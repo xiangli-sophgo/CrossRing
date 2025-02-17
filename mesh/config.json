@@ -1,0 +1,26 @@
+{
+  "routing": "XY",
+  "x_length": 8,
+  "y_length": 8,
+  "fifo_depth": 2,
+  "LBN": 4,
+  "enter_mesh_slice": 1,
+  "leave_mesh_slice": 5,
+  "network_frequency": 2,
+  "module_frequency": 1,
+
+  "rn_r_tracker_outstanding": 48,
+  "rn_w_tracker_outstanding": 48,
+  "rn_r_data_buffer_size": "outstanding * rn_r_tracker_outstanding",
+  "rn_w_data_buffer_size": "inf",
+
+  "sn_r_tracker_outstanding": 48,
+  "sn_w_tracker_outstanding": 48,
+  "sn_r_data_buffer_size": "inf",
+  "sn_w_data_buffer_size": "outstanding * sn_w_tracker_outstanding",
+  "ddr_latency": 150,
+
+  "interleave": 4,
+  "outstanding": 64,
+  "end_cycle": "inf"
+}
