@@ -48,6 +48,7 @@ class SimulationConfig:
 
     def update_config(self):
         self.ddr_latency = self.config["ddr_latency"] * self.network_frequency
+        self.sn_tracker_release_latency = self.config["sn_tracker_release_latency"] * self.network_frequency
         self.rn_read_tracker_ostd = self.rn_rdb_size // self.burst
         self.rn_write_tracker_ostd = self.rn_wdb_size // self.burst
         self.ro_tracker_ostd = self.sn_wdb_size // self.burst

@@ -44,6 +44,7 @@ class Simulation:
         self.trans_flits_num = 0
         self.end_time = np.inf
         self.print_interval = 5000
+        self.finish_time = -1
         self.new_write_req = []
         self.flit_num, self.req_num, self.rsp_num = 0, 0, 0
         self.read_BW, self.read_latency_avg, self.read_latency_max = (-1, -1, -1)
@@ -69,6 +70,8 @@ class Simulation:
             self.cycle += 1
             self.cycle_mod = self.cycle % self.config.network_frequency
             self.rn_type, self.sn_type = self.get_network_types()
+
+            self.check_and_release_sn_tracker()
 
             # Process requests
             self.process_requests()
@@ -184,9 +187,12 @@ class Simulation:
                     (req for req in self.node.sn_tracker[self.sn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
-                self.node.sn_tracker[self.sn_type][in_pos].remove(req)
-                self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][in_pos] += 1
-                if self.node.sn_req_wait["write"][self.sn_type][in_pos]:
+                # TODO: 释放tracker 增加40ns
+                release_time = self.cycle + self.config.sn_tracker_release_latency
+                self.node.sn_tracker_release_time[release_time].append((self.sn_type, in_pos, req))
+                # self.node.sn_tracker[self.sn_type][in_pos].remove(req)
+                # self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][in_pos] += 1
+                if self.node.sn_wdb_count[self.sn_type][in_pos] > 0 and self.node.sn_req_wait["write"][self.sn_type][in_pos]:
                     new_req = self.node.sn_req_wait["write"][self.sn_type][in_pos].pop(0)
                     new_req.sn_tracker_type = req.sn_tracker_type
                     new_req.req_attr = "old"
@@ -195,6 +201,17 @@ class Simulation:
                     self.node.sn_wdb[self.sn_type][in_pos][new_req.packet_id] = []
                     self.node.sn_wdb_count[self.sn_type][in_pos] -= new_req.burst_length
                     self.create_rsp(new_req, "positive")
+
+    def check_and_release_sn_tracker(self):
+        """Check if any trackers can be released based on the current cycle."""
+        for release_time in sorted(self.node.sn_tracker_release_time.keys()):
+            if release_time <= self.cycle:
+                tracker_list = self.node.sn_tracker_release_time.pop(release_time)
+                for sn_type, in_pos, req in tracker_list:
+                    self.node.sn_tracker[sn_type][in_pos].remove(req)
+                    self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] += 1
+            else:
+                break
 
     def move_all_to_inject_queue(self, network, network_type):
         """Move all items from pre-injection queues to injection queues for a given network."""
@@ -1308,7 +1325,7 @@ class Simulation:
                 self.write_BW, self.write_latency_avg, self.write_latency_max = self.output_intervals(
                     f3, write_merged_intervals, "Write", write_latency
                 )
-        print(f"Read + Write Bandwidth: {self.read_BW + self.write_BW}\n")
+        print(f"Read + Write Bandwidth: {self.read_BW + self.write_BW:.1f}\n")
 
     def update_intervals(self, flit, merged_intervals, latency, file, req_type):
         """Update the merged intervals and latency for the given request type."""
@@ -1342,6 +1359,7 @@ class Simulation:
             weighted_bandwidth_sum += bandwidth * count
             total_count += count
             print(f"Interval: {start} to {end}, count: {count}, bandwidth: {bandwidth:.1f}", file=f3)
+            self.finish_time = max(self.finish_time, end)
 
         weighted_bandwidth = weighted_bandwidth_sum / total_count if total_count > 0 else 0
         latency_avg = np.average(latency)
@@ -1668,7 +1686,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r""
-    file_name = r"demo2.txt"
+    file_name = r"demo3.txt"
     # file_name = r"testcase-v1.1.1.txt"
     # file_name = r"burst2.txt"
 
@@ -1705,9 +1723,9 @@ def main():
     sim.config.rn_write_tracker_ostd = 60
     sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * 4
     sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * 4
-    sim.config.sn_wdb_size = 10000 * 4
-    sim.config.ro_tracker_ostd = 10000
-    sim.config.share_tracker_ostd = 10000
+    sim.config.ro_tracker_ostd = 20
+    sim.config.share_tracker_ostd = 20
+    sim.config.sn_wdb_size = max(sim.config.ro_tracker_ostd, sim.config.share_tracker_ostd) * 4
 
     # sim.config.update_config()
     sim.initial()
@@ -1753,8 +1771,8 @@ def find_optimal_parameters():
     os.makedirs(result_root_save_path, exist_ok=True)  # 确保根目录存在
 
     # 定义参数范围
-    parm1_start, parm1_end, parm1_step = (24, 72, 4)
-    parm2_start, parm2_end, parm2_step = (24, 72, 4)
+    parm1_start, parm1_end, parm1_step = (4, 128, 4)
+    parm2_start, parm2_end, parm2_step = (4, 128, 4)
 
     # 遍历参数组合
     for parm1 in range(parm1_start, parm1_end + 1, parm1_step):  # 使用 parm1_end + 1 以包含结束值
@@ -1806,7 +1824,7 @@ def find_optimal_parameters():
                 "ReadBandWidth": sim.read_BW,
                 "ReadAvgLatency": sim.read_latency_avg,
                 "ReadMaxLatency": sim.read_latency_max,
-                "FinishTime": sim.cycle // sim.config.network_frequency,
+                "FinishTime": sim.finish_time,
                 "TotalBandWidth": sim.read_BW + sim.write_BW,
                 # "LBN": sim.config.seats_per_link,
                 "eject_queues_len": sim.config.eject_queues_len,

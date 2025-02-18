@@ -185,6 +185,7 @@ class Node:
 
     def initialize_sn(self):
         """Initialize SN structures."""
+        self.sn_tracker_release_time = defaultdict(list)
         for ip_pos in self.config.ddr_send_positions:
             for key in self.sn_tracker:
                 self.sn_rdb[key][ip_pos] = []
@@ -401,9 +402,7 @@ class Network:
         # 获取当前节点所在列的索引
         current_column_index = current % self.config.cols
 
-        # 根据当前列索引和目标节点位置决定移动方向
         if current_column_index == 0:
-            # 处理左边界向右移动的逻辑
             if next_node == current + 1:
                 if self.links[(current, current)][-1] is not None:
                     if self.links_tag[(current, current)][-1] is None:
