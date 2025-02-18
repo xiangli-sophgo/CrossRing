@@ -47,8 +47,8 @@ class Simulation:
         self.finish_time = -1
         self.new_write_req = []
         self.flit_num, self.req_num, self.rsp_num = 0, 0, 0
-        self.read_BW, self.read_latency_avg, self.read_latency_max = (-1, -1, -1)
-        self.write_BW, self.write_latency_avg, self.write_latency_max = (-1, -1, -1)
+        self.read_BW, self.read_latency_avg, self.read_latency_max = (0, 0, 0)
+        self.write_BW, self.write_latency_avg, self.write_latency_max = (0, 0, 0)
         self.directions = ["right", "left", "up", "local"]
         self.direction_conditions = {
             "right": lambda flit: flit.path[1] - flit.path[0] == 1,
@@ -642,12 +642,14 @@ class Simulation:
 
                 # 处理vup操作
                 if len(network.transfer_stations["vup"][(pos, next_pos)]) < self.config.seats_per_vstation:
-                    # if vup_flit:
-                    #     print(vup_flit)
+                    if vup_flit:
+                        print(vup_flit)
                     vup_flit = self._process_vup_flit(network, station_flits, pos, next_pos)
 
                 # 处理vdown操作
                 if len(network.transfer_stations["vdown"][(pos, next_pos)]) < self.config.seats_per_vstation:
+                    if vdown_flit:
+                        print(vdown_flit)
                     vdown_flit = self._process_vdown_flit(network, station_flits, pos, next_pos)
 
                 # transfer_eject
@@ -1325,7 +1327,7 @@ class Simulation:
                 self.write_BW, self.write_latency_avg, self.write_latency_max = self.output_intervals(
                     f3, write_merged_intervals, "Write", write_latency
                 )
-        print(f"Read + Write Bandwidth: {self.read_BW + self.write_BW:.1f}\n")
+        print(f"Read + Write Bandwidth: {(self.read_BW + self.write_BW)}\n")
 
     def update_intervals(self, flit, merged_intervals, latency, file, req_type):
         """Update the merged intervals and latency for the given request type."""
