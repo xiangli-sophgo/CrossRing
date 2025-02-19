@@ -37,5 +37,6 @@
     "ddr_latency": 150,
     "ue_max_T0":1,
     "ue_max_T1":2,
-    "ue_max_T2":5
+    "ue_max_T2":5,
+    "sn_tracker_release_latency": 40
 }
