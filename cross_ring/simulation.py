@@ -40,6 +40,8 @@ class Simulation:
         self.req_count = 0
         self.flit_id_count = 0
         self.send_flits_num = 0
+        self.send_read_flits_num = 0
+        self.send_write_flits_num = 0
         self.send_reqs_num = 0
         self.trans_flits_num = 0
         self.end_time = np.inf
@@ -71,7 +73,7 @@ class Simulation:
             self.cycle_mod = self.cycle % self.config.network_frequency
             self.rn_type, self.sn_type = self.get_network_types()
 
-            self.check_and_release_sn_tracker()
+            # self.check_and_release_sn_tracker()
 
             # Process requests
             self.process_requests()
@@ -187,11 +189,11 @@ class Simulation:
                     (req for req in self.node.sn_tracker[self.sn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
-                # TODO: 释放tracker 增加40ns
-                release_time = self.cycle + self.config.sn_tracker_release_latency
-                self.node.sn_tracker_release_time[release_time].append((self.sn_type, in_pos, req))
-                # self.node.sn_tracker[self.sn_type][in_pos].remove(req)
-                # self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][in_pos] += 1
+                # # TODO: 释放tracker 增加40ns
+                # release_time = self.cycle + self.config.sn_tracker_release_latency
+                # self.node.sn_tracker_release_time[release_time].append((self.sn_type, in_pos, req))
+                self.node.sn_tracker[self.sn_type][in_pos].remove(req)
+                self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][in_pos] += 1
                 if self.node.sn_wdb_count[self.sn_type][in_pos] > 0 and self.node.sn_req_wait["write"][self.sn_type][in_pos]:
                     new_req = self.node.sn_req_wait["write"][self.sn_type][in_pos].pop(0)
                     new_req.sn_tracker_type = req.sn_tracker_type
@@ -237,7 +239,10 @@ class Simulation:
 
     def log_summary(self):
         print(
-            f"Time: {self.cycle // self.config.network_frequency}, Request count: {self.req_count} Inject Request: {self.req_num}, Response: {self.rsp_num}, Sent flits: {self.send_flits_num}, Transferred flits: {self.trans_flits_num}, Received flits: {self.flit_network.recv_flits_num}"
+            f"T: {self.cycle // self.config.network_frequency}, Req_cnt: {self.req_count} Inject_Req: {self.req_num}, rsp: {self.rsp_num},"
+            # f"" Sent flits: {self.send_flits_num}, "
+            f" R_fs: {self.send_read_flits_num}, W_fs: {self.send_write_flits_num}, "
+            f"Trans_fs: {self.trans_flits_num}, Recv_fs: {self.flit_network.recv_flits_num}"
         )
 
     def handle_request_injection(self):
@@ -328,6 +333,7 @@ class Simulation:
                             queue_pre[flit.source] = flit
                             if i == 0:
                                 self.send_flits_num += 1
+                                self.send_read_flits_num += 1
                                 self.trans_flits_num += 1
                                 self.node.sn_rdb[self.sn_type][ip_pos].pop(0)
                                 if flit.is_last_flit:
@@ -345,6 +351,7 @@ class Simulation:
                                         self.create_rsp(new_req, "positive")
                             else:
                                 self.send_flits_num += 1
+                                self.send_write_flits_num += 1
                                 self.trans_flits_num += 1
                                 self.node.rn_wdb[self.rn_type][ip_pos][self.node.rn_wdb_send[self.rn_type][ip_pos][0]].pop(0)
                                 if flit.is_last_flit:
@@ -452,7 +459,9 @@ class Simulation:
             req.departure_cycle = req_data[0]
             req.burst_length = req_data[6]
             req.source_type = req_data[2]
-            req.destination_type = req_data[4]
+            req.destination_type = req_data[4][:3]
+            req.original_source_type = req_data[2]
+            req.original_destination_type = req_data[4]
             if self.topo_type in ["5x4", "4x5"]:
                 req.source_type = "sdma" if req_data[1] > 15 else "gdma"
                 req.destination_type = "ddr" if req_data[3] > 15 else "l2m"
@@ -839,8 +848,8 @@ class Simulation:
                             network.eject_num += 1
                             network.arrive_flits[flit.packet_id].append(flit)
                             network.recv_flits_num += 1
-                            if flit.req_type == "read" and flit.is_last_flit:
-                                self.create_write_req(flit)
+                            # if flit.req_type == "read" and flit.is_last_flit:
+                            # self.create_write_req_after_read(flit)
             for in_pos in self.flit_position:
                 ip_pos = in_pos - self.config.cols
                 for ip_type in network.eject_queues_pre:
@@ -893,11 +902,11 @@ class Simulation:
                     self.node.sn_tracker[self.sn_type][in_pos].append(req)
                     self.node.sn_tracker_count[self.sn_type]["ro"][in_pos] -= 1
                     self.create_read_packet(req)
-                elif self.node.sn_tracker_count[self.sn_type]["share"][in_pos] > 0:
-                    req.sn_tracker_type = "share"
-                    self.node.sn_tracker[self.sn_type][in_pos].append(req)
-                    self.node.sn_tracker_count[self.sn_type]["share"][in_pos] -= 1
-                    self.create_read_packet(req)
+                # elif self.node.sn_tracker_count[self.sn_type]["share"][in_pos] > 0:
+                #     req.sn_tracker_type = "share"
+                #     self.node.sn_tracker[self.sn_type][in_pos].append(req)
+                #     self.node.sn_tracker_count[self.sn_type]["share"][in_pos] -= 1
+                #     self.create_read_packet(req)
                 else:
                     self.create_rsp(req, "negative")
                     self.node.sn_req_wait[req.req_type][self.sn_type][in_pos].append(req)
@@ -984,7 +993,8 @@ class Simulation:
         if rsp.req_type == "read":
             if rsp.rsp_type == "negative":
                 req = next((req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == rsp.packet_id), None)
-                if req and not req.early_rsp:
+                # if req and not req.early_rsp:
+                if req:
                     req.req_state = "invalid"
                     req.is_injected = False
                     req.path_index = 0
@@ -1003,7 +1013,8 @@ class Simulation:
         elif rsp.req_type == "write":
             if rsp.rsp_type == "negative":
                 req = next((req for req in self.node.rn_tracker["write"][self.rn_type][in_pos] if req.packet_id == rsp.packet_id), None)
-                if req and not req.early_rsp:
+                # if req and not req.early_rsp:
+                if req:
                     req.req_state = "invalid"
                     req.is_injected = False
                     req.path_index = 0
@@ -1120,7 +1131,7 @@ class Simulation:
                 break
         return eject_flits
 
-    def create_write_req(self, flit):
+    def create_write_req_after_read(self, flit):
         source = self.node_change(flit.destination_original)
         destination = self.node_change(flit.source_original, False)
         path = self.routes[source][destination]
@@ -1132,6 +1143,8 @@ class Simulation:
         req.burst_length = flit.burst_length
         req.source_type = flit.destination_type
         req.destination_type = flit.source_type
+        req.original_source_type = flit.original_destination_type
+        req.original_destination_type = flit.original_source_type
         if self.topo_type in ["5x4", "4x5"]:
             req.source_type = "sdma" if req.source_original > 15 else "gdma"
             req.destination_type = "ddr" if req.destination_original > 15 else "l2m"
@@ -1152,6 +1165,8 @@ class Simulation:
             flit.req_departure_cycle = req.departure_cycle
             flit.source_type = req.source_type
             flit.destination_type = req.destination_type
+            flit.original_source_type = req.original_source_type
+            flit.original_destination_type = req.original_destination_type
             flit.req_type = req.req_type
             flit.packet_id = req.packet_id
             flit.flit_id_in_packet = i
@@ -1170,10 +1185,12 @@ class Simulation:
             flit.destination_original = req.source_original
             flit.req_type = req.req_type
             flit.flit_type = "data"
-            flit.departure_cycle = self.cycle + self.config.ddr_latency + i  # if req.destination_type == "ddr" else self.cycle + i
+            flit.departure_cycle = self.cycle + self.config.ddr_latency + i if req.destination_type == "ddr" else self.cycle + i
             flit.req_departure_cycle = req.departure_cycle
             flit.source_type = req.destination_type
             flit.destination_type = req.source_type
+            flit.original_source_type = req.original_source_type
+            flit.original_destination_type = req.original_destination_type
             flit.packet_id = req.packet_id
             flit.flit_id_in_packet = i
             flit.burst_length = req.burst_length
@@ -1245,6 +1262,8 @@ class Simulation:
             )
 
             # Process each flit
+            self.sdma_R_ddr_finish_time, self.sdma_W_l2m_finish_time, self.gdma_R_l2m_finish_time = 0, 0, 0
+            self.sdma_R_ddr_flit_num, self.sdma_W_l2m_flit_num, self.gdma_R_l2m_flit_num = 0, 0, 0
             for flits in network.arrive_flits.values():
                 self.process_flits(
                     next((flit for flit in flits if flit.is_last_flit), flits[-1]),
@@ -1327,7 +1346,20 @@ class Simulation:
                 self.write_BW, self.write_latency_avg, self.write_latency_max = self.output_intervals(
                     f3, write_merged_intervals, "Write", write_latency
                 )
-        print(f"Read + Write Bandwidth: {(self.read_BW + self.write_BW)}\n")
+        # print(f"Read + Write Bandwidth: {(self.read_BW + self.write_BW)}\n")
+        print(
+            f"Finish Time: sdma-R-DDR: {self.sdma_R_ddr_finish_time}, sdma-W-l2m: {self.sdma_W_l2m_finish_time}, gdam-R-L2M: {self.gdma_R_l2m_finish_time}"
+        )
+        # print(
+        #     f"Throughput: sdma-R-DDR: {(self.sdma_R_ddr_flit_num * 128/self.sdma_R_ddr_finish_time/4):.1f}, "
+        #     f"sdma-W-l2m: {(self.sdma_W_l2m_flit_num* 128/self.sdma_W_l2m_finish_time/4):.1f}, "
+        #     f"gdam-R-L2M: {(self.gdma_R_l2m_flit_num* 128/self.gdma_R_l2m_finish_time/4):.1f}\n"
+        # )
+        print(
+            f"Throughput: sdma-R-DDR: {(self.sdma_R_ddr_flit_num * 128/self.sdma_R_ddr_finish_time/4):.1f}, "
+            f"sdma-W-l2m: {(self.sdma_W_l2m_flit_num* 128/self.sdma_W_l2m_finish_time/4):.1f}, "
+            f"gdam-R-L2M: {(self.gdma_R_l2m_flit_num* 128/self.gdma_R_l2m_finish_time/4):.1f}\n"
+        )
 
     def update_intervals(self, flit, merged_intervals, latency, file, req_type):
         """Update the merged intervals and latency for the given request type."""
@@ -1339,9 +1371,19 @@ class Simulation:
                 (flit.req_departure_cycle // self.config.network_frequency, flit.arrival_cycle // self.config.network_frequency, flit.burst_length)
             )
 
+        if "ddr" == flit.source_type and "sdma" == flit.destination_type and req_type == "R":
+            self.sdma_R_ddr_finish_time = max(self.sdma_R_ddr_finish_time, flit.arrival_cycle // self.config.network_frequency)
+            self.sdma_R_ddr_flit_num += flit.burst_length
+        elif "l2m" == flit.destination_type and "sdma" == flit.source_type and req_type == "W":
+            self.sdma_W_l2m_finish_time = max(self.sdma_W_l2m_finish_time, flit.arrival_cycle // self.config.network_frequency)
+            self.sdma_W_l2m_flit_num += flit.burst_length
+        elif "l2m" == flit.source_type and "gdma" == flit.destination_type and req_type == "R":
+            self.gdma_R_l2m_finish_time = max(self.gdma_R_l2m_finish_time, flit.arrival_cycle // self.config.network_frequency)
+            self.gdma_R_l2m_flit_num += flit.burst_length
+
         latency.append(flit.arrival_cycle // self.config.network_frequency - flit.req_departure_cycle // self.config.network_frequency)
         print(
-            f"{flit.req_departure_cycle // self.config.network_frequency},{flit.source_original},{flit.source_type},{flit.destination_original},{flit.destination_type},"
+            f"{flit.req_departure_cycle // self.config.network_frequency},{flit.source_original},{flit.original_source_type},{flit.destination_original},{flit.original_destination_type},"
             f"{req_type},{flit.burst_length},{flit.arrival_cycle // self.config.network_frequency},{flit.path},{flit.circuits_completed_v},{flit.circuits_completed_h}",
             file=file,
         )
@@ -1350,6 +1392,7 @@ class Simulation:
         """Output the intervals and calculate bandwidth for the given request type."""
         print(f"{req_type} intervals:", file=f3)
         print(f"{req_type} results:")
+        # print(f"{req_type} results:", file=f3)
         weighted_bandwidth_sum, total_count, total_bandwidth = 0, 0, [np.inf, -np.inf]
 
         for start, end, count in merged_intervals:
@@ -1688,9 +1731,10 @@ def main():
     import tracemalloc
 
     traffic_file_path = r""
-    file_name = r"demo3.txt"
+    # file_name = r"demo3.txt"
     # file_name = r"testcase-v1.1.1.txt"
-    # file_name = r"burst2.txt"
+    file_name = r"burst2_large.txt"
+    # file_name = r"3x3_burst2.txt"
 
     # traffic_file_path = r"../traffic/"
     # traffic_file_path = r"../traffic/output-v8-32/3M/step6_32core_map/"
@@ -1699,14 +1743,16 @@ def main():
     # file_name = r"LLama2_MLP_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
 
-    result_save_path = r"../Result/cross ring/v8-32/3M"
+    result_save_path = r"../Result/cross ring/REQ_RSP/large/sn_tracker-v1.0/"
 
     # topo_type = "4x9"
     # topo_type = "9x4"
-    topo_type = "5x4"
+    # topo_type = "5x4"
     # topo_type = "4x5"
 
     # topo_type = "6x5"
+
+    topo_type = "3x3"
 
     # result_save_path = None
     config_path = r"config2.json"
@@ -1721,16 +1767,19 @@ def main():
     # tracemalloc.start()
 
     # sim.end_time = 10000
-    sim.config.rn_read_tracker_ostd = 60
-    sim.config.rn_write_tracker_ostd = 60
-    sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * 4
-    sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * 4
-    sim.config.ro_tracker_ostd = 20
-    sim.config.share_tracker_ostd = 20
-    sim.config.sn_wdb_size = max(sim.config.ro_tracker_ostd, sim.config.share_tracker_ostd) * 4
+    sim.config.rn_read_tracker_ostd = 64
+    sim.config.rn_write_tracker_ostd = 32
+    sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * 2
+    sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * 2
+    sim.config.ro_tracker_ostd = 128
+    sim.config.share_tracker_ostd = 32
+    sim.config.sn_wdb_size = sim.config.share_tracker_ostd * 2
+    sim.config.seats_per_link = 7
 
     # sim.config.update_config()
     sim.initial()
+    # sim.end_time = 1000
+    sim.print_interval = 10000
     sim.run()
 
     # # 获取当前的内存快照

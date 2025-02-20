@@ -15,7 +15,7 @@ for i in range(end):
         for k in range(32):
             # rand_dest = 10
             print(f"{i* 32 * m + (j + 1) * m},{rand_src[k]},gdma,{rand_dest[k]},ddr,{'R'},{random.randint(4, 4)}", file=f)
-            # print(f"{i + 1},{rand_src},gdma,{rand_dest},ddr,{'W'},{random.randint(4, 4)}", file=f)
+            print(f"{i* 32 * m + (j + 1) * m},{rand_src[k]},gdma,{rand_dest[k]},ddr,{'W'},{random.randint(4, 4)}", file=f)
 
     # print(f"{i * 1 + 1},{j},gdma,{rand_dest},ddr,{'W'},4", file=f)
 

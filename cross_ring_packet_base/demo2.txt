@@ -1,2 +1,1 @@
-8,28,gdma,7,ddr,R,4
-8,28,gdma,7,ddr,W,4
+0,0,gdma,7,l2m,R,4

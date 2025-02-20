@@ -57,6 +57,8 @@ class Flit:
         self.destination_original = -1
         self.source_type = None
         self.destination_type = None
+        self.original_source_type = None
+        self.original_destination_type = None
         self.burst_length = -1
         self.path = path
         self.current_position = None
