@@ -113,7 +113,7 @@ class Flit:
         return False
 
     def __repr__(self):
-        return f"{self.packet_id}.{self.flit_id_in_packet}: {self.current_link}-> {self.current_seat_index}, {self.current_position}"
+        return f"{self.packet_id}.{self.flit_id_in_packet}: {self.current_link}-> {self.current_seat_index}, {self.current_position};"
 
     @classmethod
     def clear_flit_id(cls):

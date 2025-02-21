@@ -23,16 +23,14 @@ class Simulation:
 
         self.result_save_path = result_save_path
         if result_save_path:
-            self.result_save_path = self.result_save_path + \
-                str(topo_type) + "/" + self.file_name[:-4] + "/"
+            self.result_save_path = self.result_save_path + str(topo_type) + "/" + self.file_name[:-4] + "/"
             if not os.path.exists(self.result_save_path):
                 os.makedirs(self.result_save_path)
         self.initial()
 
     def initial(self):
         self.config.topology_select(self.topo_type)
-        self.adjacency_matrix = create_adjacency_matrix(
-            "CrossRing", self.config.num_nodes, self.config.cols)
+        self.adjacency_matrix = create_adjacency_matrix("CrossRing", self.config.num_nodes, self.config.cols)
         # plot_adjacency_matrix(self.adjacency_matrix)
         self.flit_network = Network(self.config, self.adjacency_matrix)
         self.req_network = Network(self.config, self.adjacency_matrix)
@@ -55,8 +53,7 @@ class Simulation:
         self.new_write_req = []
         self.flit_num, self.req_num, self.rsp_num = 0, 0, 0
         self.read_BW, self.read_latency_avg, self.read_latency_max = (0, 0, 0)
-        self.write_BW, self.write_latency_avg, self.write_latency_max = (
-            0, 0, 0)
+        self.write_BW, self.write_latency_avg, self.write_latency_max = (0, 0, 0)
         self.directions = ["right", "left", "up", "local"]
         self.direction_conditions = {
             "right": lambda flit: flit.path[1] - flit.path[0] == 1,
@@ -65,8 +62,7 @@ class Simulation:
             "local": lambda flit: flit.source - flit.destination == self.config.cols,
         }
         self.flit_position = set(
-            self.config.ddr_send_positions + self.config.sdma_send_positions +
-            self.config.l2m_send_positions + self.config.gdma_send_positions
+            self.config.ddr_send_positions + self.config.sdma_send_positions + self.config.l2m_send_positions + self.config.gdma_send_positions
         )
 
     def run(self):
@@ -74,6 +70,7 @@ class Simulation:
         self.load_request_stream()
         flits, reqs, rsps = [], [], []
         self.cycle = 0
+        tail_time = 10
 
         while True:
             self.cycle += 1
@@ -105,8 +102,7 @@ class Simulation:
                 # Inject and process data flits
                 self.handle_data_injection()
 
-            flits = self.process_and_move_flits(
-                self.flit_network, flits, "data")
+            flits = self.process_and_move_flits(self.flit_network, flits, "data")
             # if flits:
             # print(flits)
 
@@ -136,8 +132,11 @@ class Simulation:
                 or self.cycle > self.end_time * self.config.network_frequency
                 # or self.cycle > 60000 * self.config.network_frequency
             ):
-                print("Finish!")
-                break
+                if tail_time == 0:
+                    print("Finish!")
+                    break
+                else:
+                    tail_time -= 1
 
         # Performance evaluation
         self.print_data_statistic()
@@ -146,8 +145,7 @@ class Simulation:
 
     def all_flit_queues_empty(self):
         return (
-            all(len(queue) ==
-                0 for queue in self.flit_network.eject_queues["down"].values())
+            all(len(queue) == 0 for queue in self.flit_network.eject_queues["down"].values())
             and all(len(queue) == 0 for queue in self.flit_network.eject_queues["up"].values())
             and all(len(queue) == 0 for queue in self.flit_network.eject_queues["mid"].values())
             and all(len(queue) == 0 for queue in self.flit_network.inject_queues["left"].values())
@@ -178,8 +176,7 @@ class Simulation:
                 self.node.rn_rdb_recv[self.rn_type][in_pos].pop(0)
                 self.node.rn_rdb_count[self.rn_type][in_pos] += self.req_network.send_flits[packet_id].burst_length
                 req = next(
-                    (req for req in self.node.rn_tracker["read"]
-                     [self.rn_type][in_pos] if req.packet_id == packet_id),
+                    (req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
                 for flit in self.flit_network.arrive_flits[packet_id]:
@@ -198,27 +195,23 @@ class Simulation:
                 self.node.sn_wdb_recv[self.sn_type][in_pos].pop(0)
                 self.node.sn_wdb_count[self.sn_type][in_pos] += self.req_network.send_flits[packet_id].burst_length
                 req = next(
-                    (req for req in self.node.sn_tracker[self.sn_type]
-                     [in_pos] if req.packet_id == packet_id),
+                    (req for req in self.node.sn_tracker[self.sn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
                 for flit in self.flit_network.arrive_flits[packet_id]:
-                    flit.leave_db_cycle = self.cycle
+                    flit.leave_db_cycle = self.cycle + self.config.sn_tracker_release_latency
                 # TODO: 释放tracker 增加40ns
                 release_time = self.cycle + self.config.sn_tracker_release_latency
-                self.node.sn_tracker_release_time[release_time].append(
-                    (self.sn_type, in_pos, req))
+                self.node.sn_tracker_release_time[release_time].append((self.sn_type, in_pos, req))
                 # self.node.sn_tracker[self.sn_type][in_pos].remove(req)
                 # self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][in_pos] += 1
                 if self.node.sn_wdb_count[self.sn_type][in_pos] > 0 and self.node.sn_req_wait["write"][self.sn_type][in_pos]:
-                    new_req = self.node.sn_req_wait["write"][self.sn_type][in_pos].pop(
-                        0)
+                    new_req = self.node.sn_req_wait["write"][self.sn_type][in_pos].pop(0)
                     new_req.sn_tracker_type = req.sn_tracker_type
                     new_req.req_attr = "old"
                     self.node.sn_tracker[self.sn_type][in_pos].append(new_req)
                     self.node.sn_tracker_count[self.sn_type][new_req.sn_tracker_type][in_pos] -= 1
-                    self.node.sn_wdb[self.sn_type][in_pos][new_req.packet_id] = [
-                    ]
+                    self.node.sn_wdb[self.sn_type][in_pos][new_req.packet_id] = []
                     self.node.sn_wdb_count[self.sn_type][in_pos] -= new_req.burst_length
                     self.create_rsp(new_req, "positive")
 
@@ -226,8 +219,7 @@ class Simulation:
         """Check if any trackers can be released based on the current cycle."""
         for release_time in sorted(self.node.sn_tracker_release_time.keys()):
             if release_time <= self.cycle:
-                tracker_list = self.node.sn_tracker_release_time.pop(
-                    release_time)
+                tracker_list = self.node.sn_tracker_release_time.pop(release_time)
                 for sn_type, in_pos, req in tracker_list:
                     self.node.sn_tracker[sn_type][in_pos].remove(req)
                     self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] += 1
@@ -241,8 +233,7 @@ class Simulation:
         elif network_type == "rsp":
             positions = getattr(self.config, f"{self.sn_type}_send_positions")
         elif network_type == "data":
-            positions = set(getattr(self.config, f"{self.rn_type}_send_positions") + getattr(
-                self.config, f"{self.sn_type}_send_positions"))
+            positions = set(getattr(self.config, f"{self.rn_type}_send_positions") + getattr(self.config, f"{self.sn_type}_send_positions"))
 
         for ip_pos in positions:
             for direction in self.directions:
@@ -259,7 +250,7 @@ class Simulation:
 
     def log_summary(self):
         print(
-            f"T: {self.cycle // self.config.network_frequency}, Req_cnt: {self.req_count} Inject_Req: {self.req_num}, rsp: {self.rsp_num},"
+            f"T: {self.cycle // self.config.network_frequency}, Req_cnt: {self.req_count} In_Req: {self.req_num}, Rsp: {self.rsp_num},"
             # f"" Sent flits: {self.send_flits_num}, "
             f" R_fs: {self.send_read_flits_num}, W_fs: {self.send_write_flits_num}, "
             f"Trans_fs: {self.trans_flits_num}, Recv_fs: {self.flit_network.recv_flits_num}"
@@ -272,41 +263,33 @@ class Simulation:
                 if req_type == "read":
                     if self.req_network.ip_read[self.rn_type][ip_pos]:
                         req = self.req_network.ip_read[self.rn_type][ip_pos][0]
-                        # TODO
                         if self.node.rn_rdb_count[self.rn_type][ip_pos] > self.node.rn_rdb_reserve[self.rn_type][ip_pos] * req.burst_length:
                             # if self.node.rn_rdb_count[self.rn_type][ip_pos] > req.burst_length:
                             if self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0:
                                 req.entry_db_cycle = self.cycle
-                                self.req_network.ip_read[self.rn_type][ip_pos].popleft(
-                                )
-                                self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(
-                                    req)
+                                self.req_network.ip_read[self.rn_type][ip_pos].popleft()
+                                self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
                                 self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] -= 1
                                 self.node.rn_rdb_count[self.rn_type][ip_pos] -= req.burst_length
-                                self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = [
-                                ]
+                                self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = []
                 elif req_type == "write":
                     if self.req_network.ip_write[self.rn_type][ip_pos]:
                         req = self.req_network.ip_write[self.rn_type][ip_pos][0]
                         if self.node.rn_wdb_count[self.rn_type][ip_pos] >= req.burst_length:
                             if self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0:
-                                req.entry_db_cycle = self.cycle
-                                self.req_network.ip_write[self.rn_type][ip_pos].popleft(
-                                )
-                                self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(
-                                    req)
+                                # req.entry_db_cycle = self.cycle
+                                self.req_network.ip_write[self.rn_type][ip_pos].popleft()
+                                self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
                                 self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] -= 1
                                 self.node.rn_wdb_count[self.rn_type][ip_pos] -= req.burst_length
-                                self.node.rn_wdb[self.rn_type][ip_pos][req.packet_id] = [
-                                ]
+                                self.node.rn_wdb[self.rn_type][ip_pos][req.packet_id] = []
                                 self.create_write_packet(req)
             self.select_inject_network(ip_pos)
 
     def process_and_move_flits(self, network, flits, flit_type):
         """Process injection queues and move flits."""
         for inject_queues in network.inject_queues.values():
-            num, moved_flits = self.process_inject_queues(
-                network, inject_queues)
+            num, moved_flits = self.process_inject_queues(network, inject_queues)
             if num == 0 and not moved_flits:
                 continue
             if flit_type == "req":
@@ -336,8 +319,7 @@ class Simulation:
         Inject data flits into the network.
         """
         for ip_pos in set(
-            self.config.ddr_send_positions + self.config.l2m_send_positions +
-                self.config.sdma_send_positions + self.config.gdma_send_positions
+            self.config.ddr_send_positions + self.config.l2m_send_positions + self.config.sdma_send_positions + self.config.gdma_send_positions
         ):
             # BUG: rn_wdb 里面flit,还有但是rn_wdb_send里面没有了,导致flit没有发完。
             inject_flits = [
@@ -368,41 +350,35 @@ class Simulation:
                                 self.node.sn_rdb[self.sn_type][ip_pos].pop(0)
                                 if flit.is_last_flit:
                                     # finish current req injection
-                                    req = next(
-                                        (req for req in self.node.sn_tracker[self.sn_type][ip_pos] if req.packet_id == flit.packet_id), None)
-                                    self.node.sn_tracker[self.sn_type][ip_pos].remove(
-                                        req)
+                                    req = next((req for req in self.node.sn_tracker[self.sn_type][ip_pos] if req.packet_id == flit.packet_id), None)
+                                    self.node.sn_tracker[self.sn_type][ip_pos].remove(req)
                                     self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][ip_pos] += 1
                                     if self.node.sn_req_wait["read"][self.sn_type][ip_pos]:
                                         # If there is a waiting request, inject it
-                                        new_req = self.node.sn_req_wait["read"][self.sn_type][ip_pos].pop(
-                                            0)
+                                        new_req = self.node.sn_req_wait["read"][self.sn_type][ip_pos].pop(0)
                                         new_req.sn_tracker_type = req.sn_tracker_type
                                         new_req.req_attr = "old"
-                                        self.node.sn_tracker[self.sn_type][ip_pos].append(
-                                            new_req)
+                                        self.node.sn_tracker[self.sn_type][ip_pos].append(new_req)
                                         self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][ip_pos] -= 1
                                         self.create_rsp(new_req, "positive")
                             else:
                                 self.send_flits_num += 1
                                 self.send_write_flits_num += 1
                                 self.trans_flits_num += 1
-                                self.node.rn_wdb[self.rn_type][ip_pos][self.node.rn_wdb_send[self.rn_type][ip_pos][0]].pop(
-                                    0)
+                                if flit.flit_id_in_packet == 0:
+                                    for f in self.node.rn_wdb[self.rn_type][ip_pos][flit.packet_id]:
+                                        f.entry_db_cycle = self.cycle
+                                self.node.rn_wdb[self.rn_type][ip_pos][flit.packet_id].pop(0)
                                 if flit.is_last_flit:
                                     # finish current req injection
                                     req = next(
-                                        (req for req in self.node.rn_tracker["write"][self.rn_type]
-                                         [ip_pos] if req.packet_id == flit.packet_id), None
+                                        (req for req in self.node.rn_tracker["write"][self.rn_type][ip_pos] if req.packet_id == flit.packet_id), None
                                     )
-                                    self.node.rn_tracker["write"][self.rn_type][ip_pos].remove(
-                                        req)
+                                    self.node.rn_tracker["write"][self.rn_type][ip_pos].remove(req)
                                     self.node.rn_tracker_count["write"][self.rn_type][ip_pos] += 1
                                     self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] -= 1
-                                    self.node.rn_wdb_send[self.rn_type][ip_pos].pop(
-                                        0)
-                                    self.node.rn_wdb[self.rn_type][ip_pos].pop(
-                                        req.packet_id)
+                                    self.node.rn_wdb_send[self.rn_type][ip_pos].pop(0)
+                                    self.node.rn_wdb[self.rn_type][ip_pos].pop(req.packet_id)
                                     self.node.rn_wdb_count[self.rn_type][ip_pos] += req.burst_length
                             inject_flits[i] = None
                             break
@@ -510,32 +486,26 @@ class Simulation:
             req.req_type = "read" if req_data[5] == "R" else "write"
             self.req_network.send_flits[req.packet_id] = req
             if req.req_type == "read":
-                self.req_network.ip_read[req.source_type][req.source].append(
-                    req)
+                self.req_network.ip_read[req.source_type][req.source].append(req)
             if req.req_type == "write":
-                self.req_network.ip_write[req.source_type][req.source].append(
-                    req)
+                self.req_network.ip_write[req.source_type][req.source].append(req)
 
             # 重置缓存并更新计数
             self.next_req = None
             self.req_count += 1
 
     def select_inject_network(self, ip_pos):
-        read_old = self.node.rn_rdb_reserve[self.rn_type][
-            ip_pos] > 0 and self.node.rn_rdb_count[self.rn_type][ip_pos] > self.config.burst
-        read_new = len(self.node.rn_tracker["read"][self.rn_type][ip_pos]) - \
-            1 > self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos]
+        read_old = self.node.rn_rdb_reserve[self.rn_type][ip_pos] > 0 and self.node.rn_rdb_count[self.rn_type][ip_pos] > self.config.burst
+        read_new = len(self.node.rn_tracker["read"][self.rn_type][ip_pos]) - 1 > self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos]
         write_old = self.node.rn_wdb_reserve[self.rn_type][ip_pos] > 0
-        write_new = len(self.node.rn_tracker["write"][self.rn_type][ip_pos]) - \
-            1 > self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos]
+        write_new = len(self.node.rn_tracker["write"][self.rn_type][ip_pos]) - 1 > self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos]
         read_valid = read_old or read_new
         write_valid = write_old or write_new
         if read_valid and write_valid:
             if self.req_network.last_select[self.rn_type][ip_pos] == "write":
                 if read_old:
                     req = next(
-                        (req for req in self.node.rn_tracker_wait["read"]
-                         [self.rn_type][ip_pos] if req.req_state == "valid"),
+                        (req for req in self.node.rn_tracker_wait["read"][self.rn_type][ip_pos] if req.req_state == "valid"),
                         None,
                     )
                     if req:
@@ -544,12 +514,10 @@ class Simulation:
                             queue_pre = self.req_network.inject_queues_pre[direction]
                             if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.inject_queues_len:
                                 queue_pre[ip_pos] = req
-                                self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(
-                                    req)
+                                self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
                                 self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
                                 self.node.rn_rdb_count[self.rn_type][ip_pos] -= req.burst_length
-                                self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = [
-                                ]
+                                self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = []
                                 self.req_network.last_select[self.rn_type][ip_pos] = "read"
                 elif read_new:
                     rn_tracker_pointer = self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] + 1
@@ -565,8 +533,7 @@ class Simulation:
             else:
                 if write_old:
                     req = next(
-                        (req for req in self.node.rn_tracker_wait["write"]
-                         [self.rn_type][ip_pos] if req.req_state == "valid"),
+                        (req for req in self.node.rn_tracker_wait["write"][self.rn_type][ip_pos] if req.req_state == "valid"),
                         None,
                     )
                     if req:
@@ -575,8 +542,7 @@ class Simulation:
                             queue_pre = self.req_network.inject_queues_pre[direction]
                             if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.inject_queues_len:
                                 queue_pre[ip_pos] = req
-                                self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(
-                                    req)
+                                self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(req)
                                 self.node.rn_wdb_reserve[self.rn_type][ip_pos] -= 1
                                 self.req_network.last_select[self.rn_type][ip_pos] = "write"
                 elif write_new:
@@ -593,8 +559,7 @@ class Simulation:
         elif read_valid:
             if read_old:
                 req = next(
-                    (req for req in self.node.rn_tracker_wait["read"]
-                     [self.rn_type][ip_pos] if req.req_state == "valid"),
+                    (req for req in self.node.rn_tracker_wait["read"][self.rn_type][ip_pos] if req.req_state == "valid"),
                     None,
                 )
                 if req:
@@ -603,12 +568,10 @@ class Simulation:
                         queue_pre = self.req_network.inject_queues_pre[direction]
                         if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.inject_queues_len:
                             queue_pre[ip_pos] = req
-                            self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(
-                                req)
+                            self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
                             self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
                             self.node.rn_rdb_count[self.rn_type][ip_pos] -= req.burst_length
-                            self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = [
-                            ]
+                            self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = []
                             self.req_network.last_select[self.rn_type][ip_pos] = "read"
             elif read_new:
                 rn_tracker_pointer = self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] + 1
@@ -624,8 +587,7 @@ class Simulation:
         elif write_valid:
             if write_old:
                 req = next(
-                    (req for req in self.node.rn_tracker_wait["write"]
-                     [self.rn_type][ip_pos] if req.req_state == "valid"),
+                    (req for req in self.node.rn_tracker_wait["write"][self.rn_type][ip_pos] if req.req_state == "valid"),
                     None,
                 )
                 if req:
@@ -634,8 +596,7 @@ class Simulation:
                         queue_pre = self.req_network.inject_queues_pre[direction]
                         if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.inject_queues_len:
                             queue_pre[ip_pos] = req
-                            self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(
-                                req)
+                            self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(req)
                             self.node.rn_wdb_reserve[self.rn_type][ip_pos] -= 1
                             self.req_network.last_select[self.rn_type][ip_pos] = "write"
             elif write_new:
@@ -678,8 +639,7 @@ class Simulation:
 
     def flit_move(self, network, flits, flit_type):
         # 分类不同类型的flits
-        transfer_station_flits, vertical_flits, horizontal_flits, new_flits, local_flits = self.classify_flits(
-            flits)
+        transfer_station_flits, vertical_flits, horizontal_flits, new_flits, local_flits = self.classify_flits(flits)
 
         # 处理新到达的flits
         for flit in new_flits + horizontal_flits:
@@ -694,69 +654,55 @@ class Simulation:
 
                 # 获取各方向的flit
                 station_flits = [
-                    network.transfer_stations["up"][(
-                        pos, next_pos)][0] if network.transfer_stations["up"][(pos, next_pos)] else None,
-                    network.transfer_stations["left"][(
-                        pos, next_pos)][0] if network.transfer_stations["left"][(pos, next_pos)] else None,
-                    network.transfer_stations["right"][(
-                        pos, next_pos)][0] if network.transfer_stations["right"][(pos, next_pos)] else None,
-                    network.transfer_stations["ft"][(
-                        pos, next_pos)][0] if network.transfer_stations["ft"][(pos, next_pos)] else None,
+                    network.transfer_stations["up"][(pos, next_pos)][0] if network.transfer_stations["up"][(pos, next_pos)] else None,
+                    network.transfer_stations["left"][(pos, next_pos)][0] if network.transfer_stations["left"][(pos, next_pos)] else None,
+                    network.transfer_stations["right"][(pos, next_pos)][0] if network.transfer_stations["right"][(pos, next_pos)] else None,
+                    network.transfer_stations["ft"][(pos, next_pos)][0] if network.transfer_stations["ft"][(pos, next_pos)] else None,
                 ]
                 # if not all(flit is None for flit in station_flits):
                 #     print(station_flits)
 
                 # 处理eject操作
                 if len(network.transfer_stations["eject"][(pos, next_pos)]) < self.config.seats_per_vstation:
-                    eject_flit = self._process_eject_flit(
-                        network, station_flits, pos, next_pos)
+                    eject_flit = self._process_eject_flit(network, station_flits, pos, next_pos)
 
                 # 处理vup操作
                 if len(network.transfer_stations["vup"][(pos, next_pos)]) < self.config.seats_per_vstation:
                     if vup_flit:
                         print(vup_flit)
-                    vup_flit = self._process_vup_flit(
-                        network, station_flits, pos, next_pos)
+                    vup_flit = self._process_vup_flit(network, station_flits, pos, next_pos)
 
                 # 处理vdown操作
                 if len(network.transfer_stations["vdown"][(pos, next_pos)]) < self.config.seats_per_vstation:
                     if vdown_flit:
                         print(vdown_flit)
-                    vdown_flit = self._process_vdown_flit(
-                        network, station_flits, pos, next_pos)
+                    vdown_flit = self._process_vdown_flit(network, station_flits, pos, next_pos)
 
                 # transfer_eject
                 # 处理eject队列
                 # TODO: eject_queue -> ETag
                 if next_pos in network.eject_queues["mid"] and len(network.eject_queues["mid"][next_pos]) < self.config.eject_queues_len:
                     if network.transfer_stations["eject"][(pos, next_pos)]:
-                        flit = network.transfer_stations["eject"][(
-                            pos, next_pos)].popleft()
+                        flit = network.transfer_stations["eject"][(pos, next_pos)].popleft()
                         flit.is_arrive = True
 
-                up_node, down_node = next_pos - self.config.cols * \
-                    2, next_pos + self.config.cols * 2
+                up_node, down_node = next_pos - self.config.cols * 2, next_pos + self.config.cols * 2
                 if up_node < 0:
                     up_node = next_pos
                 if down_node >= self.config.num_nodes:
                     down_node = next_pos
                 # 处理vup方向
-                self._process_transfer_station(
-                    network, "up", pos, next_pos, down_node, up_node)
+                self._process_transfer_station(network, "up", pos, next_pos, down_node, up_node)
 
                 # 处理vdown方向
-                self._process_transfer_station(
-                    network, "down", pos, next_pos, up_node, down_node)
+                self._process_transfer_station(network, "down", pos, next_pos, up_node, down_node)
 
                 if eject_flit:
-                    network.transfer_stations["eject"][(
-                        pos, next_pos)].append(eject_flit)
+                    network.transfer_stations["eject"][(pos, next_pos)].append(eject_flit)
                 if vup_flit:
-                    network.transfer_stations["vup"][(
-                        pos, next_pos)].append(vup_flit)
+                    network.transfer_stations["vup"][(pos, next_pos)].append(vup_flit)
                 if vdown_flit:
-                    network.transfer_stations["vdown"][(
-                        pos, next_pos)].append(vdown_flit)
+                    network.transfer_stations["vdown"][(pos, next_pos)].append(vdown_flit)
 
         # 处理纵向flits的移动
         for flit in vertical_flits:
@@ -861,10 +807,8 @@ class Simulation:
                 ]
                 # if not all(eject_flit is None for eject_flit in eject_flits):
                 #     print(eject_flits)
-                eject_flits = self.process_eject_queues(
-                    network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
-                eject_flits = self.process_eject_queues(
-                    network, eject_flits, network.round_robin["l2m"][ip_pos], "l2m", ip_pos)
+                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
+                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["l2m"][ip_pos], "l2m", ip_pos)
 
             if self.sn_type != "Idle":
                 for in_pos in self.config.ddr_send_positions:
@@ -884,10 +828,8 @@ class Simulation:
                 ]
                 # if not all(eject_flit is None for eject_flit in eject_flits):
                 #     print(eject_flits)
-                eject_flits = self.process_eject_queues(
-                    network, eject_flits, network.round_robin["sdma"][ip_pos], "sdma", ip_pos)
-                eject_flits = self.process_eject_queues(
-                    network, eject_flits, network.round_robin["gdma"][ip_pos], "gdma", ip_pos)
+                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["sdma"][ip_pos], "sdma", ip_pos)
+                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["gdma"][ip_pos], "gdma", ip_pos)
 
             if self.rn_type != "Idle":
                 for in_pos in getattr(self.config, f"{self.rn_type}_send_positions"):
@@ -907,14 +849,10 @@ class Simulation:
                 ]
                 # if not all(eject_flit is None for eject_flit in eject_flits):
                 #     print(eject_flits)
-                eject_flits = self.process_eject_queues(
-                    network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
-                eject_flits = self.process_eject_queues(
-                    network, eject_flits, network.round_robin["l2m"][ip_pos], "l2m", ip_pos)
-                eject_flits = self.process_eject_queues(
-                    network, eject_flits, network.round_robin["sdma"][ip_pos], "sdma", ip_pos)
-                eject_flits = self.process_eject_queues(
-                    network, eject_flits, network.round_robin["gdma"][ip_pos], "gdma", ip_pos)
+                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
+                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["l2m"][ip_pos], "l2m", ip_pos)
+                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["sdma"][ip_pos], "sdma", ip_pos)
+                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["gdma"][ip_pos], "gdma", ip_pos)
 
             if self.rn_type != "Idle":
                 for in_pos in self.flit_position:
@@ -933,17 +871,14 @@ class Simulation:
                 ip_pos = in_pos - self.config.cols
                 for ip_type in network.eject_queues_pre:
                     if network.eject_queues_pre[ip_type][ip_pos]:
-                        network.ip_eject[ip_type][ip_pos].append(
-                            network.eject_queues_pre[ip_type][ip_pos])
+                        network.ip_eject[ip_type][ip_pos].append(network.eject_queues_pre[ip_type][ip_pos])
                         network.eject_queues_pre[ip_type][ip_pos] = None
 
         # 最后,更新预先排队的eject队列
         if flit_type == "req":
-            in_pos_position = set(
-                self.config.ddr_send_positions + self.config.l2m_send_positions)
+            in_pos_position = set(self.config.ddr_send_positions + self.config.l2m_send_positions)
         elif flit_type == "rsp":
-            in_pos_position = set(
-                self.config.sdma_send_positions + self.config.gdma_send_positions)
+            in_pos_position = set(self.config.sdma_send_positions + self.config.gdma_send_positions)
         elif flit_type == "data":
             in_pos_position = self.flit_position
 
@@ -951,8 +886,7 @@ class Simulation:
             ip_pos = in_pos - self.config.cols
             for ip_type in network.eject_queues_pre:
                 if network.eject_queues_pre[ip_type][ip_pos]:
-                    network.ip_eject[ip_type][ip_pos].append(
-                        network.eject_queues_pre[ip_type][ip_pos])
+                    network.ip_eject[ip_type][ip_pos].append(network.eject_queues_pre[ip_type][ip_pos])
                     network.eject_queues_pre[ip_type][ip_pos] = None
             if flit_type == "data" and self.rn_type != "Idle":
                 if network.arrive_node_pre[self.rn_type][ip_pos]:
@@ -960,24 +894,20 @@ class Simulation:
                         network.arrive_node_pre[self.rn_type][ip_pos]
                     )
                     if (
-                        len(self.node.rn_rdb[self.rn_type][in_pos]
-                            [network.arrive_node_pre[self.rn_type][ip_pos].packet_id])
+                        len(self.node.rn_rdb[self.rn_type][in_pos][network.arrive_node_pre[self.rn_type][ip_pos].packet_id])
                         == self.node.rn_rdb[self.rn_type][in_pos][network.arrive_node_pre[self.rn_type][ip_pos].packet_id][0].burst_length
                     ):
-                        self.node.rn_rdb_recv[self.rn_type][in_pos].append(
-                            network.arrive_node_pre[self.rn_type][ip_pos].packet_id)
+                        self.node.rn_rdb_recv[self.rn_type][in_pos].append(network.arrive_node_pre[self.rn_type][ip_pos].packet_id)
                     network.arrive_node_pre[self.rn_type][ip_pos] = None
                 if network.arrive_node_pre[self.sn_type][ip_pos]:
                     self.node.sn_wdb[self.sn_type][in_pos][network.arrive_node_pre[self.sn_type][ip_pos].packet_id].append(
                         network.arrive_node_pre[self.sn_type][ip_pos]
                     )
                     if (
-                        len(self.node.sn_wdb[self.sn_type][in_pos]
-                            [network.arrive_node_pre[self.sn_type][ip_pos].packet_id])
+                        len(self.node.sn_wdb[self.sn_type][in_pos][network.arrive_node_pre[self.sn_type][ip_pos].packet_id])
                         == self.node.sn_wdb[self.sn_type][in_pos][network.arrive_node_pre[self.sn_type][ip_pos].packet_id][0].burst_length
                     ):
-                        self.node.sn_wdb_recv[self.sn_type][in_pos].append(
-                            network.arrive_node_pre[self.sn_type][ip_pos].packet_id)
+                        self.node.sn_wdb_recv[self.sn_type][in_pos].append(network.arrive_node_pre[self.sn_type][ip_pos].packet_id)
                     network.arrive_node_pre[self.sn_type][ip_pos] = None
 
     def _handle_request(self, req, in_pos):
@@ -996,8 +926,7 @@ class Simulation:
                 #     self.create_read_packet(req)
                 else:
                     self.create_rsp(req, "negative")
-                    self.node.sn_req_wait[req.req_type][self.sn_type][in_pos].append(
-                        req)
+                    self.node.sn_req_wait[req.req_type][self.sn_type][in_pos].append(req)
             else:
                 self.create_read_packet(req)
         elif req.req_type == "write":
@@ -1012,8 +941,7 @@ class Simulation:
                 else:
                     # retry
                     self.create_rsp(req, "negative")
-                    self.node.sn_req_wait[req.req_type][self.sn_type][in_pos].append(
-                        req)
+                    self.node.sn_req_wait[req.req_type][self.sn_type][in_pos].append(req)
             else:
                 self.create_rsp(req, "datasend")
 
@@ -1066,15 +994,13 @@ class Simulation:
 
     def _handle_wait_cycles(self, network, ts_key, pos, next_pos, direction, link):
         if (
-            network.transfer_stations[ts_key][(
-                pos, next_pos)][0].wait_cycle_v > self.config.wait_cycle_v
+            network.transfer_stations[ts_key][(pos, next_pos)][0].wait_cycle_v > self.config.wait_cycle_v
             and not network.transfer_stations[ts_key][(pos, next_pos)][0].is_tag_v
         ):
             if network.remain_tag[direction][next_pos] > 0:
                 network.remain_tag[direction][next_pos] -= 1
                 network.links_tag[link][-1] = [next_pos, direction]
-                network.transfer_stations[ts_key][(
-                    pos, next_pos)][0].is_tag_v = True
+                network.transfer_stations[ts_key][(pos, next_pos)][0].is_tag_v = True
         else:
             for flit in network.transfer_stations[ts_key][(pos, next_pos)]:
                 flit.wait_cycle_v += 1
@@ -1084,8 +1010,7 @@ class Simulation:
         """处理response的eject"""
         if rsp.req_type == "read":
             if rsp.rsp_type == "negative":
-                req = next(
-                    (req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == rsp.packet_id), None)
+                req = next((req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == rsp.packet_id), None)
                 # if req and not req.early_rsp:
                 if req:
                     req.req_state = "invalid"
@@ -1093,44 +1018,36 @@ class Simulation:
                     req.path_index = 0
                     self.node.rn_rdb_count[self.rn_type][in_pos] += req.burst_length
                     self.node.rn_rdb[self.rn_type][in_pos].pop(req.packet_id)
-                    self.node.rn_tracker_wait["read"][self.rn_type][in_pos].append(
-                        req)
+                    self.node.rn_tracker_wait["read"][self.rn_type][in_pos].append(req)
             else:
-                req = next(
-                    (req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == rsp.packet_id), None)
+                req = next((req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == rsp.packet_id), None)
                 req.req_state = "valid"
                 self.node.rn_rdb_reserve[self.rn_type][in_pos] += 1
                 if req not in self.node.rn_tracker_wait["read"][self.rn_type][in_pos]:
                     req.is_injected = False
                     req.path_index = 0
                     req.early_rsp = True
-                    self.node.rn_tracker_wait["read"][self.rn_type][in_pos].append(
-                        req)
+                    self.node.rn_tracker_wait["read"][self.rn_type][in_pos].append(req)
         elif rsp.req_type == "write":
             if rsp.rsp_type == "negative":
-                req = next(
-                    (req for req in self.node.rn_tracker["write"][self.rn_type][in_pos] if req.packet_id == rsp.packet_id), None)
+                req = next((req for req in self.node.rn_tracker["write"][self.rn_type][in_pos] if req.packet_id == rsp.packet_id), None)
                 # if req and not req.early_rsp:
                 if req:
                     req.req_state = "invalid"
                     req.is_injected = False
                     req.path_index = 0
-                    self.node.rn_tracker_wait["write"][self.rn_type][in_pos].append(
-                        req)
+                    self.node.rn_tracker_wait["write"][self.rn_type][in_pos].append(req)
             elif rsp.rsp_type == "positive":
-                req = next(
-                    (req for req in self.node.rn_tracker["write"][self.rn_type][in_pos] if req.packet_id == rsp.packet_id), None)
+                req = next((req for req in self.node.rn_tracker["write"][self.rn_type][in_pos] if req.packet_id == rsp.packet_id), None)
                 req.req_state = "valid"
                 self.node.rn_wdb_reserve[self.rn_type][in_pos] += 1
                 if req not in self.node.rn_tracker_wait["write"][self.rn_type][in_pos]:
                     req.is_injected = False
                     req.path_index = 0
                     req.early_rsp = True
-                    self.node.rn_tracker_wait["write"][self.rn_type][in_pos].append(
-                        req)
+                    self.node.rn_tracker_wait["write"][self.rn_type][in_pos].append(req)
             else:
-                self.node.rn_wdb_send[self.rn_type][in_pos].append(
-                    rsp.packet_id)
+                self.node.rn_wdb_send[self.rn_type][in_pos].append(rsp.packet_id)
 
     def tag_move(self, network):
         if self.cycle % (self.config.seats_per_link * (self.config.cols - 1) * 2 + 4) == 0:
@@ -1159,73 +1076,53 @@ class Simulation:
             interval = self.config.cols * 2
             col_end = col_start + interval * (self.config.rows // 2 - 1)
             last_position = network.links_tag[(col_start, col_start)][0]
-            network.links_tag[(col_start, col_start)][0] = network.links_tag[(
-                col_start + interval, col_start)][-1]
+            network.links_tag[(col_start, col_start)][0] = network.links_tag[(col_start + interval, col_start)][-1]
             for i in range(1, self.config.cols):
-                current_node, next_node = col_start + i * \
-                    interval, col_start + (i - 1) * interval
+                current_node, next_node = col_start + i * interval, col_start + (i - 1) * interval
                 for j in range(self.config.seats_per_link - 6 - 1, -1, -1):
                     if j == 0 and current_node == col_end:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(
-                            current_node, current_node)][-1]
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(
-                            current_node + interval, current_node)][-1]
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node + interval, current_node)][-1]
                     else:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(
-                            current_node, next_node)][j - 1]
-            network.links_tag[(col_end, col_end)
-                              ][-1] = network.links_tag[(col_end, col_end)][0]
-            network.links_tag[(col_end, col_end)][0] = network.links_tag[(
-                col_end - interval, col_end)][-1]
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
+            network.links_tag[(col_end, col_end)][-1] = network.links_tag[(col_end, col_end)][0]
+            network.links_tag[(col_end, col_end)][0] = network.links_tag[(col_end - interval, col_end)][-1]
             for i in range(1, self.config.rows // 2):
-                current_node, next_node = col_end - i * \
-                    interval, col_end - (i - 1) * interval
+                current_node, next_node = col_end - i * interval, col_end - (i - 1) * interval
                 for j in range(self.config.seats_per_link - 1, -1, -1):
                     if j == 0 and current_node == col_start:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(
-                            current_node, current_node)][-1]
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(
-                            current_node - interval, current_node)][-1]
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node - interval, current_node)][-1]
                     else:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(
-                            current_node, next_node)][j - 1]
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
             network.links_tag[(col_start, col_start)][-1] = last_position
 
         for row_start in range(self.config.cols, self.config.num_nodes, self.config.cols * 2):
             row_end = row_start + self.config.cols - 1
             last_position = network.links_tag[(row_start, row_start)][0]
-            network.links_tag[(row_start, row_start)][0] = network.links_tag[(
-                row_start + 1, row_start)][-1]
+            network.links_tag[(row_start, row_start)][0] = network.links_tag[(row_start + 1, row_start)][-1]
             for i in range(1, self.config.cols):
                 current_node, next_node = row_start + i, row_start + i - 1
                 for j in range(self.config.seats_per_link - 1, -1, -1):
                     if j == 0 and current_node == row_end:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(
-                            current_node, current_node)][-1]
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(
-                            current_node + 1, current_node)][-1]
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node + 1, current_node)][-1]
                     else:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(
-                            current_node, next_node)][j - 1]
-            network.links_tag[(row_end, row_end)
-                              ][-1] = network.links_tag[(row_end, row_end)][0]
-            network.links_tag[(row_end, row_end)][0] = network.links_tag[(
-                row_end - 1, row_end)][-1]
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
+            network.links_tag[(row_end, row_end)][-1] = network.links_tag[(row_end, row_end)][0]
+            network.links_tag[(row_end, row_end)][0] = network.links_tag[(row_end - 1, row_end)][-1]
             for i in range(1, self.config.cols):
                 current_node, next_node = row_end - i, row_end - i + 1
                 for j in range(self.config.seats_per_link - 1, -1, -1):
                     if j == 0 and current_node == row_start:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(
-                            current_node, current_node)][-1]
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(
-                            current_node - 1, current_node)][-1]
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node - 1, current_node)][-1]
                     else:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(
-                            current_node, next_node)][j - 1]
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
             network.links_tag[(row_start, row_start)][-1] = last_position
 
     def process_eject_queues(self, network, eject_flits, rr_queue, destination_type, ip_pos):
@@ -1295,8 +1192,7 @@ class Simulation:
             flit.burst_length = req.burst_length
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
-            self.node.rn_wdb[flit.source_type][flit.source][flit.packet_id].append(
-                flit)
+            self.node.rn_wdb[flit.source_type][flit.source][flit.packet_id].append(flit)
 
     def create_read_packet(self, req):
         for i in range(req.burst_length):
@@ -1308,8 +1204,7 @@ class Simulation:
             flit.destination_original = req.source_original
             flit.req_type = req.req_type
             flit.flit_type = "data"
-            flit.departure_cycle = self.cycle + self.config.ddr_latency + \
-                i if req.destination_type == "ddr" else self.cycle + i
+            flit.departure_cycle = self.cycle + self.config.ddr_latency + i if req.destination_type == "ddr" else self.cycle + i
             flit.entry_db_cycle = req.entry_db_cycle
             flit.req_departure_cycle = req.departure_cycle
             flit.source_type = req.destination_type
@@ -1370,12 +1265,10 @@ class Simulation:
             json.dump(self.config.__dict__, f, indent=4)
 
         read_latency, write_latency = [], []
-        read_merged_intervals, write_merged_intervals = [(0, 0, 0)], [
-            (0, 0, 0)]
+        read_merged_intervals, write_merged_intervals = [(0, 0, 0)], [(0, 0, 0)]
 
         with open(os.path.join(self.result_save_path, f"Result_{self.file_name[10:-9]}R.txt"), "w") as f1, open(
-            os.path.join(self.result_save_path,
-                         f"Result_{self.file_name[10:-9]}W.txt"), "w"
+            os.path.join(self.result_save_path, f"Result_{self.file_name[10:-9]}W.txt"), "w"
         ) as f2:
 
             # Print headers
@@ -1394,8 +1287,7 @@ class Simulation:
             self.sdma_R_ddr_latency, self.sdma_W_l2m_latency, self.gdma_R_l2m_latency = [], [], []
             for flits in network.arrive_flits.values():
                 self.process_flits(
-                    next((flit for flit in flits if flit.is_last_flit),
-                         flits[-1]),
+                    next((flit for flit in flits if flit.is_last_flit), flits[-1]),
                     network,
                     read_latency,
                     write_latency,
@@ -1406,17 +1298,14 @@ class Simulation:
                 )
 
         # Calculate and output results
-        self.calculate_and_output_results(
-            network, read_latency, write_latency, read_merged_intervals, write_merged_intervals)
+        self.calculate_and_output_results(network, read_latency, write_latency, read_merged_intervals, write_merged_intervals)
 
     def calculate_predicted_duration(self, flit):
         """Calculate the predicted duration based on the flit's path."""
         duration = 0
         for i in range(1, len(flit.path)):
-            duration += 2 if flit.path[i] - flit.path[i - 1] == - \
-                self.config.cols else self.config.seats_per_link
-        duration += 2 if flit.path[1] - \
-            flit.path[0] == -self.config.cols else 3
+            duration += 2 if flit.path[i] - flit.path[i - 1] == -self.config.cols else self.config.seats_per_link
+        duration += 2 if flit.path[1] - flit.path[0] == -self.config.cols else 3
         return 0 if len(flit.path) == 2 else duration
 
     def process_flits(self, flit, network, read_latency, write_latency, read_merged_intervals, write_merged_intervals, f1, f2):
@@ -1425,8 +1314,7 @@ class Simulation:
         flit.predicted_duration = self.calculate_predicted_duration(flit)
         flit.actual_duration = flit.arrival_cycle - flit.departure_cycle
         flit.actual_ject_duration = flit.arrival_eject_cycle - flit.departure_inject_cycle
-        flit.actual_network_duration = flit.arrival_network_cycle - \
-            flit.departure_network_cycle
+        flit.actual_network_duration = flit.arrival_network_cycle - flit.departure_network_cycle
 
         # # Update network statistics
         # network.inject_time[flit.source].append(flit.departure_inject_cycle - flit.departure_cycle)
@@ -1449,11 +1337,9 @@ class Simulation:
 
         # Update merged intervals and latencies
         if flit.req_type == "read":
-            self.update_intervals(
-                flit, read_merged_intervals, read_latency, f1, "R")
+            self.update_intervals(flit, read_merged_intervals, read_latency, f1, "R")
         elif flit.req_type == "write":
-            self.update_intervals(
-                flit, write_merged_intervals, write_latency, f2, "W")
+            self.update_intervals(flit, write_merged_intervals, write_latency, f2, "W")
 
     def calculate_and_output_results(self, network, read_latency, write_latency, read_merged_intervals, write_merged_intervals):
         """Calculate average latencies and output total results."""
@@ -1461,97 +1347,73 @@ class Simulation:
         for source in self.flit_position:
             destination = source - self.config.cols
             if network.inject_time[source]:
-                network.avg_inject_time[source] = sum(
-                    network.inject_time[source]) / len(network.inject_time[source])
+                network.avg_inject_time[source] = sum(network.inject_time[source]) / len(network.inject_time[source])
             if network.eject_time[destination]:
-                network.avg_eject_time[destination] = sum(
-                    network.eject_time[destination]) / len(network.eject_time[destination])
+                network.avg_eject_time[destination] = sum(network.eject_time[destination]) / len(network.eject_time[destination])
 
-        network.avg_circuits_h = sum(
-            network.circuits_h) / len(network.circuits_h) / 2 if network.circuits_h else None
-        network.max_circuits_h = max(
-            network.circuits_h) / 2 if network.circuits_h else None
-        network.avg_circuits_v = sum(
-            network.circuits_v) / len(network.circuits_v) / 2 if network.circuits_v else None
-        network.max_circuits_v = max(
-            network.circuits_v) / 2 if network.circuits_v else None
+        network.avg_circuits_h = sum(network.circuits_h) / len(network.circuits_h) / 2 if network.circuits_h else None
+        network.max_circuits_h = max(network.circuits_h) / 2 if network.circuits_h else None
+        network.avg_circuits_v = sum(network.circuits_v) / len(network.circuits_v) / 2 if network.circuits_v else None
+        network.max_circuits_v = max(network.circuits_v) / 2 if network.circuits_v else None
 
         # Output total results
         total_result = os.path.join(self.result_save_path, "total_result.txt")
         with open(total_result, "w", encoding="utf-8") as f3:
             print(f"Topology: {self.topo_type}, file_name: {self.file_name}")
-            print(
-                f"Topology: {self.topo_type}, file_name: {self.file_name}", file=f3)
+            print(f"Topology: {self.topo_type}, file_name: {self.file_name}", file=f3)
             if read_latency:
-                self.read_BW, self.read_latency_avg, self.read_latency_max = self.output_intervals(
-                    f3, read_merged_intervals, "Read", read_latency)
+                self.read_BW, self.read_latency_avg, self.read_latency_max = self.output_intervals(f3, read_merged_intervals, "Read", read_latency)
             if write_latency:
                 self.write_BW, self.write_latency_avg, self.write_latency_max = self.output_intervals(
                     f3, write_merged_intervals, "Write", write_latency
                 )
         # print(f"Read + Write Bandwidth: {(self.read_BW + self.write_BW)}\n")
         print(
-            f"Finish Time: sdma-R-DDR: {self.sdma_R_ddr_finish_time}, sdma-W-l2m: {self.sdma_W_l2m_finish_time}, gdam-R-L2M: {self.gdma_R_l2m_finish_time}"
-        )
-        # print(
-        #     f"Throughput: sdma-R-DDR: {(self.sdma_R_ddr_flit_num * 128/self.sdma_R_ddr_finish_time/4):.1f}, "
-        #     f"sdma-W-l2m: {(self.sdma_W_l2m_flit_num* 128/self.sdma_W_l2m_finish_time/4):.1f}, "
-        #     f"gdam-R-L2M: {(self.gdma_R_l2m_flit_num* 128/self.gdma_R_l2m_finish_time/4):.1f}\n"
-        # )
-        print(
             f"Throughput: sdma-R-DDR: {(self.sdma_R_ddr_flit_num * 128/self.sdma_R_ddr_finish_time/4):.1f}, "
             f"sdma-W-l2m: {(self.sdma_W_l2m_flit_num* 128/self.sdma_W_l2m_finish_time/4):.1f}, "
-            f"gdam-R-L2M: {(self.gdma_R_l2m_flit_num* 128/self.gdma_R_l2m_finish_time/4):.1f}\n"
+            f"gdam-R-L2M: {(self.gdma_R_l2m_flit_num* 128/self.gdma_R_l2m_finish_time/4):.1f}"
+        )
+        print(
+            f"Finish Cycle: sdma-R-DDR: {self.sdma_R_ddr_finish_time * self.config.network_frequency}, "
+            f"sdma-W-l2m: {self.sdma_W_l2m_finish_time* self.config.network_frequency}, "
+            f"gdam-R-L2M: {self.gdma_R_l2m_finish_time* self.config.network_frequency}"
+        )
+        print(
+            f"Avg Latency: sdma-R-DDR: {np.average(self.sdma_R_ddr_latency):.1f}, "
+            f"sdma-W-l2m: {(np.average(self.sdma_W_l2m_latency)):.1f}, "
+            f"gdam-R-L2M: {(np.average(self.gdma_R_l2m_latency)):.1f}"
         )
 
     def update_intervals(self, flit, merged_intervals, latency, file, req_type):
         """Update the merged intervals and latency for the given request type."""
         last_start, last_end, count = merged_intervals[-1]
         if flit.req_departure_cycle // self.config.network_frequency <= last_end:
-            merged_intervals[-1] = (last_start, max(last_end, flit.arrival_cycle //
-                                    self.config.network_frequency), count + flit.burst_length)
+            merged_intervals[-1] = (last_start, max(last_end, flit.arrival_cycle // self.config.network_frequency), count + flit.burst_length)
         else:
             merged_intervals.append(
-                (flit.req_departure_cycle // self.config.network_frequency,
-                 flit.arrival_cycle // self.config.network_frequency, flit.burst_length)
+                (flit.req_departure_cycle // self.config.network_frequency, flit.arrival_cycle // self.config.network_frequency, flit.burst_length)
             )
 
-        if (
-            flit.source_type == "ddr"
-            and flit.destination_type == "sdma"
-            and req_type == "R"
-        ):
-            self.sdma_R_ddr_finish_time = max(
-                self.sdma_R_ddr_finish_time, flit.arrival_cycle // self.config.network_frequency)
+        if flit.source_type == "ddr" and flit.destination_type == "sdma" and req_type == "R":
+            self.sdma_R_ddr_finish_time = max(self.sdma_R_ddr_finish_time, flit.arrival_cycle // self.config.network_frequency)
             self.sdma_R_ddr_flit_num += flit.burst_length
-            self.sdma_R_ddr_latency.append(
-                flit.leave_db_cycle - flit.entry_db_cycle
-            )
-        elif (
-            flit.destination_type == "l2m"
-            and flit.source_type == "sdma"
-            and req_type == "W"
-        ):
-            self.sdma_W_l2m_finish_time = max(
-                self.sdma_W_l2m_finish_time, flit.arrival_cycle // self.config.network_frequency)
+            if flit.leave_db_cycle is None:
+                flit.leave_db_cycle = flit.arrive_cycle
+            self.sdma_R_ddr_latency.append(flit.leave_db_cycle - flit.entry_db_cycle)
+        elif flit.destination_type == "l2m" and flit.source_type == "sdma" and req_type == "W":
+            self.sdma_W_l2m_finish_time = max(self.sdma_W_l2m_finish_time, flit.arrival_cycle // self.config.network_frequency)
             self.sdma_W_l2m_flit_num += flit.burst_length
-            self.sdma_W_l2m_latency.append(
-                flit.leave_db_cycle - flit.entry_db_cycle
-            )
-        elif (
-            flit.source_type == "l2m"
-            and flit.destination_type == "gdma"
-            and req_type == "R"
-        ):
-            self.gdma_R_l2m_finish_time = max(
-                self.gdma_R_l2m_finish_time, flit.arrival_cycle // self.config.network_frequency)
+            if flit.leave_db_cycle is None:
+                flit.leave_db_cycle = flit.arrive_cycle
+            self.sdma_W_l2m_latency.append(flit.leave_db_cycle - flit.entry_db_cycle)
+        elif flit.source_type == "l2m" and flit.destination_type == "gdma" and req_type == "R":
+            self.gdma_R_l2m_finish_time = max(self.gdma_R_l2m_finish_time, flit.arrival_cycle // self.config.network_frequency)
             self.gdma_R_l2m_flit_num += flit.burst_length
-            self.gdma_R_l2m_latency.append(
-                flit.leave_db_cycle - flit.entry_db_cycle
-            )
+            if flit.leave_db_cycle is None:
+                flit.leave_db_cycle = flit.arrive_cycle
+            self.gdma_R_l2m_latency.append(flit.leave_db_cycle - flit.entry_db_cycle)
 
-        latency.append(flit.arrival_cycle // self.config.network_frequency -
-                       flit.req_departure_cycle // self.config.network_frequency)
+        latency.append(flit.arrival_cycle // self.config.network_frequency - flit.req_departure_cycle // self.config.network_frequency)
         print(
             f"{flit.req_departure_cycle // self.config.network_frequency},{flit.source_original},{flit.original_source_type},{flit.destination_original},{flit.original_destination_type},"
             f"{req_type},{flit.burst_length},{flit.arrival_cycle // self.config.network_frequency},{flit.path},{flit.circuits_completed_v},{flit.circuits_completed_h}",
@@ -1563,8 +1425,7 @@ class Simulation:
         print(f"{req_type} intervals:", file=f3)
         print(f"{req_type} results:")
         # print(f"{req_type} results:", file=f3)
-        weighted_bandwidth_sum, total_count, total_bandwidth = 0, 0, [
-            np.inf, -np.inf]
+        weighted_bandwidth_sum, total_count, total_bandwidth = 0, 0, [np.inf, -np.inf]
 
         for start, end, count in merged_intervals:
             if start == end:
@@ -1574,18 +1435,14 @@ class Simulation:
             total_bandwidth[1] = max(total_bandwidth[1], bandwidth)
             weighted_bandwidth_sum += bandwidth * count
             total_count += count
-            print(
-                f"Interval: {start} to {end}, count: {count}, bandwidth: {bandwidth:.1f}", file=f3)
+            print(f"Interval: {start} to {end}, count: {count}, bandwidth: {bandwidth:.1f}", file=f3)
             self.finish_time = max(self.finish_time, end)
 
-        weighted_bandwidth = weighted_bandwidth_sum / \
-            total_count if total_count > 0 else 0
+        weighted_bandwidth = weighted_bandwidth_sum / total_count if total_count > 0 else 0
         latency_avg = np.average(latency)
         latency_max = max(latency)
-        print(
-            f"Weighted bandwidth: {weighted_bandwidth:.1f} AvgLatency: {latency_avg:.1f}, MaxLatency: {latency_max}", file=f3)
-        print(
-            f"Weighted bandwidth: {weighted_bandwidth:.1f} AvgLatency: {latency_avg:.1f}, MaxLatency: {latency_max}")
+        print(f"Weighted bandwidth: {weighted_bandwidth:.1f} AvgLatency: {latency_avg:.1f}, MaxLatency: {latency_max}", file=f3)
+        print(f"Weighted bandwidth: {weighted_bandwidth:.1f} AvgLatency: {latency_avg:.1f}, MaxLatency: {latency_max}")
         return weighted_bandwidth, latency_avg, latency_max
 
     def evaluate_performance(self, network):
@@ -1593,8 +1450,7 @@ class Simulation:
         send_flit_ids = set(flit.id for flit in network.send_flits)
         arrive_flit_ids = set(flit.id for flit in network.arrive_flits)
         unreceived_flit_ids = send_flit_ids - arrive_flit_ids
-        unreceived_flits = [
-            flit for flit in network.send_flits if flit.id in unreceived_flit_ids]
+        unreceived_flits = [flit for flit in network.send_flits if flit.id in unreceived_flit_ids]
 
         # Latency confirm
         for flit in network.arrive_flits:
@@ -1612,20 +1468,15 @@ class Simulation:
 
             flit.actual_duration = flit.arrival_cycle - flit.departure_cycle
             flit.actual_ject_duration = flit.arrival_eject_cycle - flit.departure_inject_cycle
-            flit.actual_network_duration = flit.arrival_network_cycle - \
-                flit.departure_network_cycle
-            network.inject_time[flit.source].append(
-                flit.departure_inject_cycle - flit.departure_cycle)
-            network.eject_time[flit.destination].append(
-                flit.arrival_cycle - flit.arrival_network_cycle)
+            flit.actual_network_duration = flit.arrival_network_cycle - flit.departure_network_cycle
+            network.inject_time[flit.source].append(flit.departure_inject_cycle - flit.departure_cycle)
+            network.eject_time[flit.destination].append(flit.arrival_cycle - flit.arrival_network_cycle)
             network.all_latency.append(flit.actual_duration)
             network.ject_latency.append(flit.actual_ject_duration)
             network.network_latency.append(flit.actual_network_duration)
             network.predicted_recv_time.append(flit.predicted_duration)
-            network.circuits_h.append(
-                flit.circuits_completed_h) if flit.circuits_completed_h != 0 else None
-            network.circuits_v.append(
-                flit.circuits_completed_v) if flit.circuits_completed_v != 0 else None
+            network.circuits_h.append(flit.circuits_completed_h) if flit.circuits_completed_h != 0 else None
+            network.circuits_v.append(flit.circuits_completed_v) if flit.circuits_completed_v != 0 else None
             if flit.circuits_completed_h != 0:
                 network.circuits_flit_h[flit.destination_type] += 1
             if flit.circuits_completed_v != 0:
@@ -1634,41 +1485,29 @@ class Simulation:
         for source in self.flit_position:
             destination = source - self.config.cols
             if network.inject_time[source]:
-                network.avg_inject_time[source] = sum(
-                    network.inject_time[source]) / len(network.inject_time[source])
+                network.avg_inject_time[source] = sum(network.inject_time[source]) / len(network.inject_time[source])
             if network.eject_time[destination]:
-                network.avg_eject_time[destination] = sum(
-                    network.eject_time[destination]) / len(network.eject_time[destination])
-        network.predicted_avg_latency = sum(
-            network.predicted_recv_time) / len(network.predicted_recv_time) / 2
+                network.avg_eject_time[destination] = sum(network.eject_time[destination]) / len(network.eject_time[destination])
+        network.predicted_avg_latency = sum(network.predicted_recv_time) / len(network.predicted_recv_time) / 2
         network.predicted_max_latency = max(network.predicted_recv_time) / 2
-        network.actual_avg_latency = sum(
-            network.all_latency) / len(network.all_latency) / 2
+        network.actual_avg_latency = sum(network.all_latency) / len(network.all_latency) / 2
         network.actual_max_latency = max(network.all_latency) / 2
-        network.actual_avg_ject_latency = sum(
-            network.ject_latency) / len(network.ject_latency) / 2
+        network.actual_avg_ject_latency = sum(network.ject_latency) / len(network.ject_latency) / 2
         network.actual_max_ject_latency = max(network.ject_latency) / 2
-        network.actual_avg_net_latency = sum(
-            network.network_latency) / len(network.network_latency) / 2
+        network.actual_avg_net_latency = sum(network.network_latency) / len(network.network_latency) / 2
         network.actual_max_net_latency = max(network.network_latency) / 2
-        network.avg_circuits_h = sum(
-            network.circuits_h) / len(network.circuits_h) / 2 if len(network.circuits_h) > 0 else None
-        network.max_circuits_h = max(
-            network.circuits_h) / 2 if len(network.circuits_h) > 0 else None
-        network.avg_circuits_v = sum(
-            network.circuits_v) / len(network.circuits_v) / 2 if len(network.circuits_v) > 0 else None
-        network.max_circuits_v = max(
-            network.circuits_v) / 2 if len(network.circuits_v) > 0 else None
+        network.avg_circuits_h = sum(network.circuits_h) / len(network.circuits_h) / 2 if len(network.circuits_h) > 0 else None
+        network.max_circuits_h = max(network.circuits_h) / 2 if len(network.circuits_h) > 0 else None
+        network.avg_circuits_v = sum(network.circuits_v) / len(network.circuits_v) / 2 if len(network.circuits_v) > 0 else None
+        network.max_circuits_v = max(network.circuits_v) / 2 if len(network.circuits_v) > 0 else None
 
         # throughput confirm
         # self.cycle = 828 - 10
         for ip_type in network.per_send_throughput:
             for source in network.per_send_throughput[ip_type]:
                 destination = source - self.config.cols
-                network.per_send_throughput[ip_type][source] = 256 * \
-                    network.num_send[ip_type][source] / (self.cycle)
-                network.per_recv_throughput[ip_type][destination] = 256 * \
-                    network.num_recv[ip_type][destination] / (self.cycle)
+                network.per_send_throughput[ip_type][source] = 256 * network.num_send[ip_type][source] / (self.cycle)
+                network.per_recv_throughput[ip_type][destination] = 256 * network.num_recv[ip_type][destination] / (self.cycle)
                 network.send_throughput[ip_type] += network.per_send_throughput[ip_type][source]
                 network.recv_throughput[ip_type] += network.per_recv_throughput[ip_type][destination]
             # network.send_throughput[ip_type] = network.send_throughput[ip_type] / len(network.per_send_throughput[ip_type]) if len(network.per_send_throughput[ip_type]) > 0 else None
@@ -1693,18 +1532,13 @@ class Simulation:
         for flit in sorted_flits:
             destination_key = flit.destination + self.config.cols
             if flit.destination_type not in network.throughput:
-                print(
-                    f"Warning: destination_type '{flit.destination_type}' is not initialized.")
+                print(f"Warning: destination_type '{flit.destination_type}' is not initialized.")
                 continue
             network.throughput[flit.destination_type][destination_key][1] += 1
-            first_time = network.throughput[flit.destination_type][flit.destination +
-                                                                   self.config.cols][2]
-            network.throughput[flit.destination_type][destination_key][2] = min(
-                flit.departure_inject_cycle, first_time)
-            last_time = network.throughput[flit.destination_type][flit.destination +
-                                                                  self.config.cols][3]
-            network.throughput[flit.destination_type][destination_key][3] = max(
-                flit.arrival_cycle, last_time)
+            first_time = network.throughput[flit.destination_type][flit.destination + self.config.cols][2]
+            network.throughput[flit.destination_type][destination_key][2] = min(flit.departure_inject_cycle, first_time)
+            last_time = network.throughput[flit.destination_type][flit.destination + self.config.cols][3]
+            network.throughput[flit.destination_type][destination_key][3] = max(flit.arrival_cycle, last_time)
         for source in self.config.sdma_send_positions:
             network.throughput["gdma"][source][0] = (
                 network.throughput["gdma"][source][1]
@@ -1768,8 +1602,7 @@ class Simulation:
                     throughput_data[source]["first_send"] = sorted_flits[j].departure_inject_cycle
                 if destination in throughput_data:
                     throughput_data[destination]["recv_num"] += 1
-                    throughput_data[destination]["last_recv"] = max(
-                        throughput_data[destination]["last_recv"], sorted_flits[j].arrival_cycle)
+                    throughput_data[destination]["last_recv"] = max(throughput_data[destination]["last_recv"], sorted_flits[j].arrival_cycle)
             for key in throughput_data:
                 if throughput_data[key]["last_recv"] > 0:
                     if key == "sdma":
@@ -1825,33 +1658,25 @@ class Simulation:
                 predicted_latency += flit.predicted_duration
                 actual_ject_duration += flit.actual_ject_duration
                 all_predicted_latency += flit.predicted_duration
-                predicted_max_latency = max(
-                    flit.predicted_duration, predicted_max_latency)
+                predicted_max_latency = max(flit.predicted_duration, predicted_max_latency)
                 all_actual_latency += flit.actual_duration
-                actual_max_latency = max(
-                    flit.actual_duration, actual_max_latency)
+                actual_max_latency = max(flit.actual_duration, actual_max_latency)
                 all_actual_ject_latency += flit.actual_ject_duration
-                actual_max_ject_latency = max(
-                    flit.actual_ject_duration, actual_max_ject_latency)
+                actual_max_ject_latency = max(flit.actual_ject_duration, actual_max_ject_latency)
                 all_actual_net_latency += flit.actual_network_duration
-                actual_max_net_latency = max(
-                    flit.actual_network_duration, actual_max_net_latency)
+                actual_max_net_latency = max(flit.actual_network_duration, actual_max_net_latency)
             predicted_latency /= len(packets[packet_id])
             actual_ject_duration /= len(packets[packet_id])
             diff = actual_ject_duration - predicted_latency
             diff_Latency[packet_id] = diff / self.config.network_frequency
             len_packets += len(packets[packet_id])
-        predicted_avg_latency = all_predicted_latency / \
-            len_packets / self.config.network_frequency
+        predicted_avg_latency = all_predicted_latency / len_packets / self.config.network_frequency
         predicted_max_latency = predicted_max_latency / self.config.network_frequency
-        actual_avg_latency = all_actual_latency / \
-            len_packets / self.config.network_frequency
+        actual_avg_latency = all_actual_latency / len_packets / self.config.network_frequency
         actual_max_latency = actual_max_latency / self.config.network_frequency
-        actual_avg_ject_latency = all_actual_ject_latency / \
-            len_packets / self.config.network_frequency
+        actual_avg_ject_latency = all_actual_ject_latency / len_packets / self.config.network_frequency
         actual_max_ject_latency = actual_max_ject_latency / self.config.network_frequency
-        actual_avg_net_latency = all_actual_net_latency / \
-            len_packets / self.config.network_frequency
+        actual_avg_net_latency = all_actual_net_latency / len_packets / self.config.network_frequency
         actual_max_net_latency = actual_max_net_latency / self.config.network_frequency
 
         analysis_result = [
@@ -1950,7 +1775,10 @@ def main():
     # file_name = r"LLama2_MLP_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
 
-    result_save_path = r"../Result/cross ring/REQ_RSP/large/sn_tracker-v1.0/"
+    p1 = 64
+    p2 = 64
+
+    result_save_path = f"../Result/cross ring/REQ_RSP/large/{p1}-{p2}/"
 
     # topo_type = "4x9"
     # topo_type = "9x4"
@@ -1978,8 +1806,8 @@ def main():
     sim.config.rn_write_tracker_ostd = 32
     sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * 2
     sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * 2
-    sim.config.ro_tracker_ostd = 128
-    sim.config.share_tracker_ostd = 32
+    sim.config.ro_tracker_ostd = p1
+    sim.config.share_tracker_ostd = p2
     sim.config.sn_wdb_size = sim.config.share_tracker_ostd * 2
     sim.config.seats_per_link = 7
 
@@ -1988,6 +1816,8 @@ def main():
     # sim.end_time = 1000
     sim.print_interval = 10000
     sim.run()
+    print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
+    print(f"ro_tracker_ostd: {p1}: share_tracker_ostd: {p2}")
 
     # # 获取当前的内存快照
     # snapshot = tracemalloc.take_snapshot()
@@ -2066,8 +1896,7 @@ def find_optimal_parameters():
             sim.run()
 
             # 计算并保存总结果
-            output_csv = os.path.join(
-                result_root_save_path, "all_result_overall.csv")
+            output_csv = os.path.join(result_root_save_path, "all_result_overall.csv")
             csv_file_exists = os.path.isfile(output_csv)
 
             # 准备写入结果
@@ -2093,8 +1922,7 @@ def find_optimal_parameters():
 
             # 写入 CSV 文件
             with open(output_csv, mode="a", newline="") as output_csv_file:
-                writer = csv.DictWriter(
-                    output_csv_file, fieldnames=results.keys())
+                writer = csv.DictWriter(output_csv_file, fieldnames=results.keys())
                 if not csv_file_exists:
                     writer.writeheader()  # 写入表头
                 writer.writerow(results)  # 写入结果行
