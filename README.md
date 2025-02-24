@@ -19,6 +19,10 @@ git remote add origin http://10.129.4.209/spc/noc.git
 git branch -M main
 git push -uf origin main
 ```
+## Pip install
+```
+pip install -e .
+```
 
 ## Integrate with your tools
 

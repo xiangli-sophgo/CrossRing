@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="CrossRing",  # 包名称
-    version="0.1.0",  # 版本号
+    version="1.0.0",  # 版本号
     author="xiang.li",  # 作者
     author_email="xiang.li@sophgo.com",  # 作者邮箱
     description="A model of CrossRing",  # 简短描述

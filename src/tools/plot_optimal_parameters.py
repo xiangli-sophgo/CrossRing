@@ -4,15 +4,18 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 import seaborn as sns
+import os
 
 # 读取CSV文件
-data = pd.read_csv(r"../Params_csv/rn_r_w.csv")
+file_root = r"../../Result/Params_csv/"
+data_file_name = r"RN_Tracker_OSTD_Results_copy.csv"
+data = pd.read_csv(file_root + data_file_name)
 
 # 定义不同的拓扑
 topologies = ["4x9", "9x4", "5x4", "4x5"]
 # topologies = ["4x9"]
 
-topo = topologies[0]
+# topo = topologies[0]
 
 # # 创建一个图形
 # plt.figure(figsize=(15, 10))
@@ -60,25 +63,30 @@ topo = topologies[0]
 
 # 热力图
 # 创建一个图形
-import os
+# import os
 
-data = pd.read_csv(r"../Params_csv/RN_R_W_Results.csv")
+# data = pd.read_csv(r"../Params_csv/RN_R_W_Results.csv")
 
-# 定义不同的拓扑
-topologies = ["4x9", "9x4", "5x4", "4x5"]
+# # 定义不同的拓扑
+# topologies = ["4x9", "9x4", "5x4", "4x5"]
 # topologies = ["9x4"]
 
 # topo = topologies[0]
 
 # show_value = "ReadBandWidth"
-show_value = "WriteBandWidth"
-# show_value = "TotalBandWidth"
-# show_value = "FinishTime"
+# show_value = "WriteBandWidth"
+show_value = "TotalBandWidth"
+# show_value = "FinishCycle"
+# show_value = "cir_h_total"
+# show_value = "cir_v_total"
 # x_name = "ro_tracker_ostd"
 # y_name = "share_tracker_ostd"
-x_name = "rn_r_tracker_outstanding"
-y_name = "rn_w_tracker_outstanding"
-save_images = 1
+x_name = "rn_r_tracker_ostd"
+y_name = "rn_w_tracker_ostd"
+
+log_data = 0
+save_images = 0
+
 if show_value in ["ReadBandWidth", "WriteBandWidth"]:
     vmax = 64
     vmin = 0
@@ -86,28 +94,32 @@ else:
     vmax = 128
     vmin = 64
 if save_images:
-    output_dir = f"../Plt_results/{x_name}_{y_name}/"
+    output_dir = f"../../Result/Plt_results/{x_name}_{y_name}/"
     os.makedirs(output_dir, exist_ok=True)
 
 for topo in topologies:
     # 筛选出当前拓扑的数据
     # topo_data = data[(data["Topo"] == topo) & (data["FinishTime"] != 60000)]
     topo_data = data[data["Topo"] == topo]
+    if log_data:
+        topo_data[show_value] = np.log(topo_data[show_value] + 0.1)
 
     # 使用透视表来准备热图数据
     pivot_table = topo_data.pivot_table(index=x_name, columns=y_name, values=show_value, aggfunc="first")  # 直接使用第一个值
 
     # 绘制热图
     plt.figure(figsize=(10, 8))
-    sns.heatmap(pivot_table, cmap="YlGnBu", annot=True, fmt=".1f", cbar_kws={"label": "Read Bandwidth"})
-    # sns.heatmap(pivot_table, cmap="YlGnBu_r", annot=True, fmt=".1f", cbar_kws={"label": "Read Bandwidth"})
+    if show_value in ["FinishCycle", "cir_h_total"]:
+        sns.heatmap(pivot_table, cmap="YlGnBu_r", annot=True, fmt=".1f", cbar_kws={"label": show_value})
+    else:
+        sns.heatmap(pivot_table, cmap="YlGnBu", annot=True, fmt=".1f", cbar_kws={"label": show_value})
 
     plt.title(f"Heatmap of {show_value} for Topo {topo}")
     plt.xlabel(x_name)
     plt.ylabel(y_name)
 
     if save_images:
-        heatmap_filename = output_dir + f"{show_value}_{topo}.png"
+        heatmap_filename = output_dir + f"{topo}_{show_value}.png"
         plt.savefig(heatmap_filename)
         plt.close()
     else:

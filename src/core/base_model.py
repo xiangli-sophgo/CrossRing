@@ -53,9 +53,13 @@ class BaseModel:
         self.finish_time = -1
         self.new_write_req = []
         self.flit_num, self.req_num, self.rsp_num = 0, 0, 0
-        self.cir_h_total, self.cir_v_total = 0, 0
-        self.read_BW, self.read_latency_avg, self.read_latency_max = (0, 0, 0)
-        self.write_BW, self.write_latency_avg, self.write_latency_max = (0, 0, 0)
+        self.req_cir_h_total, self.req_cir_v_total = 0, 0
+        self.rsp_cir_h_total, self.rsp_cir_v_total = 0, 0
+        self.data_cir_h_total, self.data_cir_v_total = 0, 0
+        self.read_retry_num, self.write_retry_num = 0, 0
+        self.R_retry_num, self.W_retry_num = 0, 0
+        self.read_BW, self.read_latency_avg, self.read_latency_max = 0, 0, 0
+        self.write_BW, self.write_latency_avg, self.write_latency_max = 0, 0, 0
         self.directions = ["right", "left", "up", "local"]
         self.direction_conditions = {
             "right": lambda flit: flit.path[1] - flit.path[0] == 1,
@@ -176,6 +180,8 @@ class BaseModel:
                     (req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
+                self.req_cir_h_total += req.circuits_completed_h
+                self.req_cir_v_total += req.circuits_completed_v
                 for flit in self.flit_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle
                 self.node.rn_tracker["read"][self.rn_type][in_pos].remove(req)
@@ -195,6 +201,8 @@ class BaseModel:
                     (req for req in self.node.sn_tracker[self.sn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
+                self.req_cir_h_total += req.circuits_completed_h
+                self.req_cir_v_total += req.circuits_completed_v
                 for flit in self.flit_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle + self.config.sn_tracker_release_latency
                 # 释放tracker 增加40ns
@@ -464,7 +472,7 @@ class BaseModel:
             req.original_destination_type = req_data[4]
             if self.topo_type in ["5x4", "4x5"]:
                 req.source_type = "sdma" if req_data[1] > 15 else "gdma"
-                req.destination_type = "ddr" if req_data[3] > 15 else "l2m"
+                # req.destination_type = "ddr" if req_data[3] > 15 else "l2m"
             req.packet_id = Node.get_next_packet_id()
             req.req_type = "read" if req_data[5] == "R" else "write"
             self.req_network.send_flits[req.packet_id] = req
@@ -986,6 +994,8 @@ class BaseModel:
             (req for req in self.node.rn_tracker[rsp.req_type][self.rn_type][in_pos] if req.packet_id == rsp.packet_id),
             None,
         )
+        self.rsp_cir_h_total += rsp.circuits_completed_h
+        self.rsp_cir_v_total += rsp.circuits_completed_v
         if not req:
             return
         if rsp.req_type == "read":
@@ -1186,6 +1196,11 @@ class BaseModel:
             self.node.sn_rdb[flit.source_type][flit.source].append(flit)
 
     def create_rsp(self, req, rsp_type):
+        if rsp_type == "negative":
+            if req.req_type == "read":
+                self.read_retry_num += 1
+            elif req.req_type == "write":
+                self.write_retry_num += 1
         source = req.destination + self.config.cols
         destination = req.source - self.config.cols
         path = self.routes[source][destination]
@@ -1252,8 +1267,8 @@ class BaseModel:
             self.sdma_R_ddr_latency, self.sdma_W_l2m_latency, self.gdma_R_l2m_latency = [], [], []
             for flits in network.arrive_flits.values():
                 for flit in flits:
-                    self.cir_h_total += flit.circuits_completed_h
-                    self.cir_v_total += flit.circuits_completed_v
+                    self.data_cir_h_total += flit.circuits_completed_h
+                    self.data_cir_v_total += flit.circuits_completed_v
                 self.process_flits(
                     next((flit for flit in flits if flit.is_last_flit), flits[-1]),
                     network,
@@ -1323,6 +1338,7 @@ class BaseModel:
         network.max_circuits_v = max(network.circuits_v) / 2 if network.circuits_v else None
 
         # Output total results
+        print("=" * 50)
         total_result = os.path.join(self.result_save_path, "total_result.txt")
         with open(total_result, "w", encoding="utf-8") as f3:
             print(f"Topology: {self.topo_type}, file_name: {self.file_name}")
@@ -1331,8 +1347,25 @@ class BaseModel:
                 self.read_BW, self.read_latency_avg, self.read_latency_max = self.output_intervals(f3, read_merged_intervals, "Read", read_latency)
             if write_latency:
                 self.write_BW, self.write_latency_avg, self.write_latency_max = self.output_intervals(f3, write_merged_intervals, "Write", write_latency)
-        print(f"Avg circuits h: {(self.cir_h_total / self.flit_num):.1f}, v: {(self.cir_v_total / self.flit_num):.1f}")
         print(f"Read + Write Bandwidth: {(self.read_BW + self.write_BW)}")
+        print("=" * 50)
+        print(
+            f"Total Circuits req h: {self.req_cir_h_total}, avg: {(self.req_cir_h_total / self.req_num) if self.req_num > 0 else 0:.3f}; "
+            f"v: {self.req_cir_v_total}, avg: {(self.req_cir_v_total / self.req_num) if self.req_num > 0 else 0:.3f}"
+        )
+
+        print(
+            f"Total Circuits rsp h: {self.rsp_cir_h_total}, avg: {(self.rsp_cir_h_total / self.rsp_num) if self.rsp_num > 0 else 0:.3f}; "
+            f"v: {self.rsp_cir_v_total}, avg: {(self.rsp_cir_v_total / self.rsp_num) if self.rsp_num > 0 else 0:.3f}"
+        )
+
+        print(
+            f"Total Circuits data h: {self.data_cir_h_total}, avg: {(self.data_cir_h_total / self.flit_num) if self.flit_num > 0 else 0:.3f}; "
+            f"v: {self.data_cir_v_total}, avg: {(self.data_cir_v_total / self.flit_num) if self.flit_num > 0 else 0:.3f}"
+        )
+        if self.model_type == "REQ_RSP":
+            print(f"Retry num: R: {self.read_retry_num}, W: {self.write_retry_num}")
+        print("=" * 50)
         print(
             f"Throughput: sdma-R-DDR: {((self.sdma_R_ddr_flit_num * 128/self.sdma_R_ddr_finish_time/4) if self.sdma_R_ddr_finish_time>0 else 0):.1f}, "
             f"sdma-W-l2m: {(self.sdma_W_l2m_flit_num* 128/self.sdma_W_l2m_finish_time/4 if self.sdma_W_l2m_finish_time>0 else 0):.1f}, "
@@ -1346,8 +1379,9 @@ class BaseModel:
         print(
             f"Avg Latency: sdma-R-DDR: {(np.average(self.sdma_R_ddr_latency) if self.sdma_R_ddr_latency else 0):.1f}, "
             f"sdma-W-l2m: {(np.average(self.sdma_W_l2m_latency) if self.sdma_W_l2m_latency else 0):.1f}, "
-            f"gdam-R-L2M: {(np.average(self.gdma_R_l2m_latency)if self.sdma_W_l2m_latency else 0):.1f}\n"
+            f"gdam-R-L2M: {(np.average(self.gdma_R_l2m_latency)if self.gdma_R_l2m_latency else 0):.1f}"
         )
+        print("=" * 50)
 
     def update_intervals(self, flit, merged_intervals, latency, file, req_type):
         """Update the merged intervals and latency for the given request type."""

@@ -113,6 +113,8 @@ class REQ_RSP_model(BaseModel):
                     (req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
+                self.req_cir_h_total += req.circuits_completed_h
+                self.req_cir_v_total += req.circuits_completed_v
                 for flit in self.flit_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle
                 self.node.rn_tracker["read"][self.rn_type][in_pos].remove(req)
@@ -132,6 +134,8 @@ class REQ_RSP_model(BaseModel):
                     (req for req in self.node.sn_tracker[self.sn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
+                self.req_cir_h_total += req.circuits_completed_h
+                self.req_cir_v_total += req.circuits_completed_v
                 for flit in self.flit_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle + self.config.sn_tracker_release_latency
                 # 释放tracker 增加40ns
@@ -801,6 +805,8 @@ class REQ_RSP_model(BaseModel):
             (req for req in self.node.rn_tracker[rsp.req_type][self.rn_type][in_pos] if req.packet_id == rsp.packet_id),
             None,
         )
+        self.rsp_cir_h_total += rsp.circuits_completed_h
+        self.rsp_cir_v_total += rsp.circuits_completed_v
         if not req:
             return
         if rsp.req_type == "read":
@@ -858,26 +864,26 @@ class REQ_RSP_model(BaseModel):
                 break
         return eject_flits
 
-    def create_write_req_after_read(self, flit):
-        source = self.node_change(flit.destination_original)
-        destination = self.node_change(flit.source_original, False)
-        path = self.routes[source][destination]
-        req = Flit(source, destination, path)
-        req.source_original = flit.destination + self.config.cols
-        req.destination_original = flit.source - self.config.cols
-        req.flit_type = "req"
-        req.departure_cycle = self.cycle + 1
-        req.burst_length = flit.burst_length
-        req.source_type = flit.destination_type
-        req.destination_type = flit.source_type
-        req.original_source_type = flit.original_destination_type
-        req.original_destination_type = flit.original_source_type
-        if self.topo_type in ["5x4", "4x5"]:
-            req.source_type = "sdma" if req.source_original > 15 else "gdma"
-            req.destination_type = "ddr" if req.destination_original > 15 else "l2m"
-        req.packet_id = Node.get_next_packet_id()
-        req.req_type = "write"
-        self.new_write_req.append(req)
+    # def create_write_req_after_read(self, flit):
+    #     source = self.node_change(flit.destination_original)
+    #     destination = self.node_change(flit.source_original, False)
+    #     path = self.routes[source][destination]
+    #     req = Flit(source, destination, path)
+    #     req.source_original = flit.destination + self.config.cols
+    #     req.destination_original = flit.source - self.config.cols
+    #     req.flit_type = "req"
+    #     req.departure_cycle = self.cycle + 1
+    #     req.burst_length = flit.burst_length
+    #     req.source_type = flit.destination_type
+    #     req.destination_type = flit.source_type
+    #     req.original_source_type = flit.original_destination_type
+    #     req.original_destination_type = flit.original_source_type
+    #     if self.topo_type in ["5x4", "4x5"]:
+    #         req.source_type = "sdma" if req.source_original > 15 else "gdma"
+    #         req.destination_type = "ddr" if req.destination_original > 15 else "l2m"
+    #     req.packet_id = Node.get_next_packet_id()
+    #     req.req_type = "write"
+    #     self.new_write_req.append(req)
 
     def create_write_packet(self, req):
         for i in range(req.burst_length):
@@ -927,21 +933,6 @@ class REQ_RSP_model(BaseModel):
                 flit.is_last_flit = True
             self.node.sn_rdb[flit.source_type][flit.source].append(flit)
 
-    def create_rsp(self, req, rsp_type):
-        source = req.destination + self.config.cols
-        destination = req.source - self.config.cols
-        path = self.routes[source][destination]
-        rsp = Flit(source, destination, path)
-        rsp.flit_type = "rsp"
-        rsp.rsp_type = rsp_type
-        rsp.req_type = req.req_type
-        rsp.packet_id = req.packet_id
-        rsp.departure_cycle = self.cycle
-        rsp.req_departure_cycle = req.departure_cycle
-        rsp.source_type = req.destination_type
-        rsp.destination_type = req.source_type
-        self.node.sn_rsp_queue[rsp.source_type][source].append(rsp)
-
     def process_inject_queues(self, network, inject_queues):
         flit_num = 0
         flits = []
@@ -958,184 +949,3 @@ class REQ_RSP_model(BaseModel):
                     for flit in queue:
                         flit.wait_cycle += 1
         return flit_num, flits
-
-
-def main():
-    import tracemalloc
-
-    traffic_file_path = r"../../test_data/"
-    # file_name = r"demo3.txt"
-    # file_name = r"testcase-v1.1.1.txt"
-    # file_name = r"burst2_large.txt"
-    file_name = r"3x3_burst2.txt"
-
-    # traffic_file_path = r"../../traffic/"
-    # traffic_file_path = r"../traffic/output-v8-32/3M/step6_32core_map/"
-    # file_name = r"LLama2_Attention_FC_Trace.txt"
-    # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
-    # file_name = r"LLama2_MLP_Trace.txt"
-    # file_name = r"LLama2_MM_QKV_Trace.txt"
-
-    p1 = 64
-    p2 = 64
-
-    result_save_path = f"../../Result/CrossRing/REQ_RSP/large/{p1}-{p2}/"
-
-    # topo_type = "4x9"
-    # topo_type = "9x4"
-    # topo_type = "5x4"
-    # topo_type = "4x5"
-
-    # topo_type = "6x5"
-
-    topo_type = "3x3"
-
-    # result_save_path = None
-    config_path = r"../../config/config2.json"
-    # config_path = r"config.json"
-    sim = REQ_RSP_model(
-        config_path=config_path,
-        topo_type=topo_type,
-        traffic_file_path=traffic_file_path,
-        file_name=file_name,
-        result_save_path=result_save_path,
-    )
-
-    # profiler = cProfile.Profile()
-    # profiler.enable()
-
-    # tracemalloc.start()
-
-    # sim.end_time = 10000
-    sim.config.rn_read_tracker_ostd = 64
-    sim.config.rn_write_tracker_ostd = 32
-    sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * 2
-    sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * 2
-    sim.config.ro_tracker_ostd = p1
-    sim.config.share_tracker_ostd = p2
-    sim.config.sn_wdb_size = sim.config.share_tracker_ostd * 2
-    sim.config.seats_per_link = 7
-
-    # sim.config.update_config()
-    sim.initial()
-    # sim.end_time = 1000
-    sim.print_interval = 10000
-    sim.run()
-    print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
-    print(f"ro_tracker_ostd: {p1}: share_tracker_ostd: {p2}")
-
-    # # 获取当前的内存快照
-    # snapshot = tracemalloc.take_snapshot()
-    # top_stats = snapshot.statistics("lineno")
-    # print("[ Top 10 ]")
-    # for stat in top_stats[:10]:
-    #     print(stat)
-
-    # profiler.disable()
-    # profiler.print_stats()
-
-    # sim.draw_figure()
-
-
-def find_optimal_parameters():
-    import csv
-
-    # 定义流量文件路径和文件名
-    traffic_file_path = r""
-    file_name = r"demo3.txt"
-
-    # traffic_file_path = r"../traffic/"
-    # traffic_file_path = r"../traffic/output-v7-32/step6_mesh_32core_map/"
-    # file_name = r"LLama2_Attention_FC_Trace.txt"
-    # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
-    # file_name = r"LLama2_MLP_Trace.txt"
-    # file_name = r"LLama2_MM_QKV_Trace.txt"
-
-    # 定义拓扑类型
-    # topo_type = "4x9"
-    # topo_type = "9x4"
-    # topo_type = "5x4"
-    topo_type = "4x5"
-
-    config_path = r"config2.json"
-
-    # 创建结果保存路径
-    result_root_save_path = r"../Result/cross ring/optimal/write_after_read/rn_r_w/"
-    os.makedirs(result_root_save_path, exist_ok=True)  # 确保根目录存在
-
-    # 定义参数范围
-    parm1_start, parm1_end, parm1_step = (4, 128, 4)
-    parm2_start, parm2_end, parm2_step = (4, 128, 4)
-
-    # 遍历参数组合
-    for parm1 in range(parm1_start, parm1_end + 1, parm1_step):  # 使用 parm1_end + 1 以包含结束值
-        for parm2 in range(parm2_start, parm2_end + 1, parm2_step):  # 使用 parm2_end + 1 以包含结束值
-            # 创建特定结果保存路径
-            result_part_save_path = f"{parm1}_{parm2}/"  # 使用下划线分隔参数
-            # 初始化模拟实例
-            sim = REQ_RSP_model(
-                config_path=config_path,
-                topo_type=topo_type,
-                traffic_file_path=traffic_file_path,
-                file_name=file_name,
-                result_save_path=result_root_save_path + result_part_save_path,
-            )
-            sim.config.rn_read_tracker_ostd = parm1
-            sim.config.rn_write_tracker_ostd = parm2
-            sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * 4
-            sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * 4
-            sim.config.sn_wdb_size = 64 * 4
-            sim.config.ro_tracker_ostd = 64
-            sim.config.share_tracker_ostd = 64
-            # sim.config.seats_per_link = parm2
-            # sim.config.inject_queues_len = parm1
-            # sim.config.eject_queues_len = parm2
-
-            # sim.config.update_config()
-            sim.initial()
-            sim.end_time = 60000
-            sim.print_interval = 10000
-            print(f"Parm1: {parm1}, Parm2: {parm2}")
-
-            # 运行模拟
-            sim.run()
-
-            # 计算并保存总结果
-            output_csv = os.path.join(result_root_save_path, "all_result_overall.csv")
-            csv_file_exists = os.path.isfile(output_csv)
-
-            # 准备写入结果
-            results = {
-                "network_frequency": sim.config.network_frequency,
-                "rn_w_tracker_outstanding": sim.config.rn_write_tracker_ostd,
-                "share_tracker_ostd": sim.config.share_tracker_ostd,
-                "WriteBandWidth": sim.write_BW,
-                "WriteAvgLatency": sim.write_latency_avg,
-                "WriteMaxLatency": sim.write_latency_max,
-                "rn_r_tracker_outstanding": sim.config.rn_read_tracker_ostd,
-                "ro_tracker_ostd": sim.config.ro_tracker_ostd,
-                "ReadBandWidth": sim.read_BW,
-                "ReadAvgLatency": sim.read_latency_avg,
-                "ReadMaxLatency": sim.read_latency_max,
-                "FinishTime": sim.finish_time,
-                "TotalBandWidth": sim.read_BW + sim.write_BW,
-                # "LBN": sim.config.seats_per_link,
-                "eject_queues_len": sim.config.eject_queues_len,
-                "inject_queues_len": sim.config.inject_queues_len,
-                "Topo": topo_type,
-            }
-
-            # 写入 CSV 文件
-            with open(output_csv, mode="a", newline="") as output_csv_file:
-                writer = csv.DictWriter(output_csv_file, fieldnames=results.keys())
-                if not csv_file_exists:
-                    writer.writeheader()  # 写入表头
-                writer.writerow(results)  # 写入结果行
-
-            Flit.clear_flit_id()
-            Node.clear_packet_id()
-
-
-if __name__ == "__main__":
-    main()
-    # find_optimal_parameters()

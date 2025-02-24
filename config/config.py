@@ -331,7 +331,7 @@ class SimulationConfig:
         parser.add_argument("--reservation_num", type=int, default=default_config["reservation_num"], help="Reservation number")
         parser.add_argument("--ddr_latency", type=int, default=default_config["ddr_latency"], help="Reservation number")
         parser.add_argument("--sn_tracker_release_latency", type=int, default=default_config["sn_tracker_release_latency"], help="Reservation number")
-        parser.add_argument("--burst", type=int, default=default_config["burst"], help="Burst size")
+        parser.add_argument("--burst", type=int, default=default_config["burst"], help="Burst length")
         parser.add_argument("--network_frequency", type=float, default=default_config["network_frequency"], help="Network frequency")
         parser.add_argument("--rn_rdb_size", type=int, default=default_config["rn_rdb_size"], help="RN read buffer size")
         parser.add_argument("--rn_wdb_size", type=int, default=default_config["rn_wdb_size"], help="RN write buffer size")
