@@ -1130,9 +1130,9 @@ class BaseModel:
         req.destination_type = flit.source_type
         req.original_source_type = flit.original_destination_type
         req.original_destination_type = flit.original_source_type
-        if self.topo_type in ["5x4", "4x5"]:
-            req.source_type = "sdma" if req.source_original > 15 else "gdma"
-            req.destination_type = "ddr" if req.destination_original > 15 else "l2m"
+        # if self.topo_type in ["5x4", "4x5"]:
+        #     req.source_type = "sdma" if req.source_original > 15 else "gdma"
+        #     req.destination_type = "ddr" if req.destination_original > 15 else "l2m"
         req.packet_id = Node.get_next_packet_id()
         req.req_type = "write"
         self.new_write_req.append(req)

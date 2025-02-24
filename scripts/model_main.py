@@ -28,9 +28,9 @@ def main():
     result_save_path = f"../Result/CrossRing/{model_type}/{p1}-{p2}/"
 
     # topo_type = "4x9"
-    # topo_type = "9x4"
+    topo_type = "9x4"
     # topo_type = "5x4"
-    topo_type = "4x5"
+    # topo_type = "4x5"
 
     # topo_type = "6x5"
 
