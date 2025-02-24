@@ -14,12 +14,13 @@ import cProfile
 
 
 class BaseModel:
-    def __init__(self, config_path, topo_type, traffic_file_path, file_name, result_save_path=None):
+    def __init__(self, model_type, config_path, topo_type, traffic_file_path, file_name, result_save_path=None):
+        self.model_type = model_type
         self.config = SimulationConfig(config_path)
         self.topo_type = topo_type
         self.traffic_file_path = traffic_file_path
         self.file_name = file_name
-        print(f"Topology: {self.topo_type}, file_name: {self.file_name}")
+        print(f"\nModel Type: {model_type}, Topology: {self.topo_type}, file_name: {self.file_name}")
 
         self.result_save_path = result_save_path
         if result_save_path:
@@ -1033,18 +1034,11 @@ class BaseModel:
                     if network.links_tag[(i, j)][-1] == [j, "right"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["right"][j] += 1
-                elif i - j == self.config.cols * 2 or (
-                    i == j
-                    and i
-                    in range(
-                        self.config.num_nodes - self.config.cols * 2,
-                        self.config.cols + self.config.num_nodes - self.config.cols * 2,
-                    )
-                ):
+                elif i - j == self.config.cols * 2 or (i == j and i in range(self.config.num_nodes - self.config.cols * 2, self.config.cols + self.config.num_nodes - self.config.cols * 2)):
                     if network.links_tag[(i, j)][-1] == [j, "up"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["up"][j] += 1
-                elif i - j == -self.config.cols * 2 or (i == j and i in range(self.config.cols)):
+                elif i - j == -self.config.cols * 2 or (i == j and i in range(0, self.config.cols)):
                     if network.links_tag[(i, j)][-1] == [j, "down"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["down"][j] += 1
@@ -1056,7 +1050,7 @@ class BaseModel:
             network.links_tag[(col_start, col_start)][0] = network.links_tag[(col_start + interval, col_start)][-1]
             for i in range(1, self.config.cols):
                 current_node, next_node = col_start + i * interval, col_start + (i - 1) * interval
-                for j in range(self.config.seats_per_link - 6 - 1, -1, -1):
+                for j in range(self.config.seats_per_link - 7 - 1, -1, -1):
                     if j == 0 and current_node == col_end:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
@@ -1338,11 +1332,11 @@ class BaseModel:
             if write_latency:
                 self.write_BW, self.write_latency_avg, self.write_latency_max = self.output_intervals(f3, write_merged_intervals, "Write", write_latency)
         print(f"Avg circuits h: {(self.cir_h_total / self.flit_num):.1f}, v: {(self.cir_v_total / self.flit_num):.1f}")
-        # print(f"Read + Write Bandwidth: {(self.read_BW + self.write_BW)}\n")
+        print(f"Read + Write Bandwidth: {(self.read_BW + self.write_BW)}")
         print(
-            f"Throughput: sdma-R-DDR: {(self.sdma_R_ddr_flit_num * 128/self.sdma_R_ddr_finish_time/4):.1f}, "
-            f"sdma-W-l2m: {(self.sdma_W_l2m_flit_num* 128/self.sdma_W_l2m_finish_time/4):.1f}, "
-            f"gdam-R-L2M: {(self.gdma_R_l2m_flit_num* 128/self.gdma_R_l2m_finish_time/4):.1f}"
+            f"Throughput: sdma-R-DDR: {((self.sdma_R_ddr_flit_num * 128/self.sdma_R_ddr_finish_time/4) if self.sdma_R_ddr_finish_time>0 else 0):.1f}, "
+            f"sdma-W-l2m: {(self.sdma_W_l2m_flit_num* 128/self.sdma_W_l2m_finish_time/4 if self.sdma_W_l2m_finish_time>0 else 0):.1f}, "
+            f"gdam-R-L2M: {(self.gdma_R_l2m_flit_num* 128/self.gdma_R_l2m_finish_time/4 if self.gdma_R_l2m_finish_time>0 else 0):.1f}"
         )
         print(
             f"Finish Cycle: sdma-R-DDR: {self.sdma_R_ddr_finish_time * self.config.network_frequency}, "
@@ -1350,9 +1344,9 @@ class BaseModel:
             f"gdam-R-L2M: {self.gdma_R_l2m_finish_time* self.config.network_frequency}"
         )
         print(
-            f"Avg Latency: sdma-R-DDR: {np.average(self.sdma_R_ddr_latency):.1f}, "
-            f"sdma-W-l2m: {(np.average(self.sdma_W_l2m_latency)):.1f}, "
-            f"gdam-R-L2M: {(np.average(self.gdma_R_l2m_latency)):.1f}"
+            f"Avg Latency: sdma-R-DDR: {(np.average(self.sdma_R_ddr_latency) if self.sdma_R_ddr_latency else 0):.1f}, "
+            f"sdma-W-l2m: {(np.average(self.sdma_W_l2m_latency) if self.sdma_W_l2m_latency else 0):.1f}, "
+            f"gdam-R-L2M: {(np.average(self.gdma_R_l2m_latency)if self.sdma_W_l2m_latency else 0):.1f}\n"
         )
 
     def update_intervals(self, flit, merged_intervals, latency, file, req_type):
@@ -1377,19 +1371,19 @@ class BaseModel:
             self.sdma_R_ddr_finish_time = max(self.sdma_R_ddr_finish_time, flit.arrival_cycle // self.config.network_frequency)
             self.sdma_R_ddr_flit_num += flit.burst_length
             if flit.leave_db_cycle is None:
-                flit.leave_db_cycle = flit.arrive_cycle
+                flit.leave_db_cycle = flit.arrival_cycle
             self.sdma_R_ddr_latency.append(flit.leave_db_cycle - flit.entry_db_cycle)
         elif flit.destination_type == "l2m" and flit.source_type == "sdma" and req_type == "W":
             self.sdma_W_l2m_finish_time = max(self.sdma_W_l2m_finish_time, flit.arrival_cycle // self.config.network_frequency)
             self.sdma_W_l2m_flit_num += flit.burst_length
             if flit.leave_db_cycle is None:
-                flit.leave_db_cycle = flit.arrive_cycle
+                flit.leave_db_cycle = flit.arrival_cycle
             self.sdma_W_l2m_latency.append(flit.leave_db_cycle - flit.entry_db_cycle)
         elif flit.source_type == "l2m" and flit.destination_type == "gdma" and req_type == "R":
             self.gdma_R_l2m_finish_time = max(self.gdma_R_l2m_finish_time, flit.arrival_cycle // self.config.network_frequency)
             self.gdma_R_l2m_flit_num += flit.burst_length
             if flit.leave_db_cycle is None:
-                flit.leave_db_cycle = flit.arrive_cycle
+                flit.leave_db_cycle = flit.arrival_cycle
             self.gdma_R_l2m_latency.append(flit.leave_db_cycle - flit.entry_db_cycle)
 
         latency.append(flit.arrival_cycle // self.config.network_frequency - flit.req_departure_cycle // self.config.network_frequency)

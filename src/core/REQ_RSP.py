@@ -4,7 +4,7 @@ from collections import deque
 from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths
 from config.config import SimulationConfig
 from src.utils.component import Flit, Network, Node
-from .base_model import BaseModel
+from src.core.base_model import BaseModel
 import matplotlib.pyplot as plt
 import random
 import json
@@ -145,7 +145,6 @@ class REQ_RSP_model(BaseModel):
                     new_req.req_attr = "old"
                     self.node.sn_tracker[self.sn_type][in_pos].append(new_req)
                     self.node.sn_tracker_count[self.sn_type][new_req.sn_tracker_type][in_pos] -= 1
-                    self.node.sn_wdb[self.sn_type][in_pos][new_req.packet_id] = []
                     self.node.sn_wdb_count[self.sn_type][in_pos] -= new_req.burst_length
                     self.create_rsp(new_req, "positive")
 
@@ -730,7 +729,6 @@ class REQ_RSP_model(BaseModel):
                     req.sn_tracker_type = "share"
                     self.node.sn_tracker[self.sn_type][in_pos].append(req)
                     self.node.sn_tracker_count[self.sn_type]["share"][in_pos] -= 1
-                    self.node.sn_wdb[self.sn_type][in_pos][req.packet_id] = []
                     self.node.sn_wdb_count[self.sn_type][in_pos] -= req.burst_length
                     self.create_rsp(req, "datasend")
                 else:

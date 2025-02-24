@@ -5,7 +5,7 @@ from collections import deque
 from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths
 from config.config import SimulationConfig
 from src.utils.component import Flit, Network, Node
-from .base_model import BaseModel
+from src.core.base_model import BaseModel
 import matplotlib.pyplot as plt
 import random
 import json
@@ -15,7 +15,7 @@ import sys
 import cProfile
 
 
-class Packet_base_model(BaseModel):
+class Packet_Base_model(BaseModel):
 
     def run(self):
         """Main simulation loop."""
@@ -700,6 +700,7 @@ class Packet_base_model(BaseModel):
 
                                 else:
                                     if self.node.sn_wdb_count[self.sn_type][in_pos] > 0:
+                                        # self.node.sn_wdb[self.sn_type][in_pos][req.packet_id] = []
                                         self.node.sn_wdb_count[self.sn_type][in_pos] -= 1
                                         network.ip_eject[ip_type][ip_pos].popleft()
                                         flit.arrival_cycle = self.cycle
@@ -731,21 +732,15 @@ class Packet_base_model(BaseModel):
                     network.ip_eject[ip_type][ip_pos].append(network.eject_queues_pre[ip_type][ip_pos])
                     network.eject_queues_pre[ip_type][ip_pos] = None
             if flit_type == "data" and self.rn_type != "Idle":
-                if network.arrive_node_pre[self.rn_type][ip_pos]:
-                    self.node.rn_rdb[self.rn_type][in_pos][network.arrive_node_pre[self.rn_type][ip_pos].packet_id].append(network.arrive_node_pre[self.rn_type][ip_pos])
-                    if (
-                        len(self.node.rn_rdb[self.rn_type][in_pos][network.arrive_node_pre[self.rn_type][ip_pos].packet_id])
-                        == self.node.rn_rdb[self.rn_type][in_pos][network.arrive_node_pre[self.rn_type][ip_pos].packet_id][0].burst_length
-                    ):
-                        self.node.rn_rdb_recv[self.rn_type][in_pos].append(network.arrive_node_pre[self.rn_type][ip_pos].packet_id)
+                if flit := network.arrive_node_pre[self.rn_type][ip_pos]:
+                    self.node.rn_rdb[self.rn_type][in_pos][flit.packet_id].append(flit)
+                    if len(self.node.rn_rdb[self.rn_type][in_pos][flit.packet_id]) == self.node.rn_rdb[self.rn_type][in_pos][flit.packet_id][0].burst_length:
+                        self.node.rn_rdb_recv[self.rn_type][in_pos].append(flit.packet_id)
                     network.arrive_node_pre[self.rn_type][ip_pos] = None
-                if network.arrive_node_pre[self.sn_type][ip_pos]:
-                    self.node.sn_wdb[self.sn_type][in_pos][network.arrive_node_pre[self.sn_type][ip_pos].packet_id].append(network.arrive_node_pre[self.sn_type][ip_pos])
-                    if (
-                        len(self.node.sn_wdb[self.sn_type][in_pos][network.arrive_node_pre[self.sn_type][ip_pos].packet_id])
-                        == self.node.sn_wdb[self.sn_type][in_pos][network.arrive_node_pre[self.sn_type][ip_pos].packet_id][0].burst_length
-                    ):
-                        self.node.sn_wdb_recv[self.sn_type][in_pos].append(network.arrive_node_pre[self.sn_type][ip_pos].packet_id)
+                if flit := network.arrive_node_pre[self.sn_type][ip_pos]:
+                    self.node.sn_wdb[self.sn_type][in_pos][flit.packet_id].append(flit)
+                    if len(self.node.sn_wdb[self.sn_type][in_pos][flit.packet_id]) == self.node.sn_wdb[self.sn_type][in_pos][flit.packet_id][0].burst_length:
+                        self.node.sn_wdb_recv[self.sn_type][in_pos].append(flit.packet_id)
                     network.arrive_node_pre[self.sn_type][ip_pos] = None
 
     def _handle_request(self, req, in_pos):
@@ -1013,7 +1008,7 @@ class Packet_base_model(BaseModel):
 def main():
     import tracemalloc
 
-    traffic_file_path = r""
+    traffic_file_path = r"../../test_data/"
     # file_name = r"demo2.txt"
     # file_name = r"testcase-v1.1.1.txt"
     file_name = r"burst2_large.txt"
@@ -1027,7 +1022,7 @@ def main():
     # file_name = r"LLama2_MM_QKV_Trace.txt"
     p1 = 64
     p2 = 8
-    result_save_path = f"../Result/cross ring/packet_base/large/{p1}-{p2}/"
+    result_save_path = f"../../Result/CrossRing/REQ_RSP/large/{p1}-{p2}/"
 
     # topo_type = "4x9"
     # topo_type = "9x4"
@@ -1039,9 +1034,9 @@ def main():
     topo_type = "3x3"
 
     # result_save_path = None
-    config_path = r"config2.json"
+    config_path = r"../../config/config2.json"
     # config_path = r"config.json"
-    sim = Packet_base_model(config_path=config_path, topo_type=topo_type, traffic_file_path=traffic_file_path, file_name=file_name, result_save_path=result_save_path)
+    sim = Packet_Base_model(config_path=config_path, topo_type=topo_type, traffic_file_path=traffic_file_path, file_name=file_name, result_save_path=result_save_path)
 
     # profiler = cProfile.Profile()
     # profiler.enable()
@@ -1117,7 +1112,7 @@ def find_optimal_parameters():
         # 创建特定结果保存路径
         result_part_save_path = f"{parm1}_{parm2}/"  # 使用下划线分隔参数
         # 初始化模拟实例
-        sim = Packet_base_model(
+        sim = Packet_Base_model(
             config_path=config_path,
             topo_type=topo_type,
             traffic_file_path=traffic_file_path,

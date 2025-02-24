@@ -3,7 +3,7 @@ import random
 
 f = open("demo3.txt", "w", encoding="utf-8")
 end = 64
-m = 8
+m = 6
 np.random.seed(12)
 for i in range(end):
     # print(f"{1 * i + 1},2,sdma,3,ddr,R,4", file=f)
