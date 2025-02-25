@@ -10,8 +10,10 @@ def main():
     # file_name = r"demo2.txt"
     # file_name = r"testcase-v1.1.1.txt"
     # file_name = r"burst2_large.txt"
-    file_name = r"burst4_common.txt"
+    # file_name = r"burst4_common.txt"
     # file_name = r"3x3_burst2.txt"
+    # file_name = r"demo_3x3.txt"
+    file_name = r"demo_459.txt"
 
     # traffic_file_path = r"../../traffic/"
     # traffic_file_path = r"../traffic/output-v8-32/3M/step6_32core_map/"
@@ -23,19 +25,19 @@ def main():
     model_type = "REQ_RSP"
     # model_type = "Packet_Base"
 
-    p1 = 32 // 2
-    p2 = 32 // 2
+    p1 = 100000
+    p2 = 100000
 
     result_save_path = f"../Result/CrossRing/{model_type}/burst4/{p1}-{p2}/"
 
     # topo_type = "4x9"
     # topo_type = "9x4"
-    # topo_type = "5x4"
+    topo_type = "5x4"
     # topo_type = "4x5"
 
     # topo_type = "6x5"
 
-    topo_type = "3x3"
+    # topo_type = "3x3"
 
     # result_save_path = None
     config_path = r"../config/config2.json"
@@ -56,8 +58,8 @@ def main():
 
     # sim.end_time = 10000
     sim.config.burst = 4
-    sim.config.rn_read_tracker_ostd = 64 // 2
-    sim.config.rn_write_tracker_ostd = 32 // 2
+    sim.config.rn_read_tracker_ostd = 1000
+    sim.config.rn_write_tracker_ostd = 1000
     sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * 4
     sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * 4
     sim.config.ro_tracker_ostd = p1

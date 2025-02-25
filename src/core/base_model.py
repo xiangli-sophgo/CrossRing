@@ -130,7 +130,7 @@ class BaseModel:
 
             if (
                 self.req_count >= self.read_req + self.write_req
-                and self.send_flits_num == self.flit_network.recv_flits_num >= self.read_flit + self.write_flit  # - 200
+                and self.send_flits_num == self.flit_network.recv_flits_num >= self.read_flit + self.write_flit - 200
                 and self.trans_flits_num == 0
                 and not self.new_write_req
                 or self.cycle > self.end_time * self.config.network_frequency
@@ -1347,7 +1347,7 @@ class BaseModel:
                 self.read_BW, self.read_latency_avg, self.read_latency_max = self.output_intervals(f3, read_merged_intervals, "Read", read_latency)
             if write_latency:
                 self.write_BW, self.write_latency_avg, self.write_latency_max = self.output_intervals(f3, write_merged_intervals, "Write", write_latency)
-        print(f"Read + Write Bandwidth: {(self.read_BW + self.write_BW)}")
+        print(f"Read + Write Bandwidth: {(self.read_BW + self.write_BW):.1f}")
         print("=" * 50)
         print(
             f"Total Circuits req h: {self.req_cir_h_total}, avg: {(self.req_cir_h_total / self.req_num) if self.req_num > 0 else 0:.3f}; "
@@ -1369,17 +1369,17 @@ class BaseModel:
         print(
             f"Throughput: sdma-R-DDR: {((self.sdma_R_ddr_flit_num * 128/self.sdma_R_ddr_finish_time/4) if self.sdma_R_ddr_finish_time>0 else 0):.1f}, "
             f"sdma-W-l2m: {(self.sdma_W_l2m_flit_num* 128/self.sdma_W_l2m_finish_time/4 if self.sdma_W_l2m_finish_time>0 else 0):.1f}, "
-            f"gdam-R-L2M: {(self.gdma_R_l2m_flit_num* 128/self.gdma_R_l2m_finish_time/4 if self.gdma_R_l2m_finish_time>0 else 0):.1f}"
+            f"gdma-R-L2M: {(self.gdma_R_l2m_flit_num* 128/self.gdma_R_l2m_finish_time/4 if self.gdma_R_l2m_finish_time>0 else 0):.1f}"
         )
         print(
             f"Finish Cycle: sdma-R-DDR: {self.sdma_R_ddr_finish_time * self.config.network_frequency}, "
             f"sdma-W-l2m: {self.sdma_W_l2m_finish_time* self.config.network_frequency}, "
-            f"gdam-R-L2M: {self.gdma_R_l2m_finish_time* self.config.network_frequency}"
+            f"gdma-R-L2M: {self.gdma_R_l2m_finish_time* self.config.network_frequency}"
         )
         print(
             f"Avg Latency: sdma-R-DDR: {(np.average(self.sdma_R_ddr_latency) if self.sdma_R_ddr_latency else 0):.1f}, "
             f"sdma-W-l2m: {(np.average(self.sdma_W_l2m_latency) if self.sdma_W_l2m_latency else 0):.1f}, "
-            f"gdam-R-L2M: {(np.average(self.gdma_R_l2m_latency)if self.gdma_R_l2m_latency else 0):.1f}"
+            f"gdma-R-L2M: {(np.average(self.gdma_R_l2m_latency)if self.gdma_R_l2m_latency else 0):.1f}"
         )
         print("=" * 50)
 

@@ -5,14 +5,15 @@ import plotly.graph_objects as go
 import numpy as np
 import seaborn as sns
 import os
+from sklearn.preprocessing import StandardScaler
 
 # 读取CSV文件
-file_root = r"../../Result/Params_csv/"
-data_file_name = r"RN_Tracker_OSTD_Results_copy.csv"
-data = pd.read_csv(file_root + data_file_name)
+# file_root = r"../../Result/Params_csv/"
+# data_file_name = r"RN_Tracker_OSTD_Results_0225.csv"
+# data = pd.read_csv(file_root + data_file_name)
 
-# 定义不同的拓扑
-topologies = ["4x9", "9x4", "5x4", "4x5"]
+# # 定义不同的拓扑
+# topologies = ["4x9", "9x4", "5x4", "4x5"]
 # topologies = ["4x9"]
 
 # topo = topologies[0]
@@ -65,66 +66,115 @@ topologies = ["4x9", "9x4", "5x4", "4x5"]
 # 创建一个图形
 # import os
 
-# data = pd.read_csv(r"../Params_csv/RN_R_W_Results.csv")
+file_root = r"../../Result/Params_csv/"
 
-# # 定义不同的拓扑
-# topologies = ["4x9", "9x4", "5x4", "4x5"]
-# topologies = ["9x4"]
+data_file_name = r"RN_Tracker_OSTD_Results_0225.csv"
+topologies = [
+    "4x9",
+    "9x4",
+    "5x4",
+    "4x5",
+]
 
+data_file_name = r"RN_Tracker_OSTD_Results_3x3_all.csv"
+topologies = ["3x3"]
+
+data = pd.read_csv(file_root + data_file_name)
+
+# 定义不同的拓扑
 # topo = topologies[0]
 
 # show_value = "ReadBandWidth"
 # show_value = "WriteBandWidth"
-show_value = "TotalBandWidth"
+# show_value = "TotalBandWidth"
+# show_value = "gdma-R-L2M_thoughput"
+# show_value = "sdma-W-L2M_thoughput"
+show_value = "sdma-R-DDR_thoughput"
 # show_value = "FinishCycle"
-# show_value = "cir_h_total"
-# show_value = "cir_v_total"
+# show_value = "data_cir_h_total"
+# show_value = "data_cir_v_total"
 # x_name = "ro_tracker_ostd"
 # y_name = "share_tracker_ostd"
 x_name = "rn_r_tracker_ostd"
 y_name = "rn_w_tracker_ostd"
+model_type = "REQ_RSP"
+# model_type = "Packet_Base"
 
 log_data = 0
 save_images = 0
 
+# 设置 vmax 和 vmin
 if show_value in ["ReadBandWidth", "WriteBandWidth"]:
     vmax = 64
     vmin = 0
 else:
     vmax = 128
     vmin = 64
+
 if save_images:
     output_dir = f"../../Result/Plt_results/{x_name}_{y_name}/"
     os.makedirs(output_dir, exist_ok=True)
 
 for topo in topologies:
     # 筛选出当前拓扑的数据
-    # topo_data = data[(data["Topo"] == topo) & (data["FinishTime"] != 60000)]
-    topo_data = data[data["Topo"] == topo]
+    topo_data = data[(data["Topo"] == topo) & (data["model_type"] == model_type)]
     if log_data:
         topo_data[show_value] = np.log(topo_data[show_value] + 0.1)
 
-    # 使用透视表来准备热图数据
-    pivot_table = topo_data.pivot_table(index=x_name, columns=y_name, values=show_value, aggfunc="first")  # 直接使用第一个值
+    # 创建数据透视表
+    pivot_table = topo_data.pivot_table(index=x_name, columns=y_name, values=show_value, aggfunc="first")
 
-    # 绘制热图
-    plt.figure(figsize=(10, 8))
-    if show_value in ["FinishCycle", "cir_h_total"]:
-        sns.heatmap(pivot_table, cmap="YlGnBu_r", annot=True, fmt=".1f", cbar_kws={"label": show_value})
-    else:
-        sns.heatmap(pivot_table, cmap="YlGnBu", annot=True, fmt=".1f", cbar_kws={"label": show_value})
+    # 计算行均值和列均值
+    row_means = pivot_table.mean(axis=1)  # 每行的均值
+    col_means = pivot_table.mean(axis=0)  # 每列的均值
 
-    plt.title(f"Heatmap of {show_value} for Topo {topo}")
-    plt.xlabel(x_name)
-    plt.ylabel(y_name)
+    # 在数据透视表中插入空行和空列
+    pivot_table_with_means = pivot_table.copy()
+    pivot_table_with_means[" "] = np.nan  # 插入空列
+    pivot_table_with_means.loc[" "] = np.nan  # 插入空行
 
+    # 添加行均值和列均值
+    pivot_table_with_means["Mean"] = row_means  # 添加列：行均值
+    col_means["Mean"] = np.nan  # 在列均值的最后一项补充 NaN
+    pivot_table_with_means.loc["Mean"] = col_means  # 添加行：列均值
+    cmap = "YlGnBu"
+    if show_value in ["FinishCycle", "data_cir_h_total", "data_cir_v_total"]:
+        cmap += "_r"
+
+    # 绘制热力图
+    plt.figure(figsize=(12, 10))  # 调整图像大小
+    ax = sns.heatmap(
+        pivot_table_with_means,
+        cmap=cmap,  # 配色方案
+        annot=True,  # 显示数值
+        fmt=".1f",  # 保留一位小数
+        # cbar_kws={"label": show_value},  # 颜色条标签
+        annot_kws={"size": 12},  # 数值字体大小
+        # vmax=vmax,
+        # vmin=vmin,
+        linewidths=0.5,  # 网格线宽度
+        linecolor="white",  # 网格线颜色
+    )
+    ax.invert_yaxis()
+
+    # 添加标题和轴标签
+    plt.title(f"Heatmap of {show_value} for Topo {topo}", fontsize=16, pad=20)
+    plt.xlabel(x_name, fontsize=14)
+    plt.ylabel(y_name, fontsize=14)
+
+    # 调整刻度字体大小
+    plt.xticks(fontsize=12, rotation=0)
+    plt.yticks(fontsize=12)
+
+    # 保存或显示图像
     if save_images:
-        heatmap_filename = output_dir + f"{topo}_{show_value}.png"
-        plt.savefig(heatmap_filename)
+        heatmap_filename = os.path.join(output_dir, f"{topo}_{show_value}.png")
+        plt.tight_layout()  # 调整布局
+        plt.savefig(heatmap_filename, bbox_inches="tight")  # 保存图片
         plt.close()
     else:
+        plt.tight_layout()  # 调整布局
         plt.show()
-
 # # 等高线图
 # # 创建一个图形
 # for topo in topologies:

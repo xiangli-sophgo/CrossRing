@@ -885,53 +885,53 @@ class REQ_RSP_model(BaseModel):
     #     req.req_type = "write"
     #     self.new_write_req.append(req)
 
-    def create_write_packet(self, req):
-        for i in range(req.burst_length):
-            source = req.source
-            destination = req.destination
-            path = self.routes[source][destination]
-            flit = Flit(source, destination, path)
-            flit.source_original = req.source_original
-            flit.destination_original = req.destination_original
-            flit.flit_type = "data"
-            flit.departure_cycle = self.cycle
-            flit.req_departure_cycle = req.departure_cycle
-            flit.entry_db_cycle = req.entry_db_cycle
-            flit.source_type = req.source_type
-            flit.destination_type = req.destination_type
-            flit.original_source_type = req.original_source_type
-            flit.original_destination_type = req.original_destination_type
-            flit.req_type = req.req_type
-            flit.packet_id = req.packet_id
-            flit.flit_id_in_packet = i
-            flit.burst_length = req.burst_length
-            if i == req.burst_length - 1:
-                flit.is_last_flit = True
-            self.node.rn_wdb[flit.source_type][flit.source][flit.packet_id].append(flit)
+    # def create_write_packet(self, req):
+    #     for i in range(req.burst_length):
+    #         source = req.source
+    #         destination = req.destination
+    #         path = self.routes[source][destination]
+    #         flit = Flit(source, destination, path)
+    #         flit.source_original = req.source_original
+    #         flit.destination_original = req.destination_original
+    #         flit.flit_type = "data"
+    #         flit.departure_cycle = self.cycle
+    #         flit.req_departure_cycle = req.departure_cycle
+    #         flit.entry_db_cycle = req.entry_db_cycle
+    #         flit.source_type = req.source_type
+    #         flit.destination_type = req.destination_type
+    #         flit.original_source_type = req.original_source_type
+    #         flit.original_destination_type = req.original_destination_type
+    #         flit.req_type = req.req_type
+    #         flit.packet_id = req.packet_id
+    #         flit.flit_id_in_packet = i
+    #         flit.burst_length = req.burst_length
+    #         if i == req.burst_length - 1:
+    #             flit.is_last_flit = True
+    #         self.node.rn_wdb[flit.source_type][flit.source][flit.packet_id].append(flit)
 
-    def create_read_packet(self, req):
-        for i in range(req.burst_length):
-            source = req.destination + self.config.cols
-            destination = req.source - self.config.cols
-            path = self.routes[source][destination]
-            flit = Flit(source, destination, path)
-            flit.source_original = req.destination_original
-            flit.destination_original = req.source_original
-            flit.req_type = req.req_type
-            flit.flit_type = "data"
-            flit.departure_cycle = self.cycle + self.config.ddr_latency + i if req.destination_type == "ddr" else self.cycle + i
-            flit.entry_db_cycle = req.entry_db_cycle
-            flit.req_departure_cycle = req.departure_cycle
-            flit.source_type = req.destination_type
-            flit.destination_type = req.source_type
-            flit.original_source_type = req.original_source_type
-            flit.original_destination_type = req.original_destination_type
-            flit.packet_id = req.packet_id
-            flit.flit_id_in_packet = i
-            flit.burst_length = req.burst_length
-            if i == req.burst_length - 1:
-                flit.is_last_flit = True
-            self.node.sn_rdb[flit.source_type][flit.source].append(flit)
+    # def create_read_packet(self, req):
+    #     for i in range(req.burst_length):
+    #         source = req.destination + self.config.cols
+    #         destination = req.source - self.config.cols
+    #         path = self.routes[source][destination]
+    #         flit = Flit(source, destination, path)
+    #         flit.source_original = req.destination_original
+    #         flit.destination_original = req.source_original
+    #         flit.req_type = req.req_type
+    #         flit.flit_type = "data"
+    #         flit.departure_cycle = self.cycle + self.config.ddr_latency + i if req.destination_type == "ddr" else self.cycle + i
+    #         flit.entry_db_cycle = req.entry_db_cycle
+    #         flit.req_departure_cycle = req.departure_cycle
+    #         flit.source_type = req.destination_type
+    #         flit.destination_type = req.source_type
+    #         flit.original_source_type = req.original_source_type
+    #         flit.original_destination_type = req.original_destination_type
+    #         flit.packet_id = req.packet_id
+    #         flit.flit_id_in_packet = i
+    #         flit.burst_length = req.burst_length
+    #         if i == req.burst_length - 1:
+    #             flit.is_last_flit = True
+    #         self.node.sn_rdb[flit.source_type][flit.source].append(flit)
 
     def process_inject_queues(self, network, inject_queues):
         flit_num = 0
