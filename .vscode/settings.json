@@ -1,197 +1,229 @@
 {
-    "editor.formatOnSave": true,
-    "editor.defaultFormatter": "ms-python.black-formatter",
-    "C_Cpp.formatting": "clangFormat",
-    "C_Cpp.clang_format_style": "Google",
-    "C_Cpp.clang_format_fallbackStyle": "Google",
-    "black-formatter.args": [
-      "--line-length=200"
-    ],
-    "remote.SSH.remotePlatform": {
-        "server": "linux"
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "ms-python.black-formatter",
+  "C_Cpp.formatting": "clangFormat",
+  "C_Cpp.clang_format_style": "Google",
+  "C_Cpp.clang_format_fallbackStyle": "Google",
+  "black-formatter.args": [
+    "--line-length=200"
+  ],
+  "remote.SSH.remotePlatform": {
+    "server": "linux"
+  },
+  "tabnine.experimentalAutoImports": true,
+  "workbench.tree.indent": 16,
+  "workbench.tree.renderIndentGuides": "always",
+  "explorer.compactFolders": false,
+  "pylint.args": [
+    "--errors-only",
+    "--generated-members"
+  ],
+  "vim.commandLineModeKeyBindings": [],
+  "todo-tree.tree.showScanModeButton": false,
+  "todo-tree.filtering.excludeGlobs": [
+    "**/node_modules",
+    "*.xml",
+    "*.XML"
+  ],
+  "todo-tree.filtering.ignoreGitSubmodules": true,
+  "todohighlight.keywords": [],
+  "todo-tree.tree.showCountsInTree": true,
+  "todohighlight.keywordsPattern": "TODO:|FIXME:|NOTE:|\\(([^)]+)\\)",
+  "todohighlight.defaultStyle": {},
+  "todohighlight.isEnable": false,
+  "todo-tree.highlights.customHighlight": {
+    "BUG": {
+      "icon": "bug",
+      "foreground": "#F56C6C",
+      "type": "line"
     },
-    "tabnine.experimentalAutoImports": true,
-    "workbench.tree.indent": 16,
-    "workbench.tree.renderIndentGuides": "always",
-    "explorer.compactFolders": false,
-    "pylint.args": ["--errors-only","--generated-members"],
-    "vim.commandLineModeKeyBindings": [
-    ],
-    "todo-tree.tree.showScanModeButton": false,
-    "todo-tree.filtering.excludeGlobs": ["**/node_modules", "*.xml", "*.XML"],
-    "todo-tree.filtering.ignoreGitSubmodules": true,
-    "todohighlight.keywords": [
-    ],
-    "todo-tree.tree.showCountsInTree": true,
-    "todohighlight.keywordsPattern": "TODO:|FIXME:|NOTE:|\\(([^)]+)\\)",
-    "todohighlight.defaultStyle": {
-  
+    "FIXME": {
+      "icon": "flame",
+      "foreground": "#FF9800",
+      "type": "line"
     },
-    "todohighlight.isEnable": false,
-    "todo-tree.highlights.customHighlight": {
-      "BUG": {
-        "icon": "bug",
-        "foreground": "#F56C6C",
-        "type": "line"
-      },
-      "FIXME": {
-        "icon": "flame",
-        "foreground": "#FF9800",
-        "type":"line"
-      },
-      "TODO":{
-        "foreground": "#FFEB38",
-        "type":"line"
-      },
-      "NOTE":{
-        "icon": "note",
-        "foreground": "#67C23A",
-        "type":"line"
-      },
-      "INFO":{
-        "icon": "info",
-        "foreground": "#909399",
-        "type":"line"
-      },
-      "TAG":{
-        "icon": "tag",
-        "foreground": "#409EFF",
-        "type":"line"
-      },
-      "HACK":{
-        "icon": "versions",
-        "foreground": "#E040FB",
-        "type":"line"
-      },
-      "XXX":{
-        "icon": "unverified",
-        "foreground": "#E91E63",
-        "type":"line"
-      }
+    "TODO": {
+      "foreground": "#FFEB38",
+      "type": "line"
     },
-    "todo-tree.general.tags": [
-      "BUG",
-      "HACK",
-      "FIXME",
-      "TODO",
-      "INFO",
-      "NOTE",
-      "TAG",
-      "XXX"
-    ],
-    "todo-tree.general.statusBar": "total",
-    "vim.handleKeys": {
-  
-        "<C-f>": false,
-        "<C-w>": false,
-        "<C-p>": false,
-        "<C-g>": false,
-        // "<C-a>": false,
-        // "<C-x>": false,
-        "<C-d>": false,
-        "<C-o>": false,
-        "<C-c>": false,
-        "<C-v>": false,
-        "<C-,>": false,
-        "<C-k>": false,
-        "<C-t>": false,
-        "<C-j>": false,
-        "<C-b>": false,
-        "<C-s>": false,
+    "NOTE": {
+      "icon": "note",
+      "foreground": "#67C23A",
+      "type": "line"
     },
-    "security.workspace.trust.untrustedFiles": "open",
-    "cmake.showOptionsMovedNotification": false,
-    "terminal.integrated.enableMultiLinePasteWarning": "auto",
-    "terminal.integrated.cwd": "${fileDirname}",
-    "python.terminal.executeInFileDir": true,
-    "autopep8.args": [
-        "--max-line-length=150"
-    ],
-    "git.ignoreRebaseWarning": true,
-    "explorer.confirmDelete": false,
-    "files.exclude": {
-        "**/.trunk/*actions/": true,
-        "**/.trunk/*logs/": true,
-        "**/.trunk/*notifications/": true,
-        "**/.trunk/*out/": true,
-        "**/.trunk/*plugins/": true,
+    "INFO": {
+      "icon": "info",
+      "foreground": "#909399",
+      "type": "line"
     },
-    "files.watcherExclude": {
-        "**/.trunk/*actions/": true,
-        "**/.trunk/*logs/": true,
-        "**/.trunk/*notifications/": true,
-        "**/.trunk/*out/": true,
-        "**/.trunk/*plugins/": true
+    "TAG": {
+      "icon": "tag",
+      "foreground": "#409EFF",
+      "type": "line"
     },
-    "window.openFilesInNewWindow": "on",
-    "window.openFoldersInNewWindow": "on",
-    "chat.commandCenter.enabled": false,
-    "workbench.colorTheme": "Darcula Pycharm with Dark GUI",
-    "editor.fontSize": 15,
-    "python.createEnvironment.trigger": "off",
-    "git.enableSmartCommit": true,
-    "files.autoSaveDelay": 100,
-    "workbench.iconTheme": "vscode-icons",
-    "editor.gotoLocation.multipleDefinitions": "goto",
-    "editor.gotoLocation.multipleTypeDefinitions": "goto",
-    "terminal.integrated.defaultProfile.windows": "PowerShell",
-    "terminal.integrated.profiles.linux": {
-      "bash": {
-        "path": "bash",
-        "icon": "terminal-bash"
-      },
-      "zsh": {
-        "path": "zsh"
-      },
-      "fish": {
-        "path": "fish"
-      },
-      "tmux": {
-        "path": "tmux",
-        "icon": "terminal-tmux"
-      },
-      "pwsh": {
-        "path": "pwsh",
-        "icon": "terminal-powershell"
-      },
-      "bash2": {
-        "path": "/usr/bin/bash"
-      }
+    "HACK": {
+      "icon": "versions",
+      "foreground": "#E040FB",
+      "type": "line"
     },
-    "task": {
-      
+    "XXX": {
+      "icon": "unverified",
+      "foreground": "#E91E63",
+      "type": "line"
+    }
+  },
+  "todo-tree.general.tags": [
+    "BUG",
+    "HACK",
+    "FIXME",
+    "TODO",
+    "INFO",
+    "NOTE",
+    "TAG",
+    "XXX"
+  ],
+  "todo-tree.general.statusBar": "total",
+  "vim.handleKeys": {
+    "<C-f>": false,
+    "<C-w>": false,
+    "<C-p>": false,
+    "<C-g>": false,
+    "<C-d>": false,
+    "<C-o>": false,
+    "<C-c>": false,
+    "<C-v>": false,
+    "<C-,>": false,
+    "<C-k>": false,
+    "<C-t>": false,
+    "<C-j>": false,
+    "<C-b>": false,
+    "<C-s>": false
+  },
+  "security.workspace.trust.untrustedFiles": "open",
+  "cmake.showOptionsMovedNotification": false,
+  "terminal.integrated.enableMultiLinePasteWarning": "auto",
+  "terminal.integrated.cwd": "${fileDirname}",
+  "python.terminal.executeInFileDir": true,
+  "autopep8.args": [
+    "--max-line-length=150"
+  ],
+  "git.ignoreRebaseWarning": true,
+  "explorer.confirmDelete": false,
+  "files.exclude": {
+    "**/.trunk/*actions/": true,
+    "**/.trunk/*logs/": true,
+    "**/.trunk/*notifications/": true,
+    "**/.trunk/*out/": true,
+    "**/.trunk/*plugins/": true
+  },
+  "files.watcherExclude": {
+    "**/.trunk/*actions/": true,
+    "**/.trunk/*logs/": true,
+    "**/.trunk/*notifications/": true,
+    "**/.trunk/*out/": true,
+    "**/.trunk/*plugins/": true
+  },
+  "window.openFilesInNewWindow": "on",
+  "window.openFoldersInNewWindow": "on",
+  "chat.commandCenter.enabled": false,
+  "workbench.colorTheme": "Atom One Dark",
+  "editor.fontSize": 15,
+  "python.createEnvironment.trigger": "off",
+  "git.enableSmartCommit": true,
+  "files.autoSaveDelay": 100,
+  "workbench.iconTheme": "vscode-icons",
+  "editor.gotoLocation.multipleDefinitions": "goto",
+  "editor.gotoLocation.multipleTypeDefinitions": "goto",
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "terminal.integrated.profiles.linux": {
+    "bash": {
+      "path": "bash",
+      "icon": "terminal-bash"
     },
-    "indentRainbow.errorColor": "rgba(128,32,32,0.2)",
-    "Key Promoter.suggestKeybindingCreation": false,
-    "Key Promoter.ignoredCommands": [
-      "type",
-      "editor.action.insertLineAfter",
-      "workbench.action.Editor",
-      "workbench.action.debug.restart",
-      "workbench.action.debug.stop",
-      "workbench.action.quickOpen",
-      "workbench.action.files.save",
-      "undo",
-      "deleteLeft",
-      "editor.action.clipboardPasteAction",
-      "editor.action.clipboardCopyAction",
-      "workbench.action.debug.continue",
-      "repl.action.acceptInput",
-      "acceptSelectedSuggestion",
-      "tab",
-      "closeParameterHints",
-      "workbench.action.debug.start",
-      "editor.action.moveLinesDownAction",
-      "closeReferenceSearch"
-    ],
-    "filesize.displayInfoOnTheRightSideOfStatusBar": true,
-    "terminal.integrated.env.osx": {
-        "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}"
-      },
-    "terminal.integrated.env.linux": {
-        "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}"
-      },
-    "terminal.integrated.env.windows": {
-        "PYTHONPATH": "${workspaceFolder};${env:PYTHONPATH}"
-      }
-  }
+    "zsh": {
+      "path": "zsh"
+    },
+    "fish": {
+      "path": "fish"
+    },
+    "tmux": {
+      "path": "tmux",
+      "icon": "terminal-tmux"
+    },
+    "pwsh": {
+      "path": "pwsh",
+      "icon": "terminal-powershell"
+    },
+    "bash2": {
+      "path": "/usr/bin/bash"
+    }
+  },
+  "indentRainbow.errorColor": "rgba(128,32,32,0.2)",
+  "filesize.displayInfoOnTheRightSideOfStatusBar": true,
+  "terminal.integrated.env.osx": {
+    "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}"
+  },
+  "terminal.integrated.env.linux": {
+    "PYTHONPATH": "${workspaceFolder}:${env:PYTHONPATH}"
+  },
+  "terminal.integrated.env.windows": {
+    "PYTHONPATH": "${workspaceFolder};${env:PYTHONPATH}"
+  },
+  "C_Cpp_Runner.cCompilerPath": "gcc",
+  "C_Cpp_Runner.cppCompilerPath": "g++",
+  "C_Cpp_Runner.debuggerPath": "gdb",
+  "C_Cpp_Runner.cStandard": "",
+  "C_Cpp_Runner.cppStandard": "",
+  "C_Cpp_Runner.msvcBatchPath": "C:/Program Files/Microsoft Visual Studio/VR_NR/Community/VC/Auxiliary/Build/vcvarsall.bat",
+  "C_Cpp_Runner.useMsvc": false,
+  "C_Cpp_Runner.warnings": [
+    "-Wall",
+    "-Wextra",
+    "-Wpedantic",
+    "-Wshadow",
+    "-Wformat=2",
+    "-Wcast-align",
+    "-Wconversion",
+    "-Wsign-conversion",
+    "-Wnull-dereference"
+  ],
+  "C_Cpp_Runner.msvcWarnings": [
+    "/W4",
+    "/permissive-",
+    "/w14242",
+    "/w14287",
+    "/w14296",
+    "/w14311",
+    "/w14826",
+    "/w44062",
+    "/w44242",
+    "/w14905",
+    "/w14906",
+    "/w14263",
+    "/w44265",
+    "/w14928"
+  ],
+  "C_Cpp_Runner.enableWarnings": true,
+  "C_Cpp_Runner.warningsAsError": false,
+  "C_Cpp_Runner.compilerArgs": [],
+  "C_Cpp_Runner.linkerArgs": [],
+  "C_Cpp_Runner.includePaths": [],
+  "C_Cpp_Runner.includeSearch": [
+    "*",
+    "**/*"
+  ],
+  "C_Cpp_Runner.excludeSearch": [
+    "**/build",
+    "**/build/**",
+    "**/.*",
+    "**/.*/**",
+    "**/.vscode",
+    "**/.vscode/**"
+  ],
+  "C_Cpp_Runner.useAddressSanitizer": false,
+  "C_Cpp_Runner.useUndefinedSanitizer": false,
+  "C_Cpp_Runner.useLeakSanitizer": false,
+  "C_Cpp_Runner.showCompilationTime": false,
+  "C_Cpp_Runner.useLinkTimeOptimization": false,
+  "C_Cpp_Runner.msvcSecureNoWarnings": false
+}

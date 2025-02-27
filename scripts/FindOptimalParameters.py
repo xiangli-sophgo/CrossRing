@@ -1,6 +1,7 @@
 from src.core import *
 import os
 from src.utils.component import Flit, Network, Node
+from config.config import SimulationConfig
 import numpy as np
 
 
@@ -20,18 +21,23 @@ def find_optimal_parameters():
     # file_name = r"LLama2_MLP_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
 
+    config_path = r"../config/config2.json"
+    config = SimulationConfig(config_path)
+
     # 定义拓扑类型
-    # topo_type = "4x9"
-    # topo_type = "9x4"
-    # topo_type = "5x4"
-    topo_type = "4x5"
+    if not config.topo_type:
+        # topo_type = "4x9"
+        # topo_type = "9x4"
+        # topo_type = "5x4"
+        topo_type = "4x5"
 
-    # topo_type = "6x5"
+        # topo_type = "6x5"
 
-    # topo_type = "3x3"
+        # topo_type = "3x3"
+    else:
+        topo_type = config.topo_type
 
     # result_save_path = None
-    config_path = r"../config/config2.json"
 
     model_type = "REQ_RSP"
     # model_type = "Packet_Base"
@@ -62,14 +68,24 @@ def find_optimal_parameters():
             # 创建特定结果保存路径
             result_part_save_path = f"{parm1}_{parm2}/"  # 使用下划线分隔参数
             # 初始化模拟实例
-            sim = eval(f"{model_type}_model")(
-                model_type=model_type,
-                config_path=config_path,
-                topo_type=topo_type,
-                traffic_file_path=traffic_file_path,
-                file_name=file_name,
-                result_save_path=result_root_save_path + result_part_save_path,
-            )
+            if model_type == "REQ_RSP":
+                sim = REQ_RSP_model(
+                    model_type=model_type,
+                    config=config,
+                    topo_type=topo_type,
+                    traffic_file_path=traffic_file_path,
+                    file_name=file_name,
+                    result_save_path=result_root_save_path + result_part_save_path,
+                )
+            elif model_type == "Packet_Base":
+                sim = Packet_Base_model(
+                    model_type=model_type,
+                    config=config,
+                    topo_type=topo_type,
+                    traffic_file_path=traffic_file_path,
+                    file_name=file_name,
+                    result_save_path=result_root_save_path + result_part_save_path,
+                )
             sim.config.rn_read_tracker_ostd = rn_r_tracker_ostd
             sim.config.rn_write_tracker_ostd = rn_w_tracker_ostd
             sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * 4

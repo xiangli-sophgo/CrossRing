@@ -14,9 +14,9 @@ import cProfile
 
 
 class BaseModel:
-    def __init__(self, model_type, config_path, topo_type, traffic_file_path, file_name, result_save_path=None):
+    def __init__(self, model_type, config, topo_type, traffic_file_path, file_name, result_save_path=None):
         self.model_type = model_type
-        self.config = SimulationConfig(config_path)
+        self.config = config
         self.topo_type = topo_type
         self.traffic_file_path = traffic_file_path
         self.file_name = file_name

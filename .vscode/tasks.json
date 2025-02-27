@@ -1,12 +1,112 @@
 {
-    // See https://go.microsoft.com/fwlink/?LinkId=733558
-    // for the documentation about the tasks.json format
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "echo",
+            "label": "Run Python Script 1",
+            "command": "C:/Users/Administrator/AppData/Local/Programs/Python/Python313/python.exe",
+            "args": [
+                "${file}"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                // "panel": "new"
+            },
+            "dependsOrder": "parallel",
+            "isBackground": true
+        },
+        {
+            "label": "Run Python Script 2",
+            "command": "C:/Users/Administrator/AppData/Local/Programs/Python/Python313/python.exe",
+            "args": [
+                "${file}"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                // "panel": "new"
+            },
+            "dependsOrder": "parallel",
+            "isBackground": true
+        },
+        {
+            "label": "Run Python Input args 1",
             "type": "shell",
-            "command": "echo Hello"
-        }
-    ]
+            "command": "C:/Users/Administrator/AppData/Local/Programs/Python/Python313/python.exe",
+            "args": [
+                "${file}",
+                "${input:args}"  // 使用动态输入的参数
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                // "panel": "new"
+            },
+        },
+        {
+            "label": "Run Python different topo",
+            "type": "shell",
+            "command": "C:/Users/Administrator/AppData/Local/Programs/Python/Python313/python.exe",
+            "args": [
+                "${file}",
+                "${input:topo_choose}"  // 使用动态输入的参数
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                // "panel": "new"
+            },
+        },
+        
+    ],
+    "inputs": [
+        {
+            "id": "args",
+            "type": "promptString",
+            "description": "Enter command line arguments",
+            "default": ""
+        },
+        {
+            "id": "topo_choose",
+            "type": "pickString",//"输入参数类型: 挑选预设的选项",
+            "default": "-tt=4x5",
+            "options": [
+                "-tt=4x5",
+                "-tt=4x9",
+                "-tt=5x4",
+                "-tt=9x4",
+                "-tt=3x3",
+              ],
+            "description": "Choose from different topologies.",
+        },
+    ],
+    
 }

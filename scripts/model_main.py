@@ -1,6 +1,7 @@
 from src.core import *
 import os
 from src.utils.component import Flit, Network, Node
+from config.config import SimulationConfig
 
 
 def main():
@@ -30,21 +31,25 @@ def main():
 
     result_save_path = f"../Result/CrossRing/{model_type}/burst4/{p1}-{p2}/"
 
-    # topo_type = "4x9"
-    # topo_type = "9x4"
-    topo_type = "5x4"
-    # topo_type = "4x5"
+    config_path = r"../config/config2.json"
+    config = SimulationConfig(config_path)
+    if not config.topo_type:
+        # topo_type = "4x9"
+        # topo_type = "9x4"
+        # topo_type = "5x4"
+        topo_type = "4x5"
 
-    # topo_type = "6x5"
+        # topo_type = "6x5"
 
-    # topo_type = "3x3"
+        # topo_type = "3x3"
+    else:
+        topo_type = config.topo_type
 
     # result_save_path = None
-    config_path = r"../config/config2.json"
     # config_path = r"config.json"
     sim = eval(f"{model_type}_model")(
         model_type=model_type,
-        config_path=config_path,
+        config=config,
         topo_type=topo_type,
         traffic_file_path=traffic_file_path,
         file_name=file_name,
