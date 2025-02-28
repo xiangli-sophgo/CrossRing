@@ -79,25 +79,26 @@ def format_func(x):
 
 file_root = r"../../Result/Params_csv/"
 
-data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
-topologies = [
-    "4x9",
-    "9x4",
-    "5x4",
-    "4x5",
-]
+# data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
+# topologies = [
+#     "4x9",
+#     "9x4",
+#     "5x4",
+#     "4x5",
+# ]
 
-# data_file_name = r"RN_Tracker_OSTD_Results_3x3_all.csv"
-# topologies = ["3x3"]
+# data_file_name = r"inject_eject_queue_length_3x3_0228.csv"
+data_file_name = r"inject_eject_queue_length_3x3_0228_fixed_time_interval.csv"
+topologies = ["3x3"]
 
 data = pd.read_csv(file_root + data_file_name)
 
 # 定义不同的拓扑
 # topo = topologies[0]
 
-show_value = "ReadBandWidth"
+# show_value = "ReadBandWidth"
 # show_value = "WriteBandWidth"
-# show_value = "TotalBandWidth"
+show_value = "TotalBandWidth"
 # show_value = "FinishCycle"
 # show_value = "gdma-R-L2M_thoughput"
 # show_value = "sdma-W-L2M_thoughput"
@@ -106,10 +107,12 @@ show_value = "ReadBandWidth"
 # show_value = "data_cir_v_total"
 # show_value = "read_retry_num"
 # show_value = "write_retry_num"
-x_name = "ro_tracker_ostd"
-y_name = "share_tracker_ostd"
+# x_name = "ro_tracker_ostd"
+# y_name = "share_tracker_ostd"
 # x_name = "rn_r_tracker_ostd"
 # y_name = "rn_w_tracker_ostd"
+x_name = "inject_queue_length"
+y_name = "eject_queue_length"
 model_type = "REQ_RSP"
 # model_type = "Packet_Base"
 
@@ -125,7 +128,7 @@ else:
     vmin = 64
 
 if save_images:
-    output_dir = f"../../Result/Plt_results/{x_name}_{y_name}/"
+    output_dir = f"../../Result/Plt_results/{x_name}_{y_name}_{model_type}/"
     os.makedirs(output_dir, exist_ok=True)
 
 for topo in topologies:
@@ -135,15 +138,15 @@ for topo in topologies:
         # topo_data = data[(data["Topo"] == topo) & (data["rn_r_tracker_ostd"] > 16) & (data["rn_w_tracker_ostd"] > 16)]
         topo_data = data[(data["Topo"] == topo)]
     else:
-        topo_data = data[(data["Topo"] == topo) & (data["rn_r_tracker_ostd"] > 16) & (data["rn_w_tracker_ostd"] > 16)]
-        # topo_data = data.loc[(data["Topo"] == topo) & (data["model_type"] == model_type)]
+        # topo_data = data[(data["Topo"] == topo) & (data["rn_r_tracker_ostd"] > 16) & (data["rn_w_tracker_ostd"] > 16)]
+        topo_data = data.loc[(data["Topo"] == topo) & (data["model_type"] == model_type)]
 
     if log_data:
         topo_data[show_value] = np.log(topo_data[show_value] + 0.1)
 
     # 创建数据透视表
     pivot_table = topo_data.pivot_table(index=y_name, columns=x_name, values=show_value, aggfunc="first")
-    pivot_table = pivot_table.iloc[::2, ::2]
+    # pivot_table = pivot_table.iloc[::2, ::2]
 
     # # 计算行均值和列均值
     # row_means = pivot_table.mean(axis=1)  # 每行的均值
@@ -171,7 +174,7 @@ for topo in topologies:
         annot=np.vectorize(format_func)(pivot_table),  # 使用自定义格式化
         fmt="",  # 使用科学计数法，保留一位小数
         # cbar_kws={"label": show_value},  # 颜色条标签
-        annot_kws={"size": 12},  # 数值字体大小
+        annot_kws={"size": 10},  # 数值字体大小
         # vmax=vmax,
         # vmin=vmin,
         linewidths=0.5,  # 网格线宽度
