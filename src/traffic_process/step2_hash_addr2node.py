@@ -28,7 +28,9 @@ class AddressHasher:
 
     def shared_64(self, addr):
         assert 0x04_0000_0000 <= addr < 0x08_0000_0000
-        return self.hash_addr2node(addr, 64)
+        res = self.hash_addr2node(addr, 32)
+        assert res < 32
+        return res
 
     def shared_8(self, addr):
         assert 0x08_0000_0000 <= addr < 0x10_0000_0000
@@ -75,8 +77,10 @@ class AddressHasher:
     def ip2node(self, n):
         """Input ddr/dma number and return the corresponding node number"""
         n = int(n)
-        ip2node_map = {0: 0, 4: 8, 8: 4, 12: 12, 16: 20, 20: 28, 24: 36, 28: 44, 32: 52, 36: 60, 40: 48, 44: 56, 48: 32, 52: 40, 56: 16, 60: 24}
-        assert len(ip2node_map.keys()) == 16 and len(ip2node_map.values()) == 16
+        # TODO
+        # ip2node_map = {0: 0, 4: 8, 8: 4, 12: 12, 16: 20, 20: 28, 24: 36, 28: 44, 32: 52, 36: 60, 40: 48, 44: 56, 48: 32, 52: 40, 56: 16, 60: 24}
+        ip2node_map = {0: 0, 4: 8, 8: 4, 12: 12, 16: 16, 20: 24, 24: 20, 28: 28}
+        # assert len(ip2node_map.keys()) == 16 and len(ip2node_map.values()) == 16
         remaining = n % 4
         return str(ip2node_map[n - remaining] + remaining)
 

@@ -41,20 +41,20 @@ class REQ_RSP_model(BaseModel):
             if self.rn_type != "Idle":
                 self.move_all_to_inject_queue(self.req_network, "req")
 
+            if self.sn_type != "Idle":
+                self.handle_response_injection()
                 # Inject and process responses
-                self.handle_response_injection(self.cycle, self.sn_type)
 
             rsps = self.process_and_move_flits(self.rsp_network, rsps, "rsp")
 
             if self.sn_type != "Idle":
                 self.move_all_to_inject_queue(self.rsp_network, "rsp")
 
-                # Inject and process data flits
+            if self.sn_type != "Idle" or self.rn_type != "Idle":
                 self.handle_data_injection()
+                # Inject and process data flits
 
             flits = self.process_and_move_flits(self.flit_network, flits, "data")
-            # if flits:
-            # print(flits)
 
             self.move_all_to_inject_queue(self.flit_network, "data")
 
@@ -108,7 +108,7 @@ class REQ_RSP_model(BaseModel):
             if len(self.node.rn_rdb[self.rn_type][in_pos][packet_id]) == 0:
                 self.node.rn_rdb[self.rn_type][in_pos].pop(packet_id)
                 self.node.rn_rdb_recv[self.rn_type][in_pos].pop(0)
-                self.node.rn_rdb_count[self.rn_type][in_pos] += self.req_network.send_flits[packet_id].burst_length
+                self.node.rn_rdb_count[self.rn_type][in_pos] += self.req_network.send_flits[packet_id][0].burst_length
                 req = next(
                     (req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == packet_id),
                     None,
@@ -129,7 +129,7 @@ class REQ_RSP_model(BaseModel):
             if len(self.node.sn_wdb[self.sn_type][in_pos][packet_id]) == 0:
                 self.node.sn_wdb[self.sn_type][in_pos].pop(packet_id)
                 self.node.sn_wdb_recv[self.sn_type][in_pos].pop(0)
-                self.node.sn_wdb_count[self.sn_type][in_pos] += self.req_network.send_flits[packet_id].burst_length
+                self.node.sn_wdb_count[self.sn_type][in_pos] += self.req_network.send_flits[packet_id][0].burst_length
                 req = next(
                     (req for req in self.node.sn_tracker[self.sn_type][in_pos] if req.packet_id == packet_id),
                     None,
@@ -188,7 +188,7 @@ class REQ_RSP_model(BaseModel):
                             self.node.rn_rdb_count[self.rn_type][ip_pos] > self.node.rn_rdb_reserve[self.rn_type][ip_pos] * req.burst_length
                             and self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0
                         ):
-                            req.entry_db_cycle = self.cycle
+                            # req.entry_db_cycle = self.cycle
                             self.req_network.ip_read[self.rn_type][ip_pos].popleft()
                             self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
                             self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] -= 1
@@ -198,11 +198,13 @@ class REQ_RSP_model(BaseModel):
                     if self.req_network.ip_write[self.rn_type][ip_pos]:
                         req = self.req_network.ip_write[self.rn_type][ip_pos][0]
                         if self.node.rn_wdb_count[self.rn_type][ip_pos] >= req.burst_length and self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0:
+                            # if req.packet_id == 1785:
+                            #     print(req)
                             self.req_network.ip_write[self.rn_type][ip_pos].popleft()
                             self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
                             self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] -= 1
                             self.node.rn_wdb_count[self.rn_type][ip_pos] -= req.burst_length
-                            self.node.rn_wdb[self.rn_type][ip_pos][req.packet_id] = []
+                            # self.node.rn_wdb[self.rn_type][ip_pos][req.packet_id] = []
                             self.create_write_packet(req)
             self.select_inject_network(ip_pos)
 
@@ -222,24 +224,24 @@ class REQ_RSP_model(BaseModel):
         flits = self.flit_move(network, flits, flit_type)
         return flits
 
-    def handle_response_injection(self, cycle, sn_type):
+    def handle_response_injection(self):
         """Inject responses into the network."""
         for ip_pos in self.config.ddr_send_positions:
-            if self.node.sn_rsp_queue[sn_type][ip_pos]:
-                rsp = self.node.sn_rsp_queue[sn_type][ip_pos][0]
+            if self.node.sn_rsp_queue[self.sn_type][ip_pos]:
+                rsp = self.node.sn_rsp_queue[self.sn_type][ip_pos][0]
                 for direction in self.directions:
                     queue = self.rsp_network.inject_queues[direction]
                     queue_pre = self.rsp_network.inject_queues_pre[direction]
-                    if self.direction_conditions[direction](rsp) and len(queue[ip_pos]) < self.config.inject_queues_len:
+                    if self.direction_conditions[direction](rsp) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
                         queue_pre[ip_pos] = rsp
-                        self.node.sn_rsp_queue[sn_type][ip_pos].pop(0)
+                        self.node.sn_rsp_queue[self.sn_type][ip_pos].pop(0)
 
     def handle_data_injection(self):
         """
         Inject data flits into the network.
         """
         for ip_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions + self.config.sdma_send_positions + self.config.gdma_send_positions):
-            # BUG: rn_wdb 里面flit,还有但是rn_wdb_send里面没有了,导致flit没有发完。
+            # BUG: rn_wdb 里面flit,还有但是rn_wdb_send里面没有了,导致flit没有发完。 查到原因是req显示到达， 但是没有发送rsp。
             inject_flits = [
                 (self.node.sn_rdb[self.sn_type][ip_pos][0] if self.node.sn_rdb[self.sn_type][ip_pos] and self.node.sn_rdb[self.sn_type][ip_pos][0].departure_cycle <= self.cycle else None),
                 (self.node.rn_wdb[self.rn_type][ip_pos][self.node.rn_wdb_send[self.rn_type][ip_pos][0]][0] if len(self.node.rn_wdb_send[self.rn_type][ip_pos]) > 0 else None),
@@ -250,7 +252,7 @@ class REQ_RSP_model(BaseModel):
                     if flit := inject_flits[i]:
                         queue = self.flit_network.inject_queues[direction]
                         queue_pre = self.flit_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.inject_queues_len:
+                        if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
                             queue_pre[flit.source] = flit
                             self.send_flits_num += 1
                             self.trans_flits_num += 1
@@ -324,9 +326,11 @@ class REQ_RSP_model(BaseModel):
         self.next_req = None  # 缓存未处理的请求
 
     def select_inject_network(self, ip_pos):
-        read_old = self.node.rn_rdb_reserve[self.rn_type][ip_pos] > 0 and self.node.rn_rdb_count[self.rn_type][ip_pos] > self.config.burst
+        read_old = self.node.rn_rdb_reserve[self.rn_type][ip_pos] > 0 and self.node.rn_rdb_count[self.rn_type][ip_pos] >= self.config.burst
         read_new = len(self.node.rn_tracker["read"][self.rn_type][ip_pos]) - 1 > self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos]
         write_old = self.node.rn_wdb_reserve[self.rn_type][ip_pos] > 0
+        # if write_old and self.rn_type == "sdma" and ip_pos == 4:
+        # print("here")
         write_new = len(self.node.rn_tracker["write"][self.rn_type][ip_pos]) - 1 > self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos]
         read_valid = read_old or read_new
         write_valid = write_old or write_new
@@ -340,7 +344,7 @@ class REQ_RSP_model(BaseModel):
                         for direction in self.directions:
                             queue_pre = self.req_network.inject_queues_pre[direction]
                             queue = self.req_network.inject_queues[direction]
-                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.inject_queues_len:
+                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
                                 queue_pre[ip_pos] = req
                                 self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
                                 self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
@@ -353,7 +357,7 @@ class REQ_RSP_model(BaseModel):
                         for direction in self.directions:
                             queue = self.req_network.inject_queues[direction]
                             queue_pre = self.req_network.inject_queues_pre[direction]
-                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.inject_queues_len:
+                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
                                 queue_pre[ip_pos] = req
                                 self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] += 1
                                 self.req_network.last_select[self.rn_type][ip_pos] = "read"
@@ -365,18 +369,18 @@ class REQ_RSP_model(BaseModel):
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.inject_queues_len:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(req)
                             self.node.rn_wdb_reserve[self.rn_type][ip_pos] -= 1
                             self.req_network.last_select[self.rn_type][ip_pos] = "write"
-            elif write_new:
+            else:
                 rn_tracker_pointer = self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] + 1
                 if req := self.node.rn_tracker["write"][self.rn_type][ip_pos][rn_tracker_pointer]:
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.inject_queues_len:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] += 1
                             self.req_network.last_select[self.rn_type][ip_pos] = "write"
@@ -389,20 +393,20 @@ class REQ_RSP_model(BaseModel):
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.inject_queues_len:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
                             self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
                             self.node.rn_rdb_count[self.rn_type][ip_pos] -= req.burst_length
                             self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = []
                             self.req_network.last_select[self.rn_type][ip_pos] = "read"
-            elif read_new:
+            else:
                 rn_tracker_pointer = self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] + 1
                 if req := self.node.rn_tracker["read"][self.rn_type][ip_pos][rn_tracker_pointer]:
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.inject_queues_len:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] += 1
                             self.req_network.last_select[self.rn_type][ip_pos] = "read"
@@ -415,18 +419,18 @@ class REQ_RSP_model(BaseModel):
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.inject_queues_len:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(req)
                             self.node.rn_wdb_reserve[self.rn_type][ip_pos] -= 1
                             self.req_network.last_select[self.rn_type][ip_pos] = "write"
-            elif write_new:
+            else:
                 rn_tracker_pointer = self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] + 1
                 if req := self.node.rn_tracker["write"][self.rn_type][ip_pos][rn_tracker_pointer]:
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.inject_queues_len:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] += 1
                             self.req_network.last_select[self.rn_type][ip_pos] = "write"
@@ -467,27 +471,30 @@ class REQ_RSP_model(BaseModel):
                 eject_flit, vup_flit, vdown_flit = None, None, None
 
                 # 获取各方向的flit
+                # station_flits = [
+                #     (network.transfer_stations["up"][(pos, next_pos)][0] if network.transfer_stations["up"][(pos, next_pos)] else None),
+                #     (network.transfer_stations["left"][(pos, next_pos)][0] if network.transfer_stations["left"][(pos, next_pos)] else None),
+                #     (network.transfer_stations["right"][(pos, next_pos)][0] if network.transfer_stations["right"][(pos, next_pos)] else None),
+                #     (network.transfer_stations["ft"][(pos, next_pos)][0] if network.transfer_stations["ft"][(pos, next_pos)] else None),
+                # ]
                 station_flits = [
-                    (network.transfer_stations["up"][(pos, next_pos)][0] if network.transfer_stations["up"][(pos, next_pos)] else None),
-                    (network.transfer_stations["left"][(pos, next_pos)][0] if network.transfer_stations["left"][(pos, next_pos)] else None),
-                    (network.transfer_stations["right"][(pos, next_pos)][0] if network.transfer_stations["right"][(pos, next_pos)] else None),
-                    (network.transfer_stations["ft"][(pos, next_pos)][0] if network.transfer_stations["ft"][(pos, next_pos)] else None),
+                    network.transfer_stations[fifo_pos][(pos, next_pos)][0] if network.transfer_stations[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]
                 ]
                 # if not all(flit is None for flit in station_flits):
                 #     print(station_flits)
 
                 # 处理eject操作
-                if len(network.transfer_stations["eject"][(pos, next_pos)]) < self.config.seats_per_vstation:
+                if len(network.transfer_stations["eject"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
                     eject_flit = self._process_eject_flit(network, station_flits, pos, next_pos)
 
                 # 处理vup操作
-                if len(network.transfer_stations["vup"][(pos, next_pos)]) < self.config.seats_per_vstation:
+                if len(network.transfer_stations["vup"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
                     if vup_flit:
                         print(vup_flit)
                     vup_flit = self._process_vup_flit(network, station_flits, pos, next_pos)
 
                 # 处理vdown操作
-                if len(network.transfer_stations["vdown"][(pos, next_pos)]) < self.config.seats_per_vstation:
+                if len(network.transfer_stations["vdown"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
                     if vdown_flit:
                         print(vdown_flit)
                     vdown_flit = self._process_vdown_flit(network, station_flits, pos, next_pos)
@@ -495,7 +502,7 @@ class REQ_RSP_model(BaseModel):
                 # transfer_eject
                 # 处理eject队列
                 # TODO: eject_queue -> ETag
-                if next_pos in network.eject_queues["mid"] and len(network.eject_queues["mid"][next_pos]) < self.config.eject_queues_len and network.transfer_stations["eject"][(pos, next_pos)]:
+                if next_pos in network.eject_queues["mid"] and len(network.eject_queues["mid"][next_pos]) < self.config.EQ_FIFO_depth and network.transfer_stations["eject"][(pos, next_pos)]:
                     flit = network.transfer_stations["eject"][(pos, next_pos)].popleft()
                     flit.is_arrive = True
 
@@ -601,12 +608,7 @@ class REQ_RSP_model(BaseModel):
         if flit_type == "req":
             for in_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions):
                 ip_pos = in_pos - self.config.cols
-                eject_flits = [
-                    network.eject_queues["up"][ip_pos][0] if network.eject_queues["up"][ip_pos] else None,
-                    network.eject_queues["mid"][ip_pos][0] if network.eject_queues["mid"][ip_pos] else None,
-                    network.eject_queues["down"][ip_pos][0] if network.eject_queues["down"][ip_pos] else None,
-                    network.eject_queues["local"][ip_pos][0] if network.eject_queues["local"][ip_pos] else None,
-                ]
+                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "mid", "down", "local"]]
                 # if not all(eject_flit is None for eject_flit in eject_flits):
                 #     print(eject_flits)
                 eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
@@ -617,17 +619,21 @@ class REQ_RSP_model(BaseModel):
                     ip_pos = in_pos - self.config.cols
                     if network.ip_eject[self.sn_type][ip_pos]:
                         req = network.ip_eject[self.sn_type][ip_pos].popleft()
+                        # if req.packet_id == 488:
+                        # print(req)
                         self._handle_request(req, in_pos)
 
         elif flit_type == "rsp":
             for in_pos in set(self.config.sdma_send_positions + self.config.gdma_send_positions):
                 ip_pos = in_pos - self.config.cols
-                eject_flits = [
-                    network.eject_queues["up"][ip_pos][0] if network.eject_queues["up"][ip_pos] else None,
-                    network.eject_queues["mid"][ip_pos][0] if network.eject_queues["mid"][ip_pos] else None,
-                    network.eject_queues["down"][ip_pos][0] if network.eject_queues["down"][ip_pos] else None,
-                    network.eject_queues["local"][ip_pos][0] if network.eject_queues["local"][ip_pos] else None,
-                ]
+                # eject_flits = [
+                #     network.eject_queues["up"][ip_pos][0] if network.eject_queues["up"][ip_pos] else None,
+                #     network.eject_queues["mid"][ip_pos][0] if network.eject_queues["mid"][ip_pos] else None,
+                #     network.eject_queues["down"][ip_pos][0] if network.eject_queues["down"][ip_pos] else None,
+                #     network.eject_queues["local"][ip_pos][0] if network.eject_queues["local"][ip_pos] else None,
+                # ]
+                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "mid", "down", "local"]]
+
                 # if not all(eject_flit is None for eject_flit in eject_flits):
                 #     print(eject_flits)
                 eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["sdma"][ip_pos], "sdma", ip_pos)
@@ -643,12 +649,14 @@ class REQ_RSP_model(BaseModel):
         elif flit_type == "data":
             for in_pos in self.flit_position:
                 ip_pos = in_pos - self.config.cols
-                eject_flits = [
-                    network.eject_queues["up"][ip_pos][0] if network.eject_queues["up"][ip_pos] else None,
-                    network.eject_queues["mid"][ip_pos][0] if network.eject_queues["mid"][ip_pos] else None,
-                    network.eject_queues["down"][ip_pos][0] if network.eject_queues["down"][ip_pos] else None,
-                    network.eject_queues["local"][ip_pos][0] if network.eject_queues["local"][ip_pos] else None,
-                ]
+                # eject_flits = [
+                #     network.eject_queues["up"][ip_pos][0] if network.eject_queues["up"][ip_pos] else None,
+                #     network.eject_queues["mid"][ip_pos][0] if network.eject_queues["mid"][ip_pos] else None,
+                #     network.eject_queues["down"][ip_pos][0] if network.eject_queues["down"][ip_pos] else None,
+                #     network.eject_queues["local"][ip_pos][0] if network.eject_queues["local"][ip_pos] else None,
+                # ]
+                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "mid", "down", "local"]]
+
                 # if not all(eject_flit is None for eject_flit in eject_flits):
                 #     print(eject_flits)
                 eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
@@ -710,6 +718,8 @@ class REQ_RSP_model(BaseModel):
 
     def _handle_request(self, req, in_pos):
         """处理request类型的eject"""
+        # if req.packet_id == 489:
+        #     print(req)
         if req.req_type == "read":
             if req.req_attr == "new":
                 if self.node.sn_tracker_count[self.sn_type]["ro"][in_pos] > 0:
@@ -756,7 +766,7 @@ class REQ_RSP_model(BaseModel):
                         if network.links_tag[link][-1] == [
                             next_pos,
                             direction,
-                        ] and network.config.eject_queues_len - len(
+                        ] and network.config.EQ_FIFO_depth - len(
                             eject_queue
                         ) > len(reservations):
                             network.remain_tag[direction][next_pos] += 1
@@ -765,7 +775,7 @@ class REQ_RSP_model(BaseModel):
                 elif flit_l.destination == next_pos:
                     eject_queue = network.eject_queues[direction][next_pos]
                     reservations = network.eject_reservations[direction][next_pos]
-                    # TODO: eject_queues_len -> ETag
+                    # TODO: EQ_FIFO_depth -> ETag
                     return (
                         self._update_flit_state(
                             network,
@@ -775,7 +785,7 @@ class REQ_RSP_model(BaseModel):
                             opposite_node,
                             direction,
                         )
-                        if network.config.eject_queues_len - len(eject_queue) > len(reservations)
+                        if network.config.EQ_FIFO_depth - len(eject_queue) > len(reservations)
                         else self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
                     )
                 else:
@@ -807,6 +817,8 @@ class REQ_RSP_model(BaseModel):
         )
         self.rsp_cir_h_total += rsp.circuits_completed_h
         self.rsp_cir_v_total += rsp.circuits_completed_v
+        if rsp.packet_id == 490:
+            print(rsp)
         if not req:
             return
         if rsp.req_type == "read":
@@ -828,12 +840,16 @@ class REQ_RSP_model(BaseModel):
                     self.node.rn_tracker_wait["read"][self.rn_type][in_pos].append(req)
         elif rsp.req_type == "write":
             if rsp.rsp_type == "negative":
+                self.negative_rsp_num += 1
                 if not req.early_rsp:
                     req.req_state = "invalid"
                     req.is_injected = False
                     req.path_index = 0
                     self.node.rn_tracker_wait["write"][self.rn_type][in_pos].append(req)
+                # else:
+                #     print(req)
             elif rsp.rsp_type == "positive":
+                self.positive_rsp_num += 1
                 req.req_state = "valid"
                 self.node.rn_wdb_reserve[self.rn_type][in_pos] += 1
                 if req not in self.node.rn_tracker_wait["write"][self.rn_type][in_pos]:
@@ -841,8 +857,11 @@ class REQ_RSP_model(BaseModel):
                     req.path_index = 0
                     req.early_rsp = True
                     self.node.rn_tracker_wait["write"][self.rn_type][in_pos].append(req)
+                # else:
+                #     print("here1")
             else:
                 self.node.rn_wdb_send[self.rn_type][in_pos].append(rsp.packet_id)
+                self.rn_send_num += 1
 
     def process_eject_queues(self, network, eject_flits, rr_queue, destination_type, ip_pos):
         for i in rr_queue:
@@ -933,19 +952,19 @@ class REQ_RSP_model(BaseModel):
     #             flit.is_last_flit = True
     #         self.node.sn_rdb[flit.source_type][flit.source].append(flit)
 
-    def process_inject_queues(self, network, inject_queues):
-        flit_num = 0
-        flits = []
-        for source, queue in inject_queues.items():
-            if queue and queue[0]:
-                flit = queue.popleft()
-                if flit.inject(network):
-                    network.inject_num += 1
-                    flit_num += 1
-                    flit.departure_network_cycle = self.cycle
-                    flits.append(flit)
-                else:
-                    queue.appendleft(flit)
-                    for flit in queue:
-                        flit.wait_cycle += 1
-        return flit_num, flits
+    # def process_inject_queues(self, network, inject_queues):
+    #     flit_num = 0
+    #     flits = []
+    #     for source, queue in inject_queues.items():
+    #         if queue and queue[0]:
+    #             flit = queue.popleft()
+    #             if flit.inject(network):
+    #                 network.inject_num += 1
+    #                 flit_num += 1
+    #                 flit.departure_network_cycle = self.cycle
+    #                 flits.append(flit)
+    #             else:
+    #                 queue.appendleft(flit)
+    #                 for flit in queue:
+    #                     flit.wait_cycle += 1
+    #     return flit_num, flits

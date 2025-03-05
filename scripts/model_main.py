@@ -17,27 +17,28 @@ def main():
     file_name = r"demo_459.txt"
 
     # traffic_file_path = r"../../traffic/"
-    # traffic_file_path = r"../traffic/output-v8-32/3M/step6_32core_map/"
+    traffic_file_path = r"../traffic/output_All_reduce/step5_data_merge/"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"LLama2_MLP_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
+    file_name = "TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
 
     model_type = "REQ_RSP"
     # model_type = "Packet_Base"
 
-    p1 = 100000
-    p2 = 100000
+    p1 = 128
+    p2 = 32
 
-    result_save_path = f"../Result/CrossRing/{model_type}/burst4/{p1}-{p2}/"
+    result_save_path = f"../Result/CrossRing/{model_type}/burst2/{p1}-{p2}/"
 
     config_path = r"../config/config2.json"
     config = SimulationConfig(config_path)
     if not config.topo_type:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        # topo_type = "5x4"
-        topo_type = "4x5"
+        topo_type = "5x4"
+        # topo_type = "4x5"
 
         # topo_type = "6x5"
 
@@ -62,9 +63,9 @@ def main():
     # tracemalloc.start()
 
     # sim.end_time = 10000
-    sim.config.burst = 4
-    sim.config.rn_read_tracker_ostd = 1000
-    sim.config.rn_write_tracker_ostd = 1000
+    sim.config.burst = 2
+    sim.config.rn_read_tracker_ostd = 64
+    sim.config.rn_write_tracker_ostd = 64
     sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * 4
     sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * 4
     sim.config.ro_tracker_ostd = p1
@@ -75,7 +76,7 @@ def main():
     # sim.config.update_config()
     sim.initial()
     # sim.end_time = 1000
-    sim.print_interval = 10000
+    sim.print_interval = 2000
     sim.run()
     print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
     print(f"ro_tracker_ostd: {p1}: share_tracker_ostd: {p2}\n")

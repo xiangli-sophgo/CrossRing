@@ -91,12 +91,8 @@ class AddressStat:
             print(f"64 shared flits: {self.shared_64_count}, {100 * self.shared_64_count / self.total_flit_count:.1f} %")
             print(f"8 shared flits: {self.shared_8_count}, {100 * self.shared_8_count / self.total_flit_count:.1f} %")
             print(f"Private flits: {self.private_count}, {100 * self.private_count / self.total_flit_count:.1f} %")
-            print(
-                f"Read flit: {self.read_flit_count}, {100* self.read_flit_count / self.total_flit_count:.1f}%, {self.read_flit_count / (32 * self.request_end_time):.2f} flit/Cycle/IP"
-            )
-            print(
-                f"Write flit: {self.write_flit_count}, {100* self.write_flit_count / self.total_flit_count:.1f}%,{self.write_flit_count / (32 * self.request_end_time):.2f} flit/Cycle/IP"
-            )
+            print(f"Read flit: {self.read_flit_count}, {100* self.read_flit_count / self.total_flit_count:.1f}%, {self.read_flit_count / (32 * self.request_end_time):.2f} flit/Cycle/IP")
+            print(f"Write flit: {self.write_flit_count}, {100* self.write_flit_count / self.total_flit_count:.1f}%,{self.write_flit_count / (32 * self.request_end_time):.2f} flit/Cycle/IP")
             print(
                 f"Total flit num: {self.total_flit_count}, {self.total_flit_count * 128 / (1024 * self.request_end_time):.2f} TB/s, {self.total_flit_count / (32 * self.request_end_time):.2f} flit/Cycle/IP"
             )
@@ -167,7 +163,7 @@ class AddressStat:
 
         # 保存或显示图形
         # plt.savefig("../data_stat/v7-32/" + file_name[10:] + ".png", dpi=300)  # 保存为图片
-        # plt.show()  # 显示图形
+        plt.show()  # 显示图形
 
         # 重置时间分布
         self.time_distribution = defaultdict(lambda: {"R": 0, "W": 0, "flit_num": 0})
@@ -179,4 +175,4 @@ class AddressStat:
 
 if __name__ == "__main__":
     stat = AddressStat(100)
-    stat.run(r"../traffic/output-v8-32/4M/step1_flatten")
+    stat.run(r"../../traffic/output_All_reduce/step1_flatten")

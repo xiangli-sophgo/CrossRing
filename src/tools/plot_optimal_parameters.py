@@ -80,15 +80,20 @@ def format_func(x):
 file_root = r"../../Result/Params_csv/"
 
 # data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
-# topologies = [
-#     "4x9",
-#     "9x4",
-#     "5x4",
-#     "4x5",
-# ]
+# data_file_name = r"RB_IN_OUT_FIFO_459_0303_2_fixed_time_interval.csv"
+data_file_name = r"RB_IN_OUT_FIFO_459_0304.csv"
+topologies = [
+    # "4x9",
+    "9x4",
+    # "5x4",
+    # "4x5",
+]
 
-# data_file_name = r"inject_eject_queue_length_3x3_0228.csv"
-data_file_name = r"inject_eject_queue_length_3x3_0228_fixed_time_interval.csv"
+data_file_name = r"RB_IN_OUT_FIFO_3x3_0303_2.csv"
+# data_file_name = r"RB_IN_OUT_FIFO_3x3_0303_2_fixed_time_interval.csv"
+# data_file_name = r"LBN_459_0303_fixed_time_interval.csv"
+# data_file_name = r"LBN_3x3_0303_fixed_time_interval.csv"
+# data_file_name = r"inject_eject_queue_length_3x3_0228_fixed_time_interval.csv"
 topologies = ["3x3"]
 
 data = pd.read_csv(file_root + data_file_name)
@@ -98,8 +103,8 @@ data = pd.read_csv(file_root + data_file_name)
 
 # show_value = "ReadBandWidth"
 # show_value = "WriteBandWidth"
-show_value = "TotalBandWidth"
 # show_value = "FinishCycle"
+show_value = "TotalBandWidth"
 # show_value = "gdma-R-L2M_thoughput"
 # show_value = "sdma-W-L2M_thoughput"
 # show_value = "sdma-R-DDR_thoughput"
@@ -111,13 +116,20 @@ show_value = "TotalBandWidth"
 # y_name = "share_tracker_ostd"
 # x_name = "rn_r_tracker_ostd"
 # y_name = "rn_w_tracker_ostd"
-x_name = "inject_queue_length"
-y_name = "eject_queue_length"
-model_type = "REQ_RSP"
-# model_type = "Packet_Base"
+# x_name = "inject_queue_length"
+# y_name = "eject_queue_length"
+x_name = "RB_IN_FIFO"
+y_name = "RB_OUT_FIFO"
+# x_name = "SliceNum"
+# y_name = "model_type"
+# y_name = "Topo"
+# model_type = "REQ_RSP"
+model_type = "Packet_Base"
 
+rate_plot = 0
 log_data = 0
-save_images = 1
+save_images = 0
+
 
 # 设置 vmax 和 vmin
 if show_value in ["ReadBandWidth", "WriteBandWidth"]:
@@ -140,6 +152,7 @@ for topo in topologies:
     else:
         # topo_data = data[(data["Topo"] == topo) & (data["rn_r_tracker_ostd"] > 16) & (data["rn_w_tracker_ostd"] > 16)]
         topo_data = data.loc[(data["Topo"] == topo) & (data["model_type"] == model_type)]
+        # topo_data = data.loc[(data["Topo"] == topo)]
 
     if log_data:
         topo_data[show_value] = np.log(topo_data[show_value] + 0.1)
@@ -161,9 +174,49 @@ for topo in topologies:
     # pivot_table_with_means["Mean"] = row_means  # 添加列：行均值
     # col_means["Mean"] = np.nan  # 在列均值的最后一项补充 NaN
     # pivot_table_with_means.loc["Mean"] = col_means  # 添加行：列均值
+
     cmap = "YlGnBu"
     if show_value in ["FinishCycle", "data_cir_h_total", "data_cir_v_total"]:
         cmap += "_r"
+    #  计算每个点的变化率
+    if rate_plot:
+        dx, dy = np.gradient(pivot_table.fillna(0).values)  # 计算梯度
+        change_rate = np.sqrt(dx**2 + dy**2)  # 计算综合变化率
+
+        # 绘制变化率的热力图
+        plt.figure(figsize=(12, 10))  # 调整图像大小
+        ax = sns.heatmap(
+            change_rate,
+            cmap="YlGnBu_r",  # 配色方案
+            annot=np.vectorize(format_func)(change_rate),
+            fmt="",  # 格式化
+            center=change_rate.mean(),  # 将颜色映射中心值设为数据的平均值
+            annot_kws={"size": 12},
+            vmax=change_rate.max() + 0.2,
+            vmin=change_rate.min() - 0.2,
+            linewidths=0.5,  # 网格线宽度
+            linecolor="white",  # 网格线颜色
+        )
+        ax.invert_yaxis()
+
+        # 添加标题和轴标签
+        plt.title(f"Change Rate Heatmap of {show_value} for Topo {topo}", fontsize=16, pad=20)
+        plt.xlabel(x_name, fontsize=14)
+        plt.ylabel(y_name, fontsize=14)
+
+        # 调整刻度字体大小
+        plt.xticks(fontsize=12, rotation=0)
+        plt.yticks(fontsize=12)
+
+        # 保存或显示图像
+        if save_images:
+            heatmap_filename = os.path.join(output_dir, f"{topo}_{show_value}_change_rate.png")
+            plt.tight_layout()  # 调整布局
+            plt.savefig(heatmap_filename, bbox_inches="tight")  # 保存图片
+            plt.close()
+        else:
+            plt.tight_layout()  # 调整布局
+            plt.show()
 
     # 绘制热力图
     plt.figure(figsize=(12, 10))  # 调整图像大小
@@ -174,9 +227,10 @@ for topo in topologies:
         annot=np.vectorize(format_func)(pivot_table),  # 使用自定义格式化
         fmt="",  # 使用科学计数法，保留一位小数
         # cbar_kws={"label": show_value},  # 颜色条标签
-        annot_kws={"size": 10},  # 数值字体大小
-        # vmax=vmax,
-        # vmin=vmin,
+        annot_kws={"size": 12},  # 数值字体大小
+        center=pivot_table.mean().mean(),  # 将颜色映射中心值设为数据的平均值
+        vmax=pivot_table.max().max() + 1,
+        vmin=pivot_table.min().min() - 1,
         linewidths=0.5,  # 网格线宽度
         linecolor="white",  # 网格线颜色
     )

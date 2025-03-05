@@ -111,7 +111,7 @@ class Flit:
         return False
 
     def __repr__(self):
-        return f"{self.packet_id}.{self.flit_id_in_packet}: {self.current_link}-> {self.current_seat_index}, {self.current_position};"
+        return f"{self.packet_id}.{self.flit_id_in_packet}: {self.current_link}-> {self.current_seat_index}, {self.current_position}; {self.rsp_type}"
 
     @classmethod
     def clear_flit_id(cls):
@@ -233,7 +233,7 @@ class Network:
 
         self.round_robin_counter = 0
         self.recv_flits_num = 0
-        self.send_flits = {}
+        self.send_flits = defaultdict(list)
         self.arrive_flits = defaultdict(list)
         self.all_latency = []
         self.ject_latency = []
@@ -296,10 +296,10 @@ class Network:
         # }
 
         for ip_pos in set(config.ddr_send_positions + config.sdma_send_positions + config.l2m_send_positions + config.gdma_send_positions):
-            self.inject_queues["left"][ip_pos] = deque(maxlen=config.inject_queues_len)
-            self.inject_queues["right"][ip_pos] = deque(maxlen=config.inject_queues_len)
-            self.inject_queues["up"][ip_pos] = deque(maxlen=config.inject_queues_len)
-            self.inject_queues["local"][ip_pos] = deque(maxlen=config.inject_queues_len)
+            self.inject_queues["left"][ip_pos] = deque(maxlen=config.IQ_FIFO_depth)
+            self.inject_queues["right"][ip_pos] = deque(maxlen=config.IQ_FIFO_depth)
+            self.inject_queues["up"][ip_pos] = deque(maxlen=config.IQ_FIFO_depth)
+            self.inject_queues["local"][ip_pos] = deque(maxlen=config.IQ_FIFO_depth)
             self.inject_queues_pre["left"][ip_pos] = None
             self.inject_queues_pre["right"][ip_pos] = None
             self.inject_queues_pre["up"][ip_pos] = None
@@ -308,10 +308,10 @@ class Network:
                 self.eject_queues_pre[key][ip_pos - config.cols] = None
             for key in self.arrive_node_pre:
                 self.arrive_node_pre[key][ip_pos - config.cols] = None
-            self.eject_queues["up"][ip_pos - config.cols] = deque(maxlen=config.eject_queues_len)
-            self.eject_queues["down"][ip_pos - config.cols] = deque(maxlen=config.eject_queues_len)
-            self.eject_queues["mid"][ip_pos - config.cols] = deque(maxlen=config.eject_queues_len)
-            self.eject_queues["local"][ip_pos - config.cols] = deque(maxlen=config.eject_queues_len)
+            self.eject_queues["up"][ip_pos - config.cols] = deque(maxlen=config.EQ_FIFO_depth)
+            self.eject_queues["down"][ip_pos - config.cols] = deque(maxlen=config.EQ_FIFO_depth)
+            self.eject_queues["mid"][ip_pos - config.cols] = deque(maxlen=config.EQ_FIFO_depth)
+            self.eject_queues["local"][ip_pos - config.cols] = deque(maxlen=config.EQ_FIFO_depth)
             self.eject_reservations["down"][ip_pos - config.cols] = deque(maxlen=config.reservation_num)
             self.eject_reservations["up"][ip_pos - config.cols] = deque(maxlen=config.reservation_num)
             for key in self.inject_queue_rr:
@@ -350,13 +350,13 @@ class Network:
             for col in range(config.cols):
                 pos = row * config.cols + col
                 next_pos = pos - config.cols
-                self.transfer_stations["left"][(pos, next_pos)] = deque(maxlen=config.seats_per_station)
-                self.transfer_stations["right"][(pos, next_pos)] = deque(maxlen=config.seats_per_station)
-                self.transfer_stations["up"][(pos, next_pos)] = deque(maxlen=config.seats_per_station)
+                self.transfer_stations["left"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_depth)
+                self.transfer_stations["right"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_depth)
+                self.transfer_stations["up"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_depth)
                 self.transfer_stations["ft"][(pos, next_pos)] = deque(maxlen=config.ft_len)
-                self.transfer_stations["vup"][(pos, next_pos)] = deque(maxlen=config.seats_per_vstation)
-                self.transfer_stations["vdown"][(pos, next_pos)] = deque(maxlen=config.seats_per_vstation)
-                self.transfer_stations["eject"][(pos, next_pos)] = deque(maxlen=config.seats_per_vstation)
+                self.transfer_stations["vup"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_depth)
+                self.transfer_stations["vdown"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_depth)
+                self.transfer_stations["eject"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_depth)
                 self.station_reservations["left"][(pos, next_pos)] = deque(maxlen=config.reservation_num)
                 self.station_reservations["right"][(pos, next_pos)] = deque(maxlen=config.reservation_num)
                 self.round_robin["up"][next_pos] = deque([0, 1, 2])
@@ -397,7 +397,7 @@ class Network:
     def can_move_to_next(self, flit, current, next_node):
         # 判断是否可以将flit放到本地出口队列。
         if flit.source - flit.destination == self.config.cols:
-            return len(self.eject_queues["local"][flit.destination]) < self.config.eject_queues_len
+            return len(self.eject_queues["local"][flit.destination]) < self.config.EQ_FIFO_depth
 
         # 获取当前节点所在列的索引
         current_column_index = current % self.config.cols
@@ -410,7 +410,7 @@ class Network:
                         if flit_l.current_link[1] == flit_l.current_position:
                             flit_exist_right = any(flit_r.id == flit_l.id for flit_r in self.station_reservations["right"][(flit_l.current_link[1], flit_l.path[flit_l.path_index])])
                             link_station = self.transfer_stations["right"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
-                            if len(link_station) < self.config.seats_per_station and flit_exist_right:
+                            if len(link_station) < self.config.RB_IN_FIFO_depth and flit_exist_right:
                                 return True
                         if flit.wait_cycle > self.config.wait_cycle_h and not flit.is_tag_h:
                             if self.remain_tag["right"][current] > 0:
@@ -422,7 +422,7 @@ class Network:
                         if flit_l.current_link[1] == flit_l.current_position:
                             flit_exist_right = any(flit_r.id == flit_l.id for flit_r in self.station_reservations["right"][(flit_l.current_link[1], flit_l.path[flit_l.path_index])])
                             link_station = self.transfer_stations["right"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
-                            if len(link_station) < self.config.seats_per_station and flit_exist_right:
+                            if len(link_station) < self.config.RB_IN_FIFO_depth and flit_exist_right:
                                 if self.links_tag[(current, current)][-1] == [current, "right"]:
                                     self.links_tag[(current, current)][-1] = None
                                     self.remain_tag["right"][current] += 1
@@ -445,7 +445,7 @@ class Network:
                         if flit_l.current_link[1] == flit_l.current_position:
                             flit_exist_left = any(flit_r.id == flit_l.id for flit_r in self.station_reservations["left"][(flit_l.current_link[1], flit_l.path[flit_l.path_index])])
                             link_station = self.transfer_stations["left"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
-                            if len(link_station) < self.config.seats_per_station and flit_exist_left:
+                            if len(link_station) < self.config.RB_IN_FIFO_depth and flit_exist_left:
                                 return True
                         if flit.wait_cycle > self.config.wait_cycle_h and not flit.is_tag_h:
                             if self.remain_tag["left"][current] > 0:
@@ -457,7 +457,7 @@ class Network:
                         if flit_l.current_link[1] == flit_l.current_position:
                             flit_exist_left = any(flit_r.id == flit_l.id for flit_r in self.station_reservations["left"][(flit_l.current_link[1], flit_l.path[flit_l.path_index])])
                             link_station = self.transfer_stations["left"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
-                            if len(link_station) < self.config.seats_per_station and flit_exist_left:
+                            if len(link_station) < self.config.RB_IN_FIFO_depth and flit_exist_left:
                                 if self.links_tag[(current, current)][-1] == [current, "left"]:
                                     self.links_tag[(current, current)][-1] = None
                                     self.remain_tag["left"][current] += 1
@@ -474,7 +474,7 @@ class Network:
 
         if current - next_node == self.config.cols:
             # 向 Ring Bridge 移动
-            return len(self.transfer_stations["up"][(current, next_node)]) < self.config.seats_per_station
+            return len(self.transfer_stations["up"][(current, next_node)]) < self.config.RB_IN_FIFO_depth
         elif next_node - current == 1:
             # 向右移动
             if self.links[(current - 1, current)][-1] is not None:
@@ -484,7 +484,7 @@ class Network:
                         new_current = flit_l.current_link[1]
                         new_next_node = flit_l.path[flit_l.path_index + 1]
                         station_right = self.transfer_stations["right"].get((new_current, new_next_node))
-                        if self.config.seats_per_station - len(station_right) > len(self.station_reservations["right"][(new_current, new_next_node)]):
+                        if self.config.RB_IN_FIFO_depth - len(station_right) > len(self.station_reservations["right"][(new_current, new_next_node)]):
                             return True
                     if flit.wait_cycle > self.config.wait_cycle_h and not flit.is_tag_h:
                         if self.remain_tag["right"][current] > 0:
@@ -497,7 +497,7 @@ class Network:
                         new_current = flit_l.current_link[1]
                         new_next_node = flit_l.path[flit_l.path_index + 1]
                         station_right = self.transfer_stations["right"].get((new_current, new_next_node))
-                        if self.config.seats_per_station - len(station_right) > len(self.station_reservations["right"][(new_current, new_next_node)]):
+                        if self.config.RB_IN_FIFO_depth - len(station_right) > len(self.station_reservations["right"][(new_current, new_next_node)]):
                             if self.links_tag[(current - 1, current)][-1] == [current, "right"]:
                                 self.links_tag[(current - 1, current)][-1] = None
                                 self.remain_tag["right"][current] += 1
@@ -520,7 +520,7 @@ class Network:
                         new_current = flit_l.current_link[1]
                         new_next_node = flit_l.path[flit_l.path_index + 1]
                         station_left = self.transfer_stations["left"].get((new_current, new_next_node))
-                        if self.config.seats_per_station - len(station_left) > len(self.station_reservations["left"][(new_current, new_next_node)]):
+                        if self.config.RB_IN_FIFO_depth - len(station_left) > len(self.station_reservations["left"][(new_current, new_next_node)]):
                             return True
                     if flit.wait_cycle > self.config.wait_cycle_h and not flit.is_tag_h:
                         if self.remain_tag["left"][current] > 0:
@@ -533,7 +533,7 @@ class Network:
                         new_current = flit_l.current_link[1]
                         new_next_node = flit_l.path[flit_l.path_index + 1]
                         station_left = self.transfer_stations["left"].get((new_current, new_next_node))
-                        if self.config.seats_per_station - len(station_left) > len(self.station_reservations["left"][(new_current, new_next_node)]):
+                        if self.config.RB_IN_FIFO_depth - len(station_left) > len(self.station_reservations["left"][(new_current, new_next_node)]):
                             if self.links_tag[(current + 1, current)][-1] == [current, "left"]:
                                 self.links_tag[(current + 1, current)][-1] = None
                                 self.remain_tag["left"][current] += 1
@@ -591,13 +591,13 @@ class Network:
                         flit_exist_left = any(flit_l.id == flit.id for flit_l in self.station_reservations["left"][(next_node, flit.path[flit.path_index])])
                         flit_exist_right = any(flit_r.id == flit.id for flit_r in self.station_reservations["right"][(next_node, flit.path[flit.path_index])])
                         link_station = self.transfer_stations["right"].get((next_node, flit.path[flit.path_index]))
-                        if len(link_station) < self.config.seats_per_station and flit_exist_right:
+                        if len(link_station) < self.config.RB_IN_FIFO_depth and flit_exist_right:
                             flit.is_delay = False
                             flit.current_link = (next_node, flit.path[flit.path_index])
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 1
                             self.station_reservations["right"][(next_node, flit.path[flit.path_index])].remove(flit)
-                        elif not flit_exist_right and self.config.seats_per_station - len(link_station) > len(self.station_reservations["right"][(next_node, flit.path[flit.path_index])]):
+                        elif not flit_exist_right and self.config.RB_IN_FIFO_depth - len(link_station) > len(self.station_reservations["right"][(next_node, flit.path[flit.path_index])]):
                             flit.is_delay = False
                             flit.current_link = (next_node, flit.path[flit.path_index])
                             link[flit.current_seat_index] = None
@@ -643,13 +643,13 @@ class Network:
                                 flit.current_seat_index = 0
                         else:
                             link_station = self.transfer_stations["left"].get((next_node, flit.path[flit.path_index]))
-                            if len(link_station) < self.config.seats_per_station and flit_exist_left:
+                            if len(link_station) < self.config.RB_IN_FIFO_depth and flit_exist_left:
                                 flit.is_delay = False
                                 flit.current_link = (next_node, flit.path[flit.path_index])
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
                                 self.station_reservations["left"][(next_node, flit.path[flit.path_index])].remove(flit)
-                            elif not flit_exist_left and self.config.seats_per_station - len(link_station) > len(self.station_reservations["left"][(next_node, flit.path[flit.path_index])]):
+                            elif not flit_exist_left and self.config.RB_IN_FIFO_depth - len(link_station) > len(self.station_reservations["left"][(next_node, flit.path[flit.path_index])]):
                                 flit.is_delay = False
                                 flit.current_link = (next_node, flit.path[flit.path_index])
                                 link[flit.current_seat_index] = None
@@ -675,13 +675,13 @@ class Network:
                         flit_exist_up = any(flit_u.id == flit.id for flit_u in self.eject_reservations["up"][next_node])
                         flit_exist_down = any(flit_r.id == flit.id for flit_r in self.eject_reservations["down"][next_node])
                         link_eject = self.eject_queues["down"][next_node]
-                        if len(link_eject) < self.config.eject_queues_len and flit_exist_down:
+                        if len(link_eject) < self.config.EQ_FIFO_depth and flit_exist_down:
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 0
                             self.eject_reservations["down"][next_node].remove(flit)
-                        elif not flit_exist_down and self.config.eject_queues_len - len(link_eject) > len(self.eject_reservations["down"][next_node]):
+                        elif not flit_exist_down and self.config.EQ_FIFO_depth - len(link_eject) > len(self.eject_reservations["down"][next_node]):
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
@@ -707,13 +707,13 @@ class Network:
                         flit_exist_up = any(flit_u.id == flit.id for flit_u in self.eject_reservations["up"][next_node])
                         flit_exist_down = any(flit_r.id == flit.id for flit_r in self.eject_reservations["down"][next_node])
                         link_eject = self.eject_queues["up"][next_node]
-                        if len(link_eject) < self.config.eject_queues_len and flit_exist_up:
+                        if len(link_eject) < self.config.EQ_FIFO_depth and flit_exist_up:
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 0
                             self.eject_reservations["up"][next_node].remove(flit)
-                        elif not flit_exist_up and self.config.eject_queues_len - len(link_eject) > len(self.eject_reservations["up"][next_node]):
+                        elif not flit_exist_up and self.config.EQ_FIFO_depth - len(link_eject) > len(self.eject_reservations["up"][next_node]):
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
@@ -764,13 +764,13 @@ class Network:
                         if current - next_node == 1:
                             # left move
                             link_station = self.transfer_stations["left"].get((next_node, flit.path[flit.path_index]))
-                            if len(link_station) < self.config.seats_per_station and flit_exist_left:
+                            if len(link_station) < self.config.RB_IN_FIFO_depth and flit_exist_left:
                                 flit.is_delay = False
                                 flit.current_link = (next_node, flit.path[flit.path_index])
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
                                 self.station_reservations["left"][(next_node, flit.path[flit.path_index])].remove(flit)
-                            elif not flit_exist_left and self.config.seats_per_station - len(link_station) > len(self.station_reservations["left"][(next_node, flit.path[flit.path_index])]):
+                            elif not flit_exist_left and self.config.RB_IN_FIFO_depth - len(link_station) > len(self.station_reservations["left"][(next_node, flit.path[flit.path_index])]):
                                 flit.is_delay = False
                                 flit.current_link = (next_node, flit.path[flit.path_index])
                                 link[flit.current_seat_index] = None
@@ -788,13 +788,13 @@ class Network:
                         else:
                             # right move
                             link_station = self.transfer_stations["right"].get((next_node, flit.path[flit.path_index]))
-                            if len(link_station) < self.config.seats_per_station and flit_exist_right:
+                            if len(link_station) < self.config.RB_IN_FIFO_depth and flit_exist_right:
                                 flit.is_delay = False
                                 flit.current_link = (next_node, flit.path[flit.path_index])
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 1
                                 self.station_reservations["right"][(next_node, flit.path[flit.path_index])].remove(flit)
-                            elif not flit_exist_right and self.config.seats_per_station - len(link_station) > len(self.station_reservations["right"][(next_node, flit.path[flit.path_index])]):
+                            elif not flit_exist_right and self.config.RB_IN_FIFO_depth - len(link_station) > len(self.station_reservations["right"][(next_node, flit.path[flit.path_index])]):
                                 flit.is_delay = False
                                 flit.current_link = (next_node, flit.path[flit.path_index])
                                 link[flit.current_seat_index] = None
@@ -825,13 +825,13 @@ class Network:
                     if current - next_node == self.config.cols * 2:
                         # up move
                         link_eject = self.eject_queues["up"][next_node]
-                        if len(link_eject) < self.config.eject_queues_len and flit_exist_up:
+                        if len(link_eject) < self.config.EQ_FIFO_depth and flit_exist_up:
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 0
                             self.eject_reservations["up"][next_node].remove(flit)
-                        elif not flit_exist_up and self.config.eject_queues_len - len(link_eject) > len(self.eject_reservations["up"][next_node]):
+                        elif not flit_exist_up and self.config.EQ_FIFO_depth - len(link_eject) > len(self.eject_reservations["up"][next_node]):
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
@@ -849,13 +849,13 @@ class Network:
                     else:
                         # down move
                         link_eject = self.eject_queues["down"][next_node]
-                        if len(link_eject) < self.config.eject_queues_len and flit_exist_down:
+                        if len(link_eject) < self.config.EQ_FIFO_depth and flit_exist_down:
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 0
                             self.eject_reservations["down"][next_node].remove(flit)
-                        elif not flit_exist_down and self.config.eject_queues_len - len(link_eject) > len(self.eject_reservations["down"][next_node]):
+                        elif not flit_exist_down and self.config.EQ_FIFO_depth - len(link_eject) > len(self.eject_reservations["down"][next_node]):
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
@@ -900,7 +900,7 @@ class Network:
                     opposite_station_side = "right" if direction == 1 else "left"
                     station = self.transfer_stations[station_side].get((new_current, new_next_node))
                     reservations = self.station_reservations[station_side][(new_current, new_next_node)]
-                    if self.config.seats_per_station - len(station) > len(reservations):
+                    if self.config.RB_IN_FIFO_depth - len(station) > len(reservations):
                         flit.current_link = (new_current, new_next_node)
                         link[flit.current_seat_index] = None
                         flit.current_seat_index = 0 if direction == 1 else 1
@@ -919,7 +919,7 @@ class Network:
                 if abs(current - next_node) == self.config.cols * 2:
                     eject_side = "up" if current - next_node == self.config.cols * 2 else "down"
                     eject_queue = self.eject_queues[eject_side][next_node]
-                    if self.config.eject_queues_len - len(eject_queue) > len(self.eject_reservations[eject_side][next_node]):
+                    if self.config.EQ_FIFO_depth - len(eject_queue) > len(self.eject_reservations[eject_side][next_node]):
                         link[flit.current_seat_index] = None
                         flit.current_seat_index = 0
                         flit.is_arrive = True
@@ -976,13 +976,13 @@ class Network:
                                 flit_exist_left = any(flit_l.id == flit.id for flit_l in self.station_reservations["left"][(next_node, flit.path[flit.path_index])])
                                 flit_exist_right = any(flit_r.id == flit.id for flit_r in self.station_reservations["right"][(next_node, flit.path[flit.path_index])])
                                 link_station = self.transfer_stations["right"].get((next_node, flit.path[flit.path_index]))
-                                if len(link_station) < self.config.seats_per_station and flit_exist_right:
+                                if len(link_station) < self.config.RB_IN_FIFO_depth and flit_exist_right:
                                     flit.is_delay = False
                                     flit.current_link = (next_node, flit.path[flit.path_index])
                                     link[flit.current_seat_index] = None
                                     flit.current_seat_index = 1
                                     self.station_reservations["right"][(next_node, flit.path[flit.path_index])].remove(flit)
-                                elif not flit_exist_right and self.config.seats_per_station - len(link_station) > len(self.station_reservations["right"][(next_node, flit.path[flit.path_index])]):
+                                elif not flit_exist_right and self.config.RB_IN_FIFO_depth - len(link_station) > len(self.station_reservations["right"][(next_node, flit.path[flit.path_index])]):
                                     flit.is_delay = False
                                     flit.current_link = (next_node, flit.path[flit.path_index])
                                     link[flit.current_seat_index] = None
@@ -1028,13 +1028,13 @@ class Network:
                                         flit.current_seat_index = 0
                                 else:
                                     link_station = self.transfer_stations["left"].get((next_node, flit.path[flit.path_index]))
-                                    if len(link_station) < self.config.seats_per_station and flit_exist_left:
+                                    if len(link_station) < self.config.RB_IN_FIFO_depth and flit_exist_left:
                                         flit.is_delay = False
                                         flit.current_link = (next_node, flit.path[flit.path_index])
                                         link[flit.current_seat_index] = None
                                         flit.current_seat_index = 0
                                         self.station_reservations["left"][(next_node, flit.path[flit.path_index])].remove(flit)
-                                    elif not flit_exist_left and self.config.seats_per_station - len(link_station) > len(self.station_reservations["left"][(next_node, flit.path[flit.path_index])]):
+                                    elif not flit_exist_left and self.config.RB_IN_FIFO_depth - len(link_station) > len(self.station_reservations["left"][(next_node, flit.path[flit.path_index])]):
                                         flit.is_delay = False
                                         flit.current_link = (next_node, flit.path[flit.path_index])
                                         link[flit.current_seat_index] = None
@@ -1060,13 +1060,13 @@ class Network:
                                 flit_exist_up = any(flit_u.id == flit.id for flit_u in self.eject_reservations["up"][next_node])
                                 flit_exist_down = any(flit_r.id == flit.id for flit_r in self.eject_reservations["down"][next_node])
                                 link_eject = self.eject_queues["down"][next_node]
-                                if len(link_eject) < self.config.eject_queues_len and flit_exist_down:
+                                if len(link_eject) < self.config.EQ_FIFO_depth and flit_exist_down:
                                     flit.is_delay = False
                                     flit.is_arrive = True
                                     link[flit.current_seat_index] = None
                                     flit.current_seat_index = 0
                                     self.eject_reservations["down"][next_node].remove(flit)
-                                elif not flit_exist_down and self.config.eject_queues_len - len(link_eject) > len(self.eject_reservations["down"][next_node]):
+                                elif not flit_exist_down and self.config.EQ_FIFO_depth - len(link_eject) > len(self.eject_reservations["down"][next_node]):
                                     flit.is_delay = False
                                     flit.is_arrive = True
                                     link[flit.current_seat_index] = None
@@ -1092,13 +1092,13 @@ class Network:
                                 flit_exist_up = any(flit_u.id == flit.id for flit_u in self.eject_reservations["up"][next_node])
                                 flit_exist_down = any(flit_r.id == flit.id for flit_r in self.eject_reservations["down"][next_node])
                                 link_eject = self.eject_queues["up"][next_node]
-                                if len(link_eject) < self.config.eject_queues_len and flit_exist_up:
+                                if len(link_eject) < self.config.EQ_FIFO_depth and flit_exist_up:
                                     flit.is_delay = False
                                     flit.is_arrive = True
                                     link[flit.current_seat_index] = None
                                     flit.current_seat_index = 0
                                     self.eject_reservations["up"][next_node].remove(flit)
-                                elif not flit_exist_up and self.config.eject_queues_len - len(link_eject) > len(self.eject_reservations["up"][next_node]):
+                                elif not flit_exist_up and self.config.EQ_FIFO_depth - len(link_eject) > len(self.eject_reservations["up"][next_node]):
                                     flit.is_delay = False
                                     flit.is_arrive = True
                                     link[flit.current_seat_index] = None
@@ -1149,13 +1149,13 @@ class Network:
                                 if current - next_node == 1:
                                     # left move
                                     link_station = self.transfer_stations["left"].get((next_node, flit.path[flit.path_index]))
-                                    if len(link_station) < self.config.seats_per_station and flit_exist_left:
+                                    if len(link_station) < self.config.RB_IN_FIFO_depth and flit_exist_left:
                                         flit.is_delay = False
                                         flit.current_link = (next_node, flit.path[flit.path_index])
                                         link[flit.current_seat_index] = None
                                         flit.current_seat_index = 0
                                         self.station_reservations["left"][(next_node, flit.path[flit.path_index])].remove(flit)
-                                    elif not flit_exist_left and self.config.seats_per_station - len(link_station) > len(self.station_reservations["left"][(next_node, flit.path[flit.path_index])]):
+                                    elif not flit_exist_left and self.config.RB_IN_FIFO_depth - len(link_station) > len(self.station_reservations["left"][(next_node, flit.path[flit.path_index])]):
                                         flit.is_delay = False
                                         flit.current_link = (next_node, flit.path[flit.path_index])
                                         link[flit.current_seat_index] = None
@@ -1173,13 +1173,13 @@ class Network:
                                 else:
                                     # right move
                                     link_station = self.transfer_stations["right"].get((next_node, flit.path[flit.path_index]))
-                                    if len(link_station) < self.config.seats_per_station and flit_exist_right:
+                                    if len(link_station) < self.config.RB_IN_FIFO_depth and flit_exist_right:
                                         flit.is_delay = False
                                         flit.current_link = (next_node, flit.path[flit.path_index])
                                         link[flit.current_seat_index] = None
                                         flit.current_seat_index = 1
                                         self.station_reservations["right"][(next_node, flit.path[flit.path_index])].remove(flit)
-                                    elif not flit_exist_right and self.config.seats_per_station - len(link_station) > len(self.station_reservations["right"][(next_node, flit.path[flit.path_index])]):
+                                    elif not flit_exist_right and self.config.RB_IN_FIFO_depth - len(link_station) > len(self.station_reservations["right"][(next_node, flit.path[flit.path_index])]):
                                         flit.is_delay = False
                                         flit.current_link = (next_node, flit.path[flit.path_index])
                                         link[flit.current_seat_index] = None
@@ -1210,13 +1210,13 @@ class Network:
                             if current - next_node == self.config.cols * 2:
                                 # up move
                                 link_eject = self.eject_queues["up"][next_node]
-                                if len(link_eject) < self.config.eject_queues_len and flit_exist_up:
+                                if len(link_eject) < self.config.EQ_FIFO_depth and flit_exist_up:
                                     flit.is_delay = False
                                     flit.is_arrive = True
                                     link[flit.current_seat_index] = None
                                     flit.current_seat_index = 0
                                     self.eject_reservations["up"][next_node].remove(flit)
-                                elif not flit_exist_up and self.config.eject_queues_len - len(link_eject) > len(self.eject_reservations["up"][next_node]):
+                                elif not flit_exist_up and self.config.EQ_FIFO_depth - len(link_eject) > len(self.eject_reservations["up"][next_node]):
                                     flit.is_delay = False
                                     flit.is_arrive = True
                                     link[flit.current_seat_index] = None
@@ -1234,13 +1234,13 @@ class Network:
                             else:
                                 # down move
                                 link_eject = self.eject_queues["down"][next_node]
-                                if len(link_eject) < self.config.eject_queues_len and flit_exist_down:
+                                if len(link_eject) < self.config.EQ_FIFO_depth and flit_exist_down:
                                     flit.is_delay = False
                                     flit.is_arrive = True
                                     link[flit.current_seat_index] = None
                                     flit.current_seat_index = 0
                                     self.eject_reservations["down"][next_node].remove(flit)
-                                elif not flit_exist_down and self.config.eject_queues_len - len(link_eject) > len(self.eject_reservations["down"][next_node]):
+                                elif not flit_exist_down and self.config.EQ_FIFO_depth - len(link_eject) > len(self.eject_reservations["down"][next_node]):
                                     flit.is_delay = False
                                     flit.is_arrive = True
                                     link[flit.current_seat_index] = None
@@ -1281,7 +1281,7 @@ class Network:
                         else:
                             if current - next_node == 1:
                                 station_left = self.transfer_stations["left"].get((new_current, new_next_node))
-                                if self.config.seats_per_station - len(station_left) > len(self.station_reservations["left"][(new_current, new_next_node)]):
+                                if self.config.RB_IN_FIFO_depth - len(station_left) > len(self.station_reservations["left"][(new_current, new_next_node)]):
                                     flit.current_link = (new_current, new_next_node)
                                     link[flit.current_seat_index] = None
                                     flit.current_seat_index = 0
@@ -1295,7 +1295,7 @@ class Network:
                                     flit.current_seat_index = 0
                             elif current - next_node == -1:
                                 station_right = self.transfer_stations["right"].get((new_current, new_next_node))
-                                if self.config.seats_per_station - len(station_right) > len(self.station_reservations["right"][(new_current, new_next_node)]):
+                                if self.config.RB_IN_FIFO_depth - len(station_right) > len(self.station_reservations["right"][(new_current, new_next_node)]):
                                     flit.current_link = (new_current, new_next_node)
                                     link[flit.current_seat_index] = None
                                     flit.current_seat_index = 1
@@ -1310,7 +1310,7 @@ class Network:
                     else:
                         if current - next_node == self.config.cols * 2:
                             eject_up = self.eject_queues["up"][next_node]
-                            if self.config.eject_queues_len - len(eject_up) > len(self.eject_reservations["up"][next_node]):
+                            if self.config.EQ_FIFO_depth - len(eject_up) > len(self.eject_reservations["up"][next_node]):
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
                                 flit.is_arrive = True
@@ -1324,7 +1324,7 @@ class Network:
                                 flit.current_seat_index = 0
                         elif current - next_node == -self.config.cols * 2:
                             eject_down = self.eject_queues["down"][next_node]
-                            if self.config.eject_queues_len - len(eject_down) > len(self.eject_reservations["down"][next_node]):
+                            if self.config.EQ_FIFO_depth - len(eject_down) > len(self.eject_reservations["down"][next_node]):
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
                                 flit.is_arrive = True

@@ -26,10 +26,10 @@ class SimulationConfig:
         self.num_gdma = args.num_gdma
         self.flit_size = args.flit_size
         self.seats_per_link = args.seats_per_link
-        self.seats_per_station = args.seats_per_station
-        self.seats_per_vstation = args.seats_per_vstation
-        self.inject_queues_len = args.inject_queues_len
-        self.eject_queues_len = args.eject_queues_len
+        self.RB_IN_FIFO_depth = args.RB_IN_FIFO_depth
+        self.RB_OUT_FIFO_depth = args.RB_OUT_FIFO_depth
+        self.IQ_FIFO_depth = args.IQ_FIFO_depth
+        self.EQ_FIFO_depth = args.EQ_FIFO_depth
         self.ip_eject_len = args.ip_eject_len
         self.wait_cycle_h = args.wait_cycle_h
         self.wait_cycle_v = args.wait_cycle_v
@@ -60,6 +60,16 @@ class SimulationConfig:
             self.sdma_send_positions = [self.cols * 2 * (x // self.cols) + self.cols + x % self.cols for x in range(self.num_ips)]
             self.l2m_send_positions = [self.cols * 2 * (x // self.cols) + self.cols + x % self.cols for x in range(self.num_ips)]
             self.gdma_send_positions = [self.cols * 2 * (x // self.cols) + self.cols + x % self.cols for x in range(self.num_ips)]
+
+        elif topo_type == "8x8":
+            self.num_nodes = 128
+            self.cols = 8
+            self.num_ips = 32
+            self.rows = self.num_nodes // self.cols
+            self.ddr_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
+            self.sdma_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
+            self.l2m_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
+            self.gdma_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
 
         elif topo_type == "4x9":
             self.num_nodes = 72
@@ -176,10 +186,10 @@ class SimulationConfig:
         parser.add_argument("--num_gdma", type=int, default=default_config["num_gdma"], help="Number of GDMA")
         parser.add_argument("--flit_size", type=int, default=default_config["flit_size"], help="Flit size")
         parser.add_argument("--seats_per_link", type=int, default=default_config["seats_per_link"], help="Seats per link")
-        parser.add_argument("--seats_per_station", type=int, default=default_config["seats_per_station"], help="Seats per station")
-        parser.add_argument("--seats_per_vstation", type=int, default=default_config["seats_per_vstation"], help="Seats per virtual station")
-        parser.add_argument("--inject_queues_len", type=int, default=default_config["inject_queues_len"], help="Length of inject queues")
-        parser.add_argument("--eject_queues_len", type=int, default=default_config["eject_queues_len"], help="Length of eject queues")
+        parser.add_argument("--RB_IN_FIFO_depth", type=int, default=default_config["RB_IN_FIFO_depth"], help="Depth of IN FIFOs in Ring Bridge")
+        parser.add_argument("--RB_OUT_FIFO_depth", type=int, default=default_config["RB_OUT_FIFO_depth"], help="Depth of OUT FIFOs in Ring Bridge")
+        parser.add_argument("--IQ_FIFO_depth", type=int, default=default_config["IQ_FIFO_depth"], help="Depth of IQ FIFOs in inject queues")
+        parser.add_argument("--EQ_FIFO_depth", type=int, default=default_config["EQ_FIFO_depth"], help="Depth of EQ FIFOs in inject queues")
         parser.add_argument("--ip_eject_len", type=int, default=default_config["ip_eject_len"], help="Length of IP eject queues")
         parser.add_argument("--wait_cycle_h", type=int, default=default_config["wait_cycle_h"], help="Horizontal wait cycles")
         parser.add_argument("--wait_cycle_v", type=int, default=default_config["wait_cycle_v"], help="Vertical wait cycles")
