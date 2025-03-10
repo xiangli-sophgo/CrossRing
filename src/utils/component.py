@@ -74,6 +74,7 @@ class Flit:
         self.entry_db_cycle = None
         self.leave_db_cycle = None
         self.is_injected = False
+        self.is_ejected = False
         self.is_new_on_network = True
         self.is_on_station = False
         self.is_delay = False
@@ -102,6 +103,9 @@ class Flit:
 
     def inject(self, network):
         if self.path_index == 0 and not self.is_injected:
+            # self.is_arrive = False
+            # if self.packet_id == 522:
+            #     print(self)
             if len(self.path) > 1:  # Ensure there is a next position
                 next_position = self.path[self.path_index + 1]
                 if network.can_move_to_next(self, self.source, next_position):
@@ -111,7 +115,7 @@ class Flit:
         return False
 
     def __repr__(self):
-        return f"{self.packet_id}.{self.flit_id_in_packet}: {self.current_link}-> {self.current_seat_index}, {self.current_position}; {self.rsp_type}"
+        return f"{self.packet_id}.{self.flit_id_in_packet}: {self.current_link}-> {self.current_seat_index}, {self.current_position}; {self.flit_type}, {self.rsp_type[0] if self.rsp_type else '-'}, {'T' if self.is_arrive else ''}"
 
     @classmethod
     def clear_flit_id(cls):
@@ -881,6 +885,8 @@ class Network:
         return
 
     def _handle_regular_flit(self, flit, link, current, next_node, row_start, row_end, col_start, col_end):
+        # if flit.packet_id == 1784:
+        # print(flit)
         if flit.current_seat_index != len(link) - 1:
             # 节点间进行移动
             link[flit.current_seat_index] = None
@@ -923,6 +929,8 @@ class Network:
                         link[flit.current_seat_index] = None
                         flit.current_seat_index = 0
                         flit.is_arrive = True
+                        # if flit.packet_id == 1784:
+                        #     print(flit)
                     else:
                         opposite_eject_side = "down" if eject_side == "up" else "up"
                         if len(self.eject_reservations[opposite_eject_side][next_node]) < self.config.reservation_num:
@@ -1343,6 +1351,8 @@ class Network:
             current, next_node = flit.current_link
             if current - next_node != self.config.cols:
                 link = self.links.get(flit.current_link)
+                if not link:
+                    print(flit)
                 link[flit.current_seat_index] = flit
             else:
                 if not flit.is_on_station:
@@ -1359,12 +1369,16 @@ class Network:
                     flit.is_on_station = True
             return False
         else:
+            # if flit.packet_id ==  465:
+            #     print(flit)
             if flit.current_link is not None:
                 current, next_node = flit.current_link
             flit.arrival_network_cycle = cycle
             if flit.source - flit.destination == self.config.cols:
                 self.eject_queues["local"][flit.destination].append(flit)
             elif current - next_node == self.config.cols * 2 or (current == next_node and current not in range(0, self.config.cols)):
+                # if flit.packet_id == 1784:
+                #     print(flit)
                 self.eject_queues["up"][next_node].append(flit)
             else:
                 self.eject_queues["down"][next_node].append(flit)

@@ -1,32 +1,32 @@
 import numpy as np
 import random
 
-topo = "3x3"
+topo = "4x9"
 
 if topo in ["4x9", "9x4", "4x5", "5x4"]:
-    f = open("../test_data/demo_459.txt", "w", encoding="utf-8")
-    end_time = 64
+    f = open("../test_data/demo3.txt", "w", encoding="utf-8")
+    end_time = 1
     sdma_pos = range(32)
     gdma_pos = range(32)
     ddr_pos = range(32)
     l2m_pos = range(32)
     rn_num = 32
     np.random.seed(12)
-    burst = 4
+    burst = 1
     speed = {1: 128, 2: 68, 4: 64}
 
     time = [128 // (speed[burst] // burst) * i for i in range(speed[burst] // burst)]
     # print(time)
     data_all = []
 
-    for src in sdma_pos:
-        rand_index = []
-        for i in range(end_time):
-            for j in time:
-                if not rand_index:
-                    rand_index = random.sample(range(rn_num), rn_num)
-                index = rand_index.pop()
-                data_all.append(f"{128 * i + j},{src},sdma,{ddr_pos[index]},ddr,R,{burst}\n")
+    # for src in sdma_pos:
+    #     rand_index = []
+    #     for i in range(end_time):
+    #         for j in time:
+    #             if not rand_index:
+    #                 rand_index = random.sample(range(rn_num), rn_num)
+    #             index = rand_index.pop()
+    #             data_all.append(f"{128 * i + j},{src},sdma,{ddr_pos[index]},ddr,R,{burst}\n")
 
     for src in sdma_pos:
         rand_index = []

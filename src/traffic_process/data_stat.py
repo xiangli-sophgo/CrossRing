@@ -175,4 +175,4 @@ class AddressStat:
 
 if __name__ == "__main__":
     stat = AddressStat(100)
-    stat.run(r"../../traffic/output_All_reduce/step1_flatten")
+    stat.run(r"../../traffic/output_All_reduce_burst2/step1_flatten")

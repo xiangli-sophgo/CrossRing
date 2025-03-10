@@ -10,7 +10,7 @@ data = pd.read_csv(file_path, header=None)
 
 # 选择前面的数字和 "ddr" 列
 # 这里假设前面的数字在第二列（索引为1），"ddr" 在第五列（索引为4）
-numbers = data[3]
+numbers = data[1]
 
 # 统计每个数字出现的次数
 count_series = numbers.value_counts()

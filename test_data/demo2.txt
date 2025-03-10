@@ -1,1 +1,1 @@
-0,0,gdma,5,ddr,R,4
+0,0,gdma,5,ddr,W,4

@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import random
 import json
 import os
-import sys
+import sys, time
 
 import cProfile
 
@@ -254,8 +254,8 @@ class BaseModel:
         print(
             f"T: {self.cycle // self.config.network_frequency}, Req_cnt: {self.req_count} In_Req: {self.req_num}, Rsp: {self.rsp_num},"
             # f"" Sent flits: {self.send_flits_num}, "
-            f" R_fs: {self.send_read_flits_num}, W_fs: {self.send_write_flits_num}, "
-            f"Trans_fs: {self.trans_flits_num}, Recv_fs: {self.flit_network.recv_flits_num}"
+            f" R_fn: {self.send_read_flits_num}, W_fn: {self.send_write_flits_num}, "
+            f"Trans_fn: {self.trans_flits_num}, Recv_fn: {self.flit_network.recv_flits_num}"
         )
 
     def handle_request_injection(self):
@@ -436,6 +436,20 @@ class BaseModel:
         type_mapping = {0: ("sdma", "ddr"), 1: ("gdma", "l2m")}
         return type_mapping.get(self.cycle_mod, ("Idle", "Idle"))
 
+    def error_log(self, flit, target_id):
+        if flit and flit.packet_id == target_id:
+            print(self.cycle, flit)
+
+    def flit_trace(self, packet_id):
+        print
+        (
+            self.cycle,
+            self.req_network.send_flits[packet_id],
+            self.rsp_network.send_flits[packet_id],
+            #   self.flit_network.arrive_flits[packet_id]
+        )
+        # time.sleep(0.1)
+
     def process_requests(self):
         while self.new_write_req and self.new_write_req[0].departure_cycle <= self.cycle:
             req = self.new_write_req[0]
@@ -474,7 +488,7 @@ class BaseModel:
             req.original_destination_type = req_data[4]
             if self.topo_type in ["5x4", "4x5"]:
                 req.source_type = "sdma" if req_data[1] > 15 else "gdma"
-                # req.destination_type = "ddr" if req_data[3] > 15 else "l2m"
+            #     req.destination_type = "ddr" if req_data[3] > 15 else "l2m"
             req.packet_id = Node.get_next_packet_id()
             req.req_type = "read" if req_data[5] == "R" else "write"
             self.req_network.send_flits[req.packet_id].append(req)
@@ -862,7 +876,7 @@ class BaseModel:
             for in_pos in self.flit_position:
                 ip_pos = in_pos - self.config.cols
                 for ip_type in network.eject_queues_pre:
-                    if network.eject_queues_pre[ip_type][ip_pos]:
+                    if req := network.eject_queues_pre[ip_type][ip_pos]:
                         network.ip_eject[ip_type][ip_pos].append(network.eject_queues_pre[ip_type][ip_pos])
                         network.eject_queues_pre[ip_type][ip_pos] = None
 
@@ -932,6 +946,8 @@ class BaseModel:
                     self.node.sn_req_wait[req.req_type][self.sn_type][in_pos].append(req)
             else:
                 self.create_rsp(req, "datasend")
+        if req.packet_id == 1784:
+            print(req)
 
     def _process_transfer_station(self, network, direction, pos, next_pos, curr_node, opposite_node):
         dir_key = f"v{direction}"
@@ -1124,6 +1140,9 @@ class BaseModel:
                 # network.ip_eject[destination_type][ip_pos].append(eject_flits[i])
                 network.eject_queues_pre[destination_type][ip_pos] = eject_flits[i]
                 eject_flits[i].arrival_eject_cycle = self.cycle
+                # print(eject_flits[i])
+                # if eject_flits[i].packet_id == 1:
+                # print(eject_flits[i])
                 eject_flits[i] = None
                 if i == 0:
                     network.eject_queues["up"][ip_pos].popleft()
@@ -1152,9 +1171,9 @@ class BaseModel:
         req.destination_type = flit.source_type
         req.original_source_type = flit.original_destination_type
         req.original_destination_type = flit.original_source_type
-        # if self.topo_type in ["5x4", "4x5"]:
-        #     req.source_type = "sdma" if req.source_original > 15 else "gdma"
-        #     req.destination_type = "ddr" if req.destination_original > 15 else "l2m"
+        if self.topo_type in ["5x4", "4x5"]:
+            req.source_type = "sdma" if req.source_original > 15 else "gdma"
+            req.destination_type = "ddr" if req.destination_original > 15 else "l2m"
         req.packet_id = Node.get_next_packet_id()
         req.req_type = "write"
         self.new_write_req.append(req)
