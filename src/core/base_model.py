@@ -9,6 +9,7 @@ import random
 import json
 import os
 import sys, time
+import inspect
 
 import cProfile
 
@@ -438,17 +439,20 @@ class BaseModel:
 
     def error_log(self, flit, target_id):
         if flit and flit.packet_id == target_id:
-            print(self.cycle, flit)
+            print(
+                # inspect.currentframe().f_back.f_code.co_name,  # 调用函数名称
+                self.cycle,
+                flit,
+            )
 
     def flit_trace(self, packet_id):
-        print
-        (
+        print(
             self.cycle,
             self.req_network.send_flits[packet_id],
             self.rsp_network.send_flits[packet_id],
-            #   self.flit_network.arrive_flits[packet_id]
         )
-        # time.sleep(0.1)
+        #   self.flit_network.arrive_flits[packet_id]
+        time.sleep(0.05)
 
     def process_requests(self):
         while self.new_write_req and self.new_write_req[0].departure_cycle <= self.cycle:

@@ -14,7 +14,7 @@
     "num_gdma": 32,
     "flit_size": 128,
     "seats_per_link": 7,
-    "RB_IN_FIFO_depth": 8,
+    "RB_IN_FIFO_depth": 16,
     "RB_OUT_FIFO_depth": 8,
     "IQ_FIFO_depth": 6,
     "EQ_FIFO_depth": 8,

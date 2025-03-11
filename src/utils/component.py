@@ -39,18 +39,6 @@ class Flit:
     last_id = 0
 
     def __init__(self, source, destination, path):
-        self.flit_type = "flit"
-        self.req_type = None
-        self.req_attr = "new"
-        self.early_rsp = False
-        self.rn_tracker_type = None
-        self.sn_tracker_type = None
-        self.req_state = "valid"
-        self.rsp_type = None
-        self.id = Flit.last_id
-        Flit.last_id += 1
-        self.packet_id = None
-        self.flit_id_in_packet = -1
         self.source = source
         self.source_original = -1
         self.destination = destination
@@ -59,11 +47,33 @@ class Flit:
         self.destination_type = None
         self.burst_length = -1
         self.path = path
-        self.current_position = None
-        self.station_position = None
+        Flit.last_id += 1
+        self.packet_id = None
+        self.moving_direction = self.calculate_direction(path)
+        self.moving_direction_v = 1 if source < destination else -1
+        self.flit_type = "flit"
+        self.req_type = None
+        self.req_attr = "new"
+        self.req_state = "valid"
+        self.id = Flit.last_id
+        self.flit_id_in_packet = -1
+        self.is_last_flit = False
+        self.circuits_completed_v = 0
+        self.circuits_completed_h = 0
+        self.wait_cycle = 0
+        self.wait_cycle_v = 0
         self.path_index = 0
         self.current_seat_index = -1  # flit position index on link
         self.current_link = None
+        self.rsp_type = None
+        self.rn_tracker_type = None
+        self.sn_tracker_type = None
+        self.init_param()
+
+    def init_param(self):
+        self.early_rsp = False
+        self.current_position = None
+        self.station_position = None
         self.departure_cycle = None
         self.req_departure_cycle = None
         self.departure_network_cycle = None
@@ -79,22 +89,14 @@ class Flit:
         self.is_on_station = False
         self.is_delay = False
         self.is_arrive = False
-        self.is_last_flit = False
         self.predicted_duration = 0
         self.actual_duration = 0
         self.actual_ject_duration = 0
         self.actual_network_duration = 0
-        self.circuits_completed_v = 0
-        self.circuits_completed_h = 0
-        self.wait_cycle = 0
-        self.wait_cycle_v = 0
         self.is_tag_v = False
         self.is_tag_h = False
         self.is_tagged = False
         self.ETag_priority = "T2"  # 默认优先级为 T2
-
-        self.moving_direction = self.calculate_direction(path)
-        self.moving_direction_v = 1 if source < destination else -1
 
     def calculate_direction(self, path):
         if len(path) < 2:
@@ -115,7 +117,18 @@ class Flit:
         return False
 
     def __repr__(self):
-        return f"{self.packet_id}.{self.flit_id_in_packet}: {self.current_link}-> {self.current_seat_index}, {self.current_position}; {self.flit_type}, {self.rsp_type[0] if self.rsp_type else '-'}, {'T' if self.is_arrive else ''}"
+        req_attr = "O" if self.req_attr == "old" else "N"
+        rsp_type_display = self.rsp_type[:3] if self.rsp_type else "-"
+        arrive_status = "T" if self.is_arrive else ""
+        eject_status = "E" if self.is_ejected else ""
+
+        return (
+            f"{self.packet_id}.{self.flit_id_in_packet}: "
+            f"{self.current_link} -> {self.current_seat_index}, "
+            f"{self.current_position}; "
+            f"{req_attr}, {self.flit_type}, {rsp_type_display}, "
+            f"{arrive_status}{eject_status}"
+        )
 
     @classmethod
     def clear_flit_id(cls):
@@ -553,11 +566,18 @@ class Network:
             return False
 
     def plan_move(self, flit):
+        # if flit.packet_id == 584:
+        #     print(flit, "plan_move_up")
         if flit.is_new_on_network:
+            # flit.init_param()
+            # if flit.packet_id == 584:  # and flit.req_attr == "old":
+                # print(flit, "plan_move")
             current = flit.source
             next_node = flit.path[flit.path_index + 1]
             flit.current_position = current
             flit.is_new_on_network = False
+            flit.is_arrive = False
+            flit.is_on_station = False
             flit.current_link = (current, next_node)
             flit.current_seat_index = 2 if (current - next_node == self.config.cols) else 0
             flit.path_index += 1
@@ -1351,10 +1371,10 @@ class Network:
             current, next_node = flit.current_link
             if current - next_node != self.config.cols:
                 link = self.links.get(flit.current_link)
-                if not link:
-                    print(flit)
                 link[flit.current_seat_index] = flit
             else:
+                # if flit.packet_id == 535:
+                # print(flit, 'execute_moves')
                 if not flit.is_on_station:
                     if flit.current_seat_index == 0:
                         self.transfer_stations["left"][flit.current_link].append(flit)
@@ -1375,12 +1395,17 @@ class Network:
                 current, next_node = flit.current_link
             flit.arrival_network_cycle = cycle
             if flit.source - flit.destination == self.config.cols:
+                if len(self.eject_queues["local"][flit.destination]) >= self.config.EQ_FIFO_depth:
+                    return False
                 self.eject_queues["local"][flit.destination].append(flit)
             elif current - next_node == self.config.cols * 2 or (current == next_node and current not in range(0, self.config.cols)):
-                # if flit.packet_id == 1784:
-                #     print(flit)
+                if len(self.eject_queues["up"][next_node]) >= self.config.EQ_FIFO_depth:
+                    return False
                 self.eject_queues["up"][next_node].append(flit)
             else:
+                # assert current - next_node == - self.config.cols * 2
+                if len(self.eject_queues["down"][next_node]) >= self.config.EQ_FIFO_depth:
+                    return False
                 self.eject_queues["down"][next_node].append(flit)
             return True
 

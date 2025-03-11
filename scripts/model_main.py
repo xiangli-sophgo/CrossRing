@@ -18,7 +18,7 @@ def main():
 
     # traffic_file_path = r"../../traffic/"
     # traffic_file_path = r"../traffic/output_All_reduce/step5_data_merge/"
-    traffic_file_path = r"../traffic/output_All_reduce_burst2/step5_data_merge/"
+    # traffic_file_path = r"../traffic/output_All_reduce_burst2/step5_data_merge/"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"LLama2_MLP_Trace.txt"

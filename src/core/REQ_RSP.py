@@ -28,7 +28,7 @@ class REQ_RSP_model(BaseModel):
             self.rn_type, self.sn_type = self.get_network_types()
 
             self.check_and_release_sn_tracker()
-            self.flit_trace(522)
+            self.flit_trace(584)
 
             # Process requests
             self.process_requests()
@@ -135,6 +135,7 @@ class REQ_RSP_model(BaseModel):
                     (req for req in self.node.sn_tracker[self.sn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
+
                 self.req_cir_h_total += req.circuits_completed_h
                 self.req_cir_v_total += req.circuits_completed_v
                 for flit in self.flit_network.arrive_flits[packet_id]:
@@ -178,8 +179,15 @@ class REQ_RSP_model(BaseModel):
 
                 if self.node.sn_wdb_count[sn_type][in_pos] > 0 and self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] > 0 and self.node.sn_req_wait[req.req_type][sn_type][in_pos]:
                     new_req = self.node.sn_req_wait[req.req_type][sn_type][in_pos].pop(0)
+                    # if new_req.packet_id == 658:  # and flit.req_attr == "old":
+                    #     print(new_req, "release_sn_tracker")
+                    # new_req.init_param()
                     new_req.sn_tracker_type = req.sn_tracker_type
                     new_req.req_attr = "old"
+                    new_req.is_arrive = False
+                    new_req.path_index = 0
+                    # # new_req.is_new_on_network = True
+
                     self.node.sn_tracker[sn_type][in_pos].append(new_req)
                     self.node.sn_tracker_count[sn_type][new_req.sn_tracker_type][in_pos] -= 1
                     self.node.sn_wdb_count[sn_type][in_pos] -= new_req.burst_length
@@ -463,6 +471,8 @@ class REQ_RSP_model(BaseModel):
     def classify_flits(self, flits):
         transfer_station_flits, vertical_flits, horizontal_flits, new_flits, local_flits = [], [], [], [], []
         for flit in flits:
+            # if flit.packet_id == 584:  # and flit.req_attr == 'old':
+            #     print(flit)
             if flit.source - flit.destination == self.config.cols:
                 flit.is_new_on_network = False
                 flit.is_arrive = True
@@ -486,6 +496,8 @@ class REQ_RSP_model(BaseModel):
 
         # 处理新到达的flits
         for flit in new_flits + horizontal_flits:
+            # if flit.packet_id == 658:
+            #     print(flit, "flit_move")
             network.plan_move(flit)
 
         # 处理transfer station的flits
@@ -505,6 +517,9 @@ class REQ_RSP_model(BaseModel):
                 station_flits = [
                     network.transfer_stations[fifo_pos][(pos, next_pos)][0] if network.transfer_stations[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]
                 ]
+                # for f in station_flits:
+                #     if f and f.packet_id == 535 and f.req_attr == "old":
+                #         print(f)
                 # if not all(flit is None for flit in station_flits):
                 #     print(station_flits)
 
@@ -559,6 +574,8 @@ class REQ_RSP_model(BaseModel):
 
         # 执行所有flit的移动
         for flit in vertical_flits + horizontal_flits + new_flits + local_flits:
+            # if flit.packet_id == 658 and flit.req_attr == "old":
+            #     print(flit)
             if network.execute_moves(flit, self.cycle):
                 flits.remove(flit)
 
@@ -874,19 +891,26 @@ class REQ_RSP_model(BaseModel):
                     req.req_state = "invalid"
                     req.is_injected = False
                     req.path_index = 0
-                    
-                    # req.is_arrive = False
-                    # req.current_position = in_pos
-                    # req.current_link = (in_pos, req.path[req.path_index + 1])
+
                     # # self.error_log(req, 522)
                     # req.current_seat_index = -1
-                    
+
                     self.node.rn_tracker_wait["write"][self.rn_type][in_pos].append(req)
                 # else:
                 #     print(req, '---')
             elif rsp.rsp_type == "positive":
                 self.positive_rsp_num += 1
+                if rsp.packet_id == 584:
+                    print(rsp)
+                
                 req.req_state = "valid"
+                req.is_arrive = False
+                req.current_position = in_pos
+                req.current_link = (in_pos, req.path[req.path_index + 1])
+                req.current_seat_index = 2 if (in_pos - req.path[req.path_index + 1] == self.config.cols) else 0
+                req.path_index += 1
+                # req.is_new_on_network = True
+                # req.is_arrive = False
                 self.node.rn_wdb_reserve[self.rn_type][in_pos] += 1
                 if req not in self.node.rn_tracker_wait["write"][self.rn_type][in_pos]:
                     req.is_injected = False
@@ -901,7 +925,7 @@ class REQ_RSP_model(BaseModel):
 
     def process_eject_queues(self, network, eject_flits, rr_queue, destination_type, ip_pos):
         for i in rr_queue:
-            self.error_log(eject_flits[i], 522)
+            # self.error_log(eject_flits[i], 535)
             # BUG：
             if eject_flits[i] is not None and eject_flits[i].destination_type == destination_type and len(network.ip_eject[destination_type][ip_pos]) < network.config.ip_eject_len:
                 # network.ip_eject[destination_type][ip_pos].append(eject_flits[i])
