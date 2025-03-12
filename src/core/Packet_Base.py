@@ -468,29 +468,27 @@ class Packet_Base_model(BaseModel):
 
                 # 获取各方向的flit
                 # station_flits = [
-                #     network.transfer_stations["up"][(pos, next_pos)][0] if network.transfer_stations["up"][(pos, next_pos)] else None,
-                #     network.transfer_stations["left"][(pos, next_pos)][0] if network.transfer_stations["left"][(pos, next_pos)] else None,
-                #     network.transfer_stations["right"][(pos, next_pos)][0] if network.transfer_stations["right"][(pos, next_pos)] else None,
-                #     network.transfer_stations["ft"][(pos, next_pos)][0] if network.transfer_stations["ft"][(pos, next_pos)] else None,
+                #     network.ring_bridge["up"][(pos, next_pos)][0] if network.ring_bridge["up"][(pos, next_pos)] else None,
+                #     network.ring_bridge["left"][(pos, next_pos)][0] if network.ring_bridge["left"][(pos, next_pos)] else None,
+                #     network.ring_bridge["right"][(pos, next_pos)][0] if network.ring_bridge["right"][(pos, next_pos)] else None,
+                #     network.ring_bridge["ft"][(pos, next_pos)][0] if network.ring_bridge["ft"][(pos, next_pos)] else None,
                 # ]
-                station_flits = [
-                    network.transfer_stations[fifo_pos][(pos, next_pos)][0] if network.transfer_stations[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]
-                ]
+                station_flits = [network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]]
                 # if not all(flit is None for flit in station_flits):
                 #     print(station_flits)
 
                 # 处理eject操作
-                if len(network.transfer_stations["eject"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
+                if len(network.ring_bridge["eject"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
                     eject_flit = self._process_eject_flit(network, station_flits, pos, next_pos)
 
                 # 处理vup操作
-                if len(network.transfer_stations["vup"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
+                if len(network.ring_bridge["vup"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
                     if vup_flit:
                         print(vup_flit)
                     vup_flit = self._process_vup_flit(network, station_flits, pos, next_pos)
 
                 # 处理vdown操作
-                if len(network.transfer_stations["vdown"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
+                if len(network.ring_bridge["vdown"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
                     if vdown_flit:
                         print(vdown_flit)
                     vdown_flit = self._process_vdown_flit(network, station_flits, pos, next_pos)
@@ -498,8 +496,8 @@ class Packet_Base_model(BaseModel):
                 # transfer_eject
                 # 处理eject队列
                 # TODO: eject_queue -> ETag
-                if next_pos in network.eject_queues["mid"] and len(network.eject_queues["mid"][next_pos]) < self.config.EQ_FIFO_depth and network.transfer_stations["eject"][(pos, next_pos)]:
-                    flit = network.transfer_stations["eject"][(pos, next_pos)].popleft()
+                if next_pos in network.eject_queues["mid"] and len(network.eject_queues["mid"][next_pos]) < self.config.EQ_FIFO_depth and network.ring_bridge["eject"][(pos, next_pos)]:
+                    flit = network.ring_bridge["eject"][(pos, next_pos)].popleft()
                     flit.is_arrive = True
 
                 up_node, down_node = next_pos - self.config.cols * 2, next_pos + self.config.cols * 2
@@ -514,11 +512,11 @@ class Packet_Base_model(BaseModel):
                 self._process_transfer_station(network, "down", pos, next_pos, up_node, down_node)
 
                 if eject_flit:
-                    network.transfer_stations["eject"][(pos, next_pos)].append(eject_flit)
+                    network.ring_bridge["eject"][(pos, next_pos)].append(eject_flit)
                 if vup_flit:
-                    network.transfer_stations["vup"][(pos, next_pos)].append(vup_flit)
+                    network.ring_bridge["vup"][(pos, next_pos)].append(vup_flit)
                 if vdown_flit:
-                    network.transfer_stations["vdown"][(pos, next_pos)].append(vdown_flit)
+                    network.ring_bridge["vdown"][(pos, next_pos)].append(vdown_flit)
 
         # 处理纵向flits的移动
         for flit in vertical_flits:
@@ -549,14 +547,14 @@ class Packet_Base_model(BaseModel):
         if station_flits[3] and station_flits[3].destination == next_pos:
             eject_flit = station_flits[3]
             station_flits[3] = None
-            network.transfer_stations["ft"][(pos, next_pos)].popleft()
+            network.ring_bridge["ft"][(pos, next_pos)].popleft()
         else:
             index = network.round_robin["mid"][next_pos]
             for i in index:
                 if station_flits[i] and station_flits[i].destination == next_pos:
                     eject_flit = station_flits[i]
                     station_flits[i] = None
-                    self._update_transfer_stations(network, pos, next_pos, i)
+                    self._update_ring_bridge(network, pos, next_pos, i)
                     break
 
         return eject_flit
@@ -567,14 +565,14 @@ class Packet_Base_model(BaseModel):
 
         if station_flits[3] and station_flits[3].destination < next_pos:
             vup_flit = station_flits[3]
-            network.transfer_stations["ft"][(pos, next_pos)].popleft()
+            network.ring_bridge["ft"][(pos, next_pos)].popleft()
         else:
             index = network.round_robin["up"][next_pos]
             for i in index:
                 if station_flits[i] and station_flits[i].destination < next_pos:
                     vup_flit = station_flits[i]
                     station_flits[i] = None
-                    self._update_transfer_stations(network, pos, next_pos, i)
+                    self._update_ring_bridge(network, pos, next_pos, i)
                     break
 
         return vup_flit
@@ -585,26 +583,26 @@ class Packet_Base_model(BaseModel):
 
         if station_flits[3] and station_flits[3].destination > next_pos:
             vdown_flit = station_flits[3]
-            network.transfer_stations["ft"][(pos, next_pos)].popleft()
+            network.ring_bridge["ft"][(pos, next_pos)].popleft()
         else:
             index = network.round_robin["down"][next_pos]
             for i in index:
                 if station_flits[i] and station_flits[i].destination > next_pos:
                     vdown_flit = station_flits[i]
                     station_flits[i] = None
-                    self._update_transfer_stations(network, pos, next_pos, i)
+                    self._update_ring_bridge(network, pos, next_pos, i)
                     break
 
         return vdown_flit
 
-    def _update_transfer_stations(self, network, pos, next_pos, index):
+    def _update_ring_bridge(self, network, pos, next_pos, index):
         """更新transfer stations"""
         if index == 0:
-            network.transfer_stations["up"][(pos, next_pos)].popleft()
+            network.ring_bridge["up"][(pos, next_pos)].popleft()
         elif index == 1:
-            network.transfer_stations["left"][(pos, next_pos)].popleft()
+            network.ring_bridge["left"][(pos, next_pos)].popleft()
         elif index == 2:
-            network.transfer_stations["right"][(pos, next_pos)].popleft()
+            network.ring_bridge["right"][(pos, next_pos)].popleft()
         network.round_robin["mid"][next_pos].remove(index)
         network.round_robin["mid"][next_pos].append(index)
 
@@ -768,7 +766,7 @@ class Packet_Base_model(BaseModel):
     def _process_transfer_station(self, network, direction, pos, next_pos, curr_node, opposite_node):
         dir_key = f"v{direction}"
 
-        if network.transfer_stations[dir_key][(pos, next_pos)]:
+        if network.ring_bridge[dir_key][(pos, next_pos)]:
             link = (curr_node, next_pos)
             if network.links[link][-1]:
                 flit_l = network.links[link][-1]
@@ -808,7 +806,7 @@ class Packet_Base_model(BaseModel):
                     return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
 
     def _update_flit_state(self, network, ts_key, pos, next_pos, target_node, direction):
-        flit = network.transfer_stations[ts_key][(pos, next_pos)].popleft()
+        flit = network.ring_bridge[ts_key][(pos, next_pos)].popleft()
         flit.current_position = next_pos
         flit.path_index += 1
         flit.current_link = (next_pos, target_node)
@@ -817,13 +815,13 @@ class Packet_Base_model(BaseModel):
         return True
 
     def _handle_wait_cycles(self, network, ts_key, pos, next_pos, direction, link):
-        if network.transfer_stations[ts_key][(pos, next_pos)][0].wait_cycle_v > self.config.wait_cycle_v and not network.transfer_stations[ts_key][(pos, next_pos)][0].is_tag_v:
+        if network.ring_bridge[ts_key][(pos, next_pos)][0].wait_cycle_v > self.config.wait_cycle_v and not network.ring_bridge[ts_key][(pos, next_pos)][0].is_tag_v:
             if network.remain_tag[direction][next_pos] > 0:
                 network.remain_tag[direction][next_pos] -= 1
                 network.links_tag[link][-1] = [next_pos, direction]
-                network.transfer_stations[ts_key][(pos, next_pos)][0].is_tag_v = True
+                network.ring_bridge[ts_key][(pos, next_pos)][0].is_tag_v = True
         else:
-            for flit in network.transfer_stations[ts_key][(pos, next_pos)]:
+            for flit in network.ring_bridge[ts_key][(pos, next_pos)]:
                 flit.wait_cycle_v += 1
         return False
 

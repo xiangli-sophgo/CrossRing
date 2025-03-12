@@ -1,19 +1,19 @@
-import step1_flatten
-import step2_hash_addr2node
+from src.traffic_process import step1_flatten
+from src.traffic_process import step2_hash_addr2node
 
 # import step3_data_reduced
 # import step4_add_4N
-import step5_data_merge
-import step6_core32_map
+from src.traffic_process import step5_data_merge
+from src.traffic_process import step6_core32_map
 
 # import AddPacketId
 
 
 # path为输入Trace的文件夹名称,path和代码在同一路径
 
-path = "../../traffic/data/All_reduce_burst2/"
+path = "../traffic/data/All_reduce_burst2/"
 # path += "ins_SG2262_Ring_all_reduce_8cluster_all2all"
-output_path = "../../traffic/output_All_reduce_burst2/"
+output_path = "../traffic/output_All_reduce_burst2/"
 # # outstanding_num必须为2的幂
 outstanding_num = 256
 assert isinstance(outstanding_num, int), "outstanding_num must be integer or out of range."
