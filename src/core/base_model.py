@@ -312,7 +312,7 @@ class BaseModel:
                 for direction in self.directions:
                     queue = self.rsp_network.inject_queues[direction]
                     queue_pre = self.rsp_network.inject_queues_pre[direction]
-                    if self.direction_conditions[direction](rsp) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
+                    if self.direction_conditions[direction](rsp) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                         queue_pre[ip_pos] = rsp
                         self.node.sn_rsp_queue[sn_type][ip_pos].pop(0)
 
@@ -331,7 +331,7 @@ class BaseModel:
                     if flit := inject_flits[i]:
                         queue = self.flit_network.inject_queues[direction]
                         queue_pre = self.flit_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
+                        if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                             queue_pre[flit.source] = flit
                             self.send_flits_num += 1
                             self.trans_flits_num += 1
@@ -516,7 +516,7 @@ class BaseModel:
                         for direction in self.directions:
                             queue_pre = self.req_network.inject_queues_pre[direction]
                             queue = self.req_network.inject_queues[direction]
-                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
+                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                                 queue_pre[ip_pos] = req
                                 self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
                                 self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
@@ -529,7 +529,7 @@ class BaseModel:
                         for direction in self.directions:
                             queue = self.req_network.inject_queues[direction]
                             queue_pre = self.req_network.inject_queues_pre[direction]
-                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
+                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                                 queue_pre[ip_pos] = req
                                 self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] += 1
                                 self.req_network.last_select[self.rn_type][ip_pos] = "read"
@@ -541,7 +541,7 @@ class BaseModel:
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(req)
                             self.node.rn_wdb_reserve[self.rn_type][ip_pos] -= 1
@@ -552,7 +552,7 @@ class BaseModel:
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] += 1
                             self.req_network.last_select[self.rn_type][ip_pos] = "write"
@@ -565,7 +565,7 @@ class BaseModel:
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
                             self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
@@ -578,7 +578,7 @@ class BaseModel:
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] += 1
                             self.req_network.last_select[self.rn_type][ip_pos] = "read"
@@ -591,7 +591,7 @@ class BaseModel:
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(req)
                             self.node.rn_wdb_reserve[self.rn_type][ip_pos] -= 1
@@ -602,7 +602,7 @@ class BaseModel:
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_FIFO_depth:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] += 1
                             self.req_network.last_select[self.rn_type][ip_pos] = "write"
@@ -660,17 +660,17 @@ class BaseModel:
                 #     print(station_flits)
 
                 # 处理eject操作
-                if len(network.ring_bridge["eject"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
+                if len(network.ring_bridge["eject"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
                     eject_flit = self._process_eject_flit(network, station_flits, pos, next_pos)
 
                 # 处理vup操作
-                if len(network.ring_bridge["vup"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
+                if len(network.ring_bridge["vup"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
                     if vup_flit:
                         print(vup_flit)
                     vup_flit = self._process_vup_flit(network, station_flits, pos, next_pos)
 
                 # 处理vdown操作
-                if len(network.ring_bridge["vdown"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
+                if len(network.ring_bridge["vdown"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
                     if vdown_flit:
                         print(vdown_flit)
                     vdown_flit = self._process_vdown_flit(network, station_flits, pos, next_pos)
@@ -678,7 +678,7 @@ class BaseModel:
                 # transfer_eject
                 # 处理eject队列
                 # TODO: eject_queue -> ETag
-                if next_pos in network.eject_queues["mid"] and len(network.eject_queues["mid"][next_pos]) < self.config.EQ_FIFO_depth and network.ring_bridge["eject"][(pos, next_pos)]:
+                if next_pos in network.eject_queues["mid"] and len(network.eject_queues["mid"][next_pos]) < self.config.EQ_IN_FIFO_DEPTH and network.ring_bridge["eject"][(pos, next_pos)]:
                     flit = network.ring_bridge["eject"][(pos, next_pos)].popleft()
                     flit.is_arrive = True
 
@@ -959,7 +959,7 @@ class BaseModel:
                         if network.links_tag[link][-1] == [
                             next_pos,
                             direction,
-                        ] and network.config.EQ_FIFO_depth - len(
+                        ] and network.config.EQ_IN_FIFO_DEPTH - len(
                             eject_queue
                         ) > len(reservations):
                             network.remain_tag[direction][next_pos] += 1
@@ -968,7 +968,7 @@ class BaseModel:
                 elif flit_l.destination == next_pos:
                     eject_queue = network.eject_queues[direction][next_pos]
                     reservations = network.eject_reservations[direction][next_pos]
-                    # TODO: EQ_FIFO_depth -> ETag
+                    # TODO: EQ_IN_FIFO_DEPTH -> ETag
                     return (
                         self._update_flit_state(
                             network,
@@ -978,7 +978,7 @@ class BaseModel:
                             opposite_node,
                             direction,
                         )
-                        if network.config.EQ_FIFO_depth - len(eject_queue) > len(reservations)
+                        if network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations)
                         else self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
                     )
                 else:

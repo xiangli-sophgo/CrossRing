@@ -26,10 +26,10 @@ class SimulationConfig:
         self.num_gdma = args.num_gdma
         self.flit_size = args.flit_size
         self.seats_per_link = args.seats_per_link
-        self.RB_IN_FIFO_depth = args.RB_IN_FIFO_depth
-        self.RB_OUT_FIFO_depth = args.RB_OUT_FIFO_depth
-        self.IQ_FIFO_depth = args.IQ_FIFO_depth
-        self.EQ_FIFO_depth = args.EQ_FIFO_depth
+        self.RB_IN_FIFO_DEPTH = args.RB_IN_FIFO_DEPTH
+        self.RB_OUT_FIFO_DEPTH = args.RB_OUT_FIFO_DEPTH
+        self.IQ_OUT_FIFO_DEPTH = args.IQ_OUT_FIFO_DEPTH
+        self.EQ_IN_FIFO_DEPTH = args.EQ_IN_FIFO_DEPTH
         self.ip_eject_len = args.ip_eject_len
         self.wait_cycle_h = args.wait_cycle_h
         self.wait_cycle_v = args.wait_cycle_v
@@ -44,6 +44,20 @@ class SimulationConfig:
         self.sn_wdb_size = args.sn_wdb_size
         self.ddr_latency = args.ddr_latency
         self.sn_tracker_release_latency = args.sn_tracker_release_latency
+        self.TL_Etag_T1_UE_MAX = args.TL_Etag_T1_UE_MAX
+        self.TL_Etag_T2_UE_MAX = args.TL_Etag_T2_UE_MAX
+        self.TR_Etag_T2_UE_MAX = args.TR_Etag_T2_UE_MAX
+        self.TU_Etag_T1_UE_MAX = args.TU_Etag_T1_UE_MAX
+        self.TU_Etag_T2_UE_MAX = args.TU_Etag_T2_UE_MAX
+        self.TD_Etag_T2_UE_MAX = args.TD_Etag_T2_UE_MAX
+        assert (
+            self.TL_Etag_T2_UE_MAX < self.TL_Etag_T1_UE_MAX < self.RB_IN_FIFO_DEPTH
+            and self.TL_Etag_T2_UE_MAX < self.RB_IN_FIFO_DEPTH - 2
+            and self.TR_Etag_T2_UE_MAX < self.RB_IN_FIFO_DEPTH - 1
+            and self.TU_Etag_T2_UE_MAX < self.TU_Etag_T1_UE_MAX < self.EQ_IN_FIFO_DEPTH
+            and self.TU_Etag_T2_UE_MAX < self.EQ_IN_FIFO_DEPTH - 2
+            and self.TD_Etag_T2_UE_MAX < self.EQ_IN_FIFO_DEPTH - 1
+        ), "ETag parameter conditions are not met."
         self.update_config()
 
     def update_config(self):
@@ -186,10 +200,10 @@ class SimulationConfig:
         parser.add_argument("--num_gdma", type=int, default=default_config["num_gdma"], help="Number of GDMA")
         parser.add_argument("--flit_size", type=int, default=default_config["flit_size"], help="Flit size")
         parser.add_argument("--seats_per_link", type=int, default=default_config["seats_per_link"], help="Seats per link")
-        parser.add_argument("--RB_IN_FIFO_depth", type=int, default=default_config["RB_IN_FIFO_depth"], help="Depth of IN FIFOs in Ring Bridge")
-        parser.add_argument("--RB_OUT_FIFO_depth", type=int, default=default_config["RB_OUT_FIFO_depth"], help="Depth of OUT FIFOs in Ring Bridge")
-        parser.add_argument("--IQ_FIFO_depth", type=int, default=default_config["IQ_FIFO_depth"], help="Depth of IQ FIFOs in inject queues")
-        parser.add_argument("--EQ_FIFO_depth", type=int, default=default_config["EQ_FIFO_depth"], help="Depth of EQ FIFOs in inject queues")
+        parser.add_argument("--RB_IN_FIFO_DEPTH", type=int, default=default_config["RB_IN_FIFO_DEPTH"], help="Depth of IN FIFOs in Ring Bridge")
+        parser.add_argument("--RB_OUT_FIFO_DEPTH", type=int, default=default_config["RB_OUT_FIFO_DEPTH"], help="Depth of OUT FIFOs in Ring Bridge")
+        parser.add_argument("--IQ_OUT_FIFO_DEPTH", type=int, default=default_config["IQ_OUT_FIFO_DEPTH"], help="Depth of IQ FIFOs in inject queues")
+        parser.add_argument("--EQ_IN_FIFO_DEPTH", type=int, default=default_config["EQ_IN_FIFO_DEPTH"], help="Depth of EQ FIFOs in inject queues")
         parser.add_argument("--ip_eject_len", type=int, default=default_config["ip_eject_len"], help="Length of IP eject queues")
         parser.add_argument("--wait_cycle_h", type=int, default=default_config["wait_cycle_h"], help="Horizontal wait cycles")
         parser.add_argument("--wait_cycle_v", type=int, default=default_config["wait_cycle_v"], help="Vertical wait cycles")
@@ -199,11 +213,18 @@ class SimulationConfig:
         parser.add_argument("--reservation_num", type=int, default=default_config["reservation_num"], help="Reservation number")
         parser.add_argument("--ddr_latency", type=int, default=default_config["ddr_latency"], help="Reservation number")
         parser.add_argument("--sn_tracker_release_latency", type=int, default=default_config["sn_tracker_release_latency"], help="Reservation number")
+
         parser.add_argument("--burst", type=int, default=default_config["burst"], help="Burst length")
         parser.add_argument("--network_frequency", type=float, default=default_config["network_frequency"], help="Network frequency")
         parser.add_argument("--rn_rdb_size", type=int, default=default_config["rn_rdb_size"], help="RN read buffer size")
         parser.add_argument("--rn_wdb_size", type=int, default=default_config["rn_wdb_size"], help="RN write buffer size")
         parser.add_argument("--sn_wdb_size", type=int, default=default_config["sn_wdb_size"], help="SN write buffer size")
         parser.add_argument("-tt", "--topo_type", type=str, default="", help="Choose topology type id from [4x9, 4x5, 5x4, 9x4, 3x3]")
+        parser.add_argument("--TL_Etag_T1_UE_MAX", type=int, default=default_config["TL_Etag_T1_UE_MAX"], help="Horizontal cross point towards left T1 ETag FIFO Entry number")
+        parser.add_argument("--TL_Etag_T2_UE_MAX", type=int, default=default_config["TL_Etag_T2_UE_MAX"], help="Horizontal cross point towards left T2 ETag FIFO Entry number")
+        parser.add_argument("--TR_Etag_T2_UE_MAX", type=int, default=default_config["TR_Etag_T2_UE_MAX"], help="Horizontal cross point towards right T2 ETag FIFO Entry number")
+        parser.add_argument("--TU_Etag_T1_UE_MAX", type=int, default=default_config["TU_Etag_T1_UE_MAX"], help="Vertival cross point towards up T1 ETag FIFO Entry number")
+        parser.add_argument("--TU_Etag_T2_UE_MAX", type=int, default=default_config["TU_Etag_T2_UE_MAX"], help="Vertival cross point towards up T2 ETag FIFO Entry number")
+        parser.add_argument("--TD_Etag_T2_UE_MAX", type=int, default=default_config["TD_Etag_T2_UE_MAX"], help="Vertival cross point towards down T2 ETag FIFO Entry number")
 
         return parser.parse_args()

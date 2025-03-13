@@ -25,8 +25,9 @@ def main():
     # file_name = r"LLama2_MM_QKV_Trace.txt"
     file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
 
-    model_type = "REQ_RSP"
+    # model_type = "REQ_RSP"
     # model_type = "Packet_Base"
+    model_type = "Feature"
 
     p1 = 128
     p2 = 32

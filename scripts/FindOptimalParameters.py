@@ -89,10 +89,10 @@ def find_optimal_parameters():
                 sim.config.share_tracker_ostd = 32
                 sim.config.sn_wdb_size = sim.config.share_tracker_ostd * 4
                 sim.config.seats_per_link = 7
-                sim.config.IQ_FIFO_depth = 6
-                sim.config.EQ_FIFO_depth = 8
-                sim.config.RB_IN_FIFO_depth = parm1
-                sim.config.RB_OUT_FIFO_depth = parm2
+                sim.config.IQ_OUT_FIFO_DEPTH = 6
+                sim.config.EQ_IN_FIFO_DEPTH = 8
+                sim.config.RB_IN_FIFO_DEPTH = parm1
+                sim.config.RB_OUT_FIFO_DEPTH = parm2
             elif topo_type in ["3x3"]:
                 sim.config.rn_read_tracker_ostd = 64
                 sim.config.rn_write_tracker_ostd = 32
@@ -102,10 +102,10 @@ def find_optimal_parameters():
                 sim.config.share_tracker_ostd = 64
                 sim.config.sn_wdb_size = sim.config.share_tracker_ostd * 4
                 sim.config.seats_per_link = 7
-                sim.config.IQ_FIFO_depth = 6
-                sim.config.EQ_FIFO_depth = 8
-                sim.config.RB_IN_FIFO_depth = parm1
-                sim.config.RB_OUT_FIFO_depth = parm2
+                sim.config.IQ_OUT_FIFO_DEPTH = 6
+                sim.config.EQ_IN_FIFO_DEPTH = 8
+                sim.config.RB_IN_FIFO_DEPTH = parm1
+                sim.config.RB_OUT_FIFO_DEPTH = parm2
 
             # sim.config.update_config()
             sim.initial()
@@ -137,8 +137,8 @@ def find_optimal_parameters():
                 "TotalBandWidth": sim.read_BW + sim.write_BW,
                 "FinishCycle": sim.finish_time * sim.config.network_frequency,
                 "SliceNum": sim.config.seats_per_link,
-                "EQ_FIFO_depth": sim.config.EQ_FIFO_depth,
-                "IQ_FIFO_depth": sim.config.IQ_FIFO_depth,
+                "EQ_IN_FIFO_DEPTH": sim.config.EQ_IN_FIFO_DEPTH,
+                "IQ_OUT_FIFO_DEPTH": sim.config.IQ_OUT_FIFO_DEPTH,
                 "sdma-R-DDR_thoughput": sim.sdma_R_ddr_flit_num * 128 / sim.sdma_R_ddr_finish_time / 4 if sim.sdma_R_ddr_finish_time > 0 else 0,
                 "sdma-W-L2M_thoughput": sim.sdma_W_l2m_flit_num * 128 / sim.sdma_W_l2m_finish_time / 4 if sim.sdma_W_l2m_finish_time > 0 else 0,
                 "gdma-R-L2M_thoughput": sim.gdma_R_l2m_flit_num * 128 / sim.gdma_R_l2m_finish_time / 4 if sim.gdma_R_l2m_finish_time > 0 else 0,
@@ -154,13 +154,13 @@ def find_optimal_parameters():
                 "rsp_cir_v_total": sim.rsp_cir_v_total,
                 "data_cir_h_total": sim.data_cir_h_total,
                 "data_cir_v_total": sim.data_cir_v_total,
-                "inject_queue_length": sim.config.IQ_FIFO_depth,
-                "eject_queue_length": sim.config.EQ_FIFO_depth,
+                "inject_queue_length": sim.config.IQ_OUT_FIFO_DEPTH,
+                "eject_queue_length": sim.config.EQ_IN_FIFO_DEPTH,
                 "read_retry_num": sim.read_retry_num,
                 "write_retry_num": sim.write_retry_num,
                 "model_type": sim.model_type,
-                "RB_IN_FIFO": sim.config.RB_IN_FIFO_depth,
-                "RB_OUT_FIFO": sim.config.RB_OUT_FIFO_depth,
+                "RB_IN_FIFO": sim.config.RB_IN_FIFO_DEPTH,
+                "RB_OUT_FIFO": sim.config.RB_OUT_FIFO_DEPTH,
                 "Topo": topo_type,
             }
 
