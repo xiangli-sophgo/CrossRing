@@ -252,7 +252,6 @@ class Packet_Base_model(BaseModel):
         Inject data flits into the network.
         """
         for ip_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions + self.config.sdma_send_positions + self.config.gdma_send_positions):
-            # BUG: rn_wdb 里面flit,还有但是rn_wdb_send里面没有了,导致flit没有发完。
             inject_flits = [
                 (self.node.sn_rdb[self.sn_type][ip_pos][0] if self.node.sn_rdb[self.sn_type][ip_pos] and self.node.sn_rdb[self.sn_type][ip_pos][0].departure_cycle <= self.cycle else None),
                 (self.node.rn_wdb[self.rn_type][ip_pos][self.node.rn_wdb_send[self.rn_type][ip_pos][0]][0] if len(self.node.rn_wdb_send[self.rn_type][ip_pos]) > 0 else None),
@@ -432,7 +431,7 @@ class Packet_Base_model(BaseModel):
             queue_pre[ip_pos] = None
 
     def classify_flits(self, flits):
-        transfer_station_flits, vertical_flits, horizontal_flits, new_flits, local_flits = [], [], [], [], []
+        ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits = [], [], [], [], []
         for flit in flits:
             if flit.source - flit.destination == self.config.cols:
                 flit.is_new_on_network = False
@@ -442,18 +441,18 @@ class Packet_Base_model(BaseModel):
                 new_flits.append(flit)
             elif flit.current_link[0] - flit.current_link[1] == self.config.cols:
                 # Ring bridge: 横向环到纵向环
-                transfer_station_flits.append(flit)
+                ring_bridge_flits.append(flit)
             elif abs(flit.current_link[0] - flit.current_link[1]) == 1:
                 # 横向环
                 horizontal_flits.append(flit)
             else:
                 # 纵向环
                 vertical_flits.append(flit)
-        return transfer_station_flits, vertical_flits, horizontal_flits, new_flits, local_flits
+        return ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits
 
     def flit_move(self, network, flits, flit_type):
         # 分类不同类型的flits
-        transfer_station_flits, vertical_flits, horizontal_flits, new_flits, local_flits = self.classify_flits(flits)
+        ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits = self.classify_flits(flits)
 
         # 处理新到达的flits
         for flit in new_flits + horizontal_flits:
@@ -506,10 +505,10 @@ class Packet_Base_model(BaseModel):
                 if down_node >= self.config.num_nodes:
                     down_node = next_pos
                 # 处理vup方向
-                self._process_transfer_station(network, "up", pos, next_pos, down_node, up_node)
+                self._process_ring_bridge(network, "up", pos, next_pos, down_node, up_node)
 
                 # 处理vdown方向
-                self._process_transfer_station(network, "down", pos, next_pos, up_node, down_node)
+                self._process_ring_bridge(network, "down", pos, next_pos, up_node, down_node)
 
                 if eject_flit:
                     network.ring_bridge["eject"][(pos, next_pos)].append(eject_flit)
@@ -532,7 +531,7 @@ class Packet_Base_model(BaseModel):
                 flits.remove(flit)
 
         # 处理transfer station的flits
-        for flit in transfer_station_flits:
+        for flit in ring_bridge_flits:
             if flit.is_arrive:
                 flit.arrival_network_cycle = self.cycle
                 network.eject_queues["mid"][flit.destination].append(flit)
@@ -763,7 +762,7 @@ class Packet_Base_model(BaseModel):
                 return True
         return False
 
-    def _process_transfer_station(self, network, direction, pos, next_pos, curr_node, opposite_node):
+    def _process_ring_bridge(self, network, direction, pos, next_pos, curr_node, opposite_node):
         dir_key = f"v{direction}"
 
         if network.ring_bridge[dir_key][(pos, next_pos)]:

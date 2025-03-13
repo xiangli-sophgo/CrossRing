@@ -37,8 +37,8 @@ def main():
     config = SimulationConfig(config_path)
     if not config.topo_type:
         # topo_type = "4x9"
-        topo_type = "9x4"
-        # topo_type = "5x4"
+        # topo_type = "9x4"
+        topo_type = "5x4"
         # topo_type = "4x5"
 
         # topo_type = "6x5"
