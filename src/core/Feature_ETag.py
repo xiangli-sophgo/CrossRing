@@ -28,7 +28,7 @@ class Feature_model(BaseModel):
             self.rn_type, self.sn_type = self.get_network_types()
 
             self.check_and_release_sn_tracker()
-            # self.flit_trace(50)
+            # self.flit_trace(2406)
 
             # Process requests
             self.process_requests()
@@ -810,23 +810,23 @@ class Feature_model(BaseModel):
                 self.node.rn_wdb_send[self.rn_type][in_pos].append(rsp.packet_id)
                 self.rn_send_num += 1
 
-    def process_eject_queues(self, network, eject_flits, rr_queue, destination_type, ip_pos):
-        for i in rr_queue:
-            if eject_flits[i] is not None and eject_flits[i].destination_type == destination_type and len(network.ip_eject[destination_type][ip_pos]) < network.config.ip_eject_len:
-                # network.ip_eject[destination_type][ip_pos].append(eject_flits[i])
-                network.eject_queues_pre[destination_type][ip_pos] = eject_flits[i]
-                eject_flits[i].arrival_eject_cycle = self.cycle
-                eject_flits[i] = None
-                if i == 0:
-                    network.eject_queues["up"][ip_pos].popleft()
-                elif i == 1:
-                    network.eject_queues["mid"][ip_pos].popleft()
-                elif i == 2:
-                    network.eject_queues["down"][ip_pos].popleft()
-                elif i == 3:
-                    network.eject_queues["local"][ip_pos].popleft()
-                rr_queue.remove(i)
-                rr_queue.append(i)
-                break
+    # def process_eject_queues(self, network, eject_flits, rr_queue, destination_type, ip_pos):
+    #     for i in rr_queue:
+    #         if eject_flits[i] is not None and eject_flits[i].destination_type == destination_type and len(network.ip_eject[destination_type][ip_pos]) < network.config.ip_eject_len:
+    #             # network.ip_eject[destination_type][ip_pos].append(eject_flits[i])
+    #             network.eject_queues_pre[destination_type][ip_pos] = eject_flits[i]
+    #             eject_flits[i].arrival_eject_cycle = self.cycle
+    #             eject_flits[i] = None
+    #             if i == 0:
+    #                 network.eject_queues["up"][ip_pos].popleft()
+    #             elif i == 1:
+    #                 network.eject_queues["mid"][ip_pos].popleft()
+    #             elif i == 2:
+    #                 network.eject_queues["down"][ip_pos].popleft()
+    #             elif i == 3:
+    #                 network.eject_queues["local"][ip_pos].popleft()
+    #             rr_queue.remove(i)
+    #             rr_queue.append(i)
+    #             break
 
-        return eject_flits
+    #     return eject_flits

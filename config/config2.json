@@ -14,7 +14,7 @@
     "num_gdma": 32,
     "flit_size": 128,
     "seats_per_link": 7,
-    "RB_IN_FIFO_DEPTH": 16,
+    "RB_IN_FIFO_DEPTH": 8,
     "RB_OUT_FIFO_DEPTH": 8,
     "IQ_OUT_FIFO_DEPTH": 6,
     "EQ_IN_FIFO_DEPTH": 8,
@@ -37,10 +37,10 @@
     "ddr_latency": 150,
     "sn_tracker_release_latency": 40,
     "ue_max_T0":1,
-    "TL_Etag_T1_UE_MAX":2,
+    "TL_Etag_T1_UE_MAX":7,
     "TL_Etag_T2_UE_MAX":5,
     "TR_Etag_T2_UE_MAX":5,
-    "TU_Etag_T1_UE_MAX":2,
+    "TU_Etag_T1_UE_MAX":7,
     "TU_Etag_T2_UE_MAX":5,
     "TD_Etag_T2_UE_MAX":5
 }

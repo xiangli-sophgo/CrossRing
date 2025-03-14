@@ -477,17 +477,17 @@ class Packet_Base_model(BaseModel):
                 #     print(station_flits)
 
                 # 处理eject操作
-                if len(network.ring_bridge["eject"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
+                if len(network.ring_bridge["eject"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
                     eject_flit = self._process_eject_flit(network, station_flits, pos, next_pos)
 
                 # 处理vup操作
-                if len(network.ring_bridge["vup"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
+                if len(network.ring_bridge["vup"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
                     if vup_flit:
                         print(vup_flit)
                     vup_flit = self._process_vup_flit(network, station_flits, pos, next_pos)
 
                 # 处理vdown操作
-                if len(network.ring_bridge["vdown"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
+                if len(network.ring_bridge["vdown"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
                     if vdown_flit:
                         print(vdown_flit)
                     vdown_flit = self._process_vdown_flit(network, station_flits, pos, next_pos)
@@ -495,7 +495,7 @@ class Packet_Base_model(BaseModel):
                 # transfer_eject
                 # 处理eject队列
                 # TODO: eject_queue -> ETag
-                if next_pos in network.eject_queues["mid"] and len(network.eject_queues["mid"][next_pos]) < self.config.EQ_IN_FIFO_DEPTH and network.ring_bridge["eject"][(pos, next_pos)]:
+                if next_pos in network.eject_queues["mid"] and len(network.eject_queues["mid"][next_pos]) < self.config.EQ_FIFO_depth and network.ring_bridge["eject"][(pos, next_pos)]:
                     flit = network.ring_bridge["eject"][(pos, next_pos)].popleft()
                     flit.is_arrive = True
 
@@ -774,14 +774,14 @@ class Packet_Base_model(BaseModel):
                         eject_queue = network.eject_queues[direction][next_pos]
                         reservations = network.eject_reservations[direction][next_pos]
                         if network.links_tag[link][-1] == [next_pos, direction]:
-                            if network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations):
+                            if network.config.EQ_FIFO_depth - len(eject_queue) > len(reservations):
                                 network.remain_tag[direction][next_pos] += 1
                                 network.links_tag[link][-1] = None
                                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
                 elif flit_l.destination == next_pos:
                     eject_queue = network.eject_queues[direction][next_pos]
                     reservations = network.eject_reservations[direction][next_pos]
-                    # TODO: EQ_IN_FIFO_DEPTH -> ETag
+                    # TODO: EQ_FIFO_depth -> ETag
                     return (
                         self._update_flit_state(
                             network,
@@ -791,7 +791,7 @@ class Packet_Base_model(BaseModel):
                             opposite_node,
                             direction,
                         )
-                        if network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations)
+                        if network.config.EQ_FIFO_depth - len(eject_queue) > len(reservations)
                         else self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
                     )
                 else:

@@ -17,13 +17,13 @@ def main():
     # file_name = r"demo_459.txt"
 
     # traffic_file_path = r"../../traffic/"
-    traffic_file_path = r"../traffic/output_All_reduce/step5_data_merge/"
+    # traffic_file_path = r"../traffic/output_All_reduce/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_All_reduce_burst2/step5_data_merge/"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"LLama2_MLP_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
-    file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
+    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
 
     # model_type = "REQ_RSP"
     # model_type = "Packet_Base"

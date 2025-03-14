@@ -3,7 +3,7 @@ from collections import deque
 
 from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths
 from config.config import SimulationConfig
-from src.utils.component import Flit, Network, Node
+from src.utils.component_feature_ETag import Flit, Network, Node
 import matplotlib.pyplot as plt
 import random
 import json
@@ -338,7 +338,7 @@ class BaseModel:
                             if i == 0:
                                 self.send_read_flits_num += 1
                                 self.node.sn_rdb[self.sn_type][ip_pos].pop(0)
-                                if flit.is_last_flit:
+                                if len(self.flit_network.arrive_flits[flit.packet_id]) == flit.burst_length:
                                     # finish current req injection
                                     req = next(
                                         (req for req in self.node.sn_tracker[self.sn_type][ip_pos] if req.packet_id == flit.packet_id),
@@ -360,7 +360,8 @@ class BaseModel:
                                     for f in self.node.rn_wdb[self.rn_type][ip_pos][flit.packet_id]:
                                         f.entry_db_cycle = self.cycle
                                 self.node.rn_wdb[self.rn_type][ip_pos][flit.packet_id].pop(0)
-                                if flit.is_last_flit:
+                                # if flit.is_last_flit:
+                                if len(self.flit_network.arrive_flits[flit.packet_id]) == flit.burst_length:
                                     # finish current req injection
                                     req = next(
                                         (req for req in self.node.rn_tracker["write"][self.rn_type][ip_pos] if req.packet_id == flit.packet_id),
@@ -445,8 +446,10 @@ class BaseModel:
             )
 
     def flit_trace(self, packet_id):
-        print(self.cycle, self.req_network.send_flits[packet_id], self.rsp_network.send_flits[packet_id], len(self.flit_network.arrive_flits[packet_id]))
-        time.sleep(0.05)
+        if self.cycle % 10 == 0:
+            # print(self.cycle, self.req_network.send_flits[packet_id], self.rsp_network.send_flits[packet_id], len(self.flit_network.arrive_flits[packet_id]))
+            print(self.cycle, self.req_network.send_flits[packet_id], self.rsp_network.send_flits[packet_id], self.flit_network.send_flits[packet_id])
+            time.sleep(0.05)
 
     def process_requests(self):
         while self.new_write_req and self.new_write_req[0].departure_cycle <= self.cycle:
@@ -486,7 +489,7 @@ class BaseModel:
             req.original_destination_type = req_data[4]
             if self.topo_type in ["5x4", "4x5"]:
                 req.source_type = "sdma" if req_data[1] > 15 else "gdma"
-                req.destination_type = "ddr" if req_data[3] > 15 else "l2m"
+                # req.destination_type = "ddr" if req_data[3] > 15 else "l2m"
             req.packet_id = Node.get_next_packet_id()
             req.req_type = "read" if req_data[5] == "R" else "write"
             self.req_network.send_flits[req.packet_id].append(req)
@@ -719,8 +722,6 @@ class BaseModel:
                 flit.arrival_network_cycle = self.cycle
                 network.eject_queues["mid"][flit.destination].append(flit)
                 flits.remove(flit)
-                # if flit.is_last_flit and flit_type == "data":
-                #     del self.req_network.send_flits[flit.packet_id]
 
         return flits
 
@@ -782,11 +783,29 @@ class BaseModel:
     def _update_ring_bridge(self, network, pos, next_pos, index):
         """更新transfer stations"""
         if index == 0:
-            network.ring_bridge["up"][(pos, next_pos)].popleft()
+            flit = network.ring_bridge["up"][(pos, next_pos)].popleft()
+            flit.ETag_priority = "T2"
         elif index == 1:
-            network.ring_bridge["left"][(pos, next_pos)].popleft()
+            flit = network.ring_bridge["left"][(pos, next_pos)].popleft()
+            if flit.ETag_priority == "T0":
+                network.RB_UE_Counters["left"][(pos, next_pos)]["T0"] -= 1
+            elif flit.ETag_priority == "T1":
+                network.RB_UE_Counters["left"][(pos, next_pos)]["T0"] -= 1
+                network.RB_UE_Counters["left"][(pos, next_pos)]["T1"] -= 1
+            else:
+                network.RB_UE_Counters["left"][(pos, next_pos)]["T0"] -= 1
+                network.RB_UE_Counters["left"][(pos, next_pos)]["T1"] -= 1
+                network.RB_UE_Counters["left"][(pos, next_pos)]["T2"] -= 1
+            flit.ETag_priority = "T2"
         elif index == 2:
-            network.ring_bridge["right"][(pos, next_pos)].popleft()
+            flit = network.ring_bridge["right"][(pos, next_pos)].popleft()
+            if flit.ETag_priority == "T1":
+                network.RB_UE_Counters["right"][(pos, next_pos)]["T1"] -= 1
+            else:
+                network.RB_UE_Counters["right"][(pos, next_pos)]["T1"] -= 1
+                network.RB_UE_Counters["right"][(pos, next_pos)]["T2"] -= 1
+            flit.ETag_priority = "T2"
+
         network.round_robin["mid"][next_pos].remove(index)
         network.round_robin["mid"][next_pos].append(index)
 
@@ -1136,18 +1155,33 @@ class BaseModel:
                 # network.ip_eject[destination_type][ip_pos].append(eject_flits[i])
                 network.eject_queues_pre[destination_type][ip_pos] = eject_flits[i]
                 eject_flits[i].arrival_eject_cycle = self.cycle
-                # print(eject_flits[i])
-                # if eject_flits[i].packet_id == 1:
-                # print(eject_flits[i])
                 eject_flits[i] = None
                 if i == 0:
-                    network.eject_queues["up"][ip_pos].popleft()
+                    flit = network.eject_queues["up"][ip_pos].popleft()
+                    if flit.ETag_priority == "T0":
+                        network.EQ_UE_Counters["up"][ip_pos]["T0"] -= 1
+                    elif flit.ETag_priority == "T1":
+                        network.EQ_UE_Counters["up"][ip_pos]["T0"] -= 1
+                        network.EQ_UE_Counters["up"][ip_pos]["T1"] -= 1
+                    else:
+                        network.EQ_UE_Counters["up"][ip_pos]["T0"] -= 1
+                        network.EQ_UE_Counters["up"][ip_pos]["T1"] -= 1
+                        network.EQ_UE_Counters["up"][ip_pos]["T2"] -= 1
+                    flit.ETag_priority = "T2"
                 elif i == 1:
-                    network.eject_queues["mid"][ip_pos].popleft()
+                    flit = network.eject_queues["mid"][ip_pos].popleft()
+                    flit.ETag_priority = "T2"
                 elif i == 2:
-                    network.eject_queues["down"][ip_pos].popleft()
+                    flit = network.eject_queues["down"][ip_pos].popleft()
+                    if flit.ETag_priority == "T1":
+                        network.EQ_UE_Counters["down"][ip_pos]["T1"] -= 1
+                    else:
+                        network.EQ_UE_Counters["down"][ip_pos]["T1"] -= 1
+                        network.EQ_UE_Counters["down"][ip_pos]["T2"] -= 1
+                    flit.ETag_priority = "T2"
                 elif i == 3:
-                    network.eject_queues["local"][ip_pos].popleft()
+                    flit = network.eject_queues["local"][ip_pos].popleft()
+                    flit.ETag_priority = "T2"
                 rr_queue.remove(i)
                 rr_queue.append(i)
                 break
@@ -1169,7 +1203,7 @@ class BaseModel:
         req.original_destination_type = flit.original_source_type
         if self.topo_type in ["5x4", "4x5"]:
             req.source_type = "sdma" if req.source_original > 15 else "gdma"
-            req.destination_type = "ddr" if req.destination_original > 15 else "l2m"
+            # req.destination_type = "ddr" if req.destination_original > 15 else "l2m"
         req.packet_id = Node.get_next_packet_id()
         req.req_type = "write"
         self.new_write_req.append(req)
@@ -1199,6 +1233,7 @@ class BaseModel:
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
             self.node.rn_wdb[flit.source_type][flit.source][flit.packet_id].append(flit)
+            self.flit_network.send_flits[flit.packet_id].append(flit)
 
     def create_read_packet(self, req):
         for i in range(req.burst_length):
@@ -1224,6 +1259,7 @@ class BaseModel:
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
             self.node.sn_rdb[flit.source_type][flit.source].append(flit)
+            self.flit_network.send_flits[flit.packet_id].append(flit)
 
     def create_rsp(self, req, rsp_type):
         if rsp_type == "negative":
@@ -1303,7 +1339,8 @@ class BaseModel:
                     self.data_cir_h_total += flit.circuits_completed_h
                     self.data_cir_v_total += flit.circuits_completed_v
                 self.process_flits(
-                    next((flit for flit in flits if flit.is_last_flit), flits[-1]),
+                    flits[-1],
+                    # next((flit for flit in flits if flit.is_last_flit), flits[-1]),
                     network,
                     read_latency,
                     write_latency,
