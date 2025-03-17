@@ -783,14 +783,7 @@ class Packet_Base_model(BaseModel):
                     reservations = network.eject_reservations[direction][next_pos]
                     # TODO: EQ_FIFO_depth -> ETag
                     return (
-                        self._update_flit_state(
-                            network,
-                            dir_key,
-                            pos,
-                            next_pos,
-                            opposite_node,
-                            direction,
-                        )
+                        self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
                         if network.config.EQ_FIFO_depth - len(eject_queue) > len(reservations)
                         else self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
                     )
@@ -814,7 +807,7 @@ class Packet_Base_model(BaseModel):
         return True
 
     def _handle_wait_cycles(self, network, ts_key, pos, next_pos, direction, link):
-        if network.ring_bridge[ts_key][(pos, next_pos)][0].wait_cycle_v > self.config.wait_cycle_v and not network.ring_bridge[ts_key][(pos, next_pos)][0].is_tag_v:
+        if network.ring_bridge[ts_key][(pos, next_pos)][0].wait_cycle_v > self.config.ITag_Trigger_Th_V and not network.ring_bridge[ts_key][(pos, next_pos)][0].is_tag_v:
             if network.remain_tag[direction][next_pos] > 0:
                 network.remain_tag[direction][next_pos] -= 1
                 network.links_tag[link][-1] = [next_pos, direction]
@@ -895,7 +888,7 @@ class Packet_Base_model(BaseModel):
 
     def process_eject_queues(self, network, eject_flits, rr_queue, destination_type, ip_pos):
         for i in rr_queue:
-            if eject_flits[i] is not None and eject_flits[i].destination_type == destination_type and len(network.ip_eject[destination_type][ip_pos]) < network.config.ip_eject_len:
+            if eject_flits[i] is not None and eject_flits[i].destination_type == destination_type and len(network.ip_eject[destination_type][ip_pos]) < network.config.EQ_CH_FIFO_DEPTH:
                 # network.ip_eject[destination_type][ip_pos].append(eject_flits[i])
                 network.eject_queues_pre[destination_type][ip_pos] = eject_flits[i]
                 eject_flits[i].arrival_eject_cycle = self.cycle
@@ -997,5 +990,5 @@ class Packet_Base_model(BaseModel):
     #             else:
     #                 queue.appendleft(flit)
     #                 for flit in queue:
-    #                     flit.wait_cycle += 1
+    #                     flit.wait_cycle_h += 1
     #     return flit_num, flits

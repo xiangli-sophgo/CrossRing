@@ -60,6 +60,8 @@ class BaseModel:
         self.rsp_cir_h_total, self.rsp_cir_v_total = 0, 0
         self.data_cir_h_total, self.data_cir_v_total = 0, 0
         self.read_retry_num, self.write_retry_num = 0, 0
+        self.EQ_ETag_T1_num, self.EQ_ETag_T0_num = 0, 0
+        self.RB_ETag_T1_num, self.RB_ETag_T0_num = 0, 0
         self.R_retry_num, self.W_retry_num = 0, 0
         self.read_BW, self.read_latency_avg, self.read_latency_max = 0, 0, 0
         self.write_BW, self.write_latency_avg, self.write_latency_max = 0, 0, 0
@@ -784,7 +786,6 @@ class BaseModel:
         """更新transfer stations"""
         if index == 0:
             flit = network.ring_bridge["up"][(pos, next_pos)].popleft()
-            flit.ETag_priority = "T2"
         elif index == 1:
             flit = network.ring_bridge["left"][(pos, next_pos)].popleft()
             if flit.ETag_priority == "T0":
@@ -796,16 +797,20 @@ class BaseModel:
                 network.RB_UE_Counters["left"][(pos, next_pos)]["T0"] -= 1
                 network.RB_UE_Counters["left"][(pos, next_pos)]["T1"] -= 1
                 network.RB_UE_Counters["left"][(pos, next_pos)]["T2"] -= 1
-            flit.ETag_priority = "T2"
         elif index == 2:
             flit = network.ring_bridge["right"][(pos, next_pos)].popleft()
-            if flit.ETag_priority == "T1":
+            if flit.ETag_priority == "T1" or flit.ETag_priority == "T0":
                 network.RB_UE_Counters["right"][(pos, next_pos)]["T1"] -= 1
             else:
                 network.RB_UE_Counters["right"][(pos, next_pos)]["T1"] -= 1
                 network.RB_UE_Counters["right"][(pos, next_pos)]["T2"] -= 1
-            flit.ETag_priority = "T2"
 
+        if flit.ETag_priority == "T1":
+            self.RB_ETag_T1_num += 1
+        elif flit.ETag_priority == "T0":
+            self.RB_ETag_T0_num += 1
+
+        flit.ETag_priority = "T2"
         network.round_robin["mid"][next_pos].remove(index)
         network.round_robin["mid"][next_pos].append(index)
 
@@ -975,12 +980,7 @@ class BaseModel:
                     if flit_l.destination == next_pos:
                         eject_queue = network.eject_queues[direction][next_pos]
                         reservations = network.eject_reservations[direction][next_pos]
-                        if network.links_tag[link][-1] == [
-                            next_pos,
-                            direction,
-                        ] and network.config.EQ_IN_FIFO_DEPTH - len(
-                            eject_queue
-                        ) > len(reservations):
+                        if network.links_tag[link][-1] == [next_pos, direction] and network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations):
                             network.remain_tag[direction][next_pos] += 1
                             network.links_tag[link][-1] = None
                             return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
@@ -989,14 +989,7 @@ class BaseModel:
                     reservations = network.eject_reservations[direction][next_pos]
                     # TODO: EQ_IN_FIFO_DEPTH -> ETag
                     return (
-                        self._update_flit_state(
-                            network,
-                            dir_key,
-                            pos,
-                            next_pos,
-                            opposite_node,
-                            direction,
-                        )
+                        self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
                         if network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations)
                         else self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
                     )
@@ -1020,7 +1013,7 @@ class BaseModel:
         return True
 
     def _handle_wait_cycles(self, network, ts_key, pos, next_pos, direction, link):
-        if network.ring_bridge[ts_key][(pos, next_pos)][0].wait_cycle_v > self.config.wait_cycle_v and not network.ring_bridge[ts_key][(pos, next_pos)][0].is_tag_v:
+        if network.ring_bridge[ts_key][(pos, next_pos)][0].wait_cycle_v > self.config.ITag_Trigger_Th_V and not network.ring_bridge[ts_key][(pos, next_pos)][0].is_tag_v:
             if network.remain_tag[direction][next_pos] > 0:
                 network.remain_tag[direction][next_pos] -= 1
                 network.links_tag[link][-1] = [next_pos, direction]
@@ -1151,7 +1144,7 @@ class BaseModel:
 
     def process_eject_queues(self, network, eject_flits, rr_queue, destination_type, ip_pos):
         for i in rr_queue:
-            if eject_flits[i] is not None and eject_flits[i].destination_type == destination_type and len(network.ip_eject[destination_type][ip_pos]) < network.config.ip_eject_len:
+            if eject_flits[i] is not None and eject_flits[i].destination_type == destination_type and len(network.ip_eject[destination_type][ip_pos]) < network.config.EQ_CH_FIFO_DEPTH:
                 # network.ip_eject[destination_type][ip_pos].append(eject_flits[i])
                 network.eject_queues_pre[destination_type][ip_pos] = eject_flits[i]
                 eject_flits[i].arrival_eject_cycle = self.cycle
@@ -1167,21 +1160,24 @@ class BaseModel:
                         network.EQ_UE_Counters["up"][ip_pos]["T0"] -= 1
                         network.EQ_UE_Counters["up"][ip_pos]["T1"] -= 1
                         network.EQ_UE_Counters["up"][ip_pos]["T2"] -= 1
-                    flit.ETag_priority = "T2"
                 elif i == 1:
                     flit = network.eject_queues["mid"][ip_pos].popleft()
-                    flit.ETag_priority = "T2"
                 elif i == 2:
                     flit = network.eject_queues["down"][ip_pos].popleft()
-                    if flit.ETag_priority == "T1":
+                    if flit.ETag_priority == "T1" or flit.ETag_priority == "T0":
                         network.EQ_UE_Counters["down"][ip_pos]["T1"] -= 1
                     else:
                         network.EQ_UE_Counters["down"][ip_pos]["T1"] -= 1
                         network.EQ_UE_Counters["down"][ip_pos]["T2"] -= 1
-                    flit.ETag_priority = "T2"
                 elif i == 3:
                     flit = network.eject_queues["local"][ip_pos].popleft()
-                    flit.ETag_priority = "T2"
+
+                if flit.ETag_priority == "T1":
+                    self.EQ_ETag_T1_num += 1
+                elif flit.ETag_priority == "T0":
+                    self.EQ_ETag_T0_num += 1
+                flit.ETag_priority = "T2"
+
                 rr_queue.remove(i)
                 rr_queue.append(i)
                 break
@@ -1298,7 +1294,7 @@ class BaseModel:
                 else:
                     queue.appendleft(flit)
                     for flit in queue:
-                        flit.wait_cycle += 1
+                        flit.wait_cycle_h += 1
         return flit_num, flits
 
     def evaluate_results(self, network):
@@ -1433,6 +1429,7 @@ class BaseModel:
             f"Total Circuits data h: {self.data_cir_h_total}, avg: {(self.data_cir_h_total / self.flit_num) if self.flit_num > 0 else 0:.3f}; "
             f"v: {self.data_cir_v_total}, avg: {(self.data_cir_v_total / self.flit_num) if self.flit_num > 0 else 0:.3f}"
         )
+        print(f"Total RB ETag: T1: {self.RB_ETag_T1_num}, T0: {self.RB_ETag_T0_num}; EQ ETag: T1: {self.EQ_ETag_T1_num}, T0: {self.EQ_ETag_T0_num}")
         if self.model_type == "REQ_RSP":
             print(f"Retry num: R: {self.read_retry_num}, W: {self.write_retry_num}")
         print("=" * 50)
@@ -1654,9 +1651,8 @@ class BaseModel:
         ddr2_throughput /= self.config.num_ips
 
         throughput_data = {
-            # "ddr": {"ddr_throughput": 0, "first_send": 0, "recv_num": 0, "last_recv": 0, "num": self.config.num_ips},
-            "ddr": {"ddr1_throughput": 0, "first_send": 0, "recv_num": 0, "last_recv": 0, "num": self.config.num_ips},
-            "l2m": {"ddr2_throughput": 0, "first_send": 0, "recv_num": 0, "last_recv": 0, "num": self.config.num_ips},
+            "ddr": {"ddr_throughput": 0, "first_send": 0, "recv_num": 0, "last_recv": 0, "num": self.config.num_ips},
+            "l2m": {"l2m_throughput": 0, "first_send": 0, "recv_num": 0, "last_recv": 0, "num": self.config.num_ips},
             "sdma": {"sdma_throughput": 0, "first_send": 0, "recv_num": 0, "last_recv": 0, "num": self.config.num_ips},
             "gdma": {"gdma_throughput": 0, "first_send": 0, "recv_num": 0, "last_recv": 0, "num": self.config.num_ips},
         }

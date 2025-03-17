@@ -30,9 +30,9 @@ class SimulationConfig:
         self.RB_OUT_FIFO_DEPTH = args.RB_OUT_FIFO_DEPTH
         self.IQ_OUT_FIFO_DEPTH = args.IQ_OUT_FIFO_DEPTH
         self.EQ_IN_FIFO_DEPTH = args.EQ_IN_FIFO_DEPTH
-        self.ip_eject_len = args.ip_eject_len
-        self.wait_cycle_h = args.wait_cycle_h
-        self.wait_cycle_v = args.wait_cycle_v
+        self.EQ_CH_FIFO_DEPTH = args.EQ_CH_FIFO_DEPTH
+        self.ITag_Trigger_Th_H = args.ITag_Trigger_Th_H
+        self.ITag_Trigger_Th_V = args.ITag_Trigger_Th_V
         self.ft_count = args.ft_count
         self.ft_len = args.ft_len
         self.tags_num = args.tags_num
@@ -204,9 +204,9 @@ class SimulationConfig:
         parser.add_argument("--RB_OUT_FIFO_DEPTH", type=int, default=default_config["RB_OUT_FIFO_DEPTH"], help="Depth of OUT FIFOs in Ring Bridge")
         parser.add_argument("--IQ_OUT_FIFO_DEPTH", type=int, default=default_config["IQ_OUT_FIFO_DEPTH"], help="Depth of IQ FIFOs in inject queues")
         parser.add_argument("--EQ_IN_FIFO_DEPTH", type=int, default=default_config["EQ_IN_FIFO_DEPTH"], help="Depth of EQ FIFOs in inject queues")
-        parser.add_argument("--ip_eject_len", type=int, default=default_config["ip_eject_len"], help="Length of IP eject queues")
-        parser.add_argument("--wait_cycle_h", type=int, default=default_config["wait_cycle_h"], help="Horizontal wait cycles")
-        parser.add_argument("--wait_cycle_v", type=int, default=default_config["wait_cycle_v"], help="Vertical wait cycles")
+        parser.add_argument("--EQ_CH_FIFO_DEPTH", type=int, default=default_config["EQ_CH_FIFO_DEPTH"], help="Length of IP eject queues")
+        parser.add_argument("--ITag_Trigger_Th_H", type=int, default=default_config["ITag_Trigger_Th_H"], help="Horizontal wait cycles")
+        parser.add_argument("--ITag_Trigger_Th_V", type=int, default=default_config["ITag_Trigger_Th_V"], help="Vertical wait cycles")
         parser.add_argument("--ft_count", type=int, default=default_config["ft_count"], help="FT count")
         parser.add_argument("--ft_len", type=int, default=default_config["ft_len"], help="FT length")
         parser.add_argument("--tags_num", type=int, default=default_config["tags_num"], help="Number of tags")

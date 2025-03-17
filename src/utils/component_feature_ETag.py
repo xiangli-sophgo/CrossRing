@@ -27,7 +27,7 @@ class Flit:
         self.is_last_flit = False
         self.circuits_completed_v = 0
         self.circuits_completed_h = 0
-        self.wait_cycle = 0
+        self.wait_cycle_h = 0
         self.wait_cycle_v = 0
         self.path_index = 0
         self.current_seat_index = -1
@@ -353,7 +353,7 @@ class Network:
             for ip_index in getattr(config, f"{ip}_send_positions"):
                 ip_recv_index = ip_index - config.cols
                 self.ip_inject[ip_type][ip_index] = deque()
-                self.ip_eject[ip_type][ip_recv_index] = deque(maxlen=config.ip_eject_len)
+                self.ip_eject[ip_type][ip_recv_index] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
         for ip_type in ["sdma", "gdma"]:
             for ip_index in getattr(config, f"{ip_type}_send_positions"):
                 self.ip_read[ip_type][ip_index] = deque()
@@ -382,7 +382,7 @@ class Network:
                             link_station = self.ring_bridge["right"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
                             if len(link_station) < self.config.RB_IN_FIFO_DEPTH and flit_exist_right:
                                 return True
-                        if flit.wait_cycle > self.config.wait_cycle_h and not flit.is_tag_h:
+                        if flit.wait_cycle_h > self.config.ITag_Trigger_Th_H and not flit.is_tag_h:
                             if self.remain_tag["right"][current] > 0:
                                 self.remain_tag["right"][current] -= 1
                                 self.links_tag[(current, current)][-1] = [current, "right"]
@@ -417,7 +417,7 @@ class Network:
                             link_station = self.ring_bridge["left"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
                             if len(link_station) < self.config.RB_IN_FIFO_DEPTH and flit_exist_left:
                                 return True
-                        if flit.wait_cycle > self.config.wait_cycle_h and not flit.is_tag_h:
+                        if flit.wait_cycle_h > self.config.ITag_Trigger_Th_H and not flit.is_tag_h:
                             if self.remain_tag["left"][current] > 0:
                                 self.remain_tag["left"][current] -= 1
                                 self.links_tag[(current, current)][-1] = [current, "left"]
@@ -456,7 +456,7 @@ class Network:
                         station_right = self.ring_bridge["right"].get((new_current, new_next_node))
                         if self.config.RB_IN_FIFO_DEPTH - len(station_right) > len(self.station_reservations["right"][(new_current, new_next_node)]):
                             return True
-                    if flit.wait_cycle > self.config.wait_cycle_h and not flit.is_tag_h:
+                    if flit.wait_cycle_h > self.config.ITag_Trigger_Th_H and not flit.is_tag_h:
                         if self.remain_tag["right"][current] > 0:
                             self.remain_tag["right"][current] -= 1
                             self.links_tag[(current - 1, current)][-1] = [current, "right"]
@@ -492,7 +492,7 @@ class Network:
                         station_left = self.ring_bridge["left"].get((new_current, new_next_node))
                         if self.config.RB_IN_FIFO_DEPTH - len(station_left) > len(self.station_reservations["left"][(new_current, new_next_node)]):
                             return True
-                    if flit.wait_cycle > self.config.wait_cycle_h and not flit.is_tag_h:
+                    if flit.wait_cycle_h > self.config.ITag_Trigger_Th_H and not flit.is_tag_h:
                         if self.remain_tag["left"][current] > 0:
                             self.remain_tag["left"][current] -= 1
                             self.links_tag[(current + 1, current)][-1] = [current, "left"]
@@ -551,8 +551,6 @@ class Network:
                 return self._handle_regular_flit(flit, link, current, next_node, row_start, row_end, col_start, col_end)
 
     def _handle_delay_flit(self, flit, link, current, next_node, row_start, row_end, col_start, col_end):
-        if flit.packet_id == 1124 and flit.flit_id_in_packet == 1 and flit.ETag_priority == "T0":
-            print(flit, "delay")
         if flit.current_seat_index < len(link) - 1:
             # 节点间进行移动
             link[flit.current_seat_index] = None
@@ -1119,8 +1117,6 @@ class Network:
                 link = self.links.get(flit.current_link)
                 link[flit.current_seat_index] = flit
             else:
-                if flit.packet_id == 1124 and flit.flit_id_in_packet == 1:
-                    print(flit, "execute")
                 # 将 flit 放入 ring_bridge 的相应方向
                 if not flit.is_on_station:
                     # 使用字典映射 seat_index 到 ring_bridge 的方向和深度限制
