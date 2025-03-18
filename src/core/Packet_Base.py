@@ -113,8 +113,8 @@ class Packet_Base_model(BaseModel):
                     (req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
-                self.req_cir_h_total += req.circuits_completed_h
-                self.req_cir_v_total += req.circuits_completed_v
+                self._req_cir_h_num += req.circuits_completed_h
+                self._req_cir_v_num += req.circuits_completed_v
                 for flit in self.flit_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle
                 req.leave_db_cycle = self.cycle
@@ -135,8 +135,8 @@ class Packet_Base_model(BaseModel):
                     (req for req in self.node.sn_tracker[self.sn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
-                self.req_cir_h_total += req.circuits_completed_h
-                self.req_cir_v_total += req.circuits_completed_v
+                self._req_cir_h_num += req.circuits_completed_h
+                self._req_cir_v_num += req.circuits_completed_v
                 for flit in self.flit_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle + self.config.sn_tracker_release_latency
                 # 释放tracker 增加40ns延迟
@@ -265,7 +265,7 @@ class Packet_Base_model(BaseModel):
                         if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                             queue_pre[flit.source] = flit
                             if i == 0:
-                                self.send_read_flits_num += 1
+                                self._send_read_flits_num += 1
                                 self.node.sn_rdb[self.sn_type][ip_pos].pop(0)
                                 if flit.is_last_flit:
                                     # finish current req injection
@@ -281,7 +281,7 @@ class Packet_Base_model(BaseModel):
                                     #     self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][ip_pos] -= 1
                                     #     self.create_rsp(new_req, "positive")
                             else:
-                                self.send_write_flits_num += 1
+                                self._send_write_flits_num += 1
                                 self.node.rn_wdb[self.rn_type][ip_pos][self.node.rn_wdb_send[self.rn_type][ip_pos][0]].pop(0)
 
                                 # packet base: 发完数据不更新rn tracker
@@ -477,17 +477,17 @@ class Packet_Base_model(BaseModel):
                 #     print(station_flits)
 
                 # 处理eject操作
-                if len(network.ring_bridge["eject"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
+                if len(network.ring_bridge["eject"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
                     eject_flit = self._process_eject_flit(network, station_flits, pos, next_pos)
 
                 # 处理vup操作
-                if len(network.ring_bridge["vup"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
+                if len(network.ring_bridge["vup"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
                     if vup_flit:
                         print(vup_flit)
                     vup_flit = self._process_vup_flit(network, station_flits, pos, next_pos)
 
                 # 处理vdown操作
-                if len(network.ring_bridge["vdown"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_depth:
+                if len(network.ring_bridge["vdown"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
                     if vdown_flit:
                         print(vdown_flit)
                     vdown_flit = self._process_vdown_flit(network, station_flits, pos, next_pos)
@@ -806,17 +806,6 @@ class Packet_Base_model(BaseModel):
         network.links[(next_pos, target_node)][0] = flit
         return True
 
-    def _handle_wait_cycles(self, network, ts_key, pos, next_pos, direction, link):
-        if network.ring_bridge[ts_key][(pos, next_pos)][0].wait_cycle_v > self.config.ITag_Trigger_Th_V and not network.ring_bridge[ts_key][(pos, next_pos)][0].is_tag_v:
-            if network.remain_tag[direction][next_pos] > 0:
-                network.remain_tag[direction][next_pos] -= 1
-                network.links_tag[link][-1] = [next_pos, direction]
-                network.ring_bridge[ts_key][(pos, next_pos)][0].is_tag_v = True
-        else:
-            for flit in network.ring_bridge[ts_key][(pos, next_pos)]:
-                flit.wait_cycle_v += 1
-        return False
-
     def _handle_response_packet_base(self, rsp, in_pos):
         if rsp.req_type == "read":
             req = next((req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == rsp.packet_id), None)
@@ -843,8 +832,8 @@ class Packet_Base_model(BaseModel):
             (req for req in self.node.rn_tracker[rsp.req_type][self.rn_type][in_pos] if req.packet_id == rsp.packet_id),
             None,
         )
-        self.rsp_cir_h_total += rsp.circuits_completed_h
-        self.rsp_cir_v_total += rsp.circuits_completed_v
+        self._rsp_cir_h_num += rsp.circuits_completed_h
+        self._rsp_cir_v_num += rsp.circuits_completed_v
         if not req:
             return
         if rsp.req_type == "read":
@@ -905,90 +894,3 @@ class Packet_Base_model(BaseModel):
                 rr_queue.append(i)
                 break
         return eject_flits
-
-    # def create_write_req_after_read(self, flit):
-    #     source = self.node_change(flit.destination_original)
-    #     destination = self.node_change(flit.source_original, False)
-    #     path = self.routes[source][destination]
-    #     req = Flit(source, destination, path)
-    #     req.source_original = flit.destination + self.config.cols
-    #     req.destination_original = flit.source - self.config.cols
-    #     req.flit_type = "req"
-    #     req.departure_cycle = self.cycle + 1
-    #     req.burst_length = flit.burst_length
-    #     req.source_type = flit.destination_type
-    #     req.destination_type = flit.source_type
-    #     req.original_source_type = flit.original_destination_type
-    #     req.original_destination_type = flit.original_source_type
-    #     if self.topo_type in ["5x4", "4x5"]:
-    #         req.source_type = "sdma" if req.source_original > 15 else "gdma"
-    #         req.destination_type = "ddr" if req.destination_original > 15 else "l2m"
-    #     req.packet_id = Node.get_next_packet_id()
-    #     req.req_type = "write"
-    #     self.new_write_req.append(req)
-
-    # def create_write_packet(self, req):
-    #     for i in range(req.burst_length):
-    #         source = req.source
-    #         destination = req.destination
-    #         path = self.routes[source][destination]
-    #         flit = Flit(source, destination, path)
-    #         flit.source_original = req.source_original
-    #         flit.destination_original = req.destination_original
-    #         flit.flit_type = "data"
-    #         flit.departure_cycle = self.cycle
-    #         flit.req_departure_cycle = req.departure_cycle
-    #         flit.entry_db_cycle = req.entry_db_cycle
-    #         flit.sn_tracker_type = "share"
-    #         flit.source_type = req.source_type
-    #         flit.destination_type = req.destination_type
-    #         flit.original_source_type = req.original_source_type
-    #         flit.original_destination_type = req.original_destination_type
-    #         flit.req_type = req.req_type
-    #         flit.packet_id = req.packet_id
-    #         flit.flit_id_in_packet = i
-    #         flit.burst_length = req.burst_length
-    #         if i == req.burst_length - 1:
-    #             flit.is_last_flit = True
-    #         self.node.rn_wdb[flit.source_type][flit.source][flit.packet_id].append(flit)
-
-    # def create_read_packet(self, req):
-    #     for i in range(req.burst_length):
-    #         source = req.destination + self.config.cols
-    #         destination = req.source - self.config.cols
-    #         path = self.routes[source][destination]
-    #         flit = Flit(source, destination, path)
-    #         flit.source_original = req.destination_original
-    #         flit.destination_original = req.source_original
-    #         flit.req_type = req.req_type
-    #         flit.flit_type = "data"
-    #         flit.departure_cycle = self.cycle + self.config.ddr_latency + i if req.destination_type == "ddr" else self.cycle + i
-    #         flit.req_departure_cycle = req.departure_cycle
-    #         flit.entry_db_cycle = req.entry_db_cycle
-    #         flit.source_type = req.destination_type
-    #         flit.destination_type = req.source_type
-    #         flit.original_source_type = req.original_source_type
-    #         flit.original_destination_type = req.original_destination_type
-    #         flit.packet_id = req.packet_id
-    #         flit.flit_id_in_packet = i
-    #         flit.burst_length = req.burst_length
-    #         if i == req.burst_length - 1:
-    #             flit.is_last_flit = True
-    #         self.node.sn_rdb[flit.source_type][flit.source].append(flit)
-
-    # def process_inject_queues(self, network, inject_queues):
-    #     flit_num = 0
-    #     flits = []
-    #     for source, queue in inject_queues.items():
-    #         if queue and queue[0]:
-    #             flit = queue.popleft()
-    #             if flit.inject(network):
-    #                 network.inject_num += 1
-    #                 flit_num += 1
-    #                 flit.departure_network_cycle = self.cycle
-    #                 flits.append(flit)
-    #             else:
-    #                 queue.appendleft(flit)
-    #                 for flit in queue:
-    #                     flit.wait_cycle_h += 1
-    #     return flit_num, flits

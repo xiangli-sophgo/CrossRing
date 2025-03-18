@@ -108,8 +108,8 @@ show_value = "TotalBandWidth"
 # show_value = "gdma-R-L2M_thoughput"
 # show_value = "sdma-W-L2M_thoughput"
 # show_value = "sdma-R-DDR_thoughput"
-# show_value = "data_cir_h_total"
-# show_value = "data_cir_v_total"
+# show_value = "_data_cir_h_num"
+# show_value = "_data_cir_v_num"
 # show_value = "read_retry_num"
 # show_value = "write_retry_num"
 # x_name = "ro_tracker_ostd"
@@ -176,7 +176,7 @@ for topo in topologies:
     # pivot_table_with_means.loc["Mean"] = col_means  # 添加行：列均值
 
     cmap = "YlGnBu"
-    if show_value in ["FinishCycle", "data_cir_h_total", "data_cir_v_total"]:
+    if show_value in ["FinishCycle", "_data_cir_h_num", "_data_cir_v_num"]:
         cmap += "_r"
     #  计算每个点的变化率
     if rate_plot:

@@ -8,7 +8,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"demo3.txt"
+    file_name = r"demo45.txt"
     # file_name = r"testcase-v1.1.1.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -39,8 +39,8 @@ def main():
     if not config.topo_type:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        topo_type = "5x4"
-        # topo_type = "4x5"
+        # topo_type = "5x4"
+        topo_type = "4x5"
 
         # topo_type = "6x5"
 

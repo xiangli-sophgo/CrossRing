@@ -4,7 +4,7 @@ import random
 topo = "4x9"
 
 if topo in ["4x9", "9x4", "4x5", "5x4"]:
-    f = open("../test_data/demo3.txt", "w", encoding="utf-8")
+    f = open("../test_data/demo45.txt", "w", encoding="utf-8")
     end_time = 64
     sdma_pos = range(32)
     gdma_pos = range(32)
@@ -13,7 +13,7 @@ if topo in ["4x9", "9x4", "4x5", "5x4"]:
     rn_num = 32
     np.random.seed(12)
     burst = 4
-    speed = {1: 128, 2: 68, 4: 64}
+    speed = {1: 128, 2: 68, 4: 32}
 
     time = [128 // (speed[burst] // burst) * i for i in range(speed[burst] // burst)]
     # print(time)

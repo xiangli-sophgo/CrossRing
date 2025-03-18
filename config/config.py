@@ -35,7 +35,8 @@ class SimulationConfig:
         self.ITag_Trigger_Th_V = args.ITag_Trigger_Th_V
         self.ft_count = args.ft_count
         self.ft_len = args.ft_len
-        self.tags_num = args.tags_num
+        self.ITag_Max_Num_H = args.ITag_Max_Num_H
+        self.ITag_Max_Num_V = args.ITag_Max_Num_V
         self.reservation_num = args.reservation_num
         self.burst = args.burst
         self.network_frequency = args.network_frequency
@@ -175,6 +176,9 @@ class SimulationConfig:
         # assert len(indices) == self.num_ips, f"Expected {self.num_ips} indices, but got {len(indices)}."
         return indices
 
+    def finish_del(self):
+        del self.ddr_send_positions, self.l2m_send_positions, self.gdma_send_positions, self.sdma_send_positions
+
     def parse_args(self, default_config):
         if os.path.exists(default_config):
             with open(default_config, "r") as f:
@@ -205,14 +209,15 @@ class SimulationConfig:
         parser.add_argument("--IQ_OUT_FIFO_DEPTH", type=int, default=default_config["IQ_OUT_FIFO_DEPTH"], help="Depth of IQ FIFOs in inject queues")
         parser.add_argument("--EQ_IN_FIFO_DEPTH", type=int, default=default_config["EQ_IN_FIFO_DEPTH"], help="Depth of EQ FIFOs in inject queues")
         parser.add_argument("--EQ_CH_FIFO_DEPTH", type=int, default=default_config["EQ_CH_FIFO_DEPTH"], help="Length of IP eject queues")
-        parser.add_argument("--ITag_Trigger_Th_H", type=int, default=default_config["ITag_Trigger_Th_H"], help="Horizontal wait cycles")
-        parser.add_argument("--ITag_Trigger_Th_V", type=int, default=default_config["ITag_Trigger_Th_V"], help="Vertical wait cycles")
+        parser.add_argument("--ITag_Trigger_Th_H", type=int, default=default_config["ITag_Trigger_Th_H"], help="Horizontal ring I-Tag trigger threshold")
+        parser.add_argument("--ITag_Trigger_Th_V", type=int, default=default_config["ITag_Trigger_Th_V"], help="Vertical ring I-Tag trigger threshold")
         parser.add_argument("--ft_count", type=int, default=default_config["ft_count"], help="FT count")
         parser.add_argument("--ft_len", type=int, default=default_config["ft_len"], help="FT length")
-        parser.add_argument("--tags_num", type=int, default=default_config["tags_num"], help="Number of tags")
+        parser.add_argument("--ITag_Max_Num_H", type=int, default=default_config["ITag_Max_Num_H"], help="Maximum number of I-Tag reservations for horizontal ring XY nodes")
+        parser.add_argument("--ITag_Max_Num_V", type=int, default=default_config["ITag_Max_Num_V"], help="Maximum number of I-Tag reservations for vertical ring XY nodes")
         parser.add_argument("--reservation_num", type=int, default=default_config["reservation_num"], help="Reservation number")
-        parser.add_argument("--ddr_latency", type=int, default=default_config["ddr_latency"], help="Reservation number")
-        parser.add_argument("--sn_tracker_release_latency", type=int, default=default_config["sn_tracker_release_latency"], help="Reservation number")
+        parser.add_argument("--ddr_latency", type=int, default=default_config["ddr_latency"], help="DDR latency")
+        parser.add_argument("--sn_tracker_release_latency", type=int, default=default_config["sn_tracker_release_latency"], help="SN tracker release latency")
 
         parser.add_argument("--burst", type=int, default=default_config["burst"], help="Burst length")
         parser.add_argument("--network_frequency", type=float, default=default_config["network_frequency"], help="Network frequency")

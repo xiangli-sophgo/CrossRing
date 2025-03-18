@@ -16,12 +16,12 @@ import cProfile
 
 class BaseModel:
     def __init__(self, model_type, config, topo_type, traffic_file_path, file_name, result_save_path=None):
-        self.model_type = model_type
+        self._model_type = model_type
         self.config = config
-        self.topo_type = topo_type
+        self._topo_type = topo_type
         self.traffic_file_path = traffic_file_path
         self.file_name = file_name
-        print(f"\nModel Type: {model_type}, Topology: {self.topo_type}, file_name: {self.file_name}")
+        print(f"\nModel Type: {model_type}, Topology: {self._topo_type }, file_name: {self.file_name}")
 
         self.result_save_path = result_save_path
         if result_save_path:
@@ -31,7 +31,7 @@ class BaseModel:
         self.initial()
 
     def initial(self):
-        self.config.topology_select(self.topo_type)
+        self.config.topology_select(self._topo_type)
         self.adjacency_matrix = create_adjacency_matrix("CrossRing", self.config.num_nodes, self.config.cols)
         # plot_adjacency_matrix(self.adjacency_matrix)
         self.flit_network = Network(self.config, self.adjacency_matrix)
@@ -45,26 +45,12 @@ class BaseModel:
         self.req_count = 0
         self.flit_id_count = 0
         self.send_flits_num = 0
-        self.send_read_flits_num = 0
-        self.send_write_flits_num = 0
         self.send_reqs_num = 0
-        self.rn_send_num = 0
-        self.negative_rsp_num, self.positive_rsp_num = 0, 0
         self.trans_flits_num = 0
         self.end_time = np.inf
         self.print_interval = 5000
-        self.finish_time = -1
-        self.new_write_req = []
         self.flit_num, self.req_num, self.rsp_num = 0, 0, 0
-        self.req_cir_h_total, self.req_cir_v_total = 0, 0
-        self.rsp_cir_h_total, self.rsp_cir_v_total = 0, 0
-        self.data_cir_h_total, self.data_cir_v_total = 0, 0
-        self.read_retry_num, self.write_retry_num = 0, 0
-        self.EQ_ETag_T1_num, self.EQ_ETag_T0_num = 0, 0
-        self.RB_ETag_T1_num, self.RB_ETag_T0_num = 0, 0
-        self.R_retry_num, self.W_retry_num = 0, 0
-        self.read_BW, self.read_latency_avg, self.read_latency_max = 0, 0, 0
-        self.write_BW, self.write_latency_avg, self.write_latency_max = 0, 0, 0
+        self.new_write_req = []
         self.directions = ["right", "left", "up", "local"]
         self.direction_conditions = {
             "right": lambda flit: flit.path[1] - flit.path[0] == 1,
@@ -73,6 +59,23 @@ class BaseModel:
             "local": lambda flit: flit.source - flit.destination == self.config.cols,
         }
         self.flit_position = set(self.config.ddr_send_positions + self.config.sdma_send_positions + self.config.l2m_send_positions + self.config.gdma_send_positions)
+
+        # statistical data
+        self._send_read_flits_num = 0
+        self._send_write_flits_num = 0
+        self._rn_send_num = 0
+        self._negative_rsp_num, self._positive_rsp_num = 0, 0
+        self._R_finish_time, self._W_finish_time = 0, 0
+        self._R_tail_latency, self._W_tail_latency = 0, 0
+        self._req_cir_h_num, self._req_cir_v_num = 0, 0
+        self._rsp_cir_h_num, self._rsp_cir_v_num = 0, 0
+        self._data_cir_h_num, self._data_cir_v_num = 0, 0
+        self._read_retry_num, self._write_retry_num = 0, 0
+        self._EQ_ETag_T1_num, self._EQ_ETag_T0_num = 0, 0
+        self._RB_ETag_T1_num, self._RB_ETag_T0_num = 0, 0
+        self._ITag_h_num, self._ITag_v_num = 0, 0
+        self._read_BW, self._read_latency_avg, self._read_latency_max = 0, 0, 0
+        self._write_BW, self._write_latency_avg, self._write_latency_max = 0, 0, 0
 
     def run(self):
         """Main simulation loop."""
@@ -185,8 +188,8 @@ class BaseModel:
                     (req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
-                self.req_cir_h_total += req.circuits_completed_h
-                self.req_cir_v_total += req.circuits_completed_v
+                self._req_cir_h_num += req.circuits_completed_h
+                self._req_cir_v_num += req.circuits_completed_v
                 for flit in self.flit_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle
                 self.node.rn_tracker["read"][self.rn_type][in_pos].remove(req)
@@ -206,8 +209,8 @@ class BaseModel:
                     (req for req in self.node.sn_tracker[self.sn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
-                self.req_cir_h_total += req.circuits_completed_h
-                self.req_cir_v_total += req.circuits_completed_v
+                self._req_cir_h_num += req.circuits_completed_h
+                self._req_cir_v_num += req.circuits_completed_v
                 for flit in self.flit_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle + self.config.sn_tracker_release_latency
                 # 释放tracker 增加40ns
@@ -257,7 +260,7 @@ class BaseModel:
         print(
             f"T: {self.cycle // self.config.network_frequency}, Req_cnt: {self.req_count} In_Req: {self.req_num}, Rsp: {self.rsp_num},"
             # f"" Sent flits: {self.send_flits_num}, "
-            f" R_fn: {self.send_read_flits_num}, W_fn: {self.send_write_flits_num}, "
+            f" R_fn: {self._send_read_flits_num}, W_fn: {self._send_write_flits_num}, "
             f"Trans_fn: {self.trans_flits_num}, Recv_fn: {self.flit_network.recv_flits_num}"
         )
 
@@ -338,7 +341,7 @@ class BaseModel:
                             self.send_flits_num += 1
                             self.trans_flits_num += 1
                             if i == 0:
-                                self.send_read_flits_num += 1
+                                self._send_read_flits_num += 1
                                 self.node.sn_rdb[self.sn_type][ip_pos].pop(0)
                                 if len(self.flit_network.arrive_flits[flit.packet_id]) == flit.burst_length:
                                     # finish current req injection
@@ -357,7 +360,7 @@ class BaseModel:
                                         self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][ip_pos] -= 1
                                         self.create_rsp(new_req, "positive")
                             else:
-                                self.send_write_flits_num += 1
+                                self._send_write_flits_num += 1
                                 if flit.flit_id_in_packet == 0:
                                     for f in self.node.rn_wdb[self.rn_type][ip_pos][flit.packet_id]:
                                         f.entry_db_cycle = self.cycle
@@ -476,8 +479,8 @@ class BaseModel:
                 break  # 等待下一周期
 
             req_data = self.next_req
-            source = self.node_change(req_data[1])
-            destination = self.node_change(req_data[3], False)
+            source = self.node_map(req_data[1])
+            destination = self.node_map(req_data[3], False)
             path = self.routes[source][destination]
             req = Flit(source, destination, path)
             req.source_original = req_data[1]
@@ -489,16 +492,18 @@ class BaseModel:
             req.destination_type = req_data[4][:3]
             req.original_source_type = req_data[2]
             req.original_destination_type = req_data[4]
-            if self.topo_type in ["5x4", "4x5"]:
+            if self._topo_type in ["5x4", "4x5"]:
                 req.source_type = "sdma" if req_data[1] > 15 else "gdma"
-                # req.destination_type = "ddr" if req_data[3] > 15 else "l2m"
+                req.destination_type = "ddr" if req_data[3] > 15 else "l2m"
             req.packet_id = Node.get_next_packet_id()
             req.req_type = "read" if req_data[5] == "R" else "write"
             self.req_network.send_flits[req.packet_id].append(req)
             if req.req_type == "read":
                 self.req_network.ip_read[req.source_type][req.source].append(req)
+                self._R_tail_latency = req_data[0]
             if req.req_type == "write":
                 self.req_network.ip_write[req.source_type][req.source].append(req)
+                self._W_tail_latency = req_data[0]
 
             # 重置缓存并更新计数
             self.next_req = None
@@ -806,9 +811,9 @@ class BaseModel:
                 network.RB_UE_Counters["right"][(pos, next_pos)]["T2"] -= 1
 
         if flit.ETag_priority == "T1":
-            self.RB_ETag_T1_num += 1
+            self._RB_ETag_T1_num += 1
         elif flit.ETag_priority == "T0":
-            self.RB_ETag_T0_num += 1
+            self._RB_ETag_T0_num += 1
 
         flit.ETag_priority = "T2"
         network.round_robin["mid"][next_pos].remove(index)
@@ -987,7 +992,6 @@ class BaseModel:
                 elif flit_l.destination == next_pos:
                     eject_queue = network.eject_queues[direction][next_pos]
                     reservations = network.eject_reservations[direction][next_pos]
-                    # TODO: EQ_IN_FIFO_DEPTH -> ETag
                     return (
                         self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
                         if network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations)
@@ -1013,11 +1017,12 @@ class BaseModel:
         return True
 
     def _handle_wait_cycles(self, network, ts_key, pos, next_pos, direction, link):
-        if network.ring_bridge[ts_key][(pos, next_pos)][0].wait_cycle_v > self.config.ITag_Trigger_Th_V and not network.ring_bridge[ts_key][(pos, next_pos)][0].is_tag_v:
+        if network.ring_bridge[ts_key][(pos, next_pos)][0].wait_cycle_v > self.config.ITag_Trigger_Th_V and not network.ring_bridge[ts_key][(pos, next_pos)][0].itag_v:
             if network.remain_tag[direction][next_pos] > 0:
                 network.remain_tag[direction][next_pos] -= 1
                 network.links_tag[link][-1] = [next_pos, direction]
-                network.ring_bridge[ts_key][(pos, next_pos)][0].is_tag_v = True
+                network.ring_bridge[ts_key][(pos, next_pos)][0].itag_v = True
+                self._ITag_v_num += 1
         else:
             for flit in network.ring_bridge[ts_key][(pos, next_pos)]:
                 flit.wait_cycle_v += 1
@@ -1029,8 +1034,8 @@ class BaseModel:
             (req for req in self.node.rn_tracker[rsp.req_type][self.rn_type][in_pos] if req.packet_id == rsp.packet_id),
             None,
         )
-        self.rsp_cir_h_total += rsp.circuits_completed_h
-        self.rsp_cir_v_total += rsp.circuits_completed_v
+        self._rsp_cir_h_num += rsp.circuits_completed_h
+        self._rsp_cir_v_num += rsp.circuits_completed_v
         if not req:
             print("RSP do not have REQ")
             return
@@ -1173,9 +1178,9 @@ class BaseModel:
                     flit = network.eject_queues["local"][ip_pos].popleft()
 
                 if flit.ETag_priority == "T1":
-                    self.EQ_ETag_T1_num += 1
+                    self._EQ_ETag_T1_num += 1
                 elif flit.ETag_priority == "T0":
-                    self.EQ_ETag_T0_num += 1
+                    self._EQ_ETag_T0_num += 1
                 flit.ETag_priority = "T2"
 
                 rr_queue.remove(i)
@@ -1184,8 +1189,8 @@ class BaseModel:
         return eject_flits
 
     def create_write_req_after_read(self, flit):
-        source = self.node_change(flit.destination_original)
-        destination = self.node_change(flit.source_original, False)
+        source = self.node_map(flit.destination_original)
+        destination = self.node_map(flit.source_original, False)
         path = self.routes[source][destination]
         req = Flit(source, destination, path)
         req.source_original = flit.destination + self.config.cols
@@ -1197,9 +1202,9 @@ class BaseModel:
         req.destination_type = flit.source_type
         req.original_source_type = flit.original_destination_type
         req.original_destination_type = flit.original_source_type
-        if self.topo_type in ["5x4", "4x5"]:
+        if self._topo_type in ["5x4", "4x5"]:
             req.source_type = "sdma" if req.source_original > 15 else "gdma"
-            # req.destination_type = "ddr" if req.destination_original > 15 else "l2m"
+            req.destination_type = "ddr" if req.destination_original > 15 else "l2m"
         req.packet_id = Node.get_next_packet_id()
         req.req_type = "write"
         self.new_write_req.append(req)
@@ -1260,9 +1265,9 @@ class BaseModel:
     def create_rsp(self, req, rsp_type):
         if rsp_type == "negative":
             if req.req_type == "read":
-                self.read_retry_num += 1
+                self._read_retry_num += 1
             elif req.req_type == "write":
-                self.write_retry_num += 1
+                self._write_retry_num += 1
         source = req.destination + self.config.cols
         destination = req.source - self.config.cols
         path = self.routes[source][destination]
@@ -1295,6 +1300,8 @@ class BaseModel:
                     queue.appendleft(flit)
                     for flit in queue:
                         flit.wait_cycle_h += 1
+                if flit.itag_h:
+                    self._ITag_h_num += 1
         return flit_num, flits
 
     def evaluate_results(self, network):
@@ -1332,8 +1339,8 @@ class BaseModel:
             self.sdma_R_ddr_latency, self.sdma_W_l2m_latency, self.gdma_R_l2m_latency = [], [], []
             for flits in network.arrive_flits.values():
                 for flit in flits:
-                    self.data_cir_h_total += flit.circuits_completed_h
-                    self.data_cir_v_total += flit.circuits_completed_v
+                    self._data_cir_h_num += flit.circuits_completed_h
+                    self._data_cir_v_num += flit.circuits_completed_v
                 self.process_flits(
                     flits[-1],
                     # next((flit for flit in flits if flit.is_last_flit), flits[-1]),
@@ -1407,31 +1414,23 @@ class BaseModel:
         print("=" * 50)
         total_result = os.path.join(self.result_save_path, "total_result.txt")
         with open(total_result, "w", encoding="utf-8") as f3:
-            print(f"Topology: {self.topo_type}, file_name: {self.file_name}")
-            print(f"Topology: {self.topo_type}, file_name: {self.file_name}", file=f3)
+            print(f"Topology: {self._topo_type }, file_name: {self.file_name}")
+            print(f"Topology: {self._topo_type }, file_name: {self.file_name}", file=f3)
             if read_latency:
-                self.read_BW, self.read_latency_avg, self.read_latency_max = self.output_intervals(f3, read_merged_intervals, "Read", read_latency)
+                self._read_BW, self._read_latency_avg, self._read_latency_max = self.output_intervals(f3, read_merged_intervals, "Read", read_latency)
             if write_latency:
-                self.write_BW, self.write_latency_avg, self.write_latency_max = self.output_intervals(f3, write_merged_intervals, "Write", write_latency)
-        print(f"Read + Write Bandwidth: {(self.read_BW + self.write_BW):.1f}")
+                self._write_BW, self._write_latency_avg, self._write_latency_max = self.output_intervals(f3, write_merged_intervals, "Write", write_latency)
+        print(f"Read + Write Bandwidth: {(self._read_BW + self._write_BW):.1f}")
         print("=" * 50)
-        print(
-            f"Total Circuits req h: {self.req_cir_h_total}, avg: {(self.req_cir_h_total / self.req_num) if self.req_num > 0 else 0:.3f}; "
-            f"v: {self.req_cir_v_total}, avg: {(self.req_cir_v_total / self.req_num) if self.req_num > 0 else 0:.3f}"
-        )
+        print(f"Total Circuits req h: {self._req_cir_h_num}, v: {self._req_cir_v_num}")
 
-        print(
-            f"Total Circuits rsp h: {self.rsp_cir_h_total}, avg: {(self.rsp_cir_h_total / self.rsp_num) if self.rsp_num > 0 else 0:.3f}; "
-            f"v: {self.rsp_cir_v_total}, avg: {(self.rsp_cir_v_total / self.rsp_num) if self.rsp_num > 0 else 0:.3f}"
-        )
+        print(f"Total Circuits rsp h: {self._rsp_cir_h_num}, v: {self._rsp_cir_v_num}")
 
-        print(
-            f"Total Circuits data h: {self.data_cir_h_total}, avg: {(self.data_cir_h_total / self.flit_num) if self.flit_num > 0 else 0:.3f}; "
-            f"v: {self.data_cir_v_total}, avg: {(self.data_cir_v_total / self.flit_num) if self.flit_num > 0 else 0:.3f}"
-        )
-        print(f"Total RB ETag: T1: {self.RB_ETag_T1_num}, T0: {self.RB_ETag_T0_num}; EQ ETag: T1: {self.EQ_ETag_T1_num}, T0: {self.EQ_ETag_T0_num}")
-        if self.model_type == "REQ_RSP":
-            print(f"Retry num: R: {self.read_retry_num}, W: {self.write_retry_num}")
+        print(f"Total Circuits data h: {self._data_cir_h_num}, v: {self._data_cir_v_num}")
+        print(f"Total RB ETag: T1: {self._RB_ETag_T1_num}, T0: {self._RB_ETag_T0_num}; EQ ETag: T1: {self._EQ_ETag_T1_num}, T0: {self._EQ_ETag_T0_num}")
+        print(f"Total ITag: h: {self._ITag_h_num}, v: {self._ITag_v_num}")
+        if self._model_type == "REQ_RSP":
+            print(f"Retry num: R: {self._read_retry_num}, W: {self._write_retry_num}")
         print("=" * 50)
         print(
             f"Throughput: sdma-R-DDR: {((self.sdma_R_ddr_flit_num * 128/self.sdma_R_ddr_finish_time/4) if self.sdma_R_ddr_finish_time>0 else 0):.1f}, "
@@ -1499,7 +1498,7 @@ class BaseModel:
         print(f"{req_type} intervals:", file=f3)
         print(f"{req_type} results:")
         # print(f"{req_type} results:", file=f3)
-        weighted_bandwidth_sum, total_count, total_bandwidth = 0, 0, [np.inf, -np.inf]
+        weighted_bandwidth_sum, total_count, finish_time, total_bandwidth = 0, 0, 0, [np.inf, -np.inf]
 
         for start, end, count in merged_intervals:
             if start == end:
@@ -1510,11 +1509,20 @@ class BaseModel:
             weighted_bandwidth_sum += bandwidth * count
             total_count += count
             print(f"Interval: {start} to {end}, count: {count}, bandwidth: {bandwidth:.1f}", file=f3)
-            self.finish_time = max(self.finish_time, end)
+            finish_time = max(finish_time, end)
 
         # weighted_bandwidth = weighted_bandwidth_sum / total_count if total_count > 0 else 0
-        weighted_bandwidth = self.flit_num * 128 / self.finish_time / self.config.num_ips
-        print(f"Finish Time: {self.finish_time}")
+        weighted_bandwidth = total_count * 128 / finish_time / self.config.num_ips
+
+        if req_type == "Read":
+            self._R_finish_time = finish_time
+            self._R_tail_latency = finish_time - self._R_tail_latency // self.config.network_frequency
+            print(f"Finish Time: {self._R_finish_time}, Tail latency: {self._R_tail_latency}")
+        elif req_type == "Write":
+            self._W_finish_time = finish_time
+            self._W_tail_latency = finish_time - self._W_tail_latency // self.config.network_frequency
+            print(f"Finish Time: {self._W_finish_time}, Tail latency: {self._W_tail_latency}")
+
         latency_avg = np.average(latency)
         latency_max = max(latency)
         print(
@@ -1743,17 +1751,17 @@ class BaseModel:
             actual_max_net_latency,
         ]
 
-    def node_change(self, node, is_source=True):
+    def node_map(self, node, is_source=True):
         if is_source:
-            if self.topo_type in ["5x4", "4x5"]:
+            if self._topo_type in ["5x4", "4x5"]:
                 return self.config.gdma_send_positions[node] if node < 16 else self.config.sdma_send_positions[node % 16]
-            elif self.topo_type == "6x5":
+            elif self._topo_type == "6x5":
                 return node % self.config.cols + self.config.cols + node // self.config.cols * 2 * self.config.cols
             return self.config.gdma_send_positions[node]
         else:
-            if self.topo_type in ["5x4", "4x5"]:
+            if self._topo_type in ["5x4", "4x5"]:
                 return self.config.gdma_send_positions[node] - self.config.cols if node < 16 else self.config.sdma_send_positions[node % 16] - self.config.cols
-            elif self.topo_type == "6x5":
+            elif self._topo_type == "6x5":
                 return node % self.config.cols + node // self.config.cols * 2 * self.config.cols
             return self.config.gdma_send_positions[node] - self.config.cols
 
