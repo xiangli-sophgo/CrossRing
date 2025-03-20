@@ -13,7 +13,7 @@ if topo in ["4x9", "9x4", "4x5", "5x4"]:
     rn_num = 32
     np.random.seed(12)
     burst = 4
-    speed = {1: 128, 2: 68, 4: 32}
+    speed = {1: 128, 2: 68, 4: 64}
 
     time = [128 // (speed[burst] // burst) * i for i in range(speed[burst] // burst)]
     # print(time)

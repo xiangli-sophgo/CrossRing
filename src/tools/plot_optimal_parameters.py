@@ -6,6 +6,8 @@ import numpy as np
 import seaborn as sns
 import os
 from sklearn.preprocessing import StandardScaler
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # 读取CSV文件
 # file_root = r"../../Result/Params_csv/"
@@ -70,9 +72,9 @@ from sklearn.preprocessing import StandardScaler
 # 自定义格式化函数
 def format_func(x):
     if x >= 1e6:
-        return f"{x/1e6:.1f}M"  # 显示为百万
+        return f"{x/1e6:.3f}M"  # 显示为百万
     elif x >= 1e3:
-        return f"{x/1e3:.1f}K"  # 显示为千
+        return f"{x/1e3:.2f}K"  # 显示为千
     else:
         return f"{x:.1f}"  # 保留一位小数
 
@@ -81,35 +83,39 @@ file_root = r"../../Result/Params_csv/"
 
 # data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
 # data_file_name = r"RB_IN_OUT_FIFO_459_0303_2_fixed_time_interval.csv"
-data_file_name = r"RB_IN_OUT_FIFO_459_0304.csv"
+data_file_name = r"ETag_RB_0320.csv"
 topologies = [
     # "4x9",
-    "9x4",
-    # "5x4",
+    # "9x4",
+    "5x4",
     # "4x5",
 ]
 
-data_file_name = r"RB_IN_OUT_FIFO_3x3_0303_2.csv"
+# data_file_name = r"RB_IN_OUT_FIFO_3x3_0303_2.csv"
 # data_file_name = r"RB_IN_OUT_FIFO_3x3_0303_2_fixed_time_interval.csv"
 # data_file_name = r"LBN_459_0303_fixed_time_interval.csv"
 # data_file_name = r"LBN_3x3_0303_fixed_time_interval.csv"
 # data_file_name = r"inject_eject_queue_length_3x3_0228_fixed_time_interval.csv"
-topologies = ["3x3"]
+# topologies = ["3x3"]
 
 data = pd.read_csv(file_root + data_file_name)
 
 # 定义不同的拓扑
 # topo = topologies[0]
 
-# show_value = "ReadBandWidth"
-# show_value = "WriteBandWidth"
-# show_value = "FinishCycle"
-show_value = "TotalBandWidth"
+show_value = "read_BW"
+# show_value = "write_BW"
+# show_value = "Total_BW"
+# show_value = "R_finish_time"
+# show_value = "W_finish_time"
+# show_value = "R_tail_latency"
+# show_value = "W_tail_latency"
+# show_value = "RB_ETag_T0_num"
 # show_value = "gdma-R-L2M_thoughput"
 # show_value = "sdma-W-L2M_thoughput"
 # show_value = "sdma-R-DDR_thoughput"
-# show_value = "_data_cir_h_num"
-# show_value = "_data_cir_v_num"
+# show_value = "data_cir_h_num"
+# show_value = "data_cir_v_num"
 # show_value = "read_retry_num"
 # show_value = "write_retry_num"
 # x_name = "ro_tracker_ostd"
@@ -118,17 +124,26 @@ show_value = "TotalBandWidth"
 # y_name = "rn_w_tracker_ostd"
 # x_name = "inject_queue_length"
 # y_name = "eject_queue_length"
-x_name = "RB_IN_FIFO"
-y_name = "RB_OUT_FIFO"
+# x_name = "RB_IN_FIFO"
+# y_name = "RB_OUT_FIFO"
 # x_name = "SliceNum"
 # y_name = "model_type"
 # y_name = "Topo"
+x_name = "TL_Etag_T2_UE_MAX"
+y_name = "TL_Etag_T1_UE_MAX"
+z_name = "TR_Etag_T2_UE_MAX"
+# x_name = "TU_Etag_T2_UE_MAX"
+# y_name = "TU_Etag_T1_UE_MAX"
+# z_name = "TD_Etag_T2_UE_MAX"
 # model_type = "REQ_RSP"
-model_type = "Packet_Base"
+# model_type = "Packet_Base"
+model_type = "Feature"
 
 rate_plot = 0
 log_data = 0
-save_images = 0
+save_images = 1
+reverse_cmap = 0
+single_plot = 0
 
 
 # 设置 vmax 和 vmin
@@ -148,10 +163,10 @@ for topo in topologies:
     if "model_type" not in data.columns:
         # 如果没有该列，可以选择跳过过滤或采取其他操作
         # topo_data = data[(data["Topo"] == topo) & (data["rn_r_tracker_ostd"] > 16) & (data["rn_w_tracker_ostd"] > 16)]
-        topo_data = data[(data["Topo"] == topo)]
+        topo_data = data[(data["topo_type"] == topo)]
     else:
         # topo_data = data[(data["Topo"] == topo) & (data["rn_r_tracker_ostd"] > 16) & (data["rn_w_tracker_ostd"] > 16)]
-        topo_data = data.loc[(data["Topo"] == topo) & (data["model_type"] == model_type)]
+        topo_data = data.loc[(data["topo_type"] == topo)]
         # topo_data = data.loc[(data["Topo"] == topo)]
 
     if log_data:
@@ -176,7 +191,7 @@ for topo in topologies:
     # pivot_table_with_means.loc["Mean"] = col_means  # 添加行：列均值
 
     cmap = "YlGnBu"
-    if show_value in ["FinishCycle", "_data_cir_h_num", "_data_cir_v_num"]:
+    if show_value in ["FinishCycle", "data_cir_h_num", "data_cir_v_num"] or reverse_cmap:
         cmap += "_r"
     #  计算每个点的变化率
     if rate_plot:
@@ -184,7 +199,7 @@ for topo in topologies:
         change_rate = np.sqrt(dx**2 + dy**2)  # 计算综合变化率
 
         # 绘制变化率的热力图
-        plt.figure(figsize=(12, 10))  # 调整图像大小
+        # plt.figure(figsize=(12, 10))  # 调整图像大小
         ax = sns.heatmap(
             change_rate,
             cmap="YlGnBu_r",  # 配色方案
@@ -219,41 +234,85 @@ for topo in topologies:
             plt.show()
 
     # 绘制热力图
-    plt.figure(figsize=(12, 10))  # 调整图像大小
-    ax = sns.heatmap(
-        pivot_table,
-        cmap=cmap,  # 配色方案
-        # annot=True,  # 显示数值
-        annot=np.vectorize(format_func)(pivot_table),  # 使用自定义格式化
-        fmt="",  # 使用科学计数法，保留一位小数
-        # cbar_kws={"label": show_value},  # 颜色条标签
-        annot_kws={"size": 12},  # 数值字体大小
-        center=pivot_table.mean().mean(),  # 将颜色映射中心值设为数据的平均值
-        vmax=pivot_table.max().max() + 1,
-        vmin=pivot_table.min().min() - 1,
-        linewidths=0.5,  # 网格线宽度
-        linecolor="white",  # 网格线颜色
-    )
-    ax.invert_yaxis()
+    # plt.figure(figsize=(12, 10))  # 调整图像大小
+    if single_plot:
+        ax = sns.heatmap(
+            pivot_table,
+            cmap=cmap,  # 配色方案
+            # annot=True,  # 显示数值
+            annot=np.vectorize(format_func)(pivot_table),  # 使用自定义格式化
+            fmt="",  # 使用科学计数法，保留一位小数
+            # cbar_kws={"label": show_value},  # 颜色条标签
+            annot_kws={"size": 12},  # 数值字体大小
+            center=pivot_table.mean().mean(),  # 将颜色映射中心值设为数据的平均值
+            vmax=pivot_table.max().max() + 1,
+            vmin=pivot_table.min().min() - 1,
+            linewidths=0.5,  # 网格线宽度
+            linecolor="white",  # 网格线颜色
+        )
+        ax.invert_yaxis()
 
-    # 添加标题和轴标签
-    plt.title(f"Heatmap of {show_value} for Topo {topo}", fontsize=16, pad=20)
-    plt.xlabel(x_name, fontsize=14)
-    plt.ylabel(y_name, fontsize=14)
+        # 添加标题和轴标签
+        plt.title(f"Heatmap of {show_value} for Topo {topo}", fontsize=16, pad=20)
+        plt.xlabel(x_name, fontsize=14)
+        plt.ylabel(y_name, fontsize=14)
 
-    # 调整刻度字体大小
-    plt.xticks(fontsize=12, rotation=0)
-    plt.yticks(fontsize=12)
+        # 调整刻度字体大小
+        plt.xticks(fontsize=12, rotation=0)
+        plt.yticks(fontsize=12)
 
-    # 保存或显示图像
-    if save_images:
-        heatmap_filename = os.path.join(output_dir, f"{topo}_{show_value}.png")
-        plt.tight_layout()  # 调整布局
-        plt.savefig(heatmap_filename, bbox_inches="tight")  # 保存图片
-        plt.close()
+        # 保存或显示图像
+        if save_images:
+            heatmap_filename = os.path.join(output_dir, f"{topo}_{show_value}.png")
+            plt.tight_layout()  # 调整布局
+            plt.savefig(heatmap_filename, bbox_inches="tight")  # 保存图片
+            plt.close()
+        else:
+            plt.tight_layout()  # 调整布局
+            plt.show()
     else:
-        plt.tight_layout()  # 调整布局
-        plt.show()
+
+        unique_z_names = data[z_name].unique()
+
+        # 创建子图
+        fig, axes = plt.subplots(nrows=1, ncols=len(unique_z_names), figsize=(18, 3))
+        vmin = data[show_value].min()
+        vmax = data[show_value].max()
+
+        # 遍历每个 z_name 值
+        for i, z_value in enumerate(unique_z_names):
+            # 筛选出当前 z_name 的数据
+            z_data = data[data[z_name] == z_value]
+
+            # 创建数据透视表
+            pivot_table = z_data.pivot_table(index=y_name, columns=x_name, values=show_value, aggfunc="first")
+
+            # 绘制热力图
+            sns.heatmap(
+                pivot_table,
+                cmap=cmap,
+                annot=np.vectorize(format_func)(pivot_table),
+                fmt="",
+                ax=axes[i],
+                linewidths=0.5,
+                # linecolor="white",
+                vmin=vmin,  # 设置数据范围
+                vmax=vmax,
+            )
+            axes[i].invert_yaxis()
+            axes[i].set_title(f"{z_name}={z_value}")
+            axes[i].set_xlabel(x_name)
+            axes[i].set_ylabel(y_name)
+        fig.suptitle(f"Heatmap of {show_value} for Topo {topo}", fontsize=16)
+        if save_images:
+            heatmap_filename = os.path.join(output_dir, f"{topo}_{show_value}.png")
+            plt.tight_layout()  # 调整布局
+            plt.savefig(heatmap_filename, bbox_inches="tight")  # 保存图片
+            plt.close()
+        else:
+            plt.tight_layout()  # 调整布局
+            plt.show()
+
 # # 等高线图
 # # 创建一个图形
 # for topo in topologies:

@@ -260,6 +260,7 @@ class Network:
         self.T0_Etag_Order_FIFO = deque()  # 用于轮询选择 T0 Flit 的 Order FIFO
         self.RB_UE_Counters = {"left": {}, "right": {}}
         self.EQ_UE_Counters = {"up": {}, "down": {}}
+        self.both_side_ETag_upgrade = False
 
         for ip_pos in set(config.ddr_send_positions + config.sdma_send_positions + config.l2m_send_positions + config.gdma_send_positions):
             self.inject_queues["left"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
@@ -568,25 +569,35 @@ class Network:
                         if (
                             len(link_station) < self.config.RB_IN_FIFO_DEPTH
                             and flit_exist_right
-                            and self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH
+                            and (
+                                (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH and flit.ETag_priority in ["T0", "T1"])
+                                or (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                            )
                         ):
                             flit.is_delay = False
                             flit.current_link = (next_node, flit.path[flit.path_index])
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 1
                             self.station_reservations["right"][(next_node, flit.path[flit.path_index])].remove(flit)
+                            if flit.ETag_priority == "T2":
+                                self.RB_UE_Counters["right"].get((new_current, new_next_node))["T2"] += 1
                             self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] += 1
                             if flit.ETag_priority == "T0":
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                         elif (
                             not flit_exist_right
                             and self.config.RB_IN_FIFO_DEPTH - len(link_station) > len(self.station_reservations["right"][(new_current, new_next_node)])
-                            and self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH
+                            and (
+                                (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH and flit.ETag_priority in ["T0", "T1"])
+                                or (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                            )
                         ):
                             flit.is_delay = False
                             flit.current_link = (next_node, flit.path[flit.path_index])
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 1
+                            if flit.ETag_priority == "T2":
+                                self.RB_UE_Counters["right"].get((new_current, new_next_node))["T2"] += 1
                             self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] += 1
                             if flit.ETag_priority == "T0":
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
@@ -601,6 +612,8 @@ class Network:
                             next_pos = next_node + 1
                             flit.current_link = (next_node, next_pos)
                             flit.current_seat_index = 0
+                            if not self.both_side_ETag_upgrade and flit.ETag_priority == "T2":
+                                flit.ETag_priority = "T1"
                     else:
                         link[flit.current_seat_index] = None
                         next_pos = next_node + 1
@@ -632,33 +645,50 @@ class Network:
                                 next_pos = next_node - 1
                                 flit.current_link = (next_node, next_pos)
                                 flit.current_seat_index = 0
-                        elif flit.ETag_priority == "T1":
+                        elif flit.ETag_priority in ["T1", "T2"]:
                             link_station = self.ring_bridge["left"].get((new_current, new_next_node))
-                            if len(link_station) < self.config.RB_IN_FIFO_DEPTH and flit_exist_left and self.RB_UE_Counters["left"][(new_current, new_next_node)]["T1"] < self.config.TL_Etag_T1_UE_MAX:
+                            if (
+                                len(link_station) < self.config.RB_IN_FIFO_DEPTH
+                                and flit_exist_left
+                                and (
+                                    (self.RB_UE_Counters["left"][(new_current, new_next_node)]["T1"] < self.config.TL_Etag_T1_UE_MAX and flit.ETag_priority == "T1")
+                                    or (self.RB_UE_Counters["left"][(new_current, new_next_node)]["T2"] < self.config.TL_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                                )
+                            ):
                                 flit.is_delay = False
                                 flit.current_link = (new_current, new_next_node)
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
                                 self.station_reservations["left"][(new_current, new_next_node)].remove(flit)
+                                if flit.ETag_priority == "T2":
+                                    self.RB_UE_Counters["left"][(new_current, new_next_node)]["T2"] += 1
                                 self.RB_UE_Counters["left"][(new_current, new_next_node)]["T1"] += 1
                                 self.RB_UE_Counters["left"][(new_current, new_next_node)]["T0"] += 1
                             elif (
                                 not flit_exist_left
                                 and self.config.RB_IN_FIFO_DEPTH - len(link_station) > len(self.station_reservations["left"][(new_current, new_next_node)])
-                                and self.RB_UE_Counters["left"][(new_current, new_next_node)]["T1"] < self.config.TL_Etag_T1_UE_MAX
+                                and (
+                                    (self.RB_UE_Counters["left"][(new_current, new_next_node)]["T1"] < self.config.TL_Etag_T1_UE_MAX and flit.ETag_priority == "T1")
+                                    or (self.RB_UE_Counters["left"][(new_current, new_next_node)]["T2"] < self.config.TL_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                                )
                             ):
                                 flit.is_delay = False
                                 flit.current_link = (next_node, flit.path[flit.path_index])
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
+                                if flit.ETag_priority == "T2":
+                                    self.RB_UE_Counters["left"][(new_current, new_next_node)]["T2"] += 1
                                 self.RB_UE_Counters["left"][(new_current, new_next_node)]["T1"] += 1
                                 self.RB_UE_Counters["left"][(new_current, new_next_node)]["T0"] += 1
                                 if flit_exist_right:
                                     self.station_reservations["right"][(next_node, flit.path[flit.path_index])].remove(flit)
                             else:
-                                # 无法下环，升级T0并记录
-                                self.T0_Etag_Order_FIFO.append((next_node, flit))
-                                flit.ETag_priority = "T0"
+                                # 无法下环，升级ETag并记录
+                                if flit.ETag_priority == "T2":
+                                    flit.ETag_priority = "T1"
+                                elif flit.ETag_priority == "T1":
+                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
+                                    flit.ETag_priority = "T0"
                                 if not flit_exist_left and not flit_exist_right:
                                     if len(self.station_reservations["right"][(new_current, new_next_node)]) < self.config.reservation_num:
                                         self.station_reservations["right"][(new_current, new_next_node)].append(flit)
@@ -691,24 +721,38 @@ class Network:
                         flit_exist_up = any(flit_u.id == flit.id for flit_u in self.eject_reservations["up"][next_node])
                         flit_exist_down = any(flit_r.id == flit.id for flit_r in self.eject_reservations["down"][next_node])
                         link_eject = self.eject_queues["down"][next_node]
-                        if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH and flit_exist_down and self.EQ_UE_Counters["down"][next_node]["T1"] < self.config.EQ_IN_FIFO_DEPTH:
+                        if (
+                            len(link_eject) < self.config.EQ_IN_FIFO_DEPTH
+                            and flit_exist_down
+                            and (
+                                (self.EQ_UE_Counters["down"][next_node]["T1"] < self.config.EQ_IN_FIFO_DEPTH and flit.ETag_priority in ["T1", "T0"])
+                                or (self.EQ_UE_Counters["down"][next_node]["T2"] < self.config.TD_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                            )
+                        ):
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 0
                             self.eject_reservations["down"][next_node].remove(flit)
+                            if flit.ETag_priority == "T2":
+                                self.EQ_UE_Counters["down"][next_node]["T2"] += 1
                             self.EQ_UE_Counters["down"][next_node]["T1"] += 1
                             if flit.ETag_priority == "T0":
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                         elif (
                             not flit_exist_down
                             and self.config.EQ_IN_FIFO_DEPTH - len(link_eject) > len(self.eject_reservations["down"][next_node])
-                            and self.EQ_UE_Counters["down"][next_node]["T1"] < self.config.EQ_IN_FIFO_DEPTH
+                            and (
+                                (self.EQ_UE_Counters["down"][next_node]["T1"] < self.config.EQ_IN_FIFO_DEPTH and flit.ETag_priority in ["T1", "T0"])
+                                or (self.EQ_UE_Counters["down"][next_node]["T2"] < self.config.TD_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                            )
                         ):
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 0
+                            if flit.ETag_priority == "T2":
+                                self.EQ_UE_Counters["down"][next_node]["T2"] += 1
                             self.EQ_UE_Counters["down"][next_node]["T1"] += 1
                             if flit.ETag_priority == "T0":
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
@@ -716,6 +760,8 @@ class Network:
                                 self.eject_reservations["up"][next_node].remove(flit)
                         else:
                             # 无法下环，TD方向的flit不能升级T0
+                            if not self.both_side_ETag_upgrade and flit.ETag_priority == "T2":
+                                flit.ETag_priority = "T1"
                             if not flit_exist_up and not flit_exist_down:
                                 if len(self.eject_reservations["up"][next_node]) < self.config.reservation_num:
                                     self.eject_reservations["up"][next_node].append(flit)
@@ -734,32 +780,49 @@ class Network:
                         flit_exist_up = any(flit_u.id == flit.id for flit_u in self.eject_reservations["up"][next_node])
                         flit_exist_down = any(flit_r.id == flit.id for flit_r in self.eject_reservations["down"][next_node])
                         link_eject = self.eject_queues["up"][next_node]
-                        if flit.ETag_priority == "T1":
-                            if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH and flit_exist_up and self.EQ_UE_Counters["up"][next_node]["T1"] < self.config.TU_Etag_T1_UE_MAX:
-                                flit.is_delay = False
-                                flit.is_arrive = True
-                                link[flit.current_seat_index] = None
-                                flit.current_seat_index = 0
-                                self.eject_reservations["up"][next_node].remove(flit)
-                                self.EQ_UE_Counters["up"][next_node]["T1"] += 1
-                                self.EQ_UE_Counters["up"][next_node]["T0"] += 1
-                            elif (
-                                not flit_exist_up
-                                and self.config.EQ_IN_FIFO_DEPTH - len(link_eject) > len(self.eject_reservations["up"][next_node])
-                                and self.EQ_UE_Counters["up"][next_node]["T1"] < self.config.TU_Etag_T1_UE_MAX
+                        if flit.ETag_priority in ["T1", "T2"]:
+                            if (
+                                len(link_eject) < self.config.EQ_IN_FIFO_DEPTH
+                                and flit_exist_up
+                                and (
+                                    (self.EQ_UE_Counters["up"][next_node]["T1"] < self.config.TU_Etag_T1_UE_MAX and flit.ETag_priority == "T1")
+                                    or (self.EQ_UE_Counters["up"][next_node]["T2"] < self.config.TU_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                                )
                             ):
                                 flit.is_delay = False
                                 flit.is_arrive = True
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
+                                self.eject_reservations["up"][next_node].remove(flit)
+                                if flit.ETag_priority == "T2":
+                                    self.EQ_UE_Counters["up"][next_node]["T2"] += 1
+                                self.EQ_UE_Counters["up"][next_node]["T1"] += 1
+                                self.EQ_UE_Counters["up"][next_node]["T0"] += 1
+                            elif (
+                                not flit_exist_up
+                                and self.config.EQ_IN_FIFO_DEPTH - len(link_eject) > len(self.eject_reservations["up"][next_node])
+                                and (
+                                    (self.EQ_UE_Counters["up"][next_node]["T1"] < self.config.TU_Etag_T1_UE_MAX and flit.ETag_priority == "T1")
+                                    or (self.EQ_UE_Counters["up"][next_node]["T2"] < self.config.TU_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                                )
+                            ):
+                                flit.is_delay = False
+                                flit.is_arrive = True
+                                link[flit.current_seat_index] = None
+                                flit.current_seat_index = 0
+                                if flit.ETag_priority == "T2":
+                                    self.EQ_UE_Counters["up"][next_node]["T2"] += 1
                                 self.EQ_UE_Counters["up"][next_node]["T1"] += 1
                                 self.EQ_UE_Counters["up"][next_node]["T0"] += 1
                                 if flit_exist_down:
                                     self.eject_reservations["down"][next_node].remove(flit)
                             else:
-                                # 无法下环，升级T0并记录
-                                self.T0_Etag_Order_FIFO.append((next_node, flit))
-                                flit.ETag_priority = "T0"
+                                # 无法下环，升级ETag并记录
+                                if flit.ETag_priority == "T2":
+                                    flit.ETag_priority = "T1"
+                                elif flit.ETag_priority == "T1":
+                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
+                                    flit.ETag_priority = "T0"
                                 if not flit_exist_up and not flit_exist_down:
                                     if len(self.eject_reservations["down"][next_node]) < self.config.reservation_num:
                                         self.eject_reservations["down"][next_node].append(flit)
@@ -816,37 +879,50 @@ class Network:
                             flit.current_seat_index = 0
                     else:
                         if current - next_node == 1:
-                            if flit.ETag_priority == "T1":
+                            if flit.ETag_priority in ["T1", "T2"]:
                                 # left move
                                 link_station = self.ring_bridge["left"].get((new_current, new_next_node))
                                 if (
                                     len(link_station) < self.config.RB_IN_FIFO_DEPTH
                                     and flit_exist_left
-                                    and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T1"] < self.config.TL_Etag_T1_UE_MAX
+                                    and (
+                                        (self.RB_UE_Counters["left"][(new_current, new_next_node)]["T1"] < self.config.TL_Etag_T1_UE_MAX and flit.ETag_priority == "T1")
+                                        or (self.RB_UE_Counters["left"][(new_current, new_next_node)]["T2"] < self.config.TL_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                                    )
                                 ):
                                     flit.is_delay = False
                                     flit.current_link = (new_current, new_next_node)
                                     link[flit.current_seat_index] = None
                                     flit.current_seat_index = 0
                                     self.station_reservations["left"][(new_current, new_next_node)].remove(flit)
+                                    if flit.ETag_priority == "T2":
+                                        self.RB_UE_Counters["left"].get((new_current, new_next_node))["T2"] += 1
                                     self.RB_UE_Counters["left"].get((new_current, new_next_node))["T1"] += 1
                                     self.RB_UE_Counters["left"].get((new_current, new_next_node))["T0"] += 1
                                 elif (
                                     not flit_exist_left
                                     and self.config.RB_IN_FIFO_DEPTH - len(link_station) > len(self.station_reservations["left"][(new_current, new_next_node)])
-                                    and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T1"] < self.config.TL_Etag_T1_UE_MAX
+                                    and (
+                                        (self.RB_UE_Counters["left"][(new_current, new_next_node)]["T1"] < self.config.TL_Etag_T1_UE_MAX and flit.ETag_priority == "T1")
+                                        or (self.RB_UE_Counters["left"][(new_current, new_next_node)]["T2"] < self.config.TL_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                                    )
                                 ):
                                     flit.is_delay = False
                                     flit.current_link = (next_node, flit.path[flit.path_index])
                                     link[flit.current_seat_index] = None
                                     flit.current_seat_index = 0
+                                    if flit.ETag_priority == "T2":
+                                        self.RB_UE_Counters["left"].get((new_current, new_next_node))["T2"] += 1
                                     self.RB_UE_Counters["left"].get((new_current, new_next_node))["T1"] += 1
                                     self.RB_UE_Counters["left"].get((new_current, new_next_node))["T0"] += 1
                                     if flit_exist_right:
                                         self.station_reservations["right"][(next_node, flit.path[flit.path_index])].remove(flit)
                                 else:
-                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
-                                    flit.ETag_priority = "T0"
+                                    if flit.ETag_priority == "T2":
+                                        flit.ETag_priority = "T1"
+                                    elif flit.ETag_priority == "T1":
+                                        self.T0_Etag_Order_FIFO.append((next_node, flit))
+                                        flit.ETag_priority = "T0"
                                     if not flit_exist_left and not flit_exist_right:
                                         if len(self.station_reservations["right"][(new_current, new_next_node)]) < self.config.reservation_num:
                                             self.station_reservations["right"][(new_current, new_next_node)].append(flit)
@@ -879,25 +955,35 @@ class Network:
                             if (
                                 len(link_station) < self.config.RB_IN_FIFO_DEPTH
                                 and flit_exist_right
-                                and self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH
+                                and (
+                                    (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH and flit.ETag_priority in ["T1", "T0"])
+                                    or (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                                )
                             ):
                                 flit.is_delay = False
                                 flit.current_link = (new_current, new_next_node)
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 1
                                 self.station_reservations["right"][(new_current, new_next_node)].remove(flit)
+                                if flit.ETag_priority == "T2":
+                                    self.RB_UE_Counters["right"].get((new_current, new_next_node))["T2"] += 1
                                 self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] += 1
                                 if flit.ETag_priority == "T0":
                                     self.T0_Etag_Order_FIFO.remove((next_node, flit))
                             elif (
                                 not flit_exist_right
                                 and self.config.RB_IN_FIFO_DEPTH - len(link_station) > len(self.station_reservations["right"][(new_current, new_next_node)])
-                                and self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH
+                                and (
+                                    (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH and flit.ETag_priority in ["T1", "T0"])
+                                    or (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                                )
                             ):
                                 flit.is_delay = False
                                 flit.current_link = (next_node, flit.path[flit.path_index])
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 1
+                                if flit.ETag_priority == "T2":
+                                    self.RB_UE_Counters["right"].get((new_current, new_next_node))["T2"] += 1
                                 self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] += 1
                                 if flit.ETag_priority == "T0":
                                     self.T0_Etag_Order_FIFO.remove((next_node, flit))
@@ -911,6 +997,8 @@ class Network:
                                 next_pos = min(next_node + 1, row_end)
                                 flit.current_link = (next_node, next_pos)
                                 flit.current_seat_index = 0
+                                if not self.both_side_ETag_upgrade and flit.ETag_priority == "T2":
+                                    flit.ETag_priority = "T1"
                 else:
                     link[flit.current_seat_index] = None
                     if current - next_node == 1:
@@ -925,21 +1013,33 @@ class Network:
                     flit_exist_up = any(flit_u.id == flit.id for flit_u in self.eject_reservations["up"][next_node])
                     flit_exist_down = any(flit_r.id == flit.id for flit_r in self.eject_reservations["down"][next_node])
                     if current - next_node == self.config.cols * 2:
-                        if flit.ETag_priority == "T1":
+                        if flit.ETag_priority in ["T1", "T2"]:
                             # up move
                             link_eject = self.eject_queues["up"][next_node]
-                            if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH and flit_exist_up and self.EQ_UE_Counters["up"][next_node]["T1"] < self.config.TU_Etag_T1_UE_MAX:
+                            if (
+                                len(link_eject) < self.config.EQ_IN_FIFO_DEPTH
+                                and flit_exist_up
+                                and (
+                                    (self.EQ_UE_Counters["up"][next_node]["T1"] < self.config.TU_Etag_T1_UE_MAX and flit.ETag_priority == "T1")
+                                    or (self.EQ_UE_Counters["up"][next_node]["T2"] < self.config.TU_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                                )
+                            ):
                                 flit.is_delay = False
                                 flit.is_arrive = True
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
                                 self.eject_reservations["up"][next_node].remove(flit)
+                                if flit.ETag_priority == "T2":
+                                    self.EQ_UE_Counters["up"][next_node]["T2"] += 1
                                 self.EQ_UE_Counters["up"][next_node]["T1"] += 1
                                 self.EQ_UE_Counters["up"][next_node]["T0"] += 1
                             elif (
                                 not flit_exist_up
                                 and self.config.EQ_IN_FIFO_DEPTH - len(link_eject) > len(self.eject_reservations["up"][next_node])
-                                and self.EQ_UE_Counters["up"][next_node]["T1"] < self.config.TU_Etag_T1_UE_MAX
+                                and (
+                                    (self.EQ_UE_Counters["up"][next_node]["T1"] < self.config.TU_Etag_T1_UE_MAX and flit.ETag_priority == "T1")
+                                    or (self.EQ_UE_Counters["up"][next_node]["T2"] < self.config.TU_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                                )
                             ):
                                 flit.is_delay = False
                                 flit.is_arrive = True
@@ -950,8 +1050,11 @@ class Network:
                                 if flit_exist_down:
                                     self.eject_reservations["down"][next_node].remove(flit)
                             else:
-                                self.T0_Etag_Order_FIFO.append((next_node, flit))
-                                flit.ETag_priority = "T0"
+                                if flit.ETag_priority == "T2":
+                                    flit.ETag_priority = "T1"
+                                elif flit.ETag_priority == "T1":
+                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
+                                    flit.ETag_priority = "T0"
                                 if not flit_exist_up and not flit_exist_down:
                                     if len(self.eject_reservations["down"][next_node]) < self.config.reservation_num:
                                         self.eject_reservations["down"][next_node].append(flit)
@@ -977,11 +1080,20 @@ class Network:
                     else:
                         # down move
                         link_eject = self.eject_queues["down"][next_node]
-                        if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH and flit_exist_down and self.EQ_UE_Counters["down"][next_node]["T1"] < self.config.EQ_IN_FIFO_DEPTH:
+                        if (
+                            len(link_eject) < self.config.EQ_IN_FIFO_DEPTH
+                            and flit_exist_down
+                            and (
+                                (self.EQ_UE_Counters["down"][next_node]["T1"] < self.config.EQ_IN_FIFO_DEPTH and flit.ETag_priority in ["T1", "T0"])
+                                or (self.EQ_UE_Counters["down"][next_node]["T2"] < self.config.TD_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                            )
+                        ):
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 0
+                            if flit.ETag_priority == "T2":
+                                self.EQ_UE_Counters["down"][next_node]["T2"] += 1
                             self.EQ_UE_Counters["down"][next_node]["T1"] += 1
                             if flit.ETag_priority == "T0":
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
@@ -989,12 +1101,17 @@ class Network:
                         elif (
                             not flit_exist_down
                             and self.config.EQ_IN_FIFO_DEPTH - len(link_eject) > len(self.eject_reservations["down"][next_node])
-                            and self.EQ_UE_Counters["down"][next_node]["T1"] < self.config.EQ_IN_FIFO_DEPTH
+                            and (
+                                (self.EQ_UE_Counters["down"][next_node]["T1"] < self.config.EQ_IN_FIFO_DEPTH and flit.ETag_priority in ["T1", "T0"])
+                                or (self.EQ_UE_Counters["down"][next_node]["T2"] < self.config.TD_Etag_T2_UE_MAX and flit.ETag_priority == "T2")
+                            )
                         ):
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 0
+                            if flit.ETag_priority == "T2":
+                                self.EQ_UE_Counters["down"][next_node]["T2"] += 1
                             self.EQ_UE_Counters["down"][next_node]["T1"] += 1
                             if flit.ETag_priority == "T0":
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
@@ -1063,7 +1180,8 @@ class Network:
                     else:
                         if len(self.station_reservations["left"][(new_current, new_next_node)]) < self.config.reservation_num:
                             self.station_reservations["left"][(new_current, new_next_node)].append(flit)
-                        flit.ETag_priority = "T1"
+                        if self.both_side_ETag_upgrade:
+                            flit.ETag_priority = "T1"
                         next_pos = next_node + 1 if next_node + 1 <= row_end else row_end
                         flit.is_delay = True
                         link[flit.current_seat_index] = None
@@ -1102,7 +1220,8 @@ class Network:
                     else:
                         if len(self.eject_reservations["up"][next_node]) < self.config.reservation_num:
                             self.eject_reservations["up"][next_node].append(flit)
-                        flit.ETag_priority = "T1"
+                        if self.both_side_ETag_upgrade:
+                            flit.ETag_priority = "T1"
                         next_pos = next_node + self.config.cols * 2 if next_node + self.config.cols * 2 <= col_end else col_end
                         flit.is_delay = True
                         link[flit.current_seat_index] = None
