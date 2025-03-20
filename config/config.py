@@ -51,6 +51,7 @@ class SimulationConfig:
         self.TU_Etag_T1_UE_MAX = args.TU_Etag_T1_UE_MAX
         self.TU_Etag_T2_UE_MAX = args.TU_Etag_T2_UE_MAX
         self.TD_Etag_T2_UE_MAX = args.TD_Etag_T2_UE_MAX
+        self.Both_side_ETag_upgrade = args.Both_side_ETag_upgrade
         assert (
             self.TL_Etag_T2_UE_MAX < self.TL_Etag_T1_UE_MAX < self.RB_IN_FIFO_DEPTH
             and self.TL_Etag_T2_UE_MAX < self.RB_IN_FIFO_DEPTH - 2
@@ -231,5 +232,6 @@ class SimulationConfig:
         parser.add_argument("--TU_Etag_T1_UE_MAX", type=int, default=default_config["TU_Etag_T1_UE_MAX"], help="Vertival cross point towards up T1 ETag FIFO Entry number")
         parser.add_argument("--TU_Etag_T2_UE_MAX", type=int, default=default_config["TU_Etag_T2_UE_MAX"], help="Vertival cross point towards up T2 ETag FIFO Entry number")
         parser.add_argument("--TD_Etag_T2_UE_MAX", type=int, default=default_config["TD_Etag_T2_UE_MAX"], help="Vertival cross point towards down T2 ETag FIFO Entry number")
+        parser.add_argument("--Both_side_ETag_upgrade", type=int, default=default_config["Both_side_ETag_upgrade"], help="ETag upgrade method")
 
         return parser.parse_args()
