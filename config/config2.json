@@ -43,5 +43,5 @@
     "TU_Etag_T1_UE_MAX":7,
     "TU_Etag_T2_UE_MAX":5,
     "TD_Etag_T2_UE_MAX":5,
-    "Both_side_ETag_upgrade": 0
+    "Both_side_ETag_upgrade": 1
 }

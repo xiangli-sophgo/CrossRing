@@ -83,7 +83,8 @@ file_root = r"../../Result/Params_csv/"
 
 # data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
 # data_file_name = r"RB_IN_OUT_FIFO_459_0303_2_fixed_time_interval.csv"
-data_file_name = r"ETag_RB_0320.csv"
+# data_file_name = r"ETag_EQ_0321.csv"
+data_file_name = r"ITag_03232.csv"
 topologies = [
     # "4x9",
     # "9x4",
@@ -103,14 +104,16 @@ data = pd.read_csv(file_root + data_file_name)
 # 定义不同的拓扑
 # topo = topologies[0]
 
-show_value = "read_BW"
+# show_value = "read_BW"
 # show_value = "write_BW"
 # show_value = "Total_BW"
+# show_value = "ITag_h_num"
+show_value = "ITag_v_num"
 # show_value = "R_finish_time"
 # show_value = "W_finish_time"
 # show_value = "R_tail_latency"
 # show_value = "W_tail_latency"
-# show_value = "RB_ETag_T0_num"
+# show_value = "EQ_ETag_T1_num"
 # show_value = "gdma-R-L2M_thoughput"
 # show_value = "sdma-W-L2M_thoughput"
 # show_value = "sdma-R-DDR_thoughput"
@@ -129,33 +132,38 @@ show_value = "read_BW"
 # x_name = "SliceNum"
 # y_name = "model_type"
 # y_name = "Topo"
-x_name = "TL_Etag_T2_UE_MAX"
-y_name = "TL_Etag_T1_UE_MAX"
-z_name = "TR_Etag_T2_UE_MAX"
+# x_name = "TL_Etag_T2_UE_MAX"
+# y_name = "TL_Etag_T1_UE_MAX"
+# z_name = "TR_Etag_T2_UE_MAX"
 # x_name = "TU_Etag_T2_UE_MAX"
 # y_name = "TU_Etag_T1_UE_MAX"
 # z_name = "TD_Etag_T2_UE_MAX"
+x_name = "ITag_Trigger_Th_H"
+y_name = "ITag_Trigger_Th_V"
+z_name = "ITag_Max_Num_H"
 # model_type = "REQ_RSP"
 # model_type = "Packet_Base"
 model_type = "Feature"
 
+Both_side_ETag_upgrade = 0
+
 rate_plot = 0
 log_data = 0
 save_images = 1
-reverse_cmap = 0
-single_plot = 0
+reverse_cmap = 1
+plot_type = 2
 
 
 # 设置 vmax 和 vmin
-if show_value in ["ReadBandWidth", "WriteBandWidth"]:
-    vmax = 64
-    vmin = 0
-else:
-    vmax = 128
-    vmin = 64
+# if show_value in ["ReadBandWidth", "WriteBandWidth"]:
+#     vmax = 64
+#     vmin = 0
+# else:
+#     vmax = 128
+#     vmin = 64
 
 if save_images:
-    output_dir = f"../../Result/Plt_results/{x_name}_{y_name}_{model_type}/"
+    output_dir = f"../../Result/Plt_results/{x_name}_{y_name}_{model_type}_{'both' if Both_side_ETag_upgrade else 'singe'}/"
     os.makedirs(output_dir, exist_ok=True)
 
 for topo in topologies:
@@ -163,10 +171,10 @@ for topo in topologies:
     if "model_type" not in data.columns:
         # 如果没有该列，可以选择跳过过滤或采取其他操作
         # topo_data = data[(data["Topo"] == topo) & (data["rn_r_tracker_ostd"] > 16) & (data["rn_w_tracker_ostd"] > 16)]
-        topo_data = data[(data["topo_type"] == topo)]
+        topo_data = data[(data["topo_type"] == topo) & (data["Both_side_ETag_upgrade"] == Both_side_ETag_upgrade)]
     else:
         # topo_data = data[(data["Topo"] == topo) & (data["rn_r_tracker_ostd"] > 16) & (data["rn_w_tracker_ostd"] > 16)]
-        topo_data = data.loc[(data["topo_type"] == topo)]
+        topo_data = data.loc[(data["topo_type"] == topo) & (data["Both_side_ETag_upgrade"] == Both_side_ETag_upgrade)]
         # topo_data = data.loc[(data["Topo"] == topo)]
 
     if log_data:
@@ -235,7 +243,7 @@ for topo in topologies:
 
     # 绘制热力图
     # plt.figure(figsize=(12, 10))  # 调整图像大小
-    if single_plot:
+    if plot_type == 0:
         ax = sns.heatmap(
             pivot_table,
             cmap=cmap,  # 配色方案
@@ -270,14 +278,16 @@ for topo in topologies:
         else:
             plt.tight_layout()  # 调整布局
             plt.show()
-    else:
-
+    elif plot_type == 1:
+        data = data.loc[(data["Both_side_ETag_upgrade"] == Both_side_ETag_upgrade)]
         unique_z_names = data[z_name].unique()
 
         # 创建子图
         fig, axes = plt.subplots(nrows=1, ncols=len(unique_z_names), figsize=(18, 3))
         vmin = data[show_value].min()
         vmax = data[show_value].max()
+        # vmin = 95
+        # vmax = 103
 
         # 遍历每个 z_name 值
         for i, z_value in enumerate(unique_z_names):
@@ -300,7 +310,7 @@ for topo in topologies:
                 vmax=vmax,
             )
             axes[i].invert_yaxis()
-            axes[i].set_title(f"{z_name}={z_value}")
+            axes[i].set_title(f"{z_name[:-1]}={z_value}")
             axes[i].set_xlabel(x_name)
             axes[i].set_ylabel(y_name)
         fig.suptitle(f"Heatmap of {show_value} for Topo {topo}", fontsize=16)
@@ -312,6 +322,50 @@ for topo in topologies:
         else:
             plt.tight_layout()  # 调整布局
             plt.show()
+    elif plot_type == 2:
+        data = data.loc[(data["Both_side_ETag_upgrade"] == Both_side_ETag_upgrade)]
+        unique_z_names = data[z_name].unique()
+
+        # 创建子图
+        vmin = data[show_value].min() - 0.5
+        vmax = data[show_value].max() + 0.5
+        for i, z_value in enumerate(unique_z_names):
+            # 筛选出当前 z_name 的数据
+            z_data = data[data[z_name] == z_value]
+
+            # 创建数据透视表
+            pivot_table = z_data.pivot_table(index=y_name, columns=x_name, values=show_value, aggfunc="first")
+
+            # 独立创建一个图和子图
+            fig_single, ax_single = plt.subplots(figsize=(12, 8))
+
+            # 绘制热力图
+            sns.heatmap(
+                pivot_table,
+                cmap=cmap,
+                annot=np.vectorize(format_func)(pivot_table),
+                fmt="",
+                ax=ax_single,
+                linewidths=0.5,
+                # linecolor="white",
+                vmin=vmin,
+                vmax=vmax,
+            )
+
+            ax_single.invert_yaxis()
+            ax_single.set_title(f"{z_name[:-1]}={z_value}")
+            ax_single.set_xlabel(x_name)
+            ax_single.set_ylabel(y_name)
+
+            fig_single.suptitle(f"Heatmap of {show_value} for Topo {topo}", fontsize=16)
+            plt.tight_layout()
+
+            if save_images:
+                heatmap_filename = os.path.join(output_dir, f"{topo}_{show_value}_{z_value}.png")
+                plt.savefig(heatmap_filename, bbox_inches="tight")
+                plt.close(fig_single)
+            else:
+                plt.show()
 
 # # 等高线图
 # # 创建一个图形
