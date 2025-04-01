@@ -18,7 +18,8 @@ def main():
 
     # traffic_file_path = r"../../traffic/"
     # traffic_file_path = r"../traffic/output_All_reduce/step5_data_merge/"
-    # traffic_file_path = r"../traffic/output_All_reduce_burst2/step5_data_merge/"
+    traffic_file_path = r"../traffic/output_0401/step5_data_merge/"
+    file_name = r"output_Trace.txt"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"LLama2_MLP_Trace.txt"
@@ -30,20 +31,18 @@ def main():
     # model_type = "Packet_Base"
 
     p1 = 128
-    p2 = 32
+    p2 = 64
 
-    result_save_path = f"../Result/CrossRing/{model_type}/burst2/{p1}-{p2}/"
+    result_save_path = f"../Result/CrossRing/{model_type}/{p1}-{p2}/"
 
     config_path = r"../config/config2.json"
     config = SimulationConfig(config_path)
     if not config.topo_type:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        # topo_type = "5x4"
-        topo_type = "4x5"
-
+        topo_type = "5x4"
+        # topo_type = "4x5"
         # topo_type = "6x5"
-
         # topo_type = "3x3"
     else:
         topo_type = config.topo_type
@@ -66,12 +65,12 @@ def main():
 
     # sim.end_time = 10000
     sim.config.burst = 4
-    sim.config.rn_read_tracker_ostd = 64
-    sim.config.rn_write_tracker_ostd = 64
+    sim.config.rn_read_tracker_ostd = 128
+    sim.config.rn_write_tracker_ostd = 128
     sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
     sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
-    sim.config.ro_tracker_ostd = p1
-    sim.config.share_tracker_ostd = p2
+    sim.config.ro_tracker_ostd = 192
+    sim.config.share_tracker_ostd = 192
     sim.config.sn_wdb_size = sim.config.share_tracker_ostd * sim.config.burst
     sim.config.seats_per_link = 7
 

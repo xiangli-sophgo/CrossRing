@@ -138,7 +138,7 @@ class Node:
         self.sn_rsp_queue = {"ddr": {}, "l2m": {}}
         self.sn_req_wait = {"read": {"ddr": {}, "l2m": {}}, "write": {"ddr": {}, "l2m": {}}}
         self.sn_tracker = {"ddr": {}, "l2m": {}}
-        self.sn_tracker_count = {"ddr": {"ro": {}, "share": {}}, "ddr2": {"ro": {}, "share": {}}, "l2m": {"ro": {}, "share": {}}}
+        self.sn_tracker_count = {"ddr": {"ro": {}, "share": {}}, "l2m": {"ro": {}, "share": {}}}
         self.sn_wdb = {"ddr": {}, "l2m": {}}
         self.sn_wdb_recv = {"ddr": {}, "l2m": {}}
         self.sn_wdb_count = {"ddr": {}, "l2m": {}}
@@ -169,7 +169,7 @@ class Node:
     def initialize_sn(self):
         """Initialize SN structures."""
         self.sn_tracker_release_time = defaultdict(list)
-        for ip_pos in self.config.ddr_send_positions:
+        for ip_pos in self.config.ddr_send_positions + self.config.l2m_send_positions:
             for key in self.sn_tracker:
                 self.sn_rdb[key][ip_pos] = []
                 self.sn_wdb[key][ip_pos] = defaultdict(list)
@@ -198,7 +198,7 @@ class Network:
         self.inject_queues = {"left": {}, "right": {}, "up": {}, "local": {}}
         self.inject_queues_pre = {"left": {}, "right": {}, "up": {}, "local": {}}
         self.eject_queues_pre = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
-        self.eject_queues = {"up": {}, "down": {}, "mid": {}, "local": {}}
+        self.eject_queues = {"up": {}, "down": {}, "RB": {}, "local": {}}
         self.eject_reservations = {"up": {}, "down": {}}
         self.arrive_node_pre = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
         self.ip_inject = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
@@ -212,7 +212,7 @@ class Network:
         self.station_reservations = {"left": {}, "right": {}}
         self.inject_queue_rr = {"left": {0: {}, 1: {}}, "right": {0: {}, 1: {}}, "up": {0: {}, 1: {}}, "local": {0: {}, 1: {}}}
         self.inject_rr = {"left": {}, "right": {}, "up": {}, "local": {}}
-        self.round_robin = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}, "up": {}, "down": {}, "mid": {}}
+        self.round_robin = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}, "up": {}, "down": {}, "RB": {}}
 
         self.round_robin_counter = 0
         self.recv_flits_num = 0
@@ -279,7 +279,7 @@ class Network:
             self.eject_queues["down"][ip_pos - config.cols] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
             self.EQ_UE_Counters["up"][ip_pos - config.cols] = {"T2": 0, "T1": 0, "T0": 0}
             self.EQ_UE_Counters["down"][ip_pos - config.cols] = {"T2": 0, "T1": 0}
-            self.eject_queues["mid"][ip_pos - config.cols] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
+            self.eject_queues["RB"][ip_pos - config.cols] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
             self.eject_queues["local"][ip_pos - config.cols] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
             self.eject_reservations["down"][ip_pos - config.cols] = deque(maxlen=config.reservation_num)
             self.eject_reservations["up"][ip_pos - config.cols] = deque(maxlen=config.reservation_num)
@@ -332,15 +332,13 @@ class Network:
                 self.station_reservations["right"][(pos, next_pos)] = deque(maxlen=config.reservation_num)
                 self.round_robin["up"][next_pos] = deque([0, 1, 2])
                 self.round_robin["down"][next_pos] = deque([0, 1, 2])
-                self.round_robin["mid"][next_pos] = deque([0, 1, 2])
+                self.round_robin["RB"][next_pos] = deque([0, 1, 2])
                 for direction in ["left", "right"]:
                     self.remain_tag[direction][pos] = config.ITag_Max_Num_H
                 for direction in ["up", "down"]:
                     self.remain_tag[direction][next_pos] = config.ITag_Max_Num_V
 
         for ip_type in self.num_recv:
-            if ip_type == "ddr" or ip_type == "ddr2":
-                ip_type = "ddr"
             source_positions = getattr(config, f"{ip_type}_send_positions")
             for source in source_positions:
                 destination = source - config.cols
@@ -350,8 +348,7 @@ class Network:
                 self.per_recv_throughput[ip_type][destination] = 0
 
         for ip_type in ["ddr", "l2m", "sdma", "gdma"]:
-            ip = "ddr" if ip_type == "ddr" or ip_type == "ddr2" else ip_type
-            for ip_index in getattr(config, f"{ip}_send_positions"):
+            for ip_index in getattr(config, f"{ip_type}_send_positions"):
                 ip_recv_index = ip_index - config.cols
                 self.ip_inject[ip_type][ip_index] = deque()
                 self.ip_eject[ip_type][ip_recv_index] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
@@ -361,8 +358,7 @@ class Network:
                 self.ip_write[ip_type][ip_index] = deque()
                 self.last_select[ip_type][ip_index] = "write"
         for ip_type in ["gdma", "sdma", "ddr", "l2m"]:
-            ip = "ddr" if ip_type == "ddr" or ip_type == "ddr2" else ip_type
-            for ip_index in getattr(config, f"{ip}_send_positions"):
+            for ip_index in getattr(config, f"{ip_type}_send_positions"):
                 self.throughput[ip_type][ip_index] = [0, 0, 10000000, 0]
 
     def can_move_to_next(self, flit, current, next_node):
@@ -552,6 +548,8 @@ class Network:
                 return self._handle_regular_flit(flit, link, current, next_node, row_start, row_end, col_start, col_end)
 
     def _handle_delay_flit(self, flit, link, current, next_node, row_start, row_end, col_start, col_end):
+        if flit.packet_id == 64:
+            print(flit)
         if flit.current_seat_index < len(link) - 1:
             # 节点间进行移动
             link[flit.current_seat_index] = None
@@ -1136,6 +1134,8 @@ class Network:
         return
 
     def _handle_regular_flit(self, flit, link, current, next_node, row_start, row_end, col_start, col_end):
+        # if flit.packet_id == 17258 and flit.flit_id_in_packet == 1:
+        #     print(flit)
         if flit.current_seat_index != len(link) - 1:
             # 节点间进行移动
             link[flit.current_seat_index] = None

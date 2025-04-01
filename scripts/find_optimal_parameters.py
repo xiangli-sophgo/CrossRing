@@ -141,7 +141,7 @@ def find_optimal_parameters():
                 sim.config.finish_del()
 
                 sim_vars = vars(sim)
-                results = {key[:-5]: value for key, value in sim_vars.items() if key.endswith()("_stat")}
+                results = {key[:-5]: value for key, value in sim_vars.items() if key.endswith("_stat")}
 
                 config_var = {key: value for key, value in vars(sim.config).items()}
                 results = {**results, **config_var}

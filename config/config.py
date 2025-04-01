@@ -2,8 +2,9 @@
 
 import json
 import os
-
+import numpy as np
 import argparse
+from scipy.optimize import linear_sum_assignment
 
 
 class SimulationConfig:
@@ -176,6 +177,74 @@ class SimulationConfig:
                     indices.append(index)
         # assert len(indices) == self.num_ips, f"Expected {self.num_ips} indices, but got {len(indices)}."
         return indices
+
+    def distance(self, p1, p2):
+        # return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
+        return np.abs(p1[0] - p2[0]) + np.abs(p1[1] - p2[1])
+
+    def assign_nearest_spare(self, failed_gdma, spare_cores):
+        """
+        为损坏核心分配备用核心，优先级为：
+        1. 同列备用核心优先
+        2. 同列中更靠近网络中心的优先
+        3. 非同列时选择最靠近中心的备用核心
+        """
+        num_failed = len(failed_gdma)
+        num_spare = len(spare_cores)
+
+        if num_spare < num_failed:
+            return []
+
+        def decode(code):
+            row = code // self.cols // 2
+            col = code % self.cols
+            return (col, self.cols - row)
+
+        original_spare_cores = spare_cores.copy()
+        failed_gdma = [decode(code) for code in failed_gdma]
+        spare_cores = [decode(code) for code in spare_cores]
+
+        # 计算每个备用核心的中心性分数（曼哈顿距离到中心点）
+        network_center = (1.5, 2)  # 5x4 Mesh的中心坐标近似
+        center_scores = {spare: abs(spare[0] - network_center[0]) + abs(spare[1] - network_center[1]) for spare in spare_cores}
+
+        # 构造优先级矩阵
+        cost_matrix = np.zeros((num_failed, num_spare))
+        for i, gdma in enumerate(failed_gdma):
+            for j, spare in enumerate(spare_cores):
+                cost_matrix[i][j] = center_scores[spare] + self.distance(gdma, spare) * 1000
+
+        # 匈牙利算法寻找最小总成本分配
+        row_ind, col_ind = linear_sum_assignment(cost_matrix)
+        return [original_spare_cores[j] for _, j in sorted(zip(row_ind, col_ind))]
+
+    def spare_core_change(self, spare_core_row, fail_core_num):
+        # print(spare_core_row)
+        if spare_core_row > self.rows:
+            return
+
+        spare_core_row = (spare_core_row + 1) // 2
+        self.spare_core = [i for i in range(self.cols * (self.rows - 1 - spare_core_row * 2), self.cols * (self.rows - spare_core_row * 2))]
+        add_core = [i for i in range(self.cols * (self.rows - 1), self.cols * (self.rows))]
+        if spare_core_row != 0:
+            for i, j in zip(self.spare_core, add_core):
+                self.ddr_send_positions.remove(i)
+                self.ddr_send_positions.append(j)
+                self.gdma_send_positions.remove(i)
+                self.gdma_send_positions.append(j)
+
+        self.fail_core_pos = np.random.choice(self.gdma_send_positions, fail_core_num, replace=False).tolist()
+
+        self.spare_core_pos = self.assign_nearest_spare(self.fail_core_pos, self.spare_core)
+
+        if len(self.fail_core_pos) != len(self.spare_core_pos):
+            raise ValueError("fail_core_pos and spare_core_pos must have the same length")
+
+        pos_mapping = dict(zip(self.fail_core_pos, self.spare_core_pos))
+
+        # 执行批量替换
+        self.gdma_send_positions = [pos_mapping.get(pos, pos) for pos in self.gdma_send_positions]  # 如果在映射表中则替换，否则保持原位置
+        print(f"spare core: {self.spare_core}, fail core: {self.fail_core_pos}, used spare core: {self.spare_core_pos}")
 
     def finish_del(self):
         del self.ddr_send_positions, self.l2m_send_positions, self.gdma_send_positions, self.sdma_send_positions

@@ -174,5 +174,5 @@ class AddressStat:
 
 
 if __name__ == "__main__":
-    stat = AddressStat(100)
-    stat.run(r"../../traffic/output-v6/step1_flatten")
+    stat = AddressStat(200)
+    stat.run(r"../../traffic/output-v8-32/2M/step1_flatten")
