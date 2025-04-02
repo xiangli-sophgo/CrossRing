@@ -44,8 +44,8 @@ class SimulationConfig:
         self.rn_rdb_size = args.rn_rdb_size
         self.rn_wdb_size = args.rn_wdb_size
         self.sn_wdb_size = args.sn_wdb_size
-        self.ddr_latency = args.ddr_latency
-        self.sn_tracker_release_latency = args.sn_tracker_release_latency
+        self.ddr_latency_original = args.ddr_latency
+        self.sn_tracker_release_latency_original = args.sn_tracker_release_latency
         self.TL_Etag_T1_UE_MAX = args.TL_Etag_T1_UE_MAX
         self.TL_Etag_T2_UE_MAX = args.TL_Etag_T2_UE_MAX
         self.TR_Etag_T2_UE_MAX = args.TR_Etag_T2_UE_MAX
@@ -64,8 +64,8 @@ class SimulationConfig:
         self.update_config()
 
     def update_config(self):
-        self.ddr_latency = self.ddr_latency * self.network_frequency
-        self.sn_tracker_release_latency = self.sn_tracker_release_latency * self.network_frequency
+        self.ddr_latency = self.ddr_latency_original * self.network_frequency
+        self.sn_tracker_release_latency = self.sn_tracker_release_latency_original * self.network_frequency
         self.rn_read_tracker_ostd = self.rn_rdb_size // self.burst
         self.rn_write_tracker_ostd = self.rn_wdb_size // self.burst
         self.ro_tracker_ostd = self.sn_wdb_size // self.burst

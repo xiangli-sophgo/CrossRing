@@ -45,7 +45,7 @@ def main():
     else:
         topo_type = config.topo_type
 
-    results_file_name = "Spare_core_0401"
+    results_file_name = "Spare_core_0402"
     result_root_save_path = f"../Result/CrossRing/SCM/{model_type}/{results_file_name}"
     os.makedirs(result_root_save_path, exist_ok=True)  # 确保根目录存在
 
@@ -56,9 +56,9 @@ def main():
     # config_path = r"config.json"
     np.random.seed(401)
 
-    for failed_core_num in range(0, 4):
+    for failed_core_num in range(1, 2):
         for spare_core_row in range(0, 9):
-            for repeat_time in range(1):
+            for repeat_time in range(5):
                 result_part_save_path = f"{failed_core_num}_{spare_core_row}_{repeat_time}/"
 
                 if model_type == "REQ_RSP":
@@ -107,7 +107,7 @@ def main():
                 # sim.config.update_config()
                 sim.initial()
                 # sim.end_time = 20000
-                sim.print_interval = 1000
+                sim.print_interval = 10000
                 sim.run()
                 sim.config.finish_del()
 
