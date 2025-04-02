@@ -20,8 +20,8 @@ def main():
 
     # traffic_file_path = r"../../traffic/"R
     # traffic_file_path = r"../traffic/output_v8_All_reduce/step5_data_merge/"
-    # traffic_file_path = r"../traffic/output_v8-32/step5_data_merge/"
-    # file_name = r"LLama2_Attention_FC_Trace.txt"
+    traffic_file_path = r"../traffic/output-v8-32/2M/step5_data_merge/"
+    file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"LLama2_MLP_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
@@ -44,8 +44,8 @@ def main():
         # topo_type = "3x3"
     else:
         topo_type = config.topo_type
-
-    results_file_name = "Spare_core_0402"
+    config.topo_type = topo_type
+    results_file_name = "Spare_core_0402_AF"
     result_root_save_path = f"../Result/CrossRing/SCM/{model_type}/{results_file_name}"
     os.makedirs(result_root_save_path, exist_ok=True)  # 确保根目录存在
 
@@ -56,9 +56,10 @@ def main():
     # config_path = r"config.json"
     np.random.seed(401)
 
-    for failed_core_num in range(1, 2):
-        for spare_core_row in range(0, 9):
-            for repeat_time in range(5):
+    for repeat_time in range(20):
+        for failed_core_num in range(0, 1):
+            failed_core_poses = np.random.choice(list(i for i in range(16)), failed_core_num, replace=False)
+            for spare_core_row in range(8, 9):
                 result_part_save_path = f"{failed_core_num}_{spare_core_row}_{repeat_time}/"
 
                 if model_type == "REQ_RSP":
@@ -102,20 +103,15 @@ def main():
                 sim.config.TU_Etag_T1_UE_MAX = 7
                 sim.config.TD_Etag_T2_UE_MAX = 5
                 sim.config.Both_side_ETag_upgrade = 1
-                sim.config.spare_core_change(spare_core_row, failed_core_num)
+                sim.config.spare_core_change(spare_core_row, failed_core_num, failed_core_poses)
 
                 # sim.config.update_config()
                 sim.initial()
-                # sim.end_time = 20000
+                # sim.end_time = 2000
                 sim.print_interval = 10000
                 sim.run()
-                sim.config.finish_del()
 
-                sim_vars = vars(sim)
-                results = {key[:-5]: value for key, value in sim_vars.items() if key.endswith("_stat")}
-
-                config_var = {key: value for key, value in vars(sim.config).items()}
-                results = {**results, **config_var}
+                results = sim.get_results()
 
                 # 写入 CSV 文件
                 csv_file_exists = os.path.isfile(output_csv)
@@ -124,9 +120,6 @@ def main():
                     if not csv_file_exists:
                         writer.writeheader()  # 写入表头
                     writer.writerow(results)  # 写入结果行
-
-                Flit.clear_flit_id()
-                Node.clear_packet_id()
 
 
 if __name__ == "__main__":

@@ -37,6 +37,8 @@ def find_optimal_parameters():
     else:
         topo_type = config.topo_type
 
+    config.topo_type = topo_type
+
     # result_save_path = None
 
     # model_type = "REQ_RSP"
@@ -138,13 +140,8 @@ def find_optimal_parameters():
 
                 # 运行模拟
                 sim.run()
-                sim.config.finish_del()
 
-                sim_vars = vars(sim)
-                results = {key[:-5]: value for key, value in sim_vars.items() if key.endswith("_stat")}
-
-                config_var = {key: value for key, value in vars(sim.config).items()}
-                results = {**results, **config_var}
+                results = sim.get_results()
 
                 # 写入 CSV 文件
                 csv_file_exists = os.path.isfile(output_csv)
@@ -153,9 +150,6 @@ def find_optimal_parameters():
                     if not csv_file_exists:
                         writer.writeheader()  # 写入表头
                     writer.writerow(results)  # 写入结果行
-
-                Flit.clear_flit_id()
-                Node.clear_packet_id()
 
 
 if __name__ == "__main__":

@@ -84,7 +84,7 @@ file_root = r"../../Result/Params_csv/"
 # data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
 # data_file_name = r"RB_IN_OUT_FIFO_459_0303_2_fixed_time_interval.csv"
 # data_file_name = r"ETag_EQ_0321.csv"
-data_file_name = r"ITag_03232.csv"
+data_file_name = r"Spare_core_0402.csv"
 topologies = [
     # "4x9",
     # "9x4",
@@ -108,9 +108,9 @@ data = pd.read_csv(file_root + data_file_name)
 # show_value = "write_BW"
 # show_value = "Total_BW"
 # show_value = "ITag_h_num"
-show_value = "ITag_v_num"
+# show_value = "ITag_v_num"
 # show_value = "R_finish_time"
-# show_value = "W_finish_time"
+show_value = "W_finish_time"
 # show_value = "R_tail_latency"
 # show_value = "W_tail_latency"
 # show_value = "EQ_ETag_T1_num"
@@ -138,20 +138,22 @@ show_value = "ITag_v_num"
 # x_name = "TU_Etag_T2_UE_MAX"
 # y_name = "TU_Etag_T1_UE_MAX"
 # z_name = "TD_Etag_T2_UE_MAX"
-x_name = "ITag_Trigger_Th_H"
-y_name = "ITag_Trigger_Th_V"
-z_name = "ITag_Max_Num_H"
-# model_type = "REQ_RSP"
+# x_name = "ITag_Trigger_Th_H"
+# y_name = "ITag_Trigger_Th_V"
+# z_name = "ITag_Max_Num_H"
+x_name = "fail_core_num"
+y_name = "spare_core_row"
+model_type = "REQ_RSP"
 # model_type = "Packet_Base"
-model_type = "Feature"
+# model_type = "Feature"
 
-Both_side_ETag_upgrade = 0
+Both_side_ETag_upgrade = 1
 
 rate_plot = 0
 log_data = 0
-save_images = 1
+save_images = 0
 reverse_cmap = 1
-plot_type = 2
+plot_type = 0
 
 
 # 设置 vmax 和 vmin
@@ -181,7 +183,8 @@ for topo in topologies:
         topo_data[show_value] = np.log(topo_data[show_value] + 0.1)
 
     # 创建数据透视表
-    pivot_table = topo_data.pivot_table(index=y_name, columns=x_name, values=show_value, aggfunc="first")
+    # pivot_table = topo_data.pivot_table(index=y_name, columns=x_name, values=show_value, aggfunc="first")
+    pivot_table = topo_data.pivot_table(index=y_name, columns=x_name, values=show_value, aggfunc="mean")
     # pivot_table = pivot_table.iloc[::2, ::2]
 
     # # 计算行均值和列均值

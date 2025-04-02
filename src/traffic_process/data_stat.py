@@ -7,12 +7,14 @@ from matplotlib.font_manager import FontProperties
 import pandas as pd
 import numpy as np
 import time
+import csv
 
 
 class AddressStat:
     def __init__(self, interval_num=20):
         self.interval_num = interval_num
         self.init_params()
+        self.results = []  # To store results for each directory
 
     def init_params(self):
         self.shared_64_count = 0
@@ -23,9 +25,7 @@ class AddressStat:
         self.total_flit_count = 0
         self.total_request_count = 0
         self.request_end_time = -1
-
-        # 使用 defaultdict 以便统计不同时间段的 R 和 W 请求
-        self.time_distribution = defaultdict(lambda: {"R": 0, "W": 0, "flit_num": 0})  # 增加 flit_num 统计
+        self.time_distribution = defaultdict(lambda: {"R": 0, "W": 0, "flit_num": 0})
 
     def classify_address(self, addr, flit_num):
         addr = int(addr, base=16)
@@ -37,45 +37,40 @@ class AddressStat:
             self.private_count += flit_num
         else:
             pass
-            # raise ValueError(f"Address error: {hex(addr)}")
 
     def process_file(self, file_path):
         with open(file_path, "r", encoding="utf-8") as file:
             lines = file.readlines()
 
         for line in lines:
-            data = line.strip().split(",")  # Assume data is comma-separated
-            if len(data) > 1:  # Ensure there is an address to process
-                time = int(data[0])  # 请求的时间
+            data = line.strip().split(",")
+            if len(data) > 1:
+                time = int(data[0])
                 addr = data[1]
-                operation = data[2]  # R or W
+                operation = data[2]
                 flit_num = int(data[-1])
 
-                # Classify address
                 try:
                     self.classify_address(addr, flit_num)
                 except ValueError as e:
                     print(f"Error processing address in file {file_path}: {e}")
 
-                # Count read/write operations
                 if operation == "R":
                     self.read_flit_count += flit_num
-                    self.time_distribution[time]["R"] += flit_num  # 记录读操作数量
+                    self.time_distribution[time]["R"] += flit_num
                 elif operation == "W":
                     self.write_flit_count += flit_num
-                    self.time_distribution[time]["W"] += flit_num  # 记录写操作数量
+                    self.time_distribution[time]["W"] += flit_num
                 else:
                     print(f"Unknown operation '{operation}' in file {file_path}")
 
-                # Add flit_num to total
                 self.total_flit_count += flit_num
                 self.total_request_count += 1
 
-        # Update the end time based on the last line's timestamp
         if lines:
             self.request_end_time = max(self.request_end_time, int(lines[-1].strip().split(",")[0]))
 
-    def process_folder(self, input_folder):
+    def process_folder(self, input_folder, plot_data):
         for root, dirs, files in os.walk(input_folder):
             for file in files:
                 file_path = os.path.join(root, file)
@@ -83,27 +78,57 @@ class AddressStat:
                     continue
                 self.process_file(file_path)
 
-            # Output statistics for the current directory
             if not files:
                 continue
-            # total_requests = self.shared_64_count + self.shared_8_count + self.private_count
-            print(f"Directory: {root[27:]}")
-            print(f"64 shared flits: {self.shared_64_count}, {100 * self.shared_64_count / self.total_flit_count:.1f} %")
-            print(f"8 shared flits: {self.shared_8_count}, {100 * self.shared_8_count / self.total_flit_count:.1f} %")
-            print(f"Private flits: {self.private_count}, {100 * self.private_count / self.total_flit_count:.1f} %")
-            print(f"Read flit: {self.read_flit_count}, {100* self.read_flit_count / self.total_flit_count:.1f}%, {self.read_flit_count / (32 * self.request_end_time):.2f} flit/Cycle/IP")
-            print(f"Write flit: {self.write_flit_count}, {100* self.write_flit_count / self.total_flit_count:.1f}%,{self.write_flit_count / (32 * self.request_end_time):.2f} flit/Cycle/IP")
-            print(
-                f"Total flit num: {self.total_flit_count}, {self.total_flit_count * 128 / (1024 * self.request_end_time):.2f} TB/s, {self.total_flit_count / (32 * self.request_end_time):.2f} flit/Cycle/IP"
-            )
+
+            # Calculate statistics
+            dir_name = root.rsplit("/", 1)[-1]
+            shared_64_percent = 100 * self.shared_64_count / self.total_flit_count if self.total_flit_count > 0 else 0
+            shared_8_percent = 100 * self.shared_8_count / self.total_flit_count if self.total_flit_count > 0 else 0
+            private_percent = 100 * self.private_count / self.total_flit_count if self.total_flit_count > 0 else 0
+            read_percent = 100 * self.read_flit_count / self.total_flit_count if self.total_flit_count > 0 else 0
+            write_percent = 100 * self.write_flit_count / self.total_flit_count if self.total_flit_count > 0 else 0
+            read_flit_per_cycle = self.read_flit_count / (32 * self.request_end_time) if self.request_end_time > 0 else 0
+            write_flit_per_cycle = self.write_flit_count / (32 * self.request_end_time) if self.request_end_time > 0 else 0
+            total_bandwidth = self.total_flit_count * 128 / (1024 * self.request_end_time) if self.request_end_time > 0 else 0
+            total_flit_per_cycle = self.total_flit_count / (32 * self.request_end_time) if self.request_end_time > 0 else 0
+
+            # Print to console
+            print(f"Directory: {dir_name}")
+            print(f"64 shared flits: {self.shared_64_count}, {shared_64_percent:.1f} %")
+            print(f"8 shared flits: {self.shared_8_count}, {shared_8_percent:.1f} %")
+            print(f"Private flits: {self.private_count}, {private_percent:.1f} %")
+            print(f"Read flit: {self.read_flit_count}, {read_percent:.1f}%, {read_flit_per_cycle:.2f} flit/Cycle/IP")
+            print(f"Write flit: {self.write_flit_count}, {write_percent:.1f}%, {write_flit_per_cycle:.2f} flit/Cycle/IP")
+            print(f"Total flit num: {self.total_flit_count}, {total_bandwidth:.2f} TB/s, {total_flit_per_cycle:.2f} flit/Cycle/IP")
             print(f"Total Request num: {self.total_request_count}")
             print(f"Request end time: {self.request_end_time} \n")
 
-            # print(self.request_end_time // self.interval_num, self.request_end_time // self.interval_num)
-            # self.plot_time_distribution(root[27:], ((self.request_end_time // self.interval_num) // 500 + 1) * 500)
-            self.plot_time_distribution(root[27:], self.request_end_time // self.interval_num)
-
-            # Reset counts for the next directory
+            # Store results for CSV
+            self.results.append(
+                {
+                    "Traffic_name": dir_name,
+                    "64_shared_flits": self.shared_64_count,
+                    "64_shared_percent": shared_64_percent / 100,
+                    "8_shared_flits": self.shared_8_count,
+                    "8_shared_percent": shared_8_percent / 100,
+                    "private_flits": self.private_count,
+                    "private_percent": private_percent / 100,
+                    "read_flits": self.read_flit_count,
+                    "read_percent": read_percent / 100,
+                    # "read_flit_per_cycle": read_flit_per_cycle,
+                    "write_flits": self.write_flit_count,
+                    "write_percent": write_percent / 100,
+                    # "write_flit_per_cycle": write_flit_per_cycle,
+                    "total_flits": self.total_flit_count,
+                    "total_bandwidth": total_bandwidth,
+                    # "total_flit_per_cycle": total_flit_per_cycle,
+                    "total_requests": self.total_request_count,
+                    "end_time": self.request_end_time,
+                }
+            )
+            if plot_data:
+                self.plot_time_distribution(dir_name, self.request_end_time // self.interval_num)
             self.init_params()
 
     def aggregate_time_distribution(self, interval):
@@ -155,7 +180,7 @@ class AddressStat:
         ax.set_ylim(0, max_value + 0.4)  # 设置 y 轴的上限，留出一些空间
         # plt.ylim(0, max(read_counts + write_counts) + 0.4)  # 增加 y 轴的上限
         # plt.rcParams["font.sans-serif"] = ["SimHei"]
-        plt.title(file_name[10:])
+        plt.title(file_name)
         plt.xlabel("Time (ns)")
         plt.ylabel("Flit Input Bandwidth (TB/s)")
         plt.legend()
@@ -168,11 +193,52 @@ class AddressStat:
         # 重置时间分布
         self.time_distribution = defaultdict(lambda: {"R": 0, "W": 0, "flit_num": 0})
 
-    def run(self, input_folder):
-        self.process_folder(input_folder)
+    def save_to_csv(self, output_file):
+        if not self.results:
+            print("No results to save.")
+            return
+
+        # Define the CSV fieldnames
+        fieldnames = [
+            "Traffic_name",
+            "64_shared_flits",
+            "8_shared_flits",
+            "private_flits",
+            "64_shared_percent",
+            "8_shared_percent",
+            "private_percent",
+            "read_flits",
+            # "read_flit_per_cycle",
+            "read_percent",
+            "write_flits",
+            "write_percent",
+            # "write_flit_per_cycle",
+            "total_flits",
+            "total_bandwidth",
+            # "total_flit_per_cycle",
+            "total_requests",
+            "end_time",
+        ]
+
+        # Write to CSV
+        with open(output_file, "w", newline="") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(self.results)
+
+        print(f"Results saved to {output_file}")
+
+    # ... (keep the rest of your methods unchanged)
+
+    def run(self, input_folder, output_csv=None, plot_data=False):
+        self.process_folder(input_folder, plot_data)
+        if output_csv:
+            self.save_to_csv(output_csv)
         print("Processing has been completed.")
 
 
 if __name__ == "__main__":
     stat = AddressStat(200)
-    stat.run(r"../../traffic/output-v8-32/2M/step1_flatten")
+    # Specify the output CSV file path
+    output_csv = r"../../Result/Data_csv/DeepSeek_traffic_stats.csv"
+    stat.run(r"../../traffic/output_DeepSeek/step1_flatten/", output_csv, plot_data=0)

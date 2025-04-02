@@ -218,11 +218,12 @@ class SimulationConfig:
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
         return [original_spare_cores[j] for _, j in sorted(zip(row_ind, col_ind))]
 
-    def spare_core_change(self, spare_core_row, fail_core_num):
+    def spare_core_change(self, spare_core_row, fail_core_num, failed_core_poses=None):
         # print(spare_core_row)
         if spare_core_row > self.rows:
             return
 
+        self.spare_core_row = spare_core_row
         spare_core_row = (spare_core_row + 1) // 2
         self.spare_core = [i for i in range(self.cols * (self.rows - 1 - spare_core_row * 2), self.cols * (self.rows - spare_core_row * 2))]
         add_core = [i for i in range(self.cols * (self.rows - 1), self.cols * (self.rows))]
@@ -233,7 +234,12 @@ class SimulationConfig:
                 self.gdma_send_positions.remove(i)
                 self.gdma_send_positions.append(j)
 
-        self.fail_core_pos = np.random.choice(self.gdma_send_positions, fail_core_num, replace=False).tolist()
+        self.fail_core_num = fail_core_num
+
+        if failed_core_poses is None:
+            self.fail_core_pos = np.random.choice(self.gdma_send_positions, fail_core_num, replace=False).tolist()
+        else:
+            self.fail_core_pos = [self.gdma_send_positions[i] for i in failed_core_poses]
 
         self.spare_core_pos = self.assign_nearest_spare(self.fail_core_pos, self.spare_core)
 

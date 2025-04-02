@@ -3,25 +3,28 @@ import shutil
 
 
 def flatten_directory(directory):
-    for dir in os.listdir(directory):
-        path = os.path.join(directory, dir)
+    # 如果目录不存在则创建（包括父目录）
+    if not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)  # exist_ok避免竞态条件报错
+        print(f"目录不存在，已自动创建: {directory}")
+    elif not os.path.isdir(directory):
+        raise NotADirectoryError(f"路径不是目录: {directory}")
+
+    for dir_name in os.listdir(directory):
+        path = os.path.join(directory, dir_name)
         if os.path.isdir(path):
             for root, dirs, files in os.walk(path, topdown=False):
-                # Check if there's only one directory in the current level
                 if len(dirs) == 1 and not files:
                     single_dir = dirs[0]
                     single_dir_path = os.path.join(root, single_dir)
 
-                    # Move all contents of the single directory to the current level
+                    # 移动内容
                     for item in os.listdir(single_dir_path):
-                        s = os.path.join(single_dir_path, item)
-                        d = os.path.join(root, item)
-                        if os.path.isdir(s):
-                            shutil.move(s, d)
-                        else:
-                            shutil.move(s, root)
+                        src = os.path.join(single_dir_path, item)
+                        dst = os.path.join(root, item)
+                        shutil.move(src, dst)
 
-                    # Remove the now-empty single directory
+                    # 删除空目录
                     os.rmdir(single_dir_path)
 
 

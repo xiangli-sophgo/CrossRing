@@ -21,7 +21,7 @@ class BaseModel:
         self.topo_type_stat = topo_type
         self.traffic_file_path = traffic_file_path
         self.file_name = file_name
-        print(f"\nModel Type: {model_type}, Topology: {self.topo_type_stat}, file_name: {self.file_name}")
+        print(f"\nModel Type: {model_type}, Topology: {self.topo_type_stat}, file_name: {self.file_name[:-4]}")
 
         self.result_save_path = result_save_path
         if result_save_path:
@@ -67,6 +67,7 @@ class BaseModel:
         self.send_read_flits_num_stat = 0
         self.send_write_flits_num_stat = 0
         self.rn_send_num_stat = 0
+        self.file_name_stat = self.file_name[:-4]
         self.negative_rsp_num_stat, self.positive_rsp_num_stat = 0, 0
         self.R_finish_time_stat, self.W_finish_time_stat = 0, 0
         self.R_tail_latency_stat, self.W_tail_latency_stat = 0, 0
@@ -1528,8 +1529,8 @@ class BaseModel:
             print(f"Interval: {start} to {end}, count: {count}, bandwidth: {bandwidth:.1f}", file=f3)
             finish_time = max(finish_time, end)
 
-        # weighted_bandwidth = weighted_bandwidth_sum / total_count if total_count > 0 else 0
-        weighted_bandwidth = total_count * 128 / finish_time / self.config.num_ips
+        weighted_bandwidth = weighted_bandwidth_sum / total_count if total_count > 0 else 0
+        # weighted_bandwidth = total_count * 128 / finish_time / self.config.num_ips
 
         if req_type == "Read":
             self.R_finish_time_stat = finish_time
@@ -1814,3 +1815,28 @@ class BaseModel:
 
         plt.tight_layout()
         plt.show(block=True)
+
+    def get_results(self):
+        """
+        Extract simulation statistics and configuration variables.
+
+        Returns:
+            dict: A combined dictionary of configuration variables and statistics.
+        """
+        # Get all variables from the sim instance
+        self.config.finish_del()
+
+        sim_vars = vars(self)
+
+        # Extract statistics (ending with "_stat")
+        results = {key.rsplit("_stat", 1)[0]: value for key, value in sim_vars.items() if key.endswith("_stat")}
+
+        # Add configuration variables
+        config_var = {key: value for key, value in vars(self.config).items()}
+        results = {**config_var, **results}
+
+        # Clear flit and packet IDs (assuming these are class methods)
+        Flit.clear_flit_id()
+        Node.clear_packet_id()
+
+        return results
