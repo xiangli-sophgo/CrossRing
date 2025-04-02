@@ -35,7 +35,7 @@
     "share_tracker_ostd": 48,
     "sn_wdb_size": 192,
     "network_frequency": 2,
-    "ddr_latency": 0,
+    "ddr_latency": 150,
     "sn_tracker_release_latency": 40,
     "TL_Etag_T2_UE_MAX":4,
     "TL_Etag_T1_UE_MAX":7,

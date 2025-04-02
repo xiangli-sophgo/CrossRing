@@ -15,7 +15,7 @@ class REQ_RSP_model(BaseModel):
             self.rn_type, self.sn_type = self.get_network_types()
 
             self.check_and_release_sn_tracker()
-            self.flit_trace(64)
+            # self.flit_trace(407)
 
             # Process requests
             self.process_requests()
@@ -472,7 +472,11 @@ class REQ_RSP_model(BaseModel):
                     vdown_flit = self._process_vdown_flit(network, station_flits, pos, next_pos)
 
                 # 处理eject队列
-                if next_pos in network.eject_queues["RB"] and len(network.eject_queues["RB"][next_pos]) < self.config.EQ_IN_FIFO_DEPTH and network.ring_bridge["eject"][(pos, next_pos)]:
+                if (
+                    next_pos in network.eject_queues["ring_bridge"]
+                    and len(network.eject_queues["ring_bridge"][next_pos]) < self.config.EQ_IN_FIFO_DEPTH
+                    and network.ring_bridge["eject"][(pos, next_pos)]
+                ):
                     flit = network.ring_bridge["eject"][(pos, next_pos)].popleft()
                     flit.is_arrive = True
 
@@ -511,7 +515,7 @@ class REQ_RSP_model(BaseModel):
         for flit in ring_bridge_EQ_flits:
             if flit.is_arrive:
                 flit.arrival_network_cycle = self.cycle
-                network.eject_queues["RB"][flit.destination].append(flit)
+                network.eject_queues["ring_bridge"][flit.destination].append(flit)
                 flits.remove(flit)
 
         return flits
@@ -525,7 +529,7 @@ class REQ_RSP_model(BaseModel):
             station_flits[3] = None
             network.ring_bridge["ft"][(pos, next_pos)].popleft()
         else:
-            index = network.round_robin["RB"][next_pos]
+            index = network.round_robin["ring_bridge"][next_pos]
             for i in index:
                 if station_flits[i] and station_flits[i].destination == next_pos:
                     eject_flit = station_flits[i]
@@ -576,7 +580,7 @@ class REQ_RSP_model(BaseModel):
         if flit_type == "req":
             for in_pos in self.flit_position:
                 ip_pos = in_pos - self.config.cols
-                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "RB", "down", "local"]]
+                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "ring_bridge", "down", "local"]]
                 eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
                 eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["l2m"][ip_pos], "l2m", ip_pos)
 
@@ -590,7 +594,7 @@ class REQ_RSP_model(BaseModel):
         elif flit_type == "rsp":
             for in_pos in self.flit_position:
                 ip_pos = in_pos - self.config.cols
-                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "RB", "down", "local"]]
+                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "ring_bridge", "down", "local"]]
 
                 eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["sdma"][ip_pos], "sdma", ip_pos)
                 eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["gdma"][ip_pos], "gdma", ip_pos)
@@ -607,7 +611,7 @@ class REQ_RSP_model(BaseModel):
                 ip_pos = in_pos - self.config.cols
                 eject_flits = [
                     network.eject_queues[fifo_pos][ip_pos][0] if ip_pos in network.eject_queues[fifo_pos] and network.eject_queues[fifo_pos][ip_pos] else None
-                    for fifo_pos in ["up", "RB", "down", "local"]
+                    for fifo_pos in ["up", "ring_bridge", "down", "local"]
                 ]
 
                 eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
@@ -635,9 +639,9 @@ class REQ_RSP_model(BaseModel):
 
         # 最后,更新预先排队的eject队列
         if flit_type == "req":
-            in_pos_position = getattr(self.config, f"{self.rn_type}_send_positions")
+            in_pos_position = set(self.config.ddr_send_positions + self.config.l2m_send_positions)
         elif flit_type == "rsp":
-            in_pos_position = getattr(self.config, f"{self.sn_type}_send_positions")
+            in_pos_position = set(self.config.sdma_send_positions + self.config.gdma_send_positions)
         elif flit_type == "data":
             in_pos_position = self.flit_position
 
@@ -805,7 +809,7 @@ class REQ_RSP_model(BaseModel):
     #             if i == 0:
     #                 network.eject_queues["up"][ip_pos].popleft()
     #             elif i == 1:
-    #                 network.eject_queues["RB"][ip_pos].popleft()
+    #                 network.eject_queues["ring_bridge"][ip_pos].popleft()
     #             elif i == 2:
     #                 network.eject_queues["down"][ip_pos].popleft()
     #             elif i == 3:

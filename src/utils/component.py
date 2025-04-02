@@ -198,7 +198,7 @@ class Network:
         self.inject_queues = {"left": {}, "right": {}, "up": {}, "local": {}}
         self.inject_queues_pre = {"left": {}, "right": {}, "up": {}, "local": {}}
         self.eject_queues_pre = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
-        self.eject_queues = {"up": {}, "down": {}, "RB": {}, "local": {}}
+        self.eject_queues = {"up": {}, "down": {}, "ring_bridge": {}, "local": {}}
         self.eject_reservations = {"up": {}, "down": {}}
         self.arrive_node_pre = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
         self.ip_inject = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
@@ -212,7 +212,7 @@ class Network:
         self.station_reservations = {"left": {}, "right": {}}
         self.inject_queue_rr = {"left": {0: {}, 1: {}}, "right": {0: {}, 1: {}}, "up": {0: {}, 1: {}}, "local": {0: {}, 1: {}}}
         self.inject_rr = {"left": {}, "right": {}, "up": {}, "local": {}}
-        self.round_robin = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}, "up": {}, "down": {}, "RB": {}}
+        self.round_robin = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}, "up": {}, "down": {}, "ring_bridge": {}}
 
         self.round_robin_counter = 0
         self.recv_flits_num = 0
@@ -279,7 +279,7 @@ class Network:
             self.eject_queues["down"][ip_pos - config.cols] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
             self.EQ_UE_Counters["up"][ip_pos - config.cols] = {"T2": 0, "T1": 0, "T0": 0}
             self.EQ_UE_Counters["down"][ip_pos - config.cols] = {"T2": 0, "T1": 0}
-            self.eject_queues["RB"][ip_pos - config.cols] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
+            self.eject_queues["ring_bridge"][ip_pos - config.cols] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
             self.eject_queues["local"][ip_pos - config.cols] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
             self.eject_reservations["down"][ip_pos - config.cols] = deque(maxlen=config.reservation_num)
             self.eject_reservations["up"][ip_pos - config.cols] = deque(maxlen=config.reservation_num)
@@ -332,7 +332,7 @@ class Network:
                 self.station_reservations["right"][(pos, next_pos)] = deque(maxlen=config.reservation_num)
                 self.round_robin["up"][next_pos] = deque([0, 1, 2])
                 self.round_robin["down"][next_pos] = deque([0, 1, 2])
-                self.round_robin["RB"][next_pos] = deque([0, 1, 2])
+                self.round_robin["ring_bridge"][next_pos] = deque([0, 1, 2])
                 for direction in ["left", "right"]:
                     self.remain_tag[direction][pos] = config.ITag_Max_Num_H
                 for direction in ["up", "down"]:
@@ -548,8 +548,8 @@ class Network:
                 return self._handle_regular_flit(flit, link, current, next_node, row_start, row_end, col_start, col_end)
 
     def _handle_delay_flit(self, flit, link, current, next_node, row_start, row_end, col_start, col_end):
-        if flit.packet_id == 64:
-            print(flit)
+        # if flit.packet_id == 64:
+            # print(flit)
         if flit.current_seat_index < len(link) - 1:
             # 节点间进行移动
             link[flit.current_seat_index] = None

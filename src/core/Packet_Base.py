@@ -481,7 +481,11 @@ class Packet_Base_model(BaseModel):
 
                 # transfer_eject
                 # 处理eject队列
-                if next_pos in network.eject_queues["RB"] and len(network.eject_queues["RB"][next_pos]) < self.config.EQ_IN_FIFO_DEPTH and network.ring_bridge["eject"][(pos, next_pos)]:
+                if (
+                    next_pos in network.eject_queues["ring_bridge"]
+                    and len(network.eject_queues["ring_bridge"][next_pos]) < self.config.EQ_IN_FIFO_DEPTH
+                    and network.ring_bridge["eject"][(pos, next_pos)]
+                ):
                     flit = network.ring_bridge["eject"][(pos, next_pos)].popleft()
                     flit.is_arrive = True
 
@@ -520,7 +524,7 @@ class Packet_Base_model(BaseModel):
         for flit in ring_bridge_flits:
             if flit.is_arrive:
                 flit.arrival_network_cycle = self.cycle
-                network.eject_queues["RB"][flit.destination].append(flit)
+                network.eject_queues["ring_bridge"][flit.destination].append(flit)
                 flits.remove(flit)
 
         return flits
@@ -534,7 +538,7 @@ class Packet_Base_model(BaseModel):
             station_flits[3] = None
             network.ring_bridge["ft"][(pos, next_pos)].popleft()
         else:
-            index = network.round_robin["RB"][next_pos]
+            index = network.round_robin["ring_bridge"][next_pos]
             for i in index:
                 if station_flits[i] and station_flits[i].destination == next_pos:
                     eject_flit = station_flits[i]
@@ -588,8 +592,8 @@ class Packet_Base_model(BaseModel):
     #         network.ring_bridge["left"][(pos, next_pos)].popleft()
     #     elif index == 2:
     #         network.ring_bridge["right"][(pos, next_pos)].popleft()
-    #     network.round_robin["RB"][next_pos].remove(index)
-    #     network.round_robin["RB"][next_pos].append(index)
+    #     network.round_robin["ring_bridge"][next_pos].remove(index)
+    #     network.round_robin["ring_bridge"][next_pos].append(index)
 
     def _handle_eject_arbitration(self, network, flit_type):
         """处理eject的仲裁逻辑,根据flit类型处理不同的eject队列"""
@@ -598,11 +602,11 @@ class Packet_Base_model(BaseModel):
                 ip_pos = in_pos - self.config.cols
                 # eject_flits = [
                 #     network.eject_queues["up"][ip_pos][0] if network.eject_queues["up"][ip_pos] else None,
-                #     network.eject_queues["RB"][ip_pos][0] if network.eject_queues["RB"][ip_pos] else None,
+                #     network.eject_queues["ring_bridge"][ip_pos][0] if network.eject_queues["ring_bridge"][ip_pos] else None,
                 #     network.eject_queues["down"][ip_pos][0] if network.eject_queues["down"][ip_pos] else None,
                 #     network.eject_queues["local"][ip_pos][0] if network.eject_queues["local"][ip_pos] else None,
                 # ]
-                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "RB", "down", "local"]]
+                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "ring_bridge", "down", "local"]]
 
                 # if not all(eject_flit is None for eject_flit in eject_flits):
                 #     print(eject_flits)
@@ -622,11 +626,11 @@ class Packet_Base_model(BaseModel):
                 ip_pos = in_pos - self.config.cols
                 # eject_flits = [
                 # network.eject_queues["up"][ip_pos][0] if network.eject_queues["up"][ip_pos] else None,
-                # network.eject_queues["RB"][ip_pos][0] if network.eject_queues["RB"][ip_pos] else None,
+                # network.eject_queues["ring_bridge"][ip_pos][0] if network.eject_queues["ring_bridge"][ip_pos] else None,
                 # network.eject_queues["down"][ip_pos][0] if network.eject_queues["down"][ip_pos] else None,
                 # network.eject_queues["local"][ip_pos][0] if network.eject_queues["local"][ip_pos] else None,
                 # ]
-                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "RB", "down", "local"]]
+                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "ring_bridge", "down", "local"]]
                 # if not all(eject_flit is None for eject_flit in eject_flits):
                 #     print(eject_flits)
                 eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["sdma"][ip_pos], "sdma", ip_pos)
@@ -645,11 +649,11 @@ class Packet_Base_model(BaseModel):
                 ip_pos = in_pos - self.config.cols
                 # eject_flits = [
                 # network.eject_queues["up"][ip_pos][0] if network.eject_queues["up"][ip_pos] else None,
-                # network.eject_queues["RB"][ip_pos][0] if network.eject_queues["RB"][ip_pos] else None,
+                # network.eject_queues["ring_bridge"][ip_pos][0] if network.eject_queues["ring_bridge"][ip_pos] else None,
                 # network.eject_queues["down"][ip_pos][0] if network.eject_queues["down"][ip_pos] else None,
                 # network.eject_queues["local"][ip_pos][0] if network.eject_queues["local"][ip_pos] else None,
                 # ]
-                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "RB", "down", "local"]]
+                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "ring_bridge", "down", "local"]]
                 # if not all(eject_flit is None for eject_flit in eject_flits):
                 #     print(eject_flits)
                 eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
@@ -870,7 +874,7 @@ class Packet_Base_model(BaseModel):
     #             if i == 0:
     #                 network.eject_queues["up"][ip_pos].popleft()
     #             elif i == 1:
-    #                 network.eject_queues["RB"][ip_pos].popleft()
+    #                 network.eject_queues["ring_bridge"][ip_pos].popleft()
     #             elif i == 2:
     #                 network.eject_queues["down"][ip_pos].popleft()
     #             elif i == 3:

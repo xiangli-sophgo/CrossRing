@@ -56,8 +56,8 @@ def main():
     # config_path = r"config.json"
     np.random.seed(401)
 
-    for failed_core_num in range(0, 5):
-        for spare_core_row in range(8, 9):
+    for failed_core_num in range(0, 4):
+        for spare_core_row in range(0, 9):
             for repeat_time in range(1):
                 result_part_save_path = f"{failed_core_num}_{spare_core_row}_{repeat_time}/"
 
@@ -107,7 +107,7 @@ def main():
                 # sim.config.update_config()
                 sim.initial()
                 # sim.end_time = 20000
-                sim.print_interval = 100
+                sim.print_interval = 1000
                 sim.run()
                 sim.config.finish_del()
 

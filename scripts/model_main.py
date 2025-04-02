@@ -66,11 +66,11 @@ def main():
     # sim.end_time = 10000
     sim.config.burst = 4
     sim.config.rn_read_tracker_ostd = 128
-    sim.config.rn_write_tracker_ostd = 128
+    sim.config.rn_write_tracker_ostd = 64
     sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
     sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
-    sim.config.ro_tracker_ostd = 192
-    sim.config.share_tracker_ostd = 192
+    sim.config.ro_tracker_ostd = 128
+    sim.config.share_tracker_ostd = 64
     sim.config.sn_wdb_size = sim.config.share_tracker_ostd * sim.config.burst
     sim.config.seats_per_link = 7
 
