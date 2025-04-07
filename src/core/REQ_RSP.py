@@ -15,7 +15,7 @@ class REQ_RSP_model(BaseModel):
             self.rn_type, self.sn_type = self.get_network_types()
 
             self.check_and_release_sn_tracker()
-            # self.flit_trace(407)
+            # self.flit_trace(501)
 
             # Process requests
             self.process_requests()

@@ -108,16 +108,16 @@ class AddressStat:
             self.results.append(
                 {
                     "Traffic_name": dir_name,
-                    "64_shared_flits": self.shared_64_count,
+                    # "64_shared_flits": self.shared_64_count,
                     "64_shared_percent": shared_64_percent / 100,
-                    "8_shared_flits": self.shared_8_count,
+                    # "8_shared_flits": self.shared_8_count,
                     "8_shared_percent": shared_8_percent / 100,
-                    "private_flits": self.private_count,
+                    # "private_flits": self.private_count,
                     "private_percent": private_percent / 100,
-                    "read_flits": self.read_flit_count,
+                    # "read_flits": self.read_flit_count,
                     "read_percent": read_percent / 100,
                     # "read_flit_per_cycle": read_flit_per_cycle,
-                    "write_flits": self.write_flit_count,
+                    # "write_flits": self.write_flit_count,
                     "write_percent": write_percent / 100,
                     # "write_flit_per_cycle": write_flit_per_cycle,
                     "total_flits": self.total_flit_count,
@@ -201,23 +201,23 @@ class AddressStat:
         # Define the CSV fieldnames
         fieldnames = [
             "Traffic_name",
-            "64_shared_flits",
-            "8_shared_flits",
-            "private_flits",
+            "end_time",
+            "total_requests",
+            "total_flits",
+            "total_bandwidth",
+            # "64_shared_flits",
+            # "8_shared_flits",
+            # "private_flits",
             "64_shared_percent",
             "8_shared_percent",
             "private_percent",
-            "read_flits",
+            # "read_flits",
             # "read_flit_per_cycle",
             "read_percent",
-            "write_flits",
+            # "write_flits",
             "write_percent",
             # "write_flit_per_cycle",
-            "total_flits",
-            "total_bandwidth",
             # "total_flit_per_cycle",
-            "total_requests",
-            "end_time",
         ]
 
         # Write to CSV
@@ -240,5 +240,5 @@ class AddressStat:
 if __name__ == "__main__":
     stat = AddressStat(200)
     # Specify the output CSV file path
-    output_csv = r"../../Result/Data_csv/DeepSeek_traffic_stats.csv"
+    output_csv = r"../../Result/Data_csv/DeepSeek_V3_traffic_stats.csv"
     stat.run(r"../../traffic/output_DeepSeek/step1_flatten/", output_csv, plot_data=0)

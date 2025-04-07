@@ -1,5 +1,5 @@
 import numpy as np
-from collections import deque
+from collections import deque, defaultdict
 
 from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths
 from config.config import SimulationConfig
@@ -12,6 +12,11 @@ import sys, time
 import inspect
 
 import cProfile
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.colors import LinearSegmentedColormap
+import seaborn as sns
+import pandas as pd
 
 
 class BaseModel:
@@ -62,6 +67,8 @@ class BaseModel:
             "local": lambda flit: flit.source - flit.destination == self.config.cols,
         }
         self.flit_position = set(self.config.ddr_send_positions + self.config.sdma_send_positions + self.config.l2m_send_positions + self.config.gdma_send_positions)
+        self.read_ip_intervals = defaultdict(list)  # 存储每个IP的读请求时间区间
+        self.write_ip_intervals = defaultdict(list)  # 存储每个IP的写请求时间区间
 
         # statistical data
         self.send_read_flits_num_stat = 0
@@ -500,6 +507,8 @@ class BaseModel:
             if self.topo_type_stat in ["5x4", "4x5"]:
                 req.source_type = "gdma" if req_data[1] < 16 else "sdma"
                 req.destination_type = "ddr" if req_data[3] < 16 else "l2m"
+            if req.source_type == "gdma" and req.destination == 20:
+                print(req)
             req.packet_id = Node.get_next_packet_id()
             req.req_type = "read" if req_data[5] == "R" else "write"
             self.req_network.send_flits[req.packet_id].append(req)
@@ -679,14 +688,10 @@ class BaseModel:
 
                 # 处理vup操作
                 if len(network.ring_bridge["vup"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    if vup_flit:
-                        print(vup_flit)
                     vup_flit = self._process_vup_flit(network, station_flits, pos, next_pos)
 
                 # 处理vdown操作
                 if len(network.ring_bridge["vdown"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    if vdown_flit:
-                        print(vdown_flit)
                     vdown_flit = self._process_vdown_flit(network, station_flits, pos, next_pos)
 
                 # transfer_eject
@@ -1299,8 +1304,6 @@ class BaseModel:
         rsp.destination_type = req.source_type
         self.rsp_network.send_flits[rsp.packet_id].append(rsp)
         self.node.sn_rsp_queue[rsp.source_type][source].append(rsp)
-        # if req.packet_id == 1785:
-        #     print(rsp)
 
     def process_inject_queues(self, network, inject_queues):
         flit_num = 0
@@ -1437,6 +1440,25 @@ class BaseModel:
                 self.read_BW_stat, self.read_latency_avg_stat, self.read_latency_max_stat = self.output_intervals(f3, read_merged_intervals, "Read", read_latency)
             if write_latency:
                 self.write_BW_stat, self.write_latency_avg_stat, self.write_latency_max_stat = self.output_intervals(f3, write_merged_intervals, "Write", write_latency)
+
+            print("\nPer-IP Weighted Bandwidth:", file=f3)
+            # 处理读带宽
+            print("\nRead Bandwidth per IP:", file=f3)
+            for ip_id in sorted(self.read_ip_intervals.keys()):
+                intervals = self.read_ip_intervals[ip_id]
+                bw = self.calculate_ip_bandwidth(intervals)
+                print(f"{ip_id}: {bw:.1f} GB/s", file=f3)
+
+            # 处理写带宽
+            print("\nWrite Bandwidth per IP:", file=f3)
+            for ip_id in sorted(self.write_ip_intervals.keys()):
+                intervals = self.write_ip_intervals[ip_id]
+                bw = self.calculate_ip_bandwidth(intervals)
+                print(f"{ip_id}: {bw:.1f} GB/s", file=f3)
+
+        self.plot_ip_bandwidth_heatmap(self.result_save_path)
+        # self.plot_ip_bandwidth_heatmap()
+
         self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
         print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")
         print("=" * 50)
@@ -1470,6 +1492,36 @@ class BaseModel:
     def update_intervals(self, flit, merged_intervals, latency, file, req_type):
         """Update the merged intervals and latency for the given request type."""
         last_start, last_end, count = merged_intervals[-1]
+
+        # 根据请求类型更新对应的IP区间
+        if req_type == "R":
+            ip_id = f"{str(flit.destination_type)}_{str(flit.destination + self.config.cols)}"
+            ip_intervals = self.read_ip_intervals[ip_id]
+        elif req_type == "W":
+            ip_id = f"{str(flit.source_type)}_{str(flit.source)}"
+            ip_intervals = self.write_ip_intervals[ip_id]
+
+        # 合并区间逻辑（与全局merged_intervals相同）
+        current_start = flit.req_departure_cycle // self.config.network_frequency
+        current_end = flit.arrival_cycle // self.config.network_frequency
+        current_count = flit.burst_length
+
+        if not ip_intervals:
+            ip_intervals.append((current_start, current_end, current_count))
+        else:
+            last_start, last_end, last_count = ip_intervals[-1]
+            if current_start <= last_end:
+                merged = (last_start, max(last_end, current_end), last_count + current_count)
+                ip_intervals[-1] = merged
+            else:
+                ip_intervals.append((current_start, current_end, current_count))
+
+        # 更新字典
+        if req_type == "R":
+            self.read_ip_intervals[ip_id] = ip_intervals
+        elif req_type == "W":
+            self.write_ip_intervals[ip_id] = ip_intervals
+
         if flit.req_departure_cycle // self.config.network_frequency <= last_end:
             merged_intervals[-1] = (
                 last_start,
@@ -1529,8 +1581,8 @@ class BaseModel:
             print(f"Interval: {start} to {end}, count: {count}, bandwidth: {bandwidth:.1f}", file=f3)
             finish_time = max(finish_time, end)
 
-        weighted_bandwidth = weighted_bandwidth_sum / total_count if total_count > 0 else 0
-        # weighted_bandwidth = total_count * 128 / finish_time / self.config.num_ips
+        # weighted_bandwidth = weighted_bandwidth_sum / total_count if total_count > 0 else 0
+        weighted_bandwidth = total_count * 128 / finish_time / self.config.num_ips
 
         if req_type == "Read":
             self.R_finish_time_stat = finish_time
@@ -1549,6 +1601,112 @@ class BaseModel:
         )
         print(f"Weighted bandwidth: {weighted_bandwidth:.1f} AvgLatency: {latency_avg:.1f}, MaxLatency: {latency_max}")
         return weighted_bandwidth, latency_avg, latency_max
+
+    def calculate_ip_bandwidth(self, intervals):
+        """计算给定区间的加权带宽"""
+        weighted_sum = 0.0
+        total_count = 0
+        finish_time = 0
+        for start, end, count in intervals:
+            if start >= end:
+                continue  # 跳过无效区间
+            duration = end - start
+            bandwidth = (count * 128) / duration  # 计算该区间的带宽（不除以IP总数）
+            weighted_sum += bandwidth * count  # 加权求和
+            total_count += count
+            finish_time = max(finish_time, end)
+
+        # return weighted_sum / total_count if total_count > 0 else 0.0
+        return total_count * 128 / finish_time if finish_time > 0 else 0.0
+
+    def plot_ip_bandwidth_heatmap(self, save_path=None):
+        """
+        绘制读、写和总带宽的三个热图(SDMA在上，GDMA在下)
+        :param save_path: 图片保存路径，如果为None则显示而不保存
+        """
+        # 获取配置
+        rows = self.config.rows
+        cols = self.config.cols
+
+        # 创建三个矩阵分别存储读、写和总带宽
+        read_data = np.zeros((rows - 1, cols))
+        write_data = np.zeros((rows - 1, cols))
+        total_data = np.zeros((rows - 1, cols))
+
+        # 填充矩阵数据
+        for ip_id in set(self.read_ip_intervals) | set(self.write_ip_intervals):
+            # 解析IP信息
+            source_type, source = ip_id.split("_")
+            source = int(source)
+
+            # 计算物理位置
+            physical_col = source % cols
+            physical_row = source // cols // 2
+
+            # 确定在矩阵中的位置
+            if source_type == "sdma":
+                row = physical_row * 2 + 2
+            else:  # gdma
+                row = physical_row * 2 + 1
+
+            col = physical_col
+
+            # 确保不越界
+            # if row < rows and col < cols:
+            # 计算带宽
+            read_bw = self.calculate_ip_bandwidth(self.read_ip_intervals.get(ip_id, []))
+            write_bw = self.calculate_ip_bandwidth(self.write_ip_intervals.get(ip_id, []))
+
+            read_data[row - 1, col] = read_bw
+            write_data[row - 1, col] = write_bw
+            total_data[row - 1, col] = read_bw + write_bw
+
+        # 创建图形和子图
+        fig, axes = plt.subplots(1, 3, figsize=(cols * 4, rows * 0.6))
+        titles = ["Read Bandwidth", "Write Bandwidth", "Total Bandwidth"]
+        data_list = [read_data, write_data, total_data]
+        if self.config.spare_core_row != -1:
+            fig.suptitle(
+                f"Row: {self.config.spare_core_row}, Failed core: {[(core%self.config.cols, (rows - core//self.config.cols)//2) for core in self.config.fail_core_pos]}, Spare core: {[(core%self.config.cols, (rows - core//self.config.cols)//2) for core in self.config.spare_core_pos]}",
+                y=1,
+                fontsize=12,
+                # fontweight="bold",
+            )
+
+        # 统一的最大值用于颜色映射
+        vmax = max(np.max(total_data), np.max(read_data), np.max(write_data)) or 1.0
+
+        # 绘制三个热图
+        for ax, data, title in zip(axes, data_list, titles):
+            # 创建标签矩阵
+            labels = np.empty_like(data, dtype=object)
+            for i in range(data.shape[0]):
+                for j in range(data.shape[1]):
+                    if data[i, j] > 0:
+                        labels[i, j] = f"{data[i, j]:.1f}"
+                    else:
+                        labels[i, j] = ""
+
+            # 创建DataFrame
+            df = pd.DataFrame(data, index=[f"Row{rows-2-i}" for i in range(rows - 1)], columns=[f"Col{j}" for j in range(cols)])
+
+            # 绘制热图
+            sns.heatmap(df, annot=labels, fmt="", cmap="YlGnBu", linewidths=0.5, linecolor="gray", cbar=True, vmin=0, ax=ax, cbar_kws={"label": "Bandwidth (GB/s)"}, annot_kws={"size": 10})
+
+            # 设置标题和坐标轴
+            ax.set_title(f"{title}")
+            ax.set_xlabel("Column Position")
+            ax.set_ylabel("Row Position")
+
+        # 自动调整布局
+        plt.tight_layout()
+
+        # 保存或显示
+        if save_path:
+            plt.savefig(os.path.join(save_path, "ip_bandwidth_heatmaps.png"), dpi=300, bbox_inches="tight")
+            plt.close()
+        else:
+            plt.show()
 
     def evaluate_performance(self, network):
         # receive confirm

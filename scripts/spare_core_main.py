@@ -20,8 +20,8 @@ def main():
 
     # traffic_file_path = r"../../traffic/"R
     # traffic_file_path = r"../traffic/output_v8_All_reduce/step5_data_merge/"
-    traffic_file_path = r"../traffic/output-v8-32/2M/step5_data_merge/"
-    file_name = r"LLama2_Attention_FC_Trace.txt"
+    # traffic_file_path = r"../traffic/output-v8-32/2M/step5_data_merge/"
+    # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"LLama2_MLP_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
@@ -45,7 +45,7 @@ def main():
     else:
         topo_type = config.topo_type
     config.topo_type = topo_type
-    results_file_name = "Spare_core_0402_AF"
+    results_file_name = "Spare_core_0403_to32"
     result_root_save_path = f"../Result/CrossRing/SCM/{model_type}/{results_file_name}"
     os.makedirs(result_root_save_path, exist_ok=True)  # 确保根目录存在
 
@@ -56,11 +56,11 @@ def main():
     # config_path = r"config.json"
     np.random.seed(401)
 
-    for repeat_time in range(20):
-        for failed_core_num in range(0, 1):
+    for repeat_time in range(1):
+        for failed_core_num in range(1, 2):
             failed_core_poses = np.random.choice(list(i for i in range(16)), failed_core_num, replace=False)
-            for spare_core_row in range(8, 9):
-                result_part_save_path = f"{failed_core_num}_{spare_core_row}_{repeat_time}/"
+            for spare_core_row in range(2, 3, 2):
+                result_part_save_path = f"_{failed_core_num}_{spare_core_row}_{repeat_time}/"
 
                 if model_type == "REQ_RSP":
                     sim = REQ_RSP_model(
@@ -96,7 +96,8 @@ def main():
                 sim.config.share_tracker_ostd = 64
                 sim.config.sn_wdb_size = sim.config.share_tracker_ostd * sim.config.burst
                 sim.config.seats_per_link = 7
-                sim.config.TL_Etag_T2_UE_MAX = 4
+                sim.config.RB_IN_FIFO_DEPTH = 8
+                sim.config.TL_Etag_T2_UE_MAX = 5
                 sim.config.TL_Etag_T1_UE_MAX = 7
                 sim.config.TR_Etag_T2_UE_MAX = 6
                 sim.config.TU_Etag_T2_UE_MAX = 4
@@ -107,8 +108,8 @@ def main():
 
                 # sim.config.update_config()
                 sim.initial()
-                # sim.end_time = 2000
-                sim.print_interval = 10000
+                sim.end_time = 2000
+                sim.print_interval = 2000
                 sim.run()
 
                 results = sim.get_results()

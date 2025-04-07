@@ -18,8 +18,8 @@ def main():
 
     # traffic_file_path = r"../../traffic/"
     # traffic_file_path = r"../traffic/output_All_reduce/step5_data_merge/"
-    traffic_file_path = r"../traffic/output_v8_new/step5_data_merge/"
-    file_name = r"LLama2_Attention_FC_Trace.txt"
+    # traffic_file_path = r"../traffic/output_v8_new/step5_data_merge/"
+    # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"output_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"LLama2_MLP_Trace.txt"
@@ -78,7 +78,7 @@ def main():
 
     # sim.config.update_config()
     sim.initial()
-    # sim.end_time = 1000
+    sim.end_time = 3000
     sim.print_interval = 5000
     sim.run()
     print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")

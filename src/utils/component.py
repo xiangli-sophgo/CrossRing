@@ -549,7 +549,7 @@ class Network:
 
     def _handle_delay_flit(self, flit, link, current, next_node, row_start, row_end, col_start, col_end):
         # if flit.packet_id == 64:
-            # print(flit)
+        # print(flit)
         if flit.current_seat_index < len(link) - 1:
             # 节点间进行移动
             link[flit.current_seat_index] = None

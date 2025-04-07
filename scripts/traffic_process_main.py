@@ -11,9 +11,9 @@ from src.traffic_process import step6_core32_map
 
 # path为输入Trace的文件夹名称,path和代码在同一路径
 
-path = "../traffic/original_data/V8-32/2M/"
+path = "../traffic/original_data/DeepSeek/"
 # path += "ins_SG2262_Ring_all_reduce_8cluster_all2all"
-output_path = "../traffic/output_v8_new/"
+output_path = "../traffic/output_DeepSeek/"
 # # outstanding_num必须为2的幂
 outstanding_num = 512
 assert isinstance(outstanding_num, int), "outstanding_num must be integer or out of range."

@@ -18,8 +18,8 @@ def generate_data(topo, end_time, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_po
                     data_all.append(f"{128 * i + j},{src},{src_type},{dest_pos[index]},{dest_type},{operation},{burst}\n")
 
     if topo in ["4x9", "9x4", "4x5", "5x4"]:
-        generate_entries(sdma_pos, "sdma", "ddr", ddr_pos, "R", burst)
-        generate_entries(sdma_pos, "sdma", "ddr", l2m_pos, "W", burst)
+        generate_entries(sdma_pos, "gdma", "ddr", ddr_pos, "R", burst)
+        generate_entries(sdma_pos, "gdma", "ddr", l2m_pos, "W", burst)
 
     elif topo == "3x3":
         generate_entries(sdma_pos, "sdma", "ddr", ddr_pos, "R", burst)
@@ -33,9 +33,9 @@ def generate_data(topo, end_time, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_po
 
 def main():
     # 示例参数配置
-    np.random.seed(12)
+    np.random.seed(403)
     topo = "5x4"
-    end_time = 64
+    end_time = 96
     file_name = "../../test_data/demo45.txt"
 
     sdma_pos = range(32)

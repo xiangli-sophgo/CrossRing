@@ -26,6 +26,7 @@ class SimulationConfig:
         self.num_l2m = args.num_l2m
         self.num_gdma = args.num_gdma
         self.flit_size = args.flit_size
+        self.spare_core_row = -1
         self.seats_per_link = args.seats_per_link
         self.RB_IN_FIFO_DEPTH = args.RB_IN_FIFO_DEPTH
         self.RB_OUT_FIFO_DEPTH = args.RB_OUT_FIFO_DEPTH
@@ -250,7 +251,7 @@ class SimulationConfig:
 
         # 执行批量替换
         self.gdma_send_positions = [pos_mapping.get(pos, pos) for pos in self.gdma_send_positions]  # 如果在映射表中则替换，否则保持原位置
-        print(f"spare core: {self.spare_core}, fail core: {self.fail_core_pos}, used spare core: {self.spare_core_pos}")
+        print(f"spare core: row: {self.spare_core_row}, id: {self.spare_core}, fail core: {self.fail_core_pos}, used spare core: {self.spare_core_pos}")
 
     def finish_del(self):
         del self.ddr_send_positions, self.l2m_send_positions, self.gdma_send_positions, self.sdma_send_positions
