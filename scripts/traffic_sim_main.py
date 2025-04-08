@@ -34,7 +34,7 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name):
     file_names = [file for file in all_files if file.endswith(".txt")]
 
     # Setup result paths
-    result_save_path = f"../Result/CrossRing/{model_type}/{traffic_path.split('/')[-2]}/"
+    result_save_path = f"../Result/CrossRing/{model_type}/{traffic_path.split('/')[-4]}/"
     output_csv = os.path.join(r"../Result/Traffic_result_csv/", f"{results_file_name}.csv")
     os.makedirs(result_save_path, exist_ok=True)
 
@@ -84,24 +84,24 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name):
 
 def main():
     parser = argparse.ArgumentParser(description="Network Traffic Processing and Simulation")
-    parser.add_argument("--input", default="../traffic/original_data/DeepSeek/", help="Input traffic data path")
-    parser.add_argument("--output", default="../traffic/output_DeepSeek/", help="Output directory for processed data")
+    parser.add_argument("--raw_traffic_input", default="../traffic/original_data/DeepSeek/", help="Input traffic data path")
+    parser.add_argument("--traffic_output", default="../traffic/output_DeepSeek/", help="Output directory for processed data")
     parser.add_argument("--outstanding", type=int, default=512, help="Outstanding number (must be power of 2)")
     parser.add_argument("--config", default="../config/config2.json", help="Simulation config file path")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="Simulation model type")
-    parser.add_argument("--results", default="DeepSeek_0403", help="Base name for results files")
+    parser.add_argument("--results_file_name", default="DeepSeek_0407", help="Base name for results files")
     parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both (default)")
 
     args = parser.parse_args()
 
     if args.mode in [0, 2]:
         print("Processing traffic data...")
-        process_traffic_data(args.input, args.output, args.outstanding)
+        process_traffic_data(args.raw_traffic_input, args.traffic_output, args.outstanding)
 
     if args.mode in [1]:
         print("Running simulation...")
-        processed_data_path = f"{args.output}/step5_data_merge/"
-        run_simulation(args.config, processed_data_path, args.model, args.results)
+        processed_data_path = f"{args.traffic_output}/step5_data_merge/"
+        run_simulation(args.config, processed_data_path, args.model, args.results_file_name)
 
 
 if __name__ == "__main__":

@@ -18,10 +18,10 @@ def main():
     # file_name = r"demo_3x3.txt"
     # file_name = r"demo_459.txt"
 
-    # traffic_file_path = r"../../traffic/"R
+    traffic_file_path = r"../traffic/output-v8-32/2M/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_All_reduce/step5_data_merge/"
     # traffic_file_path = r"../traffic/output-v8-32/2M/step5_data_merge/"
-    # file_name = r"LLama2_Attention_FC_Trace.txt"
+    file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"LLama2_MLP_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
@@ -54,7 +54,7 @@ def main():
 
     # result_save_path = None
     # config_path = r"config.json"
-    np.random.seed(401)
+    np.random.seed(407)
 
     for repeat_time in range(1):
         for failed_core_num in range(1, 2):
@@ -108,7 +108,7 @@ def main():
 
                 # sim.config.update_config()
                 sim.initial()
-                sim.end_time = 2000
+                # sim.end_time = 2000
                 sim.print_interval = 2000
                 sim.run()
 

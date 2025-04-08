@@ -34,6 +34,7 @@ def main():
     p2 = 64
 
     result_save_path = f"../Result/CrossRing/{model_type}/{p1}-{p2}/"
+    ip_BW_fig_save_path = f"../Result/CrossRing/{model_type}/{p1}-{p2}/"
 
     config_path = r"../config/config2.json"
     config = SimulationConfig(config_path)
@@ -58,6 +59,7 @@ def main():
         traffic_file_path=traffic_file_path,
         file_name=file_name,
         result_save_path=result_save_path,
+        ip_BW_fig_save_path=ip_BW_fig_save_path,
     )
 
     # profiler = cProfile.Profile()

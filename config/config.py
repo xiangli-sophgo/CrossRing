@@ -27,6 +27,7 @@ class SimulationConfig:
         self.num_gdma = args.num_gdma
         self.flit_size = args.flit_size
         self.spare_core_row = -1
+        self.fail_core_pos = []
         self.seats_per_link = args.seats_per_link
         self.RB_IN_FIFO_DEPTH = args.RB_IN_FIFO_DEPTH
         self.RB_OUT_FIFO_DEPTH = args.RB_OUT_FIFO_DEPTH

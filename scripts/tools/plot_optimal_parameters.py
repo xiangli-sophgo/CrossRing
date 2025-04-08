@@ -84,7 +84,7 @@ file_root = r"../../Result/Params_csv/"
 # data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
 # data_file_name = r"RB_IN_OUT_FIFO_459_0303_2_fixed_time_interval.csv"
 # data_file_name = r"ETag_EQ_0321.csv"
-data_file_name = r"Spare_core_0403_MMQKV.csv"
+data_file_name = r"Spare_core_0407_to32.csv"
 topologies = [
     # "4x9",
     # "9x4",
@@ -106,13 +106,13 @@ data = pd.read_csv(file_root + data_file_name)
 
 # show_value = "read_BW"
 # show_value = "write_BW"
-# show_value = "Total_BW"
+show_value = "Total_BW"
 # show_value = "ITag_h_num"
 # show_value = "ITag_v_num"
 # show_value = "R_finish_time"
 # show_value = "W_finish_time"
 # show_value = "R_tail_latency"
-show_value = "W_tail_latency"
+# show_value = "W_tail_latency"
 # show_value = "EQ_ETag_T1_num"
 # show_value = "gdma-R-L2M_thoughput"
 # show_value = "sdma-W-L2M_thoughput"
@@ -151,8 +151,8 @@ Both_side_ETag_upgrade = 1
 
 rate_plot = 0
 log_data = 0
-save_images = 0
-reverse_cmap = 1
+save_images = 1
+reverse_cmap = 0
 plot_type = 0
 
 

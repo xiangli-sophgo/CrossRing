@@ -20,7 +20,7 @@ import pandas as pd
 
 
 class BaseModel:
-    def __init__(self, model_type, config, topo_type, traffic_file_path, file_name, result_save_path=None):
+    def __init__(self, model_type, config, topo_type, traffic_file_path, file_name, result_save_path=None, ip_BW_fig_save_path=None):
         self.model_type_stat = model_type
         self.config = config
         self.topo_type_stat = topo_type
@@ -28,11 +28,15 @@ class BaseModel:
         self.file_name = file_name
         print(f"\nModel Type: {model_type}, Topology: {self.topo_type_stat}, file_name: {self.file_name[:-4]}")
 
-        self.result_save_path = result_save_path
+        self.result_save_path_original = result_save_path
         if result_save_path:
-            self.result_save_path = self.result_save_path + str(topo_type) + "/" + self.file_name[:-4] + "/"
+            self.result_save_path = self.result_save_path_original + str(topo_type) + "/" + self.file_name[:-4] + "/"
             if not os.path.exists(self.result_save_path):
                 os.makedirs(self.result_save_path)
+        if ip_BW_fig_save_path:
+            self.ip_BW_fig_save_path = ip_BW_fig_save_path + "ip_BW_fig/"
+            if not os.path.exists(self.ip_BW_fig_save_path):
+                os.makedirs(self.ip_BW_fig_save_path)
         self.config.topology_select(self.topo_type_stat)
         self.config.update_config()
         # self.initial()
@@ -1456,7 +1460,7 @@ class BaseModel:
                 bw = self.calculate_ip_bandwidth(intervals)
                 print(f"{ip_id}: {bw:.1f} GB/s", file=f3)
 
-        self.plot_ip_bandwidth_heatmap(self.result_save_path)
+        self.plot_ip_bandwidth_heatmap(self.ip_BW_fig_save_path)
         # self.plot_ip_bandwidth_heatmap()
 
         self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
@@ -1689,9 +1693,11 @@ class BaseModel:
 
             # 创建DataFrame
             df = pd.DataFrame(data, index=[f"Row{rows-2-i}" for i in range(rows - 1)], columns=[f"Col{j}" for j in range(cols)])
+            nonzero_min = np.min(data[data > 0])
+            vmin = nonzero_min * 0.4  # 略小于最小非零值
 
             # 绘制热图
-            sns.heatmap(df, annot=labels, fmt="", cmap="YlGnBu", linewidths=0.5, linecolor="gray", cbar=True, vmin=0, ax=ax, cbar_kws={"label": "Bandwidth (GB/s)"}, annot_kws={"size": 10})
+            sns.heatmap(df, annot=labels, fmt="", cmap="YlGnBu", linewidths=0.5, linecolor="gray", cbar=True, vmin=vmin, ax=ax, cbar_kws={"label": "Bandwidth (GB/s)"}, annot_kws={"size": 10})
 
             # 设置标题和坐标轴
             ax.set_title(f"{title}")
@@ -1703,7 +1709,11 @@ class BaseModel:
 
         # 保存或显示
         if save_path:
-            plt.savefig(os.path.join(save_path, "ip_bandwidth_heatmaps.png"), dpi=300, bbox_inches="tight")
+            plt.savefig(
+                os.path.join(save_path, f"{str(self.topo_type_stat)}_{self.file_name[:-4]}_ip_bandwidth_{self.config.spare_core_row}_{self.config.fail_core_pos}_{str(time.time_ns())[-3:]}.png"),
+                dpi=300,
+                bbox_inches="tight",
+            )
             plt.close()
         else:
             plt.show()
