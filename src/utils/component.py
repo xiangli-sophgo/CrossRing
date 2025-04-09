@@ -602,7 +602,7 @@ class Network:
                             if flit_exist_left:
                                 self.station_reservations["left"][(next_node, flit.path[flit.path_index])].remove(flit)
                         else:
-                            # 无法下环，TR方向的flit不能升级T0
+                            # 无法下环,TR方向的flit不能升级T0
                             if not flit_exist_left and not flit_exist_right:
                                 if len(self.station_reservations["left"][(new_current, new_next_node)]) < self.config.reservation_num:
                                     self.station_reservations["left"][(new_current, new_next_node)].append(flit)
@@ -681,7 +681,7 @@ class Network:
                                 if flit_exist_right:
                                     self.station_reservations["right"][(next_node, flit.path[flit.path_index])].remove(flit)
                             else:
-                                # 无法下环，升级ETag并记录
+                                # 无法下环,升级ETag并记录
                                 if flit.ETag_priority == "T2":
                                     flit.ETag_priority = "T1"
                                 elif flit.ETag_priority == "T1":
@@ -757,7 +757,7 @@ class Network:
                             if flit_exist_up:
                                 self.eject_reservations["up"][next_node].remove(flit)
                         else:
-                            # 无法下环，TD方向的flit不能升级T0
+                            # 无法下环,TD方向的flit不能升级T0
                             if not self.Both_side_ETag_upgrade and flit.ETag_priority == "T2":
                                 flit.ETag_priority = "T1"
                             if not flit_exist_up and not flit_exist_down:
@@ -815,7 +815,7 @@ class Network:
                                 if flit_exist_down:
                                     self.eject_reservations["down"][next_node].remove(flit)
                             else:
-                                # 无法下环，升级ETag并记录
+                                # 无法下环,升级ETag并记录
                                 if flit.ETag_priority == "T2":
                                     flit.ETag_priority = "T1"
                                 elif flit.ETag_priority == "T1":
@@ -1264,4 +1264,5 @@ class Network:
             if len(queue) < self.config.EQ_IN_FIFO_DEPTH:
                 queue.append(flit)
                 return True
+            flit.is_arrive = False
             return False

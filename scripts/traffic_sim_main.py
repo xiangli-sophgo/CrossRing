@@ -35,6 +35,7 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name):
 
     # Setup result paths
     result_save_path = f"../Result/CrossRing/{model_type}/{traffic_path.split('/')[-4]}/"
+    ip_BW_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/{traffic_path.split('/')[-4]}/"
     output_csv = os.path.join(r"../Result/Traffic_result_csv/", f"{results_file_name}.csv")
     os.makedirs(result_save_path, exist_ok=True)
 
@@ -66,6 +67,7 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name):
             traffic_file_path=traffic_path,
             file_name=file_name,
             result_save_path=result_save_path + file_name[:-4] + "/",
+            ip_BW_fig_save_path=ip_BW_fig_save_path,
         )
 
         sim.initial()
@@ -89,7 +91,7 @@ def main():
     parser.add_argument("--outstanding", type=int, default=512, help="Outstanding number (must be power of 2)")
     parser.add_argument("--config", default="../config/config2.json", help="Simulation config file path")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="Simulation model type")
-    parser.add_argument("--results_file_name", default="DeepSeek_0407", help="Base name for results files")
+    parser.add_argument("--results_file_name", default="DeepSeek_0408", help="Base name for results files")
     parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both (default)")
 
     args = parser.parse_args()

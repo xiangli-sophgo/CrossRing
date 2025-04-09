@@ -94,7 +94,7 @@ def process_requests(file_path):
     print(f"Overall Write Weighted Bandwidth: {overall_write_weighted_bandwidth:.1f} GB/s", end="\n\n")
 
 
-# 主函数，遍历文件夹中的所有文件
+# 主函数,遍历文件夹中的所有文件
 def main(folder_path):
     for filename in os.listdir(folder_path):
         if filename.endswith(".txt"):  # 只处理以 .txt 结尾的文件

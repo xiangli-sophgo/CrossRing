@@ -158,7 +158,7 @@ class AddressStat:
                 read_counts.append(aggregated_distribution[i]["R"] * 128 / (1024 * interval))
                 write_counts.append(aggregated_distribution[i]["W"] * 128 / (1024 * interval))
             else:
-                read_counts.append(0)  # 如果没有数据，设置为 0
+                read_counts.append(0)  # 如果没有数据,设置为 0
                 write_counts.append(0)
 
         time_labels = [f"{i * interval}" for i in complete_intervals]
@@ -177,7 +177,7 @@ class AddressStat:
         ax.xaxis.set_major_locator(ticker.MaxNLocator(4))  # 或者使用 10000
         # ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{int(x):,}"))  # 格式化为千分位
         max_value = max([read + write for read, write in zip(read_counts, write_counts)])  # 计算最大值
-        ax.set_ylim(0, max_value + 0.4)  # 设置 y 轴的上限，留出一些空间
+        ax.set_ylim(0, max_value + 0.4)  # 设置 y 轴的上限,留出一些空间
         # plt.ylim(0, max(read_counts + write_counts) + 0.4)  # 增加 y 轴的上限
         # plt.rcParams["font.sans-serif"] = ["SimHei"]
         plt.title(file_name)
@@ -240,5 +240,5 @@ class AddressStat:
 if __name__ == "__main__":
     stat = AddressStat(200)
     # Specify the output CSV file path
-    output_csv = r"../../Result/Data_csv/DeepSeek_V3_traffic_stats.csv"
-    stat.run(r"../../traffic/output_DeepSeek/step1_flatten/", output_csv, plot_data=0)
+    output_csv = r"../../Result/Data_csv/v8-32_traffic_stats.csv"
+    stat.run(r"../../traffic/output_DeepSeek/step1_flatten/", output_csv, plot_data=1)

@@ -106,7 +106,7 @@ def main(directory_path, output_directory):
     for filename in os.listdir(directory_path):
         input_file_path = os.path.join(directory_path, filename)
 
-        # 只处理文件，跳过子目录
+        # 只处理文件,跳过子目录
         if os.path.isfile(input_file_path):
             # 定义输出文件路径
             output_file_path = os.path.join(output_directory, filename)

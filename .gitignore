@@ -16,3 +16,7 @@ CrossRing.egg-info/
 .vscode
 
 *.log
+
+.DS_Store
+
+test_data/

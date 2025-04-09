@@ -6,7 +6,7 @@ def flatten_directory(directory):
     # 如果目录不存在则创建（包括父目录）
     if not os.path.exists(directory):
         os.makedirs(directory, exist_ok=True)  # exist_ok避免竞态条件报错
-        print(f"目录不存在，已自动创建: {directory}")
+        print(f"目录不存在,已自动创建: {directory}")
     elif not os.path.isdir(directory):
         raise NotADirectoryError(f"路径不是目录: {directory}")
 
@@ -34,7 +34,7 @@ def copy_files_with_suffix(input_path, output_path):
         print("输入路径不存在")
         return
 
-    # 确保输出路径存在，如果不存在则创建
+    # 确保输出路径存在,如果不存在则创建
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 

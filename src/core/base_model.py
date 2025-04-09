@@ -34,7 +34,7 @@ class BaseModel:
             if not os.path.exists(self.result_save_path):
                 os.makedirs(self.result_save_path)
         if ip_BW_fig_save_path:
-            self.ip_BW_fig_save_path = ip_BW_fig_save_path + "ip_BW_fig/"
+            self.ip_BW_fig_save_path = ip_BW_fig_save_path
             if not os.path.exists(self.ip_BW_fig_save_path):
                 os.makedirs(self.ip_BW_fig_save_path)
         self.config.topology_select(self.topo_type_stat)
@@ -98,7 +98,7 @@ class BaseModel:
         self.load_request_stream()
         flits, reqs, rsps = [], [], []
         self.cycle = 0
-        tail_time = 10
+        tail_time = 0
 
         while True:
             self.cycle += 1
@@ -511,8 +511,6 @@ class BaseModel:
             if self.topo_type_stat in ["5x4", "4x5"]:
                 req.source_type = "gdma" if req_data[1] < 16 else "sdma"
                 req.destination_type = "ddr" if req_data[3] < 16 else "l2m"
-            if req.source_type == "gdma" and req.destination == 20:
-                print(req)
             req.packet_id = Node.get_next_packet_id()
             req.req_type = "read" if req_data[5] == "R" else "write"
             self.req_network.send_flits[req.packet_id].append(req)
@@ -1366,8 +1364,8 @@ class BaseModel:
                     self.data_cir_h_num_stat += flit.circuits_completed_h
                     self.data_cir_v_num_stat += flit.circuits_completed_v
                 self.process_flits(
-                    flits[-1],
-                    # next((flit for flit in flits if flit.is_last_flit), flits[-1]),
+                    # flits[-1],
+                    next((flit for flit in flits if flit.is_last_flit), flits[-1]),
                     network,
                     read_latency,
                     write_latency,
@@ -1572,7 +1570,8 @@ class BaseModel:
         print(f"{req_type} intervals:", file=f3)
         print(f"{req_type} results:")
         # print(f"{req_type} results:", file=f3)
-        weighted_bandwidth_sum, total_count, finish_time, total_bandwidth = 0, 0, 0, [np.inf, -np.inf]
+        # weighted_bandwidth_sum, total_count, finish_time, total_bandwidth = 0, 0, 0, [np.inf, -np.inf]
+        weighted_bandwidth_sum, total_count, finish_time, total_bandwidth = 0, 0, self.cycle // self.config.network_frequency, [np.inf, -np.inf]
 
         for start, end, count in merged_intervals:
             if start == end:
@@ -1610,7 +1609,8 @@ class BaseModel:
         """计算给定区间的加权带宽"""
         weighted_sum = 0.0
         total_count = 0
-        finish_time = 0
+        # finish_time = 0
+        finish_time = self.cycle // self.config.network_frequency
         for start, end, count in intervals:
             if start >= end:
                 continue  # 跳过无效区间
@@ -1625,17 +1625,19 @@ class BaseModel:
 
     def plot_ip_bandwidth_heatmap(self, save_path=None):
         """
-        绘制读、写和总带宽的三个热图(SDMA在上，GDMA在下)
-        :param save_path: 图片保存路径，如果为None则显示而不保存
+        绘制读、写和总带宽的三个热图(SDMA在上,GDMA在下)
+        :param save_path: 图片保存路径,如果为None则显示而不保存
         """
         # 获取配置
         rows = self.config.rows
         cols = self.config.cols
 
         # 创建三个矩阵分别存储读、写和总带宽
-        read_data = np.zeros((rows - 1, cols))
-        write_data = np.zeros((rows - 1, cols))
-        total_data = np.zeros((rows - 1, cols))
+        if self.topo_type_stat != "4x5":
+            rows -= 1
+        read_data = np.zeros((rows, cols))
+        write_data = np.zeros((rows, cols))
+        total_data = np.zeros((rows, cols))
 
         # 填充矩阵数据
         for ip_id in set(self.read_ip_intervals) | set(self.write_ip_intervals):
@@ -1692,9 +1694,9 @@ class BaseModel:
                         labels[i, j] = ""
 
             # 创建DataFrame
-            df = pd.DataFrame(data, index=[f"Row{rows-2-i}" for i in range(rows - 1)], columns=[f"Col{j}" for j in range(cols)])
-            nonzero_min = np.min(data[data > 0])
-            vmin = nonzero_min * 0.4  # 略小于最小非零值
+            df = pd.DataFrame(data, index=[f"Row{rows - 1 - i}" for i in range(rows)], columns=[f"Col{j}" for j in range(cols)])
+            vmin = np.min(data[data > 0], initial=0)
+            vmin = vmin * 0.4
 
             # 绘制热图
             sns.heatmap(df, annot=labels, fmt="", cmap="YlGnBu", linewidths=0.5, linecolor="gray", cbar=True, vmin=vmin, ax=ax, cbar_kws={"label": "Bandwidth (GB/s)"}, annot_kws={"size": 10})

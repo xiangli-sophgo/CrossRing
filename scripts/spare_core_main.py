@@ -18,7 +18,7 @@ def main():
     # file_name = r"demo_3x3.txt"
     # file_name = r"demo_459.txt"
 
-    traffic_file_path = r"../traffic/output-v8-32/2M/step5_data_merge/"
+    traffic_file_path = r"../traffic/output_v8_new/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_All_reduce/step5_data_merge/"
     # traffic_file_path = r"../traffic/output-v8-32/2M/step5_data_merge/"
     file_name = r"LLama2_Attention_FC_Trace.txt"
@@ -46,7 +46,9 @@ def main():
         topo_type = config.topo_type
     config.topo_type = topo_type
     results_file_name = "Spare_core_0403_to32"
-    result_root_save_path = f"../Result/CrossRing/SCM/{model_type}/{results_file_name}"
+    result_root_save_path = f"../Result/CrossRing/SCM/{model_type}/{results_file_name}/"
+    ip_BW_fig_save_path = f"../Result/Plt_IP_BW/SCM/{model_type}/{results_file_name}/"
+
     os.makedirs(result_root_save_path, exist_ok=True)  # 确保根目录存在
 
     output_csv = os.path.join(r"../Result/Params_csv/", f"{results_file_name}.csv")
@@ -57,9 +59,9 @@ def main():
     np.random.seed(407)
 
     for repeat_time in range(1):
-        for failed_core_num in range(1, 2):
+        for failed_core_num in range(2, 3):
             failed_core_poses = np.random.choice(list(i for i in range(16)), failed_core_num, replace=False)
-            for spare_core_row in range(2, 3, 2):
+            for spare_core_row in range(4, 5, 2):
                 result_part_save_path = f"_{failed_core_num}_{spare_core_row}_{repeat_time}/"
 
                 if model_type == "REQ_RSP":
@@ -70,6 +72,7 @@ def main():
                         traffic_file_path=traffic_file_path,
                         file_name=file_name,
                         result_save_path=result_root_save_path + result_part_save_path,
+                        ip_BW_fig_save_path=ip_BW_fig_save_path,
                     )
                 elif model_type == "Packet_Base":
                     sim = Packet_Base_model(
@@ -79,6 +82,7 @@ def main():
                         traffic_file_path=traffic_file_path,
                         file_name=file_name,
                         result_save_path=result_root_save_path + result_part_save_path,
+                        ip_BW_fig_save_path=ip_BW_fig_save_path,
                     )
 
                 # profiler = cProfile.Profile()

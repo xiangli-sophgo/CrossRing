@@ -1,5 +1,5 @@
 def generate_ip_positions(rows, cols, zero_rows=None, zero_cols=None):
-    # 创建一个矩阵，初始值为1
+    # 创建一个矩阵,初始值为1
     matrix = [[1 for _ in range(cols)] for _ in range(rows)]
 
     # 将指定的行设置为0
@@ -38,7 +38,7 @@ def distance(p1, p2):
 
 def assign_nearest_spare(failed_gdma, spare_cores):
     """
-    为损坏核心分配备用核心，优先级为：
+    为损坏核心分配备用核心,优先级为：
     1. 同列备用核心优先
     2. 同列中更靠近网络中心的优先
     3. 非同列时选择最靠近中心的备用核心

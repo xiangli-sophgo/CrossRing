@@ -7,7 +7,7 @@ class REQ_RSP_model(BaseModel):
         self.load_request_stream()
         flits, reqs, rsps = [], [], []
         self.cycle = 0
-        tail_time = 10
+        tail_time = 0
 
         while True:
             self.cycle += 1
@@ -15,7 +15,7 @@ class REQ_RSP_model(BaseModel):
             self.rn_type, self.sn_type = self.get_network_types()
 
             self.check_and_release_sn_tracker()
-            # self.flit_trace(501)
+            # self.flit_trace(2251)
 
             # Process requests
             self.process_requests()

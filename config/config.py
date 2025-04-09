@@ -153,7 +153,7 @@ class SimulationConfig:
             raise ValueError("Error topology type: ", topo_type)
 
     def generate_ip_positions(self, zero_rows=None, zero_cols=None):
-        # 创建一个矩阵，初始值为1
+        # 创建一个矩阵,初始值为1
         matrix = [[1 for _ in range(self.cols)] for _ in range(self.rows)]
 
         # 将指定的行设置为0
@@ -186,7 +186,7 @@ class SimulationConfig:
 
     def assign_nearest_spare(self, failed_gdma, spare_cores):
         """
-        为损坏核心分配备用核心，优先级为：
+        为损坏核心分配备用核心,优先级为：
         1. 同列备用核心优先
         2. 同列中更靠近网络中心的优先
         3. 非同列时选择最靠近中心的备用核心
@@ -251,7 +251,7 @@ class SimulationConfig:
         pos_mapping = dict(zip(self.fail_core_pos, self.spare_core_pos))
 
         # 执行批量替换
-        self.gdma_send_positions = [pos_mapping.get(pos, pos) for pos in self.gdma_send_positions]  # 如果在映射表中则替换，否则保持原位置
+        self.gdma_send_positions = [pos_mapping.get(pos, pos) for pos in self.gdma_send_positions]  # 如果在映射表中则替换,否则保持原位置
         print(f"spare core: row: {self.spare_core_row}, id: {self.spare_core}, fail core: {self.fail_core_pos}, used spare core: {self.spare_core_pos}")
 
     def finish_del(self):

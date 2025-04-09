@@ -17,14 +17,16 @@ def main():
     # file_name = r"demo_459.txt"
 
     # traffic_file_path = r"../../traffic/"
-    # traffic_file_path = r"../traffic/output_All_reduce/step5_data_merge/"
-    # traffic_file_path = r"../traffic/output_v8_new/step5_data_merge/"
+    # traffic_file_path = r"../traffic/output_DeepSeek/step5_data_merge/"
+    traffic_file_path = r"../traffic/output_v8_new/step5_data_merge/"
+    # traffic_file_path = r"../traffic/output_v8_All_reduce/step5_data_merge/"
+    # file_name = r"output_embedding_Trace.txt"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"output_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"LLama2_MLP_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
-    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
+    file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
 
     # model_type = "Feature"
     model_type = "REQ_RSP"
@@ -33,16 +35,16 @@ def main():
     p1 = 128
     p2 = 64
 
-    result_save_path = f"../Result/CrossRing/{model_type}/{p1}-{p2}/"
-    ip_BW_fig_save_path = f"../Result/CrossRing/{model_type}/{p1}-{p2}/"
+    result_save_path = f"../Result/CrossRing/{model_type}/"
+    ip_BW_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/"
 
     config_path = r"../config/config2.json"
     config = SimulationConfig(config_path)
     if not config.topo_type:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        topo_type = "5x4"
-        # topo_type = "4x5"
+        # topo_type = "5x4"
+        topo_type = "4x5"
         # topo_type = "6x5"
         # topo_type = "3x3"
     else:
@@ -80,8 +82,8 @@ def main():
 
     # sim.config.update_config()
     sim.initial()
-    sim.end_time = 3000
-    sim.print_interval = 5000
+    # sim.end_time = 3000
+    sim.print_interval = 20000
     sim.run()
     print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
     print(f"ro_tracker_ostd: {p1}: share_tracker_ostd: {p2}\n")

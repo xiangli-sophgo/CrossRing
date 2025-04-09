@@ -17,7 +17,7 @@ setup(
     ],
     python_requires=">=3.8",  # Python 版本要求
     install_requires=[
-        # 在这里列出你的依赖库，例如：
+        # 在这里列出你的依赖库,例如：
         "numpy",
     ],
 )

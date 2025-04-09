@@ -84,7 +84,7 @@ file_root = r"../../Result/Params_csv/"
 # data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
 # data_file_name = r"RB_IN_OUT_FIFO_459_0303_2_fixed_time_interval.csv"
 # data_file_name = r"ETag_EQ_0321.csv"
-data_file_name = r"Spare_core_0407_to32.csv"
+data_file_name = r"Spare_core_8_shared_96GB_409.csv"
 topologies = [
     # "4x9",
     # "9x4",
@@ -104,9 +104,9 @@ data = pd.read_csv(file_root + data_file_name)
 # 定义不同的拓扑
 # topo = topologies[0]
 
-# show_value = "read_BW"
+show_value = "read_BW"
 # show_value = "write_BW"
-show_value = "Total_BW"
+# show_value = "Total_BW"
 # show_value = "ITag_h_num"
 # show_value = "ITag_v_num"
 # show_value = "R_finish_time"
@@ -151,7 +151,7 @@ Both_side_ETag_upgrade = 1
 
 rate_plot = 0
 log_data = 0
-save_images = 1
+save_images = 0
 reverse_cmap = 0
 plot_type = 0
 
@@ -171,7 +171,7 @@ if save_images:
 for topo in topologies:
     # 筛选出当前拓扑的数据
     if "model_type" not in data.columns:
-        # 如果没有该列，可以选择跳过过滤或采取其他操作
+        # 如果没有该列,可以选择跳过过滤或采取其他操作
         # topo_data = data[(data["Topo"] == topo) & (data["rn_r_tracker_ostd"] > 16) & (data["rn_w_tracker_ostd"] > 16)]
         topo_data = data[(data["topo_type"] == topo) & (data["Both_side_ETag_upgrade"] == Both_side_ETag_upgrade)]
     else:
@@ -252,7 +252,7 @@ for topo in topologies:
             cmap=cmap,  # 配色方案
             # annot=True,  # 显示数值
             annot=np.vectorize(format_func)(pivot_table),  # 使用自定义格式化
-            fmt="",  # 使用科学计数法，保留一位小数
+            fmt="",  # 使用科学计数法,保留一位小数
             # cbar_kws={"label": show_value},  # 颜色条标签
             annot_kws={"size": 12},  # 数值字体大小
             center=pivot_table.mean().mean(),  # 将颜色映射中心值设为数据的平均值
