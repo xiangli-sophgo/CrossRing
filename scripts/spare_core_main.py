@@ -10,7 +10,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"demo45.txt"
+    file_name = r"demo_54_16core_128GB_32_shared.txt"
     # file_name = r"testcase-v1.1.1.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -18,10 +18,10 @@ def main():
     # file_name = r"demo_3x3.txt"
     # file_name = r"demo_459.txt"
 
-    traffic_file_path = r"../traffic/output_v8_new/step5_data_merge/"
+    # traffic_file_path = r"../traffic/output_v8_new/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_All_reduce/step5_data_merge/"
     # traffic_file_path = r"../traffic/output-v8-32/2M/step5_data_merge/"
-    file_name = r"LLama2_Attention_FC_Trace.txt"
+    # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"LLama2_MLP_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
@@ -45,7 +45,7 @@ def main():
     else:
         topo_type = config.topo_type
     config.topo_type = topo_type
-    results_file_name = "Spare_core_0403_to32"
+    results_file_name = "Spare_core_0410_test"
     result_root_save_path = f"../Result/CrossRing/SCM/{model_type}/{results_file_name}/"
     ip_BW_fig_save_path = f"../Result/Plt_IP_BW/SCM/{model_type}/{results_file_name}/"
 
@@ -56,12 +56,12 @@ def main():
 
     # result_save_path = None
     # config_path = r"config.json"
-    np.random.seed(407)
+    np.random.seed(410)
 
     for repeat_time in range(1):
-        for failed_core_num in range(2, 3):
+        for failed_core_num in range(4, 5):
             failed_core_poses = np.random.choice(list(i for i in range(16)), failed_core_num, replace=False)
-            for spare_core_row in range(4, 5, 2):
+            for spare_core_row in range(2, 3, 2):
                 result_part_save_path = f"_{failed_core_num}_{spare_core_row}_{repeat_time}/"
 
                 if model_type == "REQ_RSP":
@@ -92,6 +92,7 @@ def main():
 
                 # sim.end_time = 10000
                 sim.config.burst = 4
+                sim.config.num_ips = 16
                 sim.config.rn_read_tracker_ostd = 64
                 sim.config.rn_write_tracker_ostd = 64
                 sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst

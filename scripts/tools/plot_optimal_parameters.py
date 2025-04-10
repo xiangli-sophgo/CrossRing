@@ -84,7 +84,7 @@ file_root = r"../../Result/Params_csv/"
 # data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
 # data_file_name = r"RB_IN_OUT_FIFO_459_0303_2_fixed_time_interval.csv"
 # data_file_name = r"ETag_EQ_0321.csv"
-data_file_name = r"Spare_core_8_shared_96GB_409.csv"
+data_file_name = r"Spare_core_16_core_32_shared_128GB_410.csv"
 topologies = [
     # "4x9",
     # "9x4",
@@ -104,9 +104,9 @@ data = pd.read_csv(file_root + data_file_name)
 # 定义不同的拓扑
 # topo = topologies[0]
 
-show_value = "read_BW"
+# show_value = "read_BW"
 # show_value = "write_BW"
-# show_value = "Total_BW"
+show_value = "Total_BW"
 # show_value = "ITag_h_num"
 # show_value = "ITag_v_num"
 # show_value = "R_finish_time"

@@ -115,25 +115,26 @@ def main():
     # 示例参数配置
     np.random.seed(409)
     topo = "5x4"
-    end_time = 128
-    file_name = "../../test_data/demo_54_64_8_shared.txt"
+    end_time = 64
+    file_name = "../../test_data/demo_54_16core_128GB_32_shared.txt"
 
-    sdma_pos = range(32)
-    gdma_pos = range(32)
-    ddr_pos = range(32)
-    l2m_pos = range(32)
+    num_ip = 16
+    sdma_pos = range(num_ip)
+    gdma_pos = range(num_ip)
+    ddr_pos = range(num_ip)
+    l2m_pos = range(num_ip)
 
     # sdma_pos = [0, 2, 6, 8]
     # gdma_pos = [0, 2, 6, 8]
     # ddr_pos = [0, 2, 3, 3, 5, 5, 6, 8]
     # l2m_pos = [0, 0, 1, 1, 7, 7, 8, 8]
 
-    speed = {1: 128, 2: 68, 4: 64}
+    speed = {1: 128, 2: 68, 4: 128}
     burst = 4
 
     # 调用生成数据的函数
     custom_ratios = {0: 0.4, 1: 0.4, 2: 0.2}
-    generate_data(topo, end_time, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_pos, speed, burst, flow_type=1, mix_ratios=custom_ratios)
+    generate_data(topo, end_time, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_pos, speed, burst, flow_type=0, mix_ratios=custom_ratios)
 
 
 if __name__ == "__main__":
