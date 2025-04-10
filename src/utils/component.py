@@ -685,8 +685,8 @@ class Network:
                                 if flit.ETag_priority == "T2":
                                     flit.ETag_priority = "T1"
                                 elif flit.ETag_priority == "T1":
-                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
                                     flit.ETag_priority = "T0"
+                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
                                 if not flit_exist_left and not flit_exist_right:
                                     if len(self.station_reservations["right"][(new_current, new_next_node)]) < self.config.reservation_num:
                                         self.station_reservations["right"][(new_current, new_next_node)].append(flit)

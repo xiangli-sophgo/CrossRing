@@ -8,7 +8,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"demo45.txt"
+    file_name = r"Traffic_R_W_64GB.txt"
     # file_name = r"testcase-v1.1.1.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -18,7 +18,7 @@ def main():
 
     # traffic_file_path = r"../../traffic/"
     # traffic_file_path = r"../traffic/output_DeepSeek/step5_data_merge/"
-    traffic_file_path = r"../traffic/output_v8_new/step5_data_merge/"
+    # traffic_file_path = r"../traffic/output_v8_new/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_All_reduce/step5_data_merge/"
     # file_name = r"output_embedding_Trace.txt"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
@@ -26,7 +26,7 @@ def main():
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"LLama2_MLP_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
-    file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
+    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
 
     # model_type = "Feature"
     model_type = "REQ_RSP"
@@ -43,8 +43,8 @@ def main():
     if not config.topo_type:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        # topo_type = "5x4"
-        topo_type = "4x5"
+        topo_type = "5x4"
+        # topo_type = "4x5"
         # topo_type = "6x5"
         # topo_type = "3x3"
     else:

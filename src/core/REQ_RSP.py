@@ -15,7 +15,7 @@ class REQ_RSP_model(BaseModel):
             self.rn_type, self.sn_type = self.get_network_types()
 
             self.check_and_release_sn_tracker()
-            # self.flit_trace(2251)
+            # self.flit_trace(102)
 
             # Process requests
             self.process_requests()
@@ -60,7 +60,7 @@ class REQ_RSP_model(BaseModel):
 
             if (
                 self.req_count >= self.read_req + self.write_req
-                and self.send_flits_num == self.flit_network.recv_flits_num == self.read_flit + self.write_flit  # - 200
+                and self.send_flits_num == self.flit_network.recv_flits_num >= self.read_flit + self.write_flit  # - 200
                 and self.trans_flits_num == 0
                 and not self.new_write_req
                 or self.cycle > self.end_time * self.config.network_frequency
@@ -517,6 +517,8 @@ class REQ_RSP_model(BaseModel):
                 flit.arrival_network_cycle = self.cycle
                 network.eject_queues["ring_bridge"][flit.destination].append(flit)
                 flits.remove(flit)
+            else:
+                network.execute_moves(flit, self.cycle)
 
         return flits
 

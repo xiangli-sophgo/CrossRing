@@ -467,7 +467,7 @@ class BaseModel:
             )
 
     def flit_trace(self, packet_id):
-        if self.cycle % 1 == 0 and len(self.req_network.send_flits[packet_id]) > 0:
+        if self.cycle % 1 == 0 and self.flit_network.send_flits[packet_id] and self.flit_network.send_flits[packet_id][0].current_link is not None:
             # print(self.cycle, self.req_network.send_flits[packet_id], self.rsp_network.send_flits[packet_id], len(self.flit_network.arrive_flits[packet_id]))
             print(self.cycle, self.req_network.send_flits[packet_id], self.rsp_network.send_flits[packet_id], self.flit_network.send_flits[packet_id])
             time.sleep(0.3)
@@ -642,6 +642,8 @@ class BaseModel:
     def classify_flits(self, flits):
         ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits = [], [], [], [], []
         for flit in flits:
+            # if flit.packet_id == 102 and flit.flit_id_in_packet == 0:
+                # print(flit, "1")
             if flit.source - flit.destination == self.config.cols:
                 flit.is_new_on_network = False
                 flit.is_arrive = True

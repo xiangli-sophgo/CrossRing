@@ -10,7 +10,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"demo_54_16core_128GB_32_shared.txt"
+    file_name = r"Traffic_R_W_64GB.txt"
     # file_name = r"testcase-v1.1.1.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -45,7 +45,7 @@ def main():
     else:
         topo_type = config.topo_type
     config.topo_type = topo_type
-    results_file_name = "Spare_core_0410_test"
+    results_file_name = "Spare_core_0410_16_core_128GB_32_shared_test"
     result_root_save_path = f"../Result/CrossRing/SCM/{model_type}/{results_file_name}/"
     ip_BW_fig_save_path = f"../Result/Plt_IP_BW/SCM/{model_type}/{results_file_name}/"
 
@@ -56,12 +56,13 @@ def main():
 
     # result_save_path = None
     # config_path = r"config.json"
-    np.random.seed(410)
+    np.random.seed(45)
 
     for repeat_time in range(1):
-        for failed_core_num in range(4, 5):
-            failed_core_poses = np.random.choice(list(i for i in range(16)), failed_core_num, replace=False)
-            for spare_core_row in range(2, 3, 2):
+        for failed_core_num in range(2, 3):
+            # failed_core_poses = np.random.choice(list(i for i in range(16)), failed_core_num, replace=False)
+            failed_core_poses = [9, 7]
+            for spare_core_row in range(4, 5, 2):
                 result_part_save_path = f"_{failed_core_num}_{spare_core_row}_{repeat_time}/"
 
                 if model_type == "REQ_RSP":
