@@ -83,9 +83,10 @@ file_root = r"../../Result/Params_csv/"
 
 # data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
 # data_file_name = r"RB_IN_OUT_FIFO_459_0303_2_fixed_time_interval.csv"
-# data_file_name = r"ETag_EQ_0321.csv"
+# data_file_name = r"ITag_0411.csv"
+data_file_name = r"Spare_core_MLP_0411.csv"
 # data_file_name = r"Spare_core_0410_16_core_128GB_32_shared2.csv"
-data_file_name = r"0410.csv"
+# data_file_name = r"Spare_core_0410_Traffic_R_W_64GB_32_shared.csv"
 topologies = [
     # "4x9",
     # "9x4",
@@ -105,17 +106,16 @@ data = pd.read_csv(file_root + data_file_name)
 # 定义不同的拓扑
 # topo = topologies[0]
 
-# show_value = "read_BW"
+show_value = "read_BW"
 # show_value = "write_BW"
 # show_value = "Total_BW"
-show_value = "write_latency_max"
 # show_value = "ITag_h_num"
 # show_value = "ITag_v_num"
 # show_value = "R_finish_time"
 # show_value = "W_finish_time"
 # show_value = "R_tail_latency"
 # show_value = "W_tail_latency"
-# show_value = "EQ_ETag_T1_num"
+# show_value = "EQ_ETag_T0_num"
 # show_value = "gdma-R-L2M_thoughput"
 # show_value = "sdma-W-L2M_thoughput"
 # show_value = "sdma-R-DDR_thoughput"
@@ -123,6 +123,7 @@ show_value = "write_latency_max"
 # show_value = "data_cir_v_num"
 # show_value = "read_retry_num"
 # show_value = "write_retry_num"
+# show_value = "write_latency_max"
 # x_name = "ro_tracker_ostd"
 # y_name = "share_tracker_ostd"
 # x_name = "rn_r_tracker_ostd"
@@ -140,11 +141,11 @@ show_value = "write_latency_max"
 # x_name = "TU_Etag_T2_UE_MAX"
 # y_name = "TU_Etag_T1_UE_MAX"
 # z_name = "TD_Etag_T2_UE_MAX"
-x_name = "ITag_Trigger_Th_H"
-y_name = "ITag_Trigger_Th_V"
+# x_name = "ITag_Trigger_Th_H"
+# y_name = "ITag_Trigger_Th_V"
 # z_name = "ITag_Max_Num_H"
-# x_name = "fail_core_num"
-# y_name = "spare_core_row"
+x_name = "fail_core_num"
+y_name = "spare_core_row"
 model_type = "REQ_RSP"
 # model_type = "Packet_Base"
 # model_type = "Feature"
@@ -153,7 +154,7 @@ Both_side_ETag_upgrade = 1
 
 rate_plot = 0
 log_data = 0
-save_images = 0
+save_images = 1
 reverse_cmap = 0
 plot_type = 0
 
@@ -220,8 +221,8 @@ for topo in topologies:
             fmt="",  # 格式化
             center=change_rate.mean(),  # 将颜色映射中心值设为数据的平均值
             annot_kws={"size": 12},
-            vmax=change_rate.max() + 0.2,
-            vmin=change_rate.min() - 0.2,
+            vmax=change_rate.max() * 1.05,
+            vmin=change_rate.min() * 0.95,
             linewidths=0.5,  # 网格线宽度
             linecolor="white",  # 网格线颜色
         )
@@ -258,8 +259,8 @@ for topo in topologies:
             # cbar_kws={"label": show_value},  # 颜色条标签
             annot_kws={"size": 12},  # 数值字体大小
             center=pivot_table.mean().mean(),  # 将颜色映射中心值设为数据的平均值
-            vmax=pivot_table.max().max() + 1,
-            vmin=pivot_table.min().min() - 1,
+            vmax=pivot_table.max().max() * 1.005,
+            vmin=pivot_table.min().min() * 0.995,
             linewidths=0.5,  # 网格线宽度
             linecolor="white",  # 网格线颜色
         )

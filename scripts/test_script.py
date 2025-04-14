@@ -1,92 +1,87 @@
-def generate_ip_positions(rows, cols, zero_rows=None, zero_cols=None):
-    # 创建一个矩阵,初始值为1
-    matrix = [[1 for _ in range(cols)] for _ in range(rows)]
-
-    # 将指定的行设置为0
-    if zero_rows:
-        for row in zero_rows:
-            if 0 <= row < rows:
-                for col in range(cols):
-                    matrix[row][col] = 0
-
-    # 将指定的列设置为0
-    if zero_cols:
-        for col in zero_cols:
-            if 0 <= col < cols:
-                for row in range(rows):
-                    matrix[row][col] = 0
-
-    # 收集所有元素为1的编号
-    indices = []
-    for r in range(rows):
-        for c in range(cols):
-            if matrix[r][c] == 1:
-                index = r * cols + c
-                indices.append(index)
-    # assert len(indices) == self.num_ips, f"Expected {self.num_ips} indices, but got {len(indices)}."
-    return indices
-
-
-from scipy.optimize import linear_sum_assignment
+import networkx as nx
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle, FancyArrowPatch
 import numpy as np
 
 
-def distance(p1, p2):
-    # return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
-    return np.abs(p1[0] - p2[0]) + np.abs(p1[1] - p2[1])
-
-
-def assign_nearest_spare(failed_gdma, spare_cores):
+def draw_links_grid(links, rows=5, cols=4, node_size=800, selfloop_radius=0.2):
     """
-    为损坏核心分配备用核心,优先级为：
-    1. 同列备用核心优先
-    2. 同列中更靠近网络中心的优先
-    3. 非同列时选择最靠近中心的备用核心
+    绘制 links 字典的图，节点为方形，边从方形边缘出发。
+
+    参数:
+        links (dict): 键为 (i, j) 表示边，值为边的标签/权重。
+        rows (int): 网格行数（默认 5）。
+        cols (int): 网格列数（默认 4）。
+        node_size (int): 节点大小（默认 800）。
+        selfloop_radius (float): 自循环边的半径（默认 0.2）。
     """
-    num_failed = len(failed_gdma)
-    num_spare = len(spare_cores)
+    G = nx.DiGraph()
 
-    if num_spare < num_failed:
-        return []
+    # 添加边
+    for (i, j), value in links.items():
+        G.add_edge(i, j, label=value)
 
-    def decode(code):
-        row = code // 4 // 2
-        col = code % 4
-        return (col, 4 - row)
+    # 计算节点位置（按编号顺序排列）
+    pos = {}
+    for node in G.nodes():
+        x = node % cols
+        y = node // cols
+        pos[node] = (x, -y)
 
-    original_spare_cores = spare_cores.copy()
-    failed_gdma = [decode(code) for code in failed_gdma]
-    spare_cores = [decode(code) for code in spare_cores]
+    # 创建图形
+    fig, ax = plt.subplots()
+    ax.set_aspect("equal")  # 保持方形比例
 
-    # 计算每个备用核心的中心性分数（曼哈顿距离到中心点）
-    network_center = (1.5, 2)  # 5x4 Mesh的中心坐标近似
-    center_scores = {spare: abs(spare[0] - network_center[0]) + abs(spare[1] - network_center[1]) for spare in spare_cores}
+    # 方形节点参数
+    square_size = np.sqrt(node_size) / 100  # 方形边长（比例）
 
-    # 构造优先级矩阵
-    cost_matrix = np.zeros((num_failed, num_spare))
-    for i, gdma in enumerate(failed_gdma):
-        for j, spare in enumerate(spare_cores):
-            cost_matrix[i][j] = center_scores[spare] + distance(gdma, spare) * 1000
+    # 绘制方形节点
+    for node, (x, y) in pos.items():
+        rect = Rectangle((x - square_size / 2, y - square_size / 2), width=square_size, height=square_size, color="lightblue", ec="black", zorder=2)  # 确保节点在边的上层
+        ax.add_patch(rect)
+        ax.text(x, y, str(node), ha="center", va="center", fontsize=10)
 
-    # 匈牙利算法寻找最小总成本分配
-    row_ind, col_ind = linear_sum_assignment(cost_matrix)
-    return [original_spare_cores[j] for _, j in sorted(zip(row_ind, col_ind))]
+    # 自定义边的绘制（避开方形边缘）
+    for i, j, data in G.edges(data=True):
+        x1, y1 = pos[i]
+        x2, y2 = pos[j]
+
+        if i == j:  # 自循环边
+            nx.draw_networkx_edges(G, pos, edgelist=[(i, j)], connectionstyle=f"arc3,rad={selfloop_radius}", arrows=True, arrowstyle="-|>", ax=ax)
+        else:  # 普通边
+            # 计算边的起点和终点（方形边缘）
+            dx, dy = x2 - x1, y2 - y1
+            dist = np.hypot(dx, dy)
+            if dist > 0:
+                dx, dy = dx / dist, dy / dist  # 单位方向向量
+                start_x = x1 + dx * square_size / 2  # 从方形边缘出发
+                start_y = y1 + dy * square_size / 2
+                end_x = x2 - dx * square_size / 2  # 到目标方形边缘结束
+                end_y = y2 - dy * square_size / 2
+
+                # 绘制带箭头的边
+                arrow = FancyArrowPatch((start_x, start_y), (end_x, end_y), arrowstyle="-|>", mutation_scale=15, color="black", zorder=1)  # 边在节点下层
+                ax.add_patch(arrow)
+
+    # 绘制边标签
+    edge_labels = nx.get_edge_attributes(G, "label")
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, ax=ax)
+
+    plt.title("Links Graph (Square Nodes, Edge Avoidance)")
+    plt.axis("off")
+    plt.tight_layout()
+    plt.show()
 
 
-# spare_core_row = 2
-# if spare_core_row % 2 == 0:
-#     change_ddr_pos = 1
-# else:
-#     change_ddr_pos = 0
-# # if change_ddr_pos:
-# normal_core_row = [i for i in range(10) if i % 2 == 0]
-# core_poses = generate_ip_positions(10, 4, normal_core_row, [])
-# remove_core = [i for i in range(4 * (10 - 1 - spare_core_row), 4 * (10 - spare_core_row))]
-# print(core_poses, remove_core)
-# normal_core_row.append((9 - (spare_core_row + 1) // 2))
-# print(normal_core_row)
-# # print(generate_ip_positions(5, 4, normal_core_row, []))
-# print(generate_ip_positions(10, 4, normal_core_row, []))
-
-a = assign_nearest_spare([4, 6], [28, 29, 30, 31])
-print(a)
+# 示例用法
+if __name__ == "__main__":
+    links = {
+        (0, 1): "A",
+        (1, 2): "B",
+        (2, 3): "C",
+        (3, 3): "Self",
+        (4, 5): "D",
+        (5, 6): "E",
+        (6, 6): "Loop",
+    }
+    draw_links_grid(links, rows=2, cols=4, node_size=1000, selfloop_radius=0.3)

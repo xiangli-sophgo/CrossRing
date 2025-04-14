@@ -47,7 +47,7 @@ def main():
     config.topo_type = topo_type
     results_file_name = "Spare_core_0410_16_core_128GB_32_shared_test"
     result_root_save_path = f"../Result/CrossRing/SCM/{model_type}/{results_file_name}/"
-    ip_BW_fig_save_path = f"../Result/Plt_IP_BW/SCM/{model_type}/{results_file_name}/"
+    results_fig_save_path = f"../Result/Plt_IP_BW/SCM/{model_type}/{results_file_name}/"
 
     os.makedirs(result_root_save_path, exist_ok=True)  # 确保根目录存在
 
@@ -73,7 +73,7 @@ def main():
                         traffic_file_path=traffic_file_path,
                         file_name=file_name,
                         result_save_path=result_root_save_path + result_part_save_path,
-                        ip_BW_fig_save_path=ip_BW_fig_save_path,
+                        results_fig_save_path=results_fig_save_path,
                     )
                 elif model_type == "Packet_Base":
                     sim = Packet_Base_model(
@@ -83,7 +83,7 @@ def main():
                         traffic_file_path=traffic_file_path,
                         file_name=file_name,
                         result_save_path=result_root_save_path + result_part_save_path,
-                        ip_BW_fig_save_path=ip_BW_fig_save_path,
+                        results_fig_save_path=results_fig_save_path,
                     )
 
                 # profiler = cProfile.Profile()

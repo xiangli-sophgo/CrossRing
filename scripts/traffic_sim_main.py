@@ -35,7 +35,7 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name):
 
     # Setup result paths
     result_save_path = f"../Result/CrossRing/{model_type}/{traffic_path.split('/')[-4]}/"
-    ip_BW_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/{traffic_path.split('/')[-4]}/"
+    results_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/{traffic_path.split('/')[-4]}/"
     output_csv = os.path.join(r"../Result/Traffic_result_csv/", f"{results_file_name}.csv")
     os.makedirs(result_save_path, exist_ok=True)
 
@@ -67,7 +67,7 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name):
             traffic_file_path=traffic_path,
             file_name=file_name,
             result_save_path=result_save_path + file_name[:-4] + "/",
-            ip_BW_fig_save_path=ip_BW_fig_save_path,
+            results_fig_save_path=results_fig_save_path,
         )
 
         sim.initial()

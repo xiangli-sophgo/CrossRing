@@ -17,10 +17,14 @@ import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 import pandas as pd
+import networkx as nx
+from matplotlib.patches import Rectangle, FancyArrowPatch
+import matplotlib.colors as mcolors
+import matplotlib.cm as cm
 
 
 class BaseModel:
-    def __init__(self, model_type, config, topo_type, traffic_file_path, file_name, result_save_path=None, ip_BW_fig_save_path=None):
+    def __init__(self, model_type, config, topo_type, traffic_file_path, file_name, result_save_path=None, results_fig_save_path=None, plot_ip_BW_fig=False, plot_flow_fig=False):
         self.model_type_stat = model_type
         self.config = config
         self.topo_type_stat = topo_type
@@ -29,14 +33,17 @@ class BaseModel:
         print(f"\nModel Type: {model_type}, Topology: {self.topo_type_stat}, file_name: {self.file_name[:-4]}")
 
         self.result_save_path_original = result_save_path
+        self.plot_ip_BW_fig = plot_ip_BW_fig
+        self.plot_flow_fig = plot_flow_fig
+        self.results_fig_save_path = None
         if result_save_path:
             self.result_save_path = self.result_save_path_original + str(topo_type) + "/" + self.file_name[:-4] + "/"
             if not os.path.exists(self.result_save_path):
                 os.makedirs(self.result_save_path)
-        if ip_BW_fig_save_path:
-            self.ip_BW_fig_save_path = ip_BW_fig_save_path
-            if not os.path.exists(self.ip_BW_fig_save_path):
-                os.makedirs(self.ip_BW_fig_save_path)
+        if results_fig_save_path:
+            self.results_fig_save_path = results_fig_save_path
+            if not os.path.exists(self.results_fig_save_path):
+                os.makedirs(self.results_fig_save_path)
         self.config.topology_select(self.topo_type_stat)
         self.config.update_config()
         # self.initial()
@@ -44,9 +51,9 @@ class BaseModel:
     def initial(self):
         self.adjacency_matrix = create_adjacency_matrix("CrossRing", self.config.num_nodes, self.config.cols)
         # plot_adjacency_matrix(self.adjacency_matrix)
-        self.req_network = Network(self.config, self.adjacency_matrix)
-        self.rsp_network = Network(self.config, self.adjacency_matrix)
-        self.flit_network = Network(self.config, self.adjacency_matrix)
+        self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
+        self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
+        self.flit_network = Network(self.config, self.adjacency_matrix, name="Data Network")
         if self.config.Both_side_ETag_upgrade:
             self.req_network.Both_side_ETag_upgrade = self.rsp_network.Both_side_ETag_upgrade = self.flit_network.Both_side_ETag_upgrade = True
         self.routes = find_shortest_paths(self.adjacency_matrix)
@@ -643,7 +650,7 @@ class BaseModel:
         ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits = [], [], [], [], []
         for flit in flits:
             # if flit.packet_id == 102 and flit.flit_id_in_packet == 0:
-                # print(flit, "1")
+            # print(flit, "1")
             if flit.source - flit.destination == self.config.cols:
                 flit.is_new_on_network = False
                 flit.is_arrive = True
@@ -1460,8 +1467,13 @@ class BaseModel:
                 bw = self.calculate_ip_bandwidth(intervals)
                 print(f"{ip_id}: {bw:.1f} GB/s", file=f3)
 
-        self.plot_ip_bandwidth_heatmap(self.ip_BW_fig_save_path)
         # self.plot_ip_bandwidth_heatmap()
+        if self.plot_ip_BW_fig:
+            self.plot_ip_bandwidth_heatmap(self.results_fig_save_path, self.result_save_path)
+        if self.plot_flow_fig:
+            self.draw_links_flow_graph(self.req_network, save_path=self.results_fig_save_path)
+            self.draw_links_flow_graph(self.rsp_network, save_path=self.results_fig_save_path)
+            self.draw_links_flow_graph(self.flit_network, save_path=self.results_fig_save_path)
 
         self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
         print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")
@@ -1715,6 +1727,232 @@ class BaseModel:
         if save_path:
             plt.savefig(
                 os.path.join(save_path, f"{str(self.topo_type_stat)}_{self.file_name[:-4]}_ip_bandwidth_{self.config.spare_core_row}_{self.config.fail_core_pos}_{str(time.time_ns())[-3:]}.png"),
+                dpi=300,
+                bbox_inches="tight",
+            )
+            plt.close()
+        else:
+            plt.show()
+
+    def draw_links_flow_graph(self, network, node_size=2000, selfloop_radius=1, save_path=None):
+        G = nx.DiGraph()
+        links = network.links_flow_stat
+
+        link_values = []
+        # 添加边
+        for (i, j), value in links.items():
+            link_value = value * 128 / (self.cycle // self.config.network_frequency)
+            link_values.append(link_value)
+            formatted_label = f"{link_value:.1f}"
+            G.add_edge(i, j, label=formatted_label)
+
+        # 计算节点位置（按编号顺序排列）
+        pos = {}
+        for node in G.nodes():
+            x = node % self.config.cols
+            y = node // self.config.cols
+            if y % 2 == 1:  # 奇数行左移
+                x -= 0.25
+                y -= 0.6
+            # 显著增加节点间距（x和y方向都乘以3.5）
+            pos[node] = (x * 3, -y * 1.5)
+
+        # 创建更大的图形
+        fig, ax = plt.subplots(figsize=(12, 10))  # 进一步增大图形尺寸
+        ax.set_aspect("equal")  # 保持方形比例
+
+        # 调整方形节点大小（相对更小）
+        square_size = np.sqrt(node_size) / 100  # 减小节点大小
+
+        sorted_edges = sorted(link_values)
+        edge_value_threshold = sorted_edges[-9]
+
+        nx.draw_networkx_nodes(G, pos, node_size=square_size, node_shape="s", ax=ax)
+
+        # 绘制方形节点
+        for node, (x, y) in pos.items():
+            rect = Rectangle((x - square_size / 2, y - square_size / 2), width=square_size, height=square_size, color="lightblue", ec="black", zorder=2)
+            ax.add_patch(rect)
+            ax.text(x, y, str(node), ha="center", va="center", fontsize=10)
+
+        # 自定义边的绘制（避开方形边缘）
+        for i, j, data in G.edges(data=True):
+            x1, y1 = pos[i]
+            x2, y2 = pos[j]
+            if float(data["label"]) > edge_value_threshold:
+                color = "red"
+            else:
+                color = "black"
+
+            if i == j:  # 自循环边
+                continue
+                # 计算原始行列号
+                original_row = i // self.config.cols
+                original_col = i % self.config.cols
+
+                # 确定边缘位置
+                edge_position = []
+                if original_row == 0:
+                    edge_position.append("top")
+                if original_row == self.config.rows - 1:
+                    edge_position.append("bottom")
+                if original_col == 0:
+                    edge_position.append("left")
+                if original_col == self.config.cols - 1:
+                    edge_position.append("right")
+
+                # 优先处理四角的情况
+                if not edge_position:
+                    edge_position = ["top"]  # 默认处理
+                else:
+                    edge_position = edge_position[:1]  # 取第一个边缘
+
+                # 根据边缘位置设置连接点
+                if "top" in edge_position:
+                    start = (x1, y1 + square_size / 2)
+                    end = (x1, y1 + square_size / 2)
+                    connection_style = f"arc3,rad={abs(selfloop_radius)}"
+                elif "bottom" in edge_position:
+                    start = (x1, y1 - square_size / 2)
+                    end = (x1, y1 - square_size / 2)
+                    connection_style = f"arc3,rad={-abs(selfloop_radius)}"
+                elif "left" in edge_position:
+                    start = (x1 - square_size / 2, y1)
+                    end = (x1 - square_size / 2, y1)
+                    connection_style = f"arc3,rad={abs(selfloop_radius)}"
+                elif "right" in edge_position:
+                    start = (x1 + square_size / 2, y1)
+                    end = (x1 + square_size / 2, y1)
+                    connection_style = f"arc3,rad={-abs(selfloop_radius)}"
+
+                # 绘制自循环边
+                arrow = FancyArrowPatch(start, end, arrowstyle="-|>", mutation_scale=15, color="black", connectionstyle=connection_style, shrinkA=0, shrinkB=0, linewidth=1, zorder=1)
+                ax.add_patch(arrow)
+            else:  # 普通边
+                # 计算边的起点和终点（方形边缘）
+                dx, dy = x2 - x1, y2 - y1
+                dist = np.hypot(dx, dy)
+                if dist > 0:
+                    dx, dy = dx / dist, dy / dist  # 单位方向向量
+
+                    # 计算垂直向量用于边偏移（增加偏移量）
+                    perp_dx, perp_dy = -dy * 0.1, dx * 0.1  # 更大的偏移量
+
+                    # 检查是否有反向边
+                    has_reverse = G.has_edge(j, i)
+
+                    # 为双向边调整偏移
+                    if has_reverse:
+                        # 第一条边偏移到一侧
+                        start_x = x1 + dx * square_size / 2 + perp_dx
+                        start_y = y1 + dy * square_size / 2 + perp_dy
+                        end_x = x2 - dx * square_size / 2 + perp_dx
+                        end_y = y2 - dy * square_size / 2 + perp_dy
+                    else:
+                        # 单向边不偏移
+                        start_x = x1 + dx * square_size / 2
+                        start_y = y1 + dy * square_size / 2
+                        end_x = x2 - dx * square_size / 2
+                        end_y = y2 - dy * square_size / 2
+
+                    # 绘制带箭头的边（增加箭头大小）
+                    arrow = FancyArrowPatch((start_x, start_y), (end_x, end_y), arrowstyle="-|>", mutation_scale=12, color=color, zorder=1, linewidth=1)
+                    ax.add_patch(arrow)
+
+        # 改进的边标签绘制（更大的字体和更明显的背景）
+        edge_labels = nx.get_edge_attributes(G, "label")
+        for edge, label in edge_labels.items():
+            i, j = edge
+            if float(label) == 0.0:
+                continue
+            if float(label) > edge_value_threshold:
+                color = "red"
+            else:
+                color = "black"
+            if i == j:
+                # 计算标签位置
+                original_row = i // self.config.cols
+                original_col = i % self.config.cols
+                x, y = pos[i]
+
+                offset = 0.17  # 标签偏移量
+                if original_row == 0:
+                    label_pos = (x, y + square_size / 2 + offset)
+                    angle = 0
+                elif original_row == self.config.rows - 2:
+                    label_pos = (x, y - square_size / 2 - offset)
+                    angle = 0
+                elif original_col == 0:
+                    label_pos = (x - square_size / 2 - offset, y)
+                    angle = -90
+                elif original_col == self.config.cols - 1:
+                    label_pos = (x + square_size / 2 + offset, y)
+                    angle = 90
+                else:
+                    label_pos = (x, y + square_size / 2 + offset)
+                    angle = 0
+
+                ax.text(*label_pos, str(label), ha="center", va="center", color=color, fontweight="bold", fontsize=11, rotation=angle)
+            else:
+                x1, y1 = pos[i]
+                x2, y2 = pos[j]
+
+                # 计算边的中点
+                mid_x = (x1 + x2) / 2
+                mid_y = (y1 + y2) / 2
+
+                # 计算边的方向向量
+                dx, dy = x2 - x1, y2 - y1
+                angle = np.degrees(np.arctan2(dy, dx))
+
+                # 检查是否有反向边
+                has_reverse = G.has_edge(j, i)
+
+                # 计算边的长度
+                edge_length = np.sqrt(dx**2 + dy**2)
+
+                # 判断边的方向类型 (主要考虑水平和垂直方向)
+                is_horizontal = abs(dx) > abs(dy)  # 更接近水平方向
+                is_vertical = abs(dy) > abs(dx)  # 更接近垂直方向
+
+                if has_reverse:
+                    # 双向边的标签偏移
+                    if is_horizontal:
+                        # 水平双向边：垂直偏移0.05
+                        perp_dx, perp_dy = -dy * 0.1 + 0.2, dx * 0.1
+                    else:
+                        # 垂直双向边：垂直偏移且向下偏
+                        perp_dx, perp_dy = -dy * 0.18, dx * 0.18 - 0.3
+
+                    label_x = mid_x + perp_dx
+                    label_y = mid_y + perp_dy
+                else:
+                    # 单向边的标签偏移
+                    if is_horizontal:
+                        # 水平单向边：沿边方向偏移5%长度
+                        label_x = mid_x + dx * 0.1
+                        label_y = mid_y + dy * 0.1
+                    else:
+                        # 垂直单向边：横向偏移10%长度且向下偏
+                        label_x = mid_x + (-dy * 0.1 if dx > 0 else dy * 0.1)
+                        label_y = mid_y - 0.1  # 固定向下偏移
+
+                # 绘制标签
+                ax.text(
+                    label_x,
+                    label_y,
+                    str(label),
+                    ha="center",
+                    va="center",
+                    fontsize=11,
+                    fontweight="bold",
+                    color=color,
+                )
+        plt.axis("off")
+        plt.title(network.name)
+        if save_path:
+            plt.savefig(
+                os.path.join(save_path, f"{str(self.topo_type_stat)}_{self.file_name[:-4]}_{network.name}_flow_{self.config.spare_core_row}_{self.config.fail_core_pos}_{str(time.time_ns())[-3:]}.png"),
                 dpi=300,
                 bbox_inches="tight",
             )

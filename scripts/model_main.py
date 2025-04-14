@@ -8,7 +8,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"Traffic_R_W_64GB.txt"
+    file_name = r"traffic_data_0411.txt"
     # file_name = r"testcase-v1.1.1.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -35,8 +35,10 @@ def main():
     p1 = 128
     p2 = 64
 
+    results_fig_save_path = None
+
     result_save_path = f"../Result/CrossRing/{model_type}/"
-    ip_BW_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/"
+    results_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/"
 
     config_path = r"../config/config2.json"
     config = SimulationConfig(config_path)
@@ -61,7 +63,8 @@ def main():
         traffic_file_path=traffic_file_path,
         file_name=file_name,
         result_save_path=result_save_path,
-        ip_BW_fig_save_path=ip_BW_fig_save_path,
+        results_fig_save_path=results_fig_save_path,
+        plot_flow_fig=1,
     )
 
     # profiler = cProfile.Profile()
@@ -82,11 +85,11 @@ def main():
 
     # sim.config.update_config()
     sim.initial()
-    # sim.end_time = 3000
-    sim.print_interval = 20000
+    # sim.end_time = 500
+    sim.print_interval = 2000
     sim.run()
-    print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
-    print(f"ro_tracker_ostd: {p1}: share_tracker_ostd: {p2}\n")
+    # print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
+    # print(f"ro_tracker_ostd: {p1}: share_tracker_ostd: {p2}\n")
 
     # # 获取当前的内存快照
     # snapshot = tracemalloc.take_snapshot()

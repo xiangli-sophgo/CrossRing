@@ -1,141 +1,159 @@
-import numpy as np
 import random
+from math import gcd
+from collections import defaultdict
 
 
-def generate_data(topo, end_time, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_pos, speed, burst, flow_type=0, mix_ratios=None):
+class TrafficGenerator:
+    def __init__(self, read_duration=64, write_duration=64, total_bandwidth=128):
+        """
+        :param read_duration: 读操作时间窗口长度(ns)
+        :param write_duration: 写操作时间窗口长度(ns)
+        :param total_bandwidth: 总带宽单位(GB/s)
+        """
+        self.read_duration = read_duration
+        self.write_duration = write_duration
+        self.cycle_duration = read_duration + write_duration
+        self.total_bandwidth = total_bandwidth
+
+    def calculate_time_points(self, speed, burst, is_read=True):
+        """计算读/写时间点序列"""
+        window_duration = self.read_duration if is_read else self.write_duration
+        total_transfers = speed * window_duration // (self.total_bandwidth * burst)
+
+        if total_transfers == 0:
+            return []
+
+        # 计算均匀分布的时间间隔(保持整数)
+        base_interval = window_duration // total_transfers
+        remainder = window_duration % total_transfers
+        intervals = [base_interval + (1 if i < remainder else 0) for i in range(total_transfers)]
+
+        # 生成时间点序列
+        time_points = []
+        current_time = 0
+        for interval in intervals:
+            time_points.append(current_time)
+            current_time += interval
+
+        return time_points
+
+
+def generate_data(topo, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_pos, speed, burst, flow_type=0, mix_ratios=None):
     """
-    flow_type:
-        0: 32-shared (默认)
-        1: 8-shared 分组
-        2: private (自己发给自己)
-        3: 混合模式 (需要指定mix_ratios)
-    mix_ratios: 当flow_type=3时使用，格式为 {0: ratio1, 1: ratio2, 2: ratio3}
+    :param interval_count: 读写周期数量(每个周期=read_duration+write_duration)
     """
-    f = open(file_name, "w", encoding="utf-8")
+    # 初始化流量生成器(默认读128ns+写128ns)
+    generator = TrafficGenerator(read_duration=128, write_duration=128)
     data_all = []
 
-    def generate_entries(src_pos, src_type, dest_type, dest_pos, operation, burst, flow_type):
-        time = [128 // (speed[burst] // burst) * i for i in range(speed[burst] // burst)]
+    def generate_entries(src_pos, src_type, dest_type, dest_pos, operation, burst, flow_type, speed, interval_count):
+        """生成指定模式的流量条目"""
+        is_read = operation == "R"
+        time_pattern = generator.calculate_time_points(speed, burst, is_read)
+        dest_len = len(dest_pos)
+        entries = []
 
-        if flow_type == 1:  # 8-shared分组模式
-            for group_start in range(0, len(src_pos), 8):
-                group_end = min(group_start + 8, len(src_pos))
-                current_src_pos = src_pos[group_start:group_end]
-                current_dest_pos = dest_pos[group_start:group_end]
+        for cycle in range(interval_count):
+            base_time = cycle * generator.cycle_duration
+            # 读操作需要加上0，写操作需要加上read_duration
+            time_offset = 0 if is_read else generator.read_duration
 
-                for src in current_src_pos:
-                    rand_index = []
-                    for i in range(end_time):
-                        for j in time:
-                            if not rand_index:
-                                rand_index = random.sample(range(len(current_dest_pos)), len(current_dest_pos))
-                            index = rand_index.pop()
-                            data_all.append(f"{128 * i + j},{src},{src_type},{current_dest_pos[index]},{dest_type},{operation},{burst}\n")
+            if flow_type == 1:  # 8-shared分组
+                for src in src_pos:
+                    group = src // 8
+                    group_dests = dest_pos[group * 8 : (group + 1) * 8]
+                    for t in time_pattern:
+                        dest = random.choice(group_dests)
+                        entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
-        elif flow_type == 2:  # private模式 (自己发给自己)
-            for src in src_pos:
-                for i in range(end_time):
-                    for j in time:
-                        # 找到对应的dest位置 (src可能不在dest_pos中)
-                        dest = src if src in dest_pos else dest_pos[src % len(dest_pos)]
-                        data_all.append(f"{128 * i + j},{src},{src_type},{dest},{dest_type},{operation},{burst}\n")
+            elif flow_type == 2:  # private模式
+                for src in src_pos:
+                    dest = src if src in dest_pos else dest_pos[src % dest_len]
+                    for t in time_pattern:
+                        entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
-        else:  # 原始32-shared模式
-            for src in src_pos:
-                rand_index = []
-                for i in range(end_time):
-                    for j in time:
-                        if not rand_index:
-                            rand_index = random.sample(range(len(dest_pos)), len(dest_pos))
-                        index = rand_index.pop()
-                        data_all.append(f"{128 * i + j},{src},{src_type},{dest_pos[index]},{dest_type},{operation},{burst}\n")
+            else:  # 32-shared模式
+                for src in src_pos:
+                    for t in time_pattern:
+                        dest = random.choice(dest_pos)
+                        entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
+
+        return entries
 
     def generate_mixed_entries(src_pos, src_type, dest_type, dest_pos, operation, burst, ratios):
-        """混合模式生成函数"""
-        time = [128 // (speed[burst] // burst) * i for i in range(speed[burst] // burst)]
-        total_entries = len(src_pos) * end_time * len(time)
+        """混合模式生成（保持原有逻辑，但区分读写时间）"""
+        is_read = operation == "R"
+        total_speed = speed[burst]
+        mode_speeds = {k: int(total_speed * v) for k, v in ratios.items()}
+        dest_len = len(dest_pos)
+        entries = []
 
-        # 计算每种模式需要的条目数
-        counts = {k: int(total_entries * v) for k, v in ratios.items()}
-        remaining = total_entries - sum(counts.values())
-        counts[max(ratios, key=ratios.get)] += remaining  # 将剩余条目分配给比例最大的模式
+        for cycle in range(interval_count):
+            base_time = cycle * generator.cycle_duration
+            time_offset = 0 if is_read else generator.read_duration
 
-        # 为每个src分配模式
-        mode_assignments = []
-        for mode, count in counts.items():
-            mode_assignments.extend([mode] * count)
-        random.shuffle(mode_assignments)
+            for mode, mode_speed in mode_speeds.items():
+                if mode_speed <= 0:
+                    continue
 
-        # 按分配的模式生成数据
-        for src in src_pos:
-            mode_iter = iter(mode_assignments)
-            for i in range(end_time):
-                for j in time:
-                    mode = next(mode_iter)
-                    if mode == 0:  # 32-shared
-                        dest = random.choice(dest_pos)
-                    elif mode == 1:  # 8-shared
-                        group = src // 8
-                        group_start = group * 8
-                        group_end = min(group_start + 8, len(dest_pos))
-                        dest = random.choice(dest_pos[group_start:group_end])
-                    else:  # private
-                        dest = src if src in dest_pos else dest_pos[src % len(dest_pos)]
+                time_pattern = generator.calculate_time_points(mode_speed, burst, is_read)
 
-                    data_all.append(f"{128 * i + j},{src},{src_type},{dest},{dest_type},{operation},{burst}\n")
+                for src in src_pos:
+                    for t in time_pattern:
+                        if mode == 0:  # 32-shared
+                            dest = random.choice(dest_pos)
+                        elif mode == 1:  # 8-shared
+                            group = src // 8
+                            group_dests = dest_pos[group * 8 : (group + 1) * 8]
+                            dest = random.choice(group_dests)
+                        else:  # private
+                            dest = src if src in dest_pos else dest_pos[src % dest_len]
 
+                        entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
+
+        return entries
+
+    # 生成数据逻辑
     if topo in ["4x9", "9x4", "4x5", "5x4"]:
-        if flow_type == 3:  # 混合模式
-            if not mix_ratios:
-                mix_ratios = {0: 0.4, 1: 0.4, 2: 0.2}  # 默认比例
-            generate_mixed_entries(sdma_pos, "gdma", "ddr", ddr_pos, "R", burst, mix_ratios)
-            generate_mixed_entries(sdma_pos, "gdma", "ddr", l2m_pos, "W", burst, mix_ratios)
+        if flow_type == 3:
+            mix_ratios = mix_ratios or {0: 0.4, 1: 0.4, 2: 0.2}
+            data_all.extend(generate_mixed_entries(sdma_pos, "gdma", "ddr", ddr_pos, "R", burst, mix_ratios))
+            data_all.extend(generate_mixed_entries(sdma_pos, "gdma", "ddr", l2m_pos, "W", burst, mix_ratios))
         else:
-            generate_entries(sdma_pos, "gdma", "ddr", ddr_pos, "R", burst, flow_type)
-            generate_entries(sdma_pos, "gdma", "ddr", l2m_pos, "W", burst, flow_type)
+            data_all.extend(generate_entries(gdma_pos, "gdma", "ddr", ddr_pos, "R", burst, flow_type, speed[burst], interval_count))
+            data_all.extend(generate_entries(gdma_pos, "gdma", "ddr", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
 
     elif topo == "3x3":
-        if flow_type == 3:  # 混合模式
-            if not mix_ratios:
-                mix_ratios = {0: 0.4, 1: 0.4, 2: 0.2}  # 默认比例
-            generate_mixed_entries(sdma_pos, "sdma", "ddr", ddr_pos, "R", burst, mix_ratios)
-            generate_mixed_entries(sdma_pos, "sdma", "l2m", l2m_pos, "W", burst, mix_ratios)
-            generate_mixed_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, mix_ratios)
+        if flow_type == 3:
+            mix_ratios = mix_ratios or {0: 0.4, 1: 0.4, 2: 0.2}
+            data_all.extend(generate_mixed_entries(sdma_pos, "sdma", "ddr", ddr_pos, "R", burst, mix_ratios))
+            data_all.extend(generate_mixed_entries(sdma_pos, "sdma", "l2m", l2m_pos, "W", burst, mix_ratios))
+            data_all.extend(generate_mixed_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, mix_ratios))
         else:
-            generate_entries(sdma_pos, "sdma", "ddr", ddr_pos, "R", burst, flow_type)
-            generate_entries(sdma_pos, "sdma", "l2m", l2m_pos, "W", burst, flow_type)
-            generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, flow_type)
+            data_all.extend(generate_entries(sdma_pos, "sdma", "ddr", ddr_pos, "R", burst, flow_type, speed[burst], interval_count))
+            data_all.extend(generate_entries(sdma_pos, "sdma", "l2m", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
+            data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, flow_type, speed[burst], interval_count))
 
-    sorted_data = sorted(data_all, key=lambda x: int(x.strip().split(",")[0]))
-    f.writelines(sorted_data)
-    f.close()
+    # 排序并写入文件
+    with open(file_name, "w") as f:
+        f.writelines(sorted(data_all, key=lambda x: int(x.split(",")[0])))
 
 
-def main():
-    # 示例参数配置
-    np.random.seed(409)
+# 示例使用
+if __name__ == "__main__":
+    # 参数配置
     topo = "5x4"
-    end_time = 64
-    file_name = "../../test_data/demo_54_16core_128GB_32_shared.txt"
+    interval_count = 32
+    file_name = "../../test_data/traffic_single_dma_0414.txt"
 
-    num_ip = 16
+    num_ip = 32
     sdma_pos = range(num_ip)
-    gdma_pos = range(num_ip)
-    ddr_pos = range(num_ip)
-    l2m_pos = range(num_ip)
+    gdma_pos = range(1)
+    ddr_pos = range(13, 14)
+    l2m_pos = range(13, 14)
 
-    # sdma_pos = [0, 2, 6, 8]
-    # gdma_pos = [0, 2, 6, 8]
-    # ddr_pos = [0, 2, 3, 3, 5, 5, 6, 8]
-    # l2m_pos = [0, 0, 1, 1, 7, 7, 8, 8]
-
-    speed = {1: 128, 2: 68, 4: 128}
+    speed = {1: 128, 2: 68, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 4
 
-    # 调用生成数据的函数
-    custom_ratios = {0: 0.4, 1: 0.4, 2: 0.2}
-    generate_data(topo, end_time, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_pos, speed, burst, flow_type=0, mix_ratios=custom_ratios)
-
-
-if __name__ == "__main__":
-    main()
+    # 生成数据(使用混合模式)
+    generate_data(topo, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_pos, speed, burst, flow_type=0)
