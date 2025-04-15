@@ -8,7 +8,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_data_0411.txt"
+    file_name = r"Traffic_R_W_64GB.txt"
     # file_name = r"testcase-v1.1.1.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -38,7 +38,7 @@ def main():
     results_fig_save_path = None
 
     result_save_path = f"../Result/CrossRing/{model_type}/"
-    results_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/"
+    # results_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/"
 
     config_path = r"../config/config2.json"
     config = SimulationConfig(config_path)
@@ -74,6 +74,7 @@ def main():
 
     # sim.end_time = 10000
     sim.config.burst = 4
+    sim.config.num_ips = 4
     sim.config.rn_read_tracker_ostd = 128
     sim.config.rn_write_tracker_ostd = 64
     sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
@@ -81,12 +82,16 @@ def main():
     sim.config.ro_tracker_ostd = 128
     sim.config.share_tracker_ostd = 64
     sim.config.sn_wdb_size = sim.config.share_tracker_ostd * sim.config.burst
+    sim.config.ITag_Trigger_Th_H = 16
+    sim.config.ITag_Trigger_Th_V = 16
+    sim.config.ITag_Max_Num_H = sim.config.ITag_Max_Num_V = 3
     sim.config.seats_per_link = 7
+    sim.config.Both_side_ETag_upgrade = 1
 
     # sim.config.update_config()
     sim.initial()
     # sim.end_time = 500
-    sim.print_interval = 2000
+    sim.print_interval = 20000
     sim.run()
     # print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
     # print(f"ro_tracker_ostd: {p1}: share_tracker_ostd: {p2}\n")

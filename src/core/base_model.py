@@ -24,7 +24,7 @@ import matplotlib.cm as cm
 
 
 class BaseModel:
-    def __init__(self, model_type, config, topo_type, traffic_file_path, file_name, result_save_path=None, results_fig_save_path=None, plot_ip_BW_fig=False, plot_flow_fig=False):
+    def __init__(self, model_type, config, topo_type, traffic_file_path, file_name, result_save_path=None, results_fig_save_path=None, plot_flow_fig=False):
         self.model_type_stat = model_type
         self.config = config
         self.topo_type_stat = topo_type
@@ -33,7 +33,6 @@ class BaseModel:
         print(f"\nModel Type: {model_type}, Topology: {self.topo_type_stat}, file_name: {self.file_name[:-4]}")
 
         self.result_save_path_original = result_save_path
-        self.plot_ip_BW_fig = plot_ip_BW_fig
         self.plot_flow_fig = plot_flow_fig
         self.results_fig_save_path = None
         if result_save_path:
@@ -1468,12 +1467,8 @@ class BaseModel:
                 print(f"{ip_id}: {bw:.1f} GB/s", file=f3)
 
         # self.plot_ip_bandwidth_heatmap()
-        if self.plot_ip_BW_fig:
-            self.plot_ip_bandwidth_heatmap(self.results_fig_save_path, self.result_save_path)
         if self.plot_flow_fig:
-            self.draw_links_flow_graph(self.req_network, save_path=self.results_fig_save_path)
-            self.draw_links_flow_graph(self.rsp_network, save_path=self.results_fig_save_path)
-            self.draw_links_flow_graph(self.flit_network, save_path=self.results_fig_save_path)
+            self.draw_flow_graph(self.flit_network, save_path=self.results_fig_save_path)
 
         self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
         print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")
@@ -1511,32 +1506,47 @@ class BaseModel:
 
         # 根据请求类型更新对应的IP区间
         if req_type == "R":
-            ip_id = f"{str(flit.destination_type)}_{str(flit.destination + self.config.cols)}"
-            ip_intervals = self.read_ip_intervals[ip_id]
+            dma_id = f"{str(flit.destination_type)}_{str(flit.destination + self.config.cols)}"
+            ddr_id = f"{str(flit.source_type)}_{str(flit.source)}"
+            dma_intervals = self.read_ip_intervals[dma_id]
+            ddr_intervals = self.read_ip_intervals[ddr_id]
         elif req_type == "W":
-            ip_id = f"{str(flit.source_type)}_{str(flit.source)}"
-            ip_intervals = self.write_ip_intervals[ip_id]
+            dma_id = f"{str(flit.source_type)}_{str(flit.source)}"
+            ddr_id = f"{str(flit.destination_type)}_{str(flit.destination+ self.config.cols)}"
+            dma_intervals = self.write_ip_intervals[dma_id]
+            ddr_intervals = self.write_ip_intervals[ddr_id]
 
         # 合并区间逻辑（与全局merged_intervals相同）
         current_start = flit.req_departure_cycle // self.config.network_frequency
         current_end = flit.arrival_cycle // self.config.network_frequency
         current_count = flit.burst_length
 
-        if not ip_intervals:
-            ip_intervals.append((current_start, current_end, current_count))
+        if not dma_intervals:
+            dma_intervals.append((current_start, current_end, current_count))
         else:
-            last_start, last_end, last_count = ip_intervals[-1]
+            last_start, last_end, last_count = dma_intervals[-1]
             if current_start <= last_end:
                 merged = (last_start, max(last_end, current_end), last_count + current_count)
-                ip_intervals[-1] = merged
+                dma_intervals[-1] = merged
             else:
-                ip_intervals.append((current_start, current_end, current_count))
+                dma_intervals.append((current_start, current_end, current_count))
+        if not ddr_intervals:
+            ddr_intervals.append((current_start, current_end, current_count))
+        else:
+            last_start, last_end, last_count = ddr_intervals[-1]
+            if current_start <= last_end:
+                merged = (last_start, max(last_end, current_end), last_count + current_count)
+                ddr_intervals[-1] = merged
+            else:
+                ddr_intervals.append((current_start, current_end, current_count))
 
         # 更新字典
         if req_type == "R":
-            self.read_ip_intervals[ip_id] = ip_intervals
+            self.read_ip_intervals[dma_id] = dma_intervals
+            self.read_ip_intervals[ddr_id] = ddr_intervals
         elif req_type == "W":
-            self.write_ip_intervals[ip_id] = ip_intervals
+            self.write_ip_intervals[dma_id] = dma_intervals
+            self.write_ip_intervals[ddr_id] = ddr_intervals
 
         if flit.req_departure_cycle // self.config.network_frequency <= last_end:
             merged_intervals[-1] = (
@@ -1637,116 +1647,78 @@ class BaseModel:
         # return weighted_sum / total_count if total_count > 0 else 0.0
         return total_count * 128 / finish_time if finish_time > 0 else 0.0
 
-    def plot_ip_bandwidth_heatmap(self, save_path=None):
-        """
-        绘制读、写和总带宽的三个热图(SDMA在上,GDMA在下)
-        :param save_path: 图片保存路径,如果为None则显示而不保存
-        """
-        # 获取配置
+    def calculate_ip_bandwidth_data(self):
         rows = self.config.rows
         cols = self.config.cols
-
-        # 创建三个矩阵分别存储读、写和总带宽
         if self.topo_type_stat != "4x5":
             rows -= 1
-        read_data = np.zeros((rows, cols))
-        write_data = np.zeros((rows, cols))
-        total_data = np.zeros((rows, cols))
 
-        # 填充矩阵数据
+        # 初始化数据结构
+        self.ip_bandwidth_data = {
+            "read": {"sdma": np.zeros((rows, cols)), "gdma": np.zeros((rows, cols)), "ddr": np.zeros((rows, cols)), "l2m": np.zeros((rows, cols))},
+            "write": {"sdma": np.zeros((rows, cols)), "gdma": np.zeros((rows, cols)), "ddr": np.zeros((rows, cols)), "l2m": np.zeros((rows, cols))},
+            "total": {"sdma": np.zeros((rows, cols)), "gdma": np.zeros((rows, cols)), "ddr": np.zeros((rows, cols)), "l2m": np.zeros((rows, cols))},
+        }
+
+        # 填充数据
         for ip_id in set(self.read_ip_intervals) | set(self.write_ip_intervals):
-            # 解析IP信息
             source_type, source = ip_id.split("_")
             source = int(source)
 
-            # 计算物理位置
             physical_col = source % cols
             physical_row = source // cols // 2
 
-            # 确定在矩阵中的位置
-            if source_type == "sdma":
-                row = physical_row * 2 + 2
-            else:  # gdma
-                row = physical_row * 2 + 1
-
-            col = physical_col
-
-            # 确保不越界
-            # if row < rows and col < cols:
             # 计算带宽
             read_bw = self.calculate_ip_bandwidth(self.read_ip_intervals.get(ip_id, []))
             write_bw = self.calculate_ip_bandwidth(self.write_ip_intervals.get(ip_id, []))
+            total_bw = read_bw + write_bw
 
-            read_data[row - 1, col] = read_bw
-            write_data[row - 1, col] = write_bw
-            total_data[row - 1, col] = read_bw + write_bw
+            # 存储数据
+            self.ip_bandwidth_data["read"][source_type][physical_row, physical_col] = read_bw
+            self.ip_bandwidth_data["write"][source_type][physical_row, physical_col] = write_bw
+            self.ip_bandwidth_data["total"][source_type][physical_row, physical_col] = total_bw
 
-        # 创建图形和子图
-        fig, axes = plt.subplots(1, 3, figsize=(cols * 4, rows * 0.6))
-        titles = ["Read Bandwidth", "Write Bandwidth", "Total Bandwidth"]
-        data_list = [read_data, write_data, total_data]
-        if self.config.spare_core_row != -1:
-            fig.suptitle(
-                f"Row: {self.config.spare_core_row}, Failed core: {[(core%self.config.cols, (rows - core//self.config.cols)//2) for core in self.config.fail_core_pos]}, Spare core: {[(core%self.config.cols, (rows - core//self.config.cols)//2) for core in self.config.spare_core_pos]}",
-                y=1,
-                fontsize=12,
-                # fontweight="bold",
-            )
+    def draw_flow_graph(self, network, mode="total", node_size=2000, save_path=None):
+        """
+        绘制合并的网络流图和IP
 
-        # 统一的最大值用于颜色映射
-        vmax = max(np.max(total_data), np.max(read_data), np.max(write_data)) or 1.0
+        :param network: 网络对象
+        :param mode: 显示模式，可以是'read', 'write'或'total'
+        :param node_size: 节点大小
+        :param save_path: 图片保存路径
+        """
+        # 确保IP带宽数据已计算
+        if not hasattr(self, "ip_bandwidth_data"):
+            self.calculate_ip_bandwidth_data()
 
-        # 绘制三个热图
-        for ax, data, title in zip(axes, data_list, titles):
-            # 创建标签矩阵
-            labels = np.empty_like(data, dtype=object)
-            for i in range(data.shape[0]):
-                for j in range(data.shape[1]):
-                    if data[i, j] > 0:
-                        labels[i, j] = f"{data[i, j]:.1f}"
-                    else:
-                        labels[i, j] = ""
-
-            # 创建DataFrame
-            df = pd.DataFrame(data, index=[f"Row{rows - 1 - i}" for i in range(rows)], columns=[f"Col{j}" for j in range(cols)])
-            vmin = np.min(data[data > 0], initial=0)
-            vmin = vmin * 0.4
-
-            # 绘制热图
-            sns.heatmap(df, annot=labels, fmt="", cmap="YlGnBu", linewidths=0.5, linecolor="gray", cbar=True, vmin=vmin, ax=ax, cbar_kws={"label": "Bandwidth (GB/s)"}, annot_kws={"size": 10})
-
-            # 设置标题和坐标轴
-            ax.set_title(f"{title}")
-            ax.set_xlabel("Column Position")
-            ax.set_ylabel("Row Position")
-
-        # 自动调整布局
-        plt.tight_layout()
-
-        # 保存或显示
-        if save_path:
-            plt.savefig(
-                os.path.join(save_path, f"{str(self.topo_type_stat)}_{self.file_name[:-4]}_ip_bandwidth_{self.config.spare_core_row}_{self.config.fail_core_pos}_{str(time.time_ns())[-3:]}.png"),
-                dpi=300,
-                bbox_inches="tight",
-            )
-            plt.close()
-        else:
-            plt.show()
-
-    def draw_links_flow_graph(self, network, node_size=2000, selfloop_radius=1, save_path=None):
+        # 准备网络流数据
         G = nx.DiGraph()
-        links = network.links_flow_stat
+
+        # 处理不同模式的网络流数据
+        if mode == "read":
+            links = network.links_flow_stat.get("read", {})
+        elif mode == "write":
+            links = network.links_flow_stat.get("write", {})
+        else:  # total模式，需要合并读和写的数据
+            read_links = network.links_flow_stat.get("read", {})
+            write_links = network.links_flow_stat.get("write", {})
+
+            # 合并读和写的流量
+            all_keys = set(read_links.keys()) | set(write_links.keys())
+            links = {}
+            for key in all_keys:
+                read_val = read_links.get(key, 0)
+                write_val = write_links.get(key, 0)
+                links[key] = read_val + write_val
 
         link_values = []
-        # 添加边
         for (i, j), value in links.items():
             link_value = value * 128 / (self.cycle // self.config.network_frequency)
             link_values.append(link_value)
             formatted_label = f"{link_value:.1f}"
             G.add_edge(i, j, label=formatted_label)
 
-        # 计算节点位置（按编号顺序排列）
+        # 计算节点位置
         pos = {}
         for node in G.nodes():
             x = node % self.config.cols
@@ -1754,28 +1726,88 @@ class BaseModel:
             if y % 2 == 1:  # 奇数行左移
                 x -= 0.25
                 y -= 0.6
-            # 显著增加节点间距（x和y方向都乘以3.5）
             pos[node] = (x * 3, -y * 1.5)
 
-        # 创建更大的图形
-        fig, ax = plt.subplots(figsize=(12, 10))  # 进一步增大图形尺寸
-        ax.set_aspect("equal")  # 保持方形比例
+        # 创建图形
+        fig, ax = plt.subplots(figsize=(16, 14))
+        ax.set_aspect("equal")
 
-        # 调整方形节点大小（相对更小）
-        square_size = np.sqrt(node_size) / 100  # 减小节点大小
+        # 调整方形节点大小
+        square_size = np.sqrt(node_size) / 100
 
-        sorted_edges = sorted(link_values)
-        edge_value_threshold = sorted_edges[-9]
-
+        # 绘制网络流图
         nx.draw_networkx_nodes(G, pos, node_size=square_size, node_shape="s", ax=ax)
 
-        # 绘制方形节点
+        # 绘制方形节点并添加IP信息
         for node, (x, y) in pos.items():
+            # 绘制主节点方框
             rect = Rectangle((x - square_size / 2, y - square_size / 2), width=square_size, height=square_size, color="lightblue", ec="black", zorder=2)
             ax.add_patch(rect)
             ax.text(x, y, str(node), ha="center", va="center", fontsize=10)
 
-        # 自定义边的绘制（避开方形边缘）
+            # 在节点左侧添加IP信息
+            physical_row = node // self.config.cols
+            physical_col = node % self.config.cols
+
+            if physical_row % 2 == 0:
+                # 田字格位置和大小
+                ip_width = square_size * 2.4
+                ip_height = square_size * 2.4
+                ip_x = x - square_size - ip_width / 2.8
+                ip_y = y + 0.23
+
+                # 绘制田字格外框
+                ip_rect = Rectangle((ip_x - ip_width / 2, ip_y - ip_height / 2), width=ip_width, height=ip_height, color="white", ec="black", linewidth=1, zorder=2)
+                ax.add_patch(ip_rect)
+
+                # 绘制田字格内部线条
+                ax.plot([ip_x - ip_width / 2, ip_x + ip_width / 2], [ip_y, ip_y], color="black", linewidth=1, zorder=3)
+                ax.plot([ip_x, ip_x], [ip_y - ip_height / 2, ip_y + ip_height / 2], color="black", linewidth=1, zorder=3)
+
+                # 为左列和右列填充不同颜色（DMA和DDR区分）
+                left_color = "honeydew"  # 左列颜色（DMA）
+                right_color = "aliceblue"  # 右列颜色（GDMA）
+                # 左列矩形（DMA区域）
+                left_rect = Rectangle((ip_x - ip_width / 2, ip_y - ip_height / 2), width=ip_width / 2, height=ip_height, color=left_color, ec="none", zorder=2)
+                ax.add_patch(left_rect)
+
+                # 右列矩形（DDR区域）
+                right_rect = Rectangle((ip_x, ip_y - ip_height / 2), width=ip_width / 2, height=ip_height, color=right_color, ec="none", zorder=2)
+                ax.add_patch(right_rect)
+
+                # 添加IP信息
+                if mode == "read":
+                    sdma_value = self.ip_bandwidth_data["read"]["sdma"][physical_row // 2, physical_col]
+                    gdma_value = self.ip_bandwidth_data["read"]["gdma"][physical_row // 2, physical_col]
+                    ddr_value = self.ip_bandwidth_data["read"]["ddr"][physical_row // 2, physical_col]
+                    l2m_value = self.ip_bandwidth_data["read"]["l2m"][physical_row // 2, physical_col]
+                elif mode == "write":
+                    sdma_value = self.ip_bandwidth_data["write"]["sdma"][physical_row // 2, physical_col]
+                    gdma_value = self.ip_bandwidth_data["write"]["gdma"][physical_row // 2, physical_col]
+                    ddr_value = self.ip_bandwidth_data["write"]["ddr"][physical_row // 2, physical_col]
+                    l2m_value = self.ip_bandwidth_data["write"]["l2m"][physical_row // 2, physical_col]
+                else:  # total
+                    sdma_value = self.ip_bandwidth_data["total"]["sdma"][physical_row // 2, physical_col]
+                    gdma_value = self.ip_bandwidth_data["total"]["gdma"][physical_row // 2, physical_col]
+                    ddr_value = self.ip_bandwidth_data["total"]["ddr"][physical_row // 2, physical_col]
+                    l2m_value = self.ip_bandwidth_data["total"]["l2m"][physical_row // 2, physical_col]
+
+                # SDMA在左上半部分
+                ax.text(ip_x - ip_width / 4, ip_y + ip_height / 4, f"{sdma_value:.1f}", fontweight="bold", ha="center", va="center", fontsize=9.5, color="black")
+
+                # GDMA在左下半部分
+                ax.text(ip_x - ip_width / 4, ip_y - ip_height / 4, f"{gdma_value:.1f}", fontweight="bold", ha="center", va="center", fontsize=9.5, color="black")
+                
+                # DDR在右上半部分
+                ax.text(ip_x + ip_width / 4, ip_y + ip_height / 4, f"{ddr_value:.1f}", fontweight="bold", ha="center", va="center", fontsize=9.5, color="black")
+                
+                # l2m在右上半部分
+                ax.text(ip_x + ip_width / 4, ip_y - ip_height / 4, f"{l2m_value:.1f}", fontweight="bold", ha="center", va="center", fontsize=9.5, color="black")
+
+        # 绘制边和边标签
+        sorted_edges = sorted(link_values)
+        edge_value_threshold = sorted_edges[-9] if len(sorted_edges) >= 9 else float("inf")
+
         for i, j, data in G.edges(data=True):
             x1, y1 = pos[i]
             x2, y2 = pos[j]
@@ -1784,82 +1816,29 @@ class BaseModel:
             else:
                 color = "black"
 
-            if i == j:  # 自循环边
-                continue
-                # 计算原始行列号
-                original_row = i // self.config.cols
-                original_col = i % self.config.cols
-
-                # 确定边缘位置
-                edge_position = []
-                if original_row == 0:
-                    edge_position.append("top")
-                if original_row == self.config.rows - 1:
-                    edge_position.append("bottom")
-                if original_col == 0:
-                    edge_position.append("left")
-                if original_col == self.config.cols - 1:
-                    edge_position.append("right")
-
-                # 优先处理四角的情况
-                if not edge_position:
-                    edge_position = ["top"]  # 默认处理
-                else:
-                    edge_position = edge_position[:1]  # 取第一个边缘
-
-                # 根据边缘位置设置连接点
-                if "top" in edge_position:
-                    start = (x1, y1 + square_size / 2)
-                    end = (x1, y1 + square_size / 2)
-                    connection_style = f"arc3,rad={abs(selfloop_radius)}"
-                elif "bottom" in edge_position:
-                    start = (x1, y1 - square_size / 2)
-                    end = (x1, y1 - square_size / 2)
-                    connection_style = f"arc3,rad={-abs(selfloop_radius)}"
-                elif "left" in edge_position:
-                    start = (x1 - square_size / 2, y1)
-                    end = (x1 - square_size / 2, y1)
-                    connection_style = f"arc3,rad={abs(selfloop_radius)}"
-                elif "right" in edge_position:
-                    start = (x1 + square_size / 2, y1)
-                    end = (x1 + square_size / 2, y1)
-                    connection_style = f"arc3,rad={-abs(selfloop_radius)}"
-
-                # 绘制自循环边
-                arrow = FancyArrowPatch(start, end, arrowstyle="-|>", mutation_scale=15, color="black", connectionstyle=connection_style, shrinkA=0, shrinkB=0, linewidth=1, zorder=1)
-                ax.add_patch(arrow)
-            else:  # 普通边
-                # 计算边的起点和终点（方形边缘）
+            if i != j:  # 普通边
                 dx, dy = x2 - x1, y2 - y1
                 dist = np.hypot(dx, dy)
                 if dist > 0:
-                    dx, dy = dx / dist, dy / dist  # 单位方向向量
+                    dx, dy = dx / dist, dy / dist
+                    perp_dx, perp_dy = -dy * 0.1, dx * 0.1
 
-                    # 计算垂直向量用于边偏移（增加偏移量）
-                    perp_dx, perp_dy = -dy * 0.1, dx * 0.1  # 更大的偏移量
-
-                    # 检查是否有反向边
                     has_reverse = G.has_edge(j, i)
-
-                    # 为双向边调整偏移
                     if has_reverse:
-                        # 第一条边偏移到一侧
                         start_x = x1 + dx * square_size / 2 + perp_dx
                         start_y = y1 + dy * square_size / 2 + perp_dy
                         end_x = x2 - dx * square_size / 2 + perp_dx
                         end_y = y2 - dy * square_size / 2 + perp_dy
                     else:
-                        # 单向边不偏移
                         start_x = x1 + dx * square_size / 2
                         start_y = y1 + dy * square_size / 2
                         end_x = x2 - dx * square_size / 2
                         end_y = y2 - dy * square_size / 2
 
-                    # 绘制带箭头的边（增加箭头大小）
                     arrow = FancyArrowPatch((start_x, start_y), (end_x, end_y), arrowstyle="-|>", mutation_scale=12, color=color, zorder=1, linewidth=1)
                     ax.add_patch(arrow)
 
-        # 改进的边标签绘制（更大的字体和更明显的背景）
+        # 绘制边标签
         edge_labels = nx.get_edge_attributes(G, "label")
         for edge, label in edge_labels.items():
             i, j = edge
@@ -1869,90 +1848,53 @@ class BaseModel:
                 color = "red"
             else:
                 color = "black"
-            if i == j:
-                # 计算标签位置
-                original_row = i // self.config.cols
-                original_col = i % self.config.cols
-                x, y = pos[i]
 
-                offset = 0.17  # 标签偏移量
-                if original_row == 0:
-                    label_pos = (x, y + square_size / 2 + offset)
-                    angle = 0
-                elif original_row == self.config.rows - 2:
-                    label_pos = (x, y - square_size / 2 - offset)
-                    angle = 0
-                elif original_col == 0:
-                    label_pos = (x - square_size / 2 - offset, y)
-                    angle = -90
-                elif original_col == self.config.cols - 1:
-                    label_pos = (x + square_size / 2 + offset, y)
-                    angle = 90
-                else:
-                    label_pos = (x, y + square_size / 2 + offset)
-                    angle = 0
-
-                ax.text(*label_pos, str(label), ha="center", va="center", color=color, fontweight="bold", fontsize=11, rotation=angle)
-            else:
+            if i != j:
                 x1, y1 = pos[i]
                 x2, y2 = pos[j]
-
-                # 计算边的中点
                 mid_x = (x1 + x2) / 2
                 mid_y = (y1 + y2) / 2
-
-                # 计算边的方向向量
                 dx, dy = x2 - x1, y2 - y1
                 angle = np.degrees(np.arctan2(dy, dx))
 
-                # 检查是否有反向边
                 has_reverse = G.has_edge(j, i)
-
-                # 计算边的长度
-                edge_length = np.sqrt(dx**2 + dy**2)
-
-                # 判断边的方向类型 (主要考虑水平和垂直方向)
-                is_horizontal = abs(dx) > abs(dy)  # 更接近水平方向
-                is_vertical = abs(dy) > abs(dx)  # 更接近垂直方向
+                is_horizontal = abs(dx) > abs(dy)
 
                 if has_reverse:
-                    # 双向边的标签偏移
                     if is_horizontal:
-                        # 水平双向边：垂直偏移0.05
                         perp_dx, perp_dy = -dy * 0.1 + 0.2, dx * 0.1
                     else:
-                        # 垂直双向边：垂直偏移且向下偏
                         perp_dx, perp_dy = -dy * 0.18, dx * 0.18 - 0.3
-
                     label_x = mid_x + perp_dx
                     label_y = mid_y + perp_dy
                 else:
-                    # 单向边的标签偏移
                     if is_horizontal:
-                        # 水平单向边：沿边方向偏移5%长度
                         label_x = mid_x + dx * 0.1
                         label_y = mid_y + dy * 0.1
                     else:
-                        # 垂直单向边：横向偏移10%长度且向下偏
                         label_x = mid_x + (-dy * 0.1 if dx > 0 else dy * 0.1)
-                        label_y = mid_y - 0.1  # 固定向下偏移
+                        label_y = mid_y - 0.1
 
-                # 绘制标签
-                ax.text(
-                    label_x,
-                    label_y,
-                    str(label),
-                    ha="center",
-                    va="center",
-                    fontsize=11,
-                    fontweight="bold",
-                    color=color,
-                )
+                ax.text(label_x, label_y, str(label), ha="center", va="center", fontsize=11, fontweight="bold", color=color)
+
         plt.axis("off")
-        plt.title(network.name)
+        title = f"{network.name} - {mode.capitalize()} Bandwidth"
+        if self.config.spare_core_row != -1:
+            title += f"\nRow: {self.config.spare_core_row}, Failed cores: {self.config.fail_core_pos}, Spare cores: {self.config.spare_core_pos}"
+        plt.title(title, y=1.02)
+
+        # # 添加图例说明
+        # legend_text = f"IP {mode.capitalize()} Bandwidth (GB/s):\n" "SDMA: Top half of square\n" "GDMA: Bottom half of square"
+        # plt.figtext(0.02, 0.98, legend_text, ha="left", va="top", fontsize=10, bbox=dict(facecolor="white", alpha=0.8, edgecolor="gray"))
+
+        plt.tight_layout()
+
         if save_path:
             plt.savefig(
-                os.path.join(save_path, f"{str(self.topo_type_stat)}_{self.file_name[:-4]}_{network.name}_flow_{self.config.spare_core_row}_{self.config.fail_core_pos}_{str(time.time_ns())[-3:]}.png"),
+                os.path.join(
+                    save_path,
+                    f"{str(self.topo_type_stat)}_{self.file_name[:-4]}_combined_{mode}_{network.name}_{self.config.spare_core_row}_{self.config.fail_core_pos}_{str(time.time_ns())[-3:]}.png",
+                ),
                 dpi=300,
                 bbox_inches="tight",
             )

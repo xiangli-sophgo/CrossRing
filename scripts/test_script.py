@@ -75,13 +75,16 @@ def draw_links_grid(links, rows=5, cols=4, node_size=800, selfloop_radius=0.2):
 
 # 示例用法
 if __name__ == "__main__":
-    links = {
-        (0, 1): "A",
-        (1, 2): "B",
-        (2, 3): "C",
-        (3, 3): "Self",
-        (4, 5): "D",
-        (5, 6): "E",
-        (6, 6): "Loop",
-    }
-    draw_links_grid(links, rows=2, cols=4, node_size=1000, selfloop_radius=0.3)
+    # links = {
+    #     (0, 1): "A",
+    #     (1, 2): "B",
+    #     (2, 3): "C",
+    #     (3, 3): "Self",
+    #     (4, 5): "D",
+    #     (5, 6): "E",
+    #     (6, 6): "Loop",
+    # }
+    # draw_links_grid(links, rows=2, cols=4, node_size=1000, selfloop_radius=0.3)
+    import matplotlib.colors as mcolors
+
+    print(mcolors.CSS4_COLORS)  # 打印所有 CSS4 颜色名

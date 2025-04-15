@@ -188,7 +188,7 @@ class Node:
 
 
 class Network:
-    def __init__(self, config, adjacency_matrix, name='network'):
+    def __init__(self, config, adjacency_matrix, name="network"):
         self.config = config
         self.name = name
         self.current_cycle = []
@@ -207,7 +207,7 @@ class Network:
         self.ip_read = {"sdma": {}, "gdma": {}}
         self.ip_write = {"sdma": {}, "gdma": {}}
         self.links = {}
-        self.links_flow_stat = {}
+        self.links_flow_stat = {"read": {}, "write": {}}
         self.links_tag = {}
         self.remain_tag = {"left": {}, "right": {}, "up": {}, "down": {}}
         self.ring_bridge = {"left": {}, "right": {}, "up": {}, "ft": {}, "vup": {}, "vdown": {}, "eject": {}}
@@ -305,20 +305,25 @@ class Network:
             for j in range(config.num_nodes):
                 if adjacency_matrix[i][j] == 1 and i - j != config.cols:
                     self.links[(i, j)] = [None] * config.seats_per_link
-                    self.links_flow_stat[(i, j)] = 0
+                    self.links_flow_stat["read"][(i, j)] = 0
+                    self.links_flow_stat["write"][(i, j)] = 0
                     self.links_tag[(i, j)] = [None] * config.seats_per_link
             if i in range(0, config.cols):
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.num_nodes - config.cols * 2, i + config.num_nodes - config.cols * 2)] = [None] * 2
-                self.links_flow_stat[(i, i)] = 0
-                self.links_flow_stat[(i + config.num_nodes - config.cols * 2, i + config.num_nodes - config.cols * 2)] = 0
+                self.links_flow_stat["read"][(i, i)] = 0
+                self.links_flow_stat["write"][(i, i)] = 0
+                self.links_flow_stat["read"][(i + config.num_nodes - config.cols * 2, i + config.num_nodes - config.cols * 2)] = 0
+                self.links_flow_stat["write"][(i + config.num_nodes - config.cols * 2, i + config.num_nodes - config.cols * 2)] = 0
                 self.links_tag[(i, i)] = [None] * 2
                 self.links_tag[(i + config.num_nodes - config.cols * 2, i + config.num_nodes - config.cols * 2)] = [None] * 2
             if i % config.cols == 0 and (i // config.cols) % 2 != 0:
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.cols - 1, i + config.cols - 1)] = [None] * 2
-                self.links_flow_stat[(i, i)] = 0
-                self.links_flow_stat[(i + config.cols - 1, i + config.cols - 1)] = 0
+                self.links_flow_stat["read"][(i, i)] = 0
+                self.links_flow_stat["write"][(i, i)] = 0
+                self.links_flow_stat["read"][(i + config.cols - 1, i + config.cols - 1)] = 0
+                self.links_flow_stat["write"][(i + config.cols - 1, i + config.cols - 1)] = 0
                 self.links_tag[(i, i)] = [None] * 2
                 self.links_tag[(i + config.cols - 1, i + config.cols - 1)] = [None] * 2
 
@@ -1240,7 +1245,7 @@ class Network:
                 # print(flit.current_seat_index)
                 link[flit.current_seat_index] = flit
                 if flit.current_seat_index == len(link) - 1:
-                    self.links_flow_stat[flit.current_link] += 1
+                    self.links_flow_stat[flit.req_type][flit.current_link] += 1
             else:
                 # 将 flit 放入 ring_bridge 的相应方向
                 if not flit.is_on_station:

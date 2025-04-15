@@ -76,6 +76,10 @@ def generate_data(topo, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, 
                 for src in src_pos:
                     for t in time_pattern:
                         dest = random.choice(dest_pos)
+                        # if src == 3:
+                        #     entries.append(f"{base_time + time_offset + t + 4},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
+                        # else:
+                        #     entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
                         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
         return entries
@@ -108,7 +112,6 @@ def generate_data(topo, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, 
                             dest = random.choice(group_dests)
                         else:  # private
                             dest = src if src in dest_pos else dest_pos[src % dest_len]
-
                         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
         return entries
@@ -120,7 +123,7 @@ def generate_data(topo, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, 
             data_all.extend(generate_mixed_entries(sdma_pos, "gdma", "ddr", ddr_pos, "R", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(sdma_pos, "gdma", "ddr", l2m_pos, "W", burst, mix_ratios))
         else:
-            data_all.extend(generate_entries(gdma_pos, "gdma", "ddr", ddr_pos, "R", burst, flow_type, speed[burst], interval_count))
+            # data_all.extend(generate_entries(gdma_pos, "gdma", "ddr", ddr_pos, "R", burst, flow_type, speed[burst], interval_count))
             data_all.extend(generate_entries(gdma_pos, "gdma", "ddr", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
 
     elif topo == "3x3":
@@ -144,13 +147,14 @@ if __name__ == "__main__":
     # 参数配置
     topo = "5x4"
     interval_count = 32
-    file_name = "../../test_data/traffic_single_dma_0414.txt"
+    file_name = "../../test_data/traffic_ITag_0414.txt"
 
     num_ip = 32
     sdma_pos = range(num_ip)
-    gdma_pos = range(1)
-    ddr_pos = range(13, 14)
-    l2m_pos = range(13, 14)
+    # gdma_pos = range(1)
+    gdma_pos = [0, 1, 2, 3]
+    ddr_pos = range(15, 16)
+    l2m_pos = range(15, 16)
 
     speed = {1: 128, 2: 68, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 4

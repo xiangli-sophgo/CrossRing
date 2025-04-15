@@ -84,7 +84,7 @@ file_root = r"../../Result/Params_csv/"
 # data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
 # data_file_name = r"RB_IN_OUT_FIFO_459_0303_2_fixed_time_interval.csv"
 # data_file_name = r"ITag_0411.csv"
-data_file_name = r"Spare_core_MLP_0411.csv"
+data_file_name = r"Spare_core_64GB_32_shared_0414.csv"
 # data_file_name = r"Spare_core_0410_16_core_128GB_32_shared2.csv"
 # data_file_name = r"Spare_core_0410_Traffic_R_W_64GB_32_shared.csv"
 topologies = [
@@ -106,9 +106,9 @@ data = pd.read_csv(file_root + data_file_name)
 # 定义不同的拓扑
 # topo = topologies[0]
 
-show_value = "read_BW"
+# show_value = "read_BW"
 # show_value = "write_BW"
-# show_value = "Total_BW"
+show_value = "Total_BW"
 # show_value = "ITag_h_num"
 # show_value = "ITag_v_num"
 # show_value = "R_finish_time"
@@ -154,7 +154,7 @@ Both_side_ETag_upgrade = 1
 
 rate_plot = 0
 log_data = 0
-save_images = 1
+save_images = 0
 reverse_cmap = 0
 plot_type = 0
 

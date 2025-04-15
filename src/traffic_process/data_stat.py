@@ -228,8 +228,6 @@ class AddressStat:
 
         print(f"Results saved to {output_file}")
 
-    # ... (keep the rest of your methods unchanged)
-
     def run(self, input_folder, output_csv=None, plot_data=False):
         self.process_folder(input_folder, plot_data)
         if output_csv:
@@ -240,5 +238,6 @@ class AddressStat:
 if __name__ == "__main__":
     stat = AddressStat(200)
     # Specify the output CSV file path
-    output_csv = r"../../Result/Data_csv/v8-32_traffic_stats.csv"
+    output_csv = None
+    output_csv = r"../../Result/Data_csv/DeepSeek_traffic_stats.csv"
     stat.run(r"../../traffic/output_DeepSeek/step1_flatten/", output_csv, plot_data=1)
