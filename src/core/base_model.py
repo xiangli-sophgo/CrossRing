@@ -91,6 +91,9 @@ class BaseModel:
         self.req_cir_h_num_stat, self.req_cir_v_num_stat = 0, 0
         self.rsp_cir_h_num_stat, self.rsp_cir_v_num_stat = 0, 0
         self.data_cir_h_num_stat, self.data_cir_v_num_stat = 0, 0
+        self.req_wait_cycle_h_num_stat, self.req_wait_cycle_v_num_stat = 0, 0
+        self.rsp_wait_cycle_h_num_stat, self.rsp_wait_cycle_v_num_stat = 0, 0
+        self.data_wait_cycle_h_num_stat, self.data_wait_cycle_v_num_stat = 0, 0
         self.read_retry_num_stat, self.write_retry_num_stat = 0, 0
         self.EQ_ETag_T1_num_stat, self.EQ_ETag_T0_num_stat = 0, 0
         self.RB_ETag_T1_num_stat, self.RB_ETag_T0_num_stat = 0, 0
@@ -212,6 +215,8 @@ class BaseModel:
                 )
                 self.req_cir_h_num_stat += req.circuits_completed_h
                 self.req_cir_v_num_stat += req.circuits_completed_v
+                self.req_wait_cycle_h_num_stat += req.wait_cycle_h
+                self.req_wait_cycle_v_num_stat += req.wait_cycle_v
                 for flit in self.flit_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle
                 self.node.rn_tracker["read"][self.rn_type][in_pos].remove(req)
@@ -473,7 +478,8 @@ class BaseModel:
             )
 
     def flit_trace(self, packet_id):
-        if self.cycle % 1 == 0 and self.flit_network.send_flits[packet_id] and self.flit_network.send_flits[packet_id][0].current_link is not None:
+        # if self.cycle % 1 == 0 and self.flit_network.send_flits[packet_id] and self.flit_network.send_flits[packet_id][0].current_link is not None:
+        if self.cycle % 1 == 0 and self.req_network.send_flits[packet_id]:
             # print(self.cycle, self.req_network.send_flits[packet_id], self.rsp_network.send_flits[packet_id], len(self.flit_network.arrive_flits[packet_id]))
             print(self.cycle, self.req_network.send_flits[packet_id], self.rsp_network.send_flits[packet_id], self.flit_network.send_flits[packet_id])
             time.sleep(0.3)
@@ -646,7 +652,7 @@ class BaseModel:
             queue_pre[ip_pos] = None
 
     def classify_flits(self, flits):
-        ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits = [], [], [], [], []
+        ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits = [], [], [], [], []
         for flit in flits:
             # if flit.packet_id == 102 and flit.flit_id_in_packet == 0:
             # print(flit, "1")
@@ -657,22 +663,24 @@ class BaseModel:
             elif not flit.current_link:
                 new_flits.append(flit)
             elif flit.current_link[0] - flit.current_link[1] == self.config.cols and flit.current_link[1] == flit.destination:
-                ring_bridge_flits.append(flit)
+                ring_bridge_EQ_flits.append(flit)
             elif abs(flit.current_link[0] - flit.current_link[1]) == 1:
                 # 横向环
                 horizontal_flits.append(flit)
             else:
                 # 纵向环
                 vertical_flits.append(flit)
-        return ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits
+        return ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits
 
     def flit_move(self, network, flits, flit_type):
         # 分类不同类型的flits
-        ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits = self.classify_flits(flits)
+        ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits = self.classify_flits(flits)
 
         # 处理新到达的flits
         for flit in new_flits + horizontal_flits:
             network.plan_move(flit)
+            if network.execute_moves(flit, self.cycle):
+                flits.remove(flit)
 
         # 处理transfer station的flits
         for col in range(1, self.config.rows, 2):
@@ -735,22 +743,29 @@ class BaseModel:
         # 处理纵向flits的移动
         for flit in vertical_flits:
             network.plan_move(flit)
+            if network.execute_moves(flit, self.cycle):
+                flits.remove(flit)
 
         # eject arbitration
         if flit_type in ["req", "rsp", "data"]:
             self._handle_eject_arbitration(network, flit_type)
 
         # 执行所有flit的移动
-        for flit in vertical_flits + horizontal_flits + new_flits + local_flits:
+        for flit in local_flits:
             if network.execute_moves(flit, self.cycle):
                 flits.remove(flit)
 
         # 处理transfer station的flits
-        for flit in ring_bridge_flits:
+        for flit in ring_bridge_EQ_flits:
             if flit.is_arrive:
                 flit.arrival_network_cycle = self.cycle
-                network.eject_queues["ring_bridge"][flit.destination].append(flit)
-                flits.remove(flit)
+                if len(network.eject_queues["ring_bridge"][flit.destination]) < self.config.EQ_IN_FIFO_DEPTH:
+                    network.eject_queues["ring_bridge"][flit.destination].append(flit)
+                    flits.remove(flit)
+                else:
+                    flit.is_arrive = False
+            else:
+                network.execute_moves(flit, self.cycle)
 
         return flits
 
@@ -1058,6 +1073,8 @@ class BaseModel:
         )
         self.rsp_cir_h_num_stat += rsp.circuits_completed_h
         self.rsp_cir_v_num_stat += rsp.circuits_completed_v
+        self.rsp_wait_cycle_h_num_stat += rsp.wait_cycle_h
+        self.rsp_wait_cycle_v_num_stat += rsp.wait_cycle_v
         if not req:
             print("RSP do not have REQ")
             return
@@ -1371,6 +1388,8 @@ class BaseModel:
                 for flit in flits:
                     self.data_cir_h_num_stat += flit.circuits_completed_h
                     self.data_cir_v_num_stat += flit.circuits_completed_v
+                    self.data_wait_cycle_h_num_stat += flit.wait_cycle_h
+                    self.data_wait_cycle_v_num_stat += flit.wait_cycle_v
                 self.process_flits(
                     # flits[-1],
                     next((flit for flit in flits if flit.is_last_flit), flits[-1]),
@@ -1466,22 +1485,22 @@ class BaseModel:
                 bw = self.calculate_ip_bandwidth(intervals)
                 print(f"{ip_id}: {bw:.1f} GB/s", file=f3)
 
-        # self.plot_ip_bandwidth_heatmap()
-        if self.plot_flow_fig:
-            self.draw_flow_graph(self.flit_network, save_path=self.results_fig_save_path)
 
         self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
         print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")
         print("=" * 50)
         print(f"Total Circuits req h: {self.req_cir_h_num_stat}, v: {self.req_cir_v_num_stat}")
-
         print(f"Total Circuits rsp h: {self.rsp_cir_h_num_stat}, v: {self.rsp_cir_v_num_stat}")
-
         print(f"Total Circuits data h: {self.data_cir_h_num_stat}, v: {self.data_cir_v_num_stat}")
+        print(f"Total wait cycle req h: {self.req_wait_cycle_h_num_stat}, v: {self.req_wait_cycle_v_num_stat}")
+        print(f"Total wait cycle rsp h: {self.rsp_wait_cycle_h_num_stat}, v: {self.rsp_wait_cycle_v_num_stat}")
+        print(f"Total wait cycle data h: {self.data_wait_cycle_h_num_stat}, v: {self.data_wait_cycle_v_num_stat}")
         print(f"Total RB ETag: T1: {self.RB_ETag_T1_num_stat}, T0: {self.RB_ETag_T0_num_stat}; EQ ETag: T1: {self.EQ_ETag_T1_num_stat}, T0: {self.EQ_ETag_T0_num_stat}")
         print(f"Total ITag: h: {self.ITag_h_num_stat}, v: {self.ITag_v_num_stat}")
         if self.model_type_stat == "REQ_RSP":
             print(f"Retry num: R: {self.read_retry_num_stat}, W: {self.write_retry_num_stat}")
+        if self.plot_flow_fig:
+            self.draw_flow_graph(self.flit_network, save_path=self.results_fig_save_path)
         # print("=" * 50)
         # print(
         #     f"Throughput: sdma-R-DDR: {((self.sdma_R_ddr_flit_num * 128/self.sdma_R_ddr_finish_time/4) if self.sdma_R_ddr_finish_time>0 else 0):.1f}, "
@@ -1633,8 +1652,8 @@ class BaseModel:
         """计算给定区间的加权带宽"""
         weighted_sum = 0.0
         total_count = 0
-        # finish_time = 0
-        finish_time = self.cycle // self.config.network_frequency
+        finish_time = 0
+        # finish_time = self.cycle // self.config.network_frequency
         for start, end, count in intervals:
             if start >= end:
                 continue  # 跳过无效区间
@@ -1751,10 +1770,10 @@ class BaseModel:
 
             if physical_row % 2 == 0:
                 # 田字格位置和大小
-                ip_width = square_size * 2.4
-                ip_height = square_size * 2.4
+                ip_width = square_size * 2.6
+                ip_height = square_size * 2.6
                 ip_x = x - square_size - ip_width / 2.8
-                ip_y = y + 0.23
+                ip_y = y + 0.26
 
                 # 绘制田字格外框
                 ip_rect = Rectangle((ip_x - ip_width / 2, ip_y - ip_height / 2), width=ip_width, height=ip_height, color="white", ec="black", linewidth=1, zorder=2)
@@ -1781,32 +1800,59 @@ class BaseModel:
                     gdma_value = self.ip_bandwidth_data["read"]["gdma"][physical_row // 2, physical_col]
                     ddr_value = self.ip_bandwidth_data["read"]["ddr"][physical_row // 2, physical_col]
                     l2m_value = self.ip_bandwidth_data["read"]["l2m"][physical_row // 2, physical_col]
+
+                    # 收集当前模式下每个IP的所有值
+                    all_sdma = self.ip_bandwidth_data["read"]["sdma"].flatten()
+                    all_gdma = self.ip_bandwidth_data["read"]["gdma"].flatten()
+                    all_ddr = self.ip_bandwidth_data["read"]["ddr"].flatten()
+                    all_l2m = self.ip_bandwidth_data["read"]["l2m"].flatten()
+
                 elif mode == "write":
                     sdma_value = self.ip_bandwidth_data["write"]["sdma"][physical_row // 2, physical_col]
                     gdma_value = self.ip_bandwidth_data["write"]["gdma"][physical_row // 2, physical_col]
                     ddr_value = self.ip_bandwidth_data["write"]["ddr"][physical_row // 2, physical_col]
                     l2m_value = self.ip_bandwidth_data["write"]["l2m"][physical_row // 2, physical_col]
+
+                    all_sdma = self.ip_bandwidth_data["write"]["sdma"].flatten()
+                    all_gdma = self.ip_bandwidth_data["write"]["gdma"].flatten()
+                    all_ddr = self.ip_bandwidth_data["write"]["ddr"].flatten()
+                    all_l2m = self.ip_bandwidth_data["write"]["l2m"].flatten()
+
                 else:  # total
                     sdma_value = self.ip_bandwidth_data["total"]["sdma"][physical_row // 2, physical_col]
                     gdma_value = self.ip_bandwidth_data["total"]["gdma"][physical_row // 2, physical_col]
                     ddr_value = self.ip_bandwidth_data["total"]["ddr"][physical_row // 2, physical_col]
                     l2m_value = self.ip_bandwidth_data["total"]["l2m"][physical_row // 2, physical_col]
 
-                # SDMA在左上半部分
-                ax.text(ip_x - ip_width / 4, ip_y + ip_height / 4, f"{sdma_value:.1f}", fontweight="bold", ha="center", va="center", fontsize=9.5, color="black")
+                    all_sdma = self.ip_bandwidth_data["total"]["sdma"].flatten()
+                    all_gdma = self.ip_bandwidth_data["total"]["gdma"].flatten()
+                    all_ddr = self.ip_bandwidth_data["total"]["ddr"].flatten()
+                    all_l2m = self.ip_bandwidth_data["total"]["l2m"].flatten()
+
+                # 计算每个IP的阈值（例如取前20%的分位数）
+                sdma_threshold = np.percentile(all_sdma, 90)  # 大于80%的值会被标红
+                gdma_threshold = np.percentile(all_gdma, 90)
+                ddr_threshold = np.percentile(all_ddr, 90)
+                l2m_threshold = np.percentile(all_l2m, 90)
+
+                # SDMA在左上半部分（大于阈值则红色）
+                sdma_color = "red" if sdma_value > sdma_threshold else "black"
+                ax.text(ip_x - ip_width / 4, ip_y + ip_height / 4, f"{sdma_value:.1f}", fontweight="bold", ha="center", va="center", fontsize=9.5, color=sdma_color)
 
                 # GDMA在左下半部分
-                ax.text(ip_x - ip_width / 4, ip_y - ip_height / 4, f"{gdma_value:.1f}", fontweight="bold", ha="center", va="center", fontsize=9.5, color="black")
-                
-                # DDR在右上半部分
-                ax.text(ip_x + ip_width / 4, ip_y + ip_height / 4, f"{ddr_value:.1f}", fontweight="bold", ha="center", va="center", fontsize=9.5, color="black")
-                
+                gdma_color = "red" if gdma_value > gdma_threshold else "black"
+                ax.text(ip_x - ip_width / 4, ip_y - ip_height / 4, f"{gdma_value:.1f}", fontweight="bold", ha="center", va="center", fontsize=9.5, color=gdma_color)
+
                 # l2m在右上半部分
-                ax.text(ip_x + ip_width / 4, ip_y - ip_height / 4, f"{l2m_value:.1f}", fontweight="bold", ha="center", va="center", fontsize=9.5, color="black")
+                l2m_color = "red" if l2m_value > l2m_threshold else "black"
+                ax.text(ip_x + ip_width / 4, ip_y + ip_height / 4, f"{l2m_value:.1f}", fontweight="bold", ha="center", va="center", fontsize=9.5, color=l2m_color)
+
+                # ddr在右下半部分
+                ddr_color = "red" if ddr_value > ddr_threshold else "black"
+                ax.text(ip_x + ip_width / 4, ip_y - ip_height / 4, f"{ddr_value:.1f}", fontweight="bold", ha="center", va="center", fontsize=9.5, color=ddr_color)
 
         # 绘制边和边标签
-        sorted_edges = sorted(link_values)
-        edge_value_threshold = sorted_edges[-9] if len(sorted_edges) >= 9 else float("inf")
+        edge_value_threshold = np.percentile(link_values, 90)
 
         for i, j, data in G.edges(data=True):
             x1, y1 = pos[i]
@@ -1848,6 +1894,30 @@ class BaseModel:
                 color = "red"
             else:
                 color = "black"
+            if i == j:
+                # 计算标签位置
+                original_row = i // self.config.cols
+                original_col = i % self.config.cols
+                x, y = pos[i]
+
+                offset = 0.17  # 标签偏移量
+                if original_row == 0:
+                    label_pos = (x, y + square_size / 2 + offset)
+                    angle = 0
+                elif original_row == self.config.rows - 2:
+                    label_pos = (x, y - square_size / 2 - offset)
+                    angle = 0
+                elif original_col == 0:
+                    label_pos = (x - square_size / 2 - offset, y)
+                    angle = -90
+                elif original_col == self.config.cols - 1:
+                    label_pos = (x + square_size / 2 + offset, y)
+                    angle = 90
+                else:
+                    label_pos = (x, y + square_size / 2 + offset)
+                    angle = 0
+
+                ax.text(*label_pos, str(label), ha="center", va="center", color=color, fontweight="bold", fontsize=11, rotation=angle)
 
             if i != j:
                 x1, y1 = pos[i]
@@ -1875,13 +1945,13 @@ class BaseModel:
                         label_x = mid_x + (-dy * 0.1 if dx > 0 else dy * 0.1)
                         label_y = mid_y - 0.1
 
-                ax.text(label_x, label_y, str(label), ha="center", va="center", fontsize=11, fontweight="bold", color=color)
+                ax.text(label_x, label_y, str(label), ha="center", va="center", fontsize=14, fontweight="bold", color=color)
 
         plt.axis("off")
         title = f"{network.name} - {mode.capitalize()} Bandwidth"
         if self.config.spare_core_row != -1:
             title += f"\nRow: {self.config.spare_core_row}, Failed cores: {self.config.fail_core_pos}, Spare cores: {self.config.spare_core_pos}"
-        plt.title(title, y=1.02)
+        plt.title(title, fontsize=20)
 
         # # 添加图例说明
         # legend_text = f"IP {mode.capitalize()} Bandwidth (GB/s):\n" "SDMA: Top half of square\n" "GDMA: Bottom half of square"
@@ -1893,7 +1963,7 @@ class BaseModel:
             plt.savefig(
                 os.path.join(
                     save_path,
-                    f"{str(self.topo_type_stat)}_{self.file_name[:-4]}_combined_{mode}_{network.name}_{self.config.spare_core_row}_{self.config.fail_core_pos}_{str(time.time_ns())[-3:]}.png",
+                    f"{str(self.topo_type_stat)}_{self.file_name[:-4]}_combined_{mode}_{network.name}_{self.config.fail_core_pos}_{self.config.spare_core_row}_{str(time.time_ns())[-3:]}.png",
                 ),
                 dpi=300,
                 bbox_inches="tight",

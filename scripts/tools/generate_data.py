@@ -1,6 +1,7 @@
 import random
 from math import gcd
 from collections import defaultdict
+import numpy as np
 
 
 class TrafficGenerator:
@@ -38,12 +39,38 @@ class TrafficGenerator:
         return time_points
 
 
-def generate_data(topo, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_pos, speed, burst, flow_type=0, mix_ratios=None):
+def group_numbers():
+    """生成特殊分组的 4 个组（每组 8 个数字）"""
+    points = list(range(32))
+
+    # 第一步：分成两个大组（0-15和16-31）
+    group_a = points[:16]
+    group_b = points[16:]
+
+    # 第二步：将每个大组重塑为4x4矩阵
+    matrix_a = np.array(group_a).reshape(4, 4)
+    matrix_b = np.array(group_b).reshape(4, 4)
+
+    # 第三步：将每个4x4矩阵分成4个2x2象限
+    def split_quadrants(matrix):
+        return [matrix[:2, :2].flatten(), matrix[:2, 2:].flatten(), matrix[2:, :2].flatten(), matrix[2:, 2:].flatten()]  # 左上  # 右上  # 左下  # 右下
+
+    quadrants_a = split_quadrants(matrix_a)
+    quadrants_b = split_quadrants(matrix_b)
+
+    # 第四步：将两个大组对应的象限合并
+    final_groups = [np.concatenate((a, b)) for a, b in zip(quadrants_a, quadrants_b)]
+
+    # 转换为列表形式返回
+    return [group.tolist() for group in final_groups]
+
+
+def generate_data(topo, read_duration, write_duration, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_pos, speed, burst, flow_type=0, mix_ratios=None):
     """
     :param interval_count: 读写周期数量(每个周期=read_duration+write_duration)
     """
     # 初始化流量生成器(默认读128ns+写128ns)
-    generator = TrafficGenerator(read_duration=128, write_duration=128)
+    generator = TrafficGenerator(read_duration=read_duration, write_duration=write_duration)
     data_all = []
 
     def generate_entries(src_pos, src_type, dest_type, dest_pos, operation, burst, flow_type, speed, interval_count):
@@ -59,11 +86,29 @@ def generate_data(topo, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, 
             time_offset = 0 if is_read else generator.read_duration
 
             if flow_type == 1:  # 8-shared分组
-                for src in src_pos:
-                    group = src // 8
-                    group_dests = dest_pos[group * 8 : (group + 1) * 8]
-                    for t in time_pattern:
-                        dest = random.choice(group_dests)
+                dest_pos = list(dest_pos)
+                groups = group_numbers()
+                # 提前为每个组打乱 dest
+                shuffled_group_dests = {}
+                for group_id in range(4):  # 现在只有4个组
+                    group_dests = [d for d in dest_pos if d in groups[group_id]]  # 筛选属于当前组的dest
+                    random.shuffle(group_dests)  # 打乱顺序
+                    shuffled_group_dests[group_id] = group_dests.copy()  # 存储打乱后的列表
+
+                for t in time_pattern:
+                    for src in src_pos:
+                        # 找到 src 所属的组（特殊分组）
+                        group_id = next((i for i, g in enumerate(groups) if src in g), -1)
+                        if group_id == -1:
+                            continue  # 如果 src 不在任何组中（理论上不会发生）
+
+                        group_dests = shuffled_group_dests[group_id]  # 获取当前组打乱后的 dest
+                        if not group_dests:  # 如果当前组 dest 用完（可选重置）
+                            group_dests = [d for d in dest_pos if d in groups[group_id]].copy()
+                            random.shuffle(group_dests)  # 重新打乱
+                            shuffled_group_dests[group_id] = group_dests  # 更新
+
+                        dest = group_dests.pop()  # 取最后一个（因为已打乱）
                         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
             elif flow_type == 2:  # private模式
@@ -73,13 +118,27 @@ def generate_data(topo, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, 
                         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
             else:  # 32-shared模式
+                # for t in time_pattern:
+                #     # Shuffle the destination positions for each time pattern to ensure randomness
+                #     shuffled_dest_pos = random.sample(dest_pos, len(dest_pos))
+
+                #     for src, dest in zip(src_pos, shuffled_dest_pos):
+                #         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
+
+                remaining_dest_pos = list(dest_pos).copy()
+
                 for src in src_pos:
                     for t in time_pattern:
-                        dest = random.choice(dest_pos)
-                        # if src == 3:
-                        #     entries.append(f"{base_time + time_offset + t + 4},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
-                        # else:
-                        #     entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
+                        if not remaining_dest_pos:
+                            # 如果所有目标位置都已经被选取过，可以选择重新开始或者结束循环
+                            remaining_dest_pos = list(dest_pos).copy()  # 重新开始
+                            # break  # 或者结束循环
+
+                        # 不放回地选取一个目标位置
+                        dest = random.sample(remaining_dest_pos, 1)[0]
+                        # 从剩余的目标位置中移除已选取的 dest
+                        remaining_dest_pos.remove(dest)
+
                         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
         return entries
@@ -102,16 +161,40 @@ def generate_data(topo, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, 
 
                 time_pattern = generator.calculate_time_points(mode_speed, burst, is_read)
 
+                if mode == 0:  # 32-shared
+                    shuffled_dest_pos = list(dest_pos)
+                    random.shuffle(shuffled_dest_pos)
+                    dest_iter = iter(shuffled_dest_pos)  # 用迭代器逐个取
+                elif mode == 1:  # 8-shared
+                    shuffled_group_dests = {}
+                    for group in range(len(dest_pos) // 8):
+                        group_dests = dest_pos[group * 8 : (group + 1) * 8]
+                        random.shuffle(group_dests)
+                        shuffled_group_dests[group] = iter(group_dests)  # 每组一个迭代器
+
                 for src in src_pos:
                     for t in time_pattern:
                         if mode == 0:  # 32-shared
-                            dest = random.choice(dest_pos)
+                            try:
+                                dest = next(dest_iter)
+                            except StopIteration:  # 如果用完，重新打乱（可选）
+                                random.shuffle(shuffled_dest_pos)
+                                dest_iter = iter(shuffled_dest_pos)
+                                dest = next(dest_iter)
+
                         elif mode == 1:  # 8-shared
                             group = src // 8
-                            group_dests = dest_pos[group * 8 : (group + 1) * 8]
-                            dest = random.choice(group_dests)
+                            try:
+                                dest = next(shuffled_group_dests[group])
+                            except StopIteration:  # 如果当前组用完，重新打乱（可选）
+                                group_dests = dest_pos[group * 8 : (group + 1) * 8]
+                                random.shuffle(group_dests)
+                                shuffled_group_dests[group] = iter(group_dests)
+                                dest = next(shuffled_group_dests[group])
+
                         else:  # private
-                            dest = src if src in dest_pos else dest_pos[src % dest_len]
+                            dest = src if src in dest_pos else dest_pos[src % len(dest_pos)]
+
                         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
         return entries
@@ -124,7 +207,10 @@ def generate_data(topo, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, 
             data_all.extend(generate_mixed_entries(sdma_pos, "gdma", "ddr", l2m_pos, "W", burst, mix_ratios))
         else:
             # data_all.extend(generate_entries(gdma_pos, "gdma", "ddr", ddr_pos, "R", burst, flow_type, speed[burst], interval_count))
-            data_all.extend(generate_entries(gdma_pos, "gdma", "ddr", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
+            data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", ddr_pos, "W", burst, flow_type, speed[burst], interval_count))
+
+            # data_all.extend(generate_entries(gdma_pos, "gdma", "ddr", ddr_pos, "R", burst, flow_type, speed[burst], interval_count))
+            # data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
 
     elif topo == "3x3":
         if flow_type == 3:
@@ -146,18 +232,22 @@ def generate_data(topo, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, 
 if __name__ == "__main__":
     # 参数配置
     topo = "5x4"
-    interval_count = 32
-    file_name = "../../test_data/traffic_ITag_0414.txt"
+    interval_count = 64
+    file_name = "../../test_data/traffic_ITag_0418.txt"
+    np.random.seed(415)
 
     num_ip = 32
     sdma_pos = range(num_ip)
-    # gdma_pos = range(1)
+    gdma_pos = range(num_ip)
+    ddr_pos = range(num_ip)
+    l2m_pos = range(num_ip)
     gdma_pos = [0, 1, 2, 3]
-    ddr_pos = range(15, 16)
-    l2m_pos = range(15, 16)
+    ddr_pos = [18]
 
     speed = {1: 128, 2: 68, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 4
+    read_duration = 0
+    write_duration = 128
 
     # 生成数据(使用混合模式)
-    generate_data(topo, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_pos, speed, burst, flow_type=0)
+    generate_data(topo, read_duration, write_duration, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_pos, speed, burst, flow_type=0)

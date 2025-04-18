@@ -8,8 +8,8 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"Traffic_R_W_64GB.txt"
-    # file_name = r"testcase-v1.1.1.txt"
+    file_name = r"traffic_ITag_0418.txt"
+    # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
     # file_name = r"3x3_burst2.txt"
@@ -31,9 +31,6 @@ def main():
     # model_type = "Feature"
     model_type = "REQ_RSP"
     # model_type = "Packet_Base"
-
-    p1 = 128
-    p2 = 64
 
     results_fig_save_path = None
 
@@ -82,6 +79,10 @@ def main():
     sim.config.ro_tracker_ostd = 128
     sim.config.share_tracker_ostd = 64
     sim.config.sn_wdb_size = sim.config.share_tracker_ostd * sim.config.burst
+    sim.config.IQ_OUT_FIFO_DEPTH = 8
+    sim.config.EQ_IN_FIFO_DEPTH = 8
+    sim.config.RB_IN_FIFO_DEPTH = 8
+    sim.config.RB_OUT_FIFO_DEPTH = 8
     sim.config.ITag_Trigger_Th_H = 16
     sim.config.ITag_Trigger_Th_V = 16
     sim.config.ITag_Max_Num_H = sim.config.ITag_Max_Num_V = 3
@@ -90,11 +91,11 @@ def main():
 
     # sim.config.update_config()
     sim.initial()
-    # sim.end_time = 500
-    sim.print_interval = 20000
+    sim.end_time = 50000
+    sim.print_interval = 2000
     sim.run()
     # print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
-    # print(f"ro_tracker_ostd: {p1}: share_tracker_ostd: {p2}\n")
+    print(f"ITag_Trigger_Th_H: {sim.config.ITag_Trigger_Th_H}: ITag_Max_Num: {sim.config.ITag_Max_Num_V}, {sim.config.seats_per_link}\n")
 
     # # 获取当前的内存快照
     # snapshot = tracemalloc.take_snapshot()

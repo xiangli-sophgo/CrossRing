@@ -100,7 +100,7 @@ def main():
         print("Processing traffic data...")
         process_traffic_data(args.raw_traffic_input, args.traffic_output, args.outstanding)
 
-    if args.mode in [1]:
+    if args.mode in [1, 2]:
         print("Running simulation...")
         processed_data_path = f"{args.traffic_output}/step5_data_merge/"
         run_simulation(args.config, processed_data_path, args.model, args.results_file_name)

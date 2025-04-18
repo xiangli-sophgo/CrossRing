@@ -56,18 +56,18 @@ def find_optimal_parameters():
     os.makedirs(result_root_save_path, exist_ok=True)
 
     # 定义参数范围
-    parm1_start, parm1_end, parm1_step = (2, 5, 1)
-    parm2_start, parm2_end, parm2_step = (2, 7, 1)
-    parm3_start, parm3_end, parm3_step = (2, 6, 1)
+    param1_start, param1_end, param1_step = (2, 5, 1)
+    param2_start, param2_end, param2_step = (2, 7, 1)
+    param3_start, param3_end, param3_step = (2, 6, 1)
 
     # 遍历参数组合
-    # for parm1 in range(parm1_start, parm1_end + 1, parm1_step):
-    # for parm2 in range(parm2_start, parm2_end + 1, parm2_step):
-    for parm1 in range(parm1_start, parm1_end + 1, parm1_step):
-        for parm2 in range(parm1 + 1, parm2_end + 1, parm2_step):
-            for parm3 in range(parm3_start, parm3_end + 1, parm3_step):
+    # for param1 in range(param1_start, param1_end + 1, param1_step):
+    # for param2 in range(param2_start, param2_end + 1, param2_step):
+    for param1 in range(param1_start, param1_end + 1, param1_step):
+        for param2 in range(param1 + 1, param2_end + 1, param2_step):
+            for param3 in range(param3_start, param3_end + 1, param3_step):
 
-                result_part_save_path = f"{parm1}_{parm2}/"
+                result_part_save_path = f"{param1}_{param2}/"
 
                 if model_type == "REQ_RSP":
                     sim = REQ_RSP_model(
@@ -113,9 +113,9 @@ def find_optimal_parameters():
                     sim.config.TL_Etag_T2_UE_MAX = 4
                     sim.config.TL_Etag_T1_UE_MAX = 7
                     sim.config.TR_Etag_T2_UE_MAX = 6
-                    sim.config.TU_Etag_T2_UE_MAX = parm1
-                    sim.config.TU_Etag_T1_UE_MAX = parm2
-                    sim.config.TD_Etag_T2_UE_MAX = parm3
+                    sim.config.TU_Etag_T2_UE_MAX = param1
+                    sim.config.TU_Etag_T1_UE_MAX = param2
+                    sim.config.TD_Etag_T2_UE_MAX = param3
                     sim.config.Both_side_ETag_upgrade = 1
 
                 elif topo_type in ["3x3"]:
@@ -129,14 +129,14 @@ def find_optimal_parameters():
                     sim.config.seats_per_link = 7
                     sim.config.IQ_OUT_FIFO_DEPTH = 6
                     sim.config.EQ_IN_FIFO_DEPTH = 8
-                    sim.config.RB_IN_FIFO_DEPTH = parm1
-                    sim.config.RB_OUT_FIFO_DEPTH = parm2
+                    sim.config.RB_IN_FIFO_DEPTH = param1
+                    sim.config.RB_OUT_FIFO_DEPTH = param2
 
                 # sim.config.update_config()
                 sim.initial()
                 sim.end_time = 20000
                 sim.print_interval = 10000
-                print(f"Parm1: {parm1}, Parm2: {parm2}, Parm3: {parm3}")
+                print(f"param1: {param1}, param2: {param2}, param3: {param3}")
 
                 # 运行模拟
                 sim.run()

@@ -15,7 +15,8 @@ class REQ_RSP_model(BaseModel):
             self.rn_type, self.sn_type = self.get_network_types()
 
             self.check_and_release_sn_tracker()
-            # self.flit_trace(102)
+            # self.flit_trace(484)
+            print(self.cycle)
 
             # Process requests
             self.process_requests()
@@ -445,9 +446,23 @@ class REQ_RSP_model(BaseModel):
         # 分类不同类型的flits
         ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits = self.classify_flits(flits)
 
+        # for flit in flits:
+        #     if (
+        #         flit.current_link
+        #         and flit.current_link[0] - flit.current_link[1] != self.config.cols
+        #         and (
+        #             (flit.current_seat_index == len(network.links[flit.current_link]) - 2 and len(network.links[flit.current_link]) != 2)
+        #             or (flit.current_seat_index == len(network.links[flit.current_link]) - 1 and len(network.links[flit.current_link]) == 2)
+        #         )
+        #     ):
+        #         print(network.name, flit.current_link, flit.packet_id, flit.current_seat_index, flit.flit_id_in_packet)
+        #         network.links_flow_stat[flit.req_type][flit.current_link] += 1
+
         # 处理新到达的flits
         for flit in new_flits + horizontal_flits:
             network.plan_move(flit)
+            if network.execute_moves(flit, self.cycle):
+                flits.remove(flit)
 
         # 处理transfer station的flits
         for col in range(1, self.config.rows, 2):
@@ -501,13 +516,15 @@ class REQ_RSP_model(BaseModel):
         # 处理纵向flits的移动
         for flit in vertical_flits:
             network.plan_move(flit)
+            if network.execute_moves(flit, self.cycle):
+                flits.remove(flit)
 
         # eject arbitration
         if flit_type in ["req", "rsp", "data"]:
             self._handle_eject_arbitration(network, flit_type)
 
         # 执行所有flit的移动
-        for flit in vertical_flits + horizontal_flits + new_flits + local_flits:
+        for flit in local_flits:
             if network.execute_moves(flit, self.cycle):
                 flits.remove(flit)
 
@@ -515,8 +532,11 @@ class REQ_RSP_model(BaseModel):
         for flit in ring_bridge_EQ_flits:
             if flit.is_arrive:
                 flit.arrival_network_cycle = self.cycle
-                network.eject_queues["ring_bridge"][flit.destination].append(flit)
-                flits.remove(flit)
+                if len(network.eject_queues["ring_bridge"][flit.destination]) < self.config.EQ_IN_FIFO_DEPTH:
+                    network.eject_queues["ring_bridge"][flit.destination].append(flit)
+                    flits.remove(flit)
+                else:
+                    flit.is_arrive = False
             else:
                 network.execute_moves(flit, self.cycle)
 

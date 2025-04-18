@@ -550,6 +550,9 @@ class Network:
         col_end = col_start + self.config.num_nodes - self.config.cols * 2 if col_start >= 0 else -1
 
         link = self.links.get(flit.current_link)
+        if link and flit.current_seat_index == len(link) - 1:
+            print(self.name, flit.current_link, flit.packet_id, flit.current_seat_index, flit.flit_id_in_packet)
+            self.links_flow_stat[flit.req_type][flit.current_link] += 1
         # Plan non ring bridge moves
         if current - next_node != self.config.cols:
             # Handling delay flits
@@ -1244,8 +1247,8 @@ class Network:
                 link = self.links.get(flit.current_link)
                 # print(flit.current_seat_index)
                 link[flit.current_seat_index] = flit
-                if flit.current_seat_index == len(link) - 1:
-                    self.links_flow_stat[flit.req_type][flit.current_link] += 1
+                # if flit.current_seat_index ==0:
+                #     self.links_flow_stat[flit.req_type][flit.current_link] += 1
             else:
                 # 将 flit 放入 ring_bridge 的相应方向
                 if not flit.is_on_station:
