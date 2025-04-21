@@ -388,7 +388,7 @@ class BaseModel:
                                         self.create_rsp(new_req, "positive")
                             else:
                                 self.send_write_flits_num_stat += 1
-                                if flit.flit_id_in_packet == 0:
+                                if flit.flit_id == 0:
                                     for f in self.node.rn_wdb[self.rn_type][ip_pos][flit.packet_id]:
                                         f.entry_db_cycle = self.cycle
                                 self.node.rn_wdb[self.rn_type][ip_pos][flit.packet_id].pop(0)
@@ -654,7 +654,7 @@ class BaseModel:
     def classify_flits(self, flits):
         ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits = [], [], [], [], []
         for flit in flits:
-            # if flit.packet_id == 102 and flit.flit_id_in_packet == 0:
+            # if flit.packet_id == 102 and flit.flit_id == 0:
             # print(flit, "1")
             if flit.source - flit.destination == self.config.cols:
                 flit.is_new_on_network = False
@@ -1276,7 +1276,7 @@ class BaseModel:
             flit.original_destination_type = req.original_destination_type
             flit.req_type = req.req_type
             flit.packet_id = req.packet_id
-            flit.flit_id_in_packet = i
+            flit.flit_id = i
             flit.burst_length = req.burst_length
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
@@ -1304,7 +1304,7 @@ class BaseModel:
             flit.original_source_type = req.original_source_type
             flit.original_destination_type = req.original_destination_type
             flit.packet_id = req.packet_id
-            flit.flit_id_in_packet = i
+            flit.flit_id = i
             flit.burst_length = req.burst_length
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
@@ -1484,7 +1484,6 @@ class BaseModel:
                 intervals = self.write_ip_intervals[ip_id]
                 bw = self.calculate_ip_bandwidth(intervals)
                 print(f"{ip_id}: {bw:.1f} GB/s", file=f3)
-
 
         self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
         print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")

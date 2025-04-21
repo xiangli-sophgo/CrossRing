@@ -8,7 +8,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_ITag_0418.txt"
+    file_name = r"traffic_ITag_0421.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -83,8 +83,8 @@ def main():
     sim.config.EQ_IN_FIFO_DEPTH = 8
     sim.config.RB_IN_FIFO_DEPTH = 8
     sim.config.RB_OUT_FIFO_DEPTH = 8
-    sim.config.ITag_Trigger_Th_H = 16
-    sim.config.ITag_Trigger_Th_V = 16
+    sim.config.ITag_Trigger_Th_H = 80
+    sim.config.ITag_Trigger_Th_V = 80
     sim.config.ITag_Max_Num_H = sim.config.ITag_Max_Num_V = 3
     sim.config.seats_per_link = 7
     sim.config.Both_side_ETag_upgrade = 1

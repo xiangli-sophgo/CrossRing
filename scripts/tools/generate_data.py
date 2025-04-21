@@ -232,8 +232,8 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
 if __name__ == "__main__":
     # 参数配置
     topo = "5x4"
-    interval_count = 64
-    file_name = "../../test_data/traffic_ITag_0418.txt"
+    interval_count = 32
+    file_name = "../../test_data/traffic_ITag_0421.txt"
     np.random.seed(415)
 
     num_ip = 32
@@ -241,10 +241,10 @@ if __name__ == "__main__":
     gdma_pos = range(num_ip)
     ddr_pos = range(num_ip)
     l2m_pos = range(num_ip)
-    gdma_pos = [0, 1, 2, 3]
-    ddr_pos = [18]
+    gdma_pos = [0, 1, 3]
+    ddr_pos = [10, 14]
 
-    speed = {1: 128, 2: 68, 4: 128}  # 不同burst对应的带宽(GB/s)
+    speed = {1: 128, 2: 68, 4: 256}  # 不同burst对应的带宽(GB/s)
     burst = 4
     read_duration = 0
     write_duration = 128

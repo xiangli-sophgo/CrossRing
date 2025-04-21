@@ -676,7 +676,7 @@ class Packet_Base_model(BaseModel):
                                 network.recv_flits_num += 1
                             elif flit.req_type == "write":
                                 # packet base: 到达的flit
-                                if flit.flit_id_in_packet == 0:
+                                if flit.flit_id == 0:
                                     if self.node.sn_wdb_count[self.sn_type][in_pos] > 0:
                                         flit.sn_tracker_type = "share"
                                         req = next(

@@ -15,8 +15,7 @@ class REQ_RSP_model(BaseModel):
             self.rn_type, self.sn_type = self.get_network_types()
 
             self.check_and_release_sn_tracker()
-            # self.flit_trace(484)
-            print(self.cycle)
+            # self.flit_trace(13)
 
             # Process requests
             self.process_requests()
@@ -266,7 +265,7 @@ class REQ_RSP_model(BaseModel):
                                         self.create_rsp(new_req, "positive")
                             else:
                                 self.send_write_flits_num_stat += 1
-                                if flit.flit_id_in_packet == 0:
+                                if flit.flit_id == 0:
                                     for f in self.node.rn_wdb[self.rn_type][ip_pos][flit.packet_id]:
                                         f.entry_db_cycle = self.cycle
                                 self.node.rn_wdb[self.rn_type][ip_pos][flit.packet_id].pop(0)
@@ -423,7 +422,7 @@ class REQ_RSP_model(BaseModel):
     # def classify_flits(self, flits):
     #     ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits = [], [], [], [], []
     #     for flit in flits:
-    #         # if flit.packet_id == 17258 and flit.flit_id_in_packet == 1:
+    #         # if flit.packet_id == 17258 and flit.flit_id == 1:
     #         # print(flit)
     #         if flit.source - flit.destination == self.config.cols:
     #             flit.is_new_on_network = False
@@ -450,19 +449,16 @@ class REQ_RSP_model(BaseModel):
         #     if (
         #         flit.current_link
         #         and flit.current_link[0] - flit.current_link[1] != self.config.cols
-        #         and (
-        #             (flit.current_seat_index == len(network.links[flit.current_link]) - 2 and len(network.links[flit.current_link]) != 2)
-        #             or (flit.current_seat_index == len(network.links[flit.current_link]) - 1 and len(network.links[flit.current_link]) == 2)
-        #         )
+        #         and ((flit.current_seat_index == 4 and len(network.links[flit.current_link]) != 2) or (flit.current_seat_index == 0 and len(network.links[flit.current_link]) == 2))
         #     ):
-        #         print(network.name, flit.current_link, flit.packet_id, flit.current_seat_index, flit.flit_id_in_packet)
+        #         print(network.name, flit.current_link, flit.packet_id, flit.current_seat_index, flit.flit_id)
         #         network.links_flow_stat[flit.req_type][flit.current_link] += 1
 
         # 处理新到达的flits
         for flit in new_flits + horizontal_flits:
             network.plan_move(flit)
-            if network.execute_moves(flit, self.cycle):
-                flits.remove(flit)
+            # if network.execute_moves(flit, self.cycle):
+            # flits.remove(flit)
 
         # 处理transfer station的flits
         for col in range(1, self.config.rows, 2):
@@ -516,15 +512,15 @@ class REQ_RSP_model(BaseModel):
         # 处理纵向flits的移动
         for flit in vertical_flits:
             network.plan_move(flit)
-            if network.execute_moves(flit, self.cycle):
-                flits.remove(flit)
+            # if network.execute_moves(flit, self.cycle):
+            # flits.remove(flit)
 
         # eject arbitration
         if flit_type in ["req", "rsp", "data"]:
             self._handle_eject_arbitration(network, flit_type)
 
         # 执行所有flit的移动
-        for flit in local_flits:
+        for flit in new_flits + horizontal_flits + vertical_flits + local_flits:
             if network.execute_moves(flit, self.cycle):
                 flits.remove(flit)
 
