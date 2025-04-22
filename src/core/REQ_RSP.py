@@ -16,6 +16,7 @@ class REQ_RSP_model(BaseModel):
 
             self.check_and_release_sn_tracker()
             # self.flit_trace(1000)
+            self.vis.update_display(self.flit_network)
 
             # Process requests
             self.process_requests()

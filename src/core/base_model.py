@@ -4,7 +4,7 @@ from collections import deque, defaultdict
 from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths
 from config.config import SimulationConfig
 from src.utils.component import Flit, Network, Node
-from src.core.CrossRing_Piece_Visualizer import Network_Internal_Partition_Visualizer
+from src.core.CrossRing_Piece_Visualizer import CrossRingVisualizer
 import matplotlib.pyplot as plt
 import random
 import json
@@ -54,7 +54,7 @@ class BaseModel:
         self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.flit_network = Network(self.config, self.adjacency_matrix, name="Data Network")
-        # self.vis = Network_Internal_Partition_Visualizer(self.req_network, node_id=5, config=self.config)  # 示例节点ID
+        self.vis = CrossRingVisualizer(self.config, 4) 
         if self.config.Both_side_ETag_upgrade:
             self.req_network.Both_side_ETag_upgrade = self.rsp_network.Both_side_ETag_upgrade = self.flit_network.Both_side_ETag_upgrade = True
         self.routes = find_shortest_paths(self.adjacency_matrix)
