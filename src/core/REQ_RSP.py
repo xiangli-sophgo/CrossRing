@@ -15,7 +15,7 @@ class REQ_RSP_model(BaseModel):
             self.rn_type, self.sn_type = self.get_network_types()
 
             self.check_and_release_sn_tracker()
-            # self.flit_trace(13)
+            # self.flit_trace(1000)
 
             # Process requests
             self.process_requests()
@@ -731,29 +731,19 @@ class REQ_RSP_model(BaseModel):
                 if network.links_tag[link][-1]:
                     if flit_l.destination == next_pos:
                         eject_queue = network.eject_queues[direction][next_pos]
-                        reservations = network.eject_reservations[direction][next_pos]
-                        if network.links_tag[link][-1] == [
-                            next_pos,
-                            direction,
-                        ] and network.config.EQ_IN_FIFO_DEPTH - len(
-                            eject_queue
-                        ) > len(reservations):
+                        # reservations = network.eject_reservations[direction][next_pos]
+                        # if network.links_tag[link][-1] == [next_pos, direction] and network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations):
+                        if network.links_tag[link][-1] == [next_pos, direction] and network.config.EQ_IN_FIFO_DEPTH > len(eject_queue):
                             network.remain_tag[direction][next_pos] += 1
                             network.links_tag[link][-1] = None
                             return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
                 elif flit_l.destination == next_pos:
                     eject_queue = network.eject_queues[direction][next_pos]
-                    reservations = network.eject_reservations[direction][next_pos]
+                    # reservations = network.eject_reservations[direction][next_pos]
                     return (
-                        self._update_flit_state(
-                            network,
-                            dir_key,
-                            pos,
-                            next_pos,
-                            opposite_node,
-                            direction,
-                        )
-                        if network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations)
+                        self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+                        # if network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations)
+                        if network.config.EQ_IN_FIFO_DEPTH > len(eject_queue)
                         else self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
                     )
                 else:

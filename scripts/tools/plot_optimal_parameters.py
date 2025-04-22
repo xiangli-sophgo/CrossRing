@@ -84,7 +84,7 @@ file_root = r"../../Result/Params_csv/"
 # data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
 # data_file_name = r"RB_IN_OUT_FIFO_459_0303_2_fixed_time_interval.csv"
 # data_file_name = r"ITag_0411.csv"
-data_file_name = r"Spare_core_32_shared_0418.csv"
+data_file_name = r"ETag_EQ_0421.csv"
 # data_file_name = r"ITag_0416.csv"
 # data_file_name = r"Spare_core_0410_16_core_128GB_32_shared2.csv"
 # data_file_name = r"Spare_core_0410_Traffic_R_W_64GB_32_shared.csv"
@@ -107,16 +107,16 @@ data = pd.read_csv(file_root + data_file_name)
 # 定义不同的拓扑
 # topo = topologies[0]
 
-# show_value = "read_BW"
+show_value = "read_BW"
 # show_value = "write_BW"
 # show_value = "Total_BW"
 # show_value = "ITag_h_num"
 # show_value = "ITag_v_num"
 # show_value = "R_finish_time"
-show_value = "W_finish_time"
+# show_value = "W_finish_time"
 # show_value = "R_tail_latency"
 # show_value = "W_tail_latency"
-# show_value = "EQ_ETag_T0_num"
+# show_value = "RB_ETag_T1_num"
 # show_value = "gdma-R-L2M_thoughput"
 # show_value = "sdma-W-L2M_thoughput"
 # show_value = "sdma-R-DDR_thoughput"
@@ -124,7 +124,8 @@ show_value = "W_finish_time"
 # show_value = "data_cir_v_num"
 # show_value = "read_retry_num"
 # show_value = "write_retry_num"
-# show_value = "write_latency_max"
+# show_value = "read_latency_avg"
+# show_value = "read_latency_max"
 # show_value = "data_wait_cycle_h_num"
 # x_name = "ro_tracker_ostd"
 # y_name = "share_tracker_ostd"
@@ -140,25 +141,25 @@ show_value = "W_finish_time"
 # x_name = "TL_Etag_T2_UE_MAX"
 # y_name = "TL_Etag_T1_UE_MAX"
 # z_name = "TR_Etag_T2_UE_MAX"
-# x_name = "TU_Etag_T2_UE_MAX"
-# y_name = "TU_Etag_T1_UE_MAX"
-# z_name = "TD_Etag_T2_UE_MAX"
+x_name = "TU_Etag_T2_UE_MAX"
+y_name = "TU_Etag_T1_UE_MAX"
+z_name = "TD_Etag_T2_UE_MAX"
 # x_name = "ITag_Trigger_Th_H"
 # y_name = "ITag_Trigger_Th_V"
 # z_name = "ITag_Max_Num_H"
-x_name = "fail_core_num"
-y_name = "spare_core_row"
-# model_type = "REQ_RSP"
+# x_name = "fail_core_num"
+# y_name = "spare_core_row"
+model_type = "REQ_RSP"
 # model_type = "Packet_Base"
 # model_type = "Feature"
 
-Both_side_ETag_upgrade = 1
+Both_side_ETag_upgrade = 0
 
 rate_plot = 0
 log_data = 0
 save_images = 0
 reverse_cmap = 0
-plot_type = 0
+plot_type = 1
 
 
 # 设置 vmax 和 vmin

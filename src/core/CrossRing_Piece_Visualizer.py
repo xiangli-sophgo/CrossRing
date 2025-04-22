@@ -4,7 +4,7 @@ from matplotlib.patches import Rectangle, Circle
 import numpy as np
 
 
-class NetworkVisualizer:
+class Network_Internal_Partition_Visualizer:
     def __init__(self, network, node_id, config):
         self.network = network
         self.node_id = node_id
@@ -120,20 +120,3 @@ class NetworkVisualizer:
         """启动动画"""
         ani = animation.FuncAnimation(self.fig, self.update, interval=1000, blit=True)
         plt.show()
-
-
-# 使用示例
-if __name__ == "__main__":
-    from src.utils.component import Flit, Network, Node  # 替换为实际模块
-    from config.config import SimulationConfig
-
-    # 初始化网络（需要提供实际的config和邻接矩阵）
-    config_path = r"../config/config2.json"
-    config = SimulationConfig(config_path)
-    config.topo_type = "5x4"
-    adj_matrix = np.zeros((config.num_nodes, config.num_nodes))  # 示例矩阵
-    network = Network(config, adj_matrix)
-
-    # 创建可视化实例并运行动画
-    vis = NetworkVisualizer(network, node_id=5, config=config)  # 示例节点ID
-    vis.animate()

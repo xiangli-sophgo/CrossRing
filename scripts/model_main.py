@@ -8,7 +8,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_ITag_0421.txt"
+    file_name = r"traffic_32_shared_0422.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -17,16 +17,16 @@ def main():
     # file_name = r"demo_459.txt"
 
     # traffic_file_path = r"../../traffic/"
-    # traffic_file_path = r"../traffic/output_DeepSeek/step5_data_merge/"
-    # traffic_file_path = r"../traffic/output_v8_new/step5_data_merge/"
+    # traffic_file_path = r"../traffic/output_DeepSeek_part1/step5_data_merge/"
+    traffic_file_path = r"../traffic/output_v8_new/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_All_reduce/step5_data_merge/"
     # file_name = r"output_embedding_Trace.txt"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"output_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
-    # file_name = r"LLama2_MLP_Trace.txt"
+    # file_name = r"MLP_MoE_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
-    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
+    file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
 
     # model_type = "Feature"
     model_type = "REQ_RSP"
@@ -71,7 +71,7 @@ def main():
 
     # sim.end_time = 10000
     sim.config.burst = 4
-    sim.config.num_ips = 4
+    sim.config.num_ips = 32
     sim.config.rn_read_tracker_ostd = 128
     sim.config.rn_write_tracker_ostd = 64
     sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
@@ -83,15 +83,21 @@ def main():
     sim.config.EQ_IN_FIFO_DEPTH = 8
     sim.config.RB_IN_FIFO_DEPTH = 8
     sim.config.RB_OUT_FIFO_DEPTH = 8
+    sim.config.TL_Etag_T2_UE_MAX = 4
+    sim.config.TL_Etag_T1_UE_MAX = 7
+    sim.config.TR_Etag_T2_UE_MAX = 6
+    sim.config.TU_Etag_T2_UE_MAX = 4
+    sim.config.TU_Etag_T1_UE_MAX = 7
+    sim.config.TD_Etag_T3_UE_MAX = 5
     sim.config.ITag_Trigger_Th_H = 80
     sim.config.ITag_Trigger_Th_V = 80
-    sim.config.ITag_Max_Num_H = sim.config.ITag_Max_Num_V = 3
+    sim.config.ITag_Max_Num_H = sim.config.ITag_Max_Num_V = 1
     sim.config.seats_per_link = 7
     sim.config.Both_side_ETag_upgrade = 1
 
     # sim.config.update_config()
     sim.initial()
-    sim.end_time = 50000
+    # sim.end_time = 50000
     sim.print_interval = 2000
     sim.run()
     # print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")

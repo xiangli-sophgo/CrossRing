@@ -4,6 +4,7 @@ from collections import deque, defaultdict
 from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths
 from config.config import SimulationConfig
 from src.utils.component import Flit, Network, Node
+from src.core.CrossRing_Piece_Visualizer import Network_Internal_Partition_Visualizer
 import matplotlib.pyplot as plt
 import random
 import json
@@ -53,6 +54,7 @@ class BaseModel:
         self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.flit_network = Network(self.config, self.adjacency_matrix, name="Data Network")
+        # self.vis = Network_Internal_Partition_Visualizer(self.req_network, node_id=5, config=self.config)  # 示例节点ID
         if self.config.Both_side_ETag_upgrade:
             self.req_network.Both_side_ETag_upgrade = self.rsp_network.Both_side_ETag_upgrade = self.flit_network.Both_side_ETag_upgrade = True
         self.routes = find_shortest_paths(self.adjacency_matrix)
@@ -1534,29 +1536,38 @@ class BaseModel:
             dma_intervals = self.write_ip_intervals[dma_id]
             ddr_intervals = self.write_ip_intervals[ddr_id]
 
-        # 合并区间逻辑（与全局merged_intervals相同）
+        # 合并区间逻辑
         current_start = flit.req_departure_cycle // self.config.network_frequency
         current_end = flit.arrival_cycle // self.config.network_frequency
         current_count = flit.burst_length
 
+        # 更新 dma_intervals
         if not dma_intervals:
             dma_intervals.append((current_start, current_end, current_count))
         else:
-            last_start, last_end, last_count = dma_intervals[-1]
-            if current_start <= last_end:
-                merged = (last_start, max(last_end, current_end), last_count + current_count)
-                dma_intervals[-1] = merged
-            else:
-                dma_intervals.append((current_start, current_end, current_count))
+            # 如果新区间与最后一个区间有重叠，合并
+            while dma_intervals and current_start <= dma_intervals[-1][1]:
+                last_start, last_end, last_count = dma_intervals.pop()
+                current_start = min(last_start, current_start)
+                current_end = max(last_end, current_end)
+                current_count += last_count
+            dma_intervals.append((current_start, current_end, current_count))
+
+        # 同理更新 ddr_intervals
+        # 为了避免对象引用问题，单独计算一份新的current_start, current_end, current_count_for_ddr
+        cur_start_ddr = flit.req_departure_cycle // self.config.network_frequency
+        cur_end_ddr = flit.arrival_cycle // self.config.network_frequency
+        cur_count_ddr = flit.burst_length
+
         if not ddr_intervals:
-            ddr_intervals.append((current_start, current_end, current_count))
+            ddr_intervals.append((cur_start_ddr, cur_end_ddr, cur_count_ddr))
         else:
-            last_start, last_end, last_count = ddr_intervals[-1]
-            if current_start <= last_end:
-                merged = (last_start, max(last_end, current_end), last_count + current_count)
-                ddr_intervals[-1] = merged
-            else:
-                ddr_intervals.append((current_start, current_end, current_count))
+            while ddr_intervals and cur_start_ddr <= ddr_intervals[-1][1]:
+                last_start, last_end, last_count = ddr_intervals.pop()
+                cur_start_ddr = min(last_start, cur_start_ddr)
+                cur_end_ddr = max(last_end, cur_end_ddr)
+                cur_count_ddr += last_count
+            ddr_intervals.append((cur_start_ddr, cur_end_ddr, cur_count_ddr))
 
         # 更新字典
         if req_type == "R":
@@ -1566,20 +1577,21 @@ class BaseModel:
             self.write_ip_intervals[dma_id] = dma_intervals
             self.write_ip_intervals[ddr_id] = ddr_intervals
 
-        if flit.req_departure_cycle // self.config.network_frequency <= last_end:
-            merged_intervals[-1] = (
-                last_start,
-                max(last_end, flit.arrival_cycle // self.config.network_frequency),
-                count + flit.burst_length,
-            )
+        # 对 merged_intervals 的更新，防止出现重叠情况
+        # 这里采用类似的逻辑：检查 new_interval 与最后一个区间是否重叠，若重叠则合并
+        # 注意：merged_intervals可能为空，所以先添加再合并
+        new_interval = (flit.req_departure_cycle // self.config.network_frequency, flit.arrival_cycle // self.config.network_frequency, flit.burst_length)
+        if not merged_intervals:
+            merged_intervals.append(new_interval)
         else:
-            merged_intervals.append(
-                (
-                    flit.req_departure_cycle // self.config.network_frequency,
-                    flit.arrival_cycle // self.config.network_frequency,
-                    flit.burst_length,
-                )
-            )
+            # 采用 while 循环逐步合并重叠区间
+            while merged_intervals and (new_interval[0] <= merged_intervals[-1][1]):
+                last_start, last_end, last_count = merged_intervals.pop()
+                merged_start = min(last_start, new_interval[0])
+                merged_end = max(last_end, new_interval[1])
+                merged_count = last_count + new_interval[2]
+                new_interval = (merged_start, merged_end, merged_count)
+            merged_intervals.append(new_interval)
 
         if flit.source_type == "ddr" and flit.destination_type == "sdma" and req_type == "R":
             self.sdma_R_ddr_finish_time = max(self.sdma_R_ddr_finish_time, flit.arrival_cycle // self.config.network_frequency)
@@ -1611,23 +1623,26 @@ class BaseModel:
         """Output the intervals and calculate bandwidth for the given request type."""
         print(f"{req_type} intervals:", file=f3)
         print(f"{req_type} results:")
-        # print(f"{req_type} results:", file=f3)
-        # weighted_bandwidth_sum, total_count, finish_time, total_bandwidth = 0, 0, 0, [np.inf, -np.inf]
-        weighted_bandwidth_sum, total_count, finish_time, total_bandwidth = 0, 0, self.cycle // self.config.network_frequency, [np.inf, -np.inf]
+        total_count = 0
+        finish_time = 0  # self.cycle // self.config.network_frequency
+        total_interval_time = 0  # 累加所有区间的时长
 
         for start, end, count in merged_intervals:
             if start == end:
                 continue
-            bandwidth = count * 128 / (end - start) / self.config.num_ips
-            total_bandwidth[0] = min(total_bandwidth[0], bandwidth)
-            total_bandwidth[1] = max(total_bandwidth[1], bandwidth)
-            weighted_bandwidth_sum += bandwidth * count
+            interval_bandwidth = count * 128 / (end - start) / self.config.num_ips
+            interval_time = end - start
+            # 累加所有区间时长及count
+            total_interval_time += interval_time
             total_count += count
-            print(f"Interval: {start} to {end}, count: {count}, bandwidth: {bandwidth:.1f}", file=f3)
+            print(f"Interval: {start} to {end}, count: {count}, bandwidth: {interval_bandwidth:.1f}", file=f3)
             finish_time = max(finish_time, end)
 
-        # weighted_bandwidth = weighted_bandwidth_sum / total_count if total_count > 0 else 0
-        weighted_bandwidth = total_count * 128 / finish_time / self.config.num_ips
+        # 带宽计算：
+        if total_interval_time > 0:
+            total_bandwidth = total_count * 128 / total_interval_time / self.config.num_ips
+        else:
+            total_bandwidth = 0
 
         if req_type == "Read":
             self.R_finish_time_stat = finish_time
@@ -1641,11 +1656,12 @@ class BaseModel:
         latency_avg = np.average(latency)
         latency_max = max(latency)
         print(
-            f"Weighted bandwidth: {weighted_bandwidth:.1f} AvgLatency: {latency_avg:.1f}, MaxLatency: {latency_max}",
+            f"Weighted bandwidth: {total_bandwidth:.1f} AvgLatency: {latency_avg:.1f}, MaxLatency: {latency_max}",
             file=f3,
         )
-        print(f"Weighted bandwidth: {weighted_bandwidth:.1f} AvgLatency: {latency_avg:.1f}, MaxLatency: {latency_max}")
-        return weighted_bandwidth, latency_avg, latency_max
+        print(f"Weighted bandwidth: {total_bandwidth:.1f} AvgLatency: {latency_avg:.1f}, MaxLatency: {latency_max}")
+
+        return total_bandwidth, latency_avg, latency_max
 
     def calculate_ip_bandwidth(self, intervals):
         """计算给定区间的加权带宽"""

@@ -1,0 +1,12 @@
+// 内部节点 FIFO & Link 动态演示
+digraph {
+	FIFO [label="FIFO（方向：left）
+IP: 5
+flit 数量: 2" color="#006064" fillcolor="#e0f7fa" shape=box style=filled]
+	Link [label="Link
+(5, 5)
+flit 数量: 2" color="#e65100" fillcolor="#ffe0b2" shape=box style=filled]
+	Out [label="接收节点" color="#2e7d32" fillcolor="#c8e6c9" shape=box style=filled]
+	FIFO -> Link [label="flit 出队"]
+	Link -> Out [label="flit 传输"]
+}
