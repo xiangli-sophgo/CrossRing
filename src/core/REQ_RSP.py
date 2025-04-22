@@ -721,40 +721,125 @@ class REQ_RSP_model(BaseModel):
             else:
                 self.create_rsp(req, "datasend")
 
+    # def _process_ring_bridge(self, network, direction, pos, next_pos, curr_node, opposite_node):
+    #     dir_key = f"v{direction}"
+
+    #     if network.ring_bridge[dir_key][(pos, next_pos)]:
+    #         link = (curr_node, next_pos)
+    #         if network.links[link][-1]:
+    #             flit_l = network.links[link][-1]
+    #             if network.links_tag[link][-1]:
+    #                 if flit_l.destination == next_pos:
+    #                     eject_queue = network.eject_queues[direction][next_pos]
+    #                     # reservations = network.eject_reservations[direction][next_pos]
+    #                     # if network.links_tag[link][-1] == [next_pos, direction] and network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations):
+    #                     if network.links_tag[link][-1] == [next_pos, direction] and network.config.EQ_IN_FIFO_DEPTH > len(eject_queue):
+    #                         network.remain_tag[direction][next_pos] += 1
+    #                         network.links_tag[link][-1] = None
+    #                         return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+    #             elif flit_l.destination == next_pos:
+    #                 eject_queue = network.eject_queues[direction][next_pos]
+    #                 # reservations = network.eject_reservations[direction][next_pos]
+    #                 return (
+    #                     self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+    #                     # if network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations)
+    #                     if network.config.EQ_IN_FIFO_DEPTH > len(eject_queue)
+    #                     and (
+    #                         (
+    #                             direction == "down"
+    #                             and (
+    #                                 (flit_l.ETag_priority in ["T1", "T0"] and network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH)
+    #                                 or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX)
+    #                             )
+    #                         )
+    #                         or (
+    #                             direction == "up"
+    #                             and (
+    #                                 (
+    #                                     flit_l.ETag_priority == "T0"
+    #                                     and network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH
+    #                                     and network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l)
+    #                                 )
+    #                                 or (flit_l.ETag_priority == "T1" and network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX)
+    #                                 or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)
+    #                             )
+    #                         )
+    #                     )
+    #                     else self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
+    #                 )
+    #             else:
+    #                 return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
+    #         else:
+    #             if network.links_tag[link][-1] is None:
+    #                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+    #             if network.links_tag[link][-1] == [next_pos, direction]:
+    #                 network.remain_tag[direction][next_pos] += 1
+    #                 network.links_tag[link][-1] = None
+    #                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+    
     def _process_ring_bridge(self, network, direction, pos, next_pos, curr_node, opposite_node):
         dir_key = f"v{direction}"
+        link = (curr_node, next_pos)
+        
+        # Early return if ring bridge is not active for this direction and position
+        if not network.ring_bridge[dir_key][(pos, next_pos)]:
+            return None
 
-        if network.ring_bridge[dir_key][(pos, next_pos)]:
-            link = (curr_node, next_pos)
-            if network.links[link][-1]:
-                flit_l = network.links[link][-1]
-                if network.links_tag[link][-1]:
-                    if flit_l.destination == next_pos:
-                        eject_queue = network.eject_queues[direction][next_pos]
-                        # reservations = network.eject_reservations[direction][next_pos]
-                        # if network.links_tag[link][-1] == [next_pos, direction] and network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations):
-                        if network.links_tag[link][-1] == [next_pos, direction] and network.config.EQ_IN_FIFO_DEPTH > len(eject_queue):
-                            network.remain_tag[direction][next_pos] += 1
-                            network.links_tag[link][-1] = None
-                            return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-                elif flit_l.destination == next_pos:
-                    eject_queue = network.eject_queues[direction][next_pos]
-                    # reservations = network.eject_reservations[direction][next_pos]
-                    return (
-                        self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-                        # if network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations)
-                        if network.config.EQ_IN_FIFO_DEPTH > len(eject_queue)
-                        else self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
-                    )
-                else:
-                    return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
-            else:
-                if network.links_tag[link][-1] is None:
-                    return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-                if network.links_tag[link][-1] == [next_pos, direction]:
-                    network.remain_tag[direction][next_pos] += 1
-                    network.links_tag[link][-1] = None
-                    return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+        # Case 1: No flit in the link
+        if not network.links[link][-1]:
+            # Handle empty link cases
+            if network.links_tag[link][-1] is None:
+                return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+            
+            if network.links_tag[link][-1] == [next_pos, direction]:
+                network.remain_tag[direction][next_pos] += 1
+                network.links_tag[link][-1] = None
+                return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+            
+            return None
+        
+        # Get the flit at the end of the link
+        flit_l = network.links[link][-1]
+        
+        # Case 2: Flit destination doesn't match next position
+        if flit_l.destination != next_pos:
+            return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
+        
+        # Case 3: Flit destination matches next position
+        eject_queue = network.eject_queues[direction][next_pos]
+        
+        # Subcase 3.1: Link has a tag
+        if network.links_tag[link][-1]:
+            if (network.links_tag[link][-1] == [next_pos, direction] and 
+                network.config.EQ_IN_FIFO_DEPTH > len(eject_queue)):
+                network.remain_tag[direction][next_pos] += 1
+                network.links_tag[link][-1] = None
+                return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+            return None
+        
+        # Subcase 3.2: Link has no tag
+        if network.config.EQ_IN_FIFO_DEPTH <= len(eject_queue):
+            return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
+        
+        # Check priority conditions based on direction
+        if direction == "down":
+            if ((flit_l.ETag_priority in ["T1", "T0"] and 
+                network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH) or
+                (flit_l.ETag_priority == "T2" and 
+                network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX)):
+                return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+        
+        elif direction == "up":
+            if ((flit_l.ETag_priority == "T0" and 
+                network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH and
+                network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l)) or
+                (flit_l.ETag_priority == "T1" and 
+                network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX) or
+                (flit_l.ETag_priority == "T2" and 
+                network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)):
+                return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+        
+        return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
     def _handle_response(self, rsp, in_pos):
         """处理response的eject"""

@@ -389,8 +389,14 @@ class Network:
                         if flit_l.current_link[1] == flit_l.current_position:
                             # flit_exist_right = any(flit_r.id == flit_l.id for flit_r in self.station_reservations["right"][(flit_l.current_link[1], flit_l.path[flit_l.path_index])])
                             link_station = self.ring_bridge["right"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
+                            new_current = flit_l.current_link[1]
+                            new_next_node = flit_l.path[flit_l.path_index]
                             # if len(link_station) < self.config.RB_IN_FIFO_DEPTH and flit_exist_right:
-                            if len(link_station) < self.config.RB_IN_FIFO_DEPTH:
+                            # if len(link_station) < self.config.RB_IN_FIFO_DEPTH:
+                            if self.config.RB_IN_FIFO_DEPTH > len(link_station) and (
+                                (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH and flit_l.ETag_priority in ["T0", "T1"])
+                                or (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit_l.ETag_priority == "T2")
+                            ):
                                 return True
                         if flit.wait_cycle_h > self.config.ITag_Trigger_Th_H and not flit.itag_h:
                             if self.remain_tag["right"][current] > 0:
@@ -402,8 +408,14 @@ class Network:
                         if flit_l.current_link[1] == flit_l.current_position:
                             # flit_exist_right = any(flit_r.id == flit_l.id for flit_r in self.station_reservations["right"][(flit_l.current_link[1], flit_l.path[flit_l.path_index])])
                             link_station = self.ring_bridge["right"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
+                            new_current = flit_l.current_link[1]
+                            new_next_node = flit_l.path[flit_l.path_index]
                             # if len(link_station) < self.config.RB_IN_FIFO_DEPTH and flit_exist_right:
-                            if len(link_station) < self.config.RB_IN_FIFO_DEPTH:
+                            # if len(link_station) < self.config.RB_IN_FIFO_DEPTH:
+                            if self.config.RB_IN_FIFO_DEPTH > len(link_station) and (
+                                (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH and flit_l.ETag_priority in ["T0", "T1"])
+                                or (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit_l.ETag_priority == "T2")
+                            ):
                                 if self.links_tag[(current, current)][-1] == [current, "right"]:
                                     self.links_tag[(current, current)][-1] = None
                                     self.remain_tag["right"][current] += 1
@@ -426,8 +438,18 @@ class Network:
                         if flit_l.current_link[1] == flit_l.current_position:
                             # flit_exist_left = any(flit_r.id == flit_l.id for flit_r in self.station_reservations["left"][(flit_l.current_link[1], flit_l.path[flit_l.path_index])])
                             link_station = self.ring_bridge["left"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
+                            new_current = flit_l.current_link[1]
+                            new_next_node = flit_l.path[flit_l.path_index]
                             # if len(link_station) < self.config.RB_IN_FIFO_DEPTH and flit_exist_left:
-                            if len(link_station) < self.config.RB_IN_FIFO_DEPTH:
+                            if self.config.RB_IN_FIFO_DEPTH > len(link_station) and (
+                                (flit_l.ETag_priority == "T2" and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T2"] < self.config.TL_Etag_T2_UE_MAX)
+                                or (flit_l.ETag_priority == "T1" and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T1"] < self.config.TL_Etag_T2_UE_MAX)
+                                or (
+                                    flit_l.ETag_priority == "T0"
+                                    and self.T0_Etag_Order_FIFO[0] == (new_current, flit_l)
+                                    and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T0"] < self.config.RB_IN_FIFO_DEPTH
+                                )
+                            ):
                                 return True
                         if flit.wait_cycle_h > self.config.ITag_Trigger_Th_H and not flit.itag_h:
                             if self.remain_tag["left"][current] > 0:
@@ -439,8 +461,19 @@ class Network:
                         if flit_l.current_link[1] == flit_l.current_position:
                             # flit_exist_left = any(flit_r.id == flit_l.id for flit_r in self.station_reservations["left"][(flit_l.current_link[1], flit_l.path[flit_l.path_index])])
                             link_station = self.ring_bridge["left"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
+                            new_current = flit_l.current_link[1]
+                            new_next_node = flit_l.path[flit_l.path_index]
                             # if len(link_station) < self.config.RB_IN_FIFO_DEPTH and flit_exist_left:
-                            if len(link_station) < self.config.RB_IN_FIFO_DEPTH:
+                            # if len(link_station) < self.config.RB_IN_FIFO_DEPTH:
+                            if self.config.RB_IN_FIFO_DEPTH > len(link_station) and (
+                                (flit_l.ETag_priority == "T2" and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T2"] < self.config.TL_Etag_T2_UE_MAX)
+                                or (flit_l.ETag_priority == "T1" and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T1"] < self.config.TL_Etag_T2_UE_MAX)
+                                or (
+                                    flit_l.ETag_priority == "T0"
+                                    and self.T0_Etag_Order_FIFO[0] == (new_current, flit_l)
+                                    and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T0"] < self.config.RB_IN_FIFO_DEPTH
+                                )
+                            ):
                                 if self.links_tag[(current, current)][-1] == [current, "left"]:
                                     self.links_tag[(current, current)][-1] = None
                                     self.remain_tag["left"][current] += 1
@@ -466,9 +499,12 @@ class Network:
                     if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.cols:
                         new_current = flit_l.current_link[1]
                         new_next_node = flit_l.path[flit_l.path_index + 1]
-                        station_right = self.ring_bridge["right"].get((new_current, new_next_node))
+                        link_station = self.ring_bridge["right"].get((new_current, new_next_node))
                         # if self.config.RB_IN_FIFO_DEPTH - len(station_right) > len(self.station_reservations["right"][(new_current, new_next_node)]):
-                        if self.config.RB_IN_FIFO_DEPTH > len(station_right):
+                        if self.config.RB_IN_FIFO_DEPTH > len(link_station) and (
+                            (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH and flit_l.ETag_priority in ["T0", "T1"])
+                            or (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit_l.ETag_priority == "T2")
+                        ):
                             return True
                     if flit.wait_cycle_h > self.config.ITag_Trigger_Th_H and not flit.itag_h:
                         if self.remain_tag["right"][current] > 0:
@@ -480,9 +516,12 @@ class Network:
                     if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.cols:
                         new_current = flit_l.current_link[1]
                         new_next_node = flit_l.path[flit_l.path_index + 1]
-                        station_right = self.ring_bridge["right"].get((new_current, new_next_node))
+                        link_station = self.ring_bridge["right"].get((new_current, new_next_node))
                         # if self.config.RB_IN_FIFO_DEPTH - len(station_right) > len(self.station_reservations["right"][(new_current, new_next_node)]):
-                        if self.config.RB_IN_FIFO_DEPTH > len(station_right):
+                        if self.config.RB_IN_FIFO_DEPTH > len(link_station) and (
+                            (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH and flit_l.ETag_priority in ["T0", "T1"])
+                            or (self.RB_UE_Counters["right"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit_l.ETag_priority == "T2")
+                        ):
                             if self.links_tag[(current - 1, current)][-1] == [current, "right"]:
                                 self.links_tag[(current - 1, current)][-1] = None
                                 self.remain_tag["right"][current] += 1
@@ -506,7 +545,15 @@ class Network:
                         new_next_node = flit_l.path[flit_l.path_index + 1]
                         station_left = self.ring_bridge["left"].get((new_current, new_next_node))
                         # if self.config.RB_IN_FIFO_DEPTH - len(station_left) > len(self.station_reservations["left"][(new_current, new_next_node)]):
-                        if self.config.RB_IN_FIFO_DEPTH > len(station_left):
+                        if self.config.RB_IN_FIFO_DEPTH > len(station_left) and (
+                            (flit_l.ETag_priority == "T2" and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T2"] < self.config.TL_Etag_T2_UE_MAX)
+                            or (flit_l.ETag_priority == "T1" and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T1"] < self.config.TL_Etag_T2_UE_MAX)
+                            or (
+                                flit_l.ETag_priority == "T0"
+                                and self.T0_Etag_Order_FIFO[0] == (new_current, flit_l)
+                                and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T0"] < self.config.RB_IN_FIFO_DEPTH
+                            )
+                        ):
                             return True
                     if flit.wait_cycle_h > self.config.ITag_Trigger_Th_H and not flit.itag_h:
                         if self.remain_tag["left"][current] > 0:
@@ -520,7 +567,15 @@ class Network:
                         new_next_node = flit_l.path[flit_l.path_index + 1]
                         station_left = self.ring_bridge["left"].get((new_current, new_next_node))
                         # if self.config.RB_IN_FIFO_DEPTH - len(station_left) > len(self.station_reservations["left"][(new_current, new_next_node)]):
-                        if self.config.RB_IN_FIFO_DEPTH > len(station_left):
+                        if self.config.RB_IN_FIFO_DEPTH > len(station_left) and (
+                            (flit_l.ETag_priority == "T2" and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T2"] < self.config.TL_Etag_T2_UE_MAX)
+                            or (flit_l.ETag_priority == "T1" and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T1"] < self.config.TL_Etag_T2_UE_MAX)
+                            or (
+                                flit_l.ETag_priority == "T0"
+                                and self.T0_Etag_Order_FIFO[0] == (new_current, flit_l)
+                                and self.RB_UE_Counters["left"].get((new_current, new_next_node))["T0"] < self.config.RB_IN_FIFO_DEPTH
+                            )
+                        ):
                             if self.links_tag[(current + 1, current)][-1] == [current, "left"]:
                                 self.links_tag[(current + 1, current)][-1] = None
                                 self.remain_tag["left"][current] += 1
@@ -1289,7 +1344,7 @@ class Network:
                 link = self.links.get(flit.current_link)
                 # print(flit.current_seat_index)
                 # if link[flit.current_seat_index] is not None:
-                    # return
+                # return
                 link[flit.current_seat_index] = flit
                 if (flit.current_seat_index == 6 and len(link) == 7) or (flit.current_seat_index == 1 and len(link) == 2):
                     self.links_flow_stat[flit.req_type][flit.current_link] += 1
