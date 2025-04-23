@@ -241,8 +241,8 @@ if __name__ == "__main__":
     gdma_pos = range(num_ip)
     ddr_pos = range(num_ip)
     l2m_pos = range(num_ip)
-    gdma_pos = [0]
-    ddr_pos = [7]
+    # gdma_pos = [0]
+    # ddr_pos = [7]
 
     speed = {1: 128, 2: 128, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 4

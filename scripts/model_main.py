@@ -2,7 +2,8 @@ from src.core import *
 import os
 from src.utils.component import Flit, Network, Node
 from config.config import SimulationConfig
-
+import matplotlib
+matplotlib.use('macosx') 
 
 def main():
     import tracemalloc

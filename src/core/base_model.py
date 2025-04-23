@@ -54,7 +54,7 @@ class BaseModel:
         self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.flit_network = Network(self.config, self.adjacency_matrix, name="Data Network")
-        self.vis = CrossRingVisualizer(self.config, 7)
+        self.vis = CrossRingVisualizer(self.config, 6)
         if self.config.Both_side_ETag_upgrade:
             self.req_network.Both_side_ETag_upgrade = self.rsp_network.Both_side_ETag_upgrade = self.flit_network.Both_side_ETag_upgrade = True
         self.routes = find_shortest_paths(self.adjacency_matrix)
