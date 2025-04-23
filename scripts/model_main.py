@@ -3,14 +3,12 @@ import os
 from src.utils.component import Flit, Network, Node
 from config.config import SimulationConfig
 
-import matplotlib
-matplotlib.use('macosx') 
 
 def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_ITag_0418.txt"
+    file_name = r"traffic_test_0423.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -72,7 +70,7 @@ def main():
     # tracemalloc.start()
 
     # sim.end_time = 10000
-    sim.config.burst = 4
+    sim.config.burst = 2
     sim.config.num_ips = 32
     sim.config.rn_read_tracker_ostd = 64
     sim.config.rn_write_tracker_ostd = 64

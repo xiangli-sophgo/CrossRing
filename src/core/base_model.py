@@ -54,7 +54,7 @@ class BaseModel:
         self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.flit_network = Network(self.config, self.adjacency_matrix, name="Data Network")
-        self.vis = CrossRingVisualizer(self.config, 4) 
+        self.vis = CrossRingVisualizer(self.config, 7)
         if self.config.Both_side_ETag_upgrade:
             self.req_network.Both_side_ETag_upgrade = self.rsp_network.Both_side_ETag_upgrade = self.flit_network.Both_side_ETag_upgrade = True
         self.routes = find_shortest_paths(self.adjacency_matrix)
@@ -1050,7 +1050,7 @@ class BaseModel:
     def _process_ring_bridge(self, network, direction, pos, next_pos, curr_node, opposite_node):
         dir_key = f"v{direction}"
         link = (curr_node, next_pos)
-        
+
         # Early return if ring bridge is not active for this direction and position
         if not network.ring_bridge[dir_key][(pos, next_pos)]:
             return None
@@ -1060,55 +1060,51 @@ class BaseModel:
             # Handle empty link cases
             if network.links_tag[link][-1] is None:
                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-            
+
             if network.links_tag[link][-1] == [next_pos, direction]:
                 network.remain_tag[direction][next_pos] += 1
                 network.links_tag[link][-1] = None
                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-            
+
             return None
-        
+
         # Get the flit at the end of the link
         flit_l = network.links[link][-1]
-        
+
         # Case 2: Flit destination doesn't match next position
         if flit_l.destination != next_pos:
             return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
-        
+
         # Case 3: Flit destination matches next position
         eject_queue = network.eject_queues[direction][next_pos]
-        
+
         # Subcase 3.1: Link has a tag
         if network.links_tag[link][-1]:
-            if (network.links_tag[link][-1] == [next_pos, direction] and 
-                network.config.EQ_IN_FIFO_DEPTH > len(eject_queue)):
+            if network.links_tag[link][-1] == [next_pos, direction] and network.config.EQ_IN_FIFO_DEPTH > len(eject_queue):
                 network.remain_tag[direction][next_pos] += 1
                 network.links_tag[link][-1] = None
                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
             return None
-        
+
         # Subcase 3.2: Link has no tag
         if network.config.EQ_IN_FIFO_DEPTH <= len(eject_queue):
             return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
-        
+
         # Check priority conditions based on direction
         if direction == "down":
-            if ((flit_l.ETag_priority in ["T1", "T0"] and 
-                network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH) or
-                (flit_l.ETag_priority == "T2" and 
-                network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX)):
+            if (flit_l.ETag_priority in ["T1", "T0"] and network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH) or (
+                flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX
+            ):
                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-        
+
         elif direction == "up":
-            if ((flit_l.ETag_priority == "T0" and 
-                network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH and
-                network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l)) or
-                (flit_l.ETag_priority == "T1" and 
-                network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX) or
-                (flit_l.ETag_priority == "T2" and 
-                network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)):
+            if (
+                (flit_l.ETag_priority == "T0" and network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH and network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l))
+                or (flit_l.ETag_priority == "T1" and network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX)
+                or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)
+            ):
                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-        
+
         return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
     def _update_flit_state(self, network, ts_key, pos, next_pos, target_node, direction):
@@ -1538,19 +1534,64 @@ class BaseModel:
                 self.write_BW_stat, self.write_latency_avg_stat, self.write_latency_max_stat = self.output_intervals(f3, write_merged_intervals, "Write", write_latency)
 
             print("\nPer-IP Weighted Bandwidth:", file=f3)
+
             # 处理读带宽
             print("\nRead Bandwidth per IP:", file=f3)
+            rn_read_bws = []
+            sn_read_bws = []
             for ip_id in sorted(self.read_ip_intervals.keys()):
                 intervals = self.read_ip_intervals[ip_id]
                 bw = self.calculate_ip_bandwidth(intervals)
                 print(f"{ip_id}: {bw:.1f} GB/s", file=f3)
 
-            # 处理写带宽
-            print("\nWrite Bandwidth per IP:", file=f3)
+                # 分类统计
+                if ip_id.startswith(("gdma", "sdma")):
+                    rn_read_bws.append(bw)
+                elif ip_id.startswith(("ddr", "l2m")):
+                    sn_read_bws.append(bw)
+
+                # 处理写带宽
+                # 处理写带宽
+                print("\nWrite Bandwidth per IP:", file=f3)
+                rn_write_bws = []
+            sn_write_bws = []
+
             for ip_id in sorted(self.write_ip_intervals.keys()):
                 intervals = self.write_ip_intervals[ip_id]
                 bw = self.calculate_ip_bandwidth(intervals)
-                print(f"{ip_id}: {bw:.1f} GB/s", file=f3)
+                print(f"{ip_id}: {bw:.1f} GB/s", file=f3)  # 只输出到文件
+
+                # 分类统计
+                if ip_id.startswith(("gdma", "sdma")):
+                    rn_write_bws.append(bw)
+                elif ip_id.startswith(("ddr", "l2m")):
+                    sn_write_bws.append(bw)
+
+            # 计算并输出RN和SN的统计信息
+            def print_stats(bw_list, name, operation):
+                if bw_list:
+                    avg = sum(bw_list) / len(bw_list)
+                    min_bw = min(bw_list)
+                    max_bw = max(bw_list)
+                    print(f"\n{name} {operation} Bandwidth Stats:", file=f3)
+                    print(f"  Average: {avg:.1f} GB/s", file=f3)
+                    print(f"  Range: {min_bw:.1f} - {max_bw:.1f} GB/s", file=f3)
+
+                    # 屏幕输出
+                    print(f"{name} {operation}: Avg={avg:.1f} GB/s, Range={min_bw:.1f}-{max_bw:.1f} GB/s")
+                # else:
+                #     print(f"\nNo {name} {operation} bandwidth data", file=f3)
+                #     print(f"No {name} {operation} bandwidth data")  # 屏幕输出
+
+            # 输出读统计
+            print("")  # 屏幕输出空行分隔
+            print_stats(rn_read_bws, "RN", "Read")
+            print_stats(sn_read_bws, "SN", "Read")
+
+            # 输出写统计
+            print("")  # 屏幕输出空行分隔
+            print_stats(rn_write_bws, "RN", "Write")
+            print_stats(sn_write_bws, "SN", "Write")
 
         self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
         print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")
@@ -1730,21 +1771,20 @@ class BaseModel:
 
     def calculate_ip_bandwidth(self, intervals):
         """计算给定区间的加权带宽"""
-        weighted_sum = 0.0
         total_count = 0
-        finish_time = 0
+        total_interval_time = 0
         # finish_time = self.cycle // self.config.network_frequency
         for start, end, count in intervals:
             if start >= end:
                 continue  # 跳过无效区间
-            duration = end - start
-            bandwidth = (count * 128) / duration  # 计算该区间的带宽（不除以IP总数）
-            weighted_sum += bandwidth * count  # 加权求和
+            interval_time = end - start
+            # bandwidth = (count * 128) / duration  # 计算该区间的带宽（不除以IP总数）
+            # weighted_sum += bandwidth * count  # 加权求和
             total_count += count
-            finish_time = max(finish_time, end)
+            total_interval_time += interval_time
 
         # return weighted_sum / total_count if total_count > 0 else 0.0
-        return total_count * 128 / finish_time if finish_time > 0 else 0.0
+        return total_count * 128 / total_interval_time if total_interval_time > 0 else 0.0
 
     def calculate_ip_bandwidth_data(self):
         rows = self.config.rows

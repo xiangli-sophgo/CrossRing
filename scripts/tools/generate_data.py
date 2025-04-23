@@ -233,7 +233,7 @@ if __name__ == "__main__":
     # 参数配置
     topo = "5x4"
     interval_count = 32
-    file_name = "../../test_data/traffic_32_shared_0422.txt"
+    file_name = "../../test_data/traffic_test_0423.txt"
     np.random.seed(415)
 
     num_ip = 32
@@ -241,10 +241,10 @@ if __name__ == "__main__":
     gdma_pos = range(num_ip)
     ddr_pos = range(num_ip)
     l2m_pos = range(num_ip)
-    # gdma_pos = [0, 1]
-    # ddr_pos = [7]
+    gdma_pos = [0]
+    ddr_pos = [7]
 
-    speed = {1: 128, 2: 68, 4: 128}  # 不同burst对应的带宽(GB/s)
+    speed = {1: 128, 2: 128, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 4
     read_duration = 0
     write_duration = 128
