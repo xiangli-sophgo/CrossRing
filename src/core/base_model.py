@@ -56,7 +56,7 @@ class BaseModel:
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.flit_network = Network(self.config, self.adjacency_matrix, name="Data Network")
         if self.plot_piece:
-            self.vis = CrossRingVisualizer(self.config, 7)
+            self.vis = CrossRingVisualizer(self.config, 3)
         if self.config.Both_side_ETag_upgrade:
             self.req_network.Both_side_ETag_upgrade = self.rsp_network.Both_side_ETag_upgrade = self.flit_network.Both_side_ETag_upgrade = True
         self.routes = find_shortest_paths(self.adjacency_matrix)
@@ -534,6 +534,8 @@ class BaseModel:
             if self.topo_type_stat in ["5x4", "4x5"]:
                 req.source_type = "gdma" if req_data[1] < 16 else "sdma"
                 req.destination_type = "ddr" if req_data[3] < 16 else "l2m"
+            elif self.topo_type_stat in ['3x3']:
+                req.destination_type = "ddr" if req_data[4] in ['ddr_1', 'l2m_1'] else "l2m"
             req.packet_id = Node.get_next_packet_id()
             req.req_type = "read" if req_data[5] == "R" else "write"
             self.req_network.send_flits[req.packet_id].append(req)
@@ -1313,7 +1315,7 @@ class BaseModel:
             flit.destination_original = req.destination_original
             flit.flit_type = "data"
             # flit.departure_cycle = self.cycle
-            flit.departure_cycle = self.cycle + self.config.ddr_W_latency + i if req.destination_type == "ddr" else self.cycle + self.config.l2m_W_latency + i
+            flit.departure_cycle = self.cycle + self.config.ddr_W_latency + i if req.original_destination_type.startswith('ddr') else self.cycle + self.config.l2m_W_latency + i
             flit.req_departure_cycle = req.departure_cycle
             flit.entry_db_cycle = req.entry_db_cycle
             flit.source_type = req.source_type
@@ -1344,8 +1346,12 @@ class BaseModel:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             flit.departure_cycle = (
-                self.cycle + np.random.normal(loc=self.config.ddr_R_latency, scale=self.config.ddr_R_latency_var, size=None) + i
-                if req.destination_type == "ddr"
+                self.cycle + np.random.uniform(
+                    low=self.config.ddr_R_latency - self.config.ddr_R_latency_var,
+                    high=self.config.ddr_R_latency + self.config.ddr_R_latency_var,
+                    size=None
+                ) + i
+                if req.original_destination_type.startswith('ddr')
                 else self.cycle + self.config.l2m_R_latency + i
             )
             flit.entry_db_cycle = self.cycle

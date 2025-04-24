@@ -4,7 +4,7 @@ from src.utils.component import Flit, Network, Node
 from config.config import SimulationConfig
 import matplotlib
 
-# matplotlib.use("macosx")
+matplotlib.use("macosx")
 
 
 def main():
@@ -65,7 +65,7 @@ def main():
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
-        plot_piece=0,
+        plot_piece=1,
     )
 
     # profiler = cProfile.Profile()

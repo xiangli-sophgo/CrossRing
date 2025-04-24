@@ -1379,8 +1379,8 @@ class Network:
             if current - next_node != self.config.cols:
                 link = self.links.get(flit.current_link)
                 # print(flit.current_seat_index)
-                # if link[flit.current_seat_index] is not None:
-                #     return
+                if link[flit.current_seat_index] is not None:
+                    return
                 link[flit.current_seat_index] = flit
                 if (flit.current_seat_index == 6 and len(link) == 7) or (flit.current_seat_index == 1 and len(link) == 2):
                     self.links_flow_stat[flit.req_type][flit.current_link] += 1
