@@ -1,6 +1,6 @@
 import numpy as np
 from collections import deque, defaultdict
-
+from src.core.Device_Switch import DeviceSwitch
 
 class Flit:
     last_id = 0
@@ -170,14 +170,14 @@ class Node:
         self.rn_tracker_wait = {"read": {"sdma": {}, "gdma": {}}, "write": {"sdma": {}, "gdma": {}}}
         self.rn_tracker_count = {"read": {"sdma": {}, "gdma": {}}, "write": {"sdma": {}, "gdma": {}}}
         self.rn_tracker_pointer = {"read": {"sdma": {}, "gdma": {}}, "write": {"sdma": {}, "gdma": {}}}
-        self.sn_rdb = {"ddr": {}, "l2m": {}}
-        self.sn_rsp_queue = {"ddr": {}, "l2m": {}}
-        self.sn_req_wait = {"read": {"ddr": {}, "l2m": {}}, "write": {"ddr": {}, "l2m": {}}}
-        self.sn_tracker = {"ddr": {}, "l2m": {}}
-        self.sn_tracker_count = {"ddr": {"ro": {}, "share": {}}, "l2m": {"ro": {}, "share": {}}}
-        self.sn_wdb = {"ddr": {}, "l2m": {}}
-        self.sn_wdb_recv = {"ddr": {}, "l2m": {}}
-        self.sn_wdb_count = {"ddr": {}, "l2m": {}}
+        self.sn_rdb = {"ddr_1": {}, "l2m_1": {},"ddr_2": {}, "l2m_2": {}}
+        self.sn_rsp_queue = {"ddr_1": {}, "l2m_1": {},"ddr_2": {}, "l2m_2": {}}
+        self.sn_req_wait = {"read": {"ddr_1": {}, "l2m_1": {}, "ddr_2": {}, "l2m_2": {}}, "write": {"ddr_1": {}, "l2m_1": {}, "ddr_2": {}, "l2m_2": {}}}
+        self.sn_tracker = {"ddr_1": {}, "l2m_1": {},"ddr_2": {}, "l2m_2": {}}
+        self.sn_tracker_count = {"ddr_1": {"ro": {}, "share": {}}, "l2m_1": {"ro": {}, "share": {}},"ddr_2": {"ro": {}, "share": {}}, "l2m_2": {"ro": {}, "share": {}}}
+        self.sn_wdb = {"ddr_1": {}, "l2m_1": {},"ddr_2": {}, "l2m_2": {}}
+        self.sn_wdb_recv = {"ddr_1": {}, "l2m_1": {},"ddr_2": {}, "l2m_2": {}}
+        self.sn_wdb_count = {"ddr_1": {}, "l2m_1": {},"ddr_2": {}, "l2m_2": {}}
 
     def initialize_rn(self):
         """Initialize RN structures."""
@@ -205,7 +205,8 @@ class Node:
     def initialize_sn(self):
         """Initialize SN structures."""
         self.sn_tracker_release_time = defaultdict(list)
-        for ip_pos in self.config.ddr_send_positions + self.config.l2m_send_positions:
+        # for ip_pos in self.config.ddr_send_positions + self.config.l2m_send_positions:
+        for ip_pos in self.config.ddr_1_send_positions + self.config.l2m_1_send_positions:
             for key in self.sn_tracker:
                 self.sn_rdb[key][ip_pos] = []
                 self.sn_wdb[key][ip_pos] = defaultdict(list)
@@ -238,10 +239,36 @@ class Network:
         self.eject_queues = {"up": {}, "down": {}, "ring_bridge": {}, "local": {}}
         # self.eject_reservations = {"up": {}, "down": {}}
         self.arrive_node_pre = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
-        self.ip_inject = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
-        self.ip_eject = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
+        
+        # self.ip_inject = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
+        # self.ip_eject = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
         self.ip_read = {"sdma": {}, "gdma": {}}
         self.ip_write = {"sdma": {}, "gdma": {}}
+
+        self.ip_inject = {
+            "ddr_1": {}, "ddr_2": {},
+            "l2m_1": {}, "l2m_2": {},
+            "sdma": {}, "gdma": {}
+        }
+        self.ip_eject = {
+            "ddr_1": {}, "ddr_2": {},
+            "l2m_1": {}, "l2m_2": {},
+            "sdma": {}, "gdma": {}
+        }
+
+        # 扁平化所有 IP 标识，交给 DeviceSwitch 管理
+        inject_ids = []
+        inject_ids += [("ddr_1", i) for i in range(config.num_ips)]
+        inject_ids += [("ddr_2", i) for i in range(config.num_ips)]
+        inject_ids += [("l2m_1", i) for i in range(config.num_ips)]
+        inject_ids += [("l2m_2", i) for i in range(config.num_ips)]
+        inject_ids += [("sdma", i) for i in range(config.num_ips)]
+        inject_ids += [("gdma", i) for i in range(config.num_ips)]
+        self.inject_switch = DeviceSwitch(inject_ids)
+        self.eject_switch  = DeviceSwitch(inject_ids)
+        self._inject_ratio = 2
+
+        
         self.links = {}
         self.links_flow_stat = {"read": {}, "write": {}}
         self.links_tag = {}
@@ -250,7 +277,8 @@ class Network:
         # self.station_reservations = {"left": {}, "right": {}}
         self.inject_queue_rr = {"left": {0: {}, 1: {}}, "right": {0: {}, 1: {}}, "up": {0: {}, 1: {}}, "local": {0: {}, 1: {}}}
         self.inject_rr = {"left": {}, "right": {}, "up": {}, "local": {}}
-        self.round_robin = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}, "up": {}, "down": {}, "ring_bridge": {}}
+        # self.round_robin = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}, "up": {}, "down": {}, "ring_bridge": {}}
+        self.round_robin = {"ddr_1": {}, "l2m_1": {}, "ddr_2": {}, "l2m_2": {},"sdma": {}, "gdma": {}, "up": {}, "down": {}, "ring_bridge": {}}
 
         self.round_robin_counter = 0
         self.recv_flits_num = 0
@@ -300,7 +328,8 @@ class Network:
         self.EQ_UE_Counters = {"up": {}, "down": {}}
         self.Both_side_ETag_upgrade = False
 
-        for ip_pos in set(config.ddr_send_positions + config.sdma_send_positions + config.l2m_send_positions + config.gdma_send_positions):
+        # for ip_pos in set(config.ddr_send_positions + config.sdma_send_positions + config.l2m_send_positions + config.gdma_send_positions):
+        for ip_pos in set(config.ddr_1_send_positions + config.ddr_2_send_positions + config.sdma_send_positions + config.l2m_1_send_positions + config.l2m_2_send_positions+ config.gdma_send_positions):
             self.inject_queues["left"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
             self.inject_queues["right"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
             self.inject_queues["up"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
@@ -328,9 +357,11 @@ class Network:
             self.inject_rr["left"][ip_pos] = deque([0, 1, 2])
             self.inject_rr["up"][ip_pos] = deque([0, 1, 2])
             self.inject_rr["local"][ip_pos] = deque([0, 1, 2])
-            self.round_robin["ddr"][ip_pos - config.cols] = deque([0, 1, 2, 3])
+            self.round_robin["ddr_1"][ip_pos - config.cols] = deque([0, 1, 2, 3])
+            self.round_robin["ddr_2"][ip_pos - config.cols] = deque([0, 1, 2, 3])
+            self.round_robin["l2m_1"][ip_pos - config.cols] = deque([0, 1, 2, 3])
+            self.round_robin["l2m_2"][ip_pos - config.cols] = deque([0, 1, 2, 3])
             self.round_robin["sdma"][ip_pos - config.cols] = deque([0, 1, 2, 3])
-            self.round_robin["l2m"][ip_pos - config.cols] = deque([0, 1, 2, 3])
             self.round_robin["gdma"][ip_pos - config.cols] = deque([0, 1, 2, 3])
             self.inject_time[ip_pos] = []
             self.eject_time[ip_pos - config.cols] = []
@@ -386,16 +417,16 @@ class Network:
                 for direction in ["up", "down"]:
                     self.remain_tag[direction][next_pos] = config.ITag_Max_Num_V
 
-        for ip_type in self.num_recv:
-            source_positions = getattr(config, f"{ip_type}_send_positions")
-            for source in source_positions:
-                destination = source - config.cols
-                self.num_send[ip_type][source] = 0
-                self.num_recv[ip_type][destination] = 0
-                self.per_send_throughput[ip_type][source] = 0
-                self.per_recv_throughput[ip_type][destination] = 0
+        # for ip_type in self.num_recv:
+        #     source_positions = getattr(config, f"{ip_type}_send_positions")
+        #     for source in source_positions:
+        #         destination = source - config.cols
+        #         self.num_send[ip_type][source] = 0
+        #         self.num_recv[ip_type][destination] = 0
+        #         self.per_send_throughput[ip_type][source] = 0
+        #         self.per_recv_throughput[ip_type][destination] = 0
 
-        for ip_type in ["ddr", "l2m", "sdma", "gdma"]:
+        for ip_type in ["ddr_1", "l2m_2", "ddr_2", "l2m_2",  "sdma", "gdma"]:
             for ip_index in getattr(config, f"{ip_type}_send_positions"):
                 ip_recv_index = ip_index - config.cols
                 self.ip_inject[ip_type][ip_index] = deque()
@@ -405,9 +436,9 @@ class Network:
                 self.ip_read[ip_type][ip_index] = deque()
                 self.ip_write[ip_type][ip_index] = deque()
                 self.last_select[ip_type][ip_index] = "write"
-        for ip_type in ["gdma", "sdma", "ddr", "l2m"]:
-            for ip_index in getattr(config, f"{ip_type}_send_positions"):
-                self.throughput[ip_type][ip_index] = [0, 0, 10000000, 0]
+        # for ip_type in ["gdma", "sdma", "ddr", "l2m"]:
+        #     for ip_index in getattr(config, f"{ip_type}_send_positions"):
+        #         self.throughput[ip_type][ip_index] = [0, 0, 10000000, 0]
 
     def can_move_to_next(self, flit, current, next_node):
         # flit inject的时候判断是否可以将flit放到本地出口队列。

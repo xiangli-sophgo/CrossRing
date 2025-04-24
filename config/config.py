@@ -153,9 +153,11 @@ class SimulationConfig:
             self.cols = 3
             self.num_ips = 4
             self.rows = self.num_nodes // self.cols
-            self.ddr_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
+            self.ddr_1_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
+            self.ddr_2_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
+            self.l2m_1_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
+            self.l2m_2_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
             self.sdma_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
-            self.l2m_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
             self.gdma_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
         else:
             raise ValueError("Error topology type: ", topo_type)

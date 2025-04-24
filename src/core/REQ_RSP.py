@@ -23,8 +23,9 @@ class REQ_RSP_model(BaseModel):
             self.process_requests()
 
             # Inject and process flits for requests
-            if self.rn_type != "Idle":
-                self.handle_request_injection()
+            # if self.rn_type != "Idle":
+            #     self.handle_request_injection()
+            self.handle_request_injection_new()
 
             reqs = self.process_and_move_flits(self.req_network, reqs, "req")
 
@@ -608,8 +609,10 @@ class REQ_RSP_model(BaseModel):
             for in_pos in self.flit_position:
                 ip_pos = in_pos - self.config.cols
                 eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "ring_bridge", "down", "local"]]
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["l2m"][ip_pos], "l2m", ip_pos)
+                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["ddr_1"][ip_pos], "ddr_1", ip_pos)
+                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["ddr_1"][ip_pos], "ddr_1", ip_pos)
+                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["l2m_2"][ip_pos], "l2m_2", ip_pos)
+                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["l2m_2"][ip_pos], "l2m_2", ip_pos)
 
             if self.sn_type != "Idle":
                 for in_pos in self.flit_position:

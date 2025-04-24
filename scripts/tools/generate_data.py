@@ -219,10 +219,10 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
             data_all.extend(generate_mixed_entries(sdma_pos, "sdma", "l2m", l2m_pos, "W", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, mix_ratios))
         else:
-            data_all.extend(generate_entries(sdma_pos, "sdma", "ddr", ddr_pos, "R", burst, flow_type, speed[burst], interval_count))
-            data_all.extend(generate_entries(sdma_pos, "sdma", "ddr", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
-            data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, flow_type, speed[burst], interval_count))
-            data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
+            data_all.extend(generate_entries(sdma_pos, "sdma", "ddr_1", ddr_1_pos, "R", burst, flow_type, speed[burst], interval_count))
+            data_all.extend(generate_entries(sdma_pos, "sdma", "ddr_2", ddr_2_pos, "R", burst, flow_type, speed[burst], interval_count))
+            # data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, flow_type, speed[burst], interval_count))
+            # data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
 
     # 排序并写入文件
     with open(file_name, "w") as f:
@@ -248,8 +248,10 @@ if __name__ == "__main__":
     # SG2260E
     sdma_pos = [0, 2, 6, 8]
     gdma_pos = [0, 2, 6, 8]
-    ddr_pos = [0, 2, 3, 3, 5, 5, 6, 8]
-    l2m_pos = [1, 1, 7, 7]
+    ddr_1_pos = [0, 2, 3, 5, 6, 8]
+    ddr_2_pos = [3, 5]
+    l2m_1_pos = [1, 7]
+    l2m_2_pos = [1, 7]
 
     speed = {1: 128, 2: 256, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 2

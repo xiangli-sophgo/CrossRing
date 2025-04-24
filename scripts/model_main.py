@@ -98,11 +98,12 @@ def main():
     sim.config.ITag_Max_Num_H = sim.config.ITag_Max_Num_V = 1
     sim.config.seats_per_link = 7
     sim.config.Both_side_ETag_upgrade = 1
-    sim.config.ddr_R_latency_original = 155
-    sim.config.ddr_R_latency_var_original = 25
-    sim.config.ddr_W_latency_original = 16
-    sim.config.l2m_R_latency_original = 12
-    sim.config.l2m_W_latency_original = 16
+    if topo_type == '3x3':
+        sim.config.ddr_R_latency_original = 155
+        sim.config.ddr_R_latency_var_original = 25
+        sim.config.ddr_W_latency_original = 16
+        sim.config.l2m_R_latency_original = 12
+        sim.config.l2m_W_latency_original = 16
 
     # sim.config.update_config()
     sim.initial()
