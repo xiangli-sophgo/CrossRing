@@ -64,6 +64,42 @@ class Flit:
         self.itag_h = False
         self.is_tagged = False
         self.ETag_priority = "T2"  # 默认优先级为 T2
+        # Latency record
+        self.rn_req_generated_cycle = None
+        self.req_entry_network_cycle = None
+        self.sn_receive_req_cycle = None
+        self.sn_data_generated_cycle = None
+        self.data_entry_network_cycle = None
+        self.rn_data_collection_complete_cycle = None
+        self.sn_rsp_generate_cycle = None
+        self.rsp_entry_network_cycle = None
+        self.rn_receive_rsp_cycle = None
+        self.rn_data_generated_cycle = None
+        self.data_entry_network_cycle = None
+        self.sn_data_collection_completet_cycle = None
+        self.total_latency = None
+        self.latency_1 = None
+        self.latency_2 = None
+        self.latency_3 = None
+
+    def sync_latency_record(self, flit):
+        if flit.req_type == "read":
+            self.rn_req_generated_cycle = flit.rn_req_generated_cycle
+            self.req_entry_network_cycle = flit.req_entry_network_cycle
+            self.sn_receive_req_cycle = flit.sn_receive_req_cycle
+            self.sn_data_generated_cycle = flit.sn_data_generated_cycle
+            self.data_entry_network_cycle = flit.data_entry_network_cycle
+            self.rn_data_collection_complete_cycle = flit.rn_data_collection_complete_cycle
+        elif flit.req_type == "write":
+            self.rn_req_generated_cycle = flit.rn_req_generated_cycle
+            self.req_entry_network_cycle = flit.req_entry_network_cycle
+            self.sn_receive_req_cycle = flit.sn_receive_req_cycle
+            self.sn_rsp_generate_cycle = flit.sn_rsp_generate_cycle
+            self.rsp_entry_network_cycle = flit.rsp_entry_network_cycle
+            self.rn_receive_rsp_cycle = flit.rn_receive_rsp_cycle
+            self.rn_data_generated_cycle = flit.rn_data_generated_cycle
+            self.data_entry_network_cycle = flit.data_entry_network_cycle
+            self.sn_data_collection_completet_cycle = flit.sn_data_collection_completet_cycle
 
     def calculate_direction(self, path):
         if len(path) < 2:
@@ -1344,7 +1380,7 @@ class Network:
                 link = self.links.get(flit.current_link)
                 # print(flit.current_seat_index)
                 # if link[flit.current_seat_index] is not None:
-                # return
+                #     return
                 link[flit.current_seat_index] = flit
                 if (flit.current_seat_index == 6 and len(link) == 7) or (flit.current_seat_index == 1 and len(link) == 2):
                     self.links_flow_stat[flit.req_type][flit.current_link] += 1

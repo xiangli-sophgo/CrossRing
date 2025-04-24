@@ -46,7 +46,11 @@ class SimulationConfig:
         self.rn_rdb_size = args.rn_rdb_size
         self.rn_wdb_size = args.rn_wdb_size
         self.sn_wdb_size = args.sn_wdb_size
-        self.ddr_latency_original = args.ddr_latency
+        self.ddr_R_latency_original = args.ddr_R_latency
+        self.ddr_R_latency_var_original = args.ddr_R_latency_var
+        self.ddr_W_latency_original = args.ddr_W_latency
+        self.l2m_R_latency_original = args.l2m_R_latency
+        self.l2m_W_latency_original = args.l2m_W_latency
         self.sn_tracker_release_latency_original = args.sn_tracker_release_latency
         self.TL_Etag_T1_UE_MAX = args.TL_Etag_T1_UE_MAX
         self.TL_Etag_T2_UE_MAX = args.TL_Etag_T2_UE_MAX
@@ -66,7 +70,11 @@ class SimulationConfig:
         self.update_config()
 
     def update_config(self):
-        self.ddr_latency = self.ddr_latency_original * self.network_frequency
+        self.ddr_R_latency = self.ddr_R_latency_original * self.network_frequency
+        self.ddr_R_latency_var = self.ddr_R_latency_var_original * self.network_frequency
+        self.ddr_W_latency = self.ddr_W_latency_original * self.network_frequency
+        self.l2m_R_latency = self.l2m_R_latency_original * self.network_frequency
+        self.l2m_W_latency = self.l2m_W_latency_original * self.network_frequency
         self.sn_tracker_release_latency = self.sn_tracker_release_latency_original * self.network_frequency
         self.rn_read_tracker_ostd = self.rn_rdb_size // self.burst
         self.rn_write_tracker_ostd = self.rn_wdb_size // self.burst
@@ -294,7 +302,11 @@ class SimulationConfig:
         parser.add_argument("--ITag_Max_Num_H", type=int, default=default_config["ITag_Max_Num_H"], help="Maximum number of I-Tag reservations for horizontal ring XY nodes")
         parser.add_argument("--ITag_Max_Num_V", type=int, default=default_config["ITag_Max_Num_V"], help="Maximum number of I-Tag reservations for vertical ring XY nodes")
         parser.add_argument("--reservation_num", type=int, default=default_config["reservation_num"], help="Reservation number")
-        parser.add_argument("--ddr_latency", type=int, default=default_config["ddr_latency"], help="DDR latency")
+        parser.add_argument("--ddr_R_latency", type=int, default=default_config["ddr_R_latency"], help="DDR latency")
+        parser.add_argument("--ddr_R_latency_var", type=int, default=default_config["ddr_R_latency_var"], help="DDR latency")
+        parser.add_argument("--ddr_W_latency", type=int, default=default_config["ddr_W_latency"], help="DDR latency")
+        parser.add_argument("--l2m_R_latency", type=int, default=default_config["l2m_R_latency"], help="DDR latency")
+        parser.add_argument("--l2m_W_latency", type=int, default=default_config["l2m_W_latency"], help="DDR latency")
         parser.add_argument("--sn_tracker_release_latency", type=int, default=default_config["sn_tracker_release_latency"], help="SN tracker release latency")
 
         parser.add_argument("--burst", type=int, default=default_config["burst"], help="Burst length")

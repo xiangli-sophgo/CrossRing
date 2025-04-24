@@ -26,8 +26,9 @@ class CrossRingVisualizer:
         self.RB_out_depth = config.RB_OUT_FIFO_DEPTH
         self.seats_per_link = config.seats_per_link
         # 固定几何参数
-        self.square = 0.15  # flit 方块边长
+        self.square = 0.17  # flit 方块边长
         self.gap = 0.02  # 相邻槽之间间距
+        self.fifo_gap = 0.5  # 相邻fifo之间间隙
         # 初始化图形
         self.fig, self.ax = plt.subplots(figsize=(8, 6))
         self.ax.axis("off")
@@ -36,37 +37,37 @@ class CrossRingVisualizer:
         self._colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
         self._color_map = {}
         self._next_color = 0
-        self.name_map = {'left': 'TL', 'right': 'TR', 'up': 'TU', 'down': 'TD', 'vup': 'TU', 'vdown': 'TD', 'ring_bridge': 'RB', 'eject': 'EQ', 'local_I': 'EQ', 'local_E': 'IQ'}
+        self.name_map = {"left": "TL", "right": "TR", "up": "TU", "down": "TD", "vup": "TU", "vdown": "TD", "ring_bridge": "RB", "eject": "EQ", "local_I": "EQ", "local_E": "IQ"}
         # 存储 patch 和 text
         self.iq_patches, self.iq_texts = {}, {}
         self.eq_patches, self.eq_texts = {}, {}
         self.rb_patches, self.rb_texts = {}, {}
-        self.cph_patches, self.cph_texts = {}, {}
-        self.cpv_patches, self.cpv_texts = {}, {}
+        self.lh_patches, self.cph_texts = {}, {}
+        self.lv_patches, self.cpv_texts = {}, {}
         # 画出三个模块的框和 FIFO 槽
         self._draw_modules()
 
     def _draw_modules(self):
         # 仅绘制当前节点的 Inject Queue, Eject Queue, Ring Bridge
         center_x, center_y = 0, 0
-        IQ_x = center_x - 3
+        IQ_x = center_x - 3.5
         IQ_y = center_y
         EQ_x = center_x
-        EQ_y = center_y + 3
+        EQ_y = center_y + 3.5
         RB_x = center_x
-        RB_y = center_y 
-        CPH_x = center_x - 1.2
-        CPH_y = center_y - 3.5
-        CPV_x = center_x + 3.5
-        CPV_y = center_y + 1.2
+        RB_y = center_y
+        LH_x = center_x - 1.2
+        LH_y = center_y - 3.5
+        LV_x = center_x + 3.5
+        LV_y = center_y + 1.2
         # Inject Queue
         self._draw_fifo_module(
             x=IQ_x,
             y=IQ_y,
             title="Inject Queue",
             lanes=["left", "right", "up", "local"],
-            module_height=2.9,
-            module_width=1.9,
+            module_height=3.5,
+            module_width=2.5,
             depths=self.IQ_depth,
             patch_dict=self.iq_patches,
             text_dict=self.iq_texts,
@@ -80,8 +81,8 @@ class CrossRingVisualizer:
             y=EQ_y,
             title="Eject Queue",
             lanes=["up", "down", "ring_bridge", "local"],
-            module_height=1.9,
-            module_width=2.9,
+            module_height=2.5,
+            module_width=3.5,
             depths=self.EQ_depth,
             patch_dict=self.eq_patches,
             text_dict=self.eq_texts,
@@ -96,47 +97,55 @@ class CrossRingVisualizer:
             title="Ring Bridge",
             lanes=["left", "right", "up", "vup", "vdown", "eject"],
             depths=[self.RB_in_depth] * 3 + [self.RB_out_depth] * 3,
-            module_height=2.9,
-            module_width=2.9,
+            module_height=3.5,
+            module_width=3.5,
             patch_dict=self.rb_patches,
             text_dict=self.rb_texts,
             per_lane_depth=True,
             orientations=["vertical"] * 3 + ["horizontal"] * 3,
         )
-        
+
+        LH_depths = [self.seats_per_link if self.col != 0 else 2, self.seats_per_link if self.col + 1 != self.cols else 2]
+        LH_orientations = ["horizontal" if self.col != 0 else "vertical", "horizontal" if self.col + 1 != self.cols else "vertical"]
         self._draw_fifo_module(
-            x=CPH_x,
-            y=CPH_y,
-            title="Cross Point Horizontal",
+            x=LH_x,
+            y=LH_y,
+            title="Link Horizontal",
             lanes=["left", "right"],
-            depths=[self.seats_per_link] * 2,
+            depths=LH_depths,
             module_height=2,
             module_width=5,
-            patch_dict=self.cph_patches,
+            patch_dict=self.lh_patches,
             text_dict=self.cph_texts,
             per_lane_depth=True,
-            orientations=["horizontal"] * 2,
+            orientations=LH_orientations,
+            h_position="top",
+            v_position="right",
         )
+
+        LV_depths = [self.seats_per_link if self.row != 1 else 2, self.seats_per_link if self.row + 1 != self.rows else 2]
+        LV_orientations = ["vertical" if self.row != 1 else "horizontal", "vertical" if self.row + 1 != self.rows else "horizontal"]
         self._draw_fifo_module(
-            x=CPV_x,
-            y=CPV_y,
-            title="Cross Point vertical",
+            x=LV_x,
+            y=LV_y,
+            title="Link vertical",
             lanes=["up", "down"],
-            depths=[self.seats_per_link] * 2,
+            depths=LV_depths,
             module_height=5,
             module_width=2,
-            patch_dict=self.cpv_patches,
+            patch_dict=self.lv_patches,
             text_dict=self.cpv_texts,
             per_lane_depth=True,
-            orientations=["vertical"] * 2,
+            orientations=LV_orientations,
+            h_position="top",
+            v_position="left",
         )
         self.ax.relim()
         self.ax.autoscale_view()
 
-
-    def _draw_fifo_module(self, x, y, title,module_height,module_width, lanes, depths, patch_dict, text_dict, per_lane_depth=False, orientations=None):
+    def _draw_fifo_module(self, x, y, title, module_height, module_width, lanes, depths, patch_dict, text_dict, per_lane_depth=False, orientations=None, h_position="top", v_position="left"):
         """
-        绘制一个模块及其 FIFO 槽，支持横向 FIFO 在上部、纵向 FIFO 在下部的混合布局
+        绘制一个模块及其 FIFO 槽，支持横向和纵向 FIFO 的灵活布局
 
         参数：
         - x, y: 模块中心坐标
@@ -146,6 +155,8 @@ class CrossRingVisualizer:
         - patch_dict, text_dict: 存放 patch/text 对象的字典
         - per_lane_depth: 如果 True，则 depths 必须是与 lanes 等长的列表
         - orientations: None (全部相同方向) 或列表，每个元素为 'horizontal'/'vertical'
+        - h_position: 横向 FIFO 的位置 ('top' 或 'bottom')
+        - v_position: 纵向 FIFO 的位置 ('left' 或 'right')
         """
         square = self.square
         gap = self.gap
@@ -176,11 +187,18 @@ class CrossRingVisualizer:
         patch_dict.clear()
         text_dict.clear()
 
-        # 绘制横向 FIFO (上部)
+        # 绘制横向 FIFO
         for i, (lane, depth) in enumerate(zip(h_lanes, h_depths)):
-            lane_x = x + module_width / 2 - 0.02 - depth * (square + gap) - square -0.02
-            lane_y = y + module_height / 2 - (i * 0.3 + 0.2)
-            self.ax.text(lane_x, lane_y, self.name_map[lane] if lane != 'local' else self.name_map[f"{lane}_{title[0]}"], ha="right", va="center", fontsize=10)
+            # 根据位置参数确定 y 坐标
+            if h_position == "top":
+                lane_y = y + module_height / 2 - (i * self.fifo_gap + 0.2)
+                text_va = "bottom"
+            else:  # bottom
+                lane_y = y - module_height / 2 + (i * self.fifo_gap + 0.2)
+                text_va = "top"
+
+            lane_x = x + module_width / 2 - 0.02 - depth * (square + gap) - square - 0.02
+            self.ax.text(lane_x, lane_y, self.name_map[lane] if lane != "local" else self.name_map[f"{lane}_{title[0]}"], ha="right", va="center", fontsize=10)
 
             patch_dict[lane] = []
             text_dict[lane] = []
@@ -190,15 +208,22 @@ class CrossRingVisualizer:
                 slot_y = lane_y
                 patch = Rectangle((slot_x - square / 2, slot_y - square / 2), square, square, edgecolor="black", facecolor="none")
                 self.ax.add_patch(patch)
-                txt = self.ax.text(slot_x, slot_y + square / 2 + 0.005, "", ha="center", va="bottom", fontsize=10)
+                txt = self.ax.text(slot_x, slot_y + (square / 2 + 0.005 if h_position == "top" else -square / 2 - 0.005), "", ha="center", va=text_va, fontsize=10)
                 patch_dict[lane].append(patch)
                 text_dict[lane].append(txt)
 
-        # 绘制纵向 FIFO (下部)
+        # 绘制纵向 FIFO
         for i, (lane, depth) in enumerate(zip(v_lanes, v_depths)):
-            lane_x = x - module_width / 2 + (i * 0.3 + 0.2)
-            lane_y = y - module_height / 2 + 0.1 + depth * (square + gap) + square / 2 + 0.05  # 稍微抬高一点
-            self.ax.text(lane_x, lane_y, self.name_map[lane] if lane != 'local' else self.name_map[f"{lane}_{title[0]}"], ha="center", va="bottom", fontsize=10)
+            # 根据位置参数确定 x 坐标
+            if v_position == "left":
+                lane_x = x - module_width / 2 + (i * self.fifo_gap + 0.2)
+                text_ha = "right"
+            else:  # right
+                lane_x = x + module_width / 2 - (i * self.fifo_gap + 0.2)
+                text_ha = "left"
+
+            lane_y = y - module_height / 2 + 0.1 + depth * (square + gap) + square / 2 + 0.05
+            self.ax.text(lane_x, lane_y, self.name_map[lane] if lane != "local" else self.name_map[f"{lane}_{title[0]}"], ha="center", va="bottom", fontsize=10)
 
             patch_dict[lane] = []
             text_dict[lane] = []
@@ -208,7 +233,7 @@ class CrossRingVisualizer:
                 slot_y = y - module_height / 2 + 0.1 + s * (square + gap) + square / 2
                 patch = Rectangle((slot_x - square / 2, slot_y - square / 2), square, square, edgecolor="black", facecolor="none")
                 self.ax.add_patch(patch)
-                txt = self.ax.text(slot_x - square / 2 - 0.005, slot_y, "", ha="right", va="center", fontsize=10)
+                txt = self.ax.text(slot_x + (square / 2 + 0.005 if v_position == "right" else -square / 2 - 0.005), slot_y, "", ha=text_ha, va="center", fontsize=10)
                 patch_dict[lane].append(patch)
                 text_dict[lane].append(txt)
 
@@ -302,17 +327,17 @@ class CrossRingVisualizer:
                     t.set_text("")
 
         # Cross Ring Horizontal
-        for lane, patches in self.cph_patches.items():
-            if lane == 'left':
+        for lane, patches in self.lh_patches.items():
+            if lane == "left":
                 if self.node_id % self.cols == 0:
                     q = links.get((self.node_id, self.node_id), [])
                 else:
-                    q = links.get((self.node_id, self.node_id - 1), []) 
-            elif lane == 'right':
+                    q = links.get((self.node_id, self.node_id - 1), [])
+            elif lane == "right":
                 if self.node_id % self.cols == self.cols - 1:
                     q = links.get((self.node_id, self.node_id), [])
                 else:
-                    q = links.get((self.node_id, self.node_id + 1), []) 
+                    q = links.get((self.node_id, self.node_id + 1), [])
             for idx, p in enumerate(patches):
                 t = self.cph_texts[lane][idx]
                 if idx < len(q):
@@ -331,19 +356,19 @@ class CrossRingVisualizer:
                 else:
                     p.set_facecolor("none")
                     t.set_text("")
-                    
+
         # Cross Ring Vertical
-        for lane, patches in self.cpv_patches.items():
-            if lane == 'up':
+        for lane, patches in self.lv_patches.items():
+            if lane == "up":
                 if self.node_id // self.cols == 0:
                     q = links.get((self.node_id, self.node_id), [])
                 else:
-                    q = links.get((self.node_id, self.node_id - 2*self.cols), []) 
-            elif lane == 'down':
+                    q = links.get((self.node_id, self.node_id - 2 * self.cols), [])
+            elif lane == "down":
                 if self.node_id // self.cols == self.rows:
                     q = links.get((self.node_id, self.node_id), [])
                 else:
-                    q = links.get((self.node_id, self.node_id + 2*self.cols), [])  
+                    q = links.get((self.node_id, self.node_id + 2 * self.cols), [])
             for idx, p in enumerate(patches):
                 t = self.cpv_texts[lane][idx]
                 if idx < len(q):

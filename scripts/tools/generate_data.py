@@ -220,8 +220,9 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
             data_all.extend(generate_mixed_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, mix_ratios))
         else:
             data_all.extend(generate_entries(sdma_pos, "sdma", "ddr", ddr_pos, "R", burst, flow_type, speed[burst], interval_count))
-            data_all.extend(generate_entries(sdma_pos, "sdma", "l2m", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
+            data_all.extend(generate_entries(sdma_pos, "sdma", "ddr", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
             data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, flow_type, speed[burst], interval_count))
+            data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
 
     # 排序并写入文件
     with open(file_name, "w") as f:
@@ -231,9 +232,9 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
 # 示例使用
 if __name__ == "__main__":
     # 参数配置
-    topo = "5x4"
+    topo = "3x3"
     interval_count = 32
-    file_name = "../../test_data/traffic_test_0423.txt"
+    file_name = "../../test_data/traffic_2260E_0424.txt"
     np.random.seed(415)
 
     num_ip = 32
@@ -244,9 +245,15 @@ if __name__ == "__main__":
     # gdma_pos = [0]
     # ddr_pos = [7]
 
-    speed = {1: 128, 2: 128, 4: 128}  # 不同burst对应的带宽(GB/s)
-    burst = 4
-    read_duration = 0
+    # SG2260E
+    sdma_pos = [0, 2, 6, 8]
+    gdma_pos = [0, 2, 6, 8]
+    ddr_pos = [0, 2, 3, 3, 5, 5, 6, 8]
+    l2m_pos = [1, 1, 7, 7]
+
+    speed = {1: 128, 2: 256, 4: 128}  # 不同burst对应的带宽(GB/s)
+    burst = 2
+    read_duration = 128
     write_duration = 128
 
     # 生成数据(使用混合模式)

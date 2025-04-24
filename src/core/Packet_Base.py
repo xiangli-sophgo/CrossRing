@@ -184,6 +184,7 @@ class Packet_Base_model(BaseModel):
                             self.node.rn_rdb_count[self.rn_type][ip_pos] > self.node.rn_rdb_reserve[self.rn_type][ip_pos] * req.burst_length
                             and self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0
                         ):
+                            req.req_entry_network_cycle = self.cycle
                             req.entry_db_cycle = self.cycle
                             self.req_network.ip_read[self.rn_type][ip_pos].popleft()
                             self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
@@ -194,6 +195,7 @@ class Packet_Base_model(BaseModel):
                     if self.req_network.ip_write[self.rn_type][ip_pos]:
                         req = self.req_network.ip_write[self.rn_type][ip_pos][0]
                         if self.node.rn_wdb_count[self.rn_type][ip_pos] >= req.burst_length and self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0:
+                            req.req_entry_network_cycle = self.cycle
                             self.req_network.ip_write[self.rn_type][ip_pos].popleft()
                             self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
                             self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] -= 1
@@ -251,6 +253,9 @@ class Packet_Base_model(BaseModel):
                         queue_pre = self.flit_network.inject_queues_pre[direction]
                         if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                             queue_pre[flit.source] = flit
+                            req = self.req_network.send_flits[flit.packet_id][0]
+                            flit.sync_latency_record(req)
+                            flit.data_entry_network_cycle = self.cycle
                             if i == 0:
                                 self.send_read_flits_num_stat += 1
                                 self.node.sn_rdb[self.sn_type][ip_pos].pop(0)
@@ -642,7 +647,7 @@ class Packet_Base_model(BaseModel):
                     if network.ip_eject[self.rn_type][ip_pos]:
                         rsp = network.ip_eject[self.rn_type][ip_pos].popleft()
                         # self._handle_response_packet_base(rsp, in_pos)
-                        self._handle_response(rsp, in_pos)
+                        self._rn_handle_response(rsp, in_pos)
 
         elif flit_type == "data":
             for in_pos in self.flit_position:
@@ -815,7 +820,7 @@ class Packet_Base_model(BaseModel):
                 req.early_rsp = True
                 self.node.rn_tracker_wait["write"][self.rn_type][in_pos].append(req)
 
-    def _handle_response(self, rsp, in_pos):
+    def _rn_handle_response(self, rsp, in_pos):
         """处理response的eject"""
         req = next(
             (req for req in self.node.rn_tracker[rsp.req_type][self.rn_type][in_pos] if req.packet_id == rsp.packet_id),
@@ -825,6 +830,8 @@ class Packet_Base_model(BaseModel):
         self.rsp_cir_v_num_stat += rsp.circuits_completed_v
         if not req:
             return
+        rsp.rn_receive_rsp_cycle = self.cycle
+        req.sync_latency_record(rsp)
         if rsp.req_type == "read":
             if rsp.rsp_type == "negative":
                 if not req.early_rsp:

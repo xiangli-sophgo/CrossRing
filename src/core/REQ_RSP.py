@@ -16,7 +16,8 @@ class REQ_RSP_model(BaseModel):
 
             self.check_and_release_sn_tracker()
             # self.flit_trace(1000)
-            self.vis.update_display(self.flit_network)
+            if self.plot_piece:
+                self.vis.update_display(self.flit_network)
 
             # Process requests
             self.process_requests()
@@ -102,6 +103,7 @@ class REQ_RSP_model(BaseModel):
                 self.req_cir_v_num_stat += req.circuits_completed_v
                 for flit in self.flit_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle
+                    flit.rn_data_collection_complete_cycle = self.cycle
                 self.node.rn_tracker["read"][self.rn_type][in_pos].remove(req)
                 self.node.rn_tracker_count["read"][self.rn_type][in_pos] += 1
                 self.node.rn_tracker_pointer["read"][self.rn_type][in_pos] -= 1
@@ -124,6 +126,7 @@ class REQ_RSP_model(BaseModel):
                 self.req_cir_v_num_stat += req.circuits_completed_v
                 for flit in self.flit_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle + self.config.sn_tracker_release_latency
+                    flit.sn_data_collection_completet_cycle = self.cycle
                 # 释放tracker 增加40ns
                 release_time = self.cycle + self.config.sn_tracker_release_latency
                 self.node.sn_tracker_release_time[release_time].append((self.sn_type, in_pos, req))
@@ -173,6 +176,7 @@ class REQ_RSP_model(BaseModel):
                             self.node.rn_rdb_count[self.rn_type][ip_pos] > self.node.rn_rdb_reserve[self.rn_type][ip_pos] * req.burst_length
                             and self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0
                         ):
+                            req.req_entry_network_cycle = self.cycle
                             self.req_network.ip_read[self.rn_type][ip_pos].popleft()
                             self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
                             self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] -= 1
@@ -182,6 +186,7 @@ class REQ_RSP_model(BaseModel):
                     if self.req_network.ip_write[self.rn_type][ip_pos]:
                         req = self.req_network.ip_write[self.rn_type][ip_pos][0]
                         if self.node.rn_wdb_count[self.rn_type][ip_pos] >= req.burst_length and self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0:
+                            req.req_entry_network_cycle = self.cycle
                             self.req_network.ip_write[self.rn_type][ip_pos].popleft()
                             self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
                             self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] -= 1
@@ -242,6 +247,9 @@ class REQ_RSP_model(BaseModel):
                         queue = self.flit_network.inject_queues[direction]
                         queue_pre = self.flit_network.inject_queues_pre[direction]
                         if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+                            req = self.req_network.send_flits[flit.packet_id][0]
+                            flit.sync_latency_record(req)
+                            flit.data_entry_network_cycle = self.cycle
                             queue_pre[flit.source] = flit
                             self.send_flits_num += 1
                             self.trans_flits_num += 1
@@ -623,7 +631,7 @@ class REQ_RSP_model(BaseModel):
                     ip_pos = in_pos - self.config.cols
                     if ip_pos in network.ip_eject[self.rn_type] and network.ip_eject[self.rn_type][ip_pos]:
                         rsp = network.ip_eject[self.rn_type][ip_pos].popleft()
-                        self._handle_response(rsp, in_pos)
+                        self._rn_handle_response(rsp, in_pos)
 
         elif flit_type == "data":
             for in_pos in self.flit_position:
@@ -694,6 +702,7 @@ class REQ_RSP_model(BaseModel):
             if req.req_attr == "new":
                 if self.node.sn_tracker_count[self.sn_type]["ro"][in_pos] > 0:
                     req.sn_tracker_type = "ro"
+                    req.sn_receive_req_cycle = self.cycle
                     self.node.sn_tracker[self.sn_type][in_pos].append(req)
                     self.node.sn_tracker_count[self.sn_type]["ro"][in_pos] -= 1
                     self.create_read_packet(req)
@@ -706,11 +715,13 @@ class REQ_RSP_model(BaseModel):
                     self.create_rsp(req, "negative")
                     self.node.sn_req_wait[req.req_type][self.sn_type][in_pos].append(req)
             else:
+                req.sn_receive_req_cycle = self.cycle
                 self.create_read_packet(req)
         elif req.req_type == "write":
             if req.req_attr == "new":
                 if self.node.sn_tracker_count[self.sn_type]["share"][in_pos] > 0 and self.node.sn_wdb_count[self.sn_type][in_pos] >= req.burst_length:
                     req.sn_tracker_type = "share"
+                    req.sn_receive_req_cycle = self.cycle
                     self.node.sn_tracker[self.sn_type][in_pos].append(req)
                     self.node.sn_tracker_count[self.sn_type]["share"][in_pos] -= 1
                     self.node.sn_wdb_count[self.sn_type][in_pos] -= req.burst_length
@@ -720,6 +731,7 @@ class REQ_RSP_model(BaseModel):
                     self.create_rsp(req, "negative")
                     self.node.sn_req_wait[req.req_type][self.sn_type][in_pos].append(req)
             else:
+                req.sn_receive_req_cycle = self.cycle
                 self.create_rsp(req, "datasend")
 
     # def _process_ring_bridge(self, network, direction, pos, next_pos, curr_node, opposite_node):
@@ -777,11 +789,11 @@ class REQ_RSP_model(BaseModel):
     #                 network.remain_tag[direction][next_pos] += 1
     #                 network.links_tag[link][-1] = None
     #                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-    
+
     def _process_ring_bridge(self, network, direction, pos, next_pos, curr_node, opposite_node):
         dir_key = f"v{direction}"
         link = (curr_node, next_pos)
-        
+
         # Early return if ring bridge is not active for this direction and position
         if not network.ring_bridge[dir_key][(pos, next_pos)]:
             return None
@@ -791,58 +803,54 @@ class REQ_RSP_model(BaseModel):
             # Handle empty link cases
             if network.links_tag[link][-1] is None:
                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-            
+
             if network.links_tag[link][-1] == [next_pos, direction]:
                 network.remain_tag[direction][next_pos] += 1
                 network.links_tag[link][-1] = None
                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-            
+
             return None
-        
+
         # Get the flit at the end of the link
         flit_l = network.links[link][-1]
-        
+
         # Case 2: Flit destination doesn't match next position
         if flit_l.destination != next_pos:
             return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
-        
+
         # Case 3: Flit destination matches next position
         eject_queue = network.eject_queues[direction][next_pos]
-        
+
         # Subcase 3.1: Link has a tag
         if network.links_tag[link][-1]:
-            if (network.links_tag[link][-1] == [next_pos, direction] and 
-                network.config.EQ_IN_FIFO_DEPTH > len(eject_queue)):
+            if network.links_tag[link][-1] == [next_pos, direction] and network.config.EQ_IN_FIFO_DEPTH > len(eject_queue):
                 network.remain_tag[direction][next_pos] += 1
                 network.links_tag[link][-1] = None
                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
             return None
-        
+
         # Subcase 3.2: Link has no tag
         if network.config.EQ_IN_FIFO_DEPTH <= len(eject_queue):
             return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
-        
+
         # Check priority conditions based on direction
         if direction == "down":
-            if ((flit_l.ETag_priority in ["T1", "T0"] and 
-                network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH) or
-                (flit_l.ETag_priority == "T2" and 
-                network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX)):
+            if (flit_l.ETag_priority in ["T1", "T0"] and network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH) or (
+                flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX
+            ):
                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-        
+
         elif direction == "up":
-            if ((flit_l.ETag_priority == "T0" and 
-                network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH and
-                network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l)) or
-                (flit_l.ETag_priority == "T1" and 
-                network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX) or
-                (flit_l.ETag_priority == "T2" and 
-                network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)):
+            if (
+                (flit_l.ETag_priority == "T0" and network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH and network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l))
+                or (flit_l.ETag_priority == "T1" and network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX)
+                or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)
+            ):
                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-        
+
         return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
-    def _handle_response(self, rsp, in_pos):
+    def _rn_handle_response(self, rsp, in_pos):
         """处理response的eject"""
         req = next(
             (req for req in self.node.rn_tracker[rsp.req_type][self.rn_type][in_pos] if req.packet_id == rsp.packet_id),
@@ -852,6 +860,8 @@ class REQ_RSP_model(BaseModel):
         self.rsp_cir_v_num_stat += rsp.circuits_completed_v
         if not req:
             return
+        rsp.rn_receive_rsp_cycle = self.cycle
+        req.sync_latency_record(rsp)
         if rsp.req_type == "read":
             if rsp.rsp_type == "negative":
                 if not req.early_rsp:

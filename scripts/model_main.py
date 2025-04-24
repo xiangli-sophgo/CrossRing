@@ -3,13 +3,15 @@ import os
 from src.utils.component import Flit, Network, Node
 from config.config import SimulationConfig
 import matplotlib
-matplotlib.use('macosx') 
+
+# matplotlib.use("macosx")
+
 
 def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_test_0423.txt"
+    file_name = r"traffic_2260E_0424.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -43,10 +45,10 @@ def main():
     if not config.topo_type:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        topo_type = "5x4"
+        # topo_type = "5x4"
         # topo_type = "4x5"
         # topo_type = "6x5"
-        # topo_type = "3x3"
+        topo_type = "3x3"  # SG2260E
     else:
         topo_type = config.topo_type
 
@@ -63,6 +65,7 @@ def main():
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
+        plot_piece=0,
     )
 
     # profiler = cProfile.Profile()
@@ -73,11 +76,11 @@ def main():
     # sim.end_time = 10000
     sim.config.burst = 2
     sim.config.num_ips = 32
-    sim.config.rn_read_tracker_ostd = 64
-    sim.config.rn_write_tracker_ostd = 64
+    sim.config.rn_read_tracker_ostd = 128
+    sim.config.rn_write_tracker_ostd = 32
     sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
     sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
-    sim.config.ro_tracker_ostd = 128
+    sim.config.ro_tracker_ostd = 64
     sim.config.share_tracker_ostd = 64
     sim.config.sn_wdb_size = sim.config.share_tracker_ostd * sim.config.burst
     sim.config.IQ_OUT_FIFO_DEPTH = 8
@@ -95,10 +98,15 @@ def main():
     sim.config.ITag_Max_Num_H = sim.config.ITag_Max_Num_V = 1
     sim.config.seats_per_link = 7
     sim.config.Both_side_ETag_upgrade = 1
+    sim.config.ddr_R_latency_original = 155
+    sim.config.ddr_R_latency_var_original = 25
+    sim.config.ddr_W_latency_original = 16
+    sim.config.l2m_R_latency_original = 12
+    sim.config.l2m_W_latency_original = 16
 
     # sim.config.update_config()
     sim.initial()
-    # sim.end_time = 50000
+    # sim.end_time = 200
     sim.print_interval = 2000
     sim.run()
     # print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
