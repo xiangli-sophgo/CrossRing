@@ -104,9 +104,9 @@ def main():
                 sim.config.rn_write_tracker_ostd = 64
                 sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
                 sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
-                sim.config.ro_tracker_ostd = 128
-                sim.config.share_tracker_ostd = 64
-                sim.config.sn_wdb_size = sim.config.share_tracker_ostd * sim.config.burst
+                sim.config.sn_read_tracker_ostd = 128
+                sim.config.sn_write_tracker_ostd = 64
+                sim.config.sn_wdb_size = sim.config.sn_write_tracker_ostd * sim.config.burst
                 sim.config.seats_per_link = 7
                 sim.config.RB_IN_FIFO_DEPTH = 8
                 sim.config.TL_Etag_T2_UE_MAX = 5

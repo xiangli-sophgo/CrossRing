@@ -33,8 +33,8 @@ def process_file(file_path):
 
         # 解析路径信息
         path_parts = file_path.split(os.sep)
-        ro_tracker_ostd = int(path_parts[-4].split("_")[0])
-        share_tracker_ostd = int(path_parts[-4].split("_")[1])
+        sn_read_tracker_ostd = int(path_parts[-4].split("_")[0])
+        sn_write_tracker_ostd = int(path_parts[-4].split("_")[1])
         topo_type = path_parts[-3]
         model_type = path_parts[4]
 
@@ -42,8 +42,8 @@ def process_file(file_path):
         results.append(
             {
                 # "file_path": file_path,
-                "ro_tracker_ostd": ro_tracker_ostd,
-                "share_tracker_ostd": share_tracker_ostd,
+                "sn_read_tracker_ostd": sn_read_tracker_ostd,
+                "sn_write_tracker_ostd": sn_write_tracker_ostd,
                 "topo_type": topo_type,
                 "model_type": model_type,
                 "ReadBandWidth": r_burst_len * 128 / (end_time - start_time) / 32,
@@ -64,7 +64,7 @@ def main():
     # 将结果保存到 CSV 文件
     output_csv = r"../../Result/Params_csv/SN_Tracker_OSTD_Results_fixed_time_interval.csv"
     with open(output_csv, "w", newline="") as csvfile:
-        fieldnames = ["ro_tracker_ostd", "share_tracker_ostd", "topo_type", "model_type", "ReadBandWidth", "WriteBandWidth"]
+        fieldnames = ["sn_read_tracker_ostd", "sn_write_tracker_ostd", "topo_type", "model_type", "ReadBandWidth", "WriteBandWidth"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
         writer.writeheader()

@@ -53,9 +53,9 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name):
     config.rn_write_tracker_ostd = 64
     config.rn_rdb_size = config.rn_read_tracker_ostd * config.burst
     config.rn_wdb_size = config.rn_write_tracker_ostd * config.burst
-    config.ro_tracker_ostd = 128
-    config.share_tracker_ostd = 64
-    config.sn_wdb_size = config.share_tracker_ostd * config.burst
+    config.sn_read_tracker_ostd = 128
+    config.sn_write_tracker_ostd = 64
+    config.sn_wdb_size = config.sn_write_tracker_ostd * config.burst
     config.seats_per_link = 7
 
     # Run simulation for each traffic file

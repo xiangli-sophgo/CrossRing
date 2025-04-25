@@ -45,7 +45,8 @@ class SimulationConfig:
         self.network_frequency = args.network_frequency
         self.rn_rdb_size = args.rn_rdb_size
         self.rn_wdb_size = args.rn_wdb_size
-        self.sn_wdb_size = args.sn_wdb_size
+        self.sn_ddr_wdb_size = args.sn_ddr_wdb_size
+        self.sn_l2m_wdb_size = args.sn_l2m_wdb_size
         self.ddr_R_latency_original = args.ddr_R_latency
         self.ddr_R_latency_var_original = args.ddr_R_latency_var
         self.ddr_W_latency_original = args.ddr_W_latency
@@ -70,16 +71,21 @@ class SimulationConfig:
         self.update_config()
 
     def update_config(self):
+        self.update_latency()
+        self.sn_tracker_release_latency = self.sn_tracker_release_latency_original * self.network_frequency
+        self.rn_read_tracker_ostd = self.rn_rdb_size // self.burst
+        self.rn_write_tracker_ostd = self.rn_wdb_size // self.burst
+        self.sn_ddr_read_tracker_ostd = self.sn_ddr_wdb_size // self.burst
+        self.sn_ddr_write_tracker_ostd = self.sn_ddr_wdb_size // self.burst
+        self.sn_l2m_read_tracker_ostd = self.sn_l2m_wdb_size // self.burst
+        self.sn_l2m_write_tracker_ostd = self.sn_l2m_wdb_size // self.burst
+
+    def update_latency(self):
         self.ddr_R_latency = self.ddr_R_latency_original * self.network_frequency
         self.ddr_R_latency_var = self.ddr_R_latency_var_original * self.network_frequency
         self.ddr_W_latency = self.ddr_W_latency_original * self.network_frequency
         self.l2m_R_latency = self.l2m_R_latency_original * self.network_frequency
         self.l2m_W_latency = self.l2m_W_latency_original * self.network_frequency
-        self.sn_tracker_release_latency = self.sn_tracker_release_latency_original * self.network_frequency
-        self.rn_read_tracker_ostd = self.rn_rdb_size // self.burst
-        self.rn_write_tracker_ostd = self.rn_wdb_size // self.burst
-        self.ro_tracker_ostd = self.sn_wdb_size // self.burst
-        self.share_tracker_ostd = self.sn_wdb_size // self.burst
 
     def topology_select(self, topo_type="default"):
         if topo_type == "default":
@@ -157,6 +163,8 @@ class SimulationConfig:
             self.sdma_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
             self.l2m_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
             self.gdma_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
+            self.ddr_real_positions = [3, 5, 9, 11, 15, 17]
+            self.l2m_real_positions = [4, 16]
         else:
             raise ValueError("Error topology type: ", topo_type)
 
@@ -285,8 +293,8 @@ class SimulationConfig:
         parser.add_argument("--l2m_send_rate", type=float, default=default_config["l2m_send_rate"], help="L2M send rate")
         parser.add_argument("--gdma_send_rate", type=float, default=default_config["gdma_send_rate"], help="GDMA send rate")
         parser.add_argument("--num_ddr", type=int, default=default_config["num_ddr"], help="Number of DDRs")
-        parser.add_argument("--num_sdma", type=int, default=default_config["num_sdma"], help="Number of SDMAs")
         parser.add_argument("--num_l2m", type=int, default=default_config["num_l2m"], help="Number of L2Ms")
+        parser.add_argument("--num_sdma", type=int, default=default_config["num_sdma"], help="Number of SDMAs")
         parser.add_argument("--num_gdma", type=int, default=default_config["num_gdma"], help="Number of GDMA")
         parser.add_argument("--flit_size", type=int, default=default_config["flit_size"], help="Flit size")
         parser.add_argument("--seats_per_link", type=int, default=default_config["seats_per_link"], help="Seats per link")
@@ -313,7 +321,8 @@ class SimulationConfig:
         parser.add_argument("--network_frequency", type=float, default=default_config["network_frequency"], help="Network frequency")
         parser.add_argument("--rn_rdb_size", type=int, default=default_config["rn_rdb_size"], help="RN read buffer size")
         parser.add_argument("--rn_wdb_size", type=int, default=default_config["rn_wdb_size"], help="RN write buffer size")
-        parser.add_argument("--sn_wdb_size", type=int, default=default_config["sn_wdb_size"], help="SN write buffer size")
+        parser.add_argument("--sn_ddr_wdb_size", type=int, default=default_config["sn_ddr_wdb_size"], help="SN write buffer size")
+        parser.add_argument("--sn_l2m_wdb_size", type=int, default=default_config["sn_l2m_wdb_size"], help="SN write buffer size")
         parser.add_argument("-tt", "--topo_type", type=str, default="", help="Choose topology type id from [4x9, 4x5, 5x4, 9x4, 3x3]")
         parser.add_argument("--TL_Etag_T1_UE_MAX", type=int, default=default_config["TL_Etag_T1_UE_MAX"], help="Horizontal cross point towards left T1 ETag FIFO Entry number")
         parser.add_argument("--TL_Etag_T2_UE_MAX", type=int, default=default_config["TL_Etag_T2_UE_MAX"], help="Horizontal cross point towards left T2 ETag FIFO Entry number")

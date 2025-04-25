@@ -5,6 +5,7 @@ import numpy as np
 import itertools
 import random
 
+
 class TrafficGenerator:
     def __init__(self, read_duration=64, write_duration=64, total_bandwidth=128):
         """
@@ -74,11 +75,7 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
     generator = TrafficGenerator(read_duration=read_duration, write_duration=write_duration)
     data_all = []
 
-
-
-    def generate_entries(src_pos, src_type, dest_map, operation, burst,
-                        flow_type, speed, interval_count,
-                        dest_access_mode='round_robin'):
+    def generate_entries(src_pos, src_type, dest_map, operation, burst, flow_type, speed, interval_count, dest_access_mode="random"):
         """
         生成指定模式的流量条目
 
@@ -93,21 +90,17 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
         interval_count: int, 周期数
         dest_access_mode: 'round_robin' 或 'random', 控制目标选择方式
         """
-        if dest_access_mode not in ('round_robin', 'random'):
+        if dest_access_mode not in ("round_robin", "random"):
             raise ValueError("dest_access_mode 必须是 'round_robin' 或 'random'")
 
         is_read = operation == "R"
         time_pattern = generator.calculate_time_points(speed, burst, is_read)
         entries = []
         # 构造 (dest_type, pos) 列表
-        dest_items = [
-            (dtype, pos)
-            for dtype, poses in dest_map.items()
-            for pos in poses
-        ]
+        dest_items = [(dtype, pos) for dtype, poses in dest_map.items() for pos in poses]
 
         # 准备循环器：仅 round_robin 模式
-        if dest_access_mode == 'round_robin':
+        if dest_access_mode == "round_robin":
             if flow_type == 1:
                 groups = group_numbers()
                 group_cycles = {}
@@ -130,15 +123,12 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
                         gid = next((i for i, g in enumerate(groups) if src in g), -1)
                         if gid == -1:
                             continue
-                        if dest_access_mode == 'random':
+                        if dest_access_mode == "random":
                             group_items = [item for item in dest_items if item[1] in groups[gid]]
                             dest_type, dest = random.choice(group_items)
                         else:
                             dest_type, dest = next(group_cycles[gid])
-                        entries.append(
-                            f"{base_time + time_offset + t},{src},{src_type},"
-                            f"{dest},{dest_type},{operation},{burst}\n"
-                        )
+                        entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
             elif flow_type == 2:
                 total = len(dest_items)
@@ -149,30 +139,22 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
                         if match:
                             dest_type, dest = match
                         else:
-                            if dest_access_mode == 'random':
+                            if dest_access_mode == "random":
                                 dest_type, dest = random.choice(dest_items)
                             else:
                                 dest_type, dest = next(dest_cycle)
-                        entries.append(
-                            f"{base_time + time_offset + t},{src},{src_type},"
-                            f"{dest},{dest_type},{operation},{burst}\n"
-                        )
+                        entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
             else:
                 for t in time_pattern:
                     for src in src_pos:
-                        if dest_access_mode == 'random':
+                        if dest_access_mode == "random":
                             dest_type, dest = random.choice(dest_items)
                         else:
                             dest_type, dest = next(dest_cycle)
-                        entries.append(
-                            f"{base_time + time_offset + t},{src},{src_type},"
-                            f"{dest},{dest_type},{operation},{burst}\n"
-                        )
+                        entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
         return entries
-
-
 
     def generate_mixed_entries(src_pos, src_type, dest_type, dest_pos, operation, burst, ratios):
         """混合模式生成（保持原有逻辑，但区分读写时间）"""
@@ -237,8 +219,8 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
             data_all.extend(generate_mixed_entries(sdma_pos, "gdma", "ddr", ddr_pos, "R", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(sdma_pos, "gdma", "ddr", l2m_pos, "W", burst, mix_ratios))
         else:
-            # data_all.extend(generate_entries(gdma_pos, "gdma", "ddr", ddr_pos, "R", burst, flow_type, speed[burst], interval_count))
-            data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", ddr_pos, "W", burst, flow_type, speed[burst], interval_count))
+            data_all.extend(generate_entries(gdma_pos, "gdma", "ddr", ddr_pos, "R", burst, flow_type, speed[burst], interval_count))
+            # data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", ddr_pos, "W", burst, flow_type, speed[burst], interval_count))
 
             # data_all.extend(generate_entries(gdma_pos, "gdma", "ddr", ddr_pos, "R", burst, flow_type, speed[burst], interval_count))
             # data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
@@ -250,8 +232,9 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
             data_all.extend(generate_mixed_entries(sdma_pos, "sdma", "l2m", l2m_pos, "W", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, mix_ratios))
         else:
-            data_all.extend(generate_entries(sdma_pos, "sdma", ddr_map, "R", burst, flow_type, speed[burst], interval_count))
-            data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count))
+            data_all.extend(generate_entries(gdma_pos, "gdma", ddr_map, "R", burst, flow_type, speed[burst], interval_count))
+            # data_all.extend(generate_entries(gdma_pos, "gdma", ddr_map, "W", burst, flow_type, speed[burst], interval_count))
+            # data_all.extend(generate_entries(sdma_pos, "gdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count))
             # data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, flow_type, speed[burst], interval_count))
             # data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
 
@@ -265,7 +248,7 @@ if __name__ == "__main__":
     # 参数配置
     topo = "3x3"
     interval_count = 32
-    file_name = "../../test_data/traffic_2260E_0424.txt"
+    file_name = "../../test_data/traffic_2260E_0425.txt"
     np.random.seed(415)
 
     num_ip = 32
@@ -279,23 +262,14 @@ if __name__ == "__main__":
     # SG2260E
     sdma_pos = [0, 2, 6, 8]
     gdma_pos = [0, 2, 6, 8]
-    ddr_1_pos = [0, 2, 3, 5, 6, 8]
-    ddr_2_pos = [3, 5]
-    l2m_1_pos = [1, 7]
-    l2m_2_pos = [1, 7]
-    ddr_map = {
-        "ddr_1": [0, 2, 3, 5, 6, 8],
-        "ddr_2": [3, 5]
-    }
-    l2m_map = {
-        "l2m_1": [1, 7],
-        "l2m_2": [1, 7]
-    }
-        
-    speed = {1: 128, 2: 256, 4: 128}  # 不同burst对应的带宽(GB/s)
+
+    ddr_map = {"ddr_1": [0, 2, 3, 5, 6, 8], "ddr_2": [3, 5]}
+    l2m_map = {"l2m_1": [1, 7], "l2m_2": [1, 7]}
+
+    speed = {1: 128, 2: 512, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 2
     read_duration = 128
-    write_duration = 128
+    write_duration = 0
 
     # 生成数据(使用混合模式)
     generate_data(topo, read_duration, write_duration, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_pos, speed, burst, flow_type=0)

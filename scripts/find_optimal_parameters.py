@@ -102,9 +102,9 @@ def find_optimal_parameters():
                     sim.config.rn_write_tracker_ostd = 64
                     sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * 4
                     sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * 4
-                    sim.config.ro_tracker_ostd = 128
-                    sim.config.share_tracker_ostd = 64
-                    sim.config.sn_wdb_size = sim.config.share_tracker_ostd * 4
+                    sim.config.sn_read_tracker_ostd = 128
+                    sim.config.sn_write_tracker_ostd = 64
+                    sim.config.sn_wdb_size = sim.config.sn_write_tracker_ostd * 4
                     sim.config.seats_per_link = 7
                     sim.config.IQ_OUT_FIFO_DEPTH = 6
                     sim.config.EQ_IN_FIFO_DEPTH = 8
@@ -123,9 +123,9 @@ def find_optimal_parameters():
                     sim.config.rn_write_tracker_ostd = 32
                     sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * 4
                     sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * 4
-                    sim.config.ro_tracker_ostd = 64
-                    sim.config.share_tracker_ostd = 64
-                    sim.config.sn_wdb_size = sim.config.share_tracker_ostd * 4
+                    sim.config.sn_read_tracker_ostd = 64
+                    sim.config.sn_write_tracker_ostd = 64
+                    sim.config.sn_wdb_size = sim.config.sn_write_tracker_ostd * 4
                     sim.config.seats_per_link = 7
                     sim.config.IQ_OUT_FIFO_DEPTH = 6
                     sim.config.EQ_IN_FIFO_DEPTH = 8

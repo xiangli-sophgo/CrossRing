@@ -5,6 +5,7 @@ from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_p
 from config.config import SimulationConfig
 from src.utils.component import Flit, Network, Node
 from src.core.CrossRing_Piece_Visualizer import CrossRingVisualizer
+from src.core.Link_State_Visualizer import NetworkLinkVisualizer
 import matplotlib.pyplot as plt
 import random
 import json
@@ -19,7 +20,8 @@ from matplotlib.colors import LinearSegmentedColormap
 import seaborn as sns
 import pandas as pd
 import networkx as nx
-from matplotlib.patches import Rectangle, FancyArrowPatch
+from matplotlib.patches import Rectangle, FancyArrowPatch, Patch
+from matplotlib.lines import Line2D
 import matplotlib.colors as mcolors
 import matplotlib.cm as cm
 
@@ -47,16 +49,18 @@ class BaseModel:
                 os.makedirs(self.results_fig_save_path)
         self.config.topology_select(self.topo_type_stat)
         # self.initial()
+        self.config.update_config()
 
     def initial(self):
-        self.config.update_config()
+        self.config.update_latency()
         self.adjacency_matrix = create_adjacency_matrix("CrossRing", self.config.num_nodes, self.config.cols)
         # plot_adjacency_matrix(self.adjacency_matrix)
         self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.flit_network = Network(self.config, self.adjacency_matrix, name="Data Network")
         if self.plot_piece:
-            self.vis = CrossRingVisualizer(self.config, 3)
+            self.vis = NetworkLinkVisualizer(self.req_network)
+            # self.vis = CrossRingVisualizer(self.config, 3)
         if self.config.Both_side_ETag_upgrade:
             self.req_network.Both_side_ETag_upgrade = self.rsp_network.Both_side_ETag_upgrade = self.flit_network.Both_side_ETag_upgrade = True
         self.routes = find_shortest_paths(self.adjacency_matrix)
@@ -534,8 +538,8 @@ class BaseModel:
             if self.topo_type_stat in ["5x4", "4x5"]:
                 req.source_type = "gdma" if req_data[1] < 16 else "sdma"
                 req.destination_type = "ddr" if req_data[3] < 16 else "l2m"
-            elif self.topo_type_stat in ['3x3']:
-                req.destination_type = "ddr" if req_data[4] in ['ddr_1', 'l2m_1'] else "l2m"
+            elif self.topo_type_stat in ["3x3"]:
+                req.destination_type = "ddr" if req_data[4] in ["ddr_1", "l2m_1"] else "l2m"
             req.packet_id = Node.get_next_packet_id()
             req.req_type = "read" if req_data[5] == "R" else "write"
             self.req_network.send_flits[req.packet_id].append(req)
@@ -1095,6 +1099,8 @@ class BaseModel:
         flit.path_index += 1
         flit.current_link = (next_pos, target_node)
         flit.current_seat_index = 0
+        if network.links[(next_pos, target_node)][0]:
+            print(network.links[(next_pos, target_node)][0])
         network.links[(next_pos, target_node)][0] = flit
         return True
 
@@ -1315,7 +1321,7 @@ class BaseModel:
             flit.destination_original = req.destination_original
             flit.flit_type = "data"
             # flit.departure_cycle = self.cycle
-            flit.departure_cycle = self.cycle + self.config.ddr_W_latency + i if req.original_destination_type.startswith('ddr') else self.cycle + self.config.l2m_W_latency + i
+            flit.departure_cycle = self.cycle + self.config.ddr_W_latency + i if req.original_destination_type.startswith("ddr") else self.cycle + self.config.l2m_W_latency + i
             flit.req_departure_cycle = req.departure_cycle
             flit.entry_db_cycle = req.entry_db_cycle
             flit.source_type = req.source_type
@@ -1346,12 +1352,8 @@ class BaseModel:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             flit.departure_cycle = (
-                self.cycle + np.random.uniform(
-                    low=self.config.ddr_R_latency - self.config.ddr_R_latency_var,
-                    high=self.config.ddr_R_latency + self.config.ddr_R_latency_var,
-                    size=None
-                ) + i
-                if req.original_destination_type.startswith('ddr')
+                self.cycle + np.random.uniform(low=self.config.ddr_R_latency - self.config.ddr_R_latency_var, high=self.config.ddr_R_latency + self.config.ddr_R_latency_var, size=None) + i
+                if req.original_destination_type.startswith("ddr")
                 else self.cycle + self.config.l2m_R_latency + i
             )
             flit.entry_db_cycle = self.cycle
@@ -1484,21 +1486,14 @@ class BaseModel:
         flit.actual_network_duration = flit.arrival_network_cycle - flit.departure_network_cycle
 
         flit.total_latency = (flit.arrival_cycle - flit.rn_req_generated_cycle) // self.config.network_frequency
-        flit.latency_1 = (flit.sn_receive_req_cycle - flit.rn_req_generated_cycle) // self.config.network_frequency
+        # flit.latency_1 = (flit.sn_receive_req_cycle - flit.rn_req_generated_cycle) // self.config.network_frequency
+        flit.latency_1 = (flit.sn_receive_req_cycle - flit.req_entry_network_cycle) // self.config.network_frequency
         if flit.req_type == "read":
             flit.latency_2 = 0
-            if not flit.rn_data_collection_complete_cycle:
-                flit.latency_3 = 0
-            else:
-                flit.latency_3 = (flit.rn_data_collection_complete_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
-            # flit.latency_3 = (flit.rn_data_collection_complete_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
+            flit.latency_3 = (flit.rn_data_collection_complete_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
         elif flit.req_type == "write":
             flit.latency_2 = (flit.rn_receive_rsp_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
-            if not flit.sn_data_collection_completet_cycle:
-                flit.latency_3 = 0
-            else:
-                flit.latency_3 = (flit.sn_data_collection_completet_cycle - flit.rn_receive_rsp_cycle) // self.config.network_frequency
-            # flit.latency_3 = (flit.sn_data_collection_completet_cycle - flit.rn_receive_rsp_cycle) // self.config.network_frequency
+            flit.latency_3 = (flit.sn_data_collection_completet_cycle - flit.rn_receive_rsp_cycle) // self.config.network_frequency
 
         # Skip if not the last flit or if arrival/departure cycles are invalid
         if not flit.is_last_flit or not flit.arrival_cycle or not flit.req_departure_cycle:
@@ -1575,7 +1570,8 @@ class BaseModel:
             # 计算并输出RN和SN的统计信息
             def print_stats(bw_list, name, operation):
                 if bw_list:
-                    avg = sum(bw_list) / len(bw_list)
+                    # avg = sum(bw_list) / len(bw_list)
+                    avg = sum(bw_list) / getattr(self.config, f"num_{name}")
                     min_bw = min(bw_list)
                     max_bw = max(bw_list)
                     print(f"\n{name} {operation} Bandwidth Stats:", file=f3)
@@ -1583,7 +1579,7 @@ class BaseModel:
                     print(f"  Range: {min_bw:.1f} - {max_bw:.1f} GB/s", file=f3)
 
                     # 屏幕输出
-                    print(f"{name} {operation}: Avg={avg:.1f} GB/s, Range={min_bw:.1f}-{max_bw:.1f} GB/s")
+                    print(f"{name} {operation}: Avg: {avg:.1f} GB/s, Range: {min_bw:.1f}-{max_bw:.1f} GB/s")
                 # else:
                 #     print(f"\nNo {name} {operation} bandwidth data", file=f3)
                 #     print(f"No {name} {operation} bandwidth data")  # 屏幕输出
@@ -1637,13 +1633,13 @@ class BaseModel:
 
         # 根据请求类型更新对应的IP区间
         if req_type == "R":
-            dma_id = f"{str(flit.destination_type)}_{str(flit.destination + self.config.cols)}"
-            ddr_id = f"{str(flit.source_type)}_{str(flit.source)}"
+            dma_id = f"{str(flit.original_source_type)}_{str(flit.destination + self.config.cols)}"
+            ddr_id = f"{str(flit.original_destination_type[:3])}_{str(flit.source)}"
             dma_intervals = self.read_ip_intervals[dma_id]
             ddr_intervals = self.read_ip_intervals[ddr_id]
         elif req_type == "W":
-            dma_id = f"{str(flit.source_type)}_{str(flit.source)}"
-            ddr_id = f"{str(flit.destination_type)}_{str(flit.destination+ self.config.cols)}"
+            dma_id = f"{str(flit.original_source_type)}_{str(flit.source)}"
+            ddr_id = f"{str(flit.original_destination_type[:3])}_{str(flit.destination+ self.config.cols)}"
             dma_intervals = self.write_ip_intervals[dma_id]
             ddr_intervals = self.write_ip_intervals[ddr_id]
 
@@ -1755,7 +1751,7 @@ class BaseModel:
 
         # 带宽计算：
         if total_interval_time > 0:
-            total_bandwidth = total_count * 128 / total_interval_time / self.config.num_ips
+            total_bandwidth = total_count * 128 / total_interval_time / (self.config.num_RN if req_type == "read" else self.config.num_SN)
         else:
             total_bandwidth = 0
 
@@ -1836,6 +1832,8 @@ class BaseModel:
             self.ip_bandwidth_data["write"][source_type][physical_row, physical_col] = write_bw
             self.ip_bandwidth_data["total"][source_type][physical_row, physical_col] = total_bw
 
+    
+
     def draw_flow_graph(self, network, mode="total", node_size=2000, save_path=None):
         """
         绘制合并的网络流图和IP
@@ -1871,7 +1869,7 @@ class BaseModel:
 
         link_values = []
         for (i, j), value in links.items():
-            link_value = value * 128 / (self.cycle // self.config.network_frequency)
+            link_value = value * 128 / (self.cycle // self.config.network_frequency) if value else 0
             link_values.append(link_value)
             formatted_label = f"{link_value:.1f}"
             G.add_edge(i, j, label=formatted_label)

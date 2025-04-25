@@ -217,10 +217,25 @@ class Node:
         for req_type in ["read", "write"]:
             self.sn_req_wait[req_type][key][ip_pos] = []
         self.sn_wdb_recv[key][ip_pos] = []
-        self.sn_wdb_count[key][ip_pos] = self.config.sn_wdb_size
         self.sn_tracker[key][ip_pos] = []
-        self.sn_tracker_count[key]["ro"][ip_pos] = self.config.ro_tracker_ostd
-        self.sn_tracker_count[key]["share"][ip_pos] = self.config.share_tracker_ostd
+        if self.config.topo_type != "3x3":
+            if key == "ddr":
+                self.sn_wdb_count[key][ip_pos] = self.config.sn_ddr_wdb_size
+                self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_ddr_read_tracker_ostd
+                self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_ddr_write_tracker_ostd
+            elif key == "l2m":
+                self.sn_wdb_count[key][ip_pos] = self.config.sn_l2m_wdb_size
+                self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_l2m_read_tracker_ostd
+                self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_l2m_write_tracker_ostd
+        else:
+            if ip_pos in self.config.ddr_real_positions:
+                self.sn_wdb_count[key][ip_pos] = self.config.sn_ddr_wdb_size
+                self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_ddr_read_tracker_ostd
+                self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_ddr_write_tracker_ostd
+            elif ip_pos in self.config.l2m_real_positions:
+                self.sn_wdb_count[key][ip_pos] = self.config.sn_l2m_wdb_size
+                self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_l2m_read_tracker_ostd
+                self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_l2m_write_tracker_ostd
 
 
 class Network:
@@ -1379,8 +1394,9 @@ class Network:
             if current - next_node != self.config.cols:
                 link = self.links.get(flit.current_link)
                 # print(flit.current_seat_index)
-                if link[flit.current_seat_index] is not None:
-                    return
+                # if link[flit.current_seat_index] is not None:
+                # print(flit)
+                # return
                 link[flit.current_seat_index] = flit
                 if (flit.current_seat_index == 6 and len(link) == 7) or (flit.current_seat_index == 1 and len(link) == 2):
                     self.links_flow_stat[flit.req_type][flit.current_link] += 1

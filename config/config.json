@@ -30,8 +30,8 @@
     "burst": 2, 
     "rn_rdb_size": 256,
     "rn_wdb_size": 64,
-    "ro_tracker_ostd": 128,
-    "share_tracker_ostd": 128,
+    "sn_read_tracker_ostd": 128,
+    "sn_write_tracker_ostd": 128,
     "sn_wdb_size": 128,
     "network_frequency": 2,
     "ddr_latency": 150

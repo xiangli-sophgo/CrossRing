@@ -30,7 +30,8 @@ class CrossRingVisualizer:
         self.gap = 0.02  # 相邻槽之间间距
         self.fifo_gap = 0.5  # 相邻fifo之间间隙
         # 初始化图形
-        self.fig, self.ax = plt.subplots(figsize=(8, 6))
+        self.fig, self.ax = plt.subplots(figsize=(12, 10))  # 增大图形尺寸
+        plt.subplots_adjust(bottom=0.2)  # 为底部links模块留出空间
         self.ax.axis("off")
         self.ax.set_aspect("equal")
         # 调色板
@@ -44,8 +45,67 @@ class CrossRingVisualizer:
         self.rb_patches, self.rb_texts = {}, {}
         self.lh_patches, self.cph_texts = {}, {}
         self.lv_patches, self.cpv_texts = {}, {}
+        self.link_patches, self.link_texts = {}, {}  # 新增的link可视化存储
         # 画出三个模块的框和 FIFO 槽
         self._draw_modules()
+        self._draw_links_module()  # 新增的links模块
+
+    def _draw_links_module(self):
+        """绘制所有links的模块"""
+        square = self.square
+        gap = self.gap
+
+        # 确定模块位置
+        links_x = -4
+        links_y = -1  # 放在底部
+
+        # 模块尺寸
+        module_width = 10
+        module_height = 3
+
+        # 绘制模块边框
+        box = Rectangle((links_x - module_width / 2, links_y - module_height / 2), module_width, module_height, fill=False)
+        self.ax.add_patch(box)
+
+        # 模块标题
+        title_x = links_x
+        title_y = links_y + module_height / 2 + 0.02
+        self.ax.text(title_x, title_y, "All Links", ha="center", va="bottom", fontweight="bold")
+
+        # 计算每个link的位置
+        num_links = self.cols * self.rows * 4  # 假设每个节点有4个方向的link
+        link_rows = 3
+        link_cols = (num_links + link_rows - 1) // link_rows
+
+        # 清空旧数据
+        self.link_patches.clear()
+        self.link_texts.clear()
+
+        # 为每个link绘制FIFO槽
+        for i in range(num_links):
+            row = i // link_cols
+            col = i % link_cols
+
+            # 计算位置
+            x = links_x - module_width / 2 + 0.5 + col * 1.5
+            y = links_y + module_height / 2 - 0.5 - row * 0.7
+
+            # 创建link标识
+            link_name = f"Link_{i}"
+            self.ax.text(x - 0.5, y, link_name, ha="right", va="center", fontsize=8)
+
+            # 绘制FIFO槽
+            self.link_patches[link_name] = []
+            self.link_texts[link_name] = []
+
+            for s in range(self.seats_per_link):
+                slot_x = x + s * (square + gap)
+                slot_y = y
+                patch = Rectangle((slot_x - square / 2, slot_y - square / 2), square, square, edgecolor="black", facecolor="none")
+                self.ax.add_patch(patch)
+                txt = self.ax.text(slot_x, slot_y + square / 2 + 0.005, "", ha="center", va="bottom", fontsize=8)
+                self.link_patches[link_name].append(patch)
+                self.link_texts[link_name].append(txt)
 
     def _draw_modules(self):
         # 仅绘制当前节点的 Inject Queue, Eject Queue, Ring Bridge
@@ -387,4 +447,42 @@ class CrossRingVisualizer:
                 else:
                     p.set_facecolor("none")
                     t.set_text("")
+
+        # 更新所有links的显示
+        self._update_links_display(links)
         plt.pause(0.2)
+
+    def _update_links_display(self, links):
+        """更新所有links的显示"""
+        # 遍历所有links
+        link_idx = 0
+        for src_dest, q in links.items():
+            src, dest = src_dest
+            link_name = f"Link_{link_idx}"
+            link_idx += 1
+
+            if link_name not in self.link_patches:
+                continue
+
+            patches = self.link_patches[link_name]
+            texts = self.link_texts[link_name]
+
+            # 更新显示
+            for idx, p in enumerate(patches):
+                t = texts[idx]
+                if idx < len(q):
+                    item = q[idx]
+                    if item is None:
+                        p.set_facecolor("none")
+                        t.set_text("")
+                        continue
+
+                    packet_id = getattr(item, "packet_id", None)
+                    flit_id = getattr(item, "flit_id", str(item))
+                    pid = {"packet_id": packet_id, "flit_id": flit_id}
+
+                    p.set_facecolor(self._get_color(pid))
+                    t.set_text(f"{packet_id}-{flit_id}")
+                else:
+                    p.set_facecolor("none")
+                    t.set_text("")

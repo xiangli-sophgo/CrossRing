@@ -32,8 +32,8 @@ from plotly.subplots import make_subplots
 #     # 统一rn_w_tracker_outstanding
 #     # unified_rn_w = topo_data["rn_w_tracker_outstanding"].iloc[0]
 #     unified_rn_w = 48
-#     # x_name = "ro_tracker_ostd"
-#     # y_name = "share_tracker_ostd"
+#     # x_name = "sn_read_tracker_ostd"
+#     # y_name = "sn_write_tracker_ostd"
 #     x_name = "rn_r_tracker_outstanding"
 #     y_name = "rn_w_tracker_outstanding"
 
@@ -127,8 +127,8 @@ show_value = "read_BW"
 # show_value = "read_latency_avg"
 # show_value = "read_latency_max"
 # show_value = "data_wait_cycle_h_num"
-# x_name = "ro_tracker_ostd"
-# y_name = "share_tracker_ostd"
+# x_name = "sn_read_tracker_ostd"
+# y_name = "sn_write_tracker_ostd"
 # x_name = "rn_r_tracker_ostd"
 # y_name = "rn_w_tracker_ostd"
 # x_name = "inject_queue_length"
