@@ -19,7 +19,7 @@ class REQ_RSP_model(BaseModel):
             self.check_and_release_sn_tracker()
             # self.flit_trace(1000)
             if self.plot_piece:
-                show_id = 1
+                show_id = 2
                 use_highlight = 1
                 if self.req_network.send_flits[show_id] and not self.req_network.send_flits[show_id][-1].is_arrive:
                     self.vis.update(self.req_network, use_highlight)

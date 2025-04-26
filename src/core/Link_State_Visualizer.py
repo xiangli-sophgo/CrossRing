@@ -4,12 +4,15 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Rectangle
 from matplotlib.lines import Line2D
 from collections import defaultdict, deque
+import copy
+import threading
+import time
 
 
 class NetworkLinkVisualizer:
     def __init__(self, network):
         self.network = network
-        self.fig, self.ax = plt.subplots(figsize=(12, 10))
+        self.fig, self.ax = plt.subplots(figsize=(10, 8))
         self.ax.set_aspect("equal")
         self.node_positions = self._calculate_layout()
         self.link_artists = {}  # 存储链路相关的静态信息
@@ -17,8 +20,11 @@ class NetworkLinkVisualizer:
         self._color_map = {}
         self._next_color = 0
         self._draw_static_elements()
-        # self.ax.set_xlim(-1, 10)
-        # self.ax.set_ylim(-10, 1)
+
+        # 播放控制参数
+        self.pause_interval = 0.1        # 默认每帧暂停间隔(秒)
+        # 绑定键盘事件:
+        self.fig.canvas.mpl_connect('key_press_event', self._on_key)
 
     def _calculate_layout(self):
         """根据网格计算节点位置（可调整节点间距）"""
@@ -27,9 +33,9 @@ class NetworkLinkVisualizer:
             x, y = node % self.network.config.cols, node // self.network.config.cols
             # 为了美观，按照行列计算位置，并添加些许偏移
             if y % 2 == 1:  # 奇数行左移
-                x -= 0.25
+                x -= 0.16
                 y -= 0.6
-            pos[node] = (x * 3, -y * 1.5)
+            pos[node] = (x * 4, -y * 1.8)
         return pos
 
     def _draw_static_elements(self):
@@ -64,12 +70,7 @@ class NetworkLinkVisualizer:
         self.ax.axis("off")
         plt.tight_layout()
 
-    def _draw_link_frame(self, src, dest, queue_fixed_length=1.0):
-        """为链路绘制队列框架和箭头，根据箭头方向自动调整队列框架的位置及形状：
-        - 水平箭头：指向左的队列框架放在上方，指向右的放在下方，框架尺寸为宽度 queue_fixed_length、高度 0.3；
-        - 竖直箭头：指向上的队列框架放在右侧，指向下的放在左侧，框架尺寸为宽度 0.3、高度 queue_fixed_length；
-        双向链路的箭头会在主要方向上做微小偏移，避免相互重叠。
-        """
+    def _draw_link_frame(self, src, dest, queue_fixed_length=2):
         # 节点矩形尺寸
         node_width = 0.5
         node_height = 0.5
@@ -163,7 +164,7 @@ class NetworkLinkVisualizer:
         - 向下的链路: 横向标签在左侧
         """
         self.network = network
-        # 清除旧的 flit 图形
+                        
         for link_id, artists_dict in self.link_artists.items():
             if "flit_artists" in artists_dict:
                 for artist in artists_dict["flit_artists"]:
@@ -198,8 +199,8 @@ class NetworkLinkVisualizer:
             else:
                 is_forward = dy > 0  # 向上为正向
 
-            margin = 0.05
-            flit_size = 0.12  # flit方形大小
+            margin = 0.02
+            flit_size = 0.15  # flit方形大小
             spacing = flit_size * 1.2  # flit之间的间距
 
             # 计算需要的总空间
@@ -208,14 +209,16 @@ class NetworkLinkVisualizer:
                 required_space = num_flits * spacing
                 available_space = queue_width - 2 * margin
                 # 如果需要的空间大于可用空间，按比例缩小间距
-                if required_space > available_space:
-                    spacing = available_space / num_flits
+                spacing = available_space / num_flits
+                # if required_space > available_space:
+                #     spacing = available_space / num_flits
             else:
                 required_space = num_flits * spacing
                 available_space = queue_height - 2 * margin
+                spacing = available_space / num_flits
                 # 如果需要的空间大于可用空间，按比例缩小间距
-                if required_space > available_space:
-                    spacing = available_space / num_flits
+                # if required_space > available_space:
+                #     spacing = available_space / num_flits
 
             # 绘制所有flit位置
             flit_artists = []
@@ -243,20 +246,24 @@ class NetworkLinkVisualizer:
 
                 # 添加文本标签 - 根据方向调整位置和显示方式
                 label = f"{flit.packet_id}.{flit.flit_id}"
+
+                # 2. 拼成多行标签
+
                 if is_horizontal:
-                    # 水平链路：纵向标签
-                    char_spacing = flit_size * 0.5  # 字符垂直间距
-                    total_height = len(label) * char_spacing
+                    label = f"{flit.packet_id}\n{flit.flit_id}"
+                    # 根据方向决定 y 偏移
+                    if is_forward:
+                        y_text = y - flit_size * 2 - 0.1
+                    else:
+                        y_text = y + flit_size * 2 + 0.1
 
-                    if is_forward:  # 向右的链路
-                        base_y = y - flit_size * 2 - total_height / 2
-                    else:  # 向左的链路
-                        base_y = y + flit_size * 2 - total_height / 2
-
-                    for j, char in enumerate(label):
-                        char_y = base_y + j * char_spacing
-                        text = self.ax.text(x, char_y, char, ha="center", va="center", fontsize=10)  # 使用更小的字体
-                        flit_artists.append(text)
+                    # 一次性绘制两行
+                    txt = self.ax.text(
+                        x + (i - 0.2) * 0.04 * (int(is_forward)-0.5), y_text, label,
+                        ha="center", va="center",
+                        fontsize=9
+                    )
+                    flit_artists.append(txt)
                 else:
                     # 垂直链路：横向标签
                     if is_forward:  # 向上的链路
@@ -266,7 +273,7 @@ class NetworkLinkVisualizer:
                         text_x = x - flit_size * 1.1  # 左侧
                         ha = "right"
                     text_y = y
-                    text = self.ax.text(text_x, text_y, label, ha=ha, va="center", fontsize=10)
+                    text = self.ax.text(text_x, text_y, label, ha=ha, va="center", fontsize=9)
                     flit_artists.append(text)
 
                 self.ax.add_patch(rect)
@@ -275,10 +282,42 @@ class NetworkLinkVisualizer:
             # 保存该链路的图形对象
             self.link_artists[link_id]["flit_artists"] = flit_artists
 
-        # 刷新图形
-        self.fig.canvas.draw_idle()
-        plt.pause(0.5)
+        # # 刷新画布并缓存帧 (兼容 Mac OS Retina 高 DPI)
+        # self.fig.canvas.draw()
+        # # 获取逻辑像素尺寸
+        # w, h = self.fig.canvas.get_width_height()
+        # # 取 ARGB 缓冲区并转为 uint8 array
+        # buf = np.frombuffer(self.fig.canvas.tostring_argb(), dtype=np.uint8)
+        # # 计算实际像素缩放比例: buf.size == w*h*4*scale^2
+        # total_pixels = buf.size // 4
+        # scale = int(round((total_pixels / (w * h)) ** 0.5))
+        # # 按实际像素尺寸 reshape
+        # h_pix, w_pix = int(h * scale), int(w * scale)
+        # buf = buf.reshape((h_pix, w_pix, 4))
+        # # 丢弃 alpha 通道，只保留 RGB
+        # frame = buf[..., 1:]
+        # self.frames.append(frame)
+        # self.current_index = len(self.frames) - 1
+
+        # 标题与排版
+        self.ax.set_title(self.network.name)
+        plt.tight_layout()
+        plt.pause(self.pause_interval)
+
         return self.ax.patches
+
+    def _on_key(self, event):
+        key = event.key
+
+        if key == 'up':
+            # 加快 --> 缩短 pause_interval，但不跑到 0
+            self.pause_interval = max(1e-3, self.pause_interval*0.75)
+            # print(f"播放间隔：{self.pause_interval:.3f}s")
+        elif key == 'down':
+            # 减慢
+            self.pause_interval *= 1.25
+            # print(f"播放间隔：{self.pause_interval:.3f}s")
+        
 
     def _get_flit_color(self, flit, use_highlight=True, expected_packet_id=1, highlight_color=None):
         """获取颜色，支持多种PID格式：
@@ -318,29 +357,3 @@ class NetworkLinkVisualizer:
             return highlight_color
         return "grey"
 
-
-########################################
-# 测试可视化
-########################################
-
-
-# def test_visualization():
-#     # 创建模拟网络与可视化器，启动动画
-#     network = MockNetwork()
-#     visualizer = NetworkLinkVisualizer(network)
-
-#     # 为了动画中同时更新网络内部状态和显示效果，这里创建一个更新函数闭包
-#     def update_frame(frame):
-#         network.update()
-#         return visualizer.update(frame)
-
-#     # 用 FuncAnimation 调用更新函数，这里同样关闭了 blit
-#     ani = FuncAnimation(visualizer.fig, visualizer.update_frame, frames=100, interval=500, blit=False, repeat=True)
-#     plt.title("3x3 Mesh Network Flit Animation (Dynamic)")
-#     plt.tight_layout()
-
-#     plt.show()
-
-
-# if __name__ == "__main__":
-#     test_visualization()

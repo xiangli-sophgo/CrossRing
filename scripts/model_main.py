@@ -4,7 +4,7 @@ from src.utils.component import Flit, Network, Node
 from config.config import SimulationConfig
 import matplotlib
 
-# matplotlib.use("macosx")
+matplotlib.use("macosx")
 
 
 def main():
