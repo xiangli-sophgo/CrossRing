@@ -65,7 +65,9 @@ def main():
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
-        plot_piece=1,
+        plot_link_state=1,
+        print_trace=1,
+        show_trace_id=251,
     )
 
     # profiler = cProfile.Profile()

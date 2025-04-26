@@ -17,19 +17,19 @@ class REQ_RSP_model(BaseModel):
             # self.draw_link_state(self.req_network)
 
             self.check_and_release_sn_tracker()
-            # self.flit_trace(1000)
-            if self.plot_piece:
-                show_id = 2
+            if self.print_trace:
+                self.flit_trace(self.show_trace_id)
+            if self.plot_link_state:
+                show_id = self.show_trace_id
                 use_highlight = 1
-                if self.req_network.send_flits[show_id] and not self.req_network.send_flits[show_id][-1].is_arrive:
-                    self.vis.update(self.req_network, use_highlight)
-                # elif self.rsp_network.send_flits[show_id] and not self.rsp_network.send_flits[show_id][-1].is_arrive:
-                # self.vis.update(self.rsp_network, use_highlight)
-                elif self.flit_network.send_flits[show_id] and not self.flit_network.send_flits[show_id][-1].is_arrive:
-                    self.vis.update(self.flit_network, use_highlight)
-                else:
-                    self.vis.update(self.flit_network, 0)
-                # self.vis.update_display(self.flit_network)
+                if self.req_network.send_flits[show_id] and not self.req_network.send_flits[show_id][-1].is_arrive and  self.req_network.send_flits[show_id][0].current_link is not None:
+                    self.vis.update(self.req_network, show_id, use_highlight)
+                elif self.rsp_network.send_flits[show_id] and not self.rsp_network.send_flits[show_id][-1].is_arrive and self.rsp_network.send_flits[show_id][0].current_link is not None:
+                    self.vis.update(self.rsp_network, use_highlight)
+                elif self.flit_network.send_flits[show_id] and not self.flit_network.send_flits[show_id][-1].is_arrive and self.flit_network.send_flits[show_id][0].current_link is not None:
+                    self.vis.update(self.flit_network, show_id, use_highlight)
+                elif self.flit_network.send_flits[show_id] and self.flit_network.send_flits[show_id][-1].is_arrive:
+                    self.vis.update(self.flit_network, show_id, 0)
 
             # Process requests
             self.process_requests()
@@ -209,21 +209,21 @@ class REQ_RSP_model(BaseModel):
                             self.create_write_packet(req)
             self.select_inject_network(ip_pos)
 
-    def process_and_move_flits(self, network, flits, flit_type):
-        """Process injection queues and move flits."""
-        for inject_queues in network.inject_queues.values():
-            num, moved_flits = self.process_inject_queues(network, inject_queues)
-            if num == 0 and not moved_flits:
-                continue
-            if flit_type == "req":
-                self.req_num += num
-            elif flit_type == "rsp":
-                self.rsp_num += num
-            elif flit_type == "data":
-                self.flit_num += num
-            flits.extend(moved_flits)
-        flits = self.flit_move(network, flits, flit_type)
-        return flits
+    # def process_and_move_flits(self, network, flits, flit_type):
+    #     """Process injection queues and move flits."""
+    #     for inject_queues in network.inject_queues.values():
+    #         num, moved_flits = self.process_inject_queues(network, inject_queues)
+    #         if num == 0 and not moved_flits:
+    #             continue
+    #         if flit_type == "req":
+    #             self.req_num += num
+    #         elif flit_type == "rsp":
+    #             self.rsp_num += num
+    #         elif flit_type == "data":
+    #             self.flit_num += num
+    #         flits.extend(moved_flits)
+    #     flits = self.flit_move(network, flits, flit_type)
+    #     return flits
 
     def handle_response_injection(self):
         """Inject responses into the network."""
@@ -464,102 +464,97 @@ class REQ_RSP_model(BaseModel):
     #             vertical_flits.append(flit)
     #     return ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits
 
-    def flit_move(self, network, flits, flit_type):
-        # 分类不同类型的flits
-        ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits = self.classify_flits(flits)
+    # def flit_move(self, network, flits, flit_type):
+    #     # 分类不同类型的flits
+    #     ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits = self.classify_flits(flits)
 
-        # for flit in flits:
-        #     if (
-        #         flit.current_link
-        #         and flit.current_link[0] - flit.current_link[1] != self.config.cols
-        #         and ((flit.current_seat_index == 4 and len(network.links[flit.current_link]) != 2) or (flit.current_seat_index == 0 and len(network.links[flit.current_link]) == 2))
-        #     ):
-        #         print(network.name, flit.current_link, flit.packet_id, flit.current_seat_index, flit.flit_id)
-        #         network.links_flow_stat[flit.req_type][flit.current_link] += 1
+    #     # 处理新到达的flits
+    #     for flit in local_flits:
+    #         if network.execute_moves(flit, self.cycle):
+    #             flits.remove(flit)
+    #     for flit in new_flits + horizontal_flits + vertical_flits:
+    #         network.plan_move(flit)
+    #         if network.execute_moves(flit, self.cycle):
+    #             flits.remove(flit)
+        
 
-        # 处理新到达的flits
-        for flit in new_flits + horizontal_flits + vertical_flits:
-            network.plan_move(flit)
-            # if network.execute_moves(flit, self.cycle):
-            # flits.remove(flit)
+    #     # 处理transfer station的flits
+    #     for col in range(1, self.config.rows, 2):
+    #         for row in range(self.config.cols):
+    #             pos = col * self.config.cols + row
+    #             next_pos = pos - self.config.cols
+    #             eject_flit, vup_flit, vdown_flit = None, None, None
 
-        # 处理transfer station的flits
-        for col in range(1, self.config.rows, 2):
-            for row in range(self.config.cols):
-                pos = col * self.config.cols + row
-                next_pos = pos - self.config.cols
-                eject_flit, vup_flit, vdown_flit = None, None, None
+    #             # 获取各方向的flit
+    #             station_flits = [network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]]
 
-                # 获取各方向的flit
-                station_flits = [network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]]
+    #             # 处理eject操作
+    #             if len(network.ring_bridge["eject"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
+    #                 eject_flit = self._process_eject_flit(network, station_flits, pos, next_pos)
 
-                # 处理eject操作
-                if len(network.ring_bridge["eject"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    eject_flit = self._process_eject_flit(network, station_flits, pos, next_pos)
+    #             # 处理vup操作
+    #             if len(network.ring_bridge["vup"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
+    #                 vup_flit = self._process_vup_flit(network, station_flits, pos, next_pos)
 
-                # 处理vup操作
-                if len(network.ring_bridge["vup"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    vup_flit = self._process_vup_flit(network, station_flits, pos, next_pos)
+    #             # 处理vdown操作
+    #             if len(network.ring_bridge["vdown"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
+    #                 vdown_flit = self._process_vdown_flit(network, station_flits, pos, next_pos)
 
-                # 处理vdown操作
-                if len(network.ring_bridge["vdown"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    vdown_flit = self._process_vdown_flit(network, station_flits, pos, next_pos)
+    #             # 处理eject队列
+    #             if (
+    #                 next_pos in network.eject_queues["ring_bridge"]
+    #                 and len(network.eject_queues["ring_bridge"][next_pos]) < self.config.EQ_IN_FIFO_DEPTH
+    #                 and network.ring_bridge["eject"][(pos, next_pos)]
+    #             ):
+    #                 flit = network.ring_bridge["eject"][(pos, next_pos)].popleft()
+    #                 flit.is_arrive = True
 
-                # 处理eject队列
-                if (
-                    next_pos in network.eject_queues["ring_bridge"]
-                    and len(network.eject_queues["ring_bridge"][next_pos]) < self.config.EQ_IN_FIFO_DEPTH
-                    and network.ring_bridge["eject"][(pos, next_pos)]
-                ):
-                    flit = network.ring_bridge["eject"][(pos, next_pos)].popleft()
-                    flit.is_arrive = True
+    #             up_node, down_node = next_pos - self.config.cols * 2, next_pos + self.config.cols * 2
+    #             if up_node < 0:
+    #                 up_node = next_pos
+    #             if down_node >= self.config.num_nodes:
+    #                 down_node = next_pos
+    #             # 处理vup方向
+    #             # self._process_ring_bridge(network, "up", pos, next_pos, down_node, up_node)
+    #             self._process_ring_bridge(network, "up", pos, next_pos, up_node, down_node)
 
-                up_node, down_node = next_pos - self.config.cols * 2, next_pos + self.config.cols * 2
-                if up_node < 0:
-                    up_node = next_pos
-                if down_node >= self.config.num_nodes:
-                    down_node = next_pos
-                # 处理vup方向
-                self._process_ring_bridge(network, "up", pos, next_pos, down_node, up_node)
+    #             # 处理vdown方向
+    #             # self._process_ring_bridge(network, "down", pos, next_pos, up_node, down_node)
+    #             self._process_ring_bridge(network, "down", pos, next_pos, down_node, up_node)
 
-                # 处理vdown方向
-                self._process_ring_bridge(network, "down", pos, next_pos, up_node, down_node)
+    #             if eject_flit:
+    #                 network.ring_bridge["eject"][(pos, next_pos)].append(eject_flit)
+    #             if vup_flit:
+    #                 network.ring_bridge["vup"][(pos, next_pos)].append(vup_flit)
+    #             if vdown_flit:
+    #                 network.ring_bridge["vdown"][(pos, next_pos)].append(vdown_flit)
 
-                if eject_flit:
-                    network.ring_bridge["eject"][(pos, next_pos)].append(eject_flit)
-                if vup_flit:
-                    network.ring_bridge["vup"][(pos, next_pos)].append(vup_flit)
-                if vdown_flit:
-                    network.ring_bridge["vdown"][(pos, next_pos)].append(vdown_flit)
+    #     # 处理纵向flits的移动
+    #     # for flit in vertical_flits:
+    #     #     network.plan_move(flit)
 
-        # 处理纵向flits的移动
-        # for flit in vertical_flits:
-        #     network.plan_move(flit)
-        #     if network.execute_moves(flit, self.cycle):
-        #         flits.remove(flit)
+    #     # eject arbitration
+    #     if flit_type in ["req", "rsp", "data"]:
+    #         self._handle_eject_arbitration(network, flit_type)
 
-        # eject arbitration
-        if flit_type in ["req", "rsp", "data"]:
-            self._handle_eject_arbitration(network, flit_type)
+    #     # 执行所有flit的移动
+    #     # for flit in vertical_flits + horizontal_flits + new_flits + local_flits:
+    #     #     if network.execute_moves(flit, self.cycle):
+    #     #         flits.remove(flit)
 
-        # 执行所有flit的移动
-        for flit in new_flits + horizontal_flits + vertical_flits + local_flits:
-            if network.execute_moves(flit, self.cycle):
-                flits.remove(flit)
+    #     # 处理transfer station的flits
+    #     for flit in ring_bridge_EQ_flits:
+    #         if flit.is_arrive:
+    #             flit.arrival_network_cycle = self.cycle
+    #             if len(network.eject_queues["ring_bridge"][flit.destination]) < self.config.EQ_IN_FIFO_DEPTH:
+    #                 network.eject_queues["ring_bridge"][flit.destination].append(flit)
+    #                 flits.remove(flit)
+    #             else:
+    #                 flit.is_arrive = False
+    #         # else:
+    #         #     network.execute_moves(flit, self.cycle)
 
-        # 处理transfer station的flits
-        for flit in ring_bridge_EQ_flits:
-            if flit.is_arrive:
-                flit.arrival_network_cycle = self.cycle
-                if len(network.eject_queues["ring_bridge"][flit.destination]) < self.config.EQ_IN_FIFO_DEPTH:
-                    network.eject_queues["ring_bridge"][flit.destination].append(flit)
-                    flits.remove(flit)
-                else:
-                    flit.is_arrive = False
-            else:
-                network.execute_moves(flit, self.cycle)
-
-        return flits
+    #     return flits
 
     def _process_eject_flit(self, network, station_flits, pos, next_pos):
         """处理eject操作"""
@@ -763,7 +758,27 @@ class REQ_RSP_model(BaseModel):
     #                     eject_queue = network.eject_queues[direction][next_pos]
     #                     # reservations = network.eject_reservations[direction][next_pos]
     #                     # if network.links_tag[link][-1] == [next_pos, direction] and network.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(reservations):
-    #                     if network.links_tag[link][-1] == [next_pos, direction] and network.config.EQ_IN_FIFO_DEPTH > len(eject_queue):
+    #                     if network.links_tag[link][-1] == [next_pos, direction] and network.config.EQ_IN_FIFO_DEPTH > len(eject_queue) and (
+    #                         (
+    #                             direction == "down"
+    #                             and (
+    #                                 (flit_l.ETag_priority in ["T1", "T0"] and network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH)
+    #                                 or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX)
+    #                             )
+    #                         )
+    #                         or (
+    #                             direction == "up"
+    #                             and (
+    #                                 (
+    #                                     flit_l.ETag_priority == "T0"
+    #                                     and network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH
+    #                                     and network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l)
+    #                                 )
+    #                                 or (flit_l.ETag_priority == "T1" and network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX)
+    #                                 or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)
+    #                             )
+    #                         )
+    #                     ):
     #                         network.remain_tag[direction][next_pos] += 1
     #                         network.links_tag[link][-1] = None
     #                         return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
@@ -807,27 +822,29 @@ class REQ_RSP_model(BaseModel):
     #                 network.links_tag[link][-1] = None
     #                 return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
 
-    def _process_ring_bridge(self, network, direction, pos, next_pos, curr_node, opposite_node):
-        dir_key = f"v{direction}"
-        link = (curr_node, next_pos)
+    # def _process_ring_bridge(self, network, direction, pos, next_pos, curr_node, opposite_node):
+    #     dir_key = f"v{direction}"
+    #     link = (curr_node, next_pos)
+    #     link_next = (curr_node, opposite_node)
 
-        # Early return if ring bridge is not active for this direction and position
-        if not network.ring_bridge[dir_key][(pos, next_pos)]:
-            return None
+    #     # Early return if ring bridge is not active for this direction and position
+    #     if not network.ring_bridge[dir_key][(pos, next_pos)]:
+    #         return None
 
-        # Case 1: No flit in the link
-        if not network.links[link][-1]:
-            # Handle empty link cases
-            if network.links_tag[link][-1] is None:
-                return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+    #     # Case 1: No flit in the link
+    #     if not network.links[link][-1]:
+    #     # if not network.links[link_next][0]:
+    #         # Handle empty link cases
+    #         if network.links_tag[link][-1] is None:
+    #             return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
 
-            elif network.links_tag[link][-1] == [next_pos, direction]:
-                network.remain_tag[direction][next_pos] += 1
-                network.links_tag[link][-1] = None
-                return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-            return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
+    #         elif network.links_tag[link][-1] == [next_pos, direction]:
+    #             network.remain_tag[direction][next_pos] += 1
+    #             network.links_tag[link][-1] = None
+    #             return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+    #         return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
-        return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
+    #     return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
         # # Get the flit at the end of the link
         # flit_l = network.links[link][-1]

@@ -251,7 +251,6 @@ class Network:
         self.inject_queues_pre = {"left": {}, "right": {}, "up": {}, "local": {}}
         self.eject_queues_pre = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
         self.eject_queues = {"up": {}, "down": {}, "ring_bridge": {}, "local": {}}
-        # self.eject_reservations = {"up": {}, "down": {}}
         self.arrive_node_pre = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
         self.ip_inject = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
         self.ip_eject = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
@@ -642,8 +641,8 @@ class Network:
             return False
 
     def plan_move(self, flit):
-        # if flit.packet_id == 1000 and flit.flit_id == 3:
-        # print(flit)
+        # if flit.packet_id == 7 and flit.flit_id == -1:
+            # print(flit)
         if flit.is_new_on_network:
             current = flit.source
             next_node = flit.path[flit.path_index + 1]
