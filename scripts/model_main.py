@@ -3,15 +3,17 @@ import os
 from src.utils.component import Flit, Network, Node
 from config.config import SimulationConfig
 import matplotlib
+import sys
 
-matplotlib.use("macosx")
+if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
+    matplotlib.use("macosx")  # 仅在 macOS 上使用该后端
 
 
 def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_2260E_0425.txt"
+    file_name = r"traffic_2260E_GDMA_RO_0427.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -65,9 +67,9 @@ def main():
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
-        plot_link_state=1,
-        print_trace=1,
-        show_trace_id=251,
+        plot_link_state=0,
+        print_trace=0,
+        show_trace_id=1,
     )
 
     # profiler = cProfile.Profile()
@@ -111,8 +113,8 @@ def main():
     sim.config.Both_side_ETag_upgrade = 1
 
     # 2260E latency 参数
-    sim.config.ddr_R_latency_original = 1
-    sim.config.ddr_R_latency_var_original = 0
+    sim.config.ddr_R_latency_original = 155
+    sim.config.ddr_R_latency_var_original = 25
     sim.config.ddr_W_latency_original = 16
     sim.config.l2m_R_latency_original = 12
     sim.config.l2m_W_latency_original = 16

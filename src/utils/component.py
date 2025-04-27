@@ -65,7 +65,7 @@ class Flit:
         self.is_tagged = False
         self.ETag_priority = "T2"  # 默认优先级为 T2
         # Latency record
-        self.rn_req_generated_cycle = None
+        self.cmd_entry_cmd_table_cycle = None
         self.req_entry_network_cycle = None
         self.sn_receive_req_cycle = None
         self.sn_data_generated_cycle = None
@@ -75,23 +75,22 @@ class Flit:
         self.rsp_entry_network_cycle = None
         self.rn_receive_rsp_cycle = None
         self.rn_data_generated_cycle = None
-        self.data_entry_network_cycle = None
-        self.sn_data_collection_completet_cycle = None
+        self.sn_data_collection_complete_cycle = None
         self.total_latency = None
-        self.latency_1 = None
-        self.latency_2 = None
-        self.latency_3 = None
+        self.cmd_latency = None
+        self.rsp_latency = None
+        self.dat_latency = None
 
     def sync_latency_record(self, flit):
         if flit.req_type == "read":
-            self.rn_req_generated_cycle = flit.rn_req_generated_cycle
+            self.cmd_entry_cmd_table_cycle = flit.cmd_entry_cmd_table_cycle
             self.req_entry_network_cycle = flit.req_entry_network_cycle
             self.sn_receive_req_cycle = flit.sn_receive_req_cycle
             self.sn_data_generated_cycle = flit.sn_data_generated_cycle
             self.data_entry_network_cycle = flit.data_entry_network_cycle
             self.rn_data_collection_complete_cycle = flit.rn_data_collection_complete_cycle
         elif flit.req_type == "write":
-            self.rn_req_generated_cycle = flit.rn_req_generated_cycle
+            self.cmd_entry_cmd_table_cycle = flit.cmd_entry_cmd_table_cycle
             self.req_entry_network_cycle = flit.req_entry_network_cycle
             self.sn_receive_req_cycle = flit.sn_receive_req_cycle
             self.sn_rsp_generate_cycle = flit.sn_rsp_generate_cycle
@@ -99,7 +98,7 @@ class Flit:
             self.rn_receive_rsp_cycle = flit.rn_receive_rsp_cycle
             self.rn_data_generated_cycle = flit.rn_data_generated_cycle
             self.data_entry_network_cycle = flit.data_entry_network_cycle
-            self.sn_data_collection_completet_cycle = flit.sn_data_collection_completet_cycle
+            self.sn_data_collection_complete_cycle = flit.sn_data_collection_complete_cycle
 
     def calculate_direction(self, path):
         if len(path) < 2:
@@ -642,7 +641,7 @@ class Network:
 
     def plan_move(self, flit):
         # if flit.packet_id == 7 and flit.flit_id == -1:
-            # print(flit)
+        # print(flit)
         if flit.is_new_on_network:
             current = flit.source
             next_node = flit.path[flit.path_index + 1]

@@ -27,7 +27,20 @@ import matplotlib.cm as cm
 
 
 class BaseModel:
-    def __init__(self, model_type, config, topo_type, traffic_file_path, file_name, result_save_path=None, results_fig_save_path=None, plot_flow_fig=False, plot_link_state=False, print_trace=False,show_trace_id=0):
+    def __init__(
+        self,
+        model_type,
+        config,
+        topo_type,
+        traffic_file_path,
+        file_name,
+        result_save_path=None,
+        results_fig_save_path=None,
+        plot_flow_fig=False,
+        plot_link_state=False,
+        print_trace=False,
+        show_trace_id=0,
+    ):
         self.model_type_stat = model_type
         self.config = config
         self.topo_type_stat = topo_type
@@ -169,6 +182,8 @@ class BaseModel:
             self.move_all_to_inject_queue(self.flit_network, "data")
 
             # Tag moves
+            self.tag_move(self.req_network)
+            self.tag_move(self.rsp_network)
             self.tag_move(self.flit_network)
 
             if self.rn_type != "Idle":
@@ -262,9 +277,9 @@ class BaseModel:
                 )
                 self.req_cir_h_num_stat += req.circuits_completed_h
                 self.req_cir_v_num_stat += req.circuits_completed_v
-                for flit in self.flit_network.arrive_flits[packet_id]:
+                for flit in self.flit_network.send_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle + self.config.sn_tracker_release_latency
-                    flit.sn_data_collection_completet_cycle = self.cycle
+                    flit.sn_data_collection_complete_cycle = self.cycle
                 # 释放tracker 增加40ns
                 release_time = self.cycle + self.config.sn_tracker_release_latency
                 self.node.sn_tracker_release_time[release_time].append((self.sn_type, in_pos, req))
@@ -511,10 +526,12 @@ class BaseModel:
         if self.plot_link_state and self.vis.should_stop:
             return
         # if self.cycle % 1 == 0 and self.flit_network.send_flits[packet_id] and self.flit_network.send_flits[packet_id][0].current_link is not None:
-        if (self.cycle % 1 == 0 and (self.req_network.send_flits[packet_id] and self.req_network.send_flits[packet_id][-1].current_link and not self.req_network.send_flits[packet_id][-1].is_arrive)
+        if (
+            self.cycle % 1 == 0
+            and (self.req_network.send_flits[packet_id] and self.req_network.send_flits[packet_id][-1].current_link and not self.req_network.send_flits[packet_id][-1].is_arrive)
             or (self.rsp_network.send_flits[packet_id] and self.rsp_network.send_flits[packet_id][-1].current_link and not self.rsp_network.send_flits[packet_id][-1].is_arrive)
             or (self.flit_network.send_flits[packet_id] and self.flit_network.send_flits[packet_id][-1].current_link and not self.flit_network.send_flits[packet_id][-1].is_arrive)
-            ):
+        ):
             # print(self.cycle, self.req_network.send_flits[packet_id], self.rsp_network.send_flits[packet_id], len(self.flit_network.arrive_flits[packet_id]))
             print(self.cycle, self.req_network.send_flits[packet_id], self.rsp_network.send_flits[packet_id], self.flit_network.send_flits[packet_id])
             time.sleep(0.3)
@@ -571,7 +588,7 @@ class BaseModel:
                 self.W_tail_latency_stat = req_data[0]
 
             # RN请求产生
-            req.rn_req_generated_cycle = self.cycle
+            req.cmd_entry_cmd_table_cycle = self.cycle
 
             # 重置缓存并更新计数
             self.next_req = None
@@ -724,7 +741,6 @@ class BaseModel:
             if network.execute_moves(flit, self.cycle):
                 flits.remove(flit)
 
-
         # 处理transfer station的flits
         for col in range(1, self.config.rows, 2):
             for row in range(self.config.cols):
@@ -783,11 +799,9 @@ class BaseModel:
                 if vdown_flit:
                     network.ring_bridge["vdown"][(pos, next_pos)].append(vdown_flit)
 
-
         # eject arbitration
         if flit_type in ["req", "rsp", "data"]:
             self._handle_eject_arbitration(network, flit_type)
-
 
         # 处理transfer station的flits
         for flit in ring_bridge_EQ_flits:
@@ -966,6 +980,12 @@ class BaseModel:
                             network.arrive_node_pre[ip_type][ip_pos] = flit
                             network.eject_num += 1
                             network.arrive_flits[flit.packet_id].append(flit)
+                            if len(network.arrive_flits[flit.packet_id]) == flit.burst_length:
+                                for flit in network.arrive_flits[flit.packet_id]:
+                                    if flit.req_type == "read":
+                                        flit.rn_data_collection_complete_cycle = self.cycle
+                                    elif flit.req_type == "write":
+                                        flit.sn_data_collection_complete_cycle = self.cycle
                             network.recv_flits_num += 1
                             # if flit.req_type == "read" and flit.is_last_flit:
                             # self.create_write_req_after_read(flit)
@@ -1046,7 +1066,7 @@ class BaseModel:
                 self.create_rsp(req, "datasend")
         # if req.packet_id == 1784:
         # print(req)
-    
+
     def _process_ring_bridge(self, network, direction, pos, next_pos, curr_node, opposite_node):
         dir_key = f"v{direction}"
         link = (curr_node, next_pos)
@@ -1061,7 +1081,7 @@ class BaseModel:
             if network.links_tag[link][0] is None:
                 if self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction):
                     return True
-                return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link) 
+                return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
             if network.links_tag[link][0] == [next_pos, direction]:
                 network.remain_tag[direction][next_pos] += 1
@@ -1071,70 +1091,9 @@ class BaseModel:
                 return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
         return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
-
-    # def _process_ring_bridge(self, network, direction, pos, next_pos, curr_node, opposite_node):
-    #     dir_key = f"v{direction}"
-    #     link = (curr_node, next_pos)
-
-    #     # Early return if ring bridge is not active for this direction and position
-    #     if not network.ring_bridge[dir_key][(pos, next_pos)]:
-    #         return None
-
-    #     # Case 1: No flit in the link
-    #     if not network.links[link][-1]:
-    #         # Handle empty link cases
-    #         if network.links_tag[link][-1] is None:
-    #             return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-
-    #         if network.links_tag[link][-1] == [next_pos, direction]:
-    #             network.remain_tag[direction][next_pos] += 1
-    #             network.links_tag[link][-1] = None
-    #             return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-
-    #         return None
-
-    #     # Get the flit at the end of the link
-    #     flit_l = network.links[link][-1]
-
-    #     # Case 2: Flit destination doesn't match next position
-    #     if flit_l.destination != next_pos:
-    #         return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
-
-    #     # Case 3: Flit destination matches next position
-    #     eject_queue = network.eject_queues[direction][next_pos]
-
-    #     # Subcase 3.1: Link has a tag
-    #     if network.links_tag[link][-1]:
-    #         if network.links_tag[link][-1] == [next_pos, direction] and network.config.EQ_IN_FIFO_DEPTH > len(eject_queue):
-    #             network.remain_tag[direction][next_pos] += 1
-    #             network.links_tag[link][-1] = None
-    #             return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-    #         return None
-
-    #     # Subcase 3.2: Link has no tag
-    #     if network.config.EQ_IN_FIFO_DEPTH <= len(eject_queue):
-    #         return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
-
-    #     # Check priority conditions based on direction
-    #     if direction == "down":
-    #         if (flit_l.ETag_priority in ["T1", "T0"] and network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH) or (
-    #             flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX
-    #         ):
-    #             return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-
-    #     elif direction == "up":
-    #         if (
-    #             (flit_l.ETag_priority == "T0" and network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH and network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l))
-    #             or (flit_l.ETag_priority == "T1" and network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX)
-    #             or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)
-    #         ):
-    #             return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-
-    #     return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
-
     def _update_flit_state(self, network, ts_key, pos, next_pos, target_node, direction):
         if network.links[(next_pos, target_node)][0] is not None:
-           return False
+            return False
         flit = network.ring_bridge[ts_key][(pos, next_pos)].popleft()
         flit.current_position = next_pos
         flit.path_index += 1
@@ -1470,18 +1429,18 @@ class BaseModel:
         with open(os.path.join(self.result_save_path, "config.json"), "w") as f:
             json.dump(self.config.__dict__, f, indent=4)
 
-        read_latency, write_latency = {"total_latency": [], "latency_1": [], "latency_2": [], "latency_3": []}, {"total_latency": [], "latency_1": [], "latency_2": [], "latency_3": []}
+        read_latency, write_latency = {"total_latency": [], "cmd_latency": [], "rsp_latency": [], "dat_latency": []}, {"total_latency": [], "cmd_latency": [], "rsp_latency": [], "dat_latency": []}
         read_merged_intervals, write_merged_intervals = [(0, 0, 0)], [(0, 0, 0)]
 
         with open(os.path.join(self.result_save_path, f"Result_{self.file_name[10:-9]}R.txt"), "w") as f1, open(os.path.join(self.result_save_path, f"Result_{self.file_name[10:-9]}W.txt"), "w") as f2:
 
             # Print headers
             print(
-                "tx_time(ns), src_id, src_type, des_id, des_type, R/W, burst_len, rx_time(ns), path, total_latency, latency_1, latency_2, latency_3, circuits_completed_v, circuits_completed_h",
+                "tx_time(ns), src_id, src_type, des_id, des_type, R/W, burst_len, rx_time(ns), path, total_latency, cmd_latency, rsp_latency, dat_latency, circuits_completed_v, circuits_completed_h",
                 file=f1,
             )
             print(
-                "tx_time(ns), src_id, src_type, des_id, des_type, R/W, burst_len, rx_time(ns), path, total_latency, latency_1, latency_2, latency_3, circuits_completed_v, circuits_completed_h",
+                "tx_time(ns), src_id, src_type, des_id, des_type, R/W, burst_len, rx_time(ns), path, total_latency, cmd_latency, rsp_latency, dat_latency, circuits_completed_v, circuits_completed_h",
                 file=f2,
             )
 
@@ -1498,8 +1457,8 @@ class BaseModel:
                     self.data_wait_cycle_h_num_stat += flit.wait_cycle_h
                     self.data_wait_cycle_v_num_stat += flit.wait_cycle_v
                 self.process_flits(
-                    # flits[-1],
-                    next((flit for flit in flits if flit.is_last_flit), flits[-1]),
+                    flits[-1],
+                    # next((flit for flit in flits if flit.is_last_flit), flits[-1]),
                     network,
                     read_latency,
                     write_latency,
@@ -1521,24 +1480,24 @@ class BaseModel:
     def process_flits(self, flit, network, read_latency, write_latency, read_merged_intervals, write_merged_intervals, f1, f2):
         """Process a single flit and update the network and latency data."""
         # Calculate predicted and actual durations
+        # if not flit.is_last_flit or not flit.arrival_cycle or not flit.req_departure_cycle:
+        #     return
         flit.predicted_duration = self.calculate_predicted_duration(flit)
         flit.actual_duration = flit.arrival_cycle - flit.departure_cycle
         flit.actual_ject_duration = flit.arrival_eject_cycle - flit.departure_inject_cycle
         flit.actual_network_duration = flit.arrival_network_cycle - flit.departure_network_cycle
 
-        flit.total_latency = (flit.arrival_cycle - flit.rn_req_generated_cycle) // self.config.network_frequency
-        # flit.latency_1 = (flit.sn_receive_req_cycle - flit.rn_req_generated_cycle) // self.config.network_frequency
-        flit.latency_1 = (flit.sn_receive_req_cycle - flit.req_entry_network_cycle) // self.config.network_frequency
+        flit.total_latency = (flit.arrival_cycle - flit.cmd_entry_cmd_table_cycle) // self.config.network_frequency
+        # flit.cmd_latency = (flit.sn_receive_req_cycle - flit.cmd_entry_cmd_table_cycle) // self.config.network_frequency
+        flit.cmd_latency = (flit.sn_receive_req_cycle - flit.req_entry_network_cycle) // self.config.network_frequency
         if flit.req_type == "read":
-            flit.latency_2 = 0
-            flit.latency_3 = (flit.rn_data_collection_complete_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
+            flit.rsp_latency = 0
+            flit.dat_latency = (flit.rn_data_collection_complete_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
         elif flit.req_type == "write":
-            flit.latency_2 = (flit.rn_receive_rsp_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
-            flit.latency_3 = (flit.sn_data_collection_completet_cycle - flit.rn_receive_rsp_cycle) // self.config.network_frequency
+            flit.rsp_latency = (flit.rn_receive_rsp_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
+            flit.dat_latency = (flit.sn_data_collection_complete_cycle - flit.rn_receive_rsp_cycle) // self.config.network_frequency
 
         # Skip if not the last flit or if arrival/departure cycles are invalid
-        if not flit.is_last_flit or not flit.arrival_cycle or not flit.req_departure_cycle:
-            return
 
         # Update merged intervals and latencies
         if flit.req_type == "read":
@@ -1761,13 +1720,13 @@ class BaseModel:
             self.gdma_R_l2m_latency.append(flit.leave_db_cycle - flit.entry_db_cycle)
 
         latency["total_latency"].append(flit.total_latency // self.config.network_frequency)
-        latency["latency_1"].append(flit.latency_1 // self.config.network_frequency)
-        latency["latency_2"].append(flit.latency_2 // self.config.network_frequency)
-        latency["latency_3"].append(flit.latency_3 // self.config.network_frequency)
+        latency["cmd_latency"].append(flit.cmd_latency // self.config.network_frequency)
+        latency["rsp_latency"].append(flit.rsp_latency // self.config.network_frequency)
+        latency["dat_latency"].append(flit.dat_latency // self.config.network_frequency)
         print(
             f"{flit.req_departure_cycle // self.config.network_frequency},{flit.source_original},{flit.original_source_type},{flit.destination_original},{flit.original_destination_type},"
             f"{req_type},{flit.burst_length},{flit.arrival_cycle // self.config.network_frequency},{flit.path},{flit.total_latency},"
-            f"{flit.latency_1 },{flit.latency_2},{flit.latency_3},{flit.circuits_completed_v},{flit.circuits_completed_h}",
+            f"{flit.cmd_latency },{flit.rsp_latency},{flit.dat_latency},{flit.circuits_completed_v},{flit.circuits_completed_h}",
             file=file,
         )
 
@@ -1794,7 +1753,8 @@ class BaseModel:
         if total_interval_time > 0:
             total_bandwidth = total_count * 128 / total_interval_time / (self.config.num_RN if req_type == "read" else self.config.num_SN)
         else:
-            total_bandwidth = 0
+            return 0, [0,0,0,0], [0,0,0,0]
+            # total_bandwidth = 0
 
         if req_type == "Read":
             self.R_finish_time_stat = finish_time
@@ -1807,23 +1767,23 @@ class BaseModel:
 
         total_latency_avg = np.average(latency["total_latency"])
         total_latency_max = max(latency["total_latency"], default=0)
-        latency_1_avg = np.average(latency["latency_1"])
-        latency_1_max = max(latency["latency_1"], default=0)
-        latency_2_avg = np.average(latency["latency_2"])
-        latency_2_max = max(latency["latency_2"], default=0)
-        latency_3_avg = np.average(latency["latency_3"])
-        latency_3_max = max(latency["latency_3"], default=0)
+        cmd_latency_avg = np.average(latency["cmd_latency"])
+        cmd_latency_max = max(latency["cmd_latency"], default=0)
+        rsp_latency_avg = np.average(latency["rsp_latency"])
+        rsp_latency_max = max(latency["rsp_latency"], default=0)
+        dat_latency_avg = np.average(latency["dat_latency"])
+        dat_latency_max = max(latency["dat_latency"], default=0)
         print(
             f"Bandwidth: {total_bandwidth:.1f}; \nTotal latency: Avg: {total_latency_avg:.1f}, Max: {total_latency_max}; "
-            f"latency_1: Avg: {latency_1_avg:.1f}, Max: {latency_1_max}; latency_2: Avg: {latency_2_avg:.1f}, Max: {latency_2_max}; latency_3: Avg: {latency_3_avg:.1f}, Max: {latency_3_max}",
+            f"cmd_latency: Avg: {cmd_latency_avg:.1f}, Max: {cmd_latency_max}; rsp_latency: Avg: {rsp_latency_avg:.1f}, Max: {rsp_latency_max}; dat_latency: Avg: {dat_latency_avg:.1f}, Max: {dat_latency_max}",
             file=f3,
         )
         print(
             f"Bandwidth: {total_bandwidth:.1f}; \nTotal latency: Avg: {total_latency_avg:.1f}, Max: {total_latency_max}; "
-            f"latency_1: Avg: {latency_1_avg:.1f}, Max: {latency_1_max}; latency_2: Avg: {latency_2_avg:.1f}, Max: {latency_2_max}; latency_3: Avg: {latency_3_avg:.1f}, Max: {latency_3_max}"
+            f"cmd_latency: Avg: {cmd_latency_avg:.1f}, Max: {cmd_latency_max}; rsp_latency: Avg: {rsp_latency_avg:.1f}, Max: {rsp_latency_max}; dat_latency: Avg: {dat_latency_avg:.1f}, Max: {dat_latency_max}"
         )
 
-        return total_bandwidth, [total_latency_avg, latency_1_avg, latency_2_avg, latency_3_avg], [total_latency_max, latency_1_max, latency_2_max, latency_3_max]
+        return total_bandwidth, [total_latency_avg, cmd_latency_avg, rsp_latency_avg, dat_latency_avg], [total_latency_max, cmd_latency_max, rsp_latency_max, dat_latency_max]
 
     def calculate_ip_bandwidth(self, intervals):
         """计算给定区间的加权带宽"""
@@ -1872,8 +1832,6 @@ class BaseModel:
             self.ip_bandwidth_data["read"][source_type][physical_row, physical_col] = read_bw
             self.ip_bandwidth_data["write"][source_type][physical_row, physical_col] = write_bw
             self.ip_bandwidth_data["total"][source_type][physical_row, physical_col] = total_bw
-
-    
 
     def draw_flow_graph(self, network, mode="total", node_size=2000, save_path=None):
         """

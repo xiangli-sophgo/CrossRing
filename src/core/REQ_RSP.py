@@ -22,10 +22,10 @@ class REQ_RSP_model(BaseModel):
             if self.plot_link_state:
                 show_id = self.show_trace_id
                 use_highlight = 1
-                if self.req_network.send_flits[show_id] and not self.req_network.send_flits[show_id][-1].is_arrive and  self.req_network.send_flits[show_id][0].current_link is not None:
+                if self.req_network.send_flits[show_id] and not self.req_network.send_flits[show_id][-1].is_arrive and self.req_network.send_flits[show_id][0].current_link is not None:
                     self.vis.update(self.req_network, show_id, use_highlight)
                 elif self.rsp_network.send_flits[show_id] and not self.rsp_network.send_flits[show_id][-1].is_arrive and self.rsp_network.send_flits[show_id][0].current_link is not None:
-                    self.vis.update(self.rsp_network, use_highlight)
+                    self.vis.update(self.rsp_network, show_id, use_highlight)
                 elif self.flit_network.send_flits[show_id] and not self.flit_network.send_flits[show_id][-1].is_arrive and self.flit_network.send_flits[show_id][0].current_link is not None:
                     self.vis.update(self.flit_network, show_id, use_highlight)
                 elif self.flit_network.send_flits[show_id] and self.flit_network.send_flits[show_id][-1].is_arrive:
@@ -61,6 +61,8 @@ class REQ_RSP_model(BaseModel):
             self.move_all_to_inject_queue(self.flit_network, "data")
 
             # Tag moves
+            self.tag_move(self.req_network)
+            self.tag_move(self.rsp_network)
             self.tag_move(self.flit_network)
 
             # if self.rn_type != "Idle":
@@ -138,9 +140,9 @@ class REQ_RSP_model(BaseModel):
 
                 self.req_cir_h_num_stat += req.circuits_completed_h
                 self.req_cir_v_num_stat += req.circuits_completed_v
-                for flit in self.flit_network.arrive_flits[packet_id]:
+                for flit in self.flit_network.send_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle + self.config.sn_tracker_release_latency
-                    flit.sn_data_collection_completet_cycle = self.cycle
+                    flit.sn_data_collection_complete_cycle = self.cycle
                 # 释放tracker 增加40ns
                 release_time = self.cycle + self.config.sn_tracker_release_latency
                 self.node.sn_tracker_release_time[release_time].append((self.sn_type, in_pos, req))
@@ -476,7 +478,6 @@ class REQ_RSP_model(BaseModel):
     #         network.plan_move(flit)
     #         if network.execute_moves(flit, self.cycle):
     #             flits.remove(flit)
-        
 
     #     # 处理transfer station的flits
     #     for col in range(1, self.config.rows, 2):
@@ -667,8 +668,13 @@ class REQ_RSP_model(BaseModel):
                             network.arrive_flits[flit.packet_id].append(flit)
                             network.recv_flits_num += 1
                             if len(network.arrive_flits[flit.packet_id]) == flit.burst_length:
+                                # if flit.packet_id == 1999:
+                                # print(flit)
                                 for flit in network.arrive_flits[flit.packet_id]:
-                                    flit.rn_data_collection_complete_cycle = self.cycle
+                                    if flit.req_type == "read":
+                                        flit.rn_data_collection_complete_cycle = self.cycle
+                                    elif flit.req_type == "write":
+                                        flit.sn_data_collection_complete_cycle = self.cycle
             for in_pos in self.flit_position:
                 ip_pos = in_pos - self.config.cols
                 for ip_type in network.eject_queues_pre:
@@ -846,77 +852,77 @@ class REQ_RSP_model(BaseModel):
 
     #     return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
-        # # Get the flit at the end of the link
-        # flit_l = network.links[link][-1]
+    # # Get the flit at the end of the link
+    # flit_l = network.links[link][-1]
 
-        # # Case 2: Flit destination doesn't match next position
-        # if flit_l.destination != next_pos:
-        #     return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
+    # # Case 2: Flit destination doesn't match next position
+    # if flit_l.destination != next_pos:
+    #     return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
-        # # Case 3: Flit destination matches next position
-        # eject_queue = network.eject_queues[direction][next_pos]
+    # # Case 3: Flit destination matches next position
+    # eject_queue = network.eject_queues[direction][next_pos]
 
-        # # Subcase 3.1: Link has a tag
-        # if network.links_tag[link][-1]:
-        #     if (
-        #         network.links_tag[link][-1] == [next_pos, direction]
-        #         and network.config.EQ_IN_FIFO_DEPTH > len(eject_queue)
-        #         and (
-        #             (
-        #                 direction == "down"
-        #                 and (flit_l.ETag_priority in ["T1", "T0"] and network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH)
-        #                 or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX)
-        #             )
-        #         )
-        #         or (
-        #             direction == "up"
-        #             and (
-        #                 (flit_l.ETag_priority == "T0" and network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH and network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l))
-        #                 or (flit_l.ETag_priority == "T1" and network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX)
-        #                 or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)
-        #             )
-        #         )
-        #     ):
-        #         network.remain_tag[direction][next_pos] += 1
-        #         network.links_tag[link][-1] = None
-        #         return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
-        #     return None
+    # # Subcase 3.1: Link has a tag
+    # if network.links_tag[link][-1]:
+    #     if (
+    #         network.links_tag[link][-1] == [next_pos, direction]
+    #         and network.config.EQ_IN_FIFO_DEPTH > len(eject_queue)
+    #         and (
+    #             (
+    #                 direction == "down"
+    #                 and (flit_l.ETag_priority in ["T1", "T0"] and network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH)
+    #                 or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX)
+    #             )
+    #         )
+    #         or (
+    #             direction == "up"
+    #             and (
+    #                 (flit_l.ETag_priority == "T0" and network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH and network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l))
+    #                 or (flit_l.ETag_priority == "T1" and network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX)
+    #                 or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)
+    #             )
+    #         )
+    #     ):
+    #         network.remain_tag[direction][next_pos] += 1
+    #         network.links_tag[link][-1] = None
+    #         return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+    #     return None
 
-        # # Subcase 3.2: Link has no tag
-        # if (
-        #     network.config.EQ_IN_FIFO_DEPTH <= len(eject_queue)
-        #     or (
-        #         direction == "down"
-        #         and (flit_l.ETag_priority in ["T1", "T0"] and network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH)
-        #         or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX)
-        #     )
-        #     or (
-        #         direction == "up"
-        #         and (
-        #             (flit_l.ETag_priority == "T0" and network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH and network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l))
-        #             or (flit_l.ETag_priority == "T1" and network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX)
-        #             or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)
-        #         )
-        #     )
-        # ):
-        #     return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
+    # # Subcase 3.2: Link has no tag
+    # if (
+    #     network.config.EQ_IN_FIFO_DEPTH <= len(eject_queue)
+    #     or (
+    #         direction == "down"
+    #         and (flit_l.ETag_priority in ["T1", "T0"] and network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH)
+    #         or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX)
+    #     )
+    #     or (
+    #         direction == "up"
+    #         and (
+    #             (flit_l.ETag_priority == "T0" and network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH and network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l))
+    #             or (flit_l.ETag_priority == "T1" and network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX)
+    #             or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)
+    #         )
+    #     )
+    # ):
+    #     return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
-        # # Check priority conditions based on direction
-        # if direction == "down":
-        #     if (flit_l.ETag_priority in ["T1", "T0"] and network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH) or (
-        #         flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX
-        #     ):
-        #         return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+    # # Check priority conditions based on direction
+    # if direction == "down":
+    #     if (flit_l.ETag_priority in ["T1", "T0"] and network.EQ_UE_Counters["down"][next_pos]["T1"] < self.config.EQ_IN_FIFO_DEPTH) or (
+    #         flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["down"][next_pos]["T2"] < self.config.TD_Etag_T2_UE_MAX
+    #     ):
+    #         return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
 
-        # elif direction == "up":
-        #     if (
-        #         (flit_l.ETag_priority == "T0" and network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH and network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l))
-        #         or (flit_l.ETag_priority == "T1" and network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX)
-        #         or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)
-        #     ):
-        #         return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
+    # elif direction == "up":
+    #     if (
+    #         (flit_l.ETag_priority == "T0" and network.EQ_UE_Counters["up"][next_pos]["T0"] < self.config.EQ_IN_FIFO_DEPTH and network.T0_Etag_Order_FIFO[0] == (next_pos, flit_l))
+    #         or (flit_l.ETag_priority == "T1" and network.EQ_UE_Counters["up"][next_pos]["T1"] < self.config.TU_Etag_T1_UE_MAX)
+    #         or (flit_l.ETag_priority == "T2" and network.EQ_UE_Counters["up"][next_pos]["T2"] < self.config.TU_Etag_T2_UE_MAX)
+    #     ):
+    #         return self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction)
 
-        # return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
+    # return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
     def _rn_handle_response(self, rsp, in_pos):
         """处理response的eject"""
