@@ -1069,7 +1069,8 @@ class BaseModel:
 
     def _process_ring_bridge(self, network, direction, pos, next_pos, curr_node, opposite_node):
         dir_key = f"v{direction}"
-        link = (curr_node, next_pos)
+        # link = (curr_node, next_pos)
+        link = (next_pos, opposite_node)
 
         # Early return if ring bridge is not active for this direction and position
         if not network.ring_bridge[dir_key][(pos, next_pos)]:
@@ -1753,7 +1754,7 @@ class BaseModel:
         if total_interval_time > 0:
             total_bandwidth = total_count * 128 / total_interval_time / (self.config.num_RN if req_type == "read" else self.config.num_SN)
         else:
-            return 0, [0,0,0,0], [0,0,0,0]
+            return 0, [0, 0, 0, 0], [0, 0, 0, 0]
             # total_bandwidth = 0
 
         if req_type == "Read":

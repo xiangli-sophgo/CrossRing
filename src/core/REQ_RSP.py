@@ -105,8 +105,8 @@ class REQ_RSP_model(BaseModel):
         if in_pos in self.node.rn_rdb_recv[self.rn_type] and len(self.node.rn_rdb_recv[self.rn_type][in_pos]) > 0:
             packet_id = self.node.rn_rdb_recv[self.rn_type][in_pos][0]
             self.node.rn_rdb[self.rn_type][in_pos][packet_id].pop(0)
-            if packet_id == 32755:
-                print(packet_id)
+            # if packet_id == 32755:
+                # print(packet_id)
             if len(self.node.rn_rdb[self.rn_type][in_pos][packet_id]) == 0:
                 self.node.rn_rdb[self.rn_type][in_pos].pop(packet_id)
                 self.node.rn_rdb_recv[self.rn_type][in_pos].pop(0)
