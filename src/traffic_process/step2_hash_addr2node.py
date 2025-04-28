@@ -77,12 +77,14 @@ class AddressHasher:
     def ip2node(self, n):
         """Input ddr/dma number and return the corresponding node number"""
         n = int(n)
-        # TODO
         # ip2node_map = {0: 0, 4: 8, 8: 4, 12: 12, 16: 20, 20: 28, 24: 36, 28: 44, 32: 52, 36: 60, 40: 48, 44: 56, 48: 32, 52: 40, 56: 16, 60: 24}
+        # ip2node_map = {0: 0, 4: 8, 8: 4, 12: 12, 16: 16, 20: 24, 24: 20, 28: 28}
         ip2node_map = {0: 0, 4: 8, 8: 4, 12: 12, 16: 16, 20: 24, 24: 20, 28: 28}
-        # assert len(ip2node_map.keys()) == 16 and len(ip2node_map.values()) == 16
         remaining = n % 4
-        return str(ip2node_map[n - remaining] + remaining)
+        n_1 = ip2node_map[n - remaining] + remaining
+        ip2node_map_2 = {0: 0, 2: 4, 4: 2, 6: 6, 8: 8, 10: 12, 12: 10, 14: 14, 16: 16, 18: 20, 20: 18, 22: 22, 24: 24, 26: 28, 28: 26, 30: 30}  # 每 2 个一组映射
+        remaining = n_1 % 2
+        return str(ip2node_map_2[n_1 - remaining] + remaining)
 
     def process_file(self, file_path, input_folder, output_folder, file_name):
         with open(file_path, "r", encoding="utf-8") as file:

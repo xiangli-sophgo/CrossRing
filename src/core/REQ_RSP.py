@@ -106,7 +106,7 @@ class REQ_RSP_model(BaseModel):
             packet_id = self.node.rn_rdb_recv[self.rn_type][in_pos][0]
             self.node.rn_rdb[self.rn_type][in_pos][packet_id].pop(0)
             # if packet_id == 32755:
-                # print(packet_id)
+            # print(packet_id)
             if len(self.node.rn_rdb[self.rn_type][in_pos][packet_id]) == 0:
                 self.node.rn_rdb[self.rn_type][in_pos].pop(packet_id)
                 self.node.rn_rdb_recv[self.rn_type][in_pos].pop(0)
@@ -714,43 +714,43 @@ class REQ_RSP_model(BaseModel):
                         self.node.sn_wdb_recv[self.sn_type][in_pos].append(network.arrive_node_pre[self.sn_type][ip_pos].packet_id)
                     network.arrive_node_pre[self.sn_type][ip_pos] = None
 
-    def _handle_request(self, req, in_pos):
-        """处理request类型的eject"""
-        if req.req_type == "read":
-            if req.req_attr == "new":
-                if self.node.sn_tracker_count[self.sn_type]["ro"][in_pos] > 0:
-                    req.sn_tracker_type = "ro"
-                    req.sn_receive_req_cycle = self.cycle
-                    self.node.sn_tracker[self.sn_type][in_pos].append(req)
-                    self.node.sn_tracker_count[self.sn_type]["ro"][in_pos] -= 1
-                    self.create_read_packet(req)
-                # elif self.node.sn_tracker_count[self.sn_type]["share"][in_pos] > 0:
-                #     req.sn_tracker_type = "share"
-                #     self.node.sn_tracker[self.sn_type][in_pos].append(req)
-                #     self.node.sn_tracker_count[self.sn_type]["share"][in_pos] -= 1
-                #     self.create_read_packet(req)
-                else:
-                    self.create_rsp(req, "negative")
-                    self.node.sn_req_wait[req.req_type][self.sn_type][in_pos].append(req)
-            else:
-                req.sn_receive_req_cycle = self.cycle
-                self.create_read_packet(req)
-        elif req.req_type == "write":
-            if req.req_attr == "new":
-                if self.node.sn_tracker_count[self.sn_type]["share"][in_pos] > 0 and self.node.sn_wdb_count[self.sn_type][in_pos] >= req.burst_length:
-                    req.sn_tracker_type = "share"
-                    req.sn_receive_req_cycle = self.cycle
-                    self.node.sn_tracker[self.sn_type][in_pos].append(req)
-                    self.node.sn_tracker_count[self.sn_type]["share"][in_pos] -= 1
-                    self.node.sn_wdb_count[self.sn_type][in_pos] -= req.burst_length
-                    self.create_rsp(req, "datasend")
-                else:
-                    # retry
-                    self.create_rsp(req, "negative")
-                    self.node.sn_req_wait[req.req_type][self.sn_type][in_pos].append(req)
-            else:
-                req.sn_receive_req_cycle = self.cycle
-                self.create_rsp(req, "datasend")
+    # def _handle_request(self, req, in_pos):
+    #     """处理request类型的eject"""
+    #     if req.req_type == "read":
+    #         if req.req_attr == "new":
+    #             if self.node.sn_tracker_count[self.sn_type]["ro"][in_pos] > 0:
+    #                 req.sn_tracker_type = "ro"
+    #                 req.sn_receive_req_cycle = self.cycle
+    #                 self.node.sn_tracker[self.sn_type][in_pos].append(req)
+    #                 self.node.sn_tracker_count[self.sn_type]["ro"][in_pos] -= 1
+    #                 self.create_read_packet(req)
+    #             # elif self.node.sn_tracker_count[self.sn_type]["share"][in_pos] > 0:
+    #             #     req.sn_tracker_type = "share"
+    #             #     self.node.sn_tracker[self.sn_type][in_pos].append(req)
+    #             #     self.node.sn_tracker_count[self.sn_type]["share"][in_pos] -= 1
+    #             #     self.create_read_packet(req)
+    #             else:
+    #                 self.create_rsp(req, "negative")
+    #                 self.node.sn_req_wait[req.req_type][self.sn_type][in_pos].append(req)
+    #         else:
+    #             req.sn_receive_req_cycle = self.cycle
+    #             self.create_read_packet(req)
+    #     elif req.req_type == "write":
+    #         if req.req_attr == "new":
+    #             if self.node.sn_tracker_count[self.sn_type]["share"][in_pos] > 0 and self.node.sn_wdb_count[self.sn_type][in_pos] >= req.burst_length:
+    #                 req.sn_tracker_type = "share"
+    #                 req.sn_receive_req_cycle = self.cycle
+    #                 self.node.sn_tracker[self.sn_type][in_pos].append(req)
+    #                 self.node.sn_tracker_count[self.sn_type]["share"][in_pos] -= 1
+    #                 self.node.sn_wdb_count[self.sn_type][in_pos] -= req.burst_length
+    #                 self.create_rsp(req, "datasend")
+    #             else:
+    #                 # retry
+    #                 self.create_rsp(req, "negative")
+    #                 self.node.sn_req_wait[req.req_type][self.sn_type][in_pos].append(req)
+    #         else:
+    #             req.sn_receive_req_cycle = self.cycle
+    #             self.create_rsp(req, "datasend")
 
     # def _process_ring_bridge(self, network, direction, pos, next_pos, curr_node, opposite_node):
     #     dir_key = f"v{direction}"

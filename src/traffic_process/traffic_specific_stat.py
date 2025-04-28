@@ -8,7 +8,10 @@ plt.rcParams["axes.unicode_minus"] = False  # 解决负号显示问题
 # 读取数据流文件
 # file_path = f"../../traffic/output_DeepSeek/step5_data_merge/MLP_MoE_Trace.txt"
 # file_path = f"../../traffic/output_v8_new/step5_data_merge/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
-file_path = f"../../test_data/traffic_2260E_0425.txt"
+# file_path = f"../../traffic/output_v8_32_0427/step5_data_merge/LLama2_Attention_FC_Trace.txt"
+# file_path = f"../../traffic/output_v8_0427/step2_hash_addr2node/LLama2_Attention_FC/gmemTrace.TPU1.tdma_instance.txt"
+# file_path = f"../../traffic/output_All_reduce_new_0427/step5_data_merge/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
+file_path = f"../../test_data/traffic_2260E_GDMA_RO_0427.txt"
 data = pd.read_csv(file_path, header=None)
 
 # file_path = r"../../Result/CrossRing/SCM/REQ_RSP/Spare_core_0403_to32_1_2_0/5x4/LLama2_Attention_FC_Trace/Result_ention_FC_R.txt"

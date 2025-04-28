@@ -121,8 +121,14 @@ class BaseModel:
         self.EQ_ETag_T1_num_stat, self.EQ_ETag_T0_num_stat = 0, 0
         self.RB_ETag_T1_num_stat, self.RB_ETag_T0_num_stat = 0, 0
         self.ITag_h_num_stat, self.ITag_v_num_stat = 0, 0
-        self.read_BW_stat, self.read_latency_avg_stat, self.read_latency_max_stat = 0, 0, 0
-        self.write_BW_stat, self.write_latency_avg_stat, self.write_latency_max_stat = 0, 0, 0
+        self.read_BW_stat, self.read_total_latency_avg_stat, self.read_total_latency_max_stat = 0, 0, 0
+        self.read_cmd_latency_avg_stat, self.read_cmd_latency_max_stat = 0, 0
+        self.read_rsp_latency_avg_stat, self.read_rsp_latency_max_stat = 0, 0
+        self.read_dat_latency_avg_stat, self.read_dat_latency_max_stat = 0, 0
+        self.write_BW_stat, self.write_total_latency_avg_stat, self.write_total_latency_max_stat = 0, 0, 0
+        self.write_cmd_latency_avg_stat, self.write_cmd_latency_max_stat = 0, 0
+        self.write_rsp_latency_avg_stat, self.write_rsp_latency_max_stat = 0, 0
+        self.write_dat_latency_avg_stat, self.write_dat_latency_max_stat = 0, 0
         self.Total_BW_stat = 0
 
     def run(self):
@@ -1030,11 +1036,11 @@ class BaseModel:
 
     def _handle_request(self, req, in_pos):
         """处理request类型的eject"""
+        req.sn_receive_req_cycle = self.cycle
         if req.req_type == "read":
             if req.req_attr == "new":
                 if self.node.sn_tracker_count[self.sn_type]["ro"][in_pos] > 0:
                     req.sn_tracker_type = "ro"
-                    req.sn_receive_req_cycle = self.cycle
                     self.node.sn_tracker[self.sn_type][in_pos].append(req)
                     self.node.sn_tracker_count[self.sn_type]["ro"][in_pos] -= 1
                     self.create_read_packet(req)
@@ -1052,7 +1058,6 @@ class BaseModel:
             if req.req_attr == "new":
                 if self.node.sn_tracker_count[self.sn_type]["share"][in_pos] > 0 and self.node.sn_wdb_count[self.sn_type][in_pos] >= req.burst_length:
                     req.sn_tracker_type = "share"
-                    req.sn_receive_req_cycle = self.cycle
                     self.node.sn_tracker[self.sn_type][in_pos].append(req)
                     self.node.sn_tracker_count[self.sn_type]["share"][in_pos] -= 1
                     self.node.sn_wdb[self.sn_type][in_pos][req.packet_id] = []
@@ -1528,9 +1533,29 @@ class BaseModel:
             print(f"Topology: {self.topo_type_stat }, file_name: {self.file_name}")
             print(f"Topology: {self.topo_type_stat }, file_name: {self.file_name}", file=f3)
             if read_latency:
-                self.read_BW_stat, self.read_latency_avg_stat, self.read_latency_max_stat = self.output_intervals(f3, read_merged_intervals, "Read", read_latency)
+                (
+                    self.read_BW_stat,
+                    self.read_total_latency_avg_stat,
+                    self.read_cmd_latency_avg_stat,
+                    self.read_rsp_latency_avg_stat,
+                    self.read_dat_latency_avg_stat,
+                    self.read_total_latency_max_stat,
+                    self.read_cmd_latency_max_stat,
+                    self.read_rsp_latency_max_stat,
+                    self.read_dat_latency_max_stat,
+                ) = self.output_intervals(f3, read_merged_intervals, "Read", read_latency)
             if write_latency:
-                self.write_BW_stat, self.write_latency_avg_stat, self.write_latency_max_stat = self.output_intervals(f3, write_merged_intervals, "Write", write_latency)
+                (
+                    self.write_BW_stat,
+                    self.write_total_latency_avg_stat,
+                    self.write_cmd_latency_avg_stat,
+                    self.write_rsp_latency_avg_stat,
+                    self.write_dat_latency_avg_stat,
+                    self.write_total_latency_max_stat,
+                    self.write_cmd_latency_max_stat,
+                    self.write_rsp_latency_max_stat,
+                    self.write_dat_latency_max_stat,
+                ) = self.output_intervals(f3, write_merged_intervals, "Write", write_latency)
 
             print("\nPer-IP Weighted Bandwidth:", file=f3)
 
@@ -1569,31 +1594,16 @@ class BaseModel:
                     sn_write_bws.append(bw)
 
             # 计算并输出RN和SN的统计信息
-            def print_stats(bw_list, name, operation):
-                if bw_list:
-                    # avg = sum(bw_list) / len(bw_list)
-                    avg = sum(bw_list) / getattr(self.config, f"num_{name}")
-                    min_bw = min(bw_list)
-                    max_bw = max(bw_list)
-                    print(f"\n{name} {operation} Bandwidth Stats:", file=f3)
-                    print(f"  Average: {avg:.1f} GB/s", file=f3)
-                    print(f"  Range: {min_bw:.1f} - {max_bw:.1f} GB/s", file=f3)
-
-                    # 屏幕输出
-                    print(f"{name} {operation}: Avg: {avg:.1f} GB/s, Range: {min_bw:.1f}-{max_bw:.1f} GB/s")
-                # else:
-                #     print(f"\nNo {name} {operation} bandwidth data", file=f3)
-                #     print(f"No {name} {operation} bandwidth data")  # 屏幕输出
 
             # 输出读统计
             print("")  # 屏幕输出空行分隔
-            print_stats(rn_read_bws, "RN", "Read")
-            print_stats(sn_read_bws, "SN", "Read")
+            self.print_stats(rn_read_bws, "RN", "Read", f3)
+            self.print_stats(sn_read_bws, "SN", "Read", f3)
 
             # 输出写统计
             print("")  # 屏幕输出空行分隔
-            print_stats(rn_write_bws, "RN", "Write")
-            print_stats(sn_write_bws, "SN", "Write")
+            self.print_stats(rn_write_bws, "RN", "Write", f3)
+            self.print_stats(sn_write_bws, "SN", "Write", f3)
 
         self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
         print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")
@@ -1628,6 +1638,30 @@ class BaseModel:
         # )
         # print("=" * 50)
 
+    def print_stats(self, bw_list, name, operation, file):
+        if bw_list:
+            # avg = sum(bw_list) / len(bw_list)
+            avg = sum(bw_list) / getattr(self.config, f"num_{name}")
+            min_bw = min(bw_list)
+            max_bw = max(bw_list)
+            if name == 'RN':
+                self.RN_BW_avg_stat = avg
+                self.RN_BW_min_stat = min_bw
+                self.RN_BW_max_stat = max_bw
+            elif name == 'SN':
+                self.SN_BW_avg_stat = avg
+                self.SN_BW_min_stat = min_bw
+                self.SN_BW_max_stat = max_bw
+
+            print(f"\n{name} {operation} Bandwidth Stats:", file=file)
+            print(f"  Average: {avg:.1f} GB/s", file=file)
+            print(f"  Range: {min_bw:.1f} - {max_bw:.1f} GB/s", file=file)
+
+            # 屏幕输出
+            print(f"{name} {operation}: Avg: {avg:.1f} GB/s, Range: {min_bw:.1f}-{max_bw:.1f} GB/s")
+        # else:
+        #     print(f"\nNo {name} {operation} bandwidth data", file=f3)
+        #     print(f"No {name} {operation} bandwidth data")  # 屏幕输出
     def update_intervals(self, flit, merged_intervals, latency, file, req_type):
         """Update the merged intervals and latency for the given request type."""
         last_start, last_end, count = merged_intervals[-1]
@@ -1754,8 +1788,7 @@ class BaseModel:
         if total_interval_time > 0:
             total_bandwidth = total_count * 128 / total_interval_time / (self.config.num_RN if req_type == "read" else self.config.num_SN)
         else:
-            return 0, [0, 0, 0, 0], [0, 0, 0, 0]
-            # total_bandwidth = 0
+            return 0, 0, 0, 0, 0, 0, 0, 0, 0
 
         if req_type == "Read":
             self.R_finish_time_stat = finish_time
@@ -1784,7 +1817,7 @@ class BaseModel:
             f"cmd_latency: Avg: {cmd_latency_avg:.1f}, Max: {cmd_latency_max}; rsp_latency: Avg: {rsp_latency_avg:.1f}, Max: {rsp_latency_max}; dat_latency: Avg: {dat_latency_avg:.1f}, Max: {dat_latency_max}"
         )
 
-        return total_bandwidth, [total_latency_avg, cmd_latency_avg, rsp_latency_avg, dat_latency_avg], [total_latency_max, cmd_latency_max, rsp_latency_max, dat_latency_max]
+        return total_bandwidth, total_latency_avg, cmd_latency_avg, rsp_latency_avg, dat_latency_avg, total_latency_max, cmd_latency_max, rsp_latency_max, dat_latency_max
 
     def calculate_ip_bandwidth(self, intervals):
         """计算给定区间的加权带宽"""

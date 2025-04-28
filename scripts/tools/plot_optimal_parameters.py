@@ -9,65 +9,6 @@ from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# 读取CSV文件
-# file_root = r"../../Result/Params_csv/"
-# data_file_name = r"RN_Tracker_OSTD_Results_0225.csv"
-# data = pd.read_csv(file_root + data_file_name)
-
-# # 定义不同的拓扑
-# topologies = ["4x9", "9x4", "5x4", "4x5"]
-# topologies = ["4x9"]
-
-# topo = topologies[0]
-
-# # 创建一个图形
-# plt.figure(figsize=(15, 10))
-
-# # 遍历每种拓扑
-# for topo in topologies:
-#     # for unified_rn_w in range(24, 72, 8):
-#     # 筛选出当前拓扑的数据
-#     topo_data = data[data["Topo"] == topo]
-
-#     # 统一rn_w_tracker_outstanding
-#     # unified_rn_w = topo_data["rn_w_tracker_outstanding"].iloc[0]
-#     unified_rn_w = 48
-#     # x_name = "sn_read_tracker_ostd"
-#     # y_name = "sn_write_tracker_ostd"
-#     x_name = "rn_r_tracker_outstanding"
-#     y_name = "rn_w_tracker_outstanding"
-
-#     filtered_data = topo_data[topo_data[x_name] == unified_rn_w]
-#     filtered_data = filtered_data.sort_values(by=y_name)
-#     plt.plot(
-#         filtered_data[y_name],
-#         filtered_data["ReadBandWidth"] * 1 + 1 * filtered_data["WriteBandWidth"],
-#         label=f"Topo {topo}",
-#     )
-
-#     # filtered_data = topo_data[topo_data[y_name] == unified_rn_w]
-#     # filtered_data = filtered_data.sort_values(by=x_name)
-#     # plt.plot(
-#     #     filtered_data[x_name],
-#     #     filtered_data["ReadBandWidth"] * 1 + 1 * filtered_data["WriteBandWidth"],
-#     #     label=f"Topo {topo}",
-#     # )
-
-# # 添加图例和标签
-# plt.title(f"RN_W_Tracker_Outstanding={unified_rn_w}", fontsize=16)
-# plt.xlabel("RN_R_Tracker_Outstanding", fontsize=16)
-# plt.ylabel("Read Bandwidth", fontsize=16)
-# # plt.title(f"RN_R_Tracker_Outstanding={unified_rn_r}", fontsize=16)
-# # plt.xlabel("RN_W_Tracker_Outstanding", fontsize=16)
-# # plt.ylabel("Write Bandwidth", fontsize=16)
-# plt.legend()
-# plt.grid()
-# plt.show()
-
-# 热力图
-# 创建一个图形
-# import os
-
 
 # 自定义格式化函数
 def format_func(x):
@@ -84,7 +25,8 @@ file_root = r"../../Result/Params_csv/"
 # data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
 # data_file_name = r"RB_IN_OUT_FIFO_459_0303_2_fixed_time_interval.csv"
 # data_file_name = r"ITag_0411.csv"
-data_file_name = r"ETag_EQ_0421.csv"
+data_file_name = r"Spare_core_MLP_0427.csv"
+# data_file_name = r"Spare_core_MM_QKV_0427.csv"
 # data_file_name = r"ITag_0416.csv"
 # data_file_name = r"Spare_core_0410_16_core_128GB_32_shared2.csv"
 # data_file_name = r"Spare_core_0410_Traffic_R_W_64GB_32_shared.csv"
@@ -107,9 +49,9 @@ data = pd.read_csv(file_root + data_file_name)
 # 定义不同的拓扑
 # topo = topologies[0]
 
-show_value = "read_BW"
+# show_value = "read_BW"
 # show_value = "write_BW"
-# show_value = "Total_BW"
+show_value = "Total_BW"
 # show_value = "ITag_h_num"
 # show_value = "ITag_v_num"
 # show_value = "R_finish_time"
@@ -141,25 +83,28 @@ show_value = "read_BW"
 # x_name = "TL_Etag_T2_UE_MAX"
 # y_name = "TL_Etag_T1_UE_MAX"
 # z_name = "TR_Etag_T2_UE_MAX"
-x_name = "TU_Etag_T2_UE_MAX"
-y_name = "TU_Etag_T1_UE_MAX"
-z_name = "TD_Etag_T2_UE_MAX"
+# x_name = "TU_Etag_T2_UE_MAX"
+# y_name = "TU_Etag_T1_UE_MAX"
+# z_name = "TD_Etag_T2_UE_MAX"
 # x_name = "ITag_Trigger_Th_H"
 # y_name = "ITag_Trigger_Th_V"
 # z_name = "ITag_Max_Num_H"
-# x_name = "fail_core_num"
-# y_name = "spare_core_row"
+x_name = "fail_core_num"
+y_name = "spare_core_row"
+name_map = {"fail_core_num": "损坏IP数量", "spare_core_row": "冗余IP所在行"}
+
 model_type = "REQ_RSP"
 # model_type = "Packet_Base"
 # model_type = "Feature"
 
-Both_side_ETag_upgrade = 0
+Both_side_ETag_upgrade = 1
 
 rate_plot = 0
 log_data = 0
 save_images = 0
 reverse_cmap = 0
-plot_type = 1
+plot_type = 0
+use_name_map = 1
 
 
 # 设置 vmax 和 vmin
@@ -272,9 +217,14 @@ for topo in topologies:
         ax.invert_yaxis()
 
         # 添加标题和轴标签
-        plt.title(f"Heatmap of {show_value} for Topo {topo}", fontsize=16, pad=20)
-        plt.xlabel(x_name, fontsize=14)
-        plt.ylabel(y_name, fontsize=14)
+        # plt.title(f"Heatmap of {show_value} for Topo {topo}", fontsize=16, pad=20)
+        plt.title(f"Heatmap of {show_value}", fontsize=20, pad=20)
+        if use_name_map:
+            plt.xlabel(name_map[x_name], fontsize=18, fontproperties="SimHei")
+            plt.ylabel(name_map[y_name], fontsize=18, fontproperties="SimHei")
+        else:
+            plt.xlabel(x_name, fontsize=14)
+            plt.ylabel(y_name, fontsize=14)
 
         # 调整刻度字体大小
         plt.xticks(fontsize=12, rotation=0)

@@ -47,17 +47,6 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name):
         topo_type = config.topo_type
     config.topo_type = topo_type
 
-    # Set simulation parameters
-    config.burst = 4
-    config.rn_read_tracker_ostd = 128
-    config.rn_write_tracker_ostd = 64
-    config.rn_rdb_size = config.rn_read_tracker_ostd * config.burst
-    config.rn_wdb_size = config.rn_write_tracker_ostd * config.burst
-    config.sn_read_tracker_ostd = 128
-    config.sn_write_tracker_ostd = 64
-    config.sn_wdb_size = config.sn_write_tracker_ostd * config.burst
-    config.seats_per_link = 7
-
     # Run simulation for each traffic file
     for file_name in file_names:
         sim = eval(f"{model_type}_model")(
@@ -69,6 +58,30 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name):
             result_save_path=result_save_path + file_name[:-4] + "/",
             results_fig_save_path=results_fig_save_path,
         )
+        # Set simulation parameters
+        sim.config.burst = 4
+        sim.config.num_ips = 32
+        sim.config.num_ddr = 32
+        sim.config.num_l2m = 32
+        sim.config.num_gdma = 32
+        sim.config.num_sdma = 32
+        sim.config.num_RN = 32
+        sim.config.num_SN = 32
+        sim.config.rn_read_tracker_ostd = 64
+        sim.config.rn_write_tracker_ostd = 64
+        sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
+        sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
+        sim.config.sn_ddr_read_tracker_ostd = 128
+        sim.config.sn_ddr_write_tracker_ostd = 64
+        sim.config.sn_l2m_read_tracker_ostd = 64
+        sim.config.sn_l2m_write_tracker_ostd = 64
+        sim.config.sn_ddr_wdb_size = sim.config.sn_ddr_write_tracker_ostd * sim.config.burst
+        sim.config.sn_l2m_wdb_size = sim.config.sn_l2m_write_tracker_ostd * sim.config.burst
+        sim.config.ddr_R_latency_original = 150
+        sim.config.ddr_R_latency_var_original = 0
+        sim.config.ddr_W_latency_original = 16
+        sim.config.l2m_R_latency_original = 12
+        sim.config.l2m_W_latency_original = 16
 
         sim.initial()
         sim.print_interval = 5000
@@ -87,11 +100,11 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name):
 def main():
     parser = argparse.ArgumentParser(description="Network Traffic Processing and Simulation")
     parser.add_argument("--raw_traffic_input", default="../traffic/original_data/DeepSeek/", help="Input traffic data path")
-    parser.add_argument("--traffic_output", default="../traffic/output_DeepSeek_part2/", help="Output directory for processed data")
+    parser.add_argument("--traffic_output", default="../traffic/output_DeepSeek_0427/", help="Output directory for processed data")
     parser.add_argument("--outstanding", type=int, default=512, help="Outstanding number (must be power of 2)")
     parser.add_argument("--config", default="../config/config2.json", help="Simulation config file path")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="Simulation model type")
-    parser.add_argument("--results_file_name", default="DeepSeek_0422", help="Base name for results files")
+    parser.add_argument("--results_file_name", default="DeepSeek_0427", help="Base name for results files")
     parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both (default)")
 
     args = parser.parse_args()
