@@ -10,7 +10,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_8_shared_0416.txt"
+    file_name = r"traffic_5x4_8_shared_0427.txt"
     # file_name = r"testcase-v1.1.1.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -18,13 +18,13 @@ def main():
     # file_name = r"demo_3x3.txt"
     # file_name = r"demo_459.txt"
 
-    # traffic_file_path = r"../traffic/"
+    traffic_file_path = r"../traffic/"
     # traffic_file_path = r"../traffic/output_v8_new/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_All_reduce/step5_data_merge/"
     # traffic_file_path = r"../traffic/output-v8-32/2M/step5_data_merge/"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
-    # file_name = r"LLama2_MLP_Trace.txt"
+    file_name = r"MLP_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
     # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
 
@@ -46,7 +46,7 @@ def main():
     else:
         topo_type = config.topo_type
     config.topo_type = topo_type
-    results_file_name = "Spare_core_8_shared_0417"
+    results_file_name = "Spare_core_MLP_0427"
     results_fig_save_path = None
     result_root_save_path = f"../Result/CrossRing/SCM/{model_type}/{results_file_name}/"
     # results_fig_save_path = f"../Result/Plt_IP_BW/SCM/{model_type}/{results_file_name}/"
@@ -56,18 +56,18 @@ def main():
     output_csv = os.path.join(r"../Result/Params_csv/", f"{results_file_name}.csv")
     os.makedirs(result_root_save_path, exist_ok=True)
 
-    np.random.seed(415)
+    np.random.seed(427)
     param = 0
     if param == 0:
         repeat_time_all = 1
     else:
-        repeat_time_all = min(3 * param, 10)
+        repeat_time_all = min(4 * param, 10)
 
     for repeat_time in range(repeat_time_all):
         for failed_core_num in range(param, param + 1):
             failed_core_poses = np.random.choice(list(i for i in range(16)), failed_core_num, replace=False)
-            failed_core_poses = [5]
-            for spare_core_row in range(8, 9, 2):
+            # failed_core_poses = [5]
+            for spare_core_row in range(0, 9, 2):
                 result_part_save_path = f"{failed_core_num}_{spare_core_row}_{repeat_time}/"
 
                 if model_type == "REQ_RSP":
@@ -100,6 +100,20 @@ def main():
                 # sim.end_time = 10000
                 sim.config.burst = 4
                 sim.config.num_ips = 32
+                if topo_type == "3x3":
+                    sim.config.num_ddr = 8
+                    sim.config.num_l2m = 4
+                    sim.config.num_gdma = 4
+                    sim.config.num_sdma = 4
+                    sim.config.num_RN = 4
+                    sim.config.num_SN = 8
+                elif topo_type in ["5x4", "4x5"]:
+                    sim.config.num_ddr = 32
+                    sim.config.num_l2m = 32
+                    sim.config.num_gdma = 32
+                    sim.config.num_sdma = 32
+                    sim.config.num_RN = 32
+                    sim.config.num_SN = 32
                 sim.config.rn_read_tracker_ostd = 64
                 sim.config.rn_write_tracker_ostd = 64
                 sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
@@ -116,6 +130,11 @@ def main():
                 sim.config.TU_Etag_T1_UE_MAX = 7
                 sim.config.TD_Etag_T2_UE_MAX = 5
                 sim.config.Both_side_ETag_upgrade = 1
+                sim.config.ddr_R_latency_original = 150
+                sim.config.ddr_R_latency_var_original = 0
+                sim.config.ddr_W_latency_original = 16
+                sim.config.l2m_R_latency_original = 12
+                sim.config.l2m_W_latency_original = 16
                 sim.config.spare_core_change(spare_core_row, failed_core_num, failed_core_poses)
 
                 # sim.config.update_config()
