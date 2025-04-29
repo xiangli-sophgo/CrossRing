@@ -334,7 +334,7 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
             data_all.extend(generate_mixed_entries(sdma_pos, "gdma", "ddr", ddr_pos, "R", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(sdma_pos, "gdma", "ddr", l2m_pos, "W", burst, mix_ratios))
         else:
-            data_all.extend(generate_entries(gdma_pos, "gdma", ddr_map, "R", burst, flow_type, speed[burst], interval_count))
+            # data_all.extend(generate_entries(gdma_pos, "gdma", ddr_map, "R", burst, flow_type, speed[burst], interval_count))
             data_all.extend(generate_entries(gdma_pos, "gdma", ddr_map, "W", burst, flow_type, speed[burst], interval_count))
             # data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count))
             # data_all.extend(generate_entries(sdma_pos, "sdma", ddr_map, "R", burst, flow_type, speed[burst], interval_count))
@@ -366,27 +366,28 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
 if __name__ == "__main__":
     # 参数配置
     topo = "3x3"
-    interval_count = 32
-    file_name = "../../test_data/traffic_2260E_GDMA_RO_0427.txt"
-    np.random.seed(415)
+    interval_count = 128
+    file_name = "../../test_data/traffic_2260E_GDMA_RO_single_0428.txt"
+    np.random.seed(428)
 
-    num_ip = 32
-    sdma_pos = range(num_ip)
-    gdma_pos = range(num_ip)
-    ddr_map = {"ddr_1": range(num_ip)}
-    l2m_map = {"l2m_1": range(num_ip // 2)}
+    if topo == "5x4":
+        num_ip = 32
+        sdma_pos = range(num_ip)
+        gdma_pos = range(num_ip)
+        ddr_map = {"ddr_1": range(num_ip)}
+        l2m_map = {"l2m_1": range(num_ip // 2)}
 
     # SG2260E
-    if topo == "3x3":
+    elif topo == "3x3":
         sdma_pos = [0, 2, 6, 8]
-        gdma_pos = [0, 2, 6, 8]
-        # gdma_pos = [0]
+        # gdma_pos = [0, 2, 6, 8]
+        gdma_pos = [0]
 
-        # ddr_map = {"ddr_1": [3], "ddr_2": [3]}
-        ddr_map = {"ddr_1": [0, 2, 3, 5, 6, 8], "ddr_2": [3, 5]}
+        ddr_map = {"ddr_1": [3], "ddr_2": [5]}
+        # ddr_map = {"ddr_1": [0, 2, 3, 5, 6, 8], "ddr_2": [3, 5]}
         l2m_map = {"l2m_1": [1, 7], "l2m_2": [1, 7]}
 
-    speed = {1: 128, 2: 128, 4: 256}  # 不同burst对应的带宽(GB/s)
+    speed = {1: 128, 2: 256, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 2
     read_duration = 128
     write_duration = 0

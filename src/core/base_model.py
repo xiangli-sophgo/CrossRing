@@ -38,8 +38,10 @@ class BaseModel:
         results_fig_save_path=None,
         plot_flow_fig=False,
         plot_link_state=False,
+        plot_ring_bridge_state=False,
         print_trace=False,
         show_trace_id=0,
+        show_node_id=3,
     ):
         self.model_type_stat = model_type
         self.config = config
@@ -51,8 +53,10 @@ class BaseModel:
         self.result_save_path_original = result_save_path
         self.plot_flow_fig = plot_flow_fig
         self.plot_link_state = plot_link_state
+        self.plot_ring_bridge_state = plot_ring_bridge_state
         self.print_trace = print_trace
         self.show_trace_id = show_trace_id
+        self.show_node_id = show_node_id
         self.results_fig_save_path = None
         if result_save_path:
             self.result_save_path = self.result_save_path_original + str(topo_type) + "/" + self.file_name[:-4] + "/"
@@ -74,8 +78,9 @@ class BaseModel:
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.flit_network = Network(self.config, self.adjacency_matrix, name="Data Network")
         if self.plot_link_state:
-            self.vis = NetworkLinkVisualizer(self.req_network)
-            # self.vis = CrossRingVisualizer(self.config, 3)
+            self.link_state_vis = NetworkLinkVisualizer(self.req_network)
+        if self.plot_ring_bridge_state:
+            self.ring_bridge_state_vis = CrossRingVisualizer(self.config, self.show_node_id)
         if self.config.Both_side_ETag_upgrade:
             self.req_network.Both_side_ETag_upgrade = self.rsp_network.Both_side_ETag_upgrade = self.flit_network.Both_side_ETag_upgrade = True
         self.routes = find_shortest_paths(self.adjacency_matrix)
@@ -144,19 +149,7 @@ class BaseModel:
             self.rn_type, self.sn_type = self.get_network_types()
 
             self.check_and_release_sn_tracker()
-            if self.print_trace:
-                self.flit_trace(self.show_trace_id)
-            if self.plot_link_state:
-                show_id = self.show_trace_id
-                use_highlight = 1
-                if self.req_network.send_flits[show_id] and not self.req_network.send_flits[show_id][-1].is_arrive:
-                    self.vis.update(self.req_network, show_id, use_highlight)
-                # elif self.rsp_network.send_flits[show_id] and not self.rsp_network.send_flits[show_id][-1].is_arrive:
-                # self.vis.update(self.rsp_network, use_highlight)
-                elif self.flit_network.send_flits[show_id] and not self.flit_network.send_flits[show_id][-1].is_arrive and self.flit_network.send_flits[show_id][0].current_link is not None:
-                    self.vis.update(self.flit_network, show_id, use_highlight)
-                elif self.flit_network.send_flits[show_id] and self.flit_network.send_flits[show_id][-1].is_arrive:
-                    self.vis.update(self.flit_network, show_id, 0)
+            self.debug_func()
 
             # Process requests
             self.process_requests()
@@ -223,6 +216,24 @@ class BaseModel:
         self.print_data_statistic()
         self.log_summary()
         self.evaluate_results(self.flit_network)
+
+    def debug_func(self):
+        if self.print_trace:
+            self.flit_trace(self.show_trace_id)
+        if self.plot_link_state:
+            show_id = self.show_trace_id
+            use_highlight = 1
+            if self.req_network.send_flits[show_id] and not self.req_network.send_flits[show_id][-1].is_arrive:
+                self.link_state_vis.update(self.req_network, show_id, use_highlight)
+            # elif self.rsp_network.send_flits[show_id] and not self.rsp_network.send_flits[show_id][-1].is_arrive:
+            # self.vis.update(self.rsp_network, use_highlight)
+            elif self.flit_network.send_flits[show_id] and not self.flit_network.send_flits[show_id][-1].is_arrive and self.flit_network.send_flits[show_id][0].current_link is not None:
+                self.link_state_vis.update(self.flit_network, show_id, use_highlight)
+            elif self.flit_network.send_flits[show_id] and self.flit_network.send_flits[show_id][-1].is_arrive:
+                self.link_state_vis.update(self.flit_network, show_id, 0)
+
+        if self.plot_ring_bridge_state:
+            self.ring_bridge_state_vis.update_display(self.flit_network)
 
     def all_flit_queues_empty(self):
         return (
@@ -529,7 +540,7 @@ class BaseModel:
             )
 
     def flit_trace(self, packet_id):
-        if self.plot_link_state and self.vis.should_stop:
+        if self.plot_link_state and self.link_state_vis.should_stop:
             return
         # if self.cycle % 1 == 0 and self.flit_network.send_flits[packet_id] and self.flit_network.send_flits[packet_id][0].current_link is not None:
         if (
@@ -1644,11 +1655,11 @@ class BaseModel:
             avg = sum(bw_list) / getattr(self.config, f"num_{name}")
             min_bw = min(bw_list)
             max_bw = max(bw_list)
-            if name == 'RN':
+            if name == "RN":
                 self.RN_BW_avg_stat = avg
                 self.RN_BW_min_stat = min_bw
                 self.RN_BW_max_stat = max_bw
-            elif name == 'SN':
+            elif name == "SN":
                 self.SN_BW_avg_stat = avg
                 self.SN_BW_min_stat = min_bw
                 self.SN_BW_max_stat = max_bw
@@ -1662,6 +1673,7 @@ class BaseModel:
         # else:
         #     print(f"\nNo {name} {operation} bandwidth data", file=f3)
         #     print(f"No {name} {operation} bandwidth data")  # 屏幕输出
+
     def update_intervals(self, flit, merged_intervals, latency, file, req_type):
         """Update the merged intervals and latency for the given request type."""
         last_start, last_end, count = merged_intervals[-1]

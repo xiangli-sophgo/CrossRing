@@ -13,7 +13,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_2260E_GDMA_RO_0427.txt"
+    file_name = r"traffic_2260E_GDMA_RO_single_0428.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -46,7 +46,7 @@ def main():
     if not config.topo_type:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        # topo_type = "5x4"
+        # topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
         # topo_type = "6x5"
         topo_type = "3x3"  # SG2260E
@@ -67,8 +67,10 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_link_state=0,
+        plot_ring_bridge_state=1,
         print_trace=0,
         show_trace_id=100,
+        show_node_id=3,
     )
 
     # profiler = cProfile.Profile()
@@ -96,8 +98,8 @@ def main():
         sim.config.sn_l2m_write_tracker_ostd = 64
         sim.config.sn_ddr_wdb_size = sim.config.sn_ddr_write_tracker_ostd * sim.config.burst
         sim.config.sn_l2m_wdb_size = sim.config.sn_l2m_write_tracker_ostd * sim.config.burst
-        sim.config.ddr_R_latency_original = 300
-        sim.config.ddr_R_latency_var_original = 25
+        sim.config.ddr_R_latency_original = 155
+        sim.config.ddr_R_latency_var_original = 0
         sim.config.ddr_W_latency_original = 16
         sim.config.l2m_R_latency_original = 12
         sim.config.l2m_W_latency_original = 16

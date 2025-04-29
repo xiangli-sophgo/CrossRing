@@ -2,6 +2,8 @@ import time
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
+from matplotlib.patches import FancyArrowPatch
+
 
 class CrossRingVisualizer:
     def __init__(self, config, node_id):
@@ -38,7 +40,20 @@ class CrossRingVisualizer:
         self._colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
         self._color_map = {}
         self._next_color = 0
-        self.name_map = {"left": "TL", "right": "TR", "up": "TU", "down": "TD", "vup": "TU", "vdown": "TD", "ring_bridge": "RB", "eject": "EQ", "local_I": "EQ", "local_E": "IQ"}
+        self.name_map = {
+            "left": "TL",
+            "right": "TR",
+            "up_R": "IQ",
+            "up_E": "TU",
+            "up_I": "RB",
+            "down": "TD",
+            "vup": "TU",
+            "vdown": "TD",
+            "ring_bridge": "RB",
+            "eject": "EQ",
+            "local_I": "EQ",
+            "local_E": "IQ",
+        }
         # 存储 patch 和 text
         self.iq_patches, self.iq_texts = {}, {}
         self.eq_patches, self.eq_texts = {}, {}
@@ -48,7 +63,7 @@ class CrossRingVisualizer:
         self.link_patches, self.link_texts = {}, {}  # 新增的link可视化存储
         # 画出三个模块的框和 FIFO 槽
         self._draw_modules()
-        self._draw_links_module()  # 新增的links模块
+        self._draw_arrows()
 
     def _draw_links_module(self):
         """绘制所有links的模块"""
@@ -103,9 +118,69 @@ class CrossRingVisualizer:
                 slot_y = y
                 patch = Rectangle((slot_x - square / 2, slot_y - square / 2), square, square, edgecolor="black", facecolor="none")
                 self.ax.add_patch(patch)
-                txt = self.ax.text(slot_x, slot_y + square / 2 + 0.005, "", ha="center", va="bottom", fontsize=8)
+                txt = self.ax.text(slot_x, slot_y + square / 2 + 0.005, "", ha="center", va="bottom", size=8)
                 self.link_patches[link_name].append(patch)
                 self.link_texts[link_name].append(txt)
+
+    def _draw_arrows(self):
+        # 1. 模块几何信息（必须与 _draw_modules 中的保持一致）
+        IQ_x, IQ_y, IQ_w, IQ_h = -3.5, 0.0, 2.5, 3.5
+        EQ_x, EQ_y, EQ_w, EQ_h = 0.0, 3.5, 3.5, 2.5
+        RB_x, RB_y, RB_w, RB_h = 0.0, 0.0, 3.5, 3.5
+
+        # 2. 公共箭头样式基础
+        base_style = dict(arrowstyle="-|>", color="black", lw=3.5, mutation_scale=15)
+
+        # 3. 原来的三条箭头，改用 arc3,rad 控制圆润度
+        # 箭头1: IQ 右侧上半 → EQ 下侧左半
+        A = (IQ_x + IQ_w / 2, IQ_y + IQ_h * 0.25)
+        B = (EQ_x - EQ_w / 2, EQ_y - EQ_h / 2)
+        style = base_style.copy()
+        style["connectionstyle"] = "arc3,rad=0"
+        self.ax.add_patch(FancyArrowPatch(posA=A, posB=B, **style))
+
+        # 箭头2: IQ 右侧下半 → RB 左侧中点
+        C = (IQ_x + IQ_w / 2, IQ_y - IQ_h * 0.25)
+        D = (RB_x - RB_w / 2, RB_y)
+        style = base_style.copy()
+        style["connectionstyle"] = "arc3,rad=0"
+        self.ax.add_patch(FancyArrowPatch(posA=C, posB=D, **style))
+
+        # 箭头3: IQ 底部中点 向下
+        E = (IQ_x, IQ_y - IQ_h / 2)
+        F = (IQ_x, IQ_y - IQ_h / 2 - 1.0)
+        style = base_style.copy()
+        style["connectionstyle"] = "arc3,rad=0"  # 直线
+        self.ax.add_patch(FancyArrowPatch(posA=E, posB=F, **style))
+
+        # 4. 新增四条箭头
+        # 箭头4: RB 底部中点 向下
+        G = (RB_x, RB_y - RB_h / 2)
+        H = (RB_x, RB_y - RB_h / 2 - 1.0)
+        style = base_style.copy()
+        style["connectionstyle"] = "arc3,rad=0"
+        self.ax.add_patch(FancyArrowPatch(posA=G, posB=H, **style))
+
+        # 箭头5: RB 顶部中点 → EQ 底部中点
+        I = (RB_x, RB_y + RB_h / 2)
+        J = (EQ_x, EQ_y - EQ_h / 2)
+        style = base_style.copy()
+        style["connectionstyle"] = "arc3,rad=0"
+        self.ax.add_patch(FancyArrowPatch(posA=I, posB=J, **style))
+
+        # 箭头6: RB 右侧中点 向右
+        K = (RB_x + RB_w / 2, RB_y)
+        L = (RB_x + RB_w / 2 + 1.0, RB_y)
+        style = base_style.copy()
+        style["connectionstyle"] = "arc3,rad=0"
+        self.ax.add_patch(FancyArrowPatch(posA=K, posB=L, **style))
+
+        # 箭头7: EQ 右侧中点 → 向右的一段距离（指向中点）
+        M = (EQ_x + EQ_w / 2, EQ_y)
+        N = (EQ_x + EQ_w / 2 + 1.0, EQ_y)
+        style = base_style.copy()
+        style["connectionstyle"] = "arc3,rad=0"
+        self.ax.add_patch(FancyArrowPatch(posA=M, posB=N, **style))
 
     def _draw_modules(self):
         # 仅绘制当前节点的 Inject Queue, Eject Queue, Ring Bridge
@@ -116,16 +191,13 @@ class CrossRingVisualizer:
         EQ_y = center_y + 3.5
         RB_x = center_x
         RB_y = center_y
-        LH_x = center_x - 1.2
-        LH_y = center_y - 3.5
-        LV_x = center_x + 3.5
-        LV_y = center_y + 1.2
+
         # Inject Queue
         self._draw_fifo_module(
             x=IQ_x,
             y=IQ_y,
             title="Inject Queue",
-            lanes=["left", "right", "up", "local"],
+            lanes=["left", "right", "local", "up"],
             module_height=3.5,
             module_width=2.5,
             depths=self.IQ_depth,
@@ -140,7 +212,7 @@ class CrossRingVisualizer:
             x=EQ_x,
             y=EQ_y,
             title="Eject Queue",
-            lanes=["up", "down", "ring_bridge", "local"],
+            lanes=["local", "ring_bridge", "up", "down"],
             module_height=2.5,
             module_width=3.5,
             depths=self.EQ_depth,
@@ -155,7 +227,7 @@ class CrossRingVisualizer:
             x=RB_x,
             y=RB_y,
             title="Ring Bridge",
-            lanes=["left", "right", "up", "vup", "vdown", "eject"],
+            lanes=["up", "left", "right", "eject", "vup", "vdown"],
             depths=[self.RB_in_depth] * 3 + [self.RB_out_depth] * 3,
             module_height=3.5,
             module_width=3.5,
@@ -165,45 +237,26 @@ class CrossRingVisualizer:
             orientations=["vertical"] * 3 + ["horizontal"] * 3,
         )
 
-        LH_depths = [self.seats_per_link if self.col != 0 else 2, self.seats_per_link if self.col + 1 != self.cols else 2]
-        LH_orientations = ["horizontal" if self.col != 0 else "vertical", "horizontal" if self.col + 1 != self.cols else "vertical"]
-        self._draw_fifo_module(
-            x=LH_x,
-            y=LH_y,
-            title="Link Horizontal",
-            lanes=["left", "right"],
-            depths=LH_depths,
-            module_height=2,
-            module_width=5,
-            patch_dict=self.lh_patches,
-            text_dict=self.cph_texts,
-            per_lane_depth=True,
-            orientations=LH_orientations,
-            h_position="top",
-            v_position="right",
-        )
-
-        LV_depths = [self.seats_per_link if self.row != 1 else 2, self.seats_per_link if self.row + 1 != self.rows else 2]
-        LV_orientations = ["vertical" if self.row != 1 else "horizontal", "vertical" if self.row + 1 != self.rows else "horizontal"]
-        self._draw_fifo_module(
-            x=LV_x,
-            y=LV_y,
-            title="Link vertical",
-            lanes=["up", "down"],
-            depths=LV_depths,
-            module_height=5,
-            module_width=2,
-            patch_dict=self.lv_patches,
-            text_dict=self.cpv_texts,
-            per_lane_depth=True,
-            orientations=LV_orientations,
-            h_position="top",
-            v_position="left",
-        )
         self.ax.relim()
         self.ax.autoscale_view()
 
-    def _draw_fifo_module(self, x, y, title, module_height, module_width, lanes, depths, patch_dict, text_dict, per_lane_depth=False, orientations=None, h_position="top", v_position="left"):
+    def _draw_fifo_module(
+        self,
+        x,
+        y,
+        title,
+        module_height,
+        module_width,
+        lanes,
+        depths,
+        patch_dict,
+        text_dict,
+        per_lane_depth=False,
+        orientations=None,
+        h_position="top",
+        v_position="left",
+        title_position="left-up",
+    ):
         """
         绘制一个模块及其 FIFO 槽，支持横向和纵向 FIFO 的灵活布局
 
@@ -217,6 +270,8 @@ class CrossRingVisualizer:
         - orientations: None (全部相同方向) 或列表，每个元素为 'horizontal'/'vertical'
         - h_position: 横向 FIFO 的位置 ('top' 或 'bottom')
         - v_position: 纵向 FIFO 的位置 ('left' 或 'right')
+        - title_position: 标题的位置 ('left-up/down' 或 'right-up/down')
+
         """
         square = self.square
         gap = self.gap
@@ -258,7 +313,7 @@ class CrossRingVisualizer:
                 text_va = "top"
 
             lane_x = x + module_width / 2 - 0.02 - depth * (square + gap) - square - 0.02
-            self.ax.text(lane_x, lane_y, self.name_map[lane] if lane != "local" else self.name_map[f"{lane}_{title[0]}"], ha="right", va="center", fontsize=10)
+            self.ax.text(lane_x, lane_y, self.name_map[lane] if lane not in ["local", "up"] else self.name_map[f"{lane}_{title[0]}"], ha="right", va="center", fontsize=10)
 
             patch_dict[lane] = []
             text_dict[lane] = []
@@ -283,7 +338,7 @@ class CrossRingVisualizer:
                 text_ha = "left"
 
             lane_y = y - module_height / 2 + 0.1 + depth * (square + gap) + square / 2 + 0.05
-            self.ax.text(lane_x, lane_y, self.name_map[lane] if lane != "local" else self.name_map[f"{lane}_{title[0]}"], ha="center", va="bottom", fontsize=10)
+            self.ax.text(lane_x, lane_y, self.name_map[lane] if lane not in ["local", "up"] else self.name_map[f"{lane}_{title[0]}"], ha="center", va="bottom", fontsize=10)
 
             patch_dict[lane] = []
             text_dict[lane] = []
@@ -447,42 +502,5 @@ class CrossRingVisualizer:
                 else:
                     p.set_facecolor("none")
                     t.set_text("")
-
-        # 更新所有links的显示
-        self._update_links_display(links)
+        plt.title(f"{network.name}, node: {self.node_id}", fontsize=12)
         plt.pause(0.2)
-
-    def _update_links_display(self, links):
-        """更新所有links的显示"""
-        # 遍历所有links
-        link_idx = 0
-        for src_dest, q in links.items():
-            src, dest = src_dest
-            link_name = f"Link_{link_idx}"
-            link_idx += 1
-
-            if link_name not in self.link_patches:
-                continue
-
-            patches = self.link_patches[link_name]
-            texts = self.link_texts[link_name]
-
-            # 更新显示
-            for idx, p in enumerate(patches):
-                t = texts[idx]
-                if idx < len(q):
-                    item = q[idx]
-                    if item is None:
-                        p.set_facecolor("none")
-                        t.set_text("")
-                        continue
-
-                    packet_id = getattr(item, "packet_id", None)
-                    flit_id = getattr(item, "flit_id", str(item))
-                    pid = {"packet_id": packet_id, "flit_id": flit_id}
-
-                    p.set_facecolor(self._get_color(pid))
-                    t.set_text(f"{packet_id}-{flit_id}")
-                else:
-                    p.set_facecolor("none")
-                    t.set_text("")

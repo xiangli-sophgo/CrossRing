@@ -17,19 +17,7 @@ class REQ_RSP_model(BaseModel):
             # self.draw_link_state(self.req_network)
 
             self.check_and_release_sn_tracker()
-            if self.print_trace:
-                self.flit_trace(self.show_trace_id)
-            if self.plot_link_state:
-                show_id = self.show_trace_id
-                use_highlight = 1
-                if self.req_network.send_flits[show_id] and not self.req_network.send_flits[show_id][-1].is_arrive and self.req_network.send_flits[show_id][0].current_link is not None:
-                    self.vis.update(self.req_network, show_id, use_highlight)
-                elif self.rsp_network.send_flits[show_id] and not self.rsp_network.send_flits[show_id][-1].is_arrive and self.rsp_network.send_flits[show_id][0].current_link is not None:
-                    self.vis.update(self.rsp_network, show_id, use_highlight)
-                elif self.flit_network.send_flits[show_id] and not self.flit_network.send_flits[show_id][-1].is_arrive and self.flit_network.send_flits[show_id][0].current_link is not None:
-                    self.vis.update(self.flit_network, show_id, use_highlight)
-                elif self.flit_network.send_flits[show_id] and self.flit_network.send_flits[show_id][-1].is_arrive:
-                    self.vis.update(self.flit_network, show_id, 0)
+            self.debug_func()
 
             # Process requests
             self.process_requests()

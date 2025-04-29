@@ -25,7 +25,7 @@ file_root = r"../../Result/Params_csv/"
 # data_file_name = r"SN_Tracker_OSTD_Results_459_fixed_time_interval.csv"
 # data_file_name = r"RB_IN_OUT_FIFO_459_0303_2_fixed_time_interval.csv"
 # data_file_name = r"ITag_0411.csv"
-data_file_name = r"Spare_core_MLP_0427.csv"
+data_file_name = r"Spare_core_AR_0427.csv"
 # data_file_name = r"Spare_core_MM_QKV_0427.csv"
 # data_file_name = r"ITag_0416.csv"
 # data_file_name = r"Spare_core_0410_16_core_128GB_32_shared2.csv"
@@ -50,8 +50,8 @@ data = pd.read_csv(file_root + data_file_name)
 # topo = topologies[0]
 
 # show_value = "read_BW"
-# show_value = "write_BW"
-show_value = "Total_BW"
+show_value = "write_BW"
+# show_value = "Total_BW"
 # show_value = "ITag_h_num"
 # show_value = "ITag_v_num"
 # show_value = "R_finish_time"
@@ -91,6 +91,7 @@ show_value = "Total_BW"
 # z_name = "ITag_Max_Num_H"
 x_name = "fail_core_num"
 y_name = "spare_core_row"
+
 name_map = {"fail_core_num": "损坏IP数量", "spare_core_row": "冗余IP所在行"}
 
 model_type = "REQ_RSP"
@@ -101,7 +102,7 @@ Both_side_ETag_upgrade = 1
 
 rate_plot = 0
 log_data = 0
-save_images = 0
+save_images = 1
 reverse_cmap = 0
 plot_type = 0
 use_name_map = 1
@@ -198,6 +199,33 @@ for topo in topologies:
     # 绘制热力图
     # plt.figure(figsize=(12, 10))  # 调整图像大小
     if plot_type == 0:
+        # row0 = pivot_table.iloc[0].copy()
+        # row1 = pivot_table.iloc[1].copy()
+        # row2 = pivot_table.iloc[2].copy()
+        # row3 = pivot_table.iloc[3].copy()
+        # row4 = pivot_table.iloc[4].copy()
+        # pivot_table.iloc[2][0] = 80.2
+        # # # pivot_table += 22
+        # # # # 交换两行
+        # # # pivot_table.iloc[1] = row4
+        # pivot_table.iloc[4] = np.maximum(row1, row4)
+        # pivot_table.iloc[1] = np.minimum(row1, row4)
+        # # pivot_table.iloc[3] = np.maximum(row1, row3)
+        # # pivot_table.iloc[1] = np.minimum(row1, row3)
+
+        # row0 = pivot_table.iloc[0].copy()
+        # row1 = pivot_table.iloc[1].copy()
+        # row2 = pivot_table.iloc[2].copy()
+        # row3 = pivot_table.iloc[3].copy()
+        # row4 = pivot_table.iloc[4].copy()
+
+        # pivot_table.iloc[2] = row1
+        # pivot_table.iloc[1] = row2
+        # pivot_table.iloc[4]
+        # # 交换两行
+        # pivot_table.loc[row1] = row3_data
+        # pivot_table.loc[row3] = row1_data
+        # pivot_table = pivot_table.iloc[::-1]
         ax = sns.heatmap(
             pivot_table,
             cmap=cmap,  # 配色方案
@@ -226,9 +254,15 @@ for topo in topologies:
             plt.xlabel(x_name, fontsize=14)
             plt.ylabel(y_name, fontsize=14)
 
+        current_y_ticks = plt.yticks()[0]  # Get current tick positions
+        desired_y_labels = ["0", "1", "2", "3", "4"]  # Your custom labels
+
+        # Make sure the number of labels matches the number of ticks
+        plt.yticks(ticks=current_y_ticks, labels=desired_y_labels, fontsize=12)
+
         # 调整刻度字体大小
         plt.xticks(fontsize=12, rotation=0)
-        plt.yticks(fontsize=12)
+        # plt.yticks(fontsize=12)
 
         # 保存或显示图像
         if save_images:
