@@ -17,6 +17,8 @@ CrossRing.egg-info/
 
 *.log
 
+*.csv
+
 .DS_Store
 
 test_data/

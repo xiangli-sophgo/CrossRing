@@ -108,6 +108,15 @@ class BaseModel:
         self.read_ip_intervals = defaultdict(list)  # 存储每个IP的读请求时间区间
         self.write_ip_intervals = defaultdict(list)  # 存储每个IP的写请求时间区间
 
+        # DDR IP 列表（物理环上的节点编号）
+        self.flit_size_bytes = 128
+        self.ddr_bytes_per_cycle = self.config.ddr_bandwidth_limit / self.config.network_frequency / self.flit_size_bytes
+        self.ddr_ips = self.config.ddr_send_positions
+        # 每个 DDR IP 的桶容量与初始令牌数
+        self.ddr_bucket_capacity = {ip: {"ddr_1": self.config.ddr_bandwidth_limit, "ddr_2": self.config.ddr_bandwidth_limit} for ip in self.ddr_ips}
+        self.ddr_tokens = {ip: {"ddr_1": self.ddr_bucket_capacity[ip]["ddr_1"], "ddr_2": self.ddr_bucket_capacity[ip]["ddr_2"]} for ip in self.ddr_ips}
+        self.ddr_last_cycle = {ip: {"ddr_1": 0, "ddr_2": 0} for ip in self.ddr_ips}
+
         # statistical data
         self.send_read_flits_num_stat = 0
         self.send_write_flits_num_stat = 0
@@ -194,10 +203,6 @@ class BaseModel:
             if self.cycle / self.config.network_frequency % self.print_interval == 0:
                 self.log_summary()
 
-            # if len(flits) == 0 and self.all_flit_queues_empty() and self.cycle >= self.req_stream[-1][0] * 2 and self.is_all_ip_eject_empty():
-            #     print("Finish!")
-            #     break
-
             if (
                 self.req_count >= self.read_req + self.write_req
                 and self.send_flits_num == self.flit_network.recv_flits_num >= self.read_flit + self.write_flit
@@ -217,6 +222,17 @@ class BaseModel:
         self.log_summary()
         self.evaluate_results(self.flit_network)
 
+    def _refill_ddr_tokens(self, ip, sn_type):
+        """按周期为 DDR IP ip 的令牌桶充值（单位：bytes）。"""
+        dt = self.cycle - self.ddr_last_cycle[ip][sn_type]
+        if dt <= 0:
+            return
+        # 每个 cycle 产生 self.ddr_bytes_per_cycle 字节令牌
+        add = dt * self.ddr_bytes_per_cycle
+        cap = self.ddr_bucket_capacity[ip][sn_type]
+        self.ddr_tokens[ip][sn_type] = min(cap, self.ddr_tokens[ip][sn_type] + add)
+        self.ddr_last_cycle[ip][sn_type] = self.cycle
+
     def debug_func(self):
         if self.print_trace:
             self.flit_trace(self.show_trace_id)
@@ -234,19 +250,6 @@ class BaseModel:
 
         if self.plot_ring_bridge_state:
             self.ring_bridge_state_vis.update_display(self.flit_network)
-
-    def all_flit_queues_empty(self):
-        return (
-            all(len(queue) == 0 for queue in self.flit_network.eject_queues["down"].values())
-            and all(len(queue) == 0 for queue in self.flit_network.eject_queues["up"].values())
-            and all(len(queue) == 0 for queue in self.flit_network.eject_queues["ring_bridge"].values())
-            and all(len(queue) == 0 for queue in self.flit_network.inject_queues["left"].values())
-            and all(len(queue) == 0 for queue in self.flit_network.inject_queues["right"].values())
-            and all(len(queue) == 0 for queue in self.flit_network.inject_queues["up"].values())
-        )
-
-    def is_all_ip_eject_empty(self):
-        return not any(any(len(deque) != 0 for deque in self.flit_network.ip_eject[ip_type].values()) for ip_type in ["ddr", "sdma", "l2m", "gdma"])
 
     def process_received_data(self):
         """Process received data in RN and SN networks."""
@@ -343,7 +346,6 @@ class BaseModel:
     def log_summary(self):
         print(
             f"T: {self.cycle // self.config.network_frequency}, Req_cnt: {self.req_count} In_Req: {self.req_num}, Rsp: {self.rsp_num},"
-            # f"" Sent flits: {self.send_flits_num}, "
             f" R_fn: {self.send_read_flits_num_stat}, W_fn: {self.send_write_flits_num_stat}, "
             f"Trans_fn: {self.trans_flits_num}, Recv_fn: {self.flit_network.recv_flits_num}"
         )
@@ -423,6 +425,12 @@ class BaseModel:
                         queue = self.flit_network.inject_queues[direction]
                         queue_pre = self.flit_network.inject_queues_pre[direction]
                         if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+                            if flit.original_destination_type[:3] == "ddr":
+                                self._refill_ddr_tokens(flit.source, flit.original_destination_type)
+                                if self.ddr_tokens[flit.source][flit.original_destination_type] < 1:
+                                    # 令牌不足，本 cycle 跳过
+                                    continue
+                                self.ddr_tokens[flit.source][flit.original_destination_type] -= 1
                             req = self.req_network.send_flits[flit.packet_id][0]
                             flit.sync_latency_record(req)
                             flit.data_entry_network_cycle = self.cycle
@@ -992,6 +1000,12 @@ class BaseModel:
                     for ip_type in [self.rn_type, self.sn_type]:
                         ip_pos = in_pos - self.config.cols
                         if network.ip_eject[ip_type][ip_pos]:
+                            flit = network.ip_eject[ip_type][ip_pos][0]
+                            if flit.flit_type == "data" and flit.req_type == "write" and flit.original_destination_type[:3] == "ddr":
+                                self._refill_ddr_tokens(flit.destination + self.config.cols, flit.original_destination_type)
+                                if self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] < 1:
+                                    continue
+                                self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] -= 1
                             flit = network.ip_eject[ip_type][ip_pos].popleft()
                             flit.arrival_cycle = self.cycle
                             network.arrive_node_pre[ip_type][ip_pos] = flit
@@ -1267,6 +1281,14 @@ class BaseModel:
                 # network.ip_eject[destination_type][ip_pos].append(eject_flits[i])
                 # if eject_flits[i].packet_id == 64:
                 # print(eject_flits[i])
+
+                # 对 DDR 做限速
+                # flit = eject_flits[i]
+                # if flit.flit_type == "data" and flit.original_destination_type == "ddr":
+                #     self._refill_ddr_tokens(flit.destination_original)
+                #     if self.ddr_tokens[flit.destination_original] < 1:
+                #         continue
+                #     self.ddr_tokens[flit.destination_original] -= 1
 
                 network.eject_queues_pre[destination_type][ip_pos] = eject_flits[i]
                 eject_flits[i].arrival_eject_cycle = self.cycle
@@ -1665,11 +1687,11 @@ class BaseModel:
                 self.SN_BW_max_stat = max_bw
 
             print(f"\n{name} {operation} Bandwidth Stats:", file=file)
-            print(f"  Average: {avg:.1f} GB/s", file=file)
+            print(f" Sum: {sum(bw_list)}, Average: {avg:.1f} GB/s", file=file)
             print(f"  Range: {min_bw:.1f} - {max_bw:.1f} GB/s", file=file)
 
             # 屏幕输出
-            print(f"{name} {operation}: Avg: {avg:.1f} GB/s, Range: {min_bw:.1f}-{max_bw:.1f} GB/s")
+            print(f"{name} {operation}: Sum: {sum(bw_list):.1f}, Avg: {avg:.1f} GB/s, Range: {min_bw:.1f}-{max_bw:.1f} GB/s")
         # else:
         #     print(f"\nNo {name} {operation} bandwidth data", file=f3)
         #     print(f"No {name} {operation} bandwidth data")  # 屏幕输出
@@ -2154,225 +2176,6 @@ class BaseModel:
         else:
             plt.show()
 
-    # def evaluate_performance(self, network):
-    #     # receive confirm
-    #     send_flit_ids = {flit.id for flit in network.send_flits}
-    #     arrive_flit_ids = {flit.id for flit in network.arrive_flits}
-    #     unreceived_flit_ids = send_flit_ids - arrive_flit_ids
-    #     unreceived_flits = [flit for flit in network.send_flits if flit.id in unreceived_flit_ids]
-
-    #     # Latency confirm
-    #     for flit in network.arrive_flits:
-    #         for i in range(1, len(flit.path)):
-    #             if flit.path[i] - flit.path[i - 1] == -self.config.cols:
-    #                 flit.predicted_duration += 2
-    #             else:
-    #                 flit.predicted_duration += self.config.seats_per_link
-    #         if flit.path[1] - flit.path[0] == -self.config.cols:
-    #             flit.predicted_duration += 2
-    #         else:
-    #             flit.predicted_duration += 3
-    #         if len(flit.path) == 2:
-    #             flit.predicted_duration = 0
-
-    #         flit.actual_duration = flit.arrival_cycle - flit.departure_cycle
-    #         flit.actual_ject_duration = flit.arrival_eject_cycle - flit.departure_inject_cycle
-    #         flit.actual_network_duration = flit.arrival_network_cycle - flit.departure_network_cycle
-    #         network.inject_time[flit.source].append(flit.departure_inject_cycle - flit.departure_cycle)
-    #         network.eject_time[flit.destination].append(flit.arrival_cycle - flit.arrival_network_cycle)
-    #         network.all_latency.append(flit.actual_duration)
-    #         network.ject_latency.append(flit.actual_ject_duration)
-    #         network.network_latency.append(flit.actual_network_duration)
-    #         network.predicted_recv_time.append(flit.predicted_duration)
-    #         network.circuits_h.append(flit.circuits_completed_h) if flit.circuits_completed_h != 0 else None
-    #         network.circuits_v.append(flit.circuits_completed_v) if flit.circuits_completed_v != 0 else None
-    #         if flit.circuits_completed_h != 0:
-    #             network.circuits_flit_h[flit.destination_type] += 1
-    #         if flit.circuits_completed_v != 0:
-    #             network.circuits_flit_v[flit.destination_type] += 1
-
-    #     for source in self.flit_position:
-    #         destination = source - self.config.cols
-    #         if network.inject_time[source]:
-    #             network.avg_inject_time[source] = sum(network.inject_time[source]) / len(network.inject_time[source])
-    #         if network.eject_time[destination]:
-    #             network.avg_eject_time[destination] = sum(network.eject_time[destination]) / len(network.eject_time[destination])
-    #     network.predicted_avg_latency = sum(network.predicted_recv_time) / len(network.predicted_recv_time) / 2
-    #     network.predicted_max_latency = max(network.predicted_recv_time) / 2
-    #     network.actual_avg_latency = sum(network.all_latency) / len(network.all_latency) / 2
-    #     network.actual_max_latency = max(network.all_latency) / 2
-    #     network.actual_avg_ject_latency = sum(network.ject_latency) / len(network.ject_latency) / 2
-    #     network.actual_max_ject_latency = max(network.ject_latency) / 2
-    #     network.actual_avg_net_latency = sum(network.network_latency) / len(network.network_latency) / 2
-    #     network.actual_max_net_latency = max(network.network_latency) / 2
-    #     network.avg_circuits_h = sum(network.circuits_h) / len(network.circuits_h) / 2 if len(network.circuits_h) > 0 else None
-    #     network.max_circuits_h = max(network.circuits_h) / 2 if len(network.circuits_h) > 0 else None
-    #     network.avg_circuits_v = sum(network.circuits_v) / len(network.circuits_v) / 2 if len(network.circuits_v) > 0 else None
-    #     network.max_circuits_v = max(network.circuits_v) / 2 if len(network.circuits_v) > 0 else None
-
-    #     # throughput confirm
-    #     # self.cycle = 828 - 10
-    #     for ip_type in network.per_send_throughput:
-    #         for source in network.per_send_throughput[ip_type]:
-    #             destination = source - self.config.cols
-    #             network.per_send_throughput[ip_type][source] = 256 * network.num_send[ip_type][source] / (self.cycle)
-    #             network.per_recv_throughput[ip_type][destination] = 256 * network.num_recv[ip_type][destination] / (self.cycle)
-    #             network.send_throughput[ip_type] += network.per_send_throughput[ip_type][source]
-    #             network.recv_throughput[ip_type] += network.per_recv_throughput[ip_type][destination]
-    #         # network.send_throughput[ip_type] = network.send_throughput[ip_type] / len(network.per_send_throughput[ip_type]) if len(network.per_send_throughput[ip_type]) > 0 else None
-    #         # network.recv_throughput[ip_type] = network.recv_throughput[ip_type] / len(network.per_send_throughput[ip_type]) if len(network.per_send_throughput[ip_type]) > 0 else None
-
-    #     sorted_flits = sorted(network.arrive_flits, key=lambda flit: flit.id)
-    #     read_flits, write_flits = {}, {}
-    #     for flit in sorted_flits:
-    #         if flit.source_type in ["ddr", "l2m"]:
-    #             if flit.packet_id in read_flits:
-    #                 read_flits[flit.packet_id].append(flit)
-    #             else:
-    #                 read_flits[flit.packet_id] = [flit]
-    #         elif flit.packet_id in read_flits:
-    #             write_flits[flit.packet_id].append(flit)
-    #         else:
-    #             write_flits[flit.packet_id] = [flit]
-    #     read_result = self.analysis(read_flits)
-    #     write_result = self.analysis(write_flits)
-    #     gdma_throughput, sdma_throughput, ddr_throughput, ddr1_throughput, ddr2_throughput = 0, 0, 0, 0, 0
-    #     for flit in sorted_flits:
-    #         destination_key = flit.destination + self.config.cols
-    #         if flit.destination_type not in network.throughput:
-    #             print(f"Warning: destination_type '{flit.destination_type}' is not initialized.")
-    #             continue
-    #         network.throughput[flit.destination_type][destination_key][1] += 1
-    #         first_time = network.throughput[flit.destination_type][flit.destination + self.config.cols][2]
-    #         network.throughput[flit.destination_type][destination_key][2] = min(flit.departure_inject_cycle, first_time)
-    #         last_time = network.throughput[flit.destination_type][flit.destination + self.config.cols][3]
-    #         network.throughput[flit.destination_type][destination_key][3] = max(flit.arrival_cycle, last_time)
-    #     for source in self.config.gdma_send_positions:
-    #         network.throughput["gdma"][source][0] = (
-    #             network.throughput["gdma"][source][1] * self.config.flit_size * self.config.network_frequency / (network.throughput["gdma"][source][3] - network.throughput["gdma"][source][2])
-    #         )
-    #         gdma_throughput += network.throughput["sdma"][source][0]
-    #     for source in self.config.sdma_send_positions:
-    #         network.throughput["sdma"][source][0] = (
-    #             network.throughput["sdma"][source][1] * self.config.flit_size * self.config.network_frequency / (network.throughput["sdma"][source][3] - network.throughput["sdma"][source][2])
-    #         )
-    #         sdma_throughput += network.throughput["sdma"][source][0]
-    #     # for source in self.config.ddr_send_positions:
-    #     #     network.throughput["ddr"][source][0] = (
-    #     #         network.throughput["ddr"][source][1]
-    #     #         * self.config.flit_size
-    #     #         * self.config.network_frequency
-    #     #         / (network.throughput["ddr"][source][3] - network.throughput["ddr"][source][2])
-    #     #     )
-    #     #     ddr_throughput += network.throughput["ddr"][source][0]
-    #     for source in self.config.ddr_send_positions:
-    #         network.throughput["ddr"][source][0] = (
-    #             network.throughput["ddr"][source][1] * self.config.flit_size * self.config.network_frequency / (network.throughput["ddr"][source][3] - network.throughput["ddr"][source][2])
-    #         )
-    #         ddr1_throughput += network.throughput["ddr"][source][0]
-    #     for source in self.config.l2m_send_positions:
-    #         network.throughput["l2m"][source][0] = (
-    #             network.throughput["l2m"][source][1] * self.config.flit_size * self.config.network_frequency / (network.throughput["l2m"][source][3] - network.throughput["l2m"][source][2])
-    #         )
-    #         ddr2_throughput += network.throughput["l2m"][source][0]
-    #     gdma_throughput /= self.config.num_ips
-    #     sdma_throughput /= self.config.num_ips
-    #     ddr1_throughput /= self.config.num_ips
-    #     ddr2_throughput /= self.config.num_ips
-
-    #     throughput_data = {
-    #         "ddr": {"ddr_throughput": 0, "first_send": 0, "recv_num": 0, "last_recv": 0, "num": self.config.num_ips},
-    #         "l2m": {"l2m_throughput": 0, "first_send": 0, "recv_num": 0, "last_recv": 0, "num": self.config.num_ips},
-    #         "sdma": {"sdma_throughput": 0, "first_send": 0, "recv_num": 0, "last_recv": 0, "num": self.config.num_ips},
-    #         "gdma": {"gdma_throughput": 0, "first_send": 0, "recv_num": 0, "last_recv": 0, "num": self.config.num_ips},
-    #     }
-    #     begin_id = 0
-
-    #     for i in range(len(self.throughput_time)):
-    #         end_id = self.throughput_time[i] + begin_id
-    #         for j in range(begin_id, end_id):
-    #             source = sorted_flits[j].source_type
-    #             destination = sorted_flits[j].destination_type
-    #             if throughput_data[source]["first_send"] == 0:
-    #                 throughput_data[source]["first_send"] = sorted_flits[j].departure_inject_cycle
-    #             if destination in throughput_data:
-    #                 throughput_data[destination]["recv_num"] += 1
-    #                 throughput_data[destination]["last_recv"] = max(throughput_data[destination]["last_recv"], sorted_flits[j].arrival_cycle)
-    #         for key in throughput_data:
-    #             if throughput_data[key]["last_recv"] > 0:
-    #                 if key == "sdma":
-    #                     throughput_data[key][f"{key}_throughput"] = (
-    #                         throughput_data[key]["recv_num"] * 256 / (throughput_data["sdma"]["last_recv"] - throughput_data["ddr"]["first_send"]) / throughput_data[key]["num"]
-    #                     )
-    #                 # elif key == "ddr":
-    #                 #     throughput_data[key][f"{key}_throughput"] = (
-    #                 #         throughput_data[key]["recv_num"]
-    #                 #         * 256
-    #                 #         / (throughput_data["ddr"]["last_recv"] - throughput_data["sdma"]["first_send"])
-    #                 #         / throughput_data[key]["num"]
-    #                 #     )
-    #                 elif key == "ddr":
-    #                     throughput_data[key][f"{key}_throughput"] = (
-    #                         throughput_data[key]["recv_num"] * 256 / (throughput_data["ddr"]["last_recv"] - throughput_data["sdma"]["first_send"]) / throughput_data[key]["num"]
-    #                     )
-    #                 elif key == "l2m":
-    #                     throughput_data[key][f"{key}_throughput"] = (
-    #                         throughput_data[key]["recv_num"] * 256 / (throughput_data["l2m"]["last_recv"] - throughput_data["gdma"]["first_send"]) / throughput_data[key]["num"]
-    #                     )
-    #                 elif key == "gdma":
-    #                     throughput_data[key][f"{key}_throughput"] = (
-    #                         throughput_data[key]["recv_num"] * 256 / (throughput_data["gdma"]["last_recv"] - throughput_data["l2m"]["first_send"]) / throughput_data[key]["num"]
-    #                     )
-    #         begin_id = end_id
-    #     # print(throughput_data)
-    #     return
-
-    # def analysis(self, packets):
-    #     if not packets:
-    #         return [0] * 8
-    #     diff_Latency = {}
-    #     all_predicted_latency, all_actual_latency, all_actual_ject_latency, all_actual_net_latency = 0, 0, 0, 0
-    #     predicted_max_latency, actual_max_latency, actual_max_ject_latency, actual_max_net_latency = 0, 0, 0, 0
-    #     len_packets = 0
-    #     for packet_id in packets:
-    #         predicted_latency = 0
-    #         actual_ject_duration = 0
-    #         for flit in packets[packet_id]:
-    #             predicted_latency += flit.predicted_duration
-    #             actual_ject_duration += flit.actual_ject_duration
-    #             all_predicted_latency += flit.predicted_duration
-    #             predicted_max_latency = max(flit.predicted_duration, predicted_max_latency)
-    #             all_actual_latency += flit.actual_duration
-    #             actual_max_latency = max(flit.actual_duration, actual_max_latency)
-    #             all_actual_ject_latency += flit.actual_ject_duration
-    #             actual_max_ject_latency = max(flit.actual_ject_duration, actual_max_ject_latency)
-    #             all_actual_net_latency += flit.actual_network_duration
-    #             actual_max_net_latency = max(flit.actual_network_duration, actual_max_net_latency)
-    #         predicted_latency /= len(packets[packet_id])
-    #         actual_ject_duration /= len(packets[packet_id])
-    #         diff = actual_ject_duration - predicted_latency
-    #         diff_Latency[packet_id] = diff / self.config.network_frequency
-    #         len_packets += len(packets[packet_id])
-    #     predicted_avg_latency = all_predicted_latency / len_packets / self.config.network_frequency
-    #     predicted_max_latency = predicted_max_latency / self.config.network_frequency
-    #     actual_avg_latency = all_actual_latency / len_packets / self.config.network_frequency
-    #     actual_max_latency = actual_max_latency / self.config.network_frequency
-    #     actual_avg_ject_latency = all_actual_ject_latency / len_packets / self.config.network_frequency
-    #     actual_max_ject_latency = actual_max_ject_latency / self.config.network_frequency
-    #     actual_avg_net_latency = all_actual_net_latency / len_packets / self.config.network_frequency
-    #     actual_max_net_latency = actual_max_net_latency / self.config.network_frequency
-
-    #     return [
-    #         predicted_avg_latency,
-    #         predicted_max_latency,
-    #         actual_avg_latency,
-    #         actual_max_latency,
-    #         actual_avg_ject_latency,
-    #         actual_max_ject_latency,
-    #         actual_avg_net_latency,
-    #         actual_max_net_latency,
-    #     ]
-
     def node_map(self, node, is_source=True):
         if is_source:
             if self.topo_type_stat in ["5x4", "4x5"]:
@@ -2388,13 +2191,6 @@ class BaseModel:
             return self.config.ddr_send_positions[node] - self.config.cols
 
     def draw_figure(self):
-        # fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 12))
-        # ax1.plot(self.flit_network.current_cycle, self.flit_network.flits_num, linestyle="-", color="b", label="Sample Data")
-        # ax1.set_title("Figure 1")
-        # ax1.set_xlabel("cycle")
-        # ax1.set_ylabel("packet num on flit_network")
-        # ax1.grid(True)
-        # ax1.legend()
 
         fig, (ax2, ax3) = plt.subplots(2, 1, figsize=(8, 10))
 

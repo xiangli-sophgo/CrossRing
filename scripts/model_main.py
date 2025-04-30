@@ -66,7 +66,7 @@ def main():
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
-        plot_link_state=1,
+        plot_link_state=0,
         plot_ring_bridge_state=0,
         print_trace=0,
         show_trace_id=100,
@@ -89,20 +89,22 @@ def main():
         sim.config.num_RN = 4
         sim.config.num_SN = 8
         sim.config.rn_read_tracker_ostd = 128
-        sim.config.rn_write_tracker_ostd = 32
+        sim.config.rn_write_tracker_ostd = 64
         sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
         sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
-        sim.config.sn_ddr_read_tracker_ostd = 64
+        sim.config.sn_ddr_read_tracker_ostd = 128
         sim.config.sn_ddr_write_tracker_ostd = 32
-        sim.config.sn_l2m_read_tracker_ostd = 64
-        sim.config.sn_l2m_write_tracker_ostd = 64
+        sim.config.sn_l2m_read_tracker_ostd = 128
+        sim.config.sn_l2m_write_tracker_ostd = 128
         sim.config.sn_ddr_wdb_size = sim.config.sn_ddr_write_tracker_ostd * sim.config.burst
         sim.config.sn_l2m_wdb_size = sim.config.sn_l2m_write_tracker_ostd * sim.config.burst
         sim.config.ddr_R_latency_original = 155
-        sim.config.ddr_R_latency_var_original = 0
+        sim.config.ddr_R_latency_var_original = 25
         sim.config.ddr_W_latency_original = 16
         sim.config.l2m_R_latency_original = 12
         sim.config.l2m_W_latency_original = 16
+        # sim.config.ddr_bandwidth_limit = 76.8 / 2
+        sim.config.ddr_bandwidth_limit = 75 / 2
 
     elif topo_type in ["5x4", "4x5"]:
         sim.config.burst = 4

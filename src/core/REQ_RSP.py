@@ -251,6 +251,14 @@ class REQ_RSP_model(BaseModel):
                         queue = self.flit_network.inject_queues[direction]
                         queue_pre = self.flit_network.inject_queues_pre[direction]
                         if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+
+                            if flit.req_type == "read" and flit.original_destination_type[:3] == "ddr":
+                                self._refill_ddr_tokens(flit.source, flit.original_destination_type)
+                                if self.ddr_tokens[flit.source][flit.original_destination_type] < 1:
+                                    # 令牌不足，本 cycle 跳过
+                                    continue
+                                self.ddr_tokens[flit.source][flit.original_destination_type] -= 1
+
                             req = self.req_network.send_flits[flit.packet_id][0]
                             flit.sync_latency_record(req)
                             flit.data_entry_network_cycle = self.cycle
@@ -649,6 +657,12 @@ class REQ_RSP_model(BaseModel):
                     for ip_type in [self.rn_type, self.sn_type]:
                         ip_pos = in_pos - self.config.cols
                         if ip_pos in network.ip_eject[ip_type] and network.ip_eject[ip_type][ip_pos]:
+                            flit = network.ip_eject[ip_type][ip_pos][0]
+                            if flit.flit_type == "data" and flit.req_type == "write" and flit.original_destination_type[:3] == "ddr":
+                                self._refill_ddr_tokens(flit.destination + self.config.cols, flit.original_destination_type)
+                                if self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] < 1:
+                                    continue
+                                self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] -= 1
                             flit = network.ip_eject[ip_type][ip_pos].popleft()
                             flit.arrival_cycle = self.cycle
                             network.arrive_node_pre[ip_type][ip_pos] = flit
@@ -964,24 +978,3 @@ class REQ_RSP_model(BaseModel):
             else:
                 self.node.rn_wdb_send[self.rn_type][in_pos].append(rsp.packet_id)
                 self.rn_send_num_stat += 1
-
-    # def process_eject_queues(self, network, eject_flits, rr_queue, destination_type, ip_pos):
-    #     for i in rr_queue:
-    #         if eject_flits[i] is not None and eject_flits[i].destination_type == destination_type and len(network.ip_eject[destination_type][ip_pos]) < network.config.EQ_CH_FIFO_DEPTH:
-    #             # network.ip_eject[destination_type][ip_pos].append(eject_flits[i])
-    #             network.eject_queues_pre[destination_type][ip_pos] = eject_flits[i]
-    #             eject_flits[i].arrival_eject_cycle = self.cycle
-    #             eject_flits[i] = None
-    #             if i == 0:
-    #                 network.eject_queues["up"][ip_pos].popleft()
-    #             elif i == 1:
-    #                 network.eject_queues["ring_bridge"][ip_pos].popleft()
-    #             elif i == 2:
-    #                 network.eject_queues["down"][ip_pos].popleft()
-    #             elif i == 3:
-    #                 network.eject_queues["local"][ip_pos].popleft()
-    #             rr_queue.remove(i)
-    #             rr_queue.append(i)
-    #             break
-
-    #     return eject_flits

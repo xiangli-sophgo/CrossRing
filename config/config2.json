@@ -38,6 +38,7 @@
     "sn_ddr_wdb_size": 192,
     "sn_l2m_wdb_size": 192,
     "network_frequency": 2,
+    "ddr_bandwidth_limit": 128,
     "ddr_R_latency": 150,
     "ddr_R_latency_var": 0,
     "ddr_W_latency": 0,
