@@ -131,7 +131,7 @@ class BaseModel:
         }
         self.l2m_last_cycle = {"read": {ip: {"l2m_1": 0, "l2m_2": 0} for ip in self.l2m_ips}, "write": {ip: {"l2m_1": 0, "l2m_2": 0} for ip in self.l2m_ips}}
 
-        self.dma_rw_counts = {"gdma": {"read": 0, "write": 0}, "sdma": {"read": 0, "write": 0}}
+        self.dma_rw_counts = {"gdma":{ip: {"read": 0, "write": 0}for ip in self.config.gdma_send_positions}, "sdma":{ip: {"read": 0, "write": 0}for ip in self.config.sdma_send_positions}}
 
         self.rn_bandwidth_stats = {
             "SDMA read": {"time": [], "bandwidth": []},
@@ -612,55 +612,6 @@ class BaseModel:
         #     self.new_write_req.pop(0)
         #     self.write_flit += req.burst_length
 
-        # 处理延迟请求队列
-        delayed_requests_to_keep = {"gdma": [], "sdma": []}
-        for dma_type in ["gdma", "sdma"]:
-            for req_data in getattr(self, f"{dma_type}_delayed_requests", []):
-                if req_data[0] > self.cycle:
-                    delayed_requests_to_keep[dma_type].append(req_data)
-                    continue
-
-                # 尝试处理延迟请求
-                source = self.node_map(req_data[1])
-                destination = self.node_map(req_data[3], False)
-                path = self.routes[source][destination]
-                req = Flit(source, destination, path)
-                # 设置请求属性...
-                req.req_type = "read" if req_data[5] == "R" else "write"
-
-                if req.req_type == "read":
-                    current_gap = self.dma_rw_counts[dma_type]["read"] - self.dma_rw_counts[dma_type]["write"]
-                    max_gap = self.config.gdma_rw_gap if dma_type == "gdma" else self.config.sdma_rw_gap
-
-                    if current_gap >= max_gap:
-                        delayed_requests_to_keep[dma_type].append(req_data)
-                        continue
-
-                    self.dma_rw_counts[dma_type]["read"] += 1
-
-                # 处理请求
-                self.req_network.send_flits[req.packet_id].append(req)
-                if req.req_type == "read":
-                    self.req_network.ip_read[req.source_type][req.source].append(req)
-                    self.R_tail_latency_stat = req_data[0]
-                    self.read_req += 1
-                    self.read_flit += req.burst_length
-                else:
-                    self.req_network.ip_write[req.source_type][req.source].append(req)
-                    self.W_tail_latency_stat = req_data[0]
-                    self.write_req += 1
-                    self.write_flit += req.burst_length
-                    if dma_type == "gdma":
-                        self.dma_rw_counts["gdma"]["write"] += 1
-                    else:
-                        self.dma_rw_counts["sdma"]["write"] += 1
-
-                req.cmd_entry_cmd_table_cycle = self.cycle
-                self.req_count += 1
-
-        # 更新延迟队列
-        self.gdma_delayed_requests = delayed_requests_to_keep["gdma"]
-        self.sdma_delayed_requests = delayed_requests_to_keep["sdma"]
 
         while True:
             # 获取下一个请求（如果缓存中没有）
@@ -698,24 +649,41 @@ class BaseModel:
 
             # Check read-write gap before processing
             dma_type = "gdma" if self.next_req[2].startswith("gdma") else "sdma"
-            source = self.node_map(self.next_req[1])
-            destination = self.node_map(self.next_req[3], False)
-            path = self.routes[source][destination]
-            req = Flit(source, destination, path)
             # 设置请求属性...
             req.req_type = "read" if self.next_req[5] == "R" else "write"
 
-            if req.req_type == "read":
-                current_gap = self.dma_rw_counts[dma_type]["read"] - self.dma_rw_counts[dma_type]["write"]
-                max_gap = self.config.gdma_rw_gap if dma_type == "gdma" else self.config.sdma_rw_gap
+             # 预计插入后的差值
+            diff_after = abs(
+                (self.dma_rw_counts[dma_type][source]["read"] + (1 if req.req_type == "read" else 0))
+                - (self.dma_rw_counts[dma_type][source]["write"] + (0 if req.req_type == "read" else 1))
+            )
 
-                if current_gap >= max_gap:
-                    # 延迟处理这个读请求
-                    getattr(self, f"{dma_type}_delayed_requests").append(self.next_req)
-                    self.next_req = None
-                    continue
+            max_gap = self.config.gdma_rw_gap if dma_type == "gdma" else self.config.sdma_rw_gap
+            if diff_after > max_gap:
+                self.next_req = None
+                continue
+            self.dma_rw_counts[dma_type][source][req.req_type] += 1
+            # if req.req_type == "read":
+            #     current_gap = abs(self.dma_rw_counts[dma_type]["read"] - self.dma_rw_counts[dma_type]["write"])
 
-                self.dma_rw_counts[dma_type]["read"] += 1
+            #     if current_gap >= max_gap:
+            #         # 延迟处理这个读请求
+            #         # getattr(self, f"{dma_type}_delayed_requests").append(self.next_req)
+            #         self.next_req = None
+            #         continue
+            #     self.dma_rw_counts[dma_type]["read"] += 1
+
+            # elif req.req_type == "write":
+            #     current_gap = abs(self.dma_rw_counts[dma_type]["read"] - self.dma_rw_counts[dma_type]["write"])
+            #     max_gap = self.config.gdma_rw_gap if dma_type == "gdma" else self.config.sdma_rw_gap
+
+            #     if current_gap >= max_gap:
+            #         # 延迟处理这个读请求
+            #         # getattr(self, f"{dma_type}_delayed_requests").append(self.next_req)
+            #         self.next_req = None
+            #         continue
+
+            #     self.dma_rw_counts[dma_type]["write"] += 1
 
             self.req_network.send_flits[req.packet_id].append(req)
             if req.req_type == "read":
@@ -1668,7 +1636,7 @@ class BaseModel:
     def plot_rn_bandwidth(self):
         """绘制RN端带宽图，使用累积和计算带宽"""
         plt.figure(figsize=(12, 6))
-        total_bw_series = None
+        total_bw = 0
         stats = self.rn_bandwidth_stats
         for k, data_dict in stats.items():
             if not data_dict["time"]:
@@ -1702,7 +1670,8 @@ class BaseModel:
 
             # 打印最终带宽值
             print(f"{k} Final Bandwidth: {bandwidth[-1]:.2f} GB/s")
-
+            total_bw += bandwidth[-1]
+        print(f"Total Bandwidth: {total_bw:.2f} GB/s")
         plt.xlabel("Time (us)")
         plt.ylabel("Bandwidth (GB/s)")
         plt.title("RN Bandwidth")
@@ -1804,6 +1773,7 @@ class BaseModel:
             self.print_stats(rn_write_bws, "RN", "Write", f3)
             self.print_stats(sn_write_bws, "SN", "Write", f3)
         if self.plot_RN_BW_fig:
+            # print(self.dma_rw_counts)
             self.plot_rn_bandwidth()
         self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
         print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")

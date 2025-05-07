@@ -66,7 +66,7 @@ def main():
         file_name=file_name,
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
-        plot_flow_fig=1,
+        plot_flow_fig=0,
         plot_RN_BW_fig=1,
         plot_link_state=0,
         plot_ring_bridge_state=0,
@@ -90,7 +90,7 @@ def main():
         sim.config.num_sdma = 4
         sim.config.num_RN = 4
         sim.config.num_SN = 8
-        sim.config.rn_read_tracker_ostd = 32
+        sim.config.rn_read_tracker_ostd = 128
         sim.config.rn_write_tracker_ostd = 32
         sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
         sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
@@ -107,9 +107,8 @@ def main():
         sim.config.l2m_W_latency_original = 16
         sim.config.ddr_bandwidth_limit = 76.8 / 2
         sim.config.l2m_bandwidth_limit = 128
-        sim.config.gdma_rw_gap = np.inf  # Maximum allowed read-write gap for GDMA
-        sim.config.sdma_rw_gap = 500  # Maximum allowed read-write gap for SDMA
-        # sim.config.ddr_bandwidth_limit = 75 / 2
+        sim.config.gdma_rw_gap = np.inf 
+        sim.config.sdma_rw_gap = 500
 
     elif topo_type in ["5x4", "4x5"]:
         sim.config.burst = 4
@@ -155,7 +154,7 @@ def main():
     # sim.config.update_config()
     sim.initial()
     sim.end_time = 10000
-    sim.print_interval = 200
+    sim.print_interval = 2000
     sim.run()
     # print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
     # print(f"ITag_Trigger_Th_H: {sim.config.ITag_Trigger_Th_H}: ITag_Max_Num: {sim.config.ITag_Max_Num_V}, {sim.config.seats_per_link}\n")

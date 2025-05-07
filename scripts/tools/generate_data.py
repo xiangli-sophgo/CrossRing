@@ -407,10 +407,13 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
             data_all.extend(generate_mixed_entries(sdma_pos, "sdma", "l2m", l2m_pos, "W", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, mix_ratios))
         else:
-            # data_all.extend(generate_simultaneous_entries(gdma_pos, "gdma", l2m_map, burst, flow_type, speed[burst], speed[burst], interval_count))
             data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count))
-            data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "W", burst, flow_type, speed[burst], interval_count))
             data_all.extend(generate_entries(sdma_pos, "sdma", ddr_map, "R", burst, flow_type, speed[burst], interval_count))
+            data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "W", burst, flow_type, speed[burst], interval_count))
+            # 
+            # data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "W", burst, flow_type, speed[burst], interval_count))
+            # data_all.extend(generate_entries(sdma_pos, "sdma", ddr_map, "W", burst, flow_type, speed[burst], interval_count))
+            # data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count))
             # data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, flow_type, speed[burst], interval_count))
             # data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
 
@@ -455,7 +458,7 @@ if __name__ == "__main__":
             "l2m_2": [1, 7],
         }
 
-    speed = {1: 128, 2: 512, 4: 128}  # 不同burst对应的带宽(GB/s)
+    speed = {1: 128, 2: 1280, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 2
     read_duration = 128
     write_duration = 128
