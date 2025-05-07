@@ -3,6 +3,7 @@ import os
 from src.utils.component import Flit, Network, Node
 from config.config import SimulationConfig
 import matplotlib
+import numpy as np
 import sys
 
 if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
@@ -13,7 +14,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_2260E_SDMA_WO_l2m_0506.txt"
+    file_name = r"traffic_2260E_0507.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -66,6 +67,7 @@ def main():
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
+        plot_RN_BW_fig=1,
         plot_link_state=0,
         plot_ring_bridge_state=0,
         print_trace=0,
@@ -88,13 +90,13 @@ def main():
         sim.config.num_sdma = 4
         sim.config.num_RN = 4
         sim.config.num_SN = 8
-        sim.config.rn_read_tracker_ostd = 128
-        sim.config.rn_write_tracker_ostd = 64
+        sim.config.rn_read_tracker_ostd = 32
+        sim.config.rn_write_tracker_ostd = 32
         sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
         sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
-        sim.config.sn_ddr_read_tracker_ostd = 128
-        sim.config.sn_ddr_write_tracker_ostd = 32
-        sim.config.sn_l2m_read_tracker_ostd = 128
+        sim.config.sn_ddr_read_tracker_ostd = 64
+        sim.config.sn_ddr_write_tracker_ostd = 64
+        sim.config.sn_l2m_read_tracker_ostd = 64
         sim.config.sn_l2m_write_tracker_ostd = 64
         sim.config.sn_ddr_wdb_size = sim.config.sn_ddr_write_tracker_ostd * sim.config.burst
         sim.config.sn_l2m_wdb_size = sim.config.sn_l2m_write_tracker_ostd * sim.config.burst
@@ -104,6 +106,9 @@ def main():
         sim.config.l2m_R_latency_original = 12
         sim.config.l2m_W_latency_original = 16
         sim.config.ddr_bandwidth_limit = 76.8 / 2
+        sim.config.l2m_bandwidth_limit = 128
+        sim.config.gdma_rw_gap = np.inf  # Maximum allowed read-write gap for GDMA
+        sim.config.sdma_rw_gap = 500  # Maximum allowed read-write gap for SDMA
         # sim.config.ddr_bandwidth_limit = 75 / 2
 
     elif topo_type in ["5x4", "4x5"]:
@@ -149,11 +154,11 @@ def main():
 
     # sim.config.update_config()
     sim.initial()
-    # sim.end_time = 200
-    sim.print_interval = 2000
+    sim.end_time = 10000
+    sim.print_interval = 200
     sim.run()
     # print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
-    print(f"ITag_Trigger_Th_H: {sim.config.ITag_Trigger_Th_H}: ITag_Max_Num: {sim.config.ITag_Max_Num_V}, {sim.config.seats_per_link}\n")
+    # print(f"ITag_Trigger_Th_H: {sim.config.ITag_Trigger_Th_H}: ITag_Max_Num: {sim.config.ITag_Max_Num_V}, {sim.config.seats_per_link}\n")
 
     # # 获取当前的内存快照
     # snapshot = tracemalloc.take_snapshot()

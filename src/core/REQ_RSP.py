@@ -251,13 +251,18 @@ class REQ_RSP_model(BaseModel):
                         queue = self.flit_network.inject_queues[direction]
                         queue_pre = self.flit_network.inject_queues_pre[direction]
                         if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-
-                            if flit.req_type == "read" and flit.original_destination_type[:3] == "ddr":
+                            dst3 = flit.original_destination_type[:3]
+                            if flit.req_type == "read" and dst3 == "ddr":
                                 self._refill_ddr_tokens(flit.source, flit.original_destination_type)
                                 if self.ddr_tokens[flit.source][flit.original_destination_type] < 1:
-                                    # 令牌不足，本 cycle 跳过
                                     continue
                                 self.ddr_tokens[flit.source][flit.original_destination_type] -= 1
+
+                            elif flit.req_type == "read" and dst3 == "l2m":
+                                self._refill_l2m_tokens(flit.source, flit.original_destination_type, flit.req_type)
+                                if self.l2m_tokens[flit.req_type][flit.source][flit.original_destination_type] < 1:
+                                    continue
+                                self.l2m_tokens[flit.req_type][flit.source][flit.original_destination_type] -= 1
 
                             req = self.req_network.send_flits[flit.packet_id][0]
                             flit.sync_latency_record(req)
@@ -658,11 +663,17 @@ class REQ_RSP_model(BaseModel):
                         ip_pos = in_pos - self.config.cols
                         if ip_pos in network.ip_eject[ip_type] and network.ip_eject[ip_type][ip_pos]:
                             flit = network.ip_eject[ip_type][ip_pos][0]
-                            if flit.flit_type == "data" and flit.req_type == "write" and flit.original_destination_type[:3] == "ddr":
-                                self._refill_ddr_tokens(flit.destination + self.config.cols, flit.original_destination_type)
-                                if self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] < 1:
-                                    continue
-                                self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] -= 1
+                            if flit.flit_type == "data" and flit.req_type == "write":
+                                if flit.original_destination_type[:3] == "ddr":
+                                    self._refill_ddr_tokens(flit.destination + self.config.cols, flit.original_destination_type)
+                                    if self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] < 1:
+                                        continue
+                                    self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] -= 1
+                                elif flit.original_destination_type[:3] == "l2m":
+                                    self._refill_l2m_tokens(flit.destination + self.config.cols, flit.original_destination_type, flit.req_type)
+                                    if self.l2m_tokens[flit.req_type][flit.destination + self.config.cols][flit.original_destination_type] < 1:
+                                        continue
+                                    self.l2m_tokens[flit.req_type][flit.destination + self.config.cols][flit.original_destination_type] -= 1
                             flit = network.ip_eject[ip_type][ip_pos].popleft()
                             flit.arrival_cycle = self.cycle
                             network.arrive_node_pre[ip_type][ip_pos] = flit
@@ -670,8 +681,6 @@ class REQ_RSP_model(BaseModel):
                             network.arrive_flits[flit.packet_id].append(flit)
                             network.recv_flits_num += 1
                             if len(network.arrive_flits[flit.packet_id]) == flit.burst_length:
-                                # if flit.packet_id == 1999:
-                                # print(flit)
                                 for flit in network.arrive_flits[flit.packet_id]:
                                     if flit.req_type == "read":
                                         flit.rn_data_collection_complete_cycle = self.cycle

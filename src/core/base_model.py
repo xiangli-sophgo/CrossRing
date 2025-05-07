@@ -37,6 +37,7 @@ class BaseModel:
         result_save_path=None,
         results_fig_save_path=None,
         plot_flow_fig=False,
+        plot_RN_BW_fig=-False,
         plot_link_state=False,
         plot_ring_bridge_state=False,
         print_trace=False,
@@ -52,6 +53,7 @@ class BaseModel:
 
         self.result_save_path_original = result_save_path
         self.plot_flow_fig = plot_flow_fig
+        self.plot_RN_BW_fig = plot_RN_BW_fig
         self.plot_link_state = plot_link_state
         self.plot_ring_bridge_state = plot_ring_bridge_state
         self.print_trace = print_trace
@@ -108,7 +110,6 @@ class BaseModel:
         self.read_ip_intervals = defaultdict(list)  # 存储每个IP的读请求时间区间
         self.write_ip_intervals = defaultdict(list)  # 存储每个IP的写请求时间区间
 
-        # DDR IP 列表（物理环上的节点编号）
         self.flit_size_bytes = 128
         self.ddr_bytes_per_cycle = self.config.ddr_bandwidth_limit / self.config.network_frequency / self.flit_size_bytes
         self.ddr_ips = self.config.ddr_send_positions
@@ -116,6 +117,29 @@ class BaseModel:
         self.ddr_bucket_capacity = {ip: {"ddr_1": self.config.ddr_bandwidth_limit, "ddr_2": self.config.ddr_bandwidth_limit} for ip in self.ddr_ips}
         self.ddr_tokens = {ip: {"ddr_1": self.ddr_bucket_capacity[ip]["ddr_1"], "ddr_2": self.ddr_bucket_capacity[ip]["ddr_2"]} for ip in self.ddr_ips}
         self.ddr_last_cycle = {ip: {"ddr_1": 0, "ddr_2": 0} for ip in self.ddr_ips}
+
+        # L2M token‐bucket (single bucket per L2M port) ---
+        self.l2m_bytes_per_cycle = self.config.l2m_bandwidth_limit / self.config.network_frequency / self.flit_size_bytes
+        self.l2m_ips = self.config.l2m_send_positions
+        self.l2m_bucket_capacity = {
+            "read": {ip: {"l2m_1": self.config.l2m_bandwidth_limit, "l2m_2": self.config.l2m_bandwidth_limit} for ip in self.l2m_ips},
+            "write": {ip: {"l2m_1": self.config.l2m_bandwidth_limit, "l2m_2": self.config.l2m_bandwidth_limit} for ip in self.l2m_ips},
+        }
+        self.l2m_tokens = {
+            "read": {ip: {"l2m_1": self.l2m_bucket_capacity["read"][ip]["l2m_1"], "l2m_2": self.l2m_bucket_capacity["read"][ip]["l2m_2"]} for ip in self.l2m_ips},
+            "write": {ip: {"l2m_1": self.l2m_bucket_capacity["write"][ip]["l2m_1"], "l2m_2": self.l2m_bucket_capacity["write"][ip]["l2m_2"]} for ip in self.l2m_ips},
+        }
+        self.l2m_last_cycle = {"read": {ip: {"l2m_1": 0, "l2m_2": 0} for ip in self.l2m_ips}, "write": {ip: {"l2m_1": 0, "l2m_2": 0} for ip in self.l2m_ips}}
+
+        self.dma_rw_counts = {"gdma": {"read": 0, "write": 0}, "sdma": {"read": 0, "write": 0}}
+
+        self.rn_bandwidth_stats = {
+            "SDMA read": {"time": [], "bandwidth": []},
+            "GDMA read": {"time": [], "bandwidth": []},
+            "SDMA write": {"time": [], "bandwidth": []},
+            "GDMA write": {"time": [], "bandwidth": []},
+            "total": {"time": [], "bandwidth": []},
+        }
 
         # statistical data
         self.send_read_flits_num_stat = 0
@@ -232,6 +256,16 @@ class BaseModel:
         cap = self.ddr_bucket_capacity[ip][sn_type]
         self.ddr_tokens[ip][sn_type] = min(cap, self.ddr_tokens[ip][sn_type] + add)
         self.ddr_last_cycle[ip][sn_type] = self.cycle
+
+    def _refill_l2m_tokens(self, ip, sn_type, req_type):
+        """每 cycle 为 L2M IP ip 的令牌桶充值（单位：bytes）。"""
+        dt = self.cycle - self.l2m_last_cycle[req_type][ip][sn_type]
+        if dt <= 0:
+            return
+        add = dt * self.l2m_bytes_per_cycle
+        cap = self.l2m_bucket_capacity[req_type][ip][sn_type]
+        self.l2m_tokens[req_type][ip][sn_type] = min(cap, self.l2m_tokens[req_type][ip][sn_type] + add)
+        self.l2m_last_cycle[req_type][ip][sn_type] = self.cycle
 
     def debug_func(self):
         if self.print_trace:
@@ -425,12 +459,19 @@ class BaseModel:
                         queue = self.flit_network.inject_queues[direction]
                         queue_pre = self.flit_network.inject_queues_pre[direction]
                         if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-                            if flit.original_destination_type[:3] == "ddr":
+                            dst3 = flit.original_destination_type[:3]
+                            if flit.req_type == "read" and dst3 == "ddr":
                                 self._refill_ddr_tokens(flit.source, flit.original_destination_type)
                                 if self.ddr_tokens[flit.source][flit.original_destination_type] < 1:
-                                    # 令牌不足，本 cycle 跳过
                                     continue
                                 self.ddr_tokens[flit.source][flit.original_destination_type] -= 1
+
+                            elif flit.req_type == "read" and dst3 == "l2m":
+                                self._refill_l2m_tokens(flit.source, flit.original_destination_type, flit.req_type)
+                                if self.l2m_tokens[flit.req_type][flit.source][flit.original_destination_type] < 1:
+                                    continue
+                                self.l2m_tokens[flit.req_type][flit.source][flit.original_destination_type] -= 1
+
                             req = self.req_network.send_flits[flit.packet_id][0]
                             flit.sync_latency_record(req)
                             flit.data_entry_network_cycle = self.cycle
@@ -562,14 +603,64 @@ class BaseModel:
             time.sleep(0.3)
 
     def process_requests(self):
-        while self.new_write_req and self.new_write_req[0].departure_cycle <= self.cycle:
-            req = self.new_write_req[0]
-            self.req_network.send_flits[req.packet_id].append(req)
-            self.req_network.ip_write[req.source_type][req.source].append(req)
-            self.req_count += 1
-            self.write_req += 1
-            self.new_write_req.pop(0)
-            self.write_flit += req.burst_length
+        # while self.new_write_req and self.new_write_req[0].departure_cycle <= self.cycle:
+        #     req = self.new_write_req[0]
+        #     self.req_network.send_flits[req.packet_id].append(req)
+        #     self.req_network.ip_write[req.source_type][req.source].append(req)
+        #     self.req_count += 1
+        #     self.write_req += 1
+        #     self.new_write_req.pop(0)
+        #     self.write_flit += req.burst_length
+
+        # 处理延迟请求队列
+        delayed_requests_to_keep = {"gdma": [], "sdma": []}
+        for dma_type in ["gdma", "sdma"]:
+            for req_data in getattr(self, f"{dma_type}_delayed_requests", []):
+                if req_data[0] > self.cycle:
+                    delayed_requests_to_keep[dma_type].append(req_data)
+                    continue
+
+                # 尝试处理延迟请求
+                source = self.node_map(req_data[1])
+                destination = self.node_map(req_data[3], False)
+                path = self.routes[source][destination]
+                req = Flit(source, destination, path)
+                # 设置请求属性...
+                req.req_type = "read" if req_data[5] == "R" else "write"
+
+                if req.req_type == "read":
+                    current_gap = self.dma_rw_counts[dma_type]["read"] - self.dma_rw_counts[dma_type]["write"]
+                    max_gap = self.config.gdma_rw_gap if dma_type == "gdma" else self.config.sdma_rw_gap
+
+                    if current_gap >= max_gap:
+                        delayed_requests_to_keep[dma_type].append(req_data)
+                        continue
+
+                    self.dma_rw_counts[dma_type]["read"] += 1
+
+                # 处理请求
+                self.req_network.send_flits[req.packet_id].append(req)
+                if req.req_type == "read":
+                    self.req_network.ip_read[req.source_type][req.source].append(req)
+                    self.R_tail_latency_stat = req_data[0]
+                    self.read_req += 1
+                    self.read_flit += req.burst_length
+                else:
+                    self.req_network.ip_write[req.source_type][req.source].append(req)
+                    self.W_tail_latency_stat = req_data[0]
+                    self.write_req += 1
+                    self.write_flit += req.burst_length
+                    if dma_type == "gdma":
+                        self.dma_rw_counts["gdma"]["write"] += 1
+                    else:
+                        self.dma_rw_counts["sdma"]["write"] += 1
+
+                req.cmd_entry_cmd_table_cycle = self.cycle
+                self.req_count += 1
+
+        # 更新延迟队列
+        self.gdma_delayed_requests = delayed_requests_to_keep["gdma"]
+        self.sdma_delayed_requests = delayed_requests_to_keep["sdma"]
 
         while True:
             # 获取下一个请求（如果缓存中没有）
@@ -604,6 +695,28 @@ class BaseModel:
                 req.destination_type = "ddr" if req_data[4] in ["ddr_1", "l2m_1"] else "l2m"
             req.packet_id = Node.get_next_packet_id()
             req.req_type = "read" if req_data[5] == "R" else "write"
+
+            # Check read-write gap before processing
+            dma_type = "gdma" if self.next_req[2].startswith("gdma") else "sdma"
+            source = self.node_map(self.next_req[1])
+            destination = self.node_map(self.next_req[3], False)
+            path = self.routes[source][destination]
+            req = Flit(source, destination, path)
+            # 设置请求属性...
+            req.req_type = "read" if self.next_req[5] == "R" else "write"
+
+            if req.req_type == "read":
+                current_gap = self.dma_rw_counts[dma_type]["read"] - self.dma_rw_counts[dma_type]["write"]
+                max_gap = self.config.gdma_rw_gap if dma_type == "gdma" else self.config.sdma_rw_gap
+
+                if current_gap >= max_gap:
+                    # 延迟处理这个读请求
+                    getattr(self, f"{dma_type}_delayed_requests").append(self.next_req)
+                    self.next_req = None
+                    continue
+
+                self.dma_rw_counts[dma_type]["read"] += 1
+
             self.req_network.send_flits[req.packet_id].append(req)
             if req.req_type == "read":
                 self.req_network.ip_read[req.source_type][req.source].append(req)
@@ -1001,11 +1114,17 @@ class BaseModel:
                         ip_pos = in_pos - self.config.cols
                         if network.ip_eject[ip_type][ip_pos]:
                             flit = network.ip_eject[ip_type][ip_pos][0]
-                            if flit.flit_type == "data" and flit.req_type == "write" and flit.original_destination_type[:3] == "ddr":
-                                self._refill_ddr_tokens(flit.destination + self.config.cols, flit.original_destination_type)
-                                if self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] < 1:
-                                    continue
-                                self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] -= 1
+                            if flit.flit_type == "data" and flit.req_type == "write":
+                                if flit.original_destination_type[:3] == "ddr":
+                                    self._refill_ddr_tokens(flit.destination + self.config.cols, flit.original_destination_type)
+                                    if self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] < 1:
+                                        continue
+                                    self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] -= 1
+                                elif flit.original_destination_type[:3] == "l2m":
+                                    self._refill_l2m_tokens(flit.destination + self.config.cols, flit.original_destination_type, flit.req_type)
+                                    if self.l2m_tokens[flit.req_type][flit.destination + self.config.cols][flit.original_destination_type] < 1:
+                                        continue
+                                    self.l2m_tokens[flit.req_type][flit.destination + self.config.cols][flit.original_destination_type] -= 1
                             flit = network.ip_eject[ip_type][ip_pos].popleft()
                             flit.arrival_cycle = self.cycle
                             network.arrive_node_pre[ip_type][ip_pos] = flit
@@ -1532,9 +1651,11 @@ class BaseModel:
         if flit.req_type == "read":
             flit.rsp_latency = 0
             flit.dat_latency = (flit.rn_data_collection_complete_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
+            self.rn_bandwidth_stats[f"{flit.original_source_type.upper()} {flit.req_type}"]["time"].append(flit.rn_data_collection_complete_cycle // self.config.network_frequency)
         elif flit.req_type == "write":
             flit.rsp_latency = (flit.rn_receive_rsp_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
-            flit.dat_latency = (flit.sn_data_collection_complete_cycle - flit.rn_receive_rsp_cycle) // self.config.network_frequency
+            flit.dat_latency = (flit.sn_data_collection_complete_cycle - flit.data_entry_network_cycle) // self.config.network_frequency
+            self.rn_bandwidth_stats[f"{flit.original_source_type.upper()} {flit.req_type}"]["time"].append(flit.data_entry_network_cycle // self.config.network_frequency)
 
         # Skip if not the last flit or if arrival/departure cycles are invalid
 
@@ -1543,6 +1664,51 @@ class BaseModel:
             self.update_intervals(flit, read_merged_intervals, read_latency, f1, "R")
         elif flit.req_type == "write":
             self.update_intervals(flit, write_merged_intervals, write_latency, f2, "W")
+
+    def plot_rn_bandwidth(self):
+        """绘制RN端带宽图，使用累积和计算带宽"""
+        plt.figure(figsize=(12, 6))
+        total_bw_series = None
+        stats = self.rn_bandwidth_stats
+        for k, data_dict in stats.items():
+            if not data_dict["time"]:
+                continue
+
+            # 排序时间戳
+            times = np.array(sorted(data_dict["time"]))
+            if len(times) == 0:
+                continue
+
+            # 计算瞬时带宽
+            # 带宽 = (累计事务数 * 每事务字节数) / 当前时间
+            cum_counts = np.arange(1, len(times) + 1)
+            bandwidth = (cum_counts * 128 * self.config.burst) / (times)  # 转换为bytes/sec
+
+            # 只显示前85%的时间段
+            t = np.percentile(times, 90)
+            mask = times <= t
+
+            # 绘制曲线
+            plt.plot(times[mask] / 1000, bandwidth[mask], drawstyle="steps-post", label=f"{k}")  # 时间转换为us
+
+            # # 累加总带宽序列
+            # if total_bw_series is None:
+            #     total_bw_series = bandwidth.copy()
+            # else:
+            #     # 对齐时间序列
+            #     common_times = np.union1d(times, total_bw_times)
+            #     total_bw_series = np.interp(common_times, times, bandwidth) + np.interp(common_times, total_bw_times, total_bw_series)
+            #     total_bw_times = common_times
+
+            # 打印最终带宽值
+            print(f"{k} Final Bandwidth: {bandwidth[-1]:.2f} GB/s")
+
+        plt.xlabel("Time (us)")
+        plt.ylabel("Bandwidth (GB/s)")
+        plt.title("RN Bandwidth")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
 
     def calculate_and_output_results(self, network, read_latency, write_latency, read_merged_intervals, write_merged_intervals):
         """Calculate average latencies and output total results."""
@@ -1637,7 +1803,8 @@ class BaseModel:
             print("")  # 屏幕输出空行分隔
             self.print_stats(rn_write_bws, "RN", "Write", f3)
             self.print_stats(sn_write_bws, "SN", "Write", f3)
-
+        if self.plot_RN_BW_fig:
+            self.plot_rn_bandwidth()
         self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
         print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")
         print("=" * 50)
