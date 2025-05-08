@@ -675,7 +675,7 @@ class REQ_RSP_model(BaseModel):
                         if ip_pos in network.ip_eject[ip_type] and network.ip_eject[ip_type][ip_pos]:
                             flit = network.ip_eject[ip_type][ip_pos][0]
                             if flit.flit_type == "data" and flit.req_type == "write":
-                                if flit.original_destination_type[:3] == "ddr":
+                                if flit.original_destination_type.startswith("ddr") and flit.destination_original not in [4, 10]:
                                     self._refill_ddr_tokens(flit.destination + self.config.cols, flit.original_destination_type)
                                     if self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] < 1:
                                         continue

@@ -293,9 +293,9 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
             # data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             #
             data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            data_all.extend(generate_entries(gdma_pos, "gdma", ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            #
+            data_all.extend(generate_entries(sdma_pos, "sdma", ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            
             # data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
@@ -308,8 +308,8 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
 if __name__ == "__main__":
     # 参数配置
     topo = "3x3"
-    interval_count = 32
-    file_name = "../../test_data/traffic_2260E_case3.txt"
+    interval_count = 96
+    file_name = "../../test_data/traffic_2260E_case2.txt"
     np.random.seed(428)
 
     if topo == "5x4":
@@ -345,7 +345,7 @@ if __name__ == "__main__":
             "l2m_2": [1, 7],
         }
 
-    speed = {1: 128, 2: 512, 4: 128}  # 不同burst对应的带宽(GB/s)
+    speed = {1: 128, 2: 256, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 2
     read_duration = 64
     write_duration = 64

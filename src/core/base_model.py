@@ -660,22 +660,12 @@ class BaseModel:
             elif self.topo_type_stat in ["3x3"]:
                 req.destination_type = "ddr" if req_data[4] in ["ddr_1", "l2m_1"] else "l2m"
 
+            
             req.packet_id = Node.get_next_packet_id()
             req.req_type = "read" if req_data[5] == "R" else "write"
-
-            # # Check read-write gap constraints
-            # dma_type = "gdma" if req.original_source_type.startswith("gdma") else "sdma"
-            # max_gap = self.config.gdma_rw_gap if dma_type == "gdma" else self.config.sdma_rw_gap
-
-            # # Calculate potential new read-write difference
-            # current_diff = self.dma_rw_counts[dma_type]["write"] - self.dma_rw_counts[dma_type]["read"]
-            # potential_diff = current_diff + (1 if req.req_type == "write" else -1)
-            # print(current_diff, potential_diff)
-
-            # Reject request if it would exceed the gap
-
-            # Update counters and process the request
-            # self.dma_rw_counts[dma_type][req.req_type] += 1
+            if self.node.rn_tracker_count[req.req_type][req.source_type][source] <= 0:
+                self.next_req = None
+                continue
 
             # Add to appropriate network structures
             self.req_network.send_flits[req.packet_id].append(req)
