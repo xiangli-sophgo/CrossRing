@@ -14,7 +14,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_2260E_0507.txt"
+    file_name = r"traffic_2260E_case3.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -106,9 +106,10 @@ def main():
         sim.config.l2m_R_latency_original = 12
         sim.config.l2m_W_latency_original = 16
         sim.config.ddr_bandwidth_limit = 76.8 / 2
+        # sim.config.ddr_bandwidth_limit = 256 / 2
         sim.config.l2m_bandwidth_limit = 128
-        sim.config.gdma_rw_gap = np.inf 
-        sim.config.sdma_rw_gap = 500
+        sim.config.gdma_rw_gap = np.inf
+        sim.config.sdma_rw_gap = np.inf
 
     elif topo_type in ["5x4", "4x5"]:
         sim.config.burst = 4

@@ -552,7 +552,8 @@ class NoC_Simulator:
             bw = cum / ts
             t85 = np.percentile(ts, 85)
             mask = ts <= t85
-            plt.plot(ts[mask] / 1000, bw[mask], drawstyle="steps-post", label=f"{k[0].upper()}-{k[1]}")
+            (line,) = plt.plot(ts[mask] / 1000, bw[mask], drawstyle="steps-post", label=f"{k[0].upper()}-{k[1]}")
+            plt.text(ts[mask][-1] / 1000, bw[mask][-1], f"{bw[mask][-1]:.2f}", ha="left", va="center", color=line.get_color(), fontsize=14)
             total_bw += bw[-1]
             print(f"{k[0].upper()}-{k[1]} Bandwidth: {bw[-1]:.2f} GB/s")
         print(f"Total Bandwidth: {total_bw:.2f} GB/s")
@@ -603,8 +604,8 @@ if __name__ == "__main__":
     mix = {
         # 性能case 1
         ("gdma", "l2m", "W"): 1,
-        # ("sdma", "l2m", "R"): 1,
-        # ("sdma", "ddr", "W"): 1,
+        ("sdma", "l2m", "R"): 1,
+        ("sdma", "ddr", "W"): 1,
         # 性能case 2
         # ("gdma", "l2m", "W"): 1,
         # ("sdma", "l2m", "R"): 1,
@@ -612,7 +613,7 @@ if __name__ == "__main__":
     }
     gap_rules = [
         {"dma": "gdma", "limit": np.inf},
-        {"dma": "sdma", "limit": 100},
+        {"dma": "sdma", "limit": 10},
     ]
 
     sim = NoC_Simulator(

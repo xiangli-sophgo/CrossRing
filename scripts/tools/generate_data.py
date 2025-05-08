@@ -67,7 +67,7 @@ def group_numbers():
     return [group.tolist() for group in final_groups]
 
 
-def generate_data(topo, read_duration, write_duration, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_pos, speed, burst, flow_type=0, mix_ratios=None):
+def generate_data(topo, read_duration, write_duration, interval_count, file_name, sdma_pos, gdma_pos, ddr_pos, l2m_pos, speed, burst, flow_type=0, mix_ratios=None, overlap=0):
     """
     :param interval_count: 读写周期数量(每个周期=read_duration+write_duration)
     """
@@ -75,121 +75,7 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
     generator = TrafficGenerator(read_duration=read_duration, write_duration=write_duration)
     data_all = []
 
-    # def generate_entries(src_pos, src_type, dest_map, operation, burst, flow_type, speed, interval_count, dest_access_mode="random"):
-    #     """
-    #     生成指定模式的流量条目，确保同一时刻所有dest都有访问
-
-    #     参数:
-    #     src_pos: list of source positions
-    #     src_type: str, source类型
-    #     dest_map: dict, 键为dest_type(str)，值为对应的dest_pos(list)
-    #     operation: 'R' 或 'W'
-    #     burst: int, burst长度
-    #     flow_type: int, 1=8-shared, 2=private, 其他=32-shared
-    #     speed: dict or list, 计算时间点所需参数
-    #     interval_count: int, 周期数
-    #     dest_access_mode: 'round_robin' 或 'random', 控制目标选择方式
-    #     """
-    #     if dest_access_mode not in ("round_robin", "random"):
-    #         raise ValueError("dest_access_mode 必须是 'round_robin' 或 'random'")
-
-    #     is_read = operation == "R"
-    #     time_pattern = generator.calculate_time_points(speed, burst, is_read)
-    #     entries = []
-    #     # 构造 (dest_type, pos) 列表
-    #     dest_items = [(dtype, pos) for dtype, poses in dest_map.items() for pos in poses]
-
-    #     # 准备循环器和随机访问列表
-    #     if dest_access_mode == "round_robin":
-    #         if flow_type == 1:
-    #             groups = group_numbers()
-    #             group_cycles = {}
-    #             for gid, group in enumerate(groups):
-    #                 items = [item for item in dest_items if item[1] in group]
-    #                 if items:
-    #                     group_cycles[gid] = itertools.cycle(items)
-    #         elif flow_type != 2:
-    #             dest_cycle = itertools.cycle(dest_items)
-    #     else:  # random模式
-    #         if flow_type == 1:
-    #             groups = group_numbers()
-    #             group_items = {}
-    #             for gid, group in enumerate(groups):
-    #                 group_items[gid] = [item for item in dest_items if item[1] in group]
-    #         else:
-    #             # 为random模式创建所有可能的dest排列组合
-    #             all_dest_permutations = list(itertools.permutations(dest_items))
-    #             random.shuffle(all_dest_permutations)
-
-    #     # 生成条目
-    #     for cycle in range(interval_count):
-    #         base_time = cycle * generator.cycle_duration
-    #         time_offset = 0 if is_read else generator.read_duration
-
-    #         if flow_type == 1:  # 8-shared
-    #             groups = group_numbers()
-    #             for t in time_pattern:
-    #                 for src in src_pos:
-    #                     gid = next((i for i, g in enumerate(groups) if src in g), -1)
-    #                     if gid == -1:
-    #                         continue
-    #                     if dest_access_mode == "random":
-    #                         # 确保组内所有dest都被访问
-    #                         if not hasattr(generate_entries, "group_access_idx"):
-    #                             generate_entries.group_access_idx = {}
-    #                         if gid not in generate_entries.group_access_idx:
-    #                             generate_entries.group_access_idx[gid] = 0
-
-    #                         idx = generate_entries.group_access_idx[gid] % len(group_items[gid])
-    #                         dest_type, dest = group_items[gid][idx]
-    #                         generate_entries.group_access_idx[gid] += 1
-    #                     else:
-    #                         dest_type, dest = next(group_cycles[gid])
-    #                     entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
-
-    #         elif flow_type == 2:  # private
-    #             for t in time_pattern:
-    #                 for src in src_pos:
-    #                     # private: 优先匹配相同 src
-    #                     match = next((item for item in dest_items if item[1] == src), None)
-    #                     if match:
-    #                         dest_type, dest = match
-    #                     else:
-    #                         if dest_access_mode == "random":
-    #                             # 使用排列组合确保所有dest都被访问
-    #                             if not hasattr(generate_entries, "perm_idx"):
-    #                                 generate_entries.perm_idx = 0
-
-    #                             perm = all_dest_permutations[generate_entries.perm_idx % len(all_dest_permutations)]
-    #                             dest_type, dest = perm[src_pos.index(src) % len(perm)]
-    #                             generate_entries.perm_idx += 1
-    #                         else:
-    #                             dest_type, dest = next(dest_cycle)
-    #                     entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
-
-    #         else:  # 32-shared或其他
-    #             for t in time_pattern:
-    #                 if dest_access_mode == "random":
-    #                     # 确保每个src访问不同的dest
-    #                     generate_entries.dest_assignments = {}
-
-    #                     if t not in generate_entries.dest_assignments:
-    #                         # 为这个时间点创建新的dest分配
-    #                         shuffled_dests = random.sample(dest_items, len(dest_items))
-    #                         # 如果src比dest多，循环使用dest
-    #                         generate_entries.dest_assignments[t] = itertools.cycle(shuffled_dests)
-
-    #                     dest_cycle = generate_entries.dest_assignments[t]
-    #                 else:
-    #                     dest_cycle = itertools.cycle(dest_items)
-
-    #                 for src in src_pos:
-    #                     dest_type, dest = next(dest_cycle)
-    #                     entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
-
-    #     return entries
-
-    def generate_entries(src_pos, src_type, dest_map, operation, burst, flow_type, speed, interval_count, dest_access_mode="random"):
+    def generate_entries(src_pos, src_type, dest_map, operation, burst, flow_type, speed, interval_count, dest_access_mode="random", overlap=False):
         """
         生成指定模式的流量条目，确保同一时刻所有dest都有访问
 
@@ -202,7 +88,8 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
         flow_type: int, 1=8-shared, 2=private, 其他=32-shared
         speed: dict or list, 计算时间点所需参数
         interval_count: int, 周期数
-        dest_access_mode: 'round_robin' 或 'random', 控制目标选择方式
+        dest_access_mode: 'round_robin' 或 'random'
+        overlap: bool, 是否让读写请求时间点重叠（True 时 time_offset 恒为 0）
         """
         if dest_access_mode not in ("round_robin", "random"):
             raise ValueError("dest_access_mode 必须是 'round_robin' 或 'random'")
@@ -210,95 +97,89 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
         is_read = operation == "R"
         time_pattern = generator.calculate_time_points(speed, burst, is_read)
         entries = []
-        # 构造 (dest_type, pos) 列表
+
+        # 扁平化 dest_map
         dest_items = [(dtype, pos) for dtype, poses in dest_map.items() for pos in poses]
 
-        # 准备循环器和随机访问列表
+        # 预处理：轮询器 / 随机排列
         if dest_access_mode == "round_robin":
             if flow_type == 1:
                 groups = group_numbers()
-                group_cycles = {}
-                for gid, group in enumerate(groups):
-                    items = [item for item in dest_items if item[1] in group]
-                    if items:
-                        group_cycles[gid] = itertools.cycle(items)
+                group_cycles = {gid: itertools.cycle([item for item in dest_items if item[1] in g]) for gid, g in enumerate(groups)}
             elif flow_type != 2:
                 dest_cycle = itertools.cycle(dest_items)
-        else:  # random模式
+        else:  # random
             if flow_type == 1:
                 groups = group_numbers()
-                group_items = {}
-                for gid, group in enumerate(groups):
-                    group_items[gid] = [item for item in dest_items if item[1] in group]
+                group_items = {gid: [item for item in dest_items if item[1] in g] for gid, g in enumerate(groups)}
+                generate_entries.group_access_idx = getattr(generate_entries, "group_access_idx", {})
             else:
-                # 为random模式创建所有可能的dest排列组合
                 all_dest_permutations = list(itertools.permutations(dest_items))
                 random.shuffle(all_dest_permutations)
+                generate_entries.perm_idx = getattr(generate_entries, "perm_idx", 0)
 
         # 生成条目
         for cycle in range(interval_count):
             base_time = cycle * generator.cycle_duration
-            time_offset = 0  # 现在读写时间点可以重叠
 
-            if flow_type == 1:  # 8-shared
+            # 根据 overlap 参数决定 time_offset
+            if overlap:
+                time_offset = 0
+            else:
+                time_offset = 0 if is_read else generator.read_duration
+
+            # 8-shared
+            if flow_type == 1:
                 groups = group_numbers()
                 for t in time_pattern:
                     for src in src_pos:
                         gid = next((i for i, g in enumerate(groups) if src in g), -1)
-                        if gid == -1:
+                        if gid < 0:
                             continue
-                        if dest_access_mode == "random":
-                            # 确保组内所有dest都被访问
-                            if not hasattr(generate_entries, "group_access_idx"):
-                                generate_entries.group_access_idx = {}
-                            if gid not in generate_entries.group_access_idx:
-                                generate_entries.group_access_idx[gid] = 0
 
-                            idx = generate_entries.group_access_idx[gid] % len(group_items[gid])
+                        if dest_access_mode == "random":
+                            idx = generate_entries.group_access_idx.get(gid, 0) % len(group_items[gid])
                             dest_type, dest = group_items[gid][idx]
-                            generate_entries.group_access_idx[gid] += 1
+                            generate_entries.group_access_idx[gid] = idx + 1
                         else:
                             dest_type, dest = next(group_cycles[gid])
+
                         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
-            elif flow_type == 2:  # private
+            # private
+            elif flow_type == 2:
                 for t in time_pattern:
                     for src in src_pos:
-                        # private: 优先匹配相同 src
+                        # 优先匹配同号 dest
                         match = next((item for item in dest_items if item[1] == src), None)
                         if match:
                             dest_type, dest = match
                         else:
                             if dest_access_mode == "random":
-                                # 使用排列组合确保所有dest都被访问
-                                if not hasattr(generate_entries, "perm_idx"):
-                                    generate_entries.perm_idx = 0
-
                                 perm = all_dest_permutations[generate_entries.perm_idx % len(all_dest_permutations)]
                                 dest_type, dest = perm[src_pos.index(src) % len(perm)]
                                 generate_entries.perm_idx += 1
                             else:
                                 dest_type, dest = next(dest_cycle)
+
                         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
-            else:  # 32-shared或其他
+            # 32-shared 或其他
+            else:
                 for t in time_pattern:
                     if dest_access_mode == "random":
-                        # 确保每个src访问不同的dest
+                        # 每个 t 重置一次 dest 分配
+                        # if not hasattr(generate_entries, "dest_assignments"):
                         generate_entries.dest_assignments = {}
-
                         if t not in generate_entries.dest_assignments:
-                            # 为这个时间点创建新的dest分配
-                            shuffled_dests = random.sample(dest_items, len(dest_items))
-                            # 如果src比dest多，循环使用dest
-                            generate_entries.dest_assignments[t] = itertools.cycle(shuffled_dests)
-
-                        dest_cycle = generate_entries.dest_assignments[t]
+                            shuffled = random.sample(dest_items, len(dest_items))
+                            generate_entries.dest_assignments[t] = itertools.cycle(shuffled)
+                        dest_cycle_t = generate_entries.dest_assignments[t]
                     else:
-                        dest_cycle = itertools.cycle(dest_items)
+                        dest_cycle_t = itertools.cycle(dest_items)
 
                     for src in src_pos:
-                        dest_type, dest = next(dest_cycle)
+                        dest_type, dest = next(dest_cycle_t)
                         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
         return entries
@@ -407,15 +288,16 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
             data_all.extend(generate_mixed_entries(sdma_pos, "sdma", "l2m", l2m_pos, "W", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, mix_ratios))
         else:
-            data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count))
-            data_all.extend(generate_entries(sdma_pos, "sdma", ddr_map, "R", burst, flow_type, speed[burst], interval_count))
-            data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "W", burst, flow_type, speed[burst], interval_count))
-            # 
-            # data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "W", burst, flow_type, speed[burst], interval_count))
-            # data_all.extend(generate_entries(sdma_pos, "sdma", ddr_map, "W", burst, flow_type, speed[burst], interval_count))
-            # data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count))
-            # data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "R", burst, flow_type, speed[burst], interval_count))
-            # data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
+            # data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(sdma_pos, "sdma", ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            #
+            data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(gdma_pos, "gdma", ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            #
+            # data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
     # 排序并写入文件
     with open(file_name, "w") as f:
@@ -427,7 +309,7 @@ if __name__ == "__main__":
     # 参数配置
     topo = "3x3"
     interval_count = 32
-    file_name = "../../test_data/traffic_2260E_0507.txt"
+    file_name = "../../test_data/traffic_2260E_case3.txt"
     np.random.seed(428)
 
     if topo == "5x4":
@@ -441,13 +323,18 @@ if __name__ == "__main__":
     elif topo == "3x3":
         sdma_pos = [0, 2, 6, 8]
         gdma_pos = [0, 2, 6, 8]
+        # sdma_pos = [0]
         # gdma_pos = [
         #     0,
         # ]
 
         # ddr_map = {
         #     "ddr_1": [3],
-        #     "ddr_2": [3],
+        #     # "ddr_2": [3],
+        # }
+        # l2m_map = {
+        #     "l2m_1": [1],
+        #     # "l2m_2": [1],
         # }
         ddr_map = {
             "ddr_1": [0, 2, 3, 5, 6, 8],
@@ -458,10 +345,11 @@ if __name__ == "__main__":
             "l2m_2": [1, 7],
         }
 
-    speed = {1: 128, 2: 1280, 4: 128}  # 不同burst对应的带宽(GB/s)
+    speed = {1: 128, 2: 512, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 2
-    read_duration = 128
-    write_duration = 128
+    read_duration = 64
+    write_duration = 64
+    overlap = 1
 
     # 生成数据(使用混合模式)
-    generate_data(topo, read_duration, write_duration, interval_count, file_name, sdma_pos, gdma_pos, ddr_map, l2m_map, speed, burst, flow_type=0)
+    generate_data(topo, read_duration, write_duration, interval_count, file_name, sdma_pos, gdma_pos, ddr_map, l2m_map, speed, burst, flow_type=0, overlap=overlap)
