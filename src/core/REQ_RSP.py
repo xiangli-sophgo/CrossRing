@@ -154,20 +154,20 @@ class REQ_RSP_model(BaseModel):
                     self.node.sn_wdb_count[sn_type][in_pos] -= new_req.burst_length
                     self.create_rsp(new_req, "positive")
 
-    def move_all_to_inject_queue(self, network, network_type):
-        """Move all items from pre-injection queues to injection queues for a given network."""
-        if network_type == "req":
-            positions = getattr(self.config, f"{self.rn_type}_send_positions")
-        elif network_type == "rsp":
-            positions = getattr(self.config, f"{self.sn_type}_send_positions")
-        elif network_type == "data":
-            positions = set(getattr(self.config, f"{self.rn_type}_send_positions") + getattr(self.config, f"{self.sn_type}_send_positions"))
+    # def move_all_to_inject_queue(self, network, network_type):
+    #     """Move all items from pre-injection queues to injection queues for a given network."""
+    #     if network_type == "req":
+    #         positions = getattr(self.config, f"{self.rn_type}_send_positions")
+    #     elif network_type == "rsp":
+    #         positions = getattr(self.config, f"{self.sn_type}_send_positions")
+    #     elif network_type == "data":
+    #         positions = set(getattr(self.config, f"{self.rn_type}_send_positions") + getattr(self.config, f"{self.sn_type}_send_positions"))
 
-        for ip_pos in positions:
-            for direction in self.directions:
-                pre_queue = network.inject_queues_pre[direction]
-                queue = network.inject_queues[direction]
-                self.move_to_inject_queue(network, pre_queue, queue, ip_pos)
+    #     for ip_pos in positions:
+    #         for direction in self.directions:
+    #             pre_queue = network.inject_queues_pre[direction]
+    #             queue = network.inject_queues[direction]
+    #             self.move_to_inject_queue(network, pre_queue, queue, ip_pos)
 
     def handle_request_injection(self):
         """Inject requests into the network."""
@@ -226,17 +226,17 @@ class REQ_RSP_model(BaseModel):
     #     flits = self.flit_move(network, flits, flit_type)
     #     return flits
 
-    def handle_response_injection(self):
-        """Inject responses into the network."""
-        for ip_pos in getattr(self.config, f"{self.sn_type}_send_positions"):
-            if ip_pos in self.node.sn_rsp_queue[self.sn_type] and self.node.sn_rsp_queue[self.sn_type][ip_pos]:
-                rsp = self.node.sn_rsp_queue[self.sn_type][ip_pos][0]
-                for direction in self.directions:
-                    queue = self.rsp_network.inject_queues[direction]
-                    queue_pre = self.rsp_network.inject_queues_pre[direction]
-                    if self.direction_conditions[direction](rsp) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-                        queue_pre[ip_pos] = rsp
-                        self.node.sn_rsp_queue[self.sn_type][ip_pos].pop(0)
+    # def handle_response_injection(self):
+    #     """Inject responses into the network."""
+    #     for ip_pos in getattr(self.config, f"{self.sn_type}_send_positions"):
+    #         if ip_pos in self.node.sn_rsp_queue[self.sn_type] and self.node.sn_rsp_queue[self.sn_type][ip_pos]:
+    #             rsp = self.node.sn_rsp_queue[self.sn_type][ip_pos][0]
+    #             for direction in self.directions:
+    #                 queue = self.rsp_network.inject_queues[direction]
+    #                 queue_pre = self.rsp_network.inject_queues_pre[direction]
+    #                 if self.direction_conditions[direction](rsp) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+    #                     queue_pre[ip_pos] = rsp
+    #                     self.node.sn_rsp_queue[self.sn_type][ip_pos].pop(0)
 
     def handle_data_injection(self):
         """
@@ -269,11 +269,11 @@ class REQ_RSP_model(BaseModel):
                                     continue
                                 self.ddr_tokens[flit.source][flit.original_destination_type] -= 1
 
-                            # elif flit.req_type == "read" and dst3 == "l2m":
-                            #     self._refill_l2m_tokens(flit.source, flit.original_destination_type, flit.req_type)
-                            #     if self.l2m_tokens[flit.req_type][flit.source][flit.original_destination_type] < 1:
-                            #         continue
-                            #     self.l2m_tokens[flit.req_type][flit.source][flit.original_destination_type] -= 1
+                            elif flit.req_type == "read" and dst3 == "l2m":
+                                self._refill_l2m_tokens(flit.source, flit.original_destination_type, flit.req_type)
+                                if self.l2m_tokens[flit.req_type][flit.source][flit.original_destination_type] < 1:
+                                    continue
+                                self.l2m_tokens[flit.req_type][flit.source][flit.original_destination_type] -= 1
 
                             req = self.req_network.send_flits[flit.packet_id][0]
                             flit.sync_latency_record(req)
@@ -675,17 +675,18 @@ class REQ_RSP_model(BaseModel):
                         if ip_pos in network.ip_eject[ip_type] and network.ip_eject[ip_type][ip_pos]:
                             flit = network.ip_eject[ip_type][ip_pos][0]
                             if flit.flit_type == "data" and flit.req_type == "write":
-                                if flit.original_destination_type.startswith("ddr") and flit.destination_original not in [4, 10]:
+                                if flit.original_destination_type.startswith("ddr"):
                                     self._refill_ddr_tokens(flit.destination + self.config.cols, flit.original_destination_type)
                                     if self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] < 1:
                                         continue
                                     self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] -= 1
-                                # elif flit.original_destination_type[:3] == "l2m":
-                                # print(flit)
-                                #     self._refill_l2m_tokens(flit.destination + self.config.cols, flit.original_destination_type, flit.req_type)
-                                #     if self.l2m_tokens[flit.req_type][flit.destination + self.config.cols][flit.original_destination_type] < 1:
-                                #         continue
-                                #     self.l2m_tokens[flit.req_type][flit.destination + self.config.cols][flit.original_destination_type] -= 1
+
+                                elif flit.original_destination_type[:3] == "l2m":
+                                    self._refill_l2m_tokens(flit.destination + self.config.cols, flit.original_destination_type, flit.req_type)
+                                    if self.l2m_tokens[flit.req_type][flit.destination + self.config.cols][flit.original_destination_type] < 1:
+                                        continue
+                                    self.l2m_tokens[flit.req_type][flit.destination + self.config.cols][flit.original_destination_type] -= 1
+
                             flit = network.ip_eject[ip_type][ip_pos].popleft()
                             flit.arrival_cycle = self.cycle
                             network.arrive_node_pre[ip_type][ip_pos] = flit

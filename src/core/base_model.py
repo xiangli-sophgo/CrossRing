@@ -2,7 +2,7 @@ import numpy as np
 from collections import deque, defaultdict
 
 from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths
-from config.config import SimulationConfig
+from config.config import CrossRingConfig
 from src.utils.component import Flit, Network, Node
 from src.core.CrossRing_Piece_Visualizer import CrossRingVisualizer
 from src.core.Link_State_Visualizer import NetworkLinkVisualizer
@@ -135,10 +135,14 @@ class BaseModel:
         # self.dma_rw_counts = {"gdma": {"read": 0, "write": 0}, "sdma": {"read": 0, "write": 0}}
 
         self.rn_bandwidth_stats = {
-            "SDMA read": {"time": [], "bandwidth": []},
-            "GDMA read": {"time": [], "bandwidth": []},
-            "SDMA write": {"time": [], "bandwidth": []},
-            "GDMA write": {"time": [], "bandwidth": []},
+            "SDMA read DDR": {"time": [], "bandwidth": []},
+            "SDMA read L2M": {"time": [], "bandwidth": []},
+            "GDMA read DDR": {"time": [], "bandwidth": []},
+            "GDMA read L2M": {"time": [], "bandwidth": []},
+            "SDMA write DDR": {"time": [], "bandwidth": []},
+            "SDMA write L2M": {"time": [], "bandwidth": []},
+            "GDMA write DDR": {"time": [], "bandwidth": []},
+            "GDMA write L2M": {"time": [], "bandwidth": []},
             "total": {"time": [], "bandwidth": []},
         }
 
@@ -198,7 +202,7 @@ class BaseModel:
                 self.move_all_to_inject_queue(self.req_network, "req")
 
                 # Inject and process responses
-                self.handle_response_injection(self.cycle, self.sn_type)
+                self.handle_response_injection()
 
             rsps = self.process_and_move_flits(self.rsp_network, rsps, "rsp")
 
@@ -442,18 +446,18 @@ class BaseModel:
         flits = self.flit_move(network, flits, flit_type)
         return flits
 
-    def handle_response_injection(self, cycle, sn_type):
+    def handle_response_injection(self):
         """Inject responses into the network."""
         for ip_pos in getattr(self.config, f"{self.sn_type}_send_positions"):
-            if self.node.sn_rsp_queue[sn_type][ip_pos]:
-                rsp = self.node.sn_rsp_queue[sn_type][ip_pos][0]
+            if self.node.sn_rsp_queue[self.sn_type][ip_pos]:
+                rsp = self.node.sn_rsp_queue[self.sn_type][ip_pos][0]
                 for direction in self.directions:
                     queue = self.rsp_network.inject_queues[direction]
                     queue_pre = self.rsp_network.inject_queues_pre[direction]
                     if self.direction_conditions[direction](rsp) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                         rsp.rsp_entry_network_cycle = self.cycle
                         queue_pre[ip_pos] = rsp
-                        self.node.sn_rsp_queue[sn_type][ip_pos].pop(0)
+                        self.node.sn_rsp_queue[self.sn_type][ip_pos].pop(0)
 
     def handle_data_injection(self):
         """
@@ -660,12 +664,12 @@ class BaseModel:
             elif self.topo_type_stat in ["3x3"]:
                 req.destination_type = "ddr" if req_data[4] in ["ddr_1", "l2m_1"] else "l2m"
 
-            
             req.packet_id = Node.get_next_packet_id()
             req.req_type = "read" if req_data[5] == "R" else "write"
-            if self.node.rn_tracker_count[req.req_type][req.source_type][source] <= 0:
-                self.next_req = None
-                continue
+
+            # if self.node.rn_tracker_count[req.req_type][req.source_type][source] <= 10:
+            #     self.next_req = None
+            #     continue
 
             # Add to appropriate network structures
             self.req_network.send_flits[req.packet_id].append(req)
@@ -1602,11 +1606,15 @@ class BaseModel:
         if flit.req_type == "read":
             flit.rsp_latency = 0
             flit.dat_latency = (flit.rn_data_collection_complete_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
-            self.rn_bandwidth_stats[f"{flit.original_source_type.upper()} {flit.req_type}"]["time"].append(flit.rn_data_collection_complete_cycle // self.config.network_frequency)
+            self.rn_bandwidth_stats[f"{flit.original_source_type.upper()} {flit.req_type} {flit.original_destination_type[:3].upper()}"]["time"].append(
+                flit.rn_data_collection_complete_cycle // self.config.network_frequency
+            )
         elif flit.req_type == "write":
             flit.rsp_latency = (flit.rn_receive_rsp_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
             flit.dat_latency = (flit.sn_data_collection_complete_cycle - flit.data_entry_network_cycle) // self.config.network_frequency
-            self.rn_bandwidth_stats[f"{flit.original_source_type.upper()} {flit.req_type}"]["time"].append(flit.data_entry_network_cycle // self.config.network_frequency)
+            self.rn_bandwidth_stats[f"{flit.original_source_type.upper()} {flit.req_type} {flit.original_destination_type[:3].upper()}"]["time"].append(
+                flit.data_entry_network_cycle // self.config.network_frequency
+            )
             # self.rn_bandwidth_stats[f"{flit.original_source_type.upper()} {flit.req_type}"]["time"].append(flit.sn_data_collection_complete_cycle // self.config.network_frequency)
 
         # Skip if not the last flit or if arrival/departure cycles are invalid

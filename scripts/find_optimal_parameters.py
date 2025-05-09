@@ -1,7 +1,7 @@
 from src.core import *
 import os
 from src.utils.component import Flit, Network, Node
-from config.config import SimulationConfig
+from config.config import CrossRingConfig
 import numpy as np
 
 
@@ -22,7 +22,7 @@ def find_optimal_parameters():
     # file_name = r"LLama2_MM_QKV_Trace.txt"
 
     config_path = r"../config/config2.json"
-    config = SimulationConfig(config_path)
+    config = CrossRingConfig(config_path)
 
     # 定义拓扑类型
     if not config.topo_type:

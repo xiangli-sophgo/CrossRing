@@ -31,7 +31,7 @@ class Packet_Base_model(BaseModel):
                 self.move_all_to_inject_queue(self.req_network, "req")
 
                 # Inject and process responses
-                self.handle_response_injection(self.cycle, self.sn_type)
+                self.handle_response_injection()
 
             rsps = self.process_and_move_flits(self.rsp_network, rsps, "rsp")
 
@@ -158,20 +158,20 @@ class Packet_Base_model(BaseModel):
             else:
                 break
 
-    def move_all_to_inject_queue(self, network, network_type):
-        """Move all items from pre-injection queues to injection queues for a given network."""
-        if network_type == "req":
-            positions = getattr(self.config, f"{self.rn_type}_send_positions")
-        elif network_type == "rsp":
-            positions = getattr(self.config, f"{self.sn_type}_send_positions")
-        elif network_type == "data":
-            positions = set(getattr(self.config, f"{self.rn_type}_send_positions") + getattr(self.config, f"{self.sn_type}_send_positions"))
+    # def move_all_to_inject_queue(self, network, network_type):
+    #     """Move all items from pre-injection queues to injection queues for a given network."""
+    #     if network_type == "req":
+    #         positions = getattr(self.config, f"{self.rn_type}_send_positions")
+    #     elif network_type == "rsp":
+    #         positions = getattr(self.config, f"{self.sn_type}_send_positions")
+    #     elif network_type == "data":
+    #         positions = set(getattr(self.config, f"{self.rn_type}_send_positions") + getattr(self.config, f"{self.sn_type}_send_positions"))
 
-        for ip_pos in positions:
-            for direction in self.directions:
-                pre_queue = network.inject_queues_pre[direction]
-                queue = network.inject_queues[direction]
-                self.move_to_inject_queue(network, pre_queue, queue, ip_pos)
+    #     for ip_pos in positions:
+    #         for direction in self.directions:
+    #             pre_queue = network.inject_queues_pre[direction]
+    #             queue = network.inject_queues[direction]
+    #             self.move_to_inject_queue(network, pre_queue, queue, ip_pos)
 
     def handle_request_injection(self):
         """Inject requests into the network."""
@@ -208,33 +208,33 @@ class Packet_Base_model(BaseModel):
             # self.select_inject_network(ip_pos)
             self.select_inject_network_packet_base(ip_pos)
 
-    def process_and_move_flits(self, network, flits, flit_type):
-        """Process injection queues and move flits."""
-        for inject_queues in network.inject_queues.values():
-            num, moved_flits = self.process_inject_queues(network, inject_queues)
-            if num == 0 and not moved_flits:
-                continue
-            if flit_type == "req":
-                self.req_num += num
-            elif flit_type == "rsp":
-                self.rsp_num += num
-            elif flit_type == "data":
-                self.flit_num += num
-            flits.extend(moved_flits)
-        flits = self.flit_move(network, flits, flit_type)
-        return flits
+    # def process_and_move_flits(self, network, flits, flit_type):
+    #     """Process injection queues and move flits."""
+    #     for inject_queues in network.inject_queues.values():
+    #         num, moved_flits = self.process_inject_queues(network, inject_queues)
+    #         if num == 0 and not moved_flits:
+    #             continue
+    #         if flit_type == "req":
+    #             self.req_num += num
+    #         elif flit_type == "rsp":
+    #             self.rsp_num += num
+    #         elif flit_type == "data":
+    #             self.flit_num += num
+    #         flits.extend(moved_flits)
+    #     flits = self.flit_move(network, flits, flit_type)
+    #     return flits
 
-    def handle_response_injection(self, cycle, sn_type):
-        """Inject responses into the network."""
-        for ip_pos in self.config.ddr_send_positions:
-            if self.node.sn_rsp_queue[sn_type][ip_pos]:
-                rsp = self.node.sn_rsp_queue[sn_type][ip_pos][0]
-                for direction in self.directions:
-                    queue = self.rsp_network.inject_queues[direction]
-                    queue_pre = self.rsp_network.inject_queues_pre[direction]
-                    if self.direction_conditions[direction](rsp) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-                        queue_pre[ip_pos] = rsp
-                        self.node.sn_rsp_queue[sn_type][ip_pos].pop(0)
+    # def handle_response_injection(self, cycle, sn_type):
+    #     """Inject responses into the network."""
+    #     for ip_pos in self.config.ddr_send_positions:
+    #         if self.node.sn_rsp_queue[sn_type][ip_pos]:
+    #             rsp = self.node.sn_rsp_queue[sn_type][ip_pos][0]
+    #             for direction in self.directions:
+    #                 queue = self.rsp_network.inject_queues[direction]
+    #                 queue_pre = self.rsp_network.inject_queues_pre[direction]
+    #                 if self.direction_conditions[direction](rsp) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+    #                     queue_pre[ip_pos] = rsp
+    #                     self.node.sn_rsp_queue[sn_type][ip_pos].pop(0)
 
     def handle_data_injection(self):
         """

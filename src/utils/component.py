@@ -2,6 +2,35 @@ import numpy as np
 from collections import deque, defaultdict
 
 
+class ChannelBuffer:
+    """
+    IQ/EQ 内部的独立通道缓冲区。
+    只做简单 FIFO；出队时由外部仲裁器决定是否真正 pop。
+    """
+
+    def __init__(self, depth):
+        self.depth = depth
+        self.fifo = deque(maxlen=depth)
+
+    # 写入：成功返回 True，溢出返回 False
+    def push(self, flit):
+        if len(self.fifo) < self.depth:
+            self.fifo.append(flit)
+            return True
+        return False
+
+    # 只窥视不弹出
+    def peek(self):
+        return self.fifo[0] if self.fifo else None
+
+    # 真正出队
+    def pop(self):
+        return self.fifo.popleft() if self.fifo else None
+
+    def __len__(self):
+        return len(self.fifo)
+
+
 class Flit:
     last_id = 0
 
@@ -308,6 +337,35 @@ class Network:
         self.last_select = {"sdma": {}, "gdma": {}}
         self.throughput = {"sdma": {}, "ddr": {}, "l2m": {}, "gdma": {}}
 
+        # channel buffer setup
+        self.IQ_ch_buffer = defaultdict(
+            lambda: {
+                "gdma": ChannelBuffer(self.config.IQ_CH_FIFO_DEPTH),
+                "sdma": ChannelBuffer(self.config.IQ_CH_FIFO_DEPTH),
+                "ddr_1": ChannelBuffer(self.config.IQ_CH_FIFO_DEPTH),
+                "ddr_2": ChannelBuffer(self.config.IQ_CH_FIFO_DEPTH),
+                "ddr_3": ChannelBuffer(self.config.IQ_CH_FIFO_DEPTH),
+                "ddr_4": ChannelBuffer(self.config.IQ_CH_FIFO_DEPTH),
+                "l2m_1": ChannelBuffer(self.config.IQ_CH_FIFO_DEPTH),
+                "l2m_2": ChannelBuffer(self.config.IQ_CH_FIFO_DEPTH),
+            }
+        )
+        self.EQ_ch_buffer = defaultdict(
+            lambda: {
+                "gdma": ChannelBuffer(self.config.EQ_CH_FIFO_DEPTH),
+                "sdma": ChannelBuffer(self.config.EQ_CH_FIFO_DEPTH),
+                "ddr_1": ChannelBuffer(self.config.EQ_CH_FIFO_DEPTH),
+                "ddr_2": ChannelBuffer(self.config.EQ_CH_FIFO_DEPTH),
+                "ddr_3": ChannelBuffer(self.config.EQ_CH_FIFO_DEPTH),
+                "ddr_4": ChannelBuffer(self.config.EQ_CH_FIFO_DEPTH),
+                "l2m_1": ChannelBuffer(self.config.EQ_CH_FIFO_DEPTH),
+                "l2m_2": ChannelBuffer(self.config.EQ_CH_FIFO_DEPTH),
+            }
+        )
+        self.IQ_ch_rr = defaultdict(int)
+        self.EQ_ch_rr = defaultdict(int)
+
+        # ETag setup
         self.T0_Etag_Order_FIFO = deque()  # 用于轮询选择 T0 Flit 的 Order FIFO
         self.RB_UE_Counters = {"left": {}, "right": {}}
         self.EQ_UE_Counters = {"up": {}, "down": {}}
@@ -413,11 +471,13 @@ class Network:
                 ip_recv_index = ip_index - config.cols
                 self.ip_inject[ip_type][ip_index] = deque()
                 self.ip_eject[ip_type][ip_recv_index] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
+
         for ip_type in ["sdma", "gdma"]:
             for ip_index in getattr(config, f"{ip_type}_send_positions"):
                 self.ip_read[ip_type][ip_index] = deque()
                 self.ip_write[ip_type][ip_index] = deque()
                 self.last_select[ip_type][ip_index] = "write"
+
         for ip_type in ["gdma", "sdma", "ddr", "l2m"]:
             for ip_index in getattr(config, f"{ip_type}_send_positions"):
                 self.throughput[ip_type][ip_index] = [0, 0, 10000000, 0]

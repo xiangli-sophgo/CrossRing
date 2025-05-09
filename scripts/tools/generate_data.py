@@ -4,6 +4,7 @@ from collections import defaultdict
 import numpy as np
 import itertools
 import random
+from itertools import product
 
 
 class TrafficGenerator:
@@ -114,8 +115,10 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
                 group_items = {gid: [item for item in dest_items if item[1] in g] for gid, g in enumerate(groups)}
                 generate_entries.group_access_idx = getattr(generate_entries, "group_access_idx", {})
             else:
-                all_dest_permutations = list(itertools.permutations(dest_items))
-                random.shuffle(all_dest_permutations)
+                # all_dest_permutations = list(itertools.permutations(dest_items))
+                # random.shuffle(all_dest_permutations)
+                all_dest_combinations = list(product(*dest_map.values()))
+                random.shuffle(all_dest_combinations)
                 generate_entries.perm_idx = getattr(generate_entries, "perm_idx", 0)
 
         # 生成条目
@@ -295,9 +298,9 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
             data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             data_all.extend(generate_entries(sdma_pos, "sdma", ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            
+
             # data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
     # 排序并写入文件
     with open(file_name, "w") as f:
@@ -308,7 +311,7 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
 if __name__ == "__main__":
     # 参数配置
     topo = "3x3"
-    interval_count = 96
+    interval_count = 32
     file_name = "../../test_data/traffic_2260E_case2.txt"
     np.random.seed(428)
 
@@ -339,6 +342,7 @@ if __name__ == "__main__":
         ddr_map = {
             "ddr_1": [0, 2, 3, 5, 6, 8],
             "ddr_2": [3, 5],
+            # "ddr_2": [0, 2, 3, 5, 6, 8],
         }
         l2m_map = {
             "l2m_1": [1, 7],

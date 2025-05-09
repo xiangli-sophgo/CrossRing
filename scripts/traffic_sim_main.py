@@ -2,7 +2,7 @@ from src.traffic_process import step1_flatten, step2_hash_addr2node, step5_data_
 from src.core import *
 import os
 from src.utils.component import Flit, Network, Node
-from config.config import SimulationConfig
+from config.config import CrossRingConfig
 import csv
 import argparse
 
@@ -40,7 +40,7 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name):
     os.makedirs(result_save_path, exist_ok=True)
 
     # Load simulation config
-    config = SimulationConfig(config_path)
+    config = CrossRingConfig(config_path)
     if not config.topo_type:
         topo_type = "5x4"  # Default topology
     else:

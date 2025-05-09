@@ -1,7 +1,7 @@
 from src.core import *
 import os
 from src.utils.component import Flit, Network, Node
-from config.config import SimulationConfig
+from config.config import CrossRingConfig
 import matplotlib
 import numpy as np
 import sys
@@ -14,7 +14,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_2260E_case2.txt"
+    file_name = r"traffic_2260E_case1.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -43,7 +43,7 @@ def main():
     # results_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/"
 
     config_path = r"../config/config2.json"
-    config = SimulationConfig(config_path)
+    config = CrossRingConfig(config_path)
     if not config.topo_type:
         # topo_type = "4x9"
         # topo_type = "9x4"
@@ -95,7 +95,7 @@ def main():
         sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
         sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
         sim.config.sn_ddr_read_tracker_ostd = 64
-        sim.config.sn_ddr_write_tracker_ostd = 64
+        sim.config.sn_ddr_write_tracker_ostd = 32
         sim.config.sn_l2m_read_tracker_ostd = 64
         sim.config.sn_l2m_write_tracker_ostd = 64
         sim.config.sn_ddr_wdb_size = sim.config.sn_ddr_write_tracker_ostd * sim.config.burst
@@ -106,10 +106,11 @@ def main():
         sim.config.l2m_R_latency_original = 12
         sim.config.l2m_W_latency_original = 16
         sim.config.ddr_bandwidth_limit = 76.8 / 2
-        # sim.config.ddr_bandwidth_limit = 256 / 2
+        sim.config.EQ_CH_FIFO_DEPTH = 10
+        sim.config.RB_OUT_FIFO_DEPTH = 8
         sim.config.l2m_bandwidth_limit = 128
         sim.config.gdma_rw_gap = np.inf
-        sim.config.sdma_rw_gap = 1
+        sim.config.sdma_rw_gap = 10
 
     elif topo_type in ["5x4", "4x5"]:
         sim.config.burst = 4
@@ -124,7 +125,7 @@ def main():
         sim.config.rn_write_tracker_ostd = 64
         sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
         sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
-        sim.config.sn_ddr_read_tracker_ostd = 128
+        sim.config.sn_ddr_read_tracker_ostd = 64
         sim.config.sn_ddr_write_tracker_ostd = 64
         sim.config.sn_l2m_read_tracker_ostd = 64
         sim.config.sn_l2m_write_tracker_ostd = 64
@@ -154,7 +155,7 @@ def main():
 
     # sim.config.update_config()
     sim.initial()
-    sim.end_time = 20000
+    sim.end_time = 10000
     sim.print_interval = 2000
     sim.run()
     # print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")

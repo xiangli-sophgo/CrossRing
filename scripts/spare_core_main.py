@@ -1,7 +1,7 @@
 from src.core import *
 import os
 from src.utils.component import Flit, Network, Node
-from config.config import SimulationConfig
+from config.config import CrossRingConfig
 import numpy as np
 import csv
 
@@ -33,7 +33,7 @@ def main():
     # model_type = "Packet_Base"
 
     config_path = r"../config/config2.json"
-    config = SimulationConfig(config_path)
+    config = CrossRingConfig(config_path)
     if not config.topo_type:
         # topo_type = "4x9"
         # topo_type = "9x4"

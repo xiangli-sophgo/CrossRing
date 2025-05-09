@@ -7,7 +7,7 @@ import argparse
 from scipy.optimize import linear_sum_assignment
 
 
-class SimulationConfig:
+class CrossRingConfig:
     def __init__(self, default_config):
         args = self.parse_args(default_config)
         self.topo_type = args.topo_type
@@ -68,6 +68,7 @@ class SimulationConfig:
             and self.TU_Etag_T2_UE_MAX < self.EQ_IN_FIFO_DEPTH - 2
             and self.TD_Etag_T2_UE_MAX < self.EQ_IN_FIFO_DEPTH - 1
         ), "ETag parameter conditions are not met."
+
         self.update_config()
 
     def update_config(self):
