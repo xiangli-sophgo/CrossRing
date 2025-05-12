@@ -169,46 +169,46 @@ class REQ_RSP_model(BaseModel):
     #             queue = network.inject_queues[direction]
     #             self.move_to_inject_queue(network, pre_queue, queue, ip_pos)
 
-    def handle_request_injection(self):
-        """Inject requests into the network."""
-        dma_type = self.rn_type  # "gdma" or "sdma"
-        max_gap = self.config.gdma_rw_gap if dma_type == "gdma" else self.config.sdma_rw_gap
-        for ip_pos in getattr(self.config, f"{self.rn_type}_send_positions"):
-            counts = self.dma_rw_counts[dma_type][ip_pos]
-            for req_type in ["read", "write"]:
-                rd = counts["read"]
-                wr = counts["write"]
-                if req_type == "read":
-                    if self.req_network.ip_read[self.rn_type][ip_pos]:
-                        if rd - wr >= max_gap:
-                            continue
-                        req = self.req_network.ip_read[self.rn_type][ip_pos][0]
-                        if (
-                            self.node.rn_rdb_count[self.rn_type][ip_pos] > self.node.rn_rdb_reserve[self.rn_type][ip_pos] * req.burst_length
-                            and self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0
-                        ):
-                            counts["read"] += 1
-                            req.req_entry_network_cycle = self.cycle
-                            self.req_network.ip_read[self.rn_type][ip_pos].popleft()
-                            self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
-                            self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] -= 1
-                            self.node.rn_rdb_count[self.rn_type][ip_pos] -= req.burst_length
-                            self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = []
-                elif req_type == "write":
-                    if self.req_network.ip_write[self.rn_type][ip_pos]:
-                        if wr - rd >= max_gap:
-                            continue
-                        req = self.req_network.ip_write[self.rn_type][ip_pos][0]
-                        if self.node.rn_wdb_count[self.rn_type][ip_pos] >= req.burst_length and self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0:
-                            counts["write"] += 1
-                            req.req_entry_network_cycle = self.cycle
-                            self.req_network.ip_write[self.rn_type][ip_pos].popleft()
-                            self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
-                            self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] -= 1
-                            self.node.rn_wdb_count[self.rn_type][ip_pos] -= req.burst_length
-                            # self.node.rn_wdb[self.rn_type][ip_pos][req.packet_id] = []
-                            self.create_write_packet(req)
-            self.select_inject_network(ip_pos)
+    # def handle_request_injection(self):
+    #     """Inject requests into the network."""
+    #     dma_type = self.rn_type  # "gdma" or "sdma"
+    #     max_gap = self.config.gdma_rw_gap if dma_type == "gdma" else self.config.sdma_rw_gap
+    #     for ip_pos in getattr(self.config, f"{self.rn_type}_send_positions"):
+    #         counts = self.dma_rw_counts[dma_type][ip_pos]
+    #         for req_type in ["read", "write"]:
+    #             rd = counts["read"]
+    #             wr = counts["write"]
+    #             if req_type == "read":
+    #                 if self.req_network.ip_read[self.rn_type][ip_pos]:
+    #                     if rd - wr >= max_gap:
+    #                         continue
+    #                     req = self.req_network.ip_read[self.rn_type][ip_pos][0]
+    #                     if (
+    #                         self.node.rn_rdb_count[self.rn_type][ip_pos] > self.node.rn_rdb_reserve[self.rn_type][ip_pos] * req.burst_length
+    #                         and self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0
+    #                     ):
+    #                         counts["read"] += 1
+    #                         req.req_entry_network_cycle = self.cycle
+    #                         self.req_network.ip_read[self.rn_type][ip_pos].popleft()
+    #                         self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
+    #                         self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] -= 1
+    #                         self.node.rn_rdb_count[self.rn_type][ip_pos] -= req.burst_length
+    #                         self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = []
+    #             elif req_type == "write":
+    #                 if self.req_network.ip_write[self.rn_type][ip_pos]:
+    #                     if wr - rd >= max_gap:
+    #                         continue
+    #                     req = self.req_network.ip_write[self.rn_type][ip_pos][0]
+    #                     if self.node.rn_wdb_count[self.rn_type][ip_pos] >= req.burst_length and self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0:
+    #                         counts["write"] += 1
+    #                         req.req_entry_network_cycle = self.cycle
+    #                         self.req_network.ip_write[self.rn_type][ip_pos].popleft()
+    #                         self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
+    #                         self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] -= 1
+    #                         self.node.rn_wdb_count[self.rn_type][ip_pos] -= req.burst_length
+    #                         # self.node.rn_wdb[self.rn_type][ip_pos][req.packet_id] = []
+    #                         self.create_write_packet(req)
+    #         self.select_inject_network(ip_pos)
 
     # def process_and_move_flits(self, network, flits, flit_type):
     #     """Process injection queues and move flits."""
@@ -348,113 +348,113 @@ class REQ_RSP_model(BaseModel):
         self.req_stream = self._load_requests_stream()
         self.next_req = None  # 缓存未处理的请求
 
-    def select_inject_network(self, ip_pos):
-        read_old = self.node.rn_rdb_reserve[self.rn_type][ip_pos] > 0 and self.node.rn_rdb_count[self.rn_type][ip_pos] >= self.config.burst
-        read_new = len(self.node.rn_tracker["read"][self.rn_type][ip_pos]) - 1 > self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos]
-        write_old = self.node.rn_wdb_reserve[self.rn_type][ip_pos] > 0
-        write_new = len(self.node.rn_tracker["write"][self.rn_type][ip_pos]) - 1 > self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos]
-        read_valid = read_old or read_new
-        write_valid = write_old or write_new
-        if read_valid and write_valid:
-            if self.req_network.last_select[self.rn_type][ip_pos] == "write":
-                if read_old:
-                    if req := next(
-                        (req for req in self.node.rn_tracker_wait["read"][self.rn_type][ip_pos] if req.req_state == "valid"),
-                        None,
-                    ):
-                        for direction in self.directions:
-                            queue_pre = self.req_network.inject_queues_pre[direction]
-                            queue = self.req_network.inject_queues[direction]
-                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-                                queue_pre[ip_pos] = req
-                                self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
-                                self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
-                                self.node.rn_rdb_count[self.rn_type][ip_pos] -= req.burst_length
-                                self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = []
-                                self.req_network.last_select[self.rn_type][ip_pos] = "read"
-                elif read_new:
-                    rn_tracker_pointer = self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] + 1
-                    if req := self.node.rn_tracker["read"][self.rn_type][ip_pos][rn_tracker_pointer]:
-                        for direction in self.directions:
-                            queue = self.req_network.inject_queues[direction]
-                            queue_pre = self.req_network.inject_queues_pre[direction]
-                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-                                queue_pre[ip_pos] = req
-                                self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] += 1
-                                self.req_network.last_select[self.rn_type][ip_pos] = "read"
-            elif write_old:
-                if req := next(
-                    (req for req in self.node.rn_tracker_wait["write"][self.rn_type][ip_pos] if req.req_state == "valid"),
-                    None,
-                ):
-                    for direction in self.directions:
-                        queue = self.req_network.inject_queues[direction]
-                        queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-                            queue_pre[ip_pos] = req
-                            self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(req)
-                            self.node.rn_wdb_reserve[self.rn_type][ip_pos] -= 1
-                            self.req_network.last_select[self.rn_type][ip_pos] = "write"
-            else:
-                rn_tracker_pointer = self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] + 1
-                if req := self.node.rn_tracker["write"][self.rn_type][ip_pos][rn_tracker_pointer]:
-                    for direction in self.directions:
-                        queue = self.req_network.inject_queues[direction]
-                        queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-                            queue_pre[ip_pos] = req
-                            self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] += 1
-                            self.req_network.last_select[self.rn_type][ip_pos] = "write"
-        elif read_valid:
-            if read_old:
-                if req := next(
-                    (req for req in self.node.rn_tracker_wait["read"][self.rn_type][ip_pos] if req.req_state == "valid"),
-                    None,
-                ):
-                    for direction in self.directions:
-                        queue = self.req_network.inject_queues[direction]
-                        queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-                            queue_pre[ip_pos] = req
-                            self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
-                            self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
-                            self.node.rn_rdb_count[self.rn_type][ip_pos] -= req.burst_length
-                            self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = []
-                            self.req_network.last_select[self.rn_type][ip_pos] = "read"
-            else:
-                rn_tracker_pointer = self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] + 1
-                if req := self.node.rn_tracker["read"][self.rn_type][ip_pos][rn_tracker_pointer]:
-                    for direction in self.directions:
-                        queue = self.req_network.inject_queues[direction]
-                        queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-                            queue_pre[ip_pos] = req
-                            self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] += 1
-                            self.req_network.last_select[self.rn_type][ip_pos] = "read"
-        elif write_valid:
-            if write_old:
-                if req := next(
-                    (req for req in self.node.rn_tracker_wait["write"][self.rn_type][ip_pos] if req.req_state == "valid"),
-                    None,
-                ):
-                    for direction in self.directions:
-                        queue = self.req_network.inject_queues[direction]
-                        queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-                            queue_pre[ip_pos] = req
-                            self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(req)
-                            self.node.rn_wdb_reserve[self.rn_type][ip_pos] -= 1
-                            self.req_network.last_select[self.rn_type][ip_pos] = "write"
-            else:
-                rn_tracker_pointer = self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] + 1
-                if req := self.node.rn_tracker["write"][self.rn_type][ip_pos][rn_tracker_pointer]:
-                    for direction in self.directions:
-                        queue = self.req_network.inject_queues[direction]
-                        queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-                            queue_pre[ip_pos] = req
-                            self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] += 1
-                            self.req_network.last_select[self.rn_type][ip_pos] = "write"
+    # def select_inject_network(self, ip_pos):
+    #     read_old = self.node.rn_rdb_reserve[self.rn_type][ip_pos] > 0 and self.node.rn_rdb_count[self.rn_type][ip_pos] >= self.config.burst
+    #     read_new = len(self.node.rn_tracker["read"][self.rn_type][ip_pos]) - 1 > self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos]
+    #     write_old = self.node.rn_wdb_reserve[self.rn_type][ip_pos] > 0
+    #     write_new = len(self.node.rn_tracker["write"][self.rn_type][ip_pos]) - 1 > self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos]
+    #     read_valid = read_old or read_new
+    #     write_valid = write_old or write_new
+    #     if read_valid and write_valid:
+    #         if self.req_network.last_select[self.rn_type][ip_pos] == "write":
+    #             if read_old:
+    #                 if req := next(
+    #                     (req for req in self.node.rn_tracker_wait["read"][self.rn_type][ip_pos] if req.req_state == "valid"),
+    #                     None,
+    #                 ):
+    #                     for direction in self.directions:
+    #                         queue_pre = self.req_network.inject_queues_pre[direction]
+    #                         queue = self.req_network.inject_queues[direction]
+    #                         if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+    #                             queue_pre[ip_pos] = req
+    #                             self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
+    #                             self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
+    #                             self.node.rn_rdb_count[self.rn_type][ip_pos] -= req.burst_length
+    #                             self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = []
+    #                             self.req_network.last_select[self.rn_type][ip_pos] = "read"
+    #             elif read_new:
+    #                 rn_tracker_pointer = self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] + 1
+    #                 if req := self.node.rn_tracker["read"][self.rn_type][ip_pos][rn_tracker_pointer]:
+    #                     for direction in self.directions:
+    #                         queue = self.req_network.inject_queues[direction]
+    #                         queue_pre = self.req_network.inject_queues_pre[direction]
+    #                         if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+    #                             queue_pre[ip_pos] = req
+    #                             self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] += 1
+    #                             self.req_network.last_select[self.rn_type][ip_pos] = "read"
+    #         elif write_old:
+    #             if req := next(
+    #                 (req for req in self.node.rn_tracker_wait["write"][self.rn_type][ip_pos] if req.req_state == "valid"),
+    #                 None,
+    #             ):
+    #                 for direction in self.directions:
+    #                     queue = self.req_network.inject_queues[direction]
+    #                     queue_pre = self.req_network.inject_queues_pre[direction]
+    #                     if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+    #                         queue_pre[ip_pos] = req
+    #                         self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(req)
+    #                         self.node.rn_wdb_reserve[self.rn_type][ip_pos] -= 1
+    #                         self.req_network.last_select[self.rn_type][ip_pos] = "write"
+    #         else:
+    #             rn_tracker_pointer = self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] + 1
+    #             if req := self.node.rn_tracker["write"][self.rn_type][ip_pos][rn_tracker_pointer]:
+    #                 for direction in self.directions:
+    #                     queue = self.req_network.inject_queues[direction]
+    #                     queue_pre = self.req_network.inject_queues_pre[direction]
+    #                     if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+    #                         queue_pre[ip_pos] = req
+    #                         self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] += 1
+    #                         self.req_network.last_select[self.rn_type][ip_pos] = "write"
+    #     elif read_valid:
+    #         if read_old:
+    #             if req := next(
+    #                 (req for req in self.node.rn_tracker_wait["read"][self.rn_type][ip_pos] if req.req_state == "valid"),
+    #                 None,
+    #             ):
+    #                 for direction in self.directions:
+    #                     queue = self.req_network.inject_queues[direction]
+    #                     queue_pre = self.req_network.inject_queues_pre[direction]
+    #                     if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+    #                         queue_pre[ip_pos] = req
+    #                         self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
+    #                         self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
+    #                         self.node.rn_rdb_count[self.rn_type][ip_pos] -= req.burst_length
+    #                         self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = []
+    #                         self.req_network.last_select[self.rn_type][ip_pos] = "read"
+    #         else:
+    #             rn_tracker_pointer = self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] + 1
+    #             if req := self.node.rn_tracker["read"][self.rn_type][ip_pos][rn_tracker_pointer]:
+    #                 for direction in self.directions:
+    #                     queue = self.req_network.inject_queues[direction]
+    #                     queue_pre = self.req_network.inject_queues_pre[direction]
+    #                     if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+    #                         queue_pre[ip_pos] = req
+    #                         self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] += 1
+    #                         self.req_network.last_select[self.rn_type][ip_pos] = "read"
+    #     elif write_valid:
+    #         if write_old:
+    #             if req := next(
+    #                 (req for req in self.node.rn_tracker_wait["write"][self.rn_type][ip_pos] if req.req_state == "valid"),
+    #                 None,
+    #             ):
+    #                 for direction in self.directions:
+    #                     queue = self.req_network.inject_queues[direction]
+    #                     queue_pre = self.req_network.inject_queues_pre[direction]
+    #                     if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+    #                         queue_pre[ip_pos] = req
+    #                         self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(req)
+    #                         self.node.rn_wdb_reserve[self.rn_type][ip_pos] -= 1
+    #                         self.req_network.last_select[self.rn_type][ip_pos] = "write"
+    #         else:
+    #             rn_tracker_pointer = self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] + 1
+    #             if req := self.node.rn_tracker["write"][self.rn_type][ip_pos][rn_tracker_pointer]:
+    #                 for direction in self.directions:
+    #                     queue = self.req_network.inject_queues[direction]
+    #                     queue_pre = self.req_network.inject_queues_pre[direction]
+    #                     if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+    #                         queue_pre[ip_pos] = req
+    #                         self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] += 1
+    #                         self.req_network.last_select[self.rn_type][ip_pos] = "write"
 
     # def classify_flits(self, flits):
     #     ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits = [], [], [], [], []

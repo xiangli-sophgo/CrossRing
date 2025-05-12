@@ -5,7 +5,9 @@ import os
 import numpy as np
 import argparse
 from scipy.optimize import linear_sum_assignment
-
+from collections import deque, defaultdict
+from typing import Callable, Iterable, Dict, Any
+import copy
 
 class CrossRingConfig:
     def __init__(self, default_config):
@@ -60,6 +62,12 @@ class CrossRingConfig:
         self.TU_Etag_T2_UE_MAX = args.TU_Etag_T2_UE_MAX
         self.TD_Etag_T2_UE_MAX = args.TD_Etag_T2_UE_MAX
         self.Both_side_ETag_upgrade = args.Both_side_ETag_upgrade
+        self.CHANNEL_SPEC = {
+            "gdma": 1,   # → RN 侧
+            "sdma": 1,   # → RN 侧
+            "ddr":  1,   # → SN 侧
+            "l2m":  1,   # → SN 侧
+        }
         assert (
             self.TL_Etag_T2_UE_MAX < self.TL_Etag_T1_UE_MAX < self.RB_IN_FIFO_DEPTH
             and self.TL_Etag_T2_UE_MAX < self.RB_IN_FIFO_DEPTH - 2
@@ -70,6 +78,23 @@ class CrossRingConfig:
         ), "ETag parameter conditions are not met."
 
         self.update_config()
+    
+
+    def _make_channels(
+            self,
+            key_types,
+            value_factory= lambda: defaultdict(list)              # 允许 None / callable / 静态对象
+    ):
+        # 把非 callable 的默认值包装成 deepcopy，可避免共享引用
+        if not callable(value_factory):
+            static_value = copy.deepcopy(value_factory)
+            value_factory = (lambda v=static_value: copy.deepcopy(v))
+
+        ports = {}
+        for key in key_types:
+            for idx in range(self.CHANNEL_SPEC.get(key, 0)):
+                ports[f"{key}_{idx}"] = value_factory() if value_factory else None
+        return ports
 
     def update_config(self):
         self.update_latency()

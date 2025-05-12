@@ -111,6 +111,12 @@ def main():
         sim.config.l2m_bandwidth_limit = 128
         sim.config.gdma_rw_gap = np.inf
         sim.config.sdma_rw_gap = 10
+        sim.config.CHANNEL_SPEC = {
+            "gdma": 1,  # → RN 侧
+            "sdma": 1,  # → RN 侧
+            "ddr": 1,  # → SN 侧
+            "l2m": 1,  # → SN 侧
+        }
 
     elif topo_type in ["5x4", "4x5"]:
         sim.config.burst = 4

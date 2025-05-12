@@ -1,5 +1,35 @@
 import numpy as np
 from collections import deque, defaultdict
+from config.config import CrossRingConfig
+
+
+class ChannelBuffer:
+    """
+    IQ/EQ 内部的独立通道缓冲区。
+    只做简单 FIFO；出队时由外部仲裁器决定是否真正 pop。
+    """
+
+    def __init__(self, depth):
+        self.depth = depth
+        self.fifo = deque(maxlen=depth)
+
+    # 写入：成功返回 True，溢出返回 False
+    def push(self, flit):
+        if len(self.fifo) < self.depth:
+            self.fifo.append(flit)
+            return True
+        return False
+
+    # 只窥视不弹出
+    def peek(self):
+        return self.fifo[0] if self.fifo else None
+
+    # 真正出队
+    def pop(self):
+        return self.fifo.popleft() if self.fifo else None
+
+    def __len__(self):
+        return len(self.fifo)
 
 
 class ChannelBuffer:
@@ -169,7 +199,7 @@ class Flit:
 class Node:
     global_packet_id = -1
 
-    def __init__(self, config):
+    def __init__(self, config: CrossRingConfig):
         self.config = config
         self.initialize_data_structures()
         self.initialize_rn()
@@ -186,31 +216,32 @@ class Node:
 
     def initialize_data_structures(self):
         """Initialize the data structures for read and write databases."""
-        self.rn_rdb = {"sdma": {}, "gdma": {}}
-        self.rn_rdb_reserve = {"sdma": {}, "gdma": {}}
-        self.rn_rdb_recv = {"sdma": {}, "gdma": {}}
-        self.rn_rdb_count = {"sdma": {}, "gdma": {}}
-        self.rn_wdb = {"sdma": {}, "gdma": {}}
-        self.rn_wdb_reserve = {"sdma": {}, "gdma": {}}
-        self.rn_wdb_count = {"sdma": {}, "gdma": {}}
-        self.rn_wdb_send = {"sdma": {}, "gdma": {}}
-        self.rn_tracker = {"read": {"sdma": {}, "gdma": {}}, "write": {"sdma": {}, "gdma": {}}}
-        self.rn_tracker_wait = {"read": {"sdma": {}, "gdma": {}}, "write": {"sdma": {}, "gdma": {}}}
-        self.rn_tracker_count = {"read": {"sdma": {}, "gdma": {}}, "write": {"sdma": {}, "gdma": {}}}
-        self.rn_tracker_pointer = {"read": {"sdma": {}, "gdma": {}}, "write": {"sdma": {}, "gdma": {}}}
-        self.sn_rdb = {"ddr": {}, "l2m": {}}
-        self.sn_rsp_queue = {"ddr": {}, "l2m": {}}
-        self.sn_req_wait = {"read": {"ddr": {}, "l2m": {}}, "write": {"ddr": {}, "l2m": {}}}
-        self.sn_tracker = {"ddr": {}, "l2m": {}}
-        self.sn_tracker_count = {"ddr": {"ro": {}, "share": {}}, "l2m": {"ro": {}, "share": {}}}
-        self.sn_wdb = {"ddr": {}, "l2m": {}}
-        self.sn_wdb_recv = {"ddr": {}, "l2m": {}}
-        self.sn_wdb_count = {"ddr": {}, "l2m": {}}
+
+        self.rn_rdb = self.config._make_channels(("sdma", "gdma"))
+        self.rn_rdb_reserve = self.config._make_channels(("sdma", "gdma"))
+        self.rn_rdb_recv = self.config._make_channels(("sdma", "gdma"))
+        self.rn_rdb_count = self.config._make_channels(("sdma", "gdma"))
+        self.rn_wdb = self.config._make_channels(("sdma", "gdma"))
+        self.rn_wdb_reserve = self.config._make_channels(("sdma", "gdma"))
+        self.rn_wdb_count = self.config._make_channels(("sdma", "gdma"))
+        self.rn_wdb_send = self.config._make_channels(("sdma", "gdma"))
+        self.rn_tracker = {"read": self.config._make_channels(("sdma", "gdma")), "write": self.config._make_channels(("sdma", "gdma"))}
+        self.rn_tracker_wait = {"read": self.config._make_channels(("sdma", "gdma")), "write": self.config._make_channels(("sdma", "gdma"))}
+        self.rn_tracker_count = {"read": self.config._make_channels(("sdma", "gdma")), "write": self.config._make_channels(("sdma", "gdma"))}
+        self.rn_tracker_pointer = {"read": self.config._make_channels(("sdma", "gdma")), "write": self.config._make_channels(("sdma", "gdma"))}
+        self.sn_rdb = self.config._make_channels(("ddr", "l2m"))
+        self.sn_rsp_queue = self.config._make_channels(("ddr", "l2m"))
+        self.sn_req_wait = {"read": self.config._make_channels(("ddr", "l2m")), "write": self.config._make_channels(("ddr", "l2m"))}
+        self.sn_tracker = self.config._make_channels(("ddr", "l2m"))
+        self.sn_tracker_count = self.config._make_channels(("ddr", "l2m"), value_factory={"ro": {}, "share": {}})
+        self.sn_wdb = self.config._make_channels(("ddr", "l2m"))
+        self.sn_wdb_recv = self.config._make_channels(("ddr", "l2m"))
+        self.sn_wdb_count = self.config._make_channels(("ddr", "l2m"))
 
     def initialize_rn(self):
         """Initialize RN structures."""
-        for ip_type in ["sdma", "gdma"]:
-            for ip_pos in getattr(self.config, f"{ip_type}_send_positions"):
+        for ip_type in self.rn_rdb.keys():
+            for ip_pos in getattr(self.config, f"{ip_type[:-2]}_send_positions"):
                 self.rn_rdb[ip_type][ip_pos] = defaultdict(list)
                 self.rn_wdb[ip_type][ip_pos] = defaultdict(list)
                 self.setup_rn_trackers(ip_type, ip_pos)
@@ -247,11 +278,11 @@ class Node:
         self.sn_wdb_recv[key][ip_pos] = []
         self.sn_tracker[key][ip_pos] = []
         if self.config.topo_type != "3x3":
-            if key == "ddr":
+            if key.startwith("ddr"):
                 self.sn_wdb_count[key][ip_pos] = self.config.sn_ddr_wdb_size
                 self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_ddr_read_tracker_ostd
                 self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_ddr_write_tracker_ostd
-            elif key == "l2m":
+            elif key.startwith("l2m"):
                 self.sn_wdb_count[key][ip_pos] = self.config.sn_l2m_wdb_size
                 self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_l2m_read_tracker_ostd
                 self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_l2m_write_tracker_ostd
@@ -267,7 +298,7 @@ class Node:
 
 
 class Network:
-    def __init__(self, config, adjacency_matrix, name="network"):
+    def __init__(self, config: CrossRingConfig, adjacency_matrix, name="network"):
         self.config = config
         self.name = name
         self.current_cycle = []
@@ -277,13 +308,13 @@ class Network:
         self.eject_num = 0
         self.inject_queues = {"left": {}, "right": {}, "up": {}, "local": {}}
         self.inject_queues_pre = {"left": {}, "right": {}, "up": {}, "local": {}}
-        self.eject_queues_pre = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
+        self.eject_queues_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.eject_queues = {"up": {}, "down": {}, "ring_bridge": {}, "local": {}}
-        self.arrive_node_pre = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
-        self.ip_inject = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
-        self.ip_eject = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}}
-        self.ip_read = {"sdma": {}, "gdma": {}}
-        self.ip_write = {"sdma": {}, "gdma": {}}
+        self.arrive_node_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.ip_inject = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.ip_eject = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.ip_read = self.config._make_channels(("sdma", "gdma"))
+        self.ip_write = self.config._make_channels(("sdma", "gdma"))
         self.links = {}
         self.links_flow_stat = {"read": {}, "write": {}}
         self.links_tag = {}
@@ -292,7 +323,7 @@ class Network:
         # self.station_reservations = {"left": {}, "right": {}}
         self.inject_queue_rr = {"left": {0: {}, 1: {}}, "right": {0: {}, 1: {}}, "up": {0: {}, 1: {}}, "local": {0: {}, 1: {}}}
         self.inject_rr = {"left": {}, "right": {}, "up": {}, "local": {}}
-        self.round_robin = {"ddr": {}, "l2m": {}, "sdma": {}, "gdma": {}, "up": {}, "down": {}, "ring_bridge": {}}
+        self.round_robin = {**{"up": {}, "down": {}, "ring_bridge": {}}, **self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))}
 
         self.round_robin_counter = 0
         self.recv_flits_num = 0
@@ -320,22 +351,22 @@ class Network:
         self.max_circuits_h = None
         self.avg_circuits_v = None
         self.max_circuits_v = None
-        self.circuits_flit_h = {"ddr": 0, "sdma": 0, "l2m": 0, "gdma": 0}
-        self.circuits_flit_v = {"ddr": 0, "sdma": 0, "l2m": 0, "gdma": 0}
+        self.circuits_flit_h = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.circuits_flit_v = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.gdma_recv = 0
         self.gdma_remainder = 0
         self.gdma_count = 512
         self.l2m_recv = 0
         self.l2m_remainder = 0
         self.sdma_send = []
-        self.num_send = {"ddr": {}, "sdma": {}, "l2m": {}, "gdma": {}}
-        self.num_recv = {"ddr": {}, "sdma": {}, "l2m": {}, "gdma": {}}
-        self.per_send_throughput = {"ddr": {}, "sdma": {}, "l2m": {}, "gdma": {}}
-        self.per_recv_throughput = {"ddr": {}, "sdma": {}, "l2m": {}, "gdma": {}}
-        self.send_throughput = {"ddr": 0, "sdma": 0, "l2m": 0, "gdma": 0}
-        self.recv_throughput = {"ddr": 0, "sdma": 0, "l2m": 0, "gdma": 0}
-        self.last_select = {"sdma": {}, "gdma": {}}
-        self.throughput = {"sdma": {}, "ddr": {}, "l2m": {}, "gdma": {}}
+        self.num_send = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.num_recv = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.per_send_throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.per_recv_throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.send_throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.recv_throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.last_select = self.config._make_channels(("port_1", "port_2"))
+        self.throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
 
         # channel buffer setup
         self.IQ_ch_buffer = defaultdict(
@@ -399,10 +430,13 @@ class Network:
             self.inject_rr["left"][ip_pos] = deque([0, 1, 2])
             self.inject_rr["up"][ip_pos] = deque([0, 1, 2])
             self.inject_rr["local"][ip_pos] = deque([0, 1, 2])
-            self.round_robin["ddr"][ip_pos - config.cols] = deque([0, 1, 2, 3])
-            self.round_robin["sdma"][ip_pos - config.cols] = deque([0, 1, 2, 3])
-            self.round_robin["l2m"][ip_pos - config.cols] = deque([0, 1, 2, 3])
-            self.round_robin["gdma"][ip_pos - config.cols] = deque([0, 1, 2, 3])
+            for key in self.round_robin.keys():
+                if key[:-2] in ["ddr", "l2m", "sdma", "gdma"]:
+                    self.round_robin[key][ip_pos - config.cols] = deque([0, 1, 2, 3])
+            # self.round_robin["ddr"][ip_pos - config.cols] = deque([0, 1, 2, 3])
+            # self.round_robin["sdma"][ip_pos - config.cols] = deque([0, 1, 2, 3])
+            # self.round_robin["l2m"][ip_pos - config.cols] = deque([0, 1, 2, 3])
+            # self.round_robin["gdma"][ip_pos - config.cols] = deque([0, 1, 2, 3])
             self.inject_time[ip_pos] = []
             self.eject_time[ip_pos - config.cols] = []
             self.avg_inject_time[ip_pos] = 0
@@ -457,8 +491,8 @@ class Network:
                 for direction in ["up", "down"]:
                     self.remain_tag[direction][next_pos] = config.ITag_Max_Num_V
 
-        for ip_type in self.num_recv:
-            source_positions = getattr(config, f"{ip_type}_send_positions")
+        for ip_type in self.num_recv.keys():
+            source_positions = getattr(config, f"{ip_type[:-2]}_send_positions")
             for source in source_positions:
                 destination = source - config.cols
                 self.num_send[ip_type][source] = 0
@@ -466,20 +500,18 @@ class Network:
                 self.per_send_throughput[ip_type][source] = 0
                 self.per_recv_throughput[ip_type][destination] = 0
 
-        for ip_type in ["ddr", "l2m", "sdma", "gdma"]:
-            for ip_index in getattr(config, f"{ip_type}_send_positions"):
+        for ip_type in self.ip_inject.keys():
+            for ip_index in getattr(config, f"{ip_type[:-2]}_send_positions"):
                 ip_recv_index = ip_index - config.cols
                 self.ip_inject[ip_type][ip_index] = deque()
                 self.ip_eject[ip_type][ip_recv_index] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
-
-        for ip_type in ["sdma", "gdma"]:
-            for ip_index in getattr(config, f"{ip_type}_send_positions"):
+        for ip_type in self.ip_read.keys():
+            for ip_index in getattr(config, f"{ip_type[:-2]}_send_positions"):
                 self.ip_read[ip_type][ip_index] = deque()
                 self.ip_write[ip_type][ip_index] = deque()
                 self.last_select[ip_type][ip_index] = "write"
-
-        for ip_type in ["gdma", "sdma", "ddr", "l2m"]:
-            for ip_index in getattr(config, f"{ip_type}_send_positions"):
+        for ip_type in self.throughput.keys():
+            for ip_index in getattr(config, f"{ip_type[:-2]}_send_positions"):
                 self.throughput[ip_type][ip_index] = [0, 0, 10000000, 0]
 
     def can_move_to_next(self, flit, current, next_node):
