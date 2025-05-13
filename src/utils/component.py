@@ -10,6 +10,7 @@ class TokenBucket:
         self.rate = rate
         self.bucket_size = bucket_size
         self.tokens = bucket_size
+        self.last_cycle = 0
 
     def consume(self):
         if self.tokens > 0:
@@ -17,8 +18,13 @@ class TokenBucket:
             return True
         return False
 
-    def refill(self):
-        self.tokens = min(self.tokens + self.rate, self.bucket_size)
+    def refill(self, cycle):
+        dt = cycle - self.last_cycle
+        if dt <= 0:
+            return
+        add = dt * self.rate
+        self.last_cycle = cycle
+        self.tokens = min(self.tokens + add, self.bucket_size)
 
 
 class ChannelBuffer:
@@ -308,7 +314,7 @@ class Network:
         self.links_flow_stat = {"read": {}, "write": {}}
         self.links_tag = {}
         self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
-        self.ring_bridge = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "ft": {}, "out_TU": {}, "out_TD": {}, "EQ": {}}
+        self.ring_bridge = {"TL": {}, "TR": {}, "ft": {}, "TU": {}, "TD": {}, "EQ": {}}
         # self.inject_queue_rr = {"TL": {0: {}, 1: {}}, "TR": {0: {}, 1: {}}, "TU": {0: {}, 1: {}}, "EQ": {0: {}, 1: {}}}
         # self.inject_rr = {"TL": {}, "TR": {}, "TU": {}, "EQ": {}}
         # self.round_robin = {**{"TU": {}, "TD": {}, "RB": {}}, **self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))}
@@ -358,10 +364,9 @@ class Network:
         self.last_select = self.config._make_channels(("sdma", "gdma"))
         self.throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
 
-        # channel buffer setup
-        self.IQ_ch_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"), ChannelBuffer(self.config.IQ_CH_FIFO_DEPTH))
-
-        self.EQ_ch_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"), ChannelBuffer(self.config.EQ_CH_FIFO_DEPTH))
+        # # channel buffer setup
+        self.IQ_ch_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.EQ_ch_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
 
         self.token_bucket = defaultdict(dict)
         self.flit_size_bytes = 128
@@ -388,6 +393,8 @@ class Network:
             self.inject_queues["TL"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
             self.inject_queues["TR"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
             self.inject_queues["TU"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
+            self.inject_queues["TD"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
+            self.inject_queues["EQ"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
             self.eject_queues["IQ"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
             self.inject_queues_pre["TL"][ip_pos] = None
             self.inject_queues_pre["TR"][ip_pos] = None
@@ -456,11 +463,9 @@ class Network:
                 next_pos = pos - config.cols
                 self.ring_bridge["TL"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
                 self.ring_bridge["TR"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
-                self.ring_bridge["TU"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
-                self.ring_bridge["TD"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
                 self.ring_bridge["ft"][(pos, next_pos)] = deque(maxlen=config.ft_len)
-                self.ring_bridge["out_TU"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
-                self.ring_bridge["out_TD"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
+                self.ring_bridge["TU"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
+                self.ring_bridge["TD"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
                 self.ring_bridge["EQ"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
                 self.RB_UE_Counters["TL"][(pos, next_pos)] = {"T2": 0, "T1": 0, "T0": 0}
                 self.RB_UE_Counters["TR"][(pos, next_pos)] = {"T2": 0, "T1": 0}

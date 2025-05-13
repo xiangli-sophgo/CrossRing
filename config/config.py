@@ -9,6 +9,7 @@ from collections import deque, defaultdict
 from typing import Callable, Iterable, Dict, Any
 import copy
 
+
 class CrossRingConfig:
     def __init__(self, default_config):
         args = self.parse_args(default_config)
@@ -35,6 +36,7 @@ class CrossRingConfig:
         self.RB_OUT_FIFO_DEPTH = args.RB_OUT_FIFO_DEPTH
         self.IQ_OUT_FIFO_DEPTH = args.IQ_OUT_FIFO_DEPTH
         self.EQ_IN_FIFO_DEPTH = args.EQ_IN_FIFO_DEPTH
+        self.IQ_CH_FIFO_DEPTH = args.IQ_CH_FIFO_DEPTH
         self.EQ_CH_FIFO_DEPTH = args.EQ_CH_FIFO_DEPTH
         self.ITag_Trigger_Th_H = args.ITag_Trigger_Th_H
         self.ITag_Trigger_Th_V = args.ITag_Trigger_Th_V
@@ -63,10 +65,10 @@ class CrossRingConfig:
         self.TD_Etag_T2_UE_MAX = args.TD_Etag_T2_UE_MAX
         self.Both_side_ETag_upgrade = args.Both_side_ETag_upgrade
         self.CHANNEL_SPEC = {
-            "gdma": 1,   # → RN 侧
-            "sdma": 1,   # → RN 侧
-            "ddr":  1,   # → SN 侧
-            "l2m":  1,   # → SN 侧
+            "gdma": 1,  # → RN 侧
+            "sdma": 1,  # → RN 侧
+            "ddr": 1,  # → SN 侧
+            "l2m": 1,  # → SN 侧
         }
         assert (
             self.TL_Etag_T2_UE_MAX < self.TL_Etag_T1_UE_MAX < self.RB_IN_FIFO_DEPTH
@@ -78,17 +80,12 @@ class CrossRingConfig:
         ), "ETag parameter conditions are not met."
 
         self.update_config()
-    
 
-    def _make_channels(
-            self,
-            key_types,
-            value_factory= lambda: defaultdict(list)              # 允许 None / callable / 静态对象
-    ):
+    def _make_channels(self, key_types, value_factory=lambda: defaultdict(list)):  # 允许 None / callable / 静态对象
         # 把非 callable 的默认值包装成 deepcopy，可避免共享引用
         if not callable(value_factory):
             static_value = copy.deepcopy(value_factory)
-            value_factory = (lambda v=static_value: copy.deepcopy(v))
+            value_factory = lambda v=static_value: copy.deepcopy(v)
 
         ports = {}
         for key in key_types:
@@ -328,6 +325,7 @@ class CrossRingConfig:
         parser.add_argument("--RB_OUT_FIFO_DEPTH", type=int, default=default_config["RB_OUT_FIFO_DEPTH"], help="Depth of OUT FIFOs in Ring Bridge")
         parser.add_argument("--IQ_OUT_FIFO_DEPTH", type=int, default=default_config["IQ_OUT_FIFO_DEPTH"], help="Depth of IQ FIFOs in inject queues")
         parser.add_argument("--EQ_IN_FIFO_DEPTH", type=int, default=default_config["EQ_IN_FIFO_DEPTH"], help="Depth of EQ FIFOs in inject queues")
+        parser.add_argument("--IQ_CH_FIFO_DEPTH", type=int, default=default_config["IQ_CH_FIFO_DEPTH"], help="Length of IP inject queues")
         parser.add_argument("--EQ_CH_FIFO_DEPTH", type=int, default=default_config["EQ_CH_FIFO_DEPTH"], help="Length of IP eject queues")
         parser.add_argument("--ITag_Trigger_Th_H", type=int, default=default_config["ITag_Trigger_Th_H"], help="Horizontal ring I-Tag trigger threshold")
         parser.add_argument("--ITag_Trigger_Th_V", type=int, default=default_config["ITag_Trigger_Th_V"], help="Vertical ring I-Tag trigger threshold")

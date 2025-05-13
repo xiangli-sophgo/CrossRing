@@ -2,6 +2,7 @@ from src.core.base_model import BaseModel
 
 
 class REQ_RSP_model(BaseModel):
+    pass
     # def run(self):
     #     """Main simulation loop."""
     #     self.load_request_stream()
@@ -81,82 +82,82 @@ class REQ_RSP_model(BaseModel):
     #     self.log_summary()
     #     self.evaluate_results(self.flit_network)
 
-    def process_received_data(self):
-        """Process received data in RN and SN networks."""
-        positions = self.flit_position
-        for in_pos in positions:
-            self.process_rn_received_data(in_pos)
-            self.process_sn_received_data(in_pos)
+    # def process_received_data(self):
+    #     """Process received data in RN and SN networks."""
+    #     positions = self.flit_position
+    #     for in_pos in positions:
+    #         self.process_rn_received_data(in_pos)
+    #         self.process_sn_received_data(in_pos)
 
-    def process_rn_received_data(self, in_pos):
-        """Handle received data in the RN network."""
-        for ip_type in self.req_network.EQ_ch_buffer.keys():
-            if ip_type.startswith("ddr") or ip_type.startswith("l2m"):
-                continue
-            if in_pos in self.node.rn_rdb_recv[ip_type] and len(self.node.rn_rdb_recv[ip_type][in_pos]) > 0:
-                packet_id = self.node.rn_rdb_recv[ip_type][in_pos][0]
-                self.node.rn_rdb[ip_type][in_pos][packet_id].pop(0)
-                if len(self.node.rn_rdb[ip_type][in_pos][packet_id]) == 0:
-                    self.node.rn_rdb[ip_type][in_pos].pop(packet_id)
-                    self.node.rn_rdb_recv[ip_type][in_pos].pop(0)
-                    self.node.rn_rdb_count[ip_type][in_pos] += self.req_network.send_flits[packet_id][0].burst_length
-                    req = next(
-                        (req for req in self.node.rn_tracker["read"][ip_type][in_pos] if req.packet_id == packet_id),
-                        None,
-                    )
-                    self.req_cir_h_num_stat += req.circuits_completed_h
-                    self.req_cir_v_num_stat += req.circuits_completed_v
-                    for flit in self.flit_network.arrive_flits[packet_id]:
-                        flit.leave_db_cycle = self.cycle
-                        flit.rn_data_collection_complete_cycle = self.cycle
-                    self.node.rn_tracker["read"][ip_type][in_pos].remove(req)
-                    self.node.rn_tracker_count["read"][ip_type][in_pos] += 1
-                    self.node.rn_tracker_pointer["read"][ip_type][in_pos] -= 1
+    # def process_rn_received_data(self, in_pos):
+    #     """Handle received data in the RN network."""
+    #     for ip_type in self.req_network.EQ_ch_buffer.keys():
+    #         if ip_type.startswith("ddr") or ip_type.startswith("l2m"):
+    #             continue
+    #         if in_pos in self.node.rn_rdb_recv[ip_type] and len(self.node.rn_rdb_recv[ip_type][in_pos]) > 0:
+    #             packet_id = self.node.rn_rdb_recv[ip_type][in_pos][0]
+    #             self.node.rn_rdb[ip_type][in_pos][packet_id].pop(0)
+    #             if len(self.node.rn_rdb[ip_type][in_pos][packet_id]) == 0:
+    #                 self.node.rn_rdb[ip_type][in_pos].pop(packet_id)
+    #                 self.node.rn_rdb_recv[ip_type][in_pos].pop(0)
+    #                 self.node.rn_rdb_count[ip_type][in_pos] += self.req_network.send_flits[packet_id][0].burst_length
+    #                 req = next(
+    #                     (req for req in self.node.rn_tracker["read"][ip_type][in_pos] if req.packet_id == packet_id),
+    #                     None,
+    #                 )
+    #                 self.req_cir_h_num_stat += req.circuits_completed_h
+    #                 self.req_cir_v_num_stat += req.circuits_completed_v
+    #                 for flit in self.flit_network.arrive_flits[packet_id]:
+    #                     flit.leave_db_cycle = self.cycle
+    #                     flit.rn_data_collection_complete_cycle = self.cycle
+    #                 self.node.rn_tracker["read"][ip_type][in_pos].remove(req)
+    #                 self.node.rn_tracker_count["read"][ip_type][in_pos] += 1
+    #                 self.node.rn_tracker_pointer["read"][ip_type][in_pos] -= 1
 
-    def process_sn_received_data(self, in_pos):
-        """Handle received data in the SN network."""
-        for ip_type in self.req_network.EQ_ch_buffer.keys():
-            if ip_type.startswith("gdma") or ip_type.startswith("sdma"):
-                continue
-            if in_pos in self.node.sn_wdb_recv[ip_type] and len(self.node.sn_wdb_recv[ip_type][in_pos]) > 0:
-                packet_id = self.node.sn_wdb_recv[ip_type][in_pos][0]
-                self.node.sn_wdb[ip_type][in_pos][packet_id].pop(0)
-                if len(self.node.sn_wdb[ip_type][in_pos][packet_id]) == 0:
-                    self.node.sn_wdb[ip_type][in_pos].pop(packet_id)
-                    self.node.sn_wdb_recv[ip_type][in_pos].pop(0)
-                    self.node.sn_wdb_count[ip_type][in_pos] += self.req_network.send_flits[packet_id][0].burst_length
-                    req = next(
-                        (req for req in self.node.sn_tracker[ip_type][in_pos] if req.packet_id == packet_id),
-                        None,
-                    )
+    # def process_sn_received_data(self, in_pos):
+    #     """Handle received data in the SN network."""
+    #     for ip_type in self.req_network.EQ_ch_buffer.keys():
+    #         if ip_type.startswith("gdma") or ip_type.startswith("sdma"):
+    #             continue
+    #         if in_pos in self.node.sn_wdb_recv[ip_type] and len(self.node.sn_wdb_recv[ip_type][in_pos]) > 0:
+    #             packet_id = self.node.sn_wdb_recv[ip_type][in_pos][0]
+    #             self.node.sn_wdb[ip_type][in_pos][packet_id].pop(0)
+    #             if len(self.node.sn_wdb[ip_type][in_pos][packet_id]) == 0:
+    #                 self.node.sn_wdb[ip_type][in_pos].pop(packet_id)
+    #                 self.node.sn_wdb_recv[ip_type][in_pos].pop(0)
+    #                 self.node.sn_wdb_count[ip_type][in_pos] += self.req_network.send_flits[packet_id][0].burst_length
+    #                 req = next(
+    #                     (req for req in self.node.sn_tracker[ip_type][in_pos] if req.packet_id == packet_id),
+    #                     None,
+    #                 )
 
-                    self.req_cir_h_num_stat += req.circuits_completed_h
-                    self.req_cir_v_num_stat += req.circuits_completed_v
-                    for flit in self.flit_network.send_flits[packet_id]:
-                        flit.leave_db_cycle = self.cycle + self.config.sn_tracker_release_latency
-                        flit.sn_data_collection_complete_cycle = self.cycle
-                    # 释放tracker 增加40ns
-                    release_time = self.cycle + self.config.sn_tracker_release_latency
-                    self.node.sn_tracker_release_time[release_time].append((ip_type, in_pos, req))
+    #                 self.req_cir_h_num_stat += req.circuits_completed_h
+    #                 self.req_cir_v_num_stat += req.circuits_completed_v
+    #                 for flit in self.flit_network.send_flits[packet_id]:
+    #                     flit.leave_db_cycle = self.cycle + self.config.sn_tracker_release_latency
+    #                     flit.sn_data_collection_complete_cycle = self.cycle
+    #                 # 释放tracker 增加40ns
+    #                 release_time = self.cycle + self.config.sn_tracker_release_latency
+    #                 self.node.sn_tracker_release_time[release_time].append((ip_type, in_pos, req))
 
-    def check_and_release_sn_tracker(self):
-        """Check if any trackers can be released based on the current cycle."""
-        for release_time in sorted(self.node.sn_tracker_release_time.keys()):
-            if release_time > self.cycle:
-                return
-            tracker_list = self.node.sn_tracker_release_time.pop(release_time)
-            for sn_type, in_pos, req in tracker_list:
-                self.node.sn_tracker[sn_type][in_pos].remove(req)
-                self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] += 1
+    # def check_and_release_sn_tracker(self):
+    #     """Check if any trackers can be released based on the current cycle."""
+    #     for release_time in sorted(self.node.sn_tracker_release_time.keys()):
+    #         if release_time > self.cycle:
+    #             return
+    #         tracker_list = self.node.sn_tracker_release_time.pop(release_time)
+    #         for sn_type, in_pos, req in tracker_list:
+    #             self.node.sn_tracker[sn_type][in_pos].remove(req)
+    #             self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] += 1
 
-                if self.node.sn_wdb_count[sn_type][in_pos] > 0 and self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] > 0 and self.node.sn_req_wait[req.req_type][sn_type][in_pos]:
-                    new_req = self.node.sn_req_wait[req.req_type][sn_type][in_pos].pop(0)
-                    new_req.sn_tracker_type = req.sn_tracker_type
-                    new_req.req_attr = "old"
-                    self.node.sn_tracker[sn_type][in_pos].append(new_req)
-                    self.node.sn_tracker_count[sn_type][new_req.sn_tracker_type][in_pos] -= 1
-                    self.node.sn_wdb_count[sn_type][in_pos] -= new_req.burst_length
-                    self.create_rsp(new_req, "positive")
+    #             if self.node.sn_wdb_count[sn_type][in_pos] > 0 and self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] > 0 and self.node.sn_req_wait[req.req_type][sn_type][in_pos]:
+    #                 new_req = self.node.sn_req_wait[req.req_type][sn_type][in_pos].pop(0)
+    #                 new_req.sn_tracker_type = req.sn_tracker_type
+    #                 new_req.req_attr = "old"
+    #                 self.node.sn_tracker[sn_type][in_pos].append(new_req)
+    #                 self.node.sn_tracker_count[sn_type][new_req.sn_tracker_type][in_pos] -= 1
+    #                 self.node.sn_wdb_count[sn_type][in_pos] -= new_req.burst_length
+    #                 self.create_rsp(new_req, "positive")
 
     # def move_all_to_inject_queue(self, network, network_type):
     #     """Move all items from pre-injection queues to injection queues for a given network."""
@@ -668,174 +669,176 @@ class REQ_RSP_model(BaseModel):
 
     #     return vdown_flit
 
-    def _handle_eject_arbitration(self, network, flit_type):
-        """处理eject的仲裁逻辑,根据flit类型处理不同的eject队列"""
-        if flit_type == "req":
-            for in_pos in self.flit_position:
-                ip_pos = in_pos - self.config.cols
-                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["TU", "RB", "TD", "IQ"]]
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "ddr", ip_pos)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "l2m", ip_pos)
+    # def _handle_eject_arbitration(self, network, flit_type):
+    #     """处理eject的仲裁逻辑,根据flit类型处理不同的eject队列"""
+    #     if flit_type == "req":
+    #         for in_pos in self.flit_position:
+    #             ip_pos = in_pos - self.config.cols
+    #             eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["TU", "RB", "TD", "IQ"]]
+    #             if not any(eject_flits):
+    #                 continue
+    #             eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "ddr", ip_pos)
+    #             eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "l2m", ip_pos)
 
-            if self.cycle_mod:
-                for in_pos in self.flit_position:
-                    ip_pos = in_pos - self.config.cols
-                    for ip_type in network.EQ_ch_buffer.keys():
-                        if ip_type.startswith("ddr") or ip_type.startswith("l2m"):
-                            if network.ip_eject[ip_type][ip_pos]:
-                                req = network.ip_eject[ip_type][ip_pos].popleft()
-                                self._handle_request(req, in_pos)
+    #         if self.cycle_mod:
+    #             for in_pos in self.sn_positions:
+    #                 ip_pos = in_pos - self.config.cols
+    #                 for ip_type in network.EQ_ch_buffer.keys():
+    #                     if ip_type.startswith("ddr") or ip_type.startswith("l2m"):
+    #                         if network.ip_eject[ip_type][ip_pos]:
+    #                             req = network.ip_eject[ip_type][ip_pos].popleft()
+    #                             self._sn_handle_request(req, in_pos)
 
-        elif flit_type == "rsp":
-            for in_pos in self.flit_position:
-                ip_pos = in_pos - self.config.cols
-                eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["TU", "RB", "TD", "IQ"]]
+    #     elif flit_type == "rsp":
+    #         for in_pos in self.flit_position:
+    #             ip_pos = in_pos - self.config.cols
+    #             eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["TU", "RB", "TD", "IQ"]]
 
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "sdma", ip_pos)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "gdma", ip_pos)
+    #             eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "sdma", ip_pos)
+    #             eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "gdma", ip_pos)
 
-            if self.cycle_mod:
-                for in_pos in self.flit_position:
-                    ip_pos = in_pos - self.config.cols
-                    for ip_type in network.EQ_ch_buffer.keys():
-                        if ip_type.startswith("sdma") or ip_type.startswith("gdma"):
-                            if network.ip_eject[ip_type][ip_pos]:
-                                rsp = network.ip_eject[ip_type][ip_pos].popleft()
-                                self._rn_handle_response(rsp, in_pos)
+    #         if self.cycle_mod:
+    #             for in_pos in self.flit_position:
+    #                 ip_pos = in_pos - self.config.cols
+    #                 for ip_type in network.EQ_ch_buffer.keys():
+    #                     if ip_type.startswith("sdma") or ip_type.startswith("gdma"):
+    #                         if network.ip_eject[ip_type][ip_pos]:
+    #                             rsp = network.ip_eject[ip_type][ip_pos].popleft()
+    #                             self._rn_handle_response(rsp, in_pos)
 
-        elif flit_type == "data":
-            for in_pos in self.flit_position:
-                ip_pos = in_pos - self.config.cols
-                eject_flits = [
-                    network.eject_queues[fifo_pos][ip_pos][0] if ip_pos in network.eject_queues[fifo_pos] and network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["TU", "RB", "TD", "IQ"]
-                ]
+    #     elif flit_type == "data":
+    #         for in_pos in self.flit_position:
+    #             ip_pos = in_pos - self.config.cols
+    #             eject_flits = [
+    #                 network.eject_queues[fifo_pos][ip_pos][0] if ip_pos in network.eject_queues[fifo_pos] and network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["TU", "RB", "TD", "IQ"]
+    #             ]
 
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "ddr", ip_pos)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "l2m", ip_pos)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "sdma", ip_pos)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "gdma", ip_pos)
+    #             eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "ddr", ip_pos)
+    #             eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "l2m", ip_pos)
+    #             eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "sdma", ip_pos)
+    #             eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["RB"][ip_pos], "gdma", ip_pos)
 
-            if self.cycle_mod:
-                for in_pos in self.flit_position:
-                    for ip_type in network.EQ_ch_buffer.keys():
-                        ip_pos = in_pos - self.config.cols
-                        if network.ip_eject[ip_type][ip_pos]:
-                            flit = network.ip_eject[ip_type][ip_pos][0]
-                            if flit.flit_type == "data" and flit.req_type == "write":
-                                if flit.original_destination_type.startswith("ddr"):
-                                    self._refill_ddr_tokens(flit.destination + self.config.cols, flit.original_destination_type)
-                                    if self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] < 1:
-                                        continue
-                                    self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] -= 1
+    #         if self.cycle_mod:
+    #             for in_pos in self.flit_position:
+    #                 for ip_type in network.EQ_ch_buffer.keys():
+    #                     ip_pos = in_pos - self.config.cols
+    #                     if network.ip_eject[ip_type][ip_pos]:
+    #                         flit = network.ip_eject[ip_type][ip_pos][0]
+    #                         if flit.flit_type == "data" and flit.req_type == "write":
+    #                             if flit.original_destination_type.startswith("ddr"):
+    #                                 self._refill_ddr_tokens(flit.destination + self.config.cols, flit.original_destination_type)
+    #                                 if self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] < 1:
+    #                                     continue
+    #                                 self.ddr_tokens[flit.destination + self.config.cols][flit.original_destination_type] -= 1
 
-                                elif flit.original_destination_type[:3] == "l2m":
-                                    self._refill_l2m_tokens(flit.destination + self.config.cols, flit.original_destination_type, flit.req_type)
-                                    if self.l2m_tokens[flit.req_type][flit.destination + self.config.cols][flit.original_destination_type] < 1:
-                                        continue
-                                    self.l2m_tokens[flit.req_type][flit.destination + self.config.cols][flit.original_destination_type] -= 1
+    #                             elif flit.original_destination_type[:3] == "l2m":
+    #                                 self._refill_l2m_tokens(flit.destination + self.config.cols, flit.original_destination_type, flit.req_type)
+    #                                 if self.l2m_tokens[flit.req_type][flit.destination + self.config.cols][flit.original_destination_type] < 1:
+    #                                     continue
+    #                                 self.l2m_tokens[flit.req_type][flit.destination + self.config.cols][flit.original_destination_type] -= 1
 
-                            flit = network.ip_eject[ip_type][ip_pos].popleft()
-                            flit.arrival_cycle = self.cycle
-                            network.arrive_node_pre[ip_type][ip_pos] = flit
-                            network.eject_num += 1
-                            network.arrive_flits[flit.packet_id].append(flit)
-                            network.recv_flits_num += 1
-                            if len(network.arrive_flits[flit.packet_id]) == flit.burst_length:
-                                for flit in network.arrive_flits[flit.packet_id]:
-                                    if flit.req_type == "read":
-                                        flit.rn_data_collection_complete_cycle = self.cycle
-                                    elif flit.req_type == "write":
-                                        flit.sn_data_collection_complete_cycle = self.cycle
-            for in_pos in self.flit_position:
-                ip_pos = in_pos - self.config.cols
-                for ip_type in network.eject_queues_pre.keys():
-                    if ip_pos in network.eject_queues_pre[ip_type] and network.eject_queues_pre[ip_type][ip_pos]:
-                        network.ip_eject[ip_type][ip_pos].append(network.eject_queues_pre[ip_type][ip_pos])
-                        network.eject_queues_pre[ip_type][ip_pos] = None
+    #                         flit = network.ip_eject[ip_type][ip_pos].popleft()
+    #                         flit.arrival_cycle = self.cycle
+    #                         network.arrive_node_pre[ip_type][ip_pos] = flit
+    #                         network.eject_num += 1
+    #                         network.arrive_flits[flit.packet_id].append(flit)
+    #                         network.recv_flits_num += 1
+    #                         if len(network.arrive_flits[flit.packet_id]) == flit.burst_length:
+    #                             for flit in network.arrive_flits[flit.packet_id]:
+    #                                 if flit.req_type == "read":
+    #                                     flit.rn_data_collection_complete_cycle = self.cycle
+    #                                 elif flit.req_type == "write":
+    #                                     flit.sn_data_collection_complete_cycle = self.cycle
+    #         for in_pos in self.flit_position:
+    #             ip_pos = in_pos - self.config.cols
+    #             for ip_type in network.eject_queues_pre.keys():
+    #                 if ip_pos in network.eject_queues_pre[ip_type] and network.eject_queues_pre[ip_type][ip_pos]:
+    #                     network.ip_eject[ip_type][ip_pos].append(network.eject_queues_pre[ip_type][ip_pos])
+    #                     network.eject_queues_pre[ip_type][ip_pos] = None
 
-        # 最后,更新预先排队的eject队列
-        if flit_type == "req":
-            in_pos_position = set(self.config.ddr_send_positions + self.config.l2m_send_positions)
-        elif flit_type == "rsp":
-            in_pos_position = set(self.config.sdma_send_positions + self.config.gdma_send_positions)
-        elif flit_type == "data":
-            in_pos_position = self.flit_position
+    #     # 最后,更新预先排队的eject队列
+    #     if flit_type == "req":
+    #         in_pos_position = set(self.config.ddr_send_positions + self.config.l2m_send_positions)
+    #     elif flit_type == "rsp":
+    #         in_pos_position = set(self.config.sdma_send_positions + self.config.gdma_send_positions)
+    #     elif flit_type == "data":
+    #         in_pos_position = self.flit_position
 
-        if self.cycle_mod == 0 or flit_type != "data":
-            return
-        for in_pos in in_pos_position:
-            ip_pos = in_pos - self.config.cols
-            for ip_type in network.eject_queues_pre.keys():
-                if ip_pos in network.eject_queues_pre[ip_type] and network.eject_queues_pre[ip_type][ip_pos]:
-                    network.ip_eject[ip_type][ip_pos].append(network.eject_queues_pre[ip_type][ip_pos])
-                    network.eject_queues_pre[ip_type][ip_pos] = None
+    #     for in_pos in in_pos_position:
+    #         ip_pos = in_pos - self.config.cols
+    #         for ip_type in network.eject_queues_pre.keys():
+    #             if ip_pos in network.eject_queues_pre[ip_type] and network.eject_queues_pre[ip_type][ip_pos]:
+    #                 network.ip_eject[ip_type][ip_pos].append(network.eject_queues_pre[ip_type][ip_pos])
+    #                 network.eject_queues_pre[ip_type][ip_pos] = None
 
-                if network.arrive_node_pre[ip_type][ip_pos]:
-                    self.node.rn_rdb[ip_type][in_pos][network.arrive_node_pre[ip_type][ip_pos].packet_id].append(network.arrive_node_pre[ip_type][ip_pos])
-                    if (
-                        len(self.node.rn_rdb[ip_type][in_pos][network.arrive_node_pre[ip_type][ip_pos].packet_id])
-                        == self.node.rn_rdb[ip_type][in_pos][network.arrive_node_pre[ip_type][ip_pos].packet_id][0].burst_length
-                    ):
-                        self.node.rn_rdb_recv[ip_type][in_pos].append(network.arrive_node_pre[ip_type][ip_pos].packet_id)
-                    network.arrive_node_pre[ip_type][ip_pos] = None
-                if network.arrive_node_pre[ip_type][ip_pos]:
-                    self.node.sn_wdb[ip_type][in_pos][network.arrive_node_pre[ip_type][ip_pos].packet_id].append(network.arrive_node_pre[ip_type][ip_pos])
-                    if (
-                        len(self.node.sn_wdb[ip_type][in_pos][network.arrive_node_pre[ip_type][ip_pos].packet_id])
-                        == self.node.sn_wdb[ip_type][in_pos][network.arrive_node_pre[ip_type][ip_pos].packet_id][0].burst_length
-                    ):
-                        self.node.sn_wdb_recv[ip_type][in_pos].append(network.arrive_node_pre[ip_type][ip_pos].packet_id)
-                    network.arrive_node_pre[ip_type][ip_pos] = None
+    #             if self.cycle_mod == 0 or flit_type != "data":
+    #                 continue
+    #             if network.arrive_node_pre[ip_type][ip_pos]:
+    #                 self.node.rn_rdb[ip_type][in_pos][network.arrive_node_pre[ip_type][ip_pos].packet_id].append(network.arrive_node_pre[ip_type][ip_pos])
+    #                 if (
+    #                     len(self.node.rn_rdb[ip_type][in_pos][network.arrive_node_pre[ip_type][ip_pos].packet_id])
+    #                     == self.node.rn_rdb[ip_type][in_pos][network.arrive_node_pre[ip_type][ip_pos].packet_id][0].burst_length
+    #                 ):
+    #                     self.node.rn_rdb_recv[ip_type][in_pos].append(network.arrive_node_pre[ip_type][ip_pos].packet_id)
+    #                 network.arrive_node_pre[ip_type][ip_pos] = None
+    #             if network.arrive_node_pre[ip_type][ip_pos]:
+    #                 self.node.sn_wdb[ip_type][in_pos][network.arrive_node_pre[ip_type][ip_pos].packet_id].append(network.arrive_node_pre[ip_type][ip_pos])
+    #                 if (
+    #                     len(self.node.sn_wdb[ip_type][in_pos][network.arrive_node_pre[ip_type][ip_pos].packet_id])
+    #                     == self.node.sn_wdb[ip_type][in_pos][network.arrive_node_pre[ip_type][ip_pos].packet_id][0].burst_length
+    #                 ):
+    #                     self.node.sn_wdb_recv[ip_type][in_pos].append(network.arrive_node_pre[ip_type][ip_pos].packet_id)
+    #                 network.arrive_node_pre[ip_type][ip_pos] = None
 
-    def _rn_handle_response(self, rsp, in_pos):
-        """处理response的eject"""
-        req = next(
-            (req for req in self.node.rn_tracker[rsp.req_type][self.rn_type][in_pos] if req.packet_id == rsp.packet_id),
-            None,
-        )
-        self.rsp_cir_h_num_stat += rsp.circuits_completed_h
-        self.rsp_cir_v_num_stat += rsp.circuits_completed_v
-        if not req:
-            return
-        rsp.rn_receive_rsp_cycle = self.cycle
-        req.sync_latency_record(rsp)
-        if rsp.req_type == "read":
-            if rsp.rsp_type == "negative":
-                if not req.early_rsp:
-                    req.req_state = "invalid"
-                    req.is_injected = False
-                    req.path_index = 0
-                    self.node.rn_rdb_count[self.rn_type][in_pos] += req.burst_length
-                    self.node.rn_rdb[self.rn_type][in_pos].pop(req.packet_id)
-                    self.node.rn_tracker_wait["read"][self.rn_type][in_pos].append(req)
-            else:
-                req.req_state = "valid"
-                self.node.rn_rdb_reserve[self.rn_type][in_pos] += 1
-                if req not in self.node.rn_tracker_wait["read"][self.rn_type][in_pos]:
-                    req.is_injected = False
-                    req.path_index = 0
-                    req.early_rsp = True
-                    self.node.rn_tracker_wait["read"][self.rn_type][in_pos].append(req)
-        elif rsp.req_type == "write":
-            if rsp.rsp_type == "negative":
-                self.negative_rsp_num_stat += 1
-                if not req.early_rsp:
-                    req.req_state = "invalid"
-                    req.is_injected = False
-                    req.is_arrive = False
-                    req.path_index = 0
-                    self.node.rn_tracker_wait["write"][self.rn_type][in_pos].append(req)
-            elif rsp.rsp_type == "positive":
-                self.positive_rsp_num_stat += 1
+    # def _rn_handle_response(self, rsp, in_pos):
+    #     """处理response的eject"""
+    #     req = next(
+    #         (req for req in self.node.rn_tracker[rsp.req_type][self.rn_type][in_pos] if req.packet_id == rsp.packet_id),
+    #         None,
+    #     )
+    #     self.rsp_cir_h_num_stat += rsp.circuits_completed_h
+    #     self.rsp_cir_v_num_stat += rsp.circuits_completed_v
+    #     if not req:
+    #         return
+    #     rsp.rn_receive_rsp_cycle = self.cycle
+    #     req.sync_latency_record(rsp)
+    #     if rsp.req_type == "read":
+    #         if rsp.rsp_type == "negative":
+    #             if not req.early_rsp:
+    #                 req.req_state = "invalid"
+    #                 req.is_injected = False
+    #                 req.path_index = 0
+    #                 self.node.rn_rdb_count[self.rn_type][in_pos] += req.burst_length
+    #                 self.node.rn_rdb[self.rn_type][in_pos].pop(req.packet_id)
+    #                 self.node.rn_tracker_wait["read"][self.rn_type][in_pos].append(req)
+    #         else:
+    #             req.req_state = "valid"
+    #             self.node.rn_rdb_reserve[self.rn_type][in_pos] += 1
+    #             if req not in self.node.rn_tracker_wait["read"][self.rn_type][in_pos]:
+    #                 req.is_injected = False
+    #                 req.path_index = 0
+    #                 req.early_rsp = True
+    #                 self.node.rn_tracker_wait["read"][self.rn_type][in_pos].append(req)
+    #     elif rsp.req_type == "write":
+    #         if rsp.rsp_type == "negative":
+    #             self.negative_rsp_num_stat += 1
+    #             if not req.early_rsp:
+    #                 req.req_state = "invalid"
+    #                 req.is_injected = False
+    #                 req.is_arrive = False
+    #                 req.path_index = 0
+    #                 self.node.rn_tracker_wait["write"][self.rn_type][in_pos].append(req)
+    #         elif rsp.rsp_type == "positive":
+    #             self.positive_rsp_num_stat += 1
 
-                req.req_state = "valid"
+    #             req.req_state = "valid"
 
-                self.node.rn_wdb_reserve[self.rn_type][in_pos] += 1
-                if req not in self.node.rn_tracker_wait["write"][self.rn_type][in_pos]:
-                    req.is_injected = False
-                    req.path_index = 0
-                    req.early_rsp = True
-                    self.node.rn_tracker_wait["write"][self.rn_type][in_pos].append(req)
-            else:
-                self.node.rn_wdb_send[self.rn_type][in_pos].append(rsp.packet_id)
-                self.rn_send_num_stat += 1
+    #             self.node.rn_wdb_reserve[self.rn_type][in_pos] += 1
+    #             if req not in self.node.rn_tracker_wait["write"][self.rn_type][in_pos]:
+    #                 req.is_injected = False
+    #                 req.path_index = 0
+    #                 req.early_rsp = True
+    #                 self.node.rn_tracker_wait["write"][self.rn_type][in_pos].append(req)
+    #         else:
+    #             self.node.rn_wdb_send[self.rn_type][in_pos].append(rsp.packet_id)
+    #             self.rn_send_num_stat += 1

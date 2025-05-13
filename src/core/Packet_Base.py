@@ -623,7 +623,7 @@ class Packet_Base_model(BaseModel):
                     ip_pos = in_pos - self.config.cols
                     if network.ip_eject[self.sn_type][ip_pos]:
                         req = network.ip_eject[self.sn_type][ip_pos][0]
-                        if self._handle_request(req, in_pos):
+                        if self._sn_handle_request(req, in_pos):
                             network.ip_eject[self.sn_type][ip_pos].popleft()
 
         elif flit_type == "rsp":
@@ -746,7 +746,7 @@ class Packet_Base_model(BaseModel):
                         self.node.sn_wdb_recv[self.sn_type][in_pos].append(flit.packet_id)
                     network.arrive_node_pre[self.sn_type][ip_pos] = None
 
-    def _handle_request(self, req, in_pos):
+    def _sn_handle_request(self, req, in_pos):
         """处理request类型的eject"""
         if req.req_type == "read":
             if req.req_attr == "new" and self.node.sn_tracker_count[self.sn_type]["ro"][in_pos] > 0:

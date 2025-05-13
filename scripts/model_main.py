@@ -14,7 +14,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_2260E_case3.txt"
+    file_name = r"traffic_2260E_case2.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -66,12 +66,12 @@ def main():
         file_name=file_name,
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
-        plot_flow_fig=1,
+        plot_flow_fig=0,
         plot_RN_BW_fig=1,
         plot_link_state=0,
         plot_ring_bridge_state=0,
-        print_trace=0,
-        show_trace_id=100,
+        print_trace=1,
+        show_trace_id=0,
         show_node_id=3,
     )
 
@@ -96,7 +96,7 @@ def main():
         sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
         sim.config.sn_ddr_read_tracker_ostd = 64
         sim.config.sn_ddr_write_tracker_ostd = 32
-        sim.config.sn_l2m_read_tracker_ostd = 64
+        sim.config.sn_l2m_read_tracker_ostd = 16
         sim.config.sn_l2m_write_tracker_ostd = 64
         sim.config.sn_ddr_wdb_size = sim.config.sn_ddr_write_tracker_ostd * sim.config.burst
         sim.config.sn_l2m_wdb_size = sim.config.sn_l2m_write_tracker_ostd * sim.config.burst
@@ -105,17 +105,19 @@ def main():
         sim.config.ddr_W_latency_original = 16
         sim.config.l2m_R_latency_original = 12
         sim.config.l2m_W_latency_original = 16
-        sim.config.ddr_bandwidth_limit = 76.8 / 2
+        # sim.config.ddr_bandwidth_limit = 76.8 / 2
+        sim.config.ddr_bandwidth_limit = 128
         sim.config.EQ_CH_FIFO_DEPTH = 10
-        sim.config.RB_OUT_FIFO_DEPTH = 8
+        sim.config.RB_IN_FIFO_DEPTH = 16
+        sim.config.RB_OUT_FIFO_DEPTH = 16
         sim.config.l2m_bandwidth_limit = 128
         sim.config.gdma_rw_gap = np.inf
-        sim.config.sdma_rw_gap = 10
+        sim.config.sdma_rw_gap = np.inf
         sim.config.CHANNEL_SPEC = {
-            "gdma": 1,  # → RN 侧
-            "sdma": 1,  # → RN 侧
-            "ddr": 1,  # → SN 侧
-            "l2m": 1,  # → SN 侧
+            "gdma": 1,
+            "sdma": 1,
+            "ddr": 4,
+            "l2m": 2,
         }
 
     elif topo_type in ["5x4", "4x5"]:
