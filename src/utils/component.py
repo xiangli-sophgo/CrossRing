@@ -230,7 +230,7 @@ class Node:
     def initialize_sn(self):
         """Initialize SN structures."""
         self.sn_tracker_release_time = defaultdict(list)
-        for ip_pos in self.config.ddr_send_positions + self.config.l2m_send_positions:
+        for ip_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions):
             for key in self.sn_tracker:
                 self.sn_rdb[key][ip_pos] = []
                 self.sn_wdb[key][ip_pos] = defaultdict(list)
@@ -243,24 +243,24 @@ class Node:
             self.sn_req_wait[req_type][key][ip_pos] = []
         self.sn_wdb_recv[key][ip_pos] = []
         self.sn_tracker[key][ip_pos] = []
-        if self.config.topo_type != "3x3":
-            if key.startwith("ddr"):
-                self.sn_wdb_count[key][ip_pos] = self.config.sn_ddr_wdb_size
-                self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_ddr_read_tracker_ostd
-                self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_ddr_write_tracker_ostd
-            elif key.startwith("l2m"):
-                self.sn_wdb_count[key][ip_pos] = self.config.sn_l2m_wdb_size
-                self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_l2m_read_tracker_ostd
-                self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_l2m_write_tracker_ostd
-        else:
-            if ip_pos in self.config.ddr_real_positions:
-                self.sn_wdb_count[key][ip_pos] = self.config.sn_ddr_wdb_size
-                self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_ddr_read_tracker_ostd
-                self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_ddr_write_tracker_ostd
-            elif ip_pos in self.config.l2m_real_positions:
-                self.sn_wdb_count[key][ip_pos] = self.config.sn_l2m_wdb_size
-                self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_l2m_read_tracker_ostd
-                self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_l2m_write_tracker_ostd
+        # if self.config.topo_type != "3x3":
+        if key.startswith("ddr"):
+            self.sn_wdb_count[key][ip_pos] = self.config.sn_ddr_wdb_size
+            self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_ddr_read_tracker_ostd
+            self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_ddr_write_tracker_ostd
+        elif key.startswith("l2m"):
+            self.sn_wdb_count[key][ip_pos] = self.config.sn_l2m_wdb_size
+            self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_l2m_read_tracker_ostd
+            self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_l2m_write_tracker_ostd
+        # else:
+        # if ip_pos in self.config.ddr_real_positions:
+        #     self.sn_wdb_count[key][ip_pos] = self.config.sn_ddr_wdb_size
+        #     self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_ddr_read_tracker_ostd
+        #     self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_ddr_write_tracker_ostd
+        # elif ip_pos in self.config.l2m_real_positions:
+        #     self.sn_wdb_count[key][ip_pos] = self.config.sn_l2m_wdb_size
+        #     self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_l2m_read_tracker_ostd
+        #     self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_l2m_write_tracker_ostd
 
 
 class Network:
@@ -401,7 +401,7 @@ class Network:
                 elif key == "EQ":
                     self.round_robin[key][ip_pos - config.cols] = deque([0, 1, 2, 3])
                 else:
-                    self.round_robin[key][ip_pos - config.cols] = deque([0, 1, 2, 3])
+                    self.round_robin[key][ip_pos - config.cols] = deque([0, 1, 2, 3, 4])
 
             self.inject_time[ip_pos] = []
             self.eject_time[ip_pos - config.cols] = []
@@ -594,8 +594,12 @@ class Network:
 
         if current - next_node == self.config.cols:
             # 向 Ring Bridge 移动
-            # TODO: RING BRIDGE TU 和 TD
-            return len(self.ring_bridge["TU"][(current, next_node)]) < self.config.RB_IN_FIFO_DEPTH
+            # return len(self.ring_bridge["TU"][(current, next_node)]) < self.config.RB_IN_FIFO_DEPTH
+            # v1.3 在IQ中分TU和TD两个FIFO
+            if len(flit.path) > 2 and flit.path[2] - flit.path[1] == self.config.cols * 2:
+                return len(self.inject_queues["TD"][current]) < self.config.IQ_OUT_FIFO_DEPTH
+            elif len(flit.path) > 2 and flit.path[2] - flit.path[1] == -self.config.cols * 2:
+                return len(self.inject_queues["TU"][current]) < self.config.IQ_OUT_FIFO_DEPTH
         elif next_node - current == 1:
             # 向右移动
             if self.links[(current - 1, current)][-1] is not None:
@@ -1259,7 +1263,9 @@ class Network:
                             next_pos = next_node - self.config.cols * 2 if next_node - self.config.cols * 2 >= col_start else col_start
                             flit.current_link = (next_node, next_pos)
                             flit.current_seat_index = 0
-                    elif flit.ETag_priority == "T0" and self.T0_Etag_Order_FIFO[0] == (next_node, flit) and self.EQ_UE_Counters["TU"][next_node]["T0"] < self.config.EQ_IN_FIFO_DEPTH:
+                    elif (
+                        flit.ETag_priority == "T0" and self.T0_Etag_Order_FIFO[0] == (next_node, flit) and self.EQ_UE_Counters["TU"][next_node]["T0"] < self.config.EQ_IN_FIFO_DEPTH
+                    ):
                         self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
                         flit.is_delay = False
                         flit.is_arrive = True
@@ -1447,10 +1453,6 @@ class Network:
             current, next_node = flit.current_link
             if current - next_node != self.config.cols:
                 link = self.links.get(flit.current_link)
-                # print(flit.current_seat_index)
-                # if link[flit.current_seat_index] is not None:
-                # print(flit)
-                # return
                 link[flit.current_seat_index] = flit
                 if (flit.current_seat_index == 6 and len(link) == 7) or (flit.current_seat_index == 1 and len(link) == 2):
                     self.links_flow_stat[flit.req_type][flit.current_link] += 1
@@ -1459,8 +1461,13 @@ class Network:
                 if not flit.is_on_station:
                     # 使用字典映射 seat_index 到 ring_bridge 的方向和深度限制
 
-                    direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, ("TU", self.config.RB_IN_FIFO_DEPTH))
-                    if len(self.ring_bridge[direction][flit.current_link]) < max_depth:
+                    # direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, ("TU", self.config.RB_IN_FIFO_DEPTH))
+                    direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, ("TU", self.config.IQ_OUT_FIFO_DEPTH))
+                    if direction == "TU":
+                        if flit.packet_id == 86:
+                            print(flit)
+                        flit.is_on_station = True
+                    elif len(self.ring_bridge[direction][flit.current_link]) < max_depth:
                         self.ring_bridge[direction][flit.current_link].append(flit)
                         flit.is_on_station = True
             return False

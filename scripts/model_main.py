@@ -66,12 +66,12 @@ def main():
         file_name=file_name,
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
-        plot_flow_fig=1,
+        plot_flow_fig=0,
         plot_RN_BW_fig=1,
         plot_link_state=0,
         plot_ring_bridge_state=0,
         print_trace=0,
-        show_trace_id=56,
+        show_trace_id=86,
         show_node_id=5,
     )
 
@@ -106,7 +106,7 @@ def main():
         sim.config.l2m_R_latency_original = 12
         sim.config.l2m_W_latency_original = 16
         # sim.config.ddr_bandwidth_limit = 76.8 / 2
-        sim.config.ddr_bandwidth_limit = 76.8 / 2
+        sim.config.ddr_bandwidth_limit = np.inf
         sim.config.l2m_bandwidth_limit = np.inf
         sim.config.IQ_CH_FIFO_DEPTH = 10
         sim.config.EQ_CH_FIFO_DEPTH = 10

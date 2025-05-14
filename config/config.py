@@ -186,8 +186,8 @@ class CrossRingConfig:
             self.sdma_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
             self.l2m_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
             self.gdma_send_positions = self.generate_ip_positions([i for i in range(self.rows) if i % 2 == 0], [])
-            self.ddr_real_positions = [3, 5, 9, 11, 15, 17]
-            self.l2m_real_positions = [4, 16]
+            # self.ddr_real_positions = [3, 5, 9, 10, 11, 15, 17]
+            # self.l2m_real_positions = [4, 16]
         else:
             raise ValueError("Error topology type: ", topo_type)
 
