@@ -3,7 +3,7 @@ from collections import deque, defaultdict
 
 from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths
 from config.config import CrossRingConfig
-from src.utils.component import Flit, Network, Node
+from src.utils.component import Flit, Network, Node, TokenBucket
 from src.core.CrossRing_Piece_Visualizer import CrossRingVisualizer
 from src.core.Link_State_Visualizer import NetworkLinkVisualizer
 import matplotlib.pyplot as plt
@@ -24,24 +24,6 @@ from matplotlib.patches import Rectangle, FancyArrowPatch, Patch
 from matplotlib.lines import Line2D
 import matplotlib.colors as mcolors
 import matplotlib.cm as cm
-
-
-class TokenBucket:
-    """Simple token bucket for rate limiting."""
-
-    def __init__(self, rate=1, bucket_size=10):
-        self.rate = rate
-        self.bucket_size = bucket_size
-        self.tokens = bucket_size
-
-    def consume(self):
-        if self.tokens > 0:
-            self.tokens -= 1
-            return True
-        return False
-
-    def refill(self):
-        self.tokens = min(self.tokens + self.rate, self.bucket_size)
 
 
 class BaseModel:
@@ -141,27 +123,6 @@ class BaseModel:
         self.rn_positions = set(self.config.gdma_send_positions + self.config.sdma_send_positions)
         self.sn_positions = set(self.config.ddr_send_positions + self.config.l2m_send_positions)
         self.flit_positions = set(self.config.gdma_send_positions + self.config.sdma_send_positions + self.config.ddr_send_positions + self.config.l2m_send_positions)
-
-        # self.flit_size_bytes = 128
-        # self.ddr_bytes_per_cycle = self.config.ddr_bandwidth_limit / self.config.network_frequency / self.flit_size_bytes
-        # self.ddr_ips = self.config.ddr_send_positions
-        # # 每个 DDR IP 的桶容量与初始令牌数
-        # self.ddr_bucket_capacity = {ip: {"ddr_1": self.config.ddr_bandwidth_limit, "ddr_2": self.config.ddr_bandwidth_limit} for ip in self.ddr_ips}
-        # self.ddr_tokens = {ip: {"ddr_1": self.ddr_bucket_capacity[ip]["ddr_1"], "ddr_2": self.ddr_bucket_capacity[ip]["ddr_2"]} for ip in self.ddr_ips}
-        # self.ddr_last_cycle = {ip: {"ddr_1": 0, "ddr_2": 0} for ip in self.ddr_ips}
-
-        # # L2M token‐bucket (single bucket per L2M port) ---
-        # self.l2m_bytes_per_cycle = self.config.l2m_bandwidth_limit / self.config.network_frequency / self.flit_size_bytes
-        # self.l2m_ips = self.config.l2m_send_positions
-        # self.l2m_bucket_capacity = {
-        #     "read": {ip: {"l2m_1": self.config.l2m_bandwidth_limit, "l2m_2": self.config.l2m_bandwidth_limit} for ip in self.l2m_ips},
-        #     "write": {ip: {"l2m_1": self.config.l2m_bandwidth_limit, "l2m_2": self.config.l2m_bandwidth_limit} for ip in self.l2m_ips},
-        # }
-        # self.l2m_tokens = {
-        #     "read": {ip: {"l2m_1": self.l2m_bucket_capacity["read"][ip]["l2m_1"], "l2m_2": self.l2m_bucket_capacity["read"][ip]["l2m_2"]} for ip in self.l2m_ips},
-        #     "write": {ip: {"l2m_1": self.l2m_bucket_capacity["write"][ip]["l2m_1"], "l2m_2": self.l2m_bucket_capacity["write"][ip]["l2m_2"]} for ip in self.l2m_ips},
-        # }
-        # self.l2m_last_cycle = {"read": {ip: {"l2m_1": 0, "l2m_2": 0} for ip in self.l2m_ips}, "write": {ip: {"l2m_1": 0, "l2m_2": 0} for ip in self.l2m_ips}}
 
         self.dma_rw_counts = self.config._make_channels(("gdma", "sdma"), {ip: {"read": 0, "write": 0} for ip in self.config.gdma_send_positions})
         # {"gdma": {ip: {"read": 0, "write": 0} for ip in self.config.gdma_send_positions}, "sdma": {ip: {"read": 0, "write": 0} for ip in self.config.sdma_send_positions}}
@@ -334,7 +295,7 @@ class BaseModel:
             self.process_sn_received_data(in_pos)
 
     def process_rn_received_data(self, in_pos):
-        """Handle received data in the RN network."""
+        """Handle received read data in the RN network."""
         for ip_type in self.req_network.EQ_ch_buffer.keys():
             if ip_type.startswith("ddr") or ip_type.startswith("l2m"):
                 continue
@@ -361,11 +322,11 @@ class BaseModel:
                     self.node.rn_tracker_pointer["read"][ip_type][in_pos] -= 1
 
     def process_sn_received_data(self, in_pos):
-        """Handle received data in the SN network."""
+        """Handle received write data in the SN network."""
         for ip_type in self.req_network.EQ_ch_buffer.keys():
             if ip_type.startswith("gdma") or ip_type.startswith("sdma"):
                 continue
-            if in_pos in self.node.sn_wdb_recv[ip_type] and len(self.node.sn_wdb_recv[ip_type][in_pos]) > 0:
+            if len(self.node.sn_wdb_recv[ip_type][in_pos]) > 0:
                 packet_id = self.node.sn_wdb_recv[ip_type][in_pos][0]
                 self.node.sn_wdb[ip_type][in_pos][packet_id].pop(0)
                 if len(self.node.sn_wdb[ip_type][in_pos][packet_id]) == 0:
@@ -384,17 +345,6 @@ class BaseModel:
                     # 释放tracker 增加40ns
                     release_time = self.cycle + self.config.sn_tracker_release_latency
                     self.node.sn_tracker_release_time[release_time].append((ip_type, in_pos, req))
-                    # self.node.sn_tracker[ip_type][in_pos].remove(req)
-                    # self.node.sn_tracker_count[ip_type][req.sn_tracker_type][in_pos] += 1
-                    # if self.node.sn_wdb_count[ip_type][in_pos] > 0 and self.node.sn_req_wait["write"][ip_type][in_pos]:
-                    #     new_req = self.node.sn_req_wait["write"][ip_type][in_pos].pop(0)
-                    #     new_req.sn_tracker_type = req.sn_tracker_type
-                    #     new_req.req_attr = "old"
-                    #     self.node.sn_tracker[ip_type][in_pos].append(new_req)
-                    #     self.node.sn_tracker_count[ip_type][new_req.sn_tracker_type][in_pos] -= 1
-                    #     self.node.sn_wdb[ip_type][in_pos][new_req.packet_id] = []
-                    #     self.node.sn_wdb_count[ip_type][in_pos] -= new_req.burst_length
-                    #     self.create_rsp(new_req, "positive")
 
     def check_and_release_sn_tracker(self):
         """Check if any trackers can be released based on the current cycle."""
@@ -405,7 +355,6 @@ class BaseModel:
             for sn_type, in_pos, req in tracker_list:
                 self.node.sn_tracker[sn_type][in_pos].remove(req)
                 self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] += 1
-
                 if self.node.sn_wdb_count[sn_type][in_pos] > 0 and self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] > 0 and self.node.sn_req_wait[req.req_type][sn_type][in_pos]:
                     new_req = self.node.sn_req_wait[req.req_type][sn_type][in_pos].pop(0)
                     new_req.sn_tracker_type = req.sn_tracker_type
@@ -946,9 +895,9 @@ class BaseModel:
                 # transfer_eject
                 # 处理eject队列
                 # if network.ring_bridge["EQ"][(pos, next_pos)] and len(network.eject_queues["RB"][next_pos]) < self.config.EQ_IN_FIFO_DEPTH:
-                if network.ring_bridge["EQ"][(pos, next_pos)]:
-                    flit = network.ring_bridge["EQ"][(pos, next_pos)].popleft()
-                    flit.is_arrive = True
+                # if network.ring_bridge["EQ"][(pos, next_pos)]:
+                #     flit = network.ring_bridge["EQ"][(pos, next_pos)].popleft()
+                #     flit.is_arrive = True
 
                 up_node, down_node = (
                     next_pos - self.config.cols * 2,
@@ -977,18 +926,21 @@ class BaseModel:
             self._handle_eject_arbitration(network, flit_type)
 
         # 处理transfer station的flits
+        # for flit in ring_bridge_EQ_flits:
+        #     if flit.is_arrive:
+        #         flit.arrival_network_cycle = self.cycle
+        #         # if len(network.eject_queues["RB"][flit.destination]) < self.config.EQ_IN_FIFO_DEPTH:
+        #         # network.eject_queues["RB"][flit.destination].append(flit)
+        #         if len(network.ring_bridge["EQ"][flit.current_link]) < self.config.RB_OUT_FIFO_DEPTH:
+        #             network.ring_bridge["EQ"][flit.current_link].append(flit)
+        #             flits.remove(flit)
+        #         else:
+        #             flit.is_arrive = False
+        #     else:
+        #         network.execute_moves(flit, self.cycle)
         for flit in ring_bridge_EQ_flits:
             if flit.is_arrive:
-                flit.arrival_network_cycle = self.cycle
-                # if len(network.eject_queues["RB"][flit.destination]) < self.config.EQ_IN_FIFO_DEPTH:
-                # network.eject_queues["RB"][flit.destination].append(flit)
-                if len(network.ring_bridge["EQ"][flit.current_link]) < self.config.RB_OUT_FIFO_DEPTH:
-                    network.ring_bridge["EQ"][flit.current_link].append(flit)
-                    flits.remove(flit)
-                else:
-                    flit.is_arrive = False
-            else:
-                network.execute_moves(flit, self.cycle)
+                flits.remove(flit)
 
         return flits
 
@@ -1151,13 +1103,13 @@ class BaseModel:
                         if network.ip_eject[ip_type][ip_pos]:
                             flit = network.ip_eject[ip_type][ip_pos][0]
                             if flit.flit_type == "data" and flit.req_type == "write":
-                                if flit.original_destination_type.startswith("ddr"):
+                                if flit.original_destination_type == ip_type:
                                     token_bucket: TokenBucket = network.token_bucket[flit.source][ip_type]
                                     token_bucket.refill(self.cycle)
                                     if not token_bucket.consume():
                                         continue
 
-                                elif flit.original_destination_type.startswith("l2m"):
+                                elif flit.original_destination_type == ip_type:
                                     token_bucket: TokenBucket = network.token_bucket[flit.source][ip_type]
                                     token_bucket.refill(self.cycle)
                                     if not token_bucket.consume():
@@ -1179,7 +1131,7 @@ class BaseModel:
             for in_pos in self.flit_position:
                 ip_pos = in_pos - self.config.cols
                 for ip_type in network.eject_queues_pre.keys():
-                    if ip_pos in network.eject_queues_pre[ip_type] and network.eject_queues_pre[ip_type][ip_pos]:
+                    if network.eject_queues_pre[ip_type][ip_pos]:
                         network.ip_eject[ip_type][ip_pos].append(network.eject_queues_pre[ip_type][ip_pos])
                         network.eject_queues_pre[ip_type][ip_pos] = None
 
@@ -1435,7 +1387,8 @@ class BaseModel:
                 if (
                     ip_type.startswith(destination_type)
                     and eject_flits[i] is not None
-                    and eject_flits[i].destination_type.startswith(destination_type)
+                    # and eject_flits[i].destination_type.startswith(destination_type)
+                    and eject_flits[i].destination_type == ip_type
                     and len(network.ip_eject[ip_type][ip_pos]) < network.config.EQ_CH_FIFO_DEPTH
                 ):
                     in_pos = ip_pos + self.config.cols
@@ -1700,25 +1653,15 @@ class BaseModel:
         duration += 2 if flit.path[1] - flit.path[0] == -self.config.cols else 3
         return 0 if len(flit.path) == 2 else duration
 
-    def process_flits(
-        self,
-        flit,
-        network,
-        read_latency,
-        write_latency,
-        read_merged_intervals,
-        write_merged_intervals,
-        f1,
-        f2,
-    ):
+    def process_flits(self, flit, network, read_latency, write_latency, read_merged_intervals, write_merged_intervals, f1, f2):
         """Process a single flit and update the network and latency data."""
         # Calculate predicted and actual durations
         # if not flit.is_last_flit or not flit.arrival_cycle or not flit.req_departure_cycle:
         #     return
-        flit.predicted_duration = self.calculate_predicted_duration(flit)
-        flit.actual_duration = flit.arrival_cycle - flit.departure_cycle
-        flit.actual_ject_duration = flit.arrival_eject_cycle - flit.departure_inject_cycle
-        flit.actual_network_duration = flit.arrival_network_cycle - flit.departure_network_cycle
+        # flit.predicted_duration = self.calculate_predicted_duration(flit)
+        # flit.actual_duration = flit.arrival_cycle - flit.departure_cycle
+        # flit.actual_ject_duration = flit.arrival_eject_cycle - flit.departure_inject_cycle
+        # flit.actual_network_duration = flit.arrival_network_cycle - flit.departure_network_cycle
 
         flit.total_latency = (flit.arrival_cycle - flit.cmd_entry_cmd_table_cycle) // self.config.network_frequency
         # flit.cmd_latency = (flit.sn_receive_req_cycle - flit.cmd_entry_cmd_table_cycle) // self.config.network_frequency

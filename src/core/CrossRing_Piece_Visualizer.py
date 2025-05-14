@@ -63,7 +63,7 @@ class CrossRingVisualizer:
         self.link_patches, self.link_texts = {}, {}  # 新增的link可视化存储
         # 画出三个模块的框和 FIFO 槽
         self._draw_modules()
-        self._draw_arrows()
+        # self._draw_arrows()
 
     def _draw_links_module(self):
         """绘制所有links的模块"""
@@ -197,14 +197,14 @@ class CrossRingVisualizer:
             x=IQ_x,
             y=IQ_y,
             title="Inject Queue",
-            lanes=["left", "right", "local", "up"],
+            lanes=["TL", "TR", "EQ", "TU", "TD"],
             module_height=3.5,
             module_width=2.5,
             depths=self.IQ_depth,
             patch_dict=self.iq_patches,
             text_dict=self.iq_texts,
             per_lane_depth=False,
-            orientations=["vertical"] * 2 + ["horizontal"] * 2,
+            orientations=["vertical"] * 2 + ["horizontal"] * 3,
         )
 
         # Eject Queue
@@ -212,14 +212,14 @@ class CrossRingVisualizer:
             x=EQ_x,
             y=EQ_y,
             title="Eject Queue",
-            lanes=["local", "ring_bridge", "up", "down"],
+            lanes=["TU", "TD"],
             module_height=2.5,
             module_width=3.5,
             depths=self.EQ_depth,
             patch_dict=self.eq_patches,
             text_dict=self.eq_texts,
             per_lane_depth=False,
-            orientations=["vertical"] * 2 + ["horizontal"] * 2,
+            orientations=["horizontal"] * 2,
         )
 
         # Ring Bridge（入 3 条，出 3 条）
@@ -227,14 +227,14 @@ class CrossRingVisualizer:
             x=RB_x,
             y=RB_y,
             title="Ring Bridge",
-            lanes=["up", "left", "right", "eject", "vup", "vdown"],
+            lanes=["TL", "TR", "TU", "TD"],
             depths=[self.RB_in_depth] * 3 + [self.RB_out_depth] * 3,
             module_height=3.5,
             module_width=3.5,
             patch_dict=self.rb_patches,
             text_dict=self.rb_texts,
             per_lane_depth=True,
-            orientations=["vertical"] * 3 + ["horizontal"] * 3,
+            orientations=["vertical"] * 2 + ["horizontal"] * 2,
         )
 
         self.ax.relim()
@@ -313,7 +313,8 @@ class CrossRingVisualizer:
                 text_va = "top"
 
             lane_x = x + module_width / 2 - 0.02 - depth * (square + gap) - square - 0.02
-            self.ax.text(lane_x, lane_y, self.name_map[lane] if lane not in ["local", "up"] else self.name_map[f"{lane}_{title[0]}"], ha="right", va="center", fontsize=10)
+            # self.ax.text(lane_x, lane_y, self.name_map[lane] if lane not in ["local", "up"] else self.name_map[f"{lane}_{title[0]}"], ha="right", va="center", fontsize=10)
+            self.ax.text(lane_x, lane_y, lane, ha="right", va="center", fontsize=10)
 
             patch_dict[lane] = []
             text_dict[lane] = []
@@ -338,7 +339,8 @@ class CrossRingVisualizer:
                 text_ha = "left"
 
             lane_y = y - module_height / 2 + 0.1 + depth * (square + gap) + square / 2 + 0.05
-            self.ax.text(lane_x, lane_y, self.name_map[lane] if lane not in ["local", "up"] else self.name_map[f"{lane}_{title[0]}"], ha="center", va="bottom", fontsize=10)
+            # self.ax.text(lane_x, lane_y, self.name_map[lane] if lane not in ["local", "up"] else self.name_map[f"{lane}_{title[0]}"], ha="center", va="bottom", fontsize=10)
+            self.ax.text(lane_x, lane_y, lane, ha="center", va="bottom", fontsize=10)
 
             patch_dict[lane] = []
             text_dict[lane] = []

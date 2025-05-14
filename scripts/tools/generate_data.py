@@ -295,7 +295,7 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
             # data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(sdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
-            data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(sdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
     # 排序并写入文件
@@ -307,7 +307,7 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
 if __name__ == "__main__":
     # 参数配置
     topo = "3x3"
-    interval_count = 32
+    interval_count = 128
     file_name = "../../test_data/traffic_2260E_case2.txt"
     np.random.seed(428)
 
@@ -321,29 +321,31 @@ if __name__ == "__main__":
     # SG2260E
     elif topo == "3x3":
         sdma_map = {
-            # "sdma_0": [0, 2, 6, 8],
-            "sdma_0": [0],
+            "sdma_0": [2],
+            # "sdma_0": [6, 8],
         }
         gdma_map = {
             "gdma_0": [0, 2, 6, 8],
+            # "gdma_0": [0],
         }
         ddr_map = {
-            "ddr_0": [0],
-            # "ddr_0": [0, 2, 3, 5, 6, 8],
-            # "ddr_1": [0, 2, 3, 5, 6, 8],
-            # "ddr_2": [3, 5],
-            # "ddr_3": [3, 5],
+            # "ddr_0": [2],
+            "ddr_0": [0, 2, 3, 5, 6, 8],
+            "ddr_1": [0, 2, 3, 5, 6, 8],
+            "ddr_2": [3, 5],
+            "ddr_3": [3, 5],
         }
         l2m_map = {
-            "l2m_0": [1],
+            "l2m_0": [7],
+            # "l2m_1": [7],
             # "l2m_0": [1, 7],
             # "l2m_1": [1, 7],
         }
 
     speed = {1: 128, 2: 256, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 2
-    read_duration = 64
-    write_duration = 64
+    read_duration = 128
+    write_duration = 128
     overlap = 1
 
     # 生成数据(使用混合模式)

@@ -27,35 +27,6 @@ class TokenBucket:
         self.tokens = min(self.tokens + add, self.bucket_size)
 
 
-class ChannelBuffer:
-    """
-    IQ/EQ 内部的独立通道缓冲区。
-    只做简单 FIFO；出队时由外部仲裁器决定是否真正 pop。
-    """
-
-    def __init__(self, depth):
-        self.depth = depth
-        self.fifo = deque(maxlen=depth)
-
-    # 写入：成功返回 True，溢出返回 False
-    def push(self, flit):
-        if len(self.fifo) < self.depth:
-            self.fifo.append(flit)
-            return True
-        return False
-
-    # 只窥视不弹出
-    def peek(self):
-        return self.fifo[0] if self.fifo else None
-
-    # 真正出队
-    def pop(self):
-        return self.fifo.popleft() if self.fifo else None
-
-    def __len__(self):
-        return len(self.fifo)
-
-
 class Flit:
     last_id = 0
 
@@ -178,7 +149,7 @@ class Flit:
         eject_status = "E" if self.is_ejected else ""
 
         return (
-            f"{self.packet_id}.{self.flit_id}: "
+            f"{self.packet_id}.{self.flit_id} {self.source}.{self.source_type[0]}{self.source_type[-1]}->{self.destination}.{self.destination_type[0]}{self.destination_type[-1]}: "
             f"{self.current_link} -> {self.current_seat_index}, "
             f"{self.current_position}, "
             f"{req_attr}, {self.flit_type}, {type_display}, "
@@ -367,6 +338,12 @@ class Network:
         # # channel buffer setup
         self.IQ_ch_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.EQ_ch_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+
+        self.ring_bridge_map = {
+            0: ("TL", self.config.RB_IN_FIFO_DEPTH),
+            1: ("TR", self.config.RB_IN_FIFO_DEPTH),
+            -2: ("ft", self.config.ft_len),
+        }
 
         self.token_bucket = defaultdict(dict)
         self.flit_size_bytes = 128
@@ -1481,12 +1458,8 @@ class Network:
                 # 将 flit 放入 ring_bridge 的相应方向
                 if not flit.is_on_station:
                     # 使用字典映射 seat_index 到 ring_bridge 的方向和深度限制
-                    ring_bridge_map = {
-                        0: ("TL", self.config.RB_IN_FIFO_DEPTH),
-                        1: ("TR", self.config.RB_IN_FIFO_DEPTH),
-                        -2: ("ft", self.config.ft_len),
-                    }
-                    direction, max_depth = ring_bridge_map.get(flit.current_seat_index, ("TU", self.config.RB_IN_FIFO_DEPTH))
+
+                    direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, ("TU", self.config.RB_IN_FIFO_DEPTH))
                     if len(self.ring_bridge[direction][flit.current_link]) < max_depth:
                         self.ring_bridge[direction][flit.current_link].append(flit)
                         flit.is_on_station = True
