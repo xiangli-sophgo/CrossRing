@@ -76,7 +76,7 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
     generator = TrafficGenerator(read_duration=read_duration, write_duration=write_duration)
     data_all = []
 
-    def generate_entries(src_map, dest_map, operation, burst, flow_type, speed, interval_count, dest_access_mode="random", overlap=False):
+    def generate_entries(src_map, dest_map, operation, burst, flow_type, speed, interval_count, dest_access_mode="random", overlap=True):
         """
         生成指定模式的流量条目，确保同一时刻所有dest都有访问
 
@@ -307,7 +307,7 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
 if __name__ == "__main__":
     # 参数配置
     topo = "3x3"
-    interval_count = 128
+    interval_count = 32
     file_name = "../../test_data/traffic_2260E_case2.txt"
     np.random.seed(428)
 
@@ -321,19 +321,20 @@ if __name__ == "__main__":
     # SG2260E
     elif topo == "3x3":
         sdma_map = {
-            "sdma_0": [2],
-            # "sdma_0": [6, 8],
+            "sdma_0": [0],
+            # "sdma_0": [0, 2, 6, 8],
         }
         gdma_map = {
             "gdma_0": [0, 2, 6, 8],
             # "gdma_0": [0],
         }
         ddr_map = {
-            # "ddr_0": [2],
-            "ddr_0": [0, 2, 3, 5, 6, 8],
-            "ddr_1": [0, 2, 3, 5, 6, 8],
-            "ddr_2": [3, 5],
-            "ddr_3": [3, 5],
+            "ddr_0": [2],
+            "ddr_1": [2],
+            # "ddr_0": [0, 2, 3, 5, 6, 8],
+            # "ddr_1": [0, 2, 3, 5, 6, 8],
+            # "ddr_2": [3, 5],
+            # "ddr_3": [3, 5],
         }
         l2m_map = {
             "l2m_0": [7],
@@ -342,10 +343,10 @@ if __name__ == "__main__":
             # "l2m_1": [1, 7],
         }
 
-    speed = {1: 128, 2: 256, 4: 128}  # 不同burst对应的带宽(GB/s)
+    speed = {1: 128, 2: 128, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 2
     read_duration = 128
-    write_duration = 128
+    write_duration = 0
     overlap = 1
 
     # 生成数据(使用混合模式)

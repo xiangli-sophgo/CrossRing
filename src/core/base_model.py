@@ -406,7 +406,7 @@ class BaseModel:
                     wr = counts["write"]
                     if req_type == "read":
                         if self.req_network.ip_read[ip_type][ip_pos]:
-                            if rd - wr >= max_gap:
+                            if abs(rd - wr) >= max_gap:
                                 continue
                             req = self.req_network.ip_read[ip_type][ip_pos][0]
                             if self.node.rn_rdb_count[ip_type][ip_pos] > self.node.rn_rdb_reserve[ip_type][ip_pos] * req.burst_length and self.node.rn_tracker_count[req_type][ip_type][ip_pos] > 0:
@@ -419,7 +419,7 @@ class BaseModel:
                                 self.node.rn_rdb[ip_type][ip_pos][req.packet_id] = []
                     elif req_type == "write":
                         if self.req_network.ip_write[ip_type][ip_pos]:
-                            if wr - rd >= max_gap:
+                            if abs(wr - rd) >= max_gap:
                                 continue
                             req = self.req_network.ip_write[ip_type][ip_pos][0]
                             if self.node.rn_wdb_count[ip_type][ip_pos] >= req.burst_length and self.node.rn_tracker_count[req_type][ip_type][ip_pos] > 0:
@@ -477,7 +477,9 @@ class BaseModel:
                 else:
                     inject_flit = (
                         self.node.rn_wdb[ip_type][ip_pos][self.node.rn_wdb_send[ip_type][ip_pos][0]][0]
-                        if len(self.node.rn_wdb_send[ip_type][ip_pos]) > 0 and self.node.rn_wdb[ip_type][ip_pos][self.node.rn_wdb_send[ip_type][ip_pos][0]]
+                        if len(self.node.rn_wdb_send[ip_type][ip_pos]) > 0
+                        and self.node.rn_wdb[ip_type][ip_pos][self.node.rn_wdb_send[ip_type][ip_pos][0]]
+                        and self.node.rn_wdb[ip_type][ip_pos][self.node.rn_wdb_send[ip_type][ip_pos][0]][0].departure_cycle <= self.cycle
                         else None
                     )
                     data_injected_from = "rn"
@@ -490,13 +492,13 @@ class BaseModel:
                         if self.IQ_direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                             dst3 = flit.original_destination_type[:3]
                             if flit.req_type == "read" and dst3 == "ddr":
-                                token_bucket: TokenBucket = self.flit_network.token_bucket[flit.source][ip_type]
+                                token_bucket: TokenBucket = self.flit_network.token_bucket[ip_pos][ip_type]
                                 token_bucket.refill(self.cycle)
                                 if not token_bucket.consume():
                                     continue
 
                             elif flit.req_type == "read" and dst3 == "l2m":
-                                token_bucket: TokenBucket = self.flit_network.token_bucket[flit.source][ip_type]
+                                token_bucket: TokenBucket = self.flit_network.token_bucket[ip_pos][ip_type]
                                 token_bucket.refill(self.cycle)
                                 if not token_bucket.consume():
                                     continue
@@ -511,7 +513,6 @@ class BaseModel:
                                 self.send_read_flits_num_stat += 1
                                 self.node.sn_rdb[ip_type][ip_pos].pop(0)
                                 self.flit_network.send_flits[flit.packet_id].append(flit)
-                                # if len(self.flit_network.arrive_flits[flit.packet_id]) == flit.burst_length:
                                 if len(self.flit_network.send_flits[flit.packet_id]) == flit.burst_length:
                                     # finish current req injection
                                     req = next(
@@ -534,8 +535,6 @@ class BaseModel:
                                     for f in self.node.rn_wdb[ip_type][ip_pos][flit.packet_id]:
                                         f.entry_db_cycle = self.cycle
                                 self.node.rn_wdb[ip_type][ip_pos][flit.packet_id].pop(0)
-                                # if flit.is_last_flit:
-                                # if len(self.flit_network.arrive_flits[flit.packet_id]) == flit.burst_length:
                                 self.flit_network.send_flits[flit.packet_id].append(flit)
                                 if len(self.flit_network.send_flits[flit.packet_id]) == flit.burst_length:
                                     # finish current req injection

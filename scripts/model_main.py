@@ -71,8 +71,8 @@ def main():
         plot_link_state=0,
         plot_ring_bridge_state=0,
         print_trace=0,
-        show_trace_id=1,
-        show_node_id=4,
+        show_trace_id=56,
+        show_node_id=5,
     )
 
     # profiler = cProfile.Profile()
@@ -106,8 +106,8 @@ def main():
         sim.config.l2m_R_latency_original = 12
         sim.config.l2m_W_latency_original = 16
         # sim.config.ddr_bandwidth_limit = 76.8 / 2
-        sim.config.ddr_bandwidth_limit = 76.8
-        sim.config.l2m_bandwidth_limit = 256
+        sim.config.ddr_bandwidth_limit = 76.8 / 2
+        sim.config.l2m_bandwidth_limit = np.inf
         sim.config.IQ_CH_FIFO_DEPTH = 10
         sim.config.EQ_CH_FIFO_DEPTH = 10
         sim.config.RB_IN_FIFO_DEPTH = 16

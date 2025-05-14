@@ -22,13 +22,13 @@ class NetworkLinkVisualizer:
         self._draw_static_elements()
 
         # 播放控制参数
-        self.pause_interval = 0.1        # 默认每帧暂停间隔(秒)
-        self.should_stop = False         # 停止标志
-        self.status_text = self.ax.text(-0.1, 1, f"Running...\nInterval: {self.pause_interval:.2f}", transform=self.ax.transAxes,
-                                        fontsize=12, fontweight='bold', color='green',
-                                        verticalalignment='top')
+        self.pause_interval = 0.1  # 默认每帧暂停间隔(秒)
+        self.should_stop = False  # 停止标志
+        self.status_text = self.ax.text(
+            -0.1, 1, f"Running...\nInterval: {self.pause_interval:.2f}", transform=self.ax.transAxes, fontsize=12, fontweight="bold", color="green", verticalalignment="top"
+        )
         # 绑定键盘事件:
-        self.fig.canvas.mpl_connect('key_press_event', self._on_key)
+        self.fig.canvas.mpl_connect("key_press_event", self._on_key)
 
     def _calculate_layout(self):
         """根据网格计算节点位置（可调整节点间距）"""
@@ -70,83 +70,82 @@ class NetworkLinkVisualizer:
             margin_y = (max(ys) - min(ys)) * 0.1
             self.ax.set_xlim(min(xs) - margin_x, max(xs) + margin_x + 0.5)
             self.ax.set_ylim(min(ys) - margin_y, max(ys) + margin_y + 0.5)
-            
+
         self.ax.axis("off")
         plt.tight_layout()
 
-    def _draw_link_frame(self, src, dest, queue_fixed_length=2):
+    def _draw_link_frame(self, src, dest, queue_fixed_length=1.6, seat_num=7):
         # 检查是否为自环链路
         is_self_loop = src == dest
-        
+
         # 节点矩形尺寸
         node_width = 0.5
         node_height = 0.5
         half_w, half_h = node_width / 2, node_height / 2
-        
+
         # 获取节点信息
         src_pos = self.node_positions[src]
         src_center = (src_pos[0] + half_w, src_pos[1] + half_h)
-        
+
         if is_self_loop:
             # 判断节点是否在边界
             rows, cols = self.network.config.rows, self.network.config.cols
             row, col = src // cols, src % cols
-            
+
             # 确定节点在哪个边界并设置相应的箭头和队列位置
             is_left_edge = col == 0 and row % 2 == 1
             is_right_edge = col == cols - 1 and row % 2 == 1
-            is_top_edge = row == 0  and row % 2 == 0
+            is_top_edge = row == 0 and row % 2 == 0
             is_bottom_edge = row == rows - 2 and row % 2 == 0
-            
+
             # 只处理边界节点，内部节点不添加自环
             if not (is_left_edge or is_right_edge or is_top_edge or is_bottom_edge):
                 return
-                
+
             # 根据边界位置设置自环方向和队列位置
             loop_offset = 0.1  # 自环与节点的距离
             queue_width = 0.2
-            queue_height = queue_fixed_length/3.5
-            
+            queue_height = queue_fixed_length / 3.5
+
             # 确定箭头和队列的位置及方向
             if is_top_edge:  # 最上边，从右到左
                 # src_arrow = (src_center[0] + half_w, src_center[1] + loop_offset)
                 # dest_arrow = (src_center[0] - half_w, src_center[1] + loop_offset)
-                queue_center = (src_center[0], src_center[1] + loop_offset + queue_height/2)
+                queue_center = (src_center[0], src_center[1] + loop_offset + queue_height / 2)
                 is_horizontal = True
                 is_forward = False  # 从右到左
             elif is_bottom_edge:  # 最下边，从左到右
                 # src_arrow = (src_center[0] - half_w, src_center[1] - loop_offset)
                 # dest_arrow = (src_center[0] + half_w, src_center[1] - loop_offset)
-                queue_center = (src_center[0], src_center[1] - loop_offset - queue_height/2)
+                queue_center = (src_center[0], src_center[1] - loop_offset - queue_height / 2)
                 is_horizontal = True
                 is_forward = True  # 从左到右
             elif is_left_edge:  # 最左边，从上到下
                 # src_arrow = (src_center[0] - loop_offset, src_center[1] + half_h)
                 # dest_arrow = (src_center[0] - loop_offset, src_center[1] - half_h)
-                queue_center = (src_center[0] - loop_offset*1.5 - queue_width, src_center[1])
+                queue_center = (src_center[0] - loop_offset * 1.5 - queue_width, src_center[1])
                 is_horizontal = False
                 is_forward = False  # 从上到下
             elif is_right_edge:  # 最右边，从下到上
                 # src_arrow = (src_center[0] + loop_offset, src_center[1] - half_h)
                 # dest_arrow = (src_center[0] + loop_offset, src_center[1] + half_h)
-                queue_center = (src_center[0] + loop_offset*1.5 + queue_width, src_center[1])
+                queue_center = (src_center[0] + loop_offset * 1.5 + queue_width, src_center[1])
                 is_horizontal = False
                 is_forward = True  # 从下到上
-            
+
             # 根据是水平还是垂直方向调整队列尺寸
             if is_horizontal:
                 queue_width, queue_height = queue_height, queue_width
-                
+
             # 绘制自环箭头
-            # self.ax.annotate("", xy=dest_arrow, xycoords="data", xytext=src_arrow, 
-                            # textcoords="data", arrowprops=dict(arrowstyle="->", color="blue", lw=2))
-            
+            # self.ax.annotate("", xy=dest_arrow, xycoords="data", xytext=src_arrow,
+            # textcoords="data", arrowprops=dict(arrowstyle="->", color="blue", lw=2))
+
             # 绘制队列框架
-            q_ll = (queue_center[0] - queue_width/2, queue_center[1] - queue_height/2)
-            queue = Rectangle(q_ll, queue_width, queue_height, 
-                            facecolor="white", edgecolor="black", linestyle="--")
+            q_ll = (queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2)
+            queue = Rectangle(q_ll, queue_width, queue_height, facecolor="white", edgecolor="black", linestyle="--")
             self.ax.add_patch(queue)
-            
+
             # 存储链路绘制信息
             link_id = f"{src}-{dest}"
             self.link_artists[link_id] = {
@@ -155,11 +154,11 @@ class NetworkLinkVisualizer:
                 "queue_height": queue_height,
                 "is_horizontal": is_horizontal,
                 "is_forward": is_forward,
-                "is_self_loop": True
+                "is_self_loop": True,
             }
             return
-            
-        # 以下是原有的非自环链路的处理逻辑
+
+        # 非自环链路的处理逻辑
         dest_pos = self.node_positions[dest]
         dest_center = (dest_pos[0] + half_w, dest_pos[1] + half_h)
 
@@ -225,22 +224,64 @@ class NetworkLinkVisualizer:
             queue_height = queue_fixed_length
 
         # 绘制队列框架矩形，中心位于 queue_center
-        queue = Rectangle((queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2), queue_width, queue_height, facecolor="white", edgecolor="black", linestyle="--")
-        self.ax.add_patch(queue)
+        # queue = Rectangle((queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2), queue_width, queue_height, facecolor="white", edgecolor="black", linestyle="--")
+        # self.ax.add_patch(queue)
 
+        seats = self.split_queue_into_seats(
+            (queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2), queue_width, queue_height, seat_num, is_horizontal, facecolor="white", edgecolor="black", linestyle="--"
+        )
+
+        for seat in seats:
+            self.ax.add_patch(seat)
         # 绘制箭头连接线，并使用 annotate 添加箭头头部
-        self.ax.annotate("", xy=dest_arrow, xycoords="data", xytext=src_arrow, textcoords="data", arrowprops=dict(arrowstyle="->", color="blue", lw=2))
+        self.ax.annotate("", xy=dest_arrow, xycoords="data", xytext=src_arrow, textcoords="data", arrowprops=dict(arrowstyle="->", color="blue", lw=1.5))
 
         # 存储链路绘制信息，可用于后续动态更新
         link_id = f"{src}-{dest}"
         self.link_artists[link_id] = {
-            "queue_center": queue_center, 
-            "queue_width": queue_width, 
+            "queue_center": queue_center,
+            "queue_width": queue_width,
             "queue_height": queue_height,
             "is_horizontal": is_horizontal,
             "is_forward": dx > 0 if is_horizontal else dy > 0,
-            "is_self_loop": False
+            "is_self_loop": False,
         }
+
+    def split_queue_into_seats(self, q_ll, queue_width, queue_height, seat_num, is_horizontal=True, **kwargs):
+        """
+        将队列矩形分割成 seat_num 个小矩形，支持横向或纵向切割
+
+        参数:
+            q_ll: 队列左下角坐标 (x, y)
+            queue_width: 队列总宽度
+            queue_height: 队列高度
+            seat_num: 座位数量
+            is_horizontal:
+                - True（默认）: 横向切割（沿宽度方向，生成多个等宽小矩形）
+                - False: 纵向切割（沿高度方向，生成多个等高小矩形）
+            **kwargs: 传递给 Rectangle 的其他参数（如 facecolor, edgecolor 等）
+
+        返回:
+            list: 包含 seat_num 个小矩形的列表
+        """
+        seats = []
+
+        if is_horizontal:
+            # 横向切割（沿宽度方向）
+            seat_width = queue_width / seat_num
+            for i in range(seat_num):
+                seat_ll = (q_ll[0] + i * seat_width, q_ll[1])
+                seat = Rectangle(seat_ll, seat_width, queue_height, **kwargs)
+                seats.append(seat)
+        else:
+            # 纵向切割（沿高度方向）
+            seat_height = queue_height / seat_num
+            for i in range(seat_num):
+                seat_ll = (q_ll[0], q_ll[1] + i * seat_height)
+                seat = Rectangle(seat_ll, queue_width, seat_height, **kwargs)
+                seats.append(seat)
+
+        return seats
 
     def update(self, network=None, expected_packet_id=0, use_highlight=False):
         """
@@ -256,9 +297,9 @@ class NetworkLinkVisualizer:
         """
         if self.should_stop:
             return False
-        
+
         self.network = network
-                        
+
         for link_id, artists_dict in self.link_artists.items():
             if "flit_artists" in artists_dict:
                 for artist in artists_dict["flit_artists"]:
@@ -279,7 +320,7 @@ class NetworkLinkVisualizer:
 
             # 检查是否为自环
             is_self_loop = queue_info.get("is_self_loop", False)
-            
+
             # 如果已经存储了链路方向，直接使用
             if "is_horizontal" in queue_info and "is_forward" in queue_info:
                 is_horizontal = queue_info["is_horizontal"]
@@ -350,11 +391,7 @@ class NetworkLinkVisualizer:
                         y_text = y + flit_size * 2 + 0.1
                     if not is_self_loop:
                         # 一次性绘制两行
-                        txt = self.ax.text(
-                            x + (i - 0.2) * 0.04 * (int(is_forward)-0.5), y_text, label,
-                            ha="center", va="center",
-                            fontsize=9
-                        )
+                        txt = self.ax.text(x + (i - 0.2) * 0.04 * (int(is_forward) - 0.5), y_text, label, ha="center", va="center", fontsize=9)
                         flit_artists.append(txt)
                 else:
                     # 垂直链路：横向标签
@@ -374,19 +411,19 @@ class NetworkLinkVisualizer:
 
             # 保存该链路的图形对象
             self.link_artists[link_id]["flit_artists"] = flit_artists
-        
+
         # 标题与排版
         self.ax.set_title(self.network.name)
         plt.tight_layout()
         plt.pause(self.pause_interval)
 
         return self.ax.patches
-    
+
     def _update_status_display(self):
         """更新状态显示"""
         status = f"Running...\nInterval: {self.pause_interval:.2f}"
-        color = 'green'
-            
+        color = "green"
+
         # 更新状态文本
         self.status_text.set_text(status)
         self.status_text.set_color(color)
@@ -394,18 +431,17 @@ class NetworkLinkVisualizer:
     def _on_key(self, event):
         key = event.key
 
-        if key == 'up':
+        if key == "up":
             # 加快 --> 缩短 pause_interval，但不跑到 0
-            self.pause_interval = max(1e-3, self.pause_interval*0.75)
+            self.pause_interval = max(1e-3, self.pause_interval * 0.75)
             self._update_status_display()
-        elif key == 'down':
+        elif key == "down":
             # 减慢
             self.pause_interval *= 1.25
             self._update_status_display()
-        elif key == 'q':
+        elif key == "q":
             # q 键 - 停止更新
             self.should_stop = True
-        
 
     def _get_flit_color(self, flit, use_highlight=True, expected_packet_id=1, highlight_color=None):
         """获取颜色，支持多种PID格式：

@@ -32,7 +32,7 @@ class CrossRingVisualizer:
         self.gap = 0.02  # 相邻槽之间间距
         self.fifo_gap = 0.5  # 相邻fifo之间间隙
         # 初始化图形
-        self.fig, self.ax = plt.subplots(figsize=(12, 10))  # 增大图形尺寸
+        self.fig, self.ax = plt.subplots(figsize=(8, 6))  # 增大图形尺寸
         plt.subplots_adjust(bottom=0.2)  # 为底部links模块留出空间
         self.ax.axis("off")
         self.ax.set_aspect("equal")
