@@ -6,7 +6,7 @@ from matplotlib.patches import FancyArrowPatch
 
 
 class CrossRingVisualizer:
-    def __init__(self, config, node_id):
+    def __init__(self, config, ax):
         """
         仅绘制单个节点的 Inject/Eject Queue 和 Ring Bridge FIFO。
         参数:
@@ -15,10 +15,10 @@ class CrossRingVisualizer:
         - node_id: 要可视化的节点索引 (0 到 num_nodes-1)
         """
         self.cfg = config
-        self.node_id = node_id
+        # self.node_id = node_id
         # 计算该节点的坐标 (暂不用于绘制位置)
-        self.row = node_id // config.cols
-        self.col = node_id % config.cols
+        # self.row = node_id // config.cols
+        # self.col = node_id % config.cols
         self.cols = config.cols
         self.rows = config.rows
         # 提取深度
@@ -32,7 +32,10 @@ class CrossRingVisualizer:
         self.gap = 0.02  # 相邻槽之间间距
         self.fifo_gap = 0.5  # 相邻fifo之间间隙
         # 初始化图形
-        self.fig, self.ax = plt.subplots(figsize=(8, 6))  # 增大图形尺寸
+        if ax is None:
+            self.fig, self.ax = plt.subplots(figsize=(8, 6))  # 增大图形尺寸
+        else:
+            self.ax = ax
         plt.subplots_adjust(bottom=0.2)  # 为底部links模块留出空间
         self.ax.axis("off")
         self.ax.set_aspect("equal")
@@ -64,63 +67,6 @@ class CrossRingVisualizer:
         # 画出三个模块的框和 FIFO 槽
         self._draw_modules()
         # self._draw_arrows()
-
-    def _draw_links_module(self):
-        """绘制所有links的模块"""
-        square = self.square
-        gap = self.gap
-
-        # 确定模块位置
-        links_x = -4
-        links_y = -1  # 放在底部
-
-        # 模块尺寸
-        module_width = 10
-        module_height = 3
-
-        # 绘制模块边框
-        box = Rectangle((links_x - module_width / 2, links_y - module_height / 2), module_width, module_height, fill=False)
-        self.ax.add_patch(box)
-
-        # 模块标题
-        title_x = links_x
-        title_y = links_y + module_height / 2 + 0.02
-        self.ax.text(title_x, title_y, "All Links", ha="center", va="bottom", fontweight="bold")
-
-        # 计算每个link的位置
-        num_links = self.cols * self.rows * 4  # 假设每个节点有4个方向的link
-        link_rows = 3
-        link_cols = (num_links + link_rows - 1) // link_rows
-
-        # 清空旧数据
-        self.link_patches.clear()
-        self.link_texts.clear()
-
-        # 为每个link绘制FIFO槽
-        for i in range(num_links):
-            row = i // link_cols
-            col = i % link_cols
-
-            # 计算位置
-            x = links_x - module_width / 2 + 0.5 + col * 1.5
-            y = links_y + module_height / 2 - 0.5 - row * 0.7
-
-            # 创建link标识
-            link_name = f"Link_{i}"
-            self.ax.text(x - 0.5, y, link_name, ha="right", va="center", fontsize=8)
-
-            # 绘制FIFO槽
-            self.link_patches[link_name] = []
-            self.link_texts[link_name] = []
-
-            for s in range(self.seats_per_link):
-                slot_x = x + s * (square + gap)
-                slot_y = y
-                patch = Rectangle((slot_x - square / 2, slot_y - square / 2), square, square, edgecolor="black", facecolor="none")
-                self.ax.add_patch(patch)
-                txt = self.ax.text(slot_x, slot_y + square / 2 + 0.005, "", ha="center", va="bottom", size=8)
-                self.link_patches[link_name].append(patch)
-                self.link_texts[link_name].append(txt)
 
     def _draw_arrows(self):
         # 1. 模块几何信息（必须与 _draw_modules 中的保持一致）
@@ -376,15 +322,23 @@ class CrossRingVisualizer:
         self._next_color += 1
         return c
 
-    def update_display(self, network):
+    def draw_piece_for_node(self, node_id, network):
         """
         更新当前节点的 FIFO 状态。
         state: { 'inject': {...}, 'eject': {...}, 'ring_bridge': {...} }
         """
+        # --------------------------------------------------------------
+        # 若外部 (Link_State_Visualizer) 清除了坐标轴，需要重新画框架
+        # --------------------------------------------------------------
+        if len(self.ax.patches) == 0:  # 轴内无任何图元，说明已被 clear()
+            self._draw_modules()  # 重建 FIFO / RB 边框与槽
+            # 如果还想显示所有 links，可取消下一行注释
+            # self._draw_links_module()
+
+        self.node_id = node_id
         IQ = network.inject_queues
         EQ = network.eject_queues
         RB = network.ring_bridge
-        links = network.links
         # Inject
         for lane, patches in self.iq_patches.items():
             q = IQ.get(lane, [])[self.node_id]
@@ -443,66 +397,5 @@ class CrossRingVisualizer:
                     p.set_facecolor("none")
                     t.set_text("")
 
-        # Cross Ring Horizontal
-        for lane, patches in self.lh_patches.items():
-            if lane == "left":
-                if self.node_id % self.cols == 0:
-                    q = links.get((self.node_id, self.node_id), [])
-                else:
-                    q = links.get((self.node_id, self.node_id - 1), [])
-            elif lane == "right":
-                if self.node_id % self.cols == self.cols - 1:
-                    q = links.get((self.node_id, self.node_id), [])
-                else:
-                    q = links.get((self.node_id, self.node_id + 1), [])
-            for idx, p in enumerate(patches):
-                t = self.cph_texts[lane][idx]
-                if idx < len(q):
-                    item = q[idx]
-                    if item is None:
-                        continue
-                    packet_id = getattr(item, "packet_id", None)
-                    flit_id = getattr(item, "flit_id", str(item))
-
-                    # 创建复合ID对象
-                    pid = {"packet_id": packet_id, "flit_id": flit_id}
-
-                    # 设置颜色（基于packet_id）和显示文本
-                    p.set_facecolor(self._get_color(pid))
-                    t.set_text(f"{packet_id}-{flit_id}")  # 显示格式: packet_id/flit_id
-                else:
-                    p.set_facecolor("none")
-                    t.set_text("")
-
-        # Cross Ring Vertical
-        for lane, patches in self.lv_patches.items():
-            if lane == "up":
-                if self.node_id // self.cols == 0:
-                    q = links.get((self.node_id, self.node_id), [])
-                else:
-                    q = links.get((self.node_id, self.node_id - 2 * self.cols), [])
-            elif lane == "down":
-                if self.node_id // self.cols == self.rows:
-                    q = links.get((self.node_id, self.node_id), [])
-                else:
-                    q = links.get((self.node_id, self.node_id + 2 * self.cols), [])
-            for idx, p in enumerate(patches):
-                t = self.cpv_texts[lane][idx]
-                if idx < len(q):
-                    item = q[idx]
-                    if item is None:
-                        continue
-                    packet_id = getattr(item, "packet_id", None)
-                    flit_id = getattr(item, "flit_id", str(item))
-
-                    # 创建复合ID对象
-                    pid = {"packet_id": packet_id, "flit_id": flit_id}
-
-                    # 设置颜色（基于packet_id）和显示文本
-                    p.set_facecolor(self._get_color(pid))
-                    t.set_text(f"{packet_id}-{flit_id}")  # 显示格式: packet_id/flit_id
-                else:
-                    p.set_facecolor("none")
-                    t.set_text("")
-        plt.title(f"{network.name}, node: {self.node_id}", fontsize=12)
-        plt.pause(0.2)
+        plt.title(f"Node: {self.node_id}", fontsize=12)
+        # plt.pause(0.2)

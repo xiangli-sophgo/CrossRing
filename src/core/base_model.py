@@ -88,7 +88,7 @@ class BaseModel:
             self.link_state_vis = NetworkLinkVisualizer(self.req_network)
             self.link_state_history = deque(maxlen=50)
         if self.plot_ring_bridge_state:
-            self.ring_bridge_state_vis = CrossRingVisualizer(self.config, self.show_node_id)
+            self.ring_bridge_state_vis = CrossRingVisualizer(self.config)
         if self.config.Both_side_ETag_upgrade:
             self.req_network.Both_side_ETag_upgrade = self.rsp_network.Both_side_ETag_upgrade = self.flit_network.Both_side_ETag_upgrade = True
         self.routes = find_shortest_paths(self.adjacency_matrix)
@@ -295,7 +295,7 @@ class BaseModel:
                 self.link_state_vis.update(self.flit_network, self.cycle, show_id, 0)
 
         if self.plot_ring_bridge_state:
-            self.ring_bridge_state_vis.update_display(self.flit_network)
+            self.ring_bridge_state_vis.draw_piece_for_node(self.show_node_id, self.flit_network)
 
     def process_received_data(self):
         """Process received data in RN and SN networks."""
@@ -1002,9 +1002,9 @@ class BaseModel:
         """处理eject操作"""
         eject_flit = None
 
-        if station_flits[3] and station_flits[3].destination == next_pos:
-            eject_flit = station_flits[3]
-            station_flits[3] = None
+        if station_flits[2] and station_flits[3].destination == next_pos:
+            eject_flit = station_flits[2]
+            station_flits[2] = None
             network.ring_bridge["ft"][(pos, next_pos)].popleft()
         else:
             index = network.round_robin["RB"][next_pos]

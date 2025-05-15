@@ -71,7 +71,7 @@ def main():
         plot_link_state=1,
         plot_ring_bridge_state=0,
         print_trace=0,
-        show_trace_id=160,
+        show_trace_id=200,
         show_node_id=4,
     )
 

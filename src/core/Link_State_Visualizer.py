@@ -9,12 +9,25 @@ import threading
 import time
 from types import SimpleNamespace
 
+# 引入节点局部 CrossRing piece 绘制函数（若存在）
+from .CrossRing_Piece_Visualizer import CrossRingVisualizer
+
 
 class NetworkLinkVisualizer:
     def __init__(self, network):
         self.network = network
-        self.fig, self.ax = plt.subplots(figsize=(10, 8))
+        self.cols = network.config.cols
+        # ---- Figure & Sub‑Axes ------------------------------------------------
+        self.fig = plt.figure(figsize=(12, 8))
+        gs = self.fig.add_gridspec(1, 2, width_ratios=[3, 1])
+        self.ax = self.fig.add_subplot(gs[0])  # 主网络视图
+        self.piece_ax = self.fig.add_subplot(gs[1])  # 右侧 Piece 视图
+        self.piece_ax.axis("off")
         self.ax.set_aspect("equal")
+        self.piece_vis = CrossRingVisualizer(self.network.config, self.piece_ax)
+        # 当前点击选中的节点 (None 表示未选)
+        self._selected_node = None
+        # 绘制主网络的静态元素
         self.node_positions = self._calculate_layout()
         self.link_artists = {}  # 存储链路相关的静态信息
         self._colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
@@ -39,6 +52,51 @@ class NetworkLinkVisualizer:
         )
         # 绑定键盘事件:
         self.fig.canvas.mpl_connect("key_press_event", self._on_key)
+        # 鼠标点击用于显示节点局部 Piece
+        self.fig.canvas.mpl_connect("button_press_event", self._on_click)
+
+    # ------------------------------------------------------------------
+    # 鼠标点击：显示选中节点的 Cross‑Ring Piece
+    # ------------------------------------------------------------------
+    def _on_click(self, event):
+        # 仅处理左键，且在主 ax 内点击
+        if event.button != 1 or event.inaxes is not self.ax:
+            return
+
+        # 找到距离最近且在阈值内的节点
+        sel_node = None
+        min_d = float("inf")
+        for nid, (x_ll, y_ll) in self.node_positions.items():
+            cx, cy = x_ll + 0.25, y_ll + 0.25  # 节点中心
+            d = np.hypot(event.xdata - cx, event.ydata - cy)
+            if d < min_d and d < 0.35:  # 阈值可根据布局调整
+                min_d = d
+                sel_node = nid
+
+        if sel_node is None:
+            return  # 点击空白
+        if (sel_node // self.cols) % 2 == 0:
+            sel_node += self.cols
+        # 记录当前选中节点
+        self._selected_node = sel_node
+
+        # 清空右侧子图并绘制
+        self.piece_ax.clear()
+        self.piece_ax.axis("off")
+
+        # 若正处于历史回溯视图，使用快照里的队列状态
+        if self.paused and self._play_idx is not None and len(self.history) > self._play_idx:
+            _, _, meta = self.history[self._play_idx]
+            fake_net = SimpleNamespace(
+                inject_queues=meta["inject_queues"],
+                eject_queues=meta["eject_queues"],
+                ring_bridge=meta["ring_bridge"],
+                config=self.network.config,
+            )
+            self.piece_vis.draw_piece_for_node(sel_node, fake_net)
+        else:
+            self.piece_vis.draw_piece_for_node(sel_node, self.network)
+        self.fig.canvas.draw_idle()
 
     def _calculate_layout(self):
         """根据网格计算节点位置（可调整节点间距）"""
@@ -331,10 +389,17 @@ class NetworkLinkVisualizer:
                 "network_name": self.network.name,
                 "use_highlight": self._use_highlight,
                 "expected_pid": self._expected_pid,
+                # 深拷贝三类队列，便于历史回溯时还原 Piece 状态
+                "inject_queues": copy.deepcopy(self.network.inject_queues),
+                "eject_queues": copy.deepcopy(self.network.eject_queues),
+                "ring_bridge": copy.deepcopy(getattr(self.network, "ring_bridge", {})),
             }
             self.history.append((cycle, snapshot, meta))
 
         self._render_snapshot({(src, dest): [(f.packet_id, f.flit_id) if f is not None else None for f in flits] for (src, dest), flits in self.network.links.items()})
+        # 若已有选中节点，实时更新右侧 Piece 视图
+        if self._selected_node is not None:
+            self._refresh_piece_view()
         self.ax.set_title(self.network.name)
         plt.tight_layout()
         plt.pause(self.pause_interval)
@@ -352,6 +417,31 @@ class NetworkLinkVisualizer:
         # 更新状态文本
         self.status_text.set_text(status)
         self.status_text.set_color(color)
+
+    # ------------------------------------------------------------------
+    # 刷新右侧局部 Piece 视图（实时 / 回溯自动判断）
+    # ------------------------------------------------------------------
+    def _refresh_piece_view(self):
+        if self._selected_node is None:
+            return
+
+        self.piece_ax.clear()
+        self.piece_ax.axis("off")
+
+        # 回溯模式：用保存的快照队列
+        if self.paused and self._play_idx is not None and len(self.history) > self._play_idx:
+            _, _, meta = self.history[self._play_idx]
+            fake_net = SimpleNamespace(
+                inject_queues=meta["inject_queues"],
+                eject_queues=meta["eject_queues"],
+                ring_bridge=meta["ring_bridge"],
+                config=self.network.config,
+            )
+            self.piece_vis.draw_piece_for_node(self._selected_node, fake_net)
+        else:  # 实时
+            self.piece_vis.draw_piece_for_node(self._selected_node, self.network)
+
+        self.fig.canvas.draw_idle()
 
     def _on_key(self, event):
         key = event.key
@@ -388,6 +478,7 @@ class NetworkLinkVisualizer:
                         self.ax.set_title(meta.get("network_name", ""))
                         self.status_text.set_text(f"Paused\ncycle {cyc} ({self._play_idx+1}/{len(self.history)})")
                         self._draw_state(snap)
+                        self._refresh_piece_view()
             else:
                 self._update_status_display()
                 self._play_idx = None
@@ -407,6 +498,7 @@ class NetworkLinkVisualizer:
             self.ax.set_title(meta.get("network_name", ""))
             self.status_text.set_text(f"Paused\ncycle {cyc} ({self._play_idx+1}/{len(self.history)})")
             self._draw_state(snap)
+            self._refresh_piece_view()
 
     def _draw_state(self, snapshot):
         self._render_snapshot(snapshot)
