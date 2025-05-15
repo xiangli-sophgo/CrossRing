@@ -20,25 +20,14 @@ class TrafficGenerator:
         self.total_bandwidth = total_bandwidth
 
     def calculate_time_points(self, speed, burst, is_read=True):
-        """计算读/写时间点序列"""
+        """计算读/写时间点序列，使请求均匀分布"""
         window_duration = self.read_duration if is_read else self.write_duration
+        # 计算请求数
         total_transfers = speed * window_duration // (self.total_bandwidth * burst)
-
         if total_transfers == 0:
             return []
-
-        # 计算均匀分布的时间间隔(保持整数)
-        base_interval = window_duration // total_transfers
-        remainder = window_duration % total_transfers
-        intervals = [base_interval + (1 if i < remainder else 0) for i in range(total_transfers)]
-
-        # 生成时间点序列
-        time_points = []
-        current_time = 0
-        for interval in intervals:
-            time_points.append(current_time)
-            current_time += interval
-
+        # 均匀分布
+        time_points = [int(i * window_duration / total_transfers) for i in range(total_transfers)]
         return time_points
 
 
@@ -68,12 +57,12 @@ def group_numbers():
     return [group.tolist() for group in final_groups]
 
 
-def generate_data(topo, read_duration, write_duration, interval_count, file_name, sdma_map, gdma_map, ddr_map, l2m_map, speed, burst, flow_type=0, mix_ratios=None, overlap=0):
+def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, l2m_map, speed, burst, flow_type=0, mix_ratios=None, overlap=0):
     """
     :param interval_count: 读写周期数量(每个周期=read_duration+write_duration)
     """
     # 初始化流量生成器(默认读128ns+写128ns)
-    generator = TrafficGenerator(read_duration=read_duration, write_duration=write_duration)
+    # generator = TrafficGenerator(read_duration=read_duration, write_duration=write_duration)
     data_all = []
 
     def generate_entries(src_map, dest_map, operation, burst, flow_type, speed, interval_count, dest_access_mode="random", overlap=True):
@@ -93,6 +82,12 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
         """
         if dest_access_mode not in ("round_robin", "random"):
             raise ValueError("dest_access_mode 必须是 'round_robin' 或 'random'")
+        read_duration = write_duration = 0
+        if operation == "R":
+            read_duration = 128
+        else:
+            write_duration = 128
+        generator = TrafficGenerator(read_duration=read_duration, write_duration=write_duration)
 
         is_read = operation == "R"
         time_pattern = generator.calculate_time_points(speed, burst, is_read)
@@ -214,6 +209,12 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
         mode_speeds = {k: int(total_speed * v) for k, v in ratios.items()}
         dest_len = len(dest_pos)
         entries = []
+        read_duration = write_duration = 0
+        if operation == "R":
+            read_duration = 128
+        else:
+            write_duration = 128
+        generator = TrafficGenerator(read_duration=read_duration, write_duration=write_duration)
 
         for cycle in range(interval_count):
             base_time = cycle * generator.cycle_duration
@@ -287,15 +288,15 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
             data_all.extend(generate_mixed_entries(sdma_map, "sdma", "l2m", l2m_map, "W", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(gdma_map, "gdma", "l2m", l2m_map, "R", burst, mix_ratios))
         else:
-            # data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_pos, "sdma", ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(gdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(sdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             #
             # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(sdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
-            data_all.extend(generate_entries(gdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
     # 排序并写入文件
@@ -307,8 +308,8 @@ def generate_data(topo, read_duration, write_duration, interval_count, file_name
 if __name__ == "__main__":
     # 参数配置
     topo = "3x3"
-    interval_count = 32
-    file_name = "../../test_data/traffic_2260E_case2.txt"
+    interval_count = 64
+    file_name = "../../test_data/traffic_2260E_case1.txt"
     np.random.seed(428)
 
     if topo == "5x4":
@@ -321,33 +322,27 @@ if __name__ == "__main__":
     # SG2260E
     elif topo == "3x3":
         sdma_map = {
-            "sdma_0": [2],
-            # "sdma_0": [0, 2, 6, 8],
+            "sdma_0": [0, 2, 6, 8],
         }
         gdma_map = {
-            "gdma_0": [0],
-            # "gdma_0": [0],
+            "gdma_0": [0, 2, 6, 8],
         }
         ddr_map = {
-            "ddr_0": [0, 1, 2, 3, 4, 5, 6, 7, 8],
-            # "ddr_1": [3],
-            # "ddr_0": [0, 2, 3, 5, 6, 8],
-            # "ddr_1": [0, 2, 3, 5, 6, 8],
-            # "ddr_2": [3, 5],
-            # "ddr_3": [3, 5],
+            "ddr_0": [0, 2, 3, 5, 6, 8],
+            "ddr_1": [0, 2, 3, 5, 6, 8],
+            "ddr_2": [3, 5],
+            "ddr_3": [3, 5],
         }
         l2m_map = {
-            "l2m_0": [2],
-            "l2m_1": [1],
-            # "l2m_0": [1, 7],
-            # "l2m_1": [1, 7],
+            "l2m_0": [1, 7],
+            "l2m_1": [1, 7],
         }
 
-    speed = {1: 128, 2: 128, 4: 128}  # 不同burst对应的带宽(GB/s)
+    speed = {1: 128, 2: 512, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 2
-    read_duration = 128
-    write_duration = 0
+    # read_duration = 0
+    # write_duration = 128
     overlap = 1
 
     # 生成数据(使用混合模式)
-    generate_data(topo, read_duration, write_duration, interval_count, file_name, sdma_map, gdma_map, ddr_map, l2m_map, speed, burst, flow_type=0, overlap=overlap)
+    generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, l2m_map, speed, burst, flow_type=0, overlap=overlap)
