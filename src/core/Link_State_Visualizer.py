@@ -7,6 +7,7 @@ from collections import defaultdict, deque
 import copy
 import threading
 import time
+from types import SimpleNamespace
 
 
 class NetworkLinkVisualizer:
@@ -19,6 +20,15 @@ class NetworkLinkVisualizer:
         self._colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
         self._color_map = {}
         self._next_color = 0
+        self.paused = False
+        # 颜色/高亮控制
+        self._use_highlight = False
+        self._expected_pid = 0
+        # ===============  History Buffer  ====================
+        # 保存最近 50 个周期的轻量级链路状态，便于暂停时回溯
+        # 形式: deque([(cycle_number, { "src-dst": [(pid,fid), ...], ... }), ...])
+        self.history = deque(maxlen=50)
+        self._play_idx = None  # 暂停时正在浏览的 history 索引
         self._draw_static_elements()
 
         # 播放控制参数
@@ -228,7 +238,14 @@ class NetworkLinkVisualizer:
         # self.ax.add_patch(queue)
 
         seats = self.split_queue_into_seats(
-            (queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2), queue_width, queue_height, seat_num, is_horizontal, facecolor="white", edgecolor="black", linestyle="--"
+            (queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2),
+            queue_width,
+            queue_height,
+            seat_num,
+            is_horizontal,
+            facecolor="white",
+            edgecolor="black",
+            linestyle="--",
         )
 
         for seat in seats:
@@ -283,7 +300,7 @@ class NetworkLinkVisualizer:
 
         return seats
 
-    def update(self, network=None, expected_packet_id=0, use_highlight=False):
+    def update(self, network=None, cycle=None, expected_packet_id=0, use_highlight=False):
         """
         更新每条链路队列中 flit 的显示
         - 空位: 无填充的方形
@@ -295,132 +312,40 @@ class NetworkLinkVisualizer:
         - 向上的链路: 横向标签在右侧
         - 向下的链路: 横向标签在左侧
         """
+        # 记录当前高亮配置, 供回溯绘制保持一致
+        self._use_highlight = use_highlight
+        self._expected_pid = expected_packet_id
+        # 若暂停，则仅保持 GUI 响应；不推进模拟
+        if self.paused:
+            plt.pause(self.pause_interval)
+            return self.ax.patches
+
         if self.should_stop:
             return False
 
         self.network = network
+        # 记录快照到历史缓冲 (仅在提供 cycle 时)
+        if cycle is not None:
+            snapshot = {(src, dest): [(f.packet_id, f.flit_id) if f is not None else None for f in flits] for (src, dest), flits in self.network.links.items()}
+            meta = {
+                "network_name": self.network.name,
+                "use_highlight": self._use_highlight,
+                "expected_pid": self._expected_pid,
+            }
+            self.history.append((cycle, snapshot, meta))
 
-        for link_id, artists_dict in self.link_artists.items():
-            if "flit_artists" in artists_dict:
-                for artist in artists_dict["flit_artists"]:
-                    artist.remove()
-            artists_dict["flit_artists"] = []
-
-        # 遍历所有链路
-        for (src, dest), flit_list in self.network.links.items():
-            link_id = f"{src}-{dest}"
-            if link_id not in self.link_artists:
-                continue
-
-            # 获取队列信息
-            queue_info = self.link_artists[link_id]
-            queue_center = queue_info["queue_center"]
-            queue_width = queue_info["queue_width"]
-            queue_height = queue_info["queue_height"]
-
-            # 检查是否为自环
-            is_self_loop = queue_info.get("is_self_loop", False)
-
-            # 如果已经存储了链路方向，直接使用
-            if "is_horizontal" in queue_info and "is_forward" in queue_info:
-                is_horizontal = queue_info["is_horizontal"]
-                is_forward = queue_info["is_forward"]
-            else:
-                # 确定链路方向（针对非自环链路的旧代码兼容）
-                dx = src % self.network.config.cols - dest % self.network.config.cols
-                dy = src // self.network.config.cols - dest // self.network.config.cols
-                is_horizontal = abs(dx) > abs(dy)
-                if is_horizontal:
-                    is_forward = dx < 0  # 向右为正向
-                else:
-                    is_forward = dy > 0  # 向上为正向
-
-            # 计算队列区域参数
-            q_ll = (queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2)
-
-            margin = 0.02
-            flit_size = 0.15  # flit方形大小
-            spacing = flit_size * 1.2  # flit之间的间距
-
-            # 计算需要的总空间
-            num_flits = len(flit_list)
-            if is_horizontal:
-                required_space = num_flits * spacing
-                available_space = queue_width - 2 * margin
-                # 如果需要的空间大于可用空间，按比例缩小间距
-                spacing = available_space / num_flits
-            else:
-                required_space = num_flits * spacing
-                available_space = queue_height - 2 * margin
-                spacing = available_space / num_flits
-
-            # 绘制所有flit位置
-            flit_artists = []
-            for i in range(num_flits):
-                # 计算位置 - 考虑方向
-                if is_horizontal:
-                    x = q_ll[0] + margin + (i + 0.5) * spacing
-                    y = queue_center[1]
-                    # 如果是向左的链路，反转顺序
-                    if not is_forward:
-                        x = q_ll[0] + queue_width - margin - (i + 0.5) * spacing
-                else:
-                    x = queue_center[0]
-                    y = q_ll[1] + margin + (i + 0.5) * spacing
-                    # 如果是向下的链路，反转顺序
-                    if not is_forward:
-                        y = q_ll[1] + queue_height - margin - (i + 0.5) * spacing
-
-                # 创建方形
-                flit = flit_list[i]
-                if flit is None:
-                    continue
-                facecolor = self._get_flit_color(flit, expected_packet_id=expected_packet_id, use_highlight=use_highlight)
-                rect = Rectangle((x - flit_size / 2, y - flit_size / 2), flit_size, flit_size, facecolor=facecolor, edgecolor="black")
-
-                # 添加文本标签 - 根据方向调整位置和显示方式
-                label = f"{flit.packet_id}.{flit.flit_id}"
-
-                # 2. 拼成多行标签
-                if is_horizontal:
-                    label = f"{flit.packet_id}\n{flit.flit_id}"
-                    # 根据方向决定 y 偏移
-                    if is_forward:
-                        y_text = y - flit_size * 2 - 0.1
-                    else:
-                        y_text = y + flit_size * 2 + 0.1
-                    if not is_self_loop:
-                        # 一次性绘制两行
-                        txt = self.ax.text(x + (i - 0.2) * 0.04 * (int(is_forward) - 0.5), y_text, label, ha="center", va="center", fontsize=9)
-                        flit_artists.append(txt)
-                else:
-                    # 垂直链路：横向标签
-                    if is_forward:  # 向上的链路
-                        text_x = x + flit_size * 1.1  # 右侧
-                        ha = "left"
-                    else:  # 向下的链路
-                        text_x = x - flit_size * 1.1  # 左侧
-                        ha = "right"
-                    text_y = y
-                    if not is_self_loop:
-                        text = self.ax.text(text_x, text_y, label, ha=ha, va="center", fontsize=9)
-                        flit_artists.append(text)
-
-                self.ax.add_patch(rect)
-                flit_artists.append(rect)
-
-            # 保存该链路的图形对象
-            self.link_artists[link_id]["flit_artists"] = flit_artists
-
-        # 标题与排版
+        self._render_snapshot({(src, dest): [(f.packet_id, f.flit_id) if f is not None else None for f in flits] for (src, dest), flits in self.network.links.items()})
         self.ax.set_title(self.network.name)
         plt.tight_layout()
         plt.pause(self.pause_interval)
-
         return self.ax.patches
 
     def _update_status_display(self):
         """更新状态显示"""
+        if self.paused:
+            # 保持暂停颜色 & 文本
+            self.status_text.set_color("orange")
+            return
         status = f"Running...\nInterval: {self.pause_interval:.2f}"
         color = "green"
 
@@ -432,16 +357,167 @@ class NetworkLinkVisualizer:
         key = event.key
 
         if key == "up":
-            # 加快 --> 缩短 pause_interval，但不跑到 0
-            self.pause_interval = max(1e-3, self.pause_interval * 0.75)
-            self._update_status_display()
+            if not self.paused:  # 暂停时不调速
+                self.pause_interval = max(1e-3, self.pause_interval * 0.75)
+                self._update_status_display()
         elif key == "down":
-            # 减慢
-            self.pause_interval *= 1.25
-            self._update_status_display()
+            if not self.paused:
+                self.pause_interval *= 1.25
+                self._update_status_display()
         elif key == "q":
             # q 键 - 停止更新
+            for art in getattr(self, "_history_artists", []):
+                try:
+                    art.remove()
+                except Exception:
+                    pass
             self.should_stop = True
+        elif key == "p":
+            self.paused = not self.paused
+            if self.paused:
+                self.status_text.set_text("Paused")
+                self.status_text.set_color("orange")
+                if self.paused:
+                    # 进入暂停：定位到最新快照并立即绘制
+                    if self.history:
+                        self._play_idx = len(self.history) - 1
+                        cyc, snap, meta = self.history[self._play_idx]
+                        # 同步高亮 / 标题等元数据
+                        self._use_highlight = meta.get("use_highlight", False)
+                        self._expected_pid = meta.get("expected_pid", 0)
+                        self.ax.set_title(meta.get("network_name", ""))
+                        self.status_text.set_text(f"Paused\ncycle {cyc} ({self._play_idx+1}/{len(self.history)})")
+                        self._draw_state(snap)
+            else:
+                self._update_status_display()
+                self._play_idx = None
+        elif self.paused and key in {"left", "right"}:
+            if not self.history:
+                return
+            if self._play_idx is None:
+                self._play_idx = len(self.history) - 1
+            if key == "left":
+                self._play_idx = max(0, self._play_idx - 1)
+            else:  # "right"
+                self._play_idx = min(len(self.history) - 1, self._play_idx + 1)
+            cyc, snap, meta = self.history[self._play_idx]
+            # 同步高亮 / 标题
+            self._use_highlight = meta.get("use_highlight", False)
+            self._expected_pid = meta.get("expected_pid", 0)
+            self.ax.set_title(meta.get("network_name", ""))
+            self.status_text.set_text(f"Paused\ncycle {cyc} ({self._play_idx+1}/{len(self.history)})")
+            self._draw_state(snap)
+
+    def _draw_state(self, snapshot):
+        self._render_snapshot(snapshot)
+
+    def _render_snapshot(self, snapshot):
+        # 清掉上一帧的 flit 图元
+        for link_id, info in self.link_artists.items():
+            for art in info.get("flit_artists", []):
+                try:
+                    art.remove()
+                except Exception:
+                    pass
+            info["flit_artists"] = []
+
+        margin = 0.02
+        flit_size = 0.15  # 单个 flit 方块边长
+        for (src, dest), flit_list in snapshot.items():
+            link_id = f"{src}-{dest}"
+            if link_id not in self.link_artists:
+                continue
+
+            info = self.link_artists[link_id]
+            queue_center = info["queue_center"]
+            queue_width = info["queue_width"]
+            queue_height = info["queue_height"]
+            is_horizontal = info["is_horizontal"]
+            is_forward = info["is_forward"]
+            is_self_loop = info.get("is_self_loop", False)
+
+            q_ll = (queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2)
+
+            num_seats = len(flit_list)
+            if num_seats == 0:
+                continue
+
+            # 计算 seat 间距，确保所有 seat 都能显示
+            if is_horizontal:
+                spacing = (queue_width - 2 * margin) / num_seats
+            else:
+                spacing = (queue_height - 2 * margin) / num_seats
+
+            flit_artists = []
+            for i, seat in enumerate(flit_list):
+                if seat is None:
+                    continue  # 空位
+
+                pid, fid = seat
+                flit = SimpleNamespace(packet_id=pid, flit_id=fid)
+
+                # ---------- 位置 ----------
+                if is_horizontal:
+                    x = q_ll[0] + margin + (i + 0.5) * spacing
+                    y = queue_center[1]
+                    if not is_forward:  # 向左
+                        x = q_ll[0] + queue_width - margin - (i + 0.5) * spacing
+                else:
+                    x = queue_center[0]
+                    y = q_ll[1] + margin + (i + 0.5) * spacing
+                    if not is_forward:  # 向下
+                        y = q_ll[1] + queue_height - margin - (i + 0.5) * spacing
+
+                # ---------- 绘制矩形 ----------
+                facecolor = self._get_flit_color(
+                    flit,
+                    use_highlight=self._use_highlight,
+                    expected_packet_id=self._expected_pid,
+                )
+                rect = Rectangle(
+                    (x - flit_size / 2, y - flit_size / 2),
+                    flit_size,
+                    flit_size,
+                    facecolor=facecolor,
+                    edgecolor="black",
+                )
+                self.ax.add_patch(rect)
+                flit_artists.append(rect)
+
+                # ---------- 文本标签 ----------
+                label_vert = f"{pid}\n{fid}"
+                label_horz = f"{pid}.{fid}"
+                if is_horizontal:
+                    # 标签放上下
+                    y_text = y - flit_size * 2 - 0.1 if is_forward else y + flit_size * 2 + 0.1
+                    txt = self.ax.text(
+                        x,
+                        y_text,
+                        label_vert,
+                        ha="center",
+                        va="center",
+                        fontsize=8,
+                    )
+                    flit_artists.append(txt)
+                else:
+                    # 标签放左右
+                    text_x = x + flit_size * 1.1 if is_forward else x - flit_size * 1.1
+                    ha = "left" if is_forward else "right"
+                    txt = self.ax.text(
+                        text_x,
+                        y,
+                        label_horz,
+                        ha=ha,
+                        va="center",
+                        fontsize=8,
+                    )
+                    flit_artists.append(txt)
+
+            # 保存此链路新生成的图元
+            info["flit_artists"] = flit_artists
+
+        # 最后刷新画布
+        self.fig.canvas.draw_idle()
 
     def _get_flit_color(self, flit, use_highlight=True, expected_packet_id=1, highlight_color=None):
         """获取颜色，支持多种PID格式：

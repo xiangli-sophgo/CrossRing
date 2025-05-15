@@ -14,7 +14,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_2260E_case1.txt"
+    file_name = r"traffic_2260E_case2.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -70,8 +70,8 @@ def main():
         plot_RN_BW_fig=1,
         plot_link_state=1,
         plot_ring_bridge_state=0,
-        print_trace=1,
-        show_trace_id=120,
+        print_trace=0,
+        show_trace_id=160,
         show_node_id=4,
     )
 
@@ -91,7 +91,7 @@ def main():
         sim.config.num_RN = 4
         sim.config.num_SN = 8
         sim.config.rn_read_tracker_ostd = 128
-        sim.config.rn_write_tracker_ostd = 64
+        sim.config.rn_write_tracker_ostd = 32
         sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
         sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
         sim.config.sn_ddr_read_tracker_ostd = 32
@@ -113,7 +113,7 @@ def main():
         sim.config.RB_IN_FIFO_DEPTH = 16
         sim.config.RB_OUT_FIFO_DEPTH = 16
         sim.config.gdma_rw_gap = np.inf
-        sim.config.sdma_rw_gap = 10
+        sim.config.sdma_rw_gap = 2
         sim.config.CHANNEL_SPEC = {
             "gdma": 1,
             "sdma": 1,
@@ -164,7 +164,7 @@ def main():
 
     # sim.config.update_config()
     sim.initial()
-    sim.end_time = 10000
+    sim.end_time = 50000
     sim.print_interval = 2000
     sim.run()
     # print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
