@@ -351,6 +351,7 @@ class Network:
         self.flit_size_bytes = 128
         for ch_name in self.IQ_ch_buffer.keys():
             for ip_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions):
+
                 if ch_name.startswith("ddr"):
                     self.token_bucket[ip_pos][ch_name] = TokenBucket(
                         rate=self.config.ddr_bandwidth_limit / self.config.network_frequency / self.flit_size_bytes,

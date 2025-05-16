@@ -15,10 +15,6 @@ class CrossRingVisualizer:
         - node_id: 要可视化的节点索引 (0 到 num_nodes-1)
         """
         self.cfg = config
-        # self.node_id = node_id
-        # 计算该节点的坐标 (暂不用于绘制位置)
-        # self.row = node_id // config.cols
-        # self.col = node_id % config.cols
         self.cols = config.cols
         self.rows = config.rows
         # 提取深度
@@ -31,32 +27,21 @@ class CrossRingVisualizer:
         self.square = 0.17  # flit 方块边长
         self.gap = 0.02  # 相邻槽之间间距
         self.fifo_gap = 0.5  # 相邻fifo之间间隙
+        self.inject_module_size = (3.5, 2.5)
+        self.eject_module_size = (2.5, 3.5)
+        self.rb_module_size = (3.5, 3.5)
         # 初始化图形
         if ax is None:
             self.fig, self.ax = plt.subplots(figsize=(8, 6))  # 增大图形尺寸
         else:
             self.ax = ax
-        plt.subplots_adjust(bottom=0.2)  # 为底部links模块留出空间
         self.ax.axis("off")
         self.ax.set_aspect("equal")
         # 调色板
         self._colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
         self._color_map = {}
         self._next_color = 0
-        self.name_map = {
-            "left": "TL",
-            "right": "TR",
-            "up_R": "IQ",
-            "up_E": "TU",
-            "up_I": "RB",
-            "down": "TD",
-            "vup": "TU",
-            "vdown": "TD",
-            "ring_bridge": "RB",
-            "eject": "EQ",
-            "local_I": "EQ",
-            "local_E": "IQ",
-        }
+
         # 存储 patch 和 text
         self.iq_patches, self.iq_texts = {}, {}
         self.eq_patches, self.eq_texts = {}, {}
@@ -69,10 +54,11 @@ class CrossRingVisualizer:
         # self._draw_arrows()
 
     def _draw_arrows(self):
+        # TODO: not Finished
         # 1. 模块几何信息（必须与 _draw_modules 中的保持一致）
-        IQ_x, IQ_y, IQ_w, IQ_h = -3.5, 0.0, 2.5, 3.5
-        EQ_x, EQ_y, EQ_w, EQ_h = 0.0, 3.5, 3.5, 2.5
-        RB_x, RB_y, RB_w, RB_h = 0.0, 0.0, 3.5, 3.5
+        IQ_x, IQ_y, IQ_w, IQ_h = -4, 0.0, self.inject_module_size
+        EQ_x, EQ_y, EQ_w, EQ_h = 0.0, 4, self.eject_module_size
+        RB_x, RB_y, RB_w, RB_h = 0.0, 0.0, self.rb_module_size
 
         # 2. 公共箭头样式基础
         base_style = dict(arrowstyle="-|>", color="black", lw=3.5, mutation_scale=15)
@@ -131,10 +117,10 @@ class CrossRingVisualizer:
     def _draw_modules(self):
         # 仅绘制当前节点的 Inject Queue, Eject Queue, Ring Bridge
         center_x, center_y = 0, 0
-        IQ_x = center_x - 3.5
+        IQ_x = center_x - self.inject_module_size[0] * 1.2
         IQ_y = center_y
         EQ_x = center_x
-        EQ_y = center_y + 3.5
+        EQ_y = center_y + self.inject_module_size[1] * 1.5
         RB_x = center_x
         RB_y = center_y
 
@@ -144,8 +130,8 @@ class CrossRingVisualizer:
             y=IQ_y,
             title="Inject Queue",
             lanes=["TL", "TR", "EQ", "TU", "TD"],
-            module_height=3.5,
-            module_width=2.5,
+            module_height=self.inject_module_size[0],
+            module_width=self.inject_module_size[1],
             depths=self.IQ_depth,
             patch_dict=self.iq_patches,
             text_dict=self.iq_texts,
@@ -159,8 +145,8 @@ class CrossRingVisualizer:
             y=EQ_y,
             title="Eject Queue",
             lanes=["TU", "TD"],
-            module_height=2.5,
-            module_width=3.5,
+            module_height=self.eject_module_size[0],
+            module_width=self.eject_module_size[1],
             depths=self.EQ_depth,
             patch_dict=self.eq_patches,
             text_dict=self.eq_texts,
@@ -175,8 +161,8 @@ class CrossRingVisualizer:
             title="Ring Bridge",
             lanes=["TL", "TR", "TU", "TD"],
             depths=[self.RB_in_depth] * 3 + [self.RB_out_depth] * 3,
-            module_height=3.5,
-            module_width=3.5,
+            module_height=self.rb_module_size[0],
+            module_width=self.rb_module_size[1],
             patch_dict=self.rb_patches,
             text_dict=self.rb_texts,
             per_lane_depth=True,
@@ -259,7 +245,6 @@ class CrossRingVisualizer:
                 text_va = "top"
 
             lane_x = x + module_width / 2 - 0.02 - depth * (square + gap) - square - 0.02
-            # self.ax.text(lane_x, lane_y, self.name_map[lane] if lane not in ["local", "up"] else self.name_map[f"{lane}_{title[0]}"], ha="right", va="center", fontsize=10)
             self.ax.text(lane_x, lane_y, lane, ha="right", va="center", fontsize=10)
 
             patch_dict[lane] = []
@@ -285,7 +270,6 @@ class CrossRingVisualizer:
                 text_ha = "left"
 
             lane_y = y - module_height / 2 + 0.1 + depth * (square + gap) + square / 2 + 0.05
-            # self.ax.text(lane_x, lane_y, self.name_map[lane] if lane not in ["local", "up"] else self.name_map[f"{lane}_{title[0]}"], ha="center", va="bottom", fontsize=10)
             self.ax.text(lane_x, lane_y, lane, ha="center", va="bottom", fontsize=10)
 
             patch_dict[lane] = []

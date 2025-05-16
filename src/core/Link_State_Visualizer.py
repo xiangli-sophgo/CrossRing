@@ -18,8 +18,8 @@ class NetworkLinkVisualizer:
         self.network = network
         self.cols = network.config.cols
         # ---- Figure & Sub‑Axes ------------------------------------------------
-        self.fig = plt.figure(figsize=(12, 8))
-        gs = self.fig.add_gridspec(1, 2, width_ratios=[3, 1])
+        self.fig = plt.figure(figsize=(15, 8))
+        gs = self.fig.add_gridspec(1, 2, width_ratios=[1.5, 1])
         self.ax = self.fig.add_subplot(gs[0])  # 主网络视图
         self.piece_ax = self.fig.add_subplot(gs[1])  # 右侧 Piece 视图
         self.piece_ax.axis("off")
@@ -38,14 +38,13 @@ class NetworkLinkVisualizer:
         self._use_highlight = False
         self._expected_pid = 0
         # ===============  History Buffer  ====================
-        # 保存最近 50 个周期的轻量级链路状态，便于暂停时回溯
-        # 形式: deque([(cycle_number, { "src-dst": [(pid,fid), ...], ... }), ...])
-        self.history = deque(maxlen=50)
+        # 保存最近N个周期的轻量级链路状态，便于暂停时回溯
+        self.history = deque(maxlen=20)
         self._play_idx = None  # 暂停时正在浏览的 history 索引
         self._draw_static_elements()
 
         # 播放控制参数
-        self.pause_interval = 0.1  # 默认每帧暂停间隔(秒)
+        self.pause_interval = 0.2  # 默认每帧暂停间隔(秒)
         self.should_stop = False  # 停止标志
         self.status_text = self.ax.text(
             -0.1, 1, f"Running...\nInterval: {self.pause_interval:.2f}", transform=self.ax.transAxes, fontsize=12, fontweight="bold", color="green", verticalalignment="top"

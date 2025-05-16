@@ -15,33 +15,33 @@ class Packet_Base_model(BaseModel):
             self.cycle_mod = self.cycle % self.config.network_frequency
             self.rn_type, self.sn_type = self.get_network_types()
 
-            self.check_and_release_sn_tracker()
+            self.release_completed_sn_tracker()
             # self.flit_trace(39)
 
             # Process requests
-            self.process_requests()
+            self.enqueue_new_requests()
 
             # Inject and process flits for requests
             if self.rn_type != "Idle":
-                self.handle_request_injection()
+                self.inject_request_flits()
 
-            reqs = self.process_and_move_flits(self.req_network, reqs, "req")
+            reqs = self.move_flits_in_network(self.req_network, reqs, "req")
 
             if self.rn_type != "Idle":
                 self.move_all_to_inject_queue(self.req_network, "req")
 
                 # Inject and process responses
-                self.handle_response_injection()
+                self.inject_response_flits()
 
-            rsps = self.process_and_move_flits(self.rsp_network, rsps, "rsp")
+            rsps = self.move_flits_in_network(self.rsp_network, rsps, "rsp")
 
             if self.sn_type != "Idle":
                 self.move_all_to_inject_queue(self.rsp_network, "rsp")
 
                 # Inject and process data flits
-                self.handle_data_injection()
+                self.inject_data_flits()
 
-            flits = self.process_and_move_flits(self.flit_network, flits, "data")
+            flits = self.move_flits_in_network(self.flit_network, flits, "data")
 
             self.move_all_to_inject_queue(self.flit_network, "data")
 
@@ -147,7 +147,7 @@ class Packet_Base_model(BaseModel):
                 #     self.node.sn_wdb_count[self.sn_type][in_pos] -= new_req.burst_length
                 #     self.create_rsp(new_req, "positive")
 
-    def check_and_release_sn_tracker(self):
+    def release_completed_sn_tracker(self):
         """Check if any trackers can be released based on the current cycle."""
         for release_time in sorted(self.node.sn_tracker_release_time.keys()):
             if release_time <= self.cycle:
@@ -173,7 +173,7 @@ class Packet_Base_model(BaseModel):
     #             queue = network.inject_queues[direction]
     #             self.move_to_inject_queue(network, pre_queue, queue, ip_pos)
 
-    def handle_request_injection(self):
+    def inject_request_flits(self):
         """Inject requests into the network."""
         for ip_pos in getattr(self.config, f"{self.rn_type}_send_positions"):
             for req_type in ["read", "write"]:
@@ -236,7 +236,7 @@ class Packet_Base_model(BaseModel):
     #                     queue_pre[ip_pos] = rsp
     #                     self.node.sn_rsp_queue[sn_type][ip_pos].pop(0)
 
-    def handle_data_injection(self):
+    def inject_data_flits(self):
         """
         Inject data flits into the network.
         """
@@ -442,9 +442,9 @@ class Packet_Base_model(BaseModel):
     #             vertical_flits.append(flit)
     #     return ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits
 
-    def flit_move(self, network, flits, flit_type):
+    def _flit_move(self, network, flits, flit_type):
         # 分类不同类型的flits
-        ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits = self.classify_flits(flits)
+        ring_bridge_flits, vertical_flits, horizontal_flits, new_flits, local_flits = self.categorize_flits_by_direction(flits)
 
         # 处理新到达的flits
         for flit in new_flits + horizontal_flits:
@@ -470,19 +470,19 @@ class Packet_Base_model(BaseModel):
 
                 # 处理eject操作
                 if len(network.ring_bridge["eject"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    eject_flit = self._process_eject_flit(network, station_flits, pos, next_pos)
+                    eject_flit = self._ring_bridge_EQ_arbitrate(network, station_flits, pos, next_pos)
 
                 # 处理vup操作
                 if len(network.ring_bridge["vup"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
                     if vup_flit:
                         print(vup_flit)
-                    vup_flit = self._process_vup_flit(network, station_flits, pos, next_pos)
+                    vup_flit = self._ring_bridge_TU_arbitrate(network, station_flits, pos, next_pos)
 
                 # 处理vdown操作
                 if len(network.ring_bridge["vdown"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
                     if vdown_flit:
                         print(vdown_flit)
-                    vdown_flit = self._process_vdown_flit(network, station_flits, pos, next_pos)
+                    vdown_flit = self._ring_bridge_TD_arbitrate(network, station_flits, pos, next_pos)
 
                 # transfer_eject
                 # 处理eject队列
@@ -534,7 +534,7 @@ class Packet_Base_model(BaseModel):
 
         return flits
 
-    def _process_eject_flit(self, network, station_flits, pos, next_pos):
+    def _ring_bridge_EQ_arbitrate(self, network, station_flits, pos, next_pos):
         """处理eject操作"""
         eject_flit = None
 
@@ -553,7 +553,7 @@ class Packet_Base_model(BaseModel):
 
         return eject_flit
 
-    def _process_vup_flit(self, network, station_flits, pos, next_pos):
+    def _ring_bridge_TU_arbitrate(self, network, station_flits, pos, next_pos):
         """处理vup操作"""
         vup_flit = None
 
@@ -571,7 +571,7 @@ class Packet_Base_model(BaseModel):
 
         return vup_flit
 
-    def _process_vdown_flit(self, network, station_flits, pos, next_pos):
+    def _ring_bridge_TD_arbitrate(self, network, station_flits, pos, next_pos):
         """处理vdown操作"""
         vdown_flit = None
 

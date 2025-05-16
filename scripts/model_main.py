@@ -69,7 +69,6 @@ def main():
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
         plot_link_state=1,
-        plot_ring_bridge_state=0,
         print_trace=0,
         show_trace_id=200,
         show_node_id=4,
@@ -94,8 +93,8 @@ def main():
         sim.config.rn_write_tracker_ostd = 32
         sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
         sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
-        sim.config.sn_ddr_read_tracker_ostd = 32
-        sim.config.sn_ddr_write_tracker_ostd = 32
+        sim.config.sn_ddr_read_tracker_ostd = 64
+        sim.config.sn_ddr_write_tracker_ostd = 16
         sim.config.sn_l2m_read_tracker_ostd = 64
         sim.config.sn_l2m_write_tracker_ostd = 64
         sim.config.sn_ddr_wdb_size = sim.config.sn_ddr_write_tracker_ostd * sim.config.burst
@@ -106,7 +105,6 @@ def main():
         sim.config.l2m_R_latency_original = 12
         sim.config.l2m_W_latency_original = 16
         sim.config.ddr_bandwidth_limit = 76.8 / 4
-        # sim.config.ddr_bandwidth_limit = np.inf
         sim.config.l2m_bandwidth_limit = np.inf
         sim.config.IQ_CH_FIFO_DEPTH = 10
         sim.config.EQ_CH_FIFO_DEPTH = 10
@@ -164,7 +162,7 @@ def main():
 
     # sim.config.update_config()
     sim.initial()
-    sim.end_time = 50000
+    sim.end_time = 10000
     sim.print_interval = 2000
     sim.run()
     # print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
