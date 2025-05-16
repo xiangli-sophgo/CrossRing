@@ -632,11 +632,12 @@ class NetworkLinkVisualizer:
 
         # 如果不启用高亮功能，使用原有逻辑
         if not use_highlight:
-            if color_key in self._color_map:
-                return self._color_map[color_key]
-            c = self._colors[self._next_color % len(self._colors)]
+            # if color_key in self._color_map:
+            #     return self._color_map[color_key]
+            # c = self._colors[self._next_color % len(self._colors)]
+            c = self._colors[color_key % len(self._colors)]
             self._color_map[color_key] = c
-            self._next_color += 1
+            # self._next_color += 1
             return c
 
         # 启用高亮功能时的逻辑

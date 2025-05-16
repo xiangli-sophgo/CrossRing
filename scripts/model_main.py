@@ -70,7 +70,7 @@ def main():
         plot_RN_BW_fig=1,
         plot_link_state=1,
         print_trace=0,
-        show_trace_id=200,
+        show_trace_id=0,
         show_node_id=4,
     )
 
@@ -105,11 +105,17 @@ def main():
         sim.config.l2m_R_latency_original = 12
         sim.config.l2m_W_latency_original = 16
         sim.config.ddr_bandwidth_limit = 76.8 / 4
-        sim.config.l2m_bandwidth_limit = np.inf
+        sim.config.l2m_bandwidth_limit = 64
         sim.config.IQ_CH_FIFO_DEPTH = 10
         sim.config.EQ_CH_FIFO_DEPTH = 10
         sim.config.RB_IN_FIFO_DEPTH = 16
         sim.config.RB_OUT_FIFO_DEPTH = 16
+        sim.config.TL_Etag_T2_UE_MAX = 4
+        sim.config.TL_Etag_T1_UE_MAX = 7
+        sim.config.TR_Etag_T2_UE_MAX = 6
+        sim.config.TU_Etag_T2_UE_MAX = 4
+        sim.config.TU_Etag_T1_UE_MAX = 7
+        sim.config.TD_Etag_T3_UE_MAX = 5
         sim.config.gdma_rw_gap = np.inf
         sim.config.sdma_rw_gap = 2
         sim.config.CHANNEL_SPEC = {
@@ -143,22 +149,6 @@ def main():
         sim.config.ddr_W_latency_original = 16
         sim.config.l2m_R_latency_original = 12
         sim.config.l2m_W_latency_original = 16
-
-    sim.config.IQ_OUT_FIFO_DEPTH = 8
-    sim.config.EQ_IN_FIFO_DEPTH = 8
-    sim.config.RB_IN_FIFO_DEPTH = 8
-    sim.config.RB_OUT_FIFO_DEPTH = 8
-    sim.config.TL_Etag_T2_UE_MAX = 4
-    sim.config.TL_Etag_T1_UE_MAX = 7
-    sim.config.TR_Etag_T2_UE_MAX = 6
-    sim.config.TU_Etag_T2_UE_MAX = 4
-    sim.config.TU_Etag_T1_UE_MAX = 7
-    sim.config.TD_Etag_T3_UE_MAX = 5
-    sim.config.ITag_Trigger_Th_H = 80
-    sim.config.ITag_Trigger_Th_V = 80
-    sim.config.ITag_Max_Num_H = sim.config.ITag_Max_Num_V = 1
-    sim.config.seats_per_link = 7
-    sim.config.Both_side_ETag_upgrade = 1
 
     # sim.config.update_config()
     sim.initial()

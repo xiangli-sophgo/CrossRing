@@ -865,6 +865,8 @@ class BaseModel:
             if network.execute_moves(flit, self.cycle):
                 flits.remove(flit)
 
+        # if flit_type == "data":
+        # print(network.round_robin["RB"][1])
         # 处理 Ring Bridge 的 FIFOSel
         for col in range(1, self.config.rows, 2):
             for row in range(self.config.cols):
@@ -875,7 +877,7 @@ class BaseModel:
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["TL", "TR", "ft", "IQ_TU", "IQ_TD"]]
                 # station_flits = [network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["TL", "TR", "ft"]] + [
-                    # network.inject_queues[fifo_pos][pos][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["TU", "TD"]
+                # network.inject_queues[fifo_pos][pos][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["TU", "TD"]
                 # ]
 
                 # 处理EQ操作
@@ -1009,16 +1011,16 @@ class BaseModel:
                 network.RB_UE_Counters["TR"][(pos, next_pos)]["T2"] -= 1
         elif index == 2:
             flit = network.ring_bridge["ft"][(pos, next_pos)].popleft()
-            
+
         elif index == 3:
             flit = network.ring_bridge["IQ_TU"][(pos, next_pos)].popleft()
         elif index == 4:
             flit = network.ring_bridge["IQ_TD"][(pos, next_pos)].popleft()
-            
+
         # elif index == 3:
-            # flit = network.ring_bridge["TU"][pos].popleft()
+        # flit = network.ring_bridge["TU"][pos].popleft()
         # elif index == 4:
-            # flit = network.ring_bridge["TD"][pos].popleft()
+        # flit = network.ring_bridge["TD"][pos].popleft()
 
         if flit.ETag_priority == "T1":
             self.RB_ETag_T1_num_stat += 1

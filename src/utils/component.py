@@ -407,7 +407,7 @@ class Network:
                 elif key == "EQ":
                     self.round_robin[key][ip_pos - config.cols] = deque([0, 1, 2, 3])
                 else:
-                    self.round_robin[key][ip_pos - config.cols] = deque([0, 1, 2, 3, 4])
+                    self.round_robin[key][ip_pos - config.cols] = deque([0,0,0, 1, 1,  1, 2, 3, 4])
 
             self.inject_time[ip_pos] = []
             self.eject_time[ip_pos - config.cols] = []

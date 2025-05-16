@@ -70,6 +70,10 @@ class CrossRingConfig:
             "ddr": 1,  # → SN 侧
             "l2m": 1,  # → SN 侧
         }
+        self.channel_names = []
+        for key in self.CHANNEL_SPEC:
+            for idx in range(self.CHANNEL_SPEC[key]):
+                self.channel_names.append(f"{key}_{idx}")
         assert (
             self.TL_Etag_T2_UE_MAX < self.TL_Etag_T1_UE_MAX < self.RB_IN_FIFO_DEPTH
             and self.TL_Etag_T2_UE_MAX < self.RB_IN_FIFO_DEPTH - 2
@@ -102,6 +106,10 @@ class CrossRingConfig:
         self.sn_ddr_write_tracker_ostd = self.sn_ddr_wdb_size // self.burst
         self.sn_l2m_read_tracker_ostd = self.sn_l2m_wdb_size // self.burst
         self.sn_l2m_write_tracker_ostd = self.sn_l2m_wdb_size // self.burst
+        self.channel_names = []
+        for key in self.CHANNEL_SPEC:
+            for idx in range(self.CHANNEL_SPEC[key]):
+                self.channel_names.append(f"{key}_{idx}")
 
     def update_latency(self):
         self.ddr_R_latency = self.ddr_R_latency_original * self.network_frequency
