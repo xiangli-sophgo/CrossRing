@@ -288,13 +288,13 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
             data_all.extend(generate_mixed_entries(sdma_map, "sdma", "l2m", l2m_map, "W", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(gdma_map, "gdma", "l2m", l2m_map, "R", burst, mix_ratios))
         else:
-            # data_all.extend(generate_entries(gdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(gdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(sdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             #
-            data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(sdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
             # data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
@@ -322,26 +322,40 @@ if __name__ == "__main__":
     # SG2260E
     elif topo == "3x3":
         sdma_map = {
-            "sdma_0": [0, 2, 6, 8],
+            "sdma_0": [
+                0,
+                2,
+                6,
+                8,
+            ],
         }
         gdma_map = {
-            # "gdma_0": [0, 2, 6, 8],
-            "gdma_0": [0, 2, 8],
+            "gdma_0": [
+                0,
+                2,
+                6,
+                # 8,
+            ],
+            # "gdma_0": [0, 2],
         }
         ddr_map = {
             "ddr_0": [0, 2, 3, 5, 6, 8],
             "ddr_1": [0, 2, 3, 5, 6, 8],
             "ddr_2": [3, 5],
             "ddr_3": [3, 5],
+            # "ddr_0": [3],
+            # "ddr_1": [3],
+            # "ddr_2": [3],
+            # "ddr_3": [3],
         }
         l2m_map = {
-            "l2m_0": [1],
-            "l2m_1": [1],
-            # "l2m_0": [1, 7],
-            # "l2m_1": [1, 7],
+            # "l2m_0": [1],
+            # "l2m_1": [1],
+            "l2m_0": [1, 7],
+            "l2m_1": [1, 7],
         }
 
-    speed = {1: 128, 2: 128, 4: 128}  # 不同burst对应的带宽(GB/s)
+    speed = {1: 128, 2: 256, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 2
     # read_duration = 0
     # write_duration = 128

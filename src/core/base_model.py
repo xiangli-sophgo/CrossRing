@@ -76,6 +76,7 @@ class BaseModel:
         self.config.update_config()
 
     def initial(self):
+        self.config.update_config()
         self.config.update_latency()
         self.adjacency_matrix = create_adjacency_matrix("CrossRing", self.config.num_nodes, self.config.cols)
         # plot_adjacency_matrix(self.adjacency_matrix)
@@ -106,10 +107,16 @@ class BaseModel:
             "TR": lambda flit: flit.path[1] - flit.path[0] == 1,
             "TL": lambda flit: flit.path[1] - flit.path[0] == -1,
             "TU": lambda flit: (
-                len(flit.path) >= 3 and flit.path[2] - flit.path[1] == -self.config.cols * 2 and flit.path[1] - flit.path[0] == -self.config.cols and flit.source - flit.destination != self.config.cols
+                len(flit.path) >= 3
+                and flit.path[2] - flit.path[1] == -self.config.cols * 2
+                and flit.path[1] - flit.path[0] == -self.config.cols
+                and flit.source - flit.destination != self.config.cols
             ),
             "TD": lambda flit: (
-                len(flit.path) >= 3 and flit.path[2] - flit.path[1] == self.config.cols * 2 and flit.path[1] - flit.path[0] == -self.config.cols and flit.source - flit.destination != self.config.cols
+                len(flit.path) >= 3
+                and flit.path[2] - flit.path[1] == self.config.cols * 2
+                and flit.path[1] - flit.path[0] == -self.config.cols
+                and flit.source - flit.destination != self.config.cols
             ),
             "EQ": lambda flit: flit.source - flit.destination == self.config.cols,
         }
@@ -248,7 +255,9 @@ class BaseModel:
             use_highlight = 1
             if self.req_network.send_flits[show_id] and not self.req_network.send_flits[show_id][-1].is_arrive:
                 self.link_state_vis.update(self.req_network, self.cycle, show_id, use_highlight)
-            elif self.rsp_network.send_flits[show_id] and not self.rsp_network.send_flits[show_id][-1].is_arrive and self.rsp_network.send_flits[show_id][0].current_link is not None:
+            elif (
+                self.rsp_network.send_flits[show_id] and not self.rsp_network.send_flits[show_id][-1].is_arrive and self.rsp_network.send_flits[show_id][0].current_link is not None
+            ):
                 self.link_state_vis.update(self.rsp_network, self.cycle, show_id, use_highlight)
             elif self.flit_network.send_flits[show_id] and self.flit_network.send_flits[show_id][-1].is_arrive:
                 self.link_state_vis.update(self.flit_network, self.cycle, show_id, 0)
@@ -323,7 +332,11 @@ class BaseModel:
             for sn_type, in_pos, req in tracker_list:
                 self.node.sn_tracker[sn_type][in_pos].remove(req)
                 self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] += 1
-                if self.node.sn_wdb_count[sn_type][in_pos] > 0 and self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] > 0 and self.node.sn_req_wait[req.req_type][sn_type][in_pos]:
+                if (
+                    self.node.sn_wdb_count[sn_type][in_pos] > 0
+                    and self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] > 0
+                    and self.node.sn_req_wait[req.req_type][sn_type][in_pos]
+                ):
                     new_req = self.node.sn_req_wait[req.req_type][sn_type][in_pos].pop(0)
                     new_req.sn_tracker_type = req.sn_tracker_type
                     new_req.req_attr = "old"
@@ -351,7 +364,11 @@ class BaseModel:
                     queue_pre[ip_pos] = None
 
     def print_data_statistic(self):
-        print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
+        print(
+            f"Data statistic: Read: {self.read_req, self.read_flit}, "
+            f"Write: {self.write_req, self.write_flit}, "
+            f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
+        )
 
     def log_summary(self):
         print(
@@ -397,7 +414,10 @@ class BaseModel:
                             if abs(rd + 1 - wr) >= max_gap:
                                 continue
                             req = self.req_network.ip_read[ip_type][ip_pos][0]
-                            if self.node.rn_rdb_count[ip_type][ip_pos] > self.node.rn_rdb_reserve[ip_type][ip_pos] * req.burst_length and self.node.rn_tracker_count[req_type][ip_type][ip_pos] > 0:
+                            if (
+                                self.node.rn_rdb_count[ip_type][ip_pos] > self.node.rn_rdb_reserve[ip_type][ip_pos] * req.burst_length
+                                and self.node.rn_tracker_count[req_type][ip_type][ip_pos] > 0
+                            ):
                                 counts["read"] += 1
                                 req.req_entry_network_cycle = self.cycle
                                 self.req_network.ip_read[ip_type][ip_pos].popleft()
@@ -472,7 +492,9 @@ class BaseModel:
                 ip_type = rr_queue.popleft()
                 processed = False
                 if ip_type.startswith("ddr") or ip_type.startswith("l2m"):
-                    inject_flit = self.node.sn_rdb[ip_type][ip_pos][0] if self.node.sn_rdb[ip_type][ip_pos] and self.node.sn_rdb[ip_type][ip_pos][0].departure_cycle <= self.cycle else None
+                    inject_flit = (
+                        self.node.sn_rdb[ip_type][ip_pos][0] if self.node.sn_rdb[ip_type][ip_pos] and self.node.sn_rdb[ip_type][ip_pos][0].departure_cycle <= self.cycle else None
+                    )
                     data_injected_from = "sn"
                 else:
                     inject_flit = (
@@ -683,13 +705,6 @@ class BaseModel:
             req.original_source_type = req_data[2]
             req.original_destination_type = req_data[4]
 
-            # Handle topology-specific type assignments
-            # if self.topo_type_stat in ["5x4", "4x5"]:
-            #     req.source_type = "gdma" if req_data[1] < 16 else "sdma"
-            #     req.destination_type = "ddr" if req_data[3] < 16 else "l2m"
-            # elif self.topo_type_stat in ["3x3"]:
-            #     req.destination_type = "ddr" if req_data[4] in ["ddr_1", "l2m_1"] else "l2m"
-
             req.packet_id = Node.get_next_packet_id()
             req.req_type = "read" if req_data[5] == "R" else "write"
 
@@ -875,7 +890,10 @@ class BaseModel:
                 EQ_flit, TU_flit, TD_flit = None, None, None
 
                 # 获取各方向的flit
-                station_flits = [network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["TL", "TR", "ft", "IQ_TU", "IQ_TD"]]
+                station_flits = [
+                    network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None
+                    for fifo_pos in ["TL", "TR", "ft", "IQ_TU", "IQ_TD"]
+                ]
                 # station_flits = [network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["TL", "TR", "ft"]] + [
                 # network.inject_queues[fifo_pos][pos][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["TU", "TD"]
                 # ]
@@ -937,7 +955,7 @@ class BaseModel:
 
         return flits
 
-    def _ring_bridge_EQ_arbitrate(self, network, station_flits, pos, next_pos):
+    def _ring_bridge_EQ_arbitrate(self, network: Network, station_flits, pos, next_pos):
         """处理eject操作"""
         RB_EQ_flit = None
         if station_flits[2] and station_flits[3].destination == next_pos:
@@ -1093,7 +1111,8 @@ class BaseModel:
                     if network.ip_eject[ip_type][ip_pos]:
                         flit = network.ip_eject[ip_type][ip_pos][0]
                         if flit.req_type == "write" and ip_type.startswith("ddr"):
-                            token_bucket: TokenBucket = network.token_bucket[flit.source][ip_type]
+                            token_bucket: TokenBucket = network.token_bucket[flit.destination + self.config.cols][ip_type]
+                            # token_bucket: TokenBucket = network.token_bucket[flit.destination ][ip_type]
                             token_bucket.refill(self.cycle)
                             if not token_bucket.consume():
                                 continue
@@ -1294,7 +1313,9 @@ class BaseModel:
                     if network.links_tag[(i, j)][-1] == [j, "TR"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["TR"][j] += 1
-                elif i - j == self.config.cols * 2 or (i == j and i in range(self.config.num_nodes - self.config.cols * 2, self.config.cols + self.config.num_nodes - self.config.cols * 2)):
+                elif i - j == self.config.cols * 2 or (
+                    i == j and i in range(self.config.num_nodes - self.config.cols * 2, self.config.cols + self.config.num_nodes - self.config.cols * 2)
+                ):
                     if network.links_tag[(i, j)][-1] == [j, "TU"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["TU"][j] += 1
@@ -1421,9 +1442,6 @@ class BaseModel:
         req.destination_type = flit.source_type
         req.original_source_type = flit.original_destination_type
         req.original_destination_type = flit.original_source_type
-        if self.topo_type_stat in ["5x4", "4x5"]:
-            req.source_type = "gdma" if req.source_original < 16 else "sdma"
-            req.destination_type = "ddr" if req.destination_original < 16 else "l2m"
         req.packet_id = Node.get_next_packet_id()
         req.req_type = "write"
         self.new_write_req.append(req)
@@ -1465,7 +1483,9 @@ class BaseModel:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             flit.departure_cycle = (
-                self.cycle + np.random.uniform(low=self.config.ddr_R_latency - self.config.ddr_R_latency_var, high=self.config.ddr_R_latency + self.config.ddr_R_latency_var, size=None) + i
+                self.cycle
+                + np.random.uniform(low=self.config.ddr_R_latency - self.config.ddr_R_latency_var, high=self.config.ddr_R_latency + self.config.ddr_R_latency_var, size=None)
+                + i
                 if req.original_destination_type.startswith("ddr")
                 else self.cycle + self.config.l2m_R_latency + i
             )
@@ -2109,9 +2129,9 @@ class BaseModel:
             total_bw = read_bw + write_bw
 
             # 存储数据
-            self.ip_bandwidth_data["read"][source_type][physical_row, physical_col] = read_bw
-            self.ip_bandwidth_data["write"][source_type][physical_row, physical_col] = write_bw
-            self.ip_bandwidth_data["total"][source_type][physical_row, physical_col] = total_bw
+            self.ip_bandwidth_data["read"][source_type][physical_row, physical_col] += read_bw
+            self.ip_bandwidth_data["write"][source_type][physical_row, physical_col] += write_bw
+            self.ip_bandwidth_data["total"][source_type][physical_row, physical_col] += total_bw
 
     def draw_flow_graph(self, network, mode="total", node_size=2000, save_path=None):
         """

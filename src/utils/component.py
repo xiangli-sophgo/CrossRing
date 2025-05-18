@@ -357,6 +357,10 @@ class Network:
                         rate=self.config.ddr_bandwidth_limit / self.config.network_frequency / self.flit_size_bytes,
                         bucket_size=self.config.ddr_bandwidth_limit,
                     )
+                    self.token_bucket[ip_pos - self.config.cols][ch_name] = TokenBucket(
+                        rate=self.config.ddr_bandwidth_limit / self.config.network_frequency / self.flit_size_bytes,
+                        bucket_size=self.config.ddr_bandwidth_limit,
+                    )
                 elif ch_name.startswith("l2m"):
                     self.token_bucket[ip_pos][ch_name] = TokenBucket(
                         rate=self.config.l2m_bandwidth_limit / self.config.network_frequency / self.flit_size_bytes,
@@ -407,7 +411,7 @@ class Network:
                 elif key == "EQ":
                     self.round_robin[key][ip_pos - config.cols] = deque([0, 1, 2, 3])
                 else:
-                    self.round_robin[key][ip_pos - config.cols] = deque([0,0,0, 1, 1,  1, 2, 3, 4])
+                    self.round_robin[key][ip_pos - config.cols] = deque([0, 0, 0, 1, 1, 1, 2, 3, 4])
 
             self.inject_time[ip_pos] = []
             self.eject_time[ip_pos - config.cols] = []
@@ -1280,7 +1284,9 @@ class Network:
                             next_pos = next_node - self.config.cols * 2 if next_node - self.config.cols * 2 >= col_start else col_start
                             flit.current_link = (next_node, next_pos)
                             flit.current_seat_index = 0
-                    elif flit.ETag_priority == "T0" and self.T0_Etag_Order_FIFO[0] == (next_node, flit) and self.EQ_UE_Counters["TU"][next_node]["T0"] < self.config.EQ_IN_FIFO_DEPTH:
+                    elif (
+                        flit.ETag_priority == "T0" and self.T0_Etag_Order_FIFO[0] == (next_node, flit) and self.EQ_UE_Counters["TU"][next_node]["T0"] < self.config.EQ_IN_FIFO_DEPTH
+                    ):
                         self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
                         flit.is_delay = False
                         flit.is_arrive = True

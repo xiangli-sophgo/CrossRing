@@ -31,9 +31,12 @@ class NetworkLinkVisualizer:
         self.node_positions = self._calculate_layout()
         self.link_artists = {}  # 存储链路相关的静态信息
         self._colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-        self._color_map = {}
-        self._next_color = 0
+
         self.paused = False
+        # ============  flit‑click tracking ==============
+        self.tracked_pid = None  # 当前追踪的 packet_id (None = 不追踪)
+        self.rect_info_map = {}  # rect → (text_obj, packet_id)
+        self.fig.canvas.mpl_connect("button_press_event", self._on_flit_click)
         # 颜色/高亮控制
         self._use_highlight = False
         self._expected_pid = 0
@@ -55,9 +58,20 @@ class NetworkLinkVisualizer:
         self.fig.canvas.mpl_connect("button_press_event", self._on_click)
 
     # ------------------------------------------------------------------
+    #  simple palette lookup (no cache)                                 #
+    # ------------------------------------------------------------------
+    def _palette_color(self, pid: int):
+        return self._colors[pid % len(self._colors)]
+
+    # ------------------------------------------------------------------
     # 鼠标点击：显示选中节点的 Cross‑Ring Piece
     # ------------------------------------------------------------------
     def _on_click(self, event):
+        # 若点中了 flit，则交由 flit 追踪逻辑处理，不当作节点点击
+        for rect in self.rect_info_map:
+            contains, _ = rect.contains(event)
+            if contains:
+                return
         # 仅处理左键，且在主 ax 内点击
         if event.button != 1 or event.inaxes is not self.ax:
             return
@@ -87,6 +101,8 @@ class NetworkLinkVisualizer:
         if self.paused and self._play_idx is not None and len(self.history) > self._play_idx:
             _, _, meta = self.history[self._play_idx]
             fake_net = SimpleNamespace(
+                ip_inject=meta["ip_inject"],
+                ip_eject=meta["ip_eject"],
                 inject_queues=meta["inject_queues"],
                 eject_queues=meta["eject_queues"],
                 ring_bridge=meta["ring_bridge"],
@@ -96,6 +112,45 @@ class NetworkLinkVisualizer:
         else:
             self.piece_vis.draw_piece_for_node(sel_node, self.network)
         self.fig.canvas.draw_idle()
+
+    # ------------------------------------------------------------------
+    # flit 点击：显示/隐藏 flit id 并追踪该 packet_id
+    # ------------------------------------------------------------------
+    def _on_flit_click(self, event):
+        if event.button != 1 or event.inaxes is not self.ax:
+            return
+        # 查找点击中的 flit
+        for rect, (txt, pid) in self.rect_info_map.items():
+            contains, _ = rect.contains(event)
+            if contains:
+                # 切换追踪
+                if self.tracked_pid == pid:
+                    self.tracked_pid = None
+                else:
+                    self.tracked_pid = pid
+                # 根据追踪状态更新高亮配置
+                self._use_highlight = self.tracked_pid is not None
+                self._expected_pid = self.tracked_pid or 0
+                # 刷新右侧 Piece 视图以保持同步高亮
+                self._refresh_piece_view()
+                # 更新可见性
+                self._update_tracked_labels()
+                self.fig.canvas.draw_idle()
+                break
+
+    def _update_tracked_labels(self):
+        highlight_on = self.tracked_pid is not None
+        for rect, (txt, pid) in self.rect_info_map.items():
+            is_target = highlight_on and pid == self.tracked_pid
+
+            # 文本可见性
+            txt.set_visible(is_target)
+
+            # 面色高亮 / 恢复
+            if highlight_on:
+                rect.set_facecolor("red" if is_target else "lightgrey")
+            else:
+                rect.set_facecolor(self._palette_color(pid))
 
     def _calculate_layout(self):
         """根据网格计算节点位置（可调整节点间距）"""
@@ -389,6 +444,8 @@ class NetworkLinkVisualizer:
                 "use_highlight": self._use_highlight,
                 "expected_pid": self._expected_pid,
                 # 深拷贝三类队列，便于历史回溯时还原 Piece 状态
+                "ip_inject": copy.deepcopy(self.network.ip_inject),
+                "ip_eject": copy.deepcopy(self.network.ip_eject),
                 "inject_queues": copy.deepcopy(self.network.inject_queues),
                 "eject_queues": copy.deepcopy(self.network.eject_queues),
                 "ring_bridge": copy.deepcopy(getattr(self.network, "ring_bridge", {})),
@@ -423,6 +480,9 @@ class NetworkLinkVisualizer:
     def _refresh_piece_view(self):
         if self._selected_node is None:
             return
+        # 把当前高亮信息同步给右侧 Piece 可视化器
+        self.piece_vis.use_highlight = self._use_highlight
+        self.piece_vis.highlight_pid = self.tracked_pid
 
         self.piece_ax.clear()
         self.piece_ax.axis("off")
@@ -431,6 +491,8 @@ class NetworkLinkVisualizer:
         if self.paused and self._play_idx is not None and len(self.history) > self._play_idx:
             _, _, meta = self.history[self._play_idx]
             fake_net = SimpleNamespace(
+                ip_inject=meta["ip_inject"],
+                ip_eject=meta["ip_eject"],
                 inject_queues=meta["inject_queues"],
                 eject_queues=meta["eject_queues"],
                 ring_bridge=meta["ring_bridge"],
@@ -503,6 +565,8 @@ class NetworkLinkVisualizer:
         self._render_snapshot(snapshot)
 
     def _render_snapshot(self, snapshot):
+        # 重置 flit→文本映射
+        self.rect_info_map.clear()
         # 清掉上一帧的 flit 图元
         for link_id, info in self.link_artists.items():
             for art in info.get("flit_artists", []):
@@ -589,6 +653,8 @@ class NetworkLinkVisualizer:
                         va="center",
                         fontsize=8,
                     )
+                    txt.set_visible(False)
+                    self.rect_info_map[rect] = (txt, pid)
                     flit_artists.append(txt)
                 else:
                     # 标签放左右
@@ -602,11 +668,15 @@ class NetworkLinkVisualizer:
                         va="center",
                         fontsize=8,
                     )
+                    txt.set_visible(False)
+                    self.rect_info_map[rect] = (txt, pid)
                     flit_artists.append(txt)
 
             # 保存此链路新生成的图元
             info["flit_artists"] = flit_artists
 
+        # 根据当前 tracked_pid 更新可见性
+        self._update_tracked_labels()
         # 最后刷新画布
         self.fig.canvas.draw_idle()
 
@@ -621,30 +691,10 @@ class NetworkLinkVisualizer:
         - expected_packet_id: 期望的packet_id值
         - highlight_color: 高亮颜色(默认为红色)
         """
-        # 统一提取 packet_id 作为颜色依据
-        pid = {"packet_id": flit.packet_id, "flit_id": flit.flit_id}
-        if isinstance(pid, tuple) and len(pid) >= 1:
-            color_key = pid[0]  # 元组第一个元素作为 packet_id
-        elif isinstance(pid, dict):
-            color_key = pid.get("packet_id", str(pid))
-        else:
-            color_key = pid
+        # 高亮模式：目标 flit → 红，其余 → 灰
+        if use_highlight:
+            hl = highlight_color or "red"
+            return hl if flit.packet_id == expected_packet_id else "lightgrey"
 
-        # 如果不启用高亮功能，使用原有逻辑
-        if not use_highlight:
-            # if color_key in self._color_map:
-            #     return self._color_map[color_key]
-            # c = self._colors[self._next_color % len(self._colors)]
-            c = self._colors[color_key % len(self._colors)]
-            self._color_map[color_key] = c
-            # self._next_color += 1
-            return c
-
-        # 启用高亮功能时的逻辑
-        if highlight_color is None:
-            highlight_color = "red"  # 默认高亮红色
-
-        # 方案1: 仅期望包高亮，其他灰色
-        if flit.packet_id == expected_packet_id:
-            return highlight_color
-        return "grey"
+        # 普通模式：直接取调色板色
+        return self._palette_color(flit.packet_id)
