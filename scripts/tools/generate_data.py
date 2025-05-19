@@ -292,7 +292,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
             # data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(sdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             #
-            data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             data_all.extend(generate_entries(sdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
@@ -308,7 +308,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
 if __name__ == "__main__":
     # 参数配置
     topo = "3x3"
-    interval_count = 32
+    interval_count = 64
     file_name = "../../test_data/traffic_2260E_case2.txt"
     np.random.seed(428)
 
@@ -355,7 +355,7 @@ if __name__ == "__main__":
             "l2m_1": [1, 7],
         }
 
-    speed = {1: 128, 2: 256, 4: 128}  # 不同burst对应的带宽(GB/s)
+    speed = {1: 128, 2: 128, 4: 128}  # 不同burst对应的带宽(GB/s)
     burst = 2
     # read_duration = 0
     # write_duration = 128

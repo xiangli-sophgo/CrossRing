@@ -68,9 +68,9 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
-        plot_link_state=0,
+        plot_link_state=1,
         print_trace=0,
-        show_trace_id=500,
+        show_trace_id=0,
         show_node_id=4,
     )
 
