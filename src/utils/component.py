@@ -274,11 +274,11 @@ class Network:
         self.eject_num = 0
         self.inject_queues = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.inject_queues_pre = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
-        self.eject_queues_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.EQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.eject_queues = {"TU": {}, "TD": {}, "RB": {}, "IQ": {}}
         self.arrive_node_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.ip_inject = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.ip_eject = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.IQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.EQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.links = {}
         self.links_flow_stat = {"read": {}, "write": {}}
         self.links_tag = {}
@@ -383,8 +383,8 @@ class Network:
             self.inject_queues_pre["TU"][ip_pos] = None
             self.inject_queues_pre["TD"][ip_pos] = None
             self.inject_queues_pre["EQ"][ip_pos] = None
-            for key in self.eject_queues_pre:
-                self.eject_queues_pre[key][ip_pos - config.cols] = None
+            for key in self.EQ_channel_buffer_pre:
+                self.EQ_channel_buffer_pre[key][ip_pos - config.cols] = None
             for key in self.arrive_node_pre:
                 self.arrive_node_pre[key][ip_pos - config.cols] = None
             self.eject_queues["TU"][ip_pos - config.cols] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
@@ -473,11 +473,11 @@ class Network:
                 self.per_send_throughput[ip_type][source] = 0
                 self.per_recv_throughput[ip_type][destination] = 0
 
-        for ip_type in self.ip_inject.keys():
+        for ip_type in self.IQ_channel_buffer.keys():
             for ip_index in getattr(config, f"{ip_type[:-2]}_send_positions"):
                 ip_recv_index = ip_index - config.cols
-                self.ip_inject[ip_type][ip_index] = deque()
-                self.ip_eject[ip_type][ip_recv_index] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
+                self.IQ_channel_buffer[ip_type][ip_index] = deque()
+                self.EQ_channel_buffer[ip_type][ip_recv_index] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
         for ip_type in self.last_select.keys():
             for ip_index in getattr(config, f"{ip_type[:-2]}_send_positions"):
                 self.last_select[ip_type][ip_index] = "write"

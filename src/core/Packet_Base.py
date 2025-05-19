@@ -242,7 +242,11 @@ class Packet_Base_model(BaseModel):
         """
         for ip_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions + self.config.sdma_send_positions + self.config.gdma_send_positions):
             inject_flits = [
-                (self.node.sn_rdb[self.sn_type][ip_pos][0] if self.node.sn_rdb[self.sn_type][ip_pos] and self.node.sn_rdb[self.sn_type][ip_pos][0].departure_cycle <= self.cycle else None),
+                (
+                    self.node.sn_rdb[self.sn_type][ip_pos][0]
+                    if self.node.sn_rdb[self.sn_type][ip_pos] and self.node.sn_rdb[self.sn_type][ip_pos][0].departure_cycle <= self.cycle
+                    else None
+                ),
                 (self.node.rn_wdb[self.rn_type][ip_pos][self.node.rn_wdb_send[self.rn_type][ip_pos][0]][0] if len(self.node.rn_wdb_send[self.rn_type][ip_pos]) > 0 else None),
             ]
             for direction in self.directions:
@@ -464,7 +468,9 @@ class Packet_Base_model(BaseModel):
                 #     network.ring_bridge["right"][(pos, next_pos)][0] if network.ring_bridge["right"][(pos, next_pos)] else None,
                 #     network.ring_bridge["ft"][(pos, next_pos)][0] if network.ring_bridge["ft"][(pos, next_pos)] else None,
                 # ]
-                station_flits = [network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]]
+                station_flits = [
+                    network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]
+                ]
                 # if not all(flit is None for flit in station_flits):
                 #     print(station_flits)
 
@@ -621,10 +627,10 @@ class Packet_Base_model(BaseModel):
             if self.sn_type != "Idle":
                 for in_pos in self.config.ddr_send_positions:
                     ip_pos = in_pos - self.config.cols
-                    if network.ip_eject[self.sn_type][ip_pos]:
-                        req = network.ip_eject[self.sn_type][ip_pos][0]
+                    if network.EQ_channel_buffer[self.sn_type][ip_pos]:
+                        req = network.EQ_channel_buffer[self.sn_type][ip_pos][0]
                         if self._sn_handle_request(req, in_pos):
-                            network.ip_eject[self.sn_type][ip_pos].popleft()
+                            network.EQ_channel_buffer[self.sn_type][ip_pos].popleft()
 
         elif flit_type == "rsp":
             for in_pos in set(self.config.sdma_send_positions + self.config.gdma_send_positions):
@@ -644,8 +650,8 @@ class Packet_Base_model(BaseModel):
             if self.rn_type != "Idle":
                 for in_pos in getattr(self.config, f"{self.rn_type}_send_positions"):
                     ip_pos = in_pos - self.config.cols
-                    if network.ip_eject[self.rn_type][ip_pos]:
-                        rsp = network.ip_eject[self.rn_type][ip_pos].popleft()
+                    if network.EQ_channel_buffer[self.rn_type][ip_pos]:
+                        rsp = network.EQ_channel_buffer[self.rn_type][ip_pos].popleft()
                         # self._handle_response_packet_base(rsp, in_pos)
                         self._rn_handle_response(rsp, in_pos)
 
@@ -670,10 +676,10 @@ class Packet_Base_model(BaseModel):
                 for in_pos in self.flit_position:
                     for ip_type in [self.rn_type, self.sn_type]:
                         ip_pos = in_pos - self.config.cols
-                        if network.ip_eject[ip_type][ip_pos]:
-                            flit = network.ip_eject[ip_type][ip_pos][0]
+                        if network.EQ_channel_buffer[ip_type][ip_pos]:
+                            flit = network.EQ_channel_buffer[ip_type][ip_pos][0]
                             if flit.req_type == "read":
-                                network.ip_eject[ip_type][ip_pos].popleft()
+                                network.EQ_channel_buffer[ip_type][ip_pos].popleft()
                                 flit.arrival_cycle = self.cycle
                                 network.arrive_node_pre[ip_type][ip_pos] = flit
                                 network.eject_num += 1
@@ -694,7 +700,7 @@ class Packet_Base_model(BaseModel):
                                         # self.node.sn_wdb[self.sn_type][in_pos][req.packet_id] = []
                                         self.node.sn_wdb_count[self.sn_type][in_pos] -= 1
 
-                                        network.ip_eject[ip_type][ip_pos].popleft()
+                                        network.EQ_channel_buffer[ip_type][ip_pos].popleft()
                                         flit.arrival_cycle = self.cycle
                                         network.arrive_node_pre[ip_type][ip_pos] = flit
                                         network.eject_num += 1
@@ -705,7 +711,7 @@ class Packet_Base_model(BaseModel):
                                     if self.node.sn_wdb_count[self.sn_type][in_pos] > 0:
                                         # self.node.sn_wdb[self.sn_type][in_pos][req.packet_id] = []
                                         self.node.sn_wdb_count[self.sn_type][in_pos] -= 1
-                                        network.ip_eject[ip_type][ip_pos].popleft()
+                                        network.EQ_channel_buffer[ip_type][ip_pos].popleft()
                                         flit.arrival_cycle = self.cycle
                                         network.arrive_node_pre[ip_type][ip_pos] = flit
                                         network.eject_num += 1
@@ -716,10 +722,10 @@ class Packet_Base_model(BaseModel):
                             #     self.create_write_req_after_read(flit)
             for in_pos in self.flit_position:
                 ip_pos = in_pos - self.config.cols
-                for ip_type in network.eject_queues_pre:
-                    if network.eject_queues_pre[ip_type][ip_pos]:
-                        network.ip_eject[ip_type][ip_pos].append(network.eject_queues_pre[ip_type][ip_pos])
-                        network.eject_queues_pre[ip_type][ip_pos] = None
+                for ip_type in network.EQ_channel_buffer_pre:
+                    if network.EQ_channel_buffer_pre[ip_type][ip_pos]:
+                        network.EQ_channel_buffer[ip_type][ip_pos].append(network.EQ_channel_buffer_pre[ip_type][ip_pos])
+                        network.EQ_channel_buffer_pre[ip_type][ip_pos] = None
 
         if flit_type == "req":
             in_pos_position = set(self.config.ddr_send_positions + self.config.l2m_send_positions)
@@ -730,10 +736,10 @@ class Packet_Base_model(BaseModel):
 
         for in_pos in in_pos_position:
             ip_pos = in_pos - self.config.cols
-            for ip_type in network.eject_queues_pre:
-                if network.eject_queues_pre[ip_type][ip_pos]:
-                    network.ip_eject[ip_type][ip_pos].append(network.eject_queues_pre[ip_type][ip_pos])
-                    network.eject_queues_pre[ip_type][ip_pos] = None
+            for ip_type in network.EQ_channel_buffer_pre:
+                if network.EQ_channel_buffer_pre[ip_type][ip_pos]:
+                    network.EQ_channel_buffer[ip_type][ip_pos].append(network.EQ_channel_buffer_pre[ip_type][ip_pos])
+                    network.EQ_channel_buffer_pre[ip_type][ip_pos] = None
             if flit_type == "data" and self.rn_type != "Idle":
                 if flit := network.arrive_node_pre[self.rn_type][ip_pos]:
                     self.node.rn_rdb[self.rn_type][in_pos][flit.packet_id].append(flit)

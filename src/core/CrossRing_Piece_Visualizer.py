@@ -465,8 +465,8 @@ class CrossRingVisualizer:
         IQ = network.inject_queues
         EQ = network.eject_queues
         RB = network.ring_bridge
-        IQ_Ch = network.ip_inject
-        EQ_Ch = network.ip_eject
+        IQ_Ch = network.IQ_channel_buffer
+        EQ_Ch = network.EQ_channel_buffer
         # Inject
         for lane, patches in self.iq_patches.items():
             if "_" in lane:
@@ -652,8 +652,8 @@ if __name__ == "__main__":
             self.inject_queues = defaultdict(lambda: defaultdict(list))
             self.eject_queues = defaultdict(lambda: defaultdict(list))
             self.ring_bridge = defaultdict(lambda: defaultdict(list))
-            self.ip_inject = defaultdict(lambda: defaultdict(list))
-            self.ip_eject = defaultdict(lambda: defaultdict(list))
+            self.IQ_channel_buffer = defaultdict(lambda: defaultdict(list))
+            self.EQ_channel_buffer = defaultdict(lambda: defaultdict(list))
 
             # populate with random flits
             for lane in ["TL", "TR", "TU", "TD", "EQ", "IQ", "RB"]:
@@ -668,11 +668,11 @@ if __name__ == "__main__":
                     self.eject_queues[ch][0].append(_DemoFlit(random.randint(0, 9), 0))
                     self.ring_bridge[ch][(0, 0)].append(_DemoFlit(random.randint(0, 9), 0))
 
-            # Ensure ip_inject / ip_eject have lists for each node to avoid IndexError
+            # Ensure IQ_channel_buffer / EQ_channel_buffer have lists for each node to avoid IndexError
             all_lanes = ["gdma_0", "ddr_0", "TL", "TR", "TU", "TD"]
             for lane in all_lanes:
-                self.ip_inject[lane] = [[]]  # one node (index 0) with empty fifo
-                self.ip_eject[lane] = [[]]
+                self.IQ_channel_buffer[lane] = [[]]  # one node (index 0) with empty fifo
+                self.EQ_channel_buffer[lane] = [[]]
 
     cfg = _DemoConfig()
     net = _DemoNet()

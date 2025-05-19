@@ -90,7 +90,7 @@ def main():
         sim.config.num_RN = 4
         sim.config.num_SN = 8
         sim.config.rn_read_tracker_ostd = 128
-        sim.config.rn_write_tracker_ostd = 64
+        sim.config.rn_write_tracker_ostd = 32
         sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
         sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
         sim.config.sn_ddr_read_tracker_ostd = 32
@@ -107,11 +107,12 @@ def main():
         sim.config.ddr_bandwidth_limit = 76.8 / 4
         # sim.config.ddr_bandwidth_limit = 10
         sim.config.l2m_bandwidth_limit = np.inf
-        sim.config.IQ_CH_FIFO_DEPTH = 8
-        sim.config.EQ_CH_FIFO_DEPTH = 8
+        sim.config.IQ_CH_FIFO_DEPTH = 16
+        sim.config.EQ_CH_FIFO_DEPTH = 16
         sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8
-        sim.config.EQ_IN_FIFO_DEPTH = 16
+
+        # sim.config.EQ_IN_FIFO_DEPTH = 8
         # sim.config.RB_IN_FIFO_DEPTH = 8
         # sim.config.TL_Etag_T2_UE_MAX = 4
         # sim.config.TL_Etag_T1_UE_MAX = 7
@@ -120,6 +121,7 @@ def main():
         # sim.config.TU_Etag_T1_UE_MAX = 7
         # sim.config.TD_Etag_T3_UE_MAX = 6
 
+        sim.config.EQ_IN_FIFO_DEPTH = 16
         sim.config.RB_IN_FIFO_DEPTH = 16
         sim.config.TL_Etag_T2_UE_MAX = 8
         sim.config.TL_Etag_T1_UE_MAX = 14
@@ -127,8 +129,10 @@ def main():
         sim.config.TU_Etag_T2_UE_MAX = 8
         sim.config.TU_Etag_T1_UE_MAX = 14
         sim.config.TD_Etag_T3_UE_MAX = 9
+
         sim.config.gdma_rw_gap = np.inf
-        sim.config.sdma_rw_gap = 2
+        # sim.config.sdma_rw_gap = np.inf
+        sim.config.sdma_rw_gap = 100
         sim.config.CHANNEL_SPEC = {
             "gdma": 1,
             "sdma": 1,
@@ -163,7 +167,7 @@ def main():
 
     # sim.config.update_config()
     sim.initial()
-    sim.end_time = 10000
+    sim.end_time = 15000
     sim.print_interval = 2000
     sim.run()
     # print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")

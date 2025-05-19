@@ -101,8 +101,8 @@ class NetworkLinkVisualizer:
         if self.paused and self._play_idx is not None and len(self.history) > self._play_idx:
             _, _, meta = self.history[self._play_idx]
             fake_net = SimpleNamespace(
-                ip_inject=meta["ip_inject"],
-                ip_eject=meta["ip_eject"],
+                IQ_channel_buffer=meta["IQ_channel_buffer"],
+                EQ_channel_buffer=meta["EQ_channel_buffer"],
                 inject_queues=meta["inject_queues"],
                 eject_queues=meta["eject_queues"],
                 ring_bridge=meta["ring_bridge"],
@@ -444,8 +444,8 @@ class NetworkLinkVisualizer:
                 "use_highlight": self._use_highlight,
                 "expected_pid": self._expected_pid,
                 # 深拷贝三类队列，便于历史回溯时还原 Piece 状态
-                "ip_inject": copy.deepcopy(self.network.ip_inject),
-                "ip_eject": copy.deepcopy(self.network.ip_eject),
+                "IQ_channel_buffer": copy.deepcopy(self.network.IQ_channel_buffer),
+                "EQ_channel_buffer": copy.deepcopy(self.network.EQ_channel_buffer),
                 "inject_queues": copy.deepcopy(self.network.inject_queues),
                 "eject_queues": copy.deepcopy(self.network.eject_queues),
                 "ring_bridge": copy.deepcopy(getattr(self.network, "ring_bridge", {})),
@@ -491,8 +491,8 @@ class NetworkLinkVisualizer:
         if self.paused and self._play_idx is not None and len(self.history) > self._play_idx:
             _, _, meta = self.history[self._play_idx]
             fake_net = SimpleNamespace(
-                ip_inject=meta["ip_inject"],
-                ip_eject=meta["ip_eject"],
+                IQ_channel_buffer=meta["IQ_channel_buffer"],
+                EQ_channel_buffer=meta["EQ_channel_buffer"],
                 inject_queues=meta["inject_queues"],
                 eject_queues=meta["eject_queues"],
                 ring_bridge=meta["ring_bridge"],

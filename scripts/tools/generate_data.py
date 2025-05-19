@@ -292,7 +292,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
             # data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(sdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             #
-            # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             data_all.extend(generate_entries(sdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
@@ -308,7 +308,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
 if __name__ == "__main__":
     # 参数配置
     topo = "3x3"
-    interval_count = 64
+    interval_count = 196
     file_name = "../../test_data/traffic_2260E_case2.txt"
     np.random.seed(428)
 
@@ -349,7 +349,7 @@ if __name__ == "__main__":
             # "ddr_3": [3],
         }
         l2m_map = {
-            # "l2m_0": [1],
+            # "l2m_0": [0],
             # "l2m_1": [1],
             "l2m_0": [1, 7],
             "l2m_1": [1, 7],
