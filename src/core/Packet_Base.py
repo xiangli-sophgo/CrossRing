@@ -518,7 +518,7 @@ class Packet_Base_model(BaseModel):
 
         # eject arbitration
         if flit_type in ["req", "rsp", "data"]:
-            self._handle_eject_arbitration(network, flit_type)
+            self._eject_queue_arbitration(network, flit_type)
 
         # 执行所有flit的移动
         for flit in vertical_flits + horizontal_flits + new_flits + local_flits:
@@ -600,7 +600,7 @@ class Packet_Base_model(BaseModel):
     #     network.round_robin["ring_bridge"][next_pos].remove(index)
     #     network.round_robin["ring_bridge"][next_pos].append(index)
 
-    def _handle_eject_arbitration(self, network, flit_type):
+    def _eject_queue_arbitration(self, network, flit_type):
         """处理eject的仲裁逻辑,根据flit类型处理不同的eject队列"""
         if flit_type == "req":
             for in_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions):

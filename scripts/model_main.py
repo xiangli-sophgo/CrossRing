@@ -68,9 +68,9 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
-        plot_link_state=1,
+        plot_link_state=0,
         print_trace=0,
-        show_trace_id=50,
+        show_trace_id=500,
         show_node_id=4,
     )
 
@@ -90,7 +90,7 @@ def main():
         sim.config.num_RN = 4
         sim.config.num_SN = 8
         sim.config.rn_read_tracker_ostd = 128
-        sim.config.rn_write_tracker_ostd = 32
+        sim.config.rn_write_tracker_ostd = 64
         sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
         sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
         sim.config.sn_ddr_read_tracker_ostd = 32
@@ -109,15 +109,24 @@ def main():
         sim.config.l2m_bandwidth_limit = np.inf
         sim.config.IQ_CH_FIFO_DEPTH = 8
         sim.config.EQ_CH_FIFO_DEPTH = 8
-        sim.config.IQ_OUT_FIFO_DEPTH = 6
-        sim.config.RB_IN_FIFO_DEPTH = 8
+        sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8
-        sim.config.TL_Etag_T2_UE_MAX = 4
-        sim.config.TL_Etag_T1_UE_MAX = 7
-        sim.config.TR_Etag_T2_UE_MAX = 5
-        sim.config.TU_Etag_T2_UE_MAX = 4
-        sim.config.TU_Etag_T1_UE_MAX = 7
-        sim.config.TD_Etag_T3_UE_MAX = 6
+        sim.config.EQ_IN_FIFO_DEPTH = 16
+        # sim.config.RB_IN_FIFO_DEPTH = 8
+        # sim.config.TL_Etag_T2_UE_MAX = 4
+        # sim.config.TL_Etag_T1_UE_MAX = 7
+        # sim.config.TR_Etag_T2_UE_MAX = 5
+        # sim.config.TU_Etag_T2_UE_MAX = 4
+        # sim.config.TU_Etag_T1_UE_MAX = 7
+        # sim.config.TD_Etag_T3_UE_MAX = 6
+
+        sim.config.RB_IN_FIFO_DEPTH = 16
+        sim.config.TL_Etag_T2_UE_MAX = 8
+        sim.config.TL_Etag_T1_UE_MAX = 14
+        sim.config.TR_Etag_T2_UE_MAX = 9
+        sim.config.TU_Etag_T2_UE_MAX = 8
+        sim.config.TU_Etag_T1_UE_MAX = 14
+        sim.config.TD_Etag_T3_UE_MAX = 9
         sim.config.gdma_rw_gap = np.inf
         sim.config.sdma_rw_gap = 2
         sim.config.CHANNEL_SPEC = {

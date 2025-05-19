@@ -279,8 +279,6 @@ class Network:
         self.arrive_node_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.ip_inject = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.ip_eject = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.ip_read = self.config._make_channels(("sdma", "gdma"))
-        self.ip_write = self.config._make_channels(("sdma", "gdma"))
         self.links = {}
         self.links_flow_stat = {"read": {}, "write": {}}
         self.links_tag = {}
@@ -332,7 +330,7 @@ class Network:
         self.per_recv_throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.send_throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.recv_throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.last_select = self.config._make_channels(("sdma", "gdma"))
+        self.last_select = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
 
         # # channel buffer setup
@@ -480,10 +478,8 @@ class Network:
                 ip_recv_index = ip_index - config.cols
                 self.ip_inject[ip_type][ip_index] = deque()
                 self.ip_eject[ip_type][ip_recv_index] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
-        for ip_type in self.ip_read.keys():
+        for ip_type in self.last_select.keys():
             for ip_index in getattr(config, f"{ip_type[:-2]}_send_positions"):
-                self.ip_read[ip_type][ip_index] = deque()
-                self.ip_write[ip_type][ip_index] = deque()
                 self.last_select[ip_type][ip_index] = "write"
         for ip_type in self.throughput.keys():
             for ip_index in getattr(config, f"{ip_type[:-2]}_send_positions"):
@@ -1468,8 +1464,6 @@ class Network:
                     flit.current_seat_index = 0
 
     def execute_moves(self, flit, cycle):
-        # if flit.packet_id == 1000 and flit.flit_id == 3:
-        # print(flit)
         if not flit.is_arrive:
             current, next_node = flit.current_link
             if current - next_node != self.config.cols:
@@ -1481,8 +1475,6 @@ class Network:
                 # 将 flit 放入 ring_bridge 的相应方向
                 if not flit.is_on_station:
                     # 使用字典映射 seat_index 到 ring_bridge 的方向和深度限制
-
-                    # direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, ("TU", self.config.RB_IN_FIFO_DEPTH))
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
