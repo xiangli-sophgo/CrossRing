@@ -6,6 +6,7 @@ from matplotlib.lines import Line2D
 from collections import defaultdict, deque
 import copy
 import threading
+from matplotlib.widgets import Button
 import time
 from types import SimpleNamespace
 
@@ -32,6 +33,7 @@ class NetworkLinkVisualizer:
         self.link_artists = {}  # 存储链路相关的静态信息
         self._colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
+        self.cycle = 0
         self.paused = False
         # ============  flit‑click tracking ==============
         self.tracked_pid = None  # 当前追踪的 packet_id (None = 不追踪)
@@ -41,8 +43,20 @@ class NetworkLinkVisualizer:
         self._use_highlight = False
         self._expected_pid = 0
         # ===============  History Buffer  ====================
-        # 保存最近N个周期的轻量级链路状态，便于暂停时回溯
-        self.history = deque(maxlen=20)
+        # 支持多网络显示
+        # self.history = deque(maxlen=20)
+        self.networks = None
+        self.selected_network_index = 0
+        # 为每个网络维护独立历史缓冲
+        self.histories = [deque(maxlen=20) for _ in range(3)]
+        self.buttons = []
+        # 添加网络选择按钮
+        btn_positions = [(0.01, 0.03, 0.08, 0.04), (0.10, 0.03, 0.08, 0.04), (0.19, 0.03, 0.08, 0.04)]
+        for idx, label in enumerate(["REQ", "RSP", "DATA"]):
+            ax_btn = self.fig.add_axes(btn_positions[idx])
+            btn = Button(ax_btn, label)
+            btn.on_clicked(lambda event, i=idx: self._on_select_network(i))
+            self.buttons.append(btn)
         self._play_idx = None  # 暂停时正在浏览的 history 索引
         self._draw_static_elements()
 
@@ -97,20 +111,23 @@ class NetworkLinkVisualizer:
         self.piece_ax.clear()
         self.piece_ax.axis("off")
 
+        # 当前网络对应的历史缓冲
+        current_history = self.histories[self.selected_network_index]
         # 若正处于历史回溯视图，使用快照里的队列状态
-        if self.paused and self._play_idx is not None and len(self.history) > self._play_idx:
-            _, _, meta = self.history[self._play_idx]
+        if self.paused and self._play_idx is not None and len(current_history) > self._play_idx:
+            _, _, meta = current_history[self._play_idx]
             fake_net = SimpleNamespace(
                 IQ_channel_buffer=meta["IQ_channel_buffer"],
                 EQ_channel_buffer=meta["EQ_channel_buffer"],
                 inject_queues=meta["inject_queues"],
                 eject_queues=meta["eject_queues"],
                 ring_bridge=meta["ring_bridge"],
-                config=self.network.config,
+                config=self.networks[self.selected_network_index].config,
             )
             self.piece_vis.draw_piece_for_node(sel_node, fake_net)
         else:
-            self.piece_vis.draw_piece_for_node(sel_node, self.network)
+            live_net = self.networks[self.selected_network_index] if self.networks is not None else self.network
+            self.piece_vis.draw_piece_for_node(sel_node, live_net)
         self.fig.canvas.draw_idle()
 
     # ------------------------------------------------------------------
@@ -412,7 +429,7 @@ class NetworkLinkVisualizer:
 
         return seats
 
-    def update(self, network=None, cycle=None, expected_packet_id=0, use_highlight=False):
+    def update(self, networks=None, cycle=None, expected_packet_id=0, use_highlight=False, skip_pause=False):
         """
         更新每条链路队列中 flit 的显示
         - 空位: 无填充的方形
@@ -424,41 +441,57 @@ class NetworkLinkVisualizer:
         - 向上的链路: 横向标签在右侧
         - 向下的链路: 横向标签在左侧
         """
+        # 接收并保存多网络列表
+        if networks is not None:
+            self.networks = networks
         # 记录当前高亮配置, 供回溯绘制保持一致
         self._use_highlight = use_highlight
         self._expected_pid = expected_packet_id
-        # 若暂停，则仅保持 GUI 响应；不推进模拟
-        if self.paused:
+        # 若暂停且非跳过暂停调用，则仅保持 GUI 响应；不推进模拟
+        if self.paused and not skip_pause:
             plt.pause(self.pause_interval)
             return self.ax.patches
 
         if self.should_stop:
             return False
+        self.cycle = cycle
 
-        self.network = network
-        # 记录快照到历史缓冲 (仅在提供 cycle 时)
-        if cycle is not None:
-            snapshot = {(src, dest): [(f.packet_id, f.flit_id) if f is not None else None for f in flits] for (src, dest), flits in self.network.links.items()}
-            meta = {
-                "network_name": self.network.name,
-                "use_highlight": self._use_highlight,
-                "expected_pid": self._expected_pid,
-                # 深拷贝三类队列，便于历史回溯时还原 Piece 状态
-                "IQ_channel_buffer": copy.deepcopy(self.network.IQ_channel_buffer),
-                "EQ_channel_buffer": copy.deepcopy(self.network.EQ_channel_buffer),
-                "inject_queues": copy.deepcopy(self.network.inject_queues),
-                "eject_queues": copy.deepcopy(self.network.eject_queues),
-                "ring_bridge": copy.deepcopy(getattr(self.network, "ring_bridge", {})),
-            }
-            self.history.append((cycle, snapshot, meta))
+        # 记录所有网络的历史快照
+        if cycle is not None and self.networks is not None:
+            for i, net in enumerate(self.networks):
+                # 构建快照
+                snap = {(s, d): [(f.packet_id, f.flit_id) if f is not None else None for f in flits] for (s, d), flits in net.links.items()}
+                meta = {
+                    "network_name": net.name,
+                    "use_highlight": use_highlight,
+                    "expected_pid": expected_packet_id,
+                    "IQ_channel_buffer": copy.deepcopy(net.IQ_channel_buffer),
+                    "EQ_channel_buffer": copy.deepcopy(net.EQ_channel_buffer),
+                    "inject_queues": copy.deepcopy(net.inject_queues),
+                    "eject_queues": copy.deepcopy(net.eject_queues),
+                    "ring_bridge": copy.deepcopy(getattr(net, "ring_bridge", {})),
+                }
+                self.histories[i].append((cycle, snap, meta))
 
-        self._render_snapshot({(src, dest): [(f.packet_id, f.flit_id) if f is not None else None for f in flits] for (src, dest), flits in self.network.links.items()})
-        # 若已有选中节点，实时更新右侧 Piece 视图
-        if self._selected_node is not None:
-            self._refresh_piece_view()
-        self.ax.set_title(self.network.name)
+        # 渲染当前选中网络的快照
+        if self.networks is not None:
+            current_net = self.networks[self.selected_network_index]
+            render_snap = {(s, d): [(f.packet_id, f.flit_id) if f is not None else None for f in flits] for (s, d), flits in current_net.links.items()}
+            self._render_snapshot(render_snap)
+            # 若已有选中节点，实时更新右侧 Piece 视图
+            if self._selected_node is not None:
+                self._refresh_piece_view()
+            self.ax.set_title(current_net.name)
+        else:
+            self._render_snapshot({(src, dest): [(f.packet_id, f.flit_id) if f is not None else None for f in flits] for (src, dest), flits in self.network.links.items()})
+            # 若已有选中节点，实时更新右侧 Piece 视图
+            if self._selected_node is not None:
+                self._refresh_piece_view()
+            self.ax.set_title(self.network.name)
+        self._update_status_display()
         plt.tight_layout()
-        plt.pause(self.pause_interval)
+        if not skip_pause:
+            plt.pause(self.pause_interval)
         return self.ax.patches
 
     def _update_status_display(self):
@@ -467,7 +500,7 @@ class NetworkLinkVisualizer:
             # 保持暂停颜色 & 文本
             self.status_text.set_color("orange")
             return
-        status = f"Running...\nInterval: {self.pause_interval:.2f}"
+        status = f"Running... cycle: {self.cycle}\nInterval: {self.pause_interval:.2f}"
         color = "green"
 
         # 更新状态文本
@@ -487,25 +520,32 @@ class NetworkLinkVisualizer:
         self.piece_ax.clear()
         self.piece_ax.axis("off")
 
+        # 当前网络对应的历史缓冲
+        current_history = self.histories[self.selected_network_index]
+
         # 回溯模式：用保存的快照队列
-        if self.paused and self._play_idx is not None and len(self.history) > self._play_idx:
-            _, _, meta = self.history[self._play_idx]
+        if self.paused and self._play_idx is not None and len(current_history) > self._play_idx:
+            _, _, meta = current_history[self._play_idx]
             fake_net = SimpleNamespace(
                 IQ_channel_buffer=meta["IQ_channel_buffer"],
                 EQ_channel_buffer=meta["EQ_channel_buffer"],
                 inject_queues=meta["inject_queues"],
                 eject_queues=meta["eject_queues"],
                 ring_bridge=meta["ring_bridge"],
-                config=self.network.config,
+                config=self.networks[self.selected_network_index].config,
             )
             self.piece_vis.draw_piece_for_node(self._selected_node, fake_net)
         else:  # 实时
-            self.piece_vis.draw_piece_for_node(self._selected_node, self.network)
+            live_net = self.networks[self.selected_network_index]
+            self.piece_vis.draw_piece_for_node(self._selected_node, live_net)
 
         self.fig.canvas.draw_idle()
 
     def _on_key(self, event):
         key = event.key
+
+        # 使用当前选中网络的历史
+        current_history = self.histories[self.selected_network_index]
 
         if key == "up":
             if not self.paused:  # 暂停时不调速
@@ -530,34 +570,34 @@ class NetworkLinkVisualizer:
                 self.status_text.set_color("orange")
                 if self.paused:
                     # 进入暂停：定位到最新快照并立即绘制
-                    if self.history:
-                        self._play_idx = len(self.history) - 1
-                        cyc, snap, meta = self.history[self._play_idx]
+                    if current_history:
+                        self._play_idx = len(current_history) - 1
+                        cyc, snap, meta = current_history[self._play_idx]
                         # 同步高亮 / 标题等元数据
                         self._use_highlight = meta.get("use_highlight", False)
                         self._expected_pid = meta.get("expected_pid", 0)
                         self.ax.set_title(meta.get("network_name", ""))
-                        self.status_text.set_text(f"Paused\ncycle {cyc} ({self._play_idx+1}/{len(self.history)})")
+                        self.status_text.set_text(f"Paused\ncycle {cyc} ({self._play_idx+1}/{len(current_history)})")
                         self._draw_state(snap)
                         self._refresh_piece_view()
             else:
                 self._update_status_display()
                 self._play_idx = None
         elif self.paused and key in {"left", "right"}:
-            if not self.history:
+            if not current_history:
                 return
             if self._play_idx is None:
-                self._play_idx = len(self.history) - 1
+                self._play_idx = len(current_history) - 1
             if key == "left":
                 self._play_idx = max(0, self._play_idx - 1)
             else:  # "right"
-                self._play_idx = min(len(self.history) - 1, self._play_idx + 1)
-            cyc, snap, meta = self.history[self._play_idx]
+                self._play_idx = min(len(current_history) - 1, self._play_idx + 1)
+            cyc, snap, meta = current_history[self._play_idx]
             # 同步高亮 / 标题
             self._use_highlight = meta.get("use_highlight", False)
             self._expected_pid = meta.get("expected_pid", 0)
             self.ax.set_title(meta.get("network_name", ""))
-            self.status_text.set_text(f"Paused\ncycle {cyc} ({self._play_idx+1}/{len(self.history)})")
+            self.status_text.set_text(f"Paused\ncycle {cyc} ({self._play_idx+1}/{len(current_history)})")
             self._draw_state(snap)
             self._refresh_piece_view()
 
@@ -698,3 +738,16 @@ class NetworkLinkVisualizer:
 
         # 普通模式：直接取调色板色
         return self._palette_color(flit.packet_id)
+
+    def _on_select_network(self, idx):
+        """切换显示网络索引 idx（0/1/2）"""
+        self.selected_network_index = idx
+        # 刷新显示（调用 update 渲染当前网络）
+        if self.networks is not None:
+            self.update(
+                self.networks,
+                cycle=None,
+                expected_packet_id=self._expected_pid,
+                use_highlight=self._use_highlight,
+                skip_pause=True,
+            )

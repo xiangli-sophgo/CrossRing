@@ -69,17 +69,12 @@ def main():
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
         plot_link_state=1,
+        plot_start_time=0,
         print_trace=0,
-        show_trace_id=0,
+        show_trace_id=100,
         show_node_id=4,
     )
 
-    # profiler = cProfile.Profile()
-    # profiler.enable()
-
-    # tracemalloc.start()
-
-    # sim.end_time = 10000
     if topo_type == "3x3":
         sim.config.burst = 2
         sim.config.num_ips = 4
@@ -99,15 +94,17 @@ def main():
         sim.config.sn_l2m_write_tracker_ostd = 64
         sim.config.sn_ddr_wdb_size = sim.config.sn_ddr_write_tracker_ostd * sim.config.burst
         sim.config.sn_l2m_wdb_size = sim.config.sn_l2m_write_tracker_ostd * sim.config.burst
-        sim.config.ddr_R_latency_original = 155
-        sim.config.ddr_R_latency_var_original = 25
+        # sim.config.ddr_R_latency_original = 155
+        # sim.config.ddr_R_latency_var_original = 25
+        sim.config.ddr_R_latency_original = 0
+        sim.config.ddr_R_latency_var_original = 0
         sim.config.ddr_W_latency_original = 16
         sim.config.l2m_R_latency_original = 12
         sim.config.l2m_W_latency_original = 16
         sim.config.ddr_bandwidth_limit = 76.8 / 4
         # sim.config.ddr_bandwidth_limit = 10
         sim.config.l2m_bandwidth_limit = np.inf
-        sim.config.IQ_CH_FIFO_DEPTH = 16
+        sim.config.IQ_CH_FIFO_DEPTH = 10
         sim.config.EQ_CH_FIFO_DEPTH = 16
         sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8
@@ -131,8 +128,8 @@ def main():
         sim.config.TD_Etag_T3_UE_MAX = 9
 
         sim.config.gdma_rw_gap = np.inf
-        # sim.config.sdma_rw_gap = np.inf
-        sim.config.sdma_rw_gap = 100
+        sim.config.sdma_rw_gap = np.inf
+        # sim.config.sdma_rw_gap = 200
         sim.config.CHANNEL_SPEC = {
             "gdma": 1,
             "sdma": 1,
@@ -165,25 +162,10 @@ def main():
         sim.config.l2m_R_latency_original = 12
         sim.config.l2m_W_latency_original = 16
 
-    # sim.config.update_config()
     sim.initial()
-    sim.end_time = 15000
+    sim.end_time = 10000
     sim.print_interval = 2000
     sim.run()
-    # print(f"rn_r_tracker_ostd: {sim.config.rn_read_tracker_ostd}: rn_w_tracker_ostd: {sim.config.rn_write_tracker_ostd}")
-    # print(f"ITag_Trigger_Th_H: {sim.config.ITag_Trigger_Th_H}: ITag_Max_Num: {sim.config.ITag_Max_Num_V}, {sim.config.seats_per_link}\n")
-
-    # # 获取当前的内存快照
-    # snapshot = tracemalloc.take_snapshot()
-    # top_stats = snapshot.statistics("lineno")
-    # print("[ Top 10 ]")
-    # for stat in top_stats[:10]:
-    #     print(stat)
-
-    # profiler.disable()
-    # profiler.print_stats()
-
-    # sim.draw_figure()
 
 
 if __name__ == "__main__":

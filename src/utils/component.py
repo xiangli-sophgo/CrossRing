@@ -275,7 +275,7 @@ class Network:
         self.inject_queues = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.inject_queues_pre = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.EQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.eject_queues = {"TU": {}, "TD": {}, "RB": {}, "IQ": {}}
+        self.eject_queues = {"TU": {}, "TD": {}}
         self.arrive_node_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.IQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.EQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
@@ -283,7 +283,7 @@ class Network:
         self.links_flow_stat = {"read": {}, "write": {}}
         self.links_tag = {}
         self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
-        self.ring_bridge = {"TL": {}, "TR": {}, "ft": {}, "IQ_TU": {}, "IQ_TD": {}, "TU": {}, "TD": {}, "EQ": {}}
+        self.ring_bridge = {"TL": {}, "TR": {}, "ft": {}, "TU": {}, "TD": {}, "EQ": {}}
         # self.inject_queue_rr = {"TL": {0: {}, 1: {}}, "TR": {0: {}, 1: {}}, "TU": {0: {}, 1: {}}, "EQ": {0: {}, 1: {}}}
         # self.inject_rr = {"TL": {}, "TR": {}, "TU": {}, "EQ": {}}
         # self.round_robin = {**{"TU": {}, "TD": {}, "RB": {}}, **self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))}
@@ -334,8 +334,6 @@ class Network:
         self.throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
 
         # # channel buffer setup
-        self.IQ_ch_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.EQ_ch_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
 
         self.ring_bridge_map = {
             0: ("TL", self.config.RB_IN_FIFO_DEPTH),
@@ -347,7 +345,7 @@ class Network:
 
         self.token_bucket = defaultdict(dict)
         self.flit_size_bytes = 128
-        for ch_name in self.IQ_ch_buffer.keys():
+        for ch_name in self.IQ_channel_buffer.keys():
             for ip_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions):
 
                 if ch_name.startswith("ddr"):
@@ -377,7 +375,6 @@ class Network:
             self.inject_queues["TU"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
             self.inject_queues["TD"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
             self.inject_queues["EQ"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
-            self.eject_queues["IQ"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
             self.inject_queues_pre["TL"][ip_pos] = None
             self.inject_queues_pre["TR"][ip_pos] = None
             self.inject_queues_pre["TU"][ip_pos] = None
@@ -391,8 +388,6 @@ class Network:
             self.eject_queues["TD"][ip_pos - config.cols] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
             self.EQ_UE_Counters["TU"][ip_pos - config.cols] = {"T2": 0, "T1": 0, "T0": 0}
             self.EQ_UE_Counters["TD"][ip_pos - config.cols] = {"T2": 0, "T1": 0}
-            self.eject_queues["RB"][ip_pos - config.cols] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
-            self.eject_queues["IQ"][ip_pos - config.cols] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
             # for key in self.inject_queue_rr:
             #     self.inject_queue_rr[key][0][ip_pos] = deque([0, 1])
             #     self.inject_queue_rr[key][1][ip_pos] = deque([0, 1])
@@ -402,9 +397,8 @@ class Network:
             # self.inject_rr["EQ"][ip_pos] = deque([0, 1, 2])
             for key in self.round_robin.keys():
                 if key == "IQ":
-                    # self.round_robin[key][ip_pos - config.cols] = deque([range(len(self.IQ_ch_buffer))])
                     self.round_robin[key][ip_pos - config.cols] = deque()
-                    for ch_name in self.IQ_ch_buffer.keys():
+                    for ch_name in self.IQ_channel_buffer.keys():
                         self.round_robin[key][ip_pos - config.cols].append(ch_name)
                 elif key == "EQ":
                     self.round_robin[key][ip_pos - config.cols] = deque([0, 1, 2, 3])
@@ -449,8 +443,6 @@ class Network:
                 self.ring_bridge["TL"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
                 self.ring_bridge["TR"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
                 self.ring_bridge["ft"][(pos, next_pos)] = deque(maxlen=config.ft_len)
-                self.ring_bridge["IQ_TU"][(pos, next_pos)] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
-                self.ring_bridge["IQ_TD"][(pos, next_pos)] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
                 self.ring_bridge["TU"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
                 self.ring_bridge["TD"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
                 self.ring_bridge["EQ"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
@@ -488,8 +480,8 @@ class Network:
     def can_move_to_next(self, flit, current, next_node):
         # flit inject的时候判断是否可以将flit放到本地出口队列。
         if flit.source - flit.destination == self.config.cols:
-            # TODO:
-            return len(self.eject_queues["IQ"][flit.destination]) < self.config.EQ_IN_FIFO_DEPTH
+            # return len(self.eject_queues["IQ"][flit.destination]) < self.config.EQ_IN_FIFO_DEPTH
+            return True
 
         # 获取当前节点所在列的索引
         current_column_index = current % self.config.cols
@@ -1280,9 +1272,7 @@ class Network:
                             next_pos = next_node - self.config.cols * 2 if next_node - self.config.cols * 2 >= col_start else col_start
                             flit.current_link = (next_node, next_pos)
                             flit.current_seat_index = 0
-                    elif (
-                        flit.ETag_priority == "T0" and self.T0_Etag_Order_FIFO[0] == (next_node, flit) and self.EQ_UE_Counters["TU"][next_node]["T0"] < self.config.EQ_IN_FIFO_DEPTH
-                    ):
+                    elif flit.ETag_priority == "T0" and self.T0_Etag_Order_FIFO[0] == (next_node, flit) and self.EQ_UE_Counters["TU"][next_node]["T0"] < self.config.EQ_IN_FIFO_DEPTH:
                         self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
                         flit.is_delay = False
                         flit.is_arrive = True
@@ -1478,7 +1468,7 @@ class Network:
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
-                    if len(self.ring_bridge[direction][flit.current_link]) < max_depth:
+                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth:
                         self.ring_bridge[direction][flit.current_link].append(flit)
                         flit.is_on_station = True
             return False
@@ -1488,7 +1478,10 @@ class Network:
             flit.arrival_network_cycle = cycle
 
             if flit.source - flit.destination == self.config.cols:
-                queue = self.eject_queues["IQ"][flit.destination]
+                # queue = self.eject_queues["IQ"][flit.destination]
+                flit.is_arrived = True
+
+                return True
             elif current - next_node == self.config.cols * 2 or (current == next_node and current not in range(0, self.config.cols)):
                 queue = self.eject_queues["TU"][next_node]
             else:

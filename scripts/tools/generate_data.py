@@ -65,7 +65,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
     # generator = TrafficGenerator(read_duration=read_duration, write_duration=write_duration)
     data_all = []
 
-    def generate_entries(src_map, dest_map, operation, burst, flow_type, speed, interval_count, dest_access_mode="random", overlap=True):
+    def generate_entries(src_map, dest_map, operation, burst, flow_type, speed, interval_count, dest_access_mode="round_robin", overlap=True):
         """
         生成指定模式的流量条目，确保同一时刻所有dest都有访问
 
@@ -97,13 +97,20 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
         src_items = [(stype, pos) for stype, poses in src_map.items() for pos in poses]
         dest_items = [(dtype, pos) for dtype, poses in dest_map.items() for pos in poses]
 
+        # 为每个 src 单独创建轮询周期，顺序随机
+        dest_cycles = {}
+        for src_type, src in src_items:
+            shuffled = dest_items.copy()
+            random.shuffle(shuffled)
+            dest_cycles[(src_type, src)] = itertools.cycle(shuffled)
+
         # 预处理：轮询器 / 随机排列
         if dest_access_mode == "round_robin":
             if flow_type == 1:
                 groups = group_numbers()
                 group_cycles = {gid: itertools.cycle([item for item in dest_items if item[1] in g]) for gid, g in enumerate(groups)}
-            elif flow_type != 2:
-                dest_cycle = itertools.cycle(dest_items)
+            # elif flow_type != 2:
+            #     dest_cycle = itertools.cycle(dest_items)
         else:  # random
             if flow_type == 1:
                 groups = group_numbers()
@@ -156,7 +163,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
                                 dest_type, dest = perm[src_items.index((src_type, src)) % len(perm)]
                                 generate_entries.perm_idx += 1
                             else:
-                                dest_type, dest = next(dest_cycle)
+                                dest_type, dest = next(dest_cycles[(src_type, src)])
 
                         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
@@ -170,10 +177,13 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
                             generate_entries.dest_assignments[t] = itertools.cycle(shuffled)
                         dest_cycle_t = generate_entries.dest_assignments[t]
                     else:
-                        dest_cycle_t = itertools.cycle(dest_items)
-
+                        # dest_cycle_t = itertools.cycle(dest_items)
+                        dest_cycle_t_dict = dest_cycles
                     for src_type, src in src_items:
-                        dest_type, dest = next(dest_cycle_t)
+                        if dest_access_mode == "random":
+                            dest_type, dest = next(dest_cycle_t)
+                        else:
+                            dest_type, dest = next(dest_cycles[(src_type, src)])
                         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
         return entries
@@ -289,12 +299,12 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
             data_all.extend(generate_mixed_entries(gdma_map, "gdma", "l2m", l2m_map, "R", burst, mix_ratios))
         else:
             # data_all.extend(generate_entries(gdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(sdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             #
-            data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            data_all.extend(generate_entries(sdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(sdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
             # data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
@@ -308,9 +318,9 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
 if __name__ == "__main__":
     # 参数配置
     topo = "3x3"
-    interval_count = 196
+    interval_count = 128
     file_name = "../../test_data/traffic_2260E_case2.txt"
-    np.random.seed(428)
+    np.random.seed(520)
 
     if topo == "5x4":
         num_ip = 32
@@ -331,10 +341,10 @@ if __name__ == "__main__":
         }
         gdma_map = {
             "gdma_0": [
-                0,
+                # 0,
                 2,
-                6,
-                8,
+                # 6,
+                # 8,
             ],
             # "gdma_0": [0, 2],
         }
@@ -349,10 +359,10 @@ if __name__ == "__main__":
             # "ddr_3": [3],
         }
         l2m_map = {
-            # "l2m_0": [0],
+            "l2m_0": [0],
             # "l2m_1": [1],
-            "l2m_0": [1, 7],
-            "l2m_1": [1, 7],
+            # "l2m_0": [1, 7],
+            # "l2m_1": [1, 7],
         }
 
     speed = {1: 128, 2: 128, 4: 128}  # 不同burst对应的带宽(GB/s)

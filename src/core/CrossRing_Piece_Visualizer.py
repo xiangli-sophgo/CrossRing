@@ -31,9 +31,8 @@ class CrossRingVisualizer:
         self.fifo_gap = 0.8  # 相邻fifo之间间隙
 
         # ------- layout tuning parameters (all adjustable) -------
-        self.margin = 0.25  # 内边距
-        self.gap_lr = 0.2  # 左右两组横向 FIFO 间距
-        self.gap_hv = 0.2  # 横纵 FIFO 交界间距
+        self.gap_lr = 0.3  # 左右内边距
+        self.gap_hv = 0.3  # 上下内边距
         self.min_depth_vis = 4  # 设计最小深度 (=4)
         self.text_gap = 0.1
         # ---------------------------------------------------------
@@ -163,11 +162,11 @@ class CrossRingVisualizer:
 
         rb_config = dict(
             title="Ring Bridge",
-            lanes=["TL", "TR", "TU", "TD"],
-            depths=[self.RB_in_depth] * 2 + [self.RB_out_depth] * 2,
-            orientations=["vertical", "vertical", "horizontal", "horizontal"],
-            h_pos=["bottom", "bottom", "top", "top"],
-            v_pos=["left", "left", "right", "right"],
+            lanes=["TL", "TR", "TU", "TD", "EQ"],
+            depths=[self.RB_in_depth] * 2 + [self.RB_out_depth] * 3,
+            orientations=["vertical", "vertical", "horizontal", "horizontal", "vertical"],
+            h_pos=["bottom", "bottom", "top", "top", "top"],
+            v_pos=["left", "left", "right", "right", "left"],
             patch_dict=self.rb_patches,
             text_dict=self.rb_texts,
         )

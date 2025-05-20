@@ -23,7 +23,7 @@ class Packet_Base_model(BaseModel):
 
             # Inject and process flits for requests
             if self.rn_type != "Idle":
-                self.inject_request_flits()
+                self._Inject_Queue_arbitration_req_network()
 
             reqs = self.move_flits_in_network(self.req_network, reqs, "req")
 
@@ -31,7 +31,7 @@ class Packet_Base_model(BaseModel):
                 self.move_all_to_inject_queue(self.req_network, "req")
 
                 # Inject and process responses
-                self.inject_response_flits()
+                self._Inject_Queue_arbitration()
 
             rsps = self.move_flits_in_network(self.rsp_network, rsps, "rsp")
 
@@ -39,14 +39,14 @@ class Packet_Base_model(BaseModel):
                 self.move_all_to_inject_queue(self.rsp_network, "rsp")
 
                 # Inject and process data flits
-                self.inject_data_flits()
+                self._Inject_Queue_arbitration_data_network()
 
-            flits = self.move_flits_in_network(self.flit_network, flits, "data")
+            flits = self.move_flits_in_network(self.data_network, flits, "data")
 
-            self.move_all_to_inject_queue(self.flit_network, "data")
+            self.move_all_to_inject_queue(self.data_network, "data")
 
             # Tag moves
-            self.tag_move(self.flit_network)
+            self._tag_move(self.data_network)
 
             if self.rn_type != "Idle":
                 self.process_received_data()
@@ -63,7 +63,7 @@ class Packet_Base_model(BaseModel):
 
             if (
                 self.req_count >= self.read_req + self.write_req
-                and self.send_flits_num == self.flit_network.recv_flits_num >= self.read_flit + self.write_flit  # - 200
+                and self.send_flits_num == self.data_network.recv_flits_num >= self.read_flit + self.write_flit  # - 200
                 and self.trans_flits_num == 0
                 and not self.new_write_req
                 or self.cycle > self.end_time * self.config.network_frequency
@@ -78,7 +78,7 @@ class Packet_Base_model(BaseModel):
         # Performance evaluation
         self.print_data_statistic()
         self.log_summary()
-        self.evaluate_results(self.flit_network)
+        self.evaluate_results(self.data_network)
 
     def process_received_data(self):
         """Process received data in RN and SN networks."""
@@ -102,7 +102,7 @@ class Packet_Base_model(BaseModel):
                 )
                 self.req_cir_h_num_stat += req.circuits_completed_h
                 self.req_cir_v_num_stat += req.circuits_completed_v
-                for flit in self.flit_network.arrive_flits[packet_id]:
+                for flit in self.data_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle
                 req.leave_db_cycle = self.cycle
                 self.node.rn_tracker["read"][self.rn_type][in_pos].remove(req)
@@ -124,7 +124,7 @@ class Packet_Base_model(BaseModel):
                 )
                 self.req_cir_h_num_stat += req.circuits_completed_h
                 self.req_cir_v_num_stat += req.circuits_completed_v
-                for flit in self.flit_network.arrive_flits[packet_id]:
+                for flit in self.data_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle + self.config.sn_tracker_release_latency
                 # 释放tracker 增加40ns延迟
                 release_time = self.cycle + self.config.sn_tracker_release_latency
@@ -173,7 +173,7 @@ class Packet_Base_model(BaseModel):
     #             queue = network.inject_queues[direction]
     #             self.move_to_inject_queue(network, pre_queue, queue, ip_pos)
 
-    def inject_request_flits(self):
+    def _Inject_Queue_arbitration_req_network(self):
         """Inject requests into the network."""
         for ip_pos in getattr(self.config, f"{self.rn_type}_send_positions"):
             for req_type in ["read", "write"]:
@@ -236,25 +236,21 @@ class Packet_Base_model(BaseModel):
     #                     queue_pre[ip_pos] = rsp
     #                     self.node.sn_rsp_queue[sn_type][ip_pos].pop(0)
 
-    def inject_data_flits(self):
+    def _Inject_Queue_arbitration_data_network(self):
         """
         Inject data flits into the network.
         """
         for ip_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions + self.config.sdma_send_positions + self.config.gdma_send_positions):
             inject_flits = [
-                (
-                    self.node.sn_rdb[self.sn_type][ip_pos][0]
-                    if self.node.sn_rdb[self.sn_type][ip_pos] and self.node.sn_rdb[self.sn_type][ip_pos][0].departure_cycle <= self.cycle
-                    else None
-                ),
+                (self.node.sn_rdb[self.sn_type][ip_pos][0] if self.node.sn_rdb[self.sn_type][ip_pos] and self.node.sn_rdb[self.sn_type][ip_pos][0].departure_cycle <= self.cycle else None),
                 (self.node.rn_wdb[self.rn_type][ip_pos][self.node.rn_wdb_send[self.rn_type][ip_pos][0]][0] if len(self.node.rn_wdb_send[self.rn_type][ip_pos]) > 0 else None),
             ]
             for direction in self.directions:
-                rr_index = self.flit_network.inject_queue_rr[direction][self.cycle_mod][ip_pos]
+                rr_index = self.data_network.inject_queue_rr[direction][self.cycle_mod][ip_pos]
                 for i in rr_index:
                     if flit := inject_flits[i]:
-                        queue = self.flit_network.inject_queues[direction]
-                        queue_pre = self.flit_network.inject_queues_pre[direction]
+                        queue = self.data_network.inject_queues[direction]
+                        queue_pre = self.data_network.inject_queues_pre[direction]
                         if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
                             queue_pre[flit.source] = flit
                             req = self.req_network.send_flits[flit.packet_id][0]
@@ -468,9 +464,7 @@ class Packet_Base_model(BaseModel):
                 #     network.ring_bridge["right"][(pos, next_pos)][0] if network.ring_bridge["right"][(pos, next_pos)] else None,
                 #     network.ring_bridge["ft"][(pos, next_pos)][0] if network.ring_bridge["ft"][(pos, next_pos)] else None,
                 # ]
-                station_flits = [
-                    network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]
-                ]
+                station_flits = [network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]]
                 # if not all(flit is None for flit in station_flits):
                 #     print(station_flits)
 
@@ -524,7 +518,7 @@ class Packet_Base_model(BaseModel):
 
         # eject arbitration
         if flit_type in ["req", "rsp", "data"]:
-            self._eject_queue_arbitration(network, flit_type)
+            self._Eject_Queue_arbitration(network, flit_type)
 
         # 执行所有flit的移动
         for flit in vertical_flits + horizontal_flits + new_flits + local_flits:
@@ -606,7 +600,7 @@ class Packet_Base_model(BaseModel):
     #     network.round_robin["ring_bridge"][next_pos].remove(index)
     #     network.round_robin["ring_bridge"][next_pos].append(index)
 
-    def _eject_queue_arbitration(self, network, flit_type):
+    def _Eject_Queue_arbitration(self, network, flit_type):
         """处理eject的仲裁逻辑,根据flit类型处理不同的eject队列"""
         if flit_type == "req":
             for in_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions):
