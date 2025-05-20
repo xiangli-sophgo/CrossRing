@@ -550,7 +550,7 @@ class NetworkLinkVisualizer:
             if self._selected_node is not None:
                 self._refresh_piece_view()
             self.ax.set_title(self.network.name)
-        if self.cycle and self.cycle % 10 == 0:
+        if cycle and self.cycle % 10 == 0:
             self._update_status_display()
         if not skip_pause:
             plt.pause(self.pause_interval)

@@ -479,18 +479,18 @@ class BaseModel:
                 if not self.data_network.IQ_channel_buffer[ip_type][ip_pos]:
                     temp_queue.append(ip_type)
                     continue
-                inject_flit = self.data_network.IQ_channel_buffer[ip_type][ip_pos][0] 
+                inject_flit = self.data_network.IQ_channel_buffer[ip_type][ip_pos][0]
                 processed = False
                 for direction in self.IQ_directions:
                     if flit := inject_flit:
                         queue = self.data_network.inject_queues[direction]
                         queue_pre = self.data_network.inject_queues_pre[direction]
                         if not queue_pre[ip_pos] and self.IQ_direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-                            if ip_type.startswith("ddr"):
-                                token_bucket: TokenBucket = self.data_network.token_bucket[ip_pos][ip_type]
-                                token_bucket.refill(self.cycle)
-                                if not token_bucket.consume():
-                                    continue
+                            # if ip_type.startswith("ddr"):
+                            #     token_bucket: TokenBucket = self.data_network.token_bucket[ip_pos][ip_type]
+                            #     token_bucket.refill(self.cycle)
+                            #     if not token_bucket.consume():
+                            #         continue
 
                             processed = True
                             req = self.req_network.send_flits[flit.packet_id][0]
@@ -1215,6 +1215,11 @@ class BaseModel:
                         continue
                     flit = ip_data_buffer[0]
                     if flit.departure_cycle <= self.cycle and len(self.data_network.IQ_channel_buffer[ip_type][ip_pos]) < self.config.IQ_CH_FIFO_DEPTH:
+                        if ip_type.startswith("ddr"):
+                            token_bucket: TokenBucket = self.data_network.token_bucket[ip_pos][ip_type]
+                            token_bucket.refill(self.cycle)
+                            if not token_bucket.consume():
+                                continue
                         self.data_network.IQ_channel_buffer[ip_type][ip_pos].append(flit)
                         ip_data_buffer.pop(0)
 
