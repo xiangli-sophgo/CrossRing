@@ -69,7 +69,7 @@ def main():
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
         plot_link_state=1,
-        plot_start_time=0,
+        plot_start_time=2000,
         print_trace=0,
         show_trace_id=100,
         show_node_id=4,
@@ -128,8 +128,8 @@ def main():
         sim.config.TD_Etag_T3_UE_MAX = 9
 
         sim.config.gdma_rw_gap = np.inf
-        sim.config.sdma_rw_gap = np.inf
-        # sim.config.sdma_rw_gap = 200
+        # sim.config.sdma_rw_gap = np.inf
+        sim.config.sdma_rw_gap = 200
         sim.config.CHANNEL_SPEC = {
             "gdma": 1,
             "sdma": 1,

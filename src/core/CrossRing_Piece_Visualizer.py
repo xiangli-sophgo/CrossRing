@@ -545,7 +545,7 @@ class CrossRingVisualizer:
                     if p in self.patch_info_map:
                         self.patch_info_map.pop(p, None)
 
-        plt.title(f"Node: {self.node_id}", fontsize=12)
+        # plt.title(f"Node: {self.node_id}", fontsize=12)
         # plt.pause(0.2)
 
     # ------------------------------------------------------------------ #

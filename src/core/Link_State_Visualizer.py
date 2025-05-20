@@ -19,7 +19,7 @@ class NetworkLinkVisualizer:
         self.network = network
         self.cols = network.config.cols
         # ---- Figure & Sub‑Axes ------------------------------------------------
-        self.fig = plt.figure(figsize=(15, 8))
+        self.fig = plt.figure(figsize=(15, 8), constrained_layout=True)
         gs = self.fig.add_gridspec(1, 2, width_ratios=[1.5, 1])
         self.ax = self.fig.add_subplot(gs[0])  # 主网络视图
         self.piece_ax = self.fig.add_subplot(gs[1])  # 右侧 Piece 视图
@@ -44,14 +44,13 @@ class NetworkLinkVisualizer:
         self._expected_pid = 0
         # ===============  History Buffer  ====================
         # 支持多网络显示
-        # self.history = deque(maxlen=20)
         self.networks = None
         self.selected_network_index = 0
         # 为每个网络维护独立历史缓冲
         self.histories = [deque(maxlen=20) for _ in range(3)]
         self.buttons = []
         # 添加网络选择按钮
-        btn_positions = [(0.01, 0.03, 0.08, 0.04), (0.10, 0.03, 0.08, 0.04), (0.19, 0.03, 0.08, 0.04)]
+        btn_positions = [(0.01, 0.03, 0.06, 0.04), (0.10, 0.03, 0.06, 0.04), (0.19, 0.03, 0.06, 0.04)]
         for idx, label in enumerate(["REQ", "RSP", "DATA"]):
             ax_btn = self.fig.add_axes(btn_positions[idx])
             btn = Button(ax_btn, label)
@@ -59,6 +58,39 @@ class NetworkLinkVisualizer:
             self.buttons.append(btn)
         self._play_idx = None  # 暂停时正在浏览的 history 索引
         self._draw_static_elements()
+
+        # 初始化时显示中心节点
+        rows, cols = self.network.config.rows, self.network.config.cols
+        # 取中间行列
+        center_row = rows // 2
+        center_col = cols // 2
+        center_raw = center_row * cols + center_col
+        # 点击逻辑：若在偶数行（0-based）需映射到下一行
+        if (center_raw // cols) % 2 == 0:
+            center_sel = center_raw + cols if center_raw + cols < rows * cols else center_raw
+        else:
+            center_sel = center_raw
+        self._selected_node = center_sel
+        # 绘制初始 Piece
+        self.piece_ax.clear()
+        self.piece_ax.axis("off")
+        self.piece_vis.draw_piece_for_node(self._selected_node, self.network)
+        # 初始化时绘制高亮框
+        raw_center = self._selected_node
+        row0 = raw_center // cols
+        nodes_center = [raw_center]
+        if row0 % 2 == 0 and raw_center + cols in self.node_positions:
+            nodes_center.append(raw_center + cols)
+        elif row0 % 2 == 1 and raw_center - cols in self.node_positions:
+            nodes_center.append(raw_center - cols)
+        xs0 = [self.node_positions[n][0] for n in nodes_center]
+        ys0 = [self.node_positions[n][1] for n in nodes_center]
+        llx0, lly0 = min(xs0), min(ys0)
+        w0 = max(xs0) - min(xs0) + 0.5
+        h0 = max(ys0) - min(ys0) + 0.5
+        self.click_box = Rectangle((llx0, lly0), w0, h0, facecolor="none", edgecolor="red", linewidth=1.2, linestyle="--")
+        self.ax.add_patch(self.click_box)
+        self.fig.canvas.draw_idle()
 
         # 播放控制参数
         self.pause_interval = 0.2  # 默认每帧暂停间隔(秒)
@@ -102,10 +134,40 @@ class NetworkLinkVisualizer:
 
         if sel_node is None:
             return  # 点击空白
+        # 记录原始点击节点
+        raw_node = sel_node
         if (sel_node // self.cols) % 2 == 0:
             sel_node += self.cols
         # 记录当前选中节点
         self._selected_node = sel_node
+
+        # 清除之前的高亮框
+        if hasattr(self, "click_box"):
+            try:
+                self.click_box.remove()
+            except Exception:
+                pass
+        row = raw_node // self.cols
+        nodes_to_box = [raw_node]
+        if row % 2 == 0:
+            # 偶数行，高亮下一行
+            if raw_node + self.cols in self.node_positions:
+                nodes_to_box.append(raw_node + self.cols)
+        else:
+            # 奇数行，高亮上一行
+            if raw_node - self.cols in self.node_positions:
+                nodes_to_box.append(raw_node - self.cols)
+        # 找到所有这些节点的坐标
+        xs = [self.node_positions[n][0] for n in nodes_to_box]
+        ys = [self.node_positions[n][1] for n in nodes_to_box]
+        # 计算包围框左下角及宽高
+        llx = min(xs)
+        lly = min(ys)
+        width = max(xs) - min(xs) + 0.5
+        height = max(ys) - min(ys) + 0.5
+        # 绘制包围框
+        self.click_box = Rectangle((llx, lly), width, height, facecolor="none", edgecolor="red", linewidth=1.2, linestyle="--")
+        self.ax.add_patch(self.click_box)
 
         # 清空右侧子图并绘制
         self.piece_ax.clear()
@@ -211,7 +273,7 @@ class NetworkLinkVisualizer:
             self.ax.set_ylim(min(ys) - margin_y, max(ys) + margin_y + 0.5)
 
         self.ax.axis("off")
-        plt.tight_layout()
+        # self.fig.tight_layout(rect=[0, 0.1, 1, 1])
 
     def _draw_link_frame(self, src, dest, queue_fixed_length=1.6, seat_num=7):
         # 检查是否为自环链路
@@ -488,8 +550,8 @@ class NetworkLinkVisualizer:
             if self._selected_node is not None:
                 self._refresh_piece_view()
             self.ax.set_title(self.network.name)
-        self._update_status_display()
-        plt.tight_layout()
+        if self.cycle and self.cycle % 10 == 0:
+            self._update_status_display()
         if not skip_pause:
             plt.pause(self.pause_interval)
         return self.ax.patches
