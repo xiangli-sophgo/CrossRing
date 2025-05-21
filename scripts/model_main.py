@@ -68,11 +68,12 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
-        plot_link_state=1,
-        plot_start_time=5000,
+        plot_link_state=0,
+        plot_start_time=8000,
         print_trace=0,
         show_trace_id=0,
         show_node_id=4,
+        verbose=1,
     )
 
     if topo_type == "3x3":
@@ -129,7 +130,7 @@ def main():
 
         sim.config.gdma_rw_gap = np.inf
         # sim.config.sdma_rw_gap = np.inf
-        sim.config.sdma_rw_gap = 200
+        sim.config.sdma_rw_gap = 50
         sim.config.CHANNEL_SPEC = {
             "gdma": 1,
             "sdma": 1,

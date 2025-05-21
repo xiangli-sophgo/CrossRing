@@ -43,13 +43,13 @@ class BaseModel:
         print_trace=False,
         show_trace_id=0,
         show_node_id=3,
+        verbose=0,
     ):
         self.model_type_stat = model_type
         self.config = config
         self.topo_type_stat = topo_type
         self.traffic_file_path = traffic_file_path
         self.file_name = file_name
-        print(f"\nModel Type: {model_type}, Topology: {self.topo_type_stat}, file_name: {self.file_name[:-4]}")
 
         self.result_save_path_original = result_save_path
         self.plot_flow_fig = plot_flow_fig
@@ -64,6 +64,9 @@ class BaseModel:
         }
         self.show_trace_id = show_trace_id
         self.show_node_id = show_node_id
+        self.verbose = verbose
+        if self.verbose:
+            print(f"\nModel Type: {model_type}, Topology: {self.topo_type_stat}, file_name: {self.file_name[:-4]}")
         self.results_fig_save_path = None
         if result_save_path:
             self.result_save_path = self.result_save_path_original + str(topo_type) + "/" + self.file_name[:-4] + "/"
@@ -131,7 +134,7 @@ class BaseModel:
 
         self.dma_rw_counts = self.config._make_channels(("gdma", "sdma"), {ip: {"read": 0, "write": 0} for ip in self.config.gdma_send_positions})
 
-        self.rn_bandwidth_stats = {
+        self.rn_bandwidth_stat = {
             "SDMA read DDR": {"time": [], "bandwidth": []},
             "SDMA read L2M": {"time": [], "bandwidth": []},
             "GDMA read DDR": {"time": [], "bandwidth": []},
@@ -357,14 +360,16 @@ class BaseModel:
                     queue_pre[ip_pos] = None
 
     def print_data_statistic(self):
-        print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
+        if self.verbose:
+            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
-        print(
-            f"T: {self.cycle // self.config.network_frequency}, Req_cnt: {self.req_count} In_Req: {self.req_num}, Rsp: {self.rsp_num},"
-            f" R_fn: {self.send_read_flits_num_stat}, W_fn: {self.send_write_flits_num_stat}, "
-            f"Trans_fn: {self.trans_flits_num}, Recv_fn: {self.data_network.recv_flits_num}"
-        )
+        if self.verbose:
+            print(
+                f"T: {self.cycle // self.config.network_frequency}, Req_cnt: {self.req_count} In_Req: {self.req_num}, Rsp: {self.rsp_num},"
+                f" R_fn: {self.send_read_flits_num_stat}, W_fn: {self.send_write_flits_num_stat}, "
+                f"Trans_fn: {self.trans_flits_num}, Recv_fn: {self.data_network.recv_flits_num}"
+            )
 
     def move_flits_in_network(self, network, flits, flit_type):
         """Process injection queues and move flits."""
@@ -1014,8 +1019,8 @@ class BaseModel:
         if in_pos_position is None:
             return  # 不合法的flit_typ
 
-        if self.cycle_mod == 0:
-            return
+        # if self.cycle_mod == 0:
+            # return
 
         if flit_type == "req":
             for in_pos in in_pos_position:
@@ -1642,13 +1647,13 @@ class BaseModel:
         if flit.req_type == "read":
             flit.rsp_latency = 0
             flit.dat_latency = (flit.rn_data_collection_complete_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
-            self.rn_bandwidth_stats[f"{flit.original_source_type[:-2].upper()} {flit.req_type} {flit.original_destination_type[:3].upper()}"]["time"].append(
+            self.rn_bandwidth_stat[f"{flit.original_source_type[:-2].upper()} {flit.req_type} {flit.original_destination_type[:3].upper()}"]["time"].append(
                 flit.rn_data_collection_complete_cycle // self.config.network_frequency
             )
         elif flit.req_type == "write":
             flit.rsp_latency = (flit.rn_receive_rsp_cycle - flit.sn_receive_req_cycle) // self.config.network_frequency
             flit.dat_latency = (flit.sn_data_collection_complete_cycle - flit.data_entry_network_cycle) // self.config.network_frequency
-            self.rn_bandwidth_stats[f"{flit.original_source_type[:-2].upper()} {flit.req_type} {flit.original_destination_type[:3].upper()}"]["time"].append(
+            self.rn_bandwidth_stat[f"{flit.original_source_type[:-2].upper()} {flit.req_type} {flit.original_destination_type[:3].upper()}"]["time"].append(
                 flit.data_entry_network_cycle // self.config.network_frequency
             )
             # self.rn_bandwidth_stats[f"{flit.original_source_type[:-2].upper()} {flit.req_type} {flit.original_destination_type[:3].upper()}"]["time"].append(flit.sn_data_collection_complete_cycle // self.config.network_frequency)
@@ -1665,7 +1670,7 @@ class BaseModel:
         """绘制RN端带宽图，使用累积和计算带宽"""
         plt.figure(figsize=(12, 8))
         total_bw = 0
-        stats = self.rn_bandwidth_stats
+        stats = self.rn_bandwidth_stat
         for k, data_dict in stats.items():
             if not data_dict["time"]:
                 continue
@@ -1732,7 +1737,8 @@ class BaseModel:
         print("=" * 50)
         total_result = os.path.join(self.result_save_path, "total_result.txt")
         with open(total_result, "w", encoding="utf-8") as f3:
-            print(f"Topology: {self.topo_type_stat }, file_name: {self.file_name}")
+            if self.verbose:
+                print(f"Topology: {self.topo_type_stat }, file_name: {self.file_name}")
             print(
                 f"Topology: {self.topo_type_stat }, file_name: {self.file_name}",
                 file=f3,
@@ -1813,18 +1819,19 @@ class BaseModel:
             # print(self.dma_rw_counts)
             self.plot_rn_bandwidth()
         self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
-        print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")
-        print("=" * 50)
-        print(f"Total Circuits req h: {self.req_cir_h_num_stat}, v: {self.req_cir_v_num_stat}")
-        print(f"Total Circuits rsp h: {self.rsp_cir_h_num_stat}, v: {self.rsp_cir_v_num_stat}")
-        print(f"Total Circuits data h: {self.data_cir_h_num_stat}, v: {self.data_cir_v_num_stat}")
-        print(f"Total wait cycle req h: {self.req_wait_cycle_h_num_stat}, v: {self.req_wait_cycle_v_num_stat}")
-        print(f"Total wait cycle rsp h: {self.rsp_wait_cycle_h_num_stat}, v: {self.rsp_wait_cycle_v_num_stat}")
-        print(f"Total wait cycle data h: {self.data_wait_cycle_h_num_stat}, v: {self.data_wait_cycle_v_num_stat}")
-        print(f"Total RB ETag: T1: {self.RB_ETag_T1_num_stat}, T0: {self.RB_ETag_T0_num_stat}; EQ ETag: T1: {self.EQ_ETag_T1_num_stat}, T0: {self.EQ_ETag_T0_num_stat}")
-        print(f"Total ITag: h: {self.ITag_h_num_stat}, v: {self.ITag_v_num_stat}")
-        if self.model_type_stat == "REQ_RSP":
-            print(f"Retry num: R: {self.read_retry_num_stat}, W: {self.write_retry_num_stat}")
+        if self.verbose:
+            print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")
+            print("=" * 50)
+            print(f"Total Circuits req h: {self.req_cir_h_num_stat}, v: {self.req_cir_v_num_stat}")
+            print(f"Total Circuits rsp h: {self.rsp_cir_h_num_stat}, v: {self.rsp_cir_v_num_stat}")
+            print(f"Total Circuits data h: {self.data_cir_h_num_stat}, v: {self.data_cir_v_num_stat}")
+            print(f"Total wait cycle req h: {self.req_wait_cycle_h_num_stat}, v: {self.req_wait_cycle_v_num_stat}")
+            print(f"Total wait cycle rsp h: {self.rsp_wait_cycle_h_num_stat}, v: {self.rsp_wait_cycle_v_num_stat}")
+            print(f"Total wait cycle data h: {self.data_wait_cycle_h_num_stat}, v: {self.data_wait_cycle_v_num_stat}")
+            print(f"Total RB ETag: T1: {self.RB_ETag_T1_num_stat}, T0: {self.RB_ETag_T0_num_stat}; EQ ETag: T1: {self.EQ_ETag_T1_num_stat}, T0: {self.EQ_ETag_T0_num_stat}")
+            print(f"Total ITag: h: {self.ITag_h_num_stat}, v: {self.ITag_v_num_stat}")
+            if self.model_type_stat == "REQ_RSP":
+                print(f"Retry num: R: {self.read_retry_num_stat}, W: {self.write_retry_num_stat}")
         if self.plot_flow_fig:
             self.draw_flow_graph(self.data_network, save_path=self.results_fig_save_path)
         # print("=" * 50)

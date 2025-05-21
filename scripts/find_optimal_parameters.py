@@ -97,13 +97,10 @@ def find_optimal_parameters():
             sim.config.sn_l2m_wdb_size = sim.config.sn_l2m_write_tracker_ostd * sim.config.burst
             sim.config.ddr_R_latency_original = 155
             sim.config.ddr_R_latency_var_original = 25
-            # sim.config.ddr_R_latency_original = 0
-            # sim.config.ddr_R_latency_var_original = 0
             sim.config.ddr_W_latency_original = 16
             sim.config.l2m_R_latency_original = 12
             sim.config.l2m_W_latency_original = 16
             sim.config.ddr_bandwidth_limit = 76.8 / 4
-            # sim.config.ddr_bandwidth_limit = 10
             sim.config.l2m_bandwidth_limit = np.inf
             sim.config.IQ_CH_FIFO_DEPTH = 10
             sim.config.EQ_CH_FIFO_DEPTH = 16
@@ -130,7 +127,7 @@ def find_optimal_parameters():
 
             sim.config.gdma_rw_gap = np.inf
             # sim.config.sdma_rw_gap = np.inf
-            sim.config.sdma_rw_gap = 200
+            sim.config.sdma_rw_gap = 50
             sim.config.CHANNEL_SPEC = {
                 "gdma": 1,
                 "sdma": 1,
@@ -162,7 +159,7 @@ def find_optimal_parameters():
     param4_vals = list(range(param4_start, param4_end + 1, param3_step))
     combos = [(p1, p2, p3, p4) for p1 in param1_vals for p2 in param2_vals for p3 in param3_vals for p4 in param4_vals if (p4 > p2 > p1) and (p4 > p3)]
     # 并行执行
-    all_results = Parallel(n_jobs=4)(delayed(_run_one)(p1, p2, p3, p4) for (p1, p2, p3, p4) in tqdm(combos, desc="Searching"))
+    all_results = Parallel(n_jobs=16)(delayed(_run_one)(p1, p2, p3, p4) for (p1, p2, p3, p4) in tqdm(combos, desc="Searching"))
     # 将所有结果写入 CSV
     csv_file_exists = os.path.isfile(output_csv)
     with open(output_csv, mode="a", newline="") as output_csv_file:
