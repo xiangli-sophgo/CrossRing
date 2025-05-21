@@ -318,7 +318,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
 if __name__ == "__main__":
     # 参数配置
     topo = "3x3"
-    interval_count = 256
+    interval_count = 128
     file_name = "../../test_data/traffic_2260E_case2.txt"
     np.random.seed(520)
 

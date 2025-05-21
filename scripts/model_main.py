@@ -68,7 +68,7 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
-        plot_link_state=0,
+        plot_link_state=1,
         plot_start_time=8000,
         print_trace=0,
         show_trace_id=0,
@@ -117,7 +117,7 @@ def main():
         # sim.config.TR_Etag_T2_UE_MAX = 5
         # sim.config.TU_Etag_T2_UE_MAX = 4
         # sim.config.TU_Etag_T1_UE_MAX = 7
-        # sim.config.TD_Etag_T3_UE_MAX = 6
+        # sim.config.TD_Etag_T2_UE_MAX = 6
 
         sim.config.EQ_IN_FIFO_DEPTH = 16
         sim.config.RB_IN_FIFO_DEPTH = 16
@@ -126,7 +126,7 @@ def main():
         sim.config.TR_Etag_T2_UE_MAX = 9
         sim.config.TU_Etag_T2_UE_MAX = 8
         sim.config.TU_Etag_T1_UE_MAX = 14
-        sim.config.TD_Etag_T3_UE_MAX = 9
+        sim.config.TD_Etag_T2_UE_MAX = 9
 
         sim.config.gdma_rw_gap = np.inf
         # sim.config.sdma_rw_gap = np.inf
@@ -164,7 +164,7 @@ def main():
         sim.config.l2m_W_latency_original = 16
 
     sim.initial()
-    sim.end_time = 1000
+    sim.end_time = 10000
     sim.print_interval = 2000
     sim.run()
 

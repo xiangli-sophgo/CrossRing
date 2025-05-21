@@ -492,12 +492,6 @@ class BaseModel:
                         queue = self.data_network.inject_queues[direction]
                         queue_pre = self.data_network.inject_queues_pre[direction]
                         if not queue_pre[ip_pos] and self.IQ_direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
-                            # if ip_type.startswith("ddr"):
-                            #     token_bucket: TokenBucket = self.data_network.token_bucket[ip_pos][ip_type]
-                            #     token_bucket.refill(self.cycle)
-                            #     if not token_bucket.consume():
-                            #         continue
-
                             processed = True
                             req = self.req_network.send_flits[flit.packet_id][0]
                             flit.sync_latency_record(req)
@@ -1848,23 +1842,7 @@ class BaseModel:
                 print(f"Retry num: R: {self.read_retry_num_stat}, W: {self.write_retry_num_stat}")
         if self.plot_flow_fig:
             self.draw_flow_graph(self.data_network, save_path=self.results_fig_save_path)
-        # print("=" * 50)
-        # print(
-        #     f"Throughput: sdma-R-DDR: {((self.sdma_R_ddr_flit_num * 128/self.sdma_R_ddr_finish_time/4) if self.sdma_R_ddr_finish_time>0 else 0):.1f}, "
-        #     f"sdma-W-l2m: {(self.sdma_W_l2m_flit_num* 128/self.sdma_W_l2m_finish_time/4 if self.sdma_W_l2m_finish_time>0 else 0):.1f}, "
-        #     f"gdma-R-L2M: {(self.gdma_R_l2m_flit_num* 128/self.gdma_R_l2m_finish_time/4 if self.gdma_R_l2m_finish_time>0 else 0):.1f}"
-        # )
-        # print(
-        #     f"Finish Cycle: sdma-R-DDR: {self.sdma_R_ddr_finish_time * self.config.network_frequency}, "
-        #     f"sdma-W-l2m: {self.sdma_W_l2m_finish_time* self.config.network_frequency}, "
-        #     f"gdma-R-L2M: {self.gdma_R_l2m_finish_time* self.config.network_frequency}"
-        # )
-        # print(
-        #     f"Avg Latency: sdma-R-DDR: {(np.average(self.sdma_R_ddr_latency) if self.sdma_R_ddr_latency else 0):.1f}, "
-        #     f"sdma-W-l2m: {(np.average(self.sdma_W_l2m_latency) if self.sdma_W_l2m_latency else 0):.1f}, "
-        #     f"gdma-R-L2M: {(np.average(self.gdma_R_l2m_latency)if self.gdma_R_l2m_latency else 0):.1f}"
-        # )
-        # print("=" * 50)
+
 
     def print_stats(self, bw_list, name, operation, file):
         if bw_list:
