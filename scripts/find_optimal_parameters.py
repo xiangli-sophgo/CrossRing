@@ -6,76 +6,48 @@ import numpy as np
 import itertools
 from joblib import Parallel, delayed
 from tqdm import tqdm
+import optuna  # Bayesian optimization library
+
+# 使用的 CPU 核心数；-1 表示全部核心
+N_JOBS = 1
 
 
 def find_optimal_parameters():
     import csv
 
-    # 定义流量文件路径和文件名
     traffic_file_path = r"../test_data/"
     file_name = r"traffic_2260E_case2.txt"
-
-    # traffic_file_path = r"../traffic/"
-    # traffic_file_path = r"../traffic/output-v7-32/step6_mesh_32core_map/"
-    # file_name = r"LLama2_Attention_FC_Trace.txt"
-    # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
-    # file_name = r"LLama2_MLP_Trace.txt"
-    # file_name = r"LLama2_MM_QKV_Trace.txt"
-
     config_path = r"../config/config2.json"
     config = CrossRingConfig(config_path)
 
-    # 定义拓扑类型
-    if not config.topo_type:
-        # topo_type = "4x9"
-        # topo_type = "9x4"
-        # topo_type = "5x4"
-        # topo_type = "4x5"
-
-        # topo_type = "6x5"
-
-        topo_type = "3x3"
-    else:
-        topo_type = config.topo_type
-
+    topo_type = config.topo_type or "3x3"
     config.topo_type = topo_type
 
-    # result_save_path = None
-
     model_type = "REQ_RSP"
-    # model_type = "Packet_Base"
-    # model_type = "Feature"
-
-    results_file_name = "2260E_ETag_case1_0520"
-    # results_file_name = "inject_eject_queue_length"
-
-    # 创建结果保存路径
+    results_file_name = "2260E_ETag_case2_0521"
     result_root_save_path = f"../Result/CrossRing/{model_type}/FOP/{results_file_name}/"
-    os.makedirs(result_root_save_path, exist_ok=True)  # 确保根目录存在
-
-    output_csv = os.path.join(r"../Result/Params_csv/", f"{results_file_name}.csv")
     os.makedirs(result_root_save_path, exist_ok=True)
+    output_csv = os.path.join(r"../Result/Params_csv/", f"{results_file_name}.csv")
+    os.makedirs(os.path.dirname(output_csv), exist_ok=True)
 
-    # 定义参数范围
+    # 参数范围
     param1_start, param1_end, param1_step = (2, 20, 1)
     param2_start, param2_end, param2_step = (2, 20, 1)
     param3_start, param3_end, param3_step = (2, 20, 1)
-    param4_start, param4_end, param3_step = (8, 20, 1)
+    param4_start, param4_end, param4_step = (8, 20, 1)
 
     def _run_one(param1, param2, param3, param4):
-        """在给定参数下运行一次模拟，返回结果字典和参数元组。"""
-        # 重新加载配置
         cfg = CrossRingConfig(config_path)
         cfg.topo_type = topo_type
-        # 构造模拟对象
         sim = REQ_RSP_model(
             model_type=model_type,
             config=cfg,
             topo_type=topo_type,
             traffic_file_path=traffic_file_path,
             file_name=file_name,
-            result_save_path=result_root_save_path + f"{param1}_{param2}/",
+            result_save_path=result_root_save_path + f"{param1}_{param2}_{param3}_{param4}/",
         )
+        # ...（此处省略参数设置，与你原来一致）...
         if topo_type == "3x3":
             sim.config.burst = 2
             sim.config.num_ips = 4
@@ -135,40 +107,62 @@ def find_optimal_parameters():
                 "l2m": 2,
             }
 
-        # 应用参数到 cfg
+        # 应用参数
         sim.config.TL_Etag_T2_UE_MAX = param1
         sim.config.TL_Etag_T1_UE_MAX = param2
         sim.config.TR_Etag_T3_UE_MAX = param3
         sim.config.RB_IN_FIFO_DEPTH = param4
-        # sim.config.TU_Etag_T2_UE_MAX = param1
-        # sim.config.TU_Etag_T1_UE_MAX = param2
-        # sim.config.TD_Etag_T2_UE_MAX = param3
-        # 其他固定设置保持不变（可按原逻辑补充）
-        sim.initial()
-        sim.end_time = 10000
-        sim.print_interval = 10000
-        sim.run()
-        results = sim.get_results()
-        results.update({"param1": param1, "param2": param2, "param3": param3})
+
+        try:
+            sim.initial()
+            sim.end_time = 1000
+            sim.print_interval = 10000
+            sim.run()
+            results = sim.get_results()
+        except Exception as e:
+            print(f"Sim failed for params: {param1}, {param2}, {param3}, {param4}, error: {str(e)}")
+            results = {}
+
+        results.update({"param1": param1, "param2": param2, "param3": param3, "param4": param4})
+        # 确保有 avg_latency 字段
+        if "Total_sum_BW" not in results:
+            results["Total_sum_BW"] = results.get("Total_sum_BW", -1e9)
         return results
 
-    # 构造参数组合列表，满足 param2 > param1
-    param1_vals = list(range(param1_start, param1_end + 1, param1_step))
-    param2_vals = list(range(param2_start, param2_end + 1, param2_step))
-    param3_vals = list(range(param3_start, param3_end + 1, param3_step))
-    param4_vals = list(range(param4_start, param4_end + 1, param3_step))
-    combos = [(p1, p2, p3, p4) for p1 in param1_vals for p2 in param2_vals for p3 in param3_vals for p4 in param4_vals if (p4 > p2 > p1) and (p4 > p3)]
-    # 并行执行
-    all_results = Parallel(n_jobs=16)(delayed(_run_one)(p1, p2, p3, p4) for (p1, p2, p3, p4) in tqdm(combos, desc="Searching"))
-    # 将所有结果写入 CSV
-    csv_file_exists = os.path.isfile(output_csv)
-    with open(output_csv, mode="a", newline="") as output_csv_file:
-        writer = csv.DictWriter(output_csv_file, fieldnames=all_results[0].keys())
-        if not csv_file_exists:
-            writer.writeheader()
-        for res in all_results:
-            writer.writerow(res)
+    def objective(trial):
+        # 采样参数
+        p1 = trial.suggest_int("TL_Etag_T2_UE_MAX", param1_start, param1_end)
+        # 保证 p2 > p1
+        p2_low = p1 + 1
+        if p2_low > param2_end:
+            trial.set_user_attr("skip", True)
+            return -1e9
+        p2 = trial.suggest_int("TL_Etag_T1_UE_MAX", p2_low, param2_end)
+        p3 = trial.suggest_int("TR_Etag_T3_UE_MAX", param3_start, param3_end)
+        p4_low = max(p2 + 1, param4_start)
+        if p4_low > param4_end:
+            trial.set_user_attr("skip", True)
+            return -1e9
+        p4 = trial.suggest_int("RB_IN_FIFO_DEPTH", p4_low, param4_end)
+
+        results = _run_one(p1, p2, p3, p4)
+        score = results.get("Total_sum_BW", -1e9)
+        for k, v in results.items():
+            trial.set_user_attr(k, v)
+        return score
+
+    return objective, output_csv
 
 
 if __name__ == "__main__":
-    find_optimal_parameters()
+    objective, output_csv = find_optimal_parameters()
+    study = optuna.create_study(
+        study_name="CrossRing_BO",
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=42),
+    )
+    study.optimize(objective, n_trials=200, n_jobs=N_JOBS, show_progress_bar=True)
+    df = study.trials_dataframe(attrs=("number", "value", "params", "user_attrs"))
+    df.to_csv(output_csv, index=False)
+    print("最佳指标:", study.best_value)
+    print("最佳参数:", study.best_params)

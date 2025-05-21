@@ -164,7 +164,7 @@ def main():
         sim.config.l2m_W_latency_original = 16
 
     sim.initial()
-    sim.end_time = 10000
+    sim.end_time = 1000
     sim.print_interval = 2000
     sim.run()
 

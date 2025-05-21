@@ -181,6 +181,7 @@ class BaseModel:
         self.write_rsp_latency_avg_stat, self.write_rsp_latency_max_stat = 0, 0
         self.write_dat_latency_avg_stat, self.write_dat_latency_max_stat = 0, 0
         self.Total_BW_stat = 0
+        self.Total_sum_BW_stat = 0
 
     def run(self):
         """Main simulation loop."""
@@ -1020,7 +1021,7 @@ class BaseModel:
             return  # 不合法的flit_typ
 
         # if self.cycle_mod == 0:
-            # return
+        # return
 
         if flit_type == "req":
             for in_pos in in_pos_position:
@@ -1666,9 +1667,14 @@ class BaseModel:
         elif flit.req_type == "write":
             self.update_intervals(flit, write_merged_intervals, write_latency, f2, "W")
 
-    def plot_rn_bandwidth(self):
-        """绘制RN端带宽图，使用累积和计算带宽"""
-        plt.figure(figsize=(12, 8))
+    def cal_rn_bandwidth(self):
+        """
+        计算并可选地绘制RN端带宽图，使用累积和计算带宽。
+        参数:
+            plot (bool): 是否绘制图像，默认为True。
+        """
+        if self.plot_RN_BW_fig:
+            plt.figure(figsize=(12, 8))
         total_bw = 0
         stats = self.rn_bandwidth_stat
         for k, data_dict in stats.items():
@@ -1685,31 +1691,41 @@ class BaseModel:
             cum_counts = np.arange(1, len(times) + 1)
             bandwidth = (cum_counts * 128 * self.config.burst) / (times)  # 转换为bytes/sec
 
-            # 只显示前85%的时间段
+            # 只显示前90%的时间段
             t = np.percentile(times, 90)
             mask = times <= t
 
-            # 绘制曲线
-            (line,) = plt.plot(
-                times[mask] / 1000,
-                bandwidth[mask],
-                drawstyle="steps-post",
-                label=f"{k}",
-            )  # 时间转换为us
+            if self.plot_RN_BW_fig:
+                # 绘制曲线
+                (line,) = plt.plot(
+                    times[mask] / 1000,
+                    bandwidth[mask],
+                    drawstyle="steps-post",
+                    label=f"{k}",
+                )  # 时间转换为us
 
-            # 在曲线末尾添加文本标签
-            plt.text(times[mask][-1] / 1000, bandwidth[mask][-1], f"{bandwidth[mask][-1]:.2f}", va="center", color=line.get_color(), fontsize=12)
+                # 在曲线末尾添加文本标签
+                plt.text(
+                    times[mask][-1] / 1000,
+                    bandwidth[mask][-1],
+                    f"{bandwidth[mask][-1]:.2f}",
+                    va="center",
+                    color=line.get_color(),
+                    fontsize=12,
+                )
 
             # 打印最终带宽值
             print(f"{k} Final Bandwidth: {bandwidth[mask][-1]:.2f} GB/s")
             total_bw += bandwidth[mask][-1]
-        print(f"Total Bandwidth: {total_bw:.2f} GB/s")
-        plt.xlabel("Time (us)")
-        plt.ylabel("Bandwidth (GB/s)")
-        plt.title("RN Bandwidth")
-        plt.legend()
-        plt.grid(True)
-        plt.show()
+        self.Total_sum_BW_stat = float(total_bw)
+        print(f"Total Bandwidth: {self.Total_sum_BW_stat:.2f} GB/s")
+        if self.plot_RN_BW_fig:
+            plt.xlabel("Time (us)")
+            plt.ylabel("Bandwidth (GB/s)")
+            plt.title("RN Bandwidth")
+            plt.legend()
+            plt.grid(True)
+            plt.show()
 
     def calculate_and_output_results(
         self,
@@ -1815,9 +1831,7 @@ class BaseModel:
             print("")  # 屏幕输出空行分隔
             self.print_stats(rn_write_bws, "RN", "Write", f3)
             self.print_stats(sn_write_bws, "SN", "Write", f3)
-        if self.plot_RN_BW_fig:
-            # print(self.dma_rw_counts)
-            self.plot_rn_bandwidth()
+        self.cal_rn_bandwidth()
         self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
         if self.verbose:
             print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")
