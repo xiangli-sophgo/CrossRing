@@ -19,5 +19,12 @@ setup(
     install_requires=[
         # 在这里列出你的依赖库,例如：
         "numpy",
+        "networkx",
+        "matplotlib",
+        "scipy",
+        "seaborn",
+        "joblib",
+        "tqdm",
+        "optuna"
     ],
 )

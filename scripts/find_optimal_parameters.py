@@ -9,7 +9,7 @@ from tqdm import tqdm
 import optuna  # Bayesian optimization library
 
 # 使用的 CPU 核心数；-1 表示全部核心
-N_JOBS = 1
+N_JOBS = -1
 
 
 def find_optimal_parameters():
@@ -24,7 +24,7 @@ def find_optimal_parameters():
     config.topo_type = topo_type
 
     model_type = "REQ_RSP"
-    results_file_name = "2260E_ETag_case2_0521"
+    results_file_name = "2260E_ETag_case2_0522"
     result_root_save_path = f"../Result/CrossRing/{model_type}/FOP/{results_file_name}/"
     os.makedirs(result_root_save_path, exist_ok=True)
     output_csv = os.path.join(r"../Result/Params_csv/", f"{results_file_name}.csv")
@@ -50,8 +50,9 @@ def find_optimal_parameters():
             traffic_file_path=traffic_file_path,
             file_name=file_name,
             result_save_path=result_root_save_path,
+            verbose=0,
         )
-        # ...（此处省略参数设置，与你原来一致）...
+
         if topo_type == "3x3":
             sim.config.burst = 2
             sim.config.num_ips = 4
@@ -179,6 +180,11 @@ def find_optimal_parameters():
     return objective, output_csv
 
 
+def save_intermediate_result(study, trial):
+    df = study.trials_dataframe(attrs=("number", "value", "params", "user_attrs"))
+    df.to_csv(output_csv, index=False)
+
+
 if __name__ == "__main__":
     objective, output_csv = find_optimal_parameters()
     study = optuna.create_study(
@@ -186,7 +192,13 @@ if __name__ == "__main__":
         direction="maximize",
         sampler=optuna.samplers.TPESampler(seed=42),
     )
-    study.optimize(objective, n_trials=100, n_jobs=N_JOBS, show_progress_bar=True)
+    study.optimize(
+        objective,
+        n_trials=1000,
+        n_jobs=N_JOBS,
+        show_progress_bar=True,
+        callbacks=[save_intermediate_result],
+    )
     df = study.trials_dataframe(attrs=("number", "value", "params", "user_attrs"))
     df.to_csv(output_csv, index=False)
     print("最佳指标:", study.best_value)

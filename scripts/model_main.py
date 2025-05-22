@@ -14,7 +14,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_2260E_case2.txt"
+    file_name = r"traffic_2260E_case1.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -68,7 +68,7 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
-        plot_link_state=1,
+        plot_link_state=0,
         plot_start_time=2000,
         print_trace=0,
         show_trace_id=4,
@@ -119,14 +119,14 @@ def main():
         # sim.config.TU_Etag_T1_UE_MAX = 7
         # sim.config.TD_Etag_T2_UE_MAX = 6
 
+        sim.config.RB_IN_FIFO_DEPTH = 19
+        sim.config.TL_Etag_T2_UE_MAX = 4
+        sim.config.TL_Etag_T1_UE_MAX = 8
+        sim.config.TR_Etag_T2_UE_MAX = 16
+        sim.config.TU_Etag_T2_UE_MAX = 4
+        sim.config.TU_Etag_T1_UE_MAX = 9
+        sim.config.TD_Etag_T2_UE_MAX = 17
         sim.config.EQ_IN_FIFO_DEPTH = 16
-        sim.config.RB_IN_FIFO_DEPTH = 16
-        sim.config.TL_Etag_T2_UE_MAX = 8
-        sim.config.TL_Etag_T1_UE_MAX = 14
-        sim.config.TR_Etag_T2_UE_MAX = 9
-        sim.config.TU_Etag_T2_UE_MAX = 8
-        sim.config.TU_Etag_T1_UE_MAX = 14
-        sim.config.TD_Etag_T2_UE_MAX = 9
 
         sim.config.gdma_rw_gap = np.inf
         # sim.config.sdma_rw_gap = np.inf

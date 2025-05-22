@@ -24,6 +24,30 @@ from matplotlib.patches import Rectangle, FancyArrowPatch, Patch
 from matplotlib.lines import Line2D
 import matplotlib.colors as mcolors
 import matplotlib.cm as cm
+from functools import lru_cache
+
+
+@lru_cache(maxsize=None)
+def _parse_traffic_file(abs_path: str, net_freq: int):
+    """
+    解析 traffic 文件并缓存结果。
+    返回 (lines, (read_req, write_req, read_flit, write_flit))
+    """
+    lines = []
+    read_req = write_req = read_flit = write_flit = 0
+    with open(abs_path, "r") as f:
+        for raw in f:
+            t, src, src_t, dst, dst_t, op, burst = raw.strip().split(",")
+            burst = int(burst)
+            tup = (int(t) * net_freq, int(src), src_t, int(dst), dst_t, op, burst)
+            lines.append(tup)
+            if op == "R":
+                read_req += 1
+                read_flit += burst
+            else:
+                write_req += 1
+                write_flit += burst
+    return lines, (read_req, write_req, read_flit, write_flit)
 
 
 class BaseModel:
@@ -351,7 +375,7 @@ class BaseModel:
         # move ring_bridge_pre to ring_bridge FIFO
         for fifo_pos in ["EQ", "TU", "TD"]:
             if network.ring_bridge_pre[fifo_pos][(in_pos, ip_pos)]:
-                flit  =network.ring_bridge_pre[fifo_pos][(in_pos, ip_pos)]
+                flit = network.ring_bridge_pre[fifo_pos][(in_pos, ip_pos)]
                 flit.is_arrive = fifo_pos == "EQ"
                 network.ring_bridge[fifo_pos][(in_pos, in_pos - self.config.cols)].append(flit)
                 network.ring_bridge_pre[fifo_pos][(in_pos, ip_pos)] = None
@@ -564,33 +588,16 @@ class BaseModel:
         # self.begin, self.end = None, None
 
     def load_request_stream(self):
-        # self.req_stream = []
-        self.read_req, self.write_req = 0, 0
-        self.read_flit, self.write_flit = 0, 0
-        with open(self.traffic_file_path + self.file_name, "r") as file:
-            for line in file:
-                split_line = list(line.strip().split(","))
-                # TODO: network frequence change
-                split_line = [
-                    # request cycle
-                    int(split_line[0]) * self.config.network_frequency,
-                    int(split_line[1]),  # source id
-                    split_line[2],  # source type
-                    int(split_line[3]),  # destination id
-                    split_line[4],  # destination type
-                    split_line[5],  # request type
-                    int(split_line[6]),  # burst length
-                ]
-                if split_line[5] == "R":
-                    self.read_req += 1
-                    self.read_flit += split_line[6]
-                elif split_line[5] == "W":
-                    self.write_req += 1
-                    self.write_flit += split_line[6]
-                    # self.req_stream.append(split_line)
+        """借助 _parse_traffic_file 只解析一次 traffic 文件。"""
+        abs_path = os.path.join(self.traffic_file_path, self.file_name)
+        lines, (self.read_req, self.write_req, self.read_flit, self.write_flit) = _parse_traffic_file(os.path.abspath(abs_path), self.config.network_frequency)
+
+        # 每个实例各自迭代，不互相影响
+        self.req_stream = iter(lines)
+        self.next_req = None
+
+        # 统计输出保持原行为
         self.print_data_statistic()
-        self.req_stream = self._load_requests_stream()
-        self.next_req = None  # 缓存未处理的请求
 
     def _load_requests_stream(self):
         """从文件生成请求流（按时间排序）"""
