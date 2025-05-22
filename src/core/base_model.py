@@ -196,19 +196,22 @@ class BaseModel:
 
             self.release_completed_sn_tracker()
 
+            self.enqueue_new_requests()
+
+            self._Inject_Queue_arbitration_req_network()
+            reqs = self.move_flits_in_network(self.req_network, reqs, "req")
+
+            self._Inject_Queue_arbitration_rsp_network()
+            rsps = self.move_flits_in_network(self.rsp_network, rsps, "rsp")
+
+            self._Inject_Queue_arbitration_data_network()
+            flits = self.move_flits_in_network(self.data_network, flits, "data")
+
+            self.debug_func()
+
             self.process_received_data()
 
-            reqs = self.move_flits_in_network(self.req_network, reqs, "req")
-            self._Inject_Queue_arbitration_req_network()
-
-            rsps = self.move_flits_in_network(self.rsp_network, rsps, "rsp")
-            self._Inject_Queue_arbitration_rsp_network()
-
-            flits = self.move_flits_in_network(self.data_network, flits, "data")
-            self._Inject_Queue_arbitration_data_network()
-
-            self.enqueue_new_requests()
-            self.debug_func()
+            self.move_pre_to_queues_all()
 
             # Tag moves
             self.tag_move_all_networks()
@@ -251,15 +254,6 @@ class BaseModel:
             if self.cycle / self.config.network_frequency < self.plot_start_time:
                 return
             self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle)
-
-            # show_id = self.show_trace_id
-            # use_highlight = 1
-            # if self.req_network.send_flits[show_id] and not self.req_network.send_flits[show_id][-1].is_arrive:
-            #     self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle, show_id, use_highlight)
-            # elif self.rsp_network.send_flits[show_id] and not self.rsp_network.send_flits[show_id][-1].is_arrive and self.rsp_network.send_flits[show_id][0].current_link is not None:
-            #     self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle, show_id, use_highlight)
-            # elif self.data_network.send_flits[show_id] and self.data_network.send_flits[show_id][-1].is_arrive:
-            #     self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle, show_id, 0)
 
     def process_received_data(self):
         """Process received data in RN and SN networks."""
@@ -342,23 +336,33 @@ class BaseModel:
                     self.node.sn_wdb_count[sn_type][in_pos] -= new_req.burst_length
                     self.create_rsp(new_req, "positive")
 
-    def _move_to_inject_queues(self, network: Network, network_type):
+    def _move_pre_to_queues(self, network: Network, in_pos):
         """Move all items from pre-injection queues to injection queues for a given network."""
-        if network_type == "req":
-            positions = self.rn_positions
-        elif network_type == "rsp":
-            positions = self.sn_positions
-        elif network_type == "data":
-            positions = self.flit_positions
+        # move inject_queues_pre to inject_queue FIFO
+        ip_pos = in_pos - self.config.cols
+        for direction in self.IQ_directions:
+            queue_pre = network.inject_queues_pre[direction]
+            queue = network.inject_queues[direction]
+            if queue_pre[in_pos]:
+                queue_pre[in_pos].departure_inject_cycle = self.cycle
+                queue[in_pos].append(queue_pre[in_pos])
+                queue_pre[in_pos] = None
 
-        for ip_pos in positions:
-            for direction in self.IQ_directions:
-                queue_pre = network.inject_queues_pre[direction]
-                queue = network.inject_queues[direction]
-                if queue_pre[ip_pos]:
-                    queue_pre[ip_pos].departure_inject_cycle = self.cycle
-                    queue[ip_pos].append(queue_pre[ip_pos])
-                    queue_pre[ip_pos] = None
+        # move ring_bridge_pre to ring_bridge FIFO
+        for fifo_pos in ["EQ", "TU", "TD"]:
+            if network.ring_bridge_pre[fifo_pos][(in_pos, ip_pos)]:
+                flit  =network.ring_bridge_pre[fifo_pos][(in_pos, ip_pos)]
+                flit.is_arrive = fifo_pos == "EQ"
+                network.ring_bridge[fifo_pos][(in_pos, in_pos - self.config.cols)].append(flit)
+                network.ring_bridge_pre[fifo_pos][(in_pos, ip_pos)] = None
+
+        # EQ_channel_buffer_pre转移到EQ_channel_buffer
+        for ip_type in network.EQ_channel_buffer_pre.keys():
+            ch_buf_pre = network.EQ_channel_buffer_pre[ip_type][ip_pos]
+            ch_buf = network.EQ_channel_buffer[ip_type][ip_pos]
+            if ch_buf_pre and len(ch_buf) < self.config.EQ_CH_FIFO_DEPTH:
+                ch_buf.append(ch_buf_pre)
+                network.EQ_channel_buffer_pre[ip_type][ip_pos] = None
 
     def print_data_statistic(self):
         if self.verbose:
@@ -442,7 +446,6 @@ class BaseModel:
 
             # 没处理的ip_type放回队首，顺序不变
             self.req_network.round_robin["IQ"][ip_pos - self.config.cols] = temp_queue + rr_queue
-            self._move_to_inject_queues(self.req_network, "req")
 
     def _Inject_Queue_arbitration_rsp_network(self):
         """Inject responses into the network."""
@@ -469,7 +472,6 @@ class BaseModel:
                 else:
                     temp_queue.append(ip_type)  # 没处理，保持顺序
             self.rsp_network.round_robin["IQ"][ip_pos - self.config.cols] = temp_queue + rr_queue
-            self._move_to_inject_queues(self.rsp_network, "rsp")
 
     def _Inject_Queue_arbitration_data_network(self):
         """
@@ -542,8 +544,13 @@ class BaseModel:
 
             # 没处理的ip_type放回队首，顺序不变
             self.data_network.round_robin["IQ"][ip_pos - self.config.cols] = temp_queue + rr_queue
-            self._move_to_inject_queues(self.data_network, "data")
             self._try_ip_inject()
+
+    def move_pre_to_queues_all(self):
+        for in_pos in self.flit_positions:
+            self._move_pre_to_queues(self.req_network, in_pos)
+            self._move_pre_to_queues(self.rsp_network, in_pos)
+            self._move_pre_to_queues(self.data_network, in_pos)
 
     def update_throughput_metrics(self, flits):
         """Update throughput metrics based on flit counts."""
@@ -688,7 +695,7 @@ class BaseModel:
             self.req_count += 1
 
     def select_inject_network(self, ip_pos, ip_type):
-        # TODO: cancel last_select
+        # TODO: cancel last_select, flit to pre
         read_old = self.node.rn_rdb_reserve[ip_type][ip_pos] > 0 and self.node.rn_rdb_count[ip_type][ip_pos] > self.config.burst
         read_new = len(self.node.rn_tracker["read"][ip_type][ip_pos]) - 1 > self.node.rn_tracker_pointer["read"][ip_type][ip_pos]
         write_old = self.node.rn_wdb_reserve[ip_type][ip_pos] > 0
@@ -825,21 +832,22 @@ class BaseModel:
         return (ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits)
 
     def _flit_move(self, network: Network, flits, flit_type):
-        # eject arbitration
-        self._Eject_Queue_arbitration(network, flit_type)
 
         # 分类不同类型的flits
         (ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits) = self.categorize_flits_by_direction(flits)
 
-        # 先对已有的flit进行plan和绕环
+        # 先对已有的flit进行plan
         for flit in new_flits + vertical_flits + horizontal_flits:
             network.plan_move(flit)
+
+        self.Ring_Bridge_arbitration(network)
+
+        # eject arbitration
+        self.Eject_Queue_arbitration(network, flit_type)
 
         for flit in new_flits + horizontal_flits + vertical_flits + local_flits:
             if network.execute_moves(flit, self.cycle):
                 flits.remove(flit)
-
-        self._Ring_Bridge_arbitration(network)
 
         for flit in ring_bridge_EQ_flits:
             if flit.is_arrive:
@@ -847,32 +855,27 @@ class BaseModel:
 
         return flits
 
-    def _Ring_Bridge_arbitration(self, network: Network):
+    def Ring_Bridge_arbitration(self, network: Network):
         for col in range(1, self.config.rows, 2):
             for row in range(self.config.cols):
                 pos = col * self.config.cols + row
                 next_pos = pos - self.config.cols
-                EQ_flit, TU_flit, TD_flit = None, None, None
 
                 # 获取各方向的flit
-                # station_flits = [
-                #     network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None
-                #     for fifo_pos in ["TL", "TR", "ft", "IQ_TU", "IQ_TD"]
-                # ]
                 station_flits = [network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["TL", "TR", "ft"]] + [
                     network.inject_queues[fifo_pos][pos][0] if network.inject_queues[fifo_pos][pos] else None for fifo_pos in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
                 if any(station_flits) and len(network.ring_bridge["EQ"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    EQ_flit = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, lambda d, n: d == n)
+                    network.ring_bridge_pre["EQ"][(pos, next_pos)] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, lambda d, n: d == n)
                 # 处理TU操作
                 if any(station_flits) and len(network.ring_bridge["TU"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    TU_flit = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, lambda d, n: d < n)
+                    network.ring_bridge_pre["TU"][(pos, next_pos)] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, lambda d, n: d < n)
 
                 # 处理TD操作
                 if any(station_flits) and len(network.ring_bridge["TD"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    TD_flit = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, lambda d, n: d > n)
+                    network.ring_bridge_pre["TD"][(pos, next_pos)] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, lambda d, n: d > n)
 
                 up_node, down_node = (
                     next_pos - self.config.cols * 2,
@@ -882,70 +885,12 @@ class BaseModel:
                     up_node = next_pos
                 if down_node >= self.config.num_nodes:
                     down_node = next_pos
-                # 处理vup方向
+
+                # 处理TU方向
                 self._process_ring_bridge(network, "TU", pos, next_pos, down_node, up_node)
 
-                # 处理vdown方向
+                # 处理TD方向
                 self._process_ring_bridge(network, "TD", pos, next_pos, up_node, down_node)
-
-                if EQ_flit:
-                    EQ_flit.is_arrive = True
-                    network.ring_bridge["EQ"][(pos, next_pos)].append(EQ_flit)
-                if TU_flit:
-                    network.ring_bridge["TU"][(pos, next_pos)].append(TU_flit)
-                if TD_flit:
-                    network.ring_bridge["TD"][(pos, next_pos)].append(TD_flit)
-
-    def _ring_bridge_EQ_arbitrate(self, network: Network, station_flits, pos, next_pos):
-        """处理eject操作"""
-        RB_EQ_flit = None
-        if station_flits[2] and station_flits[3].destination == next_pos:
-            RB_EQ_flit = station_flits[2]
-            station_flits[2] = None
-            network.ring_bridge["ft"][(pos, next_pos)].popleft()
-        else:
-            index = network.round_robin["RB"][next_pos]
-            for i in index:
-                if station_flits[i] and station_flits[i].destination == next_pos:
-                    RB_EQ_flit = station_flits[i]
-                    station_flits[i] = None
-                    self._update_ring_bridge(network, pos, next_pos, i)
-                    return RB_EQ_flit
-
-        return RB_EQ_flit
-
-    def _ring_bridge_TU_arbitrate(self, network, station_flits, pos, next_pos):
-        """处理vup操作"""
-        RB_TU_flit = None
-        if station_flits[2] and station_flits[2].destination < next_pos:
-            RB_TU_flit = station_flits[2]
-            network.ring_bridge["ft"][(pos, next_pos)].popleft()
-        else:
-            index = network.round_robin["RB"][next_pos]
-            for i in index:
-                if station_flits[i] and station_flits[i].destination < next_pos:
-                    RB_TU_flit = station_flits[i]
-                    station_flits[i] = None
-                    self._update_ring_bridge(network, pos, next_pos, i)
-                    return RB_TU_flit
-
-        return RB_TU_flit
-
-    def _ring_bridge_TD_arbitrate(self, network: Network, station_flits, pos, next_pos):
-        """处理vdown操作"""
-        RB_TD_flit = None
-        if station_flits[2] and station_flits[2].destination > next_pos:
-            RB_TD_flit = station_flits[2]
-            network.ring_bridge["ft"][(pos, next_pos)].popleft()
-        else:
-            index = network.round_robin["RB"][next_pos]
-            for i in index:
-                if station_flits[i] and station_flits[i].destination > next_pos:
-                    RB_TD_flit = station_flits[i]
-                    station_flits[i] = None
-                    self._update_ring_bridge(network, pos, next_pos, i)
-                    return RB_TD_flit
-        return RB_TD_flit
 
     def _ring_bridge_arbitrate(self, network, station_flits, pos, next_pos, cmp_func):
         """
@@ -1073,7 +1018,7 @@ class BaseModel:
                             if len(self.node.sn_wdb[ip_type][in_pos][flit.packet_id]) == flit.burst_length:
                                 self.node.sn_wdb_recv[ip_type][in_pos].append(flit.packet_id)
 
-    def _Eject_Queue_arbitration(self, network: Network, flit_type):
+    def Eject_Queue_arbitration(self, network: Network, flit_type):
         """处理eject的仲裁逻辑,根据flit类型处理不同的eject队列"""
 
         # 1. 映射flit_type到对应的positions
@@ -1081,10 +1026,7 @@ class BaseModel:
         if in_pos_position is None:
             return  # 不合法的flit_type
 
-        # 2. 处理EQ channel buffer
-        self._handle_EQ_channel_buffer(network, flit_type)
-
-        # 3. 统一处理eject_queues和ring_bridge
+        # 2. 统一处理eject_queues和ring_bridge
         for in_pos in in_pos_position:
             ip_pos = in_pos - self.config.cols
             # 构造eject_flits
@@ -1095,15 +1037,10 @@ class BaseModel:
             )
             if not any(eject_flits):
                 continue
-            self.process_eject_queues(network, eject_flits, ip_pos)
+            self._move_to_eject_queues_pre(network, eject_flits, ip_pos)
 
-            # EQ_channel_buffer_pre转移到EQ_channel_buffer
-            for ip_type in network.EQ_channel_buffer_pre.keys():
-                ch_buf_pre = network.EQ_channel_buffer_pre[ip_type][ip_pos]
-                buf = network.EQ_channel_buffer[ip_type][ip_pos]
-                if ch_buf_pre and len(buf) < self.config.EQ_CH_FIFO_DEPTH:
-                    buf.append(ch_buf_pre)
-                    network.EQ_channel_buffer_pre[ip_type][ip_pos] = None
+        # 3. 处理EQ channel buffer
+        self._handle_EQ_channel_buffer(network, flit_type)
 
     def _sn_handle_request(self, req, in_pos, ip_type):
         """处理request类型的eject"""
@@ -1358,7 +1295,7 @@ class BaseModel:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
             network.links_tag[(row_start, row_start)][-1] = last_position
 
-    def process_eject_queues(self, network: Network, eject_flits, ip_pos):
+    def _move_to_eject_queues_pre(self, network: Network, eject_flits, ip_pos):
         rr_queue = network.round_robin["EQ"][ip_pos]
         for i in rr_queue:
             if eject_flits[i] is None:
@@ -1389,7 +1326,6 @@ class BaseModel:
                             network.EQ_UE_Counters["TD"][ip_pos]["T1"] -= 1
                             network.EQ_UE_Counters["TD"][ip_pos]["T2"] -= 1
                     elif i == 2:
-                        # flit = network.eject_queues["IQ"][ip_pos].popleft()
                         flit = network.inject_queues["EQ"][in_pos].popleft()
                     elif i == 3:
                         flit = network.ring_bridge["EQ"][(in_pos, ip_pos)].popleft()
@@ -1842,7 +1778,6 @@ class BaseModel:
                 print(f"Retry num: R: {self.read_retry_num_stat}, W: {self.write_retry_num_stat}")
         if self.plot_flow_fig:
             self.draw_flow_graph(self.data_network, save_path=self.results_fig_save_path)
-
 
     def print_stats(self, bw_list, name, operation, file):
         if bw_list:

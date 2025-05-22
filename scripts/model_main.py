@@ -69,9 +69,9 @@ def main():
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
         plot_link_state=1,
-        plot_start_time=8000,
+        plot_start_time=2000,
         print_trace=0,
-        show_trace_id=0,
+        show_trace_id=4,
         show_node_id=4,
         verbose=1,
     )
@@ -105,7 +105,7 @@ def main():
         sim.config.ddr_bandwidth_limit = 76.8 / 4
         # sim.config.ddr_bandwidth_limit = 10
         sim.config.l2m_bandwidth_limit = np.inf
-        sim.config.IQ_CH_FIFO_DEPTH = 10
+        sim.config.IQ_CH_FIFO_DEPTH = 16
         sim.config.EQ_CH_FIFO_DEPTH = 16
         sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8

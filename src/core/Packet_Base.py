@@ -518,7 +518,7 @@ class Packet_Base_model(BaseModel):
 
         # eject arbitration
         if flit_type in ["req", "rsp", "data"]:
-            self._Eject_Queue_arbitration(network, flit_type)
+            self.Eject_Queue_arbitration(network, flit_type)
 
         # 执行所有flit的移动
         for flit in vertical_flits + horizontal_flits + new_flits + local_flits:
@@ -600,7 +600,7 @@ class Packet_Base_model(BaseModel):
     #     network.round_robin["ring_bridge"][next_pos].remove(index)
     #     network.round_robin["ring_bridge"][next_pos].append(index)
 
-    def _Eject_Queue_arbitration(self, network, flit_type):
+    def Eject_Queue_arbitration(self, network, flit_type):
         """处理eject的仲裁逻辑,根据flit类型处理不同的eject队列"""
         if flit_type == "req":
             for in_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions):
@@ -615,8 +615,8 @@ class Packet_Base_model(BaseModel):
 
                 # if not all(eject_flit is None for eject_flit in eject_flits):
                 #     print(eject_flits)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["l2m"][ip_pos], "l2m", ip_pos)
+                eject_flits = self._move_to_eject_queues_pre(network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
+                eject_flits = self._move_to_eject_queues_pre(network, eject_flits, network.round_robin["l2m"][ip_pos], "l2m", ip_pos)
 
             if self.sn_type != "Idle":
                 for in_pos in self.config.ddr_send_positions:
@@ -638,8 +638,8 @@ class Packet_Base_model(BaseModel):
                 eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "ring_bridge", "down", "local"]]
                 # if not all(eject_flit is None for eject_flit in eject_flits):
                 #     print(eject_flits)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["sdma"][ip_pos], "sdma", ip_pos)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["gdma"][ip_pos], "gdma", ip_pos)
+                eject_flits = self._move_to_eject_queues_pre(network, eject_flits, network.round_robin["sdma"][ip_pos], "sdma", ip_pos)
+                eject_flits = self._move_to_eject_queues_pre(network, eject_flits, network.round_robin["gdma"][ip_pos], "gdma", ip_pos)
 
             if self.rn_type != "Idle":
                 for in_pos in getattr(self.config, f"{self.rn_type}_send_positions"):
@@ -661,10 +661,10 @@ class Packet_Base_model(BaseModel):
                 eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["up", "ring_bridge", "down", "local"]]
                 # if not all(eject_flit is None for eject_flit in eject_flits):
                 #     print(eject_flits)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["l2m"][ip_pos], "l2m", ip_pos)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["sdma"][ip_pos], "sdma", ip_pos)
-                eject_flits = self.process_eject_queues(network, eject_flits, network.round_robin["gdma"][ip_pos], "gdma", ip_pos)
+                eject_flits = self._move_to_eject_queues_pre(network, eject_flits, network.round_robin["ddr"][ip_pos], "ddr", ip_pos)
+                eject_flits = self._move_to_eject_queues_pre(network, eject_flits, network.round_robin["l2m"][ip_pos], "l2m", ip_pos)
+                eject_flits = self._move_to_eject_queues_pre(network, eject_flits, network.round_robin["sdma"][ip_pos], "sdma", ip_pos)
+                eject_flits = self._move_to_eject_queues_pre(network, eject_flits, network.round_robin["gdma"][ip_pos], "gdma", ip_pos)
 
             if self.rn_type != "Idle":
                 for in_pos in self.flit_position:

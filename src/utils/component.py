@@ -284,6 +284,7 @@ class Network:
         self.links_tag = {}
         self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
         self.ring_bridge = {"TL": {}, "TR": {}, "ft": {}, "TU": {}, "TD": {}, "EQ": {}}
+        self.ring_bridge_pre = {"TU": {}, "TD": {}, "EQ": {}}
         # self.inject_queue_rr = {"TL": {0: {}, 1: {}}, "TR": {0: {}, 1: {}}, "TU": {0: {}, 1: {}}, "EQ": {0: {}, 1: {}}}
         # self.inject_rr = {"TL": {}, "TR": {}, "TU": {}, "EQ": {}}
         # self.round_robin = {**{"TU": {}, "TD": {}, "RB": {}}, **self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))}
@@ -403,7 +404,7 @@ class Network:
                 elif key == "EQ":
                     self.round_robin[key][ip_pos - config.cols] = deque([0, 1, 2, 3])
                 else:
-                    self.round_robin[key][ip_pos - config.cols] = deque([0, 0, 0, 1, 1, 1, 2, 3, 4])
+                    self.round_robin[key][ip_pos - config.cols] = deque([0, 1, 2, 3, 4])
 
             self.inject_time[ip_pos] = []
             self.eject_time[ip_pos - config.cols] = []
@@ -446,6 +447,11 @@ class Network:
                 self.ring_bridge["TU"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
                 self.ring_bridge["TD"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
                 self.ring_bridge["EQ"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
+
+                self.ring_bridge_pre["TU"][(pos, next_pos)] = None
+                self.ring_bridge_pre["TD"][(pos, next_pos)] = None
+                self.ring_bridge_pre["EQ"][(pos, next_pos)] = None
+
                 self.RB_UE_Counters["TL"][(pos, next_pos)] = {"T2": 0, "T1": 0, "T0": 0}
                 self.RB_UE_Counters["TR"][(pos, next_pos)] = {"T2": 0, "T1": 0}
                 # self.round_robin["TU"][next_pos] = deque([0, 1, 2])
