@@ -14,7 +14,8 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_2260E_case2.txt"
+    file_name = r"traffic_2260E_case1.txt"
+    # file_name = r"traffic_2262_case1.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -24,14 +25,15 @@ def main():
 
     # traffic_file_path = r"../../traffic/"
     # traffic_file_path = r"../traffic/output_DeepSeek_part1/step5_data_merge/"
-    # traffic_file_path = r"../traffic/output_v8_32_0427/step5_data_merge/"
+    # traffic_file_path = r"../traffic/output_v8_32_new/step5_data_merge/"
+    # traffic_file_path = r"../traffic/output_v8_32_2K/step5_data_merge/"
     # file_name = r"output_embedding_Trace.txt"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"output_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"MLP_MoE_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
-    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
+    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace_group_map.txt"
 
     # model_type = "Feature"
     model_type = "REQ_RSP"
@@ -71,7 +73,7 @@ def main():
         plot_link_state=0,
         plot_start_time=2000,
         print_trace=0,
-        show_trace_id=4,
+        show_trace_id=704,
         show_node_id=4,
         verbose=1,
     )
@@ -83,18 +85,18 @@ def main():
         sim.config.NUM_L2M = 4
         sim.config.NUM_GDMA = 4
         sim.config.NUM_SDMA = 4
-        sim.config.num_RN = 4
-        sim.config.num_SN = 8
-        sim.config.rn_read_tracker_ostd = 128
-        sim.config.rn_write_tracker_ostd = 32
-        sim.config.RN_RDB_SIZE = sim.config.rn_read_tracker_ostd * sim.config.BURST
-        sim.config.RN_WDB_SIZE = sim.config.rn_write_tracker_ostd * sim.config.BURST
-        sim.config.sn_ddr_read_tracker_ostd = 32
-        sim.config.sn_ddr_write_tracker_ostd = 16
-        sim.config.sn_l2m_read_tracker_ostd = 64
-        sim.config.sn_l2m_write_tracker_ostd = 64
-        sim.config.SN_DDR_WDB_SIZE = sim.config.sn_ddr_write_tracker_ostd * sim.config.BURST
-        sim.config.SN_L2M_WDB_SIZE = sim.config.sn_l2m_write_tracker_ostd * sim.config.BURST
+        sim.config.NUM_RN = 4
+        sim.config.NUM_SN = 8
+        sim.config.RN_R_TRACKER_OSTD = 128
+        sim.config.RN_W_TRacker_OSTD = 32
+        sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST
+        sim.config.RN_WDB_SIZE = sim.config.RN_W_TRacker_OSTD * sim.config.BURST
+        sim.config.SN_DDR_R_TRACKER_OSTD = 32
+        sim.config.SN_DDR_W_TRACKER_OSTD = 16
+        sim.config.SN_L2M_R_TRACKER_OSTD = 64
+        sim.config.SN_L2M_W_TRACKER_OSTD = 64
+        sim.config.SN_DDR_WDB_SIZE = sim.config.SN_DDR_W_TRACKER_OSTD * sim.config.BURST
+        sim.config.SN_L2M_WDB_SIZE = sim.config.SN_L2M_W_TRACKER_OSTD * sim.config.BURST
         sim.config.DDR_R_LATENCY_original = 155
         sim.config.DDR_R_LATENCY_VAR_original = 25
         # sim.config.ddr_R_latency_original = 0
@@ -102,9 +104,9 @@ def main():
         sim.config.DDR_W_LATENCY_original = 16
         sim.config.L2M_R_LATENCY_original = 12
         sim.config.L2M_W_LATENCY_original = 16
-        sim.config.ddr_bandwidth_limit = 76.8 / 4
-        # sim.config.ddr_bandwidth_limit = 10
-        sim.config.l2m_bandwidth_limit = np.inf
+        sim.config.DDR_BW_LIMIT = 76.8 / 4
+        # sim.config.DDR_BW_LIMIT = 10
+        sim.config.L2M_BW_LIMIT = np.inf
         sim.config.IQ_CH_FIFO_DEPTH = 16
         sim.config.EQ_CH_FIFO_DEPTH = 16
         sim.config.IQ_OUT_FIFO_DEPTH = 8
@@ -128,9 +130,9 @@ def main():
         sim.config.TD_Etag_T2_UE_MAX = 17
         sim.config.EQ_IN_FIFO_DEPTH = 20
 
-        sim.config.gdma_rw_gap = np.inf
-        # sim.config.sdma_rw_gap = np.inf
-        sim.config.sdma_rw_gap = 50
+        sim.config.GDMA_RW_GAP = np.inf
+        # sim.config.SDMA_RW_GAP = np.inf
+        sim.config.SDMA_RW_GAP = 50
         sim.config.CHANNEL_SPEC = {
             "gdma": 1,
             "sdma": 1,
@@ -145,23 +147,44 @@ def main():
         sim.config.NUM_L2M = 32
         sim.config.NUM_GDMA = 32
         sim.config.NUM_SDMA = 32
-        sim.config.num_RN = 32
-        sim.config.num_SN = 32
-        sim.config.rn_read_tracker_ostd = 64
-        sim.config.rn_write_tracker_ostd = 64
-        sim.config.RN_RDB_SIZE = sim.config.rn_read_tracker_ostd * sim.config.BURST
-        sim.config.RN_WDB_SIZE = sim.config.rn_write_tracker_ostd * sim.config.BURST
-        sim.config.sn_ddr_read_tracker_ostd = 64
-        sim.config.sn_ddr_write_tracker_ostd = 64
-        sim.config.sn_l2m_read_tracker_ostd = 64
-        sim.config.sn_l2m_write_tracker_ostd = 64
-        sim.config.SN_DDR_WDB_SIZE = sim.config.sn_ddr_write_tracker_ostd * sim.config.BURST
-        sim.config.SN_L2M_WDB_SIZE = sim.config.sn_l2m_write_tracker_ostd * sim.config.BURST
+        sim.config.NUM_RN = 32
+        sim.config.NUM_SN = 32
+        sim.config.RN_R_TRACKER_OSTD = 64
+        sim.config.RN_W_TRacker_OSTD = 64
+        sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST
+        sim.config.RN_WDB_SIZE = sim.config.RN_W_TRacker_OSTD * sim.config.BURST
+        sim.config.SN_DDR_R_TRACKER_OSTD = 64
+        sim.config.SN_DDR_W_TRACKER_OSTD = 64
+        sim.config.SN_L2M_R_TRACKER_OSTD = 64
+        sim.config.SN_L2M_W_TRACKER_OSTD = 64
+        sim.config.SN_DDR_WDB_SIZE = sim.config.SN_DDR_W_TRACKER_OSTD * sim.config.BURST
+        sim.config.SN_L2M_WDB_SIZE = sim.config.SN_L2M_W_TRACKER_OSTD * sim.config.BURST
         sim.config.DDR_R_LATENCY_original = 150
         sim.config.DDR_R_LATENCY_VAR_original = 0
-        sim.config.DDR_W_LATENCY_original = 16
+        sim.config.DDR_W_LATENCY_original = 0
         sim.config.L2M_R_LATENCY_original = 12
         sim.config.L2M_W_LATENCY_original = 16
+        sim.config.IQ_OUT_FIFO_DEPTH = 8
+        sim.config.RB_IN_FIFO_DEPTH = 16
+        sim.config.RB_OUT_FIFO_DEPTH = 8
+        sim.config.EQ_IN_FIFO_DEPTH = 16
+        sim.config.TL_Etag_T2_UE_MAX = 8
+        sim.config.TL_Etag_T1_UE_MAX = 15
+        sim.config.TR_Etag_T2_UE_MAX = 12
+        sim.config.TU_Etag_T2_UE_MAX = 8
+        sim.config.TU_Etag_T1_UE_MAX = 15
+        sim.config.TD_Etag_T2_UE_MAX = 12
+        sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
+        sim.config.ITag_MAX_Num_H = sim.config.ITag_MAX_Num_V = 1
+
+        sim.config.GDMA_RW_GAP = np.inf
+        sim.config.SDMA_RW_GAP = np.inf
+        sim.config.CHANNEL_SPEC = {
+            "gdma": 2,
+            "sdma": 2,
+            "ddr": 2,
+            "l2m": 2,
+        }
 
     sim.initial()
     sim.end_time = 10000

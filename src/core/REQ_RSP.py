@@ -177,7 +177,7 @@ class REQ_RSP_model(BaseModel):
     # def handle_request_injection(self):
     #     """Inject requests into the network."""
     #     dma_type = self.rn_type  # "gdma" or "sdma"
-    #     max_gap = self.config.gdma_rw_gap if dma_type == "gdma" else self.config.sdma_rw_gap
+    #     max_gap = self.config.GDMA_RW_GAP if dma_type == "gdma" else self.config.SDMA_RW_GAP
     #     for ip_pos in getattr(self.config, f"{self.rn_type}_send_positions"):
     #         counts = self.dma_rw_counts[dma_type][ip_pos]
     #         for req_type in ["read", "write"]:
@@ -217,7 +217,7 @@ class REQ_RSP_model(BaseModel):
     # def handle_request_injection(self):
     #     """Inject requests into the network."""
     #     dma_type = self.rn_type  # "gdma" or "sdma"
-    #     max_gap = self.config.gdma_rw_gap if dma_type == "gdma" else self.config.sdma_rw_gap
+    #     max_gap = self.config.GDMA_RW_GAP if dma_type == "gdma" else self.config.SDMA_RW_GAP
     #     for ip_pos in getattr(self.config, f"{self.rn_type}_send_positions"):
     #         counts = self.dma_rw_counts[dma_type][ip_pos]
     #         for req_type in ["read", "write"]:

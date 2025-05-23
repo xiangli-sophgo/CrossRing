@@ -11,7 +11,8 @@ from src.traffic_process import step6_core32_map
 
 # path为输入Trace的文件夹名称,path和代码在同一路径
 
-path = "../traffic/original_data/v8-32/2M/"
+# path = "../traffic/original_data/v8-32/2M/"
+path = r"../traffic/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce/"
 # path += "ins_SG2262_Ring_all_reduce_8cluster_all2all"
 output_path = "../traffic/output_v8_32_2K/"
 # # outstanding_num必须为2的幂

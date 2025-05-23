@@ -17,7 +17,7 @@ from optuna.trial import TrialState
 # 使用的 CPU 核心数；-1 表示全部核心
 N_JOBS = -1
 # 每个参数组合重复仿真次数，用于平滑随机 latency 影响
-N_REPEATS = 3  # 可根据需求调大
+N_REPEATS = 5  # 可根据需求调大
 # 参数规模惩罚系数（与 BW 同量级，Total_sum_BW ≈ 1000）
 ALPHA = 0.5  # 惩罚权重，可调
 
@@ -33,7 +33,7 @@ def find_optimal_parameters():
     config.TOPO_TYPE = topo_type
 
     model_type = "REQ_RSP"
-    results_file_name = "2260E_ETag_case1_0522"
+    results_file_name = "2260E_ETag_case1_0523"
     result_root_save_path = f"../Result/CrossRing/{model_type}/FOP/{results_file_name}/"
     os.makedirs(result_root_save_path, exist_ok=True)
     output_csv = os.path.join(r"../Result/Params_csv/", f"{results_file_name}.csv")
@@ -74,16 +74,16 @@ def find_optimal_parameters():
                 sim.config.NUM_SDMA = 4
                 sim.config.num_RN = 4
                 sim.config.num_SN = 8
-                sim.config.rn_read_tracker_ostd = 128
-                sim.config.rn_write_tracker_ostd = 32
-                sim.config.RN_RDB_SIZE = sim.config.rn_read_tracker_ostd * sim.config.BURST
-                sim.config.RN_WDB_SIZE = sim.config.rn_write_tracker_ostd * sim.config.BURST
-                sim.config.sn_ddr_read_tracker_ostd = 32
-                sim.config.sn_ddr_write_tracker_ostd = 16
-                sim.config.sn_l2m_read_tracker_ostd = 64
-                sim.config.sn_l2m_write_tracker_ostd = 64
-                sim.config.SN_DDR_WDB_SIZE = sim.config.sn_ddr_write_tracker_ostd * sim.config.BURST
-                sim.config.SN_L2M_WDB_SIZE = sim.config.sn_l2m_write_tracker_ostd * sim.config.BURST
+                sim.config.RN_R_TRACKER_OSTD = 128
+                sim.config.RN_W_TRacker_OSTD = 32
+                sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST
+                sim.config.RN_WDB_SIZE = sim.config.RN_W_TRacker_OSTD * sim.config.BURST
+                sim.config.SN_DDR_R_TRACKER_OSTD = 32
+                sim.config.SN_DDR_W_TRACKER_OSTD = 16
+                sim.config.SN_L2M_R_TRACKER_OSTD = 64
+                sim.config.SN_L2M_W_TRACKER_OSTD = 64
+                sim.config.SN_DDR_WDB_SIZE = sim.config.SN_DDR_W_TRACKER_OSTD * sim.config.BURST
+                sim.config.SN_L2M_WDB_SIZE = sim.config.SN_L2M_W_TRACKER_OSTD * sim.config.BURST
                 sim.config.DDR_R_LATENCY_original = 155
                 sim.config.DDR_R_LATENCY_VAR_original = 25
                 sim.config.DDR_W_LATENCY_original = 16
@@ -103,8 +103,8 @@ def find_optimal_parameters():
                 sim.config.TU_Etag_T2_UE_MAX = 8
                 sim.config.TU_Etag_T1_UE_MAX = 14
                 sim.config.TD_Etag_T2_UE_MAX = 9
-                sim.config.gdma_rw_gap = np.inf
-                sim.config.sdma_rw_gap = 50
+                sim.config.GDMA_RW_GAP = np.inf
+                sim.config.SDMA_RW_GAP = 50
                 sim.config.CHANNEL_SPEC = {
                     "gdma": 1,
                     "sdma": 1,
@@ -223,15 +223,12 @@ if __name__ == "__main__":
     study = optuna.create_study(
         study_name="CrossRing_BO",
         direction="maximize",
-        sampler=optuna.samplers.TPESampler(seed=42),
+        sampler=optuna.samplers.TPESampler(
+            seed=523, n_startup_trials=10, multivariate=True, group=True, warn_independent_sampling=False
+        ),  # 进一步减少初始随机采样（根据实际情况调整）  # 对存在条件依赖的参数进行分组优化（可选）
     )
-    study.optimize(
-        objective,
-        n_trials=500,
-        n_jobs=N_JOBS,
-        show_progress_bar=True,
-        callbacks=[save_intermediate_result],
-    )
+
+    study.optimize(objective, n_trials=500, n_jobs=N_JOBS, show_progress_bar=True, callbacks=[save_intermediate_result], catch=(KeyboardInterrupt,))
     # 再存一次完整扁平化结果
     final_records = []
     for t in study.trials:

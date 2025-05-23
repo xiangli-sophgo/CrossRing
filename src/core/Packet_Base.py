@@ -240,13 +240,9 @@ class Packet_Base_model(BaseModel):
         """
         Inject data flits into the network.
         """
-        for ip_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions + self.config.sdma_send_positions + self.config.gdma_send_positions):
+        for ip_pos in set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.GDMA_SEND_POSITION_LIST):
             inject_flits = [
-                (
-                    self.node.sn_rdb[self.sn_type][ip_pos][0]
-                    if self.node.sn_rdb[self.sn_type][ip_pos] and self.node.sn_rdb[self.sn_type][ip_pos][0].departure_cycle <= self.cycle
-                    else None
-                ),
+                (self.node.sn_rdb[self.sn_type][ip_pos][0] if self.node.sn_rdb[self.sn_type][ip_pos] and self.node.sn_rdb[self.sn_type][ip_pos][0].departure_cycle <= self.cycle else None),
                 (self.node.rn_wdb[self.rn_type][ip_pos][self.node.rn_wdb_send[self.rn_type][ip_pos][0]][0] if len(self.node.rn_wdb_send[self.rn_type][ip_pos]) > 0 else None),
             ]
             for direction in self.directions:
@@ -455,10 +451,10 @@ class Packet_Base_model(BaseModel):
             network.plan_move(flit)
 
         # 处理transfer station的flits
-        for col in range(1, self.config.ROWS, 2):
-            for row in range(self.config.COLS):
-                pos = col * self.config.COLS + row
-                next_pos = pos - self.config.COLS
+        for col in range(1, self.config.NUM_ROW, 2):
+            for row in range(self.config.NUM_COL):
+                pos = col * self.config.NUM_COL + row
+                next_pos = pos - self.config.NUM_COL
                 eject_flit, vup_flit, vdown_flit = None, None, None
 
                 # 获取各方向的flit
@@ -468,9 +464,7 @@ class Packet_Base_model(BaseModel):
                 #     network.ring_bridge["right"][(pos, next_pos)][0] if network.ring_bridge["right"][(pos, next_pos)] else None,
                 #     network.ring_bridge["ft"][(pos, next_pos)][0] if network.ring_bridge["ft"][(pos, next_pos)] else None,
                 # ]
-                station_flits = [
-                    network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]
-                ]
+                station_flits = [network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]]
                 # if not all(flit is None for flit in station_flits):
                 #     print(station_flits)
 
@@ -500,7 +494,7 @@ class Packet_Base_model(BaseModel):
                     flit = network.ring_bridge["eject"][(pos, next_pos)].popleft()
                     flit.is_arrive = True
 
-                up_node, down_node = next_pos - self.config.COLS * 2, next_pos + self.config.COLS * 2
+                up_node, down_node = next_pos - self.config.NUM_COL * 2, next_pos + self.config.NUM_COL * 2
                 if up_node < 0:
                     up_node = next_pos
                 if down_node >= self.config.NUM_NODE:
@@ -609,8 +603,8 @@ class Packet_Base_model(BaseModel):
     def Eject_Queue_arbitration(self, network, flit_type):
         """处理eject的仲裁逻辑,根据flit类型处理不同的eject队列"""
         if flit_type == "req":
-            for in_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions):
-                ip_pos = in_pos - self.config.COLS
+            for in_pos in set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST):
+                ip_pos = in_pos - self.config.NUM_COL
                 # eject_flits = [
                 #     network.eject_queues["up"][ip_pos][0] if network.eject_queues["up"][ip_pos] else None,
                 #     network.eject_queues["ring_bridge"][ip_pos][0] if network.eject_queues["ring_bridge"][ip_pos] else None,
@@ -625,16 +619,16 @@ class Packet_Base_model(BaseModel):
                 eject_flits = self._move_to_eject_queues_pre(network, eject_flits, network.round_robin["l2m"][ip_pos], "l2m", ip_pos)
 
             if self.sn_type != "Idle":
-                for in_pos in self.config.ddr_send_positions:
-                    ip_pos = in_pos - self.config.COLS
+                for in_pos in self.config.DDR_SEND_POSITION_LIST:
+                    ip_pos = in_pos - self.config.NUM_COL
                     if network.EQ_channel_buffer[self.sn_type][ip_pos]:
                         req = network.EQ_channel_buffer[self.sn_type][ip_pos][0]
                         if self._sn_handle_request(req, in_pos):
                             network.EQ_channel_buffer[self.sn_type][ip_pos].popleft()
 
         elif flit_type == "rsp":
-            for in_pos in set(self.config.sdma_send_positions + self.config.gdma_send_positions):
-                ip_pos = in_pos - self.config.COLS
+            for in_pos in set(self.config.SDMA_SEND_POSITION_LIST + self.config.GDMA_SEND_POSITION_LIST):
+                ip_pos = in_pos - self.config.NUM_COL
                 # eject_flits = [
                 # network.eject_queues["up"][ip_pos][0] if network.eject_queues["up"][ip_pos] else None,
                 # network.eject_queues["ring_bridge"][ip_pos][0] if network.eject_queues["ring_bridge"][ip_pos] else None,
@@ -649,7 +643,7 @@ class Packet_Base_model(BaseModel):
 
             if self.rn_type != "Idle":
                 for in_pos in getattr(self.config, f"{self.rn_type}_send_positions"):
-                    ip_pos = in_pos - self.config.COLS
+                    ip_pos = in_pos - self.config.NUM_COL
                     if network.EQ_channel_buffer[self.rn_type][ip_pos]:
                         rsp = network.EQ_channel_buffer[self.rn_type][ip_pos].popleft()
                         # self._handle_response_packet_base(rsp, in_pos)
@@ -657,7 +651,7 @@ class Packet_Base_model(BaseModel):
 
         elif flit_type == "data":
             for in_pos in self.flit_position:
-                ip_pos = in_pos - self.config.COLS
+                ip_pos = in_pos - self.config.NUM_COL
                 # eject_flits = [
                 # network.eject_queues["up"][ip_pos][0] if network.eject_queues["up"][ip_pos] else None,
                 # network.eject_queues["ring_bridge"][ip_pos][0] if network.eject_queues["ring_bridge"][ip_pos] else None,
@@ -675,7 +669,7 @@ class Packet_Base_model(BaseModel):
             if self.rn_type != "Idle":
                 for in_pos in self.flit_position:
                     for ip_type in [self.rn_type, self.sn_type]:
-                        ip_pos = in_pos - self.config.COLS
+                        ip_pos = in_pos - self.config.NUM_COL
                         if network.EQ_channel_buffer[ip_type][ip_pos]:
                             flit = network.EQ_channel_buffer[ip_type][ip_pos][0]
                             if flit.req_type == "read":
@@ -721,21 +715,21 @@ class Packet_Base_model(BaseModel):
                             # if flit.req_type == "read" and flit.is_last_flit:
                             #     self.create_write_req_after_read(flit)
             for in_pos in self.flit_position:
-                ip_pos = in_pos - self.config.COLS
+                ip_pos = in_pos - self.config.NUM_COL
                 for ip_type in network.EQ_channel_buffer_pre:
                     if network.EQ_channel_buffer_pre[ip_type][ip_pos]:
                         network.EQ_channel_buffer[ip_type][ip_pos].append(network.EQ_channel_buffer_pre[ip_type][ip_pos])
                         network.EQ_channel_buffer_pre[ip_type][ip_pos] = None
 
         if flit_type == "req":
-            in_pos_position = set(self.config.ddr_send_positions + self.config.l2m_send_positions)
+            in_pos_position = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         elif flit_type == "rsp":
-            in_pos_position = set(self.config.sdma_send_positions + self.config.gdma_send_positions)
+            in_pos_position = set(self.config.SDMA_SEND_POSITION_LIST + self.config.GDMA_SEND_POSITION_LIST)
         elif flit_type == "data":
             in_pos_position = self.flit_position
 
         for in_pos in in_pos_position:
-            ip_pos = in_pos - self.config.COLS
+            ip_pos = in_pos - self.config.NUM_COL
             for ip_type in network.EQ_channel_buffer_pre:
                 if network.EQ_channel_buffer_pre[ip_type][ip_pos]:
                     network.EQ_channel_buffer[ip_type][ip_pos].append(network.EQ_channel_buffer_pre[ip_type][ip_pos])

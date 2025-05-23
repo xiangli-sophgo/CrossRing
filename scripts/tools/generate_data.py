@@ -281,15 +281,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
             data_all.extend(generate_mixed_entries(sdma_map, "gdma", "ddr", ddr_map, "R", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(sdma_map, "gdma", "ddr", l2m_map, "W", burst, mix_ratios))
         else:
-            # data_all.extend(generate_entries(gdma_pos, "gdma", ddr_map, "R", burst, flow_type, speed[burst], interval_count))
-            data_all.extend(generate_entries(gdma_map, "gdma", ddr_map, "W", burst, flow_type, speed[burst], interval_count))
-            # data_all.extend(generate_entries(gdma_pos, "gdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count))
-            # data_all.extend(generate_entries(sdma_pos, "sdma", ddr_map, "R", burst, flow_type, speed[burst], interval_count))
-            # data_all.extend(generate_entries(sdma_pos, "sdma", l2m_map, "R", burst, flow_type, speed[burst], interval_count))
-            # data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", ddr_pos, "W", burst, flow_type, speed[burst], interval_count))
-
-            # data_all.extend(generate_entries(gdma_pos, "gdma", "ddr", ddr_pos, "R", burst, flow_type, speed[burst], interval_count))
-            # data_all.extend(generate_entries(gdma_pos, "gdma", "l2m", l2m_pos, "W", burst, flow_type, speed[burst], interval_count))
+            data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
     elif topo == "3x3":
         if flow_type == 3:
@@ -298,13 +290,13 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
             data_all.extend(generate_mixed_entries(sdma_map, "sdma", "l2m", l2m_map, "W", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(gdma_map, "gdma", "l2m", l2m_map, "R", burst, mix_ratios))
         else:
-            data_all.extend(generate_entries(gdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            data_all.extend(generate_entries(sdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(gdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(sdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             #
-            # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(sdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
             # data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
@@ -317,21 +309,33 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
 # 示例使用
 if __name__ == "__main__":
     # 参数配置
-    topo = "3x3"
-    interval_count = 128
-    file_name = "../../test_data/traffic_2260E_case1.txt"
+    TOPO = "3x3"
+    INTERVAL_COUNT = 128
+    FILE_NAME = "../../test_data/traffic_2260E_case2.txt"
+    # FILE_NAME = "../../test_data/traffic_2262_case1.txt"
     np.random.seed(520)
 
-    if topo == "5x4":
-        num_ip = 32
-        sdma_map = range(num_ip)
-        gdma_map = range(num_ip)
-        ddr_map = {"ddr_1": range(num_ip)}
-        l2m_map = {"l2m_1": range(num_ip // 2)}
+    if TOPO == "5x4":
+        BURST = 2
+        NUM_IP = 16
+        SDMA_MAP = {
+            "sdma_0": range(NUM_IP),
+            "sdma_1": range(NUM_IP),
+        }
+        GDMA_MAP = {
+            "gdma_0": range(NUM_IP),
+            "gdma_1": range(NUM_IP),
+        }
+        DDR_MAP = {
+            "ddr_0": range(NUM_IP),
+            "ddr_1": range(NUM_IP),
+        }
+        L2M_MAP = {"l2m_0": range(NUM_IP)}
 
     # SG2260E
-    elif topo == "3x3":
-        sdma_map = {
+    elif TOPO == "3x3":
+        BURST = 2
+        SDMA_MAP = {
             "sdma_0": [
                 0,
                 2,
@@ -339,7 +343,7 @@ if __name__ == "__main__":
                 8,
             ],
         }
-        gdma_map = {
+        GDMA_MAP = {
             "gdma_0": [
                 0,
                 2,
@@ -348,7 +352,7 @@ if __name__ == "__main__":
             ],
             # "gdma_0": [0, 2],
         }
-        ddr_map = {
+        DDR_MAP = {
             "ddr_0": [0, 2, 3, 5, 6, 8],
             "ddr_1": [0, 2, 3, 5, 6, 8],
             "ddr_2": [3, 5],
@@ -358,18 +362,17 @@ if __name__ == "__main__":
             # "ddr_2": [3],
             # "ddr_3": [3],
         }
-        l2m_map = {
+        L2M_MAP = {
             # "l2m_0": [0],
             # "l2m_1": [1],
             "l2m_0": [1, 7],
             "l2m_1": [1, 7],
         }
 
-    speed = {1: 128, 2: 128, 4: 128}  # 不同burst对应的带宽(GB/s)
-    burst = 2
+    SPEED = {1: 128, 2: 128, 4: 128}  # 不同burst对应的带宽(GB/s)
     # read_duration = 0
     # write_duration = 128
     overlap = 1
 
     # 生成数据(使用混合模式)
-    generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, l2m_map, speed, burst, flow_type=0, overlap=overlap)
+    generate_data(TOPO, INTERVAL_COUNT, FILE_NAME, SDMA_MAP, GDMA_MAP, DDR_MAP, L2M_MAP, SPEED, BURST, flow_type=0, overlap=overlap)

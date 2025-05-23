@@ -207,7 +207,7 @@ class Node:
     def initialize_rn(self):
         """Initialize RN structures."""
         for ip_type in self.rn_rdb.keys():
-            for ip_pos in getattr(self.config, f"{ip_type[:-2]}_send_positions"):
+            for ip_pos in getattr(self.config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST"):
                 self.rn_rdb[ip_type][ip_pos] = defaultdict(list)
                 self.rn_wdb[ip_type][ip_pos] = defaultdict(list)
                 self.setup_rn_trackers(ip_type, ip_pos)
@@ -224,13 +224,13 @@ class Node:
         for req_type in ["read", "write"]:
             self.rn_tracker[req_type][ip_type][ip_pos] = []
             self.rn_tracker_wait[req_type][ip_type][ip_pos] = []
-            self.rn_tracker_count[req_type][ip_type][ip_pos] = self.config.rn_read_tracker_ostd if req_type == "read" else self.config.rn_write_tracker_ostd
+            self.rn_tracker_count[req_type][ip_type][ip_pos] = self.config.RN_R_TRACKER_OSTD if req_type == "read" else self.config.RN_W_TRacker_OSTD
             self.rn_tracker_pointer[req_type][ip_type][ip_pos] = -1
 
     def initialize_sn(self):
         """Initialize SN structures."""
         self.sn_tracker_release_time = defaultdict(list)
-        for ip_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions):
+        for ip_pos in set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST):
             for key in self.sn_tracker:
                 self.sn_rdb[key][ip_pos] = []
                 self.sn_wdb[key][ip_pos] = defaultdict(list)
@@ -246,12 +246,12 @@ class Node:
         # if self.config.topo_type != "3x3":
         if key.startswith("ddr"):
             self.sn_wdb_count[key][ip_pos] = self.config.SN_DDR_WDB_SIZE
-            self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_ddr_read_tracker_ostd
-            self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_ddr_write_tracker_ostd
+            self.sn_tracker_count[key]["ro"][ip_pos] = self.config.SN_DDR_R_TRACKER_OSTD
+            self.sn_tracker_count[key]["share"][ip_pos] = self.config.SN_DDR_W_TRACKER_OSTD
         elif key.startswith("l2m"):
             self.sn_wdb_count[key][ip_pos] = self.config.SN_L2M_WDB_SIZE
-            self.sn_tracker_count[key]["ro"][ip_pos] = self.config.sn_l2m_read_tracker_ostd
-            self.sn_tracker_count[key]["share"][ip_pos] = self.config.sn_l2m_write_tracker_ostd
+            self.sn_tracker_count[key]["ro"][ip_pos] = self.config.SN_L2M_R_TRACKER_OSTD
+            self.sn_tracker_count[key]["share"][ip_pos] = self.config.SN_L2M_W_TRACKER_OSTD
         # else:
         # if ip_pos in self.config.ddr_real_positions:
         #     self.sn_wdb_count[key][ip_pos] = self.config.sn_ddr_wdb_size
@@ -347,21 +347,21 @@ class Network:
         self.token_bucket = defaultdict(dict)
         self.flit_size_bytes = 128
         for ch_name in self.IQ_channel_buffer.keys():
-            for ip_pos in set(self.config.ddr_send_positions + self.config.l2m_send_positions):
+            for ip_pos in set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST):
 
                 if ch_name.startswith("ddr"):
                     self.token_bucket[ip_pos][ch_name] = TokenBucket(
-                        rate=self.config.ddr_bandwidth_limit / self.config.NETWORK_FREQUENCY / self.flit_size_bytes,
-                        bucket_size=self.config.ddr_bandwidth_limit,
+                        rate=self.config.DDR_BW_LIMIT / self.config.NETWORK_FREQUENCY / self.flit_size_bytes,
+                        bucket_size=self.config.DDR_BW_LIMIT,
                     )
-                    self.token_bucket[ip_pos - self.config.COLS][ch_name] = TokenBucket(
-                        rate=self.config.ddr_bandwidth_limit / self.config.NETWORK_FREQUENCY / self.flit_size_bytes,
-                        bucket_size=self.config.ddr_bandwidth_limit,
+                    self.token_bucket[ip_pos - self.config.NUM_COL][ch_name] = TokenBucket(
+                        rate=self.config.DDR_BW_LIMIT / self.config.NETWORK_FREQUENCY / self.flit_size_bytes,
+                        bucket_size=self.config.DDR_BW_LIMIT,
                     )
                 elif ch_name.startswith("l2m"):
                     self.token_bucket[ip_pos][ch_name] = TokenBucket(
-                        rate=self.config.l2m_bandwidth_limit / self.config.NETWORK_FREQUENCY / self.flit_size_bytes,
-                        bucket_size=self.config.l2m_bandwidth_limit,
+                        rate=self.config.L2M_BW_LIMIT / self.config.NETWORK_FREQUENCY / self.flit_size_bytes,
+                        bucket_size=self.config.L2M_BW_LIMIT,
                     )
 
         # ETag setup
@@ -370,7 +370,7 @@ class Network:
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}
         self.Both_side_ETag_upgrade = False
 
-        for ip_pos in set(config.ddr_send_positions + config.sdma_send_positions + config.l2m_send_positions + config.gdma_send_positions):
+        for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
             self.inject_queues["TL"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
             self.inject_queues["TR"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
             self.inject_queues["TU"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
@@ -382,13 +382,13 @@ class Network:
             self.inject_queues_pre["TD"][ip_pos] = None
             self.inject_queues_pre["EQ"][ip_pos] = None
             for key in self.EQ_channel_buffer_pre:
-                self.EQ_channel_buffer_pre[key][ip_pos - config.COLS] = None
+                self.EQ_channel_buffer_pre[key][ip_pos - config.NUM_COL] = None
             for key in self.arrive_node_pre:
-                self.arrive_node_pre[key][ip_pos - config.COLS] = None
-            self.eject_queues["TU"][ip_pos - config.COLS] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
-            self.eject_queues["TD"][ip_pos - config.COLS] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
-            self.EQ_UE_Counters["TU"][ip_pos - config.COLS] = {"T2": 0, "T1": 0, "T0": 0}
-            self.EQ_UE_Counters["TD"][ip_pos - config.COLS] = {"T2": 0, "T1": 0}
+                self.arrive_node_pre[key][ip_pos - config.NUM_COL] = None
+            self.eject_queues["TU"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
+            self.eject_queues["TD"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
+            self.EQ_UE_Counters["TU"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0, "T0": 0}
+            self.EQ_UE_Counters["TD"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0}
             # for key in self.inject_queue_rr:
             #     self.inject_queue_rr[key][0][ip_pos] = deque([0, 1])
             #     self.inject_queue_rr[key][1][ip_pos] = deque([0, 1])
@@ -398,49 +398,49 @@ class Network:
             # self.inject_rr["EQ"][ip_pos] = deque([0, 1, 2])
             for key in self.round_robin.keys():
                 if key == "IQ":
-                    self.round_robin[key][ip_pos - config.COLS] = deque()
+                    self.round_robin[key][ip_pos - config.NUM_COL] = deque()
                     for ch_name in self.IQ_channel_buffer.keys():
-                        self.round_robin[key][ip_pos - config.COLS].append(ch_name)
+                        self.round_robin[key][ip_pos - config.NUM_COL].append(ch_name)
                 elif key == "EQ":
-                    self.round_robin[key][ip_pos - config.COLS] = deque([0, 1, 2, 3])
+                    self.round_robin[key][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3])
                 else:
-                    self.round_robin[key][ip_pos - config.COLS] = deque([0, 1, 2, 3, 4])
+                    self.round_robin[key][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3, 4])
 
             self.inject_time[ip_pos] = []
-            self.eject_time[ip_pos - config.COLS] = []
+            self.eject_time[ip_pos - config.NUM_COL] = []
             self.avg_inject_time[ip_pos] = 0
-            self.avg_eject_time[ip_pos - config.COLS] = 1
+            self.avg_eject_time[ip_pos - config.NUM_COL] = 1
 
         for i in range(config.NUM_NODE):
             for j in range(config.NUM_NODE):
-                if adjacency_matrix[i][j] == 1 and i - j != config.COLS:
-                    self.links[(i, j)] = [None] * config.SEAT_PRE_LINK
+                if adjacency_matrix[i][j] == 1 and i - j != config.NUM_COL:
+                    self.links[(i, j)] = [None] * config.SEAT_PER_LINK
                     self.links_flow_stat["read"][(i, j)] = 0
                     self.links_flow_stat["write"][(i, j)] = 0
-                    self.links_tag[(i, j)] = [None] * config.SEAT_PRE_LINK
-            if i in range(0, config.COLS):
+                    self.links_tag[(i, j)] = [None] * config.SEAT_PER_LINK
+            if i in range(0, config.NUM_COL):
                 self.links[(i, i)] = [None] * 2
-                self.links[(i + config.NUM_NODE - config.COLS * 2, i + config.NUM_NODE - config.COLS * 2)] = [None] * 2
+                self.links[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
                 self.links_flow_stat["read"][(i, i)] = 0
                 self.links_flow_stat["write"][(i, i)] = 0
-                self.links_flow_stat["read"][(i + config.NUM_NODE - config.COLS * 2, i + config.NUM_NODE - config.COLS * 2)] = 0
-                self.links_flow_stat["write"][(i + config.NUM_NODE - config.COLS * 2, i + config.NUM_NODE - config.COLS * 2)] = 0
+                self.links_flow_stat["read"][(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = 0
+                self.links_flow_stat["write"][(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = 0
                 self.links_tag[(i, i)] = [None] * 2
-                self.links_tag[(i + config.NUM_NODE - config.COLS * 2, i + config.NUM_NODE - config.COLS * 2)] = [None] * 2
-            if i % config.COLS == 0 and (i // config.COLS) % 2 != 0:
+                self.links_tag[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
+            if i % config.NUM_COL == 0 and (i // config.NUM_COL) % 2 != 0:
                 self.links[(i, i)] = [None] * 2
-                self.links[(i + config.COLS - 1, i + config.COLS - 1)] = [None] * 2
+                self.links[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
                 self.links_flow_stat["read"][(i, i)] = 0
                 self.links_flow_stat["write"][(i, i)] = 0
-                self.links_flow_stat["read"][(i + config.COLS - 1, i + config.COLS - 1)] = 0
-                self.links_flow_stat["write"][(i + config.COLS - 1, i + config.COLS - 1)] = 0
+                self.links_flow_stat["read"][(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = 0
+                self.links_flow_stat["write"][(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = 0
                 self.links_tag[(i, i)] = [None] * 2
-                self.links_tag[(i + config.COLS - 1, i + config.COLS - 1)] = [None] * 2
+                self.links_tag[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
 
-        for row in range(1, config.ROWS, 2):
-            for col in range(config.COLS):
-                pos = row * config.COLS + col
-                next_pos = pos - config.COLS
+        for row in range(1, config.NUM_ROW, 2):
+            for col in range(config.NUM_COL):
+                pos = row * config.NUM_COL + col
+                next_pos = pos - config.NUM_COL
                 self.ring_bridge["TL"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
                 self.ring_bridge["TR"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
                 self.ring_bridge["ft"][(pos, next_pos)] = deque(maxlen=config.FT_DEPTH)
@@ -458,39 +458,39 @@ class Network:
                 # self.round_robin["TD"][next_pos] = deque([0, 1, 2])
                 # self.round_robin["RB"][next_pos] = deque([0, 1, 2])
                 for direction in ["TL", "TR"]:
-                    self.remain_tag[direction][pos] = config.ITag_Max_Num_H
+                    self.remain_tag[direction][pos] = config.ITag_MAX_Num_H
                 for direction in ["TU", "TD"]:
-                    self.remain_tag[direction][next_pos] = config.ITag_Max_Num_V
+                    self.remain_tag[direction][next_pos] = config.ITag_MAX_Num_V
 
         for ip_type in self.num_recv.keys():
-            source_positions = getattr(config, f"{ip_type[:-2]}_send_positions")
+            source_positions = getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST")
             for source in source_positions:
-                destination = source - config.COLS
+                destination = source - config.NUM_COL
                 self.num_send[ip_type][source] = 0
                 self.num_recv[ip_type][destination] = 0
                 self.per_send_throughput[ip_type][source] = 0
                 self.per_recv_throughput[ip_type][destination] = 0
 
         for ip_type in self.IQ_channel_buffer.keys():
-            for ip_index in getattr(config, f"{ip_type[:-2]}_send_positions"):
-                ip_recv_index = ip_index - config.COLS
+            for ip_index in getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST"):
+                ip_recv_index = ip_index - config.NUM_COL
                 self.IQ_channel_buffer[ip_type][ip_index] = deque()
                 self.EQ_channel_buffer[ip_type][ip_recv_index] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
         for ip_type in self.last_select.keys():
-            for ip_index in getattr(config, f"{ip_type[:-2]}_send_positions"):
+            for ip_index in getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST"):
                 self.last_select[ip_type][ip_index] = "write"
         for ip_type in self.throughput.keys():
-            for ip_index in getattr(config, f"{ip_type[:-2]}_send_positions"):
+            for ip_index in getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST"):
                 self.throughput[ip_type][ip_index] = [0, 0, 10000000, 0]
 
     def can_move_to_next(self, flit, current, next_node):
         # flit inject的时候判断是否可以将flit放到本地出口队列。
-        if flit.source - flit.destination == self.config.COLS:
+        if flit.source - flit.destination == self.config.NUM_COL:
             # return len(self.eject_queues["IQ"][flit.destination]) < self.config.EQ_IN_FIFO_DEPTH
             return True
 
         # 获取当前节点所在列的索引
-        current_column_index = current % self.config.COLS
+        current_column_index = current % self.config.NUM_COL
 
         if current_column_index == 0:
             if next_node == current + 1:
@@ -509,7 +509,7 @@ class Network:
                                 or (self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit_l.ETag_priority == "T2")
                             ):
                                 return True
-                        if flit.wait_cycle_h > self.config.ITag_Trigger_Th_H and not flit.itag_h:
+                        if flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H and not flit.itag_h:
                             if self.remain_tag["TR"][current] > 0:
                                 self.remain_tag["TR"][current] -= 1
                                 self.links_tag[(current, current)][-1] = [current, "TR"]
@@ -540,7 +540,7 @@ class Network:
                             self.remain_tag["TR"][current] += 1
                             return True
                 return False
-        elif current_column_index == self.config.COLS - 1:
+        elif current_column_index == self.config.NUM_COL - 1:
             # 处理右边界向左移动的逻辑
             if next_node == current - 1:
                 if self.links[(current, current)][-1] is not None:
@@ -562,7 +562,7 @@ class Network:
                                 )
                             ):
                                 return True
-                        if flit.wait_cycle_h > self.config.ITag_Trigger_Th_H and not flit.itag_h:
+                        if flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H and not flit.itag_h:
                             if self.remain_tag["TL"][current] > 0:
                                 self.remain_tag["TL"][current] -= 1
                                 self.links_tag[(current, current)][-1] = [current, "TL"]
@@ -599,20 +599,20 @@ class Network:
                             return True
                 return False
 
-        if current - next_node == self.config.COLS:
+        if current - next_node == self.config.NUM_COL:
             # 向 Ring Bridge 移动
             # return len(self.ring_bridge["TU"][(current, next_node)]) < self.config.RB_IN_FIFO_DEPTH
             # v1.3 在IQ中分TU和TD两个FIFO
-            if len(flit.path) > 2 and flit.path[2] - flit.path[1] == self.config.COLS * 2:
+            if len(flit.path) > 2 and flit.path[2] - flit.path[1] == self.config.NUM_COL * 2:
                 return len(self.inject_queues["TD"][current]) < self.config.IQ_OUT_FIFO_DEPTH
-            elif len(flit.path) > 2 and flit.path[2] - flit.path[1] == -self.config.COLS * 2:
+            elif len(flit.path) > 2 and flit.path[2] - flit.path[1] == -self.config.NUM_COL * 2:
                 return len(self.inject_queues["TU"][current]) < self.config.IQ_OUT_FIFO_DEPTH
         elif next_node - current == 1:
             # 向右移动
             if self.links[(current - 1, current)][-1] is not None:
                 if self.links_tag[(current - 1, current)][-1] is None:
                     flit_l = self.links[(current - 1, current)][-1]
-                    if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.COLS:
+                    if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.NUM_COL:
                         new_current = flit_l.current_link[1]
                         new_next_node = flit_l.path[flit_l.path_index + 1]
                         link_station = self.ring_bridge["TR"].get((new_current, new_next_node))
@@ -622,14 +622,14 @@ class Network:
                             or (self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit_l.ETag_priority == "T2")
                         ):
                             return True
-                    if flit.wait_cycle_h > self.config.ITag_Trigger_Th_H and not flit.itag_h:
+                    if flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H and not flit.itag_h:
                         if self.remain_tag["TR"][current] > 0:
                             self.remain_tag["TR"][current] -= 1
                             self.links_tag[(current - 1, current)][-1] = [current, "TR"]
                             flit.itag_h = True
                 else:
                     flit_l = self.links[(current - 1, current)][-1]
-                    if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.COLS:
+                    if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.NUM_COL:
                         new_current = flit_l.current_link[1]
                         new_next_node = flit_l.path[flit_l.path_index + 1]
                         link_station = self.ring_bridge["TR"].get((new_current, new_next_node))
@@ -656,7 +656,7 @@ class Network:
             if self.links[(current + 1, current)][-1] is not None:
                 if self.links_tag[current + 1, current][-1] is None:
                     flit_l = self.links[(current + 1, current)][-1]
-                    if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.COLS:
+                    if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.NUM_COL:
                         new_current = flit_l.current_link[1]
                         new_next_node = flit_l.path[flit_l.path_index + 1]
                         station_left = self.ring_bridge["TL"].get((new_current, new_next_node))
@@ -671,14 +671,14 @@ class Network:
                             )
                         ):
                             return True
-                    if flit.wait_cycle_h > self.config.ITag_Trigger_Th_H and not flit.itag_h:
+                    if flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H and not flit.itag_h:
                         if self.remain_tag["TL"][current] > 0:
                             self.remain_tag["TL"][current] -= 1
                             self.links_tag[(current + 1, current)][-1] = [current, "TL"]
                             flit.itag_h = True
                 else:
                     flit_l = self.links[(current + 1, current)][-1]
-                    if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.COLS:
+                    if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.NUM_COL:
                         new_current = flit_l.current_link[1]
                         new_next_node = flit_l.path[flit_l.path_index + 1]
                         station_left = self.ring_bridge["TL"].get((new_current, new_next_node))
@@ -718,10 +718,10 @@ class Network:
             flit.is_on_station = False
             flit.current_link = (current, next_node)
             # flit.current_seat_index = 2 if (current - next_node == self.config.cols) else 0
-            if current - next_node == self.config.COLS:
-                if len(flit.path) > 2 and flit.path[flit.path_index + 2] - next_node == 2 * self.config.COLS:
+            if current - next_node == self.config.NUM_COL:
+                if len(flit.path) > 2 and flit.path[flit.path_index + 2] - next_node == 2 * self.config.NUM_COL:
                     flit.current_seat_index = -1
-                elif len(flit.path) > 2 and flit.path[flit.path_index + 2] - next_node == -2 * self.config.COLS:
+                elif len(flit.path) > 2 and flit.path[flit.path_index + 2] - next_node == -2 * self.config.NUM_COL:
                     flit.current_seat_index = -2
             else:
                 flit.current_seat_index = 0
@@ -731,19 +731,19 @@ class Network:
 
         # 计算行和列的起始和结束点
         current, next_node = flit.current_link
-        row_start = (current // self.config.COLS) * self.config.COLS
-        row_start = row_start if (row_start // self.config.COLS) % 2 != 0 else -1
-        row_end = row_start + self.config.COLS - 1 if row_start > 0 else -1
-        col_start = current % (self.config.COLS * 2)
-        col_start = col_start if col_start < self.config.COLS else -1
-        col_end = col_start + self.config.NUM_NODE - self.config.COLS * 2 if col_start >= 0 else -1
+        row_start = (current // self.config.NUM_COL) * self.config.NUM_COL
+        row_start = row_start if (row_start // self.config.NUM_COL) % 2 != 0 else -1
+        row_end = row_start + self.config.NUM_COL - 1 if row_start > 0 else -1
+        col_start = current % (self.config.NUM_COL * 2)
+        col_start = col_start if col_start < self.config.NUM_COL else -1
+        col_end = col_start + self.config.NUM_NODE - self.config.NUM_COL * 2 if col_start >= 0 else -1
 
         link = self.links.get(flit.current_link)
         # if link and flit.current_seat_index == len(link) - 1:
         #     print(self.name, flit.current_link, flit.packet_id, flit.current_seat_index, flit.flit_id)
         #     self.links_flow_stat[flit.req_type][flit.current_link] += 1
         # Plan non ring bridge moves
-        if current - next_node != self.config.COLS:
+        if current - next_node != self.config.NUM_COL:
             # Handling delay flits
             if flit.is_delay:
                 return self._handle_delay_flit(flit, link, current, next_node, row_start, row_end, col_start, col_end)
@@ -834,7 +834,7 @@ class Network:
                     # flit_exist_left = any(flit_l.id == flit.id for flit_l in self.station_reservations["TL"][(new_current, new_next_node)])
                     # flit_exist_right = any(flit_r.id == flit.id for flit_r in self.station_reservations["TR"][(new_current, new_next_node)])
                     # 绕环超过阈值，通过FT下环
-                    if flit.circuits_completed_h > self.config.FT_Trigger:
+                    if flit.circuits_completed_h > self.config.FT_TRIGGER:
                         link_station = self.ring_bridge["ft"].get((next_node, flit.path[flit.path_index]))
                         if len(link_station) < self.config.FT_DEPTH:
                             flit.is_delay = False
@@ -980,12 +980,12 @@ class Network:
                         # if len(self.eject_reservations["TU"][next_node]) < self.config.reservation_num:
                         # self.eject_reservations["TU"][next_node].append(flit)
                         link[flit.current_seat_index] = None
-                        next_pos = next_node + self.config.COLS * 2
+                        next_pos = next_node + self.config.NUM_COL * 2
                         flit.current_link = (next_node, next_pos)
                         flit.current_seat_index = 0
                 else:
                     link[flit.current_seat_index] = None
-                    next_pos = next_node + self.config.COLS * 2
+                    next_pos = next_node + self.config.NUM_COL * 2
                     flit.current_link = (next_node, next_pos)
                     flit.current_seat_index = 0
             # A4. 下边界情况：
@@ -1042,7 +1042,7 @@ class Network:
                             #     if len(self.eject_reservations["TD"][next_node]) < self.config.reservation_num:
                             #         self.eject_reservations["TD"][next_node].append(flit)
                             link[flit.current_seat_index] = None
-                            next_pos = next_node - self.config.COLS * 2
+                            next_pos = next_node - self.config.NUM_COL * 2
                             flit.current_link = (next_node, next_pos)
                             flit.current_seat_index = 0
                     elif flit.ETag_priority == "T0":
@@ -1055,12 +1055,12 @@ class Network:
                             self.T0_Etag_Order_FIFO.popleft()
                         else:
                             link[flit.current_seat_index] = None
-                            next_pos = next_node - self.config.COLS * 2
+                            next_pos = next_node - self.config.NUM_COL * 2
                             flit.current_link = (next_node, next_pos)
                             flit.current_seat_index = 0
                 else:
                     link[flit.current_seat_index] = None
-                    next_pos = next_node - self.config.COLS * 2
+                    next_pos = next_node - self.config.NUM_COL * 2
                     flit.current_link = (next_node, next_pos)
                     flit.current_seat_index = 0
         # B. 非边界横向环情况
@@ -1069,7 +1069,7 @@ class Network:
                 flit.circuits_completed_h += 1
                 # flit_exist_left = any(flit_l.id == flit.id for flit_l in self.station_reservations["TL"][(next_node, flit.path[flit.path_index])])
                 # flit_exist_right = any(flit_r.id == flit.id for flit_r in self.station_reservations["TR"][(next_node, flit.path[flit.path_index])])
-                if flit.circuits_completed_h > self.config.FT_Trigger and current - next_node == 1:
+                if flit.circuits_completed_h > self.config.FT_TRIGGER and current - next_node == 1:
                     link_station = self.ring_bridge["ft"].get((next_node, flit.path[flit.path_index]))
                     if len(link_station) < self.config.FT_DEPTH:
                         flit.is_delay = False
@@ -1228,7 +1228,7 @@ class Network:
                 flit.circuits_completed_v += 1
                 # flit_exist_up = any(flit_u.id == flit.id for flit_u in self.eject_reservations["TU"][next_node])
                 # flit_exist_down = any(flit_r.id == flit.id for flit_r in self.eject_reservations["TD"][next_node])
-                if current - next_node == self.config.COLS * 2:
+                if current - next_node == self.config.NUM_COL * 2:
                     if flit.ETag_priority in ["T1", "T2"]:
                         # up move
                         link_eject = self.eject_queues["TU"][next_node]
@@ -1275,12 +1275,10 @@ class Network:
                             #     if len(self.eject_reservations["TD"][next_node]) < self.config.reservation_num:
                             #         self.eject_reservations["TD"][next_node].append(flit)
                             link[flit.current_seat_index] = None
-                            next_pos = next_node - self.config.COLS * 2 if next_node - self.config.COLS * 2 >= col_start else col_start
+                            next_pos = next_node - self.config.NUM_COL * 2 if next_node - self.config.NUM_COL * 2 >= col_start else col_start
                             flit.current_link = (next_node, next_pos)
                             flit.current_seat_index = 0
-                    elif (
-                        flit.ETag_priority == "T0" and self.T0_Etag_Order_FIFO[0] == (next_node, flit) and self.EQ_UE_Counters["TU"][next_node]["T0"] < self.config.EQ_IN_FIFO_DEPTH
-                    ):
+                    elif flit.ETag_priority == "T0" and self.T0_Etag_Order_FIFO[0] == (next_node, flit) and self.EQ_UE_Counters["TU"][next_node]["T0"] < self.config.EQ_IN_FIFO_DEPTH:
                         self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
                         flit.is_delay = False
                         flit.is_arrive = True
@@ -1289,10 +1287,10 @@ class Network:
                         self.T0_Etag_Order_FIFO.popleft()
                     else:
                         link[flit.current_seat_index] = None
-                        if current - next_node == self.config.COLS * 2:
-                            next_pos = max(next_node - self.config.COLS * 2, col_start)
+                        if current - next_node == self.config.NUM_COL * 2:
+                            next_pos = max(next_node - self.config.NUM_COL * 2, col_start)
                         else:
-                            next_pos = min(next_node + self.config.COLS * 2, col_end)
+                            next_pos = min(next_node + self.config.NUM_COL * 2, col_end)
                         flit.current_link = (next_node, next_pos)
                         flit.current_seat_index = 0
                 else:
@@ -1340,15 +1338,15 @@ class Network:
                         #     if len(self.eject_reservations["TU"][next_node]) < self.config.reservation_num:
                         #         self.eject_reservations["TU"][next_node].append(flit)
                         link[flit.current_seat_index] = None
-                        next_pos = min(next_node + self.config.COLS * 2, col_end)
+                        next_pos = min(next_node + self.config.NUM_COL * 2, col_end)
                         flit.current_link = (next_node, next_pos)
                         flit.current_seat_index = 0
             else:
                 link[flit.current_seat_index] = None
-                if current - next_node == self.config.COLS * 2:
-                    next_pos = max(next_node - self.config.COLS * 2, col_start)
+                if current - next_node == self.config.NUM_COL * 2:
+                    next_pos = max(next_node - self.config.NUM_COL * 2, col_start)
                 else:
-                    next_pos = min(next_node + self.config.COLS * 2, col_end)
+                    next_pos = min(next_node + self.config.NUM_COL * 2, col_end)
                 flit.current_link = (next_node, next_pos)
                 flit.current_seat_index = 0
         return
@@ -1368,7 +1366,7 @@ class Network:
             new_current, new_next_node = next_node, flit.path[flit.path_index]
 
             # 2a. 正常绕环
-            if new_current - new_next_node != self.config.COLS:
+            if new_current - new_next_node != self.config.NUM_COL:
                 flit.current_link = (new_current, new_next_node)
                 link[flit.current_seat_index] = None
                 flit.current_seat_index = 0
@@ -1422,7 +1420,7 @@ class Network:
                     flit.current_seat_index = 0
         else:
             # 3. 已经到达目的地，执行eject逻辑
-            if current - next_node == self.config.COLS * 2:  # 纵向环向上TU
+            if current - next_node == self.config.NUM_COL * 2:  # 纵向环向上TU
                 eject_queue = self.eject_queues["TU"][next_node]
                 # if self.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(self.eject_reservations["TU"][next_node]) and self.EQ_UE_Counters["TU"][next_node]["T2"] < self.config.TU_Etag_T2_UE_MAX:
                 if self.config.EQ_IN_FIFO_DEPTH > len(eject_queue) and self.EQ_UE_Counters["TU"][next_node]["T2"] < self.config.TU_Etag_T2_UE_MAX:
@@ -1436,12 +1434,12 @@ class Network:
                     # if len(self.eject_reservations["TD"][next_node]) < self.config.reservation_num:
                     # self.eject_reservations["TD"][next_node].append(flit)
                     flit.ETag_priority = "T1"
-                    next_pos = next_node - self.config.COLS * 2 if next_node - self.config.COLS * 2 >= col_start else col_start
+                    next_pos = next_node - self.config.NUM_COL * 2 if next_node - self.config.NUM_COL * 2 >= col_start else col_start
                     flit.is_delay = True
                     link[flit.current_seat_index] = None
                     flit.current_link = (next_node, next_pos)
                     flit.current_seat_index = 0
-            elif current - next_node == -self.config.COLS * 2:  # 纵向环向下TD
+            elif current - next_node == -self.config.NUM_COL * 2:  # 纵向环向下TD
                 eject_queue = self.eject_queues["TD"][next_node]
                 # if self.config.EQ_IN_FIFO_DEPTH - len(eject_queue) > len(self.eject_reservations["TD"][next_node]) and self.EQ_UE_Counters["TD"][next_node]["T2"] < self.config.TD_Etag_T2_UE_MAX:
                 if self.config.EQ_IN_FIFO_DEPTH > len(eject_queue) and self.EQ_UE_Counters["TD"][next_node]["T2"] < self.config.TD_Etag_T2_UE_MAX:
@@ -1455,7 +1453,7 @@ class Network:
                     # self.eject_reservations["TU"][next_node].append(flit)
                     if self.Both_side_ETag_upgrade:
                         flit.ETag_priority = "T1"
-                    next_pos = next_node + self.config.COLS * 2 if next_node + self.config.COLS * 2 <= col_end else col_end
+                    next_pos = next_node + self.config.NUM_COL * 2 if next_node + self.config.NUM_COL * 2 <= col_end else col_end
                     flit.is_delay = True
                     link[flit.current_seat_index] = None
                     flit.current_link = (next_node, next_pos)
@@ -1464,7 +1462,7 @@ class Network:
     def execute_moves(self, flit, cycle):
         if not flit.is_arrive:
             current, next_node = flit.current_link
-            if current - next_node != self.config.COLS:
+            if current - next_node != self.config.NUM_COL:
                 link = self.links.get(flit.current_link)
                 link[flit.current_seat_index] = flit
                 if (flit.current_seat_index == 6 and len(link) == 7) or (flit.current_seat_index == 1 and len(link) == 2):
@@ -1485,12 +1483,12 @@ class Network:
                 current, next_node = flit.current_link
             flit.arrival_network_cycle = cycle
 
-            if flit.source - flit.destination == self.config.COLS:
+            if flit.source - flit.destination == self.config.NUM_COL:
                 # queue = self.eject_queues["IQ"][flit.destination]
                 flit.is_arrived = True
 
                 return True
-            elif current - next_node == self.config.COLS * 2 or (current == next_node and current not in range(0, self.config.COLS)):
+            elif current - next_node == self.config.NUM_COL * 2 or (current == next_node and current not in range(0, self.config.NUM_COL)):
                 queue = self.eject_queues["TU"][next_node]
             else:
                 queue = self.eject_queues["TD"][next_node]

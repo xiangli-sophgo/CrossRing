@@ -9,6 +9,7 @@ import threading
 from matplotlib.widgets import Button
 import time
 from types import SimpleNamespace
+from config.config import CrossRingConfig
 
 # 引入节点局部 CrossRing piece 绘制函数（若存在）
 # from .CrossRing_Piece_Visualizer import CrossRingVisualizer
@@ -21,7 +22,7 @@ from matplotlib.patches import FancyArrowPatch
 
 class NetworkLinkVisualizer:
     class PieceVisualizer:
-        def __init__(self, config, ax, highlight_callback=None):
+        def __init__(self, config: CrossRingConfig, ax, highlight_callback=None):
             """
             仅绘制单个节点的 Inject/Eject Queue 和 Ring Bridge FIFO。
             参数:
@@ -31,14 +32,14 @@ class NetworkLinkVisualizer:
             """
             self.highlight_callback = highlight_callback
             self.config = config
-            self.cols = config.cols
-            self.rows = config.rows
+            self.cols = config.NUM_COL
+            self.rows = config.NUM_ROW
             # 提取深度
             self.IQ_depth = config.IQ_OUT_FIFO_DEPTH
             self.EQ_depth = config.EQ_IN_FIFO_DEPTH
             self.RB_in_depth = config.RB_IN_FIFO_DEPTH
             self.RB_out_depth = config.RB_OUT_FIFO_DEPTH
-            self.seats_per_link = config.seats_per_link
+            self.seats_per_link = config.SEAT_PER_LINK
             self.IQ_CH_depth = config.IQ_CH_FIFO_DEPTH
             self.EQ_CH_depth = config.EQ_CH_FIFO_DEPTH
             # 固定几何参数
@@ -151,7 +152,7 @@ class NetworkLinkVisualizer:
 
         def _draw_modules(self):
             # ---- collect fifo specs ---------------------------------
-            ch_names = self.config.channel_names
+            ch_names = self.config.CH_NAME_LIST
             # ------- absolute positions (keep spacing param) ----------
             # ------------------- unified module configs ------------------- #
             iq_config = dict(
@@ -635,7 +636,7 @@ class NetworkLinkVisualizer:
 
     def __init__(self, network):
         self.network = network
-        self.cols = network.config.cols
+        self.cols = network.config.NUM_COL
         # ---- Figure & Sub‑Axes ------------------------------------------------
         self.fig = plt.figure(figsize=(15, 8), constrained_layout=True)
         gs = self.fig.add_gridspec(1, 2, width_ratios=[1.5, 1])
@@ -686,7 +687,7 @@ class NetworkLinkVisualizer:
         self._draw_static_elements()
 
         # 初始化时显示中心节点
-        rows, cols = self.network.config.rows, self.network.config.cols
+        rows, cols = self.network.config.NUM_ROW, self.network.config.NUM_COL
         # 取中间行列
         center_row = rows // 2
         center_col = cols // 2
@@ -862,8 +863,8 @@ class NetworkLinkVisualizer:
     def _calculate_layout(self):
         """根据网格计算节点位置（可调整节点间距）"""
         pos = {}
-        for node in range(self.network.config.rows * self.network.config.cols):
-            x, y = node % self.network.config.cols, node // self.network.config.cols
+        for node in range(self.network.config.NUM_ROW * self.network.config.NUM_COL):
+            x, y = node % self.network.config.NUM_COL, node // self.network.config.NUM_COL
             # 为了美观，按照行列计算位置，并添加些许偏移
             if y % 2 == 1:  # 奇数行左移
                 x -= 0.2
@@ -918,7 +919,7 @@ class NetworkLinkVisualizer:
 
         if is_self_loop:
             # 判断节点是否在边界
-            rows, cols = self.network.config.rows, self.network.config.cols
+            rows, cols = self.network.config.NUM_ROW, self.network.config.NUM_COL
             row, col = src // cols, src % cols
 
             # 确定节点在哪个边界并设置相应的箭头和队列位置

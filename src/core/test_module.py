@@ -2,6 +2,7 @@
 calibrate_iq_layout.py
 交互式微调 Inject-Queue 布局常量 → 保存 JSON
 """
+
 import json
 from pathlib import Path
 
@@ -60,6 +61,7 @@ for i, (key, vmin, vmax) in enumerate(slider_specs):
 ax_save = plt.axes([0.8, 0.02, 0.15, 0.04])
 btn_save = Button(ax_save, "Save JSON", hovercolor="0.975")
 
+
 # ------- 5. 绘制函数 ------------------------------------------------------
 def redraw(event=None):
     layout = {k: (sliders[k].val if k in sliders else v) for k, v in init.items()}
@@ -70,7 +72,7 @@ def redraw(event=None):
     L = lambda name, depth, orient, quad: {"name": name, "depth": depth, "orient": orient, "quad": quad}
 
     lanes_cfg_IQ = [
-        *[L(ch, 8, "v", "lt") for ch in cfg.channel_names],
+        *[L(ch, 8, "v", "lt") for ch in cfg.CH_NAME_LIST],
         L("TL", 8, "v", "lb"),
         L("TR", 8, "v", "lb"),
         L("TU", 8, "h", "rm"),
@@ -91,16 +93,19 @@ def redraw(event=None):
     )
     fig.canvas.draw_idle()
 
+
 for s in sliders.values():
     s.on_changed(redraw)
 
 redraw()  # 初次绘制
+
 
 # ------- 6. 保存回调 ------------------------------------------------------
 def save_json(event):
     layout = {k: (sliders[k].val if k in sliders else v) for k, v in init.items()}
     Path("iq_layout.json").write_text(json.dumps(layout, indent=2))
     print("Layout saved to iq_layout.json:", layout)
+
 
 btn_save.on_clicked(save_json)
 
