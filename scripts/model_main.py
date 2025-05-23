@@ -14,7 +14,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_2260E_case1.txt"
+    file_name = r"traffic_2260E_case2.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
     # file_name = r"burst4_common.txt"
@@ -44,7 +44,7 @@ def main():
 
     config_path = r"../config/config2.json"
     config = CrossRingConfig(config_path)
-    if not config.topo_type:
+    if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
         # topo_type = "5x4"  # SG2262
@@ -52,9 +52,9 @@ def main():
         # topo_type = "6x5"
         topo_type = "3x3"  # SG2260E
     else:
-        topo_type = config.topo_type
+        topo_type = config.TOPO_TYPE
 
-    config.topo_type = topo_type
+    config.TOPO_TYPE = topo_type
 
     # result_save_path = None
     # config_path = r"config.json"
@@ -77,31 +77,31 @@ def main():
     )
 
     if topo_type == "3x3":
-        sim.config.burst = 2
-        sim.config.num_ips = 4
-        sim.config.num_ddr = 8
-        sim.config.num_l2m = 4
-        sim.config.num_gdma = 4
-        sim.config.num_sdma = 4
+        sim.config.BURST = 2
+        sim.config.NUM_IP = 4
+        sim.config.NUM_DDR = 8
+        sim.config.NUM_L2M = 4
+        sim.config.NUM_GDMA = 4
+        sim.config.NUM_SDMA = 4
         sim.config.num_RN = 4
         sim.config.num_SN = 8
         sim.config.rn_read_tracker_ostd = 128
         sim.config.rn_write_tracker_ostd = 32
-        sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
-        sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
+        sim.config.RN_RDB_SIZE = sim.config.rn_read_tracker_ostd * sim.config.BURST
+        sim.config.RN_WDB_SIZE = sim.config.rn_write_tracker_ostd * sim.config.BURST
         sim.config.sn_ddr_read_tracker_ostd = 32
         sim.config.sn_ddr_write_tracker_ostd = 16
         sim.config.sn_l2m_read_tracker_ostd = 64
         sim.config.sn_l2m_write_tracker_ostd = 64
-        sim.config.sn_ddr_wdb_size = sim.config.sn_ddr_write_tracker_ostd * sim.config.burst
-        sim.config.sn_l2m_wdb_size = sim.config.sn_l2m_write_tracker_ostd * sim.config.burst
-        sim.config.ddr_R_latency_original = 155
-        sim.config.ddr_R_latency_var_original = 25
+        sim.config.SN_DDR_WDB_SIZE = sim.config.sn_ddr_write_tracker_ostd * sim.config.BURST
+        sim.config.SN_L2M_WDB_SIZE = sim.config.sn_l2m_write_tracker_ostd * sim.config.BURST
+        sim.config.DDR_R_LATENCY_original = 155
+        sim.config.DDR_R_LATENCY_VAR_original = 25
         # sim.config.ddr_R_latency_original = 0
         # sim.config.ddr_R_latency_var_original = 0
-        sim.config.ddr_W_latency_original = 16
-        sim.config.l2m_R_latency_original = 12
-        sim.config.l2m_W_latency_original = 16
+        sim.config.DDR_W_LATENCY_original = 16
+        sim.config.L2M_R_LATENCY_original = 12
+        sim.config.L2M_W_LATENCY_original = 16
         sim.config.ddr_bandwidth_limit = 76.8 / 4
         # sim.config.ddr_bandwidth_limit = 10
         sim.config.l2m_bandwidth_limit = np.inf
@@ -119,14 +119,14 @@ def main():
         # sim.config.TU_Etag_T1_UE_MAX = 7
         # sim.config.TD_Etag_T2_UE_MAX = 6
 
-        sim.config.RB_IN_FIFO_DEPTH = 19
-        sim.config.TL_Etag_T2_UE_MAX = 4
-        sim.config.TL_Etag_T1_UE_MAX = 8
+        sim.config.TL_Etag_T2_UE_MAX = 15
+        sim.config.TL_Etag_T1_UE_MAX = 18
         sim.config.TR_Etag_T2_UE_MAX = 16
-        sim.config.TU_Etag_T2_UE_MAX = 4
-        sim.config.TU_Etag_T1_UE_MAX = 9
+        sim.config.RB_IN_FIFO_DEPTH = 20
+        sim.config.TU_Etag_T2_UE_MAX = 16
+        sim.config.TU_Etag_T1_UE_MAX = 19
         sim.config.TD_Etag_T2_UE_MAX = 17
-        sim.config.EQ_IN_FIFO_DEPTH = 16
+        sim.config.EQ_IN_FIFO_DEPTH = 20
 
         sim.config.gdma_rw_gap = np.inf
         # sim.config.sdma_rw_gap = np.inf
@@ -139,29 +139,29 @@ def main():
         }
 
     elif topo_type in ["5x4", "4x5"]:
-        sim.config.burst = 4
-        sim.config.num_ips = 32
-        sim.config.num_ddr = 32
-        sim.config.num_l2m = 32
-        sim.config.num_gdma = 32
-        sim.config.num_sdma = 32
+        sim.config.BURST = 4
+        sim.config.NUM_IP = 32
+        sim.config.NUM_DDR = 32
+        sim.config.NUM_L2M = 32
+        sim.config.NUM_GDMA = 32
+        sim.config.NUM_SDMA = 32
         sim.config.num_RN = 32
         sim.config.num_SN = 32
         sim.config.rn_read_tracker_ostd = 64
         sim.config.rn_write_tracker_ostd = 64
-        sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
-        sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
+        sim.config.RN_RDB_SIZE = sim.config.rn_read_tracker_ostd * sim.config.BURST
+        sim.config.RN_WDB_SIZE = sim.config.rn_write_tracker_ostd * sim.config.BURST
         sim.config.sn_ddr_read_tracker_ostd = 64
         sim.config.sn_ddr_write_tracker_ostd = 64
         sim.config.sn_l2m_read_tracker_ostd = 64
         sim.config.sn_l2m_write_tracker_ostd = 64
-        sim.config.sn_ddr_wdb_size = sim.config.sn_ddr_write_tracker_ostd * sim.config.burst
-        sim.config.sn_l2m_wdb_size = sim.config.sn_l2m_write_tracker_ostd * sim.config.burst
-        sim.config.ddr_R_latency_original = 150
-        sim.config.ddr_R_latency_var_original = 0
-        sim.config.ddr_W_latency_original = 16
-        sim.config.l2m_R_latency_original = 12
-        sim.config.l2m_W_latency_original = 16
+        sim.config.SN_DDR_WDB_SIZE = sim.config.sn_ddr_write_tracker_ostd * sim.config.BURST
+        sim.config.SN_L2M_WDB_SIZE = sim.config.sn_l2m_write_tracker_ostd * sim.config.BURST
+        sim.config.DDR_R_LATENCY_original = 150
+        sim.config.DDR_R_LATENCY_VAR_original = 0
+        sim.config.DDR_W_LATENCY_original = 16
+        sim.config.L2M_R_LATENCY_original = 12
+        sim.config.L2M_W_LATENCY_original = 16
 
     sim.initial()
     sim.end_time = 10000

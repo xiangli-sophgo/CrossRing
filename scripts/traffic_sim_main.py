@@ -41,11 +41,11 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name):
 
     # Load simulation config
     config = CrossRingConfig(config_path)
-    if not config.topo_type:
+    if not config.TOPO_TYPE:
         topo_type = "5x4"  # Default topology
     else:
-        topo_type = config.topo_type
-    config.topo_type = topo_type
+        topo_type = config.TOPO_TYPE
+    config.TOPO_TYPE = topo_type
 
     # Run simulation for each traffic file
     for file_name in file_names:

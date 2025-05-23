@@ -34,7 +34,7 @@ def main():
 
     config_path = r"../config/config2.json"
     config = CrossRingConfig(config_path)
-    if not config.topo_type:
+    if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
         topo_type = "5x4"
@@ -44,8 +44,8 @@ def main():
 
         # topo_type = "3x3"
     else:
-        topo_type = config.topo_type
-    config.topo_type = topo_type
+        topo_type = config.TOPO_TYPE
+    config.TOPO_TYPE = topo_type
     results_file_name = "Spare_core_MLP_0427"
     results_fig_save_path = None
     result_root_save_path = f"../Result/CrossRing/SCM/{model_type}/{results_file_name}/"
@@ -98,30 +98,30 @@ def main():
                 # tracemalloc.start()
 
                 # sim.end_time = 10000
-                sim.config.burst = 4
-                sim.config.num_ips = 32
+                sim.config.BURST = 4
+                sim.config.NUM_IP = 32
                 if topo_type == "3x3":
-                    sim.config.num_ddr = 8
-                    sim.config.num_l2m = 4
-                    sim.config.num_gdma = 4
-                    sim.config.num_sdma = 4
+                    sim.config.NUM_DDR = 8
+                    sim.config.NUM_L2M = 4
+                    sim.config.NUM_GDMA = 4
+                    sim.config.NUM_SDMA = 4
                     sim.config.num_RN = 4
                     sim.config.num_SN = 8
                 elif topo_type in ["5x4", "4x5"]:
-                    sim.config.num_ddr = 32
-                    sim.config.num_l2m = 32
-                    sim.config.num_gdma = 32
-                    sim.config.num_sdma = 32
+                    sim.config.NUM_DDR = 32
+                    sim.config.NUM_L2M = 32
+                    sim.config.NUM_GDMA = 32
+                    sim.config.NUM_SDMA = 32
                     sim.config.num_RN = 32
                     sim.config.num_SN = 32
                 sim.config.rn_read_tracker_ostd = 64
                 sim.config.rn_write_tracker_ostd = 64
-                sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
-                sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
+                sim.config.RN_RDB_SIZE = sim.config.rn_read_tracker_ostd * sim.config.BURST
+                sim.config.RN_WDB_SIZE = sim.config.rn_write_tracker_ostd * sim.config.BURST
                 sim.config.sn_read_tracker_ostd = 128
                 sim.config.sn_write_tracker_ostd = 64
-                sim.config.sn_wdb_size = sim.config.sn_write_tracker_ostd * sim.config.burst
-                sim.config.seats_per_link = 7
+                sim.config.sn_wdb_size = sim.config.sn_write_tracker_ostd * sim.config.BURST
+                sim.config.SEAT_PRE_LINK = 7
                 sim.config.RB_IN_FIFO_DEPTH = 8
                 sim.config.TL_Etag_T2_UE_MAX = 5
                 sim.config.TL_Etag_T1_UE_MAX = 7
@@ -129,12 +129,12 @@ def main():
                 sim.config.TU_Etag_T2_UE_MAX = 4
                 sim.config.TU_Etag_T1_UE_MAX = 7
                 sim.config.TD_Etag_T2_UE_MAX = 5
-                sim.config.Both_side_ETag_upgrade = 1
-                sim.config.ddr_R_latency_original = 150
-                sim.config.ddr_R_latency_var_original = 0
-                sim.config.ddr_W_latency_original = 16
-                sim.config.l2m_R_latency_original = 12
-                sim.config.l2m_W_latency_original = 16
+                sim.config.ETag_BOTHSIDE_UPGRADE = 1
+                sim.config.DDR_R_LATENCY_original = 150
+                sim.config.DDR_R_LATENCY_VAR_original = 0
+                sim.config.DDR_W_LATENCY_original = 16
+                sim.config.L2M_R_LATENCY_original = 12
+                sim.config.L2M_W_LATENCY_original = 16
                 sim.config.spare_core_change(spare_core_row, failed_core_num, failed_core_poses)
 
                 # sim.config.update_config()
