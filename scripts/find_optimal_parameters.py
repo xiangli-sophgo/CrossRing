@@ -14,10 +14,16 @@ import traceback
 from optuna.exceptions import TrialPruned
 from optuna.trial import TrialState
 
+import joblib
+import optuna.visualization as vis
+import plotly.io as pio
+
+pio.renderers.default = "browser"
+
 # 使用的 CPU 核心数；-1 表示全部核心
 N_JOBS = -1
 # 每个参数组合重复仿真次数，用于平滑随机 latency 影响
-N_REPEATS = 5  # 可根据需求调大
+N_REPEATS = 3  # 可根据需求调大
 # 参数规模惩罚系数（与 BW 同量级，Total_sum_BW ≈ 1000）
 ALPHA = 0.5  # 惩罚权重，可调
 
@@ -25,7 +31,7 @@ ALPHA = 0.5  # 惩罚权重，可调
 def find_optimal_parameters():
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_2260E_case1.txt"
+    file_name = r"traffic_2260E_case2.txt"
     config_path = r"../config/config2.json"
     config = CrossRingConfig(config_path)
 
@@ -33,7 +39,7 @@ def find_optimal_parameters():
     config.TOPO_TYPE = topo_type
 
     model_type = "REQ_RSP"
-    results_file_name = "2260E_ETag_case1_0523"
+    results_file_name = "2260E_ETag_case2_0524"
     result_root_save_path = f"../Result/CrossRing/{model_type}/FOP/{results_file_name}/"
     os.makedirs(result_root_save_path, exist_ok=True)
     output_csv = os.path.join(r"../Result/Params_csv/", f"{results_file_name}.csv")
@@ -72,12 +78,12 @@ def find_optimal_parameters():
                 sim.config.NUM_L2M = 4
                 sim.config.NUM_GDMA = 4
                 sim.config.NUM_SDMA = 4
-                sim.config.num_RN = 4
-                sim.config.num_SN = 8
+                sim.config.NUM_RN = 4
+                sim.config.NUM_SN = 8
                 sim.config.RN_R_TRACKER_OSTD = 128
-                sim.config.RN_W_TRacker_OSTD = 32
+                sim.config.RN_W_TRACKER_OSTD = 32
                 sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST
-                sim.config.RN_WDB_SIZE = sim.config.RN_W_TRacker_OSTD * sim.config.BURST
+                sim.config.RN_WDB_SIZE = sim.config.RN_W_TRACKER_OSTD * sim.config.BURST
                 sim.config.SN_DDR_R_TRACKER_OSTD = 32
                 sim.config.SN_DDR_W_TRACKER_OSTD = 16
                 sim.config.SN_L2M_R_TRACKER_OSTD = 64
@@ -89,21 +95,24 @@ def find_optimal_parameters():
                 sim.config.DDR_W_LATENCY_original = 16
                 sim.config.L2M_R_LATENCY_original = 12
                 sim.config.L2M_W_LATENCY_original = 16
-                sim.config.ddr_bandwidth_limit = 76.8 / 4
-                sim.config.l2m_bandwidth_limit = np.inf
-                sim.config.IQ_CH_FIFO_DEPTH = 10
+                sim.config.DDR_BW_LIMIT = 76.8 / 4
+                sim.config.L2M_BW_LIMIT = np.inf
+                sim.config.IQ_CH_FIFO_DEPTH = 16
                 sim.config.EQ_CH_FIFO_DEPTH = 16
                 sim.config.IQ_OUT_FIFO_DEPTH = 8
                 sim.config.RB_OUT_FIFO_DEPTH = 8
-                sim.config.EQ_IN_FIFO_DEPTH = 16
-                sim.config.RB_IN_FIFO_DEPTH = 16
-                sim.config.TL_Etag_T2_UE_MAX = 8
-                sim.config.TL_Etag_T1_UE_MAX = 14
-                sim.config.TR_Etag_T2_UE_MAX = 9
-                sim.config.TU_Etag_T2_UE_MAX = 8
-                sim.config.TU_Etag_T1_UE_MAX = 14
-                sim.config.TD_Etag_T2_UE_MAX = 9
+
+                sim.config.TL_Etag_T2_UE_MAX = 15
+                sim.config.TL_Etag_T1_UE_MAX = 18
+                sim.config.TR_Etag_T2_UE_MAX = 16
+                sim.config.RB_IN_FIFO_DEPTH = 20
+                sim.config.TU_Etag_T2_UE_MAX = 16
+                sim.config.TU_Etag_T1_UE_MAX = 19
+                sim.config.TD_Etag_T2_UE_MAX = 17
+                sim.config.EQ_IN_FIFO_DEPTH = 20
+
                 sim.config.GDMA_RW_GAP = np.inf
+                # sim.config.SDMA_RW_GAP = np.inf
                 sim.config.SDMA_RW_GAP = 50
                 sim.config.CHANNEL_SPEC = {
                     "gdma": 1,
@@ -216,6 +225,7 @@ def save_intermediate_result(study, trial):
         rec.update(t.user_attrs)
         records.append(rec)
     pd.DataFrame(records).to_csv(output_csv, index=False)
+    joblib.dump(study, "../Result/study_snapshot.pkl")
 
 
 if __name__ == "__main__":
@@ -224,11 +234,22 @@ if __name__ == "__main__":
         study_name="CrossRing_BO",
         direction="maximize",
         sampler=optuna.samplers.TPESampler(
-            seed=523, n_startup_trials=10, multivariate=True, group=True, warn_independent_sampling=False
+            seed=523,
+            n_startup_trials=10,
+            # multivariate=True,
+            # group=True,
+            warn_independent_sampling=False,
         ),  # 进一步减少初始随机采样（根据实际情况调整）  # 对存在条件依赖的参数进行分组优化（可选）
     )
 
-    study.optimize(objective, n_trials=500, n_jobs=N_JOBS, show_progress_bar=True, callbacks=[save_intermediate_result], catch=(KeyboardInterrupt,))
+    study.optimize(
+        objective,
+        n_trials=500,
+        n_jobs=N_JOBS,
+        show_progress_bar=True,
+        callbacks=[save_intermediate_result],
+        catch=(KeyboardInterrupt,),
+    )
     # 再存一次完整扁平化结果
     final_records = []
     for t in study.trials:
@@ -245,3 +266,13 @@ if __name__ == "__main__":
     pd.DataFrame(final_records).to_csv(output_csv, index=False)
     print("最佳指标:", study.best_value)
     print("最佳参数:", study.best_params)
+
+    # 可视化结果
+    fig1 = vis.plot_optimization_history(study)
+    fig1.show()
+
+    fig2 = vis.plot_param_importances(study)
+    fig2.show()
+
+    fig3 = vis.plot_parallel_coordinate(study)
+    fig3.show()

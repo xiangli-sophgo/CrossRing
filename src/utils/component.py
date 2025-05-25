@@ -64,17 +64,17 @@ class Flit:
 
     def init_param(self):
         self.early_rsp = False
-        self.current_position = None
-        self.station_position = None
-        self.departure_cycle = None
-        self.req_departure_cycle = None
-        self.departure_network_cycle = None
-        self.departure_inject_cycle = None
-        self.arrival_cycle = None
-        self.arrival_network_cycle = None
-        self.arrival_eject_cycle = None
-        self.entry_db_cycle = None
-        self.leave_db_cycle = None
+        self.current_position = -1
+        self.station_position = -1
+        self.departure_cycle = -1
+        self.req_departure_cycle = -1
+        self.departure_network_cycle = -1
+        self.departure_inject_cycle = -1
+        self.arrival_cycle = -1
+        self.arrival_network_cycle = -1
+        self.arrival_eject_cycle = -1
+        self.entry_db_cycle = -1
+        self.leave_db_cycle = -1
         self.is_injected = False
         self.is_ejected = False
         self.is_new_on_network = True
@@ -90,21 +90,21 @@ class Flit:
         self.is_tagged = False
         self.ETag_priority = "T2"  # 默认优先级为 T2
         # Latency record
-        self.cmd_entry_cmd_table_cycle = None
-        self.req_entry_network_cycle = None
-        self.sn_receive_req_cycle = None
-        self.sn_data_generated_cycle = None
-        self.data_entry_network_cycle = None
-        self.rn_data_collection_complete_cycle = None
-        self.sn_rsp_generate_cycle = None
-        self.rsp_entry_network_cycle = None
-        self.rn_receive_rsp_cycle = None
-        self.rn_data_generated_cycle = None
-        self.sn_data_collection_complete_cycle = None
-        self.total_latency = None
-        self.cmd_latency = None
-        self.rsp_latency = None
-        self.dat_latency = None
+        self.cmd_entry_cmd_table_cycle = -1
+        self.req_entry_network_cycle = -1
+        self.sn_receive_req_cycle = -1
+        self.sn_data_generated_cycle = -1
+        self.data_entry_network_cycle = -1
+        self.rn_data_collection_complete_cycle = -1
+        self.sn_rsp_generate_cycle = -1
+        self.rsp_entry_network_cycle = -1
+        self.rn_receive_rsp_cycle = -1
+        self.rn_data_generated_cycle = -1
+        self.sn_data_collection_complete_cycle = -1
+        self.total_latency = -1
+        self.cmd_latency = -1
+        self.rsp_latency = -1
+        self.dat_latency = -1
 
     def sync_latency_record(self, flit):
         if flit.req_type == "read":
@@ -224,7 +224,7 @@ class Node:
         for req_type in ["read", "write"]:
             self.rn_tracker[req_type][ip_type][ip_pos] = []
             self.rn_tracker_wait[req_type][ip_type][ip_pos] = []
-            self.rn_tracker_count[req_type][ip_type][ip_pos] = self.config.RN_R_TRACKER_OSTD if req_type == "read" else self.config.RN_W_TRacker_OSTD
+            self.rn_tracker_count[req_type][ip_type][ip_pos] = self.config.RN_R_TRACKER_OSTD if req_type == "read" else self.config.RN_W_TRACKER_OSTD
             self.rn_tracker_pointer[req_type][ip_type][ip_pos] = -1
 
     def initialize_sn(self):
@@ -1278,7 +1278,9 @@ class Network:
                             next_pos = next_node - self.config.NUM_COL * 2 if next_node - self.config.NUM_COL * 2 >= col_start else col_start
                             flit.current_link = (next_node, next_pos)
                             flit.current_seat_index = 0
-                    elif flit.ETag_priority == "T0" and self.T0_Etag_Order_FIFO[0] == (next_node, flit) and self.EQ_UE_Counters["TU"][next_node]["T0"] < self.config.EQ_IN_FIFO_DEPTH:
+                    elif (
+                        flit.ETag_priority == "T0" and self.T0_Etag_Order_FIFO[0] == (next_node, flit) and self.EQ_UE_Counters["TU"][next_node]["T0"] < self.config.EQ_IN_FIFO_DEPTH
+                    ):
                         self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
                         flit.is_delay = False
                         flit.is_arrive = True

@@ -14,7 +14,7 @@ def main():
     import tracemalloc
 
     traffic_file_path = r"../test_data/"
-    file_name = r"traffic_2260E_case1.txt"
+    file_name = r"traffic_2260E_case2.txt"
     # file_name = r"traffic_2262_case1.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
@@ -70,8 +70,8 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
-        plot_link_state=0,
-        plot_start_time=2000,
+        plot_link_state=1,
+        plot_start_time=200,
         print_trace=0,
         show_trace_id=704,
         show_node_id=4,
@@ -88,9 +88,9 @@ def main():
         sim.config.NUM_RN = 4
         sim.config.NUM_SN = 8
         sim.config.RN_R_TRACKER_OSTD = 128
-        sim.config.RN_W_TRacker_OSTD = 32
+        sim.config.RN_W_TRACKER_OSTD = 32
         sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST
-        sim.config.RN_WDB_SIZE = sim.config.RN_W_TRacker_OSTD * sim.config.BURST
+        sim.config.RN_WDB_SIZE = sim.config.RN_W_TRACKER_OSTD * sim.config.BURST
         sim.config.SN_DDR_R_TRACKER_OSTD = 32
         sim.config.SN_DDR_W_TRACKER_OSTD = 16
         sim.config.SN_L2M_R_TRACKER_OSTD = 64
@@ -121,13 +121,13 @@ def main():
         # sim.config.TU_Etag_T1_UE_MAX = 7
         # sim.config.TD_Etag_T2_UE_MAX = 6
 
-        sim.config.TL_Etag_T2_UE_MAX = 15
-        sim.config.TL_Etag_T1_UE_MAX = 18
-        sim.config.TR_Etag_T2_UE_MAX = 16
+        sim.config.TL_Etag_T2_UE_MAX = 17
+        sim.config.TL_Etag_T1_UE_MAX = 19
+        sim.config.TR_Etag_T2_UE_MAX = 12
         sim.config.RB_IN_FIFO_DEPTH = 20
-        sim.config.TU_Etag_T2_UE_MAX = 16
-        sim.config.TU_Etag_T1_UE_MAX = 19
-        sim.config.TD_Etag_T2_UE_MAX = 17
+        sim.config.TU_Etag_T2_UE_MAX = 9
+        sim.config.TU_Etag_T1_UE_MAX = 11
+        sim.config.TD_Etag_T2_UE_MAX = 16
         sim.config.EQ_IN_FIFO_DEPTH = 20
 
         sim.config.GDMA_RW_GAP = np.inf
@@ -150,9 +150,9 @@ def main():
         sim.config.NUM_RN = 32
         sim.config.NUM_SN = 32
         sim.config.RN_R_TRACKER_OSTD = 64
-        sim.config.RN_W_TRacker_OSTD = 64
+        sim.config.RN_W_TRACKER_OSTD = 64
         sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST
-        sim.config.RN_WDB_SIZE = sim.config.RN_W_TRacker_OSTD * sim.config.BURST
+        sim.config.RN_WDB_SIZE = sim.config.RN_W_TRACKER_OSTD * sim.config.BURST
         sim.config.SN_DDR_R_TRACKER_OSTD = 64
         sim.config.SN_DDR_W_TRACKER_OSTD = 64
         sim.config.SN_L2M_R_TRACKER_OSTD = 64
@@ -187,7 +187,7 @@ def main():
         }
 
     sim.initial()
-    sim.end_time = 10000
+    # sim.end_time = 10000
     sim.print_interval = 2000
     sim.run()
 

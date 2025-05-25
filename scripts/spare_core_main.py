@@ -115,9 +115,9 @@ def main():
                     sim.config.num_RN = 32
                     sim.config.num_SN = 32
                 sim.config.RN_R_TRACKER_OSTD = 64
-                sim.config.RN_W_TRacker_OSTD = 64
+                sim.config.RN_W_TRACKER_OSTD = 64
                 sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST
-                sim.config.RN_WDB_SIZE = sim.config.RN_W_TRacker_OSTD * sim.config.BURST
+                sim.config.RN_WDB_SIZE = sim.config.RN_W_TRACKER_OSTD * sim.config.BURST
                 sim.config.sn_read_tracker_ostd = 128
                 sim.config.sn_write_tracker_ostd = 64
                 sim.config.sn_wdb_size = sim.config.sn_write_tracker_ostd * sim.config.BURST

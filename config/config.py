@@ -101,7 +101,7 @@ class CrossRingConfig:
         self.update_latency()
         self.SN_TRACKER_RELEASE_LATENCY = self.SN_TRACKER_RELEASE_LATENCY_original * self.NETWORK_FREQUENCY
         self.RN_R_TRACKER_OSTD = self.RN_RDB_SIZE // self.BURST
-        self.RN_W_TRacker_OSTD = self.RN_WDB_SIZE // self.BURST
+        self.RN_W_TRACKER_OSTD = self.RN_WDB_SIZE // self.BURST
         self.SN_DDR_R_TRACKER_OSTD = self.SN_DDR_RDB_SIZE // self.BURST
         self.SN_DDR_W_TRACKER_OSTD = self.SN_DDR_WDB_SIZE // self.BURST
         self.SN_L2M_R_TRACKER_OSTD = self.SN_L2M_RDB_SIZE // self.BURST
