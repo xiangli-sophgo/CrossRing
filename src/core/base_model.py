@@ -404,42 +404,25 @@ class BaseModel:
         for ip_type in self.req_network.EQ_channel_buffer.keys():
             if ip_type.startswith("gdma") or ip_type.startswith("sdma"):
                 continue
-
             if len(self.node.sn_wdb_recv[ip_type][in_pos]) > 0:
                 packet_id = self.node.sn_wdb_recv[ip_type][in_pos][0]
-
-                # 同样的修复：增加存在性检查
-                if packet_id in self.node.sn_wdb[ip_type][in_pos] and len(self.node.sn_wdb[ip_type][in_pos][packet_id]) > 0:
-
-                    self.node.sn_wdb[ip_type][in_pos][packet_id].pop(0)
-
-                    if len(self.node.sn_wdb[ip_type][in_pos][packet_id]) == 0:
-                        self.node.sn_wdb[ip_type][in_pos].pop(packet_id)
-                        self.node.sn_wdb_recv[ip_type][in_pos].pop(0)
-                        self.node.sn_wdb_count[ip_type][in_pos] += self.req_network.send_flits[packet_id][0].burst_length
-
-                        req = next(
-                            (req for req in self.node.sn_tracker[ip_type][in_pos] if req.packet_id == packet_id),
-                            None,
-                        )
-                        if not req:
-                            print(f"Warning: No request found for packet_id {packet_id}")
-                            continue
-
-                        self.req_cir_h_num_stat += req.circuits_completed_h
-                        self.req_cir_v_num_stat += req.circuits_completed_v
-
-                        for flit in self.data_network.send_flits[packet_id]:
-                            flit.leave_db_cycle = self.cycle + self.config.SN_TRACKER_RELEASE_LATENCY
-                            flit.sn_data_collection_complete_cycle = self.cycle
-
-                        # 释放tracker 增加release_latency
-                        release_time = self.cycle + self.config.SN_TRACKER_RELEASE_LATENCY
-                        self.node.sn_tracker_release_time[release_time].append((ip_type, in_pos, req))
-                else:
-                    print(f"Warning: packet_id {packet_id} not found in sn_wdb or empty list")
-                    # 清理不一致的状态
+                self.node.sn_wdb[ip_type][in_pos][packet_id].pop(0)
+                if len(self.node.sn_wdb[ip_type][in_pos][packet_id]) == 0:
+                    self.node.sn_wdb[ip_type][in_pos].pop(packet_id)
                     self.node.sn_wdb_recv[ip_type][in_pos].pop(0)
+                    self.node.sn_wdb_count[ip_type][in_pos] += self.req_network.send_flits[packet_id][0].burst_length
+                    req = next(
+                        (req for req in self.node.sn_tracker[ip_type][in_pos] if req.packet_id == packet_id),
+                        None,
+                    )
+                    self.req_cir_h_num_stat += req.circuits_completed_h
+                    self.req_cir_v_num_stat += req.circuits_completed_v
+                    for flit in self.data_network.send_flits[packet_id]:
+                        flit.leave_db_cycle = self.cycle + self.config.SN_TRACKER_RELEASE_LATENCY
+                        flit.sn_data_collection_complete_cycle = self.cycle
+                    # 只添加到延迟释放队列，不立即释放
+                    release_time = self.cycle + self.config.SN_TRACKER_RELEASE_LATENCY
+                    self.node.sn_tracker_release_time[release_time].append((ip_type, in_pos, req))
 
     def release_completed_sn_tracker(self):
         """Check if any trackers can be released based on the current cycle."""
@@ -448,21 +431,23 @@ class BaseModel:
                 return
             tracker_list = self.node.sn_tracker_release_time.pop(release_time)
             for sn_type, in_pos, req in tracker_list:
-                # BUG: list.remove(x): x not in list
-                self.node.sn_tracker[sn_type][in_pos].remove(req)
-                self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] += 1
-                if (
-                    self.node.sn_wdb_count[sn_type][in_pos] > 0
-                    and self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] > 0
-                    and self.node.sn_req_wait[req.req_type][sn_type][in_pos]
-                ):
-                    new_req = self.node.sn_req_wait[req.req_type][sn_type][in_pos].pop(0)
-                    new_req.sn_tracker_type = req.sn_tracker_type
-                    new_req.req_attr = "old"
-                    self.node.sn_tracker[sn_type][in_pos].append(new_req)
-                    self.node.sn_tracker_count[sn_type][new_req.sn_tracker_type][in_pos] -= 1
-                    self.node.sn_wdb_count[sn_type][in_pos] -= new_req.burst_length
-                    self.create_rsp(new_req, "positive")
+                # 检查 tracker 是否还在列表中（避免重复释放）
+                if req in self.node.sn_tracker[sn_type][in_pos]:
+                    self.node.sn_tracker[sn_type][in_pos].remove(req)
+                    self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] += 1
+                    # 检查是否有等待的请求
+                    if (
+                        self.node.sn_wdb_count[sn_type][in_pos] > 0
+                        and self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] > 0
+                        and self.node.sn_req_wait[req.req_type][sn_type][in_pos]
+                    ):
+                        new_req = self.node.sn_req_wait[req.req_type][sn_type][in_pos].pop(0)
+                        new_req.sn_tracker_type = req.sn_tracker_type
+                        new_req.req_attr = "old"
+                        self.node.sn_tracker[sn_type][in_pos].append(new_req)
+                        self.node.sn_tracker_count[sn_type][new_req.sn_tracker_type][in_pos] -= 1
+                        self.node.sn_wdb_count[sn_type][in_pos] -= new_req.burst_length
+                        self.create_rsp(new_req, "positive")
 
     def _move_pre_to_queues(self, network: Network, in_pos):
         """Move all items from pre-injection queues to injection queues for a given network."""
@@ -819,7 +804,6 @@ class BaseModel:
         """
         Inject data flits into the network.
         """
-        # self._try_ip_inject()
         for ip_pos in self.flit_positions:
             rr_queue = self.data_network.round_robin["IQ"][ip_pos - self.config.NUM_COL]
             num_ip_types = len(rr_queue)
@@ -843,48 +827,52 @@ class BaseModel:
                             queue_pre[flit.source] = flit
                             self.send_flits_num += 1
                             self.trans_flits_num += 1
+
                             if ip_type.startswith("ddr") or ip_type.startswith("l2m"):
+                                # SN 端读数据注入
                                 self.send_read_flits_num_stat += 1
                                 self.data_network.IQ_channel_buffer[ip_type][ip_pos].popleft()
                                 self.data_network.send_flits[flit.packet_id].append(flit)
                                 if len(self.data_network.send_flits[flit.packet_id]) == flit.burst_length:
+                                    # 读数据注入完成，释放 tracker
                                     req = next(
                                         (req for req in self.node.sn_tracker[ip_type][ip_pos] if req.packet_id == flit.packet_id),
                                         None,
                                     )
-                                    self.node.sn_tracker[ip_type][ip_pos].remove(req)
-                                    self.node.sn_tracker_count[ip_type][req.sn_tracker_type][ip_pos] += 1
-                                    if self.node.sn_req_wait["read"][ip_type][ip_pos]:
-                                        # If there is a waiting request, inject it
-                                        new_req = self.node.sn_req_wait["read"][ip_type][ip_pos].pop(0)
-                                        new_req.sn_tracker_type = req.sn_tracker_type
-                                        new_req.req_attr = "old"
-                                        self.node.sn_tracker[ip_type][ip_pos].append(new_req)
-                                        self.node.sn_tracker_count[ip_type][req.sn_tracker_type][ip_pos] -= 1
-                                        self.create_rsp(new_req, "positive")
+                                    if req:  # 添加检查避免重复释放
+                                        self.node.sn_tracker[ip_type][ip_pos].remove(req)
+                                        self.node.sn_tracker_count[ip_type][req.sn_tracker_type][ip_pos] += 1
+                                        if self.node.sn_req_wait["read"][ip_type][ip_pos]:
+                                            new_req = self.node.sn_req_wait["read"][ip_type][ip_pos].pop(0)
+                                            new_req.sn_tracker_type = req.sn_tracker_type
+                                            new_req.req_attr = "old"
+                                            self.node.sn_tracker[ip_type][ip_pos].append(new_req)
+                                            self.node.sn_tracker_count[ip_type][req.sn_tracker_type][ip_pos] -= 1
+                                            self.create_rsp(new_req, "positive")
                             else:
+                                # RN 端写数据注入 - 删除错误的 tracker 释放逻辑
                                 self.send_write_flits_num_stat += 1
                                 self.data_network.IQ_channel_buffer[ip_type][ip_pos].popleft()
                                 self.data_network.send_flits[flit.packet_id].append(flit)
                                 if len(self.data_network.send_flits[flit.packet_id]) == flit.burst_length:
-                                    # finish current req injection
+                                    # 写数据注入完成，处理 RN tracker
                                     req = next(
                                         (req for req in self.node.rn_tracker["write"][ip_type][ip_pos] if req.packet_id == flit.packet_id),
                                         None,
                                     )
-                                    self.node.rn_tracker["write"][ip_type][ip_pos].remove(req)
-                                    self.node.rn_tracker_count["write"][ip_type][ip_pos] += 1
-                                    self.node.rn_tracker_pointer["write"][ip_type][ip_pos] -= 1
-                                    self.node.rn_wdb[ip_type][ip_pos].pop(req.packet_id)
-                                    self.node.rn_wdb_count[ip_type][ip_pos] += req.burst_length
+                                    if req:  # 添加检查
+                                        self.node.rn_tracker["write"][ip_type][ip_pos].remove(req)
+                                        self.node.rn_tracker_count["write"][ip_type][ip_pos] += 1
+                                        self.node.rn_tracker_pointer["write"][ip_type][ip_pos] -= 1
+                                        self.node.rn_wdb[ip_type][ip_pos].pop(req.packet_id)
+                                        self.node.rn_wdb_count[ip_type][ip_pos] += req.burst_length
                             break
 
                 if processed:
-                    rr_queue.append(ip_type)  # 处理了，放到队尾
+                    rr_queue.append(ip_type)
                 else:
-                    temp_queue.append(ip_type)  # 没处理，保持顺序
+                    temp_queue.append(ip_type)
 
-            # 没处理的ip_type放回队首，顺序不变
             self.data_network.round_robin["IQ"][ip_pos - self.config.NUM_COL] = temp_queue + rr_queue
             self._try_ip_inject()
 
@@ -1976,7 +1964,8 @@ class BaseModel:
                 )
 
             # 打印最终带宽值
-            print(f"{k} Final Bandwidth: {bandwidth[mask][-1]:.2f} GB/s")
+            if self.verbose:
+                print(f"{k} Final Bandwidth: {bandwidth[mask][-1]:.2f} GB/s")
             total_bw += bandwidth[mask][-1]
         self.Total_sum_BW_stat = float(total_bw)
         print(f"Total Bandwidth: {self.Total_sum_BW_stat:.2f} GB/s")
@@ -2011,7 +2000,8 @@ class BaseModel:
         network.max_circuits_v = max(network.circuits_v) / 2 if network.circuits_v else None
 
         # Output total results
-        print("=" * 50)
+        if self.verbose:
+            print("=" * 50)
         total_result = os.path.join(self.result_save_path, "total_result.txt")
         with open(total_result, "w", encoding="utf-8") as f3:
             if self.verbose:
@@ -2130,7 +2120,8 @@ class BaseModel:
             print(f"  Range: {min_bw:.1f} - {max_bw:.1f} GB/s", file=file)
 
             # 屏幕输出
-            print(f"{name} {operation}: Sum: {sum(bw_list):.1f}, Avg: {avg:.1f} GB/s, Range: {min_bw:.1f}-{max_bw:.1f} GB/s")
+            if self.verbose:
+                print(f"{name} {operation}: Sum: {sum(bw_list):.1f}, Avg: {avg:.1f} GB/s, Range: {min_bw:.1f}-{max_bw:.1f} GB/s")
         # else:
         #     print(f"\nNo {name} {operation} bandwidth data", file=f3)
         #     print(f"No {name} {operation} bandwidth data")  # 屏幕输出
@@ -2254,7 +2245,8 @@ class BaseModel:
     def output_intervals(self, f3, merged_intervals, req_type, latency):
         """Output the intervals and calculate bandwidth for the given request type."""
         print(f"{req_type} intervals:", file=f3)
-        print(f"{req_type} results:")
+        if self.verbose:
+            print(f"{req_type} results:")
         total_count = 0
         finish_time = 0  # self.cycle // self.config.network_frequency
         total_interval_time = 0  # 累加所有区间的时长
@@ -2282,11 +2274,13 @@ class BaseModel:
         if req_type == "Read":
             self.R_finish_time_stat = finish_time
             self.R_tail_latency_stat = finish_time - self.R_tail_latency_stat // self.config.NETWORK_FREQUENCY
-            print(f"Finish Time: {self.R_finish_time_stat}, Tail latency: {self.R_tail_latency_stat}")
+            if self.verbose:
+                print(f"Finish Time: {self.R_finish_time_stat}, Tail latency: {self.R_tail_latency_stat}")
         elif req_type == "Write":
             self.W_finish_time_stat = finish_time
             self.W_tail_latency_stat = finish_time - self.W_tail_latency_stat // self.config.NETWORK_FREQUENCY
-            print(f"Finish Time: {self.W_finish_time_stat}, Tail latency: {self.W_tail_latency_stat}")
+            if self.verbose:
+                print(f"Finish Time: {self.W_finish_time_stat}, Tail latency: {self.W_tail_latency_stat}")
 
         total_latency_avg = np.average(latency["total_latency"])
         total_latency_max = max(latency["total_latency"], default=0)
@@ -2301,10 +2295,11 @@ class BaseModel:
             f"cmd_latency: Avg: {cmd_latency_avg:.1f}, Max: {cmd_latency_max}; rsp_latency: Avg: {rsp_latency_avg:.1f}, Max: {rsp_latency_max}; dat_latency: Avg: {dat_latency_avg:.1f}, Max: {dat_latency_max}",
             file=f3,
         )
-        print(
-            f"Bandwidth: {total_bandwidth:.1f}; \nTotal latency: Avg: {total_latency_avg:.1f}, Max: {total_latency_max}; "
-            f"cmd_latency: Avg: {cmd_latency_avg:.1f}, Max: {cmd_latency_max}; rsp_latency: Avg: {rsp_latency_avg:.1f}, Max: {rsp_latency_max}; dat_latency: Avg: {dat_latency_avg:.1f}, Max: {dat_latency_max}"
-        )
+        if self.verbose:
+            print(
+                f"Bandwidth: {total_bandwidth:.1f}; \nTotal latency: Avg: {total_latency_avg:.1f}, Max: {total_latency_max}; "
+                f"cmd_latency: Avg: {cmd_latency_avg:.1f}, Max: {cmd_latency_max}; rsp_latency: Avg: {rsp_latency_avg:.1f}, Max: {rsp_latency_max}; dat_latency: Avg: {dat_latency_avg:.1f}, Max: {dat_latency_max}"
+            )
 
         return (
             total_bandwidth,

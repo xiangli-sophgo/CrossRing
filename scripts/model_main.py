@@ -70,12 +70,12 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
-        plot_link_state=1,
+        plot_link_state=0,
         plot_start_time=200,
         print_trace=0,
         show_trace_id=704,
         show_node_id=4,
-        verbose=1,
+        verbose=0,
     )
 
     if topo_type == "3x3":
@@ -187,7 +187,7 @@ def main():
         }
 
     sim.initial()
-    # sim.end_time = 10000
+    sim.end_time = 10000
     sim.print_interval = 2000
     sim.run()
 
