@@ -414,6 +414,9 @@ class BaseModel:
                         (req for req in self.node.sn_tracker[ip_type][in_pos] if req.packet_id == packet_id),
                         None,
                     )
+                    if req is None:
+                        print(f"Warning: No SN tracker for packet_id {packet_id} at {ip_type}, {in_pos}")
+                        continue
                     self.req_cir_h_num_stat += req.circuits_completed_h
                     self.req_cir_v_num_stat += req.circuits_completed_v
                     for flit in self.data_network.send_flits[packet_id]:
@@ -1301,12 +1304,14 @@ class BaseModel:
                                 elif f.req_type == "write":
                                     f.sn_data_collection_complete_cycle = self.cycle
 
-                        # 分类进入各自的data buffer
-                        if ip_type.startswith("gdma") or ip_type.startswith("sdma"):
+                        # 分类进入各自的data buffer：根据请求类型区分读/写
+                        if flit.req_type == "read":
+                            # 读响应进入 RN 端
                             self.node.rn_rdb[ip_type][in_pos][flit.packet_id].append(flit)
                             if len(self.node.rn_rdb[ip_type][in_pos][flit.packet_id]) == flit.burst_length:
                                 self.node.rn_rdb_recv[ip_type][in_pos].append(flit.packet_id)
-                        elif ip_type.startswith("ddr") or ip_type.startswith("l2m"):
+                        elif flit.req_type == "write":
+                            # 写数据进入 SN 端
                             self.node.sn_wdb[ip_type][in_pos][flit.packet_id].append(flit)
                             if len(self.node.sn_wdb[ip_type][in_pos][flit.packet_id]) == flit.burst_length:
                                 self.node.sn_wdb_recv[ip_type][in_pos].append(flit.packet_id)

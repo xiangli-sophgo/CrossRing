@@ -25,7 +25,7 @@ def main():
 
     # traffic_file_path = r"../../traffic/"
     # traffic_file_path = r"../traffic/output_DeepSeek_part1/step5_data_merge/"
-    traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
+    # traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_2K/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_no_map/step5_data_merge/"
     # file_name = r"output_embedding_Trace.txt"
@@ -34,7 +34,7 @@ def main():
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"MLP_MoE_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
-    file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace_group_map.txt"
+    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace_group_map.txt"
 
     # model_type = "Feature"
     model_type = "REQ_RSP"
@@ -50,10 +50,10 @@ def main():
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        topo_type = "5x4"  # SG2262
+        # topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
         # topo_type = "6x5"
-        # topo_type = "3x3"  # SG2260E
+        topo_type = "3x3"  # SG2260E
     else:
         topo_type = config.TOPO_TYPE
 
@@ -71,8 +71,8 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
-        plot_link_state=0,
-        plot_start_time=200,
+        plot_link_state=1,
+        plot_start_time=2000,
         print_trace=0,
         show_trace_id=704,
         show_node_id=4,
@@ -186,7 +186,7 @@ def main():
         sim.config.CHANNEL_SPEC = {
             "gdma": 2,
             "sdma": 2,
-            "ddr": 2,
+            "ddr": 4,
             "l2m": 2,
         }
 
