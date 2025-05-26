@@ -24,7 +24,7 @@ from optuna.trial import TrialState
 # 使用的 CPU 核心数；-1 表示全部核心
 N_JOBS = -1
 # 每个参数组合重复仿真次数，用于平滑随机 latency 影响
-N_REPEATS = 5  # 减少重复次数，因为要测试多个traffic
+N_REPEATS = 3  # 减少重复次数，因为要测试多个traffic
 
 # 全局变量用于存储可视化数据
 visualization_data = {"trials": [], "progress": [], "pareto_data": [], "param_importance": {}, "convergence": []}
@@ -166,9 +166,7 @@ def create_pareto_front(trials, traffic_files, save_dir):
             )
         )
 
-        fig.update_layout(
-            title=f"Pareto前沿: {traffic1_name} vs {traffic2_name}", xaxis_title=f"{traffic1_name} 带宽 (GB/s)", yaxis_title=f"{traffic2_name} 带宽 (GB/s)", height=600
-        )
+        fig.update_layout(title=f"Pareto前沿: {traffic1_name} vs {traffic2_name}", xaxis_title=f"{traffic1_name} 带宽 (GB/s)", yaxis_title=f"{traffic2_name} 带宽 (GB/s)", height=600)
 
         fig.write_html(os.path.join(save_dir, "pareto_front.html"))
 
@@ -473,14 +471,14 @@ def find_optimal_parameters():
     os.makedirs(os.path.dirname(output_csv), exist_ok=True)
 
     # 参数范围
-    param1_start, param1_end = 2, 20
-    param2_start, param2_end = 2, 20
-    param3_start, param3_end = 2, 20
-    param4_start, param4_end = 4, 20
-    param5_start, param5_end = 2, 20
-    param6_start, param6_end = 2, 20
-    param7_start, param7_end = 2, 20
-    param8_start, param8_end = 4, 20
+    param1_start, param1_end = 2, 16
+    param2_start, param2_end = 2, 16
+    param3_start, param3_end = 2, 16
+    param4_start, param4_end = 4, 16
+    param5_start, param5_end = 2, 16
+    param6_start, param6_end = 2, 16
+    param7_start, param7_end = 2, 16
+    param8_start, param8_end = 4, 16
 
     def _run_one_traffic(traffic_file, param1, param2, param3, param4, param5, param6, param7, param8):
         """运行单个traffic文件的仿真"""

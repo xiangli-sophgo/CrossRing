@@ -116,7 +116,7 @@ class BaseModel:
             # self.link_state_vis = create_optimized_visualizer(self.req_network)
             self.link_state_vis = NetworkLinkVisualizer(self.req_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
-            self.req_network.Both_side_ETag_upgrade = self.rsp_network.Both_side_ETag_upgrade = self.data_network.Both_side_ETag_upgrade = True
+            self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
         self.flits = []
@@ -154,9 +154,7 @@ class BaseModel:
 
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
-        self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
-        )
+        self.flit_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
 
         self.type_to_positions = {
             "req": self.sn_positions,
@@ -263,7 +261,8 @@ class BaseModel:
                 # or self.cycle > 60000 * self.config.network_frequency
             ):
                 if tail_time == 0:
-                    print("Finish!")
+                    if self.verbose:
+                        print("Finish!")
                     break
                 else:
                     tail_time -= 1
@@ -436,11 +435,7 @@ class BaseModel:
                     self.node.sn_tracker[sn_type][in_pos].remove(req)
                     self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] += 1
                     # 检查是否有等待的请求
-                    if (
-                        self.node.sn_wdb_count[sn_type][in_pos] > 0
-                        and self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] > 0
-                        and self.node.sn_req_wait[req.req_type][sn_type][in_pos]
-                    ):
+                    if self.node.sn_wdb_count[sn_type][in_pos] > 0 and self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] > 0 and self.node.sn_req_wait[req.req_type][sn_type][in_pos]:
                         new_req = self.node.sn_req_wait[req.req_type][sn_type][in_pos].pop(0)
                         new_req.sn_tracker_type = req.sn_tracker_type
                         new_req.req_attr = "old"
@@ -481,11 +476,7 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(
-                f"Data statistic: Read: {self.read_req, self.read_flit}, "
-                f"Write: {self.write_req, self.write_flit}, "
-                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
-            )
+            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
         if self.verbose:
@@ -597,10 +588,7 @@ class BaseModel:
                 request_accepted = False
 
                 if req.req_type == "read":
-                    if (
-                        self.node.rn_rdb_count[ip_type][ip_pos] > self.node.rn_rdb_reserve[ip_type][ip_pos] * req.burst_length
-                        and self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] > 0
-                    ):
+                    if self.node.rn_rdb_count[ip_type][ip_pos] > self.node.rn_rdb_reserve[ip_type][ip_pos] * req.burst_length and self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] > 0:
 
                         # 接受请求
                         counts["read"] += 1
@@ -884,14 +872,7 @@ class BaseModel:
 
     def update_throughput_metrics(self, flits):
         """Update throughput metrics based on flit counts."""
-        # if len(flits) > 0 and self.begin is None:
-        #     self.begin = self.cycle
         self.trans_flits_num = len(flits)
-        # if len(flits) == 0:
-        #     self.throughput_time.append(self.trans_flits_num)
-        #     self.trans_flits_num = 0
-        # self.end = self.cycle
-        # self.begin, self.end = None, None
 
     def load_request_stream(self):
         """借助 _parse_traffic_file 只解析一次 traffic 文件。"""
@@ -1174,11 +1155,8 @@ class BaseModel:
                 next_pos = pos - self.config.NUM_COL
 
                 # 获取各方向的flit
-                station_flits = [
-                    network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["TL", "TR", "ft"]
-                ] + [
-                    network.inject_queues[fifo_pos][pos][0] if pos in network.inject_queues[fifo_pos] and network.inject_queues[fifo_pos][pos] else None
-                    for fifo_pos in ["TU", "TD"]
+                station_flits = [network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["TL", "TR", "ft"]] + [
+                    network.inject_queues[fifo_pos][pos][0] if pos in network.inject_queues[fifo_pos] and network.inject_queues[fifo_pos][pos] else None for fifo_pos in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
@@ -1542,9 +1520,7 @@ class BaseModel:
                     if network.links_tag[(i, j)][-1] == [j, "TR"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["TR"][j] += 1
-                elif i - j == self.config.NUM_COL * 2 or (
-                    i == j and i in range(self.config.NUM_NODE - self.config.NUM_COL * 2, self.config.NUM_COL + self.config.NUM_NODE - self.config.NUM_COL * 2)
-                ):
+                elif i - j == self.config.NUM_COL * 2 or (i == j and i in range(self.config.NUM_NODE - self.config.NUM_COL * 2, self.config.NUM_COL + self.config.NUM_NODE - self.config.NUM_COL * 2)):
                     if network.links_tag[(i, j)][-1] == [j, "TU"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["TU"][j] += 1
@@ -1716,9 +1692,7 @@ class BaseModel:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             if req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(
-                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
-                )
+                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
             else:
                 latency = self.config.L2M_R_LATENCY
             flit.departure_cycle = self.cycle + latency + i * self.config.NETWORK_FREQUENCY
