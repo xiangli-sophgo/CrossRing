@@ -25,8 +25,9 @@ def main():
 
     # traffic_file_path = r"../../traffic/"
     # traffic_file_path = r"../traffic/output_DeepSeek_part1/step5_data_merge/"
-    # traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
-    traffic_file_path = r"../traffic/output_v8_32_2K/step5_data_merge/"
+    traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
+    # traffic_file_path = r"../traffic/output_v8_32_2K/step5_data_merge/"
+    # traffic_file_path = r"../traffic/output_v8_32_no_map/step5_data_merge/"
     # file_name = r"output_embedding_Trace.txt"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"output_Trace.txt"

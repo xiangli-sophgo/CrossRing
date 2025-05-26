@@ -4,7 +4,7 @@ import re
 
 
 class AddressHasher:
-    def __init__(self, itlv_size=512):
+    def __init__(self, itlv_size=2048):
         self.itlv_size = itlv_size
         self.itlv_digit = itlv_size.bit_length() - 1
         self.shared_64_count = 0
@@ -77,6 +77,7 @@ class AddressHasher:
     def ip2node(self, n):
         """Input ddr/dma number and return the corresponding node number"""
         n = int(n)
+        # return str(n)
         # ip2node_map = {0: 0, 4: 8, 8: 4, 12: 12, 16: 20, 20: 28, 24: 36, 28: 44, 32: 52, 36: 60, 40: 48, 44: 56, 48: 32, 52: 40, 56: 16, 60: 24}
         # ip2node_map = {0: 0, 4: 8, 8: 4, 12: 12, 16: 16, 20: 24, 24: 20, 28: 28}
         ip2node_map = {0: 0, 4: 8, 8: 4, 12: 12, 16: 16, 20: 24, 24: 20, 28: 28}
@@ -150,6 +151,7 @@ class AddressHasher:
 # Main execution
 if __name__ == "__main__":
     hasher = AddressHasher()
-    input_folder = "../output-v7-32/step1_flatten"
-    output_folder = "../output-v7-32/step2_hash_addr2node"
-    hasher.run(input_folder, output_folder)
+    # input_folder = "../output-v7-32/step1_flatten"
+    # output_folder = "../output-v7-32/step2_hash_addr2node"
+    # hasher.run(input_folder, output_folder)
+    print(hasher.ip2node(hasher.hash_addr2node(0x400000000, 32)))

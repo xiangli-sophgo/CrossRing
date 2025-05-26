@@ -14,7 +14,7 @@ from src.traffic_process import step6_core32_map
 # path = "../traffic/original_data/v8-32/2M/"
 path = r"../traffic/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce/"
 # path += "ins_SG2262_Ring_all_reduce_8cluster_all2all"
-output_path = "../traffic/output_v8_32_2K/"
+output_path = "../traffic/output_v8_32_no_map/"
 # # outstanding_num必须为2的幂
 outstanding_num = 2048
 assert isinstance(outstanding_num, int), "outstanding_num must be integer or out of range."

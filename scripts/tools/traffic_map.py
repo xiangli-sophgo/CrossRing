@@ -12,8 +12,8 @@ def modify_id(num):
         return str(num)
 
 
-input_file = r"../../traffic/output_v8_32_2K/step5_data_merge/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
-output_file = r"../../traffic/output_v8_32_2K4/step5_data_merge/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace_group_map.txt"
+input_file = r"../../traffic/output_v8_32_no_map/step5_data_merge/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
+output_file = r"../../traffic/output_v8_32_no_map/step5_data_merge/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace_group_map.txt"
 
 with open(input_file, mode="r", newline="") as infile, open(output_file, mode="w", newline="") as outfile:
     reader = csv.reader(infile)
