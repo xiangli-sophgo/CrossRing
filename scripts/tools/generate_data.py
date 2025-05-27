@@ -294,11 +294,11 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
             # data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(sdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             #
-            data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            data_all.extend(generate_entries(sdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(sdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
-            # data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(gdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
     # 排序并写入文件
@@ -309,11 +309,11 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
 # 示例使用
 if __name__ == "__main__":
     # 参数配置
-    # TOPO = "3x3"
-    TOPO = "5x4"
-    INTERVAL_COUNT = 10
-    FILE_NAME = "../../test_data/traffic_2262_case1.txt"
-    # FILE_NAME = "../../test_data/traffic_2260E_case2.txt"
+    TOPO = "3x3"
+    # TOPO = "5x4"
+    INTERVAL_COUNT = 128
+    # FILE_NAME = "../../test_data/traffic_2262_case1.txt"
+    FILE_NAME = "../../test_data/traffic_2260E_case6.txt"
     # FILE_NAME = "../../test_data/traffic_2262_case1.txt"
     np.random.seed(520)
 

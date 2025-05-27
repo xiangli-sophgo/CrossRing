@@ -89,6 +89,9 @@ class Flit:
         self.itag_h = False
         self.is_tagged = False
         self.ETag_priority = "T2"  # 默认优先级为 T2
+        # 记录下环 / 弹出时实际占用的是哪一级 entry（"T0" / "T1" / "T2"）
+        # 生成时为 None，占用时写入；释放时根据该字段选择对应计数器自减
+        self.used_entry_level = None
         # Latency record
         self.cmd_entry_cmd_table_cycle = -1
         self.req_entry_network_cycle = -1
@@ -203,6 +206,7 @@ class Node:
         self.sn_wdb = self.config._make_channels(("ddr", "l2m"))
         self.sn_wdb_recv = self.config._make_channels(("ddr", "l2m"))
         self.sn_wdb_count = self.config._make_channels(("ddr", "l2m"))
+        self.rn_wait_to_inject = []
 
     def initialize_rn(self):
         """Initialize RN structures."""
@@ -286,9 +290,6 @@ class Network:
         self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
         self.ring_bridge = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.ring_bridge_pre = {"TU": {}, "TD": {}, "EQ": {}}
-        # self.inject_queue_rr = {"TL": {0: {}, 1: {}}, "TR": {0: {}, 1: {}}, "TU": {0: {}, 1: {}}, "EQ": {0: {}, 1: {}}}
-        # self.inject_rr = {"TL": {}, "TR": {}, "TU": {}, "EQ": {}}
-        # self.round_robin = {**{"TU": {}, "TD": {}, "RB": {}}, **self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))}
         self.round_robin = {"IQ": defaultdict(lambda: defaultdict(dict)), "RB": defaultdict(lambda: defaultdict(dict)), "EQ": defaultdict(lambda: defaultdict(dict))}
         self.round_robin_counter = 0
         self.recv_flits_num = 0
@@ -391,9 +392,6 @@ class Network:
 
             for key in self.round_robin.keys():
                 if key == "IQ":
-                    # self.round_robin[key][ip_pos - config.NUM_COL] = deque()
-                    # for ch_name in self.IQ_channel_buffer.keys():
-                    # self.round_robin[key][ip_pos - config.NUM_COL].append(ch_name)
                     for fifo_name in ["TR", "TL", "TU", "TD", "EQ"]:
                         self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque()
                         for ch_name in self.IQ_channel_buffer.keys():
@@ -480,6 +478,76 @@ class Network:
         for ip_type in self.throughput.keys():
             for ip_index in getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST"):
                 self.throughput[ip_type][ip_index] = [0, 0, 10000000, 0]
+
+        self.RB_CAPACITY = {"TL": {}, "TR": {}}
+        self.EQ_CAPACITY = {"TU": {}, "TD": {}}
+
+        # TL capacity
+        def _cap_tl(lvl):
+            if lvl == "T2":
+                return self.config.TL_Etag_T2_UE_MAX
+            if lvl == "T1":
+                return self.config.TL_Etag_T1_UE_MAX - self.config.TL_Etag_T2_UE_MAX
+            if lvl == "T0":
+                return self.config.RB_IN_FIFO_DEPTH - self.config.TL_Etag_T1_UE_MAX
+
+        # TR capacity
+        def _cap_tr(lvl):
+            if lvl == "T2":
+                return self.config.TR_Etag_T2_UE_MAX
+            if lvl == "T1":
+                return self.config.RB_IN_FIFO_DEPTH - self.config.TR_Etag_T2_UE_MAX
+            return 0  # TR 无 T0
+
+        # TU capacity
+        def _cap_tu(lvl):
+            if lvl == "T2":
+                return self.config.TU_Etag_T2_UE_MAX
+            if lvl == "T1":
+                return self.config.TU_Etag_T1_UE_MAX - self.config.TU_Etag_T2_UE_MAX
+            if lvl == "T0":
+                return self.config.EQ_IN_FIFO_DEPTH - self.config.TU_Etag_T1_UE_MAX
+
+        # TD capacity
+        def _cap_td(lvl):
+            if lvl == "T2":
+                return self.config.TD_Etag_T2_UE_MAX
+            if lvl == "T1":
+                return self.config.EQ_IN_FIFO_DEPTH - self.config.TD_Etag_T2_UE_MAX
+            return 0  # TD 无 T0
+
+        for pair in self.RB_UE_Counters["TL"]:
+            self.RB_CAPACITY["TL"][pair] = {lvl: _cap_tl(lvl) for lvl in ("T0", "T1", "T2")}
+        for pair in self.RB_UE_Counters["TR"]:
+            self.RB_CAPACITY["TR"][pair] = {lvl: _cap_tr(lvl) for lvl in ("T1", "T2")}
+
+        for pos in self.EQ_UE_Counters["TU"]:
+            self.EQ_CAPACITY["TU"][pos] = {lvl: _cap_tu(lvl) for lvl in ("T0", "T1", "T2")}
+        for pos in self.EQ_UE_Counters["TD"]:
+            self.EQ_CAPACITY["TD"][pos] = {lvl: _cap_td(lvl) for lvl in ("T1", "T2")}
+
+    def _entry_available(self, dir_type, key, level):
+        if dir_type in ("TL", "TR"):
+            cap = self.RB_CAPACITY[dir_type][key][level]
+            occ = self.RB_UE_Counters[dir_type][key][level]
+        else:
+            cap = self.EQ_CAPACITY[dir_type][key][level]
+            occ = self.EQ_UE_Counters[dir_type][key][level]
+        return occ < cap
+
+    # ------------------------------------------------------------------
+    def _occupy_entry(self, dir_type, key, level, flit):
+        """
+        统一处理占用计数器，并记录 flit.used_entry_level
+        dir_type : "TL"|"TR"|"TU"|"TD"
+        key      : (cur,next) for RB  or  dest_pos for EQ
+        level    : "T0"/"T1"/"T2"
+        """
+        if dir_type in ("TL", "TR"):
+            self.RB_UE_Counters[dir_type][key][level] += 1
+        else:
+            self.EQ_UE_Counters[dir_type][key][level] += 1
+        flit.used_entry_level = level
 
     def can_move_to_next(self, flit, current, next_node):
         # flit inject的时候判断是否可以将flit放到本地出口队列。
@@ -763,10 +831,15 @@ class Network:
                     # Flit已经绕横向环一圈
                     flit.circuits_completed_h += 1
                     link_station = self.ring_bridge["TR"].get((next_node, flit.path[flit.path_index]))
+                    can_use_T1 = self._entry_available("TR", (new_current, new_next_node), "T1")
+                    can_use_T2 = self._entry_available("TR", (new_current, new_next_node), "T2")
                     # TR方向尝试下环
                     if len(link_station) < self.config.RB_IN_FIFO_DEPTH and (
-                        (self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH and flit.ETag_priority in ["T0", "T1"])
-                        or (self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit.ETag_priority in ["T2", "T0", "T1"])
+                        (flit.ETag_priority == "T1" and can_use_T1)
+                        or (flit.ETag_priority == "T2" and can_use_T2)
+                        or (flit.ETag_priority == "T1" and not can_use_T1 and can_use_T2)  # T1使用T2 entry
+                        or (flit.ETag_priority == "T0" and can_use_T1)  # T0使用T1 entry
+                        or (flit.ETag_priority == "T0" and not can_use_T1 and can_use_T2)  # T0使用T2 entry
                     ):
                         flit.is_delay = False
                         flit.current_link = (next_node, flit.path[flit.path_index])
@@ -775,16 +848,17 @@ class Network:
                         if flit.ETag_priority == "T0":
                             # 若升级到T0则需要从T0队列中移除flit
                             self.T0_Etag_Order_FIFO.remove((next_node, flit))
-                            if self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH:
-                                self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T1"] += 1
+                            if can_use_T1:
+                                self._occupy_entry("TR", (new_current, new_next_node), "T1", flit)
                             else:
-                                self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T2"] += 1
-                                self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T1"] += 1
+                                self._occupy_entry("TR", (new_current, new_next_node), "T2", flit)
                         elif flit.ETag_priority == "T2":
-                            self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T2"] += 1
-                            self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T1"] += 1
+                            self._occupy_entry("TR", (new_current, new_next_node), "T2", flit)
                         elif flit.ETag_priority == "T1":
-                            self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T1"] += 1
+                            if can_use_T1:
+                                self._occupy_entry("TR", (new_current, new_next_node), "T1", flit)
+                            else:
+                                self._occupy_entry("TR", (new_current, new_next_node), "T2", flit)
                     else:
                         # 无法下环,TR方向的flit不能升级T0
                         link[flit.current_seat_index] = None
@@ -805,9 +879,9 @@ class Network:
                 if current == flit.current_position:
                     flit.circuits_completed_h += 1
                     link_station = self.ring_bridge["TL"].get((new_current, new_next_node))
-                    can_use_T0 = self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] < self.config.RB_IN_FIFO_DEPTH
-                    can_use_T1 = self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T1"] < self.config.TL_Etag_T1_UE_MAX
-                    can_use_T2 = self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T2"] < self.config.TL_Etag_T2_UE_MAX
+                    can_use_T0 = self._entry_available("TL", (new_current, new_next_node), "T0")
+                    can_use_T1 = self._entry_available("TL", (new_current, new_next_node), "T1")
+                    can_use_T2 = self._entry_available("TL", (new_current, new_next_node), "T2")
                     # 尝试TL下环，非T0情况
                     if flit.ETag_priority in ["T1", "T2"]:
                         if len(link_station) < self.config.RB_IN_FIFO_DEPTH and (
@@ -820,19 +894,14 @@ class Network:
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 0
                             if flit.ETag_priority == "T2":
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T2"] += 1
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T1"] += 1
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] += 1
+                                self._occupy_entry("TL", (new_current, new_next_node), "T2", flit)
                             elif flit.ETag_priority == "T1":
                                 if can_use_T1:
                                     # T1使用T1 entry
-                                    self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T1"] += 1
-                                    self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] += 1
+                                    self._occupy_entry("TL", (new_current, new_next_node), "T1", flit)
                                 else:
                                     # T1使用T2 entry
-                                    self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T2"] += 1
-                                    self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T1"] += 1
-                                    self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] += 1
+                                    self._occupy_entry("TL", (new_current, new_next_node), "T2", flit)
 
                         else:
                             # 无法下环,升级ETag并记录
@@ -851,7 +920,7 @@ class Network:
                             # 按优先级尝试：T0专用 > T1 > T2
                             if self.T0_Etag_Order_FIFO[0] == (next_node, flit) and can_use_T0:
                                 # 使用T0专用entry
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] += 1
+                                self._occupy_entry("TL", (new_current, new_next_node), "T0", flit)
                                 flit.is_delay = False
                                 flit.current_link = (new_current, new_next_node)
                                 link[flit.current_seat_index] = None
@@ -859,8 +928,7 @@ class Network:
                                 self.T0_Etag_Order_FIFO.popleft()
                             elif can_use_T1:
                                 # 使用T1 entry
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T1"] += 1
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] += 1
+                                self._occupy_entry("TL", (new_current, new_next_node), "T1", flit)
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                                 flit.is_delay = False
                                 flit.current_link = (new_current, new_next_node)
@@ -868,9 +936,7 @@ class Network:
                                 flit.current_seat_index = 0
                             elif can_use_T2:
                                 # 使用T2 entry
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T2"] += 1
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T1"] += 1
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] += 1
+                                self._occupy_entry("TL", (new_current, new_next_node), "T2", flit)
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                                 flit.is_delay = False
                                 flit.current_link = (new_current, new_next_node)
@@ -899,8 +965,8 @@ class Network:
                 if next_node == flit.destination:
                     flit.circuits_completed_v += 1
                     link_eject = self.eject_queues["TD"][next_node]
-                    can_use_T1 = self.EQ_UE_Counters["TD"][next_node]["T1"] < self.config.EQ_IN_FIFO_DEPTH
-                    can_use_T2 = self.EQ_UE_Counters["TD"][next_node]["T2"] < self.config.TD_Etag_T2_UE_MAX
+                    can_use_T1 = self._entry_available("TD", next_node, "T1")
+                    can_use_T2 = self._entry_available("TD", next_node, "T2")
 
                     if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH and (
                         (flit.ETag_priority == "T1" and can_use_T1) or (flit.ETag_priority == "T2" and can_use_T2) or (flit.ETag_priority == "T0" and (can_use_T1 or can_use_T2))
@@ -914,16 +980,19 @@ class Network:
                             self.T0_Etag_Order_FIFO.remove((next_node, flit))
                             if can_use_T1:
                                 # T0使用T1 entry
-                                self.EQ_UE_Counters["TD"][next_node]["T1"] += 1
+                                self._occupy_entry("TD", next_node, "T1", flit)
                             else:
                                 # T0使用T2 entry
-                                self.EQ_UE_Counters["TD"][next_node]["T2"] += 1
-                                self.EQ_UE_Counters["TD"][next_node]["T1"] += 1
+                                self._occupy_entry("TD", next_node, "T2", flit)
                         elif flit.ETag_priority == "T2":
-                            self.EQ_UE_Counters["TD"][next_node]["T2"] += 1
-                            self.EQ_UE_Counters["TD"][next_node]["T1"] += 1
+                            self._occupy_entry("TD", next_node, "T2", flit)
                         elif flit.ETag_priority == "T1":
-                            self.EQ_UE_Counters["TD"][next_node]["T1"] += 1
+                            if can_use_T1:
+                                # T1使用T1 entry
+                                self._occupy_entry("TD", next_node, "T1", flit)
+                            else:
+                                # T1使用T2 entry
+                                self._occupy_entry("TD", next_node, "T2", flit)
                     else:
                         # 无法下环,TD方向的flit不能升级T0
                         if self.ETag_BOTHSIDE_UPGRADE and flit.ETag_priority == "T2":
@@ -942,9 +1011,9 @@ class Network:
                 if next_node == flit.destination:
                     flit.circuits_completed_v += 1
                     link_eject = self.eject_queues["TU"][next_node]
-                    can_use_T0 = self.EQ_UE_Counters["TU"][next_node]["T0"] < self.config.EQ_IN_FIFO_DEPTH
-                    can_use_T1 = self.EQ_UE_Counters["TU"][next_node]["T1"] < self.config.TU_Etag_T1_UE_MAX
-                    can_use_T2 = self.EQ_UE_Counters["TU"][next_node]["T2"] < self.config.TU_Etag_T2_UE_MAX
+                    can_use_T0 = self._entry_available("TU", next_node, "T0")
+                    can_use_T1 = self._entry_available("TU", next_node, "T1")
+                    can_use_T2 = self._entry_available("TU", next_node, "T2")
 
                     if flit.ETag_priority in ["T1", "T2"]:
                         if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH and (
@@ -958,19 +1027,14 @@ class Network:
                             flit.current_seat_index = 0
 
                             if flit.ETag_priority == "T2":
-                                self.EQ_UE_Counters["TU"][next_node]["T2"] += 1
-                                self.EQ_UE_Counters["TU"][next_node]["T1"] += 1
-                                self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
+                                self._occupy_entry("TU", next_node, "T2", flit)
                             elif flit.ETag_priority == "T1":
                                 if can_use_T1:
                                     # T1使用T1 entry
-                                    self.EQ_UE_Counters["TU"][next_node]["T1"] += 1
-                                    self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
+                                    self._occupy_entry("TU", next_node, "T1", flit)
                                 else:
                                     # T1使用T2 entry
-                                    self.EQ_UE_Counters["TU"][next_node]["T2"] += 1
-                                    self.EQ_UE_Counters["TU"][next_node]["T1"] += 1
-                                    self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
+                                    self._occupy_entry("TU", next_node, "T2", flit)
                         else:
                             # 无法下环,升级ETag并记录
                             if flit.ETag_priority == "T2":
@@ -988,7 +1052,7 @@ class Network:
                             # 按优先级尝试：T0专用 > T1 > T2
                             if self.T0_Etag_Order_FIFO[0] == (next_node, flit) and can_use_T0:
                                 # 使用T0专用entry
-                                self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
+                                self._occupy_entry("TU", next_node, "T0", flit)
                                 flit.is_delay = False
                                 flit.is_arrive = True
                                 link[flit.current_seat_index] = None
@@ -996,8 +1060,7 @@ class Network:
                                 self.T0_Etag_Order_FIFO.popleft()
                             elif can_use_T1:
                                 # 使用T1 entry
-                                self.EQ_UE_Counters["TU"][next_node]["T1"] += 1
-                                self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
+                                self._occupy_entry("TU", next_node, "T1", flit)
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                                 flit.is_delay = False
                                 flit.is_arrive = True
@@ -1005,9 +1068,7 @@ class Network:
                                 flit.current_seat_index = 0
                             elif can_use_T2:
                                 # 使用T2 entry
-                                self.EQ_UE_Counters["TU"][next_node]["T2"] += 1
-                                self.EQ_UE_Counters["TU"][next_node]["T1"] += 1
-                                self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
+                                self._occupy_entry("TU", next_node, "T2", flit)
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                                 flit.is_delay = False
                                 flit.is_arrive = True
@@ -1036,9 +1097,9 @@ class Network:
                 flit.circuits_completed_h += 1
                 if current - next_node == 1:
                     link_station = self.ring_bridge["TL"].get((new_current, new_next_node))
-                    can_use_T0 = self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] < self.config.RB_IN_FIFO_DEPTH
-                    can_use_T1 = self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T1"] < self.config.TL_Etag_T1_UE_MAX
-                    can_use_T2 = self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T2"] < self.config.TL_Etag_T2_UE_MAX
+                    can_use_T0 = self._entry_available("TL", (new_current, new_next_node), "T0")
+                    can_use_T1 = self._entry_available("TL", (new_current, new_next_node), "T1")
+                    can_use_T2 = self._entry_available("TL", (new_current, new_next_node), "T2")
 
                     if flit.ETag_priority in ["T1", "T2"]:
                         if len(link_station) < self.config.RB_IN_FIFO_DEPTH and (
@@ -1052,19 +1113,14 @@ class Network:
                             flit.current_seat_index = 0
 
                             if flit.ETag_priority == "T2":
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T2"] += 1
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T1"] += 1
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] += 1
+                                self._occupy_entry("TL", (new_current, new_next_node), "T2", flit)
                             elif flit.ETag_priority == "T1":
                                 if can_use_T1:
                                     # T1使用T1 entry
-                                    self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T1"] += 1
-                                    self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] += 1
+                                    self._occupy_entry("TL", (new_current, new_next_node), "T1", flit)
                                 else:
                                     # T1使用T2 entry
-                                    self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T2"] += 1
-                                    self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T1"] += 1
-                                    self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] += 1
+                                    self._occupy_entry("TL", (new_current, new_next_node), "T2", flit)
 
                         else:
                             if flit.ETag_priority == "T2":
@@ -1082,7 +1138,7 @@ class Network:
                             # 按优先级尝试：T0专用 > T1 > T2
                             if self.T0_Etag_Order_FIFO[0] == (next_node, flit) and can_use_T0:
                                 # 使用T0专用entry
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] += 1
+                                self._occupy_entry("TL", (new_current, new_next_node), "T0", flit)
                                 flit.is_delay = False
                                 flit.current_link = (new_current, new_next_node)
                                 link[flit.current_seat_index] = None
@@ -1090,8 +1146,7 @@ class Network:
                                 self.T0_Etag_Order_FIFO.popleft()
                             elif can_use_T1:
                                 # 使用T1 entry
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T1"] += 1
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] += 1
+                                self._occupy_entry("TL", (new_current, new_next_node), "T1", flit)
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                                 flit.is_delay = False
                                 flit.current_link = (new_current, new_next_node)
@@ -1099,9 +1154,7 @@ class Network:
                                 flit.current_seat_index = 0
                             elif can_use_T2:
                                 # 使用T2 entry
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T2"] += 1
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T1"] += 1
-                                self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] += 1
+                                self._occupy_entry("TL", (new_current, new_next_node), "T2", flit)
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                                 flit.is_delay = False
                                 flit.current_link = (new_current, new_next_node)
@@ -1122,8 +1175,8 @@ class Network:
                 else:
                     # 横向环TR尝试下环
                     link_station = self.ring_bridge["TR"].get((new_current, new_next_node))
-                    can_use_T1 = self.RB_UE_Counters["TR"][(new_current, new_next_node)]["T1"] < self.config.RB_IN_FIFO_DEPTH
-                    can_use_T2 = self.RB_UE_Counters["TR"][(new_current, new_next_node)]["T2"] < self.config.TR_Etag_T2_UE_MAX
+                    can_use_T1 = self._entry_available("TR", (new_current, new_next_node), "T1")
+                    can_use_T2 = self._entry_available("TR", (new_current, new_next_node), "T2")
 
                     if len(link_station) < self.config.RB_IN_FIFO_DEPTH and (
                         (flit.ETag_priority == "T1" and can_use_T1) or (flit.ETag_priority == "T2" and can_use_T2) or (flit.ETag_priority == "T0" and (can_use_T1 or can_use_T2))
@@ -1138,16 +1191,19 @@ class Network:
                             self.T0_Etag_Order_FIFO.remove((next_node, flit))
                             if can_use_T1:
                                 # T0使用T1 entry
-                                self.RB_UE_Counters["TR"][(new_current, new_next_node)]["T1"] += 1
+                                self._occupy_entry("TR", (new_current, new_next_node), "T1", flit)
                             else:
                                 # T0使用T2 entry
-                                self.RB_UE_Counters["TR"][(new_current, new_next_node)]["T2"] += 1
-                                self.RB_UE_Counters["TR"][(new_current, new_next_node)]["T1"] += 1
+                                self._occupy_entry("TR", (new_current, new_next_node), "T2", flit)
                         elif flit.ETag_priority == "T2":
-                            self.RB_UE_Counters["TR"][(new_current, new_next_node)]["T2"] += 1
-                            self.RB_UE_Counters["TR"][(new_current, new_next_node)]["T1"] += 1
+                            self._occupy_entry("TR", (new_current, new_next_node), "T2", flit)
                         elif flit.ETag_priority == "T1":
-                            self.RB_UE_Counters["TR"][(new_current, new_next_node)]["T1"] += 1
+                            if can_use_T1:
+                                # T1使用T1 entry
+                                self._occupy_entry("TR", (new_current, new_next_node), "T1", flit)
+                            else:
+                                # T1使用T2 entry
+                                self._occupy_entry("TR", (new_current, new_next_node), "T2", flit)
                     else:
                         link[flit.current_seat_index] = None
                         next_pos = min(next_node + 1, row_end)
@@ -1169,9 +1225,9 @@ class Network:
                 flit.circuits_completed_v += 1
                 if current - next_node == self.config.NUM_COL * 2:
                     link_eject = self.eject_queues["TU"][next_node]
-                    can_use_T0 = self.EQ_UE_Counters["TU"][next_node]["T0"] < self.config.EQ_IN_FIFO_DEPTH
-                    can_use_T1 = self.EQ_UE_Counters["TU"][next_node]["T1"] < self.config.TU_Etag_T1_UE_MAX
-                    can_use_T2 = self.EQ_UE_Counters["TU"][next_node]["T2"] < self.config.TU_Etag_T2_UE_MAX
+                    can_use_T0 = self._entry_available("TU", next_node, "T0")
+                    can_use_T1 = self._entry_available("TU", next_node, "T1")
+                    can_use_T2 = self._entry_available("TU", next_node, "T2")
                     if flit.ETag_priority in ["T1", "T2"]:
                         # up move
                         if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH and (
@@ -1184,19 +1240,14 @@ class Network:
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 0
                             if flit.ETag_priority == "T2":
-                                self.EQ_UE_Counters["TU"][next_node]["T2"] += 1
-                                self.EQ_UE_Counters["TU"][next_node]["T1"] += 1
-                                self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
+                                self._occupy_entry("TU", next_node, "T2", flit)
                             elif flit.ETag_priority == "T1":
                                 if can_use_T1:
                                     # T1使用T1 entry
-                                    self.EQ_UE_Counters["TU"][next_node]["T1"] += 1
-                                    self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
+                                    self._occupy_entry("TU", next_node, "T1", flit)
                                 else:
                                     # T1使用T2 entry
-                                    self.EQ_UE_Counters["TU"][next_node]["T2"] += 1
-                                    self.EQ_UE_Counters["TU"][next_node]["T1"] += 1
-                                    self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
+                                    self._occupy_entry("TU", next_node, "T2", flit)
                         else:
                             if flit.ETag_priority == "T2":
                                 flit.ETag_priority = "T1"
@@ -1212,7 +1263,7 @@ class Network:
                             # 按优先级尝试：T0专用 > T1 > T2
                             if self.T0_Etag_Order_FIFO[0] == (next_node, flit) and can_use_T0:
                                 # 使用T0专用entry
-                                self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
+                                self._occupy_entry("TU", next_node, "T0", flit)
                                 flit.is_delay = False
                                 flit.is_arrive = True
                                 link[flit.current_seat_index] = None
@@ -1220,8 +1271,7 @@ class Network:
                                 self.T0_Etag_Order_FIFO.popleft()
                             elif can_use_T1:
                                 # 使用T1 entry
-                                self.EQ_UE_Counters["TU"][next_node]["T1"] += 1
-                                self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
+                                self._occupy_entry("TU", next_node, "T1", flit)
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                                 flit.is_delay = False
                                 flit.is_arrive = True
@@ -1229,9 +1279,7 @@ class Network:
                                 flit.current_seat_index = 0
                             elif can_use_T2:
                                 # 使用T2 entry
-                                self.EQ_UE_Counters["TU"][next_node]["T2"] += 1
-                                self.EQ_UE_Counters["TU"][next_node]["T1"] += 1
-                                self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
+                                self._occupy_entry("TU", next_node, "T2", flit)
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                                 flit.is_delay = False
                                 flit.is_arrive = True
@@ -1252,8 +1300,8 @@ class Network:
                 else:
                     # down move
                     link_eject = self.eject_queues["TD"][next_node]
-                    can_use_T1 = self.EQ_UE_Counters["TD"][next_node]["T1"] < self.config.EQ_IN_FIFO_DEPTH
-                    can_use_T2 = self.EQ_UE_Counters["TD"][next_node]["T2"] < self.config.TD_Etag_T2_UE_MAX
+                    can_use_T1 = self._entry_available("TD", next_node, "T1")
+                    can_use_T2 = self._entry_available("TD", next_node, "T2")
 
                     if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH and (
                         (flit.ETag_priority == "T1" and can_use_T1) or (flit.ETag_priority == "T2" and can_use_T2) or (flit.ETag_priority == "T0" and (can_use_T1 or can_use_T2))
@@ -1267,16 +1315,19 @@ class Network:
                             self.T0_Etag_Order_FIFO.remove((next_node, flit))
                             if can_use_T1:
                                 # T0使用T1 entry
-                                self.EQ_UE_Counters["TD"][next_node]["T1"] += 1
+                                self._occupy_entry("TD", next_node, "T1", flit)
                             else:
                                 # T0使用T2 entry
-                                self.EQ_UE_Counters["TD"][next_node]["T2"] += 1
-                                self.EQ_UE_Counters["TD"][next_node]["T1"] += 1
+                                self._occupy_entry("TD", next_node, "T2", flit)
                         elif flit.ETag_priority == "T2":
                             self.EQ_UE_Counters["TD"][next_node]["T2"] += 1
-                            self.EQ_UE_Counters["TD"][next_node]["T1"] += 1
                         elif flit.ETag_priority == "T1":
-                            self.EQ_UE_Counters["TD"][next_node]["T1"] += 1
+                            if can_use_T1:
+                                # T1使用T1 entry
+                                self._occupy_entry("TD", next_node, "T1", flit)
+                            else:
+                                # T1使用T2 entry
+                                self._occupy_entry("TD", next_node, "T2", flit)
                     else:
                         link[flit.current_seat_index] = None
                         next_pos = min(next_node + self.config.NUM_COL * 2, col_end)
@@ -1326,9 +1377,7 @@ class Network:
                     link[flit.current_seat_index] = None
                     flit.current_seat_index = 0
                     # 更新计数器
-                    self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T2"] += 1
-                    self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T1"] += 1
-                    self.RB_UE_Counters["TL"][(new_current, new_next_node)]["T0"] += 1
+                    self._occupy_entry("TL", (new_current, new_next_node), "T2", flit)
                 else:
                     # TL无空位：预留到右侧等待队列，设置延迟标志，ETag升级
                     flit.ETag_priority = "T1"
@@ -1345,8 +1394,7 @@ class Network:
                     flit.current_link = (new_current, new_next_node)
                     link[flit.current_seat_index] = None
                     flit.current_seat_index = 1
-                    self.RB_UE_Counters["TR"][(new_current, new_next_node)]["T2"] += 1
-                    self.RB_UE_Counters["TR"][(new_current, new_next_node)]["T1"] += 1
+                    self._occupy_entry("TR", (new_current, new_next_node), "T2", flit)
                 else:
                     # TR无空位：设置延迟标志，如果双边ETag升级，则升级ETag。
                     if self.ETag_BOTHSIDE_UPGRADE:
@@ -1364,9 +1412,7 @@ class Network:
                     link[flit.current_seat_index] = None
                     flit.current_seat_index = 0
                     flit.is_arrive = True
-                    self.EQ_UE_Counters["TU"][next_node]["T2"] += 1
-                    self.EQ_UE_Counters["TU"][next_node]["T1"] += 1
-                    self.EQ_UE_Counters["TU"][next_node]["T0"] += 1
+                    self._occupy_entry("TU", next_node, "T2", flit)
                 else:
                     flit.ETag_priority = "T1"
                     next_pos = next_node - self.config.NUM_COL * 2 if next_node - self.config.NUM_COL * 2 >= col_start else col_start
@@ -1380,8 +1426,7 @@ class Network:
                     link[flit.current_seat_index] = None
                     flit.current_seat_index = 0
                     flit.is_arrive = True
-                    self.EQ_UE_Counters["TD"][next_node]["T2"] += 1
-                    self.EQ_UE_Counters["TD"][next_node]["T1"] += 1
+                    self._occupy_entry("TD", next_node, "T2", flit)
                 else:
                     if self.ETag_BOTHSIDE_UPGRADE:
                         flit.ETag_priority = "T1"

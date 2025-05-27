@@ -154,7 +154,9 @@ class BaseModel:
 
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
-        self.flit_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
+        self.flit_positions = set(
+            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
+        )
 
         self.type_to_positions = {
             "req": self.sn_positions,
@@ -228,7 +230,7 @@ class BaseModel:
 
             self.release_completed_sn_tracker()
 
-            self.enqueue_new_request()
+            self.enqueue_request()
             self.enqueue_data()
 
             self._Inject_Queue_arbitration_req_network()
@@ -340,10 +342,10 @@ class BaseModel:
                         self.node.rn_tracker["read"][ip_type][in_pos].remove(req)
                         self.node.rn_tracker_count["read"][ip_type][in_pos] += 1
                         self.node.rn_tracker_pointer["read"][ip_type][in_pos] -= 1
-                else:
-                    print(f"Warning: packet_id {packet_id} not found in rn_rdb or empty list")
-                    # 清理不一致的状态
-                    # self.node.rn_rdb_recv[ip_type][in_pos].pop(0)
+                # else:
+                #     print(f"Warning: packet_id {packet_id} not found in rn_rdb or empty list")
+                # 清理不一致的状态
+                # self.node.rn_rdb_recv[ip_type][in_pos].pop(0)
 
     def process_sn_received_data(self, in_pos):
         """Handle received write data in the SN network."""
@@ -385,10 +387,14 @@ class BaseModel:
                     self.node.sn_tracker[sn_type][in_pos].remove(req)
                     self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] += 1
                     # 检查是否有等待的请求
-                    if self.node.sn_wdb_count[sn_type][in_pos] > 0 and self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] > 0 and self.node.sn_req_wait[req.req_type][sn_type][in_pos]:
+                    if (
+                        self.node.sn_wdb_count[sn_type][in_pos] > 0
+                        and self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] > 0
+                        and self.node.sn_req_wait[req.req_type][sn_type][in_pos]
+                    ):
                         new_req = self.node.sn_req_wait[req.req_type][sn_type][in_pos].pop(0)
                         new_req.sn_tracker_type = req.sn_tracker_type
-                        new_req.req_attr = "old"
+                        # new_req.req_attr = "old"
                         self.node.sn_tracker[sn_type][in_pos].append(new_req)
                         self.node.sn_tracker_count[sn_type][new_req.sn_tracker_type][in_pos] -= 1
                         self.node.sn_wdb_count[sn_type][in_pos] -= new_req.burst_length
@@ -426,7 +432,11 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
+            print(
+                f"Data statistic: Read: {self.read_req, self.read_flit}, "
+                f"Write: {self.write_req, self.write_flit}, "
+                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
+            )
 
     def log_summary(self):
         if self.verbose:
@@ -502,32 +512,28 @@ class BaseModel:
 
     def _try_inject_to_direction(self, req: Flit, ip_type, ip_pos, direction, counts):
         """检查tracker空间并尝试注入到指定direction的pre缓冲"""
-        # if req.req_attr == "old":
-        #     # 直接注入到指定direction的pre缓冲
-        #     self.error_log(req, 6554)
-        #     queue_pre = self.req_network.inject_queues_pre[direction]
-        #     queue_pre[ip_pos] = req
-        #     return True
-
         # 检查tracker空间
-        if req.req_attr == "old":  # retry请求
-            # Retry请求已经有专用的tracker，不需要检查tracker可用性
-            # 但仍需要检查data buffer空间（如果需要的话）
-            if req.req_type == "write":
-                # 对于写请求的retry，检查data buffer是否有足够空间
-                if not (self.node.rn_wdb_count[ip_type][ip_pos] >= req.burst_length):
-                    return False
-            # 读请求的retry不需要额外检查，因为data buffer空间在negative响应时已经恢复
+        # if req.req_attr == "old":  # retry请求
+        #     # Retry请求已经有专用的tracker，不需要检查tracker可用性
+        #     # 但仍需要检查data buffer空间（如果需要的话）
+        #     if req.req_type == "write":
+        #         # 对于写请求的retry，检查data buffer是否有足够空间
+        #         if not (self.node.rn_wdb_count[ip_type][ip_pos] >= req.burst_length):
+        #             return False
+        #     # 读请求的retry不需要额外检查，因为data buffer空间在negative响应时已经恢复
 
-        else:  # 新请求
-            # 检查tracker空间
-            if req.req_type == "read":
-                if not (self.node.rn_rdb_count[ip_type][ip_pos] > self.node.rn_rdb_reserve[ip_type][ip_pos] * req.burst_length and self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] > 0):
-                    return False
+        # else:  # 新请求
+        #     # 检查tracker空间
+        #     if req.req_type == "read":
+        #         if not (
+        #             self.node.rn_rdb_count[ip_type][ip_pos] > self.node.rn_rdb_reserve[ip_type][ip_pos] * req.burst_length
+        #             and self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] > 0
+        #         ):
+        #             return False
 
-            elif req.req_type == "write":
-                if not (self.node.rn_wdb_count[ip_type][ip_pos] >= req.burst_length and self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] > 0):
-                    return False
+        #     elif req.req_type == "write":
+        #         if not (self.node.rn_wdb_count[ip_type][ip_pos] >= req.burst_length and self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] > 0):
+        #             return False
 
         # 直接注入到指定direction的pre缓冲
         queue_pre = self.req_network.inject_queues_pre[direction]
@@ -540,27 +546,25 @@ class BaseModel:
         if req.req_attr == "new":  # 只有新请求才更新计数器和tracker
             if req.req_type == "read":
                 counts["read"] += 1
-                self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] -= 1
-                self.node.rn_rdb_count[ip_type][ip_pos] -= req.burst_length
-                # 在tracker中记录
-                self.node.rn_tracker[req.req_type][ip_type][ip_pos].append(req)
-                self.node.rn_rdb[ip_type][ip_pos][req.packet_id] = []
+                # self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] -= 1
+                # self.node.rn_rdb_count[ip_type][ip_pos] -= req.burst_length
+                # # 在tracker中记录
+                # self.node.rn_tracker[req.req_type][ip_type][ip_pos].append(req)
+                # self.node.rn_rdb[ip_type][ip_pos][req.packet_id] = []
 
             elif req.req_type == "write":
                 counts["write"] += 1
-                self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] -= 1
-                self.node.rn_wdb_count[ip_type][ip_pos] -= req.burst_length
+                # self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] -= 1
+                # self.node.rn_wdb_count[ip_type][ip_pos] -= req.burst_length
                 # 在tracker中记录
-                self.node.rn_tracker[req.req_type][ip_type][ip_pos].append(req)
-                self.node.rn_wdb[ip_type][ip_pos][req.packet_id] = []
+                # self.node.rn_tracker[req.req_type][ip_type][ip_pos].append(req)
+                # self.node.rn_wdb[ip_type][ip_pos][req.packet_id] = []
                 self.create_write_packet(req)
 
-        else:  # retry请求
-            # Retry请求不需要重新分配tracker，但需要更新data buffer计数
-            if req.req_type == "write":
-                self.node.rn_wdb_count[ip_type][ip_pos] -= req.burst_length
-                # 重新创建写数据包
-                self.create_write_packet(req)
+        # else:  # retry请求
+        #     # Retry请求不需要重新分配tracker，但需要更新data buffer计数
+        #     if req.req_type == "write":
+        #         self.node.rn_wdb_count[ip_type][ip_pos] -= req.burst_length
 
         req.req_entry_network_cycle = self.cycle
         return True
@@ -689,12 +693,13 @@ class BaseModel:
                                         (req for req in self.node.rn_tracker["write"][ip_type][ip_pos] if req.packet_id == flit.packet_id),
                                         None,
                                     )
-                                    if req:  # 添加检查
+                                    if req:
+                                        # 释放 tracker 资源
                                         self.node.rn_tracker["write"][ip_type][ip_pos].remove(req)
                                         self.node.rn_tracker_count["write"][ip_type][ip_pos] += 1
                                         self.node.rn_tracker_pointer["write"][ip_type][ip_pos] -= 1
-                                        self.node.rn_wdb[ip_type][ip_pos].pop(req.packet_id)
-                                        self.node.rn_wdb_count[ip_type][ip_pos] += req.burst_length
+                                    # rn_wdb 以及计数在 enqueue_data 已经恢复，这里仅确保条目不存在，避免 KeyError
+                                    self.node.rn_wdb[ip_type][ip_pos].pop(flit.packet_id, None)
 
                     if processed:
                         # 处理成功，将ip_type放到这个direction队列的队尾
@@ -788,7 +793,64 @@ class BaseModel:
             # self._done_flags[net_type] = True  # 标记为已完成
             time.sleep(0.3)
 
-    def enqueue_new_request(self):
+    def enqueue_request(self):
+        # ---------------------------------------------------------------
+        # 1) 先尝试把由于 OSTD 不足而挂起的请求重新注入
+        # ---------------------------------------------------------------
+        if self.node.rn_wait_to_inject:
+            # 用副本遍历，便于在循环中安全地删除元素
+            pending = list(self.node.rn_wait_to_inject)
+            for req in pending:
+                ip_pos  = req.source
+                ip_type = req.source_type
+
+                # 判断当前是否有可用的 OSTD
+                if req.req_type == "read":
+                    ostd_ok = (
+                        self.node.rn_rdb_count[ip_type][ip_pos] >
+                        self.node.rn_rdb_reserve[ip_type][ip_pos] * req.burst_length
+                        and self.node.rn_tracker_count["read"][ip_type][ip_pos] > 0
+                    )
+                else:  # write
+                    ostd_ok = (
+                        self.node.rn_wdb_count[ip_type][ip_pos] >= req.burst_length
+                        and self.node.rn_tracker_count["write"][ip_type][ip_pos] > 0
+                    )
+
+                if not ostd_ok:
+                    # 仍然没有资源，保留在等待队列
+                    continue
+                
+                # DMA读写间隔控制
+                max_gap = self.config.GDMA_RW_GAP if ip_type.startswith("gdma") else self.config.SDMA_RW_GAP
+                counts = self.dma_rw_counts[ip_type][ip_pos]
+                rd, wr = counts["read"], counts["write"]
+
+                if req.req_type == "read" and abs(rd + 1 - wr) >= max_gap:
+                    continue
+                elif req.req_type == "write" and abs(wr + 1 - rd) >= max_gap:
+                    continue
+
+                # 立即占用 tracker / 数据缓冲
+                if req.req_type == "read":
+                    self.node.rn_rdb_count[ip_type][ip_pos] -= req.burst_length
+                    self.node.rn_tracker_count["read"][ip_type][ip_pos] -= 1
+                    self.node.rn_rdb[ip_type][ip_pos][req.packet_id] = []
+                    self.node.rn_tracker["read"][ip_type][ip_pos].append(req)
+                else:  # write
+                    self.node.rn_wdb_count[ip_type][ip_pos] -= req.burst_length
+                    self.node.rn_tracker_count["write"][ip_type][ip_pos] -= 1
+                    self.node.rn_wdb[ip_type][ip_pos][req.packet_id] = []
+                    self.node.rn_tracker["write"][ip_type][ip_pos].append(req)
+
+                # 放入 IQ_channel_buffer，等待后续方向仲裁
+                self.req_network.IQ_channel_buffer[ip_type][ip_pos].append(req)
+                req.tracker_reserved = True
+
+                # 从等待列表中移除
+                self.node.rn_wait_to_inject.remove(req)
+        # ---------------------------------------------------------------
+
         while True:
             # Get next request if we don't have one cached
             if self.next_req is None:
@@ -823,7 +885,29 @@ class BaseModel:
 
             # Add to appropriate network structures
             self.req_network.send_flits[req.packet_id].append(req)
-            self.req_network.IQ_channel_buffer[req.source_type][req.source].append(req)
+            ip_pos = req.source  # 节点坐标
+            ip_type = req.source_type
+            if req.req_type == "read":
+                if (
+                    self.node.rn_rdb_count[ip_type][ip_pos] > self.node.rn_rdb_reserve[ip_type][ip_pos] * req.burst_length
+                    and self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] > 0
+                ):
+                    self.node.rn_rdb_count[ip_type][ip_pos] -= req.burst_length
+                    self.node.rn_tracker_count["read"][ip_type][ip_pos] -= 1
+                    self.node.rn_rdb[ip_type][ip_pos][req.packet_id] = []
+                    self.node.rn_tracker["read"][ip_type][ip_pos].append(req)
+                    self.req_network.IQ_channel_buffer[req.source_type][req.source].append(req)
+                else:
+                    self.node.rn_wait_to_inject.append(req)
+            else:  # write
+                if self.node.rn_wdb_count[ip_type][ip_pos] >= req.burst_length and self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] > 0:
+                    self.node.rn_wdb_count[ip_type][ip_pos] -= req.burst_length
+                    self.node.rn_tracker_count["write"][ip_type][ip_pos] -= 1
+                    self.node.rn_wdb[ip_type][ip_pos][req.packet_id] = []
+                    self.node.rn_tracker["write"][ip_type][ip_pos].append(req)
+                    self.req_network.IQ_channel_buffer[req.source_type][req.source].append(req)
+                else:
+                    self.node.rn_wait_to_inject.append(req)
             if req.req_type == "read":
                 self.R_tail_latency_stat = req_data[0]
             elif req.req_type == "write":
@@ -888,7 +972,8 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
+                    for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
@@ -936,21 +1021,17 @@ class BaseModel:
         """更新transfer stations"""
         if index == 0:
             flit = network.ring_bridge["TL"][(pos, next_pos)].popleft()
-            if flit.ETag_priority == "T0":
+            if flit.used_entry_level == "T0":
                 network.RB_UE_Counters["TL"][(pos, next_pos)]["T0"] -= 1
-            elif flit.ETag_priority == "T1":
-                network.RB_UE_Counters["TL"][(pos, next_pos)]["T0"] -= 1
+            elif flit.used_entry_level == "T1":
                 network.RB_UE_Counters["TL"][(pos, next_pos)]["T1"] -= 1
-            else:
-                network.RB_UE_Counters["TL"][(pos, next_pos)]["T0"] -= 1
-                network.RB_UE_Counters["TL"][(pos, next_pos)]["T1"] -= 1
+            elif flit.used_entry_level == "T2":
                 network.RB_UE_Counters["TL"][(pos, next_pos)]["T2"] -= 1
         elif index == 1:
             flit = network.ring_bridge["TR"][(pos, next_pos)].popleft()
-            if flit.ETag_priority == "T1" or flit.ETag_priority == "T0":
+            if flit.used_entry_level == "T1":
                 network.RB_UE_Counters["TR"][(pos, next_pos)]["T1"] -= 1
-            else:
-                network.RB_UE_Counters["TR"][(pos, next_pos)]["T1"] -= 1
+            elif flit.used_entry_level == "T2":
                 network.RB_UE_Counters["TR"][(pos, next_pos)]["T2"] -= 1
         elif index == 2:
             flit = network.inject_queues["TU"][pos].popleft()
@@ -963,6 +1044,7 @@ class BaseModel:
             self.RB_ETag_T0_num_stat += 1
 
         flit.ETag_priority = "T2"
+        # flit.used_entry_level = None
         network.round_robin["RB"][fifo_name][next_pos].remove(index)
         network.round_robin["RB"][fifo_name][next_pos].append(index)
 
@@ -1155,8 +1237,12 @@ class BaseModel:
 
                     ip_data_buffer = self.node.rn_wdb[ip_type][ip_pos][packet_id]
                     if not ip_data_buffer:
-                        # 数据buffer为空，清理相关记录
-                        self.node.rn_wdb[ip_type][ip_pos].pop(packet_id)
+                        # 当前 burst 的所有 flit 已全部送出，释放写数据缓冲占用并清理记录
+                        flit = self.req_network.send_flits[packet_id][0]
+                        self.node.rn_wdb_count[ip_type][ip_pos] += flit.burst_length
+                        # 删除写数据缓冲中对应的 packet 记录（若仍存在）
+                        self.node.rn_wdb[ip_type][ip_pos].pop(packet_id, None)
+                        # 将 packet_id 从发送队列移除
                         ip_send_queue.pop(0)
                         continue
 
@@ -1176,7 +1262,9 @@ class BaseModel:
 
                         # 若该 burst 已发完，移除 packet_id
                         if not ip_data_buffer:
-                            # self.node.rn_wdb[ip_type][ip_pos].pop(packet_id)
+                            # 当前 burst 的所有 flit 已全部送出，释放写数据缓冲占用并清理记录
+                            self.node.rn_wdb_count[ip_type][ip_pos] += flit.burst_length
+                            self.node.rn_wdb[ip_type][ip_pos].pop(packet_id, None)
                             ip_send_queue.pop(0)
 
                 # 处理 ddr/l2m (保持原逻辑)
@@ -1214,77 +1302,83 @@ class BaseModel:
 
         if rsp.req_type == "read":
             if rsp.rsp_type == "negative":
-                # 收到negative响应，准备重试
-                req.req_state = "invalid"
-                req.is_injected = False
-                req.path_index = 0
-                req.req_attr = "old"
-                req.is_arrive = False
-                self.node.rn_rdb_count[ip_type][in_pos] += req.burst_length
-                if req.packet_id in self.node.rn_rdb[ip_type][in_pos]:
-                    self.node.rn_rdb[ip_type][in_pos].pop(req.packet_id)
-                self.node.rn_tracker_wait["read"][ip_type][in_pos].append(req)
-                # 增加reserve计数，表示有请求需要重试
-                self.node.rn_rdb_reserve[ip_type][in_pos] += 1
+                if req.req_attr == "new":
+                    # 收到negative响应，准备重试
+                    req.req_state = "invalid"
+                    req.is_injected = False
+                    req.path_index = 0
+                    req.req_attr = "old"
+                    # req.is_arrive = False
+                    self.node.rn_rdb_count[ip_type][in_pos] += req.burst_length
+                    if req.packet_id in self.node.rn_rdb[ip_type][in_pos]:
+                        self.node.rn_rdb[ip_type][in_pos].pop(req.packet_id)
+                    self.node.rn_tracker_wait["read"][ip_type][in_pos].append(req)
+                    # 增加reserve计数，表示有请求需要重试
+                    self.node.rn_rdb_reserve[ip_type][in_pos] += 1
 
             elif rsp.rsp_type == "positive":
                 # 收到positive响应，将重试请求放回channel buffer
                 if self.node.rn_rdb_reserve[ip_type][in_pos] > 0:
                     # 找到对应的重试请求
-                    req = next((r for r in self.node.rn_tracker_wait["read"][ip_type][in_pos] if r.req_state == "invalid" and r.packet_id == rsp.packet_id), None)
+                    retry_req = next((r for r in self.node.rn_tracker_wait["read"][ip_type][in_pos] if r.req_state == "invalid" and r.packet_id == rsp.packet_id), None)
 
-                    if req:
+                    if retry_req:
                         # 从tracker_wait中移除
-                        self.node.rn_tracker_wait["read"][ip_type][in_pos].remove(req)
+                        self.node.rn_tracker_wait["read"][ip_type][in_pos].remove(retry_req)
 
                         # 重置请求状态，准备重新注入
-                        req.req_state = "valid"
-                        req.is_injected = False
-                        req.path_index = 0
-                        req.is_new_on_network = True
-                        req.is_arrive = False
+                        retry_req.req_state = "valid"
+                        retry_req.is_injected = False
+                        retry_req.path_index = 0
+                        retry_req.is_new_on_network = True
+                        retry_req.is_arrive = False
 
                         # 重新放回channel buffer队尾
-                        self.req_network.IQ_channel_buffer[ip_type][in_pos].append(req)
+                        self.req_network.IQ_channel_buffer[ip_type][in_pos].append(retry_req)
 
                         # 减少reserve计数
                         self.node.rn_rdb_reserve[ip_type][in_pos] -= 1
 
         elif rsp.req_type == "write":
             if rsp.rsp_type == "negative":
-                # 收到negative响应，准备重试
-                req.req_state = "invalid"
-                req.req_attr = "old"
-                req.is_injected = False
-                req.path_index = 0
-                req.is_arrive = False
-                self.node.rn_tracker_wait["write"][ip_type][in_pos].append(req)
-                # 增加reserve计数，表示有请求需要重试
-                self.node.rn_wdb_reserve[ip_type][in_pos] += 1
-
+                if req.req_attr == "new":
+                    # 收到negative响应，准备重试
+                    req.req_state = "invalid"
+                    req.req_attr = "old"
+                    req.is_injected = False
+                    req.path_index = 0
+                    # req.is_arrive = False
+                    self.node.rn_tracker_wait["write"][ip_type][in_pos].append(req)
+                    # 增加reserve计数，表示有请求需要重试
+                    self.node.rn_wdb_reserve[ip_type][in_pos] += 1
+                elif req.req_attr == "old":
+                    # 收到positive的相应已经重发请求，不需要再放入rn_tracker_wait中
+                    pass
             elif rsp.rsp_type == "positive":
-                self.error_log(rsp, 6554)
                 # 收到positive响应，将重试请求放回channel buffer
                 if self.node.rn_wdb_reserve[ip_type][in_pos] > 0:
                     # 找到对应的重试请求
-                    req: Flit = next((r for r in self.node.rn_tracker_wait["write"][ip_type][in_pos] if r.req_state == "invalid" and r.packet_id == rsp.packet_id), None)
+                    retry_req: Flit = next((r for r in self.node.rn_tracker_wait["write"][ip_type][in_pos] if r.req_state == "invalid" and r.packet_id == rsp.packet_id), None)
 
-                    if req:
+                    if retry_req:
                         # 从tracker_wait中移除
                         self.node.rn_tracker_wait["write"][ip_type][in_pos].remove(req)
-
-                        # 重置请求状态，准备重新注入
-                        req.req_state = "valid"
-                        req.is_injected = False
-                        req.path_index = 0
-                        req.is_new_on_network = True
-                        req.is_arrive = False
-
-                        # 重新放回channel buffer队尾
-                        self.req_network.IQ_channel_buffer[ip_type][in_pos].append(req)
-
                         # 减少reserve计数
                         self.node.rn_wdb_reserve[ip_type][in_pos] -= 1
+                    else:
+                        # 可能negative的相应还没有到达，所以在wait中找不到对应的请求，在tracker中寻找
+                        retry_req = req
+
+                    # 重置请求状态，准备重新注入
+                    retry_req.req_state = "valid"
+                    retry_req.req_attr = "old"
+                    retry_req.is_injected = False
+                    retry_req.path_index = 0
+                    retry_req.is_new_on_network = True
+                    retry_req.is_arrive = False
+
+                    # 重新放回channel buffer队尾
+                    self.req_network.IQ_channel_buffer[ip_type][in_pos].append(req)
 
             else:  # datasend 响应
                 self.node.rn_wdb_send[ip_type][in_pos].append(rsp.packet_id)
@@ -1305,7 +1399,9 @@ class BaseModel:
                     if network.links_tag[(i, j)][-1] == [j, "TR"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["TR"][j] += 1
-                elif i - j == self.config.NUM_COL * 2 or (i == j and i in range(self.config.NUM_NODE - self.config.NUM_COL * 2, self.config.NUM_COL + self.config.NUM_NODE - self.config.NUM_COL * 2)):
+                elif i - j == self.config.NUM_COL * 2 or (
+                    i == j and i in range(self.config.NUM_NODE - self.config.NUM_COL * 2, self.config.NUM_COL + self.config.NUM_NODE - self.config.NUM_COL * 2)
+                ):
                     if network.links_tag[(i, j)][-1] == [j, "TU"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["TU"][j] += 1
@@ -1387,21 +1483,17 @@ class BaseModel:
                     eject_flits[i] = None
                     if i == 0:
                         flit = network.eject_queues["TU"][ip_pos].popleft()
-                        if flit.ETag_priority == "T0":
+                        if flit.used_entry_level == "T0":
                             network.EQ_UE_Counters["TU"][ip_pos]["T0"] -= 1
-                        elif flit.ETag_priority == "T1":
-                            network.EQ_UE_Counters["TU"][ip_pos]["T0"] -= 1
+                        elif flit.used_entry_level == "T1":
                             network.EQ_UE_Counters["TU"][ip_pos]["T1"] -= 1
-                        else:
-                            network.EQ_UE_Counters["TU"][ip_pos]["T0"] -= 1
-                            network.EQ_UE_Counters["TU"][ip_pos]["T1"] -= 1
+                        elif flit.used_entry_level == "T2":
                             network.EQ_UE_Counters["TU"][ip_pos]["T2"] -= 1
                     elif i == 1:
                         flit = network.eject_queues["TD"][ip_pos].popleft()
-                        if flit.ETag_priority == "T1" or flit.ETag_priority == "T0":
+                        if flit.used_entry_level == "T1":
                             network.EQ_UE_Counters["TD"][ip_pos]["T1"] -= 1
-                        else:
-                            network.EQ_UE_Counters["TD"][ip_pos]["T1"] -= 1
+                        elif flit.used_entry_level == "T2":
                             network.EQ_UE_Counters["TD"][ip_pos]["T2"] -= 1
                     elif i == 2:
                         flit = network.inject_queues["EQ"][in_pos].popleft()
@@ -1413,6 +1505,7 @@ class BaseModel:
                     elif flit.ETag_priority == "T0":
                         self.EQ_ETag_T0_num_stat += 1
                     flit.ETag_priority = "T2"
+                    # flit.used_entry_level = None
 
                     rr_queue.remove(i)
                     rr_queue.append(i)
@@ -1477,7 +1570,9 @@ class BaseModel:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             if req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
+                latency = np.random.uniform(
+                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
+                )
             else:
                 latency = self.config.L2M_R_LATENCY
             flit.departure_cycle = self.cycle + latency + i * self.config.NETWORK_FREQUENCY

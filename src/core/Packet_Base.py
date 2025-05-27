@@ -19,7 +19,7 @@ class Packet_Base_model(BaseModel):
             # self.flit_trace(39)
 
             # Process requests
-            self.enqueue_new_request()
+            self.enqueue_request()
 
             # Inject and process flits for requests
             if self.rn_type != "Idle":
@@ -242,7 +242,11 @@ class Packet_Base_model(BaseModel):
         """
         for ip_pos in set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.GDMA_SEND_POSITION_LIST):
             inject_flits = [
-                (self.node.sn_rdb[self.sn_type][ip_pos][0] if self.node.sn_rdb[self.sn_type][ip_pos] and self.node.sn_rdb[self.sn_type][ip_pos][0].departure_cycle <= self.cycle else None),
+                (
+                    self.node.sn_rdb[self.sn_type][ip_pos][0]
+                    if self.node.sn_rdb[self.sn_type][ip_pos] and self.node.sn_rdb[self.sn_type][ip_pos][0].departure_cycle <= self.cycle
+                    else None
+                ),
                 (self.node.rn_wdb[self.rn_type][ip_pos][self.node.rn_wdb_send[self.rn_type][ip_pos][0]][0] if len(self.node.rn_wdb_send[self.rn_type][ip_pos]) > 0 else None),
             ]
             for direction in self.directions:
@@ -464,7 +468,9 @@ class Packet_Base_model(BaseModel):
                 #     network.ring_bridge["right"][(pos, next_pos)][0] if network.ring_bridge["right"][(pos, next_pos)] else None,
                 #     network.ring_bridge["ft"][(pos, next_pos)][0] if network.ring_bridge["ft"][(pos, next_pos)] else None,
                 # ]
-                station_flits = [network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]]
+                station_flits = [
+                    network.ring_bridge[fifo_pos][(pos, next_pos)][0] if network.ring_bridge[fifo_pos][(pos, next_pos)] else None for fifo_pos in ["up", "left", "right", "ft"]
+                ]
                 # if not all(flit is None for flit in station_flits):
                 #     print(station_flits)
 
