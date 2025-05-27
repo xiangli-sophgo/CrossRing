@@ -309,14 +309,16 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
 # 示例使用
 if __name__ == "__main__":
     # 参数配置
-    TOPO = "3x3"
-    INTERVAL_COUNT = 128
-    FILE_NAME = "../../test_data/traffic_2260E_case2.txt"
+    # TOPO = "3x3"
+    TOPO = "5x4"
+    INTERVAL_COUNT = 10
+    FILE_NAME = "../../test_data/traffic_2262_case1.txt"
+    # FILE_NAME = "../../test_data/traffic_2260E_case2.txt"
     # FILE_NAME = "../../test_data/traffic_2262_case1.txt"
     np.random.seed(520)
 
     if TOPO == "5x4":
-        BURST = 2
+        BURST = 4
         NUM_IP = 16
         SDMA_MAP = {
             "sdma_0": range(NUM_IP),
@@ -369,7 +371,7 @@ if __name__ == "__main__":
             "l2m_1": [1, 7],
         }
 
-    SPEED = {1: 128, 2: 128, 4: 128}  # 不同burst对应的带宽(GB/s)
+    SPEED = {1: 128, 2: 128, 4: 256}  # 不同burst对应的带宽(GB/s)
     # read_duration = 0
     # write_duration = 128
     overlap = 1

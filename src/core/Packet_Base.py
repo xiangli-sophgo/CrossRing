@@ -19,7 +19,7 @@ class Packet_Base_model(BaseModel):
             # self.flit_trace(39)
 
             # Process requests
-            self.enqueue_new_requests()
+            self.enqueue_new_request()
 
             # Inject and process flits for requests
             if self.rn_type != "Idle":
