@@ -3,7 +3,7 @@ from collections import deque, defaultdict
 
 from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths
 from config.config import CrossRingConfig
-from src.utils.component import Flit, Network, Node, TokenBucket
+from src.utils.component import Flit, Network, Node, TokenBucket, IPInterface
 
 # from src.core.CrossRing_Piece_Visualizer import CrossRingVisualizer
 # from src.core.Link_State_Visualizer import create_optimized_visualizer
@@ -117,8 +117,24 @@ class BaseModel:
             self.link_state_vis = NetworkLinkVisualizer(self.req_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
             self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
+        self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST)
+        self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
+        self.flit_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
+        self.ip_modules = {}
+        for ip_pos in self.flit_positions:
+            for ip_type in self.config.CH_NAME_LIST:
+                self.ip_modules[(ip_type, ip_pos)] = IPInterface(
+                    ip_type,
+                    ip_pos,
+                    self.config,
+                    self.req_network,
+                    self.rsp_network,
+                    self.data_network,
+                    self.node,
+                    self.routes,
+                )
         self.flits = []
         self.throughput_time = []
         self.data_count = 0
@@ -151,12 +167,6 @@ class BaseModel:
         }
         self.read_ip_intervals = defaultdict(list)  # 存储每个IP的读请求时间区间
         self.write_ip_intervals = defaultdict(list)  # 存储每个IP的写请求时间区间
-
-        self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST)
-        self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
-        self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
-        )
 
         self.type_to_positions = {
             "req": self.sn_positions,
@@ -225,13 +235,12 @@ class BaseModel:
         while True:
             self.cycle += 1
             self.cycle_mod = self.cycle % self.config.NETWORK_FREQUENCY
-            # if self.cycle == 1538:
-            #     print("here")
 
             self.release_completed_sn_tracker()
 
-            self.enqueue_request()
-            self.enqueue_data()
+            self.process_new_request()
+            
+            self.ip_inject_to_network()
 
             self._Inject_Queue_arbitration_req_network()
             reqs = self.move_flits_in_network(self.req_network, reqs, "req")
@@ -242,11 +251,13 @@ class BaseModel:
             self._Inject_Queue_arbitration_data_network()
             flits = self.move_flits_in_network(self.data_network, flits, "data")
 
-            self.debug_func()
-
-            self.process_received_data()
+            self.network_to_ip_eject()
 
             self.move_pre_to_queues_all()
+
+            self.debug_func()
+
+            # self.process_received_data()
 
             # Tag moves
             self.tag_move_all_networks()
@@ -290,90 +301,17 @@ class BaseModel:
 
             self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle)
 
-    def process_received_data(self):
-        """Process received data in RN and SN networks."""
-        # if self.cycle_mod == 0:
-        # return
-        positions = self.flit_positions
-        for in_pos in positions:
-            self.process_rn_received_data(in_pos)
-            self.process_sn_received_data(in_pos)
+    def ip_inject_to_network(self):
+        for ip_pos in self.flit_positions:
+            for ip_type in self.config.CH_NAME_LIST:
+                ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
+                ip_interface.inject_step(self.cycle)
 
-    def process_rn_received_data(self, in_pos):
-        """Handle received read data in the RN network."""
-        for ip_type in self.req_network.EQ_channel_buffer.keys():
-            if ip_type.startswith("ddr") or ip_type.startswith("l2m"):
-                continue
-
-            # 增加更严格的检查
-            if in_pos in self.node.rn_rdb_recv[ip_type] and len(self.node.rn_rdb_recv[ip_type][in_pos]) > 0:
-
-                packet_id = self.node.rn_rdb_recv[ip_type][in_pos][0]
-
-                # 关键修复：检查 packet_id 是否存在且对应列表非空
-                if packet_id in self.node.rn_rdb[ip_type][in_pos] and len(self.node.rn_rdb[ip_type][in_pos][packet_id]) > 0:
-
-                    self.node.rn_rdb[ip_type][in_pos][packet_id].pop(0)
-
-                    # 如果列表为空，清理 packet_id
-                    if len(self.node.rn_rdb[ip_type][in_pos][packet_id]) == 0:
-                        self.node.rn_rdb[ip_type][in_pos].pop(packet_id)
-                        self.node.rn_rdb_recv[ip_type][in_pos].pop(0)
-                        self.node.rn_rdb_count[ip_type][in_pos] += self.req_network.send_flits[packet_id][0].burst_length
-
-                        req = next(
-                            (req for req in self.node.rn_tracker["read"][ip_type][in_pos] if req.packet_id == packet_id),
-                            None,
-                        )
-                        if not req:
-                            print(f"Warning: No request found for packet_id {packet_id}")
-                            continue
-
-                        # 统计更新
-                        self.req_cir_h_num_stat += req.circuits_completed_h
-                        self.req_cir_v_num_stat += req.circuits_completed_v
-                        self.req_wait_cycle_h_num_stat += req.wait_cycle_h
-                        self.req_wait_cycle_v_num_stat += req.wait_cycle_v
-
-                        for flit in self.data_network.arrive_flits[packet_id]:
-                            flit.leave_db_cycle = self.cycle
-                            flit.rn_data_collection_complete_cycle = self.cycle
-
-                        self.node.rn_tracker["read"][ip_type][in_pos].remove(req)
-                        self.node.rn_tracker_count["read"][ip_type][in_pos] += 1
-                        self.node.rn_tracker_pointer["read"][ip_type][in_pos] -= 1
-                # else:
-                #     print(f"Warning: packet_id {packet_id} not found in rn_rdb or empty list")
-                # 清理不一致的状态
-                # self.node.rn_rdb_recv[ip_type][in_pos].pop(0)
-
-    def process_sn_received_data(self, in_pos):
-        """Handle received write data in the SN network."""
-        for ip_type in self.req_network.EQ_channel_buffer.keys():
-            if ip_type.startswith("gdma") or ip_type.startswith("sdma"):
-                continue
-            if len(self.node.sn_wdb_recv[ip_type][in_pos]) > 0:
-                packet_id = self.node.sn_wdb_recv[ip_type][in_pos][0]
-                self.node.sn_wdb[ip_type][in_pos][packet_id].pop(0)
-                if len(self.node.sn_wdb[ip_type][in_pos][packet_id]) == 0:
-                    self.node.sn_wdb[ip_type][in_pos].pop(packet_id)
-                    self.node.sn_wdb_recv[ip_type][in_pos].pop(0)
-                    self.node.sn_wdb_count[ip_type][in_pos] += self.req_network.send_flits[packet_id][0].burst_length
-                    req = next(
-                        (req for req in self.node.sn_tracker[ip_type][in_pos] if req.packet_id == packet_id),
-                        None,
-                    )
-                    if req is None:
-                        print(f"Warning: No SN tracker for packet_id {packet_id} at {ip_type}, {in_pos}")
-                        continue
-                    self.req_cir_h_num_stat += req.circuits_completed_h
-                    self.req_cir_v_num_stat += req.circuits_completed_v
-                    for flit in self.data_network.send_flits[packet_id]:
-                        flit.leave_db_cycle = self.cycle + self.config.SN_TRACKER_RELEASE_LATENCY
-                        flit.sn_data_collection_complete_cycle = self.cycle
-                    # 只添加到延迟释放队列，不立即释放
-                    release_time = self.cycle + self.config.SN_TRACKER_RELEASE_LATENCY
-                    self.node.sn_tracker_release_time[release_time].append((ip_type, in_pos, req))
+    def network_to_ip_eject(self):
+        for ip_pos in self.flit_positions:
+            for ip_type in self.config.CH_NAME_LIST:
+                ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
+                ip_interface.eject_step(self.cycle)
 
     def release_completed_sn_tracker(self):
         """Check if any trackers can be released based on the current cycle."""
@@ -381,24 +319,11 @@ class BaseModel:
             if release_time > self.cycle:
                 continue
             tracker_list = self.node.sn_tracker_release_time.pop(release_time)
-            for sn_type, in_pos, req in tracker_list:
+            for sn_type, ip_pos, req in tracker_list:
                 # 检查 tracker 是否还在列表中（避免重复释放）
-                if req in self.node.sn_tracker[sn_type][in_pos]:
-                    self.node.sn_tracker[sn_type][in_pos].remove(req)
-                    self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] += 1
-                    # 检查是否有等待的请求
-                    if (
-                        self.node.sn_wdb_count[sn_type][in_pos] > 0
-                        and self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] > 0
-                        and self.node.sn_req_wait[req.req_type][sn_type][in_pos]
-                    ):
-                        new_req = self.node.sn_req_wait[req.req_type][sn_type][in_pos].pop(0)
-                        new_req.sn_tracker_type = req.sn_tracker_type
-                        # new_req.req_attr = "old"
-                        self.node.sn_tracker[sn_type][in_pos].append(new_req)
-                        self.node.sn_tracker_count[sn_type][new_req.sn_tracker_type][in_pos] -= 1
-                        self.node.sn_wdb_count[sn_type][in_pos] -= new_req.burst_length
-                        self.create_rsp(new_req, "positive")
+                if req in self.node.sn_tracker[sn_type][ip_pos]:
+                    ip_interface: IPInterface = self.ip_modules[(sn_type, ip_pos)]
+                    ip_interface.release_completed_sn_tracker(req)
 
     def _move_pre_to_queues(self, network: Network, in_pos):
         """Move all items from pre-injection queues to injection queues for a given network."""
@@ -432,11 +357,7 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(
-                f"Data statistic: Read: {self.read_req, self.read_flit}, "
-                f"Write: {self.write_req, self.write_flit}, "
-                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
-            )
+            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
         if self.verbose:
@@ -505,10 +426,10 @@ class BaseModel:
 
                     # 检查tracker空间并尝试注入
                     if self._try_inject_to_direction(req, ip_type, ip_pos, direction, counts):
-                        # 成功注入，更新这个direction的round robin顺序
                         rr_queue.remove(ip_type)
                         rr_queue.append(ip_type)
                         break  # 这个direction已经处理了一个请求，转到下一个direction
+                        # 成功注入，更新这个direction的round robin顺序
 
     def _try_inject_to_direction(self, req: Flit, ip_type, ip_pos, direction, counts):
         """检查tracker空间并尝试注入到指定direction的pre缓冲"""
@@ -559,7 +480,7 @@ class BaseModel:
                 # 在tracker中记录
                 # self.node.rn_tracker[req.req_type][ip_type][ip_pos].append(req)
                 # self.node.rn_wdb[ip_type][ip_pos][req.packet_id] = []
-                self.create_write_packet(req)
+                # self.create_write_packet(req)
 
         # else:  # retry请求
         #     # Retry请求不需要重新分配tracker，但需要更新data buffer计数
@@ -653,6 +574,7 @@ class BaseModel:
                     if flit := inject_flit:
                         # 检查这个flit是否适合这个direction
                         if self.IQ_direction_conditions[direction](flit):
+                            self.data_network.IQ_channel_buffer[ip_type][ip_pos].popleft()
                             processed = True
                             req = self.req_network.send_flits[flit.packet_id][0]
                             flit.sync_latency_record(req)
@@ -660,46 +582,6 @@ class BaseModel:
                             queue_pre[flit.source] = flit
                             self.send_flits_num += 1
                             self.trans_flits_num += 1
-
-                            if ip_type.startswith("ddr") or ip_type.startswith("l2m"):
-                                # SN 端读数据注入
-                                self.send_read_flits_num_stat += 1
-                                self.data_network.IQ_channel_buffer[ip_type][ip_pos].popleft()
-                                self.data_network.send_flits[flit.packet_id].append(flit)
-                                if len(self.data_network.send_flits[flit.packet_id]) == flit.burst_length:
-                                    # 读数据注入完成，释放 tracker 没有release延迟
-                                    req = next(
-                                        (req for req in self.node.sn_tracker[ip_type][ip_pos] if req.packet_id == flit.packet_id),
-                                        None,
-                                    )
-                                    if req:  # 添加检查避免重复释放
-                                        self.node.sn_tracker[ip_type][ip_pos].remove(req)
-                                        self.node.sn_tracker_count[ip_type][req.sn_tracker_type][ip_pos] += 1
-                                        if self.node.sn_req_wait["read"][ip_type][ip_pos]:
-                                            new_req = self.node.sn_req_wait["read"][ip_type][ip_pos].pop(0)
-                                            new_req.sn_tracker_type = req.sn_tracker_type
-                                            new_req.req_attr = "old"
-                                            self.node.sn_tracker[ip_type][ip_pos].append(new_req)
-                                            self.node.sn_tracker_count[ip_type][req.sn_tracker_type][ip_pos] -= 1
-                                            self.create_rsp(new_req, "positive")
-                            else:
-                                # RN 端写数据注入 - 删除错误的 tracker 释放逻辑
-                                self.send_write_flits_num_stat += 1
-                                self.data_network.IQ_channel_buffer[ip_type][ip_pos].popleft()
-                                self.data_network.send_flits[flit.packet_id].append(flit)
-                                if len(self.data_network.send_flits[flit.packet_id]) == flit.burst_length:
-                                    # 写数据注入完成，处理 RN tracker
-                                    req = next(
-                                        (req for req in self.node.rn_tracker["write"][ip_type][ip_pos] if req.packet_id == flit.packet_id),
-                                        None,
-                                    )
-                                    if req:
-                                        # 释放 tracker 资源
-                                        self.node.rn_tracker["write"][ip_type][ip_pos].remove(req)
-                                        self.node.rn_tracker_count["write"][ip_type][ip_pos] += 1
-                                        self.node.rn_tracker_pointer["write"][ip_type][ip_pos] -= 1
-                                    # rn_wdb 以及计数在 enqueue_data 已经恢复，这里仅确保条目不存在，避免 KeyError
-                                    self.node.rn_wdb[ip_type][ip_pos].pop(flit.packet_id, None)
 
                     if processed:
                         # 处理成功，将ip_type放到这个direction队列的队尾
@@ -771,86 +653,47 @@ class BaseModel:
         self._debug_print(self.data_network, "flit", packet_id)
 
     def _debug_print(self, net, net_type, packet_id):
+        # 取出所有 flit
         flits = net.send_flits.get(packet_id)
         if not flits:
             return
-        flit = flits[0]
-        # if not flit.current_link:
-        # return
 
-        # 从字典中获取当前网络的状态
-        if not self._done_flags[net_type]:
-            print(self.cycle, self.req_network.send_flits.get(packet_id), self.rsp_network.send_flits.get(packet_id), self.data_network.send_flits.get(packet_id))
+        first_flit = flits[0]
+        if not first_flit.current_link:
+            return
 
-            if net_type == "rsp":
-                new_rsp: Flit = flits[-1]
-                if new_rsp.rsp_type == "datasend":
-                    self._done_flags[net_type] = True
-            elif flits[-1].is_arrive:
-                self._done_flags[net_type] = True  # 标记为已完成
+        # 如果已经标记完成，直接跳过
+        if self._done_flags.get(net_type, False):
+            return
 
-            # if flits[-1].is_arrive:
-            # self._done_flags[net_type] = True  # 标记为已完成
-            time.sleep(0.3)
+        # 对于单 flit 的 negative rsp，到达后不打印也不更新状态
+        if net_type == "rsp":
+            last_flit = flits[-1]
+            if last_flit.rsp_type == "negative" and len(flits) == 1 and last_flit.is_arrive:
+                return
 
-    def enqueue_request(self):
-        # ---------------------------------------------------------------
-        # 1) 先尝试把由于 OSTD 不足而挂起的请求重新注入
-        # ---------------------------------------------------------------
-        if self.node.rn_wait_to_inject:
-            # 用副本遍历，便于在循环中安全地删除元素
-            pending = list(self.node.rn_wait_to_inject)
-            for req in pending:
-                ip_pos  = req.source
-                ip_type = req.source_type
+        # —— 到这里，说明需要打印调试信息 ——
+        print(
+            self.cycle,
+            self.req_network.send_flits.get(packet_id),
+            self.rsp_network.send_flits.get(packet_id),
+            self.data_network.send_flits.get(packet_id),
+        )
 
-                # 判断当前是否有可用的 OSTD
-                if req.req_type == "read":
-                    ostd_ok = (
-                        self.node.rn_rdb_count[ip_type][ip_pos] >
-                        self.node.rn_rdb_reserve[ip_type][ip_pos] * req.burst_length
-                        and self.node.rn_tracker_count["read"][ip_type][ip_pos] > 0
-                    )
-                else:  # write
-                    ostd_ok = (
-                        self.node.rn_wdb_count[ip_type][ip_pos] >= req.burst_length
-                        and self.node.rn_tracker_count["write"][ip_type][ip_pos] > 0
-                    )
+        # —— 更新完成标记 ——
+        last_flit = flits[-1]
+        if net_type == "rsp":
+            # 只有最后一个 datasend 到达时才算完成
+            if last_flit.rsp_type == "datasend" and last_flit.is_arrive:
+                self._done_flags[net_type] = True
+        else:
+            # 其他网络类型，只要最后一个 flit 到达就算完成
+            if last_flit.is_arrive:
+                self._done_flags[net_type] = True
 
-                if not ostd_ok:
-                    # 仍然没有资源，保留在等待队列
-                    continue
-                
-                # DMA读写间隔控制
-                max_gap = self.config.GDMA_RW_GAP if ip_type.startswith("gdma") else self.config.SDMA_RW_GAP
-                counts = self.dma_rw_counts[ip_type][ip_pos]
-                rd, wr = counts["read"], counts["write"]
+        time.sleep(0.3)
 
-                if req.req_type == "read" and abs(rd + 1 - wr) >= max_gap:
-                    continue
-                elif req.req_type == "write" and abs(wr + 1 - rd) >= max_gap:
-                    continue
-
-                # 立即占用 tracker / 数据缓冲
-                if req.req_type == "read":
-                    self.node.rn_rdb_count[ip_type][ip_pos] -= req.burst_length
-                    self.node.rn_tracker_count["read"][ip_type][ip_pos] -= 1
-                    self.node.rn_rdb[ip_type][ip_pos][req.packet_id] = []
-                    self.node.rn_tracker["read"][ip_type][ip_pos].append(req)
-                else:  # write
-                    self.node.rn_wdb_count[ip_type][ip_pos] -= req.burst_length
-                    self.node.rn_tracker_count["write"][ip_type][ip_pos] -= 1
-                    self.node.rn_wdb[ip_type][ip_pos][req.packet_id] = []
-                    self.node.rn_tracker["write"][ip_type][ip_pos].append(req)
-
-                # 放入 IQ_channel_buffer，等待后续方向仲裁
-                self.req_network.IQ_channel_buffer[ip_type][ip_pos].append(req)
-                req.tracker_reserved = True
-
-                # 从等待列表中移除
-                self.node.rn_wait_to_inject.remove(req)
-        # ---------------------------------------------------------------
-
+    def process_new_request(self):
         while True:
             # Get next request if we don't have one cached
             if self.next_req is None:
@@ -882,41 +725,26 @@ class BaseModel:
 
             req.packet_id = Node.get_next_packet_id()
             req.req_type = "read" if req_data[5] == "R" else "write"
+            req.req_attr = "new"
+            # Record command table entry cycle
+            req.cmd_entry_cmd_table_cycle = self.cycle
 
             # Add to appropriate network structures
-            self.req_network.send_flits[req.packet_id].append(req)
-            ip_pos = req.source  # 节点坐标
+
+            # 通过IPInterface处理请求
+            ip_pos = req.source
             ip_type = req.source_type
-            if req.req_type == "read":
-                if (
-                    self.node.rn_rdb_count[ip_type][ip_pos] > self.node.rn_rdb_reserve[ip_type][ip_pos] * req.burst_length
-                    and self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] > 0
-                ):
-                    self.node.rn_rdb_count[ip_type][ip_pos] -= req.burst_length
-                    self.node.rn_tracker_count["read"][ip_type][ip_pos] -= 1
-                    self.node.rn_rdb[ip_type][ip_pos][req.packet_id] = []
-                    self.node.rn_tracker["read"][ip_type][ip_pos].append(req)
-                    self.req_network.IQ_channel_buffer[req.source_type][req.source].append(req)
-                else:
-                    self.node.rn_wait_to_inject.append(req)
-            else:  # write
-                if self.node.rn_wdb_count[ip_type][ip_pos] >= req.burst_length and self.node.rn_tracker_count[req.req_type][ip_type][ip_pos] > 0:
-                    self.node.rn_wdb_count[ip_type][ip_pos] -= req.burst_length
-                    self.node.rn_tracker_count["write"][ip_type][ip_pos] -= 1
-                    self.node.rn_wdb[ip_type][ip_pos][req.packet_id] = []
-                    self.node.rn_tracker["write"][ip_type][ip_pos].append(req)
-                    self.req_network.IQ_channel_buffer[req.source_type][req.source].append(req)
-                else:
-                    self.node.rn_wait_to_inject.append(req)
+
+            ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
+            if ip_interface is None:
+                raise ValueError("IP modeul setup error!")
+            ip_interface.enqueue(req, "req")
+
+            # 更新统计信息
             if req.req_type == "read":
                 self.R_tail_latency_stat = req_data[0]
             elif req.req_type == "write":
                 self.W_tail_latency_stat = req_data[0]
-            else:
-                self.next_req = None
-                continue
-            # Record command table entry cycle
-            req.cmd_entry_cmd_table_cycle = self.cycle
 
             # Reset cached request and update count
             self.next_req = None
@@ -972,8 +800,7 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
-                    for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
@@ -1048,73 +875,70 @@ class BaseModel:
         network.round_robin["RB"][fifo_name][next_pos].remove(index)
         network.round_robin["RB"][fifo_name][next_pos].append(index)
 
-    def _handle_EQ_channel_buffer(self, network: Network, flit_type):
-        """处理EQ的Channel buffer"""
+    # def _handle_EQ_channel_buffer(self, network: Network, flit_type):
+    #     """处理EQ的Channel buffer"""
 
-        in_pos_position = self.type_to_positions.get(flit_type)
-        if in_pos_position is None:
-            return  # 不合法的flit_typ
+    #     in_pos_position = self.type_to_positions.get(flit_type)
+    #     if in_pos_position is None:
+    #         return  # 不合法的flit_typ
 
-        # if self.cycle_mod == 0:
-        # return
+    #     if flit_type == "req":
+    #         for in_pos in in_pos_position:
+    #             ip_pos = in_pos - self.config.NUM_COL
+    #             for ip_type in network.EQ_channel_buffer.keys():
+    #                 if ip_type.startswith("ddr") or ip_type.startswith("l2m"):
+    #                     if network.EQ_channel_buffer[ip_type][ip_pos]:
+    #                         req = network.EQ_channel_buffer[ip_type][ip_pos].popleft()
+    #                         req.is_arrive = True
+    #                         self._sn_handle_request(req, in_pos, ip_type)
 
-        if flit_type == "req":
-            for in_pos in in_pos_position:
-                ip_pos = in_pos - self.config.NUM_COL
-                for ip_type in network.EQ_channel_buffer.keys():
-                    if ip_type.startswith("ddr") or ip_type.startswith("l2m"):
-                        if network.EQ_channel_buffer[ip_type][ip_pos]:
-                            req = network.EQ_channel_buffer[ip_type][ip_pos].popleft()
-                            req.is_arrive = True
-                            self._sn_handle_request(req, in_pos, ip_type)
+    #     elif flit_type == "rsp":
+    #         for in_pos in in_pos_position:
+    #             ip_pos = in_pos - self.config.NUM_COL
+    #             for ip_type in network.EQ_channel_buffer.keys():
+    #                 if ip_type.startswith("sdma") or ip_type.startswith("gdma"):
+    #                     if network.EQ_channel_buffer[ip_type][ip_pos]:
+    #                         rsp = network.EQ_channel_buffer[ip_type][ip_pos].popleft()
+    #                         rsp.is_arrive = True
+    #                         self._rn_handle_response(rsp, in_pos, ip_type)
 
-        elif flit_type == "rsp":
-            for in_pos in in_pos_position:
-                ip_pos = in_pos - self.config.NUM_COL
-                for ip_type in network.EQ_channel_buffer.keys():
-                    if ip_type.startswith("sdma") or ip_type.startswith("gdma"):
-                        if network.EQ_channel_buffer[ip_type][ip_pos]:
-                            rsp = network.EQ_channel_buffer[ip_type][ip_pos].popleft()
-                            rsp.is_arrive = True
-                            self._rn_handle_response(rsp, in_pos, ip_type)
+    #     elif flit_type == "data":
+    #         for in_pos in in_pos_position:
+    #             ip_pos = in_pos - self.config.NUM_COL
+    #             for ip_type in network.EQ_channel_buffer.keys():
+    #                 if network.EQ_channel_buffer[ip_type][ip_pos]:
+    #                     flit = network.EQ_channel_buffer[ip_type][ip_pos][0]
+    #                     # token bucket 检查
+    #                     if ip_type.startswith("ddr"):
+    #                         token_bucket: TokenBucket = network.token_bucket[flit.destination + self.config.NUM_COL][ip_type]
+    #                         token_bucket.refill(self.cycle)
+    #                         if not token_bucket.consume():
+    #                             continue
 
-        elif flit_type == "data":
-            for in_pos in in_pos_position:
-                ip_pos = in_pos - self.config.NUM_COL
-                for ip_type in network.EQ_channel_buffer.keys():
-                    if network.EQ_channel_buffer[ip_type][ip_pos]:
-                        flit = network.EQ_channel_buffer[ip_type][ip_pos][0]
-                        # token bucket 检查
-                        if ip_type.startswith("ddr"):
-                            token_bucket: TokenBucket = network.token_bucket[flit.destination + self.config.NUM_COL][ip_type]
-                            token_bucket.refill(self.cycle)
-                            if not token_bucket.consume():
-                                continue
+    #                     flit = network.EQ_channel_buffer[ip_type][ip_pos].popleft()
+    #                     flit.is_arrive = True
+    #                     flit.arrival_cycle = self.cycle
+    #                     network.eject_num += 1
+    #                     network.arrive_flits[flit.packet_id].append(flit)
+    #                     network.recv_flits_num += 1
+    #                     if len(network.arrive_flits[flit.packet_id]) == flit.burst_length:
+    #                         for f in network.arrive_flits[flit.packet_id]:
+    #                             if f.req_type == "read":
+    #                                 f.rn_data_collection_complete_cycle = self.cycle
+    #                             elif f.req_type == "write":
+    #                                 f.sn_data_collection_complete_cycle = self.cycle
 
-                        flit = network.EQ_channel_buffer[ip_type][ip_pos].popleft()
-                        flit.is_arrive = True
-                        flit.arrival_cycle = self.cycle
-                        network.eject_num += 1
-                        network.arrive_flits[flit.packet_id].append(flit)
-                        network.recv_flits_num += 1
-                        if len(network.arrive_flits[flit.packet_id]) == flit.burst_length:
-                            for f in network.arrive_flits[flit.packet_id]:
-                                if f.req_type == "read":
-                                    f.rn_data_collection_complete_cycle = self.cycle
-                                elif f.req_type == "write":
-                                    f.sn_data_collection_complete_cycle = self.cycle
-
-                        # 分类进入各自的data buffer：根据请求类型区分读/写
-                        if flit.req_type == "read":
-                            # 读响应进入 RN 端
-                            self.node.rn_rdb[ip_type][in_pos][flit.packet_id].append(flit)
-                            if len(self.node.rn_rdb[ip_type][in_pos][flit.packet_id]) == flit.burst_length:
-                                self.node.rn_rdb_recv[ip_type][in_pos].append(flit.packet_id)
-                        elif flit.req_type == "write":
-                            # 写数据进入 SN 端
-                            self.node.sn_wdb[ip_type][in_pos][flit.packet_id].append(flit)
-                            if len(self.node.sn_wdb[ip_type][in_pos][flit.packet_id]) == flit.burst_length:
-                                self.node.sn_wdb_recv[ip_type][in_pos].append(flit.packet_id)
+    #                     # 分类进入各自的data buffer：根据请求类型区分读/写
+    #                     if flit.req_type == "read":
+    #                         # 读响应进入 RN 端
+    #                         self.node.rn_rdb[ip_type][in_pos][flit.packet_id].append(flit)
+    #                         if len(self.node.rn_rdb[ip_type][in_pos][flit.packet_id]) == flit.burst_length:
+    #                             self.node.rn_rdb_recv[ip_type][in_pos].append(flit.packet_id)
+    #                     elif flit.req_type == "write":
+    #                         # 写数据进入 SN 端
+    #                         self.node.sn_wdb[ip_type][in_pos][flit.packet_id].append(flit)
+    #                         if len(self.node.sn_wdb[ip_type][in_pos][flit.packet_id]) == flit.burst_length:
+    #                             self.node.sn_wdb_recv[ip_type][in_pos].append(flit.packet_id)
 
     def Eject_Queue_arbitration(self, network: Network, flit_type):
         """处理eject的仲裁逻辑,根据flit类型处理不同的eject队列"""
@@ -1137,39 +961,36 @@ class BaseModel:
                 continue
             self._move_to_eject_queues_pre(network, eject_flits, ip_pos)
 
-        # 3. 处理EQ channel buffer
-        self._handle_EQ_channel_buffer(network, flit_type)
-
-    def _sn_handle_request(self, req, in_pos, ip_type):
-        """处理request类型的eject"""
-        req.sn_receive_req_cycle = self.cycle
-        if req.req_type == "read":
-            if req.req_attr == "new":
-                if self.node.sn_tracker_count[ip_type]["ro"][in_pos] > 0:
-                    req.sn_tracker_type = "ro"
-                    self.node.sn_tracker[ip_type][in_pos].append(req)
-                    self.node.sn_tracker_count[ip_type]["ro"][in_pos] -= 1
-                    self.create_read_packet(req)
-                else:
-                    self.create_rsp(req, "negative")
-                    self.node.sn_req_wait[req.req_type][ip_type][in_pos].append(req)
-            else:
-                self.create_read_packet(req)
-        elif req.req_type == "write":
-            if req.req_attr == "new":
-                if self.node.sn_tracker_count[ip_type]["share"][in_pos] > 0 and self.node.sn_wdb_count[ip_type][in_pos] >= req.burst_length:
-                    req.sn_tracker_type = "share"
-                    self.node.sn_tracker[ip_type][in_pos].append(req)
-                    self.node.sn_tracker_count[ip_type]["share"][in_pos] -= 1
-                    self.node.sn_wdb[ip_type][in_pos][req.packet_id] = []
-                    self.node.sn_wdb_count[ip_type][in_pos] -= req.burst_length
-                    self.create_rsp(req, "datasend")
-                else:
-                    # retry
-                    self.create_rsp(req, "negative")
-                    self.node.sn_req_wait[req.req_type][ip_type][in_pos].append(req)
-            else:
-                self.create_rsp(req, "datasend")
+    # def _sn_handle_request(self, req, in_pos, ip_type):
+    #     """处理request类型的eject"""
+    #     req.sn_receive_req_cycle = self.cycle
+    #     if req.req_type == "read":
+    #         if req.req_attr == "new":
+    #             if self.node.sn_tracker_count[ip_type]["ro"][in_pos] > 0:
+    #                 req.sn_tracker_type = "ro"
+    #                 self.node.sn_tracker[ip_type][in_pos].append(req)
+    #                 self.node.sn_tracker_count[ip_type]["ro"][in_pos] -= 1
+    #                 self.create_read_packet(req)
+    #             else:
+    #                 self.create_rsp(req, "negative")
+    #                 self.node.sn_req_wait[req.req_type][ip_type][in_pos].append(req)
+    #         else:
+    #             self.create_read_packet(req)
+    #     elif req.req_type == "write":
+    #         if req.req_attr == "new":
+    #             if self.node.sn_tracker_count[ip_type]["share"][in_pos] > 0 and self.node.sn_wdb_count[ip_type][in_pos] >= req.burst_length:
+    #                 req.sn_tracker_type = "share"
+    #                 self.node.sn_tracker[ip_type][in_pos].append(req)
+    #                 self.node.sn_tracker_count[ip_type]["share"][in_pos] -= 1
+    #                 self.node.sn_wdb[ip_type][in_pos][req.packet_id] = []
+    #                 self.node.sn_wdb_count[ip_type][in_pos] -= req.burst_length
+    #                 self.create_rsp(req, "datasend")
+    #             else:
+    #                 # retry
+    #                 self.create_rsp(req, "negative")
+    #                 self.node.sn_req_wait[req.req_type][ip_type][in_pos].append(req)
+    #         else:
+    #             self.create_rsp(req, "datasend")
 
     def _process_ring_bridge(self, network: Network, dir_key, pos, next_pos, curr_node, opposite_node):
         direction = dir_key
@@ -1282,106 +1103,106 @@ class BaseModel:
                         self.data_network.IQ_channel_buffer[ip_type][ip_pos].append(flit)
                         ip_data_buffer.pop(0)
 
-    def _rn_handle_response(self, rsp: Flit, in_pos, ip_type):
-        """处理response的eject"""
-        req = next(
-            (req for req in self.node.rn_tracker[rsp.req_type][ip_type][in_pos] if req.packet_id == rsp.packet_id),
-            None,
-        )
-        if not req:
-            print(f"RSP {rsp} do not have REQ")
-            return
+    # def _rn_handle_response(self, rsp: Flit, in_pos, ip_type):
+    #     """处理response的eject"""
+    #     req = next(
+    #         (req for req in self.node.rn_tracker[rsp.req_type][ip_type][in_pos] if req.packet_id == rsp.packet_id),
+    #         None,
+    #     )
+    #     if not req:
+    #         print(f"RSP {rsp} do not have REQ")
+    #         return
 
-        self.rsp_cir_h_num_stat += rsp.circuits_completed_h
-        self.rsp_cir_v_num_stat += rsp.circuits_completed_v
-        self.rsp_wait_cycle_h_num_stat += rsp.wait_cycle_h
-        self.rsp_wait_cycle_v_num_stat += rsp.wait_cycle_v
+    #     self.rsp_cir_h_num_stat += rsp.circuits_completed_h
+    #     self.rsp_cir_v_num_stat += rsp.circuits_completed_v
+    #     self.rsp_wait_cycle_h_num_stat += rsp.wait_cycle_h
+    #     self.rsp_wait_cycle_v_num_stat += rsp.wait_cycle_v
 
-        rsp.rn_receive_rsp_cycle = self.cycle
-        req.sync_latency_record(rsp)
+    #     rsp.rn_receive_rsp_cycle = self.cycle
+    #     req.sync_latency_record(rsp)
 
-        if rsp.req_type == "read":
-            if rsp.rsp_type == "negative":
-                if req.req_attr == "new":
-                    # 收到negative响应，准备重试
-                    req.req_state = "invalid"
-                    req.is_injected = False
-                    req.path_index = 0
-                    req.req_attr = "old"
-                    # req.is_arrive = False
-                    self.node.rn_rdb_count[ip_type][in_pos] += req.burst_length
-                    if req.packet_id in self.node.rn_rdb[ip_type][in_pos]:
-                        self.node.rn_rdb[ip_type][in_pos].pop(req.packet_id)
-                    self.node.rn_tracker_wait["read"][ip_type][in_pos].append(req)
-                    # 增加reserve计数，表示有请求需要重试
-                    self.node.rn_rdb_reserve[ip_type][in_pos] += 1
+    #     if rsp.req_type == "read":
+    #         if rsp.rsp_type == "negative":
+    #             if req.req_attr == "new":
+    #                 # 收到negative响应，准备重试
+    #                 req.req_state = "invalid"
+    #                 req.is_injected = False
+    #                 req.path_index = 0
+    #                 req.req_attr = "old"
+    #                 # req.is_arrive = False
+    #                 self.node.rn_rdb_count[ip_type][in_pos] += req.burst_length
+    #                 if req.packet_id in self.node.rn_rdb[ip_type][in_pos]:
+    #                     self.node.rn_rdb[ip_type][in_pos].pop(req.packet_id)
+    #                 self.node.rn_tracker_wait["read"][ip_type][in_pos].append(req)
+    #                 # 增加reserve计数，表示有请求需要重试
+    #                 self.node.rn_rdb_reserve[ip_type][in_pos] += 1
 
-            elif rsp.rsp_type == "positive":
-                # 收到positive响应，将重试请求放回channel buffer
-                if self.node.rn_rdb_reserve[ip_type][in_pos] > 0:
-                    # 找到对应的重试请求
-                    retry_req = next((r for r in self.node.rn_tracker_wait["read"][ip_type][in_pos] if r.req_state == "invalid" and r.packet_id == rsp.packet_id), None)
+    #         elif rsp.rsp_type == "positive":
+    #             # 收到positive响应，将重试请求放回channel buffer
+    #             if self.node.rn_rdb_reserve[ip_type][in_pos] > 0:
+    #                 # 找到对应的重试请求
+    #                 retry_req = next((r for r in self.node.rn_tracker_wait["read"][ip_type][in_pos] if r.req_state == "invalid" and r.packet_id == rsp.packet_id), None)
 
-                    if retry_req:
-                        # 从tracker_wait中移除
-                        self.node.rn_tracker_wait["read"][ip_type][in_pos].remove(retry_req)
+    #                 if retry_req:
+    #                     # 从tracker_wait中移除
+    #                     self.node.rn_tracker_wait["read"][ip_type][in_pos].remove(retry_req)
 
-                        # 重置请求状态，准备重新注入
-                        retry_req.req_state = "valid"
-                        retry_req.is_injected = False
-                        retry_req.path_index = 0
-                        retry_req.is_new_on_network = True
-                        retry_req.is_arrive = False
+    #                     # 重置请求状态，准备重新注入
+    #                     retry_req.req_state = "valid"
+    #                     retry_req.is_injected = False
+    #                     retry_req.path_index = 0
+    #                     retry_req.is_new_on_network = True
+    #                     retry_req.is_arrive = False
 
-                        # 重新放回channel buffer队尾
-                        self.req_network.IQ_channel_buffer[ip_type][in_pos].append(retry_req)
+    #                     # 重新放回channel buffer队尾
+    #                     self.req_network.IQ_channel_buffer[ip_type][in_pos].append(retry_req)
 
-                        # 减少reserve计数
-                        self.node.rn_rdb_reserve[ip_type][in_pos] -= 1
+    #                     # 减少reserve计数
+    #                     self.node.rn_rdb_reserve[ip_type][in_pos] -= 1
 
-        elif rsp.req_type == "write":
-            if rsp.rsp_type == "negative":
-                if req.req_attr == "new":
-                    # 收到negative响应，准备重试
-                    req.req_state = "invalid"
-                    req.req_attr = "old"
-                    req.is_injected = False
-                    req.path_index = 0
-                    # req.is_arrive = False
-                    self.node.rn_tracker_wait["write"][ip_type][in_pos].append(req)
-                    # 增加reserve计数，表示有请求需要重试
-                    self.node.rn_wdb_reserve[ip_type][in_pos] += 1
-                elif req.req_attr == "old":
-                    # 收到positive的相应已经重发请求，不需要再放入rn_tracker_wait中
-                    pass
-            elif rsp.rsp_type == "positive":
-                # 收到positive响应，将重试请求放回channel buffer
-                if self.node.rn_wdb_reserve[ip_type][in_pos] > 0:
-                    # 找到对应的重试请求
-                    retry_req: Flit = next((r for r in self.node.rn_tracker_wait["write"][ip_type][in_pos] if r.req_state == "invalid" and r.packet_id == rsp.packet_id), None)
+    #     elif rsp.req_type == "write":
+    #         if rsp.rsp_type == "negative":
+    #             if req.req_attr == "new":
+    #                 # 收到negative响应，准备重试
+    #                 req.req_state = "invalid"
+    #                 req.req_attr = "old"
+    #                 req.is_injected = False
+    #                 req.path_index = 0
+    #                 # req.is_arrive = False
+    #                 self.node.rn_tracker_wait["write"][ip_type][in_pos].append(req)
+    #                 # 增加reserve计数，表示有请求需要重试
+    #                 self.node.rn_wdb_reserve[ip_type][in_pos] += 1
+    #             elif req.req_attr == "old":
+    #                 # 收到positive的相应已经重发请求，不需要再放入rn_tracker_wait中
+    #                 pass
+    #         elif rsp.rsp_type == "positive":
+    #             # 收到positive响应，将重试请求放回channel buffer
+    #             if self.node.rn_wdb_reserve[ip_type][in_pos] > 0:
+    #                 # 找到对应的重试请求
+    #                 retry_req: Flit = next((r for r in self.node.rn_tracker_wait["write"][ip_type][in_pos] if r.req_state == "invalid" and r.packet_id == rsp.packet_id), None)
 
-                    if retry_req:
-                        # 从tracker_wait中移除
-                        self.node.rn_tracker_wait["write"][ip_type][in_pos].remove(req)
-                        # 减少reserve计数
-                        self.node.rn_wdb_reserve[ip_type][in_pos] -= 1
-                    else:
-                        # 可能negative的相应还没有到达，所以在wait中找不到对应的请求，在tracker中寻找
-                        retry_req = req
+    #                 if retry_req:
+    #                     # 从tracker_wait中移除
+    #                     self.node.rn_tracker_wait["write"][ip_type][in_pos].remove(req)
+    #                     # 减少reserve计数
+    #                     self.node.rn_wdb_reserve[ip_type][in_pos] -= 1
+    #                 else:
+    #                     # 可能negative的相应还没有到达，所以在wait中找不到对应的请求，在tracker中寻找
+    #                     retry_req = req
 
-                    # 重置请求状态，准备重新注入
-                    retry_req.req_state = "valid"
-                    retry_req.req_attr = "old"
-                    retry_req.is_injected = False
-                    retry_req.path_index = 0
-                    retry_req.is_new_on_network = True
-                    retry_req.is_arrive = False
+    #                 # 重置请求状态，准备重新注入
+    #                 retry_req.req_state = "valid"
+    #                 retry_req.req_attr = "old"
+    #                 retry_req.is_injected = False
+    #                 retry_req.path_index = 0
+    #                 retry_req.is_new_on_network = True
+    #                 retry_req.is_arrive = False
 
-                    # 重新放回channel buffer队尾
-                    self.req_network.IQ_channel_buffer[ip_type][in_pos].append(req)
+    #                 # 重新放回channel buffer队尾
+    #                 self.req_network.IQ_channel_buffer[ip_type][in_pos].append(req)
 
-            else:  # datasend 响应
-                self.node.rn_wdb_send[ip_type][in_pos].append(rsp.packet_id)
+    #         else:  # datasend 响应
+    #             self.node.rn_wdb_send[ip_type][in_pos].append(rsp.packet_id)
 
     def tag_move_all_networks(self):
         self._tag_move(self.req_network)
@@ -1399,9 +1220,7 @@ class BaseModel:
                     if network.links_tag[(i, j)][-1] == [j, "TR"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["TR"][j] += 1
-                elif i - j == self.config.NUM_COL * 2 or (
-                    i == j and i in range(self.config.NUM_NODE - self.config.NUM_COL * 2, self.config.NUM_COL + self.config.NUM_NODE - self.config.NUM_COL * 2)
-                ):
+                elif i - j == self.config.NUM_COL * 2 or (i == j and i in range(self.config.NUM_NODE - self.config.NUM_COL * 2, self.config.NUM_COL + self.config.NUM_NODE - self.config.NUM_COL * 2)):
                     if network.links_tag[(i, j)][-1] == [j, "TU"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["TU"][j] += 1
@@ -1511,111 +1330,6 @@ class BaseModel:
                     rr_queue.append(i)
                     return eject_flits
         return eject_flits
-
-    def create_write_req_after_read(self, flit):
-        source = self.node_map(flit.destination_original)
-        destination = self.node_map(flit.source_original, False)
-        path = self.routes[source][destination]
-        req = Flit(source, destination, path)
-        req.source_original = flit.destination + self.config.NUM_COL
-        req.destination_original = flit.source - self.config.NUM_COL
-        req.flit_type = "req"
-        req.departure_cycle = self.cycle + self.config.NETWORK_FREQUENCY
-        req.burst_length = flit.burst_length
-        req.source_type = flit.destination_type
-        req.destination_type = flit.source_type
-        req.original_source_type = flit.original_destination_type
-        req.original_destination_type = flit.original_source_type
-        req.packet_id = Node.get_next_packet_id()
-        req.req_type = "write"
-        self.new_write_req.append(req)
-
-    def create_write_packet(self, req):
-        for i in range(req.burst_length):
-            source = req.source
-            destination = req.destination
-            path = self.routes[source][destination]
-            flit = Flit(source, destination, path)
-            flit.source_original = req.source_original
-            flit.destination_original = req.destination_original
-            flit.flit_type = "data"
-            flit.departure_cycle = (
-                self.cycle + self.config.DDR_W_LATENCY + i * self.config.NETWORK_FREQUENCY
-                if req.original_destination_type.startswith("ddr")
-                else self.cycle + self.config.L2M_W_LATENCY + i * self.config.NETWORK_FREQUENCY
-            )
-            flit.req_departure_cycle = req.departure_cycle
-            flit.entry_db_cycle = req.entry_db_cycle
-            flit.source_type = req.source_type
-            flit.destination_type = req.destination_type
-            flit.original_source_type = req.original_source_type
-            flit.original_destination_type = req.original_destination_type
-            flit.req_type = req.req_type
-            flit.packet_id = req.packet_id
-            flit.flit_id = i
-            flit.burst_length = req.burst_length
-            if i == req.burst_length - 1:
-                flit.is_last_flit = True
-            flit.rn_data_generated_cycle = self.cycle
-            self.node.rn_wdb[flit.source_type][flit.source][flit.packet_id].append(flit)
-
-    def create_read_packet(self, req: Flit):
-        for i in range(req.burst_length):
-            source = req.destination + self.config.NUM_COL
-            destination = req.source - self.config.NUM_COL
-            path = self.routes[source][destination]
-            flit = Flit(source, destination, path)
-            flit.source_original = req.destination_original
-            flit.destination_original = req.source_original
-            flit.req_type = req.req_type
-            flit.flit_type = "data"
-            if req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(
-                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
-                )
-            else:
-                latency = self.config.L2M_R_LATENCY
-            flit.departure_cycle = self.cycle + latency + i * self.config.NETWORK_FREQUENCY
-            flit.entry_db_cycle = self.cycle
-            flit.req_departure_cycle = req.departure_cycle
-            flit.source_type = req.destination_type
-            flit.destination_type = req.source_type
-            flit.original_source_type = req.original_source_type
-            flit.original_destination_type = req.original_destination_type
-            flit.packet_id = req.packet_id
-            flit.flit_id = i
-            flit.burst_length = req.burst_length
-            if i == req.burst_length - 1:
-                flit.is_last_flit = True
-            flit.sync_latency_record(req)
-            flit.sn_data_generated_cycle = self.cycle
-            self.node.sn_rdb[flit.source_type][flit.source].append(flit)
-            # self.flit_network.ip_inject[flit.destination_type][flit.source].append(flit)
-            # self.flit_network.send_flits[flit.packet_id].append(flit)
-
-    def create_rsp(self, req, rsp_type):
-        if rsp_type == "negative":
-            if req.req_type == "read":
-                self.read_retry_num_stat += 1
-            elif req.req_type == "write":
-                self.write_retry_num_stat += 1
-        source = req.destination + self.config.NUM_COL
-        destination = req.source - self.config.NUM_COL
-        path = self.routes[source][destination]
-        rsp = Flit(source, destination, path)
-        rsp.flit_type = "rsp"
-        rsp.rsp_type = rsp_type
-        rsp.req_type = req.req_type
-        rsp.packet_id = req.packet_id
-        rsp.departure_cycle = self.cycle + self.config.NETWORK_FREQUENCY
-        rsp.req_departure_cycle = req.departure_cycle
-        rsp.source_type = req.destination_type
-        rsp.destination_type = req.source_type
-        rsp.sync_latency_record(req)
-        rsp.sn_rsp_generate_cycle = self.cycle
-        self.rsp_network.send_flits[rsp.packet_id].append(rsp)
-        self.rsp_network.IQ_channel_buffer[rsp.source_type][source].append(rsp)
-        # self.node.sn_rsp_queue[rsp.source_type][source].append(rsp)
 
     def process_inject_queues(self, network, inject_queues, direction):
         flit_num = 0
@@ -1737,13 +1451,6 @@ class BaseModel:
 
     def process_flits(self, flit: Flit, network, read_latency, write_latency, read_merged_intervals, write_merged_intervals, f1, f2):
         """Process a single flit and update the network and latency data."""
-        # Calculate predicted and actual durations
-        # if not flit.is_last_flit or not flit.arrival_cycle or not flit.req_departure_cycle:
-        #     return
-        # flit.predicted_duration = self.calculate_predicted_duration(flit)
-        # flit.actual_duration = flit.arrival_cycle - flit.departure_cycle
-        # flit.actual_ject_duration = flit.arrival_eject_cycle - flit.departure_inject_cycle
-        # flit.actual_network_duration = flit.arrival_network_cycle - flit.departure_network_cycle
 
         flit.total_latency = (flit.arrival_cycle - flit.cmd_entry_cmd_table_cycle) // self.config.NETWORK_FREQUENCY
         # flit.cmd_latency = (flit.sn_receive_req_cycle - flit.cmd_entry_cmd_table_cycle) // self.config.network_frequency
@@ -1800,22 +1507,10 @@ class BaseModel:
 
             if self.plot_RN_BW_fig:
                 # 绘制曲线
-                (line,) = plt.plot(
-                    times[mask] / 1000,
-                    bandwidth[mask],
-                    drawstyle="steps-post",
-                    label=f"{k}",
-                )  # 时间转换为us
+                (line,) = plt.plot(times[mask] / 1000, bandwidth[mask], drawstyle="steps-post", label=f"{k}")  # 时间转换为us
 
                 # 在曲线末尾添加文本标签
-                plt.text(
-                    times[mask][-1] / 1000,
-                    bandwidth[mask][-1],
-                    f"{bandwidth[mask][-1]:.2f}",
-                    va="center",
-                    color=line.get_color(),
-                    fontsize=12,
-                )
+                plt.text(times[mask][-1] / 1000, bandwidth[mask][-1], f"{bandwidth[mask][-1]:.2f}", va="center", color=line.get_color(), fontsize=12)
 
             # 打印最终带宽值
             if self.verbose:

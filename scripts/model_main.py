@@ -26,7 +26,7 @@ def main():
 
     # traffic_file_path = r"../../traffic/"
     # traffic_file_path = r"../traffic/output_DeepSeek_part1/step5_data_merge/"
-    # traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
+    traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_2K/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_no_map/step5_data_merge/"
     # file_name = r"output_embedding_Trace.txt"
@@ -35,7 +35,7 @@ def main():
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"MLP_MoE_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
-    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace_group_map.txt"
+    file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace_group_map.txt"
 
     # model_type = "Feature"
     model_type = "REQ_RSP"
@@ -54,7 +54,7 @@ def main():
         topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
         # topo_type = "6x5"
-        topo_type = "3x3"  # SG2260E
+        # topo_type = "3x3"  # SG2260E
     else:
         topo_type = config.TOPO_TYPE
 
@@ -73,9 +73,9 @@ def main():
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
         plot_link_state=0,
-        plot_start_time=2000,
+        plot_start_time=1000,
         print_trace=0,
-        show_trace_id=17,
+        show_trace_id=33,
         show_node_id=4,
         verbose=1,
     )
@@ -108,10 +108,10 @@ def main():
         sim.config.L2M_R_LATENCY_original = 12
         sim.config.L2M_W_LATENCY_original = 16
         sim.config.DDR_BW_LIMIT = 76.8 / 4
-        # sim.config.DDR_BW_LIMIT = 10
+        # sim.config.DDR_BW_LIMIT = 64
         sim.config.L2M_BW_LIMIT = np.inf
         sim.config.IQ_CH_FIFO_DEPTH = 10
-        sim.config.EQ_CH_FIFO_DEPTH = 10
+        sim.config.EQ_CH_FIFO_DEPTH = 12
         sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8
 
@@ -124,14 +124,14 @@ def main():
         # sim.config.TU_Etag_T1_UE_MAX = 7
         # sim.config.TD_Etag_T2_UE_MAX = 6
 
-        sim.config.TL_Etag_T2_UE_MAX = 6
-        sim.config.TL_Etag_T1_UE_MAX = 10
+        sim.config.TL_Etag_T2_UE_MAX = 8
+        sim.config.TL_Etag_T1_UE_MAX = 12
         sim.config.TR_Etag_T2_UE_MAX = 10
-        sim.config.RB_IN_FIFO_DEPTH = 12
-        sim.config.TU_Etag_T2_UE_MAX = 6
-        sim.config.TU_Etag_T1_UE_MAX = 10
+        sim.config.RB_IN_FIFO_DEPTH = 16
+        sim.config.TU_Etag_T2_UE_MAX = 8
+        sim.config.TU_Etag_T2_UE_MAX = 12
         sim.config.TD_Etag_T2_UE_MAX = 10
-        sim.config.EQ_IN_FIFO_DEPTH = 12
+        sim.config.EQ_IN_FIFO_DEPTH = 16
 
         sim.config.GDMA_RW_GAP = np.inf
         # sim.config.SDMA_RW_GAP = np.inf

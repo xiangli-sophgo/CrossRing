@@ -16,6 +16,8 @@
     "EQ_IN_FIFO_DEPTH": 8,
     "IQ_CH_FIFO_DEPTH": 8,
     "EQ_CH_FIFO_DEPTH": 8,
+    "IP_L2H_FIFO_DEPTH": 2,
+    "IP_H2L_FIFO_DEPTH": 4,
     "ITag_TRIGGER_Th_H": 100,
     "ITag_TRIGGER_Th_V": 100,
     "FT_TRIGGER": 4000000,
