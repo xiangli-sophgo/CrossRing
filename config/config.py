@@ -36,8 +36,6 @@ class CrossRingConfig:
         self.EQ_CH_FIFO_DEPTH = args.EQ_CH_FIFO_DEPTH
         self.ITag_TRIGGER_Th_H = args.ITag_TRIGGER_Th_H
         self.ITag_TRIGGER_Th_V = args.ITag_TRIGGER_Th_V
-        self.FT_TRIGGER = args.FT_TRIGGER
-        self.FT_DEPTH = args.FT_DEPTH
         self.ITag_MAX_Num_H = args.ITag_MAX_Num_H
         self.ITag_MAX_Num_V = args.ITag_MAX_Num_V
         # self.reservation_num = args.reservation_num
@@ -326,8 +324,6 @@ class CrossRingConfig:
         parser.add_argument("--EQ_CH_FIFO_DEPTH", type=int, default=default_config["EQ_CH_FIFO_DEPTH"], help="Length of IP eject queues")
         parser.add_argument("--ITag_TRIGGER_Th_H", type=int, default=default_config["ITag_TRIGGER_Th_H"], help="Horizontal ring I-Tag trigger threshold")
         parser.add_argument("--ITag_TRIGGER_Th_V", type=int, default=default_config["ITag_TRIGGER_Th_V"], help="Vertical ring I-Tag trigger threshold")
-        parser.add_argument("--FT_TRIGGER", type=int, default=default_config["FT_TRIGGER"], help="FT count")
-        parser.add_argument("--FT_DEPTH", type=int, default=default_config["FT_DEPTH"], help="FT length")
         parser.add_argument("--ITag_MAX_Num_H", type=int, default=default_config["ITag_MAX_Num_H"], help="Maximum number of I-Tag reservations for horizontal ring XY nodes")
         parser.add_argument("--ITag_MAX_Num_V", type=int, default=default_config["ITag_MAX_Num_V"], help="Maximum number of I-Tag reservations for vertical ring XY nodes")
         parser.add_argument("--DDR_BW_LIMIT", type=int, default=default_config["DDR_BW_LIMIT"], help="DDR Bandwidth limit.")

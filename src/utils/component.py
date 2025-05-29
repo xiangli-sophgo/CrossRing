@@ -538,6 +538,9 @@ class IPInterface:
         if rsp.req_type == "read":
             if rsp.rsp_type == "negative":
                 # 读请求retry逻辑
+                if req.req_attr == "old":
+                    # 该请求已经被重新注入网络，不需要再次修改。直接返回
+                    return
                 req.req_state = "invalid"
                 req.is_injected = False
                 req.path_index = 0
@@ -545,52 +548,45 @@ class IPInterface:
                 self.node.rn_rdb_count[self.ip_type][self.ip_pos] += req.burst_length
                 if req.packet_id in self.node.rn_rdb[self.ip_type][self.ip_pos]:
                     self.node.rn_rdb[self.ip_type][self.ip_pos].pop(req.packet_id)
-                self.node.rn_tracker_wait["read"][self.ip_type][self.ip_pos].append(req)
                 self.node.rn_rdb_reserve[self.ip_type][self.ip_pos] += 1
 
             elif rsp.rsp_type == "positive":
                 # 处理读重试
-                if self.node.rn_rdb_reserve[self.ip_type][self.ip_pos] > 0:
-                    retry_req = next((r for r in self.node.rn_tracker_wait["read"][self.ip_type][self.ip_pos] if r.req_state == "invalid" and r.packet_id == rsp.packet_id), None)
-                    if retry_req:
-                        self.node.rn_tracker_wait["read"][self.ip_type][self.ip_pos].remove(retry_req)
-                        retry_req.req_state = "valid"
-                        retry_req.is_injected = False
-                        retry_req.path_index = 0
-                        retry_req.is_new_on_network = True
-                        retry_req.is_arrive = False
-                        # 放入请求网络的inject_fifo
-                        self.enqueue(retry_req, "req", retry=True)
-                        self.node.rn_rdb_reserve[self.ip_type][self.ip_pos] -= 1
+                if req.req_attr == "new":
+                    self.node.rn_rdb_count[self.ip_type][self.ip_pos] += req.burst_length
+                    if req.packet_id in self.node.rn_rdb[self.ip_type][self.ip_pos]:
+                        self.node.rn_rdb[self.ip_type][self.ip_pos].pop(req.packet_id)
+                    self.node.rn_rdb_reserve[self.ip_type][self.ip_pos] += 1
+                req.req_state = "valid"
+                req.req_attr = "old"
+                req.is_injected = False
+                req.path_index = 0
+                req.is_new_on_network = True
+                req.is_arrive = False
+                # 放入请求网络的inject_fifo
+                self.enqueue(req, "req", retry=True)
+                self.node.rn_rdb_reserve[self.ip_type][self.ip_pos] -= 1
 
         elif rsp.req_type == "write":
             if rsp.rsp_type == "negative":
                 # 写请求retry逻辑
+                if req.req_attr == "old":
+                    # 该请求已经被重新注入网络，不需要再次修改。直接返回
+                    return
                 req.req_state = "invalid"
                 req.req_attr = "old"
                 req.is_injected = False
                 req.path_index = 0
-                self.node.rn_tracker_wait["write"][self.ip_type][self.ip_pos].append(req)
-                self.node.rn_wdb_reserve[self.ip_type][self.ip_pos] += 1
 
             elif rsp.rsp_type == "positive":
                 # 处理写重试
-                if self.node.rn_wdb_reserve[self.ip_type][self.ip_pos] > 0:
-                    retry_req = next((r for r in self.node.rn_tracker_wait["write"][self.ip_type][self.ip_pos] if r.req_state == "invalid" and r.packet_id == rsp.packet_id), None)
-                    if retry_req:
-                        self.node.rn_tracker_wait["write"][self.ip_type][self.ip_pos].remove(retry_req)
-                        self.node.rn_wdb_reserve[self.ip_type][self.ip_pos] -= 1
-                    else:
-                        # 可能negative的相应还没有到达，所以在wait中找不到对应的请求，在tracker中寻找
-                        retry_req = req
-
-                    retry_req.req_state = "valid"
-                    retry_req.is_injected = False
-                    retry_req.path_index = 0
-                    retry_req.is_new_on_network = True
-                    retry_req.is_arrive = False
-                    # 放入请求网络的inject_fifo
-                    self.enqueue(retry_req, "req", retry=True)
+                req.req_state = "valid"
+                req.is_injected = False
+                req.path_index = 0
+                req.is_new_on_network = True
+                req.is_arrive = False
+                # 放入请求网络的inject_fifo
+                self.enqueue(req, "req", retry=True)
 
             elif rsp.rsp_type == "datasend":
                 # 写数据发送，将写数据包放入数据网络inject_fifo
@@ -715,7 +711,7 @@ class IPInterface:
             return
 
         current_cycle = getattr(self, "current_cycle", 0)
-        if network_type == 'data' and  self.token_bucket:
+        if network_type == "data" and self.token_bucket:
             self.token_bucket.refill(current_cycle)
             if not self.token_bucket.consume():
                 return
@@ -813,7 +809,9 @@ class IPInterface:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             if req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
+                latency = np.random.uniform(
+                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
+                )
             else:
                 latency = self.config.L2M_R_LATENCY
             flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY
@@ -2037,7 +2035,8 @@ class Network:
             if current - next_node != self.config.NUM_COL:
                 link = self.links.get(flit.current_link)
                 link[flit.current_seat_index] = flit
-                if (flit.current_seat_index == 6 and len(link) == 7) or (flit.current_seat_index == 1 and len(link) == 2):
+                # BUG: TypeError: 'NoneType' object does not support item assignment
+                if (flit.current_seat_index == 6 and len(link) > 2) or (flit.current_seat_index == 1 and len(link) == 2):
                     self.links_flow_stat[flit.req_type][flit.current_link] += 1
             else:
                 # 将 flit 放入 ring_bridge 的相应方向

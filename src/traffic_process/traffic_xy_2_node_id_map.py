@@ -1,6 +1,7 @@
 import os
 import re
 from pathlib import Path
+import glob
 
 
 def coordinate_to_node(x, y):
@@ -153,29 +154,34 @@ def process_files(input_folder, output_file):
 
 def main():
     """
-    主函数
+    主函数：遍历输入根目录下的每个子文件夹，为每个子文件夹生成一个独立的 traffic 文件
     """
-    # 设置输入文件夹和输出文件路径
-    input_folder = "input_data"  # 修改为你的输入文件夹路径
-    output_file = "processed_data.txt"  # 输出文件名
+    # 设置输入根目录和输出文件夹
+    input_root = r"../../traffic/xy_map/TPS153-DeepSeek3-671B-A37B-S4K-O1-W8A8-B16"  # 根目录，内部含若干子文件夹
+    output_folder = r"../../traffic/DeepSeek/"  # 输出文件统一放在此目录
 
-    # 检查输入文件夹是否存在
-    if not os.path.exists(input_folder):
-        print(f"输入文件夹 {input_folder} 不存在")
-        print("请修改脚本中的 input_folder 变量为正确的路径")
+    # 检查输入根目录
+    if not os.path.exists(input_root):
+        print(f"输入根目录 {input_root} 不存在")
         return
 
-    print("开始处理数据...")
-    print(f"输入文件夹: {input_folder}")
-    print(f"输出文件: {output_file}")
-    print("文件名格式要求: master_p0_x1_y1.txt")
-    print("-" * 50)
+    # 确保输出目录存在
+    os.makedirs(output_folder, exist_ok=True)
 
-    process_files(input_folder, output_file)
+    print("开始批量处理子文件夹...")
+    # 遍历一级子目录
+    for sub_name in sorted(os.listdir(input_root)):
+        sub_path = os.path.join(input_root, sub_name)
+        if not os.path.isdir(sub_path):
+            continue
 
-    print("-" * 50)
-    print("处理完成!")
+        # 为该子文件夹生成对应的输出文件
+        output_file = os.path.join(output_folder, f"{sub_name}_traffic.txt")
+        print(f"\n处理子目录: {sub_path}")
+        print(f"  输出文件: {output_file}")
+        process_files(sub_path, output_file)
 
+    print("\n所有子文件夹处理完成！")
 
 if __name__ == "__main__":
     main()

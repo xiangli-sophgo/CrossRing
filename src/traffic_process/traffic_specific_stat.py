@@ -1,5 +1,10 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import sys
+import matplotlib
+
+if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
+    matplotlib.use("macosx")  # 仅在 macOS 上使用该后端
 
 # 设置中文字体（如果标签需要显示中文）
 plt.rcParams["font.sans-serif"] = ["SimHei"]  # Windows系统
@@ -7,7 +12,8 @@ plt.rcParams["axes.unicode_minus"] = False  # 解决负号显示问题
 
 # 读取数据流文件
 # file_path = f"../../traffic/output_DeepSeek/step5_data_merge/MLP_MoE_Trace.txt"
-file_path = r"../../traffic/output_v8_32_2K/step5_data_merge/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
+# file_path = r"../../traffic/output_v8_32_2K/step5_data_merge/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
+file_path = r"../../traffic/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce-2KB-new.txt"
 # file_path = f"../../traffic/output_v8_32_0427/step5_data_merge/LLama2_Attention_FC_Trace.txt"
 # file_path = f"../../traffic/output_v8_0427/step2_hash_addr2node/LLama2_Attention_FC/gmemTrace.TPU1.tdma_instance.txt"
 # file_path = f"../../traffic/output_All_reduce_new_0427/step5_data_merge/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"

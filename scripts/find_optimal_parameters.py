@@ -24,7 +24,7 @@ from optuna.trial import TrialState
 # 使用的 CPU 核心数；-1 表示全部核心
 N_JOBS = -1
 # 每个参数组合重复仿真次数，用于平滑随机 latency 影响
-N_REPEATS = 3  # 减少重复次数，因为要测试多个traffic
+N_REPEATS = 5  # 减少重复次数，因为要测试多个traffic
 
 # 全局变量用于存储可视化数据
 visualization_data = {"trials": [], "progress": [], "pareto_data": [], "param_importance": {}, "convergence": []}
@@ -126,7 +126,8 @@ def create_parameter_importance(study, save_dir):
 
         fig.write_html(os.path.join(save_dir, "parameter_importance.html"))
     except Exception as e:
-        print(f"参数重要性分析失败: {e}")
+        print("参数重要性分析失败，详细错误信息：")
+        traceback.print_exc()
 
 
 def create_pareto_front(trials, traffic_files, save_dir):
@@ -166,7 +167,9 @@ def create_pareto_front(trials, traffic_files, save_dir):
             )
         )
 
-        fig.update_layout(title=f"Pareto前沿: {traffic1_name} vs {traffic2_name}", xaxis_title=f"{traffic1_name} 带宽 (GB/s)", yaxis_title=f"{traffic2_name} 带宽 (GB/s)", height=600)
+        fig.update_layout(
+            title=f"Pareto前沿: {traffic1_name} vs {traffic2_name}", xaxis_title=f"{traffic1_name} 带宽 (GB/s)", yaxis_title=f"{traffic2_name} 带宽 (GB/s)", height=600
+        )
 
         fig.write_html(os.path.join(save_dir, "pareto_front.html"))
 
@@ -524,7 +527,7 @@ def find_optimal_parameters():
                 sim.config.DDR_BW_LIMIT = 76.8 / 4
                 sim.config.L2M_BW_LIMIT = np.inf
                 sim.config.IQ_CH_FIFO_DEPTH = 10
-                sim.config.EQ_CH_FIFO_DEPTH = 16
+                sim.config.EQ_CH_FIFO_DEPTH = 12
                 sim.config.IQ_OUT_FIFO_DEPTH = 8
                 sim.config.RB_OUT_FIFO_DEPTH = 8
                 sim.config.EQ_IN_FIFO_DEPTH = 16
@@ -562,7 +565,8 @@ def find_optimal_parameters():
                 bw = sim.get_results().get("Total_sum_BW", 0)
             except Exception as e:
                 print(f"[{traffic_file}][RPT {rpt}] Sim failed for params: {param1}, {param2}, {param3}, {param4}, {param5}, {param6}, {param7}, {param8}")
-                print("Exception:", str(e))
+                print("Exception details (full traceback):")
+                traceback.print_exc()
                 bw = 0
             tot_bw_list.append(bw)
 
@@ -867,7 +871,7 @@ if __name__ == "__main__":
     study = optuna.create_study(
         study_name="CrossRing_Multi_Traffic_BO",
         directions=["maximize", "maximize", "minimize"],  # bw1 ↑  bw2 ↑  param_norm ↓
-        sampler=optuna.samplers.NSGAIISampler(seed=525),
+        sampler=optuna.samplers.NSGAIISampler(seed=527),
     )
 
     try:

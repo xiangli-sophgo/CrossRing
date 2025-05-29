@@ -8,6 +8,10 @@ import argparse
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 import time
+import numpy as np
+import logging
+
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(filename)s:%(lineno)d: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
 
 def process_traffic_data(input_path, output_path, outstanding_num):
@@ -57,29 +61,53 @@ def run_single_simulation(sim_params):
         )
 
         # Set simulation parameters
-        sim.config.burst = 4
-        sim.config.num_ips = 32
-        sim.config.num_ddr = 32
-        sim.config.num_l2m = 32
-        sim.config.num_gdma = 32
-        sim.config.num_sdma = 32
-        sim.config.num_RN = 32
-        sim.config.num_SN = 32
-        sim.config.rn_read_tracker_ostd = 64
-        sim.config.rn_write_tracker_ostd = 64
-        sim.config.rn_rdb_size = sim.config.rn_read_tracker_ostd * sim.config.burst
-        sim.config.rn_wdb_size = sim.config.rn_write_tracker_ostd * sim.config.burst
-        sim.config.sn_ddr_read_tracker_ostd = 128
-        sim.config.sn_ddr_write_tracker_ostd = 64
-        sim.config.sn_l2m_read_tracker_ostd = 64
-        sim.config.sn_l2m_write_tracker_ostd = 64
-        sim.config.sn_ddr_wdb_size = sim.config.sn_ddr_write_tracker_ostd * sim.config.burst
-        sim.config.sn_l2m_wdb_size = sim.config.sn_l2m_write_tracker_ostd * sim.config.burst
-        sim.config.ddr_R_latency_original = 150
-        sim.config.ddr_R_latency_var_original = 0
-        sim.config.ddr_W_latency_original = 16
-        sim.config.l2m_R_latency_original = 12
-        sim.config.l2m_W_latency_original = 16
+        sim.config.BURST = 4
+        sim.config.NUM_IP = 32
+        sim.config.NUM_DDR = 32
+        sim.config.NUM_L2M = 32
+        sim.config.NUM_GDMA = 32
+        sim.config.NUM_SDMA = 32
+        sim.config.NUM_RN = 32
+        sim.config.NUM_SN = 32
+        sim.config.RN_R_TRACKER_OSTD = 64
+        sim.config.RN_W_TRACKER_OSTD = 64
+        sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST
+        sim.config.RN_WDB_SIZE = sim.config.RN_W_TRACKER_OSTD * sim.config.BURST
+        sim.config.SN_DDR_R_TRACKER_OSTD = 64
+        sim.config.SN_DDR_W_TRACKER_OSTD = 64
+        sim.config.SN_L2M_R_TRACKER_OSTD = 64
+        sim.config.SN_L2M_W_TRACKER_OSTD = 64
+        sim.config.SN_DDR_WDB_SIZE = sim.config.SN_DDR_W_TRACKER_OSTD * sim.config.BURST
+        sim.config.SN_L2M_WDB_SIZE = sim.config.SN_L2M_W_TRACKER_OSTD * sim.config.BURST
+        sim.config.DDR_R_LATENCY_original = 150
+        sim.config.DDR_R_LATENCY_VAR_original = 0
+        sim.config.DDR_W_LATENCY_original = 0
+        sim.config.L2M_R_LATENCY_original = 12
+        sim.config.L2M_W_LATENCY_original = 16
+        sim.config.IQ_CH_FIFO_DEPTH = 10
+        sim.config.EQ_CH_FIFO_DEPTH = 10
+        sim.config.IQ_OUT_FIFO_DEPTH = 8
+        sim.config.RB_IN_FIFO_DEPTH = 16
+        sim.config.RB_OUT_FIFO_DEPTH = 8
+        sim.config.EQ_IN_FIFO_DEPTH = 16
+        sim.config.TL_Etag_T2_UE_MAX = 8
+        sim.config.TL_Etag_T1_UE_MAX = 15
+        sim.config.TR_Etag_T2_UE_MAX = 12
+        sim.config.TU_Etag_T2_UE_MAX = 8
+        sim.config.TU_Etag_T1_UE_MAX = 15
+        sim.config.TD_Etag_T2_UE_MAX = 12
+        sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
+        sim.config.ITag_MAX_Num_H = sim.config.ITag_MAX_Num_V = 1
+        sim.config.ETag_BOTHSIDE_UPGRADE = 0
+
+        sim.config.GDMA_RW_GAP = np.inf
+        sim.config.SDMA_RW_GAP = np.inf
+        sim.config.CHANNEL_SPEC = {
+            "gdma": 2,
+            "sdma": 2,
+            "ddr": 4,
+            "l2m": 2,
+        }
 
         sim.initial()
         sim.print_interval = 5000
@@ -91,8 +119,8 @@ def run_single_simulation(sim_params):
         print(f"Completed simulation for {file_name} on process {os.getpid()}")
         return (file_name, results, output_csv)
 
-    except Exception as e:
-        print(f"Error in simulation for {file_name}: {str(e)}")
+    except Exception:
+        logging.exception(f"Simulation failed for {file_name}")
         return (file_name, None, output_csv)
 
 
@@ -137,10 +165,14 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name, max
     print(f"Found {len(file_names)} traffic files to process")
 
     # Setup result paths
-    result_save_path = f"../Result/CrossRing/{model_type}/{traffic_path.split('/')[-4]}/"
-    results_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/{traffic_path.split('/')[-4]}/"
+    result_save_path = f"../Result/CrossRing/{model_type}/{results_file_name}/"
+    results_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/{results_file_name}/"
     output_csv = os.path.join(r"../Result/Traffic_result_csv/", f"{results_file_name}.csv")
     os.makedirs(result_save_path, exist_ok=True)
+
+    # Ensure the CSV output directory exists
+    csv_dir = os.path.dirname(output_csv)
+    os.makedirs(csv_dir, exist_ok=True)
 
     # Determine number of workers
     if max_workers is None:
@@ -170,8 +202,8 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name, max
                 save_results_to_csv(result_data)
                 completed += 1
                 print(f"Progress: {completed}/{len(file_names)} simulations completed")
-            except Exception as e:
-                print(f"Error processing {file_name}: {str(e)}")
+            except Exception:
+                logging.exception(f"Error processing {file_name}")
 
     end_time = time.time()
     print(f"All simulations completed in {end_time - start_time:.2f} seconds")
@@ -180,11 +212,11 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name, max
 def main():
     parser = argparse.ArgumentParser(description="Network Traffic Processing and Simulation")
     parser.add_argument("--raw_traffic_input", default="../traffic/original_data/DeepSeek/", help="Input traffic data path")
-    parser.add_argument("--traffic_output", default="../traffic/output_DeepSeek_0427/", help="Output directory for processed data")
-    parser.add_argument("--outstanding", type=int, default=512, help="Outstanding number (must be power of 2)")
+    parser.add_argument("--traffic_output", default="../traffic/DeepSeek/", help="Output directory for processed data")
+    parser.add_argument("--outstanding", type=int, default=2048, help="Outstanding number (must be power of 2)")
     parser.add_argument("--config", default="../config/config2.json", help="Simulation config file path")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="Simulation model type")
-    parser.add_argument("--results_file_name", default="DeepSeek_0427", help="Base name for results files")
+    parser.add_argument("--results_file_name", default="DeepSeek_0527", help="Base name for results files")
     parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both")
     parser.add_argument("--max_workers", type=int, default=None, help="Maximum number of parallel workers (default: number of CPU cores)")
 
@@ -196,7 +228,8 @@ def main():
 
     if args.mode in [1, 2]:
         print("Running parallel simulations...")
-        processed_data_path = f"{args.traffic_output}/step5_data_merge/"
+        # processed_data_path = f"{args.traffic_output}/step5_data_merge/"
+        processed_data_path = f"{args.traffic_output}/"
         run_simulation(args.config, processed_data_path, args.model, args.results_file_name, args.max_workers)
 
 

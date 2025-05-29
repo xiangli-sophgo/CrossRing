@@ -15,7 +15,7 @@ def main():
 
     traffic_file_path = r"../test_data/"
     # file_name = r"traffic_2262_case1.txt"
-    file_name = r"traffic_2260E_case2.txt"
+    file_name = r"traffic_2260E_case1.txt"
     # file_name = r"traffic_2262_case1.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
@@ -24,9 +24,9 @@ def main():
     # file_name = r"demo_3x3.txt"
     # file_name = r"demo_459.txt"
 
-    # traffic_file_path = r"../../traffic/"
+    # traffic_file_path = r"../traffic/"
     # traffic_file_path = r"../traffic/output_DeepSeek_part1/step5_data_merge/"
-    traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
+    # traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_2K/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_no_map/step5_data_merge/"
     # file_name = r"output_embedding_Trace.txt"
@@ -35,7 +35,8 @@ def main():
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"MLP_MoE_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
-    file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace_group_map.txt"
+    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace_group_map.txt"
+    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce-2KB-new.txt"
 
     # model_type = "Feature"
     model_type = "REQ_RSP"
@@ -51,10 +52,10 @@ def main():
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        topo_type = "5x4"  # SG2262
+        # topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
         # topo_type = "6x5"
-        # topo_type = "3x3"  # SG2260E
+        topo_type = "3x3"  # SG2260E
     else:
         topo_type = config.TOPO_TYPE
 
@@ -111,7 +112,7 @@ def main():
         # sim.config.DDR_BW_LIMIT = 64
         sim.config.L2M_BW_LIMIT = np.inf
         sim.config.IQ_CH_FIFO_DEPTH = 10
-        sim.config.EQ_CH_FIFO_DEPTH = 12
+        sim.config.EQ_CH_FIFO_DEPTH = 13
         sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8
 
@@ -182,6 +183,7 @@ def main():
         sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
         sim.config.ITag_MAX_Num_H = sim.config.ITag_MAX_Num_V = 1
         sim.config.ETag_BOTHSIDE_UPGRADE = 0
+        sim.config.SEAT_PER_LINK = 7
 
         sim.config.GDMA_RW_GAP = np.inf
         sim.config.SDMA_RW_GAP = np.inf
