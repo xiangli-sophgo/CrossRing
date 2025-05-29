@@ -3,6 +3,7 @@ import numpy as np
 from collections import deque, defaultdict
 from config.config import CrossRingConfig
 import logging
+import inspect
 
 
 class TokenBucket:
@@ -68,7 +69,7 @@ class Flit:
 
     def init_param(self):
         self.early_rsp = False
-        self.current_position = -1
+        self.current_position = self.path[0]
         self.station_position = -1
         self.departure_cycle = -1
         self.req_departure_cycle = -1
@@ -153,7 +154,9 @@ class Flit:
     def __repr__(self):
         req_attr = "O" if self.req_attr == "old" else "N"
         type_display = self.rsp_type[:3] if self.rsp_type else self.req_type[0]
-        flit_position = self.flit_position if self.flit_position != "Link" else f"({self.current_link[0]}->{self.current_link[1]}).{self.current_seat_index}, "
+        flit_position = (
+            f"{self.current_position}:{self.flit_position}" if self.flit_position != "Link" else f"({self.current_link[0]}->{self.current_link[1]}).{self.current_seat_index}, "
+        )
         finish_status = "F" if self.is_finish else ""
         eject_status = "E" if self.is_ejected else ""
 
@@ -399,17 +402,16 @@ class IPInterface:
         if not net_info["l2h_fifo"]:
             return
 
-        # 检查目标缓冲区是否已满
-        queue = network.IQ_channel_buffer[self.ip_type][self.ip_pos]
-        queue_pre = network.IQ_channel_buffer_pre[self.ip_type][self.ip_pos]
-        if len(queue) >= getattr(self.config, "IQ_CH_FIFO_DEPTH", 8) or queue_pre:
-            return
+        # 检查目标缓冲区是否已满（只能在 *pre* 缓冲区为空且正式 FIFO 未满时移动）
+        fifo = network.IQ_channel_buffer[self.ip_type][self.ip_pos]
+        fifo_pre = network.IQ_channel_buffer_pre[self.ip_type][self.ip_pos]
+        if len(fifo) >= getattr(self.config, "IQ_CH_FIFO_DEPTH", 8) or fifo_pre is not None:
+            return  # 没空间，或 pre 槽已占用
 
-        # 移动到网络缓冲区
+        # 从 l2h_fifo 弹出一个 flit，先放到 *pre* 槽
         flit = net_info["l2h_fifo"].popleft()
         flit.flit_position = "IQ_CH"
-        queue_pre = flit
-        # queue.append(flit)
+        network.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = flit
 
     def _check_and_reserve_resources(self, req):
         """检查并预占新请求所需的资源"""
@@ -750,7 +752,10 @@ class IPInterface:
                 net_info["l2h_fifo"].append(net_info["l2h_fifo_pre"])
                 net_info["l2h_fifo_pre"] = None
 
-            if net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen:
+            if (
+                net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None
+                and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen
+            ):
                 net.IQ_channel_buffer[self.ip_type][self.ip_pos].append(net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos])
                 net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = None
 
@@ -819,7 +824,9 @@ class IPInterface:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             if req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
+                latency = np.random.uniform(
+                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
+                )
             else:
                 latency = self.config.L2M_R_LATENCY
             flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY
@@ -864,7 +871,6 @@ class IPInterface:
 
 class Network:
     def __init__(self, config: CrossRingConfig, adjacency_matrix, name="network"):
-
         self.config = config
         self.name = name
         self.current_cycle = []
@@ -1133,10 +1139,12 @@ class Network:
         if dir_type in ("TL", "TR"):
             cap = self.RB_CAPACITY[dir_type][key][level]
             occ = self.RB_UE_Counters[dir_type][key][level]
+            pre = self.ring_bridge_in_pre[dir_type][key]
         else:
             cap = self.EQ_CAPACITY[dir_type][key][level]
             occ = self.EQ_UE_Counters[dir_type][key][level]
-        return occ < cap
+            pre = self.eject_queue_in_pre[dir_type][key]
+        return occ < cap and not pre
 
     # ------------------------------------------------------------------
     def _occupy_entry(self, dir_type, key, level, flit):
@@ -1154,123 +1162,59 @@ class Network:
             flit.flit_position = f"EQ_{dir_type}"
         flit.used_entry_level = level
 
+    def error_log(self, flit, target_id):
+        if flit and flit.packet_id == target_id:
+            print(
+                inspect.currentframe().f_back.f_code.co_name,  # 调用函数名称
+                flit,
+            )
+
     def can_move_to_next(self, flit, current, next_node):
         # flit inject的时候判断是否可以将flit放到本地出口队列。
         if flit.source - flit.destination == self.config.NUM_COL:
-            # return len(self.eject_queues["IQ"][flit.destination]) < self.config.EQ_IN_FIFO_DEPTH
             return True
 
-        # 获取当前节点所在列的索引
-        current_column_index = current % self.config.NUM_COL
-
-        if current_column_index == 0:
-            if next_node == current + 1:
-                if self.links[(current, current)][-1] is not None:
-                    if self.links_tag[(current, current)][-1] is None:
-                        flit_l = self.links[(current, current)][-1]
-                        if flit_l.current_link[1] == flit_l.current_position:
-                            # flit_exist_right = any(flit_r.id == flit_l.id for flit_r in self.station_reservations["TR"][(flit_l.current_link[1], flit_l.path[flit_l.path_index])])
-                            link_station = self.ring_bridge["TR"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
-                            new_current = flit_l.current_link[1]
-                            new_next_node = flit_l.path[flit_l.path_index]
-                            # if len(link_station) < self.config.RB_IN_FIFO_DEPTH and flit_exist_right:
-                            # if len(link_station) < self.config.RB_IN_FIFO_DEPTH:
-                            if self.config.RB_IN_FIFO_DEPTH > len(link_station) and (
-                                (self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH and flit_l.ETag_priority in ["T0", "T1"])
-                                or (self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit_l.ETag_priority == "T2")
-                            ):
-                                return True
-                        if flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H and not flit.itag_h:
-                            if self.remain_tag["TR"][current] > 0:
-                                self.remain_tag["TR"][current] -= 1
-                                self.links_tag[(current, current)][-1] = [current, "TR"]
-                                flit.itag_h = True
-                    else:
-                        flit_l = self.links[(current, current)][-1]
-                        if flit_l.current_link[1] == flit_l.current_position:
-                            # flit_exist_right = any(flit_r.id == flit_l.id for flit_r in self.station_reservations["TR"][(flit_l.current_link[1], flit_l.path[flit_l.path_index])])
-                            link_station = self.ring_bridge["TR"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
-                            new_current = flit_l.current_link[1]
-                            new_next_node = flit_l.path[flit_l.path_index]
-                            # if len(link_station) < self.config.RB_IN_FIFO_DEPTH and flit_exist_right:
-                            # if len(link_station) < self.config.RB_IN_FIFO_DEPTH:
-                            if self.config.RB_IN_FIFO_DEPTH > len(link_station) and (
-                                (self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH and flit_l.ETag_priority in ["T0", "T1"])
-                                or (self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit_l.ETag_priority == "T2")
-                            ):
-                                if self.links_tag[(current, current)][-1] == [current, "TR"]:
-                                    self.links_tag[(current, current)][-1] = None
-                                    self.remain_tag["TR"][current] += 1
-                                    return True
-                else:
-                    if self.links_tag[(current, current)][-1] is None:
-                        return True
-                    else:
-                        if self.links_tag[(current, current)][-1] == [current, "TR"]:
-                            self.links_tag[(current, current)][-1] = None
-                            self.remain_tag["TR"][current] += 1
-                            return True
+        elif next_node == current + 1:
+            if self.links[(current, next_node)][0] is not None:
+                if (
+                    (self.links_tag[(current, next_node)][0] is None or self.links_tag[(current, next_node)][0] != [current, "TR"])
+                    and flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H
+                    and not flit.itag_h
+                ):
+                    if self.remain_tag["TR"][current] > 0:
+                        self.remain_tag["TR"][current] -= 1
+                        self.links_tag[(current, next_node)][0] = [current, "TR"]
+                        flit.itag_h = True
                 return False
-        elif current_column_index == self.config.NUM_COL - 1:
-            # 处理右边界向左移动的逻辑
-            if next_node == current - 1:
-                if self.links[(current, current)][-1] is not None:
-                    if self.links_tag[(current, current)][-1] is None:
-                        flit_l = self.links[(current, current)][-1]
-                        if flit_l.current_link[1] == flit_l.current_position:
-                            # flit_exist_left = any(flit_r.id == flit_l.id for flit_r in self.station_reservations["TL"][(flit_l.current_link[1], flit_l.path[flit_l.path_index])])
-                            link_station = self.ring_bridge["TL"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
-                            new_current = flit_l.current_link[1]
-                            new_next_node = flit_l.path[flit_l.path_index]
-                            # if len(link_station) < self.config.RB_IN_FIFO_DEPTH and flit_exist_left:
-                            if self.config.RB_IN_FIFO_DEPTH > len(link_station) and (
-                                (flit_l.ETag_priority == "T2" and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T2"] < self.config.TL_Etag_T2_UE_MAX)
-                                or (flit_l.ETag_priority == "T1" and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T1"] < self.config.TL_Etag_T2_UE_MAX)
-                                or (
-                                    flit_l.ETag_priority == "T0"
-                                    and self.T0_Etag_Order_FIFO[0] == (new_current, flit_l)
-                                    and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T0"] < self.config.RB_IN_FIFO_DEPTH
-                                )
-                            ):
-                                return True
-                        if flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H and not flit.itag_h:
-                            if self.remain_tag["TL"][current] > 0:
-                                self.remain_tag["TL"][current] -= 1
-                                self.links_tag[(current, current)][-1] = [current, "TL"]
-                                flit.itag_h = True
-                    else:
-                        flit_l = self.links[(current, current)][-1]
-                        if flit_l.current_link[1] == flit_l.current_position:
-                            # flit_exist_left = any(flit_r.id == flit_l.id for flit_r in self.station_reservations["TL"][(flit_l.current_link[1], flit_l.path[flit_l.path_index])])
-                            link_station = self.ring_bridge["TL"].get((flit_l.current_link[1], flit_l.path[flit_l.path_index]))
-                            new_current = flit_l.current_link[1]
-                            new_next_node = flit_l.path[flit_l.path_index]
-                            # if len(link_station) < self.config.RB_IN_FIFO_DEPTH and flit_exist_left:
-                            # if len(link_station) < self.config.RB_IN_FIFO_DEPTH:
-                            if self.config.RB_IN_FIFO_DEPTH > len(link_station) and (
-                                (flit_l.ETag_priority == "T2" and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T2"] < self.config.TL_Etag_T2_UE_MAX)
-                                or (flit_l.ETag_priority == "T1" and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T1"] < self.config.TL_Etag_T2_UE_MAX)
-                                or (
-                                    flit_l.ETag_priority == "T0"
-                                    and self.T0_Etag_Order_FIFO[0] == (new_current, flit_l)
-                                    and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T0"] < self.config.RB_IN_FIFO_DEPTH
-                                )
-                            ):
-                                if self.links_tag[(current, current)][-1] == [current, "TL"]:
-                                    self.links_tag[(current, current)][-1] = None
-                                    self.remain_tag["TL"][current] += 1
-                                    return True
+            else:
+                if self.links_tag[(current, next_node)][0] is None:
+                    return True
                 else:
-                    if self.links_tag[(current, current)][-1] is None:
+                    if self.links_tag[(current, next_node)][0] == [current, "TR"]:
+                        self.links_tag[(current, next_node)][0] = None
+                        self.remain_tag["TR"][current] += 1
                         return True
-                    else:
-                        if self.links_tag[(current, current)][-1] == [current, "TL"]:
-                            self.links_tag[(current, current)][-1] = None
-                            self.remain_tag["TL"][current] += 1
-                            return True
-                return False
+            return False
 
-        if current - next_node == self.config.NUM_COL:
+        elif next_node == current - 1:
+            if self.links[(current, next_node)][0] is not None:
+                if flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H and not flit.itag_h:
+                    if self.remain_tag["TL"][current] > 0:
+                        self.remain_tag["TL"][current] -= 1
+                        self.links_tag[(current, next_node)][0] = [current, "TL"]
+                        flit.itag_h = True
+                return False
+            else:
+                if self.links_tag[(current, next_node)][0] is None:
+                    return True
+                else:
+                    if self.links_tag[(current, next_node)][0] == [current, "TL"]:
+                        self.links_tag[(current, next_node)][0] = None
+                        self.remain_tag["TL"][current] += 1
+                        return True
+            return False
+
+        elif current - next_node == self.config.NUM_COL:
             # 向 Ring Bridge 移动
             # return len(self.ring_bridge["TU"][(current, next_node)]) < self.config.RB_IN_FIFO_DEPTH
             # v1.3 在IQ中分TU和TD两个FIFO
@@ -1278,104 +1222,8 @@ class Network:
                 return len(self.inject_queues["TD"][current]) < self.config.IQ_OUT_FIFO_DEPTH
             elif len(flit.path) > 2 and flit.path[2] - flit.path[1] == -self.config.NUM_COL * 2:
                 return len(self.inject_queues["TU"][current]) < self.config.IQ_OUT_FIFO_DEPTH
-        elif next_node - current == 1:
-            # 向右移动
-            if self.links[(current - 1, current)][-1] is not None:
-                if self.links_tag[(current - 1, current)][-1] is None:
-                    flit_l = self.links[(current - 1, current)][-1]
-                    if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.NUM_COL:
-                        new_current = flit_l.current_link[1]
-                        new_next_node = flit_l.path[flit_l.path_index + 1]
-                        link_station = self.ring_bridge["TR"].get((new_current, new_next_node))
-                        # if self.config.RB_IN_FIFO_DEPTH - len(station_right) > len(self.station_reservations["TR"][(new_current, new_next_node)]):
-                        if self.config.RB_IN_FIFO_DEPTH > len(link_station) and (
-                            (self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH and flit_l.ETag_priority in ["T0", "T1"])
-                            or (self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit_l.ETag_priority == "T2")
-                        ):
-                            return True
-                    if flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H and not flit.itag_h:
-                        if self.remain_tag["TR"][current] > 0:
-                            self.remain_tag["TR"][current] -= 1
-                            self.links_tag[(current - 1, current)][-1] = [current, "TR"]
-                            flit.itag_h = True
-                else:
-                    flit_l = self.links[(current - 1, current)][-1]
-                    if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.NUM_COL:
-                        new_current = flit_l.current_link[1]
-                        new_next_node = flit_l.path[flit_l.path_index + 1]
-                        link_station = self.ring_bridge["TR"].get((new_current, new_next_node))
-                        # if self.config.RB_IN_FIFO_DEPTH - len(station_right) > len(self.station_reservations["TR"][(new_current, new_next_node)]):
-                        if self.config.RB_IN_FIFO_DEPTH > len(link_station) and (
-                            (self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T1"] < self.config.RB_IN_FIFO_DEPTH and flit_l.ETag_priority in ["T0", "T1"])
-                            or (self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX and flit_l.ETag_priority == "T2")
-                        ):
-                            if self.links_tag[(current - 1, current)][-1] == [current, "TR"]:
-                                self.links_tag[(current - 1, current)][-1] = None
-                                self.remain_tag["TR"][current] += 1
-                                return True
-            else:
-                if self.links_tag[(current - 1, current)][-1] is None:
-                    return True
-                else:
-                    if self.links_tag[(current - 1, current)][-1] == [current, "TR"]:
-                        self.links_tag[(current - 1, current)][-1] = None
-                        self.remain_tag["TR"][current] += 1
-                        return True
-            return False
-        elif current - next_node == 1:
-            # 向左移动
-            if self.links[(current + 1, current)][-1] is not None:
-                if self.links_tag[current + 1, current][-1] is None:
-                    flit_l = self.links[(current + 1, current)][-1]
-                    if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.NUM_COL:
-                        new_current = flit_l.current_link[1]
-                        new_next_node = flit_l.path[flit_l.path_index + 1]
-                        station_left = self.ring_bridge["TL"].get((new_current, new_next_node))
-                        # if self.config.RB_IN_FIFO_DEPTH - len(station_left) > len(self.station_reservations["TL"][(new_current, new_next_node)]):
-                        if self.config.RB_IN_FIFO_DEPTH > len(station_left) and (
-                            (flit_l.ETag_priority == "T2" and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T2"] < self.config.TL_Etag_T2_UE_MAX)
-                            or (flit_l.ETag_priority == "T1" and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T1"] < self.config.TL_Etag_T2_UE_MAX)
-                            or (
-                                flit_l.ETag_priority == "T0"
-                                and self.T0_Etag_Order_FIFO[0] == (new_current, flit_l)
-                                and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T0"] < self.config.RB_IN_FIFO_DEPTH
-                            )
-                        ):
-                            return True
-                    if flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H and not flit.itag_h:
-                        if self.remain_tag["TL"][current] > 0:
-                            self.remain_tag["TL"][current] -= 1
-                            self.links_tag[(current + 1, current)][-1] = [current, "TL"]
-                            flit.itag_h = True
-                else:
-                    flit_l = self.links[(current + 1, current)][-1]
-                    if flit_l.path_index + 1 < len(flit_l.path) and flit_l.current_link[1] - flit_l.path[flit_l.path_index + 1] == self.config.NUM_COL:
-                        new_current = flit_l.current_link[1]
-                        new_next_node = flit_l.path[flit_l.path_index + 1]
-                        station_left = self.ring_bridge["TL"].get((new_current, new_next_node))
-                        # if self.config.RB_IN_FIFO_DEPTH - len(station_left) > len(self.station_reservations["TL"][(new_current, new_next_node)]):
-                        if self.config.RB_IN_FIFO_DEPTH > len(station_left) and (
-                            (flit_l.ETag_priority == "T2" and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T2"] < self.config.TL_Etag_T2_UE_MAX)
-                            or (flit_l.ETag_priority == "T1" and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T1"] < self.config.TL_Etag_T2_UE_MAX)
-                            or (
-                                flit_l.ETag_priority == "T0"
-                                and self.T0_Etag_Order_FIFO[0] == (new_current, flit_l)
-                                and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T0"] < self.config.RB_IN_FIFO_DEPTH
-                            )
-                        ):
-                            if self.links_tag[(current + 1, current)][-1] == [current, "TL"]:
-                                self.links_tag[(current + 1, current)][-1] = None
-                                self.remain_tag["TL"][current] += 1
-                                return True
-            else:
-                if self.links_tag[(current + 1, current)][-1] is None:
-                    return True
-                else:
-                    if self.links_tag[(current + 1, current)][-1] == [current, "TL"]:
-                        self.links_tag[(current + 1, current)][-1] = None
-                        self.remain_tag["TL"][current] += 1
-                        return True
-            return False
+
+        return False
 
     def plan_move(self, flit):
         if flit.is_new_on_network:
@@ -1423,7 +1271,6 @@ class Network:
             link[flit.current_seat_index] = None
             flit.current_seat_index += 1
             return
-
         # 2. 到达链路末端
         new_current, new_next_node = next_node, flit.path[flit.path_index]  # delay情况下path_index不更新
         # A. 处理横边界情况
@@ -2039,7 +1886,7 @@ class Network:
                     flit.current_link = (next_node, next_pos)
                     flit.current_seat_index = 0
 
-    def execute_moves(self, flit, cycle):
+    def execute_moves(self, flit: Flit, cycle):
         if not flit.is_arrive:
             current, next_node = flit.current_link
             if current - next_node != self.config.NUM_COL:
@@ -2054,7 +1901,11 @@ class Network:
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
-                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth and not self.ring_bridge_in_pre[direction][flit.current_link]:
+                    if (
+                        direction in self.ring_bridge.keys()
+                        and len(self.ring_bridge[direction][flit.current_link]) < max_depth
+                        and not self.ring_bridge_in_pre[direction][flit.current_link]
+                    ):
                         flit.flit_position = f"RB_{direction}"
                         self.ring_bridge_in_pre[direction][flit.current_link] = flit
                         flit.is_on_station = True
@@ -2071,18 +1922,14 @@ class Network:
                 return True
             elif current - next_node == self.config.NUM_COL * 2 or (current == next_node and current not in range(0, self.config.NUM_COL)):
                 direction = "TU"
-                queue = self.eject_queues["TU"][next_node]
-                queue_pre = self.eject_queue_in_pre["TU"][next_node]
+                queue = self.eject_queues["TU"]
+                queue_pre = self.eject_queue_in_pre["TU"]
             else:
                 direction = "TD"
-                queue = self.eject_queues["TD"][next_node]
-                queue_pre = self.eject_queue_in_pre["TD"][next_node]
+                queue = self.eject_queues["TD"]
+                queue_pre = self.eject_queue_in_pre["TD"]
 
-            if len(queue) < self.config.EQ_IN_FIFO_DEPTH and not queue_pre:
-                flit.flit_position = f"EQ_{direction}"
-                queue_pre = flit
-                # queue.append(flit)
-                return True
-            flit.is_arrive = False
-            flit.is_delay = True
+            flit.flit_position = f"EQ_{direction}"
+            queue_pre[next_node] = flit
+
             return False

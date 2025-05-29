@@ -15,7 +15,7 @@ def main():
 
     traffic_file_path = r"../test_data/"
     # file_name = r"traffic_2262_case1.txt"
-    file_name = r"traffic_2260E_case3.txt"
+    file_name = r"traffic_2260E_case2.txt"
     # file_name = r"traffic_2262_case1.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
@@ -53,10 +53,10 @@ def main():
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        topo_type = "5x4"  # SG2262
+        # topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
         # topo_type = "6x5"
-        # topo_type = "3x3"  # SG2260E
+        topo_type = "3x3"  # SG2260E
     else:
         topo_type = config.TOPO_TYPE
 
@@ -75,9 +75,9 @@ def main():
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
         plot_link_state=0,
-        plot_start_time=1000,
-        print_trace=1,
-        show_trace_id=304,  # 10,13,gdma_1,0,ddr_1,R,4
+        plot_start_time=200,
+        print_trace=0,
+        show_trace_id=0,  # 308 10,13,gdma_1,0,ddr_1,R,4
         show_node_id=4,
         verbose=1,
     )
@@ -113,7 +113,7 @@ def main():
         # sim.config.DDR_BW_LIMIT = 64
         sim.config.L2M_BW_LIMIT = np.inf
         sim.config.IQ_CH_FIFO_DEPTH = 10
-        sim.config.EQ_CH_FIFO_DEPTH = 13
+        sim.config.EQ_CH_FIFO_DEPTH = 10
         sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8
 
