@@ -41,6 +41,8 @@ class Flit:
         self.destination_type = None
         self.burst_length = -1
         self.path = path
+        self.flit_position = ""
+        self.is_finish = False
         Flit.last_id += 1
         self.packet_id = None
         self.moving_direction = self.calculate_direction(path)
@@ -77,6 +79,7 @@ class Flit:
         self.arrival_eject_cycle = -1
         self.entry_db_cycle = -1
         self.leave_db_cycle = -1
+        self.start_inject = False
         self.is_injected = False
         self.is_ejected = False
         self.is_new_on_network = True
@@ -92,7 +95,6 @@ class Flit:
         self.is_tagged = False
         self.ETag_priority = "T2"  # 默认优先级为 T2
         # 记录下环 / 弹出时实际占用的是哪一级 entry（"T0" / "T1" / "T2"）
-        # 生成时为 None，占用时写入；释放时根据该字段选择对应计数器自减
         self.used_entry_level = None
         # Latency record
         self.cmd_entry_cmd_table_cycle = -1
@@ -144,21 +146,22 @@ class Flit:
                     self.is_injected = True
                     self.is_new_on_network = True
                     self.current_link = None
+                    self.flit_position = "Link"
                     return True
         return False
 
     def __repr__(self):
         req_attr = "O" if self.req_attr == "old" else "N"
         type_display = self.rsp_type[:3] if self.rsp_type else self.req_type[0]
-        arrive_status = "A" if self.is_arrive else ""
+        flit_position = self.flit_position if self.flit_position != "Link" else f"({self.current_link[0]}->{self.current_link[1]}).{self.current_seat_index}, "
+        finish_status = "F" if self.is_finish else ""
         eject_status = "E" if self.is_ejected else ""
 
         return (
             f"{self.packet_id}.{self.flit_id} {self.source}.{self.source_type[0]}{self.source_type[-1]}->{self.destination}.{self.destination_type[0]}{self.destination_type[-1]}: "
-            f"{self.current_link} -> {self.current_seat_index}, "
-            f"{self.current_position}, "
+            f"{flit_position}, "
             f"{req_attr}, {self.flit_type}, {type_display}, "
-            f"{arrive_status}{eject_status}, "
+            f"{finish_status}{eject_status}, "
             f"{self.ETag_priority};"
         )
 
@@ -339,12 +342,13 @@ class IPInterface:
         else:
             self.token_bucket = None
 
-    def enqueue(self, flit, network_type, retry=False):
+    def enqueue(self, flit: Flit, network_type: str, retry=False):
         """IP 核把flit丢进对应网络的 inject_fifo"""
         if retry:
             self.networks[network_type]["inject_fifo"].appendleft(flit)
         else:
             self.networks[network_type]["inject_fifo"].append(flit)
+        flit.flit_position = "IP_inject"
         if network_type == "req" and self.networks[network_type]["send_flits"][flit.packet_id]:
             return True
         self.networks[network_type]["send_flits"][flit.packet_id].append(flit)
@@ -363,11 +367,14 @@ class IPInterface:
         if network_type == "req":
             if flit.req_attr == "new" and not self._check_and_reserve_resources(flit):
                 return  # 资源不足，保持在inject_fifo中
-
+            flit.flit_position = "L2H_FIFO"
+            flit.start_inject = True
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
 
         elif network_type == "rsp":
             # 响应网络：直接移动
+            flit.flit_position = "L2H_FIFO"
+            flit.start_inject = True
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
 
         elif network_type == "data":
@@ -380,34 +387,29 @@ class IPInterface:
                 if not self.token_bucket.consume():
                     return
             flit: Flit = net_info["inject_fifo"].popleft()
+            flit.flit_position = "L2H_FIFO"
+            flit.start_inject = True
             net_info["l2h_fifo_pre"] = flit
 
     def l2h_to_IQ_channel_buffer(self, network_type):
         """2GHz: l2h_fifo → network.IQ_channel_buffer"""
         net_info = self.networks[network_type]
-        network = net_info["network"]
+        network: Network = net_info["network"]
 
         if not net_info["l2h_fifo"]:
             return
 
         # 检查目标缓冲区是否已满
-        target_buf = network.IQ_channel_buffer[self.ip_type][self.ip_pos]
-        if len(target_buf) >= getattr(self.config, "IQ_CH_FIFO_DEPTH", 8):
+        queue = network.IQ_channel_buffer[self.ip_type][self.ip_pos]
+        queue_pre = network.IQ_channel_buffer_pre[self.ip_type][self.ip_pos]
+        if len(queue) >= getattr(self.config, "IQ_CH_FIFO_DEPTH", 8) or queue_pre:
             return
-
-        flit = net_info["l2h_fifo"][0]
-
-        # 根据网络类型进行不同的处理
-        # if network_type == "req":
-        #     # 请求网络：区分新请求和retry请求的资源检查
-        #     if getattr(flit, "req_attr", "new") == "new":
-        #         if not self._check_and_reserve_resources(flit):
-        #             return
-        # rsp和data网络的item可以直接发送
 
         # 移动到网络缓冲区
         flit = net_info["l2h_fifo"].popleft()
-        target_buf.append(flit)
+        flit.flit_position = "IQ_CH"
+        queue_pre = flit
+        # queue.append(flit)
 
     def _check_and_reserve_resources(self, req):
         """检查并预占新请求所需的资源"""
@@ -475,6 +477,8 @@ class IPInterface:
                 return
 
             flit = eq_buf.popleft()
+            flit.is_arrive = True
+            flit.flit_position = "H2L_FIFO"
             net_info["h2l_fifo_pre"] = flit
             net_info["network"].arrive_flits[flit.packet_id].append(flit)
             net_info["network"].recv_flits_num += 1
@@ -583,6 +587,7 @@ class IPInterface:
                 req.req_state = "valid"
                 req.is_injected = False
                 req.path_index = 0
+                req.req_attr = "old"
                 req.is_new_on_network = True
                 req.is_arrive = False
                 # 放入请求网络的inject_fifo
@@ -717,6 +722,8 @@ class IPInterface:
                 return
 
         flit = net_info["h2l_fifo"].popleft()
+        flit.flit_position = "IP_eject"
+        flit.is_finish = True
         # eject后的行为不再模拟
 
     def inject_step(self, cycle):
@@ -734,12 +741,22 @@ class IPInterface:
         for net_type in ["req", "rsp", "data"]:
             self.l2h_to_IQ_channel_buffer(net_type)
 
+    def move_pre_to_fifo(self):
         # pre → fifo 的移动（每个周期都执行）
         for net_type, net_info in self.networks.items():
+            net: Network = net_info["network"]
             # l2h_fifo_pre → l2h_fifo
             if net_info["l2h_fifo_pre"] is not None and len(net_info["l2h_fifo"]) < net_info["l2h_fifo"].maxlen:
                 net_info["l2h_fifo"].append(net_info["l2h_fifo_pre"])
                 net_info["l2h_fifo_pre"] = None
+
+            if net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen:
+                net.IQ_channel_buffer[self.ip_type][self.ip_pos].append(net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos])
+                net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = None
+
+            if net_info["h2l_fifo_pre"] is not None and len(net_info["h2l_fifo"]) < net_info["h2l_fifo"].maxlen:
+                net_info["h2l_fifo"].append(net_info["h2l_fifo_pre"])
+                net_info["h2l_fifo_pre"] = None
 
     def eject_step(self, cycle):
         """根据周期和频率调用eject相应的方法"""
@@ -755,13 +772,6 @@ class IPInterface:
             # 对三个网络分别执行h2l_to_eject_fifo
             for net_type in ["req", "rsp", "data"]:
                 self.h2l_to_eject_fifo(net_type)
-
-        # pre → fifo 的移动（每个周期都执行）
-        # h2l_fifo_pre → h2l_fifo
-        for net_type, net_info in self.networks.items():
-            if net_info["h2l_fifo_pre"] is not None and len(net_info["h2l_fifo"]) < net_info["h2l_fifo"].maxlen:
-                net_info["h2l_fifo"].append(net_info["h2l_fifo_pre"])
-                net_info["h2l_fifo_pre"] = None
 
     def create_write_packet(self, req):
         """创建写数据包并放入数据网络inject_fifo"""
@@ -809,9 +819,7 @@ class IPInterface:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             if req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(
-                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
-                )
+                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
             else:
                 latency = self.config.L2M_R_LATENCY
             flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY
@@ -834,12 +842,6 @@ class IPInterface:
 
     def create_rsp(self, req, rsp_type):
         """创建响应并放入响应网络inject_fifo"""
-        # if rsp_type == "negative":
-        #     if req.req_type == "read":
-        #         self.read_retry_num_stat += 1
-        #     elif req.req_type == "write":
-        #         self.write_retry_num_stat += 1
-
         cycle = getattr(self, "current_cycle", 0)
         source = req.destination + self.config.NUM_COL
         destination = req.source - self.config.NUM_COL
@@ -872,17 +874,20 @@ class Network:
         self.eject_num = 0
         self.inject_queues = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.inject_queues_pre = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
-        self.EQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.eject_queues = {"TU": {}, "TD": {}}
+        self.eject_queue_in_pre = {"TU": {}, "TD": {}}
         self.arrive_node_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.IQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.EQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.IQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.EQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.links = {}
         self.links_flow_stat = {"read": {}, "write": {}}
         self.links_tag = {}
         self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
         self.ring_bridge = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
-        self.ring_bridge_pre = {"TU": {}, "TD": {}, "EQ": {}}
+        self.ring_bridge_in_pre = {"TL": {}, "TR": {}}
+        self.ring_bridge_out_pre = {"TU": {}, "TD": {}, "EQ": {}}
         self.round_robin = {"IQ": defaultdict(lambda: defaultdict(dict)), "RB": defaultdict(lambda: defaultdict(dict)), "EQ": defaultdict(lambda: defaultdict(dict))}
         self.round_robin_counter = 0
         self.recv_flits_num = 0
@@ -974,12 +979,15 @@ class Network:
             self.inject_queues_pre["TU"][ip_pos] = None
             self.inject_queues_pre["TD"][ip_pos] = None
             self.inject_queues_pre["EQ"][ip_pos] = None
-            for key in self.EQ_channel_buffer_pre:
+            for key in self.config.CH_NAME_LIST:
+                self.IQ_channel_buffer_pre[key][ip_pos] = None
                 self.EQ_channel_buffer_pre[key][ip_pos - config.NUM_COL] = None
             for key in self.arrive_node_pre:
                 self.arrive_node_pre[key][ip_pos - config.NUM_COL] = None
             self.eject_queues["TU"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
             self.eject_queues["TD"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
+            self.eject_queue_in_pre["TU"][ip_pos - config.NUM_COL] = None
+            self.eject_queue_in_pre["TD"][ip_pos - config.NUM_COL] = None
             self.EQ_UE_Counters["TU"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0, "T0": 0}
             self.EQ_UE_Counters["TD"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0}
 
@@ -1037,9 +1045,11 @@ class Network:
                 self.ring_bridge["TD"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
                 self.ring_bridge["EQ"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
 
-                self.ring_bridge_pre["TU"][(pos, next_pos)] = None
-                self.ring_bridge_pre["TD"][(pos, next_pos)] = None
-                self.ring_bridge_pre["EQ"][(pos, next_pos)] = None
+                self.ring_bridge_in_pre["TL"][(pos, next_pos)] = None
+                self.ring_bridge_in_pre["TR"][(pos, next_pos)] = None
+                self.ring_bridge_out_pre["TU"][(pos, next_pos)] = None
+                self.ring_bridge_out_pre["TD"][(pos, next_pos)] = None
+                self.ring_bridge_out_pre["EQ"][(pos, next_pos)] = None
 
                 self.RB_UE_Counters["TL"][(pos, next_pos)] = {"T2": 0, "T1": 0, "T0": 0}
                 self.RB_UE_Counters["TR"][(pos, next_pos)] = {"T2": 0, "T1": 0}
@@ -1063,7 +1073,7 @@ class Network:
         for ip_type in self.IQ_channel_buffer.keys():
             for ip_index in getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST"):
                 ip_recv_index = ip_index - config.NUM_COL
-                self.IQ_channel_buffer[ip_type][ip_index] = deque()
+                self.IQ_channel_buffer[ip_type][ip_index] = deque(maxlen=config.IQ_CH_FIFO_DEPTH)
                 self.EQ_channel_buffer[ip_type][ip_recv_index] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
         for ip_type in self.last_select.keys():
             for ip_index in getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST"):
@@ -1138,8 +1148,10 @@ class Network:
         """
         if dir_type in ("TL", "TR"):
             self.RB_UE_Counters[dir_type][key][level] += 1
+            flit.flit_position = f"RB_{dir_type}"
         else:
             self.EQ_UE_Counters[dir_type][key][level] += 1
+            flit.flit_position = f"EQ_{dir_type}"
         flit.used_entry_level = level
 
     def can_move_to_next(self, flit, current, next_node):
@@ -1366,8 +1378,6 @@ class Network:
             return False
 
     def plan_move(self, flit):
-        # if flit.packet_id == 7 and flit.flit_id == -1:
-        # print(flit)
         if flit.is_new_on_network:
             current = flit.source
             next_node = flit.path[flit.path_index + 1]
@@ -1376,7 +1386,6 @@ class Network:
             flit.is_arrive = False
             flit.is_on_station = False
             flit.current_link = (current, next_node)
-            # flit.current_seat_index = 2 if (current - next_node == self.config.cols) else 0
             if current - next_node == self.config.NUM_COL:
                 if len(flit.path) > 2 and flit.path[flit.path_index + 2] - next_node == 2 * self.config.NUM_COL:
                     flit.current_seat_index = -1
@@ -1398,6 +1407,7 @@ class Network:
         col_end = col_start + self.config.NUM_NODE - self.config.NUM_COL * 2 if col_start >= 0 else -1
 
         link = self.links.get(flit.current_link)
+
         # Plan non ring bridge moves
         if current - next_node != self.config.NUM_COL:
             # Handling delay flits
@@ -1936,7 +1946,7 @@ class Network:
                 flit.current_seat_index = 0
         return
 
-    def _handle_regular_flit(self, flit, link, current, next_node, row_start, row_end, col_start, col_end):
+    def _handle_regular_flit(self, flit: Flit, link, current, next_node, row_start, row_end, col_start, col_end):
         # 1. 非链路末端: 在当前链路上前进一步
         if flit.current_seat_index < len(link) - 1:
             link[flit.current_seat_index] = None
@@ -2035,8 +2045,7 @@ class Network:
             if current - next_node != self.config.NUM_COL:
                 link = self.links.get(flit.current_link)
                 link[flit.current_seat_index] = flit
-                # BUG: TypeError: 'NoneType' object does not support item assignment
-                if (flit.current_seat_index == 6 and len(link) > 2) or (flit.current_seat_index == 1 and len(link) == 2):
+                if (flit.current_seat_index == len(link) - 1 and len(link) > 2) or (flit.current_seat_index == 1 and len(link) == 2):
                     self.links_flow_stat[flit.req_type][flit.current_link] += 1
             else:
                 # 将 flit 放入 ring_bridge 的相应方向
@@ -2045,8 +2054,9 @@ class Network:
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
-                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth:
-                        self.ring_bridge[direction][flit.current_link].append(flit)
+                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth and not self.ring_bridge_in_pre[direction][flit.current_link]:
+                        flit.flit_position = f"RB_{direction}"
+                        self.ring_bridge_in_pre[direction][flit.current_link] = flit
                         flit.is_on_station = True
             return False
         else:
@@ -2055,17 +2065,23 @@ class Network:
             flit.arrival_network_cycle = cycle
 
             if flit.source - flit.destination == self.config.NUM_COL:
-                # queue = self.eject_queues["IQ"][flit.destination]
+                flit.flit_position = f"IQ_EQ"
                 flit.is_arrived = True
 
                 return True
             elif current - next_node == self.config.NUM_COL * 2 or (current == next_node and current not in range(0, self.config.NUM_COL)):
+                direction = "TU"
                 queue = self.eject_queues["TU"][next_node]
+                queue_pre = self.eject_queue_in_pre["TU"][next_node]
             else:
+                direction = "TD"
                 queue = self.eject_queues["TD"][next_node]
+                queue_pre = self.eject_queue_in_pre["TD"][next_node]
 
-            if len(queue) < self.config.EQ_IN_FIFO_DEPTH:
-                queue.append(flit)
+            if len(queue) < self.config.EQ_IN_FIFO_DEPTH and not queue_pre:
+                flit.flit_position = f"EQ_{direction}"
+                queue_pre = flit
+                # queue.append(flit)
                 return True
             flit.is_arrive = False
             flit.is_delay = True

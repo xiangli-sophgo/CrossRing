@@ -15,7 +15,7 @@ def main():
 
     traffic_file_path = r"../test_data/"
     # file_name = r"traffic_2262_case1.txt"
-    file_name = r"traffic_2260E_case1.txt"
+    file_name = r"traffic_2260E_case3.txt"
     # file_name = r"traffic_2262_case1.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
@@ -24,19 +24,20 @@ def main():
     # file_name = r"demo_3x3.txt"
     # file_name = r"demo_459.txt"
 
-    # traffic_file_path = r"../traffic/"
+    # traffic_file_path = r"../traffic/v1.0.8 All_Reduce new/"
+    # traffic_file_path = r"../traffic/DeepSeek/"
     # traffic_file_path = r"../traffic/output_DeepSeek_part1/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_2K/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_no_map/step5_data_merge/"
-    # file_name = r"output_embedding_Trace.txt"
+    # file_name = r"Add.txt"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"output_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
     # file_name = r"MLP_MoE_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
     # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace_group_map.txt"
-    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce-2KB-new.txt"
+    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce-2KB-new_traffic.txt"
 
     # model_type = "Feature"
     model_type = "REQ_RSP"
@@ -52,10 +53,10 @@ def main():
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        # topo_type = "5x4"  # SG2262
+        topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
         # topo_type = "6x5"
-        topo_type = "3x3"  # SG2260E
+        # topo_type = "3x3"  # SG2260E
     else:
         topo_type = config.TOPO_TYPE
 
@@ -75,8 +76,8 @@ def main():
         plot_RN_BW_fig=1,
         plot_link_state=0,
         plot_start_time=1000,
-        print_trace=0,
-        show_trace_id=33,
+        print_trace=1,
+        show_trace_id=304,  # 10,13,gdma_1,0,ddr_1,R,4
         show_node_id=4,
         verbose=1,
     )

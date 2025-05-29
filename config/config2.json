@@ -50,5 +50,7 @@
     "TU_Etag_T2_UE_MAX":5,
     "TU_Etag_T1_UE_MAX":7,
     "TD_Etag_T2_UE_MAX":6,
-    "ETag_BOTHSIDE_UPGRADE": 1
+    "ETag_BOTHSIDE_UPGRADE": 1,
+    "GDMA_RW_GAP": 1e9,
+    "SDMA_RW_GAP": 1e9
 }

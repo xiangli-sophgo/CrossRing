@@ -157,7 +157,7 @@ def main():
     主函数：遍历输入根目录下的每个子文件夹，为每个子文件夹生成一个独立的 traffic 文件
     """
     # 设置输入根目录和输出文件夹
-    input_root = r"../../traffic/xy_map/TPS153-DeepSeek3-671B-A37B-S4K-O1-W8A8-B16"  # 根目录，内部含若干子文件夹
+    input_root = r"../../traffic/original/DeepSeek-v3/"  # 根目录，内部含若干子文件夹
     output_folder = r"../../traffic/DeepSeek/"  # 输出文件统一放在此目录
 
     # 检查输入根目录
@@ -176,12 +176,13 @@ def main():
             continue
 
         # 为该子文件夹生成对应的输出文件
-        output_file = os.path.join(output_folder, f"{sub_name}_traffic.txt")
+        output_file = os.path.join(output_folder, f"{sub_name}.txt")
         print(f"\n处理子目录: {sub_path}")
         print(f"  输出文件: {output_file}")
         process_files(sub_path, output_file)
 
     print("\n所有子文件夹处理完成！")
+
 
 if __name__ == "__main__":
     main()

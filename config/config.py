@@ -62,6 +62,8 @@ class CrossRingConfig:
         self.TU_Etag_T2_UE_MAX = args.TU_Etag_T2_UE_MAX
         self.TD_Etag_T2_UE_MAX = args.TD_Etag_T2_UE_MAX
         self.ETag_BOTHSIDE_UPGRADE = args.ETag_BOTHSIDE_UPGRADE
+        self.GDMA_RW_GAP = args.GDMA_RW_GAP
+        self.SDMA_RW_GAP = args.SDMA_RW_GAP
         self.CHANNEL_SPEC = {
             "gdma": 1,  # → RN 侧
             "sdma": 1,  # → RN 侧
@@ -353,5 +355,7 @@ class CrossRingConfig:
         parser.add_argument("--ETag_BOTHSIDE_UPGRADE", type=int, default=default_config["ETag_BOTHSIDE_UPGRADE"], help="ETag upgrade method")
         parser.add_argument("--IP_L2H_FIFO_DEPTH", type=int, default=default_config["IP_L2H_FIFO_DEPTH"], help="IP frequency change l2h fifo depth")
         parser.add_argument("--IP_H2L_FIFO_DEPTH", type=int, default=default_config["IP_H2L_FIFO_DEPTH"], help="IP frequency change h2l fifo depth")
+        parser.add_argument("--GDMA_RW_GAP", type=int, default=default_config["GDMA_RW_GAP"], help="GDMA read and write cmd num gap")
+        parser.add_argument("--SDMA_RW_GAP", type=int, default=default_config["SDMA_RW_GAP"], help="SDMA read and write cmd num gap")
 
         return parser.parse_args()

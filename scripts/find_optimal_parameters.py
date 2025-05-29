@@ -20,55 +20,595 @@ import plotly.express as px
 
 from optuna.exceptions import TrialPruned
 from optuna.trial import TrialState
+from scipy import stats
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.feature_selection import mutual_info_regression
 
 # 使用的 CPU 核心数；-1 表示全部核心
 N_JOBS = -1
 # 每个参数组合重复仿真次数，用于平滑随机 latency 影响
-N_REPEATS = 5  # 减少重复次数，因为要测试多个traffic
+N_REPEATS = 8  # 减少重复次数，因为要测试多个traffic
 
 # 全局变量用于存储可视化数据
 visualization_data = {"trials": [], "progress": [], "pareto_data": [], "param_importance": {}, "convergence": []}
 
 
-def create_visualization_plots(study, traffic_files, traffic_weights, save_dir):
-    """创建全面的可视化图表"""
-    print("生成可视化图表...")
+def create_parameter_impact_plot(trials, traffic_files, save_dir):
+    """增强版参数影响分析图"""
+    if not trials:
+        return
+
+    # 获取参数和性能数据
+    param_names = list(trials[0].params.keys())
+    traffic_names = [tf[:-4] for tf in traffic_files]
+
+    # 准备数据
+    param_data = {param: [] for param in param_names}
+    performance_data = {traffic: [] for traffic in traffic_names}
+    weighted_performance = []
+
+    for trial in trials:
+        if trial.values is not None:
+            # 参数数据
+            for param in param_names:
+                param_data[param].append(trial.params[param])
+
+            # 性能数据
+            for traffic in traffic_names:
+                key = f"Total_sum_BW_mean_{traffic}"
+                performance_data[traffic].append(trial.user_attrs.get(key, 0))
+
+            weighted_performance.append(trial.user_attrs.get("Total_sum_BW_weighted_mean", 0))
+
+    # 1. 参数敏感性分析热力图
+    fig1 = create_parameter_sensitivity_heatmap(param_data, performance_data, traffic_names, param_names)
+    fig1.write_html(os.path.join(save_dir, "parameter_sensitivity_heatmap.html"))
+
+    # 2. 参数影响力散点图矩阵
+    fig2 = create_parameter_scatter_matrix(param_data, weighted_performance, param_names)
+    fig2.write_html(os.path.join(save_dir, "parameter_scatter_matrix.html"))
+
+    # 3. 参数协同效应分析
+    fig3 = create_parameter_synergy_analysis(param_data, weighted_performance, param_names)
+    fig3.write_html(os.path.join(save_dir, "parameter_synergy_analysis.html"))
+
+
+def create_parameter_sensitivity_heatmap(param_data, performance_data, traffic_names, param_names):
+    """创建参数敏感性热力图"""
+    from scipy import stats
+
+    # 计算相关系数矩阵
+    correlation_matrix: np.ndarray = np.zeros((len(param_names), len(traffic_names)))
+
+    for i, param in enumerate(param_names):
+        for j, traffic in enumerate(traffic_names):
+            if len(param_data[param]) > 1 and len(performance_data[traffic]) > 1:
+                corr, _ = stats.pearsonr(param_data[param], performance_data[traffic])
+                correlation_matrix[i, j] = corr if not np.isnan(corr) else 0
+
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=correlation_matrix,
+            x=traffic_names,
+            y=param_names,
+            colorscale="RdBu",
+            zmid=0,
+            text=np.round(correlation_matrix, 3),
+            texttemplate="%{text}",
+            textfont={"size": 12},
+            hoverongaps=False,
+            colorbar=dict(title="相关系数"),
+        )
+    )
+
+    fig.update_layout(title="参数对不同Traffic性能的敏感性分析", xaxis_title="Traffic类型", yaxis_title="参数", height=600, width=800)
+
+    return fig
+
+
+def create_parameter_scatter_matrix(param_data, performance, param_names):
+    """创建参数影响散点图矩阵"""
+    n_params = len(param_names)
+    cols = min(3, n_params)
+    rows = (n_params + cols - 1) // cols
+
+    fig = make_subplots(rows=rows, cols=cols, subplot_titles=[f"{param} vs 性能" for param in param_names], vertical_spacing=0.08, horizontal_spacing=0.08)
+
+    for i, param in enumerate(param_names):
+        row = i // cols + 1
+        col = i % cols + 1
+
+        x_vals = param_data[param]
+        y_vals = performance
+
+        # 添加散点图
+        fig.add_trace(
+            go.Scatter(x=x_vals, y=y_vals, mode="markers", marker=dict(size=6, color=y_vals, colorscale="Viridis", opacity=0.7, line=dict(width=1, color="black")), name=param, showlegend=False),
+            row=row,
+            col=col,
+        )
+
+        # 添加趋势线
+        if len(x_vals) > 2:
+            try:
+                z = np.polyfit(x_vals, y_vals, 1)
+                p = np.poly1d(z)
+                x_trend = np.linspace(min(x_vals), max(x_vals), 100)
+                y_trend = p(x_trend)
+
+                fig.add_trace(go.Scatter(x=x_trend, y=y_trend, mode="lines", line=dict(color="red", width=2), name=f"{param}_trend", showlegend=False), row=row, col=col)
+            except:
+                pass
+
+    fig.update_layout(title="参数对性能的个体影响分析", height=300 * rows, width=1200)
+
+    return fig
+
+
+def create_parameter_synergy_analysis(param_data, performance, param_names):
+    """创建参数协同效应分析"""
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.feature_selection import mutual_info_regression
+
+    # 使用随机森林分析参数重要性和交互效应
+    X = np.array([param_data[param] for param in param_names]).T
+    y = np.array(performance)
+
+    if len(X) < 10:
+        # 数据太少，创建简单的相关性分析
+        return create_simple_correlation_plot(param_data, performance, param_names)
+
+    # 随机森林特征重要性
+    rf = RandomForestRegressor(n_estimators=100, random_state=42)
+    rf.fit(X, y)
+    feature_importance = rf.feature_importances_
+
+    # 创建子图
+    fig = make_subplots(
+        rows=2, cols=2, subplot_titles=("参数重要性排名", "参数交互强度", "参数聚类分析", "协同效应网络"), specs=[[{"type": "bar"}, {"type": "heatmap"}], [{"type": "scatter"}, {"type": "scatter"}]]
+    )
+
+    # 1. 参数重要性排名
+    sorted_idx = np.argsort(feature_importance)[::-1]
+    fig.add_trace(
+        go.Bar(x=[param_names[i] for i in sorted_idx], y=[feature_importance[i] for i in sorted_idx], marker=dict(color=feature_importance[sorted_idx], colorscale="Viridis"), name="重要性"),
+        row=1,
+        col=1,
+    )
+
+    # 2. 参数间相关性热力图
+    param_corr = np.corrcoef(X.T)
+    fig.add_trace(go.Heatmap(z=param_corr, x=param_names, y=param_names, colorscale="RdBu", zmid=0, showscale=False), row=1, col=2)
+
+    fig.update_layout(title="参数协同效应深度分析", height=800, width=1200)
+
+    return fig
+
+
+def create_simple_correlation_plot(param_data, performance, param_names):
+    """数据较少时的简单相关性分析"""
+    from scipy import stats
+
+    correlations = []
+    for param in param_names:
+        if len(param_data[param]) > 1:
+            corr, _ = stats.pearsonr(param_data[param], performance)
+            correlations.append(corr if not np.isnan(corr) else 0)
+        else:
+            correlations.append(0)
+
+    fig = go.Figure(data=[go.Bar(x=param_names, y=correlations, marker=dict(color=correlations, colorscale="RdBu", colorbar=dict(title="相关系数")))])
+
+    fig.update_layout(title="参数与性能的相关性分析", xaxis_title="参数", yaxis_title="相关系数", height=500)
+
+    return fig
+
+
+def create_enhanced_optimization_insight(study, vis_dir):
+    """增强版优化过程深度洞察"""
+    complete_trials = [t for t in study.trials if t.state.name == "COMPLETE"]
+
+    if len(complete_trials) < 10:
+        return
+
+    # 准备数据
+    trial_numbers = [t.number for t in complete_trials]
+    objective_values = [t.values[0] if t.values else 0 for t in complete_trials]
+    param_names = list(complete_trials[0].params.keys()) if complete_trials else []
+
+    fig = make_subplots(
+        rows=2,
+        cols=2,
+        subplot_titles=("探索与利用平衡分析", "参数进化趋势", "性能突破点识别", "优化效率分析"),
+        specs=[[{"secondary_y": True}, {"secondary_y": False}], [{"secondary_y": False}, {"secondary_y": False}]],
+    )
+
+    # 1. 探索与利用平衡分析
+    exploration_scores, exploitation_scores = analyze_exploration_exploitation(complete_trials)
+
+    fig.add_trace(go.Scatter(x=trial_numbers, y=exploration_scores, mode="lines+markers", name="探索度", line=dict(color="blue", width=2), marker=dict(size=4)), row=1, col=1)
+
+    fig.add_trace(go.Scatter(x=trial_numbers, y=exploitation_scores, mode="lines+markers", name="利用度", line=dict(color="red", width=2), marker=dict(size=4)), row=1, col=1, secondary_y=True)
+
+    # 2. 参数进化趋势
+    if param_names:
+        param_evolution = [trial.params.get(param_names[0], 0) for trial in complete_trials]
+        fig.add_trace(go.Scatter(x=trial_numbers, y=param_evolution, mode="lines+markers", name=f"{param_names[0]} 进化", line=dict(color="green", width=2), marker=dict(size=4)), row=1, col=2)
+
+    # 3. 性能突破点识别
+    breakthrough_points = identify_breakthrough_points(objective_values, trial_numbers)
+
+    fig.add_trace(go.Scatter(x=trial_numbers, y=objective_values, mode="lines+markers", name="性能轨迹", line=dict(color="gray", width=1), marker=dict(size=3, opacity=0.6)), row=2, col=1)
+
+    if breakthrough_points:
+        breakthrough_x, breakthrough_y = zip(*breakthrough_points)
+        fig.add_trace(go.Scatter(x=breakthrough_x, y=breakthrough_y, mode="markers", name="突破点", marker=dict(size=10, color="red", symbol="star", line=dict(width=2, color="black"))), row=2, col=1)
+
+    # 4. 优化效率分析
+    efficiency_scores = calculate_optimization_efficiency(objective_values)
+    fig.add_trace(
+        go.Scatter(x=trial_numbers[1:], y=efficiency_scores, mode="lines+markers", name="优化效率", line=dict(color="purple", width=2), marker=dict(size=4)), row=2, col=2  # 从第二个trial开始
+    )
+
+    fig.update_layout(title="优化过程深度洞察分析", height=800, width=1200, showlegend=True)
+
+    fig.write_html(os.path.join(vis_dir, "enhanced_optimization_insight.html"))
+
+
+def analyze_exploration_exploitation(trials):
+    """分析探索与利用的平衡"""
+    exploration_scores = []
+    exploitation_scores = []
+
+    for i, trial in enumerate(trials):
+        if i == 0:
+            exploration_scores.append(1.0)
+            exploitation_scores.append(0.0)
+            continue
+
+        # 计算当前参数配置与历史最佳配置的差异（探索度）
+        best_so_far = max(trials[:i], key=lambda x: x.values[0] if x.values else -np.inf)
+
+        param_diff = 0
+        param_count = 0
+        for param_name in trial.params:
+            if param_name in best_so_far.params:
+                param_diff += abs(trial.params[param_name] - best_so_far.params[param_name])
+                param_count += 1
+
+        if param_count > 0:
+            exploration = param_diff / param_count
+            exploration_scores.append(min(exploration / 5.0, 1.0))  # 归一化
+        else:
+            exploration_scores.append(0.0)
+
+        # 计算利用度（基于与历史最佳的相似性）
+        exploitation_scores.append(1.0 - exploration_scores[-1])
+
+    return exploration_scores, exploitation_scores
+
+
+def identify_breakthrough_points(objective_values, trial_numbers, threshold=0.05):
+    """识别性能突破点"""
+    breakthrough_points = []
+
+    if len(objective_values) < 3:
+        return breakthrough_points
+
+    # 计算移动平均
+    window = min(5, len(objective_values) // 3)
+    moving_avg = pd.Series(objective_values).rolling(window=window, center=True).mean()
+
+    # 识别显著提升点
+    for i in range(window, len(objective_values) - window):
+        if i > 0:
+            improvement = (moving_avg.iloc[i] - moving_avg.iloc[i - 1]) / abs(moving_avg.iloc[i - 1])
+            if improvement > threshold:
+                breakthrough_points.append((trial_numbers[i], objective_values[i]))
+
+    return breakthrough_points
+
+
+def calculate_optimization_efficiency(objective_values):
+    """计算优化效率"""
+    efficiency_scores = []
+
+    for i in range(1, len(objective_values)):
+        # 计算改进率
+        if i == 1:
+            improvement = 1.0 if objective_values[i] > objective_values[i - 1] else 0.0
+        else:
+            # 基于最近几次试验的平均改进
+            recent_window = min(5, i)
+            recent_best = max(objective_values[max(0, i - recent_window) : i])
+            current_value = objective_values[i]
+
+            if recent_best > 0:
+                improvement = max(0, (current_value - recent_best) / recent_best)
+            else:
+                improvement = 1.0 if current_value > recent_best else 0.0
+
+        efficiency_scores.append(improvement)
+
+    return efficiency_scores
+
+
+def create_optimization_guidance_report(study, traffic_files, save_dir):
+    """创建参数优化指导报告"""
+    complete_trials = [t for t in study.trials if t.state.name == "COMPLETE"]
+
+    if len(complete_trials) < 10:
+        return
+
+    # 分析每个参数的优化策略
+    param_names = list(complete_trials[0].params.keys()) if complete_trials else []
+    optimization_insights = {}
+
+    for param in param_names:
+        insights = analyze_parameter_optimization_strategy(complete_trials, param)
+        optimization_insights[param] = insights
+
+    # 生成优化指导文档
+    guidance_html = generate_optimization_guidance_html(optimization_insights, complete_trials, traffic_files)
+
+    with open(os.path.join(save_dir, "optimization_guidance.html"), "w", encoding="utf-8") as f:
+        f.write(guidance_html)
+
+
+def analyze_parameter_optimization_strategy(trials, param_name):
+    """分析单个参数的优化策略"""
+    from scipy import stats
+
+    param_values = [t.params[param_name] for t in trials]
+    performance_values = [t.values[0] for t in trials]
+
+    # 计算相关性
+    correlation, p_value = stats.pearsonr(param_values, performance_values)
+
+    # 找出最佳值范围
+    top_trials = sorted(trials, key=lambda x: x.values[0], reverse=True)[: len(trials) // 4]
+    best_param_values = [t.params[param_name] for t in top_trials]
+
+    optimal_range = (min(best_param_values), max(best_param_values))
+    optimal_mean = np.mean(best_param_values)
+
+    # 分析参数敏感性
+    sensitivity = analyze_parameter_sensitivity(param_values, performance_values)
+
+    # 生成优化建议
+    recommendations = generate_parameter_recommendations(param_name, correlation, optimal_range, optimal_mean, sensitivity)
+
+    return {"correlation": correlation, "p_value": p_value, "optimal_range": optimal_range, "optimal_mean": optimal_mean, "sensitivity": sensitivity, "recommendations": recommendations}
+
+
+def analyze_parameter_sensitivity(param_values, performance_values):
+    """分析参数敏感性"""
+    if len(param_values) < 5:
+        return "数据不足"
+
+    # 计算参数变化对性能的影响
+    param_changes = np.diff(param_values)
+    perf_changes = np.diff(performance_values)
+
+    # 避免除零错误
+    non_zero_changes = param_changes[param_changes != 0]
+    corresponding_perf_changes = perf_changes[param_changes != 0]
+
+    if len(non_zero_changes) == 0:
+        return "低敏感性"
+
+    # 计算敏感性分数
+    sensitivity_scores = np.abs(corresponding_perf_changes / non_zero_changes)
+    avg_sensitivity = np.mean(sensitivity_scores)
+
+    if avg_sensitivity > 1.0:
+        return "高敏感性"
+    elif avg_sensitivity > 0.5:
+        return "中等敏感性"
+    else:
+        return "低敏感性"
+
+
+def generate_parameter_recommendations(param_name, correlation, optimal_range, optimal_mean, sensitivity):
+    """生成参数优化建议"""
+    recommendations = []
+
+    # 基于相关性的建议
+    if abs(correlation) > 0.7:
+        if correlation > 0:
+            recommendations.append(f"📈 {param_name} 与性能呈强正相关，建议适当增大此参数")
+        else:
+            recommendations.append(f"📉 {param_name} 与性能呈强负相关，建议适当减小此参数")
+    elif abs(correlation) > 0.3:
+        recommendations.append(f"📊 {param_name} 与性能存在中等相关性，需要结合其他参数综合考虑")
+    else:
+        recommendations.append(f"🔄 {param_name} 与性能相关性较弱，可能存在非线性关系或参数冗余")
+
+    # 基于最优范围的建议
+    range_size = optimal_range[1] - optimal_range[0]
+    if range_size <= 2:
+        recommendations.append(f"🎯 最佳值集中在 {optimal_range[0]}-{optimal_range[1]} 范围内，建议精确调优")
+    else:
+        recommendations.append(f"🔍 最佳值分布在 {optimal_range[0]}-{optimal_range[1]} 范围内，建议在此范围内探索")
+
+    # 基于敏感性的建议
+    if sensitivity == "高敏感性":
+        recommendations.append(f"⚠️ {param_name} 高度敏感，小幅调整即可显著影响性能，需要精细调优")
+    elif sensitivity == "中等敏感性":
+        recommendations.append(f"⚖️ {param_name} 中等敏感，可以适度调整来优化性能")
+    else:
+        recommendations.append(f"🔧 {param_name} 敏感性较低，可以大幅调整或考虑固定此参数")
+
+    # 推荐起始值
+    recommendations.append(f"💡 建议起始值: {optimal_mean:.1f} (基于最佳试验的平均值)")
+
+    return recommendations
+
+
+def generate_optimization_guidance_html(optimization_insights, trials, traffic_files):
+    """生成优化指导HTML文档"""
+
+    # 获取最佳试验
+    best_trial = max(trials, key=lambda x: x.values[0])
+
+    # 计算整体统计信息
+    performance_values = [t.values[0] for t in trials]
+    performance_improvement = (max(performance_values) - min(performance_values)) / min(performance_values) * 100
+
+    # 找出最重要的参数
+    param_importance = {param: abs(insights.get("correlation", 0)) for param, insights in optimization_insights.items()}
+    most_important_param = max(param_importance.keys(), key=lambda x: param_importance[x])
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>参数优化策略指导</title>
+        <meta charset="utf-8">
+        <style>
+            body {{ 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; 
+                margin: 40px; 
+                line-height: 1.6;
+                color: #333;
+            }}
+            .header {{ 
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 30px; 
+                border-radius: 10px;
+                margin-bottom: 30px;
+            }}
+            .section {{ 
+                margin: 25px 0; 
+                padding: 20px;
+                background: #f8f9fa;
+                border-radius: 8px;
+                border-left: 4px solid #007bff;
+            }}
+            .param-analysis {{
+                background: white;
+                padding: 20px;
+                margin: 15px 0;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }}
+            .metric {{ 
+                display: inline-block; 
+                margin: 10px 15px; 
+                padding: 15px 20px; 
+                background: white;
+                border-radius: 8px; 
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                min-width: 200px;
+            }}
+            .recommendations {{
+                background: #e8f5e8;
+                padding: 15px;
+                border-radius: 8px;
+                margin-top: 15px;
+            }}
+            .recommendations ul {{
+                margin: 10px 0;
+                padding-left: 0;
+                list-style: none;
+            }}
+            .recommendations li {{
+                margin: 8px 0;
+                padding: 8px 12px;
+                background: white;
+                border-radius: 5px;
+                border-left: 3px solid #28a745;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>🎯 参数优化策略指导报告</h1>
+            <p>基于 {len(trials)} 次试验的深度分析 | 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <p>性能提升: <strong>{performance_improvement:.1f}%</strong> | 最佳性能: <strong>{best_trial.values[0]:.2f}</strong></p>
+        </div>
+        
+        <div class="section">
+            <h2>🏆 关键发现</h2>
+            <ul>
+                <li><strong>最关键参数</strong>: {most_important_param}</li>
+                <li><strong>优化潜力</strong>: {performance_improvement:.1f}% 性能提升空间</li>
+                <li><strong>稳定性</strong>: {'高' if performance_improvement < 50 else '中等'}</li>
+            </ul>
+        </div>
+        
+        <div class="section">
+            <h2>📋 详细参数分析</h2>
+    """
+
+    # 为每个参数生成详细分析
+    for param_name, insights in optimization_insights.items():
+        correlation = insights.get("correlation", 0)
+        optimal_range = insights.get("optimal_range", (0, 0))
+        optimal_mean = insights.get("optimal_mean", 0)
+        sensitivity = insights.get("sensitivity", "未知")
+        recommendations = insights.get("recommendations", [])
+
+        html_content += f"""
+            <div class="param-analysis">
+                <h3>🔧 {param_name}</h3>
+                <p><strong>相关性</strong>: {correlation:.3f} | <strong>最优范围</strong>: {optimal_range[0]:.1f}-{optimal_range[1]:.1f} | <strong>推荐值</strong>: {optimal_mean:.1f}</p>
+                
+                <div class="recommendations">
+                    <h4>🎯 优化建议:</h4>
+                    <ul>
+        """
+
+        for rec in recommendations:
+            html_content += f"<li>{rec}</li>"
+
+        html_content += """
+                    </ul>
+                </div>
+            </div>
+        """
+
+    html_content += """
+        </div>
+    </body>
+    </html>
+    """
+
+    return html_content
+
+
+# ============= 修改主函数中的调用 =============
+def enhanced_create_visualization_plots(study, traffic_files, traffic_weights, save_dir):
+    """增强版可视化图表创建函数 - 在原有基础上添加新功能"""
+    print("生成增强版可视化图表...")
 
     # 创建可视化目录
     vis_dir = os.path.join(save_dir, "visualizations")
     os.makedirs(vis_dir, exist_ok=True)
 
     # 获取完成的trials
-    complete_trials = [t for t in study.trials if t.state == TrialState.COMPLETE]
+    complete_trials = [t for t in study.trials if t.state.name == "COMPLETE"]
     if not complete_trials:
         print("没有完成的trials，跳过可视化")
         return
 
-    # 1. 优化历史图
+    # ========== 保留所有原有的可视化函数 ==========
     create_optimization_history(complete_trials, vis_dir)
-
-    # 2. 参数重要性图
     create_parameter_importance(study, vis_dir)
-
-    # 3. Pareto前沿图
     create_pareto_front(complete_trials, traffic_files, vis_dir)
-
-    # 4. 参数相关性热力图
     create_parameter_correlation(complete_trials, vis_dir)
-
-    # 5. 多Traffic性能对比
     create_multi_traffic_comparison(complete_trials, traffic_files, traffic_weights, vis_dir)
-
-    # 6. 参数分布图
     create_parameter_distribution(complete_trials, vis_dir)
-
-    # 7. 收敛图
     create_convergence_plot(complete_trials, vis_dir)
-
-    # 8. 3D参数空间图
     create_3d_parameter_space(complete_trials, vis_dir)
 
-    print(f"可视化图表已保存到: {vis_dir}")
+    # ========== 新增增强版可视化函数 ==========
+    create_parameter_impact_plot(complete_trials, traffic_files, vis_dir)
+    create_enhanced_optimization_insight(study, vis_dir)
+    create_optimization_guidance_report(study, traffic_files, vis_dir)
+
+    print(f"增强版可视化图表已保存到: {vis_dir}")
 
 
 def create_optimization_history(trials, save_dir):
@@ -167,9 +707,7 @@ def create_pareto_front(trials, traffic_files, save_dir):
             )
         )
 
-        fig.update_layout(
-            title=f"Pareto前沿: {traffic1_name} vs {traffic2_name}", xaxis_title=f"{traffic1_name} 带宽 (GB/s)", yaxis_title=f"{traffic2_name} 带宽 (GB/s)", height=600
-        )
+        fig.update_layout(title=f"Pareto前沿: {traffic1_name} vs {traffic2_name}", xaxis_title=f"{traffic1_name} 带宽 (GB/s)", yaxis_title=f"{traffic2_name} 带宽 (GB/s)", height=600)
 
         fig.write_html(os.path.join(save_dir, "pareto_front.html"))
 
@@ -510,9 +1048,9 @@ def find_optimal_parameters():
                 sim.config.NUM_RN = 4
                 sim.config.NUM_SN = 8
                 sim.config.RN_R_TRACKER_OSTD = 128
-                sim.config.RN_W_TRacker_OSTD = 32
+                sim.config.RN_W_TRACKER_OSTD = 32
                 sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST
-                sim.config.RN_WDB_SIZE = sim.config.RN_W_TRacker_OSTD * sim.config.BURST
+                sim.config.RN_WDB_SIZE = sim.config.RN_W_TRACKER_OSTD * sim.config.BURST
                 sim.config.SN_DDR_R_TRACKER_OSTD = 32
                 sim.config.SN_DDR_W_TRACKER_OSTD = 16
                 sim.config.SN_L2M_R_TRACKER_OSTD = 64
@@ -657,9 +1195,10 @@ def find_optimal_parameters():
         # ─── 两个 traffic 的带宽均值 ──────────────────────────
         bw1_mean = results[f"Total_sum_BW_mean_{traffic_files[0][:-4]}"]
         bw2_mean = results[f"Total_sum_BW_mean_{traffic_files[1][:-4]}"] if len(traffic_files) > 1 else 0.0
+        weighted_bw = results["Total_sum_BW_weighted_mean"]
 
         # ─── 参数规模归一化（越小越好）───────────────────────
-        param_norm = (
+        param_penalty = (
             # (p1 - param1_start) / (param1_end - param1_start)
             # + (p2 - param2_start) / (param2_end - param2_start)
             # + (p3 - param3_start) / (param3_end - param3_start)
@@ -670,13 +1209,18 @@ def find_optimal_parameters():
             + (p8 - param8_start) / (param8_end - param8_start)
         ) / 2.0
 
+        # 综合指标 = 加权带宽 - α * 参数惩罚
+        # 调整α值平衡性能和资源消耗 (0.05表示资源消耗占5%权重)
+        composite_metric = weighted_bw - 0.05 * param_penalty
+
         # 保存到 trial.user_attrs，便于后期分析 / CSV
         for k, v in results.items():
             trial.set_user_attr(k, v)
-        trial.set_user_attr("param_norm", param_norm)
+        trial.set_user_attr("param_penalty", param_penalty)
+        trial.set_user_attr("composite_metric", composite_metric)
 
         # ─── 多目标返回： (maximize, maximize, minimize) ────
-        return bw1_mean, bw2_mean, param_norm
+        return composite_metric
 
     return objective, output_csv, traffic_files, traffic_weights, result_root_save_path
 
@@ -711,8 +1255,7 @@ def create_summary_report(study, traffic_files, traffic_weights, save_dir):
         return
 
     # 获取最佳试验
-    best_trial = study.best_trials[0] if study.best_trials else None
-
+    best_trial = study.best_trials[0]
     # 获取Top 10试验
     top_trials = sorted(complete_trials, key=lambda t: t.values[0] if t.values else -np.inf, reverse=True)[:10]
 
@@ -869,13 +1412,19 @@ if __name__ == "__main__":
     print("=" * 60)
 
     study = optuna.create_study(
-        study_name="CrossRing_Multi_Traffic_BO",
-        directions=["maximize", "maximize", "minimize"],  # bw1 ↑  bw2 ↑  param_norm ↓
-        sampler=optuna.samplers.NSGAIISampler(seed=527),
+        study_name="CrossRing_Single_Traffic_BO",
+        direction="maximize",
+        sampler=optuna.samplers.NSGAIISampler(),
     )
 
     try:
-        study.optimize(objective, n_trials=300, n_jobs=N_JOBS, show_progress_bar=True, callbacks=[save_intermediate_result], catch=(KeyboardInterrupt,))  # 可能需要增加trial数量
+        study.optimize(
+            objective,
+            n_trials=50,
+            n_jobs=N_JOBS,
+            show_progress_bar=True,
+            callbacks=[save_intermediate_result],
+        )
     except KeyboardInterrupt:
         print("优化被用户中断")
 
@@ -917,7 +1466,7 @@ if __name__ == "__main__":
     # 创建最终可视化
     print("\n正在生成最终可视化报告...")
     try:
-        create_visualization_plots(study, traffic_files, traffic_weights, result_root_save_path)
+        enhanced_create_visualization_plots(study, traffic_files, traffic_weights, result_root_save_path)
         print(f"可视化报告已生成: {result_root_save_path}/visualizations/")
 
         # 创建总结报告

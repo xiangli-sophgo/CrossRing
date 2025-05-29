@@ -50,7 +50,7 @@ def run_single_simulation(sim_params):
         config.TOPO_TYPE = topo_type
 
         # Create simulation instance
-        sim = eval(f"{model_type}_model")(
+        sim: BaseModel = eval(f"{model_type}_model")(
             model_type=model_type,
             config=config,
             topo_type=topo_type,
@@ -58,6 +58,7 @@ def run_single_simulation(sim_params):
             file_name=file_name,
             result_save_path=result_save_path + file_name[:-4] + "/",
             results_fig_save_path=results_fig_save_path,
+            verbose=0,
         )
 
         # Set simulation parameters
@@ -132,21 +133,41 @@ def save_results_to_csv(results_data):
         print(f"Skipping CSV write for {file_name} due to simulation error")
         return
 
-    # Use file locking to prevent concurrent writes
-    import fcntl
+    # Use portalocker for cross-platform file locking
+    try:
+        import portalocker
+
+        use_portalocker = True
+    except ImportError:
+        print("Warning: portalocker not available, using threading.Lock instead")
+        use_portalocker = False
 
     csv_file_exists = os.path.isfile(output_csv)
 
-    with open(output_csv, mode="a", newline="") as output_csv_file:
-        # Lock the file for exclusive access
-        fcntl.flock(output_csv_file.fileno(), fcntl.LOCK_EX)
+    if use_portalocker:
+        with open(output_csv, mode="a", newline="") as output_csv_file:
+            # Lock the file for exclusive access (cross-platform)
+            portalocker.lock(output_csv_file, portalocker.LOCK_EX)
 
-        writer = csv.DictWriter(output_csv_file, fieldnames=results.keys())
-        if not csv_file_exists:
-            writer.writeheader()
-        writer.writerow(results)
+            writer = csv.DictWriter(output_csv_file, fieldnames=results.keys())
+            if not csv_file_exists:
+                writer.writeheader()
+            writer.writerow(results)
 
-        # File is automatically unlocked when closed
+            # File is automatically unlocked when closed
+    else:
+        # Fallback: use a global lock (less ideal but works)
+        import threading
+
+        if not hasattr(save_results_to_csv, "_lock"):
+            save_results_to_csv._lock = threading.Lock()
+
+        with save_results_to_csv._lock:
+            with open(output_csv, mode="a", newline="") as output_csv_file:
+                writer = csv.DictWriter(output_csv_file, fieldnames=results.keys())
+                if not csv_file_exists:
+                    writer.writeheader()
+                writer.writerow(results)
 
     print(f"Results for {file_name} saved to CSV")
 
@@ -216,9 +237,10 @@ def main():
     parser.add_argument("--outstanding", type=int, default=2048, help="Outstanding number (must be power of 2)")
     parser.add_argument("--config", default="../config/config2.json", help="Simulation config file path")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="Simulation model type")
-    parser.add_argument("--results_file_name", default="DeepSeek_0527", help="Base name for results files")
+    parser.add_argument("--results_file_name", default="DeepSeek_0529", help="Base name for results files")
     parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both")
     parser.add_argument("--max_workers", type=int, default=None, help="Maximum number of parallel workers (default: number of CPU cores)")
+    # parser.add_argument("--max_workers", type=int, default=1, help="Maximum number of parallel workers (default: number of CPU cores)")
 
     args = parser.parse_args()
 

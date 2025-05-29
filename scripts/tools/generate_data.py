@@ -313,7 +313,7 @@ if __name__ == "__main__":
     # TOPO = "5x4"
     INTERVAL_COUNT = 128
     # FILE_NAME = "../../test_data/traffic_2262_case1.txt"
-    FILE_NAME = "../../test_data/traffic_2260E_case4.txt"
+    FILE_NAME = "../../test_data/traffic_2260E_case3.txt"
     # FILE_NAME = "../../test_data/traffic_2262_case1.txt"
     np.random.seed(520)
 
@@ -348,17 +348,17 @@ if __name__ == "__main__":
         GDMA_MAP = {
             "gdma_0": [
                 0,
-                2,
-                6,
-                8,
+                # 2,
+                # 6,
+                # 8,
             ],
         }
         DDR_MAP = {
-            "ddr_0": [0, 2, 3, 5, 6, 8],
-            "ddr_1": [0, 2, 3, 5, 6, 8],
-            "ddr_2": [3, 5],
-            "ddr_3": [3, 5],
-            # "ddr_0": [3],
+            # "ddr_0": [0, 2, 3, 5, 6, 8],
+            # "ddr_1": [0, 2, 3, 5, 6, 8],
+            # "ddr_2": [3, 5],
+            # "ddr_3": [3, 5],
+            "ddr_0": [3],
             # "ddr_1": [3],
             # "ddr_2": [3],
             # "ddr_3": [3],
