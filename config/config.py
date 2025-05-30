@@ -27,7 +27,7 @@ class CrossRingConfig:
         self.FLIT_SIZE = args.FLIT_SIZE
         self.SPARE_CORE_ROW = -1
         self.FAIL_CORE_POS = []
-        self.SEAT_PER_LINK = args.SEAT_PER_LINK
+        self.SLICE_PER_LINK = args.SLICE_PER_LINK
         self.RB_IN_FIFO_DEPTH = args.RB_IN_FIFO_DEPTH
         self.RB_OUT_FIFO_DEPTH = args.RB_OUT_FIFO_DEPTH
         self.IQ_OUT_FIFO_DEPTH = args.IQ_OUT_FIFO_DEPTH
@@ -317,7 +317,7 @@ class CrossRingConfig:
         parser.add_argument("--NUM_SDMA", type=int, default=default_config["NUM_SDMA"], help="Number of SDMAs")
         parser.add_argument("--NUM_GDMA", type=int, default=default_config["NUM_GDMA"], help="Number of GDMA")
         parser.add_argument("--FLIT_SIZE", type=int, default=default_config["FLIT_SIZE"], help="Flit size")
-        parser.add_argument("--SEAT_PER_LINK", type=int, default=default_config["SEAT_PER_LINK"], help="Seats per link")
+        parser.add_argument("--SLICE_PER_LINK", type=int, default=default_config["SLICE_PER_LINK"], help="Slice num per link, (num -2) equals to RTL slice num")
         parser.add_argument("--RB_IN_FIFO_DEPTH", type=int, default=default_config["RB_IN_FIFO_DEPTH"], help="Depth of IN FIFOs in Ring Bridge")
         parser.add_argument("--RB_OUT_FIFO_DEPTH", type=int, default=default_config["RB_OUT_FIFO_DEPTH"], help="Depth of OUT FIFOs in Ring Bridge")
         parser.add_argument("--IQ_OUT_FIFO_DEPTH", type=int, default=default_config["IQ_OUT_FIFO_DEPTH"], help="Depth of IQ FIFOs in inject queues")

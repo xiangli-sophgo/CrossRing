@@ -39,7 +39,7 @@ class NetworkLinkVisualizer:
             self.EQ_depth = config.EQ_IN_FIFO_DEPTH
             self.RB_in_depth = config.RB_IN_FIFO_DEPTH
             self.RB_out_depth = config.RB_OUT_FIFO_DEPTH
-            self.seats_per_link = config.SEAT_PER_LINK
+            self.slice_per_link = config.SLICE_PER_LINK
             self.IQ_CH_depth = config.IQ_CH_FIFO_DEPTH
             self.EQ_CH_depth = config.EQ_CH_FIFO_DEPTH
             # 固定几何参数
@@ -59,6 +59,7 @@ class NetworkLinkVisualizer:
             self.inject_module_size = (height, weight)
             self.eject_module_size = (weight, height)
             self.rb_module_size = (height, height)
+            self.cp_module_size = (2, 5)
             # 初始化图形
             if ax is None:
                 self.fig, self.ax = plt.subplots(figsize=(8, 6))  # 增大图形尺寸
@@ -79,8 +80,8 @@ class NetworkLinkVisualizer:
             self.iq_patches, self.iq_texts = {}, {}
             self.eq_patches, self.eq_texts = {}, {}
             self.rb_patches, self.rb_texts = {}, {}
-            self.lh_patches, self.cph_texts = {}, {}
-            self.lv_patches, self.cpv_texts = {}, {}
+            self.cph_patches, self.cph_texts = {}, {}
+            self.cpv_patches, self.cpv_texts = {}, {}
             # 画出三个模块的框和 FIFO 槽
             self._draw_modules()
             # self._draw_arrows()
@@ -157,7 +158,7 @@ class NetworkLinkVisualizer:
             # ------------------- unified module configs ------------------- #
             iq_config = dict(
                 title="Inject Queue",
-                lanes=ch_names + ["TL", "TR", "EQ", "TU", "TD"],
+                lanes=ch_names + ["TL", "TR", "TD", "TU", "EQ"],
                 depths=[self.IQ_CH_depth] * len(ch_names) + [self.IQ_depth] * 5,
                 orientations=["vertical"] * len(ch_names) + ["vertical"] * 2 + ["horizontal"] * 3,
                 h_pos=["top"] * len(ch_names) + ["bottom"] * 2 + ["mid"] * 3,
@@ -186,6 +187,28 @@ class NetworkLinkVisualizer:
                 v_pos=["left", "left", "right", "right", "left"],
                 patch_dict=self.rb_patches,
                 text_dict=self.rb_texts,
+            )
+
+            cross_point_horizontal_config = dict(
+                title="Cross Point",
+                lanes=["TR", "TL"],
+                depths=[2, 2],
+                orientations=["horizontal", "horizontal"],
+                h_pos=["bottom", "bottom"],
+                v_pos=["right", "right"],
+                patch_dict=self.cph_patches,
+                text_dict=self.cph_texts,
+            )
+
+            cross_point_vertical_config = dict(
+                title="Cross Point",
+                lanes=["TU", "TD"],
+                depths=[2, 2],
+                orientations=["vertical", "vertical"],
+                h_pos=["bottom", "bottom"],
+                v_pos=["left", "left"],
+                patch_dict=self.cpv_patches,
+                text_dict=self.cpv_texts,
             )
 
             # ---------------- compute sizes via fifo specs ---------------- #
@@ -229,6 +252,10 @@ class NetworkLinkVisualizer:
             RB_y = center_y
             EQ_x = center_x
             EQ_y = center_y + self.rb_module_size[0] + spacing
+            CPH_x = center_x - (self.inject_module_size[1] - spacing) / 3
+            CPH_y = center_y - self.cp_module_size[0] - spacing
+            CPV_x = center_x + self.rb_module_size[1] + spacing
+            CPV_y = center_y + (self.rb_module_size[0] + spacing) * 2 / 3
 
             # ---------------------- draw modules -------------------------- #
             self._draw_fifo_module(
@@ -279,6 +306,38 @@ class NetworkLinkVisualizer:
                 per_lane_depth=True,
             )
 
+            self._draw_fifo_module(
+                x=CPH_x,
+                y=CPH_y,
+                title=cross_point_horizontal_config["title"],
+                module_height=self.cp_module_size[0],
+                module_width=self.cp_module_size[1],
+                lanes=cross_point_horizontal_config["lanes"],
+                depths=cross_point_horizontal_config["depths"],
+                orientations=cross_point_horizontal_config["orientations"],
+                h_position=cross_point_horizontal_config["h_pos"],
+                v_position=cross_point_horizontal_config["v_pos"],
+                patch_dict=cross_point_horizontal_config["patch_dict"],
+                text_dict=cross_point_horizontal_config["text_dict"],
+                per_lane_depth=True,
+            )
+
+            self._draw_fifo_module(
+                x=CPV_x,
+                y=CPV_y,
+                title=cross_point_vertical_config["title"],
+                module_height=self.cp_module_size[1],
+                module_width=self.cp_module_size[0],
+                lanes=cross_point_vertical_config["lanes"],
+                depths=cross_point_vertical_config["depths"],
+                orientations=cross_point_vertical_config["orientations"],
+                h_position=cross_point_vertical_config["h_pos"],
+                v_position=cross_point_vertical_config["v_pos"],
+                patch_dict=cross_point_vertical_config["patch_dict"],
+                text_dict=cross_point_vertical_config["text_dict"],
+                per_lane_depth=True,
+            )
+
             self.ax.relim()
             self.ax.autoscale_view()
 
@@ -304,6 +363,9 @@ class NetworkLinkVisualizer:
             """
             square = self.square
             gap = self.gap
+            if title == "Cross Point":
+                square *= 2
+                gap *= 20
 
             # 处理方向参数
             if orientations is None:
@@ -474,8 +536,6 @@ class NetworkLinkVisualizer:
             # --------------------------------------------------------------
             if len(self.ax.patches) == 0:  # 轴内无任何图元，说明已被 clear()
                 self._draw_modules()  # 重建 FIFO / RB 边框与槽
-                # 如果还想显示所有 links，可取消下一行注释
-                # self._draw_links_module()
 
             self.node_id = node_id
             IQ = network.inject_queues
@@ -639,7 +699,7 @@ class NetworkLinkVisualizer:
         self.cols = network.config.NUM_COL
         # ---- Figure & Sub‑Axes ------------------------------------------------
         self.fig = plt.figure(figsize=(15, 8), constrained_layout=True)
-        gs = self.fig.add_gridspec(1, 2, width_ratios=[1.5, 1])
+        gs = self.fig.add_gridspec(1, 2, width_ratios=[1.6, 1])
         self.ax = self.fig.add_subplot(gs[0])  # 主网络视图
         self.piece_ax = self.fig.add_subplot(gs[1])  # 右侧 Piece 视图
         self.piece_ax.axis("off")
@@ -648,6 +708,7 @@ class NetworkLinkVisualizer:
         # 当前点击选中的节点 (None 表示未选)
         self._selected_node = None
         # 绘制主网络的静态元素
+        self.slice_per_link = network.config.SLICE_PER_LINK
         self.node_positions = self._calculate_layout()
         self.link_artists = {}  # 存储链路相关的静态信息
         self._colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
@@ -891,7 +952,7 @@ class NetworkLinkVisualizer:
         # 绘制所有链路的框架，这里不再赘述
         self.link_artists.clear()
         for src, dest in self.network.links.keys():
-            self._draw_link_frame(src, dest)
+            self._draw_link_frame(src, dest, slice_num=self.slice_per_link)
 
         # 根据节点位置自动调整显示范围
         if xs and ys:
@@ -904,7 +965,7 @@ class NetworkLinkVisualizer:
         self.ax.axis("off")
         # self.fig.tight_layout(rect=[0, 0.1, 1, 1])
 
-    def _draw_link_frame(self, src, dest, queue_fixed_length=1.6, seat_num=7):
+    def _draw_link_frame(self, src, dest, queue_fixed_length=1.6, slice_num=7):
         # 检查是否为自环链路
         is_self_loop = src == dest
 
@@ -918,74 +979,74 @@ class NetworkLinkVisualizer:
         src_center = (src_pos[0] + half_w, src_pos[1] + half_h)
 
         if is_self_loop:
-            # 判断节点是否在边界
-            rows, cols = self.network.config.NUM_ROW, self.network.config.NUM_COL
-            row, col = src // cols, src % cols
+            # # 判断节点是否在边界
+            # rows, cols = self.network.config.NUM_ROW, self.network.config.NUM_COL
+            # row, col = src // cols, src % cols
 
-            # 确定节点在哪个边界并设置相应的箭头和队列位置
-            is_left_edge = col == 0 and row % 2 == 1
-            is_right_edge = col == cols - 1 and row % 2 == 1
-            is_top_edge = row == 0 and row % 2 == 0
-            is_bottom_edge = row == rows - 2 and row % 2 == 0
+            # # 确定节点在哪个边界并设置相应的箭头和队列位置
+            # is_left_edge = col == 0 and row % 2 == 1
+            # is_right_edge = col == cols - 1 and row % 2 == 1
+            # is_top_edge = row == 0 and row % 2 == 0
+            # is_bottom_edge = row == rows - 2 and row % 2 == 0
 
-            # 只处理边界节点，内部节点不添加自环
-            if not (is_left_edge or is_right_edge or is_top_edge or is_bottom_edge):
-                return
+            # # 只处理边界节点，内部节点不添加自环
+            # if not (is_left_edge or is_right_edge or is_top_edge or is_bottom_edge):
+            #     return
 
-            # 根据边界位置设置自环方向和队列位置
-            loop_offset = 0.1  # 自环与节点的距离
-            queue_width = 0.2
-            queue_height = queue_fixed_length / 3.5
+            # # 根据边界位置设置自环方向和队列位置
+            # loop_offset = 0.1  # 自环与节点的距离
+            # queue_width = 0.2
+            # queue_height = queue_fixed_length / 3.5
 
-            # 确定箭头和队列的位置及方向
-            if is_top_edge:  # 最上边，从右到左
-                # src_arrow = (src_center[0] + half_w, src_center[1] + loop_offset)
-                # dest_arrow = (src_center[0] - half_w, src_center[1] + loop_offset)
-                queue_center = (src_center[0], src_center[1] + loop_offset + queue_height / 2)
-                is_horizontal = True
-                is_forward = False  # 从右到左
-            elif is_bottom_edge:  # 最下边，从左到右
-                # src_arrow = (src_center[0] - half_w, src_center[1] - loop_offset)
-                # dest_arrow = (src_center[0] + half_w, src_center[1] - loop_offset)
-                queue_center = (src_center[0], src_center[1] - loop_offset - queue_height / 2)
-                is_horizontal = True
-                is_forward = True  # 从左到右
-            elif is_left_edge:  # 最左边，从上到下
-                # src_arrow = (src_center[0] - loop_offset, src_center[1] + half_h)
-                # dest_arrow = (src_center[0] - loop_offset, src_center[1] - half_h)
-                queue_center = (src_center[0] - loop_offset * 1.5 - queue_width, src_center[1])
-                is_horizontal = False
-                is_forward = False  # 从上到下
-            elif is_right_edge:  # 最右边，从下到上
-                # src_arrow = (src_center[0] + loop_offset, src_center[1] - half_h)
-                # dest_arrow = (src_center[0] + loop_offset, src_center[1] + half_h)
-                queue_center = (src_center[0] + loop_offset * 1.5 + queue_width, src_center[1])
-                is_horizontal = False
-                is_forward = True  # 从下到上
+            # # 确定箭头和队列的位置及方向
+            # if is_top_edge:  # 最上边，从右到左
+            #     # src_arrow = (src_center[0] + half_w, src_center[1] + loop_offset)
+            #     # dest_arrow = (src_center[0] - half_w, src_center[1] + loop_offset)
+            #     queue_center = (src_center[0], src_center[1] + loop_offset + queue_height / 2)
+            #     is_horizontal = True
+            #     is_forward = False  # 从右到左
+            # elif is_bottom_edge:  # 最下边，从左到右
+            #     # src_arrow = (src_center[0] - half_w, src_center[1] - loop_offset)
+            #     # dest_arrow = (src_center[0] + half_w, src_center[1] - loop_offset)
+            #     queue_center = (src_center[0], src_center[1] - loop_offset - queue_height / 2)
+            #     is_horizontal = True
+            #     is_forward = True  # 从左到右
+            # elif is_left_edge:  # 最左边，从上到下
+            #     # src_arrow = (src_center[0] - loop_offset, src_center[1] + half_h)
+            #     # dest_arrow = (src_center[0] - loop_offset, src_center[1] - half_h)
+            #     queue_center = (src_center[0] - loop_offset * 1.5 - queue_width, src_center[1])
+            #     is_horizontal = False
+            #     is_forward = False  # 从上到下
+            # elif is_right_edge:  # 最右边，从下到上
+            #     # src_arrow = (src_center[0] + loop_offset, src_center[1] - half_h)
+            #     # dest_arrow = (src_center[0] + loop_offset, src_center[1] + half_h)
+            #     queue_center = (src_center[0] + loop_offset * 1.5 + queue_width, src_center[1])
+            #     is_horizontal = False
+            #     is_forward = True  # 从下到上
 
-            # 根据是水平还是垂直方向调整队列尺寸
-            if is_horizontal:
-                queue_width, queue_height = queue_height, queue_width
+            # # 根据是水平还是垂直方向调整队列尺寸
+            # if is_horizontal:
+            #     queue_width, queue_height = queue_height, queue_width
 
-            # 绘制自环箭头
-            # self.ax.annotate("", xy=dest_arrow, xycoords="data", xytext=src_arrow,
-            # textcoords="data", arrowprops=dict(arrowstyle="->", color="blue", lw=2))
+            # # 绘制自环箭头
+            # # self.ax.annotate("", xy=dest_arrow, xycoords="data", xytext=src_arrow,
+            # # textcoords="data", arrowprops=dict(arrowstyle="->", color="blue", lw=2))
 
-            # 绘制队列框架
-            q_ll = (queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2)
-            queue = Rectangle(q_ll, queue_width, queue_height, facecolor="white", edgecolor="black", linestyle="--")
-            self.ax.add_patch(queue)
+            # # 绘制队列框架
+            # q_ll = (queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2)
+            # queue = Rectangle(q_ll, queue_width, queue_height, facecolor="white", edgecolor="black", linestyle="--")
+            # self.ax.add_patch(queue)
 
-            # 存储链路绘制信息
-            link_id = f"{src}-{dest}"
-            self.link_artists[link_id] = {
-                "queue_center": queue_center,
-                "queue_width": queue_width,
-                "queue_height": queue_height,
-                "is_horizontal": is_horizontal,
-                "is_forward": is_forward,
-                "is_self_loop": True,
-            }
+            # # 存储链路绘制信息
+            # link_id = f"{src}-{dest}"
+            # self.link_artists[link_id] = {
+            #     "queue_center": queue_center,
+            #     "queue_width": queue_width,
+            #     "queue_height": queue_height,
+            #     "is_horizontal": is_horizontal,
+            #     "is_forward": is_forward,
+            #     "is_self_loop": True,
+            # }
             return
 
         # 非自环链路的处理逻辑
@@ -1057,19 +1118,19 @@ class NetworkLinkVisualizer:
         # queue = Rectangle((queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2), queue_width, queue_height, facecolor="white", edgecolor="black", linestyle="--")
         # self.ax.add_patch(queue)
 
-        seats = self.split_queue_into_seats(
+        slices = self.split_queue_into_slices(
             (queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2),
             queue_width,
             queue_height,
-            seat_num,
+            slice_num - 2,
             is_horizontal,
             facecolor="white",
             edgecolor="black",
             linestyle="--",
         )
 
-        for seat in seats:
-            self.ax.add_patch(seat)
+        for slice in slices:
+            self.ax.add_patch(slice)
         # 绘制箭头连接线，并使用 annotate 添加箭头头部
         self.ax.annotate("", xy=dest_arrow, xycoords="data", xytext=src_arrow, textcoords="data", arrowprops=dict(arrowstyle="->", color="blue", lw=1.5))
 
@@ -1084,41 +1145,41 @@ class NetworkLinkVisualizer:
             "is_self_loop": False,
         }
 
-    def split_queue_into_seats(self, q_ll, queue_width, queue_height, seat_num, is_horizontal=True, **kwargs):
+    def split_queue_into_slices(self, q_ll, queue_width, queue_height, slice_num, is_horizontal=True, **kwargs):
         """
-        将队列矩形分割成 seat_num 个小矩形，支持横向或纵向切割
+        将队列矩形分割成 slice_num 个小矩形，支持横向或纵向切割
 
         参数:
             q_ll: 队列左下角坐标 (x, y)
             queue_width: 队列总宽度
             queue_height: 队列高度
-            seat_num: 座位数量
+            slice_num: 座位数量
             is_horizontal:
                 - True（默认）: 横向切割（沿宽度方向，生成多个等宽小矩形）
                 - False: 纵向切割（沿高度方向，生成多个等高小矩形）
             **kwargs: 传递给 Rectangle 的其他参数（如 facecolor, edgecolor 等）
 
         返回:
-            list: 包含 seat_num 个小矩形的列表
+            list: 包含 slice_num 个小矩形的列表
         """
-        seats = []
+        slices = []
 
         if is_horizontal:
             # 横向切割（沿宽度方向）
-            seat_width = queue_width / seat_num
-            for i in range(seat_num):
-                seat_ll = (q_ll[0] + i * seat_width, q_ll[1])
-                seat = Rectangle(seat_ll, seat_width, queue_height, **kwargs)
-                seats.append(seat)
+            slice_width = queue_width / slice_num
+            for i in range(slice_num):
+                slice_ll = (q_ll[0] + i * slice_width, q_ll[1])
+                slice = Rectangle(slice_ll, slice_width, queue_height, **kwargs)
+                slices.append(slice)
         else:
             # 纵向切割（沿高度方向）
-            seat_height = queue_height / seat_num
-            for i in range(seat_num):
-                seat_ll = (q_ll[0], q_ll[1] + i * seat_height)
-                seat = Rectangle(seat_ll, queue_width, seat_height, **kwargs)
-                seats.append(seat)
+            slice_height = queue_height / slice_num
+            for i in range(slice_num):
+                slice_ll = (q_ll[0], q_ll[1] + i * slice_height)
+                slice = Rectangle(slice_ll, queue_width, slice_height, **kwargs)
+                slices.append(slice)
 
-        return seats
+        return slices
 
     def update(self, networks=None, cycle=None, expected_packet_id=0, use_highlight=False, skip_pause=False):
         """
@@ -1324,22 +1385,22 @@ class NetworkLinkVisualizer:
 
             q_ll = (queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2)
 
-            num_seats = len(flit_list)
-            if num_seats == 0:
+            num_slices = len(flit_list) - 2
+            if num_slices == 0:
                 continue
 
-            # 计算 seat 间距，确保所有 seat 都能显示
+            # 计算 slice 间距，确保所有 slice 都能显示
             if is_horizontal:
-                spacing = (queue_width - 2 * margin) / num_seats
+                spacing = (queue_width - 2 * margin) / num_slices
             else:
-                spacing = (queue_height - 2 * margin) / num_seats
+                spacing = (queue_height - 2 * margin) / num_slices
 
             flit_artists = []
-            for i, seat in enumerate(flit_list):
-                if seat is None:
+            for i, slice in enumerate(flit_list[1:-1]):
+                if slice is None:
                     continue  # 空位
 
-                pid, fid = seat
+                pid, fid = slice
                 flit = SimpleNamespace(packet_id=pid, flit_id=fid)
 
                 # ---------- 位置 ----------

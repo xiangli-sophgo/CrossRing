@@ -9,7 +9,7 @@
     "NUM_SDMA": 32,
     "NUM_GDMA": 32,
     "FLIT_SIZE": 128,
-    "SEAT_PER_LINK": 7,
+    "SLICE_PER_LINK": 7,
     "RB_IN_FIFO_DEPTH": 8,
     "RB_OUT_FIFO_DEPTH": 8,
     "IQ_OUT_FIFO_DEPTH": 6,

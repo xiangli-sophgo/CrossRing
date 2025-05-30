@@ -111,15 +111,12 @@ class BaseModel:
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.data_network = Network(self.config, self.adjacency_matrix, name="Data Network")
         if self.plot_link_state:
-            # self.link_state_vis = create_optimized_visualizer(self.req_network)
             self.link_state_vis = NetworkLinkVisualizer(self.req_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
             self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
-        self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
-        )
+        self.flit_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
         self.ip_modules = {}
@@ -338,17 +335,6 @@ class BaseModel:
                 queue[in_pos].append(flit)
                 queue_pre[in_pos] = None
 
-        # ring_bridge_in_pre → ring_bridge
-        for fifo_pos in ("TL", "TR"):
-            queue_pre = network.ring_bridge_in_pre[fifo_pos]
-            queue = network.ring_bridge[fifo_pos]
-            key = (in_pos, ip_pos)
-            if queue_pre[key] and len(queue[key]) < self.config.RB_IN_FIFO_DEPTH:
-                flit = queue_pre[key]
-                flit.flit_position = f"RB_{fifo_pos}"
-                queue[key].append(flit)
-                queue_pre[key] = None
-
         # ring_bridge_out_pre → ring_bridge
         for fifo_pos in ("EQ", "TU", "TD"):
             queue_pre = network.ring_bridge_out_pre[fifo_pos]
@@ -360,16 +346,6 @@ class BaseModel:
                 flit.flit_position = f"RB_{fifo_pos}"
                 queue[key].append(flit)
                 queue_pre[key] = None
-
-        # eject_queue_in_pre → eject_queues
-        for fifo_pos in ("TU", "TD"):
-            queue_pre = network.eject_queue_in_pre[fifo_pos]
-            queue = network.eject_queues[fifo_pos]
-            if queue_pre[ip_pos] and len(queue[ip_pos]) < self.config.RB_OUT_FIFO_DEPTH:
-                flit = queue_pre[ip_pos]
-                flit.flit_position = f"EQ_{fifo_pos}"
-                queue[ip_pos].append(flit)
-                queue_pre[ip_pos] = None
 
         # EQ_channel_buffer_pre → EQ_channel_buffer
         for ip_type in network.EQ_channel_buffer_pre.keys():
@@ -383,11 +359,7 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(
-                f"Data statistic: Read: {self.read_req, self.read_flit}, "
-                f"Write: {self.write_req, self.write_flit}, "
-                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
-            )
+            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
         if self.verbose:
@@ -599,7 +571,7 @@ class BaseModel:
 
     def update_throughput_metrics(self, flits):
         """Update throughput metrics based on flit counts."""
-        self.trans_flits_num = 0 #len(flits)
+        self.trans_flits_num = 0  # len(flits)
 
     def load_request_stream(self):
         """借助 _parse_traffic_file 只解析一次 traffic 文件。"""
@@ -767,28 +739,12 @@ class BaseModel:
                 vertical_flits.append(flit)
         return (ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits)
 
-        # # 分类不同类型的flits
-        # (ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits) = self.categorize_flits_by_direction(flits)
-
-        # # 先对已有的flit进行plan
-        # for flit in new_flits + vertical_flits + horizontal_flits:
-        #     network.plan_move(flit)
-        # for flit in new_flits + vertical_flits + horizontal_flits + local_flits:
-        #     if network.execute_moves(flit, self.cycle):
-        #         flits.remove(flit)
-        # for flit in ring_bridge_EQ_flits:
-        #     if flit.is_arrive:
-        #         flits.remove(flit)
-
-        # return flits
-
     def _flit_move(self, network: Network, flit_type):
 
         self.link_move(network, flit_type)
 
         self.Ring_Bridge_arbitration(network)
 
-        # eject arbitration
         self.Eject_Queue_arbitration(network, flit_type)
 
     def link_move(self, network: Network, flit_type):
@@ -798,21 +754,26 @@ class BaseModel:
 
         tail_flit_list = []
 
-        for (u, v), seats in network.links.items():
-            seats_per = len(seats)
+        for (u, v), link in network.links.items():
+            seats_per = len(link)
             # ---------- STEP‑0 : 把尾 flit 暂存出来 ----------
             tail_idx = seats_per - 1
-            tail_flit = seats[tail_idx]
+            tail_flit = link[tail_idx]
             if tail_flit is not None:
                 tail_flit_list.append(tail_flit)
-                seats[tail_idx] = None  # 先清空尾 slot，为内部 slide 腾位
+                link[tail_idx] = None  # 先清空尾 slot，为内部 slide 腾位
+
+            if tail_flit:
+                if u == v:
+                    print(u, v)
+                network.links_flow_stat[tail_flit.req_type][(u, v)] += 1
 
             # ---------- STEP‑1 : slide 0 .. N‑2 右移 ----------
             for idx in range(seats_per - 2, -1, -1):
-                if seats[idx] and seats[idx + 1] is None:
-                    flit = seats[idx]
-                    seats[idx + 1] = flit
-                    seats[idx] = None
+                if link[idx] and link[idx + 1] is None:
+                    flit = link[idx]
+                    link[idx + 1] = flit
+                    link[idx] = None
                     flit.current_seat_index += 1
 
         for tail_flit in tail_flit_list:
@@ -850,8 +811,7 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
-                    for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
@@ -1001,7 +961,7 @@ class BaseModel:
         self._tag_move(self.data_network)
 
     def _tag_move(self, network):
-        if self.cycle % (self.config.SEAT_PER_LINK * (self.config.NUM_COL - 1) * 2 + 4) == 0:
+        if self.cycle % (self.config.SLICE_PER_LINK * (self.config.NUM_COL - 1) * 2 + 4) == 0:
             for i, j in network.links:
                 if i - j == 1 or (i == j and (i % self.config.NUM_COL == self.config.NUM_COL - 1 and (i // self.config.NUM_COL) % 2 != 0)):
                     if network.links_tag[(i, j)][-1] == [j, "TL"] and network.links[(i, j)][-1] is None:
@@ -1011,9 +971,7 @@ class BaseModel:
                     if network.links_tag[(i, j)][-1] == [j, "TR"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["TR"][j] += 1
-                elif i - j == self.config.NUM_COL * 2 or (
-                    i == j and i in range(self.config.NUM_NODE - self.config.NUM_COL * 2, self.config.NUM_COL + self.config.NUM_NODE - self.config.NUM_COL * 2)
-                ):
+                elif i - j == self.config.NUM_COL * 2 or (i == j and i in range(self.config.NUM_NODE - self.config.NUM_COL * 2, self.config.NUM_COL + self.config.NUM_NODE - self.config.NUM_COL * 2)):
                     if network.links_tag[(i, j)][-1] == [j, "TU"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["TU"][j] += 1
@@ -1032,7 +990,7 @@ class BaseModel:
                     col_start + i * interval,
                     col_start + (i - 1) * interval,
                 )
-                for j in range(self.config.SEAT_PER_LINK - 7 - 1, -1, -1):
+                for j in range(self.config.SLICE_PER_LINK - 7 - 1, -1, -1):
                     if j == 0 and current_node == col_end:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
@@ -1046,7 +1004,7 @@ class BaseModel:
                     col_end - i * interval,
                     col_end - (i - 1) * interval,
                 )
-                for j in range(self.config.SEAT_PER_LINK - 1, -1, -1):
+                for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
                     if j == 0 and current_node == col_start:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
@@ -1061,7 +1019,7 @@ class BaseModel:
             network.links_tag[(row_start, row_start)][0] = network.links_tag[(row_start + 1, row_start)][-1]
             for i in range(1, self.config.NUM_COL):
                 current_node, next_node = row_start + i, row_start + i - 1
-                for j in range(self.config.SEAT_PER_LINK - 1, -1, -1):
+                for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
                     if j == 0 and current_node == row_end:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
@@ -1072,7 +1030,7 @@ class BaseModel:
             network.links_tag[(row_end, row_end)][0] = network.links_tag[(row_end - 1, row_end)][-1]
             for i in range(1, self.config.NUM_COL):
                 current_node, next_node = row_end - i, row_end - i + 1
-                for j in range(self.config.SEAT_PER_LINK - 1, -1, -1):
+                for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
                     if j == 0 and current_node == row_start:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
@@ -1237,7 +1195,7 @@ class BaseModel:
 
     def calculate_predicted_duration(self, flit):
         """Calculate the predicted duration based on the flit's path."""
-        duration = sum((2 if flit.path[i] - flit.path[i - 1] == -self.config.NUM_COL else self.config.SEAT_PER_LINK) for i in range(1, len(flit.path)))
+        duration = sum((2 if flit.path[i] - flit.path[i - 1] == -self.config.NUM_COL else self.config.SLICE) for i in range(1, len(flit.path)))
         duration += 2 if flit.path[1] - flit.path[0] == -self.config.NUM_COL else 3
         return 0 if len(flit.path) == 2 else duration
 

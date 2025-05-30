@@ -15,7 +15,7 @@ def main():
 
     traffic_file_path = r"../test_data/"
     # file_name = r"traffic_2262_case1.txt"
-    file_name = r"traffic_2260E_case2.txt"
+    file_name = r"traffic_2260E_case3.txt"
     # file_name = r"traffic_2262_case1.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
@@ -74,10 +74,10 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
-        plot_link_state=0,
+        plot_link_state=1,
         plot_start_time=200,
         print_trace=0,
-        show_trace_id=0,  # 308 10,13,gdma_1,0,ddr_1,R,4
+        show_trace_id=0,
         show_node_id=4,
         verbose=1,
     )
@@ -116,6 +116,7 @@ def main():
         sim.config.EQ_CH_FIFO_DEPTH = 10
         sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8
+        sim.config.SLICE_PER_LINK = 8
 
         # sim.config.EQ_IN_FIFO_DEPTH = 8
         # sim.config.RB_IN_FIFO_DEPTH = 8
@@ -184,7 +185,7 @@ def main():
         sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
         sim.config.ITag_MAX_Num_H = sim.config.ITag_MAX_Num_V = 1
         sim.config.ETag_BOTHSIDE_UPGRADE = 0
-        sim.config.SEAT_PER_LINK = 7
+        sim.config.SLICE_PER_LINK = 7
 
         sim.config.GDMA_RW_GAP = np.inf
         sim.config.SDMA_RW_GAP = np.inf

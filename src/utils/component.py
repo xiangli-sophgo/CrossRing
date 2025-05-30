@@ -154,9 +154,7 @@ class Flit:
     def __repr__(self):
         req_attr = "O" if self.req_attr == "old" else "N"
         type_display = self.rsp_type[:3] if self.rsp_type else self.req_type[0]
-        flit_position = (
-            f"{self.current_position}:{self.flit_position}" if self.flit_position != "Link" else f"({self.current_link[0]}->{self.current_link[1]}).{self.current_seat_index}, "
-        )
+        flit_position = f"{self.current_position}:{self.flit_position}" if self.flit_position != "Link" else f"({self.current_link[0]}->{self.current_link[1]}).{self.current_seat_index}, "
         finish_status = "F" if self.is_finish else ""
         eject_status = "E" if self.is_ejected else ""
 
@@ -752,10 +750,7 @@ class IPInterface:
                 net_info["l2h_fifo"].append(net_info["l2h_fifo_pre"])
                 net_info["l2h_fifo_pre"] = None
 
-            if (
-                net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None
-                and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen
-            ):
+            if net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen:
                 net.IQ_channel_buffer[self.ip_type][self.ip_pos].append(net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos])
                 net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = None
 
@@ -824,9 +819,7 @@ class IPInterface:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             if req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(
-                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
-                )
+                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
             else:
                 latency = self.config.L2M_R_LATENCY
             flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY
@@ -881,7 +874,6 @@ class Network:
         self.inject_queues = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.inject_queues_pre = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.eject_queues = {"TU": {}, "TD": {}}
-        self.eject_queue_in_pre = {"TU": {}, "TD": {}}
         self.arrive_node_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.IQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.EQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
@@ -892,7 +884,6 @@ class Network:
         self.links_tag = {}
         self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
         self.ring_bridge = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
-        self.ring_bridge_in_pre = {"TL": {}, "TR": {}}
         self.ring_bridge_out_pre = {"TU": {}, "TD": {}, "EQ": {}}
         self.round_robin = {"IQ": defaultdict(lambda: defaultdict(dict)), "RB": defaultdict(lambda: defaultdict(dict)), "EQ": defaultdict(lambda: defaultdict(dict))}
         self.round_robin_counter = 0
@@ -992,8 +983,6 @@ class Network:
                 self.arrive_node_pre[key][ip_pos - config.NUM_COL] = None
             self.eject_queues["TU"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
             self.eject_queues["TD"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
-            self.eject_queue_in_pre["TU"][ip_pos - config.NUM_COL] = None
-            self.eject_queue_in_pre["TD"][ip_pos - config.NUM_COL] = None
             self.EQ_UE_Counters["TU"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0, "T0": 0}
             self.EQ_UE_Counters["TD"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0}
 
@@ -1018,10 +1007,10 @@ class Network:
         for i in range(config.NUM_NODE):
             for j in range(config.NUM_NODE):
                 if adjacency_matrix[i][j] == 1 and i - j != config.NUM_COL:
-                    self.links[(i, j)] = [None] * config.SEAT_PER_LINK
+                    self.links[(i, j)] = [None] * config.SLICE_PER_LINK
                     self.links_flow_stat["read"][(i, j)] = 0
                     self.links_flow_stat["write"][(i, j)] = 0
-                    self.links_tag[(i, j)] = [None] * config.SEAT_PER_LINK
+                    self.links_tag[(i, j)] = [None] * config.SLICE_PER_LINK
             if i in range(0, config.NUM_COL):
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
@@ -1051,8 +1040,6 @@ class Network:
                 self.ring_bridge["TD"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
                 self.ring_bridge["EQ"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
 
-                self.ring_bridge_in_pre["TL"][(pos, next_pos)] = None
-                self.ring_bridge_in_pre["TR"][(pos, next_pos)] = None
                 self.ring_bridge_out_pre["TU"][(pos, next_pos)] = None
                 self.ring_bridge_out_pre["TD"][(pos, next_pos)] = None
                 self.ring_bridge_out_pre["EQ"][(pos, next_pos)] = None
@@ -1139,12 +1126,10 @@ class Network:
         if dir_type in ("TL", "TR"):
             cap = self.RB_CAPACITY[dir_type][key][level]
             occ = self.RB_UE_Counters[dir_type][key][level]
-            pre = self.ring_bridge_in_pre[dir_type][key]
         else:
             cap = self.EQ_CAPACITY[dir_type][key][level]
             occ = self.EQ_UE_Counters[dir_type][key][level]
-            pre = self.eject_queue_in_pre[dir_type][key]
-        return occ < cap and not pre
+        return occ < cap
 
     # ------------------------------------------------------------------
     def _occupy_entry(self, dir_type, key, level, flit):
@@ -1901,13 +1886,9 @@ class Network:
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
-                    if (
-                        direction in self.ring_bridge.keys()
-                        and len(self.ring_bridge[direction][flit.current_link]) < max_depth
-                        and not self.ring_bridge_in_pre[direction][flit.current_link]
-                    ):
+                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth:
                         flit.flit_position = f"RB_{direction}"
-                        self.ring_bridge_in_pre[direction][flit.current_link] = flit
+                        self.ring_bridge[direction][flit.current_link].append(flit)
                         flit.is_on_station = True
             return False
         else:
@@ -1923,13 +1904,11 @@ class Network:
             elif current - next_node == self.config.NUM_COL * 2 or (current == next_node and current not in range(0, self.config.NUM_COL)):
                 direction = "TU"
                 queue = self.eject_queues["TU"]
-                queue_pre = self.eject_queue_in_pre["TU"]
             else:
                 direction = "TD"
                 queue = self.eject_queues["TD"]
-                queue_pre = self.eject_queue_in_pre["TD"]
 
             flit.flit_position = f"EQ_{direction}"
-            queue_pre[next_node] = flit
+            queue[next_node].append(flit)
 
             return False
