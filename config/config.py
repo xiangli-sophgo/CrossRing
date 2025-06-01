@@ -36,8 +36,8 @@ class CrossRingConfig:
         self.EQ_CH_FIFO_DEPTH = args.EQ_CH_FIFO_DEPTH
         self.ITag_TRIGGER_Th_H = args.ITag_TRIGGER_Th_H
         self.ITag_TRIGGER_Th_V = args.ITag_TRIGGER_Th_V
-        self.ITag_MAX_Num_H = args.ITag_MAX_Num_H
-        self.ITag_MAX_Num_V = args.ITag_MAX_Num_V
+        self.ITag_MAX_NUM_H = args.ITag_MAX_Num_H
+        self.ITag_MAX_NUM_V = args.ITag_MAX_Num_V
         # self.reservation_num = args.reservation_num
         self.BURST = args.BURST
         self.NETWORK_FREQUENCY = args.NETWORK_FREQUENCY

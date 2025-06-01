@@ -46,10 +46,11 @@ class NetworkLinkVisualizer:
             self.square = 0.3  # flit 方块边长
             self.gap = 0.04  # 相邻槽之间间距
             self.fifo_gap = 0.8  # 相邻fifo之间间隙
+            self.fontsize = 8
 
             # ------- layout tuning parameters (all adjustable) -------
-            self.gap_lr = 0.3  # 左右内边距
-            self.gap_hv = 0.3  # 上下内边距
+            self.gap_lr = 0.35  # 左右内边距
+            self.gap_hv = 0.35  # 上下内边距
             self.min_depth_vis = 4  # 设计最小深度 (=4)
             self.text_gap = 0.1
             # ---------------------------------------------------------
@@ -190,7 +191,7 @@ class NetworkLinkVisualizer:
             )
 
             cross_point_horizontal_config = dict(
-                title="Cross Point",
+                title="CP",
                 lanes=["TR", "TL"],
                 depths=[2, 2],
                 orientations=["horizontal", "horizontal"],
@@ -201,8 +202,8 @@ class NetworkLinkVisualizer:
             )
 
             cross_point_vertical_config = dict(
-                title="Cross Point",
-                lanes=["TU", "TD"],
+                title="CP",
+                lanes=["TD", "TU"],
                 depths=[2, 2],
                 orientations=["vertical", "vertical"],
                 h_pos=["bottom", "bottom"],
@@ -245,7 +246,7 @@ class NetworkLinkVisualizer:
             # self.rb_module_size = (6, 6)
 
             center_x, center_y = 0, 0
-            spacing = 1.5
+            spacing = 1.2
             IQ_x = center_x - self.inject_module_size[1] - spacing
             IQ_y = center_y
             RB_x = center_x
@@ -363,9 +364,11 @@ class NetworkLinkVisualizer:
             """
             square = self.square
             gap = self.gap
-            if title == "Cross Point":
+            fontsize = self.fontsize
+            if title == "CP":
                 square *= 2
                 gap *= 20
+                fontsize = 8
 
             # 处理方向参数
             if orientations is None:
@@ -449,7 +452,7 @@ class NetworkLinkVisualizer:
                     else:
                         raise ValueError(f"Unknown v_position: {vpos}")
 
-                    self.ax.text(text_x, lane_y + square / 2, lane[0].upper() + lane[-1], ha=ha, va="center", fontsize=9)
+                    self.ax.text(text_x, lane_y + square / 2, lane[0].upper() + lane[-1], ha=ha, va="center", fontsize=fontsize)
                     patch_dict[lane] = []
                     text_dict[lane] = []
 
@@ -458,7 +461,7 @@ class NetworkLinkVisualizer:
                         slot_y = lane_y
                         patch = Rectangle((slot_x, slot_y), square, square, edgecolor="black", facecolor="none")
                         self.ax.add_patch(patch)
-                        txt = self.ax.text(slot_x, slot_y + (square / 2 + 0.005 if hpos == "top" else -square / 2 - 0.005), "", ha="center", va=text_va, fontsize=9)
+                        txt = self.ax.text(slot_x, slot_y + (square / 2 + 0.005 if hpos == "top" else -square / 2 - 0.005), "", ha="center", va=text_va, fontsize=fontsize)
                         txt.set_visible(False)  # 默认隐藏
                         patch_dict[lane].append(patch)
                         text_dict[lane].append(txt)
@@ -496,7 +499,7 @@ class NetworkLinkVisualizer:
                     else:
                         raise ValueError(f"Unknown h_position: {hpos}")
 
-                    self.ax.text(lane_x + square / 2, text_y, lane[0].upper() + lane[-1], ha="center", va=va, fontsize=9)
+                    self.ax.text(lane_x + square / 2, text_y, lane[0].upper() + lane[-1], ha="center", va=va, fontsize=fontsize)
                     patch_dict[lane] = []
                     text_dict[lane] = []
 
@@ -505,7 +508,7 @@ class NetworkLinkVisualizer:
                         slot_y = lane_y + slot_dir * s * (square + gap)
                         patch = Rectangle((slot_x, slot_y), square, square, edgecolor="black", facecolor="none")
                         self.ax.add_patch(patch)
-                        txt = self.ax.text(slot_x + (square / 2 + 0.005 if vpos == "right" else -square / 2 - 0.005), slot_y, "", ha=text_ha, va="center", fontsize=9)
+                        txt = self.ax.text(slot_x + (square / 2 + 0.005 if vpos == "right" else -square / 2 - 0.005), slot_y, "", ha=text_ha, va="center", fontsize=fontsize)
                         txt.set_visible(False)  # 默认隐藏
                         patch_dict[lane].append(patch)
                         text_dict[lane].append(txt)
@@ -543,6 +546,8 @@ class NetworkLinkVisualizer:
             RB = network.ring_bridge
             IQ_Ch = network.IQ_channel_buffer
             EQ_Ch = network.EQ_channel_buffer
+            CP_H = network.cross_point["horizontal"]
+            CP_V = network.cross_point["vertical"]
             # Inject
             for lane, patches in self.iq_patches.items():
                 if "_" in lane:
@@ -604,6 +609,63 @@ class NetworkLinkVisualizer:
                     t = self.rb_texts[lane][idx]
                     if idx < len(q):
                         flit = q[idx]
+                        packet_id = getattr(flit, "packet_id", None)
+                        flit_id = getattr(flit, "flit_id", str(flit))
+
+                        # 创建复合ID对象
+                        pid = {"packet_id": packet_id, "flit_id": flit_id}
+
+                        # 设置颜色（基于packet_id）和显示文本
+                        p.set_facecolor(self._get_color(flit))
+                        info = f"{packet_id}-{flit_id}"
+                        t.set_text(info)
+                        t.set_visible(self.use_highlight and packet_id == self.highlight_pid)
+                        self.patch_info_map[p] = (t, packet_id, flit_id)
+                    else:
+                        p.set_facecolor("none")
+                        t.set_visible(False)
+                        if p in self.patch_info_map:
+                            self.patch_info_map.pop(p, None)
+            # Cross Point Horizontal
+            for lane, patches in self.cph_patches.items():
+                q = CP_H.get(self.node_id, [])[lane]
+                for idx, p in enumerate(patches):
+                    t = self.cph_texts[lane][idx]
+                    if idx < len(q):
+                        flit = q[idx]
+                        if flit is None:
+                            p.set_facecolor("none")
+                            t.set_visible(False)
+                            continue
+                        packet_id = getattr(flit, "packet_id", None)
+                        flit_id = getattr(flit, "flit_id", str(flit))
+
+                        # 创建复合ID对象
+                        pid = {"packet_id": packet_id, "flit_id": flit_id}
+
+                        # 设置颜色（基于packet_id）和显示文本
+                        p.set_facecolor(self._get_color(flit))
+                        info = f"{packet_id}-{flit_id}"
+                        t.set_text(info)
+                        t.set_visible(self.use_highlight and packet_id == self.highlight_pid)
+                        self.patch_info_map[p] = (t, packet_id, flit_id)
+                    else:
+                        p.set_facecolor("none")
+                        t.set_visible(False)
+                        if p in self.patch_info_map:
+                            self.patch_info_map.pop(p, None)
+
+            # Cross Point Vertical
+            for lane, patches in self.cpv_patches.items():
+                q = CP_V.get(self.node_id, [])[lane]
+                for idx, p in enumerate(patches):
+                    t = self.cpv_texts[lane][idx]
+                    if idx < len(q):
+                        flit = q[idx]
+                        if flit is None:
+                            p.set_facecolor("none")
+                            t.set_visible(False)
+                            continue
                         packet_id = getattr(flit, "packet_id", None)
                         flit_id = getattr(flit, "flit_id", str(flit))
 
@@ -874,6 +936,7 @@ class NetworkLinkVisualizer:
                 eject_queues=meta["eject_queues"],
                 ring_bridge=meta["ring_bridge"],
                 config=self.networks[self.selected_network_index].config,
+                cross_point=meta["cross_point"],
             )
             self.piece_vis.draw_piece_for_node(sel_node, fake_net)
         else:
@@ -1221,7 +1284,8 @@ class NetworkLinkVisualizer:
                     "EQ_channel_buffer": copy.deepcopy(net.EQ_channel_buffer),
                     "inject_queues": copy.deepcopy(net.inject_queues),
                     "eject_queues": copy.deepcopy(net.eject_queues),
-                    "ring_bridge": copy.deepcopy(getattr(net, "ring_bridge", {})),
+                    "ring_bridge": copy.deepcopy(net.ring_bridge),
+                    "cross_point": copy.deepcopy(net.cross_point),
                 }
                 self.histories[i].append((cycle, snap, meta))
 
@@ -1284,6 +1348,7 @@ class NetworkLinkVisualizer:
                 inject_queues=meta["inject_queues"],
                 eject_queues=meta["eject_queues"],
                 ring_bridge=meta["ring_bridge"],
+                cross_point=meta["cross_point"],
                 config=self.networks[self.selected_network_index].config,
             )
             self.piece_vis.draw_piece_for_node(self._selected_node, fake_net)

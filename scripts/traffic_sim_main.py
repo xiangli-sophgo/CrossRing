@@ -98,7 +98,7 @@ def run_single_simulation(sim_params):
         sim.config.TU_Etag_T1_UE_MAX = 15
         sim.config.TD_Etag_T2_UE_MAX = 12
         sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
-        sim.config.ITag_MAX_Num_H = sim.config.ITag_MAX_Num_V = 1
+        sim.config.ITag_MAX_NUM_H = sim.config.ITag_MAX_NUM_V = 1
         sim.config.ETag_BOTHSIDE_UPGRADE = 0
 
         sim.config.GDMA_RW_GAP = np.inf

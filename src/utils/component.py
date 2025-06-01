@@ -147,14 +147,16 @@ class Flit:
                     self.is_injected = True
                     self.is_new_on_network = True
                     self.current_link = None
-                    self.flit_position = "Link"
+                    # self.flit_position = "Link"
                     return True
         return False
 
     def __repr__(self):
         req_attr = "O" if self.req_attr == "old" else "N"
         type_display = self.rsp_type[:3] if self.rsp_type else self.req_type[0]
-        flit_position = f"{self.current_position}:{self.flit_position}" if self.flit_position != "Link" else f"({self.current_link[0]}->{self.current_link[1]}).{self.current_seat_index}, "
+        flit_position = (
+            f"{self.current_position}:{self.flit_position}" if self.flit_position != "Link" else f"({self.current_link[0]}->{self.current_link[1]}).{self.current_seat_index}, "
+        )
         finish_status = "F" if self.is_finish else ""
         eject_status = "E" if self.is_ejected else ""
 
@@ -750,7 +752,10 @@ class IPInterface:
                 net_info["l2h_fifo"].append(net_info["l2h_fifo_pre"])
                 net_info["l2h_fifo_pre"] = None
 
-            if net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen:
+            if (
+                net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None
+                and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen
+            ):
                 net.IQ_channel_buffer[self.ip_type][self.ip_pos].append(net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos])
                 net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = None
 
@@ -819,7 +824,9 @@ class IPInterface:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             if req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
+                latency = np.random.uniform(
+                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
+                )
             else:
                 latency = self.config.L2M_R_LATENCY
             flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY
@@ -874,17 +881,26 @@ class Network:
         self.inject_queues = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.inject_queues_pre = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.eject_queues = {"TU": {}, "TD": {}}
+        self.eject_queues_in_pre = {"TU": {}, "TD": {}}
         self.arrive_node_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.IQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.EQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.IQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.EQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
         self.links = {}
+        self.cross_point = {"horizontal": defaultdict(lambda: defaultdict(list)), "vertical": defaultdict(lambda: defaultdict(list))}
         self.links_flow_stat = {"read": {}, "write": {}}
+        # ITag setup
         self.links_tag = {}
         self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
+        self.tagged_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}  # 环上已标记ITag数
+        self.itag_req_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}  # FIFO中ITag需求数
+        self.excess_ITag_to_remove = {"TL": {}, "TR": {}, "TD": {}, "TU": {}}
+
+        # 每个FIFO Entry的等待计数器
+        self.fifo_counters = {"TL": {}, "TR": {}}
         self.ring_bridge = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
-        self.ring_bridge_out_pre = {"TU": {}, "TD": {}, "EQ": {}}
+        self.ring_bridge_pre = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.round_robin = {"IQ": defaultdict(lambda: defaultdict(dict)), "RB": defaultdict(lambda: defaultdict(dict)), "EQ": defaultdict(lambda: defaultdict(dict))}
         self.round_robin_counter = 0
         self.recv_flits_num = 0
@@ -966,6 +982,10 @@ class Network:
         self.ETag_BOTHSIDE_UPGRADE = False
 
         for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
+            self.cross_point["horizontal"][ip_pos]["TL"] = [None] * 2
+            self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
+            self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2
+            self.cross_point["vertical"][ip_pos]["TD"] = [None] * 2
             self.inject_queues["TL"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
             self.inject_queues["TR"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
             self.inject_queues["TU"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
@@ -983,6 +1003,8 @@ class Network:
                 self.arrive_node_pre[key][ip_pos - config.NUM_COL] = None
             self.eject_queues["TU"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
             self.eject_queues["TD"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
+            self.eject_queues_in_pre["TU"][ip_pos - config.NUM_COL] = None
+            self.eject_queues_in_pre["TD"][ip_pos - config.NUM_COL] = None
             self.EQ_UE_Counters["TU"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0, "T0": 0}
             self.EQ_UE_Counters["TD"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0}
 
@@ -1040,9 +1062,11 @@ class Network:
                 self.ring_bridge["TD"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
                 self.ring_bridge["EQ"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
 
-                self.ring_bridge_out_pre["TU"][(pos, next_pos)] = None
-                self.ring_bridge_out_pre["TD"][(pos, next_pos)] = None
-                self.ring_bridge_out_pre["EQ"][(pos, next_pos)] = None
+                self.ring_bridge_pre["TL"][(pos, next_pos)] = None
+                self.ring_bridge_pre["TR"][(pos, next_pos)] = None
+                self.ring_bridge_pre["TU"][(pos, next_pos)] = None
+                self.ring_bridge_pre["TD"][(pos, next_pos)] = None
+                self.ring_bridge_pre["EQ"][(pos, next_pos)] = None
 
                 self.RB_UE_Counters["TL"][(pos, next_pos)] = {"T2": 0, "T1": 0, "T0": 0}
                 self.RB_UE_Counters["TR"][(pos, next_pos)] = {"T2": 0, "T1": 0}
@@ -1050,9 +1074,15 @@ class Network:
                 # self.round_robin["TD"][next_pos] = deque([0, 1, 2])
                 # self.round_robin["RB"][next_pos] = deque([0, 1, 2])
                 for direction in ["TL", "TR"]:
-                    self.remain_tag[direction][pos] = config.ITag_MAX_Num_H
+                    self.remain_tag[direction][pos] = config.ITag_MAX_NUM_H
+                    self.itag_req_counter[direction][pos] = 0
+                    self.tagged_counter[direction][pos] = 0
+                    self.excess_ITag_to_remove[direction][pos] = 0
                 for direction in ["TU", "TD"]:
-                    self.remain_tag[direction][next_pos] = config.ITag_MAX_Num_V
+                    self.remain_tag[direction][pos] = config.ITag_MAX_NUM_V
+                    self.itag_req_counter[direction][pos] = 0
+                    self.tagged_counter[direction][pos] = 0
+                    self.excess_ITag_to_remove[direction][pos] = 0
 
         for ip_type in self.num_recv.keys():
             source_positions = getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST")
@@ -1141,85 +1171,101 @@ class Network:
         """
         if dir_type in ("TL", "TR"):
             self.RB_UE_Counters[dir_type][key][level] += 1
-            flit.flit_position = f"RB_{dir_type}"
+            # flit.flit_position = f"RB_{dir_type}"
         else:
             self.EQ_UE_Counters[dir_type][key][level] += 1
-            flit.flit_position = f"EQ_{dir_type}"
+            # flit.flit_position = f"EQ_{dir_type}"
         flit.used_entry_level = level
 
     def error_log(self, flit, target_id):
         if flit and flit.packet_id == target_id:
-            print(
-                inspect.currentframe().f_back.f_code.co_name,  # 调用函数名称
-                flit,
-            )
+            print(inspect.currentframe().f_back.f_code.co_name, flit)
 
     def can_move_to_next(self, flit, current, next_node):
-        # flit inject的时候判断是否可以将flit放到本地出口队列。
+        # 1. flit不进入Cross Poing
         if flit.source - flit.destination == self.config.NUM_COL:
-            return True
-
-        elif next_node == current + 1:
-            if self.links[(current, next_node)][0] is not None:
-                if (
-                    (self.links_tag[(current, next_node)][0] is None or self.links_tag[(current, next_node)][0] != [current, "TR"])
-                    and flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H
-                    and not flit.itag_h
-                ):
-                    if self.remain_tag["TR"][current] > 0:
-                        self.remain_tag["TR"][current] -= 1
-                        self.links_tag[(current, next_node)][0] = [current, "TR"]
-                        flit.itag_h = True
-                return False
-            else:
-                if self.links_tag[(current, next_node)][0] is None:
-                    return True
-                else:
-                    if self.links_tag[(current, next_node)][0] == [current, "TR"]:
-                        self.links_tag[(current, next_node)][0] = None
-                        self.remain_tag["TR"][current] += 1
-                        return True
-            return False
-
-        elif next_node == current - 1:
-            if self.links[(current, next_node)][0] is not None:
-                if flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H and not flit.itag_h:
-                    if self.remain_tag["TL"][current] > 0:
-                        self.remain_tag["TL"][current] -= 1
-                        self.links_tag[(current, next_node)][0] = [current, "TL"]
-                        flit.itag_h = True
-                return False
-            else:
-                if self.links_tag[(current, next_node)][0] is None:
-                    return True
-                else:
-                    if self.links_tag[(current, next_node)][0] == [current, "TL"]:
-                        self.links_tag[(current, next_node)][0] = None
-                        self.remain_tag["TL"][current] += 1
-                        return True
-            return False
-
+            return len(self.inject_queues["EQ"]) < self.config.IQ_OUT_FIFO_DEPTH
         elif current - next_node == self.config.NUM_COL:
-            # 向 Ring Bridge 移动
-            # return len(self.ring_bridge["TU"][(current, next_node)]) < self.config.RB_IN_FIFO_DEPTH
-            # v1.3 在IQ中分TU和TD两个FIFO
+            # 向 Ring Bridge 移动. v1.3 在IQ中分TU和TD两个FIFO
             if len(flit.path) > 2 and flit.path[2] - flit.path[1] == self.config.NUM_COL * 2:
                 return len(self.inject_queues["TD"][current]) < self.config.IQ_OUT_FIFO_DEPTH
             elif len(flit.path) > 2 and flit.path[2] - flit.path[1] == -self.config.NUM_COL * 2:
                 return len(self.inject_queues["TU"][current]) < self.config.IQ_OUT_FIFO_DEPTH
 
+        direction = "TR" if next_node == current + 1 else "TL"
+        link = (current, next_node)
+
+        # 横向环ITag处理
+        if self.links[link][0] is not None:  # Link被占用
+            # 检查是否需要标记ITag（内联所有检查逻辑）
+            if (
+                self.links_tag[link][0] is None
+                and flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H
+                and self.tagged_counter[direction][current] < self.config.ITag_Max_Num_H
+                and self.itag_req_counter[direction][current] > 0
+                and self.remain_tag[direction][current] > 0
+            ):
+
+                # 创建ITag标记（内联逻辑）
+                self.remain_tag[direction][current] -= 1
+                self.tagged_counter[direction][current] += 1
+                self.links_tag[link][0] = [current, direction]
+                flit.itag_h = True
+            return False
+
+        else:  # Link空闲
+            if self.links_tag[link][0] is None:  # 无预约
+                return True  # 直接上环
+            else:  # 有预约
+                if self.links_tag[link][0] == [current, direction]:  # 是自己的预约
+                    # 使用预约（内联逻辑）
+                    self.links_tag[link][0] = None
+                    self.remain_tag[direction][current] += 1  # 修复：使用direction
+                    self.tagged_counter[direction][current] -= 1
+                    return True
         return False
 
+    def update_excess_ITag(self):
+        """在主循环中调用，处理多余ITag释放"""
+        # 处理多余ITag释放（简化版）
+        for direction in ["TL", "TR"]:
+            for node_id in set(self.config.DDR_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST + self.config.GDMA_SEND_POSITION_LIST):
+                if self.excess_ITag_to_remove[direction][node_id] > 0:
+                    # 寻找该节点创建的ITag并释放
+                    for link, tag_info in self.links_tag.items():
+                        if tag_info[0] is not None and tag_info[0] == [node_id, direction] and link[0] == node_id:  # ITag回到创建节点
+                            # 释放多余ITag
+                            self.links_tag[link][0] = None
+                            self.tagged_counter[direction][node_id] -= 1
+                            self.remain_tag[direction][node_id] += 1
+                            self.excess_ITag_to_remove[direction][node_id] -= 1
+                            break  # 一次只释放一个
+
+    def update_cross_point(self):
+        for ip_pos in set(self.config.DDR_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST + self.config.GDMA_SEND_POSITION_LIST):
+            left_pos = ip_pos - 1 if ip_pos % self.config.NUM_COL != 0 else ip_pos
+            right_pos = ip_pos + 1 if ip_pos % self.config.NUM_COL != self.config.NUM_COL - 1 else ip_pos
+            up_pos = ip_pos - self.config.NUM_COL * 3 if ip_pos // self.config.NUM_COL != 1 else ip_pos - self.config.NUM_COL
+            down_pos = ip_pos + self.config.NUM_COL * 1 if ip_pos // self.config.NUM_COL != self.config.NUM_ROW - 1 else ip_pos - self.config.NUM_COL
+            self.cross_point["horizontal"][ip_pos]["TR"] = [self.links[(left_pos, ip_pos)][-1], self.links[(ip_pos, right_pos)][0]]
+            self.cross_point["horizontal"][ip_pos]["TL"] = [self.links[(ip_pos, left_pos)][0], self.links[(right_pos, ip_pos)][-1]]
+            self.cross_point["vertical"][ip_pos]["TU"] = [self.links[(down_pos, ip_pos - self.config.NUM_COL)][-1], self.links[(ip_pos - self.config.NUM_COL, up_pos)][0]]
+            self.cross_point["vertical"][ip_pos]["TD"] = [self.links[(ip_pos - self.config.NUM_COL, down_pos)][0], self.links[(up_pos, ip_pos - self.config.NUM_COL)][-1]]
+
     def plan_move(self, flit):
+        self.error_log(flit, 0)
         if flit.is_new_on_network:
             current = flit.source
             next_node = flit.path[flit.path_index + 1]
             flit.current_position = current
             flit.is_new_on_network = False
+            flit.flit_position = "Link"
             flit.is_arrive = False
             flit.is_on_station = False
             flit.current_link = (current, next_node)
-            if current - next_node == self.config.NUM_COL:
+            if flit.source - flit.destination == self.config.NUM_COL:
+                flit.is_arrive = True
+            elif current - next_node == self.config.NUM_COL:
                 if len(flit.path) > 2 and flit.path[flit.path_index + 2] - next_node == 2 * self.config.NUM_COL:
                     flit.current_seat_index = -1
                 elif len(flit.path) > 2 and flit.path[flit.path_index + 2] - next_node == -2 * self.config.NUM_COL:
@@ -1872,6 +1918,7 @@ class Network:
                     flit.current_seat_index = 0
 
     def execute_moves(self, flit: Flit, cycle):
+        # self.error_log(flit, 0)
         if not flit.is_arrive:
             current, next_node = flit.current_link
             if current - next_node != self.config.NUM_COL:
@@ -1886,9 +1933,14 @@ class Network:
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
-                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth:
-                        flit.flit_position = f"RB_{direction}"
-                        self.ring_bridge[direction][flit.current_link].append(flit)
+                    if (
+                        direction in self.ring_bridge.keys()
+                        and len(self.ring_bridge[direction][flit.current_link]) < max_depth
+                        and self.ring_bridge_pre[direction][flit.current_link] is None
+                    ):
+                        # flit.flit_position = f"RB_{direction}"
+                        # self.ring_bridge[direction][flit.current_link].append(flit)
+                        self.ring_bridge_pre[direction][flit.current_link] = flit
                         flit.is_on_station = True
             return False
         else:
@@ -1904,11 +1956,14 @@ class Network:
             elif current - next_node == self.config.NUM_COL * 2 or (current == next_node and current not in range(0, self.config.NUM_COL)):
                 direction = "TU"
                 queue = self.eject_queues["TU"]
+                queue_pre = self.eject_queues_in_pre["TU"]
             else:
                 direction = "TD"
                 queue = self.eject_queues["TD"]
+                queue_pre = self.eject_queues_in_pre["TD"]
 
-            flit.flit_position = f"EQ_{direction}"
-            queue[next_node].append(flit)
+            # flit.flit_position = f"EQ_{direction}"
+            # queue[next_node].append(flit)
+            queue_pre[next_node] = flit
 
-            return False
+            return True

@@ -116,7 +116,9 @@ class BaseModel:
             self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
-        self.flit_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
+        self.flit_positions = set(
+            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
+        )
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
         self.ip_modules = {}
@@ -233,7 +235,9 @@ class BaseModel:
             self.cycle += 1
             self.cycle_mod = self.cycle % self.config.NETWORK_FREQUENCY
 
-            self.debug_func()
+            # Tag moves
+            self.tag_move_all_networks()
+
             self.release_completed_sn_tracker()
 
             self.process_new_request()
@@ -253,8 +257,7 @@ class BaseModel:
 
             self.move_pre_to_queues_all()
 
-            # Tag moves
-            self.tag_move_all_networks()
+            self.debug_func()
 
             # Evaluate throughput time
             self.update_throughput_metrics(flits)
@@ -335,9 +338,20 @@ class BaseModel:
                 queue[in_pos].append(flit)
                 queue_pre[in_pos] = None
 
-        # ring_bridge_out_pre → ring_bridge
+        # RB_IN_PRE → RB_IN
+        for direction in ["TL", "TR"]:
+            queue_pre = network.ring_bridge_pre[direction]
+            queue = network.ring_bridge[direction]
+            key = (in_pos, ip_pos)
+            if queue_pre[key] and len(queue[key]) < self.config.RB_IN_FIFO_DEPTH:
+                flit = queue_pre[key]
+                flit.flit_position = f"RB_{direction}"
+                queue[key].append(flit)
+                queue_pre[key] = None
+
+        # RB_OUT_PRE → RB_OUT
         for fifo_pos in ("EQ", "TU", "TD"):
-            queue_pre = network.ring_bridge_out_pre[fifo_pos]
+            queue_pre = network.ring_bridge_pre[fifo_pos]
             queue = network.ring_bridge[fifo_pos]
             key = (in_pos, ip_pos)
             if queue_pre[key] and len(queue[key]) < self.config.RB_OUT_FIFO_DEPTH:
@@ -346,6 +360,17 @@ class BaseModel:
                 flit.flit_position = f"RB_{fifo_pos}"
                 queue[key].append(flit)
                 queue_pre[key] = None
+
+        # EQ_IN_PRE → EQ_IN
+        for fifo_pos in ("TU", "TD"):
+            queue_pre = network.eject_queues_in_pre[fifo_pos]
+            queue = network.eject_queues[fifo_pos]
+            if queue_pre[ip_pos] and len(queue[ip_pos]) < self.config.RB_OUT_FIFO_DEPTH:
+                flit = queue_pre[ip_pos]
+                flit.is_arrive = fifo_pos == "EQ"
+                flit.flit_position = f"EQ_{fifo_pos}"
+                queue[ip_pos].append(flit)
+                queue_pre[ip_pos] = None
 
         # EQ_channel_buffer_pre → EQ_channel_buffer
         for ip_type in network.EQ_channel_buffer_pre.keys():
@@ -359,7 +384,11 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
+            print(
+                f"Data statistic: Read: {self.read_req, self.read_flit}, "
+                f"Write: {self.write_req, self.write_flit}, "
+                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
+            )
 
     def log_summary(self):
         if self.verbose:
@@ -382,6 +411,22 @@ class BaseModel:
         #     flits.extend(moved_flits)
 
     def move_flits_in_network(self, network, flits, flit_type):
+        """Process injection queues and move flits."""
+        for direction, inject_queues in network.inject_queues.items():
+            num, moved_flits = self.process_inject_queues(network, inject_queues, direction)
+            if num == 0 and not moved_flits:
+                continue
+            if flit_type == "req":
+                self.req_num += num
+            elif flit_type == "rsp":
+                self.rsp_num += num
+            elif flit_type == "data":
+                self.flit_num += num
+            flits.extend(moved_flits)
+        flits = self._flit_move(network, flits, flit_type)
+        return flits
+
+    def move_flits_in_network__(self, network, flits, flit_type):
         """Process injection queues and move flits."""
         flits = self._flit_move(network, flit_type)
         return flits
@@ -608,11 +653,7 @@ class BaseModel:
 
     def error_log(self, flit, target_id):
         if flit and flit.packet_id == target_id:
-            print(
-                inspect.currentframe().f_back.f_code.co_name,  # 调用函数名称
-                self.cycle,
-                flit,
-            )
+            print(inspect.currentframe().f_back.f_code.co_name, self.cycle, flit)
 
     def flit_trace(self, packet_id):
         if self.plot_link_state and self.link_state_vis.should_stop:
@@ -739,69 +780,80 @@ class BaseModel:
                 vertical_flits.append(flit)
         return (ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits)
 
-    def _flit_move(self, network: Network, flit_type):
+    def _flit_move(self, network: Network, flits, flit_type):
 
-        self.link_move(network, flit_type)
+        # 分类不同类型的flits
+        (ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits) = self.categorize_flits_by_direction(flits)
+
+        # 先对已有的flit进行plan
+        for flit in new_flits + horizontal_flits + vertical_flits + local_flits:
+            network.plan_move(flit)
+            if network.execute_moves(flit, self.cycle):
+                flits.remove(flit)
+
+        network.update_excess_ITag()
+        network.update_cross_point()
 
         self.Ring_Bridge_arbitration(network)
 
+        # eject arbitration
         self.Eject_Queue_arbitration(network, flit_type)
 
-    def link_move(self, network: Network, flit_type):
-        """
-        Tail‑buffer link traversal (see algorithm in docstring).
-        """
+        for flit in ring_bridge_EQ_flits:
+            if flit.is_arrive:
+                flits.remove(flit)
 
-        tail_flit_list = []
+        return flits
 
-        for (u, v), link in network.links.items():
-            seats_per = len(link)
-            # ---------- STEP‑0 : 把尾 flit 暂存出来 ----------
-            tail_idx = seats_per - 1
-            tail_flit = link[tail_idx]
-            if tail_flit is not None:
-                tail_flit_list.append(tail_flit)
-                link[tail_idx] = None  # 先清空尾 slot，为内部 slide 腾位
+    # def _flit_move__(self, network: Network, flit_type):
 
-            if tail_flit:
-                if u == v:
-                    print(u, v)
-                network.links_flow_stat[tail_flit.req_type][(u, v)] += 1
+    #     self.link_move(network, flit_type)
 
-            # ---------- STEP‑1 : slide 0 .. N‑2 右移 ----------
-            for idx in range(seats_per - 2, -1, -1):
-                if link[idx] and link[idx + 1] is None:
-                    flit = link[idx]
-                    link[idx + 1] = flit
-                    link[idx] = None
-                    flit.current_seat_index += 1
+    #     self.Ring_Bridge_arbitration(network)
 
-        for tail_flit in tail_flit_list:
-            # (a) 到站 / 转环 用原 plan_move 逻辑
-            network.plan_move(tail_flit)
-            network.execute_moves(tail_flit, self.cycle)
+    #     self.Eject_Queue_arbitration(network, flit_type)
 
-        for direction, inject_queues in network.inject_queues.items():
-            num, new_flits = self.process_inject_queues(network, inject_queues, direction)
-            if num == 0 and not new_flits:
-                continue
-            if flit_type == "req":
-                self.req_num += num
-            elif flit_type == "rsp":
-                self.rsp_num += num
-            elif flit_type == "data":
-                self.flit_num += num
-            for flit in new_flits:
-                network.plan_move(flit)
-                network.execute_moves(flit, self.cycle)
+    # def link_move(self, network: Network, flit_type):
+    #     """
+    #     Tail‑buffer link traversal (see algorithm in docstring).
+    #     """
+    #     # BUG: 现在一个slice上有很多flit。
 
-    # ------------------------------------------------------------------
-    # Helper – 判断下一跳是否仍在同一环 (横 or 纵)
-    # ------------------------------------------------------------------
-    def _is_same_ring(self, u, v, w):
-        horiz = lambda a, b: abs(a - b) == 1
-        vert = lambda a, b: abs(a - b) == self.config.NUM_COL
-        return (horiz(u, v) and horiz(v, w)) or (vert(u, v) and vert(v, w))
+    #     tail_flit_list = []
+
+    #     for (u, v), link in network.links.items():
+    #         seats_per = len(link)
+    #         # ---------- STEP‑0 : 把尾 flit 暂存出来 ----------
+    #         tail_idx = seats_per - 1
+    #         tail_flit = link[tail_idx]
+    #         if tail_flit is not None:
+    #             tail_flit_list.append(tail_flit)
+    #             link[tail_idx] = None  # 先清空尾 slot，为内部 slide 腾位
+
+    #         if tail_flit:
+    #             if u == v:
+    #                 print(u, v)
+    #             network.links_flow_stat[tail_flit.req_type][(u, v)] += 1
+
+    #         # ---------- STEP‑1 : slide 0 .. N‑2 右移 ----------
+    #         for idx in range(seats_per - 2, -1, -1):
+    #             if link[idx] and link[idx + 1] is None:
+    #                 flit = link[idx]
+    #                 link[idx + 1] = flit
+    #                 link[idx] = None
+    #                 flit.current_seat_index += 1
+
+    #     for tail_flit in tail_flit_list:
+    #         # (a) 到站 / 转环 用原 plan_move 逻辑
+    #         # self.error_log(tail_flit, 0)
+    #         network.plan_move(tail_flit)
+    #         network.execute_moves(tail_flit, self.cycle)
+
+    #     for direction, inject_queues in network.inject_queues.items():
+    #         num, moved_flits = self.process_inject_queues(network, inject_queues, direction)
+
+    #     network.update_excess_ITag()
+    #     network.update_cross_point()
 
     def Ring_Bridge_arbitration(self, network: Network):
         for col in range(1, self.config.NUM_ROW, 2):
@@ -811,19 +863,20 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
+                    for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
                 if any(station_flits) and len(network.ring_bridge["EQ"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    network.ring_bridge_out_pre["EQ"][(pos, next_pos)] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, "EQ", lambda d, n: d == n)
+                    network.ring_bridge_pre["EQ"][(pos, next_pos)] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, "EQ", lambda d, n: d == n)
                 # 处理TU操作
                 if any(station_flits) and len(network.ring_bridge["TU"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    network.ring_bridge_out_pre["TU"][(pos, next_pos)] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, "TU", lambda d, n: d < n)
+                    network.ring_bridge_pre["TU"][(pos, next_pos)] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, "TU", lambda d, n: d < n)
 
                 # 处理TD操作
                 if any(station_flits) and len(network.ring_bridge["TD"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    network.ring_bridge_out_pre["TD"][(pos, next_pos)] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, "TD", lambda d, n: d > n)
+                    network.ring_bridge_pre["TD"][(pos, next_pos)] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, "TD", lambda d, n: d > n)
 
                 up_node, down_node = (
                     next_pos - self.config.NUM_COL * 2,
@@ -908,12 +961,13 @@ class BaseModel:
             self._move_to_eject_queues_pre(network, eject_flits, ip_pos)
 
     def _process_ring_bridge(self, network: Network, dir_key, pos, next_pos, curr_node, opposite_node):
-        direction = dir_key
+        direction = dir_key  # "TU" or "TD"
         link = (next_pos, opposite_node)
 
         # Early return if ring bridge is not active for this direction and position
         if not network.ring_bridge[dir_key][(pos, next_pos)]:
             return None
+        # self.error_log(network.ring_bridge[dir_key][(pos, next_pos)][0], 0)
 
         # Case 1: No flit in the link
         if not network.links[link][0]:
@@ -923,18 +977,36 @@ class BaseModel:
                     return True
                 return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
+            # Case 2: Has ITag reservation
             if network.links_tag[link][0] == [next_pos, direction]:
+                # 使用预约并更新双计数器
                 network.remain_tag[direction][next_pos] += 1
+                network.tagged_counter[direction][next_pos] -= 1  # 新增：更新tagged计数器
                 network.links_tag[link][0] = None
+
                 if self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction):
                     return True
                 return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
+
         return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
     def _update_flit_state(self, network, ts_key, pos, next_pos, target_node, direction):
+        """更新Flit状态并处理ITag需求变化"""
         if network.links[(next_pos, target_node)][0] is not None:
             return False
+
         flit: Flit = network.ring_bridge[ts_key][(pos, next_pos)].popleft()
+
+        # 检查这个Flit是否曾经申请过ITag → 减少需求计数
+        if flit.wait_cycle_v >= self.config.ITag_TRIGGER_Th_V:
+            network.itag_req_counter[direction][next_pos] -= 1
+
+            # 检查多余预约（内联逻辑）
+            excess = network.tagged_counter[direction][next_pos] - network.itag_req_counter[direction][next_pos]
+            if excess > 0:
+                network.excess_to_remove[direction][next_pos] += excess
+
+        # 更新Flit位置
         flit.current_position = next_pos
         flit.path_index += 1
         flit.current_link = (next_pos, target_node)
@@ -943,16 +1015,41 @@ class BaseModel:
         network.links[(next_pos, target_node)][0] = flit
         return True
 
-    def _handle_wait_cycles(self, network, ts_key, pos, next_pos, direction, link):
-        if network.ring_bridge[ts_key][(pos, next_pos)][0].wait_cycle_v > self.config.ITag_TRIGGER_Th_V and not network.ring_bridge[ts_key][(pos, next_pos)][0].itag_v:
-            if network.remain_tag[direction][next_pos] > 0:
-                network.remain_tag[direction][next_pos] -= 1
-                network.links_tag[link][0] = [next_pos, direction]
-                network.ring_bridge[ts_key][(pos, next_pos)][0].itag_v = True
-                self.ITag_v_num_stat += 1
-        else:
-            for flit in network.ring_bridge[ts_key][(pos, next_pos)]:
-                flit.wait_cycle_v += 1
+    def _handle_wait_cycles(self, network: Network, ts_key, pos, next_pos, direction, link):
+        """处理等待周期和ITag标记逻辑"""
+        if not network.ring_bridge[ts_key][(pos, next_pos)]:
+            return False
+
+        first_flit = network.ring_bridge[ts_key][(pos, next_pos)][0]
+
+        # 检查第一个Flit刚达到阈值 → 增加需求计数
+        if first_flit.wait_cycle_v == self.config.ITag_TRIGGER_Th_V:
+            network.itag_req_counter[direction][pos] += 1
+
+        # 检查是否需要标记ITag（内联所有检查逻辑）
+        if (
+            first_flit.wait_cycle_v > self.config.ITag_TRIGGER_Th_V
+            and not first_flit.itag_v
+            and network.links_tag[link][0] is None
+            and network.tagged_counter[direction][pos] < self.config.ITag_MAX_NUM_V
+            and network.itag_req_counter[direction][pos] > 0
+            and network.remain_tag[direction][pos] > 0
+        ):
+
+            # 创建ITag标记（内联逻辑）
+            network.remain_tag[direction][pos] -= 1
+            network.tagged_counter[direction][pos] += 1
+            network.links_tag[link][0] = [pos, direction]
+            first_flit.itag_v = True
+            self.ITag_v_num_stat += 1
+
+        # 更新所有Flit的等待时间并检查新的需求
+        for i, flit in enumerate(network.ring_bridge[ts_key][(pos, next_pos)]):
+            flit.wait_cycle_v += 1
+            # 检查其他Flit是否刚达到阈值
+            if i > 0 and flit.wait_cycle_v == self.config.ITag_TRIGGER_Th_V:
+                network.itag_req_counter[direction][pos] += 1
+
         return False
 
     def tag_move_all_networks(self):
@@ -971,7 +1068,9 @@ class BaseModel:
                     if network.links_tag[(i, j)][-1] == [j, "TR"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["TR"][j] += 1
-                elif i - j == self.config.NUM_COL * 2 or (i == j and i in range(self.config.NUM_NODE - self.config.NUM_COL * 2, self.config.NUM_COL + self.config.NUM_NODE - self.config.NUM_COL * 2)):
+                elif i - j == self.config.NUM_COL * 2 or (
+                    i == j and i in range(self.config.NUM_NODE - self.config.NUM_COL * 2, self.config.NUM_COL + self.config.NUM_NODE - self.config.NUM_COL * 2)
+                ):
                     if network.links_tag[(i, j)][-1] == [j, "TU"] and network.links[(i, j)][-1] is None:
                         network.links_tag[(i, j)][-1] = None
                         network.remain_tag["TU"][j] += 1
@@ -1081,23 +1180,39 @@ class BaseModel:
                     return eject_flits
         return eject_flits
 
-    def process_inject_queues(self, network, inject_queues, direction):
+    def process_inject_queues(self, network: Network, inject_queues, direction):
         flit_num = 0
         flits = []
-        for queue in inject_queues.values():
+        for ip_pos, queue in inject_queues.items():
             if queue and queue[0]:
                 flit: Flit = queue.popleft()
+                # self.error_log(flit, 0)
+
+                # 检查是否需要生成Buffer_Reach_Th信号
+                if flit.wait_cycle_h == self.config.ITag_TRIGGER_Th_H and direction != "EQ":
+                    network.itag_req_counter[direction][ip_pos] += 1
                 if flit.inject(network):
                     network.inject_num += 1
                     flit_num += 1
                     flit.departure_network_cycle = self.cycle
                     flits.append(flit)
+
+                    # 生成Reduce_ITag_Req信号
+                    if flit.itag_h:
+                        self.itag_req_counter[direction][ip_pos] -= 1
+
                     if direction in ["EQ", "TU", "TD"]:
                         queue.appendleft(flit)
                 else:
                     queue.appendleft(flit)
-                    for flit in queue:
-                        flit.wait_cycle_h += 1
+                    # 更新FIFO中所有Flit的等待时间
+                    for f in queue:
+                        f.wait_cycle_h += 1
+                        # 检查新达到阈值的Flit
+                        if f.wait_cycle_h == self.config.ITag_TRIGGER_Th_H:
+                            flit.itag_h = True
+                            if direction != "EQ":
+                                network.itag_req_counter[direction][ip_pos] += 1
                 if flit.itag_h:
                     self.ITag_h_num_stat += 1
 

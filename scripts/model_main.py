@@ -15,7 +15,7 @@ def main():
 
     traffic_file_path = r"../test_data/"
     # file_name = r"traffic_2262_case1.txt"
-    file_name = r"traffic_2260E_case3.txt"
+    file_name = r"traffic_2260E_case2.txt"
     # file_name = r"traffic_2262_case1.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
@@ -37,7 +37,7 @@ def main():
     # file_name = r"MLP_MoE_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
     # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace_group_map.txt"
-    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce-2KB-new_traffic.txt"
+    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce-2KB-new.txt"
 
     # model_type = "Feature"
     model_type = "REQ_RSP"
@@ -53,7 +53,7 @@ def main():
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        # topo_type = "5x4"  # SG2262
+        topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
         # topo_type = "6x5"
         topo_type = "3x3"  # SG2260E
@@ -74,15 +74,14 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
-        plot_link_state=1,
-        plot_start_time=200,
+        plot_link_state=0,
+        plot_start_time=2000,
         print_trace=0,
         show_trace_id=0,
         show_node_id=4,
         verbose=1,
     )
     np.random.seed(527)
-
     if topo_type == "3x3":
         sim.config.BURST = 2
         sim.config.NUM_IP = 4
@@ -183,7 +182,7 @@ def main():
         sim.config.TU_Etag_T1_UE_MAX = 15
         sim.config.TD_Etag_T2_UE_MAX = 12
         sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
-        sim.config.ITag_MAX_Num_H = sim.config.ITag_MAX_Num_V = 1
+        sim.config.ITag_MAX_NUM_H = sim.config.ITag_MAX_NUM_V = 1
         sim.config.ETag_BOTHSIDE_UPGRADE = 0
         sim.config.SLICE_PER_LINK = 7
 
