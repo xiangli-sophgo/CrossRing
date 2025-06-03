@@ -77,7 +77,7 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
-        plot_link_state=0,
+        plot_link_state=1,
         plot_start_time=1000,
         print_trace=0,
         show_trace_id=6212,
@@ -169,32 +169,32 @@ def main():
         sim.config.DDR_W_LATENCY_original = 0
         sim.config.L2M_R_LATENCY_original = 12
         sim.config.L2M_W_LATENCY_original = 16
-        sim.config.IQ_CH_FIFO_DEPTH = 10
-        sim.config.EQ_CH_FIFO_DEPTH = 10
+        sim.config.IQ_CH_FIFO_DEPTH = 4
+        sim.config.EQ_CH_FIFO_DEPTH = 4
         sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8
 
-        sim.config.EQ_IN_FIFO_DEPTH = 8
-        sim.config.RB_IN_FIFO_DEPTH = 8
-        sim.config.TL_Etag_T2_UE_MAX = 4
-        sim.config.TL_Etag_T1_UE_MAX = 7
-        sim.config.TR_Etag_T2_UE_MAX = 5
-        sim.config.TU_Etag_T2_UE_MAX = 4
-        sim.config.TU_Etag_T1_UE_MAX = 7
-        sim.config.TD_Etag_T2_UE_MAX = 6
+        # sim.config.EQ_IN_FIFO_DEPTH = 8
+        # sim.config.RB_IN_FIFO_DEPTH = 8
+        # sim.config.TL_Etag_T2_UE_MAX = 4
+        # sim.config.TL_Etag_T1_UE_MAX = 7
+        # sim.config.TR_Etag_T2_UE_MAX = 5
+        # sim.config.TU_Etag_T2_UE_MAX = 4
+        # sim.config.TU_Etag_T1_UE_MAX = 7
+        # sim.config.TD_Etag_T2_UE_MAX = 6
 
-        # sim.config.TL_Etag_T2_UE_MAX = 12
-        # sim.config.TL_Etag_T1_UE_MAX = 15
-        # sim.config.TR_Etag_T2_UE_MAX = 12
-        # sim.config.RB_IN_FIFO_DEPTH = 16
-        # sim.config.TU_Etag_T2_UE_MAX = 12
-        # sim.config.TU_Etag_T1_UE_MAX = 15
-        # sim.config.TD_Etag_T2_UE_MAX = 12
-        # sim.config.EQ_IN_FIFO_DEPTH = 16
+        sim.config.TL_Etag_T2_UE_MAX = 8
+        sim.config.TL_Etag_T1_UE_MAX = 15
+        sim.config.TR_Etag_T2_UE_MAX = 12
+        sim.config.RB_IN_FIFO_DEPTH = 16
+        sim.config.TU_Etag_T2_UE_MAX = 8
+        sim.config.TU_Etag_T1_UE_MAX = 15
+        sim.config.TD_Etag_T2_UE_MAX = 12
+        sim.config.EQ_IN_FIFO_DEPTH = 16
 
         sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
         sim.config.ITag_MAX_NUM_H = sim.config.ITag_MAX_NUM_V = 1
-        sim.config.ETag_BOTHSIDE_UPGRADE = 1
+        sim.config.ETag_BOTHSIDE_UPGRADE = 0
         sim.config.SLICE_PER_LINK = 8
 
         sim.config.GDMA_RW_GAP = np.inf

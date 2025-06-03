@@ -607,8 +607,73 @@ def enhanced_create_visualization_plots(study, traffic_files, traffic_weights, s
     create_parameter_impact_plot(complete_trials, traffic_files, vis_dir)
     create_enhanced_optimization_insight(study, vis_dir)
     create_optimization_guidance_report(study, traffic_files, vis_dir)
+    # 新增 2D 参数×带宽热力图
+    create_2d_param_bw_heatmaps(
+        complete_trials,
+        metric_key="Total_sum_BW_weighted_mean",  # 你也可以用单个 traffic 的 key
+        # 手动指定感兴趣的参数对；留空则所有两两组合都会画
+        param_pairs=[
+            ("TL_Etag_T2_UE_MAX", "TL_Etag_T1_UE_MAX"),
+            ("TU_Etag_T2_UE_MAX", "TU_Etag_T1_UE_MAX"),
+            ("RB_IN_FIFO_DEPTH", "EQ_IN_FIFO_DEPTH"),
+        ],
+        save_dir=vis_dir,
+    )
 
     print(f"增强版可视化图表已保存到: {vis_dir}")
+
+
+def create_2d_param_bw_heatmaps(trials, metric_key="Total_sum_BW_weighted_mean", param_pairs=None, aggfunc="mean", save_dir="."):
+    """
+    绘制所有指定参数对的 2D 热力图
+    ─────────────────────────────────────────────
+    • trials        : List[optuna.Trial]，只传 COMPLETE 的就行
+    • metric_key    : 作为色值的指标；默认用加权整体带宽
+    • param_pairs   : [('paramA','paramB'), ...]；为空时自动取所有两两组合
+    • aggfunc       : 'mean' | 'max' | 'min' 等，透视表聚合方式
+    • save_dir      : html/png 输出目录
+    """
+    import plotly.graph_objects as go
+    import pandas as pd, numpy as np, os, itertools, seaborn as sns, matplotlib.pyplot as plt
+
+    # ------- 整理 DataFrame -------
+    rows = []
+    for t in trials:
+        if t.state.name != "COMPLETE" or t.values is None:
+            continue
+        row = {k: v for k, v in t.params.items()}
+        row[metric_key] = t.user_attrs.get(metric_key, t.values[0])
+        rows.append(row)
+    df = pd.DataFrame(rows)
+    if df.empty:
+        print("没有可用 Trial 数据，跳过 2D 热力图绘制")
+        return
+
+    # ------- 自动组合参数对 -------
+    if not param_pairs:
+        cols = list(trials[0].params.keys())
+        param_pairs = list(itertools.combinations(cols, 2))
+
+    os.makedirs(save_dir, exist_ok=True)
+
+    # ------- 逐对绘制 -------
+    for x, y in param_pairs:
+        pivot = df.pivot_table(index=y, columns=x, values=metric_key, aggfunc=aggfunc)
+        title = f"{y} vs {x} — {metric_key}"
+
+        # ——— 方法 A：Plotly（交互式，默认输出 HTML） ———
+        fig = go.Figure(data=go.Heatmap(z=pivot.values, x=pivot.columns, y=pivot.index, colorscale="Viridis", colorbar=dict(title=metric_key)))
+        fig.update_layout(title=title, xaxis_title=x, yaxis_title=y, height=600, width=750)
+        fig.write_html(os.path.join(save_dir, f"{y}_vs_{x}.html"))
+
+        # ——— 方法 B：Seaborn（静态 PNG，可选） ———
+        plt.figure(figsize=(10, 8))
+        ax = sns.heatmap(pivot, cmap="YlGnBu", annot=True, fmt=".1f", linewidths=0.5, linecolor="white")
+        ax.invert_yaxis()
+        plt.title(title, fontsize=14)
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_dir, f"{y}_vs_{x}.png"), dpi=200)
+        plt.close()
 
 
 def create_optimization_history(trials, save_dir):
@@ -1380,14 +1445,6 @@ def create_summary_report(study, traffic_files, traffic_weights, save_dir):
                 <li><a href="visualizations/multi_traffic_comparison.html">多Traffic对比</a></li>
                 <li><a href="visualizations/convergence_analysis.html">收敛分析</a></li>
                 <li><a href="visualizations/3d_parameter_space.html">3D参数空间</a></li>
-            </ul>
-        </div>
-        
-        <div class="section">
-            <h2>实时监控</h2>
-            <p>运行过程中的实时图表:</p>
-            <ul>
-                <li><a href="intermediate_vis/realtime_progress.html">实时进度</a></li>
             </ul>
         </div>
     </body>
