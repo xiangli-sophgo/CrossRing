@@ -116,9 +116,7 @@ class BaseModel:
             self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
-        self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
-        )
+        self.flit_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
         self.ip_modules = {}
@@ -236,11 +234,12 @@ class BaseModel:
             self.cycle_mod = self.cycle % self.config.NETWORK_FREQUENCY
 
             # Tag moves
-            self.tag_move_all_networks()
 
             self.release_completed_sn_tracker()
 
             self.process_new_request()
+
+            self.tag_move_all_networks()
 
             self.ip_inject_to_network()
 
@@ -365,7 +364,7 @@ class BaseModel:
         for fifo_pos in ("TU", "TD"):
             queue_pre = network.eject_queues_in_pre[fifo_pos]
             queue = network.eject_queues[fifo_pos]
-            if queue_pre[ip_pos] and len(queue[ip_pos]) < self.config.RB_OUT_FIFO_DEPTH:
+            if queue_pre[ip_pos] and len(queue[ip_pos]) < self.config.EQ_IN_FIFO_DEPTH:
                 flit = queue_pre[ip_pos]
                 flit.is_arrive = fifo_pos == "EQ"
                 flit.flit_position = f"EQ_{fifo_pos}"
@@ -384,11 +383,7 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(
-                f"Data statistic: Read: {self.read_req, self.read_flit}, "
-                f"Write: {self.write_req, self.write_flit}, "
-                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
-            )
+            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
         if self.verbose:
@@ -564,7 +559,7 @@ class BaseModel:
         if not flits:
             return
 
-        first_flit: Flit = flits[0]
+        first_flit: Flit = flits[0] if len(flits) < 2 else flits[-2]
         if first_flit.is_finish or not first_flit.start_inject:
             return
 
@@ -685,8 +680,7 @@ class BaseModel:
             if flit.current_link[0] - flit.current_link[1] == self.config.NUM_COL and flit.current_link[1] == flit.destination:
                 ring_bridge_EQ_flits.append(flit)
         for flit in link_flits:
-            # self.error_log(flit, 4, -1)
-            network.plan_move(flit)
+            network.plan_move(flit, self.cycle)
         for flit in link_flits:
             # self.error_log(flit, 13, -1)
             if network.execute_moves(flit, self.cycle):
@@ -732,8 +726,7 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
-                    for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
@@ -847,6 +840,7 @@ class BaseModel:
         if not network.ring_bridge[dir_key][(pos, next_pos)]:
             return None
         flit = network.ring_bridge[dir_key][(pos, next_pos)][0]
+        # self.error_log(flit, 6212, 1)
         # Case 1: No flit in the link
         if not network.links[link][0]:
             # Handle empty link cases
@@ -937,27 +931,6 @@ class BaseModel:
         self._tag_move(self.data_network)
 
     def _tag_move(self, network):
-        if self.cycle % (self.config.SLICE_PER_LINK * (self.config.NUM_COL - 1) * 2 + 4) == 0:
-            for i, j in network.links:
-                if i - j == 1 or (i == j and (i % self.config.NUM_COL == self.config.NUM_COL - 1 and (i // self.config.NUM_COL) % 2 != 0)):
-                    if network.links_tag[(i, j)][-1] == [j, "TL"] and network.links[(i, j)][-1] is None:
-                        network.links_tag[(i, j)][-1] = None
-                        network.remain_tag["TL"][j] += 1
-                elif i - j == -1 or (i == j and (i % self.config.NUM_COL == 0 and (i // self.config.NUM_COL) % 2 != 0)):
-                    if network.links_tag[(i, j)][-1] == [j, "TR"] and network.links[(i, j)][-1] is None:
-                        network.links_tag[(i, j)][-1] = None
-                        network.remain_tag["TR"][j] += 1
-                elif i - j == self.config.NUM_COL * 2 or (
-                    i == j and i in range(self.config.NUM_NODE - self.config.NUM_COL * 2, self.config.NUM_COL + self.config.NUM_NODE - self.config.NUM_COL * 2)
-                ):
-                    if network.links_tag[(i, j)][-1] == [j, "TU"] and network.links[(i, j)][-1] is None:
-                        network.links_tag[(i, j)][-1] = None
-                        network.remain_tag["TU"][j] += 1
-                elif i - j == -self.config.NUM_COL * 2 or (i == j and i in range(0, self.config.NUM_COL)):
-                    if network.links_tag[(i, j)][-1] == [j, "TD"] and network.links[(i, j)][-1] is None:
-                        network.links_tag[(i, j)][-1] = None
-                        network.remain_tag["TD"][j] += 1
-
         for col_start in range(self.config.NUM_COL):
             interval = self.config.NUM_COL * 2
             col_end = col_start + interval * (self.config.NUM_ROW // 2 - 1)
@@ -968,7 +941,7 @@ class BaseModel:
                     col_start + i * interval,
                     col_start + (i - 1) * interval,
                 )
-                for j in range(self.config.SLICE_PER_LINK - 7 - 1, -1, -1):
+                for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
                     if j == 0 and current_node == col_end:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
@@ -1065,7 +1038,6 @@ class BaseModel:
         for ip_pos, queue in inject_queues.items():
             if queue and queue[0]:
                 flit: Flit = queue.popleft()
-                self.error_log(flit, 7, -1)
 
                 # 检查是否需要生成Buffer_Reach_Th信号
                 if flit.wait_cycle_h == self.config.ITag_TRIGGER_Th_H and direction != "EQ":
@@ -1074,7 +1046,7 @@ class BaseModel:
                     network.inject_num += 1
                     flit_num += 1
                     flit.departure_network_cycle = self.cycle
-                    network.plan_move(flit)
+                    network.plan_move(flit, self.cycle)
                     network.execute_moves(flit, self.cycle)
                     flits.append(flit)
 
@@ -1238,7 +1210,11 @@ class BaseModel:
                 continue
 
             # 排序时间戳
-            times = np.array(sorted(data_dict["time"]))
+            raw_times = np.array(data_dict["time"])
+            # 去除 nan
+            clean_times = raw_times[~np.isnan(raw_times)]
+            # 排序
+            times = np.sort(clean_times)
             if len(times) == 0:
                 continue
 
@@ -1253,7 +1229,9 @@ class BaseModel:
 
             if self.plot_RN_BW_fig:
                 # 绘制曲线
-                (line,) = plt.plot(times[mask] / 1000, bandwidth[mask], drawstyle="steps-post", label=f"{k}")  # 时间转换为us
+                # (line,) = plt.plot(times[mask] / 1000, bandwidth[mask], drawstyle="steps-post", label=f"{k}")  # 时间转换为us
+                (line,) = plt.plot(times[mask] / 1000, bandwidth[mask], drawstyle="default", label=f"{k}")  # 时间转换为us
+                # (line,) = plt.plot(times[mask] / 1000, bandwidth[mask], drawstyle="steps", label=f"{k}")  # 时间转换为us
 
                 # 在曲线末尾添加文本标签
                 plt.text(times[mask][-1] / 1000, bandwidth[mask][-1], f"{bandwidth[mask][-1]:.2f}", va="center", color=line.get_color(), fontsize=12)

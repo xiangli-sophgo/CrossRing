@@ -25,9 +25,9 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.feature_selection import mutual_info_regression
 
 # 使用的 CPU 核心数；-1 表示全部核心
-N_JOBS = -1
+N_JOBS = 1
 # 每个参数组合重复仿真次数，用于平滑随机 latency 影响
-N_REPEATS = 8  # 减少重复次数，因为要测试多个traffic
+N_REPEATS = 2  # 减少重复次数，因为要测试多个traffic
 
 # 全局变量用于存储可视化数据
 visualization_data = {"trials": [], "progress": [], "pareto_data": [], "param_importance": {}, "convergence": []}
@@ -1015,11 +1015,11 @@ def find_optimal_parameters():
     param1_start, param1_end = 2, 16
     param2_start, param2_end = 2, 16
     param3_start, param3_end = 2, 16
-    param4_start, param4_end = 4, 16
+    param4_start, param4_end = 4, 20
     param5_start, param5_end = 2, 16
     param6_start, param6_end = 2, 16
     param7_start, param7_end = 2, 16
-    param8_start, param8_end = 4, 16
+    param8_start, param8_end = 4, 20
 
     def _run_one_traffic(traffic_file, param1, param2, param3, param4, param5, param6, param7, param8):
         """运行单个traffic文件的仿真"""
@@ -1064,8 +1064,8 @@ def find_optimal_parameters():
                 sim.config.L2M_W_LATENCY_original = 16
                 sim.config.DDR_BW_LIMIT = 76.8 / 4
                 sim.config.L2M_BW_LIMIT = np.inf
-                sim.config.IQ_CH_FIFO_DEPTH = 10
-                sim.config.EQ_CH_FIFO_DEPTH = 12
+                sim.config.IQ_CH_FIFO_DEPTH = 8
+                sim.config.EQ_CH_FIFO_DEPTH = 8
                 sim.config.IQ_OUT_FIFO_DEPTH = 8
                 sim.config.RB_OUT_FIFO_DEPTH = 8
                 sim.config.EQ_IN_FIFO_DEPTH = 16
@@ -1211,7 +1211,7 @@ def find_optimal_parameters():
 
         # 综合指标 = 加权带宽 - α * 参数惩罚
         # 调整α值平衡性能和资源消耗 (0.05表示资源消耗占5%权重)
-        composite_metric = weighted_bw - 0.05 * param_penalty
+        composite_metric = weighted_bw - 10 * param_penalty
 
         # 保存到 trial.user_attrs，便于后期分析 / CSV
         for k, v in results.items():
@@ -1420,7 +1420,7 @@ if __name__ == "__main__":
     try:
         study.optimize(
             objective,
-            n_trials=50,
+            n_trials=100,
             n_jobs=N_JOBS,
             show_progress_bar=True,
             callbacks=[save_intermediate_result],

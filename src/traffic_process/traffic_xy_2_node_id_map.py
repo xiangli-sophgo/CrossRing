@@ -157,8 +157,8 @@ def main():
     主函数：遍历输入根目录下的每个子文件夹，为每个子文件夹生成一个独立的 traffic 文件
     """
     # 设置输入根目录和输出文件夹
-    input_root = r"../../traffic/original/DeepSeek-v3/"  # 根目录，内部含若干子文件夹
-    output_folder = r"../../traffic/DeepSeek/"  # 输出文件统一放在此目录
+    input_root = r"../../traffic/original/xy_node/"  # 根目录，内部含若干子文件夹
+    output_folder = r"../../traffic/0603/"  # 输出文件统一放在此目录
 
     # 检查输入根目录
     if not os.path.exists(input_root):

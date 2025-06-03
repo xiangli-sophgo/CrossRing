@@ -26,10 +26,13 @@ def main():
 
     # traffic_file_path = r"../traffic/v1.0.8 All_Reduce new/"
     # traffic_file_path = r"../traffic/DeepSeek/"
+    traffic_file_path = r"../traffic/0603/"
     # traffic_file_path = r"../traffic/output_DeepSeek_part1/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_no_map/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_2K/step5_data_merge/"
+    file_name = r"LLama2_AllReduce.txt"
+    # file_name = r"LLama2_AttentionFC.txt"
     # file_name = r"Add.txt"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"output_Trace.txt"
@@ -37,7 +40,7 @@ def main():
     # file_name = r"MLP_MoE_Trace.txt"
     # file_name = r"LLama2_MM_QKV_Trace.txt"
     # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace_group_map.txt"
-    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce-2KB-new.txt"
+    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce-2KB-new_traffic.txt"
 
     # model_type = "Feature"
     model_type = "REQ_RSP"
@@ -56,7 +59,7 @@ def main():
         topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
         # topo_type = "6x5"
-        topo_type = "3x3"  # SG2260E
+        # topo_type = "3x3"  # SG2260E
     else:
         topo_type = config.TOPO_TYPE
 
@@ -75,9 +78,9 @@ def main():
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
         plot_link_state=0,
-        plot_start_time=2000,
+        plot_start_time=1000,
         print_trace=0,
-        show_trace_id=144,
+        show_trace_id=6212,
         show_node_id=4,
         verbose=1,
     )
@@ -108,8 +111,8 @@ def main():
         sim.config.L2M_W_LATENCY_original = 16
         sim.config.DDR_BW_LIMIT = 76.8 / 4
         sim.config.L2M_BW_LIMIT = np.inf
-        sim.config.IQ_CH_FIFO_DEPTH = 10
-        sim.config.EQ_CH_FIFO_DEPTH = 9
+        sim.config.IQ_CH_FIFO_DEPTH = 8
+        sim.config.EQ_CH_FIFO_DEPTH = 8
         sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8
         sim.config.SLICE_PER_LINK = 8
@@ -123,11 +126,11 @@ def main():
         # sim.config.TU_Etag_T1_UE_MAX = 7
         # sim.config.TD_Etag_T2_UE_MAX = 6
 
-        sim.config.TL_Etag_T2_UE_MAX = 1
+        sim.config.TL_Etag_T2_UE_MAX = 8
         sim.config.TL_Etag_T1_UE_MAX = 12
         sim.config.TR_Etag_T2_UE_MAX = 10
         sim.config.RB_IN_FIFO_DEPTH = 16
-        sim.config.TU_Etag_T2_UE_MAX = 1
+        sim.config.TU_Etag_T2_UE_MAX = 8
         sim.config.TU_Etag_T2_UE_MAX = 12
         sim.config.TD_Etag_T2_UE_MAX = 10
         sim.config.EQ_IN_FIFO_DEPTH = 16
@@ -169,19 +172,30 @@ def main():
         sim.config.IQ_CH_FIFO_DEPTH = 10
         sim.config.EQ_CH_FIFO_DEPTH = 10
         sim.config.IQ_OUT_FIFO_DEPTH = 8
-        sim.config.RB_IN_FIFO_DEPTH = 16
         sim.config.RB_OUT_FIFO_DEPTH = 8
-        sim.config.EQ_IN_FIFO_DEPTH = 16
-        sim.config.TL_Etag_T2_UE_MAX = 8
-        sim.config.TL_Etag_T1_UE_MAX = 15
-        sim.config.TR_Etag_T2_UE_MAX = 12
-        sim.config.TU_Etag_T2_UE_MAX = 8
-        sim.config.TU_Etag_T1_UE_MAX = 15
-        sim.config.TD_Etag_T2_UE_MAX = 12
+
+        sim.config.EQ_IN_FIFO_DEPTH = 8
+        sim.config.RB_IN_FIFO_DEPTH = 8
+        sim.config.TL_Etag_T2_UE_MAX = 4
+        sim.config.TL_Etag_T1_UE_MAX = 7
+        sim.config.TR_Etag_T2_UE_MAX = 5
+        sim.config.TU_Etag_T2_UE_MAX = 4
+        sim.config.TU_Etag_T1_UE_MAX = 7
+        sim.config.TD_Etag_T2_UE_MAX = 6
+
+        # sim.config.TL_Etag_T2_UE_MAX = 12
+        # sim.config.TL_Etag_T1_UE_MAX = 15
+        # sim.config.TR_Etag_T2_UE_MAX = 12
+        # sim.config.RB_IN_FIFO_DEPTH = 16
+        # sim.config.TU_Etag_T2_UE_MAX = 12
+        # sim.config.TU_Etag_T1_UE_MAX = 15
+        # sim.config.TD_Etag_T2_UE_MAX = 12
+        # sim.config.EQ_IN_FIFO_DEPTH = 16
+
         sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
         sim.config.ITag_MAX_NUM_H = sim.config.ITag_MAX_NUM_V = 1
-        sim.config.ETag_BOTHSIDE_UPGRADE = 0
-        sim.config.SLICE_PER_LINK = 7
+        sim.config.ETag_BOTHSIDE_UPGRADE = 1
+        sim.config.SLICE_PER_LINK = 8
 
         sim.config.GDMA_RW_GAP = np.inf
         sim.config.SDMA_RW_GAP = np.inf
@@ -193,8 +207,8 @@ def main():
         }
 
     sim.initial()
-    sim.end_time = 1000
-    sim.print_interval = 1000
+    sim.end_time = 10000
+    sim.print_interval = 2000
     sim.run()
 
 

@@ -71,15 +71,15 @@ class Flit:
         self.early_rsp = False
         self.current_position = self.path[0]
         self.station_position = -1
-        self.departure_cycle = -1
-        self.req_departure_cycle = -1
-        self.departure_network_cycle = -1
-        self.departure_inject_cycle = -1
-        self.arrival_cycle = -1
-        self.arrival_network_cycle = -1
-        self.arrival_eject_cycle = -1
-        self.entry_db_cycle = -1
-        self.leave_db_cycle = -1
+        self.departure_cycle = np.inf
+        self.req_departure_cycle = np.inf
+        self.departure_network_cycle = np.inf
+        self.departure_inject_cycle = np.inf
+        self.arrival_cycle = np.inf
+        self.arrival_network_cycle = np.inf
+        self.arrival_eject_cycle = np.inf
+        self.entry_db_cycle = np.inf
+        self.leave_db_cycle = np.inf
         self.start_inject = False
         self.is_injected = False
         self.is_ejected = False
@@ -98,17 +98,17 @@ class Flit:
         # 记录下环 / 弹出时实际占用的是哪一级 entry（"T0" / "T1" / "T2"）
         self.used_entry_level = None
         # Latency record
-        self.cmd_entry_cmd_table_cycle = -1
-        self.req_entry_network_cycle = -1
-        self.sn_receive_req_cycle = -1
-        self.sn_data_generated_cycle = -1
-        self.data_entry_network_cycle = -1
-        self.rn_data_collection_complete_cycle = -1
-        self.sn_rsp_generate_cycle = -1
-        self.rsp_entry_network_cycle = -1
-        self.rn_receive_rsp_cycle = -1
-        self.rn_data_generated_cycle = -1
-        self.sn_data_collection_complete_cycle = -1
+        self.cmd_entry_cmd_table_cycle = np.inf
+        self.req_entry_network_cycle = np.inf
+        self.sn_receive_req_cycle = np.inf
+        self.sn_data_generated_cycle = np.inf
+        self.data_entry_network_cycle = np.inf
+        self.rn_data_collection_complete_cycle = np.inf
+        self.sn_rsp_generate_cycle = np.inf
+        self.rsp_entry_network_cycle = np.inf
+        self.rn_receive_rsp_cycle = np.inf
+        self.rn_data_generated_cycle = np.inf
+        self.sn_data_collection_complete_cycle = np.inf
         self.total_latency = -1
         self.cmd_latency = -1
         self.rsp_latency = -1
@@ -759,10 +759,7 @@ class IPInterface:
                 net_info["l2h_fifo"].append(net_info["l2h_fifo_pre"])
                 net_info["l2h_fifo_pre"] = None
 
-            if (
-                net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None
-                and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen
-            ):
+            if net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen:
                 net.IQ_channel_buffer[self.ip_type][self.ip_pos].append(net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos])
                 net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = None
 
@@ -831,9 +828,7 @@ class IPInterface:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             if req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(
-                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
-                )
+                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
             else:
                 latency = self.config.L2M_R_LATENCY
             flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY
@@ -1187,7 +1182,7 @@ class Network:
 
     def error_log(self, flit, target_id, flit_id):
         if flit and flit.packet_id == target_id and flit.flit_id == flit_id:
-            print(inspect.currentframe().f_back.f_code.co_name, flit)
+            print(inspect.currentframe().f_back.f_code.co_name, self.cycle, flit)
 
     def set_link_slice(self, link: tuple[int, int], slice_index: int, flit: "Flit", cycle, *, override: bool = False):
         """
@@ -1296,7 +1291,8 @@ class Network:
             self.cross_point["vertical"][ip_pos]["TU"] = [self.links[(down_pos, ip_pos - self.config.NUM_COL)][-1], self.links[(ip_pos - self.config.NUM_COL, up_pos)][0]]
             self.cross_point["vertical"][ip_pos]["TD"] = [self.links[(ip_pos - self.config.NUM_COL, down_pos)][0], self.links[(up_pos, ip_pos - self.config.NUM_COL)][-1]]
 
-    def plan_move(self, flit):
+    def plan_move(self, flit, cycle):
+        self.cycle = cycle
         if flit.is_new_on_network:
             # current = flit.source
             current = flit.path[flit.path_index]
@@ -1317,7 +1313,6 @@ class Network:
             else:
                 flit.current_seat_index = 0
 
-            # flit.path_index += 1
             return
 
         # 计算行和列的起始和结束点
@@ -1331,6 +1326,7 @@ class Network:
             col_end = col_start + self.config.NUM_NODE - self.config.NUM_COL * 2 if col_start >= 0 else -1
 
             link = self.links.get(flit.current_link)
+            # self.error_log(flit, 6491, -1)
 
             # Plan non ring bridge moves
             # Handling delay flits
@@ -1346,9 +1342,9 @@ class Network:
             link[flit.current_seat_index] = None
             flit.current_seat_index += 1
             return
-        self.error_log(flit, 144, -1)
+        # self.error_log(flit, 144, -1)
         # 2. 到达链路末端，此时flit在next_node节点
-        target_eject_node_id = flit.path[flit.path_index + 1]  # delay情况下path_index不更新
+        target_eject_node_id = flit.path[flit.path_index + 1] if flit.path_index + 1 < len(flit.path) else flit.path[flit.path_index]  # delay情况下path_index不更新
         # A. 处理横边界情况
         if current == next_node:
             # A1. 左边界情况
@@ -1980,11 +1976,7 @@ class Network:
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
-                    if (
-                        direction in self.ring_bridge.keys()
-                        and len(self.ring_bridge[direction][flit.current_link]) < max_depth
-                        and self.ring_bridge_pre[direction][flit.current_link] is None
-                    ):
+                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth and self.ring_bridge_pre[direction][flit.current_link] is None:
                         # flit.flit_position = f"RB_{direction}"
                         # self.ring_bridge[direction][flit.current_link].append(flit)
                         self.ring_bridge_pre[direction][flit.current_link] = flit

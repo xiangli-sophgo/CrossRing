@@ -22,7 +22,7 @@ from matplotlib.patches import FancyArrowPatch
 
 class NetworkLinkVisualizer:
     class PieceVisualizer:
-        def __init__(self, config: CrossRingConfig, ax, highlight_callback=None):
+        def __init__(self, config: CrossRingConfig, ax, highlight_callback=None, parent: "NetworkLinkVisualizer" = None):
             """
             仅绘制单个节点的 Inject/Eject Queue 和 Ring Bridge FIFO。
             参数:
@@ -34,6 +34,7 @@ class NetworkLinkVisualizer:
             self.config = config
             self.cols = config.NUM_COL
             self.rows = config.NUM_ROW
+            self.parent = parent
             # 提取深度
             self.IQ_depth = config.IQ_OUT_FIFO_DEPTH
             self.EQ_depth = config.EQ_IN_FIFO_DEPTH
@@ -565,7 +566,15 @@ class NetworkLinkVisualizer:
                         pid = {"packet_id": packet_id, "flit_id": flit_id}
 
                         # 设置颜色（基于packet_id）和显示文本
-                        p.set_facecolor(self._get_color(flit))
+                        face, alpha, lw, edge = self.parent._get_flit_style(
+                            flit,
+                            use_highlight=self.use_highlight,
+                            expected_packet_id=self.highlight_pid,
+                        )
+                        p.set_facecolor(face)
+                        p.set_alpha(alpha)
+                        p.set_linewidth(lw)
+                        p.set_edgecolor(edge)
                         info = f"{packet_id}-{flit_id}"
                         t.set_text(info)
                         t.set_visible(self.use_highlight and packet_id == self.highlight_pid)
@@ -592,7 +601,15 @@ class NetworkLinkVisualizer:
                         pid = {"packet_id": packet_id, "flit_id": flit_id}
 
                         # 设置颜色（基于packet_id）和显示文本
-                        p.set_facecolor(self._get_color(flit))
+                        face, alpha, lw, edge = self.parent._get_flit_style(
+                            flit,
+                            use_highlight=self.use_highlight,
+                            expected_packet_id=self.highlight_pid,
+                        )
+                        p.set_facecolor(face)
+                        p.set_alpha(alpha)
+                        p.set_linewidth(lw)
+                        p.set_edgecolor(edge)
                         info = f"{packet_id}-{flit_id}"
                         t.set_text(info)
                         t.set_visible(self.use_highlight and packet_id == self.highlight_pid)
@@ -616,7 +633,15 @@ class NetworkLinkVisualizer:
                         pid = {"packet_id": packet_id, "flit_id": flit_id}
 
                         # 设置颜色（基于packet_id）和显示文本
-                        p.set_facecolor(self._get_color(flit))
+                        face, alpha, lw, edge = self.parent._get_flit_style(
+                            flit,
+                            use_highlight=self.use_highlight,
+                            expected_packet_id=self.highlight_pid,
+                        )
+                        p.set_facecolor(face)
+                        p.set_alpha(alpha)
+                        p.set_linewidth(lw)
+                        p.set_edgecolor(edge)
                         info = f"{packet_id}-{flit_id}"
                         t.set_text(info)
                         t.set_visible(self.use_highlight and packet_id == self.highlight_pid)
@@ -644,7 +669,15 @@ class NetworkLinkVisualizer:
                         pid = {"packet_id": packet_id, "flit_id": flit_id}
 
                         # 设置颜色（基于packet_id）和显示文本
-                        p.set_facecolor(self._get_color(flit))
+                        face, alpha, lw, edge = self.parent._get_flit_style(
+                            flit,
+                            use_highlight=self.use_highlight,
+                            expected_packet_id=self.highlight_pid,
+                        )
+                        p.set_facecolor(face)
+                        p.set_alpha(alpha)
+                        p.set_linewidth(lw)
+                        p.set_edgecolor(edge)
                         info = f"{packet_id}-{flit_id}"
                         t.set_text(info)
                         t.set_visible(self.use_highlight and packet_id == self.highlight_pid)
@@ -673,7 +706,15 @@ class NetworkLinkVisualizer:
                         pid = {"packet_id": packet_id, "flit_id": flit_id}
 
                         # 设置颜色（基于packet_id）和显示文本
-                        p.set_facecolor(self._get_color(flit))
+                        face, alpha, lw, edge = self.parent._get_flit_style(
+                            flit,
+                            use_highlight=self.use_highlight,
+                            expected_packet_id=self.highlight_pid,
+                        )
+                        p.set_facecolor(face)
+                        p.set_alpha(alpha)
+                        p.set_linewidth(lw)
+                        p.set_edgecolor(edge)
                         info = f"{packet_id}-{flit_id}"
                         t.set_text(info)
                         t.set_visible(self.use_highlight and packet_id == self.highlight_pid)
@@ -690,19 +731,61 @@ class NetworkLinkVisualizer:
         # ------------------------------------------------------------------ #
         #  点击 flit 矩形时显示 / 隐藏文字                                      #
         # ------------------------------------------------------------------ #
+
+        # _ETAG_ALPHA = {"T0": 1.0, "T1": 1.0, "T2": 0.75}  # T0  # T1  # T2
+        # _ETAG_LW = {"T0": 2.5, "T1": 1, "T2": 0}  # T0  # T1  # T2
+        # _ETAG_EDGE = {"T0": "red", "T1": "black", "T2": "black"}
+
+        # def _get_flit_style(self, flit, use_highlight=True, expected_packet_id=0, highlight_color=None):
+        #     """
+        #     返回 (facecolor, alpha, linewidth)
+        #     - facecolor 仍沿用 _get_flit_color 的逻辑（高亮 / 调色板）
+        #     - alpha / linewidth 由 flit.etag 决定
+        #     """
+        #     face = self._get_flit_color(flit, use_highlight, expected_packet_id, highlight_color)
+
+        #     etag = getattr(flit, "ETag_priority", "T2")  # 缺省视为 T0
+        #     alpha = self._ETAG_ALPHA.get(etag, 1.0)
+        #     lw = self._ETAG_LW.get(etag, 0)
+        #     edge_coloe = self._ETAG_EDGE.get(etag, "black")
+
+        #     return face, alpha, lw, edge_coloe
+
+        # def _get_flit_color(self, flit, use_highlight=True, expected_packet_id=1, highlight_color=None):
+        #     """获取颜色，支持多种PID格式：
+        #     - 单个值 (packet_id 或 flit_id)
+        #     - 元组 (packet_id, flit_id)
+        #     - 字典 {'packet_id': x, 'flit_id': y}
+
+        #     新增参数:
+        #     - use_highlight: 是否启用高亮功能(默认False)
+        #     - expected_packet_id: 期望的packet_id值
+        #     - highlight_color: 高亮颜色(默认为红色)
+        #     """
+
+        #     # 高亮模式：目标 flit → 红，其余 → 灰
+        #     if use_highlight:
+        #         hl = highlight_color or "red"
+        #         return hl if flit.packet_id == expected_packet_id else "lightgrey"
+
+        #     # 普通模式：直接取调色板色
+        #     return self._colors[flit.packet_id % len(self._colors)]
+
         def _on_click(self, event):
             if event.inaxes != self.ax:
                 return
             for patch, (txt, pid, fid) in self.patch_info_map.items():
                 contains, _ = patch.contains(event)
                 if contains:
-                    # 切换可见性
-                    vis = not txt.get_visible()
-                    txt.set_visible(vis)
-                    # 若即将显示，确保在最上层
-                    if vis:
-                        txt.set_zorder(patch.get_zorder() + 1)
-                    # -> 通知父级高亮
+                    # 只有在高亮模式下才允许切换文本可见性
+                    if self.use_highlight and pid == self.highlight_pid:
+                        vis = not txt.get_visible()
+                        txt.set_visible(vis)
+                        # 若即将显示，确保在最上层
+                        if vis:
+                            txt.set_zorder(patch.get_zorder() + 1)
+
+                    # 通知父级高亮
                     if self.highlight_callback:
                         try:
                             self.highlight_callback(int(pid), int(fid))
@@ -710,6 +793,18 @@ class NetworkLinkVisualizer:
                             pass
                     self.fig.canvas.draw_idle()
                     break
+
+        def sync_highlight(self, use_highlight, highlight_pid):
+            """同步高亮状态"""
+            self.use_highlight = use_highlight
+            self.highlight_pid = highlight_pid
+
+            # 更新所有patch的文本可见性
+            for patch, (txt, pid, fid) in self.patch_info_map.items():
+                if self.use_highlight and pid == self.highlight_pid:
+                    txt.set_visible(True)
+                else:
+                    txt.set_visible(False)
 
         # ------------------------------------------------------------------ #
         #  计算模块尺寸 (宽 = X 方向, 高 = Y 方向)                             #
@@ -766,7 +861,7 @@ class NetworkLinkVisualizer:
         self.piece_ax = self.fig.add_subplot(gs[1])  # 右侧 Piece 视图
         self.piece_ax.axis("off")
         self.ax.set_aspect("equal")
-        self.piece_vis = self.PieceVisualizer(self.network.config, self.piece_ax, highlight_callback=self._on_piece_highlight)
+        self.piece_vis = self.PieceVisualizer(self.network.config, self.piece_ax, highlight_callback=self._on_piece_highlight, parent=self)
         # 当前点击选中的节点 (None 表示未选)
         self._selected_node = None
         # 绘制主网络的静态元素
@@ -782,8 +877,8 @@ class NetworkLinkVisualizer:
         self.rect_info_map = {}  # rect → (text_obj, packet_id)
         self.fig.canvas.mpl_connect("button_press_event", self._on_flit_click)
         # 颜色/高亮控制
-        self._use_highlight = False
-        self._expected_pid = 0
+        self.use_highlight = False
+        self.highlight_pid = 0
         # ===============  History Buffer  ====================
         # 支持多网络显示
         self.networks = None
@@ -960,10 +1055,10 @@ class NetworkLinkVisualizer:
                 else:
                     self.tracked_pid = pid
                 # 根据追踪状态更新高亮配置
-                self._use_highlight = self.tracked_pid is not None
-                self._expected_pid = self.tracked_pid or 0
-                # 刷新右侧 Piece 视图以保持同步高亮
-                self._refresh_piece_view()
+                self.use_highlight = self.tracked_pid is not None
+                self.highlight_pid = self.tracked_pid or 0
+                # 同步右侧 Piece 视图的高亮状态
+                self.piece_vis.sync_highlight(self.use_highlight, self.tracked_pid)
                 # 更新可见性
                 self._update_tracked_labels()
                 self.detail_text.set_text(f"PID {pid}  FID {fid}" if self.tracked_pid else "")
@@ -1244,7 +1339,7 @@ class NetworkLinkVisualizer:
 
         return slices
 
-    def update(self, networks=None, cycle=None, expected_packet_id=0, use_highlight=False, skip_pause=False):
+    def update(self, networks=None, cycle=None, skip_pause=False):
         """
         更新每条链路队列中 flit 的显示
         - 空位: 无填充的方形
@@ -1260,8 +1355,6 @@ class NetworkLinkVisualizer:
         if networks is not None:
             self.networks = networks
         # 记录当前高亮配置, 供回溯绘制保持一致
-        self._use_highlight = use_highlight
-        self._expected_pid = expected_packet_id
         # 若暂停且非跳过暂停调用，则仅保持 GUI 响应；不推进模拟
         if self.paused and not skip_pause:
             plt.pause(self.pause_interval)
@@ -1275,11 +1368,11 @@ class NetworkLinkVisualizer:
         if cycle is not None and self.networks is not None:
             for i, net in enumerate(self.networks):
                 # 构建快照
-                snap = {(s, d): [(f.packet_id, f.flit_id) if f is not None else None for f in flits] for (s, d), flits in net.links.items()}
+                snap = {(s, d): [(f.packet_id, f.flit_id, f.ETag_priority, f.itag_h, f.itag_v) if f is not None else None for f in flits] for (s, d), flits in net.links.items()}
                 meta = {
                     "network_name": net.name,
-                    "use_highlight": use_highlight,
-                    "expected_pid": expected_packet_id,
+                    "use_highlight": self.use_highlight,
+                    "expected_pid": self.highlight_pid,
                     "IQ_channel_buffer": copy.deepcopy(net.IQ_channel_buffer),
                     "EQ_channel_buffer": copy.deepcopy(net.EQ_channel_buffer),
                     "inject_queues": copy.deepcopy(net.inject_queues),
@@ -1292,14 +1385,16 @@ class NetworkLinkVisualizer:
         # 渲染当前选中网络的快照
         if self.networks is not None:
             current_net = self.networks[self.selected_network_index]
-            render_snap = {(s, d): [(f.packet_id, f.flit_id) if f is not None else None for f in flits] for (s, d), flits in current_net.links.items()}
+            render_snap = {(s, d): [(f.packet_id, f.flit_id, f.ETag_priority, f.itag_h, f.itag_v) if f is not None else None for f in flits] for (s, d), flits in current_net.links.items()}
             self._render_snapshot(render_snap)
             # 若已有选中节点，实时更新右侧 Piece 视图
             if self._selected_node is not None:
                 self._refresh_piece_view()
             self.ax.set_title(current_net.name)
         else:
-            self._render_snapshot({(src, dest): [(f.packet_id, f.flit_id) if f is not None else None for f in flits] for (src, dest), flits in self.network.links.items()})
+            self._render_snapshot(
+                {(src, dest): [(f.packet_id, f.flit_id, f.ETag_priority, f.itag_h, f.itag_v) if f is not None else None for f in flits] for (src, dest), flits in self.network.links.items()}
+            )
             # 若已有选中节点，实时更新右侧 Piece 视图
             if self._selected_node is not None:
                 self._refresh_piece_view()
@@ -1330,8 +1425,7 @@ class NetworkLinkVisualizer:
         if self._selected_node is None:
             return
         # 把当前高亮信息同步给右侧 Piece 可视化器
-        self.piece_vis.use_highlight = self._use_highlight
-        self.piece_vis.highlight_pid = self.tracked_pid
+        self.piece_vis.sync_highlight(self.use_highlight, self.tracked_pid)
 
         self.piece_ax.clear()
         self.piece_ax.axis("off")
@@ -1391,8 +1485,8 @@ class NetworkLinkVisualizer:
                         self._play_idx = len(current_history) - 1
                         cyc, snap, meta = current_history[self._play_idx]
                         # 同步高亮 / 标题等元数据
-                        self._use_highlight = meta.get("use_highlight", False)
-                        self._expected_pid = meta.get("expected_pid", 0)
+                        self.use_highlight = meta.get("use_highlight", False)
+                        self.highlight_pid = meta.get("expected_pid", 0)
                         self.ax.set_title(meta.get("network_name", ""))
                         self.status_text.set_text(f"Paused\ncycle {cyc} ({self._play_idx+1}/{len(current_history)})")
                         self._draw_state(snap)
@@ -1411,8 +1505,8 @@ class NetworkLinkVisualizer:
                 self._play_idx = min(len(current_history) - 1, self._play_idx + 1)
             cyc, snap, meta = current_history[self._play_idx]
             # 同步高亮 / 标题
-            self._use_highlight = meta.get("use_highlight", False)
-            self._expected_pid = meta.get("expected_pid", 0)
+            self.use_highlight = meta.get("use_highlight", False)
+            self.highlight_pid = meta.get("expected_pid", 0)
             self.ax.set_title(meta.get("network_name", ""))
             self.status_text.set_text(f"Paused\ncycle {cyc} ({self._play_idx+1}/{len(current_history)})")
             self._draw_state(snap)
@@ -1465,8 +1559,14 @@ class NetworkLinkVisualizer:
                 if slice is None:
                     continue  # 空位
 
-                pid, fid = slice
-                flit = SimpleNamespace(packet_id=pid, flit_id=fid)
+                pid, fid, etag, itag_h, itag_v = slice
+                flit = SimpleNamespace(
+                    packet_id=pid,
+                    flit_id=fid,
+                    ETag_priority=etag,
+                    itag_h=itag_h,
+                    itag_v=itag_v,
+                )
 
                 # ---------- 位置 ----------
                 if is_horizontal:
@@ -1481,17 +1581,20 @@ class NetworkLinkVisualizer:
                         y = q_ll[1] + queue_height - margin - (i + 0.5) * spacing
 
                 # ---------- 绘制矩形 ----------
-                facecolor = self._get_flit_color(
+                face, alpha, lw, edge = self._get_flit_style(
                     flit,
-                    use_highlight=self._use_highlight,
-                    expected_packet_id=self._expected_pid,
+                    use_highlight=self.use_highlight,
+                    expected_packet_id=self.highlight_pid,
                 )
+
                 rect = Rectangle(
                     (x - flit_size / 2, y - flit_size / 2),
                     flit_size,
                     flit_size,
-                    facecolor=facecolor,
-                    edgecolor="black",
+                    facecolor=face,
+                    linewidth=lw,
+                    alpha=alpha,
+                    edgecolor=edge,
                 )
                 self.ax.add_patch(rect)
                 flit_artists.append(rect)
@@ -1537,6 +1640,30 @@ class NetworkLinkVisualizer:
         # 最后刷新画布
         self.fig.canvas.draw_idle()
 
+    _ETAG_ALPHA = {"T0": 1.0, "T1": 1.0, "T2": 0.85}  # T0  # T1  # T2
+    _ETAG_LW = {"T0": 1, "T1": 1, "T2": 0}  # T0  # T1  # T2
+    _ETAG_EDGE = {"T0": 2, "T1": 1, "T2": 0}
+    _ITAG_ALPHA = {True: 1.0, False: 0.85}
+    _ITAG_LW = {True: 1.0, False: 0}
+    _ITAG_EDGE = {True: 2.0, False: 0}
+
+    def _get_flit_style(self, flit, use_highlight=True, expected_packet_id=0, highlight_color=None):
+        """
+        返回 (facecolor, alpha, linewidth)
+        - facecolor 仍沿用 _get_flit_color 的逻辑（高亮 / 调色板）
+        - alpha / linewidth 由 flit.etag 决定
+        """
+        face = self._get_flit_color(flit, use_highlight, expected_packet_id, highlight_color)
+
+        etag = getattr(flit, "ETag_priority", "T2")
+        itag = flit.itag_h or flit.itag_v
+        alpha = max(self._ETAG_ALPHA.get(etag, 1.0), self._ITAG_ALPHA.get(itag, 1.0))
+        lw = max(self._ETAG_LW.get(etag, 0), self._ITAG_LW.get(itag, 0))
+        edge_color = max(self._ETAG_EDGE.get(etag, 0), self._ITAG_EDGE.get(itag, 0))
+        edge_color = "red" if edge_color == 2 else "black"
+
+        return face, alpha, lw, edge_color
+
     def _get_flit_color(self, flit, use_highlight=True, expected_packet_id=1, highlight_color=None):
         """获取颜色，支持多种PID格式：
         - 单个值 (packet_id 或 flit_id)
@@ -1548,6 +1675,7 @@ class NetworkLinkVisualizer:
         - expected_packet_id: 期望的packet_id值
         - highlight_color: 高亮颜色(默认为红色)
         """
+
         # 高亮模式：目标 flit → 红，其余 → 灰
         if use_highlight:
             hl = highlight_color or "red"
@@ -1564,8 +1692,8 @@ class NetworkLinkVisualizer:
             self.update(
                 self.networks,
                 cycle=None,
-                expected_packet_id=self._expected_pid,
-                use_highlight=self._use_highlight,
+                # expected_packet_id=self.highlight_pid,
+                # use_highlight=self.use_highlight,
                 skip_pause=True,
             )
 
@@ -1578,8 +1706,10 @@ class NetworkLinkVisualizer:
     # ------------------------------------------------------------------
     def _on_clear_highlight(self, event):
         self.tracked_pid = None
-        self._use_highlight = False
-        self._expected_pid = 0
+        self.use_highlight = False
+        self.highlight_pid = 0
+        # 同步piece视图的高亮状态
+        self.piece_vis.sync_highlight(False, None)
         self._update_tracked_labels()
         self._refresh_piece_view()
         self.fig.canvas.draw_idle()
@@ -1590,14 +1720,16 @@ class NetworkLinkVisualizer:
     def _on_piece_highlight(self, pid, fid):
         if self.tracked_pid == pid:
             self.tracked_pid = None
-            self._use_highlight = False
-            self._expected_pid = 0
+            self.use_highlight = False
+            self.highlight_pid = 0
             self.detail_text.set_text("")
         else:
             self.tracked_pid = pid
-            self._use_highlight = True
-            self._expected_pid = pid
+            self.use_highlight = True
+            self.highlight_pid = pid
             self.detail_text.set_text(f"PID {pid}  FID {fid}")
         self._update_tracked_labels()
         self._refresh_piece_view()
         self.fig.canvas.draw_idle()
+        # 同步piece视图的高亮状态
+        self.piece_vis.sync_highlight(self.use_highlight, self.tracked_pid)
