@@ -25,6 +25,7 @@ from matplotlib.lines import Line2D
 import matplotlib.colors as mcolors
 import matplotlib.cm as cm
 from functools import lru_cache
+from src.core.result_processor import *
 
 
 @lru_cache(maxsize=None)
@@ -74,6 +75,8 @@ class BaseModel:
         self.topo_type_stat = topo_type
         self.traffic_file_path = traffic_file_path
         self.file_name = file_name
+        # 添加结果统计
+        self.result_processor = ResultStatisticsProcessor(self.config)
 
         self.result_save_path_original = result_save_path
         self.plot_flow_fig = plot_flow_fig
@@ -110,6 +113,8 @@ class BaseModel:
         self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.data_network = Network(self.config, self.adjacency_matrix, name="Data Network")
+        if hasattr(self, "statistics_processor"):
+            self.result_processor = ResultStatisticsProcessor(self.config)
         if self.plot_link_state:
             self.link_state_vis = NetworkLinkVisualizer(self.req_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
@@ -282,7 +287,10 @@ class BaseModel:
         # Performance evaluation
         self.print_data_statistic()
         self.log_summary()
-        self.evaluate_results(self.data_network)
+        # self.evaluate_results(self.data_network)
+
+        # 结果统计
+        self.process_comprehensive_results()
 
     def debug_func(self):
         if self.print_trace:
@@ -650,26 +658,6 @@ class BaseModel:
             # Reset cached request and update count
             self.next_req = None
             self.req_count += 1
-
-    # def categorize_flits_by_direction(self, flits):
-    #     (ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits) = ([], [], [], [], [])
-    #     for flit in flits:
-    #         if flit.source - flit.destination == self.config.NUM_COL:
-    #             flit.is_new_on_network = False
-    #             flit.is_arrive = True
-    #             local_flits.append(flit)
-    #         # elif not flit.current_link:
-    #         elif flit.is_new_on_network:
-    #             new_flits.append(flit)
-    #         elif flit.current_link[0] - flit.current_link[1] == self.config.NUM_COL and flit.current_link[1] == flit.destination:
-    #             ring_bridge_EQ_flits.append(flit)
-    #         elif abs(flit.current_link[0] - flit.current_link[1]) == 1:
-    #             # 横向环
-    #             horizontal_flits.append(flit)
-    #         else:
-    #             # 纵向环
-    #             vertical_flits.append(flit)
-    #     return (ring_bridge_EQ_flits, vertical_flits, horizontal_flits, new_flits, local_flits)
 
     def _flit_move(self, network: Network, flits, flit_type):
         # link 上的flit移动
@@ -1071,129 +1059,158 @@ class BaseModel:
 
         return flit_num, flits
 
-    def evaluate_results(self, network):
-        """
-        Evaluate the results of the simulation.
-
-        :param network: The network object
-        :return: None
-        """
+    def process_comprehensive_results(self):
+        """处理综合统计结果"""
         if not self.result_save_path:
             return
 
-        # Save configuration
-        with open(os.path.join(self.result_save_path, "config.json"), "w") as f:
-            json.dump(self.config.__dict__, f, indent=4)
+        # 收集数据并执行全面评估
+        self.result_processor.collect_data_from_base_model(self)
+        traditional_result, weighted_result = self.result_processor.evaluate_all_results(self.data_network)
 
-        read_latency, write_latency = {
-            "total_latency": [],
-            "cmd_latency": [],
-            "rsp_latency": [],
-            "dat_latency": [],
-        }, {
-            "total_latency": [],
-            "cmd_latency": [],
-            "rsp_latency": [],
-            "dat_latency": [],
-        }
-        read_merged_intervals, write_merged_intervals = [(0, 0, 0)], [(0, 0, 0)]
+        # 生成综合报告
+        comprehensive_stats_path = os.path.join(self.result_save_path, "comprehensive_statistics")
+        self.result_processor.generate_comprehensive_report(traditional_result, weighted_result, comprehensive_stats_path)
 
-        with open(
-            os.path.join(self.result_save_path, f"Result_{self.file_name[10:-9]}R.txt"),
-            "w",
-        ) as f1, open(
-            os.path.join(self.result_save_path, f"Result_{self.file_name[10:-9]}W.txt"),
-            "w",
-        ) as f2:
+        # 生成可视化图表
+        if self.results_fig_save_path:
+            self.result_processor.plot_comprehensive_analysis(traditional_result, weighted_result, comprehensive_stats_path)
 
-            # Print headers
-            print(
-                "tx_time(ns), src_id, src_type, des_id, des_type, R/W, burst_len, rx_time(ns), path, total_latency, cmd_latency, rsp_latency, dat_latency, circuits_completed_v, circuits_completed_h",
-                file=f1,
-            )
-            print(
-                "tx_time(ns), src_id, src_type, des_id, des_type, R/W, burst_len, rx_time(ns), path, total_latency, cmd_latency, rsp_latency, dat_latency, circuits_completed_v, circuits_completed_h",
-                file=f2,
-            )
+        # 更新base_model的统计变量（使用请求数量权重）
+        self.result_processor.update_base_model_weighted_stats(weighted_result, WeightStrategy.REQUEST_COUNT)
 
-            # Process each flit
-            (
-                self.sdma_R_ddr_finish_time,
-                self.sdma_W_l2m_finish_time,
-                self.gdma_R_l2m_finish_time,
-            ) = (0, 0, 0)
-            (
-                self.sdma_R_ddr_flit_num,
-                self.sdma_W_l2m_flit_num,
-                self.gdma_R_l2m_flit_num,
-            ) = (0, 0, 0)
-            (
-                self.sdma_R_ddr_latency,
-                self.sdma_W_l2m_latency,
-                self.gdma_R_l2m_latency,
-            ) = ([], [], [])
-            for flits in network.arrive_flits.values():
-                if len(flits) != flits[0].burst_length:
-                    continue
-                for flit in flits:
-                    self.data_cir_h_num_stat += flit.circuits_completed_h
-                    self.data_cir_v_num_stat += flit.circuits_completed_v
-                    self.data_wait_cycle_h_num_stat += flit.wait_cycle_h
-                    self.data_wait_cycle_v_num_stat += flit.wait_cycle_v
-                self.process_flits(
-                    flits[-1],
-                    # next((flit for flit in flits if flit.is_last_flit), flits[-1]),
-                    network,
-                    read_latency,
-                    write_latency,
-                    read_merged_intervals,
-                    write_merged_intervals,
-                    f1,
-                    f2,
-                )
+        # 可选：也可以计算其他权重策略的结果
+        weighted_result_flits = self.result_processor.calculate_weighted_bandwidth(WeightStrategy.FLIT_COUNT)
+        self.result_processor.update_base_model_weighted_stats(weighted_result_flits, WeightStrategy.FLIT_COUNT)
 
-        # Calculate and output results
-        self.calculate_and_output_results(
-            network,
-            read_latency,
-            write_latency,
-            read_merged_intervals,
-            write_merged_intervals,
-        )
+        # 验证结果一致性
+        validations = self.result_processor.validate_comprehensive_results(traditional_result, weighted_result)
+        if not all(validations.values()):
+            print("警告：统计结果验证发现问题：", {k: v for k, v in validations.items() if not v})
 
-    def calculate_predicted_duration(self, flit):
-        """Calculate the predicted duration based on the flit's path."""
-        duration = sum((2 if flit.path[i] - flit.path[i - 1] == -self.config.NUM_COL else self.config.SLICE) for i in range(1, len(flit.path)))
-        duration += 2 if flit.path[1] - flit.path[0] == -self.config.NUM_COL else 3
-        return 0 if len(flit.path) == 2 else duration
+    # def evaluate_results(self, network):
+    #     """
+    #     Evaluate the results of the simulation.
 
-    def process_flits(self, flit: Flit, network, read_latency, write_latency, read_merged_intervals, write_merged_intervals, f1, f2):
-        """Process a single flit and update the network and latency data."""
+    #     :param network: The network object
+    #     :return: None
+    #     """
+    #     if not self.result_save_path:
+    #         return
 
-        flit.total_latency = (flit.arrival_cycle - flit.cmd_entry_cmd_table_cycle) // self.config.NETWORK_FREQUENCY
-        # flit.cmd_latency = (flit.sn_receive_req_cycle - flit.cmd_entry_cmd_table_cycle) // self.config.network_frequency
-        flit.cmd_latency = (flit.sn_receive_req_cycle - flit.req_entry_network_cycle) // self.config.NETWORK_FREQUENCY
-        if flit.req_type == "read":
-            flit.rsp_latency = 0
-            flit.dat_latency = (flit.rn_data_collection_complete_cycle - flit.sn_receive_req_cycle) // self.config.NETWORK_FREQUENCY
-            self.rn_bandwidth[f"{flit.original_source_type[:-2].upper()} {flit.req_type} {flit.original_destination_type[:3].upper()}"]["time"].append(
-                flit.rn_data_collection_complete_cycle // self.config.NETWORK_FREQUENCY
-            )
-        elif flit.req_type == "write":
-            flit.rsp_latency = (flit.rn_receive_rsp_cycle - flit.sn_receive_req_cycle) // self.config.NETWORK_FREQUENCY
-            flit.dat_latency = (flit.sn_data_collection_complete_cycle - flit.data_entry_network_cycle) // self.config.NETWORK_FREQUENCY
-            self.rn_bandwidth[f"{flit.original_source_type[:-2].upper()} {flit.req_type} {flit.original_destination_type[:3].upper()}"]["time"].append(
-                flit.data_entry_network_cycle // self.config.NETWORK_FREQUENCY
-            )
-            # self.rn_bandwidth_stats[f"{flit.original_source_type[:-2].upper()} {flit.req_type} {flit.original_destination_type[:3].upper()}"]["time"].append(flit.sn_data_collection_complete_cycle // self.config.network_frequency)
+    #     # Save configuration
+    #     with open(os.path.join(self.result_save_path, "config.json"), "w") as f:
+    #         json.dump(self.config.__dict__, f, indent=4)
 
-        # Skip if not the last flit or if arrival/departure cycles are invalid
+    #     read_latency, write_latency = {
+    #         "total_latency": [],
+    #         "cmd_latency": [],
+    #         "rsp_latency": [],
+    #         "dat_latency": [],
+    #     }, {
+    #         "total_latency": [],
+    #         "cmd_latency": [],
+    #         "rsp_latency": [],
+    #         "dat_latency": [],
+    #     }
+    #     read_merged_intervals, write_merged_intervals = [(0, 0, 0)], [(0, 0, 0)]
 
-        # Update merged intervals and latencies
-        if flit.req_type == "read":
-            self.update_intervals(flit, read_merged_intervals, read_latency, f1, "R")
-        elif flit.req_type == "write":
-            self.update_intervals(flit, write_merged_intervals, write_latency, f2, "W")
+    #     with open(
+    #         os.path.join(self.result_save_path, f"Result_{self.file_name[10:-9]}R.txt"),
+    #         "w",
+    #     ) as f1, open(
+    #         os.path.join(self.result_save_path, f"Result_{self.file_name[10:-9]}W.txt"),
+    #         "w",
+    #     ) as f2:
+
+    #         # Print headers
+    #         print(
+    #             "tx_time(ns), src_id, src_type, des_id, des_type, R/W, burst_len, rx_time(ns), path, total_latency, cmd_latency, rsp_latency, dat_latency, circuits_completed_v, circuits_completed_h",
+    #             file=f1,
+    #         )
+    #         print(
+    #             "tx_time(ns), src_id, src_type, des_id, des_type, R/W, burst_len, rx_time(ns), path, total_latency, cmd_latency, rsp_latency, dat_latency, circuits_completed_v, circuits_completed_h",
+    #             file=f2,
+    #         )
+
+    #         # Process each flit
+    #         (
+    #             self.sdma_R_ddr_finish_time,
+    #             self.sdma_W_l2m_finish_time,
+    #             self.gdma_R_l2m_finish_time,
+    #         ) = (0, 0, 0)
+    #         (
+    #             self.sdma_R_ddr_flit_num,
+    #             self.sdma_W_l2m_flit_num,
+    #             self.gdma_R_l2m_flit_num,
+    #         ) = (0, 0, 0)
+    #         (
+    #             self.sdma_R_ddr_latency,
+    #             self.sdma_W_l2m_latency,
+    #             self.gdma_R_l2m_latency,
+    #         ) = ([], [], [])
+    #         for flits in network.arrive_flits.values():
+    #             if len(flits) != flits[0].burst_length:
+    #                 continue
+    #             for flit in flits:
+    #                 self.data_cir_h_num_stat += flit.circuits_completed_h
+    #                 self.data_cir_v_num_stat += flit.circuits_completed_v
+    #                 self.data_wait_cycle_h_num_stat += flit.wait_cycle_h
+    #                 self.data_wait_cycle_v_num_stat += flit.wait_cycle_v
+    #             self.process_flits(
+    #                 flits[-1],
+    #                 # next((flit for flit in flits if flit.is_last_flit), flits[-1]),
+    #                 network,
+    #                 read_latency,
+    #                 write_latency,
+    #                 read_merged_intervals,
+    #                 write_merged_intervals,
+    #                 f1,
+    #                 f2,
+    #             )
+
+    #     # Calculate and output results
+    #     self.calculate_and_output_results(
+    #         network,
+    #         read_latency,
+    #         write_latency,
+    #         read_merged_intervals,
+    #         write_merged_intervals,
+    #     )
+
+    # def calculate_predicted_duration(self, flit):
+    #     """Calculate the predicted duration based on the flit's path."""
+    #     duration = sum((2 if flit.path[i] - flit.path[i - 1] == -self.config.NUM_COL else self.config.SLICE) for i in range(1, len(flit.path)))
+    #     duration += 2 if flit.path[1] - flit.path[0] == -self.config.NUM_COL else 3
+    #     return 0 if len(flit.path) == 2 else duration
+
+    # def process_flits(self, flit: Flit, network, read_latency, write_latency, read_merged_intervals, write_merged_intervals, f1, f2):
+    #     """Process a single flit and update the network and latency data."""
+
+    #     flit.total_latency = (flit.arrival_cycle - flit.cmd_entry_cmd_table_cycle) // self.config.NETWORK_FREQUENCY
+    #     # flit.cmd_latency = (flit.sn_receive_req_cycle - flit.cmd_entry_cmd_table_cycle) // self.config.network_frequency
+    #     flit.cmd_latency = (flit.sn_receive_req_cycle - flit.req_entry_network_cycle) // self.config.NETWORK_FREQUENCY
+    #     if flit.req_type == "read":
+    #         flit.rsp_latency = 0
+    #         flit.dat_latency = (flit.rn_data_collection_complete_cycle - flit.sn_receive_req_cycle) // self.config.NETWORK_FREQUENCY
+    #         self.rn_bandwidth[f"{flit.original_source_type[:-2].upper()} {flit.req_type} {flit.original_destination_type[:3].upper()}"]["time"].append(
+    #             flit.rn_data_collection_complete_cycle // self.config.NETWORK_FREQUENCY
+    #         )
+    #     elif flit.req_type == "write":
+    #         flit.rsp_latency = (flit.rn_receive_rsp_cycle - flit.sn_receive_req_cycle) // self.config.NETWORK_FREQUENCY
+    #         flit.dat_latency = (flit.sn_data_collection_complete_cycle - flit.data_entry_network_cycle) // self.config.NETWORK_FREQUENCY
+    #         self.rn_bandwidth[f"{flit.original_source_type[:-2].upper()} {flit.req_type} {flit.original_destination_type[:3].upper()}"]["time"].append(
+    #             flit.data_entry_network_cycle // self.config.NETWORK_FREQUENCY
+    #         )
+    #         # self.rn_bandwidth_stats[f"{flit.original_source_type[:-2].upper()} {flit.req_type} {flit.original_destination_type[:3].upper()}"]["time"].append(flit.sn_data_collection_complete_cycle // self.config.network_frequency)
+
+    #     # Skip if not the last flit or if arrival/departure cycles are invalid
+
+    #     # Update merged intervals and latencies
+    #     if flit.req_type == "read":
+    #         self.update_intervals(flit, read_merged_intervals, read_latency, f1, "R")
+    #     elif flit.req_type == "write":
+    #         self.update_intervals(flit, write_merged_intervals, write_latency, f2, "W")
 
     def cal_rn_bandwidth(self):
         """
@@ -1250,135 +1267,141 @@ class BaseModel:
             plt.grid(True)
             plt.show()
 
-    def calculate_and_output_results(
-        self,
-        network,
-        read_latency,
-        write_latency,
-        read_merged_intervals,
-        write_merged_intervals,
-    ):
-        """Calculate average latencies and output total results."""
-        # Calculate average latencies
-        for source in self.flit_positions:
-            destination = source - self.config.NUM_COL
-            if network.inject_time[source]:
-                network.avg_inject_time[source] = sum(network.inject_time[source]) / len(network.inject_time[source])
-            if network.eject_time[destination]:
-                network.avg_eject_time[destination] = sum(network.eject_time[destination]) / len(network.eject_time[destination])
+    # def calculate_and_output_results(
+    #     self,
+    #     network,
+    #     read_latency,
+    #     write_latency,
+    #     read_merged_intervals,
+    #     write_merged_intervals,
+    # ):
+    #     """Calculate average latencies and output total results."""
+    #     # Calculate average latencies
+    #     for source in self.flit_positions:
+    #         destination = source - self.config.NUM_COL
+    #         if network.inject_time[source]:
+    #             network.avg_inject_time[source] = sum(network.inject_time[source]) / len(network.inject_time[source])
+    #         if network.eject_time[destination]:
+    #             network.avg_eject_time[destination] = sum(network.eject_time[destination]) / len(network.eject_time[destination])
 
-        network.avg_circuits_h = sum(network.circuits_h) / len(network.circuits_h) / 2 if network.circuits_h else None
-        network.max_circuits_h = max(network.circuits_h) / 2 if network.circuits_h else None
-        network.avg_circuits_v = sum(network.circuits_v) / len(network.circuits_v) / 2 if network.circuits_v else None
-        network.max_circuits_v = max(network.circuits_v) / 2 if network.circuits_v else None
+    #     network.avg_circuits_h = sum(network.circuits_h) / len(network.circuits_h) / 2 if network.circuits_h else None
+    #     network.max_circuits_h = max(network.circuits_h) / 2 if network.circuits_h else None
+    #     network.avg_circuits_v = sum(network.circuits_v) / len(network.circuits_v) / 2 if network.circuits_v else None
+    #     network.max_circuits_v = max(network.circuits_v) / 2 if network.circuits_v else None
 
-        # Output total results
-        if self.verbose:
-            print("=" * 50)
-        total_result = os.path.join(self.result_save_path, "total_result.txt")
-        with open(total_result, "w", encoding="utf-8") as f3:
-            if self.verbose:
-                print(f"Topology: {self.topo_type_stat }, file_name: {self.file_name}")
-            print(
-                f"Topology: {self.topo_type_stat }, file_name: {self.file_name}",
-                file=f3,
-            )
-            if read_latency:
-                (
-                    self.read_BW_stat,
-                    self.read_total_latency_avg_stat,
-                    self.read_cmd_latency_avg_stat,
-                    self.read_rsp_latency_avg_stat,
-                    self.read_dat_latency_avg_stat,
-                    self.read_total_latency_max_stat,
-                    self.read_cmd_latency_max_stat,
-                    self.read_rsp_latency_max_stat,
-                    self.read_dat_latency_max_stat,
-                ) = self.output_intervals(f3, read_merged_intervals, "Read", read_latency)
-            if write_latency:
-                (
-                    self.write_BW_stat,
-                    self.write_total_latency_avg_stat,
-                    self.write_cmd_latency_avg_stat,
-                    self.write_rsp_latency_avg_stat,
-                    self.write_dat_latency_avg_stat,
-                    self.write_total_latency_max_stat,
-                    self.write_cmd_latency_max_stat,
-                    self.write_rsp_latency_max_stat,
-                    self.write_dat_latency_max_stat,
-                ) = self.output_intervals(f3, write_merged_intervals, "Write", write_latency)
+    #     # Output total results
+    #     if self.verbose:
+    #         print("=" * 50)
+    #     total_result = os.path.join(self.result_save_path, "total_result.txt")
+    #     with open(total_result, "w", encoding="utf-8") as f3:
+    #         if self.verbose:
+    #             print(f"Topology: {self.topo_type_stat }, file_name: {self.file_name}")
+    #         print(
+    #             f"Topology: {self.topo_type_stat }, file_name: {self.file_name}",
+    #             file=f3,
+    #         )
+    #         if read_latency:
+    #             (
+    #                 self.read_BW_stat,
+    #                 self.read_total_latency_avg_stat,
+    #                 self.read_cmd_latency_avg_stat,
+    #                 self.read_rsp_latency_avg_stat,
+    #                 self.read_dat_latency_avg_stat,
+    #                 self.read_total_latency_max_stat,
+    #                 self.read_cmd_latency_max_stat,
+    #                 self.read_rsp_latency_max_stat,
+    #                 self.read_dat_latency_max_stat,
+    #             ) = self.output_intervals(f3, read_merged_intervals, "Read", read_latency)
+    #         if write_latency:
+    #             (
+    #                 self.write_BW_stat,
+    #                 self.write_total_latency_avg_stat,
+    #                 self.write_cmd_latency_avg_stat,
+    #                 self.write_rsp_latency_avg_stat,
+    #                 self.write_dat_latency_avg_stat,
+    #                 self.write_total_latency_max_stat,
+    #                 self.write_cmd_latency_max_stat,
+    #                 self.write_rsp_latency_max_stat,
+    #                 self.write_dat_latency_max_stat,
+    #             ) = self.output_intervals(f3, write_merged_intervals, "Write", write_latency)
 
-            print("\nPer-IP Weighted Bandwidth:", file=f3)
+    #         print("\nPer-IP Weighted Bandwidth:", file=f3)
 
-            # 处理读带宽
-            print("\nRead Bandwidth per IP:", file=f3)
+    #         # 处理读带宽
+    #         print("\nRead Bandwidth per IP:", file=f3)
 
-            rn_read_bws = []
-            sn_read_bws = []
-            for ip_id in sorted(self.write_ip_intervals.keys(), key=lambda k: (k.split("_")[0], int(k.split("_")[-1]))):  # 第一维：前缀字符串  # 第二维：末尾数字
-                idx = int(ip_id.rsplit("_", 1)[1])
-                # 计算行、列
-                row = 4 - idx // self.config.NUM_COL // 2
-                col = idx % self.config.NUM_COL
-                intervals = self.read_ip_intervals[ip_id]
-                bw = self.calculate_ip_bandwidth(intervals)
-                # print(f"{ip_id}: {bw:.1f} GB/s", file=f3)
-                print(f"{ip_id} {ip_id.rsplit('_', 1)[0]}_x{col}_y{row}: {bw:.1f} GB/s", file=f3)  # 只输出到文件, 节点的xy坐标
-                # 分类统计
-                if ip_id.startswith(("gdma", "sdma")):
-                    rn_read_bws.append(bw)
-                elif ip_id.startswith(("ddr", "l2m")):
-                    sn_read_bws.append(bw)
+    #         rn_read_bws = []
+    #         sn_read_bws = []
+    #         for ip_id in sorted(self.write_ip_intervals.keys(), key=lambda k: (k.split("_")[0], int(k.split("_")[-1]))):  # 第一维：前缀字符串  # 第二维：末尾数字
+    #             idx = int(ip_id.rsplit("_", 1)[1])
+    #             # 计算行、列
+    #             row = 4 - idx // self.config.NUM_COL // 2
+    #             col = idx % self.config.NUM_COL
+    #             intervals = self.read_ip_intervals[ip_id]
+    #             bw = self.calculate_ip_bandwidth(intervals)
+    #             # print(f"{ip_id}: {bw:.1f} GB/s", file=f3)
+    #             print(f"{ip_id} {ip_id.rsplit('_', 1)[0]}_x{col}_y{row}: {bw:.1f} GB/s", file=f3)  # 只输出到文件, 节点的xy坐标
+    #             # 分类统计
+    #             if ip_id.startswith(("gdma", "sdma")):
+    #                 rn_read_bws.append(bw)
+    #             elif ip_id.startswith(("ddr", "l2m")):
+    #                 sn_read_bws.append(bw)
 
-            # 处理写带宽
-            print("\nWrite Bandwidth per IP:", file=f3)
+    #         # 处理写带宽
+    #         print("\nWrite Bandwidth per IP:", file=f3)
 
-            rn_write_bws = []
-            sn_write_bws = []
+    #         rn_write_bws = []
+    #         sn_write_bws = []
 
-            for ip_id in sorted(self.write_ip_intervals.keys(), key=lambda k: (k.split("_")[0], int(k.split("_")[-1]))):  # 第一维：前缀字符串  # 第二维：末尾数字
-                idx = int(ip_id.rsplit("_", 1)[1])
-                row = 4 - idx // self.config.NUM_COL // 2
-                col = idx % self.config.NUM_COL
-                intervals = self.write_ip_intervals[ip_id]
-                bw = self.calculate_ip_bandwidth(intervals)
-                # print(f"{ip_id}: {bw:.1f} GB/s", file=f3)  # 只输出到文件
-                print(f"{ip_id} {ip_id.rsplit('_', 1)[0]}_x{col}_y{row}: {bw:.1f} GB/s", file=f3)  # 只输出到文件, 节点的xy坐标
+    #         for ip_id in sorted(self.write_ip_intervals.keys(), key=lambda k: (k.split("_")[0], int(k.split("_")[-1]))):  # 第一维：前缀字符串  # 第二维：末尾数字
+    #             idx = int(ip_id.rsplit("_", 1)[1])
+    #             row = 4 - idx // self.config.NUM_COL // 2
+    #             col = idx % self.config.NUM_COL
+    #             intervals = self.write_ip_intervals[ip_id]
+    #             bw = self.calculate_ip_bandwidth(intervals)
+    #             # print(f"{ip_id}: {bw:.1f} GB/s", file=f3)  # 只输出到文件
+    #             print(f"{ip_id} {ip_id.rsplit('_', 1)[0]}_x{col}_y{row}: {bw:.1f} GB/s", file=f3)  # 只输出到文件, 节点的xy坐标
 
-                # 分类统计
-                if ip_id.startswith(("gdma", "sdma")):
-                    rn_write_bws.append(bw)
-                elif ip_id.startswith(("ddr", "l2m")):
-                    sn_write_bws.append(bw)
+    #             # 分类统计
+    #             if ip_id.startswith(("gdma", "sdma")):
+    #                 rn_write_bws.append(bw)
+    #             elif ip_id.startswith(("ddr", "l2m")):
+    #                 sn_write_bws.append(bw)
 
-            # 计算并输出RN和SN的统计信息
+    #         # 计算并输出RN和SN的统计信息
 
-            # 输出读统计
-            print("")  # 屏幕输出空行分隔
-            self.print_stats(rn_read_bws, "RN", "Read", f3)
-            self.print_stats(sn_read_bws, "SN", "Read", f3)
+    #         # 输出读统计
+    #         print("")  # 屏幕输出空行分隔
+    #         self.print_stats(rn_read_bws, "RN", "Read", f3)
+    #         self.print_stats(sn_read_bws, "SN", "Read", f3)
 
-            # 输出写统计
-            print("")  # 屏幕输出空行分隔
-            self.print_stats(rn_write_bws, "RN", "Write", f3)
-            self.print_stats(sn_write_bws, "SN", "Write", f3)
-        self.cal_rn_bandwidth()
-        self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
-        if self.verbose:
-            print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")
-            print("=" * 50)
-            print(f"Total Circuits req h: {self.req_cir_h_num_stat}, v: {self.req_cir_v_num_stat}")
-            print(f"Total Circuits rsp h: {self.rsp_cir_h_num_stat}, v: {self.rsp_cir_v_num_stat}")
-            print(f"Total Circuits data h: {self.data_cir_h_num_stat}, v: {self.data_cir_v_num_stat}")
-            print(f"Total wait cycle req h: {self.req_wait_cycle_h_num_stat}, v: {self.req_wait_cycle_v_num_stat}")
-            print(f"Total wait cycle rsp h: {self.rsp_wait_cycle_h_num_stat}, v: {self.rsp_wait_cycle_v_num_stat}")
-            print(f"Total wait cycle data h: {self.data_wait_cycle_h_num_stat}, v: {self.data_wait_cycle_v_num_stat}")
-            print(f"Total RB ETag: T1: {self.RB_ETag_T1_num_stat}, T0: {self.RB_ETag_T0_num_stat}; EQ ETag: T1: {self.EQ_ETag_T1_num_stat}, T0: {self.EQ_ETag_T0_num_stat}")
-            print(f"Total ITag: h: {self.ITag_h_num_stat}, v: {self.ITag_v_num_stat}")
-            if self.model_type_stat == "REQ_RSP":
-                print(f"Retry num: R: {self.read_retry_num_stat}, W: {self.write_retry_num_stat}")
-        if self.plot_flow_fig:
-            self.draw_flow_graph(self.data_network, save_path=self.results_fig_save_path)
+    #         # 输出写统计
+    #         print("")  # 屏幕输出空行分隔
+    #         self.print_stats(rn_write_bws, "RN", "Write", f3)
+    #         self.print_stats(sn_write_bws, "SN", "Write", f3)
+    #     self.cal_rn_bandwidth()
+    #     self.Total_BW_stat = self.read_BW_stat + self.write_BW_stat
+    #     if self.verbose:
+    #         print(f"Read + Write Bandwidth: {self.Total_BW_stat:.1f}")
+    #         print("=" * 50)
+    #         print(f"Total Circuits req h: {self.req_cir_h_num_stat}, v: {self.req_cir_v_num_stat}")
+    #         print(f"Total Circuits rsp h: {self.rsp_cir_h_num_stat}, v: {self.rsp_cir_v_num_stat}")
+    #         print(f"Total Circuits data h: {self.data_cir_h_num_stat}, v: {self.data_cir_v_num_stat}")
+    #         print(f"Total wait cycle req h: {self.req_wait_cycle_h_num_stat}, v: {self.req_wait_cycle_v_num_stat}")
+    #         print(f"Total wait cycle rsp h: {self.rsp_wait_cycle_h_num_stat}, v: {self.rsp_wait_cycle_v_num_stat}")
+    #         print(f"Total wait cycle data h: {self.data_wait_cycle_h_num_stat}, v: {self.data_wait_cycle_v_num_stat}")
+    #         print(f"Total RB ETag: T1: {self.RB_ETag_T1_num_stat}, T0: {self.RB_ETag_T0_num_stat}; EQ ETag: T1: {self.EQ_ETag_T1_num_stat}, T0: {self.EQ_ETag_T0_num_stat}")
+    #         print(f"Total ITag: h: {self.ITag_h_num_stat}, v: {self.ITag_v_num_stat}")
+    #         if self.model_type_stat == "REQ_RSP":
+    #             for ip_pos in self.flit_positions:
+    #                 for ip_type in self.config.CH_NAME_LIST:
+    #                     ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
+    #                     self.read_retry_num_stat += ip_interface.read_retry_num_stat
+    #                     self.write_retry_num_stat += ip_interface.write_retry_num_stat
+
+    #             print(f"Retry num: R: {self.read_retry_num_stat}, W: {self.write_retry_num_stat}")
+    #     if self.plot_flow_fig:
+    #         self.draw_flow_graph(self.data_network, save_path=self.results_fig_save_path)
 
     def print_stats(self, bw_list, name, operation, file):
         if bw_list:
@@ -1403,192 +1426,192 @@ class BaseModel:
             if self.verbose:
                 print(f"{name} {operation}: Sum: {sum(bw_list):.1f}, Avg: {avg:.1f} GB/s, Range: {min_bw:.1f}-{max_bw:.1f} GB/s")
 
-    def update_intervals(self, flit, merged_intervals, latency, file, req_type):
-        """Update the merged intervals and latency for the given request type."""
-        last_start, last_end, count = merged_intervals[-1]
+    # def update_intervals(self, flit, merged_intervals, latency, file, req_type):
+    #     """Update the merged intervals and latency for the given request type."""
+    #     last_start, last_end, count = merged_intervals[-1]
 
-        # 根据请求类型更新对应的IP区间
-        if req_type == "R":
-            dma_id = f"{str(flit.original_source_type)}_{str(flit.destination + self.config.NUM_COL)}"
-            ddr_id = f"{str(flit.original_destination_type)}_{str(flit.source)}"
-            dma_intervals = self.read_ip_intervals[dma_id]
-            ddr_intervals = self.read_ip_intervals[ddr_id]
-        elif req_type == "W":
-            dma_id = f"{str(flit.original_source_type)}_{str(flit.source)}"
-            ddr_id = f"{str(flit.original_destination_type)}_{str(flit.destination+ self.config.NUM_COL)}"
-            dma_intervals = self.write_ip_intervals[dma_id]
-            ddr_intervals = self.write_ip_intervals[ddr_id]
+    #     # 根据请求类型更新对应的IP区间
+    #     if req_type == "R":
+    #         dma_id = f"{str(flit.original_source_type)}_{str(flit.destination + self.config.NUM_COL)}"
+    #         ddr_id = f"{str(flit.original_destination_type)}_{str(flit.source)}"
+    #         dma_intervals = self.read_ip_intervals[dma_id]
+    #         ddr_intervals = self.read_ip_intervals[ddr_id]
+    #     elif req_type == "W":
+    #         dma_id = f"{str(flit.original_source_type)}_{str(flit.source)}"
+    #         ddr_id = f"{str(flit.original_destination_type)}_{str(flit.destination+ self.config.NUM_COL)}"
+    #         dma_intervals = self.write_ip_intervals[dma_id]
+    #         ddr_intervals = self.write_ip_intervals[ddr_id]
 
-        # 合并区间逻辑
-        current_start = flit.req_departure_cycle // self.config.NETWORK_FREQUENCY
-        current_end = flit.arrival_cycle // self.config.NETWORK_FREQUENCY
-        current_count = flit.burst_length
+    #     # 合并区间逻辑
+    #     current_start = flit.req_departure_cycle // self.config.NETWORK_FREQUENCY
+    #     current_end = flit.arrival_cycle // self.config.NETWORK_FREQUENCY
+    #     current_count = flit.burst_length
 
-        # 更新 dma_intervals
-        if not dma_intervals:
-            dma_intervals.append((current_start, current_end, current_count))
-        else:
-            # 如果新区间与最后一个区间有重叠，合并
-            while dma_intervals and current_start <= dma_intervals[-1][1]:
-                last_start, last_end, last_count = dma_intervals.pop()
-                current_start = min(last_start, current_start)
-                current_end = max(last_end, current_end)
-                current_count += last_count
-            dma_intervals.append((current_start, current_end, current_count))
+    #     # 更新 dma_intervals
+    #     if not dma_intervals:
+    #         dma_intervals.append((current_start, current_end, current_count))
+    #     else:
+    #         # 如果新区间与最后一个区间有重叠，合并
+    #         while dma_intervals and current_start <= dma_intervals[-1][1]:
+    #             last_start, last_end, last_count = dma_intervals.pop()
+    #             current_start = min(last_start, current_start)
+    #             current_end = max(last_end, current_end)
+    #             current_count += last_count
+    #         dma_intervals.append((current_start, current_end, current_count))
 
-        # 同理更新 ddr_intervals
-        # 为了避免对象引用问题，单独计算一份新的current_start, current_end, current_count_for_ddr
-        cur_start_ddr = flit.req_departure_cycle // self.config.NETWORK_FREQUENCY
-        cur_end_ddr = flit.arrival_cycle // self.config.NETWORK_FREQUENCY
-        cur_count_ddr = flit.burst_length
+    #     # 同理更新 ddr_intervals
+    #     # 为了避免对象引用问题，单独计算一份新的current_start, current_end, current_count_for_ddr
+    #     cur_start_ddr = flit.req_departure_cycle // self.config.NETWORK_FREQUENCY
+    #     cur_end_ddr = flit.arrival_cycle // self.config.NETWORK_FREQUENCY
+    #     cur_count_ddr = flit.burst_length
 
-        if not ddr_intervals:
-            ddr_intervals.append((cur_start_ddr, cur_end_ddr, cur_count_ddr))
-        else:
-            while ddr_intervals and cur_start_ddr <= ddr_intervals[-1][1]:
-                last_start, last_end, last_count = ddr_intervals.pop()
-                cur_start_ddr = min(last_start, cur_start_ddr)
-                cur_end_ddr = max(last_end, cur_end_ddr)
-                cur_count_ddr += last_count
-            ddr_intervals.append((cur_start_ddr, cur_end_ddr, cur_count_ddr))
+    #     if not ddr_intervals:
+    #         ddr_intervals.append((cur_start_ddr, cur_end_ddr, cur_count_ddr))
+    #     else:
+    #         while ddr_intervals and cur_start_ddr <= ddr_intervals[-1][1]:
+    #             last_start, last_end, last_count = ddr_intervals.pop()
+    #             cur_start_ddr = min(last_start, cur_start_ddr)
+    #             cur_end_ddr = max(last_end, cur_end_ddr)
+    #             cur_count_ddr += last_count
+    #         ddr_intervals.append((cur_start_ddr, cur_end_ddr, cur_count_ddr))
 
-        # 更新字典
-        if req_type == "R":
-            self.read_ip_intervals[dma_id] = dma_intervals
-            self.read_ip_intervals[ddr_id] = ddr_intervals
-        elif req_type == "W":
-            self.write_ip_intervals[dma_id] = dma_intervals
-            self.write_ip_intervals[ddr_id] = ddr_intervals
+    #     # 更新字典
+    #     if req_type == "R":
+    #         self.read_ip_intervals[dma_id] = dma_intervals
+    #         self.read_ip_intervals[ddr_id] = ddr_intervals
+    #     elif req_type == "W":
+    #         self.write_ip_intervals[dma_id] = dma_intervals
+    #         self.write_ip_intervals[ddr_id] = ddr_intervals
 
-        # 对 merged_intervals 的更新，防止出现重叠情况
-        # 这里采用类似的逻辑：检查 new_interval 与最后一个区间是否重叠，若重叠则合并
-        # 注意：merged_intervals可能为空，所以先添加再合并
-        new_interval = (
-            flit.req_departure_cycle // self.config.NETWORK_FREQUENCY,
-            flit.arrival_cycle // self.config.NETWORK_FREQUENCY,
-            flit.burst_length,
-        )
-        if not merged_intervals:
-            merged_intervals.append(new_interval)
-        else:
-            # 采用 while 循环逐步合并重叠区间
-            while merged_intervals and (new_interval[0] <= merged_intervals[-1][1]):
-                last_start, last_end, last_count = merged_intervals.pop()
-                merged_start = min(last_start, new_interval[0])
-                merged_end = max(last_end, new_interval[1])
-                merged_count = last_count + new_interval[2]
-                new_interval = (merged_start, merged_end, merged_count)
-            merged_intervals.append(new_interval)
+    #     # 对 merged_intervals 的更新，防止出现重叠情况
+    #     # 这里采用类似的逻辑：检查 new_interval 与最后一个区间是否重叠，若重叠则合并
+    #     # 注意：merged_intervals可能为空，所以先添加再合并
+    #     new_interval = (
+    #         flit.req_departure_cycle // self.config.NETWORK_FREQUENCY,
+    #         flit.arrival_cycle // self.config.NETWORK_FREQUENCY,
+    #         flit.burst_length,
+    #     )
+    #     if not merged_intervals:
+    #         merged_intervals.append(new_interval)
+    #     else:
+    #         # 采用 while 循环逐步合并重叠区间
+    #         while merged_intervals and (new_interval[0] <= merged_intervals[-1][1]):
+    #             last_start, last_end, last_count = merged_intervals.pop()
+    #             merged_start = min(last_start, new_interval[0])
+    #             merged_end = max(last_end, new_interval[1])
+    #             merged_count = last_count + new_interval[2]
+    #             new_interval = (merged_start, merged_end, merged_count)
+    #         merged_intervals.append(new_interval)
 
-        if flit.source_type == "ddr" and flit.destination_type == "sdma" and req_type == "R":
-            self.sdma_R_ddr_finish_time = max(
-                self.sdma_R_ddr_finish_time,
-                flit.arrival_cycle // self.config.NETWORK_FREQUENCY,
-            )
-            self.sdma_R_ddr_flit_num += flit.burst_length
-            if flit.leave_db_cycle is None:
-                flit.leave_db_cycle = flit.arrival_cycle
-            self.sdma_R_ddr_latency.append(flit.leave_db_cycle - flit.entry_db_cycle)
-        elif flit.source_type == "ddr" and flit.destination_type == "sdma" and req_type == "W":
-            self.sdma_W_l2m_finish_time = max(
-                self.sdma_W_l2m_finish_time,
-                flit.arrival_cycle // self.config.NETWORK_FREQUENCY,
-            )
-            self.sdma_W_l2m_flit_num += flit.burst_length
-            if flit.leave_db_cycle is None:
-                flit.leave_db_cycle = flit.arrival_cycle
-            self.sdma_W_l2m_latency.append(flit.leave_db_cycle - flit.entry_db_cycle)
-        elif flit.source_type == "l2m" and flit.destination_type == "gdma" and req_type == "R":
-            self.gdma_R_l2m_finish_time = max(
-                self.gdma_R_l2m_finish_time,
-                flit.arrival_cycle // self.config.NETWORK_FREQUENCY,
-            )
-            self.gdma_R_l2m_flit_num += flit.burst_length
-            if flit.leave_db_cycle is None:
-                flit.leave_db_cycle = flit.arrival_cycle
-            self.gdma_R_l2m_latency.append(flit.leave_db_cycle - flit.entry_db_cycle)
+    #     if flit.source_type == "ddr" and flit.destination_type == "sdma" and req_type == "R":
+    #         self.sdma_R_ddr_finish_time = max(
+    #             self.sdma_R_ddr_finish_time,
+    #             flit.arrival_cycle // self.config.NETWORK_FREQUENCY,
+    #         )
+    #         self.sdma_R_ddr_flit_num += flit.burst_length
+    #         if flit.leave_db_cycle is None:
+    #             flit.leave_db_cycle = flit.arrival_cycle
+    #         self.sdma_R_ddr_latency.append(flit.leave_db_cycle - flit.entry_db_cycle)
+    #     elif flit.source_type == "ddr" and flit.destination_type == "sdma" and req_type == "W":
+    #         self.sdma_W_l2m_finish_time = max(
+    #             self.sdma_W_l2m_finish_time,
+    #             flit.arrival_cycle // self.config.NETWORK_FREQUENCY,
+    #         )
+    #         self.sdma_W_l2m_flit_num += flit.burst_length
+    #         if flit.leave_db_cycle is None:
+    #             flit.leave_db_cycle = flit.arrival_cycle
+    #         self.sdma_W_l2m_latency.append(flit.leave_db_cycle - flit.entry_db_cycle)
+    #     elif flit.source_type == "l2m" and flit.destination_type == "gdma" and req_type == "R":
+    #         self.gdma_R_l2m_finish_time = max(
+    #             self.gdma_R_l2m_finish_time,
+    #             flit.arrival_cycle // self.config.NETWORK_FREQUENCY,
+    #         )
+    #         self.gdma_R_l2m_flit_num += flit.burst_length
+    #         if flit.leave_db_cycle is None:
+    #             flit.leave_db_cycle = flit.arrival_cycle
+    #         self.gdma_R_l2m_latency.append(flit.leave_db_cycle - flit.entry_db_cycle)
 
-        latency["total_latency"].append(flit.total_latency // self.config.NETWORK_FREQUENCY)
-        latency["cmd_latency"].append(flit.cmd_latency // self.config.NETWORK_FREQUENCY)
-        latency["rsp_latency"].append(flit.rsp_latency // self.config.NETWORK_FREQUENCY)
-        latency["dat_latency"].append(flit.dat_latency // self.config.NETWORK_FREQUENCY)
-        print(
-            f"{flit.req_departure_cycle // self.config.NETWORK_FREQUENCY},{flit.source_original},{flit.original_source_type},{flit.destination_original},{flit.original_destination_type},"
-            f"{req_type},{flit.burst_length},{flit.arrival_cycle // self.config.NETWORK_FREQUENCY},{flit.path},{flit.total_latency},"
-            f"{flit.cmd_latency },{flit.rsp_latency},{flit.dat_latency},{flit.circuits_completed_v},{flit.circuits_completed_h}",
-            file=file,
-        )
+    #     latency["total_latency"].append(flit.total_latency // self.config.NETWORK_FREQUENCY)
+    #     latency["cmd_latency"].append(flit.cmd_latency // self.config.NETWORK_FREQUENCY)
+    #     latency["rsp_latency"].append(flit.rsp_latency // self.config.NETWORK_FREQUENCY)
+    #     latency["dat_latency"].append(flit.dat_latency // self.config.NETWORK_FREQUENCY)
+    #     print(
+    #         f"{flit.req_departure_cycle // self.config.NETWORK_FREQUENCY},{flit.source_original},{flit.original_source_type},{flit.destination_original},{flit.original_destination_type},"
+    #         f"{req_type},{flit.burst_length},{flit.arrival_cycle // self.config.NETWORK_FREQUENCY},{flit.path},{flit.total_latency},"
+    #         f"{flit.cmd_latency },{flit.rsp_latency},{flit.dat_latency},{flit.circuits_completed_v},{flit.circuits_completed_h}",
+    #         file=file,
+    #     )
 
-    def output_intervals(self, f3, merged_intervals, req_type, latency):
-        """Output the intervals and calculate bandwidth for the given request type."""
-        print(f"{req_type} intervals:", file=f3)
-        if self.verbose:
-            print(f"{req_type} results:")
-        total_count = 0
-        finish_time = 0  # self.cycle // self.config.network_frequency
-        total_interval_time = 0  # 累加所有区间的时长
+    # def output_intervals(self, f3, merged_intervals, req_type, latency):
+    #     """Output the intervals and calculate bandwidth for the given request type."""
+    #     print(f"{req_type} intervals:", file=f3)
+    #     if self.verbose:
+    #         print(f"{req_type} results:")
+    #     total_count = 0
+    #     finish_time = 0  # self.cycle // self.config.network_frequency
+    #     total_interval_time = 0  # 累加所有区间的时长
 
-        for start, end, count in merged_intervals:
-            if start == end:
-                continue
-            interval_bandwidth = count * 128 / (end - start) / self.config.NUM_IP
-            interval_time = end - start
-            # 累加所有区间时长及count
-            total_interval_time += interval_time
-            total_count += count
-            print(
-                f"Interval: {start} to {end}, count: {count}, bandwidth: {interval_bandwidth:.1f}",
-                file=f3,
-            )
-            finish_time = max(finish_time, end)
+    #     for start, end, count in merged_intervals:
+    #         if start == end:
+    #             continue
+    #         interval_bandwidth = count * 128 / (end - start) / self.config.NUM_IP
+    #         interval_time = end - start
+    #         # 累加所有区间时长及count
+    #         total_interval_time += interval_time
+    #         total_count += count
+    #         print(
+    #             f"Interval: {start} to {end}, count: {count}, bandwidth: {interval_bandwidth:.1f}",
+    #             file=f3,
+    #         )
+    #         finish_time = max(finish_time, end)
 
-        # 带宽计算：
-        if total_interval_time > 0:
-            total_bandwidth = total_count * 128 / total_interval_time / (self.config.NUM_RN if req_type == "read" else self.config.NUM_SN)
-        else:
-            return 0, 0, 0, 0, 0, 0, 0, 0, 0
+    #     # 带宽计算：
+    #     if total_interval_time > 0:
+    #         total_bandwidth = total_count * 128 / total_interval_time / (self.config.NUM_RN if req_type == "read" else self.config.NUM_SN)
+    #     else:
+    #         return 0, 0, 0, 0, 0, 0, 0, 0, 0
 
-        if req_type == "Read":
-            self.R_finish_time_stat = finish_time
-            self.R_tail_latency_stat = finish_time - self.R_tail_latency_stat // self.config.NETWORK_FREQUENCY
-            if self.verbose:
-                print(f"Finish Time: {self.R_finish_time_stat}, Tail latency: {self.R_tail_latency_stat}")
-        elif req_type == "Write":
-            self.W_finish_time_stat = finish_time
-            self.W_tail_latency_stat = finish_time - self.W_tail_latency_stat // self.config.NETWORK_FREQUENCY
-            if self.verbose:
-                print(f"Finish Time: {self.W_finish_time_stat}, Tail latency: {self.W_tail_latency_stat}")
+    #     if req_type == "Read":
+    #         self.R_finish_time_stat = finish_time
+    #         self.R_tail_latency_stat = finish_time - self.R_tail_latency_stat // self.config.NETWORK_FREQUENCY
+    #         if self.verbose:
+    #             print(f"Finish Time: {self.R_finish_time_stat}, Tail latency: {self.R_tail_latency_stat}")
+    #     elif req_type == "Write":
+    #         self.W_finish_time_stat = finish_time
+    #         self.W_tail_latency_stat = finish_time - self.W_tail_latency_stat // self.config.NETWORK_FREQUENCY
+    #         if self.verbose:
+    #             print(f"Finish Time: {self.W_finish_time_stat}, Tail latency: {self.W_tail_latency_stat}")
 
-        total_latency_avg = np.average(latency["total_latency"])
-        total_latency_max = max(latency["total_latency"], default=0)
-        cmd_latency_avg = np.average(latency["cmd_latency"])
-        cmd_latency_max = max(latency["cmd_latency"], default=0)
-        rsp_latency_avg = np.average(latency["rsp_latency"])
-        rsp_latency_max = max(latency["rsp_latency"], default=0)
-        dat_latency_avg = np.average(latency["dat_latency"])
-        dat_latency_max = max(latency["dat_latency"], default=0)
-        print(
-            f"Bandwidth: {total_bandwidth:.1f}; \nTotal latency: Avg: {total_latency_avg:.1f}, Max: {total_latency_max}; "
-            f"cmd_latency: Avg: {cmd_latency_avg:.1f}, Max: {cmd_latency_max}; rsp_latency: Avg: {rsp_latency_avg:.1f}, Max: {rsp_latency_max}; dat_latency: Avg: {dat_latency_avg:.1f}, Max: {dat_latency_max}",
-            file=f3,
-        )
-        if self.verbose:
-            print(
-                f"Bandwidth: {total_bandwidth:.1f}; \nTotal latency: Avg: {total_latency_avg:.1f}, Max: {total_latency_max}; "
-                f"cmd_latency: Avg: {cmd_latency_avg:.1f}, Max: {cmd_latency_max}; rsp_latency: Avg: {rsp_latency_avg:.1f}, Max: {rsp_latency_max}; dat_latency: Avg: {dat_latency_avg:.1f}, Max: {dat_latency_max}"
-            )
+    #     total_latency_avg = np.average(latency["total_latency"])
+    #     total_latency_max = max(latency["total_latency"], default=0)
+    #     cmd_latency_avg = np.average(latency["cmd_latency"])
+    #     cmd_latency_max = max(latency["cmd_latency"], default=0)
+    #     rsp_latency_avg = np.average(latency["rsp_latency"])
+    #     rsp_latency_max = max(latency["rsp_latency"], default=0)
+    #     dat_latency_avg = np.average(latency["dat_latency"])
+    #     dat_latency_max = max(latency["dat_latency"], default=0)
+    #     print(
+    #         f"Bandwidth: {total_bandwidth:.1f}; \nTotal latency: Avg: {total_latency_avg:.1f}, Max: {total_latency_max}; "
+    #         f"cmd_latency: Avg: {cmd_latency_avg:.1f}, Max: {cmd_latency_max}; rsp_latency: Avg: {rsp_latency_avg:.1f}, Max: {rsp_latency_max}; dat_latency: Avg: {dat_latency_avg:.1f}, Max: {dat_latency_max}",
+    #         file=f3,
+    #     )
+    #     if self.verbose:
+    #         print(
+    #             f"Bandwidth: {total_bandwidth:.1f}; \nTotal latency: Avg: {total_latency_avg:.1f}, Max: {total_latency_max}; "
+    #             f"cmd_latency: Avg: {cmd_latency_avg:.1f}, Max: {cmd_latency_max}; rsp_latency: Avg: {rsp_latency_avg:.1f}, Max: {rsp_latency_max}; dat_latency: Avg: {dat_latency_avg:.1f}, Max: {dat_latency_max}"
+    #         )
 
-        return (
-            total_bandwidth,
-            total_latency_avg,
-            cmd_latency_avg,
-            rsp_latency_avg,
-            dat_latency_avg,
-            total_latency_max,
-            cmd_latency_max,
-            rsp_latency_max,
-            dat_latency_max,
-        )
+    #     return (
+    #         total_bandwidth,
+    #         total_latency_avg,
+    #         cmd_latency_avg,
+    #         rsp_latency_avg,
+    #         dat_latency_avg,
+    #         total_latency_max,
+    #         cmd_latency_max,
+    #         rsp_latency_max,
+    #         dat_latency_max,
+    #     )
 
     def calculate_ip_bandwidth(self, intervals):
         """计算给定区间的加权带宽"""

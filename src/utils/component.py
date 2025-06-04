@@ -295,6 +295,8 @@ class IPInterface:
         self.data_network = data_network
         self.node = node
         self.routes = routes
+        self.read_retry_num_stat = 0
+        self.write_retry_num_stat = 0
 
         # 验证FIFO深度配置
         l2h_depth = getattr(config, "IP_L2H_FIFO_DEPTH", 4)
@@ -866,6 +868,10 @@ class IPInterface:
         rsp.destination_type = req.source_type
         rsp.sync_latency_record(req)
         rsp.sn_rsp_generate_cycle = cycle
+        if req.req_type == 'read' and rsp.rsp_type == 'negative':
+            self.read_retry_num_stat += 1
+        elif req.req_type == 'write' and rsp.rsp_type == 'negative':
+            self.write_retry_num_stat += 1
 
         # 将响应放入响应网络的inject_fifo
         self.enqueue(rsp, "rsp")

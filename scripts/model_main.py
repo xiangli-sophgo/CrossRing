@@ -31,9 +31,10 @@ def main():
     # traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_no_map/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_2K/step5_data_merge/"
-    file_name = r"LLama2_AllReduce.txt"
+    # file_name = r"LLama2_AllReduce.txt"
     # file_name = r"LLama2_AttentionFC.txt"
-    # file_name = r"Add.txt"
+    # file_name = r"DeepSeek_MLP.txt"
+    file_name = r"test.txt"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"output_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
@@ -77,7 +78,7 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
-        plot_link_state=1,
+        plot_link_state=0,
         plot_start_time=1000,
         print_trace=0,
         show_trace_id=6212,
@@ -169,10 +170,11 @@ def main():
         sim.config.DDR_W_LATENCY_original = 0
         sim.config.L2M_R_LATENCY_original = 12
         sim.config.L2M_W_LATENCY_original = 16
-        sim.config.IQ_CH_FIFO_DEPTH = 4
-        sim.config.EQ_CH_FIFO_DEPTH = 4
+        sim.config.IQ_CH_FIFO_DEPTH = 10
+        sim.config.EQ_CH_FIFO_DEPTH = 10
         sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8
+        sim.config.SN_TRACKER_RELEASE_LATENCY = 42
 
         # sim.config.EQ_IN_FIFO_DEPTH = 8
         # sim.config.RB_IN_FIFO_DEPTH = 8
@@ -183,13 +185,13 @@ def main():
         # sim.config.TU_Etag_T1_UE_MAX = 7
         # sim.config.TD_Etag_T2_UE_MAX = 6
 
-        sim.config.TL_Etag_T2_UE_MAX = 8
-        sim.config.TL_Etag_T1_UE_MAX = 15
-        sim.config.TR_Etag_T2_UE_MAX = 12
+        sim.config.TL_Etag_T2_UE_MAX = 16
+        sim.config.TL_Etag_T1_UE_MAX = 16
+        sim.config.TR_Etag_T2_UE_MAX = 16
         sim.config.RB_IN_FIFO_DEPTH = 16
-        sim.config.TU_Etag_T2_UE_MAX = 8
-        sim.config.TU_Etag_T1_UE_MAX = 15
-        sim.config.TD_Etag_T2_UE_MAX = 12
+        sim.config.TU_Etag_T2_UE_MAX = 16
+        sim.config.TU_Etag_T1_UE_MAX = 16
+        sim.config.TD_Etag_T2_UE_MAX = 16
         sim.config.EQ_IN_FIFO_DEPTH = 16
 
         sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
@@ -207,7 +209,7 @@ def main():
         }
 
     sim.initial()
-    sim.end_time = 10000
+    sim.end_time = 20000
     sim.print_interval = 2000
     sim.run()
 
