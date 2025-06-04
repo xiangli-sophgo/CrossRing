@@ -26,12 +26,12 @@ def main():
 
     # traffic_file_path = r"../traffic/v1.0.8 All_Reduce new/"
     # traffic_file_path = r"../traffic/DeepSeek/"
-    traffic_file_path = r"../traffic/0603/"
+    # traffic_file_path = r"../traffic/0603/"
     # traffic_file_path = r"../traffic/output_DeepSeek_part1/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_no_map/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_2K/step5_data_merge/"
-    file_name = r"LLama2_AllReduce.txt"
+    # file_name = r"LLama2_AllReduce.txt"
     # file_name = r"LLama2_AttentionFC.txt"
     # file_name = r"Add.txt"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
@@ -59,7 +59,7 @@ def main():
         topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
         # topo_type = "6x5"
-        # topo_type = "3x3"  # SG2260E
+        topo_type = "3x3"  # SG2260E
     else:
         topo_type = config.TOPO_TYPE
 
@@ -77,8 +77,8 @@ def main():
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
-        plot_link_state=0,
-        plot_start_time=1000,
+        plot_link_state=1,
+        plot_start_time=100,
         print_trace=0,
         show_trace_id=6212,
         show_node_id=4,
