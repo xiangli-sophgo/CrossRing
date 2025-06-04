@@ -27,17 +27,6 @@ CrossRing 是一个用于片上网络（NoC, Network-on-Chip）中 CrossRing 拓
 3. **结果分析与可视化**
    仿真结束后，结果会保存到 `../Result/` 目录下。可以使用仓库中的相关脚本（如 `result_statistic.py`、`FOP_realtime_visualize.py` 等）进行后处理和分析。
 
-## 脚本说明
-
-- `scripts/model_main.py`：主仿真入口，进行 CrossRing 拓扑建模与流量仿真
-- `scripts/traffic_process_main.py`：流量文件预处理与转化
-- `scripts/traffic_sim_main.py`：流量仿真主程序（可自定义流量场景）
-- `scripts/find_optimal_parameters.py`：自动参数寻优脚本
-- `scripts/result_statistic.py`：结果统计与分析
-- `scripts/FOP_realtime_visualize.py`：仿真过程可视化
-- `scripts/spare_core_main.py`：备用核心相关建模脚本
-
-> 详细用法请查阅每个脚本文件的开头注释说明。
 
 ## 目录结构
 
