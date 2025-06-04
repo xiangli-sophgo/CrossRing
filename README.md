@@ -10,20 +10,11 @@ CrossRing 是一个用于片上网络（NoC, Network-on-Chip）中 CrossRing 拓
 - 支持仿真结果的自动统计、可视化分析
 - 提供多种辅助脚本实现流量预处理、参数寻优等功能
 
-## 依赖环境
-
-- Python 3.7 及以上
-- 依赖包：`numpy`  
-  你可以通过如下命令安装依赖：
-  ```bash
-  pip install -r requirements.txt
-  ```
-
 ## 快速开始
 
 1. **安装依赖**
    ```bash
-   pip install -r requirements.txt
+   pip install -e .
    ```
 
 2. **运行主仿真脚本**
