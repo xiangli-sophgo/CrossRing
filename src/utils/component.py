@@ -160,13 +160,15 @@ class Flit:
         )
         finish_status = "F" if self.is_finish else ""
         eject_status = "E" if self.is_ejected else ""
+        ITag_H = "H" if self.itag_h else ""
+        ITag_V = "V" if self.itag_v else ""
 
         return (
             f"{self.packet_id}.{self.flit_id} {self.source}.{self.source_type[0]}{self.source_type[-1]}->{self.destination}.{self.destination_type[0]}{self.destination_type[-1]}: "
             f"{flit_position}, "
             f"{req_attr}, {self.flit_type}, {type_display}, "
             f"{finish_status}{eject_status}, "
-            f"{self.ETag_priority};"
+            f"{self.ETag_priority}, {ITag_H}, {ITag_V}"
         )
 
     @classmethod
@@ -1236,6 +1238,8 @@ class Network:
                 return len(self.inject_queues["TD"][current]) < self.config.IQ_OUT_FIFO_DEPTH
             elif len(flit.path) > 2 and flit.path[2] - flit.path[1] == -self.config.NUM_COL * 2:
                 return len(self.inject_queues["TU"][current]) < self.config.IQ_OUT_FIFO_DEPTH
+            else:
+                raise Exception(f"Invalid path: {flit.path}")
 
         direction = "TR" if next_node == current + 1 else "TL"
         link = (current, next_node)
@@ -2013,4 +2017,5 @@ class Network:
                 return False
             else:
                 queue_pre[next_node] = flit
+                flit.itag_v = False
                 return True

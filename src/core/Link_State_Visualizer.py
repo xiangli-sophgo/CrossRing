@@ -934,7 +934,7 @@ class NetworkLinkVisualizer:
         self.cols = network.config.NUM_COL
         # ---- Figure & Sub‑Axes ------------------------------------------------
         self.fig = plt.figure(figsize=(15, 8), constrained_layout=True)
-        gs = self.fig.add_gridspec(1, 2, width_ratios=[1.6, 2])
+        gs = self.fig.add_gridspec(1, 2, width_ratios=[1.9, 1])
         self.ax = self.fig.add_subplot(gs[0])  # 主网络视图
         self.piece_ax = self.fig.add_subplot(gs[1])  # 右侧 Piece 视图
         self.piece_ax.axis("off")
@@ -960,6 +960,8 @@ class NetworkLinkVisualizer:
         # 颜色/高亮控制
         self.use_highlight = False
         self.highlight_pid = 0
+        # Show tags only mode (force all flit faces to light grey)
+        self.show_tags_only = False
         # ===============  History Buffer  ====================
         # 支持多网络显示
         self.networks = None
@@ -968,17 +970,26 @@ class NetworkLinkVisualizer:
         self.histories = [deque(maxlen=20) for _ in range(3)]
         self.buttons = []
         # 添加网络选择按钮
-        btn_positions = [(0.01, 0.03, 0.06, 0.04), (0.10, 0.03, 0.06, 0.04), (0.19, 0.03, 0.06, 0.04)]
+        btn_positions = [
+            (0.01, 0.03, 0.07, 0.04),
+            (0.10, 0.03, 0.07, 0.04),
+            (0.19, 0.03, 0.07, 0.04),
+        ]
         for idx, label in enumerate(["REQ", "RSP", "DATA"]):
             ax_btn = self.fig.add_axes(btn_positions[idx])
             btn = Button(ax_btn, label)
             btn.on_clicked(lambda event, i=idx: self._on_select_network(i))
             self.buttons.append(btn)
 
-        # -------- Clear‑Highlight button --------
-        ax_clear = self.fig.add_axes([0.28, 0.03, 0.08, 0.04])
-        self.clear_btn = Button(ax_clear, "Clear HL")
+        # -------- Clear-Highlight button --------
+        ax_clear = self.fig.add_axes([0.28, 0.03, 0.07, 0.04])
+        self.clear_btn = Button(ax_clear, "Clear HL")
         self.clear_btn.on_clicked(self._on_clear_highlight)
+
+        # -------- Show Tags Only button --------
+        ax_tags = self.fig.add_axes([0.37, 0.03, 0.07, 0.04])
+        self.tags_btn = Button(ax_tags, "Show Tags")
+        self.tags_btn.on_clicked(self._on_toggle_tags)
 
         # -------- Hover tooltip (显示 packet_id) --------
         # (removed hover annotation and motion_notify_event)
@@ -1042,7 +1053,7 @@ class NetworkLinkVisualizer:
         lines = []
 
         # ① link 视图：rect_info_map
-        for _, flit in self.rect_info_map.values():
+        for _, flit, _ in self.rect_info_map.values():
             if getattr(flit, "packet_id", None) == pid_trk:
                 lines.append(str(flit))
 
@@ -1144,13 +1155,33 @@ class NetworkLinkVisualizer:
         self.fig.canvas.draw_idle()
 
     # ------------------------------------------------------------------
+    # Receive packet_id selected in PieceVisualizer and toggle highlight
+    # ------------------------------------------------------------------
+    def _on_piece_highlight(self, pid, fid):
+        if self.tracked_pid == pid:
+            self.tracked_pid = None
+            self.use_highlight = False
+            self.highlight_pid = 0
+            self.info_text.set_text("")
+        else:
+            self.tracked_pid = pid
+            self.use_highlight = True
+            self.highlight_pid = pid
+            self.info_text.set_text(f"PID {pid}  FID {fid}")
+        self._update_tracked_labels()
+        self._refresh_piece_view()
+        self.fig.canvas.draw_idle()
+        # 同步piece视图的高亮状态
+        self.piece_vis.sync_highlight(self.use_highlight, self.tracked_pid)
+
+    # ------------------------------------------------------------------
     # flit 点击：显示/隐藏 flit id 并追踪该 packet_id
     # ------------------------------------------------------------------
     def _on_flit_click(self, event):
         if event.button != 1 or event.inaxes is not self.ax:
             return
 
-        for rect, (txt, flit) in self.rect_info_map.items():
+        for rect, (txt, flit, tag) in self.rect_info_map.items():
             contains, _ = rect.contains(event)
             if contains:
                 pid = getattr(flit, "packet_id", None)
@@ -1165,15 +1196,49 @@ class NetworkLinkVisualizer:
 
                 # 同步右侧 Piece 高亮
                 self.piece_vis.sync_highlight(self.use_highlight, self.tracked_pid)
+                # 同步右侧 Piece 高亮并重绘 Piece 视图
+                if self._selected_node is not None:
+                    live_net = self.networks[self.selected_network_index] if self.networks is not None else self.network
+                    self.piece_vis.draw_piece_for_node(self._selected_node, live_net)
                 # 更新链路和 piece 的可见性
                 self._update_tracked_labels()
-                self._update_info_text()
+                # Show info_text with tag if present
+                info_str = str(flit)
+                if tag is not None:
+                    info_str += f"\nITag: {tag}"
+                self.info_text.set_text(info_str)
                 self.fig.canvas.draw_idle()
                 return
 
+        # 若点击空白 link 的 slice，仍需判断是否有 tag
+        if event.inaxes == self.ax:
+            for rect in self.rect_info_map:
+                contains, _ = rect.contains(event)
+                if contains:
+                    break
+            else:
+                # 更鲁棒的三角形点击检测逻辑，使用 bbox.contains(event.x, event.y)
+                import matplotlib.pyplot as plt
+
+                for link_id, info in self.link_artists.items():
+                    tag_list = getattr(self.network, "links_tag", {}).get(tuple(map(int, link_id.split("-"))), [])
+                    if not tag_list:
+                        continue
+                    flit_artists = info.get("flit_artists", [])
+                    for idx, artist in enumerate(flit_artists):
+                        if not isinstance(artist, plt.Polygon):
+                            continue
+                        bbox = artist.get_window_extent()
+                        if bbox.contains(event.x, event.y):
+                            if 0 <= idx < len(tag_list):
+                                tag_val = getattr(artist, "tag_val", None)
+                                self.info_text.set_text(f"ITag: {tag_val}")
+                                self.fig.canvas.draw_idle()
+                                return
+
     def _update_tracked_labels(self):
         highlight_on = self.tracked_pid is not None
-        for rect, (txt, flit) in self.rect_info_map.items():
+        for rect, (txt, flit, _) in self.rect_info_map.items():
             pid = getattr(flit, "packet_id", None)
             is_target = highlight_on and pid == self.tracked_pid
 
@@ -1487,6 +1552,7 @@ class NetworkLinkVisualizer:
                     "eject_queues": copy.deepcopy(net.eject_queues),
                     "ring_bridge": copy.deepcopy(net.ring_bridge),
                     "cross_point": copy.deepcopy(net.cross_point),
+                    "links_tag": copy.deepcopy(net.links_tag),
                 }
                 self.histories[i].append((cycle, snap, meta))
 
@@ -1549,6 +1615,7 @@ class NetworkLinkVisualizer:
                 eject_queues=meta["eject_queues"],
                 ring_bridge=meta["ring_bridge"],
                 cross_point=meta["cross_point"],
+                links_tag=meta["links_tag"],
                 config=self.networks[self.selected_network_index].config,
             )
             self.piece_vis.draw_piece_for_node(self._selected_node, fake_net)
@@ -1630,6 +1697,11 @@ class NetworkLinkVisualizer:
         self._render_snapshot(snapshot)
 
     def _render_snapshot(self, snapshot):
+        # Determine tag source: use historical tags during replay, else live network tags
+        if self.paused and self._play_idx is not None and self.networks is not None:
+            tags_dict = self.histories[self.selected_network_index][self._play_idx][2].get("links_tag", {})
+        else:
+            tags_dict = getattr(self.network, "links_tag", {})
         # keep snapshot for later info refresh
         self.last_snapshot = snapshot
         # 重置 flit→文本映射
@@ -1672,8 +1744,42 @@ class NetworkLinkVisualizer:
 
             flit_artists = []
             for i, slice in enumerate(flit_list[1:-1]):
+                # Determine index in original flit_list (offset by 1 because we skipped first element)
+                idx_slice = i + 1
+                tag = None
+                tag_list = tags_dict.get((src, dest), None)
+                if isinstance(tag_list, (list, tuple)) and len(tag_list) > idx_slice:
+                    tag = tag_list[idx_slice]
+
                 if slice is None:
-                    continue  # 空位
+                    # 如果有tag也要画三角
+                    if tag is not None:
+                        if is_horizontal:
+                            x = q_ll[0] + margin + (i + 0.5) * spacing
+                            if not is_forward:
+                                x = q_ll[0] + queue_width - margin - (i + 0.5) * spacing
+                            y = queue_center[1]
+                        else:
+                            y = q_ll[1] + margin + (i + 0.5) * spacing
+                            if not is_forward:
+                                y = q_ll[1] + queue_height - margin - (i + 0.5) * spacing
+                            x = queue_center[0]
+
+                        t_offset = flit_size * 0.3
+                        tri_x = x + flit_size / 2 - t_offset
+                        tri_y = y + flit_size / 2 - t_offset
+                        triangle = plt.Polygon(
+                            [
+                                (tri_x + t_offset, tri_y + t_offset),
+                                (tri_x, tri_y + t_offset),
+                                (tri_x + t_offset, tri_y),
+                            ],
+                            color="red",
+                        )
+                        triangle.tag_val = tag
+                        self.ax.add_patch(triangle)
+                        flit_artists.append(triangle)
+                    continue
                 # slice 是 Flit 实例
                 flit = slice
 
@@ -1723,7 +1829,7 @@ class NetworkLinkVisualizer:
                         fontsize=8,
                     )
                     txt.set_visible(self.use_highlight and pid == self.tracked_pid)
-                    self.rect_info_map[rect] = (txt, flit)
+                    self.rect_info_map[rect] = (txt, flit, tag)
                     flit_artists.append(txt)
                 else:
                     # 标签放左右
@@ -1738,8 +1844,27 @@ class NetworkLinkVisualizer:
                         fontsize=8,
                     )
                     txt.set_visible(self.use_highlight and pid == self.tracked_pid)
-                    self.rect_info_map[rect] = (txt, flit)
+                    self.rect_info_map[rect] = (txt, flit, tag)
                     flit_artists.append(txt)
+
+                # Draw a small red triangle if tag is not None (using links_tag)
+                if tag is not None:
+                    t_offset = flit_size * 0.3
+                    # Compute an interior point at top-right of the flit square
+                    tri_x = x + flit_size / 2 - t_offset
+                    tri_y = y + flit_size / 2 - t_offset
+                    triangle = plt.Polygon(
+                        [
+                            (tri_x, tri_y),
+                            (tri_x - t_offset, tri_y),
+                            (tri_x, tri_y - t_offset),
+                        ],
+                        color="red",
+                    )
+                    triangle.tag_val = tag
+                    self.ax.add_patch(triangle)
+                    # Also include triangle in flit_artists so it is removed on next frame
+                    flit_artists.append(triangle)
 
             # 保存此链路新生成的图元
             info["flit_artists"] = flit_artists
@@ -1762,14 +1887,24 @@ class NetworkLinkVisualizer:
         - facecolor 仍沿用 _get_flit_color 的逻辑（高亮 / 调色板）
         - alpha / linewidth 由 flit.etag 决定
         """
-        face = self._get_flit_color(flit, use_highlight, expected_packet_id, highlight_color)
+        # When showing tags only, force face color to light grey
+        if getattr(self, "show_tags_only", False):
+            face = "lightgrey"
+        else:
+            face = self._get_flit_color(flit, use_highlight, expected_packet_id, highlight_color)
 
         etag = getattr(flit, "ETag_priority", "T2")
         itag = flit.itag_h or flit.itag_v
         alpha = max(self._ETAG_ALPHA.get(etag, 1.0), self._ITAG_ALPHA.get(itag, 1.0))
         lw = max(self._ETAG_LW.get(etag, 0), self._ITAG_LW.get(itag, 0))
-        edge_color = max(self._ETAG_EDGE.get(etag, 0), self._ITAG_EDGE.get(itag, 0))
-        edge_color = "red" if edge_color == 2 else "black"
+        # Determine border color: yellow if ITag is present, else red if ETag indicates, otherwise black
+        if flit.itag_h:
+            edge_color = "yellow"
+        elif flit.itag_v:
+            edge_color = "blue"
+        else:
+            etag_edge_value = self._ETAG_EDGE.get(etag, 0)
+            edge_color = "red" if etag_edge_value == 2 else "black"
 
         return face, alpha, lw, edge_color
 
@@ -1812,33 +1947,39 @@ class NetworkLinkVisualizer:
 
     # ------------------------------------------------------------------
     # Clear‑Highlight button callback
-    # ------------------------------------------------------------------
+
     def _on_clear_highlight(self, event):
+        """清除高亮追踪状态"""
         self.tracked_pid = None
         self.use_highlight = False
-        self.highlight_pid = 0
-        # 同步piece视图的高亮状态
         self.piece_vis.sync_highlight(False, None)
         self._update_tracked_labels()
-        self._refresh_piece_view()
+        self.info_text.set_text("")
         self.fig.canvas.draw_idle()
 
-    # ------------------------------------------------------------------
-    # Receive packet_id selected in PieceVisualizer and toggle highlight
-    # ------------------------------------------------------------------
-    def _on_piece_highlight(self, pid, fid):
-        if self.tracked_pid == pid:
-            self.tracked_pid = None
-            self.use_highlight = False
-            self.highlight_pid = 0
-            self.info_text.set_text("")
+    def _on_toggle_tags(self, event):
+        """切换仅显示标签模式，并刷新视图"""
+        self.show_tags_only = not self.show_tags_only
+        # 更新按钮标签文本以反映当前状态
+        if self.show_tags_only:
+            self.tags_btn.label.set_text("Show Flits")
         else:
-            self.tracked_pid = pid
-            self.use_highlight = True
-            self.highlight_pid = pid
-            self.info_text.set_text(f"PID {pid}  FID {fid}")
-        self._update_tracked_labels()
-        self._refresh_piece_view()
-        self.fig.canvas.draw_idle()
-        # 同步piece视图的高亮状态
-        self.piece_vis.sync_highlight(self.use_highlight, self.tracked_pid)
+            self.tags_btn.label.set_text("Show Tags")
+        # 刷新当前网络视图（保留当前 cycle 并跳过暂停等待）
+        if self.networks is not None:
+            self.update(self.networks, cycle=self.cycle, skip_pause=True)
+        else:
+            self.update(None, cycle=self.cycle, skip_pause=True)
+
+    def _on_select_network(self, idx):
+        """切换显示网络索引 idx（0/1/2）"""
+        self.selected_network_index = idx
+        # 刷新显示（调用 update 渲染当前网络）
+        if self.networks is not None:
+            self.update(
+                self.networks,
+                cycle=None,
+                # expected_packet_id=self.highlight_pid,
+                # use_highlight=self.use_highlight,
+                skip_pause=True,
+            )
