@@ -65,6 +65,7 @@ class PortBandwidthMetrics:
     port_id: str
     read_metrics: BandwidthMetrics
     write_metrics: BandwidthMetrics
+    mixed_metrics: BandwidthMetrics  # 新增：混合读写指标
 
 
 class BandwidthAnalyzer:
@@ -75,8 +76,9 @@ class BandwidthAnalyzer:
     1. 统计工作区间（去除空闲时间段）
     2. 计算非加权和加权带宽
     3. 分别统计读写操作
-    4. 网络整体和RN端口带宽统计
-    5. 生成统一报告
+    4. 统计混合读写操作（不区分读写类型）
+    5. 网络整体和RN端口带宽统计
+    6. 生成统一报告
     """
 
     def __init__(self, config, min_gap_threshold: int = 50):
@@ -235,19 +237,22 @@ class BandwidthAnalyzer:
 
         return merged
 
-    def calculate_bandwidth_metrics(self, requests: List[RequestInfo], operation_type: str) -> BandwidthMetrics:
+    def calculate_bandwidth_metrics(self, requests: List[RequestInfo], operation_type: str = None) -> BandwidthMetrics:
         """
         计算指定操作类型的带宽指标
 
         Args:
             requests: 所有请求列表
-            operation_type: 'read' 或 'write'
+            operation_type: 'read'、'write' 或 None（表示混合读写）
 
         Returns:
             BandwidthMetrics对象
         """
-        # 筛选指定类型的请求
-        filtered_requests = [req for req in requests if req.req_type == operation_type]
+        # 筛选指定类型的请求，如果operation_type为None则不筛选
+        if operation_type is None:
+            filtered_requests = requests  # 混合读写，不筛选
+        else:
+            filtered_requests = [req for req in requests if req.req_type == operation_type]
 
         if not filtered_requests:
             return BandwidthMetrics(
@@ -297,15 +302,19 @@ class BandwidthAnalyzer:
 
     def calculate_network_overall_bandwidth(self) -> Dict[str, BandwidthMetrics]:
         """
-        计算网络整体带宽（读和写）
+        计算网络整体带宽（读、写和混合）
 
         Returns:
-            {'read': BandwidthMetrics, 'write': BandwidthMetrics}
+            {'read': BandwidthMetrics, 'write': BandwidthMetrics, 'mixed': BandwidthMetrics}
         """
         results = {}
 
+        # 分别计算读写带宽
         for operation in ["read", "write"]:
             results[operation] = self.calculate_bandwidth_metrics(self.requests, operation)
+
+        # 计算混合读写带宽（不区分请求类型）
+        results["mixed"] = self.calculate_bandwidth_metrics(self.requests, operation_type=None)
 
         return results
 
@@ -328,12 +337,13 @@ class BandwidthAnalyzer:
                 port_id = f"{req.source_type}_{req.source_node}"
                 rn_requests_by_port[port_id].append(req)
 
-        # 计算每个端口的读写带宽
+        # 计算每个端口的读写和混合带宽
         for port_id, port_requests in rn_requests_by_port.items():
             read_metrics = self.calculate_bandwidth_metrics(port_requests, "read")
             write_metrics = self.calculate_bandwidth_metrics(port_requests, "write")
+            mixed_metrics = self.calculate_bandwidth_metrics(port_requests, operation_type=None)
 
-            port_metrics[port_id] = PortBandwidthMetrics(port_id=port_id, read_metrics=read_metrics, write_metrics=write_metrics)
+            port_metrics[port_id] = PortBandwidthMetrics(port_id=port_id, read_metrics=read_metrics, write_metrics=write_metrics, mixed_metrics=mixed_metrics)
 
         return port_metrics
 
@@ -437,15 +447,18 @@ class BandwidthAnalyzer:
         # 网络整体带宽
         read_metrics = results["network_overall"]["read"]
         write_metrics = results["network_overall"]["write"]
+        mixed_metrics = results["network_overall"]["mixed"]
 
         print(f"网络整体带宽:")
         print(f"  读带宽  - 非加权: {read_metrics.unweighted_bandwidth:.3f} GB/s, 加权: {read_metrics.weighted_bandwidth:.3f} GB/s")
         print(f"  写带宽  - 非加权: {write_metrics.unweighted_bandwidth:.3f} GB/s, 加权: {write_metrics.weighted_bandwidth:.3f} GB/s")
+        print(f"  混合带宽 - 非加权: {mixed_metrics.unweighted_bandwidth:.3f} GB/s, 加权: {mixed_metrics.weighted_bandwidth:.3f} GB/s")
         print(
             f"  总带宽  - 非加权: {read_metrics.unweighted_bandwidth + write_metrics.unweighted_bandwidth:.3f} GB/s, 加权: {read_metrics.weighted_bandwidth + write_metrics.weighted_bandwidth:.3f} GB/s"
         )
         print(f"  读带宽  - 平均非加权: {read_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {read_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
         print(f"  写带宽  - 平均非加权: {write_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {write_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
+        print(f"  混合带宽 - 平均非加权: {mixed_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {mixed_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
         print(
             f"  总带宽  - 平均非加权: {(read_metrics.unweighted_bandwidth + write_metrics.unweighted_bandwidth) / self.config.NUM_IP:.3f} GB/s, 平均加权: {(read_metrics.weighted_bandwidth + write_metrics.weighted_bandwidth) / self.config.NUM_IP:.3f} GB/s"
         )
@@ -475,6 +488,7 @@ class BandwidthAnalyzer:
         print(f"\n工作区间统计:")
         print(f"  读操作工作区间: {len(read_metrics.working_intervals)}")
         print(f"  写操作工作区间: {len(write_metrics.working_intervals)}")
+        print(f"  混合操作工作区间: {len(mixed_metrics.working_intervals)}")
 
         print("=" * 60)
 
@@ -516,7 +530,7 @@ class BandwidthAnalyzer:
         f.write("网络带宽统计\n")
         f.write("=" * 50 + "\n\n")
 
-        for operation in ["read", "write"]:
+        for operation in ["read", "write", "mixed"]:
             metrics = network_overall[operation]
             f.write(f"{operation.upper()} 操作带宽:\n")
             f.write(f"  非加权带宽: {metrics.unweighted_bandwidth:.3f} GB/s, 平均：{metrics.unweighted_bandwidth/self.config.NUM_IP:.3f}\n")
@@ -550,7 +564,7 @@ class BandwidthAnalyzer:
                 print("没有RN端口数据，跳过CSV生成")
             return
 
-        # CSV文件头部
+        # CSV文件头部 - 增加混合带宽字段
         csv_header = [
             "port_id",
             "coordinate",
@@ -558,18 +572,26 @@ class BandwidthAnalyzer:
             "read_weighted_bandwidth_gbps",
             "write_unweighted_bandwidth_gbps",
             "write_weighted_bandwidth_gbps",
+            "mixed_unweighted_bandwidth_gbps",
+            "mixed_weighted_bandwidth_gbps",
             "read_requests_count",
             "write_requests_count",
+            "total_requests_count",
             "read_flits_count",
             "write_flits_count",
+            "total_flits_count",
             "read_working_intervals_count",
             "write_working_intervals_count",
+            "mixed_working_intervals_count",
             "read_total_working_time_ns",
             "write_total_working_time_ns",
+            "mixed_total_working_time_ns",
             "read_network_start_time_ns",
             "read_network_end_time_ns",
             "write_network_start_time_ns",
             "write_network_end_time_ns",
+            "mixed_network_start_time_ns",
+            "mixed_network_end_time_ns",
         ]
 
         # 生成RN端口CSV
@@ -590,6 +612,7 @@ class BandwidthAnalyzer:
                 # 计算flit数量
                 read_flits = sum(interval.flit_count for interval in port_metrics.read_metrics.working_intervals) if port_metrics.read_metrics.working_intervals else 0
                 write_flits = sum(interval.flit_count for interval in port_metrics.write_metrics.working_intervals) if port_metrics.write_metrics.working_intervals else 0
+                mixed_flits = sum(interval.flit_count for interval in port_metrics.mixed_metrics.working_intervals) if port_metrics.mixed_metrics.working_intervals else 0
 
                 row_data = [
                     port_id,
@@ -598,26 +621,29 @@ class BandwidthAnalyzer:
                     port_metrics.read_metrics.weighted_bandwidth,
                     port_metrics.write_metrics.unweighted_bandwidth,
                     port_metrics.write_metrics.weighted_bandwidth,
+                    port_metrics.mixed_metrics.unweighted_bandwidth,
+                    port_metrics.mixed_metrics.weighted_bandwidth,
                     port_metrics.read_metrics.total_requests,
                     port_metrics.write_metrics.total_requests,
+                    port_metrics.mixed_metrics.total_requests,
                     read_flits,
                     write_flits,
+                    mixed_flits,
                     len(port_metrics.read_metrics.working_intervals),
                     len(port_metrics.write_metrics.working_intervals),
+                    len(port_metrics.mixed_metrics.working_intervals),
                     port_metrics.read_metrics.total_working_time,
                     port_metrics.write_metrics.total_working_time,
+                    port_metrics.mixed_metrics.total_working_time,
                     port_metrics.read_metrics.network_start_time,
                     port_metrics.read_metrics.network_end_time,
                     port_metrics.write_metrics.network_start_time,
                     port_metrics.write_metrics.network_end_time,
+                    port_metrics.mixed_metrics.network_start_time,
+                    port_metrics.mixed_metrics.network_end_time,
                 ]
 
                 f.write(",".join(map(str, row_data)) + "\n")
-
-        # 输出统计信息
-        # if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
-        #     print(f"RN端口统计:")
-        #     print(f"  RN端口: {len(rn_ports)} 个端口 -> {rn_csv_file}")
 
     def _write_rn_ports_section(self, f, rn_ports):
         """写入RN端口带宽统计部分"""
@@ -660,12 +686,15 @@ class BandwidthAnalyzer:
         f.write("# 5. 获取特定结果\n")
         f.write("read_unweighted_bw = results['network_overall']['read'].unweighted_bandwidth\n")
         f.write("read_weighted_bw = results['network_overall']['read'].weighted_bandwidth\n")
+        f.write("mixed_unweighted_bw = results['network_overall']['mixed'].unweighted_bandwidth\n")
+        f.write("mixed_weighted_bw = results['network_overall']['mixed'].weighted_bandwidth\n")
         f.write("```\n\n")
 
         f.write("参数说明:\n")
         f.write("- min_gap_threshold: 工作区间合并阈值(ns)，默认50ns\n")
         f.write("- 非加权带宽: 总数据量 / 网络总时间\n")
         f.write("- 加权带宽: 各工作区间带宽按flit数量加权平均\n")
+        f.write("- 混合带宽: 不区分读写请求类型的带宽统计\n")
         f.write("- 网络整体工作区间: 从第一笔请求发出到最后一笔数据完成传输\n")
         f.write("- RN端口读请求: 从第一笔请求到收到最后一笔读数据\n")
         f.write("- RN端口写请求: 从第一笔请求到发出最后一笔写数据\n")
@@ -750,7 +779,7 @@ class BandwidthAnalyzer:
         # 转换为可序列化的格式
         serializable_results = {}
 
-        # 网络整体数据
+        # 网络整体数据 - 包含混合带宽
         serializable_results["network_overall"] = {}
         for op_type, metrics in results["network_overall"].items():
             serializable_results["network_overall"][op_type] = {
@@ -775,7 +804,7 @@ class BandwidthAnalyzer:
                 ],
             }
 
-        # RN端口数据
+        # RN端口数据 - 包含混合带宽
         serializable_results["rn_ports"] = {}
         for port_id, port_metrics in results["rn_ports"].items():
             serializable_results["rn_ports"][port_id] = {
@@ -790,6 +819,12 @@ class BandwidthAnalyzer:
                     "weighted_bandwidth_gbps": port_metrics.write_metrics.weighted_bandwidth,
                     "total_requests": port_metrics.write_metrics.total_requests,
                     "total_bytes": port_metrics.write_metrics.total_bytes,
+                },
+                "mixed": {
+                    "unweighted_bandwidth_gbps": port_metrics.mixed_metrics.unweighted_bandwidth,
+                    "weighted_bandwidth_gbps": port_metrics.mixed_metrics.weighted_bandwidth,
+                    "total_requests": port_metrics.mixed_metrics.total_requests,
+                    "total_bytes": port_metrics.mixed_metrics.total_bytes,
                 },
             }
 
@@ -838,3 +873,15 @@ def main():
     print("analyzer = BandwidthAnalyzer(config, min_gap_threshold=50)")
     print("analyzer.collect_requests_data(base_model)")
     print("results = analyzer.analyze_all_bandwidth()")
+    print()
+    print("# 获取混合读写带宽:")
+    print("mixed_unweighted_bw = results['network_overall']['mixed'].unweighted_bandwidth")
+    print("mixed_weighted_bw = results['network_overall']['mixed'].weighted_bandwidth")
+    print()
+    print("# 获取RN端口混合带宽:")
+    print("for port_id, port_metrics in results['rn_ports'].items():")
+    print("    print(f'{port_id} 混合带宽: {port_metrics.mixed_metrics.unweighted_bandwidth:.3f} GB/s')")
+
+
+if __name__ == "__main__":
+    main()

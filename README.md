@@ -12,7 +12,7 @@ CrossRing 是一个用于片上网络（NoC, Network-on-Chip）中 CrossRing 拓
 
 ## 快速开始
 
-1. **安装依赖**
+1. **安装软件包和依赖**
    ```bash
    pip install -e .
    ```

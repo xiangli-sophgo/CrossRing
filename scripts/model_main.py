@@ -32,8 +32,8 @@ def main():
     # traffic_file_path = r"../traffic/output_v8_32_no_map/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_2K/step5_data_merge/"
     # file_name = r"LLama2_AllReduce.txt"
-    # file_name = r"LLama2_AttentionFC.txt"
-    file_name = r"DeepSeek_MLP.txt"
+    file_name = r"LLama2_AttentionFC.txt"
+    # file_name = r"DeepSeek_MLP.txt"
     # file_name = r"test.txt"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"output_Trace.txt"
@@ -211,7 +211,7 @@ def main():
         }
 
     sim.initial()
-    # sim.end_time = 2000
+    # sim.end_time = 10000
     sim.print_interval = 2000
     sim.run()
 
