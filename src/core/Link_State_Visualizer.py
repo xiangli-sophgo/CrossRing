@@ -85,7 +85,7 @@ class NetworkLinkVisualizer:
             self.cp_module_size = (2, 5)
             # 初始化图形
             if ax is None:
-                self.fig, self.ax = plt.subplots(figsize=(8, 6))  # 增大图形尺寸
+                self.fig, self.ax = plt.subplots(figsize=(10, 8))  # 增大图形尺寸
             else:
                 self.ax = ax
                 self.fig = ax.figure
@@ -113,7 +113,7 @@ class NetworkLinkVisualizer:
             self.patch_info_map = {}  # patch -> (text_obj, info_str)
             self.fig.canvas.mpl_connect("button_press_event", self._on_click)
             # 全局信息显示框（右下角）
-            self.info_text = self.fig.text(0.75, 0.02, "", fontsize=8, va="bottom", ha="left", wrap=True)
+            self.info_text = self.fig.text(0.75, 0.02, "", fontsize=12, va="bottom", ha="left", wrap=True)
             # 当前被点击 / 高亮的 flit（用于信息框自动刷新）
             self.current_highlight_flit = None
 
@@ -933,8 +933,25 @@ class NetworkLinkVisualizer:
         self.network = network
         self.cols = network.config.NUM_COL
         # ---- Figure & Sub‑Axes ------------------------------------------------
-        self.fig = plt.figure(figsize=(15, 8), constrained_layout=True)
-        gs = self.fig.add_gridspec(1, 2, width_ratios=[1.9, 1])
+        self.fig = plt.figure(figsize=(15, 10), constrained_layout=True)
+        # 全屏显示
+        # try:
+        #     mng = self.fig.canvas.manager
+        #     # 尝试不同的最大化方法
+        #     if hasattr(mng, 'window'):
+        #         if hasattr(mng.window, 'wm_state'):
+        #             mng.window.wm_state('zoomed')  # Windows/Linux
+        #         elif hasattr(mng.window, 'showMaximized'):
+        #             mng.window.showMaximized()  # Qt backend
+        #         elif hasattr(mng.window, 'maximize'):
+        #             mng.window.maximize()  # Mac
+        #     elif hasattr(mng, 'full_screen_toggle'):
+        #         mng.full_screen_toggle()  # 备选方案
+        # except Exception:
+        #     # 如果自动最大化失败，至少增大窗口尺寸
+        #     self.fig.set_size_inches(15, 10)
+        gs = self.fig.add_gridspec(1, 2, width_ratios=[1.3, 1], 
+                          left=0.02, right=0.98, top=0.95, bottom=0.08)
         self.ax = self.fig.add_subplot(gs[0])  # 主网络视图
         self.piece_ax = self.fig.add_subplot(gs[1])  # 右侧 Piece 视图
         self.piece_ax.axis("off")
@@ -965,7 +982,7 @@ class NetworkLinkVisualizer:
         # ===============  History Buffer  ====================
         # 支持多网络显示
         self.networks = None
-        self.selected_network_index = 0
+        self.selected_network_index = 2
         # 为每个网络维护独立历史缓冲
         self.histories = [deque(maxlen=20) for _ in range(3)]
         self.buttons = []
@@ -1030,7 +1047,7 @@ class NetworkLinkVisualizer:
         self.fig.canvas.draw_idle()
 
         # 播放控制参数
-        self.pause_interval = 0.2  # 默认每帧暂停间隔(秒)
+        self.pause_interval = 0.4  # 默认每帧暂停间隔(秒)
         self.should_stop = False  # 停止标志
         self.status_text = self.ax.text(
             -0.1, 1, f"Running...\nInterval: {self.pause_interval:.2f}", transform=self.ax.transAxes, fontsize=12, fontweight="bold", color="green", verticalalignment="top"
@@ -1544,8 +1561,6 @@ class NetworkLinkVisualizer:
                 meta = {
                     "network_name": net.name,
                     # 不再保存高亮状态到历史
-                    # "use_highlight": self.use_highlight,
-                    # "expected_pid": self.highlight_pid,
                     "IQ_channel_buffer": copy.deepcopy(net.IQ_channel_buffer),
                     "EQ_channel_buffer": copy.deepcopy(net.EQ_channel_buffer),
                     "inject_queues": copy.deepcopy(net.inject_queues),
@@ -1765,14 +1780,13 @@ class NetworkLinkVisualizer:
                                 y = q_ll[1] + queue_height - margin - (i + 0.5) * spacing
                             x = queue_center[0]
 
-                        t_offset = flit_size * 0.3
-                        tri_x = x + flit_size / 2 - t_offset
-                        tri_y = y + flit_size / 2 - t_offset
+                        t_size = flit_size * 0.6  # 增大三角形尺寸
+                        # 在正中心绘制正三角形
                         triangle = plt.Polygon(
                             [
-                                (tri_x + t_offset, tri_y + t_offset),
-                                (tri_x, tri_y + t_offset),
-                                (tri_x + t_offset, tri_y),
+                                (x, y + t_size / 2),  # 顶点
+                                (x - t_size / 2, y - t_size / 4),  # 左下
+                                (x + t_size / 2, y - t_size / 4),  # 右下
                             ],
                             color="red",
                         )
@@ -1849,15 +1863,13 @@ class NetworkLinkVisualizer:
 
                 # Draw a small red triangle if tag is not None (using links_tag)
                 if tag is not None:
-                    t_offset = flit_size * 0.3
-                    # Compute an interior point at top-right of the flit square
-                    tri_x = x + flit_size / 2 - t_offset
-                    tri_y = y + flit_size / 2 - t_offset
+                    t_size = flit_size * 0.6  # 增大三角形尺寸
+                    # 在 flit 正中心绘制正三角形
                     triangle = plt.Polygon(
                         [
-                            (tri_x, tri_y),
-                            (tri_x - t_offset, tri_y),
-                            (tri_x, tri_y - t_offset),
+                            (x, y + t_size / 2),  # 顶点
+                            (x - t_size / 2, y - t_size / 4),  # 左下
+                            (x + t_size / 2, y - t_size / 4),  # 右下
                         ],
                         color="red",
                     )

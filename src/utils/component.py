@@ -98,40 +98,33 @@ class Flit:
         # 记录下环 / 弹出时实际占用的是哪一级 entry（"T0" / "T1" / "T2"）
         self.used_entry_level = None
         # Latency record
-        self.cmd_entry_cmd_table_cycle = np.inf
-        self.req_entry_network_cycle = np.inf
-        self.sn_receive_req_cycle = np.inf
-        self.sn_data_generated_cycle = np.inf
-        self.data_entry_network_cycle = np.inf
-        self.rn_data_collection_complete_cycle = np.inf
-        self.sn_rsp_generate_cycle = np.inf
-        self.rsp_entry_network_cycle = np.inf
-        self.rn_receive_rsp_cycle = np.inf
-        self.rn_data_generated_cycle = np.inf
-        self.sn_data_collection_complete_cycle = np.inf
-        self.total_latency = -1
+        self.cmd_entry_cake0_cycle = np.inf
+        self.cmd_entry_noc_from_cake0_cycle = np.inf
+        self.cmd_entry_noc_from_cake1_cycle = np.inf
+        self.cmd_received_by_cake0_cycle = np.inf
+        self.cmd_received_by_cake1_cycle = np.inf
+        self.data_entry_noc_from_cake0_cycle = np.inf
+        self.data_entry_noc_from_cake1_cycle = np.inf
+        self.data_received_complete_cycle = np.inf
+        self.transaction_latency = -1
         self.cmd_latency = -1
-        self.rsp_latency = -1
-        self.dat_latency = -1
+        self.data_latency = -1
 
     def sync_latency_record(self, flit):
         if flit.req_type == "read":
-            self.cmd_entry_cmd_table_cycle = flit.cmd_entry_cmd_table_cycle
-            self.req_entry_network_cycle = flit.req_entry_network_cycle
-            self.sn_receive_req_cycle = flit.sn_receive_req_cycle
-            self.sn_data_generated_cycle = flit.sn_data_generated_cycle
-            self.data_entry_network_cycle = flit.data_entry_network_cycle
-            self.rn_data_collection_complete_cycle = flit.rn_data_collection_complete_cycle
+            self.cmd_entry_cake0_cycle = flit.cmd_entry_cake0_cycle
+            self.cmd_entry_noc_from_cake0_cycle = flit.cmd_entry_noc_from_cake0_cycle
+            self.cmd_received_by_cake1_cycle = flit.cmd_received_by_cake1_cycle
+            self.data_entry_noc_from_cake0_cycle = flit.data_entry_noc_from_cake0_cycle
+            self.data_received_complete_cycle = flit.data_received_complete_cycle
         elif flit.req_type == "write":
-            self.cmd_entry_cmd_table_cycle = flit.cmd_entry_cmd_table_cycle
-            self.req_entry_network_cycle = flit.req_entry_network_cycle
-            self.sn_receive_req_cycle = flit.sn_receive_req_cycle
-            self.sn_rsp_generate_cycle = flit.sn_rsp_generate_cycle
-            self.rsp_entry_network_cycle = flit.rsp_entry_network_cycle
-            self.rn_receive_rsp_cycle = flit.rn_receive_rsp_cycle
-            self.rn_data_generated_cycle = flit.rn_data_generated_cycle
-            self.data_entry_network_cycle = flit.data_entry_network_cycle
-            self.sn_data_collection_complete_cycle = flit.sn_data_collection_complete_cycle
+            self.cmd_entry_cake0_cycle = flit.cmd_entry_cake0_cycle
+            self.cmd_entry_noc_from_cake0_cycle = flit.cmd_entry_noc_from_cake0_cycle
+            self.cmd_received_by_cake1_cycle = flit.cmd_received_by_cake1_cycle
+            self.cmd_entry_noc_from_cake1_cycle = flit.cmd_entry_noc_from_cake1_cycle
+            self.cmd_received_by_cake0_cycle = flit.cmd_received_by_cake0_cycle
+            self.data_entry_noc_from_cake1_cycle = flit.data_entry_noc_from_cake1_cycle
+            self.data_received_complete_cycle = flit.data_received_complete_cycle
 
     def calculate_direction(self, path):
         if len(path) < 2:
@@ -299,6 +292,15 @@ class IPInterface:
         self.routes = routes
         self.read_retry_num_stat = 0
         self.write_retry_num_stat = 0
+        self.req_wait_cycles_h = 0
+        self.req_wait_cycles_v = 0
+        self.rsp_wait_cycles_h = 0
+        self.rsp_wait_cycles_v = 0
+        self.data_wait_cycles_h = 0
+        self.data_wait_cycles_v = 0
+        self.req_cir_h_num, self.req_cir_v_num = 0, 0
+        self.rsp_cir_h_num, self.rsp_cir_v_num = 0, 0
+        self.data_cir_h_num, self.data_cir_v_num = 0, 0
 
         # 验证FIFO深度配置
         l2h_depth = getattr(config, "IP_L2H_FIFO_DEPTH", 4)
@@ -355,6 +357,7 @@ class IPInterface:
         if retry:
             self.networks[network_type]["inject_fifo"].appendleft(flit)
         else:
+            flit.cmd_entry_cake0_cycle = self.current_cycle
             self.networks[network_type]["inject_fifo"].append(flit)
         flit.flit_position = "IP_inject"
         if network_type == "req" and self.networks[network_type]["send_flits"][flit.packet_id]:
@@ -414,9 +417,20 @@ class IPInterface:
             return  # 没空间，或 pre 槽已占用
 
         # 从 l2h_fifo 弹出一个 flit，先放到 *pre* 槽
-        flit = net_info["l2h_fifo"].popleft()
+        flit: Flit = net_info["l2h_fifo"].popleft()
         flit.flit_position = "IQ_CH"
         network.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = flit
+
+        # 更新cycle统计
+        if network_type == "req" and flit.req_attr == "new":
+            flit.cmd_entry_noc_from_cake0_cycle = self.current_cycle
+        elif network_type == "rsp":
+            flit.cmd_entry_noc_from_cake1_cycle = self.current_cycle
+        elif network_type == "data":
+            if flit.req_type == "read" and flit.flit_id == 0:
+                flit.data_entry_noc_from_cake1_cycle = self.current_cycle
+            elif flit.req_type == "write" and flit.flit_id == 0:
+                flit.data_entry_noc_from_cake0_cycle = self.current_cycle
 
     def _check_and_reserve_resources(self, req):
         """检查并预占新请求所需的资源"""
@@ -490,20 +504,17 @@ class IPInterface:
             net_info["network"].arrive_flits[flit.packet_id].append(flit)
             net_info["network"].recv_flits_num += 1
 
-            # # 根据网络类型进行特殊处理
-            # if network_type == "req":
-            #     self._handle_received_request(flit)
-            # elif network_type == "rsp":
-            #     self._handle_received_response(flit)
-            # elif network_type == "data":
-            #     self._handle_received_data(flit)
-
         except (KeyError, AttributeError) as e:
             logging.warning(f"EQ to h2l transfer failed for {network_type}: {e}")
 
     def _handle_received_request(self, req: Flit):
         """处理接收到的请求（SN端）"""
-        req.sn_receive_req_cycle = getattr(self, "current_cycle", 0)
+        req.cmd_received_by_cake1_cycle = getattr(self, "current_cycle", 0)
+        self.req_wait_cycles_h += req.wait_cycle_h
+        self.req_wait_cycles_v += req.wait_cycle_v
+        self.req_cir_h_num += req.circuits_completed_h
+        self.req_cir_v_num += req.circuits_completed_v
+        req.cmd_received_by_cake1_cycle = self.current_cycle
 
         if req.req_type == "read":
             if req.req_attr == "new":
@@ -537,7 +548,16 @@ class IPInterface:
 
     def _handle_received_response(self, rsp: Flit):
         """处理接收到的响应（RN端）"""
-        rsp.sn_receive_req_cycle = getattr(self, "current_cycle", 0)
+        rsp.cmd_received_by_cake1_cycle = getattr(self, "current_cycle", 0)
+        self.rsp_wait_cycles_h += rsp.wait_cycle_h
+        self.rsp_wait_cycles_v += rsp.wait_cycle_v
+        self.rsp_cir_h_num += rsp.circuits_completed_h
+        self.rsp_cir_v_num += rsp.circuits_completed_v
+        rsp.cmd_received_by_cake0_cycle = self.current_cycle
+        if rsp.req_type == "read" and rsp.rsp_type == "negative":
+            self.read_retry_num_stat += 1
+        elif rsp.req_type == "write" and rsp.rsp_type == "negative":
+            self.write_retry_num_stat += 1
 
         req = next((req for req in self.node.rn_tracker[rsp.req_type][self.ip_type][self.ip_pos] if req.packet_id == rsp.packet_id), None)
         if not req:
@@ -660,14 +680,15 @@ class IPInterface:
     def _handle_received_data(self, flit: Flit):
         """处理接收到的数据"""
         flit.arrival_cycle = getattr(self, "current_cycle", 0)
+        self.data_wait_cycles_h += flit.wait_cycle_h
+        self.data_wait_cycles_v += flit.wait_cycle_v
+        self.data_cir_h_num += flit.circuits_completed_h
+        self.data_cir_v_num += flit.circuits_completed_v
         if flit.req_type == "read":
             # 读数据到达RN端，需要收集到data buffer中
             self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
             # 检查是否收集完整个burst
             if len(self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id]) == flit.burst_length:
-                # 更新统计
-                flit.rn_data_collection_complete_cycle = self.current_cycle
-
                 req = next((req for req in self.node.rn_tracker["read"][self.ip_type][self.ip_pos] if req.packet_id == flit.packet_id), None)
                 if req:
                     # 立即释放tracker和更新计数
@@ -676,8 +697,14 @@ class IPInterface:
                     self.node.rn_tracker_pointer["read"][self.ip_type][self.ip_pos] -= 1
                     self.node.rn_rdb_count[self.ip_type][self.ip_pos] += req.burst_length
                     # 为所有flit设置完成时间戳
-                    for f in self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id]:
+                    first_flit = self.data_network.send_flits[flit.packet_id][0]
+                    for f in self.data_network.send_flits[flit.packet_id]:
                         f.leave_db_cycle = self.current_cycle
+                        f.sync_latency_record(req)
+                        f.data_received_complete_cycle = self.current_cycle
+                        f.cmd_latency = f.cmd_received_by_cake1_cycle - f.cmd_entry_noc_from_cake0_cycle
+                        f.data_latency = f.data_received_complete_cycle - first_flit.data_entry_noc_from_cake1_cycle
+                        f.transaction_latency = f.data_received_complete_cycle - f.cmd_entry_cake0_cycle
 
                     # 清理data buffer（数据已经收集完成）
                     self.node.rn_rdb[self.ip_type][self.ip_pos].pop(flit.packet_id)
@@ -690,9 +717,6 @@ class IPInterface:
 
             # 检查是否收集完整个burst
             if len(self.node.sn_wdb[self.ip_type][self.ip_pos][flit.packet_id]) == flit.burst_length:
-                # 完整burst到达，设置完成时间戳
-                for f in self.node.sn_wdb[self.ip_type][self.ip_pos][flit.packet_id]:
-                    f.sn_data_collection_complete_cycle = self.current_cycle
 
                 # 找到对应的请求
                 req = next((req for req in self.node.sn_tracker[self.ip_type][self.ip_pos] if req.packet_id == flit.packet_id), None)
@@ -705,8 +729,14 @@ class IPInterface:
                         self.node.sn_tracker_release_time = defaultdict(list)
 
                     # 更新flit时间戳
-                    for f in self.node.sn_wdb[self.ip_type][self.ip_pos][flit.packet_id]:
+                    first_flit = self.data_network.send_flits[flit.packet_id][0]
+                    for f in self.data_network.send_flits[flit.packet_id]:
+                        f.sync_latency_record(req)
                         f.leave_db_cycle = release_time
+                        f.data_received_complete_cycle = self.current_cycle
+                        f.cmd_latency = f.cmd_received_by_cake0_cycle - f.cmd_entry_noc_from_cake0_cycle
+                        f.data_latency = f.data_received_complete_cycle - first_flit.data_entry_noc_from_cake0_cycle
+                        f.transaction_latency = f.data_received_complete_cycle + self.config.SN_TRACKER_RELEASE_LATENCY - f.cmd_entry_cake0_cycle
 
                     # 清理data buffer（数据已经收集完成）
                     self.node.sn_wdb[self.ip_type][self.ip_pos].pop(flit.packet_id)
@@ -786,7 +816,7 @@ class IPInterface:
             for net_type in ["req", "rsp", "data"]:
                 self.h2l_to_eject_fifo(net_type)
 
-    def create_write_packet(self, req):
+    def create_write_packet(self, req: Flit):
         """创建写数据包并放入数据网络inject_fifo"""
         cycle = getattr(self, "current_cycle", 0)
         for i in range(req.burst_length):
@@ -812,14 +842,14 @@ class IPInterface:
             flit.packet_id = req.packet_id
             flit.flit_id = i
             flit.burst_length = req.burst_length
+            flit.sync_latency_record(req)
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
-            flit.rn_data_generated_cycle = cycle
 
             # 将写数据包放入wdb中
             self.node.rn_wdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
 
-    def create_read_packet(self, req):
+    def create_read_packet(self, req: Flit):
         """创建读数据包并放入数据网络inject_fifo"""
         cycle = getattr(self, "current_cycle", 0)
         for i in range(req.burst_length):
@@ -848,12 +878,11 @@ class IPInterface:
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
             flit.sync_latency_record(req)
-            flit.sn_data_generated_cycle = cycle
 
             # 将读数据包放入数据网络的inject_fifo
             self.enqueue(flit, "data")
 
-    def create_rsp(self, req, rsp_type):
+    def create_rsp(self, req: Flit, rsp_type):
         """创建响应并放入响应网络inject_fifo"""
         cycle = getattr(self, "current_cycle", 0)
         source = req.destination + self.config.NUM_COL
@@ -870,10 +899,6 @@ class IPInterface:
         rsp.destination_type = req.source_type
         rsp.sync_latency_record(req)
         rsp.sn_rsp_generate_cycle = cycle
-        if req.req_type == 'read' and rsp.rsp_type == 'negative':
-            self.read_retry_num_stat += 1
-        elif req.req_type == 'write' and rsp.rsp_type == 'negative':
-            self.write_retry_num_stat += 1
 
         # 将响应放入响应网络的inject_fifo
         self.enqueue(rsp, "rsp")

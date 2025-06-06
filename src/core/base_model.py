@@ -76,7 +76,7 @@ class BaseModel:
         self.traffic_file_path = traffic_file_path
         self.file_name = file_name
         # 添加结果统计
-        self.result_processor = ResultStatisticsProcessor(self.config)
+        self.result_processor = BandwidthAnalyzer(config, min_gap_threshold=50)
 
         self.result_save_path_original = result_save_path
         self.plot_flow_fig = plot_flow_fig
@@ -113,17 +113,15 @@ class BaseModel:
         self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.data_network = Network(self.config, self.adjacency_matrix, name="Data Network")
-        if hasattr(self, "statistics_processor"):
-            self.result_processor = ResultStatisticsProcessor(self.config)
+        if hasattr(self, "result_processor"):
+            self.result_processor = BandwidthAnalyzer(self.config, min_gap_threshold=50)
         if self.plot_link_state:
-            self.link_state_vis = NetworkLinkVisualizer(self.req_network)
+            self.link_state_vis = NetworkLinkVisualizer(self.data_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
             self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
-        self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
-        )
+        self.flit_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
         self.ip_modules = {}
@@ -216,7 +214,6 @@ class BaseModel:
             self.read_total_latency_max_stat,
         ) = (0, 0, 0)
         self.read_cmd_latency_avg_stat, self.read_cmd_latency_max_stat = 0, 0
-        self.read_rsp_latency_avg_stat, self.read_rsp_latency_max_stat = 0, 0
         self.read_dat_latency_avg_stat, self.read_dat_latency_max_stat = 0, 0
         (
             self.write_BW_stat,
@@ -224,7 +221,6 @@ class BaseModel:
             self.write_total_latency_max_stat,
         ) = (0, 0, 0)
         self.write_cmd_latency_avg_stat, self.write_cmd_latency_max_stat = 0, 0
-        self.write_rsp_latency_avg_stat, self.write_rsp_latency_max_stat = 0, 0
         self.write_dat_latency_avg_stat, self.write_dat_latency_max_stat = 0, 0
         self.Total_BW_stat = 0
         self.Total_sum_BW_stat = 0
@@ -234,7 +230,7 @@ class BaseModel:
         self.load_request_stream()
         flits, reqs, rsps = [], [], []
         self.cycle = 0
-        tail_time = 0
+        tail_time = 5
 
         while True:
             self.cycle += 1
@@ -289,10 +285,30 @@ class BaseModel:
         # Performance evaluation
         self.print_data_statistic()
         self.log_summary()
-        # self.evaluate_results(self.data_network)
+        self.syn_IP_stat()
 
         # 结果统计
         self.process_comprehensive_results()
+
+    def syn_IP_stat(self):
+        for ip_pos in self.flit_positions:
+            for ip_type in self.config.CH_NAME_LIST:
+                ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
+                if self.model_type_stat == "REQ_RSP":
+                    self.read_retry_num_stat += ip_interface.read_retry_num_stat
+                    self.write_retry_num_stat += ip_interface.write_retry_num_stat
+                self.req_cir_h_num_stat += ip_interface.req_cir_h_num
+                self.req_cir_v_num_stat += ip_interface.req_cir_v_num
+                self.rsp_cir_h_num_stat += ip_interface.rsp_cir_h_num
+                self.rsp_cir_v_num_stat += ip_interface.rsp_cir_v_num
+                self.data_cir_h_num_stat += ip_interface.data_cir_h_num
+                self.data_cir_v_num_stat += ip_interface.data_cir_v_num
+                self.req_wait_cycle_h_num_stat += ip_interface.req_wait_cycles_h
+                self.req_wait_cycle_v_num_stat += ip_interface.req_wait_cycles_v
+                self.rsp_wait_cycle_h_num_stat += ip_interface.rsp_wait_cycles_h
+                self.rsp_wait_cycle_v_num_stat += ip_interface.rsp_wait_cycles_v
+                self.data_wait_cycle_h_num_stat += ip_interface.data_wait_cycles_h
+                self.data_wait_cycle_v_num_stat += ip_interface.data_wait_cycles_v
 
     def debug_func(self):
         if self.print_trace:
@@ -393,11 +409,7 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(
-                f"Data statistic: Read: {self.read_req, self.read_flit}, "
-                f"Write: {self.write_req, self.write_flit}, "
-                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
-            )
+            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
         if self.verbose:
@@ -429,7 +441,7 @@ class BaseModel:
             elif req.req_type == "write":
                 counts["write"] += 1
 
-        req.req_entry_network_cycle = self.cycle
+        req.cmd_entry_noc_from_cake0_cycle = self.cycle
         return True
 
     # ------------------------------------------------------------------
@@ -642,7 +654,7 @@ class BaseModel:
             req.req_type = "read" if req_data[5] == "R" else "write"
             req.req_attr = "new"
             # Record command table entry cycle
-            req.cmd_entry_cmd_table_cycle = self.cycle
+            req.cmd_entry_cake0_cycle = self.cycle
 
             # Add to appropriate network structures
 
@@ -676,7 +688,6 @@ class BaseModel:
         for flit in link_flits:
             network.plan_move(flit, self.cycle)
         for flit in link_flits:
-            # self.error_log(flit, 13, -1)
             if network.execute_moves(flit, self.cycle):
                 flits.remove(flit)
 
@@ -720,8 +731,7 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
-                    for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
@@ -1077,29 +1087,9 @@ class BaseModel:
         if not self.result_save_path:
             return
 
-        # 收集数据并执行全面评估
-        self.result_processor.collect_data_from_base_model(self)
-        traditional_result, weighted_result = self.result_processor.evaluate_all_results(self.data_network)
-
-        # 生成综合报告
-        comprehensive_stats_path = os.path.join(self.result_save_path, "comprehensive_statistics")
-        self.result_processor.generate_comprehensive_report(traditional_result, weighted_result, comprehensive_stats_path)
-
-        # 生成可视化图表
-        if self.results_fig_save_path:
-            self.result_processor.plot_comprehensive_analysis(traditional_result, weighted_result, comprehensive_stats_path)
-
-        # 更新base_model的统计变量（使用请求数量权重）
-        self.result_processor.update_base_model_weighted_stats(weighted_result, WeightStrategy.REQUEST_COUNT)
-
-        # 可选：也可以计算其他权重策略的结果
-        weighted_result_flits = self.result_processor.calculate_weighted_bandwidth(WeightStrategy.FLIT_COUNT)
-        self.result_processor.update_base_model_weighted_stats(weighted_result_flits, WeightStrategy.FLIT_COUNT)
-
-        # 验证结果一致性
-        validations = self.result_processor.validate_comprehensive_results(traditional_result, weighted_result)
-        if not all(validations.values()):
-            print("警告：统计结果验证发现问题：", {k: v for k, v in validations.items() if not v})
+        self.result_processor.collect_requests_data(self)
+        results = self.result_processor.analyze_all_bandwidth()
+        self.result_processor.generate_unified_report(results, self.result_save_path)
 
     def cal_rn_bandwidth(self):
         """
