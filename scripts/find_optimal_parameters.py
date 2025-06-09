@@ -1058,7 +1058,7 @@ def find_optimal_parameters():
     ]
 
     # 每个traffic的权重（用于加权平均）
-    traffic_weights = [0.5, 0.5]  # 第一个traffic权重0.6，第二个0.4
+    traffic_weights = [0.3, 0.7]  # 第一个traffic权重0.6，第二个0.4
 
     assert len(traffic_files) == len(traffic_weights), "traffic文件数量和权重数量必须一致"
     assert abs(sum(traffic_weights) - 1.0) < 1e-6, "权重总和必须等于1"
@@ -1085,8 +1085,9 @@ def find_optimal_parameters():
     param6_start, param6_end = 2, 16
     param7_start, param7_end = 2, 16
     param8_start, param8_end = 4, 20
+    param9_start, param9_end = 0, 1
 
-    def _run_one_traffic(traffic_file, param1, param2, param3, param4, param5, param6, param7, param8):
+    def _run_one_traffic(traffic_file, param1, param2, param3, param4, param5, param6, param7, param8, param9):
         """运行单个traffic文件的仿真"""
         tot_bw_list = []
         for rpt in range(N_REPEATS):
@@ -1143,6 +1144,7 @@ def find_optimal_parameters():
                 sim.config.TD_Etag_T2_UE_MAX = 9
                 sim.config.GDMA_RW_GAP = np.inf
                 sim.config.SDMA_RW_GAP = 50
+                sim.config.ETag_BOTHSIDE_UPGRADE = 0
                 sim.config.CHANNEL_SPEC = {
                     "gdma": 1,
                     "sdma": 1,
@@ -1159,6 +1161,7 @@ def find_optimal_parameters():
             sim.config.TU_Etag_T1_UE_MAX = param6
             sim.config.TD_Etag_T2_UE_MAX = param7
             sim.config.EQ_IN_FIFO_DEPTH = param8
+            sim.config.ETag_BOTHSIDE_UPGRADE = param9
 
             try:
                 sim.initial()
@@ -1167,7 +1170,7 @@ def find_optimal_parameters():
                 sim.run()
                 bw = sim.get_results().get("Total_sum_BW", 0)
             except Exception as e:
-                print(f"[{traffic_file}][RPT {rpt}] Sim failed for params: {param1}, {param2}, {param3}, {param4}, {param5}, {param6}, {param7}, {param8}")
+                print(f"[{traffic_file}][RPT {rpt}] Sim failed for params: {param1}, {param2}, {param3}, {param4}, {param5}, {param6}, {param7}, {param8}, {param9}")
                 print("Exception details (full traceback):")
                 traceback.print_exc()
                 bw = 0
@@ -1181,14 +1184,14 @@ def find_optimal_parameters():
             f"Total_sum_BW_std_{traffic_file[:-4]}": bw_std,
         }
 
-    def _run_one(param1, param2, param3, param4, param5, param6, param7, param8):
+    def _run_one(param1, param2, param3, param4, param5, param6, param7, param8, param9):
         """运行所有traffic文件并综合结果"""
         all_results = {}
         all_bw_means = []
 
         for traffic_file in traffic_files:
             try:
-                result = _run_one_traffic(traffic_file, param1, param2, param3, param4, param5, param6, param7, param8)
+                result = _run_one_traffic(traffic_file, param1, param2, param3, param4, param5, param6, param7, param8, param9)
                 all_results.update(result)
                 bw_mean = result[f"Total_sum_BW_mean_{traffic_file[:-4]}"]
                 all_bw_means.append(bw_mean)
@@ -1221,6 +1224,7 @@ def find_optimal_parameters():
                 "param6": param6,
                 "param7": param7,
                 "param8": param8,
+                "param9": param9,
             }
         )
 
@@ -1254,8 +1258,9 @@ def find_optimal_parameters():
         if p8_low > param8_end:
             raise TrialPruned()
         p8 = trial.suggest_int("EQ_IN_FIFO_DEPTH", p8_low, param8_end)
+        p9 = trial.suggest_int("ETag_BOTHSIDE_UPGRADE", param9_start, param9_end)
 
-        results = _run_one(p1, p2, p3, p4, p5, p6, p7, p8)
+        results = _run_one(p1, p2, p3, p4, p5, p6, p7, p8, p9)
 
         # ─── 两个 traffic 的带宽均值 ──────────────────────────
         bw1_mean = results[f"Total_sum_BW_mean_{traffic_files[0][:-4]}"]
@@ -1267,16 +1272,15 @@ def find_optimal_parameters():
             # (p1 - param1_start) / (param1_end - param1_start)
             # + (p2 - param2_start) / (param2_end - param2_start)
             # + (p3 - param3_start) / (param3_end - param3_start)
-            +(p4 - param4_start) / (param4_end - param4_start)
+            +(p4 - param4_start)
+            / (param4_end - param4_start)
             # + (p5 - param5_start) / (param5_end - param5_start)
             # + (p6 - param6_start) / (param6_end - param6_start)
-            # + (p7 - param7_start) / (param7_end - param7_start)
-            + (p8 - param8_start) / (param8_end - param8_start)
         ) / 2.0
 
         # 综合指标 = 加权带宽 - α * 参数惩罚
-        # 调整α值平衡性能和资源消耗 (0.05表示资源消耗占5%权重)
-        composite_metric = weighted_bw - 10 * param_penalty
+        # 调整α值平衡性能和资源消耗
+        composite_metric = weighted_bw - 30 * param_penalty
 
         # 保存到 trial.user_attrs，便于后期分析 / CSV
         for k, v in results.items():

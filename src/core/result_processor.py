@@ -6,6 +6,15 @@ from typing import Dict, List, Tuple, Optional, NamedTuple
 from dataclasses import dataclass
 from enum import Enum
 from src.utils.component import *
+import matplotlib.pyplot as plt
+import networkx as nx
+from matplotlib.patches import Rectangle, FancyArrowPatch, Patch
+from matplotlib.lines import Line2D
+import matplotlib.colors as mcolors
+import matplotlib.cm as cm
+from functools import lru_cache
+from src.core.result_processor import *
+import time
 
 
 @dataclass
@@ -14,7 +23,9 @@ class RequestInfo:
 
     packet_id: int
     start_time: int  # ns
-    end_time: int  # ns
+    end_time: int  # ns (整体网络结束时间)
+    rn_end_time: int  # ns (RN端口结束时间)
+    sn_end_time: int  # ns (SN端口结束时间)
     req_type: str  # 'read' or 'write'
     source_node: int
     dest_node: int
@@ -81,7 +92,13 @@ class BandwidthAnalyzer:
     6. 生成统一报告
     """
 
-    def __init__(self, config, min_gap_threshold: int = 50):
+    def __init__(
+        self,
+        config,
+        min_gap_threshold: int = 50,
+        plot_rn_bw_fig: bool = False,
+        plot_flow_graph: bool = False,
+    ):
         """
         初始化带宽分析器
 
@@ -92,11 +109,18 @@ class BandwidthAnalyzer:
         self.config = config
         self.min_gap_threshold = min_gap_threshold
         self.network_frequency = config.NETWORK_FREQUENCY  # GHz
+        self.plot_rn_bw_fig = plot_rn_bw_fig
+        self.plot_flow_graph = plot_flow_graph
+        self.finish_cycle = -np.inf
 
         # 数据存储
         self.requests: List[RequestInfo] = []
         self.rn_positions = set()
         self.sn_positions = set()
+        self.rn_bandwidth_time_series = defaultdict(lambda: {"time": [], "bytes": []})
+        self.ip_bandwidth_data = None
+        self.read_ip_intervals = defaultdict(list)
+        self.write_ip_intervals = defaultdict(list)
 
         # 初始化节点位置
         self._initialize_node_positions()
@@ -113,43 +137,232 @@ class BandwidthAnalyzer:
             self.sn_positions.update(pos - self.config.NUM_COL for pos in self.config.L2M_SEND_POSITION_LIST)
 
     def collect_requests_data(self, base_model) -> None:
-        """
-        从base_model收集请求数据
-
-        Args:
-            base_model: BaseModel实例
-        """
+        """从base_model收集请求数据"""
         self.requests.clear()
-        self.base_model = base_model  # 保存base_model引用以获取统计数据
+        self.base_model = base_model
 
-        # 从数据网络的arrive_flits中提取请求信息
         for packet_id, flits in base_model.data_network.arrive_flits.items():
             if not flits or len(flits) != flits[0].burst_length:
                 continue
 
-            # 使用最后一个flit作为代表（包含完整统计信息）
             representative_flit: Flit = flits[-1]
+
+            # 计算不同角度的结束时间
+            network_end_time = representative_flit.data_received_complete_cycle // self.network_frequency
+
+            if representative_flit.req_type == "read":
+                # 读请求：RN在收到数据时结束，SN在发出数据时结束
+                rn_end_time = representative_flit.data_received_complete_cycle // self.network_frequency  # RN收到数据
+                sn_end_time = representative_flit.data_entry_noc_from_cake1_cycle // self.network_frequency  # SN发出数据
+            else:  # write
+                # 写请求：RN在发出数据时结束，SN在收到数据时结束
+                rn_end_time = representative_flit.data_entry_noc_from_cake0_cycle // self.network_frequency  # RN发出数据
+                sn_end_time = representative_flit.data_received_complete_cycle // self.network_frequency  # SN收到数据
 
             request_info = RequestInfo(
                 packet_id=packet_id,
                 start_time=representative_flit.cmd_entry_cake0_cycle // self.network_frequency,
-                end_time=representative_flit.data_received_complete_cycle // self.network_frequency,
+                end_time=network_end_time,  # 整体网络结束时间
+                rn_end_time=rn_end_time,
+                sn_end_time=sn_end_time,
                 req_type=representative_flit.req_type,
                 source_node=representative_flit.source,
                 dest_node=representative_flit.destination,
                 source_type=representative_flit.original_source_type,
                 dest_type=representative_flit.original_destination_type,
                 burst_length=representative_flit.burst_length,
-                total_bytes=representative_flit.burst_length * 128,  # 每个flit 128字节
+                total_bytes=representative_flit.burst_length * 128,
                 cmd_latency=representative_flit.cmd_latency // self.network_frequency,
                 data_latency=representative_flit.data_latency // self.network_frequency,
                 transaction_latency=representative_flit.transaction_latency // self.network_frequency,
             )
 
+            # 收集RN带宽时间序列数据
+            port_key = f"{representative_flit.original_source_type[:-3].upper()} {representative_flit.req_type} {representative_flit.original_destination_type[:3].upper()}"
+
+            if representative_flit.req_type == "read":
+                completion_time = rn_end_time
+            else:  # write
+                completion_time = rn_end_time
+
+            self.rn_bandwidth_time_series[port_key]["time"].append(completion_time)
+            self.rn_bandwidth_time_series[port_key]["bytes"].append(representative_flit.burst_length * 128)
+
+            # 更新finish_cycle
+            if representative_flit.data_received_complete_cycle != float("inf"):
+                self.finish_cycle = max(self.finish_cycle, representative_flit.data_received_complete_cycle)
+
             self.requests.append(request_info)
 
         # 按开始时间排序
         self.requests.sort(key=lambda x: x.start_time)
+
+    def calculate_ip_bandwidth_data(self):
+        """计算IP带宽数据矩阵"""
+        rows = self.config.NUM_ROW
+        cols = self.config.NUM_COL
+        if getattr(self.base_model, "topo_type_stat", None) != "4x5":
+            rows -= 1
+
+        # 初始化数据结构
+        self.ip_bandwidth_data = {
+            "read": {
+                "sdma": np.zeros((rows, cols)),
+                "gdma": np.zeros((rows, cols)),
+                "ddr": np.zeros((rows, cols)),
+                "l2m": np.zeros((rows, cols)),
+            },
+            "write": {
+                "sdma": np.zeros((rows, cols)),
+                "gdma": np.zeros((rows, cols)),
+                "ddr": np.zeros((rows, cols)),
+                "l2m": np.zeros((rows, cols)),
+            },
+            "total": {
+                "sdma": np.zeros((rows, cols)),
+                "gdma": np.zeros((rows, cols)),
+                "ddr": np.zeros((rows, cols)),
+                "l2m": np.zeros((rows, cols)),
+            },
+        }
+
+        # 处理RN端口（按照source_node分组，避免重复计算）
+        rn_requests_by_source = defaultdict(list)
+
+        for req in self.requests:
+            if req.source_node in self.rn_positions:
+                rn_requests_by_source[req.source_node].append(req)
+
+        # 计算每个RN源节点的带宽
+        for source_node, node_requests in rn_requests_by_source.items():
+            # 按source_type分组
+            by_type = defaultdict(list)
+            for req in node_requests:
+                # 提取source_type的前缀（去掉_ip后缀）
+                source_type = req.source_type.lower()[:-2]
+                by_type[source_type].append(req)
+
+            # 计算物理位置
+            physical_col = source_node % cols
+            physical_row = source_node // cols // 2
+
+            # 为每种类型计算带宽
+            for source_type, type_requests in by_type.items():
+                # 分别计算读写带宽
+                read_requests = [req for req in type_requests if req.req_type == "read"]
+                write_requests = [req for req in type_requests if req.req_type == "write"]
+
+                # 计算读带宽
+                if read_requests:
+                    read_metrics = self.calculate_bandwidth_metrics(read_requests, "read")
+                    self.ip_bandwidth_data["read"][source_type][physical_row, physical_col] = read_metrics.weighted_bandwidth
+
+                # 计算写带宽
+                if write_requests:
+                    write_metrics = self.calculate_bandwidth_metrics(write_requests, "write")
+                    self.ip_bandwidth_data["write"][source_type][physical_row, physical_col] = write_metrics.weighted_bandwidth
+
+                # 计算总带宽
+                if type_requests:
+                    total_metrics = self.calculate_bandwidth_metrics(type_requests, operation_type=None)
+                    self.ip_bandwidth_data["total"][source_type][physical_row, physical_col] = total_metrics.weighted_bandwidth
+
+        # 处理SN端口
+        sn_requests_by_dest = defaultdict(list)
+
+        for req in self.requests:
+            if req.dest_node in self.sn_positions:
+                sn_requests_by_dest[req.dest_node].append(req)
+
+        # 计算每个SN目标节点的带宽
+        for dest_node, node_requests in sn_requests_by_dest.items():
+            # 按dest_type分组
+            by_type = defaultdict(list)
+            for req in node_requests:
+                # 提取dest_type的前缀（去掉_ip后缀）
+                dest_type = req.dest_type.lower()[:-2]
+                by_type[dest_type].append(req)
+
+            # 计算物理位置
+            physical_col = dest_node % cols
+            physical_row = dest_node // cols // 2
+
+            # 为每种类型计算带宽
+            for dest_type, type_requests in by_type.items():
+                # 分别计算读写带宽
+                read_requests = [req for req in type_requests if req.req_type == "read"]
+                write_requests = [req for req in type_requests if req.req_type == "write"]
+
+                # 计算读带宽
+                if read_requests:
+                    read_metrics = self.calculate_bandwidth_metrics(read_requests, "read")
+                    self.ip_bandwidth_data["read"][dest_type][physical_row, physical_col] = read_metrics.weighted_bandwidth
+
+                # 计算写带宽
+                if write_requests:
+                    write_metrics = self.calculate_bandwidth_metrics(write_requests, "write")
+                    self.ip_bandwidth_data["write"][dest_type][physical_row, physical_col] = write_metrics.weighted_bandwidth
+
+                # 计算总带宽
+                if type_requests:
+                    total_metrics = self.calculate_bandwidth_metrics(type_requests, operation_type=None)
+                    self.ip_bandwidth_data["total"][dest_type][physical_row, physical_col] = total_metrics.weighted_bandwidth
+
+    def plot_rn_bandwidth_curves(self) -> float:
+        """
+        绘制RN端带宽曲线图，使用累积和计算带宽
+
+        Returns:
+            总带宽 (GB/s)
+        """
+        if self.plot_rn_bw_fig:
+            plt.figure(figsize=(12, 8))
+
+        total_bw = 0
+
+        for port_key, data_dict in self.rn_bandwidth_time_series.items():
+            if not data_dict["time"]:
+                continue
+
+            # 排序时间戳并去除nan值
+            raw_times = np.array(data_dict["time"])
+            clean_times = raw_times[~np.isnan(raw_times)]
+            times = np.sort(clean_times)
+
+            if len(times) == 0:
+                continue
+
+            # 计算累积带宽
+            cum_counts = np.arange(1, len(times) + 1)
+            bandwidth = (cum_counts * 128 * self.config.BURST) / times  # bytes/ns转换为GB/s
+
+            # 只显示前100%的时间段
+            t = np.percentile(times, 100)
+            mask = times <= t
+
+            if self.plot_rn_bw_fig:
+                (line,) = plt.plot(times[mask] / 1000, bandwidth[mask], drawstyle="default", label=f"{port_key}")
+                plt.text(times[mask][-1] / 1000, bandwidth[mask][-1], f"{bandwidth[mask][-1]:.2f}", va="center", color=line.get_color(), fontsize=12)
+
+            # 打印最终带宽值
+            if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
+                print(f"{port_key} Final Bandwidth: {bandwidth[mask][-1]:.2f} GB/s")
+
+            total_bw += bandwidth[mask][-1]
+
+        if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
+            print(f"Total Bandwidth: {total_bw:.2f} GB/s")
+            print("=" * 60)
+
+        if self.plot_rn_bw_fig:
+            plt.xlabel("Time (us)")
+            plt.ylabel("Bandwidth (GB/s)")
+            plt.title("RN Bandwidth")
+            plt.legend()
+            plt.grid(True)
+            plt.show()
+
+        return total_bw
 
     def calculate_working_intervals(self, requests: List[RequestInfo]) -> List[WorkingInterval]:
         """
@@ -237,22 +450,49 @@ class BandwidthAnalyzer:
 
         return merged
 
-    def calculate_bandwidth_metrics(self, requests: List[RequestInfo], operation_type: str = None) -> BandwidthMetrics:
+    def calculate_bandwidth_metrics(self, requests: List[RequestInfo], operation_type: str = None, endpoint_type: str = "network") -> BandwidthMetrics:
         """
         计算指定操作类型的带宽指标
 
         Args:
             requests: 所有请求列表
             operation_type: 'read'、'write' 或 None（表示混合读写）
-
-        Returns:
-            BandwidthMetrics对象
+            endpoint_type: 'network'(整体网络)、'rn'(RN端口)、'sn'(SN端口)
         """
-        # 筛选指定类型的请求，如果operation_type为None则不筛选
-        if operation_type is None:
-            filtered_requests = requests  # 混合读写，不筛选
-        else:
-            filtered_requests = [req for req in requests if req.req_type == operation_type]
+        # 筛选请求并创建临时请求列表（使用正确的结束时间）
+        filtered_requests = []
+
+        for req in requests:
+            if operation_type is not None and req.req_type != operation_type:
+                continue
+
+            # 根据endpoint_type选择正确的结束时间
+            if endpoint_type == "rn":
+                end_time = req.rn_end_time
+            elif endpoint_type == "sn":
+                end_time = req.sn_end_time
+            else:  # network
+                end_time = req.end_time
+
+            # 创建临时请求对象，使用正确的结束时间
+            temp_req = RequestInfo(
+                packet_id=req.packet_id,
+                start_time=req.start_time,
+                end_time=end_time,
+                rn_end_time=req.rn_end_time,
+                sn_end_time=req.sn_end_time,
+                req_type=req.req_type,
+                source_node=req.source_node,
+                dest_node=req.dest_node,
+                source_type=req.source_type,
+                dest_type=req.dest_type,
+                burst_length=req.burst_length,
+                total_bytes=req.total_bytes,
+                cmd_latency=req.cmd_latency,
+                data_latency=req.data_latency,
+                transaction_latency=req.transaction_latency,
+            )
+            filtered_requests.append(temp_req)
 
         if not filtered_requests:
             return BandwidthMetrics(
@@ -319,33 +559,53 @@ class BandwidthAnalyzer:
         return results
 
     def calculate_rn_port_bandwidth(self) -> Dict[str, PortBandwidthMetrics]:
-        """
-        计算每个RN端口的带宽
-
-        Returns:
-            {port_id: PortBandwidthMetrics}
-        """
+        """计算每个RN端口的带宽"""
         port_metrics = {}
-
-        # 按源节点分组RN端口的请求
         rn_requests_by_port = defaultdict(list)
 
         for req in self.requests:
             if req.source_node in self.rn_positions:
-                # 对于读请求：从第一笔请求到收到最后一笔读数据
-                # 对于写请求：从第一笔请求到发出最后一笔写数据
                 port_id = f"{req.source_type}_{req.source_node}"
                 rn_requests_by_port[port_id].append(req)
 
-        # 计算每个端口的读写和混合带宽
         for port_id, port_requests in rn_requests_by_port.items():
-            read_metrics = self.calculate_bandwidth_metrics(port_requests, "read")
-            write_metrics = self.calculate_bandwidth_metrics(port_requests, "write")
-            mixed_metrics = self.calculate_bandwidth_metrics(port_requests, operation_type=None)
+            # 使用RN端点类型计算带宽
+            read_metrics = self.calculate_bandwidth_metrics(port_requests, "read", "rn")
+            write_metrics = self.calculate_bandwidth_metrics(port_requests, "write", "rn")
+            mixed_metrics = self.calculate_bandwidth_metrics(port_requests, None, "rn")
 
             port_metrics[port_id] = PortBandwidthMetrics(port_id=port_id, read_metrics=read_metrics, write_metrics=write_metrics, mixed_metrics=mixed_metrics)
 
         return port_metrics
+
+    def calculate_sn_port_bandwidth(self) -> Dict[str, PortBandwidthMetrics]:
+        """计算每个SN端口的带宽"""
+        port_metrics = {}
+        sn_requests_by_port = defaultdict(list)
+
+        for req in self.requests:
+            if req.dest_node in self.sn_positions:
+                port_id = f"{req.dest_type}_{req.dest_node}"
+                sn_requests_by_port[port_id].append(req)
+
+        for port_id, port_requests in sn_requests_by_port.items():
+            # 使用SN端点类型计算带宽
+            read_metrics = self.calculate_bandwidth_metrics(port_requests, "read", "sn")
+            write_metrics = self.calculate_bandwidth_metrics(port_requests, "write", "sn")
+            mixed_metrics = self.calculate_bandwidth_metrics(port_requests, None, "sn")
+
+            port_metrics[port_id] = PortBandwidthMetrics(port_id=port_id, read_metrics=read_metrics, write_metrics=write_metrics, mixed_metrics=mixed_metrics)
+
+        return port_metrics
+
+    def precalculate_ip_bandwidth_data(self):
+        """预计算IP带宽数据，供绘图使用"""
+        if self.ip_bandwidth_data is not None:
+            return  # 已经计算过了
+
+        # 使用现有的calculate_ip_bandwidth_data逻辑
+        # 但基于已有的端口带宽计算结果
+        self.calculate_ip_bandwidth_data()
 
     def analyze_all_bandwidth(self) -> Dict:
         """
@@ -413,7 +673,394 @@ class BandwidthAnalyzer:
         if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
             self._print_summary_to_console(results)
 
+        # 绘制RN带宽曲线
+        total_bandwidth = self.plot_rn_bandwidth_curves()
+        results["summary"]["Total_sum_BW"] = total_bandwidth
+        results["Total_sum_BW"] = total_bandwidth
+
+        if self.plot_flow_graph and hasattr(self, "base_model") and self.base_model:
+            # 需要从base_model获取network对象
+            if hasattr(self.base_model, "data_network"):
+                self.draw_flow_graph(self.base_model.data_network, mode="total")
+
         return results
+
+    def draw_flow_graph(self, network: Network, mode="total", node_size=2000, save_path=None):
+        """
+        绘制合并的网络流图和IP
+
+        :param network: 网络对象
+        :param mode: 显示模式，可以是'read', 'write'或'total'
+        :param node_size: 节点大小
+        :param save_path: 图片保存路径
+        """
+        # 确保IP带宽数据已计算
+        self.precalculate_ip_bandwidth_data()
+
+        # 准备网络流数据
+        G = nx.DiGraph()
+
+        # 处理不同模式的网络流数据
+        if mode == "read":
+            links = network.links_flow_stat.get("read", {})
+        elif mode == "write":
+            links = network.links_flow_stat.get("write", {})
+        else:  # total模式，需要合并读和写的数据
+            read_links = network.links_flow_stat.get("read", {})
+            write_links = network.links_flow_stat.get("write", {})
+
+            # 合并读和写的流量
+            all_keys = set(read_links.keys()) | set(write_links.keys())
+            links = {}
+            for key in all_keys:
+                read_val = read_links.get(key, 0)
+                write_val = write_links.get(key, 0)
+                links[key] = read_val + write_val
+
+        link_values = []
+        for (i, j), value in links.items():
+            link_value = value * 128 / (self.finish_cycle // self.config.NETWORK_FREQUENCY) if value else 0
+            link_values.append(link_value)
+            formatted_label = f"{link_value:.1f}"
+            G.add_edge(i, j, label=formatted_label)
+
+        # 计算节点位置
+        pos = {}
+        for node in G.nodes():
+            x = node % self.config.NUM_COL
+            y = node // self.config.NUM_COL
+            if y % 2 == 1:  # 奇数行左移
+                x -= 0.25
+                y -= 0.6
+            pos[node] = (x * 3, -y * 1.5)
+
+        # 创建图形
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ax.set_aspect("equal")
+
+        # 调整方形节点大小
+        square_size = np.sqrt(node_size) / 100
+
+        # 绘制网络流图
+        nx.draw_networkx_nodes(G, pos, node_size=square_size, node_shape="s", ax=ax)
+
+        # 绘制方形节点并添加IP信息
+        for node, (x, y) in pos.items():
+            # 绘制主节点方框
+            rect = Rectangle(
+                (x - square_size / 2, y - square_size / 2),
+                width=square_size,
+                height=square_size,
+                color="lightblue",
+                ec="black",
+                zorder=2,
+            )
+            ax.add_patch(rect)
+            ax.text(x, y, str(node), ha="center", va="center", fontsize=10)
+
+            # 在节点左侧添加IP信息
+            physical_row = node // self.config.NUM_COL
+            physical_col = node % self.config.NUM_COL
+
+            if physical_row % 2 == 0:
+                # 田字格位置和大小
+                ip_width = square_size * 2.6
+                ip_height = square_size * 2.6
+                ip_x = x - square_size - ip_width / 2.8
+                ip_y = y + 0.26
+
+                # 绘制田字格外框
+                ip_rect = Rectangle(
+                    (ip_x - ip_width / 2, ip_y - ip_height / 2),
+                    width=ip_width,
+                    height=ip_height,
+                    color="white",
+                    ec="black",
+                    linewidth=1,
+                    zorder=2,
+                )
+                ax.add_patch(ip_rect)
+
+                # 绘制田字格内部线条
+                ax.plot(
+                    [ip_x - ip_width / 2, ip_x + ip_width / 2],
+                    [ip_y, ip_y],
+                    color="black",
+                    linewidth=1,
+                    zorder=3,
+                )
+                ax.plot(
+                    [ip_x, ip_x],
+                    [ip_y - ip_height / 2, ip_y + ip_height / 2],
+                    color="black",
+                    linewidth=1,
+                    zorder=3,
+                )
+
+                # 为左列和右列填充不同颜色（DMA和DDR区分）
+                left_color = "honeydew"  # 左列颜色（DMA）
+                right_color = "aliceblue"  # 右列颜色（GDMA）
+                # 左列矩形（DMA区域）
+                left_rect = Rectangle(
+                    (ip_x - ip_width / 2, ip_y - ip_height / 2),
+                    width=ip_width / 2,
+                    height=ip_height,
+                    color=left_color,
+                    ec="none",
+                    zorder=2,
+                )
+                ax.add_patch(left_rect)
+
+                # 右列矩形（DDR区域）
+                right_rect = Rectangle(
+                    (ip_x, ip_y - ip_height / 2),
+                    width=ip_width / 2,
+                    height=ip_height,
+                    color=right_color,
+                    ec="none",
+                    zorder=2,
+                )
+                ax.add_patch(right_rect)
+
+                # 添加IP信息
+                if mode == "read":
+                    sdma_value = self.ip_bandwidth_data["read"]["sdma"][physical_row // 2, physical_col]
+                    gdma_value = self.ip_bandwidth_data["read"]["gdma"][physical_row // 2, physical_col]
+                    ddr_value = self.ip_bandwidth_data["read"]["ddr"][physical_row // 2, physical_col]
+                    l2m_value = self.ip_bandwidth_data["read"]["l2m"][physical_row // 2, physical_col]
+
+                    # 收集当前模式下每个IP的所有值
+                    all_sdma = self.ip_bandwidth_data["read"]["sdma"].flatten()
+                    all_gdma = self.ip_bandwidth_data["read"]["gdma"].flatten()
+                    all_ddr = self.ip_bandwidth_data["read"]["ddr"].flatten()
+                    all_l2m = self.ip_bandwidth_data["read"]["l2m"].flatten()
+
+                elif mode == "write":
+                    sdma_value = self.ip_bandwidth_data["write"]["sdma"][physical_row // 2, physical_col]
+                    gdma_value = self.ip_bandwidth_data["write"]["gdma"][physical_row // 2, physical_col]
+                    ddr_value = self.ip_bandwidth_data["write"]["ddr"][physical_row // 2, physical_col]
+                    l2m_value = self.ip_bandwidth_data["write"]["l2m"][physical_row // 2, physical_col]
+
+                    all_sdma = self.ip_bandwidth_data["write"]["sdma"].flatten()
+                    all_gdma = self.ip_bandwidth_data["write"]["gdma"].flatten()
+                    all_ddr = self.ip_bandwidth_data["write"]["ddr"].flatten()
+                    all_l2m = self.ip_bandwidth_data["write"]["l2m"].flatten()
+
+                else:  # total
+                    sdma_value = self.ip_bandwidth_data["total"]["sdma"][physical_row // 2, physical_col]
+                    gdma_value = self.ip_bandwidth_data["total"]["gdma"][physical_row // 2, physical_col]
+                    ddr_value = self.ip_bandwidth_data["total"]["ddr"][physical_row // 2, physical_col]
+                    l2m_value = self.ip_bandwidth_data["total"]["l2m"][physical_row // 2, physical_col]
+
+                    all_sdma = self.ip_bandwidth_data["total"]["sdma"].flatten()
+                    all_gdma = self.ip_bandwidth_data["total"]["gdma"].flatten()
+                    all_ddr = self.ip_bandwidth_data["total"]["ddr"].flatten()
+                    all_l2m = self.ip_bandwidth_data["total"]["l2m"].flatten()
+
+                # 计算每个IP的阈值（例如取前20%的分位数）
+                sdma_threshold = np.percentile(all_sdma, 90)
+                gdma_threshold = np.percentile(all_gdma, 90)
+                ddr_threshold = np.percentile(all_ddr, 90)
+                l2m_threshold = np.percentile(all_l2m, 90)
+
+                # SDMA在左上半部分（大于阈值则红色）
+                sdma_color = "red" if sdma_value > sdma_threshold else "black"
+                ax.text(
+                    ip_x - ip_width / 4,
+                    ip_y + ip_height / 4,
+                    f"{sdma_value:.1f}",
+                    fontweight="bold",
+                    ha="center",
+                    va="center",
+                    fontsize=9.5,
+                    color=sdma_color,
+                )
+
+                # GDMA在左下半部分
+                gdma_color = "red" if gdma_value > gdma_threshold else "black"
+                ax.text(
+                    ip_x - ip_width / 4,
+                    ip_y - ip_height / 4,
+                    f"{gdma_value:.1f}",
+                    fontweight="bold",
+                    ha="center",
+                    va="center",
+                    fontsize=9.5,
+                    color=gdma_color,
+                )
+
+                # l2m在右上半部分
+                l2m_color = "red" if l2m_value > l2m_threshold else "black"
+                ax.text(
+                    ip_x + ip_width / 4,
+                    ip_y + ip_height / 4,
+                    f"{l2m_value:.1f}",
+                    fontweight="bold",
+                    ha="center",
+                    va="center",
+                    fontsize=9.5,
+                    color=l2m_color,
+                )
+
+                # ddr在右下半部分
+                ddr_color = "red" if ddr_value > ddr_threshold else "black"
+                ax.text(
+                    ip_x + ip_width / 4,
+                    ip_y - ip_height / 4,
+                    f"{ddr_value:.1f}",
+                    fontweight="bold",
+                    ha="center",
+                    va="center",
+                    fontsize=9.5,
+                    color=ddr_color,
+                )
+
+        # 绘制边和边标签
+        edge_value_threshold = np.percentile(link_values, 90)
+
+        for i, j, data in G.edges(data=True):
+            x1, y1 = pos[i]
+            x2, y2 = pos[j]
+            if float(data["label"]) > edge_value_threshold:
+                color = "red"
+            else:
+                color = "black"
+
+            if i != j:  # 普通边
+                dx, dy = x2 - x1, y2 - y1
+                dist = np.hypot(dx, dy)
+                if dist > 0:
+                    dx, dy = dx / dist, dy / dist
+                    perp_dx, perp_dy = -dy * 0.1, dx * 0.1
+
+                    has_reverse = G.has_edge(j, i)
+                    if has_reverse:
+                        start_x = x1 + dx * square_size / 2 + perp_dx
+                        start_y = y1 + dy * square_size / 2 + perp_dy
+                        end_x = x2 - dx * square_size / 2 + perp_dx
+                        end_y = y2 - dy * square_size / 2 + perp_dy
+                    else:
+                        start_x = x1 + dx * square_size / 2
+                        start_y = y1 + dy * square_size / 2
+                        end_x = x2 - dx * square_size / 2
+                        end_y = y2 - dy * square_size / 2
+
+                    arrow = FancyArrowPatch(
+                        (start_x, start_y),
+                        (end_x, end_y),
+                        arrowstyle="-|>",
+                        mutation_scale=10,
+                        color=color,
+                        zorder=1,
+                        linewidth=1,
+                    )
+                    ax.add_patch(arrow)
+
+        # 绘制边标签
+        edge_labels = nx.get_edge_attributes(G, "label")
+        for edge, label in edge_labels.items():
+            i, j = edge
+            if float(label) == 0.0:
+                continue
+            if float(label) > edge_value_threshold:
+                color = "red"
+            else:
+                color = "black"
+            if i == j:
+                # 计算标签位置
+                original_row = i // self.config.NUM_COL
+                original_col = i % self.config.NUM_COL
+                x, y = pos[i]
+
+                offset = 0.17  # 标签偏移量
+                if original_row == 0:
+                    label_pos = (x, y + square_size / 2 + offset)
+                    angle = 0
+                elif original_row == self.config.NUM_ROW - 2:
+                    label_pos = (x, y - square_size / 2 - offset)
+                    angle = 0
+                elif original_col == 0:
+                    label_pos = (x - square_size / 2 - offset, y)
+                    angle = -90
+                elif original_col == self.config.NUM_COL - 1:
+                    label_pos = (x + square_size / 2 + offset, y)
+                    angle = 90
+                else:
+                    label_pos = (x, y + square_size / 2 + offset)
+                    angle = 0
+
+                ax.text(
+                    *label_pos,
+                    str(label),
+                    ha="center",
+                    va="center",
+                    color=color,
+                    fontweight="bold",
+                    fontsize=11,
+                    rotation=angle,
+                )
+
+            if i != j:
+                x1, y1 = pos[i]
+                x2, y2 = pos[j]
+                mid_x = (x1 + x2) / 2
+                mid_y = (y1 + y2) / 2
+                dx, dy = x2 - x1, y2 - y1
+                angle = np.degrees(np.arctan2(dy, dx))
+
+                has_reverse = G.has_edge(j, i)
+                is_horizontal = abs(dx) > abs(dy)
+
+                if has_reverse:
+                    if is_horizontal:
+                        perp_dx, perp_dy = -dy * 0.1 + 0.2, dx * 0.1
+                    else:
+                        perp_dx, perp_dy = -dy * 0.18, dx * 0.18 - 0.3
+                    label_x = mid_x + perp_dx
+                    label_y = mid_y + perp_dy
+                else:
+                    if is_horizontal:
+                        label_x = mid_x + dx * 0.1
+                        label_y = mid_y + dy * 0.1
+                    else:
+                        label_x = mid_x + (-dy * 0.1 if dx > 0 else dy * 0.1)
+                        label_y = mid_y - 0.1
+
+                ax.text(
+                    label_x,
+                    label_y,
+                    str(label),
+                    ha="center",
+                    va="center",
+                    fontsize=12,
+                    fontweight="bold",
+                    color=color,
+                )
+
+        plt.axis("off")
+        title = f"{network.name} - {mode.capitalize()} Bandwidth"
+        if self.config.SPARE_CORE_ROW != -1:
+            title += f"\nRow: {self.config.SPARE_CORE_ROW}, Failed cores: {self.config.FAIL_CORE_POS}, Spare cores: {self.config.spare_core_pos}"
+        plt.title(title, fontsize=20)
+
+        # # 添加图例说明
+        # legend_text = f"IP {mode.capitalize()} Bandwidth (GB/s):\n" "SDMA: Top half of square\n" "GDMA: Bottom half of square"
+        # plt.figtext(0.02, 0.98, legend_text, ha="TL", va="top", fontsize=10, bbox=dict(facecolor="white", alpha=0.8, edgecolor="gray"))
+
+        plt.tight_layout()
+
+        if save_path:
+            plt.savefig(
+                os.path.join(
+                    save_path,
+                    f"{str(self.topo_type_stat)}_{self.file_name[:-4]}_combined_{mode}_{network.name}_{self.config.FAIL_CORE_POS}_{self.config.SPARE_CORE_ROW}_{str(time.time_ns())[-3:]}.png",
+                ),
+                dpi=300,
+                bbox_inches="tight",
+            )
+            plt.close()
+        else:
+            plt.show()
 
     def generate_unified_report(self, results: Dict, output_path: str) -> None:
         """
@@ -434,9 +1081,9 @@ class BandwidthAnalyzer:
 
         # 生成详细请求记录的CSV文件（读写分开）
         self._generate_detailed_request_csv(output_path)
-
-        print(f"带宽分析报告： {report_file}")
-        print(f"具体RN端口的统计CSV： {output_path}rn_ports_bandwidth.csv")
+        if self.base_model.verbose:
+            print(f"带宽分析报告： {report_file}")
+            print(f"具体RN端口的统计CSV： {output_path}rn_ports_bandwidth.csv")
 
     def _print_summary_to_console(self, results):
         """输出重要数据到控制台"""
@@ -836,7 +1483,7 @@ class BandwidthAnalyzer:
 
 
 # 便捷使用函数
-def analyze_bandwidth(base_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50) -> Dict:
+def analyze_bandwidth(base_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False) -> Dict:
     """
     便捷的带宽分析函数
 
@@ -850,7 +1497,7 @@ def analyze_bandwidth(base_model, config, output_path: str = "./bandwidth_analys
         分析结果字典
     """
     # 创建分析器
-    analyzer = BandwidthAnalyzer(config, min_gap_threshold)
+    analyzer = BandwidthAnalyzer(config, min_gap_threshold, plot_rn_bw_fig)
 
     # 收集数据
     analyzer.collect_requests_data(base_model)

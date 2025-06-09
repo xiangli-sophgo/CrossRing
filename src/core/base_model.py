@@ -76,7 +76,7 @@ class BaseModel:
         self.traffic_file_path = traffic_file_path
         self.file_name = file_name
         # 添加结果统计
-        self.result_processor = BandwidthAnalyzer(config, min_gap_threshold=50)
+        self.result_processor = BandwidthAnalyzer(config, min_gap_threshold=50, plot_rn_bw_fig=plot_RN_BW_fig, plot_flow_graph=plot_flow_fig)
 
         self.result_save_path_original = result_save_path
         self.plot_flow_fig = plot_flow_fig
@@ -114,7 +114,7 @@ class BaseModel:
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.data_network = Network(self.config, self.adjacency_matrix, name="Data Network")
         if hasattr(self, "result_processor"):
-            self.result_processor = BandwidthAnalyzer(self.config, min_gap_threshold=50)
+            self.result_processor = BandwidthAnalyzer(self.config, min_gap_threshold=50, plot_rn_bw_fig=self.plot_RN_BW_fig, plot_flow_graph=self.plot_flow_fig)
         if self.plot_link_state:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
@@ -1090,84 +1090,8 @@ class BaseModel:
         self.result_processor.collect_requests_data(self)
         results = self.result_processor.analyze_all_bandwidth()
         self.result_processor.generate_unified_report(results, self.result_save_path)
+        self.Total_sum_BW_stat = results["Total_sum_BW"]
 
-    def cal_rn_bandwidth(self):
-        """
-        计算并可选地绘制RN端带宽图，使用累积和计算带宽。
-        参数:
-            plot (bool): 是否绘制图像，默认为True。
-        """
-        if self.plot_RN_BW_fig:
-            plt.figure(figsize=(12, 8))
-        total_bw = 0
-        stats = self.rn_bandwidth
-        for k, data_dict in stats.items():
-            if not data_dict["time"]:
-                continue
-
-            # 排序时间戳
-            raw_times = np.array(data_dict["time"])
-            # 去除 nan
-            clean_times = raw_times[~np.isnan(raw_times)]
-            # 排序
-            times = np.sort(clean_times)
-            if len(times) == 0:
-                continue
-
-            # 计算瞬时带宽
-            # 带宽 = (累计事务数 * 每事务字节数) / 当前时间
-            cum_counts = np.arange(1, len(times) + 1)
-            bandwidth = (cum_counts * 128 * self.config.BURST) / (times)  # 转换为bytes/sec
-
-            # 只显示前90%的时间段
-            t = np.percentile(times, 100)
-            mask = times <= t
-
-            if self.plot_RN_BW_fig:
-                # 绘制曲线
-                # (line,) = plt.plot(times[mask] / 1000, bandwidth[mask], drawstyle="steps-post", label=f"{k}")  # 时间转换为us
-                (line,) = plt.plot(times[mask] / 1000, bandwidth[mask], drawstyle="default", label=f"{k}")  # 时间转换为us
-                # (line,) = plt.plot(times[mask] / 1000, bandwidth[mask], drawstyle="steps", label=f"{k}")  # 时间转换为us
-
-                # 在曲线末尾添加文本标签
-                plt.text(times[mask][-1] / 1000, bandwidth[mask][-1], f"{bandwidth[mask][-1]:.2f}", va="center", color=line.get_color(), fontsize=12)
-
-            # 打印最终带宽值
-            if self.verbose:
-                print(f"{k} Final Bandwidth: {bandwidth[mask][-1]:.2f} GB/s")
-            total_bw += bandwidth[mask][-1]
-        self.Total_sum_BW_stat = float(total_bw)
-        print(f"Total Bandwidth: {self.Total_sum_BW_stat:.2f} GB/s")
-        if self.plot_RN_BW_fig:
-            plt.xlabel("Time (us)")
-            plt.ylabel("Bandwidth (GB/s)")
-            plt.title("RN Bandwidth")
-            plt.legend()
-            plt.grid(True)
-            plt.show()
-
-    def print_stats(self, bw_list, name, operation, file):
-        if bw_list:
-            # avg = sum(bw_list) / len(bw_list)
-            avg = sum(bw_list) / getattr(self.config, f"NUM_{name}")
-            min_bw = min(bw_list)
-            max_bw = max(bw_list)
-            if name == "RN":
-                self.RN_BW_avg_stat = avg
-                self.RN_BW_min_stat = min_bw
-                self.RN_BW_max_stat = max_bw
-            elif name == "SN":
-                self.SN_BW_avg_stat = avg
-                self.SN_BW_min_stat = min_bw
-                self.SN_BW_max_stat = max_bw
-
-            print(f"\n{name} {operation} Bandwidth Stats:", file=file)
-            print(f" Sum: {sum(bw_list)}, Average: {avg:.1f} GB/s", file=file)
-            print(f"  Range: {min_bw:.1f} - {max_bw:.1f} GB/s", file=file)
-
-            # 屏幕输出
-            if self.verbose:
-                print(f"{name} {operation}: Sum: {sum(bw_list):.1f}, Avg: {avg:.1f} GB/s, Range: {min_bw:.1f}-{max_bw:.1f} GB/s")
 
     def calculate_ip_bandwidth(self, intervals):
         """计算给定区间的加权带宽"""
@@ -1623,32 +1547,6 @@ class BaseModel:
             elif self.topo_type_stat == "6x5":
                 return node % self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
             return self.config.DDR_SEND_POSITION_LIST[node] - self.config.NUM_COL
-
-    def draw_figure(self):
-
-        fig, (ax2, ax3) = plt.subplots(2, 1, figsize=(8, 10))
-
-        x_values = list(range(self.config.NUM_IP))
-        y_values = []
-        y_values.extend(self.data_network.avg_inject_time[ip_pos] for ip_pos in self.flit_position)
-        ax2.bar(x_values, y_values, color="blue")
-        ax2.set_title("Average Inject Time")
-        ax2.set_xlabel("Node")
-        ax2.set_ylabel("Latency")
-        ax2.set_xticks(list(range(self.config.NUM_IP)))
-        ax2.set_xticklabels(list(range(self.config.NUM_IP)), rotation=90)
-
-        x_values = list(range(self.config.NUM_IP))
-        y_values = [self.data_network.avg_eject_time[in_pos - self.config.NUM_COL] for in_pos in self.flit_position]
-        ax3.bar(x_values, y_values, color="red")
-        ax3.set_title("Average Eject Time")
-        ax3.set_xlabel("Node")
-        ax3.set_ylabel("Latency")
-        ax3.set_xticks(list(range(self.config.NUM_IP)))
-        ax3.set_xticklabels(list(range(self.config.NUM_IP)), rotation=90)
-
-        plt.tight_layout()
-        plt.show(block=True)
 
     def get_results(self):
         """

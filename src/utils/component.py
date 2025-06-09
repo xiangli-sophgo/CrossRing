@@ -106,25 +106,25 @@ class Flit:
         self.data_entry_noc_from_cake0_cycle = np.inf
         self.data_entry_noc_from_cake1_cycle = np.inf
         self.data_received_complete_cycle = np.inf
-        self.transaction_latency = -1
-        self.cmd_latency = -1
-        self.data_latency = -1
+        self.transaction_latency = np.inf
+        self.cmd_latency = np.inf
+        self.data_latency = np.inf
 
     def sync_latency_record(self, flit):
         if flit.req_type == "read":
-            self.cmd_entry_cake0_cycle = flit.cmd_entry_cake0_cycle
-            self.cmd_entry_noc_from_cake0_cycle = flit.cmd_entry_noc_from_cake0_cycle
-            self.cmd_received_by_cake1_cycle = flit.cmd_received_by_cake1_cycle
-            self.data_entry_noc_from_cake0_cycle = flit.data_entry_noc_from_cake0_cycle
-            self.data_received_complete_cycle = flit.data_received_complete_cycle
+            self.cmd_entry_cake0_cycle = min(flit.cmd_entry_cake0_cycle, self.cmd_entry_cake0_cycle)
+            self.cmd_entry_noc_from_cake0_cycle = min(flit.cmd_entry_noc_from_cake0_cycle, self.cmd_entry_noc_from_cake0_cycle)
+            self.cmd_received_by_cake1_cycle = min(flit.cmd_received_by_cake1_cycle, self.cmd_received_by_cake1_cycle)
+            self.data_entry_noc_from_cake1_cycle = min(flit.data_entry_noc_from_cake1_cycle, self.data_entry_noc_from_cake1_cycle)
+            self.data_received_complete_cycle = min(flit.data_received_complete_cycle, self.data_received_complete_cycle)
         elif flit.req_type == "write":
-            self.cmd_entry_cake0_cycle = flit.cmd_entry_cake0_cycle
-            self.cmd_entry_noc_from_cake0_cycle = flit.cmd_entry_noc_from_cake0_cycle
-            self.cmd_received_by_cake1_cycle = flit.cmd_received_by_cake1_cycle
-            self.cmd_entry_noc_from_cake1_cycle = flit.cmd_entry_noc_from_cake1_cycle
-            self.cmd_received_by_cake0_cycle = flit.cmd_received_by_cake0_cycle
-            self.data_entry_noc_from_cake1_cycle = flit.data_entry_noc_from_cake1_cycle
-            self.data_received_complete_cycle = flit.data_received_complete_cycle
+            self.cmd_entry_cake0_cycle = min(flit.cmd_entry_cake0_cycle, self.cmd_entry_cake0_cycle)
+            self.cmd_entry_noc_from_cake0_cycle = min(flit.cmd_entry_noc_from_cake0_cycle, self.cmd_entry_noc_from_cake0_cycle)
+            self.cmd_received_by_cake1_cycle = min(flit.cmd_received_by_cake1_cycle, self.cmd_received_by_cake1_cycle)
+            self.cmd_entry_noc_from_cake1_cycle = min(flit.cmd_entry_noc_from_cake1_cycle, self.cmd_entry_noc_from_cake1_cycle)
+            self.cmd_received_by_cake0_cycle = min(flit.cmd_received_by_cake0_cycle, self.cmd_received_by_cake0_cycle)
+            self.data_entry_noc_from_cake0_cycle = min(flit.data_entry_noc_from_cake0_cycle, self.data_entry_noc_from_cake0_cycle)
+            self.data_received_complete_cycle = min(flit.data_received_complete_cycle, self.data_received_complete_cycle)
 
     def calculate_direction(self, path):
         if len(path) < 2:
@@ -282,6 +282,7 @@ class IPInterface:
         node: Node,
         routes: dict,
     ):
+        self.current_cycle = 0
         self.ip_type = ip_type
         self.ip_pos = ip_pos
         self.config = config
@@ -427,9 +428,11 @@ class IPInterface:
         elif network_type == "rsp":
             flit.cmd_entry_noc_from_cake1_cycle = self.current_cycle
         elif network_type == "data":
-            if flit.req_type == "read" and flit.flit_id == 0:
+            # if flit.req_type == "read" and flit.flit_id == 0:
+            if flit.req_type == "read":
                 flit.data_entry_noc_from_cake1_cycle = self.current_cycle
-            elif flit.req_type == "write" and flit.flit_id == 0:
+            # elif flit.req_type == "write" and flit.flit_id == 0:
+            elif flit.req_type == "write":
                 flit.data_entry_noc_from_cake0_cycle = self.current_cycle
 
     def _check_and_reserve_resources(self, req):
@@ -729,9 +732,9 @@ class IPInterface:
                         self.node.sn_tracker_release_time = defaultdict(list)
 
                     # 更新flit时间戳
-                    first_flit = self.data_network.send_flits[flit.packet_id][0]
+                    first_flit = next((flit for flit in self.data_network.send_flits[flit.packet_id] if flit.flit_id == 0), self.data_network.send_flits[flit.packet_id][0])
                     for f in self.data_network.send_flits[flit.packet_id]:
-                        f.sync_latency_record(req)
+                        # f.sync_latency_record(req)
                         f.leave_db_cycle = release_time
                         f.data_received_complete_cycle = self.current_cycle
                         f.cmd_latency = f.cmd_received_by_cake0_cycle - f.cmd_entry_noc_from_cake0_cycle
@@ -824,6 +827,7 @@ class IPInterface:
             destination = req.destination
             path = self.routes[source][destination]
             flit = Flit(source, destination, path)
+            flit.sync_latency_record(req)
             flit.source_original = req.source_original
             flit.destination_original = req.destination_original
             flit.flit_type = "data"
@@ -842,7 +846,6 @@ class IPInterface:
             flit.packet_id = req.packet_id
             flit.flit_id = i
             flit.burst_length = req.burst_length
-            flit.sync_latency_record(req)
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
 
@@ -857,6 +860,7 @@ class IPInterface:
             destination = req.source - self.config.NUM_COL
             path = self.routes[source][destination]
             flit = Flit(source, destination, path)
+            flit.sync_latency_record(req)
             flit.source_original = req.destination_original
             flit.destination_original = req.source_original
             flit.req_type = req.req_type
@@ -877,7 +881,6 @@ class IPInterface:
             flit.burst_length = req.burst_length
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
-            flit.sync_latency_record(req)
 
             # 将读数据包放入数据网络的inject_fifo
             self.enqueue(flit, "data")
