@@ -564,7 +564,7 @@ class SimpleBandwidthAnalyzer:
 # 使用示例
 if __name__ == "__main__":
     # 分析指定文件
-    analyzer = SimpleBandwidthAnalyzer(r"../../Result/FOP/2260E_ETag_multi_traffic_0603_All.csv", analysis_targets=["case2"])
+    analyzer = SimpleBandwidthAnalyzer(r"../../Result/FOP/2260E_ETag_multi_traffic_0609_All.csv", analysis_targets=["case2"])
 
     # 生成HTML报告
     html_report = analyzer.run_analysis("all_parameter_analysis.html")

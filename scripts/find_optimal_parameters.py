@@ -440,7 +440,7 @@ def generate_parameter_recommendations(param_name, correlation, optimal_range, o
         recommendations.append(f"🔧 {param_name} 敏感性较低，可以大幅调整或考虑固定此参数")
 
     # 推荐起始值
-    recommendations.append(f"💡 建议起始值: {optimal_mean:.1f} (基于最佳试验的平均值)")
+    recommendations.append(f"💡 建议起始值: {int(optimal_mean):.1f} (基于最佳试验的平均值)")
 
     return recommendations
 
@@ -1165,7 +1165,7 @@ def find_optimal_parameters():
 
             try:
                 sim.initial()
-                sim.end_time = 10000
+                sim.end_time = 1000
                 sim.print_interval = 10000
                 sim.run()
                 bw = sim.get_results().get("Total_sum_BW", 0)
@@ -1373,7 +1373,7 @@ def create_summary_report(study, traffic_files, traffic_weights, save_dir):
     """
 
     for param, value in best_trial.params.items():
-        html_content += f"<li>{param}: {value}</li>"
+        html_content += f"<li>{param}: {int(value)}</li>"
 
     html_content += f"""
             </ul>
@@ -1472,6 +1472,8 @@ if __name__ == "__main__":
     print(f"结果保存路径: {result_root_save_path}")
     print("=" * 60)
 
+    n_trials = 100
+
     study = optuna.create_study(
         study_name="CrossRing_Single_Traffic_BO",
         direction="maximize",
@@ -1481,7 +1483,7 @@ if __name__ == "__main__":
     try:
         study.optimize(
             objective,
-            n_trials=100,
+            n_trials=n_trials,
             n_jobs=N_JOBS,
             show_progress_bar=True,
             callbacks=[save_intermediate_result],
@@ -1538,3 +1540,46 @@ if __name__ == "__main__":
         traceback.print_exc()
 
     print("=" * 60)
+
+    # 1. 保存Study对象
+    study_file = os.path.join(result_root_save_path, "optuna_study.pkl")
+    import joblib
+
+    joblib.dump(study, study_file)
+    print(f"Study对象已保存: {study_file}")
+
+    # 2. 保存优化配置
+    config_data = {
+        "traffic_files": traffic_files,
+        "traffic_weights": traffic_weights,
+        "param_ranges": {
+            "TL_Etag_T2_UE_MAX": [2, 16],
+            "TL_Etag_T1_UE_MAX": [2, 16],
+            "TR_Etag_T2_UE_MAX": [2, 16],
+            "RB_IN_FIFO_DEPTH": [4, 20],
+            "TU_Etag_T2_UE_MAX": [2, 16],
+            "TU_Etag_T1_UE_MAX": [2, 16],
+            "TD_Etag_T2_UE_MAX": [2, 16],
+            "EQ_IN_FIFO_DEPTH": [4, 20],
+            "ETag_BOTHSIDE_UPGRADE": [0, 1],
+        },
+        "n_trials": n_trials,
+        "n_repeats": N_REPEATS,
+        "timestamp": datetime.now().isoformat(),
+        "result_root_save_path": result_root_save_path,
+    }
+
+    config_file = os.path.join(result_root_save_path, "optimization_config.json")
+    with open(config_file, "w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=2, ensure_ascii=False)
+    print(f"优化配置已保存: {config_file}")
+
+    print("\n📁 已保存以下文件用于后续分析:")
+    print(f"  • Study对象: {study_file}")
+    print(f"  • 配置文件: {config_file}")
+    print(f"  • CSV数据: {output_csv}")
+    print(f"  • HTML报告: {result_root_save_path}/optimization_report.html")
+    print(f"  • 可视化: {result_root_save_path}/visualizations/")
+
+    print(f"\n🔄 重新生成分析请运行:")
+    print(f"python regenerate_analysis.py ../{result_root_save_path}")
