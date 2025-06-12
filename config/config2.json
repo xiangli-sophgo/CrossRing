@@ -1,7 +1,7 @@
 {
-    "NUM_NODE": 72,
-    "NUM_COL": 9,
-    "NUM_IP": 32,
+    "NUM_NODE": 200,
+    "NUM_COL": 10,
+    "NUM_IP": 100,
     "NUM_RN": 32,
     "NUM_SN": 32,
     "NUM_DDR": 32,

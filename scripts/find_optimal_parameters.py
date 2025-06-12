@@ -27,7 +27,7 @@ from sklearn.feature_selection import mutual_info_regression
 # 使用的 CPU 核心数；-1 表示全部核心
 N_JOBS = 1
 # 每个参数组合重复仿真次数，用于平滑随机 latency 影响
-N_REPEATS = 2  # 减少重复次数，因为要测试多个traffic
+N_REPEATS = 1  # 减少重复次数，因为要测试多个traffic
 
 # 全局变量用于存储可视化数据
 visualization_data = {"trials": [], "progress": [], "pareto_data": [], "param_importance": {}, "convergence": []}
@@ -553,7 +553,7 @@ def generate_optimization_guidance_html(optimization_insights, trials, traffic_f
         html_content += f"""
             <div class="param-analysis">
                 <h3>🔧 {param_name}</h3>
-                <p><strong>相关性</strong>: {correlation:.3f} | <strong>最优范围</strong>: {optimal_range[0]:.1f}-{optimal_range[1]:.1f} | <strong>推荐值</strong>: {optimal_mean:.1f}</p>
+                <p><strong>相关性</strong>: {correlation:.3f} | <strong>最优范围</strong>: {optimal_range[0]:.0f}-{optimal_range[1]:.0f} | <strong>推荐值</strong>: {int(optimal_mean)}</p>
                 
                 <div class="recommendations">
                     <h4>🎯 优化建议:</h4>
@@ -1048,17 +1048,22 @@ def create_intermediate_visualization(study):
 def find_optimal_parameters():
     global output_csv
 
-    traffic_file_path = r"../test_data/"
+    # traffic_file_path = r"../test_data/"
+    traffic_file_path = r"../traffic/0603/"
 
     # ===== 多个traffic文件配置 =====
     traffic_files = [
-        r"traffic_2260E_case1.txt",
-        r"traffic_2260E_case2.txt",  # 添加你的第二个traffic文件
+        # r"traffic_2260E_case1.txt",
+        # r"traffic_2260E_case2.txt",  # 添加你的第二个traffic文件
         # r"traffic_2260E_case3.txt",  # 可以继续添加更多
+        r"DeepSeek_MLP.txt",
+        r"LLama2_AllReduce.txt",
+        r"LLama2_AttentionFC.txt",
     ]
 
     # 每个traffic的权重（用于加权平均）
-    traffic_weights = [0.3, 0.7]  # 第一个traffic权重0.6，第二个0.4
+    traffic_weights = [0.25, 0.5, 0.25]  # 第一个traffic权重0.6，第二个0.4
+    # traffic_weights = [1]  # 第一个traffic权重0.6，第二个0.4
 
     assert len(traffic_files) == len(traffic_weights), "traffic文件数量和权重数量必须一致"
     assert abs(sum(traffic_weights) - 1.0) < 1e-6, "权重总和必须等于1"
@@ -1066,7 +1071,8 @@ def find_optimal_parameters():
     config_path = r"../config/config2.json"
     config = CrossRingConfig(config_path)
 
-    topo_type = config.TOPO_TYPE or "3x3"
+    # topo_type = "3x3"
+    topo_type = "5x4"
     config.TOPO_TYPE = topo_type
 
     model_type = "REQ_RSP"
@@ -1151,6 +1157,58 @@ def find_optimal_parameters():
                     "ddr": 4,
                     "l2m": 2,
                 }
+            elif topo_type in ["5x4", "4x5"]:
+                sim.config.BURST = 4
+                sim.config.NUM_IP = 32
+                sim.config.NUM_DDR = 32
+                sim.config.NUM_L2M = 32
+                sim.config.NUM_GDMA = 32
+                sim.config.NUM_SDMA = 32
+                sim.config.NUM_RN = 32
+                sim.config.NUM_SN = 32
+                sim.config.RN_R_TRACKER_OSTD = 64
+                sim.config.RN_W_TRACKER_OSTD = 64
+                sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST
+                sim.config.RN_WDB_SIZE = sim.config.RN_W_TRACKER_OSTD * sim.config.BURST
+                sim.config.SN_DDR_R_TRACKER_OSTD = 64
+                sim.config.SN_DDR_W_TRACKER_OSTD = 64
+                sim.config.SN_L2M_R_TRACKER_OSTD = 64
+                sim.config.SN_L2M_W_TRACKER_OSTD = 64
+                sim.config.SN_DDR_WDB_SIZE = sim.config.SN_DDR_W_TRACKER_OSTD * sim.config.BURST
+                sim.config.SN_L2M_WDB_SIZE = sim.config.SN_L2M_W_TRACKER_OSTD * sim.config.BURST
+                sim.config.DDR_R_LATENCY_original = 40
+                sim.config.DDR_R_LATENCY_VAR_original = 0
+                sim.config.DDR_W_LATENCY_original = 0
+                sim.config.L2M_R_LATENCY_original = 12
+                sim.config.L2M_W_LATENCY_original = 16
+                sim.config.IQ_CH_FIFO_DEPTH = 10
+                sim.config.EQ_CH_FIFO_DEPTH = 10
+                sim.config.IQ_OUT_FIFO_DEPTH = 8
+                sim.config.RB_OUT_FIFO_DEPTH = 8
+                sim.config.SN_TRACKER_RELEASE_LATENCY = 40
+
+                sim.config.TL_Etag_T2_UE_MAX = 8
+                sim.config.TL_Etag_T1_UE_MAX = 15
+                sim.config.TR_Etag_T2_UE_MAX = 12
+                sim.config.RB_IN_FIFO_DEPTH = 16
+                sim.config.TU_Etag_T2_UE_MAX = 8
+                sim.config.TU_Etag_T1_UE_MAX = 15
+                sim.config.TD_Etag_T2_UE_MAX = 12
+                sim.config.EQ_IN_FIFO_DEPTH = 16
+
+                sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
+                sim.config.ITag_MAX_NUM_H = sim.config.ITag_MAX_NUM_V = 1
+                sim.config.ETag_BOTHSIDE_UPGRADE = 0
+                sim.config.SLICE_PER_LINK = 8
+
+                sim.config.GDMA_RW_GAP = np.inf
+                sim.config.SDMA_RW_GAP = np.inf
+                sim.config.CHANNEL_SPEC = {
+                    "gdma": 2,
+                    "sdma": 2,
+                    "ddr": 2,
+                    "l2m": 2,
+                }
 
             # --- 覆盖待优化参数 ----------------------------
             sim.config.TL_Etag_T2_UE_MAX = param1
@@ -1165,7 +1223,7 @@ def find_optimal_parameters():
 
             try:
                 sim.initial()
-                sim.end_time = 1000
+                sim.end_time = 10000
                 sim.print_interval = 10000
                 sim.run()
                 bw = sim.get_results().get("Total_sum_BW", 0)
@@ -1263,8 +1321,6 @@ def find_optimal_parameters():
         results = _run_one(p1, p2, p3, p4, p5, p6, p7, p8, p9)
 
         # ─── 两个 traffic 的带宽均值 ──────────────────────────
-        bw1_mean = results[f"Total_sum_BW_mean_{traffic_files[0][:-4]}"]
-        bw2_mean = results[f"Total_sum_BW_mean_{traffic_files[1][:-4]}"] if len(traffic_files) > 1 else 0.0
         weighted_bw = results["Total_sum_BW_weighted_mean"]
 
         # ─── 参数规模归一化（越小越好）───────────────────────
@@ -1272,15 +1328,15 @@ def find_optimal_parameters():
             # (p1 - param1_start) / (param1_end - param1_start)
             # + (p2 - param2_start) / (param2_end - param2_start)
             # + (p3 - param3_start) / (param3_end - param3_start)
-            +(p4 - param4_start)
-            / (param4_end - param4_start)
+            +(p4 - param4_start) / (param4_end - param4_start)
             # + (p5 - param5_start) / (param5_end - param5_start)
             # + (p6 - param6_start) / (param6_end - param6_start)
+            + (p8 - param8_start) / (param8_end - param8_start)
         ) / 2.0
 
         # 综合指标 = 加权带宽 - α * 参数惩罚
         # 调整α值平衡性能和资源消耗
-        composite_metric = weighted_bw - 30 * param_penalty
+        composite_metric = weighted_bw - 50 * param_penalty
 
         # 保存到 trial.user_attrs，便于后期分析 / CSV
         for k, v in results.items():
@@ -1472,7 +1528,7 @@ if __name__ == "__main__":
     print(f"结果保存路径: {result_root_save_path}")
     print("=" * 60)
 
-    n_trials = 100
+    n_trials = 500
 
     study = optuna.create_study(
         study_name="CrossRing_Single_Traffic_BO",

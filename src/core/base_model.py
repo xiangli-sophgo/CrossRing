@@ -101,15 +101,13 @@ class BaseModel:
         if results_fig_save_path:
             self.results_fig_save_path = results_fig_save_path
             os.makedirs(self.results_fig_save_path, exist_ok=True)
-        self.config.topology_select(self.topo_type_stat)
-        # self.initial()
-        self.config.update_config()
 
     def initial(self):
+        self.topo_type_stat = self.config.TOPO_TYPE
         self.config.update_config()
         self.config.update_latency()
+        self.config.topology_select(self.topo_type_stat)
         self.adjacency_matrix = create_adjacency_matrix("CrossRing", self.config.NUM_NODE, self.config.NUM_COL)
-        # plot_adjacency_matrix(self.adjacency_matrix)
         self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.data_network = Network(self.config, self.adjacency_matrix, name="Data Network")
@@ -1091,7 +1089,6 @@ class BaseModel:
         results = self.result_processor.analyze_all_bandwidth()
         self.result_processor.generate_unified_report(results, self.result_save_path)
         self.Total_sum_BW_stat = results["Total_sum_BW"]
-
 
     def calculate_ip_bandwidth(self, intervals):
         """计算给定区间的加权带宽"""

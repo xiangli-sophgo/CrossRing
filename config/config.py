@@ -99,6 +99,7 @@ class CrossRingConfig:
 
     def update_config(self):
         self.update_latency()
+        self.topology_select()
         self.SN_TRACKER_RELEASE_LATENCY = self.SN_TRACKER_RELEASE_LATENCY_original * self.NETWORK_FREQUENCY
         self.RN_R_TRACKER_OSTD = self.RN_RDB_SIZE // self.BURST
         self.RN_W_TRACKER_OSTD = self.RN_WDB_SIZE // self.BURST
@@ -191,7 +192,11 @@ class CrossRingConfig:
             self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
             self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
         else:
-            raise ValueError("Error topology type: ", topo_type)
+            # raise ValueError("Error topology type: ", topo_type)
+            self.DDR_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
+            self.L2M_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
+            self.SDMA_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
+            self.GDMA_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
 
     def generate_ip_positions(self, zero_rows=None, zero_cols=None):
         # 创建一个矩阵,初始值为1
