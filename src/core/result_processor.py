@@ -11,7 +11,6 @@ import networkx as nx
 from matplotlib.patches import Rectangle, FancyArrowPatch, Patch
 from matplotlib.lines import Line2D
 import matplotlib.colors as mcolors
-import matplotlib.cm as cm
 from functools import lru_cache
 from src.core.result_processor import *
 import time
@@ -80,6 +79,48 @@ class PortBandwidthMetrics:
 
 
 class BandwidthAnalyzer:
+    def _calculate_latency_stats(self):
+        """计算并返回延迟统计数据字典，过滤掉无穷大"""
+        import math
+
+        stats = {
+            "cmd": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
+            "data": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
+            "trans": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
+        }
+        for r in self.requests:
+            # CMD
+            if math.isfinite(r.cmd_latency):
+                group = stats["cmd"][r.req_type]
+                group["sum"] += r.cmd_latency
+                group["count"] += 1
+                group["max"] = max(group["max"], r.cmd_latency)
+                mixed = stats["cmd"]["mixed"]
+                mixed["sum"] += r.cmd_latency
+                mixed["count"] += 1
+                mixed["max"] = max(mixed["max"], r.cmd_latency)
+            # Data
+            if math.isfinite(r.data_latency):
+                group = stats["data"][r.req_type]
+                group["sum"] += r.data_latency
+                group["count"] += 1
+                group["max"] = max(group["max"], r.data_latency)
+                mixed = stats["data"]["mixed"]
+                mixed["sum"] += r.data_latency
+                mixed["count"] += 1
+                mixed["max"] = max(mixed["max"], r.data_latency)
+            # Transaction
+            if math.isfinite(r.transaction_latency):
+                group = stats["trans"][r.req_type]
+                group["sum"] += r.transaction_latency
+                group["count"] += 1
+                group["max"] = max(group["max"], r.transaction_latency)
+                mixed = stats["trans"]["mixed"]
+                mixed["sum"] += r.transaction_latency
+                mixed["count"] += 1
+                mixed["max"] = max(mixed["max"], r.transaction_latency)
+        return stats
+
     """
     带宽分析器 - 统一的带宽统计分析类
 
@@ -496,7 +537,14 @@ class BandwidthAnalyzer:
 
         if not filtered_requests:
             return BandwidthMetrics(
-                unweighted_bandwidth=0.0, weighted_bandwidth=0.0, working_intervals=[], total_working_time=0, network_start_time=0, network_end_time=0, total_bytes=0, total_requests=0
+                unweighted_bandwidth=0.0,
+                weighted_bandwidth=0.0,
+                working_intervals=[],
+                total_working_time=0,
+                network_start_time=0,
+                network_end_time=0,
+                total_bytes=0,
+                total_requests=0,
             )
 
         # 计算工作区间
@@ -724,6 +772,17 @@ class BandwidthAnalyzer:
             formatted_label = f"{link_value:.1f}"
             G.add_edge(i, j, label=formatted_label)
 
+        # 链路颜色映射范围：动态最大值的60%阈值起红
+        link_mapping_max = max(link_values) if link_values else 0.0
+        link_mapping_min = max(0.6 * link_mapping_max, 100)
+        # IP颜色映射范围：动态最大值的60%阈值起红
+        # 从 ip_bandwidth_data 提取所有带宽值，计算当前最大
+        all_ip_vals = []
+        for svc in ["sdma", "gdma", "ddr", "l2m"]:
+            all_ip_vals.extend(self.ip_bandwidth_data[mode][svc].flatten())
+        ip_mapping_max = max(all_ip_vals) if all_ip_vals else 0.0
+        ip_mapping_min = max(0.6 * ip_mapping_max, 80)
+
         # 计算节点位置
         pos = {}
         for node in G.nodes():
@@ -733,6 +792,13 @@ class BandwidthAnalyzer:
                 x -= 0.25
                 y -= 0.6
             pos[node] = (x * 3, -y * 1.5)
+
+        # 动态计算字体大小，添加最大值上限以避免过大
+        node_count = len(G.nodes())
+        base_font = 9
+        dynamic_font = max(4, base_font * (65 / node_count) ** 0.5)
+        max_font = 14  # 最大字号上限，可以根据需要调整
+        dynamic_font = min(dynamic_font, max_font)
 
         # 创建图形
         fig, ax = plt.subplots(figsize=(10, 8))
@@ -756,7 +822,7 @@ class BandwidthAnalyzer:
                 zorder=2,
             )
             ax.add_patch(rect)
-            ax.text(x, y, str(node), ha="center", va="center", fontsize=10)
+            ax.text(x, y, str(node), ha="center", va="center", fontsize=dynamic_font)
 
             # 在节点左侧添加IP信息
             physical_row = node // self.config.NUM_COL
@@ -863,8 +929,13 @@ class BandwidthAnalyzer:
                 ddr_threshold = np.percentile(all_ddr, 90)
                 l2m_threshold = np.percentile(all_l2m, 90)
 
-                # SDMA在左上半部分（大于阈值则红色）
-                sdma_color = "red" if sdma_value > sdma_threshold else "black"
+                # SDMA在左上半部分
+                if sdma_value <= ip_mapping_min:
+                    intensity = 0.0
+                else:
+                    intensity = (sdma_value - ip_mapping_min) / (ip_mapping_max - ip_mapping_min)
+                intensity = min(max(intensity, 0.0), 1.0)
+                sdma_color = (intensity, 0, 0)
                 ax.text(
                     ip_x - ip_width / 4,
                     ip_y + ip_height / 4,
@@ -872,12 +943,17 @@ class BandwidthAnalyzer:
                     fontweight="bold",
                     ha="center",
                     va="center",
-                    fontsize=9.5,
+                    fontsize=dynamic_font * 0.6,
                     color=sdma_color,
                 )
 
                 # GDMA在左下半部分
-                gdma_color = "red" if gdma_value > gdma_threshold else "black"
+                if gdma_value <= ip_mapping_min:
+                    intensity = 0.0
+                else:
+                    intensity = (gdma_value - ip_mapping_min) / (ip_mapping_max - ip_mapping_min)
+                intensity = min(max(intensity, 0.0), 1.0)
+                gdma_color = (intensity, 0, 0)
                 ax.text(
                     ip_x - ip_width / 4,
                     ip_y - ip_height / 4,
@@ -885,12 +961,17 @@ class BandwidthAnalyzer:
                     fontweight="bold",
                     ha="center",
                     va="center",
-                    fontsize=9.5,
+                    fontsize=dynamic_font * 0.6,
                     color=gdma_color,
                 )
 
                 # l2m在右上半部分
-                l2m_color = "red" if l2m_value > l2m_threshold else "black"
+                if l2m_value <= ip_mapping_min:
+                    intensity = 0.0
+                else:
+                    intensity = (l2m_value - ip_mapping_min) / (ip_mapping_max - ip_mapping_min)
+                intensity = min(max(intensity, 0.0), 1.0)
+                l2m_color = (intensity, 0, 0)
                 ax.text(
                     ip_x + ip_width / 4,
                     ip_y + ip_height / 4,
@@ -898,12 +979,17 @@ class BandwidthAnalyzer:
                     fontweight="bold",
                     ha="center",
                     va="center",
-                    fontsize=9.5,
+                    fontsize=dynamic_font * 0.6,
                     color=l2m_color,
                 )
 
                 # ddr在右下半部分
-                ddr_color = "red" if ddr_value > ddr_threshold else "black"
+                if ddr_value <= ip_mapping_min:
+                    intensity = 0.0
+                else:
+                    intensity = (ddr_value - ip_mapping_min) / (ip_mapping_max - ip_mapping_min)
+                intensity = min(max(intensity, 0.0), 1.0)
+                ddr_color = (intensity, 0, 0)
                 ax.text(
                     ip_x + ip_width / 4,
                     ip_y - ip_height / 4,
@@ -911,20 +997,28 @@ class BandwidthAnalyzer:
                     fontweight="bold",
                     ha="center",
                     va="center",
-                    fontsize=9.5,
+                    fontsize=dynamic_font * 0.6,
                     color=ddr_color,
                 )
 
         # 绘制边和边标签
         edge_value_threshold = np.percentile(link_values, 90)
+        # 链路带宽热力图颜色映射
+        # norm = mcolors.Normalize(vmin=min(link_values), vmax=max(link_values))
 
         for i, j, data in G.edges(data=True):
             x1, y1 = pos[i]
             x2, y2 = pos[j]
-            if float(data["label"]) > edge_value_threshold:
-                color = "red"
+            # 根据流量值映射颜色
+            value = float(data["label"])
+            # 链路60%阈值起红
+            if value <= link_mapping_min:
+                intensity = 0.0
             else:
-                color = "black"
+                intensity = (value - link_mapping_min) / (link_mapping_max - link_mapping_min)
+            # clamp to [0,1]
+            intensity = min(max(intensity, 0.0), 1.0)
+            color = (intensity, 0, 0)
 
             if i != j:  # 普通边
                 dx, dy = x2 - x1, y2 - y1
@@ -962,10 +1056,16 @@ class BandwidthAnalyzer:
             i, j = edge
             if float(label) == 0.0:
                 continue
-            if float(label) > edge_value_threshold:
-                color = "red"
+            # 根据带宽值映射标签颜色
+            value = float(label)
+            # 链路60%阈值起红
+            if value <= link_mapping_min:
+                intensity = 0.0
             else:
-                color = "black"
+                intensity = (value - link_mapping_min) / (link_mapping_max - link_mapping_min)
+            # clamp to [0,1]
+            intensity = min(max(intensity, 0.0), 1.0)
+            color = (intensity, 0, 0)
             if i == j:
                 # 计算标签位置
                 original_row = i // self.config.NUM_COL
@@ -996,7 +1096,7 @@ class BandwidthAnalyzer:
                     va="center",
                     color=color,
                     fontweight="bold",
-                    fontsize=11,
+                    fontsize=dynamic_font * 0.9,
                     rotation=angle,
                 )
 
@@ -1032,7 +1132,7 @@ class BandwidthAnalyzer:
                     str(label),
                     ha="center",
                     va="center",
-                    fontsize=12,
+                    fontsize=dynamic_font,
                     fontweight="bold",
                     color=color,
                 )
@@ -1103,9 +1203,15 @@ class BandwidthAnalyzer:
         print(
             f"  总带宽  - 非加权: {read_metrics.unweighted_bandwidth + write_metrics.unweighted_bandwidth:.3f} GB/s, 加权: {read_metrics.weighted_bandwidth + write_metrics.weighted_bandwidth:.3f} GB/s"
         )
-        print(f"  读带宽  - 平均非加权: {read_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {read_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
-        print(f"  写带宽  - 平均非加权: {write_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {write_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
-        print(f"  混合带宽 - 平均非加权: {mixed_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {mixed_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
+        print(
+            f"  读带宽  - 平均非加权: {read_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {read_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s"
+        )
+        print(
+            f"  写带宽  - 平均非加权: {write_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {write_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s"
+        )
+        print(
+            f"  混合带宽 - 平均非加权: {mixed_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {mixed_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s"
+        )
         print(
             f"  总带宽  - 平均非加权: {(read_metrics.unweighted_bandwidth + write_metrics.unweighted_bandwidth) / self.config.NUM_IP:.3f} GB/s, 平均加权: {(read_metrics.weighted_bandwidth + write_metrics.weighted_bandwidth) / self.config.NUM_IP:.3f} GB/s"
         )
@@ -1139,6 +1245,22 @@ class BandwidthAnalyzer:
 
         print("=" * 60)
 
+        # 延迟统计 (cmd, data, transaction) - 用新helper
+        stats = self._calculate_latency_stats()
+
+        def _avg(cat, op):
+            s = stats[cat][op]
+            return s["sum"] / s["count"] if s["count"] else 0.0
+
+        print("\n延迟统计 (单位: cycle)")
+        for key, label in [("cmd", "CMD"), ("data", "Data"), ("trans", "Trans")]:
+            print(
+                f"  {label} 延迟  - "
+                f"读: avg {_avg(key,'read'):.2f}, max {stats[key]['read']['max']}；"
+                f"写: avg {_avg(key,'write'):.2f}, max {stats[key]['write']['max']}；"
+                f"混合: avg {_avg(key,'mixed'):.2f}, max {stats[key]['mixed']['max']}"
+            )
+
     def _write_report_header(self, f, results):
         """写入报告头部"""
         summary = results["summary"]
@@ -1168,6 +1290,23 @@ class BandwidthAnalyzer:
             f.write(f"  EQ ETag - T1: {circuit_stats.get('EQ_ETag_T1_num', 0)}, T0: {circuit_stats.get('EQ_ETag_T0_num', 0)}\n")
             f.write(f"  ITag - h: {circuit_stats.get('ITag_h_num', 0)}, v: {circuit_stats.get('ITag_v_num', 0)}\n")
             f.write(f"  Retry - read: {circuit_stats.get('read_retry_num', 0)}, write: {circuit_stats.get('write_retry_num', 0)}\n")
+
+        # 延迟统计 (cmd, data, transaction)
+        stats = self._calculate_latency_stats()
+
+        def _avg(cat, op):
+            s = stats[cat][op]
+            return s["sum"] / s["count"] if s["count"] else 0.0
+
+        f.write("延迟统计 (cycle)：\n")
+        for cat, label in [("cmd", "CMD"), ("data", "Data"), ("trans", "Trans")]:
+            rl = stats[cat]
+            f.write(
+                f"  {label} 延迟 - "
+                f"读 avg {_avg(cat,'read'):.2f}, max {rl['read']['max']}; "
+                f"写 avg {_avg(cat,'write'):.2f}, max {rl['write']['max']}; "
+                f"混合 avg {_avg(cat,'mixed'):.2f}, max {rl['mixed']['max']}\n"
+            )
 
         f.write("\n")
 
@@ -1483,7 +1622,9 @@ class BandwidthAnalyzer:
 
 
 # 便捷使用函数
-def analyze_bandwidth(base_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False) -> Dict:
+def analyze_bandwidth(
+    base_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False
+) -> Dict:
     """
     便捷的带宽分析函数
 

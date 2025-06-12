@@ -106,7 +106,7 @@ class BaseModel:
         self.topo_type_stat = self.config.TOPO_TYPE
         self.config.update_config()
         self.config.update_latency()
-        self.config.topology_select(self.topo_type_stat)
+        # self.config.topology_select(self.topo_type_stat)
         self.adjacency_matrix = create_adjacency_matrix("CrossRing", self.config.NUM_NODE, self.config.NUM_COL)
         self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
@@ -119,7 +119,9 @@ class BaseModel:
             self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
-        self.flit_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
+        self.flit_positions = set(
+            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
+        )
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
         self.ip_modules = {}
@@ -206,22 +208,35 @@ class BaseModel:
         self.EQ_ETag_T1_num_stat, self.EQ_ETag_T0_num_stat = 0, 0
         self.RB_ETag_T1_num_stat, self.RB_ETag_T0_num_stat = 0, 0
         self.ITag_h_num_stat, self.ITag_v_num_stat = 0, 0
-        (
-            self.read_BW_stat,
-            self.read_total_latency_avg_stat,
-            self.read_total_latency_max_stat,
-        ) = (0, 0, 0)
-        self.read_cmd_latency_avg_stat, self.read_cmd_latency_max_stat = 0, 0
-        self.read_dat_latency_avg_stat, self.read_dat_latency_max_stat = 0, 0
-        (
-            self.write_BW_stat,
-            self.write_total_latency_avg_stat,
-            self.write_total_latency_max_stat,
-        ) = (0, 0, 0)
-        self.write_cmd_latency_avg_stat, self.write_cmd_latency_max_stat = 0, 0
-        self.write_dat_latency_avg_stat, self.write_dat_latency_max_stat = 0, 0
-        self.Total_BW_stat = 0
+        # (
+        #     self.read_BW_stat,
+        #     self.read_total_latency_avg_stat,
+        #     self.read_total_latency_max_stat,
+        # ) = (0, 0, 0)
+        # self.read_cmd_latency_avg_stat, self.read_cmd_latency_max_stat = 0, 0
+        # self.read_dat_latency_avg_stat, self.read_dat_latency_max_stat = 0, 0
+        # (
+        #     self.write_BW_stat,
+        #     self.write_total_latency_avg_stat,
+        #     self.write_total_latency_max_stat,
+        # ) = (0, 0, 0)
+        # self.write_cmd_latency_avg_stat, self.write_cmd_latency_max_stat = 0, 0
+        # self.write_dat_latency_avg_stat, self.write_dat_latency_max_stat = 0, 0
+        # self.Total_BW_stat = 0
         self.Total_sum_BW_stat = 0
+
+        # Mixed (total) bandwidth/latency stats initialization
+        self.mixed_unweighted_bw_stat = 0
+        self.mixed_weighted_bw_stat = 0
+        self.cmd_mixed_avg_latency_stat = 0
+        self.cmd_mixed_max_latency_stat = 0
+        self.data_mixed_avg_latency_stat = 0
+        self.data_mixed_max_latency_stat = 0
+        self.trans_mixed_avg_latency_stat = 0
+        self.trans_mixed_max_latency_stat = 0
+        # Overall average bandwidth stats (unweighted and weighted)
+        self.total_unweighted_bw_stat = 0
+        self.total_weighted_bw_stat   = 0
 
     def run(self):
         """Main simulation loop."""
@@ -407,7 +422,11 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
+            print(
+                f"Data statistic: Read: {self.read_req, self.read_flit}, "
+                f"Write: {self.write_req, self.write_flit}, "
+                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
+            )
 
     def log_summary(self):
         if self.verbose:
@@ -729,7 +748,8 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
+                    for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
@@ -1090,6 +1110,52 @@ class BaseModel:
         self.result_processor.generate_unified_report(results, self.result_save_path)
         self.Total_sum_BW_stat = results["Total_sum_BW"]
 
+        # 额外带宽统计
+        read_metrics = results["network_overall"]["read"]
+        write_metrics = results["network_overall"]["write"]
+        # 非加权 / 加权 带宽
+        self.read_unweighted_bw_stat = read_metrics.unweighted_bandwidth
+        self.read_weighted_bw_stat = read_metrics.weighted_bandwidth
+        self.write_unweighted_bw_stat = write_metrics.unweighted_bandwidth
+        self.write_weighted_bw_stat = write_metrics.weighted_bandwidth
+
+        # 延迟统计
+        latency_stats = self.result_processor._calculate_latency_stats()
+        # CMD 延迟
+        self.cmd_read_avg_latency_stat = (latency_stats["cmd"]["read"]["sum"] / latency_stats["cmd"]["read"]["count"]) if latency_stats["cmd"]["read"]["count"] else 0.0
+        self.cmd_read_max_latency_stat = latency_stats["cmd"]["read"]["max"]
+        self.cmd_write_avg_latency_stat = (latency_stats["cmd"]["write"]["sum"] / latency_stats["cmd"]["write"]["count"]) if latency_stats["cmd"]["write"]["count"] else 0.0
+        self.cmd_write_max_latency_stat = latency_stats["cmd"]["write"]["max"]
+        # Data 延迟
+        self.data_read_avg_latency_stat = (latency_stats["data"]["read"]["sum"] / latency_stats["data"]["read"]["count"]) if latency_stats["data"]["read"]["count"] else 0.0
+        self.data_read_max_latency_stat = latency_stats["data"]["read"]["max"]
+        self.data_write_avg_latency_stat = (latency_stats["data"]["write"]["sum"] / latency_stats["data"]["write"]["count"]) if latency_stats["data"]["write"]["count"] else 0.0
+        self.data_write_max_latency_stat = latency_stats["data"]["write"]["max"]
+        # Transaction 延迟
+        self.trans_read_avg_latency_stat = (latency_stats["trans"]["read"]["sum"] / latency_stats["trans"]["read"]["count"]) if latency_stats["trans"]["read"]["count"] else 0.0
+        self.trans_read_max_latency_stat = latency_stats["trans"]["read"]["max"]
+        self.trans_write_avg_latency_stat = (latency_stats["trans"]["write"]["sum"] / latency_stats["trans"]["write"]["count"]) if latency_stats["trans"]["write"]["count"] else 0.0
+        self.trans_write_max_latency_stat = latency_stats["trans"]["write"]["max"]
+
+        # Mixed 带宽统计
+        mixed_metrics = results["network_overall"]["mixed"]
+        self.mixed_unweighted_bw_stat = mixed_metrics.unweighted_bandwidth
+        self.mixed_weighted_bw_stat = mixed_metrics.weighted_bandwidth
+        # Total average bandwidth stats (unweighted and weighted)
+        self.mixed_avg_unweighted_bw_stat = mixed_metrics.unweighted_bandwidth / self.config.NUM_IP
+        self.mixed_avg_weighted_bw_stat = mixed_metrics.weighted_bandwidth / self.config.NUM_IP
+
+        # Mixed 延迟统计
+        # CMD 混合
+        self.cmd_mixed_avg_latency_stat = (latency_stats["cmd"]["mixed"]["sum"] / latency_stats["cmd"]["mixed"]["count"]) if latency_stats["cmd"]["mixed"]["count"] else 0.0
+        self.cmd_mixed_max_latency_stat = latency_stats["cmd"]["mixed"]["max"]
+        # Data 混合
+        self.data_mixed_avg_latency_stat = (latency_stats["data"]["mixed"]["sum"] / latency_stats["data"]["mixed"]["count"]) if latency_stats["data"]["mixed"]["count"] else 0.0
+        self.data_mixed_max_latency_stat = latency_stats["data"]["mixed"]["max"]
+        # Trans 混合
+        self.trans_mixed_avg_latency_stat = (latency_stats["trans"]["mixed"]["sum"] / latency_stats["trans"]["mixed"]["count"]) if latency_stats["trans"]["mixed"]["count"] else 0.0
+        self.trans_mixed_max_latency_stat = latency_stats["trans"]["mixed"]["max"]
+
     def calculate_ip_bandwidth(self, intervals):
         """计算给定区间的加权带宽"""
         total_count = 0
@@ -1152,384 +1218,6 @@ class BaseModel:
             self.ip_bandwidth_data["read"][source_type][physical_row, physical_col] += read_bw
             self.ip_bandwidth_data["write"][source_type][physical_row, physical_col] += write_bw
             self.ip_bandwidth_data["total"][source_type][physical_row, physical_col] += total_bw
-
-    def draw_flow_graph(self, network, mode="total", node_size=2000, save_path=None):
-        """
-        绘制合并的网络流图和IP
-
-        :param network: 网络对象
-        :param mode: 显示模式，可以是'read', 'write'或'total'
-        :param node_size: 节点大小
-        :param save_path: 图片保存路径
-        """
-        # 确保IP带宽数据已计算
-        if not hasattr(self, "ip_bandwidth_data"):
-            self.calculate_ip_bandwidth_data()
-
-        # 准备网络流数据
-        G = nx.DiGraph()
-
-        # 处理不同模式的网络流数据
-        if mode == "read":
-            links = network.links_flow_stat.get("read", {})
-        elif mode == "write":
-            links = network.links_flow_stat.get("write", {})
-        else:  # total模式，需要合并读和写的数据
-            read_links = network.links_flow_stat.get("read", {})
-            write_links = network.links_flow_stat.get("write", {})
-
-            # 合并读和写的流量
-            all_keys = set(read_links.keys()) | set(write_links.keys())
-            links = {}
-            for key in all_keys:
-                read_val = read_links.get(key, 0)
-                write_val = write_links.get(key, 0)
-                links[key] = read_val + write_val
-
-        link_values = []
-        for (i, j), value in links.items():
-            link_value = value * 128 / (self.cycle // self.config.NETWORK_FREQUENCY) if value else 0
-            link_values.append(link_value)
-            formatted_label = f"{link_value:.1f}"
-            G.add_edge(i, j, label=formatted_label)
-
-        # 计算节点位置
-        pos = {}
-        for node in G.nodes():
-            x = node % self.config.NUM_COL
-            y = node // self.config.NUM_COL
-            if y % 2 == 1:  # 奇数行左移
-                x -= 0.25
-                y -= 0.6
-            pos[node] = (x * 3, -y * 1.5)
-
-        # 创建图形
-        fig, ax = plt.subplots(figsize=(10, 8))
-        ax.set_aspect("equal")
-
-        # 调整方形节点大小
-        square_size = np.sqrt(node_size) / 100
-
-        # 绘制网络流图
-        nx.draw_networkx_nodes(G, pos, node_size=square_size, node_shape="s", ax=ax)
-
-        # 绘制方形节点并添加IP信息
-        for node, (x, y) in pos.items():
-            # 绘制主节点方框
-            rect = Rectangle(
-                (x - square_size / 2, y - square_size / 2),
-                width=square_size,
-                height=square_size,
-                color="lightblue",
-                ec="black",
-                zorder=2,
-            )
-            ax.add_patch(rect)
-            ax.text(x, y, str(node), ha="center", va="center", fontsize=10)
-
-            # 在节点左侧添加IP信息
-            physical_row = node // self.config.NUM_COL
-            physical_col = node % self.config.NUM_COL
-
-            if physical_row % 2 == 0:
-                # 田字格位置和大小
-                ip_width = square_size * 2.6
-                ip_height = square_size * 2.6
-                ip_x = x - square_size - ip_width / 2.8
-                ip_y = y + 0.26
-
-                # 绘制田字格外框
-                ip_rect = Rectangle(
-                    (ip_x - ip_width / 2, ip_y - ip_height / 2),
-                    width=ip_width,
-                    height=ip_height,
-                    color="white",
-                    ec="black",
-                    linewidth=1,
-                    zorder=2,
-                )
-                ax.add_patch(ip_rect)
-
-                # 绘制田字格内部线条
-                ax.plot(
-                    [ip_x - ip_width / 2, ip_x + ip_width / 2],
-                    [ip_y, ip_y],
-                    color="black",
-                    linewidth=1,
-                    zorder=3,
-                )
-                ax.plot(
-                    [ip_x, ip_x],
-                    [ip_y - ip_height / 2, ip_y + ip_height / 2],
-                    color="black",
-                    linewidth=1,
-                    zorder=3,
-                )
-
-                # 为左列和右列填充不同颜色（DMA和DDR区分）
-                left_color = "honeydew"  # 左列颜色（DMA）
-                right_color = "aliceblue"  # 右列颜色（GDMA）
-                # 左列矩形（DMA区域）
-                left_rect = Rectangle(
-                    (ip_x - ip_width / 2, ip_y - ip_height / 2),
-                    width=ip_width / 2,
-                    height=ip_height,
-                    color=left_color,
-                    ec="none",
-                    zorder=2,
-                )
-                ax.add_patch(left_rect)
-
-                # 右列矩形（DDR区域）
-                right_rect = Rectangle(
-                    (ip_x, ip_y - ip_height / 2),
-                    width=ip_width / 2,
-                    height=ip_height,
-                    color=right_color,
-                    ec="none",
-                    zorder=2,
-                )
-                ax.add_patch(right_rect)
-
-                # 添加IP信息
-                if mode == "read":
-                    sdma_value = self.ip_bandwidth_data["read"]["sdma"][physical_row // 2, physical_col]
-                    gdma_value = self.ip_bandwidth_data["read"]["gdma"][physical_row // 2, physical_col]
-                    ddr_value = self.ip_bandwidth_data["read"]["ddr"][physical_row // 2, physical_col]
-                    l2m_value = self.ip_bandwidth_data["read"]["l2m"][physical_row // 2, physical_col]
-
-                    # 收集当前模式下每个IP的所有值
-                    all_sdma = self.ip_bandwidth_data["read"]["sdma"].flatten()
-                    all_gdma = self.ip_bandwidth_data["read"]["gdma"].flatten()
-                    all_ddr = self.ip_bandwidth_data["read"]["ddr"].flatten()
-                    all_l2m = self.ip_bandwidth_data["read"]["l2m"].flatten()
-
-                elif mode == "write":
-                    sdma_value = self.ip_bandwidth_data["write"]["sdma"][physical_row // 2, physical_col]
-                    gdma_value = self.ip_bandwidth_data["write"]["gdma"][physical_row // 2, physical_col]
-                    ddr_value = self.ip_bandwidth_data["write"]["ddr"][physical_row // 2, physical_col]
-                    l2m_value = self.ip_bandwidth_data["write"]["l2m"][physical_row // 2, physical_col]
-
-                    all_sdma = self.ip_bandwidth_data["write"]["sdma"].flatten()
-                    all_gdma = self.ip_bandwidth_data["write"]["gdma"].flatten()
-                    all_ddr = self.ip_bandwidth_data["write"]["ddr"].flatten()
-                    all_l2m = self.ip_bandwidth_data["write"]["l2m"].flatten()
-
-                else:  # total
-                    sdma_value = self.ip_bandwidth_data["total"]["sdma"][physical_row // 2, physical_col]
-                    gdma_value = self.ip_bandwidth_data["total"]["gdma"][physical_row // 2, physical_col]
-                    ddr_value = self.ip_bandwidth_data["total"]["ddr"][physical_row // 2, physical_col]
-                    l2m_value = self.ip_bandwidth_data["total"]["l2m"][physical_row // 2, physical_col]
-
-                    all_sdma = self.ip_bandwidth_data["total"]["sdma"].flatten()
-                    all_gdma = self.ip_bandwidth_data["total"]["gdma"].flatten()
-                    all_ddr = self.ip_bandwidth_data["total"]["ddr"].flatten()
-                    all_l2m = self.ip_bandwidth_data["total"]["l2m"].flatten()
-
-                # 计算每个IP的阈值（例如取前20%的分位数）
-                sdma_threshold = np.percentile(all_sdma, 90)
-                gdma_threshold = np.percentile(all_gdma, 90)
-                ddr_threshold = np.percentile(all_ddr, 90)
-                l2m_threshold = np.percentile(all_l2m, 90)
-
-                # SDMA在左上半部分（大于阈值则红色）
-                sdma_color = "red" if sdma_value > sdma_threshold else "black"
-                ax.text(
-                    ip_x - ip_width / 4,
-                    ip_y + ip_height / 4,
-                    f"{sdma_value:.1f}",
-                    fontweight="bold",
-                    ha="center",
-                    va="center",
-                    fontsize=9.5,
-                    color=sdma_color,
-                )
-
-                # GDMA在左下半部分
-                gdma_color = "red" if gdma_value > gdma_threshold else "black"
-                ax.text(
-                    ip_x - ip_width / 4,
-                    ip_y - ip_height / 4,
-                    f"{gdma_value:.1f}",
-                    fontweight="bold",
-                    ha="center",
-                    va="center",
-                    fontsize=9.5,
-                    color=gdma_color,
-                )
-
-                # l2m在右上半部分
-                l2m_color = "red" if l2m_value > l2m_threshold else "black"
-                ax.text(
-                    ip_x + ip_width / 4,
-                    ip_y + ip_height / 4,
-                    f"{l2m_value:.1f}",
-                    fontweight="bold",
-                    ha="center",
-                    va="center",
-                    fontsize=9.5,
-                    color=l2m_color,
-                )
-
-                # ddr在右下半部分
-                ddr_color = "red" if ddr_value > ddr_threshold else "black"
-                ax.text(
-                    ip_x + ip_width / 4,
-                    ip_y - ip_height / 4,
-                    f"{ddr_value:.1f}",
-                    fontweight="bold",
-                    ha="center",
-                    va="center",
-                    fontsize=9.5,
-                    color=ddr_color,
-                )
-
-        # 绘制边和边标签
-        edge_value_threshold = np.percentile(link_values, 90)
-
-        for i, j, data in G.edges(data=True):
-            x1, y1 = pos[i]
-            x2, y2 = pos[j]
-            if float(data["label"]) > edge_value_threshold:
-                color = "red"
-            else:
-                color = "black"
-
-            if i != j:  # 普通边
-                dx, dy = x2 - x1, y2 - y1
-                dist = np.hypot(dx, dy)
-                if dist > 0:
-                    dx, dy = dx / dist, dy / dist
-                    perp_dx, perp_dy = -dy * 0.1, dx * 0.1
-
-                    has_reverse = G.has_edge(j, i)
-                    if has_reverse:
-                        start_x = x1 + dx * square_size / 2 + perp_dx
-                        start_y = y1 + dy * square_size / 2 + perp_dy
-                        end_x = x2 - dx * square_size / 2 + perp_dx
-                        end_y = y2 - dy * square_size / 2 + perp_dy
-                    else:
-                        start_x = x1 + dx * square_size / 2
-                        start_y = y1 + dy * square_size / 2
-                        end_x = x2 - dx * square_size / 2
-                        end_y = y2 - dy * square_size / 2
-
-                    arrow = FancyArrowPatch(
-                        (start_x, start_y),
-                        (end_x, end_y),
-                        arrowstyle="-|>",
-                        mutation_scale=10,
-                        color=color,
-                        zorder=1,
-                        linewidth=1,
-                    )
-                    ax.add_patch(arrow)
-
-        # 绘制边标签
-        edge_labels = nx.get_edge_attributes(G, "label")
-        for edge, label in edge_labels.items():
-            i, j = edge
-            if float(label) == 0.0:
-                continue
-            if float(label) > edge_value_threshold:
-                color = "red"
-            else:
-                color = "black"
-            if i == j:
-                # 计算标签位置
-                original_row = i // self.config.NUM_COL
-                original_col = i % self.config.NUM_COL
-                x, y = pos[i]
-
-                offset = 0.17  # 标签偏移量
-                if original_row == 0:
-                    label_pos = (x, y + square_size / 2 + offset)
-                    angle = 0
-                elif original_row == self.config.NUM_ROW - 2:
-                    label_pos = (x, y - square_size / 2 - offset)
-                    angle = 0
-                elif original_col == 0:
-                    label_pos = (x - square_size / 2 - offset, y)
-                    angle = -90
-                elif original_col == self.config.NUM_COL - 1:
-                    label_pos = (x + square_size / 2 + offset, y)
-                    angle = 90
-                else:
-                    label_pos = (x, y + square_size / 2 + offset)
-                    angle = 0
-
-                ax.text(
-                    *label_pos,
-                    str(label),
-                    ha="center",
-                    va="center",
-                    color=color,
-                    fontweight="bold",
-                    fontsize=11,
-                    rotation=angle,
-                )
-
-            if i != j:
-                x1, y1 = pos[i]
-                x2, y2 = pos[j]
-                mid_x = (x1 + x2) / 2
-                mid_y = (y1 + y2) / 2
-                dx, dy = x2 - x1, y2 - y1
-                angle = np.degrees(np.arctan2(dy, dx))
-
-                has_reverse = G.has_edge(j, i)
-                is_horizontal = abs(dx) > abs(dy)
-
-                if has_reverse:
-                    if is_horizontal:
-                        perp_dx, perp_dy = -dy * 0.1 + 0.2, dx * 0.1
-                    else:
-                        perp_dx, perp_dy = -dy * 0.18, dx * 0.18 - 0.3
-                    label_x = mid_x + perp_dx
-                    label_y = mid_y + perp_dy
-                else:
-                    if is_horizontal:
-                        label_x = mid_x + dx * 0.1
-                        label_y = mid_y + dy * 0.1
-                    else:
-                        label_x = mid_x + (-dy * 0.1 if dx > 0 else dy * 0.1)
-                        label_y = mid_y - 0.1
-
-                ax.text(
-                    label_x,
-                    label_y,
-                    str(label),
-                    ha="center",
-                    va="center",
-                    fontsize=12,
-                    fontweight="bold",
-                    color=color,
-                )
-
-        plt.axis("off")
-        title = f"{network.name} - {mode.capitalize()} Bandwidth"
-        if self.config.SPARE_CORE_ROW != -1:
-            title += f"\nRow: {self.config.SPARE_CORE_ROW}, Failed cores: {self.config.FAIL_CORE_POS}, Spare cores: {self.config.spare_core_pos}"
-        plt.title(title, fontsize=20)
-
-        # # 添加图例说明
-        # legend_text = f"IP {mode.capitalize()} Bandwidth (GB/s):\n" "SDMA: Top half of square\n" "GDMA: Bottom half of square"
-        # plt.figtext(0.02, 0.98, legend_text, ha="TL", va="top", fontsize=10, bbox=dict(facecolor="white", alpha=0.8, edgecolor="gray"))
-
-        plt.tight_layout()
-
-        if save_path:
-            plt.savefig(
-                os.path.join(
-                    save_path,
-                    f"{str(self.topo_type_stat)}_{self.file_name[:-4]}_combined_{mode}_{network.name}_{self.config.FAIL_CORE_POS}_{self.config.SPARE_CORE_ROW}_{str(time.time_ns())[-3:]}.png",
-                ),
-                dpi=300,
-                bbox_inches="tight",
-            )
-            plt.close()
-        else:
-            plt.show()
 
     def node_map(self, node, is_source=True):
         if is_source:

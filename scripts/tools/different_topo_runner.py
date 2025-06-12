@@ -9,6 +9,7 @@ from config.config import CrossRingConfig
 import matplotlib
 import time
 from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
     matplotlib.use("macosx")  # 仅在 macOS 上使用该后端
@@ -151,7 +152,8 @@ class CrossRingBatchRunner:
 
             config = CrossRingConfig(self.config_path)
             config.TOPO_TYPE = topo_name
-            num_col = int(topo_name[0])
+            rows, cols = map(int, topo_name.split("x"))
+            num_col = cols
             num_core = num_col**2
             config.NUM_NODE = num_core * 2
             config.NUM_COL = num_col
@@ -165,12 +167,6 @@ class CrossRingBatchRunner:
             config.NUM_L2M = num_core
 
             config.BURST = 4
-            config.NUM_DDR = 32
-            config.NUM_L2M = 32
-            config.NUM_GDMA = 32
-            config.NUM_SDMA = 32
-            config.NUM_RN = 32
-            config.NUM_SN = 32
             config.RN_R_TRACKER_OSTD = 64
             config.RN_W_TRACKER_OSTD = 64
             config.RN_RDB_SIZE = config.RN_R_TRACKER_OSTD * config.BURST
@@ -201,8 +197,8 @@ class CrossRingBatchRunner:
                 file_name=traffic_file,
                 result_save_path=self.result_save_path,
                 results_fig_save_path=None,  # 批量运行时不保存图片
-                plot_flow_fig=1,
-                plot_RN_BW_fig=1,
+                plot_flow_fig=0,
+                plot_RN_BW_fig=0,
                 plot_link_state=0,
                 plot_start_time=0,
                 print_trace=0,
@@ -222,10 +218,8 @@ class CrossRingBatchRunner:
             # 收集结果
             result = {}
 
-            # 添加更多性能指标（如果仿真器提供的话）
-            if hasattr(sim, "get_performance_metrics"):
-                metrics = sim.get_results()
-                result.update(metrics)
+            metrics = sim.get_results()
+            result.update(metrics)
 
             print(f"Completed: {topo_name} with {traffic_file}")
             del sim
@@ -274,14 +268,19 @@ class CrossRingBatchRunner:
         for model_type in model_types:
             print(f"Running simulations with model type: {model_type}")
 
+            # 准备并行执行任务
+            tasks = []
             for topo_name in sorted(all_traffic_files.keys()):
-                traffic_files = all_traffic_files[topo_name]
+                for traffic_file in all_traffic_files[topo_name]:
+                    tasks.append((topo_name, traffic_file, model_type))
 
-                for traffic_file in traffic_files:
-                    total_runs += 1
-                    result = self.run_single_simulation(topo_name, traffic_file, model_type)
+            total_runs += len(tasks)
+            # 使用多进程并行执行
+            with ProcessPoolExecutor() as executor:
+                future_to_task = {executor.submit(self.run_single_simulation, topo, tf, mt): (topo, tf) for topo, tf, mt in tasks}
+                for future in as_completed(future_to_task):
+                    result = future.result()
                     self.results.append(result)
-
                     completed_runs += 1
 
                     # 定期保存结果
@@ -328,13 +327,13 @@ class CrossRingBatchRunner:
         print(model_summary)
 
         # 失败的运行
-        failed_runs = df[df["status"] != "completed"]
-        if not failed_runs.empty:
-            print(f"\nFailed Runs ({len(failed_runs)}):")
-            for _, row in failed_runs.iterrows():
-                print(f"  {row['topology']} - {row['traffic_file']}: {row['status']}")
-        else:
-            print("\nNo failed runs!")
+        # failed_runs = df[df["status"] != "completed"]
+        # if not failed_runs.empty:
+        #     print(f"\nFailed Runs ({len(failed_runs)}):")
+        #     for _, row in failed_runs.iterrows():
+        #         print(f"  {row['topology']} - {row['traffic_file']}: {row['status']}")
+        # else:
+        #     print("\nNo failed runs!")
 
 
 def main():
