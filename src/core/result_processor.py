@@ -357,7 +357,7 @@ class BandwidthAnalyzer:
             总带宽 (GB/s)
         """
         if self.plot_rn_bw_fig:
-            plt.figure(figsize=(12, 8))
+            fig = plt.figure(figsize=(12, 8))
 
         total_bw = 0
 
@@ -401,7 +401,12 @@ class BandwidthAnalyzer:
             plt.title("RN Bandwidth")
             plt.legend()
             plt.grid(True)
-            plt.show()
+            # 自动保存RN带宽曲线到结果文件夹
+            if self.plot_rn_bw_fig and hasattr(self, "base_model") and getattr(self.base_model, "results_fig_save_path", None):
+                rn_save_path = os.path.join(self.base_model.results_fig_save_path, f"rn_bandwidth_{self.config.TOPO_TYPE}.png")
+                fig.savefig(rn_save_path, bbox_inches="tight")
+            else:
+                plt.show()
 
         return total_bw
 
@@ -726,10 +731,11 @@ class BandwidthAnalyzer:
         results["summary"]["Total_sum_BW"] = total_bandwidth
         results["Total_sum_BW"] = total_bandwidth
 
-        if self.plot_flow_graph and hasattr(self, "base_model") and self.base_model:
-            # 需要从base_model获取network对象
-            if hasattr(self.base_model, "data_network"):
-                self.draw_flow_graph(self.base_model.data_network, mode="total")
+        if self.plot_flow_graph and hasattr(self, "base_model") and self.base_model and getattr(self.base_model, "results_fig_save_path", None):
+            # 自动保存流量图到结果文件夹
+            flow_fname = f"flow_graph_{self.config.TOPO_TYPE}.png"
+            flow_save_path = os.path.join(self.base_model.results_fig_save_path, flow_fname)
+            self.draw_flow_graph(self.base_model.data_network, mode="total", save_path=flow_save_path)
 
         return results
 
@@ -1153,7 +1159,6 @@ class BandwidthAnalyzer:
             plt.savefig(
                 os.path.join(
                     save_path,
-                    f"{str(self.topo_type_stat)}_{self.file_name[:-4]}_combined_{mode}_{network.name}_{self.config.FAIL_CORE_POS}_{self.config.SPARE_CORE_ROW}_{str(time.time_ns())[-3:]}.png",
                 ),
                 dpi=300,
                 bbox_inches="tight",

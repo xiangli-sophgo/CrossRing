@@ -196,9 +196,9 @@ class CrossRingBatchRunner:
                 traffic_file_path=self.traffic_base_path,
                 file_name=traffic_file,
                 result_save_path=self.result_save_path,
-                results_fig_save_path=None,  # 批量运行时不保存图片
-                plot_flow_fig=0,
-                plot_RN_BW_fig=0,
+                results_fig_save_path=self.result_save_path,  # 批量运行时不保存图片
+                plot_flow_fig=1,
+                plot_RN_BW_fig=1,
                 plot_link_state=0,
                 plot_start_time=0,
                 print_trace=0,
