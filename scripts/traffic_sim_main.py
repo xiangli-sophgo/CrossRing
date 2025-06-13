@@ -25,7 +25,7 @@ def process_traffic_data(input_path, output_path, outstanding_num):
     outstanding_digit = outstanding_num.bit_length() - 1
 
     # Step 1: Flatten trace files
-    step1_flatten.main(input_path, output_path)
+    # step1_flatten.main(input_path, output_path)
 
     # Step 2: Hash addresses to node numbers
     hasher = step2_hash_addr2node.AddressHasher(itlv_size=outstanding_num)
@@ -244,7 +244,7 @@ def main():
     parser.add_argument("--config", default="../config/config2.json", help="Simulation config file path")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="Simulation model type")
     parser.add_argument("--results_file_name", default="DeepSeek_0613_mix", help="Base name for results files")
-    parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both")
+    parser.add_argument("--mode", default=0, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both")
     # parser.add_argument("--max_workers", type=int, default=None, help="Maximum number of parallel workers (default: number of CPU cores)")
     parser.add_argument("--max_workers", type=int, default=1, help="Maximum number of parallel workers (default: number of CPU cores)")
 

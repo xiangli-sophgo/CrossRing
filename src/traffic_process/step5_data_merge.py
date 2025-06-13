@@ -28,7 +28,7 @@ def merge_and_sort_files(folder_path, output_path=None):
     all_data.sort(key=lambda x: int(x.split(",")[0]))
 
     # Write sorted data to a new file
-    file_name = os.path.basename(folder_path) + "_Trace.txt"
+    file_name = os.path.basename(folder_path) + ".txt"
     output_path = output_path if output_path else "../output"
     output_file = os.path.join(output_path + "/step5_data_merge", file_name)
     os.makedirs(os.path.dirname(output_file), exist_ok=True)

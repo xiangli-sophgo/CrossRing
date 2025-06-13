@@ -240,4 +240,4 @@ if __name__ == "__main__":
     # Specify the output CSV file path
     output_csv = None
     output_csv = r"../../Result/Data_csv/DeepSeek_traffic_stats.csv"
-    stat.run(r"../../traffic/output_DeepSeek/step1_flatten/", output_csv, plot_data=1)
+    stat.run(r"../../traffic/DeepSeek_0613/step1_flatten/", output_csv, plot_data=0)

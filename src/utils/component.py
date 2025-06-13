@@ -734,8 +734,8 @@ class IPInterface:
                     # 更新flit时间戳
                     first_flit = next((flit for flit in self.data_network.send_flits[flit.packet_id] if flit.flit_id == 0), self.data_network.send_flits[flit.packet_id][0])
                     for f in self.data_network.send_flits[flit.packet_id]:
-                        # f.sync_latency_record(req)
                         f.leave_db_cycle = release_time
+                        f.sync_latency_record(req)
                         f.data_received_complete_cycle = self.current_cycle
                         f.cmd_latency = f.cmd_received_by_cake0_cycle - f.cmd_entry_noc_from_cake0_cycle
                         f.data_latency = f.data_received_complete_cycle - first_flit.data_entry_noc_from_cake0_cycle

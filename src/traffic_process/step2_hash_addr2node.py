@@ -7,7 +7,7 @@ class AddressHasher:
     def __init__(self, itlv_size=2048):
         self.itlv_size = itlv_size
         self.itlv_digit = itlv_size.bit_length() - 1
-        self.shared_64_count = 0
+        self.shared_32_count = 0
         self.shared_8_count = 0
         self.private_count = 0
         self.request_end_time = -1
@@ -15,7 +15,7 @@ class AddressHasher:
     def hash_all(self, addr, base=16):
         addr = int(addr, base=base)
         if 0x04_0000_0000 <= addr < 0x08_0000_0000:
-            self.shared_64_count += 1  # 统计 64 shared
+            self.shared_32_count += 1  # 统计 64 shared
             return self.shared_64(addr)
         elif 0x08_0000_0000 <= addr < 0x10_0000_0000:
             self.shared_8_count += 1  # 统计 8 shared
@@ -132,14 +132,14 @@ class AddressHasher:
             # Output statistics for the current directory
             if not files:
                 continue
-            total_request = self.shared_64_count + self.shared_8_count + self.private_count
+            total_request = self.shared_32_count + self.shared_8_count + self.private_count
             print(f"Directory: {root[27:]}")
-            print(f"64 shared requests: {self.shared_64_count}, {self.shared_64_count / total_request}")
+            print(f"32 shared requests: {self.shared_32_count}, {self.shared_32_count / total_request}")
             print(f"8 shared requests: {self.shared_8_count}, {self.shared_8_count / total_request}")
             print(f"Private requests: {self.private_count}, {self.private_count / total_request}")
-            print(f"Total requests: {self.shared_64_count + self.shared_8_count + self.private_count}")
+            print(f"Total requests: {self.shared_32_count + self.shared_8_count + self.private_count}")
             print(f"Request end time: {self.request_end_time}")
-            self.shared_64_count = 0
+            self.shared_32_count = 0
             self.shared_8_count = 0
             self.private_count = 0
 

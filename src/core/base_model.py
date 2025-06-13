@@ -204,21 +204,6 @@ class BaseModel:
         self.EQ_ETag_T1_num_stat, self.EQ_ETag_T0_num_stat = 0, 0
         self.RB_ETag_T1_num_stat, self.RB_ETag_T0_num_stat = 0, 0
         self.ITag_h_num_stat, self.ITag_v_num_stat = 0, 0
-        # (
-        #     self.read_BW_stat,
-        #     self.read_total_latency_avg_stat,
-        #     self.read_total_latency_max_stat,
-        # ) = (0, 0, 0)
-        # self.read_cmd_latency_avg_stat, self.read_cmd_latency_max_stat = 0, 0
-        # self.read_dat_latency_avg_stat, self.read_dat_latency_max_stat = 0, 0
-        # (
-        #     self.write_BW_stat,
-        #     self.write_total_latency_avg_stat,
-        #     self.write_total_latency_max_stat,
-        # ) = (0, 0, 0)
-        # self.write_cmd_latency_avg_stat, self.write_cmd_latency_max_stat = 0, 0
-        # self.write_dat_latency_avg_stat, self.write_dat_latency_max_stat = 0, 0
-        # self.Total_BW_stat = 0
         self.Total_sum_BW_stat = 0
 
         # Mixed (total) bandwidth/latency stats initialization
@@ -450,7 +435,7 @@ class BaseModel:
             elif req.req_type == "write":
                 counts["write"] += 1
 
-        req.cmd_entry_noc_from_cake0_cycle = self.cycle
+        # req.cmd_entry_noc_from_cake0_cycle = self.cycle
         return True
 
     # ------------------------------------------------------------------
