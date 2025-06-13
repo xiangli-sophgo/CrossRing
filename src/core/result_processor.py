@@ -403,7 +403,7 @@ class BandwidthAnalyzer:
             plt.grid(True)
             # 自动保存RN带宽曲线到结果文件夹
             if self.plot_rn_bw_fig and hasattr(self, "base_model") and getattr(self.base_model, "results_fig_save_path", None):
-                rn_save_path = os.path.join(self.base_model.results_fig_save_path, f"rn_bandwidth_{self.config.TOPO_TYPE}.png")
+                rn_save_path = os.path.join(self.base_model.results_fig_save_path, f"rn_bandwidth_{self.config.TOPO_TYPE}_{self.base_model.file_name}.png")
                 fig.savefig(rn_save_path, bbox_inches="tight")
             else:
                 plt.show()
@@ -733,7 +733,7 @@ class BandwidthAnalyzer:
 
         if self.plot_flow_graph and hasattr(self, "base_model") and self.base_model and getattr(self.base_model, "results_fig_save_path", None):
             # 自动保存流量图到结果文件夹
-            flow_fname = f"flow_graph_{self.config.TOPO_TYPE}.png"
+            flow_fname = f"flow_graph_{self.config.TOPO_TYPE}_{self.base_model.file_name}.png"
             flow_save_path = os.path.join(self.base_model.results_fig_save_path, flow_fname)
             self.draw_flow_graph(self.base_model.data_network, mode="total", save_path=flow_save_path)
 
@@ -1208,15 +1208,9 @@ class BandwidthAnalyzer:
         print(
             f"  总带宽  - 非加权: {read_metrics.unweighted_bandwidth + write_metrics.unweighted_bandwidth:.3f} GB/s, 加权: {read_metrics.weighted_bandwidth + write_metrics.weighted_bandwidth:.3f} GB/s"
         )
-        print(
-            f"  读带宽  - 平均非加权: {read_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {read_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s"
-        )
-        print(
-            f"  写带宽  - 平均非加权: {write_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {write_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s"
-        )
-        print(
-            f"  混合带宽 - 平均非加权: {mixed_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {mixed_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s"
-        )
+        print(f"  读带宽  - 平均非加权: {read_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {read_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
+        print(f"  写带宽  - 平均非加权: {write_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {write_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
+        print(f"  混合带宽 - 平均非加权: {mixed_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {mixed_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
         print(
             f"  总带宽  - 平均非加权: {(read_metrics.unweighted_bandwidth + write_metrics.unweighted_bandwidth) / self.config.NUM_IP:.3f} GB/s, 平均加权: {(read_metrics.weighted_bandwidth + write_metrics.weighted_bandwidth) / self.config.NUM_IP:.3f} GB/s"
         )
@@ -1627,9 +1621,7 @@ class BandwidthAnalyzer:
 
 
 # 便捷使用函数
-def analyze_bandwidth(
-    base_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False
-) -> Dict:
+def analyze_bandwidth(base_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False) -> Dict:
     """
     便捷的带宽分析函数
 

@@ -97,9 +97,10 @@ class CrossRingConfig:
                 ports[f"{key}_{idx}"] = value_factory() if value_factory else None
         return ports
 
-    def update_config(self):
+    def update_config(self, topo_type="default"):
         self.update_latency()
-        self.topology_select()
+        self.update_latency()
+        self.topology_select(topo_type)
         self.SN_TRACKER_RELEASE_LATENCY = self.SN_TRACKER_RELEASE_LATENCY_original * self.NETWORK_FREQUENCY
         self.RN_R_TRACKER_OSTD = self.RN_RDB_SIZE // self.BURST
         self.RN_W_TRACKER_OSTD = self.RN_WDB_SIZE // self.BURST

@@ -20,7 +20,7 @@ class CrossRingBatchRunner:
         self.results = []
         self.traffic_base_path = r"../../traffic/nxn_traffics/"
         self.config_path = r"../../config/config2.json"
-        self.result_save_path = f"../../Result/CrossRing_different_topo/"
+        self.result_save_path = f"../../Result/CrossRing_different_topo_complete/"
         self.csv_output_path = f"../../Result/CrossRing_different_topo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
         # 确保输出目录存在
@@ -29,66 +29,14 @@ class CrossRingBatchRunner:
 
     def get_topology_configs(self):
         """定义不同拓扑的配置参数"""
-        base_config = {
-            "BURST": 4,
-            "RN_R_TRACKER_OSTD": 64,
-            "RN_W_TRACKER_OSTD": 64,
-            "SN_DDR_R_TRACKER_OSTD": 64,
-            "SN_DDR_W_TRACKER_OSTD": 64,
-            "SN_L2M_R_TRACKER_OSTD": 64,
-            "SN_L2M_W_TRACKER_OSTD": 64,
-            "DDR_R_LATENCY_original": 40,
-            "DDR_R_LATENCY_VAR_original": 0,
-            "DDR_W_LATENCY_original": 0,
-            "L2M_R_LATENCY_original": 12,
-            "L2M_W_LATENCY_original": 16,
-            "IQ_CH_FIFO_DEPTH": 10,
-            "EQ_CH_FIFO_DEPTH": 10,
-            "IQ_OUT_FIFO_DEPTH": 8,
-            "RB_OUT_FIFO_DEPTH": 8,
-            "SN_TRACKER_RELEASE_LATENCY": 40,
-            "TL_Etag_T2_UE_MAX": 8,
-            "TL_Etag_T1_UE_MAX": 15,
-            "TR_Etag_T2_UE_MAX": 12,
-            "RB_IN_FIFO_DEPTH": 16,
-            "TU_Etag_T2_UE_MAX": 8,
-            "TU_Etag_T1_UE_MAX": 15,
-            "TD_Etag_T2_UE_MAX": 12,
-            "EQ_IN_FIFO_DEPTH": 16,
-            "ITag_TRIGGER_Th_H": 80,
-            "ITag_TRIGGER_Th_V": 80,
-            "ITag_MAX_NUM_H": 1,
-            "ITag_MAX_NUM_V": 1,
-            "ETag_BOTHSIDE_UPGRADE": 0,
-            "SLICE_PER_LINK": 8,
-            "GDMA_RW_GAP": np.inf,
-            "SDMA_RW_GAP": np.inf,
-            "CHANNEL_SPEC": {
-                "gdma": 2,
-                "sdma": 2,
-                "ddr": 2,
-                "l2m": 2,
-            },
-        }
 
         # 为不同拓扑生成配置
         topo_configs = {}
         for rows in range(3, 11):  # 3x3 到 10x10
             cols = rows  # 只生成方形拓扑
             topo_name = f"{rows}x{cols}"
-            num_nodes = rows * cols
 
-            config = base_config.copy()
-            config["NUM_NODE"] = num_nodes**2
-            config["NUM_COL"] = cols
-            config["NUM_ROW"] = num_nodes // cols * 2
-            config["NUM_IP"] = num_nodes
-            config["NUM_DDR"] = num_nodes
-            config["NUM_L2M"] = num_nodes
-            config["NUM_GDMA"] = num_nodes
-            config["NUM_SDMA"] = num_nodes
-            config["NUM_RN"] = num_nodes
-            config["NUM_SN"] = num_nodes
+            config = {}
 
             topo_configs[topo_name] = config
 
@@ -210,7 +158,7 @@ class CrossRingBatchRunner:
             # 运行仿真
             np.random.seed(609)
             sim.initial()
-            sim.end_time = 6000
+            # sim.end_time = 6000
             sim.print_interval = 6000  # 减少打印频率
 
             sim.run()
@@ -325,15 +273,6 @@ class CrossRingBatchRunner:
         model_summary = df.groupby("model_type").agg({"status": lambda x: (x == "completed").sum(), "simulation_time": "mean"}).round(2)
         model_summary.columns = ["Completed_Runs", "Avg_SimTime(s)"]
         print(model_summary)
-
-        # 失败的运行
-        # failed_runs = df[df["status"] != "completed"]
-        # if not failed_runs.empty:
-        #     print(f"\nFailed Runs ({len(failed_runs)}):")
-        #     for _, row in failed_runs.iterrows():
-        #         print(f"  {row['topology']} - {row['traffic_file']}: {row['status']}")
-        # else:
-        #     print("\nNo failed runs!")
 
 
 def main():

@@ -104,9 +104,7 @@ class BaseModel:
 
     def initial(self):
         self.topo_type_stat = self.config.TOPO_TYPE
-        self.config.update_config()
-        self.config.update_latency()
-        # self.config.topology_select(self.topo_type_stat)
+        self.config.update_config(self.topo_type_stat)
         self.adjacency_matrix = create_adjacency_matrix("CrossRing", self.config.NUM_NODE, self.config.NUM_COL)
         self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
@@ -119,9 +117,7 @@ class BaseModel:
             self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
-        self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
-        )
+        self.flit_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
         self.ip_modules = {}
@@ -236,7 +232,7 @@ class BaseModel:
         self.trans_mixed_max_latency_stat = 0
         # Overall average bandwidth stats (unweighted and weighted)
         self.total_unweighted_bw_stat = 0
-        self.total_weighted_bw_stat   = 0
+        self.total_weighted_bw_stat = 0
 
     def run(self):
         """Main simulation loop."""
@@ -422,11 +418,7 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(
-                f"Data statistic: Read: {self.read_req, self.read_flit}, "
-                f"Write: {self.write_req, self.write_flit}, "
-                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
-            )
+            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
         if self.verbose:
@@ -748,8 +740,7 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
-                    for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
