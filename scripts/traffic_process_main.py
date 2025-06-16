@@ -5,6 +5,7 @@ from src.traffic_process import step2_hash_addr2node
 # import step4_add_4N
 from src.traffic_process import step5_data_merge
 from src.traffic_process import step6_core32_map
+from src.traffic_process import step6_map_to_ch
 
 # import AddPacketId
 
@@ -12,9 +13,9 @@ from src.traffic_process import step6_core32_map
 # path为输入Trace的文件夹名称,path和代码在同一路径
 
 # path = "../traffic/original_data/v8-32/2M/"
-path = r"../traffic/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce/"
+path = r"../traffic/original/DeepSeek3-671B-A37B-S4K-O1-W8A8-B32-Decode/Add"
 # path += "ins_SG2262_Ring_all_reduce_8cluster_all2all"
-output_path = "../traffic/output_v8_32_no_map/"
+output_path = "../traffic/0616_test/"
 # # outstanding_num必须为2的幂
 outstanding_num = 2048
 assert isinstance(outstanding_num, int), "outstanding_num must be integer or out of range."
@@ -43,6 +44,7 @@ hasher.run(output_path + "/step1_flatten", output_path + "/step2_hash_addr2node"
 step5_data_merge.main(output_path + "/step2_hash_addr2node", output_path)
 
 # step6_core32_map.main(output_path + "/step5_data_merge", output_path + "/step6_32core_map")
+step6_map_to_ch.main(output_path + "/step5_data_merge", output_path + "/step6_ch_map")
 
 
 # AddPacketId.main()

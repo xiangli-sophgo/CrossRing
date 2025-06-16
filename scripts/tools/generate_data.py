@@ -57,12 +57,22 @@ def group_numbers():
     return [group.tolist() for group in final_groups]
 
 
-def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, l2m_map, speed, burst, flow_type=0, mix_ratios=None, overlap=0):
+def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, cdma_map, ddr_map, l2m_map, speed, burst, flow_type=0, mix_ratios=None, overlap=0, custom_mapping=None):
     """
-    :param interval_count: 读写周期数量(每个周期=read_duration+write_duration)
+    :param custom_mapping: 自定义映射配置，格式如下：
+    {
+        'read': {
+            ('cdma', 12): [('ddr', 0), ('ddr', 1), ('ddr', 2), ('ddr', 3), ('ddr', 4), ('ddr', 5), ('ddr', 6), ('ddr', 7)],
+            ('cdma', 13): [('ddr', 8), ('ddr', 9), ('ddr', 10), ('ddr', 11), ('ddr', 12), ('ddr', 13), ('ddr', 14), ('ddr', 15)],
+            ('gdma', 0): [('l2m', 0), ('l2m', 1)]
+        },
+        'write': {
+            ('cdma', 12): [('l2m', 0), ('l2m', 1)],
+            ('cdma', 13): [('l2m', 2), ('l2m', 3)]
+        }
+    }
     """
     # 初始化流量生成器(默认读128ns+写128ns)
-    # generator = TrafficGenerator(read_duration=read_duration, write_duration=write_duration)
     data_all = []
 
     def generate_entries(src_map, dest_map, operation, burst, flow_type, speed, interval_count, dest_access_mode="round_robin", overlap=True):
@@ -74,7 +84,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
         dest_map: dict, 键为dest_type(str)，值为对应的dest_pos(list)
         operation: 'R' 或 'W'
         burst: int, burst长度
-        flow_type: int, 1=8-shared, 2=private, 其他=32-shared
+        flow_type: int, 1=8-shared, 2=private, 4=custom_mapping, 其他=32-shared
         speed: dict or list, 计算时间点所需参数
         interval_count: int, 周期数
         dest_access_mode: 'round_robin' 或 'random'
@@ -109,8 +119,6 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
             if flow_type == 1:
                 groups = group_numbers()
                 group_cycles = {gid: itertools.cycle([item for item in dest_items if item[1] in g]) for gid, g in enumerate(groups)}
-            # elif flow_type != 2:
-            #     dest_cycle = itertools.cycle(dest_items)
         else:  # random
             if flow_type == 1:
                 groups = group_numbers()
@@ -167,6 +175,43 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
 
                         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
+            # custom_mapping
+            elif flow_type == 4:
+                if custom_mapping and operation in custom_mapping:
+                    op_key = operation
+                    mapping = custom_mapping.get(op_key, {})
+
+                    for t in time_pattern:
+                        for src_type, src in src_items:
+                            # 查找该源DMA的自定义目标列表
+                            src_key = (src_type, src)
+                            if src_key in mapping:
+                                target_dests = mapping[src_key]
+                                # 轮询访问目标列表中的所有目标
+                                if not hasattr(generate_entries, "custom_cycles"):
+                                    generate_entries.custom_cycles = {}
+                                if src_key not in generate_entries.custom_cycles:
+                                    generate_entries.custom_cycles[src_key] = itertools.cycle(target_dests)
+
+                                dest_type, dest = next(generate_entries.custom_cycles[src_key])
+                                entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
+                            else:
+                                # 如果没有自定义映射，回退到默认行为
+                                if dest_access_mode == "random":
+                                    dest_type, dest = random.choice(dest_items)
+                                else:
+                                    dest_type, dest = next(dest_cycles[(src_type, src)])
+                                entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
+                else:
+                    # 没有自定义映射时，回退到默认32-shared行为
+                    for t in time_pattern:
+                        for src_type, src in src_items:
+                            if dest_access_mode == "random":
+                                dest_type, dest = random.choice(dest_items)
+                            else:
+                                dest_type, dest = next(dest_cycles[(src_type, src)])
+                            entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
+
             # 32-shared 或其他
             else:
                 for t in time_pattern:
@@ -177,7 +222,6 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
                             generate_entries.dest_assignments[t] = itertools.cycle(shuffled)
                         dest_cycle_t = generate_entries.dest_assignments[t]
                     else:
-                        # dest_cycle_t = itertools.cycle(dest_items)
                         dest_cycle_t_dict = dest_cycles
                     for src_type, src in src_items:
                         if dest_access_mode == "random":
@@ -187,30 +231,6 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
                         entries.append(f"{base_time + time_offset + t},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
 
         return entries
-
-    def generate_simultaneous_entries(src_pos, src_type, dest_map, burst, flow_type, read_speed, write_speed, interval_count, dest_access_mode="random"):
-        """
-        同时生成读和写请求
-
-        参数:
-        src_pos: list of source positions
-        src_type: str, source类型
-        dest_map: dict, 键为dest_type(str)，值为对应的dest_pos(list)
-        burst: int, burst长度
-        flow_type: int, 流量类型
-        read_speed: int, 读带宽
-        write_speed: int, 写带宽
-        interval_count: int, 周期数
-        dest_access_mode: str, 目标选择模式
-        """
-        # 生成读请求
-        read_entries = generate_entries(src_pos, src_type, dest_map, "R", burst, flow_type, read_speed, interval_count, dest_access_mode)
-        # 生成写请求
-        write_entries = generate_entries(src_pos, src_type, dest_map, "W", burst, flow_type, write_speed, interval_count, dest_access_mode)
-
-        # 合并并排序
-        all_entries = read_entries + write_entries
-        return sorted(all_entries, key=lambda x: int(x.split(",")[0]))
 
     def generate_mixed_entries(src_pos, src_type, dest_type, dest_pos, operation, burst, ratios):
         """混合模式生成（保持原有逻辑，但区分读写时间）"""
@@ -274,14 +294,36 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
 
         return entries
 
-    # 生成数据逻辑
+    # 生成数据逻辑 - 增加CDMA相关的分支
     if topo in ["4x9", "9x4", "4x5", "5x4"]:
         if flow_type == 3:
             mix_ratios = mix_ratios or {0: 0.4, 1: 0.4, 2: 0.2}
-            data_all.extend(generate_mixed_entries(sdma_map, "gdma", "ddr", ddr_map, "R", burst, mix_ratios))
-            data_all.extend(generate_mixed_entries(sdma_map, "gdma", "ddr", l2m_map, "W", burst, mix_ratios))
+            data_all.extend(generate_mixed_entries(sdma_map, "sdma", "ddr", ddr_map, "R", burst, mix_ratios))
+            data_all.extend(generate_mixed_entries(sdma_map, "sdma", "l2m", l2m_map, "W", burst, mix_ratios))
+            # 添加CDMA相关的混合流量
+            if cdma_map:
+                data_all.extend(generate_mixed_entries(cdma_map, "cdma", "ddr", ddr_map, "R", burst, mix_ratios))
+                data_all.extend(generate_mixed_entries(cdma_map, "cdma", "l2m", l2m_map, "W", burst, mix_ratios))
+        elif flow_type == 4:
+            # 使用自定义映射
+            if custom_mapping:
+                # 处理读操作
+                if "R" in custom_mapping:
+                    data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+
+                # 处理写操作
+                if "W" in custom_mapping:
+                    data_all.extend(generate_entries(cdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            else:
+                # 没有自定义映射时，使用默认行为
+                data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+                if cdma_map:
+                    data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
         else:
             data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # 添加CDMA相关的基础流量
+            if cdma_map:
+                data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
     elif topo == "3x3":
         if flow_type == 3:
@@ -289,17 +331,28 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
             data_all.extend(generate_mixed_entries(sdma_map, "sdma", "ddr", ddr_map, "R", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(sdma_map, "sdma", "l2m", l2m_map, "W", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(gdma_map, "gdma", "l2m", l2m_map, "R", burst, mix_ratios))
-        else:
-            # data_all.extend(generate_entries(gdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            #
-            # data_all.extend(generate_entries(gdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            # data_all.extend(generate_entries(sdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # 添加CDMA相关的混合流量
+            if cdma_map:
+                data_all.extend(generate_mixed_entries(cdma_map, "cdma", "ddr", ddr_map, "R", burst, mix_ratios))
+                data_all.extend(generate_mixed_entries(cdma_map, "cdma", "l2m", l2m_map, "W", burst, mix_ratios))
+        elif flow_type == 4:
+            # 使用自定义映射
+            if custom_mapping:
+                # 处理读操作
+                if "R" in custom_mapping:
+                    data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+                    data_all.extend(generate_entries(gdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
-            # data_all.extend(generate_entries(gdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+                # 处理写操作
+                if "W" in custom_mapping:
+                    data_all.extend(generate_entries(cdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+        else:
+            # 保持原有的逻辑
             data_all.extend(generate_entries(gdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # 添加CDMA相关的基础流量
+            if cdma_map:
+                data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+                data_all.extend(generate_entries(cdma_map, l2m_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
     # 排序并写入文件
     with open(file_name, "w") as f:
@@ -309,71 +362,102 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, ddr_map, 
 # 示例使用
 if __name__ == "__main__":
     # 参数配置
-    TOPO = "3x3"
-    # TOPO = "5x4"
-    INTERVAL_COUNT = 128
-    # FILE_NAME = "../../test_data/traffic_2262_case1.txt"
-    FILE_NAME = "../../test_data/traffic_2260E_case2.txt"
-    # FILE_NAME = "../../test_data/traffic_2262_case1.txt"
-    np.random.seed(520)
+    TOPO = "5x4"
+    INTERVAL_COUNT = 600
+    FILE_NAME = "../../test_data/All2All_Combine.txt"
+    np.random.seed(616)
 
     if TOPO == "5x4":
         BURST = 4
         NUM_IP = 16
-        SDMA_MAP = {
-            "sdma_0": range(NUM_IP),
-            "sdma_1": range(NUM_IP),
-        }
-        GDMA_MAP = {
-            "gdma_0": range(NUM_IP),
-            "gdma_1": range(NUM_IP),
-        }
-        DDR_MAP = {
-            "ddr_0": range(NUM_IP),
-            "ddr_1": range(NUM_IP),
-        }
-        L2M_MAP = {"l2m_0": range(NUM_IP)}
+        SDMA_MAP = {}
+        GDMA_MAP = {}
 
-    # SG2260E
+        # CDMA映射：12-15四个CDMA
+        CDMA_MAP = {
+            "cdma_0": [16, 17, 18, 19],
+        }
+
+        DDR_MAP = {
+            # "ddr_0": range(NUM_IP),
+            # "ddr_1": range(NUM_IP),
+        }
+        L2M_MAP = {}
+
+        # 自定义映射配置：每个CDMA发送到特定的8个DDR
+        CUSTOM_MAPPING = {
+            "R": {
+                ("cdma_0", 16): [
+                    ("ddr_0", 0),
+                    ("ddr_1", 0),
+                    ("ddr_0", 4),
+                    ("ddr_1", 4),
+                    ("ddr_0", 8),
+                    ("ddr_1", 8),
+                    ("ddr_0", 12),
+                    ("ddr_1", 12),
+                ],
+                ("cdma_0", 17): [
+                    ("ddr_0", 1),
+                    ("ddr_1", 1),
+                    ("ddr_0", 5),
+                    ("ddr_1", 5),
+                    ("ddr_0", 9),
+                    ("ddr_1", 9),
+                    ("ddr_0", 13),
+                    ("ddr_1", 13),
+                ],
+                ("cdma_0", 18): [
+                    ("ddr_0", 2),
+                    ("ddr_1", 2),
+                    ("ddr_0", 6),
+                    ("ddr_1", 6),
+                    ("ddr_0", 10),
+                    ("ddr_1", 10),
+                    ("ddr_0", 14),
+                    ("ddr_1", 14),
+                ],
+                ("cdma_0", 19): [
+                    ("ddr_0", 3),
+                    ("ddr_1", 3),
+                    ("ddr_0", 7),
+                    ("ddr_1", 7),
+                    ("ddr_0", 11),
+                    ("ddr_1", 11),
+                    ("ddr_0", 15),
+                    ("ddr_1", 15),
+                ],
+            }
+        }
+
     elif TOPO == "3x3":
         BURST = 2
         SDMA_MAP = {
-            "sdma_0": [
-                0,
-                2,
-                6,
-                8,
-            ],
+            "sdma_0": [0, 2, 6, 8],
         }
         GDMA_MAP = {
-            "gdma_0": [
-                0,
-                2,
-                6,
-                8,
-            ],
+            "gdma_0": [0, 2, 6, 8],
+        }
+        CDMA_MAP = {
+            "cdma_0": [0, 2, 6, 8],
         }
         DDR_MAP = {
             "ddr_0": [0, 2, 3, 5, 6, 8],
             "ddr_1": [0, 2, 3, 5, 6, 8],
             "ddr_2": [3, 5],
             "ddr_3": [3, 5],
-            # "ddr_0": [3],
-            # "ddr_1": [3],
-            # "ddr_2": [3],
-            # "ddr_3": [3],
         }
         L2M_MAP = {
-            # "l2m_0": [3],
-            # "l2m_1": [4],
             "l2m_0": [1, 7],
             "l2m_1": [1, 7],
         }
 
-    SPEED = {1: 128, 2: 128, 4: 128}  # 不同burst对应的带宽(GB/s)
-    # read_duration = 0
-    # write_duration = 128
+        CUSTOM_MAPPING = {}
+
+    SPEED = {1: 128, 2: 128, 4: 32}  # 不同burst对应的带宽(GB/s)
     overlap = 1
 
-    # 生成数据(使用混合模式)
-    generate_data(TOPO, INTERVAL_COUNT, FILE_NAME, SDMA_MAP, GDMA_MAP, DDR_MAP, L2M_MAP, SPEED, BURST, flow_type=0, overlap=overlap)
+    # 生成数据，使用flow_type=4启用自定义映射
+    generate_data(TOPO, INTERVAL_COUNT, FILE_NAME, SDMA_MAP, GDMA_MAP, CDMA_MAP, DDR_MAP, L2M_MAP, SPEED, BURST, flow_type=4, overlap=overlap, custom_mapping=CUSTOM_MAPPING)
+
+    print(f"Traffic data generated successfully! {FILE_NAME}")

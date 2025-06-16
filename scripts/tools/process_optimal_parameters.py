@@ -567,7 +567,7 @@ if __name__ == "__main__":
     analyzer = SimpleBandwidthAnalyzer(r"../../Result/FOP/2260E_ETag_multi_traffic_0609_All.csv", analysis_targets=["case2"])
 
     # 生成HTML报告
-    html_report = analyzer.run_analysis("all_parameter_analysis.html")
+    html_report = analyzer.run_analysis(r"../../Result/result_html/all_parameter_analysis_0609.html")
 
     if html_report:
         print(f"\n✅ HTML文件已生成: {html_report}")

@@ -165,6 +165,7 @@ class CrossRingConfig:
             self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [9], [])
             self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [9], [])
             self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [9], [])
+            self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
         elif topo_type == "6x5":
             self.NUM_NODE = 60
             self.NUM_COL = 5

@@ -13,9 +13,9 @@ if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
 
 def main():
 
-    traffic_file_path = r"../test_data/"
+    # traffic_file_path = r"../test_data/"
     # file_name = r"traffic_2262_case1.txt"
-    file_name = r"traffic_2260E_case2.txt"
+    # file_name = r"traffic_2260E_case2.txt"
     # file_name = r"traffic_2262_case1.txt"
     # file_name = r"burst2_0417_2.txt"
     # file_name = r"burst2_large.txt"
@@ -25,7 +25,8 @@ def main():
     # file_name = r"demo_459.txt"
 
     # traffic_file_path = r"../traffic/v1.0.8 All_Reduce new/"
-    traffic_file_path = r"../traffic/DeepSeek_0613/step6_ch_map/"
+    traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
+    # traffic_file_path = r"../test_data/"
     # traffic_file_path = r"../traffic/0603/"
     # traffic_file_path = r"../traffic/nxn_traffics"
     # traffic_file_path = r"../traffic/output_DeepSeek_part1/step5_data_merge/"
@@ -35,8 +36,10 @@ def main():
     # file_name = r"LLama2_AllReduce.txt"
     # file_name = r"LLama2_AttentionFC.txt"
     # file_name = r"DeepSeek_MLP.txt"
-    file_name = r"MLP_MoE.txt"
-    # file_name = r"test.txt"
+    traffic_config = [[r"MLP_MoE.txt"], [r"All2All_Dispatch.txt"]]
+    # traffic_config = r"MLP_merge.txt"
+    # file_name = r"All2All_Dispatch.txt"
+    # file_name = r"All2All_Combine.txt"
     # file_name = r"LLama2_Attention_FC_Trace.txt"
     # file_name = r"output_Trace.txt"
     # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
@@ -75,15 +78,16 @@ def main():
         config=config,
         topo_type=topo_type,
         traffic_file_path=traffic_file_path,
-        file_name=file_name,
+        traffic_config=traffic_config,
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
+        flow_fig_show_CDMA=0,
         plot_RN_BW_fig=1,
         plot_link_state=0,
-        plot_start_time=0,
+        plot_start_time=100,
         print_trace=0,
-        show_trace_id=6212,
+        show_trace_id=0,
         show_node_id=4,
         verbose=1,
     )
@@ -210,12 +214,13 @@ def main():
         sim.config.CHANNEL_SPEC = {
             "gdma": 2,
             "sdma": 2,
+            "cdma": 1,
             "ddr": 2,
             "l2m": 2,
         }
 
     sim.initial()
-    # sim.end_time = 1000
+    sim.end_time = 2000
     sim.print_interval = 2000
     sim.run()
 

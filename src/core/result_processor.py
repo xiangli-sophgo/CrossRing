@@ -172,6 +172,8 @@ class BandwidthAnalyzer:
             self.rn_positions.update(self.config.GDMA_SEND_POSITION_LIST)
         if hasattr(self.config, "SDMA_SEND_POSITION_LIST"):
             self.rn_positions.update(self.config.SDMA_SEND_POSITION_LIST)
+        if hasattr(self.config, "CDMA_SEND_POSITION_LIST"):
+            self.rn_positions.update(self.config.CDMA_SEND_POSITION_LIST)
         if hasattr(self.config, "DDR_SEND_POSITION_LIST"):
             self.sn_positions.update(pos - self.config.NUM_COL for pos in self.config.DDR_SEND_POSITION_LIST)
         if hasattr(self.config, "L2M_SEND_POSITION_LIST"):
@@ -195,10 +197,22 @@ class BandwidthAnalyzer:
                 # 读请求：RN在收到数据时结束，SN在发出数据时结束
                 rn_end_time = representative_flit.data_received_complete_cycle // self.network_frequency  # RN收到数据
                 sn_end_time = representative_flit.data_entry_noc_from_cake1_cycle // self.network_frequency  # SN发出数据
+
+                # 读请求：flit的source是SN(DDR/L2M)，destination是RN(SDMA/GDMA/CDMA)
+                actual_source_node = representative_flit.destination + self.config.NUM_COL  # 实际发起请求的节点
+                actual_dest_node = representative_flit.source - self.config.NUM_COL  # 实际目标节点
+                actual_source_type = representative_flit.original_source_type  # 实际发起请求的类型
+                actual_dest_type = representative_flit.original_destination_type  # 实际目标类型
             else:  # write
                 # 写请求：RN在发出数据时结束，SN在收到数据时结束
                 rn_end_time = representative_flit.data_entry_noc_from_cake0_cycle // self.network_frequency  # RN发出数据
                 sn_end_time = representative_flit.data_received_complete_cycle // self.network_frequency  # SN收到数据
+
+                # 写请求：flit的source是RN(SDMA/GDMA/CDMA)，destination是SN(DDR/L2M)
+                actual_source_node = representative_flit.source  # 实际发起请求的节点
+                actual_dest_node = representative_flit.destination  # 实际目标节点
+                actual_source_type = representative_flit.original_source_type  # 实际发起请求的类型
+                actual_dest_type = representative_flit.original_destination_type  # 实际目标类型
 
             request_info = RequestInfo(
                 packet_id=packet_id,
@@ -207,10 +221,10 @@ class BandwidthAnalyzer:
                 rn_end_time=rn_end_time,
                 sn_end_time=sn_end_time,
                 req_type=representative_flit.req_type,
-                source_node=representative_flit.source,
-                dest_node=representative_flit.destination,
-                source_type=representative_flit.original_source_type,
-                dest_type=representative_flit.original_destination_type,
+                source_node=actual_source_node,  # 使用修正后的源节点
+                dest_node=actual_dest_node,  # 使用修正后的目标节点
+                source_type=actual_source_type,  # 使用修正后的源类型
+                dest_type=actual_dest_type,  # 使用修正后的目标类型
                 burst_length=representative_flit.burst_length,
                 total_bytes=representative_flit.burst_length * 128,
                 cmd_latency=representative_flit.cmd_latency // self.network_frequency,
@@ -219,7 +233,8 @@ class BandwidthAnalyzer:
             )
 
             # 收集RN带宽时间序列数据
-            port_key = f"{representative_flit.original_source_type[:-3].upper()} {representative_flit.req_type} {representative_flit.original_destination_type[:3].upper()}"
+            # 使用修正后的类型信息
+            port_key = f"{actual_source_type[:-3].upper()} {representative_flit.req_type} {actual_dest_type[:3].upper()}"
 
             if representative_flit.req_type == "read":
                 completion_time = rn_end_time
@@ -250,18 +265,21 @@ class BandwidthAnalyzer:
             "read": {
                 "sdma": np.zeros((rows, cols)),
                 "gdma": np.zeros((rows, cols)),
+                "cdma": np.zeros((rows, cols)),
                 "ddr": np.zeros((rows, cols)),
                 "l2m": np.zeros((rows, cols)),
             },
             "write": {
                 "sdma": np.zeros((rows, cols)),
                 "gdma": np.zeros((rows, cols)),
+                "cdma": np.zeros((rows, cols)),
                 "ddr": np.zeros((rows, cols)),
                 "l2m": np.zeros((rows, cols)),
             },
             "total": {
                 "sdma": np.zeros((rows, cols)),
                 "gdma": np.zeros((rows, cols)),
+                "cdma": np.zeros((rows, cols)),
                 "ddr": np.zeros((rows, cols)),
                 "l2m": np.zeros((rows, cols)),
             },
@@ -731,15 +749,18 @@ class BandwidthAnalyzer:
         results["summary"]["Total_sum_BW"] = total_bandwidth
         results["Total_sum_BW"] = total_bandwidth
 
-        if self.plot_flow_graph and hasattr(self, "base_model") and self.base_model and getattr(self.base_model, "results_fig_save_path", None):
-            # 自动保存流量图到结果文件夹
-            flow_fname = f"flow_graph_{self.config.TOPO_TYPE}_{self.base_model.file_name}.png"
-            flow_save_path = os.path.join(self.base_model.results_fig_save_path, flow_fname)
-            self.draw_flow_graph(self.base_model.data_network, mode="total", save_path=flow_save_path)
+        if self.plot_flow_graph:
+            if self.base_model.results_fig_save_path:
+                # 保存流量图到结果文件夹
+                flow_fname = f"flow_graph_{self.config.TOPO_TYPE}_{self.base_model.file_name}.png"
+                flow_save_path = os.path.join(self.base_model.results_fig_save_path, flow_fname)
+            else:
+                flow_save_path = None
+            self.draw_flow_graph(self.base_model.data_network, mode="total", save_path=flow_save_path, show_cdma=self.base_model.flow_fig_show_CDMA)
 
         return results
 
-    def draw_flow_graph(self, network: Network, mode="total", node_size=2000, save_path=None):
+    def draw_flow_graph(self, network: Network, mode="total", node_size=2000, save_path=None, show_cdma=True):
         """
         绘制合并的网络流图和IP
 
@@ -747,6 +768,7 @@ class BandwidthAnalyzer:
         :param mode: 显示模式，可以是'read', 'write'或'total'
         :param node_size: 节点大小
         :param save_path: 图片保存路径
+        :param show_cdma: 是否展示CDMA，True显示SDMA/GDMA/CDMA三分区，False显示SDMA/GDMA两分区
         """
         # 确保IP带宽数据已计算
         self.precalculate_ip_bandwidth_data()
@@ -781,10 +803,15 @@ class BandwidthAnalyzer:
         # 链路颜色映射范围：动态最大值的60%阈值起红
         link_mapping_max = max(link_values) if link_values else 0.0
         link_mapping_min = max(0.6 * link_mapping_max, 100)
+
         # IP颜色映射范围：动态最大值的60%阈值起红
         # 从 ip_bandwidth_data 提取所有带宽值，计算当前最大
         all_ip_vals = []
-        for svc in ["sdma", "gdma", "ddr", "l2m"]:
+        ip_services = ["sdma", "gdma", "cdma", "ddr", "l2m"]
+        if show_cdma and "cdma" in self.ip_bandwidth_data[mode]:
+            ip_services.append("cdma")
+
+        for svc in ip_services:
             all_ip_vals.extend(self.ip_bandwidth_data[mode][svc].flatten())
         ip_mapping_max = max(all_ip_vals) if all_ip_vals else 0.0
         ip_mapping_min = max(0.6 * ip_mapping_max, 80)
@@ -807,7 +834,7 @@ class BandwidthAnalyzer:
         dynamic_font = min(dynamic_font, max_font)
 
         # 创建图形
-        fig, ax = plt.subplots(figsize=(10, 8))
+        fig, ax = plt.subplots(figsize=(12, 10))  # 增大画布以容纳更多内容
         ax.set_aspect("equal")
 
         # 调整方形节点大小
@@ -835,13 +862,13 @@ class BandwidthAnalyzer:
             physical_col = node % self.config.NUM_COL
 
             if physical_row % 2 == 0:
-                # 田字格位置和大小
-                ip_width = square_size * 2.6
+                # IP信息框位置和大小
+                ip_width = square_size * 3.2
                 ip_height = square_size * 2.6
-                ip_x = x - square_size - ip_width / 2.8
+                ip_x = x - square_size - ip_width / 2.5
                 ip_y = y + 0.26
 
-                # 绘制田字格外框
+                # 绘制IP信息框外框
                 ip_rect = Rectangle(
                     (ip_x - ip_width / 2, ip_y - ip_height / 2),
                     width=ip_width,
@@ -853,14 +880,7 @@ class BandwidthAnalyzer:
                 )
                 ax.add_patch(ip_rect)
 
-                # 绘制田字格内部线条
-                ax.plot(
-                    [ip_x - ip_width / 2, ip_x + ip_width / 2],
-                    [ip_y, ip_y],
-                    color="black",
-                    linewidth=1,
-                    zorder=3,
-                )
+                # 绘制分割线：垂直线分割左右两部分
                 ax.plot(
                     [ip_x, ip_x],
                     [ip_y - ip_height / 2, ip_y + ip_height / 2],
@@ -869,21 +889,105 @@ class BandwidthAnalyzer:
                     zorder=3,
                 )
 
-                # 为左列和右列填充不同颜色（DMA和DDR区分）
-                left_color = "honeydew"  # 左列颜色（DMA）
-                right_color = "aliceblue"  # 右列颜色（GDMA）
-                # 左列矩形（DMA区域）
-                left_rect = Rectangle(
-                    (ip_x - ip_width / 2, ip_y - ip_height / 2),
-                    width=ip_width / 2,
-                    height=ip_height,
-                    color=left_color,
-                    ec="none",
-                    zorder=2,
+                # 绘制水平线分割右侧上下两部分
+                ax.plot(
+                    [ip_x, ip_x + ip_width / 2],
+                    [ip_y, ip_y],
+                    color="black",
+                    linewidth=1,
+                    zorder=3,
                 )
-                ax.add_patch(left_rect)
 
-                # 右列矩形（DDR区域）
+                # 左侧DMA区域分割
+                left_width = ip_width / 2
+
+                if show_cdma:
+                    # 三分区：SDMA、GDMA、CDMA
+                    dma_height = ip_height / 3
+                    # 绘制左侧的两条水平分割线
+                    for i in range(1, 3):
+                        line_y = ip_y - ip_height / 2 + i * dma_height
+                        ax.plot(
+                            [ip_x - ip_width / 2, ip_x],
+                            [line_y, line_y],
+                            color="black",
+                            linewidth=0.8,
+                            zorder=3,
+                        )
+                else:
+                    # 两分区：SDMA、GDMA
+                    dma_height = ip_height / 2
+                    # 绘制左侧的一条水平分割线
+                    line_y = ip_y
+                    ax.plot(
+                        [ip_x - ip_width / 2, ip_x],
+                        [line_y, line_y],
+                        color="black",
+                        linewidth=0.8,
+                        zorder=3,
+                    )
+
+                # 为左侧DMA区域填充颜色
+                dma_color = "honeydew"  # DMA区域统一颜色
+                right_color = "aliceblue"  # 右侧DDR/L2M区域颜色
+
+                if show_cdma:
+                    # SDMA区域（最上方）
+                    sdma_rect = Rectangle(
+                        (ip_x - ip_width / 2, ip_y + dma_height / 2),
+                        width=left_width,
+                        height=dma_height,
+                        color=dma_color,
+                        ec="none",
+                        zorder=2,
+                    )
+                    ax.add_patch(sdma_rect)
+
+                    # GDMA区域（中间）
+                    gdma_rect = Rectangle(
+                        (ip_x - ip_width / 2, ip_y - dma_height / 2),
+                        width=left_width,
+                        height=dma_height,
+                        color=dma_color,
+                        ec="none",
+                        zorder=2,
+                    )
+                    ax.add_patch(gdma_rect)
+
+                    # CDMA区域（最下方）
+                    cdma_rect = Rectangle(
+                        (ip_x - ip_width / 2, ip_y - ip_height / 2),
+                        width=left_width,
+                        height=dma_height,
+                        color=dma_color,
+                        ec="none",
+                        zorder=2,
+                    )
+                    ax.add_patch(cdma_rect)
+                else:
+                    # SDMA区域（上半部分）
+                    sdma_rect = Rectangle(
+                        (ip_x - ip_width / 2, ip_y),
+                        width=left_width,
+                        height=dma_height,
+                        color=dma_color,
+                        ec="none",
+                        zorder=2,
+                    )
+                    ax.add_patch(sdma_rect)
+
+                    # GDMA区域（下半部分）
+                    gdma_rect = Rectangle(
+                        (ip_x - ip_width / 2, ip_y - ip_height / 2),
+                        width=left_width,
+                        height=dma_height,
+                        color=dma_color,
+                        ec="none",
+                        zorder=2,
+                    )
+                    ax.add_patch(gdma_rect)
+
+                # 右侧DDR/L2M区域
                 right_rect = Rectangle(
                     (ip_x, ip_y - ip_height / 2),
                     width=ip_width / 2,
@@ -894,123 +998,147 @@ class BandwidthAnalyzer:
                 )
                 ax.add_patch(right_rect)
 
-                # 添加IP信息
+                # 获取IP带宽数据
                 if mode == "read":
                     sdma_value = self.ip_bandwidth_data["read"]["sdma"][physical_row // 2, physical_col]
                     gdma_value = self.ip_bandwidth_data["read"]["gdma"][physical_row // 2, physical_col]
+                    if show_cdma and "cdma" in self.ip_bandwidth_data["read"]:
+                        cdma_value = self.ip_bandwidth_data["read"]["cdma"][physical_row // 2, physical_col]
                     ddr_value = self.ip_bandwidth_data["read"]["ddr"][physical_row // 2, physical_col]
                     l2m_value = self.ip_bandwidth_data["read"]["l2m"][physical_row // 2, physical_col]
-
-                    # 收集当前模式下每个IP的所有值
-                    all_sdma = self.ip_bandwidth_data["read"]["sdma"].flatten()
-                    all_gdma = self.ip_bandwidth_data["read"]["gdma"].flatten()
-                    all_ddr = self.ip_bandwidth_data["read"]["ddr"].flatten()
-                    all_l2m = self.ip_bandwidth_data["read"]["l2m"].flatten()
-
                 elif mode == "write":
                     sdma_value = self.ip_bandwidth_data["write"]["sdma"][physical_row // 2, physical_col]
                     gdma_value = self.ip_bandwidth_data["write"]["gdma"][physical_row // 2, physical_col]
+                    if show_cdma and "cdma" in self.ip_bandwidth_data["write"]:
+                        cdma_value = self.ip_bandwidth_data["write"]["cdma"][physical_row // 2, physical_col]
                     ddr_value = self.ip_bandwidth_data["write"]["ddr"][physical_row // 2, physical_col]
                     l2m_value = self.ip_bandwidth_data["write"]["l2m"][physical_row // 2, physical_col]
-
-                    all_sdma = self.ip_bandwidth_data["write"]["sdma"].flatten()
-                    all_gdma = self.ip_bandwidth_data["write"]["gdma"].flatten()
-                    all_ddr = self.ip_bandwidth_data["write"]["ddr"].flatten()
-                    all_l2m = self.ip_bandwidth_data["write"]["l2m"].flatten()
-
                 else:  # total
                     sdma_value = self.ip_bandwidth_data["total"]["sdma"][physical_row // 2, physical_col]
                     gdma_value = self.ip_bandwidth_data["total"]["gdma"][physical_row // 2, physical_col]
+                    if show_cdma and "cdma" in self.ip_bandwidth_data["total"]:
+                        cdma_value = self.ip_bandwidth_data["total"]["cdma"][physical_row // 2, physical_col]
                     ddr_value = self.ip_bandwidth_data["total"]["ddr"][physical_row // 2, physical_col]
                     l2m_value = self.ip_bandwidth_data["total"]["l2m"][physical_row // 2, physical_col]
 
-                    all_sdma = self.ip_bandwidth_data["total"]["sdma"].flatten()
-                    all_gdma = self.ip_bandwidth_data["total"]["gdma"].flatten()
-                    all_ddr = self.ip_bandwidth_data["total"]["ddr"].flatten()
-                    all_l2m = self.ip_bandwidth_data["total"]["l2m"].flatten()
+                # 定义颜色计算函数
+                def get_intensity_color(value):
+                    if value <= ip_mapping_min:
+                        intensity = 0.0
+                    else:
+                        intensity = (value - ip_mapping_min) / (ip_mapping_max - ip_mapping_min)
+                    intensity = min(max(intensity, 0.0), 1.0)
+                    return (intensity, 0, 0)
 
-                # 计算每个IP的阈值（例如取前20%的分位数）
-                sdma_threshold = np.percentile(all_sdma, 90)
-                gdma_threshold = np.percentile(all_gdma, 90)
-                ddr_threshold = np.percentile(all_ddr, 90)
-                l2m_threshold = np.percentile(all_l2m, 90)
+                if show_cdma:
+                    # 三分区布局
+                    # SDMA在最上方区域
+                    sdma_color_val = get_intensity_color(sdma_value)
+                    ax.text(
+                        ip_x - ip_width / 4,
+                        ip_y + dma_height,
+                        f"S:{sdma_value:.1f}",
+                        fontweight="bold",
+                        ha="center",
+                        va="center",
+                        fontsize=dynamic_font * 0.5,
+                        color=sdma_color_val,
+                    )
 
-                # SDMA在左上半部分
-                if sdma_value <= ip_mapping_min:
-                    intensity = 0.0
+                    # GDMA在中间区域
+                    gdma_color_val = get_intensity_color(gdma_value)
+                    ax.text(
+                        ip_x - ip_width / 4,
+                        ip_y,
+                        f"G:{gdma_value:.1f}",
+                        fontweight="bold",
+                        ha="center",
+                        va="center",
+                        fontsize=dynamic_font * 0.5,
+                        color=gdma_color_val,
+                    )
+
+                    # CDMA在最下方区域
+                    if "cdma" in self.ip_bandwidth_data[mode]:
+                        cdma_color_val = get_intensity_color(cdma_value)
+                        ax.text(
+                            ip_x - ip_width / 4,
+                            ip_y - dma_height,
+                            f"C: {cdma_value:.1f}",
+                            fontweight="bold",
+                            ha="center",
+                            va="center",
+                            fontsize=dynamic_font * 0.5,
+                            color=cdma_color_val,
+                        )
+                    else:
+                        # 如果没有CDMA数据，显示空值
+                        ax.text(
+                            ip_x - ip_width / 4,
+                            ip_y - dma_height,
+                            "C:0.0",
+                            fontweight="bold",
+                            ha="center",
+                            va="center",
+                            fontsize=dynamic_font * 0.5,
+                            color=(0, 0, 0),
+                        )
                 else:
-                    intensity = (sdma_value - ip_mapping_min) / (ip_mapping_max - ip_mapping_min)
-                intensity = min(max(intensity, 0.0), 1.0)
-                sdma_color = (intensity, 0, 0)
-                ax.text(
-                    ip_x - ip_width / 4,
-                    ip_y + ip_height / 4,
-                    f"{sdma_value:.1f}",
-                    fontweight="bold",
-                    ha="center",
-                    va="center",
-                    fontsize=dynamic_font * 0.6,
-                    color=sdma_color,
-                )
+                    # 两分区布局
+                    # SDMA在上半区域
+                    sdma_color_val = get_intensity_color(sdma_value)
+                    ax.text(
+                        ip_x - ip_width / 4,
+                        ip_y + dma_height / 2,
+                        f"S:{sdma_value:.1f}",
+                        fontweight="bold",
+                        ha="center",
+                        va="center",
+                        fontsize=dynamic_font * 0.6,
+                        color=sdma_color_val,
+                    )
 
-                # GDMA在左下半部分
-                if gdma_value <= ip_mapping_min:
-                    intensity = 0.0
-                else:
-                    intensity = (gdma_value - ip_mapping_min) / (ip_mapping_max - ip_mapping_min)
-                intensity = min(max(intensity, 0.0), 1.0)
-                gdma_color = (intensity, 0, 0)
-                ax.text(
-                    ip_x - ip_width / 4,
-                    ip_y - ip_height / 4,
-                    f"{gdma_value:.1f}",
-                    fontweight="bold",
-                    ha="center",
-                    va="center",
-                    fontsize=dynamic_font * 0.6,
-                    color=gdma_color,
-                )
+                    # GDMA在下半区域
+                    gdma_color_val = get_intensity_color(gdma_value)
+                    ax.text(
+                        ip_x - ip_width / 4,
+                        ip_y - dma_height / 2,
+                        f"G:{gdma_value:.1f}",
+                        fontweight="bold",
+                        ha="center",
+                        va="center",
+                        fontsize=dynamic_font * 0.6,
+                        color=gdma_color_val,
+                    )
 
-                # l2m在右上半部分
-                if l2m_value <= ip_mapping_min:
-                    intensity = 0.0
-                else:
-                    intensity = (l2m_value - ip_mapping_min) / (ip_mapping_max - ip_mapping_min)
-                intensity = min(max(intensity, 0.0), 1.0)
-                l2m_color = (intensity, 0, 0)
+                # L2M在右上区域
+                l2m_color_val = get_intensity_color(l2m_value)
                 ax.text(
                     ip_x + ip_width / 4,
                     ip_y + ip_height / 4,
-                    f"{l2m_value:.1f}",
+                    f"L:{l2m_value:.1f}",
                     fontweight="bold",
                     ha="center",
                     va="center",
-                    fontsize=dynamic_font * 0.6,
-                    color=l2m_color,
+                    fontsize=dynamic_font * 0.5,
+                    color=l2m_color_val,
                 )
 
-                # ddr在右下半部分
-                if ddr_value <= ip_mapping_min:
-                    intensity = 0.0
-                else:
-                    intensity = (ddr_value - ip_mapping_min) / (ip_mapping_max - ip_mapping_min)
-                intensity = min(max(intensity, 0.0), 1.0)
-                ddr_color = (intensity, 0, 0)
+                # DDR在右下区域
+                ddr_color_val = get_intensity_color(ddr_value)
                 ax.text(
                     ip_x + ip_width / 4,
                     ip_y - ip_height / 4,
-                    f"{ddr_value:.1f}",
+                    f"D:{ddr_value:.1f}",
                     fontweight="bold",
                     ha="center",
                     va="center",
-                    fontsize=dynamic_font * 0.6,
-                    color=ddr_color,
+                    fontsize=dynamic_font * 0.5,
+                    color=ddr_color_val,
                 )
 
-        # 绘制边和边标签
+        # 绘制边和边标签（保持原有逻辑）
         edge_value_threshold = np.percentile(link_values, 90)
-        # 链路带宽热力图颜色映射
-        # norm = mcolors.Normalize(vmin=min(link_values), vmax=max(link_values))
 
         for i, j, data in G.edges(data=True):
             x1, y1 = pos[i]
@@ -1056,7 +1184,7 @@ class BandwidthAnalyzer:
                     )
                     ax.add_patch(arrow)
 
-        # 绘制边标签
+        # 绘制边标签（保持原有逻辑）
         edge_labels = nx.get_edge_attributes(G, "label")
         for edge, label in edge_labels.items():
             i, j = edge
@@ -1072,6 +1200,7 @@ class BandwidthAnalyzer:
             # clamp to [0,1]
             intensity = min(max(intensity, 0.0), 1.0)
             color = (intensity, 0, 0)
+
             if i == j:
                 # 计算标签位置
                 original_row = i // self.config.NUM_COL
@@ -1145,21 +1274,24 @@ class BandwidthAnalyzer:
 
         plt.axis("off")
         title = f"{network.name} - {mode.capitalize()} Bandwidth"
+
         if self.config.SPARE_CORE_ROW != -1:
             title += f"\nRow: {self.config.SPARE_CORE_ROW}, Failed cores: {self.config.FAIL_CORE_POS}, Spare cores: {self.config.spare_core_pos}"
         plt.title(title, fontsize=20)
 
         # # 添加图例说明
-        # legend_text = f"IP {mode.capitalize()} Bandwidth (GB/s):\n" "SDMA: Top half of square\n" "GDMA: Bottom half of square"
-        # plt.figtext(0.02, 0.98, legend_text, ha="TL", va="top", fontsize=10, bbox=dict(facecolor="white", alpha=0.8, edgecolor="gray"))
+        # if show_cdma:
+        #     legend_text = f"IP {mode.capitalize()} Bandwidth (GB/s):\n" "Left (top to bottom): S=SDMA, G=GDMA, C=CDMA\n" "Right (top to bottom): L=L2M, D=DDR"
+        # else:
+        #     legend_text = f"IP {mode.capitalize()} Bandwidth (GB/s):\n" "Left (top to bottom): S=SDMA, G=GDMA\n" "Right (top to bottom): L=L2M, D=DDR"
+
+        # plt.figtext(0.02, 0.98, legend_text, ha="left", va="top", fontsize=10, bbox=dict(facecolor="white", alpha=0.8, edgecolor="gray"))
 
         plt.tight_layout()
 
         if save_path:
             plt.savefig(
-                os.path.join(
-                    save_path,
-                ),
+                os.path.join(save_path),
                 dpi=300,
                 bbox_inches="tight",
             )

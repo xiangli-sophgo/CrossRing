@@ -190,18 +190,18 @@ class Node:
     def initialize_data_structures(self):
         """Initialize the data structures for read and write databases."""
 
-        self.rn_rdb = self.config._make_channels(("sdma", "gdma"))
-        self.rn_rdb_reserve = self.config._make_channels(("sdma", "gdma"))
-        self.rn_rdb_recv = self.config._make_channels(("sdma", "gdma"))
-        self.rn_rdb_count = self.config._make_channels(("sdma", "gdma"))
-        self.rn_wdb = self.config._make_channels(("sdma", "gdma"))
-        self.rn_wdb_reserve = self.config._make_channels(("sdma", "gdma"))
-        self.rn_wdb_count = self.config._make_channels(("sdma", "gdma"))
-        self.rn_wdb_send = self.config._make_channels(("sdma", "gdma"))
-        self.rn_tracker = {"read": self.config._make_channels(("sdma", "gdma")), "write": self.config._make_channels(("sdma", "gdma"))}
-        self.rn_tracker_wait = {"read": self.config._make_channels(("sdma", "gdma")), "write": self.config._make_channels(("sdma", "gdma"))}
-        self.rn_tracker_count = {"read": self.config._make_channels(("sdma", "gdma")), "write": self.config._make_channels(("sdma", "gdma"))}
-        self.rn_tracker_pointer = {"read": self.config._make_channels(("sdma", "gdma")), "write": self.config._make_channels(("sdma", "gdma"))}
+        self.rn_rdb = self.config._make_channels(("sdma", "gdma", "cdma"))
+        self.rn_rdb_reserve = self.config._make_channels(("sdma", "gdma", "cdma"))
+        self.rn_rdb_recv = self.config._make_channels(("sdma", "gdma", "cdma"))
+        self.rn_rdb_count = self.config._make_channels(("sdma", "gdma", "cdma"))
+        self.rn_wdb = self.config._make_channels(("sdma", "gdma", "cdma"))
+        self.rn_wdb_reserve = self.config._make_channels(("sdma", "gdma", "cdma"))
+        self.rn_wdb_count = self.config._make_channels(("sdma", "gdma", "cdma"))
+        self.rn_wdb_send = self.config._make_channels(("sdma", "gdma", "cdma"))
+        self.rn_tracker = {"read": self.config._make_channels(("sdma", "gdma", "cdma")), "write": self.config._make_channels(("sdma", "gdma", "cdma"))}
+        self.rn_tracker_wait = {"read": self.config._make_channels(("sdma", "gdma", "cdma")), "write": self.config._make_channels(("sdma", "gdma", "cdma"))}
+        self.rn_tracker_count = {"read": self.config._make_channels(("sdma", "gdma", "cdma")), "write": self.config._make_channels(("sdma", "gdma", "cdma"))}
+        self.rn_tracker_pointer = {"read": self.config._make_channels(("sdma", "gdma", "cdma")), "write": self.config._make_channels(("sdma", "gdma", "cdma"))}
         self.sn_rdb = self.config._make_channels(("ddr", "l2m"))
         self.sn_rsp_queue = self.config._make_channels(("ddr", "l2m"))
         self.sn_req_wait = {"read": self.config._make_channels(("ddr", "l2m")), "write": self.config._make_channels(("ddr", "l2m"))}
@@ -920,11 +920,11 @@ class Network:
         self.inject_queues_pre = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.eject_queues = {"TU": {}, "TD": {}}
         self.eject_queues_in_pre = {"TU": {}, "TD": {}}
-        self.arrive_node_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.IQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.EQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.IQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.EQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.arrive_node_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        self.IQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        self.EQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        self.IQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        self.EQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
         self.links = {}
         self.cross_point = {"horizontal": defaultdict(lambda: defaultdict(list)), "vertical": defaultdict(lambda: defaultdict(list))}
         self.links_flow_stat = {"read": {}, "write": {}}
@@ -968,22 +968,22 @@ class Network:
         self.max_circuits_h = None
         self.avg_circuits_v = None
         self.max_circuits_v = None
-        self.circuits_flit_h = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.circuits_flit_v = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.circuits_flit_h = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        self.circuits_flit_v = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
         self.gdma_recv = 0
         self.gdma_remainder = 0
         self.gdma_count = 512
         self.l2m_recv = 0
         self.l2m_remainder = 0
         self.sdma_send = []
-        self.num_send = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.num_recv = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.per_send_throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.per_recv_throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.send_throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.recv_throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.last_select = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
-        self.throughput = self.config._make_channels(("sdma", "gdma", "ddr", "l2m"))
+        self.num_send = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        self.num_recv = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        self.per_send_throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        self.per_recv_throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        self.send_throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        self.recv_throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        self.last_select = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        self.throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
 
         # # channel buffer setup
 
@@ -1020,7 +1020,7 @@ class Network:
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}
         self.ETag_BOTHSIDE_UPGRADE = False
 
-        for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
+        for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
             self.cross_point["horizontal"][ip_pos]["TL"] = [None] * 2
             self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2

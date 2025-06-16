@@ -94,5 +94,5 @@ def main(input_dir: str, output_dir: str, ext: str = ".txt", delimiter: str = ",
 # 如果作为脚本直接运行，可以在此处调用示例（可选）
 if __name__ == "__main__":
     # 示例：直接运行时修改下面两个路径
-    step6_map_to_ch(input_dir="../../traffic/output_v8_32_no_map/step5_data_merge", output_dir="../../traffic/output_v8_32_no_map/step5_data_merge_mod", ext=".txt", delimiter=",")
+    main(input_dir="../../traffic/output_v8_32_no_map/step5_data_merge", output_dir="../../traffic/output_v8_32_no_map/step5_data_merge_mod", ext=".txt", delimiter=",")
     print("批量修改完成。")

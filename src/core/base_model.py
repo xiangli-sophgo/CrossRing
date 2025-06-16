@@ -26,6 +26,7 @@ import matplotlib.colors as mcolors
 import matplotlib.cm as cm
 from functools import lru_cache
 from src.core.result_processor import *
+from src.core.traffic_scheduler import TrafficScheduler
 
 
 @lru_cache(maxsize=None)
@@ -58,10 +59,11 @@ class BaseModel:
         config: CrossRingConfig,
         topo_type,
         traffic_file_path,
-        file_name,
         result_save_path: str,
+        traffic_config,  # 可以是 "single_file.txt" 或者 [["file1.txt", "file2.txt"], ["file3.txt"]]
         results_fig_save_path: str = "",
         plot_flow_fig=False,
+        flow_fig_show_CDMA=False,
         plot_RN_BW_fig=False,
         plot_link_state=False,
         plot_start_time=-1,
@@ -74,12 +76,28 @@ class BaseModel:
         self.config = config
         self.topo_type_stat = topo_type
         self.traffic_file_path = traffic_file_path
-        self.file_name = file_name
         # 添加结果统计
         self.result_processor = BandwidthAnalyzer(config, min_gap_threshold=50, plot_rn_bw_fig=plot_RN_BW_fig, plot_flow_graph=plot_flow_fig)
 
+        # 初始化TrafficScheduler
+        self.traffic_scheduler = TrafficScheduler(config, traffic_file_path)
+        self.traffic_scheduler.set_verbose(verbose > 0)
+
+        # 处理traffic配置
+        if isinstance(traffic_config, str):
+            # 单个文件，向后兼容
+            self.file_name = traffic_config
+            self.traffic_scheduler.setup_single_chain([traffic_config])
+        elif isinstance(traffic_config, list):
+            # 多traffic链配置
+            self.traffic_scheduler.setup_parallel_chains(traffic_config)
+            self.file_name = self.traffic_scheduler.get_combined_filename() + ".txt"
+        else:
+            raise ValueError("traffic_config must be a string (single file) or list of lists (multiple chains)")
+
         self.result_save_path_original = result_save_path
         self.plot_flow_fig = plot_flow_fig
+        self.flow_fig_show_CDMA = flow_fig_show_CDMA
         self.plot_RN_BW_fig = plot_RN_BW_fig
         self.plot_link_state = plot_link_state
         self.plot_start_time = plot_start_time
@@ -115,9 +133,11 @@ class BaseModel:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
             self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
-        self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST)
+        self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
-        self.flit_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
+        self.flit_positions = set(
+            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
+        )
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
         self.ip_modules = {}
@@ -172,7 +192,9 @@ class BaseModel:
             "data": self.flit_positions,
         }
 
-        self.dma_rw_counts = self.config._make_channels(("gdma", "sdma"), {ip: {"read": 0, "write": 0} for ip in self.config.GDMA_SEND_POSITION_LIST})
+        self.dma_rw_counts = self.config._make_channels(
+            ("gdma", "sdma", "cdma"), {ip: {"read": 0, "write": 0} for ip in set(self.config.GDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)}
+        )
 
         self.rn_bandwidth = {
             "SDMA read DDR": {"time": [], "bandwidth": []},
@@ -261,14 +283,12 @@ class BaseModel:
             if self.cycle / self.config.NETWORK_FREQUENCY % self.print_interval == 0:
                 self.log_summary()
 
-            if (
-                self.req_count >= self.read_req + self.write_req
-                and self.send_flits_num == self.data_network.recv_flits_num >= self.read_flit + self.write_flit
-                and self.trans_flits_num == 0
-                and not self.new_write_req
-                or self.cycle > self.end_time * self.config.NETWORK_FREQUENCY
-                # or self.cycle > 60000 * self.config.network_frequency
-            ):
+            # 检查traffic完成情况并推进链
+            completed_traffics = self.traffic_scheduler.check_and_advance_chains(self.cycle)
+            if completed_traffics and self.verbose:
+                print(f"Completed traffics: {completed_traffics}")
+
+            if self.traffic_scheduler.is_all_completed() and self.trans_flits_num == 0 and not self.new_write_req or self.cycle > self.end_time * self.config.NETWORK_FREQUENCY:
                 if tail_time == 0:
                     if self.verbose:
                         print("Finish!")
@@ -283,6 +303,15 @@ class BaseModel:
 
         # 结果统计
         self.process_comprehensive_results()
+
+    def update_traffic_completion_stats(self, flit):
+        """在flit完成时更新TrafficScheduler的统计"""
+        if hasattr(flit, "traffic_id"):
+            if flit.flit_type == "data":
+                self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "sent_flit")
+            # 当flit到达目的地时
+            if flit.is_arrive:
+                self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "received_flit")
 
     def syn_IP_stat(self):
         for ip_pos in self.flit_positions:
@@ -464,7 +493,7 @@ class BaseModel:
 
                 for ip_type in list(rr_queue):
                     # —— 网络‑特定 ip_type 过滤 ——
-                    if network_type == "req" and not (ip_type.startswith("sdma") or ip_type.startswith("gdma")):
+                    if network_type == "req" and not (ip_type.startswith("sdma") or ip_type.startswith("gdma") or ip_type.startswith("cdma")):
                         continue
                     if network_type == "rsp" and not (ip_type.startswith("ddr") or ip_type.startswith("l2m")):
                         continue
@@ -528,38 +557,122 @@ class BaseModel:
         """Update throughput metrics based on flit counts."""
         self.trans_flits_num = len(flits)
 
-    def load_request_stream(self):
-        """借助 _parse_traffic_file 只解析一次 traffic 文件。"""
-        abs_path = os.path.join(self.traffic_file_path, self.file_name)
-        lines, (self.read_req, self.write_req, self.read_flit, self.write_flit) = _parse_traffic_file(os.path.abspath(abs_path), self.config.NETWORK_FREQUENCY)
+    # def load_request_stream(self):
+    #     """借助 _parse_traffic_file 只解析一次 traffic 文件。"""
+    #     abs_path = os.path.join(self.traffic_file_path, self.file_name)
+    #     lines, (self.read_req, self.write_req, self.read_flit, self.write_flit) = _parse_traffic_file(os.path.abspath(abs_path), self.config.NETWORK_FREQUENCY)
 
-        # 每个实例各自迭代，不互相影响
-        self.req_stream = iter(lines)
-        self.next_req = None
+    #     # 每个实例各自迭代，不互相影响
+    #     self.req_stream = iter(lines)
+    #     self.next_req = None
+
+    #     # 统计输出保持原行为
+    #     self.print_data_statistic()
+    def load_request_stream(self):
+        """修改：使用TrafficScheduler来管理请求流"""
+        # 启动初始的traffic
+        self.traffic_scheduler.start_initial_traffics()
+
+        # 从TrafficScheduler获取统计信息
+        total_stats = self._get_total_traffic_stats()
+        self.read_req = total_stats["read_req"]
+        self.write_req = total_stats["write_req"]
+        self.read_flit = total_stats["read_flit"]
+        self.write_flit = total_stats["write_flit"]
 
         # 统计输出保持原行为
         self.print_data_statistic()
 
-    def _load_requests_stream(self):
-        """从文件生成请求流（按时间排序）"""
-        with open(self.traffic_file_path + self.file_name, "r") as f:
-            for line in f:
-                # 解析每行数据为元组（根据实际格式调整）
-                split_line = line.strip().split(",")
-                yield (
-                    # request cycle
-                    int(split_line[0]) * self.config.NETWORK_FREQUENCY,
-                    int(split_line[1]),  # source id
-                    split_line[2],  # source type
-                    int(split_line[3]),  # destination id
-                    split_line[4],  # destination type
-                    split_line[5],  # request type
-                    int(split_line[6]),  # burst length
-                )
+    def _get_total_traffic_stats(self):
+        """从所有链中统计总的请求和flit数量"""
+        total_read_req = total_write_req = total_read_flit = total_write_flit = 0
 
-    def get_network_types(self):
-        type_mapping = {0: ("sdma", "ddr"), 1: ("gdma", "l2m")}
-        return type_mapping.get(self.cycle_mod, ("Idle", "Idle"))
+        for chain in self.traffic_scheduler.parallel_chains:
+            for traffic_file in chain.traffic_files:
+                abs_path = os.path.join(self.traffic_file_path, traffic_file)
+                with open(abs_path, "r") as f:
+                    for line in f:
+                        parts = line.strip().split(",")
+                        if len(parts) >= 7:
+                            op, burst = parts[5], int(parts[6])
+                            if op == "R":
+                                total_read_req += 1
+                                total_read_flit += burst
+                            else:
+                                total_write_req += 1
+                                total_write_flit += burst
+
+        return {"read_req": total_read_req, "write_req": total_write_req, "read_flit": total_read_flit, "write_flit": total_write_flit}
+
+    def process_new_request(self):
+        """修改：使用TrafficScheduler获取下一个请求"""
+        # 从TrafficScheduler获取下一个请求
+        req_data = self.traffic_scheduler.get_next_request(self.cycle)
+
+        if req_data is None:
+            return  # 没有待处理的请求
+
+        # 解析请求数据（注意最后一个元素是traffic_id）
+        source = self.node_map(req_data[1])
+        destination = self.node_map(req_data[3], False)
+        path = self.routes[source][destination]
+        traffic_id = req_data[7]  # 最后一个元素是traffic_id
+
+        # 创建flit对象
+        req = Flit(source, destination, path)
+        req.source_original = req_data[1]
+        req.destination_original = req_data[3]
+        req.flit_type = "req"
+        req.departure_cycle = req_data[0]
+        req.burst_length = req_data[6]
+        req.source_type = req_data[2]
+        req.destination_type = req_data[4]
+        req.original_source_type = req_data[2]
+        req.original_destination_type = req_data[4]
+        req.traffic_id = traffic_id  # 添加traffic_id标记
+
+        req.packet_id = Node.get_next_packet_id()
+        req.req_type = "read" if req_data[5] == "R" else "write"
+        req.req_attr = "new"
+        req.cmd_entry_cake0_cycle = self.cycle
+
+        # 通过IPInterface处理请求
+        ip_pos = req.source
+        ip_type = req.source_type
+
+        ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
+        if ip_interface is None:
+            raise ValueError("IP module setup error!")
+        ip_interface.enqueue(req, "req")
+
+        # 更新TrafficScheduler的统计信息
+        self.traffic_scheduler.update_traffic_stats(traffic_id, "injected_req")
+
+        # 更新统计信息
+        if req.req_type == "read":
+            self.R_tail_latency_stat = req_data[0]
+        elif req.req_type == "write":
+            self.W_tail_latency_stat = req_data[0]
+
+        # 更新请求计数
+        self.req_count += 1
+
+    # def _load_requests_stream(self):
+    #     """从文件生成请求流（按时间排序）"""
+    #     with open(self.traffic_file_path + self.file_name, "r") as f:
+    #         for line in f:
+    #             # 解析每行数据为元组（根据实际格式调整）
+    #             split_line = line.strip().split(",")
+    #             yield (
+    #                 # request cycle
+    #                 int(split_line[0]) * self.config.NETWORK_FREQUENCY,
+    #                 int(split_line[1]),  # source id
+    #                 split_line[2],  # source type
+    #                 int(split_line[3]),  # destination id
+    #                 split_line[4],  # destination type
+    #                 split_line[5],  # request type
+    #                 int(split_line[6]),  # burst length
+    #             )
 
     def error_log(self, flit, target_id, flit_id):
         if flit and flit.packet_id == target_id and flit.flit_id == flit_id:
@@ -614,62 +727,62 @@ class BaseModel:
 
         time.sleep(0.3)
 
-    def process_new_request(self):
-        while True:
-            # Get next request if we don't have one cached
-            if self.next_req is None:
-                try:
-                    self.next_req = next(self.req_stream)
-                except StopIteration:
-                    break  # No more requests
+    # def process_new_request(self):
+    #     while True:
+    #         # Get next request if we don't have one cached
+    #         if self.next_req is None:
+    #             try:
+    #                 self.next_req = next(self.req_stream)
+    #             except StopIteration:
+    #                 break  # No more requests
 
-            # Check if request's arrival time has come
-            if self.next_req[0] > self.cycle:
-                break  # Wait for next cycle
+    #         # Check if request's arrival time has come
+    #         if self.next_req[0] > self.cycle:
+    #             break  # Wait for next cycle
 
-            req_data = self.next_req
-            source = self.node_map(req_data[1])
-            destination = self.node_map(req_data[3], False)
-            path = self.routes[source][destination]
+    #         req_data = self.next_req
+    #         source = self.node_map(req_data[1])
+    #         destination = self.node_map(req_data[3], False)
+    #         path = self.routes[source][destination]
 
-            # Create flit object
-            req = Flit(source, destination, path)
-            req.source_original = req_data[1]
-            req.destination_original = req_data[3]
-            req.flit_type = "req"
-            req.departure_cycle = req_data[0]
-            req.burst_length = req_data[6]
-            req.source_type = req_data[2]
-            req.destination_type = req_data[4]
-            req.original_source_type = req_data[2]
-            req.original_destination_type = req_data[4]
+    #         # Create flit object
+    #         req = Flit(source, destination, path)
+    #         req.source_original = req_data[1]
+    #         req.destination_original = req_data[3]
+    #         req.flit_type = "req"
+    #         req.departure_cycle = req_data[0]
+    #         req.burst_length = req_data[6]
+    #         req.source_type = req_data[2]
+    #         req.destination_type = req_data[4]
+    #         req.original_source_type = req_data[2]
+    #         req.original_destination_type = req_data[4]
 
-            req.packet_id = Node.get_next_packet_id()
-            req.req_type = "read" if req_data[5] == "R" else "write"
-            req.req_attr = "new"
-            # Record command table entry cycle
-            req.cmd_entry_cake0_cycle = self.cycle
+    #         req.packet_id = Node.get_next_packet_id()
+    #         req.req_type = "read" if req_data[5] == "R" else "write"
+    #         req.req_attr = "new"
+    #         # Record command table entry cycle
+    #         req.cmd_entry_cake0_cycle = self.cycle
 
-            # Add to appropriate network structures
+    #         # Add to appropriate network structures
 
-            # 通过IPInterface处理请求
-            ip_pos = req.source
-            ip_type = req.source_type
+    #         # 通过IPInterface处理请求
+    #         ip_pos = req.source
+    #         ip_type = req.source_type
 
-            ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
-            if ip_interface is None:
-                raise ValueError("IP modeul setup error!")
-            ip_interface.enqueue(req, "req")
+    #         ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
+    #         if ip_interface is None:
+    #             raise ValueError("IP modeul setup error!")
+    #         ip_interface.enqueue(req, "req")
 
-            # 更新统计信息
-            if req.req_type == "read":
-                self.R_tail_latency_stat = req_data[0]
-            elif req.req_type == "write":
-                self.W_tail_latency_stat = req_data[0]
+    #         # 更新统计信息
+    #         if req.req_type == "read":
+    #             self.R_tail_latency_stat = req_data[0]
+    #         elif req.req_type == "write":
+    #             self.W_tail_latency_stat = req_data[0]
 
-            # Reset cached request and update count
-            self.next_req = None
-            self.req_count += 1
+    #         # Reset cached request and update count
+    #         self.next_req = None
+    #         self.req_count += 1
 
     def _flit_move(self, network: Network, flits, flit_type):
         # link 上的flit移动
@@ -1198,7 +1311,8 @@ class BaseModel:
     def node_map(self, node, is_source=True):
         if is_source:
             if self.topo_type_stat in ["5x4", "4x5"]:
-                return self.config.GDMA_SEND_POSITION_LIST[node] if node < 16 else self.config.SDMA_SEND_POSITION_LIST[node % 16]
+                # return self.config.GDMA_SEND_POSITION_LIST[node] if node < 16 else self.config.SDMA_SEND_POSITION_LIST[node % 16]
+                return self.config.GDMA_SEND_POSITION_LIST[node] if node < 16 else self.config.CDMA_SEND_POSITION_LIST[node - 16]
             elif self.topo_type_stat == "6x5":
                 return node % self.config.NUM_COL + self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
             return self.config.GDMA_SEND_POSITION_LIST[node]
