@@ -93,6 +93,9 @@ class TrafficScheduler:
         self.pending_requests.clear()
 
         for i, traffic_files in enumerate(chains_config):
+            # 跳过空的链配置，不创建对应的链
+            if not traffic_files:
+                continue
             chain_id = f"chain_{i}"
             chain = SerialChain(chain_id, traffic_files)
             self.parallel_chains.append(chain)
@@ -302,25 +305,26 @@ class TrafficScheduler:
         """设置详细输出模式"""
         self.verbose = verbose
 
-    def get_combined_filename(self) -> str:
+    def get_save_filename(self) -> str:
         """
-        生成组合的文件名（用于结果保存路径）
-
+        生成用于保存结果的文件名，包含串行或并行前缀
         Returns:
-            组合的文件名，不包含扩展名
+            带前缀的组合文件名，不包含扩展名
         """
+        # 根据并行链数量区分串行（1 条链）或并行（多条链）
+        prefix = "serial" if len(self.parallel_chains) == 1 else "parallel"
         if not self.parallel_chains:
-            return "no_traffic"
+            return f"{prefix}_no_traffic"
 
         chain_names = []
         for chain in self.parallel_chains:
-            # 移除扩展名并连接链中的文件
+            # 移除扩展名并连接链中的文件名
             files_without_ext = [f[:-4] if f.endswith(".txt") else f for f in chain.traffic_files]
             chain_name = "-".join(files_without_ext)
             chain_names.append(chain_name)
 
-        # 用 "_" 分隔不同的链
-        return "_".join(chain_names)
+        combined = "_".join(chain_names)
+        return f"{prefix}_{combined}"
 
     def reset(self):
         """重置调度器状态"""

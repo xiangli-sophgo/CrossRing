@@ -36,7 +36,20 @@ def main():
     # file_name = r"LLama2_AllReduce.txt"
     # file_name = r"LLama2_AttentionFC.txt"
     # file_name = r"DeepSeek_MLP.txt"
-    traffic_config = [[r"MLP_MoE.txt"], [r"All2All_Dispatch.txt"]]
+    traffic_config = [
+        [
+            r"Add.txt",
+            r"Add.txt",
+        ],
+        [
+            # r"Add.txt",
+            # r"All2All_Dispatch.txt",
+        ],
+        # [
+        #     r"Add.txt",
+        #     r"Add.txt",
+        # ],
+    ]
     # traffic_config = r"MLP_merge.txt"
     # file_name = r"All2All_Dispatch.txt"
     # file_name = r"All2All_Combine.txt"
@@ -220,7 +233,7 @@ def main():
         }
 
     sim.initial()
-    sim.end_time = 2000
+    sim.end_time = 3000
     sim.print_interval = 2000
     sim.run()
 

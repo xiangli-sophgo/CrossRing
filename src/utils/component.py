@@ -46,6 +46,8 @@ class Flit:
         self.is_finish = False
         Flit.last_id += 1
         self.packet_id = None
+        # 标记该flit所属的traffic
+        self.traffic_id = None
         self.moving_direction = self.calculate_direction(path)
         self.moving_direction_v = 1 if source < destination else -1
         self.flit_type = "flit"
@@ -771,6 +773,9 @@ class IPInterface:
             self._handle_received_response(flit)
         elif network_type == "data":
             self._handle_received_data(flit)
+        return flit
+    # Ensure method always returns None if no flit ejected
+        return None
 
     def inject_step(self, cycle):
         """根据周期和频率调用inject相应的方法"""
@@ -796,7 +801,10 @@ class IPInterface:
                 net_info["l2h_fifo"].append(net_info["l2h_fifo_pre"])
                 net_info["l2h_fifo_pre"] = None
 
-            if net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen:
+            if (
+                net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None
+                and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen
+            ):
                 net.IQ_channel_buffer[self.ip_type][self.ip_pos].append(net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos])
                 net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = None
 
@@ -809,15 +817,22 @@ class IPInterface:
         self.current_cycle = cycle
         cycle_mod = cycle % self.config.NETWORK_FREQUENCY
 
+        # Initialize list to collect ejected flits
+        ejected_flits = []
+
         # 2GHz 操作（每半个网络周期执行一次）
         for net_type in ["req", "rsp", "data"]:
             self.EQ_channel_buffer_to_h2l_pre(net_type)
 
         # 1GHz 操作（每个网络周期执行一次）
         if cycle_mod == 0:
-            # 对三个网络分别执行h2l_to_eject_fifo
+            # 对三个网络分别执行h2l_to_eject_fifo，收集被eject的flit
             for net_type in ["req", "rsp", "data"]:
-                self.h2l_to_eject_fifo(net_type)
+                flit = self.h2l_to_eject_fifo(net_type)
+                if flit:
+                    ejected_flits.append(flit)
+
+        return ejected_flits
 
     def create_write_packet(self, req: Flit):
         """创建写数据包并放入数据网络inject_fifo"""
@@ -846,6 +861,7 @@ class IPInterface:
             flit.packet_id = req.packet_id
             flit.flit_id = i
             flit.burst_length = req.burst_length
+            flit.traffic_id = req.traffic_id
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
 
@@ -866,7 +882,9 @@ class IPInterface:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             if req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
+                latency = np.random.uniform(
+                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
+                )
             else:
                 latency = self.config.L2M_R_LATENCY
             flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY
@@ -879,6 +897,7 @@ class IPInterface:
             flit.packet_id = req.packet_id
             flit.flit_id = i
             flit.burst_length = req.burst_length
+            flit.traffic_id = req.traffic_id
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
 
@@ -1020,7 +1039,9 @@ class Network:
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}
         self.ETag_BOTHSIDE_UPGRADE = False
 
-        for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
+        for ip_pos in set(
+            config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST
+        ):
             self.cross_point["horizontal"][ip_pos]["TL"] = [None] * 2
             self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2
@@ -2014,7 +2035,11 @@ class Network:
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
-                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth and self.ring_bridge_pre[direction][flit.current_link] is None:
+                    if (
+                        direction in self.ring_bridge.keys()
+                        and len(self.ring_bridge[direction][flit.current_link]) < max_depth
+                        and self.ring_bridge_pre[direction][flit.current_link] is None
+                    ):
                         # flit.flit_position = f"RB_{direction}"
                         # self.ring_bridge[direction][flit.current_link].append(flit)
                         self.ring_bridge_pre[direction][flit.current_link] = flit

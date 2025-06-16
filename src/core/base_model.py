@@ -91,7 +91,7 @@ class BaseModel:
         elif isinstance(traffic_config, list):
             # 多traffic链配置
             self.traffic_scheduler.setup_parallel_chains(traffic_config)
-            self.file_name = self.traffic_scheduler.get_combined_filename() + ".txt"
+            self.file_name = self.traffic_scheduler.get_save_filename() + ".txt"
         else:
             raise ValueError("traffic_config must be a string (single file) or list of lists (multiple chains)")
 
@@ -128,7 +128,7 @@ class BaseModel:
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.data_network = Network(self.config, self.adjacency_matrix, name="Data Network")
         if hasattr(self, "result_processor"):
-            self.result_processor = BandwidthAnalyzer(self.config, min_gap_threshold=50, plot_rn_bw_fig=self.plot_RN_BW_fig, plot_flow_graph=self.plot_flow_fig)
+            self.result_processor = BandwidthAnalyzer(self.config, min_gap_threshold=100, plot_rn_bw_fig=self.plot_RN_BW_fig, plot_flow_graph=self.plot_flow_fig)
         if self.plot_link_state:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
@@ -136,7 +136,11 @@ class BaseModel:
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
+            self.config.GDMA_SEND_POSITION_LIST
+            + self.config.SDMA_SEND_POSITION_LIST
+            + self.config.CDMA_SEND_POSITION_LIST
+            + self.config.DDR_SEND_POSITION_LIST
+            + self.config.L2M_SEND_POSITION_LIST
         )
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
@@ -306,12 +310,8 @@ class BaseModel:
 
     def update_traffic_completion_stats(self, flit):
         """在flit完成时更新TrafficScheduler的统计"""
-        if hasattr(flit, "traffic_id"):
-            if flit.flit_type == "data":
-                self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "sent_flit")
-            # 当flit到达目的地时
-            if flit.is_arrive:
-                self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "received_flit")
+        if hasattr(flit, "traffic_id") and getattr(flit, "is_arrive", False):
+            self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "received_flit")
 
     def syn_IP_stat(self):
         for ip_pos in self.flit_positions:
@@ -353,10 +353,16 @@ class BaseModel:
                 ip_interface.inject_step(self.cycle)
 
     def network_to_ip_eject(self):
+        """从网络到IP的eject步骤，并更新received_flit统计"""
         for ip_pos in self.flit_positions:
             for ip_type in self.config.CH_NAME_LIST:
                 ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
-                ip_interface.eject_step(self.cycle)
+                # 执行eject，获取已到达目的IP的flit列表
+                ejected_flits = ip_interface.eject_step(self.cycle)
+                # 更新TrafficScheduler中的received_flit统计
+                if ejected_flits:
+                    for flit in ejected_flits:
+                        self.update_traffic_completion_stats(flit)
 
     def release_completed_sn_tracker(self):
         """Check if any trackers can be released based on the current cycle."""
@@ -432,7 +438,11 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
+            print(
+                f"Data statistic: Read: {self.read_req, self.read_flit}, "
+                f"Write: {self.write_req, self.write_flit}, "
+                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
+            )
 
     def log_summary(self):
         if self.verbose:
@@ -536,6 +546,8 @@ class BaseModel:
                             flit.data_entry_network_cycle = self.cycle
                             self.send_flits_num += 1
                             self.trans_flits_num += 1
+                            if hasattr(flit, "traffic_id"):
+                                self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "sent_flit")
 
                         rr_queue.remove(ip_type)
                         rr_queue.append(ip_type)
@@ -838,7 +850,8 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
+                    for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作

@@ -158,7 +158,7 @@ class BandwidthAnalyzer:
         self.requests: List[RequestInfo] = []
         self.rn_positions = set()
         self.sn_positions = set()
-        self.rn_bandwidth_time_series = defaultdict(lambda: {"time": [], "bytes": []})
+        self.rn_bandwidth_time_series = defaultdict(lambda: {"time": [], "start_times": [], "bytes": []})
         self.ip_bandwidth_data = None
         self.read_ip_intervals = defaultdict(list)
         self.write_ip_intervals = defaultdict(list)
@@ -234,7 +234,7 @@ class BandwidthAnalyzer:
 
             # 收集RN带宽时间序列数据
             # 使用修正后的类型信息
-            port_key = f"{actual_source_type[:-3].upper()} {representative_flit.req_type} {actual_dest_type[:3].upper()}"
+            port_key = f"{actual_source_type[:-2].upper()} {representative_flit.req_type} {actual_dest_type[:3].upper()}"
 
             if representative_flit.req_type == "read":
                 completion_time = rn_end_time
@@ -242,6 +242,7 @@ class BandwidthAnalyzer:
                 completion_time = rn_end_time
 
             self.rn_bandwidth_time_series[port_key]["time"].append(completion_time)
+            self.rn_bandwidth_time_series[port_key]["start_times"].append(request_info.start_time)
             self.rn_bandwidth_time_series[port_key]["bytes"].append(representative_flit.burst_length * 128)
 
             # 更新finish_cycle
@@ -369,7 +370,7 @@ class BandwidthAnalyzer:
 
     def plot_rn_bandwidth_curves(self) -> float:
         """
-        绘制RN端带宽曲线图，使用累积和计算带宽
+        绘制RN端带宽曲线图，使用累积和计算带宽，区分工作区间（gap大于阈值时分段）
 
         Returns:
             总带宽 (GB/s)
@@ -383,31 +384,52 @@ class BandwidthAnalyzer:
             if not data_dict["time"]:
                 continue
 
-            # 排序时间戳并去除nan值
-            raw_times = np.array(data_dict["time"])
-            clean_times = raw_times[~np.isnan(raw_times)]
-            times = np.sort(clean_times)
+            # 排序时间戳并去除nan值，同时处理start_times
+            raw_end = np.array(data_dict["time"])
+            raw_start = np.array(data_dict["start_times"])
+            # 去除nan
+            mask = ~np.isnan(raw_end)
+            end_clean = raw_end[mask]
+            start_clean = raw_start[mask]
+            # 同步排序
+            sort_idx = np.argsort(end_clean)
+            times = end_clean[sort_idx]
+            start_times = start_clean[sort_idx]
 
             if len(times) == 0:
                 continue
 
-            # 计算累积带宽
-            cum_counts = np.arange(1, len(times) + 1)
-            bandwidth = (cum_counts * 128 * self.config.BURST) / times  # bytes/ns转换为GB/s
+            # 分割工作区间：当相邻时间差大于阈值时，认为是新区间
+            gap_indices = np.where(np.diff(times) > self.min_gap_threshold)[0]
+            # 定义区间的起止索引
+            segment_bounds = np.concatenate(([0], gap_indices + 1, [len(times)]))
 
-            # 只显示前100%的时间段
-            t = np.percentile(times, 100)
-            mask = times <= t
-
-            if self.plot_rn_bw_fig:
-                (line,) = plt.plot(times[mask] / 1000, bandwidth[mask], drawstyle="default", label=f"{port_key}")
-                plt.text(times[mask][-1] / 1000, bandwidth[mask][-1], f"{bandwidth[mask][-1]:.2f}", va="center", color=line.get_color(), fontsize=12)
-
-            # 打印最终带宽值
-            if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
-                print(f"{port_key} Final Bandwidth: {bandwidth[mask][-1]:.2f} GB/s")
-
-            total_bw += bandwidth[mask][-1]
+            last_bw = 0
+            # 对每个工作区间分别绘制，从0开始累积
+            for i in range(len(segment_bounds) - 1):
+                start_idx = segment_bounds[i]
+                end_idx = segment_bounds[i + 1]
+                # 获取绝对时间和相对时间
+                abs_end = times[start_idx:end_idx]
+                # 使用该段第一个请求的start_time作为起点
+                segment_start = start_times[start_idx]
+                rel_times = abs_end - segment_start
+                if len(rel_times) == 0:
+                    continue
+                cum_counts = np.arange(1, len(rel_times) + 1)
+                # 防止除以0
+                rel_nonzero = rel_times.copy()
+                rel_nonzero[rel_nonzero == 0] = 1e-9
+                bandwidth = (cum_counts * 128 * self.config.BURST) / rel_nonzero
+                # 绘制曲线片段，使用绝对时间轴
+                if self.plot_rn_bw_fig:
+                    (line,) = plt.plot(abs_end / 1000, bandwidth, drawstyle="default", label=f"{port_key}_seg{i}")
+                    plt.text(abs_end[-1] / 1000, bandwidth[-1], f"{bandwidth[-1]:.2f}", va="center", color=line.get_color(), fontsize=12)
+                last_bw = bandwidth[-1]
+                # 打印每个区间的最终带宽值（可选）
+                if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
+                    print(f"{port_key} seg{i} Final Bandwidth: {bandwidth[-1]:.2f} GB/s")
+            total_bw += last_bw
 
         if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
             print(f"Total Bandwidth: {total_bw:.2f} GB/s")
@@ -1340,9 +1362,15 @@ class BandwidthAnalyzer:
         print(
             f"  总带宽  - 非加权: {read_metrics.unweighted_bandwidth + write_metrics.unweighted_bandwidth:.3f} GB/s, 加权: {read_metrics.weighted_bandwidth + write_metrics.weighted_bandwidth:.3f} GB/s"
         )
-        print(f"  读带宽  - 平均非加权: {read_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {read_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
-        print(f"  写带宽  - 平均非加权: {write_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {write_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
-        print(f"  混合带宽 - 平均非加权: {mixed_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {mixed_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
+        print(
+            f"  读带宽  - 平均非加权: {read_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {read_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s"
+        )
+        print(
+            f"  写带宽  - 平均非加权: {write_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {write_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s"
+        )
+        print(
+            f"  混合带宽 - 平均非加权: {mixed_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {mixed_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s"
+        )
         print(
             f"  总带宽  - 平均非加权: {(read_metrics.unweighted_bandwidth + write_metrics.unweighted_bandwidth) / self.config.NUM_IP:.3f} GB/s, 平均加权: {(read_metrics.weighted_bandwidth + write_metrics.weighted_bandwidth) / self.config.NUM_IP:.3f} GB/s"
         )
@@ -1753,7 +1781,9 @@ class BandwidthAnalyzer:
 
 
 # 便捷使用函数
-def analyze_bandwidth(base_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False) -> Dict:
+def analyze_bandwidth(
+    base_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False
+) -> Dict:
     """
     便捷的带宽分析函数
 
