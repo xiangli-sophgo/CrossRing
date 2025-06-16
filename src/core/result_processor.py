@@ -387,6 +387,9 @@ class BandwidthAnalyzer:
             # 排序时间戳并去除nan值，同时处理start_times
             raw_end = np.array(data_dict["time"])
             raw_start = np.array(data_dict["start_times"])
+            # Prepare consistent color for this port_key's segments
+            segment_color = None
+            first_segment = True
             # 去除nan
             mask = ~np.isnan(raw_end)
             end_clean = raw_end[mask]
@@ -423,8 +426,13 @@ class BandwidthAnalyzer:
                 bandwidth = (cum_counts * 128 * self.config.BURST) / rel_nonzero
                 # 绘制曲线片段，使用绝对时间轴
                 if self.plot_rn_bw_fig:
-                    (line,) = plt.plot(abs_end / 1000, bandwidth, drawstyle="default", label=f"{port_key}_seg{i}")
-                    plt.text(abs_end[-1] / 1000, bandwidth[-1], f"{bandwidth[-1]:.2f}", va="center", color=line.get_color(), fontsize=12)
+                    if first_segment:
+                        (line,) = plt.plot(abs_end / 1000, bandwidth, drawstyle="default", label=port_key)
+                        segment_color = line.get_color()
+                        first_segment = False
+                    else:
+                        plt.plot(abs_end / 1000, bandwidth, drawstyle="default", color=segment_color)
+                    plt.text(abs_end[-1] / 1000, bandwidth[-1], f"{bandwidth[-1]:.2f}", va="center", color=segment_color, fontsize=12)
                 last_bw = bandwidth[-1]
                 # 打印每个区间的最终带宽值（可选）
                 if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:

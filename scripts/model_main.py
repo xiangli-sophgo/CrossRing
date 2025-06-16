@@ -40,6 +40,16 @@ def main():
         [
             r"Add.txt",
             r"Add.txt",
+            r"Add.txt",
+            r"Add.txt",
+            r"Add.txt",
+        ],
+        [
+            r"Add.txt",
+            r"Add.txt",
+            r"Add.txt",
+            r"Add.txt",
+            r"Add.txt",
         ],
         [
             # r"Add.txt",
@@ -233,7 +243,7 @@ def main():
         }
 
     sim.initial()
-    sim.end_time = 3000
+    # sim.end_time = 3000
     sim.print_interval = 2000
     sim.run()
 
