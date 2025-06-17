@@ -342,17 +342,30 @@ class IPInterface:
             },
         }
 
+        # 根据IP类型设置带宽限制令牌桶
         if ip_type.startswith("ddr"):
+            # DDR通道限速
             self.token_bucket = TokenBucket(
                 rate=self.config.DDR_BW_LIMIT / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
                 bucket_size=self.config.DDR_BW_LIMIT,
             )
         elif ip_type.startswith("l2m"):
+            # L2M通道限速
             self.token_bucket = TokenBucket(
                 rate=self.config.L2M_BW_LIMIT / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
                 bucket_size=self.config.L2M_BW_LIMIT,
             )
+        elif ip_type[:4] in ("sdma", "gdma", "cdma"):
+            # DMA通道（SDMA/GDMA/CDMA）限速
+            # 配置字段应为 SDMA_BW_LIMIT, GDMA_BW_LIMIT, CDMA_BW_LIMIT
+            limit_attr = f"{ip_type[:4].upper()}_BW_LIMIT"
+            bw_limit = getattr(self.config, limit_attr)
+            self.token_bucket = TokenBucket(
+                rate=bw_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
+                bucket_size=bw_limit,
+            )
         else:
+            # 默认不限速
             self.token_bucket = None
 
     def enqueue(self, flit: Flit, network_type: str, retry=False):

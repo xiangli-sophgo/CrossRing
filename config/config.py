@@ -47,6 +47,9 @@ class CrossRingConfig:
         self.SN_DDR_WDB_SIZE = args.SN_DDR_WDB_SIZE
         self.SN_L2M_RDB_SIZE = args.SN_L2M_RDB_SIZE
         self.SN_L2M_WDB_SIZE = args.SN_L2M_WDB_SIZE
+        self.GDMA_BW_LIMIT = args.GDMA_BW_LIMIT
+        self.SDMA_BW_LIMIT = args.SDMA_BW_LIMIT
+        self.CDMA_BW_LIMIT = args.CDMA_BW_LIMIT
         self.DDR_BW_LIMIT = args.DDR_BW_LIMIT
         self.L2M_BW_LIMIT = args.L2M_BW_LIMIT
         self.DDR_R_LATENCY_original = args.DDR_R_LATENCY
@@ -98,7 +101,6 @@ class CrossRingConfig:
         return ports
 
     def update_config(self, topo_type="default"):
-        self.update_latency()
         self.update_latency()
         self.topology_select(topo_type)
         self.SN_TRACKER_RELEASE_LATENCY = self.SN_TRACKER_RELEASE_LATENCY_original * self.NETWORK_FREQUENCY
@@ -335,6 +337,9 @@ class CrossRingConfig:
         parser.add_argument("--ITag_TRIGGER_Th_V", type=int, default=default_config["ITag_TRIGGER_Th_V"], help="Vertical ring I-Tag trigger threshold")
         parser.add_argument("--ITag_MAX_Num_H", type=int, default=default_config["ITag_MAX_Num_H"], help="Maximum number of I-Tag reservations for horizontal ring XY nodes")
         parser.add_argument("--ITag_MAX_Num_V", type=int, default=default_config["ITag_MAX_Num_V"], help="Maximum number of I-Tag reservations for vertical ring XY nodes")
+        parser.add_argument("--GDMA_BW_LIMIT", type=int, default=default_config["GDMA_BW_LIMIT"], help="GDMA Bandwidth limit.")
+        parser.add_argument("--SDMA_BW_LIMIT", type=int, default=default_config["SDMA_BW_LIMIT"], help="SDMA Bandwidth limit.")
+        parser.add_argument("--CDMA_BW_LIMIT", type=int, default=default_config["CDMA_BW_LIMIT"], help="CDMA Bandwidth limit.")
         parser.add_argument("--DDR_BW_LIMIT", type=int, default=default_config["DDR_BW_LIMIT"], help="DDR Bandwidth limit.")
         parser.add_argument("--L2M_BW_LIMIT", type=int, default=default_config["L2M_BW_LIMIT"], help="L2M Bandwidth limit.")
         parser.add_argument("--DDR_R_LATENCY", type=int, default=default_config["DDR_R_LATENCY"], help="DDR latency")

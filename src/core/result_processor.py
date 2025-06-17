@@ -14,6 +14,7 @@ import matplotlib.colors as mcolors
 from functools import lru_cache
 from src.core.result_processor import *
 import time
+import pandas as pd
 
 
 @dataclass
@@ -1390,6 +1391,207 @@ class BandwidthAnalyzer:
         else:
             plt.show()
 
+    def _save_analysis_config(self, output_path: str):
+        """保存分析配置用于重新绘图"""
+        config_file = os.path.join(output_path, "analysis_config.json")
+
+        config_data = {
+            "min_gap_threshold": self.min_gap_threshold,
+            "network_frequency": self.network_frequency,
+            "burst": getattr(self.config, "BURST", 4),
+            "topo_type": getattr(self.config, "TOPO_TYPE", "unknown"),
+            "num_ip": getattr(self.config, "NUM_IP", 1),
+            "num_col": getattr(self.config, "NUM_COL", 1),
+            "num_row": getattr(self.config, "NUM_ROW", 1),
+            "spare_core_row": getattr(self.config, "SPARE_CORE_ROW", -1),
+            "fail_core_pos": getattr(self.config, "FAIL_CORE_POS", []),
+            "spare_core_pos": getattr(self.config, "spare_core_pos", []),
+            "rn_positions": list(self.rn_positions),
+            "sn_positions": list(self.sn_positions),
+        }
+
+        # 保存网络链路流量数据（如果存在）
+        if hasattr(self, "base_model") and hasattr(self.base_model, "data_network"):
+            network = self.base_model.data_network
+            if hasattr(network, "links_flow_stat"):
+                config_data["links_flow_stat"] = {}
+                for mode, links in network.links_flow_stat.items():
+                    # 转换为可序列化格式，键需要转换为字符串
+                    config_data["links_flow_stat"][mode] = {f"{i},{j}": value for (i, j), value in links.items()}
+
+            # 保存finish_cycle用于计算链路带宽
+            config_data["finish_cycle"] = float(self.finish_cycle)
+            config_data["network_name"] = getattr(network, "name", "Network")
+
+        with open(config_file, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, indent=2)
+
+        if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
+            print(f"分析配置已保存: {config_file}")
+
+    def load_requests_from_csv(self, csv_folder: str, config_dict: Dict = None):
+        """
+        从CSV文件重新加载请求数据
+
+        Args:
+            csv_folder: 包含read_requests.csv和write_requests.csv的文件夹
+            config_dict: 配置字典，如果为None则尝试从保存的配置加载
+        """
+        self.requests.clear()
+        self.rn_bandwidth_time_series.clear()
+
+        # 加载配置
+        if config_dict is None:
+            config_file = os.path.join(csv_folder, "analysis_config.json")
+            if os.path.exists(config_file):
+                with open(config_file, "r", encoding="utf-8") as f:
+                    config_data = json.load(f)
+            else:
+                print("警告: 未找到配置文件，使用默认配置")
+                config_data = {
+                    "min_gap_threshold": 50,
+                    "network_frequency": 1.0,
+                    "burst": 4,
+                    "topo_type": "unknown",
+                    "num_ip": 1,
+                    "num_col": 4,
+                    "num_row": 5,
+                    "rn_positions": [],
+                    "sn_positions": [],
+                }
+        else:
+            config_data = config_dict
+
+        # 设置分析器属性
+        self.min_gap_threshold = config_data.get("min_gap_threshold", 50)
+        self.network_frequency = config_data.get("network_frequency", 1.0)
+        self.finish_cycle = config_data.get("finish_cycle", 1000000)
+
+        # 创建临时config对象
+        class TempConfig:
+            def __init__(self, config_dict):
+                self.BURST = config_dict.get("burst", 4)
+                self.TOPO_TYPE = config_dict.get("topo_type", "unknown")
+                self.NUM_IP = config_dict.get("num_ip", 1)
+                self.NUM_COL = config_dict.get("num_col", 4)
+                self.NUM_ROW = config_dict.get("num_row", 5)
+                self.SPARE_CORE_ROW = config_dict.get("spare_core_row", -1)
+                self.FAIL_CORE_POS = config_dict.get("fail_core_pos", [])
+                self.spare_core_pos = config_dict.get("spare_core_pos", [])
+                self.NETWORK_FREQUENCY = config_dict.get("network_frequency", 1.0)
+
+        self.config = TempConfig(config_data)
+
+        # 恢复节点位置
+        self.rn_positions = set(config_data.get("rn_positions", []))
+        self.sn_positions = set(config_data.get("sn_positions", []))
+
+        # 创建临时网络对象用于流图绘制
+        if "links_flow_stat" in config_data:
+
+            class TempNetwork:
+                def __init__(self, config_data):
+                    self.name = config_data.get("network_name", "Network")
+                    self.links_flow_stat = {}
+
+                    # 恢复链路流量数据
+                    for mode, links_str in config_data["links_flow_stat"].items():
+                        self.links_flow_stat[mode] = {}
+                        for key_str, value in links_str.items():
+                            # 将字符串键转换回元组
+                            i, j = map(int, key_str.split(","))
+                            self.links_flow_stat[mode][(i, j)] = value
+
+            self.temp_network = TempNetwork(config_data)
+        else:
+            self.temp_network = None
+
+        # 读取CSV文件（保持原有逻辑）
+        read_csv = os.path.join(csv_folder, "read_requests.csv")
+        write_csv = os.path.join(csv_folder, "write_requests.csv")
+
+        # 处理读请求
+        if os.path.exists(read_csv):
+            df_read = pd.read_csv(read_csv)
+            for _, row in df_read.iterrows():
+                request_info = RequestInfo(
+                    packet_id=int(row["packet_id"]),
+                    start_time=int(row["start_time_ns"]),
+                    end_time=int(row["end_time_ns"]),
+                    rn_end_time=int(row["end_time_ns"]),
+                    sn_end_time=int(row["end_time_ns"]),
+                    req_type="read",
+                    source_node=int(row["source_node"]),
+                    dest_node=int(row["dest_node"]),
+                    source_type=str(row["source_type"]),
+                    dest_type=str(row["dest_type"]),
+                    burst_length=int(row["burst_length"]),
+                    total_bytes=int(row["burst_length"]) * 128,
+                    cmd_latency=int(row["cmd_latency_ns"]),
+                    data_latency=int(row["data_latency_ns"]),
+                    transaction_latency=int(row["transaction_latency_ns"]),
+                )
+                self.requests.append(request_info)
+
+                # 更新节点位置信息（如果配置中没有）
+                if not self.rn_positions and request_info.source_type.endswith("_ip"):
+                    self.rn_positions.add(request_info.source_node)
+                if not self.sn_positions and request_info.dest_type.endswith("_ip"):
+                    self.sn_positions.add(request_info.dest_node)
+
+        # 处理写请求
+        if os.path.exists(write_csv):
+            df_write = pd.read_csv(write_csv)
+            for _, row in df_write.iterrows():
+                request_info = RequestInfo(
+                    packet_id=int(row["packet_id"]),
+                    start_time=int(row["start_time_ns"]),
+                    end_time=int(row["end_time_ns"]),
+                    rn_end_time=int(row["end_time_ns"]),
+                    sn_end_time=int(row["end_time_ns"]),
+                    req_type="write",
+                    source_node=int(row["source_node"]),
+                    dest_node=int(row["dest_node"]),
+                    source_type=str(row["source_type"]),
+                    dest_type=str(row["dest_type"]),
+                    burst_length=int(row["burst_length"]),
+                    total_bytes=int(row["burst_length"]) * 128,
+                    cmd_latency=int(row["cmd_latency_ns"]),
+                    data_latency=int(row["data_latency_ns"]),
+                    transaction_latency=int(row["transaction_latency_ns"]),
+                )
+                self.requests.append(request_info)
+
+                # 更新节点位置信息（如果配置中没有）
+                if not self.rn_positions and request_info.source_type.endswith("_ip"):
+                    self.rn_positions.add(request_info.source_node)
+                if not self.sn_positions and request_info.dest_type.endswith("_ip"):
+                    self.sn_positions.add(request_info.dest_node)
+
+        # 按开始时间排序
+        self.requests.sort(key=lambda x: x.start_time)
+
+        # 重建RN带宽时间序列数据
+        self._rebuild_rn_bandwidth_time_series()
+
+        print(f"从CSV加载了 {len(self.requests)} 个请求 (读: {len([r for r in self.requests if r.req_type == 'read'])}, " f"写: {len([r for r in self.requests if r.req_type == 'write'])})")
+
+    def _rebuild_rn_bandwidth_time_series(self):
+        """重建RN带宽时间序列数据"""
+        for req in self.requests:
+            if req.source_node in self.rn_positions:
+                # 使用与原始collect_requests_data相同的逻辑
+                port_key = f"{req.source_type[:-2].upper()} {req.req_type} {req.dest_type[:3].upper()}"
+
+                if req.req_type == "read":
+                    completion_time = req.rn_end_time
+                else:  # write
+                    completion_time = req.rn_end_time
+
+                self.rn_bandwidth_time_series[port_key]["time"].append(completion_time)
+                self.rn_bandwidth_time_series[port_key]["start_times"].append(req.start_time)
+                self.rn_bandwidth_time_series[port_key]["bytes"].append(req.burst_length * 128)
+
     def generate_unified_report(self, results: Dict, output_path: str) -> None:
         """
         生成统一的带宽分析报告
@@ -1407,11 +1609,97 @@ class BandwidthAnalyzer:
             self._write_network_overall_section(f, results["network_overall"])
             self._generate_rn_ports_csv(results["rn_ports"], output_path)
 
-        # 生成详细请求记录的CSV文件（读写分开）
+        # 生成详细请求记录的CSV文件
         self._generate_detailed_request_csv(output_path)
+
+        # 保存分析配置
+        self._save_analysis_config(output_path)
+
         if self.base_model.verbose:
             print(f"带宽分析报告： {report_file}")
             print(f"具体RN端口的统计CSV： {output_path}rn_ports_bandwidth.csv")
+
+    @staticmethod
+    def reanalyze_and_plot_from_csv(csv_folder: str, output_path: str = None, plot_rn_bw: bool = True, plot_flow: bool = False, show_cdma: bool = False) -> Dict:
+        """
+        从CSV文件重新分析并绘图
+
+        Args:
+            csv_folder: 包含CSV文件的文件夹
+            output_path: 图片保存路径，如果为None则保存到csv_folder
+            plot_rn_bw: 是否绘制RN带宽曲线
+            plot_flow: 是否绘制流图
+
+        Returns:
+            分析结果字典
+        """
+        # 创建临时分析器实例
+        analyzer = BandwidthAnalyzer.__new__(BandwidthAnalyzer)
+
+        # 初始化基本属性
+        analyzer.requests = []
+        analyzer.rn_positions = set()
+        analyzer.sn_positions = set()
+        analyzer.rn_bandwidth_time_series = defaultdict(lambda: {"time": [], "start_times": [], "bytes": []})
+        analyzer.plot_rn_bw_fig = plot_rn_bw
+        analyzer.plot_flow_graph = plot_flow
+        analyzer.finish_cycle = -np.inf
+        analyzer.ip_bandwidth_data = None
+
+        # 从CSV加载数据
+        analyzer.load_requests_from_csv(csv_folder)
+
+        # 执行分析
+        if output_path is None:
+            output_path = csv_folder
+
+        # 创建一个临时的base_model用于保存路径
+        class TempBaseModel:
+            def __init__(self, save_path, config):
+                self.results_fig_save_path = save_path
+                self.verbose = True
+                self.file_name = "replot"
+                self.topo_type_stat = getattr(config, "TOPO_TYPE", "unknown")
+                self.flow_fig_show_CDMA = show_cdma  # 默认显示CDMA
+
+        analyzer.base_model = TempBaseModel(output_path, analyzer.config)
+
+        if plot_rn_bw:
+            # 绘制RN带宽曲线
+            total_bandwidth = analyzer.plot_rn_bandwidth_curves_new()
+            print(f"重新分析得到的总带宽: {total_bandwidth:.2f} GB/s")
+
+        # 绘制流图（如果有网络数据且用户要求）
+        if plot_flow and hasattr(analyzer, "temp_network") and analyzer.temp_network:
+            # 预计算IP带宽数据
+            analyzer.calculate_ip_bandwidth_data()
+
+            # 生成流图
+            flow_save_path = os.path.join(output_path, f"flow_graph_{analyzer.config.TOPO_TYPE}_replot.png")
+            analyzer.draw_flow_graph(analyzer.temp_network, mode="total", save_path=flow_save_path, show_cdma=show_cdma)
+            print(f"网络带宽图已保存: {flow_save_path}")
+        elif plot_flow:
+            print("警告: 没有找到网络链路数据，无法绘制流图")
+
+        # 计算整体带宽指标
+        network_overall = analyzer.calculate_network_overall_bandwidth()
+        rn_port_metrics = analyzer.calculate_rn_port_bandwidth()
+
+        results = {
+            "network_overall": network_overall,
+            "rn_ports": rn_port_metrics,
+            "summary": {
+                "total_requests": len(analyzer.requests),
+                "read_requests": len([r for r in analyzer.requests if r.req_type == "read"]),
+                "write_requests": len([r for r in analyzer.requests if r.req_type == "write"]),
+                "reanalyzed_from_csv": True,
+            },
+        }
+
+        if plot_rn_bw:
+            results["Total_sum_BW"] = total_bandwidth
+
+        return results
 
     def _print_summary_to_console(self, results):
         """输出重要数据到控制台"""
@@ -1872,23 +2160,84 @@ def analyze_bandwidth(base_model, config, output_path: str = "./bandwidth_analys
     return results
 
 
+def replot_from_result_folder(csv_folder: str, plot_rn_bw: bool = True, plot_flow: bool = True, output_filename: str = None, show_cdma: bool = False) -> Dict:
+    """
+    便捷函数：从CSV文件夹重新分析并绘制所有图表
+
+    Args:
+        csv_folder: 包含CSV文件的文件夹路径
+        plot_rn_bw: 是否绘制RN带宽曲线
+        plot_flow: 是否绘制流图
+        output_filename: 输出图片文件名前缀
+
+    Returns:
+        分析结果字典
+    """
+    output_path = csv_folder
+
+    results = BandwidthAnalyzer.reanalyze_and_plot_from_csv(csv_folder, output_path, plot_rn_bw=plot_rn_bw, plot_flow=plot_flow, show_cdma=show_cdma)
+
+    return results
+
+
+def batch_replot_all_from_csv_folders(parent_folder: str, pattern: str = "*bandwidth_analysis*", plot_rn_bw: bool = True, plot_flow: bool = True):
+    """批量从CSV重新绘制所有图表"""
+    import glob
+
+    folders = glob.glob(os.path.join(parent_folder, pattern))
+
+    results_summary = []
+    for folder in folders:
+        if os.path.isdir(folder):
+            try:
+                start_time = time.time()
+                results = replot_from_result_folder(folder, plot_rn_bw, plot_flow)
+                end_time = time.time()
+
+                folder_name = os.path.basename(folder)
+                processing_time = end_time - start_time
+                total_bw = results.get("Total_sum_BW", 0.0)
+
+                results_summary.append({"folder": folder_name, "bandwidth": total_bw, "time": processing_time, "status": "success"})
+
+                plots_generated = []
+                if plot_rn_bw:
+                    plots_generated.append("RN带宽")
+                if plot_flow:
+                    plots_generated.append("流图")
+
+                print(f"✓ {folder_name}: {total_bw:.2f} GB/s, " f"已生成: {', '.join(plots_generated)} (耗时: {processing_time:.2f}s)")
+
+            except Exception as e:
+                folder_name = os.path.basename(folder)
+                results_summary.append({"folder": folder_name, "bandwidth": 0.0, "time": 0.0, "status": f"error: {str(e)}"})
+                print(f"✗ {folder_name}: 错误 - {e}")
+
+    # 输出汇总
+    print(f"\n批量处理完成，共处理 {len(results_summary)} 个文件夹")
+    total_time = sum(r["time"] for r in results_summary if r["status"] == "success")
+    success_count = len([r for r in results_summary if r["status"] == "success"])
+    print(f"成功: {success_count}, 总耗时: {total_time:.2f}s")
+
+    return results_summary
+
+
 # 使用示例
 def main():
-    """使用示例"""
-    print("BandwidthAnalyzer 使用示例:")
-    print()
-    print("# 基本使用方法:")
-    print("analyzer = BandwidthAnalyzer(config, min_gap_threshold=50)")
-    print("analyzer.collect_requests_data(base_model)")
-    print("results = analyzer.analyze_all_bandwidth()")
-    print()
-    print("# 获取混合读写带宽:")
-    print("mixed_unweighted_bw = results['network_overall']['mixed'].unweighted_bandwidth")
-    print("mixed_weighted_bw = results['network_overall']['mixed'].weighted_bandwidth")
-    print()
-    print("# 获取RN端口混合带宽:")
-    print("for port_id, port_metrics in results['rn_ports'].items():")
-    print("    print(f'{port_id} 混合带宽: {port_metrics.mixed_metrics.unweighted_bandwidth:.3f} GB/s')")
+    # 1. 从CSV重新分析和绘图
+    total_bw = replot_from_result_folder(
+        r"../../Result/CrossRing/REQ_RSP/5x4/LLama2_AllReduce",
+        show_cdma=False,
+    )
+
+    # # 2. 批量处理多个结果文件夹
+    # summary = batch_replot_from_csv_folders("./all_results")
+
+    # # # 3. 更详细的控制
+    # results = BandwidthAnalyzer.reanalyze_and_plot_from_csv(
+    #     r"../../Result/CrossRing/REQ_RSP/5x4/Add",
+    #     plot_rn_bw=True,
+    # )
 
 
 if __name__ == "__main__":

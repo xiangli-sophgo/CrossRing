@@ -25,9 +25,9 @@ def main():
     # file_name = r"demo_459.txt"
 
     # traffic_file_path = r"../traffic/v1.0.8 All_Reduce new/"
-    traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
+    # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
     # traffic_file_path = r"../test_data/"
-    # traffic_file_path = r"../traffic/0603/"
+    traffic_file_path = r"../traffic/0617/"
     # traffic_file_path = r"../traffic/nxn_traffics"
     # traffic_file_path = r"../traffic/output_DeepSeek_part1/step5_data_merge/"
     # traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
@@ -38,12 +38,12 @@ def main():
     # file_name = r"DeepSeek_MLP.txt"
     traffic_config = [
         [
-            r"MLP_MoE.txt",
+            r"LLama2_AttentionFC.txt",
         ]
-        * 2,
+        * 1,
         [
             # r"All2All_Combine.txt",
-            r"All2All_Dispatch.txt",
+            # r"All2All_Dispatch.txt",
         ],
     ]
     # traffic_config = r"MLP_merge.txt"
@@ -194,6 +194,7 @@ def main():
         sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8
         sim.config.SN_TRACKER_RELEASE_LATENCY = 40
+        sim.config.CDMA_BW_LIMIT = 8
 
         # sim.config.EQ_IN_FIFO_DEPTH = 8
         # sim.config.RB_IN_FIFO_DEPTH = 8
@@ -229,7 +230,7 @@ def main():
         }
 
     sim.initial()
-    # sim.end_time = 3000
+    sim.end_time = 10000
     sim.print_interval = 2000
     sim.run()
 
