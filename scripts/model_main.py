@@ -38,27 +38,13 @@ def main():
     # file_name = r"DeepSeek_MLP.txt"
     traffic_config = [
         [
-            r"Add.txt",
-            r"Add.txt",
-            r"Add.txt",
-            r"Add.txt",
-            r"Add.txt",
-        ],
+            r"MLP_MoE.txt",
+        ]
+        * 2,
         [
-            r"Add.txt",
-            r"Add.txt",
-            r"Add.txt",
-            r"Add.txt",
-            r"Add.txt",
+            # r"All2All_Combine.txt",
+            r"All2All_Dispatch.txt",
         ],
-        [
-            # r"Add.txt",
-            # r"All2All_Dispatch.txt",
-        ],
-        # [
-        #     r"Add.txt",
-        #     r"Add.txt",
-        # ],
     ]
     # traffic_config = r"MLP_merge.txt"
     # file_name = r"All2All_Dispatch.txt"
@@ -105,16 +91,16 @@ def main():
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
-        flow_fig_show_CDMA=0,
+        flow_fig_show_CDMA=1,
         plot_RN_BW_fig=1,
         plot_link_state=0,
-        plot_start_time=100,
+        plot_start_time=26000,
         print_trace=0,
         show_trace_id=0,
         show_node_id=4,
         verbose=1,
     )
-    np.random.seed(609)
+    np.random.seed(617)
     if topo_type == "3x3":
         sim.config.BURST = 2
         sim.config.NUM_IP = 8

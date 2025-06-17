@@ -59,7 +59,7 @@ def run_single_simulation(sim_params):
             config=config,
             topo_type=topo_type,
             traffic_file_path=traffic_path,
-            file_name=file_name,
+            traffic_config=file_name,
             result_save_path=result_save_path + file_name[:-4] + "/",
             results_fig_save_path=results_fig_save_path,
             plot_flow_fig=1,
@@ -234,6 +234,7 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name, max
 
     end_time = time.time()
     print(f"All simulations completed in {end_time - start_time:.2f} seconds")
+    print(f"Result output: {csv_dir}")
 
 
 def main():
@@ -243,7 +244,7 @@ def main():
     parser.add_argument("--outstanding", type=int, default=2048, help="Outstanding number (must be power of 2)")
     parser.add_argument("--config", default="../config/config2.json", help="Simulation config file path")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="Simulation model type")
-    parser.add_argument("--results_file_name", default="DeepSeek_0616_mix_new", help="Base name for results files")
+    parser.add_argument("--results_file_name", default="DeepSeek_0617_mix_new", help="Base name for results files")
     parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both")
     # parser.add_argument("--max_workers", type=int, default=None, help="Maximum number of parallel workers (default: number of CPU cores)")
     parser.add_argument("--max_workers", type=int, default=2, help="Maximum number of parallel workers (default: number of CPU cores)")

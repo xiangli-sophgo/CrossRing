@@ -128,7 +128,7 @@ class BaseModel:
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.data_network = Network(self.config, self.adjacency_matrix, name="Data Network")
         if hasattr(self, "result_processor"):
-            self.result_processor = BandwidthAnalyzer(self.config, min_gap_threshold=100, plot_rn_bw_fig=self.plot_RN_BW_fig, plot_flow_graph=self.plot_flow_fig)
+            self.result_processor = BandwidthAnalyzer(self.config, min_gap_threshold=200, plot_rn_bw_fig=self.plot_RN_BW_fig, plot_flow_graph=self.plot_flow_fig)
         if self.plot_link_state:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
@@ -136,11 +136,7 @@ class BaseModel:
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST
-            + self.config.SDMA_SEND_POSITION_LIST
-            + self.config.CDMA_SEND_POSITION_LIST
-            + self.config.DDR_SEND_POSITION_LIST
-            + self.config.L2M_SEND_POSITION_LIST
+            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
         )
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
@@ -438,11 +434,7 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(
-                f"Data statistic: Read: {self.read_req, self.read_flit}, "
-                f"Write: {self.write_req, self.write_flit}, "
-                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
-            )
+            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
         if self.verbose:
@@ -617,13 +609,19 @@ class BaseModel:
         return {"read_req": total_read_req, "write_req": total_write_req, "read_flit": total_read_flit, "write_flit": total_write_flit}
 
     def process_new_request(self):
-        """修改：使用TrafficScheduler获取下一个请求"""
-        # 从TrafficScheduler获取下一个请求
-        req_data = self.traffic_scheduler.get_next_request(self.cycle)
+        """修改：使用TrafficScheduler获取多个准备就绪的请求"""
+        # 从TrafficScheduler获取所有准备就绪的请求
+        ready_requests = self.traffic_scheduler.get_ready_requests(self.cycle)
 
-        if req_data is None:
+        if not ready_requests:
             return  # 没有待处理的请求
 
+        # 处理所有准备就绪的请求
+        for req_data in ready_requests:
+            self._process_single_request(req_data)
+
+    def _process_single_request(self, req_data):
+        """处理单个请求"""
         # 解析请求数据（注意最后一个元素是traffic_id）
         source = self.node_map(req_data[1])
         destination = self.node_map(req_data[3], False)
@@ -648,26 +646,91 @@ class BaseModel:
         req.req_attr = "new"
         req.cmd_entry_cake0_cycle = self.cycle
 
-        # 通过IPInterface处理请求
-        ip_pos = req.source
-        ip_type = req.source_type
+        try:
+            # 通过IPInterface处理请求
+            ip_pos = req.source
+            ip_type = req.source_type
 
-        ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
-        if ip_interface is None:
-            raise ValueError("IP module setup error!")
-        ip_interface.enqueue(req, "req")
+            ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
+            if ip_interface is None:
+                raise ValueError(f"IP module setup error for ({ip_type}, {ip_pos})!")
 
-        # 更新TrafficScheduler的统计信息
-        self.traffic_scheduler.update_traffic_stats(traffic_id, "injected_req")
+            # 检查IP接口是否能接受新请求（可选的流控机制）
+            if hasattr(ip_interface, "can_accept_request") and not ip_interface.can_accept_request():
+                if self.traffic_scheduler.verbose:
+                    print(f"Warning: IP interface ({ip_type}, {ip_pos}) is busy, request may be delayed")
 
-        # 更新统计信息
-        if req.req_type == "read":
-            self.R_tail_latency_stat = req_data[0]
-        elif req.req_type == "write":
-            self.W_tail_latency_stat = req_data[0]
+            ip_interface.enqueue(req, "req")
 
-        # 更新请求计数
-        self.req_count += 1
+            # 更新统计信息
+            if req.req_type == "read":
+                self.R_tail_latency_stat = req_data[0]
+            elif req.req_type == "write":
+                self.W_tail_latency_stat = req_data[0]
+
+            # 更新请求计数
+            self.req_count += 1
+
+        except Exception as e:
+            print(f"Error processing request from traffic {traffic_id}: {e}")
+            print(f"Request data: {req_data}")
+
+    # def process_new_request(self):
+    #     """修改：使用TrafficScheduler获取下一个请求"""
+    #     # 从TrafficScheduler获取下一个请求
+    #     req_data = self.traffic_scheduler.get_next_request()
+
+    #     if req_data is None or req_data[0] > self.cycle:
+    #         # 没有待处理的请求或请求还未到达当前周期
+    #         if req_data is not None:
+    #             # 放回请求
+    #             self.traffic_scheduler.pending_requests.appendleft(req_data)
+    #         return  # 没有待处理的请求
+
+    #     # 解析请求数据（注意最后一个元素是traffic_id）
+    #     source = self.node_map(req_data[1])
+    #     destination = self.node_map(req_data[3], False)
+    #     path = self.routes[source][destination]
+    #     traffic_id = req_data[7]  # 最后一个元素是traffic_id
+
+    #     # 创建flit对象
+    #     req = Flit(source, destination, path)
+    #     req.source_original = req_data[1]
+    #     req.destination_original = req_data[3]
+    #     req.flit_type = "req"
+    #     req.departure_cycle = req_data[0]
+    #     req.burst_length = req_data[6]
+    #     req.source_type = req_data[2]
+    #     req.destination_type = req_data[4]
+    #     req.original_source_type = req_data[2]
+    #     req.original_destination_type = req_data[4]
+    #     req.traffic_id = traffic_id  # 添加traffic_id标记
+
+    #     req.packet_id = Node.get_next_packet_id()
+    #     req.req_type = "read" if req_data[5] == "R" else "write"
+    #     req.req_attr = "new"
+    #     req.cmd_entry_cake0_cycle = self.cycle
+
+    #     # 通过IPInterface处理请求
+    #     ip_pos = req.source
+    #     ip_type = req.source_type
+
+    #     ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
+    #     if ip_interface is None:
+    #         raise ValueError("IP module setup error!")
+    #     ip_interface.enqueue(req, "req")
+
+    #     # 更新TrafficScheduler的统计信息
+    #     self.traffic_scheduler.update_traffic_stats(traffic_id, "injected_req")
+
+    #     # 更新统计信息
+    #     if req.req_type == "read":
+    #         self.R_tail_latency_stat = req_data[0]
+    #     elif req.req_type == "write":
+    #         self.W_tail_latency_stat = req_data[0]
+
+    #     # 更新请求计数
+    #     self.req_count += 1
 
     # def _load_requests_stream(self):
     #     """从文件生成请求流（按时间排序）"""
@@ -850,8 +913,7 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
-                    for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
@@ -1059,16 +1121,21 @@ class BaseModel:
         self._tag_move(self.data_network)
 
     def _tag_move(self, network):
+        # 第一部分：纵向环处理
         for col_start in range(self.config.NUM_COL):
-            interval = self.config.NUM_COL * 2
-            col_end = col_start + interval * (self.config.NUM_ROW // 2 - 1)
+            interval = self.config.NUM_COL * 2  # 8
+            col_end = col_start + interval * (self.config.NUM_ROW // 2 - 1)  # col_start + 32
+
+            # 保存起始位置的tag
             last_position = network.links_tag[(col_start, col_start)][0]
+
+            # 前向传递：从起点到终点
             network.links_tag[(col_start, col_start)][0] = network.links_tag[(col_start + interval, col_start)][-1]
-            for i in range(1, self.config.NUM_COL):
-                current_node, next_node = (
-                    col_start + i * interval,
-                    col_start + (i - 1) * interval,
-                )
+
+            for i in range(1, self.config.NUM_ROW // 2):  # range(1, 5) = [1,2,3,4]
+                current_node = col_start + i * interval
+                next_node = col_start + (i - 1) * interval
+
                 for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
                     if j == 0 and current_node == col_end:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
@@ -1076,13 +1143,17 @@ class BaseModel:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node + interval, current_node)][-1]
                     else:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
+
+            # 终点自环处理
             network.links_tag[(col_end, col_end)][-1] = network.links_tag[(col_end, col_end)][0]
             network.links_tag[(col_end, col_end)][0] = network.links_tag[(col_end - interval, col_end)][-1]
-            for i in range(1, self.config.NUM_ROW // 2):
-                current_node, next_node = (
-                    col_end - i * interval,
-                    col_end - (i - 1) * interval,
-                )
+
+            # 回程传递：从终点回到起点
+            # 修复：确保处理所有回程连接
+            for i in range(1, self.config.NUM_ROW // 2):  # range(1, 5) = [1,2,3,4]
+                current_node = col_end - i * interval
+                next_node = col_end - (i - 1) * interval
+
                 for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
                     if j == 0 and current_node == col_start:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
@@ -1090,12 +1161,16 @@ class BaseModel:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node - interval, current_node)][-1]
                     else:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
+
+            # 起点自环处理
             network.links_tag[(col_start, col_start)][-1] = last_position
 
+        # 第二部分：横向环处理（保持原逻辑）
         for row_start in range(self.config.NUM_COL, self.config.NUM_NODE, self.config.NUM_COL * 2):
             row_end = row_start + self.config.NUM_COL - 1
             last_position = network.links_tag[(row_start, row_start)][0]
             network.links_tag[(row_start, row_start)][0] = network.links_tag[(row_start + 1, row_start)][-1]
+
             for i in range(1, self.config.NUM_COL):
                 current_node, next_node = row_start + i, row_start + i - 1
                 for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
@@ -1105,8 +1180,10 @@ class BaseModel:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node + 1, current_node)][-1]
                     else:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
+
             network.links_tag[(row_end, row_end)][-1] = network.links_tag[(row_end, row_end)][0]
             network.links_tag[(row_end, row_end)][0] = network.links_tag[(row_end - 1, row_end)][-1]
+
             for i in range(1, self.config.NUM_COL):
                 current_node, next_node = row_end - i, row_end - i + 1
                 for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
@@ -1116,6 +1193,7 @@ class BaseModel:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node - 1, current_node)][-1]
                     else:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
+
             network.links_tag[(row_start, row_start)][-1] = last_position
 
     def _move_to_eject_queues_pre(self, network: Network, eject_flits, ip_pos):

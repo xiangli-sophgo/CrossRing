@@ -1,7 +1,6 @@
 import os
 from typing import List, Dict, Tuple, Optional, Iterator
-from collections import defaultdict
-import heapq
+from collections import defaultdict, deque
 
 
 class TrafficState:
@@ -18,6 +17,11 @@ class TrafficState:
         self.received_flit = 0
         self.start_time = 0
         self.end_time = 0
+        self.actual_end_time = 0
+
+    def is_injection_completed(self) -> bool:
+        """判断是否所有请求都已注入"""
+        return self.injected_req >= self.total_req
 
     def is_completed(self) -> bool:
         """判断traffic是否完成"""
@@ -37,7 +41,7 @@ class TrafficState:
 
 
 class SerialChain:
-    """表示一条串行的traffic链"""
+    """表示一条串行的traffic链，每条链维护独立的请求队列"""
 
     def __init__(self, chain_id: str, traffic_files: List[str]):
         self.chain_id = chain_id
@@ -46,6 +50,9 @@ class SerialChain:
         self.chain_time_offset = 0
         self.is_completed = False
         self.start_time = 0
+        # 每条链独立的请求队列
+        self.pending_requests = deque()
+        self.current_traffic_id = None
 
     def get_current_traffic_file(self) -> Optional[str]:
         """获取当前应该执行的traffic文件"""
@@ -53,15 +60,42 @@ class SerialChain:
             return self.traffic_files[self.current_index]
         return None
 
-    def advance_to_next(self):
+    def advance_to_next(self, gap_time: int = 10):
         """推进到下一个traffic"""
         self.current_index += 1
+        self.chain_time_offset += gap_time  # 添加间隔
+        self.pending_requests.clear()  # 清空当前队列
+        self.current_traffic_id = None
         if self.current_index >= len(self.traffic_files):
             self.is_completed = True
 
     def has_next_traffic(self) -> bool:
         """检查是否还有下一个traffic"""
         return self.current_index < len(self.traffic_files)
+
+    def has_pending_requests(self) -> bool:
+        """检查是否还有待处理的请求"""
+        return len(self.pending_requests) > 0
+
+    def get_ready_requests(self, current_cycle: int) -> List[Tuple]:
+        """获取所有准备就绪的请求（批量处理）"""
+        ready_requests = []
+
+        # 检查队列头部的所有准备就绪请求
+        while self.pending_requests:
+            next_req = self.pending_requests[0]
+            if next_req[0] <= current_cycle:  # 时间已到
+                ready_requests.append(self.pending_requests.popleft())
+            else:
+                break  # 遇到未到时间的请求，停止
+
+        return ready_requests
+
+    def load_traffic_requests(self, requests: List[Tuple], traffic_id: str):
+        """加载traffic的请求到链的队列"""
+        self.pending_requests.clear()
+        self.pending_requests.extend(requests)
+        self.current_traffic_id = traffic_id
 
 
 class TrafficScheduler:
@@ -72,28 +106,15 @@ class TrafficScheduler:
         self.traffic_file_path = traffic_file_path
         self.parallel_chains: List[SerialChain] = []
         self.active_traffics: Dict[str, TrafficState] = {}
-        self.pending_requests = []  # 使用堆来维护按时间排序的请求
         self.current_cycle = 0
         self.verbose = False
 
     def setup_parallel_chains(self, chains_config: List[List[str]]):
-        """
-        设置并行的串行链
-
-        Args:
-            chains_config: 链配置，例如：
-                [
-                    ["traffic_A.txt", "traffic_B.txt", "traffic_C.txt"],  # 链1
-                    ["traffic_D.txt", "traffic_E.txt"],                   # 链2
-                    ["traffic_F.txt"]                                     # 链3
-                ]
-        """
+        """设置并行的串行链"""
         self.parallel_chains.clear()
         self.active_traffics.clear()
-        self.pending_requests.clear()
 
         for i, traffic_files in enumerate(chains_config):
-            # 跳过空的链配置，不创建对应的链
             if not traffic_files:
                 continue
             chain_id = f"chain_{i}"
@@ -131,21 +152,19 @@ class TrafficScheduler:
         traffic_state.start_time = chain.chain_time_offset
         self.active_traffics[traffic_id] = traffic_state
 
-        # 将请求添加到pending队列中
-        for req in requests:
-            heapq.heappush(self.pending_requests, req)
+        # 将请求加载到对应链的队列中
+        chain.load_traffic_requests(requests, traffic_id)
 
         if self.verbose:
-            print(f"Started traffic {traffic_file} on {chain.chain_id} at time {chain.chain_time_offset}")
+            print(f"Started traffic {traffic_file} on {chain.chain_id}")
             print(f"  Traffic ID: {traffic_id}, Requests: {total_req}, Flits: {total_flit}")
+            print(f"  Time offset: {chain.chain_time_offset}")
+            if requests:
+                print(f"  First request time: {requests[0][0]}")
+                print(f"  Last request time: {requests[-1][0]}")
 
     def _parse_traffic_file(self, filename: str, time_offset: int, traffic_id: str) -> Tuple[int, int, List[Tuple]]:
-        """
-        解析traffic文件并添加时间偏移
-
-        Returns:
-            (total_req, total_flit, requests_list)
-        """
+        """解析traffic文件并添加时间偏移"""
         abs_path = os.path.join(self.traffic_file_path, filename)
         requests = []
         read_req = write_req = read_flit = write_flit = 0
@@ -158,7 +177,7 @@ class TrafficScheduler:
 
                 # 解析原始数据
                 t, src, src_t, dst, dst_t, op, burst = parts
-                t = int(t) * self.config.NETWORK_FREQUENCY + time_offset
+                t = int(t) * self.config.NETWORK_FREQUENCY + time_offset * self.config.NETWORK_FREQUENCY
                 src, dst, burst = int(src), int(dst), int(burst)
 
                 # 创建带traffic_id的请求元组
@@ -178,34 +197,68 @@ class TrafficScheduler:
 
         return total_req, total_flit, requests
 
-    def get_next_request(self, current_cycle: int) -> Optional[Tuple]:
+    def get_ready_requests(self, current_cycle: int) -> List[Tuple]:
         """
-        获取下一个应该处理的请求
-
-        Args:
-            current_cycle: 当前仿真周期
+        获取所有链中准备就绪的请求
 
         Returns:
-            请求元组或None
+            List of request tuples ready for injection
         """
         self.current_cycle = current_cycle
+        ready_requests = []
 
-        if self.pending_requests and self.pending_requests[0][0] <= current_cycle:
-            return heapq.heappop(self.pending_requests)
-        return None
+        # 遍历所有链，获取所有准备就绪的请求
+        for chain in self.parallel_chains:
+            chain_requests = chain.get_ready_requests(current_cycle)
+            ready_requests.extend(chain_requests)
+
+            # 更新注入统计
+            for req in chain_requests:
+                traffic_id = req[7]  # traffic_id在索引7
+                self.update_traffic_stats(traffic_id, "injected_req")
+
+        # if self.verbose and ready_requests:
+        #     print(f"Cycle {current_cycle}: Injecting {len(ready_requests)} requests")
+        #     for req in ready_requests:
+        #         print(f"  {req[7]}: {req[5]} from {req[1]} to {req[3]} at time {req[0]}")
+
+        return ready_requests
+
+    def get_save_filename(self) -> str:
+        """
+        生成用于保存结果的文件名
+        Returns:
+            文件名，不包含扩展名
+        """
+        if not self.parallel_chains:
+            return "no_traffic"
+
+        chain_names = []
+        for chain in self.parallel_chains:
+            # 移除扩展名并连接链中的文件名
+            files_without_ext = [f[:-4] if f.endswith(".txt") else f for f in chain.traffic_files]
+            chain_name = "-".join(files_without_ext)
+            chain_names.append(chain_name)
+
+        # 单条链且只有一个文件：直接返回文件名
+        if len(self.parallel_chains) == 1 and len(self.parallel_chains[0].traffic_files) == 1:
+            return chain_names[0]
+
+        # 单条链但有多个文件：串行，使用简短前缀
+        elif len(self.parallel_chains) == 1:
+            return f"s_{chain_names[0]}"
+
+        # 多条链：并行，使用简短前缀
+        else:
+            combined = "_".join(chain_names)
+            return f"p_{combined}"
 
     def has_pending_requests(self) -> bool:
         """检查是否还有等待处理的请求"""
-        return len(self.pending_requests) > 0
+        return any(chain.has_pending_requests() for chain in self.parallel_chains)
 
     def update_traffic_stats(self, traffic_id: str, stat_type: str):
-        """
-        更新traffic统计信息
-
-        Args:
-            traffic_id: traffic标识
-            stat_type: 统计类型 ('injected_req', 'sent_flit', 'received_flit')
-        """
+        """更新traffic统计信息"""
         if traffic_id in self.active_traffics:
             state = self.active_traffics[traffic_id]
             if stat_type == "injected_req":
@@ -214,45 +267,47 @@ class TrafficScheduler:
                 state.update_sent_flit()
             elif stat_type == "received_flit":
                 state.update_received_flit()
+                # 记录实际结束时间
+                if state.received_flit >= state.total_flit:
+                    state.actual_end_time = self.current_cycle
 
     def check_and_advance_chains(self, current_cycle: int) -> List[str]:
-        """
-        检查traffic完成情况并推进链
-
-        Args:
-            current_cycle: 当前仿真周期
-
-        Returns:
-            完成的traffic_id列表
-        """
+        """检查traffic完成情况并推进链"""
+        self.current_cycle = current_cycle
         completed_traffics = []
 
-        # 检查已完成的traffic
         for traffic_id, state in list(self.active_traffics.items()):
-            if state.is_completed():
+            # 检查对应的链是否还有请求要注入
+            chain = self._find_chain_by_id(state.chain_id)
+            injection_done = state.is_injection_completed() and (not chain or not chain.has_pending_requests())
+
+            if injection_done and state.is_completed():
                 completed_traffics.append(traffic_id)
 
-                # 更新对应链的状态
-                chain = self._find_chain_by_id(state.chain_id)
                 if chain:
-                    # 记录结束时间
-                    state.end_time = current_cycle // self.config.NETWORK_FREQUENCY
-                    chain.chain_time_offset = state.end_time
+                    # 计算实际结束时间
+                    actual_end_ns = state.actual_end_time // self.config.NETWORK_FREQUENCY
+                    state.end_time = actual_end_ns
 
-                    # 推进到下一个traffic
-                    chain.advance_to_next()
+                    # 更新链的时间偏移（实际结束时间 + 间隔）
+                    gap_time = 0  # 10ns间隔
+                    chain.chain_time_offset = actual_end_ns + gap_time
 
                     if self.verbose:
-                        print(f"Traffic {traffic_id} completed at time {state.end_time}")
+                        print(f"Traffic {traffic_id} completed:")
+                        print(f"  Actual end time: {actual_end_ns}ns")
+                        print(f"  Next time offset: {chain.chain_time_offset}ns")
+
+                    # 推进到下一个traffic
+                    chain.advance_to_next(gap_time)
 
                     # 如果链还有下一个traffic，立即启动
                     if chain.has_next_traffic():
                         self._start_single_traffic(chain)
                     else:
                         if self.verbose:
-                            print(f"Chain {chain.chain_id} completed at time {chain.chain_time_offset}")
+                            print(f"Chain {chain.chain_id} completed")
 
-                # 清理完成的traffic
                 del self.active_traffics[traffic_id]
 
         return completed_traffics
@@ -266,7 +321,7 @@ class TrafficScheduler:
 
     def is_all_completed(self) -> bool:
         """检查是否所有链都已完成"""
-        return len(self.active_traffics) == 0 and len(self.pending_requests) == 0 and all(chain.is_completed for chain in self.parallel_chains)
+        return len(self.active_traffics) == 0 and not self.has_pending_requests() and all(chain.is_completed for chain in self.parallel_chains)
 
     def get_active_traffic_count(self) -> int:
         """获取当前活跃的traffic数量"""
@@ -281,23 +336,9 @@ class TrafficScheduler:
                 "total_traffics": len(chain.traffic_files),
                 "current_file": chain.get_current_traffic_file(),
                 "time_offset": chain.chain_time_offset,
+                "pending_requests": len(chain.pending_requests),
+                "current_traffic_id": chain.current_traffic_id,
                 "is_completed": chain.is_completed,
-            }
-        return status
-
-    def get_active_traffic_status(self) -> Dict[str, Dict]:
-        """获取活跃traffic的状态信息"""
-        status = {}
-        for traffic_id, state in self.active_traffics.items():
-            status[traffic_id] = {
-                "chain_id": state.chain_id,
-                "total_req": state.total_req,
-                "injected_req": state.injected_req,
-                "total_flit": state.total_flit,
-                "sent_flit": state.sent_flit,
-                "received_flit": state.received_flit,
-                "progress": f"{state.received_flit}/{state.total_flit}",
-                "is_completed": state.is_completed(),
             }
         return status
 
@@ -305,83 +346,8 @@ class TrafficScheduler:
         """设置详细输出模式"""
         self.verbose = verbose
 
-    def get_save_filename(self) -> str:
-        """
-        生成用于保存结果的文件名，包含串行或并行前缀
-        Returns:
-            带前缀的组合文件名，不包含扩展名
-        """
-        # 根据并行链数量区分串行（1 条链）或并行（多条链）
-        prefix = "serial" if len(self.parallel_chains) == 1 else "parallel"
-        if not self.parallel_chains:
-            return f"{prefix}_no_traffic"
-
-        chain_names = []
-        for chain in self.parallel_chains:
-            # 移除扩展名并连接链中的文件名
-            files_without_ext = [f[:-4] if f.endswith(".txt") else f for f in chain.traffic_files]
-            chain_name = "-".join(files_without_ext)
-            chain_names.append(chain_name)
-
-        combined = "_".join(chain_names)
-        return f"{prefix}_{combined}"
-
     def reset(self):
         """重置调度器状态"""
         self.parallel_chains.clear()
         self.active_traffics.clear()
-        self.pending_requests.clear()
         self.current_cycle = 0
-
-
-# 使用示例和测试代码
-if __name__ == "__main__":
-    # 示例配置类
-    class MockConfig:
-        def __init__(self):
-            self.NETWORK_FREQUENCY = 1000
-
-    # 创建调度器
-    config = MockConfig()
-    scheduler = TrafficScheduler(config, "./traffic_files/")
-    scheduler.set_verbose(True)
-
-    # 设置并行链
-    chains_config = [
-        ["traffic_A.txt", "traffic_B.txt", "traffic_C.txt"],
-        ["traffic_D.txt", "traffic_E.txt"],
-        ["traffic_F.txt"],
-    ]
-
-    scheduler.setup_parallel_chains(chains_config)
-    scheduler.start_initial_traffics()
-
-    # 模拟主循环
-    cycle = 0
-    while not scheduler.is_all_completed():
-        cycle += 1000  # 假设每次增加1000个周期
-
-        # 检查是否有请求需要处理
-        while True:
-            req = scheduler.get_next_request(cycle)
-            if req is None:
-                break
-            print(f"Processing request at cycle {cycle}: {req}")
-            # 这里会调用实际的请求处理逻辑
-
-        # 检查并推进链
-        completed = scheduler.check_and_advance_chains(cycle)
-        if completed:
-            print(f"Completed traffics: {completed}")
-
-        # 输出状态
-        if cycle % 10000 == 0:
-            print(f"\nCycle {cycle}:")
-            print(f"Active traffics: {scheduler.get_active_traffic_count()}")
-            print(f"Pending requests: {len(scheduler.pending_requests)}")
-
-        # 防止无限循环
-        if cycle > 100000:
-            break
-
-    print("All chains completed!")

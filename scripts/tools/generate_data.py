@@ -363,8 +363,8 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, cdma_map,
 if __name__ == "__main__":
     # 参数配置
     TOPO = "5x4"
-    INTERVAL_COUNT = 600
-    FILE_NAME = "../../test_data/All2All_Combine.txt"
+    INTERVAL_COUNT = 50
+    FILE_NAME = "../../test_data/test1.txt"
     np.random.seed(616)
 
     if TOPO == "5x4":
@@ -375,7 +375,10 @@ if __name__ == "__main__":
 
         # CDMA映射：12-15四个CDMA
         CDMA_MAP = {
-            "cdma_0": [16, 17, 18, 19],
+            "cdma_0": [
+                16,
+                17,
+            ],
         }
 
         DDR_MAP = {
