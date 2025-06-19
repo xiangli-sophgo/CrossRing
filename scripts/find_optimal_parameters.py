@@ -28,6 +28,7 @@ from sklearn.feature_selection import mutual_info_regression
 N_JOBS = 1
 # 每个参数组合重复仿真次数，用于平滑随机 latency 影响
 N_REPEATS = 1  # 减少重复次数，因为要测试多个traffic
+N_TRIALS = 300
 
 # 全局变量用于存储可视化数据
 visualization_data = {"trials": [], "progress": [], "pareto_data": [], "param_importance": {}, "convergence": []}
@@ -602,6 +603,7 @@ def enhanced_create_visualization_plots(study, traffic_files, traffic_weights, s
     create_parameter_distribution(complete_trials, vis_dir)
     create_convergence_plot(complete_trials, vis_dir)
     create_3d_parameter_space(complete_trials, vis_dir)
+    create_single_parameter_line_plots(complete_trials, save_dir=vis_dir)
 
     # ========== 新增增强版可视化函数 ==========
     create_parameter_impact_plot(complete_trials, traffic_files, vis_dir)
@@ -621,6 +623,34 @@ def enhanced_create_visualization_plots(study, traffic_files, traffic_weights, s
     )
 
     print(f"增强版可视化图表已保存到: {vis_dir}")
+
+
+def create_single_parameter_line_plots(trials, metric_key="Total_sum_BW_weighted_mean", save_dir="."):
+    """为每个参数绘制一维性能曲线"""
+    import pandas as pd
+
+    if not trials:
+        return
+
+    rows = []
+    for t in trials:
+        if t.state.name != "COMPLETE" or t.values is None:
+            continue
+        row = {k: v for k, v in t.params.items()}
+        row[metric_key] = t.user_attrs.get(metric_key, t.values[0])
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return
+
+    os.makedirs(save_dir, exist_ok=True)
+
+    for param in [c for c in df.columns if c != metric_key]:
+        agg = df.groupby(param)[metric_key].mean().reset_index().sort_values(param)
+        fig = go.Figure(data=go.Scatter(x=agg[param], y=agg[metric_key], mode="lines+markers"))
+        fig.update_layout(title=f"{param} 对性能影响", xaxis_title=param, yaxis_title=metric_key, height=400)
+        fig.write_html(os.path.join(save_dir, f"{param}_line.html"))
 
 
 def create_2d_param_bw_heatmaps(trials, metric_key="Total_sum_BW_weighted_mean", param_pairs=None, aggfunc="mean", save_dir="."):
@@ -1049,20 +1079,18 @@ def find_optimal_parameters():
     global output_csv
 
     # traffic_file_path = r"../test_data/"
-    traffic_file_path = r"../traffic/0603/"
+    traffic_file_path = r"../traffic/0617/"
 
     # ===== 多个traffic文件配置 =====
     traffic_files = [
-        # r"traffic_2260E_case1.txt",
-        # r"traffic_2260E_case2.txt",  # 添加你的第二个traffic文件
-        # r"traffic_2260E_case3.txt",  # 可以继续添加更多
-        r"DeepSeek_MLP.txt",
         r"LLama2_AllReduce.txt",
         r"LLama2_AttentionFC.txt",
+        r"MLP_MoE.txt",
+        r"MLP.txt",
     ]
 
     # 每个traffic的权重（用于加权平均）
-    traffic_weights = [0.25, 0.5, 0.25]  # 第一个traffic权重0.6，第二个0.4
+    traffic_weights = [0.4, 0.2, 0.2, 0.2]  # 第一个traffic权重0.6，第二个0.4
     # traffic_weights = [1]  # 第一个traffic权重0.6，第二个0.4
 
     assert len(traffic_files) == len(traffic_weights), "traffic文件数量和权重数量必须一致"
@@ -1104,7 +1132,7 @@ def find_optimal_parameters():
                 config=cfg,
                 topo_type=topo_type,
                 traffic_file_path=traffic_file_path,
-                file_name=traffic_file,
+                traffic_config=traffic_file,
                 result_save_path=result_root_save_path,
                 verbose=0,
             )
@@ -1336,12 +1364,17 @@ def find_optimal_parameters():
 
         # 综合指标 = 加权带宽 - α * 参数惩罚
         # 调整α值平衡性能和资源消耗
-        composite_metric = weighted_bw - 50 * param_penalty
+        # composite_metric = weighted_bw - 50 * param_penalty
+        # α 根据试验进度自适应，前期约束更强，后期逐渐减弱
+        progress = min(trial.number / N_TRIALS, 1.0)
+        penalty_weight = 50 * (1 - progress)
+        composite_metric = weighted_bw - penalty_weight * param_penalty
 
         # 保存到 trial.user_attrs，便于后期分析 / CSV
         for k, v in results.items():
             trial.set_user_attr(k, v)
         trial.set_user_attr("param_penalty", param_penalty)
+        trial.set_user_attr("penalty_weight", penalty_weight)
         trial.set_user_attr("composite_metric", composite_metric)
 
         # ─── 多目标返回： (maximize, maximize, minimize) ────
@@ -1528,7 +1561,7 @@ if __name__ == "__main__":
     print(f"结果保存路径: {result_root_save_path}")
     print("=" * 60)
 
-    n_trials = 500
+    n_trials = N_TRIALS
 
     study = optuna.create_study(
         study_name="CrossRing_Single_Traffic_BO",

@@ -38,7 +38,7 @@ def main():
     # file_name = r"DeepSeek_MLP.txt"
     traffic_config = [
         [
-            r"LLama2_AttentionFC.txt",
+            r"burst2_2260_2.txt",
         ]
         * 1,
         [
@@ -71,9 +71,9 @@ def main():
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        topo_type = "5x4"  # SG2262
+        # topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
-        # topo_type = "6x5"
+        topo_type = "6x5"  # SG2260
         # topo_type = "3x3"  # SG2260E
     else:
         topo_type = config.TOPO_TYPE
@@ -91,12 +91,12 @@ def main():
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
-        flow_fig_show_CDMA=1,
+        flow_fig_show_CDMA=0,
         plot_RN_BW_fig=1,
         plot_link_state=0,
-        plot_start_time=26000,
+        plot_start_time=5000,
         print_trace=0,
-        show_trace_id=0,
+        show_trace_id=59,
         show_node_id=4,
         verbose=1,
     )
@@ -228,9 +228,56 @@ def main():
             "ddr": 2,
             "l2m": 2,
         }
+    elif topo_type in ["6x5"]:
+        sim.config.BURST = 2
+        sim.config.RN_R_TRACKER_OSTD = 64
+        sim.config.RN_W_TRACKER_OSTD = 64
+        sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST
+        sim.config.RN_WDB_SIZE = sim.config.RN_W_TRACKER_OSTD * sim.config.BURST
+        sim.config.SN_DDR_R_TRACKER_OSTD = 64
+        sim.config.SN_DDR_W_TRACKER_OSTD = 64
+        sim.config.SN_L2M_R_TRACKER_OSTD = 64
+        sim.config.SN_L2M_W_TRACKER_OSTD = 64
+        sim.config.SN_DDR_WDB_SIZE = sim.config.SN_DDR_W_TRACKER_OSTD * sim.config.BURST
+        sim.config.SN_L2M_WDB_SIZE = sim.config.SN_L2M_W_TRACKER_OSTD * sim.config.BURST
+        sim.config.DDR_R_LATENCY_original = 40
+        sim.config.DDR_R_LATENCY_VAR_original = 0
+        sim.config.DDR_W_LATENCY_original = 0
+        sim.config.L2M_R_LATENCY_original = 12
+        sim.config.L2M_W_LATENCY_original = 16
+        sim.config.IQ_CH_FIFO_DEPTH = 10
+        sim.config.EQ_CH_FIFO_DEPTH = 10
+        sim.config.IQ_OUT_FIFO_DEPTH = 8
+        sim.config.RB_OUT_FIFO_DEPTH = 8
+        sim.config.SN_TRACKER_RELEASE_LATENCY = 40
+        sim.config.CDMA_BW_LIMIT = 8
+
+        sim.config.TL_Etag_T2_UE_MAX = 8
+        sim.config.TL_Etag_T1_UE_MAX = 15
+        sim.config.TR_Etag_T2_UE_MAX = 12
+        sim.config.RB_IN_FIFO_DEPTH = 16
+        sim.config.TU_Etag_T2_UE_MAX = 8
+        sim.config.TU_Etag_T1_UE_MAX = 15
+        sim.config.TD_Etag_T2_UE_MAX = 12
+        sim.config.EQ_IN_FIFO_DEPTH = 16
+
+        sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
+        sim.config.ITag_MAX_NUM_H = sim.config.ITag_MAX_NUM_V = 1
+        sim.config.ETag_BOTHSIDE_UPGRADE = 0
+        sim.config.SLICE_PER_LINK = 8
+
+        sim.config.GDMA_RW_GAP = np.inf
+        sim.config.SDMA_RW_GAP = np.inf
+        sim.config.CHANNEL_SPEC = {
+            "gdma": 2,
+            "sdma": 2,
+            "cdma": 1,
+            "ddr": 2,
+            "l2m": 2,
+        }
 
     sim.initial()
-    sim.end_time = 10000
+    sim.end_time = 6000
     sim.print_interval = 2000
     sim.run()
 

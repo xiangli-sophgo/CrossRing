@@ -129,35 +129,35 @@ class CrossRingConfig:
             self.SDMA_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
             self.GDMA_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
 
-        elif topo_type == "8x8":
-            self.NUM_NODE = 128
-            self.NUM_COL = 8
-            self.NUM_IP = 32
-            self.NUM_ROW = self.NUM_NODE // self.NUM_COL
-            self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        # elif topo_type == "8x8":
+        #     self.NUM_NODE = 128
+        #     self.NUM_COL = 8
+        #     self.NUM_IP = 32
+        #     self.NUM_ROW = self.NUM_NODE // self.NUM_COL
+        #     self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        #     self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        #     self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        #     self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
 
-        elif topo_type == "4x9":
-            self.NUM_NODE = 72
-            self.NUM_COL = 9
-            self.NUM_IP = 32
-            self.NUM_ROW = self.NUM_NODE // self.NUM_COL
-            self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [0])
-            self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [0])
-            self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [0])
-            self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [0])
+        # elif topo_type == "4x9":
+        #     self.NUM_NODE = 72
+        #     self.NUM_COL = 9
+        #     self.NUM_IP = 32
+        #     self.NUM_ROW = self.NUM_NODE // self.NUM_COL
+        #     self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [0])
+        #     self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [0])
+        #     self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [0])
+        #     self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [0])
 
-        elif topo_type == "9x4":
-            self.NUM_NODE = 72
-            self.NUM_COL = 4
-            self.NUM_IP = 32
-            self.NUM_ROW = self.NUM_NODE // self.NUM_COL
-            self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
-            self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
-            self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
-            self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
+        # elif topo_type == "9x4":
+        #     self.NUM_NODE = 72
+        #     self.NUM_COL = 4
+        #     self.NUM_IP = 32
+        #     self.NUM_ROW = self.NUM_NODE // self.NUM_COL
+        #     self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
+        #     self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
+        #     self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
+        #     self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
         elif topo_type == "5x4":
             self.NUM_NODE = 40
             self.NUM_COL = 4
@@ -173,10 +173,16 @@ class CrossRingConfig:
             self.NUM_COL = 5
             self.NUM_IP = 8
             self.NUM_ROW = self.NUM_NODE // self.NUM_COL
-            self.DDR_SEND_POSITION_LIST = [6, 8, 15, 19, 25, 29, 45, 49]
-            self.L2M_SEND_POSITION_LIST = [16, 17, 26, 27, 36, 37, 46, 47]
-            self.SDMA_SEND_POSITION_LIST = [15, 18, 25, 28, 35, 38, 45, 48]
-            self.GDMA_SEND_POSITION_LIST = [16, 17, 26, 27, 36, 37, 46, 47]
+            self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
+            # self.DDR_SEND_POSITION_LIST = [6, 8, 15, 19, 25, 29, 45, 49]
+            # self.L2M_SEND_POSITION_LIST = [16, 17, 26, 27, 36, 37, 46, 47]
+            # self.SDMA_SEND_POSITION_LIST = [15, 18, 25, 28, 35, 38, 45, 48]
+            # self.GDMA_SEND_POSITION_LIST = [16, 17, 26, 27, 36, 37, 46, 47]
+            # self.CDMA_SEND_POSITION_LIST = [16, 17, 26, 27, 36, 37, 46, 47]
         elif topo_type == "4x5":
             self.NUM_NODE = 40
             self.NUM_COL = 5
@@ -186,21 +192,22 @@ class CrossRingConfig:
             self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [0])
             self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [0])
             self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [0])
-        elif topo_type == "3x3":
-            self.NUM_NODE = 18
-            self.NUM_COL = 3
-            self.NUM_IP = 4
-            self.NUM_ROW = self.NUM_NODE // self.NUM_COL
-            self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        # elif topo_type == "3x3":
+        #     self.NUM_NODE = 18
+        #     self.NUM_COL = 3
+        #     self.NUM_IP = 4
+        #     self.NUM_ROW = self.NUM_NODE // self.NUM_COL
+        #     self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        #     self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        #     self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        #     self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
         else:
             # raise ValueError("Error topology type: ", topo_type)
             self.DDR_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
             self.L2M_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
             self.SDMA_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
             self.GDMA_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
+            self.CDMA_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
 
     def generate_ip_positions(self, zero_rows=None, zero_cols=None):
         # 创建一个矩阵,初始值为1
@@ -361,9 +368,9 @@ class CrossRingConfig:
         parser.add_argument("--TL_Etag_T1_UE_MAX", type=int, default=default_config["TL_Etag_T1_UE_MAX"], help="Horizontal cross point towards left T1 ETag FIFO Entry number")
         parser.add_argument("--TL_Etag_T2_UE_MAX", type=int, default=default_config["TL_Etag_T2_UE_MAX"], help="Horizontal cross point towards left T2 ETag FIFO Entry number")
         parser.add_argument("--TR_Etag_T2_UE_MAX", type=int, default=default_config["TR_Etag_T2_UE_MAX"], help="Horizontal cross point towards right T2 ETag FIFO Entry number")
-        parser.add_argument("--TU_Etag_T1_UE_MAX", type=int, default=default_config["TU_Etag_T1_UE_MAX"], help="Vertival cross point towards up T1 ETag FIFO Entry number")
-        parser.add_argument("--TU_Etag_T2_UE_MAX", type=int, default=default_config["TU_Etag_T2_UE_MAX"], help="Vertival cross point towards up T2 ETag FIFO Entry number")
-        parser.add_argument("--TD_Etag_T2_UE_MAX", type=int, default=default_config["TD_Etag_T2_UE_MAX"], help="Vertival cross point towards down T2 ETag FIFO Entry number")
+        parser.add_argument("--TU_Etag_T1_UE_MAX", type=int, default=default_config["TU_Etag_T1_UE_MAX"], help="Vertical cross point towards up T1 ETag FIFO Entry number")
+        parser.add_argument("--TU_Etag_T2_UE_MAX", type=int, default=default_config["TU_Etag_T2_UE_MAX"], help="Vertical cross point towards up T2 ETag FIFO Entry number")
+        parser.add_argument("--TD_Etag_T2_UE_MAX", type=int, default=default_config["TD_Etag_T2_UE_MAX"], help="Vertical cross point towards down T2 ETag FIFO Entry number")
         parser.add_argument("--ETag_BOTHSIDE_UPGRADE", type=int, default=default_config["ETag_BOTHSIDE_UPGRADE"], help="ETag upgrade method")
         parser.add_argument("--IP_L2H_FIFO_DEPTH", type=int, default=default_config["IP_L2H_FIFO_DEPTH"], help="IP frequency change l2h fifo depth")
         parser.add_argument("--IP_H2L_FIFO_DEPTH", type=int, default=default_config["IP_H2L_FIFO_DEPTH"], help="IP frequency change h2l fifo depth")

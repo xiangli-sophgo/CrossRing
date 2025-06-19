@@ -193,7 +193,7 @@ class BaseModel:
         }
 
         self.dma_rw_counts = self.config._make_channels(
-            ("gdma", "sdma", "cdma"), {ip: {"read": 0, "write": 0} for ip in set(self.config.GDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)}
+            ("gdma", "sdma", "cdma"), {ip: {"read": 0, "write": 0} for ip in set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)}
         )
 
         self.rn_bandwidth = {
@@ -288,7 +288,7 @@ class BaseModel:
             if completed_traffics and self.verbose:
                 print(f"Completed traffics: {completed_traffics}")
 
-            if self.traffic_scheduler.is_all_completed() and self.trans_flits_num == 0 and not self.new_write_req or self.cycle > self.end_time * self.config.NETWORK_FREQUENCY:
+            if (self.traffic_scheduler.is_all_completed() and self.trans_flits_num == 0 and not self.new_write_req) or self.cycle > self.end_time * self.config.NETWORK_FREQUENCY:
                 if tail_time == 0:
                     if self.verbose:
                         print("Finish!")
@@ -635,10 +635,10 @@ class BaseModel:
         req.flit_type = "req"
         req.departure_cycle = req_data[0]
         req.burst_length = req_data[6]
-        req.source_type = req_data[2]
-        req.destination_type = req_data[4]
-        req.original_source_type = req_data[2]
-        req.original_destination_type = req_data[4]
+        req.source_type = f"{req_data[2]}_0" if "_" not in req_data[2] else req_data[2]
+        req.destination_type = f"{req_data[4]}_0" if "_" not in req_data[4] else req_data[4]
+        req.original_source_type = f"{req_data[2]}_0" if "_" not in req_data[2] else req_data[2]
+        req.original_destination_type = f"{req_data[4]}_0" if "_" not in req_data[4] else req_data[4]
         req.traffic_id = traffic_id  # 添加traffic_id标记
 
         req.packet_id = Node.get_next_packet_id()

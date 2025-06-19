@@ -1269,7 +1269,7 @@ class BandwidthAnalyzer:
                         (start_x, start_y),
                         (end_x, end_y),
                         arrowstyle="-|>",
-                        mutation_scale=10,
+                        mutation_scale=dynamic_font * 0.8,
                         color=color,
                         zorder=1,
                         linewidth=1,

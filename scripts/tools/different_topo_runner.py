@@ -18,9 +18,9 @@ if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
 class CrossRingBatchRunner:
     def __init__(self):
         self.results = []
-        self.traffic_base_path = r"../../traffic/nxn_traffics/"
+        self.traffic_base_path = r"../../traffic/uniform_traffic_W"
         self.config_path = r"../../config/config2.json"
-        self.result_save_path = f"../../Result/CrossRing_different_topo_complete/"
+        self.result_save_path = f"../../Result/CrossRing_different_topo_{datetime.now().strftime('%Y%m%d_%H%M%S')}/"
         self.csv_output_path = f"../../Result/CrossRing_different_topo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
         # 确保输出目录存在
@@ -32,7 +32,7 @@ class CrossRingBatchRunner:
 
         # 为不同拓扑生成配置
         topo_configs = {}
-        for rows in range(3, 11):  # 3x3 到 10x10
+        for rows in range(3, 100):  # 3x3 到 10x10
             cols = rows  # 只生成方形拓扑
             topo_name = f"{rows}x{cols}"
 
@@ -134,7 +134,8 @@ class CrossRingBatchRunner:
             config.EQ_CH_FIFO_DEPTH = 10
             config.IQ_OUT_FIFO_DEPTH = 8
             config.RB_OUT_FIFO_DEPTH = 8
-            config.SN_TRACKER_RELEASE_LATENCY = 40
+            config.SN_TRACKER_RELEASE_LATENCY = 4
+            # config.DDR_BW_LIMIT = 64
 
             # 创建仿真器
             sim: BaseModel = eval(f"{model_type}_model")(
@@ -142,7 +143,7 @@ class CrossRingBatchRunner:
                 config=config,
                 topo_type=topo_name,
                 traffic_file_path=self.traffic_base_path,
-                file_name=traffic_file,
+                traffic_config=traffic_file,
                 result_save_path=self.result_save_path,
                 results_fig_save_path=self.result_save_path,  # 批量运行时不保存图片
                 plot_flow_fig=1,
@@ -158,7 +159,7 @@ class CrossRingBatchRunner:
             # 运行仿真
             np.random.seed(609)
             sim.initial()
-            # sim.end_time = 6000
+            sim.end_time = 1000
             sim.print_interval = 6000  # 减少打印频率
 
             sim.run()
@@ -281,7 +282,7 @@ def main():
 
     # 配置运行参数
     model_types = ["REQ_RSP"]  # 可以添加其他模型类型，如 ["REQ_RSP", "Feature", "Packet_Base"]
-    max_topology_size = 10  # 设置最大拓扑大小限制，None表示无限制
+    max_topology_size = 20  # 设置最大拓扑大小限制，None表示无限制
 
     print("=" * 60)
     print("CrossRing Topology-based Traffic Matching Runner")
