@@ -86,14 +86,23 @@ def create_adjacency_matrix(topology_type, num_nodes, rows=0):
                     adjacency_matrix[node][node + rows * 2] = 1
                     adjacency_matrix[node][node - rows * 2] = 1
             else:
+                # connect vertically backward
                 adjacency_matrix[node][node - rows] = 1
-                if node % rows == 0:
-                    adjacency_matrix[node][node + 1] = 1
-                elif node % rows == rows - 1:
-                    adjacency_matrix[node][node - 1] = 1
-                else:
-                    adjacency_matrix[node][node + 1] = 1
-                    adjacency_matrix[node][node - 1] = 1
+                # only add horizontal neighbors if more than one column
+                if rows > 1:
+                    # left neighbor (column +1)
+                    if node % rows == 0:
+                        if node + 1 < num_nodes:
+                            adjacency_matrix[node][node + 1] = 1
+                    # right neighbor (column -1)
+                    elif node % rows == rows - 1:
+                        if node - 1 >= 0:
+                            adjacency_matrix[node][node - 1] = 1
+                    else:
+                        if node + 1 < num_nodes:
+                            adjacency_matrix[node][node + 1] = 1
+                        if node - 1 >= 0:
+                            adjacency_matrix[node][node - 1] = 1
     elif topology_type == "Torus":
         assert num_nodes % rows == 0, "This is not a valid 2D Torus."
         cols = num_nodes // rows

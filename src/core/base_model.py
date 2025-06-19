@@ -136,7 +136,11 @@ class BaseModel:
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
+            self.config.GDMA_SEND_POSITION_LIST
+            + self.config.SDMA_SEND_POSITION_LIST
+            + self.config.CDMA_SEND_POSITION_LIST
+            + self.config.DDR_SEND_POSITION_LIST
+            + self.config.L2M_SEND_POSITION_LIST
         )
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
@@ -167,8 +171,8 @@ class BaseModel:
         self.new_write_req = []
         self.IQ_directions = ["TR", "TL", "TU", "TD", "EQ"]
         self.IQ_direction_conditions = {
-            "TR": lambda flit: flit.path[1] - flit.path[0] == 1,
-            "TL": lambda flit: flit.path[1] - flit.path[0] == -1,
+            "TR": lambda flit: flit.path[1] - flit.path[0] == 1 and flit.source - flit.destination != self.config.NUM_COL,
+            "TL": lambda flit: flit.path[1] - flit.path[0] == -1 and flit.source - flit.destination != self.config.NUM_COL,
             "TU": lambda flit: (
                 len(flit.path) >= 3
                 and flit.path[2] - flit.path[1] == -self.config.NUM_COL * 2
@@ -183,6 +187,24 @@ class BaseModel:
             ),
             "EQ": lambda flit: flit.source - flit.destination == self.config.NUM_COL,
         }
+        # 如果只有1列，禁用横向和垂直环注入，仅保留EQ方向
+        if self.config.NUM_COL <= 1:
+            self.IQ_directions = ["EQ", "TU", "TD"]
+            self.IQ_direction_conditions = {
+                "TU": lambda flit: (
+                    len(flit.path) >= 3
+                    and flit.path[2] - flit.path[1] == -self.config.NUM_COL * 2
+                    and flit.path[1] - flit.path[0] == -self.config.NUM_COL
+                    and flit.source - flit.destination != self.config.NUM_COL
+                ),
+                "TD": lambda flit: (
+                    len(flit.path) >= 3
+                    and flit.path[2] - flit.path[1] == self.config.NUM_COL * 2
+                    and flit.path[1] - flit.path[0] == -self.config.NUM_COL
+                    and flit.source - flit.destination != self.config.NUM_COL
+                ),
+                "EQ": lambda flit: flit.source - flit.destination == self.config.NUM_COL,
+            }
         self.read_ip_intervals = defaultdict(list)  # 存储每个IP的读请求时间区间
         self.write_ip_intervals = defaultdict(list)  # 存储每个IP的写请求时间区间
 
@@ -193,7 +215,8 @@ class BaseModel:
         }
 
         self.dma_rw_counts = self.config._make_channels(
-            ("gdma", "sdma", "cdma"), {ip: {"read": 0, "write": 0} for ip in set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)}
+            ("gdma", "sdma", "cdma"),
+            {ip: {"read": 0, "write": 0} for ip in set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)},
         )
 
         self.rn_bandwidth = {
@@ -434,7 +457,11 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
+            print(
+                f"Data statistic: Read: {self.read_req, self.read_flit}, "
+                f"Write: {self.write_req, self.write_flit}, "
+                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
+            )
 
     def log_summary(self):
         if self.verbose:
@@ -913,7 +940,8 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
+                    for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
@@ -1120,7 +1148,7 @@ class BaseModel:
         self._tag_move(self.rsp_network)
         self._tag_move(self.data_network)
 
-    def _tag_move(self, network):
+    def _tag_move(self, network: Network):
         # 第一部分：纵向环处理
         for col_start in range(self.config.NUM_COL):
             interval = self.config.NUM_COL * 2  # 8
@@ -1166,35 +1194,55 @@ class BaseModel:
             network.links_tag[(col_start, col_start)][-1] = last_position
 
         # 第二部分：横向环处理（保持原逻辑）
+        # Skip horizontal tag movement if only one column or links_tag missing
+        if self.config.NUM_COL <= 1:
+            return
         for row_start in range(self.config.NUM_COL, self.config.NUM_NODE, self.config.NUM_COL * 2):
             row_end = row_start + self.config.NUM_COL - 1
+            # Existence check for links_tag entry
+            if (row_start, row_start) not in network.links_tag:
+                continue
             last_position = network.links_tag[(row_start, row_start)][0]
-            network.links_tag[(row_start, row_start)][0] = network.links_tag[(row_start + 1, row_start)][-1]
+            if (row_start + 1, row_start) in network.links_tag:
+                network.links_tag[(row_start, row_start)][0] = network.links_tag[(row_start + 1, row_start)][-1]
+            else:
+                network.links_tag[(row_start, row_start)][0] = last_position
 
             for i in range(1, self.config.NUM_COL):
                 current_node, next_node = row_start + i, row_start + i - 1
                 for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
                     if j == 0 and current_node == row_end:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
+                        if (current_node, current_node) in network.links_tag and (current_node, next_node) in network.links_tag:
+                            network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node + 1, current_node)][-1]
+                        if (current_node + 1, current_node) in network.links_tag and (current_node, next_node) in network.links_tag:
+                            network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node + 1, current_node)][-1]
                     else:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
+                        if (current_node, next_node) in network.links_tag:
+                            network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
 
-            network.links_tag[(row_end, row_end)][-1] = network.links_tag[(row_end, row_end)][0]
-            network.links_tag[(row_end, row_end)][0] = network.links_tag[(row_end - 1, row_end)][-1]
+            if (row_end, row_end) in network.links_tag:
+                network.links_tag[(row_end, row_end)][-1] = network.links_tag[(row_end, row_end)][0]
+                if (row_end - 1, row_end) in network.links_tag:
+                    network.links_tag[(row_end, row_end)][0] = network.links_tag[(row_end - 1, row_end)][-1]
+                else:
+                    network.links_tag[(row_end, row_end)][0] = last_position
 
             for i in range(1, self.config.NUM_COL):
                 current_node, next_node = row_end - i, row_end - i + 1
                 for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
                     if j == 0 and current_node == row_start:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
+                        if (current_node, current_node) in network.links_tag and (current_node, next_node) in network.links_tag:
+                            network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node - 1, current_node)][-1]
+                        if (current_node - 1, current_node) in network.links_tag and (current_node, next_node) in network.links_tag:
+                            network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node - 1, current_node)][-1]
                     else:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
+                        if (current_node, next_node) in network.links_tag:
+                            network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
 
-            network.links_tag[(row_start, row_start)][-1] = last_position
+            if (row_start, row_start) in network.links_tag:
+                network.links_tag[(row_start, row_start)][-1] = last_position
 
     def _move_to_eject_queues_pre(self, network: Network, eject_flits, ip_pos):
         for ip_type in network.EQ_channel_buffer.keys():
@@ -1406,13 +1454,13 @@ class BaseModel:
                 return self.config.GDMA_SEND_POSITION_LIST[node] if node < 16 else self.config.CDMA_SEND_POSITION_LIST[node - 16]
             elif self.topo_type_stat == "6x5":
                 return node % self.config.NUM_COL + self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
-            return self.config.GDMA_SEND_POSITION_LIST[node]
+            return node % self.config.NUM_COL + self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
         else:
             if self.topo_type_stat in ["5x4", "4x5"]:
                 return self.config.DDR_SEND_POSITION_LIST[node] - self.config.NUM_COL if node < 16 else self.config.L2M_SEND_POSITION_LIST[node % 16] - self.config.NUM_COL
             elif self.topo_type_stat == "6x5":
                 return node % self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
-            return self.config.DDR_SEND_POSITION_LIST[node] - self.config.NUM_COL
+            return node % self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
 
     def get_results(self):
         """
