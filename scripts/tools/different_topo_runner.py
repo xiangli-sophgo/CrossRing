@@ -19,7 +19,7 @@ if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
 class CrossRingBatchRunner:
     def __init__(self):
         self.results = []
-        self.traffic_base_path = r"../../traffic/3x1_w/"
+        self.traffic_base_path = r"../../traffic/nxn_MLP_MoE"
         self.config_path = r"../../config/config2.json"
         self.result_save_path = f"../../Result/CrossRing_different_topo_{datetime.now().strftime('%Y%m%d_%H%M%S')}/"
         self.csv_output_path = f"../../Result/CrossRing_different_topo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
