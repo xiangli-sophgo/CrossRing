@@ -25,7 +25,8 @@ class TrafficState:
 
     def is_completed(self) -> bool:
         """判断traffic是否完成"""
-        return self.injected_req >= self.total_req and self.sent_flit >= self.total_flit and self.received_flit >= self.total_flit
+        # return self.injected_req >= self.total_req and self.sent_flit >= self.total_flit and self.received_flit >= self.total_flit
+        return self.injected_req >= self.total_req and self.received_flit >= self.total_flit
 
     def update_injected_req(self):
         """更新已注入请求数"""
@@ -109,6 +110,10 @@ class TrafficScheduler:
         self.current_cycle = 0
         self.verbose = False
 
+        # Ring拓扑支持
+        self.ring_config = None
+        self.use_ring_mapping = False
+
     def setup_parallel_chains(self, chains_config: List[List[str]]):
         """设置并行的串行链"""
         self.parallel_chains.clear()
@@ -179,6 +184,11 @@ class TrafficScheduler:
                 t, src, src_t, dst, dst_t, op, burst = parts
                 t = int(t) * self.config.NETWORK_FREQUENCY + time_offset * self.config.NETWORK_FREQUENCY
                 src, dst, burst = int(src), int(dst), int(burst)
+
+                # # Ring拓扑节点映射
+                # if self.use_ring_mapping and self.ring_config:
+                #     src = self.ring_config.map_node(src)
+                #     dst = self.ring_config.map_node(dst)
 
                 # 创建带traffic_id的请求元组
                 req_tuple = (t, src, src_t, dst, dst_t, op, burst, traffic_id)

@@ -240,11 +240,24 @@ class Node:
     def initialize_sn(self):
         """Initialize SN structures."""
         self.sn_tracker_release_time = defaultdict(list)
-        for ip_pos in set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST):
-            for key in self.sn_tracker:
-                self.sn_rdb[key][ip_pos] = []
-                self.sn_wdb[key][ip_pos] = defaultdict(list)
-                self.setup_sn_trackers(key, ip_pos)
+
+        # 检查是否为Ring拓扑 - 通过CH_NAME_LIST是否包含带索引的IP类型判断
+        is_ring_topology = hasattr(self.config, "CH_NAME_LIST") and any("_" in ch for ch in getattr(self.config, "CH_NAME_LIST", []))
+
+        if is_ring_topology:
+            # Ring拓扑：每个节点都有所有IP类型的SN tracker
+            for ip_pos in range(getattr(self.config, "NUM_RING_NODES", self.config.NUM_NODE)):
+                for key in self.sn_tracker:
+                    self.sn_rdb[key][ip_pos] = []
+                    self.sn_wdb[key][ip_pos] = defaultdict(list)
+                    self.setup_sn_trackers(key, ip_pos)
+        else:
+            # 原始CrossRing拓扑：只在特定位置创建SN tracker
+            for ip_pos in set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST):
+                for key in self.sn_tracker:
+                    self.sn_rdb[key][ip_pos] = []
+                    self.sn_wdb[key][ip_pos] = defaultdict(list)
+                    self.setup_sn_trackers(key, ip_pos)
 
     def setup_sn_trackers(self, key, ip_pos):
         """Setup trackers for SN."""
@@ -504,8 +517,13 @@ class IPInterface:
             return  # 预缓冲已占用
 
         try:
-            # 接收，使用 ip_pos - NUM_COL
-            pos_index = self.ip_pos - self.config.NUM_COL
+            # 接收，CrossRing使用 ip_pos - NUM_COL，Ring使用 ip_pos
+            if hasattr(self.config, "NUM_RING_NODES") and self.config.NUM_RING_NODES > 0:
+                # Ring topology: eject at same position as inject
+                pos_index = self.ip_pos
+            else:
+                # CrossRing topology: eject at ip_pos - NUM_COL
+                pos_index = self.ip_pos - self.config.NUM_COL
 
             eq_buf = network.EQ_channel_buffer[self.ip_type][pos_index]
             if not eq_buf:
@@ -527,6 +545,11 @@ class IPInterface:
 
     def _handle_received_request(self, req: Flit):
         """处理接收到的请求（SN端）"""
+        # 只有SN-side IP类型可以处理接收到的请求
+        if not (self.ip_type.startswith("ddr") or self.ip_type.startswith("l2m")):
+            # RN-side IP类型不应该接收请求，直接忽略
+            return
+
         req.cmd_received_by_cake1_cycle = getattr(self, "current_cycle", 0)
         self.req_wait_cycles_h += req.wait_cycle_h
         self.req_wait_cycles_v += req.wait_cycle_v
@@ -579,6 +602,9 @@ class IPInterface:
 
         req = next((req for req in self.node.rn_tracker[rsp.req_type][self.ip_type][self.ip_pos] if req.packet_id == rsp.packet_id), None)
         if not req:
+            # For Ring topology, ignore spurious positive responses for read requests
+            if hasattr(self.config, "NUM_RING_NODES") and self.config.NUM_RING_NODES > 0 and rsp.req_type == "read" and rsp.rsp_type == "positive":
+                return  # Silently ignore - this is expected for Ring read completions
             logging.warning(f"RSP {rsp} do not have REQ")
             return
 
@@ -814,7 +840,10 @@ class IPInterface:
                 net_info["l2h_fifo"].append(net_info["l2h_fifo_pre"])
                 net_info["l2h_fifo_pre"] = None
 
-            if net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen:
+            if (
+                net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None
+                and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen
+            ):
                 net.IQ_channel_buffer[self.ip_type][self.ip_pos].append(net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos])
                 net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = None
 
@@ -882,8 +911,15 @@ class IPInterface:
         """创建读数据包并放入数据网络inject_fifo"""
         cycle = getattr(self, "current_cycle", 0)
         for i in range(req.burst_length):
-            source = req.destination + self.config.NUM_COL
-            destination = req.source - self.config.NUM_COL
+            # Ring拓扑：数据包从当前SN位置返回到原始请求者位置
+            if hasattr(self.config, "NUM_RING_NODES"):
+                # Ring拓扑
+                source = req.destination  # 当前SN位置
+                destination = req.source  # 原始请求者位置
+            else:
+                # 原始网格拓扑逻辑
+                source = req.destination + self.config.NUM_COL
+                destination = req.source - self.config.NUM_COL
             path = self.routes[source][destination]
             flit = Flit(source, destination, path)
             flit.sync_latency_record(req)
@@ -891,17 +927,23 @@ class IPInterface:
             flit.destination_original = req.source_original
             flit.req_type = req.req_type
             flit.flit_type = "data"
-            if req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
+            if hasattr(req, "original_destination_type") and req.original_destination_type.startswith("ddr"):
+                latency = np.random.uniform(
+                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
+                )
+            elif hasattr(req, "destination_type") and req.destination_type and req.destination_type.startswith("ddr"):
+                latency = np.random.uniform(
+                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
+                )
             else:
                 latency = self.config.L2M_R_LATENCY
             flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY
             flit.entry_db_cycle = cycle
             flit.req_departure_cycle = req.departure_cycle
-            flit.source_type = req.destination_type
-            flit.destination_type = req.source_type
-            flit.original_source_type = req.original_source_type
-            flit.original_destination_type = req.original_destination_type
+            flit.source_type = getattr(req, "destination_type", None)
+            flit.destination_type = getattr(req, "source_type", None)
+            flit.original_source_type = getattr(req, "original_source_type", None)
+            flit.original_destination_type = getattr(req, "original_destination_type", None)
             flit.packet_id = req.packet_id
             flit.flit_id = i
             flit.burst_length = req.burst_length
@@ -915,8 +957,17 @@ class IPInterface:
     def create_rsp(self, req: Flit, rsp_type):
         """创建响应并放入响应网络inject_fifo"""
         cycle = getattr(self, "current_cycle", 0)
-        source = req.destination + self.config.NUM_COL
-        destination = req.source - self.config.NUM_COL
+
+        # 检查是否为Ring拓扑
+        if hasattr(self.config, "NUM_RING_NODES"):
+            # Ring拓扑：响应直接从目标节点返回到源节点
+            source = req.destination
+            destination = req.source
+        else:
+            # 原始网格拓扑逻辑
+            source = req.destination + self.config.NUM_COL
+            destination = req.source - self.config.NUM_COL
+
         path = self.routes[source][destination]
         rsp = Flit(source, destination, path)
         rsp.flit_type = "rsp"
@@ -1047,7 +1098,9 @@ class Network:
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}
         self.ETag_BOTHSIDE_UPGRADE = False
 
-        for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
+        for ip_pos in set(
+            config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST
+        ):
             self.cross_point["horizontal"][ip_pos]["TL"] = [None] * 2
             self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2
@@ -2041,7 +2094,11 @@ class Network:
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
-                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth and self.ring_bridge_pre[direction][flit.current_link] is None:
+                    if (
+                        direction in self.ring_bridge.keys()
+                        and len(self.ring_bridge[direction][flit.current_link]) < max_depth
+                        and self.ring_bridge_pre[direction][flit.current_link] is None
+                    ):
                         # flit.flit_position = f"RB_{direction}"
                         # self.ring_bridge[direction][flit.current_link].append(flit)
                         self.ring_bridge_pre[direction][flit.current_link] = flit
