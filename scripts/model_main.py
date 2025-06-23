@@ -40,11 +40,11 @@ def main():
     traffic_config = [
         [
             # r"Read_burst4_2262HBM_v2.txt",
-            r"Write_burst4_2262HBM_v2.txt",
+            r"MLP_MoE.txt",
         ]
-        * 1,
+        * 3,
         [
-            # r"All2All_Combine.txt",
+            r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
         ],
     ]
@@ -73,9 +73,9 @@ def main():
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        # topo_type = "5x4"  # SG2262
+        topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
-        topo_type = "4x2"
+        # topo_type = "4x2"
         # topo_type = "3x1"
         # topo_type = "6x5"  # SG2260
         # topo_type = "3x3"  # SG2260E
@@ -401,7 +401,7 @@ def main():
         }
 
     sim.initial()
-    sim.end_time = 6000
+    # sim.end_time = 6000
     sim.print_interval = 2000
     sim.run()
 

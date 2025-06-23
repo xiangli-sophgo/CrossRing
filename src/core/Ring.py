@@ -43,10 +43,10 @@ class RingConfig(CrossRingConfig):
 
         # 重写CHANNEL_SPEC以支持Ring拓扑中的多IP实例
         self.CHANNEL_SPEC = {
-            "gdma": min(2, self.NUM_RING_NODES // 4),  # 每4个节点一个GDMA
-            "sdma": min(2, self.NUM_RING_NODES // 8),  # 每8个节点一个SDMA
-            "ddr": min(2, self.NUM_RING_NODES // 4),  # 每4个节点一个DDR
-            "l2m": min(2, self.NUM_RING_NODES // 8),  # 每8个节点一个L2M
+            "gdma": 2,  # 每4个节点一个GDMA
+            "sdma": 2,  # 每8个节点一个SDMA
+            "ddr": 2,  # 每4个节点一个DDR
+            "l2m": 2,  # 每8个节点一个L2M
         }
 
         # 重新生成CH_NAME_LIST
@@ -76,6 +76,7 @@ class RingConfig(CrossRingConfig):
         self.node_mapping = self._create_node_mapping()
 
         # 新增：是否在到达目的地时本地弹出，否则绕环
+        # TODO: 参数含义理解错误，是如果下不了环才继续绕环，而不是到达目的地不下环还绕环。
         self.RING_LOCAL_EJECT = True
 
     def _create_node_mapping(self):
@@ -211,8 +212,8 @@ class RingNode:
             "eject_priority": ["CW", "CCW"],
         }
 
-        # 新增的仲裁状态
-        self.inject_arbitration_state = {"channel_priority": [], "last_served": {}}  # 将在_setup_ip_connections中初始化
+        # 新增的仲裁状态 - 使用新的双方向结构
+        self.inject_arbitration_state = {"CW": {"channel_priority": [], "last_served": None}, "CCW": {"channel_priority": [], "last_served": None}}
         self.eject_arbitration_state = {"direction_priority": ["CW", "CCW"], "channel_assignment": {}, "last_served_direction": None}
 
         # IP连接信息
@@ -239,12 +240,17 @@ class RingNetwork(Network):
             ring_node = RingNode(i, config)
             self.ring_nodes.append(ring_node)
 
-        # 链路状态 - 每个方向每个链路的slice级flit存储
+        # 链路状态 - 使用起终点元组标识链路
         # 每个链路有SLICE_PER_LINK个slice位置
-        self.ring_links = {
-            "CW": [[None] * config.SLICE_PER_LINK for _ in range(config.NUM_RING_NODES)],  # 顺时针链路
-            "CCW": [[None] * config.SLICE_PER_LINK for _ in range(config.NUM_RING_NODES)],  # 逆时针链路
-        }
+        self.ring_links = {}
+        for i in range(config.NUM_RING_NODES):
+            # 顺时针链路
+            cw_next = (i + 1) % config.NUM_RING_NODES
+            self.ring_links[(i, cw_next)] = [None] * config.SLICE_PER_LINK
+
+            # 逆时针链路
+            ccw_next = (i - 1) % config.NUM_RING_NODES
+            self.ring_links[(i, ccw_next)] = [None] * config.SLICE_PER_LINK
 
         # 流量统计
         self.links_flow_stat = {
@@ -342,17 +348,24 @@ class RingTopology:
         (ip_type_with_index, node_id) → IPInterface 映射。
 
         这意味着 *每个* node 都有 gdma_0…gdma_N, sdma_0… 等完整一套 IP。
+
+        **关键修复**: 为所有三个网络(req/rsp/data)的对应节点设置仲裁状态
         """
+        import copy
+
         for node_id in range(self.config.NUM_RING_NODES):
-            # 由于我们有三个独立的网络，每个节点的RingNode对象应从req网络获取（因为节点对象是独立的，但结构上相同）
-            ring_node = self.networks["req"].ring_nodes[node_id]
+            # 获取所有三个网络的对应节点
+            req_node = self.networks["req"].ring_nodes[node_id]
+            rsp_node = self.networks["rsp"].ring_nodes[node_id]
+            data_node = self.networks["data"].ring_nodes[node_id]
 
-            # 初始化列表 / 字典
-            if ring_node.connected_ip_type is None:
-                ring_node.connected_ip_type = []
-            if ring_node.ip_interface is None:
-                ring_node.ip_interface = {}
+            # 初始化req节点的IP连接信息（作为主节点）
+            if req_node.connected_ip_type is None:
+                req_node.connected_ip_type = []
+            if req_node.ip_interface is None:
+                req_node.ip_interface = {}
 
+            # 为每个IP类型创建接口并连接到req节点
             for ip_name in self.config.CH_NAME_LIST:
                 ip_interface = IPInterface(
                     ip_type=ip_name,
@@ -365,16 +378,67 @@ class RingTopology:
                     routes=self.networks["req"].routes,
                 )
 
-                # 写入全局表
+                # 写入全局IP模块表
                 self.ip_modules[(ip_name, node_id)] = ip_interface
 
-                # 记录到节点
-                ring_node.connected_ip_type.append(ip_name)
-                ring_node.ip_interface[ip_name] = ip_interface
+                # 记录到req节点（作为IP连接的主记录）
+                req_node.connected_ip_type.append(ip_name)
+                req_node.ip_interface[ip_name] = ip_interface
 
-            # 初始化仲裁状态的 channel_priority（保持与 connected_ip_type 顺序一致）
-            ring_node.inject_arbitration_state["channel_priority"] = list(ring_node.connected_ip_type)
-            ring_node.eject_arbitration_state["channel_assignment"] = {}
+            # 🔥 关键修复：为所有三个网络的节点设置仲裁状态
+            # 创建标准的仲裁状态结构
+            standard_arbitration_state = {
+                "CW": {"channel_priority": list(req_node.connected_ip_type), "last_served": None},
+                "CCW": {"channel_priority": list(req_node.connected_ip_type), "last_served": None},
+            }
+
+            # 为每个网络的节点分别设置仲裁状态（使用深拷贝避免状态共享）
+            req_node.inject_arbitration_state = copy.deepcopy(standard_arbitration_state)
+            rsp_node.inject_arbitration_state = copy.deepcopy(standard_arbitration_state)
+            data_node.inject_arbitration_state = copy.deepcopy(standard_arbitration_state)
+
+            # 同时为rsp和data节点设置connected_ip_type（用于仲裁逻辑）
+            rsp_node.connected_ip_type = list(req_node.connected_ip_type)
+            data_node.connected_ip_type = list(req_node.connected_ip_type)
+
+            # 初始化rsp和data节点的ip_interface字典（虽然不直接使用，但保持结构一致）
+            rsp_node.ip_interface = {}
+            data_node.ip_interface = {}
+
+            # 🔥 关键修复：设置弹出仲裁状态（所有网络节点）
+            standard_eject_arbitration_state = {"direction_priority": ["CW", "CCW"], "channel_assignment": {}, "last_served_direction": None}
+
+            req_node.eject_arbitration_state = copy.deepcopy(standard_eject_arbitration_state)
+            rsp_node.eject_arbitration_state = copy.deepcopy(standard_eject_arbitration_state)
+            data_node.eject_arbitration_state = copy.deepcopy(standard_eject_arbitration_state)
+
+            # 🔥 验证修复：打印确认信息（可选，调试时启用）
+            if hasattr(self, "debug_enabled") and self.debug_enabled:
+                print(f"Node {node_id} arbitration states initialized:")
+                print(f"  req_node.inject_arbitration_state: {bool(hasattr(req_node, 'inject_arbitration_state'))}")
+                print(f"  rsp_node.inject_arbitration_state: {bool(hasattr(rsp_node, 'inject_arbitration_state'))}")
+                print(f"  data_node.inject_arbitration_state: {bool(hasattr(data_node, 'inject_arbitration_state'))}")
+                print(f"  Connected IP types: {req_node.connected_ip_type}")
+                print("")
+
+        # 🔥 最终验证：确保所有网络节点都正确初始化
+        print("=== IP连接和仲裁状态设置完成 ===")
+        for channel in ["req", "rsp", "data"]:
+            nodes_with_arbitration = 0
+            total_ip_connections = 0
+
+            for node_id in range(self.config.NUM_RING_NODES):
+                node = self.networks[channel].ring_nodes[node_id]
+                if hasattr(node, "inject_arbitration_state"):
+                    nodes_with_arbitration += 1
+                if hasattr(node, "connected_ip_type") and node.connected_ip_type:
+                    total_ip_connections += len(node.connected_ip_type)
+
+            print(f"[{channel}网络] 节点仲裁状态: {nodes_with_arbitration}/{self.config.NUM_RING_NODES}")
+            print(f"[{channel}网络] IP连接总数: {total_ip_connections}")
+
+        print(f"全局IP模块总数: {len(self.ip_modules)}")
+        print("=================================")
 
     def _find_injection_point(self, preferred_node: int, ip_type: str) -> Optional[int]:
         """
@@ -410,6 +474,24 @@ class RingTopology:
         # 让 analyzer 知道 base_model（用于计算 IP 带宽和其他属性）
         self.bandwidth_analyzer.base_model = self
 
+        # Ring特定的节点位置初始化
+        self._initialize_ring_node_positions()
+
+    def _initialize_ring_node_positions(self):
+        """为Ring拓扑初始化节点位置 - 所有节点都可以是RN或SN"""
+        # Ring拓扑中所有节点都可以作为RN（请求节点）和SN（存储节点）
+        ring_nodes = set(range(self.config.NUM_RING_NODES))
+
+        # 清空原有的节点位置设置
+        self.bandwidth_analyzer.rn_positions = ring_nodes.copy()
+        self.bandwidth_analyzer.sn_positions = ring_nodes.copy()
+
+        # 为Ring拓扑调整配置，避免网格拓扑相关的计算错误
+        if not hasattr(self.config, "NUM_COL"):
+            self.config.NUM_COL = 1  # Ring是1维拓扑
+        if not hasattr(self.config, "NUM_ROW"):
+            self.config.NUM_ROW = self.config.NUM_RING_NODES
+
     def process_results(self, plot_rn=True, plot_flow=True, save_path=None):
         """处理结果并生成可视化"""
         if self.bandwidth_analyzer is None:
@@ -421,14 +503,111 @@ class RingTopology:
         # 传递统计信息到result processor
         self.networks["data"].stats = self.stats
 
+        # Ring特定的数据收集
+        self._collect_ring_requests_data()
+
         total_bw = 0
         if plot_rn:
             total_bw = self.bandwidth_analyzer.plot_rn_bandwidth_curves()
 
         if plot_flow:
-            self.bandwidth_analyzer.draw_flow_graph_ring(self.networks["req"], save_path=save_path)
+            # self.bandwidth_analyzer.draw_flow_graph_ring_rectangular(self.networks["data"], save_path=save_path)
+            self.bandwidth_analyzer.draw_flow_graph_ring_rectangular(self.networks["data"], save_path=None)
 
         return total_bw
+
+    def _collect_ring_requests_data(self):
+        """Ring特定的数据收集方法 - 模拟网格拓扑的arrive_flits结构"""
+        # 创建模拟的data_network结构用于BandwidthAnalyzer
+        if not hasattr(self, "data_network"):
+            # 创建模拟的data_network对象
+            class MockDataNetwork:
+                def __init__(self):
+                    self.arrive_flits = {}
+
+            self.data_network = MockDataNetwork()
+
+        # 从ejected_flits或send_flits收集完成的数据请求
+        all_completed_flits = []
+
+        # 收集已弹出的数据flit
+        # if hasattr(self, "ejected_flits") and self.ejected_flits:
+        #     all_completed_flits.extend([f for f in self.ejected_flits if hasattr(f, "packet_id") and f.flit_type == "data"])
+
+        # 也可以从send_flits中收集已完成的数据（用于模拟完整的数据传输）
+        for channel_flits in self.send_flits.values():
+            all_completed_flits.extend([f for f in channel_flits if hasattr(f, "packet_id") and f.flit_type == "data"])
+
+        if all_completed_flits:
+            # 按packet_id分组flit
+            flits_by_packet = {}
+            for flit in all_completed_flits:
+                packet_id = flit.packet_id
+                if packet_id not in flits_by_packet:
+                    flits_by_packet[packet_id] = []
+                flits_by_packet[packet_id].append(flit)
+
+            # 将完整的数据传输添加到arrive_flits
+            for packet_id, flits in flits_by_packet.items():
+                if flits:
+                    # 取第一个flit作为代表
+                    representative_flit = flits[0]
+
+                    # 设置Ring特定的时间戳
+                    if not hasattr(representative_flit, "cmd_entry_cake0_cycle"):
+                        representative_flit.cmd_entry_cake0_cycle = getattr(representative_flit, "departure_cycle", 0) * self.config.NETWORK_FREQUENCY
+                    if not hasattr(representative_flit, "data_received_complete_cycle"):
+                        representative_flit.data_received_complete_cycle = getattr(representative_flit, "eject_ring_cycle", self.current_cycle) * self.config.NETWORK_FREQUENCY
+                    if not hasattr(representative_flit, "data_entry_noc_from_cake1_cycle"):
+                        representative_flit.data_entry_noc_from_cake1_cycle = representative_flit.data_received_complete_cycle
+                    if not hasattr(representative_flit, "data_entry_noc_from_cake0_cycle"):
+                        representative_flit.data_entry_noc_from_cake0_cycle = representative_flit.data_received_complete_cycle
+
+                    # 设置延迟统计
+                    if not hasattr(representative_flit, "cmd_latency"):
+                        representative_flit.cmd_latency = 0
+                    if not hasattr(representative_flit, "data_latency"):
+                        representative_flit.data_latency = max(0, representative_flit.data_received_complete_cycle - representative_flit.cmd_entry_cake0_cycle)
+                    if not hasattr(representative_flit, "transaction_latency"):
+                        representative_flit.transaction_latency = representative_flit.data_latency
+
+                    # 确保有原始类型信息
+                    if not hasattr(representative_flit, "original_source_type"):
+                        representative_flit.original_source_type = representative_flit.source_type
+                    if not hasattr(representative_flit, "original_destination_type"):
+                        representative_flit.original_destination_type = representative_flit.destination_type
+
+                    # Ring拓扑的节点编号适配：保持原样，因为Ring节点编号就是0-7
+                    # 不需要像网格拓扑那样进行NUM_COL的偏移
+
+                    # 创建足够数量的flit来满足burst_length
+                    burst_length = getattr(representative_flit, "burst_length", 1)
+                    complete_flits = []
+                    for i in range(burst_length):
+                        if i < len(flits):
+                            flit_copy = flits[i]
+                        else:
+                            # 复制代表flit以满足burst_length要求
+                            flit_copy = representative_flit
+
+                        # 确保每个flit都有必要的属性
+                        for attr in [
+                            "cmd_entry_cake0_cycle",
+                            "data_received_complete_cycle",
+                            "data_entry_noc_from_cake1_cycle",
+                            "data_entry_noc_from_cake0_cycle",
+                            "cmd_latency",
+                            "data_latency",
+                            "transaction_latency",
+                            "original_source_type",
+                            "original_destination_type",
+                        ]:
+                            if not hasattr(flit_copy, attr):
+                                setattr(flit_copy, attr, getattr(representative_flit, attr, 0))
+
+                        complete_flits.append(flit_copy)
+
+                    self.data_network.arrive_flits[packet_id] = complete_flits
 
     def adaptive_routing_decision(self, flit: Flit) -> str:
         """自适应路由决策"""
@@ -469,11 +648,11 @@ class RingTopology:
         # 1. 处理新请求注入 - 复用traffic处理流程
         self._process_new_requests()
 
-        # 2. IP接口处理 - 复用IPInterface的周期处理
-        self._process_ip_interfaces()
-
-        # 3. Ring网络传输
+        # 2. Ring网络传输
         self._process_ring_transmission()
+
+        # 3. IP接口处理 - 复用IPInterface的周期处理
+        self._process_ip_interfaces()
 
         # 4. 处理弹出队列
         self._process_eject_queues()
@@ -486,10 +665,6 @@ class RingTopology:
 
         # 7. Debug追踪
         self._trace_packet_locations()
-
-        # Debug send_flits counts summary
-        # if self.debug_enabled:
-        #     print("Debug send_flits counts:", {ch: len(self.send_flits[ch]) for ch in self.send_flits})
 
     def _process_new_requests(self):
         """处理新请求 - 复用TrafficScheduler"""
@@ -564,11 +739,7 @@ class RingTopology:
         for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
             ip_interface.inject_step(self.current_cycle)
 
-        # 2. 处理pre_to_fifo移动 - 每个周期都执行
-        for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
-            ip_interface.move_pre_to_fifo()
-
-        # 3. 处理eject步骤 - 让IPInterface自行处理请求、响应和数据
+        # 2. 处理eject步骤 - 让IPInterface自行处理请求、响应和数据
         self.ejected_flits = []
         for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
             ejected_flits = ip_interface.eject_step(self.current_cycle)
@@ -587,16 +758,35 @@ class RingTopology:
                         elif flit.flit_type == "data":
                             self.stats["total_data_flits_ejected"] += 1
 
-    def _process_ring_transmission(self):
-        """处理Ring传输"""
-        # 1. 先移动环上已有 flit（清空 slice 0）
-        self._move_flits_on_ring()
+        # 补充记录RSP和DATA类型的send_flits统计
+        # 检查各个IP接口中新生成的RSP和DATA flits
+        for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
+            # 检查RSP网络的inject_fifo中新注入的flits
+            for channel in ["rsp", "data"]:
+                net_info = ip_interface.networks[channel]
+                # 检查inject_fifo中的新flits（刚从其他处理函数生成的）
+                for flit in list(net_info["inject_fifo"]):
+                    if hasattr(flit, "packet_id") and flit not in self.send_flits[channel]:
+                        # 确保这个flit还没有被记录过
+                        already_recorded = any(
+                            recorded_flit.packet_id == flit.packet_id and getattr(recorded_flit, "flit_id", 0) == getattr(flit, "flit_id", 0) for recorded_flit in self.send_flits[channel]
+                        )
+                        if not already_recorded:
+                            self.send_flits[channel].append(flit)
+        # 3. 处理pre_to_fifo移动 - 每个周期都执行
+        for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
+            ip_interface.move_pre_to_fifo()
 
-        # 2. 再从IQ_channel_buffer注入到Ring（确保首 slice 为空）
-        self._inject_from_IQ_to_ring()
+    # def _process_ring_transmission(self):
+    #     """处理Ring传输"""
+    #     # 1. 先移动环上已有 flit（清空 slice 0）
+    #     self._move_flits_on_ring()
 
-        # 3. 从Ring弹出到EQ
-        self._eject_from_ring_to_EQ()
+    #     # 2. 再从IQ_channel_buffer注入到Ring（确保首 slice 为空）
+    #     self._inject_from_IQ_to_ring()
+
+    #     # 3. 从Ring弹出到EQ
+    #     self._eject_from_ring_to_EQ()
 
     def _move_ring_pre_to_queues(self, node: RingNode):
         """移动Ring特有的pre缓冲到正式队列"""
@@ -605,49 +795,68 @@ class RingTopology:
         pass
 
     def _inject_from_IQ_to_ring(self):
-        """从IQ_channel_buffer注入到Ring - 实现n to 2仲裁机制"""
+        """从IQ_channel_buffer注入到Ring - 实现正确的硬件仲裁机制
+        每个节点每个方向每周期最多注入1个flit，使用round-robin仲裁
+        """
         # 对每个channel分别处理注入
         for channel in ["req", "rsp", "data"]:
             ring_network = self.networks[channel]
-            # 统一使用req网络的connected_ip_type遍历所有节点
+
+            # 遍历所有节点
             for node_id in range(self.config.NUM_RING_NODES):
                 req_node = self.networks["req"].ring_nodes[node_id]
                 ip_types = req_node.connected_ip_type or []
                 if not ip_types:
                     continue
+
                 ring_node = ring_network.ring_nodes[node_id]
 
                 # 收集所有有数据的IP channel buffer
-                available_channels = []
+                available_channels = {}  # {ip_type: buffer}
                 if hasattr(ring_network, "IQ_channel_buffer"):
                     for ip_type in ip_types:
                         if ip_type in ring_network.IQ_channel_buffer:
                             buffer = ring_network.IQ_channel_buffer[ip_type][node_id]
                             if buffer:
-                                available_channels.append((ip_type, buffer))
+                                available_channels[ip_type] = buffer
 
                 if not available_channels:
                     continue
 
-                # Round-robin仲裁：为两个方向(CW/CCW)各选择一个channel
-                injected_count = 0
-                max_inject_per_cycle = min(4, len(available_channels))  # 增加注入带宽，最多4个flit
-
-                # 获取节点的仲裁状态，如果不存在则初始化
+                # 初始化或确保仲裁状态结构正确
                 if not hasattr(ring_node, "inject_arbitration_state"):
-                    ring_node.inject_arbitration_state = {"channel_priority": [ip_type for ip_type in ip_types], "last_served": {}}
+                    ring_node.inject_arbitration_state = {"CW": {"channel_priority": list(ip_types), "last_served": None}, "CCW": {"channel_priority": list(ip_types), "last_served": None}}
+                else:
+                    # 确保新结构存在 - 可能是从旧格式迁移
+                    if "CW" not in ring_node.inject_arbitration_state:
+                        ring_node.inject_arbitration_state = {"CW": {"channel_priority": list(ip_types), "last_served": None}, "CCW": {"channel_priority": list(ip_types), "last_served": None}}
+                    elif not isinstance(ring_node.inject_arbitration_state.get("CW", {}), dict):
+                        # 从旧格式转换到新格式
+                        ring_node.inject_arbitration_state = {"CW": {"channel_priority": list(ip_types), "last_served": None}, "CCW": {"channel_priority": list(ip_types), "last_served": None}}
 
-                # 轮询所有可用的channel，优先处理能注入的flit
-                for _ in range(max_inject_per_cycle):
-                    if injected_count >= max_inject_per_cycle:
-                        break
+                # 为每个方向独立进行round-robin仲裁
+                for direction in ["CW", "CCW"]:
+                    inject_queue = ring_node.inject_queues[direction]
 
-                    # 查找下一个可以注入的flit
-                    selected_channel = None
-                    selected_direction = None
+                    # 检查注入队列是否有空间
+                    if len(inject_queue) >= inject_queue.maxlen:
+                        continue
 
-                    for ip_type, buffer in available_channels:
-                        if not buffer:  # buffer可能在前面的处理中被清空
+                    # 获取该方向的round-robin状态
+                    arbitration_state = ring_node.inject_arbitration_state[direction]
+                    rr_queue = arbitration_state["channel_priority"]
+
+                    # Round-robin仲裁：依次检查每个IP类型
+                    selected_ip = None
+                    selected_flit = None
+
+                    # 从当前round-robin队列顺序开始检查
+                    for ip_type in list(rr_queue):
+                        if ip_type not in available_channels:
+                            continue
+
+                        buffer = available_channels[ip_type]
+                        if not buffer:
                             continue
 
                         flit = buffer[0]
@@ -658,149 +867,318 @@ class RingTopology:
                             flit_direction = self.adaptive_routing_decision(flit)
                             flit.ring_direction = flit_direction
 
-                        # 本地传输处理
+                        # 处理LOCAL传输
                         if flit_direction == "LOCAL":
                             target_node = ring_network.ring_nodes[flit.destination]
-                            eject_queue = target_node.eject_queues["CW"]
+                            eject_queue = target_node.eject_queues["CW"]  # LOCAL使用CW弹出队列
+                            if len(eject_queue) < eject_queue.maxlen:
+                                # 直接处理LOCAL传输
+                                buffer.popleft()
+                                eject_queue.append(flit)
+                                flit.eject_ring_cycle = self.current_cycle
+
+                                # 更新round-robin状态
+                                rr_queue.remove(ip_type)
+                                rr_queue.append(ip_type)
+                                arbitration_state["last_served"] = ip_type
+                                break
+                            else:
+                                continue  # 弹出队列满，尝试下一个IP
+
+                        # 检查flit是否要注入到当前检查的方向
+                        if flit_direction == direction:
+                            selected_ip = ip_type
+                            selected_flit = flit
+                            break
+
+                    # 执行注入操作（每个方向每周期最多1个flit）
+                    if selected_ip and selected_flit:
+                        buffer = available_channels[selected_ip]
+                        flit = buffer.popleft()
+                        inject_queue.append(flit)
+                        flit.inject_ring_cycle = self.current_cycle
+                        flit.flit_position = f"IQ_{direction}"
+
+                        # 更新round-robin仲裁状态
+                        rr_queue.remove(selected_ip)
+                        rr_queue.append(selected_ip)
+                        arbitration_state["last_served"] = selected_ip
+
+                        # 统计使用情况
+                        if direction == "CW":
+                            self.stats["cw_usage"] += 1
+                        else:
+                            self.stats["ccw_usage"] += 1
+
+    def _move_flits_on_ring(self):
+        """Ring链路上的flit移动 - 修正版本，使用正确的硬件逻辑
+
+        正确的移动顺序：
+        1. 链路上的flit尝试向前移动/弹出（使用pre缓冲区）
+        2. 解决冲突并提交移动
+        3. 注入队列的flit尝试进入已清空的链路位置
+        """
+        for channel in ["req", "rsp", "data"]:
+            ring_network = self.networks[channel]
+
+            # === 阶段1：创建pre缓冲区用于原子性操作 ===
+            # 为每个位置创建pre缓冲区
+            link_pre_buffers = {}  # key: ((src, dst), slice_idx), value: flit or None
+            eject_pre_buffers = {}  # key: (node_id, direction), value: [flit_list]
+
+            # 初始化pre缓冲区
+            for i in range(self.config.NUM_RING_NODES):
+                # 链路pre缓冲区
+                cw_next = (i + 1) % self.config.NUM_RING_NODES
+                ccw_next = (i - 1) % self.config.NUM_RING_NODES
+
+                for link in [(i, cw_next), (i, ccw_next)]:
+                    for slice_idx in range(self.config.SLICE_PER_LINK):
+                        link_pre_buffers[(link, slice_idx)] = None
+
+                # 弹出pre缓冲区
+                for direction in ["CW", "CCW"]:
+                    eject_pre_buffers[(i, direction)] = []
+
+            # === 阶段2：链路上的flit尝试移动（从最后一个slice开始，避免冲突） ===
+            # 按slice从后往前处理，确保不会出现"追尾"
+            for slice_idx in range(self.config.SLICE_PER_LINK - 1, -1, -1):
+                for (src, dst), link_slices in ring_network.ring_links.items():
+                    flit = link_slices[slice_idx]
+                    if flit is None:
+                        continue
+
+                    # 判断flit的目标动作
+                    if slice_idx == self.config.SLICE_PER_LINK - 1:
+                        # 在最后一个slice，判断是弹出还是继续传输
+                        if flit.destination == dst and self.config.RING_LOCAL_EJECT:
+                            # 尝试弹出到目标节点的pre缓冲区
+                            direction = self.get_link_direction(src, dst, self.config.NUM_RING_NODES)
+                            eject_key = (dst, direction)
+
+                            # 检查目标节点的eject_queue是否有空间
+                            target_node = ring_network.ring_nodes[dst]
+                            eject_queue = target_node.eject_queues[direction]
+
+                            if len(eject_queue) < eject_queue.maxlen:
+                                eject_pre_buffers[eject_key].append(flit)
+                                # 标记当前位置将被清空
+                                link_slices[slice_idx] = None
+                            # 如果无法弹出，flit保持原位（阻塞）
+
+                        else:
+                            # 移动到下一个链路的第一个slice
+                            next_link = self.get_next_link((src, dst), self.config.NUM_RING_NODES)
+                            target_pos = (next_link, 0)
+
+                            # 检查目标位置是否可用
+                            if link_pre_buffers[target_pos] is None:
+                                link_pre_buffers[target_pos] = flit
+                                # 更新flit的current_position
+                                if hasattr(flit, "current_position"):
+                                    flit.current_position = next_link[1]
+                                # 标记当前位置将被清空
+                                link_slices[slice_idx] = None
+                            # 如果目标位置被占用，flit保持原位（阻塞）
+
+                    else:
+                        # 移动到下一个slice（同一链路内）
+                        target_pos = ((src, dst), slice_idx + 1)
+
+                        # 检查目标位置是否可用
+                        if link_pre_buffers[target_pos] is None:
+                            link_pre_buffers[target_pos] = flit
+                            # 更新flit状态
+                            flit.current_slice = slice_idx + 1
+                            flit.current_seat_index = slice_idx + 1
+                            # 标记当前位置将被清空
+                            link_slices[slice_idx] = None
+                        # 如果目标位置被占用，flit保持原位（阻塞）
+
+            # === 阶段3：提交pre缓冲区中的移动 ===
+            # 3.1 提交弹出操作
+            for (node_id, direction), flit_list in eject_pre_buffers.items():
+                if flit_list:
+                    target_node = ring_network.ring_nodes[node_id]
+                    eject_queue = target_node.eject_queues[direction]
+
+                    for flit in flit_list:
+                        if len(eject_queue) < eject_queue.maxlen:
+                            eject_queue.append(flit)
+                            flit.eject_ring_cycle = self.current_cycle
+                            flit.flit_position = f"EQ_{direction}"
+
+                            # 统计
+                            if flit.flit_type == "data":
+                                self.stats["total_flits_ejected"] += 1
+                            hops = abs(self.current_cycle - getattr(flit, "inject_ring_cycle", self.current_cycle))
+                            self.stats["total_hops"] += hops
+
+            # 3.2 提交链路移动
+            for (link, slice_idx), flit in link_pre_buffers.items():
+                if flit is not None:
+                    src, dst = link
+                    ring_network.ring_links[link][slice_idx] = flit
+
+                    # 更新flit状态
+                    flit.current_link = link
+                    flit.current_slice = slice_idx
+                    flit.flit_position = "Link"
+                    flit.current_seat_index = slice_idx
+
+            # === 阶段4：处理注入队列到链路的移动 ===
+            # 在链路移动完成后，尝试从注入队列注入新的flit
+            inject_removals = {"CW": [False] * self.config.NUM_RING_NODES, "CCW": [False] * self.config.NUM_RING_NODES}
+
+            for direction in ["CW", "CCW"]:
+                for node_idx in range(self.config.NUM_RING_NODES):
+                    node = ring_network.ring_nodes[node_idx]
+                    inject_queue = node.inject_queues[direction]
+
+                    if not inject_queue:
+                        continue
+
+                    # 确定目标链路
+                    if direction == "CW":
+                        target_link = (node_idx, (node_idx + 1) % self.config.NUM_RING_NODES)
+                    else:  # CCW
+                        target_link = (node_idx, (node_idx - 1) % self.config.NUM_RING_NODES)
+
+                    # 检查目标链路的第一个slice是否为空
+                    if ring_network.ring_links[target_link][0] is None:
+                        flit = inject_queue.popleft()
+                        ring_network.ring_links[target_link][0] = flit
+
+                        # 更新flit状态
+                        flit.inject_ring_cycle = self.current_cycle
+                        flit.flit_position = f"Link"
+                        flit.current_link = target_link
+                        flit.current_slice = 0
+                        flit.current_seat_index = 0
+                        if hasattr(flit, "current_position"):
+                            flit.current_position = target_link[1]
+
+                        # 统计
+                        if direction == "CW":
+                            self.stats["cw_usage"] += 1
+                        else:
+                            self.stats["ccw_usage"] += 1
+
+                        # 记录流量统计
+                        flow_key = target_link
+                        req_type = getattr(flit, "req_type", "read")
+                        if flow_key not in ring_network.links_flow_stat[req_type]:
+                            ring_network.links_flow_stat[req_type][flow_key] = 0
+                        ring_network.links_flow_stat[req_type][flow_key] += 1
+
+    def _process_ring_transmission(self):
+        """处理Ring传输"""
+        # 1. 链路上已有flit的移动（包括弹出操作）
+        self._move_flits_on_ring()
+
+        # 2. 从IQ_channel_buffer注入到注入队列（inject_queues）
+        # 注意：注入到链路的操作已经在_move_flits_on_ring中处理
+        self._inject_from_IQ_to_inject_queues()
+
+        # 3. 从弹出队列（eject_queues）到EQ_channel_buffer
+        self._process_eject_queues()
+
+    def _inject_from_IQ_to_inject_queues(self):
+        """从IQ_channel_buffer注入到inject_queues - 简化版本
+        这个函数只处理从IP的IQ_channel_buffer到节点inject_queues的移动
+        """
+        for channel in ["req", "rsp", "data"]:
+            ring_network = self.networks[channel]
+
+            for node_id in range(self.config.NUM_RING_NODES):
+                req_node = self.networks["req"].ring_nodes[node_id]
+                ip_types = req_node.connected_ip_type or []
+                if not ip_types:
+                    continue
+
+                ring_node = ring_network.ring_nodes[node_id]
+
+                # 收集所有有数据的IP channel buffer
+                available_channels = {}
+                if hasattr(ring_network, "IQ_channel_buffer"):
+                    for ip_type in ip_types:
+                        if ip_type in ring_network.IQ_channel_buffer:
+                            buffer = ring_network.IQ_channel_buffer[ip_type][node_id]
+                            if buffer:
+                                available_channels[ip_type] = buffer
+
+                if not available_channels:
+                    continue
+
+                # 确保仲裁状态正确初始化
+                if not hasattr(ring_node, "inject_arbitration_state"):
+                    ring_node.inject_arbitration_state = {"CW": {"channel_priority": list(ip_types), "last_served": None}, "CCW": {"channel_priority": list(ip_types), "last_served": None}}
+
+                # 为每个方向独立进行round-robin仲裁
+                for direction in ["CW", "CCW"]:
+                    inject_queue = ring_node.inject_queues[direction]
+
+                    # 检查注入队列是否有空间
+                    if len(inject_queue) >= inject_queue.maxlen:
+                        continue
+
+                    # 获取该方向的round-robin状态
+                    arbitration_state = ring_node.inject_arbitration_state[direction]
+                    rr_queue = arbitration_state["channel_priority"]
+
+                    # Round-robin仲裁
+                    selected_ip = None
+                    selected_flit = None
+
+                    for ip_type in list(rr_queue):
+                        if ip_type not in available_channels:
+                            continue
+
+                        buffer = available_channels[ip_type]
+                        if not buffer:
+                            continue
+
+                        flit = buffer[0]
+
+                        # 确定flit的路由方向
+                        flit_direction = getattr(flit, "ring_direction", None)
+                        if not flit_direction:
+                            flit_direction = self.adaptive_routing_decision(flit)
+                            flit.ring_direction = flit_direction
+
+                        # 处理LOCAL传输（直接弹出）
+                        if flit_direction == "LOCAL":
+                            target_node = ring_network.ring_nodes[flit.destination]
+                            eject_queue = target_node.eject_queues["CW"]  # LOCAL使用CW弹出队列
                             if len(eject_queue) < eject_queue.maxlen:
                                 buffer.popleft()
                                 eject_queue.append(flit)
                                 flit.eject_ring_cycle = self.current_cycle
-                                injected_count += 1  # 已完成注入计数
-                                selected_channel = (ip_type, buffer)  # 标记已处理
+
+                                # 更新round-robin状态
+                                rr_queue.remove(ip_type)
+                                rr_queue.append(ip_type)
+                                arbitration_state["last_served"] = ip_type
                                 break
                             else:
                                 continue
 
-                        # 检查对应方向的注入队列是否有空间
-                        inject_queue = ring_node.inject_queues[flit_direction]
-                        if len(inject_queue) < inject_queue.maxlen:
-                            selected_channel = (ip_type, buffer)
-                            selected_direction = flit_direction
+                        # 检查flit是否要注入到当前检查的方向
+                        if flit_direction == direction:
+                            selected_ip = ip_type
+                            selected_flit = flit
                             break
 
-                    # 如果找到合适的channel，执行注入
-                    if selected_channel and selected_direction:
-                        ip_type, buffer = selected_channel
+                    # 执行注入到inject_queue的操作
+                    if selected_ip and selected_flit:
+                        buffer = available_channels[selected_ip]
                         flit = buffer.popleft()
-                        inject_queue = ring_node.inject_queues[selected_direction]
                         inject_queue.append(flit)
-                        flit.inject_ring_cycle = self.current_cycle
-                        injected_count += 1
 
                         # 更新round-robin仲裁状态
-                        self._update_inject_arbitration_state(ring_node, ip_type, selected_direction)
-
-                        # 统计使用情况
-                        if selected_direction == "CW":
-                            self.stats["cw_usage"] += 1
-                        else:
-                            self.stats["ccw_usage"] += 1
-                    else:
-                        # 没有找到可注入的flit，退出循环
-                        break
-
-    def _move_flits_on_ring(self):
-        """Ring链路上的flit移动 - 实现pre缓冲机制避免slot冲突"""
-        for channel in ["req", "rsp", "data"]:
-            ring_network = self.networks[channel]
-
-            # 初始化pre缓冲区 - 存储本周期待移动的flit
-            ring_network.ring_links_pre = {
-                "CW": [[None] * self.config.SLICE_PER_LINK for _ in range(self.config.NUM_RING_NODES)],
-                "CCW": [[None] * self.config.SLICE_PER_LINK for _ in range(self.config.NUM_RING_NODES)],
-            }
-
-            # 阶段1: 准备移动到pre缓冲区 - 计算所有移动而不立即执行
-            moves_to_execute = []  # [(flit, src_info, dst_info, action_type)]
-
-            # 1.1 从注入队列到链路第一个slice的移动
-            for node in ring_network.ring_nodes:
-                for direction in ["CW", "CCW"]:
-                    if not node.inject_queues[direction]:
-                        continue
-
-                    # 获取下一个链路位置
-                    next_link_idx = self._get_next_link_index(node.node_id, direction)
-                    flit = node.inject_queues[direction][0]  # 查看但不移除
-
-                    # 检查链路第一个slice是否空闲
-                    if ring_network.ring_links[direction][next_link_idx][0] is None:
-                        moves_to_execute.append((flit, ("inject", node.node_id, direction), ("link", direction, next_link_idx, 0), "inject_to_link"))
-
-            # 1.2 链路上的flit在slice间移动
-            for direction in ["CW", "CCW"]:
-                for link_idx in range(self.config.NUM_RING_NODES):
-                    link_slices = ring_network.ring_links[direction][link_idx]
-
-                    # 从后往前处理slice，避免依赖冲突
-                    for slice_idx in range(self.config.SLICE_PER_LINK - 1, -1, -1):
-                        flit = link_slices[slice_idx]
-                        if flit is None:
-                            continue
-
-                        # 检查是否在最后一个slice
-                        if slice_idx == self.config.SLICE_PER_LINK - 1:
-                            # 到达最后slice时，根据配置决定本地弹出还是绕环
-                            if flit.destination == link_idx and self.config.RING_LOCAL_EJECT:
-                                # 弹出到目标节点
-                                target_node = ring_network.ring_nodes[link_idx]
-                                eject_queue = target_node.eject_queues[direction]
-                                if len(eject_queue) < eject_queue.maxlen:
-                                    moves_to_execute.append((flit, ("link", direction, link_idx, slice_idx), ("eject", link_idx, direction), "link_to_eject"))
-                                # 如果无法弹出，保持原位
-                            else:
-                                # 绕环或未到达目的地：移动到下一个链路的第一个slice
-                                next_link_idx = self._get_next_link_index(link_idx, direction)
-                                moves_to_execute.append((flit, ("link", direction, link_idx, slice_idx), ("link", direction, next_link_idx, 0), "link_to_link"))
-                        else:
-                            # 移动到下一个slice
-                            # 总是尝试移动，冲突在阶段2检查
-                            if True:
-                                moves_to_execute.append((flit, ("link", direction, link_idx, slice_idx), ("link", direction, link_idx, slice_idx + 1), "slice_advance"))
-
-            # 阶段2: 检查冲突并执行可行的移动
-            executed_moves = set()  # 跟踪已执行的移动，避免重复
-            destination_occupied = set()  # 跟踪已被占用的目标位置
-
-            for i, (flit, src_info, dst_info, action_type) in enumerate(moves_to_execute):
-                # 生成目标位置的唯一键
-                if dst_info[0] == "link":
-                    dst_key = ("link", dst_info[1], dst_info[2], dst_info[3])  # (type, direction, link_idx, slice_idx)
-                elif dst_info[0] == "eject":
-                    dst_key = ("eject", dst_info[1], dst_info[2])  # (type, node_idx, direction)
-                else:
-                    continue
-
-                # 检查目标位置是否已被占用
-                if dst_key in destination_occupied:
-                    continue  # 跳过这个移动，flit保持原位
-
-                # 执行移动
-                self._execute_flit_move(flit, src_info, dst_info, action_type, ring_network)
-                executed_moves.add(i)
-                destination_occupied.add(dst_key)
-
-            # 阶段3: 处理未能移动的flit（保持原位）
-            for direction in ["CW", "CCW"]:
-                for link_idx in range(self.config.NUM_RING_NODES):
-                    link_slices = ring_network.ring_links[direction][link_idx]
-                    for slice_idx in range(self.config.SLICE_PER_LINK):
-                        flit = link_slices[slice_idx]
-                        if flit is not None:
-                            # 检查这个flit是否已经被移动
-                            flit_moved = False
-                            for i, (move_flit, _, _, _) in enumerate(moves_to_execute):
-                                if move_flit == flit and i in executed_moves:
-                                    flit_moved = True
-                                    break
-
-                            # 如果未移动，将其复制到pre缓冲区（保持原位）
-                            if not flit_moved:
-                                ring_network.ring_links_pre[direction][link_idx][slice_idx] = flit
-
-            # 阶段4: 将pre缓冲区的结果复制回主链路
-            ring_network.ring_links = ring_network.ring_links_pre
+                        rr_queue.remove(selected_ip)
+                        rr_queue.append(selected_ip)
+                        arbitration_state["last_served"] = selected_ip
 
     def _eject_from_ring_to_EQ(self):
         """从Ring弹出到EQ_channel_buffer - 实现2 to n仲裁机制"""
@@ -876,65 +1254,10 @@ class RingTopology:
                             ring_network.EQ_channel_buffer[ip_type][node_id].append(flit)
 
     def _execute_flit_move(self, flit, src_info, dst_info, action_type, ring_network):
-        """执行单个flit的移动操作"""
-        # 从源位置移除flit
-        if src_info[0] == "inject":
-            node_id, direction = src_info[1], src_info[2]
-            node = ring_network.ring_nodes[node_id]
-            if node.inject_queues[direction]:
-                removed_flit = node.inject_queues[direction].popleft()
-                assert removed_flit == flit, "Inject queue flit mismatch"
-        elif src_info[0] == "link":
-            direction, link_idx, slice_idx = src_info[1], src_info[2], src_info[3]
-            ring_network.ring_links[direction][link_idx][slice_idx] = None
-
-        # 移动到目标位置
-        if dst_info[0] == "link":
-            direction, link_idx, slice_idx = dst_info[1], dst_info[2], dst_info[3]
-            ring_network.ring_links_pre[direction][link_idx][slice_idx] = flit
-
-            # 更新flit位置信息
-            flit.current_slice = slice_idx
-            flit.flit_position = "Link"
-            flit.current_link = (link_idx, self._get_next_link_index(link_idx, direction))
-            flit.current_seat_index = slice_idx
-
-            # 统计和流量记录
-            if action_type == "inject_to_link":
-                if direction == "CW":
-                    self.stats["cw_usage"] += 1
-                else:
-                    self.stats["ccw_usage"] += 1
-
-                # 记录流量统计
-                src_node = src_info[1] if src_info[0] == "inject" else link_idx
-                if direction == "CW":
-                    dst_node = (src_node + 1) % self.config.NUM_RING_NODES
-                else:
-                    dst_node = (src_node - 1) % self.config.NUM_RING_NODES
-
-                flow_key = (src_node, dst_node)
-                req_type = getattr(flit, "req_type", "read")
-                if flow_key not in ring_network.links_flow_stat[req_type]:
-                    ring_network.links_flow_stat[req_type][flow_key] = 0
-                ring_network.links_flow_stat[req_type][flow_key] += 1
-
-        elif dst_info[0] == "eject":
-            node_idx, direction = dst_info[1], dst_info[2]
-            target_node = ring_network.ring_nodes[node_idx]
-            eject_queue = target_node.eject_queues[direction]
-            eject_queue.append(flit)
-
-            # 更新flit信息
-            flit.eject_ring_cycle = self.current_cycle
-            flit.flit_position = f"Ring_Eject_{direction}"
-            flit.current_position = target_node.node_id
-
-            # 统计
-            if flit.flit_type == "data":
-                self.stats["total_flits_ejected"] += 1
-            hops = abs(self.current_cycle - getattr(flit, "inject_ring_cycle", self.current_cycle))
-            self.stats["total_hops"] += hops
+        """执行单个flit的移动操作 - 已废弃，保留以保持兼容性"""
+        # 这个函数已经被_move_flits_on_ring中的逻辑替代
+        # 保留此函数以防有其他地方调用
+        pass
 
     def _get_next_link_index(self, current_idx: int, direction: str) -> int:
         """获取下一个链路索引"""
@@ -1059,6 +1382,33 @@ class RingTopology:
         self.real_time_debug = real_time
         self.debug_delay = delay
 
+    def get_link_direction(self, src, dst, num_nodes):
+        """根据起终点判断链路方向"""
+        if (src + 1) % num_nodes == dst:
+            return "CW"
+        elif (src - 1) % num_nodes == dst:
+            return "CCW"
+        else:
+            raise ValueError(f"Invalid link: {src} -> {dst}")
+
+    def get_next_link(self, current_link, num_nodes):
+        """获取下一条链路"""
+        src, dst = current_link
+        # 下一条链路从当前目标节点开始
+        if self.get_link_direction(src, dst, num_nodes) == "CW":
+            next_dst = (dst + 1) % num_nodes
+        else:  # CCW
+            next_dst = (dst - 1) % num_nodes
+        return (dst, next_dst)
+
+    def direction_to_link(self, src_node, direction, num_nodes):
+        """将旧的方向格式转换为新的链路格式"""
+        if direction == "CW":
+            dst_node = (src_node + 1) % num_nodes
+        else:  # CCW
+            dst_node = (src_node - 1) % num_nodes
+        return (src_node, dst_node)
+
         mode_str = "实时显示模式" if real_time else "静默追踪模式"
         print(f"已启用packet追踪调试 ({mode_str})，追踪packet_id: {list(self.debug_packet_ids)}")
         if real_time:
@@ -1130,22 +1480,38 @@ class RingTopology:
         return {"packet_id": packet_id, "current_cycle": self.current_cycle, "current_locations": [loc["location"] for loc in locations], "status": "正在追踪中"}
 
     def _update_inject_arbitration_state(self, node, ip_type, direction):
-        """更新注入仲裁状态"""
+        """更新注入仲裁状态 - 适配新的双方向仲裁结构"""
         if not hasattr(node, "inject_arbitration_state"):
             return
 
-        # 更新channel优先级 (round-robin)
-        if ip_type in node.inject_arbitration_state["channel_priority"]:
-            node.inject_arbitration_state["channel_priority"].remove(ip_type)
-            node.inject_arbitration_state["channel_priority"].append(ip_type)
+        # 检查是否为新的双方向结构
+        if direction in node.inject_arbitration_state and isinstance(node.inject_arbitration_state[direction], dict):
+            # 新结构：每个方向独立的仲裁状态
+            arbitration_state = node.inject_arbitration_state[direction]
 
-        # 记录最后服务的channel
-        node.inject_arbitration_state["last_served"][direction] = ip_type
+            # 更新该方向的channel优先级 (round-robin)
+            if "channel_priority" in arbitration_state and ip_type in arbitration_state["channel_priority"]:
+                arbitration_state["channel_priority"].remove(ip_type)
+                arbitration_state["channel_priority"].append(ip_type)
+
+            # 记录最后服务的channel
+            arbitration_state["last_served"] = ip_type
+        else:
+            # 兼容旧结构
+            if "channel_priority" in node.inject_arbitration_state and ip_type in node.inject_arbitration_state["channel_priority"]:
+                node.inject_arbitration_state["channel_priority"].remove(ip_type)
+                node.inject_arbitration_state["channel_priority"].append(ip_type)
+
+            # 记录最后服务的channel
+            if "last_served" not in node.inject_arbitration_state:
+                node.inject_arbitration_state["last_served"] = {}
+            node.inject_arbitration_state["last_served"][direction] = ip_type
 
         # 更新传统的round-robin状态以保持兼容性
-        if direction in node.rr_state["inject_priority"]:
-            node.rr_state["inject_priority"].remove(direction)
-            node.rr_state["inject_priority"].append(direction)
+        if hasattr(node, "rr_state") and "inject_priority" in node.rr_state:
+            if direction in node.rr_state["inject_priority"]:
+                node.rr_state["inject_priority"].remove(direction)
+                node.rr_state["inject_priority"].append(direction)
 
     def _update_eject_arbitration_state(self, node, direction, target_ip_type):
         """更新弹出仲裁状态"""
@@ -1268,24 +1634,10 @@ if __name__ == "__main__":
     # ring.show_ring_topology_info()
 
     # 启用packet追踪调试（示例：追踪packet_id为0的请求，启用实时显示）
-    ring.enable_packet_debug([1], real_time=0, delay=0.3)  # 实时显示，延迟1秒
+    ring.enable_packet_debug([1], real_time=0, delay=0.5)  # 实时显示，延迟1秒
 
     # 运行仿真
     results = ring.run_simulation(max_cycles=100000)
-
-    # # 获取生命周期摘要
-    # summary = ring.get_packet_summary(0)
-    # if "error" not in summary:
-    #     print(f"\nPacket {summary['packet_id']} 生命周期摘要:")
-    #     print(f"  首次出现: Cycle {summary['first_seen_cycle']}")
-    #     print(f"  最后出现: Cycle {summary['last_seen_cycle']}")
-    #     print(f"  总周期数: {summary['total_cycles']}")
-    #     print(f"  访问位置数: {summary['locations_visited']}")
-    #     if summary.get("end_to_end_latency"):
-    #         print(f"  端到端延迟: {summary['end_to_end_latency']} cycles")
-    #     print(f"  生命周期阶段: {[stage['stage'] for stage in summary['lifecycle_stages']]}")
-    # else:
-    #     print(f"追踪摘要错误: {summary['error']}")
 
     print(f"最终统计:")
     print(f"  注入flit数: {results['statistics']['total_flits_injected']}")
