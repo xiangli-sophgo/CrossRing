@@ -86,7 +86,7 @@ class CrossRingConfig:
             and self.TD_Etag_T2_UE_MAX < self.EQ_IN_FIFO_DEPTH - 1
         ), "ETag parameter conditions are not met."
 
-        self.update_config()
+        self.update_config(topo_type="default")
 
     def _make_channels(self, key_types, value_factory=lambda: defaultdict(list)):  # 允许 None / callable / 静态对象
         # 把非 callable 的默认值包装成 deepcopy，可避免共享引用
@@ -159,8 +159,8 @@ class CrossRingConfig:
         #     self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
         #     self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
         #     self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], []o
-        elif topo_type == "4x2":
-            self.NUM_NODE = 16
+        elif topo_type == "5x2":
+            self.NUM_NODE = 20
             self.NUM_COL = 2
             self.NUM_IP = 16
             self.NUM_ROW = self.NUM_NODE // self.NUM_COL

@@ -76,6 +76,7 @@ class BaseModel:
         self.config = config
         self.topo_type_stat = topo_type
         self.traffic_file_path = traffic_file_path
+        self.result_save_path = None
         # 添加结果统计
         self.result_processor = BandwidthAnalyzer(config, min_gap_threshold=50, plot_rn_bw_fig=plot_RN_BW_fig, plot_flow_graph=plot_flow_fig)
 
@@ -138,7 +139,7 @@ class BaseModel:
         self.flit_positions = set(
             self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
         )
-        self.routes = find_shortest_paths(self.adjacency_matrix)
+        self.routes = find_shortest_paths(self.adjacency_matrix, "CrossRing")
         self.node = Node(self.config)
         self.ip_modules = {}
         for ip_pos in self.flit_positions:

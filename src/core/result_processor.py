@@ -141,7 +141,7 @@ class BandwidthAnalyzer:
     def __init__(
         self,
         config,
-        min_gap_threshold: int = 50,
+        min_gap_threshold: int = 200,
         plot_rn_bw_fig: bool = False,
         plot_flow_graph: bool = False,
     ):
@@ -456,7 +456,7 @@ class BandwidthAnalyzer:
             plt.grid(True)
             # 自动保存RN带宽曲线到结果文件夹
             if self.plot_rn_bw_fig and hasattr(self, "base_model") and getattr(self.base_model, "results_fig_save_path", None):
-                rn_save_path = os.path.join(self.base_model.results_fig_save_path, f"rn_bandwidth_{self.config.TOPO_TYPE}_{self.base_model.file_name}.png")
+                rn_save_path = os.path.join(self.base_model.results_fig_save_path, f"rn_bandwidth_{self.config.TOPO_TYPE}_{self.base_model.file_name}_{time.time_ns()}.png")
                 fig.savefig(rn_save_path, bbox_inches="tight")
             else:
                 plt.show()

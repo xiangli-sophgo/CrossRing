@@ -15,6 +15,8 @@ import traceback
 from pathlib import Path
 import time
 from datetime import datetime
+import csv
+import logging
 
 # 添加项目路径
 sys.path.append("../")
@@ -26,7 +28,7 @@ from src.core import REQ_RSP_model
 
 
 class CDMABandwidthAnalyzer:
-    def __init__(self, config_path="../config/config2.json", traffic_file_path="../examples/traffic/", output_dir="../results/cdma_analysis/"):
+    def __init__(self, config_path="../config/config2.json", traffic_file_path="../traffic/0617/", output_dir="../Result/cdma_analysis/"):
         """
         初始化CDMA带宽分析器
 
@@ -41,65 +43,81 @@ class CDMABandwidthAnalyzer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # CDMA带宽范围 (GB/s)：单通道1-32，4通道总带宽4-128
-        self.cdma_bw_ranges = [1, 2, 4, 8, 12, 16, 20, 24, 28, 32]
+        self.cdma_bw_ranges = [4, 8, 12, 16, 20, 24, 28, 32]
 
-        # 结果收集
-        self.results = []
+        # 设置CSV输出文件
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.output_csv = self.output_dir / f"cdma_bandwidth_analysis_{timestamp}.csv"
+        self.csv_initialized = False
 
         print(f"CDMA带宽分析器初始化完成")
         print(f"配置文件: {config_path}")
         print(f"Traffic路径: {traffic_file_path}")
         print(f"输出目录: {output_dir}")
+        print(f"结果CSV: {self.output_csv}")
         print(f"CDMA带宽测试范围: {self.cdma_bw_ranges} GB/s (单通道)")
 
-    def run_single_simulation(self, cdma_bw_limit, traffic_config, topo_type="5x4"):
+    def save_result_to_csv(self, result_data):
+        """
+        保存单次仿真结果到CSV文件
+
+        Args:
+            result_data: 仿真结果字典
+        """
+        try:
+            # 检查CSV文件是否存在，如果不存在则创建并写入表头
+            csv_file_exists = self.output_csv.exists()
+
+            with open(self.output_csv, mode="a", newline="", encoding="utf-8") as output_csv_file:
+                if result_data:
+                    writer = csv.DictWriter(output_csv_file, fieldnames=result_data.keys())
+                    if not csv_file_exists:
+                        writer.writeheader()
+                        self.csv_initialized = True
+                    writer.writerow(result_data)
+
+            print(f"结果已保存到CSV: CDMA带宽={result_data.get('cdma_bw_limit', 'N/A')}GB/s")
+
+        except Exception as e:
+            print(f"保存CSV时出错: {e}")
+
+    def run_single_simulation(self, cdma_bw_limit, traffic_files, topo_type="5x4"):
         """
         运行单次仿真
 
         Args:
             cdma_bw_limit: CDMA带宽限制 (GB/s)
-            traffic_config: traffic配置
+            traffic_files: traffic文件列表
             topo_type: 拓扑类型
 
         Returns:
             dict: 仿真结果
         """
         try:
+            print(f"开始仿真: CDMA带宽={cdma_bw_limit}GB/s, Traffic文件={traffic_files}")
+
             # 加载配置
             cfg = CrossRingConfig(self.config_path)
             cfg.TOPO_TYPE = topo_type
 
-            # 创建仿真模型
+            # 创建仿真模型 - 参考traffic_sim_main.py的参数设置
             sim = REQ_RSP_model(
                 model_type="REQ_RSP",
                 config=cfg,
                 topo_type=topo_type,
                 traffic_file_path=self.traffic_file_path,
-                traffic_config=traffic_config,
-                result_save_path=None,  # 不保存中间结果
-                plot_flow_fig=0,  # 不生成图像
-                plot_RN_BW_fig=0,
-                verbose=1,  # 静默模式
+                traffic_config=traffic_files,  # 直接传入文件列表
+                result_save_path=f"../Result/CrossRing/REQ_RSP/",  # 不保存中间结果
+                results_fig_save_path=f"../Result/cdma_analysis/",
+                plot_flow_fig=1,  # 不生成图像
+                plot_RN_BW_fig=1,
+                verbose=1,  # 减少输出
             )
 
             # 设置CDMA带宽限制
-            if not hasattr(sim.config, "CDMA_BW_LIMIT"):
-                # 如果配置中没有CDMA_BW_LIMIT，添加该属性
-                sim.config.CDMA_BW_LIMIT = cdma_bw_limit
-            else:
-                sim.config.CDMA_BW_LIMIT = cdma_bw_limit
+            sim.config.CDMA_BW_LIMIT = cdma_bw_limit
 
-            # 配置仿真参数
-
-            sim.config.NUM_IP = 32
-            sim.config.NUM_DDR = 32
-            sim.config.NUM_L2M = 16
-            sim.config.NUM_GDMA = 16
-            sim.config.NUM_SDMA = 16
-            sim.config.NUM_CDMA = 16  # 4个CDMA通道，每个通道可以有多个IP
-
-            sim.config.NUM_COL = 4
-            sim.config.NUM_NODE = 40
+            # 配置仿真参数 - 完全参考traffic_sim_main.py
             sim.config.BURST = 4
             sim.config.NUM_IP = 32
             sim.config.NUM_DDR = 32
@@ -118,45 +136,51 @@ class CDMABandwidthAnalyzer:
             sim.config.SN_L2M_W_TRACKER_OSTD = 64
             sim.config.SN_DDR_WDB_SIZE = sim.config.SN_DDR_W_TRACKER_OSTD * sim.config.BURST
             sim.config.SN_L2M_WDB_SIZE = sim.config.SN_L2M_W_TRACKER_OSTD * sim.config.BURST
+
+            # 延迟配置 - 使用traffic_sim_main.py的数值
             sim.config.DDR_R_LATENCY_original = 40
             sim.config.DDR_R_LATENCY_VAR_original = 0
             sim.config.DDR_W_LATENCY_original = 0
             sim.config.L2M_R_LATENCY_original = 12
             sim.config.L2M_W_LATENCY_original = 16
+
+            # FIFO配置
             sim.config.IQ_CH_FIFO_DEPTH = 10
             sim.config.EQ_CH_FIFO_DEPTH = 10
             sim.config.IQ_OUT_FIFO_DEPTH = 8
+            sim.config.RB_IN_FIFO_DEPTH = 16  # 添加这个配置
             sim.config.RB_OUT_FIFO_DEPTH = 8
-            sim.config.SN_TRACKER_RELEASE_LATENCY = 40
+            sim.config.EQ_IN_FIFO_DEPTH = 16  # 添加这个配置
 
+            # 标签配置
             sim.config.TL_Etag_T2_UE_MAX = 8
             sim.config.TL_Etag_T1_UE_MAX = 15
             sim.config.TR_Etag_T2_UE_MAX = 12
-            sim.config.RB_IN_FIFO_DEPTH = 16
             sim.config.TU_Etag_T2_UE_MAX = 8
             sim.config.TU_Etag_T1_UE_MAX = 15
             sim.config.TD_Etag_T2_UE_MAX = 12
-            sim.config.EQ_IN_FIFO_DEPTH = 16
 
             sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
             sim.config.ITag_MAX_NUM_H = sim.config.ITag_MAX_NUM_V = 1
             sim.config.ETag_BOTHSIDE_UPGRADE = 0
-            sim.config.SLICE_PER_LINK = 8
 
+            # DMA配置
             sim.config.GDMA_RW_GAP = np.inf
             sim.config.SDMA_RW_GAP = np.inf
+
+            # 通道配置 - 修改为traffic_sim_main.py的设置
             sim.config.CHANNEL_SPEC = {
                 "gdma": 2,
                 "sdma": 2,
-                "cdma": 1,
-                "ddr": 2,
+                "cdma": 1,  # 保持原来的CDMA配置
+                "ddr": 4,  # 修改为4
                 "l2m": 2,
             }
 
-            # 运行仿真
+            # 初始化并运行仿真
             sim.initial()
-            # sim.end_time = 10000  # 足够的仿真时间
-            sim.print_interval = 10000
+            # sim.end_time = 1000  # 足够的仿真时间
+            sim.print_interval = 10000  # 减少打印频率
             sim.run()
 
             # 收集结果
@@ -166,127 +190,94 @@ class CDMABandwidthAnalyzer:
             cdma_results = {
                 "cdma_bw_limit": cdma_bw_limit,
                 "total_cdma_bw_limit": cdma_bw_limit * 4,  # 4通道总带宽
-                "traffic_config": str(traffic_config),
+                "traffic_files": str(traffic_files),
                 "topo_type": topo_type,
-                "simulation_time": sim.cycle / sim.config.NETWORK_FREQUENCY if hasattr(sim, "cycle") else 0,
+                "simulation_time": results.get("simulation_time", 0),
                 "completion_status": "success",
+                "run_timestamp": datetime.now().isoformat(),
             }
 
             # 合并结果
             results.update(cdma_results)
 
-            # 提取关键性能指标
-            if hasattr(sim, "result_processor"):
-                # 获取CDMA相关的带宽统计
-                processor = sim.result_processor
-                processor.collect_requests_data(sim)
-
-                # 计算CDMA实际使用带宽
-                cdma_actual_bw = 0
-                if hasattr(processor, "ip_bandwidth_data") and processor.ip_bandwidth_data:
-                    if "cdma" in processor.ip_bandwidth_data.get("total", {}):
-                        cdma_actual_bw = np.sum(processor.ip_bandwidth_data["total"]["cdma"])
-
-                results["cdma_actual_bandwidth"] = cdma_actual_bw
-                results["cdma_utilization"] = cdma_actual_bw / (cdma_bw_limit * 4) if cdma_bw_limit > 0 else 0
-
+            print(f"仿真成功: CDMA带宽={cdma_bw_limit}GB/s, 总带宽={results.get('Total_sum_BW', 0):.3f}GB/s")
             return results
 
         except Exception as e:
-            print(f"仿真失败 - CDMA带宽: {cdma_bw_limit}GB/s, 错误: {str(e)}")
+            error_msg = f"仿真失败 - CDMA带宽: {cdma_bw_limit}GB/s, 错误: {str(e)}"
+            print(error_msg)
+            traceback.print_exc()
+
             return {
                 "cdma_bw_limit": cdma_bw_limit,
                 "total_cdma_bw_limit": cdma_bw_limit * 4,
-                "traffic_config": str(traffic_config),
+                "traffic_files": str(traffic_files),
                 "topo_type": topo_type,
                 "completion_status": "failed",
                 "error_message": str(e),
+                "run_timestamp": datetime.now().isoformat(),
                 "Total_sum_BW": 0,
-                "cdma_actual_bandwidth": 0,
-                "cdma_utilization": 0,
+                "simulation_time": 0,
             }
 
-    def run_bandwidth_sweep(self, traffic_config, topo_type="5x4", repeat=1):
+    def run_bandwidth_sweep(self, traffic_files, topo_type="5x4", repeat=1):
         """
         运行带宽扫描分析
 
         Args:
-            traffic_configs: traffic配置列表
+            traffic_files: traffic文件列表
             topo_type: 拓扑类型
             repeat: 每个配置重复次数
         """
         print(f"\n开始CDMA带宽扫描分析...")
         print(f"拓扑类型: {topo_type}")
         print(f"重复次数: {repeat}")
-        print(f"Traffic配置数量: {len(traffic_config)}")
+        print(f"Traffic文件: {traffic_files}")
 
-        total_runs = len(self.cdma_bw_ranges) * len(traffic_config) * repeat
+        total_runs = len(self.cdma_bw_ranges) * repeat
         current_run = 0
 
         start_time = time.time()
 
         for cdma_bw in self.cdma_bw_ranges:
-            print(f"  测试CDMA带宽: {cdma_bw}GB/s (4通道总计: {cdma_bw*4}GB/s)")
+            print(f"\n测试CDMA带宽: {cdma_bw}GB/s (4通道总计: {cdma_bw*4}GB/s)")
 
             for rep in range(repeat):
                 current_run += 1
                 elapsed_time = time.time() - start_time
                 eta = (elapsed_time / current_run) * (total_runs - current_run) if current_run > 0 else 0
 
-                print(f"    第{rep+1}次运行 [{current_run}/{total_runs}] - ETA: {eta/60:.1f}分钟")
+                print(f"  第{rep+1}次运行 [{current_run}/{total_runs}] - ETA: {eta/60:.1f}分钟")
 
                 # 运行仿真
-                result = self.run_single_simulation(cdma_bw, traffic_config, topo_type)
+                result = self.run_single_simulation(cdma_bw, traffic_files, topo_type)
                 result["repeat_id"] = rep
-                result["run_timestamp"] = datetime.now().isoformat()
 
-                self.results.append(result)
-
-                # 实时保存结果（防止数据丢失）
-                if current_run % 10 == 0:  # 每10次运行保存一次
-                    self.save_results(suffix=f"_partial_{current_run}")
+                # 立即保存结果到CSV
+                self.save_result_to_csv(result)
 
         print(f"\n带宽扫描完成! 总运行时间: {(time.time() - start_time)/60:.1f}分钟")
+        print(f"所有结果已保存到: {self.output_csv}")
 
-    def save_results(self, suffix=""):
+    def generate_summary_from_csv(self):
         """
-        保存结果到CSV文件
-
-        Args:
-            suffix: 文件名后缀
-        """
-        if not self.results:
-            print("没有结果可保存")
-            return
-
-        # 转换为DataFrame
-        df = pd.DataFrame(self.results)
-
-        # 生成文件名
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"cdma_bandwidth_analysis_{timestamp}{suffix}.csv"
-        filepath = self.output_dir / filename
-
-        # 保存CSV
-        df.to_csv(filepath, index=False)
-        print(f"结果已保存到: {filepath}")
-
-        # 生成摘要统计
-        self.generate_summary(df, suffix)
-
-        return filepath
-
-    def generate_summary(self, df, suffix=""):
-        """
-        生成分析摘要
-
-        Args:
-            df: 结果DataFrame
-            suffix: 文件名后缀
+        从CSV文件生成分析摘要
         """
         try:
+            if not self.output_csv.exists():
+                print("CSV文件不存在，无法生成摘要")
+                return
+
+            # 读取CSV结果
+            df = pd.read_csv(self.output_csv)
+
+            if df.empty:
+                print("CSV文件为空，无法生成摘要")
+                return
+
+            # 生成摘要文件
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            summary_file = self.output_dir / f"cdma_analysis_summary_{timestamp}{suffix}.txt"
+            summary_file = self.output_dir / f"cdma_analysis_summary_{timestamp}.txt"
 
             with open(summary_file, "w", encoding="utf-8") as f:
                 f.write("CDMA带宽并行行为分析摘要\n")
@@ -294,7 +285,9 @@ class CDMABandwidthAnalyzer:
 
                 f.write(f"分析时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write(f"总仿真次数: {len(df)}\n")
-                f.write(f"成功率: {len(df[df['completion_status']=='success'])/len(df)*100:.1f}%\n\n")
+
+                success_count = len(df[df["completion_status"] == "success"])
+                f.write(f"成功率: {success_count/len(df)*100:.1f}%\n\n")
 
                 # CDMA带宽范围分析
                 f.write("CDMA带宽范围分析:\n")
@@ -303,25 +296,20 @@ class CDMABandwidthAnalyzer:
                 success_df = df[df["completion_status"] == "success"]
                 if not success_df.empty:
                     # 按CDMA带宽分组统计
-                    cdma_stats = (
-                        success_df.groupby("cdma_bw_limit")
-                        .agg({"Total_sum_BW": ["mean", "std", "max", "min"], "cdma_actual_bandwidth": ["mean", "std"], "cdma_utilization": ["mean", "std"], "simulation_time": ["mean", "std"]})
-                        .round(3)
-                    )
+                    if "Total_sum_BW" in success_df.columns:
+                        cdma_stats = success_df.groupby("cdma_bw_limit").agg({"Total_sum_BW": ["mean", "std", "max", "min"], "simulation_time": ["mean", "std"]}).round(3)
+                        f.write(cdma_stats.to_string())
+                        f.write("\n\n")
 
-                    f.write(cdma_stats.to_string())
-                    f.write("\n\n")
+                        # 最优带宽设置
+                        best_bw_idx = success_df["Total_sum_BW"].idxmax()
+                        best_bw_row = success_df.loc[best_bw_idx]
 
-                    # 最优带宽设置
-                    best_bw_idx = success_df["Total_sum_BW"].idxmax()
-                    best_bw_row = success_df.loc[best_bw_idx]
-
-                    f.write("最优性能配置:\n")
-                    f.write("-" * 20 + "\n")
-                    f.write(f"CDMA带宽: {best_bw_row['cdma_bw_limit']}GB/s\n")
-                    f.write(f"总带宽: {best_bw_row['Total_sum_BW']:.3f}GB/s\n")
-                    f.write(f"CDMA利用率: {best_bw_row['cdma_utilization']:.3f}\n")
-                    f.write(f"仿真时间: {best_bw_row['simulation_time']:.1f}ns\n\n")
+                        f.write("最优性能配置:\n")
+                        f.write("-" * 20 + "\n")
+                        f.write(f"CDMA带宽: {best_bw_row['cdma_bw_limit']}GB/s\n")
+                        f.write(f"总带宽: {best_bw_row['Total_sum_BW']:.3f}GB/s\n")
+                        f.write(f"仿真时间: {best_bw_row['simulation_time']:.1f}ns\n\n")
 
                 # 失败案例分析
                 failed_df = df[df["completion_status"] == "failed"]
@@ -338,29 +326,7 @@ class CDMABandwidthAnalyzer:
 
         except Exception as e:
             print(f"生成摘要时出错: {e}")
-
-    def analyze_results(self):
-        """
-        分析已收集的结果
-        """
-        if not self.results:
-            print("没有结果可分析")
-            return
-
-        df = pd.DataFrame(self.results)
-
-        print("\n=== 分析结果 ===")
-        print(f"总仿真次数: {len(df)}")
-        print(f"成功次数: {len(df[df['completion_status']=='success'])}")
-        print(f"失败次数: {len(df[df['completion_status']=='failed'])}")
-
-        success_df = df[df["completion_status"] == "success"]
-        if not success_df.empty:
-            print(f"\n性能指标范围:")
-            print(f"总带宽: {success_df['Total_sum_BW'].min():.2f} - {success_df['Total_sum_BW'].max():.2f} GB/s")
-            if "cdma_actual_bandwidth" in success_df.columns:
-                print(f"CDMA实际带宽: {success_df['cdma_actual_bandwidth'].min():.2f} - {success_df['cdma_actual_bandwidth'].max():.2f} GB/s")
-                print(f"CDMA利用率: {success_df['cdma_utilization'].min():.3f} - {success_df['cdma_utilization'].max():.3f}")
+            traceback.print_exc()
 
 
 def main():
@@ -374,39 +340,33 @@ def main():
     traffic_file_path = r"../traffic/0617/"
     analyzer = CDMABandwidthAnalyzer(traffic_file_path=traffic_file_path)
 
-    # 配置traffic文件 - 根据实际情况修改
-    traffic_config = [
+    # 配置traffic文件 - 修改为简单的文件名列表格式
+    traffic_files = [
         [
-            # r"Read_burst4_2262HBM_v2.txt",
-            r"MLP_MoE.txt",
+            "MLP_MoE.txt",
         ]
-        * 2,
+        * 9,
         [
-            r"All2All_Combine.txt",
+            "All2All_Dispatch.txt",
         ],
     ]
 
     try:
         # 运行带宽扫描
-        analyzer.run_bandwidth_sweep(traffic_config=traffic_config, topo_type="5x4", repeat=1)  # 根据需要修改拓扑类型  # 每个配置重复1次，可以增加以提高统计可靠性
+        analyzer.run_bandwidth_sweep(traffic_files=traffic_files, topo_type="5x4", repeat=1)
 
-        # 分析结果
-        analyzer.analyze_results()
-
-        # 保存最终结果
-        final_file = analyzer.save_results(suffix="_final")
+        # 生成摘要
+        analyzer.generate_summary_from_csv()
 
         print(f"\n分析完成!")
-        print(f"结果文件: {final_file}")
+        print(f"结果文件: {analyzer.output_csv}")
         print(f"请查看输出目录: {analyzer.output_dir}")
 
     except KeyboardInterrupt:
-        print("\n用户中断，保存当前结果...")
-        analyzer.save_results(suffix="_interrupted")
+        print("\n用户中断，当前结果已保存在CSV文件中")
     except Exception as e:
         print(f"\n分析过程中出现错误: {e}")
         traceback.print_exc()
-        analyzer.save_results(suffix="_error")
 
 
 if __name__ == "__main__":

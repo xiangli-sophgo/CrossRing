@@ -8,6 +8,62 @@ import matplotlib.patches as patches
 from itertools import combinations
 
 
+def create_crossring_adjacency_matrix(num_nodes: int, num_cols: int) -> np.ndarray:
+    """
+    创建 CrossRing 拓扑邻接矩阵 (更通用的环绕连接实现)
+    不影响原 op.create_adjacency_matrix 接口
+    """
+    adjacency_matrix = np.zeros((num_nodes, num_nodes), dtype=int)
+    num_rows = num_nodes // num_cols
+    for i in range(num_nodes):
+        row = i // num_cols
+        col = i % num_cols
+        # 水平连接
+        if col < num_cols - 1:
+            adjacency_matrix[i][i + 1] = 1
+        if col > 0:
+            adjacency_matrix[i][i - 1] = 1
+        # 垂直连接
+        if row < num_rows - 1:
+            adjacency_matrix[i][i + num_cols] = 1
+        if row > 0:
+            adjacency_matrix[i][i - num_cols] = 1
+    return adjacency_matrix
+
+
+def create_ring_adjacency_matrix(num_nodes: int) -> np.ndarray:
+    """
+    创建标准 Ring 拓扑邻接矩阵
+    """
+    adjacency_matrix = np.zeros((num_nodes, num_nodes), dtype=int)
+    for i in range(num_nodes):
+        next_node = (i + 1) % num_nodes
+        prev_node = (i - 1) % num_nodes
+        adjacency_matrix[i][next_node] = 1
+        adjacency_matrix[i][prev_node] = 1
+    return adjacency_matrix
+
+
+def create_adjacency_matrix_adv(topology_type: str, num_nodes: int, rows: int = 0) -> np.ndarray:
+    """
+    推荐使用的扩展邻接矩阵生成接口：
+    对于 Ring_* 和 CrossRing 拓扑，调用专用实现；
+    其他类型则调用原始模块 op.create_adjacency_matrix。
+    """
+    if topology_type.startswith("Ring"):
+        # Ring_N 格式: "Ring_<节点数>"
+        try:
+            ring_nodes = int(topology_type.split("_")[1])
+        except (IndexError, ValueError):
+            ring_nodes = num_nodes
+        return create_ring_adjacency_matrix(ring_nodes)
+    elif topology_type == "CrossRing":
+        return create_crossring_adjacency_matrix(num_nodes, rows)
+    else:
+        # 调用原始模块的 create_adjacency_matrix，不修改其内部逻辑
+        return create_adjacency_matrix(topology_type, num_nodes, rows)
+
+
 def plot_adjacency_matrix(adjacency_matrix):
     """
     绘制邻接矩阵的函数。

@@ -12,52 +12,22 @@ if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
 
 
 def main():
-
     # traffic_file_path = r"../test_data/"
-    # file_name = r"traffic_2262_case1.txt"
-    # file_name = r"traffic_2260E_case2.txt"
-    # file_name = r"traffic_2262_case1.txt"
-    # file_name = r"burst2_0417_2.txt"
-    # file_name = r"burst2_large.txt"
-    # file_name = r"burst4_common.txt"
-    # file_name = r"3x3_burst2.txt"
-    # file_name = r"demo_3x3.txt"
-    # file_name = r"demo_459.txt"
-
-    # traffic_file_path = r"../traffic/v1.0.8 All_Reduce new/"
-    # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
-    # traffic_file_path = r"../test_data/"
-    # traffic_file_path = r"../traffic/3x1/"
     traffic_file_path = r"../traffic/0617/"
     # traffic_file_path = r"../traffic/nxn_traffics"
-    # traffic_file_path = r"../traffic/output_DeepSeek_part1/step5_data_merge/"
-    # traffic_file_path = r"../traffic/output_v8_32_512/step5_data_merge/"
-    # traffic_file_path = r"../traffic/output_v8_32_no_map/step5_data_merge/"
-    # traffic_file_path = r"../traffic/output_v8_32_2K/step5_data_merge/"
-    # file_name = r"LLama2_AllReduce.txt"
-    # file_name = r"LLama2_AttentionFC.txt"
-    # file_name = r"DeepSeek_MLP.txt"
+
     traffic_config = [
         [
             # r"Read_burst4_2262HBM_v2.txt",
-            r"MLP_MoE.txt",
+            # r"MLP_MoE.txt",
         ]
         * 3,
         [
-            r"All2All_Combine.txt",
+            # r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
+            r"R_5x2.txt"
         ],
     ]
-    # traffic_config = r"MLP_merge.txt"
-    # file_name = r"All2All_Dispatch.txt"
-    # file_name = r"All2All_Combine.txt"
-    # file_name = r"LLama2_Attention_FC_Trace.txt"
-    # file_name = r"output_Trace.txt"
-    # file_name = r"LLama2_Attention_QKV_Decode_Trace.txt"
-    # file_name = r"MLP_MoE_Trace.txt"
-    # file_name = r"LLama2_MM_QKV_Trace.txt"
-    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace_group_map.txt"
-    # file_name = r"TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce-2KB-new.txt"
 
     # model_type = "Feature"
     model_type = "REQ_RSP"
@@ -73,9 +43,9 @@ def main():
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        topo_type = "5x4"  # SG2262
+        # topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
-        # topo_type = "4x2"
+        topo_type = "5x2"
         # topo_type = "3x1"
         # topo_type = "6x5"  # SG2260
         # topo_type = "3x3"  # SG2260E
@@ -280,19 +250,19 @@ def main():
             "ddr": 2,
             "l2m": 2,
         }
-    elif topo_type in ["4x2"]:
+    elif topo_type in ["5x2"]:
         sim.config.BURST = 4
         sim.config.RN_R_TRACKER_OSTD = 64
-        sim.config.RN_W_TRACKER_OSTD = 64
+        sim.config.RN_W_TRACKER_OSTD = 32
         sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST
         sim.config.RN_WDB_SIZE = sim.config.RN_W_TRACKER_OSTD * sim.config.BURST
-        sim.config.SN_DDR_R_TRACKER_OSTD = 64
-        sim.config.SN_DDR_W_TRACKER_OSTD = 64
-        sim.config.SN_L2M_R_TRACKER_OSTD = 64
-        sim.config.SN_L2M_W_TRACKER_OSTD = 64
+        sim.config.SN_DDR_R_TRACKER_OSTD = 96
+        sim.config.SN_DDR_W_TRACKER_OSTD = 48
+        sim.config.SN_L2M_R_TRACKER_OSTD = 96
+        sim.config.SN_L2M_W_TRACKER_OSTD = 48
         sim.config.SN_DDR_WDB_SIZE = sim.config.SN_DDR_W_TRACKER_OSTD * sim.config.BURST
         sim.config.SN_L2M_WDB_SIZE = sim.config.SN_L2M_W_TRACKER_OSTD * sim.config.BURST
-        sim.config.DDR_R_LATENCY_original = 40
+        sim.config.DDR_R_LATENCY_original = 100
         sim.config.DDR_R_LATENCY_VAR_original = 0
         sim.config.DDR_W_LATENCY_original = 0
         sim.config.L2M_R_LATENCY_original = 12
@@ -303,6 +273,7 @@ def main():
         sim.config.RB_OUT_FIFO_DEPTH = 8
         sim.config.SN_TRACKER_RELEASE_LATENCY = 40
         sim.config.CDMA_BW_LIMIT = 8
+        sim.config.DDR_BW_LIMIT = 102
 
         sim.config.TL_Etag_T2_UE_MAX = 8
         sim.config.TL_Etag_T1_UE_MAX = 15
@@ -401,7 +372,7 @@ def main():
         }
 
     sim.initial()
-    # sim.end_time = 6000
+    sim.end_time = 6000
     sim.print_interval = 2000
     sim.run()
 
