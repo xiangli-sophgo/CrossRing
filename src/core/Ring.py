@@ -246,6 +246,12 @@ class RingNetwork(Network):
             "CCW": [[None] * config.SLICE_PER_LINK for _ in range(config.NUM_RING_NODES)],  # 逆时针链路
         }
 
+        # ITag 预留槽位记录（简化实现）
+        self.ring_links_tag = {
+            "CW": [None for _ in range(config.NUM_RING_NODES)],
+            "CCW": [None for _ in range(config.NUM_RING_NODES)],
+        }
+
         # 流量统计
         self.links_flow_stat = {
             "read": {},  # 读流量 {(src, dst): count}
@@ -472,6 +478,9 @@ class RingTopology:
         # 2. IP接口处理 - 复用IPInterface的周期处理
         self._process_ip_interfaces()
 
+        # 2.5 根据等待时间更新 ITag 预约
+        self._update_itag_tags()
+
         # 3. Ring网络传输
         self._process_ring_transmission()
 
@@ -587,6 +596,23 @@ class RingTopology:
                         elif flit.flit_type == "data":
                             self.stats["total_data_flits_ejected"] += 1
 
+    def _update_itag_tags(self):
+        """根据等待时间生成简单的 ITag 预约"""
+        for channel in ["req", "rsp", "data"]:
+            ring_network = self.networks[channel]
+            for node in ring_network.ring_nodes:
+                for direction in ["CW", "CCW"]:
+                    if not node.inject_queues[direction]:
+                        continue
+                    flit = node.inject_queues[direction][0]
+                    flit.wait_cycle_v += 1
+                    if (
+                        flit.wait_cycle_v >= self.config.ITag_TRIGGER_Th_V
+                        and ring_network.ring_links_tag[direction][node.node_id] is None
+                    ):
+                        ring_network.ring_links_tag[direction][node.node_id] = flit
+                        flit.itag_v = True
+
     def _process_ring_transmission(self):
         """处理Ring传输"""
         # 1. 先移动环上已有 flit（清空 slice 0）
@@ -645,6 +671,7 @@ class RingTopology:
                     # 查找下一个可以注入的flit
                     selected_channel = None
                     selected_direction = None
+                    local_injected = False
 
                     for ip_type, buffer in available_channels:
                         if not buffer:  # buffer可能在前面的处理中被清空
@@ -666,8 +693,8 @@ class RingTopology:
                                 buffer.popleft()
                                 eject_queue.append(flit)
                                 flit.eject_ring_cycle = self.current_cycle
-                                injected_count += 1  # 已完成注入计数
-                                selected_channel = (ip_type, buffer)  # 标记已处理
+                                injected_count += 1
+                                local_injected = True
                                 break
                             else:
                                 continue
@@ -696,8 +723,9 @@ class RingTopology:
                             self.stats["cw_usage"] += 1
                         else:
                             self.stats["ccw_usage"] += 1
+                    elif local_injected:
+                        continue
                     else:
-                        # 没有找到可注入的flit，退出循环
                         break
 
     def _move_flits_on_ring(self):
@@ -724,9 +752,12 @@ class RingTopology:
                     next_link_idx = self._get_next_link_index(node.node_id, direction)
                     flit = node.inject_queues[direction][0]  # 查看但不移除
 
-                    # 检查链路第一个slice是否空闲
-                    if ring_network.ring_links[direction][next_link_idx][0] is None:
+                    # 检查链路第一个slice是否空闲或有ITag预约
+                    reserved = ring_network.ring_links_tag[direction][node.node_id]
+                    link_empty = ring_network.ring_links[direction][next_link_idx][0] is None
+                    if link_empty or reserved is flit:
                         moves_to_execute.append((flit, ("inject", node.node_id, direction), ("link", direction, next_link_idx, 0), "inject_to_link"))
+                        ring_network.ring_links_tag[direction][node.node_id] = None
 
             # 1.2 链路上的flit在slice间移动
             for direction in ["CW", "CCW"]:
