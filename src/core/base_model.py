@@ -137,9 +137,13 @@ class BaseModel:
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
+            self.config.GDMA_SEND_POSITION_LIST
+            + self.config.SDMA_SEND_POSITION_LIST
+            + self.config.CDMA_SEND_POSITION_LIST
+            + self.config.DDR_SEND_POSITION_LIST
+            + self.config.L2M_SEND_POSITION_LIST
         )
-        self.routes = find_shortest_paths(self.adjacency_matrix, "CrossRing")
+        self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
         self.ip_modules = {}
         for ip_pos in self.flit_positions:
@@ -454,7 +458,11 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
+            print(
+                f"Data statistic: Read: {self.read_req, self.read_flit}, "
+                f"Write: {self.write_req, self.write_flit}, "
+                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
+            )
 
     def log_summary(self):
         if self.verbose:
@@ -692,10 +700,8 @@ class BaseModel:
             self.req_count += 1
 
         except Exception as e:
-            print(f"Error processing request from traffic {traffic_id}: {e}")
-            print(f"Request data: {req_data}")
+            logging.exception(f"Error processing request {req_data} in chain {traffic_id}")
 
-    # def process_new_request(self):
     #     """修改：使用TrafficScheduler获取下一个请求"""
     #     # 从TrafficScheduler获取下一个请求
     #     req_data = self.traffic_scheduler.get_next_request()
@@ -933,7 +939,8 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
+                    for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作

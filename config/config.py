@@ -8,10 +8,16 @@ from scipy.optimize import linear_sum_assignment
 from collections import deque, defaultdict
 from typing import Callable, Iterable, Dict, Any
 import copy
+from pathlib import Path
 
 
 class CrossRingConfig:
-    def __init__(self, default_config):
+    def __init__(self, default_config=None):
+        if default_config is None:
+            # __file__ 是当前脚本所在路径，.parent.parent 假设脚本在项目根的子目录中
+            project_root = Path(__file__).resolve().parent.parent
+            default_config = project_root / "config" / "config2.json"
+
         args = self.parse_args(default_config)
         self.TOPO_TYPE = args.TOPO_TYPE
         self.NUM_NODE = args.NUM_NODE
@@ -68,10 +74,11 @@ class CrossRingConfig:
         self.GDMA_RW_GAP = args.GDMA_RW_GAP
         self.SDMA_RW_GAP = args.SDMA_RW_GAP
         self.CHANNEL_SPEC = {
-            "gdma": 1,  # → RN 侧
-            "sdma": 1,  # → RN 侧
-            "ddr": 1,  # → SN 侧
-            "l2m": 1,  # → SN 侧
+            "gdma": 2,  # → RN 侧
+            "sdma": 2,  # → RN 侧
+            "cdma": 2,  # → RN 侧
+            "ddr": 2,  # → SN 侧
+            "l2m": 2,  # → SN 侧
         }
         self.CH_NAME_LIST = []
         for key in self.CHANNEL_SPEC:
@@ -325,6 +332,15 @@ class CrossRingConfig:
         del self.DDR_SEND_POSITION_LIST, self.L2M_SEND_POSITION_LIST, self.GDMA_SEND_POSITION_LIST, self.SDMA_SEND_POSITION_LIST
 
     def parse_args(self, default_config):
+        # Handle relative paths by resolving from the caller's directory
+        if not os.path.isabs(default_config):
+            # Get the caller's frame to determine the correct base directory
+            import inspect
+            caller_frame = inspect.currentframe().f_back.f_back
+            caller_file = caller_frame.f_globals['__file__']
+            caller_dir = os.path.dirname(os.path.abspath(caller_file))
+            default_config = os.path.join(caller_dir, default_config)
+        
         if os.path.exists(default_config):
             with open(default_config, "r") as f:
                 default_config = json.load(f)

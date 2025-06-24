@@ -216,11 +216,22 @@ class Node:
 
     def initialize_rn(self):
         """Initialize RN structures."""
-        for ip_type in self.rn_rdb.keys():
-            for ip_pos in getattr(self.config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST"):
-                self.rn_rdb[ip_type][ip_pos] = defaultdict(list)
-                self.rn_wdb[ip_type][ip_pos] = defaultdict(list)
-                self.setup_rn_trackers(ip_type, ip_pos)
+        # 针对 Ring 拓扑，所有节点都有 RN tracker
+        is_ring_topology = getattr(self.config, "TOPO_TYPE", "").startswith("Ring")
+        if is_ring_topology:
+            for ip_type in self.rn_rdb.keys():
+                for ip_pos in range(self.config.NUM_NODE):
+                    self.rn_rdb[ip_type][ip_pos] = defaultdict(list)
+                    self.rn_wdb[ip_type][ip_pos] = defaultdict(list)
+                    self.setup_rn_trackers(ip_type, ip_pos)
+        else:
+            # 原始 CrossRing 拓扑：只在特定位置创建 RN tracker
+            for ip_type in self.rn_rdb.keys():
+                positions = getattr(self.config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST")
+                for ip_pos in positions:
+                    self.rn_rdb[ip_type][ip_pos] = defaultdict(list)
+                    self.rn_wdb[ip_type][ip_pos] = defaultdict(list)
+                    self.setup_rn_trackers(ip_type, ip_pos)
 
     def setup_rn_trackers(self, ip_type, ip_pos):
         """Setup read and write trackers for RN."""
@@ -241,12 +252,12 @@ class Node:
         """Initialize SN structures."""
         self.sn_tracker_release_time = defaultdict(list)
 
-        # 检查是否为Ring拓扑 - 通过CH_NAME_LIST是否包含带索引的IP类型判断
-        is_ring_topology = hasattr(self.config, "CH_NAME_LIST") and any("_" in ch for ch in getattr(self.config, "CH_NAME_LIST", []))
+        # 检查是否为Ring拓扑 - 通过TOPO_TYPE字段判断
+        is_ring_topology = getattr(self.config, "TOPO_TYPE", "").startswith("Ring")
 
         if is_ring_topology:
             # Ring拓扑：每个节点都有所有IP类型的SN tracker
-            for ip_pos in range(getattr(self.config, "NUM_RING_NODES", self.config.NUM_NODE)):
+            for ip_pos in range(getattr(self.config, "RING_NUM_NODES", self.config.NUM_NODE)):
                 for key in self.sn_tracker:
                     self.sn_rdb[key][ip_pos] = []
                     self.sn_wdb[key][ip_pos] = defaultdict(list)
@@ -275,323 +286,6 @@ class Node:
             self.sn_wdb_count[key][ip_pos] = self.config.SN_L2M_WDB_SIZE
             self.sn_tracker_count[key]["ro"][ip_pos] = self.config.SN_L2M_R_TRACKER_OSTD
             self.sn_tracker_count[key]["share"][ip_pos] = self.config.SN_L2M_W_TRACKER_OSTD
-
-
-from collections import deque, defaultdict
-import numpy as np
-import logging
-from typing import Dict, List, Optional, Any
-
-# 这个文件包含对现有component.py的扩展，主要是Network类的Ring支持
-# 原有的Flit、Node、IPInterface等类保持不变，可以直接复用
-
-
-class RingNetworkMixin:
-    """
-    Ring网络的Mixin类，为Network添加Ring特有的功能
-    """
-
-    def _init_ring_structure(self):
-        """初始化Ring特有的网络结构"""
-        self.ring_mode = True
-        self.num_nodes = self.config.NUM_NODE
-
-        # Ring特有的注入/弹出队列结构
-        # 保持与CrossRing兼容的接口，但简化为双向结构
-        self._init_ring_inject_queues()
-        self._init_ring_eject_queues()
-        self._init_ring_links()
-
-        # Ring特有的统计信息
-        self.ring_stats = {"cw_flits": 0, "ccw_flits": 0, "local_flits": 0, "etag_upgrades": 0, "itag_reservations": 0}
-
-        # 路由策略（如果设置了）
-        self.routing_strategy = getattr(self, "routing_strategy", None)
-
-        logging.info(f"Ring network initialized: {self.num_nodes} nodes, name: {self.name}")
-
-    def _init_ring_inject_queues(self):
-        """初始化Ring注入队列"""
-        # 为Ring拓扑重新组织注入队列
-        # 使用TL(左/逆时针)和TR(右/顺时针)来表示Ring的两个方向
-
-        for node_id in range(self.num_nodes):
-            # 每个节点有两个方向的注入队列
-            if node_id not in self.inject_queues["TL"]:
-                self.inject_queues["TL"][node_id] = deque(maxlen=self.config.IQ_OUT_FIFO_DEPTH)
-            if node_id not in self.inject_queues["TR"]:
-                self.inject_queues["TR"][node_id] = deque(maxlen=self.config.IQ_OUT_FIFO_DEPTH)
-
-            # Pre缓冲区
-            if node_id not in self.inject_queues_pre["TL"]:
-                self.inject_queues_pre["TL"][node_id] = None
-            if node_id not in self.inject_queues_pre["TR"]:
-                self.inject_queues_pre["TR"][node_id] = None
-
-    def _init_ring_eject_queues(self):
-        """初始化Ring弹出队列"""
-        # Ring拓扑中，每个节点可以从两个方向接收flit
-        for node_id in range(self.num_nodes):
-            if node_id not in self.eject_queues:
-                self.eject_queues[node_id] = deque(maxlen=self.config.EQ_IN_FIFO_DEPTH)
-            if node_id not in self.eject_queues_in_pre:
-                self.eject_queues_in_pre[node_id] = None
-
-    def _init_ring_links(self):
-        """初始化Ring链路"""
-        # Ring拓扑的链路结构：每个节点连接到相邻的两个节点
-        for i in range(self.num_nodes):
-            # 顺时针链路 (向右)
-            next_node = (i + 1) % self.num_nodes
-            link_key = (i, next_node)
-            if link_key not in self.links:
-                self.links[link_key] = [None] * self.config.SLICE_PER_LINK
-
-            # 逆时针链路 (向左)
-            prev_node = (i - 1) % self.num_nodes
-            link_key = (i, prev_node)
-            if link_key not in self.links:
-                self.links[link_key] = [None] * self.config.SLICE_PER_LINK
-
-    def get_ring_neighbors(self, node_id: int) -> Dict[str, int]:
-        """获取Ring节点的邻居"""
-        return {"CW": (node_id + 1) % self.num_nodes, "CCW": (node_id - 1) % self.num_nodes}  # 顺时针邻居  # 逆时针邻居
-
-    def ring_inject_flit(self, flit, node_id: int, direction: str) -> bool:
-        """
-        在Ring拓扑中注入flit
-
-        Args:
-            flit: 要注入的flit
-            node_id: 注入节点ID
-            direction: 注入方向 ('CW'顺时针 或 'CCW'逆时针)
-
-        Returns:
-            bool: 是否成功注入
-        """
-        # 转换方向到CrossRing的命名约定
-        queue_direction = "TR" if direction == "CW" else "TL"
-
-        inject_queue = self.inject_queues[queue_direction].get(node_id)
-        if inject_queue is None:
-            logging.error(f"No inject queue found for node {node_id}, direction {queue_direction}")
-            return False
-
-        if len(inject_queue) < inject_queue.maxlen:
-            inject_queue.append(flit)
-            flit.ring_direction = direction
-            flit.inject_node = node_id
-            flit.inject_cycle = getattr(self, "current_cycle", 0)
-
-            # 更新统计
-            if direction == "CW":
-                self.ring_stats["cw_flits"] += 1
-            else:
-                self.ring_stats["ccw_flits"] += 1
-
-            return True
-
-        return False
-
-    def ring_eject_flit(self, flit, node_id: int) -> bool:
-        """
-        在Ring拓扑中弹出flit
-
-        Args:
-            flit: 要弹出的flit
-            node_id: 弹出节点ID
-
-        Returns:
-            bool: 是否成功弹出
-        """
-        eject_queue = self.eject_queues.get(node_id)
-        if eject_queue is None:
-            logging.error(f"No eject queue found for node {node_id}")
-            return False
-
-        if len(eject_queue) < eject_queue.maxlen:
-            eject_queue.append(flit)
-            flit.eject_node = node_id
-            flit.eject_cycle = getattr(self, "current_cycle", 0)
-            flit.is_ejected = True
-
-            self.ring_stats["local_flits"] += 1
-            return True
-
-        return False
-
-    def ring_route_flit(self, flit) -> str:
-        """
-        为Ring拓扑中的flit选择路由方向
-
-        Args:
-            flit: 要路由的flit
-
-        Returns:
-            str: 路由方向 ('CW', 'CCW', 'LOCAL')
-        """
-        if flit.source == flit.destination:
-            return "LOCAL"
-
-        # 如果网络有路由策略，使用它
-        if hasattr(self, "routing_strategy") and self.routing_strategy:
-            # 获取拥塞信息（如果需要）
-            context = {}
-            if hasattr(self, "_get_congestion_info"):
-                context = self._get_congestion_info(flit.current_position)
-
-            return self.routing_strategy.get_route_direction(flit.source, flit.destination, **context)
-
-        # 默认使用最短路径
-        cw_dist = (flit.destination - flit.source) % self.num_nodes
-        ccw_dist = (flit.source - flit.destination) % self.num_nodes
-
-        return "CW" if cw_dist <= ccw_dist else "CCW"
-
-    def ring_can_inject(self, node_id: int, direction: str) -> bool:
-        """检查是否可以向指定方向注入flit"""
-        queue_direction = "TR" if direction == "CW" else "TL"
-        inject_queue = self.inject_queues[queue_direction].get(node_id)
-
-        if inject_queue is None:
-            return False
-
-        return len(inject_queue) < inject_queue.maxlen
-
-    def ring_can_eject(self, node_id: int) -> bool:
-        """检查是否可以在指定节点弹出flit"""
-        eject_queue = self.eject_queues.get(node_id)
-
-        if eject_queue is None:
-            return False
-
-        return len(eject_queue) < eject_queue.maxlen
-
-    def ring_get_link_utilization(self) -> Dict[str, float]:
-        """获取Ring链路的利用率"""
-        cw_used = 0
-        ccw_used = 0
-        total_slices = 0
-
-        for i in range(self.num_nodes):
-            # 顺时针链路
-            cw_link = (i, (i + 1) % self.num_nodes)
-            if cw_link in self.links:
-                for slice_flit in self.links[cw_link]:
-                    total_slices += 1
-                    if slice_flit is not None:
-                        cw_used += 1
-
-            # 逆时针链路
-            ccw_link = (i, (i - 1) % self.num_nodes)
-            if ccw_link in self.links:
-                for slice_flit in self.links[ccw_link]:
-                    total_slices += 1
-                    if slice_flit is not None:
-                        ccw_used += 1
-
-        total_possible = self.num_nodes * self.config.SLICE_PER_LINK * 2  # 两个方向
-
-        return {
-            "cw_utilization": cw_used / (self.num_nodes * self.config.SLICE_PER_LINK) if self.num_nodes > 0 else 0,
-            "ccw_utilization": ccw_used / (self.num_nodes * self.config.SLICE_PER_LINK) if self.num_nodes > 0 else 0,
-            "total_utilization": (cw_used + ccw_used) / total_possible if total_possible > 0 else 0,
-        }
-
-    def ring_apply_etag_upgrade(self, flit) -> bool:
-        """
-        为Ring拓扑中的flit应用ETag升级
-        复用CrossRing的ETag逻辑
-        """
-        if hasattr(super(), "ETag_upgrade"):
-            # 复用父类的ETag升级逻辑
-            result = super().ETag_upgrade(flit)
-            if result:
-                self.ring_stats["etag_upgrades"] += 1
-            return result
-
-        # 简单的ETag升级逻辑
-        if flit.ETag_priority > 0:
-            flit.ETag_priority -= 1
-            self.ring_stats["etag_upgrades"] += 1
-            return True
-
-        return False
-
-    def ring_apply_itag_reservation(self, flit, direction: str) -> bool:
-        """
-        为Ring拓扑中的flit应用ITag预约
-        复用CrossRing的ITag逻辑
-        """
-        if hasattr(super(), "ITag_check"):
-            # 复用父类的ITag逻辑
-            result = super().ITag_check(flit, direction)
-            if result:
-                self.ring_stats["itag_reservations"] += 1
-            return result
-
-        # 简单的ITag预约逻辑
-        # 这里可以实现基本的ITag功能
-        flit.itag_h = True  # 标记为已预约
-        self.ring_stats["itag_reservations"] += 1
-        return True
-
-    def get_ring_statistics(self) -> Dict:
-        """获取Ring特有的统计信息"""
-        base_stats = {"network_name": self.name, "num_nodes": self.num_nodes, "total_flits": sum(self.ring_stats.values()) - self.ring_stats["etag_upgrades"] - self.ring_stats["itag_reservations"]}
-
-        # 添加利用率信息
-        utilization = self.ring_get_link_utilization()
-
-        return {**base_stats, **self.ring_stats, **utilization}
-
-
-# 扩展原有的Network类以支持Ring拓扑
-def enhance_network_for_ring(NetworkClass):
-    """
-    为现有的Network类添加Ring支持
-    这是一个装饰器函数，避免直接修改原始的component.py文件
-    """
-
-    class RingEnhancedNetwork(NetworkClass, RingNetworkMixin):
-        def __init__(self, config, adjacency_matrix, name="network"):
-            super().__init__(config, adjacency_matrix, name)
-
-            # 检测是否为Ring拓扑
-            if self._is_ring_topology(adjacency_matrix):
-                self._init_ring_structure()
-            else:
-                # 保持原有的CrossRing初始化
-                pass
-
-        def _is_ring_topology(self, adjacency_matrix):
-            """检测是否为Ring拓扑"""
-            num_nodes = adjacency_matrix.shape[0]
-
-            # Ring拓扑的特征：每个节点恰好连接到2个其他节点
-            for i in range(num_nodes):
-                connections = np.sum(adjacency_matrix[i])
-                if connections != 2:
-                    return False
-
-            return True
-
-        def can_move_to_next(self, flit, current, next_node):
-            """重写移动检查以支持Ring拓扑"""
-            if hasattr(self, "ring_mode") and self.ring_mode:
-                # Ring特有的移动检查逻辑
-                if flit.destination == current:
-                    # 到达目标，检查是否可以弹出
-                    return self.ring_can_eject(current)
-                else:
-                    # 继续在Ring上传输
-                    direction = self.ring_route_flit(flit)
-                    return self.ring_can_inject(current, direction)
-            else:
-                # 使用原有的CrossRing逻辑
-                return super().can_move_to_next(flit, current, next_node)
-
-    return RingEnhancedNetwork
 
 
 # IPInterface的Ring支持扩展
@@ -631,13 +325,13 @@ class RingIPInterface:
 
 
 # 便捷函数：创建Ring支持的组件
-def create_ring_network(config, adjacency_matrix, name="ring_network"):
-    """创建支持Ring的Network实例"""
-    from src.utils.component import Network
+# def create_ring_network(config, adjacency_matrix, name="ring_network"):
+#     """创建支持Ring的Network实例"""
+#     from src.utils.component import Network
 
-    # 使用增强的Network类
-    RingNetwork = enhance_network_for_ring(Network)
-    return RingNetwork(config, adjacency_matrix, name)
+#     # 使用增强的Network类
+#     RingNetwork = enhance_network_for_ring(Network)
+#     return RingNetwork(config, adjacency_matrix, name)
 
 
 def create_ring_ip_interface(ip_type, ip_pos, config, req_network, rsp_network, data_network, node, routes):
@@ -645,7 +339,7 @@ def create_ring_ip_interface(ip_type, ip_pos, config, req_network, rsp_network, 
     from src.utils.component import IPInterface
 
     # 创建混合类
-    class RingIPInterfaceImpl(IPInterface, RingIPInterface):
+    class RingIPInterfaceImpl(RingIPInterface, IPInterface):
         pass
 
     return RingIPInterfaceImpl(ip_type, ip_pos, config, req_network, rsp_network, data_network, node, routes, ring_mode=True)
@@ -892,7 +586,7 @@ class IPInterface:
 
         try:
             # 接收，CrossRing使用 ip_pos - NUM_COL，Ring使用 ip_pos
-            if hasattr(self.config, "NUM_RING_NODES") and self.config.NUM_RING_NODES > 0:
+            if hasattr(self.config, "RING_NUM_NODES") and self.config.RING_NUM_NODES > 0:
                 # Ring topology: eject at same position as inject
                 pos_index = self.ip_pos
             else:
@@ -977,7 +671,7 @@ class IPInterface:
         req = next((req for req in self.node.rn_tracker[rsp.req_type][self.ip_type][self.ip_pos] if req.packet_id == rsp.packet_id), None)
         if not req:
             # For Ring topology, ignore spurious positive responses for read requests
-            if hasattr(self.config, "NUM_RING_NODES") and self.config.NUM_RING_NODES > 0 and rsp.req_type == "read" and rsp.rsp_type == "positive":
+            if hasattr(self.config, "RING_NUM_NODES") and self.config.RING_NUM_NODES > 0 and rsp.req_type == "read" and rsp.rsp_type == "positive":
                 return  # Silently ignore - this is expected for Ring read completions
             logging.warning(f"RSP {rsp} do not have REQ")
             return
@@ -1214,7 +908,10 @@ class IPInterface:
                 net_info["l2h_fifo"].append(net_info["l2h_fifo_pre"])
                 net_info["l2h_fifo_pre"] = None
 
-            if net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen:
+            if (
+                net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None
+                and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen
+            ):
                 net.IQ_channel_buffer[self.ip_type][self.ip_pos].append(net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos])
                 net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = None
 
@@ -1283,7 +980,7 @@ class IPInterface:
         cycle = getattr(self, "current_cycle", 0)
         for i in range(req.burst_length):
             # Ring拓扑：数据包从当前SN位置返回到原始请求者位置
-            if hasattr(self.config, "NUM_RING_NODES"):
+            if hasattr(self.config, "RING_NUM_NODES"):
                 # Ring拓扑
                 source = req.destination  # 当前SN位置
                 destination = req.source  # 原始请求者位置
@@ -1299,9 +996,13 @@ class IPInterface:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             if hasattr(req, "original_destination_type") and req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
+                latency = np.random.uniform(
+                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
+                )
             elif hasattr(req, "destination_type") and req.destination_type and req.destination_type.startswith("ddr"):
-                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
+                latency = np.random.uniform(
+                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
+                )
             else:
                 latency = self.config.L2M_R_LATENCY
             flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY
@@ -1326,7 +1027,7 @@ class IPInterface:
         cycle = getattr(self, "current_cycle", 0)
 
         # 检查是否为Ring拓扑
-        if hasattr(self.config, "NUM_RING_NODES"):
+        if hasattr(self.config, "RING_NUM_NODES"):
             # Ring拓扑：响应直接从目标节点返回到源节点
             source = req.destination
             destination = req.source
@@ -1465,7 +1166,9 @@ class Network:
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}
         self.ETag_BOTHSIDE_UPGRADE = False
 
-        for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
+        for ip_pos in set(
+            config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST
+        ):
             self.cross_point["horizontal"][ip_pos]["TL"] = [None] * 2
             self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2
@@ -1495,14 +1198,18 @@ class Network:
             for key in self.round_robin.keys():
                 if key == "IQ":
                     for fifo_name in ["TR", "TL", "TU", "TD", "EQ"]:
+                        self.round_robin[key][fifo_name][ip_pos] = deque()
                         self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque()
                         for ch_name in self.IQ_channel_buffer.keys():
+                            self.round_robin[key][fifo_name][ip_pos].append(ch_name)
                             self.round_robin[key][fifo_name][ip_pos - config.NUM_COL].append(ch_name)
                 elif key == "EQ":
                     for ch_name in self.IQ_channel_buffer.keys():
+                        self.round_robin[key][ch_name][ip_pos] = deque([0, 1, 2, 3])
                         self.round_robin[key][ch_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3])
                 else:
                     for fifo_name in ["TU", "TD", "EQ"]:
+                        self.round_robin[key][fifo_name][ip_pos] = deque([0, 1, 2, 3])
                         self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3])
 
             self.inject_time[ip_pos] = []
@@ -1582,6 +1289,7 @@ class Network:
                 ip_recv_index = ip_index - config.NUM_COL
                 self.IQ_channel_buffer[ip_type][ip_index] = deque(maxlen=config.IQ_CH_FIFO_DEPTH)
                 self.EQ_channel_buffer[ip_type][ip_recv_index] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
+                self.EQ_channel_buffer[ip_type][ip_index] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
         for ip_type in self.last_select.keys():
             for ip_index in getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST"):
                 self.last_select[ip_type][ip_index] = "write"
@@ -2459,7 +2167,11 @@ class Network:
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
-                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth and self.ring_bridge_pre[direction][flit.current_link] is None:
+                    if (
+                        direction in self.ring_bridge.keys()
+                        and len(self.ring_bridge[direction][flit.current_link]) < max_depth
+                        and self.ring_bridge_pre[direction][flit.current_link] is None
+                    ):
                         # flit.flit_position = f"RB_{direction}"
                         # self.ring_bridge[direction][flit.current_link].append(flit)
                         self.ring_bridge_pre[direction][flit.current_link] = flit
@@ -2492,3 +2204,462 @@ class Network:
                 queue_pre[next_node] = flit
                 flit.itag_v = False
                 return True
+
+
+class RingNetwork(Network):
+    """
+    Ring网络的Mixin类，为Network添加Ring特有的功能
+    """
+
+    def __init__(self, config, adjacency_matrix, name="RingNetwork"):
+        super().__init__(config, adjacency_matrix, name)
+        # 初始化环相关的数据结构
+        self._init_ring_structure()
+
+    def update_excess_ITag(self):
+        """
+        Ring topology specific ITag management.
+        """
+        # Ensure each direction has a count entry for every node
+        for direction, node_dict in self.excess_ITag_to_remove.items():
+            for node_id in range(self.num_nodes):
+                node_dict.setdefault(node_id, 0)
+        
+        # Ring-specific ITag management
+        for direction in ["TL", "TR"]:
+            for node_id in range(self.num_nodes):
+                if self.excess_ITag_to_remove[direction][node_id] > 0:
+                    # Find ITags created by this node and release them
+                    for link, tag_info in self.links_tag.items():
+                        if tag_info[0] is not None and tag_info[0] == [node_id, direction] and link[0] == node_id:
+                            # Release excess ITag
+                            self.links_tag[link][0] = None
+                            self.tagged_counter[direction][node_id] -= 1
+                            self.remain_tag[direction][node_id] += 1
+                            self.excess_ITag_to_remove[direction][node_id] -= 1
+                            break  # Only release one at a time
+
+    def can_move_to_next(self, flit, current, next_node):
+        """Ring-specific movement validation with ITag management"""
+        # Handle ring wraparound for direction calculation
+        if next_node == (current + 1) % self.num_nodes:
+            direction = "TR"  # Clockwise
+        elif next_node == (current - 1) % self.num_nodes:
+            direction = "TL"  # Counter-clockwise
+        else:
+            # Invalid next_node for ring topology
+            return False
+        
+        link = (current, next_node)
+
+        # Ring ITag processing
+        if self.links[link][0] is not None:  # Link occupied
+            # Check if ITag should be created (inline all check logic)
+            if (
+                self.links_tag[link][0] is None
+                and flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H
+                and self.tagged_counter[direction][current] < self.config.ITag_MAX_NUM_H
+                and self.itag_req_counter[direction][current] > 0
+                and self.remain_tag[direction][current] > 0
+            ):
+
+                # Create ITag mark (inline logic)
+                self.remain_tag[direction][current] -= 1
+                self.tagged_counter[direction][current] += 1
+                self.links_tag[link][0] = [current, direction]
+                flit.itag_h = True
+            return False
+
+        else:  # Link free
+            if self.links_tag[link][0] is None:  # No reservation
+                return True  # Direct entry to ring
+            else:  # Has reservation
+                if self.links_tag[link][0] == [current, direction]:  # Own reservation
+                    # Use reservation (inline logic)
+                    self.links_tag[link][0] = None
+                    self.remain_tag[direction][current] += 1
+                    self.tagged_counter[direction][current] -= 1
+                    return True
+        return False
+
+    def _init_ring_structure(self):
+        """初始化Ring特有的网络结构"""
+        self.ring_mode = True
+        self.num_nodes = self.config.NUM_NODE
+        
+        # 为画图功能添加ring_nodes属性
+        self.ring_nodes = list(range(self.num_nodes))
+
+        # Ring特有的注入/弹出队列结构
+        # 保持与CrossRing兼容的接口，但简化为双向结构
+        self._init_ring_inject_queues()
+        self._init_ring_eject_queues()
+        self._init_ring_links()
+
+        for ip_type in self.config.CH_NAME_LIST:
+            # Pre-buffer: start empty for each node
+            self.IQ_channel_buffer_pre.setdefault(ip_type, {})
+            for node_id in range(self.num_nodes):
+                self.IQ_channel_buffer_pre[ip_type][node_id] = None
+
+            # Channel buffer: deque with configured depth
+            self.IQ_channel_buffer.setdefault(ip_type, {})
+            for node_id in range(self.num_nodes):
+                self.IQ_channel_buffer[ip_type][node_id] = deque(maxlen=self.config.IQ_CH_FIFO_DEPTH)
+
+        # Ring特有的统计信息
+        self.ring_stats = {"cw_flits": 0, "ccw_flits": 0, "local_flits": 0, "etag_upgrades": 0, "itag_reservations": 0}
+
+        # 路由策略（如果设置了）
+        self.routing_strategy = getattr(self, "routing_strategy", None)
+
+        logging.info(f"Ring network initialized: {self.num_nodes} nodes, name: {self.name}")
+
+    def _init_ring_inject_queues(self):
+        """初始化Ring注入队列"""
+        # 为Ring拓扑重新组织注入队列
+        # 使用TL(左/逆时针)和TR(右/顺时针)来表示Ring的两个方向
+
+        for node_id in range(self.num_nodes):
+            # 每个节点有两个方向的注入队列
+            if node_id not in self.inject_queues["TL"]:
+                self.inject_queues["TL"][node_id] = deque(maxlen=self.config.IQ_OUT_FIFO_DEPTH)
+            if node_id not in self.inject_queues["TR"]:
+                self.inject_queues["TR"][node_id] = deque(maxlen=self.config.IQ_OUT_FIFO_DEPTH)
+
+            # Pre缓冲区
+            if node_id not in self.inject_queues_pre["TL"]:
+                self.inject_queues_pre["TL"][node_id] = None
+            if node_id not in self.inject_queues_pre["TR"]:
+                self.inject_queues_pre["TR"][node_id] = None
+
+    def _init_ring_eject_queues(self):
+        """初始化Ring弹出队列"""
+        # Ring拓扑中，每个节点可以从两个方向弹出flit
+        for direction in ["TL", "TR"]:
+            # Ensure direction exists
+            if direction not in self.eject_queues:
+                self.eject_queues[direction] = {}
+            if direction not in self.eject_queues_in_pre:
+                self.eject_queues_in_pre[direction] = {}
+            for node_id in range(self.num_nodes):
+                # Main eject FIFO per node and direction
+                self.eject_queues[direction][node_id] = deque(maxlen=self.config.EQ_IN_FIFO_DEPTH)
+                # Pre-buffer for eject
+                self.eject_queues_in_pre[direction][node_id] = None
+
+    def _init_ring_links(self):
+        """初始化Ring链路"""
+        # Ring拓扑的链路结构：每个节点连接到相邻的两个节点
+        for i in range(self.num_nodes):
+            # 顺时针链路 (向右)
+            next_node = (i + 1) % self.num_nodes
+            link_key = (i, next_node)
+            if link_key not in self.links:
+                self.links[link_key] = [None] * self.config.SLICE_PER_LINK
+                self.links_tag[link_key] = [None] * self.config.SLICE_PER_LINK
+                self.links_flow_stat['read'][link_key] = 0
+                self.links_flow_stat['write'][link_key] = 0
+
+            # 逆时针链路 (向左)
+            prev_node = (i - 1) % self.num_nodes
+            link_key = (i, prev_node)
+            if link_key not in self.links:
+                self.links[link_key] = [None] * self.config.SLICE_PER_LINK
+                self.links_tag[link_key] = [None] * self.config.SLICE_PER_LINK
+                self.links_flow_stat['read'][link_key] = 0
+                self.links_flow_stat['write'][link_key] = 0
+
+    def get_ring_neighbors(self, node_id: int):
+        """获取Ring节点的邻居"""
+        return {"CW": (node_id + 1) % self.num_nodes, "CCW": (node_id - 1) % self.num_nodes}  # 顺时针邻居  # 逆时针邻居
+
+    def ring_inject_flit(self, flit, node_id: int, direction: str) -> bool:
+        """
+        在Ring拓扑中注入flit
+
+        Args:
+            flit: 要注入的flit
+            node_id: 注入节点ID
+            direction: 注入方向 ('CW'顺时针 或 'CCW'逆时针)
+
+        Returns:
+            bool: 是否成功注入
+        """
+        # 转换方向到CrossRing的命名约定
+        queue_direction = "TR" if direction == "CW" else "TL"
+
+        inject_queue = self.inject_queues[queue_direction].get(node_id)
+        if inject_queue is None:
+            logging.error(f"No inject queue found for node {node_id}, direction {queue_direction}")
+            return False
+
+        if len(inject_queue) < inject_queue.maxlen:
+            inject_queue.append(flit)
+            flit.ring_direction = direction
+            flit.inject_node = node_id
+            flit.inject_cycle = getattr(self, "current_cycle", 0)
+
+            # 更新统计
+            if direction == "CW":
+                self.ring_stats["cw_flits"] += 1
+            else:
+                self.ring_stats["ccw_flits"] += 1
+
+            return True
+
+        return False
+
+    def ring_eject_flit(self, flit, node_id: int) -> bool:
+        """
+        在Ring拓扑中弹出flit
+
+        Args:
+            flit: 要弹出的flit
+            node_id: 弹出节点ID
+
+        Returns:
+            bool: 是否成功弹出
+        """
+        eject_queue = self.eject_queues.get(node_id)
+        if eject_queue is None:
+            logging.error(f"No eject queue found for node {node_id}")
+            return False
+
+        if len(eject_queue) < eject_queue.maxlen:
+            eject_queue.append(flit)
+            flit.eject_node = node_id
+            flit.eject_cycle = getattr(self, "current_cycle", 0)
+            flit.is_ejected = True
+
+            self.ring_stats["local_flits"] += 1
+            return True
+
+        return False
+
+    def ring_route_flit(self, flit) -> str:
+        """
+        为Ring拓扑中的flit选择路由方向
+
+        Args:
+            flit: 要路由的flit
+
+        Returns:
+            str: 路由方向 ('CW', 'CCW', 'LOCAL')
+        """
+        if flit.source == flit.destination:
+            return "LOCAL"
+
+        # 如果网络有路由策略，使用它
+        if hasattr(self, "routing_strategy") and self.routing_strategy:
+            # 获取拥塞信息（如果需要）
+            context = {}
+            if hasattr(self, "_get_congestion_info"):
+                context = self._get_congestion_info(flit.current_position)
+
+            return self.routing_strategy.get_route_direction(flit.source, flit.destination, **context)
+
+        # 默认使用最短路径
+        cw_dist = (flit.destination - flit.source) % self.num_nodes
+        ccw_dist = (flit.source - flit.destination) % self.num_nodes
+
+        return "CW" if cw_dist <= ccw_dist else "CCW"
+
+    def ring_can_inject(self, node_id: int, direction: str) -> bool:
+        """检查是否可以向指定方向注入flit"""
+        queue_direction = "TR" if direction == "CW" else "TL"
+        inject_queue = self.inject_queues[queue_direction].get(node_id)
+
+        if inject_queue is None:
+            return False
+
+        return len(inject_queue) < inject_queue.maxlen
+
+    def ring_can_eject(self, node_id: int) -> bool:
+        """检查是否可以在指定节点弹出flit"""
+        eject_queue = self.eject_queues.get(node_id)
+
+        if eject_queue is None:
+            return False
+
+        return len(eject_queue) < eject_queue.maxlen
+
+    def ring_get_link_utilization(self):
+        """获取Ring链路的利用率"""
+        cw_used = 0
+        ccw_used = 0
+        total_slices = 0
+
+        for i in range(self.num_nodes):
+            # 顺时针链路
+            cw_link = (i, (i + 1) % self.num_nodes)
+            if cw_link in self.links:
+                for slice_flit in self.links[cw_link]:
+                    total_slices += 1
+                    if slice_flit is not None:
+                        cw_used += 1
+
+            # 逆时针链路
+            ccw_link = (i, (i - 1) % self.num_nodes)
+            if ccw_link in self.links:
+                for slice_flit in self.links[ccw_link]:
+                    total_slices += 1
+                    if slice_flit is not None:
+                        ccw_used += 1
+
+        total_possible = self.num_nodes * self.config.SLICE_PER_LINK * 2  # 两个方向
+
+        return {
+            "cw_utilization": cw_used / (self.num_nodes * self.config.SLICE_PER_LINK) if self.num_nodes > 0 else 0,
+            "ccw_utilization": ccw_used / (self.num_nodes * self.config.SLICE_PER_LINK) if self.num_nodes > 0 else 0,
+            "total_utilization": (cw_used + ccw_used) / total_possible if total_possible > 0 else 0,
+        }
+
+    def ring_apply_etag_upgrade(self, flit) -> bool:
+        """
+        为Ring拓扑中的flit应用ETag升级
+        复用CrossRing的ETag逻辑
+        """
+        if hasattr(super(), "ETag_upgrade"):
+            # 复用父类的ETag升级逻辑
+            result = super().ETag_upgrade(flit)
+            if result:
+                self.ring_stats["etag_upgrades"] += 1
+            return result
+
+        # 简单的ETag升级逻辑
+        if flit.ETag_priority > 0:
+            flit.ETag_priority -= 1
+            self.ring_stats["etag_upgrades"] += 1
+            return True
+
+        return False
+
+    def ring_apply_itag_reservation(self, flit, direction: str) -> bool:
+        """
+        为Ring拓扑中的flit应用ITag预约
+        复用CrossRing的ITag逻辑
+        """
+        if hasattr(super(), "ITag_check"):
+            # 复用父类的ITag逻辑
+            result = super().ITag_check(flit, direction)
+            if result:
+                self.ring_stats["itag_reservations"] += 1
+            return result
+
+        # 简单的ITag预约逻辑
+        # 这里可以实现基本的ITag功能
+        flit.itag_h = True  # 标记为已预约
+        self.ring_stats["itag_reservations"] += 1
+        return True
+
+    def get_ring_statistics(self):
+        """获取Ring特有的统计信息"""
+        base_stats = {
+            "network_name": self.name,
+            "num_nodes": self.num_nodes,
+            "total_flits": sum(self.ring_stats.values()) - self.ring_stats["etag_upgrades"] - self.ring_stats["itag_reservations"],
+        }
+
+        # 添加利用率信息
+        utilization = self.ring_get_link_utilization()
+
+        return {**base_stats, **self.ring_stats, **utilization}
+
+    def plan_move(self, flit, cycle):
+        """
+        Override plan_move for Ring topology: determine next link based on CW/CCW.
+        """
+        if flit.is_new_on_network:
+            # current = flit.source
+            current = flit.path[flit.path_index]
+            next_node = flit.path[flit.path_index + 1]
+            flit.current_position = current
+            flit.is_new_on_network = False
+            flit.flit_position = "Link"
+            flit.is_arrive = False
+            flit.is_on_station = False
+            flit.current_link = (current, next_node)
+            if flit.source == flit.destination:
+                flit.is_arrive = True
+            else:
+                flit.current_seat_index = 0
+            return
+
+        link = self.links.get(flit.current_link)
+        if flit.current_seat_index < len(link) - 1:
+            # 只规划移动，不在这里清空当前位置
+            flit.planned_next_seat_index = flit.current_seat_index + 1
+            return
+
+        current = flit.current_link[1]
+        # If at destination, skip planning
+        if current == flit.destination:
+            flit.is_arrive = True
+            return False
+        direction = self.ring_route_flit(flit)
+        neighbors = self.get_ring_neighbors(current)
+        # Determine next node based on direction
+        next_node = neighbors["CW"] if direction == "CW" else neighbors["CCW"]
+        # Plan the link and seat index
+        flit.current_link = (current, next_node)
+        flit.planned_next_seat_index = 0  # 新链路的起始位置
+        return True
+
+    def execute_moves(self, flit, cycle):
+        """
+        Override execute_moves for Ring topology:
+        - Move flit along link slices using base logic.
+        - When finishing last slice of final hop (based on path_index), eject flit.
+        """
+        if not flit.is_arrive:
+            current, next_node = flit.current_link
+            link = self.links.get(flit.current_link)
+            
+            # 清空当前位置
+            if hasattr(flit, 'current_seat_index') and flit.current_seat_index >= 0:
+                if link[flit.current_seat_index] == flit:  # 只清空如果确实是当前flit
+                    link[flit.current_seat_index] = None
+            
+            # 移动到规划的下一个位置
+            if hasattr(flit, 'planned_next_seat_index'):
+                flit.current_seat_index = flit.planned_next_seat_index
+                delattr(flit, 'planned_next_seat_index')
+            
+            # 检查目标位置是否空闲，如果已被占用则跳过
+            if link[flit.current_seat_index] is not None:
+                # 如果目标位置被占用，暂时不移动这个flit
+                return False
+            
+            # 设置新位置
+            link[flit.current_seat_index] = flit
+            
+            if (flit.current_seat_index == len(link) - 1 and len(link) > 2) or (flit.current_seat_index == 1 and len(link) == 2):
+                self.links_flow_stat[flit.req_type][flit.current_link] += 1
+
+            return False
+        else:
+            if flit.current_link is not None:
+                current, next_node = flit.current_link
+            flit.arrival_network_cycle = cycle
+            queue_pre = None
+            if flit.current_link[0] - flit.current_link[1] == 1:
+                queue = self.eject_queues["TL"]
+                queue_pre = self.eject_queues_in_pre["TL"]
+            elif flit.current_link[0] - flit.current_link[1] == -1:
+                queue = self.eject_queues["TR"]
+                queue_pre = self.eject_queues_in_pre["TR"]
+            else:
+                # Handle other cases - this should not happen in Ring topology
+                # Default to TL for safety
+                queue = self.eject_queues["TL"]
+                queue_pre = self.eject_queues_in_pre["TL"]
+
+            # flit.flit_position = f"EQ_{direction}"
+            if queue_pre[next_node]:
+                return False
+            else:
+                queue_pre[next_node] = flit
+                flit.itag_v = False
+                return True
+
