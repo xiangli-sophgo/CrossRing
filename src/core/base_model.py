@@ -68,8 +68,6 @@ class BaseModel:
         self.topo_type_stat = topo_type
         self.traffic_file_path = traffic_file_path
         self.result_save_path = None
-        # 添加结果统计
-        self.result_processor = BandwidthAnalyzer(config, min_gap_threshold=50, plot_rn_bw_fig=plot_RN_BW_fig, plot_flow_graph=plot_flow_fig)
 
         # 初始化TrafficScheduler
         self.traffic_scheduler = TrafficScheduler(config, traffic_file_path)
@@ -119,8 +117,7 @@ class BaseModel:
         self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.data_network = Network(self.config, self.adjacency_matrix, name="Data Network")
-        if hasattr(self, "result_processor"):
-            self.result_processor = BandwidthAnalyzer(self.config, min_gap_threshold=200, plot_rn_bw_fig=self.plot_RN_BW_fig, plot_flow_graph=self.plot_flow_fig)
+        self.result_processor = BandwidthAnalyzer(self.config, min_gap_threshold=50, plot_rn_bw_fig=self.plot_RN_BW_fig, plot_flow_graph=self.plot_flow_fig)
         if self.plot_link_state:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
@@ -223,9 +220,7 @@ class BaseModel:
         # statistical data
         self.send_read_flits_num_stat = 0
         self.send_write_flits_num_stat = 0
-        self.rn_send_num_stat = 0
         self.file_name_stat = self.file_name[:-4]
-        self.negative_rsp_num_stat, self.positive_rsp_num_stat = 0, 0
         self.R_finish_time_stat, self.W_finish_time_stat = 0, 0
         self.R_tail_latency_stat, self.W_tail_latency_stat = 0, 0
         self.req_cir_h_num_stat, self.req_cir_v_num_stat = 0, 0

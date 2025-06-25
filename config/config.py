@@ -111,12 +111,13 @@ class CrossRingConfig:
         self.update_latency()
         self.topology_select(topo_type)
         self.SN_TRACKER_RELEASE_LATENCY = self.SN_TRACKER_RELEASE_LATENCY_original * self.NETWORK_FREQUENCY
-        self.RN_R_TRACKER_OSTD = self.RN_RDB_SIZE // self.BURST
-        self.RN_W_TRACKER_OSTD = self.RN_WDB_SIZE // self.BURST
-        self.SN_DDR_R_TRACKER_OSTD = self.SN_DDR_RDB_SIZE // self.BURST
-        self.SN_DDR_W_TRACKER_OSTD = self.SN_DDR_WDB_SIZE // self.BURST
-        self.SN_L2M_R_TRACKER_OSTD = self.SN_L2M_RDB_SIZE // self.BURST
-        self.SN_L2M_W_TRACKER_OSTD = self.SN_L2M_WDB_SIZE // self.BURST
+
+        # self.RN_RDB_SIZE = self.RN_R_TRACKER_OSTD * self.BURST
+        # self.RN_WDB_SIZE = self.RN_W_TRACKER_OSTD * self.BURST
+        # self.SN_DDR_RDB_SIZE = self.SN_DDR_R_TRACKER_OSTD * self.BURST
+        # self.SN_DDR_WDB_SIZE = self.SN_DDR_W_TRACKER_OSTD * self.BURST
+        # self.SN_L2M_RDB_SIZE = self.SN_L2M_R_TRACKER_OSTD * self.BURST
+        # self.SN_L2M_WDB_SIZE = self.SN_L2M_W_TRACKER_OSTD * self.BURST
         self.CH_NAME_LIST = []
         for key in self.CHANNEL_SPEC:
             for idx in range(self.CHANNEL_SPEC[key]):
@@ -336,11 +337,12 @@ class CrossRingConfig:
         if not os.path.isabs(default_config):
             # Get the caller's frame to determine the correct base directory
             import inspect
+
             caller_frame = inspect.currentframe().f_back.f_back
-            caller_file = caller_frame.f_globals['__file__']
+            caller_file = caller_frame.f_globals["__file__"]
             caller_dir = os.path.dirname(os.path.abspath(caller_file))
             default_config = os.path.join(caller_dir, default_config)
-        
+
         if os.path.exists(default_config):
             with open(default_config, "r") as f:
                 default_config = json.load(f)

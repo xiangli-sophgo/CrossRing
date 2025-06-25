@@ -185,11 +185,6 @@ class TrafficScheduler:
                 t = int(t) * self.config.NETWORK_FREQUENCY + time_offset * self.config.NETWORK_FREQUENCY
                 src, dst, burst = int(src), int(dst), int(burst)
 
-                # # Ring拓扑节点映射
-                # if self.use_ring_mapping and self.ring_config:
-                #     src = self.ring_config.map_node(src)
-                #     dst = self.ring_config.map_node(dst)
-
                 # 创建带traffic_id的请求元组
                 req_tuple = (t, src, src_t, dst, dst_t, op, burst, traffic_id)
                 requests.append(req_tuple)
@@ -226,11 +221,6 @@ class TrafficScheduler:
             for req in chain_requests:
                 traffic_id = req[7]  # traffic_id在索引7
                 self.update_traffic_stats(traffic_id, "injected_req")
-
-        # if self.verbose and ready_requests:
-        #     print(f"Cycle {current_cycle}: Injecting {len(ready_requests)} requests")
-        #     for req in ready_requests:
-        #         print(f"  {req[7]}: {req[5]} from {req[1]} to {req[3]} at time {req[0]}")
 
         return ready_requests
 
@@ -300,7 +290,7 @@ class TrafficScheduler:
                     state.end_time = actual_end_ns
 
                     # 更新链的时间偏移（实际结束时间 + 间隔）
-                    gap_time = 0  # 10ns间隔
+                    gap_time = 20  # 两个traffic之间的间隔
                     chain.chain_time_offset = actual_end_ns + gap_time
 
                     if self.verbose:

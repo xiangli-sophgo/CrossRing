@@ -23,9 +23,9 @@ class TokenBucket:
         self.tokens = bucket_size
         self.last_cycle = 0
 
-    def consume(self):
-        if self.tokens > 0:
-            self.tokens -= 1
+    def consume(self, num=1):
+        if self.tokens >= num:
+            self.tokens -= num
             return True
         return False
 

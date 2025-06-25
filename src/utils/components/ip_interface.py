@@ -162,6 +162,10 @@ class IPInterface:
 
         # 根据网络类型进行不同的处理
         if network_type == "req":
+            if self.token_bucket:
+                self.token_bucket.refill(self.current_cycle)
+                if not self.token_bucket.consume(flit.burst_length):
+                    return
             if flit.req_attr == "new" and not self._check_and_reserve_resources(flit):
                 return  # 资源不足，保持在inject_fifo中
             flit.flit_position = "L2H_FIFO"

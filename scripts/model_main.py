@@ -19,12 +19,12 @@ def main():
     traffic_config = [
         [
             # r"Read_burst4_2262HBM_v2.txt",
-            r"MLP_MoE.txt",
+            # r"MLP_MoE.txt",
         ]
         * 3,
         [
             # r"All2All_Combine.txt",
-            # r"All2All_Dispatch.txt",
+            r"All2All_Dispatch.txt",
             # r"R_5x2.txt"
         ],
     ]
@@ -65,12 +65,12 @@ def main():
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
-        flow_fig_show_CDMA=0,
+        flow_fig_show_CDMA=1,
         plot_RN_BW_fig=1,
-        plot_link_state=0,
-        plot_start_time=0,
+        plot_link_state=1,
+        plot_start_time=20,
         print_trace=0,
-        show_trace_id=0,
+        show_trace_id=7,
         show_node_id=4,
         verbose=1,
     )

@@ -461,8 +461,8 @@ class BandwidthAnalyzer:
                     plt.text(abs_end[-1] / 1000, bandwidth[-1], f"{bandwidth[-1]:.2f}", va="center", color=segment_color, fontsize=12)
                 last_bw = bandwidth[-1]
                 # 打印每个区间的最终带宽值（可选）
-                if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
-                    print(f"{port_key} seg{i} Final Bandwidth: {bandwidth[-1]:.2f} GB/s")
+                # if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
+                #     print(f"{port_key} seg{i} Final Bandwidth: {bandwidth[-1]:.2f} GB/s")
             total_bw += last_bw
 
         if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
@@ -1468,7 +1468,7 @@ class BandwidthAnalyzer:
             else:
                 print("警告: 未找到配置文件，使用默认配置")
                 config_data = {
-                    "min_gap_threshold": 50,
+                    # "min_gap_threshold": 50,
                     "network_frequency": 1.0,
                     "burst": 4,
                     "topo_type": "unknown",
@@ -1482,7 +1482,7 @@ class BandwidthAnalyzer:
             config_data = config_dict
 
         # 设置分析器属性
-        self.min_gap_threshold = config_data.get("min_gap_threshold", 50)
+        # self.min_gap_threshold = config_data.get("min_gap_threshold", 50)
         self.network_frequency = config_data.get("network_frequency", 1.0)
         self.finish_cycle = config_data.get("finish_cycle", 1000000)
 
@@ -1639,7 +1639,7 @@ class BandwidthAnalyzer:
             print(f"具体端口的统计CSV： {output_path}ports_bandwidth.csv")
 
     @staticmethod
-    def reanalyze_and_plot_from_csv(csv_folder: str, output_path: str = None, plot_rn_bw: bool = True, plot_flow: bool = False, show_cdma: bool = False) -> Dict:
+    def reanalyze_and_plot_from_csv(csv_folder: str, output_path: str = None, plot_rn_bw: bool = True, plot_flow: bool = False, show_cdma: bool = False, min_gap_threshold=50) -> Dict:
         """
         从CSV文件重新分析并绘图
 
@@ -1664,6 +1664,7 @@ class BandwidthAnalyzer:
         analyzer.plot_flow_graph = plot_flow
         analyzer.finish_cycle = -np.inf
         analyzer.ip_bandwidth_data = None
+        analyzer.min_gap_threshold = min_gap_threshold
 
         # 从CSV加载数据
         analyzer.load_requests_from_csv(csv_folder)
@@ -2364,7 +2365,7 @@ def analyze_bandwidth(sim_model, config, output_path: str = "./bandwidth_analysi
     return results
 
 
-def replot_from_result_folder(csv_folder: str, plot_rn_bw: bool = True, plot_flow: bool = True, output_filename: str = None, show_cdma: bool = False) -> Dict:
+def replot_from_result_folder(csv_folder: str, plot_rn_bw: bool = True, plot_flow: bool = True, output_filename: str = None, show_cdma: bool = False, min_gap_threshold=50) -> Dict:
     """
     便捷函数：从CSV文件夹重新分析并绘制所有图表
 
@@ -2379,12 +2380,12 @@ def replot_from_result_folder(csv_folder: str, plot_rn_bw: bool = True, plot_flo
     """
     output_path = csv_folder
 
-    results = BandwidthAnalyzer.reanalyze_and_plot_from_csv(csv_folder, output_path, plot_rn_bw=plot_rn_bw, plot_flow=plot_flow, show_cdma=show_cdma)
+    results = BandwidthAnalyzer.reanalyze_and_plot_from_csv(csv_folder, output_path, plot_rn_bw=plot_rn_bw, plot_flow=plot_flow, show_cdma=show_cdma, min_gap_threshold=min_gap_threshold)
 
     return results
 
 
-def batch_replot_all_from_csv_folders(parent_folder: str, pattern: str = "*bandwidth_analysis*", plot_rn_bw: bool = True, plot_flow: bool = True):
+def batch_replot_all_from_csv_folders(parent_folder: str, pattern: str = "*bandwidth_analysis*", plot_rn_bw: bool = True, plot_flow: bool = True, min_gap_threshold=50):
     """批量从CSV重新绘制所有图表"""
     import glob
 
@@ -2395,7 +2396,7 @@ def batch_replot_all_from_csv_folders(parent_folder: str, pattern: str = "*bandw
         if os.path.isdir(folder):
             try:
                 start_time = time.time()
-                results = replot_from_result_folder(folder, plot_rn_bw, plot_flow)
+                results = replot_from_result_folder(folder, plot_rn_bw, plot_flow, min_gap_threshold=min_gap_threshold)
                 end_time = time.time()
 
                 folder_name = os.path.basename(folder)
@@ -2430,8 +2431,9 @@ def batch_replot_all_from_csv_folders(parent_folder: str, pattern: str = "*bandw
 def main():
     # 1. 从CSV重新分析和绘图
     total_bw = replot_from_result_folder(
-        r"../../Result/CrossRing/REQ_RSP/5x4/LLama2_AllReduce",
-        show_cdma=False,
+        r"../../Result/CrossRing/TMB/5x4/p_MLP_MoE_All2All_Dispatch",
+        show_cdma=True,
+        min_gap_threshold=1000,
     )
 
     # # 2. 批量处理多个结果文件夹
