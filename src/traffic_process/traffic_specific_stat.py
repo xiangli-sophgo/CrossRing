@@ -17,7 +17,7 @@ plt.rcParams["axes.unicode_minus"] = False  # 解决负号显示问题
 # file_path = f"../../traffic/output_v8_32_0427/step5_data_merge/LLama2_Attention_FC_Trace.txt"
 # file_path = f"../../traffic/output_v8_0427/step2_hash_addr2node/LLama2_Attention_FC/gmemTrace.TPU1.tdma_instance.txt"
 # file_path = f"../../traffic/output_All_reduce_new_0427/step5_data_merge/TPS009-Llama2-70B-S4K-O1-W8A8-B128-LMEM2M-AllReduce_Trace.txt"
-file_path = r"../../traffic/nxn/3×3.txt"
+file_path = r"../../traffic/0617/R_5x2.txt"
 # file_path = r"../../traffic/DeepSeek_0616/step6_ch_map/Add.txt"
 data = pd.read_csv(file_path, header=None)
 

@@ -12,7 +12,7 @@ import logging
 from src.core.base_model import BaseModel
 
 # from src.utils.routing_strategies import create_routing_strategy  # 暂时注释掉
-from src.utils.component import Flit, Network, Node, RingNetwork
+from src.utils.components import Flit, Network, Node, RingNetwork
 from config.config import CrossRingConfig
 
 
@@ -24,21 +24,49 @@ class RingConfig(CrossRingConfig):
         super().__init__()
 
         # Ring特有参数
-        self.RING_NUM_NODES = 8
-        self.TOPO_TYPE = f"Ring_{self.RING_NUM_NODES}"
+        self.RING_NUM_NODE = 8
+        self.TOPO_TYPE = f"Ring_{self.RING_NUM_NODE}"
 
         # 路由策略配置
         self.ROUTING_STRATEGY = "load_balanced"  # shortest/load_balanced/adaptive/custom
         self.LOAD_BALANCE_POLICY = "even_cw_odd_ccw"  # 负载均衡策略
-        self.ADAPTIVE_THRESHOLD = 0.7  # 自适应路由阈值
         self.CUSTOM_ROUTES = {}  # 自定义路由表
+        self.BURST = 4
+        self.NUM_DDR = 16
+        self.NUM_GDMA = 16
+        self.NUM_IP = 16
+        self.RN_R_TRACKER_OSTD = 64
+        self.RN_W_TRACKER_OSTD = 32
+        self.RN_RDB_SIZE = self.RN_R_TRACKER_OSTD * self.BURST
+        self.RN_WDB_SIZE = self.RN_W_TRACKER_OSTD * self.BURST
+        self.SN_DDR_R_TRACKER_OSTD = 96
+        self.SN_DDR_W_TRACKER_OSTD = 48
+        self.SN_L2M_R_TRACKER_OSTD = 96
+        self.SN_L2M_W_TRACKER_OSTD = 48
+        self.SN_DDR_WDB_SIZE = self.SN_DDR_W_TRACKER_OSTD * self.BURST
+        self.SN_L2M_WDB_SIZE = self.SN_L2M_W_TRACKER_OSTD * self.BURST
+        self.DDR_R_LATENCY_original = 100
+        self.DDR_R_LATENCY_VAR_original = 0
+        self.DDR_W_LATENCY_original = 0
+        self.L2M_R_LATENCY_original = 12
+        self.L2M_W_LATENCY_original = 16
+        self.IQ_CH_FIFO_DEPTH = 10
+        self.EQ_CH_FIFO_DEPTH = 10
+        self.IQ_OUT_FIFO_DEPTH = 8
+        self.RB_OUT_FIFO_DEPTH = 8
+        self.SN_TRACKER_RELEASE_LATENCY = 40
+        self.CDMA_BW_LIMIT = 8
+        self.DDR_BW_LIMIT = 80
 
-        # Ring特有的缓冲配置
-        self.RING_BUFFER_DEPTH = 8
-        self.ENABLE_ADAPTIVE_ROUTING = False
-        self.CONGESTION_THRESHOLD = 0.7
+        self.TL_Etag_T2_UE_MAX = 8
+        self.TL_Etag_T1_UE_MAX = 15
+        self.EQ_IN_FIFO_DEPTH = 16
 
-        # 确保CH_NAME_LIST存在，Ring拓扑不使用CDMA
+        self.ITag_TRIGGER_Th_H = self.ITag_TRIGGER_Th_V = 80
+        self.ITag_MAX_NUM_H = self.ITag_MAX_NUM_V = 1
+        self.ETag_BOTHSIDE_UPGRADE = 0
+        self.SLICE_PER_LINK = 8
+
         self.CHANNEL_SPEC = {
             "gdma": 2,
             "sdma": 2,
@@ -56,7 +84,7 @@ class RingConfig(CrossRingConfig):
     def _setup_ring_ip_distribution(self):
         """设置Ring拓扑的IP分布"""
         # 在Ring中，所有节点都可以连接IP
-        all_positions = list(range(self.RING_NUM_NODES))
+        all_positions = list(range(self.RING_NUM_NODE))
 
         # 根据IP数量分配到节点
         self.GDMA_SEND_POSITION_LIST = all_positions
@@ -70,14 +98,14 @@ class RingConfig(CrossRingConfig):
         if topo_type.startswith("Ring"):
             # 解析Ring节点数
             try:
-                self.RING_NUM_NODES = int(topo_type.split("_")[1])
+                self.RING_NUM_NODE = int(topo_type.split("_")[1])
             except (IndexError, ValueError):
-                self.RING_NUM_NODES = 8
+                self.RING_NUM_NODE = 8
 
             # 更新基本拓扑参数
-            self.NUM_NODE = self.RING_NUM_NODES
-            self.NUM_COL = 2  # Ring是1维拓扑
-            self.NUM_ROW = self.RING_NUM_NODES
+            self.NUM_NODE = self.RING_NUM_NODE
+            self.NUM_COL = 2
+            self.NUM_ROW = self.RING_NUM_NODE
 
             # 重新设置IP分布
             self._setup_ring_ip_distribution()
@@ -92,7 +120,7 @@ class RingModel(BaseModel):
     def __init__(self, model_type, config: RingConfig, topo_type, traffic_file_path, **kwargs):
         # 确保使用Ring拓扑类型
         if not topo_type.startswith("Ring"):
-            topo_type = f"Ring_{config.RING_NUM_NODES}"
+            topo_type = f"Ring_{config.RING_NUM_NODE}"
 
         # 提取BaseModel需要的参数
         base_params = {
@@ -118,24 +146,44 @@ class RingModel(BaseModel):
         # Ring特有的统计信息
         self.ring_stats = {"cw_usage": 0, "ccw_usage": 0, "diagonal_routes": 0, "adaptive_routes": 0, "routing_decisions": defaultdict(int)}
 
-        logging.info(f"Ring topology initialized: {self.config.RING_NUM_NODES} nodes, " f"routing strategy: {self.config.ROUTING_STRATEGY}")
+        logging.info(f"Ring topology initialized: {self.config.RING_NUM_NODE} nodes, " f"routing strategy: {self.config.ROUTING_STRATEGY}")
         self.initial()
 
     def node_map(self, node, is_source=True):
-        return node
+        # node_map_dict = {0: 0, 1: 9, 2: 1, 3: 8, 4: 2, 5: 7, 6: 3, 7: 6, 8: 4, 9: 5}
+        node_map_dict = {
+            0: 0,
+            1: 7,
+            2: 1,
+            3: 6,
+            4: 2,
+            5: 5,
+            6: 3,
+            7: 4,
+        }
+        return node_map_dict[node]
 
     def _create_simple_routing_strategy(self):
         """创建简单的路由策略"""
 
         class SimpleRingRouter:
-            def __init__(self, config):
+            def __init__(self, config: RingConfig):
                 self.config = config
-                self.num_nodes = config.RING_NUM_NODES
+                self.num_nodes = config.RING_NUM_NODE
 
             def get_route_direction(self, source, destination, **context):
                 if source == destination:
                     return "LOCAL"
 
+                # 应用负载均衡策略
+                if self.config.ROUTING_STRATEGY == "load_balanced":
+                    return self._get_load_balanced_direction(source, destination)
+                else:
+                    # 默认最短路径策略
+                    return self._get_shortest_path_direction(source, destination)
+
+            def _get_shortest_path_direction(self, source, destination):
+                """最短路径策略"""
                 # 计算顺时针和逆时针距离
                 cw_distance = (destination - source) % self.num_nodes
                 ccw_distance = (source - destination) % self.num_nodes
@@ -146,11 +194,30 @@ class RingModel(BaseModel):
                 else:
                     return "CCW"  # 逆时针
 
+            def _get_load_balanced_direction(self, source, destination):
+                """负载均衡策略：仅对正对节点（对角）按奇偶分流，其他一律走最短路径"""
+                if self.config.LOAD_BALANCE_POLICY != "even_cw_odd_ccw":
+                    return self._get_shortest_path_direction(source, destination)
+
+                ring_size = self.config.RING_NUM_NODE  # 节点总数，比如 10
+
+                # 计算顺时针和逆时针距离
+                cw_distance = (destination - source + ring_size) % ring_size
+                ccw_distance = (source - destination + ring_size) % ring_size
+
+                # 只有在偶数节点环，且正对（距离恰好为 ring_size/2）时才用奇偶分流
+                if ring_size % 2 == 0 and cw_distance == ring_size // 2:
+                    # 正对节点：偶数源节点走顺时针，奇数源节点走逆时针
+                    return "CW" if (source % 2 == 0) else "CCW"
+
+                # 其他情况：始终选择最短方向
+                return "CW" if cw_distance < ccw_distance else "CCW"
+
         return SimpleRingRouter(self.config)
 
     def create_adjacency_matrix(self):
         """创建Ring拓扑邻接矩阵"""
-        return self._create_ring_adjacency_matrix(self.config.RING_NUM_NODES)
+        return self._create_ring_adjacency_matrix(self.config.RING_NUM_NODE)
 
     def _create_ring_adjacency_matrix(self, num_nodes: int):
         """创建Ring拓扑邻接矩阵"""
@@ -177,28 +244,25 @@ class RingModel(BaseModel):
         self.data_network = RingNetwork(self.config, self.adjacency_matrix, name="Data Network")
         # Apply Ring-specific network configurations
         self._configure_ring_networks()
-        # Recompute routing paths for Ring topology
-        from src.utils.optimal_placement import find_shortest_paths
-
-        self.routes = find_shortest_paths(self.adjacency_matrix)
+        # Recompute routing paths for Ring topology using Ring-specific strategy
+        self.routes = self._calculate_ring_routes()
         # Reinitialize IP modules with new networks and routes
         # from src.utils.component import IPInterface
-        from src.utils.component import create_ring_ip_interface
+        from src.utils.components import create_ring_ip_interface
 
         self.ip_modules = {}
-        for ip_pos in range(self.config.RING_NUM_NODES):
+        for ip_pos in range(self.config.RING_NUM_NODE):
             for ip_type in self.config.CH_NAME_LIST:
                 ip_interface = create_ring_ip_interface(ip_type, ip_pos, self.config, self.req_network, self.rsp_network, self.data_network, self.node, self.routes)
-                # Preserve ring_model reference if supported
-                if hasattr(ip_interface, "ring_model"):
-                    ip_interface.ring_model = self
+                # 设置ring_model引用，确保数据包能够使用Ring路由策略
+                ip_interface.ring_model = self
                 self.ip_modules[(ip_type, ip_pos)] = ip_interface
 
         # Override IQ directions for pure Ring topology
         self.IQ_directions = ["TL", "TR", "EQ"]
         self.IQ_direction_conditions = {
-            "TL": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == -1,
-            "TR": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == 1,
+            "TL": lambda flit: len(flit.path) > 1 and ((flit.path[1] - flit.path[0]) % self.config.NUM_NODE) == (self.config.NUM_NODE - 1),
+            "TR": lambda flit: len(flit.path) > 1 and ((flit.path[1] - flit.path[0]) % self.config.NUM_NODE) == 1,
             "EQ": lambda flit: len(flit.path) == 1,
         }
 
@@ -293,7 +357,7 @@ class RingModel(BaseModel):
         """
         Override tag movement for Ring topology: shift tags clockwise along the ring.
         """
-        num_nodes = self.config.RING_NUM_NODES
+        num_nodes = self.config.RING_NUM_NODE
         slice_count = self.config.SLICE_PER_LINK
         # Build list of CW links: each node to its next neighbor
         links = [(i, (i + 1) % num_nodes) for i in range(num_nodes)]
@@ -311,10 +375,48 @@ class RingModel(BaseModel):
                 idx += 1
 
     def _calculate_ring_routes(self):
-        """计算Ring拓扑的路由表 - 使用最短路径算法"""
-        from src.utils.optimal_placement import find_shortest_paths
+        """计算Ring拓扑的路由表 - 使用Ring特有的路由策略"""
+        return self._calculate_ring_strategy_paths()
 
-        return find_shortest_paths(self.adjacency_matrix)
+    def _calculate_ring_strategy_paths(self):
+        """使用Ring路由策略计算所有节点对之间的路径"""
+        num_nodes = self.config.RING_NUM_NODE
+        routes = {}
+
+        for source in range(num_nodes):
+            routes[source] = {}
+            for destination in range(num_nodes):
+                if source == destination:
+                    routes[source][destination] = [source]
+                else:
+                    path = self._compute_ring_path_with_strategy(source, destination)
+                    routes[source][destination] = path
+
+        return routes
+
+    def _compute_ring_path_with_strategy(self, source, destination):
+        """根据Ring路由策略计算单条路径"""
+        path = [source]
+        current = source
+
+        # 先确定这个源-目标对的路由方向（基于源节点的策略）
+        direction = self.routing_strategy.get_route_direction(source, destination)
+
+        while current != destination:
+            if direction == "CW":
+                current = (current + 1) % self.config.RING_NUM_NODE
+            elif direction == "CCW":
+                current = (current - 1) % self.config.RING_NUM_NODE
+            else:  # LOCAL - shouldn't happen in loop
+                break
+
+            path.append(current)
+
+            # 防止无限循环
+            if len(path) > self.config.RING_NUM_NODE:
+                break
+
+        return path
 
     def _get_ring_path(self, source: int, destination: int) -> List[int]:
         """获取Ring拓扑中两点间的路径 - 简化版本"""
@@ -330,19 +432,19 @@ class RingModel(BaseModel):
         if direction == "CW":
             # 顺时针路径
             while current != destination:
-                current = (current + 1) % self.config.RING_NUM_NODES
+                current = (current + 1) % self.config.RING_NUM_NODE
                 path.append(current)
         else:  # CCW
             # 逆时针路径
             while current != destination:
-                current = (current - 1) % self.config.RING_NUM_NODES
+                current = (current - 1) % self.config.RING_NUM_NODE
                 path.append(current)
 
         return path
 
     def _setup_ip_modules(self):
         """设置IP模块（复用BaseModel的逻辑）"""
-        from src.utils.component import IPInterface
+        from src.utils.components import IPInterface
 
         for ip_pos in self.flit_positions:
             for ip_type in self.config.CH_NAME_LIST:
@@ -402,11 +504,6 @@ class RingModel(BaseModel):
         # 暂时返回模拟数据
         return {"cw_congestion": 0.0, "ccw_congestion": 0.0, "node_utilization": 0.0}
 
-    def step_simulation(self):
-        """执行一个仿真周期 - 复用BaseModel的大部分逻辑"""
-        # BaseModel没有step_simulation方法，直接实现Ring特有的处理
-        self._update_ring_statistics()
-
     def _update_ring_statistics(self):
         """更新Ring特有的统计信息"""
         total_decisions = sum(self.ring_stats["routing_decisions"].values())
@@ -428,42 +525,12 @@ class RingModel(BaseModel):
 
         return ring_specific_stats
 
-    def print_ring_summary(self):
-        """打印Ring拓扑的性能摘要"""
-        print(f"\n=== Ring Topology Performance Summary ===")
-        print(f"Nodes: {self.config.RING_NUM_NODES}")
-        print(f"Routing Strategy: {self.config.ROUTING_STRATEGY}")
-
-        if self.config.ROUTING_STRATEGY == "load_balanced":
-            print(f"Load Balance Policy: {self.config.LOAD_BALANCE_POLICY}")
-
-        print(f"CW Utilization: {self.ring_stats.get('cw_utilization', 0):.3f}")
-        print(f"CCW Utilization: {self.ring_stats.get('ccw_utilization', 0):.3f}")
-        print(f"Adaptive Routes: {self.ring_stats['adaptive_routes']}")
-
-        print("\nRouting Decisions:")
-        for direction, count in self.ring_stats["routing_decisions"].items():
-            print(f"  {direction}: {count}")
-        print("==========================================")
-
-    def Ring_Bridge_arbitration(self, network):
-        """No-op for Ring topology: no cross-ring bridges."""
-        return
-
-    def RB_inject_vertical(self, network):
-        """No-op for Ring topology: no vertical ring injection."""
-        return []
-
-    def _process_ring_bridge_inject(self, network, *args, **kwargs):
-        """No-op for Ring topology: no ring_bridge injection."""
-        return None
-
     def Eject_Queue_arbitration(self, network, flit_type):
         """Override eject logic: Ring topology uses only EQ and IQ injections."""
         # Only handle IQ->EQ eject; skip TU and TD
         # Use BaseModel EQ eject: inject directly from inject_queues
         eject_count = 0
-        for ip_pos in range(self.config.RING_NUM_NODES):
+        for ip_pos in range(self.config.RING_NUM_NODE):
             # 构造eject_flits
             eject_flits = [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["TL", "TR"]] + [
                 network.inject_queues[fifo_pos][ip_pos][0] if network.inject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["EQ"]
@@ -473,7 +540,7 @@ class RingModel(BaseModel):
             self._move_to_eject_queues_pre(network, eject_flits, ip_pos)
             eject_count += 1
 
-    def _move_to_eject_queues_pre(self, network: Network, eject_flits, ip_pos):
+    def _move_to_eject_queues_pre(self, network: RingNetwork, eject_flits, ip_pos):
         for ip_type in network.EQ_channel_buffer.keys():
             # Ring topology: use ip_pos directly for round_robin indexing
             rr_queue = network.round_robin["EQ"][ip_type][ip_pos]
@@ -481,32 +548,50 @@ class RingModel(BaseModel):
                 if i >= len(eject_flits) or eject_flits[i] is None:
                     continue
                 if eject_flits[i].destination_type == ip_type and len(network.EQ_channel_buffer[ip_type][ip_pos]) < network.config.EQ_CH_FIFO_DEPTH:
-                    network.EQ_channel_buffer_pre[ip_type][ip_pos] = eject_flits[i]
-                    eject_flits[i].is_arrive = True
-                    eject_flits[i].arrival_eject_cycle = self.cycle
-                    eject_flits[i] = None
+                    flit = eject_flits[i]  # 保存flit引用，在设为None之前使用
+                    network.EQ_channel_buffer_pre[ip_type][ip_pos] = flit
+                    flit.is_arrive = True
+                    flit.arrival_eject_cycle = self.cycle
+
+                    # 从对应队列中移除flit并更新ue_used统计
                     if i == 0:
-                        flit = network.eject_queues["TL"][ip_pos].popleft()
-                        if flit.used_entry_level == "T0":
-                            network.EQ_UE_Counters["TL"][ip_pos]["T0"] -= 1
-                        elif flit.used_entry_level == "T1":
-                            network.EQ_UE_Counters["TL"][ip_pos]["T1"] -= 1
-                        elif flit.used_entry_level == "T2":
-                            network.EQ_UE_Counters["TL"][ip_pos]["T2"] -= 1
+                        removed_flit = network.eject_queues["TL"][ip_pos].popleft()
+                        if removed_flit.used_entry_level == "T0":
+                            network.ue_used[ip_pos][("TL", "T0")] -= 1
+                            if network.ue_used[ip_pos][("TL", "T0")] < 0:
+                                raise ValueError
+                        elif removed_flit.used_entry_level == "T1":
+                            network.ue_used[ip_pos][("TL", "T1")] -= 1
+                            if network.ue_used[ip_pos][("TL", "T1")] < 0:
+                                raise ValueError
+                        elif removed_flit.used_entry_level == "T2":
+                            network.ue_used[ip_pos][("TL", "T2")] -= 1
+                            if network.ue_used[ip_pos][("TL", "T2")] < 0:
+                                raise ValueError
                     elif i == 1:
-                        flit = network.eject_queues["TR"][ip_pos].popleft()
-                        if flit.used_entry_level == "T1":
-                            network.EQ_UE_Counters["TR"][ip_pos]["T1"] -= 1
-                        elif flit.used_entry_level == "T2":
-                            network.EQ_UE_Counters["TR"][ip_pos]["T2"] -= 1
+                        removed_flit = network.eject_queues["TR"][ip_pos].popleft()
+                        if removed_flit.used_entry_level == "T0":
+                            network.ue_used[ip_pos][("TR", "T0")] -= 1
+                            if network.ue_used[ip_pos][("TR", "T0")] < 0:
+                                raise ValueError
+                        elif removed_flit.used_entry_level == "T1":
+                            network.ue_used[ip_pos][("TR", "T1")] -= 1
+                            if network.ue_used[ip_pos][("TR", "T1")] < 0:
+                                raise ValueError
+                        elif removed_flit.used_entry_level == "T2":
+                            network.ue_used[ip_pos][("TR", "T2")] -= 1
+                            if network.ue_used[ip_pos][("TR", "T2")] < 0:
+                                raise ValueError
                     elif i == 2:
-                        flit = network.inject_queues["EQ"][ip_pos].popleft()
+                        removed_flit = network.inject_queues["EQ"][ip_pos].popleft()
 
                     if flit.ETag_priority == "T1":
                         self.EQ_ETag_T1_num_stat += 1
                     elif flit.ETag_priority == "T0":
                         self.EQ_ETag_T0_num_stat += 1
                     flit.ETag_priority = "T2"
+
+                    eject_flits[i] = None  # 最后设为None
 
                     rr_queue.remove(i)
                     rr_queue.append(i)
@@ -515,7 +600,7 @@ class RingModel(BaseModel):
 
     def _move_pre_to_queues(self, network, ip_pos):
         """重写Ring拓扑的pre-to-queues移动逻辑"""
-        # Ring拓扑简化版本，只处理基本的IQ和EQ方向
+        # IQ_pre → IQ_OUT
         for direction in self.IQ_directions:
             queue_pre = network.inject_queues_pre[direction]
             queue = network.inject_queues[direction]
@@ -557,18 +642,12 @@ class RingModel(BaseModel):
             if flit.flit_position == "Link":
                 link_flits.append(flit)
 
-        # 分阶段处理避免冲突：先计划移动，再执行移动
+        # 按照base_model的正确流程：先plan所有flit，再execute所有flit
         for flit in link_flits:
             network.plan_move(flit, self.cycle)
-
-        # 执行移动，如果成功则从flits列表中移除
-        flits_to_remove = []
         for flit in link_flits:
             if network.execute_moves(flit, self.cycle):
-                flits_to_remove.append(flit)
-
-        for flit in flits_to_remove:
-            flits.remove(flit)
+                flits.remove(flit)
 
         # 2. 处理eject仲裁（简化版本）
         self.Eject_Queue_arbitration(network, flit_type)
@@ -601,37 +680,14 @@ class RingModel(BaseModel):
     def move_pre_to_queues_all(self):
         """重写Ring拓扑的pre-to-queues移动，兼容IP接口和网络级别"""
         # 先处理IPInterface的pre->FIFO
-        for ip_pos in range(self.config.RING_NUM_NODES):
+        for ip_pos in range(self.config.RING_NUM_NODE):
             for ip_type in self.config.CH_NAME_LIST:
                 self.ip_modules[(ip_type, ip_pos)].move_pre_to_fifo()
         # 再处理网络级别的pre->FIFO
-        for ip_pos in range(self.config.RING_NUM_NODES):
+        for ip_pos in range(self.config.RING_NUM_NODE):
             self._move_pre_to_queues(self.req_network, ip_pos)
             self._move_pre_to_queues(self.rsp_network, ip_pos)
             self._move_pre_to_queues(self.data_network, ip_pos)
-
-    def process_comprehensive_results(self):
-        """Ring拓扑的综合结果处理 - 重写以使用Ring特有的画图功能"""
-        if not self.result_save_path:
-            return
-
-        # 调用基础的结果处理
-        super().process_comprehensive_results()
-
-        # Ring特有的画图功能
-        if self.plot_flow_fig:
-            try:
-                # 使用Ring特有的画图函数
-                self.result_processor.draw_flow_graph_ring_rectangular(
-                    self.data_network,  # 使用data network的链路统计
-                    save_path=self.results_fig_save_path or self.result_save_path
-                )
-                print("Ring flow graph generated successfully")
-            except Exception as e:
-                print(f"Error generating Ring flow graph: {e}")
-
-        # Ring特有的统计输出
-        self.print_ring_summary()
 
 
 # 便捷的工厂函数
@@ -649,16 +705,14 @@ def create_ring_model(num_nodes: int = 8, routing_strategy: str = "load_balanced
         RingModel: 配置好的Ring模型实例
     """
     config = RingConfig()  # 使用默认配置，避免文件路径问题
-    config.RING_NUM_NODES = num_nodes
+    config.RING_NUM_NODE = num_nodes
     config.ROUTING_STRATEGY = routing_strategy
 
     topo_type = f"Ring_{num_nodes}"
 
     # 设置默认参数
     default_params = {
-        "traffic_file_path": "../../test_data",
-        "traffic_config": [["Read_burst4_2262HBM_v2.txt"]],
-        "result_save_path": f"./results/Ring_{num_nodes}",
+        "result_save_path": f"../../Result/Ring_{num_nodes}",
         "plot_flow_fig": True,
         "plot_RN_BW_fig": True,
         "verbose": True,
@@ -676,18 +730,20 @@ if __name__ == "__main__":
     ring_model = create_ring_model(
         num_nodes=8,
         routing_strategy="load_balanced",
-        traffic_file_path="../../test_data",
+        traffic_file_path="../../traffic/0617",
+        # traffic_file_path="../../test_data",
+        traffic_config=[
+            [
+                "W_5x2.txt",
+                # "Read_burst4_2262HBM_v2.txt",
+            ],
+        ],
         print_trace=0,
-        show_trace_id=0,
+        show_trace_id=[18, 26],
     )
 
     # 运行仿真
     print("Starting Ring simulation...")
+    ring_model.end_time = 6000
+    ring_model.print_interval = 2000
     results = ring_model.run()
-
-    # 打印结果
-    ring_model.print_ring_summary()
-
-    # 获取详细统计
-    stats = ring_model.get_ring_performance_stats()
-    print(f"\nDetailed stats: {stats}")

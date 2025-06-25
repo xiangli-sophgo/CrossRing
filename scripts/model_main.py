@@ -12,14 +12,14 @@ if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
 
 
 def main():
-    traffic_file_path = r"../test_data/"
-    # traffic_file_path = r"../traffic/0617/"
+    # traffic_file_path = r"../test_data/"
+    traffic_file_path = r"../traffic/0617/"
     # traffic_file_path = r"../traffic/nxn_traffics"
 
     traffic_config = [
         [
-            r"Read_burst4_2262HBM_v2.txt",
-            # r"MLP_MoE.txt",
+            # r"Read_burst4_2262HBM_v2.txt",
+            r"MLP_MoE.txt",
         ]
         * 3,
         [
@@ -43,9 +43,9 @@ def main():
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        # topo_type = "5x4"  # SG2262
+        topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
-        topo_type = "5x2"
+        # topo_type = "4x2"
         # topo_type = "3x1"
         # topo_type = "6x5"  # SG2260
         # topo_type = "3x3"  # SG2260E
@@ -69,7 +69,7 @@ def main():
         plot_RN_BW_fig=1,
         plot_link_state=0,
         plot_start_time=0,
-        print_trace=1,
+        print_trace=0,
         show_trace_id=0,
         show_node_id=4,
         verbose=1,
@@ -250,7 +250,7 @@ def main():
             "ddr": 2,
             "l2m": 2,
         }
-    elif topo_type in ["5x2"]:
+    elif topo_type in ["4x2"]:
         sim.config.BURST = 4
         sim.config.RN_R_TRACKER_OSTD = 64
         sim.config.RN_W_TRACKER_OSTD = 32

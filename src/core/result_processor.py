@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Dict, List, Tuple, Optional, NamedTuple
 from dataclasses import dataclass
 from enum import Enum
-from src.utils.component import *
+from src.utils.components import *
 import matplotlib.pyplot as plt
 import networkx as nx
 from matplotlib.patches import Rectangle, FancyArrowPatch, Patch
@@ -84,6 +84,18 @@ class PortBandwidthMetrics:
 
 
 class BandwidthAnalyzer:
+    """
+    带宽分析器 - 统一的带宽统计分析类
+
+    功能：
+    1. 统计工作区间（去除空闲时间段）
+    2. 计算非加权和加权带宽
+    3. 分别统计读写操作
+    4. 统计混合读写操作（不区分读写类型）
+    5. 网络整体和RN端口带宽统计
+    6. 生成统一报告
+    """
+
     def _calculate_latency_stats(self):
         """计算并返回延迟统计数据字典，过滤掉无穷大"""
         import math
@@ -125,18 +137,6 @@ class BandwidthAnalyzer:
                 mixed["count"] += 1
                 mixed["max"] = max(mixed["max"], r.transaction_latency)
         return stats
-
-    """
-    带宽分析器 - 统一的带宽统计分析类
-
-    功能：
-    1. 统计工作区间（去除空闲时间段）
-    2. 计算非加权和加权带宽
-    3. 分别统计读写操作
-    4. 统计混合读写操作（不区分读写类型）
-    5. 网络整体和RN端口带宽统计
-    6. 生成统一报告
-    """
 
     def __init__(
         self,
@@ -181,15 +181,17 @@ class BandwidthAnalyzer:
             self.rn_positions.update(self.config.CDMA_SEND_POSITION_LIST)
         if hasattr(self.config, "DDR_SEND_POSITION_LIST"):
             self.sn_positions.update(pos - self.config.NUM_COL for pos in self.config.DDR_SEND_POSITION_LIST)
+            self.sn_positions.update(self.config.DDR_SEND_POSITION_LIST)
         if hasattr(self.config, "L2M_SEND_POSITION_LIST"):
             self.sn_positions.update(pos - self.config.NUM_COL for pos in self.config.L2M_SEND_POSITION_LIST)
+            self.sn_positions.update(self.config.L2M_SEND_POSITION_LIST)
 
-    def collect_requests_data(self, base_model) -> None:
-        """从base_model收集请求数据"""
+    def collect_requests_data(self, sim_model) -> None:
+        """从sim_model收集请求数据"""
         self.requests.clear()
-        self.base_model = base_model
+        self.sim_model = sim_model
 
-        for packet_id, flits in base_model.data_network.arrive_flits.items():
+        for packet_id, flits in sim_model.data_network.arrive_flits.items():
             if not flits or len(flits) != flits[0].burst_length:
                 continue
 
@@ -204,8 +206,8 @@ class BandwidthAnalyzer:
                 sn_end_time = representative_flit.data_entry_noc_from_cake1_cycle // self.network_frequency  # SN发出数据
 
                 # 读请求：flit的source是SN(DDR/L2M)，destination是RN(SDMA/GDMA/CDMA)
-                actual_source_node = representative_flit.destination + self.config.NUM_COL  # 实际发起请求的节点
-                actual_dest_node = representative_flit.source - self.config.NUM_COL  # 实际目标节点
+                actual_source_node = representative_flit.destination + (self.config.NUM_COL if not self.sim_model.topo_type_stat.startswith("Ring") else 0)  # 实际发起请求的节点
+                actual_dest_node = representative_flit.source - (self.config.NUM_COL if not self.sim_model.topo_type_stat.startswith("Ring") else 0)  # 实际目标节点
                 actual_source_type = representative_flit.original_source_type  # 实际发起请求的类型
                 actual_dest_type = representative_flit.original_destination_type  # 实际目标类型
             else:  # write
@@ -263,7 +265,10 @@ class BandwidthAnalyzer:
         """计算IP带宽数据矩阵"""
         rows = self.config.NUM_ROW
         cols = self.config.NUM_COL
-        if getattr(self.base_model, "topo_type_stat", None) != "4x5":
+        if getattr(self.sim_model, "topo_type_stat", None).startswith("Ring"):
+            rows = self.config.RING_NUM_NODE // 2
+            cols = 2
+        elif getattr(self.sim_model, "topo_type_stat", None) != "4x5":
             rows -= 1
 
         # 初始化数据结构
@@ -308,8 +313,16 @@ class BandwidthAnalyzer:
                 by_type[source_type].append(req)
 
             # 计算物理位置
-            physical_col = source_node % cols
-            physical_row = source_node // cols // 2
+            if getattr(self.sim_model, "topo_type_stat", None).startswith("Ring"):
+                if source_node < rows:
+                    physical_col = 0
+                    physical_row = source_node
+                else:
+                    physical_col = 1
+                    physical_row = self.config.RING_NUM_NODE - 1 - source_node
+            else:
+                physical_col = source_node % cols
+                physical_row = source_node // cols // 2
 
             # 为每种类型计算带宽
             for source_type, type_requests in by_type.items():
@@ -349,8 +362,16 @@ class BandwidthAnalyzer:
                 by_type[dest_type].append(req)
 
             # 计算物理位置
-            physical_col = dest_node % cols
-            physical_row = dest_node // cols // 2
+            if getattr(self.sim_model, "topo_type_stat", None).startswith("Ring"):
+                if dest_node < rows:
+                    physical_col = 0
+                    physical_row = dest_node
+                else:
+                    physical_col = 1
+                    physical_row = self.config.RING_NUM_NODE - 1 - dest_node
+            else:
+                physical_col = dest_node % cols
+                physical_row = dest_node // cols // 2
 
             # 为每种类型计算带宽
             for dest_type, type_requests in by_type.items():
@@ -373,7 +394,7 @@ class BandwidthAnalyzer:
                     total_metrics = self.calculate_bandwidth_metrics(type_requests, operation_type=None)
                     self.ip_bandwidth_data["total"][dest_type][physical_row, physical_col] = total_metrics.weighted_bandwidth
 
-    def plot_rn_bandwidth_curves_new(self) -> float:
+    def plot_rn_bandwidth_curves_work_interval(self) -> float:
         """
         绘制RN端带宽曲线图，使用累积和计算带宽，区分工作区间（gap大于阈值时分段）
 
@@ -440,11 +461,11 @@ class BandwidthAnalyzer:
                     plt.text(abs_end[-1] / 1000, bandwidth[-1], f"{bandwidth[-1]:.2f}", va="center", color=segment_color, fontsize=12)
                 last_bw = bandwidth[-1]
                 # 打印每个区间的最终带宽值（可选）
-                if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
+                if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
                     print(f"{port_key} seg{i} Final Bandwidth: {bandwidth[-1]:.2f} GB/s")
             total_bw += last_bw
 
-        if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
+        if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
             print(f"Total Bandwidth: {total_bw:.2f} GB/s")
             print("=" * 60)
 
@@ -455,8 +476,8 @@ class BandwidthAnalyzer:
             plt.legend()
             plt.grid(True)
             # 自动保存RN带宽曲线到结果文件夹
-            if self.plot_rn_bw_fig and hasattr(self, "base_model") and getattr(self.base_model, "results_fig_save_path", None):
-                rn_save_path = os.path.join(self.base_model.results_fig_save_path, f"rn_bandwidth_{self.config.TOPO_TYPE}_{self.base_model.file_name}_{time.time_ns()}.png")
+            if self.plot_rn_bw_fig and hasattr(self, "sim_model") and getattr(self.sim_model, "results_fig_save_path", None):
+                rn_save_path = os.path.join(self.sim_model.results_fig_save_path, f"rn_bandwidth_{self.config.TOPO_TYPE}_{self.sim_model.file_name}_{time.time_ns()}.png")
                 fig.savefig(rn_save_path, bbox_inches="tight")
             else:
                 plt.show()
@@ -500,12 +521,12 @@ class BandwidthAnalyzer:
                 plt.text(times[mask][-1] / 1000, bandwidth[mask][-1], f"{bandwidth[mask][-1]:.2f}", va="center", color=line.get_color(), fontsize=12)
 
             # 打印最终带宽值
-            if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
+            if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
                 print(f"{port_key} Final Bandwidth: {bandwidth[mask][-1]:.2f} GB/s")
 
             total_bw += bandwidth[mask][-1]
 
-        if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
+        if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
             print(f"Total Bandwidth: {total_bw:.2f} GB/s")
             print("=" * 60)
 
@@ -516,8 +537,8 @@ class BandwidthAnalyzer:
             plt.legend()
             plt.grid(True)
             # 自动保存RN带宽曲线到结果文件夹
-            if self.plot_rn_bw_fig and hasattr(self, "base_model") and getattr(self.base_model, "results_fig_save_path", None):
-                rn_save_path = os.path.join(self.base_model.results_fig_save_path, f"rn_bandwidth_{self.config.TOPO_TYPE}_{self.base_model.file_name}.png")
+            if self.plot_rn_bw_fig and hasattr(self, "sim_model") and getattr(self.sim_model, "results_fig_save_path", None):
+                rn_save_path = os.path.join(self.sim_model.results_fig_save_path, f"rn_bandwidth_{self.config.TOPO_TYPE}_{self.sim_model.file_name}.png")
                 fig.savefig(rn_save_path, bbox_inches="tight")
             else:
                 plt.show()
@@ -798,28 +819,28 @@ class BandwidthAnalyzer:
 
         # 获取Circuit统计数据（如果存在）
         circuit_stats = {}
-        if hasattr(self, "base_model") and self.base_model:
+        if hasattr(self, "sim_model") and self.sim_model:
             circuit_stats = {
-                "req_circuits_h": getattr(self.base_model, "req_cir_h_num_stat", 0),
-                "req_circuits_v": getattr(self.base_model, "req_cir_v_num_stat", 0),
-                "rsp_circuits_h": getattr(self.base_model, "rsp_cir_h_num_stat", 0),
-                "rsp_circuits_v": getattr(self.base_model, "rsp_cir_v_num_stat", 0),
-                "data_circuits_h": getattr(self.base_model, "data_cir_h_num_stat", 0),
-                "data_circuits_v": getattr(self.base_model, "data_cir_v_num_stat", 0),
-                "req_wait_cycles_h": getattr(self.base_model, "req_wait_cycle_h_num_stat", 0),
-                "req_wait_cycles_v": getattr(self.base_model, "req_wait_cycle_v_num_stat", 0),
-                "rsp_wait_cycles_h": getattr(self.base_model, "rsp_wait_cycle_h_num_stat", 0),
-                "rsp_wait_cycles_v": getattr(self.base_model, "rsp_wait_cycle_v_num_stat", 0),
-                "data_wait_cycles_h": getattr(self.base_model, "data_wait_cycle_h_num_stat", 0),
-                "data_wait_cycles_v": getattr(self.base_model, "data_wait_cycle_v_num_stat", 0),
-                "read_retry_num": getattr(self.base_model, "read_retry_num_stat", 0),
-                "write_retry_num": getattr(self.base_model, "write_retry_num_stat", 0),
-                "EQ_ETag_T1_num": getattr(self.base_model, "EQ_ETag_T1_num_stat", 0),
-                "EQ_ETag_T0_num": getattr(self.base_model, "EQ_ETag_T0_num_stat", 0),
-                "RB_ETag_T1_num": getattr(self.base_model, "RB_ETag_T1_num_stat", 0),
-                "RB_ETag_T0_num": getattr(self.base_model, "RB_ETag_T0_num_stat", 0),
-                "ITag_h_num": getattr(self.base_model, "ITag_h_num_stat", 0),
-                "ITag_v_num": getattr(self.base_model, "ITag_v_num_stat", 0),
+                "req_circuits_h": getattr(self.sim_model, "req_cir_h_num_stat", 0),
+                "req_circuits_v": getattr(self.sim_model, "req_cir_v_num_stat", 0),
+                "rsp_circuits_h": getattr(self.sim_model, "rsp_cir_h_num_stat", 0),
+                "rsp_circuits_v": getattr(self.sim_model, "rsp_cir_v_num_stat", 0),
+                "data_circuits_h": getattr(self.sim_model, "data_cir_h_num_stat", 0),
+                "data_circuits_v": getattr(self.sim_model, "data_cir_v_num_stat", 0),
+                "req_wait_cycles_h": getattr(self.sim_model, "req_wait_cycle_h_num_stat", 0),
+                "req_wait_cycles_v": getattr(self.sim_model, "req_wait_cycle_v_num_stat", 0),
+                "rsp_wait_cycles_h": getattr(self.sim_model, "rsp_wait_cycle_h_num_stat", 0),
+                "rsp_wait_cycles_v": getattr(self.sim_model, "rsp_wait_cycle_v_num_stat", 0),
+                "data_wait_cycles_h": getattr(self.sim_model, "data_wait_cycle_h_num_stat", 0),
+                "data_wait_cycles_v": getattr(self.sim_model, "data_wait_cycle_v_num_stat", 0),
+                "read_retry_num": getattr(self.sim_model, "read_retry_num_stat", 0),
+                "write_retry_num": getattr(self.sim_model, "write_retry_num_stat", 0),
+                "EQ_ETag_T1_num": getattr(self.sim_model, "EQ_ETag_T1_num_stat", 0),
+                "EQ_ETag_T0_num": getattr(self.sim_model, "EQ_ETag_T0_num_stat", 0),
+                "RB_ETag_T1_num": getattr(self.sim_model, "RB_ETag_T1_num_stat", 0),
+                "RB_ETag_T0_num": getattr(self.sim_model, "RB_ETag_T0_num_stat", 0),
+                "ITag_h_num": getattr(self.sim_model, "ITag_h_num_stat", 0),
+                "ITag_v_num": getattr(self.sim_model, "ITag_v_num_stat", 0),
             }
 
         results = {
@@ -837,23 +858,25 @@ class BandwidthAnalyzer:
         }
 
         # 控制台输出重要数据
-        if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
+        if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
             self._print_summary_to_console(results)
 
         # 绘制RN带宽曲线
-        total_bandwidth = self.plot_rn_bandwidth_curves_new()
+        total_bandwidth = self.plot_rn_bandwidth_curves_work_interval()
         results["summary"]["Total_sum_BW"] = total_bandwidth
         results["Total_sum_BW"] = total_bandwidth
 
         if self.plot_flow_graph:
-            if self.base_model.results_fig_save_path:
+            if self.sim_model.results_fig_save_path:
                 # 保存流量图到结果文件夹
-                flow_fname = f"flow_graph_{self.config.TOPO_TYPE}_{self.base_model.file_name}.png"
-                flow_save_path = os.path.join(self.base_model.results_fig_save_path, flow_fname)
+                flow_fname = f"flow_graph_{self.config.TOPO_TYPE}_{self.sim_model.file_name}_{time.time_ns()}.png"
+                flow_save_path = os.path.join(self.sim_model.results_fig_save_path, flow_fname)
             else:
                 flow_save_path = None
-            self.draw_flow_graph(self.base_model.data_network, mode="total", save_path=flow_save_path, show_cdma=self.base_model.flow_fig_show_CDMA)
-
+            if self.sim_model.topo_type_stat.startswith("Ring"):
+                self.draw_ring_flow_graph(self.sim_model.data_network, save_path=flow_save_path)
+            else:
+                self.draw_flow_graph(self.sim_model.data_network, mode="total", save_path=flow_save_path, show_cdma=self.sim_model.flow_fig_show_CDMA)
         return results
 
     def draw_flow_graph(self, network: Network, mode="total", node_size=2000, save_path=None, show_cdma=True):
@@ -1407,8 +1430,8 @@ class BandwidthAnalyzer:
         }
 
         # 保存网络链路流量数据（如果存在）
-        if hasattr(self, "base_model") and hasattr(self.base_model, "data_network"):
-            network = self.base_model.data_network
+        if hasattr(self, "sim_model") and hasattr(self.sim_model, "data_network"):
+            network = self.sim_model.data_network
             if hasattr(network, "links_flow_stat"):
                 config_data["links_flow_stat"] = {}
                 for mode, links in network.links_flow_stat.items():
@@ -1422,7 +1445,7 @@ class BandwidthAnalyzer:
         with open(config_file, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=2)
 
-        if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
+        if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
             print(f"分析配置已保存: {config_file}")
 
     def load_requests_from_csv(self, csv_folder: str, config_dict: Dict = None):
@@ -1603,7 +1626,7 @@ class BandwidthAnalyzer:
         with open(report_file, "w", encoding="utf-8") as f:
             self._write_report_header(f, results)
             self._write_network_overall_section(f, results["network_overall"])
-            self._generate_rn_ports_csv(results["rn_ports"], output_path)
+            self._generate_ports_csv(results["rn_ports"], output_path)
 
         # 生成详细请求记录的CSV文件
         self._generate_detailed_request_csv(output_path)
@@ -1611,9 +1634,9 @@ class BandwidthAnalyzer:
         # 保存分析配置
         self._save_analysis_config(output_path)
 
-        if self.base_model.verbose:
+        if self.sim_model.verbose:
             print(f"带宽分析报告： {report_file}")
-            print(f"具体RN端口的统计CSV： {output_path}rn_ports_bandwidth.csv")
+            print(f"具体端口的统计CSV： {output_path}ports_bandwidth.csv")
 
     @staticmethod
     def reanalyze_and_plot_from_csv(csv_folder: str, output_path: str = None, plot_rn_bw: bool = True, plot_flow: bool = False, show_cdma: bool = False) -> Dict:
@@ -1649,7 +1672,7 @@ class BandwidthAnalyzer:
         if output_path is None:
             output_path = csv_folder
 
-        # 创建一个临时的base_model用于保存路径
+        # 创建一个临时的sim_model用于保存路径
         class TempBaseModel:
             def __init__(self, save_path, config):
                 self.results_fig_save_path = save_path
@@ -1658,11 +1681,11 @@ class BandwidthAnalyzer:
                 self.topo_type_stat = getattr(config, "TOPO_TYPE", "unknown")
                 self.flow_fig_show_CDMA = show_cdma  # 默认显示CDMA
 
-        analyzer.base_model = TempBaseModel(output_path, analyzer.config)
+        analyzer.sim_model = TempBaseModel(output_path, analyzer.config)
 
         if plot_rn_bw:
             # 绘制RN带宽曲线
-            total_bandwidth = analyzer.plot_rn_bandwidth_curves_new()
+            total_bandwidth = analyzer.plot_rn_bandwidth_curves_work_interval()
             print(f"重新分析得到的总带宽: {total_bandwidth:.2f} GB/s")
 
         # 绘制流图（如果有网络数据且用户要求）
@@ -1843,20 +1866,29 @@ class BandwidthAnalyzer:
                     )
             f.write("\n")
 
-    def _generate_rn_ports_csv(self, rn_ports, output_path: str):
+    def _generate_ports_csv(self, rn_ports: Dict[str, PortBandwidthMetrics], output_path: str):
         """
-        生成RN端口详细统计的CSV文件
+        生成所有端口（RN + SN）详细统计的CSV文件
 
+        ```
         Args:
-            rn_ports: RN端口统计数据
+            rn_ports: RN端口带宽统计字典，key 格式为 "{type}_{node_id}"
             output_path: 输出目录路径
         """
-        if not rn_ports:
-            if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
-                print("没有RN端口数据，跳过CSV生成")
+        # 1. 计算 SN 端口带宽并合并
+        sn_ports = self.calculate_sn_port_bandwidth()  # :contentReference[oaicite:0]{index=0}
+        all_ports = {**rn_ports, **sn_ports}
+
+        # 2. 若无任何端口数据则跳过
+        if not all_ports:
+            if hasattr(self, "sim_model") and self.sim_model and getattr(self.sim_model, "verbose", False):
+                print("没有端口数据，跳过 CSV 生成")
             return
 
-        # CSV文件头部 - 增加混合带宽字段
+        # 3. 确保输出目录存在
+        os.makedirs(output_path, exist_ok=True)
+
+        # 4. CSV 文件头（沿用原定义） :contentReference[oaicite:1]{index=1}
         csv_header = [
             "port_id",
             "coordinate",
@@ -1886,110 +1918,68 @@ class BandwidthAnalyzer:
             "mixed_network_end_time_ns",
         ]
 
-        # 生成RN端口CSV
-        rn_csv_file = os.path.join(output_path, "rn_ports_bandwidth.csv")
-        with open(rn_csv_file, "w", encoding="utf-8", newline="") as f:
+        csv_file = os.path.join(output_path, "ports_bandwidth.csv")
+        with open(csv_file, "w", encoding="utf-8", newline="") as f:
+            # 写入头部
             f.write(",".join(csv_header) + "\n")
 
-            # 按照特定顺序排序（先按类型，再按数字ID）
-            sorted_ports = sorted(rn_ports.items(), key=lambda x: (x[0].split("_")[0], int(x[0].split("_")[-1])))
+            # 5. 排序：先按端口类型字符串，再按节点编号大小
+            sorted_ports = sorted(all_ports.items(), key=lambda x: (x[0].split("_")[0], int(x[0].rsplit("_", 1)[1])))
 
-            for port_id, port_metrics in sorted_ports:
-                # 计算坐标
+            for port_id, metrics in sorted_ports:
+                # 提取节点索引
                 idx = int(port_id.rsplit("_", 1)[1])
-                row = 4 - idx // self.config.NUM_COL // 2
-                col = idx % self.config.NUM_COL
-                coordinate = f"x{col}_y{row}"
 
-                # 计算flit数量
-                read_flits = sum(interval.flit_count for interval in port_metrics.read_metrics.working_intervals) if port_metrics.read_metrics.working_intervals else 0
-                write_flits = sum(interval.flit_count for interval in port_metrics.write_metrics.working_intervals) if port_metrics.write_metrics.working_intervals else 0
-                mixed_flits = sum(interval.flit_count for interval in port_metrics.mixed_metrics.working_intervals) if port_metrics.mixed_metrics.working_intervals else 0
+                # 6. 计算 coordinate
+                if getattr(self.sim_model, "topo_type_stat", "").startswith("Ring"):
+                    # Ring 拓扑：直接使用节点编号
+                    coordinate = str(idx)
+                else:
+                    # CrossRing 拓扑：从左下角开始算 x/y
+                    cols = self.config.NUM_COL
+                    rows = self.config.NUM_ROW
+                    # 原编号从左上角行优先递增
+                    row_from_top = idx // cols
+                    col = idx % cols
+                    row = rows - 1 - row_from_top
+                    coordinate = f"x{col}_y{row}"
+                # —— 以上逻辑参考原有实现 :contentReference[oaicite:2]{index=2}
 
+                # 7. 统计 flit 数量
+                read_flits = sum(iv.flit_count for iv in metrics.read_metrics.working_intervals) if metrics.read_metrics.working_intervals else 0
+                write_flits = sum(iv.flit_count for iv in metrics.write_metrics.working_intervals) if metrics.write_metrics.working_intervals else 0
+                mixed_flits = sum(iv.flit_count for iv in metrics.mixed_metrics.working_intervals) if metrics.mixed_metrics.working_intervals else 0
+
+                # 8. 组装 CSV 行
                 row_data = [
                     port_id,
                     coordinate,
-                    port_metrics.read_metrics.unweighted_bandwidth,
-                    port_metrics.read_metrics.weighted_bandwidth,
-                    port_metrics.write_metrics.unweighted_bandwidth,
-                    port_metrics.write_metrics.weighted_bandwidth,
-                    port_metrics.mixed_metrics.unweighted_bandwidth,
-                    port_metrics.mixed_metrics.weighted_bandwidth,
-                    port_metrics.read_metrics.total_requests,
-                    port_metrics.write_metrics.total_requests,
-                    port_metrics.mixed_metrics.total_requests,
+                    metrics.read_metrics.unweighted_bandwidth,
+                    metrics.read_metrics.weighted_bandwidth,
+                    metrics.write_metrics.unweighted_bandwidth,
+                    metrics.write_metrics.weighted_bandwidth,
+                    metrics.mixed_metrics.unweighted_bandwidth,
+                    metrics.mixed_metrics.weighted_bandwidth,
+                    metrics.read_metrics.total_requests,
+                    metrics.write_metrics.total_requests,
+                    metrics.mixed_metrics.total_requests,
                     read_flits,
                     write_flits,
                     mixed_flits,
-                    len(port_metrics.read_metrics.working_intervals),
-                    len(port_metrics.write_metrics.working_intervals),
-                    len(port_metrics.mixed_metrics.working_intervals),
-                    port_metrics.read_metrics.total_working_time,
-                    port_metrics.write_metrics.total_working_time,
-                    port_metrics.mixed_metrics.total_working_time,
-                    port_metrics.read_metrics.network_start_time,
-                    port_metrics.read_metrics.network_end_time,
-                    port_metrics.write_metrics.network_start_time,
-                    port_metrics.write_metrics.network_end_time,
-                    port_metrics.mixed_metrics.network_start_time,
-                    port_metrics.mixed_metrics.network_end_time,
+                    len(metrics.read_metrics.working_intervals),
+                    len(metrics.write_metrics.working_intervals),
+                    len(metrics.mixed_metrics.working_intervals),
+                    metrics.read_metrics.total_working_time,
+                    metrics.write_metrics.total_working_time,
+                    metrics.mixed_metrics.total_working_time,
+                    metrics.read_metrics.network_start_time,
+                    metrics.read_metrics.network_end_time,
+                    metrics.write_metrics.network_start_time,
+                    metrics.write_metrics.network_end_time,
+                    metrics.mixed_metrics.network_start_time,
+                    metrics.mixed_metrics.network_end_time,
                 ]
-
                 f.write(",".join(map(str, row_data)) + "\n")
-
-    def _write_rn_ports_section(self, f, rn_ports):
-        """写入RN端口带宽统计部分"""
-        f.write("=" * 50 + "\n")
-        f.write("二、RN端口带宽统计\n")
-        f.write("=" * 50 + "\n\n")
-
-        if not rn_ports:
-            f.write("没有RN端口数据\n\n")
-            return
-
-        f.write(f"RN端口统计概览:\n")
-        f.write(f"  总端口数: {len(rn_ports)}\n")
-
-        # 统计各类型端口数量
-        port_types = {}
-        for port_id in rn_ports.keys():
-            port_type = port_id.split("_")[0]
-            port_types[port_type] = port_types.get(port_type, 0) + 1
-
-        for port_type, count in sorted(port_types.items()):
-            f.write(f"  {port_type.upper()}端口: {count}个\n")
-
-    def _write_usage_instructions(self, f):
-        """写入使用说明"""
-        f.write("=" * 50 + "\n")
-        f.write("四、使用说明\n")
-        f.write("=" * 50 + "\n\n")
-
-        f.write("使用方法:\n")
-        f.write("```python\n")
-        f.write("# 1. 创建分析器\n")
-        f.write("analyzer = BandwidthAnalyzer(config, min_gap_threshold=50)\n\n")
-        f.write("# 2. 收集数据\n")
-        f.write("analyzer.collect_requests_data(base_model)\n\n")
-        f.write("# 3. 执行分析\n")
-        f.write("results = analyzer.analyze_all_bandwidth()\n\n")
-        f.write("# 4. 生成报告\n")
-        f.write("analyzer.generate_unified_report(results, './output')\n\n")
-        f.write("# 5. 获取特定结果\n")
-        f.write("read_unweighted_bw = results['network_overall']['read'].unweighted_bandwidth\n")
-        f.write("read_weighted_bw = results['network_overall']['read'].weighted_bandwidth\n")
-        f.write("mixed_unweighted_bw = results['network_overall']['mixed'].unweighted_bandwidth\n")
-        f.write("mixed_weighted_bw = results['network_overall']['mixed'].weighted_bandwidth\n")
-        f.write("```\n\n")
-
-        f.write("参数说明:\n")
-        f.write("- min_gap_threshold: 工作区间合并阈值(ns)，默认50ns\n")
-        f.write("- 非加权带宽: 总数据量 / 网络总时间\n")
-        f.write("- 加权带宽: 各工作区间带宽按flit数量加权平均\n")
-        f.write("- 混合带宽: 不区分读写请求类型的带宽统计\n")
-        f.write("- 网络整体工作区间: 从第一笔请求发出到最后一笔数据完成传输\n")
-        f.write("- RN端口读请求: 从第一笔请求到收到最后一笔读数据\n")
-        f.write("- RN端口写请求: 从第一笔请求到发出最后一笔写数据\n")
 
     def _generate_detailed_request_csv(self, output_path: str):
         """
@@ -2012,7 +2002,6 @@ class BandwidthAnalyzer:
             "dest_node",
             "dest_type",
             "burst_length",
-            # "total_bytes",
             "cmd_latency_ns",
             "data_latency_ns",
             "transaction_latency_ns",
@@ -2032,7 +2021,6 @@ class BandwidthAnalyzer:
                     req.dest_node,
                     req.dest_type,
                     req.burst_length,
-                    # req.total_bytes,
                     req.cmd_latency,
                     req.data_latency,
                     req.transaction_latency,
@@ -2053,7 +2041,6 @@ class BandwidthAnalyzer:
                     req.dest_node,
                     req.dest_type,
                     req.burst_length,
-                    # req.total_bytes,
                     req.cmd_latency,
                     req.data_latency,
                     req.transaction_latency,
@@ -2061,7 +2048,7 @@ class BandwidthAnalyzer:
                 f.write(",".join(map(str, row)) + "\n")
 
         # 输出统计信息
-        if hasattr(self, "base_model") and self.base_model and hasattr(self.base_model, "verbose") and self.base_model.verbose:
+        if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
             print(f"详细请求记录统计:")
             print(f"  读请求CSV, {len(read_requests)} 条记录:  {read_csv_file}")
             print(f"  写请求CSV, {len(write_requests)} 条记录:  {write_csv_file}")
@@ -2126,88 +2113,6 @@ class BandwidthAnalyzer:
         with open(json_file, "w", encoding="utf-8") as f:
             json.dump(serializable_results, f, indent=2, ensure_ascii=False)
 
-    def draw_flow_graph_ring(self, ring_network, save_path=None):
-        """
-        绘制 Ring 拓扑流图：每个节点画一个矩形框，框外右上标号，
-        框内按行展示各 IP 类型（SDMA/GDMA/CDMA/DDR/L2M）合并后的总带宽。
-        """
-        self.precalculate_ip_bandwidth_data()
-        import numpy as np
-        from matplotlib.patches import Rectangle, FancyArrowPatch
-
-        # 准备画布
-        fig, ax = plt.subplots(figsize=(12, 8))
-        ax.set_aspect("equal")
-        ax.axis("off")
-
-        # 合并所有模式下的链路流量
-        links_stat = {}
-        for mode_links in ring_network.links_flow_stat.values():
-            for edge, val in mode_links.items():
-                links_stat[edge] = links_stat.get(edge, 0) + val
-        max_flow = max(links_stat.values()) if links_stat else 1.0
-
-        # 计算节点位置（网格 + 行偶数偏移）
-        pos = {}
-        for node in ring_network.ring_nodes:
-            nid = node.node_id
-            col = nid % self.config.NUM_COL
-            row = nid // self.config.NUM_COL
-            x = col * 3
-            y = -row * 1.5
-            if row % 2 == 1:
-                x -= 0.75
-                y -= 0.6
-            pos[nid] = (x, y)
-
-        # 绘制链路箭头，红色强度按流量/max_flow 线性映射
-        for (i, j), val in links_stat.items():
-            x1, y1 = pos[i]
-            x2, y2 = pos[j]
-            dx, dy = x2 - x1, y2 - y1
-            dist = np.hypot(dx, dy)
-            if dist == 0:
-                continue
-            ux, uy = dx / dist, dy / dist
-            start = (x1 + ux * 0.4, y1 + uy * 0.4)
-            end = (x2 - ux * 0.4, y2 - uy * 0.4)
-            intensity = min(max(val / max_flow, 0.0), 1.0)
-            arrow = FancyArrowPatch(start, end, arrowstyle="-|>", linewidth=1.5, color=(intensity, 0, 0))
-            ax.add_patch(arrow)
-
-        # 为每个节点画框、标号、IP带宽
-        for node in ring_network.ring_nodes:
-            nid = node.node_id
-            x, y = pos[nid]
-            # 矩形框
-            w, h = 1.0, 1.0
-            rect = Rectangle((x - w / 2, y - h / 2), w, h, edgecolor="black", facecolor="white", linewidth=1.2)
-            ax.add_patch(rect)
-            # 框外右上标号
-            ax.text(x + w / 2 + 0.1, y + h / 2 + 0.05, str(nid), ha="left", va="bottom", fontsize=10)
-            # 合并并显示各 IP 总带宽
-            lines = []
-            for svc in ["sdma", "gdma", "cdma", "ddr", "l2m"]:
-                mat = self.ip_bandwidth_data["total"].get(svc)
-                if mat is None:
-                    continue
-                # 带宽矩阵索引：row = nid//NUM_COL, col = nid%NUM_COL
-                r = nid // self.config.NUM_COL
-                c = nid % self.config.NUM_COL
-                bw = mat[r, c]
-                if bw and bw > 0:
-                    lines.append(f"{svc.upper()}:{bw:.1f}")
-            # 框内从上向下依次绘制，不带边框
-            for idx, text in enumerate(lines):
-                ax.text(x, y + h / 2 - 0.2 * (idx + 1), text, ha="center", va="center", fontsize=8)
-
-        plt.tight_layout()
-        if save_path:
-            fig.savefig(save_path, dpi=300, bbox_inches="tight")
-            plt.close(fig)
-        else:
-            plt.show()
-
     def _get_merged_ip_bandwidth_from_existing_data(self, node_id):
         """
         从现有的 self.ip_bandwidth_data 中获取指定Ring节点的合并IP带宽
@@ -2221,23 +2126,15 @@ class BandwidthAnalyzer:
         """
         merged_bandwidth = {}
 
-        self.calculate_ip_bandwidth_data()
-
-        # # 检查是否有已计算的IP带宽数据
-        # if not hasattr(self, "ip_bandwidth_data") or not self.ip_bandwidth_data:
-        #     print(f"警告: 节点 {node_id} 没有ip_bandwidth_data，尝试重新计算...")
-        #     # 如果没有数据，尝试重新计算
-        #     self.calculate_ip_bandwidth_data()
-        #     if not self.ip_bandwidth_data:
-        #         print("无法计算IP带宽数据，返回空数据")
-        #         return merged_bandwidth
-
-        # Ring节点到网格坐标的映射
-        # 🔥 这里需要根据Ring拓扑的实际映射方式来调整
         if hasattr(self.config, "NUM_COL") and self.config.NUM_COL > 0:
-            # 方案1: 简单线性映射
-            r = node_id // self.config.NUM_COL
-            c = node_id % self.config.NUM_COL
+            # 方案1: 环形节点 → 两列网格映射
+            half_nodes = self.config.RING_NUM_NODE // 2
+            if node_id < half_nodes:
+                # 左边列: 0,1,2,3,4 → (行=节点号, 列=0)
+                r, c = node_id, 0
+            else:
+                # 右边列: 9,8,7,6,5 → (行=总节点数-1-节点号, 列=1)
+                r, c = (self.config.RING_NUM_NODE - 1 - node_id), 1
         else:
             # 方案2: 默认映射
             r, c = 0, 0
@@ -2257,15 +2154,14 @@ class BandwidthAnalyzer:
                     bw = mat[r, c]
                     if bw > 0:
                         merged_bandwidth[svc] = bw
-                        print(f"  {svc.upper()}: {bw:.2f} GB/s")
+                        # print(f"  {svc.upper()}: {bw:.2f} GB/s")
 
-        # 🔥 新增：处理Ring特有的多IP实例合并
         # 如果Ring节点有多个同类型的IP实例，需要合并它们的带宽
-        if hasattr(self, "base_model") and hasattr(self.base_model, "ip_modules"):
+        if hasattr(self, "sim_model") and hasattr(self.sim_model, "ip_modules"):
             # 从Ring拓扑的ip_modules中获取该节点的实际IP连接
             node_ip_types = []
 
-            for (ip_type, ip_pos), ip_interface in self.base_model.ip_modules.items():
+            for (ip_type, ip_pos), ip_interface in self.sim_model.ip_modules.items():
                 if ip_pos == node_id:
                     node_ip_types.append(ip_type)
 
@@ -2278,799 +2174,174 @@ class BandwidthAnalyzer:
                         ip_groups[prefix] = []
                     ip_groups[prefix].append(ip_type)
 
-            # 根据实际IP数量调整带宽（如果需要）
-            for prefix, ip_list in ip_groups.items():
-                if prefix in merged_bandwidth and len(ip_list) > 1:
-                    # 如果有多个同类型IP，可能需要调整带宽计算
-                    # 这里假设现有计算已经正确处理了多IP的情况
-                    print(f"  {prefix.upper()} 有 {len(ip_list)} 个实例: {ip_list}")
-
         return merged_bandwidth
 
-    def draw_flow_graph_ring_rectangular(self, ring_network, save_path=None):
+    def draw_ring_flow_graph(self, ring_network, save_path=None):
         """
         绘制 Ring 拓扑流图 - n×2 矩形布局
         使用现有的带宽计算机制，从 self.ip_bandwidth_data 中获取已计算的带宽数据
+        顺时针箭头绘制在外环，逆时针箭头绘制在内环
         """
-
-        # 确保IP带宽数据已计算 - 使用现有的计算机制
+        # 确保 IP 带宽数据已计算
         self.precalculate_ip_bandwidth_data()
 
         # 准备画布
-        fig, ax = plt.subplots(figsize=(14, 16))
+        fig, ax = plt.subplots(figsize=(6, 8))
         ax.set_aspect("equal")
         ax.axis("off")
 
-        # 获取环形拓扑的节点数
+        # 获取节点数
         num_nodes = len(ring_network.ring_nodes)
-        # print(f"Ring节点数: {num_nodes}")
 
         # 合并所有模式下的链路流量
         links_stat = {}
         if hasattr(ring_network, "links_flow_stat"):
-            for mode, mode_links in ring_network.links_flow_stat.items():
+            for mode_links in ring_network.links_flow_stat.values():
                 for edge, val in mode_links.items():
                     links_stat[edge] = links_stat.get(edge, 0) + val
         else:
-            print("警告: ring_network没有links_flow_stat属性")
+            print("警告: ring_network 没有 links_flow_stat 属性")
 
-        # print(f"合并后的链路统计: {len(links_stat)} 条链路")
         max_flow = max(links_stat.values()) if links_stat else 1.0
-        # print(f"最大流量: {max_flow}")
 
-        # 计算n×2矩形布局的节点位置
+        # 计算节点位置 - n×2 矩形布局
         pos = {}
-
-        # 计算列数和行数
         cols = 2
-        rows = (num_nodes + 1) // 2  # 向上取整
-
-        # 节点间距
-        x_spacing = 5.0
-        y_spacing = 2.5
-
-        # Ring拓扑的矩形排列：
-        # 左列：0, 1, 2, ..., rows-1
-        # 右列：num_nodes-1, num_nodes-2, ..., rows（从下往上）
-
-        # 左列节点（从上到下）
-        for i in range(rows):
-            if i < num_nodes:
-                x = 0
-                y = (rows - 1 - i) * y_spacing
-                pos[i] = (x, y)
-
-        # 右列节点（从下到上）
-        right_start = rows
-        for i in range(right_start, num_nodes):
-            x = x_spacing
-            # 右列从底部开始向上排列
-            right_index = i - right_start
-            y = right_index * y_spacing
-            pos[i] = (x, y)
-
-        # print(f"矩形布局节点位置: {pos}")
-
-        # 节点尺寸
+        rows = (num_nodes + 1) // cols
+        x_spacing, y_spacing = 5.0, 2.5
         node_w, node_h = 2.0, 1.5
 
-        # 绘制Ring的相邻链路（矩形环形连接）
+        # 左列从上到下
+        for i in range(rows):
+            if i < num_nodes:
+                pos[i] = (0, (rows - 1 - i) * y_spacing)
+        # 右列从下到上
+        for i in range(rows, num_nodes):
+            right_index = i - rows
+            pos[i] = (x_spacing, right_index * y_spacing)
+
+        # 箭头绘制辅助函数
+        def get_arrow_props(flow_val):
+            if flow_val > 0:
+                intensity = min(max(flow_val / max_flow, 0.2), 1.0)
+                width = max(2.0, 4 * intensity)
+                alpha = 0.8
+            else:
+                intensity = 0.1
+                width = 1.5
+                alpha = 0.4
+            return width, intensity, alpha
+
+        def get_edge_connection_points(x1, y1, x2, y2, w, h):
+            dx, dy = x2 - x1, y2 - y1
+            if abs(dx) > abs(dy):  # 水平连接
+                if dx > 0:  # 向右
+                    return x1 + w / 2, y1, x2 - w / 2, y2
+                else:  # 向左
+                    return x1 - w / 2, y1, x2 + w / 2, y2
+            else:  # 垂直连接
+                if dy > 0:  # 向上
+                    return x1, y1 + h / 2, x2, y2 - h / 2
+                else:  # 向下
+                    return x1, y1 - h / 2, x2, y2 + h / 2
+
+        offset_size = 0.28
         for i in range(num_nodes):
             next_node = (i + 1) % num_nodes
-
-            # 获取双向流量
             cw_flow = links_stat.get((i, next_node), 0)
             ccw_flow = links_stat.get((next_node, i), 0)
-
-            # print(f"链路 {i}->{next_node}: CW={cw_flow}, CCW={ccw_flow}")
-
             if i not in pos or next_node not in pos:
                 continue
-
             x1, y1 = pos[i]
             x2, y2 = pos[next_node]
 
-            # 计算箭头的颜色和宽度
-            def get_arrow_props(flow_val):
-                if flow_val > 0:
-                    intensity = min(max(flow_val / max_flow, 0.2), 1.0)
-                    width = max(2.0, 6 * intensity)
-                    alpha = 0.8
-                else:
-                    intensity = 0.1
-                    width = 1.5
-                    alpha = 0.4
-                return width, intensity, alpha
+            # 获取连接点
+            sx, sy, ex, ey = get_edge_connection_points(x1, y1, x2, y2, node_w, node_h)
+            # 计算法向量：外侧和内侧偏移
+            dxl, dyl = ex - sx, ey - sy
+            length = np.hypot(dxl, dyl)
+            if length > 0:
+                perp_out_x, perp_out_y = dyl / length, -dxl / length
+                perp_in_x, perp_in_y = -dyl / length, dxl / length
+            else:
+                perp_out_x = perp_out_y = perp_in_x = perp_in_y = 0
 
-            # 计算从节点边缘到节点边缘的连接点
-            def get_edge_connection_points(x1, y1, x2, y2, w, h):
-                """计算从节点边缘到节点边缘的连接点"""
-                dx = x2 - x1
-                dy = y2 - y1
-
-                # 计算方向向量
-                if abs(dx) > abs(dy):
-                    # 主要是水平方向
-                    if dx > 0:  # 向右
-                        start_x = x1 + w / 2
-                        start_y = y1
-                        end_x = x2 - w / 2
-                        end_y = y2
-                    else:  # 向左
-                        start_x = x1 - w / 2
-                        start_y = y1
-                        end_x = x2 + w / 2
-                        end_y = y2
-                else:
-                    # 主要是垂直方向
-                    if dy > 0:  # 向上
-                        start_x = x1
-                        start_y = y1 + h / 2
-                        end_x = x2
-                        end_y = y2 - h / 2
-                    else:  # 向下
-                        start_x = x1
-                        start_y = y1 - h / 2
-                        end_x = x2
-                        end_y = y2 + h / 2
-
-                return start_x, start_y, end_x, end_y
-
-            # 判断连接类型
-            is_vertical = abs(x2 - x1) < 0.1  # 垂直连接
-            is_horizontal = abs(y2 - y1) < 0.1  # 水平连接
-
-            # 绘制顺时针箭头
-            if cw_flow > 0 or ccw_flow == 0:  # 总是至少显示一个方向
+            # 顺时针箭头（外环）
+            if cw_flow > 0 or ccw_flow == 0:
                 width, intensity, alpha = get_arrow_props(cw_flow)
                 color = (intensity, 0, 0) if cw_flow > 0 else (0.6, 0.6, 0.6)
-
-                # 获取连接点
-                start_x, start_y, end_x, end_y = get_edge_connection_points(x1, y1, x2, y2, node_w, node_h)
-
-                # 添加偏移避免重叠
-                if is_vertical:
-                    offset_x = 0.25
-                    offset_y = 0
-                elif is_horizontal:
-                    offset_x = 0
-                    offset_y = 0.25
-                else:
-                    # 对角连接
-                    dx, dy = end_x - start_x, end_y - start_y
-                    length = np.hypot(dx, dy)
-                    if length > 0:
-                        offset_x = -dy / length * 0.2
-                        offset_y = dx / length * 0.2
-                    else:
-                        offset_x, offset_y = 0.2, 0
-
-                final_start_x = start_x + offset_x
-                final_start_y = start_y + offset_y
-                final_end_x = end_x + offset_x
-                final_end_y = end_y + offset_y
-
-                arrow = FancyArrowPatch(
-                    (final_start_x, final_start_y), (final_end_x, final_end_y), arrowstyle="-|>", linewidth=width, color=color, alpha=alpha, mutation_scale=20, zorder=5  # 提高层级，确保箭头在节点上方
-                )
+                off_x, off_y = perp_out_x * offset_size, perp_out_y * offset_size
+                fsx, fsy = sx + off_x, sy + off_y
+                fex, fey = ex + off_x, ey + off_y
+                arrow = FancyArrowPatch((fsx, fsy), (fex, fey), arrowstyle="-|>", linewidth=width, color=color, alpha=alpha, mutation_scale=20, zorder=5)
                 ax.add_patch(arrow)
-
-                # 添加流量标签
                 if cw_flow > 0:
-                    mid_x = (final_start_x + final_end_x) / 2
-                    mid_y = (final_start_y + final_end_y) / 2
+                    mid_x, mid_y = (fsx + fex) / 2, (fsy + fey) / 2
+                    bw = (cw_flow * 128) / (self.finish_cycle // self.config.NETWORK_FREQUENCY) if getattr(self, "finish_cycle", 0) > 0 else 0
+                    ax.text(mid_x + off_x * 1.8, mid_y + off_y * 1.8, f"{bw:.1f}", fontsize=12, ha="center", va="center", fontweight="bold", zorder=6)
 
-                    # 转换为带宽
-                    bandwidth = (cw_flow * 128) / (self.finish_cycle // self.config.NETWORK_FREQUENCY) if hasattr(self, "finish_cycle") and self.finish_cycle > 0 else 0
-
-                    # 标签偏移
-                    label_offset_x = offset_x * 1.5
-                    label_offset_y = offset_y * 1.5
-
-                    ax.text(mid_x + label_offset_x, mid_y + label_offset_y, f"{bandwidth:.1f}", fontsize=12, ha="center", va="center", fontweight="bold", zorder=6)
-
-            # 绘制逆时针箭头
+            # 逆时针箭头（内环）
             if ccw_flow > 0:
                 width, intensity, alpha = get_arrow_props(ccw_flow)
                 color = (0, 0, intensity)
+                # 反向连接点
+                rsx, rsy, rex, rey = get_edge_connection_points(x2, y2, x1, y1, node_w, node_h)
+                off_x, off_y = perp_in_x * offset_size, perp_in_y * offset_size
+                fsx2, fsy2 = rsx + off_x, rsy + off_y
+                fex2, fey2 = rex + off_x, rey + off_y
+                arrow2 = FancyArrowPatch((fsx2, fsy2), (fex2, fey2), arrowstyle="-|>", linewidth=width, color=color, alpha=alpha, mutation_scale=20, zorder=5)
+                ax.add_patch(arrow2)
+                mid_x2, mid_y2 = (fsx2 + fex2) / 2, (fsy2 + fey2) / 2
+                bw2 = (ccw_flow * 128) / (self.finish_cycle // self.config.NETWORK_FREQUENCY) if getattr(self, "finish_cycle", 0) > 0 else 0
+                ax.text(mid_x2 + off_x * 1.8, mid_y2 + off_y * 1.8, f"{bw2:.1f}", fontsize=12, ha="center", va="center", fontweight="bold", zorder=6)
 
-                # 获取连接点（反向）
-                start_x, start_y, end_x, end_y = get_edge_connection_points(x2, y2, x1, y1, node_w, node_h)
-
-                # 添加反向偏移
-                if is_vertical:
-                    offset_x = -0.25
-                    offset_y = 0
-                elif is_horizontal:
-                    offset_x = 0
-                    offset_y = -0.25
-                else:
-                    dx, dy = end_x - start_x, end_y - start_y
-                    length = np.hypot(dx, dy)
-                    if length > 0:
-                        offset_x = -dy / length * 0.2
-                        offset_y = dx / length * 0.2
-                    else:
-                        offset_x, offset_y = -0.2, 0
-
-                final_start_x = start_x + offset_x
-                final_start_y = start_y + offset_y
-                final_end_x = end_x + offset_x
-                final_end_y = end_y + offset_y
-
-                arrow = FancyArrowPatch(
-                    (final_start_x, final_start_y), (final_end_x, final_end_y), arrowstyle="-|>", linewidth=width, color=color, alpha=alpha, mutation_scale=20, zorder=5  # 提高层级
-                )
-                ax.add_patch(arrow)
-
-                # 添加流量标签
-                mid_x = (final_start_x + final_end_x) / 2
-                mid_y = (final_start_y + final_end_y) / 2
-                bandwidth = (ccw_flow * 128) / (self.finish_cycle // self.config.NETWORK_FREQUENCY) if hasattr(self, "finish_cycle") and self.finish_cycle > 0 else 0
-
-                # 标签偏移
-                label_offset_x = offset_x * 1.5
-                label_offset_y = offset_y * 1.5
-
-                ax.text(mid_x + label_offset_x, mid_y + label_offset_y, f"{bandwidth:.1f}", fontsize=12, ha="center", va="center", fontweight="bold", zorder=6)
-
-        # 为每个节点画框、标号、IP带宽
-        for node in ring_network.ring_nodes:
-            nid = node.node_id
+        # 绘制节点、框和 IP 带宽信息
+        for nid in ring_network.ring_nodes:
             if nid not in pos:
                 continue
-
             x, y = pos[nid]
-
-            # 矩形框
-            rect = Rectangle((x - node_w / 2, y - node_h / 2), node_w, node_h, edgecolor="black", facecolor="lightcyan", linewidth=2.0, zorder=4)  # 节点在箭头下方
+            rect = Rectangle((x - node_w / 2, y - node_h / 2), node_w, node_h, edgecolor="black", facecolor="lightcyan", linewidth=2.0, zorder=4)
             ax.add_patch(rect)
-
-            # 框外上方标号
-            # ax.text(x, y + node_h / 2 + 0.2, f"Node {nid}", ha="center", va="bottom", fontsize=12, fontweight="bold", zorder=7)
-
-            # 🔥 使用现有的带宽计算机制获取IP带宽
-            merged_ip_bandwidth = self._get_merged_ip_bandwidth_from_existing_data(nid)
-
-            # 格式化显示的IP信息
-            lines = []
-            for ip_type, bandwidth in merged_ip_bandwidth.items():
-                if bandwidth > 0.1:
-                    lines.append(f"{ip_type.upper()}:{bandwidth:.1f}")
-
-            # 框内显示合并后的IP信息
+            merged_data = self._get_merged_ip_bandwidth_from_existing_data(nid)
+            lines = [f"{k.upper()}:{v:.1f}" for k, v in merged_data.items() if v > 0.1]
             if lines:
-                # 动态调整显示
-                max_lines = 5  # 每个节点最多显示5行
-                display_lines = lines[:max_lines]
-                line_height = (node_h - 0.4) / max(len(display_lines), 1)
-                font_size = max(8, min(11, int(16 - len(display_lines))))
-
-                for idx, text in enumerate(display_lines):
-                    text_y = y + node_h / 2 - 0.2 - (idx + 0.5) * line_height
-                    ax.text(x, text_y, text, ha="center", va="center", fontsize=font_size, fontweight="bold", zorder=7)
-
-                # 如果IP数量超过显示限制，添加省略号
+                max_lines = 5
+                disp = lines[:max_lines]
+                lh = (node_h - 0.4) / max(len(disp), 1)
+                fs = max(8, min(11, int(16 - len(disp))))
+                for j, txt in enumerate(disp):
+                    ty = y + node_h / 2 - 0.2 - (j + 0.5) * lh
+                    ax.text(x, ty, txt, ha="center", va="center", fontsize=fs, fontweight="bold", zorder=7)
                 if len(lines) > max_lines:
-                    text_y = y - node_h / 2 + 0.15
-                    ax.text(x, text_y, f"...+{len(lines) - max_lines}", ha="center", va="center", fontsize=8, style="italic", zorder=7)
+                    ax.text(x, y - node_h / 2 + 0.15, f"...+{len(lines)-max_lines}", ha="center", va="center", fontsize=8, style="italic", zorder=7)
             else:
-                # 没有IP信息时显示节点ID
                 ax.text(x, y, str(nid), ha="center", va="center", fontsize=16, fontweight="bold", zorder=7)
 
-        # 添加矩形环路的连接示意
+        plt.title("Ring Topology", fontsize=18, fontweight="bold", pad=20)
         if pos:
-            x_coords = [p[0] for p in pos.values()]
-            y_coords = [p[1] for p in pos.values()]
-
-            margin = 1.5
-            min_x, max_x = min(x_coords) - margin, max(x_coords) + margin
-            min_y, max_y = min(y_coords) - margin, max(y_coords) + margin
-
-            # 外围虚线框
-            outline_rect = Rectangle((min_x, min_y), max_x - min_x, max_y - min_y, fill=False, edgecolor="gray", linestyle="--", linewidth=1.5, alpha=0.6, zorder=1)
-            ax.add_patch(outline_rect)
-
-        # 设置标题和图例
-        network_name = getattr(ring_network, "name", "Ring Network")
-        plt.title(f"{network_name} - Ring Topology (Rectangular Layout)", fontsize=18, fontweight="bold", pad=20)
-
-        # 自动调整坐标轴范围
-        if pos:
-            x_coords = [p[0] for p in pos.values()]
-            y_coords = [p[1] for p in pos.values()]
-            margin = 2.0
-            ax.set_xlim(min(x_coords) - margin, max(x_coords) + margin)
-            ax.set_ylim(min(y_coords) - margin, max(y_coords) + margin)
-
+            xs = [p[0] for p in pos.values()]
+            ys = [p[1] for p in pos.values()]
+            m = 2.0
+            ax.set_xlim(min(xs) - m, max(xs) + m)
+            ax.set_ylim(min(ys) - m, max(ys) + m)
         plt.tight_layout()
 
-        # 保存或显示
         if save_path:
             fig.savefig(save_path, dpi=300, bbox_inches="tight")
             plt.close(fig)
-            print(f"Ring矩形布局流图已保存: {save_path}")
+            print(f"Ring 矩形布局流图已保存: {save_path}")
         else:
             plt.show()
-
-        return fig
-
-    # def draw_flow_graph_ring(self, ring_network, save_path=None):
-    #     """
-    #     绘制 Ring 拓扑流图：每个节点画一个矩形框，框外右上标号，
-    #     框内按行展示各 IP 类型（SDMA/GDMA/CDMA/DDR/L2M）合并后的总带宽。
-    #     """
-    #     # 确保IP带宽数据已计算
-    #     self.precalculate_ip_bandwidth_data()
-
-    #     import numpy as np
-    #     from matplotlib.patches import Rectangle, FancyArrowPatch
-    #     import matplotlib.pyplot as plt
-
-    #     # 准备画布
-    #     fig, ax = plt.subplots(figsize=(14, 10))
-    #     ax.set_aspect("equal")
-    #     ax.axis("off")
-
-    #     # 获取环形拓扑的节点数
-    #     num_nodes = len(ring_network.ring_nodes)
-    #     # print(f"Ring节点数: {num_nodes}")
-
-    #     # 合并所有模式下的链路流量
-    #     links_stat = {}
-    #     if hasattr(ring_network, "links_flow_stat"):
-    #         for mode, mode_links in ring_network.links_flow_stat.items():
-    #             for edge, val in mode_links.items():
-    #                 links_stat[edge] = links_stat.get(edge, 0) + val
-    #     else:
-    #         print("警告: ring_network没有links_flow_stat属性")
-
-    #     # print(f"合并后的链路统计: {len(links_stat)} 条链路")
-    #     max_flow = max(links_stat.values()) if links_stat else 1.0
-    #     # print(f"最大流量: {max_flow}")
-
-    #     # 计算Ring拓扑的节点位置 - 环形排列
-    #     pos = {}
-    #     if num_nodes <= 4:
-    #         # 简单环形排列（小环）
-    #         radius = 2.0
-    #         for i in range(num_nodes):
-    #             angle = 2 * np.pi * i / num_nodes
-    #             x = radius * np.cos(angle)
-    #             y = radius * np.sin(angle)
-    #             pos[i] = (x, y)
-    #     else:
-    #         # 较大环形排列
-    #         radius = max(3.0, num_nodes * 0.5)
-    #         for i in range(num_nodes):
-    #             angle = 2 * np.pi * i / num_nodes - np.pi / 2  # 从顶部开始
-    #             x = radius * np.cos(angle)
-    #             y = radius * np.sin(angle)
-    #             pos[i] = (x, y)
-
-    #     # print(f"节点位置: {pos}")
-
-    #     # 绘制Ring的相邻链路（环形连接）
-    #     for i in range(num_nodes):
-    #         next_node = (i + 1) % num_nodes
-
-    #         # 获取双向流量
-    #         cw_flow = links_stat.get((i, next_node), 0)
-    #         ccw_flow = links_stat.get((next_node, i), 0)
-
-    #         # print(f"链路 {i}->{next_node}: CW={cw_flow}, CCW={ccw_flow}")
-
-    #         x1, y1 = pos[i]
-    #         x2, y2 = pos[next_node]
-
-    #         # 计算箭头的颜色和宽度
-    #         def get_arrow_props(flow_val):
-    #             if flow_val > 0:
-    #                 intensity = min(max(flow_val / max_flow, 0.1), 1.0)
-    #                 width = max(1.5, 6 * intensity)
-    #                 alpha = max(0.6, intensity)
-    #             else:
-    #                 intensity = 0
-    #                 width = 1.0
-    #                 alpha = 0.3
-    #             return width, intensity, alpha
-
-    #         # 绘制顺时针箭头（带偏移避免重叠）
-    #         if cw_flow > 0 or ccw_flow == 0:  # 总是显示至少一个方向
-    #             width, intensity, alpha = get_arrow_props(cw_flow)
-    #             color = (intensity, 0, 0) if cw_flow > 0 else (0.5, 0.5, 0.5)
-
-    #             # 计算偏移
-    #             dx, dy = x2 - x1, y2 - y1
-    #             length = np.hypot(dx, dy)
-    #             if length > 0:
-    #                 offset = 0.15
-    #                 perp_x, perp_y = -dy / length * offset, dx / length * offset
-    #                 start_x, start_y = x1 + perp_x, y1 + perp_y
-    #                 end_x, end_y = x2 + perp_x, y2 + perp_y
-
-    #                 arrow = FancyArrowPatch((start_x, start_y), (end_x, end_y), arrowstyle="-|>", linewidth=width, color=color, alpha=alpha, mutation_scale=15, zorder=1)
-    #                 ax.add_patch(arrow)
-
-    #                 # 添加流量标签
-    #                 if cw_flow > 0:
-    #                     mid_x, mid_y = (start_x + end_x) / 2, (start_y + end_y) / 2
-    #                     # 转换为带宽
-    #                     bandwidth = (cw_flow * 128) / (self.finish_cycle // self.config.NETWORK_FREQUENCY) if hasattr(self, "finish_cycle") and self.finish_cycle > 0 else 0
-    #                     ax.text(mid_x + perp_x, mid_y + perp_y, f"{bandwidth:.1f}", fontsize=8, ha="center", va="center")
-
-    #         # 绘制逆时针箭头（带偏移避免重叠）
-    #         if ccw_flow > 0:
-    #             width, intensity, alpha = get_arrow_props(ccw_flow)
-    #             color = (0, 0, intensity)
-
-    #             # 计算偏移（反方向）
-    #             dx, dy = x2 - x1, y2 - y1
-    #             length = np.hypot(dx, dy)
-    #             if length > 0:
-    #                 offset = -0.15
-    #                 perp_x, perp_y = -dy / length * offset, dx / length * offset
-    #                 start_x, start_y = x2 + perp_x, y2 + perp_y
-    #                 end_x, end_y = x1 + perp_x, y1 + perp_y
-
-    #                 arrow = FancyArrowPatch((start_x, start_y), (end_x, end_y), arrowstyle="-|>", linewidth=width, color=color, alpha=alpha, mutation_scale=15, zorder=1)
-    #                 ax.add_patch(arrow)
-
-    #                 # 添加流量标签
-    #                 mid_x, mid_y = (start_x + end_x) / 2, (start_y + end_y) / 2
-    #                 # 转换为带宽
-    #                 bandwidth = (ccw_flow * 128) / (self.finish_cycle // self.config.NETWORK_FREQUENCY) if hasattr(self, "finish_cycle") and self.finish_cycle > 0 else 0
-    #                 ax.text(mid_x + perp_x, mid_y + perp_y, f"{bandwidth:.1f}", fontsize=8, ha="center", va="center")
-
-    #     # 为每个节点画框、标号、IP带宽
-    #     for node in ring_network.ring_nodes:
-    #         nid = node.node_id
-    #         if nid not in pos:
-    #             continue
-
-    #         x, y = pos[nid]
-
-    #         # 矩形框
-    #         w, h = 1.4, 1.0
-    #         rect = Rectangle((x - w / 2, y - h / 2), w, h, edgecolor="black", facecolor="lightcyan", linewidth=1.2, zorder=3)
-    #         ax.add_patch(rect)
-
-    #         # 框外右上标号
-    #         ax.text(x + w / 2 + 0.1, y + h / 2 + 0.05, str(nid), ha="left", va="bottom", fontsize=12, fontweight="bold")
-
-    #         # 获取IP带宽数据并显示
-    #         lines = []
-    #         if hasattr(self, "ip_bandwidth_data") and self.ip_bandwidth_data:
-    #             # 计算该节点在带宽数据矩阵中的位置
-    #             # Ring拓扑中，需要根据实际的映射关系来计算
-    #             if hasattr(self.config, "NUM_COL") and hasattr(self.config, "NUM_RING_NODES"):
-    #                 # 使用简单的映射：假设Ring节点映射到网格的前几行
-    #                 r = nid // self.config.NUM_COL if self.config.NUM_COL > 0 else 0
-    #                 c = nid % self.config.NUM_COL if self.config.NUM_COL > 0 else 0
-
-    #                 # 确保索引不超出矩阵范围
-    #                 max_r = self.ip_bandwidth_data["total"]["sdma"].shape[0] if "sdma" in self.ip_bandwidth_data["total"] else 1
-    #                 max_c = self.ip_bandwidth_data["total"]["sdma"].shape[1] if "sdma" in self.ip_bandwidth_data["total"] else 1
-    #                 r = min(r, max_r - 1)
-    #                 c = min(c, max_c - 1)
-    #             else:
-    #                 r, c = 0, 0
-
-    #             for svc in ["sdma", "gdma", "cdma", "ddr", "l2m"]:
-    #                 if svc in self.ip_bandwidth_data["total"]:
-    #                     mat = self.ip_bandwidth_data["total"][svc]
-    #                     if mat.shape[0] > r and mat.shape[1] > c:
-    #                         bw = mat[r, c]
-    #                         if bw and bw > 0.1:  # 只显示有意义的带宽值
-    #                             lines.append(f"{svc.upper()}:{bw:.1f}")
-
-    #         # 如果没有IP带宽数据，显示连接的IP类型
-    #         if not lines and hasattr(node, "connected_ip_type"):
-    #             if isinstance(node.connected_ip_type, list):
-    #                 for ip_type in node.connected_ip_type:
-    #                     ip_prefix = ip_type.split("_")[0].upper()
-    #                     lines.append(f"{ip_prefix}:--")
-    #             elif node.connected_ip_type:
-    #                 ip_prefix = node.connected_ip_type.split("_")[0].upper()
-    #                 lines.append(f"{ip_prefix}:--")
-
-    #         # 框内从上向下依次绘制IP信息
-    #         if lines:
-    #             line_height = (h - 0.2) / max(len(lines), 1)
-    #             for idx, text in enumerate(lines):
-    #                 text_y = y + h / 2 - 0.1 - (idx + 0.5) * line_height
-    #                 ax.text(x, text_y, text, ha="center", va="center", fontsize=9, fontweight="bold")
-    #         else:
-    #             # 如果没有IP信息，显示节点ID
-    #             ax.text(x, y, str(nid), ha="center", va="center", fontsize=12, fontweight="bold")
-
-    #     # 设置标题和图例
-    #     network_name = getattr(ring_network, "name", "Ring Network")
-    #     plt.title(f"{network_name} - Ring Topology Flow Graph", fontsize=16, fontweight="bold")
-
-    #     # 添加图例
-    #     legend_elements = [
-    #         plt.Line2D([0], [0], color="red", lw=3, label="Clockwise Flow"),
-    #         plt.Line2D([0], [0], color="blue", lw=3, label="Counter-Clockwise Flow"),
-    #         plt.Rectangle((0, 0), 1, 1, facecolor="lightcyan", edgecolor="black", label="Ring Node"),
-    #     ]
-    #     ax.legend(handles=legend_elements, loc="upper right")
-
-    #     # 添加说明文字
-    #     info_text = f"Nodes: {num_nodes}, Links: {len(links_stat)}"
-    #     if hasattr(self, "config") and hasattr(self.config, "NUM_RING_NODES"):
-    #         info_text += f"\nRing Size: {self.config.NUM_RING_NODES}"
-
-    #     plt.figtext(0.02, 0.02, info_text, fontsize=10)
-
-    #     # 自动调整坐标轴范围
-    #     if pos:
-    #         x_coords = [p[0] for p in pos.values()]
-    #         y_coords = [p[1] for p in pos.values()]
-    #         margin = 2.0
-    #         ax.set_xlim(min(x_coords) - margin, max(x_coords) + margin)
-    #         ax.set_ylim(min(y_coords) - margin, max(y_coords) + margin)
-
-    #     plt.tight_layout()
-
-    #     # 保存或显示
-    #     if save_path:
-    #         fig.savefig(save_path, dpi=300, bbox_inches="tight")
-    #         plt.close(fig)
-    #         print(f"Ring流图已保存: {save_path}")
-    #     else:
-    #         plt.show()
-
-    #     return fig
-
-    def _draw_directional_link(self, ax, x1, y1, x2, y2, width, color, offset=0):
-        """绘制带方向的链路"""
-        import numpy as np
-
-        # 计算垂直偏移
-        dx, dy = x2 - x1, y2 - y1
-        length = np.sqrt(dx**2 + dy**2)
-        if length > 0:
-            perp_x, perp_y = -dy / length * offset, dx / length * offset
-            x1_offset, y1_offset = x1 + perp_x, y1 + perp_y
-            x2_offset, y2_offset = x2 + perp_x, y2 + perp_y
-
-            # 绘制链路
-            ax.plot([x1_offset, x2_offset], [y1_offset, y2_offset], color=color, linewidth=width, alpha=0.7)
-
-            # 绘制箭头 - 改进箭头显示
-            # 计算箭头位置（在链路中间偏后一点）
-            arrow_pos_x = x1_offset + 0.7 * (x2_offset - x1_offset)
-            arrow_pos_y = y1_offset + 0.7 * (y2_offset - y1_offset)
-            arrow_start_x = x1_offset + 0.5 * (x2_offset - x1_offset)
-            arrow_start_y = y1_offset + 0.5 * (y2_offset - y1_offset)
-
-            ax.annotate("", xy=(arrow_pos_x, arrow_pos_y), xytext=(arrow_start_x, arrow_start_y), arrowprops=dict(arrowstyle="->", color=color, lw=max(1, width / 2)))
-
-    def _draw_ring_nodes(self, ax, pos, ring_nodes, num_nodes):
-        """绘制Ring节点，显示所有IP信息"""
-        from matplotlib.patches import FancyBboxPatch, Rectangle
-        import matplotlib.patches as patches
-
-        node_width, node_height = 0.8, 0.6
-
-        for i in range(num_nodes):
-            x, y = pos[i]
-            node = ring_nodes[i]
-
-            # 获取节点IP信息
-            ip_info = self._get_node_ip_info(node, i)
-
-            # 绘制节点框
-            node_patch = FancyBboxPatch(
-                (x - node_width / 2, y - node_height / 2),
-                node_width,
-                node_height,
-                boxstyle="round,pad=0.05",
-                facecolor="lightblue",
-                edgecolor="black",
-                linewidth=1.5,
-                zorder=3,
-            )
-            ax.add_patch(node_patch)
-
-            # 添加节点标签
-            ax.text(x, y, f"{i}", fontsize=10, fontweight="bold", ha="center", va="center", zorder=4)
-
-            # 在节点旁边添加IP带宽信息框（类似CrossRing的方式）
-            self._draw_ring_ip_info(ax, x, y, node, i)
-
-    def _draw_ring_ip_info(self, ax, node_x, node_y, node, node_id):
-        """为Ring节点绘制IP带宽信息框"""
-        from matplotlib.patches import Rectangle
-
-        if not hasattr(node, "connected_ip_type") or not node.connected_ip_type:
-            return
-
-        # IP信息框的位置和大小
-        ip_width = 2.0
-        ip_height = 1.2
-        ip_x = node_x - 1.5  # 位于节点左侧
-        ip_y = node_y
-
-        # 绘制IP信息框外框
-        ip_rect = Rectangle(
-            (ip_x - ip_width / 2, ip_y - ip_height / 2),
-            width=ip_width,
-            height=ip_height,
-            facecolor="white",
-            edgecolor="black",
-            linewidth=1,
-            zorder=2,
-        )
-        ax.add_patch(ip_rect)
-
-        # 获取IP列表和带宽数据
-        ip_types = node.connected_ip_type if isinstance(node.connected_ip_type, list) else [node.connected_ip_type]
-
-        # 计算每个IP类型的带宽（模拟数据，需要根据实际情况调整）
-        ip_bandwidth_data = self._calculate_ring_ip_bandwidth(node, node_id, ip_types)
-
-        # 根据IP数量动态分割信息框
-        num_ips = len(ip_types)
-        if num_ips <= 2:
-            # 简单的上下分割
-            cell_height = ip_height / max(2, num_ips)
-            for idx, ip_type in enumerate(ip_types):
-                cell_y = ip_y + ip_height / 2 - (idx + 0.5) * cell_height
-                bandwidth = ip_bandwidth_data.get(ip_type, 0.0)
-
-                # IP类型标签和带宽值
-                ip_prefix = ip_type.split("_")[0].upper()
-                ax.text(ip_x, cell_y, f"{ip_prefix[0]}:{bandwidth:.1f}", fontsize=8, ha="center", va="center", fontweight="bold", zorder=3)
-        else:
-            # 多IP的情况，使用网格布局
-            cols = 2
-            rows = (num_ips + cols - 1) // cols
-            cell_width = ip_width / cols
-            cell_height = ip_height / rows
-
-            for idx, ip_type in enumerate(ip_types):
-                row = idx // cols
-                col = idx % cols
-                cell_x = ip_x - ip_width / 2 + (col + 0.5) * cell_width
-                cell_y = ip_y + ip_height / 2 - (row + 0.5) * cell_height
-
-                bandwidth = ip_bandwidth_data.get(ip_type, 0.0)
-                ip_prefix = ip_type.split("_")[0].upper()
-
-                # 绘制分割线
-                if col > 0:  # 垂直分割线
-                    line_x = ip_x - ip_width / 2 + col * cell_width
-                    ax.plot([line_x, line_x], [ip_y - ip_height / 2, ip_y + ip_height / 2], color="black", linewidth=0.5, zorder=3)
-                if row > 0:  # 水平分割线
-                    line_y = ip_y + ip_height / 2 - row * cell_height
-                    ax.plot([ip_x - ip_width / 2, ip_x + ip_width / 2], [line_y, line_y], color="black", linewidth=0.5, zorder=3)
-
-                ax.text(cell_x, cell_y, f"{ip_prefix[0]}:{bandwidth:.1f}", fontsize=7, ha="center", va="center", fontweight="bold", zorder=3)
-
-    def _calculate_ring_ip_bandwidth(self, node, node_id, ip_types):
-        """计算Ring节点的IP带宽"""
-        bandwidth_data = {}
-
-        # 这里需要根据实际的流量统计数据来计算
-        # 目前使用模拟数据，后续需要根据Ring的流量统计来实现
-        for ip_type in ip_types:
-            # 模拟带宽计算：基于IP类型和节点ID
-            if ip_type.startswith("ddr"):
-                base_bw = 126.4
-            elif ip_type.startswith("gdma"):
-                base_bw = 105.5
-            elif ip_type.startswith("sdma"):
-                base_bw = 90.2
-            elif ip_type.startswith("l2m"):
-                base_bw = 80.1
-            else:
-                base_bw = 50.0
-
-            # 添加一些变化使每个节点看起来不同
-            variation = (node_id % 3) * 10.0
-            bandwidth_data[ip_type] = max(0.0, base_bw - variation)
-
-        return bandwidth_data
-
-    def _calculate_ring_positions(self, pos, num_nodes, node_spacing_x, node_spacing_y, rows):
-        """计算Ring拓扑的节点位置，确保环形连接正确"""
-        if num_nodes <= 2:
-            # 简单情况
-            for i in range(num_nodes):
-                pos[i] = (0, i * node_spacing_y)
-            return
-
-        # 对于n行2列的布局，节点应该按环形排列
-        # 例如对于16个节点(8行2列)，排列应该是：
-        # 0  15
-        # 1  14
-        # 2  13
-        # 3  12
-        # 4  11
-        # 5  10
-        # 6   9
-        # 7   8
-
-        half_nodes = (num_nodes + 1) // 2  # 左列节点数
-
-        # 左列：节点0到half_nodes-1
-        for i in range(half_nodes):
-            pos[i] = (0, (half_nodes - 1 - i) * node_spacing_y)
-
-        # 右列：节点half_nodes到num_nodes-1，但要按逆序排列
-        right_start = half_nodes
-        for i in range(right_start, num_nodes):
-            row_idx = i - right_start
-            pos[i] = (node_spacing_x, row_idx * node_spacing_y)
-
-    def _get_node_ip_info(self, node, node_id):
-        """获取节点IP信息"""
-        ip_info = {"type": None, "color": "lightgray"}
-
-        if hasattr(node, "connected_ip_type") and node.connected_ip_type:
-            # connected_ip_type现在是一个列表，处理多个IP的情况
-            if isinstance(node.connected_ip_type, list):
-                ip_types = node.connected_ip_type
-                ip_info["type"] = ip_types  # 保存完整的IP类型列表
-
-                # 基于第一个IP类型确定颜色（或者可以使用混合颜色逻辑）
-                first_ip_type = ip_types[0]
-                if first_ip_type.startswith("ddr"):
-                    ip_info["color"] = "lightcoral"
-                elif first_ip_type.startswith("l2m"):
-                    ip_info["color"] = "lightgreen"
-                elif first_ip_type.startswith("gdma"):
-                    ip_info["color"] = "lightblue"
-                elif first_ip_type.startswith("sdma"):
-                    ip_info["color"] = "lightyellow"
-                elif first_ip_type.startswith("cdma"):
-                    ip_info["color"] = "lightpink"
-
-                # # 如果有多个IP类型，使用更深的颜色表示
-                # if len(ip_types) > 1:
-                #     # 对于多IP节点，使用深色调表示
-                #     color_map = {"lightcoral": "indianred", "lightgreen": "mediumseagreen", "lightblue": "steelblue", "lightyellow": "gold", "lightpink": "hotpink"}
-                #     ip_info["color"] = color_map.get(ip_info["color"], "darkgray")
-            else:
-                # 向后兼容：如果是字符串类型
-                ip_type = node.connected_ip_type
-                ip_info["type"] = ip_type
-
-                if ip_type.startswith("ddr"):
-                    ip_info["color"] = "lightcoral"
-                elif ip_type.startswith("l2m"):
-                    ip_info["color"] = "lightgreen"
-                elif ip_type.startswith("gdma"):
-                    ip_info["color"] = "lightblue"
-                elif ip_type.startswith("sdma"):
-                    ip_info["color"] = "lightyellow"
-                elif ip_type.startswith("cdma"):
-                    ip_info["color"] = "lightpink"
-
-        return ip_info
-
-    def _format_ring_statistics(self, stats, mode):
-        """格式化Ring统计信息"""
-        return f"""Ring Statistics ({mode}):
-Injected: {stats.get('total_flits_injected', 0)}
-Ejected (Total): {stats.get('total_flits_ejected', 0)}
-Ejected (Requests): {stats.get('total_requests_ejected', 0)}
-Ejected (Data): {stats.get('total_data_flits_ejected', 0)}
-Avg Latency: {stats.get('average_latency', 0):.1f}
-CW Usage: {stats.get('cw_usage', 0)}
-CCW Usage: {stats.get('ccw_usage', 0)}
-Congestion: {stats.get('congestion_events', 0)}"""
+        # return fig
 
 
 # 便捷使用函数
-def analyze_bandwidth(base_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False) -> Dict:
+def analyze_bandwidth(sim_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False) -> Dict:
     """
     便捷的带宽分析函数
 
     Args:
-        base_model: BaseModel实例
+        sim_model: BaseModel实例
         config: 配置对象
         output_path: 输出路径
         min_gap_threshold: 工作区间合并阈值(ns)
@@ -3082,7 +2353,7 @@ def analyze_bandwidth(base_model, config, output_path: str = "./bandwidth_analys
     analyzer = BandwidthAnalyzer(config, min_gap_threshold, plot_rn_bw_fig)
 
     # 收集数据
-    analyzer.collect_requests_data(base_model)
+    analyzer.collect_requests_data(sim_model)
 
     # 执行分析
     results = analyzer.analyze_all_bandwidth()
