@@ -2,11 +2,13 @@ traffic/
 
 Result/
 
+backup_code
+
 tasks.json
 
 CrossRing.egg-info/
 
-__pycache__/
+__pycache__
 */__pycache__/
 */*/__pycache__/
 */*/*/__pycache__/
