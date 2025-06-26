@@ -24,3 +24,8 @@ CrossRing.egg-info/
 .DS_Store
 
 test_data/
+
+# AI-generated files
+CLAUDE.md
+**/.claude/
+.gemini/
