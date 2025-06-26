@@ -81,6 +81,7 @@ class CDMABandwidthAnalyzer:
 
         try:
             import portalocker
+
             use_portalocker = True
         except ImportError:
             print("Warning: portalocker not available, using threading.Lock instead")
@@ -95,6 +96,7 @@ class CDMABandwidthAnalyzer:
                 writer.writerow(result_data)
         else:
             import threading
+
             if not hasattr(self, "_lock"):
                 self._lock = threading.Lock()
             with self._lock:
@@ -130,10 +132,7 @@ class CDMABandwidthAnalyzer:
         completed = 0
 
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            future_to_params = {
-                executor.submit(self.run_single_simulation, bw, traffic_files, topo_type): (bw, rep)
-                for bw, rep in runs
-            }
+            future_to_params = {executor.submit(self.run_single_simulation, bw, traffic_files, topo_type): (bw, rep) for bw, rep in runs}
 
             for future in as_completed(future_to_params):
                 bw, rep = future_to_params[future]
@@ -152,9 +151,7 @@ class CDMABandwidthAnalyzer:
                 completed += 1
                 elapsed_time = time.time() - start_time
                 eta = (elapsed_time / completed) * (total_runs - completed) if completed else 0
-                print(
-                    f"  完成 {completed}/{total_runs} - ETA: {eta/60:.1f}分钟"
-                )
+                print(f"  完成 {completed}/{total_runs} - ETA: {eta/60:.1f}分钟")
 
         print(f"\n带宽扫描完成! 总运行时间: {(time.time() - start_time)/60:.1f}分钟")
         print(f"所有结果已保存到: {self.output_csv}")
@@ -328,7 +325,7 @@ class CDMABandwidthAnalyzer:
             # 初始化并运行仿真
             sim.initial()
             # sim.end_time = 1000  # 足够的仿真时间
-            sim.print_interval = 1000  # 减少打印频率
+            sim.print_interval = 30000  # 减少打印频率
             sim.run()
 
             # 收集结果
@@ -376,10 +373,10 @@ def main():
     parser.add_argument("--config", default="../config/config2.json", help="配置文件路径")
     parser.add_argument("--traffic_path", default="../traffic/0617/", help="traffic文件目录")
     parser.add_argument("--output_dir", default=None, help="结果输出目录")
-    parser.add_argument("--bandwidths", nargs="+", type=int, default=[4,8,12,16,20,24,28,32], help="待测试的CDMA带宽列表")
+    parser.add_argument("--bandwidths", nargs="+", type=int, default=list(range(4, 32)), help="待测试的CDMA带宽列表")
     parser.add_argument("--repeat", type=int, default=1, help="每个带宽的重复次数")
     parser.add_argument("--topo", default="5x4", help="拓扑类型")
-    parser.add_argument("--max_workers", type=int, default=None, help="并行进程数")
+    parser.add_argument("--max_workers", type=int, default=2, help="并行进程数")
     args = parser.parse_args()
 
     output_dir = args.output_dir or f"../Result/cdma_analysis/{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -392,8 +389,13 @@ def main():
     )
 
     traffic_files = [
-        ["MLP_MoE.txt"] * 9,
-        ["All2All_Dispatch.txt"],
+        [
+            "MLP_MoE.txt",
+        ]
+        * 9,
+        [
+            "All2All_Dispatch.txt",
+        ],
     ]
 
     try:

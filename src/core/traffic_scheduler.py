@@ -346,6 +346,28 @@ class TrafficScheduler:
         """设置详细输出模式"""
         self.verbose = verbose
 
+    def get_finish_time_stats(self) -> Dict[str, int]:
+        """获取读写操作的结束时间统计"""
+        read_end_times = []
+        write_end_times = []
+        all_end_times = []
+        
+        # 从所有活跃和已完成的traffic中收集结束时间
+        for traffic_state in self.active_traffics.values():
+            if traffic_state.actual_end_time > 0:
+                # 这里简化处理，实际中可能需要根据traffic文件内容来区分读写
+                # 目前假设每个traffic都包含读写操作
+                end_time_ns = traffic_state.actual_end_time // self.config.NETWORK_FREQUENCY
+                read_end_times.append(end_time_ns)
+                write_end_times.append(end_time_ns)
+                all_end_times.append(end_time_ns)
+        
+        return {
+            "R_finish_time": max(read_end_times) if read_end_times else 0,
+            "W_finish_time": max(write_end_times) if write_end_times else 0,
+            "Total_finish_time": max(all_end_times) if all_end_times else 0,
+        }
+
     def reset(self):
         """重置调度器状态"""
         self.parallel_chains.clear()

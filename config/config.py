@@ -47,8 +47,14 @@ class CrossRingConfig:
         # self.reservation_num = args.reservation_num
         self.BURST = args.BURST
         self.NETWORK_FREQUENCY = args.NETWORK_FREQUENCY
+        self.RN_R_TRACKER_OSTD = args.RN_R_TRACKER_OSTD
+        self.RN_W_TRACKER_OSTD = args.RN_W_TRACKER_OSTD
         self.RN_RDB_SIZE = args.RN_RDB_SIZE
         self.RN_WDB_SIZE = args.RN_WDB_SIZE
+        self.SN_DDR_R_TRACKER_OSTD = args.SN_DDR_R_TRACKER_OSTD
+        self.SN_DDR_W_TRACKER_OSTD = args.SN_DDR_W_TRACKER_OSTD
+        self.SN_L2M_R_TRACKER_OSTD = args.SN_L2M_R_TRACKER_OSTD
+        self.SN_L2M_W_TRACKER_OSTD = args.SN_L2M_W_TRACKER_OSTD
         self.SN_DDR_RDB_SIZE = args.SN_DDR_RDB_SIZE
         self.SN_DDR_WDB_SIZE = args.SN_DDR_WDB_SIZE
         self.SN_L2M_RDB_SIZE = args.SN_L2M_RDB_SIZE
@@ -111,13 +117,6 @@ class CrossRingConfig:
         self.update_latency()
         self.topology_select(topo_type)
         self.SN_TRACKER_RELEASE_LATENCY = self.SN_TRACKER_RELEASE_LATENCY_original * self.NETWORK_FREQUENCY
-
-        # self.RN_RDB_SIZE = self.RN_R_TRACKER_OSTD * self.BURST
-        # self.RN_WDB_SIZE = self.RN_W_TRACKER_OSTD * self.BURST
-        # self.SN_DDR_RDB_SIZE = self.SN_DDR_R_TRACKER_OSTD * self.BURST
-        # self.SN_DDR_WDB_SIZE = self.SN_DDR_W_TRACKER_OSTD * self.BURST
-        # self.SN_L2M_RDB_SIZE = self.SN_L2M_R_TRACKER_OSTD * self.BURST
-        # self.SN_L2M_WDB_SIZE = self.SN_L2M_W_TRACKER_OSTD * self.BURST
         self.CH_NAME_LIST = []
         for key in self.CHANNEL_SPEC:
             for idx in range(self.CHANNEL_SPEC[key]):
@@ -387,8 +386,14 @@ class CrossRingConfig:
 
         parser.add_argument("--BURST", type=int, default=default_config["BURST"], help="Burst length")
         parser.add_argument("--NETWORK_FREQUENCY", type=float, default=default_config["NETWORK_FREQUENCY"], help="Network frequency")
+        parser.add_argument("--RN_R_TRACKER_OSTD", type=int, default=default_config["RN_R_TRACKER_OSTD"], help="RN read tracker outstanding")
+        parser.add_argument("--RN_W_TRACKER_OSTD", type=int, default=default_config["RN_W_TRACKER_OSTD"], help="RN write tracker outstanding")
         parser.add_argument("--RN_RDB_SIZE", type=int, default=default_config["RN_RDB_SIZE"], help="RN read buffer size")
         parser.add_argument("--RN_WDB_SIZE", type=int, default=default_config["RN_WDB_SIZE"], help="RN write buffer size")
+        parser.add_argument("--SN_DDR_R_TRACKER_OSTD", type=int, default=default_config["SN_DDR_R_TRACKER_OSTD"], help="SN ddr read tracker outstanding")
+        parser.add_argument("--SN_DDR_W_TRACKER_OSTD", type=int, default=default_config["SN_DDR_W_TRACKER_OSTD"], help="SN ddr write tracker outstanding")
+        parser.add_argument("--SN_L2M_R_TRACKER_OSTD", type=int, default=default_config["SN_L2M_R_TRACKER_OSTD"], help="SN l2m read tracker outstanding")
+        parser.add_argument("--SN_L2M_W_TRACKER_OSTD", type=int, default=default_config["SN_L2M_W_TRACKER_OSTD"], help="SN l2m write tracker outstanding")
         parser.add_argument("--SN_DDR_RDB_SIZE", type=int, default=default_config["SN_DDR_RDB_SIZE"], help="SN ddr read buffer size")
         parser.add_argument("--SN_DDR_WDB_SIZE", type=int, default=default_config["SN_DDR_WDB_SIZE"], help="SN ddr write buffer size")
         parser.add_argument("--SN_L2M_RDB_SIZE", type=int, default=default_config["SN_L2M_RDB_SIZE"], help="SN l2m read buffer size")

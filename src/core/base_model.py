@@ -222,6 +222,7 @@ class BaseModel:
         self.send_write_flits_num_stat = 0
         self.file_name_stat = self.file_name[:-4]
         self.R_finish_time_stat, self.W_finish_time_stat = 0, 0
+        self.Total_finish_time_stat = 0
         self.R_tail_latency_stat, self.W_tail_latency_stat = 0, 0
         self.req_cir_h_num_stat, self.req_cir_v_num_stat = 0, 0
         self.rsp_cir_h_num_stat, self.rsp_cir_v_num_stat = 0, 0
@@ -308,8 +309,67 @@ class BaseModel:
         self.log_summary()
         self.syn_IP_stat()
 
+        # 更新结束时间统计
+        self.update_finish_time_stats()
+        
         # 结果统计
         self.process_comprehensive_results()
+
+    def update_finish_time_stats(self):
+        """从traffic_scheduler和result_processor获取结束时间并更新统计"""
+        read_end_times = []
+        write_end_times = []
+        all_end_times = []
+        
+        # 从traffic_scheduler获取结束时间统计
+        try:
+            finish_stats = self.traffic_scheduler.get_finish_time_stats()
+            if finish_stats["R_finish_time"] > 0:
+                read_end_times.append(finish_stats["R_finish_time"])
+                all_end_times.append(finish_stats["R_finish_time"])
+            if finish_stats["W_finish_time"] > 0:
+                write_end_times.append(finish_stats["W_finish_time"])
+                all_end_times.append(finish_stats["W_finish_time"])
+            if finish_stats["Total_finish_time"] > 0:
+                all_end_times.append(finish_stats["Total_finish_time"])
+        except Exception as e:
+            if self.verbose:
+                print(f"Warning: Could not get finish time stats from traffic_scheduler: {e}")
+        
+        # 从result_processor获取请求的结束时间
+        try:
+            if hasattr(self, 'result_processor') and hasattr(self.result_processor, 'requests'):
+                for req_info in self.result_processor.requests:
+                    end_time_ns = req_info.end_time // self.config.NETWORK_FREQUENCY
+                    all_end_times.append(end_time_ns)
+                    if req_info.req_type == "read":
+                        read_end_times.append(end_time_ns)
+                    elif req_info.req_type == "write":
+                        write_end_times.append(end_time_ns)
+        except Exception as e:
+            if self.verbose:
+                print(f"Warning: Could not get finish time stats from result_processor: {e}")
+        
+        # 更新统计数据，使用当前cycle作为备选
+        current_time_ns = self.cycle // self.config.NETWORK_FREQUENCY
+        
+        if read_end_times:
+            self.R_finish_time_stat = max(read_end_times)
+        else:
+            self.R_finish_time_stat = current_time_ns
+            
+        if write_end_times:
+            self.W_finish_time_stat = max(write_end_times)
+        else:
+            self.W_finish_time_stat = current_time_ns
+            
+        if all_end_times:
+            self.Total_finish_time_stat = max(all_end_times)
+        else:
+            self.Total_finish_time_stat = current_time_ns
+            
+        if self.verbose:
+            print(f"Updated finish times - Read: {self.R_finish_time_stat}ns, Write: {self.W_finish_time_stat}ns, Total: {self.Total_finish_time_stat}ns")
 
     def update_traffic_completion_stats(self, flit):
         """在flit完成时更新TrafficScheduler的统计"""
