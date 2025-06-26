@@ -290,7 +290,7 @@ class TrafficScheduler:
                     state.end_time = actual_end_ns
 
                     # 更新链的时间偏移（实际结束时间 + 间隔）
-                    gap_time = 20  # 两个traffic之间的间隔
+                    gap_time = 50  # 两个traffic之间的间隔
                     chain.chain_time_offset = actual_end_ns + gap_time
 
                     if self.verbose:
@@ -351,7 +351,7 @@ class TrafficScheduler:
         read_end_times = []
         write_end_times = []
         all_end_times = []
-        
+
         # 从所有活跃和已完成的traffic中收集结束时间
         for traffic_state in self.active_traffics.values():
             if traffic_state.actual_end_time > 0:
@@ -361,7 +361,7 @@ class TrafficScheduler:
                 read_end_times.append(end_time_ns)
                 write_end_times.append(end_time_ns)
                 all_end_times.append(end_time_ns)
-        
+
         return {
             "R_finish_time": max(read_end_times) if read_end_times else 0,
             "W_finish_time": max(write_end_times) if write_end_times else 0,

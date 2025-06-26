@@ -158,66 +158,193 @@ class CDMABandwidthAnalyzer:
 
     def generate_summary_from_csv(self):
         """
-        从CSV文件生成分析摘要
+        从CSV文件生成更详细、更具洞察力的Markdown分析摘要，并包含性能曲线图。
         """
         try:
             if not self.output_csv.exists():
                 print("CSV文件不存在，无法生成摘要")
                 return
 
-            # 读取CSV结果
+            # 1. 读取并清理数据
             df = pd.read_csv(self.output_csv)
-
             if df.empty:
                 print("CSV文件为空，无法生成摘要")
                 return
 
-            # 生成摘要文件
+            # 处理NaN值，对于数值列用0填充，对于错误信息用'N/A'填充
+            for col in ["Total_sum_BW", "simulation_time"]:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+            if "error_message" in df.columns:
+                df["error_message"] = df["error_message"].fillna("N/A")
+
+            # 2. 准备摘要文件和基本信息
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            summary_file = self.output_dir / f"cdma_analysis_summary_{timestamp}.txt"
+            summary_file = self.output_dir / f"cdma_analysis_summary_{timestamp}.md"
 
             with open(summary_file, "w", encoding="utf-8") as f:
-                f.write("CDMA带宽并行行为分析摘要\n")
-                f.write("=" * 50 + "\n\n")
+                f.write("# CDMA带宽性能分析报告\n\n")
+                f.write(f"**分析时间:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write(f"**数据来源:** `{self.output_csv.name}`\n\n")
 
-                f.write(f"分析时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"总仿真次数: {len(df)}\n")
-
-                success_count = len(df[df["completion_status"] == "success"])
-                f.write(f"成功率: {success_count/len(df)*100:.1f}%\n\n")
-
-                # CDMA带宽范围分析
-                f.write("CDMA带宽范围分析:\n")
-                f.write("-" * 30 + "\n")
-
+                # 提取实验配置信息 (从成功的运行中)
                 success_df = df[df["completion_status"] == "success"]
                 if not success_df.empty:
-                    # 按CDMA带宽分组统计
-                    if "Total_sum_BW" in success_df.columns:
-                        cdma_stats = success_df.groupby("cdma_bw_limit").agg({"Total_sum_BW": ["mean", "std", "max", "min"], "simulation_time": ["mean", "std"]}).round(3)
-                        f.write(cdma_stats.to_string())
-                        f.write("\n\n")
+                    first_run = success_df.iloc[0]
+                    f.write("## 1. 实验配置\n")
+                    f.write(f"- **拓扑结构:** `{first_run.get('topo_type', 'N/A')}`\n")
+                    f.write(f"- **流量文件:** `{first_run.get('traffic_files', 'N/A')}`\n")
+                    f.write(f"- **测试带宽 (GB/s):** `{sorted(df['cdma_bw_limit'].unique())}`\n\n")
 
-                        # 最优带宽设置
-                        best_bw_idx = success_df["Total_sum_BW"].idxmax()
-                        best_bw_row = success_df.loc[best_bw_idx]
+                # 3. 整体结果概览
+                total_runs = len(df)
+                success_count = len(success_df)
+                success_rate = (success_count / total_runs * 100) if total_runs > 0 else 0
+                f.write("## 2. 总体结果\n")
+                f.write(f"- **总仿真次数:** {total_runs}\n")
+                f.write(f"- **成功运行次数:** {success_count}\n")
+                f.write(f"- **成功率:** `{success_rate:.1f}%`\n\n")
 
-                        f.write("最优性能配置:\n")
-                        f.write("-" * 20 + "\n")
-                        f.write(f"CDMA带宽: {best_bw_row['cdma_bw_limit']}GB/s\n")
-                        f.write(f"总带宽: {best_bw_row['Total_sum_BW']:.3f}GB/s\n")
-                        f.write(f"仿真时间: {best_bw_row['simulation_time']:.1f}ns\n\n")
+                if success_df.empty:
+                    f.write("**没有成功的运行可供分析。**\n")
+                    # 即使没有成功案例，也要分析失败案例
+                    failed_df = df[df["completion_status"] == "failed"]
+                    if not failed_df.empty:
+                        f.write("## 5. 失败分析\n\n")
+                        f.write(f"共有 `{len(failed_df)}` 次仿真运行失败。\n\n")
 
-                # 失败案例分析
+                        # 汇总失败原因
+                        failure_summary = failed_df.groupby(["cdma_bw_limit", "error_message"]).size().reset_index(name="count")
+                        f.write("### 失败原因汇总\n\n")
+                        f.write(failure_summary.to_markdown(index=False))
+                        f.write("\n")
+                    return
+
+                # 4. 详细性能分析
+                f.write("## 3. 详细性能分析\n\n")
+
+                # 计算统计数据
+                stats_df = (
+                    success_df.groupby("cdma_bw_limit")
+                    .agg(mean_bw=("Total_sum_BW", "mean"), std_bw=("Total_sum_BW", "std"), max_bw=("Total_sum_BW", "max"), mean_time=("simulation_time", "mean"))
+                    .round(3)
+                )
+
+                # 处理std为NaN的情况 (当每个组只有一个样本时)
+                stats_df["std_bw"] = stats_df["std_bw"].fillna(0)
+
+                # 计算性价比和性能增益
+                stats_df["perf_per_gb"] = (stats_df["mean_bw"] / stats_df.index).round(3)
+                stats_df["perf_gain_pct"] = stats_df["mean_bw"].pct_change().fillna(0) * 100
+                stats_df["perf_gain_pct"] = stats_df["perf_gain_pct"].round(1)
+
+                f.write("### 性能统计 vs. CDMA带宽\n\n")
+                f.write(stats_df.to_markdown(index=True))
+                f.write("\n\n* **perf_per_gb:** 每GB/s带宽的性能 (平均总带宽 / CDMA带宽限制) - 值越高越好。\n")
+                f.write("* **perf_gain_pct:** 相较于前一带宽设置的平均性能百分比增益。\n\n")
+
+                # 5. 生成并嵌入图表
+                try:
+                    import matplotlib
+                    matplotlib.use("Agg")  # Use non-interactive backend
+                    import matplotlib.pyplot as plt
+                    import matplotlib.font_manager as fm
+
+                    # 设置中文字体
+                    plt.rcParams['font.sans-serif'] = ['SimHei']  # 或者其他支持中文的字体，如 'WenQuanYi Micro Hei'
+                    plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+
+                    fig, ax1 = plt.subplots(figsize=(12, 7))
+
+                    # 绘制性能曲线和误差棒 (主Y轴)
+                    ax1.errorbar(stats_df.index, stats_df["mean_bw"], yerr=stats_df["std_bw"], marker="o", linestyle="-", capsize=5, label="平均总带宽", color="b")
+                    ax1.set_xlabel("CDMA带宽限制 (GB/s 每通道)")
+                    ax1.set_ylabel("平均系统总带宽 (GB/s)", color="b")
+                    ax1.tick_params(axis="y", labelcolor="b")
+                    ax1.grid(True)
+
+                    # 创建第二个Y轴绘制性价比
+                    ax2 = ax1.twinx()
+                    ax2.plot(stats_df.index, stats_df["perf_per_gb"], marker="s", linestyle="--", label="每GB/s性能", color="g")
+                    ax2.set_ylabel("每GB/s性能 (平均带宽 / CDMA带宽)", color="g")
+                    ax2.tick_params(axis="y", labelcolor="g")
+
+                    # 创建第三个Y轴绘制仿真时间 (延迟)
+                    ax3 = ax1.twinx()
+                    # 调整ax3的位置，使其不与ax2重叠
+                    ax3.spines["right"].set_position(("outward", 60))  # 60 points outward
+                    ax3.plot(stats_df.index, stats_df["mean_time"], marker="^", linestyle=":", label="平均仿真时间 (延迟)", color="r")
+                    ax3.set_ylabel("平均仿真时间 (ns)", color="r")
+                    ax3.tick_params(axis="y", labelcolor="r")
+
+                    # 合并图例
+                    lines, labels = ax1.get_legend_handles_labels()
+                    lines2, labels2 = ax2.get_legend_handles_labels()
+                    lines3, labels3 = ax3.get_legend_handles_labels()
+                    ax3.legend(lines + lines2 + lines3, labels + labels2 + labels3, loc="upper left")
+
+                    plt.title("性能、效率与延迟 vs. CDMA带宽")
+                    fig.tight_layout()
+
+                    plot_filename = f"performance_summary_{timestamp}.png"
+                    plot_path = self.output_dir / plot_filename
+                    plt.savefig(plot_path)
+                    plt.close(fig)
+
+                    f.write("### 性能曲线图\n\n")
+                    f.write(f"![性能曲线图]({plot_filename})\n\n")
+                    print(f"性能分析图已保存到: {plot_path}")
+
+                except ImportError:
+                    f.write("### 性能曲线图\n\n")
+                    f.write("*(未安装Matplotlib，跳过图表生成。)*\n\n")
+                except Exception as plot_e:
+                    f.write("### 性能曲线图\n\n")
+                    f.write(f"*(生成图表时出错: {plot_e})*\n\n")
+
+                # 6. 配置推荐
+                f.write("## 4. 配置推荐\n\n")
+
+                # 找到最大性能点
+                max_perf_row = stats_df.loc[stats_df["mean_bw"].idxmax()]
+                f.write(f"### 最大性能配置\n")
+                f.write(f"- **CDMA带宽:** `{max_perf_row.name} GB/s`\n")
+                f.write(f"- **实现平均带宽:** `{max_perf_row['mean_bw']:.3f} GB/s`\n")
+                f.write(f"- *注意: 此设置提供最高的绝对性能，但可能不是最具成本效益的。*\n\n")
+
+                # 找到最佳性价比点
+                best_value_row = stats_df.loc[stats_df["perf_per_gb"].idxmax()]
+                f.write(f"### 最佳性价比配置\n")
+                f.write(f"- **CDMA带宽:** `{best_value_row.name} GB/s`\n")
+                f.write(f"- **每GB/s性能:** `{best_value_row['perf_per_gb']:.3f}`\n")
+                f.write(f"- **实现平均带宽:** `{best_value_row['mean_bw']:.3f} GB/s`\n")
+                f.write(f"- *注意: 此设置提供了最佳的“投入产出比”。*\n\n")
+
+                # 找到性能饱和点
+                # 寻找性能增益首次低于5%的点的前一个点作为平衡点
+                saturation_candidates = stats_df[stats_df["perf_gain_pct"] < 5]
+                if not saturation_candidates.empty:
+                    saturation_point_bw = saturation_candidates.index[0]
+                    # 获取饱和点之前的一个带宽设置作为推荐
+                    prev_bw_index = stats_df.index.get_loc(saturation_point_bw) - 1
+                    if prev_bw_index >= 0:
+                        balanced_bw = stats_df.index[prev_bw_index]
+                        sat_row = stats_df.loc[saturation_point_bw]
+                        f.write(f"### 平衡点 (性能饱和点) 配置\n")
+                        f.write(f"- **CDMA带宽:** `{balanced_bw} GB/s`\n")
+                        f.write(f"- *原因: 将带宽增加到 `{sat_row.name} GB/s` 之后，性能增益仅为 `{sat_row['perf_gain_pct']}%`，表明收益递减。*\n\n")
+
+                # 7. 失败案例分析
                 failed_df = df[df["completion_status"] == "failed"]
                 if not failed_df.empty:
-                    f.write("失败案例分析:\n")
-                    f.write("-" * 20 + "\n")
-                    f.write(f"失败次数: {len(failed_df)}\n")
-                    f.write("失败的CDMA带宽设置:\n")
-                    failed_bw = failed_df["cdma_bw_limit"].value_counts()
-                    f.write(failed_bw.to_string())
-                    f.write("\n\n")
+                    f.write("## 5. 失败分析\n\n")
+                    f.write(f"共有 `{len(failed_df)}` 次仿真运行失败。\n\n")
+
+                    # 汇总失败原因
+                    failure_summary = failed_df.groupby(["cdma_bw_limit", "error_message"]).size().reset_index(name="count")
+                    f.write("### 失败原因汇总\n\n")
+                    f.write(failure_summary.to_markdown(index=False))
+                    f.write("\n")
 
             print(f"分析摘要已保存到: {summary_file}")
 
@@ -256,7 +383,7 @@ class CDMABandwidthAnalyzer:
                 flow_fig_show_CDMA=1,
                 plot_flow_fig=1,  # 不生成图像
                 plot_RN_BW_fig=1,
-                verbose=1,  # 减少输出
+                verbose=0,  # 减少输出
             )
 
             # 设置CDMA带宽限制
@@ -324,7 +451,7 @@ class CDMABandwidthAnalyzer:
 
             # 初始化并运行仿真
             sim.initial()
-            # sim.end_time = 1000  # 足够的仿真时间
+            sim.end_time = 1000  # 足够的仿真时间
             sim.print_interval = 30000  # 减少打印频率
             sim.run()
 
@@ -373,7 +500,7 @@ def main():
     parser.add_argument("--config", default="../config/config2.json", help="配置文件路径")
     parser.add_argument("--traffic_path", default="../traffic/0617/", help="traffic文件目录")
     parser.add_argument("--output_dir", default=None, help="结果输出目录")
-    parser.add_argument("--bandwidths", nargs="+", type=int, default=list(range(4, 32)), help="待测试的CDMA带宽列表")
+    parser.add_argument("--bandwidths", nargs="+", type=int, default=list(range(30, 32)), help="待测试的CDMA带宽列表")
     parser.add_argument("--repeat", type=int, default=1, help="每个带宽的重复次数")
     parser.add_argument("--topo", default="5x4", help="拓扑类型")
     parser.add_argument("--max_workers", type=int, default=2, help="并行进程数")
@@ -390,12 +517,12 @@ def main():
 
     traffic_files = [
         [
+            "All2All_Dispatch.txt",
+        ],
+        [
             "MLP_MoE.txt",
         ]
         * 9,
-        [
-            "All2All_Dispatch.txt",
-        ],
     ]
 
     try:
