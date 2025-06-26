@@ -2,8 +2,19 @@
 """
 CDMA带宽并行行为分析脚本
 
-遍历不同的CDMA带宽设置，分析与上层计算模块的并行性能表现
-将所有结果保存到CSV文件供后续分析
+遍历不同的CDMA带宽设置，分析与上层计算模块的并行性能表现。
+所有结果保存到CSV文件供后续分析。
+
+Usage:
+    python scripts/two_micro_batch.py \
+        --config ../config/config2.json \
+        --traffic_path ../traffic/0617/ \
+        --output_dir ../Result/cdma_analysis \
+        --bandwidths 4 8 12 16 20 24 28 32 \
+        --repeat 1 --topo 5x4 --max_workers 4
+
+每个带宽值在独立进程中运行仿真，结果保存在
+``../Result/CrossRing/TMB/<bandwidth>/<topo>/<traffic...>/`` 目录下。
 """
 
 import os
@@ -17,6 +28,9 @@ import time
 from datetime import datetime
 import csv
 import logging
+import argparse
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # 添加项目路径
 sys.path.append("../")
@@ -58,30 +72,41 @@ class CDMABandwidthAnalyzer:
         print(f"CDMA带宽测试范围: {self.cdma_bw_ranges} GB/s (单通道)")
 
     def save_result_to_csv(self, result_data):
-        """
-        保存单次仿真结果到CSV文件
+        """保存单次仿真结果到CSV文件，使用文件锁保证并发安全"""
 
-        Args:
-            result_data: 仿真结果字典
-        """
+        if not result_data:
+            return
+
+        csv_file_exists = self.output_csv.exists()
+
         try:
-            # 检查CSV文件是否存在，如果不存在则创建并写入表头
-            csv_file_exists = self.output_csv.exists()
+            import portalocker
+            use_portalocker = True
+        except ImportError:
+            print("Warning: portalocker not available, using threading.Lock instead")
+            use_portalocker = False
 
+        if use_portalocker:
             with open(self.output_csv, mode="a", newline="", encoding="utf-8") as output_csv_file:
-                if result_data:
+                portalocker.lock(output_csv_file, portalocker.LOCK_EX)
+                writer = csv.DictWriter(output_csv_file, fieldnames=result_data.keys())
+                if not csv_file_exists:
+                    writer.writeheader()
+                writer.writerow(result_data)
+        else:
+            import threading
+            if not hasattr(self, "_lock"):
+                self._lock = threading.Lock()
+            with self._lock:
+                with open(self.output_csv, mode="a", newline="", encoding="utf-8") as output_csv_file:
                     writer = csv.DictWriter(output_csv_file, fieldnames=result_data.keys())
                     if not csv_file_exists:
                         writer.writeheader()
-                        self.csv_initialized = True
                     writer.writerow(result_data)
 
-            print(f"结果已保存到CSV: CDMA带宽={result_data.get('cdma_bw_limit', 'N/A')}GB/s")
+        print(f"结果已保存到CSV: CDMA带宽={result_data.get('cdma_bw_limit', 'N/A')}GB/s")
 
-        except Exception as e:
-            print(f"保存CSV时出错: {e}")
-
-    def run_bandwidth_sweep(self, traffic_files, topo_type="5x4", repeat=1):
+    def run_bandwidth_sweep(self, traffic_files, topo_type="5x4", repeat=1, max_workers=None):
         """
         运行带宽扫描分析
 
@@ -96,26 +121,40 @@ class CDMABandwidthAnalyzer:
         print(f"Traffic文件: {traffic_files}")
 
         total_runs = len(self.cdma_bw_ranges) * repeat
-        current_run = 0
+        runs = [(bw, rep) for rep in range(repeat) for bw in self.cdma_bw_ranges]
+
+        if max_workers is None:
+            max_workers = min(len(self.cdma_bw_ranges), multiprocessing.cpu_count())
 
         start_time = time.time()
+        completed = 0
 
-        for cdma_bw in self.cdma_bw_ranges:
-            print(f"\n测试CDMA带宽: {cdma_bw}GB/s (4通道总计: {cdma_bw*4}GB/s)")
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            future_to_params = {
+                executor.submit(self.run_single_simulation, bw, traffic_files, topo_type): (bw, rep)
+                for bw, rep in runs
+            }
 
-            for rep in range(repeat):
-                current_run += 1
-                elapsed_time = time.time() - start_time
-                eta = (elapsed_time / current_run) * (total_runs - current_run) if current_run > 0 else 0
-
-                print(f"  第{rep+1}次运行 [{current_run}/{total_runs}] - ETA: {eta/60:.1f}分钟")
-
-                # 运行仿真
-                result = self.run_single_simulation(cdma_bw, traffic_files, topo_type)
-                result["repeat_id"] = rep
-
-                # 立即保存结果到CSV
+            for future in as_completed(future_to_params):
+                bw, rep = future_to_params[future]
+                try:
+                    result = future.result()
+                    result["repeat_id"] = rep
+                except Exception as e:
+                    logging.exception(f"带宽 {bw}GB/s 仿真失败: {e}")
+                    result = {
+                        "cdma_bw_limit": bw,
+                        "repeat_id": rep,
+                        "completion_status": "failed",
+                        "error_message": str(e),
+                    }
                 self.save_result_to_csv(result)
+                completed += 1
+                elapsed_time = time.time() - start_time
+                eta = (elapsed_time / completed) * (total_runs - completed) if completed else 0
+                print(
+                    f"  完成 {completed}/{total_runs} - ETA: {eta/60:.1f}分钟"
+                )
 
         print(f"\n带宽扫描完成! 总运行时间: {(time.time() - start_time)/60:.1f}分钟")
         print(f"所有结果已保存到: {self.output_csv}")
@@ -215,7 +254,7 @@ class CDMABandwidthAnalyzer:
                 topo_type=topo_type,
                 traffic_file_path=self.traffic_file_path,
                 traffic_config=traffic_files,  # 直接传入文件列表
-                result_save_path=f"../Result/CrossRing/TMB/",  # 不保存中间结果
+                result_save_path=f"../Result/CrossRing/TMB/bw_{cdma_bw_limit}/",
                 results_fig_save_path=f"{self.output_dir}/figs/",
                 flow_fig_show_CDMA=1,
                 plot_flow_fig=1,  # 不生成图像
@@ -331,45 +370,39 @@ class CDMABandwidthAnalyzer:
 
 
 def main():
-    """
-    主函数 - 执行CDMA带宽分析
-    """
-    print("CDMA带宽并行行为分析脚本")
-    print("=" * 50)
+    """命令行接口，执行CDMA带宽分析"""
 
-    # 初始化分析器
-    traffic_file_path = r"../traffic/0617/"
+    parser = argparse.ArgumentParser(description="CDMA bandwidth sweep")
+    parser.add_argument("--config", default="../config/config2.json", help="配置文件路径")
+    parser.add_argument("--traffic_path", default="../traffic/0617/", help="traffic文件目录")
+    parser.add_argument("--output_dir", default=None, help="结果输出目录")
+    parser.add_argument("--bandwidths", nargs="+", type=int, default=[4,8,12,16,20,24,28,32], help="待测试的CDMA带宽列表")
+    parser.add_argument("--repeat", type=int, default=1, help="每个带宽的重复次数")
+    parser.add_argument("--topo", default="5x4", help="拓扑类型")
+    parser.add_argument("--max_workers", type=int, default=None, help="并行进程数")
+    args = parser.parse_args()
+
+    output_dir = args.output_dir or f"../Result/cdma_analysis/{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
     analyzer = CDMABandwidthAnalyzer(
-        traffic_file_path=traffic_file_path,
-        output_dir=f"../Result/cdma_analysis/{datetime.now().strftime("%Y%m%d_%H%M%S")}",
-        cdma_bw_ranges=[
-            4,
-            8,
-            12,
-            16,
-            20,
-            24,
-            28,
-            32,
-        ],
+        config_path=args.config,
+        traffic_file_path=args.traffic_path,
+        output_dir=output_dir,
+        cdma_bw_ranges=args.bandwidths,
     )
 
-    # 配置traffic文件 - 修改为简单的文件名列表格式
     traffic_files = [
-        [
-            "MLP_MoE.txt",
-        ]
-        * 9,
-        [
-            "All2All_Dispatch.txt",
-        ],
+        ["MLP_MoE.txt"] * 9,
+        ["All2All_Dispatch.txt"],
     ]
 
     try:
-        # 运行带宽扫描
-        analyzer.run_bandwidth_sweep(traffic_files=traffic_files, topo_type="5x4", repeat=1)
-
-        # 生成摘要
+        analyzer.run_bandwidth_sweep(
+            traffic_files=traffic_files,
+            topo_type=args.topo,
+            repeat=args.repeat,
+            max_workers=args.max_workers,
+        )
         analyzer.generate_summary_from_csv()
 
         print(f"\n分析完成!")
