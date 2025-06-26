@@ -24,8 +24,8 @@ def main():
         * 3,
         [
             # r"All2All_Combine.txt",
-            r"All2All_Dispatch.txt",
-            # r"R_5x2.txt"
+            # r"All2All_Dispatch.txt",
+            r"R_5x2.txt"
         ],
     ]
 
@@ -67,7 +67,7 @@ def main():
         plot_flow_fig=1,
         flow_fig_show_CDMA=1,
         plot_RN_BW_fig=1,
-        plot_link_state=1,
+        plot_link_state=0,
         plot_start_time=20,
         print_trace=0,
         show_trace_id=7,
@@ -373,7 +373,7 @@ def main():
 
     sim.initial()
     sim.end_time = 6000
-    sim.print_interval = 2000
+    sim.print_interval = 1000
     sim.run()
 
 

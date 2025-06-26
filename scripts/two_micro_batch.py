@@ -501,10 +501,10 @@ def main():
     parser.add_argument("--config", default="../config/config2.json", help="配置文件路径")
     parser.add_argument("--traffic_path", default="../traffic/0617/", help="traffic文件目录")
     parser.add_argument("--output_dir", default=None, help="结果输出目录")
-    parser.add_argument("--bandwidths", nargs="+", type=int, default=list(range(4, 32)), help="待测试的CDMA带宽列表")
+    parser.add_argument("--bandwidths", nargs="+", type=int, default=list(range(32, 4, -1)), help="待测试的CDMA带宽列表")
     parser.add_argument("--repeat", type=int, default=1, help="每个带宽的重复次数")
     parser.add_argument("--topo", default="5x4", help="拓扑类型")
-    parser.add_argument("--max_workers", type=int, default=1, help="并行进程数")
+    parser.add_argument("--max_workers", type=int, default=4, help="并行进程数")
     args = parser.parse_args()
 
     output_dir = args.output_dir or f"../Result/cdma_analysis/{datetime.now().strftime('%Y%m%d_%H%M%S')}"

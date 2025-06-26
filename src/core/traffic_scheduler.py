@@ -3,6 +3,140 @@ from typing import List, Dict, Tuple, Optional, Iterator
 from collections import defaultdict, deque
 
 
+class TrafficFileReader:
+    """按需读取traffic文件的迭代器"""
+
+    def __init__(self, filename: str, traffic_file_path: str, config, time_offset: int, traffic_id: str, buffer_size: int = 1000):
+        self.filename = filename
+        self.abs_path = os.path.join(traffic_file_path, filename)
+        self.config = config
+        self.time_offset = time_offset
+        self.traffic_id = traffic_id
+        self.buffer_size = buffer_size
+
+        # 统计信息
+        self.total_req = 0
+        self.total_flit = 0
+        self.read_req = 0
+        self.write_req = 0
+        self.read_flit = 0
+        self.write_flit = 0
+
+        # 文件状态
+        self._file_handle = None
+        self._buffer = deque()
+        self._eof = False
+        self._stats_calculated = False
+
+        # 预先扫描文件获取统计信息
+        self._calculate_file_stats()
+
+    def _calculate_file_stats(self):
+        """预先扫描文件计算总请求数和flit数"""
+        if self._stats_calculated:
+            return
+
+        with open(self.abs_path, "r") as f:
+            for line in f:
+                parts = line.strip().split(",")
+                if len(parts) < 7:
+                    continue
+
+                op, burst = parts[5], int(parts[6])
+                if op == "R":
+                    self.read_req += 1
+                    self.read_flit += burst
+                else:
+                    self.write_req += 1
+                    self.write_flit += burst
+
+        self.total_req = self.read_req + self.write_req
+        self.total_flit = self.read_flit + self.write_flit
+        self._stats_calculated = True
+
+    def _open_file(self):
+        """打开文件句柄"""
+        if self._file_handle is None:
+            self._file_handle = open(self.abs_path, "r")
+
+    def _close_file(self):
+        """关闭文件句柄"""
+        if self._file_handle:
+            self._file_handle.close()
+            self._file_handle = None
+
+    def _fill_buffer(self):
+        """填充缓冲区"""
+        if self._eof or not self._file_handle:
+            return
+
+        count = 0
+        while count < self.buffer_size:
+            line = self._file_handle.readline()
+            if not line:
+                self._eof = True
+                break
+
+            parts = line.strip().split(",")
+            if len(parts) < 7:
+                continue
+
+            # 解析请求
+            t, src, src_t, dst, dst_t, op, burst = parts
+            t = int(t) * self.config.NETWORK_FREQUENCY + self.time_offset * self.config.NETWORK_FREQUENCY
+            src, dst, burst = int(src), int(dst), int(burst)
+
+            req_tuple = (t, src, src_t, dst, dst_t, op, burst, self.traffic_id)
+            self._buffer.append(req_tuple)
+            count += 1
+
+    def get_requests_until_time(self, max_time: int) -> List[Tuple]:
+        """获取指定时间之前的所有请求"""
+        self._open_file()
+        results = []
+
+        # 从缓冲区获取
+        while self._buffer:
+            req = self._buffer[0]
+            if req[0] <= max_time:
+                results.append(self._buffer.popleft())
+            else:
+                break
+
+        # 如果缓冲区为空且文件未结束，填充更多数据
+        while not self._eof and (not self._buffer or self._buffer[0][0] <= max_time):
+            self._fill_buffer()
+
+            while self._buffer:
+                req = self._buffer[0]
+                if req[0] <= max_time:
+                    results.append(self._buffer.popleft())
+                else:
+                    break
+
+        return results
+
+    def peek_next_time(self) -> Optional[int]:
+        """查看下一个请求的时间，不消费"""
+        self._open_file()
+
+        if not self._buffer and not self._eof:
+            self._fill_buffer()
+
+        if self._buffer:
+            return self._buffer[0][0]
+        return None
+
+    def has_more_requests(self) -> bool:
+        """检查是否还有更多请求"""
+        return len(self._buffer) > 0 or not self._eof
+
+    def close(self):
+        """关闭文件读取器"""
+        self._close_file()
+        self._buffer.clear()
+
+
 class TrafficState:
     """跟踪单个traffic的执行状态"""
 

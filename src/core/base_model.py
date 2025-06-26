@@ -125,7 +125,11 @@ class BaseModel:
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
+            self.config.GDMA_SEND_POSITION_LIST
+            + self.config.SDMA_SEND_POSITION_LIST
+            + self.config.CDMA_SEND_POSITION_LIST
+            + self.config.DDR_SEND_POSITION_LIST
+            + self.config.L2M_SEND_POSITION_LIST
         )
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
@@ -311,7 +315,7 @@ class BaseModel:
 
         # 更新结束时间统计
         self.update_finish_time_stats()
-        
+
         # 结果统计
         self.process_comprehensive_results()
 
@@ -320,7 +324,7 @@ class BaseModel:
         read_end_times = []
         write_end_times = []
         all_end_times = []
-        
+
         # 从traffic_scheduler获取结束时间统计
         try:
             finish_stats = self.traffic_scheduler.get_finish_time_stats()
@@ -335,10 +339,10 @@ class BaseModel:
         except Exception as e:
             if self.verbose:
                 print(f"Warning: Could not get finish time stats from traffic_scheduler: {e}")
-        
+
         # 从result_processor获取请求的结束时间
         try:
-            if hasattr(self, 'result_processor') and hasattr(self.result_processor, 'requests'):
+            if hasattr(self, "result_processor") and hasattr(self.result_processor, "requests"):
                 for req_info in self.result_processor.requests:
                     end_time_ns = req_info.end_time // self.config.NETWORK_FREQUENCY
                     all_end_times.append(end_time_ns)
@@ -349,25 +353,25 @@ class BaseModel:
         except Exception as e:
             if self.verbose:
                 print(f"Warning: Could not get finish time stats from result_processor: {e}")
-        
+
         # 更新统计数据，使用当前cycle作为备选
         current_time_ns = self.cycle // self.config.NETWORK_FREQUENCY
-        
+
         if read_end_times:
             self.R_finish_time_stat = max(read_end_times)
         else:
             self.R_finish_time_stat = current_time_ns
-            
+
         if write_end_times:
             self.W_finish_time_stat = max(write_end_times)
         else:
             self.W_finish_time_stat = current_time_ns
-            
+
         if all_end_times:
             self.Total_finish_time_stat = max(all_end_times)
         else:
             self.Total_finish_time_stat = current_time_ns
-            
+
         if self.verbose:
             print(f"Updated finish times - Read: {self.R_finish_time_stat}ns, Write: {self.W_finish_time_stat}ns, Total: {self.Total_finish_time_stat}ns")
 
@@ -501,7 +505,11 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
+            print(
+                f"Data statistic: Read: {self.read_req, self.read_flit}, "
+                f"Write: {self.write_req, self.write_flit}, "
+                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
+            )
 
     def log_summary(self):
         if self.verbose:
@@ -844,7 +852,8 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
+                    for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
