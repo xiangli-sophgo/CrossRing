@@ -31,4 +31,5 @@ test_data/
 # AI-generated files
 CLAUDE.md
 **/.claude/
+*/*/.claude/
 .gemini/

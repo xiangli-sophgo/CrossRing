@@ -246,13 +246,14 @@ class CDMABandwidthAnalyzer:
                 # 5. 生成并嵌入图表
                 try:
                     import matplotlib
+
                     matplotlib.use("Agg")  # Use non-interactive backend
                     import matplotlib.pyplot as plt
                     import matplotlib.font_manager as fm
 
                     # 设置中文字体
-                    plt.rcParams['font.sans-serif'] = ['SimHei']  # 或者其他支持中文的字体，如 'WenQuanYi Micro Hei'
-                    plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+                    plt.rcParams["font.sans-serif"] = ["SimHei"]  # 或者其他支持中文的字体，如 'WenQuanYi Micro Hei'
+                    plt.rcParams["axes.unicode_minus"] = False  # 解决负号显示问题
 
                     fig, ax1 = plt.subplots(figsize=(12, 7))
 
@@ -383,7 +384,7 @@ class CDMABandwidthAnalyzer:
                 flow_fig_show_CDMA=1,
                 plot_flow_fig=1,  # 不生成图像
                 plot_RN_BW_fig=1,
-                verbose=0,  # 减少输出
+                verbose=1,  # 减少输出
             )
 
             # 设置CDMA带宽限制
@@ -451,7 +452,7 @@ class CDMABandwidthAnalyzer:
 
             # 初始化并运行仿真
             sim.initial()
-            sim.end_time = 1000  # 足够的仿真时间
+            # sim.end_time = 1000  # 足够的仿真时间
             sim.print_interval = 30000  # 减少打印频率
             sim.run()
 
@@ -500,10 +501,10 @@ def main():
     parser.add_argument("--config", default="../config/config2.json", help="配置文件路径")
     parser.add_argument("--traffic_path", default="../traffic/0617/", help="traffic文件目录")
     parser.add_argument("--output_dir", default=None, help="结果输出目录")
-    parser.add_argument("--bandwidths", nargs="+", type=int, default=list(range(30, 32)), help="待测试的CDMA带宽列表")
+    parser.add_argument("--bandwidths", nargs="+", type=int, default=list(range(4, 32)), help="待测试的CDMA带宽列表")
     parser.add_argument("--repeat", type=int, default=1, help="每个带宽的重复次数")
     parser.add_argument("--topo", default="5x4", help="拓扑类型")
-    parser.add_argument("--max_workers", type=int, default=2, help="并行进程数")
+    parser.add_argument("--max_workers", type=int, default=1, help="并行进程数")
     args = parser.parse_args()
 
     output_dir = args.output_dir or f"../Result/cdma_analysis/{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -517,7 +518,7 @@ def main():
 
     traffic_files = [
         [
-            "All2All_Dispatch.txt",
+            "All2All_Combine.txt",
         ],
         [
             "MLP_MoE.txt",
