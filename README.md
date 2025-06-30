@@ -22,7 +22,7 @@ CrossRing 是一个用于片上网络（NoC, Network-on-Chip）中 CrossRing 拓
    ```bash
    python scripts/model_main.py
    ```
-   你可以在 `scripts/model_main.py` 文件中修改 `traffic_file_path`、`file_name` 以及 `config_path` 等参数，以适配你的实验需求。
+   你可以在 `example/example.py` 文件中修改 `traffic_file_path`、`file_name` 以及 `config_path` 等参数，以适配你的实验需求。
 
 3. **结果分析与可视化**
    仿真结束后，结果会保存到 `../Result/` 目录下。可以使用仓库中的相关脚本（如 `result_statistic.py`、`FOP_realtime_visualize.py` 等）进行后处理和分析。
