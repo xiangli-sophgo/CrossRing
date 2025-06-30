@@ -1,6 +1,6 @@
 from src.core import *
 import os
-from src.utils.component import Flit, Network, Node
+from src.utils.components import *
 from config.config import CrossRingConfig
 import matplotlib
 import numpy as np
@@ -23,9 +23,9 @@ def main():
         ]
         * 3,
         [
-            # r"All2All_Combine.txt",
+            r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
-            r"R_5x2.txt"
+            # r"test1.txt"
         ],
     ]
 
@@ -169,7 +169,7 @@ def main():
         sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8
         sim.config.SN_TRACKER_RELEASE_LATENCY = 40
-        sim.config.CDMA_BW_LIMIT = 8
+        sim.config.CDMA_BW_LIMIT = 16
 
         # sim.config.EQ_IN_FIFO_DEPTH = 8
         # sim.config.RB_IN_FIFO_DEPTH = 8
@@ -372,7 +372,7 @@ def main():
         }
 
     sim.initial()
-    sim.end_time = 6000
+    sim.end_time = 3000
     sim.print_interval = 1000
     sim.run()
 

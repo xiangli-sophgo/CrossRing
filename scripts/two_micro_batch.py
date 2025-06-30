@@ -468,7 +468,7 @@ class CDMABandwidthAnalyzer:
                 flow_fig_show_CDMA=1,
                 plot_flow_fig=1,
                 plot_RN_BW_fig=1,
-                verbose=0,
+                verbose=1,
             )
 
             # 设置CDMA带宽限制
@@ -537,7 +537,7 @@ class CDMABandwidthAnalyzer:
 
             # 初始化并运行仿真
             sim.initial()
-            sim.end_time = 100
+            # sim.end_time = 10000
             sim.print_interval = 50000  # 减少打印频率
             sim.run()
 
@@ -606,7 +606,7 @@ def main():
     parser.add_argument("--bandwidths", nargs="+", type=int, default=list(range(32, 3, -1)), help="待测试的CDMA带宽列表")
     parser.add_argument("--repeat", type=int, default=1, help="每个带宽的重复次数")
     parser.add_argument("--topo", default="5x4", help="拓扑类型")
-    parser.add_argument("--max_workers", type=int, default=1, help="并行进程数(推荐1-2个避免内存问题)")
+    parser.add_argument("--max_workers", type=int, default=8, help="并行进程数(推荐1-2个避免内存问题)")
     parser.add_argument("--memory_limit", type=float, default=10000, help="内存使用限制(MB)")
     args = parser.parse_args()
 
@@ -624,10 +624,10 @@ def main():
         print("建议减少并行进程数或调整内存限制")
 
     # 根据内存情况调整worker数量
-    if args.max_workers > 2 and available_memory < 12000:
-        suggested_workers = max(1, int(available_memory / 6000))  # 每个worker大约需要6GB
-        print(f"基于可用内存，建议使用 {suggested_workers} 个worker")
-        args.max_workers = min(args.max_workers, suggested_workers)
+    # if args.max_workers > 2 and available_memory < 12000:
+    #     suggested_workers = max(1, int(available_memory / 6000))  # 每个worker大约需要6GB
+    #     print(f"基于可用内存，建议使用 {suggested_workers} 个worker")
+    #     args.max_workers = min(args.max_workers, suggested_workers)
 
     output_dir = args.output_dir or f"../Result/cdma_analysis/{time_stamp}"
 
@@ -641,7 +641,7 @@ def main():
     # 流量文件配置
     traffic_files = [
         [
-            # "All2All_Combine.txt",
+            "All2All_Combine.txt",
             # "All2All_Dispatch.txt",
         ],
         [

@@ -131,7 +131,8 @@ class IPInterface:
             limit_attr = f"{ip_type[:4].upper()}_BW_LIMIT"
             bw_limit = getattr(self.config, limit_attr)
             self.token_bucket = TokenBucket(
-                rate=bw_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
+                # rate=bw_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
+                rate=bw_limit / self.config.FLIT_SIZE,
                 bucket_size=bw_limit,
             )
         else:
@@ -601,7 +602,10 @@ class IPInterface:
                 net_info["l2h_fifo"].append(net_info["l2h_fifo_pre"])
                 net_info["l2h_fifo_pre"] = None
 
-            if net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen:
+            if (
+                net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None
+                and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen
+            ):
                 net.IQ_channel_buffer[self.ip_type][self.ip_pos].append(net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos])
                 net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = None
 
@@ -691,9 +695,13 @@ class IPInterface:
             flit.req_type = req.req_type
             flit.flit_type = "data"
             if hasattr(req, "original_destination_type") and req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
+                latency = np.random.uniform(
+                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
+                )
             elif hasattr(req, "destination_type") and req.destination_type and req.destination_type.startswith("ddr"):
-                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
+                latency = np.random.uniform(
+                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
+                )
             else:
                 latency = self.config.L2M_R_LATENCY
             flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY

@@ -363,8 +363,8 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, cdma_map,
 # 示例使用
 if __name__ == "__main__":
     # 参数配置
-    TOPO = "3x3"
-    INTERVAL_COUNT = 10
+    TOPO = "5x4"
+    INTERVAL_COUNT = 50
     FILE_NAME = "../../test_data/test1.txt"
     np.random.seed(616)
 
@@ -374,11 +374,12 @@ if __name__ == "__main__":
         SDMA_MAP = {}
         GDMA_MAP = {}
 
-        # CDMA映射：12-15四个CDMA
         CDMA_MAP = {
             "cdma_0": [
                 16,
-                17,
+                # 17,
+                # 18,
+                # 19,
             ],
         }
 
@@ -401,36 +402,36 @@ if __name__ == "__main__":
                     ("ddr_0", 12),
                     ("ddr_1", 12),
                 ],
-                ("cdma_0", 17): [
-                    ("ddr_0", 1),
-                    ("ddr_1", 1),
-                    ("ddr_0", 5),
-                    ("ddr_1", 5),
-                    ("ddr_0", 9),
-                    ("ddr_1", 9),
-                    ("ddr_0", 13),
-                    ("ddr_1", 13),
-                ],
-                ("cdma_0", 18): [
-                    ("ddr_0", 2),
-                    ("ddr_1", 2),
-                    ("ddr_0", 6),
-                    ("ddr_1", 6),
-                    ("ddr_0", 10),
-                    ("ddr_1", 10),
-                    ("ddr_0", 14),
-                    ("ddr_1", 14),
-                ],
-                ("cdma_0", 19): [
-                    ("ddr_0", 3),
-                    ("ddr_1", 3),
-                    ("ddr_0", 7),
-                    ("ddr_1", 7),
-                    ("ddr_0", 11),
-                    ("ddr_1", 11),
-                    ("ddr_0", 15),
-                    ("ddr_1", 15),
-                ],
+                # ("cdma_0", 17): [
+                #     ("ddr_0", 1),
+                #     ("ddr_1", 1),
+                #     ("ddr_0", 5),
+                #     ("ddr_1", 5),
+                #     ("ddr_0", 9),
+                #     ("ddr_1", 9),
+                #     ("ddr_0", 13),
+                #     ("ddr_1", 13),
+                # ],
+                # ("cdma_0", 18): [
+                #     ("ddr_0", 2),
+                #     ("ddr_1", 2),
+                #     ("ddr_0", 6),
+                #     ("ddr_1", 6),
+                #     ("ddr_0", 10),
+                #     ("ddr_1", 10),
+                #     ("ddr_0", 14),
+                #     ("ddr_1", 14),
+                # ],
+                # ("cdma_0", 19): [
+                #     ("ddr_0", 3),
+                #     ("ddr_1", 3),
+                #     ("ddr_0", 7),
+                #     ("ddr_1", 7),
+                #     ("ddr_0", 11),
+                #     ("ddr_1", 11),
+                #     ("ddr_0", 15),
+                #     ("ddr_1", 15),
+                # ],
             }
         }
 
@@ -475,10 +476,10 @@ if __name__ == "__main__":
 
         CUSTOM_MAPPING = {}
 
-    SPEED = {1: 128, 2: 128, 4: 32}  # 不同burst对应的带宽(GB/s)
+    SPEED = {1: 128, 2: 128, 4: 128}  # 不同burst对应的带宽(GB/s)
     overlap = 1
 
     # 生成数据，使用flow_type=4启用自定义映射
-    generate_data(TOPO, INTERVAL_COUNT, FILE_NAME, SDMA_MAP, GDMA_MAP, CDMA_MAP, DDR_MAP, L2M_MAP, SPEED, BURST, flow_type=2, overlap=overlap, custom_mapping=CUSTOM_MAPPING)
+    generate_data(TOPO, INTERVAL_COUNT, FILE_NAME, SDMA_MAP, GDMA_MAP, CDMA_MAP, DDR_MAP, L2M_MAP, SPEED, BURST, flow_type=4, overlap=overlap, custom_mapping=CUSTOM_MAPPING)
 
     print(f"Traffic data generated successfully! {FILE_NAME}")

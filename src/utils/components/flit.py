@@ -16,33 +16,41 @@ import threading
 
 
 class TokenBucket:
-    """Simple token bucket for rate limiting."""
+    """Simple token bucket for rate limiting with fractional tokens."""
 
-    def __init__(self, rate=1, bucket_size=10):
-        self.rate = rate
-        self.bucket_size = bucket_size
-        self.tokens = bucket_size
+    def __init__(self, rate: float = 1.0, bucket_size: float = 10.0):
+        # rate: tokens added per cycle; bucket_size: max tokens stored
+        self.rate = float(rate)
+        self.bucket_size = float(bucket_size)
+        self.tokens = self.bucket_size
         self.last_cycle = 0
 
-    def consume(self, num=1):
-        if self.tokens >= num:
+    def consume(self, num: float = 1.0) -> bool:
+        """Attempt to consume `num` tokens. Returns True if sufficient tokens."""
+        # print(self.tokens)
+        if self.tokens + 1e-8 >= num:
             self.tokens -= num
             return True
         return False
 
-    def refill(self, cycle):
+    def refill(self, cycle: int):
+        """Refill tokens based on cycles elapsed since last refill."""
+        # Calculate elapsed cycles
         dt = cycle - self.last_cycle
         if dt <= 0:
             return
-        add = dt * self.rate
+        # Add fractional tokens
+        added = dt * self.rate
+        # Update last refill time
         self.last_cycle = cycle
-        self.tokens = min(self.tokens + add, self.bucket_size)
+        # Cap tokens to bucket size
+        self.tokens = min(self.tokens + added, self.bucket_size)
 
 
 class Flit:
     __slots__ = [
         "source",
-        "source_original", 
+        "source_original",
         "destination",
         "destination_original",
         "source_type",
@@ -74,6 +82,7 @@ class Flit:
         "rsp_type",
         "rn_tracker_type",
         "sn_tracker_type",
+        "sn_rsp_generate_cycle",
         "early_rsp",
         "current_position",
         "station_position",
@@ -201,6 +210,7 @@ class Flit:
         self.transaction_latency = np.inf
         self.cmd_latency = np.inf
         self.data_latency = np.inf
+        self.sn_rsp_generate_cycle = np.inf
 
     def sync_latency_record(self, flit):
         if flit.req_type == "read":
