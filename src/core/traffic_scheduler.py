@@ -11,7 +11,7 @@ class TrafficFileReader:
     - 输出：请求时间转换为网络周期数
     """
 
-    def __init__(self, filename: str, traffic_file_path: str, config, time_offset: int, traffic_id: str, buffer_size: int = 1000):
+    def __init__(self, filename: str, traffic_file_path: str, config, time_offset: int, traffic_id: str, buffer_size: int = 10000):
         """
         Args:
             time_offset: 时间偏移量（纳秒）
@@ -80,12 +80,23 @@ class TrafficFileReader:
             return
 
         count = 0
+        lines_batch = []
+        
+        # Read in larger batches to reduce I/O overhead
         while count < self.buffer_size:
-            line = self._file_handle.readline()
-            if not line:
-                self._eof = True
-                break
-
+            if not lines_batch:
+                # Read multiple lines at once
+                batch_size = min(1000, self.buffer_size - count)
+                for _ in range(batch_size):
+                    line = self._file_handle.readline()
+                    if not line:
+                        self._eof = True
+                        break
+                    lines_batch.append(line)
+                if not lines_batch:
+                    break
+            
+            line = lines_batch.pop(0)
             parts = line.strip().split(",")
             if len(parts) < 7:
                 continue

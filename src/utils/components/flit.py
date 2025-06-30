@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 import numpy as np
 from collections import deque
 from typing import List, Optional, Union
+import threading
 
 
 class TokenBucket:
@@ -39,6 +40,83 @@ class TokenBucket:
 
 
 class Flit:
+    __slots__ = [
+        "source",
+        "source_original", 
+        "destination",
+        "destination_original",
+        "source_type",
+        "destination_type",
+        "original_source_type",
+        "original_destination_type",
+        "burst_length",
+        "path",
+        "flit_position",
+        "is_finish",
+        "packet_id",
+        "traffic_id",
+        "moving_direction",
+        "moving_direction_v",
+        "flit_type",
+        "req_type",
+        "req_attr",
+        "req_state",
+        "id",
+        "flit_id",
+        "is_last_flit",
+        "circuits_completed_v",
+        "circuits_completed_h",
+        "wait_cycle_h",
+        "wait_cycle_v",
+        "path_index",
+        "current_seat_index",
+        "current_link",
+        "rsp_type",
+        "rn_tracker_type",
+        "sn_tracker_type",
+        "early_rsp",
+        "current_position",
+        "station_position",
+        "departure_cycle",
+        "req_departure_cycle",
+        "departure_network_cycle",
+        "departure_inject_cycle",
+        "arrival_cycle",
+        "arrival_network_cycle",
+        "arrival_eject_cycle",
+        "entry_db_cycle",
+        "leave_db_cycle",
+        "start_inject",
+        "is_injected",
+        "is_ejected",
+        "is_new_on_network",
+        "is_on_station",
+        "is_delay",
+        "is_arrive",
+        "predicted_duration",
+        "actual_duration",
+        "actual_ject_duration",
+        "actual_network_duration",
+        "itag_v",
+        "itag_h",
+        "is_tagged",
+        "ETag_priority",
+        "used_entry_level",
+        "cmd_entry_cake0_cycle",
+        "cmd_entry_noc_from_cake0_cycle",
+        "cmd_entry_noc_from_cake1_cycle",
+        "cmd_received_by_cake0_cycle",
+        "cmd_received_by_cake1_cycle",
+        "data_entry_noc_from_cake0_cycle",
+        "data_entry_noc_from_cake1_cycle",
+        "data_received_complete_cycle",
+        "data_entry_network_cycle",
+        "rsp_entry_network_cycle",
+        "transaction_latency",
+        "cmd_latency",
+        "data_latency",
+    ]
+
     last_id = 0
 
     def __init__(self, source, destination, path):
@@ -48,6 +126,8 @@ class Flit:
         self.destination_original = -1
         self.source_type = None
         self.destination_type = None
+        self.original_source_type = None
+        self.original_destination_type = None
         self.burst_length = -1
         self.path = path
         self.flit_position = ""
@@ -116,6 +196,8 @@ class Flit:
         self.data_entry_noc_from_cake0_cycle = np.inf
         self.data_entry_noc_from_cake1_cycle = np.inf
         self.data_received_complete_cycle = np.inf
+        self.data_entry_network_cycle = np.inf
+        self.rsp_entry_network_cycle = np.inf
         self.transaction_latency = np.inf
         self.cmd_latency = np.inf
         self.data_latency = np.inf
@@ -174,6 +256,105 @@ class Flit:
             f"{self.ETag_priority}, {ITag_H}, {ITag_V}"
         )
 
+    def _reset_for_reuse(self):
+        """Reset flit to clean state for object pool reuse"""
+        # Reset critical fields but keep __slots__ structure
+        self.is_finish = False
+        self.is_arrive = False
+        self.is_injected = False
+        self.is_ejected = False
+        self.is_new_on_network = True
+        self.is_on_station = False
+        self.is_delay = False
+        self.wait_cycle_h = 0
+        self.wait_cycle_v = 0
+        self.circuits_completed_h = 0
+        self.circuits_completed_v = 0
+        self.path_index = 0
+        self.current_seat_index = -1
+        self.current_link = None
+        self.traffic_id = None
+
+        # Reset timing fields
+        self.departure_cycle = np.inf
+        self.req_departure_cycle = np.inf
+        self.departure_network_cycle = np.inf
+        self.departure_inject_cycle = np.inf
+        self.arrival_cycle = np.inf
+        self.arrival_network_cycle = np.inf
+        self.arrival_eject_cycle = np.inf
+
+        # Reset latency fields
+        self.transaction_latency = np.inf
+        self.cmd_latency = np.inf
+        self.data_latency = np.inf
+
+    @classmethod
+    def create_flit(cls, source, destination, path):
+        """Factory method to create Flit using object pool"""
+        return _flit_pool.get_flit(source, destination, path)
+
+    @classmethod
+    def return_to_pool(cls, flit):
+        """Return flit to object pool"""
+        _flit_pool.return_flit(flit)
+
     @classmethod
     def clear_flit_id(cls):
         cls.last_id = 0
+
+    @classmethod
+    def get_pool_stats(cls):
+        """Get object pool statistics"""
+        return _flit_pool.get_stats()
+
+
+class FlitPool:
+    """Object pool for Flit instances to reduce GC pressure"""
+
+    def __init__(self, initial_size=1000):
+        self._pool = deque()
+        self._lock = threading.Lock()
+        self._created_count = 0
+
+        # Pre-populate the pool
+        for _ in range(initial_size):
+            self._pool.append(self._create_new_flit())
+
+    def _create_new_flit(self):
+        """Create a new Flit instance"""
+        self._created_count += 1
+        return Flit.__new__(Flit)
+
+    def get_flit(self, source, destination, path):
+        """Get a Flit from the pool or create a new one"""
+        with self._lock:
+            if self._pool:
+                flit = self._pool.popleft()
+            else:
+                flit = self._create_new_flit()
+
+        # Initialize the flit
+        flit.__init__(source, destination, path)
+        return flit
+
+    def return_flit(self, flit):
+        """Return a Flit to the pool after use"""
+        if flit is None:
+            return
+
+        # Reset the flit to a clean state
+        flit._reset_for_reuse()
+
+        with self._lock:
+            if len(self._pool) < 2000:  # Limit pool size
+                self._pool.append(flit)
+
+    def get_stats(self):
+        """Get pool statistics"""
+        with self._lock:
+            return {"pool_size": len(self._pool), "created_count": self._created_count}
+
+
+# Global flit pool instance
+_flit_pool = FlitPool()

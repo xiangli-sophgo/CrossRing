@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import os
 import sys, time
 import inspect, logging
+from functools import wraps
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,6 +19,75 @@ import numpy as np
 from functools import lru_cache
 from src.core.result_processor import *
 from src.core.traffic_scheduler import TrafficScheduler
+import threading
+
+
+class PerformanceMonitor:
+    """Performance monitoring utility for tracking simulation metrics"""
+    
+    def __init__(self):
+        self.method_times = {}
+        self.call_counts = {}
+        self.cache_hits = {}
+        self.cache_misses = {}
+        
+    def time_method(self, method_name):
+        """Decorator to time method execution"""
+        def decorator(func):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                start_time = time.perf_counter()
+                result = func(*args, **kwargs)
+                end_time = time.perf_counter()
+                
+                execution_time = end_time - start_time
+                if method_name not in self.method_times:
+                    self.method_times[method_name] = []
+                    self.call_counts[method_name] = 0
+                
+                self.method_times[method_name].append(execution_time)
+                self.call_counts[method_name] += 1
+                
+                return result
+            return wrapper
+        return decorator
+    
+    def record_cache_hit(self, cache_name):
+        """Record a cache hit"""
+        if cache_name not in self.cache_hits:
+            self.cache_hits[cache_name] = 0
+        self.cache_hits[cache_name] += 1
+    
+    def record_cache_miss(self, cache_name):
+        """Record a cache miss"""
+        if cache_name not in self.cache_misses:
+            self.cache_misses[cache_name] = 0
+        self.cache_misses[cache_name] += 1
+    
+    def get_summary(self):
+        """Get performance summary statistics"""
+        summary = {}
+        
+        # Method timing statistics
+        for method_name, times in self.method_times.items():
+            if times:
+                summary[f'{method_name}_avg_time'] = sum(times) / len(times)
+                summary[f'{method_name}_total_time'] = sum(times)
+                summary[f'{method_name}_call_count'] = self.call_counts[method_name]
+                summary[f'{method_name}_max_time'] = max(times)
+                summary[f'{method_name}_min_time'] = min(times)
+        
+        # Cache statistics
+        for cache_name in set(list(self.cache_hits.keys()) + list(self.cache_misses.keys())):
+            hits = self.cache_hits.get(cache_name, 0)
+            misses = self.cache_misses.get(cache_name, 0)
+            total = hits + misses
+            
+            summary[f'{cache_name}_cache_hits'] = hits
+            summary[f'{cache_name}_cache_misses'] = misses
+            summary[f'{cache_name}_cache_hit_rate'] = hits / total if total > 0 else 0
+        
+        return summary
 
 
 @lru_cache(maxsize=None)
@@ -127,6 +197,25 @@ class BaseModel:
         self.flit_positions = set(
             self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
         )
+        
+        # 缓存位置列表以避免重复转换
+        self.rn_positions_list = list(self.rn_positions)
+        self.sn_positions_list = list(self.sn_positions)
+        self.flit_positions_list = list(self.flit_positions)
+        
+        # 缓存网络类型到IP类型的映射
+        self.network_ip_types = {
+            "req": [ip_type for ip_type in self.config.CH_NAME_LIST 
+                   if ip_type.startswith("gdma") or ip_type.startswith("sdma") or ip_type.startswith("cdma")],
+            "rsp": [ip_type for ip_type in self.config.CH_NAME_LIST 
+                   if ip_type.startswith("ddr") or ip_type.startswith("l2m")],
+            "data": self.config.CH_NAME_LIST  # data网络不筛选
+        }
+        
+        # Pre-calculate frequently used lists to avoid repeated conversions
+        self.rn_positions_list = list(self.rn_positions)
+        self.sn_positions_list = list(self.sn_positions)
+        self.flit_positions_list = list(self.flit_positions)
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
         self.ip_modules = {}
@@ -248,9 +337,14 @@ class BaseModel:
         # Overall average bandwidth stats (unweighted and weighted)
         self.total_unweighted_bw_stat = 0
         self.total_weighted_bw_stat = 0
+        
+        # Performance monitoring
+        self.performance_monitor = PerformanceMonitor()
+        self.start_time = time.time()
 
     def run(self):
         """Main simulation loop."""
+        simulation_start = time.perf_counter()
         self.load_request_stream()
         flits, reqs, rsps = [], [], []
         self.cycle = 0
@@ -270,13 +364,13 @@ class BaseModel:
 
             self.ip_inject_to_network()
 
-            self._inject_queue_arbitration(self.req_network, self.rn_positions, "req")
+            self._inject_queue_arbitration(self.req_network, self.rn_positions_list, "req")
             reqs = self.move_flits_in_network(self.req_network, reqs, "req")
 
-            self._inject_queue_arbitration(self.rsp_network, self.sn_positions, "rsp")
+            self._inject_queue_arbitration(self.rsp_network, self.sn_positions_list, "rsp")
             rsps = self.move_flits_in_network(self.rsp_network, rsps, "rsp")
 
-            self._inject_queue_arbitration(self.data_network, self.flit_positions, "data")
+            self._inject_queue_arbitration(self.data_network, self.flit_positions_list, "data")
             flits = self.move_flits_in_network(self.data_network, flits, "data")
 
             self.network_to_ip_eject()
@@ -314,6 +408,17 @@ class BaseModel:
 
         # 结果统计
         self.process_comprehensive_results()
+        
+        # Record simulation performance
+        simulation_end = time.perf_counter()
+        simulation_time = simulation_end - simulation_start
+        self.performance_monitor.method_times['total_simulation'] = [simulation_time]
+        self.performance_monitor.call_counts['total_simulation'] = 1
+        
+        if self.verbose:
+            print(f"Simulation completed in {simulation_time:.2f} seconds")
+            print(f"Processed {self.cycle} cycles")
+            print(f"Performance: {self.cycle / simulation_time:.0f} cycles/second")
 
     def update_finish_time_stats(self):
         """从traffic_scheduler和result_processor获取结束时间并更新统计"""
@@ -377,7 +482,7 @@ class BaseModel:
             self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "received_flit")
 
     def syn_IP_stat(self):
-        for ip_pos in self.flit_positions:
+        for ip_pos in self.flit_positions_list:
             for ip_type in self.config.CH_NAME_LIST:
                 ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
                 if self.model_type_stat == "REQ_RSP":
@@ -410,14 +515,14 @@ class BaseModel:
             self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle)
 
     def ip_inject_to_network(self):
-        for ip_pos in self.flit_positions:
+        for ip_pos in self.flit_positions_list:
             for ip_type in self.config.CH_NAME_LIST:
                 ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
                 ip_interface.inject_step(self.cycle)
 
     def network_to_ip_eject(self):
         """从网络到IP的eject步骤，并更新received_flit统计"""
-        for ip_pos in self.flit_positions:
+        for ip_pos in self.flit_positions_list:
             for ip_type in self.config.CH_NAME_LIST:
                 ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
                 # 执行eject，获取已到达目的IP的flit列表
@@ -550,6 +655,18 @@ class BaseModel:
         network_type : str
             "req" | "rsp" | "data"
         """
+        # Use cached pre-filtered IP types to avoid repeated list comprehensions
+        if not hasattr(self, '_cached_ip_types'):
+            self._cached_ip_types = {
+                "req": [ip_type for ip_type in self.config.CH_NAME_LIST 
+                       if ip_type.startswith(("sdma", "gdma", "cdma"))],
+                "rsp": [ip_type for ip_type in self.config.CH_NAME_LIST 
+                       if ip_type.startswith(("ddr", "l2m"))],
+                "data": self.config.CH_NAME_LIST
+            }
+        
+        valid_ip_types = self._cached_ip_types[network_type]
+        
         for ip_pos in ip_positions:
             for direction in self.IQ_directions:
                 rr_queue = network.round_robin["IQ"][direction][ip_pos - self.config.NUM_COL]
@@ -560,14 +677,12 @@ class BaseModel:
                 if len(queue[ip_pos]) >= self.config.IQ_OUT_FIFO_DEPTH:
                     continue  # FIFO 满
 
-                for ip_type in list(rr_queue):
-                    # —— 网络‑特定 ip_type 过滤 ——
-                    if network_type == "req" and not (ip_type.startswith("sdma") or ip_type.startswith("gdma") or ip_type.startswith("cdma")):
+                # Use optimized IP type list instead of full rr_queue iteration
+                processed = False
+                for ip_type in valid_ip_types:
+                    if ip_type not in rr_queue:
                         continue
-                    if network_type == "rsp" and not (ip_type.startswith("ddr") or ip_type.startswith("l2m")):
-                        continue
-                    # data 网络不筛选 ip_type
-
+                        
                     if not network.IQ_channel_buffer[ip_type][ip_pos]:
                         continue  # channel‑buffer 空
 
@@ -590,6 +705,7 @@ class BaseModel:
                         # _try_inject_to_direction 已经做了 popleft & pre‑缓冲写入，故直接 break
                         rr_queue.remove(ip_type)
                         rr_queue.append(ip_type)
+                        processed = True
                         break
 
                     else:
@@ -610,16 +726,20 @@ class BaseModel:
 
                         rr_queue.remove(ip_type)
                         rr_queue.append(ip_type)
+                        processed = True
                         break
+                        
+                if processed:
+                    continue
 
     def move_pre_to_queues_all(self):
         #  所有 IPInterface 的 *_pre → FIFO
-        for ip_pos in self.flit_positions:
+        for ip_pos in self.flit_positions_list:
             for ip_type in self.config.CH_NAME_LIST:
                 self.ip_modules[(ip_type, ip_pos)].move_pre_to_fifo()
 
         # 所有网络的 *_pre → FIFO
-        for in_pos in self.flit_positions:
+        for in_pos in self.flit_positions_list:
             self._move_pre_to_queues(self.req_network, in_pos)
             self._move_pre_to_queues(self.rsp_network, in_pos)
             self._move_pre_to_queues(self.data_network, in_pos)
@@ -685,8 +805,8 @@ class BaseModel:
         path = self.routes[source][destination]
         traffic_id = req_data[7]  # 最后一个元素是traffic_id
 
-        # 创建flit对象
-        req = Flit(source, destination, path)
+        # 创建flit对象 (使用对象池)
+        req = Flit.create_flit(source, destination, path)
         req.source_original = req_data[1]
         req.destination_original = req_data[3]
         req.flit_type = "req"
@@ -1304,6 +1424,7 @@ class BaseModel:
         # return weighted_sum / total_count if total_count > 0 else 0.0
         return total_count * 128 / total_interval_time if total_interval_time > 0 else 0.0
 
+    @lru_cache(maxsize=1024)
     def node_map(self, node, is_source=True):
         if is_source:
             if self.topo_type_stat in ["5x4", "4x5"]:
@@ -1341,5 +1462,32 @@ class BaseModel:
         # Clear flit and packet IDs (assuming these are class methods)
         Flit.clear_flit_id()
         Node.clear_packet_id()
+        
+        # Add performance statistics
+        perf_stats = self.performance_monitor.get_summary()
+        results.update(perf_stats)
+        
+        # Add object pool statistics
+        flit_pool_stats = Flit.get_pool_stats()
+        results['flit_pool_size'] = flit_pool_stats['pool_size']
+        results['flit_pool_created'] = flit_pool_stats['created_count']
+        results['flit_pool_reuse_rate'] = (flit_pool_stats['created_count'] - flit_pool_stats['pool_size']) / max(flit_pool_stats['created_count'], 1)
 
         return results
+    
+    def get_performance_stats(self):
+        """Get performance optimization statistics"""
+        stats = {
+            'simulation_cycles': self.cycle,
+            'total_flits_processed': self.trans_flits_num,
+            'flit_pool_stats': Flit.get_pool_stats(),
+            'cache_hit_info': {
+                'node_map_cache_size': getattr(self.node_map, 'cache_info', lambda: {'hits': 0, 'misses': 0})(),
+            }
+        }
+        
+        # Add I/O performance stats if available
+        if hasattr(self.traffic_scheduler, 'get_io_stats'):
+            stats['io_performance'] = self.traffic_scheduler.get_io_stats()
+            
+        return stats

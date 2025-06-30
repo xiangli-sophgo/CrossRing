@@ -481,6 +481,7 @@ class CDMABandwidthAnalyzer:
             sim.config.NUM_L2M = 32
             sim.config.NUM_GDMA = 32
             sim.config.NUM_SDMA = 32
+            sim.config.NUM_CDMA = 4
             sim.config.NUM_RN = 32
             sim.config.NUM_SN = 32
             sim.config.RN_R_TRACKER_OSTD = 64
@@ -530,7 +531,7 @@ class CDMABandwidthAnalyzer:
                 "gdma": 2,
                 "sdma": 2,
                 "cdma": 1,
-                "ddr": 4,
+                "ddr": 2,
                 "l2m": 2,
             }
 
