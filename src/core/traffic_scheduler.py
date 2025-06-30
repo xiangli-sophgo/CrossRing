@@ -4,9 +4,18 @@ from collections import defaultdict, deque
 
 
 class TrafficFileReader:
-    """按需读取traffic文件的迭代器"""
+    """按需读取traffic文件的迭代器
+    
+    内部处理：
+    - 输入：traffic文件中的时间（纳秒）+ time_offset（纳秒）
+    - 输出：请求时间转换为网络周期数
+    """
 
     def __init__(self, filename: str, traffic_file_path: str, config, time_offset: int, traffic_id: str, buffer_size: int = 1000):
+        """
+        Args:
+            time_offset: 时间偏移量（纳秒）
+        """
         self.filename = filename
         self.abs_path = os.path.join(traffic_file_path, filename)
         self.config = config
@@ -83,41 +92,53 @@ class TrafficFileReader:
 
             # 解析请求
             t, src, src_t, dst, dst_t, op, burst = parts
-            t = int(t) * self.config.NETWORK_FREQUENCY + self.time_offset * self.config.NETWORK_FREQUENCY
+            # t是纳秒，time_offset也是纳秒，都需要转换为网络周期数
+            t = (int(t) + self.time_offset) * self.config.NETWORK_FREQUENCY
             src, dst, burst = int(src), int(dst), int(burst)
 
             req_tuple = (t, src, src_t, dst, dst_t, op, burst, self.traffic_id)
             self._buffer.append(req_tuple)
             count += 1
 
-    def get_requests_until_time(self, max_time: int) -> List[Tuple]:
-        """获取指定时间之前的所有请求"""
+    def get_requests_until_cycle(self, max_cycle: int) -> List[Tuple]:
+        """获取指定周期之前的所有请求
+        
+        Args:
+            max_cycle: 最大网络周期数
+            
+        Returns:
+            请求列表，每个请求的时间是网络周期数
+        """
         self._open_file()
         results = []
 
         # 从缓冲区获取
         while self._buffer:
             req = self._buffer[0]
-            if req[0] <= max_time:
+            if req[0] <= max_cycle:  # 比较网络周期数
                 results.append(self._buffer.popleft())
             else:
                 break
 
         # 如果缓冲区为空且文件未结束，填充更多数据
-        while not self._eof and (not self._buffer or self._buffer[0][0] <= max_time):
+        while not self._eof and (not self._buffer or self._buffer[0][0] <= max_cycle):
             self._fill_buffer()
 
             while self._buffer:
                 req = self._buffer[0]
-                if req[0] <= max_time:
+                if req[0] <= max_cycle:  # 比较网络周期数
                     results.append(self._buffer.popleft())
                 else:
                     break
 
         return results
 
-    def peek_next_time(self) -> Optional[int]:
-        """查看下一个请求的时间，不消费"""
+    def peek_next_cycle(self) -> Optional[int]:
+        """查看下一个请求的网络周期数，不消费
+        
+        Returns:
+            下一个请求的网络周期数，如果没有更多请求返回None
+        """
         self._open_file()
 
         if not self._buffer and not self._eof:
@@ -151,7 +172,7 @@ class TrafficState:
         self.received_flit = 0
         self.start_time = 0
         self.end_time = 0
-        self.actual_end_time = 0
+        self.actual_end_time = 0  # 纳秒
 
     def is_injection_completed(self) -> bool:
         """判断是否所有请求都已注入"""
@@ -182,7 +203,7 @@ class SerialChain:
         self.chain_id = chain_id
         self.traffic_files = traffic_files
         self.current_index = 0
-        self.chain_time_offset = 0
+        self.chain_time_offset = 0  # 纳秒
         self.is_completed = False
         self.start_time = 0
         # 每条链独立的请求队列
@@ -195,10 +216,13 @@ class SerialChain:
             return self.traffic_files[self.current_index]
         return None
 
-    def advance_to_next(self, gap_time: int = 10):
-        """推进到下一个traffic"""
+    def advance_to_next(self):
+        """推进到下一个traffic
+
+        Args:
+            gap_time: 间隔时间（纳秒）
+        """
         self.current_index += 1
-        self.chain_time_offset += gap_time  # 添加间隔
         self.pending_requests.clear()  # 清空当前队列
         self.current_traffic_id = None
         if self.current_index >= len(self.traffic_files):
@@ -213,13 +237,20 @@ class SerialChain:
         return len(self.pending_requests) > 0
 
     def get_ready_requests(self, current_cycle: int) -> List[Tuple]:
-        """获取所有准备就绪的请求（批量处理）"""
+        """获取所有准备就绪的请求（批量处理）
+        
+        Args:
+            current_cycle: 当前网络周期数
+            
+        Returns:
+            准备就绪的请求列表，每个请求的时间是网络周期数
+        """
         ready_requests = []
 
         # 检查队列头部的所有准备就绪请求
         while self.pending_requests:
             next_req = self.pending_requests[0]
-            if next_req[0] <= current_cycle:  # 时间已到
+            if next_req[0] <= current_cycle:  # 网络周期数比较：请求时间 <= 当前周期
                 ready_requests.append(self.pending_requests.popleft())
             else:
                 break  # 遇到未到时间的请求，停止
@@ -227,21 +258,32 @@ class SerialChain:
         return ready_requests
 
     def load_traffic_requests(self, requests: List[Tuple], traffic_id: str):
-        """加载traffic的请求到链的队列"""
+        """加载traffic的请求到链的队列
+        
+        Args:
+            requests: 请求列表，每个请求的时间是网络周期数
+            traffic_id: traffic标识符
+        """
         self.pending_requests.clear()
         self.pending_requests.extend(requests)
         self.current_traffic_id = traffic_id
 
 
 class TrafficScheduler:
-    """Traffic调度器，支持多条并行的串行链"""
+    """Traffic调度器，支持多条并行的串行链
+    
+    时间单位约定：
+    - time_offset: 纳秒
+    - 请求时间: 网络周期数（内部计算）
+    - 显示输出: 纳秒（用户友好）
+    """
 
     def __init__(self, config, traffic_file_path: str):
         self.config = config
         self.traffic_file_path = traffic_file_path
         self.parallel_chains: List[SerialChain] = []
         self.active_traffics: Dict[str, TrafficState] = {}
-        self.current_cycle = 0
+        self.current_cycle = 0  # 当前网络周期数
         self.verbose = False
 
         # Ring拓扑支持
@@ -297,13 +339,23 @@ class TrafficScheduler:
         if self.verbose:
             print(f"Started traffic {traffic_file} on {chain.chain_id}")
             print(f"  Traffic ID: {traffic_id}, Requests: {total_req}, Flits: {total_flit}")
-            print(f"  Time offset: {chain.chain_time_offset}")
+            print(f"  Time offset: {chain.chain_time_offset}ns")
             if requests:
-                print(f"  First request time: {requests[0][0]}")
-                print(f"  Last request time: {requests[-1][0]}")
+                first_time_ns = requests[0][0] // self.config.NETWORK_FREQUENCY
+                last_time_ns = requests[-1][0] // self.config.NETWORK_FREQUENCY
+                print(f"  First request time: {first_time_ns}ns ({requests[0][0]} cycles)")
+                print(f"  Last request time: {last_time_ns}ns ({requests[-1][0]} cycles)")
 
     def _parse_traffic_file(self, filename: str, time_offset: int, traffic_id: str) -> Tuple[int, int, List[Tuple]]:
-        """解析traffic文件并添加时间偏移"""
+        """解析traffic文件并添加时间偏移
+
+        Args:
+            time_offset: 时间偏移量（纳秒）
+
+        Returns:
+            (total_req, total_flit, requests)
+            requests中的时间已转换为网络周期数
+        """
         abs_path = os.path.join(self.traffic_file_path, filename)
         requests = []
         read_req = write_req = read_flit = write_flit = 0
@@ -316,7 +368,8 @@ class TrafficScheduler:
 
                 # 解析原始数据
                 t, src, src_t, dst, dst_t, op, burst = parts
-                t = int(t) * self.config.NETWORK_FREQUENCY + time_offset * self.config.NETWORK_FREQUENCY
+                # t是纳秒，time_offset也是纳秒，都需要转换为网络周期数
+                t = (int(t) + time_offset) * self.config.NETWORK_FREQUENCY
                 src, dst, burst = int(src), int(dst), int(burst)
 
                 # 创建带traffic_id的请求元组
@@ -340,8 +393,11 @@ class TrafficScheduler:
         """
         获取所有链中准备就绪的请求
 
+        Args:
+            current_cycle: 当前网络周期数
+            
         Returns:
-            List of request tuples ready for injection
+            准备就绪的请求列表，每个请求的时间是网络周期数
         """
         self.current_cycle = current_cycle
         ready_requests = []
@@ -401,12 +457,19 @@ class TrafficScheduler:
                 state.update_sent_flit()
             elif stat_type == "received_flit":
                 state.update_received_flit()
-                # 记录实际结束时间
+                # 记录实际结束时间（纳秒）
                 if state.received_flit >= state.total_flit:
-                    state.actual_end_time = self.current_cycle
+                    state.actual_end_time = self.current_cycle // self.config.NETWORK_FREQUENCY
 
     def check_and_advance_chains(self, current_cycle: int) -> List[str]:
-        """检查traffic完成情况并推进链"""
+        """检查traffic完成情况并推进链
+        
+        Args:
+            current_cycle: 当前网络周期数
+            
+        Returns:
+            已完成的traffic_id列表
+        """
         self.current_cycle = current_cycle
         completed_traffics = []
 
@@ -419,8 +482,8 @@ class TrafficScheduler:
                 completed_traffics.append(traffic_id)
 
                 if chain:
-                    # 计算实际结束时间
-                    actual_end_ns = state.actual_end_time // self.config.NETWORK_FREQUENCY
+                    # actual_end_time已经是纳秒时间
+                    actual_end_ns = state.actual_end_time
                     state.end_time = actual_end_ns
 
                     # 更新链的时间偏移（实际结束时间 + 间隔）
@@ -433,7 +496,7 @@ class TrafficScheduler:
                         print(f"  Next time offset: {chain.chain_time_offset}ns")
 
                     # 推进到下一个traffic
-                    chain.advance_to_next(gap_time)
+                    chain.advance_to_next()
 
                     # 如果链还有下一个traffic，立即启动
                     if chain.has_next_traffic():
@@ -462,7 +525,11 @@ class TrafficScheduler:
         return len(self.active_traffics)
 
     def get_chain_status(self) -> Dict[str, Dict]:
-        """获取所有链的状态信息"""
+        """获取所有链的状态信息
+        
+        Returns:
+            链状态字典，time_offset单位为纳秒
+        """
         status = {}
         for chain in self.parallel_chains:
             status[chain.chain_id] = {
@@ -481,7 +548,11 @@ class TrafficScheduler:
         self.verbose = verbose
 
     def get_finish_time_stats(self) -> Dict[str, int]:
-        """获取读写操作的结束时间统计"""
+        """获取读写操作的结束时间统计
+        
+        Returns:
+            结束时间统计字典，所有时间单位为纳秒
+        """
         read_end_times = []
         write_end_times = []
         all_end_times = []
@@ -491,7 +562,8 @@ class TrafficScheduler:
             if traffic_state.actual_end_time > 0:
                 # 这里简化处理，实际中可能需要根据traffic文件内容来区分读写
                 # 目前假设每个traffic都包含读写操作
-                end_time_ns = traffic_state.actual_end_time // self.config.NETWORK_FREQUENCY
+                # actual_end_time已经是纳秒时间
+                end_time_ns = traffic_state.actual_end_time
                 read_end_times.append(end_time_ns)
                 write_end_times.append(end_time_ns)
                 all_end_times.append(end_time_ns)
@@ -506,4 +578,4 @@ class TrafficScheduler:
         """重置调度器状态"""
         self.parallel_chains.clear()
         self.active_traffics.clear()
-        self.current_cycle = 0
+        self.current_cycle = 0  # 当前网络周期数

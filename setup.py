@@ -1,14 +1,14 @@
+# -*- coding: utf-8 -*-
 from setuptools import setup, find_packages
+import os
 
+os.environ["PYTHONUTF8"] = "1"
 setup(
     name="CrossRing",  # 包名称
     version="1.0.0",  # 版本号
     author="xiang.li",  # 作者
     author_email="xiang.li@sophgo.com",  # 作者邮箱
     description="A model of CrossRing",  # 简短描述
-    long_description=open("README.md").read(),  # 详细描述（从 README 文件读取）
-    long_description_content_type="text/markdown",  # 描述内容类型
-    url="https://github.com/xiangli-sophgo/NoC",  # 项目网址
     packages=find_packages(),  # 自动查找包
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -25,6 +25,6 @@ setup(
         "seaborn",
         "joblib",
         "tqdm",
-        "optuna"
+        "optuna",
     ],
 )

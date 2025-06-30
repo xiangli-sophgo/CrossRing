@@ -1981,6 +1981,98 @@ class BandwidthAnalyzer:
                     metrics.mixed_metrics.network_end_time,
                 ]
                 f.write(",".join(map(str, row_data)) + "\n")
+            
+            # 添加端口带宽平均值统计
+            self._write_port_bandwidth_averages(f, all_ports)
+
+    def _write_port_bandwidth_averages(self, f, all_ports: Dict[str, 'PortBandwidthMetrics']):
+        """
+        写入端口带宽平均值统计行到CSV文件末尾
+        
+        Args:
+            f: CSV文件句柄
+            all_ports: 所有端口的带宽指标字典
+        """
+        # 按端口类型分组
+        port_groups = defaultdict(list)
+        for port_id, metrics in all_ports.items():
+            port_type = port_id.split('_')[0]  # 提取端口类型 (gdma, sdma, cdma, ddr, l2m)
+            port_groups[port_type].append(metrics)
+        
+        # 写入分隔行
+        f.write("\n# Port Bandwidth Averages by Type\n")
+        
+        # 为每种端口类型计算并写入平均值
+        for port_type, metrics_list in sorted(port_groups.items()):
+            if not metrics_list:
+                continue
+                
+            # 计算各类带宽的平均值
+            read_unweighted_avg = sum(m.read_metrics.unweighted_bandwidth for m in metrics_list) / len(metrics_list)
+            read_weighted_avg = sum(m.read_metrics.weighted_bandwidth for m in metrics_list) / len(metrics_list)
+            write_unweighted_avg = sum(m.write_metrics.unweighted_bandwidth for m in metrics_list) / len(metrics_list)
+            write_weighted_avg = sum(m.write_metrics.weighted_bandwidth for m in metrics_list) / len(metrics_list)
+            mixed_unweighted_avg = sum(m.mixed_metrics.unweighted_bandwidth for m in metrics_list) / len(metrics_list)
+            mixed_weighted_avg = sum(m.mixed_metrics.weighted_bandwidth for m in metrics_list) / len(metrics_list)
+            
+            # 计算总请求数和flits平均值
+            read_requests_avg = sum(m.read_metrics.total_requests for m in metrics_list) / len(metrics_list)
+            write_requests_avg = sum(m.write_metrics.total_requests for m in metrics_list) / len(metrics_list)
+            total_requests_avg = sum(m.mixed_metrics.total_requests for m in metrics_list) / len(metrics_list)
+            
+            # 计算flits平均值
+            read_flits_avg = sum(sum(iv.flit_count for iv in m.read_metrics.working_intervals) if m.read_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
+            write_flits_avg = sum(sum(iv.flit_count for iv in m.write_metrics.working_intervals) if m.write_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
+            mixed_flits_avg = sum(sum(iv.flit_count for iv in m.mixed_metrics.working_intervals) if m.mixed_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
+            
+            # 计算工作区间平均值
+            read_intervals_avg = sum(len(m.read_metrics.working_intervals) for m in metrics_list) / len(metrics_list)
+            write_intervals_avg = sum(len(m.write_metrics.working_intervals) for m in metrics_list) / len(metrics_list)
+            mixed_intervals_avg = sum(len(m.mixed_metrics.working_intervals) for m in metrics_list) / len(metrics_list)
+            
+            # 计算工作时间平均值
+            read_working_time_avg = sum(m.read_metrics.total_working_time for m in metrics_list) / len(metrics_list)
+            write_working_time_avg = sum(m.write_metrics.total_working_time for m in metrics_list) / len(metrics_list)
+            mixed_working_time_avg = sum(m.mixed_metrics.total_working_time for m in metrics_list) / len(metrics_list)
+            
+            # 计算网络时间平均值
+            read_start_time_avg = sum(m.read_metrics.network_start_time for m in metrics_list if m.read_metrics.network_start_time > 0) / max(1, len([m for m in metrics_list if m.read_metrics.network_start_time > 0]))
+            read_end_time_avg = sum(m.read_metrics.network_end_time for m in metrics_list if m.read_metrics.network_end_time > 0) / max(1, len([m for m in metrics_list if m.read_metrics.network_end_time > 0]))
+            write_start_time_avg = sum(m.write_metrics.network_start_time for m in metrics_list if m.write_metrics.network_start_time > 0) / max(1, len([m for m in metrics_list if m.write_metrics.network_start_time > 0]))
+            write_end_time_avg = sum(m.write_metrics.network_end_time for m in metrics_list if m.write_metrics.network_end_time > 0) / max(1, len([m for m in metrics_list if m.write_metrics.network_end_time > 0]))
+            mixed_start_time_avg = sum(m.mixed_metrics.network_start_time for m in metrics_list if m.mixed_metrics.network_start_time > 0) / max(1, len([m for m in metrics_list if m.mixed_metrics.network_start_time > 0]))
+            mixed_end_time_avg = sum(m.mixed_metrics.network_end_time for m in metrics_list if m.mixed_metrics.network_end_time > 0) / max(1, len([m for m in metrics_list if m.mixed_metrics.network_end_time > 0]))
+            
+            # 组装平均值行数据
+            avg_row_data = [
+                f"{port_type}_AVG",  # port_id
+                f"AVG_of_{len(metrics_list)}_ports",  # coordinate
+                f"{read_unweighted_avg:.6f}",
+                f"{read_weighted_avg:.6f}",
+                f"{write_unweighted_avg:.6f}",
+                f"{write_weighted_avg:.6f}",
+                f"{mixed_unweighted_avg:.6f}",
+                f"{mixed_weighted_avg:.6f}",
+                f"{read_requests_avg:.2f}",
+                f"{write_requests_avg:.2f}",
+                f"{total_requests_avg:.2f}",
+                f"{read_flits_avg:.2f}",
+                f"{write_flits_avg:.2f}",
+                f"{mixed_flits_avg:.2f}",
+                f"{read_intervals_avg:.2f}",
+                f"{write_intervals_avg:.2f}",
+                f"{mixed_intervals_avg:.2f}",
+                f"{read_working_time_avg:.2f}",
+                f"{write_working_time_avg:.2f}",
+                f"{mixed_working_time_avg:.2f}",
+                f"{read_start_time_avg:.2f}",
+                f"{read_end_time_avg:.2f}",
+                f"{write_start_time_avg:.2f}",
+                f"{write_end_time_avg:.2f}",
+                f"{mixed_start_time_avg:.2f}",
+                f"{mixed_end_time_avg:.2f}",
+            ]
+            f.write(",".join(avg_row_data) + "\n")
 
     def _generate_detailed_request_csv(self, output_path: str):
         """

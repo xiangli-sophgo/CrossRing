@@ -28,6 +28,7 @@ class CrossRingConfig:
         self.NUM_ROW = self.NUM_NODE // self.NUM_COL
         self.NUM_SDMA = args.NUM_SDMA
         self.NUM_GDMA = args.NUM_GDMA
+        self.NUM_CDMA = args.NUM_CDMA
         self.NUM_DDR = args.NUM_DDR
         self.NUM_L2M = args.NUM_L2M
         self.FLIT_SIZE = args.FLIT_SIZE
@@ -165,7 +166,7 @@ class CrossRingConfig:
         #     self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
         #     self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
         #     self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
-        #     self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], []o
+        #     self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [17], [])
         elif topo_type == "5x2":
             self.NUM_NODE = 20
             self.NUM_COL = 2
@@ -360,6 +361,7 @@ class CrossRingConfig:
         parser.add_argument("--NUM_L2M", type=int, default=default_config["NUM_L2M"], help="Number of L2Ms")
         parser.add_argument("--NUM_SDMA", type=int, default=default_config["NUM_SDMA"], help="Number of SDMAs")
         parser.add_argument("--NUM_GDMA", type=int, default=default_config["NUM_GDMA"], help="Number of GDMA")
+        parser.add_argument("--NUM_CDMA", type=int, default=default_config["NUM_CDMA"], help="Number of GDMA")
         parser.add_argument("--FLIT_SIZE", type=int, default=default_config["FLIT_SIZE"], help="Flit size")
         parser.add_argument("--SLICE_PER_LINK", type=int, default=default_config["SLICE_PER_LINK"], help="Slice num per link, (num -2) equals to RTL slice num")
         parser.add_argument("--RB_IN_FIFO_DEPTH", type=int, default=default_config["RB_IN_FIFO_DEPTH"], help="Depth of IN FIFOs in Ring Bridge")
