@@ -37,6 +37,7 @@ CrossRing/
 │   ├── traffic_process/# 流量处理相关
 │   └── utils/          # 工具类与基础组件
 ├── config/             # 配置文件
+├── example/            # 示例代码
 ├── scripts/            # 各类仿真与分析脚本
 ├── requirements.txt    # 依赖说明
 └── README.md           # 项目说明
