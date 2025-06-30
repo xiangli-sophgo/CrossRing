@@ -18,9 +18,9 @@ CrossRing 是一个用于片上网络（NoC, Network-on-Chip）中 CrossRing 拓
    ```
 
 2. **运行主仿真脚本**
-   以 `scripts/model_main.py` 为例，配置好对应的流量文件路径和参数后，运行：
+   以 `example/example.py` 为例，配置好对应的流量文件路径和参数后，运行：
    ```bash
-   python scripts/model_main.py
+   python example/example.py
    ```
    你可以在 `example/example.py` 文件中修改 `traffic_file_path`、`file_name` 以及 `config_path` 等参数，以适配你的实验需求。
 
