@@ -46,7 +46,7 @@ from src.core import REQ_RSP_model
 
 
 class CDMABandwidthAnalyzer:
-    def __init__(self, config_path="../config/config2.json", traffic_file_path="../traffic/0617/", output_dir="../Result/cdma_analysis/", cdma_bw_ranges=[4, 16, 32]):
+    def __init__(self, config_path="../config/config2.json", traffic_file_path="../traffic/0617/", output_dir="../Result/cdma_analysis/", cdma_bw_ranges=[4, 16, 32], run_timestamp=None):
         """
         初始化CDMA带宽分析器
 
@@ -57,6 +57,7 @@ class CDMABandwidthAnalyzer:
         """
         self.config_path = config_path
         self.traffic_file_path = traffic_file_path
+        self.run_timestamp = run_timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -64,8 +65,7 @@ class CDMABandwidthAnalyzer:
         self.cdma_bw_ranges = cdma_bw_ranges
 
         # 设置CSV输出文件
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.output_csv = self.output_dir / f"cdma_bandwidth_analysis_{timestamp}.csv"
+        self.output_csv = self.output_dir / f"cdma_bandwidth_analysis_{self.run_timestamp}.csv"
         self.csv_initialized = False
 
         print(f"CDMA带宽分析器初始化完成")
@@ -463,7 +463,7 @@ class CDMABandwidthAnalyzer:
                 topo_type=topo_type,
                 traffic_file_path=self.traffic_file_path,
                 traffic_config=traffic_files,
-                result_save_path=f"../Result/CrossRing/TMB/{time_stamp}/bw_{cdma_bw_limit}/",
+                result_save_path=f"../Result/CrossRing/TMB/{self.run_timestamp}/bw_{cdma_bw_limit}/",
                 results_fig_save_path=f"{self.output_dir}/figs/",
                 flow_fig_show_CDMA=1,
                 plot_flow_fig=1,
@@ -537,7 +537,7 @@ class CDMABandwidthAnalyzer:
 
             # 初始化并运行仿真
             sim.initial()
-            # sim.end_time = 10000
+            # sim.end_time = 1000
             sim.print_interval = 50000  # 减少打印频率
             sim.run()
 
@@ -559,6 +559,10 @@ class CDMABandwidthAnalyzer:
 
             # 提取关键性能指标
             key_metrics = ["trans_mixed_avg_latency", "data_mixed_avg_latency", "mixed_avg_weighted_bw", "Total_finish_time", "Total_sum_BW"]
+
+            # 提取端口平均带宽
+            if "port_averages" in results:
+                results.update(results["port_averages"])
 
             found_metrics = []
             for metric in key_metrics:
@@ -593,9 +597,6 @@ class CDMABandwidthAnalyzer:
             gc.collect()  # 强制垃圾回收
 
 
-time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-
 def main():
     """命令行接口，执行CDMA带宽分析"""
 
@@ -606,7 +607,7 @@ def main():
     parser.add_argument("--bandwidths", nargs="+", type=int, default=list(range(32, 3, -1)), help="待测试的CDMA带宽列表")
     parser.add_argument("--repeat", type=int, default=1, help="每个带宽的重复次数")
     parser.add_argument("--topo", default="5x4", help="拓扑类型")
-    parser.add_argument("--max_workers", type=int, default=8, help="并行进程数(推荐1-2个避免内存问题)")
+    parser.add_argument("--max_workers", type=int, default=1, help="并行进程数(推荐1-2个避免内存问题)")
     parser.add_argument("--memory_limit", type=float, default=10000, help="内存使用限制(MB)")
     args = parser.parse_args()
 
@@ -629,6 +630,7 @@ def main():
     #     print(f"基于可用内存，建议使用 {suggested_workers} 个worker")
     #     args.max_workers = min(args.max_workers, suggested_workers)
 
+    time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = args.output_dir or f"../Result/cdma_analysis/{time_stamp}"
 
     analyzer = CDMABandwidthAnalyzer(
@@ -636,13 +638,14 @@ def main():
         traffic_file_path=args.traffic_path,
         output_dir=output_dir,
         cdma_bw_ranges=args.bandwidths,
+        run_timestamp=time_stamp,
     )
 
     # 流量文件配置
     traffic_files = [
         [
-            "All2All_Combine.txt",
-            # "All2All_Dispatch.txt",
+            # "All2All_Combine.txt",
+            "All2All_Dispatch.txt",
         ],
         [
             "MLP_MoE.txt",

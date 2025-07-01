@@ -1481,6 +1481,27 @@ class BaseModel:
         results["flit_pool_created"] = flit_pool_stats["created_count"]
         results["flit_pool_reuse_rate"] = (flit_pool_stats["created_count"] - flit_pool_stats["pool_size"]) / max(flit_pool_stats["created_count"], 1)
 
+        # Add result processor analysis for port bandwidth data
+        try:
+            if hasattr(self, 'result_processor') and self.result_processor:
+                # Collect request data and analyze bandwidth
+                self.result_processor.collect_requests_data(self)
+                bandwidth_analysis = self.result_processor.analyze_all_bandwidth()
+                
+                # Include port averages in results
+                if 'port_averages' in bandwidth_analysis:
+                    results['port_averages'] = bandwidth_analysis['port_averages']
+                    
+                # Include other useful bandwidth metrics
+                if 'Total_sum_BW' in bandwidth_analysis:
+                    results['Total_sum_BW'] = bandwidth_analysis['Total_sum_BW']
+                    
+        except Exception as e:
+            if hasattr(self, 'verbose') and self.verbose:
+                print(f"Warning: Could not get port bandwidth analysis: {e}")
+            # Set empty port_averages to avoid errors in downstream code
+            results['port_averages'] = {}
+
         return results
 
     def get_performance_stats(self):

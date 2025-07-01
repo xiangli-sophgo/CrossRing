@@ -43,9 +43,9 @@ def main():
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        topo_type = "5x4"  # SG2262
+        # topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
-        # topo_type = "4x2"
+        topo_type = "5x2"
         # topo_type = "3x1"
         # topo_type = "6x5"  # SG2260
         # topo_type = "3x3"  # SG2260E
@@ -250,8 +250,9 @@ def main():
             "ddr": 2,
             "l2m": 2,
         }
-    elif topo_type in ["4x2"]:
+    elif topo_type in ["5x2"]:
         sim.config.BURST = 4
+        sim.config.NUM_COL = 2
         sim.config.RN_R_TRACKER_OSTD = 64
         sim.config.RN_W_TRACKER_OSTD = 32
         sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST

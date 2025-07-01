@@ -795,6 +795,29 @@ class BandwidthAnalyzer:
         # 但基于已有的端口带宽计算结果
         self.calculate_ip_bandwidth_data()
 
+    def _calculate_port_bandwidth_averages(self, all_ports: Dict[str, 'PortBandwidthMetrics']) -> Dict[str, float]:
+        """
+        计算每种端口类型的平均带宽
+
+        Args:
+            all_ports: 所有端口的带宽指标字典
+
+        Returns:
+            一个包含每种端口类型平均带宽的字典
+        """
+        port_bw_groups = defaultdict(list)
+        for port_id, metrics in all_ports.items():
+            port_type = port_id.split('_')[0]  # 提取端口类型 (gdma, sdma, cdma, ddr, l2m)
+            port_bw_groups[port_type].append(metrics.mixed_metrics.weighted_bandwidth)
+
+        avg_port_metrics = {}
+        for port_type, bw_list in port_bw_groups.items():
+            if bw_list:
+                # 使用 f-string 格式化键名
+                avg_port_metrics[f"avg_{port_type}_bw"] = sum(bw_list) / len(bw_list)
+        
+        return avg_port_metrics
+
     def analyze_all_bandwidth(self) -> Dict:
         """
         执行完整的带宽分析
@@ -810,6 +833,13 @@ class BandwidthAnalyzer:
 
         # RN端口带宽分析
         rn_port_metrics = self.calculate_rn_port_bandwidth()
+
+        # SN端口带宽分析
+        sn_port_metrics = self.calculate_sn_port_bandwidth()
+
+        # 计算并合并端口平均带宽
+        all_ports = {**rn_port_metrics, **sn_port_metrics}
+        port_averages = self._calculate_port_bandwidth_averages(all_ports)
 
         # 汇总统计
         total_read_requests = len([r for r in self.requests if r.req_type == "read"])
@@ -846,6 +876,8 @@ class BandwidthAnalyzer:
         results = {
             "network_overall": network_overall,
             "rn_ports": rn_port_metrics,
+            "sn_ports": sn_port_metrics,
+            "port_averages": port_averages,
             "summary": {
                 "total_requests": len(self.requests),
                 "read_requests": total_read_requests,
