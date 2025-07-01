@@ -198,11 +198,7 @@ class BaseModel:
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST
-            + self.config.SDMA_SEND_POSITION_LIST
-            + self.config.CDMA_SEND_POSITION_LIST
-            + self.config.DDR_SEND_POSITION_LIST
-            + self.config.L2M_SEND_POSITION_LIST
+            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
         )
 
         # 缓存位置列表以避免重复转换
@@ -611,11 +607,7 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(
-                f"Data statistic: Read: {self.read_req, self.read_flit}, "
-                f"Write: {self.write_req, self.write_flit}, "
-                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
-            )
+            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
         if self.verbose:
@@ -971,8 +963,7 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
-                    for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
@@ -1435,17 +1426,17 @@ class BaseModel:
     @lru_cache(maxsize=1024)
     def node_map(self, node, is_source=True):
         if is_source:
-            if self.topo_type_stat in ["5x4", "4x5"]:
-                # return self.config.GDMA_SEND_POSITION_LIST[node] if node < 16 else self.config.SDMA_SEND_POSITION_LIST[node % 16]
-                return self.config.GDMA_SEND_POSITION_LIST[node] if node < 16 else self.config.CDMA_SEND_POSITION_LIST[node - 16]
-            elif self.topo_type_stat == "6x5":
-                return node % self.config.NUM_COL + self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
+            # if self.topo_type_stat in ["5x4"]:
+            #     # return self.config.GDMA_SEND_POSITION_LIST[node] if node < 16 else self.config.SDMA_SEND_POSITION_LIST[node % 16]
+            #     return self.config.GDMA_SEND_POSITION_LIST[node] if node < 16 else self.config.CDMA_SEND_POSITION_LIST[node - 16]
+            # elif self.topo_type_stat == "6x5":
+            #     return node % self.config.NUM_COL + self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
             return node % self.config.NUM_COL + self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
         else:
-            if self.topo_type_stat in ["5x4", "4x5"]:
-                return self.config.DDR_SEND_POSITION_LIST[node] - self.config.NUM_COL if node < 16 else self.config.L2M_SEND_POSITION_LIST[node % 16] - self.config.NUM_COL
-            elif self.topo_type_stat == "6x5":
-                return node % self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
+            # if self.topo_type_stat in ["5x4"]:
+            #     return self.config.DDR_SEND_POSITION_LIST[node] - self.config.NUM_COL if node < 16 else self.config.L2M_SEND_POSITION_LIST[node % 16] - self.config.NUM_COL
+            # elif self.topo_type_stat == "6x5":
+            #     return node % self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
             return node % self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
 
     def get_results(self):
@@ -1483,24 +1474,24 @@ class BaseModel:
 
         # Add result processor analysis for port bandwidth data
         try:
-            if hasattr(self, 'result_processor') and self.result_processor:
+            if hasattr(self, "result_processor") and self.result_processor:
                 # Collect request data and analyze bandwidth
                 self.result_processor.collect_requests_data(self)
                 bandwidth_analysis = self.result_processor.analyze_all_bandwidth()
-                
+
                 # Include port averages in results
-                if 'port_averages' in bandwidth_analysis:
-                    results['port_averages'] = bandwidth_analysis['port_averages']
-                    
+                if "port_averages" in bandwidth_analysis:
+                    results["port_averages"] = bandwidth_analysis["port_averages"]
+
                 # Include other useful bandwidth metrics
-                if 'Total_sum_BW' in bandwidth_analysis:
-                    results['Total_sum_BW'] = bandwidth_analysis['Total_sum_BW']
-                    
+                if "Total_sum_BW" in bandwidth_analysis:
+                    results["Total_sum_BW"] = bandwidth_analysis["Total_sum_BW"]
+
         except Exception as e:
-            if hasattr(self, 'verbose') and self.verbose:
+            if hasattr(self, "verbose") and self.verbose:
                 print(f"Warning: Could not get port bandwidth analysis: {e}")
             # Set empty port_averages to avoid errors in downstream code
-            results['port_averages'] = {}
+            results["port_averages"] = {}
 
         return results
 

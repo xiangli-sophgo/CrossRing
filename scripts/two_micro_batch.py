@@ -113,10 +113,16 @@ class CDMABandwidthAnalyzer:
         print(f"结果已保存到CSV: CDMA带宽={result_data.get('cdma_bw_limit', 'N/A')}GB/s")
 
     def monitor_memory_usage(self):
-        """监控内存使用情况"""
-        process = psutil.Process()
-        memory_info = process.memory_info()
-        memory_mb = memory_info.rss / 1024 / 1024
+        """监控当前进程及其所有子进程的总内存使用情况"""
+        parent = psutil.Process()
+        total_memory = parent.memory_info().rss
+        for child in parent.children(recursive=True):
+            try:
+                total_memory += child.memory_info().rss
+            except psutil.NoSuchProcess:
+                # Child process might have terminated
+                continue
+        memory_mb = total_memory / 1024 / 1024
         return memory_mb
 
     def run_bandwidth_sweep(self, traffic_files, topo_type="5x4", repeat=1, max_workers=None):

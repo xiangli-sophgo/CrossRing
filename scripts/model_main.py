@@ -23,9 +23,9 @@ def main():
         ]
         * 3,
         [
-            r"All2All_Combine.txt",
+            # r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
-            # r"test1.txt"
+            r"full_bw_R_4x5.txt"
         ],
     ]
 
@@ -44,8 +44,8 @@ def main():
         # topo_type = "4x9"
         # topo_type = "9x4"
         # topo_type = "5x4"  # SG2262
-        # topo_type = "4x5"
-        topo_type = "5x2"
+        topo_type = "4x5"
+        # topo_type = "4x2"
         # topo_type = "3x1"
         # topo_type = "6x5"  # SG2260
         # topo_type = "3x3"  # SG2260E
@@ -169,6 +169,7 @@ def main():
         sim.config.IQ_OUT_FIFO_DEPTH = 8
         sim.config.RB_OUT_FIFO_DEPTH = 8
         sim.config.SN_TRACKER_RELEASE_LATENCY = 40
+        sim.config.GDMA_BW_LIMIT = 16
         sim.config.CDMA_BW_LIMIT = 16
 
         # sim.config.EQ_IN_FIFO_DEPTH = 8
