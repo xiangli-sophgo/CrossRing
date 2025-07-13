@@ -15,6 +15,7 @@ __pycache__
 .idea
 
 .trunk
+.env
 
 .vscode
 
@@ -29,7 +30,7 @@ __pycache__
 test_data/
 
 # AI-generated files
-CLAUDE.md
+# CLAUDE.md
 **/.claude/
 */*/.claude/
 .gemini/

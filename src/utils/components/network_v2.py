@@ -57,8 +57,22 @@ class Network:
 
         # 每个FIFO Entry的等待计数器
         self.fifo_counters = {"TL": {}, "TR": {}}
+        # Ring Bridge FIFO结构：
+        # TL/TR: 横向环输入 + 横向环输出 (双用途)
+        # TU/TD: 纵向环输出 + 纵向环输入 (双用途)  
+        # EQ: 本地弹出
         self.ring_bridge = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.ring_bridge_pre = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
+        
+        # 新增：区分RB的输入输出FIFO
+        # 横向环进入RB：TL_in, TR_in
+        # 纵向环进入RB：TU_in, TD_in  
+        # 横向环从RB输出：TL_out, TR_out
+        # 纵向环从RB输出：TU_out, TD_out
+        self.ring_bridge_input = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}  # 新增：专门的输入FIFO
+        self.ring_bridge_output = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}  # 新增：专门的输出FIFO
+        self.ring_bridge_input_pre = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
+        self.ring_bridge_output_pre = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.round_robin = {"IQ": defaultdict(lambda: defaultdict(dict)), "RB": defaultdict(lambda: defaultdict(dict)), "EQ": defaultdict(lambda: defaultdict(dict))}
         self.round_robin_counter = 0
 
@@ -179,10 +193,21 @@ class Network:
                     for ch_name in self.IQ_channel_buffer.keys():
                         self.round_robin[key][ch_name][ip_pos] = deque([0, 1, 2, 3])
                         self.round_robin[key][ch_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3])
-                else:
+                else:  # RB仲裁
+                    # 扩展RB仲裁队列以支持6个输入源：
+                    # 0: TL_in (横向环左向输入)
+                    # 1: TR_in (横向环右向输入) 
+                    # 2: IQ_TU (IQ的TU输出)
+                    # 3: IQ_TD (IQ的TD输出)
+                    # 4: TU_in (纵向环上行输入) - 新增
+                    # 5: TD_in (纵向环下行输入) - 新增
                     for fifo_name in ["TU", "TD", "EQ"]:
-                        self.round_robin[key][fifo_name][ip_pos] = deque([0, 1, 2, 3])
-                        self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3])
+                        self.round_robin[key][fifo_name][ip_pos] = deque([0, 1, 2, 3, 4, 5])
+                        self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3, 4, 5])
+                    # 新增：横向环输出方向的仲裁
+                    for fifo_name in ["TL", "TR"]:
+                        self.round_robin[key][fifo_name][ip_pos] = deque([0, 1, 2, 3, 4, 5])
+                        self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3, 4, 5])
 
             self.inject_time[ip_pos] = []
             self.eject_time[ip_pos - config.NUM_COL] = []
@@ -219,6 +244,7 @@ class Network:
             for col in range(config.NUM_COL):
                 pos = row * config.NUM_COL + col
                 next_pos = pos - config.NUM_COL
+                # 原有的ring_bridge结构保持不变（兼容性）
                 self.ring_bridge["TL"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
                 self.ring_bridge["TR"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
                 self.ring_bridge["TU"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
@@ -230,6 +256,32 @@ class Network:
                 self.ring_bridge_pre["TU"][(pos, next_pos)] = None
                 self.ring_bridge_pre["TD"][(pos, next_pos)] = None
                 self.ring_bridge_pre["EQ"][(pos, next_pos)] = None
+                
+                # 新增：专用的输入输出FIFO
+                # 输入FIFO：横向环(TL/TR)和纵向环(TU/TD)进入RB
+                self.ring_bridge_input["TL"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
+                self.ring_bridge_input["TR"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
+                self.ring_bridge_input["TU"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)  # 纵向环进入RB
+                self.ring_bridge_input["TD"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)  # 纵向环进入RB
+                
+                # 输出FIFO：RB输出到横向环(TL/TR)和纵向环(TU/TD)
+                self.ring_bridge_output["TL"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)  # RB输出到横向环
+                self.ring_bridge_output["TR"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)  # RB输出到横向环
+                self.ring_bridge_output["TU"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
+                self.ring_bridge_output["TD"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
+                self.ring_bridge_output["EQ"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
+                
+                # Pre缓冲区
+                self.ring_bridge_input_pre["TL"][(pos, next_pos)] = None
+                self.ring_bridge_input_pre["TR"][(pos, next_pos)] = None
+                self.ring_bridge_input_pre["TU"][(pos, next_pos)] = None
+                self.ring_bridge_input_pre["TD"][(pos, next_pos)] = None
+                
+                self.ring_bridge_output_pre["TL"][(pos, next_pos)] = None
+                self.ring_bridge_output_pre["TR"][(pos, next_pos)] = None
+                self.ring_bridge_output_pre["TU"][(pos, next_pos)] = None
+                self.ring_bridge_output_pre["TD"][(pos, next_pos)] = None
+                self.ring_bridge_output_pre["EQ"][(pos, next_pos)] = None
 
                 self.RB_UE_Counters["TL"][(pos, next_pos)] = {"T2": 0, "T1": 0, "T0": 0}
                 self.RB_UE_Counters["TR"][(pos, next_pos)] = {"T2": 0, "T1": 0}
@@ -246,6 +298,20 @@ class Network:
                     self.itag_req_counter[direction][pos] = 0
                     self.tagged_counter[direction][pos] = 0
                     self.excess_ITag_to_remove[direction][pos] = 0
+
+        # 为所有IP位置初始化ITag相关字典，确保update_excess_ITag方法不会出现KeyError
+        all_ip_positions = set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + 
+                              config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST)
+        for ip_pos in all_ip_positions:
+            for direction in ["TL", "TR", "TU", "TD"]:
+                if ip_pos not in self.remain_tag[direction]:
+                    if direction in ["TL", "TR"]:
+                        self.remain_tag[direction][ip_pos] = config.ITag_MAX_NUM_H
+                    else:
+                        self.remain_tag[direction][ip_pos] = config.ITag_MAX_NUM_V
+                    self.itag_req_counter[direction][ip_pos] = 0
+                    self.tagged_counter[direction][ip_pos] = 0
+                    self.excess_ITag_to_remove[direction][ip_pos] = 0
 
         for ip_type in self.num_recv.keys():
             source_positions = getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST")
@@ -483,10 +549,20 @@ class Network:
             right_pos = ip_pos + 1 if ip_pos % self.config.NUM_COL != self.config.NUM_COL - 1 else ip_pos
             up_pos = ip_pos - self.config.NUM_COL * 3 if ip_pos // self.config.NUM_COL != 1 else ip_pos - self.config.NUM_COL
             down_pos = ip_pos + self.config.NUM_COL * 1 if ip_pos // self.config.NUM_COL != self.config.NUM_ROW - 1 else ip_pos - self.config.NUM_COL
-            self.cross_point["horizontal"][ip_pos]["TR"] = [self.links[(left_pos, ip_pos)][-1], self.links[(ip_pos, right_pos)][0]]
-            self.cross_point["horizontal"][ip_pos]["TL"] = [self.links[(ip_pos, left_pos)][0], self.links[(right_pos, ip_pos)][-1]]
-            self.cross_point["vertical"][ip_pos]["TU"] = [self.links[(down_pos, ip_pos - self.config.NUM_COL)][-1], self.links[(ip_pos - self.config.NUM_COL, up_pos)][0]]
-            self.cross_point["vertical"][ip_pos]["TD"] = [self.links[(ip_pos - self.config.NUM_COL, down_pos)][0], self.links[(up_pos, ip_pos - self.config.NUM_COL)][-1]]
+            
+            # 添加键存在性检查，避免KeyError
+            try:
+                if (left_pos, ip_pos) in self.links and (ip_pos, right_pos) in self.links:
+                    self.cross_point["horizontal"][ip_pos]["TR"] = [self.links[(left_pos, ip_pos)][-1], self.links[(ip_pos, right_pos)][0]]
+                if (ip_pos, left_pos) in self.links and (right_pos, ip_pos) in self.links:
+                    self.cross_point["horizontal"][ip_pos]["TL"] = [self.links[(ip_pos, left_pos)][0], self.links[(right_pos, ip_pos)][-1]]
+                if (down_pos, ip_pos - self.config.NUM_COL) in self.links and (ip_pos - self.config.NUM_COL, up_pos) in self.links:
+                    self.cross_point["vertical"][ip_pos]["TU"] = [self.links[(down_pos, ip_pos - self.config.NUM_COL)][-1], self.links[(ip_pos - self.config.NUM_COL, up_pos)][0]]
+                if (ip_pos - self.config.NUM_COL, down_pos) in self.links and (up_pos, ip_pos - self.config.NUM_COL) in self.links:
+                    self.cross_point["vertical"][ip_pos]["TD"] = [self.links[(ip_pos - self.config.NUM_COL, down_pos)][0], self.links[(up_pos, ip_pos - self.config.NUM_COL)][-1]]
+            except (KeyError, IndexError):
+                # 忽略不存在的链路或索引错误
+                pass
 
     def plan_move(self, flit, cycle):
         self.cycle = cycle
@@ -683,6 +759,25 @@ class Network:
             elif next_node == col_start:
                 if next_node == flit.current_position:
                     flit.circuits_completed_v += 1
+                    
+                    # 新增：检查是否需要转到横向环
+                    should_transfer_to_horizontal = self._should_transfer_to_horizontal(flit, next_node)
+                    
+                    if should_transfer_to_horizontal:
+                        # 尝试进入RB的纵向环输入FIFO (TD方向)
+                        target_rb_pos = self._find_rb_position_for_vertical_transfer(next_node)
+                        if target_rb_pos:
+                            rb_pos, rb_next_pos = target_rb_pos
+                            link_station = self.ring_bridge_input["TD"].get((rb_pos, rb_next_pos))
+                            if link_station and len(link_station) < self.config.RB_IN_FIFO_DEPTH:
+                                # 成功进入RB进行纵向环→横向环转换
+                                flit.is_delay = False
+                                flit.current_link = (rb_pos, rb_next_pos)
+                                link[flit.current_seat_index] = None
+                                flit.current_seat_index = 0
+                                return
+                    
+                    # 原有逻辑：尝试eject到本地IP
                     link_eject = self.eject_queues["TD"][next_node]
                     can_use_T1 = self._entry_available("TD", next_node, "T1")
                     can_use_T2 = self._entry_available("TD", next_node, "T2")
@@ -729,6 +824,25 @@ class Network:
             elif next_node == col_end:
                 if next_node == flit.current_position:
                     flit.circuits_completed_v += 1
+                    
+                    # 新增：检查是否需要转到横向环
+                    should_transfer_to_horizontal = self._should_transfer_to_horizontal(flit, next_node)
+                    
+                    if should_transfer_to_horizontal:
+                        # 尝试进入RB的纵向环输入FIFO (TU方向)
+                        target_rb_pos = self._find_rb_position_for_vertical_transfer(next_node)
+                        if target_rb_pos:
+                            rb_pos, rb_next_pos = target_rb_pos
+                            link_station = self.ring_bridge_input["TU"].get((rb_pos, rb_next_pos))
+                            if link_station and len(link_station) < self.config.RB_IN_FIFO_DEPTH:
+                                # 成功进入RB进行纵向环→横向环转换
+                                flit.is_delay = False
+                                flit.current_link = (rb_pos, rb_next_pos)
+                                link[flit.current_seat_index] = None
+                                flit.current_seat_index = 0
+                                return
+                    
+                    # 原有逻辑：尝试eject到本地IP
                     link_eject = self.eject_queues["TU"][next_node]
                     can_use_T0 = self._entry_available("TU", next_node, "T0")
                     can_use_T1 = self._entry_available("TU", next_node, "T1")
@@ -1246,3 +1360,48 @@ class Network:
         self._all_ip_positions = None
         self._rn_positions = None
         self._sn_positions = None
+    
+    def _should_transfer_to_horizontal(self, flit, current_node):
+        """判断纵向环的flit是否需要转到横向环"""
+        # 根据flit的路径判断下一跳是否需要横向移动
+        if flit.path_index + 1 < len(flit.path):
+            next_target = flit.path[flit.path_index + 1]
+            
+            # 检查下一跳是否在同一列（如果在同一列说明继续纵向移动）
+            current_col = current_node % self.config.NUM_COL
+            next_col = next_target % self.config.NUM_COL
+            
+            # 如果下一跳在不同列，需要转到横向环
+            if current_col != next_col:
+                return True
+            
+            # 检查是否是最终目标且需要通过横向环到达
+            if next_target == flit.destination:
+                dest_col = flit.destination % self.config.NUM_COL
+                if current_col != dest_col:
+                    return True
+        
+        return False
+    
+    def _find_rb_position_for_vertical_transfer(self, current_node):
+        """为纵向环到横向环的转换找到合适的RB位置"""
+        # 找到当前节点对应的RB位置
+        # RB位置在奇数行，检查当前节点是否在RB行或相邻行
+        current_row = current_node // self.config.NUM_COL
+        current_col = current_node % self.config.NUM_COL
+        
+        # 查找最近的RB位置（奇数行）
+        for row_offset in [0, 1, -1, 2, -2]:  # 优先检查当前行，然后检查相邻行
+            target_row = current_row + row_offset
+            if (target_row >= 1 and target_row < self.config.NUM_ROW and 
+                target_row % 2 == 1):  # 奇数行有RB
+                
+                rb_pos = target_row * self.config.NUM_COL + current_col
+                rb_next_pos = rb_pos - self.config.NUM_COL
+                
+                # 检查这个RB位置是否存在
+                if ((rb_pos, rb_next_pos) in self.ring_bridge_input["TU"] or 
+                    (rb_pos, rb_next_pos) in self.ring_bridge_input["TD"]):
+                    return (rb_pos, rb_next_pos)
+        
+        return None
