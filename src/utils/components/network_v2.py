@@ -783,21 +783,21 @@ class Network:
 
                     # 新增：检查是否需要转到横向环
                     should_transfer_to_horizontal = self._should_transfer_to_horizontal(flit, next_node)
-
+                    # TODO: ETag逻辑需要修改
                     if should_transfer_to_horizontal:
-                        # 尝试进入RB的纵向环输入FIFO (TD方向)
-                        target_rb_pos = self._find_rb_position_for_vertical_transfer(next_node)
-                        if target_rb_pos:
-                            rb_pos, rb_next_pos = target_rb_pos
-                            link_station = self.ring_bridge_input["TD"].get((rb_pos, rb_next_pos))
-                            if link_station and len(link_station) < self.config.RB_IN_FIFO_DEPTH and self._entry_available("TD", (rb_pos, rb_next_pos), "T2"):
-                                # 成功进入RB进行纵向环→横向环转换
-                                flit.is_delay = False
-                                flit.current_link = (rb_pos, rb_next_pos)
-                                link[flit.current_seat_index] = None
-                                flit.current_seat_index = 0
-                                self._occupy_entry("RB_TD", (rb_pos, rb_next_pos), "T2", flit)
-                                return
+                        rb_pos, rb_next_pos = next_node, next_node + self.config.NUM_COL
+                        link_station = self.ring_bridge_input["TD"].get((rb_pos, rb_next_pos))
+                        if link_station is not None and len(link_station) < self.config.RB_IN_FIFO_DEPTH and self._entry_available("TD", (rb_pos, rb_next_pos), "T2"):
+                            # 成功进入RB进行纵向环→横向环转换
+                            flit.is_delay = False
+                            flit.current_link = (rb_pos, rb_next_pos)
+                            link[flit.current_seat_index] = None
+                            flit.current_seat_index = 0
+                            self._occupy_entry("RB_TD", (rb_pos, rb_next_pos), "T2", flit)
+                            return
+                        else:
+                            # RB队列已满，继续在纵向环内移动
+                            pass
 
                     # 原有逻辑：尝试eject到本地IP
                     link_eject = self.eject_queues["TD"][next_node]
@@ -1407,21 +1407,7 @@ class Network:
         # 根据flit的路径判断下一跳是否需要横向移动
         if flit.path_index + 1 < len(flit.path):
             next_target = flit.path[flit.path_index + 1]
-
-            # 检查下一跳是否在同一列（如果在同一列说明继续纵向移动）
-            current_col = current_node % self.config.NUM_COL
-            next_col = next_target % self.config.NUM_COL
-
-            # 如果下一跳在不同列，需要转到横向环
-            if current_col != next_col:
-                return True
-
-            # 检查是否是最终目标且需要通过横向环到达
-            if next_target == flit.destination:
-                dest_col = flit.destination % self.config.NUM_COL
-                if current_col != dest_col:
-                    return True
-
+            return next_target - current_node == self.config.NUM_COL
         return False
 
     def _find_rb_position_for_vertical_transfer(self, current_node):

@@ -97,7 +97,7 @@ def run_bidirectional_rb_demo():
         traffic_config=[["test1.txt"]],
         result_save_path=result_dir + "/",
         verbose=1,  # 启用详细输出
-        print_trace=0,
+        print_trace=1,
         show_trace_id=0,
         plot_link_state=0,
         plot_flow_fig=1,
@@ -115,6 +115,6 @@ def run_bidirectional_rb_demo():
 
 
 if __name__ == "__main__":
-    print("启动CrossRing双向Ring Bridge演示...")
+    print("启动CrossRing v2.0 演示...")
 
     results = run_bidirectional_rb_demo()
