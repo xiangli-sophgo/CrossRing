@@ -329,6 +329,20 @@ class BaseModel:
         self.EQ_ETag_T0_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count}}
         self.RB_ETag_T1_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}
         self.RB_ETag_T0_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}
+        
+        # 总数据量统计 (每个节点下环到RB和EQ的flit总数)
+        self.EQ_total_flits_per_node = {}  # {node_id: {"TU": count, "TD": count}}
+        self.RB_total_flits_per_node = {}  # {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}
+        
+        # 按通道类型分开的ETag统计
+        self.EQ_ETag_T1_per_channel = {"req": {}, "rsp": {}, "data": {}}  # {channel: {node_id: {"TU": count, "TD": count}}}
+        self.EQ_ETag_T0_per_channel = {"req": {}, "rsp": {}, "data": {}}
+        self.RB_ETag_T1_per_channel = {"req": {}, "rsp": {}, "data": {}}  # {channel: {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}}
+        self.RB_ETag_T0_per_channel = {"req": {}, "rsp": {}, "data": {}}
+        
+        # 按通道类型分开的总数据量统计
+        self.EQ_total_flits_per_channel = {"req": {}, "rsp": {}, "data": {}}  # {channel: {node_id: {"TU": count, "TD": count}}}
+        self.RB_total_flits_per_channel = {"req": {}, "rsp": {}, "data": {}}  # {channel: {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}}
         self.ITag_h_num_stat, self.ITag_v_num_stat = 0, 0
         self.Total_sum_BW_stat = 0
 
@@ -361,11 +375,25 @@ class BaseModel:
         for node_id in all_nodes:
             self.EQ_ETag_T1_per_node_fifo[node_id] = {"TU": 0, "TD": 0}
             self.EQ_ETag_T0_per_node_fifo[node_id] = {"TU": 0, "TD": 0}
+            self.EQ_total_flits_per_node[node_id] = {"TU": 0, "TD": 0}
+            
+            # Initialize per-channel EQ statistics
+            for channel in ["req", "rsp", "data"]:
+                self.EQ_ETag_T1_per_channel[channel][node_id] = {"TU": 0, "TD": 0}
+                self.EQ_ETag_T0_per_channel[channel][node_id] = {"TU": 0, "TD": 0}
+                self.EQ_total_flits_per_channel[channel][node_id] = {"TU": 0, "TD": 0}
         
         # Initialize RB ETag statistics (all four directions)
         for node_id in all_nodes:
             self.RB_ETag_T1_per_node_fifo[node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
             self.RB_ETag_T0_per_node_fifo[node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
+            self.RB_total_flits_per_node[node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
+            
+            # Initialize per-channel RB statistics
+            for channel in ["req", "rsp", "data"]:
+                self.RB_ETag_T1_per_channel[channel][node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
+                self.RB_ETag_T0_per_channel[channel][node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
+                self.RB_total_flits_per_channel[channel][node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
 
     def run(self):
         """Main simulation loop."""
@@ -1062,16 +1090,36 @@ class BaseModel:
         elif index == 3:
             flit = network.inject_queues["TD"][pos].popleft()
 
+        # 获取通道类型
+        channel_type = getattr(flit, 'flit_type', 'req')  # 默认为req
+        
+        # 更新RB总数据量统计（所有经过的flit，无论ETag等级）
+        if pos in self.RB_total_flits_per_node:
+            self.RB_total_flits_per_node[pos][direction] += 1
+        
+        # 更新按通道分类的RB总数据量统计
+        if pos in self.RB_total_flits_per_channel.get(channel_type, {}):
+            self.RB_total_flits_per_channel[channel_type][pos][direction] += 1
+        
         if flit.ETag_priority == "T1":
             self.RB_ETag_T1_num_stat += 1
             # Update per-node FIFO statistics
             if pos in self.RB_ETag_T1_per_node_fifo:
                 self.RB_ETag_T1_per_node_fifo[pos][direction] += 1
+            
+            # Update per-channel statistics
+            if pos in self.RB_ETag_T1_per_channel.get(channel_type, {}):
+                self.RB_ETag_T1_per_channel[channel_type][pos][direction] += 1
+                
         elif flit.ETag_priority == "T0":
             self.RB_ETag_T0_num_stat += 1
             # Update per-node FIFO statistics
             if pos in self.RB_ETag_T0_per_node_fifo:
                 self.RB_ETag_T0_per_node_fifo[pos][direction] += 1
+            
+            # Update per-channel statistics
+            if pos in self.RB_ETag_T0_per_channel.get(channel_type, {}):
+                self.RB_ETag_T0_per_channel[channel_type][pos][direction] += 1
 
         flit.ETag_priority = "T2"
         # flit.used_entry_level = None
@@ -1327,6 +1375,23 @@ class BaseModel:
                     elif i == 3:
                         flit = network.ring_bridge["EQ"][(in_pos, ip_pos)].popleft()
 
+                    # 获取通道类型
+                    flit_channel_type = getattr(flit, 'flit_type', 'req')  # 默认为req
+                    
+                    # 更新总数据量统计（所有经过的flit，无论ETag等级）
+                    if in_pos in self.EQ_total_flits_per_node:
+                        if i == 0:  # TU direction
+                            self.EQ_total_flits_per_node[in_pos]["TU"] += 1
+                        elif i == 1:  # TD direction
+                            self.EQ_total_flits_per_node[in_pos]["TD"] += 1
+                    
+                    # 更新按通道分类的总数据量统计
+                    if in_pos in self.EQ_total_flits_per_channel.get(flit_channel_type, {}):
+                        if i == 0:  # TU direction
+                            self.EQ_total_flits_per_channel[flit_channel_type][in_pos]["TU"] += 1
+                        elif i == 1:  # TD direction
+                            self.EQ_total_flits_per_channel[flit_channel_type][in_pos]["TD"] += 1
+                    
                     if flit.ETag_priority == "T1":
                         self.EQ_ETag_T1_num_stat += 1
                         # Update per-node FIFO statistics (only for TU and TD directions)
@@ -1335,14 +1400,29 @@ class BaseModel:
                                 self.EQ_ETag_T1_per_node_fifo[ip_pos]["TU"] += 1
                             elif i == 1:  # TD direction
                                 self.EQ_ETag_T1_per_node_fifo[ip_pos]["TD"] += 1
+                        
+                        # Update per-channel statistics
+                        if ip_pos in self.EQ_ETag_T1_per_channel.get(flit_channel_type, {}):
+                            if i == 0:  # TU direction
+                                self.EQ_ETag_T1_per_channel[flit_channel_type][ip_pos]["TU"] += 1
+                            elif i == 1:  # TD direction
+                                self.EQ_ETag_T1_per_channel[flit_channel_type][ip_pos]["TD"] += 1
+                                
                     elif flit.ETag_priority == "T0":
                         self.EQ_ETag_T0_num_stat += 1
                         # Update per-node FIFO statistics (only for TU and TD directions)
-                        if ip_pos in self.EQ_ETag_T0_per_node_fifo:
+                        if in_pos in self.EQ_ETag_T0_per_node_fifo:
                             if i == 0:  # TU direction
-                                self.EQ_ETag_T0_per_node_fifo[ip_pos]["TU"] += 1
+                                self.EQ_ETag_T0_per_node_fifo[in_pos]["TU"] += 1
                             elif i == 1:  # TD direction
-                                self.EQ_ETag_T0_per_node_fifo[ip_pos]["TD"] += 1
+                                self.EQ_ETag_T0_per_node_fifo[in_pos]["TD"] += 1
+                        
+                        # Update per-channel statistics
+                        if in_pos in self.EQ_ETag_T0_per_channel.get(flit_channel_type, {}):
+                            if i == 0:  # TU direction
+                                self.EQ_ETag_T0_per_channel[flit_channel_type][in_pos]["TU"] += 1
+                            elif i == 1:  # TD direction
+                                self.EQ_ETag_T0_per_channel[flit_channel_type][in_pos]["TD"] += 1
                     flit.ETag_priority = "T2"
 
                     rr_queue.remove(i)

@@ -28,10 +28,11 @@ def run_bidirectional_rb_demo():
     # 1. 创建配置
     print("\n1. 初始化配置...")
     config = CrossRingConfig()
+    config.TOPO_TYPE = "5x2"
     config.NUM_COL = 2
     config.NUM_NODE = 20
+    config.NUM_IP = 8
     config.BURST = 4
-    config.NUM_COL = 2
     config.RN_R_TRACKER_OSTD = 64
     config.RN_W_TRACKER_OSTD = 32
     config.RN_RDB_SIZE = config.RN_R_TRACKER_OSTD * config.BURST

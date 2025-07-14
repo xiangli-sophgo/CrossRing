@@ -1202,20 +1202,6 @@ class Network:
                 flit.itag_v = False
                 return True
 
-    @property
-    def all_ip_positions(self):
-        """Cached property for all IP positions"""
-        if self._all_ip_positions is None:
-            self._all_ip_positions = list(
-                set(
-                    self.config.GDMA_SEND_POSITION_LIST
-                    + self.config.SDMA_SEND_POSITION_LIST
-                    + self.config.CDMA_SEND_POSITION_LIST
-                    + self.config.DDR_SEND_POSITION_LIST
-                    + self.config.L2M_SEND_POSITION_LIST
-                )
-            )
-        return self._all_ip_positions
 
     @property
     def rn_positions(self):

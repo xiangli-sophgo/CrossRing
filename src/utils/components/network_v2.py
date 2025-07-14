@@ -157,7 +157,9 @@ class Network:
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}
         self.ETag_BOTHSIDE_UPGRADE = False
 
-        for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
+        for ip_pos in set(
+            config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST
+        ):
             self.cross_point["horizontal"][ip_pos]["TL"] = [None] * 2
             self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2
@@ -305,7 +307,9 @@ class Network:
                     self.excess_ITag_to_remove[direction][pos] = 0
 
         # 为所有IP位置初始化ITag相关字典，确保update_excess_ITag方法不会出现KeyError
-        all_ip_positions = set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST)
+        all_ip_positions = set(
+            config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST
+        )
         for ip_pos in all_ip_positions:
             for direction in ["TL", "TR", "TU", "TD"]:
                 if ip_pos not in self.remain_tag[direction]:
@@ -1342,7 +1346,11 @@ class Network:
                             self.ring_bridge_input_pre[direction][flit.current_link] = flit
                             flit.is_on_station = True
                             return False
-                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth and self.ring_bridge_pre[direction][flit.current_link] is None:
+                    if (
+                        direction in self.ring_bridge.keys()
+                        and len(self.ring_bridge[direction][flit.current_link]) < max_depth
+                        and self.ring_bridge_pre[direction][flit.current_link] is None
+                    ):
                         self.ring_bridge_pre[direction][flit.current_link] = flit
                         flit.is_on_station = True
             return False
@@ -1373,21 +1381,6 @@ class Network:
                 queue_pre[next_node] = flit
                 flit.itag_v = False
                 return True
-
-    @property
-    def all_ip_positions(self):
-        """Cached property for all IP positions"""
-        if self._all_ip_positions is None:
-            self._all_ip_positions = list(
-                set(
-                    self.config.GDMA_SEND_POSITION_LIST
-                    + self.config.SDMA_SEND_POSITION_LIST
-                    + self.config.CDMA_SEND_POSITION_LIST
-                    + self.config.DDR_SEND_POSITION_LIST
-                    + self.config.L2M_SEND_POSITION_LIST
-                )
-            )
-        return self._all_ip_positions
 
     @property
     def rn_positions(self):

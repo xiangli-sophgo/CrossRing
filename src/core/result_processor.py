@@ -2126,6 +2126,30 @@ class BandwidthAnalyzer:
             ]
             f.write(",".join(avg_row_data) + "\n")
 
+    def reverse_node_map(self, mapped_id, num_col):
+        """
+        将映射后的节点ID反向映射回原始节点编号
+        原始映射公式: mapped_id = node % num_col + num_col + node // num_col * 2 * num_col
+        
+        Args:
+            mapped_id: 映射后的节点ID (ip_pos)
+            num_col: 列数 (NUM_COL)
+            
+        Returns:
+            int: 原始节点编号
+        """
+        # 减去偏移量num_col
+        temp = mapped_id - num_col
+        
+        # 计算原始行和列
+        col = temp % num_col
+        row = temp // (2 * num_col)
+        
+        # 恢复原始节点编号
+        node = row * num_col + col
+        
+        return node
+
     def _generate_etag_per_node_fifo_csv(self, output_path: str):
         """
         生成每个节点每个FIFO方向的ETag统计CSV文件
@@ -2142,6 +2166,20 @@ class BandwidthAnalyzer:
         eq_t0_per_node_fifo = getattr(self.sim_model, "EQ_ETag_T0_per_node_fifo", {})
         rb_t1_per_node_fifo = getattr(self.sim_model, "RB_ETag_T1_per_node_fifo", {})
         rb_t0_per_node_fifo = getattr(self.sim_model, "RB_ETag_T0_per_node_fifo", {})
+        
+        # 获取总数据量统计
+        eq_total_flits = getattr(self.sim_model, "EQ_total_flits_per_node", {})
+        rb_total_flits = getattr(self.sim_model, "RB_total_flits_per_node", {})
+        
+        # 获取按通道分类的统计
+        eq_t1_per_channel = getattr(self.sim_model, "EQ_ETag_T1_per_channel", {"req": {}, "rsp": {}, "data": {}})
+        eq_t0_per_channel = getattr(self.sim_model, "EQ_ETag_T0_per_channel", {"req": {}, "rsp": {}, "data": {}})
+        rb_t1_per_channel = getattr(self.sim_model, "RB_ETag_T1_per_channel", {"req": {}, "rsp": {}, "data": {}})
+        rb_t0_per_channel = getattr(self.sim_model, "RB_ETag_T0_per_channel", {"req": {}, "rsp": {}, "data": {}})
+        
+        # 获取按通道分类的总数据量统计
+        eq_total_per_channel = getattr(self.sim_model, "EQ_total_flits_per_channel", {"req": {}, "rsp": {}, "data": {}})
+        rb_total_per_channel = getattr(self.sim_model, "RB_total_flits_per_channel", {"req": {}, "rsp": {}, "data": {}})
 
         # 获取所有节点ID
         all_nodes = set()
@@ -2149,40 +2187,97 @@ class BandwidthAnalyzer:
         all_nodes.update(eq_t0_per_node_fifo.keys())
         all_nodes.update(rb_t1_per_node_fifo.keys())
         all_nodes.update(rb_t0_per_node_fifo.keys())
+        all_nodes.update(eq_total_flits.keys())
+        all_nodes.update(rb_total_flits.keys())
 
         if not all_nodes:
             print("No per-node FIFO ETag statistics found")
             return
 
+        # 获取NUM_COL配置
+        num_col = getattr(self.config, "NUM_COL", 4)  # 默认值为4
+        
         with open(csv_file, "w", newline="", encoding="utf-8") as f:
             # 写入CSV头
-            headers = ["node_id", "EQ_TU_T1", "EQ_TU_T0", "EQ_TD_T1", "EQ_TD_T0", "RB_TU_T1", "RB_TU_T0", "RB_TD_T1", "RB_TD_T0", "RB_TL_T1", "RB_TL_T0", "RB_TR_T1", "RB_TR_T0"]
+            headers = ["node_id"]
+            
+            # 按通道分组，每个通道的数据放在一起
+            for channel in ["req", "rsp", "data"]:
+                # EQ统计 (TU, TD方向)
+                headers.extend([
+                    f"{channel}_EQ_TU_total", f"{channel}_EQ_TU_T1", f"{channel}_EQ_TU_T0",
+                    f"{channel}_EQ_TD_total", f"{channel}_EQ_TD_T1", f"{channel}_EQ_TD_T0"
+                ])
+                
+                # RB统计 (TU, TD, TL, TR方向)
+                headers.extend([
+                    f"{channel}_RB_TU_total", f"{channel}_RB_TU_T1", f"{channel}_RB_TU_T0",
+                    f"{channel}_RB_TD_total", f"{channel}_RB_TD_T1", f"{channel}_RB_TD_T0",
+                    f"{channel}_RB_TL_total", f"{channel}_RB_TL_T1", f"{channel}_RB_TL_T0",
+                    f"{channel}_RB_TR_total", f"{channel}_RB_TR_T1", f"{channel}_RB_TR_T0"
+                ])
+            
             f.write(",".join(headers) + "\n")
 
             # 按节点ID排序
-            for node_id in sorted(all_nodes):
-                row_data = [str(node_id)]
+            for mapped_id in sorted(all_nodes):
+                # 应用反向映射获取原始节点ID
+                original_node_id = self.reverse_node_map(mapped_id, num_col)
+                row_data = [str(original_node_id)]
 
-                # EQ统计 (只有TU和TD方向)
-                eq_t1_node = eq_t1_per_node_fifo.get(node_id, {})
-                eq_t0_node = eq_t0_per_node_fifo.get(node_id, {})
-                row_data.extend([str(eq_t1_node.get("TU", 0)), str(eq_t0_node.get("TU", 0)), str(eq_t1_node.get("TD", 0)), str(eq_t0_node.get("TD", 0))])
+                # 先获取节点的整体总数据量
+                eq_total_node = eq_total_flits.get(mapped_id, {"TU": 0, "TD": 0})
+                rb_total_node = rb_total_flits.get(mapped_id, {"TU": 0, "TD": 0, "TL": 0, "TR": 0})
 
-                # RB统计 (四个方向)
-                rb_t1_node = rb_t1_per_node_fifo.get(node_id, {})
-                rb_t0_node = rb_t0_per_node_fifo.get(node_id, {})
-                row_data.extend(
-                    [
-                        str(rb_t1_node.get("TU", 0)),
-                        str(rb_t0_node.get("TU", 0)),
-                        str(rb_t1_node.get("TD", 0)),
-                        str(rb_t0_node.get("TD", 0)),
-                        str(rb_t1_node.get("TL", 0)),
-                        str(rb_t0_node.get("TL", 0)),
-                        str(rb_t1_node.get("TR", 0)),
-                        str(rb_t0_node.get("TR", 0)),
-                    ]
-                )
+                # 按通道分组，每个通道的数据放在一起
+                for channel in ["req", "rsp", "data"]:
+                    # 获取该通道的EQ统计
+                    eq_t1_ch = eq_t1_per_channel.get(channel, {}).get(mapped_id, {})
+                    eq_t0_ch = eq_t0_per_channel.get(channel, {}).get(mapped_id, {})
+                    eq_total_ch = eq_total_per_channel.get(channel, {}).get(mapped_id, {})
+                    
+                    # EQ统计 (TU, TD方向) - 该通道总数 + T1 + T0
+                    eq_tu_t1 = eq_t1_ch.get("TU", 0)
+                    eq_tu_t0 = eq_t0_ch.get("TU", 0)
+                    eq_tu_ch_total = eq_total_ch.get("TU", 0)  # 使用真实的总flit数
+                    
+                    eq_td_t1 = eq_t1_ch.get("TD", 0)
+                    eq_td_t0 = eq_t0_ch.get("TD", 0)
+                    eq_td_ch_total = eq_total_ch.get("TD", 0)  # 使用真实的总flit数
+                    
+                    row_data.extend([
+                        str(eq_tu_ch_total), str(eq_tu_t1), str(eq_tu_t0),
+                        str(eq_td_ch_total), str(eq_td_t1), str(eq_td_t0)
+                    ])
+                    
+                    # 获取该通道的RB统计
+                    rb_t1_ch = rb_t1_per_channel.get(channel, {}).get(mapped_id, {})
+                    rb_t0_ch = rb_t0_per_channel.get(channel, {}).get(mapped_id, {})
+                    rb_total_ch = rb_total_per_channel.get(channel, {}).get(mapped_id, {})
+                    
+                    # RB统计 (TU, TD, TL, TR方向) - 该通道总数 + T1 + T0
+                    rb_tu_t1 = rb_t1_ch.get("TU", 0)
+                    rb_tu_t0 = rb_t0_ch.get("TU", 0)
+                    rb_tu_ch_total = rb_total_ch.get("TU", 0)  # 使用真实的总flit数
+                    
+                    rb_td_t1 = rb_t1_ch.get("TD", 0)
+                    rb_td_t0 = rb_t0_ch.get("TD", 0)
+                    rb_td_ch_total = rb_total_ch.get("TD", 0)  # 使用真实的总flit数
+                    
+                    rb_tl_t1 = rb_t1_ch.get("TL", 0)
+                    rb_tl_t0 = rb_t0_ch.get("TL", 0)
+                    rb_tl_ch_total = rb_total_ch.get("TL", 0)  # 使用真实的总flit数
+                    
+                    rb_tr_t1 = rb_t1_ch.get("TR", 0)
+                    rb_tr_t0 = rb_t0_ch.get("TR", 0)
+                    rb_tr_ch_total = rb_total_ch.get("TR", 0)  # 使用真实的总flit数
+                    
+                    row_data.extend([
+                        str(rb_tu_ch_total), str(rb_tu_t1), str(rb_tu_t0),
+                        str(rb_td_ch_total), str(rb_td_t1), str(rb_td_t0),
+                        str(rb_tl_ch_total), str(rb_tl_t1), str(rb_tl_t0),
+                        str(rb_tr_ch_total), str(rb_tr_t1), str(rb_tr_t0)
+                    ])
 
                 f.write(",".join(row_data) + "\n")
 
