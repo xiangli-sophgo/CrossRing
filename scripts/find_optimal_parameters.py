@@ -1,5 +1,8 @@
-from src.core import *
+import sys
 import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.core import *
 from src.utils.component import Flit, Network, Node
 from config.config import CrossRingConfig
 import numpy as np
@@ -84,8 +87,17 @@ def create_parameter_sensitivity_heatmap(param_data, performance_data, traffic_n
     for i, param in enumerate(param_names):
         for j, traffic in enumerate(traffic_names):
             if len(param_data[param]) > 1 and len(performance_data[traffic]) > 1:
-                corr, _ = stats.pearsonr(param_data[param], performance_data[traffic])
-                correlation_matrix[i, j] = corr if not np.isnan(corr) else 0
+                # 检查是否为常数输入
+                param_std = np.std(param_data[param])
+                perf_std = np.std(performance_data[traffic])
+                if param_std > 1e-10 and perf_std > 1e-10:  # 避免常数输入
+                    try:
+                        corr, _ = stats.pearsonr(param_data[param], performance_data[traffic])
+                        correlation_matrix[i, j] = corr if not np.isnan(corr) else 0
+                    except:
+                        correlation_matrix[i, j] = 0
+                else:
+                    correlation_matrix[i, j] = 0
 
     fig = go.Figure(
         data=go.Heatmap(
@@ -715,9 +727,10 @@ def create_optimization_history(trials, save_dir):
         specs=[[{"secondary_y": True}, {"secondary_y": False}], [{"type": "pie"}, {"type": "histogram"}]],
     )
 
-    # 优化历史
-    trial_numbers = [t.number for t in trials]
-    objective_values = [t.values[0] for t in trials]
+    # 优化历史（过滤掉values为None的trial）
+    valid_trials = [t for t in trials if t.values is not None]
+    trial_numbers = [t.number for t in valid_trials]
+    objective_values = [t.values[0] for t in valid_trials]
     best_values = []
     best_so_far = float("-inf")
     for val in objective_values:
@@ -732,7 +745,7 @@ def create_optimization_history(trials, save_dir):
     fig.add_trace(go.Scatter(x=trial_numbers, y=best_values, mode="lines+markers", name="最佳值历史", line=dict(color="green")), row=1, col=2)
 
     # Trial状态分布
-    states = [t.state.name for t in trials]
+    states = [t.state.name if hasattr(t.state, 'name') else str(t.state) for t in trials]
     state_counts = pd.Series(states).value_counts()
     fig.add_trace(go.Pie(labels=state_counts.index, values=state_counts.values, name="状态"), row=2, col=1)
 
@@ -748,7 +761,7 @@ def create_parameter_importance(study, save_dir):
     try:
         # 针对多目标 Study 需指定 target；默认使用第 1 个指标
         if len(study.directions) > 1:
-            importance = optuna.importance.get_param_importances(study, target=lambda t: t.values[0])
+            importance = optuna.importance.get_param_importances(study, target=lambda t: t.values[0] if t.values else 0)
         else:
             importance = optuna.importance.get_param_importances(study)
 

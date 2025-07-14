@@ -323,6 +323,12 @@ class BaseModel:
         self.read_retry_num_stat, self.write_retry_num_stat = 0, 0
         self.EQ_ETag_T1_num_stat, self.EQ_ETag_T0_num_stat = 0, 0
         self.RB_ETag_T1_num_stat, self.RB_ETag_T0_num_stat = 0, 0
+        
+        # Per-node FIFO ETag statistics
+        self.EQ_ETag_T1_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count}}
+        self.EQ_ETag_T0_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count}}
+        self.RB_ETag_T1_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}
+        self.RB_ETag_T0_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}
         self.ITag_h_num_stat, self.ITag_v_num_stat = 0, 0
         self.Total_sum_BW_stat = 0
 
@@ -342,6 +348,24 @@ class BaseModel:
         # Performance monitoring
         self.performance_monitor = PerformanceMonitor()
         self.start_time = time.time()
+        
+        # Initialize per-node FIFO ETag statistics after networks are created
+        self._initialize_per_node_etag_stats()
+
+    def _initialize_per_node_etag_stats(self):
+        """Initialize per-node FIFO ETag statistics dictionaries."""
+        # Get all IP positions from the request network
+        all_nodes = self.req_network.all_ip_positions
+        
+        # Initialize EQ ETag statistics (only TU and TD directions)
+        for node_id in all_nodes:
+            self.EQ_ETag_T1_per_node_fifo[node_id] = {"TU": 0, "TD": 0}
+            self.EQ_ETag_T0_per_node_fifo[node_id] = {"TU": 0, "TD": 0}
+        
+        # Initialize RB ETag statistics (all four directions)
+        for node_id in all_nodes:
+            self.RB_ETag_T1_per_node_fifo[node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
+            self.RB_ETag_T0_per_node_fifo[node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
 
     def run(self):
         """Main simulation loop."""
@@ -1040,8 +1064,14 @@ class BaseModel:
 
         if flit.ETag_priority == "T1":
             self.RB_ETag_T1_num_stat += 1
+            # Update per-node FIFO statistics
+            if pos in self.RB_ETag_T1_per_node_fifo:
+                self.RB_ETag_T1_per_node_fifo[pos][direction] += 1
         elif flit.ETag_priority == "T0":
             self.RB_ETag_T0_num_stat += 1
+            # Update per-node FIFO statistics
+            if pos in self.RB_ETag_T0_per_node_fifo:
+                self.RB_ETag_T0_per_node_fifo[pos][direction] += 1
 
         flit.ETag_priority = "T2"
         # flit.used_entry_level = None
@@ -1299,8 +1329,20 @@ class BaseModel:
 
                     if flit.ETag_priority == "T1":
                         self.EQ_ETag_T1_num_stat += 1
+                        # Update per-node FIFO statistics (only for TU and TD directions)
+                        if ip_pos in self.EQ_ETag_T1_per_node_fifo:
+                            if i == 0:  # TU direction
+                                self.EQ_ETag_T1_per_node_fifo[ip_pos]["TU"] += 1
+                            elif i == 1:  # TD direction
+                                self.EQ_ETag_T1_per_node_fifo[ip_pos]["TD"] += 1
                     elif flit.ETag_priority == "T0":
                         self.EQ_ETag_T0_num_stat += 1
+                        # Update per-node FIFO statistics (only for TU and TD directions)
+                        if ip_pos in self.EQ_ETag_T0_per_node_fifo:
+                            if i == 0:  # TU direction
+                                self.EQ_ETag_T0_per_node_fifo[ip_pos]["TU"] += 1
+                            elif i == 1:  # TD direction
+                                self.EQ_ETag_T0_per_node_fifo[ip_pos]["TD"] += 1
                     flit.ETag_priority = "T2"
 
                     rr_queue.remove(i)

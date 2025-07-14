@@ -3,6 +3,7 @@ Network class for NoC simulation.
 Contains the core network implementation with routing and flow control mechanisms.
 Enhanced with integrated route table support for flexible routing decisions.
 """
+
 from __future__ import annotations
 import numpy as np
 from collections import deque, defaultdict
@@ -25,7 +26,7 @@ class Network:
     def __init__(self, config: CrossRingConfig, adjacency_matrix, name="network"):
         self.config = config
         self.name = name
-        
+
         # Pre-calculate frequently used position sets for performance
         self._all_ip_positions = None
         self._rn_positions = None
@@ -315,39 +316,34 @@ class Network:
             self.EQ_CAPACITY["TU"][pos] = {lvl: _cap_tu(lvl) for lvl in ("T0", "T1", "T2")}
         for pos in self.EQ_UE_Counters["TD"]:
             self.EQ_CAPACITY["TD"][pos] = {lvl: _cap_td(lvl) for lvl in ("T1", "T2")}
-            
+
     @property
     def all_ip_positions(self):
         """Cached property for all IP positions"""
         if self._all_ip_positions is None:
-            self._all_ip_positions = list(set(
-                self.config.DDR_SEND_POSITION_LIST + 
-                self.config.SDMA_SEND_POSITION_LIST + 
-                self.config.CDMA_SEND_POSITION_LIST + 
-                self.config.L2M_SEND_POSITION_LIST + 
-                self.config.GDMA_SEND_POSITION_LIST
-            ))
+            self._all_ip_positions = list(
+                set(
+                    self.config.DDR_SEND_POSITION_LIST
+                    + self.config.SDMA_SEND_POSITION_LIST
+                    + self.config.CDMA_SEND_POSITION_LIST
+                    + self.config.L2M_SEND_POSITION_LIST
+                    + self.config.GDMA_SEND_POSITION_LIST
+                )
+            )
         return self._all_ip_positions
-    
+
     @property
     def rn_positions(self):
         """Cached property for RN positions"""
         if self._rn_positions is None:
-            self._rn_positions = list(set(
-                self.config.GDMA_SEND_POSITION_LIST + 
-                self.config.SDMA_SEND_POSITION_LIST + 
-                self.config.CDMA_SEND_POSITION_LIST
-            ))
+            self._rn_positions = list(set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST))
         return self._rn_positions
-    
-    @property  
+
+    @property
     def sn_positions(self):
         """Cached property for SN positions"""
         if self._sn_positions is None:
-            self._sn_positions = list(set(
-                self.config.DDR_SEND_POSITION_LIST + 
-                self.config.L2M_SEND_POSITION_LIST
-            ))
+            self._sn_positions = list(set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST))
         return self._sn_positions
 
     def _entry_available(self, dir_type, key, level):
@@ -539,7 +535,6 @@ class Network:
             link[flit.current_seat_index] = None
             flit.current_seat_index += 1
             return
-        # self.error_log(flit, 144, -1)
         # 2. 到达链路末端，此时flit在next_node节点
         target_eject_node_id = flit.path[flit.path_index + 1] if flit.path_index + 1 < len(flit.path) else flit.path[flit.path_index]  # delay情况下path_index不更新
         # A. 处理横边界情况
@@ -1211,36 +1206,31 @@ class Network:
     def all_ip_positions(self):
         """Cached property for all IP positions"""
         if self._all_ip_positions is None:
-            self._all_ip_positions = list(set(
-                self.config.GDMA_SEND_POSITION_LIST + 
-                self.config.SDMA_SEND_POSITION_LIST + 
-                self.config.CDMA_SEND_POSITION_LIST + 
-                self.config.DDR_SEND_POSITION_LIST + 
-                self.config.L2M_SEND_POSITION_LIST
-            ))
+            self._all_ip_positions = list(
+                set(
+                    self.config.GDMA_SEND_POSITION_LIST
+                    + self.config.SDMA_SEND_POSITION_LIST
+                    + self.config.CDMA_SEND_POSITION_LIST
+                    + self.config.DDR_SEND_POSITION_LIST
+                    + self.config.L2M_SEND_POSITION_LIST
+                )
+            )
         return self._all_ip_positions
 
     @property
     def rn_positions(self):
         """Cached property for RN positions"""
         if self._rn_positions is None:
-            self._rn_positions = list(set(
-                self.config.GDMA_SEND_POSITION_LIST + 
-                self.config.SDMA_SEND_POSITION_LIST + 
-                self.config.CDMA_SEND_POSITION_LIST
-            ))
+            self._rn_positions = list(set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST))
         return self._rn_positions
 
     @property
     def sn_positions(self):
         """Cached property for SN positions"""
         if self._sn_positions is None:
-            self._sn_positions = list(set(
-                self.config.DDR_SEND_POSITION_LIST + 
-                self.config.L2M_SEND_POSITION_LIST
-            ))
+            self._sn_positions = list(set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST))
         return self._sn_positions
-    
+
     def clear_position_cache(self):
         """Clear position cache when network configuration changes"""
         self._all_ip_positions = None

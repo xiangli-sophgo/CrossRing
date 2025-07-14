@@ -6,6 +6,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from itertools import combinations
+from collections import deque
 
 
 def create_crossring_adjacency_matrix(num_nodes: int, num_cols: int) -> np.ndarray:
@@ -93,7 +94,7 @@ def plot_adjacency_matrix(adjacency_matrix):
 
 
 # Generate adjacency matrix under different topological structures.
-def create_adjacency_matrix(topology_type, num_nodes, rows=0):
+def create_adjacency_matrix(topology_type, num_nodes, cols=0):
     adjacency_matrix = np.zeros((num_nodes, num_nodes), dtype=int)
     if topology_type == "Half Ring":
         for node in range(num_nodes):
@@ -114,44 +115,44 @@ def create_adjacency_matrix(topology_type, num_nodes, rows=0):
             adjacency_matrix[0][node] = 1
             adjacency_matrix[node][0] = 1
     elif topology_type == "Mesh":
-        assert num_nodes % rows == 0, "This is not a valid 2D Mesh."
-        cols = num_nodes // rows
+        assert num_nodes % cols == 0, "This is not a valid 2D Mesh."
+        cols = num_nodes // cols
         for node in range(num_nodes):
-            node_row = node // rows
-            node_col = node % rows
+            node_row = node // cols
+            node_col = node % cols
             if node_row > 0:
-                adjacency_matrix[node][node - rows] = 1
-                adjacency_matrix[node - rows][node] = 1
+                adjacency_matrix[node][node - cols] = 1
+                adjacency_matrix[node - cols][node] = 1
             if node_row < cols - 1:
-                adjacency_matrix[node][node + rows] = 1
-                adjacency_matrix[node + rows][node] = 1
+                adjacency_matrix[node][node + cols] = 1
+                adjacency_matrix[node + cols][node] = 1
             if node_col > 0:
                 adjacency_matrix[node][node - 1] = 1
                 adjacency_matrix[node - 1][node] = 1
-            if node_col < rows - 1:
+            if node_col < cols - 1:
                 adjacency_matrix[node][node + 1] = 1
                 adjacency_matrix[node + 1][node] = 1
     elif topology_type == "CrossRing":
         for node in range(num_nodes):
-            if (node // rows) % 2 == 0:
-                if node < rows:
-                    adjacency_matrix[node][node + rows * 2] = 1
-                elif node >= num_nodes - rows * 2:
-                    adjacency_matrix[node][node - rows * 2] = 1
+            if (node // cols) % 2 == 0:
+                if node < cols:
+                    adjacency_matrix[node][node + cols * 2] = 1
+                elif node >= num_nodes - cols * 2:
+                    adjacency_matrix[node][node - cols * 2] = 1
                 else:
-                    adjacency_matrix[node][node + rows * 2] = 1
-                    adjacency_matrix[node][node - rows * 2] = 1
+                    adjacency_matrix[node][node + cols * 2] = 1
+                    adjacency_matrix[node][node - cols * 2] = 1
             else:
                 # connect vertically backward
-                adjacency_matrix[node][node - rows] = 1
+                adjacency_matrix[node][node - cols] = 1
                 # only add horizontal neighbors if more than one column
-                if rows > 1:
+                if cols > 1:
                     # left neighbor (column +1)
-                    if node % rows == 0:
+                    if node % cols == 0:
                         if node + 1 < num_nodes:
                             adjacency_matrix[node][node + 1] = 1
                     # right neighbor (column -1)
-                    elif node % rows == rows - 1:
+                    elif node % cols == cols - 1:
                         if node - 1 >= 0:
                             adjacency_matrix[node][node - 1] = 1
                     else:
@@ -159,16 +160,48 @@ def create_adjacency_matrix(topology_type, num_nodes, rows=0):
                             adjacency_matrix[node][node + 1] = 1
                         if node - 1 >= 0:
                             adjacency_matrix[node][node - 1] = 1
+    elif topology_type == "CrossRing_v2":
+        rows = num_nodes // 2  # 每列的行数
+
+        for row in range(rows):
+            left = 2 * row  # 偶数列节点编号
+            right = left + 1  # 奇数列节点编号
+
+            # —— 1) 仅对偶数行(row%2==0)添加 斜向(row+1) 和 纵向(row+2) 连边 ——
+            if row % 2 == 0:
+                # 斜向：row → row+1
+                if row + 1 < rows:
+                    l_diag = 2 * (row + 1)
+                    r_diag = l_diag + 1
+                    adjacency_matrix[left, l_diag] = 1
+                    adjacency_matrix[l_diag, left] = 1
+                    adjacency_matrix[right, r_diag] = 1
+                    adjacency_matrix[r_diag, right] = 1
+
+                # 纵向：row → row+2
+                if row + 2 < rows:
+                    l_vert = 2 * (row + 2)
+                    r_vert = l_vert + 1
+                    adjacency_matrix[left, l_vert] = 1
+                    adjacency_matrix[l_vert, left] = 1
+                    adjacency_matrix[right, r_vert] = 1
+                    adjacency_matrix[r_vert, right] = 1
+
+            # —— 2) 横向跨链：仅在 row==1 和 row==rows-1 ——
+            if row in (1, rows - 1):
+                adjacency_matrix[left, right] = 1
+                adjacency_matrix[right, left] = 1
+
     elif topology_type == "Torus":
-        assert num_nodes % rows == 0, "This is not a valid 2D Torus."
-        cols = num_nodes // rows
+        assert num_nodes % cols == 0, "This is not a valid 2D Torus."
+        cols = num_nodes // cols
         for node in range(num_nodes):
-            node_row = node // rows
-            node_col = node % rows
-            up = ((node_row - 1) % cols) * rows + node_col
-            down = ((node_row + 1) % cols) * rows + node_col
-            left = node_row * rows + (node_col - 1) % rows
-            right = node_row * rows + (node_col + 1) % rows
+            node_row = node // cols
+            node_col = node % cols
+            up = ((node_row - 1) % cols) * cols + node_col
+            down = ((node_row + 1) % cols) * cols + node_col
+            left = node_row * cols + (node_col - 1) % cols
+            right = node_row * cols + (node_col + 1) % cols
             adjacency_matrix[node][up] = 1
             adjacency_matrix[node][down] = 1
             adjacency_matrix[node][left] = 1
@@ -230,6 +263,117 @@ def find_shortest_paths(adj_matrix):
     avg_hop = hop_count / count if count > 0 else 0
     # visualize_paths(G, shortest_paths)
     return shortest_paths
+
+
+# def all_pairs_paths_directional(A, cols):
+#     n = len(A)
+#     paths = [[None] * n for _ in range(n)]
+
+#     def bfs(src, dest):
+#         visited = [False] * n
+#         parent = [-1] * n
+#         q = deque([src])
+#         visited[src] = True
+
+#         while q:
+#             u = q.popleft()
+#             if u == dest:
+#                 break
+
+#             row_u = u // cols
+#             block = row_u // 2
+#             direction = -1 if block % 2 == 0 else 1
+
+#             # 收集所有邻居并按同一行优先方向排序
+#             nbrs = [v for v in range(n) if A[u][v]]
+#             nbrs.sort(key=lambda v: ((v // cols) - row_u) * direction, reverse=True)
+
+#             for v in nbrs:
+#                 if not visited[v]:
+#                     visited[v] = True
+#                     parent[v] = u
+#                     q.append(v)
+
+#         if not visited[dest]:
+#             return None
+#         # 重建路径
+#         path, cur = [], dest
+#         while cur != -1:
+#             path.append(cur)
+#             cur = parent[cur]
+#         return path[::-1]
+
+#     for i in range(n):
+#         for j in range(n):
+#             paths[i][j] = bfs(i, j)
+#     return paths
+
+
+def all_pairs_paths_directional(A, cols):
+    """
+    返回所有 i->j 的偏好最短物理路径，确保包含起点和终点，去除连续重复。
+    A: 邻接矩阵, cols: 列数
+    """
+    n = A.shape[0]
+    table = [[None] * n for _ in range(n)]
+
+    for src in range(n):
+        # BFS 获取 dist 和 parents
+        dist = [None] * n
+        dist[src] = 0
+        parents = {i: [] for i in range(n)}
+        dq = deque([src])
+        while dq:
+            u = dq.popleft()
+            for v in range(n):
+                if A[u, v]:
+                    if dist[v] is None:
+                        dist[v] = dist[u] + 1
+                        parents[v].append(u)
+                        dq.append(v)
+                    elif dist[v] == dist[u] + 1:
+                        parents[v].append(u)
+        # 对每个 dest 枚举并选择
+        for dest in range(n):
+            if dist[dest] is None:
+                continue
+            # 枚举所有最短路径
+            all_paths = []
+
+            def dfs(u, path):
+                if u == src:
+                    all_paths.append(path[::-1])
+                else:
+                    for p in parents[u]:
+                        dfs(p, path + [u])
+
+            dfs(dest, [dest])
+
+            # 找逻辑长度最短
+            def logical_length(path):
+                g = []
+                for u in path:
+                    gu = u // cols
+                    if not g or g[-1] != gu:
+                        g.append(gu)
+                return len(g)
+
+            best = min(all_paths, key=logical_length)
+
+            # 去重连续重复节点
+            comp = [best[0]]
+            for u in best[1:]:
+                if u != comp[-1]:
+                    comp.append(u)
+            # 确保包含 src 和 dest
+            if comp[0] != src:
+                comp.insert(0, src)
+            if comp[-1] != dest:
+                comp.append(dest)
+
+            table[src][dest] = comp
+
+    return table
 
 
 def visualize_paths(G, shortest_paths):

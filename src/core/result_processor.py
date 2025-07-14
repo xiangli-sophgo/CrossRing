@@ -12,7 +12,8 @@ from matplotlib.patches import Rectangle, FancyArrowPatch, Patch
 from matplotlib.lines import Line2D
 import matplotlib.colors as mcolors
 from functools import lru_cache
-from src.core.result_processor import *
+
+# 移除循环引用
 import time, sys
 import pandas as pd
 import matplotlib
@@ -795,7 +796,7 @@ class BandwidthAnalyzer:
         # 但基于已有的端口带宽计算结果
         self.calculate_ip_bandwidth_data()
 
-    def _calculate_port_bandwidth_averages(self, all_ports: Dict[str, 'PortBandwidthMetrics']) -> Dict[str, float]:
+    def _calculate_port_bandwidth_averages(self, all_ports: Dict[str, "PortBandwidthMetrics"]) -> Dict[str, float]:
         """
         计算每种端口类型的平均带宽
 
@@ -807,7 +808,7 @@ class BandwidthAnalyzer:
         """
         port_bw_groups = defaultdict(list)
         for port_id, metrics in all_ports.items():
-            port_type = port_id.split('_')[0]  # 提取端口类型 (gdma, sdma, cdma, ddr, l2m)
+            port_type = port_id.split("_")[0]  # 提取端口类型 (gdma, sdma, cdma, ddr, l2m)
             port_bw_groups[port_type].append(metrics.mixed_metrics.weighted_bandwidth)
 
         avg_port_metrics = {}
@@ -815,7 +816,7 @@ class BandwidthAnalyzer:
             if bw_list:
                 # 使用 f-string 格式化键名
                 avg_port_metrics[f"avg_{port_type}_bw"] = sum(bw_list) / len(bw_list)
-        
+
         return avg_port_metrics
 
     def analyze_all_bandwidth(self) -> Dict:
@@ -869,6 +870,10 @@ class BandwidthAnalyzer:
                 "EQ_ETag_T0_num": getattr(self.sim_model, "EQ_ETag_T0_num_stat", 0),
                 "RB_ETag_T1_num": getattr(self.sim_model, "RB_ETag_T1_num_stat", 0),
                 "RB_ETag_T0_num": getattr(self.sim_model, "RB_ETag_T0_num_stat", 0),
+                "EQ_ETag_T1_per_node_fifo": getattr(self.sim_model, "EQ_ETag_T1_per_node_fifo", {}),
+                "EQ_ETag_T0_per_node_fifo": getattr(self.sim_model, "EQ_ETag_T0_per_node_fifo", {}),
+                "RB_ETag_T1_per_node_fifo": getattr(self.sim_model, "RB_ETag_T1_per_node_fifo", {}),
+                "RB_ETag_T0_per_node_fifo": getattr(self.sim_model, "RB_ETag_T0_per_node_fifo", {}),
                 "ITag_h_num": getattr(self.sim_model, "ITag_h_num_stat", 0),
                 "ITag_v_num": getattr(self.sim_model, "ITag_v_num_stat", 0),
             }
@@ -1663,6 +1668,9 @@ class BandwidthAnalyzer:
         # 生成详细请求记录的CSV文件
         self._generate_detailed_request_csv(output_path)
 
+        # 生成ETag per-node FIFO统计CSV文件
+        self._generate_etag_per_node_fifo_csv(output_path)
+
         # 保存分析配置
         self._save_analysis_config(output_path)
 
@@ -2013,14 +2021,14 @@ class BandwidthAnalyzer:
                     metrics.mixed_metrics.network_end_time,
                 ]
                 f.write(",".join(map(str, row_data)) + "\n")
-            
+
             # 添加端口带宽平均值统计
             self._write_port_bandwidth_averages(f, all_ports)
 
-    def _write_port_bandwidth_averages(self, f, all_ports: Dict[str, 'PortBandwidthMetrics']):
+    def _write_port_bandwidth_averages(self, f, all_ports: Dict[str, "PortBandwidthMetrics"]):
         """
         写入端口带宽平均值统计行到CSV文件末尾
-        
+
         Args:
             f: CSV文件句柄
             all_ports: 所有端口的带宽指标字典
@@ -2028,17 +2036,17 @@ class BandwidthAnalyzer:
         # 按端口类型分组
         port_groups = defaultdict(list)
         for port_id, metrics in all_ports.items():
-            port_type = port_id.split('_')[0]  # 提取端口类型 (gdma, sdma, cdma, ddr, l2m)
+            port_type = port_id.split("_")[0]  # 提取端口类型 (gdma, sdma, cdma, ddr, l2m)
             port_groups[port_type].append(metrics)
-        
+
         # 写入分隔行
         f.write("\n# Port Bandwidth Averages by Type\n")
-        
+
         # 为每种端口类型计算并写入平均值
         for port_type, metrics_list in sorted(port_groups.items()):
             if not metrics_list:
                 continue
-                
+
             # 计算各类带宽的平均值
             read_unweighted_avg = sum(m.read_metrics.unweighted_bandwidth for m in metrics_list) / len(metrics_list)
             read_weighted_avg = sum(m.read_metrics.weighted_bandwidth for m in metrics_list) / len(metrics_list)
@@ -2046,35 +2054,47 @@ class BandwidthAnalyzer:
             write_weighted_avg = sum(m.write_metrics.weighted_bandwidth for m in metrics_list) / len(metrics_list)
             mixed_unweighted_avg = sum(m.mixed_metrics.unweighted_bandwidth for m in metrics_list) / len(metrics_list)
             mixed_weighted_avg = sum(m.mixed_metrics.weighted_bandwidth for m in metrics_list) / len(metrics_list)
-            
+
             # 计算总请求数和flits平均值
             read_requests_avg = sum(m.read_metrics.total_requests for m in metrics_list) / len(metrics_list)
             write_requests_avg = sum(m.write_metrics.total_requests for m in metrics_list) / len(metrics_list)
             total_requests_avg = sum(m.mixed_metrics.total_requests for m in metrics_list) / len(metrics_list)
-            
+
             # 计算flits平均值
             read_flits_avg = sum(sum(iv.flit_count for iv in m.read_metrics.working_intervals) if m.read_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
             write_flits_avg = sum(sum(iv.flit_count for iv in m.write_metrics.working_intervals) if m.write_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
             mixed_flits_avg = sum(sum(iv.flit_count for iv in m.mixed_metrics.working_intervals) if m.mixed_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
-            
+
             # 计算工作区间平均值
             read_intervals_avg = sum(len(m.read_metrics.working_intervals) for m in metrics_list) / len(metrics_list)
             write_intervals_avg = sum(len(m.write_metrics.working_intervals) for m in metrics_list) / len(metrics_list)
             mixed_intervals_avg = sum(len(m.mixed_metrics.working_intervals) for m in metrics_list) / len(metrics_list)
-            
+
             # 计算工作时间平均值
             read_working_time_avg = sum(m.read_metrics.total_working_time for m in metrics_list) / len(metrics_list)
             write_working_time_avg = sum(m.write_metrics.total_working_time for m in metrics_list) / len(metrics_list)
             mixed_working_time_avg = sum(m.mixed_metrics.total_working_time for m in metrics_list) / len(metrics_list)
-            
+
             # 计算网络时间平均值
-            read_start_time_avg = sum(m.read_metrics.network_start_time for m in metrics_list if m.read_metrics.network_start_time > 0) / max(1, len([m for m in metrics_list if m.read_metrics.network_start_time > 0]))
-            read_end_time_avg = sum(m.read_metrics.network_end_time for m in metrics_list if m.read_metrics.network_end_time > 0) / max(1, len([m for m in metrics_list if m.read_metrics.network_end_time > 0]))
-            write_start_time_avg = sum(m.write_metrics.network_start_time for m in metrics_list if m.write_metrics.network_start_time > 0) / max(1, len([m for m in metrics_list if m.write_metrics.network_start_time > 0]))
-            write_end_time_avg = sum(m.write_metrics.network_end_time for m in metrics_list if m.write_metrics.network_end_time > 0) / max(1, len([m for m in metrics_list if m.write_metrics.network_end_time > 0]))
-            mixed_start_time_avg = sum(m.mixed_metrics.network_start_time for m in metrics_list if m.mixed_metrics.network_start_time > 0) / max(1, len([m for m in metrics_list if m.mixed_metrics.network_start_time > 0]))
-            mixed_end_time_avg = sum(m.mixed_metrics.network_end_time for m in metrics_list if m.mixed_metrics.network_end_time > 0) / max(1, len([m for m in metrics_list if m.mixed_metrics.network_end_time > 0]))
-            
+            read_start_time_avg = sum(m.read_metrics.network_start_time for m in metrics_list if m.read_metrics.network_start_time > 0) / max(
+                1, len([m for m in metrics_list if m.read_metrics.network_start_time > 0])
+            )
+            read_end_time_avg = sum(m.read_metrics.network_end_time for m in metrics_list if m.read_metrics.network_end_time > 0) / max(
+                1, len([m for m in metrics_list if m.read_metrics.network_end_time > 0])
+            )
+            write_start_time_avg = sum(m.write_metrics.network_start_time for m in metrics_list if m.write_metrics.network_start_time > 0) / max(
+                1, len([m for m in metrics_list if m.write_metrics.network_start_time > 0])
+            )
+            write_end_time_avg = sum(m.write_metrics.network_end_time for m in metrics_list if m.write_metrics.network_end_time > 0) / max(
+                1, len([m for m in metrics_list if m.write_metrics.network_end_time > 0])
+            )
+            mixed_start_time_avg = sum(m.mixed_metrics.network_start_time for m in metrics_list if m.mixed_metrics.network_start_time > 0) / max(
+                1, len([m for m in metrics_list if m.mixed_metrics.network_start_time > 0])
+            )
+            mixed_end_time_avg = sum(m.mixed_metrics.network_end_time for m in metrics_list if m.mixed_metrics.network_end_time > 0) / max(
+                1, len([m for m in metrics_list if m.mixed_metrics.network_end_time > 0])
+            )
+
             # 组装平均值行数据
             avg_row_data = [
                 f"{port_type}_AVG",  # port_id
@@ -2105,6 +2125,68 @@ class BandwidthAnalyzer:
                 f"{mixed_end_time_avg:.2f}",
             ]
             f.write(",".join(avg_row_data) + "\n")
+
+    def _generate_etag_per_node_fifo_csv(self, output_path: str):
+        """
+        生成每个节点每个FIFO方向的ETag统计CSV文件
+        CSV格式：node_id, EQ_TU_T1, EQ_TU_T0, EQ_TD_T1, EQ_TD_T0, RB_TU_T1, RB_TU_T0, RB_TD_T1, RB_TD_T0, RB_TL_T1, RB_TL_T0, RB_TR_T1, RB_TR_T0
+        """
+        csv_file = os.path.join(output_path, "etag_per_node_fifo_stats.csv")
+
+        # 直接从sim_model获取per-node FIFO ETag统计数据
+        if not hasattr(self, "sim_model") or not self.sim_model:
+            print("No sim_model found, skipping ETag per-node FIFO CSV generation")
+            return
+
+        eq_t1_per_node_fifo = getattr(self.sim_model, "EQ_ETag_T1_per_node_fifo", {})
+        eq_t0_per_node_fifo = getattr(self.sim_model, "EQ_ETag_T0_per_node_fifo", {})
+        rb_t1_per_node_fifo = getattr(self.sim_model, "RB_ETag_T1_per_node_fifo", {})
+        rb_t0_per_node_fifo = getattr(self.sim_model, "RB_ETag_T0_per_node_fifo", {})
+
+        # 获取所有节点ID
+        all_nodes = set()
+        all_nodes.update(eq_t1_per_node_fifo.keys())
+        all_nodes.update(eq_t0_per_node_fifo.keys())
+        all_nodes.update(rb_t1_per_node_fifo.keys())
+        all_nodes.update(rb_t0_per_node_fifo.keys())
+
+        if not all_nodes:
+            print("No per-node FIFO ETag statistics found")
+            return
+
+        with open(csv_file, "w", newline="", encoding="utf-8") as f:
+            # 写入CSV头
+            headers = ["node_id", "EQ_TU_T1", "EQ_TU_T0", "EQ_TD_T1", "EQ_TD_T0", "RB_TU_T1", "RB_TU_T0", "RB_TD_T1", "RB_TD_T0", "RB_TL_T1", "RB_TL_T0", "RB_TR_T1", "RB_TR_T0"]
+            f.write(",".join(headers) + "\n")
+
+            # 按节点ID排序
+            for node_id in sorted(all_nodes):
+                row_data = [str(node_id)]
+
+                # EQ统计 (只有TU和TD方向)
+                eq_t1_node = eq_t1_per_node_fifo.get(node_id, {})
+                eq_t0_node = eq_t0_per_node_fifo.get(node_id, {})
+                row_data.extend([str(eq_t1_node.get("TU", 0)), str(eq_t0_node.get("TU", 0)), str(eq_t1_node.get("TD", 0)), str(eq_t0_node.get("TD", 0))])
+
+                # RB统计 (四个方向)
+                rb_t1_node = rb_t1_per_node_fifo.get(node_id, {})
+                rb_t0_node = rb_t0_per_node_fifo.get(node_id, {})
+                row_data.extend(
+                    [
+                        str(rb_t1_node.get("TU", 0)),
+                        str(rb_t0_node.get("TU", 0)),
+                        str(rb_t1_node.get("TD", 0)),
+                        str(rb_t0_node.get("TD", 0)),
+                        str(rb_t1_node.get("TL", 0)),
+                        str(rb_t0_node.get("TL", 0)),
+                        str(rb_t1_node.get("TR", 0)),
+                        str(rb_t0_node.get("TR", 0)),
+                    ]
+                )
+
+                f.write(",".join(row_data) + "\n")
+
+        print(f"节点的ETag数据已保存: {csv_file}")
 
     def _generate_detailed_request_csv(self, output_path: str):
         """

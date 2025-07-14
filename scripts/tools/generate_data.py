@@ -363,7 +363,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, cdma_map,
 # 示例使用
 if __name__ == "__main__":
     # 参数配置
-    TOPO = "5x4"
+    TOPO = "3x3"
     INTERVAL_COUNT = 50
     FILE_NAME = "../../test_data/test1.txt"
     np.random.seed(616)
@@ -392,16 +392,16 @@ if __name__ == "__main__":
         # 自定义映射配置：每个CDMA发送到特定的8个DDR
         CUSTOM_MAPPING = {
             "R": {
-                ("cdma_0", 16): [
-                    ("ddr_0", 0),
-                    ("ddr_1", 0),
-                    ("ddr_0", 4),
-                    ("ddr_1", 4),
-                    ("ddr_0", 8),
-                    ("ddr_1", 8),
-                    ("ddr_0", 12),
-                    ("ddr_1", 12),
-                ],
+                # ("cdma_0", 16): [
+                #     ("ddr_0", 0),
+                #     ("ddr_1", 0),
+                #     ("ddr_0", 4),
+                #     ("ddr_1", 4),
+                #     ("ddr_0", 8),
+                #     ("ddr_1", 8),
+                #     ("ddr_0", 12),
+                #     ("ddr_1", 12),
+                # ],
                 # ("cdma_0", 17): [
                 #     ("ddr_0", 1),
                 #     ("ddr_1", 1),
@@ -447,7 +447,7 @@ if __name__ == "__main__":
         }
         GDMA_MAP = {
             "gdma_0": [
-                0,
+                2,
                 # 2,
                 # 6,
                 # 8,
@@ -458,10 +458,10 @@ if __name__ == "__main__":
         }
         DDR_MAP = {
             "ddr_0": [
-                1,
+                # 1,
                 # 2,
                 # 3,
-                # 5,
+                7,
                 # 6,
                 # 8,
             ],
@@ -480,6 +480,6 @@ if __name__ == "__main__":
     overlap = 1
 
     # 生成数据，使用flow_type=4启用自定义映射
-    generate_data(TOPO, INTERVAL_COUNT, FILE_NAME, SDMA_MAP, GDMA_MAP, CDMA_MAP, DDR_MAP, L2M_MAP, SPEED, BURST, flow_type=4, overlap=overlap, custom_mapping=CUSTOM_MAPPING)
+    generate_data(TOPO, INTERVAL_COUNT, FILE_NAME, SDMA_MAP, GDMA_MAP, CDMA_MAP, DDR_MAP, L2M_MAP, SPEED, BURST, flow_type=2, overlap=overlap, custom_mapping=CUSTOM_MAPPING)
 
     print(f"Traffic data generated successfully! {FILE_NAME}")
