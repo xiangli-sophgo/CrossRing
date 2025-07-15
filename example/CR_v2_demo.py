@@ -51,7 +51,7 @@ def run_bidirectional_rb_demo():
     config.SN_TRACKER_RELEASE_LATENCY = 40
     config.CDMA_BW_LIMIT = 8
     config.DDR_BW_LIMIT = 102
-    config.RB_ONLY_TAG_NUM_PER_RING = 0
+    config.RB_ONLY_TAG_NUM_PER_RING = 6
 
     config.TL_Etag_T2_UE_MAX = 8
     config.TL_Etag_T1_UE_MAX = 15
@@ -92,11 +92,13 @@ def run_bidirectional_rb_demo():
         topo_type="5x2",
         traffic_file_path=f"../traffic/0617",
         traffic_config=[["Read_burst4_2262HBM_v2.txt"]],
+        # traffic_file_path=f"../test_data/",
+        # traffic_config=[["test1.txt"]],
         result_save_path=result_dir + "/",
         verbose=1,  # 启用详细输出
         print_trace=0,
-        show_trace_id=584,
-        plot_link_state=0,
+        show_trace_id=0,
+        plot_link_state=1,
         plot_start_time=600,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,

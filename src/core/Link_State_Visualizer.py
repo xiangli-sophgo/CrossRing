@@ -204,14 +204,25 @@ class NetworkLinkVisualizer:
                 patch_dict=self.eq_patches,
                 text_dict=self.eq_texts,
             )
-
+            # V1.3
+            # rb_config = dict(
+            #     title="Ring Bridge",
+            #     lanes=["TL", "TR", "TU", "TD",  "EQ"],
+            #     depths=[self.RB_in_depth] * 2 + [self.RB_out_depth] * 3,
+            #     orientations=["vertical", "vertical",  "horizontal", "horizontal", "vertical"],
+            #     h_pos=["bottom", "bottom",  "top", "top", "top"],
+            #     v_pos=["left", "left", "right", "right", "left"],
+            #     patch_dict=self.rb_patches,
+            #     text_dict=self.rb_texts,
+            # )
+            # V2
             rb_config = dict(
                 title="Ring Bridge",
-                lanes=["TL", "TR", "TU", "TD", "EQ"],
-                depths=[self.RB_in_depth] * 2 + [self.RB_out_depth] * 3,
-                orientations=["vertical", "vertical", "horizontal", "horizontal", "vertical"],
-                h_pos=["bottom", "bottom", "top", "top", "top"],
-                v_pos=["left", "left", "right", "right", "left"],
+                lanes=["TL_in", "TR_in", "TU_in", "TD_in", "TL_out", "TR_out", "TU_out", "TD_out", "EQ_out"],
+                depths=[self.RB_in_depth] * 4 + [self.RB_out_depth] * 5,
+                orientations=["vertical", "vertical", "vertical", "vertical", "horizontal", "horizontal", "horizontal", "horizontal", "vertical"],
+                h_pos=["bottom", "bottom", "bottom", "bottom", "top", "top", "top", "top", "top"],
+                v_pos=["left", "left", "left", "left", "right", "right", "right", "right", "left"],
                 patch_dict=self.rb_patches,
                 text_dict=self.rb_texts,
             )
@@ -477,8 +488,10 @@ class NetworkLinkVisualizer:
                         ha = "left"
                     else:
                         raise ValueError(f"Unknown v_position: {vpos}")
-
-                    self.ax.text(text_x, lane_y + square / 2, lane[0].upper() + lane[-1], ha=ha, va="center", fontsize=fontsize)
+                    if lane[:2] in ['TL', 'TR', 'TU', 'TD', 'EQ']:
+                        self.ax.text(text_x, lane_y + square / 2, lane[:2].upper(), ha=ha, va="center", fontsize=fontsize)
+                    else:
+                        self.ax.text(text_x, lane_y + square / 2, lane[0].upper() + lane[-1], ha=ha, va="center", fontsize=fontsize)
                     patch_dict[lane] = []
                     text_dict[lane] = []
 
@@ -545,7 +558,10 @@ class NetworkLinkVisualizer:
                     else:
                         raise ValueError(f"Unknown h_position: {hpos}")
 
-                    self.ax.text(lane_x + square / 2, text_y, lane[0].upper() + lane[-1], ha="center", va=va, fontsize=fontsize)
+                    if lane[:2] in ["TL", "TR", "TU", "TD", 'EQ']:
+                        self.ax.text(lane_x + square / 2, text_y, lane[:2].upper(), ha="center", va=va, fontsize=fontsize)
+                    else:
+                        self.ax.text(lane_x + square / 2, text_y, lane[0].upper() + lane[-1], ha="center", va=va, fontsize=fontsize)
                     patch_dict[lane] = []
                     text_dict[lane] = []
 
@@ -686,7 +702,11 @@ class NetworkLinkVisualizer:
                             self.patch_info_map.pop(p, None)
             # Ring Bridge
             for lane, patches in self.rb_patches.items():
-                q = RB.get(lane, [])[(self.node_id, self.node_id - self.cols)]
+                q = (
+                    RB.get(lane, [])[(self.node_id, self.node_id - self.cols)]
+                    if (self.node_id, self.node_id - self.cols) in RB.get(lane, [])
+                    else RB.get(lane, [])[(self.node_id - self.cols, self.node_id)]
+                )
                 for idx, p in enumerate(patches):
                     t = self.rb_texts[lane][idx]
                     if idx < len(q):
@@ -950,8 +970,7 @@ class NetworkLinkVisualizer:
         # except Exception:
         #     # 如果自动最大化失败，至少增大窗口尺寸
         #     self.fig.set_size_inches(15, 10)
-        gs = self.fig.add_gridspec(1, 2, width_ratios=[1.3, 1], 
-                          left=0.02, right=0.98, top=0.95, bottom=0.08)
+        gs = self.fig.add_gridspec(1, 2, width_ratios=[1.3, 1], left=0.02, right=0.98, top=0.95, bottom=0.08)
         self.ax = self.fig.add_subplot(gs[0])  # 主网络视图
         self.piece_ax = self.fig.add_subplot(gs[1])  # 右侧 Piece 视图
         self.piece_ax.axis("off")
