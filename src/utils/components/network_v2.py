@@ -575,7 +575,7 @@ class Network:
         self.links[link][slice_index] = flit
 
     def can_move_to_next(self, flit, current, next_node):
-        # 1. flit不进入Cross Poing
+        # 1. flit不进入Cross Point
         if flit.source - flit.destination == self.config.NUM_COL:
             return len(self.inject_queues["EQ"]) < self.config.IQ_OUT_FIFO_DEPTH
         elif current - next_node == self.config.NUM_COL:
@@ -590,7 +590,7 @@ class Network:
         direction = "TR" if next_node == current + 1 else "TL"
         link = (current, next_node)
 
-        # RB only 不能上环
+        # RB_ONLY 不能上环
         if self.links_tag[link][0] == "RB_ONLY":
             return False
 
@@ -1607,6 +1607,7 @@ class Network:
                 # link[flit.current_seat_index] = flit
                 if (flit.current_seat_index == len(link) - 1 and len(link) > 2) or (flit.current_seat_index == 1 and len(link) == 2):
                     self.links_flow_stat[flit.req_type][flit.current_link] += 1
+
             else:
                 # 将 flit 放入 ring_bridge 的相应方向
                 if not flit.is_on_station:

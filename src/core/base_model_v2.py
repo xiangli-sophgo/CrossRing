@@ -1151,7 +1151,7 @@ class BaseModel:
         # 情况1：链路为空
         if not network.links[link][0]:
             # 检查是否有ITag预约
-            if network.links_tag[link][0] is None:
+            if network.links_tag[link][0] is None or network.links_tag[link][0] == "RB_ONLY":
                 if self._update_horizontal_flit_state(network, dir_key, pos, next_pos, target_node, direction):
                     return flit
                 return self._handle_horizontal_wait_cycles(network, dir_key, pos, next_pos, direction, link)
@@ -1413,11 +1413,10 @@ class BaseModel:
         if not network.ring_bridge[dir_key][(pos, next_pos)]:
             return None
         flit = network.ring_bridge[dir_key][(pos, next_pos)][0]
-        # self.error_log(flit, 6212, 1)
         # Case 1: No flit in the link
         if not network.links[link][0]:
             # Handle empty link cases
-            if network.links_tag[link][0] is None:
+            if network.links_tag[link][0] is None or network.links_tag[link][0] == "RB_ONLY":
                 if self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction):
                     return flit
                 return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
@@ -1736,7 +1735,7 @@ class BaseModel:
         if not self.result_save_path:
             return
 
-        self.result_processor.collect_requests_data(self)
+        self.result_processor.collect_requests_data(self, self.cycle)
         results = self.result_processor.analyze_all_bandwidth()
         self.result_processor.generate_unified_report(results, self.result_save_path)
         self.Total_sum_BW_stat = results["Total_sum_BW"]
@@ -1848,7 +1847,7 @@ class BaseModel:
         try:
             if hasattr(self, "result_processor") and self.result_processor:
                 # Collect request data and analyze bandwidth
-                self.result_processor.collect_requests_data(self)
+                self.result_processor.collect_requests_data(self, self.cycle)
                 bandwidth_analysis = self.result_processor.analyze_all_bandwidth()
 
                 # Include port averages in results

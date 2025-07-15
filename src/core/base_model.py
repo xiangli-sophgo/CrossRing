@@ -1477,7 +1477,7 @@ class BaseModel:
         if not self.result_save_path:
             return
 
-        self.result_processor.collect_requests_data(self)
+        self.result_processor.collect_requests_data(self, self.cycle)
         results = self.result_processor.analyze_all_bandwidth()
         self.result_processor.generate_unified_report(results, self.result_save_path)
         self.Total_sum_BW_stat = results["Total_sum_BW"]
@@ -1598,7 +1598,7 @@ class BaseModel:
         try:
             if hasattr(self, "result_processor") and self.result_processor:
                 # Collect request data and analyze bandwidth
-                self.result_processor.collect_requests_data(self)
+                self.result_processor.collect_requests_data(self, self.cycle)
                 bandwidth_analysis = self.result_processor.analyze_all_bandwidth()
 
                 # Include port averages in results

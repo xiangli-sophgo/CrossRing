@@ -187,10 +187,12 @@ class BandwidthAnalyzer:
             self.sn_positions.update(pos - self.config.NUM_COL for pos in self.config.L2M_SEND_POSITION_LIST)
             self.sn_positions.update(self.config.L2M_SEND_POSITION_LIST)
 
-    def collect_requests_data(self, sim_model) -> None:
+    def collect_requests_data(self, sim_model, simulation_end_cycle=None) -> None:
         """从sim_model收集请求数据"""
         self.requests.clear()
         self.sim_model = sim_model
+        # 存储仿真结束时间用于链路带宽计算
+        self.simulation_end_cycle = simulation_end_cycle if simulation_end_cycle is not None else sim_model.cycle
 
         for packet_id, flits in sim_model.data_network.arrive_flits.items():
             if not flits or len(flits) != flits[0].burst_length:
@@ -951,7 +953,7 @@ class BandwidthAnalyzer:
 
         link_values = []
         for (i, j), value in links.items():
-            link_value = value * 128 / (self.finish_cycle // self.config.NETWORK_FREQUENCY) if value else 0
+            link_value = value * 128 / (self.simulation_end_cycle // self.config.NETWORK_FREQUENCY) if value else 0
             link_values.append(link_value)
             formatted_label = f"{link_value:.1f}"
             G.add_edge(i, j, label=formatted_label)
@@ -2579,7 +2581,7 @@ class BandwidthAnalyzer:
                 ax.add_patch(arrow)
                 if cw_flow > 0:
                     mid_x, mid_y = (fsx + fex) / 2, (fsy + fey) / 2
-                    bw = (cw_flow * 128) / (self.finish_cycle // self.config.NETWORK_FREQUENCY) if getattr(self, "finish_cycle", 0) > 0 else 0
+                    bw = (cw_flow * 128) / (self.simulation_end_cycle // self.config.NETWORK_FREQUENCY) if getattr(self, "simulation_end_cycle", 0) > 0 else 0
                     ax.text(mid_x + off_x * 1.8, mid_y + off_y * 1.8, f"{bw:.1f}", fontsize=12, ha="center", va="center", fontweight="bold", zorder=6)
 
             # 逆时针箭头（内环）
@@ -2594,7 +2596,7 @@ class BandwidthAnalyzer:
                 arrow2 = FancyArrowPatch((fsx2, fsy2), (fex2, fey2), arrowstyle="-|>", linewidth=width, color=color, alpha=alpha, mutation_scale=20, zorder=5)
                 ax.add_patch(arrow2)
                 mid_x2, mid_y2 = (fsx2 + fex2) / 2, (fsy2 + fey2) / 2
-                bw2 = (ccw_flow * 128) / (self.finish_cycle // self.config.NETWORK_FREQUENCY) if getattr(self, "finish_cycle", 0) > 0 else 0
+                bw2 = (ccw_flow * 128) / (self.simulation_end_cycle // self.config.NETWORK_FREQUENCY) if getattr(self, "simulation_end_cycle", 0) > 0 else 0
                 ax.text(mid_x2 + off_x * 1.8, mid_y2 + off_y * 1.8, f"{bw2:.1f}", fontsize=12, ha="center", va="center", fontweight="bold", zorder=6)
 
         # 绘制节点、框和 IP 带宽信息
