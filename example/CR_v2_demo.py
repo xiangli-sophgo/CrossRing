@@ -20,34 +20,30 @@ from src.utils.components.route_table import RouteTable
 
 
 def run_bidirectional_rb_demo():
-    """运行双向Ring Bridge演示"""
-    print("=" * 60)
-    print("CrossRing NoC 双向Ring Bridge功能演示")
-    print("=" * 60)
 
-    # 1. 创建配置
-    print("\n1. 初始化配置...")
+    # 创建配置
+    print("\n初始化配置...")
     config = CrossRingConfig()
     config.TOPO_TYPE = "5x2"
     config.NUM_COL = 2
     config.NUM_NODE = 20
-    config.NUM_IP = 8
+    config.NUM_IP = 16
     config.BURST = 4
     config.RN_R_TRACKER_OSTD = 64
     config.RN_W_TRACKER_OSTD = 32
-    config.RN_RDB_SIZE = config.RN_R_TRACKER_OSTD * config.BURST
-    config.RN_WDB_SIZE = config.RN_W_TRACKER_OSTD * config.BURST
     config.SN_DDR_R_TRACKER_OSTD = 96
     config.SN_DDR_W_TRACKER_OSTD = 48
     config.SN_L2M_R_TRACKER_OSTD = 96
     config.SN_L2M_W_TRACKER_OSTD = 48
+    config.RN_RDB_SIZE = config.RN_R_TRACKER_OSTD * config.BURST
+    config.RN_WDB_SIZE = config.RN_W_TRACKER_OSTD * config.BURST
     config.SN_DDR_WDB_SIZE = config.SN_DDR_W_TRACKER_OSTD * config.BURST
     config.SN_L2M_WDB_SIZE = config.SN_L2M_W_TRACKER_OSTD * config.BURST
-    config.DDR_R_LATENCY_original = 0
+    config.DDR_R_LATENCY_original = 100
     config.DDR_R_LATENCY_VAR_original = 0
-    config.DDR_W_LATENCY_original = 0
-    config.L2M_R_LATENCY_original = 12
-    config.L2M_W_LATENCY_original = 16
+    config.DDR_W_LATENCY_original = 40
+    config.L2M_R_LATENCY_original = 0
+    config.L2M_W_LATENCY_original = 0
     config.IQ_CH_FIFO_DEPTH = 10
     config.EQ_CH_FIFO_DEPTH = 10
     config.IQ_OUT_FIFO_DEPTH = 8
@@ -55,6 +51,7 @@ def run_bidirectional_rb_demo():
     config.SN_TRACKER_RELEASE_LATENCY = 40
     config.CDMA_BW_LIMIT = 8
     # config.DDR_BW_LIMIT = 102
+    config.RB_ONLY_TAG_NUM_PER_RING = 1
 
     config.TL_Etag_T2_UE_MAX = 8
     config.TL_Etag_T1_UE_MAX = 15
@@ -86,7 +83,7 @@ def run_bidirectional_rb_demo():
     print(f"   RB输出FIFO深度: {config.RB_OUT_FIFO_DEPTH}")
 
     # 创建仿真实例（使用v2版本）
-    result_dir = os.path.join(project_root, "Result", "bidirectional_rb_demo")
+    result_dir = os.path.join(project_root, "Result", "CrossRing_v2")
     os.makedirs(result_dir, exist_ok=True)
 
     sim = BaseModel(
@@ -97,15 +94,16 @@ def run_bidirectional_rb_demo():
         traffic_config=[["test1.txt"]],
         result_save_path=result_dir + "/",
         verbose=1,  # 启用详细输出
-        print_trace=1,
-        show_trace_id=0,
+        print_trace=0,
+        show_trace_id=584,
         plot_link_state=0,
+        plot_start_time=2000,
         plot_flow_fig=1,
-        plot_RN_BW_fig=0,
+        plot_RN_BW_fig=1,
     )
 
     sim.initial()
-    sim.end_time = 1500
+    sim.end_time = 3000
 
     start_time = time.time()
     sim.run()
@@ -115,6 +113,6 @@ def run_bidirectional_rb_demo():
 
 
 if __name__ == "__main__":
-    print("启动CrossRing v2.0 演示...")
+    print("启动CrossRing v2.0:")
 
     results = run_bidirectional_rb_demo()

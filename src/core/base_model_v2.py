@@ -199,11 +199,7 @@ class BaseModel:
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST
-            + self.config.SDMA_SEND_POSITION_LIST
-            + self.config.CDMA_SEND_POSITION_LIST
-            + self.config.DDR_SEND_POSITION_LIST
-            + self.config.L2M_SEND_POSITION_LIST
+            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
         )
 
         # 缓存位置列表以避免重复转换
@@ -688,11 +684,7 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(
-                f"Data statistic: Read: {self.read_req, self.read_flit}, "
-                f"Write: {self.write_req, self.write_flit}, "
-                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
-            )
+            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
         if self.verbose:
@@ -1057,10 +1049,7 @@ class BaseModel:
                 # 新增2个输入源：TU纵向环输入, TD纵向环输入（来自ring_bridge_input）
                 station_flits = (
                     [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]]
-                    + [
-                        network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
-                        for fifo_name in ["TU", "TD"]
-                    ]
+                    + [network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]]
                     + [network.ring_bridge_input[fifo_name][(next_pos, pos)][0] if network.ring_bridge_input[fifo_name][(next_pos, pos)] else None for fifo_name in ["TU", "TD"]]
                 )
 
@@ -1189,6 +1178,8 @@ class BaseModel:
 
         # 检查ITag需求变化
         if flit.wait_cycle_h >= self.config.ITag_TRIGGER_Th_H:
+            if pos not in network.itag_req_counter[direction]:
+                pos = next_pos
             network.itag_req_counter[direction][pos] -= 1
             excess = network.tagged_counter[direction][pos] - network.itag_req_counter[direction][pos]
             if excess > 0:
@@ -1207,6 +1198,7 @@ class BaseModel:
 
     def _handle_horizontal_wait_cycles(self, network: NetworkV2, dir_key, pos, next_pos, direction, link):
         """处理横向环等待周期和ITag标记逻辑"""
+        pos, next_pos = next_pos, pos
         if not network.ring_bridge_output[dir_key][(pos, next_pos)]:
             return None
 
@@ -1246,8 +1238,8 @@ class BaseModel:
     def _ring_bridge_arbitrate(self, network: NetworkV2, station_flits, pos, next_pos, direction):
         """
         通用的ring_bridge仲裁函数
-        cmp_func: 一个函数，接受 (flit.destination, next_pos)，返回True/False
         """
+        # 定义方向判定函数
         if direction == "EQ":
             cmp_func = lambda p1, p2, dt: p1 == dt
         elif direction == "TU":
@@ -1260,18 +1252,23 @@ class BaseModel:
             cmp_func = lambda p1, p2, dt: p2 - p1 == 1
         else:
             return None
+
         RB_flit = None
         rr_index = network.round_robin["RB"][direction][next_pos]
         for i in rr_index:
-            if (
-                station_flits[i]
-                and station_flits[i].path_index + 2 < len(station_flits[i].path)
-                and cmp_func(station_flits[i].path[station_flits[i].path_index + 1], station_flits[i].path[station_flits[i].path_index + 2], station_flits[i].destination)
-            ):
-                RB_flit = station_flits[i]
-                station_flits[i] = None
-                self._update_ring_bridge(network, pos, next_pos, direction, i)
-                return RB_flit
+            flit = station_flits[i]
+            if flit:
+                # 检查下一个和下下个节点
+                for offset in (1, 2):
+                    idx = flit.path_index + offset
+                    if idx < len(flit.path):
+                        p1 = flit.path[flit.path_index + 1]
+                        p2 = flit.path[idx]
+                        if cmp_func(p1, p2, flit.destination):
+                            RB_flit = flit
+                            station_flits[i] = None
+                            self._update_ring_bridge(network, pos, next_pos, direction, i)
+                            return RB_flit
         return RB_flit
 
     def _update_ring_bridge(self, network: NetworkV2, pos, next_pos, direction, index):
@@ -1319,87 +1316,37 @@ class BaseModel:
         channel_type = getattr(flit, "flit_type", "req")  # 默认为req
 
         # 更新RB总数据量统计（所有经过的flit，无论ETag等级）
-        if pos in self.RB_total_flits_per_node:
+        if pos in self.RB_total_flits_per_node and direction in self.RB_total_flits_per_node[pos]:
             self.RB_total_flits_per_node[pos][direction] += 1
 
         # 更新按通道分类的RB总数据量统计
-        if pos in self.RB_total_flits_per_channel.get(channel_type, {}):
+        if pos in self.RB_total_flits_per_channel.get(channel_type, {}) and direction in self.RB_total_flits_per_channel[channel_type][pos]:
             self.RB_total_flits_per_channel[channel_type][pos][direction] += 1
 
         if flit.ETag_priority == "T1":
             self.RB_ETag_T1_num_stat += 1
             # Update per-node FIFO statistics
-            if pos in self.RB_ETag_T1_per_node_fifo:
+            if pos in self.RB_ETag_T1_per_node_fifo and direction in self.RB_ETag_T1_per_node_fifo[pos]:
                 self.RB_ETag_T1_per_node_fifo[pos][direction] += 1
 
             # Update per-channel statistics
-            if pos in self.RB_ETag_T1_per_channel.get(channel_type, {}):
+            if pos in self.RB_ETag_T1_per_channel.get(channel_type, {}) and direction in self.RB_ETag_T1_per_channel[channel_type][pos]:
                 self.RB_ETag_T1_per_channel[channel_type][pos][direction] += 1
 
         elif flit.ETag_priority == "T0":
             self.RB_ETag_T0_num_stat += 1
             # Update per-node FIFO statistics
-            if pos in self.RB_ETag_T0_per_node_fifo:
+            if pos in self.RB_ETag_T0_per_node_fifo and direction in self.RB_ETag_T0_per_node_fifo[pos]:
                 self.RB_ETag_T0_per_node_fifo[pos][direction] += 1
 
             # Update per-channel statistics
-            if pos in self.RB_ETag_T0_per_channel.get(channel_type, {}):
+            if pos in self.RB_ETag_T0_per_channel.get(channel_type, {}) and direction in self.RB_ETag_T0_per_channel[channel_type][pos]:
                 self.RB_ETag_T0_per_channel[channel_type][pos][direction] += 1
 
         flit.ETag_priority = "T2"
         # flit.used_entry_level = None
         network.round_robin["RB"][direction][next_pos].remove(index)
         network.round_robin["RB"][direction][next_pos].append(index)
-
-    # def _ring_bridge_arbitrate_horizontal(self, network: NetworkV2, station_flits, pos, next_pos, direction, cmp_func):
-    #     """
-    #     专用于横向环输出的ring_bridge仲裁函数
-    #     支持纵向环flit转到横向环的决策逻辑
-    #     cmp_func: 一个函数，接受 (flit, next_pos)，返回True/False
-    #     """
-    #     RB_flit = None
-    #     rr_index = network.round_robin["RB"][direction][next_pos]
-    #     # 优先检查纵向环输入源（索引4和5）用于纵向→横向转换
-    #     priority_indices = [4, 5, 0, 1, 2, 3]  # TU纵向输入, TD纵向输入优先
-
-    #     for i in priority_indices:
-    #         if i in rr_index and station_flits[i] and cmp_func(station_flits[i], next_pos):
-    #             RB_flit = station_flits[i]
-    #             station_flits[i] = None
-    #             self._update_ring_bridge_horizontal(network, pos, next_pos, direction, i)
-    #             return RB_flit
-    #     return RB_flit
-
-    # def _update_ring_bridge_horizontal(self, network: NetworkV2, pos, next_pos, direction, index):
-    #     """更新横向环输出的transfer stations，专用于纵向→横向转换"""
-    #     if index == 0:
-    #         # TL横向环输入
-    #         flit = network.ring_bridge["TL"][(pos, next_pos)].popleft()
-    #     elif index == 1:
-    #         # TR横向环输入
-    #         flit = network.ring_bridge["TR"][(pos, next_pos)].popleft()
-    #     elif index == 2:
-    #         # TU注入队列输入
-    #         flit = network.inject_queues["TU"][pos].popleft()
-    #     elif index == 3:
-    #         # TD注入队列输入
-    #         flit = network.inject_queues["TD"][pos].popleft()
-    #     elif index == 4:
-    #         # TU纵向环输入（重点：纵向→横向转换）
-    #         flit = network.ring_bridge_input["TU"][(pos, next_pos)].popleft()
-    #     elif index == 5:
-    #         # TD纵向环输入（重点：纵向→横向转换）
-    #         flit = network.ring_bridge_input["TD"][(pos, next_pos)].popleft()
-
-    #     if flit.ETag_priority == "T1":
-    #         self.RB_ETag_T1_num_stat += 1
-    #     elif flit.ETag_priority == "T0":
-    #         self.RB_ETag_T0_num_stat += 1
-
-    #     flit.ETag_priority = "T2"
-    #     # 更新round-robin队列
-    #     network.round_robin["RB"][direction][next_pos].remove(index)
-    #     network.round_robin["RB"][direction][next_pos].append(index)
 
     def _should_output_to_horizontal(self, flit, next_pos, direction):
         """
@@ -1442,9 +1389,7 @@ class BaseModel:
 
             # 只在Ring Bridge位置添加RB EQ队列（奇数行）
             if (in_pos // self.config.NUM_COL) % 2 == 1:  # 检查是否为RB位置
-                rb_eq_flit = (
-                    network.ring_bridge["EQ"][(in_pos, ip_pos)][0] if (in_pos, ip_pos) in network.ring_bridge["EQ"] and network.ring_bridge["EQ"][(in_pos, ip_pos)] else None
-                )
+                rb_eq_flit = network.ring_bridge["EQ"][(in_pos, ip_pos)][0] if (in_pos, ip_pos) in network.ring_bridge["EQ"] and network.ring_bridge["EQ"][(in_pos, ip_pos)] else None
                 eject_flits = eject_flits + [rb_eq_flit]
             else:
                 eject_flits = eject_flits + [None]
@@ -1753,6 +1698,7 @@ class BaseModel:
                 # 检查是否需要生成Buffer_Reach_Th信号
                 if flit.wait_cycle_h == self.config.ITag_TRIGGER_Th_H and direction != "EQ":
                     network.itag_req_counter[direction][ip_pos] += 1
+
                 if flit.inject(network):
                     network.inject_num += 1
                     flit_num += 1

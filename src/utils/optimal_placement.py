@@ -265,115 +265,72 @@ def find_shortest_paths(adj_matrix):
     return shortest_paths
 
 
-# def all_pairs_paths_directional(A, cols):
-#     n = len(A)
-#     paths = [[None] * n for _ in range(n)]
-
-#     def bfs(src, dest):
-#         visited = [False] * n
-#         parent = [-1] * n
-#         q = deque([src])
-#         visited[src] = True
-
-#         while q:
-#             u = q.popleft()
-#             if u == dest:
-#                 break
-
-#             row_u = u // cols
-#             block = row_u // 2
-#             direction = -1 if block % 2 == 0 else 1
-
-#             # 收集所有邻居并按同一行优先方向排序
-#             nbrs = [v for v in range(n) if A[u][v]]
-#             nbrs.sort(key=lambda v: ((v // cols) - row_u) * direction, reverse=True)
-
-#             for v in nbrs:
-#                 if not visited[v]:
-#                     visited[v] = True
-#                     parent[v] = u
-#                     q.append(v)
-
-#         if not visited[dest]:
-#             return None
-#         # 重建路径
-#         path, cur = [], dest
-#         while cur != -1:
-#             path.append(cur)
-#             cur = parent[cur]
-#         return path[::-1]
-
-#     for i in range(n):
-#         for j in range(n):
-#             paths[i][j] = bfs(i, j)
-#     return paths
-
-
 def all_pairs_paths_directional(A, cols):
     """
-    返回所有 i->j 的偏好最短物理路径，确保包含起点和终点，去除连续重复。
-    A: 邻接矩阵, cols: 列数
+    对有向图A，返回所有节点对[source][destination]的最佳路径（list）。
+    A: 邻接矩阵 (numpy 数组)
+    cols: 特定的列数，用于自定义长度计算
+    返回: best_table[source][destination] = 最佳路径list 或 None
     """
     n = A.shape[0]
-    table = [[None] * n for _ in range(n)]
+    best_table = {}
+
+    def calc_custom_length(path):
+        L = 1
+        for i in range(1, len(path)):
+            if abs(path[i] - path[i - 1]) != cols:
+                L += 1
+        return L
+
+    def all_paths(src, dest):
+        all_paths = []
+
+        def dfs(u, path, visited):
+            if u == dest:
+                all_paths.append(path[:])
+                return
+            for v in range(n):
+                if A[u, v] and v not in visited:
+                    dfs(v, path + [v], visited | {v})
+
+        dfs(src, [src], {src})
+        return all_paths
+
+    def choose_best(paths, src):
+        if not paths:
+            return None
+        # 计算自定义长度
+        path_lens = [(path, calc_custom_length(path)) for path in paths]
+        min_len = min(length for _, length in path_lens)
+        best_paths = [p for p in path_lens if p[1] == min_len]
+        if len(best_paths) == 1:
+            return best_paths[0][0]
+        # 多条最短路径，按优先方向选
+        row_u = src // cols
+        block = row_u // 2
+        direction = -1 if block % 2 == 0 else 1
+
+        def first_non_cols_direction(path):
+            for i in range(1, len(path)):
+                diff = path[i] - path[i - 1]
+                if abs(diff) != cols:
+                    return np.sign(diff)
+            return 0  # 全是等于cols的移动
+
+        filtered = [p for p in best_paths if first_non_cols_direction(p[0]) == direction]
+        if filtered:
+            return min(filtered, key=lambda x: x[0])[0]
+        else:
+            return min(best_paths, key=lambda x: x[0])[0]
 
     for src in range(n):
-        # BFS 获取 dist 和 parents
-        dist = [None] * n
-        dist[src] = 0
-        parents = {i: [] for i in range(n)}
-        dq = deque([src])
-        while dq:
-            u = dq.popleft()
-            for v in range(n):
-                if A[u, v]:
-                    if dist[v] is None:
-                        dist[v] = dist[u] + 1
-                        parents[v].append(u)
-                        dq.append(v)
-                    elif dist[v] == dist[u] + 1:
-                        parents[v].append(u)
-        # 对每个 dest 枚举并选择
-        for dest in range(n):
-            if dist[dest] is None:
-                continue
-            # 枚举所有最短路径
-            all_paths = []
+        best_table[src] = {}
+        for dst in range(n):
+            paths = all_paths(src, dst)
+            best = choose_best(paths, src)
+            best_table[src][dst] = best  # 只保留路径list 或 None
 
-            def dfs(u, path):
-                if u == src:
-                    all_paths.append(path[::-1])
-                else:
-                    for p in parents[u]:
-                        dfs(p, path + [u])
-
-            dfs(dest, [dest])
-
-            # 找逻辑长度最短
-            def logical_length(path):
-                g = []
-                for u in path:
-                    gu = u // cols
-                    if not g or g[-1] != gu:
-                        g.append(gu)
-                return len(g)
-
-            best = min(all_paths, key=logical_length)
-
-            # 去重连续重复节点
-            comp = [best[0]]
-            for u in best[1:]:
-                if u != comp[-1]:
-                    comp.append(u)
-            # 确保包含 src 和 dest
-            if comp[0] != src:
-                comp.insert(0, src)
-            if comp[-1] != dest:
-                comp.append(dest)
-
-            table[src][dest] = comp
-
-    return table
+    return best_table
 
 
 def visualize_paths(G, shortest_paths):

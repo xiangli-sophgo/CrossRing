@@ -75,7 +75,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, cdma_map,
     # 初始化流量生成器(默认读128ns+写128ns)
     data_all = []
 
-    def generate_entries(src_map, dest_map, operation, burst, flow_type, speed, interval_count, dest_access_mode="round_robin", overlap=True):
+    def generate_entries(src_map, dest_map, operation, burst, flow_type, speed, interval_count, dest_access_mode="random", overlap=True):
         """
         生成指定模式的流量条目，确保同一时刻所有dest都有访问
 
@@ -326,7 +326,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, cdma_map,
                 data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
 
     elif topo == "3x3":
-        if flow_type == 3:
+        if flow_type == 5:
             mix_ratios = mix_ratios or {0: 0.4, 1: 0.4, 2: 0.2}
             data_all.extend(generate_mixed_entries(sdma_map, "sdma", "ddr", ddr_map, "R", burst, mix_ratios))
             data_all.extend(generate_mixed_entries(sdma_map, "sdma", "l2m", l2m_map, "W", burst, mix_ratios))
@@ -350,6 +350,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, cdma_map,
             # 保持原有的逻辑
             # data_all.extend(generate_entries(gdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             data_all.extend(generate_entries(gdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # 添加CDMA相关的基础流量
             if cdma_map:
                 data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
@@ -366,7 +367,7 @@ if __name__ == "__main__":
     TOPO = "3x3"
     INTERVAL_COUNT = 50
     FILE_NAME = "../../test_data/test1.txt"
-    np.random.seed(616)
+    np.random.seed(715)
 
     if TOPO == "5x4":
         BURST = 4
@@ -447,11 +448,12 @@ if __name__ == "__main__":
         }
         GDMA_MAP = {
             "gdma_0": [
-                2,
+                # 2,
                 # 2,
                 # 6,
                 # 8,
             ],
+            "gdma_1": list(range(10)),
         }
         CDMA_MAP = {
             # "cdma_0": [0, 2, 6, 8],
@@ -461,10 +463,11 @@ if __name__ == "__main__":
                 # 1,
                 # 2,
                 # 3,
-                7,
+                # 1,
                 # 6,
                 # 8,
             ],
+            "ddr_1": list(range(10)),
             # "ddr_1": [0, 2, 3, 5, 6, 8],
             # "ddr_2": [3, 5],
             # "ddr_3": [3, 5],
@@ -480,6 +483,6 @@ if __name__ == "__main__":
     overlap = 1
 
     # 生成数据，使用flow_type=4启用自定义映射
-    generate_data(TOPO, INTERVAL_COUNT, FILE_NAME, SDMA_MAP, GDMA_MAP, CDMA_MAP, DDR_MAP, L2M_MAP, SPEED, BURST, flow_type=2, overlap=overlap, custom_mapping=CUSTOM_MAPPING)
+    generate_data(TOPO, INTERVAL_COUNT, FILE_NAME, SDMA_MAP, GDMA_MAP, CDMA_MAP, DDR_MAP, L2M_MAP, SPEED, BURST, flow_type=3, overlap=overlap, custom_mapping=CUSTOM_MAPPING)
 
     print(f"Traffic data generated successfully! {FILE_NAME}")

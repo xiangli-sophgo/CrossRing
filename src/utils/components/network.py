@@ -412,7 +412,7 @@ class Network:
         self.links[link][slice_index] = flit
 
     def can_move_to_next(self, flit, current, next_node):
-        # 1. flit不进入Cross Poing
+        # 1. flit不进入Cross Point
         if flit.source - flit.destination == self.config.NUM_COL:
             return len(self.inject_queues["EQ"]) < self.config.IQ_OUT_FIFO_DEPTH
         elif current - next_node == self.config.NUM_COL:
@@ -1201,7 +1201,6 @@ class Network:
                 queue_pre[next_node] = flit
                 flit.itag_v = False
                 return True
-
 
     @property
     def rn_positions(self):
