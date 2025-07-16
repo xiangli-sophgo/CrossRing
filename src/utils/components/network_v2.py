@@ -154,9 +154,7 @@ class Network:
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}
         self.ETag_BOTHSIDE_UPGRADE = False
 
-        for ip_pos in set(
-            config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST
-        ):
+        for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
             self.cross_point["horizontal"][ip_pos]["TL"] = [None] * 2
             self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2
@@ -196,20 +194,14 @@ class Network:
                         self.round_robin[key][ch_name][ip_pos] = deque([0, 1, 2, 3])
                         self.round_robin[key][ch_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3])
                 else:  # RB仲裁
-                    # 扩展RB仲裁队列以支持6个输入源：
+                    # 扩展RB仲裁队列以支持4个输入源：
                     # 0: TL_in (横向环左向输入)
                     # 1: TR_in (横向环右向输入)
-                    # 2: IQ_TU (IQ的TU输出)
-                    # 3: IQ_TD (IQ的TD输出)
-                    # 4: TU_in (纵向环上行输入) - 新增
-                    # 5: TD_in (纵向环下行输入) - 新增
+                    # 2: TU_in (纵向环上行输入) - 新增
+                    # 3: TD_in (纵向环下行输入) - 新增
                     for fifo_name in ["TU_out", "TD_out", "EQ_out", "TR_out", "TL_out"]:
-                        self.round_robin[key][fifo_name][ip_pos] = deque([0, 1, 2, 3, 4, 5])
-                        self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3, 4, 5])
-                        # 新增：横向环输出方向的仲裁
-                        # for fifo_name in ["TL", "TR"]:
-                        # self.round_robin[key][fifo_name][ip_pos] = deque([0, 1, 2, 3, 4, 5])
-                        # self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3, 4, 5])
+                        self.round_robin[key][fifo_name][ip_pos] = deque([0, 1, 2, 3])
+                        self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3])
 
             self.inject_time[ip_pos] = []
             self.eject_time[ip_pos - config.NUM_COL] = []
@@ -290,9 +282,7 @@ class Network:
                     self.excess_ITag_to_remove[direction][pos] = 0
 
         # 为所有IP位置初始化ITag相关字典，确保update_excess_ITag方法不会出现KeyError
-        all_ip_positions = set(
-            config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST
-        )
+        all_ip_positions = set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST)
         for ip_pos in all_ip_positions:
             for direction in ["TL", "TR", "TU", "TD"]:
                 if ip_pos not in self.remain_tag[direction]:
@@ -485,6 +475,7 @@ class Network:
 
         # 随机选择位置放置RB only tag
         if available_positions:
+            # num_to_place = min(self.config.RB_ONLY_TAG_NUM_PER_RING, len(available_positions) // 2)
             num_to_place = min(self.config.RB_ONLY_TAG_NUM_PER_RING, len(available_positions))
             selected_positions = random.sample(available_positions, num_to_place)
 
@@ -562,51 +553,125 @@ class Network:
         # 1. flit不进入Cross Point
         if flit.source - flit.destination == self.config.NUM_COL:
             return len(self.inject_queues["EQ"]) < self.config.IQ_OUT_FIFO_DEPTH
+        # 2. flit注入纵向环。 v2 IQ可以直接向纵向环注入flit
         elif current - next_node == self.config.NUM_COL:
-            # 向 Ring Bridge 移动. v1.3 在IQ中分TU和TD两个FIFO
-            if len(flit.path) > 2 and flit.path[2] - flit.path[1] == self.config.NUM_COL * 2:
-                return len(self.inject_queues["TD"][current]) < self.config.IQ_OUT_FIFO_DEPTH
-            elif len(flit.path) > 2 and flit.path[2] - flit.path[1] == -self.config.NUM_COL * 2:
-                return len(self.inject_queues["TU"][current]) < self.config.IQ_OUT_FIFO_DEPTH
-            else:
+            if len(flit.path) <= 2:
                 raise Exception(f"Invalid path: {flit.path}")
+            direction = "TD" if flit.path[2] - flit.path[1] == self.config.NUM_COL * 2 else "TU"
+            link = (flit.path[1], flit.path[2])
+            # if len(flit.path) > 2 and flit.path[2] - flit.path[1] == self.config.NUM_COL * 2:
+            #     return len(self.inject_queues["TD"][current]) < self.config.IQ_OUT_FIFO_DEPTH
+            # elif len(flit.path) > 2 and flit.path[2] - flit.path[1] == -self.config.NUM_COL * 2:
+            #     return len(self.inject_queues["TU"][current]) < self.config.IQ_OUT_FIFO_DEPTH
+            if self.links[link][0] is not None:
+                if (
+                    self.links_tag[link][0] is None
+                    and flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_V
+                    and self.tagged_counter[direction][current] < self.config.ITag_MAX_NUM_V
+                    and self.itag_req_counter[direction][current] > 0
+                    and self.remain_tag[direction][current] > 0
+                ):
+                    # 创建ITag标记
+                    self.remain_tag[direction][current] -= 1
+                    self.tagged_counter[direction][current] += 1
+                    self.links_tag[link][0] = [current, direction]
+                    flit.itag_h = True
+                return False
+            else:  # Link空闲
+                if self.links_tag[link][0] is None:  # 无预约
+                    flit.path_index += 1
+                    return True  # 直接上环
+                else:  # 有预约
+                    if self.links_tag[link][0] == [current, direction]:  # 是自己的预约
+                        # 使用预约（内联逻辑）
+                        self.links_tag[link][0] = None
+                        self.remain_tag[direction][current] += 1  # 修复：使用direction
+                        self.tagged_counter[direction][current] -= 1
+                        return True
+            return False
+        # 2. flit注入横向环
+        else:
+            direction = "TR" if next_node == current + 1 else "TL"
+            link = (current, next_node)
 
-        direction = "TR" if next_node == current + 1 else "TL"
-        link = (current, next_node)
+            # 横向环ITag处理
+            if self.links[link][0] is not None:  # Link被占用
+                # 检查是否需要标记ITag
+                if (
+                    self.links_tag[link][0] is None
+                    and flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H
+                    and self.tagged_counter[direction][current] < self.config.ITag_MAX_NUM_H
+                    and self.itag_req_counter[direction][current] > 0
+                    and self.remain_tag[direction][current] > 0
+                ):
+                    # 创建ITag标记
+                    self.remain_tag[direction][current] -= 1
+                    self.tagged_counter[direction][current] += 1
+                    self.links_tag[link][0] = [current, direction]
+                    flit.itag_h = True
+                return False
 
-        # RB_ONLY 不能上环
-        if self.links_tag[link][0] == "RB_ONLY":
+            else:  # Link空闲
+                if self.links_tag[link][0] is None:  # 无预约
+                    return True  # 直接上环
+                else:  # 有预约
+                    if self.links_tag[link][0] == [current, direction]:  # 是自己的预约
+                        # 使用预约（内联逻辑）
+                        self.links_tag[link][0] = None
+                        self.remain_tag[direction][current] += 1  # 修复：使用direction
+                        self.tagged_counter[direction][current] -= 1
+                        return True
             return False
 
-        # 横向环ITag处理
-        if self.links[link][0] is not None:  # Link被占用
-            # 检查是否需要标记ITag（内联所有检查逻辑）
-            if (
-                self.links_tag[link][0] is None
-                and flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H
-                and self.tagged_counter[direction][current] < self.config.ITag_MAX_NUM_H
-                and self.itag_req_counter[direction][current] > 0
-                and self.remain_tag[direction][current] > 0
-            ):
+    # def can_move_to_next(self, flit, current, next_node):
+    #     # 1. flit不进入Cross Point
+    #     if flit.source - flit.destination == self.config.NUM_COL:
+    #         return len(self.inject_queues["EQ"]) < self.config.IQ_OUT_FIFO_DEPTH
+    #     elif current - next_node == self.config.NUM_COL:
+    #         # 向 Ring Bridge 移动. v1.3 在IQ中分TU和TD两个FIFO
+    #         if len(flit.path) > 2 and flit.path[2] - flit.path[1] == self.config.NUM_COL * 2:
+    #             return len(self.inject_queues["TD"][current]) < self.config.IQ_OUT_FIFO_DEPTH
+    #         elif len(flit.path) > 2 and flit.path[2] - flit.path[1] == -self.config.NUM_COL * 2:
+    #             return len(self.inject_queues["TU"][current]) < self.config.IQ_OUT_FIFO_DEPTH
+    #         else:
+    #             raise Exception(f"Invalid path: {flit.path}")
 
-                # 创建ITag标记（内联逻辑）
-                self.remain_tag[direction][current] -= 1
-                self.tagged_counter[direction][current] += 1
-                self.links_tag[link][0] = [current, direction]
-                flit.itag_h = True
-            return False
+    #     direction = "TR" if next_node == current + 1 else "TL"
+    #     link = (current, next_node)
 
-        else:  # Link空闲
-            if self.links_tag[link][0] is None:  # 无预约
-                return True  # 直接上环
-            else:  # 有预约
-                if self.links_tag[link][0] == [current, direction]:  # 是自己的预约
-                    # 使用预约（内联逻辑）
-                    self.links_tag[link][0] = None
-                    self.remain_tag[direction][current] += 1  # 修复：使用direction
-                    self.tagged_counter[direction][current] -= 1
-                    return True
-        return False
+    #     # # RB_ONLY 不能上环
+    #     # if self.links_tag[link][0] == "RB_ONLY":
+    #     #     return False
+
+    #     # 横向环ITag处理
+    #     if self.links[link][0] is not None:  # Link被占用
+    #         # 检查是否需要标记ITag（内联所有检查逻辑）
+    #         if (
+    #             self.links_tag[link][0] is None
+    #             and flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H
+    #             and self.tagged_counter[direction][current] < self.config.ITag_MAX_NUM_H
+    #             and self.itag_req_counter[direction][current] > 0
+    #             and self.remain_tag[direction][current] > 0
+    #         ):
+
+    #             # 创建ITag标记（内联逻辑）
+    #             self.remain_tag[direction][current] -= 1
+    #             self.tagged_counter[direction][current] += 1
+    #             self.links_tag[link][0] = [current, direction]
+    #             flit.itag_h = True
+    #         return False
+
+    #     else:  # Link空闲
+    #         if self.links_tag[link][0] is None:  # 无预约
+    #             return True  # 直接上环
+    #         else:  # 有预约
+    #             if self.links_tag[link][0] == [current, direction]:  # 是自己的预约
+    #                 # 使用预约（内联逻辑）
+    #                 self.links_tag[link][0] = None
+    #                 self.remain_tag[direction][current] += 1  # 修复：使用direction
+    #                 self.tagged_counter[direction][current] -= 1
+    #                 return True
+    #     return False
 
     def update_excess_ITag(self):
         """在主循环中调用，处理多余ITag释放"""
@@ -1605,11 +1670,7 @@ class Network:
                             flit.is_on_station = True
                             return False
 
-                    if (
-                        direction in self.ring_bridge.keys()
-                        and len(self.ring_bridge[direction][flit.current_link]) < max_depth
-                        and self.ring_bridge_pre[direction][flit.current_link] is None
-                    ):
+                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth and self.ring_bridge_pre[direction][flit.current_link] is None:
                         self.ring_bridge_pre[direction][flit.current_link] = flit
                         flit.is_on_station = True
             return False

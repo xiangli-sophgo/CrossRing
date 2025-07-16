@@ -149,6 +149,13 @@ class CrossRingConfig:
             self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
             self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
             self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        elif topo_type == "4x2":
+            self.NUM_ROW = self.NUM_NODE // self.NUM_COL
+            self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
         elif topo_type == "5x4":
             self.NUM_NODE = 40
             self.NUM_COL = 4

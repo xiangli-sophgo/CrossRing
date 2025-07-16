@@ -1094,32 +1094,33 @@ class BaseModel:
         channel_type = getattr(flit, 'flit_type', 'req')  # 默认为req
         
         # 更新RB总数据量统计（所有经过的flit，无论ETag等级）
-        if pos in self.RB_total_flits_per_node:
-            self.RB_total_flits_per_node[pos][direction] += 1
-        
-        # 更新按通道分类的RB总数据量统计
-        if pos in self.RB_total_flits_per_channel.get(channel_type, {}):
-            self.RB_total_flits_per_channel[channel_type][pos][direction] += 1
-        
-        if flit.ETag_priority == "T1":
-            self.RB_ETag_T1_num_stat += 1
-            # Update per-node FIFO statistics
-            if pos in self.RB_ETag_T1_per_node_fifo:
-                self.RB_ETag_T1_per_node_fifo[pos][direction] += 1
+        if direction != "EQ":
+            if pos in self.RB_total_flits_per_node:
+                self.RB_total_flits_per_node[pos][direction] += 1
             
-            # Update per-channel statistics
-            if pos in self.RB_ETag_T1_per_channel.get(channel_type, {}):
-                self.RB_ETag_T1_per_channel[channel_type][pos][direction] += 1
+            # 更新按通道分类的RB总数据量统计
+            if pos in self.RB_total_flits_per_channel.get(channel_type, {}):
+                self.RB_total_flits_per_channel[channel_type][pos][direction] += 1
+            
+            if flit.ETag_priority == "T1":
+                self.RB_ETag_T1_num_stat += 1
+                # Update per-node FIFO statistics
+                if pos in self.RB_ETag_T1_per_node_fifo:
+                    self.RB_ETag_T1_per_node_fifo[pos][direction] += 1
                 
-        elif flit.ETag_priority == "T0":
-            self.RB_ETag_T0_num_stat += 1
-            # Update per-node FIFO statistics
-            if pos in self.RB_ETag_T0_per_node_fifo:
-                self.RB_ETag_T0_per_node_fifo[pos][direction] += 1
-            
-            # Update per-channel statistics
-            if pos in self.RB_ETag_T0_per_channel.get(channel_type, {}):
-                self.RB_ETag_T0_per_channel[channel_type][pos][direction] += 1
+                # Update per-channel statistics
+                if pos in self.RB_ETag_T1_per_channel.get(channel_type, {}):
+                    self.RB_ETag_T1_per_channel[channel_type][pos][direction] += 1
+                    
+            elif flit.ETag_priority == "T0":
+                self.RB_ETag_T0_num_stat += 1
+                # Update per-node FIFO statistics
+                if pos in self.RB_ETag_T0_per_node_fifo:
+                    self.RB_ETag_T0_per_node_fifo[pos][direction] += 1
+                
+                # Update per-channel statistics
+                if pos in self.RB_ETag_T0_per_channel.get(channel_type, {}):
+                    self.RB_ETag_T0_per_channel[channel_type][pos][direction] += 1
 
         flit.ETag_priority = "T2"
         # flit.used_entry_level = None

@@ -199,11 +199,7 @@ class BaseModel:
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST
-            + self.config.SDMA_SEND_POSITION_LIST
-            + self.config.CDMA_SEND_POSITION_LIST
-            + self.config.DDR_SEND_POSITION_LIST
-            + self.config.L2M_SEND_POSITION_LIST
+            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
         )
 
         # 缓存位置列表以避免重复转换
@@ -688,11 +684,7 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(
-                f"Data statistic: Read: {self.read_req, self.read_flit}, "
-                f"Write: {self.write_req, self.write_flit}, "
-                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
-            )
+            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
         if self.verbose:
@@ -708,7 +700,7 @@ class BaseModel:
         return flits
 
     def _try_inject_to_direction(self, req: Flit, ip_type, ip_pos, direction, counts):
-        """检查tracker空间并尝试注入到指定direction的pre缓冲"""
+        """注入到指定direction的pre缓冲"""
         # 直接注入到指定direction的pre缓冲
         queue_pre = self.req_network.inject_queues_pre[direction]
         queue_pre[ip_pos] = req
@@ -717,7 +709,7 @@ class BaseModel:
         self.req_network.IQ_channel_buffer[ip_type][ip_pos].popleft()
 
         # 更新计数和状态
-        if req.req_attr == "new":  # 只有新请求才更新计数器和tracker
+        if req.req_attr == "new":  # 只有新请求才更新计数器
             if req.req_type == "read":
                 counts["read"] += 1
 
@@ -1057,14 +1049,11 @@ class BaseModel:
                 # 新增2个输入源：TU纵向环输入, TD纵向环输入（来自ring_bridge_input）
                 station_flits = (
                     [network.ring_bridge[f"{fifo_name}_in"][(pos, next_pos)][0] if network.ring_bridge[f"{fifo_name}_in"][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]]
-                    + [
-                        network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
-                        for fifo_name in ["TU", "TD"]
-                    ]
-                    + [
-                        network.ring_bridge[f"{fifo_name}_in"][(next_pos, pos)][0] if network.ring_bridge[f"{fifo_name}_in"][(next_pos, pos)] else None
-                        for fifo_name in ["TU", "TD"]
-                    ]
+                    # + [
+                    #     network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
+                    #     for fifo_name in ["TU", "TD"]
+                    # ]
+                    + [network.ring_bridge[f"{fifo_name}_in"][(next_pos, pos)][0] if network.ring_bridge[f"{fifo_name}_in"][(next_pos, pos)] else None for fifo_name in ["TU", "TD"]]
                 )
 
                 # 处理本地弹出EQ操作（支持6个输入源的仲裁）
@@ -1305,13 +1294,13 @@ class BaseModel:
                 network.RB_UE_Counters["TR"][(pos, next_pos)]["T1"] -= 1
             elif flit.used_entry_level == "T2":
                 network.RB_UE_Counters["TR"][(pos, next_pos)]["T2"] -= 1
+        # elif index == 2:
+        #     # TU注入队列输入
+        #     flit = network.inject_queues["TU"][pos].popleft()
+        # elif index == 3:
+        #     # TD注入队列输入
+        #     flit = network.inject_queues["TD"][pos].popleft()
         elif index == 2:
-            # TU注入队列输入
-            flit = network.inject_queues["TU"][pos].popleft()
-        elif index == 3:
-            # TD注入队列输入
-            flit = network.inject_queues["TD"][pos].popleft()
-        elif index == 4:
             # TU纵向环输入（新增）
             flit = network.ring_bridge["TU_in"][(next_pos, pos)].popleft()
             if flit.used_entry_level == "T0":
@@ -1320,7 +1309,7 @@ class BaseModel:
                 network.RB_UE_Counters["TU"][(next_pos, pos)]["T1"] -= 1
             elif flit.used_entry_level == "T2":
                 network.RB_UE_Counters["TU"][(next_pos, pos)]["T2"] -= 1
-        elif index == 5:
+        elif index == 3:
             # TD纵向环输入（新增）
             flit = network.ring_bridge["TD_in"][(next_pos, pos)].popleft()
             if flit.used_entry_level == "T1":
@@ -1405,11 +1394,7 @@ class BaseModel:
 
             # 只在Ring Bridge位置添加RB EQ队列（奇数行）
             if (in_pos // self.config.NUM_COL) % 2 == 1:  # 检查是否为RB位置
-                rb_eq_flit = (
-                    network.ring_bridge["EQ_out"][(in_pos, ip_pos)][0]
-                    if (in_pos, ip_pos) in network.ring_bridge["EQ_out"] and network.ring_bridge["EQ_out"][(in_pos, ip_pos)]
-                    else None
-                )
+                rb_eq_flit = network.ring_bridge["EQ_out"][(in_pos, ip_pos)][0] if (in_pos, ip_pos) in network.ring_bridge["EQ_out"] and network.ring_bridge["EQ_out"][(in_pos, ip_pos)] else None
                 eject_flits = eject_flits + [rb_eq_flit]
             else:
                 eject_flits = eject_flits + [None]
@@ -1730,11 +1715,13 @@ class BaseModel:
                     flits.append(flit)
 
                     # 生成Reduce_ITag_Req信号
-                    if flit.itag_h and direction not in ["EQ", "TU", "TD"]:
+                    # if flit.itag_h and direction not in ["EQ", "TU", "TD"]:
+                    if flit.itag_h and direction not in ["EQ",]:
                         network.itag_req_counter[direction][ip_pos] -= 1
                         flit.itag_h = False
 
-                    if direction in ["EQ", "TU", "TD"]:
+                    # if direction in ["EQ", "TU", "TD"]:
+                    if direction in ["EQ", ]:
                         queue.appendleft(flit)
                         flit.itag_h = False
                 else:

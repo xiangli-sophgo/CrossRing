@@ -350,7 +350,7 @@ def generate_data(topo, interval_count, file_name, sdma_map, gdma_map, cdma_map,
             # 保持原有的逻辑
             # data_all.extend(generate_entries(gdma_map, l2m_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             data_all.extend(generate_entries(gdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
-            data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
+            # data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed[burst], interval_count, overlap=overlap))
             # 添加CDMA相关的基础流量
             if cdma_map:
                 data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed[burst], interval_count, overlap=overlap))
@@ -448,26 +448,26 @@ if __name__ == "__main__":
         }
         GDMA_MAP = {
             "gdma_0": [
-                # 2,
+                3,
                 # 2,
                 # 6,
                 # 8,
             ],
-            "gdma_1": list(range(10)),
+            # "gdma_1": list(range(10)),
         }
         CDMA_MAP = {
             # "cdma_0": [0, 2, 6, 8],
         }
         DDR_MAP = {
             "ddr_0": [
-                # 1,
+                4,
                 # 2,
                 # 3,
                 # 1,
                 # 6,
                 # 8,
             ],
-            "ddr_1": list(range(10)),
+            # "ddr_1": list(range(10)),
             # "ddr_1": [0, 2, 3, 5, 6, 8],
             # "ddr_2": [3, 5],
             # "ddr_3": [3, 5],

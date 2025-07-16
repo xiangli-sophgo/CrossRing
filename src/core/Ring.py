@@ -24,7 +24,7 @@ class RingConfig(CrossRingConfig):
         super().__init__()
 
         # Ring特有参数
-        self.RING_NUM_NODE = 8
+        self.RING_NUM_NODE = 10
         self.TOPO_TYPE = f"Ring_{self.RING_NUM_NODE}"
 
         # 路由策略配置
@@ -37,17 +37,17 @@ class RingConfig(CrossRingConfig):
         self.NUM_IP = 16
         self.RN_R_TRACKER_OSTD = 64
         self.RN_W_TRACKER_OSTD = 32
-        self.RN_RDB_SIZE = self.RN_R_TRACKER_OSTD * self.BURST
-        self.RN_WDB_SIZE = self.RN_W_TRACKER_OSTD * self.BURST
         self.SN_DDR_R_TRACKER_OSTD = 96
         self.SN_DDR_W_TRACKER_OSTD = 48
         self.SN_L2M_R_TRACKER_OSTD = 96
         self.SN_L2M_W_TRACKER_OSTD = 48
+        self.RN_RDB_SIZE = self.RN_R_TRACKER_OSTD * self.BURST
+        self.RN_WDB_SIZE = self.RN_W_TRACKER_OSTD * self.BURST
         self.SN_DDR_WDB_SIZE = self.SN_DDR_W_TRACKER_OSTD * self.BURST
         self.SN_L2M_WDB_SIZE = self.SN_L2M_W_TRACKER_OSTD * self.BURST
         self.DDR_R_LATENCY_original = 100
         self.DDR_R_LATENCY_VAR_original = 0
-        self.DDR_W_LATENCY_original = 0
+        self.DDR_W_LATENCY_original = 40
         self.L2M_R_LATENCY_original = 12
         self.L2M_W_LATENCY_original = 16
         self.IQ_CH_FIFO_DEPTH = 10
@@ -56,7 +56,7 @@ class RingConfig(CrossRingConfig):
         self.RB_OUT_FIFO_DEPTH = 8
         self.SN_TRACKER_RELEASE_LATENCY = 40
         self.CDMA_BW_LIMIT = 8
-        self.DDR_BW_LIMIT = 80
+        self.DDR_BW_LIMIT = 102
 
         self.TL_Etag_T2_UE_MAX = 8
         self.TL_Etag_T1_UE_MAX = 15
@@ -150,17 +150,30 @@ class RingModel(BaseModel):
         self.initial()
 
     def node_map(self, node, is_source=True):
-        # node_map_dict = {0: 0, 1: 9, 2: 1, 3: 8, 4: 2, 5: 7, 6: 3, 7: 6, 8: 4, 9: 5}
-        node_map_dict = {
-            0: 0,
-            1: 7,
-            2: 1,
-            3: 6,
-            4: 2,
-            5: 5,
-            6: 3,
-            7: 4,
-        }
+        if self.config.RING_NUM_NODE == 10:
+            node_map_dict = {
+                0: 0,
+                1: 9,
+                2: 1,
+                3: 8,
+                4: 2,
+                5: 7,
+                6: 3,
+                7: 6,
+                8: 4,
+                9: 5,
+            }
+        elif self.config.RING_NUM_NODE == 8:
+            node_map_dict = {
+                0: 0,
+                1: 7,
+                2: 1,
+                3: 6,
+                4: 2,
+                5: 5,
+                6: 3,
+                7: 4,
+            }
         return node_map_dict[node]
 
     def _create_simple_routing_strategy(self):
@@ -194,19 +207,66 @@ class RingModel(BaseModel):
                 else:
                     return "CCW"  # 逆时针
 
+            # def _get_load_balanced_direction(self, source, destination):
+            #     """负载均衡策略：仅对正对节点（对角）按奇偶分流，其他一律走最短路径"""
+            #     if self.config.LOAD_BALANCE_POLICY != "even_cw_odd_ccw":
+            #         return self._get_shortest_path_direction(source, destination)
+
+            #     ring_size = self.config.RING_NUM_NODE
+
+            #     # 计算顺时针和逆时针距离
+            #     cw_distance = min((destination - source + ring_size) % ring_size, (ring_size - 2) // 2)
+            #     ccw_distance = min((source - destination + ring_size) % ring_size, (ring_size - 2) // 2)
+
+            #     # 只有在偶数节点环，且正对（距离恰好为 ring_size/2）时才用奇偶分流
+            #     # if ring_size % 2 == 0 and cw_distance == ring_size // 2:
+            #     if ring_size % 2 == 0 and min(cw_distance, ccw_distance) == (ring_size - 2) // 2:
+            #         # 正对节点：偶数源节点走顺时针，奇数源节点走逆时针
+            #         return "CW" if (source % 2 == 0) else "CCW"
+
+            #     # 其他情况：始终选择最短方向
+            #     return "CW" if cw_distance < ccw_distance else "CCW"
             def _get_load_balanced_direction(self, source, destination):
                 """负载均衡策略：仅对正对节点（对角）按奇偶分流，其他一律走最短路径"""
                 if self.config.LOAD_BALANCE_POLICY != "even_cw_odd_ccw":
                     return self._get_shortest_path_direction(source, destination)
 
-                ring_size = self.config.RING_NUM_NODE  # 节点总数，比如 10
+                ring_size = self.config.RING_NUM_NODE
+
+                # 计算顺时针和逆时针路径经过的节点
+                def get_ring_path_nodes(start, end, direction):
+                    nodes = []
+                    if direction == "CW":
+                        i = start
+                        while i != end:
+                            nodes.append(i)
+                            i = (i + 1) % ring_size
+                        nodes.append(end)
+                    else:  # CCW
+                        i = start
+                        while i != end:
+                            nodes.append(i)
+                            i = (i - 1 + ring_size) % ring_size
+                        nodes.append(end)
+                    return nodes
+
+                special_nodes = {ring_size // 2, ring_size // 2 - 1}
 
                 # 计算顺时针和逆时针距离
                 cw_distance = (destination - source + ring_size) % ring_size
                 ccw_distance = (source - destination + ring_size) % ring_size
 
+                # 检查路径是否经过特殊节点
+                cw_path = get_ring_path_nodes(source, destination, "CW")
+                ccw_path = get_ring_path_nodes(source, destination, "CCW")
+
+                if special_nodes & set(cw_path):
+                    cw_distance -= 2
+                if special_nodes & set(ccw_path):
+                    ccw_distance -= 2
+
                 # 只有在偶数节点环，且正对（距离恰好为 ring_size/2）时才用奇偶分流
-                if ring_size % 2 == 0 and cw_distance == ring_size // 2:
+                if ring_size % 2 == 0 and min(cw_distance, ccw_distance) == (ring_size - 2) // 2:
                     # 正对节点：偶数源节点走顺时针，奇数源节点走逆时针
                     return "CW" if (source % 2 == 0) else "CCW"
 
@@ -691,7 +751,7 @@ class RingModel(BaseModel):
 
 
 # 便捷的工厂函数
-def create_ring_model(num_nodes: int = 8, routing_strategy: str = "load_balanced", model_type: str = "REQ_RSP", **kwargs) -> RingModel:
+def create_ring_model(routing_strategy: str = "load_balanced", model_type: str = "REQ_RSP", **kwargs) -> RingModel:
     """
     创建Ring模型的便捷函数
 
@@ -705,7 +765,7 @@ def create_ring_model(num_nodes: int = 8, routing_strategy: str = "load_balanced
         RingModel: 配置好的Ring模型实例
     """
     config = RingConfig()  # 使用默认配置，避免文件路径问题
-    config.RING_NUM_NODE = num_nodes
+    num_nodes = config.RING_NUM_NODE
     config.ROUTING_STRATEGY = routing_strategy
 
     topo_type = f"Ring_{num_nodes}"
@@ -728,14 +788,16 @@ def create_ring_model(num_nodes: int = 8, routing_strategy: str = "load_balanced
 if __name__ == "__main__":
     # 创建8节点Ring，使用负载均衡路由
     ring_model = create_ring_model(
-        num_nodes=8,
         routing_strategy="load_balanced",
         traffic_file_path="../../traffic/0617",
         # traffic_file_path="../../test_data",
         traffic_config=[
             [
-                "W_5x2.txt",
+                # "test1.txt",
+                "R_5x2.txt",
+                # "W_5x2.txt",
                 # "Read_burst4_2262HBM_v2.txt",
+                # "Write_burst4_2262HBM_v2.txt",
             ],
         ],
         print_trace=0,

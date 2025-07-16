@@ -19,8 +19,7 @@ from src.core.base_model_v2 import BaseModel
 from src.utils.components.route_table import RouteTable
 
 
-def run_bidirectional_rb_demo():
-
+def run_CR_v2_demo():
     # 创建配置
     print("\n初始化配置...")
     config = CrossRingConfig()
@@ -51,7 +50,7 @@ def run_bidirectional_rb_demo():
     config.SN_TRACKER_RELEASE_LATENCY = 40
     config.CDMA_BW_LIMIT = 8
     config.DDR_BW_LIMIT = 102
-    config.RB_ONLY_TAG_NUM_PER_RING = 6
+    config.RB_ONLY_TAG_NUM_PER_RING = 8
 
     config.TL_Etag_T2_UE_MAX = 8
     config.TL_Etag_T1_UE_MAX = 15
@@ -76,7 +75,6 @@ def run_bidirectional_rb_demo():
         "ddr": 2,
         "l2m": 2,
     }
-
     print(f"   拓扑: {config.NUM_ROW}x{config.NUM_COL} ({config.NUM_NODE}个节点)")
     print(f"   IP节点数: {config.NUM_IP}")
     print(f"   RB输入FIFO深度: {config.RB_IN_FIFO_DEPTH}")
@@ -91,22 +89,29 @@ def run_bidirectional_rb_demo():
         config=config,
         topo_type="5x2",
         traffic_file_path=f"../traffic/0617",
-        traffic_config=[["Read_burst4_2262HBM_v2.txt"]],
+        traffic_config=[
+            # ["Read_burst4_2262HBM_v2.txt"],
+            [
+                # "Read_burst4_2262HBM_v2.txt",
+                # "Write_burst4_2262HBM_v2.txt",
+                "R_5x2.txt"
+            ],
+        ],
         # traffic_file_path=f"../test_data/",
         # traffic_config=[["test1.txt"]],
         result_save_path=result_dir + "/",
         verbose=1,  # 启用详细输出
         print_trace=0,
-        show_trace_id=0,
-        plot_link_state=1,
+        show_trace_id=1014,
+        plot_link_state=0,
         plot_start_time=600,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
     )
 
     sim.initial()
-    sim.end_time = 3000
-    sim.print_interval = 500
+    # sim.end_time = 6000
+    sim.print_interval = 2000
 
     start_time = time.time()
     sim.run()
@@ -116,6 +121,6 @@ def run_bidirectional_rb_demo():
 
 
 if __name__ == "__main__":
+    np.random.seed(716)
     print("启动CrossRing v2.0:")
-
-    results = run_bidirectional_rb_demo()
+    results = run_CR_v2_demo()

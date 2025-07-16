@@ -280,6 +280,9 @@ def all_pairs_paths_directional(A, cols):
         for i in range(1, len(path)):
             if abs(path[i] - path[i - 1]) != cols:
                 L += 1
+        k = len(A) - 1
+        if k in path and k - 1 in path:
+            L -= 2
         return L
 
     def all_paths(src, dest):
