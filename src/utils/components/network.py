@@ -48,6 +48,8 @@ class Network:
         self.EQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
         self.links = {}
         self.cross_point = {"horizontal": defaultdict(lambda: defaultdict(list)), "vertical": defaultdict(lambda: defaultdict(list))}
+        # Crosspoint conflict status: maintains pipeline queue [current_cycle, previous_cycle]
+        self.crosspoint_conflict = {"horizontal": defaultdict(lambda: defaultdict(lambda: [False, False])), "vertical": defaultdict(lambda: defaultdict(lambda: [False, False]))}
         self.links_flow_stat = {"read": {}, "write": {}}
         # ITag setup
         self.links_tag = {}
@@ -427,10 +429,19 @@ class Network:
         direction = "TR" if next_node == current + 1 else "TL"
         link = (current, next_node)
 
-        # 横向环ITag处理
-        if self.links[link][0] is not None:  # Link被占用
+        # 横向环处理
+        link_occupied = self.links[link][0] is not None
+        
+        # 检查crosspoint冲突（如果启用了此功能）
+        crosspoint_conflict = False
+        if hasattr(self.config, 'ENABLE_CROSSPOINT_CONFLICT_CHECK') and self.config.ENABLE_CROSSPOINT_CONFLICT_CHECK:
+            # Use the last element of the pipeline queue (previous cycle's conflict status)
+            crosspoint_conflict = self.crosspoint_conflict["horizontal"][current][direction][-1]
+        
+        if link_occupied or crosspoint_conflict:  # Link被占用或crosspoint冲突
             # 检查是否需要标记ITag（内联所有检查逻辑）
             if (
+                link_occupied and  # 只有当link被实际占用时才标记ITag
                 self.links_tag[link][0] is None
                 and flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H
                 and self.tagged_counter[direction][current] < self.config.ITag_MAX_NUM_H
@@ -445,7 +456,7 @@ class Network:
                 flit.itag_h = True
             return False
 
-        else:  # Link空闲
+        else:  # Link空闲且无crosspoint冲突
             if self.links_tag[link][0] is None:  # 无预约
                 return True  # 直接上环
             else:  # 有预约
@@ -479,10 +490,34 @@ class Network:
             right_pos = ip_pos + 1 if ip_pos % self.config.NUM_COL != self.config.NUM_COL - 1 else ip_pos
             up_pos = ip_pos - self.config.NUM_COL * 3 if ip_pos // self.config.NUM_COL != 1 else ip_pos - self.config.NUM_COL
             down_pos = ip_pos + self.config.NUM_COL * 1 if ip_pos // self.config.NUM_COL != self.config.NUM_ROW - 1 else ip_pos - self.config.NUM_COL
+            
+            # Update cross point connections
             self.cross_point["horizontal"][ip_pos]["TR"] = [self.links[(left_pos, ip_pos)][-1], self.links[(ip_pos, right_pos)][0]]
             self.cross_point["horizontal"][ip_pos]["TL"] = [self.links[(ip_pos, left_pos)][0], self.links[(right_pos, ip_pos)][-1]]
             self.cross_point["vertical"][ip_pos]["TU"] = [self.links[(down_pos, ip_pos - self.config.NUM_COL)][-1], self.links[(ip_pos - self.config.NUM_COL, up_pos)][0]]
             self.cross_point["vertical"][ip_pos]["TD"] = [self.links[(ip_pos - self.config.NUM_COL, down_pos)][0], self.links[(up_pos, ip_pos - self.config.NUM_COL)][-1]]
+            
+            # Update crosspoint conflict status pipeline queue based on [-1] positions having flits
+            # For horizontal crosspoint conflicts - update pipeline queue
+            new_tr_conflict = self.links[(left_pos, ip_pos)][-1] is not None
+            new_tl_conflict = self.links[(right_pos, ip_pos)][-1] is not None
+            
+            # Insert new state at front and keep queue length = 2
+            self.crosspoint_conflict["horizontal"][ip_pos]["TR"].insert(0, new_tr_conflict)
+            self.crosspoint_conflict["horizontal"][ip_pos]["TR"] = self.crosspoint_conflict["horizontal"][ip_pos]["TR"][:2]
+            
+            self.crosspoint_conflict["horizontal"][ip_pos]["TL"].insert(0, new_tl_conflict)
+            self.crosspoint_conflict["horizontal"][ip_pos]["TL"] = self.crosspoint_conflict["horizontal"][ip_pos]["TL"][:2]
+            
+            # For vertical crosspoint conflicts - update pipeline queue
+            new_tu_conflict = self.links[(down_pos, ip_pos - self.config.NUM_COL)][-1] is not None
+            new_td_conflict = self.links[(up_pos, ip_pos - self.config.NUM_COL)][-1] is not None
+            
+            self.crosspoint_conflict["vertical"][ip_pos]["TU"].insert(0, new_tu_conflict)
+            self.crosspoint_conflict["vertical"][ip_pos]["TU"] = self.crosspoint_conflict["vertical"][ip_pos]["TU"][:2]
+            
+            self.crosspoint_conflict["vertical"][ip_pos]["TD"].insert(0, new_td_conflict)
+            self.crosspoint_conflict["vertical"][ip_pos]["TD"] = self.crosspoint_conflict["vertical"][ip_pos]["TD"][:2]
 
     def plan_move(self, flit, cycle):
         self.cycle = cycle

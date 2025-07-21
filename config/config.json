@@ -34,5 +34,6 @@
     "sn_write_tracker_ostd": 128,
     "sn_wdb_size": 128,
     "network_frequency": 2,
-    "ddr_latency": 150
+    "ddr_latency": 150,
+    "enable_crosspoint_conflict_check": true
 }

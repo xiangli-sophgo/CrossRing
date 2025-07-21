@@ -50,6 +50,7 @@ def run_CR_v2_demo():
     config.SN_TRACKER_RELEASE_LATENCY = 40
     config.CDMA_BW_LIMIT = 8
     config.DDR_BW_LIMIT = 102
+    config.GDMA_BW_LIMIT = 102
     config.RB_ONLY_TAG_NUM_PER_RING = 8
 
     config.TL_Etag_T2_UE_MAX = 8
@@ -94,7 +95,7 @@ def run_CR_v2_demo():
             [
                 # "Read_burst4_2262HBM_v2.txt",
                 # "Write_burst4_2262HBM_v2.txt",
-                "R_5x2.txt"
+                "W_5x2.txt"
             ],
         ],
         # traffic_file_path=f"../test_data/",
@@ -110,7 +111,7 @@ def run_CR_v2_demo():
     )
 
     sim.initial()
-    # sim.end_time = 6000
+    sim.end_time = 6000
     sim.print_interval = 2000
 
     start_time = time.time()

@@ -1158,14 +1158,22 @@ class BaseModel:
         flit = network.ring_bridge[dir_key][(pos, next_pos)][0]
         # self.error_log(flit, 6212, 1)
         # Case 1: No flit in the link
-        if not network.links[link][0]:
-            # Handle empty link cases
+        link_occupied = network.links[link][0] is not None
+        
+        # Check crosspoint conflict for vertical injection (if enabled)
+        crosspoint_conflict = False
+        if hasattr(self.config, 'ENABLE_CROSSPOINT_CONFLICT_CHECK') and self.config.ENABLE_CROSSPOINT_CONFLICT_CHECK:
+            # Use the last element of the pipeline queue (previous cycle's conflict status)
+            crosspoint_conflict = network.crosspoint_conflict["vertical"][pos][direction][-1]
+        
+        if not link_occupied and not crosspoint_conflict:
+            # Handle empty link cases with no crosspoint conflict
             if network.links_tag[link][0] is None:
                 if self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction):
                     return flit
                 return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
-            # Case 2: Has ITag reservation
+            # Case 2: Has ITag reservation (no crosspoint conflict for reservations)
             if network.links_tag[link][0] == [next_pos, direction]:
                 # 使用预约并更新双计数器
                 network.remain_tag[direction][next_pos] += 1
@@ -1176,6 +1184,7 @@ class BaseModel:
                     return flit
                 return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
+        # Case 3: Link occupied or crosspoint conflict - cannot inject
         return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
     def _update_flit_state(self, network: Network, ts_key, ip_pos, next_pos, target_node, direction):

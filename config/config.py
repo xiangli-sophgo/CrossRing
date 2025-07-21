@@ -81,6 +81,8 @@ class CrossRingConfig:
         self.ETag_BOTHSIDE_UPGRADE = args.ETag_BOTHSIDE_UPGRADE
         self.GDMA_RW_GAP = args.GDMA_RW_GAP
         self.SDMA_RW_GAP = args.SDMA_RW_GAP
+        self.ENABLE_CROSSPOINT_CONFLICT_CHECK = args.ENABLE_CROSSPOINT_CONFLICT_CHECK
+        self.CROSSRING_VERSION = args.CROSSRING_VERSION
         self.CHANNEL_SPEC = {
             "gdma": 2,  # → RN 侧
             "sdma": 2,  # → RN 侧
@@ -381,5 +383,7 @@ class CrossRingConfig:
         parser.add_argument("--IP_H2L_FIFO_DEPTH", type=int, default=default_config["IP_H2L_FIFO_DEPTH"], help="IP frequency change h2l fifo depth")
         parser.add_argument("--GDMA_RW_GAP", type=int, default=default_config["GDMA_RW_GAP"], help="GDMA read and write cmd num gap")
         parser.add_argument("--SDMA_RW_GAP", type=int, default=default_config["SDMA_RW_GAP"], help="SDMA read and write cmd num gap")
+        parser.add_argument("--ENABLE_CROSSPOINT_CONFLICT_CHECK", type=bool, default=default_config["ENABLE_CROSSPOINT_CONFLICT_CHECK"], help="Enable crosspoint conflict checking for inject queue")
+        parser.add_argument("--CROSSRING_VERSION", type=str, default=default_config["CROSSRING_VERSION"], help="CrossRing version (V1 or V2)")
 
         return parser.parse_args()

@@ -19,7 +19,7 @@ def main():
     traffic_config = [
         [
             # r"R_5x2.txt",
-            r"W_5x2.txt",
+            # r"W_5x2.txt",
             # r"Read_burst4_2262HBM_v2.txt",
             # r"Write_burst4_2262HBM_v2.txt",
             # r"MLP_MoE.txt",
@@ -29,6 +29,8 @@ def main():
             # r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
             # r"full_bw_R_4x5.txt"
+            # "LLama2_AllReduce.txt"
+            "LLama2_AttentionFC.txt"
         ],
     ]
 
@@ -43,12 +45,13 @@ def main():
 
     config_path = r"../config/config2.json"
     config = CrossRingConfig(config_path)
+    config.CROSSRING_VERSION = "V1"
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        # topo_type = "5x4"  # SG2262
+        topo_type = "5x4"  # SG2262
         # topo_type = "4x5"
-        topo_type = "5x2"
+        # topo_type = "5x2"
         # topo_type = "3x1"
         # topo_type = "6x5"  # SG2260
         # topo_type = "3x3"  # SG2260E
@@ -130,12 +133,12 @@ def main():
         config.NUM_SN = 32
         config.RN_R_TRACKER_OSTD = 64
         config.RN_W_TRACKER_OSTD = 64
-        config.RN_RDB_SIZE = config.RN_R_TRACKER_OSTD * config.BURST
-        config.RN_WDB_SIZE = config.RN_W_TRACKER_OSTD * config.BURST
         config.SN_DDR_R_TRACKER_OSTD = 64
         config.SN_DDR_W_TRACKER_OSTD = 64
         config.SN_L2M_R_TRACKER_OSTD = 64
         config.SN_L2M_W_TRACKER_OSTD = 64
+        config.RN_RDB_SIZE = config.RN_R_TRACKER_OSTD * config.BURST
+        config.RN_WDB_SIZE = config.RN_W_TRACKER_OSTD * config.BURST
         config.SN_DDR_WDB_SIZE = config.SN_DDR_W_TRACKER_OSTD * config.BURST
         config.SN_L2M_WDB_SIZE = config.SN_L2M_W_TRACKER_OSTD * config.BURST
         config.DDR_R_LATENCY_original = 40
@@ -148,8 +151,9 @@ def main():
         config.IQ_OUT_FIFO_DEPTH = 8
         config.RB_OUT_FIFO_DEPTH = 8
         config.SN_TRACKER_RELEASE_LATENCY = 40
-        config.GDMA_BW_LIMIT = 16
+        # config.GDMA_BW_LIMIT = 16
         config.CDMA_BW_LIMIT = 16
+        config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 1
 
         # config.EQ_IN_FIFO_DEPTH = 8
         # config.RB_IN_FIFO_DEPTH = 8
@@ -255,6 +259,8 @@ def main():
         config.SN_TRACKER_RELEASE_LATENCY = 40
         config.CDMA_BW_LIMIT = 8
         config.DDR_BW_LIMIT = 102
+        config.GDMA_BW_LIMIT = 102
+        config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 1
 
         config.TL_Etag_T2_UE_MAX = 8
         config.TL_Etag_T1_UE_MAX = 15
@@ -367,8 +373,8 @@ def main():
         plot_flow_fig=1,
         flow_fig_show_CDMA=1,
         plot_RN_BW_fig=1,
-        plot_link_state=0,
-        plot_start_time=20,
+        plot_link_state=1,
+        plot_start_time=1000,
         print_trace=0,
         show_trace_id=7,
         show_node_id=4,
@@ -377,7 +383,7 @@ def main():
     np.random.seed(617)
 
     sim.initial()
-    sim.end_time = 6000
+    sim.end_time = 10000
     sim.print_interval = 1000
     sim.run()
 
