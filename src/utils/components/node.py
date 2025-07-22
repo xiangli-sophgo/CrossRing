@@ -52,6 +52,24 @@ class Node:
         self.sn_wdb_recv = self.config._make_channels(("ddr", "l2m"))
         self.sn_wdb_count = self.config._make_channels(("ddr", "l2m"))
         self.rn_wait_to_inject = []
+        
+        # 保序跟踪表: {(src, dest): {"REQ": last_ejected_id, "RSP": last_ejected_id, "DATA": last_ejected_id}}
+        self.order_tracking_table = defaultdict(lambda: {"REQ": 0, "RSP": 0, "DATA": 0})
+        
+    # 全局顺序ID分配器: {(src, dest): {"REQ": next_id, "RSP": next_id, "DATA": next_id}}
+    global_order_id_allocator = defaultdict(lambda: {"REQ": 1, "RSP": 1, "DATA": 1})
+    
+    @classmethod
+    def get_next_order_id(cls, src, dest, packet_category):
+        """获取下一个顺序ID"""
+        current_id = cls.global_order_id_allocator[(src, dest)][packet_category]
+        cls.global_order_id_allocator[(src, dest)][packet_category] += 1
+        return current_id
+        
+    @classmethod
+    def reset_order_ids(cls):
+        """重置所有顺序ID"""
+        cls.global_order_id_allocator.clear()
 
     def initialize_rn(self):
         """Initialize RN structures."""

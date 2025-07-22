@@ -41,6 +41,9 @@ class RequestInfo:
     cmd_latency: int
     data_latency: int
     transaction_latency: int
+    # 保序相关字段
+    src_dest_order_id: int = -1  # src-dest对的保序ID
+    packet_category: str = ""  # 包类型分类 (REQ/RSP/DATA)
 
 
 @dataclass
@@ -224,6 +227,10 @@ class BandwidthAnalyzer:
                 actual_source_type = representative_flit.original_source_type  # 实际发起请求的类型
                 actual_dest_type = representative_flit.original_destination_type  # 实际目标类型
 
+            # 收集保序信息
+            src_dest_order_id = getattr(representative_flit, 'src_dest_order_id', -1)
+            packet_category = getattr(representative_flit, 'packet_category', "")
+            
             request_info = RequestInfo(
                 packet_id=packet_id,
                 start_time=representative_flit.cmd_entry_cake0_cycle // self.network_frequency,
@@ -240,6 +247,9 @@ class BandwidthAnalyzer:
                 cmd_latency=representative_flit.cmd_latency // self.network_frequency,
                 data_latency=representative_flit.data_latency // self.network_frequency,
                 transaction_latency=representative_flit.transaction_latency // self.network_frequency,
+                # 保序相关字段
+                src_dest_order_id=src_dest_order_id,
+                packet_category=packet_category,
             )
 
             # 收集RN带宽时间序列数据
@@ -1572,6 +1582,10 @@ class BandwidthAnalyzer:
         if os.path.exists(read_csv):
             df_read = pd.read_csv(read_csv)
             for _, row in df_read.iterrows():
+                # 处理保序字段（向后兼容）
+                src_dest_order_id = int(row.get("src_dest_order_id", -1))
+                packet_category = str(row.get("packet_category", ""))
+                
                 request_info = RequestInfo(
                     packet_id=int(row["packet_id"]),
                     start_time=int(row["start_time_ns"]),
@@ -1588,6 +1602,9 @@ class BandwidthAnalyzer:
                     cmd_latency=int(row["cmd_latency_ns"]),
                     data_latency=int(row["data_latency_ns"]),
                     transaction_latency=int(row["transaction_latency_ns"]),
+                    # 保序字段
+                    src_dest_order_id=src_dest_order_id,
+                    packet_category=packet_category,
                 )
                 self.requests.append(request_info)
 
@@ -1601,6 +1618,10 @@ class BandwidthAnalyzer:
         if os.path.exists(write_csv):
             df_write = pd.read_csv(write_csv)
             for _, row in df_write.iterrows():
+                # 处理保序字段（向后兼容）
+                src_dest_order_id = int(row.get("src_dest_order_id", -1))
+                packet_category = str(row.get("packet_category", ""))
+                
                 request_info = RequestInfo(
                     packet_id=int(row["packet_id"]),
                     start_time=int(row["start_time_ns"]),
@@ -1617,6 +1638,9 @@ class BandwidthAnalyzer:
                     cmd_latency=int(row["cmd_latency_ns"]),
                     data_latency=int(row["data_latency_ns"]),
                     transaction_latency=int(row["transaction_latency_ns"]),
+                    # 保序字段
+                    src_dest_order_id=src_dest_order_id,
+                    packet_category=packet_category,
                 )
                 self.requests.append(request_info)
 
@@ -2132,24 +2156,24 @@ class BandwidthAnalyzer:
         """
         将映射后的节点ID反向映射回原始节点编号
         原始映射公式: mapped_id = node % num_col + num_col + node // num_col * 2 * num_col
-        
+
         Args:
             mapped_id: 映射后的节点ID (ip_pos)
             num_col: 列数 (NUM_COL)
-            
+
         Returns:
             int: 原始节点编号
         """
         # 减去偏移量num_col
         temp = mapped_id - num_col
-        
+
         # 计算原始行和列
         col = temp % num_col
         row = temp // (2 * num_col)
-        
+
         # 恢复原始节点编号
         node = row * num_col + col
-        
+
         return node
 
     def _generate_etag_per_node_fifo_csv(self, output_path: str):
@@ -2168,17 +2192,17 @@ class BandwidthAnalyzer:
         eq_t0_per_node_fifo = getattr(self.sim_model, "EQ_ETag_T0_per_node_fifo", {})
         rb_t1_per_node_fifo = getattr(self.sim_model, "RB_ETag_T1_per_node_fifo", {})
         rb_t0_per_node_fifo = getattr(self.sim_model, "RB_ETag_T0_per_node_fifo", {})
-        
+
         # 获取总数据量统计
         eq_total_flits = getattr(self.sim_model, "EQ_total_flits_per_node", {})
         rb_total_flits = getattr(self.sim_model, "RB_total_flits_per_node", {})
-        
+
         # 获取按通道分类的统计
         eq_t1_per_channel = getattr(self.sim_model, "EQ_ETag_T1_per_channel", {"req": {}, "rsp": {}, "data": {}})
         eq_t0_per_channel = getattr(self.sim_model, "EQ_ETag_T0_per_channel", {"req": {}, "rsp": {}, "data": {}})
         rb_t1_per_channel = getattr(self.sim_model, "RB_ETag_T1_per_channel", {"req": {}, "rsp": {}, "data": {}})
         rb_t0_per_channel = getattr(self.sim_model, "RB_ETag_T0_per_channel", {"req": {}, "rsp": {}, "data": {}})
-        
+
         # 获取按通道分类的总数据量统计
         eq_total_per_channel = getattr(self.sim_model, "EQ_total_flits_per_channel", {"req": {}, "rsp": {}, "data": {}})
         rb_total_per_channel = getattr(self.sim_model, "RB_total_flits_per_channel", {"req": {}, "rsp": {}, "data": {}})
@@ -2198,27 +2222,34 @@ class BandwidthAnalyzer:
 
         # 获取NUM_COL配置
         num_col = getattr(self.config, "NUM_COL", 4)  # 默认值为4
-        
+
         with open(csv_file, "w", newline="", encoding="utf-8") as f:
             # 写入CSV头
             headers = ["node_id"]
-            
+
             # 按通道分组，每个通道的数据放在一起
             for channel in ["req", "rsp", "data"]:
                 # EQ统计 (TU, TD方向)
-                headers.extend([
-                    f"{channel}_EQ_TU_total", f"{channel}_EQ_TU_T1", f"{channel}_EQ_TU_T0",
-                    f"{channel}_EQ_TD_total", f"{channel}_EQ_TD_T1", f"{channel}_EQ_TD_T0"
-                ])
-                
+                headers.extend([f"{channel}_EQ_TU_total", f"{channel}_EQ_TU_T1", f"{channel}_EQ_TU_T0", f"{channel}_EQ_TD_total", f"{channel}_EQ_TD_T1", f"{channel}_EQ_TD_T0"])
+
                 # RB统计 (TU, TD, TL, TR方向)
-                headers.extend([
-                    f"{channel}_RB_TU_total", f"{channel}_RB_TU_T1", f"{channel}_RB_TU_T0",
-                    f"{channel}_RB_TD_total", f"{channel}_RB_TD_T1", f"{channel}_RB_TD_T0",
-                    f"{channel}_RB_TL_total", f"{channel}_RB_TL_T1", f"{channel}_RB_TL_T0",
-                    f"{channel}_RB_TR_total", f"{channel}_RB_TR_T1", f"{channel}_RB_TR_T0"
-                ])
-            
+                headers.extend(
+                    [
+                        f"{channel}_RB_TU_total",
+                        f"{channel}_RB_TU_T1",
+                        f"{channel}_RB_TU_T0",
+                        f"{channel}_RB_TD_total",
+                        f"{channel}_RB_TD_T1",
+                        f"{channel}_RB_TD_T0",
+                        f"{channel}_RB_TL_total",
+                        f"{channel}_RB_TL_T1",
+                        f"{channel}_RB_TL_T0",
+                        f"{channel}_RB_TR_total",
+                        f"{channel}_RB_TR_T1",
+                        f"{channel}_RB_TR_T0",
+                    ]
+                )
+
             f.write(",".join(headers) + "\n")
 
             # 按节点ID排序
@@ -2237,53 +2268,60 @@ class BandwidthAnalyzer:
                     eq_t1_ch = eq_t1_per_channel.get(channel, {}).get(mapped_id, {})
                     eq_t0_ch = eq_t0_per_channel.get(channel, {}).get(mapped_id, {})
                     eq_total_ch = eq_total_per_channel.get(channel, {}).get(mapped_id, {})
-                    
+
                     # EQ统计 (TU, TD方向) - 该通道总数 + T1 + T0
                     eq_tu_t1 = eq_t1_ch.get("TU", 0)
                     eq_tu_t0 = eq_t0_ch.get("TU", 0)
                     eq_tu_ch_total = eq_total_ch.get("TU", 0)  # 使用真实的总flit数
-                    
+
                     eq_td_t1 = eq_t1_ch.get("TD", 0)
                     eq_td_t0 = eq_t0_ch.get("TD", 0)
                     eq_td_ch_total = eq_total_ch.get("TD", 0)  # 使用真实的总flit数
-                    
-                    row_data.extend([
-                        str(eq_tu_ch_total), str(eq_tu_t1), str(eq_tu_t0),
-                        str(eq_td_ch_total), str(eq_td_t1), str(eq_td_t0)
-                    ])
-                    
+
+                    row_data.extend([str(eq_tu_ch_total), str(eq_tu_t1), str(eq_tu_t0), str(eq_td_ch_total), str(eq_td_t1), str(eq_td_t0)])
+
                     # 获取该通道的RB统计
                     rb_t1_ch = rb_t1_per_channel.get(channel, {}).get(mapped_id, {})
                     rb_t0_ch = rb_t0_per_channel.get(channel, {}).get(mapped_id, {})
                     rb_total_ch = rb_total_per_channel.get(channel, {}).get(mapped_id, {})
-                    
+
                     # RB统计 (TU, TD, TL, TR方向) - 该通道总数 + T1 + T0
                     rb_tu_t1 = rb_t1_ch.get("TU", 0)
                     rb_tu_t0 = rb_t0_ch.get("TU", 0)
                     rb_tu_ch_total = rb_total_ch.get("TU", 0)  # 使用真实的总flit数
-                    
+
                     rb_td_t1 = rb_t1_ch.get("TD", 0)
                     rb_td_t0 = rb_t0_ch.get("TD", 0)
                     rb_td_ch_total = rb_total_ch.get("TD", 0)  # 使用真实的总flit数
-                    
+
                     rb_tl_t1 = rb_t1_ch.get("TL", 0)
                     rb_tl_t0 = rb_t0_ch.get("TL", 0)
                     rb_tl_ch_total = rb_total_ch.get("TL", 0)  # 使用真实的总flit数
-                    
+
                     rb_tr_t1 = rb_t1_ch.get("TR", 0)
                     rb_tr_t0 = rb_t0_ch.get("TR", 0)
                     rb_tr_ch_total = rb_total_ch.get("TR", 0)  # 使用真实的总flit数
-                    
-                    row_data.extend([
-                        str(rb_tu_ch_total), str(rb_tu_t1), str(rb_tu_t0),
-                        str(rb_td_ch_total), str(rb_td_t1), str(rb_td_t0),
-                        str(rb_tl_ch_total), str(rb_tl_t1), str(rb_tl_t0),
-                        str(rb_tr_ch_total), str(rb_tr_t1), str(rb_tr_t0)
-                    ])
+
+                    row_data.extend(
+                        [
+                            str(rb_tu_ch_total),
+                            str(rb_tu_t1),
+                            str(rb_tu_t0),
+                            str(rb_td_ch_total),
+                            str(rb_td_t1),
+                            str(rb_td_t0),
+                            str(rb_tl_ch_total),
+                            str(rb_tl_t1),
+                            str(rb_tl_t0),
+                            str(rb_tr_ch_total),
+                            str(rb_tr_t1),
+                            str(rb_tr_t0),
+                        ]
+                    )
 
                 f.write(",".join(row_data) + "\n")
-
-        print(f"节点的ETag数据已保存: {csv_file}")
+        if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
+            print(f"节点的ETag数据已保存: {csv_file}")
 
     def _generate_detailed_request_csv(self, output_path: str):
         """
@@ -2309,6 +2347,8 @@ class BandwidthAnalyzer:
             "cmd_latency_ns",
             "data_latency_ns",
             "transaction_latency_ns",
+            "src_dest_order_id",
+            "packet_category",
         ]
 
         # 生成读请求CSV
@@ -2328,6 +2368,8 @@ class BandwidthAnalyzer:
                     req.cmd_latency,
                     req.data_latency,
                     req.transaction_latency,
+                    req.src_dest_order_id,
+                    req.packet_category,
                 ]
                 f.write(",".join(map(str, row)) + "\n")
 
@@ -2348,6 +2390,8 @@ class BandwidthAnalyzer:
                     req.cmd_latency,
                     req.data_latency,
                     req.transaction_latency,
+                    req.src_dest_order_id,
+                    req.packet_category,
                 ]
                 f.write(",".join(map(str, row)) + "\n")
 

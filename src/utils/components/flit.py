@@ -124,6 +124,8 @@ class Flit:
         "transaction_latency",
         "cmd_latency",
         "data_latency",
+        "src_dest_order_id",
+        "packet_category",
     ]
 
     last_id = 0
@@ -211,6 +213,8 @@ class Flit:
         self.cmd_latency = np.inf
         self.data_latency = np.inf
         self.sn_rsp_generate_cycle = np.inf
+        self.src_dest_order_id = -1
+        self.packet_category = None
 
     def sync_latency_record(self, flit):
         if flit.req_type == "read":
@@ -232,6 +236,26 @@ class Flit:
         if len(path) < 2:
             return 0  # Or handle this case appropriately
         return 1 if path[1] - path[0] == 1 else -1 if path[1] - path[0] == -1 else 0
+
+    def set_packet_category_and_order_id(self):
+        """根据flit的类型信息设置包类型和顺序ID"""
+        # 确定包类型分类
+        if self.req_type is not None:
+            self.packet_category = "REQ"
+        elif self.rsp_type is not None:
+            self.packet_category = "RSP" 
+        elif self.flit_type == "data":
+            self.packet_category = "DATA"
+        else:
+            self.packet_category = "REQ"  # 默认为REQ
+        
+        # 获取原始的src和dest用于顺序ID分配
+        src = self.source_original if self.source_original != -1 else self.source
+        dest = self.destination_original if self.destination_original != -1 else self.destination
+        
+        # 导入Node类获取顺序ID
+        from .node import Node
+        self.src_dest_order_id = Node.get_next_order_id(src, dest, self.packet_category)
 
     def inject(self, network: "Network"):  # 使用字符串类型标注
         if self.path_index == 0 and not self.is_injected:
@@ -284,6 +308,8 @@ class Flit:
         self.current_seat_index = -1
         self.current_link = None
         self.traffic_id = None
+        self.src_dest_order_id = -1
+        self.packet_category = None
 
         # Reset timing fields
         self.departure_cycle = np.inf

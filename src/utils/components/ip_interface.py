@@ -647,6 +647,8 @@ class IPInterface:
             flit.source_original = req.source_original
             flit.destination_original = req.destination_original
             flit.flit_type = "data"
+            # 设置保序信息
+            flit.set_packet_category_and_order_id()
             flit.departure_cycle = (
                 cycle + self.config.DDR_W_LATENCY + i * self.config.NETWORK_FREQUENCY
                 if req.original_destination_type.startswith("ddr")
@@ -694,6 +696,8 @@ class IPInterface:
             flit.destination_original = req.source_original
             flit.req_type = req.req_type
             flit.flit_type = "data"
+            # 设置保序信息
+            flit.set_packet_category_and_order_id()
             if hasattr(req, "original_destination_type") and req.original_destination_type.startswith("ddr"):
                 latency = np.random.uniform(
                     low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
@@ -740,6 +744,8 @@ class IPInterface:
         rsp.flit_type = "rsp"
         rsp.rsp_type = rsp_type
         rsp.req_type = req.req_type
+        # 设置保序信息
+        rsp.set_packet_category_and_order_id()
         rsp.packet_id = req.packet_id
         rsp.departure_cycle = cycle + self.config.NETWORK_FREQUENCY
         rsp.req_departure_cycle = req.departure_cycle

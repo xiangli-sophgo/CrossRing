@@ -873,6 +873,8 @@ class BaseModel:
         req.source_original = req_data[1]
         req.destination_original = req_data[3]
         req.flit_type = "req"
+        # 设置保序信息
+        req.set_packet_category_and_order_id()
         req.departure_cycle = req_data[0]
         req.burst_length = req_data[6]
         req.source_type = f"{req_data[2]}_0" if "_" not in req_data[2] else req_data[2]

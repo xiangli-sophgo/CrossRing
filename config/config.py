@@ -83,6 +83,7 @@ class CrossRingConfig:
         self.SDMA_RW_GAP = args.SDMA_RW_GAP
         self.ENABLE_CROSSPOINT_CONFLICT_CHECK = args.ENABLE_CROSSPOINT_CONFLICT_CHECK
         self.CROSSRING_VERSION = args.CROSSRING_VERSION
+        self.ENABLE_IN_ORDER_EJECTION = args.ENABLE_IN_ORDER_EJECTION
         self.CHANNEL_SPEC = {
             "gdma": 2,  # → RN 侧
             "sdma": 2,  # → RN 侧
@@ -384,5 +385,6 @@ class CrossRingConfig:
         parser.add_argument("--SDMA_RW_GAP", type=int, default=default_config["SDMA_RW_GAP"], help="SDMA read and write cmd num gap")
         parser.add_argument("--ENABLE_CROSSPOINT_CONFLICT_CHECK", type=bool, default=default_config["ENABLE_CROSSPOINT_CONFLICT_CHECK"], help="Enable crosspoint conflict checking for inject queue")
         parser.add_argument("--CROSSRING_VERSION", type=str, default=default_config["CROSSRING_VERSION"], help="CrossRing version (V1 or V2)")
+        parser.add_argument("--ENABLE_IN_ORDER_EJECTION", type=bool, default=default_config["ENABLE_IN_ORDER_EJECTION"], help="Enable in-order ejection for src-dest pairs")
 
         return parser.parse_args()
