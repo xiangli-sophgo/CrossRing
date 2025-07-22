@@ -13,14 +13,6 @@ from .flit import Flit, TokenBucket
 import logging
 import inspect
 
-# Import route table components with fallback
-try:
-    from .route_table import DistributedRouteManager, RouteTable, RouteEntry
-except ImportError:
-    DistributedRouteManager = None
-    RouteTable = None
-    RouteEntry = None
-
 
 class Network:
     def __init__(self, config: CrossRingConfig, adjacency_matrix, name="network"):
@@ -319,35 +311,6 @@ class Network:
         for pos in self.EQ_UE_Counters["TD"]:
             self.EQ_CAPACITY["TD"][pos] = {lvl: _cap_td(lvl) for lvl in ("T1", "T2")}
 
-    @property
-    def all_ip_positions(self):
-        """Cached property for all IP positions"""
-        if self._all_ip_positions is None:
-            self._all_ip_positions = list(
-                set(
-                    self.config.DDR_SEND_POSITION_LIST
-                    + self.config.SDMA_SEND_POSITION_LIST
-                    + self.config.CDMA_SEND_POSITION_LIST
-                    + self.config.L2M_SEND_POSITION_LIST
-                    + self.config.GDMA_SEND_POSITION_LIST
-                )
-            )
-        return self._all_ip_positions
-
-    @property
-    def rn_positions(self):
-        """Cached property for RN positions"""
-        if self._rn_positions is None:
-            self._rn_positions = list(set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST))
-        return self._rn_positions
-
-    @property
-    def sn_positions(self):
-        """Cached property for SN positions"""
-        if self._sn_positions is None:
-            self._sn_positions = list(set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST))
-        return self._sn_positions
-
     def _entry_available(self, dir_type, key, level):
         if dir_type in ("TL", "TR"):
             cap = self.RB_CAPACITY[dir_type][key][level]
@@ -431,18 +394,18 @@ class Network:
 
         # 横向环处理
         link_occupied = self.links[link][0] is not None
-        
+
         # 检查crosspoint冲突（如果启用了此功能）
         crosspoint_conflict = False
-        if hasattr(self.config, 'ENABLE_CROSSPOINT_CONFLICT_CHECK') and self.config.ENABLE_CROSSPOINT_CONFLICT_CHECK:
+        if hasattr(self.config, "ENABLE_CROSSPOINT_CONFLICT_CHECK") and self.config.ENABLE_CROSSPOINT_CONFLICT_CHECK:
             # Use the last element of the pipeline queue (previous cycle's conflict status)
             crosspoint_conflict = self.crosspoint_conflict["horizontal"][current][direction][-1]
-        
+
         if link_occupied or crosspoint_conflict:  # Link被占用或crosspoint冲突
             # 检查是否需要标记ITag（内联所有检查逻辑）
             if (
-                link_occupied and  # 只有当link被实际占用时才标记ITag
-                self.links_tag[link][0] is None
+                link_occupied  # 只有当link被实际占用时才标记ITag
+                and self.links_tag[link][0] is None
                 and flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H
                 and self.tagged_counter[direction][current] < self.config.ITag_MAX_NUM_H
                 and self.itag_req_counter[direction][current] > 0
@@ -490,32 +453,32 @@ class Network:
             right_pos = ip_pos + 1 if ip_pos % self.config.NUM_COL != self.config.NUM_COL - 1 else ip_pos
             up_pos = ip_pos - self.config.NUM_COL * 3 if ip_pos // self.config.NUM_COL != 1 else ip_pos - self.config.NUM_COL
             down_pos = ip_pos + self.config.NUM_COL * 1 if ip_pos // self.config.NUM_COL != self.config.NUM_ROW - 1 else ip_pos - self.config.NUM_COL
-            
+
             # Update cross point connections
             self.cross_point["horizontal"][ip_pos]["TR"] = [self.links[(left_pos, ip_pos)][-1], self.links[(ip_pos, right_pos)][0]]
             self.cross_point["horizontal"][ip_pos]["TL"] = [self.links[(ip_pos, left_pos)][0], self.links[(right_pos, ip_pos)][-1]]
             self.cross_point["vertical"][ip_pos]["TU"] = [self.links[(down_pos, ip_pos - self.config.NUM_COL)][-1], self.links[(ip_pos - self.config.NUM_COL, up_pos)][0]]
             self.cross_point["vertical"][ip_pos]["TD"] = [self.links[(ip_pos - self.config.NUM_COL, down_pos)][0], self.links[(up_pos, ip_pos - self.config.NUM_COL)][-1]]
-            
+
             # Update crosspoint conflict status pipeline queue based on [-1] positions having flits
             # For horizontal crosspoint conflicts - update pipeline queue
             new_tr_conflict = self.links[(left_pos, ip_pos)][-1] is not None
             new_tl_conflict = self.links[(right_pos, ip_pos)][-1] is not None
-            
+
             # Insert new state at front and keep queue length = 2
             self.crosspoint_conflict["horizontal"][ip_pos]["TR"].insert(0, new_tr_conflict)
             self.crosspoint_conflict["horizontal"][ip_pos]["TR"] = self.crosspoint_conflict["horizontal"][ip_pos]["TR"][:2]
-            
+
             self.crosspoint_conflict["horizontal"][ip_pos]["TL"].insert(0, new_tl_conflict)
             self.crosspoint_conflict["horizontal"][ip_pos]["TL"] = self.crosspoint_conflict["horizontal"][ip_pos]["TL"][:2]
-            
+
             # For vertical crosspoint conflicts - update pipeline queue
             new_tu_conflict = self.links[(down_pos, ip_pos - self.config.NUM_COL)][-1] is not None
             new_td_conflict = self.links[(up_pos, ip_pos - self.config.NUM_COL)][-1] is not None
-            
+
             self.crosspoint_conflict["vertical"][ip_pos]["TU"].insert(0, new_tu_conflict)
             self.crosspoint_conflict["vertical"][ip_pos]["TU"] = self.crosspoint_conflict["vertical"][ip_pos]["TU"][:2]
-            
+
             self.crosspoint_conflict["vertical"][ip_pos]["TD"].insert(0, new_td_conflict)
             self.crosspoint_conflict["vertical"][ip_pos]["TD"] = self.crosspoint_conflict["vertical"][ip_pos]["TD"][:2]
 
@@ -1256,3 +1219,32 @@ class Network:
         self._all_ip_positions = None
         self._rn_positions = None
         self._sn_positions = None
+
+    @property
+    def all_ip_positions(self):
+        """Cached property for all IP positions"""
+        if self._all_ip_positions is None:
+            self._all_ip_positions = list(
+                set(
+                    self.config.DDR_SEND_POSITION_LIST
+                    + self.config.SDMA_SEND_POSITION_LIST
+                    + self.config.CDMA_SEND_POSITION_LIST
+                    + self.config.L2M_SEND_POSITION_LIST
+                    + self.config.GDMA_SEND_POSITION_LIST
+                )
+            )
+        return self._all_ip_positions
+
+    @property
+    def rn_positions(self):
+        """Cached property for RN positions"""
+        if self._rn_positions is None:
+            self._rn_positions = list(set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST))
+        return self._rn_positions
+
+    @property
+    def sn_positions(self):
+        """Cached property for SN positions"""
+        if self._sn_positions is None:
+            self._sn_positions = list(set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST))
+        return self._sn_positions

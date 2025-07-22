@@ -733,16 +733,6 @@ class BaseModel:
         network_type : str
             "req" | "rsp" | "data"
         """
-        # Use cached pre-filtered IP types to avoid repeated list comprehensions
-        if not hasattr(self, "_cached_ip_types"):
-            self._cached_ip_types = {
-                "req": [ip_type for ip_type in self.config.CH_NAME_LIST if ip_type.startswith(("sdma", "gdma", "cdma"))],
-                "rsp": [ip_type for ip_type in self.config.CH_NAME_LIST if ip_type.startswith(("ddr", "l2m"))],
-                "data": self.config.CH_NAME_LIST,
-            }
-
-        valid_ip_types = self._cached_ip_types[network_type]
-
         for ip_pos in ip_positions:
             for direction in self.IQ_directions:
                 rr_queue = network.round_robin["IQ"][direction][ip_pos - self.config.NUM_COL]
@@ -753,11 +743,13 @@ class BaseModel:
                 if len(queue[ip_pos]) >= self.config.IQ_OUT_FIFO_DEPTH:
                     continue  # FIFO 满
 
-                # Use optimized IP type list instead of full rr_queue iteration
-                processed = False
-                for ip_type in valid_ip_types:
-                    if ip_type not in rr_queue:
+                for ip_type in list(rr_queue):
+                    # —— 网络‑特定 ip_type 过滤 ——
+                    if network_type == "req" and not (ip_type.startswith("sdma") or ip_type.startswith("gdma") or ip_type.startswith("cdma")):
                         continue
+                    if network_type == "rsp" and not (ip_type.startswith("ddr") or ip_type.startswith("l2m")):
+                        continue
+                    # data 网络不筛选 ip_type
 
                     if not network.IQ_channel_buffer[ip_type][ip_pos]:
                         continue  # channel‑buffer 空
@@ -781,7 +773,6 @@ class BaseModel:
                         # _try_inject_to_direction 已经做了 popleft & pre‑缓冲写入，故直接 break
                         rr_queue.remove(ip_type)
                         rr_queue.append(ip_type)
-                        processed = True
                         break
 
                     else:
@@ -802,11 +793,7 @@ class BaseModel:
 
                         rr_queue.remove(ip_type)
                         rr_queue.append(ip_type)
-                        processed = True
                         break
-
-                if processed:
-                    continue
 
     def move_pre_to_queues_all(self):
         #  所有 IPInterface 的 *_pre → FIFO
@@ -1716,12 +1703,16 @@ class BaseModel:
 
                     # 生成Reduce_ITag_Req信号
                     # if flit.itag_h and direction not in ["EQ", "TU", "TD"]:
-                    if flit.itag_h and direction not in ["EQ",]:
+                    if flit.itag_h and direction not in [
+                        "EQ",
+                    ]:
                         network.itag_req_counter[direction][ip_pos] -= 1
                         flit.itag_h = False
 
                     # if direction in ["EQ", "TU", "TD"]:
-                    if direction in ["EQ", ]:
+                    if direction in [
+                        "EQ",
+                    ]:
                         queue.appendleft(flit)
                         flit.itag_h = False
                 else:

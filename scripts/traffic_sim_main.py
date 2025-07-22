@@ -86,7 +86,7 @@ def run_single_simulation(sim_params):
         sim.config.SN_L2M_W_TRACKER_OSTD = 64
         sim.config.SN_DDR_WDB_SIZE = sim.config.SN_DDR_W_TRACKER_OSTD * sim.config.BURST
         sim.config.SN_L2M_WDB_SIZE = sim.config.SN_L2M_W_TRACKER_OSTD * sim.config.BURST
-        sim.config.DDR_R_LATENCY_original = 150
+        sim.config.DDR_R_LATENCY_original = 40
         sim.config.DDR_R_LATENCY_VAR_original = 0
         sim.config.DDR_W_LATENCY_original = 0
         sim.config.L2M_R_LATENCY_original = 12
@@ -106,6 +106,7 @@ def run_single_simulation(sim_params):
         sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
         sim.config.ITag_MAX_NUM_H = sim.config.ITag_MAX_NUM_V = 1
         sim.config.ETag_BOTHSIDE_UPGRADE = 0
+        sim.config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 1
 
         sim.config.GDMA_RW_GAP = np.inf
         sim.config.SDMA_RW_GAP = np.inf
@@ -245,10 +246,10 @@ def main():
     parser.add_argument("--outstanding", type=int, default=2048, help="Outstanding number (must be power of 2)")
     parser.add_argument("--config", default="../config/config2.json", help="Simulation config file path")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="Simulation model type")
-    parser.add_argument("--results_file_name", default="DeepSeek_0617_1700_10us", help="Base name for results files")
+    parser.add_argument("--results_file_name", default="DeepSeek_0722_1700_10us_CP", help="Base name for results files")
     parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both")
     # parser.add_argument("--max_workers", type=int, default=None, help="Maximum number of parallel workers (default: number of CPU cores)")
-    parser.add_argument("--max_workers", type=int, default=2, help="Maximum number of parallel workers (default: number of CPU cores)")
+    parser.add_argument("--max_workers", type=int, default=1, help="Maximum number of parallel workers (default: number of CPU cores)")
 
     args = parser.parse_args()
 

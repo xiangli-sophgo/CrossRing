@@ -14,6 +14,7 @@ if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
 def main():
     # traffic_file_path = r"../test_data/"
     traffic_file_path = r"../traffic/0617/"
+    # traffic_file_path = r"../traffic/RW_4x2_4x4/"
     # traffic_file_path = r"../traffic/nxn_traffics"
 
     traffic_config = [
@@ -24,13 +25,14 @@ def main():
             # r"Write_burst4_2262HBM_v2.txt",
             # r"MLP_MoE.txt",
         ]
-        * 3,
+        * 1,
         [
             # r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
             # r"full_bw_R_4x5.txt"
             # "LLama2_AllReduce.txt"
             "LLama2_AttentionFC.txt"
+            # "R_4x4.txt"
         ],
     ]
 
@@ -50,7 +52,7 @@ def main():
         # topo_type = "4x9"
         # topo_type = "9x4"
         topo_type = "5x4"  # SG2262
-        # topo_type = "4x5"
+        # topo_type = "4x4"
         # topo_type = "5x2"
         # topo_type = "3x1"
         # topo_type = "6x5"  # SG2260
@@ -120,7 +122,7 @@ def main():
             "l2m": 2,
         }
 
-    elif topo_type in ["5x4", "4x5"]:
+    elif topo_type in ["5x4"]:
         config.NUM_COL = 4
         config.NUM_NODE = 40
         config.BURST = 4
@@ -152,17 +154,9 @@ def main():
         config.RB_OUT_FIFO_DEPTH = 8
         config.SN_TRACKER_RELEASE_LATENCY = 40
         # config.GDMA_BW_LIMIT = 16
-        config.CDMA_BW_LIMIT = 16
-        config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 1
-
-        # config.EQ_IN_FIFO_DEPTH = 8
-        # config.RB_IN_FIFO_DEPTH = 8
-        # config.TL_Etag_T2_UE_MAX = 4
-        # config.TL_Etag_T1_UE_MAX = 7
-        # config.TR_Etag_T2_UE_MAX = 5
-        # config.TU_Etag_T2_UE_MAX = 4
-        # config.TU_Etag_T1_UE_MAX = 7
-        # config.TD_Etag_T2_UE_MAX = 6
+        # config.CDMA_BW_LIMIT = 16
+        # config.DDR_BW_LIMIT = 128
+        config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 0
 
         config.TL_Etag_T2_UE_MAX = 8
         config.TL_Etag_T1_UE_MAX = 15
@@ -285,6 +279,61 @@ def main():
             "ddr": 2,
             "l2m": 2,
         }
+    elif topo_type in ["4x2", "4x4"]:
+        config.BURST = 4
+        config.NUM_COL = 2 if topo_type == "4x2" else 4
+        config.NUM_NODE = 16 if topo_type == "4x2" else 32
+        config.NUM_ROW = config.NUM_NODE // config.NUM_COL
+        config.NUM_IP = 16
+        config.RN_R_TRACKER_OSTD = 64
+        config.RN_W_TRACKER_OSTD = 32
+        config.RN_RDB_SIZE = config.RN_R_TRACKER_OSTD * config.BURST
+        config.RN_WDB_SIZE = config.RN_W_TRACKER_OSTD * config.BURST
+        config.NETWORK_FREQUENCY = 2
+        config.SN_DDR_R_TRACKER_OSTD = 96
+        config.SN_DDR_W_TRACKER_OSTD = 48
+        config.SN_L2M_R_TRACKER_OSTD = 96
+        config.SN_L2M_W_TRACKER_OSTD = 48
+        config.SN_DDR_WDB_SIZE = config.SN_DDR_W_TRACKER_OSTD * config.BURST
+        config.SN_L2M_WDB_SIZE = config.SN_L2M_W_TRACKER_OSTD * config.BURST
+        config.DDR_R_LATENCY_original = 100
+        config.DDR_R_LATENCY_VAR_original = 0
+        config.DDR_W_LATENCY_original = 40
+        config.L2M_R_LATENCY_original = 12
+        config.L2M_W_LATENCY_original = 16
+        config.IQ_CH_FIFO_DEPTH = 10
+        config.EQ_CH_FIFO_DEPTH = 10
+        config.IQ_OUT_FIFO_DEPTH = 8
+        config.RB_OUT_FIFO_DEPTH = 8
+        config.SN_TRACKER_RELEASE_LATENCY = 40
+        config.CDMA_BW_LIMIT = 8
+        # config.DDR_BW_LIMIT = 102
+        # config.GDMA_BW_LIMIT = 102
+        config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 0
+
+        config.TL_Etag_T2_UE_MAX = 8
+        config.TL_Etag_T1_UE_MAX = 15
+        config.TR_Etag_T2_UE_MAX = 12
+        config.RB_IN_FIFO_DEPTH = 16
+        config.TU_Etag_T2_UE_MAX = 8
+        config.TU_Etag_T1_UE_MAX = 15
+        config.TD_Etag_T2_UE_MAX = 12
+        config.EQ_IN_FIFO_DEPTH = 16
+
+        config.ITag_TRIGGER_Th_H = config.ITag_TRIGGER_Th_V = 80
+        config.ITag_MAX_NUM_H = config.ITag_MAX_NUM_V = 1
+        config.ETag_BOTHSIDE_UPGRADE = 0
+        config.SLICE_PER_LINK = 8
+
+        config.GDMA_RW_GAP = np.inf
+        config.SDMA_RW_GAP = np.inf
+        config.CHANNEL_SPEC = {
+            "gdma": 2,
+            "sdma": 2,
+            "cdma": 1,
+            "ddr": 2,
+            "l2m": 2,
+        }
     else:
         rows, cols = 3, 1
         # 解析行列并计算核心数量
@@ -373,14 +422,14 @@ def main():
         plot_flow_fig=1,
         flow_fig_show_CDMA=1,
         plot_RN_BW_fig=1,
-        plot_link_state=1,
+        plot_link_state=0,
         plot_start_time=1000,
         print_trace=0,
         show_trace_id=7,
         show_node_id=4,
         verbose=1,
     )
-    np.random.seed(617)
+    np.random.seed(722)
 
     sim.initial()
     sim.end_time = 10000

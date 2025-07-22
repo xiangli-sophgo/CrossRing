@@ -13,14 +13,6 @@ from .flit import Flit, TokenBucket
 import logging
 import inspect
 
-# Import route table components with fallback
-try:
-    from .route_table import DistributedRouteManager, RouteTable, RouteEntry
-except ImportError:
-    DistributedRouteManager = None
-    RouteTable = None
-    RouteEntry = None
-
 
 class Network:
     def __init__(self, config: CrossRingConfig, adjacency_matrix, name="network"):

@@ -323,23 +323,23 @@ class BaseModel:
         self.read_retry_num_stat, self.write_retry_num_stat = 0, 0
         self.EQ_ETag_T1_num_stat, self.EQ_ETag_T0_num_stat = 0, 0
         self.RB_ETag_T1_num_stat, self.RB_ETag_T0_num_stat = 0, 0
-        
+
         # Per-node FIFO ETag statistics
         self.EQ_ETag_T1_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count}}
         self.EQ_ETag_T0_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count}}
         self.RB_ETag_T1_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}
         self.RB_ETag_T0_per_node_fifo = {}  # {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}
-        
+
         # 总数据量统计 (每个节点下环到RB和EQ的flit总数)
         self.EQ_total_flits_per_node = {}  # {node_id: {"TU": count, "TD": count}}
         self.RB_total_flits_per_node = {}  # {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}
-        
+
         # 按通道类型分开的ETag统计
         self.EQ_ETag_T1_per_channel = {"req": {}, "rsp": {}, "data": {}}  # {channel: {node_id: {"TU": count, "TD": count}}}
         self.EQ_ETag_T0_per_channel = {"req": {}, "rsp": {}, "data": {}}
         self.RB_ETag_T1_per_channel = {"req": {}, "rsp": {}, "data": {}}  # {channel: {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}}
         self.RB_ETag_T0_per_channel = {"req": {}, "rsp": {}, "data": {}}
-        
+
         # 按通道类型分开的总数据量统计
         self.EQ_total_flits_per_channel = {"req": {}, "rsp": {}, "data": {}}  # {channel: {node_id: {"TU": count, "TD": count}}}
         self.RB_total_flits_per_channel = {"req": {}, "rsp": {}, "data": {}}  # {channel: {node_id: {"TU": count, "TD": count, "TL": count, "TR": count}}}
@@ -362,7 +362,7 @@ class BaseModel:
         # Performance monitoring
         self.performance_monitor = PerformanceMonitor()
         self.start_time = time.time()
-        
+
         # Initialize per-node FIFO ETag statistics after networks are created
         self._initialize_per_node_etag_stats()
 
@@ -370,25 +370,25 @@ class BaseModel:
         """Initialize per-node FIFO ETag statistics dictionaries."""
         # Get all IP positions from the request network
         all_nodes = self.req_network.all_ip_positions
-        
+
         # Initialize EQ ETag statistics (only TU and TD directions)
         for node_id in all_nodes:
             self.EQ_ETag_T1_per_node_fifo[node_id] = {"TU": 0, "TD": 0}
             self.EQ_ETag_T0_per_node_fifo[node_id] = {"TU": 0, "TD": 0}
             self.EQ_total_flits_per_node[node_id] = {"TU": 0, "TD": 0}
-            
+
             # Initialize per-channel EQ statistics
             for channel in ["req", "rsp", "data"]:
                 self.EQ_ETag_T1_per_channel[channel][node_id] = {"TU": 0, "TD": 0}
                 self.EQ_ETag_T0_per_channel[channel][node_id] = {"TU": 0, "TD": 0}
                 self.EQ_total_flits_per_channel[channel][node_id] = {"TU": 0, "TD": 0}
-        
+
         # Initialize RB ETag statistics (all four directions)
         for node_id in all_nodes:
             self.RB_ETag_T1_per_node_fifo[node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
             self.RB_ETag_T0_per_node_fifo[node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
             self.RB_total_flits_per_node[node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
-            
+
             # Initialize per-channel RB statistics
             for channel in ["req", "rsp", "data"]:
                 self.RB_ETag_T1_per_channel[channel][node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
@@ -708,16 +708,6 @@ class BaseModel:
         network_type : str
             "req" | "rsp" | "data"
         """
-        # Use cached pre-filtered IP types to avoid repeated list comprehensions
-        if not hasattr(self, "_cached_ip_types"):
-            self._cached_ip_types = {
-                "req": [ip_type for ip_type in self.config.CH_NAME_LIST if ip_type.startswith(("sdma", "gdma", "cdma"))],
-                "rsp": [ip_type for ip_type in self.config.CH_NAME_LIST if ip_type.startswith(("ddr", "l2m"))],
-                "data": self.config.CH_NAME_LIST,
-            }
-
-        valid_ip_types = self._cached_ip_types[network_type]
-
         for ip_pos in ip_positions:
             for direction in self.IQ_directions:
                 rr_queue = network.round_robin["IQ"][direction][ip_pos - self.config.NUM_COL]
@@ -728,11 +718,13 @@ class BaseModel:
                 if len(queue[ip_pos]) >= self.config.IQ_OUT_FIFO_DEPTH:
                     continue  # FIFO 满
 
-                # Use optimized IP type list instead of full rr_queue iteration
-                processed = False
-                for ip_type in valid_ip_types:
-                    if ip_type not in rr_queue:
+                for ip_type in list(rr_queue):
+                    # —— 网络‑特定 ip_type 过滤 ——
+                    if network_type == "req" and not (ip_type.startswith("sdma") or ip_type.startswith("gdma") or ip_type.startswith("cdma")):
                         continue
+                    if network_type == "rsp" and not (ip_type.startswith("ddr") or ip_type.startswith("l2m")):
+                        continue
+                    # data 网络不筛选 ip_type
 
                     if not network.IQ_channel_buffer[ip_type][ip_pos]:
                         continue  # channel‑buffer 空
@@ -756,7 +748,6 @@ class BaseModel:
                         # _try_inject_to_direction 已经做了 popleft & pre‑缓冲写入，故直接 break
                         rr_queue.remove(ip_type)
                         rr_queue.append(ip_type)
-                        processed = True
                         break
 
                     else:
@@ -777,11 +768,7 @@ class BaseModel:
 
                         rr_queue.remove(ip_type)
                         rr_queue.append(ip_type)
-                        processed = True
                         break
-
-                if processed:
-                    continue
 
     def move_pre_to_queues_all(self):
         #  所有 IPInterface 的 *_pre → FIFO
@@ -1091,33 +1078,33 @@ class BaseModel:
             flit = network.inject_queues["TD"][pos].popleft()
 
         # 获取通道类型
-        channel_type = getattr(flit, 'flit_type', 'req')  # 默认为req
-        
+        channel_type = getattr(flit, "flit_type", "req")  # 默认为req
+
         # 更新RB总数据量统计（所有经过的flit，无论ETag等级）
         if direction != "EQ":
             if pos in self.RB_total_flits_per_node:
                 self.RB_total_flits_per_node[pos][direction] += 1
-            
+
             # 更新按通道分类的RB总数据量统计
             if pos in self.RB_total_flits_per_channel.get(channel_type, {}):
                 self.RB_total_flits_per_channel[channel_type][pos][direction] += 1
-            
+
             if flit.ETag_priority == "T1":
                 self.RB_ETag_T1_num_stat += 1
                 # Update per-node FIFO statistics
                 if pos in self.RB_ETag_T1_per_node_fifo:
                     self.RB_ETag_T1_per_node_fifo[pos][direction] += 1
-                
+
                 # Update per-channel statistics
                 if pos in self.RB_ETag_T1_per_channel.get(channel_type, {}):
                     self.RB_ETag_T1_per_channel[channel_type][pos][direction] += 1
-                    
+
             elif flit.ETag_priority == "T0":
                 self.RB_ETag_T0_num_stat += 1
                 # Update per-node FIFO statistics
                 if pos in self.RB_ETag_T0_per_node_fifo:
                     self.RB_ETag_T0_per_node_fifo[pos][direction] += 1
-                
+
                 # Update per-channel statistics
                 if pos in self.RB_ETag_T0_per_channel.get(channel_type, {}):
                     self.RB_ETag_T0_per_channel[channel_type][pos][direction] += 1
@@ -1159,13 +1146,13 @@ class BaseModel:
         # self.error_log(flit, 6212, 1)
         # Case 1: No flit in the link
         link_occupied = network.links[link][0] is not None
-        
+
         # Check crosspoint conflict for vertical injection (if enabled)
         crosspoint_conflict = False
-        if hasattr(self.config, 'ENABLE_CROSSPOINT_CONFLICT_CHECK') and self.config.ENABLE_CROSSPOINT_CONFLICT_CHECK:
+        if hasattr(self.config, "ENABLE_CROSSPOINT_CONFLICT_CHECK") and self.config.ENABLE_CROSSPOINT_CONFLICT_CHECK:
             # Use the last element of the pipeline queue (previous cycle's conflict status)
             crosspoint_conflict = network.crosspoint_conflict["vertical"][pos][direction][-1]
-        
+
         if not link_occupied and not crosspoint_conflict:
             # Handle empty link cases with no crosspoint conflict
             if network.links_tag[link][0] is None:
@@ -1386,22 +1373,22 @@ class BaseModel:
                         flit = network.ring_bridge["EQ"][(in_pos, ip_pos)].popleft()
 
                     # 获取通道类型
-                    flit_channel_type = getattr(flit, 'flit_type', 'req')  # 默认为req
-                    
+                    flit_channel_type = getattr(flit, "flit_type", "req")  # 默认为req
+
                     # 更新总数据量统计（所有经过的flit，无论ETag等级）
                     if in_pos in self.EQ_total_flits_per_node:
                         if i == 0:  # TU direction
                             self.EQ_total_flits_per_node[in_pos]["TU"] += 1
                         elif i == 1:  # TD direction
                             self.EQ_total_flits_per_node[in_pos]["TD"] += 1
-                    
+
                     # 更新按通道分类的总数据量统计
                     if in_pos in self.EQ_total_flits_per_channel.get(flit_channel_type, {}):
                         if i == 0:  # TU direction
                             self.EQ_total_flits_per_channel[flit_channel_type][in_pos]["TU"] += 1
                         elif i == 1:  # TD direction
                             self.EQ_total_flits_per_channel[flit_channel_type][in_pos]["TD"] += 1
-                    
+
                     if flit.ETag_priority == "T1":
                         self.EQ_ETag_T1_num_stat += 1
                         # Update per-node FIFO statistics (only for TU and TD directions)
@@ -1410,14 +1397,14 @@ class BaseModel:
                                 self.EQ_ETag_T1_per_node_fifo[ip_pos]["TU"] += 1
                             elif i == 1:  # TD direction
                                 self.EQ_ETag_T1_per_node_fifo[ip_pos]["TD"] += 1
-                        
+
                         # Update per-channel statistics
                         if ip_pos in self.EQ_ETag_T1_per_channel.get(flit_channel_type, {}):
                             if i == 0:  # TU direction
                                 self.EQ_ETag_T1_per_channel[flit_channel_type][ip_pos]["TU"] += 1
                             elif i == 1:  # TD direction
                                 self.EQ_ETag_T1_per_channel[flit_channel_type][ip_pos]["TD"] += 1
-                                
+
                     elif flit.ETag_priority == "T0":
                         self.EQ_ETag_T0_num_stat += 1
                         # Update per-node FIFO statistics (only for TU and TD directions)
@@ -1426,7 +1413,7 @@ class BaseModel:
                                 self.EQ_ETag_T0_per_node_fifo[in_pos]["TU"] += 1
                             elif i == 1:  # TD direction
                                 self.EQ_ETag_T0_per_node_fifo[in_pos]["TD"] += 1
-                        
+
                         # Update per-channel statistics
                         if in_pos in self.EQ_ETag_T0_per_channel.get(flit_channel_type, {}):
                             if i == 0:  # TU direction

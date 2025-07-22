@@ -50,7 +50,7 @@ def run_CR_v2_demo():
     config.SN_TRACKER_RELEASE_LATENCY = 40
     config.CDMA_BW_LIMIT = 8
     config.DDR_BW_LIMIT = 102
-    config.GDMA_BW_LIMIT = 102
+    # config.GDMA_BW_LIMIT = 102
     config.RB_ONLY_TAG_NUM_PER_RING = 8
 
     config.TL_Etag_T2_UE_MAX = 8
