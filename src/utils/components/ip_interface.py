@@ -77,10 +77,12 @@ class IPInterface:
 
         # 验证FIFO深度配置
         l2h_depth = getattr(config, "IP_L2H_FIFO_DEPTH", 4)
-        h2l_depth = getattr(config, "IP_H2L_FIFO_DEPTH", 4)
+        h2l_h_depth = getattr(config, "IP_H2L_H_FIFO_DEPTH", 4)
+        h2l_l_depth = getattr(config, "IP_H2L_L_FIFO_DEPTH", 4)
 
         assert l2h_depth >= 2, f"L2H FIFO depth ({l2h_depth}) should be at least 2"
-        assert h2l_depth >= 2, f"H2L FIFO depth ({h2l_depth}) should be at least 2"
+        assert h2l_h_depth >= 2, f"H2L_H FIFO depth ({h2l_h_depth}) should be at least 2"
+        assert h2l_l_depth >= 2, f"H2L_L FIFO depth ({h2l_l_depth}) should be at least 2"
 
         self.networks = {
             "req": {
@@ -88,27 +90,33 @@ class IPInterface:
                 "send_flits": req_network.send_flits,
                 "inject_fifo": deque(),  # 1GHz域 - IP核产生的请求
                 "l2h_fifo_pre": None,  # 1GHz → 2GHz 预缓冲
-                "h2l_fifo_pre": None,  # 2GHz → 1GHz 预缓冲
+                "h2l_fifo_h_pre": None,  # 2GHz → H2L_H 预缓冲
+                "h2l_fifo_l_pre": None,  # H2L_H → H2L_L 预缓冲
                 "l2h_fifo": deque(maxlen=l2h_depth),  # 1GHz → 2GHz 转换FIFO
-                "h2l_fifo": deque(maxlen=h2l_depth),  # 2GHz → 1GHz 转换FIFO
+                "h2l_fifo_h": deque(maxlen=h2l_h_depth),  # 2GHz域 高频FIFO
+                "h2l_fifo_l": deque(maxlen=h2l_l_depth),  # 1GHz域 低频FIFO
             },
             "rsp": {
                 "network": rsp_network,
                 "send_flits": rsp_network.send_flits,
                 "inject_fifo": deque(),
                 "l2h_fifo_pre": None,
-                "h2l_fifo_pre": None,
+                "h2l_fifo_h_pre": None,
+                "h2l_fifo_l_pre": None,
                 "l2h_fifo": deque(maxlen=l2h_depth),
-                "h2l_fifo": deque(maxlen=h2l_depth),
+                "h2l_fifo_h": deque(maxlen=h2l_h_depth),
+                "h2l_fifo_l": deque(maxlen=h2l_l_depth),
             },
             "data": {
                 "network": data_network,
                 "send_flits": data_network.send_flits,
                 "inject_fifo": deque(),
                 "l2h_fifo_pre": None,
-                "h2l_fifo_pre": None,
+                "h2l_fifo_h_pre": None,
+                "h2l_fifo_l_pre": None,
                 "l2h_fifo": deque(maxlen=l2h_depth),
-                "h2l_fifo": deque(maxlen=h2l_depth),
+                "h2l_fifo_h": deque(maxlen=h2l_h_depth),
+                "h2l_fifo_l": deque(maxlen=h2l_l_depth),
             },
         }
 
@@ -271,11 +279,11 @@ class IPInterface:
             return False
 
     def EQ_channel_buffer_to_h2l_pre(self, network_type):
-        """2GHz: network.EQ_channel_buffer → h2l_fifo_pre"""
+        """2GHz: network.EQ_channel_buffer → h2l_fifo_h_pre"""
         net_info = self.networks[network_type]
         network = net_info["network"]
 
-        if net_info["h2l_fifo_pre"] is not None:
+        if net_info["h2l_fifo_h_pre"] is not None:
             return  # 预缓冲已占用
 
         try:
@@ -291,19 +299,38 @@ class IPInterface:
             if not eq_buf:
                 return
 
-            # 检查h2l_fifo是否有空间
-            if len(net_info["h2l_fifo"]) >= net_info["h2l_fifo"].maxlen:
+            # 检查h2l_fifo_h是否有空间
+            if len(net_info["h2l_fifo_h"]) >= net_info["h2l_fifo_h"].maxlen:
                 return
 
             flit = eq_buf.popleft()
             flit.is_arrive = True
-            flit.flit_position = "H2L_FIFO"
-            net_info["h2l_fifo_pre"] = flit
+            flit.flit_position = "H2L_H_FIFO"
+            net_info["h2l_fifo_h_pre"] = flit
             net_info["network"].arrive_flits[flit.packet_id].append(flit)
             net_info["network"].recv_flits_num += 1
 
         except (KeyError, AttributeError) as e:
-            logging.warning(f"EQ to h2l transfer failed for {network_type}: {e}")
+            logging.warning(f"EQ to h2l_h transfer failed for {network_type}: {e}")
+
+    def h2l_h_to_h2l_l_pre(self, network_type):
+        """网络频率: h2l_fifo_h → h2l_fifo_l_pre"""
+        net_info = self.networks[network_type]
+
+        if net_info["h2l_fifo_l_pre"] is not None:
+            return  # L级预缓冲已占用
+
+        if not net_info["h2l_fifo_h"]:
+            return  # H级FIFO为空
+
+        # 检查L级FIFO是否有空间
+        if len(net_info["h2l_fifo_l"]) >= net_info["h2l_fifo_l"].maxlen:
+            return
+
+        # 从H级FIFO传输到L级预缓冲
+        flit = net_info["h2l_fifo_h"].popleft()
+        flit.flit_position = "H2L_L_FIFO"
+        net_info["h2l_fifo_l_pre"] = flit
 
     def _handle_received_request(self, req: Flit):
         """处理接收到的请求（SN端）"""
@@ -553,9 +580,9 @@ class IPInterface:
                     print(f"Warning: No SN tracker found for packet_id {flit.packet_id}")
 
     def h2l_to_eject_fifo(self, network_type):
-        """1GHz: h2l_fifo → 处理完成"""
+        """1GHz: h2l_fifo_l → 处理完成"""
         net_info = self.networks[network_type]
-        if not net_info["h2l_fifo"]:
+        if not net_info["h2l_fifo_l"]:
             return
 
         current_cycle = getattr(self, "current_cycle", 0)
@@ -564,7 +591,7 @@ class IPInterface:
             if not self.token_bucket.consume():
                 return
 
-        flit = net_info["h2l_fifo"].popleft()
+        flit = net_info["h2l_fifo_l"].popleft()
         flit.flit_position = "IP_eject"
         flit.is_finish = True
         # 根据网络类型进行特殊处理
@@ -609,9 +636,15 @@ class IPInterface:
                 net.IQ_channel_buffer[self.ip_type][self.ip_pos].append(net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos])
                 net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = None
 
-            if net_info["h2l_fifo_pre"] is not None and len(net_info["h2l_fifo"]) < net_info["h2l_fifo"].maxlen:
-                net_info["h2l_fifo"].append(net_info["h2l_fifo_pre"])
-                net_info["h2l_fifo_pre"] = None
+            # h2l_fifo_h_pre → h2l_fifo_h
+            if net_info["h2l_fifo_h_pre"] is not None and len(net_info["h2l_fifo_h"]) < net_info["h2l_fifo_h"].maxlen:
+                net_info["h2l_fifo_h"].append(net_info["h2l_fifo_h_pre"])
+                net_info["h2l_fifo_h_pre"] = None
+
+            # h2l_fifo_l_pre → h2l_fifo_l
+            if net_info["h2l_fifo_l_pre"] is not None and len(net_info["h2l_fifo_l"]) < net_info["h2l_fifo_l"].maxlen:
+                net_info["h2l_fifo_l"].append(net_info["h2l_fifo_l_pre"])
+                net_info["h2l_fifo_l_pre"] = None
 
     def eject_step(self, cycle):
         """根据周期和频率调用eject相应的方法"""
@@ -624,6 +657,7 @@ class IPInterface:
         # 2GHz 操作（每半个网络周期执行一次）
         for net_type in ["req", "rsp", "data"]:
             self.EQ_channel_buffer_to_h2l_pre(net_type)
+            self.h2l_h_to_h2l_l_pre(net_type)
 
         # 1GHz 操作（每个网络周期执行一次）
         if cycle_mod == 0:
