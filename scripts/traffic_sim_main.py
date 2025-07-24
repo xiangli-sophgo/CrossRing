@@ -53,6 +53,65 @@ def run_single_simulation(sim_params):
             topo_type = config.TOPO_TYPE
         config.TOPO_TYPE = topo_type
 
+        # Set simulation parameters
+        config.NUM_COL = 4
+        config.NUM_NODE = 40
+        config.BURST = 4
+        config.NUM_IP = 32
+        config.NUM_DDR = 32
+        config.NUM_L2M = 32
+        config.NUM_GDMA = 32
+        config.NUM_SDMA = 32
+        config.NUM_RN = 32
+        config.NUM_SN = 32
+        config.RN_R_TRACKER_OSTD = 64
+        config.RN_W_TRACKER_OSTD = 64
+        config.SN_DDR_R_TRACKER_OSTD = 64
+        config.SN_DDR_W_TRACKER_OSTD = 64
+        config.SN_L2M_R_TRACKER_OSTD = 64
+        config.SN_L2M_W_TRACKER_OSTD = 64
+        config.RN_RDB_SIZE = config.RN_R_TRACKER_OSTD * config.BURST
+        config.RN_WDB_SIZE = config.RN_W_TRACKER_OSTD * config.BURST
+        config.SN_DDR_WDB_SIZE = config.SN_DDR_W_TRACKER_OSTD * config.BURST
+        config.SN_L2M_WDB_SIZE = config.SN_L2M_W_TRACKER_OSTD * config.BURST
+        config.DDR_R_LATENCY_original = 40
+        config.DDR_R_LATENCY_VAR_original = 0
+        config.DDR_W_LATENCY_original = 0
+        config.L2M_R_LATENCY_original = 12
+        config.L2M_W_LATENCY_original = 16
+        config.IQ_CH_FIFO_DEPTH = 10
+        config.EQ_CH_FIFO_DEPTH = 10
+        config.IQ_OUT_FIFO_DEPTH = 8
+        config.RB_OUT_FIFO_DEPTH = 8
+        config.SN_TRACKER_RELEASE_LATENCY = 40
+        # config.GDMA_BW_LIMIT = 16
+        # config.CDMA_BW_LIMIT = 16
+        # config.DDR_BW_LIMIT = 128
+        config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 0
+
+        config.TL_Etag_T2_UE_MAX = 8
+        config.TL_Etag_T1_UE_MAX = 15
+        config.TR_Etag_T2_UE_MAX = 12
+        config.RB_IN_FIFO_DEPTH = 16
+        config.TU_Etag_T2_UE_MAX = 8
+        config.TU_Etag_T1_UE_MAX = 15
+        config.TD_Etag_T2_UE_MAX = 12
+        config.EQ_IN_FIFO_DEPTH = 16
+
+        config.ITag_TRIGGER_Th_H = config.ITag_TRIGGER_Th_V = 80
+        config.ITag_MAX_NUM_H = config.ITag_MAX_NUM_V = 1
+        config.ETag_BOTHSIDE_UPGRADE = 0
+        config.SLICE_PER_LINK = 8
+
+        config.GDMA_RW_GAP = np.inf
+        config.SDMA_RW_GAP = np.inf
+        config.CHANNEL_SPEC = {
+            "gdma": 2,
+            "sdma": 2,
+            "cdma": 1,
+            "ddr": 2,
+            "l2m": 2,
+        }
         # Create simulation instance
         sim: BaseModel = eval(f"{model_type}_model")(
             model_type=model_type,
@@ -66,56 +125,6 @@ def run_single_simulation(sim_params):
             plot_RN_BW_fig=1,
             verbose=0,
         )
-
-        # Set simulation parameters
-        sim.config.BURST = 4
-        sim.config.NUM_IP = 32
-        sim.config.NUM_DDR = 32
-        sim.config.NUM_L2M = 32
-        sim.config.NUM_GDMA = 32
-        sim.config.NUM_SDMA = 32
-        sim.config.NUM_RN = 32
-        sim.config.NUM_SN = 32
-        sim.config.RN_R_TRACKER_OSTD = 64
-        sim.config.RN_W_TRACKER_OSTD = 64
-        sim.config.RN_RDB_SIZE = sim.config.RN_R_TRACKER_OSTD * sim.config.BURST
-        sim.config.RN_WDB_SIZE = sim.config.RN_W_TRACKER_OSTD * sim.config.BURST
-        sim.config.SN_DDR_R_TRACKER_OSTD = 64
-        sim.config.SN_DDR_W_TRACKER_OSTD = 64
-        sim.config.SN_L2M_R_TRACKER_OSTD = 64
-        sim.config.SN_L2M_W_TRACKER_OSTD = 64
-        sim.config.SN_DDR_WDB_SIZE = sim.config.SN_DDR_W_TRACKER_OSTD * sim.config.BURST
-        sim.config.SN_L2M_WDB_SIZE = sim.config.SN_L2M_W_TRACKER_OSTD * sim.config.BURST
-        sim.config.DDR_R_LATENCY_original = 40
-        sim.config.DDR_R_LATENCY_VAR_original = 0
-        sim.config.DDR_W_LATENCY_original = 0
-        sim.config.L2M_R_LATENCY_original = 12
-        sim.config.L2M_W_LATENCY_original = 16
-        sim.config.IQ_CH_FIFO_DEPTH = 10
-        sim.config.EQ_CH_FIFO_DEPTH = 10
-        sim.config.IQ_OUT_FIFO_DEPTH = 8
-        sim.config.RB_IN_FIFO_DEPTH = 16
-        sim.config.RB_OUT_FIFO_DEPTH = 8
-        sim.config.EQ_IN_FIFO_DEPTH = 16
-        sim.config.TL_Etag_T2_UE_MAX = 8
-        sim.config.TL_Etag_T1_UE_MAX = 15
-        sim.config.TR_Etag_T2_UE_MAX = 12
-        sim.config.TU_Etag_T2_UE_MAX = 8
-        sim.config.TU_Etag_T1_UE_MAX = 15
-        sim.config.TD_Etag_T2_UE_MAX = 12
-        sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
-        sim.config.ITag_MAX_NUM_H = sim.config.ITag_MAX_NUM_V = 1
-        sim.config.ETag_BOTHSIDE_UPGRADE = 0
-        sim.config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 1
-
-        sim.config.GDMA_RW_GAP = np.inf
-        sim.config.SDMA_RW_GAP = np.inf
-        sim.config.CHANNEL_SPEC = {
-            "gdma": 2,
-            "sdma": 2,
-            "ddr": 4,
-            "l2m": 2,
-        }
 
         sim.initial()
         sim.end_time = 10000
@@ -246,12 +255,13 @@ def main():
     parser.add_argument("--outstanding", type=int, default=2048, help="Outstanding number (must be power of 2)")
     parser.add_argument("--config", default="../config/config2.json", help="Simulation config file path")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="Simulation model type")
-    parser.add_argument("--results_file_name", default="DeepSeek_0722_1700_10us_CP", help="Base name for results files")
+    parser.add_argument("--results_file_name", default="DeepSeek_0722_1700_10us", help="Base name for results files")
     parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both")
     # parser.add_argument("--max_workers", type=int, default=None, help="Maximum number of parallel workers (default: number of CPU cores)")
     parser.add_argument("--max_workers", type=int, default=1, help="Maximum number of parallel workers (default: number of CPU cores)")
 
     args = parser.parse_args()
+    np.random.seed(722)
 
     if args.mode in [0, 2]:
         print("Processing traffic data...")

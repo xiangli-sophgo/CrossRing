@@ -239,5 +239,5 @@ if __name__ == "__main__":
     stat = AddressStat(200)
     # Specify the output CSV file path
     output_csv = None
-    output_csv = r"../../Result/Data_csv/DeepSeek_traffic_stats.csv"
-    stat.run(r"../../traffic/DeepSeek_0616/step1_flatten/", output_csv, plot_data=0)
+    output_csv = r"../../Result/Data_csv/DeepSeek_traffic_stats_0722.csv"
+    stat.run(r"../../traffic/DeepSeek_0616/step1_flatten/", output_csv, plot_data=1)

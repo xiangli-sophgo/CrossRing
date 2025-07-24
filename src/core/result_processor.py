@@ -1,6 +1,7 @@
 import numpy as np
 import json
 import os
+import csv
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional, NamedTuple
 from dataclasses import dataclass
@@ -228,9 +229,9 @@ class BandwidthAnalyzer:
                 actual_dest_type = representative_flit.original_destination_type  # 实际目标类型
 
             # 收集保序信息
-            src_dest_order_id = getattr(representative_flit, 'src_dest_order_id', -1)
-            packet_category = getattr(representative_flit, 'packet_category', "")
-            
+            src_dest_order_id = getattr(representative_flit, "src_dest_order_id", -1)
+            packet_category = getattr(representative_flit, "packet_category", "")
+
             request_info = RequestInfo(
                 packet_id=packet_id,
                 start_time=representative_flit.cmd_entry_cake0_cycle // self.network_frequency,
@@ -926,14 +927,92 @@ class BandwidthAnalyzer:
                 self.draw_ring_flow_graph(self.sim_model.data_network, save_path=flow_save_path)
             else:
                 self.draw_flow_graph(self.sim_model.data_network, mode="total", save_path=flow_save_path, show_cdma=self.sim_model.flow_fig_show_CDMA)
+
+
         return results
 
-    def draw_flow_graph(self, network: Network, mode="total", node_size=2000, save_path=None, show_cdma=True):
+    def export_link_statistics_csv(self, network: Network, csv_path: str):
+        """
+        导出链路统计数据到CSV文件
+
+        Args:
+            network: 网络对象
+            csv_path: CSV文件保存路径
+        """
+        if not hasattr(network, "get_links_utilization_stats") or not callable(network.get_links_utilization_stats):
+            print(f"警告: 网络 {network.name} 不支持链路统计导出")
+            return
+
+        try:
+            utilization_stats = network.get_links_utilization_stats()
+            if not utilization_stats:
+                print("警告: 没有链路统计数据可导出")
+                return
+
+            # 准备CSV数据
+            csv_data = []
+            for (src, dst), stats in utilization_stats.items():
+                row = {
+                    "source_node": src,
+                    "destination_node": dst,
+                    "utilization": f"{stats.get('utilization', 0.0)*100:.2f}%",
+                    "T2_ratio": f"{stats.get('T2_ratio', 0.0)*100:.2f}%",
+                    "T1_ratio": f"{stats.get('T1_ratio', 0.0)*100:.2f}%",
+                    "T0_ratio": f"{stats.get('T0_ratio', 0.0)*100:.2f}%",
+                    "ITag_ratio": f"{stats.get('ITag_ratio', 0.0)*100:.2f}%",
+                    "empty_ratio": f"{stats.get('empty_ratio', 0.0)*100:.2f}%",
+                    "T2_count": stats.get("T2_count", 0),
+                    "T1_count": stats.get("T1_count", 0),
+                    "T0_count": stats.get("T0_count", 0),
+                    "ITag_count": stats.get("ITag_count", 0),
+                    "empty_count": stats.get("empty_count", 0),
+                    "total_cycles": stats.get("total_cycles", 0),
+                }
+                csv_data.append(row)
+
+            # 写入CSV文件
+            if csv_data:
+                fieldnames = [
+                    "source_node",
+                    "destination_node",
+                    "utilization",
+                    "T2_ratio",
+                    "T1_ratio",
+                    "T0_ratio",
+                    "ITag_ratio",
+                    "empty_ratio",
+                    "T2_count",
+                    "T1_count",
+                    "T0_count",
+                    "ITag_count",
+                    "empty_count",
+                    "total_cycles",
+                ]
+
+                with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(csv_data)
+                if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
+                    print(f"链路统计数据已导出到: {csv_path}")
+            else:
+                print("警告: 没有有效的链路统计数据")
+
+        except Exception as e:
+            print(f"导出链路统计数据时发生错误: {e}")
+
+    def draw_flow_graph(self, network: Network, mode="utilization", node_size=2000, save_path=None, show_cdma=True):
         """
         绘制合并的网络流图和IP
 
         :param network: 网络对象
-        :param mode: 显示模式，可以是'read', 'write'或'total'
+        :param mode: 显示模式，支持:
+                    - 'utilization': 链路利用率 (默认)
+                    - 'T2_ratio': T2优先级占比
+                    - 'T1_ratio': T1优先级占比
+                    - 'T0_ratio': T0优先级占比
+                    - 'ITag_ratio': ITag标记占比
+                    - 'total': 向后兼容旧格式
         :param node_size: 节点大小
         :param save_path: 图片保存路径
         :param show_cdma: 是否展示CDMA，True显示SDMA/GDMA/CDMA三分区，False显示SDMA/GDMA两分区
@@ -944,28 +1023,106 @@ class BandwidthAnalyzer:
         # 准备网络流数据
         G = nx.DiGraph()
 
-        # 处理不同模式的网络流数据
-        if mode == "read":
-            links = network.links_flow_stat.get("read", {})
-        elif mode == "write":
-            links = network.links_flow_stat.get("write", {})
-        else:  # total模式，需要合并读和写的数据
-            read_links = network.links_flow_stat.get("read", {})
-            write_links = network.links_flow_stat.get("write", {})
+        # 处理新的网络流数据格式
+        links = {}
+        if hasattr(network, "get_links_utilization_stats") and callable(network.get_links_utilization_stats):
+            try:
+                utilization_stats = network.get_links_utilization_stats()
+                if mode == "utilization":
+                    # 显示链路利用率
+                    links = {link: stats["utilization"] for link, stats in utilization_stats.items()}
+                elif mode == "T2_ratio":
+                    # 显示T2优先级比例
+                    links = {link: stats["T2_ratio"] for link, stats in utilization_stats.items()}
+                elif mode == "T1_ratio":
+                    # 显示T1优先级比例
+                    links = {link: stats["T1_ratio"] for link, stats in utilization_stats.items()}
+                elif mode == "T0_ratio":
+                    # 显示T0优先级比例
+                    links = {link: stats["T0_ratio"] for link, stats in utilization_stats.items()}
+                elif mode == "ITag_ratio":
+                    # 显示ITag标记比例
+                    links = {link: stats["ITag_ratio"] for link, stats in utilization_stats.items()}
+                elif mode == "total":
+                    # 将利用率转换为带宽值（为了向后兼容）
+                    # 原逻辑：flit_count * 128 / time_cycles
+                    # 新逻辑：从统计数据反推flit数量，然后计算带宽
+                    time_cycles = self.simulation_end_cycle // self.config.NETWORK_FREQUENCY
+                    links = {}
+                    for link, stats in utilization_stats.items():
+                        # 估算通过该链路的flit数量
+                        # 利用率 * 总slice设置次数 * slice数 / 模拟时间可以近似为flit流量
+                        total_slice_operations = stats.get("total_slice_sets", 0)
+                        if total_slice_operations > 0 and time_cycles > 0:
+                            # 假设每个slice操作对应一个时间单位，带宽 = 利用的slice操作 * flit_size / 时间
+                            utilized_operations = stats["utilization"] * total_slice_operations
+                            bandwidth = utilized_operations * 128 / time_cycles
+                            links[link] = bandwidth
+                        else:
+                            links[link] = 0.0
+                else:  # 默认显示利用率
+                    links = {link: stats["utilization"] for link, stats in utilization_stats.items()}
+            except Exception as e:
+                print(f"警告: 获取链路统计数据失败: {e}，尝试使用旧格式")
+                # 回退到旧格式处理
+                links = self._handle_legacy_links_format(network, mode)
+        else:
+            # 使用旧格式处理
+            links = self._handle_legacy_links_format(network, mode)
 
-            # 合并读和写的流量
-            all_keys = set(read_links.keys()) | set(write_links.keys())
-            links = {}
-            for key in all_keys:
-                read_val = read_links.get(key, 0)
-                write_val = write_links.get(key, 0)
-                links[key] = read_val + write_val
+        # 检查是否获取到链路数据
+        if not links:
+            print(f"警告: 没有获取到链路数据，mode={mode}，网络类型={type(network).__name__}")
+            if hasattr(network, "links_flow_stat"):
+                print(f"network.links_flow_stat类型: {type(network.links_flow_stat)}")
+                if isinstance(network.links_flow_stat, dict):
+                    print(f"links_flow_stat键数量: {len(network.links_flow_stat)}")
+            # 如果没有链路数据，创建空图并返回
+            if save_path:
+                fig, ax = plt.subplots(figsize=(8, 6))
+                ax.text(0.5, 0.5, f"无链路数据可显示\\nmode: {mode}", ha="center", va="center", transform=ax.transAxes, fontsize=12)
+                ax.set_xlim(0, 1)
+                ax.set_ylim(0, 1)
+                ax.axis("off")
+                plt.tight_layout()
+                plt.savefig(save_path, dpi=150, bbox_inches="tight")
+                plt.close()
+                print(f"已保存空图到: {save_path}")
+            return
 
         link_values = []
         for (i, j), value in links.items():
-            link_value = value * 128 / (self.simulation_end_cycle // self.config.NETWORK_FREQUENCY) if value else 0
-            link_values.append(link_value)
-            formatted_label = f"{link_value:.1f}"
+            # 新格式的value已经是比例，旧格式需要转换
+            if mode in ["utilization", "T2_ratio", "T1_ratio", "T0_ratio", "ITag_ratio"]:
+                # 比例模式：直接使用比例值（0.0-1.0）并显示为百分比
+                display_value = float(value) if value else 0.0
+                link_values.append(display_value)
+                formatted_label = f"{display_value*100:.1f}%"
+            elif mode == "total":
+                # 带宽模式：直接使用计算好的带宽值
+                link_value = float(value) if value else 0.0
+                link_values.append(link_value)
+                formatted_label = f"{link_value:.1f}"
+            else:
+                # 其他旧格式：可能需要计算带宽
+                link_value = value * 128 / (self.simulation_end_cycle // self.config.NETWORK_FREQUENCY) if value else 0
+                link_values.append(link_value)
+                formatted_label = f"{link_value:.1f}"
+
+            # 为total模式添加T2比例和空闲比例信息
+            if mode == "total" and hasattr(network, "get_links_utilization_stats") and callable(network.get_links_utilization_stats):
+                try:
+                    utilization_stats = network.get_links_utilization_stats()
+                    if (i, j) in utilization_stats:
+                        stats = utilization_stats[(i, j)]
+                        t2_ratio = stats.get("T2_ratio", 0.0)
+                        empty_ratio = stats.get("empty_ratio", 0.0)
+                        # 添加T2比例和空闲比例到标签，保留百分号
+                        formatted_label += f"\n{t2_ratio*100:.0f}% {empty_ratio*100:.0f}%"
+                except:
+                    # 如果获取统计数据失败，保持原标签
+                    pass
+
             G.add_edge(i, j, label=formatted_label)
 
         # 链路颜色映射范围：动态最大值的60%阈值起红
@@ -997,7 +1154,10 @@ class BandwidthAnalyzer:
         # 动态计算字体大小，添加最大值上限以避免过大
         node_count = len(G.nodes())
         base_font = 9
-        dynamic_font = max(4, base_font * (65 / node_count) ** 0.5)
+        if node_count > 0:
+            dynamic_font = max(4, base_font * (65 / node_count) ** 0.5)
+        else:
+            dynamic_font = base_font  # 如果没有节点，使用默认字体大小
         max_font = 14  # 最大字号上限，可以根据需要调整
         dynamic_font = min(dynamic_font, max_font)
 
@@ -1311,8 +1471,13 @@ class BandwidthAnalyzer:
         for i, j, data in G.edges(data=True):
             x1, y1 = pos[i]
             x2, y2 = pos[j]
-            # 根据流量值映射颜色
-            value = float(data["label"])
+            # 根据流量值映射颜色，从标签中提取数值部分
+            label_text = data["label"]
+            if "\n" in label_text:
+                # 如果是多行标签，取第一行的数值部分
+                value = float(label_text.split("\n")[0])
+            else:
+                value = float(label_text)
             # 链路60%阈值起红
             if value <= link_mapping_min:
                 intensity = 0.0
@@ -1356,10 +1521,17 @@ class BandwidthAnalyzer:
         edge_labels = nx.get_edge_attributes(G, "label")
         for edge, label in edge_labels.items():
             i, j = edge
-            if float(label) == 0.0:
+            # 从标签中提取数值部分用于颜色映射
+            if "\n" in label:
+                # 如果是多行标签，取第一行的数值部分
+                first_line = label.split("\n")[0]
+                value = float(first_line)
+            else:
+                value = float(label)
+
+            if value == 0.0:
                 continue
             # 根据带宽值映射标签颜色
-            value = float(label)
             # 链路60%阈值起红
             if value <= link_mapping_min:
                 intensity = 0.0
@@ -1392,14 +1564,22 @@ class BandwidthAnalyzer:
                     label_pos = (x, y + square_size / 2 + offset)
                     angle = 0
 
+                # 自环链路只显示带宽，不显示比例信息
+                label_str = str(label)
+                if "\n" in label_str:
+                    # 如果是多行标签，只取第一行（带宽值）
+                    bandwidth_text = label_str.split("\n")[0]
+                else:
+                    bandwidth_text = label_str
+
                 ax.text(
                     *label_pos,
-                    str(label),
+                    bandwidth_text,
                     ha="center",
                     va="center",
                     color=color,
-                    fontweight="bold",
-                    fontsize=dynamic_font * 0.9,
+                    fontweight="normal",
+                    fontsize=dynamic_font * 0.7,
                     rotation=angle,
                 )
 
@@ -1416,29 +1596,63 @@ class BandwidthAnalyzer:
 
                 if has_reverse:
                     if is_horizontal:
-                        perp_dx, perp_dy = -dy * 0.1 + 0.2, dx * 0.1
+                        perp_dx, perp_dy = -dy * 0.15 + 0.25, dx * 0.15
                     else:
-                        perp_dx, perp_dy = -dy * 0.18, dx * 0.18 - 0.3
+                        perp_dx, perp_dy = -dy * 0.23, dx * 0.23 - 0.35
                     label_x = mid_x + perp_dx
                     label_y = mid_y + perp_dy
                 else:
                     if is_horizontal:
-                        label_x = mid_x + dx * 0.1
-                        label_y = mid_y + dy * 0.1
+                        label_x = mid_x + dx * 0.15
+                        label_y = mid_y + dy * 0.15
                     else:
-                        label_x = mid_x + (-dy * 0.1 if dx > 0 else dy * 0.1)
-                        label_y = mid_y - 0.1
+                        label_x = mid_x + (-dy * 0.15 if dx > 0 else dy * 0.15)
+                        label_y = mid_y - 0.15
 
-                ax.text(
-                    label_x,
-                    label_y,
-                    str(label),
-                    ha="center",
-                    va="center",
-                    fontsize=dynamic_font,
-                    fontweight="bold",
-                    color=color,
-                )
+                # 检查是否为多行标签（包含比例信息）
+                label_str = str(label)
+                if "\n" in label_str:
+                    # 分别绘制带宽和比例
+                    lines = label_str.split("\n")
+                    bandwidth_text = lines[0]  # 带宽值
+                    ratio_text = lines[1] if len(lines) > 1 else ""  # 比例信息
+
+                    # 绘制带宽文本（较大字体）
+                    ax.text(
+                        label_x,
+                        label_y + 0.08,  # 增加向上偏移避免重叠
+                        bandwidth_text,
+                        ha="center",
+                        va="center",
+                        fontsize=dynamic_font * 0.7,  # 带宽用较大字体
+                        fontweight="normal",  # 去掉粗体
+                        color=color,
+                    )
+
+                    # 绘制比例文本（较小字体）
+                    if ratio_text:
+                        ax.text(
+                            label_x,
+                            label_y - 0.08,  # 增加向下偏移避免重叠
+                            ratio_text,
+                            ha="center",
+                            va="center",
+                            fontsize=dynamic_font * 0.5,  # 比例用较小字体
+                            fontweight="normal",
+                            color=color,
+                        )
+                else:
+                    # 单行标签，使用原有逻辑
+                    ax.text(
+                        label_x,
+                        label_y,
+                        label_str,
+                        ha="center",
+                        va="center",
+                        fontsize=dynamic_font * 0.7,  # 单行用较大字体
+                        fontweight="normal",  # 去掉粗体
+                        color=color,
+                    )
 
         plt.axis("off")
         title = f"{network.name} - {mode.capitalize()} Bandwidth"
@@ -1446,6 +1660,14 @@ class BandwidthAnalyzer:
         if self.config.SPARE_CORE_ROW != -1:
             title += f"\nRow: {self.config.SPARE_CORE_ROW}, Failed cores: {self.config.FAIL_CORE_POS}, Spare cores: {self.config.spare_core_pos}"
         plt.title(title, fontsize=20)
+
+        # 设置坐标轴范围以确保所有节点都显示
+        if pos:
+            xs = [p[0] for p in pos.values()]
+            ys = [p[1] for p in pos.values()]
+            margin = 2.0  # 增加边距确保显示完整
+            ax.set_xlim(min(xs) - margin, max(xs) + margin)
+            ax.set_ylim(min(ys) - margin, max(ys) + margin)
 
         plt.tight_layout()
 
@@ -1483,9 +1705,9 @@ class BandwidthAnalyzer:
             network = self.sim_model.data_network
             if hasattr(network, "links_flow_stat"):
                 config_data["links_flow_stat"] = {}
-                for mode, links in network.links_flow_stat.items():
-                    # 转换为可序列化格式，键需要转换为字符串
-                    config_data["links_flow_stat"][mode] = {f"{i},{j}": value for (i, j), value in links.items()}
+                # 新格式：直接是 {(i,j): {统计数据}} 的格式
+                for (i, j), stats in network.links_flow_stat.items():
+                    config_data["links_flow_stat"][f"{i},{j}"] = stats
 
             # 保存finish_cycle用于计算链路带宽
             config_data["finish_cycle"] = float(self.finish_cycle)
@@ -1585,7 +1807,7 @@ class BandwidthAnalyzer:
                 # 处理保序字段（向后兼容）
                 src_dest_order_id = int(row.get("src_dest_order_id", -1))
                 packet_category = str(row.get("packet_category", ""))
-                
+
                 request_info = RequestInfo(
                     packet_id=int(row["packet_id"]),
                     start_time=int(row["start_time_ns"]),
@@ -1621,7 +1843,7 @@ class BandwidthAnalyzer:
                 # 处理保序字段（向后兼容）
                 src_dest_order_id = int(row.get("src_dest_order_id", -1))
                 packet_category = str(row.get("packet_category", ""))
-                
+
                 request_info = RequestInfo(
                     packet_id=int(row["packet_id"]),
                     start_time=int(row["start_time_ns"]),
@@ -1697,12 +1919,19 @@ class BandwidthAnalyzer:
         # 生成ETag per-node FIFO统计CSV文件
         self._generate_etag_per_node_fifo_csv(output_path)
 
+        # 导出链路统计数据到CSV
+        if hasattr(self.sim_model, 'data_network') and self.sim_model.data_network:
+            link_stats_csv = os.path.join(output_path, "link_statistics.csv")
+            self.export_link_statistics_csv(self.sim_model.data_network, link_stats_csv)
+
         # 保存分析配置
         self._save_analysis_config(output_path)
 
         if self.sim_model.verbose:
             print(f"带宽分析报告： {report_file}")
             print(f"具体端口的统计CSV： {output_path}ports_bandwidth.csv")
+            if hasattr(self.sim_model, 'data_network') and self.sim_model.data_network:
+                print(f"链路统计CSV： {output_path}link_statistics.csv")
 
     @staticmethod
     def reanalyze_and_plot_from_csv(csv_folder: str, output_path: str = None, plot_rn_bw: bool = True, plot_flow: bool = False, show_cdma: bool = False, min_gap_threshold=50) -> Dict:
@@ -1764,6 +1993,7 @@ class BandwidthAnalyzer:
             flow_save_path = os.path.join(output_path, f"flow_graph_{analyzer.config.TOPO_TYPE}_replot.png")
             analyzer.draw_flow_graph(analyzer.temp_network, mode="total", save_path=flow_save_path, show_cdma=show_cdma)
             print(f"网络带宽图已保存: {flow_save_path}")
+
         elif plot_flow:
             print("警告: 没有找到网络链路数据，无法绘制流图")
 
@@ -2795,3 +3025,51 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    def _handle_legacy_links_format(self, network, mode):
+        """处理旧的links_flow_stat格式"""
+        links = {}
+        if hasattr(network, "links_flow_stat") and isinstance(network.links_flow_stat, dict):
+            # 检查是否是旧的read/write格式
+            if "read" in network.links_flow_stat and "write" in network.links_flow_stat:
+                if mode == "read":
+                    links = network.links_flow_stat.get("read", {})
+                elif mode == "write":
+                    links = network.links_flow_stat.get("write", {})
+                else:  # total模式，合并读和写的数据
+                    read_links = network.links_flow_stat.get("read", {})
+                    write_links = network.links_flow_stat.get("write", {})
+                    all_keys = set(read_links.keys()) | set(write_links.keys())
+                    for key in all_keys:
+                        read_val = read_links.get(key, 0)
+                        write_val = write_links.get(key, 0)
+                        links[key] = read_val + write_val
+            else:
+                # 可能是新格式但没有get_links_utilization_stats方法
+                # 尝试直接使用links_flow_stat
+                for link, stats in network.links_flow_stat.items():
+                    if isinstance(stats, dict) and "total_cycles" in stats:
+                        # 看起来是新格式的原始数据，手动计算利用率
+                        total_cycles = stats.get("total_cycles", 1)
+                        slice_count = 7  # 默认假设7个slice，可以从network.links获取实际值
+                        if hasattr(network, "links") and link in network.links:
+                            slice_count = len(network.links[link])
+
+                        total_slice_cycles = total_cycles * slice_count
+                        if total_slice_cycles > 0:
+                            if mode == "utilization":
+                                utilization = (stats.get("T2_count", 0) + stats.get("T1_count", 0) + stats.get("T0_count", 0)) / total_slice_cycles
+                                links[link] = utilization
+                            elif mode == "T2_ratio":
+                                links[link] = stats.get("T2_count", 0) / total_slice_cycles
+                            elif mode == "T1_ratio":
+                                links[link] = stats.get("T1_count", 0) / total_slice_cycles
+                            elif mode == "T0_ratio":
+                                links[link] = stats.get("T0_count", 0) / total_slice_cycles
+                            elif mode == "ITag_ratio":
+                                links[link] = stats.get("ITag_count", 0) / total_slice_cycles
+                            else:
+                                # 默认返回利用率
+                                utilization = (stats.get("T2_count", 0) + stats.get("T1_count", 0) + stats.get("T0_count", 0)) / total_slice_cycles
+                                links[link] = utilization
+        return links

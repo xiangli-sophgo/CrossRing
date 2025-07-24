@@ -42,7 +42,10 @@ class Network:
         self.cross_point = {"horizontal": defaultdict(lambda: defaultdict(list)), "vertical": defaultdict(lambda: defaultdict(list))}
         # Crosspoint conflict status: maintains pipeline queue [current_cycle, previous_cycle]
         self.crosspoint_conflict = {"horizontal": defaultdict(lambda: defaultdict(lambda: [False, False])), "vertical": defaultdict(lambda: defaultdict(lambda: [False, False]))}
-        self.links_flow_stat = {"read": {}, "write": {}}
+        # 新的链路状态统计 - 记录各种ETag/ITag状态的计数
+        self.links_flow_stat = {}
+        # 每个周期的瞬时状态统计
+        self.links_state_snapshots = []
         # ITag setup
         self.links_tag = {}
         self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
@@ -188,25 +191,39 @@ class Network:
             for j in range(config.NUM_NODE):
                 if adjacency_matrix[i][j] == 1 and i - j != config.NUM_COL:
                     self.links[(i, j)] = [None] * config.SLICE_PER_LINK
-                    self.links_flow_stat["read"][(i, j)] = 0
-                    self.links_flow_stat["write"][(i, j)] = 0
+                    self.links_flow_stat[(i, j)] = {
+                        "T2_count": 0,
+                        "T1_count": 0,
+                        "T0_count": 0,
+                        "ITag_count": 0,
+                        "empty_count": 0,
+                        "total_cycles": 0
+                    }
                     self.links_tag[(i, j)] = [None] * config.SLICE_PER_LINK
             if i in range(0, config.NUM_COL):
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
-                self.links_flow_stat["read"][(i, i)] = 0
-                self.links_flow_stat["write"][(i, i)] = 0
-                self.links_flow_stat["read"][(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = 0
-                self.links_flow_stat["write"][(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = 0
+                self.links_flow_stat[(i, i)] = {
+                    "T2_count": 0, "T1_count": 0, "T0_count": 0,
+                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0
+                }
+                self.links_flow_stat[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = {
+                    "T2_count": 0, "T1_count": 0, "T0_count": 0,
+                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0
+                }
                 self.links_tag[(i, i)] = [None] * 2
                 self.links_tag[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
             if i % config.NUM_COL == 0 and (i // config.NUM_COL) % 2 != 0:
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
-                self.links_flow_stat["read"][(i, i)] = 0
-                self.links_flow_stat["write"][(i, i)] = 0
-                self.links_flow_stat["read"][(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = 0
-                self.links_flow_stat["write"][(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = 0
+                self.links_flow_stat[(i, i)] = {
+                    "T2_count": 0, "T1_count": 0, "T0_count": 0,
+                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0
+                }
+                self.links_flow_stat[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = {
+                    "T2_count": 0, "T1_count": 0, "T0_count": 0,
+                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0
+                }
                 self.links_tag[(i, i)] = [None] * 2
                 self.links_tag[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
 
@@ -1221,8 +1238,7 @@ class Network:
                 link = self.links.get(flit.current_link)
                 self.set_link_slice(flit.current_link, flit.current_seat_index, flit, cycle)
                 # link[flit.current_seat_index] = flit
-                if (flit.current_seat_index == len(link) - 1 and len(link) > 2) or (flit.current_seat_index == 1 and len(link) == 2):
-                    self.links_flow_stat[flit.req_type][flit.current_link] += 1
+                # 移除原来的读写统计逻辑，改为使用新的状态统计
             else:
                 # 将 flit 放入 ring_bridge 的相应方向
                 if not flit.is_on_station:
@@ -1312,3 +1328,137 @@ class Network:
         if self._sn_positions is None:
             self._sn_positions = list(set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST))
         return self._sn_positions
+
+
+
+    def _update_link_statistics_on_set(self, link, slice_index, new_flit, old_flit, cycle):
+        """
+        在设置链路slice时增量更新统计数据
+        
+        Args:
+            link: 链路tuple (src, dst)
+            slice_index: slice索引
+            new_flit: 新设置的flit（可以是None表示清空）
+            old_flit: 被替换的flit（可以是None表示原本为空）
+            cycle: 当前周期
+        """
+        if link not in self.links_flow_stat:
+            return
+            
+        # 根据新flit状态增加对应计数（每次设置slice时统计一次）
+        if new_flit is None:
+            # 设置为空，检查是否有ITag标记
+            if link in self.links_tag and slice_index < len(self.links_tag[link]):
+                tag_info = self.links_tag[link][slice_index]
+                if tag_info is not None:
+                    # 有ITag标记
+                    self.links_flow_stat[link]["ITag_count"] += 1
+                else:
+                    # 没有任何标记，完全空闲
+                    self.links_flow_stat[link]["empty_count"] += 1
+            else:
+                # 没有标记信息，完全空闲
+                self.links_flow_stat[link]["empty_count"] += 1
+        else:
+            # slice被flit占用，根据flit的ETag_priority分类
+            if hasattr(new_flit, 'ETag_priority'):
+                priority = new_flit.ETag_priority
+                if priority == "T2":
+                    self.links_flow_stat[link]["T2_count"] += 1
+                elif priority == "T1":
+                    self.links_flow_stat[link]["T1_count"] += 1
+                elif priority == "T0":
+                    self.links_flow_stat[link]["T0_count"] += 1
+                else:
+                    # 未知优先级，默认计为T2（与flit默认值一致）
+                    self.links_flow_stat[link]["T2_count"] += 1
+            else:
+                # 没有ETag_priority属性，默认计为T2
+                self.links_flow_stat[link]["T2_count"] += 1
+
+    def collect_cycle_end_link_statistics(self, cycle):
+        """
+        在每个周期结束时统计所有链路第一个slice位置的使用情况
+        
+        Args:
+            cycle: 当前周期
+        """
+        for link in self.links_flow_stat:
+            if link not in self.links:
+                continue
+                
+            # 只统计第一个slice位置(索引0)的使用情况
+            slice_index = 0
+            if slice_index >= len(self.links[link]):
+                continue
+                
+            flit = self.links[link][slice_index]
+            if flit is None:
+                # slice为空，检查是否有ITag标记
+                if link in self.links_tag and slice_index < len(self.links_tag[link]):
+                    tag_info = self.links_tag[link][slice_index]
+                    if tag_info is not None:
+                        # 有ITag标记
+                        self.links_flow_stat[link]["ITag_count"] += 1
+                    else:
+                        # 完全空闲
+                        self.links_flow_stat[link]["empty_count"] += 1
+                else:
+                    # 完全空闲
+                    self.links_flow_stat[link]["empty_count"] += 1
+            else:
+                # slice被flit占用，根据flit的ETag_priority分类
+                if hasattr(flit, 'ETag_priority'):
+                    priority = flit.ETag_priority
+                    if priority == "T2":
+                        self.links_flow_stat[link]["T2_count"] += 1
+                    elif priority == "T1":
+                        self.links_flow_stat[link]["T1_count"] += 1
+                    elif priority == "T0":
+                        self.links_flow_stat[link]["T0_count"] += 1
+                    else:
+                        # 未知优先级，默认计为T2
+                        self.links_flow_stat[link]["T2_count"] += 1
+                else:
+                    # 没有ETag_priority属性，默认计为T2
+                    self.links_flow_stat[link]["T2_count"] += 1
+            
+            # 更新总周期计数
+            self.links_flow_stat[link]["total_cycles"] += 1
+
+    def get_links_utilization_stats(self):
+        """
+        获取链路利用率统计信息
+        返回每个链路各状态的比例
+        
+        利用率计算说明：
+        - 总slice-周期数 = 周期数 × 每个链路的slice数
+        - 各状态比例 = 该状态的slice-周期数 / 总slice-周期数
+        - 链路利用率 = (T2 + T1 + T0) / 总slice-周期数
+        """
+        stats = {}
+        for link, link_stats in self.links_flow_stat.items():
+            # 总slice设置次数就是所有状态计数的总和
+            total_slice_sets = (link_stats["T2_count"] + link_stats["T1_count"] + 
+                               link_stats["T0_count"] + link_stats["ITag_count"] + 
+                               link_stats["empty_count"])
+            
+            if total_slice_sets > 0:
+                stats[link] = {
+                    # 各状态的比例
+                    "T2_ratio": link_stats["T2_count"] / total_slice_sets,
+                    "T1_ratio": link_stats["T1_count"] / total_slice_sets,
+                    "T0_ratio": link_stats["T0_count"] / total_slice_sets,
+                    "ITag_ratio": link_stats["ITag_count"] / total_slice_sets,
+                    "empty_ratio": link_stats["empty_count"] / total_slice_sets,
+                    
+                    # 链路总利用率（被flit占用的比例）
+                    "utilization": (link_stats["T2_count"] + link_stats["T1_count"] + 
+                                  link_stats["T0_count"]) / total_slice_sets,
+                    
+                    # 统计信息
+                    "total_slice_sets": total_slice_sets
+                }
+        
+        return stats
+

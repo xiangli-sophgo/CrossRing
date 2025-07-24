@@ -16,7 +16,6 @@ sys.path.insert(0, project_root)
 
 from config.config import CrossRingConfig
 from src.core.base_model_v2 import BaseModel
-from src.utils.components.route_table import RouteTable
 
 
 def run_CR_v2_demo():
@@ -51,7 +50,8 @@ def run_CR_v2_demo():
     config.CDMA_BW_LIMIT = 8
     config.DDR_BW_LIMIT = 102
     # config.GDMA_BW_LIMIT = 102
-    config.RB_ONLY_TAG_NUM_PER_RING = 8
+    config.RB_ONLY_TAG_NUM_HORIZONTAL = 2  # 横向环每个环的RB_ONLY标签数量
+    config.RB_ONLY_TAG_NUM_VERTICAL = 3   # 纵向环每个环的RB_ONLY标签数量
 
     config.TL_Etag_T2_UE_MAX = 8
     config.TL_Etag_T1_UE_MAX = 15
@@ -104,15 +104,15 @@ def run_CR_v2_demo():
         verbose=1,  # 启用详细输出
         print_trace=0,
         show_trace_id=1014,
-        plot_link_state=0,
-        plot_start_time=600,
+        plot_link_state=1,
+        plot_start_time=2000,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
     )
 
     sim.initial()
     sim.end_time = 6000
-    sim.print_interval = 2000
+    sim.print_interval = 1000
 
     start_time = time.time()
     sim.run()

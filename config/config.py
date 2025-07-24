@@ -45,7 +45,13 @@ class CrossRingConfig:
         self.ITag_TRIGGER_Th_V = args.ITag_TRIGGER_Th_V
         self.ITag_MAX_NUM_H = args.ITag_MAX_Num_H
         self.ITag_MAX_NUM_V = args.ITag_MAX_Num_V
-        self.RB_ONLY_TAG_NUM_PER_RING = args.RB_ONLY_TAG_NUM_PER_RING
+        self.RB_ONLY_TAG_NUM_HORIZONTAL = args.RB_ONLY_TAG_NUM_HORIZONTAL
+        self.RB_ONLY_TAG_NUM_VERTICAL = args.RB_ONLY_TAG_NUM_VERTICAL
+        # 验证标签数量参数在有效范围内
+        if self.RB_ONLY_TAG_NUM_HORIZONTAL < 0:
+            raise ValueError(f"RB_ONLY_TAG_NUM_HORIZONTAL must be non-negative, got {self.RB_ONLY_TAG_NUM_HORIZONTAL}")
+        if self.RB_ONLY_TAG_NUM_VERTICAL < 0:
+            raise ValueError(f"RB_ONLY_TAG_NUM_VERTICAL must be non-negative, got {self.RB_ONLY_TAG_NUM_VERTICAL}")
         # self.reservation_num = args.reservation_num
         self.BURST = args.BURST
         self.NETWORK_FREQUENCY = args.NETWORK_FREQUENCY
@@ -344,7 +350,8 @@ class CrossRingConfig:
         parser.add_argument("--ITag_TRIGGER_Th_V", type=int, default=default_config["ITag_TRIGGER_Th_V"], help="Vertical ring I-Tag trigger threshold")
         parser.add_argument("--ITag_MAX_Num_H", type=int, default=default_config["ITag_MAX_Num_H"], help="Maximum number of I-Tag reservations for horizontal ring XY nodes")
         parser.add_argument("--ITag_MAX_Num_V", type=int, default=default_config["ITag_MAX_Num_V"], help="Maximum number of I-Tag reservations for vertical ring XY nodes")
-        parser.add_argument("--RB_ONLY_TAG_NUM_PER_RING", type=int, default=default_config["RB_ONLY_TAG_NUM_PER_RING"], help="Number of RB only tags per ring")
+        parser.add_argument("--RB_ONLY_TAG_NUM_HORIZONTAL", type=int, default=default_config["RB_ONLY_TAG_NUM_HORIZONTAL"], help="Number of RB only tags per horizontal ring")
+        parser.add_argument("--RB_ONLY_TAG_NUM_VERTICAL", type=int, default=default_config["RB_ONLY_TAG_NUM_VERTICAL"], help="Number of RB only tags per vertical ring")
         parser.add_argument("--GDMA_BW_LIMIT", type=int, default=default_config["GDMA_BW_LIMIT"], help="GDMA Bandwidth limit.")
         parser.add_argument("--SDMA_BW_LIMIT", type=int, default=default_config["SDMA_BW_LIMIT"], help="SDMA Bandwidth limit.")
         parser.add_argument("--CDMA_BW_LIMIT", type=int, default=default_config["CDMA_BW_LIMIT"], help="CDMA Bandwidth limit.")

@@ -430,6 +430,10 @@ class BaseModel:
 
             self.move_pre_to_queues_all()
 
+            self.req_network.collect_cycle_end_link_statistics(self.cycle)
+            self.rsp_network.collect_cycle_end_link_statistics(self.cycle)
+            self.data_network.collect_cycle_end_link_statistics(self.cycle)
+
             self.debug_func()
 
             # Evaluate throughput time

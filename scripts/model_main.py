@@ -14,6 +14,7 @@ if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
 def main():
     # traffic_file_path = r"../test_data/"
     traffic_file_path = r"../traffic/0617/"
+    # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
     # traffic_file_path = r"../traffic/RW_4x2_4x4/"
     # traffic_file_path = r"../traffic/nxn_traffics"
 
@@ -30,9 +31,11 @@ def main():
             # r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
             # r"full_bw_R_4x5.txt"
-            # "LLama2_AllReduce.txt"
-            "LLama2_AttentionFC.txt"
+            "LLama2_AllReduce.txt"
+            # "test1.txt"
+            # "LLama2_AttentionFC.txt"
             # "R_4x4.txt"
+            # "MLA_B32.txt"
         ],
     ]
 
@@ -61,7 +64,10 @@ def main():
         topo_type = config.TOPO_TYPE
 
     if topo_type == "3x3":
-        config.BURST = 2
+        config.NUM_COL = 3
+        config.NUM_NODE = 18
+        config.NUM_ROW = 6
+        config.BURST = 4
         config.NUM_IP = 8
         config.NUM_DDR = 16
         config.NUM_L2M = 4
@@ -80,12 +86,12 @@ def main():
         config.SN_DDR_WDB_SIZE = config.SN_DDR_W_TRACKER_OSTD * config.BURST
         config.SN_L2M_WDB_SIZE = config.SN_L2M_W_TRACKER_OSTD * config.BURST
         config.DDR_R_LATENCY_original = 155
-        config.DDR_R_LATENCY_VAR_original = 25
+        config.DDR_R_LATENCY_VAR_original = 0
         config.DDR_W_LATENCY_original = 16
         config.L2M_R_LATENCY_original = 12
         config.L2M_W_LATENCY_original = 16
-        config.DDR_BW_LIMIT = 76.8 / 4
-        config.L2M_BW_LIMIT = np.inf
+        # config.DDR_BW_LIMIT = 76.8 / 4
+        # config.L2M_BW_LIMIT = np.inf
         config.IQ_CH_FIFO_DEPTH = 8
         config.EQ_CH_FIFO_DEPTH = 8
         config.IQ_OUT_FIFO_DEPTH = 8
@@ -125,6 +131,7 @@ def main():
     elif topo_type in ["5x4"]:
         config.NUM_COL = 4
         config.NUM_NODE = 40
+        config.NUM_ROW = 10
         config.BURST = 4
         config.NUM_IP = 32
         config.NUM_DDR = 32
@@ -148,8 +155,8 @@ def main():
         config.DDR_W_LATENCY_original = 0
         config.L2M_R_LATENCY_original = 12
         config.L2M_W_LATENCY_original = 16
-        config.IQ_CH_FIFO_DEPTH = 10
-        config.EQ_CH_FIFO_DEPTH = 10
+        config.IQ_CH_FIFO_DEPTH = 2
+        config.EQ_CH_FIFO_DEPTH = 4
         config.IQ_OUT_FIFO_DEPTH = 8
         config.RB_OUT_FIFO_DEPTH = 8
         config.SN_TRACKER_RELEASE_LATENCY = 40
@@ -157,6 +164,7 @@ def main():
         # config.CDMA_BW_LIMIT = 16
         # config.DDR_BW_LIMIT = 128
         config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 0
+        config.ENABLE_IN_ORDER_EJECTION = 0
 
         config.TL_Etag_T2_UE_MAX = 8
         config.TL_Etag_T1_UE_MAX = 15
@@ -423,16 +431,16 @@ def main():
         flow_fig_show_CDMA=1,
         plot_RN_BW_fig=1,
         plot_link_state=0,
-        plot_start_time=1000,
+        plot_start_time=3000,
         print_trace=0,
-        show_trace_id=7,
+        show_trace_id=10,
         show_node_id=4,
         verbose=1,
     )
     np.random.seed(722)
 
     sim.initial()
-    sim.end_time = 10000
+    sim.end_time = 6000
     sim.print_interval = 1000
     sim.run()
 
