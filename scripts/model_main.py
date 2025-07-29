@@ -13,7 +13,8 @@ if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
 
 def main():
     # traffic_file_path = r"../test_data/"
-    traffic_file_path = r"../traffic/0617/"
+    traffic_file_path = r"../../C2C/traffic_data"
+    # traffic_file_path = r"../traffic/0617/"
     # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
     # traffic_file_path = r"../traffic/RW_4x2_4x4/"
     # traffic_file_path = r"../traffic/nxn_traffics"
@@ -31,8 +32,8 @@ def main():
             # r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
             # r"full_bw_R_4x5.txt"
-            "LLama2_AllReduce.txt"
-            # "test1.txt"
+            # "LLama2_AllReduce.txt"
+            "test1.txt"
             # "LLama2_AttentionFC.txt"
             # "R_4x4.txt"
             # "MLA_B32.txt"
@@ -54,12 +55,12 @@ def main():
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        topo_type = "5x4"  # SG2262
+        # topo_type = "5x4"  # SG2262
         # topo_type = "4x4"
         # topo_type = "5x2"
         # topo_type = "3x1"
         # topo_type = "6x5"  # SG2260
-        # topo_type = "3x3"  # SG2260E
+        topo_type = "3x3"  # SG2260E
     else:
         topo_type = config.TOPO_TYPE
 
@@ -430,17 +431,17 @@ def main():
         plot_flow_fig=1,
         flow_fig_show_CDMA=1,
         plot_RN_BW_fig=1,
-        plot_link_state=0,
-        plot_start_time=3000,
+        plot_link_state=1,
+        plot_start_time=0,
         print_trace=0,
-        show_trace_id=10,
+        show_trace_id=0,
         show_node_id=4,
         verbose=1,
     )
     np.random.seed(722)
 
     sim.initial()
-    sim.end_time = 6000
+    sim.end_time = 4000
     sim.print_interval = 1000
     sim.run()
 

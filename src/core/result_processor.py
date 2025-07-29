@@ -45,6 +45,17 @@ class RequestInfo:
     # 保序相关字段
     src_dest_order_id: int = -1  # src-dest对的保序ID
     packet_category: str = ""  # 包类型分类 (REQ/RSP/DATA)
+    # 所有cycle数据字段
+    cmd_entry_cake0_cycle: int = -1
+    cmd_entry_noc_from_cake0_cycle: int = -1
+    cmd_entry_noc_from_cake1_cycle: int = -1
+    cmd_received_by_cake0_cycle: int = -1
+    cmd_received_by_cake1_cycle: int = -1
+    data_entry_noc_from_cake0_cycle: int = -1
+    data_entry_noc_from_cake1_cycle: int = -1
+    data_received_complete_cycle: int = -1
+    data_entry_network_cycle: int = -1
+    rsp_entry_network_cycle: int = -1
 
 
 @dataclass
@@ -251,6 +262,17 @@ class BandwidthAnalyzer:
                 # 保序相关字段
                 src_dest_order_id=src_dest_order_id,
                 packet_category=packet_category,
+                # 所有cycle数据字段
+                cmd_entry_cake0_cycle=getattr(representative_flit, "cmd_entry_cake0_cycle", -1),
+                cmd_entry_noc_from_cake0_cycle=getattr(representative_flit, "cmd_entry_noc_from_cake0_cycle", -1),
+                cmd_entry_noc_from_cake1_cycle=getattr(representative_flit, "cmd_entry_noc_from_cake1_cycle", -1),
+                cmd_received_by_cake0_cycle=getattr(representative_flit, "cmd_received_by_cake0_cycle", -1),
+                cmd_received_by_cake1_cycle=getattr(representative_flit, "cmd_received_by_cake1_cycle", -1),
+                data_entry_noc_from_cake0_cycle=getattr(representative_flit, "data_entry_noc_from_cake0_cycle", -1),
+                data_entry_noc_from_cake1_cycle=getattr(representative_flit, "data_entry_noc_from_cake1_cycle", -1),
+                data_received_complete_cycle=getattr(representative_flit, "data_received_complete_cycle", -1),
+                data_entry_network_cycle=getattr(representative_flit, "data_entry_network_cycle", -1),
+                rsp_entry_network_cycle=getattr(representative_flit, "rsp_entry_network_cycle", -1),
             )
 
             # 收集RN带宽时间序列数据
@@ -686,6 +708,20 @@ class BandwidthAnalyzer:
                 cmd_latency=req.cmd_latency,
                 data_latency=req.data_latency,
                 transaction_latency=req.transaction_latency,
+                # 保序字段
+                src_dest_order_id=req.src_dest_order_id,
+                packet_category=req.packet_category,
+                # cycle数据字段
+                cmd_entry_cake0_cycle=req.cmd_entry_cake0_cycle,
+                cmd_entry_noc_from_cake0_cycle=req.cmd_entry_noc_from_cake0_cycle,
+                cmd_entry_noc_from_cake1_cycle=req.cmd_entry_noc_from_cake1_cycle,
+                cmd_received_by_cake0_cycle=req.cmd_received_by_cake0_cycle,
+                cmd_received_by_cake1_cycle=req.cmd_received_by_cake1_cycle,
+                data_entry_noc_from_cake0_cycle=req.data_entry_noc_from_cake0_cycle,
+                data_entry_noc_from_cake1_cycle=req.data_entry_noc_from_cake1_cycle,
+                data_received_complete_cycle=req.data_received_complete_cycle,
+                data_entry_network_cycle=req.data_entry_network_cycle,
+                rsp_entry_network_cycle=req.rsp_entry_network_cycle,
             )
             filtered_requests.append(temp_req)
 
@@ -1827,6 +1863,17 @@ class BandwidthAnalyzer:
                     # 保序字段
                     src_dest_order_id=src_dest_order_id,
                     packet_category=packet_category,
+                    # cycle数据字段 (向后兼容)
+                    cmd_entry_cake0_cycle=int(row.get("cmd_entry_cake0_cycle", -1)),
+                    cmd_entry_noc_from_cake0_cycle=int(row.get("cmd_entry_noc_from_cake0_cycle", -1)),
+                    cmd_entry_noc_from_cake1_cycle=int(row.get("cmd_entry_noc_from_cake1_cycle", -1)),
+                    cmd_received_by_cake0_cycle=int(row.get("cmd_received_by_cake0_cycle", -1)),
+                    cmd_received_by_cake1_cycle=int(row.get("cmd_received_by_cake1_cycle", -1)),
+                    data_entry_noc_from_cake0_cycle=int(row.get("data_entry_noc_from_cake0_cycle", -1)),
+                    data_entry_noc_from_cake1_cycle=int(row.get("data_entry_noc_from_cake1_cycle", -1)),
+                    data_received_complete_cycle=int(row.get("data_received_complete_cycle", -1)),
+                    data_entry_network_cycle=int(row.get("data_entry_network_cycle", -1)),
+                    rsp_entry_network_cycle=int(row.get("rsp_entry_network_cycle", -1)),
                 )
                 self.requests.append(request_info)
 
@@ -1863,6 +1910,17 @@ class BandwidthAnalyzer:
                     # 保序字段
                     src_dest_order_id=src_dest_order_id,
                     packet_category=packet_category,
+                    # cycle数据字段 (向后兼容)
+                    cmd_entry_cake0_cycle=int(row.get("cmd_entry_cake0_cycle", -1)),
+                    cmd_entry_noc_from_cake0_cycle=int(row.get("cmd_entry_noc_from_cake0_cycle", -1)),
+                    cmd_entry_noc_from_cake1_cycle=int(row.get("cmd_entry_noc_from_cake1_cycle", -1)),
+                    cmd_received_by_cake0_cycle=int(row.get("cmd_received_by_cake0_cycle", -1)),
+                    cmd_received_by_cake1_cycle=int(row.get("cmd_received_by_cake1_cycle", -1)),
+                    data_entry_noc_from_cake0_cycle=int(row.get("data_entry_noc_from_cake0_cycle", -1)),
+                    data_entry_noc_from_cake1_cycle=int(row.get("data_entry_noc_from_cake1_cycle", -1)),
+                    data_received_complete_cycle=int(row.get("data_received_complete_cycle", -1)),
+                    data_entry_network_cycle=int(row.get("data_entry_network_cycle", -1)),
+                    rsp_entry_network_cycle=int(row.get("rsp_entry_network_cycle", -1)),
                 )
                 self.requests.append(request_info)
 
@@ -2579,6 +2637,16 @@ class BandwidthAnalyzer:
             "transaction_latency_ns",
             "src_dest_order_id",
             "packet_category",
+            "cmd_entry_cake0_cycle",
+            "cmd_entry_noc_from_cake0_cycle",
+            "cmd_entry_noc_from_cake1_cycle",
+            "cmd_received_by_cake0_cycle",
+            "cmd_received_by_cake1_cycle",
+            "data_entry_noc_from_cake0_cycle",
+            "data_entry_noc_from_cake1_cycle",
+            "data_received_complete_cycle",
+            "data_entry_network_cycle",
+            "rsp_entry_network_cycle",
         ]
 
         # 生成读请求CSV
@@ -2600,6 +2668,16 @@ class BandwidthAnalyzer:
                     req.transaction_latency,
                     req.src_dest_order_id,
                     req.packet_category,
+                    req.cmd_entry_cake0_cycle,
+                    req.cmd_entry_noc_from_cake0_cycle,
+                    req.cmd_entry_noc_from_cake1_cycle,
+                    req.cmd_received_by_cake0_cycle,
+                    req.cmd_received_by_cake1_cycle,
+                    req.data_entry_noc_from_cake0_cycle,
+                    req.data_entry_noc_from_cake1_cycle,
+                    req.data_received_complete_cycle,
+                    req.data_entry_network_cycle,
+                    req.rsp_entry_network_cycle,
                 ]
                 f.write(",".join(map(str, row)) + "\n")
 
@@ -2622,6 +2700,16 @@ class BandwidthAnalyzer:
                     req.transaction_latency,
                     req.src_dest_order_id,
                     req.packet_category,
+                    req.cmd_entry_cake0_cycle,
+                    req.cmd_entry_noc_from_cake0_cycle,
+                    req.cmd_entry_noc_from_cake1_cycle,
+                    req.cmd_received_by_cake0_cycle,
+                    req.cmd_received_by_cake1_cycle,
+                    req.data_entry_noc_from_cake0_cycle,
+                    req.data_entry_noc_from_cake1_cycle,
+                    req.data_received_complete_cycle,
+                    req.data_entry_network_cycle,
+                    req.rsp_entry_network_cycle,
                 ]
                 f.write(",".join(map(str, row)) + "\n")
 
