@@ -52,7 +52,9 @@ class RingConfig(CrossRingConfig):
         self.L2M_W_LATENCY_original = 16
         self.IQ_CH_FIFO_DEPTH = 10
         self.EQ_CH_FIFO_DEPTH = 10
-        self.IQ_OUT_FIFO_DEPTH = 8
+        self.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
+        self.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
+        self.IQ_OUT_FIFO_DEPTH_EQ = 8
         self.RB_OUT_FIFO_DEPTH = 8
         self.SN_TRACKER_RELEASE_LATENCY = 40
         self.CDMA_BW_LIMIT = 8
@@ -358,7 +360,15 @@ class RingModel(BaseModel):
                 if queue_pre[ip_pos]:
                     continue  # pre 槽占用
                 queue = network.inject_queues[direction]
-                if len(queue[ip_pos]) >= self.config.IQ_OUT_FIFO_DEPTH:
+                # 根据方向选择对应的 FIFO 深度
+                if direction in ["TR", "TL"]:
+                    fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_HORIZONTAL
+                elif direction in ["TU", "TD"]:
+                    fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
+                else:  # EQ
+                    fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_EQ
+                
+                if len(queue[ip_pos]) >= fifo_depth:
                     continue  # FIFO 满
 
                 for ip_type in list(rr_queue):
@@ -664,7 +674,15 @@ class RingModel(BaseModel):
         for direction in self.IQ_directions:
             queue_pre = network.inject_queues_pre[direction]
             queue = network.inject_queues[direction]
-            if queue_pre[ip_pos] and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+            # 根据方向选择对应的 FIFO 深度
+            if direction in ["TR", "TL"]:
+                fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_HORIZONTAL
+            elif direction in ["TU", "TD"]:
+                fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
+            else:  # EQ
+                fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_EQ
+            
+            if queue_pre[ip_pos] and len(queue[ip_pos]) < fifo_depth:
                 flit = queue_pre[ip_pos]
                 flit.departure_inject_cycle = self.cycle
                 flit.flit_position = f"IQ_{direction}"

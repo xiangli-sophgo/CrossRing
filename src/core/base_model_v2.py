@@ -744,7 +744,15 @@ class BaseModel:
                 if queue_pre[ip_pos]:
                     continue  # pre 槽占用
                 queue = network.inject_queues[direction]
-                if len(queue[ip_pos]) >= self.config.IQ_OUT_FIFO_DEPTH:
+                # 根据方向选择对应的 FIFO 深度
+                if direction in ["TR", "TL"]:
+                    fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_HORIZONTAL
+                elif direction in ["TU", "TD"]:
+                    fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
+                else:  # EQ
+                    fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_EQ
+                
+                if len(queue[ip_pos]) >= fifo_depth:
                     continue  # FIFO 满
 
                 for ip_type in list(rr_queue):

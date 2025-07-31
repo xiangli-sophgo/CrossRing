@@ -241,32 +241,32 @@ def plot_combined_analysis(horizontal_stats, vertical_stats):
     # HORIZONTAL对R的影响（使用最大值）
     if not horizontal_stats.empty:
         ax1.plot(horizontal_stats["RB_ONLY_TAG_NUM_HORIZONTAL"], horizontal_stats["R_max"], marker="o", linewidth=2, color="#2E86AB")
-        ax1.set_title(f"横向环 → R指标\n(每个横向环对应最优纵向环)", fontweight="bold")
-        ax1.set_xlabel("横向环 bubble slot数量")
+        ax1.set_title(f"横向环 Bubble Slot 数量与读带宽关系曲线", fontweight="bold")
+        ax1.set_xlabel("横向环 Bubble Slot 数量")
         ax1.set_ylabel("读带宽")
         ax1.grid(True, alpha=0.3)
 
     # HORIZONTAL对W的影响（使用最大值）
     if not horizontal_stats.empty:
         ax2.plot(horizontal_stats["RB_ONLY_TAG_NUM_HORIZONTAL"], horizontal_stats["W_max"], marker="s", linewidth=2, color="#F18F01")
-        ax2.set_title(f"横向环 → W指标\n(每个横向环对应最优纵向环)", fontweight="bold")
-        ax2.set_xlabel("横向环 bubble slot数量")
+        ax2.set_title(f"横向环 Bubble Slot 数量与写带宽关系曲线", fontweight="bold")
+        ax2.set_xlabel("横向环 Bubble Slot 数量")
         ax2.set_ylabel("写带宽")
         ax2.grid(True, alpha=0.3)
 
     # VERTICAL对R的影响（使用最大值）
     if not vertical_stats.empty:
         ax3.plot(vertical_stats["RB_ONLY_TAG_NUM_VERTICAL"], vertical_stats["R_max"], marker="o", linewidth=2, color="#A23B72")
-        ax3.set_title(f"纵向环 → R指标\n(每个纵向环对应最优横向环)", fontweight="bold")
-        ax3.set_xlabel("纵向环 bubble slot数量")
+        ax3.set_title(f"纵向环 Bubble Slot 数量与读带宽关系曲线", fontweight="bold")
+        ax3.set_xlabel("纵向环 Bubble Slot 数量")
         ax3.set_ylabel("读带宽")
         ax3.grid(True, alpha=0.3)
 
     # VERTICAL对W的影响（使用最大值）
     if not vertical_stats.empty:
         ax4.plot(vertical_stats["RB_ONLY_TAG_NUM_VERTICAL"], vertical_stats["W_max"], marker="s", linewidth=2, color="#C73E1D")
-        ax4.set_title(f"纵向环 → W指标\n(每个纵向环对应最优横向环)", fontweight="bold")
-        ax4.set_xlabel("纵向环 bubble slot数量")
+        ax4.set_title(f"纵向环 Bubble Slot 数量与写带宽关系曲线", fontweight="bold")
+        ax4.set_xlabel("纵向环 Bubble Slot 数量")
         ax4.set_ylabel("写带宽")
         ax4.grid(True, alpha=0.3)
 
@@ -302,8 +302,8 @@ def plot_heatmaps(df):
     # 读带宽热力图
     im1 = ax1.imshow(read_pivot.values, cmap="YlGnBu", aspect="auto", origin="lower", vmin=read_vmin, vmax=read_vmax)
     ax1.set_title(f"读带宽热力图", fontsize=14, fontweight="bold", pad=20)
-    ax1.set_xlabel("横向环 bubble slot数量", fontsize=12)
-    ax1.set_ylabel("纵向环 bubble slot数量", fontsize=12)
+    ax1.set_xlabel("横向环 Bubble Slot 数量", fontsize=12)
+    ax1.set_ylabel("纵向环 Bubble Slot 数量", fontsize=12)
 
     # 设置x轴刻度和标签
     x_ticks = range(len(read_pivot.columns))
@@ -341,8 +341,8 @@ def plot_heatmaps(df):
     # 写带宽热力图
     im2 = ax2.imshow(write_pivot.values, cmap="YlGnBu", aspect="auto", origin="lower", vmin=write_vmin, vmax=write_vmax)
     ax2.set_title(f"写带宽热力图", fontsize=14, fontweight="bold", pad=20)
-    ax2.set_xlabel("横向环 bubble slot数量", fontsize=12)
-    ax2.set_ylabel("纵向环 bubble slot数量", fontsize=12)
+    ax2.set_xlabel("横向环 Bubble Slot 数量", fontsize=12)
+    ax2.set_ylabel("纵向环 Bubble Slot 数量", fontsize=12)
 
     # 设置x轴刻度和标签
     x_ticks = range(len(write_pivot.columns))
@@ -453,7 +453,7 @@ def main():
     主函数
     """
     # 文件路径
-    csv_file = f"../Result/RB_Tag_Num_Optimization/RB_TAG_NUM_optimization_0725_0928/RB_TAG_NUM_optimization_0725_0928.csv"
+    csv_file = f"../Result/RB_Tag_Num_Optimization/parameter_range_analysis_0729_2328.csv"
 
     try:
         # 1. 加载和基本分析
@@ -470,8 +470,8 @@ def main():
 
         # 4. 绘制图表
         print("\n正在生成图表...")
-        plot_horizontal_analysis(horizontal_stats)
-        plot_vertical_analysis(vertical_stats)
+        # plot_horizontal_analysis(horizontal_stats)
+        # plot_vertical_analysis(vertical_stats)
         plot_combined_analysis(horizontal_stats, vertical_stats)
         plot_heatmaps(df)
 

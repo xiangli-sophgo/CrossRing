@@ -117,8 +117,8 @@ class Network:
         self.ring_bridge_map = {
             0: ("TL_in", self.config.RB_IN_FIFO_DEPTH),
             1: ("TR_in", self.config.RB_IN_FIFO_DEPTH),
-            -1: ("IQ_TU", self.config.IQ_OUT_FIFO_DEPTH),
-            -2: ("IQ_TD", self.config.IQ_OUT_FIFO_DEPTH),
+            -1: ("IQ_TU", self.config.IQ_OUT_FIFO_DEPTH_VERTICAL),
+            -2: ("IQ_TD", self.config.IQ_OUT_FIFO_DEPTH_VERTICAL),
             -3: ("TU_in", self.config.RB_IN_FIFO_DEPTH),
             -4: ("TD_in", self.config.RB_IN_FIFO_DEPTH),
         }
@@ -154,11 +154,11 @@ class Network:
             self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TD"] = [None] * 2
-            self.inject_queues["TL"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
-            self.inject_queues["TR"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
-            self.inject_queues["TU"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
-            self.inject_queues["TD"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
-            self.inject_queues["EQ"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
+            self.inject_queues["TL"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
+            self.inject_queues["TR"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
+            self.inject_queues["TU"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
+            self.inject_queues["TD"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
+            self.inject_queues["EQ"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_EQ)
             self.inject_queues_pre["TL"][ip_pos] = None
             self.inject_queues_pre["TR"][ip_pos] = None
             self.inject_queues_pre["TU"][ip_pos] = None
@@ -705,7 +705,7 @@ class Network:
     def can_move_to_next(self, flit, current, next_node):
         # 1. flit不进入Cross Point
         if flit.source - flit.destination == self.config.NUM_COL:
-            return len(self.inject_queues["EQ"]) < self.config.IQ_OUT_FIFO_DEPTH
+            return len(self.inject_queues["EQ"]) < self.config.IQ_OUT_FIFO_DEPTH_EQ
         # 2. flit注入纵向环。 v2 IQ可以直接向纵向环注入flit
         elif current - next_node == self.config.NUM_COL:
             if len(flit.path) <= 2:

@@ -53,8 +53,10 @@ class NetworkLinkVisualizer:
             self.cols = config.NUM_COL
             self.rows = config.NUM_ROW
             self.parent = parent
-            # 提取深度
-            self.IQ_depth = config.IQ_OUT_FIFO_DEPTH
+            # 提取深度 - 现在使用三个独立的参数
+            self.IQ_depth_horizontal = config.IQ_OUT_FIFO_DEPTH_HORIZONTAL
+            self.IQ_depth_vertical = config.IQ_OUT_FIFO_DEPTH_VERTICAL
+            self.IQ_depth_eq = config.IQ_OUT_FIFO_DEPTH_EQ
             self.EQ_depth = config.EQ_IN_FIFO_DEPTH
             self.RB_in_depth = config.RB_IN_FIFO_DEPTH
             self.RB_out_depth = config.RB_OUT_FIFO_DEPTH
@@ -186,7 +188,7 @@ class NetworkLinkVisualizer:
             iq_config = dict(
                 title="Inject Queue",
                 lanes=ch_names + ["TL", "TR", "TD", "TU", "EQ"],
-                depths=[self.IQ_CH_depth] * len(ch_names) + [self.IQ_depth] * 5,
+                depths=[self.IQ_CH_depth] * len(ch_names) + [self.IQ_depth_horizontal, self.IQ_depth_horizontal, self.IQ_depth_vertical, self.IQ_depth_vertical, self.IQ_depth_eq],
                 orientations=["vertical"] * len(ch_names) + ["vertical"] * 2 + ["horizontal"] * 3,
                 h_pos=["top"] * len(ch_names) + ["bottom"] * 2 + ["mid"] * 3,
                 v_pos=["left"] * len(ch_names) + ["left"] * 2 + ["right"] * 3,

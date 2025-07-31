@@ -2,6 +2,15 @@ from src.core.base_model import BaseModel
 
 
 class Packet_Base_model(BaseModel):
+    
+    def _get_fifo_depth_by_direction(self, direction):
+        """根据方向获取对应的 FIFO 深度"""
+        if direction in ["TR", "TL"]:
+            return self.config.IQ_OUT_FIFO_DEPTH_HORIZONTAL
+        elif direction in ["TU", "TD"]:
+            return self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
+        else:  # EQ
+            return self.config.IQ_OUT_FIFO_DEPTH_EQ
 
     def run(self):
         """Main simulation loop."""
@@ -232,7 +241,7 @@ class Packet_Base_model(BaseModel):
     #             for direction in self.directions:
     #                 queue = self.rsp_network.inject_queues[direction]
     #                 queue_pre = self.rsp_network.inject_queues_pre[direction]
-    #                 if self.direction_conditions[direction](rsp) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+    #                 if self.direction_conditions[direction](rsp) and len(queue[ip_pos]) < self._get_fifo_depth_by_direction(direction):
     #                     queue_pre[ip_pos] = rsp
     #                     self.node.sn_rsp_queue[sn_type][ip_pos].pop(0)
 
@@ -251,7 +260,7 @@ class Packet_Base_model(BaseModel):
                     if flit := inject_flits[i]:
                         queue = self.data_network.inject_queues[direction]
                         queue_pre = self.data_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+                        if self.direction_conditions[direction](flit) and len(queue[ip_pos]) < self._get_fifo_depth_by_direction(direction):
                             queue_pre[flit.source] = flit
                             req = self.req_network.send_flits[flit.packet_id][0]
                             flit.sync_latency_record(req)
@@ -300,7 +309,7 @@ class Packet_Base_model(BaseModel):
                 for direction in self.directions:
                     queue = self.req_network.inject_queues[direction]
                     queue_pre = self.req_network.inject_queues_pre[direction]
-                    if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+                    if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self._get_fifo_depth_by_direction(direction):
                         queue_pre[ip_pos] = req
                         self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] += 1
 
@@ -323,7 +332,7 @@ class Packet_Base_model(BaseModel):
                         for direction in self.directions:
                             queue_pre = self.req_network.inject_queues_pre[direction]
                             queue = self.req_network.inject_queues[direction]
-                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self._get_fifo_depth_by_direction(direction):
                                 queue_pre[ip_pos] = req
                                 self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
                                 self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
@@ -337,7 +346,7 @@ class Packet_Base_model(BaseModel):
                         for direction in self.directions:
                             queue = self.req_network.inject_queues[direction]
                             queue_pre = self.req_network.inject_queues_pre[direction]
-                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+                            if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self._get_fifo_depth_by_direction(direction):
                                 queue_pre[ip_pos] = req
                                 self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] += 1
                                 self.req_network.last_select[self.rn_type][ip_pos] = "read"
@@ -350,7 +359,7 @@ class Packet_Base_model(BaseModel):
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self._get_fifo_depth_by_direction(direction):
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(req)
                             self.node.rn_wdb_reserve[self.rn_type][ip_pos] -= 1
@@ -361,7 +370,7 @@ class Packet_Base_model(BaseModel):
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self._get_fifo_depth_by_direction(direction):
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] += 1
                             self.req_network.last_select[self.rn_type][ip_pos] = "write"
@@ -374,7 +383,7 @@ class Packet_Base_model(BaseModel):
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self._get_fifo_depth_by_direction(direction):
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
                             self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
@@ -387,7 +396,7 @@ class Packet_Base_model(BaseModel):
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self._get_fifo_depth_by_direction(direction):
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos] += 1
                             self.req_network.last_select[self.rn_type][ip_pos] = "read"
@@ -400,7 +409,7 @@ class Packet_Base_model(BaseModel):
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self._get_fifo_depth_by_direction(direction):
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_wait["write"][self.rn_type][ip_pos].remove(req)
                             self.node.rn_wdb_reserve[self.rn_type][ip_pos] -= 1
@@ -411,7 +420,7 @@ class Packet_Base_model(BaseModel):
                     for direction in self.directions:
                         queue = self.req_network.inject_queues[direction]
                         queue_pre = self.req_network.inject_queues_pre[direction]
-                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self.config.IQ_OUT_FIFO_DEPTH:
+                        if self.direction_conditions[direction](req) and len(queue[ip_pos]) < self._get_fifo_depth_by_direction(direction):
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] += 1
                             self.req_network.last_select[self.rn_type][ip_pos] = "write"

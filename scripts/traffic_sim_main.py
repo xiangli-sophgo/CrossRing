@@ -81,7 +81,9 @@ def run_single_simulation(sim_params):
         config.L2M_W_LATENCY_original = 16
         config.IQ_CH_FIFO_DEPTH = 10
         config.EQ_CH_FIFO_DEPTH = 10
-        config.IQ_OUT_FIFO_DEPTH = 8
+        config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
+        config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
+        config.IQ_OUT_FIFO_DEPTH_EQ = 8
         config.RB_OUT_FIFO_DEPTH = 8
         config.SN_TRACKER_RELEASE_LATENCY = 40
         # config.GDMA_BW_LIMIT = 16

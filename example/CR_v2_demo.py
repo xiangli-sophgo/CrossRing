@@ -44,7 +44,9 @@ def run_CR_v2_demo():
     config.L2M_W_LATENCY_original = 0
     config.IQ_CH_FIFO_DEPTH = 10
     config.EQ_CH_FIFO_DEPTH = 10
-    config.IQ_OUT_FIFO_DEPTH = 8
+    config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
+    config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
+    config.IQ_OUT_FIFO_DEPTH_EQ = 8
     config.RB_OUT_FIFO_DEPTH = 8
     config.SN_TRACKER_RELEASE_LATENCY = 40
     config.CDMA_BW_LIMIT = 8

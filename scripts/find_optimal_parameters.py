@@ -1179,7 +1179,9 @@ def find_optimal_parameters():
                 sim.config.L2M_BW_LIMIT = np.inf
                 sim.config.IQ_CH_FIFO_DEPTH = 8
                 sim.config.EQ_CH_FIFO_DEPTH = 8
-                sim.config.IQ_OUT_FIFO_DEPTH = 8
+                sim.config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
+                sim.config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
+                sim.config.IQ_OUT_FIFO_DEPTH_EQ = 8
                 sim.config.RB_OUT_FIFO_DEPTH = 8
                 sim.config.EQ_IN_FIFO_DEPTH = 16
                 sim.config.RB_IN_FIFO_DEPTH = 16
@@ -1224,7 +1226,9 @@ def find_optimal_parameters():
                 sim.config.L2M_W_LATENCY_original = 16
                 sim.config.IQ_CH_FIFO_DEPTH = 10
                 sim.config.EQ_CH_FIFO_DEPTH = 10
-                sim.config.IQ_OUT_FIFO_DEPTH = 8
+                sim.config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
+                sim.config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
+                sim.config.IQ_OUT_FIFO_DEPTH_EQ = 8
                 sim.config.RB_OUT_FIFO_DEPTH = 8
                 sim.config.SN_TRACKER_RELEASE_LATENCY = 40
 

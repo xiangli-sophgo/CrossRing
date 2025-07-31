@@ -108,8 +108,8 @@ class Network:
         self.ring_bridge_map = {
             0: ("TL", self.config.RB_IN_FIFO_DEPTH),
             1: ("TR", self.config.RB_IN_FIFO_DEPTH),
-            -1: ("IQ_TU", self.config.IQ_OUT_FIFO_DEPTH),
-            -2: ("IQ_TD", self.config.IQ_OUT_FIFO_DEPTH),
+            -1: ("IQ_TU", self.config.IQ_OUT_FIFO_DEPTH_VERTICAL),
+            -2: ("IQ_TD", self.config.IQ_OUT_FIFO_DEPTH_VERTICAL),
         }
 
         self.token_bucket = defaultdict(dict)
@@ -143,11 +143,11 @@ class Network:
             self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TD"] = [None] * 2
-            self.inject_queues["TL"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
-            self.inject_queues["TR"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
-            self.inject_queues["TU"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
-            self.inject_queues["TD"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
-            self.inject_queues["EQ"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH)
+            self.inject_queues["TL"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
+            self.inject_queues["TR"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
+            self.inject_queues["TU"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
+            self.inject_queues["TD"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
+            self.inject_queues["EQ"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_EQ)
             self.inject_queues_pre["TL"][ip_pos] = None
             self.inject_queues_pre["TR"][ip_pos] = None
             self.inject_queues_pre["TU"][ip_pos] = None
@@ -396,13 +396,13 @@ class Network:
     def can_move_to_next(self, flit, current, next_node):
         # 1. flit不进入Cross Point
         if flit.source - flit.destination == self.config.NUM_COL:
-            return len(self.inject_queues["EQ"]) < self.config.IQ_OUT_FIFO_DEPTH
+            return len(self.inject_queues["EQ"]) < self.config.IQ_OUT_FIFO_DEPTH_EQ
         elif current - next_node == self.config.NUM_COL:
             # 向 Ring Bridge 移动. v1.3 在IQ中分TU和TD两个FIFO
             if len(flit.path) > 2 and flit.path[2] - flit.path[1] == self.config.NUM_COL * 2:
-                return len(self.inject_queues["TD"][current]) < self.config.IQ_OUT_FIFO_DEPTH
+                return len(self.inject_queues["TD"][current]) < self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
             elif len(flit.path) > 2 and flit.path[2] - flit.path[1] == -self.config.NUM_COL * 2:
-                return len(self.inject_queues["TU"][current]) < self.config.IQ_OUT_FIFO_DEPTH
+                return len(self.inject_queues["TU"][current]) < self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
             else:
                 raise Exception(f"Invalid path: {flit.path}")
 

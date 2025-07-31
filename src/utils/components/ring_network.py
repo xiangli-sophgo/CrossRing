@@ -153,9 +153,9 @@ class RingNetwork(Network):
         for node_id in range(self.num_nodes):
             # 每个节点有两个方向的注入队列
             if node_id not in self.inject_queues["TL"]:
-                self.inject_queues["TL"][node_id] = deque(maxlen=self.config.IQ_OUT_FIFO_DEPTH)
+                self.inject_queues["TL"][node_id] = deque(maxlen=self.config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
             if node_id not in self.inject_queues["TR"]:
-                self.inject_queues["TR"][node_id] = deque(maxlen=self.config.IQ_OUT_FIFO_DEPTH)
+                self.inject_queues["TR"][node_id] = deque(maxlen=self.config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
 
             # Pre缓冲区
             if node_id not in self.inject_queues_pre["TL"]:

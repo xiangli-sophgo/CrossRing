@@ -35,7 +35,7 @@ def main():
             # "LLama2_AllReduce.txt"
             "test1.txt"
             # "LLama2_AttentionFC.txt"
-            # "R_4x4.txt"
+            # "R_4x2.txt"
             # "MLA_B32.txt"
         ],
     ]
@@ -56,7 +56,7 @@ def main():
         # topo_type = "4x9"
         # topo_type = "9x4"
         # topo_type = "5x4"  # SG2262
-        # topo_type = "4x4"
+        # topo_type = "4x2"
         # topo_type = "5x2"
         # topo_type = "3x1"
         # topo_type = "6x5"  # SG2260
@@ -95,7 +95,9 @@ def main():
         # config.L2M_BW_LIMIT = np.inf
         config.IQ_CH_FIFO_DEPTH = 8
         config.EQ_CH_FIFO_DEPTH = 8
-        config.IQ_OUT_FIFO_DEPTH = 8
+        config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
+        config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
+        config.IQ_OUT_FIFO_DEPTH_EQ = 8
         config.RB_OUT_FIFO_DEPTH = 8
         config.SLICE_PER_LINK = 8
 
@@ -158,7 +160,9 @@ def main():
         config.L2M_W_LATENCY_original = 16
         config.IQ_CH_FIFO_DEPTH = 2
         config.EQ_CH_FIFO_DEPTH = 4
-        config.IQ_OUT_FIFO_DEPTH = 8
+        config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
+        config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
+        config.IQ_OUT_FIFO_DEPTH_EQ = 8
         config.RB_OUT_FIFO_DEPTH = 8
         config.SN_TRACKER_RELEASE_LATENCY = 40
         # config.GDMA_BW_LIMIT = 16
@@ -209,7 +213,9 @@ def main():
         config.L2M_W_LATENCY_original = 16
         config.IQ_CH_FIFO_DEPTH = 10
         config.EQ_CH_FIFO_DEPTH = 10
-        config.IQ_OUT_FIFO_DEPTH = 8
+        config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
+        config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
+        config.IQ_OUT_FIFO_DEPTH_EQ = 8
         config.RB_OUT_FIFO_DEPTH = 8
         config.SN_TRACKER_RELEASE_LATENCY = 40
         config.CDMA_BW_LIMIT = 8
@@ -257,7 +263,9 @@ def main():
         config.L2M_W_LATENCY_original = 16
         config.IQ_CH_FIFO_DEPTH = 10
         config.EQ_CH_FIFO_DEPTH = 10
-        config.IQ_OUT_FIFO_DEPTH = 8
+        config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
+        config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
+        config.IQ_OUT_FIFO_DEPTH_EQ = 8
         config.RB_OUT_FIFO_DEPTH = 8
         config.SN_TRACKER_RELEASE_LATENCY = 40
         config.CDMA_BW_LIMIT = 8
@@ -312,7 +320,9 @@ def main():
         config.L2M_W_LATENCY_original = 16
         config.IQ_CH_FIFO_DEPTH = 10
         config.EQ_CH_FIFO_DEPTH = 10
-        config.IQ_OUT_FIFO_DEPTH = 8
+        config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
+        config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
+        config.IQ_OUT_FIFO_DEPTH_EQ = 8
         config.RB_OUT_FIFO_DEPTH = 8
         config.SN_TRACKER_RELEASE_LATENCY = 40
         config.CDMA_BW_LIMIT = 8
@@ -378,7 +388,9 @@ def main():
         config.L2M_W_LATENCY_original = 16
         config.IQ_CH_FIFO_DEPTH = 10
         config.EQ_CH_FIFO_DEPTH = 10
-        config.IQ_OUT_FIFO_DEPTH = 8
+        config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
+        config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
+        config.IQ_OUT_FIFO_DEPTH_EQ = 8
         config.RB_OUT_FIFO_DEPTH = 8
         config.SN_TRACKER_RELEASE_LATENCY = 40
         config.CDMA_BW_LIMIT = 8
@@ -431,7 +443,7 @@ def main():
         plot_flow_fig=1,
         flow_fig_show_CDMA=1,
         plot_RN_BW_fig=1,
-        plot_link_state=1,
+        plot_link_state=0,
         plot_start_time=0,
         print_trace=0,
         show_trace_id=0,
@@ -441,7 +453,7 @@ def main():
     np.random.seed(722)
 
     sim.initial()
-    sim.end_time = 4000
+    sim.end_time = 6000
     sim.print_interval = 1000
     sim.run()
 
