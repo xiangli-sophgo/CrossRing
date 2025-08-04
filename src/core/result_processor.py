@@ -988,21 +988,40 @@ class BandwidthAnalyzer:
             # 准备CSV数据
             csv_data = []
             for (src, dst), stats in utilization_stats.items():
+                # 获取下环尝试次数统计数据
+                eject_h = stats.get("eject_attempts_h", {"0": 0, "1": 0, "2": 0, ">2": 0})
+                eject_v = stats.get("eject_attempts_v", {"0": 0, "1": 0, "2": 0, ">2": 0})
+                eject_h_ratios = stats.get("eject_attempts_h_ratios", {"0": 0.0, "1": 0.0, "2": 0.0, ">2": 0.0})
+                eject_v_ratios = stats.get("eject_attempts_v_ratios", {"0": 0.0, "1": 0.0, "2": 0.0, ">2": 0.0})
+                
                 row = {
                     "source_node": src,
                     "destination_node": dst,
                     "utilization": f"{stats.get('utilization', 0.0)*100:.2f}%",
-                    "T2_ratio": f"{stats.get('T2_ratio', 0.0)*100:.2f}%",
-                    "T1_ratio": f"{stats.get('T1_ratio', 0.0)*100:.2f}%",
-                    "T0_ratio": f"{stats.get('T0_ratio', 0.0)*100:.2f}%",
                     "ITag_ratio": f"{stats.get('ITag_ratio', 0.0)*100:.2f}%",
                     "empty_ratio": f"{stats.get('empty_ratio', 0.0)*100:.2f}%",
-                    "T2_count": stats.get("T2_count", 0),
-                    "T1_count": stats.get("T1_count", 0),
-                    "T0_count": stats.get("T0_count", 0),
-                    "ITag_count": stats.get("ITag_count", 0),
-                    "empty_count": stats.get("empty_count", 0),
                     "total_cycles": stats.get("total_cycles", 0),
+                    "total_flit": stats.get("total_flit", 0),
+                    # 横向环下环尝试次数统计
+                    "eject_attempts_h_0": eject_h.get("0", 0),
+                    "eject_attempts_h_1": eject_h.get("1", 0),
+                    "eject_attempts_h_2": eject_h.get("2", 0),
+                    "eject_attempts_h_>2": eject_h.get(">2", 0),
+                    # 横向环下环尝试次数比例
+                    "eject_attempts_h_0_ratio": f"{eject_h_ratios.get('0', 0.0)*100:.2f}%",
+                    "eject_attempts_h_1_ratio": f"{eject_h_ratios.get('1', 0.0)*100:.2f}%",
+                    "eject_attempts_h_2_ratio": f"{eject_h_ratios.get('2', 0.0)*100:.2f}%",
+                    "eject_attempts_h_>2_ratio": f"{eject_h_ratios.get('>2', 0.0)*100:.2f}%",
+                    # 纵向环下环尝试次数统计
+                    "eject_attempts_v_0": eject_v.get("0", 0),
+                    "eject_attempts_v_1": eject_v.get("1", 0),
+                    "eject_attempts_v_2": eject_v.get("2", 0),
+                    "eject_attempts_v_>2": eject_v.get(">2", 0),
+                    # 纵向环下环尝试次数比例
+                    "eject_attempts_v_0_ratio": f"{eject_v_ratios.get('0', 0.0)*100:.2f}%",
+                    "eject_attempts_v_1_ratio": f"{eject_v_ratios.get('1', 0.0)*100:.2f}%",
+                    "eject_attempts_v_2_ratio": f"{eject_v_ratios.get('2', 0.0)*100:.2f}%",
+                    "eject_attempts_v_>2_ratio": f"{eject_v_ratios.get('>2', 0.0)*100:.2f}%",
                 }
                 csv_data.append(row)
 
@@ -1011,18 +1030,30 @@ class BandwidthAnalyzer:
                 fieldnames = [
                     "source_node",
                     "destination_node",
-                    "utilization",
-                    "T2_ratio",
-                    "T1_ratio",
-                    "T0_ratio",
-                    "ITag_ratio",
+                    # 下环尝试次数比例（按用户要求放在前面）
+                    "eject_attempts_h_0_ratio",
+                    "eject_attempts_h_1_ratio",
+                    "eject_attempts_h_2_ratio",
+                    "eject_attempts_h_>2_ratio",
+                    "eject_attempts_v_0_ratio",
+                    "eject_attempts_v_1_ratio",
+                    "eject_attempts_v_2_ratio",
+                    "eject_attempts_v_>2_ratio",
+                    # empty和itag比例
                     "empty_ratio",
-                    "T2_count",
-                    "T1_count",
-                    "T0_count",
-                    "ITag_count",
-                    "empty_count",
+                    "ITag_ratio",
+                    # 具体数量放在最后
+                    "utilization",
                     "total_cycles",
+                    "total_flit",
+                    "eject_attempts_h_0",
+                    "eject_attempts_h_1",
+                    "eject_attempts_h_2",
+                    "eject_attempts_h_>2",
+                    "eject_attempts_v_0",
+                    "eject_attempts_v_1",
+                    "eject_attempts_v_2",
+                    "eject_attempts_v_>2",
                 ]
 
                 with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
@@ -1044,11 +1075,8 @@ class BandwidthAnalyzer:
         :param network: 网络对象
         :param mode: 显示模式，支持:
                     - 'utilization': 链路利用率 (默认)
-                    - 'T2_ratio': T2优先级占比
-                    - 'T1_ratio': T1优先级占比
-                    - 'T0_ratio': T0优先级占比
                     - 'ITag_ratio': ITag标记占比
-                    - 'total': 向后兼容旧格式
+                    - 'total': 带宽模式，显示link带宽和0次尝试/空闲比例
         :param node_size: 节点大小
         :param save_path: 图片保存路径
         :param show_cdma: 是否展示CDMA，True显示SDMA/GDMA/CDMA三分区，False显示SDMA/GDMA两分区
@@ -1067,32 +1095,19 @@ class BandwidthAnalyzer:
                 if mode == "utilization":
                     # 显示链路利用率
                     links = {link: stats["utilization"] for link, stats in utilization_stats.items()}
-                elif mode == "T2_ratio":
-                    # 显示T2优先级比例
-                    links = {link: stats["T2_ratio"] for link, stats in utilization_stats.items()}
-                elif mode == "T1_ratio":
-                    # 显示T1优先级比例
-                    links = {link: stats["T1_ratio"] for link, stats in utilization_stats.items()}
-                elif mode == "T0_ratio":
-                    # 显示T0优先级比例
-                    links = {link: stats["T0_ratio"] for link, stats in utilization_stats.items()}
                 elif mode == "ITag_ratio":
                     # 显示ITag标记比例
                     links = {link: stats["ITag_ratio"] for link, stats in utilization_stats.items()}
                 elif mode == "total":
-                    # 将利用率转换为带宽值（为了向后兼容）
-                    # 原逻辑：flit_count * 128 / time_cycles
-                    # 新逻辑：从统计数据反推flit数量，然后计算带宽
+                    # 计算带宽值：total_flit * 128 / time_cycles
                     time_cycles = self.simulation_end_cycle // self.config.NETWORK_FREQUENCY
                     links = {}
                     for link, stats in utilization_stats.items():
-                        # 估算通过该链路的flit数量
-                        # 利用率 * 总slice设置次数 * slice数 / 模拟时间可以近似为flit流量
-                        total_slice_operations = stats.get("total_slice_sets", 0)
-                        if total_slice_operations > 0 and time_cycles > 0:
-                            # 假设每个slice操作对应一个时间单位，带宽 = 利用的slice操作 * flit_size / 时间
-                            utilized_operations = stats["utilization"] * total_slice_operations
-                            bandwidth = utilized_operations * 128 / time_cycles
+                        total_flit = stats.get("total_flit", 0)
+                        total_cycles = stats.get("total_cycles", 1)
+                        if time_cycles > 0:
+                            # 带宽 = flit数量 * flit_size / 时间
+                            bandwidth = total_flit * 128 / time_cycles
                             links[link] = bandwidth
                         else:
                             links[link] = 0.0
@@ -1145,16 +1160,26 @@ class BandwidthAnalyzer:
                 link_values.append(link_value)
                 formatted_label = f"{link_value:.1f}"
 
-            # 为total模式添加T2比例和空闲比例信息
+            # 为total模式添加0次尝试比例和空闲比例信息
             if mode == "total" and hasattr(network, "get_links_utilization_stats") and callable(network.get_links_utilization_stats):
                 try:
                     utilization_stats = network.get_links_utilization_stats()
                     if (i, j) in utilization_stats:
                         stats = utilization_stats[(i, j)]
-                        t2_ratio = stats.get("T2_ratio", 0.0)
+                        
+                        # 获取已经计算好的比例数据
+                        eject_attempts_h_ratios = stats.get("eject_attempts_h_ratios", {"0": 0.0, "1": 0.0, "2": 0.0, ">2": 0.0})
+                        eject_attempts_v_ratios = stats.get("eject_attempts_v_ratios", {"0": 0.0, "1": 0.0, "2": 0.0, ">2": 0.0})
+                        
+                        # 根据链路方向选择显示哪个方向的0次尝试比例
+                        if abs(i - j) == 1:  # 横向链路
+                            zero_attempts_ratio = eject_attempts_h_ratios.get("0", 0.0)
+                        else:  # 纵向链路
+                            zero_attempts_ratio = eject_attempts_v_ratios.get("0", 0.0)
+                        
                         empty_ratio = stats.get("empty_ratio", 0.0)
-                        # 添加T2比例和空闲比例到标签，保留百分号
-                        formatted_label += f"\n{t2_ratio*100:.0f}% {empty_ratio*100:.0f}%"
+                        # 添加0次尝试比例和空闲比例到标签
+                        formatted_label += f"\n{zero_attempts_ratio*100:.0f}% {empty_ratio*100:.0f}%"
                 except:
                     # 如果获取统计数据失败，保持原标签
                     pass

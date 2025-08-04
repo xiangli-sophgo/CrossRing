@@ -109,8 +109,8 @@ class Packet_Base_model(BaseModel):
                     (req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
-                self.req_cir_h_num_stat += req.circuits_completed_h
-                self.req_cir_v_num_stat += req.circuits_completed_v
+                self.req_cir_h_num_stat += req.eject_attempts_h
+                self.req_cir_v_num_stat += req.eject_attempts_v
                 for flit in self.data_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle
                 req.leave_db_cycle = self.cycle
@@ -131,8 +131,8 @@ class Packet_Base_model(BaseModel):
                     (req for req in self.node.sn_tracker[self.sn_type][in_pos] if req.packet_id == packet_id),
                     None,
                 )
-                self.req_cir_h_num_stat += req.circuits_completed_h
-                self.req_cir_v_num_stat += req.circuits_completed_v
+                self.req_cir_h_num_stat += req.eject_attempts_h
+                self.req_cir_v_num_stat += req.eject_attempts_v
                 for flit in self.data_network.arrive_flits[packet_id]:
                     flit.leave_db_cycle = self.cycle + self.config.sn_tracker_release_latency
                 # 释放tracker 增加40ns延迟
@@ -835,8 +835,8 @@ class Packet_Base_model(BaseModel):
             (req for req in self.node.rn_tracker[rsp.req_type][self.rn_type][in_pos] if req.packet_id == rsp.packet_id),
             None,
         )
-        self.rsp_cir_h_num_stat += rsp.circuits_completed_h
-        self.rsp_cir_v_num_stat += rsp.circuits_completed_v
+        self.rsp_cir_h_num_stat += rsp.eject_attempts_h
+        self.rsp_cir_v_num_stat += rsp.eject_attempts_v
         if not req:
             return
         rsp.rn_receive_rsp_cycle = self.cycle

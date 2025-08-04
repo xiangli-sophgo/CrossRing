@@ -120,32 +120,48 @@ class IPInterface:
             },
         }
 
-        # 根据IP类型设置带宽限制令牌桶
+        # 根据IP类型设置双向带宽限制令牌桶
         if ip_type.startswith("ddr"):
             # DDR通道限速
-            self.token_bucket = TokenBucket(
-                rate=self.config.DDR_BW_LIMIT / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
-                bucket_size=self.config.DDR_BW_LIMIT,
+            tx_limit = getattr(self.config, "DDR_TX_BW_LIMIT", 128)
+            rx_limit = getattr(self.config, "DDR_RX_BW_LIMIT", 128)
+            self.tx_token_bucket = TokenBucket(
+                rate=tx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
+                bucket_size=tx_limit,
+            )
+            self.rx_token_bucket = TokenBucket(
+                rate=rx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
+                bucket_size=rx_limit,
             )
         elif ip_type.startswith("l2m"):
             # L2M通道限速
-            self.token_bucket = TokenBucket(
-                rate=self.config.L2M_BW_LIMIT / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
-                bucket_size=self.config.L2M_BW_LIMIT,
+            tx_limit = getattr(self.config, "L2M_TX_BW_LIMIT", 128)
+            rx_limit = getattr(self.config, "L2M_RX_BW_LIMIT", 128)
+            self.tx_token_bucket = TokenBucket(
+                rate=tx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
+                bucket_size=tx_limit,
+            )
+            self.rx_token_bucket = TokenBucket(
+                rate=rx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
+                bucket_size=rx_limit,
             )
         elif ip_type[:4] in ("sdma", "gdma", "cdma"):
             # DMA通道（SDMA/GDMA/CDMA）限速
-            # 配置字段应为 SDMA_BW_LIMIT, GDMA_BW_LIMIT, CDMA_BW_LIMIT
-            limit_attr = f"{ip_type[:4].upper()}_BW_LIMIT"
-            bw_limit = getattr(self.config, limit_attr)
-            self.token_bucket = TokenBucket(
-                # rate=bw_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
-                rate=bw_limit / self.config.FLIT_SIZE,
-                bucket_size=bw_limit,
+            ip_prefix = ip_type[:4].upper()
+            tx_limit = getattr(self.config, f"{ip_prefix}_TX_BW_LIMIT", 128)
+            rx_limit = getattr(self.config, f"{ip_prefix}_RX_BW_LIMIT", 128)
+            self.tx_token_bucket = TokenBucket(
+                rate=tx_limit / self.config.FLIT_SIZE,
+                bucket_size=tx_limit,
+            )
+            self.rx_token_bucket = TokenBucket(
+                rate=rx_limit / self.config.FLIT_SIZE,
+                bucket_size=rx_limit,
             )
         else:
             # 默认不限速
-            self.token_bucket = None
+            self.tx_token_bucket = None
+            self.rx_token_bucket = None
 
     def enqueue(self, flit: Flit, network_type: str, retry=False):
         """IP 核把flit丢进对应网络的 inject_fifo"""
@@ -171,9 +187,9 @@ class IPInterface:
 
         # 根据网络类型进行不同的处理
         if network_type == "req":
-            if self.token_bucket:
-                self.token_bucket.refill(self.current_cycle)
-                if not self.token_bucket.consume(flit.burst_length):
+            if self.tx_token_bucket:
+                self.tx_token_bucket.refill(self.current_cycle)
+                if not self.tx_token_bucket.consume(flit.burst_length):
                     return
             if flit.req_attr == "new" and not self._check_and_reserve_resources(flit):
                 return  # 资源不足，保持在inject_fifo中
@@ -192,9 +208,9 @@ class IPInterface:
             current_cycle = getattr(self, "current_cycle", 0)
             if hasattr(flit, "departure_cycle") and flit.departure_cycle > current_cycle:
                 return  # 还没到发送时间
-            if self.token_bucket:
-                self.token_bucket.refill(current_cycle)
-                if not self.token_bucket.consume():
+            if self.tx_token_bucket:
+                self.tx_token_bucket.refill(current_cycle)
+                if not self.tx_token_bucket.consume():
                     return
             flit: Flit = net_info["inject_fifo"].popleft()
             flit.flit_position = "L2H_FIFO"
@@ -269,8 +285,7 @@ class IPInterface:
                 self.node.rn_tracker["write"][ip_type][ip_pos].append(req)
                 self.node.rn_tracker_pointer["write"][ip_type][ip_pos] += 1
 
-                # 创建写数据包
-                self.create_write_packet(req)
+                # 写数据包将在收到 datasend 响应时创建
 
             return True
 
@@ -342,8 +357,8 @@ class IPInterface:
         req.cmd_received_by_cake1_cycle = getattr(self, "current_cycle", 0)
         self.req_wait_cycles_h += req.wait_cycle_h
         self.req_wait_cycles_v += req.wait_cycle_v
-        self.req_cir_h_num += req.circuits_completed_h
-        self.req_cir_v_num += req.circuits_completed_v
+        self.req_cir_h_num += req.eject_attempts_h
+        self.req_cir_v_num += req.eject_attempts_v
         req.cmd_received_by_cake1_cycle = self.current_cycle
 
         if req.req_type == "read":
@@ -381,8 +396,8 @@ class IPInterface:
         rsp.cmd_received_by_cake1_cycle = getattr(self, "current_cycle", 0)
         self.rsp_wait_cycles_h += rsp.wait_cycle_h
         self.rsp_wait_cycles_v += rsp.wait_cycle_v
-        self.rsp_cir_h_num += rsp.circuits_completed_h
-        self.rsp_cir_v_num += rsp.circuits_completed_v
+        self.rsp_cir_h_num += rsp.eject_attempts_h
+        self.rsp_cir_v_num += rsp.eject_attempts_v
         rsp.cmd_received_by_cake0_cycle = self.current_cycle
         if rsp.req_type == "read" and rsp.rsp_type == "negative":
             self.read_retry_num_stat += 1
@@ -454,12 +469,15 @@ class IPInterface:
                 self.enqueue(req, "req", retry=True)
 
             elif rsp.rsp_type == "datasend":
-                # 写数据发送，将写数据包放入数据网络inject_fifo
-                for flit in self.node.rn_wdb[self.ip_type][self.ip_pos][rsp.packet_id]:
-                    self.enqueue(flit, "data")
-                # Enqueue 完所有写数据后 —— 释放 RN write‐tracker
+                # 收到写数据发送响应，现在创建并发送写数据包
                 req: Flit = next((r for r in self.node.rn_tracker["write"][self.ip_type][self.ip_pos] if r.packet_id == rsp.packet_id), None)
                 if req:
+                    # 创建写数据包
+                    self.create_write_packet(req)
+                    # 将写数据包放入数据网络inject_fifo
+                    for flit in self.node.rn_wdb[self.ip_type][self.ip_pos][rsp.packet_id]:
+                        self.enqueue(flit, "data")
+                    # Enqueue 完所有写数据后 —— 释放 RN write‐tracker
                     self.node.rn_tracker["write"][self.ip_type][self.ip_pos].remove(req)
                     self.node.rn_wdb_count[self.ip_type][self.ip_pos] += req.burst_length
                     self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos] += 1
@@ -515,8 +533,8 @@ class IPInterface:
         flit.arrival_cycle = getattr(self, "current_cycle", 0)
         self.data_wait_cycles_h += flit.wait_cycle_h
         self.data_wait_cycles_v += flit.wait_cycle_v
-        self.data_cir_h_num += flit.circuits_completed_h
-        self.data_cir_v_num += flit.circuits_completed_v
+        self.data_cir_h_num += flit.eject_attempts_h
+        self.data_cir_v_num += flit.eject_attempts_v
         if flit.req_type == "read":
             # 读数据到达RN端，需要收集到data buffer中
             self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
@@ -586,9 +604,9 @@ class IPInterface:
             return
 
         current_cycle = getattr(self, "current_cycle", 0)
-        if network_type == "data" and self.token_bucket:
-            self.token_bucket.refill(current_cycle)
-            if not self.token_bucket.consume():
+        if network_type == "data" and self.rx_token_bucket:
+            self.rx_token_bucket.refill(current_cycle)
+            if not self.rx_token_bucket.consume():
                 return
 
         flit = net_info["h2l_fifo_l"].popleft()

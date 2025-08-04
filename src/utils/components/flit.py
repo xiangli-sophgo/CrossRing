@@ -72,8 +72,8 @@ class Flit:
         "id",
         "flit_id",
         "is_last_flit",
-        "circuits_completed_v",
-        "circuits_completed_h",
+        "eject_attempts_v",
+        "eject_attempts_h",
         "wait_cycle_h",
         "wait_cycle_v",
         "path_index",
@@ -156,8 +156,8 @@ class Flit:
         self.id = Flit.last_id
         self.flit_id = -1
         self.is_last_flit = False
-        self.circuits_completed_v = 0
-        self.circuits_completed_h = 0
+        self.eject_attempts_v = 0
+        self.eject_attempts_h = 0
         self.wait_cycle_h = 0
         self.wait_cycle_v = 0
         self.path_index = 0
@@ -302,8 +302,8 @@ class Flit:
         self.is_delay = False
         self.wait_cycle_h = 0
         self.wait_cycle_v = 0
-        self.circuits_completed_h = 0
-        self.circuits_completed_v = 0
+        self.eject_attempts_h = 0
+        self.eject_attempts_v = 0
         self.path_index = 0
         self.current_seat_index = -1
         self.current_link = None

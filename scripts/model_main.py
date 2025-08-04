@@ -32,8 +32,9 @@ def main():
             # r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
             # r"full_bw_R_4x5.txt"
-            # "LLama2_AllReduce.txt"
-            "test1.txt"
+            "LLama2_AllReduce.txt"
+            # "traffic_2260E_case1.txt",
+            # "test1.txt"
             # "LLama2_AttentionFC.txt"
             # "R_4x2.txt"
             # "MLA_B32.txt"
@@ -55,12 +56,12 @@ def main():
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        # topo_type = "5x4"  # SG2262
-        # topo_type = "4x2"
+        topo_type = "5x4"  # SG2262
+        # topo_type = "4x4"
         # topo_type = "5x2"
         # topo_type = "3x1"
         # topo_type = "6x5"  # SG2260
-        topo_type = "3x3"  # SG2260E
+        # topo_type = "3x3"  # SG2260E
     else:
         topo_type = config.TOPO_TYPE
 
@@ -87,10 +88,10 @@ def main():
         config.SN_DDR_WDB_SIZE = config.SN_DDR_W_TRACKER_OSTD * config.BURST
         config.SN_L2M_WDB_SIZE = config.SN_L2M_W_TRACKER_OSTD * config.BURST
         config.DDR_R_LATENCY_original = 155
-        config.DDR_R_LATENCY_VAR_original = 0
-        config.DDR_W_LATENCY_original = 16
+        config.DDR_W_LATENCY_original = 0
         config.L2M_R_LATENCY_original = 12
         config.L2M_W_LATENCY_original = 16
+        config.DDR_R_LATENCY_VAR_original = 0
         # config.DDR_BW_LIMIT = 76.8 / 4
         # config.L2M_BW_LIMIT = np.inf
         config.IQ_CH_FIFO_DEPTH = 8
@@ -314,10 +315,10 @@ def main():
         config.SN_DDR_WDB_SIZE = config.SN_DDR_W_TRACKER_OSTD * config.BURST
         config.SN_L2M_WDB_SIZE = config.SN_L2M_W_TRACKER_OSTD * config.BURST
         config.DDR_R_LATENCY_original = 100
-        config.DDR_R_LATENCY_VAR_original = 0
         config.DDR_W_LATENCY_original = 40
         config.L2M_R_LATENCY_original = 12
         config.L2M_W_LATENCY_original = 16
+        # config.DDR_R_LATENCY_VAR_original = 0
         config.IQ_CH_FIFO_DEPTH = 10
         config.EQ_CH_FIFO_DEPTH = 10
         config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
@@ -325,9 +326,9 @@ def main():
         config.IQ_OUT_FIFO_DEPTH_EQ = 8
         config.RB_OUT_FIFO_DEPTH = 8
         config.SN_TRACKER_RELEASE_LATENCY = 40
-        config.CDMA_BW_LIMIT = 8
-        # config.DDR_BW_LIMIT = 102
-        # config.GDMA_BW_LIMIT = 102
+        # config.CDMA_BW_LIMIT = 8
+        config.DDR_BW_LIMIT = 115.2
+        # config.GDMA_BW_LIMIT = 115.2
         config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 0
 
         config.TL_Etag_T2_UE_MAX = 8
@@ -348,8 +349,8 @@ def main():
         config.SDMA_RW_GAP = np.inf
         config.CHANNEL_SPEC = {
             "gdma": 2,
-            "sdma": 2,
-            "cdma": 1,
+            "sdma": 1,
+            "cdma": 4,
             "ddr": 2,
             "l2m": 2,
         }
@@ -441,20 +442,20 @@ def main():
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
         plot_flow_fig=1,
-        flow_fig_show_CDMA=1,
+        flow_fig_show_CDMA=0,
         plot_RN_BW_fig=1,
         plot_link_state=0,
-        plot_start_time=0,
+        plot_start_time=1000,
         print_trace=0,
         show_trace_id=0,
         show_node_id=4,
         verbose=1,
     )
-    np.random.seed(722)
+    np.random.seed(801)
 
     sim.initial()
     sim.end_time = 6000
-    sim.print_interval = 1000
+    sim.print_interval = 2000
     sim.run()
 
 

@@ -112,26 +112,6 @@ class Network:
             -2: ("IQ_TD", self.config.IQ_OUT_FIFO_DEPTH_VERTICAL),
         }
 
-        self.token_bucket = defaultdict(dict)
-        self.flit_size_bytes = 128
-        for ch_name in self.IQ_channel_buffer.keys():
-            for ip_pos in set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST):
-
-                if ch_name.startswith("ddr"):
-                    self.token_bucket[ip_pos][ch_name] = TokenBucket(
-                        rate=self.config.DDR_BW_LIMIT / self.config.NETWORK_FREQUENCY / self.flit_size_bytes,
-                        bucket_size=self.config.DDR_BW_LIMIT,
-                    )
-                    self.token_bucket[ip_pos - self.config.NUM_COL][ch_name] = TokenBucket(
-                        rate=self.config.DDR_BW_LIMIT / self.config.NETWORK_FREQUENCY / self.flit_size_bytes,
-                        bucket_size=self.config.DDR_BW_LIMIT,
-                    )
-                elif ch_name.startswith("l2m"):
-                    self.token_bucket[ip_pos][ch_name] = TokenBucket(
-                        rate=self.config.L2M_BW_LIMIT / self.config.NETWORK_FREQUENCY / self.flit_size_bytes,
-                        bucket_size=self.config.L2M_BW_LIMIT,
-                    )
-
         # ETag setup
         self.T0_Etag_Order_FIFO = deque()  # 用于轮询选择 T0 Flit 的 Order FIFO
         self.RB_UE_Counters = {"TL": {}, "TR": {}}
@@ -192,24 +172,26 @@ class Network:
                 if adjacency_matrix[i][j] == 1 and i - j != config.NUM_COL:
                     self.links[(i, j)] = [None] * config.SLICE_PER_LINK
                     self.links_flow_stat[(i, j)] = {
-                        "T2_count": 0,
-                        "T1_count": 0,
-                        "T0_count": 0,
-                        "ITag_count": 0,
-                        "empty_count": 0,
-                        "total_cycles": 0
+                        "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                        # 按下环尝试次数分组的统计
+                        "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
+                        "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
                     }
                     self.links_tag[(i, j)] = [None] * config.SLICE_PER_LINK
             if i in range(0, config.NUM_COL):
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
                 self.links_flow_stat[(i, i)] = {
-                    "T2_count": 0, "T1_count": 0, "T0_count": 0,
-                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0
+                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                    # 按下环尝试次数分组的统计
+                    "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
+                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
                 }
                 self.links_flow_stat[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = {
-                    "T2_count": 0, "T1_count": 0, "T0_count": 0,
-                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0
+                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                    # 按下环尝试次数分组的统计
+                    "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
+                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
                 }
                 self.links_tag[(i, i)] = [None] * 2
                 self.links_tag[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
@@ -217,12 +199,16 @@ class Network:
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
                 self.links_flow_stat[(i, i)] = {
-                    "T2_count": 0, "T1_count": 0, "T0_count": 0,
-                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0
+                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                    # 按下环尝试次数分组的统计
+                    "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
+                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
                 }
                 self.links_flow_stat[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = {
-                    "T2_count": 0, "T1_count": 0, "T0_count": 0,
-                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0
+                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                    # 按下环尝试次数分组的统计
+                    "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
+                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
                 }
                 self.links_tag[(i, i)] = [None] * 2
                 self.links_tag[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
@@ -557,19 +543,23 @@ class Network:
             # A1. 左边界情况
             if next_node == row_start:
                 if next_node == flit.current_position:
-                    # Flit已经绕横向环一圈
-                    flit.circuits_completed_h += 1
+                    # Flit已经绕横向环一圈，尝试下环
+                    flit.eject_attempts_h += 1  # 每次尝试下环就计数
                     link_station = self.ring_bridge["TR"].get((next_node, target_eject_node_id))
                     can_use_T1 = self._entry_available("TR", (next_node, target_eject_node_id), "T1")
                     can_use_T2 = self._entry_available("TR", (next_node, target_eject_node_id), "T2")
                     # TR方向尝试下环
-                    if len(link_station) < self.config.RB_IN_FIFO_DEPTH and (
-                        (flit.ETag_priority == "T1" and can_use_T1)
-                        or (flit.ETag_priority == "T2" and can_use_T2)
-                        or (flit.ETag_priority == "T1" and not can_use_T1 and can_use_T2)  # T1使用T2 entry
-                        or (flit.ETag_priority == "T0" and can_use_T1)  # T0使用T1 entry
-                        or (flit.ETag_priority == "T0" and not can_use_T1 and can_use_T2)  # T0使用T2 entry
-                    ) and self._can_eject_in_order(flit, target_eject_node_id):
+                    if (
+                        len(link_station) < self.config.RB_IN_FIFO_DEPTH
+                        and (
+                            (flit.ETag_priority == "T1" and can_use_T1)
+                            or (flit.ETag_priority == "T2" and can_use_T2)
+                            or (flit.ETag_priority == "T1" and not can_use_T1 and can_use_T2)  # T1使用T2 entry
+                            or (flit.ETag_priority == "T0" and can_use_T1)  # T0使用T1 entry
+                            or (flit.ETag_priority == "T0" and not can_use_T1 and can_use_T2)  # T0使用T2 entry
+                        )
+                        and self._can_eject_in_order(flit, target_eject_node_id)
+                    ):
                         flit.is_delay = False
                         flit.current_link = (next_node, target_eject_node_id)
                         link[flit.current_seat_index] = None
@@ -608,18 +598,22 @@ class Network:
             # A2. 右边界情况:
             elif next_node == row_end:
                 if next_node == flit.current_position:
-                    flit.circuits_completed_h += 1
+                    flit.eject_attempts_h += 1
                     link_station = self.ring_bridge["TL"].get((next_node, target_eject_node_id))
                     can_use_T0 = self._entry_available("TL", (next_node, target_eject_node_id), "T0")
                     can_use_T1 = self._entry_available("TL", (next_node, target_eject_node_id), "T1")
                     can_use_T2 = self._entry_available("TL", (next_node, target_eject_node_id), "T2")
                     # 尝试TL下环，非T0情况
                     if flit.ETag_priority in ["T1", "T2"]:
-                        if len(link_station) < self.config.RB_IN_FIFO_DEPTH and (
-                            (flit.ETag_priority == "T1" and can_use_T1)
-                            or (flit.ETag_priority == "T2" and can_use_T2)
-                            or (flit.ETag_priority == "T1" and not can_use_T1 and can_use_T2)  # T1使用T2 entry
-                        ) and self._can_eject_in_order(flit, target_eject_node_id):
+                        if (
+                            len(link_station) < self.config.RB_IN_FIFO_DEPTH
+                            and (
+                                (flit.ETag_priority == "T1" and can_use_T1)
+                                or (flit.ETag_priority == "T2" and can_use_T2)
+                                or (flit.ETag_priority == "T1" and not can_use_T1 and can_use_T2)  # T1使用T2 entry
+                            )
+                            and self._can_eject_in_order(flit, target_eject_node_id)
+                        ):
                             flit.is_delay = False
                             flit.current_link = (next_node, target_eject_node_id)
                             link[flit.current_seat_index] = None
@@ -696,7 +690,7 @@ class Network:
             # A3. 上边界情况:
             elif next_node == col_start:
                 if next_node == flit.current_position:
-                    flit.circuits_completed_v += 1
+                    flit.eject_attempts_v += 1
                     link_eject = self.eject_queues["TD"][next_node]
                     can_use_T1 = self._entry_available("TD", next_node, "T1")
                     can_use_T2 = self._entry_available("TD", next_node, "T2")
@@ -742,7 +736,7 @@ class Network:
             # A4. 下边界情况:
             elif next_node == col_end:
                 if next_node == flit.current_position:
-                    flit.circuits_completed_v += 1
+                    flit.eject_attempts_v += 1
                     link_eject = self.eject_queues["TU"][next_node]
                     can_use_T0 = self._entry_available("TU", next_node, "T0")
                     can_use_T1 = self._entry_available("TU", next_node, "T1")
@@ -827,7 +821,7 @@ class Network:
         # B. 非边界横向环情况
         elif abs(current - next_node) == 1:
             if next_node == flit.current_position:
-                flit.circuits_completed_h += 1
+                flit.eject_attempts_h += 1
                 if current - next_node == 1:
                     link_station = self.ring_bridge["TL"].get((next_node, target_eject_node_id))
                     can_use_T0 = self._entry_available("TL", (next_node, target_eject_node_id), "T0")
@@ -955,7 +949,7 @@ class Network:
         # C. 非边界纵向环情况
         else:
             if next_node == flit.current_position:
-                flit.circuits_completed_v += 1
+                flit.eject_attempts_v += 1
                 if current - next_node == self.config.NUM_COL * 2:
                     link_eject = self.eject_queues["TU"][next_node]
                     can_use_T0 = self._entry_available("TU", next_node, "T0")
@@ -1081,46 +1075,46 @@ class Network:
         # 如果未启用保序功能，直接返回True
         if not self.config.ENABLE_IN_ORDER_EJECTION:
             return True
-            
+
         # 确保flit已设置保序信息
-        if not hasattr(flit, 'src_dest_order_id') or not hasattr(flit, 'packet_category'):
+        if not hasattr(flit, "src_dest_order_id") or not hasattr(flit, "packet_category"):
             return True
-        
+
         if flit.src_dest_order_id == -1 or flit.packet_category is None:
             return True
-            
+
         # 获取原始的src和dest
         src = flit.source_original if flit.source_original != -1 else flit.source
         dest = flit.destination_original if flit.destination_original != -1 else flit.destination
-        
+
         # 从目标节点获取保序跟踪表 - 这里需要通过节点对象访问
         # 注意：network对象需要有访问节点保序表的方法
-        if not hasattr(self, 'node') or self.node is None:
+        if not hasattr(self, "node") or self.node is None:
             return True  # 如果没有节点对象，默认允许下环
-            
+
         expected_order_id = self.node.order_tracking_table[(src, dest)][flit.packet_category] + 1
-        
+
         return flit.src_dest_order_id == expected_order_id
-    
+
     def _update_order_tracking_table(self, flit: Flit):
         """更新保序跟踪表"""
         # 如果未启用保序功能，直接返回
         if not self.config.ENABLE_IN_ORDER_EJECTION:
             return
-            
+
         # 确保flit已设置保序信息
-        if not hasattr(flit, 'src_dest_order_id') or not hasattr(flit, 'packet_category'):
+        if not hasattr(flit, "src_dest_order_id") or not hasattr(flit, "packet_category"):
             return
-        
+
         if flit.src_dest_order_id == -1 or flit.packet_category is None:
             return
-            
+
         # 获取原始的src和dest
         src = flit.source_original if flit.source_original != -1 else flit.source
         dest = flit.destination_original if flit.destination_original != -1 else flit.destination
-        
+
         # 更新保序跟踪表
-        if hasattr(self, 'node') and self.node is not None:
+        if hasattr(self, "node") and self.node is not None:
             self.node.order_tracking_table[(src, dest)][flit.packet_category] = flit.src_dest_order_id
 
     def _handle_delay_flit_original(self, flit: Flit, link, current, next_node, row_start, row_end, col_start, col_end):
@@ -1329,12 +1323,10 @@ class Network:
             self._sn_positions = list(set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST))
         return self._sn_positions
 
-
-
     def _update_link_statistics_on_set(self, link, slice_index, new_flit, old_flit, cycle):
         """
         在设置链路slice时增量更新统计数据
-        
+
         Args:
             link: 链路tuple (src, dst)
             slice_index: slice索引
@@ -1344,85 +1336,96 @@ class Network:
         """
         if link not in self.links_flow_stat:
             return
-            
+
         # 根据新flit状态增加对应计数（每次设置slice时统计一次）
+        
+        # 首先检查ITag，无论是否有flit都要检查
+        if link in self.links_tag and slice_index < len(self.links_tag[link]):
+            tag_info = self.links_tag[link][slice_index]
+            if tag_info is not None:
+                # 有ITag标记
+                self.links_flow_stat[link]["ITag_count"] += 1
+        
+        # 然后处理flit统计
         if new_flit is None:
-            # 设置为空，检查是否有ITag标记
-            if link in self.links_tag and slice_index < len(self.links_tag[link]):
-                tag_info = self.links_tag[link][slice_index]
-                if tag_info is not None:
-                    # 有ITag标记
-                    self.links_flow_stat[link]["ITag_count"] += 1
-                else:
-                    # 没有任何标记，完全空闲
-                    self.links_flow_stat[link]["empty_count"] += 1
-            else:
-                # 没有标记信息，完全空闲
+            # slice为空，且没有ITag标记，才是真正的空闲
+            if link not in self.links_tag or slice_index >= len(self.links_tag[link]) or self.links_tag[link][slice_index] is None:
                 self.links_flow_stat[link]["empty_count"] += 1
         else:
-            # slice被flit占用，根据flit的ETag_priority分类
-            if hasattr(new_flit, 'ETag_priority'):
-                priority = new_flit.ETag_priority
-                if priority == "T2":
-                    self.links_flow_stat[link]["T2_count"] += 1
-                elif priority == "T1":
-                    self.links_flow_stat[link]["T1_count"] += 1
-                elif priority == "T0":
-                    self.links_flow_stat[link]["T0_count"] += 1
-                else:
-                    # 未知优先级，默认计为T2（与flit默认值一致）
-                    self.links_flow_stat[link]["T2_count"] += 1
+            # slice被flit占用，按下环尝试次数分组统计
+            self._update_eject_attempts_stats(link, new_flit)
+
+    def _update_eject_attempts_stats(self, link, flit):
+        """
+        根据flit的下环尝试次数更新链路统计
+        
+        Args:
+            link: 链路标识 (i, j)
+            flit: flit对象
+        """
+        if not hasattr(flit, 'eject_attempts_h') or not hasattr(flit, 'eject_attempts_v'):
+            return
+            
+        # 判断链路方向并更新相应的统计
+        i, j = link
+        is_horizontal = abs(i - j) == 1  # 横向链路
+        is_vertical = abs(i - j) > 1     # 纵向链路
+        
+        if is_horizontal:
+            # 横向链路，统计横向下环尝试次数
+            attempts = flit.eject_attempts_h
+            if attempts == 0:
+                self.links_flow_stat[link]["eject_attempts_h"]["0"] += 1
+            elif attempts == 1:
+                self.links_flow_stat[link]["eject_attempts_h"]["1"] += 1
+            elif attempts == 2:
+                self.links_flow_stat[link]["eject_attempts_h"]["2"] += 1
             else:
-                # 没有ETag_priority属性，默认计为T2
-                self.links_flow_stat[link]["T2_count"] += 1
+                self.links_flow_stat[link]["eject_attempts_h"][">2"] += 1
+        elif is_vertical:
+            # 纵向链路，统计纵向下环尝试次数
+            attempts = flit.eject_attempts_v
+            if attempts == 0:
+                self.links_flow_stat[link]["eject_attempts_v"]["0"] += 1
+            elif attempts == 1:
+                self.links_flow_stat[link]["eject_attempts_v"]["1"] += 1
+            elif attempts == 2:
+                self.links_flow_stat[link]["eject_attempts_v"]["2"] += 1
+            else:
+                self.links_flow_stat[link]["eject_attempts_v"][">2"] += 1
 
     def collect_cycle_end_link_statistics(self, cycle):
         """
         在每个周期结束时统计所有链路第一个slice位置的使用情况
-        
+
         Args:
             cycle: 当前周期
         """
         for link in self.links_flow_stat:
             if link not in self.links:
                 continue
-                
+
             # 只统计第一个slice位置(索引0)的使用情况
             slice_index = 0
             if slice_index >= len(self.links[link]):
                 continue
-                
+
             flit = self.links[link][slice_index]
+            # 首先检查ITag，无论是否有flit都要检查
+            if link in self.links_tag and slice_index < len(self.links_tag[link]):
+                tag_info = self.links_tag[link][slice_index]
+                if tag_info is not None:
+                    # 有ITag标记
+                    self.links_flow_stat[link]["ITag_count"] += 1
+            
             if flit is None:
-                # slice为空，检查是否有ITag标记
-                if link in self.links_tag and slice_index < len(self.links_tag[link]):
-                    tag_info = self.links_tag[link][slice_index]
-                    if tag_info is not None:
-                        # 有ITag标记
-                        self.links_flow_stat[link]["ITag_count"] += 1
-                    else:
-                        # 完全空闲
-                        self.links_flow_stat[link]["empty_count"] += 1
-                else:
-                    # 完全空闲
+                # slice为空，且没有ITag标记，才是真正的空闲
+                if link not in self.links_tag or slice_index >= len(self.links_tag[link]) or self.links_tag[link][slice_index] is None:
                     self.links_flow_stat[link]["empty_count"] += 1
             else:
-                # slice被flit占用，根据flit的ETag_priority分类
-                if hasattr(flit, 'ETag_priority'):
-                    priority = flit.ETag_priority
-                    if priority == "T2":
-                        self.links_flow_stat[link]["T2_count"] += 1
-                    elif priority == "T1":
-                        self.links_flow_stat[link]["T1_count"] += 1
-                    elif priority == "T0":
-                        self.links_flow_stat[link]["T0_count"] += 1
-                    else:
-                        # 未知优先级，默认计为T2
-                        self.links_flow_stat[link]["T2_count"] += 1
-                else:
-                    # 没有ETag_priority属性，默认计为T2
-                    self.links_flow_stat[link]["T2_count"] += 1
-            
+                # slice被flit占用，按下环尝试次数分组统计
+                self._update_eject_attempts_stats(link, flit)
+
             # 更新总周期计数
             self.links_flow_stat[link]["total_cycles"] += 1
 
@@ -1430,7 +1433,7 @@ class Network:
         """
         获取链路利用率统计信息
         返回每个链路各状态的比例
-        
+
         利用率计算说明：
         - 总slice-周期数 = 周期数 × 每个链路的slice数
         - 各状态比例 = 该状态的slice-周期数 / 总slice-周期数
@@ -1438,27 +1441,39 @@ class Network:
         """
         stats = {}
         for link, link_stats in self.links_flow_stat.items():
-            # 总slice设置次数就是所有状态计数的总和
-            total_slice_sets = (link_stats["T2_count"] + link_stats["T1_count"] + 
-                               link_stats["T0_count"] + link_stats["ITag_count"] + 
-                               link_stats["empty_count"])
-            
-            if total_slice_sets > 0:
-                stats[link] = {
-                    # 各状态的比例
-                    "T2_ratio": link_stats["T2_count"] / total_slice_sets,
-                    "T1_ratio": link_stats["T1_count"] / total_slice_sets,
-                    "T0_ratio": link_stats["T0_count"] / total_slice_sets,
-                    "ITag_ratio": link_stats["ITag_count"] / total_slice_sets,
-                    "empty_ratio": link_stats["empty_count"] / total_slice_sets,
-                    
-                    # 链路总利用率（被flit占用的比例）
-                    "utilization": (link_stats["T2_count"] + link_stats["T1_count"] + 
-                                  link_stats["T0_count"]) / total_slice_sets,
-                    
-                    # 统计信息
-                    "total_slice_sets": total_slice_sets
-                }
-        
-        return stats
+            total_cycles = link_stats["total_cycles"]
 
+            if total_cycles > 0:
+                # 获取下环尝试次数统计
+                eject_attempts_h = link_stats.get("eject_attempts_h", {"0": 0, "1": 0, "2": 0, ">2": 0})
+                eject_attempts_v = link_stats.get("eject_attempts_v", {"0": 0, "1": 0, "2": 0, ">2": 0})
+                
+                # 计算flit总数
+                total_flit_h = sum(eject_attempts_h.values())
+                total_flit_v = sum(eject_attempts_v.values())
+                total_flit = total_flit_h + total_flit_v
+                
+                stats[link] = {
+                    # 主要比例（基于total_cycles）
+                    "utilization": total_flit / total_cycles,
+                    "ITag_ratio": link_stats["ITag_count"] / total_cycles,
+                    "empty_ratio": link_stats["empty_count"] / total_cycles,
+                    
+                    # 详细flit分布（相对于total_cycles）
+                    "eject_attempts_h_ratios": {
+                        k: v / total_cycles if total_cycles > 0 else 0.0
+                        for k, v in eject_attempts_h.items()
+                    },
+                    "eject_attempts_v_ratios": {
+                        k: v / total_cycles if total_cycles > 0 else 0.0
+                        for k, v in eject_attempts_v.items()
+                    },
+                    
+                    # 原始计数
+                    "total_cycles": total_cycles,
+                    "total_flit": total_flit,
+                    "eject_attempts_h": eject_attempts_h,
+                    "eject_attempts_v": eject_attempts_v,
+                }
+
+        return stats

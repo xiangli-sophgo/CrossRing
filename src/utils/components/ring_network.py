@@ -252,7 +252,7 @@ class RingNetwork(Network):
             start_idx = priority_order.index(flit.ETag_priority)
             # 2-A. 依 flit 当前优先级向低档探测
             if flit.ETag_priority in ["T1", "T0"]:
-                flit.circuits_completed_h += 1
+                flit.eject_attempts_h += 1
             for p in priority_order[start_idx:]:
                 if fifo_has_space(curr_node, dir_type, p, flit):
                     occupy_fifo(curr_node, dir_type, p)  # 占位
