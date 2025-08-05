@@ -32,9 +32,9 @@ def main():
             # r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
             # r"full_bw_R_4x5.txt"
-            "LLama2_AllReduce.txt"
+            # "LLama2_AllReduce.txt"
             # "traffic_2260E_case1.txt",
-            # "test1.txt"
+            "test1.txt"
             # "LLama2_AttentionFC.txt"
             # "R_4x2.txt"
             # "MLA_B32.txt"
@@ -56,12 +56,12 @@ def main():
     if not config.TOPO_TYPE:
         # topo_type = "4x9"
         # topo_type = "9x4"
-        topo_type = "5x4"  # SG2262
+        # topo_type = "5x4"  # SG2262
         # topo_type = "4x4"
         # topo_type = "5x2"
         # topo_type = "3x1"
         # topo_type = "6x5"  # SG2260
-        # topo_type = "3x3"  # SG2260E
+        topo_type = "3x3"  # SG2260E
     else:
         topo_type = config.TOPO_TYPE
 
@@ -88,7 +88,7 @@ def main():
         config.SN_DDR_WDB_SIZE = config.SN_DDR_W_TRACKER_OSTD * config.BURST
         config.SN_L2M_WDB_SIZE = config.SN_L2M_W_TRACKER_OSTD * config.BURST
         config.DDR_R_LATENCY_original = 155
-        config.DDR_W_LATENCY_original = 0
+        config.DDR_W_LATENCY_original = 16
         config.L2M_R_LATENCY_original = 12
         config.L2M_W_LATENCY_original = 16
         config.DDR_R_LATENCY_VAR_original = 0
@@ -121,14 +121,14 @@ def main():
         config.EQ_IN_FIFO_DEPTH = 16
 
         config.GDMA_RW_GAP = np.inf
-        # config.SDMA_RW_GAP = np.inf
-        config.SDMA_RW_GAP = 50
+        config.SDMA_RW_GAP = np.inf
+        # config.SDMA_RW_GAP = 50
         config.ITag_TRIGGER_Th_H = config.ITag_TRIGGER_Th_V = 80
         config.ITag_MAX_NUM_H = config.ITag_MAX_NUM_V = 1
         config.CHANNEL_SPEC = {
-            "gdma": 1,
-            "sdma": 1,
-            "ddr": 4,
+            "gdma": 2,
+            "sdma": 2,
+            "ddr": 2,
             "l2m": 2,
         }
 
@@ -159,7 +159,7 @@ def main():
         config.DDR_W_LATENCY_original = 0
         config.L2M_R_LATENCY_original = 12
         config.L2M_W_LATENCY_original = 16
-        config.IQ_CH_FIFO_DEPTH = 2
+        config.IQ_CH_FIFO_DEPTH = 4
         config.EQ_CH_FIFO_DEPTH = 4
         config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
         config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
@@ -447,14 +447,14 @@ def main():
         plot_link_state=0,
         plot_start_time=1000,
         print_trace=0,
-        show_trace_id=0,
+        show_trace_id=7,
         show_node_id=4,
         verbose=1,
     )
     np.random.seed(801)
 
     sim.initial()
-    sim.end_time = 6000
+    sim.end_time = 12000
     sim.print_interval = 2000
     sim.run()
 

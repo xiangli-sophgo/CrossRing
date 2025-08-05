@@ -242,11 +242,10 @@ class IPInterface:
         elif network_type == "rsp":
             flit.cmd_entry_noc_from_cake1_cycle = self.current_cycle
         elif network_type == "data":
-            # if flit.req_type == "read" and flit.flit_id == 0:
-            if flit.req_type == "read":
+            # 只为第一个data flit设置entry时间戳
+            if flit.req_type == "read" and flit.flit_id == 0:
                 flit.data_entry_noc_from_cake1_cycle = self.current_cycle
-            # elif flit.req_type == "write" and flit.flit_id == 0:
-            elif flit.req_type == "write":
+            elif flit.req_type == "write" and flit.flit_id == 0:
                 flit.data_entry_noc_from_cake0_cycle = self.current_cycle
 
     def _check_and_reserve_resources(self, req):
@@ -547,15 +546,20 @@ class IPInterface:
                     self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos] += 1
                     self.node.rn_tracker_pointer["read"][self.ip_type][self.ip_pos] -= 1
                     self.node.rn_rdb_count[self.ip_type][self.ip_pos] += req.burst_length
-                    # 为所有flit设置完成时间戳
+                    # 为所有flit设置完成时间戳和计算延迟
                     first_flit = self.data_network.send_flits[flit.packet_id][0]
+                    # 记录最后到达时间
+                    complete_cycle = self.current_cycle
+                    
                     for f in self.data_network.send_flits[flit.packet_id]:
                         f.leave_db_cycle = self.current_cycle
                         f.sync_latency_record(req)
-                        f.data_received_complete_cycle = self.current_cycle
+                        # 为所有flit设置receive时间戳，确保后续处理能获得正确值
+                        f.data_received_complete_cycle = complete_cycle
+                        # 计算延迟
                         f.cmd_latency = f.cmd_received_by_cake1_cycle - f.cmd_entry_noc_from_cake0_cycle
-                        f.data_latency = f.data_received_complete_cycle - first_flit.data_entry_noc_from_cake1_cycle
-                        f.transaction_latency = f.data_received_complete_cycle - f.cmd_entry_cake0_cycle
+                        f.data_latency = complete_cycle - first_flit.data_entry_noc_from_cake1_cycle
+                        f.transaction_latency = complete_cycle - f.cmd_entry_cake0_cycle
 
                     # 清理data buffer（数据已经收集完成）
                     self.node.rn_rdb[self.ip_type][self.ip_pos].pop(flit.packet_id)
@@ -581,13 +585,18 @@ class IPInterface:
 
                     # 更新flit时间戳
                     first_flit = next((flit for flit in self.data_network.send_flits[flit.packet_id] if flit.flit_id == 0), self.data_network.send_flits[flit.packet_id][0])
+                    # 记录最后到达时间
+                    complete_cycle = self.current_cycle
+                    
                     for f in self.data_network.send_flits[flit.packet_id]:
                         f.leave_db_cycle = release_time
                         f.sync_latency_record(req)
-                        f.data_received_complete_cycle = self.current_cycle
+                        # 为所有flit设置receive时间戳，确保后续处理能获得正确值
+                        f.data_received_complete_cycle = complete_cycle
+                        # 计算延迟
                         f.cmd_latency = f.cmd_received_by_cake0_cycle - f.cmd_entry_noc_from_cake0_cycle
-                        f.data_latency = f.data_received_complete_cycle - first_flit.data_entry_noc_from_cake0_cycle
-                        f.transaction_latency = f.data_received_complete_cycle + self.config.SN_TRACKER_RELEASE_LATENCY - f.cmd_entry_cake0_cycle
+                        f.data_latency = complete_cycle - first_flit.data_entry_noc_from_cake0_cycle
+                        f.transaction_latency = complete_cycle + self.config.SN_TRACKER_RELEASE_LATENCY - f.cmd_entry_cake0_cycle
 
                     # 清理data buffer（数据已经收集完成）
                     self.node.sn_wdb[self.ip_type][self.ip_pos].pop(flit.packet_id)

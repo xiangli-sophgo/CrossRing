@@ -214,6 +214,7 @@ class BandwidthAnalyzer:
                 continue
 
             representative_flit: Flit = flits[-1]
+            first_flit: Flit = flits[0]  # 用于获取entry时间戳
 
             # 计算不同角度的结束时间
             network_end_time = representative_flit.data_received_complete_cycle // self.network_frequency
@@ -221,7 +222,7 @@ class BandwidthAnalyzer:
             if representative_flit.req_type == "read":
                 # 读请求：RN在收到数据时结束，SN在发出数据时结束
                 rn_end_time = representative_flit.data_received_complete_cycle // self.network_frequency  # RN收到数据
-                sn_end_time = representative_flit.data_entry_noc_from_cake1_cycle // self.network_frequency  # SN发出数据
+                sn_end_time = first_flit.data_entry_noc_from_cake1_cycle // self.network_frequency  # SN发出数据
 
                 # 读请求：flit的source是SN(DDR/L2M)，destination是RN(SDMA/GDMA/CDMA)
                 actual_source_node = representative_flit.destination + (self.config.NUM_COL if not self.sim_model.topo_type_stat.startswith("Ring") else 0)  # 实际发起请求的节点
@@ -230,7 +231,7 @@ class BandwidthAnalyzer:
                 actual_dest_type = representative_flit.original_destination_type  # 实际目标类型
             else:  # write
                 # 写请求：RN在发出数据时结束，SN在收到数据时结束
-                rn_end_time = representative_flit.data_entry_noc_from_cake0_cycle // self.network_frequency  # RN发出数据
+                rn_end_time = first_flit.data_entry_noc_from_cake0_cycle // self.network_frequency  # RN发出数据
                 sn_end_time = representative_flit.data_received_complete_cycle // self.network_frequency  # SN收到数据
 
                 # 写请求：flit的source是RN(SDMA/GDMA/CDMA)，destination是SN(DDR/L2M)
@@ -268,8 +269,8 @@ class BandwidthAnalyzer:
                 cmd_entry_noc_from_cake1_cycle=getattr(representative_flit, "cmd_entry_noc_from_cake1_cycle", -1),
                 cmd_received_by_cake0_cycle=getattr(representative_flit, "cmd_received_by_cake0_cycle", -1),
                 cmd_received_by_cake1_cycle=getattr(representative_flit, "cmd_received_by_cake1_cycle", -1),
-                data_entry_noc_from_cake0_cycle=getattr(representative_flit, "data_entry_noc_from_cake0_cycle", -1),
-                data_entry_noc_from_cake1_cycle=getattr(representative_flit, "data_entry_noc_from_cake1_cycle", -1),
+                data_entry_noc_from_cake0_cycle=getattr(first_flit, "data_entry_noc_from_cake0_cycle", -1),
+                data_entry_noc_from_cake1_cycle=getattr(first_flit, "data_entry_noc_from_cake1_cycle", -1),
                 data_received_complete_cycle=getattr(representative_flit, "data_received_complete_cycle", -1),
                 data_entry_network_cycle=getattr(representative_flit, "data_entry_network_cycle", -1),
                 rsp_entry_network_cycle=getattr(representative_flit, "rsp_entry_network_cycle", -1),
@@ -964,7 +965,6 @@ class BandwidthAnalyzer:
             else:
                 self.draw_flow_graph(self.sim_model.data_network, mode="total", save_path=flow_save_path, show_cdma=self.sim_model.flow_fig_show_CDMA)
 
-
         return results
 
     def export_link_statistics_csv(self, network: Network, csv_path: str):
@@ -993,7 +993,7 @@ class BandwidthAnalyzer:
                 eject_v = stats.get("eject_attempts_v", {"0": 0, "1": 0, "2": 0, ">2": 0})
                 eject_h_ratios = stats.get("eject_attempts_h_ratios", {"0": 0.0, "1": 0.0, "2": 0.0, ">2": 0.0})
                 eject_v_ratios = stats.get("eject_attempts_v_ratios", {"0": 0.0, "1": 0.0, "2": 0.0, ">2": 0.0})
-                
+
                 row = {
                     "source_node": src,
                     "destination_node": dst,
@@ -1166,17 +1166,17 @@ class BandwidthAnalyzer:
                     utilization_stats = network.get_links_utilization_stats()
                     if (i, j) in utilization_stats:
                         stats = utilization_stats[(i, j)]
-                        
+
                         # 获取已经计算好的比例数据
                         eject_attempts_h_ratios = stats.get("eject_attempts_h_ratios", {"0": 0.0, "1": 0.0, "2": 0.0, ">2": 0.0})
                         eject_attempts_v_ratios = stats.get("eject_attempts_v_ratios", {"0": 0.0, "1": 0.0, "2": 0.0, ">2": 0.0})
-                        
+
                         # 根据链路方向选择显示哪个方向的0次尝试比例
                         if abs(i - j) == 1:  # 横向链路
                             zero_attempts_ratio = eject_attempts_h_ratios.get("0", 0.0)
                         else:  # 纵向链路
                             zero_attempts_ratio = eject_attempts_v_ratios.get("0", 0.0)
-                        
+
                         empty_ratio = stats.get("empty_ratio", 0.0)
                         # 添加0次尝试比例和空闲比例到标签
                         formatted_label += f"\n{zero_attempts_ratio*100:.0f}% {empty_ratio*100:.0f}%"
@@ -2003,7 +2003,7 @@ class BandwidthAnalyzer:
         self._generate_etag_per_node_fifo_csv(output_path)
 
         # 导出链路统计数据到CSV
-        if hasattr(self.sim_model, 'data_network') and self.sim_model.data_network:
+        if hasattr(self.sim_model, "data_network") and self.sim_model.data_network:
             link_stats_csv = os.path.join(output_path, "link_statistics.csv")
             self.export_link_statistics_csv(self.sim_model.data_network, link_stats_csv)
 
@@ -2013,7 +2013,7 @@ class BandwidthAnalyzer:
         if self.sim_model.verbose:
             print(f"带宽分析报告： {report_file}")
             print(f"具体端口的统计CSV： {output_path}ports_bandwidth.csv")
-            if hasattr(self.sim_model, 'data_network') and self.sim_model.data_network:
+            if hasattr(self.sim_model, "data_network") and self.sim_model.data_network:
                 print(f"链路统计CSV： {output_path}link_statistics.csv")
 
     @staticmethod
@@ -3024,6 +3024,115 @@ class BandwidthAnalyzer:
         else:
             plt.show()
         # return fig
+
+    def process_fifo_usage_statistics(self, model):
+        """处理三个网络的FIFO使用率统计"""
+        networks = {"req": model.req_network, "rsp": model.rsp_network, "data": model.data_network}
+
+        total_cycles = model.cycle  # 使用总周期数
+        results = {}
+
+        for net_name, network in networks.items():
+            results[net_name] = {}
+
+            # 获取FIFO容量配置
+            capacities = {
+                "IQ": {
+                    "CH_buffer": self.config.IQ_CH_FIFO_DEPTH,
+                    "TR": self.config.IQ_OUT_FIFO_DEPTH_HORIZONTAL,
+                    "TL": self.config.IQ_OUT_FIFO_DEPTH_HORIZONTAL,
+                    "TU": self.config.IQ_OUT_FIFO_DEPTH_VERTICAL,
+                    "TD": self.config.IQ_OUT_FIFO_DEPTH_VERTICAL,
+                    "EQ": self.config.IQ_OUT_FIFO_DEPTH_EQ,
+                },
+                "RB": {
+                    "TR": self.config.RB_IN_FIFO_DEPTH,
+                    "TL": self.config.RB_IN_FIFO_DEPTH,
+                    "TU": self.config.RB_OUT_FIFO_DEPTH,
+                    "TD": self.config.RB_OUT_FIFO_DEPTH,
+                    "EQ": self.config.RB_OUT_FIFO_DEPTH,
+                },
+                "EQ": {"TU": self.config.EQ_IN_FIFO_DEPTH, "TD": self.config.EQ_IN_FIFO_DEPTH, "CH_buffer": self.config.EQ_CH_FIFO_DEPTH},
+            }
+
+            # 计算平均深度和使用率
+            for category in network.fifo_depth_sum:
+                results[net_name][category] = {}
+                for fifo_type in network.fifo_depth_sum[category]:
+                    results[net_name][category][fifo_type] = {}
+
+                    if fifo_type == "CH_buffer":
+                        # CH_buffer需要特殊处理，因为它按ip_type分组
+                        for pos, ip_types_data in network.fifo_depth_sum[category][fifo_type].items():
+                            if isinstance(ip_types_data, dict):
+                                for ip_type, sum_depth in ip_types_data.items():
+                                    avg_depth = sum_depth / total_cycles
+                                    max_depth = network.fifo_max_depth[category][fifo_type][pos][ip_type]
+                                    capacity = capacities[category][fifo_type]
+
+                                    key = f"{pos}_{ip_type}"
+                                    results[net_name][category][fifo_type][key] = {
+                                        "avg_depth": avg_depth,
+                                        "max_depth": max_depth,
+                                        "avg_utilization": avg_depth / capacity * 100,
+                                        "max_utilization": max_depth / capacity * 100,
+                                    }
+                    else:
+                        # 其他FIFO类型
+                        for pos, sum_depth in network.fifo_depth_sum[category][fifo_type].items():
+                            avg_depth = sum_depth / total_cycles
+                            max_depth = network.fifo_max_depth[category][fifo_type][pos]
+                            capacity = capacities[category][fifo_type]
+
+                            results[net_name][category][fifo_type][pos] = {
+                                "avg_depth": avg_depth,
+                                "max_depth": max_depth,
+                                "avg_utilization": avg_depth / capacity * 100,
+                                "max_utilization": max_depth / capacity * 100,
+                            }
+
+        return results
+
+    def generate_fifo_usage_csv(self, model, output_path: str = None):
+        """生成FIFO使用率CSV文件"""
+        if output_path is None:
+            # 使用模型的结果保存路径或当前目录
+            if hasattr(model, "result_save_path") and model.result_save_path:
+                output_dir = os.path.dirname(model.result_save_path)
+                output_path = os.path.join(output_dir, "fifo_usage_statistics.csv")
+            else:
+                output_path = "fifo_usage_statistics.csv"
+
+        # 获取FIFO使用率统计
+        fifo_stats = self.process_fifo_usage_statistics(model)
+
+        # 准备CSV数据
+        rows = []
+        headers = ["Network", "Category", "FIFO_Type", "Position", "Avg_Utilization(%)", "Max_Utilization(%)", "Avg_Depth", "Max_Depth"]
+
+        for net_name, net_data in fifo_stats.items():
+            for category, category_data in net_data.items():
+                for fifo_type, fifo_data in category_data.items():
+                    for pos, stats in fifo_data.items():
+                        row = {
+                            "Network": net_name,
+                            "Category": category,
+                            "FIFO_Type": fifo_type,
+                            "Position": pos,
+                            "Avg_Utilization(%)": f"{stats['avg_utilization']:.2f}",
+                            "Max_Utilization(%)": f"{stats['max_utilization']:.2f}",
+                            "Avg_Depth": f"{stats['avg_depth']:.2f}",
+                            "Max_Depth": stats["max_depth"],
+                        }
+                        rows.append(row)
+
+        # 写入CSV文件
+        with open(output_path, "w", newline="") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=headers)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        print(f"FIFO使用率统计csv: {output_path}")
 
 
 # 便捷使用函数

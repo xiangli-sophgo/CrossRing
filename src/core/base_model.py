@@ -401,7 +401,7 @@ class BaseModel:
         self.load_request_stream()
         flits, reqs, rsps = [], [], []
         self.cycle = 0
-        tail_time = 0
+        tail_time = 6
 
         while True:
             self.cycle += 1
@@ -660,6 +660,9 @@ class BaseModel:
                 flit.flit_position = "EQ_CH"
                 queue[ip_pos].append(flit)
                 queue_pre[ip_pos] = None
+        
+        # 更新FIFO统计
+        network.update_fifo_stats_after_move(in_pos)
 
     def print_data_statistic(self):
         if self.verbose:
@@ -1504,6 +1507,9 @@ class BaseModel:
 
         # 延迟统计
         latency_stats = self.result_processor._calculate_latency_stats()
+        
+        # FIFO使用率统计
+        self.result_processor.generate_fifo_usage_csv(self)
         # CMD 延迟
         self.cmd_read_avg_latency_stat = (latency_stats["cmd"]["read"]["sum"] / latency_stats["cmd"]["read"]["count"]) if latency_stats["cmd"]["read"]["count"] else 0.0
         self.cmd_read_max_latency_stat = latency_stats["cmd"]["read"]["max"]

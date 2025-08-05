@@ -220,7 +220,7 @@ def run_single_simulation(traffic_file, topo_type, model_type, config_path, resu
         traffic_config=traffic_config,
         result_save_path=result_save_path,
         results_fig_save_path=result_save_path,
-        plot_flow_fig=1,  # 批量仿真时关闭图表生成以提高速度
+        plot_flow_fig=1,
         flow_fig_show_CDMA=1,
         plot_RN_BW_fig=1,
         plot_link_state=0,

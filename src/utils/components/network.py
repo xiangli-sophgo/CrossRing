@@ -102,6 +102,18 @@ class Network:
         self.recv_throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
         self.last_select = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
         self.throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        
+        # FIFO使用率统计
+        self.fifo_depth_sum = {
+            "IQ": {"CH_buffer": {}, "TR": {}, "TL": {}, "TU": {}, "TD": {}, "EQ": {}},
+            "RB": {"TR": {}, "TL": {}, "TU": {}, "TD": {}, "EQ": {}},
+            "EQ": {"TU": {}, "TD": {}, "CH_buffer": {}}
+        }
+        self.fifo_max_depth = {
+            "IQ": {"CH_buffer": {}, "TR": {}, "TL": {}, "TU": {}, "TD": {}, "EQ": {}},
+            "RB": {"TR": {}, "TL": {}, "TU": {}, "TD": {}, "EQ": {}},
+            "EQ": {"TU": {}, "TD": {}, "CH_buffer": {}}
+        }
 
         # # channel buffer setup
 
@@ -1428,6 +1440,77 @@ class Network:
 
             # 更新总周期计数
             self.links_flow_stat[link]["total_cycles"] += 1
+
+    def update_fifo_stats_after_move(self, in_pos):
+        """在move操作后批量更新所有FIFO统计"""
+        ip_pos = in_pos - self.config.NUM_COL
+        
+        # IQ统计 - inject_queues
+        for direction in ["TR", "TL", "TU", "TD", "EQ"]:
+            if in_pos in self.inject_queues.get(direction, {}):
+                depth = len(self.inject_queues[direction][in_pos])
+                if in_pos not in self.fifo_depth_sum["IQ"][direction]:
+                    self.fifo_depth_sum["IQ"][direction][in_pos] = 0
+                    self.fifo_max_depth["IQ"][direction][in_pos] = 0
+                self.fifo_depth_sum["IQ"][direction][in_pos] += depth
+                self.fifo_max_depth["IQ"][direction][in_pos] = max(
+                    self.fifo_max_depth["IQ"][direction][in_pos], depth
+                )
+        
+        # IQ CH_buffer统计
+        for ip_type in self.IQ_channel_buffer:
+            if in_pos in self.IQ_channel_buffer[ip_type]:
+                depth = len(self.IQ_channel_buffer[ip_type][in_pos])
+                if in_pos not in self.fifo_depth_sum["IQ"]["CH_buffer"]:
+                    self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos] = {}
+                    self.fifo_max_depth["IQ"]["CH_buffer"][in_pos] = {}
+                if ip_type not in self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos]:
+                    self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos][ip_type] = 0
+                    self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type] = 0
+                self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos][ip_type] += depth
+                self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type] = max(
+                    self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type], depth
+                )
+        
+        # RB统计 - ring_bridge
+        key = (in_pos, ip_pos)
+        for direction in ["TR", "TL", "TU", "TD", "EQ"]:
+            if key in self.ring_bridge.get(direction, {}):
+                depth = len(self.ring_bridge[direction][key])
+                if key not in self.fifo_depth_sum["RB"][direction]:
+                    self.fifo_depth_sum["RB"][direction][key] = 0
+                    self.fifo_max_depth["RB"][direction][key] = 0
+                self.fifo_depth_sum["RB"][direction][key] += depth
+                self.fifo_max_depth["RB"][direction][key] = max(
+                    self.fifo_max_depth["RB"][direction][key], depth
+                )
+        
+        # EQ统计 - eject_queues
+        for direction in ["TU", "TD"]:
+            if ip_pos in self.eject_queues.get(direction, {}):
+                depth = len(self.eject_queues[direction][ip_pos])
+                if ip_pos not in self.fifo_depth_sum["EQ"][direction]:
+                    self.fifo_depth_sum["EQ"][direction][ip_pos] = 0
+                    self.fifo_max_depth["EQ"][direction][ip_pos] = 0
+                self.fifo_depth_sum["EQ"][direction][ip_pos] += depth
+                self.fifo_max_depth["EQ"][direction][ip_pos] = max(
+                    self.fifo_max_depth["EQ"][direction][ip_pos], depth
+                )
+        
+        # EQ CH_buffer统计
+        for ip_type in self.EQ_channel_buffer:
+            if ip_pos in self.EQ_channel_buffer[ip_type]:
+                depth = len(self.EQ_channel_buffer[ip_type][ip_pos])
+                if ip_pos not in self.fifo_depth_sum["EQ"]["CH_buffer"]:
+                    self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos] = {}
+                    self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos] = {}
+                if ip_type not in self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos]:
+                    self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos][ip_type] = 0
+                    self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type] = 0
+                self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos][ip_type] += depth
+                self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type] = max(
+                    self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type], depth
+                )
 
     def get_links_utilization_stats(self):
         """

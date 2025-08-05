@@ -162,7 +162,7 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
             row = int(topo_type.split("x")[0])
             config.NUM_NODE = row * config.NUM_COL * 2
             config.NUM_ROW = row * 2
-            config.NUM_IP = config.NUM_NODE
+            config.NUM_IP = row * config.NUM_COL
             config.RN_R_TRACKER_OSTD = 64
             config.RN_W_TRACKER_OSTD = 32
             config.RN_RDB_SIZE = config.RN_R_TRACKER_OSTD * config.BURST
@@ -241,7 +241,7 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
             config.DDR_W_LATENCY_original = 0
             config.L2M_R_LATENCY_original = 12
             config.L2M_W_LATENCY_original = 16
-            config.IQ_CH_FIFO_DEPTH = 2
+            config.IQ_CH_FIFO_DEPTH = 4
             config.EQ_CH_FIFO_DEPTH = 4
             config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
             config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
@@ -849,9 +849,9 @@ def main():
 
     # 参数设置：可以配置1-3个参数
     param_configs = [
-        {"name": "IQ_OUT_FIFO_DEPTH_VERTICAL", "range": "1,8"},  # 第二个参数（可选）
-        {"name": "IQ_OUT_FIFO_DEPTH_EQ", "range": "1,8"},  # 第一个参数
-        # {"name": "IQ_OUT_FIFO_DEPTH_EQ", "range": "[4,8,16]"},     # 第三个参数（可选）
+        # {"name": "IQ_OUT_FIFO_DEPTH_VERTICAL", "range": "1,8"},
+        {"name": "SLICE_PER_LINK", "range": "5,20"},
+        # {"name": "SLICE_PER_LINK", "range": "[8, 11, 14, 20]"},
     ]
 
     # 文件路径配置
@@ -860,6 +860,7 @@ def main():
     traffic_path = "../traffic/0617"
     # 仿真配置
     traffic_files = [
+        # "W_8x8.txt",
         # "W_12x12.txt",
         "LLama2_AllReduce.txt",
     ]
