@@ -185,7 +185,7 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
             config.IQ_OUT_FIFO_DEPTH_EQ = 8
             config.RB_OUT_FIFO_DEPTH = 8
             config.SN_TRACKER_RELEASE_LATENCY = 40
-            config.CDMA_BW_LIMIT = 8
+            # config.CDMA_BW_LIMIT = 8
             # config.DDR_BW_LIMIT = 102
             # config.GDMA_BW_LIMIT = 102
             config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 0
@@ -226,33 +226,83 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
             config.NUM_SDMA = 32
             config.NUM_RN = 32
             config.NUM_SN = 32
+            # config.RN_R_TRACKER_OSTD = 64
+            # config.RN_W_TRACKER_OSTD = 64
+            # config.SN_DDR_R_TRACKER_OSTD = 64
+            # config.SN_DDR_W_TRACKER_OSTD = 64
+            # config.SN_L2M_R_TRACKER_OSTD = 64
+            # config.SN_L2M_W_TRACKER_OSTD = 64
+            # config.RN_RDB_SIZE = config.RN_R_TRACKER_OSTD * config.BURST
+            # config.RN_WDB_SIZE = config.RN_W_TRACKER_OSTD * config.BURST
+            # config.SN_DDR_WDB_SIZE = config.SN_DDR_W_TRACKER_OSTD * config.BURST
+            # config.SN_L2M_WDB_SIZE = config.SN_L2M_W_TRACKER_OSTD * config.BURST
+            # config.DDR_R_LATENCY_original = 40
+            # config.DDR_R_LATENCY_VAR_original = 0
+            # config.DDR_W_LATENCY_original = 0
+            # config.L2M_R_LATENCY_original = 12
+            # config.L2M_W_LATENCY_original = 16
+            # config.IQ_CH_FIFO_DEPTH = 4
+            # config.EQ_CH_FIFO_DEPTH = 4
+            # config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
+            # config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
+            # config.IQ_OUT_FIFO_DEPTH_EQ = 8
+            # config.RB_OUT_FIFO_DEPTH = 8
+            # config.SN_TRACKER_RELEASE_LATENCY = 40
+            # # config.GDMA_BW_LIMIT = 16
+            # # config.CDMA_BW_LIMIT = 16
+            # # config.DDR_BW_LIMIT = 128
+            # config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 0
+            # config.ENABLE_IN_ORDER_EJECTION = 0
+
+            # config.TL_Etag_T2_UE_MAX = 8
+            # config.TL_Etag_T1_UE_MAX = 15
+            # config.TR_Etag_T2_UE_MAX = 12
+            # config.RB_IN_FIFO_DEPTH = 16
+            # config.TU_Etag_T2_UE_MAX = 8
+            # config.TU_Etag_T1_UE_MAX = 15
+            # config.TD_Etag_T2_UE_MAX = 12
+            # config.EQ_IN_FIFO_DEPTH = 16
+
+            # config.ITag_TRIGGER_Th_H = config.ITag_TRIGGER_Th_V = 80
+            # config.ITag_MAX_NUM_H = config.ITag_MAX_NUM_V = 1
+            # config.ETag_BOTHSIDE_UPGRADE = 0
+            # config.SLICE_PER_LINK = 8
+
+            # config.GDMA_RW_GAP = np.inf
+            # config.SDMA_RW_GAP = np.inf
+            # config.CHANNEL_SPEC = {
+            #     "gdma": 2,
+            #     "sdma": 2,
+            #     "cdma": 1,
+            #     "ddr": 2,
+            #     "l2m": 2,
+            # }
             config.RN_R_TRACKER_OSTD = 64
-            config.RN_W_TRACKER_OSTD = 64
-            config.SN_DDR_R_TRACKER_OSTD = 64
-            config.SN_DDR_W_TRACKER_OSTD = 64
-            config.SN_L2M_R_TRACKER_OSTD = 64
-            config.SN_L2M_W_TRACKER_OSTD = 64
+            config.RN_W_TRACKER_OSTD = 32
             config.RN_RDB_SIZE = config.RN_R_TRACKER_OSTD * config.BURST
             config.RN_WDB_SIZE = config.RN_W_TRACKER_OSTD * config.BURST
+            config.NETWORK_FREQUENCY = 2
+            config.SN_DDR_R_TRACKER_OSTD = 96
+            config.SN_DDR_W_TRACKER_OSTD = 48
+            config.SN_L2M_R_TRACKER_OSTD = 96
+            config.SN_L2M_W_TRACKER_OSTD = 48
             config.SN_DDR_WDB_SIZE = config.SN_DDR_W_TRACKER_OSTD * config.BURST
             config.SN_L2M_WDB_SIZE = config.SN_L2M_W_TRACKER_OSTD * config.BURST
-            config.DDR_R_LATENCY_original = 40
-            config.DDR_R_LATENCY_VAR_original = 0
-            config.DDR_W_LATENCY_original = 0
+            config.DDR_R_LATENCY_original = 100
+            config.DDR_W_LATENCY_original = 40
             config.L2M_R_LATENCY_original = 12
             config.L2M_W_LATENCY_original = 16
-            config.IQ_CH_FIFO_DEPTH = 4
-            config.EQ_CH_FIFO_DEPTH = 4
+            config.IQ_CH_FIFO_DEPTH = 10
+            config.EQ_CH_FIFO_DEPTH = 10
             config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
             config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
             config.IQ_OUT_FIFO_DEPTH_EQ = 8
             config.RB_OUT_FIFO_DEPTH = 8
             config.SN_TRACKER_RELEASE_LATENCY = 40
-            # config.GDMA_BW_LIMIT = 16
-            # config.CDMA_BW_LIMIT = 16
-            # config.DDR_BW_LIMIT = 128
+            # config.CDMA_BW_LIMIT = 8
+            # config.DDR_BW_LIMIT = 102
+            # config.GDMA_BW_LIMIT = 102
             config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 0
-            config.ENABLE_IN_ORDER_EJECTION = 0
 
             config.TL_Etag_T2_UE_MAX = 8
             config.TL_Etag_T1_UE_MAX = 15
@@ -272,10 +322,10 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
             config.SDMA_RW_GAP = np.inf
             config.CHANNEL_SPEC = {
                 "gdma": 2,
-                "sdma": 2,
-                "cdma": 1,
+                "sdma": 0,
+                "cdma": 0,
                 "ddr": 2,
-                "l2m": 2,
+                "l2m": 0,
             }
 
         # 更新参数
@@ -850,19 +900,20 @@ def main():
     # 参数设置：可以配置1-3个参数
     param_configs = [
         # {"name": "IQ_OUT_FIFO_DEPTH_VERTICAL", "range": "1,8"},
-        {"name": "SLICE_PER_LINK", "range": "5,20"},
-        # {"name": "SLICE_PER_LINK", "range": "[8, 11, 14, 20]"},
+        # {"name": "SLICE_PER_LINK", "range": "17,20"},
+        {"name": "SLICE_PER_LINK", "range": "[5,6,7,8,9,10,11,12,13,14,17,20]"},
     ]
 
     # 文件路径配置
     config_path = "../config/config2.json"
-    # traffic_path = "../traffic/traffic0730"
-    traffic_path = "../traffic/0617"
+    traffic_path = "../traffic/traffic0730"
+    # traffic_path = "../traffic/0617"
     # 仿真配置
     traffic_files = [
-        # "W_8x8.txt",
-        # "W_12x12.txt",
-        "LLama2_AllReduce.txt",
+        "W_5x4.txt",
+        # "W_5x4_CR_v1.0.2.txt",
+        # "R_12x12.txt",
+        # "LLama2_AllReduce.txt",
     ]
     # topo_type = "4x4"
     # topo_type = "8x8"

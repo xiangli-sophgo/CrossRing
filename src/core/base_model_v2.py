@@ -536,7 +536,8 @@ class BaseModel:
 
     def update_traffic_completion_stats(self, flit):
         """在flit完成时更新TrafficScheduler的统计"""
-        if hasattr(flit, "traffic_id") and getattr(flit, "is_arrive", False):
+        # 只有当 flit 真正到达 IP_eject 状态时才更新统计
+        if hasattr(flit, "traffic_id") and flit.flit_position == "IP_eject":
             self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "received_flit")
 
     def syn_IP_stat(self):
