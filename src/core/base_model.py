@@ -929,8 +929,8 @@ class BaseModel:
             # IP_inject 状态算等待状态
             if flit.flit_position == "IP_inject":
                 return True
-            # L2H_FIFO状态且还未到departure时间 = 等待状态
-            if flit.flit_position == "L2H_FIFO" and hasattr(flit, 'departure_cycle') and flit.departure_cycle > self.cycle:
+            # L2H状态且还未到departure时间 = 等待状态
+            if flit.flit_position == "L2H" and hasattr(flit, 'departure_cycle') and flit.departure_cycle > self.cycle:
                 return True
             # IP_eject状态且位置没有变化，也算等待状态
             if flit.flit_position == "IP_eject":
@@ -972,11 +972,28 @@ class BaseModel:
             if self.cycle != self._last_printed_cycle:
                 print(f"Cycle {self.cycle}:")  # 醒目标记当前 cycle
                 self._last_printed_cycle = self.cycle  # 更新记录
-            print(
-                self.req_network.send_flits.get(packet_id),
-                self.rsp_network.send_flits.get(packet_id),
-                self.data_network.send_flits.get(packet_id),
-            )
+            
+            # 收集所有flit并格式化打印
+            all_flits = []
+            
+            # REQ网络的flit
+            req_flits = self.req_network.send_flits.get(packet_id, [])
+            for flit in req_flits:
+                all_flits.append(f"REQ,{flit.packet_id}.{flit.flit_id},{flit.source}:{flit.source_type}->{flit.destination}:{flit.destination_type}:{flit.flit_position},{flit.req_attr[0] if flit.req_attr else 'N'},{flit.req_type or flit.flit_type},{flit.rsp_type or ''},{flit.ETag_priority}")
+            
+            # RSP网络的flit  
+            rsp_flits = self.rsp_network.send_flits.get(packet_id, [])
+            for flit in rsp_flits:
+                all_flits.append(f"RSP,{flit.packet_id}.{flit.flit_id},{flit.source}:{flit.source_type}->{flit.destination}:{flit.destination_type}:{flit.flit_position},{flit.req_attr[0] if flit.req_attr else 'N'},{flit.rsp_type or flit.flit_type},{flit.req_type or ''},{flit.ETag_priority}")
+            
+            # DATA网络的flit
+            data_flits = self.data_network.send_flits.get(packet_id, [])
+            for flit in data_flits:
+                all_flits.append(f"DATA,{flit.packet_id}.{flit.flit_id},{flit.source}:{flit.source_type}->{flit.destination}:{flit.destination_type}:{flit.flit_position},{flit.req_attr[0] if flit.req_attr else 'N'},{flit.req_type or flit.flit_type},{flit.rsp_type or ''},{flit.ETag_priority}")
+            
+            # 打印所有flit，用 | 分隔
+            if all_flits:
+                print(" | ".join(all_flits) + " |")
 
         # —— 更新完成标记 ——
         # 检查所有 flit 是否都已到达 IP_eject 状态

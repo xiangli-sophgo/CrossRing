@@ -193,13 +193,13 @@ class IPInterface:
                     return
             if flit.req_attr == "new" and not self._check_and_reserve_resources(flit):
                 return  # 资源不足，保持在inject_fifo中
-            flit.flit_position = "L2H_FIFO"
+            flit.flit_position = "L2H"
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
 
         elif network_type == "rsp":
             # 响应网络：直接移动
-            flit.flit_position = "L2H_FIFO"
+            flit.flit_position = "L2H"
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
 
@@ -213,7 +213,7 @@ class IPInterface:
                 if not self.tx_token_bucket.consume():
                     return
             flit: Flit = net_info["inject_fifo"].popleft()
-            flit.flit_position = "L2H_FIFO"
+            flit.flit_position = "L2H"
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = flit
 
@@ -319,7 +319,7 @@ class IPInterface:
 
             flit = eq_buf.popleft()
             flit.is_arrive = True
-            flit.flit_position = "H2L_H_FIFO"
+            flit.flit_position = "H2L_H"
             net_info["h2l_fifo_h_pre"] = flit
             net_info["network"].arrive_flits[flit.packet_id].append(flit)
             net_info["network"].recv_flits_num += 1
@@ -343,7 +343,7 @@ class IPInterface:
 
         # 从H级FIFO传输到L级预缓冲
         flit = net_info["h2l_fifo_h"].popleft()
-        flit.flit_position = "H2L_L_FIFO"
+        flit.flit_position = "H2L_L"
         net_info["h2l_fifo_l_pre"] = flit
 
     def _handle_received_request(self, req: Flit):
@@ -550,7 +550,7 @@ class IPInterface:
                     first_flit = self.data_network.send_flits[flit.packet_id][0]
                     # 记录最后到达时间
                     complete_cycle = self.current_cycle
-                    
+
                     for f in self.data_network.send_flits[flit.packet_id]:
                         f.leave_db_cycle = self.current_cycle
                         f.sync_latency_record(req)
@@ -587,7 +587,7 @@ class IPInterface:
                     first_flit = next((flit for flit in self.data_network.send_flits[flit.packet_id] if flit.flit_id == 0), self.data_network.send_flits[flit.packet_id][0])
                     # 记录最后到达时间
                     complete_cycle = self.current_cycle
-                    
+
                     for f in self.data_network.send_flits[flit.packet_id]:
                         f.leave_db_cycle = release_time
                         f.sync_latency_record(req)
@@ -656,10 +656,7 @@ class IPInterface:
                 net_info["l2h_fifo"].append(net_info["l2h_fifo_pre"])
                 net_info["l2h_fifo_pre"] = None
 
-            if (
-                net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None
-                and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen
-            ):
+            if net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen:
                 net.IQ_channel_buffer[self.ip_type][self.ip_pos].append(net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos])
                 net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = None
 
@@ -760,13 +757,9 @@ class IPInterface:
             # 设置保序信息
             flit.set_packet_category_and_order_id()
             if hasattr(req, "original_destination_type") and req.original_destination_type.startswith("ddr"):
-                latency = np.random.uniform(
-                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
-                )
+                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
             elif hasattr(req, "destination_type") and req.destination_type and req.destination_type.startswith("ddr"):
-                latency = np.random.uniform(
-                    low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None
-                )
+                latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
             else:
                 latency = self.config.L2M_R_LATENCY
             flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY
