@@ -126,6 +126,7 @@ class Flit:
         "data_latency",
         "src_dest_order_id",
         "packet_category",
+        "data_channel_id",
     ]
 
     last_id = 0
@@ -215,6 +216,7 @@ class Flit:
         self.sn_rsp_generate_cycle = np.inf
         self.src_dest_order_id = -1
         self.packet_category = None
+        self.data_channel_id = 0  # 默认数据通道0
 
     def sync_latency_record(self, flit):
         if flit.req_type == "read":
@@ -307,6 +309,7 @@ class Flit:
         self.traffic_id = None
         self.src_dest_order_id = -1
         self.packet_category = None
+        self.data_channel_id = 0
 
         # Reset timing fields
         self.departure_cycle = np.inf

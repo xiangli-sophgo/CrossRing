@@ -37,7 +37,7 @@ def main():
             # "traffic_2260E_case1.txt",
             # "test1.txt"
             # "LLama2_AttentionFC.txt"
-            # "R_4x2.txt"
+            "W_8x8.txt"
             # "MLA_B32.txt"
         ],
     ]
@@ -62,7 +62,7 @@ def main():
         # topo_type = "5x2"
         # topo_type = "3x1"
         # topo_type = "6x5"  # SG2260
-        topo_type = "3x3"  # SG2260E
+        topo_type = "8x8"  # SG2260E
     else:
         topo_type = config.TOPO_TYPE
 
@@ -346,6 +346,60 @@ def main():
             "ddr": 2,
             "l2m": 2,
         }
+    elif topo_type in ["4x4", "8x8", "12x12"]:
+        config = CrossRingConfig()
+        config.BURST = 4
+        config.NUM_COL = int(topo_type.split("x")[1])  # 确保转换为整数
+        row = int(topo_type.split("x")[0])
+        config.NUM_NODE = row * config.NUM_COL * 2
+        config.NUM_ROW = row * 2
+        config.NUM_IP = row * config.NUM_COL
+        config.RN_R_TRACKER_OSTD = 64
+        config.RN_W_TRACKER_OSTD = 32
+        config.RN_RDB_SIZE = config.RN_R_TRACKER_OSTD * config.BURST
+        config.RN_WDB_SIZE = config.RN_W_TRACKER_OSTD * config.BURST
+        config.NETWORK_FREQUENCY = 2
+        config.SN_DDR_R_TRACKER_OSTD = 96
+        config.SN_DDR_W_TRACKER_OSTD = 48
+        config.SN_L2M_R_TRACKER_OSTD = 96
+        config.SN_L2M_W_TRACKER_OSTD = 48
+        config.SN_DDR_WDB_SIZE = config.SN_DDR_W_TRACKER_OSTD * config.BURST
+        config.SN_L2M_WDB_SIZE = config.SN_L2M_W_TRACKER_OSTD * config.BURST
+        config.DDR_R_LATENCY_original = 100
+        config.DDR_W_LATENCY_original = 40
+        config.L2M_R_LATENCY_original = 12
+        config.L2M_W_LATENCY_original = 16
+        config.IQ_CH_FIFO_DEPTH = 10
+        config.EQ_CH_FIFO_DEPTH = 10
+        config.IQ_OUT_FIFO_DEPTH_HORIZONTAL = 8
+        config.IQ_OUT_FIFO_DEPTH_VERTICAL = 8
+        config.IQ_OUT_FIFO_DEPTH_EQ = 8
+        config.RB_OUT_FIFO_DEPTH = 8
+        config.SN_TRACKER_RELEASE_LATENCY = 40
+
+        config.TL_Etag_T2_UE_MAX = 8
+        config.TL_Etag_T1_UE_MAX = 15
+        config.TR_Etag_T2_UE_MAX = 12
+        config.RB_IN_FIFO_DEPTH = 16
+        config.TU_Etag_T2_UE_MAX = 8
+        config.TU_Etag_T1_UE_MAX = 15
+        config.TD_Etag_T2_UE_MAX = 12
+        config.EQ_IN_FIFO_DEPTH = 16
+
+        config.ITag_TRIGGER_Th_H = config.ITag_TRIGGER_Th_V = 80
+        config.ITag_MAX_NUM_H = config.ITag_MAX_NUM_V = 1
+        config.ETag_BOTHSIDE_UPGRADE = 0
+        config.SLICE_PER_LINK = 6
+
+        config.GDMA_RW_GAP = np.inf
+        config.SDMA_RW_GAP = np.inf
+        config.CHANNEL_SPEC = {
+            "gdma": 2,
+            "sdma": 0,
+            "cdma": 0,
+            "ddr": 2,
+            "l2m": 0,
+        }
     else:
         rows, cols = 3, 1
         # 解析行列并计算核心数量
@@ -438,7 +492,7 @@ def main():
         plot_RN_BW_fig=0,
         plot_link_state=0,
         plot_start_time=25,
-        print_trace=1,
+        print_trace=0,
         show_trace_id=1,
         show_node_id=4,
         verbose=1,

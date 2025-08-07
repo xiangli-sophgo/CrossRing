@@ -185,9 +185,9 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
             config.IQ_OUT_FIFO_DEPTH_EQ = 8
             config.RB_OUT_FIFO_DEPTH = 8
             config.SN_TRACKER_RELEASE_LATENCY = 40
-            # config.CDMA_BW_LIMIT = 8
-            # config.DDR_BW_LIMIT = 102
-            # config.GDMA_BW_LIMIT = 102
+
+            config.IP_H2L_H_FIFO_DEPTH = 4
+            config.IP_H2L_L_FIFO_DEPTH = 4
 
             config.TL_Etag_T2_UE_MAX = 8
             config.TL_Etag_T1_UE_MAX = 15
@@ -197,10 +197,6 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
             config.TU_Etag_T1_UE_MAX = 15
             config.TD_Etag_T2_UE_MAX = 12
             config.EQ_IN_FIFO_DEPTH = 16
-
-            config.IP_H2L_H_FIFO_DEPTH = 4
-            config.IP_H2L_L_FIFO_DEPTH = 4
-            config.IP_L2H_FIFO_DEPTH = 4
 
             config.ITag_TRIGGER_Th_H = config.ITag_TRIGGER_Th_V = 80
             config.ITag_MAX_NUM_H = config.ITag_MAX_NUM_V = 1
@@ -377,8 +373,8 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
             verbose=1,
             print_trace=0,
             plot_link_state=0,
-            plot_flow_fig=1,
-            plot_RN_BW_fig=1,
+            plot_flow_fig=0,
+            plot_RN_BW_fig=0,
         )
 
         # 运行仿真
@@ -928,8 +924,7 @@ def main():
     param_configs = [
         # 示例：使用 IN_FIFO_DEPTH 同时遍历 RB_IN_FIFO_DEPTH 和 EQ_IN_FIFO_DEPTH，并按比例调整相关参数
         # {"name": "IN_FIFO_DEPTH", "range": "8,32,4"},  # 从8到32，步长为4
-        # {"name": "IN_FIFO_DEPTH", "range": "[2, 4, 6, 8, 10, 12, 14, 16, 22, 28]"},
-        {"name": "IN_FIFO_DEPTH", "range": "[16]"},
+        {"name": "IN_FIFO_DEPTH", "range": "[28, 22, 16, 14, 12, 10, 8, 6, 4, 2]"},
         # {"name": "SLICE_PER_LINK", "range": "[5,6,7,8,9,10,11,12,13,14,17,20]"},
         # 其他参数配置示例：
         # {"name": "IQ_OUT_FIFO_DEPTH_VERTICAL", "range": "1,8"},
@@ -944,7 +939,7 @@ def main():
     traffic_files = [
         "W_8x8.txt",
         # "W_5x4_CR_v1.0.2.txt",
-        # "R_12x12.txt",
+        # "W_12x12.txt",
         # "LLama2_AllReduce.txt",
     ]
     # topo_type = "4x4"

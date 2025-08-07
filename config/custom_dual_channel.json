@@ -1,0 +1,24 @@
+{
+  "dual_channel": {
+    "enabled": true,
+    "strategy": "load_balanced",
+    "priorities": {
+      "ch0": "high",
+      "ch1": "normal"
+    },
+    "bandwidth_ratios": {
+      "ch0": 0.7,
+      "ch1": 0.3
+    },
+    "fifo_depths": {
+      "ch0_iq": 12,
+      "ch1_iq": 8,
+      "ch0_eq": 8,
+      "ch1_eq": 8
+    },
+    "adaptive_selection": true,
+    "congestion_threshold": 0.8,
+    "stats_enabled": true,
+    "stats_interval": 1000
+  }
+}
