@@ -243,18 +243,19 @@ class Flit:
         if self.req_type is not None:
             self.packet_category = "REQ"
         elif self.rsp_type is not None:
-            self.packet_category = "RSP" 
+            self.packet_category = "RSP"
         elif self.flit_type == "data":
             self.packet_category = "DATA"
         else:
             self.packet_category = "REQ"  # 默认为REQ
-        
+
         # 获取原始的src和dest用于顺序ID分配
         src = self.source_original if self.source_original != -1 else self.source
         dest = self.destination_original if self.destination_original != -1 else self.destination
-        
+
         # 导入Node类获取顺序ID
         from .node import Node
+
         self.src_dest_order_id = Node.get_next_order_id(src, dest, self.packet_category)
 
     def inject(self, network: "Network"):  # 使用字符串类型标注
@@ -272,11 +273,7 @@ class Flit:
     def __repr__(self):
         req_attr = "O" if self.req_attr == "old" else "N"
         type_display = self.rsp_type[:3] if self.rsp_type else self.req_type[0]
-        flit_position = (
-            f"{self.current_position}:{self.flit_position}"
-            if self.flit_position != "Link"
-            else f"({self.current_position}: {self.current_link[0]}->{self.current_link[1]}).{self.current_seat_index}, "
-        )
+        flit_position = f"{self.current_position}:{self.flit_position}" if self.flit_position != "Link" else f"{self.current_link[0]}->{self.current_link[1]}:{self.current_seat_index}, "
         finish_status = "F" if self.is_finish else ""
         eject_status = "E" if self.is_ejected else ""
         ITag_H = "H" if self.itag_h else ""

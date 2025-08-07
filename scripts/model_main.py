@@ -13,7 +13,8 @@ if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
 
 def main():
     # traffic_file_path = r"../test_data/"
-    traffic_file_path = r"../../C2C/traffic_data"
+    # traffic_file_path = r"../../C2C/traffic_data"
+    traffic_file_path = r"../traffic/traffic0730"
     # traffic_file_path = r"../traffic/0617/"
     # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
     # traffic_file_path = r"../traffic/RW_4x2_4x4/"
@@ -34,7 +35,7 @@ def main():
             # r"full_bw_R_4x5.txt"
             # "LLama2_AllReduce.txt"
             # "traffic_2260E_case1.txt",
-            "test1.txt"
+            # "test1.txt"
             # "LLama2_AttentionFC.txt"
             # "R_4x2.txt"
             # "MLA_B32.txt"
@@ -101,15 +102,6 @@ def main():
         config.IQ_OUT_FIFO_DEPTH_EQ = 8
         config.RB_OUT_FIFO_DEPTH = 8
         config.SLICE_PER_LINK = 8
-
-        # config.EQ_IN_FIFO_DEPTH = 8
-        # config.RB_IN_FIFO_DEPTH = 8
-        # config.TL_Etag_T2_UE_MAX = 4
-        # config.TL_Etag_T1_UE_MAX = 7
-        # config.TR_Etag_T2_UE_MAX = 5
-        # config.TU_Etag_T2_UE_MAX = 4
-        # config.TU_Etag_T1_UE_MAX = 7
-        # config.TD_Etag_T2_UE_MAX = 6
 
         config.TL_Etag_T2_UE_MAX = 8
         config.TL_Etag_T1_UE_MAX = 12
@@ -441,13 +433,13 @@ def main():
         traffic_config=traffic_config,
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
-        plot_flow_fig=1,
+        plot_flow_fig=0,
         flow_fig_show_CDMA=0,
-        plot_RN_BW_fig=1,
+        plot_RN_BW_fig=0,
         plot_link_state=0,
-        plot_start_time=50,
+        plot_start_time=25,
         print_trace=1,
-        show_trace_id=3,
+        show_trace_id=1,
         show_node_id=4,
         verbose=1,
     )

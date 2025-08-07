@@ -979,17 +979,17 @@ class BaseModel:
             # REQ网络的flit
             req_flits = self.req_network.send_flits.get(packet_id, [])
             for flit in req_flits:
-                all_flits.append(f"REQ,{flit.packet_id}.{flit.flit_id},{flit.source}:{flit.source_type}->{flit.destination}:{flit.destination_type}:{flit.flit_position},{flit.req_attr[0] if flit.req_attr else 'N'},{flit.req_type or flit.flit_type},{flit.rsp_type or ''},{flit.ETag_priority}")
+                all_flits.append(f"REQ,{flit}")
             
             # RSP网络的flit  
             rsp_flits = self.rsp_network.send_flits.get(packet_id, [])
             for flit in rsp_flits:
-                all_flits.append(f"RSP,{flit.packet_id}.{flit.flit_id},{flit.source}:{flit.source_type}->{flit.destination}:{flit.destination_type}:{flit.flit_position},{flit.req_attr[0] if flit.req_attr else 'N'},{flit.rsp_type or flit.flit_type},{flit.req_type or ''},{flit.ETag_priority}")
+                all_flits.append(f"RSP,{flit}")
             
             # DATA网络的flit
             data_flits = self.data_network.send_flits.get(packet_id, [])
             for flit in data_flits:
-                all_flits.append(f"DATA,{flit.packet_id}.{flit.flit_id},{flit.source}:{flit.source_type}->{flit.destination}:{flit.destination_type}:{flit.flit_position},{flit.req_attr[0] if flit.req_attr else 'N'},{flit.req_type or flit.flit_type},{flit.rsp_type or ''},{flit.ETag_priority}")
+                all_flits.append(f"DATA,{flit}")
             
             # 打印所有flit，用 | 分隔
             if all_flits:

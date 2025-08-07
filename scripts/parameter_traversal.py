@@ -188,7 +188,6 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
             # config.CDMA_BW_LIMIT = 8
             # config.DDR_BW_LIMIT = 102
             # config.GDMA_BW_LIMIT = 102
-            config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 0
 
             config.TL_Etag_T2_UE_MAX = 8
             config.TL_Etag_T1_UE_MAX = 15
@@ -199,10 +198,14 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
             config.TD_Etag_T2_UE_MAX = 12
             config.EQ_IN_FIFO_DEPTH = 16
 
+            config.IP_H2L_H_FIFO_DEPTH = 4
+            config.IP_H2L_L_FIFO_DEPTH = 4
+            config.IP_L2H_FIFO_DEPTH = 4
+
             config.ITag_TRIGGER_Th_H = config.ITag_TRIGGER_Th_V = 80
             config.ITag_MAX_NUM_H = config.ITag_MAX_NUM_V = 1
             config.ETag_BOTHSIDE_UPGRADE = 0
-            config.SLICE_PER_LINK = 8
+            config.SLICE_PER_LINK = 6
 
             config.GDMA_RW_GAP = np.inf
             config.SDMA_RW_GAP = np.inf
@@ -330,8 +333,32 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
 
         # 更新参数
         for param_name, param_value in config_params.items():
-            if hasattr(config, param_name):
-                # 确保参数值为正确的类型
+            # 特殊处理 IN_FIFO_DEPTH 参数：同时设置 RB_IN_FIFO_DEPTH 和 EQ_IN_FIFO_DEPTH，并按比例调整相关参数
+            if param_name == "IN_FIFO_DEPTH":
+                if isinstance(param_value, (int, float)) and param_value > 0:
+                    # 设置两个FIFO深度参数为相同值
+                    config.RB_IN_FIFO_DEPTH = int(param_value)
+                    config.EQ_IN_FIFO_DEPTH = int(param_value)
+
+                    # 计算比例乘数（基准值为16）
+                    ratio_multiplier = param_value / 16.0
+
+                    # 按比例调整相关参数，确保最小值为1，并且T1比对应的T2至少大1
+                    config.TL_Etag_T2_UE_MAX = max(1, int(8 * ratio_multiplier))
+                    config.TL_Etag_T1_UE_MAX = max(config.TL_Etag_T2_UE_MAX + 1, int(15 * ratio_multiplier))
+                    config.TR_Etag_T2_UE_MAX = max(1, int(12 * ratio_multiplier))
+                    config.TU_Etag_T2_UE_MAX = max(1, int(8 * ratio_multiplier))
+                    config.TU_Etag_T1_UE_MAX = max(config.TU_Etag_T2_UE_MAX + 1, int(15 * ratio_multiplier))
+                    config.TD_Etag_T2_UE_MAX = max(1, int(12 * ratio_multiplier))
+
+                    logger.info(f"IN_FIFO_DEPTH={param_value}, 比例乘数={ratio_multiplier:.3f}")
+                    logger.info(
+                        f"调整后的参数: TL_T2={config.TL_Etag_T2_UE_MAX}, TL_T1={config.TL_Etag_T1_UE_MAX}, TR_T2={config.TR_Etag_T2_UE_MAX}, TU_T2={config.TU_Etag_T2_UE_MAX}, TU_T1={config.TU_Etag_T1_UE_MAX}, TD_T2={config.TD_Etag_T2_UE_MAX}"
+                    )
+                else:
+                    logger.warning(f"IN_FIFO_DEPTH 参数值无效: {param_value}")
+            elif hasattr(config, param_name):
+                # 普通参数的处理
                 if isinstance(param_value, (int, float)):
                     setattr(config, param_name, param_value)
                 else:
@@ -350,8 +377,8 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
             verbose=1,
             print_trace=0,
             plot_link_state=0,
-            plot_flow_fig=0,
-            plot_RN_BW_fig=0,
+            plot_flow_fig=1,
+            plot_RN_BW_fig=1,
         )
 
         # 运行仿真
@@ -899,9 +926,14 @@ def main():
 
     # 参数设置：可以配置1-3个参数
     param_configs = [
+        # 示例：使用 IN_FIFO_DEPTH 同时遍历 RB_IN_FIFO_DEPTH 和 EQ_IN_FIFO_DEPTH，并按比例调整相关参数
+        # {"name": "IN_FIFO_DEPTH", "range": "8,32,4"},  # 从8到32，步长为4
+        # {"name": "IN_FIFO_DEPTH", "range": "[2, 4, 6, 8, 10, 12, 14, 16, 22, 28]"},
+        {"name": "IN_FIFO_DEPTH", "range": "[16]"},
+        # {"name": "SLICE_PER_LINK", "range": "[5,6,7,8,9,10,11,12,13,14,17,20]"},
+        # 其他参数配置示例：
         # {"name": "IQ_OUT_FIFO_DEPTH_VERTICAL", "range": "1,8"},
         # {"name": "SLICE_PER_LINK", "range": "17,20"},
-        {"name": "SLICE_PER_LINK", "range": "[5,6,7,8,9,10,11,12,13,14,17,20]"},
     ]
 
     # 文件路径配置
@@ -910,15 +942,15 @@ def main():
     # traffic_path = "../traffic/0617"
     # 仿真配置
     traffic_files = [
-        "W_5x4.txt",
+        "W_8x8.txt",
         # "W_5x4_CR_v1.0.2.txt",
         # "R_12x12.txt",
         # "LLama2_AllReduce.txt",
     ]
     # topo_type = "4x4"
-    # topo_type = "8x8"
+    topo_type = "8x8"
     # topo_type = "12x12"
-    topo_type = "5x4"
+    # topo_type = "5x4"
     traffic_weights = [1]
     repeats = 1
     timeout = 300000

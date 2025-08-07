@@ -76,13 +76,9 @@ class IPInterface:
         self.data_cir_h_num, self.data_cir_v_num = 0, 0
 
         # 验证FIFO深度配置
-        l2h_depth = getattr(config, "IP_L2H_FIFO_DEPTH", 4)
-        h2l_h_depth = getattr(config, "IP_H2L_H_FIFO_DEPTH", 4)
-        h2l_l_depth = getattr(config, "IP_H2L_L_FIFO_DEPTH", 4)
-
-        assert l2h_depth >= 2, f"L2H FIFO depth ({l2h_depth}) should be at least 2"
-        assert h2l_h_depth >= 2, f"H2L_H FIFO depth ({h2l_h_depth}) should be at least 2"
-        assert h2l_l_depth >= 2, f"H2L_L FIFO depth ({h2l_l_depth}) should be at least 2"
+        l2h_depth = config.IP_L2H_FIFO_DEPTH
+        h2l_h_depth = config.IP_H2L_H_FIFO_DEPTH
+        h2l_l_depth = config.IP_H2L_L_FIFO_DEPTH
 
         self.networks = {
             "req": {
@@ -120,48 +116,32 @@ class IPInterface:
             },
         }
 
-        # 根据IP类型设置双向带宽限制令牌桶
+        # 根据IP类型设置统一带宽限制令牌桶
         if ip_type.startswith("ddr"):
             # DDR通道限速
-            tx_limit = getattr(self.config, "DDR_TX_BW_LIMIT", 128)
-            rx_limit = getattr(self.config, "DDR_RX_BW_LIMIT", 128)
-            self.tx_token_bucket = TokenBucket(
-                rate=tx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
-                bucket_size=tx_limit,
-            )
-            self.rx_token_bucket = TokenBucket(
-                rate=rx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
-                bucket_size=rx_limit,
+            bw_limit = getattr(self.config, "DDR_BW_LIMIT", 128)
+            self.token_bucket = TokenBucket(
+                rate=bw_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
+                bucket_size=bw_limit,
             )
         elif ip_type.startswith("l2m"):
             # L2M通道限速
-            tx_limit = getattr(self.config, "L2M_TX_BW_LIMIT", 128)
-            rx_limit = getattr(self.config, "L2M_RX_BW_LIMIT", 128)
-            self.tx_token_bucket = TokenBucket(
-                rate=tx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
-                bucket_size=tx_limit,
-            )
-            self.rx_token_bucket = TokenBucket(
-                rate=rx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
-                bucket_size=rx_limit,
+            bw_limit = getattr(self.config, "L2M_BW_LIMIT", 128)
+            self.token_bucket = TokenBucket(
+                rate=bw_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
+                bucket_size=bw_limit,
             )
         elif ip_type[:4] in ("sdma", "gdma", "cdma"):
             # DMA通道（SDMA/GDMA/CDMA）限速
             ip_prefix = ip_type[:4].upper()
-            tx_limit = getattr(self.config, f"{ip_prefix}_TX_BW_LIMIT", 128)
-            rx_limit = getattr(self.config, f"{ip_prefix}_RX_BW_LIMIT", 128)
-            self.tx_token_bucket = TokenBucket(
-                rate=tx_limit / self.config.FLIT_SIZE,
-                bucket_size=tx_limit,
-            )
-            self.rx_token_bucket = TokenBucket(
-                rate=rx_limit / self.config.FLIT_SIZE,
-                bucket_size=rx_limit,
+            bw_limit = getattr(self.config, f"{ip_prefix}_BW_LIMIT", 128)
+            self.token_bucket = TokenBucket(
+                rate=bw_limit / self.config.FLIT_SIZE,
+                bucket_size=bw_limit,
             )
         else:
             # 默认不限速
-            self.tx_token_bucket = None
-            self.rx_token_bucket = None
+            self.token_bucket = None
 
     def enqueue(self, flit: Flit, network_type: str, retry=False):
         """IP 核把flit丢进对应网络的 inject_fifo"""
@@ -187,9 +167,9 @@ class IPInterface:
 
         # 根据网络类型进行不同的处理
         if network_type == "req":
-            if self.tx_token_bucket:
-                self.tx_token_bucket.refill(self.current_cycle)
-                if not self.tx_token_bucket.consume(flit.burst_length):
+            if self.token_bucket:
+                self.token_bucket.refill(self.current_cycle)
+                if not self.token_bucket.consume(flit.burst_length):
                     return
             if flit.req_attr == "new" and not self._check_and_reserve_resources(flit):
                 return  # 资源不足，保持在inject_fifo中
@@ -208,9 +188,9 @@ class IPInterface:
             current_cycle = getattr(self, "current_cycle", 0)
             if hasattr(flit, "departure_cycle") and flit.departure_cycle > current_cycle:
                 return  # 还没到发送时间
-            if self.tx_token_bucket:
-                self.tx_token_bucket.refill(current_cycle)
-                if not self.tx_token_bucket.consume():
+            if self.token_bucket:
+                self.token_bucket.refill(current_cycle)
+                if not self.token_bucket.consume():
                     return
             flit: Flit = net_info["inject_fifo"].popleft()
             flit.flit_position = "L2H"
@@ -613,9 +593,9 @@ class IPInterface:
             return
 
         current_cycle = getattr(self, "current_cycle", 0)
-        if network_type == "data" and self.rx_token_bucket:
-            self.rx_token_bucket.refill(current_cycle)
-            if not self.rx_token_bucket.consume():
+        if network_type == "data" and self.token_bucket:
+            self.token_bucket.refill(current_cycle)
+            if not self.token_bucket.consume():
                 return
 
         flit = net_info["h2l_fifo_l"].popleft()

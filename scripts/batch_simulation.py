@@ -179,8 +179,7 @@ def run_single_simulation(traffic_file, topo_type, model_type, config_path, resu
     config.IQ_OUT_FIFO_DEPTH_EQ = 8
     config.RB_OUT_FIFO_DEPTH = 8
     config.SN_TRACKER_RELEASE_LATENCY = 40
-    config.DDR_TX_BW_LIMIT = 115.2
-    config.DDR_RX_BW_LIMIT = 115.2
+    config.DDR_BW_LIMIT = 115.2
 
     config.TL_Etag_T2_UE_MAX = 8
     config.TL_Etag_T1_UE_MAX = 15

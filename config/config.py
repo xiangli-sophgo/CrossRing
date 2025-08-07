@@ -71,17 +71,12 @@ class CrossRingConfig:
         self.SN_DDR_WDB_SIZE = args.SN_DDR_WDB_SIZE
         self.SN_L2M_RDB_SIZE = args.SN_L2M_RDB_SIZE
         self.SN_L2M_WDB_SIZE = args.SN_L2M_WDB_SIZE
-        # 新的双向带宽限制参数
-        self.GDMA_TX_BW_LIMIT = args.GDMA_TX_BW_LIMIT
-        self.GDMA_RX_BW_LIMIT = args.GDMA_RX_BW_LIMIT
-        self.SDMA_TX_BW_LIMIT = args.SDMA_TX_BW_LIMIT
-        self.SDMA_RX_BW_LIMIT = args.SDMA_RX_BW_LIMIT
-        self.CDMA_TX_BW_LIMIT = args.CDMA_TX_BW_LIMIT
-        self.CDMA_RX_BW_LIMIT = args.CDMA_RX_BW_LIMIT
-        self.DDR_TX_BW_LIMIT = args.DDR_TX_BW_LIMIT
-        self.DDR_RX_BW_LIMIT = args.DDR_RX_BW_LIMIT
-        self.L2M_TX_BW_LIMIT = args.L2M_TX_BW_LIMIT
-        self.L2M_RX_BW_LIMIT = args.L2M_RX_BW_LIMIT
+        # 带宽限制参数（统一TX和RX）
+        self.GDMA_BW_LIMIT = args.GDMA_BW_LIMIT
+        self.SDMA_BW_LIMIT = args.SDMA_BW_LIMIT
+        self.CDMA_BW_LIMIT = args.CDMA_BW_LIMIT
+        self.DDR_BW_LIMIT = args.DDR_BW_LIMIT
+        self.L2M_BW_LIMIT = args.L2M_BW_LIMIT
         self.DDR_R_LATENCY_original = args.DDR_R_LATENCY
         self.DDR_R_LATENCY_VAR_original = args.DDR_R_LATENCY_VAR
         self.DDR_W_LATENCY_original = args.DDR_W_LATENCY
@@ -100,6 +95,9 @@ class CrossRingConfig:
         self.ENABLE_CROSSPOINT_CONFLICT_CHECK = args.ENABLE_CROSSPOINT_CONFLICT_CHECK
         self.CROSSRING_VERSION = args.CROSSRING_VERSION
         self.ENABLE_IN_ORDER_EJECTION = args.ENABLE_IN_ORDER_EJECTION
+        self.IP_L2H_FIFO_DEPTH = args.IP_L2H_FIFO_DEPTH
+        self.IP_H2L_H_FIFO_DEPTH = args.IP_H2L_H_FIFO_DEPTH
+        self.IP_H2L_L_FIFO_DEPTH = args.IP_H2L_L_FIFO_DEPTH
         self.CHANNEL_SPEC = {
             "gdma": 2,  # → RN 侧
             "sdma": 2,  # → RN 侧
@@ -358,7 +356,7 @@ class CrossRingConfig:
             default_config["IQ_OUT_FIFO_DEPTH_HORIZONTAL"] = default_iq_depth
             default_config["IQ_OUT_FIFO_DEPTH_VERTICAL"] = default_iq_depth
             default_config["IQ_OUT_FIFO_DEPTH_EQ"] = default_iq_depth
-        
+
         parser.add_argument("--IQ_OUT_FIFO_DEPTH_HORIZONTAL", type=int, default=default_config.get("IQ_OUT_FIFO_DEPTH_HORIZONTAL", 6), help="Depth of IQ FIFOs for TR/TL in inject queues")
         parser.add_argument("--IQ_OUT_FIFO_DEPTH_VERTICAL", type=int, default=default_config.get("IQ_OUT_FIFO_DEPTH_VERTICAL", 6), help="Depth of IQ FIFOs for TU/TD in inject queues")
         parser.add_argument("--IQ_OUT_FIFO_DEPTH_EQ", type=int, default=default_config.get("IQ_OUT_FIFO_DEPTH_EQ", 6), help="Depth of IQ FIFOs for EQ in inject queues")
@@ -371,17 +369,12 @@ class CrossRingConfig:
         parser.add_argument("--ITag_MAX_Num_V", type=int, default=default_config["ITag_MAX_Num_V"], help="Maximum number of I-Tag reservations for vertical ring XY nodes")
         parser.add_argument("--RB_ONLY_TAG_NUM_HORIZONTAL", type=int, default=default_config["RB_ONLY_TAG_NUM_HORIZONTAL"], help="Number of RB only tags per horizontal ring")
         parser.add_argument("--RB_ONLY_TAG_NUM_VERTICAL", type=int, default=default_config["RB_ONLY_TAG_NUM_VERTICAL"], help="Number of RB only tags per vertical ring")
-        # 新的双向带宽限制参数
-        parser.add_argument("--GDMA_TX_BW_LIMIT", type=int, default=default_config["GDMA_TX_BW_LIMIT"], help="GDMA TX Bandwidth limit.")
-        parser.add_argument("--GDMA_RX_BW_LIMIT", type=int, default=default_config["GDMA_RX_BW_LIMIT"], help="GDMA RX Bandwidth limit.")
-        parser.add_argument("--SDMA_TX_BW_LIMIT", type=int, default=default_config["SDMA_TX_BW_LIMIT"], help="SDMA TX Bandwidth limit.")
-        parser.add_argument("--SDMA_RX_BW_LIMIT", type=int, default=default_config["SDMA_RX_BW_LIMIT"], help="SDMA RX Bandwidth limit.")
-        parser.add_argument("--CDMA_TX_BW_LIMIT", type=int, default=default_config["CDMA_TX_BW_LIMIT"], help="CDMA TX Bandwidth limit.")
-        parser.add_argument("--CDMA_RX_BW_LIMIT", type=int, default=default_config["CDMA_RX_BW_LIMIT"], help="CDMA RX Bandwidth limit.")
-        parser.add_argument("--DDR_TX_BW_LIMIT", type=int, default=default_config["DDR_TX_BW_LIMIT"], help="DDR TX Bandwidth limit.")
-        parser.add_argument("--DDR_RX_BW_LIMIT", type=int, default=default_config["DDR_RX_BW_LIMIT"], help="DDR RX Bandwidth limit.")
-        parser.add_argument("--L2M_TX_BW_LIMIT", type=int, default=default_config["L2M_TX_BW_LIMIT"], help="L2M TX Bandwidth limit.")
-        parser.add_argument("--L2M_RX_BW_LIMIT", type=int, default=default_config["L2M_RX_BW_LIMIT"], help="L2M RX Bandwidth limit.")
+        # 带宽限制参数（统一TX和RX）
+        parser.add_argument("--GDMA_BW_LIMIT", type=int, default=default_config["GDMA_BW_LIMIT"], help="GDMA Bandwidth limit.")
+        parser.add_argument("--SDMA_BW_LIMIT", type=int, default=default_config["SDMA_BW_LIMIT"], help="SDMA Bandwidth limit.")
+        parser.add_argument("--CDMA_BW_LIMIT", type=int, default=default_config["CDMA_BW_LIMIT"], help="CDMA Bandwidth limit.")
+        parser.add_argument("--DDR_BW_LIMIT", type=int, default=default_config["DDR_BW_LIMIT"], help="DDR Bandwidth limit.")
+        parser.add_argument("--L2M_BW_LIMIT", type=int, default=default_config["L2M_BW_LIMIT"], help="L2M Bandwidth limit.")
         parser.add_argument("--DDR_R_LATENCY", type=int, default=default_config["DDR_R_LATENCY"], help="DDR latency")
         parser.add_argument("--DDR_R_LATENCY_VAR", type=int, default=default_config["DDR_R_LATENCY_VAR"], help="DDR latency")
         parser.add_argument("--DDR_W_LATENCY", type=int, default=default_config["DDR_W_LATENCY"], help="DDR latency")
