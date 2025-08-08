@@ -119,8 +119,7 @@ class IPInterface:
         # 根据IP类型设置双向带宽限制令牌桶
         if ip_type.startswith("ddr"):
             # DDR通道限速
-            tx_limit = getattr(self.config, "DDR_BW_LIMIT", 128)
-            rx_limit = getattr(self.config, "DDR_BW_LIMIT", 128)
+            tx_limit = rx_limit = self.config.DDR_BW_LIMIT
             self.tx_token_bucket = TokenBucket(
                 rate=tx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
                 bucket_size=tx_limit,
@@ -131,8 +130,7 @@ class IPInterface:
             )
         elif ip_type.startswith("l2m"):
             # L2M通道限速
-            tx_limit = getattr(self.config, "L2M_BW_LIMIT", 128)
-            rx_limit = getattr(self.config, "L2M_BW_LIMIT", 128)
+            tx_limit = rx_limit = self.config.L2M_BW_LIMIT
             self.tx_token_bucket = TokenBucket(
                 rate=tx_limit / self.config.NETWORK_FREQUENCY / self.config.FLIT_SIZE,
                 bucket_size=tx_limit,
@@ -144,8 +142,7 @@ class IPInterface:
         elif ip_type[:4] in ("sdma", "gdma", "cdma"):
             # DMA通道（SDMA/GDMA/CDMA）限速
             ip_prefix = ip_type[:4].upper()
-            tx_limit = getattr(self.config, f"{ip_prefix}_BW_LIMIT", 128)
-            rx_limit = getattr(self.config, f"{ip_prefix}_BW_LIMIT", 128)
+            tx_limit = rx_limit = getattr(self.config, f"{ip_prefix}_BW_LIMIT", 128)
             self.tx_token_bucket = TokenBucket(
                 rate=tx_limit / self.config.FLIT_SIZE,
                 bucket_size=tx_limit,
@@ -183,10 +180,6 @@ class IPInterface:
 
         # 根据网络类型进行不同的处理
         if network_type == "req":
-            if self.tx_token_bucket:
-                self.tx_token_bucket.refill(self.current_cycle)
-                if not self.tx_token_bucket.consume(flit.burst_length):
-                    return
             if flit.req_attr == "new" and not self._check_and_reserve_resources(flit):
                 return  # 资源不足，保持在inject_fifo中
             flit.flit_position = "L2H"
@@ -317,8 +310,7 @@ class IPInterface:
             flit.is_arrive = True
             flit.flit_position = "H2L_H"
             net_info["h2l_fifo_h_pre"] = flit
-            net_info["network"].arrive_flits[flit.packet_id].append(flit)
-            net_info["network"].recv_flits_num += 1
+            # arrive_flits添加移动到IP_eject阶段，确保只记录真正完成的flit
 
         except (KeyError, AttributeError) as e:
             logging.warning(f"EQ to h2l_h transfer failed for {network_type}: {e}")
@@ -602,7 +594,7 @@ class IPInterface:
                 else:
                     print(f"Warning: No SN tracker found for packet_id {flit.packet_id}")
 
-    def h2l_to_eject_fifo(self, network_type):
+    def h2l_l_to_eject_fifo(self, network_type):
         """1GHz: h2l_fifo_l → 处理完成"""
         net_info = self.networks[network_type]
         if not net_info["h2l_fifo_l"]:
@@ -617,6 +609,13 @@ class IPInterface:
         flit = net_info["h2l_fifo_l"].popleft()
         flit.flit_position = "IP_eject"
         flit.is_finish = True
+        
+        # 在IP_eject阶段添加到arrive_flits，确保只记录真正完成的flit
+        if flit.packet_id not in net_info["network"].arrive_flits:
+            net_info["network"].arrive_flits[flit.packet_id] = []
+        net_info["network"].arrive_flits[flit.packet_id].append(flit)
+        net_info["network"].recv_flits_num += 1
+        
         # 根据网络类型进行特殊处理
         if network_type == "req":
             self._handle_received_request(flit)
@@ -683,7 +682,7 @@ class IPInterface:
         if cycle_mod == 0:
             # 对三个网络分别执行h2l_to_eject_fifo，收集被eject的flit
             for net_type in ["req", "rsp", "data"]:
-                flit = self.h2l_to_eject_fifo(net_type)
+                flit = self.h2l_l_to_eject_fifo(net_type)
                 if flit:
                     ejected_flits.append(flit)
 
