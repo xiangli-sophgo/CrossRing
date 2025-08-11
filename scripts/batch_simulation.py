@@ -223,7 +223,7 @@ def run_single_simulation(traffic_file, topo_type, model_type, config_path, resu
         flow_fig_show_CDMA=1,
         plot_RN_BW_fig=1,
         plot_link_state=0,
-        plot_start_time=1000,
+        plot_start_cycle=1000,
         print_trace=0,
         show_trace_id=0,
         show_node_id=4,

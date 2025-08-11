@@ -133,7 +133,7 @@ class RingModel(BaseModel):
             "flow_fig_show_CDMA": kwargs.get("flow_fig_show_CDMA", False),
             "plot_RN_BW_fig": kwargs.get("plot_RN_BW_fig", False),
             "plot_link_state": kwargs.get("plot_link_state", False),
-            "plot_start_time": kwargs.get("plot_start_time", -1),
+            "plot_start_cycle": kwargs.get("plot_start_cycle", -1),
             "print_trace": kwargs.get("print_trace", False),
             "show_trace_id": kwargs.get("show_trace_id", 0),
             "show_node_id": kwargs.get("show_node_id", 3),
@@ -367,7 +367,7 @@ class RingModel(BaseModel):
                     fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
                 else:  # EQ
                     fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_EQ
-                
+
                 if len(queue[ip_pos]) >= fifo_depth:
                     continue  # FIFO 满
 
@@ -681,7 +681,7 @@ class RingModel(BaseModel):
                 fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
             else:  # EQ
                 fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_EQ
-            
+
             if queue_pre[ip_pos] and len(queue[ip_pos]) < fifo_depth:
                 flit = queue_pre[ip_pos]
                 flit.departure_inject_cycle = self.cycle

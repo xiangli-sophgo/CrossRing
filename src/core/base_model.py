@@ -130,7 +130,7 @@ class BaseModel:
         flow_fig_show_CDMA=False,
         plot_RN_BW_fig=False,
         plot_link_state=False,
-        plot_start_time=-1,
+        plot_start_cycle=-1,
         print_trace=False,
         show_trace_id=0,
         show_node_id=3,
@@ -163,7 +163,7 @@ class BaseModel:
         self.flow_fig_show_CDMA = flow_fig_show_CDMA
         self.plot_RN_BW_fig = plot_RN_BW_fig
         self.plot_link_state = plot_link_state
-        self.plot_start_time = plot_start_time
+        self.plot_start_cycle = plot_start_cycle
         self.print_trace = print_trace
         self._done_flags = {
             "req": False,
@@ -447,7 +447,9 @@ class BaseModel:
             if completed_traffics and self.verbose:
                 print(f"Completed traffics: {completed_traffics}")
 
-            if (self.traffic_scheduler.is_all_completed() and self.trans_flits_num == 0 and not self.new_write_req) or self.cycle > self.end_time * self.config.NETWORK_FREQUENCY:
+            if (
+                self.traffic_scheduler.is_all_completed() and self.data_network.recv_flits_num >= (self.read_flit + self.write_flit) and self.trans_flits_num == 0 and not self.new_write_req
+            ) or self.cycle > self.end_time * self.config.NETWORK_FREQUENCY:
                 if tail_time == 0:
                     if self.verbose:
                         print("Finish!")
@@ -536,7 +538,7 @@ class BaseModel:
     def update_traffic_completion_stats(self, flit):
         """在flit完成时更新TrafficScheduler的统计"""
         # 只有当 flit 真正到达 IP_eject 状态时才更新统计
-        if hasattr(flit, "traffic_id") and flit.flit_position == "IP_eject":
+        if hasattr(flit, "traffic_id") and flit.flit_position.startswith("IP_eject"):
             self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "received_flit")
 
     def syn_IP_stat(self):
@@ -567,7 +569,7 @@ class BaseModel:
                 plt.pause(0.05)
             if self.link_state_vis.should_stop:
                 return
-            if self.cycle / self.config.NETWORK_FREQUENCY < self.plot_start_time:
+            if self.cycle < self.plot_start_cycle:
                 return
 
             self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle)
@@ -661,7 +663,7 @@ class BaseModel:
                 flit.flit_position = "EQ_CH"
                 queue[ip_pos].append(flit)
                 queue_pre[ip_pos] = None
-        
+
         # 更新FIFO统计
         network.update_fifo_stats_after_move(in_pos)
 
@@ -730,7 +732,7 @@ class BaseModel:
                     fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
                 else:  # EQ
                     fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_EQ
-                
+
                 if len(queue[ip_pos]) >= fifo_depth:
                     continue  # FIFO 满
 
@@ -877,7 +879,7 @@ class BaseModel:
         req.packet_id = Node.get_next_packet_id()
         req.req_type = "read" if req_data[5] == "R" else "write"
         req.req_attr = "new"
-        req.cmd_entry_cake0_cycle = self.cycle
+        # req.cmd_entry_cake0_cycle = self.cycle
 
         try:
             # 通过IPInterface处理请求
@@ -925,19 +927,19 @@ class BaseModel:
 
     def _should_skip_waiting_flit(self, flit) -> bool:
         """判断flit是否在等待状态，不需要打印"""
-        if hasattr(flit, 'flit_position'):
+        if hasattr(flit, "flit_position"):
             # IP_inject 状态算等待状态
             if flit.flit_position == "IP_inject":
                 return True
             # L2H状态且还未到departure时间 = 等待状态
-            if flit.flit_position == "L2H" and hasattr(flit, 'departure_cycle') and flit.departure_cycle > self.cycle:
+            if flit.flit_position == "L2H" and hasattr(flit, "departure_cycle") and flit.departure_cycle > self.cycle:
                 return True
             # IP_eject状态且位置没有变化，也算等待状态
             if flit.flit_position == "IP_eject":
                 # 使用外部字典跟踪flit的稳定周期（避免修改Flit类的__slots__）
-                if not hasattr(self, '_flit_stable_cycles'):
+                if not hasattr(self, "_flit_stable_cycles"):
                     self._flit_stable_cycles = {}
-                
+
                 flit_key = f"{flit.packet_id}_{flit.flit_id}"
                 if flit_key in self._flit_stable_cycles:
                     if self.cycle - self._flit_stable_cycles[flit_key] > 2:  # 在IP_eject超过2个周期就跳过
@@ -959,7 +961,7 @@ class BaseModel:
 
         # 检查是否有活跃的flit（非等待状态的flit）
         has_active_flit = any(not self._should_skip_waiting_flit(flit) for flit in flits)
-        
+
         # 对于单 flit 的 negative rsp，到达后不打印也不更新状态
         if net_type == "rsp":
             last_flit = flits[-1]
@@ -972,25 +974,25 @@ class BaseModel:
             if self.cycle != self._last_printed_cycle:
                 print(f"Cycle {self.cycle}:")  # 醒目标记当前 cycle
                 self._last_printed_cycle = self.cycle  # 更新记录
-            
+
             # 收集所有flit并格式化打印
             all_flits = []
-            
+
             # REQ网络的flit
             req_flits = self.req_network.send_flits.get(packet_id, [])
             for flit in req_flits:
                 all_flits.append(f"REQ,{flit}")
-            
-            # RSP网络的flit  
+
+            # RSP网络的flit
             rsp_flits = self.rsp_network.send_flits.get(packet_id, [])
             for flit in rsp_flits:
                 all_flits.append(f"RSP,{flit}")
-            
+
             # DATA网络的flit
             data_flits = self.data_network.send_flits.get(packet_id, [])
             for flit in data_flits:
                 all_flits.append(f"DATA,{flit}")
-            
+
             # 打印所有flit，用 | 分隔
             if all_flits:
                 print(" | ".join(all_flits) + " |")
@@ -998,12 +1000,11 @@ class BaseModel:
         # —— 更新完成标记 ——
         # 检查所有 flit 是否都已到达 IP_eject 状态
         all_at_ip_eject = all(f.flit_position == "IP_eject" for f in flits)
-        
+
         if net_type == "rsp":
             # 只有最后一个 datasend 到达 IP_eject 时才算完成
             last_flit = flits[-1]
-            if (last_flit.rsp_type == "datasend" and 
-                last_flit.flit_position == "IP_eject"):
+            if last_flit.rsp_type == "datasend" and last_flit.flit_position == "IP_eject":
                 self._done_flags[packet_done_key] = True
         else:
             # 其他网络类型，所有 flit 都到达 IP_eject 才算完成
@@ -1556,7 +1557,7 @@ class BaseModel:
 
         # 延迟统计
         latency_stats = self.result_processor._calculate_latency_stats()
-        
+
         # FIFO使用率统计
         self.result_processor.generate_fifo_usage_csv(self)
         # CMD 延迟

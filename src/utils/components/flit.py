@@ -233,6 +233,9 @@ class Flit:
             self.cmd_received_by_cake0_cycle = min(flit.cmd_received_by_cake0_cycle, self.cmd_received_by_cake0_cycle)
             self.data_entry_noc_from_cake0_cycle = min(flit.data_entry_noc_from_cake0_cycle, self.data_entry_noc_from_cake0_cycle)
             self.data_received_complete_cycle = min(flit.data_received_complete_cycle, self.data_received_complete_cycle)
+        if flit.flit_type == "data":
+            self.eject_attempts_h += flit.eject_attempts_h / flit.burst_length
+            self.eject_attempts_v += flit.eject_attempts_v / flit.burst_length
 
     def calculate_direction(self, path):
         if len(path) < 2:

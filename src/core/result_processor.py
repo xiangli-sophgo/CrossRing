@@ -3094,7 +3094,7 @@ class BandwidthAnalyzer:
         return results
 
     def generate_fifo_usage_csv(self, model, output_path: str = None):
-        """生成FIFO使用率CSV文件"""
+        """生成FIFO使用率CSV文件（仅统计data通道）"""
         if output_path is None:
             # 使用模型的结果保存路径或当前目录
             if hasattr(model, "result_save_path") and model.result_save_path:
@@ -3108,26 +3108,28 @@ class BandwidthAnalyzer:
 
         # 准备CSV数据
         rows = []
-        headers = ["Network", "Category", "FIFO_Type", "Position", "Avg_Utilization(%)", "Max_Utilization(%)", "Avg_Depth", "Max_Depth"]
+        headers = ["网络", "类别", "FIFO类型", "位置", "平均使用率(%)", "最大使用率(%)", "平均深度", "最大深度"]
 
-        for net_name, net_data in fifo_stats.items():
+        # 只处理data通道的数据
+        if "data" in fifo_stats:
+            net_data = fifo_stats["data"]
             for category, category_data in net_data.items():
                 for fifo_type, fifo_data in category_data.items():
                     for pos, stats in fifo_data.items():
                         row = {
-                            "Network": net_name,
-                            "Category": category,
-                            "FIFO_Type": fifo_type,
-                            "Position": pos,
-                            "Avg_Utilization(%)": f"{stats['avg_utilization']:.2f}",
-                            "Max_Utilization(%)": f"{stats['max_utilization']:.2f}",
-                            "Avg_Depth": f"{stats['avg_depth']:.2f}",
-                            "Max_Depth": stats["max_depth"],
+                            "网络": "data",
+                            "类别": category,
+                            "FIFO类型": fifo_type,
+                            "位置": pos,
+                            "平均使用率(%)": f"{stats['avg_utilization']:.2f}",
+                            "最大使用率(%)": f"{stats['max_utilization']:.2f}",
+                            "平均深度": f"{stats['avg_depth']:.2f}",
+                            "最大深度": stats["max_depth"],
                         }
                         rows.append(row)
 
-        # 写入CSV文件
-        with open(output_path, "w", newline="") as csvfile:
+        # 写入CSV文件（使用UTF-8 with BOM编码，防止Excel打开乱码）
+        with open(output_path, "w", newline="", encoding="utf-8-sig") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=headers)
             writer.writeheader()
             writer.writerows(rows)
