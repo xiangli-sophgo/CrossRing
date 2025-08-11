@@ -141,7 +141,7 @@ class CrossRingBatchRunner:
             plot_flow_fig=1,
             plot_RN_BW_fig=1,
             plot_link_state=0,
-            plot_start_time=0,
+            plot_start_cycle=0,
             print_trace=0,
             show_trace_id=0,
             show_node_id=0,

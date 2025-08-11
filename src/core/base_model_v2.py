@@ -131,7 +131,7 @@ class BaseModel:
         flow_fig_show_CDMA=False,
         plot_RN_BW_fig=False,
         plot_link_state=False,
-        plot_start_time=-1,
+        plot_start_cycle=-1,
         print_trace=False,
         show_trace_id=0,
         show_node_id=3,
@@ -164,7 +164,7 @@ class BaseModel:
         self.flow_fig_show_CDMA = flow_fig_show_CDMA
         self.plot_RN_BW_fig = plot_RN_BW_fig
         self.plot_link_state = plot_link_state
-        self.plot_start_time = plot_start_time
+        self.plot_start_cycle = plot_start_cycle
         self.print_trace = print_trace
         self._done_flags = {
             "req": False,
@@ -568,7 +568,7 @@ class BaseModel:
                 plt.pause(0.05)
             if self.link_state_vis.should_stop:
                 return
-            if self.cycle / self.config.NETWORK_FREQUENCY < self.plot_start_time:
+            if self.cycle < self.plot_start_cycle:
                 return
 
             self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle)
@@ -721,7 +721,7 @@ class BaseModel:
             elif req.req_type == "write":
                 counts["write"] += 1
 
-        # req.cmd_entry_noc_from_cake0_cycle = self.cycle
+        # req.cmd_entry_entry_noc_from_cake0_cycle = self.cycle
         return True
 
     # ------------------------------------------------------------------
@@ -752,7 +752,7 @@ class BaseModel:
                     fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
                 else:  # EQ
                     fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_EQ
-                
+
                 if len(queue[ip_pos]) >= fifo_depth:
                     continue  # FIFO 满
 
@@ -899,7 +899,7 @@ class BaseModel:
         req.packet_id = Node.get_next_packet_id()
         req.req_type = "read" if req_data[5] == "R" else "write"
         req.req_attr = "new"
-        req.cmd_entry_cake0_cycle = self.cycle
+        # req.cmd_entry_cake0_cycle = self.cycle
 
         try:
             # 通过IPInterface处理请求

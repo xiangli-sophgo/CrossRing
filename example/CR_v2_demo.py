@@ -53,7 +53,7 @@ def run_CR_v2_demo():
     config.DDR_BW_LIMIT = 102
     # config.GDMA_BW_LIMIT = 102
     config.RB_ONLY_TAG_NUM_HORIZONTAL = 2  # 横向环每个环的RB_ONLY标签数量
-    config.RB_ONLY_TAG_NUM_VERTICAL = 3   # 纵向环每个环的RB_ONLY标签数量
+    config.RB_ONLY_TAG_NUM_VERTICAL = 3  # 纵向环每个环的RB_ONLY标签数量
 
     config.TL_Etag_T2_UE_MAX = 8
     config.TL_Etag_T1_UE_MAX = 15
@@ -107,7 +107,7 @@ def run_CR_v2_demo():
         print_trace=0,
         show_trace_id=1014,
         plot_link_state=1,
-        plot_start_time=2000,
+        plot_start_cycle=2000,
         plot_flow_fig=1,
         plot_RN_BW_fig=1,
     )

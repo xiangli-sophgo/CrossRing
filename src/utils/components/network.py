@@ -102,17 +102,17 @@ class Network:
         self.recv_throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
         self.last_select = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
         self.throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        
+
         # FIFO使用率统计
         self.fifo_depth_sum = {
             "IQ": {"CH_buffer": {}, "TR": {}, "TL": {}, "TU": {}, "TD": {}, "EQ": {}},
             "RB": {"TR": {}, "TL": {}, "TU": {}, "TD": {}, "EQ": {}},
-            "EQ": {"TU": {}, "TD": {}, "CH_buffer": {}}
+            "EQ": {"TU": {}, "TD": {}, "CH_buffer": {}},
         }
         self.fifo_max_depth = {
             "IQ": {"CH_buffer": {}, "TR": {}, "TL": {}, "TU": {}, "TD": {}, "EQ": {}},
             "RB": {"TR": {}, "TL": {}, "TU": {}, "TD": {}, "EQ": {}},
-            "EQ": {"TU": {}, "TD": {}, "CH_buffer": {}}
+            "EQ": {"TU": {}, "TD": {}, "CH_buffer": {}},
         }
 
         # # channel buffer setup
@@ -184,26 +184,32 @@ class Network:
                 if adjacency_matrix[i][j] == 1 and i - j != config.NUM_COL:
                     self.links[(i, j)] = [None] * config.SLICE_PER_LINK
                     self.links_flow_stat[(i, j)] = {
-                        "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                        "ITag_count": 0,
+                        "empty_count": 0,
+                        "total_cycles": 0,
                         # 按下环尝试次数分组的统计
                         "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
-                        "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
+                        "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                     }
                     self.links_tag[(i, j)] = [None] * config.SLICE_PER_LINK
             if i in range(0, config.NUM_COL):
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
                 self.links_flow_stat[(i, i)] = {
-                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                    "ITag_count": 0,
+                    "empty_count": 0,
+                    "total_cycles": 0,
                     # 按下环尝试次数分组的统计
                     "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
-                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
+                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                 }
                 self.links_flow_stat[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = {
-                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                    "ITag_count": 0,
+                    "empty_count": 0,
+                    "total_cycles": 0,
                     # 按下环尝试次数分组的统计
                     "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
-                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
+                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                 }
                 self.links_tag[(i, i)] = [None] * 2
                 self.links_tag[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
@@ -211,16 +217,20 @@ class Network:
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
                 self.links_flow_stat[(i, i)] = {
-                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                    "ITag_count": 0,
+                    "empty_count": 0,
+                    "total_cycles": 0,
                     # 按下环尝试次数分组的统计
                     "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
-                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
+                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                 }
                 self.links_flow_stat[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = {
-                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                    "ITag_count": 0,
+                    "empty_count": 0,
+                    "total_cycles": 0,
                     # 按下环尝试次数分组的统计
                     "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
-                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
+                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                 }
                 self.links_tag[(i, i)] = [None] * 2
                 self.links_tag[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
@@ -1170,6 +1180,7 @@ class Network:
 
             # 2b. 横向环向左进入Ring Bridge
             elif current - next_node == 1:
+                flit.eject_attempts_h += 1
                 station = self.ring_bridge["TL"].get((new_current, new_next_node))
                 # TL有空位
                 if self.config.RB_IN_FIFO_DEPTH > len(station) and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T2"] < self.config.TL_Etag_T2_UE_MAX:
@@ -1189,6 +1200,7 @@ class Network:
 
             # 2c. 横向环向右进入Ring Bridge
             elif current - next_node == -1:
+                flit.eject_attempts_h += 1
                 station = self.ring_bridge["TR"].get((new_current, new_next_node))
                 if self.config.RB_IN_FIFO_DEPTH > len(station) and self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX:
                     flit.current_link = (new_current, new_next_node)
@@ -1207,6 +1219,7 @@ class Network:
         else:
             # 3. 已经到达目的地，执行eject逻辑
             if current - next_node == self.config.NUM_COL * 2:  # 纵向环向上TU
+                flit.eject_attempts_v += 1
                 eject_queue = self.eject_queues["TU"][next_node]
                 if self.config.EQ_IN_FIFO_DEPTH > len(eject_queue) and self.EQ_UE_Counters["TU"][next_node]["T2"] < self.config.TU_Etag_T2_UE_MAX:
                     link[flit.current_seat_index] = None
@@ -1221,6 +1234,7 @@ class Network:
                     flit.current_link = (next_node, next_pos)
                     flit.current_seat_index = 0
             elif current - next_node == -self.config.NUM_COL * 2:  # 纵向环向下TD
+                flit.eject_attempts_v += 1
                 eject_queue = self.eject_queues["TD"][next_node]
                 if self.config.EQ_IN_FIFO_DEPTH > len(eject_queue) and self.EQ_UE_Counters["TD"][next_node]["T2"] < self.config.TD_Etag_T2_UE_MAX:
                     link[flit.current_seat_index] = None
@@ -1230,7 +1244,6 @@ class Network:
                 else:
                     if self.ETag_BOTHSIDE_UPGRADE:
                         flit.ETag_priority = "T1"
-                    # TODO: next_pos 名称不好
                     next_pos = next_node + self.config.NUM_COL * 2 if next_node + self.config.NUM_COL * 2 <= col_end else col_end
                     flit.is_delay = True
                     link[flit.current_seat_index] = None
@@ -1350,14 +1363,14 @@ class Network:
             return
 
         # 根据新flit状态增加对应计数（每次设置slice时统计一次）
-        
+
         # 首先检查ITag，无论是否有flit都要检查
         if link in self.links_tag and slice_index < len(self.links_tag[link]):
             tag_info = self.links_tag[link][slice_index]
             if tag_info is not None:
                 # 有ITag标记
                 self.links_flow_stat[link]["ITag_count"] += 1
-        
+
         # 然后处理flit统计
         if new_flit is None:
             # slice为空，且没有ITag标记，才是真正的空闲
@@ -1370,19 +1383,19 @@ class Network:
     def _update_eject_attempts_stats(self, link, flit):
         """
         根据flit的下环尝试次数更新链路统计
-        
+
         Args:
             link: 链路标识 (i, j)
             flit: flit对象
         """
-        if not hasattr(flit, 'eject_attempts_h') or not hasattr(flit, 'eject_attempts_v'):
+        if not hasattr(flit, "eject_attempts_h") or not hasattr(flit, "eject_attempts_v"):
             return
-            
+
         # 判断链路方向并更新相应的统计
         i, j = link
         is_horizontal = abs(i - j) == 1  # 横向链路
-        is_vertical = abs(i - j) > 1     # 纵向链路
-        
+        is_vertical = abs(i - j) > 1  # 纵向链路
+
         if is_horizontal:
             # 横向链路，统计横向下环尝试次数
             attempts = flit.eject_attempts_h
@@ -1429,7 +1442,7 @@ class Network:
                 if tag_info is not None:
                     # 有ITag标记
                     self.links_flow_stat[link]["ITag_count"] += 1
-            
+
             if flit is None:
                 # slice为空，且没有ITag标记，才是真正的空闲
                 if link not in self.links_tag or slice_index >= len(self.links_tag[link]) or self.links_tag[link][slice_index] is None:
@@ -1444,7 +1457,7 @@ class Network:
     def update_fifo_stats_after_move(self, in_pos):
         """在move操作后批量更新所有FIFO统计"""
         ip_pos = in_pos - self.config.NUM_COL
-        
+
         # IQ统计 - inject_queues
         for direction in ["TR", "TL", "TU", "TD", "EQ"]:
             if in_pos in self.inject_queues.get(direction, {}):
@@ -1453,10 +1466,8 @@ class Network:
                     self.fifo_depth_sum["IQ"][direction][in_pos] = 0
                     self.fifo_max_depth["IQ"][direction][in_pos] = 0
                 self.fifo_depth_sum["IQ"][direction][in_pos] += depth
-                self.fifo_max_depth["IQ"][direction][in_pos] = max(
-                    self.fifo_max_depth["IQ"][direction][in_pos], depth
-                )
-        
+                self.fifo_max_depth["IQ"][direction][in_pos] = max(self.fifo_max_depth["IQ"][direction][in_pos], depth)
+
         # IQ CH_buffer统计
         for ip_type in self.IQ_channel_buffer:
             if in_pos in self.IQ_channel_buffer[ip_type]:
@@ -1468,10 +1479,8 @@ class Network:
                     self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos][ip_type] = 0
                     self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type] = 0
                 self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos][ip_type] += depth
-                self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type] = max(
-                    self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type], depth
-                )
-        
+                self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type] = max(self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type], depth)
+
         # RB统计 - ring_bridge
         key = (in_pos, ip_pos)
         for direction in ["TR", "TL", "TU", "TD", "EQ"]:
@@ -1481,10 +1490,8 @@ class Network:
                     self.fifo_depth_sum["RB"][direction][key] = 0
                     self.fifo_max_depth["RB"][direction][key] = 0
                 self.fifo_depth_sum["RB"][direction][key] += depth
-                self.fifo_max_depth["RB"][direction][key] = max(
-                    self.fifo_max_depth["RB"][direction][key], depth
-                )
-        
+                self.fifo_max_depth["RB"][direction][key] = max(self.fifo_max_depth["RB"][direction][key], depth)
+
         # EQ统计 - eject_queues
         for direction in ["TU", "TD"]:
             if ip_pos in self.eject_queues.get(direction, {}):
@@ -1493,10 +1500,8 @@ class Network:
                     self.fifo_depth_sum["EQ"][direction][ip_pos] = 0
                     self.fifo_max_depth["EQ"][direction][ip_pos] = 0
                 self.fifo_depth_sum["EQ"][direction][ip_pos] += depth
-                self.fifo_max_depth["EQ"][direction][ip_pos] = max(
-                    self.fifo_max_depth["EQ"][direction][ip_pos], depth
-                )
-        
+                self.fifo_max_depth["EQ"][direction][ip_pos] = max(self.fifo_max_depth["EQ"][direction][ip_pos], depth)
+
         # EQ CH_buffer统计
         for ip_type in self.EQ_channel_buffer:
             if ip_pos in self.EQ_channel_buffer[ip_type]:
@@ -1508,9 +1513,7 @@ class Network:
                     self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos][ip_type] = 0
                     self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type] = 0
                 self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos][ip_type] += depth
-                self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type] = max(
-                    self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type], depth
-                )
+                self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type] = max(self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type], depth)
 
     def get_links_utilization_stats(self):
         """
@@ -1530,28 +1533,20 @@ class Network:
                 # 获取下环尝试次数统计
                 eject_attempts_h = link_stats.get("eject_attempts_h", {"0": 0, "1": 0, "2": 0, ">2": 0})
                 eject_attempts_v = link_stats.get("eject_attempts_v", {"0": 0, "1": 0, "2": 0, ">2": 0})
-                
+
                 # 计算flit总数
                 total_flit_h = sum(eject_attempts_h.values())
                 total_flit_v = sum(eject_attempts_v.values())
                 total_flit = total_flit_h + total_flit_v
-                
+
                 stats[link] = {
                     # 主要比例（基于total_cycles）
                     "utilization": total_flit / total_cycles,
                     "ITag_ratio": link_stats["ITag_count"] / total_cycles,
                     "empty_ratio": link_stats["empty_count"] / total_cycles,
-                    
                     # 详细flit分布（相对于total_cycles）
-                    "eject_attempts_h_ratios": {
-                        k: v / total_cycles if total_cycles > 0 else 0.0
-                        for k, v in eject_attempts_h.items()
-                    },
-                    "eject_attempts_v_ratios": {
-                        k: v / total_cycles if total_cycles > 0 else 0.0
-                        for k, v in eject_attempts_v.items()
-                    },
-                    
+                    "eject_attempts_h_ratios": {k: v / total_cycles if total_cycles > 0 else 0.0 for k, v in eject_attempts_h.items()},
+                    "eject_attempts_v_ratios": {k: v / total_cycles if total_cycles > 0 else 0.0 for k, v in eject_attempts_v.items()},
                     # 原始计数
                     "total_cycles": total_cycles,
                     "total_flit": total_flit,

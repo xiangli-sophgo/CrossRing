@@ -161,7 +161,6 @@ class IPInterface:
         if retry:
             self.networks[network_type]["inject_fifo"].appendleft(flit)
         else:
-            flit.cmd_entry_cake0_cycle = self.current_cycle
             self.networks[network_type]["inject_fifo"].append(flit)
         flit.flit_position = "IP_inject"
         if network_type == "req" and self.networks[network_type]["send_flits"][flit.packet_id]:
@@ -255,6 +254,7 @@ class IPInterface:
                 self.node.rn_rdb_count[ip_type][ip_pos] -= req.burst_length
                 self.node.rn_tracker_count["read"][ip_type][ip_pos] -= 1
                 self.node.rn_rdb[ip_type][ip_pos][req.packet_id] = []
+                req.cmd_entry_cake0_cycle = self.current_cycle  # 这里记录cycle
                 self.node.rn_tracker["read"][ip_type][ip_pos].append(req)
                 self.node.rn_tracker_pointer["read"][ip_type][ip_pos] += 1
 
@@ -270,6 +270,7 @@ class IPInterface:
                 self.node.rn_wdb_count[ip_type][ip_pos] -= req.burst_length
                 self.node.rn_tracker_count["write"][ip_type][ip_pos] -= 1
                 self.node.rn_wdb[ip_type][ip_pos][req.packet_id] = []
+                req.cmd_entry_cake0_cycle = self.current_cycle  # 这里记录cycle
                 self.node.rn_tracker["write"][ip_type][ip_pos].append(req)
                 self.node.rn_tracker_pointer["write"][ip_type][ip_pos] += 1
 
@@ -609,13 +610,13 @@ class IPInterface:
         flit = net_info["h2l_fifo_l"].popleft()
         flit.flit_position = "IP_eject"
         flit.is_finish = True
-        
+
         # 在IP_eject阶段添加到arrive_flits，确保只记录真正完成的flit
         if flit.packet_id not in net_info["network"].arrive_flits:
             net_info["network"].arrive_flits[flit.packet_id] = []
         net_info["network"].arrive_flits[flit.packet_id].append(flit)
         net_info["network"].recv_flits_num += 1
-        
+
         # 根据网络类型进行特殊处理
         if network_type == "req":
             self._handle_received_request(flit)
