@@ -233,9 +233,6 @@ class Flit:
             self.cmd_received_by_cake0_cycle = min(flit.cmd_received_by_cake0_cycle, self.cmd_received_by_cake0_cycle)
             self.data_entry_noc_from_cake0_cycle = min(flit.data_entry_noc_from_cake0_cycle, self.data_entry_noc_from_cake0_cycle)
             self.data_received_complete_cycle = min(flit.data_received_complete_cycle, self.data_received_complete_cycle)
-        if flit.flit_type == "data":
-            self.eject_attempts_h += flit.eject_attempts_h / flit.burst_length
-            self.eject_attempts_v += flit.eject_attempts_v / flit.burst_length
 
     def calculate_direction(self, path):
         if len(path) < 2:
@@ -278,7 +275,9 @@ class Flit:
     def __repr__(self):
         req_attr = "O" if self.req_attr == "old" else "N"
         type_display = self.rsp_type[:3] if self.rsp_type else self.req_type[0]
-        flit_position = f"{self.current_position}:{self.flit_position}" if self.flit_position != "Link" else f"{self.current_link[0]}->{self.current_link[1]}:{self.current_seat_index}, "
+        flit_position = (
+            f"{self.current_position}:{self.flit_position}" if self.flit_position != "Link" else f"{self.current_link[0]}->{self.current_link[1]}:{self.current_seat_index}, "
+        )
         finish_status = "F" if self.is_finish else ""
         eject_status = "E" if self.is_ejected else ""
         ITag_H = "H" if self.itag_h else ""

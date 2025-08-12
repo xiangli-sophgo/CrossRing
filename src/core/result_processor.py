@@ -56,6 +56,16 @@ class RequestInfo:
     data_received_complete_cycle: int = -1
     data_entry_network_cycle: int = -1
     rsp_entry_network_cycle: int = -1
+    # 数据flit的尝试下环次数列表
+    data_eject_attempts_h_list: List[int] = None
+    data_eject_attempts_v_list: List[int] = None
+
+    def __post_init__(self):
+        # 初始化列表，避免None值
+        if self.data_eject_attempts_h_list is None:
+            self.data_eject_attempts_h_list = []
+        if self.data_eject_attempts_v_list is None:
+            self.data_eject_attempts_v_list = []
 
 
 @dataclass
@@ -244,6 +254,13 @@ class BandwidthAnalyzer:
             src_dest_order_id = getattr(representative_flit, "src_dest_order_id", -1)
             packet_category = getattr(representative_flit, "packet_category", "")
 
+            # 收集每个数据flit的尝试下环次数
+            data_eject_attempts_h_list = []
+            data_eject_attempts_v_list = []
+            for data_flit in flits:
+                data_eject_attempts_h_list.append(data_flit.eject_attempts_h)
+                data_eject_attempts_v_list.append(data_flit.eject_attempts_v)
+
             request_info = RequestInfo(
                 packet_id=packet_id,
                 start_time=representative_flit.cmd_entry_cake0_cycle // self.network_frequency,
@@ -274,6 +291,9 @@ class BandwidthAnalyzer:
                 data_received_complete_cycle=getattr(representative_flit, "data_received_complete_cycle", -1),
                 data_entry_network_cycle=getattr(representative_flit, "data_entry_network_cycle", -1),
                 rsp_entry_network_cycle=getattr(representative_flit, "rsp_entry_network_cycle", -1),
+                # 数据flit的尝试下环次数列表
+                data_eject_attempts_h_list=data_eject_attempts_h_list,
+                data_eject_attempts_v_list=data_eject_attempts_v_list,
             )
 
             # 收集RN带宽时间序列数据
@@ -502,9 +522,9 @@ class BandwidthAnalyzer:
                 #     print(f"{port_key} seg{i} Final Bandwidth: {bandwidth[-1]:.2f} GB/s")
             total_bw += last_bw
 
-        if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
-            print(f"Total Bandwidth: {total_bw:.2f} GB/s")
-            print("=" * 60)
+        # if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
+        # print(f"Total Bandwidth: {total_bw:.2f} GB/s")
+        # print("=" * 60)
 
         if self.plot_rn_bw_fig:
             plt.xlabel("Time (us)")
@@ -563,9 +583,9 @@ class BandwidthAnalyzer:
 
             total_bw += bandwidth[mask][-1]
 
-        if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
-            print(f"Total Bandwidth: {total_bw:.2f} GB/s")
-            print("=" * 60)
+        # if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
+        # print(f"Total Bandwidth: {total_bw:.2f} GB/s")
+        # print("=" * 60)
 
         if self.plot_rn_bw_fig:
             plt.xlabel("Time (us)")
@@ -943,6 +963,10 @@ class BandwidthAnalyzer:
                 "circuit_stats": circuit_stats,
             },
         }
+
+        # 计算绕环统计信息并添加到结果中
+        circling_eject_stats = self.calculate_circling_eject_stats()
+        results["circling_eject_stats"] = circling_eject_stats
 
         # 控制台输出重要数据
         if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
@@ -1961,7 +1985,10 @@ class BandwidthAnalyzer:
         # 重建RN带宽时间序列数据
         self._rebuild_rn_bandwidth_time_series()
 
-        print(f"从CSV加载了 {len(self.requests)} 个请求 (读: {len([r for r in self.requests if r.req_type == 'read'])}, " f"写: {len([r for r in self.requests if r.req_type == 'write'])})")
+        print(
+            f"从CSV加载了 {len(self.requests)} 个请求 (读: {len([r for r in self.requests if r.req_type == 'read'])}, "
+            f"写: {len([r for r in self.requests if r.req_type == 'write'])})"
+        )
 
     def _rebuild_rn_bandwidth_time_series(self):
         """重建RN带宽时间序列数据"""
@@ -2017,7 +2044,9 @@ class BandwidthAnalyzer:
                 print(f"链路统计CSV： {output_path}link_statistics.csv")
 
     @staticmethod
-    def reanalyze_and_plot_from_csv(csv_folder: str, output_path: str = None, plot_rn_bw: bool = True, plot_flow: bool = False, show_cdma: bool = False, min_gap_threshold=50) -> Dict:
+    def reanalyze_and_plot_from_csv(
+        csv_folder: str, output_path: str = None, plot_rn_bw: bool = True, plot_flow: bool = False, show_cdma: bool = False, min_gap_threshold=50
+    ) -> Dict:
         """
         从CSV文件重新分析并绘图
 
@@ -2118,9 +2147,15 @@ class BandwidthAnalyzer:
         print(
             f"  总带宽  - 非加权: {read_metrics.unweighted_bandwidth + write_metrics.unweighted_bandwidth:.3f} GB/s, 加权: {read_metrics.weighted_bandwidth + write_metrics.weighted_bandwidth:.3f} GB/s"
         )
-        print(f"  读带宽  - 平均非加权: {read_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {read_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
-        print(f"  写带宽  - 平均非加权: {write_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {write_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
-        print(f"  混合带宽 - 平均非加权: {mixed_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {mixed_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
+        print(
+            f"  读带宽  - 平均非加权: {read_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {read_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s"
+        )
+        print(
+            f"  写带宽  - 平均非加权: {write_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {write_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s"
+        )
+        print(
+            f"  混合带宽 - 平均非加权: {mixed_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {mixed_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s"
+        )
         print(
             f"  总带宽  - 平均非加权: {(read_metrics.unweighted_bandwidth + write_metrics.unweighted_bandwidth) / self.config.NUM_IP:.3f} GB/s, 平均加权: {(read_metrics.weighted_bandwidth + write_metrics.weighted_bandwidth) / self.config.NUM_IP:.3f} GB/s"
         )
@@ -2133,8 +2168,8 @@ class BandwidthAnalyzer:
 
         # Circuit统计
         circuit_stats = summary.get("circuit_stats", {})
+        print(f"\n绕环与Tag统计:")
         if circuit_stats:
-            print(f"\n绕环与Tag统计:")
             print(f"  Circuits req  - h: {circuit_stats.get('req_circuits_h', 0)}, v: {circuit_stats.get('req_circuits_v', 0)}")
             print(f"  Circuits rsp  - h: {circuit_stats.get('rsp_circuits_h', 0)}, v: {circuit_stats.get('rsp_circuits_v', 0)}")
             print(f"  Circuits data - h: {circuit_stats.get('data_circuits_h', 0)}, v: {circuit_stats.get('data_circuits_v', 0)}")
@@ -2145,6 +2180,14 @@ class BandwidthAnalyzer:
             print(f"  EQ ETag - T1: {circuit_stats.get('EQ_ETag_T1_num', 0)}, T0: {circuit_stats.get('EQ_ETag_T0_num', 0)}")
             print(f"  ITag - h: {circuit_stats.get('ITag_h_num', 0)}, v: {circuit_stats.get('ITag_v_num', 0)}")
             print(f"  Retry - read: {circuit_stats.get('read_retry_num', 0)}, write: {circuit_stats.get('write_retry_num', 0)}")
+
+        # 绕环比例统计
+        circling_stats = results.get("circling_eject_stats", {})
+        if circling_stats:
+            h_ratio = circling_stats["horizontal"]["circling_ratio"]
+            v_ratio = circling_stats["vertical"]["circling_ratio"]
+            overall_ratio = circling_stats["overall"]["circling_ratio"]
+            print(f"  下环绕环比例 (>1次): H: {h_ratio*100:.2f}%, V: {v_ratio*100:.2f}%, Overall: {overall_ratio*100:.2f}%")
 
         # 工作区间统计
         print(f"\n工作区间统计:")
@@ -2401,8 +2444,12 @@ class BandwidthAnalyzer:
 
             # 计算flits平均值
             read_flits_avg = sum(sum(iv.flit_count for iv in m.read_metrics.working_intervals) if m.read_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
-            write_flits_avg = sum(sum(iv.flit_count for iv in m.write_metrics.working_intervals) if m.write_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
-            mixed_flits_avg = sum(sum(iv.flit_count for iv in m.mixed_metrics.working_intervals) if m.mixed_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
+            write_flits_avg = sum(sum(iv.flit_count for iv in m.write_metrics.working_intervals) if m.write_metrics.working_intervals else 0 for m in metrics_list) / len(
+                metrics_list
+            )
+            mixed_flits_avg = sum(sum(iv.flit_count for iv in m.mixed_metrics.working_intervals) if m.mixed_metrics.working_intervals else 0 for m in metrics_list) / len(
+                metrics_list
+            )
 
             # 计算工作区间平均值
             read_intervals_avg = sum(len(m.read_metrics.working_intervals) for m in metrics_list) / len(metrics_list)
@@ -2672,6 +2719,9 @@ class BandwidthAnalyzer:
             "data_received_complete_cycle",
             "data_entry_network_cycle",
             "rsp_entry_network_cycle",
+            # 新增的列
+            "data_eject_attempts_h_list",
+            "data_eject_attempts_v_list",
         ]
 
         # 生成读请求CSV
@@ -2703,6 +2753,9 @@ class BandwidthAnalyzer:
                     req.data_received_complete_cycle,
                     req.data_entry_network_cycle,
                     req.rsp_entry_network_cycle,
+                    # 新增的列
+                    ",".join(map(str, req.data_eject_attempts_h_list)),  # 将列表转换为逗号分隔的字符串
+                    ",".join(map(str, req.data_eject_attempts_v_list)),  # 将列表转换为逗号分隔的字符串
                 ]
                 f.write(",".join(map(str, row)) + "\n")
 
@@ -2735,6 +2788,9 @@ class BandwidthAnalyzer:
                     req.data_received_complete_cycle,
                     req.data_entry_network_cycle,
                     req.rsp_entry_network_cycle,
+                    # 新增的列
+                    ",".join(map(str, req.data_eject_attempts_h_list)),  # 将列表转换为逗号分隔的字符串
+                    ",".join(map(str, req.data_eject_attempts_v_list)),  # 将列表转换为逗号分隔的字符串
                 ]
                 f.write(",".join(map(str, row)) + "\n")
 
@@ -3136,9 +3192,113 @@ class BandwidthAnalyzer:
 
         print(f"FIFO使用率统计csv: {output_path}")
 
+    def _handle_legacy_links_format(self, network, mode):
+        """处理旧的links_flow_stat格式"""
+        links = {}
+        if hasattr(network, "links_flow_stat") and isinstance(network.links_flow_stat, dict):
+            # 检查是否是旧的read/write格式
+            if "read" in network.links_flow_stat and "write" in network.links_flow_stat:
+                if mode == "read":
+                    links = network.links_flow_stat.get("read", {})
+                elif mode == "write":
+                    links = network.links_flow_stat.get("write", {})
+                else:  # total模式，合并读和写的数据
+                    read_links = network.links_flow_stat.get("read", {})
+                    write_links = network.links_flow_stat.get("write", {})
+                    all_keys = set(read_links.keys()) | set(write_links.keys())
+                    for key in all_keys:
+                        read_val = read_links.get(key, 0)
+                        write_val = write_links.get(key, 0)
+                        links[key] = read_val + write_val
+            else:
+                # 可能是新格式但没有get_links_utilization_stats方法
+                # 尝试直接使用links_flow_stat
+                for link, stats in network.links_flow_stat.items():
+                    if isinstance(stats, dict) and "total_cycles" in stats:
+                        # 看起来是新格式的原始数据，手动计算利用率
+                        total_cycles = stats.get("total_cycles", 1)
+                        slice_count = 7  # 默认假设7个slice，可以从network.links获取实际值
+                        if hasattr(network, "links") and link in network.links:
+                            slice_count = len(network.links[link])
+
+                        total_slice_cycles = total_cycles * slice_count
+                        if total_slice_cycles > 0:
+                            if mode == "utilization":
+                                utilization = (stats.get("T2_count", 0) + stats.get("T1_count", 0) + stats.get("T0_count", 0)) / total_slice_cycles
+                                links[link] = utilization
+                            elif mode == "T2_ratio":
+                                links[link] = stats.get("T2_count", 0) / total_slice_cycles
+                            elif mode == "T1_ratio":
+                                links[link] = stats.get("T1_count", 0) / total_slice_cycles
+                            elif mode == "T0_ratio":
+                                links[link] = stats.get("T0_count", 0) / total_slice_cycles
+                            elif mode == "ITag_ratio":
+                                links[link] = stats.get("ITag_count", 0) / total_slice_cycles
+                            else:
+                                # 默认返回利用率
+                                utilization = (stats.get("T2_count", 0) + stats.get("T1_count", 0) + stats.get("T0_count", 0)) / total_slice_cycles
+                                links[link] = utilization
+        return links
+
+    def calculate_circling_eject_stats(self):
+        """
+        计算数据flit的绕环下环统计信息。
+        绕环定义为下环尝试次数 > 1。
+
+        Returns:
+            dict: 包含绕环统计信息的字典。
+        """
+        # 初始化计数器
+        total_data_flits_h = 0
+        total_data_flits_v = 0
+        circling_flits_h = 0  # 水平方向绕环 (attempt > 1)
+        circling_flits_v = 0  # 垂直方向绕环 (attempt > 1)
+
+        # 遍历所有请求，收集数据flit的尝试次数
+        for req in self.requests:
+            # 处理水平方向尝试次数
+            for attempt in req.data_eject_attempts_h_list:
+                total_data_flits_h += 1
+                if attempt > 1:
+                    circling_flits_h += 1
+
+            # 处理垂直方向尝试次数
+            for attempt in req.data_eject_attempts_v_list:
+                total_data_flits_v += 1
+                if attempt > 1:
+                    circling_flits_v += 1
+
+        # 计算比例
+        circling_ratio_h = circling_flits_h / total_data_flits_h if total_data_flits_h > 0 else 0.0
+        circling_ratio_v = circling_flits_v / total_data_flits_v if total_data_flits_v > 0 else 0.0
+
+        # 准备结果字典
+        results = {
+            "horizontal": {
+                "total_data_flits": total_data_flits_h,
+                "circling_flits": circling_flits_h,  # 绕环次数大于1的flit数量
+                "circling_ratio": circling_ratio_h,  # 绕环比例
+            },
+            "vertical": {
+                "total_data_flits": total_data_flits_v,
+                "circling_flits": circling_flits_v,  # 绕环次数大于1的flit数量
+                "circling_ratio": circling_ratio_v,  # 绕环比例
+            },
+            # 整体统计
+            "overall": {
+                "total_data_flits": total_data_flits_h + total_data_flits_v,
+                "circling_flits": circling_flits_h + circling_flits_v,
+                "circling_ratio": (circling_flits_h + circling_flits_v) / (total_data_flits_h + total_data_flits_v) if (total_data_flits_h + total_data_flits_v) > 0 else 0.0,
+            },
+        }
+
+        return results
+
 
 # 便捷使用函数
-def analyze_bandwidth(sim_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False) -> Dict:
+def analyze_bandwidth(
+    sim_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False
+) -> Dict:
     """
     便捷的带宽分析函数
 
@@ -3181,7 +3341,9 @@ def replot_from_result_folder(csv_folder: str, plot_rn_bw: bool = True, plot_flo
     """
     output_path = csv_folder
 
-    results = BandwidthAnalyzer.reanalyze_and_plot_from_csv(csv_folder, output_path, plot_rn_bw=plot_rn_bw, plot_flow=plot_flow, show_cdma=show_cdma, min_gap_threshold=min_gap_threshold)
+    results = BandwidthAnalyzer.reanalyze_and_plot_from_csv(
+        csv_folder, output_path, plot_rn_bw=plot_rn_bw, plot_flow=plot_flow, show_cdma=show_cdma, min_gap_threshold=min_gap_threshold
+    )
 
     return results
 
@@ -3249,51 +3411,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-    def _handle_legacy_links_format(self, network, mode):
-        """处理旧的links_flow_stat格式"""
-        links = {}
-        if hasattr(network, "links_flow_stat") and isinstance(network.links_flow_stat, dict):
-            # 检查是否是旧的read/write格式
-            if "read" in network.links_flow_stat and "write" in network.links_flow_stat:
-                if mode == "read":
-                    links = network.links_flow_stat.get("read", {})
-                elif mode == "write":
-                    links = network.links_flow_stat.get("write", {})
-                else:  # total模式，合并读和写的数据
-                    read_links = network.links_flow_stat.get("read", {})
-                    write_links = network.links_flow_stat.get("write", {})
-                    all_keys = set(read_links.keys()) | set(write_links.keys())
-                    for key in all_keys:
-                        read_val = read_links.get(key, 0)
-                        write_val = write_links.get(key, 0)
-                        links[key] = read_val + write_val
-            else:
-                # 可能是新格式但没有get_links_utilization_stats方法
-                # 尝试直接使用links_flow_stat
-                for link, stats in network.links_flow_stat.items():
-                    if isinstance(stats, dict) and "total_cycles" in stats:
-                        # 看起来是新格式的原始数据，手动计算利用率
-                        total_cycles = stats.get("total_cycles", 1)
-                        slice_count = 7  # 默认假设7个slice，可以从network.links获取实际值
-                        if hasattr(network, "links") and link in network.links:
-                            slice_count = len(network.links[link])
-
-                        total_slice_cycles = total_cycles * slice_count
-                        if total_slice_cycles > 0:
-                            if mode == "utilization":
-                                utilization = (stats.get("T2_count", 0) + stats.get("T1_count", 0) + stats.get("T0_count", 0)) / total_slice_cycles
-                                links[link] = utilization
-                            elif mode == "T2_ratio":
-                                links[link] = stats.get("T2_count", 0) / total_slice_cycles
-                            elif mode == "T1_ratio":
-                                links[link] = stats.get("T1_count", 0) / total_slice_cycles
-                            elif mode == "T0_ratio":
-                                links[link] = stats.get("T0_count", 0) / total_slice_cycles
-                            elif mode == "ITag_ratio":
-                                links[link] = stats.get("ITag_count", 0) / total_slice_cycles
-                            else:
-                                # 默认返回利用率
-                                utilization = (stats.get("T2_count", 0) + stats.get("T1_count", 0) + stats.get("T0_count", 0)) / total_slice_cycles
-                                links[link] = utilization
-        return links

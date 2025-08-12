@@ -402,7 +402,15 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
 
 
 def run_parameter_combination(
-    params_dict: Dict[str, Any], traffic_files: List[str], traffic_weights: List[float], base_config_path: str, topo_type, traffic_path: str, result_save_path: str, repeats: int, timeout: int
+    params_dict: Dict[str, Any],
+    traffic_files: List[str],
+    traffic_weights: List[float],
+    base_config_path: str,
+    topo_type,
+    traffic_path: str,
+    result_save_path: str,
+    repeats: int,
+    timeout: int,
 ) -> Dict[str, Any]:
     """运行一个参数组合的所有仿真"""
     logger.info(f"测试参数组合: {params_dict}")
@@ -453,7 +461,32 @@ def run_parameter_combination(
                     for result in traffic_results_list:
                         if isinstance(result, dict) and key in result:
                             val = result[key]
-                            if isinstance(val, (int, float)):
+                            # 特殊处理嵌套字典，如 circling_eject_stats
+                            if key == "circling_eject_stats" and isinstance(val, dict):
+                                # 展开 circling_eject_stats 字典
+                                for sub_key, sub_val in val.items():
+                                    if isinstance(sub_val, dict):
+                                        for sub_sub_key, sub_sub_val in sub_val.items():
+                                            full_key = f"{key}_{sub_key}_{sub_sub_key}"
+                                            sub_values = []
+                                            for res in traffic_results_list:
+                                                if (
+                                                    isinstance(res, dict)
+                                                    and key in res
+                                                    and isinstance(res[key], dict)
+                                                    and sub_key in res[key]
+                                                    and isinstance(res[key][sub_key], dict)
+                                                    and sub_sub_key in res[key][sub_key]
+                                                ):
+                                                    sub_sub_val = res[key][sub_key][sub_sub_key]
+                                                    if isinstance(sub_sub_val, (int, float)):
+                                                        sub_values.append(sub_sub_val)
+                                            if sub_values:
+                                                all_results[f"{full_key}_mean_{traffic_name}"] = float(np.mean(sub_values))
+                                                all_results[f"{full_key}_std_{traffic_name}"] = float(np.std(sub_values))
+                                                all_results[f"{full_key}_max_{traffic_name}"] = float(np.max(sub_values))
+                                                all_results[f"{full_key}_min_{traffic_name}"] = float(np.min(sub_values))
+                            elif isinstance(val, (int, float)):
                                 values.append(val)
 
                     if values:
@@ -542,7 +575,9 @@ def create_1d_plot(df: pd.DataFrame, param_name: str, save_dir: str):
 
     # 如果有多个数据点，添加标准差区域
     if param_grouped["count"].max() > 1:
-        plt.fill_between(param_grouped.index, param_grouped["mean"] - param_grouped["std"], param_grouped["mean"] + param_grouped["std"], alpha=0.3, color="#2E86AB", label="±1标准差")
+        plt.fill_between(
+            param_grouped.index, param_grouped["mean"] - param_grouped["std"], param_grouped["mean"] + param_grouped["std"], alpha=0.3, color="#2E86AB", label="±1标准差"
+        )
 
     # 绘制最大值和最小值曲线
     if not param_grouped["max"].equals(param_grouped["mean"]):
@@ -924,8 +959,8 @@ def main():
     param_configs = [
         # 示例：使用 IN_FIFO_DEPTH 同时遍历 RB_IN_FIFO_DEPTH 和 EQ_IN_FIFO_DEPTH，并按比例调整相关参数
         # {"name": "IN_FIFO_DEPTH", "range": "8,32,4"},  # 从8到32，步长为4
-        {"name": "IN_FIFO_DEPTH", "range": "[28, 22, 16, 14, 12, 10, 8, 6, 4, 2]"},
-        # {"name": "SLICE_PER_LINK", "range": "[5,6,7,8,9,10,11,12,13,14,17,20]"},
+        # {"name": "IN_FIFO_DEPTH", "range": "[28, 22, 16, 14, 12, 10, 8, 6, 4, 2]"},
+        {"name": "SLICE_PER_LINK", "range": "5, 20"},
         # 其他参数配置示例：
         # {"name": "IQ_OUT_FIFO_DEPTH_VERTICAL", "range": "1,8"},
         # {"name": "SLICE_PER_LINK", "range": "17,20"},
@@ -937,7 +972,7 @@ def main():
     # traffic_path = "../traffic/0617"
     # 仿真配置
     traffic_files = [
-        "W_8x8.txt",
+        "R_8x8.txt",
         # "W_5x4_CR_v1.0.2.txt",
         # "W_12x12.txt",
         # "LLama2_AllReduce.txt",

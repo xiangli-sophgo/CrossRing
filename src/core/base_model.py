@@ -1675,6 +1675,10 @@ class BaseModel:
                 # Include other useful bandwidth metrics
                 if "Total_sum_BW" in bandwidth_analysis:
                     results["Total_sum_BW"] = bandwidth_analysis["Total_sum_BW"]
+                
+                # Include circling eject stats
+                if "circling_eject_stats" in bandwidth_analysis:
+                    results["circling_eject_stats"] = bandwidth_analysis["circling_eject_stats"]
 
         except Exception as e:
             if hasattr(self, "verbose") and self.verbose:
