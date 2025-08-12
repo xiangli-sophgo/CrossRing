@@ -189,14 +189,14 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
             config.IP_H2L_H_FIFO_DEPTH = 4
             config.IP_H2L_L_FIFO_DEPTH = 4
 
-            config.TL_Etag_T2_UE_MAX = 8
-            config.TL_Etag_T1_UE_MAX = 15
-            config.TR_Etag_T2_UE_MAX = 12
-            config.RB_IN_FIFO_DEPTH = 16
-            config.TU_Etag_T2_UE_MAX = 8
-            config.TU_Etag_T1_UE_MAX = 15
-            config.TD_Etag_T2_UE_MAX = 12
-            config.EQ_IN_FIFO_DEPTH = 16
+            config.TL_Etag_T2_UE_MAX = 8 // 2
+            config.TL_Etag_T1_UE_MAX = 15 // 2
+            config.TR_Etag_T2_UE_MAX = 12 // 2
+            config.RB_IN_FIFO_DEPTH = 16 // 2
+            config.TU_Etag_T2_UE_MAX = 8 // 2
+            config.TU_Etag_T1_UE_MAX = 15 // 2
+            config.TD_Etag_T2_UE_MAX = 12 // 2
+            config.EQ_IN_FIFO_DEPTH = 16 // 2
 
             config.ITag_TRIGGER_Th_H = config.ITag_TRIGGER_Th_V = 80
             config.ITag_MAX_NUM_H = config.ITag_MAX_NUM_V = 1
@@ -575,9 +575,7 @@ def create_1d_plot(df: pd.DataFrame, param_name: str, save_dir: str):
 
     # 如果有多个数据点，添加标准差区域
     if param_grouped["count"].max() > 1:
-        plt.fill_between(
-            param_grouped.index, param_grouped["mean"] - param_grouped["std"], param_grouped["mean"] + param_grouped["std"], alpha=0.3, color="#2E86AB", label="±1标准差"
-        )
+        plt.fill_between(param_grouped.index, param_grouped["mean"] - param_grouped["std"], param_grouped["mean"] + param_grouped["std"], alpha=0.3, color="#2E86AB", label="±1标准差")
 
     # 绘制最大值和最小值曲线
     if not param_grouped["max"].equals(param_grouped["mean"]):
@@ -961,6 +959,7 @@ def main():
         # {"name": "IN_FIFO_DEPTH", "range": "8,32,4"},  # 从8到32，步长为4
         # {"name": "IN_FIFO_DEPTH", "range": "[28, 22, 16, 14, 12, 10, 8, 6, 4, 2]"},
         {"name": "SLICE_PER_LINK", "range": "5, 20"},
+        # {"name": "SLICE_PER_LINK", "range": "[19, 20]"},
         # 其他参数配置示例：
         # {"name": "IQ_OUT_FIFO_DEPTH_VERTICAL", "range": "1,8"},
         # {"name": "SLICE_PER_LINK", "range": "17,20"},
@@ -972,13 +971,13 @@ def main():
     # traffic_path = "../traffic/0617"
     # 仿真配置
     traffic_files = [
-        "R_8x8.txt",
+        "R_4x4.txt",
         # "W_5x4_CR_v1.0.2.txt",
         # "W_12x12.txt",
         # "LLama2_AllReduce.txt",
     ]
-    # topo_type = "4x4"
-    topo_type = "8x8"
+    topo_type = "4x4"
+    # topo_type = "8x8"
     # topo_type = "12x12"
     # topo_type = "5x4"
     traffic_weights = [1]

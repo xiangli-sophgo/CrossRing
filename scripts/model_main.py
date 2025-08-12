@@ -34,8 +34,8 @@ def main():
             # r"All2All_Dispatch.txt",
             # r"full_bw_R_4x5.txt"
             "LLama2_AllReduce.txt"
-            # "traffic_2260E_case1.txt",
             # "test1.txt"
+            # "traffic_2260E_case1.txt",
             # "LLama2_AttentionFC.txt"
             # "W_8x8.txt"
             # "MLA_B32.txt"
@@ -487,20 +487,20 @@ def main():
         traffic_config=traffic_config,
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
-        plot_flow_fig=1,
+        plot_flow_fig=0,
         flow_fig_show_CDMA=0,
-        plot_RN_BW_fig=1,
+        plot_RN_BW_fig=0,
         plot_link_state=0,
-        plot_start_cycle=110,
+        plot_start_cycle=120,
         print_trace=0,
-        show_trace_id=2,
+        show_trace_id=10,
         show_node_id=1,
         verbose=1,
     )
     np.random.seed(801)
 
     sim.initial()
-    sim.end_time = 6000
+    sim.end_time = 4000
     sim.print_interval = 2000
     sim.run()
 
