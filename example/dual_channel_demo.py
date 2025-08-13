@@ -26,14 +26,10 @@ def main():
     # 配置双通道设置
     config.DATA_DUAL_CHANNEL_ENABLED = True
     config.DATA_CHANNEL_SELECT_STRATEGY = "ip_id_based"  # ip_id_based, target_node_based, flit_id_based
-    config.DATA_CH0_BANDWIDTH_RATIO = 0.5
-    config.DATA_CH1_BANDWIDTH_RATIO = 0.5
 
     # 打印配置信息
     print("双通道配置:")
     print(f"  选择策略: {config.DATA_CHANNEL_SELECT_STRATEGY}")
-    print(f"  通道0带宽比例: {config.DATA_CH0_BANDWIDTH_RATIO}")
-    print(f"  通道1带宽比例: {config.DATA_CH1_BANDWIDTH_RATIO}")
     print()
 
     # 初始化双通道仿真模型
@@ -58,15 +54,12 @@ def main():
 
     # 设置仿真参数
     sim.end_time = 1000
-    sim.print_interval = 100
+    sim.print_interval = 500
 
     print("开始双通道仿真...")
 
     # 运行仿真
     sim.run()
-
-    # 打印结果
-    sim.print_dual_channel_summary()
 
     print("简单双通道演示完成!")
 

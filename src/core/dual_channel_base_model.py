@@ -69,7 +69,17 @@ class DualChannelBaseModel(BaseModel):
                 self.ip_id_counters[base_ip_type] += 1
 
                 self.ip_modules[(ip_type, ip_pos)] = DualChannelIPInterface(
-                    ip_type, ip_pos, self.config, self.req_network, self.rsp_network, self.data_network_ch0, self.data_network_ch1, self.node, self.routes, self.channel_selector, ip_id
+                    ip_type,
+                    ip_pos,
+                    self.config,
+                    self.req_network,
+                    self.rsp_network,
+                    self.data_network_ch0,
+                    self.data_network_ch1,
+                    self.node,
+                    self.routes,
+                    self.channel_selector,
+                    ip_id,
                 )
 
     def run(self):
@@ -141,6 +151,10 @@ class DualChannelBaseModel(BaseModel):
         self.log_summary()
         self.syn_IP_stat()
         self.update_finish_time_stats()
+        # 在处理综合结果之前合并双通道数据
+        self.collect_dual_channel_data()
+        # 先打印双通道负载分布
+        self.print_dual_channel_summary()
         self.process_comprehensive_results()
 
         simulation_end = time.perf_counter()
@@ -243,10 +257,20 @@ class DualChannelBaseModel(BaseModel):
         if not hasattr(self, "data_network") or self.data_network is None:
             self.data_network = Network(self.config, self.adjacency_matrix, "Data Channel Merged")
 
-        # 合并arrive_flits
+        # 合并arrive_flits - 需要合并同一packet_id的flits
         merged_arrive_flits = {}
-        merged_arrive_flits.update(self.data_network_ch0.arrive_flits)
-        merged_arrive_flits.update(self.data_network_ch1.arrive_flits)
+
+        # 先添加通道0的数据
+        for packet_id, flits in self.data_network_ch0.arrive_flits.items():
+            merged_arrive_flits[packet_id] = flits[:]  # 复制列表
+
+        # 再添加通道1的数据，如果有相同packet_id则合并
+        for packet_id, flits in self.data_network_ch1.arrive_flits.items():
+            if packet_id in merged_arrive_flits:
+                merged_arrive_flits[packet_id].extend(flits)
+            else:
+                merged_arrive_flits[packet_id] = flits[:]
+
         self.data_network.arrive_flits = merged_arrive_flits
 
         # 合并统计数据
@@ -265,7 +289,9 @@ class DualChannelBaseModel(BaseModel):
                 merged_send_flits[packet_id] = flits
         self.data_network.send_flits = merged_send_flits
 
-        logging.info(f"Merged dual channel data: CH0 recv={self.data_network_ch0.recv_flits_num}, CH1 recv={self.data_network_ch1.recv_flits_num}, Total={self.data_network.recv_flits_num}")
+        logging.info(
+            f"Merged dual channel data: CH0 recv={self.data_network_ch0.recv_flits_num}, CH1 recv={self.data_network_ch1.recv_flits_num}, Total={self.data_network.recv_flits_num}"
+        )
 
     def result_statistic(self):
         """重写结果统计，合并双通道数据"""
@@ -275,85 +301,16 @@ class DualChannelBaseModel(BaseModel):
         # 调用父类的结果统计
         super().result_statistic()
 
-        # 打印双通道详细信息
-        self.print_dual_channel_summary()
-
     def print_dual_channel_summary(self):
         """打印双通道仿真总结"""
-        print("\n=== 双通道仿真总结 ===")
-
         # 获取统计数据
-        ch0_inject = self.data_network_ch0.inject_num
-        ch0_eject = self.data_network_ch0.eject_num
         ch0_recv = self.data_network_ch0.recv_flits_num
-        ch0_arrive = len(self.data_network_ch0.arrive_flits)
-
-        ch1_inject = self.data_network_ch1.inject_num
-        ch1_eject = self.data_network_ch1.eject_num
         ch1_recv = self.data_network_ch1.recv_flits_num
-        ch1_arrive = len(self.data_network_ch1.arrive_flits)
-
-        total_inject = ch0_inject + ch1_inject
-        total_eject = ch0_eject + ch1_eject
         total_recv = ch0_recv + ch1_recv
-        total_arrive = ch0_arrive + ch1_arrive
 
-        # 通道详细统计
-        print("通道0 (data_network_ch0):")
-        print(f"  注入包数: {ch0_inject}")
-        print(f"  弹出包数: {ch0_eject}")
-        print(f"  接收flit数: {ch0_recv}")
-        print(f"  完成packet数: {ch0_arrive}")
-
-        print("通道1 (data_network_ch1):")
-        print(f"  注入包数: {ch1_inject}")
-        print(f"  弹出包数: {ch1_eject}")
-        print(f"  接收flit数: {ch1_recv}")
-        print(f"  完成packet数: {ch1_arrive}")
-
-        # 总计统计
-        print(f"\n总计:")
-        print(f"  总注入包数: {total_inject}")
-        print(f"  总弹出包数: {total_eject}")
-        print(f"  总接收flit数: {total_recv}")
-        print(f"  总完成packet数: {total_arrive}")
-
-        if total_inject > 0:
-            print(f"  包传输成功率: {total_eject/total_inject*100:.2f}%")
-
-        # 通道负载均衡统计
-        print(f"\n通道负载分布:")
         if total_recv > 0:
             ch0_ratio = ch0_recv / total_recv * 100
             ch1_ratio = ch1_recv / total_recv * 100
-            print(f"  通道0负载比例: {ch0_ratio:.1f}%")
-            print(f"  通道1负载比例: {ch1_ratio:.1f}%")
-
-            # 负载均衡度（理想值为50%:50%）
-            balance_deviation = abs(ch0_ratio - 50.0)
-            if balance_deviation < 5.0:
-                balance_level = "优秀"
-            elif balance_deviation < 15.0:
-                balance_level = "良好"
-            else:
-                balance_level = "待优化"
-            print(f"  负载均衡度: {balance_level} (偏差: {balance_deviation:.1f}%)")
-
-        # 性能增益统计
-        if hasattr(self, "Total_sum_BW_stat") and self.Total_sum_BW_stat is not None:
-            # Total_sum_BW_stat可能是数值或字典
-            if isinstance(self.Total_sum_BW_stat, dict):
-                total_bw = self.Total_sum_BW_stat.get("total_sum_BW_nonweighted_gbps", 0)
-            else:
-                # 假设是数值（单位应该是GB/s）
-                total_bw = float(self.Total_sum_BW_stat)
-
-            if total_bw > 0:
-                print(f"\n双通道性能:")
-                print(f"  合并带宽: {total_bw:.3f} GB/s")
-                # 假设单通道带宽约为总带宽的一半（理想情况）
-                estimated_single_ch_bw = total_bw / 2
-                print(f"  估计单通道带宽: {estimated_single_ch_bw:.3f} GB/s")
-                print(f"  双通道增益: {(total_bw / estimated_single_ch_bw):.2f}x")
-
-        print("==================================")
+            print(f"\n双通道负载分布: {ch0_ratio:.0f}%:{ch1_ratio:.0f}%, {ch0_recv}:{ch1_recv}")
+        else:
+            print("双通道负载分布: 无数据")

@@ -162,6 +162,9 @@ class DualChannelIPInterface(IPInterface):
                     selected_flit = eq_buf.popleft()
                     # 记录来源通道，用于统计
                     selected_flit.ejected_from_channel = current_channel
+                    # 确保data_channel_id与ejected_from_channel一致
+                    if not hasattr(selected_flit, 'data_channel_id'):
+                        selected_flit.data_channel_id = current_channel
             except (KeyError, AttributeError) as e:
                 pass  # 该通道没有数据
 
@@ -202,11 +205,19 @@ class DualChannelIPInterface(IPInterface):
 
             flit = net_info["h2l_fifo_l"].popleft()
 
-            # Include channel information if available
-            if hasattr(flit, "ejected_from_channel"):
-                flit.flit_position = f"IP_eject_ch{flit.ejected_from_channel}"
+            # 确定使用哪个通道ID进行统计
+            channel_for_stats = None
+            if hasattr(flit, "data_channel_id"):
+                # 优先使用原始通道ID
+                channel_for_stats = flit.data_channel_id
+            elif hasattr(flit, "ejected_from_channel"):
+                # 如果没有原始通道ID，使用弹出通道
+                channel_for_stats = flit.ejected_from_channel
+            
+            if channel_for_stats is not None:
+                flit.flit_position = f"IP_eject_ch{channel_for_stats}"
                 # 更新对应网络的统计
-                target_network = self.data_network_ch0 if flit.ejected_from_channel == 0 else self.data_network_ch1
+                target_network = self.data_network_ch0 if channel_for_stats == 0 else self.data_network_ch1
                 if flit.packet_id not in target_network.arrive_flits:
                     target_network.arrive_flits[flit.packet_id] = []
                 target_network.arrive_flits[flit.packet_id].append(flit)
