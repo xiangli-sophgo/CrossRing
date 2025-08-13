@@ -53,10 +53,12 @@ class IPInterface:
         data_network,
         node: Node,
         routes: dict,
+        ip_id: int = None,
     ):
         self.current_cycle = 0
         self.ip_type = ip_type
         self.ip_pos = ip_pos
+        self.ip_id = ip_id if ip_id is not None else 0  # IP在其类型中的唯一ID
         self.config = config
         self.req_network = req_network
         self.rsp_network = rsp_network
@@ -651,10 +653,6 @@ class IPInterface:
             if net_info["l2h_fifo_pre"] is not None and len(net_info["l2h_fifo"]) < net_info["l2h_fifo"].maxlen:
                 net_info["l2h_fifo"].append(net_info["l2h_fifo_pre"])
                 net_info["l2h_fifo_pre"] = None
-
-            if net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] is not None and len(net.IQ_channel_buffer[self.ip_type][self.ip_pos]) < net.IQ_channel_buffer[self.ip_type][self.ip_pos].maxlen:
-                net.IQ_channel_buffer[self.ip_type][self.ip_pos].append(net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos])
-                net.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = None
 
             # h2l_fifo_h_pre → h2l_fifo_h
             if net_info["h2l_fifo_h_pre"] is not None and len(net_info["h2l_fifo_h"]) < net_info["h2l_fifo_h"].maxlen:

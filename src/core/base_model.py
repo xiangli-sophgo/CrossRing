@@ -608,6 +608,16 @@ class BaseModel:
         """Move all items from pre-injection queues to injection queues for a given network."""
         # ===  注入队列 *_pre → *_FIFO ===
         ip_pos = in_pos - self.config.NUM_COL  # 本列对应的 IP 位置
+        
+        # IQ_channel_buffer_pre → IQ_channel_buffer
+        for ip_type in network.IQ_channel_buffer_pre.keys():
+            queue_pre = network.IQ_channel_buffer_pre[ip_type]
+            queue = network.IQ_channel_buffer[ip_type]
+            if queue_pre[in_pos] and len(queue[in_pos]) < self.config.IQ_CH_FIFO_DEPTH:
+                flit = queue_pre[in_pos]
+                flit.flit_position = "IQ_CH"
+                queue[in_pos].append(flit)
+                queue_pre[in_pos] = None
 
         # IQ_pre → IQ_OUT
         for direction in self.IQ_directions:
@@ -653,6 +663,7 @@ class BaseModel:
                 flit.flit_position = f"EQ_{fifo_pos}"
                 queue[ip_pos].append(flit)
                 queue_pre[ip_pos] = None
+
 
         # EQ_channel_buffer_pre → EQ_channel_buffer
         for ip_type in network.EQ_channel_buffer_pre.keys():
@@ -1675,7 +1686,7 @@ class BaseModel:
                 # Include other useful bandwidth metrics
                 if "Total_sum_BW" in bandwidth_analysis:
                     results["Total_sum_BW"] = bandwidth_analysis["Total_sum_BW"]
-                
+
                 # Include circling eject stats
                 if "circling_eject_stats" in bandwidth_analysis:
                     results["circling_eject_stats"] = bandwidth_analysis["circling_eject_stats"]

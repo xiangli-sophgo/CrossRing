@@ -1,350 +1,359 @@
 """
 DualChannelBaseModel class for NoC simulation.
 Extends BaseModel class to support dual-channel data transmission with independent arbitration.
+简化版本：使用两个独立的Network实例实现双通道
 """
 
+import time
+import matplotlib.pyplot as plt
+
 from .base_model import BaseModel
-from src.utils.components.dual_channel_network import DualChannelDataNetwork
+from src.utils.components.network import Network
 from src.utils.components.dual_channel_ip_interface import DualChannelIPInterface
 from src.utils.channel_selector import DefaultChannelSelector
-from collections import deque, defaultdict
 import logging
 
 
 class DualChannelBaseModel(BaseModel):
-    """双通道基础模型，支持数据双通道传输"""
-    
+    """双通道基础模型，支持数据双通道传输 - 简化版本"""
+
     def __init__(self, *args, **kwargs):
         # 调用父类初始化
         super().__init__(*args, **kwargs)
-        
+
+        # 初始化IP类型的ID计数器
+        self.ip_id_counters = {"gdma": 0, "sdma": 0, "cdma": 0, "ddr": 0, "l2m": 0}
+
         # 设置通道选择器（在父类初始化后，config已可用）
         self.channel_selector = self._create_channel_selector()
-        
+
         logging.info("DualChannelBaseModel initialized with dual-channel data support")
-    
+
     def _create_channel_selector(self):
         """创建通道选择器"""
-        strategy = getattr(self.config, 'DATA_CHANNEL_SELECT_STRATEGY', 'hash_based')
+        strategy = getattr(self.config, "DATA_CHANNEL_SELECT_STRATEGY", "ip_id_based")
         return DefaultChannelSelector(strategy)
-    
-    def _create_networks(self):
-        """重写网络创建方法，使用双通道数据网络"""
-        # 先创建标准的req和rsp网络
-        super()._create_networks()
-        
-        # 替换data网络为双通道版本
-        self.data_network = DualChannelDataNetwork(
-            self.config, self.adjacency_matrix, "dual_channel_data"
-        )
-        
+
+    def _create_dual_channel_data_network(self):
+        """创建双通道数据网络 - 使用两个独立的Network实例"""
+        # 创建两个独立的数据网络实例
+        self.data_network_ch0 = Network(self.config, self.adjacency_matrix, "Data Channel 0")
+        self.data_network_ch1 = Network(self.config, self.adjacency_matrix, "Data Channel 1")
+
         # 更新通道选择器的网络引用
-        self.channel_selector.network = self.data_network
-    
-    def _create_ip_interfaces(self):
-        """重写IP接口创建，使用双通道接口"""
-        self.ip_interfaces = {}
-        
-        # 获取IP位置信息
-        ip_positions = self._get_ip_positions()
-        
-        for ip_type, positions in ip_positions.items():
-            for pos in positions:
-                self.ip_interfaces[(ip_type, pos)] = DualChannelIPInterface(
-                    ip_type, pos, self.config,
-                    self.req_network, self.rsp_network, self.data_network,
-                    self.node, self.routes, self.channel_selector
+        self.channel_selector.network = self.data_network_ch0
+
+    def initial(self):
+        """重写初始化方法，使用双通道IP接口"""
+        # 调用父类初始化但不让它创建IP模块
+        super().initial()
+
+        # 创建双通道数据网络
+        self._create_dual_channel_data_network()
+
+        # 重新创建IP模块为双通道版本
+        self.ip_modules = {}
+
+        for ip_pos in self.flit_positions:
+            for ip_type in self.config.CH_NAME_LIST:
+                # 提取基础IP类型名（去掉数字后缀）
+                base_ip_type = ip_type.split("_")[0]
+
+                # 如果基础类型不在计数器中，使用默认的计数器
+                if base_ip_type not in self.ip_id_counters:
+                    # 动态添加计数器
+                    self.ip_id_counters[base_ip_type] = 0
+
+                # 为当前IP类型分配IP_ID并递增计数器
+                ip_id = self.ip_id_counters[base_ip_type]
+                self.ip_id_counters[base_ip_type] += 1
+
+                self.ip_modules[(ip_type, ip_pos)] = DualChannelIPInterface(
+                    ip_type, ip_pos, self.config, self.req_network, self.rsp_network, self.data_network_ch0, self.data_network_ch1, self.node, self.routes, self.channel_selector, ip_id
                 )
-    
-    def _get_ip_positions(self):
-        """获取IP位置信息"""
-        # 这个方法需要根据具体的拓扑结构实现
-        # 这里提供一个基础实现
-        ip_positions = defaultdict(list)
-        
-        # GDMA positions
-        for i in range(getattr(self.config, 'NUM_GDMA', 0)):
-            ip_positions['gdma'].append(i)
-            
-        # SDMA positions
-        for i in range(getattr(self.config, 'NUM_SDMA', 0)):
-            ip_positions['sdma'].append(i)
-            
-        # CDMA positions
-        for i in range(getattr(self.config, 'NUM_CDMA', 0)):
-            ip_positions['cdma'].append(i)
-            
-        # DDR positions
-        for i in range(getattr(self.config, 'NUM_DDR', 0)):
-            ip_positions['ddr'].append(i)
-            
-        # L2M positions
-        for i in range(getattr(self.config, 'NUM_L2M', 0)):
-            ip_positions['l2m'].append(i)
-            
-        return ip_positions
-    
+
+    def run(self):
+        """重写父类的仿真主循环以支持双通道"""
+        simulation_start = time.perf_counter()
+        self.load_request_stream()
+        reqs, rsps = [], []
+        flits_ch0, flits_ch1 = [], []  # 为每个数据通道创建独立的flit列表
+        self.cycle = 0
+        tail_time = 6
+
+        while True:
+            self.cycle += 1
+            self.cycle_mod = self.cycle % self.config.NETWORK_FREQUENCY
+
+            self.release_completed_sn_tracker()
+            self.process_new_request()
+            self.tag_move_all_networks()
+            self.ip_inject_to_network()
+
+            # REQ and RSP networks (no change)
+            self._inject_queue_arbitration(self.req_network, self.rn_positions_list, "req")
+            reqs = self.move_flits_in_network(self.req_network, reqs, "req")
+            self._inject_queue_arbitration(self.rsp_network, self.sn_positions_list, "rsp")
+            rsps = self.move_flits_in_network(self.rsp_network, rsps, "rsp")
+
+            # Data networks (dual channel handling)
+            self._inject_queue_arbitration(self.data_network_ch0, self.flit_positions_list, "data")
+            self._inject_queue_arbitration(self.data_network_ch1, self.flit_positions_list, "data")
+            flits_ch0 = self.move_flits_in_network(self.data_network_ch0, flits_ch0, "data")
+            flits_ch1 = self.move_flits_in_network(self.data_network_ch1, flits_ch1, "data")
+
+            self.network_to_ip_eject()
+            self.move_pre_to_queues_all()
+
+            # Link statistics for all networks
+            self.req_network.collect_cycle_end_link_statistics(self.cycle)
+            self.rsp_network.collect_cycle_end_link_statistics(self.cycle)
+            self.data_network_ch0.collect_cycle_end_link_statistics(self.cycle)
+            self.data_network_ch1.collect_cycle_end_link_statistics(self.cycle)
+
+            self.debug_func()
+
+            # Update throughput metrics with combined flits
+            self.update_throughput_metrics(flits_ch0 + flits_ch1)
+
+            if self.cycle / self.config.NETWORK_FREQUENCY % self.print_interval == 0:
+                self.log_summary()
+
+            # Check for traffic completion and advance chains
+            completed_traffics = self.traffic_scheduler.check_and_advance_chains(self.cycle)
+            if completed_traffics and self.verbose:
+                print(f"Completed traffics: {completed_traffics}")
+
+            # Termination condition with dual channel support
+            total_recv_flits = self.data_network_ch0.recv_flits_num + self.data_network_ch1.recv_flits_num
+            if (
+                self.traffic_scheduler.is_all_completed() and total_recv_flits >= (self.read_flit + self.write_flit) and self.trans_flits_num == 0 and not self.new_write_req
+            ) or self.cycle > self.end_time * self.config.NETWORK_FREQUENCY:
+                if tail_time == 0:
+                    if self.verbose:
+                        print("Finish!")
+                    break
+                else:
+                    tail_time -= 1
+
+        # Final statistics and reporting
+        self.print_data_statistic()
+        self.log_summary()
+        self.syn_IP_stat()
+        self.update_finish_time_stats()
+        self.process_comprehensive_results()
+
+        simulation_end = time.perf_counter()
+        simulation_time = simulation_end - simulation_start
+        self.performance_monitor.method_times["total_simulation"] = [simulation_time]
+        self.performance_monitor.call_counts["total_simulation"] = 1
+
+        if self.verbose:
+            print(f"Simulation completed in {simulation_time:.2f} seconds")
+            print(f"Processed {self.cycle} cycles")
+            print(f"Performance: {self.cycle / simulation_time:.0f} cycles/second")
+
+    def log_summary(self):
+        """重写日志方法以显示双通道统计信息"""
+        if self.verbose:
+            total_recv = self.data_network_ch0.recv_flits_num + self.data_network_ch1.recv_flits_num
+            print(
+                f"T: {self.cycle // self.config.NETWORK_FREQUENCY}, Req_cnt: {self.req_count} In_Req: {self.req_num}, Rsp: {self.rsp_num},"
+                f" R_fn: {self.send_read_flits_num_stat}, W_fn: {self.send_write_flits_num_stat}, "
+                f"Trans_fn: {self.trans_flits_num}, Recv_fn_ch0: {self.data_network_ch0.recv_flits_num}, Recv_fn_ch1: {self.data_network_ch1.recv_flits_num}, Recv_fn_total: {total_recv}"
+            )
+
+    def debug_func(self):
+        """重写调试方法以支持双通道可视化"""
+        if self.print_trace:
+            self.flit_trace(self.show_trace_id)
+        if self.plot_link_state:
+            while self.link_state_vis.paused and not self.link_state_vis.should_stop:
+                plt.pause(0.05)
+            if self.link_state_vis.should_stop:
+                return
+            if self.cycle < self.plot_start_cycle:
+                return
+            # 可视化所有网络，包括两个数据通道
+            self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network_ch0, self.data_network_ch1], self.cycle)
+
+    def flit_trace(self, packet_id):
+        """重写追踪方法以显示双通道flit"""
+        if self.plot_link_state and self.link_state_vis.should_stop:
+            return
+
+        packet_ids = [packet_id] if isinstance(packet_id, (int, str)) else packet_id
+
+        for pid in packet_ids:
+            # 使用自定义的打印逻辑而不是依赖父类的_debug_print
+            if self.cycle != self._last_printed_cycle:
+                print(f"Cycle {self.cycle}:")
+                self._last_printed_cycle = self.cycle
+
+            all_flits_str = []
+            # REQ
+            for flit in self.req_network.send_flits.get(pid, []):
+                all_flits_str.append(f"REQ,{flit}")
+            # RSP
+            for flit in self.rsp_network.send_flits.get(pid, []):
+                all_flits_str.append(f"RSP,{flit}")
+            # DATA CH0
+            for flit in self.data_network_ch0.send_flits.get(pid, []):
+                all_flits_str.append(f"DATA_CH0,{flit}")
+            # DATA CH1
+            for flit in self.data_network_ch1.send_flits.get(pid, []):
+                all_flits_str.append(f"DATA_CH1,{flit}")
+
+            if all_flits_str:
+                print(" | ".join(all_flits_str) + " |")
+                time.sleep(0.3)
+
     def _inject_queue_arbitration(self, network=None, positions_list=None, network_type=None):
-        """重写IQ仲裁，包含数据双通道仲裁"""
-        # 如果有参数传入，说明是原有req和rsp网络仲裁
-        if network is not None and positions_list is not None and network_type is not None:
-            # 调用父类的原有仲裁方法
+        """重写注入队列仲裁以支持双通道数据网络"""
+        if network_type == "data":
+            # 数据网络使用双通道仲裁：对每个通道独立调用原有仲裁
+            super()._inject_queue_arbitration(self.data_network_ch0, self.flit_positions_list, "data")
+            super()._inject_queue_arbitration(self.data_network_ch1, self.flit_positions_list, "data")
+        elif network is not None and positions_list is not None and network_type is not None:
+            # 有参数的调用，使用父类方法
             super()._inject_queue_arbitration(network, positions_list, network_type)
         else:
-            # 数据双通道仲裁
-            self._inject_queue_arbitration_dual_channel()
-    
-    def _inject_queue_arbitration_dual_channel(self):
-        """数据双通道IQ仲裁"""
-        for channel_id in [0, 1]:
-            iq_buffer = self.data_network.get_iq_channel_buffer(channel_id)
-            inject_queues = self.data_network.get_inject_queues(channel_id)
-            
-            for ip_type in iq_buffer:
-                for ip_pos in iq_buffer[ip_type]:
-                    fifo = iq_buffer[ip_type][ip_pos]
-                    if fifo:
-                        flit = fifo.popleft()
-                        
-                        # 计算注入方向
-                        direction = self._calculate_injection_direction(flit)
-                        
-                        # 获取目标节点ID
-                        node_id = self._get_node_id_from_position(ip_pos, ip_type)
-                        
-                        # 确保目标队列存在
-                        if node_id not in inject_queues[direction]:
-                            inject_queues[direction][node_id] = deque()
-                        
-                        inject_queues[direction][node_id].append(flit)
-                        flit.flit_position = f"inject_{direction}_ch{channel_id}"
-    
-    def _calculate_injection_direction(self, flit):
-        """计算flit的注入方向"""
-        try:
-            source = flit.current_position
-            if len(flit.path) > flit.path_index + 1:
-                next_pos = flit.path[flit.path_index + 1]
-                
-                # 判断方向
-                if hasattr(self.config, 'NUM_COL'):
-                    col_diff = (next_pos % self.config.NUM_COL) - (source % self.config.NUM_COL)
-                    row_diff = (next_pos // self.config.NUM_COL) - (source // self.config.NUM_COL)
-                    
-                    if col_diff > 0:
-                        return "TR"  # Turn Right
-                    elif col_diff < 0:
-                        return "TL"  # Turn Left
-                    elif row_diff > 0:
-                        return "TD"  # Turn Down
-                    elif row_diff < 0:
-                        return "TU"  # Turn Up
-                    else:
-                        return "EQ"  # Eject
-                else:
-                    # 简单的方向判断逻辑
-                    if next_pos > source:
-                        return "TR"
-                    else:
-                        return "TL"
+            # 无参数调用，执行双通道仲裁
+            super()._inject_queue_arbitration(self.data_network_ch0, self.flit_positions_list, "data")
+            super()._inject_queue_arbitration(self.data_network_ch1, self.flit_positions_list, "data")
+
+    def move_pre_to_queues_all(self):
+        """重写pre到queue移动，支持双通道数据网络"""
+        # 所有IPInterface的*_pre → FIFO
+        for ip_pos in self.flit_positions_list:
+            for ip_type in self.config.CH_NAME_LIST:
+                self.ip_modules[(ip_type, ip_pos)].move_pre_to_fifo()
+
+        # req和rsp网络使用原有逻辑
+        for in_pos in self.flit_positions_list:
+            self._move_pre_to_queues(self.req_network, in_pos)
+            self._move_pre_to_queues(self.rsp_network, in_pos)
+            self._move_pre_to_queues(self.data_network_ch0, in_pos)
+            self._move_pre_to_queues(self.data_network_ch1, in_pos)
+
+    def collect_dual_channel_data(self):
+        """合并双通道数据用于结果处理"""
+        # 为了让父类的统计和分析工具能工作，我们需要临时创建一个合并后的data_network
+        # 注意：这只是为了兼容旧的分析工具，核心的run循环已经分离了
+        if not hasattr(self, "data_network") or self.data_network is None:
+            self.data_network = Network(self.config, self.adjacency_matrix, "Data Channel Merged")
+
+        # 合并arrive_flits
+        merged_arrive_flits = {}
+        merged_arrive_flits.update(self.data_network_ch0.arrive_flits)
+        merged_arrive_flits.update(self.data_network_ch1.arrive_flits)
+        self.data_network.arrive_flits = merged_arrive_flits
+
+        # 合并统计数据
+        self.data_network.recv_flits_num = self.data_network_ch0.recv_flits_num + self.data_network_ch1.recv_flits_num
+        self.data_network.inject_num = self.data_network_ch0.inject_num + self.data_network_ch1.inject_num
+        self.data_network.eject_num = self.data_network_ch0.eject_num + self.data_network_ch1.eject_num
+
+        # 合并发送数据统计
+        merged_send_flits = {}
+        for packet_id, flits in self.data_network_ch0.send_flits.items():
+            merged_send_flits[packet_id] = flits
+        for packet_id, flits in self.data_network_ch1.send_flits.items():
+            if packet_id in merged_send_flits:
+                merged_send_flits[packet_id].extend(flits)
             else:
-                return "EQ"  # 到达目的地，弹出
-                
-        except Exception as e:
-            logging.warning(f"Error calculating injection direction for flit {flit}: {e}")
-            return "EQ"
-    
-    def _get_node_id_from_position(self, ip_pos, ip_type):
-        """从IP位置获取节点ID"""
-        # 这个方法需要根据具体的拓扑映射实现
-        # 这里提供一个基础实现
-        try:
-            if hasattr(self.config, 'NUM_COL'):
-                return ip_pos
-            else:
-                return ip_pos
-        except:
-            return 0
-    
-    def Ring_Bridge_arbitration(self, network):
-        """重写RB仲裁，包含数据双通道"""
-        # 如果是双通道数据网络，使用双通道仲裁
-        if hasattr(network, 'get_inject_queues'):
-            # 这是双通道数据网络，进行双通道仲裁
-            for channel_id in [0, 1]:
-                for direction in ["TL", "TR", "TU", "TD", "EQ"]:
-                    self._ring_bridge_arbitration_dual_channel(direction, channel_id)
-        else:
-            # 原有req和rsp网络RB仲裁
-            super().Ring_Bridge_arbitration(network)
-    
-    def _ring_bridge_arbitration_dual_channel(self, direction, channel_id):
-        """数据双通道RB仲裁"""
-        try:
-            inject_queues = self.data_network.get_inject_queues(channel_id)[direction]
-            ring_bridge = self.data_network.get_ring_bridge(channel_id)[direction]
-            
-            # 执行round-robin仲裁
-            self._execute_rb_arbitration_for_channel(inject_queues, ring_bridge, channel_id, direction)
-        except Exception as e:
-            logging.warning(f"RB arbitration failed for direction {direction}, channel {channel_id}: {e}")
-    
-    def _execute_rb_arbitration_for_channel(self, source_queues, target_queues, channel_id, direction):
-        """执行指定通道的RB仲裁"""
-        if not source_queues:
-            return
-            
-        # 简单的round-robin实现
-        for node_id, queue in source_queues.items():
-            if queue:
-                # 确保目标队列存在
-                if node_id not in target_queues:
-                    target_queues[node_id] = deque()
-                
-                # 移动flit
-                flit = queue.popleft()
-                target_queues[node_id].append(flit)
-                flit.flit_position = f"RB_{direction}_ch{channel_id}"
-    
-    def Eject_Queue_arbitration(self, network, flit_type):
-        """重写EQ仲裁，包含数据双通道"""
-        # 如果是双通道数据网络，使用双通道仲裁
-        if hasattr(network, 'get_eject_queues') and flit_type == "data":
-            # 这是双通道数据网络，进行双通道仲裁
-            for channel_id in [0, 1]:
-                for direction in ["TU", "TD"]:
-                    self._eject_queue_arbitration_dual_channel(direction, channel_id)
-        else:
-            # 原有req和rsp网络EQ仲裁
-            super().Eject_Queue_arbitration(network, flit_type)
-    
-    def _eject_queue_arbitration_dual_channel(self, direction, channel_id):
-        """数据双通道EQ仲裁"""
-        try:
-            eject_queues = self.data_network.get_eject_queues(channel_id)[direction]
-            eq_buffer = self.data_network.get_eq_channel_buffer(channel_id)
-            
-            # 执行EQ仲裁
-            self._execute_eq_arbitration_for_channel(eject_queues, eq_buffer, channel_id, direction)
-        except Exception as e:
-            logging.warning(f"EQ arbitration failed for direction {direction}, channel {channel_id}: {e}")
-    
-    def _execute_eq_arbitration_for_channel(self, source_queues, target_buffers, channel_id, direction):
-        """执行指定通道的EQ仲裁"""
-        if not source_queues:
-            return
-            
-        for node_id, queue in source_queues.items():
-            if queue:
-                flit = queue.popleft()
-                
-                # 确定目标IP类型和位置
-                ip_type, ip_pos = self._get_ip_info_from_flit(flit)
-                
-                # 确保目标缓冲区存在
-                if ip_type not in target_buffers:
-                    continue
-                if ip_pos not in target_buffers[ip_type]:
-                    continue
-                    
-                target_buffers[ip_type][ip_pos].append(flit)
-                flit.flit_position = f"EQ_ch{channel_id}"
-    
-    def _get_ip_info_from_flit(self, flit):
-        """从flit获取IP类型和位置信息"""
-        try:
-            # 从flit的目标信息获取IP信息
-            ip_type = getattr(flit, 'destination_type', 'gdma')
-            ip_pos = getattr(flit, 'destination', 0)
-            
-            # 清理IP类型名称
-            if '_' in ip_type:
-                ip_type = ip_type.split('_')[0]
-                
-            return ip_type, ip_pos
-        except Exception as e:
-            logging.warning(f"Error getting IP info from flit {flit}: {e}")
-            return 'gdma', 0
-    
-    
-    def _move_dual_channel_pre_to_fifo(self):
-        """处理双通道pre缓冲区到正式fifo的移动"""
-        for channel_id in [0, 1]:
-            try:
-                # IQ pre到fifo移动
-                iq_buffer = self.data_network.get_iq_channel_buffer(channel_id)
-                iq_buffer_pre = self.data_network.get_iq_channel_buffer_pre(channel_id)
-                
-                for ip_type in iq_buffer:
-                    for ip_pos in iq_buffer[ip_type]:
-                        if ip_pos in iq_buffer_pre[ip_type] and iq_buffer_pre[ip_type][ip_pos] is not None:
-                            if len(iq_buffer[ip_type][ip_pos]) < getattr(self.config, "IQ_CH_FIFO_DEPTH", 8):
-                                iq_buffer[ip_type][ip_pos].append(iq_buffer_pre[ip_type][ip_pos])
-                                iq_buffer_pre[ip_type][ip_pos] = None
-                
-                # EQ pre到fifo移动
-                eq_buffer = self.data_network.get_eq_channel_buffer(channel_id)
-                eq_buffer_pre = self.data_network.get_eq_channel_buffer_pre(channel_id)
-                
-                for ip_type in eq_buffer:
-                    for ip_pos in eq_buffer[ip_type]:
-                        if ip_pos in eq_buffer_pre[ip_type] and eq_buffer_pre[ip_type][ip_pos] is not None:
-                            if len(eq_buffer[ip_type][ip_pos]) < getattr(self.config, "EQ_CH_FIFO_DEPTH", 8):
-                                eq_buffer[ip_type][ip_pos].append(eq_buffer_pre[ip_type][ip_pos])
-                                eq_buffer_pre[ip_type][ip_pos] = None
-                                
-            except Exception as e:
-                logging.warning(f"Error moving pre to fifo for channel {channel_id}: {e}")
-    
-    def get_dual_channel_statistics(self):
-        """获取双通道统计信息"""
-        try:
-            if hasattr(self.data_network, 'get_channel_stats'):
-                channel_stats = self.data_network.get_channel_stats()
-            else:
-                channel_stats = {"ch0": {"inject_count": 0, "eject_count": 0, "latency": []}, 
-                               "ch1": {"inject_count": 0, "eject_count": 0, "latency": []}}
-            
-            if hasattr(self.data_network, 'dual_channel_stats'):
-                dual_stats = self.data_network.dual_channel_stats
-            else:
-                dual_stats = {"ch0": {"inject_count": 0, "eject_count": 0, "latency": []}, 
-                            "ch1": {"inject_count": 0, "eject_count": 0, "latency": []}}
-            
-            return {
-                "channel_stats": channel_stats,
-                "total_inject_ch0": dual_stats["ch0"]["inject_count"],
-                "total_inject_ch1": dual_stats["ch1"]["inject_count"],
-                "total_eject_ch0": dual_stats["ch0"]["eject_count"],
-                "total_eject_ch1": dual_stats["ch1"]["eject_count"],
-                "avg_latency_ch0": sum(dual_stats["ch0"]["latency"]) / len(dual_stats["ch0"]["latency"]) if dual_stats["ch0"]["latency"] else 0,
-                "avg_latency_ch1": sum(dual_stats["ch1"]["latency"]) / len(dual_stats["ch1"]["latency"]) if dual_stats["ch1"]["latency"] else 0,
-            }
-        except Exception as e:
-            # 返回默认统计信息
-            return {
-                "channel_stats": {"ch0": {}, "ch1": {}},
-                "total_inject_ch0": 0,
-                "total_inject_ch1": 0,
-                "total_eject_ch0": 0,
-                "total_eject_ch1": 0,
-                "avg_latency_ch0": 0,
-                "avg_latency_ch1": 0,
-            }
-    
+                merged_send_flits[packet_id] = flits
+        self.data_network.send_flits = merged_send_flits
+
+        logging.info(f"Merged dual channel data: CH0 recv={self.data_network_ch0.recv_flits_num}, CH1 recv={self.data_network_ch1.recv_flits_num}, Total={self.data_network.recv_flits_num}")
+
+    def result_statistic(self):
+        """重写结果统计，合并双通道数据"""
+        # 先合并双通道数据以兼容父类分析工具
+        self.collect_dual_channel_data()
+
+        # 调用父类的结果统计
+        super().result_statistic()
+
+        # 打印双通道详细信息
+        self.print_dual_channel_summary()
+
     def print_dual_channel_summary(self):
-        """打印双通道总结信息"""
-        stats = self.get_dual_channel_statistics()
-        
-        print("\n=== Dual Channel Data Network Summary ===")
-        print(f"Channel 0 - Injected: {stats['total_inject_ch0']}, Ejected: {stats['total_eject_ch0']}")
-        print(f"Channel 1 - Injected: {stats['total_inject_ch1']}, Ejected: {stats['total_eject_ch1']}")
-        print(f"Average Latency - CH0: {stats['avg_latency_ch0']:.2f}, CH1: {stats['avg_latency_ch1']:.2f}")
-        
-        total_inject = stats['total_inject_ch0'] + stats['total_inject_ch1']
+        """打印双通道仿真总结"""
+        print("\n=== 双通道仿真总结 ===")
+
+        # 获取统计数据
+        ch0_inject = self.data_network_ch0.inject_num
+        ch0_eject = self.data_network_ch0.eject_num
+        ch0_recv = self.data_network_ch0.recv_flits_num
+        ch0_arrive = len(self.data_network_ch0.arrive_flits)
+
+        ch1_inject = self.data_network_ch1.inject_num
+        ch1_eject = self.data_network_ch1.eject_num
+        ch1_recv = self.data_network_ch1.recv_flits_num
+        ch1_arrive = len(self.data_network_ch1.arrive_flits)
+
+        total_inject = ch0_inject + ch1_inject
+        total_eject = ch0_eject + ch1_eject
+        total_recv = ch0_recv + ch1_recv
+        total_arrive = ch0_arrive + ch1_arrive
+
+        # 通道详细统计
+        print("通道0 (data_network_ch0):")
+        print(f"  注入包数: {ch0_inject}")
+        print(f"  弹出包数: {ch0_eject}")
+        print(f"  接收flit数: {ch0_recv}")
+        print(f"  完成packet数: {ch0_arrive}")
+
+        print("通道1 (data_network_ch1):")
+        print(f"  注入包数: {ch1_inject}")
+        print(f"  弹出包数: {ch1_eject}")
+        print(f"  接收flit数: {ch1_recv}")
+        print(f"  完成packet数: {ch1_arrive}")
+
+        # 总计统计
+        print(f"\n总计:")
+        print(f"  总注入包数: {total_inject}")
+        print(f"  总弹出包数: {total_eject}")
+        print(f"  总接收flit数: {total_recv}")
+        print(f"  总完成packet数: {total_arrive}")
+
         if total_inject > 0:
-            ch0_ratio = stats['total_inject_ch0'] / total_inject * 100
-            ch1_ratio = stats['total_inject_ch1'] / total_inject * 100
-            print(f"Channel Distribution - CH0: {ch0_ratio:.1f}%, CH1: {ch1_ratio:.1f}%")
-        
-        print("==========================================\n")
+            print(f"  包传输成功率: {total_eject/total_inject*100:.2f}%")
+
+        # 通道负载均衡统计
+        print(f"\n通道负载分布:")
+        if total_recv > 0:
+            ch0_ratio = ch0_recv / total_recv * 100
+            ch1_ratio = ch1_recv / total_recv * 100
+            print(f"  通道0负载比例: {ch0_ratio:.1f}%")
+            print(f"  通道1负载比例: {ch1_ratio:.1f}%")
+
+            # 负载均衡度（理想值为50%:50%）
+            balance_deviation = abs(ch0_ratio - 50.0)
+            if balance_deviation < 5.0:
+                balance_level = "优秀"
+            elif balance_deviation < 15.0:
+                balance_level = "良好"
+            else:
+                balance_level = "待优化"
+            print(f"  负载均衡度: {balance_level} (偏差: {balance_deviation:.1f}%)")
+
+        # 性能增益统计
+        if hasattr(self, "Total_sum_BW_stat") and self.Total_sum_BW_stat is not None:
+            # Total_sum_BW_stat可能是数值或字典
+            if isinstance(self.Total_sum_BW_stat, dict):
+                total_bw = self.Total_sum_BW_stat.get("total_sum_BW_nonweighted_gbps", 0)
+            else:
+                # 假设是数值（单位应该是GB/s）
+                total_bw = float(self.Total_sum_BW_stat)
+
+            if total_bw > 0:
+                print(f"\n双通道性能:")
+                print(f"  合并带宽: {total_bw:.3f} GB/s")
+                # 假设单通道带宽约为总带宽的一半（理想情况）
+                estimated_single_ch_bw = total_bw / 2
+                print(f"  估计单通道带宽: {estimated_single_ch_bw:.3f} GB/s")
+                print(f"  双通道增益: {(total_bw / estimated_single_ch_bw):.2f}x")
+
+        print("==================================")
