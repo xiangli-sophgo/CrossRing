@@ -1164,10 +1164,10 @@ class BaseModel:
                 return self._handle_horizontal_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
             # 情况2：有ITag预约且匹配
-            if network.links_tag[link][0] == [next_pos, direction]:
+            if network.links_tag[link][0] == [pos, direction]:
                 # 使用预约并更新计数器
-                network.remain_tag[direction][next_pos] += 1
-                network.tagged_counter[direction][next_pos] -= 1
+                network.remain_tag[direction][pos] += 1
+                network.tagged_counter[direction][pos] -= 1
                 network.links_tag[link][0] = None
 
                 if self._update_horizontal_flit_state(network, dir_key, pos, next_pos, target_node, direction):
@@ -1432,10 +1432,10 @@ class BaseModel:
                 return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
             # Case 2: Has ITag reservation
-            if network.links_tag[link][0] == [next_pos, direction]:
+            if network.links_tag[link][0] == [pos, direction]:
                 # 使用预约并更新双计数器
-                network.remain_tag[dir_key][next_pos] += 1
-                network.tagged_counter[dir_key][next_pos] -= 1  # 新增：更新tagged计数器
+                network.remain_tag[dir_key][pos] += 1
+                network.tagged_counter[dir_key][pos] -= 1  # 新增：更新tagged计数器
                 network.links_tag[link][0] = None
 
                 if self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction):

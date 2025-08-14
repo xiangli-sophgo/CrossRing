@@ -34,39 +34,46 @@ class DualChannelIPInterface(IPInterface):
         # 如果没有提供channel_selector，则使用从配置中获取的策略
         if channel_selector is None:
             # 在DualChannelBaseModel中会传递正确的channel_selector
-            self.channel_selector = DefaultChannelSelector("ip_id_based", self.data_network_ch0, self.ip_id)
+            self.channel_selector = DefaultChannelSelector("ip_id_based", self.data_network_ch0)
         else:
             self.channel_selector = channel_selector
 
         # 2to1轮询仲裁计数器
         self.eq_round_robin_counter = 0
 
-        logging.info(f"DualChannelIPInterface created for {ip_type}_{ip_pos}")
 
-    # def move_pre_to_fifo(self):
-    #     """重写move_pre_to_fifo方法，特殊处理数据网络的双通道"""
-    #     # 先调用父类方法处理req和rsp网络
-    #     super().move_pre_to_fifo()
+    def enqueue(self, flit, network_type, retry=False):
+        """重写enqueue方法，对data网络进行通道区分存储"""
+        if network_type == "data":
+            # 数据网络需要特殊处理
+            self._enqueue_data_with_channel_selection(flit, retry)
+        else:
+            # req和rsp使用原有逻辑
+            super().enqueue(flit, network_type, retry)
 
-    #     # 特殊处理data网络的双通道
-    #     # 对于双通道数据网络，IQ_channel_buffer_pre的移动在_l2h_to_IQ_with_channel_selection方法中处理
-    #     # 这里只需要处理本地FIFO的移动
-    #     net_info = self.data_network_config  # 使用父类的data网络配置
+    def _enqueue_data_with_channel_selection(self, flit, retry=False):
+        """数据网络的enqueue，根据通道选择存储到对应网络"""
+        # 选择通道（如果还没有选择的话）
+        flit.data_channel_id = self.channel_selector.select_channel(flit, self.ip_id)
 
-    #     # 处理l2h_fifo_pre → l2h_fifo（与父类相同）
-    #     if net_info["l2h_fifo_pre"] is not None and len(net_info["l2h_fifo"]) < net_info["l2h_fifo"].maxlen:
-    #         net_info["l2h_fifo"].append(net_info["l2h_fifo_pre"])
-    #         net_info["l2h_fifo_pre"] = None
+        channel_id = flit.data_channel_id
 
-    #     # 处理h2l_fifo_h_pre → h2l_fifo_h（与父类相同）
-    #     if net_info["h2l_fifo_h_pre"] is not None and len(net_info["h2l_fifo_h"]) < net_info["h2l_fifo_h"].maxlen:
-    #         net_info["h2l_fifo_h"].append(net_info["h2l_fifo_h_pre"])
-    #         net_info["h2l_fifo_h_pre"] = None
+        # 选择对应的网络
+        target_network = self.data_network_ch0 if channel_id == 0 else self.data_network_ch1
 
-    #     # 处理h2l_fifo_l_pre → h2l_fifo_l（与父类相同）
-    #     if net_info["h2l_fifo_l_pre"] is not None and len(net_info["h2l_fifo_l"]) < net_info["h2l_fifo_l"].maxlen:
-    #         net_info["h2l_fifo_l"].append(net_info["h2l_fifo_l_pre"])
-    #         net_info["h2l_fifo_l_pre"] = None
+        # 将flit添加到父类data网络配置的inject_fifo（因为inject_fifo在IPInterface中管理）
+        net_info = self.data_network_config  # 使用父类的data网络配置
+        if retry:
+            net_info["inject_fifo"].appendleft(flit)
+        else:
+            net_info["inject_fifo"].append(flit)
+
+        flit.flit_position = "IP_inject"
+
+        # 将flit添加到对应网络的send_flits进行追踪
+        if flit.packet_id not in target_network.send_flits:
+            target_network.send_flits[flit.packet_id] = []
+        target_network.send_flits[flit.packet_id].append(flit)
 
     def l2h_to_IQ_channel_buffer(self, network_type):
         """重写L2H到IQ方法，在此处进行通道选择"""
@@ -88,7 +95,7 @@ class DualChannelIPInterface(IPInterface):
 
         # 选择数据通道
         # if not hasattr(flit, 'data_channel_id'):
-        flit.data_channel_id = self.channel_selector.select_channel(flit)
+        flit.data_channel_id = self.channel_selector.select_channel(flit, self.ip_id)
 
         channel_id = flit.data_channel_id
 
@@ -163,7 +170,7 @@ class DualChannelIPInterface(IPInterface):
                     # 记录来源通道，用于统计
                     selected_flit.ejected_from_channel = current_channel
                     # 确保data_channel_id与ejected_from_channel一致
-                    if not hasattr(selected_flit, 'data_channel_id'):
+                    if not hasattr(selected_flit, "data_channel_id"):
                         selected_flit.data_channel_id = current_channel
             except (KeyError, AttributeError) as e:
                 pass  # 该通道没有数据
@@ -213,7 +220,7 @@ class DualChannelIPInterface(IPInterface):
             elif hasattr(flit, "ejected_from_channel"):
                 # 如果没有原始通道ID，使用弹出通道
                 channel_for_stats = flit.ejected_from_channel
-            
+
             if channel_for_stats is not None:
                 flit.flit_position = f"IP_eject_ch{channel_for_stats}"
                 # 更新对应网络的统计
@@ -239,3 +246,96 @@ class DualChannelIPInterface(IPInterface):
         else:
             # req和rsp使用父类逻辑
             return super().h2l_l_to_eject_fifo(network_type)
+
+    def _handle_received_data(self, flit: Flit):
+        """重写处理接收到的数据方法，支持双通道时间戳同步"""
+        flit.arrival_cycle = getattr(self, "current_cycle", 0)
+        self.data_wait_cycles_h += flit.wait_cycle_h
+        self.data_wait_cycles_v += flit.wait_cycle_v
+        self.data_cir_h_num += flit.eject_attempts_h
+        self.data_cir_v_num += flit.eject_attempts_v
+
+        if flit.req_type == "read":
+            # 读数据到达RN端，需要收集到data buffer中
+            self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
+            # 检查是否收集完整个burst
+            if len(self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id]) == flit.burst_length:
+                req = next((req for req in self.node.rn_tracker["read"][self.ip_type][self.ip_pos] if req.packet_id == flit.packet_id), None)
+                if req:
+                    # 立即释放tracker和更新计数
+                    self.node.rn_tracker["read"][self.ip_type][self.ip_pos].remove(req)
+                    self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos] += 1
+                    self.node.rn_tracker_pointer["read"][self.ip_type][self.ip_pos] -= 1
+                    self.node.rn_rdb_count[self.ip_type][self.ip_pos] += req.burst_length
+
+                    # 双通道时间戳同步：处理分散在两个通道的flit
+                    self._sync_dual_channel_timestamps(flit.packet_id, req, "read", None)
+
+                    # 清理data buffer（数据已经收集完成）
+                    self.node.rn_rdb[self.ip_type][self.ip_pos].pop(flit.packet_id)
+
+        elif flit.req_type == "write":
+            # 写数据到达SN端，需要收集到data buffer中
+            self.node.sn_wdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
+            # 检查是否收集完整个burst
+            if len(self.node.sn_wdb[self.ip_type][self.ip_pos][flit.packet_id]) == flit.burst_length:
+                req = next((req for req in self.node.sn_tracker[self.ip_type][self.ip_pos] if req.packet_id == flit.packet_id), None)
+                if req:
+                    # 设置tracker延迟释放时间
+                    release_time = self.current_cycle + self.config.SN_TRACKER_RELEASE_LATENCY
+
+                    # 初始化释放时间字典（如果不存在）
+                    if not hasattr(self.node, "sn_tracker_release_time"):
+                        from collections import defaultdict
+                        self.node.sn_tracker_release_time = defaultdict(list)
+
+                    # 双通道时间戳同步：处理分散在两个通道的flit
+                    self._sync_dual_channel_timestamps(flit.packet_id, req, "write", release_time)
+
+                    # 清理data buffer（数据已经收集完成）
+                    self.node.sn_wdb[self.ip_type][self.ip_pos].pop(flit.packet_id)
+
+                    # 添加到延迟释放队列
+                    self.node.sn_tracker_release_time[release_time].append((self.ip_type, self.ip_pos, req))
+
+    def _sync_dual_channel_timestamps(self, packet_id, req, req_type, release_time=None):
+        """同步双通道中同一packet的flit时间戳"""
+        complete_cycle = self.current_cycle
+        
+        # 收集两个通道中的所有flit
+        all_flits = []
+        
+        # 从通道0收集flit
+        if packet_id in self.data_network_ch0.send_flits:
+            all_flits.extend(self.data_network_ch0.send_flits[packet_id])
+            
+        # 从通道1收集flit
+        if packet_id in self.data_network_ch1.send_flits:
+            all_flits.extend(self.data_network_ch1.send_flits[packet_id])
+            
+        if not all_flits:
+            return
+            
+        # 找到第一个flit（用于延迟计算）
+        first_flit = min(all_flits, key=lambda f: f.flit_id)
+        
+        # 为所有flit设置时间戳和计算延迟
+        for f in all_flits:
+            if req_type == "read":
+                f.leave_db_cycle = self.current_cycle
+            else:  # write
+                f.leave_db_cycle = release_time if release_time else self.current_cycle
+                
+            f.sync_latency_record(req)
+            # 为所有flit设置receive时间戳，确保后续处理能获得正确值
+            f.data_received_complete_cycle = complete_cycle
+            
+            # 计算延迟
+            if req_type == "read":
+                f.cmd_latency = f.cmd_received_by_cake1_cycle - f.cmd_entry_noc_from_cake0_cycle
+                f.data_latency = complete_cycle - first_flit.data_entry_noc_from_cake1_cycle
+                f.transaction_latency = complete_cycle - f.cmd_entry_cake0_cycle
+            else:  # write
+                f.cmd_latency = f.cmd_received_by_cake0_cycle - f.cmd_entry_noc_from_cake0_cycle
+                f.data_latency = complete_cycle - first_flit.data_entry_noc_from_cake0_cycle
+                f.transaction_latency = complete_cycle + self.config.SN_TRACKER_RELEASE_LATENCY - f.cmd_entry_cake0_cycle

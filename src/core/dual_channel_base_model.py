@@ -11,6 +11,7 @@ from .base_model import BaseModel
 from src.utils.components.network import Network
 from src.utils.components.dual_channel_ip_interface import DualChannelIPInterface
 from src.utils.channel_selector import DefaultChannelSelector
+from .Dual_Channel_Link_State_Visualizer import DualChannelNetworkLinkVisualizer
 import logging
 
 
@@ -27,7 +28,6 @@ class DualChannelBaseModel(BaseModel):
         # 设置通道选择器（在父类初始化后，config已可用）
         self.channel_selector = self._create_channel_selector()
 
-        logging.info("DualChannelBaseModel initialized with dual-channel data support")
 
     def _create_channel_selector(self):
         """创建通道选择器"""
@@ -45,8 +45,15 @@ class DualChannelBaseModel(BaseModel):
 
     def initial(self):
         """重写初始化方法，使用双通道IP接口"""
-        # 调用父类初始化但不让它创建IP模块
+        # 临时禁用可视化器创建，避免父类创建单通道可视化器
+        original_plot_link_state = self.plot_link_state
+        self.plot_link_state = False
+        
+        # 调用父类初始化但不让它创建可视化器
         super().initial()
+        
+        # 恢复可视化器设置
+        self.plot_link_state = original_plot_link_state
 
         # 创建双通道数据网络
         self._create_dual_channel_data_network()
@@ -81,6 +88,10 @@ class DualChannelBaseModel(BaseModel):
                     self.channel_selector,
                     ip_id,
                 )
+
+        # 初始化双通道可视化器（在所有网络创建完成后）
+        if self.plot_link_state:
+            self.link_state_vis = DualChannelNetworkLinkVisualizer(self.config, self.data_network_ch0)
 
     def run(self):
         """重写父类的仿真主循环以支持双通道"""
@@ -199,26 +210,43 @@ class DualChannelBaseModel(BaseModel):
         packet_ids = [packet_id] if isinstance(packet_id, (int, str)) else packet_id
 
         for pid in packet_ids:
-            # 使用自定义的打印逻辑而不是依赖父类的_debug_print
-            if self.cycle != self._last_printed_cycle:
-                print(f"Cycle {self.cycle}:")
-                self._last_printed_cycle = self.cycle
-
+            # 收集所有flit信息
             all_flits_str = []
+            has_active_flit = False
+            
             # REQ
-            for flit in self.req_network.send_flits.get(pid, []):
+            req_flits = self.req_network.send_flits.get(pid, [])
+            for flit in req_flits:
+                if not self._should_skip_waiting_flit(flit):
+                    has_active_flit = True
                 all_flits_str.append(f"REQ,{flit}")
+                
             # RSP
-            for flit in self.rsp_network.send_flits.get(pid, []):
+            rsp_flits = self.rsp_network.send_flits.get(pid, [])
+            for flit in rsp_flits:
+                if not self._should_skip_waiting_flit(flit):
+                    has_active_flit = True
                 all_flits_str.append(f"RSP,{flit}")
+                
             # DATA CH0
-            for flit in self.data_network_ch0.send_flits.get(pid, []):
+            ch0_flits = self.data_network_ch0.send_flits.get(pid, [])
+            for flit in ch0_flits:
+                if not self._should_skip_waiting_flit(flit):
+                    has_active_flit = True
                 all_flits_str.append(f"DATA_CH0,{flit}")
+                
             # DATA CH1
-            for flit in self.data_network_ch1.send_flits.get(pid, []):
+            ch1_flits = self.data_network_ch1.send_flits.get(pid, [])
+            for flit in ch1_flits:
+                if not self._should_skip_waiting_flit(flit):
+                    has_active_flit = True
                 all_flits_str.append(f"DATA_CH1,{flit}")
 
-            if all_flits_str:
+            # 只有当有活跃的flit时才打印
+            if has_active_flit and all_flits_str:
+                if self.cycle != self._last_printed_cycle:
+                    print(f"Cycle {self.cycle}:")
+                    self._last_printed_cycle = self.cycle
                 print(" | ".join(all_flits_str) + " |")
                 time.sleep(0.3)
 
@@ -289,9 +317,9 @@ class DualChannelBaseModel(BaseModel):
                 merged_send_flits[packet_id] = flits
         self.data_network.send_flits = merged_send_flits
 
-        logging.info(
-            f"Merged dual channel data: CH0 recv={self.data_network_ch0.recv_flits_num}, CH1 recv={self.data_network_ch1.recv_flits_num}, Total={self.data_network.recv_flits_num}"
-        )
+        # 合并links_flow_stat数据（这是带宽计算的关键）
+        self._merge_links_flow_stat()
+
 
     def result_statistic(self):
         """重写结果统计，合并双通道数据"""
@@ -314,3 +342,53 @@ class DualChannelBaseModel(BaseModel):
             print(f"\n双通道负载分布: {ch0_ratio:.0f}%:{ch1_ratio:.0f}%, {ch0_recv}:{ch1_recv}")
         else:
             print("双通道负载分布: 无数据")
+
+    def _merge_links_flow_stat(self):
+        """合并两个数据通道的链路流量统计"""
+        # 初始化合并后的links_flow_stat
+        self.data_network.links_flow_stat = {}
+        
+        # 获取两个通道的links_flow_stat
+        ch0_stats = self.data_network_ch0.links_flow_stat
+        ch1_stats = self.data_network_ch1.links_flow_stat
+        
+        # 合并所有链路的统计数据
+        all_links = set(ch0_stats.keys()) | set(ch1_stats.keys())
+        
+        for link in all_links:
+            # 初始化合并后的链路统计
+            merged_stat = {}
+            
+            # 从通道0获取数据（如果存在）
+            ch0_data = ch0_stats.get(link, {})
+            ch1_data = ch1_stats.get(link, {})
+            
+            # 合并数值型统计（相加）
+            numeric_keys = ["ITag_count", "empty_count", "total_cycles"]
+            for key in numeric_keys:
+                merged_stat[key] = ch0_data.get(key, 0) + ch1_data.get(key, 0)
+            
+            # 合并字典型统计
+            dict_keys = ["eject_attempts_h", "eject_attempts_v", "inject_attempts_h", "inject_attempts_v"]
+            for key in dict_keys:
+                merged_stat[key] = {}
+                # 合并通道0的数据
+                if key in ch0_data:
+                    for sub_key, value in ch0_data[key].items():
+                        merged_stat[key][sub_key] = value
+                # 合并通道1的数据
+                if key in ch1_data:
+                    for sub_key, value in ch1_data[key].items():
+                        if sub_key in merged_stat[key]:
+                            merged_stat[key][sub_key] += value
+                        else:
+                            merged_stat[key][sub_key] = value
+            
+            self.data_network.links_flow_stat[link] = merged_stat
+
+    def tag_move_all_networks(self):
+        """重写tag_move方法以支持双通道数据网络"""
+        self._tag_move(self.req_network)
+        self._tag_move(self.rsp_network)
+        self._tag_move(self.data_network_ch0)  # 处理通道0
+        self._tag_move(self.data_network_ch1)  # 处理通道1

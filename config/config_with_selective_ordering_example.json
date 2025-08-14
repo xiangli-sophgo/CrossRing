@@ -1,0 +1,15 @@
+{
+    "NUM_NODE": 16,
+    "NUM_COL": 4,
+    "TU_Etag_T0_UE_MAX": 8,
+    "TU_Etag_T1_UE_MAX": 7,
+    "TD_Etag_T2_UE_MAX": 6,
+    "ETag_BOTHSIDE_UPGRADE": 1,
+    "GDMA_RW_GAP": 1000000000,
+    "SDMA_RW_GAP": 1000000000,
+    "ENABLE_CROSSPOINT_CONFLICT_CHECK": 0,
+    "CROSSRING_VERSION": "V1",
+    "ENABLE_IN_ORDER_EJECTION": 1,
+    "_comment_IN_ORDER_EJECTION_PAIRS": "使用traffic中的原始节点编号，不是建模中的节点编号",
+    "IN_ORDER_EJECTION_PAIRS": [[0, 5], [1, 6], [2, 7]]
+}

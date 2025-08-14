@@ -1667,6 +1667,18 @@ class NetworkLinkVisualizer:
     def _on_key(self, event):
         key = event.key
 
+        # 数字键1-3选择对应网络 (REQ=1, RSP=2, DATA=3)
+        if key in ['1', '2', '3']:
+            network_idx = int(key) - 1
+            if 0 <= network_idx < len(self.histories):
+                self.selected_network_index = network_idx
+                # 刷新显示
+                if self.networks is not None:
+                    self.update(self.networks, cycle=self.cycle, skip_pause=True)
+                else:
+                    self.update(None, cycle=self.cycle, skip_pause=True)
+                return
+
         # 使用当前选中网络的历史
         current_history = self.histories[self.selected_network_index]
 

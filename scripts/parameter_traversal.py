@@ -966,9 +966,10 @@ def main():
     param_configs = [
         # 示例：使用 IN_FIFO_DEPTH 同时遍历 RB_IN_FIFO_DEPTH 和 EQ_IN_FIFO_DEPTH，并按比例调整相关参数
         # {"name": "IN_FIFO_DEPTH", "range": "8,32,4"},  # 从8到32，步长为4
-        # {"name": "IN_FIFO_DEPTH", "range": "[28, 22, 16, 14, 12, 10, 8, 6, 4, 2]"},
+        # {"name": "IN_FIFO_DEPTH", "range": "[20, 18, 16, 14, 12, 10, 8, 6, 4, 2]"},
+        {"name": "IN_FIFO_DEPTH", "range": "[8, 16]"},
         # {"name": "SLICE_PER_LINK", "range": "5, 20"},
-        {"name": "SLICE_PER_LINK", "range": "[20]"},
+        # {"name": "SLICE_PER_LINK", "range": "[20]"},
         # 其他参数配置示例：
         # {"name": "IQ_OUT_FIFO_DEPTH_VERTICAL", "range": "1,8"},
         # {"name": "SLICE_PER_LINK", "range": "17,20"},
@@ -980,9 +981,10 @@ def main():
     # traffic_path = "../traffic/0617"
     # 仿真配置
     traffic_files = [
-        "W_8x8.txt",
+        # "W_4x4.txt",
+        "R_8x8.txt",
+        # "R_12x12.txt",
         # "W_5x4_CR_v1.0.2.txt",
-        # "W_12x12.txt",
         # "LLama2_AllReduce.txt",
     ]
     # topo_type = "4x4"

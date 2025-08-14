@@ -608,7 +608,7 @@ class BaseModel:
         """Move all items from pre-injection queues to injection queues for a given network."""
         # ===  注入队列 *_pre → *_FIFO ===
         ip_pos = in_pos - self.config.NUM_COL  # 本列对应的 IP 位置
-        
+
         # IQ_channel_buffer_pre → IQ_channel_buffer
         for ip_type in network.IQ_channel_buffer_pre.keys():
             queue_pre = network.IQ_channel_buffer_pre[ip_type]
@@ -663,7 +663,6 @@ class BaseModel:
                 flit.flit_position = f"EQ_{fifo_pos}"
                 queue[ip_pos].append(flit)
                 queue_pre[ip_pos] = None
-
 
         # EQ_channel_buffer_pre → EQ_channel_buffer
         for ip_type in network.EQ_channel_buffer_pre.keys():
@@ -1221,7 +1220,7 @@ class BaseModel:
         if not network.ring_bridge[dir_key][(pos, next_pos)]:
             return None
         flit = network.ring_bridge[dir_key][(pos, next_pos)][0]
-        # self.error_log(flit, 6212, 1)
+        # self.error_log(flit, 10651, 1)
         # Case 1: No flit in the link
         link_occupied = network.links[link][0] is not None
 
@@ -1239,10 +1238,10 @@ class BaseModel:
                 return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
             # Case 2: Has ITag reservation (no crosspoint conflict for reservations)
-            if network.links_tag[link][0] == [next_pos, direction]:
+            if network.links_tag[link][0] == [pos, direction]:
                 # 使用预约并更新双计数器
-                network.remain_tag[direction][next_pos] += 1
-                network.tagged_counter[direction][next_pos] -= 1  # 新增：更新tagged计数器
+                network.remain_tag[direction][pos] += 1
+                network.tagged_counter[direction][pos] -= 1  # 新增：更新tagged计数器
                 network.links_tag[link][0] = None
 
                 if self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction):

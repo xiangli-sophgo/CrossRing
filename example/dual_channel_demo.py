@@ -22,6 +22,7 @@ def main():
     # 定义拓扑结构
     topo_type = "5x4"
     config.TOPO_TYPE = topo_type
+    config.ENABLE_IN_ORDER_EJECTION = 0
 
     # 配置双通道设置
     config.DATA_DUAL_CHANNEL_ENABLED = True
@@ -37,31 +38,46 @@ def main():
         model_type=model_type,
         config=config,
         topo_type=topo_type,
-        traffic_file_path=r"",
-        traffic_config=[["../test_data/test1.txt"]],
+        traffic_file_path=r"../traffic/0617",
+        traffic_config=[["LLama2_AllReduce.txt"]],
         result_save_path="../Result/simple_dual_channel/",
         results_fig_save_path="",
-        plot_flow_fig=1,
+        plot_flow_fig=0,
         plot_RN_BW_fig=0,
         plot_link_state=0,
+        plot_start_cycle=3000,
         print_trace=0,
-        show_trace_id=0,
+        show_trace_id=10651,
         verbose=1,
     )
 
     # 初始化仿真
     sim.initial()
 
+    # 调试：打印IP ID分配情况
+    print("IP ID 分配情况:")
+    gdma_0_count = 0
+    gdma_1_count = 0
+    for (ip_type, ip_pos), ip_interface in sim.ip_modules.items():
+        ip_id = ip_interface.ip_id
+        channel = ip_id % 2
+        if ip_type == "gdma_0":
+            gdma_0_count += 1
+        elif ip_type == "gdma_1":
+            gdma_1_count += 1
+        print(f"  ({ip_type}, {ip_pos}) -> ip_id={ip_id} -> channel_{channel}")
+
+    print(f"\n统计: gdma_0 有 {gdma_0_count} 个实例, gdma_1 有 {gdma_1_count} 个实例")
+    print()
+
     # 设置仿真参数
-    sim.end_time = 1000
-    sim.print_interval = 500
+    sim.end_time = 6000  # 超短时间测试，只为调试
+    sim.print_interval = 2000
 
     print("开始双通道仿真...")
 
     # 运行仿真
     sim.run()
-
-    print("简单双通道演示完成!")
 
 
 if __name__ == "__main__":

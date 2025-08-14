@@ -657,8 +657,9 @@ class Network:
                             if flit.ETag_priority == "T2":
                                 flit.ETag_priority = "T1"
                             elif flit.ETag_priority == "T1":
-                                flit.ETag_priority = "T0"
-                                self.T0_Etag_Order_FIFO.append((next_node, flit))
+                                if self._can_upgrade_to_T0_in_order(flit, next_node):
+                                    flit.ETag_priority = "T0"
+                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
                             link[flit.current_seat_index] = None
                             next_pos = next_node - 1
                             flit.current_link = (next_node, next_pos)
@@ -789,8 +790,9 @@ class Network:
                             if flit.ETag_priority == "T2":
                                 flit.ETag_priority = "T1"
                             elif flit.ETag_priority == "T1":
-                                self.T0_Etag_Order_FIFO.append((next_node, flit))
-                                flit.ETag_priority = "T0"
+                                if self._can_upgrade_to_T0_in_order(flit, next_node):
+                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
+                                    flit.ETag_priority = "T0"
                             link[flit.current_seat_index] = None
                             next_pos = next_node - self.config.NUM_COL * 2
                             flit.current_link = (next_node, next_pos)
@@ -875,8 +877,9 @@ class Network:
                             if flit.ETag_priority == "T2":
                                 flit.ETag_priority = "T1"
                             elif flit.ETag_priority == "T1":
-                                self.T0_Etag_Order_FIFO.append((next_node, flit))
-                                flit.ETag_priority = "T0"
+                                if self._can_upgrade_to_T0_in_order(flit, next_node):
+                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
+                                    flit.ETag_priority = "T0"
                             link[flit.current_seat_index] = None
                             next_pos = max(next_node - 1, row_start)
                             flit.current_link = (next_node, next_pos)
@@ -1001,8 +1004,9 @@ class Network:
                             if flit.ETag_priority == "T2":
                                 flit.ETag_priority = "T1"
                             elif flit.ETag_priority == "T1":
-                                self.T0_Etag_Order_FIFO.append((next_node, flit))
-                                flit.ETag_priority = "T0"
+                                if self._can_upgrade_to_T0_in_order(flit, next_node):
+                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
+                                    flit.ETag_priority = "T0"
                             link[flit.current_seat_index] = None
                             next_pos = next_node - self.config.NUM_COL * 2 if next_node - self.config.NUM_COL * 2 >= col_start else col_start
                             flit.current_link = (next_node, next_pos)
@@ -1094,8 +1098,8 @@ class Network:
 
     def _can_eject_in_order(self, flit: Flit, target_eject_node):
         """检查flit是否可以按序下环"""
-        # 如果未启用保序功能，直接返回True
-        if not self.config.ENABLE_IN_ORDER_EJECTION:
+        # 先判断是否需要保序
+        if not self._need_in_order_check(flit):
             return True
 
         # 确保flit已设置保序信息
@@ -1118,10 +1122,51 @@ class Network:
 
         return flit.src_dest_order_id == expected_order_id
 
+    def _need_in_order_check(self, flit: Flit):
+        """判断该flit是否需要保序检查"""
+        if not self.config.ENABLE_IN_ORDER_EJECTION:
+            return False
+        
+        # 获取真实的src和dest
+        src = flit.source_original if flit.source_original != -1 else flit.source
+        dest = flit.destination_original if flit.destination_original != -1 else flit.destination
+        
+        # 如果未配置特定对或配置为空，则全部保序
+        if not hasattr(self.config, 'IN_ORDER_EJECTION_PAIRS') or len(self.config.IN_ORDER_EJECTION_PAIRS) == 0:
+            return True
+        
+        # 检查是否在配置的保序对列表中
+        return [src, dest] in self.config.IN_ORDER_EJECTION_PAIRS
+
+    def _can_upgrade_to_T0_in_order(self, flit: Flit, node):
+        """检查flit是否可以按序升级到T0"""
+        # 先判断是否需要保序
+        if not self._need_in_order_check(flit):
+            return True
+        
+        # 确保flit已设置保序信息
+        if not hasattr(flit, "src_dest_order_id") or not hasattr(flit, "packet_category"):
+            return True
+        
+        if flit.src_dest_order_id == -1 or flit.packet_category is None:
+            return True
+        
+        # 获取原始的src和dest
+        src = flit.source_original if flit.source_original != -1 else flit.source
+        dest = flit.destination_original if flit.destination_original != -1 else flit.destination
+        
+        # 从节点获取保序跟踪表
+        if not hasattr(self, "node") or self.node is None:
+            return True
+        
+        # 检查是否是期望的下一个顺序ID
+        expected_order_id = self.node.order_tracking_table[(src, dest)][flit.packet_category] + 1
+        return flit.src_dest_order_id == expected_order_id
+
     def _update_order_tracking_table(self, flit: Flit):
         """更新保序跟踪表"""
-        # 如果未启用保序功能，直接返回
-        if not self.config.ENABLE_IN_ORDER_EJECTION:
+        # 先判断是否需要保序
+        if not self._need_in_order_check(flit):
             return
 
         # 确保flit已设置保序信息
