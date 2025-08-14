@@ -164,12 +164,12 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
             config.NUM_ROW = row * 2
             config.NUM_IP = row * config.NUM_COL
             config.RN_R_TRACKER_OSTD = 64
-            config.RN_W_TRACKER_OSTD = 32
+            config.RN_W_TRACKER_OSTD = 64
             config.RN_RDB_SIZE = config.RN_R_TRACKER_OSTD * config.BURST
             config.RN_WDB_SIZE = config.RN_W_TRACKER_OSTD * config.BURST
             config.NETWORK_FREQUENCY = 2
             config.SN_DDR_R_TRACKER_OSTD = 96
-            config.SN_DDR_W_TRACKER_OSTD = 48
+            config.SN_DDR_W_TRACKER_OSTD = 96
             config.SN_L2M_R_TRACKER_OSTD = 96
             config.SN_L2M_W_TRACKER_OSTD = 48
             config.SN_DDR_WDB_SIZE = config.SN_DDR_W_TRACKER_OSTD * config.BURST
@@ -967,8 +967,8 @@ def main():
         # 示例：使用 IN_FIFO_DEPTH 同时遍历 RB_IN_FIFO_DEPTH 和 EQ_IN_FIFO_DEPTH，并按比例调整相关参数
         # {"name": "IN_FIFO_DEPTH", "range": "8,32,4"},  # 从8到32，步长为4
         # {"name": "IN_FIFO_DEPTH", "range": "[20, 18, 16, 14, 12, 10, 8, 6, 4, 2]"},
-        {"name": "IN_FIFO_DEPTH", "range": "[8, 16]"},
-        # {"name": "SLICE_PER_LINK", "range": "5, 20"},
+        # {"name": "IN_FIFO_DEPTH", "range": "[8, 16]"},
+        {"name": "SLICE_PER_LINK", "range": "5, 20"},
         # {"name": "SLICE_PER_LINK", "range": "[20]"},
         # 其他参数配置示例：
         # {"name": "IQ_OUT_FIFO_DEPTH_VERTICAL", "range": "1,8"},
@@ -982,14 +982,14 @@ def main():
     # 仿真配置
     traffic_files = [
         # "W_4x4.txt",
-        "R_8x8.txt",
-        # "R_12x12.txt",
+        # "W_8x8.txt",
+        "W_12x12.txt",
         # "W_5x4_CR_v1.0.2.txt",
         # "LLama2_AllReduce.txt",
     ]
     # topo_type = "4x4"
-    topo_type = "8x8"
-    # topo_type = "12x12"
+    # topo_type = "8x8"
+    topo_type = "12x12"
     # topo_type = "5x4"
     traffic_weights = [1]
     repeats = 1
