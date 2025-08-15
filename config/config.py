@@ -1,6 +1,7 @@
 # config.py
 
 import json
+import yaml
 import os
 import numpy as np
 import argparse
@@ -16,7 +17,7 @@ class CrossRingConfig:
         if default_config is None:
             # __file__ 是当前脚本所在路径，.parent.parent 假设脚本在项目根的子目录中
             project_root = Path(__file__).resolve().parent.parent
-            default_config = project_root / "config" / "config2.json"
+            default_config = project_root / "config" / "default.yaml"
 
         args = self.parse_args(default_config)
         self.TOPO_TYPE = args.TOPO_TYPE
@@ -339,13 +340,22 @@ class CrossRingConfig:
             import inspect
 
             caller_frame = inspect.currentframe().f_back.f_back
-            caller_file = caller_frame.f_globals["__file__"]
-            caller_dir = os.path.dirname(os.path.abspath(caller_file))
-            default_config = os.path.join(caller_dir, default_config)
+            if "__file__" in caller_frame.f_globals:
+                caller_file = caller_frame.f_globals["__file__"]
+                caller_dir = os.path.dirname(os.path.abspath(caller_file))
+                default_config = os.path.join(caller_dir, default_config)
+            else:
+                # 如果无法获取调用者路径，使用配置文件的绝对路径
+                if not os.path.exists(default_config):
+                    project_root = Path(__file__).resolve().parent.parent
+                    default_config = project_root / default_config
 
         if os.path.exists(default_config):
-            with open(default_config, "r") as f:
-                default_config = json.load(f)
+            with open(default_config, "r", encoding='utf-8') as f:
+                if str(default_config).endswith(('.yaml', '.yml')):
+                    default_config = yaml.safe_load(f)
+                else:
+                    default_config = json.load(f)
         else:
             raise FileNotFoundError(f"{default_config} not found.")
 

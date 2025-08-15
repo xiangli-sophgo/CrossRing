@@ -6,6 +6,7 @@ Extends CrossRingConfig class to support dual-channel data configuration.
 from .config import CrossRingConfig
 from pathlib import Path
 import json
+import yaml
 
 
 class DualChannelConfig(CrossRingConfig):

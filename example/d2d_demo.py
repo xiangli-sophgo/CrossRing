@@ -78,9 +78,9 @@ def main():
     # 定义模型类型
     model_type = "REQ_RSP"
     
-    # 创建D2D配置 - 使用新的D2DConfig
+    # 创建D2D配置 - 使用新的YAML配置
     config = D2DConfig(
-        base_config_file="../config/d2d_config.json",
+        base_config_file="../config/topologies/d2d_config.yaml",  # 使用YAML配置
         d2d_layout="horizontal"  # 可选: "horizontal" 或 "vertical"
     )
     

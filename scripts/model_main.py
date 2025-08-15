@@ -51,7 +51,12 @@ def main():
     result_save_path = f"../Result/CrossRing/{model_type}/"
     # results_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/"
 
-    config_path = r"../config/config2.json"
+    # 可以根据拓扑类型选择对应的YAML配置文件
+    # config_path = r"../config/topologies/topo_3x3.yaml"
+    # config_path = r"../config/topologies/topo_5x4.yaml"  # SG2262
+    # config_path = r"../config/topologies/topo_6x5.yaml"  # SG2260
+    # config_path = r"../config/topologies/topo_8x8.yaml"  # SG2260E
+    config_path = r"../config/default.yaml"  # 使用默认YAML配置
     config = CrossRingConfig(config_path)
     config.CROSSRING_VERSION = "V1"
     if not config.TOPO_TYPE:

@@ -7,6 +7,7 @@ configuration parameters and automatic node placement calculation.
 """
 
 import json
+import yaml
 import logging
 from typing import List, Tuple, Optional, Dict
 from .config import CrossRingConfig
@@ -84,7 +85,10 @@ class D2DConfig(CrossRingConfig):
         """加载D2D专用配置文件"""
         try:
             with open(d2d_config_file, 'r', encoding='utf-8') as f:
-                d2d_config = json.load(f)
+                if str(d2d_config_file).endswith(('.yaml', '.yml')):
+                    d2d_config = yaml.safe_load(f)
+                else:
+                    d2d_config = json.load(f)
             
             # 更新D2D特定参数
             for key, value in d2d_config.items():
@@ -94,7 +98,7 @@ class D2DConfig(CrossRingConfig):
             logging.info(f"已加载D2D配置文件: {d2d_config_file}")
         except FileNotFoundError:
             logging.warning(f"D2D配置文件未找到: {d2d_config_file}")
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, yaml.YAMLError) as e:
             logging.error(f"D2D配置文件格式错误: {e}")
     
     def _calculate_d2d_positions(self):

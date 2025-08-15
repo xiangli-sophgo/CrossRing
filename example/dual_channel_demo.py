@@ -16,13 +16,11 @@ def main():
     # 定义模型类型
     model_type = "DualChannel_REQ_RSP"
 
-    # 创建双通道配置
-    config = DualChannelConfig()
-
-    # 定义拓扑结构
+    # 创建双通道配置 - 可以基于拓扑专用配置或自定义双通道配置
     topo_type = "5x4"
-    config.TOPO_TYPE = topo_type
-    config.ENABLE_IN_ORDER_EJECTION = 0
+
+    # 拓扑配置：
+    config = DualChannelConfig(f"../config/topologies/topo_{topo_type}.yaml")
 
     # 配置双通道设置
     config.DATA_DUAL_CHANNEL_ENABLED = True
@@ -54,24 +52,8 @@ def main():
     # 初始化仿真
     sim.initial()
 
-    # 调试：打印IP ID分配情况
-    print("IP ID 分配情况:")
-    gdma_0_count = 0
-    gdma_1_count = 0
-    for (ip_type, ip_pos), ip_interface in sim.ip_modules.items():
-        ip_id = ip_interface.ip_id
-        channel = ip_id % 2
-        if ip_type == "gdma_0":
-            gdma_0_count += 1
-        elif ip_type == "gdma_1":
-            gdma_1_count += 1
-        print(f"  ({ip_type}, {ip_pos}) -> ip_id={ip_id} -> channel_{channel}")
-
-    print(f"\n统计: gdma_0 有 {gdma_0_count} 个实例, gdma_1 有 {gdma_1_count} 个实例")
-    print()
-
     # 设置仿真参数
-    sim.end_time = 6000  # 超短时间测试，只为调试
+    sim.end_time = 6000
     sim.print_interval = 2000
 
     print("开始双通道仿真...")
