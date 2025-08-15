@@ -58,7 +58,6 @@ class D2DConfig(CrossRingConfig):
         # 验证配置
         self._validate_d2d_layout()
         
-        logging.info(f"D2D配置初始化完成: {self.D2D_LAYOUT}布局, {len(self.D2D_RN_SN_PAIRS)}对RN-SN节点")
     
     def _load_d2d_base_config(self):
         """从基础配置中加载D2D相关参数"""
@@ -95,11 +94,8 @@ class D2DConfig(CrossRingConfig):
                 if key.startswith('D2D_'):
                     setattr(self, key, value)
             
-            logging.info(f"已加载D2D配置文件: {d2d_config_file}")
         except FileNotFoundError:
-            logging.warning(f"D2D配置文件未找到: {d2d_config_file}")
         except (json.JSONDecodeError, yaml.YAMLError) as e:
-            logging.error(f"D2D配置文件格式错误: {e}")
     
     def _calculate_d2d_positions(self):
         """根据拓扑类型和布局方式计算D2D节点位置"""
@@ -133,7 +129,6 @@ class D2DConfig(CrossRingConfig):
                 for row in range(self.NUM_ROW)
             ]
         
-        logging.info(f"水平布局计算完成: RN节点 {self.D2D_RN_POSITIONS}, SN节点 {self.D2D_SN_POSITIONS}")
     
     def _calculate_vertical_positions(self):
         """计算垂直布局的D2D节点位置"""
@@ -157,7 +152,6 @@ class D2DConfig(CrossRingConfig):
                 for col in range(self.NUM_COL)
             ]
         
-        logging.info(f"垂直布局计算完成: RN节点 {self.D2D_RN_POSITIONS}, SN节点 {self.D2D_SN_POSITIONS}")
     
     def _create_rn_sn_pairs(self):
         """创建RN-SN配对关系"""
@@ -169,13 +163,11 @@ class D2DConfig(CrossRingConfig):
                 for i in range(min_pairs)
             ]
         
-        logging.info(f"创建了 {len(self.D2D_RN_SN_PAIRS)} 对RN-SN配对")
     
     def _validate_d2d_layout(self):
         """验证D2D布局的合理性"""
         # 检查基本参数
         if not self.D2D_ENABLED:
-            logging.warning("D2D功能未启用")
             return
         
         if self.NUM_DIES < 2:
@@ -195,7 +187,6 @@ class D2DConfig(CrossRingConfig):
         if len(self.D2D_RN_SN_PAIRS) == 0:
             raise ValueError("没有有效的RN-SN配对")
         
-        logging.info("D2D布局验证通过")
     
     def get_rn_sn_pair_for_traffic(self, src_die: int, dst_die: int, traffic_type: str = "balanced") -> Tuple[int, int]:
         """
@@ -324,4 +315,3 @@ class D2DConfig(CrossRingConfig):
         with open(config_file, 'w', encoding='utf-8') as f:
             json.dump(d2d_config, f, indent=4, ensure_ascii=False)
         
-        logging.info(f"D2D配置已保存到: {config_file}")

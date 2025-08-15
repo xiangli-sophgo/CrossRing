@@ -127,6 +127,17 @@ class Flit:
         "src_dest_order_id",
         "packet_category",
         "data_channel_id",
+        # D2D相关属性
+        "source_die_id",
+        "target_die_id", 
+        "source_node_id",
+        "target_node_id",
+        "source_physical",
+        "source_die_id_physical",
+        "source_node_id_physical",
+        "inject_time",
+        "final_destination_physical",
+        "final_destination_type",
     ]
 
     last_id = 0
@@ -167,6 +178,17 @@ class Flit:
         self.rsp_type = None
         self.rn_tracker_type = None
         self.sn_tracker_type = None
+        # D2D属性初始化
+        self.source_die_id = None
+        self.target_die_id = None
+        self.source_node_id = None
+        self.target_node_id = None
+        self.source_physical = None
+        self.source_die_id_physical = None
+        self.source_node_id_physical = None
+        self.inject_time = None
+        self.final_destination_physical = None
+        self.final_destination_type = None
         self.init_param()
 
     def init_param(self):
@@ -312,6 +334,17 @@ class Flit:
         self.src_dest_order_id = -1
         self.packet_category = None
         self.data_channel_id = 0
+        # 重置D2D属性
+        self.source_die_id = None
+        self.target_die_id = None
+        self.source_node_id = None
+        self.target_node_id = None
+        self.source_physical = None
+        self.source_die_id_physical = None
+        self.source_node_id_physical = None
+        self.inject_time = None
+        self.final_destination_physical = None
+        self.final_destination_type = None
 
         # Reset timing fields
         self.departure_cycle = np.inf
