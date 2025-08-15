@@ -26,6 +26,8 @@ def main():
         plot_flow_fig=0,
         plot_RN_BW_fig=0,
         plot_link_state=0,
+        print_trace=1,
+        show_trace_id=0,
         verbose=1,
     )
 

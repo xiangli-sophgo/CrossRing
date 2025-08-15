@@ -910,11 +910,6 @@ class BaseModel:
             if ip_interface is None:
                 raise ValueError(f"IP module setup error for ({ip_type}, {ip_pos})!")
 
-            # 检查IP接口是否能接受新请求（可选的流控机制）
-            if hasattr(ip_interface, "can_accept_request") and not ip_interface.can_accept_request():
-                if self.traffic_scheduler.verbose:
-                    print(f"Warning: IP interface ({ip_type}, {ip_pos}) is busy, request may be delayed")
-
             ip_interface.enqueue(req, "req")
 
             # 更新统计信息

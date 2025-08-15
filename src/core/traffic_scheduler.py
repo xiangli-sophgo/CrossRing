@@ -300,6 +300,12 @@ class TrafficScheduler:
         # Ring拓扑支持
         self.ring_config = None
         self.use_ring_mapping = False
+        
+        # IP配置管理
+        self.ip_configurations = {}  # {traffic_file: {node_id: set(ip_types)}}
+        self.global_ip_mapping = {}  # {(ip_type, logical_node): physical_node}
+        self.node_mapping = {}  # {traffic_logical_node: physical_node}
+        self.required_ips = set()  # 所有需要的IP类型集合
 
     def setup_parallel_chains(self, chains_config: List[List[str]]):
         """设置并行的串行链"""
@@ -313,14 +319,80 @@ class TrafficScheduler:
             chain = SerialChain(chain_id, traffic_files)
             self.parallel_chains.append(chain)
 
+        # 预解析所有traffic文件以收集IP配置
+        self._preparse_all_traffic_files()
+
         if self.verbose:
             print(f"Setup {len(self.parallel_chains)} parallel chains")
             for chain in self.parallel_chains:
                 print(f"  {chain.chain_id}: {chain.traffic_files}")
+            
+            # 打印IP配置摘要
+            ip_summary = self.get_ip_configurations_summary()
+            print(f"Detected IP configurations:")
+            print(f"  Total traffic files: {ip_summary['total_traffic_files']}")
+            print(f"  Required IP types: {ip_summary['required_ip_types']}")
+            print(f"  Total unique IPs: {ip_summary['total_required_ips']}")
 
     def setup_single_chain(self, traffic_files: List[str]):
         """设置单条串行链（向后兼容）"""
         self.setup_parallel_chains([traffic_files])
+
+    def _preparse_all_traffic_files(self):
+        """预解析所有traffic文件以收集IP配置信息"""
+        all_traffic_files = set()
+        
+        # 收集所有traffic文件名
+        for chain in self.parallel_chains:
+            all_traffic_files.update(chain.traffic_files)
+        
+        if self.verbose:
+            print(f"Pre-parsing {len(all_traffic_files)} traffic files for IP configuration...")
+        
+        # 解析每个文件的IP配置
+        for filename in all_traffic_files:
+            self._parse_traffic_file_for_ip_config(filename)
+        
+        if self.verbose:
+            print(f"IP configuration parsing completed.")
+            print(f"  Files processed: {len(all_traffic_files)}")
+            print(f"  Unique IP types found: {len(self.required_ips)}")
+            print(f"  IP types: {sorted(list(self.required_ips))}")
+
+    def _parse_traffic_file_for_ip_config(self, filename: str):
+        """仅解析traffic文件的IP配置，不处理时间和完整请求"""
+        if filename in self.ip_configurations:
+            return  # 已经解析过
+            
+        abs_path = os.path.join(self.traffic_file_path, filename)
+        file_ip_config = {}
+        
+        try:
+            with open(abs_path, "r") as f:
+                for line in f:
+                    parts = line.strip().split(",")
+                    if len(parts) < 7:
+                        continue
+
+                    # 只解析IP配置相关信息
+                    _, src, src_t, dst, dst_t, _, _ = parts
+                    src, dst = int(src), int(dst)
+                    
+                    # 收集IP配置信息
+                    self._collect_ip_config(src, src_t, dst, dst_t, file_ip_config)
+            
+            # 保存该文件的IP配置
+            self.ip_configurations[filename] = file_ip_config
+            
+            if self.verbose:
+                unique_ips = set()
+                for ip_set in file_ip_config.values():
+                    unique_ips.update(ip_set)
+                print(f"  {filename}: {len(file_ip_config)} nodes, {len(unique_ips)} IP types")
+                
+        except Exception as e:
+            print(f"Warning: Failed to parse {filename} for IP config: {e}")
+            self.ip_configurations[filename] = {}
 
     def start_initial_traffics(self):
         """启动每条链的第一个traffic"""
@@ -370,6 +442,9 @@ class TrafficScheduler:
         abs_path = os.path.join(self.traffic_file_path, filename)
         requests = []
         read_req = write_req = read_flit = write_flit = 0
+        
+        # 收集该文件的IP配置信息
+        file_ip_config = {}
 
         with open(abs_path, "r") as f:
             for line in f:
@@ -383,6 +458,9 @@ class TrafficScheduler:
                 t = (int(t) + time_offset) * self.config.NETWORK_FREQUENCY
                 src, dst, burst = int(src), int(dst), int(burst)
 
+                # 收集IP配置信息
+                self._collect_ip_config(src, src_t, dst, dst_t, file_ip_config)
+
                 # 创建带traffic_id的请求元组
                 req_tuple = (t, src, src_t, dst, dst_t, op, burst, traffic_id)
                 requests.append(req_tuple)
@@ -395,6 +473,9 @@ class TrafficScheduler:
                     write_req += 1
                     write_flit += burst
 
+        # 保存该文件的IP配置
+        self.ip_configurations[filename] = file_ip_config
+        
         total_req = read_req + write_req
         total_flit = read_flit + write_flit
 
@@ -585,8 +666,102 @@ class TrafficScheduler:
             "Total_finish_time": max(all_end_times) if all_end_times else 0,
         }
 
+    def _collect_ip_config(self, src: int, src_t: str, dst: int, dst_t: str, file_ip_config: dict):
+        """收集IP配置信息
+        
+        Args:
+            src: 源节点编号（traffic文件中的逻辑编号）
+            src_t: 源IP类型
+            dst: 目标节点编号（traffic文件中的逻辑编号） 
+            dst_t: 目标IP类型
+            file_ip_config: 该文件的IP配置字典
+        """
+        # 处理源节点IP配置
+        if src not in file_ip_config:
+            file_ip_config[src] = set()
+        
+        # 标准化IP类型（确保带编号）
+        src_ip_type = self._normalize_ip_type(src_t)
+        dst_ip_type = self._normalize_ip_type(dst_t)
+        
+        file_ip_config[src].add(src_ip_type)
+        self.required_ips.add(src_ip_type)
+        
+        # 处理目标节点IP配置
+        if dst not in file_ip_config:
+            file_ip_config[dst] = set()
+        file_ip_config[dst].add(dst_ip_type)
+        self.required_ips.add(dst_ip_type)
+
+    def _normalize_ip_type(self, ip_type: str) -> str:
+        """标准化IP类型，确保格式一致"""
+        if "_" not in ip_type:
+            return f"{ip_type}_0"
+        return ip_type
+
+    def setup_node_mapping(self, logical_to_physical_mapping: dict = None):
+        """设置节点映射关系
+        
+        Args:
+            logical_to_physical_mapping: 逻辑节点到物理节点的映射
+                                       如果为None，则使用1:1映射
+        """
+        if logical_to_physical_mapping is None:
+            # 默认1:1映射
+            all_logical_nodes = set()
+            for config in self.ip_configurations.values():
+                all_logical_nodes.update(config.keys())
+            
+            self.node_mapping = {node: node for node in all_logical_nodes}
+        else:
+            self.node_mapping = logical_to_physical_mapping.copy()
+        
+        if self.verbose:
+            print(f"Node mapping established: {self.node_mapping}")
+
+    def get_required_ip_modules(self) -> Dict[Tuple[str, int], str]:
+        """获取所有需要的IP模块配置
+        
+        Returns:
+            {(ip_type, physical_node): ip_type}的字典
+        """
+        required_modules = {}
+        
+        for filename, file_config in self.ip_configurations.items():
+            for logical_node, ip_types in file_config.items():
+                # 映射到物理节点
+                physical_node = self.node_mapping.get(logical_node, logical_node)
+                
+                for ip_type in ip_types:
+                    key = (ip_type, physical_node)
+                    required_modules[key] = ip_type
+                    
+                    # 更新全局IP映射
+                    self.global_ip_mapping[(ip_type, logical_node)] = physical_node
+        
+        if self.verbose:
+            print(f"Required IP modules: {len(required_modules)} total")
+            for (ip_type, node), _ in sorted(required_modules.items()):
+                print(f"  {ip_type} at node {node}")
+        
+        return required_modules
+
+    def get_ip_configurations_summary(self) -> Dict[str, any]:
+        """获取IP配置摘要信息"""
+        return {
+            "total_traffic_files": len(self.ip_configurations),
+            "total_required_ips": len(self.required_ips),
+            "required_ip_types": sorted(list(self.required_ips)),
+            "node_mapping": self.node_mapping,
+            "ip_configurations": self.ip_configurations
+        }
+
     def reset(self):
         """重置调度器状态"""
         self.parallel_chains.clear()
         self.active_traffics.clear()
         self.current_cycle = 0  # 当前网络周期数
+        self.ip_configurations.clear()
+        self.global_ip_mapping.clear()
+        self.node_mapping.clear()
+        self.required_ips.clear()

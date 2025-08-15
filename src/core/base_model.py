@@ -195,11 +195,10 @@ class BaseModel:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
             self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
-        self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
-        self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
-        self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
-        )
+        # 初始化为空集合，会在动态IP初始化后填充
+        self.rn_positions = set()
+        self.sn_positions = set()
+        self.flit_positions = set()
 
         # 缓存位置列表以避免重复转换
         self.rn_positions_list = list(self.rn_positions)
@@ -220,18 +219,9 @@ class BaseModel:
         self.routes = find_shortest_paths(self.adjacency_matrix)
         self.node = Node(self.config)
         self.ip_modules = {}
-        for ip_pos in self.flit_positions:
-            for ip_type in self.config.CH_NAME_LIST:
-                self.ip_modules[(ip_type, ip_pos)] = IPInterface(
-                    ip_type,
-                    ip_pos,
-                    self.config,
-                    self.req_network,
-                    self.rsp_network,
-                    self.data_network,
-                    self.node,
-                    self.routes,
-                )
+
+        # 延迟IP模块初始化，等待traffic解析完成后动态创建
+        self._ip_modules_initialized = False
         self.flits = []
         self.throughput_time = []
         self.data_count = 0
@@ -290,10 +280,8 @@ class BaseModel:
             "data": self.flit_positions,
         }
 
-        self.dma_rw_counts = self.config._make_channels(
-            ("gdma", "sdma", "cdma"),
-            {ip: {"read": 0, "write": 0} for ip in set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)},
-        )
+        # dma_rw_counts 会在动态IP初始化后设置
+        self.dma_rw_counts = self.config._make_channels(("gdma", "sdma", "cdma"), {})
 
         self.rn_bandwidth = {
             "SDMA read DDR": {"time": [], "bandwidth": []},
@@ -542,24 +530,23 @@ class BaseModel:
             self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "received_flit")
 
     def syn_IP_stat(self):
-        for ip_pos in self.flit_positions_list:
-            for ip_type in self.config.CH_NAME_LIST:
-                ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
-                if self.model_type_stat == "REQ_RSP":
-                    self.read_retry_num_stat += ip_interface.read_retry_num_stat
-                    self.write_retry_num_stat += ip_interface.write_retry_num_stat
-                self.req_cir_h_num_stat += ip_interface.req_cir_h_num
-                self.req_cir_v_num_stat += ip_interface.req_cir_v_num
-                self.rsp_cir_h_num_stat += ip_interface.rsp_cir_h_num
-                self.rsp_cir_v_num_stat += ip_interface.rsp_cir_v_num
-                self.data_cir_h_num_stat += ip_interface.data_cir_h_num
-                self.data_cir_v_num_stat += ip_interface.data_cir_v_num
-                self.req_wait_cycle_h_num_stat += ip_interface.req_wait_cycles_h
-                self.req_wait_cycle_v_num_stat += ip_interface.req_wait_cycles_v
-                self.rsp_wait_cycle_h_num_stat += ip_interface.rsp_wait_cycles_h
-                self.rsp_wait_cycle_v_num_stat += ip_interface.rsp_wait_cycles_v
-                self.data_wait_cycle_h_num_stat += ip_interface.data_wait_cycles_h
-                self.data_wait_cycle_v_num_stat += ip_interface.data_wait_cycles_v
+        # 只对实际存在的IP模块进行统计
+        for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
+            if self.model_type_stat == "REQ_RSP":
+                self.read_retry_num_stat += ip_interface.read_retry_num_stat
+                self.write_retry_num_stat += ip_interface.write_retry_num_stat
+            self.req_cir_h_num_stat += ip_interface.req_cir_h_num
+            self.req_cir_v_num_stat += ip_interface.req_cir_v_num
+            self.rsp_cir_h_num_stat += ip_interface.rsp_cir_h_num
+            self.rsp_cir_v_num_stat += ip_interface.rsp_cir_v_num
+            self.data_cir_h_num_stat += ip_interface.data_cir_h_num
+            self.data_cir_v_num_stat += ip_interface.data_cir_v_num
+            self.req_wait_cycle_h_num_stat += ip_interface.req_wait_cycles_h
+            self.req_wait_cycle_v_num_stat += ip_interface.req_wait_cycles_v
+            self.rsp_wait_cycle_h_num_stat += ip_interface.rsp_wait_cycles_h
+            self.rsp_wait_cycle_v_num_stat += ip_interface.rsp_wait_cycles_v
+            self.data_wait_cycle_h_num_stat += ip_interface.data_wait_cycles_h
+            self.data_wait_cycle_v_num_stat += ip_interface.data_wait_cycles_v
 
     def debug_func(self):
         if self.print_trace:
@@ -575,22 +562,20 @@ class BaseModel:
             self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle)
 
     def ip_inject_to_network(self):
-        for ip_pos in self.flit_positions_list:
-            for ip_type in self.config.CH_NAME_LIST:
-                ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
-                ip_interface.inject_step(self.cycle)
+        # 只对实际存在的IP模块执行inject
+        for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
+            ip_interface.inject_step(self.cycle)
 
     def network_to_ip_eject(self):
         """从网络到IP的eject步骤，并更新received_flit统计"""
-        for ip_pos in self.flit_positions_list:
-            for ip_type in self.config.CH_NAME_LIST:
-                ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
-                # 执行eject，获取已到达目的IP的flit列表
-                ejected_flits = ip_interface.eject_step(self.cycle)
-                # 更新TrafficScheduler中的received_flit统计
-                if ejected_flits:
-                    for flit in ejected_flits:
-                        self.update_traffic_completion_stats(flit)
+        # 只对实际存在的IP模块执行eject
+        for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
+            # 执行eject，获取已到达目的IP的flit列表
+            ejected_flits = ip_interface.eject_step(self.cycle)
+            # 更新TrafficScheduler中的received_flit统计
+            if ejected_flits:
+                for flit in ejected_flits:
+                    self.update_traffic_completion_stats(flit)
 
     def release_completed_sn_tracker(self):
         """Check if any trackers can be released based on the current cycle."""
@@ -604,78 +589,79 @@ class BaseModel:
                     ip_interface: IPInterface = self.ip_modules[(sn_type, ip_pos)]
                     ip_interface.release_completed_sn_tracker(req)
 
-    def _move_pre_to_queues(self, network: Network, in_pos):
+    def _move_pre_to_queues(self, network: Network, pos):
         """Move all items from pre-injection queues to injection queues for a given network."""
         # ===  注入队列 *_pre → *_FIFO ===
-        ip_pos = in_pos - self.config.NUM_COL  # 本列对应的 IP 位置
+        # 统一使用pos，不再计算偏移
 
         # IQ_channel_buffer_pre → IQ_channel_buffer
         for ip_type in network.IQ_channel_buffer_pre.keys():
             queue_pre = network.IQ_channel_buffer_pre[ip_type]
             queue = network.IQ_channel_buffer[ip_type]
-            if queue_pre[in_pos] and len(queue[in_pos]) < self.config.IQ_CH_FIFO_DEPTH:
-                flit = queue_pre[in_pos]
+            if queue_pre[pos] and len(queue[pos]) < self.config.IQ_CH_FIFO_DEPTH:
+                flit = queue_pre[pos]
                 flit.flit_position = "IQ_CH"
-                queue[in_pos].append(flit)
-                queue_pre[in_pos] = None
+                queue[pos].append(flit)
+                queue_pre[pos] = None
 
         # IQ_pre → IQ_OUT
         for direction in self.IQ_directions:
             queue_pre = network.inject_queues_pre[direction]
             queue = network.inject_queues[direction]
-            if queue_pre[in_pos] and len(queue[in_pos]) < self.config.RB_OUT_FIFO_DEPTH:
-                flit = queue_pre[in_pos]
+            if queue_pre[pos] and len(queue[pos]) < self.config.RB_OUT_FIFO_DEPTH:
+                flit = queue_pre[pos]
                 flit.departure_inject_cycle = self.cycle
                 flit.flit_position = f"IQ_{direction}"
-                queue[in_pos].append(flit)
-                queue_pre[in_pos] = None
+                queue[pos].append(flit)
+                queue_pre[pos] = None
 
-        # RB_IN_PRE → RB_IN
+        # RB_IN_PRE → RB_IN (使用单一索引)
         for direction in ["TL", "TR"]:
-            queue_pre = network.ring_bridge_pre[direction]
-            queue = network.ring_bridge[direction]
-            key = (in_pos, ip_pos)
-            if queue_pre[key] and len(queue[key]) < self.config.RB_IN_FIFO_DEPTH:
-                flit = queue_pre[key]
+            if pos in network.ring_bridge_pre[direction] and network.ring_bridge_pre[direction][pos] and len(network.ring_bridge[direction][pos]) < self.config.RB_IN_FIFO_DEPTH:
+                flit = network.ring_bridge_pre[direction][pos]
                 flit.flit_position = f"RB_{direction}"
-                queue[key].append(flit)
-                queue_pre[key] = None
+                network.ring_bridge[direction][pos].append(flit)
+                network.ring_bridge_pre[direction][pos] = None
 
-        # RB_OUT_PRE → RB_OUT
-        for fifo_pos in ("EQ", "TU", "TD"):
-            queue_pre = network.ring_bridge_pre[fifo_pos]
-            queue = network.ring_bridge[fifo_pos]
-            key = (in_pos, ip_pos)
-            if queue_pre[key] and len(queue[key]) < self.config.RB_OUT_FIFO_DEPTH:
-                flit = queue_pre[key]
-                flit.is_arrive = fifo_pos == "EQ"
-                flit.flit_position = f"RB_{fifo_pos}"
-                queue[key].append(flit)
-                queue_pre[key] = None
+        # RB_OUT_PRE → RB_OUT (使用单一索引)  
+        for direction in ["TU", "TD"]:
+            if pos in network.ring_bridge_pre[direction] and network.ring_bridge_pre[direction][pos] and len(network.ring_bridge[direction][pos]) < self.config.RB_OUT_FIFO_DEPTH:
+                flit = network.ring_bridge_pre[direction][pos]
+                flit.flit_position = f"RB_{direction}"
+                network.ring_bridge[direction][pos].append(flit)
+                network.ring_bridge_pre[direction][pos] = None
+        
+        # EQ方向使用单一索引
+        if pos in network.ring_bridge_pre["EQ"] and network.ring_bridge_pre["EQ"][pos] and len(network.ring_bridge["EQ"][pos]) < self.config.RB_OUT_FIFO_DEPTH:
+            flit = network.ring_bridge_pre["EQ"][pos]
+            flit.is_arrive = True
+            flit.flit_position = "RB_EQ"
+            network.ring_bridge["EQ"][pos].append(flit)
+            network.ring_bridge_pre["EQ"][pos] = None
 
         # EQ_IN_PRE → EQ_IN
         for fifo_pos in ("TU", "TD"):
             queue_pre = network.eject_queues_in_pre[fifo_pos]
             queue = network.eject_queues[fifo_pos]
-            if queue_pre[ip_pos] and len(queue[ip_pos]) < self.config.EQ_IN_FIFO_DEPTH:
-                flit = queue_pre[ip_pos]
+            if queue_pre[pos] and len(queue[pos]) < self.config.EQ_IN_FIFO_DEPTH:
+                flit = queue_pre[pos]
                 flit.is_arrive = fifo_pos == "EQ"
                 flit.flit_position = f"EQ_{fifo_pos}"
-                queue[ip_pos].append(flit)
-                queue_pre[ip_pos] = None
+                queue[pos].append(flit)
+                queue_pre[pos] = None
 
         # EQ_channel_buffer_pre → EQ_channel_buffer
         for ip_type in network.EQ_channel_buffer_pre.keys():
             queue_pre = network.EQ_channel_buffer_pre[ip_type]
             queue = network.EQ_channel_buffer[ip_type]
-            if queue_pre[ip_pos] and len(queue[ip_pos]) < self.config.EQ_CH_FIFO_DEPTH:
-                flit = queue_pre[ip_pos]
+            if queue_pre[pos] and len(queue[pos]) < self.config.EQ_CH_FIFO_DEPTH:
+                flit = queue_pre[pos]
                 flit.flit_position = "EQ_CH"
-                queue[ip_pos].append(flit)
-                queue_pre[ip_pos] = None
+                queue[pos].append(flit)
+                queue_pre[pos] = None
 
         # 更新FIFO统计
-        network.update_fifo_stats_after_move(in_pos)
+        network.update_fifo_stats_after_move(pos)
 
     def print_data_statistic(self):
         if self.verbose:
@@ -730,7 +716,8 @@ class BaseModel:
         """
         for ip_pos in ip_positions:
             for direction in self.IQ_directions:
-                rr_queue = network.round_robin["IQ"][direction][ip_pos - self.config.NUM_COL]
+                # 在动态IP模式下，直接使用ip_pos
+                rr_queue = network.round_robin["IQ"][direction][ip_pos]
                 queue_pre = network.inject_queues_pre[direction]
                 if queue_pre[ip_pos]:
                     continue  # pre 槽占用
@@ -800,15 +787,14 @@ class BaseModel:
 
     def move_pre_to_queues_all(self):
         #  所有 IPInterface 的 *_pre → FIFO
-        for ip_pos in self.flit_positions_list:
-            for ip_type in self.config.CH_NAME_LIST:
-                self.ip_modules[(ip_type, ip_pos)].move_pre_to_fifo()
+        for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
+            ip_interface.move_pre_to_fifo()
 
-        # 所有网络的 *_pre → FIFO
-        for in_pos in self.flit_positions_list:
-            self._move_pre_to_queues(self.req_network, in_pos)
-            self._move_pre_to_queues(self.rsp_network, in_pos)
-            self._move_pre_to_queues(self.data_network, in_pos)
+        # 所有网络的 *_pre → FIFO - 遍历所有节点，因为所有节点都有基础网络结构
+        for pos in range(self.config.NUM_NODE):
+            self._move_pre_to_queues(self.req_network, pos)
+            self._move_pre_to_queues(self.rsp_network, pos)
+            self._move_pre_to_queues(self.data_network, pos)
 
     def update_throughput_metrics(self, flits):
         """Update throughput metrics based on flit counts."""
@@ -819,6 +805,12 @@ class BaseModel:
         # 启动初始的traffic
         self.traffic_scheduler.start_initial_traffics()
 
+        # 设置CrossRing拓扑的节点映射关系
+        self._setup_crossring_node_mapping()
+
+        # 动态初始化IP模块
+        self._initialize_dynamic_ip_modules()
+
         # 从TrafficScheduler获取统计信息
         total_stats = self._get_total_traffic_stats()
         self.read_req = total_stats["read_req"]
@@ -828,6 +820,167 @@ class BaseModel:
 
         # 统计输出保持原行为
         self.print_data_statistic()
+
+    def _setup_crossring_node_mapping(self):
+        """设置CrossRing拓扑的节点映射关系，使用现有的node_map函数"""
+        # 获取所有在traffic中出现的逻辑节点
+        all_logical_nodes = set()
+        for config in self.traffic_scheduler.ip_configurations.values():
+            all_logical_nodes.update(config.keys())
+        
+        # 分析traffic文件，确定每个节点的角色（源还是目标）
+        node_roles = {}  # {logical_node: "source"/"destination"/"both"}
+        for filename, file_config in self.traffic_scheduler.ip_configurations.items():
+            for logical_node, ip_types in file_config.items():
+                for ip_type in ip_types:
+                    if ip_type.startswith(("gdma", "sdma", "cdma")):
+                        # 通常作为源节点
+                        if logical_node not in node_roles:
+                            node_roles[logical_node] = "source"
+                        elif node_roles[logical_node] == "destination":
+                            node_roles[logical_node] = "both"
+                    elif ip_type.startswith(("ddr", "l2m")):
+                        # 通常作为目标节点
+                        if logical_node not in node_roles:
+                            node_roles[logical_node] = "destination"
+                        elif node_roles[logical_node] == "source":
+                            node_roles[logical_node] = "both"
+        
+        # 使用现有的node_map函数创建映射
+        logical_to_physical = {}
+        for logical_node in sorted(all_logical_nodes):
+            role = node_roles.get(logical_node, "source")
+            # 根据节点角色选择映射方式
+            if role == "source" or role == "both":
+                physical_node = self.node_map(logical_node, is_source=True)
+            else:  # destination
+                physical_node = self.node_map(logical_node, is_source=False)
+            logical_to_physical[logical_node] = physical_node
+        
+        # 设置映射
+        self.traffic_scheduler.setup_node_mapping(logical_to_physical)
+        
+        if self.verbose:
+            print(f"CrossRing node mapping using node_map: {logical_to_physical}")
+            print(f"Node roles: {node_roles}")
+
+    def _initialize_dynamic_ip_modules(self):
+        """基于traffic配置动态初始化IP模块"""
+        if self._ip_modules_initialized:
+            return
+
+        # 获取需要的IP模块配置
+        required_modules = self.traffic_scheduler.get_required_ip_modules()
+
+        if self.verbose:
+            ip_summary = self.traffic_scheduler.get_ip_configurations_summary()
+            print(f"Initializing dynamic IP modules:")
+            print(f"  Total IP types: {ip_summary['total_required_ips']}")
+            print(f"  IP types: {ip_summary['required_ip_types']}")
+            print(f"  Total modules: {len(required_modules)}")
+
+        # 动态创建需要的IP模块
+        for (ip_type, ip_pos), _ in required_modules.items():
+            if (ip_type, ip_pos) not in self.ip_modules:
+                try:
+                    self.ip_modules[(ip_type, ip_pos)] = IPInterface(
+                        ip_type,
+                        ip_pos,
+                        self.config,
+                        self.req_network,
+                        self.rsp_network,
+                        self.data_network,
+                        self.node,
+                        self.routes,
+                    )
+                    
+                    # 为这个IP类型和位置初始化channel buffer
+                    for network in [self.req_network, self.rsp_network, self.data_network]:
+                        if hasattr(network, "initialize_ip_channel_buffers"):
+                            network.initialize_ip_channel_buffers(ip_type, ip_pos)
+                    
+                    if self.verbose:
+                        print(f"  Created IP module: {ip_type} at node {ip_pos}")
+                except Exception as e:
+                    logging.warning(f"Failed to create IP module ({ip_type}, {ip_pos}): {e}")
+
+        # 初始化节点的动态IP挂载
+        self._setup_dynamic_node_attachments(required_modules)
+
+        # 更新位置集合
+        self._update_position_sets(required_modules)
+
+        # 初始化网络结构
+        self._initialize_network_structures()
+
+        self._ip_modules_initialized = True
+
+        if self.verbose:
+            print(f"Dynamic IP initialization completed. Total modules: {len(self.ip_modules)}")
+            print(f"  RN positions: {sorted(self.rn_positions)}")
+            print(f"  SN positions: {sorted(self.sn_positions)}")
+            print(f"  All flit positions: {sorted(self.flit_positions)}")
+
+    def _setup_dynamic_node_attachments(self, required_modules):
+        """为节点设置动态IP挂载"""
+        for (ip_type, ip_pos), _ in required_modules.items():
+            # 通知节点挂载IP（如果节点支持动态挂载）
+            if hasattr(self.node, "attach_ip"):
+                self.node.attach_ip(ip_type, ip_pos)
+
+    def _update_position_sets(self, required_modules):
+        """根据动态IP模块更新位置集合"""
+        # 清空原有集合
+        self.rn_positions.clear()
+        self.sn_positions.clear()
+        self.flit_positions.clear()
+
+        # 根据IP类型分类添加位置
+        for (ip_type, ip_pos), _ in required_modules.items():
+            ip_prefix = ip_type.split("_")[0]
+
+            if ip_prefix in ("sdma", "gdma", "cdma"):
+                self.rn_positions.add(ip_pos)
+            elif ip_prefix in ("ddr", "l2m"):
+                self.sn_positions.add(ip_pos)
+
+            # 所有IP位置都是flit位置
+            self.flit_positions.add(ip_pos)
+
+        # 更新缓存的位置列表
+        self.rn_positions_list = list(self.rn_positions)
+        self.sn_positions_list = list(self.sn_positions)
+        self.flit_positions_list = list(self.flit_positions)
+
+        # 更新dma_rw_counts
+        self._update_dma_rw_counts(required_modules)
+
+    def _update_dma_rw_counts(self, required_modules):
+        """更新DMA读写计数结构"""
+        # 重新初始化dma_rw_counts以包含实际的IP位置
+        rn_positions = set()
+        for (ip_type, ip_pos), _ in required_modules.items():
+            ip_prefix = ip_type.split("_")[0]
+            if ip_prefix in ("sdma", "gdma", "cdma"):
+                rn_positions.add(ip_pos)
+
+        self.dma_rw_counts = self.config._make_channels(
+            ("gdma", "sdma", "cdma"),
+            {ip: {"read": 0, "write": 0} for ip in rn_positions},
+        )
+
+    def _initialize_network_structures(self):
+        """初始化网络结构"""
+        # 所有节点都需要基础的IQ、RB、EQ结构
+        all_nodes = set(range(self.config.NUM_NODE))
+        
+        # 为所有网络初始化结构
+        for network in [self.req_network, self.rsp_network, self.data_network]:
+            if hasattr(network, "initialize_dynamic_structures"):
+                network.initialize_dynamic_structures(all_nodes, self.adjacency_matrix)
+        
+        if self.verbose:
+            print(f"Initialized network structures for all {len(all_nodes)} nodes")
 
     def _get_total_traffic_stats(self):
         """从所有链中统计总的请求和flit数量"""
@@ -892,18 +1045,23 @@ class BaseModel:
         # req.cmd_entry_cake0_cycle = self.cycle
 
         try:
+            # 通过节点映射获取正确的物理节点位置
+            logical_src = req.source
+            physical_src = self.traffic_scheduler.node_mapping.get(logical_src, logical_src)
+
             # 通过IPInterface处理请求
-            ip_pos = req.source
+            ip_pos = physical_src
             ip_type = req.source_type
 
-            ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
+            ip_interface: IPInterface = self.ip_modules.get((ip_type, ip_pos))
             if ip_interface is None:
-                raise ValueError(f"IP module setup error for ({ip_type}, {ip_pos})!")
+                raise ValueError(f"IP module not found for ({ip_type}, {ip_pos})! " f"Logical node {logical_src} -> Physical node {physical_src}")
 
-            # 检查IP接口是否能接受新请求（可选的流控机制）
-            if hasattr(ip_interface, "can_accept_request") and not ip_interface.can_accept_request():
-                if self.traffic_scheduler.verbose:
-                    print(f"Warning: IP interface ({ip_type}, {ip_pos}) is busy, request may be delayed")
+            # 更新请求中的源和目标为物理节点编号
+            req.source = physical_src
+            logical_dst = req.destination
+            physical_dst = self.traffic_scheduler.node_mapping.get(logical_dst, logical_dst)
+            req.destination = physical_dst
 
             ip_interface.enqueue(req, "req")
 
@@ -1078,44 +1236,25 @@ class BaseModel:
                 next_pos = pos - self.config.NUM_COL
 
                 # 获取各方向的flit
-                station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
+                station_flits = [network.ring_bridge[fifo_name][pos][0] if network.ring_bridge[fifo_name][pos] else None for fifo_name in ["TL", "TR"]] + [
                     network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
-                if any(station_flits) and len(network.ring_bridge["EQ"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    network.ring_bridge_pre["EQ"][(pos, next_pos)] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, "EQ", lambda d, n: d == n)
+                if any(station_flits) and len(network.ring_bridge["EQ"][pos]) < self.config.RB_OUT_FIFO_DEPTH:
+                    network.ring_bridge_pre["EQ"][pos] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, "EQ", lambda d, n: d == n)
                 # 处理TU操作
-                if any(station_flits) and len(network.ring_bridge["TU"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    network.ring_bridge_pre["TU"][(pos, next_pos)] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, "TU", lambda d, n: d < n)
+                if any(station_flits) and len(network.ring_bridge["TU"][pos]) < self.config.RB_OUT_FIFO_DEPTH:
+                    network.ring_bridge_pre["TU"][pos] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, "TU", lambda d, n: d < n)
 
                 # 处理TD操作
-                if any(station_flits) and len(network.ring_bridge["TD"][(pos, next_pos)]) < self.config.RB_OUT_FIFO_DEPTH:
-                    network.ring_bridge_pre["TD"][(pos, next_pos)] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, "TD", lambda d, n: d > n)
+                if any(station_flits) and len(network.ring_bridge["TD"][pos]) < self.config.RB_OUT_FIFO_DEPTH:
+                    network.ring_bridge_pre["TD"][pos] = self._ring_bridge_arbitrate(network, station_flits, pos, next_pos, "TD", lambda d, n: d > n)
 
     def RB_inject_vertical(self, network: Network):
         RB_inject_flits = []
-        for ip_pos in self.flit_positions:
-            next_pos = ip_pos - self.config.NUM_COL
-            up_node, down_node = (
-                next_pos - self.config.NUM_COL * 2,
-                next_pos + self.config.NUM_COL * 2,
-            )
-            if up_node < 0:
-                up_node = next_pos
-            if down_node >= self.config.NUM_NODE:
-                down_node = next_pos
-
-            # 处理TU方向
-            TU_inject_flit = self._process_ring_bridge_inject(network, "TU", ip_pos, next_pos, down_node, up_node)
-            if TU_inject_flit:
-                RB_inject_flits.append(TU_inject_flit)
-
-            # 处理TD方向
-            TD_inject_flit = self._process_ring_bridge_inject(network, "TD", ip_pos, next_pos, up_node, down_node)
-            if TD_inject_flit:
-                RB_inject_flits.append(TD_inject_flit)
-
+        # 在动态IP模式下，跳过传统的垂直ring bridge注入
+        # 因为我们只初始化了实际需要的IP位置，不涉及复杂的CrossRing垂直连接
         return RB_inject_flits
 
     def _ring_bridge_arbitrate(self, network: Network, station_flits, pos, next_pos, direction, cmp_func):
@@ -1124,7 +1263,7 @@ class BaseModel:
         cmp_func: 一个函数，接受 (flit.destination, next_pos)，返回True/False
         """
         RB_flit = None
-        rr_index = network.round_robin["RB"][direction][next_pos]
+        rr_index = network.round_robin["RB"][direction][pos]
         for i in rr_index:
             if station_flits[i] and cmp_func(station_flits[i].destination, next_pos):
                 RB_flit = station_flits[i]
@@ -1136,19 +1275,19 @@ class BaseModel:
     def _update_ring_bridge(self, network: Network, pos, next_pos, direction, index):
         """更新transfer stations"""
         if index == 0:
-            flit = network.ring_bridge["TL"][(pos, next_pos)].popleft()
+            flit = network.ring_bridge["TL"][pos].popleft()
             if flit.used_entry_level == "T0":
-                network.RB_UE_Counters["TL"][(pos, next_pos)]["T0"] -= 1
+                network.RB_UE_Counters["TL"][pos]["T0"] -= 1
             elif flit.used_entry_level == "T1":
-                network.RB_UE_Counters["TL"][(pos, next_pos)]["T1"] -= 1
+                network.RB_UE_Counters["TL"][pos]["T1"] -= 1
             elif flit.used_entry_level == "T2":
-                network.RB_UE_Counters["TL"][(pos, next_pos)]["T2"] -= 1
+                network.RB_UE_Counters["TL"][pos]["T2"] -= 1
         elif index == 1:
-            flit = network.ring_bridge["TR"][(pos, next_pos)].popleft()
+            flit = network.ring_bridge["TR"][pos].popleft()
             if flit.used_entry_level == "T1":
-                network.RB_UE_Counters["TR"][(pos, next_pos)]["T1"] -= 1
+                network.RB_UE_Counters["TR"][pos]["T1"] -= 1
             elif flit.used_entry_level == "T2":
-                network.RB_UE_Counters["TR"][(pos, next_pos)]["T2"] -= 1
+                network.RB_UE_Counters["TR"][pos]["T2"] -= 1
         elif index == 2:
             flit = network.inject_queues["TU"][pos].popleft()
         elif index == 3:
@@ -1200,17 +1339,17 @@ class BaseModel:
             return  # 不合法的flit_type
 
         # 2. 统一处理eject_queues和ring_bridge
-        for in_pos in in_pos_position:
-            ip_pos = in_pos - self.config.NUM_COL
+        for pos in in_pos_position:
+            # 统一使用pos，不再区分ip_pos和in_pos
             # 构造eject_flits
             eject_flits = (
-                [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["TU", "TD"]]
-                + [network.inject_queues[fifo_pos][in_pos][0] if network.inject_queues[fifo_pos][in_pos] else None for fifo_pos in ["EQ"]]
-                + [network.ring_bridge["EQ"][(in_pos, ip_pos)][0] if network.ring_bridge["EQ"][(in_pos, ip_pos)] else None]
+                [network.eject_queues[fifo_pos][pos][0] if network.eject_queues[fifo_pos][pos] else None for fifo_pos in ["TU", "TD"]]
+                + [network.inject_queues[fifo_pos][pos][0] if network.inject_queues[fifo_pos][pos] else None for fifo_pos in ["EQ"]]
+                + [network.ring_bridge["EQ"][pos + self.config.NUM_COL][0] if network.ring_bridge["EQ"][pos+ self.config.NUM_COL] else None]
             )
             if not any(eject_flits):
                 continue
-            self._move_to_eject_queues_pre(network, eject_flits, ip_pos)
+            self._move_to_eject_queues_pre(network, eject_flits, pos)
 
     def _process_ring_bridge_inject(self, network: Network, dir_key, pos, next_pos, curr_node, opposite_node):
         direction = dir_key  # "TU" or "TD"
@@ -1418,85 +1557,98 @@ class BaseModel:
             if (row_start, row_start) in network.links_tag:
                 network.links_tag[(row_start, row_start)][-1] = last_position
 
-    def _move_to_eject_queues_pre(self, network: Network, eject_flits, ip_pos):
+    def _move_to_eject_queues_pre(self, network: Network, eject_flits, pos):
         for ip_type in network.EQ_channel_buffer.keys():
-            rr_queue = network.round_robin["EQ"][ip_type][ip_pos]
+            # 检查当前位置是否有此IP类型的round robin queue
+            if pos not in network.round_robin["EQ"][ip_type]:
+                continue
+                
+            rr_queue = network.round_robin["EQ"][ip_type][pos]
             for i in rr_queue:
                 if eject_flits[i] is None:
                     continue
-                if eject_flits[i].destination_type == ip_type and len(network.EQ_channel_buffer[ip_type][ip_pos]) < network.config.EQ_CH_FIFO_DEPTH:
-                    in_pos = ip_pos + self.config.NUM_COL
-                    network.EQ_channel_buffer_pre[ip_type][ip_pos] = eject_flits[i]
+                if eject_flits[i].destination_type == ip_type:
+                    # 对于CrossRing拓扑，需要找到目标IP实际所在的物理节点
+                    # 通过反向查找destination在哪个物理节点有对应的IP
+                    target_physical_pos = None
+                    for check_pos in network.EQ_channel_buffer[ip_type].keys():
+                        if check_pos in network.EQ_channel_buffer[ip_type] and len(network.EQ_channel_buffer[ip_type][check_pos]) < network.config.EQ_CH_FIFO_DEPTH:
+                            target_physical_pos = check_pos
+                            break
+                    
+                    if target_physical_pos is not None:
+                        # 使用目标IP实际所在的物理节点位置
+                        network.EQ_channel_buffer_pre[ip_type][target_physical_pos] = eject_flits[i]
                     eject_flits[i].is_arrive = True
                     eject_flits[i].arrival_eject_cycle = self.cycle
                     eject_flits[i] = None
                     if i == 0:
-                        flit = network.eject_queues["TU"][ip_pos].popleft()
+                        flit = network.eject_queues["TU"][pos].popleft()
                         if flit.used_entry_level == "T0":
-                            network.EQ_UE_Counters["TU"][ip_pos]["T0"] -= 1
+                            network.EQ_UE_Counters["TU"][pos]["T0"] -= 1
                         elif flit.used_entry_level == "T1":
-                            network.EQ_UE_Counters["TU"][ip_pos]["T1"] -= 1
+                            network.EQ_UE_Counters["TU"][pos]["T1"] -= 1
                         elif flit.used_entry_level == "T2":
-                            network.EQ_UE_Counters["TU"][ip_pos]["T2"] -= 1
+                            network.EQ_UE_Counters["TU"][pos]["T2"] -= 1
                     elif i == 1:
-                        flit = network.eject_queues["TD"][ip_pos].popleft()
+                        flit = network.eject_queues["TD"][pos].popleft()
                         if flit.used_entry_level == "T1":
-                            network.EQ_UE_Counters["TD"][ip_pos]["T1"] -= 1
+                            network.EQ_UE_Counters["TD"][pos]["T1"] -= 1
                         elif flit.used_entry_level == "T2":
-                            network.EQ_UE_Counters["TD"][ip_pos]["T2"] -= 1
+                            network.EQ_UE_Counters["TD"][pos]["T2"] -= 1
                     elif i == 2:
-                        flit = network.inject_queues["EQ"][in_pos].popleft()
+                        flit = network.inject_queues["EQ"][pos].popleft()
                     elif i == 3:
-                        flit = network.ring_bridge["EQ"][(in_pos, ip_pos)].popleft()
+                        flit = network.ring_bridge["EQ"][pos].popleft()
 
                     # 获取通道类型
                     flit_channel_type = getattr(flit, "flit_type", "req")  # 默认为req
 
                     # 更新总数据量统计（所有经过的flit，无论ETag等级）
-                    if in_pos in self.EQ_total_flits_per_node:
+                    if pos in self.EQ_total_flits_per_node:
                         if i == 0:  # TU direction
-                            self.EQ_total_flits_per_node[in_pos]["TU"] += 1
+                            self.EQ_total_flits_per_node[pos]["TU"] += 1
                         elif i == 1:  # TD direction
-                            self.EQ_total_flits_per_node[in_pos]["TD"] += 1
+                            self.EQ_total_flits_per_node[pos]["TD"] += 1
 
                     # 更新按通道分类的总数据量统计
-                    if in_pos in self.EQ_total_flits_per_channel.get(flit_channel_type, {}):
+                    if pos in self.EQ_total_flits_per_channel.get(flit_channel_type, {}):
                         if i == 0:  # TU direction
-                            self.EQ_total_flits_per_channel[flit_channel_type][in_pos]["TU"] += 1
+                            self.EQ_total_flits_per_channel[flit_channel_type][pos]["TU"] += 1
                         elif i == 1:  # TD direction
-                            self.EQ_total_flits_per_channel[flit_channel_type][in_pos]["TD"] += 1
+                            self.EQ_total_flits_per_channel[flit_channel_type][pos]["TD"] += 1
 
                     if flit.ETag_priority == "T1":
                         self.EQ_ETag_T1_num_stat += 1
                         # Update per-node FIFO statistics (only for TU and TD directions)
-                        if ip_pos in self.EQ_ETag_T1_per_node_fifo:
+                        if pos in self.EQ_ETag_T1_per_node_fifo:
                             if i == 0:  # TU direction
-                                self.EQ_ETag_T1_per_node_fifo[ip_pos]["TU"] += 1
+                                self.EQ_ETag_T1_per_node_fifo[pos]["TU"] += 1
                             elif i == 1:  # TD direction
-                                self.EQ_ETag_T1_per_node_fifo[ip_pos]["TD"] += 1
+                                self.EQ_ETag_T1_per_node_fifo[pos]["TD"] += 1
 
                         # Update per-channel statistics
-                        if ip_pos in self.EQ_ETag_T1_per_channel.get(flit_channel_type, {}):
+                        if pos in self.EQ_ETag_T1_per_channel.get(flit_channel_type, {}):
                             if i == 0:  # TU direction
-                                self.EQ_ETag_T1_per_channel[flit_channel_type][ip_pos]["TU"] += 1
+                                self.EQ_ETag_T1_per_channel[flit_channel_type][pos]["TU"] += 1
                             elif i == 1:  # TD direction
-                                self.EQ_ETag_T1_per_channel[flit_channel_type][ip_pos]["TD"] += 1
+                                self.EQ_ETag_T1_per_channel[flit_channel_type][pos]["TD"] += 1
 
                     elif flit.ETag_priority == "T0":
                         self.EQ_ETag_T0_num_stat += 1
                         # Update per-node FIFO statistics (only for TU and TD directions)
-                        if in_pos in self.EQ_ETag_T0_per_node_fifo:
+                        if pos in self.EQ_ETag_T0_per_node_fifo:
                             if i == 0:  # TU direction
-                                self.EQ_ETag_T0_per_node_fifo[in_pos]["TU"] += 1
+                                self.EQ_ETag_T0_per_node_fifo[pos]["TU"] += 1
                             elif i == 1:  # TD direction
-                                self.EQ_ETag_T0_per_node_fifo[in_pos]["TD"] += 1
+                                self.EQ_ETag_T0_per_node_fifo[pos]["TD"] += 1
 
                         # Update per-channel statistics
-                        if in_pos in self.EQ_ETag_T0_per_channel.get(flit_channel_type, {}):
+                        if pos in self.EQ_ETag_T0_per_channel.get(flit_channel_type, {}):
                             if i == 0:  # TU direction
-                                self.EQ_ETag_T0_per_channel[flit_channel_type][in_pos]["TU"] += 1
+                                self.EQ_ETag_T0_per_channel[flit_channel_type][pos]["TU"] += 1
                             elif i == 1:  # TD direction
-                                self.EQ_ETag_T0_per_channel[flit_channel_type][in_pos]["TD"] += 1
+                                self.EQ_ETag_T0_per_channel[flit_channel_type][pos]["TD"] += 1
                     flit.ETag_priority = "T2"
 
                     rr_queue.remove(i)

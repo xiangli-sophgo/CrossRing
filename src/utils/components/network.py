@@ -130,54 +130,130 @@ class Network:
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}
         self.ETag_BOTHSIDE_UPGRADE = False
 
-        for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
-            self.cross_point["horizontal"][ip_pos]["TL"] = [None] * 2
-            self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
-            self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2
-            self.cross_point["vertical"][ip_pos]["TD"] = [None] * 2
-            self.inject_queues["TL"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
-            self.inject_queues["TR"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
-            self.inject_queues["TU"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
-            self.inject_queues["TD"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
-            self.inject_queues["EQ"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_EQ)
-            self.inject_queues_pre["TL"][ip_pos] = None
-            self.inject_queues_pre["TR"][ip_pos] = None
-            self.inject_queues_pre["TU"][ip_pos] = None
-            self.inject_queues_pre["TD"][ip_pos] = None
-            self.inject_queues_pre["EQ"][ip_pos] = None
-            for key in self.config.CH_NAME_LIST:
-                self.IQ_channel_buffer_pre[key][ip_pos] = None
-                self.EQ_channel_buffer_pre[key][ip_pos - config.NUM_COL] = None
+        # 这些结构现在会在动态初始化时创建
+        # 保留为空结构，等待后续动态添加
+
+    def initialize_dynamic_structures(self, all_positions, adjacency_matrix):
+        """基于所有节点位置初始化网络结构
+
+        Args:
+            all_positions: 所有节点位置的集合
+            adjacency_matrix: 邻接矩阵
+        """
+        config = self.config
+        self.adjacency_matrix = adjacency_matrix  # 保存邻接矩阵的引用
+
+        # 首先初始化全局结构（链路和tags）
+        self._initialize_global_structures()
+
+        # 为所有节点初始化基础网络结构
+        for pos in all_positions:
+            # 基本结构初始化
+            self.cross_point["horizontal"][pos]["TL"] = [None] * 2
+            self.cross_point["horizontal"][pos]["TR"] = [None] * 2
+            self.cross_point["vertical"][pos]["TU"] = [None] * 2
+            self.cross_point["vertical"][pos]["TD"] = [None] * 2
+
+            # Inject队列初始化
+            self.inject_queues["TL"][pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
+            self.inject_queues["TR"][pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
+            self.inject_queues["TU"][pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
+            self.inject_queues["TD"][pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
+            self.inject_queues["EQ"][pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_EQ)
+
+            # Inject队列pre初始化
+            self.inject_queues_pre["TL"][pos] = None
+            self.inject_queues_pre["TR"][pos] = None
+            self.inject_queues_pre["TU"][pos] = None
+            self.inject_queues_pre["TD"][pos] = None
+            self.inject_queues_pre["EQ"][pos] = None
+
+            # Channel buffer将在动态IP挂载时单独初始化
+
+            # Eject相关结构 - 为所有节点初始化
             for key in self.arrive_node_pre:
-                self.arrive_node_pre[key][ip_pos - config.NUM_COL] = None
-            self.eject_queues["TU"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
-            self.eject_queues["TD"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
-            self.eject_queues_in_pre["TU"][ip_pos - config.NUM_COL] = None
-            self.eject_queues_in_pre["TD"][ip_pos - config.NUM_COL] = None
-            self.EQ_UE_Counters["TU"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0, "T0": 0}
-            self.EQ_UE_Counters["TD"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0}
+                self.arrive_node_pre[key][pos] = None
+            self.eject_queues["TU"][pos] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
+            self.eject_queues["TD"][pos] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
+            self.eject_queues_in_pre["TU"][pos] = None
+            self.eject_queues_in_pre["TD"][pos] = None
 
+            # EQ计数器
+            self.EQ_UE_Counters["TU"][pos] = {"T2": 0, "T1": 0, "T0": 0}
+            self.EQ_UE_Counters["TD"][pos] = {"T2": 0, "T1": 0}
+
+            # RB计数器初始化 - 使用单一位置索引
+            self.RB_UE_Counters["TL"][pos] = {"T2": 0, "T1": 0, "T0": 0}
+            self.RB_UE_Counters["TR"][pos] = {"T2": 0, "T1": 0}
+
+            # Ring bridge初始化 - 所有方向都使用单一位置索引
+            self.ring_bridge["TL"][pos] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
+            self.ring_bridge["TR"][pos] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
+            self.ring_bridge["TU"][pos] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
+            self.ring_bridge["TD"][pos] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
+            self.ring_bridge["EQ"][pos] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
+
+            self.ring_bridge_pre["TL"][pos] = None
+            self.ring_bridge_pre["TR"][pos] = None
+            self.ring_bridge_pre["TU"][pos] = None
+            self.ring_bridge_pre["TD"][pos] = None
+            self.ring_bridge_pre["EQ"][pos] = None
+
+            # Round robin初始化 - 只初始化基础的RB round robin，IQ和EQ的将在IP挂载时初始化
             for key in self.round_robin.keys():
-                if key == "IQ":
-                    for fifo_name in ["TR", "TL", "TU", "TD", "EQ"]:
-                        self.round_robin[key][fifo_name][ip_pos] = deque()
-                        self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque()
-                        for ch_name in self.IQ_channel_buffer.keys():
-                            self.round_robin[key][fifo_name][ip_pos].append(ch_name)
-                            self.round_robin[key][fifo_name][ip_pos - config.NUM_COL].append(ch_name)
-                elif key == "EQ":
-                    for ch_name in self.IQ_channel_buffer.keys():
-                        self.round_robin[key][ch_name][ip_pos] = deque([0, 1, 2, 3])
-                        self.round_robin[key][ch_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3])
-                else:
+                if key == "RB":
                     for fifo_name in ["TU", "TD", "EQ"]:
-                        self.round_robin[key][fifo_name][ip_pos] = deque([0, 1, 2, 3])
-                        self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3])
+                        self.round_robin[key][fifo_name][pos] = deque([0, 1, 2, 3])
 
-            self.inject_time[ip_pos] = []
-            self.eject_time[ip_pos - config.NUM_COL] = []
-            self.avg_inject_time[ip_pos] = 0
-            self.avg_eject_time[ip_pos - config.NUM_COL] = 1
+            # 时间统计
+            self.inject_time[pos] = []
+            self.eject_time[pos] = []
+            self.avg_inject_time[pos] = 0
+            self.avg_eject_time[pos] = 1
+
+    def initialize_ip_channel_buffers(self, ip_type, pos):
+        """为特定IP类型和位置初始化channel buffer"""
+        config = self.config
+
+        # 确保字典存在
+        if ip_type not in self.IQ_channel_buffer:
+            self.IQ_channel_buffer[ip_type] = {}
+        if ip_type not in self.EQ_channel_buffer:
+            self.EQ_channel_buffer[ip_type] = {}
+        if ip_type not in self.IQ_channel_buffer_pre:
+            self.IQ_channel_buffer_pre[ip_type] = {}
+        if ip_type not in self.EQ_channel_buffer_pre:
+            self.EQ_channel_buffer_pre[ip_type] = {}
+
+        # 初始化该位置的channel buffer
+        self.IQ_channel_buffer[ip_type][pos] = deque(maxlen=config.IQ_CH_FIFO_DEPTH)
+        self.IQ_channel_buffer_pre[ip_type][pos] = None
+
+        self.EQ_channel_buffer[ip_type][pos] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
+        self.EQ_channel_buffer_pre[ip_type][pos] = None
+
+        # 初始化对应的round robin仲裁
+        # 为IQ round robin添加这个IP类型
+        for fifo_name in ["TR", "TL", "TU", "TD", "EQ"]:
+            if fifo_name not in self.round_robin["IQ"]:
+                self.round_robin["IQ"][fifo_name] = {}
+            if pos not in self.round_robin["IQ"][fifo_name]:
+                self.round_robin["IQ"][fifo_name][pos] = deque()
+            if ip_type not in self.round_robin["IQ"][fifo_name][pos]:
+                self.round_robin["IQ"][fifo_name][pos].append(ip_type)
+
+        # 为EQ round robin添加这个IP类型
+        if ip_type not in self.round_robin["EQ"]:
+            self.round_robin["EQ"][ip_type] = {}
+        if pos not in self.round_robin["EQ"][ip_type]:
+            self.round_robin["EQ"][ip_type][pos] = deque([0, 1, 2, 3])
+
+    def _initialize_global_structures(self):
+        """初始化全局网络结构（只执行一次）"""
+        config = self.config
+        adjacency_matrix = getattr(self, "adjacency_matrix", None)
+        if adjacency_matrix is None:
+            return  # 如果没有邻接矩阵，跳过链路初始化
 
         for i in range(config.NUM_NODE):
             for j in range(config.NUM_NODE):
@@ -235,37 +311,19 @@ class Network:
                 self.links_tag[(i, i)] = [None] * 2
                 self.links_tag[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
 
-        for row in range(1, config.NUM_ROW, 2):
-            for col in range(config.NUM_COL):
-                pos = row * config.NUM_COL + col
-                next_pos = pos - config.NUM_COL
-                self.ring_bridge["TL"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
-                self.ring_bridge["TR"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
-                self.ring_bridge["TU"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
-                self.ring_bridge["TD"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
-                self.ring_bridge["EQ"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
-
-                self.ring_bridge_pre["TL"][(pos, next_pos)] = None
-                self.ring_bridge_pre["TR"][(pos, next_pos)] = None
-                self.ring_bridge_pre["TU"][(pos, next_pos)] = None
-                self.ring_bridge_pre["TD"][(pos, next_pos)] = None
-                self.ring_bridge_pre["EQ"][(pos, next_pos)] = None
-
-                self.RB_UE_Counters["TL"][(pos, next_pos)] = {"T2": 0, "T1": 0, "T0": 0}
-                self.RB_UE_Counters["TR"][(pos, next_pos)] = {"T2": 0, "T1": 0}
-                # self.round_robin["TU"][next_pos] = deque([0, 1, 2])
-                # self.round_robin["TD"][next_pos] = deque([0, 1, 2])
-                # self.round_robin["RB"][next_pos] = deque([0, 1, 2])
-                for direction in ["TL", "TR"]:
-                    self.remain_tag[direction][pos] = config.ITag_MAX_NUM_H
-                    self.itag_req_counter[direction][pos] = 0
-                    self.tagged_counter[direction][pos] = 0
-                    self.excess_ITag_to_remove[direction][pos] = 0
-                for direction in ["TU", "TD"]:
-                    self.remain_tag[direction][pos] = config.ITag_MAX_NUM_V
-                    self.itag_req_counter[direction][pos] = 0
-                    self.tagged_counter[direction][pos] = 0
-                    self.excess_ITag_to_remove[direction][pos] = 0
+        # Ring bridge的初始化已经在动态初始化中完成，这里不再重复初始化
+        # 初始化ITag相关计数器
+        for i in range(config.NUM_NODE):
+            for direction in ["TL", "TR"]:
+                self.remain_tag[direction][i] = config.ITag_MAX_NUM_H
+                self.itag_req_counter[direction][i] = 0
+                self.tagged_counter[direction][i] = 0
+                self.excess_ITag_to_remove[direction][i] = 0
+            for direction in ["TU", "TD"]:
+                self.remain_tag[direction][i] = config.ITag_MAX_NUM_V
+                self.itag_req_counter[direction][i] = 0
+                self.tagged_counter[direction][i] = 0
+                self.excess_ITag_to_remove[direction][i] = 0
 
         for ip_type in self.num_recv.keys():
             source_positions = getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST")
@@ -567,9 +625,9 @@ class Network:
                 if next_node == flit.current_position:
                     # Flit已经绕横向环一圈，尝试下环
                     flit.eject_attempts_h += 1  # 每次尝试下环就计数
-                    link_station = self.ring_bridge["TR"].get((next_node, target_eject_node_id))
-                    can_use_T1 = self._entry_available("TR", (next_node, target_eject_node_id), "T1")
-                    can_use_T2 = self._entry_available("TR", (next_node, target_eject_node_id), "T2")
+                    link_station = self.ring_bridge["TR"].get(next_node)
+                    can_use_T1 = self._entry_available("TR", next_node, "T1")
+                    can_use_T2 = self._entry_available("TR", next_node, "T2")
                     # TR方向尝试下环
                     if (
                         len(link_station) < self.config.RB_IN_FIFO_DEPTH
@@ -590,16 +648,16 @@ class Network:
                             # 若升级到T0则需要从T0队列中移除flit
                             self.T0_Etag_Order_FIFO.remove((next_node, flit))
                             if can_use_T1:
-                                self._occupy_entry("TR", (next_node, target_eject_node_id), "T1", flit)
+                                self._occupy_entry("TR", next_node, "T1", flit)
                             else:
-                                self._occupy_entry("TR", (next_node, target_eject_node_id), "T2", flit)
+                                self._occupy_entry("TR", next_node, "T2", flit)
                         elif flit.ETag_priority == "T2":
-                            self._occupy_entry("TR", (next_node, target_eject_node_id), "T2", flit)
+                            self._occupy_entry("TR", next_node, "T2", flit)
                         elif flit.ETag_priority == "T1":
                             if can_use_T1:
-                                self._occupy_entry("TR", (next_node, target_eject_node_id), "T1", flit)
+                                self._occupy_entry("TR", next_node, "T1", flit)
                             else:
-                                self._occupy_entry("TR", (next_node, target_eject_node_id), "T2", flit)
+                                self._occupy_entry("TR", next_node, "T2", flit)
                         # 更新保序跟踪表
                         self._update_order_tracking_table(flit)
                     else:
@@ -621,10 +679,10 @@ class Network:
             elif next_node == row_end:
                 if next_node == flit.current_position:
                     flit.eject_attempts_h += 1
-                    link_station = self.ring_bridge["TL"].get((next_node, target_eject_node_id))
-                    can_use_T0 = self._entry_available("TL", (next_node, target_eject_node_id), "T0")
-                    can_use_T1 = self._entry_available("TL", (next_node, target_eject_node_id), "T1")
-                    can_use_T2 = self._entry_available("TL", (next_node, target_eject_node_id), "T2")
+                    link_station = self.ring_bridge["TL"].get(next_node)
+                    can_use_T0 = self._entry_available("TL", next_node, "T0")
+                    can_use_T1 = self._entry_available("TL", next_node, "T1")
+                    can_use_T2 = self._entry_available("TL", next_node, "T2")
                     # 尝试TL下环，非T0情况
                     if flit.ETag_priority in ["T1", "T2"]:
                         if (
@@ -641,14 +699,14 @@ class Network:
                             link[flit.current_seat_index] = None
                             flit.current_seat_index = 0
                             if flit.ETag_priority == "T2":
-                                self._occupy_entry("TL", (next_node, target_eject_node_id), "T2", flit)
+                                self._occupy_entry("TL", next_node, "T2", flit)
                             elif flit.ETag_priority == "T1":
                                 if can_use_T1:
                                     # T1使用T1 entry
-                                    self._occupy_entry("TL", (next_node, target_eject_node_id), "T1", flit)
+                                    self._occupy_entry("TL", next_node, "T1", flit)
                                 else:
                                     # T1使用T2 entry
-                                    self._occupy_entry("TL", (next_node, target_eject_node_id), "T2", flit)
+                                    self._occupy_entry("TL", next_node, "T2", flit)
                             # 更新保序跟踪表
                             self._update_order_tracking_table(flit)
 
@@ -670,7 +728,7 @@ class Network:
                             # 按优先级尝试: T0专用 > T1 > T2
                             if self.T0_Etag_Order_FIFO[0] == (next_node, flit) and can_use_T0:
                                 # 使用T0专用entry
-                                self._occupy_entry("TL", (next_node, target_eject_node_id), "T0", flit)
+                                self._occupy_entry("TL", next_node, "T0", flit)
                                 flit.is_delay = False
                                 flit.current_link = (next_node, target_eject_node_id)
                                 link[flit.current_seat_index] = None
@@ -678,7 +736,7 @@ class Network:
                                 self.T0_Etag_Order_FIFO.popleft()
                             elif can_use_T1:
                                 # 使用T1 entry
-                                self._occupy_entry("TL", (next_node, target_eject_node_id), "T1", flit)
+                                self._occupy_entry("TL", next_node, "T1", flit)
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                                 flit.is_delay = False
                                 flit.current_link = (next_node, target_eject_node_id)
@@ -686,7 +744,7 @@ class Network:
                                 flit.current_seat_index = 0
                             elif can_use_T2:
                                 # 使用T2 entry
-                                self._occupy_entry("TL", (next_node, target_eject_node_id), "T2", flit)
+                                self._occupy_entry("TL", next_node, "T2", flit)
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                                 flit.is_delay = False
                                 flit.current_link = (next_node, target_eject_node_id)
@@ -847,10 +905,10 @@ class Network:
             if next_node == flit.current_position:
                 flit.eject_attempts_h += 1
                 if current - next_node == 1:
-                    link_station = self.ring_bridge["TL"].get((next_node, target_eject_node_id))
-                    can_use_T0 = self._entry_available("TL", (next_node, target_eject_node_id), "T0")
-                    can_use_T1 = self._entry_available("TL", (next_node, target_eject_node_id), "T1")
-                    can_use_T2 = self._entry_available("TL", (next_node, target_eject_node_id), "T2")
+                    link_station = self.ring_bridge["TL"].get(next_node)
+                    can_use_T0 = self._entry_available("TL", next_node, "T0")
+                    can_use_T1 = self._entry_available("TL", next_node, "T1")
+                    can_use_T2 = self._entry_available("TL", next_node, "T2")
 
                     if flit.ETag_priority in ["T1", "T2"]:
                         if len(link_station) < self.config.RB_IN_FIFO_DEPTH and (
@@ -864,14 +922,14 @@ class Network:
                             flit.current_seat_index = 0
 
                             if flit.ETag_priority == "T2":
-                                self._occupy_entry("TL", (next_node, target_eject_node_id), "T2", flit)
+                                self._occupy_entry("TL", next_node, "T2", flit)
                             elif flit.ETag_priority == "T1":
                                 if can_use_T1:
                                     # T1使用T1 entry
-                                    self._occupy_entry("TL", (next_node, target_eject_node_id), "T1", flit)
+                                    self._occupy_entry("TL", next_node, "T1", flit)
                                 else:
                                     # T1使用T2 entry
-                                    self._occupy_entry("TL", (next_node, target_eject_node_id), "T2", flit)
+                                    self._occupy_entry("TL", next_node, "T2", flit)
 
                         else:
                             if flit.ETag_priority == "T2":
@@ -890,7 +948,7 @@ class Network:
                             # 按优先级尝试: T0专用 > T1 > T2
                             if self.T0_Etag_Order_FIFO[0] == (next_node, flit) and can_use_T0:
                                 # 使用T0专用entry
-                                self._occupy_entry("TL", (next_node, target_eject_node_id), "T0", flit)
+                                self._occupy_entry("TL", next_node, "T0", flit)
                                 flit.is_delay = False
                                 flit.current_link = (next_node, target_eject_node_id)
                                 link[flit.current_seat_index] = None
@@ -898,7 +956,7 @@ class Network:
                                 self.T0_Etag_Order_FIFO.popleft()
                             elif can_use_T1:
                                 # 使用T1 entry
-                                self._occupy_entry("TL", (next_node, target_eject_node_id), "T1", flit)
+                                self._occupy_entry("TL", next_node, "T1", flit)
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                                 flit.is_delay = False
                                 flit.current_link = (next_node, target_eject_node_id)
@@ -906,7 +964,7 @@ class Network:
                                 flit.current_seat_index = 0
                             elif can_use_T2:
                                 # 使用T2 entry
-                                self._occupy_entry("TL", (next_node, target_eject_node_id), "T2", flit)
+                                self._occupy_entry("TL", next_node, "T2", flit)
                                 self.T0_Etag_Order_FIFO.remove((next_node, flit))
                                 flit.is_delay = False
                                 flit.current_link = (next_node, target_eject_node_id)
@@ -926,9 +984,9 @@ class Network:
                             flit.current_seat_index = 0
                 else:
                     # 横向环TR尝试下环
-                    link_station = self.ring_bridge["TR"].get((next_node, target_eject_node_id))
-                    can_use_T1 = self._entry_available("TR", (next_node, target_eject_node_id), "T1")
-                    can_use_T2 = self._entry_available("TR", (next_node, target_eject_node_id), "T2")
+                    link_station = self.ring_bridge["TR"].get(next_node)
+                    can_use_T1 = self._entry_available("TR", next_node, "T1")
+                    can_use_T2 = self._entry_available("TR", next_node, "T2")
 
                     if len(link_station) < self.config.RB_IN_FIFO_DEPTH and (
                         (flit.ETag_priority == "T1" and can_use_T1) or (flit.ETag_priority == "T2" and can_use_T2) or (flit.ETag_priority == "T0" and (can_use_T1 or can_use_T2))
@@ -943,19 +1001,19 @@ class Network:
                             self.T0_Etag_Order_FIFO.remove((next_node, flit))
                             if can_use_T1:
                                 # T0使用T1 entry
-                                self._occupy_entry("TR", (next_node, target_eject_node_id), "T1", flit)
+                                self._occupy_entry("TR", next_node, "T1", flit)
                             else:
                                 # T0使用T2 entry
-                                self._occupy_entry("TR", (next_node, target_eject_node_id), "T2", flit)
+                                self._occupy_entry("TR", next_node, "T2", flit)
                         elif flit.ETag_priority == "T2":
-                            self._occupy_entry("TR", (next_node, target_eject_node_id), "T2", flit)
+                            self._occupy_entry("TR", next_node, "T2", flit)
                         elif flit.ETag_priority == "T1":
                             if can_use_T1:
                                 # T1使用T1 entry
-                                self._occupy_entry("TR", (next_node, target_eject_node_id), "T1", flit)
+                                self._occupy_entry("TR", next_node, "T1", flit)
                             else:
                                 # T1使用T2 entry
-                                self._occupy_entry("TR", (next_node, target_eject_node_id), "T2", flit)
+                                self._occupy_entry("TR", next_node, "T2", flit)
                     else:
                         link[flit.current_seat_index] = None
                         next_pos = min(next_node + 1, row_end)
@@ -1126,15 +1184,15 @@ class Network:
         """判断该flit是否需要保序检查"""
         if not self.config.ENABLE_IN_ORDER_EJECTION:
             return False
-        
+
         # 获取真实的src和dest
         src = flit.source_original if flit.source_original != -1 else flit.source
         dest = flit.destination_original if flit.destination_original != -1 else flit.destination
-        
+
         # 如果未配置特定对或配置为空，则全部保序
-        if not hasattr(self.config, 'IN_ORDER_EJECTION_PAIRS') or len(self.config.IN_ORDER_EJECTION_PAIRS) == 0:
+        if not hasattr(self.config, "IN_ORDER_EJECTION_PAIRS") or len(self.config.IN_ORDER_EJECTION_PAIRS) == 0:
             return True
-        
+
         # 检查是否在配置的保序对列表中
         return [src, dest] in self.config.IN_ORDER_EJECTION_PAIRS
 
@@ -1143,22 +1201,22 @@ class Network:
         # 先判断是否需要保序
         if not self._need_in_order_check(flit):
             return True
-        
+
         # 确保flit已设置保序信息
         if not hasattr(flit, "src_dest_order_id") or not hasattr(flit, "packet_category"):
             return True
-        
+
         if flit.src_dest_order_id == -1 or flit.packet_category is None:
             return True
-        
+
         # 获取原始的src和dest
         src = flit.source_original if flit.source_original != -1 else flit.source
         dest = flit.destination_original if flit.destination_original != -1 else flit.destination
-        
+
         # 从节点获取保序跟踪表
         if not hasattr(self, "node") or self.node is None:
             return True
-        
+
         # 检查是否是期望的下一个顺序ID
         expected_order_id = self.node.order_tracking_table[(src, dest)][flit.packet_category] + 1
         return flit.src_dest_order_id == expected_order_id
@@ -1226,16 +1284,16 @@ class Network:
             # 2b. 横向环向左进入Ring Bridge
             elif current - next_node == 1:
                 flit.eject_attempts_h += 1
-                station = self.ring_bridge["TL"].get((new_current, new_next_node))
+                station = self.ring_bridge["TL"].get(new_current)
                 # TL有空位
-                if self.config.RB_IN_FIFO_DEPTH > len(station) and self.RB_UE_Counters["TL"].get((new_current, new_next_node))["T2"] < self.config.TL_Etag_T2_UE_MAX:
+                if self.config.RB_IN_FIFO_DEPTH > len(station) and self.RB_UE_Counters["TL"].get(new_current)["T2"] < self.config.TL_Etag_T2_UE_MAX:
                     flit.current_link = (new_current, new_next_node)
                     link[flit.current_seat_index] = None
                     flit.current_seat_index = 0
                     # 更新计数器
-                    self._occupy_entry("TL", (new_current, new_next_node), "T2", flit)
+                    self._occupy_entry("TL", new_current, "T2", flit)
                 else:
-                    # TL无空位: 预留到右侧等待队列，设置延迟标志，ETag升级
+                    # TL无空位: 设置延迟标志，ETag升级
                     flit.ETag_priority = "T1"
                     next_pos = next_node - 1 if next_node - 1 >= row_start else row_start
                     flit.is_delay = True
@@ -1246,12 +1304,12 @@ class Network:
             # 2c. 横向环向右进入Ring Bridge
             elif current - next_node == -1:
                 flit.eject_attempts_h += 1
-                station = self.ring_bridge["TR"].get((new_current, new_next_node))
-                if self.config.RB_IN_FIFO_DEPTH > len(station) and self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX:
+                station = self.ring_bridge["TR"].get(new_current)
+                if self.config.RB_IN_FIFO_DEPTH > len(station) and self.RB_UE_Counters["TR"].get(new_current)["T2"] < self.config.TR_Etag_T2_UE_MAX:
                     flit.current_link = (new_current, new_next_node)
                     link[flit.current_seat_index] = None
                     flit.current_seat_index = 1
-                    self._occupy_entry("TR", (new_current, new_next_node), "T2", flit)
+                    self._occupy_entry("TR", new_current, "T2", flit)
                 else:
                     # TR无空位: 设置延迟标志，如果双边ETag升级，则升级ETag。
                     if self.ETag_BOTHSIDE_UPGRADE:
@@ -1310,10 +1368,12 @@ class Network:
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
-                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth and self.ring_bridge_pre[direction][flit.current_link] is None:
+                    # 使用current_link的起始节点位置（单一索引）
+                    pos = flit.current_link[0]
+                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][pos]) < max_depth and self.ring_bridge_pre[direction][pos] is None:
                         # flit.flit_position = f"RB_{direction}"
-                        # self.ring_bridge[direction][flit.current_link].append(flit)
-                        self.ring_bridge_pre[direction][flit.current_link] = flit
+                        # self.ring_bridge[direction][pos].append(flit)
+                        self.ring_bridge_pre[direction][pos] = flit
                         flit.is_on_station = True
             return False
         else:
@@ -1499,66 +1559,65 @@ class Network:
             # 更新总周期计数
             self.links_flow_stat[link]["total_cycles"] += 1
 
-    def update_fifo_stats_after_move(self, in_pos):
+    def update_fifo_stats_after_move(self, pos):
         """在move操作后批量更新所有FIFO统计"""
-        ip_pos = in_pos - self.config.NUM_COL
+        # 统一使用pos，不再计算ip_pos偏移
 
         # IQ统计 - inject_queues
         for direction in ["TR", "TL", "TU", "TD", "EQ"]:
-            if in_pos in self.inject_queues.get(direction, {}):
-                depth = len(self.inject_queues[direction][in_pos])
-                if in_pos not in self.fifo_depth_sum["IQ"][direction]:
-                    self.fifo_depth_sum["IQ"][direction][in_pos] = 0
-                    self.fifo_max_depth["IQ"][direction][in_pos] = 0
-                self.fifo_depth_sum["IQ"][direction][in_pos] += depth
-                self.fifo_max_depth["IQ"][direction][in_pos] = max(self.fifo_max_depth["IQ"][direction][in_pos], depth)
+            if pos in self.inject_queues.get(direction, {}):
+                depth = len(self.inject_queues[direction][pos])
+                if pos not in self.fifo_depth_sum["IQ"][direction]:
+                    self.fifo_depth_sum["IQ"][direction][pos] = 0
+                    self.fifo_max_depth["IQ"][direction][pos] = 0
+                self.fifo_depth_sum["IQ"][direction][pos] += depth
+                self.fifo_max_depth["IQ"][direction][pos] = max(self.fifo_max_depth["IQ"][direction][pos], depth)
 
         # IQ CH_buffer统计
         for ip_type in self.IQ_channel_buffer:
-            if in_pos in self.IQ_channel_buffer[ip_type]:
-                depth = len(self.IQ_channel_buffer[ip_type][in_pos])
-                if in_pos not in self.fifo_depth_sum["IQ"]["CH_buffer"]:
-                    self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos] = {}
-                    self.fifo_max_depth["IQ"]["CH_buffer"][in_pos] = {}
-                if ip_type not in self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos]:
-                    self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos][ip_type] = 0
-                    self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type] = 0
-                self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos][ip_type] += depth
-                self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type] = max(self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type], depth)
+            if pos in self.IQ_channel_buffer[ip_type]:
+                depth = len(self.IQ_channel_buffer[ip_type][pos])
+                if pos not in self.fifo_depth_sum["IQ"]["CH_buffer"]:
+                    self.fifo_depth_sum["IQ"]["CH_buffer"][pos] = {}
+                    self.fifo_max_depth["IQ"]["CH_buffer"][pos] = {}
+                if ip_type not in self.fifo_depth_sum["IQ"]["CH_buffer"][pos]:
+                    self.fifo_depth_sum["IQ"]["CH_buffer"][pos][ip_type] = 0
+                    self.fifo_max_depth["IQ"]["CH_buffer"][pos][ip_type] = 0
+                self.fifo_depth_sum["IQ"]["CH_buffer"][pos][ip_type] += depth
+                self.fifo_max_depth["IQ"]["CH_buffer"][pos][ip_type] = max(self.fifo_max_depth["IQ"]["CH_buffer"][pos][ip_type], depth)
 
-        # RB统计 - ring_bridge
-        key = (in_pos, ip_pos)
+        # RB统计 - ring_bridge (所有方向现在都使用单一索引)
         for direction in ["TR", "TL", "TU", "TD", "EQ"]:
-            if key in self.ring_bridge.get(direction, {}):
-                depth = len(self.ring_bridge[direction][key])
-                if key not in self.fifo_depth_sum["RB"][direction]:
-                    self.fifo_depth_sum["RB"][direction][key] = 0
-                    self.fifo_max_depth["RB"][direction][key] = 0
-                self.fifo_depth_sum["RB"][direction][key] += depth
-                self.fifo_max_depth["RB"][direction][key] = max(self.fifo_max_depth["RB"][direction][key], depth)
+            if pos in self.ring_bridge.get(direction, {}):
+                depth = len(self.ring_bridge[direction][pos])
+                if pos not in self.fifo_depth_sum["RB"][direction]:
+                    self.fifo_depth_sum["RB"][direction][pos] = 0
+                    self.fifo_max_depth["RB"][direction][pos] = 0
+                self.fifo_depth_sum["RB"][direction][pos] += depth
+                self.fifo_max_depth["RB"][direction][pos] = max(self.fifo_max_depth["RB"][direction][pos], depth)
 
         # EQ统计 - eject_queues
         for direction in ["TU", "TD"]:
-            if ip_pos in self.eject_queues.get(direction, {}):
-                depth = len(self.eject_queues[direction][ip_pos])
-                if ip_pos not in self.fifo_depth_sum["EQ"][direction]:
-                    self.fifo_depth_sum["EQ"][direction][ip_pos] = 0
-                    self.fifo_max_depth["EQ"][direction][ip_pos] = 0
-                self.fifo_depth_sum["EQ"][direction][ip_pos] += depth
-                self.fifo_max_depth["EQ"][direction][ip_pos] = max(self.fifo_max_depth["EQ"][direction][ip_pos], depth)
+            if pos in self.eject_queues.get(direction, {}):
+                depth = len(self.eject_queues[direction][pos])
+                if pos not in self.fifo_depth_sum["EQ"][direction]:
+                    self.fifo_depth_sum["EQ"][direction][pos] = 0
+                    self.fifo_max_depth["EQ"][direction][pos] = 0
+                self.fifo_depth_sum["EQ"][direction][pos] += depth
+                self.fifo_max_depth["EQ"][direction][pos] = max(self.fifo_max_depth["EQ"][direction][pos], depth)
 
         # EQ CH_buffer统计
         for ip_type in self.EQ_channel_buffer:
-            if ip_pos in self.EQ_channel_buffer[ip_type]:
-                depth = len(self.EQ_channel_buffer[ip_type][ip_pos])
-                if ip_pos not in self.fifo_depth_sum["EQ"]["CH_buffer"]:
-                    self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos] = {}
-                    self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos] = {}
-                if ip_type not in self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos]:
-                    self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos][ip_type] = 0
-                    self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type] = 0
-                self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos][ip_type] += depth
-                self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type] = max(self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type], depth)
+            if pos in self.EQ_channel_buffer[ip_type]:
+                depth = len(self.EQ_channel_buffer[ip_type][pos])
+                if pos not in self.fifo_depth_sum["EQ"]["CH_buffer"]:
+                    self.fifo_depth_sum["EQ"]["CH_buffer"][pos] = {}
+                    self.fifo_max_depth["EQ"]["CH_buffer"][pos] = {}
+                if ip_type not in self.fifo_depth_sum["EQ"]["CH_buffer"][pos]:
+                    self.fifo_depth_sum["EQ"]["CH_buffer"][pos][ip_type] = 0
+                    self.fifo_max_depth["EQ"]["CH_buffer"][pos][ip_type] = 0
+                self.fifo_depth_sum["EQ"]["CH_buffer"][pos][ip_type] += depth
+                self.fifo_max_depth["EQ"]["CH_buffer"][pos][ip_type] = max(self.fifo_max_depth["EQ"]["CH_buffer"][pos][ip_type], depth)
 
     def get_links_utilization_stats(self):
         """

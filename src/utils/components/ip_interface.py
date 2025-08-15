@@ -65,6 +65,12 @@ class IPInterface:
         self.data_network = data_network
         self.node = node
         self.routes = routes
+        
+        # 验证IP配置的有效性
+        self._validate_ip_configuration()
+        
+        # 标记IP为动态创建
+        self.is_dynamic = True
         self.read_retry_num_stat = 0
         self.write_retry_num_stat = 0
         self.req_wait_cycles_h = 0
@@ -157,6 +163,60 @@ class IPInterface:
             # 默认不限速
             self.tx_token_bucket = None
             self.rx_token_bucket = None
+
+    def _validate_ip_configuration(self):
+        """验证IP配置的有效性"""
+        try:
+            # 验证IP类型格式
+            if '_' not in self.ip_type:
+                raise ValueError(f"Invalid IP type format: {self.ip_type}. Expected format: 'type_id'")
+            
+            ip_prefix = self.ip_type.split('_')[0]
+            
+            # 验证IP类型是否支持
+            valid_ip_types = {"sdma", "gdma", "cdma", "ddr", "l2m"}
+            if ip_prefix not in valid_ip_types:
+                raise ValueError(f"Unsupported IP type: {ip_prefix}. Valid types: {valid_ip_types}")
+            
+            # 验证节点位置
+            if self.ip_pos < 0:
+                raise ValueError(f"Invalid node position: {self.ip_pos}. Must be non-negative")
+            
+            # 验证节点是否支持该IP类型（如果节点支持动态挂载检查）
+            if hasattr(self.node, 'is_ip_attached'):
+                if not self.node.is_ip_attached(self.ip_type, self.ip_pos):
+                    # 自动挂载IP到节点
+                    if hasattr(self.node, 'attach_ip'):
+                        self.node.attach_ip(self.ip_type, self.ip_pos)
+                    else:
+                        logging.warning(f"IP {self.ip_type} not attached to node {self.ip_pos}")
+            
+            logging.info(f"IP {self.ip_type} at position {self.ip_pos} validation passed")
+            
+        except Exception as e:
+            logging.error(f"IP configuration validation failed: {e}")
+            raise
+
+    def get_ip_status(self) -> dict:
+        """获取IP接口的状态信息"""
+        status = {
+            "ip_type": self.ip_type,
+            "ip_pos": self.ip_pos,
+            "is_dynamic": getattr(self, "is_dynamic", False),
+            "current_cycle": self.current_cycle,
+            "networks": {}
+        }
+        
+        for net_type, net_info in self.networks.items():
+            status["networks"][net_type] = {
+                "inject_fifo_size": len(net_info["inject_fifo"]),
+                "l2h_fifo_size": len(net_info["l2h_fifo"]),
+                "l2h_fifo_max": net_info["l2h_fifo"].maxlen,
+                "h2l_fifo_h_size": len(net_info["h2l_fifo_h"]),
+                "h2l_fifo_l_size": len(net_info["h2l_fifo_l"])
+            }
+        
+        return status
 
     def enqueue(self, flit: Flit, network_type: str, retry=False):
         """IP 核把flit丢进对应网络的 inject_fifo"""

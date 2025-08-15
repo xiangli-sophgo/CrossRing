@@ -125,23 +125,8 @@ class Network:
 
         self.token_bucket = defaultdict(dict)
         self.flit_size_bytes = 128
-        for ch_name in self.IQ_channel_buffer.keys():
-            for ip_pos in set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST):
-
-                if ch_name.startswith("ddr"):
-                    self.token_bucket[ip_pos][ch_name] = TokenBucket(
-                        rate=self.config.DDR_BW_LIMIT / self.config.NETWORK_FREQUENCY / self.flit_size_bytes,
-                        bucket_size=self.config.DDR_BW_LIMIT,
-                    )
-                    self.token_bucket[ip_pos - self.config.NUM_COL][ch_name] = TokenBucket(
-                        rate=self.config.DDR_BW_LIMIT / self.config.NETWORK_FREQUENCY / self.flit_size_bytes,
-                        bucket_size=self.config.DDR_BW_LIMIT,
-                    )
-                elif ch_name.startswith("l2m"):
-                    self.token_bucket[ip_pos][ch_name] = TokenBucket(
-                        rate=self.config.L2M_BW_LIMIT / self.config.NETWORK_FREQUENCY / self.flit_size_bytes,
-                        bucket_size=self.config.L2M_BW_LIMIT,
-                    )
+        # token_bucket 结构现在会在动态初始化时创建
+        # 保留为空，等待后续动态添加
 
         # ETag setup
         self.T0_Etag_Order_FIFO = deque()  # 用于轮询选择 T0 Flit 的 Order FIFO
@@ -149,59 +134,101 @@ class Network:
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}
         self.ETag_BOTHSIDE_UPGRADE = False
 
-        for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
+        # 这些结构现在会在动态初始化时创建
+        # 保留为空结构，等待后续动态添加
+        
+    def initialize_dynamic_structures(self, ip_positions, adjacency_matrix=None):
+        """基于动态IP位置初始化网络结构
+        
+        Args:
+            ip_positions: IP位置的集合
+            adjacency_matrix: 邻接矩阵（可选，network_v2可能不需要）
+        """
+        config = self.config
+        
+        # 初始化每个IP位置的结构
+        for ip_pos in ip_positions:
+            # 基本结构初始化
             self.cross_point["horizontal"][ip_pos]["TL"] = [None] * 2
             self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TD"] = [None] * 2
+            
+            # Inject队列初始化
             self.inject_queues["TL"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
             self.inject_queues["TR"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
             self.inject_queues["TU"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
             self.inject_queues["TD"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
             self.inject_queues["EQ"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_EQ)
+            
+            # Inject队列pre初始化
             self.inject_queues_pre["TL"][ip_pos] = None
             self.inject_queues_pre["TR"][ip_pos] = None
             self.inject_queues_pre["TU"][ip_pos] = None
             self.inject_queues_pre["TD"][ip_pos] = None
             self.inject_queues_pre["EQ"][ip_pos] = None
+            
+            # Channel buffer初始化
             for key in self.config.CH_NAME_LIST:
+                # 为该位置初始化通道缓冲区
+                if key not in self.IQ_channel_buffer:
+                    self.IQ_channel_buffer[key] = {}
+                if key not in self.EQ_channel_buffer:
+                    self.EQ_channel_buffer[key] = {}
+                if key not in self.IQ_channel_buffer_pre:
+                    self.IQ_channel_buffer_pre[key] = {}
+                if key not in self.EQ_channel_buffer_pre:
+                    self.EQ_channel_buffer_pre[key] = {}
+                    
+                self.IQ_channel_buffer[key][ip_pos] = deque(maxlen=config.IQ_CH_FIFO_DEPTH)
                 self.IQ_channel_buffer_pre[key][ip_pos] = None
-                self.EQ_channel_buffer_pre[key][ip_pos - config.NUM_COL] = None
+                
+                if ip_pos >= config.NUM_COL:  # 确保eject位置有效
+                    eject_pos = ip_pos - config.NUM_COL
+                    self.EQ_channel_buffer[key][eject_pos] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
+                    self.EQ_channel_buffer_pre[key][eject_pos] = None
+            
+            # Eject相关结构
+            eject_pos = ip_pos - config.NUM_COL if ip_pos >= config.NUM_COL else ip_pos
             for key in self.arrive_node_pre:
-                self.arrive_node_pre[key][ip_pos - config.NUM_COL] = None
-            self.eject_queues["TU"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
-            self.eject_queues["TD"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
-            self.eject_queues_in_pre["TU"][ip_pos - config.NUM_COL] = None
-            self.eject_queues_in_pre["TD"][ip_pos - config.NUM_COL] = None
-            self.EQ_UE_Counters["TU"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0, "T0": 0}
-            self.EQ_UE_Counters["TD"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0}
-
+                self.arrive_node_pre[key][eject_pos] = None
+            self.eject_queues["TU"][eject_pos] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
+            self.eject_queues["TD"][eject_pos] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
+            self.eject_queues_in_pre["TU"][eject_pos] = None
+            self.eject_queues_in_pre["TD"][eject_pos] = None
+            
+            # EQ计数器
+            self.EQ_UE_Counters["TU"][eject_pos] = {"T2": 0, "T1": 0, "T0": 0}
+            self.EQ_UE_Counters["TD"][eject_pos] = {"T2": 0, "T1": 0}
+            
+            # Round robin初始化
             for key in self.round_robin.keys():
                 if key == "IQ":
                     for fifo_name in ["TR", "TL", "TU", "TD", "EQ"]:
                         self.round_robin[key][fifo_name][ip_pos] = deque()
-                        self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque()
+                        self.round_robin[key][fifo_name][eject_pos] = deque()
                         for ch_name in self.IQ_channel_buffer.keys():
                             self.round_robin[key][fifo_name][ip_pos].append(ch_name)
-                            self.round_robin[key][fifo_name][ip_pos - config.NUM_COL].append(ch_name)
+                            self.round_robin[key][fifo_name][eject_pos].append(ch_name)
                 elif key == "EQ":
                     for ch_name in self.IQ_channel_buffer.keys():
                         self.round_robin[key][ch_name][ip_pos] = deque([0, 1, 2, 3])
-                        self.round_robin[key][ch_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3])
+                        self.round_robin[key][ch_name][eject_pos] = deque([0, 1, 2, 3])
                 else:  # RB仲裁
-                    # 扩展RB仲裁队列以支持4个输入源：
-                    # 0: TL_in (横向环左向输入)
-                    # 1: TR_in (横向环右向输入)
-                    # 2: TU_in (纵向环上行输入) - 新增
-                    # 3: TD_in (纵向环下行输入) - 新增
                     for fifo_name in ["TU_out", "TD_out", "EQ_out", "TR_out", "TL_out"]:
                         self.round_robin[key][fifo_name][ip_pos] = deque([0, 1, 2, 3])
-                        self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3])
-
+                        self.round_robin[key][fifo_name][eject_pos] = deque([0, 1, 2, 3])
+            
+            # 时间统计
             self.inject_time[ip_pos] = []
-            self.eject_time[ip_pos - config.NUM_COL] = []
+            self.eject_time[eject_pos] = []
             self.avg_inject_time[ip_pos] = 0
-            self.avg_eject_time[ip_pos - config.NUM_COL] = 1
+            self.avg_eject_time[eject_pos] = 1
+            
+            # ITag相关初始化
+            for direction in ["TL", "TR", "TU", "TD"]:
+                self.ITag_to_remove[direction][ip_pos] = 0
+                self.excess_ITag_to_remove[direction][ip_pos] = 0
 
         for i in range(config.NUM_NODE):
             for j in range(config.NUM_NODE):

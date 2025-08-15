@@ -198,19 +198,9 @@ class BandwidthAnalyzer:
         self._initialize_node_positions()
 
     def _initialize_node_positions(self):
-        """初始化RN和SN节点位置"""
-        if hasattr(self.config, "GDMA_SEND_POSITION_LIST"):
-            self.rn_positions.update(self.config.GDMA_SEND_POSITION_LIST)
-        if hasattr(self.config, "SDMA_SEND_POSITION_LIST"):
-            self.rn_positions.update(self.config.SDMA_SEND_POSITION_LIST)
-        if hasattr(self.config, "CDMA_SEND_POSITION_LIST"):
-            self.rn_positions.update(self.config.CDMA_SEND_POSITION_LIST)
-        if hasattr(self.config, "DDR_SEND_POSITION_LIST"):
-            self.sn_positions.update(pos - self.config.NUM_COL for pos in self.config.DDR_SEND_POSITION_LIST)
-            self.sn_positions.update(self.config.DDR_SEND_POSITION_LIST)
-        if hasattr(self.config, "L2M_SEND_POSITION_LIST"):
-            self.sn_positions.update(pos - self.config.NUM_COL for pos in self.config.L2M_SEND_POSITION_LIST)
-            self.sn_positions.update(self.config.L2M_SEND_POSITION_LIST)
+        """初始化RN和SN节点位置 - 从实际的模型中获取"""
+        # 在动态IP模式下，从模型中获取实际的位置信息
+        # 这个方法会在collect_requests_data被调用时执行，从sim_model中获取实际位置
 
     def collect_requests_data(self, sim_model, simulation_end_cycle=None) -> None:
         """从sim_model收集请求数据"""
@@ -218,6 +208,12 @@ class BandwidthAnalyzer:
         self.sim_model = sim_model
         # 存储仿真结束时间用于链路带宽计算
         self.simulation_end_cycle = simulation_end_cycle if simulation_end_cycle is not None else sim_model.cycle
+        
+        # 在动态IP模式下，从sim_model获取实际的位置信息
+        if hasattr(self.config, 'DYNAMIC_IP_MODE') and self.config.DYNAMIC_IP_MODE:
+            if hasattr(sim_model, 'rn_positions') and hasattr(sim_model, 'sn_positions'):
+                self.rn_positions = sim_model.rn_positions.copy()
+                self.sn_positions = sim_model.sn_positions.copy()
 
         for packet_id, flits in sim_model.data_network.arrive_flits.items():
             if not flits or len(flits) != flits[0].burst_length:

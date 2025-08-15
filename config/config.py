@@ -126,6 +126,10 @@ class CrossRingConfig:
         for key in self.CHANNEL_SPEC:
             for idx in range(self.CHANNEL_SPEC[key]):
                 self.CH_NAME_LIST.append(f"{key}_{idx}")
+        
+        # 动态IP模式标志
+        self.DYNAMIC_IP_MODE = True
+        
         assert (
             self.TL_Etag_T2_UE_MAX < self.TL_Etag_T1_UE_MAX < self.RB_IN_FIFO_DEPTH
             and self.TL_Etag_T2_UE_MAX < self.RB_IN_FIFO_DEPTH - 2
