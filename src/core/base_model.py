@@ -395,11 +395,61 @@ class BaseModel:
                 self.RB_ETag_T0_per_channel[channel][node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
                 self.RB_total_flits_per_channel[channel][node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
 
+    def step(self):
+        """Execute one simulation cycle step."""
+        # Tag moves
+        self.release_completed_sn_tracker()
+        
+        self.process_new_request()
+        
+        self.tag_move_all_networks()
+        
+        self.ip_inject_to_network()
+        
+        # Network arbitration and movement
+        self._inject_queue_arbitration(self.req_network, self.rn_positions_list, "req")
+        self._step_reqs = self.move_flits_in_network(self.req_network, self._step_reqs, "req")
+        
+        self._inject_queue_arbitration(self.rsp_network, self.sn_positions_list, "rsp")
+        self._step_rsps = self.move_flits_in_network(self.rsp_network, self._step_rsps, "rsp")
+        
+        self._inject_queue_arbitration(self.data_network, self.flit_positions_list, "data")
+        self._step_flits = self.move_flits_in_network(self.data_network, self._step_flits, "data")
+        
+        self.network_to_ip_eject()
+        
+        self.move_pre_to_queues_all()
+        
+        # Collect statistics
+        self.req_network.collect_cycle_end_link_statistics(self.cycle)
+        self.rsp_network.collect_cycle_end_link_statistics(self.cycle)
+        self.data_network.collect_cycle_end_link_statistics(self.cycle)
+        
+        self.debug_func()
+        
+        # Evaluate throughput time
+        self.update_throughput_metrics(self._step_flits)
+        
+        # 检查traffic完成情况并推进链
+        completed_traffics = self.traffic_scheduler.check_and_advance_chains(self.cycle)
+        if completed_traffics and self.verbose:
+            print(f"Completed traffics: {completed_traffics}")
+
+    def is_completed(self):
+        """Check if this die's simulation is completed."""
+        return (
+            self.traffic_scheduler.is_all_completed() and 
+            self.data_network.recv_flits_num >= (self.read_flit + self.write_flit) and 
+            self.trans_flits_num == 0 and 
+            not self.new_write_req
+        )
+
     def run(self):
         """Main simulation loop."""
         simulation_start = time.perf_counter()
         self.load_request_stream()
-        flits, reqs, rsps = [], [], []
+        # Initialize step variables
+        self._step_flits, self._step_reqs, self._step_rsps = [], [], []
         self.cycle = 0
         tail_time = 6
 
@@ -407,49 +457,13 @@ class BaseModel:
             self.cycle += 1
             self.cycle_mod = self.cycle % self.config.NETWORK_FREQUENCY
 
-            # Tag moves
-
-            self.release_completed_sn_tracker()
-
-            self.process_new_request()
-
-            self.tag_move_all_networks()
-
-            self.ip_inject_to_network()
-
-            self._inject_queue_arbitration(self.req_network, self.rn_positions_list, "req")
-            reqs = self.move_flits_in_network(self.req_network, reqs, "req")
-
-            self._inject_queue_arbitration(self.rsp_network, self.sn_positions_list, "rsp")
-            rsps = self.move_flits_in_network(self.rsp_network, rsps, "rsp")
-
-            self._inject_queue_arbitration(self.data_network, self.flit_positions_list, "data")
-            flits = self.move_flits_in_network(self.data_network, flits, "data")
-
-            self.network_to_ip_eject()
-
-            self.move_pre_to_queues_all()
-
-            self.req_network.collect_cycle_end_link_statistics(self.cycle)
-            self.rsp_network.collect_cycle_end_link_statistics(self.cycle)
-            self.data_network.collect_cycle_end_link_statistics(self.cycle)
-
-            self.debug_func()
-
-            # Evaluate throughput time
-            self.update_throughput_metrics(flits)
+            # Execute one step
+            self.step()
 
             if self.cycle / self.config.NETWORK_FREQUENCY % self.print_interval == 0:
                 self.log_summary()
 
-            # 检查traffic完成情况并推进链
-            completed_traffics = self.traffic_scheduler.check_and_advance_chains(self.cycle)
-            if completed_traffics and self.verbose:
-                print(f"Completed traffics: {completed_traffics}")
-
-            if (
-                self.traffic_scheduler.is_all_completed() and self.data_network.recv_flits_num >= (self.read_flit + self.write_flit) and self.trans_flits_num == 0 and not self.new_write_req
-            ) or self.cycle > self.end_time * self.config.NETWORK_FREQUENCY:
+            if self.is_completed() or self.cycle > self.end_time * self.config.NETWORK_FREQUENCY:
                 if tail_time == 0:
                     if self.verbose:
                         print("Finish!")

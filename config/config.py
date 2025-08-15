@@ -101,19 +101,6 @@ class CrossRingConfig:
         self.IP_H2L_H_FIFO_DEPTH = args.IP_H2L_H_FIFO_DEPTH
         self.IP_H2L_L_FIFO_DEPTH = args.IP_H2L_L_FIFO_DEPTH
         
-        # D2D参数
-        self.D2D_ENABLED = getattr(args, 'D2D_ENABLED', False)
-        self.NUM_DIES = getattr(args, 'NUM_DIES', 2)
-        self.DIE_ID = getattr(args, 'DIE_ID', 0)
-        self.D2D_RN_POSITION = getattr(args, 'D2D_RN_POSITION', 35)
-        self.D2D_SN_POSITION = getattr(args, 'D2D_SN_POSITION', 36)
-        self.D2D_AR_LATENCY = getattr(args, 'D2D_AR_LATENCY', 10)
-        self.D2D_R_LATENCY = getattr(args, 'D2D_R_LATENCY', 8)
-        self.D2D_AW_LATENCY = getattr(args, 'D2D_AW_LATENCY', 10)
-        self.D2D_W_LATENCY = getattr(args, 'D2D_W_LATENCY', 2)
-        self.D2D_B_LATENCY = getattr(args, 'D2D_B_LATENCY', 8)
-        self.D2D_DBID_LATENCY = getattr(args, 'D2D_DBID_LATENCY', 5)
-        self.D2D_MAX_OUTSTANDING = getattr(args, 'D2D_MAX_OUTSTANDING', 16)
         
         self.CHANNEL_SPEC = {
             "gdma": 2,  # → RN 侧
@@ -440,18 +427,5 @@ class CrossRingConfig:
         parser.add_argument("--ENABLE_IN_ORDER_EJECTION", type=bool, default=default_config["ENABLE_IN_ORDER_EJECTION"], help="Enable in-order ejection for src-dest pairs")
         parser.add_argument("--IN_ORDER_EJECTION_PAIRS", type=list, default=default_config["IN_ORDER_EJECTION_PAIRS"], help="Specific src-dest pairs for in-order ejection. Empty list means all pairs.")
         
-        # D2D参数
-        parser.add_argument("--D2D_ENABLED", type=bool, default=default_config.get("D2D_ENABLED", False), help="Enable D2D (Die-to-Die) simulation")
-        parser.add_argument("--NUM_DIES", type=int, default=default_config.get("NUM_DIES", 2), help="Number of dies in D2D simulation")
-        parser.add_argument("--DIE_ID", type=int, default=default_config.get("DIE_ID", 0), help="Current die ID")
-        parser.add_argument("--D2D_RN_POSITION", type=int, default=default_config.get("D2D_RN_POSITION", 35), help="D2D RN node position")
-        parser.add_argument("--D2D_SN_POSITION", type=int, default=default_config.get("D2D_SN_POSITION", 36), help="D2D SN node position")
-        parser.add_argument("--D2D_AR_LATENCY", type=int, default=default_config.get("D2D_AR_LATENCY", 10), help="D2D AR channel latency (cycles)")
-        parser.add_argument("--D2D_R_LATENCY", type=int, default=default_config.get("D2D_R_LATENCY", 8), help="D2D R channel latency (cycles)")
-        parser.add_argument("--D2D_AW_LATENCY", type=int, default=default_config.get("D2D_AW_LATENCY", 10), help="D2D AW channel latency (cycles)")
-        parser.add_argument("--D2D_W_LATENCY", type=int, default=default_config.get("D2D_W_LATENCY", 2), help="D2D W channel latency (cycles)")
-        parser.add_argument("--D2D_B_LATENCY", type=int, default=default_config.get("D2D_B_LATENCY", 8), help="D2D B channel latency (cycles)")
-        parser.add_argument("--D2D_DBID_LATENCY", type=int, default=default_config.get("D2D_DBID_LATENCY", 5), help="D2D DBID signal latency (cycles)")
-        parser.add_argument("--D2D_MAX_OUTSTANDING", type=int, default=default_config.get("D2D_MAX_OUTSTANDING", 16), help="D2D maximum outstanding transactions")
 
         return parser.parse_args()

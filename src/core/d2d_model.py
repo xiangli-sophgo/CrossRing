@@ -8,11 +8,15 @@ import time
 import logging
 import os
 from typing import Dict, List, Optional
+
+from flask.cli import F
 from .base_model import BaseModel
 from .d2d_traffic_scheduler import D2DTrafficScheduler
 from src.utils.components.d2d_rn_interface import D2D_RN_Interface
 from src.utils.components.d2d_sn_interface import D2D_SN_Interface
 from config.config import CrossRingConfig
+
+from src.core import base_model
 
 
 class D2D_Model:
@@ -82,6 +86,9 @@ class D2D_Model:
             # 初始化Die
             die_model.initial()
 
+            # 初始化step变量
+            die_model._step_flits, die_model._step_reqs, die_model._step_rsps = [], [], []
+
             # 替换或添加D2D节点
             self._add_d2d_nodes_to_die(die_model, die_id)
 
@@ -94,13 +101,11 @@ class D2D_Model:
         # 设置Die ID
         die_config.DIE_ID = die_id
 
-        # 获取D2D节点位置配置
-        d2d_rn_position = getattr(self.config, "D2D_RN_POSITION", 35)
-        d2d_sn_position = getattr(self.config, "D2D_SN_POSITION", 36)
-
-        # 设置D2D节点位置
-        die_config.D2D_RN_POSITION = d2d_rn_position
-        die_config.D2D_SN_POSITION = d2d_sn_position
+        # 获取当前Die的D2D节点位置
+        if die_id == 0:
+            d2d_positions = getattr(self.config, "D2D_DIE0_POSITIONS", [])
+        else:
+            d2d_positions = getattr(self.config, "D2D_DIE1_POSITIONS", [])
 
         # 添加D2D节点到IP列表
         if hasattr(die_config, "CH_NAME_LIST"):
@@ -110,15 +115,8 @@ class D2D_Model:
                 die_config.CH_NAME_LIST.append("d2d_sn")
 
         # 设置D2D节点的发送位置列表
-        if hasattr(die_config, "D2D_RN_SEND_POSITION_LIST"):
-            die_config.D2D_RN_SEND_POSITION_LIST = [d2d_rn_position]
-        else:
-            die_config.D2D_RN_SEND_POSITION_LIST = [d2d_rn_position]
-
-        if hasattr(die_config, "D2D_SN_SEND_POSITION_LIST"):
-            die_config.D2D_SN_SEND_POSITION_LIST = [d2d_sn_position]
-        else:
-            die_config.D2D_SN_SEND_POSITION_LIST = [d2d_sn_position]
+        die_config.D2D_RN_SEND_POSITION_LIST = d2d_positions
+        die_config.D2D_SN_SEND_POSITION_LIST = d2d_positions
 
         return die_config
 
@@ -126,68 +124,89 @@ class D2D_Model:
         """向Die添加D2D节点"""
         config = die_model.config
 
-        # 根据die_id确定D2D节点位置
+        # 获取当前Die的D2D节点位置
         if die_id == 0:
-            # Die 0：水平布局右边界位置（考虑node_map映射）
-            # 物理位置：7, 15, 23, 31, 39（右边界）
-            d2d_rn_position = 7  # 第0行右边界
-            d2d_sn_position = 15  # 第1行右边界
+            d2d_positions_list = getattr(self.config, "D2D_DIE0_POSITIONS", [])
         else:
-            # Die 1：水平布局左边界位置
-            # 物理位置：4, 12, 20, 28, 36（左边界源节点）
-            d2d_rn_position = 4  # 第0行左边界源节点
-            d2d_sn_position = 12  # 第1行左边界源节点
+            d2d_positions_list = getattr(self.config, "D2D_DIE1_POSITIONS", [])
 
-        # 强制添加D2D节点位置到flit_positions（绕过原有限制）
-        die_model.flit_positions.add(d2d_rn_position)
-        die_model.flit_positions.add(d2d_sn_position)
+        # 添加D2D节点位置到flit_positions
+        for pos in d2d_positions_list:
+            die_model.flit_positions.add(pos)
         die_model.flit_positions_list = list(die_model.flit_positions)
 
-        # 创建D2D_RN节点
-        die_model.ip_modules[("d2d_rn", d2d_rn_position)] = D2D_RN_Interface(
-            ip_type="d2d_rn",
-            ip_pos=d2d_rn_position,
-            config=config,
-            req_network=die_model.req_network,
-            rsp_network=die_model.rsp_network,
-            data_network=die_model.data_network,
-            node=die_model.node,
-            routes=die_model.routes,
-            ip_id=0,
-        )
+        # 在每个D2D节点位置创建RN和SN接口
+        for i, pos in enumerate(d2d_positions_list):
+            # 创建D2D_RN接口
+            die_model.ip_modules[("d2d_rn", pos)] = D2D_RN_Interface(
+                ip_type="d2d_rn",
+                ip_pos=pos,
+                config=config,
+                req_network=die_model.req_network,
+                rsp_network=die_model.rsp_network,
+                data_network=die_model.data_network,
+                node=die_model.node,
+                routes=die_model.routes,
+                ip_id=i,
+            )
 
-        # 创建D2D_SN节点
-        die_model.ip_modules[("d2d_sn", d2d_sn_position)] = D2D_SN_Interface(
-            ip_type="d2d_sn",
-            ip_pos=d2d_sn_position,
-            config=config,
-            req_network=die_model.req_network,
-            rsp_network=die_model.rsp_network,
-            data_network=die_model.data_network,
-            node=die_model.node,
-            routes=die_model.routes,
-            ip_id=0,
-        )
+            # 创建D2D_SN接口（在同一个节点位置）
+            die_model.ip_modules[("d2d_sn", pos)] = D2D_SN_Interface(
+                ip_type="d2d_sn",
+                ip_pos=pos,
+                config=config,
+                req_network=die_model.req_network,
+                rsp_network=die_model.rsp_network,
+                data_network=die_model.data_network,
+                node=die_model.node,
+                routes=die_model.routes,
+                ip_id=i,
+            )
 
-        # 更新配置以记录实际使用的D2D位置
-        config.D2D_RN_POSITION = d2d_rn_position
-        config.D2D_SN_POSITION = d2d_sn_position
+        # 为向后兼容保留旧的配置格式
+        config.D2D_RN_POSITIONS = d2d_positions_list
+        config.D2D_SN_POSITIONS = d2d_positions_list
+        config.D2D_RN_POSITION = d2d_positions_list[0] if d2d_positions_list else None
+        config.D2D_SN_POSITION = d2d_positions_list[0] if d2d_positions_list else None
 
     def _setup_cross_die_connections(self):
         """建立Die间的连接关系"""
-        for die_id, die_model in self.dies.items():
-            # 获取当前Die的D2D_RN接口
-            d2d_rn_key = ("d2d_rn", die_model.config.D2D_RN_POSITION)
-            if d2d_rn_key in die_model.ip_modules:
-                d2d_rn = die_model.ip_modules[d2d_rn_key]
+        # 从配置中获取D2D连接对
+        d2d_pairs = getattr(self.config, "D2D_PAIRS", [])
 
-                # 连接到其他Die的D2D_SN
-                for other_die_id, other_die_model in self.dies.items():
-                    if other_die_id != die_id:
-                        d2d_sn_key = ("d2d_sn", other_die_model.config.D2D_SN_POSITION)
-                        if d2d_sn_key in other_die_model.ip_modules:
-                            d2d_sn = other_die_model.ip_modules[d2d_sn_key]
-                            d2d_rn.target_die_interfaces[other_die_id] = d2d_sn
+        if not d2d_pairs:
+            print("警告: 没有找到D2D连接对配置")
+            return
+
+        # 为每个D2D连接对建立Die间连接
+        for die0_node, die1_node in d2d_pairs:
+            # Die0 -> Die1 连接
+            die0_rn_key = ("d2d_rn", die0_node)
+            die1_sn_key = ("d2d_sn", die1_node)
+
+            if die0_rn_key in self.dies[0].ip_modules and die1_sn_key in self.dies[1].ip_modules:
+
+                d2d_rn = self.dies[0].ip_modules[die0_rn_key]
+                d2d_sn = self.dies[1].ip_modules[die1_sn_key]
+
+                # 建立Die0到Die1的连接
+                if 1 not in d2d_rn.target_die_interfaces:
+                    d2d_rn.target_die_interfaces[1] = []
+                d2d_rn.target_die_interfaces[1].append(d2d_sn)
+
+            # Die1 -> Die0 连接
+            die1_rn_key = ("d2d_rn", die1_node)
+            die0_sn_key = ("d2d_sn", die0_node)
+
+            if die1_rn_key in self.dies[1].ip_modules and die0_sn_key in self.dies[0].ip_modules:
+
+                d2d_rn = self.dies[1].ip_modules[die1_rn_key]
+                d2d_sn = self.dies[0].ip_modules[die0_sn_key]
+
+                # 建立Die1到Die0的连接
+                if 0 not in d2d_rn.target_die_interfaces:
+                    d2d_rn.target_die_interfaces[0] = []
+                d2d_rn.target_die_interfaces[0].append(d2d_sn)
 
     def initial(self):
         """初始化D2D仿真"""
@@ -196,12 +215,16 @@ class D2D_Model:
     def run(self):
         """运行D2D仿真主循环"""
         simulation_start = time.perf_counter()
+        tail_time = 6  # 类似BaseModel的tail_time逻辑
 
         # 主仿真循环
-        while self.current_cycle < self.end_time:
-            # 更新所有Die的当前周期
+        while True:
+            self.current_cycle += 1
+
+            # 更新所有Die的当前周期和cycle_mod
             for die_id, die_model in self.dies.items():
-                die_model.current_cycle = self.current_cycle
+                die_model.cycle = self.current_cycle
+                die_model.cycle_mod = self.current_cycle % die_model.config.NETWORK_FREQUENCY
 
                 # 更新所有IP模块的当前周期
                 for ip_module in die_model.ip_modules.values():
@@ -216,55 +239,44 @@ class D2D_Model:
             if self.current_cycle % self.print_interval == 0 and self.current_cycle > 0:
                 self._print_progress()
 
-            self.current_cycle += 1
+            # 检查结束条件
+            if self._check_all_completed() or self.current_cycle > self.end_time:
+                if tail_time == 0:
+                    if self.kwargs.get("verbose", 1):
+                        print("D2D仿真完成！")
+                    break
+                else:
+                    tail_time -= 1
 
         # 仿真结束
         simulation_end = time.perf_counter()
         simulation_time = simulation_end - simulation_start
 
-        self._print_final_statistics()
+        if self.kwargs.get("verbose", 1):
+            print(f"D2D仿真耗时: {simulation_time:.2f} 秒")
+            print(f"处理周期数: {self.current_cycle} 周期")
+            print(f"仿真性能: {self.current_cycle / simulation_time:.0f} 周期/秒")
 
     def _step_die(self, die_model: BaseModel):
         """执行单个Die的单周期步进"""
-        # 参考BaseModel的单周期更新逻辑
-
-        # 0. 处理D2D Traffic注入
+        # 处理D2D Traffic注入
         self._process_d2d_traffic(die_model)
 
-        # 1. IP inject 步骤
-        for ip_pos in die_model.flit_positions_list:
-            for ip_type in die_model.config.CH_NAME_LIST:
-                ip_key = (ip_type, ip_pos)
-                if ip_key in die_model.ip_modules:
-                    ip_interface = die_model.ip_modules[ip_key]
-                    ip_interface.inject_step(self.current_cycle)
+        # 调用BaseModel的step方法来执行标准的单周期步进
+        die_model.step()
 
-        # 2. 网络更新步骤 - 需要实现具体的网络步进逻辑
-        # 暂时跳过，因为Network类没有step方法
-        # TODO: 需要根据BaseModel的实际实现来调用正确的网络更新方法
-        pass
+    def _check_all_completed(self):
+        """检查所有Die是否都已完成仿真"""
+        # 首先检查D2D traffic调度器是否完成
+        if not self.d2d_traffic_scheduler.is_all_completed():
+            return False
 
-        # 3. IP eject 步骤
-        for ip_pos in die_model.flit_positions_list:
-            for ip_type in die_model.config.CH_NAME_LIST:
-                ip_key = (ip_type, ip_pos)
-                if ip_key in die_model.ip_modules:
-                    ip_interface = die_model.ip_modules[ip_key]
-                    ip_interface.eject_step(self.current_cycle)
+        # 检查每个Die的完成状态
+        for die_id, die_model in self.dies.items():
+            if not die_model.is_completed():
+                return False
 
-        # 4. 移动pre到FIFO（参考BaseModel的move_pre_to_fifo）
-        for ip_pos in die_model.flit_positions_list:
-            for ip_type in die_model.config.CH_NAME_LIST:
-                ip_key = (ip_type, ip_pos)
-                if ip_key in die_model.ip_modules:
-                    die_model.ip_modules[ip_key].move_pre_to_fifo()
-
-        # 网络的pre到FIFO移动 - 只处理原始网络位置，不包括D2D节点
-        original_positions = [pos for pos in die_model.flit_positions_list if (pos != die_model.config.D2D_RN_POSITION and pos != die_model.config.D2D_SN_POSITION)]
-        for in_pos in original_positions:
-            die_model._move_pre_to_queues(die_model.req_network, in_pos)
-            die_model._move_pre_to_queues(die_model.rsp_network, in_pos)
-            die_model._move_pre_to_queues(die_model.data_network, in_pos)
+        return True
 
     def _process_d2d_traffic(self, die_model: BaseModel):
         """处理D2D traffic注入"""
@@ -272,81 +284,214 @@ class D2D_Model:
         pending_requests = self.d2d_traffic_scheduler.get_pending_requests(self.current_cycle)
 
         for req_data in pending_requests:
-            try:
-                # 检查这个请求是否属于当前Die
-                src_die = req_data[1]  # src_die字段
-                if src_die != die_model.die_id:
-                    continue  # 不是当前Die的请求，跳过
+            # 检查这个请求是否属于当前Die
+            src_die = req_data[1]  # src_die字段
+            if src_die != die_model.die_id:
+                continue  # 不是当前Die的请求，跳过
 
-                # 从D2D请求创建flit（第一段路由：源节点→D2D_SN）
-                flit = self.d2d_traffic_scheduler.create_d2d_flit_from_request(req_data, die_model, die_model.die_id)
+            # 处理单个D2D请求
+            self._process_single_d2d_request(die_model, req_data)
 
-                # 查找源IP接口
-                source_ip_key = (flit.source_type, flit.source)
-                if source_ip_key in die_model.ip_modules:
-                    ip_interface = die_model.ip_modules[source_ip_key]
-                    # 将flit注入到对应的IP接口
-                    ip_interface.enqueue(flit, "req")
+    def _process_single_d2d_request(self, die_model: BaseModel, req_data):
+        """处理单个D2D请求，参考BaseModel._process_single_request"""
+        if len(req_data) < 10:
+            raise ValueError(f"Invalid D2D request format: {req_data}")
 
-            except Exception as e:
-                print(e)
+        # 解析D2D请求数据
+        (inject_time, src_die, src_node, src_ip, dst_die, dst_node, dst_ip, req_type, burst_length, traffic_id) = req_data
+
+        # 使用die_model的node_map进行节点映射
+        source_physical = die_model.node_map(src_node, True)
+
+        # 根据是否跨Die决定路由策略
+        if src_die != dst_die:
+            # 跨Die：根据目标位置选择D2D节点
+            d2d_positions = self._get_die_d2d_positions(src_die)
+            intermediate_dest = self._select_d2d_node_for_target(dst_node, dst_ip, d2d_positions, die_model, dst_die)
+            destination_type = "d2d_sn"  # 跨Die时目标是D2D_SN
+        else:
+            # 本地：直接路由到目标
+            intermediate_dest = die_model.node_map(dst_node, False)
+            destination_type = dst_ip
+
+        # 创建flit（参考BaseModel._process_single_request）
+        from src.utils.components.flit import Flit
+        from src.utils.components.node import Node
+
+        path = die_model.routes[source_physical][intermediate_dest]
+        req = Flit.create_flit(source_physical, intermediate_dest, path)
+
+        # 设置D2D专用属性
+        req.source_die_id = src_die
+        req.target_die_id = dst_die
+        req.final_destination_physical = dst_node  # 保存最终目标
+        req.final_destination_type = dst_ip
+
+        # 设置标准属性（与BaseModel一致）
+        req.source_original = src_node
+        req.destination_original = intermediate_dest
+        req.flit_type = "req"
+        req.departure_cycle = inject_time
+        req.burst_length = burst_length
+        req.source_type = f"{src_ip}_0" if "_" not in src_ip else src_ip
+        req.destination_type = f"{destination_type}_0" if "_" not in destination_type else destination_type
+        req.original_source_type = f"{src_ip}_0" if "_" not in src_ip else src_ip
+        req.original_destination_type = f"{dst_ip}_0" if "_" not in dst_ip else dst_ip
+        req.req_type = "read" if req_type == "R" else "write"
+        req.req_attr = "new"
+        req.traffic_id = traffic_id
+        req.packet_id = Node.get_next_packet_id()
+
+        # 设置保序信息
+        req.set_packet_category_and_order_id()
+
+        try:
+            # 通过IP接口注入请求
+            ip_pos = req.source
+            ip_type = req.source_type
+
+            ip_interface = die_model.ip_modules.get((ip_type, ip_pos))
+            if ip_interface is None:
+                raise ValueError(f"IP module setup error for ({ip_type}, {ip_pos})!")
+
+            # 注入请求到IP接口
+            ip_interface.enqueue(req, "req")
+
+        except Exception as e:
+            print(f"Error processing D2D request: {e}")
+            print(f"Request data: {req_data}")
+            raise
+
+    def _get_die_d2d_positions(self, die_id):
+        """获取指定Die的D2D节点位置"""
+        if die_id == 0:
+            return getattr(self.config, "D2D_DIE0_POSITIONS", [])
+        else:
+            return getattr(self.config, "D2D_DIE1_POSITIONS", [])
+
+    def _select_d2d_node_for_target(self, dst_node, dst_ip, d2d_positions, die_model: base_model, dst_die):
+        """根据目标DDR位置选择对应的D2D节点（VERTICAL布局）"""
+
+        # 只处理目标是DDR的情况
+        if not dst_ip.startswith("ddr"):
+            # 非DDR目标，返回第一个D2D节点
+            return d2d_positions[0] if d2d_positions else None
+
+        # 获取拓扑参数
+        num_col = die_model.config.NUM_COL  # 4列
+        dst_node = die_model.node_map(dst_node)
+
+        # 计算目标节点的行列位置
+        dst_row = dst_node // num_col
+        dst_col = dst_node % num_col
+
+        # Die0（上方）的映射规则
+        if dst_die == 0:
+            if dst_col == 0:  # 第一列
+                if dst_row == 3:  # 第4行
+                    d2d_index = 0
+                elif dst_row == 5:  # 第6行
+                    d2d_index = 1
+                elif dst_row == 7:  # 第8行
+                    d2d_index = 0
+                elif dst_row == 9:  # 第10行
+                    d2d_index = 1
+                else:
+                    d2d_index = 0  # 默认
+            elif dst_col == num_col - 1:  # 最后一列
+                if dst_row == 3:  # 第4行
+                    d2d_index = 3
+                elif dst_row == 5:  # 第6行
+                    d2d_index = 2
+                elif dst_row == 7:  # 第8行
+                    d2d_index = 3
+                elif dst_row == 9:  # 第10行
+                    d2d_index = 2
+                else:
+                    d2d_index = 2  # 默认
+            else:
+                d2d_index = 0  # 非边界列，使用默认
+
+        # Die1（下方）的映射规则
+        else:  # src_die == 1
+            if dst_col == 0:  # 第一列
+                if dst_row == 1:  # 第2行
+                    d2d_index = 0
+                elif dst_row == 3:  # 第4行
+                    d2d_index = 1
+                elif dst_row == 5:  # 第6行
+                    d2d_index = 0
+                elif dst_row == 7:  # 第8行
+                    d2d_index = 1
+                else:
+                    d2d_index = 0  # 默认
+            elif dst_col == num_col - 1:  # 最后一列
+                if dst_row == 1:  # 第2行
+                    d2d_index = 3
+                elif dst_row == 3:  # 第4行
+                    d2d_index = 2
+                elif dst_row == 5:  # 第6行
+                    d2d_index = 3
+                elif dst_row == 7:  # 第8行
+                    d2d_index = 2
+                else:
+                    d2d_index = 2  # 默认
+            else:
+                d2d_index = 0  # 非边界列，使用默认
+
+        # 确保索引在有效范围内
+        if d2d_index >= len(d2d_positions):
+            d2d_index = 0
+
+        return d2d_positions[d2d_index] - num_col
 
     def _print_progress(self):
         """打印仿真进度"""
-        progress = (self.current_cycle / self.end_time) * 100
-        print(f"Cycle {self.current_cycle}/{self.end_time} ({progress:.1f}%)")
+        cycle_time = self.current_cycle // getattr(self.config, "NETWORK_FREQUENCY", 2)
 
-        # 打印各Die的统计信息
+        # 先打印总体时间信息
+        print(f"T: {cycle_time}")
+
+        # 然后打印各Die的详细统计信息
         for die_id, die_model in self.dies.items():
-            d2d_rn_key = ("d2d_rn", die_model.config.D2D_RN_POSITION)
-            d2d_sn_key = ("d2d_sn", die_model.config.D2D_SN_POSITION)
+            # 获取基本网络统计
+            req_cnt = getattr(die_model, "req_count", 0)
+            in_req = getattr(die_model, "req_num", 0)
+            rsp = getattr(die_model, "rsp_num", 0)
+            r_fn = getattr(die_model, "send_read_flits_num_stat", 0)
+            w_fn = getattr(die_model, "send_write_flits_num_stat", 0)
+            trans_fn = getattr(die_model, "trans_flits_num", 0)
+            recv_fn = die_model.data_network.recv_flits_num if hasattr(die_model, "data_network") else 0
 
-            if d2d_rn_key in die_model.ip_modules:
-                rn_stats = die_model.ip_modules[d2d_rn_key].get_statistics()
-                print(f"  Die {die_id} D2D_RN: sent={rn_stats['cross_die_requests_sent']}")
+            # 获取D2D特定统计 - 支持多个D2D节点
+            d2d_sent = 0
+            d2d_recv = 0
 
-            if d2d_sn_key in die_model.ip_modules:
-                sn_stats = die_model.ip_modules[d2d_sn_key].get_statistics()
-                print(f"  Die {die_id} D2D_SN: received={sn_stats['cross_die_requests_received']}")
+            # 获取当前Die的D2D节点位置
+            if die_id == 0:
+                d2d_positions = getattr(self.config, "D2D_DIE0_POSITIONS", [])
+            else:
+                d2d_positions = getattr(self.config, "D2D_DIE1_POSITIONS", [])
 
-    def _print_final_statistics(self):
-        """打印最终统计信息"""
-        print("\n=== D2D Simulation Final Statistics ===")
+            # 累计所有D2D节点的统计
+            for pos in d2d_positions:
+                # D2D_RN统计
+                d2d_rn_key = ("d2d_rn", pos)
+                if d2d_rn_key in die_model.ip_modules:
+                    rn_stats = die_model.ip_modules[d2d_rn_key].get_statistics()
+                    d2d_sent += rn_stats["cross_die_requests_sent"]
 
-        total_cross_die_requests = 0
-        total_cross_die_responses = 0
+                # D2D_SN统计
+                d2d_sn_key = ("d2d_sn", pos)
+                if d2d_sn_key in die_model.ip_modules:
+                    sn_stats = die_model.ip_modules[d2d_sn_key].get_statistics()
+                    d2d_recv += sn_stats["cross_die_requests_received"]
 
-        for die_id, die_model in self.dies.items():
-            print(f"\nDie {die_id} Statistics:")
-
-            # D2D_RN统计
-            d2d_rn_key = ("d2d_rn", die_model.config.D2D_RN_POSITION)
-            if d2d_rn_key in die_model.ip_modules:
-                rn_stats = die_model.ip_modules[d2d_rn_key].get_statistics()
-                print(f"  D2D_RN:")
-                print(f"    Cross-die requests sent: {rn_stats['cross_die_requests_sent']}")
-                print(f"    Cross-die responses received: {rn_stats['cross_die_responses_received']}")
-                total_cross_die_requests += rn_stats["cross_die_requests_sent"]
-
-            # D2D_SN统计
-            d2d_sn_key = ("d2d_sn", die_model.config.D2D_SN_POSITION)
-            if d2d_sn_key in die_model.ip_modules:
-                sn_stats = die_model.ip_modules[d2d_sn_key].get_statistics()
-                print(f"  D2D_SN:")
-                print(f"    Cross-die requests received: {sn_stats['cross_die_requests_received']}")
-                print(f"    Cross-die requests forwarded: {sn_stats['cross_die_requests_forwarded']}")
-                print(f"    Cross-die responses sent: {sn_stats['cross_die_responses_sent']}")
-                total_cross_die_responses += sn_stats["cross_die_responses_sent"]
-
-        print(f"\nTotal cross-die transactions:")
-        print(f"  Requests: {total_cross_die_requests}")
-        print(f"  Responses: {total_cross_die_responses}")
-
-        # 显示packet_id范围（用于验证全局唯一性）
-        from src.utils.components.node import Node
-
-        print(f"\nPacket ID Statistics:")
-        print(f"  Last packet_id generated: {Node.global_packet_id}")
+            print(
+                f"  Die{die_id}: Req_cnt: {req_cnt}, In_Req: {in_req}, Rsp: {rsp}, "
+                f"R_fn: {r_fn}, W_fn: {w_fn}, Trans_fn: {trans_fn}, Recv_fn: {recv_fn}, "
+                f"D2D_send: {d2d_sent}, D2D_recv: {d2d_recv}"
+            )
 
     def generate_combined_flow_graph(self, mode="total", save_path=None, show_cdma=True):
         """

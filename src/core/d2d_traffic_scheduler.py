@@ -139,65 +139,6 @@ class D2DTrafficScheduler(TrafficScheduler):
 
         return new_requests
 
-    def create_d2d_flit_from_request(self, req_data, base_model, die_id):
-        """
-        从D2D请求数据创建带有die信息的flit，实现三阶段路由的第一段
-
-        Args:
-            req_data: D2D请求元组 (t, src_die, src_node, src_ip, dst_die, dst_node, dst_ip, req_type, burst_length, traffic_id)
-            base_model: BaseModel实例，用于node_map映射
-            die_id: 当前处理的Die ID
-
-        Returns:
-            带有die信息的flit对象
-        """
-        if len(req_data) < 10:
-            raise ValueError(f"Invalid D2D request format: {req_data}")
-
-        (inject_time, src_die, src_node, src_ip, dst_die, dst_node, dst_ip, req_type, burst_length, traffic_id) = req_data
-
-        # 使用node_map映射逻辑节点到物理节点
-        source_physical = base_model.node_map(src_node, is_source=True)
-        final_destination_physical = base_model.node_map(dst_node, is_source=False)
-
-        # D2D三阶段路由：第一段路由（源节点 → 本Die的D2D_SN）
-        if src_die != dst_die:
-            # 跨Die请求：第一段路由到本Die的D2D_SN
-            d2d_sn_position = base_model.config.D2D_SN_POSITION
-            path = base_model.routes[source_physical][d2d_sn_position]
-            intermediate_destination = d2d_sn_position
-        else:
-            # 本地请求：直接路由到目标
-            path = base_model.routes[source_physical][final_destination_physical]
-            intermediate_destination = final_destination_physical
-
-        # 创建flit
-        from src.utils.components.flit import Flit
-
-        req = Flit.create_flit(source_physical, intermediate_destination, path)
-
-        # 设置D2D专用信息
-        req.source_die_id = src_die
-        req.target_die_id = dst_die
-        req.source_node_id = src_node
-        req.target_node_id = dst_node
-        req.source_type = src_ip
-        req.destination_type = dst_ip
-        req.req_type = req_type.lower()  # 'read' 或 'write'
-        req.burst_length = burst_length
-        req.traffic_id = traffic_id
-        req.inject_time = inject_time
-
-        # 保存最终目标信息（用于后续路由阶段）
-        req.final_destination_physical = final_destination_physical
-        req.final_destination_type = dst_ip
-
-        # 设置其他必要属性 - 使用全局唯一packet_id
-        from src.utils.components.node import Node
-
-        req.packet_id = Node.get_next_packet_id()
-
-        return req
 
     def is_all_completed(self) -> bool:
         """检查所有traffic是否已完成"""
@@ -219,3 +160,35 @@ class D2DTrafficScheduler(TrafficScheduler):
             stats["write_flit"] += reader.write_flit
 
         return stats
+
+    def _select_nearest_d2d_sn(self, source_position: int, base_model):
+        """选择距离源节点最近的D2D_SN节点"""
+        # 根据Die ID获取D2D位置
+        die_id = getattr(base_model, "die_id", 0)  # 假设有die_id属性
+        if die_id == 0:
+            d2d_positions = getattr(base_model.config, "D2D_DIE0_POSITIONS", [])
+        else:
+            d2d_positions = getattr(base_model.config, "D2D_DIE1_POSITIONS", [])
+
+        d2d_sn_positions = d2d_positions
+
+        if not d2d_sn_positions:
+            return None
+
+        # 如果只有一个D2D_SN，直接返回
+        if len(d2d_sn_positions) == 1:
+            return d2d_sn_positions[0]
+
+        # 计算距离并选择最近的
+        min_distance = float("inf")
+        nearest_sn = None
+
+        for sn_pos in d2d_sn_positions:
+            # 使用路由表计算距离（路径长度）
+            if source_position in base_model.routes and sn_pos in base_model.routes[source_position]:
+                path_length = len(base_model.routes[source_position][sn_pos])
+                if path_length < min_distance:
+                    min_distance = path_length
+                    nearest_sn = sn_pos
+
+        return nearest_sn if nearest_sn is not None else d2d_sn_positions[0]

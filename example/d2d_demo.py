@@ -4,7 +4,7 @@ D2D (Die-to-Die) 5x4拓扑演示
 """
 
 from src.core.d2d_model import D2D_Model
-from config.config import CrossRingConfig
+from config.d2d_config import D2DConfig
 import numpy as np
 import os
 
@@ -13,9 +13,12 @@ def main():
     """
     D2D 仿真演示 - 包含完整的结果处理和可视化
     """
-    # 使用标准的CrossRingConfig
+    # 使用D2DConfig替代CrossRingConfig，获得D2D特定配置功能
     die_topo_type = "5x4"
-    config = CrossRingConfig("../config/d2d_config.json")
+    config = D2DConfig(
+        die_config_file="../config/topologies/topo_5x4.yaml",     # Die拓扑配置
+        d2d_config_file="../config/topologies/d2d_config.yaml"   # D2D专用配置
+    )
 
     # 定义拓扑结构
 

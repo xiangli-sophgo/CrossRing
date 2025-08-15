@@ -185,7 +185,14 @@ class D2D_SN_Interface(IPInterface):
                 self.cross_die_requests_forwarded += 1
 
         except Exception as e:
-            print(e)
+            import traceback
+            print(f"D2D_SN跨Die请求转发错误 [周期{self.current_cycle}, 位置{self.position}]:")
+            print(f"  错误类型: {type(e).__name__}")
+            print(f"  错误信息: {str(e)}")
+            print(f"  Flit信息: source={flit.source}, dest={flit.dest}, dst_die={flit.dst_die}")
+            print(f"  目标Die接口: {self.target_die_interfaces}")
+            if hasattr(e, '__traceback__'):
+                print(f"  错误位置: {traceback.format_exc().split('\\n')[-3].strip()}")
 
     def handle_local_response_for_cross_die(self, flit: Flit):
         """
