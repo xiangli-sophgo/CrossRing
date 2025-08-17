@@ -9,6 +9,7 @@ from collections import deque
 from .ip_interface import IPInterface
 from .flit import Flit
 import logging
+import traceback
 
 
 class D2D_SN_Interface(IPInterface):
@@ -24,6 +25,20 @@ class D2D_SN_Interface(IPInterface):
         # D2D特有属性
         self.die_id = getattr(config, "DIE_ID", 0)  # 当前Die的ID
         self.cross_die_receive_queue = []  # 使用heapq管理的接收队列 [(arrival_cycle, flit)]
+        
+        # 添加D2D_SN的带宽限制（在父类初始化后）
+        if not self.tx_token_bucket and not self.rx_token_bucket:
+            # 如果父类没有设置带宽限制，使用D2D_SN专用配置
+            d2d_sn_bw_limit = getattr(config, "D2D_SN_BW_LIMIT", 128)
+            from .flit import TokenBucket
+            self.tx_token_bucket = TokenBucket(
+                rate=d2d_sn_bw_limit / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
+                bucket_size=d2d_sn_bw_limit,
+            )
+            self.rx_token_bucket = TokenBucket(
+                rate=d2d_sn_bw_limit / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
+                bucket_size=d2d_sn_bw_limit,
+            )
 
         # 获取D2D延迟配置
         self.d2d_ar_latency = getattr(config, "D2D_AR_LATENCY", 10)
@@ -36,6 +51,9 @@ class D2D_SN_Interface(IPInterface):
         self.cross_die_requests_received = 0
         self.cross_die_requests_forwarded = 0
         self.cross_die_responses_sent = 0
+        
+        # D2D_Sys引用（由D2DModel设置）
+        self.d2d_sys = None
 
     def schedule_cross_die_receive(self, flit: Flit, arrival_cycle: int):
         """
@@ -144,7 +162,7 @@ class D2D_SN_Interface(IPInterface):
         """
         # 调用父类的eject_step方法
         ejected_flits = super().eject_step(cycle)
-
+        
         # 检查ejected的flit是否需要跨Die转发
         if ejected_flits:
             for flit in ejected_flits:
@@ -158,30 +176,30 @@ class D2D_SN_Interface(IPInterface):
         return hasattr(flit, "source_die_id") and hasattr(flit, "target_die_id") and flit.source_die_id is not None and flit.target_die_id is not None and flit.source_die_id != flit.target_die_id
 
     def _handle_cross_die_transfer(self, flit):
-        """处理跨Die转发（第二阶段：Die0_D2D_SN → Die1_D2D_RN）"""
+        """处理跨Die转发（第二阶段：Die0_D2D_SN → Die1_D2D_RN）
+        可选择重新生成AXI专用flit，保持packet_id不变
+        """
         try:
             target_die_id = flit.target_die_id
 
-            # 查找目标Die的D2D_RN（需要通过D2D_Model设置的连接）
-            if hasattr(self, "target_die_d2d_rn") and target_die_id in self.target_die_d2d_rn:
-                target_d2d_rn = self.target_die_d2d_rn[target_die_id]
-
-                # 根据请求类型选择延迟
-                if hasattr(flit, "req_type"):
-                    if flit.req_type == "read":
-                        delay = self.d2d_ar_latency
-                        channel = "AR"
-                    else:  # write
-                        delay = self.d2d_aw_latency
-                        channel = "AW"
-                else:
-                    delay = self.d2d_ar_latency
+            # 根据请求类型选择AXI通道
+            if hasattr(flit, "req_type"):
+                if flit.req_type == "read":
                     channel = "AR"
+                else:  # write
+                    channel = "AW"
+            else:
+                channel = "AR"
 
-                # 计算到达时间并调度跨Die接收
-                arrival_cycle = self.current_cycle + delay
-                target_d2d_rn.schedule_cross_die_receive(flit, arrival_cycle)
-
+            # 可选：重新生成AXI专用flit（保持packet_id和关键信息）
+            # 当前实现：直接使用原始flit进行AXI传输
+            # 如果需要，可以在这里创建新的AXI专用flit：
+            # axi_flit = self._create_axi_flit(flit)
+            # 但为了简化，当前直接使用原始flit
+            
+            # 使用D2D_Sys进行仲裁和AXI传输
+            if hasattr(self, 'd2d_sys') and self.d2d_sys:
+                self.d2d_sys.enqueue_sn(flit, target_die_id, channel)
                 self.cross_die_requests_forwarded += 1
 
         except Exception as e:
@@ -189,10 +207,11 @@ class D2D_SN_Interface(IPInterface):
             print(f"D2D_SN跨Die请求转发错误 [周期{self.current_cycle}, 位置{self.position}]:")
             print(f"  错误类型: {type(e).__name__}")
             print(f"  错误信息: {str(e)}")
-            print(f"  Flit信息: source={flit.source}, dest={flit.dest}, dst_die={flit.dst_die}")
-            print(f"  目标Die接口: {self.target_die_interfaces}")
+            print(f"  Flit信息: source={flit.source}, dest={flit.destination}, dst_die={flit.target_die_id}")
+            print(f"  目标Die接口: {getattr(self, 'target_die_d2d_rn', {})}")
             if hasattr(e, '__traceback__'):
-                print(f"  错误位置: {traceback.format_exc().split('\\n')[-3].strip()}")
+                tb_lines = traceback.format_exc().split('\n')
+                print(f"  错误位置: {tb_lines[-3].strip() if len(tb_lines) >= 3 else 'N/A'}")
 
     def handle_local_response_for_cross_die(self, flit: Flit):
         """
@@ -205,6 +224,71 @@ class D2D_SN_Interface(IPInterface):
             return True
         return False
 
+    def _handle_received_data(self, flit: Flit):
+        """
+        重写数据接收处理，支持跨Die数据转发到原始请求者
+        """
+        # 检查是否是跨Die返回的数据
+        # 通过检查是否有final_destination_physical属性来判断
+        if hasattr(flit, "final_destination_physical") and flit.final_destination_physical is not None:
+            # 这是从其他Die返回的数据，需要转发到原始请求者
+            self.forward_cross_die_data_to_requester(flit)
+        else:
+            # 本地数据，调用父类正常处理
+            super()._handle_received_data(flit)
+    
+    def forward_cross_die_data_to_requester(self, flit: Flit):
+        """
+        将跨Die返回的数据转发到原始请求者
+        """
+        # 获取最终目标信息
+        final_destination = getattr(flit, "final_destination_physical", None)
+        final_destination_type = getattr(flit, "final_destination_type", None)
+        
+        if final_destination is None:
+            print(f"[D2D_SN] 错误：数据flit缺少final_destination_physical信息")
+            return
+        
+        # 设置路由信息
+        flit.source = self.ip_pos  # 当前D2D_SN
+        flit.destination = final_destination  # 原始请求者（如GDMA）
+        
+        # 更新路径
+        if hasattr(self, "routes") and self.ip_pos in self.routes and final_destination in self.routes[self.ip_pos]:
+            flit.path = self.routes[self.ip_pos][final_destination]
+            flit.path_index = 0
+        
+        # 标记为新的网络传输
+        flit.is_injected = False
+        flit.is_new_on_network = True
+        flit.current_position = self.ip_pos
+        
+        # 记录D2D_SN处理的数据包
+        if not hasattr(self, "sn_data_tracker"):
+            self.sn_data_tracker = {}
+        
+        packet_id = getattr(flit, "packet_id", -1)
+        if packet_id not in self.sn_data_tracker:
+            self.sn_data_tracker[packet_id] = {
+                "expected_count": getattr(flit, "burst_length", 4),
+                "forwarded_count": 0,
+                "start_cycle": self.current_cycle
+            }
+        
+        # 通过数据网络发送到最终目标
+        self.enqueue(flit, "data")
+        self.sn_data_tracker[packet_id]["forwarded_count"] += 1
+        
+        # 统计
+        self.cross_die_data_forwarded = getattr(self, "cross_die_data_forwarded", 0) + 1
+        
+        # 检查是否所有数据都已转发
+        tracker = self.sn_data_tracker[packet_id]
+        if tracker["forwarded_count"] >= tracker["expected_count"]:
+            # 所有数据包已转发，可以清理tracker
+            print(f"[D2D_SN] 完成packet_id={packet_id}的{tracker['expected_count']}个数据包转发")
+            del self.sn_data_tracker[packet_id]
+    
     def get_statistics(self) -> dict:
         """获取D2D_SN统计信息"""
         # 由于父类IPInterface没有get_statistics方法，直接返回D2D统计信息

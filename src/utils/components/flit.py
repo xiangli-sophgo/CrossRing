@@ -138,6 +138,9 @@ class Flit:
         "inject_time",
         "final_destination_physical",
         "final_destination_type",
+        # AXI传输相关属性
+        "axi_end_cycle",
+        "axi_start_cycle",
     ]
 
     last_id = 0

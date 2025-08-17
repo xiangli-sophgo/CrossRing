@@ -145,7 +145,7 @@ class D2DConfig(CrossRingConfig):
     def _validate_d2d_layout(self):
         """验证D2D布局的合理性"""
         # 检查基本参数
-        if not self.D2D_ENABLED:
+        if not getattr(self, 'D2D_ENABLED', False):
             return
 
         if self.NUM_DIES < 2:

@@ -31,26 +31,30 @@ class Node:
     def initialize_data_structures(self):
         """Initialize the data structures for read and write databases."""
 
-        self.rn_rdb = self.config._make_channels(("sdma", "gdma", "cdma"))
-        self.rn_rdb_reserve = self.config._make_channels(("sdma", "gdma", "cdma"))
-        self.rn_rdb_recv = self.config._make_channels(("sdma", "gdma", "cdma"))
-        self.rn_rdb_count = self.config._make_channels(("sdma", "gdma", "cdma"))
-        self.rn_wdb = self.config._make_channels(("sdma", "gdma", "cdma"))
-        self.rn_wdb_reserve = self.config._make_channels(("sdma", "gdma", "cdma"))
-        self.rn_wdb_count = self.config._make_channels(("sdma", "gdma", "cdma"))
-        self.rn_wdb_send = self.config._make_channels(("sdma", "gdma", "cdma"))
-        self.rn_tracker = {"read": self.config._make_channels(("sdma", "gdma", "cdma")), "write": self.config._make_channels(("sdma", "gdma", "cdma"))}
-        self.rn_tracker_wait = {"read": self.config._make_channels(("sdma", "gdma", "cdma")), "write": self.config._make_channels(("sdma", "gdma", "cdma"))}
-        self.rn_tracker_count = {"read": self.config._make_channels(("sdma", "gdma", "cdma")), "write": self.config._make_channels(("sdma", "gdma", "cdma"))}
-        self.rn_tracker_pointer = {"read": self.config._make_channels(("sdma", "gdma", "cdma")), "write": self.config._make_channels(("sdma", "gdma", "cdma"))}
-        self.sn_rdb = self.config._make_channels(("ddr", "l2m"))
-        self.sn_rsp_queue = self.config._make_channels(("ddr", "l2m"))
-        self.sn_req_wait = {"read": self.config._make_channels(("ddr", "l2m")), "write": self.config._make_channels(("ddr", "l2m"))}
-        self.sn_tracker = self.config._make_channels(("ddr", "l2m"))
-        self.sn_tracker_count = self.config._make_channels(("ddr", "l2m"), value_factory={"ro": {}, "share": {}})
-        self.sn_wdb = self.config._make_channels(("ddr", "l2m"))
-        self.sn_wdb_recv = self.config._make_channels(("ddr", "l2m"))
-        self.sn_wdb_count = self.config._make_channels(("ddr", "l2m"))
+        # 包含D2D_RN接口
+        rn_channels = ("sdma", "gdma", "cdma", "d2d_rn")
+        self.rn_rdb = self.config._make_channels(rn_channels)
+        self.rn_rdb_reserve = self.config._make_channels(rn_channels)
+        self.rn_rdb_recv = self.config._make_channels(rn_channels)
+        self.rn_rdb_count = self.config._make_channels(rn_channels)
+        self.rn_wdb = self.config._make_channels(rn_channels)
+        self.rn_wdb_reserve = self.config._make_channels(rn_channels)
+        self.rn_wdb_count = self.config._make_channels(rn_channels)
+        self.rn_wdb_send = self.config._make_channels(rn_channels)
+        self.rn_tracker = {"read": self.config._make_channels(rn_channels), "write": self.config._make_channels(rn_channels)}
+        self.rn_tracker_wait = {"read": self.config._make_channels(rn_channels), "write": self.config._make_channels(rn_channels)}
+        self.rn_tracker_count = {"read": self.config._make_channels(rn_channels), "write": self.config._make_channels(rn_channels)}
+        self.rn_tracker_pointer = {"read": self.config._make_channels(rn_channels), "write": self.config._make_channels(rn_channels)}
+        # 包含D2D_SN接口
+        sn_channels = ("ddr", "l2m", "d2d_sn")
+        self.sn_rdb = self.config._make_channels(sn_channels)
+        self.sn_rsp_queue = self.config._make_channels(sn_channels)
+        self.sn_req_wait = {"read": self.config._make_channels(sn_channels), "write": self.config._make_channels(sn_channels)}
+        self.sn_tracker = self.config._make_channels(sn_channels)
+        self.sn_tracker_count = self.config._make_channels(sn_channels, value_factory={"ro": {}, "share": {}})
+        self.sn_wdb = self.config._make_channels(sn_channels)
+        self.sn_wdb_recv = self.config._make_channels(sn_channels)
+        self.sn_wdb_count = self.config._make_channels(sn_channels)
         self.rn_wait_to_inject = []
         
         # 保序跟踪表: {(src, dest): {"REQ": last_ejected_id, "RSP": last_ejected_id, "DATA": last_ejected_id}}
@@ -93,16 +97,32 @@ class Node:
     def setup_rn_trackers(self, ip_type, ip_pos):
         """Setup read and write trackers for RN."""
         self.rn_rdb_recv[ip_type][ip_pos] = []
-        self.rn_rdb_count[ip_type][ip_pos] = self.config.RN_RDB_SIZE
+        
+        # 为D2D_RN使用专用配置
+        if ip_type.startswith("d2d_rn"):
+            self.rn_rdb_count[ip_type][ip_pos] = getattr(self.config, "D2D_RN_RDB_SIZE", self.config.RN_RDB_SIZE)
+            self.rn_wdb_count[ip_type][ip_pos] = getattr(self.config, "D2D_RN_WDB_SIZE", self.config.RN_WDB_SIZE)
+        else:
+            self.rn_rdb_count[ip_type][ip_pos] = self.config.RN_RDB_SIZE
+            self.rn_wdb_count[ip_type][ip_pos] = self.config.RN_WDB_SIZE
+            
         self.rn_rdb_reserve[ip_type][ip_pos] = 0
-        self.rn_wdb_count[ip_type][ip_pos] = self.config.RN_WDB_SIZE
         self.rn_wdb_send[ip_type][ip_pos] = []
         self.rn_wdb_reserve[ip_type][ip_pos] = 0
 
         for req_type in ["read", "write"]:
             self.rn_tracker[req_type][ip_type][ip_pos] = []
             self.rn_tracker_wait[req_type][ip_type][ip_pos] = []
-            self.rn_tracker_count[req_type][ip_type][ip_pos] = self.config.RN_R_TRACKER_OSTD if req_type == "read" else self.config.RN_W_TRACKER_OSTD
+            
+            # 为D2D_RN使用专用配置
+            if ip_type.startswith("d2d_rn"):
+                if req_type == "read":
+                    self.rn_tracker_count[req_type][ip_type][ip_pos] = getattr(self.config, "D2D_RN_R_TRACKER_OSTD", self.config.RN_R_TRACKER_OSTD)
+                else:
+                    self.rn_tracker_count[req_type][ip_type][ip_pos] = getattr(self.config, "D2D_RN_W_TRACKER_OSTD", self.config.RN_W_TRACKER_OSTD)
+            else:
+                self.rn_tracker_count[req_type][ip_type][ip_pos] = self.config.RN_R_TRACKER_OSTD if req_type == "read" else self.config.RN_W_TRACKER_OSTD
+                
             self.rn_tracker_pointer[req_type][ip_type][ip_pos] = -1
 
     def initialize_sn(self):
@@ -143,3 +163,8 @@ class Node:
             self.sn_wdb_count[key][ip_pos] = self.config.SN_L2M_WDB_SIZE
             self.sn_tracker_count[key]["ro"][ip_pos] = self.config.SN_L2M_R_TRACKER_OSTD
             self.sn_tracker_count[key]["share"][ip_pos] = self.config.SN_L2M_W_TRACKER_OSTD
+        elif key.startswith("d2d_sn"):
+            # 为D2D_SN使用专用配置
+            self.sn_wdb_count[key][ip_pos] = getattr(self.config, "D2D_SN_WDB_SIZE", self.config.SN_DDR_WDB_SIZE)
+            self.sn_tracker_count[key]["ro"][ip_pos] = getattr(self.config, "D2D_SN_R_TRACKER_OSTD", self.config.SN_DDR_R_TRACKER_OSTD)
+            self.sn_tracker_count[key]["share"][ip_pos] = getattr(self.config, "D2D_SN_W_TRACKER_OSTD", self.config.SN_DDR_W_TRACKER_OSTD)

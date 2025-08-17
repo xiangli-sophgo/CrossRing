@@ -344,6 +344,7 @@ class IPInterface:
             # RN-side IP类型不应该接收请求，直接忽略
             return
 
+
         req.cmd_received_by_cake1_cycle = getattr(self, "current_cycle", 0)
         self.req_wait_cycles_h += req.wait_cycle_h
         self.req_wait_cycles_v += req.wait_cycle_v
@@ -769,6 +770,18 @@ class IPInterface:
             flit.traffic_id = req.traffic_id
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
+            
+            # 继承跨Die相关属性（用于第五阶段判断）
+            if hasattr(req, "source_die_id_physical"):
+                flit.source_die_id_physical = req.source_die_id_physical
+            if hasattr(req, "source_physical"):
+                flit.source_physical = req.source_physical
+                # 对于跨Die数据，设置最终目标为原始请求者
+                flit.final_destination_physical = req.source_physical
+            if hasattr(req, "source_type"):
+                flit.source_type = req.destination_type  # DDR的类型
+            if hasattr(req, "final_destination_type"):
+                flit.final_destination_type = req.final_destination_type
 
             # 将读数据包放入数据网络的inject_fifo
             self.enqueue(flit, "data")

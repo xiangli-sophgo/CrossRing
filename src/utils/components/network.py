@@ -34,10 +34,10 @@ class Network:
         self.eject_queues = {"TU": {}, "TD": {}}
         self.eject_queues_in_pre = {"TU": {}, "TD": {}}
         self.arrive_node_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        self.IQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        self.EQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        self.IQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        self.EQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        self.IQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
+        self.EQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
+        self.IQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
+        self.EQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
         self.links = {}
         self.cross_point = {"horizontal": defaultdict(lambda: defaultdict(list)), "vertical": defaultdict(lambda: defaultdict(list))}
         # Crosspoint conflict status: maintains pipeline queue [current_cycle, previous_cycle]
@@ -130,7 +130,9 @@ class Network:
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}
         self.ETag_BOTHSIDE_UPGRADE = False
 
-        for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
+        for ip_pos in set(
+            config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST
+        ):
             self.cross_point["horizontal"][ip_pos]["TL"] = [None] * 2
             self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2
@@ -1126,15 +1128,15 @@ class Network:
         """判断该flit是否需要保序检查"""
         if not self.config.ENABLE_IN_ORDER_EJECTION:
             return False
-        
+
         # 获取真实的src和dest
         src = flit.source_original if flit.source_original != -1 else flit.source
         dest = flit.destination_original if flit.destination_original != -1 else flit.destination
-        
+
         # 如果未配置特定对或配置为空，则全部保序
-        if not hasattr(self.config, 'IN_ORDER_EJECTION_PAIRS') or len(self.config.IN_ORDER_EJECTION_PAIRS) == 0:
+        if not hasattr(self.config, "IN_ORDER_EJECTION_PAIRS") or len(self.config.IN_ORDER_EJECTION_PAIRS) == 0:
             return True
-        
+
         # 检查是否在配置的保序对列表中
         return [src, dest] in self.config.IN_ORDER_EJECTION_PAIRS
 
@@ -1143,22 +1145,22 @@ class Network:
         # 先判断是否需要保序
         if not self._need_in_order_check(flit):
             return True
-        
+
         # 确保flit已设置保序信息
         if not hasattr(flit, "src_dest_order_id") or not hasattr(flit, "packet_category"):
             return True
-        
+
         if flit.src_dest_order_id == -1 or flit.packet_category is None:
             return True
-        
+
         # 获取原始的src和dest
         src = flit.source_original if flit.source_original != -1 else flit.source
         dest = flit.destination_original if flit.destination_original != -1 else flit.destination
-        
+
         # 从节点获取保序跟踪表
         if not hasattr(self, "node") or self.node is None:
             return True
-        
+
         # 检查是否是期望的下一个顺序ID
         expected_order_id = self.node.order_tracking_table[(src, dest)][flit.packet_category] + 1
         return flit.src_dest_order_id == expected_order_id
@@ -1310,7 +1312,11 @@ class Network:
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
-                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth and self.ring_bridge_pre[direction][flit.current_link] is None:
+                    if (
+                        direction in self.ring_bridge.keys()
+                        and len(self.ring_bridge[direction][flit.current_link]) < max_depth
+                        and self.ring_bridge_pre[direction][flit.current_link] is None
+                    ):
                         # flit.flit_position = f"RB_{direction}"
                         # self.ring_bridge[direction][flit.current_link].append(flit)
                         self.ring_bridge_pre[direction][flit.current_link] = flit

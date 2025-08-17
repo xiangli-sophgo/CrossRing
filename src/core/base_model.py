@@ -198,7 +198,11 @@ class BaseModel:
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
+            self.config.GDMA_SEND_POSITION_LIST
+            + self.config.SDMA_SEND_POSITION_LIST
+            + self.config.CDMA_SEND_POSITION_LIST
+            + self.config.DDR_SEND_POSITION_LIST
+            + self.config.L2M_SEND_POSITION_LIST
         )
 
         # 缓存位置列表以避免重复转换
@@ -222,16 +226,45 @@ class BaseModel:
         self.ip_modules = {}
         for ip_pos in self.flit_positions:
             for ip_type in self.config.CH_NAME_LIST:
-                self.ip_modules[(ip_type, ip_pos)] = IPInterface(
-                    ip_type,
-                    ip_pos,
-                    self.config,
-                    self.req_network,
-                    self.rsp_network,
-                    self.data_network,
-                    self.node,
-                    self.routes,
-                )
+                # 检查是否是D2D接口类型
+                if ip_type == "d2d_rn_0":
+                    from src.utils.components.d2d_rn_interface import D2D_RN_Interface
+
+                    self.ip_modules[(ip_type, ip_pos)] = D2D_RN_Interface(
+                        ip_type,
+                        ip_pos,
+                        self.config,
+                        self.req_network,
+                        self.rsp_network,
+                        self.data_network,
+                        self.node,
+                        self.routes,
+                    )
+                elif ip_type == "d2d_sn_0":
+                    from src.utils.components.d2d_sn_interface import D2D_SN_Interface
+
+                    self.ip_modules[(ip_type, ip_pos)] = D2D_SN_Interface(
+                        ip_type,
+                        ip_pos,
+                        self.config,
+                        self.req_network,
+                        self.rsp_network,
+                        self.data_network,
+                        self.node,
+                        self.routes,
+                    )
+                else:
+                    # 普通IP接口
+                    self.ip_modules[(ip_type, ip_pos)] = IPInterface(
+                        ip_type,
+                        ip_pos,
+                        self.config,
+                        self.req_network,
+                        self.rsp_network,
+                        self.data_network,
+                        self.node,
+                        self.routes,
+                    )
         self.flits = []
         self.throughput_time = []
         self.data_count = 0
@@ -399,37 +432,37 @@ class BaseModel:
         """Execute one simulation cycle step."""
         # Tag moves
         self.release_completed_sn_tracker()
-        
+
         self.process_new_request()
-        
+
         self.tag_move_all_networks()
-        
+
         self.ip_inject_to_network()
-        
+
         # Network arbitration and movement
         self._inject_queue_arbitration(self.req_network, self.rn_positions_list, "req")
         self._step_reqs = self.move_flits_in_network(self.req_network, self._step_reqs, "req")
-        
+
         self._inject_queue_arbitration(self.rsp_network, self.sn_positions_list, "rsp")
         self._step_rsps = self.move_flits_in_network(self.rsp_network, self._step_rsps, "rsp")
-        
+
         self._inject_queue_arbitration(self.data_network, self.flit_positions_list, "data")
         self._step_flits = self.move_flits_in_network(self.data_network, self._step_flits, "data")
-        
+
         self.network_to_ip_eject()
-        
+
         self.move_pre_to_queues_all()
-        
+
         # Collect statistics
         self.req_network.collect_cycle_end_link_statistics(self.cycle)
         self.rsp_network.collect_cycle_end_link_statistics(self.cycle)
         self.data_network.collect_cycle_end_link_statistics(self.cycle)
-        
+
         self.debug_func()
-        
+
         # Evaluate throughput time
         self.update_throughput_metrics(self._step_flits)
-        
+
         # 检查traffic完成情况并推进链
         completed_traffics = self.traffic_scheduler.check_and_advance_chains(self.cycle)
         if completed_traffics and self.verbose:
@@ -438,10 +471,10 @@ class BaseModel:
     def is_completed(self):
         """Check if this die's simulation is completed."""
         return (
-            self.traffic_scheduler.is_all_completed() and 
-            self.data_network.recv_flits_num >= (self.read_flit + self.write_flit) and 
-            self.trans_flits_num == 0 and 
-            not self.new_write_req
+            self.traffic_scheduler.is_all_completed()
+            and self.data_network.recv_flits_num >= (self.read_flit + self.write_flit)
+            and self.trans_flits_num == 0
+            and not self.new_write_req
         )
 
     def run(self):
@@ -591,8 +624,11 @@ class BaseModel:
     def ip_inject_to_network(self):
         for ip_pos in self.flit_positions_list:
             for ip_type in self.config.CH_NAME_LIST:
-                ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
-                ip_interface.inject_step(self.cycle)
+                # 检查IP接口是否存在，避免KeyError
+                ip_key = (ip_type, ip_pos)
+                if ip_key in self.ip_modules:
+                    ip_interface: IPInterface = self.ip_modules[ip_key]
+                    ip_interface.inject_step(self.cycle)
 
     def network_to_ip_eject(self):
         """从网络到IP的eject步骤，并更新received_flit统计"""
@@ -693,7 +729,11 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
+            print(
+                f"Data statistic: Read: {self.read_req, self.read_flit}, "
+                f"Write: {self.write_req, self.write_flit}, "
+                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
+            )
 
     def log_summary(self):
         if self.verbose:
@@ -762,9 +802,9 @@ class BaseModel:
 
                 for ip_type in list(rr_queue):
                     # —— 网络‑特定 ip_type 过滤 ——
-                    if network_type == "req" and not (ip_type.startswith("sdma") or ip_type.startswith("gdma") or ip_type.startswith("cdma")):
+                    if network_type == "req" and not (ip_type.startswith("sdma") or ip_type.startswith("gdma") or ip_type.startswith("cdma") or ip_type.startswith("d2d_rn")):
                         continue
-                    if network_type == "rsp" and not (ip_type.startswith("ddr") or ip_type.startswith("l2m")):
+                    if network_type == "rsp" and not (ip_type.startswith("ddr") or ip_type.startswith("l2m") or ip_type.startswith("d2d_sn")):
                         continue
                     # data 网络不筛选 ip_type
 
@@ -777,17 +817,23 @@ class BaseModel:
 
                     # —— 网络‑特定前置检查 / 统计 ——
                     if network_type == "req":
-                        max_gap = self.config.GDMA_RW_GAP if ip_type.startswith("gdma") else self.config.SDMA_RW_GAP
-                        counts = self.dma_rw_counts[ip_type][ip_pos]
-                        rd, wr = counts["read"], counts["write"]
-                        if flit.req_type == "read" and abs(rd + 1 - wr) >= max_gap:
-                            continue
-                        if flit.req_type == "write" and abs(wr + 1 - rd) >= max_gap:
-                            continue
+                        counts = None  # 初始化counts变量
+                        if not ip_type.startswith("d2d_rn"):
+                            max_gap = self.config.GDMA_RW_GAP if ip_type.startswith("gdma") else self.config.SDMA_RW_GAP
+                            counts = self.dma_rw_counts[ip_type][ip_pos]
+                            rd, wr = counts["read"], counts["write"]
+                            if flit.req_type == "read" and abs(rd + 1 - wr) >= max_gap:
+                                continue
+                            if flit.req_type == "write" and abs(wr + 1 - rd) >= max_gap:
+                                continue
+                        else:
+                            # D2D RN接口使用专门的统计计数器
+                            counts = self.dma_rw_counts.get(ip_type, {}).get(ip_pos, {"read": 0, "write": 0})
+                            
                         # 使用现有函数做资源检查 + 注入
                         if not self._try_inject_to_direction(flit, ip_type, ip_pos, direction, counts):
                             continue
-                        # _try_inject_to_direction 已经做了 popleft & pre‑缓冲写入，故直接 break
+
                         rr_queue.remove(ip_type)
                         rr_queue.append(ip_type)
                         break
@@ -1093,7 +1139,8 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
+                    for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作
