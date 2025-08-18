@@ -215,6 +215,12 @@ class D2D_Model:
                     d2d_sys = self.dies[0].d2d_systems[die0_node]
                     d2d_sys.target_die_interfaces[1] = {"sn": d2d_sn, "rn": target_d2d_rn}
 
+                # 为Die0的D2D_SN设置目标Die1的D2D_RN接口
+                die0_sn_key = ("d2d_sn_0", die0_node)
+                if die0_sn_key in self.dies[0].ip_modules:
+                    die0_d2d_sn = self.dies[0].ip_modules[die0_sn_key]
+                    die0_d2d_sn.target_die_interfaces[1] = target_d2d_rn
+
             # Die1 -> Die0 连接 (使用正确的_0后缀格式)
             die1_rn_key = ("d2d_rn_0", die1_node)
             die0_sn_key = ("d2d_sn_0", die0_node)
@@ -236,6 +242,12 @@ class D2D_Model:
                 if die1_node in self.dies[1].d2d_systems:
                     d2d_sys = self.dies[1].d2d_systems[die1_node]
                     d2d_sys.target_die_interfaces[0] = {"sn": d2d_sn, "rn": target_d2d_rn}
+
+                # 为Die1的D2D_SN设置目标Die0的D2D_RN接口
+                die1_sn_key = ("d2d_sn_0", die1_node)
+                if die1_sn_key in self.dies[1].ip_modules:
+                    die1_d2d_sn = self.dies[1].ip_modules[die1_sn_key]
+                    die1_d2d_sn.target_die_interfaces[0] = target_d2d_rn
 
     def initial(self):
         """初始化D2D仿真"""
@@ -907,8 +919,8 @@ class D2D_Model:
             else:
                 net = net_type[:3]  # REQ->REQ, RSP->RSP, DATA->DAT
 
-            # DATA类型和AXI_R通道需要显示flit_id
-            if net == "DAT" or net_type == "DATA" or net_type == "AXI_R":
+            # DATA类型和AXI_R/AXI_W通道需要显示flit_id
+            if net == "DAT" or net_type == "DATA" or net_type == "AXI_R" or net_type == "AXI_W":
                 id_part = f":{getattr(flit, 'flit_id', '?')}"
             else:
                 id_part = ""
@@ -928,11 +940,20 @@ class D2D_Model:
             else:
                 pos_info = "Unknown"
 
-            # 请求类型
-            if hasattr(flit, "req_type") and flit.req_type:
+            # 响应类型优先（如果是RSP网络或AXI响应通道的flit），否则显示请求类型
+            if hasattr(flit, "rsp_type") and flit.rsp_type and (net_type == "RSP" or net_type in ["AXI_R", "AXI_B"]):
+                # 响应类型映射到清晰的缩写
+                rsp_type_map = {
+                    "positive": "pos",  # positive response
+                    "negative": "neg",  # negative response
+                    "datasend": "pos",  # datasend is positive response
+                    "write_complete": "ack",  # write acknowledgment
+                    "write_ack": "ack",  # write acknowledgment
+                    "write_response": "ack",  # write response
+                }
+                type_info = rsp_type_map.get(flit.rsp_type, flit.rsp_type[:3])
+            elif hasattr(flit, "req_type") and flit.req_type:
                 type_info = flit.req_type[0].upper()  # read->R, write->W
-            elif hasattr(flit, "rsp_type") and flit.rsp_type:
-                type_info = flit.rsp_type[:3]  # datasend->dat
             else:
                 type_info = "?"
 
@@ -958,7 +979,7 @@ class D2D_Model:
             route_info = f"{flit.source}.{current_src_type}->{flit.destination}.{current_dst_type}"
 
             # 简化输出：只有DATA类型显示flit_id，添加路由信息
-            return f"{net}{id_part}:{route_info}:{pos_info},{type_info}{status}"
+            return f"{net}{id_part}:{route_info}:{pos_info},{type_info}" + (f"[{status}]" if status else "")
 
         except Exception as e:
             # 出错时返回基本信息

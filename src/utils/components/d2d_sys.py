@@ -249,11 +249,32 @@ class D2D_Sys:
         Returns:
             str: AXI通道类型 ("AR", "R", "AW", "W", "B")
         """
+        
+        # 添加调试信息
+        flit_type = getattr(flit, 'flit_type', 'None')
+        req_type = getattr(flit, 'req_type', 'None')
+        has_write_data = hasattr(flit, 'write_data')
+        packet_id = getattr(flit, 'packet_id', '?')
+        
+        print(f"[D2D_Sys] 通道判断: packet_id={packet_id}, flit_type={flit_type}, req_type={req_type}, has_write_data={has_write_data}")
+        
+        # 数据flit - 优先判断
+        if hasattr(flit, 'flit_type') and flit.flit_type == 'data':
+            # 根据是否为写数据判断
+            if hasattr(flit, 'write_data') or (hasattr(flit, 'req_type') and flit.req_type == "write"):
+                print(f"[D2D_Sys] → W通道 (写数据)")
+                return "W"  # 写数据通道
+            else:
+                print(f"[D2D_Sys] → R通道 (读数据)")
+                return "R"  # 读数据通道
+        
         # 请求flit
         if hasattr(flit, 'req_type'):
             if flit.req_type == "read":
+                print(f"[D2D_Sys] → AR通道 (读请求)")
                 return "AR"  # 读地址通道
             elif flit.req_type == "write":
+                print(f"[D2D_Sys] → AW通道 (写请求)")
                 return "AW"  # 写地址通道
         
         # 响应flit

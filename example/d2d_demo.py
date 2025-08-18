@@ -30,7 +30,7 @@ def main():
     # 初始化D2D仿真模型 - 启用完整功能和D2D Trace
     sim = D2D_Model(
         config=config,
-        traffic_file_path=r"../traffic/d2d_test",
+        traffic_file_path=r"C:\Users\xiang\Documents\code\CrossRing\traffic\d2d_test",
         traffic_config=[["d2d_test_traffic.txt"]],
         model_type="REQ_RSP",
         topo_type=die_topo_type,

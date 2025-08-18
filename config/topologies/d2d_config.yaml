@@ -8,11 +8,11 @@ D2D_LAYOUT: "VERTICAL"  # 布局方式：HORIZONTAL(水平) 或 VERTICAL(垂直)
 
 # D2D 延迟配置 (cycles)
 D2D_AR_LATENCY: 10  # 地址读通道延迟
-D2D_R_LATENCY: 8    # 读数据通道延迟
+D2D_R_LATENCY: 10    # 读数据通道延迟
 D2D_AW_LATENCY: 10  # 地址写通道延迟
-D2D_W_LATENCY: 2    # 写数据通道延迟
-D2D_B_LATENCY: 8    # 写响应通道延迟
-D2D_DBID_LATENCY: 5 # DBID 信号延迟
+D2D_W_LATENCY: 10    # 写数据通道延迟
+D2D_B_LATENCY: 10    # 写响应通道延迟
+D2D_DBID_LATENCY: 10 # DBID 信号延迟
 D2D_MAX_OUTSTANDING: 16  # 最大未完成事务数
 
 # D2D 带宽控制

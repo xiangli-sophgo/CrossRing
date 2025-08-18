@@ -106,45 +106,94 @@ D2D系统包含两个独立的Die，每个Die内部包含完整的CrossRing网�
 
 ### 3.1 写流程概述
 
-写流程更加复杂，包含3个AXI通道的协调：
+写流程包含7个阶段，涉及3个AXI通道的协调和正确的tracker管理：
 
-1. **写地址阶段**: AW通道传输写地址
-2. **写数据阶段**: W通道传输写数据
-3. **写响应阶段**: B通道传输写完成响应
+1. **Die0内部握手**: RN与D2D_SN之间的写请求/数据握手
+2. **跨Die地址传输**: AW通道传输写地址
+3. **跨Die数据传输**: W通道传输写数据
+4. **Die1内部处理**: D2D_RN与SN之间的写请求/数据处理
+5. **跨Die响应返回**: B通道传输写完成响应
+6. **Die0响应转发**: D2D_SN转发响应给原始RN
+7. **事务完成**: 释放所有资源
 
-### 3.2 详细时序流程
+### 3.2 详细时序流程与Tracker管理
 
-#### 阶段1: 写请求发起
+#### 阶段1: Die0内部写请求握手
 ```
-Die0_RN → Die0_D2D_SN: 
-  - Write Req (包含地址和burst信息)
-Die0_RN → Die0_D2D_SN: 
-  - Write Data (实际数据负载)
-```
+时刻T0: Die0_RN 生成写请求
+  - Die0_RN消耗tracker和databuffer资源
+  - 发送写请求到Die0_D2D_SN
 
-#### 阶段2: 跨Die传输（AW + W通道延迟）
-```
-Die0_D2D_SN 发送写请求和数据:
-  - Write Req: 添加AW通道延迟 (D2D_AW_LATENCY)
-  - Write Data: 添加W通道延迟 (D2D_W_LATENCY)  
-→ Die1_D2D_RN 按延迟时间接收并转发到Die1内部网络
-```
+时刻T1: Die0_D2D_SN 处理写请求  
+  - 检查D2D_SN自身资源（tracker/databuffer）
+  - 如果有资源，消耗D2D_SN的tracker
+  - 返回data_send响应给Die0_RN
 
-#### 阶段3: 写响应处理（B通道延迟）
-```
-Die1_SN 完成写操作后:
-  - 生成写完成响应
-  - 经Die1_D2D_RN添加B通道延迟 (D2D_B_LATENCY)
-  - Die0_D2D_SN按延迟时间接收后转发给Die0_RN
+时刻T2: Die0_RN 发送写数据
+  - 收到data_send响应，开始发送写数据
+  - 关键：保持tracker，等待最终B通道响应
+  - Die0_D2D_SN接收并缓存写数据
 ```
 
-#### 特殊处理：DBIDValid信号（简化）
+#### 阶段2: 跨Die地址传输（AW通道）
 ```
-DBIDValid信号简化处理:
-  - Die1处理写请求时生成DBIDValid
-  - 添加固定延迟 (D2D_DBID_LATENCY)
-  - 无需专用信号线，通过延迟队列模拟
+时刻T3: Die0_D2D_SN → Die1_D2D_RN
+  - AW通道传输写请求，延迟：D2D_AW_LATENCY (10周期)
+  - 写请求在时刻(T3 + 10)到达Die1_D2D_RN
+  - 保持所有原始信息（packet_id, source_die等）
 ```
+
+#### 阶段3: 跨Die数据传输（W通道）
+```
+时刻T4: Die0_D2D_SN → Die1_D2D_RN  
+  - W通道传输写数据，延迟：D2D_W_LATENCY (2周期)
+  - 写数据在时刻(T4 + 2)到达Die1_D2D_RN
+  - Die1_D2D_RN消耗自己的tracker资源接收数据
+```
+
+#### 阶段4: Die1内部写请求处理
+```
+时刻T5: Die1_D2D_RN → Die1_SN
+  - 转发写请求到目标SN节点
+  - Die1_SN检查资源并返回data_send响应
+
+时刻T6: Die1_D2D_RN → Die1_SN  
+  - 收到data_send响应后，从缓存发送写数据到Die1_SN
+  - Die1_SN处理写操作（异步完成，不需要响应）
+
+时刻T7: Die1_D2D_RN自行生成write_complete响应
+  - D2D_RN在发送完写数据后立即生成write_complete响应
+  - 释放D2D_RN自己的tracker
+  - 注意：不等待Die1_SN的响应
+```
+
+#### 阶段5: 跨Die响应返回（B通道）
+```
+时刻T8: Die1_D2D_RN → Die0_D2D_SN
+  - D2D_RN发送write_complete响应到AXI_B通道
+  - B通道传输写完成响应，延迟：D2D_B_LATENCY (8周期)  
+  - 响应在时刻(T8 + 8)到达Die0_D2D_SN
+  - Die0_D2D_SN收到响应后释放自己的tracker
+```
+
+#### 阶段6-7: Die0响应转发与事务完成
+```
+时刻T9: Die0_D2D_SN → Die0_RN
+  - 转发B通道写完成响应给原始RN
+  - Die0_RN收到B通道响应后才释放tracker
+  - 完成整个跨Die写事务
+```
+
+### 3.3 关键Tracker管理规则
+
+| 组件 | Tracker消耗时机 | Tracker释放时机 |
+|------|----------------|----------------|
+| Die0_RN | 发送写请求时 | **收到B通道响应后**（跨Die特殊处理） |
+| Die0_D2D_SN | 接收写请求时 | 收到B通道响应后 |
+| Die1_D2D_RN | 接收W通道数据时 | 收到Die1_SN响应后 |
+| Die1_SN | 接收写请求时 | 发送写完成响应后（标准流程） |
+
+**重要说明**: Die0_RN的tracker管理与普通Die内写操作不同，必须等到B通道响应才能释放，而不是在data_send响应后释放。
 
 ## 4. 跨Die传输机制（延迟仿真）
 

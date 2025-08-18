@@ -468,13 +468,42 @@ class IPInterface:
                     # 将写数据包放入数据网络inject_fifo
                     for flit in self.node.rn_wdb[self.ip_type][self.ip_pos][rsp.packet_id]:
                         self.enqueue(flit, "data")
-                    # Enqueue 完所有写数据后 —— 释放 RN write‐tracker
+                    
+                    # 检查是否为跨Die写请求
+                    is_cross_die_write = self._is_cross_die_write_request(req)
+                    
+                    if is_cross_die_write:
+                        # 跨Die写请求：发送数据但不释放tracker，等待B通道响应
+                        print(f"[IP] 跨Die写请求 packet_id={req.packet_id}，数据已发送，tracker保持等待B通道响应")
+                    else:
+                        # 普通Die内写请求：发送数据并立即释放tracker
+                        self.node.rn_tracker["write"][self.ip_type][self.ip_pos].remove(req)
+                        self.node.rn_wdb_count[self.ip_type][self.ip_pos] += req.burst_length
+                        self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos] += 1
+                        self.node.rn_tracker_pointer["write"][self.ip_type][self.ip_pos] -= 1
+                        
+                # 同时清理写缓冲
+                self.node.rn_wdb[self.ip_type][self.ip_pos].pop(rsp.packet_id, None)
+                
+            elif rsp.rsp_type == "write_complete":
+                # 收到写完成响应，检查是否为跨Die写请求的最终响应
+                req: Flit = next((r for r in self.node.rn_tracker["write"][self.ip_type][self.ip_pos] 
+                                 if r.packet_id == rsp.packet_id and self._is_cross_die_write_request(r)), None)
+                if req:
+                    # 这是跨Die写请求的最终B通道响应，现在可以释放tracker
                     self.node.rn_tracker["write"][self.ip_type][self.ip_pos].remove(req)
                     self.node.rn_wdb_count[self.ip_type][self.ip_pos] += req.burst_length
                     self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos] += 1
                     self.node.rn_tracker_pointer["write"][self.ip_type][self.ip_pos] -= 1
-                # 同时清理写缓冲
-                self.node.rn_wdb[self.ip_type][self.ip_pos].pop(rsp.packet_id, None)
+                    print(f"[IP] 跨Die写请求 packet_id={req.packet_id} 收到B通道响应，释放tracker")
+
+    def _is_cross_die_write_request(self, req: Flit) -> bool:
+        """检查是否为跨Die写请求"""
+        # 检查是否有D2D目标Die ID，且与当前Die ID不同
+        if hasattr(req, 'd2d_target_die') and req.d2d_target_die is not None:
+            current_die_id = getattr(self.config, 'DIE_ID', 0)
+            return req.d2d_target_die != current_die_id
+        return False
 
     def release_completed_sn_tracker(self, req: Flit):
         # —— 1) 移除已完成的 tracker ——
@@ -725,7 +754,7 @@ class IPInterface:
             flit.set_packet_category_and_order_id()
             flit.departure_cycle = (
                 cycle + self.config.DDR_W_LATENCY + i * self.config.NETWORK_FREQUENCY
-                if req.original_destination_type.startswith("ddr")
+                if req.original_destination_type and req.original_destination_type.startswith("ddr")
                 else cycle + self.config.L2M_W_LATENCY + i * self.config.NETWORK_FREQUENCY
             )
             flit.req_departure_cycle = req.departure_cycle
@@ -741,6 +770,15 @@ class IPInterface:
             flit.traffic_id = req.traffic_id
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
+
+            # 继承D2D属性
+            if hasattr(req, "d2d_origin_die"):
+                flit.d2d_origin_die = req.d2d_origin_die      # 发起Die ID
+                flit.d2d_origin_node = req.d2d_origin_node    # 发起节点源映射位置
+                flit.d2d_origin_type = req.d2d_origin_type    # 发起IP类型
+                flit.d2d_target_die = req.d2d_target_die      # 目标Die ID
+                flit.d2d_target_node = req.d2d_target_node    # 目标节点源映射位置
+                flit.d2d_target_type = req.d2d_target_type    # 目标IP类型
 
             # 将写数据包放入wdb中
             self.node.rn_wdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
