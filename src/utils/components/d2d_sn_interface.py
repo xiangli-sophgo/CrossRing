@@ -271,8 +271,23 @@ class D2D_SN_Interface(IPInterface):
         if not target_die_id or not self.d2d_sys:
             return
 
-        # 根据请求类型选择AXI通道
-        channel = "AR" if getattr(flit, "req_type", None) == "read" else "AW"
+        # 根据flit类型和请求类型选择AXI通道
+        req_type = getattr(flit, "req_type", None)
+        flit_type = getattr(flit, "flit_type", None)
+        
+        if req_type == "read" and flit_type != "data":
+            channel = "AR"  # 读请求使用地址读通道
+        elif req_type == "read" and flit_type == "data":
+            channel = "R"   # 读数据使用读数据通道
+        elif req_type == "write" and flit_type != "data":
+            channel = "AW"  # 写请求使用地址写通道
+        elif req_type == "write" and flit_type == "data":
+            channel = "W"   # 写数据使用写数据通道
+        else:
+            channel = "AW"  # 默认使用写地址通道
+        
+        print(f"[D2D SN Debug] 跨Die转发: packet_id={getattr(flit, 'packet_id', 'None')}, "
+              f"req_type={req_type}, flit_type={flit_type}, channel={channel}, target_die={target_die_id}")
 
         # 使用D2D_Sys进行仲裁和AXI传输
         self.d2d_sys.enqueue_sn(flit, target_die_id, channel)
@@ -388,6 +403,12 @@ class D2D_SN_Interface(IPInterface):
             return  # 跳过重复处理
         
         self.node.sn_wdb[self.ip_type][self.ip_pos][packet_id].append(flit)
+        
+        # 记录写数据接收到D2D模型
+        d2d_model = getattr(self.req_network, 'd2d_model', None)
+        if d2d_model:
+            burst_length = getattr(flit, 'burst_length', 4)
+            d2d_model.record_write_data_received(flit.packet_id, self.die_id, burst_length)
 
         # 检查是否收集完所有写数据
         collected_flits = self.node.sn_wdb[self.ip_type][self.ip_pos][packet_id]

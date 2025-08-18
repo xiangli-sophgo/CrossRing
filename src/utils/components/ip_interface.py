@@ -165,6 +165,24 @@ class IPInterface:
         else:
             self.networks[network_type]["inject_fifo"].append(flit)
         flit.flit_position = "IP_inject"
+        
+        # 检查是否为新请求并记录统计
+        is_new_request = (network_type == "req" and 
+                         not self.networks[network_type]["send_flits"][flit.packet_id] and 
+                         not retry)
+        
+        if is_new_request and hasattr(flit, "req_type"):
+            # 判断是否为跨Die请求
+            is_cross_die = (hasattr(flit, "d2d_target_die") and 
+                           hasattr(flit, "d2d_origin_die") and 
+                           flit.d2d_target_die != flit.d2d_origin_die)
+            
+            # 记录请求统计到D2D模型
+            d2d_model = getattr(self.req_network, 'd2d_model', None)
+            if d2d_model:
+                die_id = getattr(self.config, "DIE_ID", 0)
+                d2d_model.record_request_issued(flit.packet_id, die_id, flit.req_type, is_cross_die)
+        
         if network_type == "req" and self.networks[network_type]["send_flits"][flit.packet_id]:
             return True
         self.networks[network_type]["send_flits"][flit.packet_id].append(flit)
@@ -503,6 +521,8 @@ class IPInterface:
                             d2d_model = getattr(self.req_network, 'd2d_model', None)
                             if d2d_model:
                                 d2d_model.d2d_requests_completed[die_id] += 1
+                                # 记录write_complete响应的接收
+                                d2d_model.record_write_complete(req.packet_id)
 
     def _is_cross_die_write_request(self, req: Flit) -> bool:
         """检查是否为跨Die写请求"""

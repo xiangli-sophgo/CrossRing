@@ -84,19 +84,26 @@ class D2D_RN_Interface(IPInterface):
         处理接收到的跨Die flit
         区分写请求、写数据和其他类型
         """
+        print(f"[D2D RN Debug] 接收到跨Die flit: packet_id={getattr(flit, 'packet_id', 'None')}, "
+              f"req_type={getattr(flit, 'req_type', 'None')}, rsp_type={getattr(flit, 'rsp_type', 'None')}, "
+              f"flit_type={getattr(flit, 'flit_type', 'None')}, position={getattr(flit, 'flit_position', 'None')}")
         
         # 检查是否为AXI_W写数据
         if (hasattr(flit, "flit_position") and flit.flit_position and "AXI_W" in str(flit.flit_position)):
             # AXI_W通道的写数据
+            print(f"[D2D RN Debug] 处理AXI_W写数据")
             self.handle_cross_die_write_data(flit)
         elif hasattr(flit, "req_type") and flit.req_type == "write" and not (hasattr(flit, "flit_type") and flit.flit_type == "data"):
             # 跨Die写请求（非数据）
+            print(f"[D2D RN Debug] 处理跨Die写请求")
             self.handle_cross_die_write_request(flit)
         elif hasattr(flit, "flit_type") and flit.flit_type == "data" and hasattr(flit, "req_type") and flit.req_type == "write":
             # 传统写数据flit
+            print(f"[D2D RN Debug] 处理传统写数据")
             self.handle_cross_die_write_data(flit)
         else:
             # 其他类型（读请求等），使用原有逻辑
+            print(f"[D2D RN Debug] 处理其他类型flit（读数据等）")
             self.handle_other_cross_die_flit(flit)
             
     def handle_cross_die_write_request(self, flit: Flit):
@@ -129,6 +136,12 @@ class D2D_RN_Interface(IPInterface):
             
         # 缓存写数据
         self.cross_die_write_data_cache[packet_id].append(flit)
+        
+        # 记录写数据接收到D2D模型
+        d2d_model = getattr(self.req_network, 'd2d_model', None)
+        if d2d_model:
+            burst_length = getattr(flit, 'burst_length', 4)
+            d2d_model.record_write_data_received(flit.packet_id, self.die_id, burst_length)
         
         # 检查是否收集完所有写数据
         collected_flits = self.cross_die_write_data_cache[packet_id]
@@ -425,6 +438,34 @@ class D2D_RN_Interface(IPInterface):
         # 调用父类的inject_step方法
         super().inject_step(cycle)
     
+    def eject_step(self, cycle):
+        """
+        重写eject_step方法，处理从本地网络接收到的跨Die读数据并发送回原始请求者
+        """
+        # 调用父类的eject_step方法
+        ejected_flits = super().eject_step(cycle)
+
+        # 检查ejected的flit是否为需要跨Die返回的读数据
+        if ejected_flits:
+            for flit in ejected_flits:
+                # 检查是否为跨Die读数据响应
+                if (hasattr(flit, "d2d_target_die") and hasattr(flit, "d2d_origin_die") and 
+                    flit.d2d_target_die is not None and flit.d2d_origin_die is not None and 
+                    flit.d2d_target_die != flit.d2d_origin_die and
+                    hasattr(flit, "req_type") and flit.req_type == "read" and
+                    hasattr(flit, "flit_type") and flit.flit_type == "data"):
+                    
+                    # 这是跨Die读数据响应，需要通过AXI_R通道发送回原始请求者
+                    print(f"[D2D RN Debug] 接收到跨Die读数据: packet_id={getattr(flit, 'packet_id', 'None')}, "
+                          f"返回到Die{flit.d2d_origin_die}")
+                    
+                    target_die_id = flit.d2d_origin_die  # 返回到原始请求者的Die
+                    if self.d2d_sys and target_die_id != self.die_id:
+                        # 通过AXI_R通道发送
+                        self.d2d_sys.enqueue_rn(flit, target_die_id, self.d2d_r_latency, channel="R")
+
+        return ejected_flits
+    
     def _handle_received_data(self, flit: Flit):
         """
         重写数据接收处理，支持跨Die数据返回
@@ -443,6 +484,12 @@ class D2D_RN_Interface(IPInterface):
             self.data_wait_cycles_v += getattr(flit, "wait_cycle_v", 0)
             self.data_cir_h_num += getattr(flit, "eject_attempts_h", 0)
             self.data_cir_v_num += getattr(flit, "eject_attempts_v", 0)
+            
+            # 记录读数据接收到D2D模型
+            d2d_model = getattr(self.req_network, 'd2d_model', None)
+            if d2d_model:
+                burst_length = getattr(flit, 'burst_length', 4)
+                d2d_model.record_read_data_received(flit.packet_id, self.die_id, burst_length)
             
             # 收集到data buffer中，但不更新网络的recv_flits_num
             if flit.packet_id not in self.node.rn_rdb[self.ip_type][self.ip_pos]:

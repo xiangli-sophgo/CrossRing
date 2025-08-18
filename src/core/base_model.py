@@ -843,6 +843,14 @@ class BaseModel:
                             flit.data_entry_network_cycle = self.cycle
                             self.send_flits_num += 1
                             self.trans_flits_num += 1
+                            
+                            # 区分读写数据统计
+                            if hasattr(req, 'req_type'):
+                                if req.req_type == "read":
+                                    self.send_read_flits_num_stat += 1
+                                elif req.req_type == "write":
+                                    self.send_write_flits_num_stat += 1
+                            
                             if hasattr(flit, "traffic_id"):
                                 self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "sent_flit")
 
