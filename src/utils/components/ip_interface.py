@@ -474,7 +474,7 @@ class IPInterface:
                     
                     if is_cross_die_write:
                         # 跨Die写请求：发送数据但不释放tracker，等待B通道响应
-                        print(f"[IP] 跨Die写请求 packet_id={req.packet_id}，数据已发送，tracker保持等待B通道响应")
+                        pass
                     else:
                         # 普通Die内写请求：发送数据并立即释放tracker
                         self.node.rn_tracker["write"][self.ip_type][self.ip_pos].remove(req)
@@ -495,7 +495,14 @@ class IPInterface:
                     self.node.rn_wdb_count[self.ip_type][self.ip_pos] += req.burst_length
                     self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos] += 1
                     self.node.rn_tracker_pointer["write"][self.ip_type][self.ip_pos] -= 1
-                    print(f"[IP] 跨Die写请求 packet_id={req.packet_id} 收到B通道响应，释放tracker")
+                    
+                    # 更新D2D请求完成计数
+                    if hasattr(req, 'd2d_origin_die') and hasattr(req, 'd2d_target_die'):
+                        die_id = getattr(self.config, 'DIE_ID', None)
+                        if die_id is not None and req.d2d_origin_die == die_id:
+                            d2d_model = getattr(self.req_network, 'd2d_model', None)
+                            if d2d_model:
+                                d2d_model.d2d_requests_completed[die_id] += 1
 
     def _is_cross_die_write_request(self, req: Flit) -> bool:
         """检查是否为跨Die写请求"""

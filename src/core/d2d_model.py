@@ -324,20 +324,25 @@ class D2D_Model:
         if not self.d2d_traffic_scheduler.is_all_completed():
             return False
 
-        # 检查跨Die事务是否完成：每个Die是否收到了所有期望的跨Die响应
+        # 检查每个Die的D2D请求是否全部完成：发起数量 == 完成数量
         for die_id in range(self.num_dies):
-            expected = self.d2d_expected_flits[die_id]
-            received = self.d2d_received_flits[die_id]
-            if expected > received:
+            sent = self.d2d_requests_sent.get(die_id, 0)
+            completed = self.d2d_requests_completed.get(die_id, 0)
+            if sent > completed:
                 return False
 
-        # # 检查每个Die的本地完成状态
-        # for die_id, die_model in self.dies.items():
-        #     if not die_model.is_completed():
-        #         print(f"[DEBUG] Die{die_id}本地事务未完成")
-        #         return False
+        # 对于D2D模型，不检查单个Die的本地traffic完成状态
+        # 因为所有traffic都是通过D2D_Model统一管理的
+        # 只需要检查网络是否空闲和没有待处理的事务
+        for die_id, die_model in self.dies.items():
+            # 检查网络中是否还有传输中的flits
+            trans_completed = die_model.trans_flits_num == 0
+            # 检查是否有新的写请求待处理
+            write_completed = not die_model.new_write_req
+            
+            if not (trans_completed and write_completed):
+                return False
 
-        # print(f"[DEBUG] 所有条件满足，仿真应该结束")
         return True
 
     def _process_d2d_traffic(self, die_model: BaseModel):
@@ -536,14 +541,13 @@ class D2D_Model:
             trans_fn = getattr(die_model, "trans_flits_num", 0)
             recv_fn = die_model.data_network.recv_flits_num if hasattr(die_model, "data_network") else 0
 
-            # 使用新的D2D统计计数器
-            d2d_sent = self.d2d_requests_sent.get(die_id, 0)
-            d2d_recv = self.d2d_requests_completed.get(die_id, 0)  # 使用完成的请求数
+            # 使用D2D完成数量统计
+            d2d_completed = self.d2d_requests_completed.get(die_id, 0)  # 完成的D2D请求数
 
             print(
                 f"  Die{die_id}: Req_cnt: {req_cnt}, In_Req: {in_req}, Rsp: {rsp}, "
                 f"R_fn: {r_fn}, W_fn: {w_fn}, Trans_fn: {trans_fn}, Recv_fn: {recv_fn}, "
-                f"D2D_send: {d2d_sent}, D2D_recv: {d2d_recv}"
+                f"D2D_done: {d2d_completed}"
             )
 
     def generate_combined_flow_graph(self, mode="total", save_path=None, show_cdma=True):
@@ -946,7 +950,7 @@ class D2D_Model:
                 rsp_type_map = {
                     "positive": "pos",  # positive response
                     "negative": "neg",  # negative response
-                    "datasend": "pos",  # datasend is positive response
+                    "datasend": "dat",  # datasend is positive response
                     "write_complete": "ack",  # write acknowledgment
                     "write_ack": "ack",  # write acknowledgment
                     "write_response": "ack",  # write response

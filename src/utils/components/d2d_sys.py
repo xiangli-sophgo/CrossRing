@@ -59,48 +59,7 @@ class D2D_Sys:
         self.arbiter_counter = 0
         
         # AXI通道状态管理（类似network.send_flits）
-        self.axi_channels = {
-            'AR': {
-                'send_flits': {},  # {packet_id: [flits_with_timing]}
-                'latency': getattr(config, 'D2D_AR_LATENCY', 10),
-                'bandwidth_limiter': TokenBucket(
-                    rate=getattr(config, 'D2D_AR_BANDWIDTH', 64) / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
-                    bucket_size=getattr(config, 'D2D_AR_BANDWIDTH', 64)
-                )
-            },
-            'R': {
-                'send_flits': {},
-                'latency': getattr(config, 'D2D_R_LATENCY', 8),
-                'bandwidth_limiter': TokenBucket(
-                    rate=getattr(config, 'D2D_R_BANDWIDTH', 128) / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
-                    bucket_size=getattr(config, 'D2D_R_BANDWIDTH', 128)
-                )
-            },
-            'AW': {
-                'send_flits': {},
-                'latency': getattr(config, 'D2D_AW_LATENCY', 10),
-                'bandwidth_limiter': TokenBucket(
-                    rate=getattr(config, 'D2D_AW_BANDWIDTH', 64) / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
-                    bucket_size=getattr(config, 'D2D_AW_BANDWIDTH', 64)
-                )
-            },
-            'W': {
-                'send_flits': {},
-                'latency': getattr(config, 'D2D_W_LATENCY', 2),
-                'bandwidth_limiter': TokenBucket(
-                    rate=getattr(config, 'D2D_W_BANDWIDTH', 128) / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
-                    bucket_size=getattr(config, 'D2D_W_BANDWIDTH', 128)
-                )
-            },
-            'B': {
-                'send_flits': {},
-                'latency': getattr(config, 'D2D_B_LATENCY', 8),
-                'bandwidth_limiter': TokenBucket(
-                    rate=getattr(config, 'D2D_B_BANDWIDTH', 32) / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
-                    bucket_size=getattr(config, 'D2D_B_BANDWIDTH', 32)
-                )
-            }
-        }
+        self.axi_channels = self._init_axi_channels(config)
         
         # 保留原有的数据传输令牌桶（用于统一的数据流控制）
         d2d_data_bw_limit = getattr(config, 'D2D_DATA_BW_LIMIT', 64)
@@ -138,6 +97,30 @@ class D2D_Sys:
         # {packet_id: [axi_flits]}
         self.send_flits = {}
     
+    def _init_axi_channels(self, config):
+        """初始化AXI通道配置"""
+        channels = {}
+        channel_configs = [
+            ('AR', 'D2D_AR_LATENCY', 10, 'D2D_AR_BANDWIDTH', 64),
+            ('R', 'D2D_R_LATENCY', 8, 'D2D_R_BANDWIDTH', 128),
+            ('AW', 'D2D_AW_LATENCY', 10, 'D2D_AW_BANDWIDTH', 64),
+            ('W', 'D2D_W_LATENCY', 2, 'D2D_W_BANDWIDTH', 128),
+            ('B', 'D2D_B_LATENCY', 8, 'D2D_B_BANDWIDTH', 32)
+        ]
+        
+        for channel_name, latency_key, latency_default, bw_key, bw_default in channel_configs:
+            bandwidth = getattr(config, bw_key, bw_default)
+            channels[channel_name] = {
+                'send_flits': {},
+                'latency': getattr(config, latency_key, latency_default),
+                'bandwidth_limiter': TokenBucket(
+                    rate=bandwidth / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
+                    bucket_size=bandwidth
+                )
+            }
+        
+        return channels
+    
     def enqueue_rn(self, flit: Flit, target_die_id: int, delay: int, channel: str = None):
         """
         RN接口请求加入发送队列
@@ -168,6 +151,7 @@ class D2D_Sys:
         Args:
             flit: 要发送的flit
             target_die_id: 目标Die ID
+            delay: 延迟（保持接口一致性）
         """
         # 根据flit类型选择AXI通道
         channel_type = self._determine_axi_channel(flit, "sn")
@@ -250,31 +234,19 @@ class D2D_Sys:
             str: AXI通道类型 ("AR", "R", "AW", "W", "B")
         """
         
-        # 添加调试信息
-        flit_type = getattr(flit, 'flit_type', 'None')
-        req_type = getattr(flit, 'req_type', 'None')
-        has_write_data = hasattr(flit, 'write_data')
-        packet_id = getattr(flit, 'packet_id', '?')
-        
-        print(f"[D2D_Sys] 通道判断: packet_id={packet_id}, flit_type={flit_type}, req_type={req_type}, has_write_data={has_write_data}")
-        
         # 数据flit - 优先判断
         if hasattr(flit, 'flit_type') and flit.flit_type == 'data':
             # 根据是否为写数据判断
             if hasattr(flit, 'write_data') or (hasattr(flit, 'req_type') and flit.req_type == "write"):
-                print(f"[D2D_Sys] → W通道 (写数据)")
                 return "W"  # 写数据通道
             else:
-                print(f"[D2D_Sys] → R通道 (读数据)")
                 return "R"  # 读数据通道
         
         # 请求flit
         if hasattr(flit, 'req_type'):
             if flit.req_type == "read":
-                print(f"[D2D_Sys] → AR通道 (读请求)")
                 return "AR"  # 读地址通道
             elif flit.req_type == "write":
-                print(f"[D2D_Sys] → AW通道 (写请求)")
                 return "AW"  # 写地址通道
         
         # 响应flit
@@ -284,40 +256,12 @@ class D2D_Sys:
             elif flit.rsp_type in ['write_ack', 'write_response']:
                 return "B"  # 写响应通道
         
-        # 数据flit
-        if hasattr(flit, 'flit_type'):
-            if flit.flit_type == 'data':
-                # 根据是否为写数据判断
-                if hasattr(flit, 'write_data') or (hasattr(flit, 'req_type') and flit.req_type == "write"):
-                    return "W"  # 写数据通道
-                else:
-                    return "R"  # 读数据通道
-        
         # 默认根据接口类型判断
         if interface_type == "rn":
             return "AR"  # RN发起的请求默认为读地址
         else:
             return "R"   # SN返回的默认为数据
     
-    def _is_data_flit(self, flit: Flit) -> bool:
-        """
-        判断是否为数据flit（需要带宽限制）
-        
-        Args:
-            flit: 待判断的flit
-            
-        Returns:
-            bool: 是否为数据flit
-        """
-        # 数据flit的判断逻辑
-        if hasattr(flit, 'flit_type') and flit.flit_type == 'data':
-            return True
-        
-        # 响应中的数据部分
-        if hasattr(flit, 'rsp_type') and flit.rsp_type in ['datasend', 'read_data']:
-            return True
-        
-        return False
     
     def _inject_to_axi_channel(self, item: dict) -> bool:
         """
@@ -347,20 +291,13 @@ class D2D_Sys:
             destination=flit.destination,
             path=getattr(flit, 'path', [])
         )
-        
-        
-        # 复制关键属性到AXI flit（使用新的d2d属性）
+        # 复制关键属性到AXI flit
         for attr in ['req_type', 'rsp_type', 'flit_type',
                      'd2d_origin_die', 'd2d_origin_node', 'd2d_origin_type',
                      'd2d_target_die', 'd2d_target_node', 'd2d_target_type',
                      'req_attr', 'packet_id', 'flit_id', 'burst_length']:
             if hasattr(flit, attr):
                 setattr(axi_flit, attr, getattr(flit, attr))
-        
-        
-        # AXI传输无需修改d2d属性，已在复制时继承
-        # 通道类型将在后续路由时处理
-        
         
         # 根据通道类型设置正确的阶段信息
         if channel_type in ['AR', 'AW', 'W']:
@@ -510,7 +447,8 @@ class D2D_Sys:
             target_interface.schedule_cross_die_receive(flit, self.current_cycle)
             
             # 如果是数据传输完成，通知源接口释放tracker
-            if self._is_data_flit(flit) and hasattr(flit, "d2d_origin_die"):
+            if ((hasattr(flit, 'flit_type') and flit.flit_type == 'data') or 
+                (hasattr(flit, 'rsp_type') and flit.rsp_type in ['datasend', 'read_data'])) and hasattr(flit, "d2d_origin_die"):
                 # 这是跨Die数据返回，需要通知源D2D_RN
                 source_die_id = self.die_id  # 当前Die是源Die
                 source_interfaces = self.target_die_interfaces.get(source_die_id, {})
@@ -521,15 +459,6 @@ class D2D_Sys:
         else:
             self.logger.error(f"无法找到合适的目标接口")
     
-    def _transmit(self, item: dict):
-        """
-        执行实际的跨Die传输（兼容旧接口，已被AXI通道机制替代）
-        
-        Args:
-            item: 包含flit和传输信息的字典
-        """
-        # 这个方法保留用于兼容性，实际传输已经由AXI通道机制处理
-        self.logger.warning("使用了已被AXI通道机制替代的_transmit方法")
     
     def get_statistics(self) -> dict:
         """
