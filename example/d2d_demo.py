@@ -31,7 +31,7 @@ def main():
     sim = D2D_Model(
         config=config,
         traffic_file_path=r"../traffic/d2d_test",
-        traffic_config=[["d2d_simple_test.txt"]],
+        traffic_config=[["d2d_test_traffic.txt"]],
         model_type="REQ_RSP",
         topo_type=die_topo_type,
         result_save_path="../Result/d2d_demo/",
@@ -39,7 +39,7 @@ def main():
         verbose=1,
         print_d2d_trace=True,  # 启用D2D trace功能
         show_d2d_trace_id=0,  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
-        d2d_trace_sleep=0.2,  # 不暂停，加快调试
+        d2d_trace_sleep=0.0,  # 不暂停，加快调试
     )
 
     # 初始化仿真

@@ -7,6 +7,7 @@ Enhanced with route table support for flexible routing.
 from __future__ import annotations
 from collections import defaultdict
 from config.config import CrossRingConfig
+from functools import lru_cache
 
 
 class Node:
@@ -168,3 +169,21 @@ class Node:
             self.sn_wdb_count[key][ip_pos] = getattr(self.config, "D2D_SN_WDB_SIZE", self.config.SN_DDR_WDB_SIZE)
             self.sn_tracker_count[key]["ro"][ip_pos] = getattr(self.config, "D2D_SN_R_TRACKER_OSTD", self.config.SN_DDR_R_TRACKER_OSTD)
             self.sn_tracker_count[key]["share"][ip_pos] = getattr(self.config, "D2D_SN_W_TRACKER_OSTD", self.config.SN_DDR_W_TRACKER_OSTD)
+
+
+# 添加全局node_map函数，根据base_model的实现
+@lru_cache(maxsize=1024)
+def node_map(node, is_source=True, num_col=4):
+    """
+    Node mapping function based on base_model implementation
+    Args:
+        node: original node id
+        is_source: True for source mapping, False for destination mapping  
+        num_col: number of columns in topology (default 4)
+    Returns:
+        mapped node position
+    """
+    if is_source:
+        return node % num_col + num_col + node // num_col * 2 * num_col
+    else:
+        return node % num_col + node // num_col * 2 * num_col

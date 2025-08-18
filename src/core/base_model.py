@@ -198,11 +198,7 @@ class BaseModel:
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST
-            + self.config.SDMA_SEND_POSITION_LIST
-            + self.config.CDMA_SEND_POSITION_LIST
-            + self.config.DDR_SEND_POSITION_LIST
-            + self.config.L2M_SEND_POSITION_LIST
+            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
         )
 
         # 缓存位置列表以避免重复转换
@@ -470,12 +466,12 @@ class BaseModel:
 
     def is_completed(self):
         """Check if this die's simulation is completed."""
-        return (
-            self.traffic_scheduler.is_all_completed()
-            and self.data_network.recv_flits_num >= (self.read_flit + self.write_flit)
-            and self.trans_flits_num == 0
-            and not self.new_write_req
-        )
+        traffic_completed = self.traffic_scheduler.is_all_completed()
+        recv_completed = self.data_network.recv_flits_num >= (self.read_flit + self.write_flit)
+        trans_completed = self.trans_flits_num == 0
+        write_completed = not self.new_write_req
+
+        return traffic_completed and recv_completed and trans_completed and write_completed
 
     def run(self):
         """Main simulation loop."""
@@ -729,11 +725,7 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(
-                f"Data statistic: Read: {self.read_req, self.read_flit}, "
-                f"Write: {self.write_req, self.write_flit}, "
-                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
-            )
+            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
         if self.verbose:
@@ -829,7 +821,7 @@ class BaseModel:
                         else:
                             # D2D RN接口使用专门的统计计数器
                             counts = self.dma_rw_counts.get(ip_type, {}).get(ip_pos, {"read": 0, "write": 0})
-                            
+
                         # 使用现有函数做资源检查 + 注入
                         if not self._try_inject_to_direction(flit, ip_type, ip_pos, direction, counts):
                             continue
@@ -1139,8 +1131,7 @@ class BaseModel:
 
                 # 获取各方向的flit
                 station_flits = [network.ring_bridge[fifo_name][(pos, next_pos)][0] if network.ring_bridge[fifo_name][(pos, next_pos)] else None for fifo_name in ["TL", "TR"]] + [
-                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None
-                    for fifo_name in ["TU", "TD"]
+                    network.inject_queues[fifo_name][pos][0] if pos in network.inject_queues[fifo_name] and network.inject_queues[fifo_name][pos] else None for fifo_name in ["TU", "TD"]
                 ]
 
                 # 处理EQ操作

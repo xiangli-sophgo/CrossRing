@@ -47,6 +47,12 @@ class D2D_Model:
         self.total_cross_die_requests = 0
         self.total_cross_die_responses = 0
 
+        # D2D跨Die事务简化统计
+        self.d2d_expected_flits = {i: 0 for i in range(self.num_dies)}  # 每个Die期望接收的跨Die数据包数
+        self.d2d_received_flits = {i: 0 for i in range(self.num_dies)}  # 每个Die实际接收的跨Die数据包数
+        self.d2d_requests_sent = {i: 0 for i in range(self.num_dies)}  # 每个Die发出的跨Die请求数
+        self.d2d_requests_completed = {i: 0 for i in range(self.num_dies)}  # 每个Die完成的跨Die请求数
+
         # 创建D2D专用的traffic调度器
         self.d2d_traffic_scheduler = D2DTrafficScheduler(traffic_config, self.kwargs.get("traffic_file_path", "../traffic/"), config)
 
@@ -85,11 +91,25 @@ class D2D_Model:
             # 初始化Die
             die_model.initial()
 
+            # D2D模式下手动设置traffic统计属性，避免AttributeError
+            die_model.read_flit = 0
+            die_model.write_flit = 0
+            die_model.read_req = 0
+            die_model.write_req = 0
+
             # 初始化step变量
             die_model._step_flits, die_model._step_reqs, die_model._step_rsps = [], [], []
 
             # 初始化d2d_systems字典
             die_model.d2d_systems = {}
+
+            # 设置D2D模型引用
+            die_model.d2d_model = self
+
+            # 为网络设置D2D模型引用，方便IP接口访问
+            die_model.req_network.d2d_model = self
+            die_model.rsp_network.d2d_model = self
+            die_model.data_network.d2d_model = self
 
             # 替换或添加D2D节点
             self._add_d2d_nodes_to_die(die_model, die_id)
@@ -137,8 +157,8 @@ class D2D_Model:
 
         for i, rn_pos in enumerate(d2d_positions_list):
             # 计算对应的SN位置（根据CrossRing拓扑规则）
-            sn_pos = rn_pos #- config.NUM_COL
-            
+            sn_pos = rn_pos  # - config.NUM_COL
+
             # 创建D2D_Sys（使用RN位置作为物理节点标识）
             d2d_sys = D2D_Sys(rn_pos, die_id, config)
 
@@ -156,7 +176,6 @@ class D2D_Model:
 
             # 存储D2D_Sys
             die_model.d2d_systems[rn_pos] = d2d_sys  # 使用RN位置作为key
-
 
         # 设置D2D配置
         d2d_sn_positions = [pos - config.NUM_COL for pos in d2d_positions_list]
@@ -190,7 +209,7 @@ class D2D_Model:
                     d2d_rn.target_die_interfaces[1] = []
                 d2d_rn.target_die_interfaces[1].append(d2d_sn)
 
-                # 为D2D_Sys设置目标接口  
+                # 为D2D_Sys设置目标接口
                 # D2D_Sys使用RN位置作为key
                 if die0_node in self.dies[0].d2d_systems:
                     d2d_sys = self.dies[0].d2d_systems[die0_node]
@@ -213,7 +232,7 @@ class D2D_Model:
                 d2d_rn.target_die_interfaces[0].append(d2d_sn)
 
                 # 为D2D_Sys设置目标接口
-                # D2D_Sys使用RN位置作为key  
+                # D2D_Sys使用RN位置作为key
                 if die1_node in self.dies[1].d2d_systems:
                     d2d_sys = self.dies[1].d2d_systems[die1_node]
                     d2d_sys.target_die_interfaces[0] = {"sn": d2d_sn, "rn": target_d2d_rn}
@@ -293,11 +312,20 @@ class D2D_Model:
         if not self.d2d_traffic_scheduler.is_all_completed():
             return False
 
-        # 检查每个Die的完成状态
-        for die_id, die_model in self.dies.items():
-            if not die_model.is_completed():
+        # 检查跨Die事务是否完成：每个Die是否收到了所有期望的跨Die响应
+        for die_id in range(self.num_dies):
+            expected = self.d2d_expected_flits[die_id]
+            received = self.d2d_received_flits[die_id]
+            if expected > received:
                 return False
 
+        # # 检查每个Die的本地完成状态
+        # for die_id, die_model in self.dies.items():
+        #     if not die_model.is_completed():
+        #         print(f"[DEBUG] Die{die_id}本地事务未完成")
+        #         return False
+
+        # print(f"[DEBUG] 所有条件满足，仿真应该结束")
         return True
 
     def _process_d2d_traffic(self, die_model: BaseModel):
@@ -345,11 +373,15 @@ class D2D_Model:
         path = die_model.routes[source_physical][intermediate_dest]
         req = Flit.create_flit(source_physical, intermediate_dest, path)
 
-        # 设置D2D专用属性
-        req.source_die_id = src_die
-        req.target_die_id = dst_die
-        req.final_destination_physical = dst_node  # 保存最终目标
-        req.final_destination_type = dst_ip
+        # 设置D2D统一属性（新设计）
+        req.d2d_origin_die = src_die  # 发起Die ID
+        req.d2d_origin_node = source_physical  # 发起节点源映射位置
+        req.d2d_origin_type = src_ip  # 发起IP类型
+
+        req.d2d_target_die = dst_die  # 目标Die ID
+        # 目标节点源映射位置（统一保存源映射）
+        req.d2d_target_node = die_model.node_map(dst_node, True)  # 目标节点的源映射
+        req.d2d_target_type = dst_ip  # 目标IP类型
 
         # 设置标准属性（与BaseModel一致）
         req.source_original = src_node
@@ -368,6 +400,11 @@ class D2D_Model:
 
         # 设置保序信息
         req.set_packet_category_and_order_id()
+
+        # 记录跨Die统计（只对跨Die请求记录）
+        if src_die != dst_die:
+            self.d2d_requests_sent[src_die] += 1
+            self.d2d_expected_flits[src_die] += burst_length
 
         try:
             # 通过IP接口注入请求
@@ -487,29 +524,9 @@ class D2D_Model:
             trans_fn = getattr(die_model, "trans_flits_num", 0)
             recv_fn = die_model.data_network.recv_flits_num if hasattr(die_model, "data_network") else 0
 
-            # 获取D2D特定统计 - 支持多个D2D节点
-            d2d_sent = 0
-            d2d_recv = 0
-
-            # 获取当前Die的D2D节点位置
-            if die_id == 0:
-                d2d_positions = getattr(self.config, "D2D_DIE0_POSITIONS", [])
-            else:
-                d2d_positions = getattr(self.config, "D2D_DIE1_POSITIONS", [])
-
-            # 累计所有D2D节点的统计
-            for pos in d2d_positions:
-                # D2D_RN统计
-                d2d_rn_key = ("d2d_rn", pos)
-                if d2d_rn_key in die_model.ip_modules:
-                    rn_stats = die_model.ip_modules[d2d_rn_key].get_statistics()
-                    d2d_sent += rn_stats["cross_die_requests_sent"]
-
-                # D2D_SN统计
-                d2d_sn_key = ("d2d_sn", pos)
-                if d2d_sn_key in die_model.ip_modules:
-                    sn_stats = die_model.ip_modules[d2d_sn_key].get_statistics()
-                    d2d_recv += sn_stats["cross_die_requests_received"]
+            # 使用新的D2D统计计数器
+            d2d_sent = self.d2d_requests_sent.get(die_id, 0)
+            d2d_recv = self.d2d_requests_completed.get(die_id, 0)  # 使用完成的请求数
 
             print(
                 f"  Die{die_id}: Req_cnt: {req_cnt}, In_Req: {in_req}, Rsp: {rsp}, "
@@ -737,6 +754,14 @@ class D2D_Model:
 
         print(f"\nD2D组合报告已保存: {combined_report_file}")
 
+    def _print_cycle_header_once(self, has_active_flits=True):
+        """只在每个周期打印一次周期标题"""
+        if has_active_flits and self.current_cycle != self._d2d_last_printed_cycle:
+            print(f"\nCycle {self.current_cycle}:")
+            self._d2d_last_printed_cycle = self.current_cycle
+            return True
+        return False
+
     def d2d_trace(self, packet_id):
         """
         D2D专用的flit trace功能
@@ -756,8 +781,34 @@ class D2D_Model:
         if not hasattr(self, "_d2d_flit_stable_cycles"):
             self._d2d_flit_stable_cycles = {}
 
+        # 检查是否有任何活跃的flit
+        has_any_active = False
+        for pid in packet_ids:
+            if not self._d2d_done_flags.get(pid, False):
+                # 检查是否有活跃flit
+                for die_id, die_model in self.dies.items():
+                    die_flits = self._collect_die_flits(die_model, pid, die_id)
+                    for flit_info in die_flits:
+                        if not self._should_skip_d2d_flit(flit_info["flit"]):
+                            has_any_active = True
+                            break
+                    if has_any_active:
+                        break
+                if has_any_active:
+                    break
+
+        # 使用统一的周期标题打印方法
+        self._print_cycle_header_once(has_any_active)
+
+        # 打印每个packet的阶段信息
         for pid in packet_ids:
             self._debug_print_d2d_packet(pid)
+
+        # 如果打印了信息且设置了trace sleep时间，则暂停
+        if has_any_active:
+            trace_sleep_time = self.kwargs.get("d2d_trace_sleep", 0)
+            if trace_sleep_time > 0:
+                time.sleep(trace_sleep_time)
 
     def _debug_print_d2d_packet(self, packet_id):
         """打印指定packet在整个D2D系统中的状态"""
@@ -780,11 +831,6 @@ class D2D_Model:
 
         # 只有当有活跃flit时才打印
         if has_active_flit and all_flits_info:
-            # 打印周期标记
-            if self.current_cycle != self._d2d_last_printed_cycle:
-                print(f"\n[D2D Trace] Cycle {self.current_cycle}:")
-                self._d2d_last_printed_cycle = self.current_cycle
-
             # 按die分组并打印
             die_groups = {}
             for flit_info in all_flits_info:
@@ -793,7 +839,7 @@ class D2D_Model:
                     die_groups[die_id] = []
                 die_groups[die_id].append(flit_info)
 
-            # 格式化打印每个die的flit状态
+            # 格式化打印每个die的flit状态（只显示阶段信息）
             for die_id in sorted(die_groups.keys()):
                 die_flits = die_groups[die_id]
                 flit_strs = []
@@ -801,17 +847,12 @@ class D2D_Model:
                     flit = flit_info["flit"]
                     net_type = flit_info["network"]
 
-                    # 构建flit状态字符串
-                    status_str = self._format_d2d_flit_status(flit, net_type)
+                    # 构建简化的flit阶段状态字符串
+                    status_str = self._format_d2d_flit_stage_only(flit, net_type)
                     flit_strs.append(status_str)
 
                 if flit_strs:
-                    print(f"  Die{die_id}: {' | '.join(flit_strs)}")
-
-            # 如果打印了信息且设置了trace sleep时间，则暂停
-            trace_sleep_time = self.kwargs.get("d2d_trace_sleep", 0)
-            if trace_sleep_time > 0:
-                time.sleep(trace_sleep_time)
+                    print(f"  Packet{packet_id} Die{die_id}: {' | '.join(flit_strs)}")
 
         # 检查是否完成
         self._check_d2d_packet_completion(packet_id)
@@ -827,14 +868,13 @@ class D2D_Model:
             flits = network.send_flits.get(packet_id, [])
             for flit in flits:
                 flits_info.append({"flit": flit, "network": net_type, "die_id": die_id})
-        
 
         # 检查D2D_Sys的send_flits（更简洁的debug结构）
         for pos, d2d_sys in die_model.d2d_systems.items():
             d2d_flits = d2d_sys.send_flits.get(packet_id, [])
             for flit in d2d_flits:
                 # 根据flit的flit_position确定AXI通道类型
-                axi_channel = flit.flit_position if hasattr(flit, 'flit_position') and flit.flit_position.startswith('AXI_') else 'AXI_UNKNOWN'
+                axi_channel = flit.flit_position if hasattr(flit, "flit_position") and flit.flit_position.startswith("AXI_") else "AXI_UNKNOWN"
                 flits_info.append({"flit": flit, "network": axi_channel, "die_id": die_id})
 
         return flits_info
@@ -858,73 +898,71 @@ class D2D_Model:
                     self._d2d_flit_stable_cycles[flit_key] = self.current_cycle
         return False
 
-    def _format_d2d_flit_status(self, flit, net_type):
-        """格式化D2D flit的状态字符串，基于Flit.__repr__的风格"""
-        # Packet和flit ID
-        id_info = f"{flit.packet_id}.{flit.flit_id}"
-
-        # 网络类型简写
-        if net_type.startswith("AXI_"):
-            net = net_type  # AXI_AR, AXI_R等直接使用完整名称
-        else:
-            net = net_type[:3]  # REQ->REQ, RSP->RSP, DATA->DAT
-
-        # 源和目标信息，包含Die ID
-        src_die = getattr(flit, "source_die_id", "?")
-        dst_die = getattr(flit, "target_die_id", "?")
-        if src_die == dst_die:
-            return flit.__repr__()
-
-        # 源和目标类型简写（如gdma_0 -> g0, d2d_sn_0 -> ds, d2d_rn_0 -> dr）
-        def get_type_abbreviation(type_str):
-            if not type_str:
-                return "??"
-            if type_str.startswith("d2d_sn"):
-                return "ds"
-            elif type_str.startswith("d2d_rn"):
-                return "dr"
+    def _format_d2d_flit_stage_only(self, flit, net_type):
+        """格式化D2D flit的阶段状态字符串，只显示阶段信息"""
+        try:
+            # 网络类型简写
+            if net_type.startswith("AXI_"):
+                net = net_type  # AXI_AR, AXI_R等直接使用完整名称
             else:
-                return type_str[0] + type_str[-1]
-        
-        src_type = get_type_abbreviation(getattr(flit, "source_type", None))
-        dst_type = get_type_abbreviation(getattr(flit, "final_destination_type", None))
+                net = net_type[:3]  # REQ->REQ, RSP->RSP, DATA->DAT
 
-        # 路由信息：当前Die.节点 -> 目标Die.节点
-        route_info = f"D{src_die}.{flit.source}.{src_type}->D{dst_die}.{flit.final_destination_physical}.{dst_type}"
-
-        # 处理destination_type的显示
-        dst_type_display = get_type_abbreviation(getattr(flit, "destination_type", None))
-
-        current_info = f"{flit.source}.{src_type}->{flit.destination}.{dst_type_display}:"
-        # 位置信息
-        if hasattr(flit, "flit_position"):
-            if flit.flit_position == "Link" and hasattr(flit, "current_link"):
-                pos_info = f"{flit.current_link[0]}->{flit.current_link[1]}:{flit.current_seat_index}"
-            elif flit.flit_position.startswith("AXI_"):
-                # AXI通道传输状态
-                axi_end_cycle = getattr(flit, "axi_end_cycle", self.current_cycle)
-                remaining_cycles = max(0, axi_end_cycle - self.current_cycle)
-                pos_info = f"AXI_Transit:+{remaining_cycles}cyc"
+            # DATA类型和AXI_R通道需要显示flit_id
+            if net == "DAT" or net_type == "DATA" or net_type == "AXI_R":
+                id_part = f":{getattr(flit, 'flit_id', '?')}"
             else:
-                pos_info = f"{getattr(flit, 'current_position', '?')}:{flit.flit_position}"
-        else:
-            pos_info = "Unknown"
+                id_part = ""
 
-        # 请求类型（对于REQ）或响应类型（对于RSP）
-        if hasattr(flit, "req_type"):
-            type_info = flit.req_type[0].upper()  # read->R, write->W
-        elif hasattr(flit, "rsp_type"):
-            type_info = flit.rsp_type[:3]  # datasend->dat, negative->neg等
-        else:
-            type_info = "?"
+            # 位置信息（阶段信息）
+            if hasattr(flit, "flit_position"):
+                if flit.flit_position == "Link" and hasattr(flit, "current_link"):
+                    seat_info = f":{flit.current_seat_index}" if hasattr(flit, "current_seat_index") else ""
+                    pos_info = f"Link:{flit.current_link[0]}->{flit.current_link[1]}{seat_info}"
+                elif flit.flit_position.startswith("AXI_"):
+                    # AXI通道传输状态
+                    axi_end_cycle = getattr(flit, "axi_end_cycle", self.current_cycle)
+                    remaining_cycles = max(0, axi_end_cycle - self.current_cycle)
+                    pos_info = f"AXI:{remaining_cycles}cyc"
+                else:
+                    pos_info = flit.flit_position
+            else:
+                pos_info = "Unknown"
 
-        # 状态标记
-        status = ""
-        if getattr(flit, "is_finish", False):
-            status += "F"
+            # 请求类型
+            if hasattr(flit, "req_type") and flit.req_type:
+                type_info = flit.req_type[0].upper()  # read->R, write->W
+            elif hasattr(flit, "rsp_type") and flit.rsp_type:
+                type_info = flit.rsp_type[:3]  # datasend->dat
+            else:
+                type_info = "?"
 
-        # 组合输出，格式类似Flit.__repr__但突出D2D信息
-        return f"{net}:{id_info},{route_info}:{current_info}:{pos_info},{type_info},{status}"
+            # 状态标记
+            status = ""
+            if getattr(flit, "is_finish", False):
+                status += "F"
+
+            # 添加当前阶段的路由信息
+            def get_type_abbreviation(type_str):
+                if not type_str:
+                    return "??"
+                if type_str.startswith("d2d_sn"):
+                    return "ds"
+                elif type_str.startswith("d2d_rn"):
+                    return "dr"
+                else:
+                    return type_str[0] + type_str[-1]
+
+            # 当前阶段的源和目标信息
+            current_src_type = get_type_abbreviation(getattr(flit, "source_type", None))
+            current_dst_type = get_type_abbreviation(getattr(flit, "destination_type", None))
+            route_info = f"{flit.source}.{current_src_type}->{flit.destination}.{current_dst_type}"
+
+            # 简化输出：只有DATA类型显示flit_id，添加路由信息
+            return f"{net}{id_part}:{route_info}:{pos_info},{type_info}{status}"
+
+        except Exception as e:
+            # 出错时返回基本信息
+            return f"{net_type}:ERROR({str(e)[:20]})"
 
     def _get_flit_current_die(self, flit, network_die_id):
         """
@@ -950,11 +988,11 @@ class D2D_Model:
 
     def _check_d2d_packet_completion(self, packet_id):
         """检查D2D packet是否完成传输
-        
+
         对于跨Die读请求，完成条件是：
         1. 请求阶段：原始请求从源到目标Die的DDR
         2. 响应阶段：数据从目标Die的DDR返回到源Die的源节点
-        
+
         只有当整个往返流程完成才算真正完成
         """
         # 首先检查是否有任何flit存在
@@ -970,7 +1008,7 @@ class D2D_Model:
                 flits = network.send_flits.get(packet_id, [])
                 if flits:  # 如果有flit存在
                     has_any_flit = True
-                
+
                 # 处理send_flits中的flit
                 if flits:
                     for flit in flits:
@@ -1027,7 +1065,7 @@ class D2D_Model:
                             break
                     if not all_completed:
                         break
-                    
+
                     # 检查AXI通道中是否还有该packet的flit
                     for channel_type, channel in d2d_sys.axi_channels.items():
                         if packet_id in channel["send_flits"]:
@@ -1036,7 +1074,7 @@ class D2D_Model:
                             break
                     if not all_completed:
                         break
-                        
+
                 if not all_completed:
                     break
 
@@ -1063,7 +1101,37 @@ class D2D_Model:
             for die_model in self.dies.values():
                 for network in [die_model.req_network, die_model.rsp_network, die_model.data_network]:
                     active_packets.update(network.send_flits.keys())
+                # 检查D2D_Sys的send_flits
+                for pos, d2d_sys in die_model.d2d_systems.items():
+                    active_packets.update(d2d_sys.send_flits.keys())
             trace_packet_ids = list(active_packets)
 
         if trace_packet_ids:
-            self.d2d_trace(trace_packet_ids)
+            # 检查是否有任何活跃的flit
+            has_any_active = False
+            for pid in trace_packet_ids:
+                if not self._d2d_done_flags.get(pid, False):
+                    # 检查是否有活跃flit
+                    for die_id, die_model in self.dies.items():
+                        die_flits = self._collect_die_flits(die_model, pid, die_id)
+                        for flit_info in die_flits:
+                            if not self._should_skip_d2d_flit(flit_info["flit"]):
+                                has_any_active = True
+                                break
+                        if has_any_active:
+                            break
+                    if has_any_active:
+                        break
+
+            # 使用统一的周期标题打印方法
+            self._print_cycle_header_once(has_any_active)
+
+            # 打印每个packet的阶段信息
+            for pid in trace_packet_ids:
+                self._debug_print_d2d_packet(pid)
+
+            # 如果打印了信息且设置了trace sleep时间，则暂停
+            if has_any_active:
+                trace_sleep_time = self.kwargs.get("d2d_trace_sleep", 0)
+                if trace_sleep_time > 0:
+                    time.sleep(trace_sleep_time)

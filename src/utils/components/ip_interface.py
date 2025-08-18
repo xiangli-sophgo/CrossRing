@@ -527,8 +527,29 @@ class IPInterface:
         self.data_cir_h_num += flit.eject_attempts_h
         self.data_cir_v_num += flit.eject_attempts_v
         if flit.req_type == "read":
+            # 检查是否为跨Die返回的数据，更新D2D统计
+            if hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die"):
+                if flit.d2d_origin_die != flit.d2d_target_die:
+                    # 这是跨Die请求的返回数据，需要通过网络或config获取Die信息
+                    die_id = getattr(self.config, 'DIE_ID', None)
+                    if die_id is not None and flit.d2d_origin_die == die_id:
+                        # 通过网络对象获取d2d_model引用
+                        d2d_model = getattr(self.req_network, 'd2d_model', None)
+                        if d2d_model:
+                            d2d_model.d2d_received_flits[die_id] += 1
+            
             # 读数据到达RN端，需要收集到data buffer中
             self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
+            
+            # 如果是跨Die数据且完成了整个burst，更新请求完成计数
+            if hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die"):
+                if flit.d2d_origin_die != flit.d2d_target_die:
+                    die_id = getattr(self.config, 'DIE_ID', None)
+                    if die_id is not None and flit.d2d_origin_die == die_id:
+                        if len(self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id]) == flit.burst_length:
+                            d2d_model = getattr(self.req_network, 'd2d_model', None)
+                            if d2d_model:
+                                d2d_model.d2d_requests_completed[die_id] += 1
             # 检查是否收集完整个burst
             if len(self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id]) == flit.burst_length:
                 req = next((req for req in self.node.rn_tracker["read"][self.ip_type][self.ip_pos] if req.packet_id == flit.packet_id), None)
@@ -771,17 +792,14 @@ class IPInterface:
             if i == req.burst_length - 1:
                 flit.is_last_flit = True
             
-            # 继承跨Die相关属性（用于第五阶段判断）
-            if hasattr(req, "source_die_id_physical"):
-                flit.source_die_id_physical = req.source_die_id_physical
-            if hasattr(req, "source_physical"):
-                flit.source_physical = req.source_physical
-                # 对于跨Die数据，设置最终目标为原始请求者
-                flit.final_destination_physical = req.source_physical
-            if hasattr(req, "source_type"):
-                flit.source_type = req.destination_type  # DDR的类型
-            if hasattr(req, "final_destination_type"):
-                flit.final_destination_type = req.final_destination_type
+            # 继承D2D属性
+            if hasattr(req, "d2d_origin_die"):
+                flit.d2d_origin_die = req.d2d_origin_die      # 发起Die ID
+                flit.d2d_origin_node = req.d2d_origin_node    # 发起节点源映射位置
+                flit.d2d_origin_type = req.d2d_origin_type    # 发起IP类型
+                flit.d2d_target_die = req.d2d_target_die      # 目标Die ID
+                flit.d2d_target_node = req.d2d_target_node    # 目标节点源映射位置
+                flit.d2d_target_type = req.d2d_target_type    # 目标IP类型
 
             # 将读数据包放入数据网络的inject_fifo
             self.enqueue(flit, "data")

@@ -82,6 +82,45 @@ Network elements are modeled as components in `src/utils/components/`:
 - Packet_Base model: For packet-switched communication
 - Feature model: For feature-specific simulations
 
+### D2D Flit State Design
+
+The D2D (Die-to-Die) communication uses a unified attribute design for clear state management:
+
+#### D2D Attributes (6 total)
+```python
+# Transaction-level attributes (immutable throughout transaction)
+d2d_origin_die      # Initiator Die ID (e.g., 0)
+d2d_origin_node     # Initiator node source mapping (e.g., 36 for GDMA)
+d2d_origin_type     # Initiator IP type (e.g., "gdma_0")
+
+d2d_target_die      # Target Die ID (e.g., 1)
+d2d_target_node     # Target node source mapping (e.g., 4 for DDR)
+d2d_target_type     # Target IP type (e.g., "ddr_0")
+```
+
+#### Key Design Principles
+1. **Unified Source Mapping**: All `d2d_*_node` attributes store source mapping positions
+2. **Path Calculation**: Use `node_map(node, is_source=False)` to convert to destination mapping when calculating paths
+3. **Clear Naming**: `d2d_` prefix distinguishes D2D attributes from Die-internal attributes
+4. **Immutable Transaction Info**: D2D attributes remain constant throughout the transaction lifecycle
+
+#### Usage Examples
+```python
+# Check if cross-die transfer needed
+if hasattr(flit, "d2d_target_die") and flit.d2d_target_die != self.die_id:
+    # Cross-die transfer required
+
+# Data return to originator (Stage 6)
+source = self.ip_pos  # D2D_SN source position (36)
+destination = node_map(flit.d2d_origin_node, is_source=False)  # GDMA destination (32)
+destination_type = flit.d2d_origin_type  # "gdma_0"
+```
+
+#### Migration from Legacy Attributes
+- Replaced: `source_die_id`, `target_die_id`, `source_node_id_physical`, etc.
+- New unified design eliminates confusion with `_physical` suffixes
+- Consistent with 6-stage D2D flow: Request(Die0→Die1) → Data(Die1→Die0)
+
 ## Important Notes
 
 - **Testing**: No established testing framework. `scripts/test.py` exists but no pytest/unittest setup

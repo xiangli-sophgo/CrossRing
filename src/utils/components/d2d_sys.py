@@ -33,6 +33,24 @@ class D2D_Sys:
         self.config = config
         self.current_cycle = 0
         
+        # 获取对端Die的RN和SN位置（在初始化时确定）
+        if die_id == 0:
+            # 当前是Die0，对端是Die1
+            self.target_die_id = 1
+            die1_positions = getattr(config, 'D2D_DIE1_POSITIONS', [])
+            if not die1_positions:
+                raise ValueError("D2D_DIE1_POSITIONS未配置")
+            self.target_die_rn_pos = die1_positions[0]  # Die1的D2D_RN位置
+            self.target_die_sn_pos = die1_positions[0]  # Die1的D2D_SN位置（通常同一个位置）
+        else:
+            # 当前是Die1，对端是Die0
+            self.target_die_id = 0
+            die0_positions = getattr(config, 'D2D_DIE0_POSITIONS', [])
+            if not die0_positions:
+                raise ValueError("D2D_DIE0_POSITIONS未配置")
+            self.target_die_rn_pos = die0_positions[0]  # Die0的D2D_RN位置
+            self.target_die_sn_pos = die0_positions[0]  # Die0的D2D_SN位置（通常同一个位置）
+        
         # RN和SN的待发送队列
         self.rn_pending_queue = deque()
         self.sn_pending_queue = deque()
@@ -309,26 +327,36 @@ class D2D_Sys:
             path=getattr(flit, 'path', [])
         )
         
-        # 复制关键属性到AXI flit
-        for attr in ['req_type', 'rsp_type', 'flit_type', 'source_die_id', 'target_die_id', 
-                     'source_node_id', 'target_node_id', 'final_destination_physical', 
-                     'final_destination_type', 'req_attr', 'packet_id', 'flit_id']:
+        
+        # 复制关键属性到AXI flit（使用新的d2d属性）
+        for attr in ['req_type', 'rsp_type', 'flit_type',
+                     'd2d_origin_die', 'd2d_origin_node', 'd2d_origin_type',
+                     'd2d_target_die', 'd2d_target_node', 'd2d_target_type',
+                     'req_attr', 'packet_id', 'flit_id', 'burst_length']:
             if hasattr(flit, attr):
                 setattr(axi_flit, attr, getattr(flit, attr))
         
-        # 设置AXI传输的整体路由信息（保持跨Die的完整路由）
-        # final_destination_physical和final_destination_type保持原始值（整体目标）
         
-        # 设置当前阶段的source_type和destination_type
-        # 第二阶段：D2D_SN -> D2D_RN
-        axi_flit.source_type = "d2d_sn_0"  # 当前阶段源：D2D_SN
-        axi_flit.destination_type = "d2d_rn_0"  # 当前阶段目标：D2D_RN
+        # AXI传输无需修改d2d属性，已在复制时继承
+        # 通道类型将在后续路由时处理
         
-        # 设置AXI阶段的源和目标节点（当前阶段信息）
-        axi_flit.source = self.position  # D2D_SN的位置
-        # 目标应该是目标Die的D2D_RN位置，从配置中获取
-        target_d2d_rn_pos = getattr(self.config, 'D2D_RN_POSITION', 4)  # 默认位置4
-        axi_flit.destination = target_d2d_rn_pos
+        
+        # 根据通道类型设置正确的阶段信息
+        if channel_type in ['AR', 'AW', 'W']:
+            # 请求/写通道：阶段2，从D2D_SN发送到D2D_RN
+            axi_flit.source_type = "d2d_sn_0"  # D2D_SN类型
+            axi_flit.destination_type = "d2d_rn_0"  # D2D_RN类型
+            # 设置源和目标位置
+            axi_flit.source = self.position  # 当前D2D_SN的位置
+            axi_flit.destination = self.target_die_rn_pos  # 目标Die的D2D_RN位置
+            
+        elif channel_type in ['R', 'B']:
+            # 响应通道：阶段5，从D2D_RN发送回D2D_SN
+            axi_flit.source_type = "d2d_rn_0"  # D2D_RN类型
+            axi_flit.destination_type = "d2d_sn_0"  # D2D_SN类型
+            # 设置源和目标位置
+            axi_flit.source = self.position  # 当前D2D_RN的位置
+            axi_flit.destination = self.target_die_sn_pos  # 目标Die的D2D_SN位置
         
         # 设置AXI传输专用信息
         axi_flit.flit_position = f"AXI_{channel_type}"
@@ -410,21 +438,50 @@ class D2D_Sys:
         Args:
             flit: 到达的flit
         """
-        target_die_id = flit.target_die_id
+        # 确定目标Die ID：
+        # 需要根据flit的传输方向判断目标
+        
+        # 检查是否为AXI传输中的flit
+        is_axi_flit = hasattr(flit, 'flit_position') and flit.flit_position and flit.flit_position.startswith('AXI_')
+        
+        if is_axi_flit:
+            # AXI传输中的flit：
+            # AXI_AR, AXI_AW: 请求类型，前往d2d_target_die
+            # AXI_R, AXI_B: 响应类型，返回d2d_origin_die
+            if flit.flit_position in ['AXI_AR', 'AXI_AW', 'AXI_W']:
+                target_die_id = flit.d2d_target_die
+            else:  # AXI_R, AXI_B
+                target_die_id = flit.d2d_origin_die  # 响应返回原始请求者Die
+        elif hasattr(flit, 'req_type') and flit.req_type:
+            # 普通请求flit：前往目标Die
+            target_die_id = flit.d2d_target_die
+        else:
+            # 普通响应/数据flit：返回原始源Die
+            target_die_id = flit.d2d_origin_die
         
         # 获取目标接口
-        if target_die_id not in self.target_die_interfaces:
-            self.logger.error(f"目标Die {target_die_id} 的接口未设置")
+        if target_die_id is None or target_die_id not in self.target_die_interfaces:
+            # 添加更详细的调试信息
+            flit_info = f"flit_position={getattr(flit, 'flit_position', 'None')}, d2d_origin_die={getattr(flit, 'd2d_origin_die', 'None')}, d2d_target_die={getattr(flit, 'd2d_target_die', 'None')}, packet_id={getattr(flit, 'packet_id', 'None')}"
+            self.logger.error(f"目标Die {target_die_id} 的接口未设置，flit信息: {flit_info}")
             return
         
         target_interfaces = self.target_die_interfaces[target_die_id]
         
         # 根据flit类型选择目标接口
-        if hasattr(flit, 'req_type'):
-            # 请求flit -> 发送到目标Die的RN（第二阶段：D2D_SN → D2D_RN）
+        if is_axi_flit:
+            # AXI传输：根据AXI通道类型判断
+            if flit.flit_position in ['AXI_AR', 'AXI_AW', 'AXI_W']:
+                # 请求/写通道 -> 发送到目标Die的RN（第二阶段：D2D_SN → D2D_RN）
+                target_interface = target_interfaces.get('rn')
+            else:  # AXI_R, AXI_B
+                # 响应通道 -> 发送到目标Die的SN（第五阶段：D2D_RN → D2D_SN）
+                target_interface = target_interfaces.get('sn')
+        elif hasattr(flit, 'req_type'):
+            # 普通请求flit -> 发送到目标Die的RN
             target_interface = target_interfaces.get('rn')
         else:
-            # 响应/数据flit -> 发送到目标Die的SN（第五阶段：D2D_RN → D2D_SN）
+            # 普通响应/数据flit -> 发送到目标Die的SN
             target_interface = target_interfaces.get('sn')
         
         if target_interface:
@@ -432,7 +489,7 @@ class D2D_Sys:
             target_interface.schedule_cross_die_receive(flit, self.current_cycle)
             
             # 如果是数据传输完成，通知源接口释放tracker
-            if self._is_data_flit(flit) and hasattr(flit, "source_die_id_physical"):
+            if self._is_data_flit(flit) and hasattr(flit, "d2d_origin_die"):
                 # 这是跨Die数据返回，需要通知源D2D_RN
                 source_die_id = self.die_id  # 当前Die是源Die
                 source_interfaces = self.target_die_interfaces.get(source_die_id, {})

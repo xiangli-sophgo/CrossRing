@@ -75,20 +75,29 @@ class D2D_RN_Interface(IPInterface):
         处理接收到的跨Die flit - 第三阶段路由（D2D_RN → 目标节点）
         创建新的内部请求并消耗tracker/databuffer资源
         """
+        # 使用D2D统一属性获取目标节点位置
+        # d2d_target_node存储的是源映射位置，转为目标映射需要减去NUM_COL
+        target_pos = flit.d2d_target_node - self.config.NUM_COL
+        if target_pos is None or target_pos < 0:
+            raise ValueError(f"flit的d2d_target_node转换错误: d2d_target_node={flit.d2d_target_node}, target_pos={target_pos}, packet_id={getattr(flit, 'packet_id', 'None')}")
+        
+        # 计算路径（使用映射后的source和destination）
+        source_mapped = self.ip_pos  # D2D_RN的位置已经是映射后的
+        path = self.routes[source_mapped][target_pos] if target_pos in self.routes[source_mapped] else []
+        
         # 创建新的请求flit，避免修改AXI传输的flit
         from .flit import Flit
-        target_pos = getattr(flit, "final_destination_physical", flit.destination)
-        path = self.routes[self.ip_pos][target_pos] if target_pos in self.routes[self.ip_pos] else []
-        
         new_flit = Flit(
-            source=self.ip_pos,  # 新请求的源为D2D_RN
-            destination=target_pos,
+            source=source_mapped,  # D2D_RN的位置
+            destination=target_pos,  # 映射后的目标节点位置
             path=path
         )
         
-        # 复制关键属性（包括ID，但不包括Die ID，因为第三阶段是本地请求）
+        # 复制关键属性（使用D2D统一属性）
         for attr in ['packet_id', 'flit_id', 'req_type', 'rsp_type', 'flit_type',
-                     'target_node_id', 'source_node_id', 'burst_length']:
+                     'd2d_origin_die', 'd2d_origin_node', 'd2d_origin_type',
+                     'd2d_target_die', 'd2d_target_node', 'd2d_target_type',
+                     'burst_length']:
             if hasattr(flit, attr):
                 setattr(new_flit, attr, getattr(flit, attr))
         
@@ -98,26 +107,16 @@ class D2D_RN_Interface(IPInterface):
         
         # 设置第三阶段的类型信息
         new_flit.source_type = self.ip_type      # D2D_RN的类型
-        new_flit.destination_type = getattr(flit, "final_destination_type", "ddr_0")  # 目标类型
+        new_flit.destination_type = flit.d2d_target_type  # 使用D2D统一属性
         
         # 设置原始类型信息，用于创建返回路径
-        new_flit.original_source_type = getattr(flit, "source_type", None)  # 原始源类型
+        new_flit.original_source_type = flit.d2d_origin_type  # 原始源类型
         new_flit.original_destination_type = new_flit.destination_type  # 当前目标类型
         new_flit.destination_original = new_flit.destination  # 当前目标位置  
-        new_flit.source_original = getattr(flit, "source_physical", getattr(flit, "source", flit.source))  # 原始源位置
+        new_flit.source_original = flit.d2d_origin_node  # 原始源位置（源映射）
         
-        # 第三阶段是Die1内部的本地请求，更新Die ID
-        new_flit.source_die_id = self.die_id  # 当前Die ID (Die1)
-        new_flit.target_die_id = self.die_id  # 目标也是当前Die ID (Die1)
-        
-        # 保存原始源信息供响应时使用
-        # 如果是第一次跨Die（阶段2），source_die_id就是原始的die
-        new_flit.source_physical = getattr(flit, 'source_physical', flit.source)
-        new_flit.source_die_id_physical = flit.source_die_id  # 这里应该是Die0
-        new_flit.source_node_id_physical = getattr(flit, 'source_node_id_physical', flit.source_node_id)
-        
-        new_flit.final_destination_physical = getattr(flit, "final_destination_physical", flit.destination)
-        new_flit.final_destination_type = getattr(flit, "final_destination_type", flit.destination_type)
+        # 保留最终目标类型信息（使用D2D统一属性）
+        # 已在上面通过destination_type设置，无需单独设置final_destination_type
 
         # 设置网络状态
         new_flit.path_index = 0
@@ -144,9 +143,8 @@ class D2D_RN_Interface(IPInterface):
 
     def is_cross_die_request(self, flit: Flit) -> bool:
         """检查是否为跨Die请求"""
-        target_die_id = getattr(flit, "target_die_id", None)
+        target_die_id = getattr(flit, "d2d_target_die", None)
         if target_die_id is None:
-            # 如果没有target_die_id属性，默认为本地请求
             return False
         return target_die_id != self.die_id
 
@@ -158,7 +156,7 @@ class D2D_RN_Interface(IPInterface):
             # 本地请求，走正常流程
             return False
 
-        target_die_id = flit.target_die_id
+        target_die_id = flit.d2d_target_die
         if target_die_id not in self.target_die_interfaces:
             return False
 
@@ -183,7 +181,8 @@ class D2D_RN_Interface(IPInterface):
         """
         处理跨Die响应 - 添加R/B延迟并发送回源Die
         """
-        source_die_id = getattr(flit, "source_die_id", None)
+        # 使用D2D统一属性获取原始请求者Die
+        source_die_id = getattr(flit, "d2d_origin_die", None)
         if source_die_id is None or source_die_id == self.die_id:
             # 本地响应，走正常流程
             return False
@@ -236,23 +235,26 @@ class D2D_RN_Interface(IPInterface):
         重写数据接收处理，支持跨Die数据返回
         """
         # 对于跨Die数据，我们需要特殊处理，不能让父类立即释放tracker
-        is_cross_die_data = (hasattr(flit, "source_die_id_physical") and 
-                            flit.source_die_id_physical is not None and
-                            flit.source_die_id_physical != self.die_id)
+        # 使用D2D统一属性判断跨Die数据
+        is_cross_die_data = (hasattr(flit, "d2d_origin_die") and 
+                            flit.d2d_origin_die is not None and
+                            flit.d2d_origin_die != self.die_id)
         
         
         if is_cross_die_data and getattr(flit, "req_type", "read") == "read":
-            # 跨Die读数据，手动处理而不调用父类
+            # 跨Die读数据，手动处理而不调用父类，避免计入recv_flits_num
             flit.arrival_cycle = getattr(self, "current_cycle", 0)
             self.data_wait_cycles_h += getattr(flit, "wait_cycle_h", 0)
             self.data_wait_cycles_v += getattr(flit, "wait_cycle_v", 0)
             self.data_cir_h_num += getattr(flit, "eject_attempts_h", 0)
             self.data_cir_v_num += getattr(flit, "eject_attempts_v", 0)
             
-            # 收集到data buffer中
+            # 收集到data buffer中，但不更新网络的recv_flits_num
             if flit.packet_id not in self.node.rn_rdb[self.ip_type][self.ip_pos]:
                 self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id] = []
             self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
+            
+            # 注意：这里不调用父类的网络统计更新，避免跨Die数据被计入本Die的recv_flits_num
             
             # 检查是否收集完整个burst
             collected_flits = self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id]
@@ -289,35 +291,38 @@ class D2D_RN_Interface(IPInterface):
         
         # 获取第一个flit的信息作为参考
         first_flit = data_flits[0]
-        source_die_id = getattr(first_flit, "source_die_id_physical", None)
+        source_die_id = getattr(first_flit, "d2d_origin_die", None)
         
         if source_die_id is None or source_die_id == self.die_id:
             # 不需要跨Die返回
             return
         
+        # 记录待传输的跨Die数据包，等待传输完成后释放tracker
+        packet_id = getattr(first_flit, "packet_id", -1)
+        if not hasattr(self, "pending_cross_die_transfers"):
+            self.pending_cross_die_transfers = {}
+        
+        self.pending_cross_die_transfers[packet_id] = {
+            "tracker": tracker_req,
+            "flits_count": len(data_flits),
+            "completed_count": 0,
+            "target_die": source_die_id
+        }
+        
         # 为每个数据flit准备跨Die传输
-        for flit in data_flits:
-            # 不能添加新属性到Flit，使用现有属性标记跨Die返回
-            # 使用flit_type或其他方式识别
-            
-            # 保持原始请求者信息，用于第六阶段
-            # 这些属性在create_read_packet中应该已经设置了
+        for i, flit in enumerate(data_flits):
+            # 修正flit_id：数据包应该有递增的flit_id (0, 1, 2, 3)
+            flit.flit_id = i
+            # 设置最后一个flit标记
+            flit.is_last_flit = (i == len(data_flits) - 1)
             
             # 使用D2D_Sys进行AXI R通道传输
             if self.d2d_sys:
                 self.d2d_sys.enqueue_rn(flit, source_die_id, self.d2d_r_latency, channel="R")
         
-        # 记录tracker的packet_id，用于后续释放
-        if not hasattr(self, "pending_cross_die_transfers"):
-            self.pending_cross_die_transfers = {}
-        self.pending_cross_die_transfers[tracker_req.packet_id] = {
-            "tracker": tracker_req,
-            "flits_count": len(data_flits),
-            "completed_count": 0
-        }
+        print(f"[D2D_RN] 准备发送{len(data_flits)}个数据包返回Die{source_die_id}，等待传输完成后释放tracker")
         
         self.cross_die_data_responses_sent = getattr(self, "cross_die_data_responses_sent", 0) + len(data_flits)
-        print(f"[D2D_RN] 发送{len(data_flits)}个数据包返回Die{source_die_id}")
     
     def release_cross_die_tracker(self, packet_id: int):
         """

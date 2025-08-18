@@ -64,7 +64,6 @@ class Flit:
         "packet_id",
         "traffic_id",
         "moving_direction",
-        "moving_direction_v",
         "flit_type",
         "req_type",
         "req_attr",
@@ -128,16 +127,13 @@ class Flit:
         "packet_category",
         "data_channel_id",
         # D2D相关属性
-        "source_die_id",
-        "target_die_id", 
-        "source_node_id",
-        "target_node_id",
-        "source_physical",
-        "source_die_id_physical",
-        "source_node_id_physical",
+        "d2d_origin_die",      # 发起Die ID
+        "d2d_origin_node",     # 发起节点源映射位置
+        "d2d_origin_type",     # 发起IP类型
+        "d2d_target_die",      # 目标Die ID
+        "d2d_target_node",     # 目标节点源映射位置
+        "d2d_target_type",     # 目标IP类型
         "inject_time",
-        "final_destination_physical",
-        "final_destination_type",
         # AXI传输相关属性
         "axi_end_cycle",
         "axi_start_cycle",
@@ -162,8 +158,6 @@ class Flit:
         self.packet_id = None
         # 标记该flit所属的traffic
         self.traffic_id = None
-        self.moving_direction = self.calculate_direction(path)
-        self.moving_direction_v = 1 if source < destination else -1
         self.flit_type = "flit"
         self.req_type = None
         self.req_attr = "new"
@@ -181,17 +175,14 @@ class Flit:
         self.rsp_type = None
         self.rn_tracker_type = None
         self.sn_tracker_type = None
-        # D2D属性初始化
-        self.source_die_id = None
-        self.target_die_id = None
-        self.source_node_id = None
-        self.target_node_id = None
-        self.source_physical = None
-        self.source_die_id_physical = None
-        self.source_node_id_physical = None
+        # D2D新属性初始化
+        self.d2d_origin_die = None
+        self.d2d_origin_node = None 
+        self.d2d_origin_type = None
+        self.d2d_target_die = None
+        self.d2d_target_node = None
+        self.d2d_target_type = None
         self.inject_time = None
-        self.final_destination_physical = None
-        self.final_destination_type = None
         self.init_param()
 
     def init_param(self):
@@ -259,11 +250,6 @@ class Flit:
             self.data_entry_noc_from_cake0_cycle = min(flit.data_entry_noc_from_cake0_cycle, self.data_entry_noc_from_cake0_cycle)
             self.data_received_complete_cycle = min(flit.data_received_complete_cycle, self.data_received_complete_cycle)
 
-    def calculate_direction(self, path):
-        if len(path) < 2:
-            return 0  # Or handle this case appropriately
-        return 1 if path[1] - path[0] == 1 else -1 if path[1] - path[0] == -1 else 0
-
     def set_packet_category_and_order_id(self):
         """根据flit的类型信息设置包类型和顺序ID"""
         # 确定包类型分类
@@ -300,9 +286,7 @@ class Flit:
     def __repr__(self):
         req_attr = "O" if self.req_attr == "old" else "N"
         type_display = self.rsp_type[:3] if self.rsp_type else self.req_type[0]
-        flit_position = (
-            f"{self.current_position}:{self.flit_position}" if self.flit_position != "Link" else f"{self.current_link[0]}->{self.current_link[1]}:{self.current_seat_index}, "
-        )
+        flit_position = f"{self.current_position}:{self.flit_position}" if self.flit_position != "Link" else f"{self.current_link[0]}->{self.current_link[1]}:{self.current_seat_index}, "
         finish_status = "F" if self.is_finish else ""
         eject_status = "E" if self.is_ejected else ""
         ITag_H = "H" if self.itag_h else ""
@@ -338,16 +322,13 @@ class Flit:
         self.packet_category = None
         self.data_channel_id = 0
         # 重置D2D属性
-        self.source_die_id = None
-        self.target_die_id = None
-        self.source_node_id = None
-        self.target_node_id = None
-        self.source_physical = None
-        self.source_die_id_physical = None
-        self.source_node_id_physical = None
+        self.d2d_origin_die = None
+        self.d2d_origin_node = None
+        self.d2d_origin_type = None
+        self.d2d_target_die = None
+        self.d2d_target_node = None
+        self.d2d_target_type = None
         self.inject_time = None
-        self.final_destination_physical = None
-        self.final_destination_type = None
 
         # Reset timing fields
         self.departure_cycle = np.inf

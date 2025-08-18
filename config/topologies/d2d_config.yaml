@@ -33,6 +33,3 @@ D2D_SN_W_TRACKER_OSTD: 48   # D2D SN 写跟踪器 OSTD
 D2D_SN_RDB_SIZE: 192        # D2D SN 读databuffer大小
 D2D_SN_WDB_SIZE: 192        # D2D SN 写databuffer大小
 
-# D2D 接口位置列表 (网络初始化需要)
-D2D_RN_SEND_POSITION_LIST: [36, 37, 38, 39]  # D2D RN接口位置 (Die0边界发送位置)
-D2D_SN_SEND_POSITION_LIST: [32, 33, 34, 35]  # D2D SN接口位置 (Die0边界接收位置)
