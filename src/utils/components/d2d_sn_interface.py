@@ -24,11 +24,11 @@ class D2D_SN_Interface(IPInterface):
         self.die_id = getattr(config, "DIE_ID", 0)  # 当前Die的ID
         self.cross_die_receive_queue = []  # 使用heapq管理的接收队列 [(arrival_cycle, flit)]
         self.target_die_interfaces = {}  # 将由D2D_Model设置 {die_id: d2d_rn_interface}
-        
+
         # 防止重复处理AXI_B响应的记录 {(packet_id, cycle): True}
         self.processed_write_complete_responses = {}
-        
-        # 防止重复处理写请求 {packet_id: True}  
+
+        # 防止重复处理写请求 {packet_id: True}
         self.processed_write_requests = set()
 
         # 添加D2D_SN的带宽限制（在父类初始化后）
@@ -64,17 +64,17 @@ class D2D_SN_Interface(IPInterface):
     def _create_response_flit(self, req_flit: Flit, rsp_type: str, destination_pos: int = None) -> Flit:
         """创建响应flit的通用方法"""
         from .flit import Flit
-        
+
         dest_pos = destination_pos if destination_pos is not None else (req_flit.source - self.config.NUM_COL)
         path = self.routes[self.ip_pos][dest_pos] if dest_pos in self.routes[self.ip_pos] else []
-        
+
         response = Flit(source=self.ip_pos, destination=dest_pos, path=path)
         response.packet_id = req_flit.packet_id
         response.rsp_type = rsp_type
         response.req_type = getattr(req_flit, "req_type", "write")
         response.source_type = self.ip_type
         response.destination_type = getattr(req_flit, "source_type", "gdma_0")
-        
+
         return response
 
     def schedule_cross_die_receive(self, flit: Flit, arrival_cycle: int):
@@ -140,7 +140,6 @@ class D2D_SN_Interface(IPInterface):
         self.networks["req"]["inject_fifo"].append(flit)
         self.cross_die_requests_forwarded += 1
 
-
     def forward_response_to_local_rn(self, flit: Flit):
         """
         将跨Die响应转发回本地原始请求节点
@@ -149,7 +148,7 @@ class D2D_SN_Interface(IPInterface):
         # d2d_origin_node是源映射位置，转为目标映射位置（减去NUM_COL）
         destination = flit.d2d_origin_node - self.config.NUM_COL
         source = self.ip_pos
-        
+
         # 计算正确的路径
         if destination in self.routes[source]:
             path = self.routes[source][destination]
@@ -169,8 +168,13 @@ class D2D_SN_Interface(IPInterface):
             flit.source_type = self.ip_type  # d2d_sn_0
             # 设置destination_type为原始请求者类型
             flit.destination_type = flit.d2d_origin_type  # 原始请求者类型 (gdma_0)
-            
+
             # 不清除D2D属性，保持完整信息
+
+        # 重置网络状态属性以确保能被正确inject
+        flit.is_injected = False
+        flit.is_new_on_network = True
+        flit.current_position = self.ip_pos
 
         # 根据响应类型选择网络
         if hasattr(flit, "rsp_type") and flit.rsp_type == "read_data":
@@ -189,11 +193,9 @@ class D2D_SN_Interface(IPInterface):
         # 首先处理跨Die接收队列
         self.process_cross_die_receives()
 
-
         # 调用父类的inject_step方法
         # 注意：数据包在process_cross_die_receives中已经直接处理，不会进入父类的inject流程
         super().inject_step(cycle)
-    
 
     def eject_step(self, cycle):
         """
@@ -205,7 +207,13 @@ class D2D_SN_Interface(IPInterface):
         # 检查ejected的flit
         if ejected_flits:
             for flit in ejected_flits:
-                if (hasattr(flit, "d2d_target_die") and hasattr(flit, "d2d_origin_die") and flit.d2d_target_die is not None and flit.d2d_origin_die is not None and flit.d2d_target_die != flit.d2d_origin_die):
+                if (
+                    hasattr(flit, "d2d_target_die")
+                    and hasattr(flit, "d2d_origin_die")
+                    and flit.d2d_target_die is not None
+                    and flit.d2d_origin_die is not None
+                    and flit.d2d_target_die != flit.d2d_origin_die
+                ):
                     # 检查flit类型：数据flit vs 请求flit
                     if hasattr(flit, "flit_type") and flit.flit_type == "data":
                         # 检查是否是从AXI跨Die传输来的数据（已经在handle_received_cross_die_flit中处理过）
@@ -229,14 +237,14 @@ class D2D_SN_Interface(IPInterface):
         先返回data_send响应，收到数据后再跨Die传输
         """
         packet_id = flit.packet_id
-        
+
         # 防重复处理：检查是否已经处理过这个写请求
         if packet_id in self.processed_write_requests:
             return
-            
+
         # 标记为已处理
         self.processed_write_requests.add(packet_id)
-        
+
         # 检查D2D_SN的资源
         has_tracker = self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos] > 0
         has_databuffer = self.node.sn_wdb_count[self.ip_type][self.ip_pos] >= flit.burst_length
@@ -264,7 +272,6 @@ class D2D_SN_Interface(IPInterface):
             negative_rsp = self._create_response_flit(flit, "negative")
             self.enqueue(negative_rsp, "rsp")
 
-
     def _handle_cross_die_transfer(self, flit):
         """处理跨Die转发（第二阶段：Die0_D2D_SN → Die1_D2D_RN）"""
         target_die_id = getattr(flit, "d2d_target_die", getattr(flit, "target_die_id", None))
@@ -274,25 +281,24 @@ class D2D_SN_Interface(IPInterface):
         # 根据flit类型和请求类型选择AXI通道
         req_type = getattr(flit, "req_type", None)
         flit_type = getattr(flit, "flit_type", None)
-        
+
         if req_type == "read" and flit_type != "data":
             channel = "AR"  # 读请求使用地址读通道
         elif req_type == "read" and flit_type == "data":
-            channel = "R"   # 读数据使用读数据通道
+            channel = "R"  # 读数据使用读数据通道
         elif req_type == "write" and flit_type != "data":
             channel = "AW"  # 写请求使用地址写通道
         elif req_type == "write" and flit_type == "data":
-            channel = "W"   # 写数据使用写数据通道
+            channel = "W"  # 写数据使用写数据通道
         else:
             channel = "AW"  # 默认使用写地址通道
-        
-        print(f"[D2D SN Debug] 跨Die转发: packet_id={getattr(flit, 'packet_id', 'None')}, "
-              f"req_type={req_type}, flit_type={flit_type}, channel={channel}, target_die={target_die_id}")
+
+        # print(f"[D2D SN Debug] 跨Die转发: packet_id={getattr(flit, 'packet_id', 'None')}, "
+        #   f"req_type={req_type}, flit_type={flit_type}, channel={channel}, target_die={target_die_id}")
 
         # 使用D2D_Sys进行仲裁和AXI传输
         self.d2d_sys.enqueue_sn(flit, target_die_id, channel)
         self.cross_die_requests_forwarded += 1
-
 
     def _handle_received_data(self, flit: Flit):
         """
@@ -306,17 +312,109 @@ class D2D_SN_Interface(IPInterface):
 
         # 检查是否是跨Die返回的数据
         flit_pos = getattr(flit, "flit_position", "")
-        is_cross_die_data = (
-            (flit_pos and "AXI" in flit_pos) or
-            (hasattr(flit, "d2d_target_die") and flit.d2d_target_die != self.die_id)
-        )
+        is_cross_die_data = (flit_pos and "AXI" in flit_pos) or (hasattr(flit, "d2d_target_die") and flit.d2d_target_die != self.die_id)
 
         if is_cross_die_data:
-            # 这是从其他Die返回的数据，需要转发到原始请求者
-            self.forward_cross_die_data_to_requester(flit)
+            # 这是从其他Die返回的数据，收集后批量转发到原始请求者
+            self.collect_cross_die_read_data(flit)
         else:
             # 本地数据，调用父类正常处理
             super()._handle_received_data(flit)
+
+    def collect_cross_die_read_data(self, flit: Flit):
+        """
+        收集跨Die返回的读数据到sn_rdb，收齐burst后批量转发
+        """
+        packet_id = getattr(flit, "packet_id", -1)
+        if packet_id == -1:
+            return
+
+        # 使用现有的sn_rdb结构，但需要转换为字典结构
+        if not isinstance(self.node.sn_rdb[self.ip_type][self.ip_pos], dict):
+            # 第一次使用时转换为字典
+            self.node.sn_rdb[self.ip_type][self.ip_pos] = {}
+
+        if packet_id not in self.node.sn_rdb[self.ip_type][self.ip_pos]:
+            self.node.sn_rdb[self.ip_type][self.ip_pos][packet_id] = []
+
+        # 添加到sn_rdb
+        self.node.sn_rdb[self.ip_type][self.ip_pos][packet_id].append(flit)
+
+        # 检查是否收齐完整burst
+        collected_flits = self.node.sn_rdb[self.ip_type][self.ip_pos][packet_id]
+        expected_length = getattr(flit, "burst_length", 4)
+
+        if len(collected_flits) >= expected_length:
+            # 收齐了，批量转发
+            self.forward_collected_cross_die_data(packet_id, collected_flits)
+            # 清理sn_rdb
+            del self.node.sn_rdb[self.ip_type][self.ip_pos][packet_id]
+
+    def forward_collected_cross_die_data(self, packet_id: int, data_flits: list):
+        """
+        批量转发收齐的跨Die读数据到原始请求者
+        """
+        if not data_flits:
+            return
+
+        # 使用第一个flit的信息作为参考
+        first_flit = data_flits[0]
+
+        # 获取原始请求节点的源映射位置
+        original_source_mapped = getattr(first_flit, "d2d_origin_node", None)
+        if original_source_mapped is None:
+            print(f"[D2D_SN] 警告: flit缺少d2d_origin_node信息: packet_id={packet_id}")
+            return
+
+        # 计算目标映射位置
+        source_mapped = self.ip_pos  # D2D_SN的位置(36)
+        destination_mapped = original_source_mapped - self.config.NUM_COL
+
+        # 计算路径
+        path = self.routes[source_mapped][destination_mapped] if destination_mapped in self.routes[source_mapped] else []
+
+        # 批量转发所有数据flits
+        for i, flit in enumerate(data_flits):
+            # 设置路由信息
+            flit.source = source_mapped
+            flit.destination = destination_mapped
+            flit.path = path.copy()  # 每个flit需要独立的路径副本
+            flit.path_index = 0
+
+            # 设置类型信息
+            flit.source_type = self.ip_type  # D2D_SN的类型
+            flit.destination_type = getattr(first_flit, "d2d_origin_type", "gdma_0")
+
+            # 标记为新的网络传输
+            flit.is_injected = False
+            flit.is_new_on_network = True
+            flit.current_position = self.ip_pos
+
+            # 设置发送时间
+            if hasattr(flit, "departure_cycle"):
+                flit.departure_cycle = self.current_cycle
+
+            # 通过数据网络发送
+            self.enqueue(flit, "data")
+
+        # print(f"[D2D_SN] 批量转发packet {packet_id}的{len(data_flits)}个数据flits到Die{getattr(first_flit, 'd2d_origin_die', '?')}")
+
+        # 发送完成后释放D2D_SN的tracker
+        self.release_sn_tracker_for_cross_die_data(packet_id)
+
+    def release_sn_tracker_for_cross_die_data(self, packet_id: int):
+        """
+        释放D2D_SN用于跨Die数据转发的tracker
+        """
+        # 查找对应的tracker（这里假设是读请求的tracker）
+        tracker = next((req for req in self.node.sn_tracker[self.ip_type][self.ip_pos] if req.packet_id == packet_id), None)
+
+        if tracker:
+            # 释放tracker资源
+            self.node.sn_tracker[self.ip_type][self.ip_pos].remove(tracker)
+            self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos] += 1
+            self.node.sn_rdb_count[self.ip_type][self.ip_pos] += tracker.burst_length
+            # print(f"[D2D_SN] 释放packet {packet_id}的tracker资源")
 
     def forward_cross_die_data_to_requester(self, flit: Flit):
         """
@@ -331,14 +429,12 @@ class D2D_SN_Interface(IPInterface):
         # D2D_SN接收到跨Die数据后，应该转发给同位置的GDMA
         source_mapped = self.ip_pos  # D2D_SN的位置(36)
 
-        # d2d_origin_node存储的是源映射位置，转为目标映射需要减去NUM_COL
-        # 36 (源映射) -> 32 (目标映射)
+        # d2d_origin_node存储的是源映射位置，转为目标映射位置（减去NUM_COL）
         destination_mapped = original_source_mapped - self.config.NUM_COL
 
         # 计算从源映射到目标映射的路径
         # 即使是同一个物理节点，源映射和目标映射也应该不同
         path = self.routes[source_mapped][destination_mapped] if destination_mapped in self.routes[source_mapped] else []
-
 
         # 设置路由信息
         flit.source = source_mapped
@@ -383,8 +479,6 @@ class D2D_SN_Interface(IPInterface):
             # 所有数据包已转发，清理tracker
             del self.sn_data_tracker[packet_id]
 
-
-
     def handle_cross_die_write_data(self, flit: Flit):
         """
         处理跨Die写数据 - 接收数据并通过AW+W通道转发
@@ -401,14 +495,11 @@ class D2D_SN_Interface(IPInterface):
 
         if flit_id in existing_flit_ids:
             return  # 跳过重复处理
-        
+
         self.node.sn_wdb[self.ip_type][self.ip_pos][packet_id].append(flit)
-        
-        # 记录写数据接收到D2D模型
-        d2d_model = getattr(self.req_network, 'd2d_model', None)
-        if d2d_model:
-            burst_length = getattr(flit, 'burst_length', 4)
-            d2d_model.record_write_data_received(flit.packet_id, self.die_id, burst_length)
+
+        # 注意：不在D2D_SN中记录写数据接收，因为这里只是源Die的中转节点
+        # 写数据接收应该在真正的目标IP（如目标Die的DDR）中记录
 
         # 检查是否收集完所有写数据
         collected_flits = self.node.sn_wdb[self.ip_type][self.ip_pos][packet_id]
@@ -442,7 +533,7 @@ class D2D_SN_Interface(IPInterface):
         释放D2D_SN的tracker并转发响应给原始RN
         """
         packet_id = flit.packet_id
-        
+
         # 查找对应的写请求tracker
         write_req = next((req for req in self.node.sn_tracker[self.ip_type][self.ip_pos] if req.packet_id == packet_id), None)
 
@@ -460,9 +551,9 @@ class D2D_SN_Interface(IPInterface):
             self.forward_response_to_local_rn(flit)
         else:
             # 没有找到tracker，可能是重复响应，尝试转发一次
-            if not hasattr(self, 'forwarded_responses'):
+            if not hasattr(self, "forwarded_responses"):
                 self.forwarded_responses = set()
-            
+
             if packet_id not in self.forwarded_responses:
                 self.forwarded_responses.add(packet_id)
                 self.forward_response_to_local_rn(flit)
@@ -471,28 +562,31 @@ class D2D_SN_Interface(IPInterface):
         """
         重写响应处理，支持B通道写完成响应
         """
-        packet_id = getattr(rsp, 'packet_id', '?')
-        req_type = getattr(rsp, 'req_type', 'None')
-        rsp_type = getattr(rsp, 'rsp_type', 'None')
-        flit_position = getattr(rsp, 'flit_position', 'None')
-        
+        packet_id = getattr(rsp, "packet_id", "?")
+        req_type = getattr(rsp, "req_type", "None")
+        rsp_type = getattr(rsp, "rsp_type", "None")
+        flit_position = getattr(rsp, "flit_position", "None")
+
         # 检查是否为需要处理的跨Die写完成响应
-        if (rsp_type == "write_complete" and 
-            hasattr(rsp, "d2d_origin_die") and hasattr(rsp, "d2d_target_die")):
-            
+        if rsp_type == "write_complete" and hasattr(rsp, "d2d_origin_die") and hasattr(rsp, "d2d_target_die"):
+
             # 防重复处理
             response_key = (packet_id, self.current_cycle)
             if response_key in self.processed_write_complete_responses:
                 return
-            
+
             if flit_position == "AXI_B":
                 # AXI_B通道的原始写完成响应
                 self.processed_write_complete_responses[response_key] = True
                 self.handle_cross_die_write_complete_response(rsp)
                 return
+            else:
+                # 非AXI_B的write_complete响应，只转发不处理tracker
+                # D2D_SN不应该有自己的write_complete处理逻辑
+                return
 
         # 检查req_type有效性
-        if req_type in [None, 'None']:
+        if req_type in [None, "None"]:
             return
 
         # 其他响应类型，调用父类处理

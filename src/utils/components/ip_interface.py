@@ -172,6 +172,9 @@ class IPInterface:
                          not retry)
         
         if is_new_request and hasattr(flit, "req_type"):
+            # 记录请求开始时间（tracker消耗开始）
+            flit.req_start_cycle = self.current_cycle
+            
             # 判断是否为跨Die请求
             is_cross_die = (hasattr(flit, "d2d_target_die") and 
                            hasattr(flit, "d2d_origin_die") and 
@@ -504,25 +507,36 @@ class IPInterface:
                 self.node.rn_wdb[self.ip_type][self.ip_pos].pop(rsp.packet_id, None)
                 
             elif rsp.rsp_type == "write_complete":
-                # 收到写完成响应，检查是否为跨Die写请求的最终响应
+                # 收到写完成响应，查找对应的写请求（包括本地和跨Die写请求）
                 req: Flit = next((r for r in self.node.rn_tracker["write"][self.ip_type][self.ip_pos] 
-                                 if r.packet_id == rsp.packet_id and self._is_cross_die_write_request(r)), None)
+                                 if r.packet_id == rsp.packet_id), None)
                 if req:
+                    # 记录写完成响应接收时间（所有写请求都需要记录）
+                    req.write_complete_received_cycle = self.current_cycle
+                    
+                    # 同时更新arrive_flits中对应packet的所有flit的时间戳
+                    if req.packet_id in self.req_network.arrive_flits:
+                        for flit in self.req_network.arrive_flits[req.packet_id]:
+                            flit.write_complete_received_cycle = self.current_cycle
+                
+                # 对于跨Die写请求，需要特殊处理tracker释放
+                if req and self._is_cross_die_write_request(req):
                     # 这是跨Die写请求的最终B通道响应，现在可以释放tracker
                     self.node.rn_tracker["write"][self.ip_type][self.ip_pos].remove(req)
                     self.node.rn_wdb_count[self.ip_type][self.ip_pos] += req.burst_length
                     self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos] += 1
                     self.node.rn_tracker_pointer["write"][self.ip_type][self.ip_pos] -= 1
                     
-                    # 更新D2D请求完成计数
-                    if hasattr(req, 'd2d_origin_die') and hasattr(req, 'd2d_target_die'):
+                    # 更新D2D请求完成计数（只在源IP收到write_complete时记录，不在D2D_SN记录）
+                    if (hasattr(req, 'd2d_origin_die') and hasattr(req, 'd2d_target_die') and 
+                        hasattr(req, 'd2d_origin_type') and req.d2d_origin_type == self.ip_type):
                         die_id = getattr(self.config, 'DIE_ID', None)
                         if die_id is not None and req.d2d_origin_die == die_id:
                             d2d_model = getattr(self.req_network, 'd2d_model', None)
                             if d2d_model:
                                 d2d_model.d2d_requests_completed[die_id] += 1
-                                # 记录write_complete响应的接收
-                                d2d_model.record_write_complete(req.packet_id)
+                                # 记录write_complete响应的接收（只在真正的源IP记录）
+                                d2d_model.record_write_complete(req.packet_id, die_id)
 
     def _is_cross_die_write_request(self, req: Flit) -> bool:
         """检查是否为跨Die写请求"""
@@ -592,7 +606,9 @@ class IPInterface:
                         # 通过网络对象获取d2d_model引用
                         d2d_model = getattr(self.req_network, 'd2d_model', None)
                         if d2d_model:
-                            d2d_model.d2d_received_flits[die_id] += 1
+                            burst_length = getattr(flit, 'burst_length', 4)
+                            # 使用新的统计方法记录跨Die读数据接收
+                            d2d_model.record_read_data_received(flit.packet_id, die_id, burst_length, is_cross_die=True)
             
             # 读数据到达RN端，需要收集到data buffer中
             self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
@@ -637,6 +653,19 @@ class IPInterface:
                     print(f"Warning: No RN tracker found for packet_id {flit.packet_id}")
 
         elif flit.req_type == "write":
+            # 检查是否为跨Die写数据，每个flit都需要更新D2D统计
+            if (hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die") and 
+                flit.d2d_origin_die != flit.d2d_target_die):
+                # 这是跨Die写请求的数据flit
+                die_id = getattr(self.config, 'DIE_ID', None)
+                if die_id is not None and flit.d2d_target_die == die_id:
+                    # 通过网络对象获取d2d_model引用
+                    d2d_model = getattr(self.req_network, 'd2d_model', None)
+                    if d2d_model:
+                        burst_length = getattr(flit, 'burst_length', 4)
+                        # 记录跨Die写数据接收（每个flit都记录）
+                        d2d_model.record_write_data_received(flit.packet_id, die_id, burst_length, is_cross_die=True)
+            
             self.node.sn_wdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
 
             # 检查是否收集完整个burst

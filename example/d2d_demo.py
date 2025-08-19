@@ -49,15 +49,17 @@ def main():
     sim.end_time = 500  # 缩短测试周期以便调试
     sim.print_interval = 100
 
-    print("-" * 40)
-    print("开始D2D仿真...")
-    print("期望看到:")
-    print("1. 第1个cycle: 请求注入到Die 0")
-    print("2. 请求传输到D2D_SN")
-    print("3. AXI跨die传输")
-    print("4. 完整的D2D trace输出")
-    print("-" * 40)
     sim.run()
+
+    # 调用D2D结果处理
+    try:
+        sim.process_d2d_comprehensive_results()
+        print("\nD2D结果处理完成! 请查看生成的CSV文件和带宽报告。")
+    except Exception as e:
+        print(f"D2D结果处理失败: {e}")
+        import traceback
+
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

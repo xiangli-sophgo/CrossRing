@@ -118,6 +118,8 @@ class Flit:
         "data_entry_noc_from_cake0_cycle",
         "data_entry_noc_from_cake1_cycle",
         "data_received_complete_cycle",
+        "write_complete_received_cycle",  # 写完成响应接收时间
+        "req_start_cycle",               # 请求开始处理时间（tracker消耗开始）
         "data_entry_network_cycle",
         "rsp_entry_network_cycle",
         "transaction_latency",
@@ -216,6 +218,7 @@ class Flit:
         # 记录下环 / 弹出时实际占用的是哪一级 entry（"T0" / "T1" / "T2"）
         self.used_entry_level = None
         # Latency record
+        self.req_start_cycle = np.inf  # 请求开始处理时间（tracker消耗开始）
         self.cmd_entry_cake0_cycle = np.inf
         self.cmd_entry_noc_from_cake0_cycle = np.inf
         self.cmd_entry_noc_from_cake1_cycle = np.inf
@@ -224,6 +227,7 @@ class Flit:
         self.data_entry_noc_from_cake0_cycle = np.inf
         self.data_entry_noc_from_cake1_cycle = np.inf
         self.data_received_complete_cycle = np.inf
+        self.write_complete_received_cycle = np.inf  # 写完成响应接收时间
         self.data_entry_network_cycle = np.inf
         self.rsp_entry_network_cycle = np.inf
         self.transaction_latency = np.inf
@@ -331,6 +335,8 @@ class Flit:
         self.inject_time = None
 
         # Reset timing fields
+        self.req_start_cycle = np.inf
+        self.write_complete_received_cycle = np.inf
         self.departure_cycle = np.inf
         self.req_departure_cycle = np.inf
         self.departure_network_cycle = np.inf

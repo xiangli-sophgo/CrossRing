@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 
 from .base_model import BaseModel
 from .d2d_traffic_scheduler import D2DTrafficScheduler
+from .d2d_result_processor import D2DResultProcessor
 from src.utils.components.d2d_rn_interface import D2D_RN_Interface
 from src.utils.components.d2d_sn_interface import D2D_SN_Interface
 from config.config import CrossRingConfig
@@ -67,17 +68,17 @@ class D2D_Model:
         for die_id in range(self.num_dies):
             die_config = self._create_die_config(die_id)
 
-            # 创建BaseModel实例
+            # 创建BaseModel实例（D2D模式下禁用单个Die的结果保存路径）
             die_model = BaseModel(
                 model_type=self.kwargs.get("model_type", "REQ_RSP"),
                 config=die_config,
                 topo_type=self.kwargs.get("topo_type", "8x9"),
                 traffic_file_path=self.kwargs.get("traffic_file_path", "../traffic/"),
                 traffic_config=self.traffic_config,
-                result_save_path=self.kwargs.get("result_save_path", "../Result/"),
-                results_fig_save_path=self.kwargs.get("results_fig_save_path", ""),
-                plot_flow_fig=self.kwargs.get("plot_flow_fig", 0),
-                plot_RN_BW_fig=self.kwargs.get("plot_RN_BW_fig", 0),
+                result_save_path="",  # 禁用单个Die的结果保存，避免生成Die_0/Die_1文件夹
+                results_fig_save_path="",  # 禁用单个Die的图片保存，避免生成figure文件夹
+                plot_flow_fig=0,  # 禁用单个Die的流图生成
+                plot_RN_BW_fig=0,  # 禁用单个Die的带宽图生成
                 plot_link_state=self.kwargs.get("plot_link_state", 0),
                 plot_start_cycle=self.kwargs.get("plot_start_cycle", 0),
                 print_trace=self.kwargs.get("print_trace", 0),
@@ -305,11 +306,10 @@ class D2D_Model:
             print(f"D2D仿真耗时: {simulation_time:.2f} 秒")
             print(f"处理周期数: {self.current_cycle} 周期")
             print(f"仿真性能: {self.current_cycle / simulation_time:.0f} 周期/秒")
-            
+
             # 打印最终状态（使用print_interval的格式）
             print("\n仿真结束时的最终状态:")
             self._print_progress()
-
 
     def _step_die(self, die_model: BaseModel):
         """执行单个Die的单周期步进"""
@@ -333,11 +333,10 @@ class D2D_Model:
         total_requests_sent = sum(self.d2d_requests_sent.values())
         if total_requests_sent == 0:
             return False  # 没有请求被发出，继续等待
-            
-        # 使用基于数据接收的完成判断
-        # 检查所有Die的数据接收是否完成
+
+        # 使用基于读数据接收和写响应完成的判断逻辑
         burst_length = 4  # 默认burst长度
-        
+
         # 初始化统计变量（如果还没有初始化）
         if not hasattr(self, "_local_read_requests"):
             self._local_read_requests = {i: 0 for i in range(self.num_dies)}
@@ -349,39 +348,34 @@ class D2D_Model:
             self._cross_die_write_requests = {i: 0 for i in range(self.num_dies)}
         if not hasattr(self, "_actual_read_flits_received"):
             self._actual_read_flits_received = {i: 0 for i in range(self.num_dies)}
-        if not hasattr(self, "_actual_write_flits_received"):
-            self._actual_write_flits_received = {i: 0 for i in range(self.num_dies)}
-            
-        # 检查每个Die的数据接收完成情况
+        if not hasattr(self, "_write_complete_received"):
+            self._write_complete_received = {i: 0 for i in range(self.num_dies)}
+
+        # 检查每个Die的事务完成情况
         for die_id in range(self.num_dies):
             other_die_id = 1 - die_id  # 另一个Die的ID (假设只有2个Die)
+
+            # 读事务完成判断：检查读数据接收
+            expected_read_flits = (self._local_read_requests[die_id] + self._cross_die_read_requests[other_die_id]) * burst_length
+            actual_read_flits = self._actual_read_flits_received[die_id]
             
-            # 计算该Die期望接收的读写数据flit数量
-            # 修正：跨Die请求只在发起请求的Die统计，不重复计算
-            expected_read_flits = (
-                self._local_read_requests[die_id] +           # 本Die本地读请求
-                self._cross_die_read_requests[other_die_id]   # 另一Die发起的跨Die读请求（目标是本Die）
-            ) * burst_length
+            if actual_read_flits < expected_read_flits:
+                return False  # 读数据接收未完成
+
+            # 写事务完成判断：检查write_complete响应接收
+            expected_write_complete = self._local_write_requests[die_id] + self._cross_die_write_requests[die_id]  # 该Die发起的所有写请求
+            actual_write_complete = self._write_complete_received[die_id]
             
-            expected_write_flits = (
-                self._local_write_requests[die_id] +          # 本Die本地写请求  
-                self._cross_die_write_requests[other_die_id]  # 另一Die发起的跨Die写请求（目标是本Die）
-            ) * burst_length
-            
-            # 检查实际接收数量是否达到期望
-            actual_read = self._actual_read_flits_received[die_id]
-            actual_write = self._actual_write_flits_received[die_id]
-            
-            if actual_read < expected_read_flits or actual_write < expected_write_flits:
-                return False  # 数据接收未完成
-                
+            if actual_write_complete < expected_write_complete:
+                return False  # 写完成响应未接收完
+
         # 检查网络是否空闲和没有待处理的事务
         for die_id, die_model in self.dies.items():
             # 检查网络中是否还有传输中的flits
             trans_completed = die_model.trans_flits_num == 0
             # 检查是否有新的写请求待处理
             write_completed = not die_model.new_write_req
-            
+
             if not (trans_completed and write_completed):
                 return False
 
@@ -593,26 +587,23 @@ class D2D_Model:
             cross_write_reqs = getattr(self, "_cross_die_write_requests", {}).get(die_id, 0)
             actual_read_flits = getattr(self, "_actual_read_flits_received", {}).get(die_id, 0)
             actual_write_flits = getattr(self, "_actual_write_flits_received", {}).get(die_id, 0)
-            
+
             # 计算期望接收的flit数量
             # 修正：跨Die请求只在发起请求的Die统计，不重复计算
             other_die_id = 1 - die_id
-            expected_read_flits = (local_read_reqs + 
-                                 getattr(self, "_cross_die_read_requests", {}).get(other_die_id, 0)) * 4
-            expected_write_flits = (local_write_reqs + 
-                                  getattr(self, "_cross_die_write_requests", {}).get(other_die_id, 0)) * 4
+            expected_read_flits = (local_read_reqs + getattr(self, "_cross_die_read_requests", {}).get(other_die_id, 0)) * 4
+            expected_write_flits = (local_write_reqs + getattr(self, "_cross_die_write_requests", {}).get(other_die_id, 0)) * 4
 
-            print(
-                f"  Die{die_id}: Req_cnt: {req_cnt}, In_Req: {in_req}, Rsp: {rsp}, "
-                f"R_fn: {r_fn}, W_fn: {w_fn}, Trans_fn: {trans_fn}, Recv_fn: {recv_fn}, "
-                f"D2D_done: {d2d_completed}"
-            )
-            print(
-                f"    Requests - Local: R{local_read_reqs}/W{local_write_reqs}, Cross: R{cross_read_reqs}/W{cross_write_reqs}"
-            )
-            print(
-                f"    Data Received - R: {actual_read_flits}/{expected_read_flits}, W: {actual_write_flits}/{expected_write_flits}"
-            )
+            # print(f"  Die{die_id}: Req_cnt: {req_cnt}, In_Req: {in_req}, Rsp: {rsp}, " f"R_fn: {r_fn}, W_fn: {w_fn}, Trans_fn: {trans_fn}, Recv_fn: {recv_fn}, " f"D2D_done: {d2d_completed}")
+            print(f"  Die{die_id}:")
+            # 获取按local/cross分类的数据统计
+            local_read_data = getattr(self, "_local_read_flits_received", {}).get(die_id, 0)
+            cross_read_data = getattr(self, "_cross_read_flits_received", {}).get(die_id, 0)
+            local_write_data = getattr(self, "_local_write_flits_received", {}).get(die_id, 0)
+            cross_write_data = getattr(self, "_cross_write_flits_received", {}).get(die_id, 0)
+
+            print(f"    Read - Requests: Local={local_read_reqs}, Cross={cross_read_reqs} | Data: Local={local_read_data}, Cross={cross_read_data}")
+            print(f"    Write - Requests: Local={local_write_reqs}, Cross={cross_write_reqs} | Data: Local={local_write_data}, Cross={cross_write_data}")
 
     def generate_combined_flow_graph(self, mode="total", save_path=None, show_cdma=True):
         """
@@ -696,42 +687,41 @@ class D2D_Model:
         # 收集D2D专有统计信息
         d2d_stats = self._collect_d2d_statistics()
 
-        # 1. 对每个Die调用现有的结果处理方法
+        # 1. 跳过Die内部结果分析（D2D系统中Die内部没有数据流）
         die_results = {}
-        for die_id, die_model in self.dies.items():
-            print(f"\n处理Die {die_id}的结果...")
 
-            # 调用现有的综合结果处理方法
-            if hasattr(die_model, "result_processor") and die_model.result_processor:
-                try:
-                    # 收集请求数据
-                    die_model.result_processor.collect_requests_data(die_model, die_model.cycle)
-                    # 分析带宽
-                    die_results[die_id] = die_model.result_processor.analyze_all_bandwidth()
+        # 2. D2D专用结果处理
+        self._process_d2d_specific_results()
 
-                    # 为每个Die生成独立的报告（保存到子目录）
-                    die_result_path = os.path.join(self.kwargs.get("result_save_path", "../Result/"), f"Die_{die_id}")
-                    os.makedirs(die_result_path, exist_ok=True)
-                    die_model.result_processor.generate_unified_report(die_results[die_id], die_result_path)
+        # 3. 输出D2D专有统计信息（可选，现在主要依靠D2D专用报告）
+        # self._print_d2d_statistics(d2d_stats)
 
-                    # 生成FIFO使用率报告
-                    die_model.result_processor.generate_fifo_usage_csv(die_model, die_result_path)
-
-                    print(f"  Die {die_id}结果已保存到: {die_result_path}")
-
-                except Exception as e:
-                    print(f"  警告: Die {die_id}结果处理失败: {e}")
-                    die_results[die_id] = None
-
-        # 2. 输出D2D专有统计信息
-        self._print_d2d_statistics(d2d_stats)
-
-        # 3. 生成D2D组合报告（基于现有结果）
-        self._generate_d2d_combined_report(die_results, d2d_stats)
+        # 4. 不再生成重复的组合报告，D2D专用报告已足够
 
         print("=" * 60)
         print("D2D综合结果分析完成")
         print("=" * 60)
+
+    def _process_d2d_specific_results(self):
+        """处理D2D专有的结果分析（跨Die请求记录和带宽统计）"""
+        try:
+            print("\n处理D2D专用结果分析...")
+
+            # 创建D2D结果处理器
+            d2d_processor = D2DResultProcessor(self.config)
+
+            # 获取结果保存路径，添加时间戳
+            import time
+
+            timestamp = int(time.time())
+            result_save_path = self.kwargs.get("result_save_path", "../Result/")
+            d2d_result_path = os.path.join(result_save_path, f"D2D_{timestamp}")
+
+            # 执行完整的D2D结果处理流程
+            d2d_processor.process_d2d_results(self.dies, d2d_result_path)
+
+        except Exception as e:
+            print(f"警告: D2D专用结果处理失败: {e}")
 
     def _collect_d2d_statistics(self):
         """收集D2D专有统计信息"""
@@ -747,21 +737,44 @@ class D2D_Model:
             }
 
             # D2D专有统计
-            d2d_rn_key = ("d2d_rn", die_model.config.D2D_RN_POSITION)
-            d2d_sn_key = ("d2d_sn", die_model.config.D2D_SN_POSITION)
+            # 获取当前Die的D2D_RN和D2D_SN位置
+            d2d_rn_positions = getattr(die_model.config, "D2D_RN_POSITIONS", [])
+            d2d_sn_positions = getattr(die_model.config, "D2D_SN_POSITIONS", [])
 
-            if d2d_rn_key in die_model.ip_modules:
+            # 对于每个位置，尝试获取统计信息
+            d2d_rn_key = None
+            d2d_sn_key = None
+
+            if d2d_rn_positions and len(d2d_rn_positions) > die_id:
+                d2d_rn_key = ("d2d_rn_0", d2d_rn_positions[die_id])
+            if d2d_sn_positions and len(d2d_sn_positions) > die_id:
+                d2d_sn_key = ("d2d_sn_0", d2d_sn_positions[die_id])
+
+            if d2d_rn_key and d2d_rn_key in die_model.ip_modules:
                 rn_stats = die_model.ip_modules[d2d_rn_key].get_statistics()
-                die_stat["d2d_rn_sent"] = rn_stats["cross_die_requests_sent"]
-                die_stat["d2d_rn_received"] = rn_stats["cross_die_responses_received"]
-                d2d_stats["cross_die_requests"] += rn_stats["cross_die_requests_sent"]
+                die_stat["d2d_rn_sent"] = rn_stats.get("cross_die_requests_sent", 0)
+                die_stat["d2d_rn_received"] = rn_stats.get("cross_die_responses_received", 0)
+                d2d_stats["cross_die_requests"] += rn_stats.get("cross_die_requests_sent", 0)
 
-            if d2d_sn_key in die_model.ip_modules:
+            if d2d_sn_key and d2d_sn_key in die_model.ip_modules:
                 sn_stats = die_model.ip_modules[d2d_sn_key].get_statistics()
-                die_stat["d2d_sn_received"] = sn_stats["cross_die_requests_received"]
-                die_stat["d2d_sn_forwarded"] = sn_stats["cross_die_requests_forwarded"]
-                die_stat["d2d_sn_responses"] = sn_stats["cross_die_responses_sent"]
-                d2d_stats["cross_die_responses"] += sn_stats["cross_die_responses_sent"]
+                die_stat["d2d_sn_received"] = sn_stats.get("cross_die_requests_received", 0)
+                die_stat["d2d_sn_forwarded"] = sn_stats.get("cross_die_requests_forwarded", 0)
+                die_stat["d2d_sn_responses"] = sn_stats.get("cross_die_responses_sent", 0)
+                d2d_stats["cross_die_responses"] += sn_stats.get("cross_die_responses_sent", 0)
+
+            # 收集D2D_Sys的AXI通道统计
+            if hasattr(die_model, 'd2d_systems'):
+                die_stat["axi_channel_flit_count"] = {}
+                total_axi_flits = 0
+                for pos, d2d_sys in die_model.d2d_systems.items():
+                    if hasattr(d2d_sys, 'axi_channel_flit_count'):
+                        for channel, count in d2d_sys.axi_channel_flit_count.items():
+                            if channel not in die_stat["axi_channel_flit_count"]:
+                                die_stat["axi_channel_flit_count"][channel] = 0
+                            die_stat["axi_channel_flit_count"][channel] += count
+                            total_axi_flits += count
+                die_stat["total_axi_flits"] = total_axi_flits
 
             d2d_stats["die_stats"][die_id] = die_stat
 
@@ -779,6 +792,10 @@ class D2D_Model:
                 print(f"  D2D_RN: 发送={stat['d2d_rn_sent']}, 接收={stat['d2d_rn_received']}")
             if "d2d_sn_received" in stat:
                 print(f"  D2D_SN: 接收={stat['d2d_sn_received']}, 转发={stat['d2d_sn_forwarded']}, 响应={stat['d2d_sn_responses']}")
+            if "axi_channel_flit_count" in stat and stat["axi_channel_flit_count"]:
+                print(f"  AXI通道传输统计 (总计: {stat.get('total_axi_flits', 0)} flits):")
+                for channel, count in stat["axi_channel_flit_count"].items():
+                    print(f"    {channel}: {count} flits")
 
     def _generate_d2d_combined_report(self, die_results, d2d_stats):
         """生成D2D组合报告，基于现有的结果分析"""
@@ -866,7 +883,7 @@ class D2D_Model:
             self._d2d_write_burst_info = {}  # {packet_id: {"burst_length": int, "received_count": {die_id: int}}}
         if not hasattr(self, "_d2d_write_data_received"):
             self._d2d_write_data_received = {}  # {packet_id: {die_id: received_count}}
-        
+
         # 添加请求统计追踪
         if not hasattr(self, "_local_read_requests"):
             self._local_read_requests = {i: 0 for i in range(self.num_dies)}  # 每个Die的本地读请求数
@@ -876,12 +893,22 @@ class D2D_Model:
             self._cross_die_read_requests = {i: 0 for i in range(self.num_dies)}  # 每个Die发起的跨Die读请求数
         if not hasattr(self, "_cross_die_write_requests"):
             self._cross_die_write_requests = {i: 0 for i in range(self.num_dies)}  # 每个Die发起的跨Die写请求数
-        
+
         # 实际接收的数据flit统计
         if not hasattr(self, "_actual_read_flits_received"):
             self._actual_read_flits_received = {i: 0 for i in range(self.num_dies)}
         if not hasattr(self, "_actual_write_flits_received"):
             self._actual_write_flits_received = {i: 0 for i in range(self.num_dies)}
+
+        # 按local/cross分类的数据接收统计
+        if not hasattr(self, "_local_read_flits_received"):
+            self._local_read_flits_received = {i: 0 for i in range(self.num_dies)}
+        if not hasattr(self, "_local_write_flits_received"):
+            self._local_write_flits_received = {i: 0 for i in range(self.num_dies)}
+        if not hasattr(self, "_cross_read_flits_received"):
+            self._cross_read_flits_received = {i: 0 for i in range(self.num_dies)}
+        if not hasattr(self, "_cross_write_flits_received"):
+            self._cross_write_flits_received = {i: 0 for i in range(self.num_dies)}
 
         # 检查是否有任何活跃的flit
         has_any_active = False
@@ -1191,7 +1218,7 @@ class D2D_Model:
 
         # 使用新的完成判断逻辑：基于每个Die接收的数据flit数量是否达到期望值
         completion_check_passed = True
-        
+
         # 确保统计变量已初始化
         if not hasattr(self, "_actual_read_flits_received"):
             self._actual_read_flits_received = {i: 0 for i in range(self.num_dies)}
@@ -1205,31 +1232,25 @@ class D2D_Model:
             self._cross_die_read_requests = {i: 0 for i in range(self.num_dies)}
         if not hasattr(self, "_cross_die_write_requests"):
             self._cross_die_write_requests = {i: 0 for i in range(self.num_dies)}
-        
+
         burst_length = 4  # 默认burst长度
-        
+
         # 检查每个Die的数据接收完成情况
         for die_id in range(self.num_dies):
             other_die_id = 1 - die_id  # 另一个Die的ID (假设只有2个Die)
-            
+
             # 计算该Die期望接收的读数据flit数量
             # 修正：跨Die请求只在发起请求的Die统计，不重复计算
-            expected_read_flits = (
-                self._local_read_requests[die_id] +           # 本Die本地读请求
-                self._cross_die_read_requests[other_die_id]   # 另一Die发起的跨Die读请求（目标是本Die）
-            ) * burst_length
-            
-            # 计算该Die期望接收的写数据flit数量  
+            expected_read_flits = (self._local_read_requests[die_id] + self._cross_die_read_requests[other_die_id]) * burst_length  # 本Die本地读请求  # 另一Die发起的跨Die读请求（目标是本Die）
+
+            # 计算该Die期望接收的写数据flit数量
             # 修正：跨Die请求只在发起请求的Die统计，不重复计算
-            expected_write_flits = (
-                self._local_write_requests[die_id] +          # 本Die本地写请求
-                self._cross_die_write_requests[other_die_id]  # 另一Die发起的跨Die写请求（目标是本Die）
-            ) * burst_length
-            
+            expected_write_flits = (self._local_write_requests[die_id] + self._cross_die_write_requests[other_die_id]) * burst_length  # 本Die本地写请求  # 另一Die发起的跨Die写请求（目标是本Die）
+
             # 检查实际接收数量是否达到期望
             actual_read = self._actual_read_flits_received[die_id]
             actual_write = self._actual_write_flits_received[die_id]
-            
+
             if actual_read < expected_read_flits or actual_write < expected_write_flits:
                 completion_check_passed = False
                 break
@@ -1242,79 +1263,107 @@ class D2D_Model:
             else:
                 print(f"[D2D Trace] Packet {packet_id} local transmission completed!")
 
-    def record_write_complete(self, packet_id):
+    def record_write_complete(self, packet_id, die_id):
         """
         记录收到write_complete响应
-        
+
         Args:
             packet_id: 完成的写事务的packet ID
+            die_id: 接收write_complete响应的Die ID（即发起写请求的Die）
         """
         if not hasattr(self, "_d2d_write_complete_count"):
             self._d2d_write_complete_count = {}
-        
-        self._d2d_write_complete_count[packet_id] = True
-        print(f"[D2D Write Complete] Packet {packet_id} received write_complete response")
+        if not hasattr(self, "_write_complete_received"):
+            self._write_complete_received = {i: 0 for i in range(self.num_dies)}
 
-    def record_write_data_received(self, packet_id, die_id, burst_length=None):
+        self._d2d_write_complete_count[packet_id] = True
+        self._write_complete_received[die_id] += 1
+        
+        print(f"[D2D Write Complete] Packet {packet_id} received write_complete response on Die{die_id} "
+              f"(total: {self._write_complete_received[die_id]})")
+
+    def record_write_data_received(self, packet_id, die_id, burst_length=None, is_cross_die=False):
         """
         记录写数据接收
-        
+
         Args:
             packet_id: packet ID
             die_id: 接收数据的die ID
             burst_length: 如果是第一次记录，设置burst长度
+            is_cross_die: 是否为跨Die数据
         """
         if not hasattr(self, "_d2d_write_data_received"):
             self._d2d_write_data_received = {}
         if not hasattr(self, "_actual_write_flits_received"):
             self._actual_write_flits_received = {i: 0 for i in range(self.num_dies)}
-            
+
         if packet_id not in self._d2d_write_data_received:
             self._d2d_write_data_received[packet_id] = {}
-        
+
         if die_id not in self._d2d_write_data_received[packet_id]:
             self._d2d_write_data_received[packet_id][die_id] = {"received": 0, "burst_length": burst_length or 4}
-        
+
         self._d2d_write_data_received[packet_id][die_id]["received"] += 1
         self._actual_write_flits_received[die_id] += 1  # 累计该Die接收的所有写数据flit
-        
+
+        # 按local/cross分类统计
+        if is_cross_die:
+            self._cross_write_flits_received[die_id] += 1
+        else:
+            self._local_write_flits_received[die_id] += 1
+
         if burst_length:
             self._d2d_write_data_received[packet_id][die_id]["burst_length"] = burst_length
-        
-        print(f"[D2D Data Received] Packet {packet_id} Die{die_id}: {self._d2d_write_data_received[packet_id][die_id]['received']}/{self._d2d_write_data_received[packet_id][die_id]['burst_length']} write data received (total: {self._actual_write_flits_received[die_id]})")
 
-    def record_read_data_received(self, packet_id, die_id, burst_length=None):
+        # print(
+        # f"[D2D Data Received] Packet {packet_id} Die{die_id}: {self._d2d_write_data_received[packet_id][die_id]['received']}/{self._d2d_write_data_received[packet_id][die_id]['burst_length']} write data received (total: {self._actual_write_flits_received[die_id]})"
+        # )
+
+    def record_read_data_received(self, packet_id, die_id, burst_length=None, is_cross_die=False):
         """
         记录读数据接收
-        
+
         Args:
             packet_id: packet ID
             die_id: 接收数据的die ID
             burst_length: 如果是第一次记录，设置burst长度
+            is_cross_die: 是否为跨Die数据
         """
         if not hasattr(self, "_d2d_read_data_received"):
             self._d2d_read_data_received = {}
         if not hasattr(self, "_actual_read_flits_received"):
             self._actual_read_flits_received = {i: 0 for i in range(self.num_dies)}
-            
+        if not hasattr(self, "_local_read_flits_received"):
+            self._local_read_flits_received = {i: 0 for i in range(self.num_dies)}
+        if not hasattr(self, "_cross_read_flits_received"):
+            self._cross_read_flits_received = {i: 0 for i in range(self.num_dies)}
+
         if packet_id not in self._d2d_read_data_received:
             self._d2d_read_data_received[packet_id] = {}
-        
+
         if die_id not in self._d2d_read_data_received[packet_id]:
             self._d2d_read_data_received[packet_id][die_id] = {"received": 0, "burst_length": burst_length or 4}
-        
+
         self._d2d_read_data_received[packet_id][die_id]["received"] += 1
         self._actual_read_flits_received[die_id] += 1  # 累计该Die接收的所有读数据flit
-        
+
+        # 按local/cross分类统计
+        if is_cross_die:
+            self._cross_read_flits_received[die_id] += 1
+        else:
+            self._local_read_flits_received[die_id] += 1
+
         if burst_length:
             self._d2d_read_data_received[packet_id][die_id]["burst_length"] = burst_length
-        
-        print(f"[D2D Data Received] Packet {packet_id} Die{die_id}: {self._d2d_read_data_received[packet_id][die_id]['received']}/{self._d2d_read_data_received[packet_id][die_id]['burst_length']} read data received (total: {self._actual_read_flits_received[die_id]})")
+
+        # print(
+        # f"[D2D Data Received] Packet {packet_id} Die{die_id}: {self._d2d_read_data_received[packet_id][die_id]['received']}/{self._d2d_read_data_received[packet_id][die_id]['burst_length']} read data received (total: {self._actual_read_flits_received[die_id]})"
+        # )
 
     def record_request_issued(self, packet_id, die_id, req_type, is_cross_die):
         """
         记录请求发起
-        
+
         Args:
             packet_id: packet ID
             die_id: 发起请求的die ID
@@ -1330,21 +1379,21 @@ class D2D_Model:
             self._cross_die_read_requests = {i: 0 for i in range(self.num_dies)}
         if not hasattr(self, "_cross_die_write_requests"):
             self._cross_die_write_requests = {i: 0 for i in range(self.num_dies)}
-        
+
         if is_cross_die:
             if req_type == "read":
                 self._cross_die_read_requests[die_id] += 1
-                print(f"[D2D Request] Die{die_id} issued cross-die read request {packet_id} (total: {self._cross_die_read_requests[die_id]})")
+                # print(f"[D2D Request] Die{die_id} issued cross-die read request {packet_id} (total: {self._cross_die_read_requests[die_id]})")
             elif req_type == "write":
                 self._cross_die_write_requests[die_id] += 1
-                print(f"[D2D Request] Die{die_id} issued cross-die write request {packet_id} (total: {self._cross_die_write_requests[die_id]})")
+                # print(f"[D2D Request] Die{die_id} issued cross-die write request {packet_id} (total: {self._cross_die_write_requests[die_id]})")
         else:
             if req_type == "read":
                 self._local_read_requests[die_id] += 1
-                print(f"[D2D Request] Die{die_id} issued local read request {packet_id} (total: {self._local_read_requests[die_id]})")
+                # print(f"[D2D Request] Die{die_id} issued local read request {packet_id} (total: {self._local_read_requests[die_id]})")
             elif req_type == "write":
                 self._local_write_requests[die_id] += 1
-                print(f"[D2D Request] Die{die_id} issued local write request {packet_id} (total: {self._local_write_requests[die_id]})")
+                # print(f"[D2D Request] Die{die_id} issued local write request {packet_id} (total: {self._local_write_requests[die_id]})")
 
     def debug_d2d_trace(self, trace_packet_ids=None):
         """

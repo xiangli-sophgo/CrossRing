@@ -86,6 +86,15 @@ class D2D_Sys:
             'B': {'injected': 0, 'ejected': 0, 'throttled': 0}
         }
         
+        # AXI通道传输的flit计数（用于计算带宽）
+        self.axi_channel_flit_count = {
+            'AR': 0,  # 读地址通道
+            'R': 0,   # 读数据通道  
+            'AW': 0,  # 写地址通道
+            'W': 0,   # 写数据通道
+            'B': 0    # 写响应通道
+        }
+        
         # 关联的RN和SN接口（由D2DModel设置）
         self.rn_interface = None
         self.sn_interface = None
@@ -340,6 +349,7 @@ class D2D_Sys:
         self.send_flits[packet_id].append(axi_flit)
         
         self.axi_channel_stats[channel_type]['injected'] += 1
+        self.axi_channel_flit_count[channel_type] += 1  # 统计传输的flit数量
         return True
     
     def step_axi_channels(self):
@@ -445,17 +455,6 @@ class D2D_Sys:
         if target_interface:
             # 调度跨Die接收（使用当前周期，因为已经经过了AXI延迟）
             target_interface.schedule_cross_die_receive(flit, self.current_cycle)
-            
-            # 如果是数据传输完成，通知源接口释放tracker
-            if ((hasattr(flit, 'flit_type') and flit.flit_type == 'data') or 
-                (hasattr(flit, 'rsp_type') and flit.rsp_type in ['datasend', 'read_data'])) and hasattr(flit, "d2d_origin_die"):
-                # 这是跨Die数据返回，需要通知源D2D_RN
-                source_die_id = self.die_id  # 当前Die是源Die
-                source_interfaces = self.target_die_interfaces.get(source_die_id, {})
-                source_rn = source_interfaces.get('rn')
-                
-                if source_rn and hasattr(source_rn, "notify_cross_die_transfer_complete"):
-                    source_rn.notify_cross_die_transfer_complete(flit)
         else:
             self.logger.error(f"无法找到合适的目标接口")
     
