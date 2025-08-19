@@ -30,14 +30,14 @@ def main():
     # 初始化D2D仿真模型 - 启用完整功能和D2D Trace
     sim = D2D_Model(
         config=config,
-        traffic_file_path=r"../traffic/d2d_test/",
+        traffic_file_path=r"",
         traffic_config=[["d2d_test_traffic.txt"]],
         model_type="REQ_RSP",
         topo_type=die_topo_type,
         result_save_path="../Result/d2d_demo/",
         results_fig_save_path="../Result/d2d_demo/figures/",
         verbose=1,
-        print_d2d_trace=1,  # 启用D2D trace功能
+        print_d2d_trace=0,  # 启用D2D trace功能
         show_d2d_trace_id=0,  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
         d2d_trace_sleep=0.0,  # 不暂停，加快调试
     )

@@ -180,11 +180,13 @@ class IPInterface:
                            hasattr(flit, "d2d_origin_die") and 
                            flit.d2d_target_die != flit.d2d_origin_die)
             
-            # 记录请求统计到D2D模型
-            d2d_model = getattr(self.req_network, 'd2d_model', None)
-            if d2d_model:
-                die_id = getattr(self.config, "DIE_ID", 0)
-                d2d_model.record_request_issued(flit.packet_id, die_id, flit.req_type, is_cross_die)
+            # 只在真正的源IP记录请求统计，避免跨Die转发时重复记录
+            should_record = self._should_record_request_issued(flit, is_cross_die)
+            if should_record:
+                d2d_model = getattr(self.req_network, 'd2d_model', None)
+                if d2d_model:
+                    die_id = getattr(self.config, "DIE_ID", 0)
+                    d2d_model.record_request_issued(flit.packet_id, die_id, flit.req_type, is_cross_die)
         
         if network_type == "req" and self.networks[network_type]["send_flits"][flit.packet_id]:
             return True
@@ -518,6 +520,11 @@ class IPInterface:
                     if req.packet_id in self.req_network.arrive_flits:
                         for flit in self.req_network.arrive_flits[req.packet_id]:
                             flit.write_complete_received_cycle = self.current_cycle
+                    
+                    # 同时更新数据网络中对应packet的所有flit的时间戳（用于结果统计）
+                    if req.packet_id in self.data_network.arrive_flits:
+                        for flit in self.data_network.arrive_flits[req.packet_id]:
+                            flit.write_complete_received_cycle = self.current_cycle
                 
                 # 对于跨Die写请求，需要特殊处理tracker释放
                 if req and self._is_cross_die_write_request(req):
@@ -545,6 +552,21 @@ class IPInterface:
             current_die_id = getattr(self.config, 'DIE_ID', 0)
             return req.d2d_target_die != current_die_id
         return False
+
+    def _should_record_request_issued(self, flit: Flit, is_cross_die: bool) -> bool:
+        """判断是否应该记录请求发出统计"""
+        # 对于跨Die请求，只在源Die的原始发起IP记录
+        if is_cross_die:
+            current_die_id = getattr(self.config, 'DIE_ID', 0)
+            origin_die_id = getattr(flit, 'd2d_origin_die', None)
+            origin_type = getattr(flit, 'd2d_origin_type', None)
+            
+            # 只有在源Die且当前IP是原始发起IP时才记录
+            return (current_die_id == origin_die_id and 
+                   origin_type == self.ip_type)
+        else:
+            # 本地请求直接记录
+            return True
 
     def release_completed_sn_tracker(self, req: Flit):
         # —— 1) 移除已完成的 tracker ——

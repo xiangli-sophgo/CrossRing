@@ -358,14 +358,14 @@ class D2D_Model:
             # 读事务完成判断：检查读数据接收
             expected_read_flits = (self._local_read_requests[die_id] + self._cross_die_read_requests[other_die_id]) * burst_length
             actual_read_flits = self._actual_read_flits_received[die_id]
-            
+
             if actual_read_flits < expected_read_flits:
                 return False  # 读数据接收未完成
 
             # 写事务完成判断：检查write_complete响应接收
             expected_write_complete = self._local_write_requests[die_id] + self._cross_die_write_requests[die_id]  # 该Die发起的所有写请求
             actual_write_complete = self._write_complete_received[die_id]
-            
+
             if actual_write_complete < expected_write_complete:
                 return False  # 写完成响应未接收完
 
@@ -764,11 +764,11 @@ class D2D_Model:
                 d2d_stats["cross_die_responses"] += sn_stats.get("cross_die_responses_sent", 0)
 
             # 收集D2D_Sys的AXI通道统计
-            if hasattr(die_model, 'd2d_systems'):
+            if hasattr(die_model, "d2d_systems"):
                 die_stat["axi_channel_flit_count"] = {}
                 total_axi_flits = 0
                 for pos, d2d_sys in die_model.d2d_systems.items():
-                    if hasattr(d2d_sys, 'axi_channel_flit_count'):
+                    if hasattr(d2d_sys, "axi_channel_flit_count"):
                         for channel, count in d2d_sys.axi_channel_flit_count.items():
                             if channel not in die_stat["axi_channel_flit_count"]:
                                 die_stat["axi_channel_flit_count"][channel] = 0
@@ -1278,9 +1278,9 @@ class D2D_Model:
 
         self._d2d_write_complete_count[packet_id] = True
         self._write_complete_received[die_id] += 1
-        
-        print(f"[D2D Write Complete] Packet {packet_id} received write_complete response on Die{die_id} "
-              f"(total: {self._write_complete_received[die_id]})")
+
+        # print(f"[D2D Write Complete] Packet {packet_id} received write_complete response on Die{die_id} "
+        #   f"(total: {self._write_complete_received[die_id]})")
 
     def record_write_data_received(self, packet_id, die_id, burst_length=None, is_cross_die=False):
         """
