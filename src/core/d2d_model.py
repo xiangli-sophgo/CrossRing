@@ -43,6 +43,10 @@ class D2D_Model:
         # 仿真参数
         self.end_time = getattr(config, "END_TIME", 10000)
         self.print_interval = getattr(config, "PRINT_INTERVAL", 1000)
+        
+        # 流量图控制参数
+        self.enable_flow_graph = kwargs.get("enable_flow_graph", True)  # 是否启用流量图绘制
+        self.flow_graph_mode = kwargs.get("flow_graph_mode", "total")  # 流量图模式：total, utilization, ITag_ratio
 
         # 统计信息
         self.total_cross_die_requests = 0
@@ -310,6 +314,15 @@ class D2D_Model:
             # 打印最终状态（使用print_interval的格式）
             print("\n仿真结束时的最终状态:")
             self._print_progress()
+        
+        # 根据参数决定是否生成流量图
+        if self.enable_flow_graph:
+            if self.kwargs.get("verbose", 1):
+                print(f"\n生成D2D流量图 (模式: {self.flow_graph_mode})")
+            try:
+                self.generate_combined_flow_graph(mode=self.flow_graph_mode, save_path=None, show_cdma=True)
+            except Exception as e:
+                print(f"流量图生成失败: {e}")
 
     def _step_die(self, die_model: BaseModel):
         """执行单个Die的单周期步进"""
@@ -356,7 +369,7 @@ class D2D_Model:
             other_die_id = 1 - die_id  # 另一个Die的ID (假设只有2个Die)
 
             # 读事务完成判断：检查读数据接收
-            expected_read_flits = (self._local_read_requests[die_id] + self._cross_die_read_requests[other_die_id]) * burst_length
+            expected_read_flits = (self._local_read_requests[die_id] + self._cross_die_read_requests[die_id]) * burst_length
             actual_read_flits = self._actual_read_flits_received[die_id]
 
             if actual_read_flits < expected_read_flits:
@@ -614,49 +627,103 @@ class D2D_Model:
             save_path: 图片保存路径
             show_cdma: 是否显示CDMA
         """
-        # 检查是否有BandwidthAnalyzer实例
-        analyzers = {}
+        # 收集网络对象
         die_networks = {}
-
         for die_id, die_model in self.dies.items():
-            if hasattr(die_model, "result_processor") and die_model.result_processor:
-                analyzers[die_id] = die_model.result_processor
-                # 收集网络对象 - 根据mode选择合适的网络
-                if mode == "total":
-                    die_networks[die_id] = die_model.data_network  # 使用data_network显示总带宽
+            # 根据mode选择合适的网络
+            if mode == "total":
+                network = die_model.data_network  # 使用data_network显示总带宽
+                print(f"[调试] Die {die_id}: 使用data_network")
+                
+                # 获取网络统计数据
+                stats = network.get_links_utilization_stats()
+                active_links = sum(1 for link_stats in stats.values() if link_stats.get("total_flit", 0) > 0)
+                if active_links > 0:
+                    print(f"[信息] Die {die_id}: 发现 {active_links} 条有流量的链路")
                 else:
-                    die_networks[die_id] = die_model.req_network  # 默认使用req_network
-
+                    print(f"[信息] Die {die_id}: 没有发现有流量的链路")
+                    
             else:
-                return
+                network = die_model.req_network  # 默认使用req_network
+                print(f"[调试] Die {die_id}: 使用req_network")
+            
+            die_networks[die_id] = network
 
-        if len(analyzers) < 2:
+        if len(die_networks) < 2:
+            print("D2D组合流量图需要至少2个Die的网络数据")
             return
 
-        # 使用第一个analyzer来绘制组合图
-        primary_analyzer = list(analyzers.values())[0]
-
-        # 设置保存路径
-        if save_path is None:
+        # 设置保存路径（如果save_path为None则直接显示，不保存）
+        if save_path == "auto":  # 只有明确指定"auto"时才自动生成路径
             import time
-
             timestamp = int(time.time())
             save_path = f"../Result/d2d_combined_flow_{mode}_{timestamp}.png"
 
-        # 确保primary_analyzer有必要的属性
-        if not hasattr(primary_analyzer, "simulation_end_cycle"):
-            primary_analyzer.simulation_end_cycle = self.current_cycle
+        # 使用已有的结果处理器或创建新的并传递Die数据
+        if hasattr(self, 'result_processor') and self.result_processor:
+            # 使用已有的结果处理器
+            d2d_processor = self.result_processor
+        else:
+            # 创建新的D2D结果处理器并传递Die数据
+            d2d_processor = D2DResultProcessor(self.config)
+            d2d_processor.simulation_end_cycle = self.current_cycle
+            # print(f"[调试] 设置simulation_end_cycle为: {self.current_cycle}")
+            
+            # 检查是否已经有D2D处理器实例（避免重复计算）
+            if hasattr(self, '_cached_d2d_processor') and self._cached_d2d_processor:
+                print("[信息] 使用缓存的D2D处理器数据")
+                d2d_processor = self._cached_d2d_processor
+            else:
+                # 第一次计算：收集D2D请求数据并计算正确的IP带宽
+                d2d_processor.collect_cross_die_requests(self.dies)
+                d2d_processor.calculate_d2d_ip_bandwidth_data(self.dies)
+                # 缓存处理器供后续使用
+                self._cached_d2d_processor = d2d_processor
+            
+            # 传递每个Die的结果处理器数据，但使用D2D计算的正确IP带宽数据
+            d2d_processor.die_processors = {}
+            for die_id, die_model in self.dies.items():
+                if hasattr(die_model, 'result_processor') and die_model.result_processor:
+                    die_processor = die_model.result_processor
+                    print(f"[信息] 为Die {die_id} 准备IP带宽数据")
+                    
+                    # 确保die_processor有sim_model引用
+                    if not hasattr(die_processor, 'sim_model'):
+                        die_processor.sim_model = die_model
+                    
+                    # 确保die_model有topo_type_stat属性
+                    if not hasattr(die_model, 'topo_type_stat'):
+                        die_model.topo_type_stat = self.kwargs.get('topo_type', '5x4')
+                    
+                    # 使用D2D处理器计算的该Die特定的IP带宽数据
+                    if hasattr(d2d_processor, 'die_ip_bandwidth_data') and die_id in d2d_processor.die_ip_bandwidth_data:
+                        die_processor.ip_bandwidth_data = d2d_processor.die_ip_bandwidth_data[die_id]
+                        print(f"[信息] Die {die_id}: 使用D2D计算的该Die特定IP带宽数据")
+                        
+                        # 检查IP带宽数据的内容
+                        total_values = 0
+                        for mode_data in die_processor.ip_bandwidth_data.values():
+                            for ip_data in mode_data.values():
+                                total_values += (ip_data > 0.001).sum()
+                        print(f"[信息] Die {die_id} IP带宽数据计算完成，非零值数量: {total_values}")
+                    else:
+                        print(f"[警告] Die {die_id} 无法获取D2D计算的IP带宽数据")
+                    
+                    d2d_processor.die_processors[die_id] = die_processor
 
         try:
-            # 调用新的draw_d2d_flow_graph方法
-            primary_analyzer.draw_d2d_flow_graph(die_networks=die_networks, config=self.config, mode=mode, save_path=save_path, show_cdma=show_cdma)
+            # 调用D2D专用的流量图绘制方法
+            d2d_processor.draw_d2d_flow_graph(die_networks=die_networks, config=self.config, mode=mode, save_path=save_path, show_cdma=show_cdma)
 
-            print(f"D2D组合流量图已保存: {save_path}")
+            if save_path:
+                print(f"D2D组合流量图已保存: {save_path}")
+            else:
+                print("D2D组合流量图已显示")
 
         except Exception as e:
-            import traceback
-
             print(f"生成D2D组合流量图失败: {e}")
+            import traceback
+            traceback.print_exc()
 
     def run_with_flow_visualization(self, enable_flow_graph=True, flow_mode="total"):
         """
@@ -707,8 +774,27 @@ class D2D_Model:
         try:
             print("\n处理D2D专用结果分析...")
 
-            # 创建D2D结果处理器
-            d2d_processor = D2DResultProcessor(self.config)
+            # 使用缓存的D2D处理器（如果存在），避免重复计算
+            if hasattr(self, '_cached_d2d_processor') and self._cached_d2d_processor:
+                print("[信息] 复用缓存的D2D处理器，避免重复计算")
+                d2d_processor = self._cached_d2d_processor
+            else:
+                # 如果没有缓存，创建新的处理器
+                print("[警告] 没有找到缓存的D2D处理器，创建新实例")
+                d2d_processor = D2DResultProcessor(self.config)
+                d2d_processor.simulation_end_cycle = self.current_cycle
+                d2d_processor.finish_cycle = self.current_cycle
+                
+                # 直接设置所需属性，避免创建临时sim_model
+                d2d_processor.topo_type_stat = "5x4"  # D2D系统使用5x4拓扑
+                d2d_processor.results_fig_save_path = self.kwargs.get("results_fig_save_path", "../Result/")
+                d2d_processor.file_name = "d2d_system"
+                d2d_processor.verbose = self.kwargs.get("verbose", 1)
+                d2d_processor.flow_fig_show_CDMA = True
+
+                # 收集数据（如果没有缓存的话）
+                d2d_processor.collect_cross_die_requests(self.dies)
+                d2d_processor.calculate_d2d_ip_bandwidth_data(self.dies)
 
             # 获取结果保存路径，添加时间戳
             import time
@@ -717,11 +803,16 @@ class D2D_Model:
             result_save_path = self.kwargs.get("result_save_path", "../Result/")
             d2d_result_path = os.path.join(result_save_path, f"D2D_{timestamp}")
 
-            # 执行完整的D2D结果处理流程
-            d2d_processor.process_d2d_results(self.dies, d2d_result_path)
+            # 只执行保存和报告生成部分，避免重复计算
+            print("[信息] 保存D2D请求到CSV并生成带宽报告")
+            d2d_processor.save_d2d_requests_csv(d2d_result_path)
+            d2d_processor.generate_d2d_bandwidth_report(d2d_result_path)
 
         except Exception as e:
+            import traceback
             print(f"警告: D2D专用结果处理失败: {e}")
+            print("详细错误信息:")
+            traceback.print_exc()
 
     def _collect_d2d_statistics(self):
         """收集D2D专有统计信息"""
@@ -1151,7 +1242,7 @@ class D2D_Model:
                 if flits:
                     for flit in flits:
                         # 检查是否为跨Die请求
-                        if hasattr(flit, "source_die_id") and hasattr(flit, "target_die_id") and flit.source_die_id != flit.target_die_id:
+                        if hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die") and flit.d2d_origin_die != flit.d2d_target_die:
                             has_cross_die_flit = True
 
                             # 对于跨Die请求，需要检查完整的流程
@@ -1162,7 +1253,7 @@ class D2D_Model:
                                 if flit.flit_type == "rsp" or flit.flit_type == "data":
                                     # 响应/数据：需要回到源Die
                                     current_die = self._get_flit_current_die(flit, die_id)
-                                    if current_die != flit.source_die_id or not hasattr(flit, "flit_position") or flit.flit_position != "IP_eject":
+                                    if current_die != flit.d2d_origin_die or not hasattr(flit, "flit_position") or flit.flit_position != "IP_eject":
                                         all_completed = False
                                         break
                                 else:
@@ -1241,7 +1332,7 @@ class D2D_Model:
 
             # 计算该Die期望接收的读数据flit数量
             # 修正：跨Die请求只在发起请求的Die统计，不重复计算
-            expected_read_flits = (self._local_read_requests[die_id] + self._cross_die_read_requests[other_die_id]) * burst_length  # 本Die本地读请求  # 另一Die发起的跨Die读请求（目标是本Die）
+            expected_read_flits = (self._local_read_requests[die_id] + self._cross_die_read_requests[die_id]) * burst_length  # 本Die本地读请求  # 本Die发起的跨Die读请求的返回数据
 
             # 计算该Die期望接收的写数据flit数量
             # 修正：跨Die请求只在发起请求的Die统计，不重复计算
@@ -1308,8 +1399,12 @@ class D2D_Model:
 
         # 按local/cross分类统计
         if is_cross_die:
+            if not hasattr(self, "_cross_write_flits_received"):
+                self._cross_write_flits_received = {i: 0 for i in range(self.num_dies)}
             self._cross_write_flits_received[die_id] += 1
         else:
+            if not hasattr(self, "_local_write_flits_received"):
+                self._local_write_flits_received = {i: 0 for i in range(self.num_dies)}
             self._local_write_flits_received[die_id] += 1
 
         if burst_length:
@@ -1349,8 +1444,12 @@ class D2D_Model:
 
         # 按local/cross分类统计
         if is_cross_die:
+            if not hasattr(self, "_cross_read_flits_received"):
+                self._cross_read_flits_received = {i: 0 for i in range(self.num_dies)}
             self._cross_read_flits_received[die_id] += 1
         else:
+            if not hasattr(self, "_local_read_flits_received"):
+                self._local_read_flits_received = {i: 0 for i in range(self.num_dies)}
             self._local_read_flits_received[die_id] += 1
 
         if burst_length:

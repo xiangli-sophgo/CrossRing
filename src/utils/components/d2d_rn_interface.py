@@ -266,9 +266,23 @@ class D2D_RN_Interface(IPInterface):
 
         # 设置原始类型信息，用于创建返回路径
         new_flit.original_source_type = flit.d2d_origin_type or "gdma_0"  # 原始源类型，提供默认值
-        new_flit.original_destination_type = new_flit.destination_type  # 当前目标类型
+        new_flit.original_destination_type = flit.d2d_target_type or "ddr_0"  # 使用D2D目标类型
         new_flit.destination_original = new_flit.destination  # 当前目标位置
         new_flit.source_original = flit.d2d_origin_node  # 原始源位置（源映射）
+
+        # 保持D2D属性传递，确保后续处理能够正确识别
+        if hasattr(flit, 'd2d_origin_die'):
+            new_flit.d2d_origin_die = flit.d2d_origin_die
+        if hasattr(flit, 'd2d_origin_node'):
+            new_flit.d2d_origin_node = flit.d2d_origin_node
+        if hasattr(flit, 'd2d_origin_type'):
+            new_flit.d2d_origin_type = flit.d2d_origin_type
+        if hasattr(flit, 'd2d_target_die'):
+            new_flit.d2d_target_die = flit.d2d_target_die
+        if hasattr(flit, 'd2d_target_node'):
+            new_flit.d2d_target_node = flit.d2d_target_node
+        if hasattr(flit, 'd2d_target_type'):
+            new_flit.d2d_target_type = flit.d2d_target_type
 
         # 设置网络状态
         new_flit.path_index = 0

@@ -297,8 +297,15 @@ class BandwidthAnalyzer:
             )
 
             # 收集RN带宽时间序列数据
-            # 使用修正后的类型信息
-            port_key = f"{actual_source_type[:-2].upper()} {representative_flit.req_type} {actual_dest_type[:3].upper()}"
+            # 使用修正后的类型信息，添加None检查
+            if actual_source_type and actual_dest_type:
+                port_key = f"{actual_source_type[:-2].upper()} {representative_flit.req_type} {actual_dest_type[:3].upper()}"
+            else:
+                # 如果original类型为空，使用source_type和destination_type作为备选
+                source_backup = representative_flit.source_type or "UNKNOWN"
+                dest_backup = representative_flit.destination_type or "UNKNOWN"
+                port_key = f"{source_backup[:-2].upper() if len(source_backup) > 2 else source_backup.upper()} {representative_flit.req_type} {dest_backup[:3].upper()}"
+                print(f"[警告] 使用备选类型: {port_key} (original_source_type={actual_source_type}, original_destination_type={actual_dest_type})")
 
             if representative_flit.req_type == "read":
                 completion_time = rn_end_time
@@ -318,6 +325,38 @@ class BandwidthAnalyzer:
         # 按开始时间排序
         self.requests.sort(key=lambda x: x.start_time)
 
+    def normalize_ip_type(self, ip_type):
+        """标准化IP类型名称，去除数字后缀和处理特殊情况"""
+        if not ip_type:
+            return "l2m"  # None或空字符串直接返回l2m
+        
+        # 转换为小写
+        ip_type = ip_type.lower()
+        
+        # 处理特殊情况
+        if ip_type == "unknown" or ip_type.startswith("unknown"):
+            return "l2m"  # 将unknown映射到l2m
+            
+        # 处理D2D特殊类型
+        if ip_type.startswith("d2d_rn"):
+            return "d2d_rn"  # D2D_RN保持原类型
+        if ip_type.startswith("d2d_sn"):
+            return "d2d_sn"  # D2D_SN保持原类型
+            
+        # 去除数字后缀 (如 gdma_0 -> gdma)
+        if '_' in ip_type:
+            base_type = ip_type.split('_')[0]
+        else:
+            base_type = ip_type
+            
+        # 确保类型在支持的列表中
+        supported_types = ["sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"]
+        if base_type in supported_types:
+            return base_type
+        else:
+            # 如果不在支持列表中，映射到l2m
+            return "l2m"
+
     def calculate_ip_bandwidth_data(self):
         """计算IP带宽数据矩阵"""
         rows = self.config.NUM_ROW
@@ -336,6 +375,8 @@ class BandwidthAnalyzer:
                 "cdma": np.zeros((rows, cols)),
                 "ddr": np.zeros((rows, cols)),
                 "l2m": np.zeros((rows, cols)),
+                "d2d_rn": np.zeros((rows, cols)),
+                "d2d_sn": np.zeros((rows, cols)),
             },
             "write": {
                 "sdma": np.zeros((rows, cols)),
@@ -343,6 +384,8 @@ class BandwidthAnalyzer:
                 "cdma": np.zeros((rows, cols)),
                 "ddr": np.zeros((rows, cols)),
                 "l2m": np.zeros((rows, cols)),
+                "d2d_rn": np.zeros((rows, cols)),
+                "d2d_sn": np.zeros((rows, cols)),
             },
             "total": {
                 "sdma": np.zeros((rows, cols)),
@@ -350,6 +393,8 @@ class BandwidthAnalyzer:
                 "cdma": np.zeros((rows, cols)),
                 "ddr": np.zeros((rows, cols)),
                 "l2m": np.zeros((rows, cols)),
+                "d2d_rn": np.zeros((rows, cols)),
+                "d2d_sn": np.zeros((rows, cols)),
             },
         }
 
@@ -365,8 +410,11 @@ class BandwidthAnalyzer:
             # 按source_type分组
             by_type = defaultdict(list)
             for req in node_requests:
-                # 提取source_type的前缀（去掉_ip后缀）
-                source_type = req.source_type.lower()[:-2]
+                # 使用标准化函数处理source_type
+                raw_source_type = req.source_type
+                if raw_source_type and raw_source_type.endswith('_ip'):
+                    raw_source_type = raw_source_type[:-3]  # 去掉_ip后缀
+                source_type = self.normalize_ip_type(raw_source_type)
                 by_type[source_type].append(req)
 
             # 计算物理位置
@@ -414,8 +462,12 @@ class BandwidthAnalyzer:
             # 按dest_type分组
             by_type = defaultdict(list)
             for req in node_requests:
-                # 提取dest_type的前缀（去掉_ip后缀）
-                dest_type = req.dest_type.lower()[:-2]
+                # 提取dest_type的前缀（去掉_ip后缀），处理None值
+                if req.dest_type:
+                    raw_dest_type = req.dest_type.lower()[:-2] if req.dest_type.endswith('_ip') else req.dest_type.lower()
+                    dest_type = self.normalize_ip_type(raw_dest_type)
+                else:
+                    dest_type = self.normalize_ip_type(None)
                 by_type[dest_type].append(req)
 
             # 计算物理位置
@@ -1765,426 +1817,6 @@ class BandwidthAnalyzer:
             plt.close()
         else:
             plt.show()
-
-    def draw_d2d_flow_graph(self, die_networks, config, mode="utilization", node_size=2000, save_path=None, show_cdma=True):
-        """
-        绘制D2D双Die流量图，将两个Die并排显示在一张图中
-        
-        Args:
-            die_networks: 字典 {die_id: network_object}，包含两个Die的网络对象
-            config: D2D配置对象
-            mode: 显示模式，支持 'utilization', 'total', 'ITag_ratio' 等
-            node_size: 节点大小
-            save_path: 图片保存路径
-            show_cdma: 是否显示CDMA
-        """
-        # 为D2D可视化创建临时sim_model（如果不存在）
-        if not hasattr(self, 'sim_model') or self.sim_model is None:
-            class TempSimModel:
-                def __init__(self, config):
-                    self.topo_type_stat = "5x4"  # D2D使用5x4拓扑
-                    self.config = config
-                    self.flow_fig_show_CDMA = show_cdma
-                    self.results_fig_save_path = "../Result/"
-                    self.file_name = "d2d_combined"
-            
-            self.sim_model = TempSimModel(config)
-        
-        # 确保IP带宽数据已计算
-        try:
-            self.precalculate_ip_bandwidth_data()
-        except Exception as e:
-            print(f"警告: IP带宽数据计算失败: {e}，继续绘制基础流量图")
-            # 创建空的IP带宽数据
-            if not hasattr(self, 'ip_bandwidth_data'):
-                self.ip_bandwidth_data = {
-                    mode: {
-                        'sdma': np.zeros((5, 4)),  # 5x4拓扑
-                        'gdma': np.zeros((5, 4)),
-                        'cdma': np.zeros((5, 4)),
-                        'ddr': np.zeros((5, 4)),
-                        'l2m': np.zeros((5, 4))
-                    }
-                }
-        
-        # 创建更大的画布以容纳两个Die
-        fig, ax = plt.subplots(figsize=(20, 12))
-        ax.set_aspect("equal")
-        
-        # Die间距和布局参数
-        die_spacing = 15  # Die之间的水平间距
-        die_0_offset_x = 0  # Die 0的X偏移
-        die_1_offset_x = die_spacing  # Die 1的X偏移
-        
-        # 处理每个Die的网络数据
-        all_die_data = {}
-        
-        for die_id, network in die_networks.items():
-            # 为每个Die准备网络流数据
-            G = nx.DiGraph()
-            links = {}
-            
-            # 获取链路统计数据
-            if hasattr(network, "get_links_utilization_stats") and callable(network.get_links_utilization_stats):
-                try:
-                    utilization_stats = network.get_links_utilization_stats()
-                    if mode == "utilization":
-                        links = {link: stats["utilization"] for link, stats in utilization_stats.items()}
-                    elif mode == "ITag_ratio":
-                        links = {link: stats["ITag_ratio"] for link, stats in utilization_stats.items()}
-                    elif mode == "total":
-                        time_cycles = self.simulation_end_cycle // config.NETWORK_FREQUENCY
-                        links = {}
-                        for link, stats in utilization_stats.items():
-                            total_flit = stats.get("total_flit", 0)
-                            if time_cycles > 0:
-                                bandwidth = total_flit * 128 / time_cycles
-                                links[link] = bandwidth
-                            else:
-                                links[link] = 0.0
-                    else:
-                        links = {link: stats["utilization"] for link, stats in utilization_stats.items()}
-                except Exception as e:
-                    print(f"Die {die_id}: 获取链路统计数据失败: {e}")
-                    links = {}
-            
-            # 计算该Die的节点位置
-            pos = {}
-            link_values = []
-            
-            # 从对应Die模型获取实际的网络节点
-            die_model = None
-            for d_id, d_model in die_networks.items():
-                if d_id == die_id:
-                    # 通过网络对象找到对应的die模型
-                    # 需要从D2D_Model实例中获取
-                    break
-            
-            # 使用实际的网络节点来计算位置
-            # 获取该网络的所有节点
-            if hasattr(network, 'queues') and network.queues:
-                actual_nodes = list(network.queues.keys())
-            else:
-                # 如果没有queues，使用默认的5x4拓扑节点
-                actual_nodes = list(range(20))  # 5x4 = 20个节点
-            
-            # 计算节点的物理位置（基于CrossRing拓扑）
-            for node in actual_nodes:
-                # 使用CrossRing的布局逻辑
-                x = node % config.NUM_COL  # 根据配置的列数
-                y = node // config.NUM_COL  # 根据配置的列数
-                
-                # CrossRing特有的布局调整
-                if y % 2 == 1:  # 奇数行左移
-                    x -= 0.25
-                    y -= 0.6
-                
-                # 添加Die偏移
-                if die_id == 0:
-                    pos[node] = (x * 3 + die_0_offset_x, -y * 1.5)
-                else:
-                    pos[node] = (x * 3 + die_1_offset_x, -y * 1.5)
-            
-            # 处理链路数据
-            for (i, j), value in links.items():
-                if mode in ["utilization", "T2_ratio", "T1_ratio", "T0_ratio", "ITag_ratio"]:
-                    display_value = float(value) if value else 0.0
-                    link_values.append(display_value)
-                    formatted_label = f"{display_value*100:.1f}%"
-                elif mode == "total":
-                    link_value = float(value) if value else 0.0
-                    link_values.append(link_value)
-                    formatted_label = f"{link_value:.1f}"
-                else:
-                    link_value = value * 128 / (self.simulation_end_cycle // config.NETWORK_FREQUENCY) if value else 0
-                    link_values.append(link_value)
-                    formatted_label = f"{link_value:.1f}"
-                
-                G.add_edge(i, j, label=formatted_label)
-            
-            all_die_data[die_id] = {
-                'G': G,
-                'pos': pos,
-                'link_values': link_values,
-                'links': links
-            }
-        
-        # 计算全局颜色映射范围
-        all_link_values = []
-        for die_data in all_die_data.values():
-            all_link_values.extend(die_data['link_values'])
-        
-        link_mapping_max = max(all_link_values) if all_link_values else 0.0
-        link_mapping_min = max(0.6 * link_mapping_max, 100)
-        
-        # 绘制每个Die
-        for die_id, die_data in all_die_data.items():
-            G = die_data['G']
-            pos = die_data['pos']
-            link_values = die_data['link_values']
-            links = die_data['links']
-            
-            # 动态计算字体大小
-            node_count = len(G.nodes())
-            base_font = 9
-            if node_count > 0:
-                dynamic_font = max(4, base_font * (65 / node_count) ** 0.5)
-            else:
-                dynamic_font = base_font
-            max_font = 14
-            dynamic_font = min(dynamic_font, max_font)
-            
-            # 调整方形节点大小
-            square_size = np.sqrt(node_size) / 100
-            
-            # 绘制节点
-            for node, (x, y) in pos.items():
-                # 绘制主节点方框
-                rect = Rectangle(
-                    (x - square_size / 2, y - square_size / 2),
-                    width=square_size,
-                    height=square_size,
-                    color="lightblue",
-                    ec="black",
-                    zorder=2,
-                )
-                ax.add_patch(rect)
-                ax.text(x, y, str(node), ha="center", va="center", fontsize=dynamic_font)
-                
-                # 在节点左侧添加IP信息（简化版）
-                physical_row = node // 4  # 5x4拓扑
-                if physical_row % 2 == 0:
-                    # IP信息框位置和大小
-                    ip_width = square_size * 3.2
-                    ip_height = square_size * 2.6
-                    ip_x = x - square_size - ip_width / 2.5
-                    ip_y = y + 0.26
-                    
-                    # 绘制IP信息框外框
-                    ip_rect = Rectangle(
-                        (ip_x - ip_width / 2, ip_y - ip_height / 2),
-                        width=ip_width,
-                        height=ip_height,
-                        color="white",
-                        ec="black",
-                        linewidth=1,
-                        zorder=2,
-                    )
-                    ax.add_patch(ip_rect)
-                    
-                    # 添加IP类型标签（简化）
-                    ax.text(ip_x, ip_y, f"IP\n{node}", ha="center", va="center", 
-                           fontsize=dynamic_font * 0.6, color="blue")
-            
-            # 绘制链路
-            for (i, j), value in links.items():
-                if i in pos and j in pos:
-                    # 计算颜色
-                    if mode in ["utilization", "T2_ratio", "T1_ratio", "T0_ratio", "ITag_ratio"]:
-                        display_value = float(value) if value else 0.0
-                    elif mode == "total":
-                        display_value = float(value) if value else 0.0
-                    else:
-                        display_value = value * 128 / (self.simulation_end_cycle // config.NETWORK_FREQUENCY) if value else 0
-                    
-                    if display_value == 0.0:
-                        continue
-                        
-                    # 根据值映射链路颜色
-                    if display_value <= link_mapping_min:
-                        intensity = 0.0
-                    else:
-                        intensity = (display_value - link_mapping_min) / (link_mapping_max - link_mapping_min)
-                    intensity = min(max(intensity, 0.0), 1.0)
-                    color = (intensity, 0, 0)
-                    
-                    # 绘制箭头
-                    x1, y1 = pos[i]
-                    x2, y2 = pos[j]
-                    
-                    arrow = FancyArrowPatch(
-                        (x1, y1), (x2, y2),
-                        arrowstyle="-|>",
-                        color=color,
-                        alpha=0.7,
-                        mutation_scale=20,
-                        zorder=1,
-                        linewidth=2,
-                    )
-                    ax.add_patch(arrow)
-                    
-                    # 绘制链路标签
-                    label_x = (x1 + x2) / 2
-                    label_y = (y1 + y2) / 2
-                    
-                    formatted_label = G.edges[(i, j)]['label']
-                    ax.text(
-                        label_x, label_y, formatted_label,
-                        ha="center", va="center",
-                        fontsize=dynamic_font * 0.7,
-                        fontweight="normal",
-                        color=color,
-                    )
-            
-            # 添加Die标签
-            die_pos = list(pos.values())
-            if die_pos:
-                xs = [p[0] for p in die_pos]
-                ys = [p[1] for p in die_pos]
-                die_center_x = (min(xs) + max(xs)) / 2
-                die_top_y = max(ys) + 2
-                
-                ax.text(die_center_x, die_top_y, f"Die {die_id}", 
-                       ha="center", va="center", fontsize=16, fontweight="bold",
-                       bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7))
-        
-        # 绘制D2D连接线
-        self._draw_d2d_connections(ax, all_die_data, config)
-        
-        # 设置标题和坐标轴
-        title = f"D2D Dual-Die Flow Graph - {mode.capitalize()}"
-        plt.title(title, fontsize=20)
-        
-        # 设置坐标轴范围
-        all_pos = {}
-        for die_data in all_die_data.values():
-            all_pos.update(die_data['pos'])
-        
-        if all_pos:
-            xs = [p[0] for p in all_pos.values()]
-            ys = [p[1] for p in all_pos.values()]
-            margin = 3.0
-            ax.set_xlim(min(xs) - margin, max(xs) + margin)
-            ax.set_ylim(min(ys) - margin, max(ys) + margin)
-        
-        plt.axis("off")
-        plt.tight_layout()
-        
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches="tight")
-            plt.close()
-        else:
-            plt.show()
-    
-    def _draw_d2d_connections(self, ax, all_die_data, config):
-        """绘制Die之间的D2D连接线"""
-        if len(all_die_data) < 2:
-            return
-        
-        # 从d2d_model的实际配置获取D2D节点位置
-        # 根据d2d_model.py中的逻辑，映射到5x4拓扑
-        die0_pos = all_die_data[0]['pos']
-        die1_pos = all_die_data[1]['pos']
-        
-        # D2D连接节点的物理位置映射
-        # 基于d2d_model.py中的位置配置：
-        # Die 0: d2d_rn_position = 7 (第0行右边界), d2d_sn_position = 15 (第1行右边界)
-        # Die 1: d2d_rn_position = 4 (第0行左边界), d2d_sn_position = 12 (第1行左边界)
-        
-        # 但是在5x4拓扑中，我们需要找到实际的边界节点
-        # 5x4拓扑：4列5行，右边界是第3列，左边界是第0列
-        
-        # 找到Die0的右边界节点和Die1的左边界节点进行连接
-        die0_right_nodes = []
-        die1_left_nodes = []
-        
-        for node in die0_pos.keys():
-            col = node % config.NUM_COL
-            if col == config.NUM_COL - 1:  # 右边界
-                die0_right_nodes.append(node)
-        
-        for node in die1_pos.keys():
-            col = node % config.NUM_COL
-            if col == 0:  # 左边界
-                die1_left_nodes.append(node)
-        
-        # 绘制多个D2D连接（表示多个通道）
-        connection_pairs = []
-        
-        # 选择代表性的连接节点
-        if die0_right_nodes and die1_left_nodes:
-            # 选择第一行和第二行的连接
-            for die0_node in sorted(die0_right_nodes)[:2]:  # 取前两个
-                for die1_node in sorted(die1_left_nodes)[:2]:  # 取前两个
-                    row0 = die0_node // config.NUM_COL
-                    row1 = die1_node // config.NUM_COL
-                    if row0 == row1:  # 同一行连接
-                        connection_pairs.append((die0_node, die1_node))
-                        break
-        
-        # 绘制D2D连接线
-        for i, (node0, node1) in enumerate(connection_pairs):
-            if node0 in die0_pos and node1 in die1_pos:
-                x1, y1 = die0_pos[node0]
-                x2, y2 = die1_pos[node1]
-                
-                # 计算连接点（从节点边缘开始）
-                connection_offset = 0.7
-                start_x = x1 + connection_offset
-                end_x = x2 - connection_offset
-                
-                # 绘制D2D连接箭头
-                d2d_arrow = FancyArrowPatch(
-                    (start_x, y1), (end_x, y2),
-                    arrowstyle="<->",
-                    color="red",
-                    alpha=0.8,
-                    mutation_scale=20,
-                    zorder=3,
-                    linewidth=2 + i,  # 不同线宽表示不同通道
-                    linestyle="--"
-                )
-                ax.add_patch(d2d_arrow)
-                
-                # 添加D2D标签（只在第一个连接上添加）
-                if i == 0:
-                    mid_x = (start_x + end_x) / 2
-                    mid_y = (y1 + y2) / 2
-                    ax.text(mid_x, mid_y + 0.5, "D2D\nConnection", 
-                           ha="center", va="center", fontsize=12, fontweight="bold",
-                           bbox=dict(boxstyle="round,pad=0.3", facecolor="red", alpha=0.3))
-                
-                # 添加节点标识（标识D2D节点）
-                ax.text(start_x - 0.3, y1 - 0.5, f"D2D_SN\n({node0})", 
-                       ha="center", va="center", fontsize=8, 
-                       bbox=dict(boxstyle="round,pad=0.1", facecolor="orange", alpha=0.7))
-                ax.text(end_x + 0.3, y2 - 0.5, f"D2D_RN\n({node1})", 
-                       ha="center", va="center", fontsize=8, 
-                       bbox=dict(boxstyle="round,pad=0.1", facecolor="orange", alpha=0.7))
-        
-        # 如果没有找到合适的连接，绘制一个通用的连接示意
-        if not connection_pairs:
-            # 找到两个Die的中心点之间绘制连接
-            die0_nodes = list(die0_pos.keys())
-            die1_nodes = list(die1_pos.keys())
-            
-            if die0_nodes and die1_nodes:
-                # 选择每个Die的一个代表节点
-                die0_center_node = die0_nodes[len(die0_nodes)//2]
-                die1_center_node = die1_nodes[len(die1_nodes)//2]
-                
-                x1, y1 = die0_pos[die0_center_node]
-                x2, y2 = die1_pos[die1_center_node]
-                
-                # 绘制通用D2D连接
-                d2d_arrow = FancyArrowPatch(
-                    (x1 + 1, y1), (x2 - 1, y2),
-                    arrowstyle="<->",
-                    color="red",
-                    alpha=0.6,
-                    mutation_scale=25,
-                    zorder=3,
-                    linewidth=3,
-                    linestyle="--"
-                )
-                ax.add_patch(d2d_arrow)
-                
-                # 添加标签
-                mid_x = (x1 + x2) / 2
-                mid_y = (y1 + y2) / 2
-                ax.text(mid_x, mid_y + 0.5, "D2D\nConnection", 
-                       ha="center", va="center", fontsize=12, fontweight="bold",
-                       bbox=dict(boxstyle="round,pad=0.3", facecolor="red", alpha=0.3))
 
     def _save_analysis_config(self, output_path: str):
         """保存分析配置用于重新绘图"""

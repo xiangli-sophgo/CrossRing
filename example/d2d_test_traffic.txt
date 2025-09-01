@@ -1,3 +1,3 @@
 # D2D Traffic
 # Format: inject_time, src_die, src_node, src_ip, dst_die, dst_node, dst_ip, req_type, burst_length
-0, 0, 16, gdma_0, 1, 0, ddr_0, W, 4
+0, 0, 6, gdma_0, 1, 12, ddr_0, R, 4

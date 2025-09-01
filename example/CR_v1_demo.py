@@ -23,7 +23,7 @@ def main():
         traffic_config=[["test_data.txt"]],
         result_save_path="../Result/",
         results_fig_save_path="",
-        plot_flow_fig=0,
+        plot_flow_fig=1,
         plot_RN_BW_fig=0,
         plot_link_state=0,
         verbose=1,
