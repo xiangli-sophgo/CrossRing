@@ -63,14 +63,6 @@ def main():
 
         traceback.print_exc()
 
-    # 流量图现在会在仿真结束后自动生成（如果enable_flow_graph=True）
-    # 如果需要手动控制，可以取消下面的注释：
-    # try:
-    #     sim.generate_combined_flow_graph(mode="total", save_path=None, show_cdma=True)
-    #     print("\nD2D流量图已显示")
-    # except Exception as e:
-    #     print(f"D2D流量图显示失败: {e}")
-
 
 if __name__ == "__main__":
     main()

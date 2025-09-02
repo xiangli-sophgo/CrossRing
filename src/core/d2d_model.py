@@ -712,8 +712,8 @@ class D2D_Model:
                     d2d_processor.die_processors[die_id] = die_processor
 
         try:
-            # 调用D2D专用的流量图绘制方法
-            d2d_processor.draw_d2d_flow_graph(die_networks=die_networks, config=self.config, mode=mode, save_path=save_path, show_cdma=show_cdma)
+            # 调用D2D专用的流量图绘制方法，传入die模型以支持跨Die带宽绘制
+            d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=mode, save_path=save_path, show_cdma=show_cdma)
 
             if save_path:
                 print(f"D2D组合流量图已保存: {save_path}")

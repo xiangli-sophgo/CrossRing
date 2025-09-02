@@ -58,6 +58,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
     """D2D系统专用的结果处理器，继承自BandwidthAnalyzer"""
 
     FLIT_SIZE_BYTES = 128  # 每个flit的字节数
+    MIN_SIMULATION_TIME_NS = 1000  # 最小仿真时间（纳秒），避免除零
+    MAX_BANDWIDTH_NORMALIZATION = 10.0  # 最大带宽归一化值（GB/s）
 
     def __init__(self, config, min_gap_threshold: int = 50):
         super().__init__(config, min_gap_threshold)
@@ -313,8 +315,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
             f"  写带宽: {stats.die1_to_die0_write_bw:.2f} GB/s (加权: {stats.die1_to_die0_write_bw_weighted:.2f} GB/s)",
             "",
             "总计:",
-            f"  跨Die总带宽: {self._calculate_total_bandwidth(stats):.2f} GB/s",
-            f"  跨Die加权总带宽: {self._calculate_total_weighted_bandwidth(stats):.2f} GB/s",
+            f"  跨Die总带宽: {stats.die0_to_die1_read_bw + stats.die0_to_die1_write_bw + stats.die1_to_die0_read_bw + stats.die1_to_die0_write_bw:.2f} GB/s",
+            f"  跨Die加权总带宽: {stats.die0_to_die1_read_bw_weighted + stats.die0_to_die1_write_bw_weighted + stats.die1_to_die0_read_bw_weighted + stats.die1_to_die0_write_bw_weighted:.2f} GB/s",
             f"  读请求数: {stats.total_read_requests}",
             f"  写请求数: {stats.total_write_requests}",
             f"  总传输字节数: {stats.total_bytes_transferred:,} bytes",
@@ -334,13 +336,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         print(f"\n[D2D结果处理] 带宽报告已保存到 {report_file}")
 
-    def _calculate_total_bandwidth(self, stats: D2DBandwidthStats) -> float:
-        """计算总带宽"""
-        return stats.die0_to_die1_read_bw + stats.die0_to_die1_write_bw + stats.die1_to_die0_read_bw + stats.die1_to_die0_write_bw
-
-    def _calculate_total_weighted_bandwidth(self, stats: D2DBandwidthStats) -> float:
-        """计算加权总带宽"""
-        return stats.die0_to_die1_read_bw_weighted + stats.die0_to_die1_write_bw_weighted + stats.die1_to_die0_read_bw_weighted + stats.die1_to_die0_write_bw_weighted
 
     def process_d2d_results(self, dies: Dict, output_path: str):
         """
@@ -363,6 +358,12 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         # 4. 计算并输出带宽报告
         self.generate_d2d_bandwidth_report(output_path)
+
+        # 5. 计算D2D_Sys AXI通道带宽统计
+        d2d_bandwidth = self._calculate_d2d_sys_bandwidth(dies)
+
+        # 6. 保存AXI通道统计到文件
+        self.save_d2d_axi_channel_statistics(output_path, d2d_bandwidth, dies, self.config)
 
         print("[D2D结果处理] D2D结果处理完成!")
 
@@ -521,18 +522,38 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         return row, col
 
-    def draw_d2d_flow_graph(self, die_networks, config, mode="utilization", node_size=2000, save_path=None, show_cdma=True):
+    def draw_d2d_flow_graph(self, die_networks=None, dies=None, config=None, mode="utilization", node_size=2000, save_path=None, show_cdma=True):
         """
         绘制D2D双Die流量图，根据D2D_LAYOUT配置动态调整Die排列
 
         Args:
-            die_networks: 字典 {die_id: network_object}，包含两个Die的网络对象
+            die_networks: 字典 {die_id: network_object}，包含两个Die的网络对象（兼容旧调用）
+            dies: 字典 {die_id: die_model}，包含两个Die的模型对象（推荐使用）
             config: D2D配置对象
             mode: 显示模式，支持 'utilization', 'total', 'ITag_ratio' 等
             node_size: 节点大小
             save_path: 图片保存路径
             show_cdma: 是否显示CDMA
         """
+
+        # 兼容旧的调用方式
+        if die_networks is not None and dies is None:
+            dies = {}
+            # 尝试从die_networks中提取die模型
+            for die_id, network in die_networks.items():
+                if hasattr(network, "die_model"):
+                    dies[die_id] = network.die_model
+                elif hasattr(network, "_die_model"):
+                    dies[die_id] = network._die_model
+
+            # 如果无法提取，使用网络对象作为替代
+            if not dies:
+                die_networks_for_draw = die_networks
+            else:
+                die_networks_for_draw = {die_id: die_model.data_network for die_id, die_model in dies.items()}
+        else:
+            # 新的调用方式：直接传入die模型
+            die_networks_for_draw = {die_id: die_model.data_network for die_id, die_model in dies.items()}
 
         # 获取D2D布局配置
         d2d_layout = getattr(config, "D2D_LAYOUT", "HORIZONTAL").upper()
@@ -556,12 +577,31 @@ class D2DResultProcessor(BandwidthAnalyzer):
         fig, ax = plt.subplots(figsize=figsize)
         ax.set_aspect("equal")
 
-        # 为每个Die绘制流量图
-        for die_id, network in die_networks.items():
+        # 为每个Die绘制流量图并收集节点位置
+        die_node_positions = {}
+        for die_id, network in die_networks_for_draw.items():
             offset_x, offset_y = die_offsets[die_id]
 
-            # 绘制单个Die的流量图
-            self._draw_single_die_flow(ax, network, config, die_id, offset_x, offset_y, mode, node_size, show_cdma)
+            # 绘制单个Die的流量图并获取节点位置
+            node_positions = self._draw_single_die_flow(ax, network, config, die_id, offset_x, offset_y, mode, node_size, show_cdma)
+            die_node_positions[die_id] = node_positions
+
+        # 绘制跨Die数据带宽连接
+        try:
+            if dies:
+                print(f"[D2D流量图] 获取到{len(dies)}个Die模型")
+                # 计算D2D_Sys带宽统计
+                d2d_bandwidth = self._calculate_d2d_sys_bandwidth(dies)
+                print(f"[D2D流量图] 计算得到的D2D带宽统计: {d2d_bandwidth}")
+                # 绘制跨Die连接，传入实际节点位置
+                self._draw_cross_die_connections(ax, d2d_bandwidth, die_node_positions, config)
+            else:
+                print("[D2D流量图] 警告：无法获取die模型，跳过跨Die连接绘制")
+        except Exception as e:
+            print(f"[D2D流量图] 绘制跨Die连接时出错: {e}")
+            import traceback
+
+            traceback.print_exc()
 
         # 设置图表标题和坐标轴 - 缩小标题字体并调整位置
         title = f"D2D Flow Graph"
@@ -877,32 +917,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 label_x, label_y, f"Die {die_id}", ha="center", va="center", fontsize=12, fontweight="bold", bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.7, edgecolor="none")
             )
 
-    def _draw_ip_info_box(self, ax, x, y, node, config, mode, show_cdma, square_size):
-        """绘制IP信息框"""
-        # IP信息框位置和大小
-        ip_width = square_size * 3.2
-        ip_height = square_size * 2.6
-        ip_x = x - square_size - ip_width / 2.5
-        ip_y = y + 0.26
+        # 返回节点位置信息供跨Die连接使用
+        return pos
 
-        # 绘制IP信息框
-        ip_rect = Rectangle(
-            (ip_x - ip_width / 2, ip_y - ip_height / 2),
-            width=ip_width,
-            height=ip_height,
-            facecolor="lightcyan",
-            edgecolor="black",
-            linewidth=1,
-            zorder=2,
-        )
-        ax.add_patch(ip_rect)
-
-        # 添加分割线
-        ax.plot([ip_x, ip_x], [ip_y - ip_height / 2, ip_y + ip_height / 2], color="black", linewidth=1, zorder=3)
-
-        # 简化的IP标签（如果没有具体的带宽数据）
-        ax.text(ip_x - ip_width / 4, ip_y + ip_height / 4, "SDMA\nGDMA", ha="center", va="center", fontsize=6, color="blue")
-        ax.text(ip_x + ip_width / 4, ip_y, "DDR\nL2M", ha="center", va="center", fontsize=6, color="green")
 
     def _draw_d2d_ip_info_box(self, ax, x, y, node, config, mode, square_size, die_id=None):
         """为D2D流量图绘制简化的IP信息框 - 在一个框内显示所有有流量的IP"""
@@ -1040,6 +1057,425 @@ class D2DResultProcessor(BandwidthAnalyzer):
             return "SN"
         else:
             return ip_name_upper[:2]  # 其他情况取前两个字母
+
+    def _calculate_d2d_sys_bandwidth(self, dies):
+        """
+        计算每个Die每个D2D节点的AXI通道带宽
+
+        Args:
+            dies: Dict[die_id, die_model] - Die模型字典
+
+        Returns:
+            dict: D2D_Sys AXI通道带宽统计 {die_id: {node_pos: {channel: bandwidth_gbps}}}
+        """
+        d2d_sys_bandwidth = {}
+
+        # 使用simulation_end_cycle来计算时间，与其他带宽计算保持一致
+        sim_end_cycle = getattr(self, "simulation_end_cycle", 1000)
+        network_frequency = getattr(self.config, 'NETWORK_FREQUENCY', 2)
+        time_cycles = sim_end_cycle // network_frequency
+        
+        print(f"[D2D_Sys带宽] 仿真周期: {sim_end_cycle} cycles, 网络频率: {network_frequency}, 时间周期: {time_cycles}")
+
+        for die_id, die_model in dies.items():
+            d2d_sys_bandwidth[die_id] = {}
+
+            # 从该Die的所有d2d_systems分别计算每个节点的带宽
+            if hasattr(die_model, "d2d_systems"):
+                print(f"[D2D_Sys调试] Die{die_id}有{len(die_model.d2d_systems)}个D2D系统")
+
+                for pos, d2d_sys in die_model.d2d_systems.items():
+                    # 为每个节点单独计算带宽
+                    node_bandwidth = {"AR": 0.0, "R": 0.0, "AW": 0.0, "W": 0.0, "B": 0.0}  # 读地址通道  # 读数据通道  # 写地址通道  # 写数据通道  # 写响应通道
+
+                    if hasattr(d2d_sys, "axi_channel_flit_count"):
+                        print(f"[D2D_Sys调试] Die{die_id}位置{pos}的AXI通道flit统计: {d2d_sys.axi_channel_flit_count}")
+
+                        # 计算该节点各通道的带宽，与其他地方保持一致
+                        for channel, flit_count in d2d_sys.axi_channel_flit_count.items():
+                            if channel in node_bandwidth and flit_count > 0 and time_cycles > 0:
+                                bandwidth = flit_count * 128 / time_cycles  # 与第652行的计算方式一致
+                                node_bandwidth[channel] = bandwidth
+
+                                print(f"[D2D_Sys带宽] Die{die_id}节点{pos} {channel}通道: {flit_count} flits -> {bandwidth:.3f} 单位")
+                    else:
+                        print(f"[D2D_Sys调试] Die{die_id}位置{pos}的D2D_Sys没有axi_channel_flit_count属性")
+
+                    d2d_sys_bandwidth[die_id][pos] = node_bandwidth
+
+        return d2d_sys_bandwidth
+
+    def _draw_cross_die_connections(self, ax, d2d_bandwidth, die_node_positions, config):
+        """
+        绘制跨Die数据带宽连接（只显示R和W通道的数据流）
+        基于实际流量数据和实际节点位置确定连接关系
+
+        Args:
+            ax: matplotlib轴对象
+            d2d_bandwidth: D2D_Sys带宽统计 {die_id: {node_pos: {channel: bandwidth}}}
+            die_node_positions: 实际的Die节点位置 {die_id: {node: (x, y)}}
+            config: 配置对象
+        """
+        try:
+            # 获取D2D节点位置配置
+            die0_positions = getattr(config, "D2D_DIE0_POSITIONS", [36, 37, 38, 39])
+            die1_positions = getattr(config, "D2D_DIE1_POSITIONS", [4, 5, 6, 7])
+
+            if not die0_positions or not die1_positions:
+                print("[D2D连接] 警告：D2D节点位置配置缺失")
+                return
+
+            # 收集所有有流量的连接
+            active_connections = []
+
+            # 检查Die0的写数据流量 (W通道) - 表示从Die0发送到Die1
+            for die0_node in die0_positions:
+                w_bw = d2d_bandwidth.get(0, {}).get(die0_node, {}).get("W", 0.0)
+                if w_bw > 0.001:
+                    print(f"[D2D连接分析] Die0节点{die0_node}有写数据流量: {w_bw:.3f} GB/s")
+                    # 找到对应的Die1目标节点（从D2D请求中推断）
+                    target_die1_node = self._find_target_node_for_write(die0_node, die1_positions)
+                    if target_die1_node:
+                        active_connections.append({"type": "write", "from_die": 0, "from_node": die0_node, "to_die": 1, "to_node": target_die1_node, "bandwidth": w_bw})
+
+            # 检查Die1的读数据返回流量 (R通道) - 表示从Die1返回到Die0
+            for die1_node in die1_positions:
+                r_bw = d2d_bandwidth.get(1, {}).get(die1_node, {}).get("R", 0.0)
+                if r_bw > 0.001:
+                    print(f"[D2D连接分析] Die1节点{die1_node}有读数据返回流量: {r_bw:.3f} GB/s")
+                    # 找到对应的Die0目标节点（从D2D请求中推断）
+                    target_die0_node = self._find_target_node_for_read(die1_node, die0_positions)
+                    if target_die0_node:
+                        active_connections.append({"type": "read", "from_die": 1, "from_node": die1_node, "to_die": 0, "to_node": target_die0_node, "bandwidth": r_bw})
+
+            # 绘制所有活跃连接
+            for i, conn in enumerate(active_connections):
+                # 使用实际节点位置
+                from_die_positions = die_node_positions.get(conn["from_die"], {})
+                to_die_positions = die_node_positions.get(conn["to_die"], {})
+
+                if conn["from_node"] not in from_die_positions or conn["to_node"] not in to_die_positions:
+                    print(f"[D2D连接] 警告：找不到节点位置 - From: Die{conn['from_die']}节点{conn['from_node']}, To: Die{conn['to_die']}节点{conn['to_node']}")
+                    continue
+
+                from_x, from_y = from_die_positions[conn["from_node"] - config.NUM_COL]
+                to_x, to_y = to_die_positions[conn["to_node"] - config.NUM_COL]
+
+                print(f"[D2D连接] 绘制{conn['type']}连接: Die{conn['from_die']}节点{conn['from_node']} -> Die{conn['to_die']}节点{conn['to_node']}, 带宽={conn['bandwidth']:.3f} GB/s")
+
+                # 计算箭头方向
+                dx, dy = to_x - from_x, to_y - from_y
+                length = np.sqrt(dx * dx + dy * dy)
+
+                if length > 0:
+                    ux, uy = dx / length, dy / length
+                    perpx, perpy = -uy * 0.2, ux * 0.2
+
+                    self._draw_single_d2d_arrow(ax, from_x, from_y, to_x, to_y, ux, uy, perpx, perpy, conn["bandwidth"], conn["type"], i)
+
+            # 为没有流量的D2D节点对绘制灰色连接线（显示潜在连接）
+            self._draw_inactive_d2d_connections(ax, die0_positions, die1_positions, active_connections, die_node_positions, config)
+
+        except Exception as e:
+            print(f"[D2D连接] 绘制跨Die连接失败: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    def _find_target_node_for_write(self, die0_node, die1_positions):
+        """根据D2D请求推断写数据的目标节点"""
+        # 简化逻辑：按索引对应
+        die0_positions = getattr(self.config, "D2D_DIE0_POSITIONS", [36, 37, 38, 39])
+        try:
+            index = die0_positions.index(die0_node)
+            if index < len(die1_positions):
+                return die1_positions[index]
+        except (ValueError, IndexError):
+            pass
+        return die1_positions[0] if die1_positions else None
+
+    def _find_target_node_for_read(self, die1_node, die0_positions):
+        """根据D2D请求推断读数据返回的目标节点"""
+        # 简化逻辑：按索引对应
+        die1_positions = getattr(self.config, "D2D_DIE1_POSITIONS", [4, 5, 6, 7])
+        try:
+            index = die1_positions.index(die1_node)
+            if index < len(die0_positions):
+                return die0_positions[index]
+        except (ValueError, IndexError):
+            pass
+        return die0_positions[0] if die0_positions else None
+
+
+    def _draw_inactive_d2d_connections(self, ax, die0_positions, die1_positions, active_connections, die_node_positions, config):
+        """为没有流量的节点对绘制灰色连接线"""
+        # 获取已经绘制的活跃连接（只记录实际有流量的方向）
+        active_pairs = set()
+        for conn in active_connections:
+            active_pairs.add((conn["from_node"], conn["to_node"]))
+
+        # 为每对D2D节点绘制缺失方向的灰色连接
+        num_pairs = min(len(die0_positions), len(die1_positions))
+        for i in range(num_pairs):
+            die0_node = die0_positions[i]
+            # 根据垂直对应关系找到目标节点
+            target_die1_node = self._find_target_node_for_write(die0_node, die1_positions)
+            if not target_die1_node:
+                continue
+                
+            # 使用实际节点位置
+            die0_positions_map = die_node_positions.get(0, {})
+            die1_positions_map = die_node_positions.get(1, {})
+
+            if die0_node not in die0_positions_map or target_die1_node not in die1_positions_map:
+                continue
+
+            die0_x, die0_y = die0_positions_map[die0_node - config.NUM_COL]
+            die1_x, die1_y = die1_positions_map[target_die1_node- config.NUM_COL]
+
+            dx, dy = die1_x - die0_x, die1_y - die0_y
+            length = np.sqrt(dx * dx + dy * dy)
+
+            if length > 0:
+                ux, uy = dx / length, dy / length
+                perpx, perpy = -uy * 0.1, ux * 0.1
+
+                # 检查两个方向是否有活跃连接
+                has_write_connection = (die0_node, target_die1_node) in active_pairs
+                has_read_connection = (target_die1_node, die0_node) in active_pairs
+                
+                # 如果写方向没有活跃连接，绘制写方向的灰色箭头
+                if not has_write_connection:
+                    self._draw_single_d2d_arrow(ax, die0_x, die0_y, die1_x, die1_y, 
+                                              ux, uy, perpx, perpy, 0.0, "write", f"inactive_{i}_w")
+                
+                # 如果读方向没有活跃连接，绘制读方向的灰色箭头
+                if not has_read_connection:
+                    self._draw_single_d2d_arrow(ax, die1_x, die1_y, die0_x, die0_y, 
+                                              -ux, -uy, -perpx, -perpy, 0.0, "read", f"inactive_{i}_r")
+
+    def _draw_single_d2d_arrow(self, ax, start_node_x, start_node_y, end_node_x, end_node_y, ux, uy, perpx, perpy, bandwidth, arrow_type, connection_index):
+        """
+        绘制单个D2D箭头
+
+        Args:
+            ax: matplotlib轴对象
+            start_node_x, start_node_y: 起始节点坐标
+            end_node_x, end_node_y: 结束节点坐标
+            ux, uy: 单位方向向量
+            perpx, perpy: 垂直方向向量
+            bandwidth: 带宽值
+            arrow_type: 箭头类型 ("write" 或 "read")
+            connection_index: 连接索引（用于调试）
+        """
+        # 计算箭头起止坐标（留出节点空间）
+        start_x = start_node_x + ux * 0.5 + perpx
+        start_y = start_node_y + uy * 0.5 + perpy
+        end_x = end_node_x - ux * 0.5 + perpx
+        end_y = end_node_y - uy * 0.5 + perpy
+
+        # 确定颜色和标签
+        if bandwidth > 0.001:
+            # 有数据流量
+            intensity = min(bandwidth / self.MAX_BANDWIDTH_NORMALIZATION, 1.0)
+            if arrow_type == "write":
+                color = (intensity, 0, 0)  # 红色（写数据）
+            else:
+                color = (0, 0, intensity)  # 蓝色（读数据）
+            label_text = f"{bandwidth:.1f}"  # 只显示数值，不加GB/s后缀
+            linewidth = 3
+        else:
+            # 无数据流量 - 灰色实线
+            color = (0.7, 0.7, 0.7)
+            label_text = None  # 不显示0
+            linewidth = 2
+
+        # 绘制箭头
+        arrow = FancyArrowPatch((start_x, start_y), (end_x, end_y), arrowstyle="-|>", mutation_scale=12, color=color, linewidth=linewidth, zorder=5)  # 稍小的箭头
+        ax.add_patch(arrow)
+
+        # 只在有流量时添加标签，参考Die内部链路的标记方式
+        if label_text:
+            # 计算箭头中点和方向
+            mid_x = (start_x + end_x) / 2
+            mid_y = (start_y + end_y) / 2
+            dx = end_x - start_x
+            dy = end_y - start_y
+            
+            # 判断是否为水平方向（跨Die连接通常是垂直的）
+            is_horizontal = abs(dx) > abs(dy)
+            
+            # 根据方向计算标签偏移，参考Die内部链路的逻辑
+            if is_horizontal:
+                # 水平方向：标签稍微向上/下偏移
+                label_x = mid_x + dx * 0.15
+                label_y = mid_y + dy * 0.15
+            else:
+                # 垂直方向：标签向左/右偏移
+                label_x = mid_x + (dy * 0.2 if dx > 0 else -dy * 0.2)
+                label_y = mid_y - 0.15
+            
+            # 绘制单个标签（与Die内部链路一致）
+            ax.text(label_x, label_y, label_text, ha="center", va="center", 
+                   fontsize=8, fontweight="normal", color=color)
+
+            print(f"[D2D连接] 连接{connection_index}: {arrow_type}箭头, 带宽={bandwidth:.3f} GB/s")
+
+    def save_d2d_axi_channel_statistics(self, output_path, d2d_bandwidth, dies, config):
+        """
+        保存所有AXI通道的带宽统计到文件
+
+        Args:
+            output_path: 输出目录路径
+            d2d_bandwidth: D2D_Sys带宽统计
+            dies: Die模型字典
+            config: 配置对象
+        """
+        try:
+            os.makedirs(output_path, exist_ok=True)
+
+            # 1. 保存详细的AXI通道带宽统计到CSV
+            csv_path = os.path.join(output_path, "d2d_axi_channel_bandwidth.csv")
+
+        except (OSError, PermissionError) as e:
+            print(f"[D2D AXI统计] 无法创建输出目录: {e}")
+            return
+
+        try:
+            with open(csv_path, "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.writer(csvfile)
+
+                # CSV文件头
+                writer.writerow(["Die_ID", "Channel", "Direction", "Bandwidth_GB/s", "Flit_Count", "Channel_Description"])
+
+                # 写入各通道数据 - 适应新的数据结构
+                for die_id, node_data in d2d_bandwidth.items():
+                    # 遍历该Die的每个D2D节点
+                    for node_pos, channels in node_data.items():
+                        # 从die模型获取该节点的原始flit计数
+                        die_model = dies.get(die_id)
+                        flit_counts = {channel: 0 for channel in ["AR", "R", "AW", "W", "B"]}
+
+                        if die_model and hasattr(die_model, "d2d_systems"):
+                            d2d_sys = die_model.d2d_systems.get(node_pos)
+                            if d2d_sys and hasattr(d2d_sys, "axi_channel_flit_count"):
+                                flit_counts = d2d_sys.axi_channel_flit_count.copy()
+
+                        # 写入各通道数据
+                        channel_descriptions = {
+                            "AR": "读地址通道 (Address Read)",
+                            "R": "读数据通道 (Read Data)",
+                            "AW": "写地址通道 (Address Write)",
+                            "W": "写数据通道 (Write Data)",
+                            "B": "写响应通道 (Write Response)",
+                        }
+
+                        direction_mapping = {
+                            "AR": f"Die{die_id}->Die{1-die_id}",  # 地址通道：发起方->目标方
+                            "R": f"Die{1-die_id}->Die{die_id}",  # 读数据：目标方->发起方
+                            "AW": f"Die{die_id}->Die{1-die_id}",  # 写地址：发起方->目标方
+                            "W": f"Die{die_id}->Die{1-die_id}",  # 写数据：发起方->目标方
+                            "B": f"Die{1-die_id}->Die{die_id}",  # 写响应：目标方->发起方
+                        }
+
+                        for channel, bandwidth in channels.items():
+                            flit_count = flit_counts.get(channel, 0)
+                            direction = direction_mapping.get(channel, f"Die{die_id}")
+                            description = channel_descriptions.get(channel, f"{channel} Channel")
+
+                            # 添加节点位置信息到CSV
+                            writer.writerow([f"Die{die_id}_Node{node_pos}", channel, direction, f"{bandwidth:.6f}", flit_count, description])
+
+            print(f"[D2D AXI统计] 已保存AXI通道带宽统计到 {csv_path}")
+
+        except (IOError, PermissionError) as e:
+            print(f"[D2D AXI统计] 保存CSV文件失败: {e}")
+            return
+
+        # 2. 生成汇总报告
+        try:
+            summary_path = os.path.join(output_path, "d2d_axi_summary.txt")
+            with open(summary_path, "w", encoding="utf-8") as f:
+                f.write("=" * 60 + "\n")
+                f.write("D2D AXI通道带宽统计汇总报告\n")
+                f.write("=" * 60 + "\n\n")
+
+                # 各Die的通道统计
+                for die_id, node_data in d2d_bandwidth.items():
+                    f.write(f"Die {die_id} AXI通道带宽:\n")
+                    f.write("-" * 30 + "\n")
+
+                    die_total_bandwidth = 0.0
+                    die_data_bandwidth = 0.0  # 数据通道（R+W）
+
+                    for node_pos, channels in node_data.items():
+                        f.write(f"  节点{node_pos}:\n")
+                        node_total = 0.0
+                        node_data_bw = 0.0
+
+                        for channel, bandwidth in channels.items():
+                            if bandwidth > 0:
+                                f.write(f"    {channel}通道: {bandwidth:.3f} GB/s\n")
+                                node_total += bandwidth
+                                die_total_bandwidth += bandwidth
+                                if channel in ["R", "W"]:
+                                    node_data_bw += bandwidth
+                                    die_data_bandwidth += bandwidth
+
+                        if node_total > 0:
+                            f.write(f"    节点总带宽: {node_total:.3f} GB/s (数据: {node_data_bw:.3f} GB/s)\n")
+                        f.write("\n")
+
+                    f.write(f"  Die{die_id}总带宽: {die_total_bandwidth:.3f} GB/s\n")
+                    f.write(f"  Die{die_id}数据带宽 (R+W): {die_data_bandwidth:.3f} GB/s\n\n")
+
+                # 跨Die数据流汇总
+                f.write("跨Die数据流汇总:\n")
+                f.write("-" * 30 + "\n")
+
+                if 0 in d2d_bandwidth and 1 in d2d_bandwidth:
+                    # 计算各Die的总数据带宽
+                    die0_total_w = sum(channels.get("W", 0.0) for channels in d2d_bandwidth[0].values())
+                    die1_total_r = sum(channels.get("R", 0.0) for channels in d2d_bandwidth[1].values())
+
+                    f.write(f"Die0 -> Die1 总写数据带宽: {die0_total_w:.3f} GB/s\n")
+                    f.write(f"Die1 -> Die0 总读数据带宽: {die1_total_r:.3f} GB/s\n")
+                    f.write(f"跨Die总数据带宽: {die0_total_w + die1_total_r:.3f} GB/s\n\n")
+
+                    # 详细的节点对连接统计
+                    f.write("详细节点对连接:\n")
+                    die0_positions = getattr(config, "D2D_DIE0_POSITIONS", [36, 37, 38, 39])
+                    die1_positions = getattr(config, "D2D_DIE1_POSITIONS", [4, 5, 6, 7])
+
+                    for i, (die0_pos, die1_pos) in enumerate(zip(die0_positions, die1_positions)):
+                        die0_w = d2d_bandwidth[0].get(die0_pos, {}).get("W", 0.0)
+                        die1_r = d2d_bandwidth[1].get(die1_pos, {}).get("R", 0.0)
+                        if die0_w > 0 or die1_r > 0:
+                            f.write(f"  连接{i}: Die0节点{die0_pos} <-> Die1节点{die1_pos}\n")
+                            f.write(f"    写数据: {die0_w:.3f} GB/s, 读数据: {die1_r:.3f} GB/s\n")
+                    f.write("\n")
+
+                # 通道利用率分析
+                f.write("AXI通道功能说明:\n")
+                f.write("-" * 30 + "\n")
+                f.write("AR (Address Read): 读地址通道 - 发送读请求地址\n")
+                f.write("R  (Read Data):    读数据通道 - 返回读取的数据\n")
+                f.write("AW (Address Write): 写地址通道 - 发送写请求地址\n")
+                f.write("W  (Write Data):   写数据通道 - 发送写入的数据\n")
+                f.write("B  (Write Response): 写响应通道 - 返回写操作完成确认\n\n")
+
+                f.write("注意: 流量图中只显示数据通道(R+W)的带宽，\n")
+                f.write("      完整的AXI通道统计请参考CSV文件。\n")
+
+            print(f"[D2D AXI统计] 已保存AXI汇总报告到 {summary_path}")
+
+        except (IOError, PermissionError) as e:
+            print(f"[D2D AXI统计] 保存汇总报告失败: {e}")
+        except Exception as e:
+            print(f"[D2D AXI统计] 生成报告时发生未预期的错误: {e}")
+            import traceback
+
+            traceback.print_exc()
 
     def collect_requests_data(self, sim_model, simulation_end_cycle=None) -> None:
         """
