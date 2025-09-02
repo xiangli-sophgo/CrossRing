@@ -318,7 +318,8 @@ class D2D_Model:
         # 根据参数决定是否生成流量图
         if self.enable_flow_graph:
             if self.kwargs.get("verbose", 1):
-                print(f"\n生成D2D流量图 (模式: {self.flow_graph_mode})")
+                # print(f"\n生成D2D流量图 (模式: {self.flow_graph_mode})")
+                pass
             try:
                 self.generate_combined_flow_graph(mode=self.flow_graph_mode, save_path=None, show_cdma=True)
             except Exception as e:
@@ -633,19 +634,15 @@ class D2D_Model:
             # 根据mode选择合适的网络
             if mode == "total":
                 network = die_model.data_network  # 使用data_network显示总带宽
-                print(f"[调试] Die {die_id}: 使用data_network")
+                # print(f"[调试] Die {die_id}: 使用data_network")
                 
                 # 获取网络统计数据
                 stats = network.get_links_utilization_stats()
                 active_links = sum(1 for link_stats in stats.values() if link_stats.get("total_flit", 0) > 0)
-                if active_links > 0:
-                    print(f"[信息] Die {die_id}: 发现 {active_links} 条有流量的链路")
-                else:
-                    print(f"[信息] Die {die_id}: 没有发现有流量的链路")
                     
             else:
                 network = die_model.req_network  # 默认使用req_network
-                print(f"[调试] Die {die_id}: 使用req_network")
+                # print(f"[调试] Die {die_id}: 使用req_network")
             
             die_networks[die_id] = network
 
@@ -685,7 +682,7 @@ class D2D_Model:
             for die_id, die_model in self.dies.items():
                 if hasattr(die_model, 'result_processor') and die_model.result_processor:
                     die_processor = die_model.result_processor
-                    print(f"[信息] 为Die {die_id} 准备IP带宽数据")
+                    # print(f"[信息] 为Die {die_id} 准备IP带宽数据")
                     
                     # 确保die_processor有sim_model引用
                     if not hasattr(die_processor, 'sim_model'):
@@ -698,14 +695,14 @@ class D2D_Model:
                     # 使用D2D处理器计算的该Die特定的IP带宽数据
                     if hasattr(d2d_processor, 'die_ip_bandwidth_data') and die_id in d2d_processor.die_ip_bandwidth_data:
                         die_processor.ip_bandwidth_data = d2d_processor.die_ip_bandwidth_data[die_id]
-                        print(f"[信息] Die {die_id}: 使用D2D计算的该Die特定IP带宽数据")
+                        # print(f"[信息] Die {die_id}: 使用D2D计算的该Die特定IP带宽数据")
                         
                         # 检查IP带宽数据的内容
                         total_values = 0
                         for mode_data in die_processor.ip_bandwidth_data.values():
                             for ip_data in mode_data.values():
                                 total_values += (ip_data > 0.001).sum()
-                        print(f"[信息] Die {die_id} IP带宽数据计算完成，非零值数量: {total_values}")
+                        # print(f"[信息] Die {die_id} IP带宽数据计算完成，非零值数量: {total_values}")
                     else:
                         print(f"[警告] Die {die_id} 无法获取D2D计算的IP带宽数据")
                     

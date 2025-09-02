@@ -1,0 +1,68 @@
+"""
+D2D (Die-to-Die) 5x4拓扑演示
+包含完整的结果处理和可视化功能。
+"""
+
+import sys
+
+sys.path.append("..")
+from src.core.d2d_model import D2D_Model
+from config.d2d_config import D2DConfig
+import numpy as np
+import os
+
+
+def main():
+    """
+    D2D 仿真演示 - 包含完整的结果处理和可视化
+    """
+    # 使用D2DConfig替代CrossRingConfig，获得D2D特定配置功能
+    die_topo_type = "5x4"
+    config = D2DConfig(die_config_file="../config/topologies/topo_5x4.yaml", d2d_config_file="../config/topologies/d2d_config.yaml")  # Die拓扑配置  # D2D专用配置
+
+    # 定义拓扑结构
+
+    print(f"配置信息:")
+    print(f"  Die数量: {getattr(config, 'NUM_DIES', 2)}")
+    print(f"  每个Die: {die_topo_type} (5行4列)")
+    print()
+
+    # 初始化D2D仿真模型 - 启用完整功能和D2D Trace
+    sim = D2D_Model(
+        config=config,
+        traffic_file_path=r"../test_data",
+        traffic_config=[["d2d_data_0902.txt"]],
+        model_type="REQ_RSP",
+        topo_type=die_topo_type,
+        result_save_path="../Result/d2d_demo/",
+        results_fig_save_path="../Result/d2d_demo/figures/",
+        verbose=1,
+        print_d2d_trace=0,  # 启用D2D trace功能
+        show_d2d_trace_id=0,  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
+        d2d_trace_sleep=0.0,  # 不暂停，加快调试
+        enable_flow_graph=1,  # 是否在仿真结束后自动生成流量图
+        # flow_graph_mode="total",  # 显示带宽值和使用率信息
+    )
+
+    # 初始化仿真
+    sim.initial()
+
+    # 设置仿真参数
+    sim.end_time = 2000  # 缩短测试周期以便调试
+    sim.print_interval = 500
+
+    sim.run()
+
+    # 调用D2D结果处理
+    try:
+        sim.process_d2d_comprehensive_results()
+        print("\nD2D结果处理完成! 请查看生成的CSV文件和带宽报告。")
+    except Exception as e:
+        print(f"D2D结果处理失败: {e}")
+        import traceback
+
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    main()

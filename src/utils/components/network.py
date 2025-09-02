@@ -572,8 +572,16 @@ class Network:
                     link_station = self.ring_bridge["TR"].get((next_node, target_eject_node_id))
                     can_use_T1 = self._entry_available("TR", (next_node, target_eject_node_id), "T1")
                     can_use_T2 = self._entry_available("TR", (next_node, target_eject_node_id), "T2")
-                    # TR方向尝试下环
-                    if (
+                    # TR方向尝试下环 - 需要保序的REQ禁止下环
+                    if self._need_in_order_check(flit):
+                        # 需要保序的REQ不能从TR下环，继续绕环
+                        link[flit.current_seat_index] = None
+                        next_pos = next_node + 1
+                        flit.current_link = (next_node, next_pos)
+                        flit.current_seat_index = 0
+                        if self.ETag_BOTHSIDE_UPGRADE and flit.ETag_priority == "T2":
+                            flit.ETag_priority = "T1"
+                    elif (
                         len(link_station) < self.config.RB_IN_FIFO_DEPTH
                         and (
                             (flit.ETag_priority == "T1" and can_use_T1)
@@ -584,6 +592,7 @@ class Network:
                         )
                         and self._can_eject_in_order(flit, target_eject_node_id)
                     ):
+                        # RSP/DATA或不需要保序的REQ可以正常下环
                         flit.is_delay = False
                         flit.current_link = (next_node, target_eject_node_id)
                         link[flit.current_seat_index] = None
@@ -720,9 +729,19 @@ class Network:
                     can_use_T1 = self._entry_available("TD", next_node, "T1")
                     can_use_T2 = self._entry_available("TD", next_node, "T2")
 
-                    if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH and (
+                    # TD方向尝试下环 - 需要保序的REQ禁止下环
+                    if self._need_in_order_check(flit):
+                        # 需要保序的REQ不能从TD下环，继续绕环
+                        if self.ETag_BOTHSIDE_UPGRADE and flit.ETag_priority == "T2":
+                            flit.ETag_priority = "T1"
+                        link[flit.current_seat_index] = None
+                        next_pos = next_node + self.config.NUM_COL * 2
+                        flit.current_link = (next_node, next_pos)
+                        flit.current_seat_index = 0
+                    elif len(link_eject) < self.config.EQ_IN_FIFO_DEPTH and (
                         (flit.ETag_priority == "T1" and can_use_T1) or (flit.ETag_priority == "T2" and can_use_T2) or (flit.ETag_priority == "T0" and (can_use_T1 or can_use_T2))
                     ):
+                        # RSP/DATA或不需要保序的REQ可以正常下环
                         flit.is_delay = False
                         flit.is_arrive = True
                         link[flit.current_seat_index] = None
@@ -772,7 +791,7 @@ class Network:
                             (flit.ETag_priority == "T1" and can_use_T1)
                             or (flit.ETag_priority == "T2" and can_use_T2)
                             or (flit.ETag_priority == "T1" and not can_use_T1 and can_use_T2)  # T1使用T2 entry
-                        ):
+                        ) and self._can_eject_in_order(flit, next_node):  # 新增保序检查
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
@@ -787,6 +806,9 @@ class Network:
                                 else:
                                     # T1使用T2 entry
                                     self._occupy_entry("TU", next_node, "T2", flit)
+                            
+                            # 新增：更新保序跟踪表
+                            self._update_order_tracking_table(flit)
                         else:
                             # 无法下环,升级ETag并记录
                             if flit.ETag_priority == "T2":
@@ -801,7 +823,7 @@ class Network:
                             flit.current_seat_index = 0
 
                     elif flit.ETag_priority == "T0":
-                        if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH:
+                        if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH and self._can_eject_in_order(flit, next_node):
                             # 按优先级尝试: T0专用 > T1 > T2
                             if self.T0_Etag_Order_FIFO[0] == (next_node, flit) and can_use_T0:
                                 # 使用T0专用entry
@@ -811,6 +833,8 @@ class Network:
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
                                 self.T0_Etag_Order_FIFO.popleft()
+                                # 新增：更新保序跟踪表
+                                self._update_order_tracking_table(flit)
                             elif can_use_T1:
                                 # 使用T1 entry
                                 self._occupy_entry("TU", next_node, "T1", flit)
@@ -819,6 +843,8 @@ class Network:
                                 flit.is_arrive = True
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
+                                # 新增：更新保序跟踪表
+                                self._update_order_tracking_table(flit)
                             elif can_use_T2:
                                 # 使用T2 entry
                                 self._occupy_entry("TU", next_node, "T2", flit)
@@ -827,6 +853,8 @@ class Network:
                                 flit.is_arrive = True
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
+                                # 新增：更新保序跟踪表
+                                self._update_order_tracking_table(flit)
                             else:
                                 # 无法下环，继续绕环
                                 link[flit.current_seat_index] = None
@@ -1129,6 +1157,16 @@ class Network:
         if not self.config.ENABLE_IN_ORDER_EJECTION:
             return False
 
+        # 检查通道类型是否需要保序
+        packet_category = self._get_flit_packet_category(flit)
+        if hasattr(self.config, "IN_ORDER_PACKET_CATEGORIES"):
+            if packet_category not in self.config.IN_ORDER_PACKET_CATEGORIES:
+                return False
+        else:
+            # 默认只有REQ类型需要保序（向后兼容）
+            if flit.req_type is None:
+                return False
+
         # 获取真实的src和dest
         src = flit.source_original if flit.source_original != -1 else flit.source
         dest = flit.destination_original if flit.destination_original != -1 else flit.destination
@@ -1139,6 +1177,17 @@ class Network:
 
         # 检查是否在配置的保序对列表中
         return [src, dest] in self.config.IN_ORDER_EJECTION_PAIRS
+
+    def _get_flit_packet_category(self, flit: Flit):
+        """获取flit的包类型分类"""
+        if flit.req_type is not None:
+            return "REQ"
+        elif flit.rsp_type is not None:
+            return "RSP"
+        elif hasattr(flit, "flit_type") and flit.flit_type == "data":
+            return "DATA"
+        else:
+            return "REQ"  # 默认为REQ
 
     def _can_upgrade_to_T0_in_order(self, flit: Flit, node):
         """检查flit是否可以按序升级到T0"""

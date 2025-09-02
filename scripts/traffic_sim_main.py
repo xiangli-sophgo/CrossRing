@@ -86,10 +86,8 @@ def run_single_simulation(sim_params):
         config.IQ_OUT_FIFO_DEPTH_EQ = 8
         config.RB_OUT_FIFO_DEPTH = 8
         config.SN_TRACKER_RELEASE_LATENCY = 40
-        # config.GDMA_BW_LIMIT = 16
-        # config.CDMA_BW_LIMIT = 16
-        # config.DDR_BW_LIMIT = 128
         config.ENABLE_CROSSPOINT_CONFLICT_CHECK = 0
+        config.ENABLE_IN_ORDER_EJECTION = 0
 
         config.TL_Etag_T2_UE_MAX = 8
         config.TL_Etag_T1_UE_MAX = 15
@@ -257,13 +255,13 @@ def main():
     parser.add_argument("--outstanding", type=int, default=2048, help="Outstanding number (must be power of 2)")
     parser.add_argument("--config", default="../config/config2.json", help="Simulation config file path")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="Simulation model type")
-    parser.add_argument("--results_file_name", default="DeepSeek_0722_1700_10us", help="Base name for results files")
+    parser.add_argument("--results_file_name", default="DeepSeek_0902_10us", help="Base name for results files")
     parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both")
     # parser.add_argument("--max_workers", type=int, default=None, help="Maximum number of parallel workers (default: number of CPU cores)")
-    parser.add_argument("--max_workers", type=int, default=1, help="Maximum number of parallel workers (default: number of CPU cores)")
+    parser.add_argument("--max_workers", type=int, default=4, help="Maximum number of parallel workers (default: number of CPU cores)")
 
     args = parser.parse_args()
-    np.random.seed(722)
+    np.random.seed(902)
 
     if args.mode in [0, 2]:
         print("Processing traffic data...")

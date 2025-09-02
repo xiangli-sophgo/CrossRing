@@ -329,26 +329,26 @@ class BandwidthAnalyzer:
         """标准化IP类型名称，去除数字后缀和处理特殊情况"""
         if not ip_type:
             return "l2m"  # None或空字符串直接返回l2m
-        
+
         # 转换为小写
         ip_type = ip_type.lower()
-        
+
         # 处理特殊情况
         if ip_type == "unknown" or ip_type.startswith("unknown"):
             return "l2m"  # 将unknown映射到l2m
-            
+
         # 处理D2D特殊类型
         if ip_type.startswith("d2d_rn"):
             return "d2d_rn"  # D2D_RN保持原类型
         if ip_type.startswith("d2d_sn"):
             return "d2d_sn"  # D2D_SN保持原类型
-            
+
         # 去除数字后缀 (如 gdma_0 -> gdma)
-        if '_' in ip_type:
-            base_type = ip_type.split('_')[0]
+        if "_" in ip_type:
+            base_type = ip_type.split("_")[0]
         else:
             base_type = ip_type
-            
+
         # 确保类型在支持的列表中
         supported_types = ["sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"]
         if base_type in supported_types:
@@ -412,7 +412,7 @@ class BandwidthAnalyzer:
             for req in node_requests:
                 # 使用标准化函数处理source_type
                 raw_source_type = req.source_type
-                if raw_source_type and raw_source_type.endswith('_ip'):
+                if raw_source_type and raw_source_type.endswith("_ip"):
                     raw_source_type = raw_source_type[:-3]  # 去掉_ip后缀
                 source_type = self.normalize_ip_type(raw_source_type)
                 by_type[source_type].append(req)
@@ -464,7 +464,7 @@ class BandwidthAnalyzer:
             for req in node_requests:
                 # 提取dest_type的前缀（去掉_ip后缀），处理None值
                 if req.dest_type:
-                    raw_dest_type = req.dest_type.lower()[:-2] if req.dest_type.endswith('_ip') else req.dest_type.lower()
+                    raw_dest_type = req.dest_type.lower()[:-2] if req.dest_type.endswith("_ip") else req.dest_type.lower()
                     dest_type = self.normalize_ip_type(raw_dest_type)
                 else:
                     dest_type = self.normalize_ip_type(None)
@@ -3226,8 +3226,8 @@ class BandwidthAnalyzer:
             writer = csv.DictWriter(csvfile, fieldnames=headers)
             writer.writeheader()
             writer.writerows(rows)
-
-        print(f"FIFO使用率统计csv: {output_path}")
+        if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
+            print(f"FIFO使用率统计csv: {output_path}")
 
     def _handle_legacy_links_format(self, network, mode):
         """处理旧的links_flow_stat格式"""

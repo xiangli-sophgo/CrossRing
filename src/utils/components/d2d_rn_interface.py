@@ -205,14 +205,14 @@ class D2D_RN_Interface(IPInterface):
         if req_type == "read":
             has_tracker = self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos] > 0
             has_databuffer = self.node.rn_rdb_count[self.ip_type][self.ip_pos] >= burst_length
-            
+
             if not (has_tracker and has_databuffer):
                 # TODO: 实现资源不足时的等待队列机制，而不是直接丢弃请求
                 # 当前版本：资源不足时直接返回失败，可能导致请求丢失
-                print(f"[D2D_RN] 资源不足，无法转发packet {getattr(flit, 'packet_id', '?')}: "
-                      f"tracker={has_tracker}, databuffer={has_databuffer} (需要{burst_length})")
+                # print(f"[D2D_RN] 资源不足，无法转发packet {getattr(flit, 'packet_id', '?')}: "
+                #       f"tracker={has_tracker}, databuffer={has_databuffer} (需要{burst_length})")
                 return False
-                
+
             # 分配D2D_RN的读资源
             self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos] -= 1
             self.node.rn_rdb_count[self.ip_type][self.ip_pos] -= burst_length
@@ -271,17 +271,17 @@ class D2D_RN_Interface(IPInterface):
         new_flit.source_original = flit.d2d_origin_node  # 原始源位置（源映射）
 
         # 保持D2D属性传递，确保后续处理能够正确识别
-        if hasattr(flit, 'd2d_origin_die'):
+        if hasattr(flit, "d2d_origin_die"):
             new_flit.d2d_origin_die = flit.d2d_origin_die
-        if hasattr(flit, 'd2d_origin_node'):
+        if hasattr(flit, "d2d_origin_node"):
             new_flit.d2d_origin_node = flit.d2d_origin_node
-        if hasattr(flit, 'd2d_origin_type'):
+        if hasattr(flit, "d2d_origin_type"):
             new_flit.d2d_origin_type = flit.d2d_origin_type
-        if hasattr(flit, 'd2d_target_die'):
+        if hasattr(flit, "d2d_target_die"):
             new_flit.d2d_target_die = flit.d2d_target_die
-        if hasattr(flit, 'd2d_target_node'):
+        if hasattr(flit, "d2d_target_node"):
             new_flit.d2d_target_node = flit.d2d_target_node
-        if hasattr(flit, 'd2d_target_type'):
+        if hasattr(flit, "d2d_target_type"):
             new_flit.d2d_target_type = flit.d2d_target_type
 
         # 设置网络状态
@@ -576,13 +576,12 @@ class D2D_RN_Interface(IPInterface):
             self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos] += 1
             self.node.rn_tracker_pointer["read"][self.ip_type][self.ip_pos] -= 1
             self.node.rn_rdb_count[self.ip_type][self.ip_pos] += tracker_req.burst_length
-            
-            print(f"[D2D_RN] 立即释放tracker资源 packet {getattr(first_flit, 'packet_id', '?')}: "
-                  f"tracker_count={self.node.rn_tracker_count['read'][self.ip_type][self.ip_pos]}, "
-                  f"rdb_count={self.node.rn_rdb_count[self.ip_type][self.ip_pos]}")
+
+            # print(f"[D2D_RN] 立即释放tracker资源 packet {getattr(first_flit, 'packet_id', '?')}: "
+            #   f"tracker_count={self.node.rn_tracker_count['read'][self.ip_type][self.ip_pos]}, "
+            #   f"rdb_count={self.node.rn_rdb_count[self.ip_type][self.ip_pos]}")
 
         self.cross_die_data_responses_sent = getattr(self, "cross_die_data_responses_sent", 0) + len(data_flits)
-
 
     def get_statistics(self) -> dict:
         """获取D2D_RN统计信息"""

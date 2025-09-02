@@ -98,6 +98,9 @@ L2M_BW_LIMIT: 128
 # 其他功能开关
 CROSSRING_VERSION: "V1"
 IN_ORDER_EJECTION_PAIRS: []
+# 需要保序的包类型 (REQ/RSP/DATA)
+IN_ORDER_PACKET_CATEGORIES:
+  - "REQ"    # 只有REQ类型需要保序
 
 # IP 频率变换 FIFO 深度 (使用默认值)
 IP_L2H_FIFO_DEPTH: 3

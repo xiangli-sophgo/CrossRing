@@ -97,6 +97,7 @@ class CrossRingConfig:
         self.CROSSRING_VERSION = args.CROSSRING_VERSION
         self.ENABLE_IN_ORDER_EJECTION = args.ENABLE_IN_ORDER_EJECTION
         self.IN_ORDER_EJECTION_PAIRS = args.IN_ORDER_EJECTION_PAIRS
+        self.IN_ORDER_PACKET_CATEGORIES = args.IN_ORDER_PACKET_CATEGORIES
         self.IP_L2H_FIFO_DEPTH = args.IP_L2H_FIFO_DEPTH
         self.IP_H2L_H_FIFO_DEPTH = args.IP_H2L_H_FIFO_DEPTH
         self.IP_H2L_L_FIFO_DEPTH = args.IP_H2L_L_FIFO_DEPTH
@@ -426,6 +427,7 @@ class CrossRingConfig:
         parser.add_argument("--CROSSRING_VERSION", type=str, default=default_config["CROSSRING_VERSION"], help="CrossRing version (V1 or V2)")
         parser.add_argument("--ENABLE_IN_ORDER_EJECTION", type=bool, default=default_config["ENABLE_IN_ORDER_EJECTION"], help="Enable in-order ejection for src-dest pairs")
         parser.add_argument("--IN_ORDER_EJECTION_PAIRS", type=list, default=default_config["IN_ORDER_EJECTION_PAIRS"], help="Specific src-dest pairs for in-order ejection. Empty list means all pairs.")
+        parser.add_argument("--IN_ORDER_PACKET_CATEGORIES", type=list, default=default_config.get("IN_ORDER_PACKET_CATEGORIES", ["REQ"]), help="Packet categories that need in-order delivery (REQ/RSP/DATA)")
         
 
         return parser.parse_args()

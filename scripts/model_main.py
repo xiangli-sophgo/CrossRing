@@ -13,9 +13,9 @@ if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
 
 def main():
     # traffic_file_path = r"../test_data/"
-    traffic_file_path = r"../../C2C/traffic_data"
+    # traffic_file_path = r"../../C2C/traffic_data"
     # traffic_file_path = r"../traffic/traffic0730"
-    # traffic_file_path = r"../traffic/0617/"
+    traffic_file_path = r"../traffic/0617/"
     # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
     # traffic_file_path = r"../traffic/RW_4x2_4x4/"
     # traffic_file_path = r"../traffic/nxn_traffics"
@@ -100,7 +100,7 @@ def main():
     np.random.seed(801)
 
     sim.initial()
-    sim.end_time = 4000
+    sim.end_time = 10000
     sim.print_interval = 2000
     sim.run()
 
