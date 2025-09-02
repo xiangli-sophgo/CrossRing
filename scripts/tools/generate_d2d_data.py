@@ -476,9 +476,14 @@ if __name__ == "__main__":
     generator = D2DTrafficGenerator(die_topo="5x4")
 
     # 自定义源和目标配置
-    custom_src_config = {"gdma_0": [6, 7]}
+    custom_src_config = {
+        "gdma_0": [6],
+    }
 
-    custom_dst_config = {"ddr_0": [12], "ddr_1": [12]}
+    custom_dst_config = {
+        "ddr_0": [12],
+        # "ddr_1": [12],
+    }
 
     generator.generate_d2d_traffic_file(
         filename="../../test_data/d2d_data_0902.txt",

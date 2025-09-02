@@ -192,16 +192,16 @@ class D2DResultProcessor(BandwidthAnalyzer):
         if read_requests:
             read_csv_path = os.path.join(output_path, "d2d_read_requests.csv")
             self._save_requests_to_csv(read_requests, read_csv_path, csv_header)
-            # print(f"[D2D结果处理] 已保存 {len(read_requests)} 个读请求到 {read_csv_path}")
-        # else:
-        # print(f"[D2D结果处理] 无读请求数据，跳过读请求CSV文件生成")
+            print(f"[D2D结果处理] 已保存 {len(read_requests)} 个读请求到 {read_csv_path}")
+        else:
+            print(f"[D2D结果处理] 无读请求数据，跳过读请求CSV文件生成")
 
         if write_requests:
             write_csv_path = os.path.join(output_path, "d2d_write_requests.csv")
             self._save_requests_to_csv(write_requests, write_csv_path, csv_header)
-            # print(f"[D2D结果处理] 已保存 {len(write_requests)} 个写请求到 {write_csv_path}")
-        # else:
-        # print(f"[D2D结果处理] 无写请求数据，跳过写请求CSV文件生成")
+            print(f"[D2D结果处理] 已保存 {len(write_requests)} 个写请求到 {write_csv_path}")
+        else:
+            print(f"[D2D结果处理] 无写请求数据，跳过写请求CSV文件生成")
 
     def _save_requests_to_csv(self, requests: List[D2DRequestInfo], file_path: str, header: List[str]):
         """保存请求列表到CSV文件"""
@@ -1131,7 +1131,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             for die0_node in die0_positions:
                 w_bw = d2d_bandwidth.get(0, {}).get(die0_node, {}).get("W", 0.0)
                 if w_bw > 0.001:
-                    print(f"[D2D连接分析] Die0节点{die0_node}有写数据流量: {w_bw:.3f} GB/s")
+                    # print(f"[D2D连接分析] Die0节点{die0_node}有写数据流量: {w_bw:.3f} GB/s")
                     # 找到对应的Die1目标节点（从D2D请求中推断）
                     target_die1_node = self._find_target_node_for_write(die0_node, die1_positions)
                     if target_die1_node:
@@ -1141,7 +1141,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             for die1_node in die1_positions:
                 r_bw = d2d_bandwidth.get(1, {}).get(die1_node, {}).get("R", 0.0)
                 if r_bw > 0.001:
-                    print(f"[D2D连接分析] Die1节点{die1_node}有读数据返回流量: {r_bw:.3f} GB/s")
+                    # print(f"[D2D连接分析] Die1节点{die1_node}有读数据返回流量: {r_bw:.3f} GB/s")
                     # 找到对应的Die0目标节点（从D2D请求中推断）
                     target_die0_node = self._find_target_node_for_read(die1_node, die0_positions)
                     if target_die0_node:
