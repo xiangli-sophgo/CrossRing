@@ -36,8 +36,8 @@ from scipy import stats
 
 # ==================== 全局配置 ====================
 N_REPEATS = 1  # 每个配置的重复次数（无随机性，只需1次）
-N_JOBS = 8  # 并行作业数
-SIMULATION_TIME = 5000  # 仿真时间
+N_JOBS = 16  # 并行作业数
+SIMULATION_TIME = 200  # 仿真时间
 OPTUNA_VERBOSITY = 1  # Optuna日志级别
 
 # FIFO参数配置（统一范围2-16）
@@ -92,7 +92,7 @@ class FIFOConditionalOptimizer:
         # 转换numpy int64为普通int，确保JSON序列化兼容
         clean_params = {}
         for key, value in params.items():
-            if hasattr(value, 'item'):  # numpy类型
+            if hasattr(value, "item"):  # numpy类型
                 clean_params[key] = int(value.item())
             else:
                 clean_params[key] = int(value)
@@ -174,7 +174,16 @@ class FIFOConditionalOptimizer:
 
                     # 设置FIFO参数
                     for param_name, param_value in fifo_params.items():
-                        setattr(sim.config, param_name, param_value)
+                        if hasattr(sim.config, param_name):
+                            # 确保参数值是正确的类型
+                            if isinstance(param_value, (int, float, np.integer)):
+                                setattr(sim.config, param_name, int(param_value))
+                            else:
+                                print(f"参数 {param_name} 的值 {param_value} (类型: {type(param_value)}) 不是数值类型")
+                                raise ValueError(f"Parameter {param_name} has invalid value: {param_value} (type: {type(param_value)})")
+                        else:
+                            print(f"配置中不存在参数: {param_name}")
+                            raise AttributeError(f"Configuration does not have parameter: {param_name}")
 
                     # 运行仿真
                     sim.initial()
@@ -218,19 +227,19 @@ class FIFOConditionalOptimizer:
 
             # 先采样FIFO参数
             for param_name, param_info in FIFO_PARAMS.items():
-                all_params[param_name] = trial.suggest_int(param_name, param_info["range"][0], param_info["range"][1])
+                all_params[param_name] = int(trial.suggest_int(param_name, param_info["range"][0], param_info["range"][1]))
 
             # 采样ETag参数（处理复杂的依赖约束）
             # 1. 先采样T2参数（调整为新的范围）
-            all_params["TL_Etag_T2_UE_MAX"] = trial.suggest_int("TL_Etag_T2_UE_MAX", 2, 15)
-            all_params["TU_Etag_T2_UE_MAX"] = trial.suggest_int("TU_Etag_T2_UE_MAX", 2, 15)
-            all_params["TR_Etag_T2_UE_MAX"] = trial.suggest_int("TR_Etag_T2_UE_MAX", 2, 15)
-            all_params["TD_Etag_T2_UE_MAX"] = trial.suggest_int("TD_Etag_T2_UE_MAX", 2, 15)
+            all_params["TL_Etag_T2_UE_MAX"] = int(trial.suggest_int("TL_Etag_T2_UE_MAX", 2, 15))
+            all_params["TU_Etag_T2_UE_MAX"] = int(trial.suggest_int("TU_Etag_T2_UE_MAX", 2, 15))
+            all_params["TR_Etag_T2_UE_MAX"] = int(trial.suggest_int("TR_Etag_T2_UE_MAX", 2, 15))
+            all_params["TD_Etag_T2_UE_MAX"] = int(trial.suggest_int("TD_Etag_T2_UE_MAX", 2, 15))
 
             # 2. 采样T1参数（必须大于对应的T2参数）
             tl_t1_min = all_params["TL_Etag_T2_UE_MAX"] + 1
             if tl_t1_min <= 15:
-                all_params["TL_Etag_T1_UE_MAX"] = trial.suggest_int("TL_Etag_T1_UE_MAX", tl_t1_min, 15)
+                all_params["TL_Etag_T1_UE_MAX"] = int(trial.suggest_int("TL_Etag_T1_UE_MAX", tl_t1_min, 15))
             else:
                 # 如果约束无法满足，跳过这个trial
                 from optuna.exceptions import TrialPruned
@@ -239,7 +248,7 @@ class FIFOConditionalOptimizer:
 
             tu_t1_min = all_params["TU_Etag_T2_UE_MAX"] + 1
             if tu_t1_min <= 15:
-                all_params["TU_Etag_T1_UE_MAX"] = trial.suggest_int("TU_Etag_T1_UE_MAX", tu_t1_min, 15)
+                all_params["TU_Etag_T1_UE_MAX"] = int(trial.suggest_int("TU_Etag_T1_UE_MAX", tu_t1_min, 15))
             else:
                 # 如果约束无法满足，跳过这个trial
                 from optuna.exceptions import TrialPruned
@@ -339,12 +348,12 @@ class FIFOConditionalOptimizer:
 
             def objective(trial):
                 # 固定目标参数
-                all_params = {target_param: target_value}
+                all_params = {target_param: int(target_value)}
 
                 # 优化其他FIFO参数
                 for param_name, param_info_inner in FIFO_PARAMS.items():
                     if param_name != target_param:
-                        all_params[param_name] = trial.suggest_int(param_name, param_info_inner["range"][0], param_info_inner["range"][1])
+                        all_params[param_name] = int(trial.suggest_int(param_name, param_info_inner["range"][0], param_info_inner["range"][1]))
 
                 # 优化其他ETag参数（处理约束）
                 for param_name, param_info_inner in ETAG_PARAMS.items():
@@ -361,11 +370,11 @@ class FIFOConditionalOptimizer:
                                 min_value = param_info_inner["range"][0]
 
                             if min_value <= param_info_inner["range"][1]:
-                                all_params[param_name] = trial.suggest_int(param_name, min_value, param_info_inner["range"][1])
+                                all_params[param_name] = int(trial.suggest_int(param_name, min_value, param_info_inner["range"][1]))
                             else:
-                                all_params[param_name] = param_info_inner["default"]
+                                all_params[param_name] = int(param_info_inner["default"])
                         else:
-                            all_params[param_name] = trial.suggest_int(param_name, param_info_inner["range"][0], param_info_inner["range"][1])
+                            all_params[param_name] = int(trial.suggest_int(param_name, param_info_inner["range"][0], param_info_inner["range"][1]))
 
                 # 运行仿真
                 performance = self.run_simulation(all_params)
@@ -527,7 +536,7 @@ class FIFOConditionalOptimizer:
 
         for param_name, results in self.conditional_results.items():
             performances = [r["best_performance"] for r in results]
-            if performances:
+            if performances and min(performances) > 0:
                 impact = (max(performances) - min(performances)) / min(performances) * 100
                 param_impacts.append(impact)
                 param_names.append(param_name)
