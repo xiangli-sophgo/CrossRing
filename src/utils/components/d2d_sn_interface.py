@@ -225,8 +225,14 @@ class D2D_SN_Interface(IPInterface):
                     elif hasattr(flit, "req_type") and flit.req_type == "write":
                         # 跨Die写请求：先进行资源检查并返回data_send响应
                         self.handle_local_cross_die_write_request(flit)
+                    elif hasattr(flit, "req_type") and flit.req_type == "read":
+                        # 跨Die读请求：使用修改后的SN处理机制
+                        # print(f"[D2D_SN] 处理跨Die读请求 packet_id={flit.packet_id}")
+                        # 标记为新请求，使用D2D专用的处理方法
+                        flit.req_attr = "new"
+                        self._handle_cross_die_read_request(flit)
                     else:
-                        # 其他类型（如读请求）：直接跨Die转发
+                        # 其他类型：直接跨Die转发
                         self._handle_cross_die_transfer(flit)
 
         return ejected_flits
@@ -271,6 +277,44 @@ class D2D_SN_Interface(IPInterface):
             # 资源不足，发送negative响应
             negative_rsp = self._create_response_flit(flit, "negative")
             self.enqueue(negative_rsp, "rsp")
+
+    def _handle_cross_die_read_request(self, flit: Flit):
+        """
+        处理跨Die读请求：使用基类的tracker分配逻辑，但转发到D2D_RN而不是直接生成读数据
+        """
+        packet_id = flit.packet_id
+        
+        if flit.req_attr == "new":
+            # 使用基类的SN tracker分配逻辑
+            if self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos] > 0:
+                flit.sn_tracker_type = "ro"
+                self.node.sn_tracker[self.ip_type][self.ip_pos].append(flit)
+                self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos] -= 1
+                
+                # print(f"[D2D_SN] 分配RO tracker并转发跨Die读请求 packet_id={packet_id}, "
+                #       f"剩余tracker={self.node.sn_tracker_count[self.ip_type]['ro'][self.ip_pos]}")
+                
+                # 转发到D2D_RN，而不是直接生成读数据包
+                self._handle_cross_die_transfer(flit)
+                
+                # 注意：不在这里释放tracker！tracker会在数据返回时释放
+            else:
+                # 资源不足，返回negative响应
+                print(f"[D2D_SN] RO tracker不足，读请求 packet_id={packet_id} 返回negative响应")
+                self.create_rsp(flit, "negative")
+                self.node.sn_req_wait[flit.req_type][self.ip_type][self.ip_pos].append(flit)
+        else:
+            # 重试请求：直接转发
+            print(f"[D2D_SN] 转发重试的跨Die读请求 packet_id={packet_id}")
+            self._handle_cross_die_transfer(flit)
+
+    def handle_local_cross_die_read_request(self, flit: Flit):
+        """
+        已废弃：现在使用_handle_cross_die_read_request方法
+        """
+        print(f"[D2D_SN] 警告：调用了已废弃的handle_local_cross_die_read_request方法")
+        # 转到新的处理方法
+        self._handle_cross_die_read_request(flit)
 
     def _handle_cross_die_transfer(self, flit):
         """处理跨Die转发（第二阶段：Die0_D2D_SN → Die1_D2D_RN）"""
@@ -405,16 +449,73 @@ class D2D_SN_Interface(IPInterface):
     def release_sn_tracker_for_cross_die_data(self, packet_id: int):
         """
         释放D2D_SN用于跨Die数据转发的tracker
+        实现正确的tracker释放和等待队列处理
         """
-        # 查找对应的tracker（这里假设是读请求的tracker）
+        # 查找对应的tracker
         tracker = next((req for req in self.node.sn_tracker[self.ip_type][self.ip_pos] if req.packet_id == packet_id), None)
 
         if tracker:
+            # 获取正确的tracker类型
+            tracker_type = getattr(tracker, 'sn_tracker_type', 'ro')  # 默认为RO类型
+            
             # 释放tracker资源
             self.node.sn_tracker[self.ip_type][self.ip_pos].remove(tracker)
-            self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos] += 1
-            self.node.sn_rdb_count[self.ip_type][self.ip_pos] += tracker.burst_length
-            # print(f"[D2D_SN] 释放packet {packet_id}的tracker资源")
+            self.node.sn_tracker_count[self.ip_type][tracker_type][self.ip_pos] += 1
+            
+            # 对于读请求，通常不需要释放RDB（读缓冲由RN管理）
+            # 对于写请求，需要释放WDB
+            if hasattr(tracker, 'req_type') and tracker.req_type == "write":
+                self.node.sn_wdb_count[self.ip_type][self.ip_pos] += tracker.burst_length
+            
+            # print(f"[D2D_SN] 释放packet {packet_id}的{tracker_type} tracker资源")
+            
+            # 实现retry机制：检查等待队列
+            self._process_waiting_requests_after_release(tracker)
+            
+    def _process_waiting_requests_after_release(self, completed_req: 'Flit'):
+        """
+        tracker释放后处理等待队列中的请求
+        """
+        req_type = getattr(completed_req, 'req_type', 'read')
+        wait_list = self.node.sn_req_wait[req_type][self.ip_type][self.ip_pos]
+        
+        if not wait_list:
+            return
+            
+        # 检查是否有足够资源处理等待的请求
+        if req_type == "read":
+            # 读请求只需要RO tracker
+            if self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos] > 0:
+                new_req = wait_list.pop(0)
+                
+                # 分配资源并处理
+                self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos] -= 1
+                new_req.sn_tracker_type = "ro"
+                self.node.sn_tracker[self.ip_type][self.ip_pos].append(new_req)
+                
+                # 直接处理请求（不发送positive，直接转发）
+                self._handle_cross_die_transfer(new_req)
+                
+                print(f"[D2D_SN] 处理等待队列中的读请求 packet_id={new_req.packet_id}")
+                
+        elif req_type == "write":
+            # 写请求需要share tracker和WDB
+            if (self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos] > 0 and
+                self.node.sn_wdb_count[self.ip_type][self.ip_pos] >= wait_list[0].burst_length):
+                
+                new_req = wait_list.pop(0)
+                
+                # 分配资源
+                self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos] -= 1
+                self.node.sn_wdb_count[self.ip_type][self.ip_pos] -= new_req.burst_length
+                new_req.sn_tracker_type = "share"
+                self.node.sn_tracker[self.ip_type][self.ip_pos].append(new_req)
+                
+                # 发送positive响应触发GDMA retry
+                positive_rsp = self._create_response_flit(new_req, "positive")
+                self.enqueue(positive_rsp, "rsp")
+                
+                print(f"[D2D_SN] 发送positive响应触发写请求retry packet_id={new_req.packet_id}")
 
     def forward_cross_die_data_to_requester(self, flit: Flit):
         """

@@ -195,6 +195,148 @@ D2D系统包含两个独立的Die，每个Die内部包含完整的CrossRing网�
 
 **重要说明**: Die0_RN的tracker管理与普通Die内写操作不同，必须等到B通道响应才能释放，而不是在data_send响应后释放。
 
+## 4. D2D Tracker管理和Retry机制详细设计
+
+### 4.1 读请求Tracker管理
+
+#### D2D_SN读请求资源检查（阶段1）
+**当前实现问题**: D2D_SN直接转发读请求，绕过了资源检查
+**正确实现**:
+```python
+def handle_cross_die_read_request(self, flit: Flit):
+    """处理跨Die读请求 - 必须进行资源检查"""
+    # 检查D2D_SN的RO tracker资源
+    has_tracker = self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos] > 0
+    
+    if has_tracker:
+        # 分配tracker
+        self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos] -= 1
+        flit.sn_tracker_type = "ro"
+        self.node.sn_tracker[self.ip_type][self.ip_pos].append(flit)
+        
+        # 转发请求到D2D_RN
+        self._handle_cross_die_transfer(flit)
+    else:
+        # 资源不足，返回negative响应
+        negative_rsp = self._create_response_flit(flit, "negative")
+        self.enqueue(negative_rsp, "rsp")
+        
+        # 加入等待队列
+        self.node.sn_req_wait[flit.req_type][self.ip_type][self.ip_pos].append(flit)
+```
+
+#### D2D_RN读请求资源检查（阶段3）
+**当前实现问题**: 资源不足时直接丢弃请求（return False）
+**正确设计**: 由于AXI不支持retry，D2D_RN不应该拒绝请求
+
+#### Tracker释放时机
+| 组件 | 分配时机 | 释放时机 | Tracker类型 |
+|------|----------|----------|-------------|
+| **D2D_SN** | 阶段1: 收到GDMA读请求 | 阶段6: 数据转发给GDMA后 | RO (Read Only) |
+| **D2D_RN** | 阶段3: 收到跨Die读请求 | 阶段5: 数据发送到AXI R通道后 | Read |
+
+### 4.2 写请求Tracker管理
+
+#### D2D_SN写请求资源检查（阶段1）
+**当前实现**: 已正确实现资源检查
+```python
+def handle_local_cross_die_write_request(self, flit: Flit):
+    # 检查share tracker和WDB资源
+    has_tracker = self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos] > 0
+    has_databuffer = self.node.sn_wdb_count[self.ip_type][self.ip_pos] >= flit.burst_length
+    
+    if has_tracker and has_databuffer:
+        # 分配资源，发送datasend响应
+    else:
+        # 返回negative响应，加入等待队列
+```
+
+#### Tracker释放时机
+| 组件 | 分配时机 | 释放时机 | Tracker类型 |
+|------|----------|----------|-------------|
+| **D2D_SN** | 阶段1: 收到GDMA写请求 | 阶段6: 写完成响应转发后 | Share + WDB |
+| **D2D_RN** | 阶段3: 收到跨Die写请求 | 阶段4: 本地写完成后 | Write + WDB |
+
+### 4.3 Retry机制设计
+
+#### GDMA Retry行为
+```python
+# ip_interface.py 中的retry逻辑
+def _handle_received_response(self, rsp: Flit):
+    if rsp.rsp_type == "negative":
+        # 标记请求无效，等待positive响应
+        req.req_state = "invalid"
+        req.req_attr = "old"
+        # 注意：不会自动retry
+        
+    elif rsp.rsp_type == "positive":
+        # 重新激活请求
+        req.req_state = "valid" 
+        req.req_attr = "old"
+        # 重新注入网络
+        self.enqueue(req, "req", retry=True)
+```
+
+#### D2D_SN Retry通知机制
+```python
+def release_completed_sn_tracker(self, req: Flit):
+    # 1. 释放tracker和databuffer资源
+    self.node.sn_tracker[self.ip_type][self.ip_pos].remove(req)
+    self.node.sn_tracker_count[self.ip_type][req.sn_tracker_type][self.ip_pos] += 1
+    
+    if req.req_type == "write":
+        self.node.sn_wdb_count[self.ip_type][self.ip_pos] += req.burst_length
+    
+    # 2. 检查等待队列，处理等待的请求
+    wait_list = self.node.sn_req_wait[req.req_type][self.ip_type][self.ip_pos]
+    
+    if wait_list and self.has_sufficient_resources():
+        new_req = wait_list.pop(0)
+        
+        if req.req_type == "write":
+            # 写请求：发送positive响应触发GDMA retry
+            self.create_rsp(new_req, "positive")
+            
+        elif req.req_type == "read":
+            # 读请求：分配资源并直接处理
+            self.allocate_tracker_resources(new_req)
+            self._handle_cross_die_transfer(new_req)
+```
+
+### 4.4 资源预留策略
+
+#### 设计原则
+1. **D2D_SN Gate-keeping**: 在源Die进行资源检查，确保有足够资源完成跨Die传输
+2. **AXI Commitment**: 一旦进入AXI传输，必须保证能完成
+3. **Early Allocation**: 在阶段1就分配所有必要资源
+
+#### 资源配置
+```yaml
+# d2d_config.yaml
+D2D_SN_R_TRACKER_OSTD: 48   # D2D SN 读跟踪器数量
+D2D_SN_W_TRACKER_OSTD: 48   # D2D SN 写跟踪器数量  
+D2D_SN_RDB_SIZE: 192        # D2D SN 读缓冲大小
+D2D_SN_WDB_SIZE: 192        # D2D SN 写缓冲大小
+
+D2D_RN_R_TRACKER_OSTD: 48   # D2D RN 读跟踪器数量
+D2D_RN_W_TRACKER_OSTD: 48   # D2D RN 写跟踪器数量
+D2D_RN_RDB_SIZE: 192        # D2D RN 读缓冲大小  
+D2D_RN_WDB_SIZE: 192        # D2D RN 写缓冲大小
+```
+
+### 4.5 当前实现问题总结
+
+#### 紧急修复项
+1. **D2D_SN读请求绕过资源检查** - 导致无限制转发
+2. **D2D_RN丢弃请求** - 违反AXI协议
+3. **缺少retry通知机制** - 等待队列无法被唤醒
+
+#### 修复优先级
+1. **高**: 添加D2D_SN读请求资源检查
+2. **高**: 实现正确的retry通知机制  
+3. **中**: 优化D2D_RN资源管理
+4. **低**: 添加详细的调试日志
+
 ## 4. 跨Die传输机制（延迟仿真）
 
 ### 4.1 传输通道定义

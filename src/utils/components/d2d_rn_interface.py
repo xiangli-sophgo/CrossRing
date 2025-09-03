@@ -192,41 +192,24 @@ class D2D_RN_Interface(IPInterface):
 
     def handle_other_cross_die_flit(self, flit: Flit):
         """
-        处理其他类型的跨Die flit（读请求等）- 修复版本
-        在转发时检查并分配D2D_RN的tracker和RDB资源
+        处理其他类型的跨Die flit（读请求等）
+        注意：tracker资源已经在基类IPInterface的_check_and_reserve_resources()中分配
+        这里只负责跨Die转发逻辑
         """
-        # 确保burst_length有效
+        packet_id = getattr(flit, "packet_id", None)
+        req_type = getattr(flit, "req_type", "read")
+        
+        # 确保burst_length有效（后面的代码需要用到）
         burst_length = getattr(flit, "burst_length", 4)
         if burst_length is None or burst_length <= 0:
             burst_length = 4
-
-        # 检查D2D_RN的资源可用性（只对读请求检查读资源）
-        req_type = getattr(flit, "req_type", "read")
-        if req_type == "read":
-            has_tracker = self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos] > 0
-            has_databuffer = self.node.rn_rdb_count[self.ip_type][self.ip_pos] >= burst_length
-
-            if not (has_tracker and has_databuffer):
-                # TODO: 实现资源不足时的等待队列机制，而不是直接丢弃请求
-                # 当前版本：资源不足时直接返回失败，可能导致请求丢失
-                # print(f"[D2D_RN] 资源不足，无法转发packet {getattr(flit, 'packet_id', '?')}: "
-                #       f"tracker={has_tracker}, databuffer={has_databuffer} (需要{burst_length})")
-                return False
-
-            # 分配D2D_RN的读资源
-            self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos] -= 1
-            self.node.rn_rdb_count[self.ip_type][self.ip_pos] -= burst_length
-            self.node.rn_tracker_pointer["read"][self.ip_type][self.ip_pos] += 1
+        
+        # print(f"[D2D_RN] 转发跨Die请求 packet_id={packet_id}, req_type={req_type} (tracker已在基类分配)")
 
         # 使用D2D统一属性获取目标节点位置
         # d2d_target_node存储的是源映射位置，转为目标映射需要减去NUM_COL
         target_pos = flit.d2d_target_node - self.config.NUM_COL
         if target_pos is None or target_pos < 0:
-            # 资源分配失败，需要回滚
-            if req_type == "read":
-                self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos] += 1
-                self.node.rn_rdb_count[self.ip_type][self.ip_pos] += burst_length
-                self.node.rn_tracker_pointer["read"][self.ip_type][self.ip_pos] -= 1
             raise ValueError(f"flit的d2d_target_node转换错误: d2d_target_node={flit.d2d_target_node}, target_pos={target_pos}, packet_id={getattr(flit, 'packet_id', 'None')}")
 
         # 计算路径（使用映射后的source和destination）

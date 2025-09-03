@@ -110,11 +110,11 @@ class D2D_Sys:
         """初始化AXI通道配置"""
         channels = {}
         channel_configs = [
-            ('AR', 'D2D_AR_LATENCY', 10, 'D2D_AR_BANDWIDTH', 64),
+            ('AR', 'D2D_AR_LATENCY', 10, 'D2D_AR_BANDWIDTH', 128),
             ('R', 'D2D_R_LATENCY', 8, 'D2D_R_BANDWIDTH', 128),
-            ('AW', 'D2D_AW_LATENCY', 10, 'D2D_AW_BANDWIDTH', 64),
+            ('AW', 'D2D_AW_LATENCY', 10, 'D2D_AW_BANDWIDTH', 128),
             ('W', 'D2D_W_LATENCY', 2, 'D2D_W_BANDWIDTH', 128),
-            ('B', 'D2D_B_LATENCY', 8, 'D2D_B_BANDWIDTH', 32)
+            ('B', 'D2D_B_LATENCY', 8, 'D2D_B_BANDWIDTH', 128)
         ]
         
         for channel_name, latency_key, latency_default, bw_key, bw_default in channel_configs:

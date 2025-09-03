@@ -121,6 +121,130 @@ destination_type = flit.d2d_origin_type  # "gdma_0"
 - New unified design eliminates confusion with `_physical` suffixes
 - Consistent with 6-stage D2D flow: Request(Die0→Die1) → Data(Die1→Die0)
 
+## D2D Communication Flow and Tracker Management
+
+### 6-Stage D2D Communication Flow
+
+#### Read Request Flow (GDMA@Die0 → DDR@Die1)
+
+**Stage 1: GDMA → D2D_SN (Die0 Internal)**
+- **Flow**: GDMA(14.g0) → D2D_SN(33.ds)
+- **D2D_SN Actions**:
+  - Check `sn_tracker_count["ro"]` availability
+  - If sufficient: Allocate tracker, forward to Stage 2
+  - If insufficient: Send `negative` response, add to `sn_req_wait` queue
+- **Tracker State**: D2D_SN allocates 1 RO tracker
+
+**Stage 2: D2D_SN → D2D_RN (Die0→Die1 AXI AR)**
+- **Flow**: D2D_SN(37.ds@Die0) → D2D_RN(4.dr@Die1) via AXI AR channel
+- **AXI Channel**: Address Read (AR) with configurable latency
+- **Tracker State**: D2D_SN tracker remains allocated
+
+**Stage 3: D2D_RN → DDR (Die1 Internal)**
+- **Flow**: D2D_RN(4.dr) → DDR(4.dr)
+- **D2D_RN Actions**:
+  - Check `rn_tracker_count["read"]` and `rn_rdb_count` availability
+  - If sufficient: Allocate tracker and RDB space
+  - If insufficient: **Should implement backpressure** (currently drops request)
+- **Tracker State**: D2D_RN allocates 1 read tracker + burst_length RDB
+
+**Stage 4: DDR → D2D_RN (Die1 Internal)**
+- **Flow**: DDR(4.dr) → D2D_RN(4.dr)
+- **Data Processing**: D2D_RN collects complete burst of data flits
+- **Tracker State**: D2D_RN tracker remains allocated until Stage 5 begins
+
+**Stage 5: D2D_RN → D2D_SN (Die1→Die0 AXI R)**
+- **Flow**: D2D_RN(4.dr@Die1) → D2D_SN(37.ds@Die0) via AXI R channel
+- **AXI Channel**: Read Data (R) with configurable latency
+- **D2D_RN Actions**: Release tracker immediately after sending to AXI
+- **Tracker State**: D2D_RN releases 1 read tracker + burst_length RDB
+
+**Stage 6: D2D_SN → GDMA (Die0 Internal)**
+- **Flow**: D2D_SN(37.ds) → GDMA(14.g0)
+- **D2D_SN Actions**: Forward data to original requester
+- **Tracker State**: D2D_SN releases 1 RO tracker after forwarding
+
+#### Write Request Flow (GDMA@Die0 → DDR@Die1)
+
+**Stage 1: GDMA → D2D_SN (Die0 Internal)**
+- **Flow**: GDMA(14.g0) → D2D_SN(33.ds)
+- **D2D_SN Actions**:
+  - Check `sn_tracker_count["share"]` and `sn_wdb_count` availability
+  - If sufficient: Allocate tracker+WDB, send `datasend` response
+  - If insufficient: Send `negative` response, add to `sn_req_wait` queue
+- **Tracker State**: D2D_SN allocates 1 share tracker + burst_length WDB
+
+**Stage 2: D2D_SN → D2D_RN (Die0→Die1 AXI AW+W)**
+- **Flow**: D2D_SN(37.ds@Die0) → D2D_RN(4.dr@Die1) via AXI AW+W channels
+- **AXI Channels**: Address Write (AW) + Write Data (W) with configurable latencies
+- **Tracker State**: D2D_SN tracker remains allocated
+
+**Stage 3: D2D_RN → DDR (Die1 Internal)**
+- **Flow**: D2D_RN(4.dr) → DDR(4.dr)
+- **D2D_RN Actions**:
+  - Check `rn_tracker_count["write"]` and `rn_wdb_count` availability
+  - Allocate tracker and WDB space
+- **Tracker State**: D2D_RN allocates 1 write tracker + burst_length WDB
+
+**Stage 4: DDR → D2D_RN (Die1 Internal)**
+- **Flow**: DDR(4.dr) → D2D_RN(4.dr)
+- **Response**: Write complete response
+- **D2D_RN Actions**: Release tracker after receiving write complete
+- **Tracker State**: D2D_RN releases 1 write tracker + burst_length WDB
+
+**Stage 5: D2D_RN → D2D_SN (Die1→Die0 AXI B)**
+- **Flow**: D2D_RN(4.dr@Die1) → D2D_SN(37.ds@Die0) via AXI B channel
+- **AXI Channel**: Write Response (B) with configurable latency
+- **Tracker State**: D2D_RN tracker already released
+
+**Stage 6: D2D_SN → GDMA (Die0 Internal)**
+- **Flow**: D2D_SN(37.ds) → GDMA(14.g0)
+- **Response**: Write complete response to original requester
+- **Tracker State**: D2D_SN releases 1 share tracker + burst_length WDB
+
+### Retry Mechanism
+
+#### Resource Shortage Handling
+
+**D2D_SN Resource Shortage**:
+1. **Immediate Response**: Send `negative` response to requester (GDMA)
+2. **Queue Management**: Add request to `sn_req_wait[req_type]` queue
+3. **GDMA Behavior**: Waits for `positive` response before retry
+
+**Tracker Release and Retry Notification**:
+1. **Resource Release**: When D2D_SN completes transaction, call `release_completed_sn_tracker()`
+2. **Queue Processing**: Check `sn_req_wait` for waiting requests
+3. **Retry Activation**:
+   - **Write Requests**: Send `positive` response to trigger GDMA retry
+   - **Read Requests**: Process directly or send `positive` (implementation dependent)
+
+#### GDMA Retry Behavior
+
+**On `negative` Response**:
+- Mark request as `req_attr = "old"` and `req_state = "invalid"`
+- Wait for `positive` response (no automatic retry)
+
+**On `positive` Response**:
+- Reactivate request: `req_state = "valid"`, `req_attr = "old"`
+- Re-inject into network: `enqueue(req, "req", retry=True)`
+
+### Critical Design Constraints
+
+#### AXI Protocol Limitations
+- **No Built-in Retry**: AXI channels cannot reject requests once accepted
+- **Committed Transmission**: All AXI transactions must complete successfully
+- **Resource Pre-check**: Must verify resources before entering AXI layer
+
+#### Resource Management Strategy
+- **D2D_SN Gate-keeping**: Primary resource control at source Die
+- **D2D_RN Guaranteed Processing**: Should not fail if D2D_SN managed resources correctly
+- **Early Resource Allocation**: Allocate at Stage 1, release at Stage 6
+
+#### Current Implementation Issues
+1. **D2D_SN Read Requests**: Currently bypasses resource check (needs fixing)
+2. **D2D_RN Resource Drops**: Drops requests when resources unavailable (AXI violation)
+3. **Missing Retry Flow**: Incomplete positive response mechanism for queued requests
+
 ## Important Notes
 
 - **Testing**: No established testing framework. `scripts/test.py` exists but no pytest/unittest setup

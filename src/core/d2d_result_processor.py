@@ -59,7 +59,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
     FLIT_SIZE_BYTES = 128  # 每个flit的字节数
     MIN_SIMULATION_TIME_NS = 1000  # 最小仿真时间（纳秒），避免除零
-    MAX_BANDWIDTH_NORMALIZATION = 10.0  # 最大带宽归一化值（GB/s）
+    MAX_BANDWIDTH_NORMALIZATION = 256.0  # 最大带宽归一化值（GB/s）
 
     def __init__(self, config, min_gap_threshold: int = 50):
         super().__init__(config, min_gap_threshold)
@@ -278,23 +278,91 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 非加权带宽 (GB/s)
         unweighted_bw = (total_bytes / total_time_ns) if total_time_ns > 0 else 0.0
 
-        # 加权带宽计算
-        if len(requests) > 1:
+        # 加权带宽计算：使用工作区间方法
+        working_intervals = self.calculate_d2d_working_intervals(requests)
+
+        if working_intervals:
             total_weighted_bw = 0.0
             total_weight = 0
 
-            for req in requests:
-                if req.latency_ns > 0:
-                    weight = req.burst_length  # 使用burst_length作为权重
-                    bandwidth = req.data_bytes / req.latency_ns if req.latency_ns > 0 else 0.0  # 修复零除错误
-                    total_weighted_bw += bandwidth * weight
-                    total_weight += weight
+            for interval in working_intervals:
+                weight = interval.flit_count  # 权重是区间的flit数量
+                bandwidth = interval.bandwidth_bytes_per_ns  # 区间带宽 (bytes/ns)
+                total_weighted_bw += bandwidth * weight
+                total_weight += weight
 
             weighted_bw = (total_weighted_bw / total_weight) if total_weight > 0 else unweighted_bw
+
+            # 调试信息：显示工作区间统计
+            # print(f"[D2D带宽] 工作区间数量: {len(working_intervals)}, 总权重: {total_weight}")
         else:
             weighted_bw = unweighted_bw
+            # print(f"[D2D带宽] 无有效工作区间，使用非加权带宽")
 
         return unweighted_bw, weighted_bw
+
+    def calculate_d2d_working_intervals(self, requests: List[D2DRequestInfo]) -> List[WorkingInterval]:
+        """
+        计算D2D请求的工作区间
+
+        Args:
+            requests: D2D请求列表
+
+        Returns:
+            工作区间列表
+        """
+        if not requests:
+            return []
+
+        # 构建时间轴事件
+        events = []
+        for req in requests:
+            # 使用D2DRequestInfo的字段
+            events.append((req.start_time_ns, "start", req))
+            events.append((req.end_time_ns, "end", req))
+        events.sort(key=lambda x: (x[0], x[1]))  # 按时间排序，相同时间时'end'在'start'前面
+
+        # 识别连续工作时段
+        active_requests = set()
+        raw_intervals = []
+        current_start = None
+
+        for time_point, event_type, req in events:
+            # 检查时间点是否有效
+            if time_point is not None and not (isinstance(time_point, float) and np.isnan(time_point)):
+                if event_type == "start":
+                    if not active_requests:  # 开始新的工作区间
+                        current_start = time_point
+                    active_requests.add(req.packet_id)
+                else:  # 'end'
+                    active_requests.discard(req.packet_id)
+                    if not active_requests and current_start is not None:
+                        # 工作区间结束
+                        raw_intervals.append((current_start, time_point))
+                        current_start = None
+
+        # 处理最后未结束的区间
+        if active_requests and current_start is not None:
+            last_end = max(req.end_time_ns for req in requests)
+            raw_intervals.append((current_start, last_end))
+
+        # 合并相近区间（复用基类方法）
+        merged_intervals = self._merge_close_intervals(raw_intervals)
+
+        # 构建WorkingInterval对象
+        working_intervals = []
+        for start, end in merged_intervals:
+            # 找到该区间内的所有D2D请求
+            interval_requests = [req for req in requests if req.start_time_ns < end and req.end_time_ns > start]
+
+            if interval_requests:
+                total_bytes = sum(req.data_bytes for req in interval_requests)
+                flit_count = sum(req.burst_length for req in interval_requests)
+
+                interval = WorkingInterval(start_time=start, end_time=end, duration=end - start, flit_count=flit_count, total_bytes=total_bytes, request_count=len(interval_requests))
+                working_intervals.append(interval)
+
+        return working_intervals
 
     def generate_d2d_bandwidth_report(self, output_path: str):
         """生成D2D带宽报告，打印到屏幕并保存到txt文件"""
@@ -463,7 +531,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
             # print(f"[D2D调试] 源IP带宽: Die{request.source_die} {source_type_normalized}({row},{col}) {request.req_type} = {bandwidth_gbps:.3f} GB/s")
 
         except Exception as e:
-            print(f"[D2D调试] 记录源带宽失败: {e}")
+            # print(f"[D2D调试] 记录源带宽失败: {e}")
+            pass
 
     def _record_target_bandwidth(self, request: "D2DRequestInfo", die_model, sim_time_ns: int):
         """记录目标IP的接收带宽"""
@@ -486,7 +555,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
             # print(f"[D2D调试] 目标IP带宽: Die{request.target_die} {target_type_normalized}({row},{col}) {request.req_type} = {bandwidth_gbps:.3f} GB/s")
 
         except Exception as e:
-            print(f"[D2D调试] 记录目标带宽失败: {e}")
+            # print(f"[D2D调试] 记录目标带宽失败: {e}")
+            pass
 
     def _normalize_d2d_ip_type(self, ip_type: str) -> str:
         """标准化D2D IP类型"""
@@ -1160,7 +1230,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 from_x, from_y = from_die_positions[conn["from_node"] - config.NUM_COL]
                 to_x, to_y = to_die_positions[conn["to_node"] - config.NUM_COL]
 
-                print(f"[D2D连接] 绘制{conn['type']}连接: Die{conn['from_die']}节点{conn['from_node']} -> Die{conn['to_die']}节点{conn['to_node']}, 带宽={conn['bandwidth']:.3f} GB/s")
+                # print(f"[D2D连接] 绘制{conn['type']}连接: Die{conn['from_die']}节点{conn['from_node']} -> Die{conn['to_die']}节点{conn['to_node']}, 带宽={conn['bandwidth']:.3f} GB/s")
 
                 # 计算箭头方向
                 dx, dy = to_x - from_x, to_y - from_y
@@ -1305,13 +1375,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 label_y = mid_y + dy * 0.15
             else:
                 # 垂直方向：标签向左/右偏移
-                label_x = mid_x + (dy * 0.2 if dx > 0 else -dy * 0.2)
+                label_x = mid_x + (dy * 0.3 if dx > 0 else -dy * 0.3)
                 label_y = mid_y - 0.15
 
             # 绘制单个标签（与Die内部链路一致）
             ax.text(label_x, label_y, label_text, ha="center", va="center", fontsize=8, fontweight="normal", color=color)
 
-            print(f"[D2D连接] 连接{connection_index}: {arrow_type}箭头, 带宽={bandwidth:.3f} GB/s")
+            # print(f"[D2D连接] 连接{connection_index}: {arrow_type}箭头, 带宽={bandwidth:.3f} GB/s")
 
     def save_d2d_axi_channel_statistics(self, output_path, d2d_bandwidth, dies, config):
         """

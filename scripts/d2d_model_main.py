@@ -37,8 +37,8 @@ def main():
         result_save_path="../Result/d2d_demo/",
         results_fig_save_path="../Result/d2d_demo/figures/",
         verbose=1,
-        print_d2d_trace=1,  # 启用D2D trace功能
-        show_d2d_trace_id=29,  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
+        print_d2d_trace=0,  # 启用D2D trace功能
+        show_d2d_trace_id=0,  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
         d2d_trace_sleep=0.0,  # 不暂停，加快调试
         enable_flow_graph=1,  # 是否在仿真结束后自动生成流量图
         # flow_graph_mode="total",  # 显示带宽值和使用率信息
