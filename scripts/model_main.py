@@ -13,9 +13,9 @@ if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
 
 def main():
     # traffic_file_path = r"../test_data/"
-    # traffic_file_path = r"../../C2C/traffic_data"
+    traffic_file_path = r"../../C2C/traffic_data"
     # traffic_file_path = r"../traffic/traffic0730"
-    traffic_file_path = r"../traffic/0617/"
+    # traffic_file_path = r"../traffic/0617/"
     # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
     # traffic_file_path = r"../traffic/RW_4x2_4x4/"
     # traffic_file_path = r"../traffic/nxn_traffics"
@@ -33,8 +33,8 @@ def main():
             # r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
             # r"full_bw_R_4x5.txt"
-            "LLama2_AllReduce.txt"
-            # "test1.txt"
+            # "LLama2_AllReduce.txt"
+            "test1.txt"
             # "traffic_2260E_case1.txt",
             # "LLama2_AttentionFC.txt"
             # "W_8x8.txt"
@@ -64,10 +64,10 @@ def main():
     # 默认拓扑类型
     # topo_type = "4x9"
     # topo_type = "9x4"
-    topo_type = "5x4"  # SG2262
+    # topo_type = "5x4"  # SG2262
     # topo_type = "4x4"
     # topo_type = "5x2"
-    # topo_type = "3x3"
+    topo_type = "3x3"
     # topo_type = "6x5"  # SG2260
     # topo_type = "8x8"  # SG2260E
 
@@ -87,7 +87,7 @@ def main():
         traffic_config=traffic_config,
         result_save_path=result_save_path,
         results_fig_save_path=results_fig_save_path,
-        plot_flow_fig=0,
+        plot_flow_fig=1,
         flow_fig_show_CDMA=0,
         plot_RN_BW_fig=0,
         plot_link_state=0,

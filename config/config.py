@@ -62,16 +62,18 @@ class CrossRingConfig:
         self.NETWORK_FREQUENCY = args.NETWORK_FREQUENCY
         self.RN_R_TRACKER_OSTD = args.RN_R_TRACKER_OSTD
         self.RN_W_TRACKER_OSTD = args.RN_W_TRACKER_OSTD
-        self.RN_RDB_SIZE = args.RN_RDB_SIZE
-        self.RN_WDB_SIZE = args.RN_WDB_SIZE
         self.SN_DDR_R_TRACKER_OSTD = args.SN_DDR_R_TRACKER_OSTD
         self.SN_DDR_W_TRACKER_OSTD = args.SN_DDR_W_TRACKER_OSTD
         self.SN_L2M_R_TRACKER_OSTD = args.SN_L2M_R_TRACKER_OSTD
         self.SN_L2M_W_TRACKER_OSTD = args.SN_L2M_W_TRACKER_OSTD
-        self.SN_DDR_RDB_SIZE = args.SN_DDR_RDB_SIZE
-        self.SN_DDR_WDB_SIZE = args.SN_DDR_WDB_SIZE
-        self.SN_L2M_RDB_SIZE = args.SN_L2M_RDB_SIZE
-        self.SN_L2M_WDB_SIZE = args.SN_L2M_WDB_SIZE
+        
+        # 自动计算缓冲区大小（如果配置文件中设置为 "auto"）
+        self.RN_RDB_SIZE = self._resolve_buffer_size(args.RN_RDB_SIZE, self.RN_R_TRACKER_OSTD * self.BURST)
+        self.RN_WDB_SIZE = self._resolve_buffer_size(args.RN_WDB_SIZE, self.RN_W_TRACKER_OSTD * self.BURST)
+        self.SN_DDR_RDB_SIZE = self._resolve_buffer_size(args.SN_DDR_RDB_SIZE, self.SN_DDR_R_TRACKER_OSTD * self.BURST)
+        self.SN_DDR_WDB_SIZE = self._resolve_buffer_size(args.SN_DDR_WDB_SIZE, self.SN_DDR_W_TRACKER_OSTD * self.BURST)
+        self.SN_L2M_RDB_SIZE = self._resolve_buffer_size(args.SN_L2M_RDB_SIZE, self.SN_L2M_R_TRACKER_OSTD * self.BURST)
+        self.SN_L2M_WDB_SIZE = self._resolve_buffer_size(args.SN_L2M_WDB_SIZE, self.SN_L2M_W_TRACKER_OSTD * self.BURST)
         # 带宽限制参数（统一TX和RX）
         self.GDMA_BW_LIMIT = args.GDMA_BW_LIMIT
         self.SDMA_BW_LIMIT = args.SDMA_BW_LIMIT
@@ -124,6 +126,31 @@ class CrossRingConfig:
         ), "ETag parameter conditions are not met."
 
         self.update_config(topo_type="default")
+
+    def _parse_buffer_size(self, value):
+        """
+        解析缓冲区大小参数，支持数字和 'auto' 字符串
+        """
+        if isinstance(value, str) and value.lower() == "auto":
+            return value
+        else:
+            return int(value)
+    
+    def _resolve_buffer_size(self, config_value, calculated_value):
+        """
+        解析缓冲区大小配置，支持自动计算
+        
+        Args:
+            config_value: 配置文件中的值，可以是数字或 "auto"
+            calculated_value: 基于公式计算的值
+            
+        Returns:
+            int: 最终的缓冲区大小
+        """
+        if isinstance(config_value, str) and config_value.lower() == "auto":
+            return calculated_value
+        else:
+            return config_value
 
     def _make_channels(self, key_types, value_factory=lambda: defaultdict(list)):  # 允许 None / callable / 静态对象
         # 把非 callable 的默认值包装成 deepcopy，可避免共享引用
@@ -400,16 +427,16 @@ class CrossRingConfig:
         parser.add_argument("--NETWORK_FREQUENCY", type=float, default=default_config["NETWORK_FREQUENCY"], help="Network frequency")
         parser.add_argument("--RN_R_TRACKER_OSTD", type=int, default=default_config["RN_R_TRACKER_OSTD"], help="RN read tracker outstanding")
         parser.add_argument("--RN_W_TRACKER_OSTD", type=int, default=default_config["RN_W_TRACKER_OSTD"], help="RN write tracker outstanding")
-        parser.add_argument("--RN_RDB_SIZE", type=int, default=default_config["RN_RDB_SIZE"], help="RN read buffer size")
-        parser.add_argument("--RN_WDB_SIZE", type=int, default=default_config["RN_WDB_SIZE"], help="RN write buffer size")
+        parser.add_argument("--RN_RDB_SIZE", type=self._parse_buffer_size, default=default_config["RN_RDB_SIZE"], help="RN read buffer size (int or 'auto')")
+        parser.add_argument("--RN_WDB_SIZE", type=self._parse_buffer_size, default=default_config["RN_WDB_SIZE"], help="RN write buffer size (int or 'auto')")
         parser.add_argument("--SN_DDR_R_TRACKER_OSTD", type=int, default=default_config["SN_DDR_R_TRACKER_OSTD"], help="SN ddr read tracker outstanding")
         parser.add_argument("--SN_DDR_W_TRACKER_OSTD", type=int, default=default_config["SN_DDR_W_TRACKER_OSTD"], help="SN ddr write tracker outstanding")
         parser.add_argument("--SN_L2M_R_TRACKER_OSTD", type=int, default=default_config["SN_L2M_R_TRACKER_OSTD"], help="SN l2m read tracker outstanding")
         parser.add_argument("--SN_L2M_W_TRACKER_OSTD", type=int, default=default_config["SN_L2M_W_TRACKER_OSTD"], help="SN l2m write tracker outstanding")
-        parser.add_argument("--SN_DDR_RDB_SIZE", type=int, default=default_config["SN_DDR_RDB_SIZE"], help="SN ddr read buffer size")
-        parser.add_argument("--SN_DDR_WDB_SIZE", type=int, default=default_config["SN_DDR_WDB_SIZE"], help="SN ddr write buffer size")
-        parser.add_argument("--SN_L2M_RDB_SIZE", type=int, default=default_config["SN_L2M_RDB_SIZE"], help="SN l2m read buffer size")
-        parser.add_argument("--SN_L2M_WDB_SIZE", type=int, default=default_config["SN_L2M_WDB_SIZE"], help="SN l2m write buffer size")
+        parser.add_argument("--SN_DDR_RDB_SIZE", type=self._parse_buffer_size, default=default_config["SN_DDR_RDB_SIZE"], help="SN ddr read buffer size (int or 'auto')")
+        parser.add_argument("--SN_DDR_WDB_SIZE", type=self._parse_buffer_size, default=default_config["SN_DDR_WDB_SIZE"], help="SN ddr write buffer size (int or 'auto')")
+        parser.add_argument("--SN_L2M_RDB_SIZE", type=self._parse_buffer_size, default=default_config["SN_L2M_RDB_SIZE"], help="SN l2m read buffer size (int or 'auto')")
+        parser.add_argument("--SN_L2M_WDB_SIZE", type=self._parse_buffer_size, default=default_config["SN_L2M_WDB_SIZE"], help="SN l2m write buffer size (int or 'auto')")
         parser.add_argument("-tt", "--TOPO_TYPE", type=str, default="", help="Choose topology type id from [4x9, 4x5, 5x4, 9x4, 3x3]")
         parser.add_argument("--TL_Etag_T1_UE_MAX", type=int, default=default_config["TL_Etag_T1_UE_MAX"], help="Horizontal cross point towards left T1 ETag FIFO Entry number")
         parser.add_argument("--TL_Etag_T2_UE_MAX", type=int, default=default_config["TL_Etag_T2_UE_MAX"], help="Horizontal cross point towards left T2 ETag FIFO Entry number")

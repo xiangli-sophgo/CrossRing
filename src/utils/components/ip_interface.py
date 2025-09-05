@@ -423,7 +423,7 @@ class IPInterface:
             # For Ring topology, ignore spurious positive responses for read requests
             if hasattr(self.config, "RING_NUM_NODE") and self.config.RING_NUM_NODE > 0 and rsp.req_type == "read" and rsp.rsp_type == "positive":
                 return  # Silently ignore - this is expected for Ring read completions
-            logging.warning(f"RSP {rsp} do not have REQ")
+            # logging.warning(f"RSP {rsp} do not have REQ")
             return
 
         req.sync_latency_record(rsp)
