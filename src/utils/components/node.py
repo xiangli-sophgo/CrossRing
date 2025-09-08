@@ -11,7 +11,7 @@ from functools import lru_cache
 
 
 class Node:
-    global_packet_id = -1
+    global_packet_id = 0
 
     def __init__(self, config: CrossRingConfig, node_id: int = 0):
         self.config = config
@@ -27,7 +27,7 @@ class Node:
 
     @classmethod
     def clear_packet_id(cls):
-        cls.global_packet_id = -1
+        cls.global_packet_id = 0
 
     def initialize_data_structures(self):
         """Initialize the data structures for read and write databases."""

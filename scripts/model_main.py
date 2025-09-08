@@ -92,8 +92,8 @@ def main():
         plot_RN_BW_fig=0,
         plot_link_state=0,
         plot_start_cycle=120,
-        print_trace=0,
-        show_trace_id=10,
+        print_trace=1,
+        show_trace_id=[99],
         show_node_id=1,
         verbose=1,
     )

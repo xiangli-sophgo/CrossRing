@@ -19,6 +19,7 @@ import numpy as np
 from functools import lru_cache
 from src.core.result_processor import *
 from src.core.traffic_scheduler import TrafficScheduler
+from src.utils.components.round_robin import RoundRobinScheduler
 import threading
 
 
@@ -195,6 +196,11 @@ class BaseModel:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
             self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
+        
+        # Initialize round-robin schedulers for different queue types
+        self.iq_scheduler = RoundRobinScheduler()  # For IQ arbitration
+        self.eq_scheduler = RoundRobinScheduler()  # For EQ arbitration
+        self.rb_scheduler = RoundRobinScheduler()  # For RB arbitration
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
@@ -792,47 +798,60 @@ class BaseModel:
                 if len(queue[ip_pos]) >= fifo_depth:
                     continue  # FIFO 满
 
-                for ip_type in list(rr_queue):
+                # Use standard round-robin scheduler for IQ arbitration
+                ip_types = list(rr_queue)
+                key = f"IQ_{direction}_{ip_pos}_{network_type}"
+                
+                def check_ip_conditions(ip_type):
                     # —— 网络‑特定 ip_type 过滤 ——
                     if network_type == "req" and not (ip_type.startswith("sdma") or ip_type.startswith("gdma") or ip_type.startswith("cdma") or ip_type.startswith("d2d_rn")):
-                        continue
+                        return False
                     if network_type == "rsp" and not (ip_type.startswith("ddr") or ip_type.startswith("l2m") or ip_type.startswith("d2d_sn")):
-                        continue
+                        return False
                     # data 网络不筛选 ip_type
 
                     if not network.IQ_channel_buffer[ip_type][ip_pos]:
-                        continue  # channel‑buffer 空
+                        return False  # channel‑buffer 空
 
                     flit = network.IQ_channel_buffer[ip_type][ip_pos][0]
                     if not self.IQ_direction_conditions[direction](flit):
-                        continue  # 方向不匹配
+                        return False  # 方向不匹配
 
                     # —— 网络‑特定前置检查 / 统计 ——
                     if network_type == "req":
-                        counts = None  # 初始化counts变量
                         if not ip_type.startswith("d2d_rn"):
                             max_gap = self.config.GDMA_RW_GAP if ip_type.startswith("gdma") else self.config.SDMA_RW_GAP
                             counts = self.dma_rw_counts[ip_type][ip_pos]
                             rd, wr = counts["read"], counts["write"]
                             if flit.req_type == "read" and abs(rd + 1 - wr) >= max_gap:
-                                continue
+                                return False
                             if flit.req_type == "write" and abs(wr + 1 - rd) >= max_gap:
-                                continue
+                                return False
+                    
+                    return True
+                
+                # Use round-robin scheduler to select IP type
+                selected_ip_type, _ = self.iq_scheduler.select(key, ip_types, check_ip_conditions)
+                
+                if selected_ip_type:
+                    flit = network.IQ_channel_buffer[selected_ip_type][ip_pos][0]
+                    
+                    # —— 网络‑特定处理 ——
+                    if network_type == "req":
+                        counts = None  # 初始化counts变量
+                        if not selected_ip_type.startswith("d2d_rn"):
+                            counts = self.dma_rw_counts[selected_ip_type][ip_pos]
                         else:
                             # D2D RN接口使用专门的统计计数器
-                            counts = self.dma_rw_counts.get(ip_type, {}).get(ip_pos, {"read": 0, "write": 0})
+                            counts = self.dma_rw_counts.get(selected_ip_type, {}).get(ip_pos, {"read": 0, "write": 0})
 
                         # 使用现有函数做资源检查 + 注入
-                        if not self._try_inject_to_direction(flit, ip_type, ip_pos, direction, counts):
-                            continue
-
-                        rr_queue.remove(ip_type)
-                        rr_queue.append(ip_type)
-                        break
+                        if self._try_inject_to_direction(flit, selected_ip_type, ip_pos, direction, counts):
+                            break  # Successfully processed, move to next direction
 
                     else:
                         # —— rsp / data 网络：直接移动到 pre‑缓冲 ——
-                        network.IQ_channel_buffer[ip_type][ip_pos].popleft()
+                        network.IQ_channel_buffer[selected_ip_type][ip_pos].popleft()
                         queue_pre[ip_pos] = flit
 
                         if network_type == "rsp":
@@ -853,10 +872,8 @@ class BaseModel:
                             
                             if hasattr(flit, "traffic_id"):
                                 self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "sent_flit")
-
-                        rr_queue.remove(ip_type)
-                        rr_queue.append(ip_type)
-                        break
+                        
+                        break  # Successfully processed, move to next direction
 
     def move_pre_to_queues_all(self):
         #  所有 IPInterface 的 *_pre → FIFO
@@ -1183,15 +1200,25 @@ class BaseModel:
         通用的ring_bridge仲裁函数
         cmp_func: 一个函数，接受 (flit.destination, next_pos)，返回True/False
         """
-        RB_flit = None
-        rr_index = network.round_robin["RB"][direction][next_pos]
-        for i in rr_index:
-            if station_flits[i] and cmp_func(station_flits[i].destination, next_pos):
-                RB_flit = station_flits[i]
-                station_flits[i] = None
-                self._update_ring_bridge(network, pos, next_pos, direction, i)
-                return RB_flit
-        return RB_flit
+        # Use standard round-robin scheduler for RB arbitration
+        slots = [0, 1, 2, 3]  # TL, TR, TU, TD
+        key = f"RB_{direction}_{pos}_{next_pos}"
+        
+        def check_rb_conditions(slot_idx):
+            if not station_flits[slot_idx]:
+                return False
+            return cmp_func(station_flits[slot_idx].destination, next_pos)
+        
+        # Use round-robin scheduler to select slot
+        selected_slot, _ = self.rb_scheduler.select(key, slots, check_rb_conditions)
+        
+        if selected_slot is not None:
+            RB_flit = station_flits[selected_slot]
+            station_flits[selected_slot] = None
+            self._update_ring_bridge(network, pos, next_pos, direction, selected_slot)
+            return RB_flit
+            
+        return None
 
     def _update_ring_bridge(self, network: Network, pos, next_pos, direction, index):
         """更新transfer stations"""
@@ -1248,8 +1275,7 @@ class BaseModel:
 
         flit.ETag_priority = "T2"
         # flit.used_entry_level = None
-        network.round_robin["RB"][direction][next_pos].remove(index)
-        network.round_robin["RB"][direction][next_pos].append(index)
+        # Note: round_robin scheduling is now handled by the RoundRobinScheduler
 
     def Eject_Queue_arbitration(self, network: Network, flit_type):
         """处理eject的仲裁逻辑,根据flit类型处理不同的eject队列"""
@@ -1480,88 +1506,101 @@ class BaseModel:
 
     def _move_to_eject_queues_pre(self, network: Network, eject_flits, ip_pos):
         for ip_type in network.EQ_channel_buffer.keys():
-            rr_queue = network.round_robin["EQ"][ip_type][ip_pos]
-            for i in rr_queue:
-                if eject_flits[i] is None:
-                    continue
-                if eject_flits[i].destination_type == ip_type and len(network.EQ_channel_buffer[ip_type][ip_pos]) < network.config.EQ_CH_FIFO_DEPTH:
-                    in_pos = ip_pos + self.config.NUM_COL
-                    network.EQ_channel_buffer_pre[ip_type][ip_pos] = eject_flits[i]
-                    eject_flits[i].is_arrive = True
-                    eject_flits[i].arrival_eject_cycle = self.cycle
-                    eject_flits[i] = None
-                    if i == 0:
-                        flit = network.eject_queues["TU"][ip_pos].popleft()
-                        if flit.used_entry_level == "T0":
-                            network.EQ_UE_Counters["TU"][ip_pos]["T0"] -= 1
-                        elif flit.used_entry_level == "T1":
-                            network.EQ_UE_Counters["TU"][ip_pos]["T1"] -= 1
-                        elif flit.used_entry_level == "T2":
-                            network.EQ_UE_Counters["TU"][ip_pos]["T2"] -= 1
-                    elif i == 1:
-                        flit = network.eject_queues["TD"][ip_pos].popleft()
-                        if flit.used_entry_level == "T1":
-                            network.EQ_UE_Counters["TD"][ip_pos]["T1"] -= 1
-                        elif flit.used_entry_level == "T2":
-                            network.EQ_UE_Counters["TD"][ip_pos]["T2"] -= 1
-                    elif i == 2:
-                        flit = network.inject_queues["EQ"][in_pos].popleft()
-                    elif i == 3:
-                        flit = network.ring_bridge["EQ"][(in_pos, ip_pos)].popleft()
+            # Use standard round-robin scheduler for EQ arbitration
+            ports = [0, 1, 2, 3]  # TU, TD, IQ, RB
+            key = f"EQ_{ip_type}_{ip_pos}"
+            
+            def check_eq_conditions(port_idx):
+                if eject_flits[port_idx] is None:
+                    return False
+                if eject_flits[port_idx].destination_type != ip_type:
+                    return False
+                if len(network.EQ_channel_buffer[ip_type][ip_pos]) >= network.config.EQ_CH_FIFO_DEPTH:
+                    return False
+                return True
+            
+            # Use round-robin scheduler to select port
+            selected_port, _ = self.eq_scheduler.select(key, ports, check_eq_conditions)
+            
+            if selected_port is not None:
+                i = selected_port
+                in_pos = ip_pos + self.config.NUM_COL
+                network.EQ_channel_buffer_pre[ip_type][ip_pos] = eject_flits[i]
+                eject_flits[i].is_arrive = True
+                eject_flits[i].arrival_eject_cycle = self.cycle
+                eject_flits[i] = None
+                
+                if i == 0:
+                    flit = network.eject_queues["TU"][ip_pos].popleft()
+                    if flit.used_entry_level == "T0":
+                        network.EQ_UE_Counters["TU"][ip_pos]["T0"] -= 1
+                    elif flit.used_entry_level == "T1":
+                        network.EQ_UE_Counters["TU"][ip_pos]["T1"] -= 1
+                    elif flit.used_entry_level == "T2":
+                        network.EQ_UE_Counters["TU"][ip_pos]["T2"] -= 1
+                elif i == 1:
+                    flit = network.eject_queues["TD"][ip_pos].popleft()
+                    if flit.used_entry_level == "T1":
+                        network.EQ_UE_Counters["TD"][ip_pos]["T1"] -= 1
+                    elif flit.used_entry_level == "T2":
+                        network.EQ_UE_Counters["TD"][ip_pos]["T2"] -= 1
+                elif i == 2:
+                    flit = network.inject_queues["EQ"][in_pos].popleft()
+                elif i == 3:
+                    flit = network.ring_bridge["EQ"][(in_pos, ip_pos)].popleft()
 
-                    # 获取通道类型
-                    flit_channel_type = getattr(flit, "flit_type", "req")  # 默认为req
+                # 获取通道类型
+                flit_channel_type = getattr(flit, "flit_type", "req")  # 默认为req
 
-                    # 更新总数据量统计（所有经过的flit，无论ETag等级）
-                    if in_pos in self.EQ_total_flits_per_node:
+                # 更新总数据量统计（所有经过的flit，无论ETag等级）
+                if in_pos in self.EQ_total_flits_per_node:
+                    if i == 0:  # TU direction
+                        self.EQ_total_flits_per_node[in_pos]["TU"] += 1
+                    elif i == 1:  # TD direction
+                        self.EQ_total_flits_per_node[in_pos]["TD"] += 1
+
+                # 更新按通道分类的总数据量统计
+                if in_pos in self.EQ_total_flits_per_channel.get(flit_channel_type, {}):
+                    if i == 0:  # TU direction
+                        self.EQ_total_flits_per_channel[flit_channel_type][in_pos]["TU"] += 1
+                    elif i == 1:  # TD direction
+                        self.EQ_total_flits_per_channel[flit_channel_type][in_pos]["TD"] += 1
+
+                if flit.ETag_priority == "T1":
+                    self.EQ_ETag_T1_num_stat += 1
+                    # Update per-node FIFO statistics (only for TU and TD directions)
+                    if ip_pos in self.EQ_ETag_T1_per_node_fifo:
                         if i == 0:  # TU direction
-                            self.EQ_total_flits_per_node[in_pos]["TU"] += 1
+                            self.EQ_ETag_T1_per_node_fifo[ip_pos]["TU"] += 1
                         elif i == 1:  # TD direction
-                            self.EQ_total_flits_per_node[in_pos]["TD"] += 1
+                            self.EQ_ETag_T1_per_node_fifo[ip_pos]["TD"] += 1
 
-                    # 更新按通道分类的总数据量统计
-                    if in_pos in self.EQ_total_flits_per_channel.get(flit_channel_type, {}):
+                    # Update per-channel statistics
+                    if ip_pos in self.EQ_ETag_T1_per_channel.get(flit_channel_type, {}):
                         if i == 0:  # TU direction
-                            self.EQ_total_flits_per_channel[flit_channel_type][in_pos]["TU"] += 1
+                            self.EQ_ETag_T1_per_channel[flit_channel_type][ip_pos]["TU"] += 1
                         elif i == 1:  # TD direction
-                            self.EQ_total_flits_per_channel[flit_channel_type][in_pos]["TD"] += 1
+                            self.EQ_ETag_T1_per_channel[flit_channel_type][ip_pos]["TD"] += 1
 
-                    if flit.ETag_priority == "T1":
-                        self.EQ_ETag_T1_num_stat += 1
-                        # Update per-node FIFO statistics (only for TU and TD directions)
-                        if ip_pos in self.EQ_ETag_T1_per_node_fifo:
-                            if i == 0:  # TU direction
-                                self.EQ_ETag_T1_per_node_fifo[ip_pos]["TU"] += 1
-                            elif i == 1:  # TD direction
-                                self.EQ_ETag_T1_per_node_fifo[ip_pos]["TD"] += 1
+                elif flit.ETag_priority == "T0":
+                    self.EQ_ETag_T0_num_stat += 1
+                    # Update per-node FIFO statistics (only for TU and TD directions)
+                    if in_pos in self.EQ_ETag_T0_per_node_fifo:
+                        if i == 0:  # TU direction
+                            self.EQ_ETag_T0_per_node_fifo[in_pos]["TU"] += 1
+                        elif i == 1:  # TD direction
+                            self.EQ_ETag_T0_per_node_fifo[in_pos]["TD"] += 1
 
-                        # Update per-channel statistics
-                        if ip_pos in self.EQ_ETag_T1_per_channel.get(flit_channel_type, {}):
-                            if i == 0:  # TU direction
-                                self.EQ_ETag_T1_per_channel[flit_channel_type][ip_pos]["TU"] += 1
-                            elif i == 1:  # TD direction
-                                self.EQ_ETag_T1_per_channel[flit_channel_type][ip_pos]["TD"] += 1
-
-                    elif flit.ETag_priority == "T0":
-                        self.EQ_ETag_T0_num_stat += 1
-                        # Update per-node FIFO statistics (only for TU and TD directions)
-                        if in_pos in self.EQ_ETag_T0_per_node_fifo:
-                            if i == 0:  # TU direction
-                                self.EQ_ETag_T0_per_node_fifo[in_pos]["TU"] += 1
-                            elif i == 1:  # TD direction
-                                self.EQ_ETag_T0_per_node_fifo[in_pos]["TD"] += 1
-
-                        # Update per-channel statistics
-                        if in_pos in self.EQ_ETag_T0_per_channel.get(flit_channel_type, {}):
-                            if i == 0:  # TU direction
-                                self.EQ_ETag_T0_per_channel[flit_channel_type][in_pos]["TU"] += 1
-                            elif i == 1:  # TD direction
-                                self.EQ_ETag_T0_per_channel[flit_channel_type][in_pos]["TD"] += 1
-                    flit.ETag_priority = "T2"
-
-                    rr_queue.remove(i)
-                    rr_queue.append(i)
-                    return eject_flits
+                    # Update per-channel statistics
+                    if in_pos in self.EQ_ETag_T0_per_channel.get(flit_channel_type, {}):
+                        if i == 0:  # TU direction
+                            self.EQ_ETag_T0_per_channel[flit_channel_type][in_pos]["TU"] += 1
+                        elif i == 1:  # TD direction
+                            self.EQ_ETag_T0_per_channel[flit_channel_type][in_pos]["TD"] += 1
+                
+                flit.ETag_priority = "T2"
+                return eject_flits
+                
         return eject_flits
 
     def process_inject_queues(self, network: Network, inject_queues, direction):
