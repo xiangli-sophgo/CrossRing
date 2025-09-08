@@ -27,7 +27,7 @@ def main():
     print(f"  每个Die: {die_topo_type} (5行4列)")
     print()
 
-    # 初始化D2D仿真模型 - 启用完整功能和D2D Trace
+    # 初始化D2D仿真模型 - 启用完整功能和D2D可视化
     sim = D2D_Model(
         config=config,
         traffic_file_path=r"../test_data",
@@ -41,6 +41,9 @@ def main():
         show_d2d_trace_id=0,  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
         d2d_trace_sleep=0.0,  # 不暂停，加快调试
         enable_flow_graph=1,  # 是否在仿真结束后自动生成流量图
+        # D2D链路状态可视化参数
+        plot_link_state=1,  # 启用D2D链路状态可视化
+        plot_start_cycle=100,  # 从第100周期开始可视化
         # flow_graph_mode="total",  # 显示带宽值和使用率信息
     )
 

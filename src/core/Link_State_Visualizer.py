@@ -1698,7 +1698,7 @@ class NetworkLinkVisualizer:
                 except Exception:
                     pass
             self.should_stop = True
-        elif key == "p":
+        elif key == " ":  # 空格键控制暂停/恢复
             self.paused = not self.paused
             if self.paused:
                 self.status_text.set_text("Paused")

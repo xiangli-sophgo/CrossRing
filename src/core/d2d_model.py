@@ -66,6 +66,14 @@ class D2D_Model:
 
         # 设置跨Die连接
         self._setup_cross_die_connections()
+        
+        # 初始化D2D链路状态可视化器
+        self.d2d_link_state_vis = None
+        if self.kwargs.get("plot_link_state", 0):
+            from .D2D_Link_State_Visualizer import D2D_Link_State_Visualizer
+            # 获取第一个Die的第一个网络作为初始网络（用于配置信息）
+            initial_network = self.dies[0].req_network
+            self.d2d_link_state_vis = D2D_Link_State_Visualizer(self.num_dies, initial_network)
 
     def _create_die_instances(self):
         """为每个Die创建独立的BaseModel实例"""
@@ -83,7 +91,7 @@ class D2D_Model:
                 results_fig_save_path="",  # 禁用单个Die的图片保存，避免生成figure文件夹
                 plot_flow_fig=0,  # 禁用单个Die的流图生成
                 plot_RN_BW_fig=0,  # 禁用单个Die的带宽图生成
-                plot_link_state=self.kwargs.get("plot_link_state", 0),
+                plot_link_state=0,  # 禁用单个Die的可视化，使用D2D统一可视化
                 plot_start_cycle=self.kwargs.get("plot_start_cycle", 0),
                 print_trace=self.kwargs.get("print_trace", 0),
                 show_trace_id=self.kwargs.get("show_trace_id", 0),
@@ -280,6 +288,18 @@ class D2D_Model:
             for die_id, die_model in self.dies.items():
                 # 调用Die的step方法
                 self._step_die(die_model)
+
+            # D2D链路状态可视化更新
+            if self.d2d_link_state_vis and self.current_cycle >= self.kwargs.get("plot_start_cycle", 0):
+                # 收集所有Die的所有网络数据
+                all_die_networks = []
+                for die_id in range(self.num_dies):
+                    die_model = self.dies[die_id]
+                    die_networks = [die_model.req_network, die_model.rsp_network, die_model.data_network]
+                    all_die_networks.append(die_networks)
+                
+                # 更新可视化器
+                self.d2d_link_state_vis.update(all_die_networks, self.current_cycle)
 
             # D2D Trace调试（如果启用）
             if self.kwargs.get("print_d2d_trace", False):
