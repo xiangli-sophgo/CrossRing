@@ -28,6 +28,12 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import csv
+import threading
+import signal
+import sys
 
 
 # 配置中文字体显示
@@ -60,7 +66,7 @@ def setup_chinese_fonts():
 
         if available_font:
             matplotlib.rcParams["font.sans-serif"] = [available_font] + ["DejaVu Sans", "Arial"]
-            print(f"使用中文字体: {available_font}")
+            # print(f"使用中文字体: {available_font}")
         else:
             # 如果没有找到中文字体，至少设置负号显示
             matplotlib.rcParams["font.sans-serif"] = ["DejaVu Sans", "Arial"]
@@ -86,12 +92,12 @@ import traceback
 from typing import Dict, List, Tuple, Any, Optional
 import itertools
 import threading
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 # ==================== 全局配置 ====================
 N_REPEATS = 1  # 每个配置的重复次数（无随机性，只需1次）
-N_JOBS = 10  # 并行作业数
-SIMULATION_TIME = 5000  # 仿真时间
+N_JOBS = 7  # 并行作业数
+SIMULATION_TIME = 200  # 仿真时间
 VERBOSE = 0
 # 内存优化配置
 MAX_COMBINATIONS_IN_MEMORY = 100000  # 内存中最大组合数
@@ -128,30 +134,40 @@ FIFO_PARAMS = {
     # "IQ_OUT_FIFO_DEPTH_VERTICAL": {"range": [2, 16], "default": 8},
     # "IQ_OUT_FIFO_DEPTH_EQ": {"range": [2, 16], "default": 8},
     "RB_OUT_FIFO_DEPTH": {"range": [2, 8], "default": 8},
-    "RB_IN_FIFO_DEPTH": {"range": [2, 16], "default": 16},
-    "EQ_IN_FIFO_DEPTH": {"range": [2, 16], "default": 16},
+    # "RB_IN_FIFO_DEPTH": {"range": [2, 16], "default": 16},
+    # "EQ_IN_FIFO_DEPTH": {"range": [2, 16], "default": 16},
 }
 
 # ETag参数配置（包含约束关系）
 ETAG_PARAMS = {
-    "TL_Etag_T2_UE_MAX": {"range": [1, 15], "default": 8, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
-    "TL_Etag_T1_UE_MAX": {"range": [2, 15], "default": 15, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo_and_greater_than_t2", "corresponding_t2": "TL_Etag_T2_UE_MAX"},
-    "TR_Etag_T2_UE_MAX": {"range": [1, 15], "default": 12, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
-    "TU_Etag_T2_UE_MAX": {"range": [1, 15], "default": 8, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
-    "TU_Etag_T1_UE_MAX": {"range": [2, 15], "default": 15, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo_and_greater_than_t2", "corresponding_t2": "TU_Etag_T2_UE_MAX"},
-    "TD_Etag_T2_UE_MAX": {"range": [1, 15], "default": 12, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
+    # "TL_Etag_T2_UE_MAX": {"range": [1, 15], "default": 8, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
+    # "TL_Etag_T1_UE_MAX": {"range": [2, 15], "default": 15, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo_and_greater_than_t2", "corresponding_t2": "TL_Etag_T2_UE_MAX"},
+    # "TR_Etag_T2_UE_MAX": {"range": [1, 15], "default": 12, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
+    # "TU_Etag_T2_UE_MAX": {"range": [1, 15], "default": 8, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
+    # "TU_Etag_T1_UE_MAX": {"range": [2, 15], "default": 15, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo_and_greater_than_t2", "corresponding_t2": "TU_Etag_T2_UE_MAX"},
+    # "TD_Etag_T2_UE_MAX": {"range": [1, 15], "default": 12, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
 }
 
 # 合并所有参数
 ALL_PARAMS = {**FIFO_PARAMS, **ETAG_PARAMS}
 
 
-# Windows并行处理辅助函数
-def run_single_simulation(combination, config_path, topo_type, traffic_files, traffic_weights, traffic_path):
+# 独立的并行仿真函数
+def run_single_simulation_optimized(sim_params):
     """
-    并行处理的包装函数，用于Windows兼容性
+    优化的独立仿真函数，参考traffic_sim_main.py的设计
+
+    Args:
+        sim_params: (combination, config_path, topo_type, traffic_files, traffic_weights, traffic_path)
+
+    Returns:
+        {"combination": combination, "performance": total_weighted_bw}
     """
+    combination, config_path, topo_type, traffic_files, traffic_weights, traffic_path = sim_params
+
     try:
+        print(f"Starting simulation for combination on process {os.getpid()}")
+
         # 创建仿真实例
         cfg = CrossRingConfig(config_path)
         cfg.TOPO_TYPE = topo_type
@@ -208,118 +224,89 @@ def run_single_simulation(combination, config_path, topo_type, traffic_files, tr
                 sim.print_interval = SIMULATION_TIME
                 sim.run()
 
-                # 获取结果
-                bw = sim.get_results().get("mixed_avg_weighted_bw", 0)
+                # 获取完整的仿真结果（配置+统计）
+                sim_results = sim.get_results()
+                bw = sim_results.get("mixed_avg_weighted_bw", 0)
                 bw_list.append(bw)
+
+                # 只在第一次重复时保存完整结果，避免重复
+                if repeat == 0:
+                    full_results = sim_results
 
             # 计算该traffic的平均带宽
             avg_bw = np.mean(bw_list)
             total_weighted_bw += avg_bw * weight
 
-        return {"combination": combination, "performance": total_weighted_bw}
+        # 使用完整的仿真结果，包含所有配置和统计信息
+        # 这样生成的CSV与traffic_sim_main.py格式一致
+        result_dict = full_results.copy()
+
+        # 添加优化相关的元数据
+        result_dict["optimization_performance"] = total_weighted_bw
+        result_dict["optimization_simulation_time"] = SIMULATION_TIME
+        result_dict["optimization_n_repeats"] = N_REPEATS
+        result_dict["optimization_traffic_files"] = "_".join(traffic_files)
+        result_dict["optimization_traffic_weights"] = "_".join(map(str, traffic_weights))
+
+        return result_dict
 
     except Exception as e:
         print(f"仿真失败: {e}")
-        return {"combination": combination, "performance": 0}
-
-
-def run_batch_simulation_wrapper(combinations_batch, config_path, topo_type, traffic_files, traffic_weights, traffic_path):
-    """
-    批量仿真的包装函数，用于并行处理
-    """
-    import os
-    import time
-
-    process_id = os.getpid()
-    start_time = time.time()
-    batch_size = len(combinations_batch)
-
-    # 在子进程中输出状态（虽然主进程看不到，但可以确认在运行）
-    print(f"[进程 {process_id}] 开始处理批次: {batch_size} 个组合")
-
-    results = []
-    for i, combination in enumerate(combinations_batch):
-        if i % 5 == 0:  # 每5个组合输出一次状态
-            elapsed = time.time() - start_time
-            avg_time = elapsed / (i + 1) if i > 0 else 0
-            remaining_time = avg_time * (batch_size - i - 1)
-            print(f"[进程 {process_id}] 进度: {i}/{batch_size} ({i/batch_size*100:.1f}%) - 耗时: {elapsed:.1f}s - 预计剩余: {remaining_time:.1f}s")
-
-        # 运行单个仿真前的状态
-        if i < 3:  # 只在前3个组合显示详细信息，避免过多输出
-            param_info = ", ".join([f"{k}:{v}" for k, v in list(combination.items())[:3]])  # 只显示前3个参数
-            print(f"[进程 {process_id}] 开始仿真组合 {i+1}: {param_info}...")
-
-        result = run_single_simulation(combination, config_path, topo_type, traffic_files, traffic_weights, traffic_path)
-        results.append(result)
-
-        # 仿真完成的状态
-        if i < 3:
-            performance = result.get("performance", 0)
-            print(f"[进程 {process_id}] 完成仿真组合 {i+1}: 性能 = {performance:.2f}")
-
-    end_time = time.time()
-    total_time = end_time - start_time
-    print(f"[进程 {process_id}] 批次完成: {batch_size} 个组合，总耗时: {total_time:.2f}s，平均: {total_time/batch_size:.2f}s/组合")
-
-    return results
-
-
-def run_parallel_with_threads(combinations_batch_list, config_path, topo_type, traffic_files, traffic_weights, traffic_path, n_jobs=N_JOBS):
-    """
-    使用线程池进行并行处理（Windows兼容）
-    """
-    results = []
-
-    with ThreadPoolExecutor(max_workers=n_jobs) as executor:
-        # 提交所有任务
-        future_to_batch = {executor.submit(run_batch_simulation_wrapper, batch, config_path, topo_type, traffic_files, traffic_weights, traffic_path): batch for batch in combinations_batch_list}
-
-        # 收集结果
-        for future in as_completed(future_to_batch):
-            try:
-                batch_result = future.result()
-                results.extend(batch_result)
-            except Exception as e:
-                print(f"批次处理失败: {e}")
-                # 对失败的批次返回空性能
-                batch = future_to_batch[future]
-                for combination in batch:
-                    results.append({"combination": combination, "performance": 0})
-
-    return results
-
-
-def run_parallel_with_processes(combinations_batch_list, config_path, topo_type, traffic_files, traffic_weights, traffic_path, n_jobs=N_JOBS):
-    """
-    使用进程池进行并行处理（参考traffic_sim_main.py）
-    """
-    results = []
-
-    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
-        # 提交所有任务
-        future_to_batch = {
-            executor.submit(run_batch_simulation_wrapper, batch, config_path, topo_type, traffic_files, traffic_weights, traffic_path): i for i, batch in enumerate(combinations_batch_list)
+        # 失败时返回基础格式，包含错误信息
+        result_dict = {
+            "optimization_performance": 0,
+            "optimization_simulation_time": SIMULATION_TIME,
+            "optimization_n_repeats": N_REPEATS,
+            "optimization_traffic_files": "_".join(traffic_files),
+            "optimization_traffic_weights": "_".join(map(str, traffic_weights)),
+            "optimization_error": str(e),
         }
 
-        # 收集结果
-        completed = 0
-        for future in as_completed(future_to_batch):
-            batch_idx = future_to_batch[future]
-            try:
-                batch_result = future.result()
-                results.extend(batch_result)
-                completed += 1
-                print(f"进程并行进度: {completed}/{len(combinations_batch_list)} 批次完成")
-            except Exception as e:
-                print(f"批次 {batch_idx} 处理失败: {e}")
-                # 对失败的批次返回空性能
-                batch = combinations_batch_list[batch_idx]
-                for combination in batch:
-                    results.append({"combination": combination, "performance": 0})
-                completed += 1
+        # 添加所有参数到结果中
+        for param_name, param_value in combination.items():
+            result_dict[param_name] = param_value
 
-    return results
+        return result_dict
+
+
+def save_optimization_results_to_csv(result_data, output_csv):
+    """保存优化结果到CSV文件，参考traffic_sim_main.py的实现"""
+    if result_data is None:
+        print("跳过CSV写入，由于仿真错误")
+        return
+
+    # 使用threading.Lock确保线程安全
+    if not hasattr(save_optimization_results_to_csv, "_lock"):
+        save_optimization_results_to_csv._lock = threading.Lock()
+
+    csv_file_exists = os.path.isfile(output_csv)
+
+    with save_optimization_results_to_csv._lock:
+        try:
+            # 确保输出目录存在
+            os.makedirs(os.path.dirname(output_csv), exist_ok=True)
+
+            with open(output_csv, mode="a", newline="", encoding="utf-8") as output_csv_file:
+                writer = csv.DictWriter(output_csv_file, fieldnames=result_data.keys())
+                if not csv_file_exists:
+                    writer.writeheader()
+                writer.writerow(result_data)
+
+            # 显示简要信息，使用优化后的性能指标
+            combination_info = {k: v for k, v in result_data.items() if k in ALL_PARAMS.keys()}
+            param_str = ", ".join([f"{k}:{v}" for k, v in list(combination_info.items())[:3]])
+            performance = result_data.get("optimization_performance", result_data.get("performance", 0))
+            print(f"✓ CSV保存成功: {os.path.basename(output_csv)}")
+            print(f"  参数: {param_str}... 性能={performance:.2f}")
+
+        except Exception as e:
+            print(f"CSV保存失败: {e}")
+            print(f"  输出路径: {output_csv}")
+            print(f"  目录是否存在: {os.path.exists(os.path.dirname(output_csv))}")
+            print(f"  结果数据键数: {len(result_data.keys()) if result_data else 0}")
+            import traceback
+
+            traceback.print_exc()
 
 
 class FIFOExhaustiveOptimizer:
@@ -347,15 +334,33 @@ class FIFOExhaustiveOptimizer:
         os.makedirs(base_result_dir, exist_ok=True)
         os.makedirs(main_result_dir, exist_ok=True)
 
+        # CSV输出路径
+        self.csv_output_path = os.path.join(self.result_dir, "optimization_results.csv")
+
         # 结果存储
         self.cache = {}  # 仿真结果缓存
         self.param_results = {}  # 每个参数的遍历结果
         self.all_results = []  # 所有仿真结果
 
+        # 周期性保存设置
+        self.save_interval = 100  # 每100个仿真结果保存一次
+        self.last_save_count = 0  # 上次保存时的结果数量
+
+        # 约束优化相关
+        self._constraint_cache = {}  # 约束验证缓存
+        self._precomputed_ranges = {}  # 预计算的有效参数范围
+
         # 默认参数配置
         self.default_params = {}
         for param_name, param_info in ALL_PARAMS.items():
             self.default_params[param_name] = param_info["default"]
+
+        # 预计算约束范围
+        self._precompute_constraints()
+
+        # 中断处理
+        self._interrupted = False
+        self._setup_signal_handlers()
 
     def _get_cache_key(self, params: Dict) -> str:
         """生成参数配置的缓存key"""
@@ -399,6 +404,211 @@ class FIFOExhaustiveOptimizer:
                 return False
 
         return True
+
+    def _precompute_constraints(self):
+        """预计算约束范围，优化组合生成"""
+        print("预计算约束范围...")
+
+        # 为每个参数计算有效范围
+        for param_name, param_info in ALL_PARAMS.items():
+            base_range = param_info["range"]
+
+            if param_name in ETAG_PARAMS:
+                etag_info = ETAG_PARAMS[param_name]
+
+                # 如果参数有FIFO约束，需要根据相关FIFO的范围调整
+                if "less_than_fifo" in etag_info["constraint"]:
+                    related_fifo = etag_info["related_fifo"]
+                    fifo_range = FIFO_PARAMS[related_fifo]["range"]
+
+                    # ETag参数必须小于FIFO深度，在预计算阶段使用FIFO最大值-1作为上限
+                    # 这样确保至少有一些有效组合
+                    max_valid = min(base_range[1], fifo_range[1] - 1)
+                    valid_range = [base_range[0], max_valid] if max_valid >= base_range[0] else None
+                else:
+                    valid_range = base_range
+            else:
+                valid_range = base_range
+
+            self._precomputed_ranges[param_name] = valid_range
+
+            if valid_range:
+                print(f"  {param_name}: {valid_range[0]}-{valid_range[1]} (原范围: {base_range[0]}-{base_range[1]})")
+            else:
+                print(f"  {param_name}: 无有效范围 (原范围: {base_range[0]}-{base_range[1]})")
+
+    def _setup_signal_handlers(self):
+        """设置信号处理器，支持优雅中断"""
+
+        def signal_handler(signum, frame):
+            print(f"\n收到中断信号 ({signum})，正在优雅停止...")
+            print("正在保存当前结果...")
+            self._interrupted = True
+
+            # 立即保存当前结果
+            if self.all_results:
+                try:
+                    print(f"已完成 {len(self.all_results)} 个仿真，正在生成报告...")
+                    self._analyze_results()
+                    self._print_best_result()
+                    self.save_results()
+                    print(f"中断保存完成，结果已保存至: {self.result_dir}")
+                except Exception as e:
+                    print(f"中断保存过程中出错: {e}")
+                    # 至少保存原始数据
+                    try:
+                        import json
+
+                        emergency_save = os.path.join(self.result_dir, "emergency_save.json")
+                        with open(emergency_save, "w", encoding="utf-8") as f:
+                            json.dump(self.all_results, f, indent=2, ensure_ascii=False)
+                        print(f"紧急保存完成: {emergency_save}")
+                    except:
+                        print("紧急保存也失败了")
+            else:
+                print("没有结果需要保存")
+
+            print("程序已停止")
+            sys.exit(0)
+
+        # 注册信号处理器
+        signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
+        if hasattr(signal, "SIGTERM"):
+            signal.signal(signal.SIGTERM, signal_handler)  # 终止信号
+
+    def _check_constraints_cached(self, param_name: str, param_value: int, all_params: Dict) -> bool:
+        """
+        缓存版本的约束检查
+
+        Args:
+            param_name: 参数名
+            param_value: 参数值
+            all_params: 所有参数的当前值
+
+        Returns:
+            True如果满足约束，False否则
+        """
+        # 创建缓存键
+        relevant_params = {}
+        if param_name in ETAG_PARAMS:
+            etag_info = ETAG_PARAMS[param_name]
+
+            # 只包含相关的参数到缓存键中
+            relevant_params[param_name] = param_value
+
+            if "less_than_fifo" in etag_info["constraint"]:
+                related_fifo = etag_info["related_fifo"]
+                relevant_params[related_fifo] = all_params.get(related_fifo, FIFO_PARAMS[related_fifo]["default"])
+
+            if "greater_than_t2" in etag_info["constraint"]:
+                corresponding_t2 = etag_info["corresponding_t2"]
+                relevant_params[corresponding_t2] = all_params.get(corresponding_t2, ETAG_PARAMS[corresponding_t2]["default"])
+        else:
+            # FIFO参数没有约束
+            return True
+
+        cache_key = json.dumps(relevant_params, sort_keys=True)
+
+        # 检查缓存
+        if cache_key in self._constraint_cache:
+            return self._constraint_cache[cache_key]
+
+        # 计算约束
+        result = self._check_constraints(param_name, param_value, all_params)
+
+        # 缓存结果
+        self._constraint_cache[cache_key] = result
+        return result
+
+    def generate_smart_combinations(self) -> List[Dict]:
+        """
+        智能生成参数组合，按依赖顺序生成，减少无效组合
+
+        Returns:
+            有效的参数组合列表
+        """
+        print("使用智能策略生成参数组合...")
+
+        valid_combinations = []
+
+        # Step 1: 生成FIFO参数的所有组合
+        fifo_param_names = list(FIFO_PARAMS.keys())
+        fifo_param_values = {}
+
+        for param_name in fifo_param_names:
+            param_range = FIFO_PARAMS[param_name]["range"]
+            fifo_param_values[param_name] = list(range(param_range[0], param_range[1] + 1))
+
+        fifo_combinations = list(itertools.product(*[fifo_param_values[name] for name in fifo_param_names]))
+        print(f"FIFO参数组合数: {len(fifo_combinations):,}")
+
+        # Step 2: 为每个FIFO组合生成对应的有效ETag组合
+        total_valid = 0
+        total_invalid = 0
+
+        for fifo_values in tqdm(fifo_combinations, desc="生成ETag组合"):
+            # 检查中断
+            if self._interrupted:
+                print("生成过程被中断")
+                break
+
+            fifo_dict = dict(zip(fifo_param_names, fifo_values))
+
+            # 根据当前FIFO值动态计算ETag参数的有效范围
+            etag_ranges = {}
+            for etag_name, etag_info in ETAG_PARAMS.items():
+                base_range = etag_info["range"]
+
+                if "less_than_fifo" in etag_info["constraint"]:
+                    related_fifo = etag_info["related_fifo"]
+                    fifo_value = fifo_dict[related_fifo]
+                    # ETag必须小于FIFO深度
+                    max_val = min(base_range[1], fifo_value - 1)
+                    if max_val >= base_range[0]:
+                        etag_ranges[etag_name] = list(range(base_range[0], max_val + 1))
+                    else:
+                        etag_ranges[etag_name] = []  # 无有效值
+                else:
+                    etag_ranges[etag_name] = list(range(base_range[0], base_range[1] + 1))
+
+            # 检查是否所有ETag参数都有有效值
+            if any(len(ranges) == 0 for ranges in etag_ranges.values()):
+                total_invalid += 1
+                continue
+
+            # 生成ETag参数的笛卡尔积
+            etag_param_names = list(ETAG_PARAMS.keys())
+            etag_combinations = itertools.product(*[etag_ranges[name] for name in etag_param_names])
+
+            # 检查T1/T2约束
+            for etag_values in etag_combinations:
+                etag_dict = dict(zip(etag_param_names, etag_values))
+
+                # 验证T1 > T2约束
+                t1_t2_valid = True
+                for etag_name, etag_info in ETAG_PARAMS.items():
+                    if "greater_than_t2" in etag_info["constraint"]:
+                        corresponding_t2 = etag_info["corresponding_t2"]
+                        t1_value = etag_dict[etag_name]
+                        t2_value = etag_dict[corresponding_t2]
+                        if t1_value <= t2_value:
+                            t1_t2_valid = False
+                            break
+
+                if t1_t2_valid:
+                    # 合并FIFO和ETag参数
+                    full_combination = {**fifo_dict, **etag_dict}
+                    valid_combinations.append(full_combination)
+                    total_valid += 1
+                else:
+                    total_invalid += 1
+
+        print(f"智能生成完成:")
+        print(f"  有效组合: {total_valid:,}")
+        print(f"  无效组合: {total_invalid:,}")
+        print(f"  有效率: {total_valid/(total_valid+total_invalid)*100:.1f}%")
+
+        return valid_combinations
 
     def _set_platform_config(self, sim):
         """设置平台相关配置"""
@@ -534,6 +744,104 @@ class FIFOExhaustiveOptimizer:
 
         return all_combinations
 
+    def generate_smart_combinations_batches(self, batch_size: int = BATCH_PROCESSING_SIZE):
+        """
+        智能生成参数组合批次（生成器模式，节省内存）
+
+        Args:
+            batch_size: 每批的大小
+
+        Yields:
+            批量的有效参数组合
+        """
+        print(f"使用智能生成器模式分批生成有效组合，批大小: {batch_size}")
+
+        # Step 1: 生成FIFO参数的所有组合
+        fifo_param_names = list(FIFO_PARAMS.keys())
+        fifo_param_values = {}
+
+        for param_name in fifo_param_names:
+            param_range = FIFO_PARAMS[param_name]["range"]
+            fifo_param_values[param_name] = list(range(param_range[0], param_range[1] + 1))
+
+        fifo_combinations = list(itertools.product(*[fifo_param_values[name] for name in fifo_param_names]))
+        print(f"FIFO参数组合数: {len(fifo_combinations):,}")
+
+        # Step 2: 为每个FIFO组合生成对应的有效ETag组合
+        batch = []
+        total_valid = 0
+        total_invalid = 0
+        batch_count = 0
+
+        for fifo_values in fifo_combinations:
+            fifo_dict = dict(zip(fifo_param_names, fifo_values))
+
+            # 根据当前FIFO值动态计算ETag参数的有效范围
+            etag_ranges = {}
+            for etag_name, etag_info in ETAG_PARAMS.items():
+                base_range = etag_info["range"]
+
+                if "less_than_fifo" in etag_info["constraint"]:
+                    related_fifo = etag_info["related_fifo"]
+                    fifo_value = fifo_dict[related_fifo]
+                    # ETag必须小于FIFO深度
+                    max_val = min(base_range[1], fifo_value - 1)
+                    if max_val >= base_range[0]:
+                        etag_ranges[etag_name] = list(range(base_range[0], max_val + 1))
+                    else:
+                        etag_ranges[etag_name] = []  # 无有效值
+                else:
+                    etag_ranges[etag_name] = list(range(base_range[0], base_range[1] + 1))
+
+            # 检查是否所有ETag参数都有有效值
+            if any(len(ranges) == 0 for ranges in etag_ranges.values()):
+                total_invalid += 1
+                continue
+
+            # 生成ETag参数的笛卡尔积
+            etag_param_names = list(ETAG_PARAMS.keys())
+            etag_combinations = itertools.product(*[etag_ranges[name] for name in etag_param_names])
+
+            # 检查T1/T2约束
+            for etag_values in etag_combinations:
+                etag_dict = dict(zip(etag_param_names, etag_values))
+
+                # 验证T1 > T2约束
+                t1_t2_valid = True
+                for etag_name, etag_info in ETAG_PARAMS.items():
+                    if "greater_than_t2" in etag_info["constraint"]:
+                        corresponding_t2 = etag_info["corresponding_t2"]
+                        t1_value = etag_dict[etag_name]
+                        t2_value = etag_dict[corresponding_t2]
+                        if t1_value <= t2_value:
+                            t1_t2_valid = False
+                            break
+
+                if t1_t2_valid:
+                    # 合并FIFO和ETag参数
+                    full_combination = {**fifo_dict, **etag_dict}
+                    batch.append(full_combination)
+                    total_valid += 1
+
+                    # 当批次满了就返回
+                    if len(batch) >= batch_size:
+                        batch_count += 1
+                        print(f"  智能生成批次 {batch_count}: {len(batch)} 个组合 (累计有效: {total_valid:,}, 无效: {total_invalid:,})")
+                        yield batch
+                        batch = []
+                else:
+                    total_invalid += 1
+
+        # 返回最后一批（如果有的话）
+        if batch:
+            batch_count += 1
+            print(f"  最后智能批次 {batch_count}: {len(batch)} 个组合")
+            yield batch
+
+        print(f"智能生成完成: 总计有效组合 {total_valid:,}, 无效组合 {total_invalid:,}")
+        print(f"有效率: {total_valid/(total_valid+total_invalid)*100:.1f}%")
+        return
+
     def generate_valid_combinations_batches(self, batch_size: int = BATCH_PROCESSING_SIZE):
         """
         批量生成有效的参数组合（生成器模式，节省内存）
@@ -568,7 +876,7 @@ class FIFOExhaustiveOptimizer:
             # 检查约束
             is_valid = True
             for param_name, param_value in combination.items():
-                if not self._check_constraints(param_name, param_value, combination):
+                if not self._check_constraints_cached(param_name, param_value, combination):
                     is_valid = False
                     invalid_count += 1
                     break
@@ -613,7 +921,7 @@ class FIFOExhaustiveOptimizer:
 
             # 检查所有ETag参数的约束
             for param_name, param_value in combination.items():
-                if not self._check_constraints(param_name, param_value, combination):
+                if not self._check_constraints_cached(param_name, param_value, combination):
                     is_valid = False
                     break
 
@@ -688,78 +996,73 @@ class FIFOExhaustiveOptimizer:
         total_processed = 0
 
         # 分批处理有效组合
-        for batch in self.generate_valid_combinations_batches(BATCH_PROCESSING_SIZE):
+        for batch in self.generate_smart_combinations_batches(BATCH_PROCESSING_SIZE):
             batch_count += 1
             print(f"\n处理第 {batch_count} 批次，包含 {len(batch)} 个组合...")
 
-            # 处理当前批次（智能并行模式）
-            if N_JOBS > 1 and len(batch) > N_JOBS:
-                parallel_success = False
-                sub_batch_size = max(1, len(batch) // N_JOBS)
-                sub_batches = [batch[i : i + sub_batch_size] for i in range(0, len(batch), sub_batch_size)]
+            # 处理当前批次（简化的并行模式）
+            n_jobs = N_JOBS  # 使用局部变量
+            if n_jobs > 1 and len(batch) > 1:
+                try:
+                    print(f"  使用ProcessPoolExecutor处理批次 ({n_jobs}核)")
 
-                # 优先尝试多进程并行
-                if USE_MULTIPROCESSING:
-                    try:
-                        if WINDOWS_COMPATIBLE:
-                            # Windows系统：使用loky后端和包装函数
-                            from joblib import parallel_backend
+                    # 准备仿真参数列表
+                    sim_params_list = []
+                    for combination in batch:
+                        sim_params = (combination, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path)
+                        sim_params_list.append(sim_params)
 
-                            with parallel_backend("loky", n_jobs=N_JOBS):
-                                batch_results = Parallel(n_jobs=N_JOBS)(
-                                    delayed(run_batch_simulation_wrapper)(sub_batch, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path)
-                                    for sub_batch in sub_batches
-                                )
-                        else:
-                            # 非Windows系统：使用默认后端
-                            batch_results = Parallel(n_jobs=N_JOBS)(delayed(self.run_exhaustive_search_batch)(sub_batch) for sub_batch in sub_batches)
+                    start_time = time.time()
 
-                        # 合并子批次结果
-                        for batch_result in batch_results:
-                            self.all_results.extend(batch_result)
-                        parallel_success = True
+                    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+                        # 提交所有仿真任务
+                        future_to_combination = {executor.submit(run_single_simulation_optimized, params): params[0] for params in sim_params_list}
 
-                    except Exception as e:
-                        print(f"  多进程并行失败: {e}")
+                        # 收集结果
+                        batch_results = []
+                        for future in as_completed(future_to_combination):
+                            combination = future_to_combination[future]
+                            try:
+                                result = future.result()
+                                batch_results.append(result)
+                                # 立即保存到CSV
+                                save_optimization_results_to_csv(result, self.csv_output_path)
+                            except Exception as e:
+                                print(f"    仿真失败: {e}")
+                                error_result = {"combination": combination, "performance": 0, "error": str(e)}
+                                batch_results.append(error_result)
+                                save_optimization_results_to_csv(error_result, self.csv_output_path)
 
-                # 如果多进程失败，尝试线程并行
-                if not parallel_success:
-                    try:
-                        with ThreadPoolExecutor(max_workers=N_JOBS) as executor:
-                            future_to_batch = {
-                                executor.submit(run_batch_simulation_wrapper, sub_batch, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path): sub_batch
-                                for sub_batch in sub_batches
-                            }
+                        self.all_results.extend(batch_results)
 
-                            for future in as_completed(future_to_batch):
-                                try:
-                                    batch_result = future.result()
-                                    self.all_results.extend(batch_result)
-                                except Exception as e:
-                                    print(f"  子批次处理失败: {e}")
-                                    # 对失败的子批次返回空性能
-                                    sub_batch = future_to_batch[future]
-                                    for combination in sub_batch:
-                                        self.all_results.append({"combination": combination, "performance": 0})
+                    elapsed_time = time.time() - start_time
+                    print(f"  批次完成，耗时: {elapsed_time:.1f}秒")
 
-                        parallel_success = True
-
-                    except Exception as e:
-                        print(f"  线程并行也失败: {e}")
-
-                # 如果所有并行方式都失败，使用串行处理
-                if not parallel_success:
-                    print(f"  所有并行方式失败，使用串行处理批次{batch_count}")
+                except Exception as e:
+                    print(f"  批次并行处理失败: {e}")
+                    print(f"  使用串行处理批次{batch_count}")
                     for combination in tqdm(batch, desc=f"批次{batch_count}串行"):
-                        performance = self.run_simulation(combination)
-                        result = {"combination": combination, "performance": performance}
-                        self.all_results.append(result)
+                        sim_params = (combination, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path)
+                        try:
+                            result = run_single_simulation_optimized(sim_params)
+                            self.all_results.append(result)
+                            save_optimization_results_to_csv(result, self.csv_output_path)
+                        except Exception as e:
+                            error_result = {"combination": combination, "optimization_performance": 0, "error": str(e)}
+                            self.all_results.append(error_result)
+                            save_optimization_results_to_csv(error_result, self.csv_output_path)
             else:
                 # 串行处理小批次
                 for combination in tqdm(batch, desc=f"批次{batch_count}仿真"):
-                    performance = self.run_simulation(combination)
-                    result = {"combination": combination, "performance": performance}
-                    self.all_results.append(result)
+                    sim_params = (combination, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path)
+                    try:
+                        result = run_single_simulation_optimized(sim_params)
+                        self.all_results.append(result)
+                        save_optimization_results_to_csv(result, self.csv_output_path)
+                    except Exception as e:
+                        error_result = {"combination": combination, "optimization_performance": 0, "error": str(e)}
+                        self.all_results.append(error_result)
+                        save_optimization_results_to_csv(error_result, self.csv_output_path)
 
             total_processed += len(batch)
 
@@ -777,11 +1080,8 @@ class FIFOExhaustiveOptimizer:
         """常规处理模式（内存充足时使用）"""
         print("使用常规处理模式...")
 
-        # Step 1: 生成所有组合
-        all_combinations = self.generate_all_combinations()
-
-        # Step 2: 过滤有效组合
-        valid_combinations = self.filter_valid_combinations(all_combinations)
+        # Step 1: 使用智能生成策略直接生成有效组合
+        valid_combinations = self.generate_smart_combinations()
 
         if not valid_combinations:
             print("没有找到满足约束的有效组合！")
@@ -790,162 +1090,98 @@ class FIFOExhaustiveOptimizer:
         print(f"\n开始运行 {len(valid_combinations):,} 个有效组合的仿真...")
 
         # Step 3: 批量处理有效组合
-        batch_size = max(1, len(valid_combinations) // N_JOBS)
+        # 使用局部变量避免全局变量作用域问题
+        n_jobs = N_JOBS
+        batch_size = max(1, len(valid_combinations) // n_jobs)
         batches = [valid_combinations[i : i + batch_size] for i in range(0, len(valid_combinations), batch_size)]
 
         print(f"将分为 {len(batches)} 个批次并行处理")
 
-        # Step 4: 运行仿真（智能并行处理）
-        if N_JOBS > 1:
-            parallel_success = False
+        # Step 4: 运行仿真（简化的并行处理）
+        print(f"开始运行 {len(valid_combinations):,} 个有效组合的仿真...")
 
-            # 优先尝试ProcessPoolExecutor（参考traffic_sim_main.py）
+        # 准备仿真参数列表
+        sim_params_list = []
+        for combination in valid_combinations:
+            sim_params = (combination, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path)
+            sim_params_list.append(sim_params)
+
+        # 使用ProcessPoolExecutor进行并行处理
+        if n_jobs > 1:
             try:
-                print(f"使用ProcessPoolExecutor并行处理 ({N_JOBS}核)")
+                print(f"使用ProcessPoolExecutor并行处理 ({n_jobs}核)")
 
-                with ProcessPoolExecutor(max_workers=N_JOBS) as executor:
-                    # 提交所有任务
-                    future_to_batch = {
-                        executor.submit(run_batch_simulation_wrapper, batch, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path): i
-                        for i, batch in enumerate(batches)
-                    }
+                start_time = time.time()
 
-                    total_combinations = sum(len(batch) for batch in batches)
-                    avg_combinations_per_batch = total_combinations / len(batches) if batches else 0
+                with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+                    # 提交所有仿真任务
+                    future_to_combination = {executor.submit(run_single_simulation_optimized, params): params[0] for params in sim_params_list}
 
-                    print(f"已提交 {len(batches)} 个批次到进程池")
-                    print(f"总组合数: {total_combinations:,}，平均每批次: {avg_combinations_per_batch:.0f} 个组合")
-                    print("正在运行仿真... (多进程输出不显示，请等待)")
+                    print(f"已提交 {len(sim_params_list)} 个仿真任务到进程池")
                     print(f"当前时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-                    # 使用tqdm显示进度
-                    start_time = time.time()
+                    # 收集结果
+                    completed = 0
+                    for future in as_completed(future_to_combination):
+                        # 检查中断
+                        if self._interrupted:
+                            print("仿真过程被中断")
+                            break
 
-                    with tqdm(total=len(batches), desc="多进程仿真", unit="批次", bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]") as pbar:
-                        completed = 0
-                        total_completed_combinations = 0
+                        combination = future_to_combination[future]
+                        try:
+                            result = future.result()
+                            self.all_results.append(result)
+                            # 立即保存到CSV
+                            save_optimization_results_to_csv(result, self.csv_output_path)
+                            completed += 1
 
-                        for future in as_completed(future_to_batch):
-                            batch_idx = future_to_batch[future]
-                            try:
-                                batch_result = future.result()
-                                self.all_results.extend(batch_result)
-                                completed += 1
-                                batch_size = len(batch_result)
-                                total_completed_combinations += batch_size
-
-                                # 更新进度条
-                                pbar.update(1)
-
-                                # 计算统计信息
+                            if completed % 50 == 0 or completed == len(sim_params_list):
                                 elapsed_time = time.time() - start_time
-                                avg_time_per_batch = elapsed_time / completed if completed > 0 else 0
-                                avg_time_per_combination = elapsed_time / total_completed_combinations if total_completed_combinations > 0 else 0
-                                remaining_batches = len(batches) - completed
-                                remaining_combinations = total_combinations - total_completed_combinations
-                                eta_seconds = avg_time_per_combination * remaining_combinations if avg_time_per_combination > 0 else 0
+                                avg_time = elapsed_time / completed if completed > 0 else 0
+                                remaining_time = avg_time * (len(sim_params_list) - completed)
+                                print(f"进度: {completed}/{len(sim_params_list)} ({completed/len(sim_params_list)*100:.1f}%) - " f"耗时: {elapsed_time:.1f}s - 预计剩余: {remaining_time:.1f}s")
 
-                                # 每完成一个批次都更新信息
-                                pbar.set_postfix(
-                                    {
-                                        "已完成组合": f"{total_completed_combinations:,}/{total_combinations:,}",
-                                        "批次耗时": f"{avg_time_per_batch:.1f}s",
-                                        "组合耗时": f"{avg_time_per_combination:.2f}s",
-                                        "ETA": f"{eta_seconds/60:.1f}min" if eta_seconds > 60 else f"{eta_seconds:.0f}s",
-                                    }
-                                )
+                                # 检查中断（在进度报告时）
+                                if self._interrupted:
+                                    print("仿真过程被中断")
+                                    break
 
-                                # 每完成10个批次保存一次中间结果
-                                if completed % 10 == 0 and completed > 0:
-                                    self._save_intermediate_results(completed, len(batches))
+                        except Exception as e:
+                            print(f"仿真失败: {e}")
+                            error_result = {"combination": combination, "performance": 0, "error": str(e)}
+                            self.all_results.append(error_result)
+                            save_optimization_results_to_csv(error_result, self.csv_output_path)
+                            completed += 1
 
-                            except Exception as e:
-                                print(f"\n批次 {batch_idx} 处理失败: {e}")
-                                # 对失败的批次返回空性能
-                                batch = batches[batch_idx]
-                                for combination in batch:
-                                    self.all_results.append({"combination": combination, "performance": 0})
-                                completed += 1
-                                pbar.update(1)
-
-                parallel_success = True
+                end_time = time.time()
+                print(f"并行仿真完成，总耗时: {end_time - start_time:.2f} 秒")
 
             except Exception as e:
-                print(f"ProcessPoolExecutor并行失败: {e}")
-                print("尝试线程并行...")
+                print(f"并行处理失败: {e}")
+                print("使用单核处理模式")
+                n_jobs = 1
 
-            # 如果多进程失败或不可用，尝试线程并行
-            if not parallel_success:
-                try:
-                    # 计算已完成的结果数量，避免重复执行
-                    completed_combinations = len(self.all_results)
-                    total_expected = sum(len(batch) for batch in batches)
-
-                    if completed_combinations > 0:
-                        print(f"ProcessPoolExecutor部分完成：已完成 {completed_combinations:,}/{total_expected:,} 组合")
-                        print("使用线程池处理剩余批次...")
-
-                        # 计算需要处理的剩余批次（简化版本：重新处理所有，但记录已有结果）
-                        print("注意：由于批次边界问题，将重新处理所有批次，但会保留已有结果")
-                    else:
-                        print(f"使用线程池并行处理 ({N_JOBS}核)")
-
-                    # 备份已完成的结果
-                    backup_results = list(self.all_results)
-
-                    # 使用线程池处理所有批次
-                    with ThreadPoolExecutor(max_workers=N_JOBS) as executor:
-                        future_to_batch = {
-                            executor.submit(run_batch_simulation_wrapper, batch, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path): i
-                            for i, batch in enumerate(batches)
-                        }
-
-                        # 重置结果列表，避免重复
-                        self.all_results = []
-
-                        # 使用tqdm显示进度
-                        with tqdm(total=len(batches), desc="线程仿真") as pbar:
-                            for future in as_completed(future_to_batch):
-                                try:
-                                    batch_result = future.result()
-                                    self.all_results.extend(batch_result)
-                                except Exception as e:
-                                    print(f"批次处理失败: {e}")
-                                    # 对失败的批次返回空性能
-                                    batch_idx = future_to_batch[future]
-                                    batch = batches[batch_idx]
-                                    for combination in batch:
-                                        self.all_results.append({"combination": combination, "performance": 0})
-                                pbar.update(1)
-
-                        # 合并备份结果（如果ThreadPoolExecutor成功但结果少于备份）
-                        if len(backup_results) > len(self.all_results):
-                            print(f"线程执行结果较少，使用ProcessPoolExecutor的部分结果")
-                            self.all_results = backup_results
-
-                    parallel_success = True
-
-                except Exception as e:
-                    print(f"线程并行也失败: {e}")
-
-            # 如果所有并行方式都失败，使用单核处理
-            if not parallel_success:
-                print("所有并行方式失败，使用单核处理模式")
-                for i, combination in enumerate(tqdm(valid_combinations, desc="单核仿真")):
-                    performance = self.run_simulation(combination)
-                    result = {"combination": combination, "performance": performance}
-                    self.all_results.append(result)
-
-                    # 每完成100个组合保存一次中间结果
-                    if (i + 1) % 100 == 0:
-                        self._save_intermediate_results_single(i + 1, len(valid_combinations))
-        else:
-            # 单核处理
+        if n_jobs == 1:
+            # 单核处理（并行失败时的备用方案）
             print("使用单核处理模式")
-            for i, combination in enumerate(tqdm(valid_combinations, desc="仿真进度")):
-                performance = self.run_simulation(combination)
-                result = {"combination": combination, "performance": performance}
-                self.all_results.append(result)
+
+            # 准备仿真参数列表
+            sim_params_list = []
+            for combination in valid_combinations:
+                sim_params = (combination, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path)
+                sim_params_list.append(sim_params)
+
+            for i, sim_params in enumerate(tqdm(sim_params_list, desc="仿真进度")):
+                try:
+                    result = run_single_simulation_optimized(sim_params)
+                    self.all_results.append(result)
+                    save_optimization_results_to_csv(result, self.csv_output_path)
+                except Exception as e:
+                    combination = sim_params[0]
+                    error_result = {"combination": combination, "optimization_performance": 0, "error": str(e)}
+                    self.all_results.append(error_result)
+                    save_optimization_results_to_csv(error_result, self.csv_output_path)
 
                 # 每完成100个组合保存一次中间结果
                 if (i + 1) % 100 == 0:
@@ -968,26 +1204,39 @@ class FIFOExhaustiveOptimizer:
             print("没有有效的仿真结果")
             return
 
-        best_result = max(self.all_results, key=lambda x: x["performance"])
-        print(f"\n最佳配置性能: {best_result['performance']:.2f} GB/s")
+        best_result = max(self.all_results, key=lambda x: x.get("performance", 0))
+        print(f"\n最佳配置性能: {best_result.get('performance', 0):.2f} GB/s")
         print("最佳参数组合:")
-        for param, value in best_result["combination"].items():
-            print(f"  {param}: {value}")
+        for param_name in ALL_PARAMS.keys():
+            if param_name in best_result:
+                print(f"  {param_name}: {best_result[param_name]}")
 
     def _analyze_results(self):
         """分析所有结果，为每个参数生成统计数据"""
         print("\n分析结果数据...")
 
         # 为每个参数收集数据
-        for param_name in ALL_PARAMS.keys():
+        # 只分析实际有数据的参数
+        actual_params = set()
+        if self.all_results:
+            # 从第一个结果中获取实际存在的参数
+            first_result = self.all_results[0]
+            actual_params = {k for k in first_result.keys() if k in ALL_PARAMS.keys()}
+            print(f"实际参数: {list(actual_params)}")
+
+        for param_name in actual_params:
             param_data = []
 
             for result in self.all_results:
-                combination = result["combination"]
-                performance = result["performance"]
-                param_value = combination[param_name]
+                # 新格式：result直接包含所有参数和性能
+                if isinstance(result, dict) and param_name in result:
+                    performance = result.get("performance", 0)
+                    param_value = result[param_name]
 
-                param_data.append({"param_name": param_name, "param_value": param_value, "performance": performance, "full_combination": combination})
+                    # 构造组合字典，保持兼容性
+                    combination = {k: v for k, v in result.items() if k in actual_params}
+
+                    param_data.append({"param_name": param_name, "param_value": param_value, "performance": performance, "full_combination": combination})
 
             self.param_results[param_name] = param_data
 
@@ -996,9 +1245,13 @@ class FIFOExhaustiveOptimizer:
             unique_values = set(d["param_value"] for d in param_data)
 
             print(f"{param_name}:")
-            print(f"  取值范围: {min(unique_values)} - {max(unique_values)}")
-            print(f"  数据点数: {len(param_data)}")
-            print(f"  性能范围: {min(performances):.2f} - {max(performances):.2f} GB/s")
+            if unique_values and performances:
+                print(f"  取值范围: {min(unique_values)} - {max(unique_values)}")
+                print(f"  数据点数: {len(param_data)}")
+                print(f"  性能范围: {min(performances):.2f} - {max(performances):.2f} GB/s")
+            else:
+                print(f"  无数据点")
+                print(f"  数据点数: 0")
 
     def visualize_parameter_results(self):
         """为每个参数生成独立的性能分布图"""
@@ -1151,6 +1404,7 @@ class FIFOExhaustiveOptimizer:
             f.write("\n".join(report))
 
         print(f"摘要报告: {report_path}")
+        print(f"CSV结果文件: {self.csv_output_path}")
 
     def _save_intermediate_results(self, completed_batches: int, total_batches: int):
         """保存中间结果，防止长时间运行后丢失数据"""
@@ -1225,9 +1479,10 @@ def main():
     topo_type = "5x4"
     traffic_files = ["LLama2_AllReduce.txt"]
     traffic_weights = [1.0]
+    traffic_path = "../traffic/0617/"  # 使用绝对路径
 
     # 创建优化器
-    optimizer = FIFOExhaustiveOptimizer(config_path=config_path, topo_type=topo_type, traffic_files=traffic_files, traffic_weights=traffic_weights)
+    optimizer = FIFOExhaustiveOptimizer(config_path=config_path, topo_type=topo_type, traffic_files=traffic_files, traffic_weights=traffic_weights, traffic_path=traffic_path)
 
     print(f"配置信息:")
     print(f"  拓扑: {topo_type}")
