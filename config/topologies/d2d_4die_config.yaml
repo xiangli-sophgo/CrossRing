@@ -1,0 +1,44 @@
+# D2D (Die-to-Die) 4-Die 配置文件
+
+# D2D 特定配置
+D2D_ENABLED: true
+NUM_DIES: 4
+D2D_LAYOUT: "GRID_2X2"  # 2x2网格布局模式
+
+# 4-Die连接映射
+D2D_CONNECTION_MAP:
+  0: {1: "horizontal", 2: "vertical"}    # Die 0连接Die 1(水平)和Die 2(垂直)
+  1: {0: "horizontal", 3: "vertical"}    # Die 1连接Die 0(水平)和Die 3(垂直)
+  2: {0: "vertical", 3: "horizontal"}    # Die 2连接Die 0(垂直)和Die 3(水平)
+  3: {1: "vertical", 2: "horizontal"}    # Die 3连接Die 1(垂直)和Die 2(水平)
+
+# 多跳路由配置
+D2D_MULTI_HOP_ENABLED: true
+D2D_ROUTING_ALGORITHM: "shortest_path"  # shortest_path, load_balance
+
+# D2D 延迟配置 (cycles) - 保持不变
+D2D_AR_LATENCY: 10  # 地址读通道延迟
+D2D_R_LATENCY: 10   # 读数据通道延迟
+D2D_AW_LATENCY: 10  # 地址写通道延迟
+D2D_W_LATENCY: 10   # 写数据通道延迟
+D2D_B_LATENCY: 10   # 写响应通道延迟
+D2D_DBID_LATENCY: 10 # DBID 信号延迟
+D2D_MAX_OUTSTANDING: 16  # 最大未完成事务数
+
+# D2D 带宽控制 - 保持不变
+D2D_DATA_BW_LIMIT: 64   # D2D数据通道带宽限制
+D2D_RN_BW_LIMIT: 128    # D2D RN 带宽限制 (GB/s)
+D2D_SN_BW_LIMIT: 128    # D2D SN 带宽限制 (GB/s)
+
+# D2D 资源管理配置 - 保持不变
+# D2D_RN 跟踪器配置
+D2D_RN_R_TRACKER_OSTD: 48   # D2D RN 读跟踪器 OSTD
+D2D_RN_W_TRACKER_OSTD: 48   # D2D RN 写跟踪器 OSTD
+D2D_RN_RDB_SIZE: 192        # D2D RN 读databuffer大小
+D2D_RN_WDB_SIZE: 192        # D2D RN 写databuffer大小
+
+# D2D_SN 跟踪器配置
+D2D_SN_R_TRACKER_OSTD: 48   # D2D SN 读跟踪器 OSTD
+D2D_SN_W_TRACKER_OSTD: 48   # D2D SN 写跟踪器 OSTD
+D2D_SN_RDB_SIZE: 192        # D2D SN 读databuffer大小
+D2D_SN_WDB_SIZE: 192        # D2D SN 写databuffer大小

@@ -747,6 +747,23 @@ class D2DResultProcessor(BandwidthAnalyzer):
         for node in actual_nodes:
             x = node % config.NUM_COL
             y = node // config.NUM_COL
+            
+            # 根据die_id和布局决定是否旋转
+            need_rotate = False
+            d2d_layout = getattr(config, "D2D_LAYOUT", "HORIZONTAL").upper()
+            
+            if d2d_layout == "VERTICAL" and die_id == 1:
+                # 垂直布局时，Die 1（上方）旋转180度
+                need_rotate = True
+            elif d2d_layout == "HORIZONTAL" and die_id == 1:
+                # 水平布局时，Die 1（右侧）旋转180度
+                need_rotate = True
+            
+            if need_rotate:
+                # 旋转180度：x和y都取反（相对于中心点）
+                x = (config.NUM_COL - 1) - x
+                y = (config.NUM_ROW - 1) - y
+            
             if y % 2 == 1:  # 奇数行左移
                 x -= 0.25
                 y -= 0.6
@@ -1038,8 +1055,26 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 始终绘制信息框 - 改为正方形
         # IP信息框位置和大小（正方形）
         ip_size = square_size * 2.0  # 正方形大小
-        ip_x = x - square_size - ip_size / 2
-        ip_y = y + 0.2
+        
+        # 根据die_id和布局决定IP框的相对位置
+        need_rotate = False
+        d2d_layout = getattr(config, "D2D_LAYOUT", "HORIZONTAL").upper()
+        
+        if d2d_layout == "VERTICAL" and die_id == 1:
+            # 垂直布局时，Die 1（上方）已旋转180度
+            need_rotate = True
+        elif d2d_layout == "HORIZONTAL" and die_id == 1:
+            # 水平布局时，Die 1（右侧）已旋转180度
+            need_rotate = True
+        
+        if need_rotate:
+            # Die旋转了，IP框也要相应调整位置（右偏移变左偏移）
+            ip_x = x + square_size + ip_size / 2
+            ip_y = y - 0.2
+        else:
+            # Die没有旋转，保持原始位置（左偏移）
+            ip_x = x - square_size - ip_size / 2
+            ip_y = y + 0.2
 
         # 绘制IP信息框
         ip_rect = Rectangle(
@@ -1253,24 +1288,44 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
     def _find_target_node_for_write(self, die0_node, die1_positions):
         """根据D2D请求推断写数据的目标节点"""
-        # 简化逻辑：按索引对应
         die0_positions = getattr(self.config, "D2D_DIE0_POSITIONS", [36, 37, 38, 39])
+        
+        # 检查Die1是否旋转了180度
+        d2d_layout = getattr(self.config, "D2D_LAYOUT", "HORIZONTAL").upper()
+        die1_rotated = ((d2d_layout == "VERTICAL") or (d2d_layout == "HORIZONTAL"))
+        
         try:
             index = die0_positions.index(die0_node)
             if index < len(die1_positions):
-                return die1_positions[index]
+                if die1_rotated:
+                    # Die1旋转了，使用反向索引：第1个对最后1个，第2个对倒数第2个
+                    reverse_index = len(die1_positions) - 1 - index
+                    return die1_positions[reverse_index]
+                else:
+                    # Die1没旋转，直接按索引对应
+                    return die1_positions[index]
         except (ValueError, IndexError):
             pass
         return die1_positions[0] if die1_positions else None
 
     def _find_target_node_for_read(self, die1_node, die0_positions):
         """根据D2D请求推断读数据返回的目标节点"""
-        # 简化逻辑：按索引对应
         die1_positions = getattr(self.config, "D2D_DIE1_POSITIONS", [4, 5, 6, 7])
+        
+        # 检查Die1是否旋转了180度
+        d2d_layout = getattr(self.config, "D2D_LAYOUT", "HORIZONTAL").upper()
+        die1_rotated = ((d2d_layout == "VERTICAL") or (d2d_layout == "HORIZONTAL"))
+        
         try:
             index = die1_positions.index(die1_node)
             if index < len(die0_positions):
-                return die0_positions[index]
+                if die1_rotated:
+                    # Die1旋转了，需要反向映射：Die1的第1个对应Die0的最后1个
+                    reverse_index = len(die0_positions) - 1 - index
+                    return die0_positions[reverse_index]
+                else:
+                    # Die1没旋转，直接按索引对应
+                    return die0_positions[index]
         except (ValueError, IndexError):
             pass
         return die0_positions[0] if die0_positions else None
