@@ -197,7 +197,8 @@ class D2DConfig(CrossRingConfig):
             if layout in ["HORIZONTAL", "VERTICAL"]:
                 # 2-Die模式：Die0和Die1之间的连接
                 min_pairs = min(len(self.D2D_DIE0_POSITIONS), len(self.D2D_DIE1_POSITIONS))
-                self.D2D_PAIRS = [(self.D2D_DIE0_POSITIONS[i], self.D2D_DIE1_POSITIONS[i]) for i in range(min_pairs)]
+                # 交叉配对：第一个连接最后一个，第二个连接倒数第二个，以此类推
+                self.D2D_PAIRS = [(self.D2D_DIE0_POSITIONS[i], self.D2D_DIE1_POSITIONS[min_pairs - 1 - i]) for i in range(min_pairs)]
             
             elif layout == "GRID_2X2":
                 # 4-Die模式：根据D2D_CONNECTION_MAP创建连接对

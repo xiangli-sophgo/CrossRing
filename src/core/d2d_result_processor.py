@@ -113,7 +113,11 @@ class D2DResultProcessor(BandwidthAnalyzer):
     def _is_cross_die_request(self, flit: Flit) -> bool:
         """检查flit是否为跨Die请求"""
         return (
-            hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die") and flit.d2d_origin_die is not None and flit.d2d_target_die is not None and flit.d2d_origin_die != flit.d2d_target_die
+            hasattr(flit, "d2d_origin_die")
+            and hasattr(flit, "d2d_target_die")
+            and flit.d2d_origin_die is not None
+            and flit.d2d_target_die is not None
+            and flit.d2d_origin_die != flit.d2d_target_die
         )
 
     def _extract_d2d_info(self, first_flit: Flit, last_flit: Flit, packet_id: int) -> Optional[D2DRequestInfo]:
@@ -186,7 +190,20 @@ class D2DResultProcessor(BandwidthAnalyzer):
         write_requests = [req for req in self.d2d_requests if req.req_type == "write"]
 
         # CSV文件头
-        csv_header = ["packet_id", "source_die", "target_die", "source_node", "target_node", "source_type", "target_type", "burst_length", "start_time_ns", "end_time_ns", "latency_ns", "data_bytes"]
+        csv_header = [
+            "packet_id",
+            "source_die",
+            "target_die",
+            "source_node",
+            "target_node",
+            "source_type",
+            "target_type",
+            "burst_length",
+            "start_time_ns",
+            "end_time_ns",
+            "latency_ns",
+            "data_bytes",
+        ]
 
         # 只有存在请求时才保存对应的CSV文件
         if read_requests:
@@ -359,7 +376,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 total_bytes = sum(req.data_bytes for req in interval_requests)
                 flit_count = sum(req.burst_length for req in interval_requests)
 
-                interval = WorkingInterval(start_time=start, end_time=end, duration=end - start, flit_count=flit_count, total_bytes=total_bytes, request_count=len(interval_requests))
+                interval = WorkingInterval(
+                    start_time=start, end_time=end, duration=end - start, flit_count=flit_count, total_bytes=total_bytes, request_count=len(interval_requests)
+                )
                 working_intervals.append(interval)
 
         return working_intervals
@@ -640,7 +659,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             die_spacing_x = 0
             die_spacing_y = -(die_height + 6)  # 垂直间距：Die高度+额外间隙
             die_offsets = {0: (0, -1.5), 1: (die_spacing_x, die_spacing_y)}  # Die0在上  # Die1在下
-            figsize = (10, 20)  # 增大图像尺寸以提高清晰度
+            figsize = (10, 14)  # 增大图像尺寸以提高清晰度
 
         # 创建画布
         fig, ax = plt.subplots(figsize=figsize)
@@ -747,23 +766,25 @@ class D2DResultProcessor(BandwidthAnalyzer):
         for node in actual_nodes:
             x = node % config.NUM_COL
             y = node // config.NUM_COL
-            
+
             # 根据die_id和布局决定是否旋转
             need_rotate = False
             d2d_layout = getattr(config, "D2D_LAYOUT", "HORIZONTAL").upper()
-            
+
             if d2d_layout == "VERTICAL" and die_id == 1:
                 # 垂直布局时，Die 1（上方）旋转180度
                 need_rotate = True
             elif d2d_layout == "HORIZONTAL" and die_id == 1:
                 # 水平布局时，Die 1（右侧）旋转180度
                 need_rotate = True
-            
+
             if need_rotate:
                 # 旋转180度：x和y都取反（相对于中心点）
                 x = (config.NUM_COL - 1) - x
                 y = (config.NUM_ROW - 1) - y
-            
+                # 旋转后的Die整体向右移动一点
+                x += -0.0
+
             if y % 2 == 1:  # 奇数行左移
                 x -= 0.25
                 y -= 0.6
@@ -911,18 +932,29 @@ class D2DResultProcessor(BandwidthAnalyzer):
                     # 计算标签位置偏移（参考原始实现）
                     if has_reverse:
                         if is_horizontal:
-                            perp_dx, perp_dy = -dy * 0.15 + 0.25, dx * 0.15
+                            perp_dx, perp_dy = -dy * 0.15 + 0.25, dx * 0.18
+                            # 水平link标签向左移动
+                            if need_rotate:
+                                perp_dx -= 0.4
                         else:
-                            perp_dx, perp_dy = -dy * 0.23, dx * 0.23 - 0.35
+                            perp_dx, perp_dy = -dy * 0.23, dx * 0.23 - 0.25
+                            # 垂直link标签向上移动
+                            if need_rotate:
+                                perp_dy += 0.3
+
                         label_x = mid_x + perp_dx
                         label_y = mid_y + perp_dy
                     else:
                         if is_horizontal:
                             label_x = mid_x + dx * 0.15
                             label_y = mid_y + dy * 0.15
+                            # 水平link标签向左移动
+                            label_x = 0.0
                         else:
                             label_x = mid_x + (-dy * 0.15 if dx > 0 else dy * 0.15)
                             label_y = mid_y - 0.15
+                            # 垂直link标签向下移动
+                            label_y -= 0.0
 
                     # 绘制标签文本（无背景框）- 支持多行显示
                     # 检查是否为多行标签（包含比例信息）
@@ -1001,7 +1033,14 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 label_y = die_center_y
 
             ax.text(
-                label_x, label_y, f"Die {die_id}", ha="center", va="center", fontsize=12, fontweight="bold", bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.7, edgecolor="none")
+                label_x,
+                label_y,
+                f"Die {die_id}",
+                ha="center",
+                va="center",
+                fontsize=12,
+                fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.7, edgecolor="none"),
             )
 
         # 返回节点位置信息供跨Die连接使用
@@ -1055,18 +1094,18 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 始终绘制信息框 - 改为正方形
         # IP信息框位置和大小（正方形）
         ip_size = square_size * 2.0  # 正方形大小
-        
+
         # 根据die_id和布局决定IP框的相对位置
         need_rotate = False
         d2d_layout = getattr(config, "D2D_LAYOUT", "HORIZONTAL").upper()
-        
+
         if d2d_layout == "VERTICAL" and die_id == 1:
             # 垂直布局时，Die 1（上方）已旋转180度
             need_rotate = True
         elif d2d_layout == "HORIZONTAL" and die_id == 1:
             # 水平布局时，Die 1（右侧）已旋转180度
             need_rotate = True
-        
+
         if need_rotate:
             # Die旋转了，IP框也要相应调整位置（右偏移变左偏移）
             ip_x = x + square_size + ip_size / 2
@@ -1223,37 +1262,33 @@ class D2DResultProcessor(BandwidthAnalyzer):
         try:
             # 获取D2D节点位置配置
             die0_positions = getattr(config, "D2D_DIE0_POSITIONS", [36, 37, 38, 39])
-            die1_positions = getattr(config, "D2D_DIE1_POSITIONS", [4, 5, 6, 7])
+            die1_positions = getattr(config, "D2D_DIE1_POSITIONS", [36, 37, 38, 39])
 
             if not die0_positions or not die1_positions:
                 print("[D2D连接] 警告：D2D节点位置配置缺失")
                 return
 
-            # 收集所有有流量的连接
-            active_connections = []
+            # 收集所有配置的D2D连接（包括无带宽的）
+            all_connections = []
 
-            # 检查Die0的写数据流量 (W通道) - 表示从Die0发送到Die1
-            for die0_node in die0_positions:
+            # 获取D2D连接对配置
+            d2d_pairs = getattr(config, "D2D_PAIRS", [])
+            if not d2d_pairs:
+                print("[D2D连接] 警告：没有找到D2D_PAIRS配置")
+                return
+
+            # 为每个D2D连接对创建双向连接（写和读）
+            for die0_node, die1_node in d2d_pairs:
+                # Die0->Die1 写连接 (W通道)
                 w_bw = d2d_bandwidth.get(0, {}).get(die0_node, {}).get("W", 0.0)
-                if w_bw > 0.001:
-                    # print(f"[D2D连接分析] Die0节点{die0_node}有写数据流量: {w_bw:.3f} GB/s")
-                    # 找到对应的Die1目标节点（从D2D请求中推断）
-                    target_die1_node = self._find_target_node_for_write(die0_node, die1_positions)
-                    if target_die1_node:
-                        active_connections.append({"type": "write", "from_die": 0, "from_node": die0_node, "to_die": 1, "to_node": target_die1_node, "bandwidth": w_bw})
+                all_connections.append({"type": "write", "from_die": 0, "from_node": die0_node, "to_die": 1, "to_node": die1_node, "bandwidth": w_bw})
 
-            # 检查Die1的读数据返回流量 (R通道) - 表示从Die1返回到Die0
-            for die1_node in die1_positions:
+                # Die1->Die0 读返回连接 (R通道)
                 r_bw = d2d_bandwidth.get(1, {}).get(die1_node, {}).get("R", 0.0)
-                if r_bw > 0.001:
-                    # print(f"[D2D连接分析] Die1节点{die1_node}有读数据返回流量: {r_bw:.3f} GB/s")
-                    # 找到对应的Die0目标节点（从D2D请求中推断）
-                    target_die0_node = self._find_target_node_for_read(die1_node, die0_positions)
-                    if target_die0_node:
-                        active_connections.append({"type": "read", "from_die": 1, "from_node": die1_node, "to_die": 0, "to_node": target_die0_node, "bandwidth": r_bw})
+                all_connections.append({"type": "read", "from_die": 1, "from_node": die1_node, "to_die": 0, "to_node": die0_node, "bandwidth": r_bw})
 
-            # 绘制所有活跃连接
-            for i, conn in enumerate(active_connections):
+            # 绘制所有连接（包括无带宽的灰色箭头）
+            for i, conn in enumerate(all_connections):
                 # 使用实际节点位置
                 from_die_positions = die_node_positions.get(conn["from_die"], {})
                 to_die_positions = die_node_positions.get(conn["to_die"], {})
@@ -1262,10 +1297,18 @@ class D2DResultProcessor(BandwidthAnalyzer):
                     print(f"[D2D连接] 警告：找不到节点位置 - From: Die{conn['from_die']}节点{conn['from_node']}, To: Die{conn['to_die']}节点{conn['to_node']}")
                     continue
 
-                from_x, from_y = from_die_positions[conn["from_node"] - config.NUM_COL]
-                to_x, to_y = to_die_positions[conn["to_node"] - config.NUM_COL]
-
-                # print(f"[D2D连接] 绘制{conn['type']}连接: Die{conn['from_die']}节点{conn['from_node']} -> Die{conn['to_die']}节点{conn['to_node']}, 带宽={conn['bandwidth']:.3f} GB/s")
+                # 根据连接方向正确获取节点坐标
+                if conn["from_die"] == 0 and conn["to_die"] == 1:
+                    # Die0 -> Die1: 使用原始节点ID
+                    from_x, from_y = from_die_positions[conn["from_node"] - config.NUM_COL]
+                    to_x, to_y = to_die_positions[conn["to_node"]]
+                elif conn["from_die"] == 1 and conn["to_die"] == 0:
+                    # Die1 -> Die0: 使用原始节点ID
+                    from_x, from_y = from_die_positions[conn["from_node"]]
+                    to_x, to_y = to_die_positions[conn["to_node"] - config.NUM_COL]
+                else:
+                    print(f"[D2D连接] 警告：未知的连接方向 Die{conn['from_die']} -> Die{conn['to_die']}")
+                    continue
 
                 # 计算箭头方向
                 dx, dy = to_x - from_x, to_y - from_y
@@ -1273,12 +1316,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
                 if length > 0:
                     ux, uy = dx / length, dy / length
-                    perpx, perpy = -uy * 0.2, ux * 0.2
+                    perpx, perpy = -uy * 0.1, ux * 0.1
 
                     self._draw_single_d2d_arrow(ax, from_x, from_y, to_x, to_y, ux, uy, perpx, perpy, conn["bandwidth"], conn["type"], i)
-
-            # 为没有流量的D2D节点对绘制灰色连接线（显示潜在连接）
-            self._draw_inactive_d2d_connections(ax, die0_positions, die1_positions, active_connections, die_node_positions, config)
 
         except Exception as e:
             print(f"[D2D连接] 绘制跨Die连接失败: {e}")
@@ -1289,11 +1329,11 @@ class D2DResultProcessor(BandwidthAnalyzer):
     def _find_target_node_for_write(self, die0_node, die1_positions):
         """根据D2D请求推断写数据的目标节点"""
         die0_positions = getattr(self.config, "D2D_DIE0_POSITIONS", [36, 37, 38, 39])
-        
+
         # 检查Die1是否旋转了180度
         d2d_layout = getattr(self.config, "D2D_LAYOUT", "HORIZONTAL").upper()
-        die1_rotated = ((d2d_layout == "VERTICAL") or (d2d_layout == "HORIZONTAL"))
-        
+        die1_rotated = (d2d_layout == "VERTICAL") or (d2d_layout == "HORIZONTAL")
+
         try:
             index = die0_positions.index(die0_node)
             if index < len(die1_positions):
@@ -1310,12 +1350,12 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
     def _find_target_node_for_read(self, die1_node, die0_positions):
         """根据D2D请求推断读数据返回的目标节点"""
-        die1_positions = getattr(self.config, "D2D_DIE1_POSITIONS", [4, 5, 6, 7])
-        
+        die1_positions = getattr(self.config, "D2D_DIE1_POSITIONS", [36, 37, 38, 39])
+
         # 检查Die1是否旋转了180度
         d2d_layout = getattr(self.config, "D2D_LAYOUT", "HORIZONTAL").upper()
-        die1_rotated = ((d2d_layout == "VERTICAL") or (d2d_layout == "HORIZONTAL"))
-        
+        die1_rotated = (d2d_layout == "VERTICAL") or (d2d_layout == "HORIZONTAL")
+
         try:
             index = die1_positions.index(die1_node)
             if index < len(die0_positions):
@@ -1354,7 +1394,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 continue
 
             die0_x, die0_y = die0_positions_map[die0_node - config.NUM_COL]
-            die1_x, die1_y = die1_positions_map[target_die1_node - config.NUM_COL]
+            die1_x, die1_y = die1_positions_map[target_die1_node]
 
             dx, dy = die1_x - die0_x, die1_y - die0_y
             length = np.sqrt(dx * dx + dy * dy)
