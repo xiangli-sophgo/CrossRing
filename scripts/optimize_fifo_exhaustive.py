@@ -130,10 +130,10 @@ else:
 FIFO_PARAMS = {
     # "IQ_CH_FIFO_DEPTH": {"range": [2, 16], "default": 4},
     # "EQ_CH_FIFO_DEPTH": {"range": [2, 16], "default": 4},
-    # "IQ_OUT_FIFO_DEPTH_HORIZONTAL": {"range": [2, 16], "default": 8},
-    # "IQ_OUT_FIFO_DEPTH_VERTICAL": {"range": [2, 16], "default": 8},
+    "IQ_OUT_FIFO_DEPTH_HORIZONTAL": {"range": [2, 8], "default": 8},
+    "IQ_OUT_FIFO_DEPTH_VERTICAL": {"range": [2, 8], "default": 8},
     # "IQ_OUT_FIFO_DEPTH_EQ": {"range": [2, 16], "default": 8},
-    "RB_OUT_FIFO_DEPTH": {"range": [2, 8], "default": 8},
+    # "RB_OUT_FIFO_DEPTH": {"range": [2, 8], "default": 8},
     # "RB_IN_FIFO_DEPTH": {"range": [2, 16], "default": 16},
     # "EQ_IN_FIFO_DEPTH": {"range": [2, 16], "default": 16},
 }
@@ -227,6 +227,16 @@ def run_single_simulation_optimized(sim_params):
                 # 获取完整的仿真结果（配置+统计）
                 sim_results = sim.get_results()
                 bw = sim_results.get("mixed_avg_weighted_bw", 0)
+                
+                # 调试：如果带宽为0，打印可用的结果字段
+                if bw == 0:
+                    print(f"Warning: bandwidth is 0 for combination {combination}")
+                    print(f"Available result fields: {list(sim_results.keys())}")
+                    # 尝试其他可能的带宽字段
+                    for key in sim_results.keys():
+                        if 'bw' in key.lower() or 'bandwidth' in key.lower():
+                            print(f"  {key}: {sim_results[key]}")
+                
                 bw_list.append(bw)
 
                 # 只在第一次重复时保存完整结果，避免重复
@@ -242,6 +252,7 @@ def run_single_simulation_optimized(sim_params):
         result_dict = full_results.copy()
 
         # 添加优化相关的元数据
+        result_dict["performance"] = total_weighted_bw
         result_dict["optimization_performance"] = total_weighted_bw
         result_dict["optimization_simulation_time"] = SIMULATION_TIME
         result_dict["optimization_n_repeats"] = N_REPEATS
@@ -296,8 +307,8 @@ def save_optimization_results_to_csv(result_data, output_csv):
             combination_info = {k: v for k, v in result_data.items() if k in ALL_PARAMS.keys()}
             param_str = ", ".join([f"{k}:{v}" for k, v in list(combination_info.items())[:3]])
             performance = result_data.get("optimization_performance", result_data.get("performance", 0))
-            print(f"✓ CSV保存成功: {os.path.basename(output_csv)}")
-            print(f"  参数: {param_str}... 性能={performance:.2f}")
+            # print(f"✓ CSV保存成功: {os.path.basename(output_csv)}")
+            # print(f"  参数: {param_str}... 性能={performance:.2f}")
 
         except Exception as e:
             print(f"CSV保存失败: {e}")
@@ -355,26 +366,13 @@ class FIFOExhaustiveOptimizer:
         for param_name, param_info in ALL_PARAMS.items():
             self.default_params[param_name] = param_info["default"]
 
-        # 预计算约束范围
-        self._precompute_constraints()
-
         # 中断处理
         self._interrupted = False
         self._setup_signal_handlers()
 
-    def _get_cache_key(self, params: Dict) -> str:
-        """生成参数配置的缓存key"""
-        clean_params = {}
-        for key, value in params.items():
-            if hasattr(value, "item"):  # numpy类型
-                clean_params[key] = int(value.item())
-            else:
-                clean_params[key] = int(value)
-        return json.dumps(clean_params, sort_keys=True)
-
     def _check_constraints(self, param_name: str, param_value: int, all_params: Dict) -> bool:
         """
-        检查参数约束是否满足
+        检查参数约束是否满足（带缓存）
 
         Args:
             param_name: 参数名
@@ -387,55 +385,45 @@ class FIFOExhaustiveOptimizer:
         if param_name not in ETAG_PARAMS:
             return True  # FIFO参数没有约束
 
+        # 创建缓存键
+        etag_info = ETAG_PARAMS[param_name]
+        relevant_params = {param_name: param_value}
+
+        if "less_than_fifo" in etag_info["constraint"]:
+            related_fifo = etag_info["related_fifo"]
+            relevant_params[related_fifo] = all_params.get(related_fifo, FIFO_PARAMS[related_fifo]["default"])
+
+        if "greater_than_t2" in etag_info["constraint"]:
+            corresponding_t2 = etag_info["corresponding_t2"]
+            relevant_params[corresponding_t2] = all_params.get(corresponding_t2, ETAG_PARAMS[corresponding_t2]["default"])
+
+        cache_key = json.dumps(relevant_params, sort_keys=True)
+
+        # 检查缓存
+        if cache_key in self._constraint_cache:
+            return self._constraint_cache[cache_key]
+
+        # 执行实际约束检查
         param_info = ETAG_PARAMS[param_name]
+        result = True
 
         # 检查是否小于相关FIFO参数
         if "less_than_fifo" in param_info["constraint"]:
             related_fifo = param_info["related_fifo"]
             fifo_value = all_params.get(related_fifo, FIFO_PARAMS[related_fifo]["default"])
             if param_value >= fifo_value:
-                return False
+                result = False
 
         # 检查T1是否大于T2
-        if "greater_than_t2" in param_info["constraint"]:
+        if result and "greater_than_t2" in param_info["constraint"]:
             corresponding_t2 = param_info["corresponding_t2"]
             t2_value = all_params.get(corresponding_t2, ETAG_PARAMS[corresponding_t2]["default"])
             if param_value <= t2_value:
-                return False
+                result = False
 
-        return True
-
-    def _precompute_constraints(self):
-        """预计算约束范围，优化组合生成"""
-        print("预计算约束范围...")
-
-        # 为每个参数计算有效范围
-        for param_name, param_info in ALL_PARAMS.items():
-            base_range = param_info["range"]
-
-            if param_name in ETAG_PARAMS:
-                etag_info = ETAG_PARAMS[param_name]
-
-                # 如果参数有FIFO约束，需要根据相关FIFO的范围调整
-                if "less_than_fifo" in etag_info["constraint"]:
-                    related_fifo = etag_info["related_fifo"]
-                    fifo_range = FIFO_PARAMS[related_fifo]["range"]
-
-                    # ETag参数必须小于FIFO深度，在预计算阶段使用FIFO最大值-1作为上限
-                    # 这样确保至少有一些有效组合
-                    max_valid = min(base_range[1], fifo_range[1] - 1)
-                    valid_range = [base_range[0], max_valid] if max_valid >= base_range[0] else None
-                else:
-                    valid_range = base_range
-            else:
-                valid_range = base_range
-
-            self._precomputed_ranges[param_name] = valid_range
-
-            if valid_range:
-                print(f"  {param_name}: {valid_range[0]}-{valid_range[1]} (原范围: {base_range[0]}-{base_range[1]})")
-            else:
-                print(f"  {param_name}: 无有效范围 (原范围: {base_range[0]}-{base_range[1]})")
+        # 缓存结果
+        self._constraint_cache[cache_key] = result
+        return result
 
     def _setup_signal_handlers(self):
         """设置信号处理器，支持优雅中断"""
@@ -475,50 +463,6 @@ class FIFOExhaustiveOptimizer:
         signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
         if hasattr(signal, "SIGTERM"):
             signal.signal(signal.SIGTERM, signal_handler)  # 终止信号
-
-    def _check_constraints_cached(self, param_name: str, param_value: int, all_params: Dict) -> bool:
-        """
-        缓存版本的约束检查
-
-        Args:
-            param_name: 参数名
-            param_value: 参数值
-            all_params: 所有参数的当前值
-
-        Returns:
-            True如果满足约束，False否则
-        """
-        # 创建缓存键
-        relevant_params = {}
-        if param_name in ETAG_PARAMS:
-            etag_info = ETAG_PARAMS[param_name]
-
-            # 只包含相关的参数到缓存键中
-            relevant_params[param_name] = param_value
-
-            if "less_than_fifo" in etag_info["constraint"]:
-                related_fifo = etag_info["related_fifo"]
-                relevant_params[related_fifo] = all_params.get(related_fifo, FIFO_PARAMS[related_fifo]["default"])
-
-            if "greater_than_t2" in etag_info["constraint"]:
-                corresponding_t2 = etag_info["corresponding_t2"]
-                relevant_params[corresponding_t2] = all_params.get(corresponding_t2, ETAG_PARAMS[corresponding_t2]["default"])
-        else:
-            # FIFO参数没有约束
-            return True
-
-        cache_key = json.dumps(relevant_params, sort_keys=True)
-
-        # 检查缓存
-        if cache_key in self._constraint_cache:
-            return self._constraint_cache[cache_key]
-
-        # 计算约束
-        result = self._check_constraints(param_name, param_value, all_params)
-
-        # 缓存结果
-        self._constraint_cache[cache_key] = result
-        return result
 
     def generate_smart_combinations(self) -> List[Dict]:
         """
@@ -648,7 +592,14 @@ class FIFOExhaustiveOptimizer:
             加权平均带宽
         """
         # 检查缓存
-        cache_key = self._get_cache_key(params)
+        clean_params = {}
+        for key, value in params.items():
+            if hasattr(value, "item"):  # numpy类型
+                clean_params[key] = int(value.item())
+            else:
+                clean_params[key] = int(value)
+        cache_key = json.dumps(clean_params, sort_keys=True)
+
         if cache_key in self.cache:
             return self.cache[cache_key]
 
@@ -876,7 +827,7 @@ class FIFOExhaustiveOptimizer:
             # 检查约束
             is_valid = True
             for param_name, param_value in combination.items():
-                if not self._check_constraints_cached(param_name, param_value, combination):
+                if not self._check_constraints(param_name, param_value, combination):
                     is_valid = False
                     invalid_count += 1
                     break
@@ -921,7 +872,7 @@ class FIFOExhaustiveOptimizer:
 
             # 检查所有ETag参数的约束
             for param_name, param_value in combination.items():
-                if not self._check_constraints_cached(param_name, param_value, combination):
+                if not self._check_constraints(param_name, param_value, combination):
                     is_valid = False
                     break
 
@@ -1068,7 +1019,7 @@ class FIFOExhaustiveOptimizer:
 
             # 定期保存中间结果
             if batch_count % 10 == 0:
-                self._save_intermediate_results(batch_count)
+                self._save_intermediate_results(batch_count, -1)  # -1表示未知总批次数
 
         print(f"\n分批处理完成，总计处理 {total_processed:,} 个有效组合")
 
@@ -1190,13 +1141,6 @@ class FIFOExhaustiveOptimizer:
         # 分析结果
         self._analyze_results()
         self._print_best_result()
-
-    def _save_intermediate_results(self, batch_count: int):
-        """保存中间结果"""
-        temp_path = os.path.join(self.result_dir, f"intermediate_results_batch_{batch_count}.json")
-        with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(self.all_results, f, indent=2, ensure_ascii=False)
-        print(f"  中间结果已保存: {len(self.all_results):,} 个结果 -> {temp_path}")
 
     def _print_best_result(self):
         """打印最佳结果"""

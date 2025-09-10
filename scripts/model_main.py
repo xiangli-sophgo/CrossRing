@@ -90,7 +90,7 @@ def main():
         plot_flow_fig=1,
         flow_fig_show_CDMA=0,
         plot_RN_BW_fig=0,
-        plot_link_state=1,
+        plot_link_state=0,
         plot_start_cycle=640,
         print_trace=0,
         show_trace_id=[71],
