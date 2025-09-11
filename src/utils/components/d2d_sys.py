@@ -19,37 +19,28 @@ class D2D_Sys:
     4. 统计信息收集
     """
     
-    def __init__(self, node_pos: int, die_id: int, config):
+    def __init__(self, node_pos: int, die_id: int, target_die_id: int, target_node_pos: int, config):
         """
         初始化D2D传输系统
         
         Args:
-            node_pos: 节点位置
-            die_id: Die ID
+            node_pos: 当前节点位置
+            die_id: 当前Die ID
+            target_die_id: 目标Die ID
+            target_node_pos: 目标节点位置
             config: 配置对象
         """
         self.position = node_pos
         self.die_id = die_id
+        self.target_die_id = target_die_id
+        self.target_node_pos = target_node_pos
         self.config = config
         self.current_cycle = 0
         
-        # 获取对端Die的RN和SN位置（在初始化时确定）
-        if die_id == 0:
-            # 当前是Die0，对端是Die1
-            self.target_die_id = 1
-            die1_positions = getattr(config, 'D2D_DIE1_POSITIONS', [])
-            if not die1_positions:
-                raise ValueError("D2D_DIE1_POSITIONS未配置")
-            self.target_die_rn_pos = die1_positions[0]  # Die1的D2D_RN位置
-            self.target_die_sn_pos = die1_positions[0]  # Die1的D2D_SN位置（通常同一个位置）
-        else:
-            # 当前是Die1，对端是Die0
-            self.target_die_id = 0
-            die0_positions = getattr(config, 'D2D_DIE0_POSITIONS', [])
-            if not die0_positions:
-                raise ValueError("D2D_DIE0_POSITIONS未配置")
-            self.target_die_rn_pos = die0_positions[0]  # Die0的D2D_RN位置
-            self.target_die_sn_pos = die0_positions[0]  # Die0的D2D_SN位置（通常同一个位置）
+        # 基于配对信息设置目标位置
+        # 每个D2D_Sys实例只管理一个点对点连接
+        self.target_die_rn_pos = target_node_pos  # 目标Die的D2D_RN位置
+        self.target_die_sn_pos = target_node_pos  # 目标Die的D2D_SN位置（通常同一个位置）
         
         # RN和SN的待发送队列
         self.rn_pending_queue = deque()
@@ -99,8 +90,8 @@ class D2D_Sys:
         self.rn_interface = None
         self.sn_interface = None
         
-        # 日志
-        self.logger = logging.getLogger(f"D2D_Sys_Die{die_id}_Node{node_pos}")
+        # 日志 - 包含连接信息
+        self.logger = logging.getLogger(f"D2D_Sys_Die{die_id}Node{node_pos}_to_Die{target_die_id}Node{target_node_pos}")
         
         # 类似Network的send_flits结构，用于debug和trace
         # {packet_id: [axi_flits]}

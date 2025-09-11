@@ -18,7 +18,10 @@ def main():
     """
     # 使用D2DConfig替代CrossRingConfig，获得D2D特定配置功能
     die_topo_type = "5x4"
-    config = D2DConfig(die_config_file="../config/topologies/topo_5x4.yaml", d2d_config_file="../config/topologies/d2d_config.yaml")  # Die拓扑配置  # D2D专用配置
+    config = D2DConfig(
+        die_config_file="../config/topologies/topo_5x4.yaml",
+        d2d_config_file="../config/topologies/d2d_config.yaml",
+    )  # Die拓扑配置  # D2D专用配置
 
     # 定义拓扑结构
 
@@ -39,10 +42,10 @@ def main():
         verbose=1,
         print_d2d_trace=0,  # 启用D2D trace功能
         show_d2d_trace_id=0,  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
-        d2d_trace_sleep=0.0,  # 不暂停，加快调试
+        d2d_trace_sleep=0.0,  # 不暂停，加快调试as
         enable_flow_graph=1,  # 是否在仿真结束后自动生成流量图
-        # D2D链路状态可视化参数
-        plot_link_state=1,  # 启用D2D链路状态可视化
+        # D2D链路状态可视化参
+        plot_link_state=0,  # 启用D2D链路状态可视化 12
         plot_start_cycle=100,  # 从第100周期开始可视化
         # flow_graph_mode="total",  # 显示带宽值和使用率信息
     )
@@ -51,7 +54,7 @@ def main():
     sim.initial()
 
     # 设置仿真参数
-    sim.end_time = 2000  # 缩短测试周期以便调试
+    sim.end_time = 200  # 缩短测试周期以便调试
     sim.print_interval = 500
 
     sim.run()

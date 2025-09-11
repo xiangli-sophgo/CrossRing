@@ -692,3 +692,16 @@ class D2D_SN_Interface(IPInterface):
 
         # 其他响应类型，调用父类处理
         super()._handle_received_response(rsp)
+
+    def get_statistics(self) -> dict:
+        """获取D2D_SN统计信息"""
+        stats = {
+            "cross_die_requests_received": self.cross_die_requests_received,
+            "cross_die_requests_forwarded": self.cross_die_requests_forwarded, 
+            "cross_die_responses_sent": self.cross_die_responses_sent,
+            "cross_die_data_forwarded": getattr(self, "cross_die_data_forwarded", 0),
+            "processed_write_requests_count": len(self.processed_write_requests),
+            "processed_write_complete_responses_count": len(self.processed_write_complete_responses),
+            "cross_die_receive_queue_size": len(self.cross_die_receive_queue)
+        }
+        return stats

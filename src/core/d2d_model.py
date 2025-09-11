@@ -66,11 +66,12 @@ class D2D_Model:
 
         # 设置跨Die连接
         self._setup_cross_die_connections()
-        
+
         # 初始化D2D链路状态可视化器
         self.d2d_link_state_vis = None
         if self.kwargs.get("plot_link_state", 0):
             from .D2D_Link_State_Visualizer import D2D_Link_State_Visualizer
+
             # 获取第一个Die的第一个网络作为初始网络（用于配置信息）
             initial_network = self.dies[0].req_network
             self.d2d_link_state_vis = D2D_Link_State_Visualizer(self.num_dies, initial_network)
@@ -84,7 +85,7 @@ class D2D_Model:
             die_model = BaseModel(
                 model_type=self.kwargs.get("model_type", "REQ_RSP"),
                 config=die_config,
-                topo_type=self.kwargs.get("topo_type", "8x9"),
+                topo_type=self.kwargs.get("topo_type", "5x4"),
                 traffic_file_path=self.kwargs.get("traffic_file_path", "../traffic/"),
                 traffic_config=self.traffic_config,
                 result_save_path="",  # 禁用单个Die的结果保存，避免生成Die_0/Die_1文件夹
@@ -137,10 +138,8 @@ class D2D_Model:
         die_config.DIE_ID = die_id
 
         # 获取当前Die的D2D节点位置
-        if die_id == 0:
-            d2d_positions = getattr(self.config, "D2D_DIE0_POSITIONS", [])
-        else:
-            d2d_positions = getattr(self.config, "D2D_DIE1_POSITIONS", [])
+        d2d_die_positions = getattr(self.config, "D2D_DIE_POSITIONS", {})
+        d2d_positions = d2d_die_positions.get(die_id, [])
 
         # 添加D2D节点到IP列表 (使用BaseModel期望的_0后缀格式)
         if hasattr(die_config, "CH_NAME_LIST"):
@@ -156,28 +155,43 @@ class D2D_Model:
         return die_config
 
     def _add_d2d_nodes_to_die(self, die_model: BaseModel, die_id: int):
-        """向Die添加D2D节点"""
+        """向Die添加D2D节点，基于D2D_PAIRS配置创建D2D_Sys实例"""
         config = die_model.config
 
-        # 获取当前Die的D2D节点位置
-        if die_id == 0:
-            d2d_positions_list = getattr(self.config, "D2D_DIE0_POSITIONS", [])
-        else:
-            d2d_positions_list = getattr(self.config, "D2D_DIE1_POSITIONS", [])
+        # 从D2D_PAIRS获取当前Die的连接配对
+        d2d_pairs = getattr(self.config, "D2D_PAIRS", [])
+        if not d2d_pairs:
+            print(f"警告: 没有找到D2D连接对配置，跳过Die{die_id}的D2D系统创建")
+            return
 
         # 创建D2D_Sys并关联已有的D2D接口
         from src.utils.components.d2d_sys import D2D_Sys
 
-        for i, rn_pos in enumerate(d2d_positions_list):
-            # 计算对应的SN位置（根据CrossRing拓扑规则）
-            sn_pos = rn_pos  # - config.NUM_COL
-
-            # 创建D2D_Sys（使用RN位置作为物理节点标识）
-            d2d_sys = D2D_Sys(rn_pos, die_id, config)
+        # 为当前Die的每个连接配对创建D2D_Sys实例
+        for pair in d2d_pairs:
+            die0_id, die0_node, die1_id, die1_node = pair
+            
+            # 检查这个配对是否涉及当前Die
+            if die0_id == die_id:
+                # 当前Die是源Die，创建到目标Die的D2D_Sys
+                node_pos = die0_node
+                target_die_id = die1_id
+                target_node_pos = die1_node
+            elif die1_id == die_id:
+                # 当前Die是目标Die，创建到源Die的D2D_Sys
+                node_pos = die1_node
+                target_die_id = die0_id
+                target_node_pos = die0_node
+            else:
+                # 这个配对不涉及当前Die
+                continue
+            
+            # 创建D2D_Sys实例，每个实例管理一个点对点连接
+            d2d_sys = D2D_Sys(node_pos, die_id, target_die_id, target_node_pos, config)
 
             # 获取BaseModel已创建的D2D接口
-            d2d_rn = die_model.ip_modules.get(("d2d_rn_0", rn_pos))
-            d2d_sn = die_model.ip_modules.get(("d2d_sn_0", sn_pos))
+            d2d_rn = die_model.ip_modules.get(("d2d_rn_0", node_pos))
+            d2d_sn = die_model.ip_modules.get(("d2d_sn_0", node_pos))
 
             # 关联D2D_Sys和接口
             if d2d_rn:
@@ -187,16 +201,27 @@ class D2D_Model:
                 d2d_sn.d2d_sys = d2d_sys
                 d2d_sys.sn_interface = d2d_sn
 
-            # 存储D2D_Sys
-            die_model.d2d_systems[rn_pos] = d2d_sys  # 使用RN位置作为key
+            # 存储D2D_Sys，使用组合key来支持一个节点位置有多个连接
+            d2d_sys_key = f"{node_pos}_to_{target_die_id}_{target_node_pos}"
+            die_model.d2d_systems[d2d_sys_key] = d2d_sys
 
-        # 设置D2D配置
-        d2d_sn_positions = [pos - config.NUM_COL for pos in d2d_positions_list]
+        # 获取当前Die的所有D2D节点位置（从配对中提取）
+        d2d_positions_set = set()
+        for pair in d2d_pairs:
+            die0_id, die0_node, die1_id, die1_node = pair
+            if die0_id == die_id:
+                d2d_positions_set.add(die0_node)
+            elif die1_id == die_id:
+                d2d_positions_set.add(die1_node)
+        
+        d2d_positions_list = list(d2d_positions_set)
+
+        # 设置D2D配置（保持向后兼容性）
         config.D2D_RN_POSITIONS = d2d_positions_list
-        config.D2D_SN_POSITIONS = d2d_sn_positions
+        config.D2D_SN_POSITIONS = d2d_positions_list  # RN和SN通常在同一位置
 
     def _setup_cross_die_connections(self):
-        """建立Die间的连接关系"""
+        """建立Die间的连接关系，基于D2D_PAIRS配置"""
         # 从配置中获取D2D连接对
         d2d_pairs = getattr(self.config, "D2D_PAIRS", [])
 
@@ -204,63 +229,60 @@ class D2D_Model:
             print("警告: 没有找到D2D连接对配置")
             return
 
-        # 为每个D2D连接对建立Die间连接
-        for die0_node, die1_node in d2d_pairs:
-            # Die0 -> Die1 连接 (使用正确的_0后缀格式)
-            die0_rn_key = ("d2d_rn_0", die0_node)
-            die1_sn_key = ("d2d_sn_0", die1_node)
-            die1_rn_key = ("d2d_rn_0", die1_node)
+        # 为每个D2D连接对建立双向连接
+        for die0_id, die0_node, die1_id, die1_node in d2d_pairs:
+            self._setup_single_pair_connection(die0_id, die0_node, die1_id, die1_node)
 
-            if die0_rn_key in self.dies[0].ip_modules and die1_sn_key in self.dies[1].ip_modules:
+    def _setup_single_pair_connection(self, die0_id: int, die0_node: int, die1_id: int, die1_node: int):
+        """为单个配对建立双向连接"""
+        
+        # 建立Die0 -> Die1的连接
+        self._setup_directional_connection(
+            src_die_id=die0_id, src_node=die0_node,
+            dst_die_id=die1_id, dst_node=die1_node
+        )
+        
+        # 建立Die1 -> Die0的连接  
+        self._setup_directional_connection(
+            src_die_id=die1_id, src_node=die1_node,
+            dst_die_id=die0_id, dst_node=die0_node
+        )
 
-                d2d_rn = self.dies[0].ip_modules[die0_rn_key]
-                d2d_sn = self.dies[1].ip_modules[die1_sn_key]
-                target_d2d_rn = self.dies[1].ip_modules[die1_rn_key] if die1_rn_key in self.dies[1].ip_modules else None
-
-                # 建立Die0到Die1的连接（保持向后兼容）
-                if 1 not in d2d_rn.target_die_interfaces:
-                    d2d_rn.target_die_interfaces[1] = []
-                d2d_rn.target_die_interfaces[1].append(d2d_sn)
-
-                # 为D2D_Sys设置目标接口
-                # D2D_Sys使用RN位置作为key
-                if die0_node in self.dies[0].d2d_systems:
-                    d2d_sys = self.dies[0].d2d_systems[die0_node]
-                    d2d_sys.target_die_interfaces[1] = {"sn": d2d_sn, "rn": target_d2d_rn}
-
-                # 为Die0的D2D_SN设置目标Die1的D2D_RN接口
-                die0_sn_key = ("d2d_sn_0", die0_node)
-                if die0_sn_key in self.dies[0].ip_modules:
-                    die0_d2d_sn = self.dies[0].ip_modules[die0_sn_key]
-                    die0_d2d_sn.target_die_interfaces[1] = target_d2d_rn
-
-            # Die1 -> Die0 连接 (使用正确的_0后缀格式)
-            die1_rn_key = ("d2d_rn_0", die1_node)
-            die0_sn_key = ("d2d_sn_0", die0_node)
-            die0_rn_key = ("d2d_rn_0", die0_node)
-
-            if die1_rn_key in self.dies[1].ip_modules and die0_sn_key in self.dies[0].ip_modules:
-
-                d2d_rn = self.dies[1].ip_modules[die1_rn_key]
-                d2d_sn = self.dies[0].ip_modules[die0_sn_key]
-                target_d2d_rn = self.dies[0].ip_modules[die0_rn_key] if die0_rn_key in self.dies[0].ip_modules else None
-
-                # 建立Die1到Die0的连接（保持向后兼容）
-                if 0 not in d2d_rn.target_die_interfaces:
-                    d2d_rn.target_die_interfaces[0] = []
-                d2d_rn.target_die_interfaces[0].append(d2d_sn)
-
-                # 为D2D_Sys设置目标接口
-                # D2D_Sys使用RN位置作为key
-                if die1_node in self.dies[1].d2d_systems:
-                    d2d_sys = self.dies[1].d2d_systems[die1_node]
-                    d2d_sys.target_die_interfaces[0] = {"sn": d2d_sn, "rn": target_d2d_rn}
-
-                # 为Die1的D2D_SN设置目标Die0的D2D_RN接口
-                die1_sn_key = ("d2d_sn_0", die1_node)
-                if die1_sn_key in self.dies[1].ip_modules:
-                    die1_d2d_sn = self.dies[1].ip_modules[die1_sn_key]
-                    die1_d2d_sn.target_die_interfaces[0] = target_d2d_rn
+    def _setup_directional_connection(self, src_die_id: int, src_node: int, dst_die_id: int, dst_node: int):
+        """建立单向连接"""
+        
+        # 获取IP接口
+        src_rn_key = ("d2d_rn_0", src_node)
+        src_sn_key = ("d2d_sn_0", src_node)
+        dst_sn_key = ("d2d_sn_0", dst_node)
+        dst_rn_key = ("d2d_rn_0", dst_node)
+        
+        src_die = self.dies[src_die_id]
+        dst_die = self.dies[dst_die_id]
+        
+        # 检查接口是否存在
+        if src_rn_key not in src_die.ip_modules or dst_sn_key not in dst_die.ip_modules:
+            return
+            
+        src_rn = src_die.ip_modules[src_rn_key]
+        dst_sn = dst_die.ip_modules[dst_sn_key]
+        dst_rn = dst_die.ip_modules.get(dst_rn_key)
+        src_sn = src_die.ip_modules.get(src_sn_key)
+        
+        # 设置RN接口的目标Die连接（向后兼容）
+        if dst_die_id not in src_rn.target_die_interfaces:
+            src_rn.target_die_interfaces[dst_die_id] = []
+        src_rn.target_die_interfaces[dst_die_id].append(dst_sn)
+        
+        # 设置D2D_Sys的目标接口
+        d2d_sys_key = f"{src_node}_to_{dst_die_id}_{dst_node}"
+        if d2d_sys_key in src_die.d2d_systems:
+            d2d_sys = src_die.d2d_systems[d2d_sys_key]
+            d2d_sys.target_die_interfaces[dst_die_id] = {"sn": dst_sn, "rn": dst_rn}
+        
+        # 设置SN接口的目标RN连接
+        if src_sn and dst_rn:
+            src_sn.target_die_interfaces[dst_die_id] = dst_rn
 
     def initial(self):
         """初始化D2D仿真"""
@@ -297,7 +319,7 @@ class D2D_Model:
                     die_model = self.dies[die_id]
                     die_networks = [die_model.req_network, die_model.rsp_network, die_model.data_network]
                     all_die_networks.append(die_networks)
-                
+
                 # 更新可视化器
                 self.d2d_link_state_vis.update(all_die_networks, self.current_cycle)
 
@@ -512,10 +534,8 @@ class D2D_Model:
 
     def _get_die_d2d_positions(self, die_id):
         """获取指定Die的D2D节点位置"""
-        if die_id == 0:
-            return getattr(self.config, "D2D_DIE0_POSITIONS", [])
-        else:
-            return getattr(self.config, "D2D_DIE1_POSITIONS", [])
+        d2d_die_positions = getattr(self.config, "D2D_DIE_POSITIONS", {})
+        return d2d_die_positions.get(die_id, [])
 
     def _select_d2d_node_for_target(self, dst_node, dst_ip, d2d_positions, die_model: base_model, dst_die):
         """根据目标DDR位置选择对应的D2D节点（VERTICAL布局）"""
@@ -588,8 +608,11 @@ class D2D_Model:
                 d2d_index = 0  # 非边界列，使用默认
 
         # 确保索引在有效范围内
-        if d2d_index >= len(d2d_positions):
-            d2d_index = 0
+        if not d2d_positions or d2d_index >= len(d2d_positions):
+            if d2d_positions:
+                d2d_index = 0
+            else:
+                return 0  # 如果d2d_positions为空，返回默认值
 
         return d2d_positions[d2d_index] - num_col
 

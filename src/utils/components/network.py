@@ -130,9 +130,7 @@ class Network:
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}
         self.ETag_BOTHSIDE_UPGRADE = False
 
-        for ip_pos in set(
-            config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST
-        ):
+        for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
             self.cross_point["horizontal"][ip_pos]["TL"] = [None] * 2
             self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
             self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2
@@ -255,9 +253,7 @@ class Network:
 
                 self.RB_UE_Counters["TL"][(pos, next_pos)] = {"T2": 0, "T1": 0, "T0": 0}
                 self.RB_UE_Counters["TR"][(pos, next_pos)] = {"T2": 0, "T1": 0}
-                # self.round_robin["TU"][next_pos] = deque([0, 1, 2])
-                # self.round_robin["TD"][next_pos] = deque([0, 1, 2])
-                # self.round_robin["RB"][next_pos] = deque([0, 1, 2])
+
                 for direction in ["TL", "TR"]:
                     self.remain_tag[direction][pos] = config.ITag_MAX_NUM_H
                     self.itag_req_counter[direction][pos] = 0
@@ -787,11 +783,15 @@ class Network:
                     can_use_T2 = self._entry_available("TU", next_node, "T2")
 
                     if flit.ETag_priority in ["T1", "T2"]:
-                        if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH and (
-                            (flit.ETag_priority == "T1" and can_use_T1)
-                            or (flit.ETag_priority == "T2" and can_use_T2)
-                            or (flit.ETag_priority == "T1" and not can_use_T1 and can_use_T2)  # T1使用T2 entry
-                        ) and self._can_eject_in_order(flit, next_node):  # 新增保序检查
+                        if (
+                            len(link_eject) < self.config.EQ_IN_FIFO_DEPTH
+                            and (
+                                (flit.ETag_priority == "T1" and can_use_T1)
+                                or (flit.ETag_priority == "T2" and can_use_T2)
+                                or (flit.ETag_priority == "T1" and not can_use_T1 and can_use_T2)  # T1使用T2 entry
+                            )
+                            and self._can_eject_in_order(flit, next_node)
+                        ):  # 新增保序检查
                             flit.is_delay = False
                             flit.is_arrive = True
                             link[flit.current_seat_index] = None
@@ -806,7 +806,7 @@ class Network:
                                 else:
                                     # T1使用T2 entry
                                     self._occupy_entry("TU", next_node, "T2", flit)
-                            
+
                             # 新增：更新保序跟踪表
                             self._update_order_tracking_table(flit)
                         else:
@@ -1361,11 +1361,7 @@ class Network:
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
-                    if (
-                        direction in self.ring_bridge.keys()
-                        and len(self.ring_bridge[direction][flit.current_link]) < max_depth
-                        and self.ring_bridge_pre[direction][flit.current_link] is None
-                    ):
+                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth and self.ring_bridge_pre[direction][flit.current_link] is None:
                         # flit.flit_position = f"RB_{direction}"
                         # self.ring_bridge[direction][flit.current_link].append(flit)
                         self.ring_bridge_pre[direction][flit.current_link] = flit

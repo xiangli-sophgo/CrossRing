@@ -30,19 +30,51 @@
 ```
 
 ### 2.2 Die间连接关系
-基于提供的4DIE互联图，各Die的连接关系如下：
+基于物理相邻关系，各Die的连接关系如下：
 
 | Die ID | 位置 | 连接的Die | 连接方向 |
 |--------|------|-----------|----------|
-| DIE 0  | 右下 | DIE 1 (左), DIE 2 (上) | 水平+垂直 |
-| DIE 1  | 左下 | DIE 0 (右), DIE 3 (上) | 水平+垂直 |
-| DIE 2  | 左上 | DIE 0 (下), DIE 3 (右) | 垂直+水平 |
-| DIE 3  | 右上 | DIE 1 (下), DIE 2 (左) | 垂直+水平 |
+| DIE 0  | 右下 | DIE 1 (左), DIE 3 (上) | 水平+垂直 |
+| DIE 1  | 左下 | DIE 0 (右), DIE 2 (上) | 水平+垂直 |
+| DIE 2  | 左上 | DIE 1 (下), DIE 3 (右) | 垂直+水平 |
+| DIE 3  | 右上 | DIE 0 (下), DIE 2 (左) | 垂直+水平 |
 
 ### 2.3 连接类型定义
 - **水平连接**: 左右相邻的Die，通过左右边缘的D2D接口
 - **垂直连接**: 上下相邻的Die，通过上下边缘的D2D接口
-- **对角连接**: 非直连Die，需要通过中间Die进行多跳路由
+
+### 2.4 配置驱动的D2D连接设计
+
+#### 2.4.1 拓扑规格
+- **配置拓扑**: 5x4（5行4列）
+- **仿真网络**: 10x4（两行表示一行物理节点）
+- **总节点数**: 40个节点（0-39）
+
+#### 2.4.2 基于配置的灵活连接定义
+现有实现采用配置驱动的方式定义D2D连接，不再依赖硬编码的节点位置或Die旋转概念。每个Die的连接关系通过YAML配置文件中的`D2D_DIE_CONFIG`定义。
+
+#### 2.4.3 配置驱动原则
+```yaml
+D2D_DIE_CONFIG:
+  <die_id>:
+    num_row: <行数>
+    num_col: <列数>
+    connections:
+      <edge>: {die: <目标die>, d2d_nodes: [相对位置索引]}
+```
+
+其中：
+- `<edge>`: 连接边缘（left/right/top/bottom）
+- `d2d_nodes`: 该边缘上D2D节点的**相对位置索引**
+- 索引从0开始，按边缘的排列顺序计算
+
+#### 2.4.4 相对位置索引计算规则
+- **left/right边**: 从上到下按奇数行排列，索引从0开始
+- **top/bottom边**: 从左到右按列排列，索引从0开始
+
+例如：在5x4拓扑中
+- **left边奇数行节点**: [12, 20, 28]，索引[0, 1, 2]分别对应节点[12, 20, 28]
+- **top边第二行节点**: [4, 5, 6, 7]，索引[0, 1, 2]分别对应节点[4, 5, 6]
 
 ## 3. D2D接口配置
 
@@ -90,118 +122,349 @@ def _calculate_grid_2x2_positions(self):
 - **避免冲突**: 确保D2D节点不与现有IP节点位置冲突
 - **负载均衡**: 在可能的情况下均匀分布D2D接口
 
-## 4. 连接映射设计
+## 4. 基于配置的节点配对设计
 
-### 4.1 D2D连接映射数据结构
+### 4.1 配对生成逻辑
+
+系统根据`D2D_DIE_CONFIG`自动生成节点配对关系，无需硬编码固定的节点位置。配对生成遵循以下原则：
+
+#### 4.1.1 配对生成流程
+1. **读取Die配置**: 从`D2D_DIE_CONFIG`获取每个Die的连接定义
+2. **计算边缘节点**: 根据拓扑规模和边缘类型计算具体节点位置
+3. **获取相对索引**: 根据`d2d_nodes`配置获取具体的D2D节点
+4. **自动对称匹配**: 查找对端Die的对应连接配置，生成配对关系
+
+#### 4.1.2 边缘节点计算规则
 ```python
-# 4-Die连接映射表
-D2D_CONNECTION_MAP = {
-    # Die 0的连接
-    0: {
-        1: {"type": "horizontal", "direction": "left"},   # DIE 0 → DIE 1
-        2: {"type": "vertical", "direction": "up"}        # DIE 0 → DIE 2
-    },
-    # Die 1的连接
-    1: {
-        0: {"type": "horizontal", "direction": "right"},  # DIE 1 → DIE 0
-        3: {"type": "vertical", "direction": "up"}        # DIE 1 → DIE 3
-    },
-    # Die 2的连接
-    2: {
-        0: {"type": "vertical", "direction": "down"},     # DIE 2 → DIE 0
-        3: {"type": "horizontal", "direction": "right"}   # DIE 2 → DIE 3
-    },
-    # Die 3的连接
-    3: {
-        1: {"type": "vertical", "direction": "down"},     # DIE 3 → DIE 1
-        2: {"type": "horizontal", "direction": "left"}    # DIE 3 → DIE 2
-    }
-}
+def _get_edge_nodes(self, edge, num_row, num_col):
+    """获取指定边的所有节点"""
+    if edge == "top":
+        # 第二行（row=1）
+        return list(range(num_col, 2 * num_col))
+    elif edge == "bottom":
+        # 最后一行（row=num_row-1）
+        return list(range((num_row - 1) * num_col, num_row * num_col))
+    elif edge == "left":
+        # 奇数行的左边（col=0）
+        return [row * num_col for row in range(1, num_row, 2)]
+    elif edge == "right":
+        # 奇数行的右边（col=num_col-1）
+        return [row * num_col + (num_col - 1) for row in range(1, num_row, 2)]
 ```
 
-### 4.2 直连Die对（6对）
-- DIE 0 ↔ DIE 1（水平连接）
-- DIE 0 ↔ DIE 2（垂直连接）
-- DIE 1 ↔ DIE 3（垂直连接）
-- DIE 2 ↔ DIE 3（水平连接）
+#### 4.1.3 基于当前配置的配对示例
+根据`config/topologies/d2d_4die_config.yaml`配置，生成的配对关系为：
 
-### 4.3 非直连Die对（2对，需多跳路由）
-- DIE 0 ↔ DIE 3：可通过 DIE 1 或 DIE 2
-- DIE 1 ↔ DIE 2：可通过 DIE 0 或 DIE 3
-
-## 5. 配置系统扩展
-
-### 5.1 新增配置参数
 ```python
-# config/d2d_config.py中需要添加的参数
+# 以5x4拓扑为例，生成的配对关系：
+# Die0-Die1连接（Die0右边 ↔ Die1左边）
+(0, 15, 1, 12),  # right[1] ↔ left[1]
+(0, 23, 1, 20),  # right[2] ↔ left[2] 
+(0, 31, 1, 28),  # right[3] ↔ left[3]
+
+# Die0-Die3连接（Die0下边 ↔ Die3上边）
+(0, 36, 3, 4),   # bottom[0] ↔ top[0]
+(0, 37, 3, 5),   # bottom[1] ↔ top[1]
+(0, 38, 3, 6),   # bottom[2] ↔ top[2]
+
+# Die1-Die2连接（Die1下边 ↔ Die2上边）
+(1, 36, 2, 4),   # bottom[0] ↔ top[0]
+(1, 37, 2, 5),   # bottom[1] ↔ top[1]
+(1, 38, 2, 6),   # bottom[2] ↔ top[2]
+
+# Die2-Die3连接（Die2右边 ↔ Die3左边）
+(2, 15, 3, 12),  # right[1] ↔ left[1]
+(2, 23, 3, 20),  # right[2] ↔ left[2]
+(2, 31, 3, 28),  # right[3] ↔ left[3]
+```
+
+### 4.2 配对生成算法优势
+
+#### 4.2.1 灵活性
+- **可配置**: 通过修改YAML文件即可调整连接关系
+- **可扩展**: 支持不同拓扑规模的Die配置
+- **可验证**: 自动检查配置的对称性和完整性
+
+#### 4.2.2 自动化
+- **自动对称匹配**: 系统自动找到对端Die的对应连接
+- **自动索引转换**: 相对位置索引自动转换为具体节点ID
+- **自动冲突检测**: 检测配置错误和资源冲突
+
+### 4.3 配置验证机制
+
+#### 4.3.1 连接完整性验证
+系统自动验证每个Die是否与正确数量的其他Die连接：
+- **2x2网格拓扑**: 每个Die应连接到2个相邻Die
+- **连接对称性**: 每个连接都有对应的反向连接配置
+
+#### 4.3.2 节点位置验证
+- **范围检查**: 确保所有D2D节点位置在有效范围内（0到NUM_NODE-1）
+- **重复检查**: 确保同一Die内D2D节点位置不重复
+- **边缘匹配**: 验证相邻Die的边缘连接正确对应
+
+## 5. 配置系统实现
+
+### 5.1 配置驱动的节点配对生成
+
+4-Die系统不再使用硬编码的节点配对函数，而是采用配置驱动的动态生成方式。配对生成过程在`D2DConfig`类中自动完成。
+
+#### 5.1.1 配对生成核心算法
+```python
+def _generate_d2d_pairs_from_config(self, config):
+    """
+    根据配置生成D2D节点配对
+    
+    Args:
+        config: Die配置字典（来自D2D_DIE_CONFIG）
+    
+    Returns:
+        pairs: [(die0_id, node0, die1_id, node1), ...]
+    """
+    pairs = []
+    processed = set()  # 避免重复处理
+    
+    for die_id, die_config in config.items():
+        # 获取Die的网络规模
+        num_row = die_config["num_row"]
+        num_col = die_config["num_col"]
+        
+        # 处理每个连接
+        for edge, conn_info in die_config["connections"].items():
+            target_die = conn_info["die"]
+            d2d_node_indices = conn_info["d2d_nodes"]  # 相对位置索引列表
+            
+            # 避免重复处理
+            pair_key = tuple(sorted([die_id, target_die]))
+            if pair_key in processed:
+                continue
+            processed.add(pair_key)
+            
+            # 获取边缘节点并生成配对
+            edge_nodes = self._get_edge_nodes(edge, num_row, num_col)
+            d2d_nodes = [edge_nodes[i] for i in d2d_node_indices if i < len(edge_nodes)]
+            
+            # 自动匹配对端配置
+            target_d2d_nodes = self._get_target_d2d_nodes(config, target_die, die_id, edge)
+            
+            # 生成配对
+            for i in range(min(len(d2d_nodes), len(target_d2d_nodes))):
+                pairs.append((die_id, d2d_nodes[i], target_die, target_d2d_nodes[i]))
+    
+    return pairs
+```
+
+#### 5.1.2 边缘节点自动计算
+```python
+def _get_edge_nodes(self, edge, num_row, num_col):
+    """获取指定边的所有节点"""
+    if edge == "top":
+        # 第二行（row=1）
+        return list(range(num_col, 2 * num_col))
+    elif edge == "bottom":
+        # 最后一行（row=num_row-1）
+        return list(range((num_row - 1) * num_col, num_row * num_col))
+    elif edge == "left":
+        # 奇数行的左边（col=0）
+        return [row * num_col for row in range(1, num_row, 2)]
+    elif edge == "right":
+        # 奇数行的右边（col=num_col-1）
+        return [row * num_col + (num_col - 1) for row in range(1, num_row, 2)]
+```
+
+#### 5.1.3 配置驱动的优势
+- **无硬编码**: 不再依赖固定的节点位置假设
+- **自动对称**: 系统自动查找并匹配对端Die的连接配置
+- **灵活配置**: 支持任意拓扑规模和连接模式
+- **错误检测**: 自动验证配置完整性和一致性
+
+### 5.2 D2DConfig类实现
+
+现有`D2DConfig`类采用配置驱动的通用设计，自动支持2-Die和4-Die模式。
+
+#### 5.2.1 配置初始化流程
+```python
 class D2DConfig(CrossRingConfig):
     def __init__(self, die_config_file=None, d2d_config_file=None):
-        # 扩展Die数量支持
-        self.NUM_DIES = 4  # 支持2-4个Die
+        super().__init__(die_config_file)
         
-        # 新增Die2和Die3的D2D位置
-        self.D2D_DIE2_POSITIONS = []
-        self.D2D_DIE3_POSITIONS = []
+        # 初始化D2D配置
+        self._init_d2d_config()
         
-        # 连接映射配置
-        self.D2D_CONNECTION_MAP = {}
+        # 加载D2D专用配置文件
+        if d2d_config_file:
+            self._load_d2d_config_file(d2d_config_file)
         
-        # 扩展的布局模式
-        self.D2D_LAYOUT = "GRID_2X2"  # 新增网格布局模式
+        # 生成D2D配对关系
+        self._generate_d2d_pairs()
         
-        # 多跳路由配置
-        self.D2D_MULTI_HOP_ENABLED = True
-        self.D2D_ROUTING_ALGORITHM = "shortest_path"  # shortest_path, load_balance
+        # 更新通道规格
+        self._update_channel_spec_for_d2d()
+        
+        # 验证配置
+        self._validate_d2d_layout()
 ```
 
-### 5.2 配置文件示例
+#### 5.2.2 配置驱动的配对生成
+```python
+def _generate_d2d_pairs(self):
+    """生成D2D配对关系"""
+    num_dies = getattr(self, "NUM_DIES", 2)
+    if num_dies < 2:
+        raise ValueError(f"D2D需要至少2个Die，当前配置: {num_dies}")
+    
+    # 使用配置驱动方式
+    self._setup_config_based()
+
+def _setup_config_based(self):
+    """基于配置的通用Die设置方式"""
+    die_config = getattr(self, "D2D_DIE_CONFIG", None)
+    
+    if die_config is None:
+        raise ValueError("未找到D2D_DIE_CONFIG配置，请在YAML配置文件中定义")
+    
+    # 使用配置生成D2D配对
+    pairs = self._generate_d2d_pairs_from_config(die_config)
+    
+    # 设置配对结果
+    self.D2D_PAIRS = pairs
+    
+    # 自动设置各Die的D2D节点位置
+    num_dies = getattr(self, "NUM_DIES", 2)
+    for die_id in range(num_dies):
+        positions = []
+        for pair in pairs:
+            if pair[0] == die_id:
+                positions.append(pair[1])
+            if pair[2] == die_id:
+                positions.append(pair[3])
+        # 去重并设置到字典中
+        self.D2D_DIE_POSITIONS[die_id] = list(set(positions))
+```
+
+#### 5.2.3 自动验证机制
+```python
+def _validate_d2d_layout(self):
+    """验证D2D布局的合理性"""
+    if not getattr(self, "D2D_ENABLED", False):
+        return
+    
+    num_dies = getattr(self, "NUM_DIES", 2)
+    
+    # 基础参数检查
+    if num_dies < 2:
+        raise ValueError(f"D2D需要至少2个Die，当前配置: {num_dies}")
+    if num_dies > 4:
+        raise ValueError(f"当前最多支持4个Die，当前配置: {num_dies}")
+    
+    # 节点位置有效性检查
+    max_node_id = self.NUM_NODE - 1
+    for die_id in range(num_dies):
+        positions = self.D2D_DIE_POSITIONS.get(die_id, [])
+        for pos in positions:
+            if pos < 0 or pos > max_node_id:
+                raise ValueError(f"Die{die_id}节点位置无效: {pos}")
+    
+    # 4-Die特定验证
+    if num_dies == 4:
+        self._validate_4die_config()
+```
+
+#### 5.2.4 配置类优势
+- **通用性**: 同时支持2-Die和4-Die模式，无需不同实现
+- **自动化**: 根据配置自动生成所有必要的连接关系
+- **验证完整**: 自动检查配置错误和不一致性
+- **向后兼容**: 完全兼容现有2-Die配置
+
+### 5.3 配置文件结构和参数说明
+
+现有配置系统采用YAML格式，通过`D2D_DIE_CONFIG`定义4-Die的连接关系。
+
+#### 5.3.1 配置文件结构
 **文件**: `config/topologies/d2d_4die_config.yaml`
 ```yaml
 # D2D (Die-to-Die) 4-Die 配置文件
 
-# D2D 特定配置
+# D2D 基础配置
 D2D_ENABLED: true
 NUM_DIES: 4
-D2D_LAYOUT: "GRID_2X2"  # 新增2x2网格布局模式
 
-# 4-Die连接映射（新增）
-D2D_CONNECTION_MAP:
-  0: {1: "horizontal", 2: "vertical"}    # Die 0连接Die 1(水平)和Die 2(垂直)
-  1: {0: "horizontal", 3: "vertical"}    # Die 1连接Die 0(水平)和Die 3(垂直)
-  2: {0: "vertical", 3: "horizontal"}    # Die 2连接Die 0(垂直)和Die 3(水平)
-  3: {1: "vertical", 2: "horizontal"}    # Die 3连接Die 1(垂直)和Die 2(水平)
+# 4-Die节点配置 (配置驱动方式)
+D2D_DIE_CONFIG:
+  0:  # Die 0 配置
+    num_row: 5         # Die内拓扑行数
+    num_col: 4         # Die内拓扑列数
+    connections:
+      right: {die: 1, d2d_nodes: [1, 2, 3]}    # 连接Die1，使用右边第1,2,3个位置
+      bottom: {die: 3, d2d_nodes: [0, 1, 2]}   # 连接Die3，使用下边第0,1,2个位置
+  1:  # Die 1 配置
+    num_row: 5
+    num_col: 4
+    connections:
+      left: {die: 0, d2d_nodes: [1, 2, 3]}     # 连接Die0，使用左边第1,2,3个位置
+      bottom: {die: 2, d2d_nodes: [0, 1, 2]}   # 连接Die2，使用下边第0,1,2个位置
+  2:  # Die 2 配置
+    num_row: 5
+    num_col: 4
+    connections:
+      top: {die: 1, d2d_nodes: [0, 1, 2]}      # 连接Die1，使用上边第0,1,2个位置
+      right: {die: 3, d2d_nodes: [1, 2, 3]}    # 连接Die3，使用右边第1,2,3个位置
+  3:  # Die 3 配置
+    num_row: 5
+    num_col: 4
+    connections:
+      left: {die: 2, d2d_nodes: [1, 2, 3]}     # 连接Die2，使用左边第1,2,3个位置
+      top: {die: 0, d2d_nodes: [0, 1, 2]}      # 连接Die0，使用上边第0,1,2个位置
 
-# 多跳路由配置（新增）
+# 多跳路由配置
 D2D_MULTI_HOP_ENABLED: true
-D2D_ROUTING_ALGORITHM: "shortest_path"  # shortest_path, load_balance
+D2D_ROUTING_ALGORITHM: "shortest_path"
 
-# D2D 延迟配置 (cycles) - 保持不变
-D2D_AR_LATENCY: 10  # 地址读通道延迟
-D2D_R_LATENCY: 10   # 读数据通道延迟
-D2D_AW_LATENCY: 10  # 地址写通道延迟
-D2D_W_LATENCY: 10   # 写数据通道延迟
-D2D_B_LATENCY: 10   # 写响应通道延迟
-D2D_DBID_LATENCY: 10 # DBID 信号延迟
-D2D_MAX_OUTSTANDING: 16  # 最大未完成事务数
+# D2D 延迟配置 (cycles)
+D2D_AR_LATENCY: 10      # 地址读通道延迟
+D2D_R_LATENCY: 10       # 读数据通道延迟
+D2D_AW_LATENCY: 10      # 地址写通道延迟
+D2D_W_LATENCY: 10       # 写数据通道延迟
+D2D_B_LATENCY: 10       # 写响应通道延迟
+D2D_DBID_LATENCY: 10    # DBID 信号延迟
+D2D_MAX_OUTSTANDING: 16 # 最大未完成事务数
 
-# D2D 带宽控制 - 保持不变
+# D2D 带宽控制
 D2D_DATA_BW_LIMIT: 64   # D2D数据通道带宽限制
 D2D_RN_BW_LIMIT: 128    # D2D RN 带宽限制 (GB/s)
 D2D_SN_BW_LIMIT: 128    # D2D SN 带宽限制 (GB/s)
 
-# D2D 资源管理配置 - 保持不变
-# D2D_RN 跟踪器配置
+# D2D 资源管理配置
 D2D_RN_R_TRACKER_OSTD: 48   # D2D RN 读跟踪器 OSTD
 D2D_RN_W_TRACKER_OSTD: 48   # D2D RN 写跟踪器 OSTD
 D2D_RN_RDB_SIZE: 192        # D2D RN 读databuffer大小
 D2D_RN_WDB_SIZE: 192        # D2D RN 写databuffer大小
 
-# D2D_SN 跟踪器配置
 D2D_SN_R_TRACKER_OSTD: 48   # D2D SN 读跟踪器 OSTD
 D2D_SN_W_TRACKER_OSTD: 48   # D2D SN 写跟踪器 OSTD
 D2D_SN_RDB_SIZE: 192        # D2D SN 读databuffer大小
 D2D_SN_WDB_SIZE: 192        # D2D SN 写databuffer大小
 ```
+
+#### 5.3.2 关键参数说明
+
+**D2D_DIE_CONFIG结构**：
+- `<die_id>`: Die编号（0-3）
+- `num_row`/`num_col`: 该Die的内部拓扑规模
+- `connections`: 该Die与其他Die的连接定义
+  - `<edge>`: 连接边缘（left/right/top/bottom）
+  - `die`: 目标Die编号
+  - `d2d_nodes`: 相对位置索引数组，指定在该边缘使用哪些位置作为D2D节点
+
+**相对位置索引规则**：
+- **left/right边**: 按奇数行从上到下排序，索引从0开始
+- **top/bottom边**: 按列从左到右排序，索引从0开始
+- 例如：`d2d_nodes: [1, 2, 3]`表示使用该边缘的第1、2、3个位置（跳过第0个）
+
+#### 5.3.3 配置优势
+- **声明式配置**: 直接描述连接关系，无需计算具体节点位置
+- **对称验证**: 系统自动检查连接配置的对称性
+- **扩展性**: 易于修改连接模式或扩展到其他拓扑规模
+- **可读性**: 配置结构直观，易于理解和维护
 
 ### 5.3 向后兼容性
 - **自动检测**: 根据NUM_DIES参数自动选择2-Die或4-Die模式
@@ -210,279 +473,137 @@ D2D_SN_WDB_SIZE: 192        # D2D SN 写databuffer大小
 
 ## 6. 核心组件修改
 
-### 6.1 D2D_Sys组件改造
+### 6.1 D2D_Sys组件简化
 **文件**: `src/utils/components/d2d_sys.py`
 
-**主要修改点**:
+**关键修改**：基于节点配对的点对点连接
 ```python
 class D2D_Sys:
     def __init__(self, node_pos: int, die_id: int, config):
-        # 支持多目标Die
-        self.target_die_connections = {}  # 替代单一目标Die
+        self.position = node_pos
+        self.die_id = die_id
         
-        # 从配置中获取连接映射
-        connection_map = getattr(config, 'D2D_CONNECTION_MAP', {})
-        self.my_connections = connection_map.get(str(die_id), {})
+        # 从配对表查找目标连接
+        self.target_die_id = None
+        self.target_node_pos = None
         
-        # 为每个连接的Die设置目标位置
-        for target_die_id, connection_info in self.my_connections.items():
-            self.setup_target_die_connection(int(target_die_id), connection_info)
-    
-    def route_to_target_die(self, flit: Flit):
-        """智能路由到目标Die"""
-        target_die = flit.d2d_target_die
+        if hasattr(config, 'D2D_NODE_PAIRS'):
+            for pair in config.D2D_NODE_PAIRS:
+                if pair[0] == die_id and pair[1] == node_pos:
+                    self.target_die_id = pair[2]
+                    self.target_node_pos = pair[3]
+                    break
+                elif pair[2] == die_id and pair[3] == node_pos:
+                    self.target_die_id = pair[0]
+                    self.target_node_pos = pair[1]
+                    break
         
-        if target_die in self.my_connections:
-            # 直连，直接发送
-            return self.send_direct(flit, target_die)
-        else:
-            # 非直连，多跳路由
-            return self.send_multi_hop(flit, target_die)
+        if self.target_die_id is None:
+            raise ValueError(f"Node {node_pos} in Die {die_id} is not a D2D node")
 ```
 
-### 6.2 D2D_Model扩展
+### 6.2 D2D_Model连接建立
 **文件**: `src/core/d2d_model.py`
 
-**主要修改点**:
+**主要修改**：使用配对表建立所有连接
 ```python
-class D2D_Model:
-    def __init__(self, config: CrossRingConfig, traffic_config: list, **kwargs):
-        # 支持动态Die数量
-        self.num_dies = getattr(config, "NUM_DIES", 2)
-        
-        # 为每个Die创建多个D2D接口
-        self._setup_multi_interface_dies()
-    
-    def _setup_multi_interface_dies(self):
-        """为每个Die设置多个D2D接口"""
-        for die_id in range(self.num_dies):
-            die_config = self._create_die_config(die_id)
-            die_model = BaseModel(...)
-            
-            # 为每个Die创建多个D2D_Sys实例
-            self._create_multiple_d2d_systems(die_model, die_id)
-    
-    def _setup_cross_die_connections_4die(self):
-        """建立4-Die的跨Die连接"""
-        connection_map = getattr(self.config, "D2D_CONNECTION_MAP", {})
-        
-        for src_die_id, connections in connection_map.items():
-            for dst_die_id, connection_type in connections.items():
-                self._establish_die_connection(
-                    int(src_die_id), int(dst_die_id), connection_type
-                )
-```
-
-### 6.3 接口组件更新
-**文件**: `src/utils/components/d2d_*_interface.py`
-
-**主要修改点**:
-- 支持多目标Die的接口管理
-- 更新路由决策逻辑
-- 处理中间Die的转发
-
-## 7. 多跳路由机制
-
-### 7.1 路由算法设计
-```python
-class MultiHopRouter:
-    def __init__(self, connection_map):
-        self.connection_map = connection_map
-        self.routing_table = self._build_routing_table()
-    
-    def _build_routing_table(self):
-        """构建路由表，使用最短路径算法"""
-        routing_table = {}
-        
-        # 对于每个源Die，计算到其他Die的最短路径
-        for src_die in range(4):
-            routing_table[src_die] = {}
-            for dst_die in range(4):
-                if src_die != dst_die:
-                    routing_table[src_die][dst_die] = self._find_shortest_path(src_die, dst_die)
-        
-        return routing_table
-    
-    def get_next_hop(self, src_die, dst_die):
-        """获取从源Die到目标Die的下一跳"""
-        if dst_die in self.connection_map.get(str(src_die), {}):
-            # 直连
-            return dst_die
-        else:
-            # 多跳路由
-            path = self.routing_table[src_die][dst_die]
-            return path[1] if len(path) > 1 else dst_die
-```
-
-### 7.2 路由表示例
-```python
-# 4-Die系统的路由表
-ROUTING_TABLE = {
-    0: {
-        1: [0, 1],        # DIE 0 → DIE 1 (直连)
-        2: [0, 2],        # DIE 0 → DIE 2 (直连)
-        3: [0, 1, 3]      # DIE 0 → DIE 3 (经过DIE 1)
-        # 或: [0, 2, 3]   # DIE 0 → DIE 3 (经过DIE 2)
-    },
-    1: {
-        0: [1, 0],        # DIE 1 → DIE 0 (直连)
-        2: [1, 0, 2],     # DIE 1 → DIE 2 (经过DIE 0)
-        3: [1, 3]         # DIE 1 → DIE 3 (直连)
-    },
-    # ... 其他Die的路由表
-}
-```
-
-### 7.3 中间Die转发逻辑
-```python
-def handle_forwarding_request(self, flit: Flit):
-    """处理转发请求（作为中间Die）"""
-    current_die = self.die_id
-    target_die = flit.d2d_target_die
-    
-    # 检查是否为转发请求
-    if target_die != current_die and not self.is_final_destination(flit):
-        # 确定下一跳
-        next_hop = self.router.get_next_hop(current_die, target_die)
-        
-        # 添加转发标记
-        flit.forwarding_path.append(current_die)
-        
-        # 转发到下一跳
-        self.forward_to_die(flit, next_hop)
+def _setup_cross_die_connections(self):
+    """建立Die间的连接关系"""
+    if self.num_dies == 4 and hasattr(self.config, 'D2D_NODE_PAIRS'):
+        self._setup_4die_connections_from_pairs()
     else:
-        # 最终目的地，正常处理
-        self.handle_local_request(flit)
+        self._setup_2die_connections()  # 保持原有逻辑
+
+def _setup_4die_connections_from_pairs(self):
+    """基于配对表建立4-Die连接"""
+    for pair in self.config.D2D_NODE_PAIRS:
+        die0_id, node0, die1_id, node1 = pair
+        self._connect_d2d_pair(die0_id, node0, die1_id, node1)
 ```
 
-### 7.4 死锁避免策略
-- **路径固定**: 对于固定的源-目标Die对，始终使用相同的路径
-- **优先级管理**: 转发请求具有更高优先级
-- **缓冲区预留**: 为转发请求预留专用缓冲区
+## 7. 实现计划
 
-## 8. 实现计划
+### 7.1 第一阶段：在d2d_config.py中实现配对生成
+**目标**: 添加节点配对计算函数
+**修改内容**:
+- 实现`calculate_4die_d2d_pairs()`函数
+- 扩展`D2DConfig`类支持4-Die
+- 自动生成各Die的D2D位置
 
-### 8.1 第一阶段：配置系统扩展
-**目标**: 支持4-Die配置参数
-**文件修改**:
-- `config/d2d_config.py`: 添加4-Die支持
-- `config/`: 创建4-Die配置文件示例
+### 7.2 第二阶段：简化D2D_Sys组件
+**目标**: 基于节点配对的点对点连接
+**修改内容**:
+- 重构`__init__`方法，使用配对表查找目标
+- 每个D2D_Sys实例只管理一个连接
+- 移除复杂的队列管理逻辑
 
-**验证标准**:
-- [ ] 成功解析4-Die配置文件
-- [ ] 正确生成4个Die的D2D节点位置
-- [ ] 连接映射表构建正确
+### 7.3 第三阶段：更新D2D_Model连接建立
+**目标**: 使用配对表建立所有连接
+**修改内容**:
+- 修改`_setup_cross_die_connections`支持4-Die
+- 实现`_setup_4die_connections_from_pairs`
+- 自动建立所有12对连接
 
-### 8.2 第二阶段：D2D_Sys组件改造
-**目标**: 支持多目标Die连接
-**文件修改**:
-- `src/utils/components/d2d_sys.py`: 多目标Die支持
-- `src/utils/components/d2d_*_interface.py`: 接口更新
-
-**验证标准**:
-- [ ] 每个Die正确识别其连接的Die
-- [ ] 直连路由功能正常
-- [ ] AXI通道延迟仿真正确
-
-### 8.3 第三阶段：D2D_Model核心扩展
-**目标**: 支持4个Die的协调管理
-**文件修改**:
-- `src/core/d2d_model.py`: 4-Die支持
-- 相关工具文件更新
-
-**验证标准**:
-- [ ] 成功创建4个Die实例
-- [ ] 跨Die连接建立正确
-- [ ] 时钟同步机制正常
-
-### 8.4 第四阶段：多跳路由实现
-**目标**: 支持非直连Die的通信
-**新增文件**:
-- `src/utils/components/multi_hop_router.py`: 路由算法
-**文件修改**:
-- D2D相关组件添加路由支持
-
-**验证标准**:
-- [ ] 最短路径算法正确
-- [ ] 中间Die转发功能正常
-- [ ] 无死锁现象
-
-### 8.5 第五阶段：测试验证
-**目标**: 全面验证4-Die功能
+### 7.4 第四阶段：测试验证
 **测试内容**:
-- 直连Die通信测试
-- 多跳路由通信测试
-- 性能对比测试
-- 稳定性测试
+- 配对表生成正确性
+- 4-Die连接建立成功
+- D2D_Sys初始化无错误
+- 基本通信功能验证
 
-## 9. Traffic配置示例
+## 8. 连接验证和拓扑确认
 
-### 9.1 4-Die Traffic文件格式
+### 8.2 基于配置的连接验证
+
+基于当前配置文件生成的连接关系，4个Die之间形成2x2网格拓扑：
+
+#### 8.2.1 直连关系验证
 ```python
-# traffic/4die_example.csv
-# cycle, src_die, src_node, dst_die, dst_node, req_type, burst_length
-# 直连通信示例
-100, 0, 5, 1, 10, read, 4      # DIE 0 → DIE 1 (直连)
-200, 1, 6, 3, 12, write, 8     # DIE 1 → DIE 3 (直连)
-300, 2, 8, 0, 15, read, 2      # DIE 2 → DIE 0 (直连)
+# 根据d2d_4die_config.yaml生成的连接对：
+连接关系验证：
+- Die0 ↔ Die1: 3对连接 (右边-左边)
+- Die0 ↔ Die3: 3对连接 (下边-上边)
+- Die1 ↔ Die2: 3对连接 (下边-上边)
+- Die2 ↔ Die3: 3对连接 (右边-左边)
 
-# 多跳通信示例
-400, 0, 20, 3, 25, read, 4     # DIE 0 → DIE 3 (通过DIE 1或DIE 2)
-500, 1, 30, 2, 35, write, 8    # DIE 1 → DIE 2 (通过DIE 0或DIE 3)
-
-# 并发通信测试
-600, 0, 5, 1, 10, read, 4      # 多条并发请求
-600, 0, 6, 2, 11, read, 4
-600, 1, 7, 3, 12, write, 8
-600, 2, 8, 0, 13, write, 8
+每个Die连接到2个相邻Die，符合2x2网格拓扑要求
 ```
 
-### 9.2 通信模式示例
-```python
-# 1. 一对一通信（点对点）
-generate_point_to_point_traffic(src_die=0, dst_die=3, request_count=100)
+#### 8.2.2 多跳路由支持
+配置文件中启用了`D2D_MULTI_HOP_ENABLED: true`，支持非直连Die间的通信：
+- **Die0 ↔ Die2**: 通过Die1或Die3中转（2跳）
+- **Die1 ↔ Die3**: 通过Die0或Die2中转（2跳）
 
-# 2. 一对多通信（广播）
-generate_broadcast_traffic(src_die=0, dst_dies=[1, 2, 3], request_count=50)
+#### 8.2.3 路由算法
+- **算法**: shortest_path（最短路径）
+- **实现**: 系统自动计算最短路径，选择最优的中转路径
 
-# 3. 多对一通信（聚合）
-generate_aggregate_traffic(src_dies=[1, 2, 3], dst_die=0, request_count=30)
+## 9. 总结
 
-# 4. 全连接通信（All-to-All）
-generate_all_to_all_traffic(request_count=20)
-```
+基于配置驱动的4-Die D2D扩展设计具有以下优势：
 
-## 10. 预期挑战和解决方案
+### 9.1 设计优势
+- **配置驱动**: 通过YAML配置定义连接关系，无需硬编码
+- **自动对称**: 系统自动匹配对端Die的连接配置
+- **灵活配置**: 支持不同拓扑规模和连接模式的定制
+- **相对索引**: 使用边缘相对位置索引，避免绝对节点ID依赖
 
-### 10.1 性能挑战
-**挑战**: 4-Die系统的复杂度显著增加，可能影响仿真性能
-**解决方案**:
-- 优化路由算法，预计算路由表
-- 使用高效的数据结构存储连接信息
-- 添加性能监控和分析工具
+### 9.2 实现简化  
+- **配置自动生成**: 节点配对由配置文件驱动自动计算
+- **验证完整**: 自动检查配置完整性和对称性
+- **调试友好**: 配置关系直观，易于理解和调试
+- **向后兼容**: 完全兼容现有2-Die设计
 
-### 10.2 调试复杂度
-**挑战**: 多Die、多跳路由增加调试难度
-**解决方案**:
-- 增强trace机制，记录完整的路径信息
-- 添加可视化工具显示Die间通信状态
-- 分阶段验证，确保每个阶段功能正确
+### 9.3 扩展性
+- **通用框架**: 统一的配置框架支持任意Die数量扩展
+- **标准化**: 建立了基于配置的Die间连接标准模式
+- **可维护**: 配置文件结构清晰，易于修改和维护
+- **错误检测**: 自动检测配置错误和不一致性
 
-### 10.3 死锁风险
-**挑战**: 环形拓扑可能导致死锁
-**解决方案**:
-- 设计保守的路由算法，避免形成等待环
-- 实现超时机制，检测和恢复死锁
-- 添加死锁检测工具
+### 9.4 与硬编码方案对比
+- **灵活性**: 从硬编码节点位置改为配置驱动的相对索引
+- **可扩展性**: 从固定的2x2网格改为支持任意拓扑配置
+- **维护性**: 从代码中的配对函数改为配置文件管理
+- **验证机制**: 增加了完整的配置验证和错误检测
 
-## 11. 总结
-
-4-Die D2D扩展是CrossRing系统的重要演进，它在保持现有2-Die设计兼容性的基础上，提供了更强大的多Die通信能力。通过合理的架构设计、渐进式实现策略和全面的测试验证，这个扩展将为用户提供更灵活、更强大的NoC仿真能力。
-
-关键成功因素：
-- **模块化设计**: 最小化对现有代码的影响
-- **渐进实施**: 分阶段实现，确保每步都可验证
-- **充分测试**: 覆盖各种通信场景和边界条件
-- **性能优化**: 确保4-Die系统的仿真效率
-
-这个设计为未来支持更多Die（如8-Die、16-Die）奠定了坚实的基础。
+这个基于配置驱动的设计为CrossRing系统提供了灵活、可扩展的4-Die支持，为未来支持更多Die和更复杂拓扑奠定了坚实基础。

@@ -467,28 +467,79 @@ class D2D_Interface:
 ## 8. 使用示例
 
 ### 8.1 配置文件示例
-```json
-{
-  "d2d_enabled": true,
-  "num_dies": 2,
-  "d2d_rn_positions": [35, 36],      // 每个Die的D2D RN节点位置
-  "d2d_sn_positions": [37, 38],      // 每个Die的D2D SN节点位置  
-  "d2d_latencies": {
-    "ar": 10, "r": 8, "aw": 10, "w": 2, "b": 8
-  },
-  "d2d_node_mapping": {
-    // 定义各Die内哪些节点可以作为D2D的源和目标
-    "die_0": {
-      "rn_nodes": [0, 1, 2, 5, 6, 7],      // Die0中的RN节点
-      "sn_nodes": [10, 11, 12, 15, 16, 17]  // Die0中的SN节点
-    },
-    "die_1": {
-      "rn_nodes": [0, 1, 2, 5, 6, 7],      // Die1中的RN节点
-      "sn_nodes": [10, 11, 12, 15, 16, 17]  // Die1中的SN节点
-    }
-  }
-}
+
+现有D2D配置采用YAML格式和配置驱动的方式，支持灵活的Die连接定义：
+
+#### 8.1.1 2-Die配置示例
+```yaml
+# config/topologies/d2d_config.yaml
+D2D_ENABLED: true
+NUM_DIES: 2
+
+D2D_DIE_CONFIG:
+  0:
+    num_row: 5
+    num_col: 4
+    connections:
+      right: {die: 1, d2d_nodes: [1, 2]}    # 连接Die1，使用右边第1,2个位置
+  1:
+    num_row: 5
+    num_col: 4
+    connections:
+      left: {die: 0, d2d_nodes: [1, 2]}     # 连接Die0，使用左边第1,2个位置
+
+# D2D延迟配置
+D2D_AR_LATENCY: 10
+D2D_R_LATENCY: 8
+D2D_AW_LATENCY: 10
+D2D_W_LATENCY: 2
+D2D_B_LATENCY: 8
 ```
+
+#### 8.1.2 4-Die配置示例  
+```yaml
+# config/topologies/d2d_4die_config.yaml
+D2D_ENABLED: true
+NUM_DIES: 4
+
+D2D_DIE_CONFIG:
+  0:
+    num_row: 5
+    num_col: 4
+    connections:
+      right: {die: 1, d2d_nodes: [1, 2, 3]}
+      bottom: {die: 3, d2d_nodes: [0, 1, 2]}
+  1:
+    num_row: 5  
+    num_col: 4
+    connections:
+      left: {die: 0, d2d_nodes: [1, 2, 3]}
+      bottom: {die: 2, d2d_nodes: [0, 1, 2]}
+  2:
+    num_row: 5
+    num_col: 4
+    connections:
+      top: {die: 1, d2d_nodes: [0, 1, 2]}
+      right: {die: 3, d2d_nodes: [1, 2, 3]}
+  3:
+    num_row: 5
+    num_col: 4
+    connections:
+      left: {die: 2, d2d_nodes: [1, 2, 3]}
+      top: {die: 0, d2d_nodes: [0, 1, 2]}
+
+# 多跳路由支持
+D2D_MULTI_HOP_ENABLED: true
+D2D_ROUTING_ALGORITHM: "shortest_path"
+```
+
+#### 8.1.3 配置参数说明
+- **D2D_DIE_CONFIG**: 核心配置结构，定义每个Die的连接关系
+- **connections**: 指定该Die与其他Die的连接
+  - **edge**: 连接边缘（left/right/top/bottom）
+  - **die**: 目标Die编号
+  - **d2d_nodes**: 相对位置索引数组
+- **相对索引**: 避免硬编码具体节点位置，提供更好的灵活性
 
 ### 8.2 Traffic文件格式
 ```

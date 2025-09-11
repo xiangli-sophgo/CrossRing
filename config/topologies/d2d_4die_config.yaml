@@ -3,14 +3,34 @@
 # D2D 特定配置
 D2D_ENABLED: true
 NUM_DIES: 4
-D2D_LAYOUT: "GRID_2X2"  # 2x2网格布局模式
 
-# 4-Die连接映射
-D2D_CONNECTION_MAP:
-  0: {1: "horizontal", 2: "vertical"}    # Die 0连接Die 1(水平)和Die 2(垂直)
-  1: {0: "horizontal", 3: "vertical"}    # Die 1连接Die 0(水平)和Die 3(垂直)
-  2: {0: "vertical", 3: "horizontal"}    # Die 2连接Die 0(垂直)和Die 3(水平)
-  3: {1: "vertical", 2: "horizontal"}    # Die 3连接Die 1(垂直)和Die 2(水平)
+# 4-Die节点配置 (新的配置驱动方式)
+D2D_DIE_CONFIG:
+  0:
+    num_row: 5
+    num_col: 4
+    connections:
+      right: {die: 1, d2d_nodes: [1, 2, 3]}        # 右边：第1,2,3个位置（从上到下）
+      bottom: {die: 3, d2d_nodes: [0, 1, 2]}       # 下边：第0,1,2个位置（从左到右）
+  1:
+    num_row: 5
+    num_col: 4
+    connections:
+      left: {die: 0, d2d_nodes: [1, 2, 3]}         # 左边：第1,2,3个位置（从上到下）
+      bottom: {die: 2, d2d_nodes: [0, 1, 2]}       # 下边：第0,1,2个位置（从左到右）
+  2:
+    num_row: 5
+    num_col: 4
+    connections:
+      top: {die: 1, d2d_nodes: [0, 1, 2]}          # 上边：第0,1,2个位置（从左到右）
+      right: {die: 3, d2d_nodes: [1, 2, 3]}        # 右边：第1,2,3个位置（从上到下）
+  3:
+    num_row: 5
+    num_col: 4
+    connections:
+      left: {die: 2, d2d_nodes: [1, 2, 3]}         # 左边：第1,2,3个位置（从上到下）
+      top: {die: 0, d2d_nodes: [0, 1, 2]}          # 上边：第0,1,2个位置（从左到右）
+
 
 # 多跳路由配置
 D2D_MULTI_HOP_ENABLED: true
