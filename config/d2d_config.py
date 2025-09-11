@@ -42,7 +42,7 @@ class D2DConfig(CrossRingConfig):
         if d2d_config_file:
             self._load_d2d_config_file(d2d_config_file)
 
-        # 生成D2D配对关系
+        # 生成D2D配对关系（需要在加载配置后）
         self._generate_d2d_pairs()
 
         # 更新 CHANNEL_SPEC 以包含 D2D 接口
@@ -61,6 +61,10 @@ class D2DConfig(CrossRingConfig):
         self.D2D_CONNECTION_MAP = {}  # Die间连接映射（兼容性保留）
         self.D2D_MULTI_HOP_ENABLED = False  # 多跳路由支持
         self.D2D_ROUTING_ALGORITHM = "shortest_path"  # 路由算法
+
+        # Die 布局推断相关属性
+        self.die_layout_positions = {}  # 推断的Die布局位置: {die_id: (x, y)}
+        self.die_layout_type = ""  # 布局类型：如 "2x1", "1x2", "2x2" 等
 
     def _generate_d2d_pairs(self):
         """生成D2D配对关系"""
@@ -95,6 +99,9 @@ class D2DConfig(CrossRingConfig):
                     positions.append(pair[3])
             # 去重并设置到字典中
             self.D2D_DIE_POSITIONS[die_id] = list(set(positions))
+
+        # 推断 Die 布局
+        self._infer_die_layout()
 
 
     def _get_edge_nodes(self, edge, num_row, num_col):
@@ -383,3 +390,94 @@ class D2DConfig(CrossRingConfig):
 
         with open(config_file, "w", encoding="utf-8") as f:
             json.dump(d2d_config, f, indent=4, ensure_ascii=False)
+
+    def _infer_die_layout(self):
+        """
+        根据 D2D_DIE_CONFIG 中的连接关系推断 Die 的 2D 布局位置
+        
+        算法：
+        1. 选择 Die 0 作为参考点 (0, 0)
+        2. 广度优先遍历，根据连接方向推断其他 Die 的位置
+        3. 坐标归一化，使最小坐标为 (0, 0)
+        """
+        die_config = getattr(self, "D2D_DIE_CONFIG", None)
+        if not die_config:
+            # 没有配置时使用默认布局
+            num_dies = getattr(self, "NUM_DIES", 2)
+            if num_dies == 2:
+                self.die_layout_positions = {0: (0, 0), 1: (1, 0)}
+                self.die_layout_type = "2x1"
+            return
+
+        num_dies = getattr(self, "NUM_DIES", 2)
+        
+        # 方向到坐标偏移的映射
+        direction_offsets = {
+            "left": (-1, 0),
+            "right": (1, 0),
+            "top": (0, -1),
+            "bottom": (0, 1)
+        }
+        
+        # 存储每个 Die 的位置
+        positions = {}
+        visited = set()
+        
+        # BFS 队列：(die_id, x, y)
+        from collections import deque
+        queue = deque()
+        
+        # 从 Die 0 开始，设为参考点 (0, 0)
+        queue.append((0, 0, 0))
+        positions[0] = (0, 0)
+        visited.add(0)
+        
+        while queue:
+            current_die, current_x, current_y = queue.popleft()
+            
+            if current_die not in die_config:
+                continue
+                
+            # 检查当前 Die 的所有连接
+            connections = die_config[current_die].get("connections", {})
+            
+            for direction, conn_info in connections.items():
+                target_die = conn_info["die"]
+                
+                if target_die in visited:
+                    continue
+                    
+                # 根据方向计算目标 Die 的位置
+                dx, dy = direction_offsets.get(direction, (0, 0))
+                target_x = current_x + dx
+                target_y = current_y + dy
+                
+                positions[target_die] = (target_x, target_y)
+                visited.add(target_die)
+                queue.append((target_die, target_x, target_y))
+        
+        # 坐标归一化：使最小坐标为 (0, 0)
+        if positions:
+            min_x = min(pos[0] for pos in positions.values())
+            min_y = min(pos[1] for pos in positions.values())
+            
+            normalized_positions = {}
+            for die_id, (x, y) in positions.items():
+                normalized_positions[die_id] = (x - min_x, y - min_y)
+            
+            self.die_layout_positions = normalized_positions
+            
+            # 推断布局类型
+            max_x = max(pos[0] for pos in normalized_positions.values())
+            max_y = max(pos[1] for pos in normalized_positions.values())
+            self.die_layout_type = f"{max_x + 1}x{max_y + 1}"
+            
+            print(f"[D2D布局推断] 检测到 {self.die_layout_type} 布局:")
+            for die_id in range(num_dies):
+                if die_id in normalized_positions:
+                    x, y = normalized_positions[die_id]
+                    print(f"  Die{die_id}: ({x}, {y})")
+        else:
+            # 回退到默认布局
+            self.die_layout_positions = {i: (i, 0) for i in range(num_dies)}
+            self.die_layout_type = f"{num_dies}x1"

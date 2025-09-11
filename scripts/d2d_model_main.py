@@ -3,13 +3,8 @@ D2D (Die-to-Die) 5x4拓扑演示
 包含完整的结果处理和可视化功能。
 """
 
-import sys
-
-sys.path.append("..")
 from src.core.d2d_model import D2D_Model
 from config.d2d_config import D2DConfig
-import numpy as np
-import os
 
 
 def main():
@@ -54,7 +49,7 @@ def main():
     sim.initial()
 
     # 设置仿真参数
-    sim.end_time = 200  # 缩短测试周期以便调试
+    sim.end_time = 500  # 缩短测试周期以便调试
     sim.print_interval = 500
 
     sim.run()

@@ -10,26 +10,26 @@ D2D_DIE_CONFIG:
     num_row: 5
     num_col: 4
     connections:
-      right: {die: 1, d2d_nodes: [1, 2, 3]}        # 右边：第1,2,3个位置（从上到下）
-      bottom: {die: 3, d2d_nodes: [0, 1, 2]}       # 下边：第0,1,2个位置（从左到右）
+      left: {die: 1, d2d_nodes: [1, 2, 3]}        # 左边：第1,2,3个位置（从上到下）
+      top: {die: 3, d2d_nodes: [0, 1, 2]}       # 上边：第0,1,2个位置（从左到右）
   1:
     num_row: 5
     num_col: 4
     connections:
-      left: {die: 0, d2d_nodes: [1, 2, 3]}         # 左边：第1,2,3个位置（从上到下）
-      bottom: {die: 2, d2d_nodes: [0, 1, 2]}       # 下边：第0,1,2个位置（从左到右）
+      right: {die: 0, d2d_nodes: [1, 2, 3]}         # 右边：第1,2,3个位置（从上到下）
+      top: {die: 2, d2d_nodes: [0, 1, 2]}       # 下边：第0,1,2个位置（从左到右）
   2:
     num_row: 5
     num_col: 4
     connections:
-      top: {die: 1, d2d_nodes: [0, 1, 2]}          # 上边：第0,1,2个位置（从左到右）
+      bottom: {die: 1, d2d_nodes: [0, 1, 2]}          # 下边：第0,1,2个位置（从左到右）
       right: {die: 3, d2d_nodes: [1, 2, 3]}        # 右边：第1,2,3个位置（从上到下）
   3:
     num_row: 5
     num_col: 4
     connections:
       left: {die: 2, d2d_nodes: [1, 2, 3]}         # 左边：第1,2,3个位置（从上到下）
-      top: {die: 0, d2d_nodes: [0, 1, 2]}          # 上边：第0,1,2个位置（从左到右）
+      bottom: {die: 0, d2d_nodes: [0, 1, 2]}          # 上边：第0,1,2个位置（从左到右）
 
 
 # 多跳路由配置
