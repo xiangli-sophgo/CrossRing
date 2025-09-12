@@ -58,7 +58,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
     """D2D系统专用的结果处理器，继承自BandwidthAnalyzer"""
 
     FLIT_SIZE_BYTES = 128  # 每个flit的字节数
-    MIN_SIMULATION_TIME_NS = 1000  # 最小仿真时间（纳秒），避免除零
     MAX_BANDWIDTH_NORMALIZATION = 256.0  # 最大带宽归一化值（GB/s）
 
     def __init__(self, config, min_gap_threshold: int = 50):
@@ -82,7 +81,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             if hasattr(die_model, "data_network") and hasattr(die_model.data_network, "arrive_flits"):
                 self._collect_requests_from_network(die_model.data_network, die_id)
 
-        # print(f"[D2D结果处理] 收集到 {len(self.d2d_requests)} 个跨Die请求")
+        print(f"[D2D结果处理] 收集到 {len(self.d2d_requests)} 个跨Die请求")
 
     def _collect_requests_from_network(self, network, die_id: int):
         """从单个网络中收集跨Die请求"""
@@ -113,11 +112,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
     def _is_cross_die_request(self, flit: Flit) -> bool:
         """检查flit是否为跨Die请求"""
         return (
-            hasattr(flit, "d2d_origin_die")
-            and hasattr(flit, "d2d_target_die")
-            and flit.d2d_origin_die is not None
-            and flit.d2d_target_die is not None
-            and flit.d2d_origin_die != flit.d2d_target_die
+            hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die") and flit.d2d_origin_die is not None and flit.d2d_target_die is not None and flit.d2d_origin_die != flit.d2d_target_die
         )
 
     def _extract_d2d_info(self, first_flit: Flit, last_flit: Flit, packet_id: int) -> Optional[D2DRequestInfo]:
@@ -376,9 +371,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 total_bytes = sum(req.data_bytes for req in interval_requests)
                 flit_count = sum(req.burst_length for req in interval_requests)
 
-                interval = WorkingInterval(
-                    start_time=start, end_time=end, duration=end - start, flit_count=flit_count, total_bytes=total_bytes, request_count=len(interval_requests)
-                )
+                interval = WorkingInterval(start_time=start, end_time=end, duration=end - start, flit_count=flit_count, total_bytes=total_bytes, request_count=len(interval_requests))
                 working_intervals.append(interval)
 
         return working_intervals
@@ -460,17 +453,16 @@ class D2DResultProcessor(BandwidthAnalyzer):
         Args:
             dies: Die模型字典
         """
-        # 初始化每个Die独立的ip_bandwidth_data结构
-        rows = self.config.NUM_ROW
-        cols = self.config.NUM_COL
-        # D2D系统使用5x4拓扑，调整行数
-        if getattr(self, "topo_type_stat", "5x4") != "4x5":
-            rows -= 1
-
         # 为每个Die创建独立的IP带宽数据结构
         self.die_ip_bandwidth_data = {}
 
-        for die_id in dies.keys():
+        for die_id, die_model in dies.items():
+            # 从每个Die的config获取其拓扑配置
+            rows = die_model.config.NUM_ROW
+            cols = die_model.config.NUM_COL
+            # D2D系统使用5x4拓扑，调整行数
+            if getattr(self, "topo_type_stat", "5x4") != "4x5":
+                rows -= 1
             self.die_ip_bandwidth_data[die_id] = {
                 "read": {
                     "sdma": np.zeros((rows, cols)),
@@ -598,7 +590,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
     def _get_physical_position(self, node_id: int, die_model) -> tuple:
         """获取节点的物理位置(row, col)"""
-        cols = self.config.NUM_COL
+        cols = die_model.config.NUM_COL
 
         # 简单映射：node_id直接映射到物理位置
         row = node_id // cols
@@ -662,9 +654,10 @@ class D2DResultProcessor(BandwidthAnalyzer):
         die_node_positions = {}
         for die_id, network in die_networks_for_draw.items():
             offset_x, offset_y = die_offsets[die_id]
+            die_model = dies.get(die_id) if dies else None
 
             # 绘制单个Die的流量图并获取节点位置
-            node_positions = self._draw_single_die_flow(ax, network, config, die_id, offset_x, offset_y, mode, node_size, show_cdma)
+            node_positions = self._draw_single_die_flow(ax, network, die_model.config if die_model else config, die_id, offset_x, offset_y, mode, node_size, show_cdma, die_model)
             die_node_positions[die_id] = node_positions
 
         # 绘制跨Die数据带宽连接
@@ -675,7 +668,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 d2d_bandwidth = self._calculate_d2d_sys_bandwidth(dies)
                 # print(f"[D2D流量图] 计算得到的D2D带宽统计: {d2d_bandwidth}")
                 # 绘制跨Die连接，传入实际节点位置
-                self._draw_cross_die_connections(ax, d2d_bandwidth, die_node_positions, config)
+                self._draw_cross_die_connections(ax, d2d_bandwidth, die_node_positions, config, dies)
             # else:
             # print("[D2D流量图] 警告：无法获取die模型，跳过跨Die连接绘制")
         except Exception as e:
@@ -702,7 +695,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             plt.tight_layout(pad=0.3)  # 减少边距以节省空间
             plt.show()
 
-    def _draw_single_die_flow(self, ax, network, config, die_id, offset_x, offset_y, mode="utilization", node_size=2000, show_cdma=True):
+    def _draw_single_die_flow(self, ax, network, config, die_id, offset_x, offset_y, mode="utilization", node_size=2000, show_cdma=True, die_model=None):
         """绘制单个Die的流量图，复用原有draw_flow_graph的核心逻辑"""
 
         # 创建NetworkX图
@@ -973,7 +966,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             # 为D2D流量图添加简化的IP信息显示 - 仅对偶数行节点显示，并区分Die
             physical_row = node // config.NUM_COL
             if physical_row % 2 == 0:
-                self._draw_d2d_ip_info_box(ax, x, y, node, config, mode, square_size, die_id)
+                self._draw_d2d_ip_info_box(ax, x, y, node, config, mode, square_size, die_id, die_model)
 
         # 添加Die标签 - 根据推断的布局和连接位置智能放置
         if pos:
@@ -1027,7 +1020,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 返回节点位置信息供跨Die连接使用
         return pos
 
-    def _draw_d2d_ip_info_box(self, ax, x, y, node, config, mode, square_size, die_id=None):
+    def _draw_d2d_ip_info_box(self, ax, x, y, node, config, mode, square_size, die_id=None, die_model=None):
         """为D2D流量图绘制简化的IP信息框 - 在一个框内显示所有有流量的IP"""
         # 计算物理位置
         physical_col = node % config.NUM_COL
@@ -1062,7 +1055,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 如果没有从die_processors获取到数据，尝试从自身的ip_bandwidth_data获取，但要根据Die区分
         if not active_ips and hasattr(self, "ip_bandwidth_data") and self.ip_bandwidth_data is not None:
             # 根据D2D请求过滤，只显示属于该Die的IP带宽
-            die_specific_ips = self._get_die_specific_ips(node, die_id)
+            die_specific_ips = self._get_die_specific_ips(node, die_id, die_model)
 
             for ip_type, data_matrix in self.ip_bandwidth_data.get(mode, {}).items():
                 if physical_row < data_matrix.shape[0] and physical_col < data_matrix.shape[1]:
@@ -1103,7 +1096,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             ax.text(ip_x, ip_y, ip_text, ha="center", va="center", fontsize=6, color="darkblue", fontweight="normal")
         # 没有活跃IP时不显示任何文字，保持空白
 
-    def _get_die_specific_ips(self, node, die_id):
+    def _get_die_specific_ips(self, node, die_id, die_model=None):
         """根据D2D请求确定该Die该节点的IP类型"""
         if not hasattr(self, "d2d_requests") or not self.d2d_requests:
             return []
@@ -1111,7 +1104,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
         die_specific_ips = []
 
         # 计算当前绘制节点的物理位置
-        cols = self.config.NUM_COL
+        if die_model is None:
+            raise ValueError("die_model参数不能为None")
+        cols = die_model.config.NUM_COL
         node_row = node // cols
         node_col = node % cols
         # 调整到偶数行（与IP带宽计算保持一致）
@@ -1211,7 +1206,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         return d2d_sys_bandwidth
 
-    def _draw_cross_die_connections(self, ax, d2d_bandwidth, die_node_positions, config):
+    def _draw_cross_die_connections(self, ax, d2d_bandwidth, die_node_positions, config, dies=None):
         """
         绘制跨Die数据带宽连接（只显示R和W通道的数据流）
         基于推断的布局和D2D_PAIRS配置绘制连接
@@ -1281,9 +1276,15 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 is_vertical_connection = from_die_pos[1] != to_die_pos[1]
 
                 if is_vertical_connection:
-                    # 垂直连接：需要减去 NUM_COL
-                    from_node_pos = from_node - config.NUM_COL
-                    to_node_pos = to_node - config.NUM_COL
+                    # 垂直连接：需要减去 NUM_COL，从具体Die的配置获取
+                    if dies:
+                        from_die_cols = dies[conn["from_die"]].config.NUM_COL if conn["from_die"] in dies else 4
+                        to_die_cols = dies[conn["to_die"]].config.NUM_COL if conn["to_die"] in dies else 4
+                    else:
+                        # 没有dies参数时报错
+                        raise ValueError("垂直连接需要dies参数来获取各Die的NUM_COL配置")
+                    from_node_pos = from_node - from_die_cols
+                    to_node_pos = to_node - to_die_cols
                 else:
                     # 水平连接：不需要减去 NUM_COL
                     from_node_pos = from_node
@@ -1742,8 +1743,14 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
             if is_vertical_connection:
                 # 垂直连接：需要减去 NUM_COL
-                from_node_pos = die0_node - self.config.NUM_COL
-                to_node_pos = die1_node - self.config.NUM_COL
+                # 这里使用self.config是历史遗留问题，应该从对应die获取，但目前先保持原逻辑避免更大改动
+                if hasattr(self.config, "NUM_COL"):
+                    from_node_pos = die0_node - self.config.NUM_COL
+                    to_node_pos = die1_node - self.config.NUM_COL
+                else:
+                    # 如果没有NUM_COL，使用默认值4（常见的5x4拓扑）
+                    from_node_pos = die0_node - 4
+                    to_node_pos = die1_node - 4
             else:
                 # 水平连接：不需要减去 NUM_COL
                 from_node_pos = die0_node

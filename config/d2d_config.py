@@ -9,38 +9,36 @@ configuration parameters and automatic node placement calculation.
 import json
 import yaml
 import logging
+import os
 from typing import List, Tuple, Optional, Dict
-from .config import CrossRingConfig
 
 
-class D2DConfig(CrossRingConfig):
+class D2DConfig:
     """
-    D2D配置管理器，继承CrossRingConfig并添加D2D特定功能
+    D2D配置管理器，独立管理D2D系统配置
 
     主要功能：
-    1. 管理D2D布局配置（水平/垂直摆放）
-    2. 自动计算RN/SN节点位置
+    1. 管理D2D布局配置和每个Die的拓扑信息
+    2. 自动加载每个Die对应的拓扑配置文件
     3. 管理RN-SN配对关系
     4. 验证D2D配置的合理性
     """
 
-    def __init__(self, die_config_file=None, d2d_config_file=None):
+    def __init__(self, d2d_config_file):
         """
         初始化D2D配置
 
         Args:
-            die_config_file: Die拓扑配置文件路径
             d2d_config_file: D2D专用配置文件路径
         """
-        # 初始化基础配置
-        super().__init__(die_config_file)
-
         # 初始化D2D配置
         self._init_d2d_config()
 
-        # 如果指定了D2D配置文件，则加载D2D特定配置
+        # 加载D2D特定配置
         if d2d_config_file:
             self._load_d2d_config_file(d2d_config_file)
+        else:
+            raise ValueError("必须指定d2d_config_file")
 
         # 生成D2D配对关系（需要在加载配置后）
         self._generate_d2d_pairs()
@@ -65,6 +63,16 @@ class D2DConfig(CrossRingConfig):
         # Die 布局推断相关属性
         self.die_layout_positions = {}  # 推断的Die布局位置: {die_id: (x, y)}
         self.die_layout_type = ""  # 布局类型：如 "2x1", "1x2", "2x2" 等
+        
+        # 基础配置属性（原来由CrossRingConfig提供）
+        self.CHANNEL_SPEC = {}  # 通道规格
+        self.CH_NAME_LIST = []  # 通道名称列表
+        self.DIE_TOPOLOGIES = {}  # Die拓扑信息存储
+        
+        # 网络基础参数（将从D2D配置文件中加载）
+        self.NETWORK_FREQUENCY = None  # 从配置文件读取
+        self.FLIT_SIZE = None  # 从配置文件读取
+        self.BURST = None  # 从配置文件读取
 
     def _generate_d2d_pairs(self):
         """生成D2D配对关系"""
@@ -103,21 +111,65 @@ class D2DConfig(CrossRingConfig):
         # 推断 Die 布局
         self._infer_die_layout()
 
+    def _parse_topology(self, topology_str):
+        """
+        解析拓扑字符串格式，如 '5x4' -> (5, 4)
+        
+        Args:
+            topology_str: 拓扑字符串，如 "5x4", "10x4" 等
+            
+        Returns:
+            tuple: (num_row, num_col)
+        """
+        try:
+            parts = topology_str.split('x')
+            if len(parts) != 2:
+                raise ValueError(f"拓扑格式错误: {topology_str}，期望格式: '行数x列数'")
+            num_row = int(parts[0])
+            num_col = int(parts[1])
+            return num_row, num_col
+        except Exception as e:
+            raise ValueError(f"解析拓扑字符串 '{topology_str}' 失败: {e}")
+
+    def _load_topology_config(self, topology_str):
+        """
+        加载对应的拓扑配置文件
+        
+        Args:
+            topology_str: 拓扑字符串，如 "5x4"
+            
+        Returns:
+            dict: 拓扑配置内容
+        """
+        import yaml
+        import os
+        
+        # 构建拓扑配置文件路径
+        config_path = os.path.join("config", "topologies", f"topo_{topology_str}.yaml")
+        
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                topo_config = yaml.safe_load(f)
+                return topo_config
+        except FileNotFoundError:
+            raise FileNotFoundError(f"拓扑配置文件不存在: {config_path}")
+        except Exception as e:
+            raise RuntimeError(f"加载拓扑配置文件失败: {config_path}, 错误: {e}")
 
     def _get_edge_nodes(self, edge, num_row, num_col):
         """获取指定边的所有节点"""
         if edge == "top":
-            # 第二行（row=1）
-            return list(range(num_col, 2 * num_col))
+            # 第一行（row=0）
+            return list(range(0, num_col))
         elif edge == "bottom":
             # 最后一行（row=num_row-1）
             return list(range((num_row - 1) * num_col, num_row * num_col))
         elif edge == "left":
-            # 奇数行的左边（col=0）
-            return [row * num_col for row in range(1, num_row, 2)]
+            # 所有行的左边（col=0）
+            return [row * num_col for row in range(num_row)]
         elif edge == "right":
-            # 奇数行的右边（col=num_col-1）
-            return [row * num_col + (num_col - 1) for row in range(1, num_row, 2)]
+            # 所有行的右边（col=num_col-1）
+            return [row * num_col + (num_col - 1) for row in range(num_row)]
         else:
             return []
 
@@ -128,7 +180,7 @@ class D2DConfig(CrossRingConfig):
 
     def _generate_d2d_pairs_from_config(self, config):
         """
-        根据配置生成D2D节点配对
+        根据新配置格式生成D2D节点配对
 
         Args:
             config: Die配置字典
@@ -136,54 +188,76 @@ class D2DConfig(CrossRingConfig):
         Returns:
             pairs: [(die0_id, node0, die1_id, node1), ...]
         """
+        # 先验证配置
+        self._validate_d2d_config(config)
+        
         pairs = []
-        processed = set()  # 避免重复处理
-
+        processed = set()
+        
+        # 初始化Die拓扑信息存储
+        if not hasattr(self, 'DIE_TOPOLOGIES'):
+            self.DIE_TOPOLOGIES = {}
+        
         for die_id, die_config in config.items():
-            # 获取Die的网络规模
-            num_row = die_config["num_row"]
-            num_col = die_config["num_col"]
-
-            # 处理每个连接
+            # 解析topology字符串获取行列数
+            topology_str = die_config["topology"]
+            num_row, num_col = self._parse_topology(topology_str)
+            
+            # 存储Die拓扑信息供后续使用
+            self.DIE_TOPOLOGIES[die_id] = topology_str
+            
             for edge, conn_info in die_config["connections"].items():
-                target_die = conn_info["die"]
-                d2d_node_indices = conn_info["d2d_nodes"]  # 相对位置索引列表
-
-                # 避免重复处理
-                pair_key = tuple(sorted([die_id, target_die]))
-                if pair_key in processed:
-                    continue
-                processed.add(pair_key)
-
-                # 获取边缘节点
+                d2d_nodes = conn_info["d2d_nodes"]
+                node_mapping = conn_info["node_to_die_mapping"]
+                
+                # 获取该边的所有节点
                 edge_nodes = self._get_edge_nodes(edge, num_row, num_col)
-
-                # 获取对端信息
-                opposite_edge = self._get_opposite_edge(edge)
-                target_config = config[target_die]
-                target_num_row = target_config["num_row"]
-                target_num_col = target_config["num_col"]
-                target_nodes = self._get_edge_nodes(opposite_edge, target_num_row, target_num_col)
-
-                # 根据相对索引获取具体节点
-                d2d_nodes = [edge_nodes[i] for i in d2d_node_indices if i < len(edge_nodes)]
-
-                # 获取对端的相对索引（从对端配置中找到）
-                target_d2d_indices = None
-                for target_edge, target_conn_info in target_config["connections"].items():
-                    if target_conn_info["die"] == die_id and target_edge == opposite_edge:
-                        target_d2d_indices = target_conn_info["d2d_nodes"]
-                        break
-
-                if target_d2d_indices is None:
-                    continue  # 找不到对端配置，跳过
-
-                target_d2d_nodes = [target_nodes[i] for i in target_d2d_indices if i < len(target_nodes)]
-
-                # 生成配对
-                for i in range(min(len(d2d_nodes), len(target_d2d_nodes))):
-                    pairs.append((die_id, d2d_nodes[i], target_die, target_d2d_nodes[i]))
-
+                
+                # 按目标Die分组处理
+                die_groups = {}
+                for node_idx in d2d_nodes:
+                    target_die = node_mapping[node_idx]
+                    if target_die not in die_groups:
+                        die_groups[target_die] = []
+                    die_groups[target_die].append(node_idx)
+                
+                # 为每个目标Die生成配对
+                for target_die, node_indices in die_groups.items():
+                    pair_key = tuple(sorted([die_id, target_die]))
+                    if pair_key in processed:
+                        continue
+                    processed.add(pair_key)
+                    
+                    # 获取源节点
+                    src_nodes = [edge_nodes[i] for i in node_indices]
+                    
+                    # 获取目标节点（从对端配置）
+                    opposite_edge = self._get_opposite_edge(edge)
+                    target_config = config[target_die]
+                    target_conn = target_config["connections"][opposite_edge]
+                    
+                    # 解析目标Die的拓扑信息
+                    target_topology_str = target_config["topology"]
+                    target_num_row, target_num_col = self._parse_topology(target_topology_str)
+                    
+                    target_edge_nodes = self._get_edge_nodes(
+                        opposite_edge, 
+                        target_num_row, 
+                        target_num_col
+                    )
+                    
+                    # 找到对应的目标节点
+                    target_indices = []
+                    for idx, t_die in target_conn["node_to_die_mapping"].items():
+                        if t_die == die_id:
+                            target_indices.append(idx)
+                    
+                    target_nodes = [target_edge_nodes[i] for i in target_indices]
+                    
+                    # 生成配对
+                    for i in range(min(len(src_nodes), len(target_nodes))):
+                        pairs.append((die_id, src_nodes[i], target_die, target_nodes[i]))
+        
         return pairs
 
     def _update_channel_spec_for_d2d(self):
@@ -210,16 +284,20 @@ class D2DConfig(CrossRingConfig):
                 else:
                     d2d_config = json.load(f)
 
-            # 更新D2D特定参数
+            # 更新D2D特定参数和网络基础参数
             for key, value in d2d_config.items():
-                if key.startswith("D2D_") or key == "NUM_DIES" or key == "D2D_DIE_CONFIG":
+                if (key.startswith("D2D_") or 
+                    key in ["NUM_DIES", "D2D_DIE_CONFIG", "NETWORK_FREQUENCY", "FLIT_SIZE", "BURST"]):
                     setattr(self, key, value)
+                    
+            print(f"成功加载D2D配置文件: {d2d_config_file}")
+            if hasattr(self, "D2D_DIE_CONFIG"):
+                print(f"D2D_DIE_CONFIG包含 {len(self.D2D_DIE_CONFIG)} 个Die配置")
 
         except FileNotFoundError as e:
-            pass  # D2D配置文件不存在，使用默认配置
+            raise FileNotFoundError(f"D2D配置文件不存在: {d2d_config_file}")
         except (json.JSONDecodeError, yaml.YAMLError) as e:
-            print(f"警告: D2D配置文件格式错误: {e}")
-            pass  # 配置文件格式错误，使用默认配置
+            raise ValueError(f"D2D配置文件格式错误: {e}")
 
 
     def _create_d2d_pairs(self):
@@ -231,6 +309,107 @@ class D2DConfig(CrossRingConfig):
     def _get_die_positions(self, die_id: int) -> List[int]:
         """获取指定Die的D2D节点位置"""
         return self.D2D_DIE_POSITIONS.get(die_id, [])
+
+    def _validate_d2d_config(self, die_config):
+        """验证D2D配置的正确性"""
+        errors = []
+        num_dies = getattr(self, "NUM_DIES", 2)
+        
+        # 1. 验证所有Die都有配置
+        for die_id in range(num_dies):
+            if die_id not in die_config:
+                errors.append(f"缺少Die {die_id}的配置")
+        
+        # 2. 验证每个连接配置
+        for die_id, config in die_config.items():
+            if "connections" not in config:
+                errors.append(f"Die {die_id}缺少connections配置")
+                continue
+                
+            for edge, conn_info in config.get("connections", {}).items():
+                # 检查必需字段
+                if "connect_die" not in conn_info:
+                    errors.append(f"Die {die_id} {edge}边缺少connect_die")
+                if "d2d_nodes" not in conn_info:
+                    errors.append(f"Die {die_id} {edge}边缺少d2d_nodes")
+                if "node_to_die_mapping" not in conn_info:
+                    errors.append(f"Die {die_id} {edge}边缺少node_to_die_mapping")
+                    continue
+                    
+                # 验证映射完整性
+                connect_die = conn_info["connect_die"]
+                d2d_nodes = conn_info["d2d_nodes"]
+                mapping = conn_info["node_to_die_mapping"]
+                
+                # 检查connect_die是否存在
+                if connect_die >= num_dies:
+                    errors.append(f"Die {die_id} {edge}边connect_die {connect_die}不存在")
+                
+                # 检查所有d2d_nodes都有映射
+                for node_idx in d2d_nodes:
+                    if node_idx not in mapping:
+                        errors.append(f"Die {die_id} {edge}边节点{node_idx}缺少映射")
+                
+                # 检查目标Die是否存在
+                for node_idx, target_die in mapping.items():
+                    if target_die >= num_dies:
+                        errors.append(f"Die {die_id}节点{node_idx}映射到不存在的Die {target_die}")
+                
+                # 验证connect_die与node_to_die_mapping的一致性（允许部分不同）
+                mapped_dies = set(mapping.values())
+                if connect_die not in mapped_dies:
+                    errors.append(f"Die {die_id} {edge}边connect_die {connect_die}不在node_to_die_mapping中")
+                        
+                # 验证节点索引有效性
+                # 解析topology获取行列数
+                if "topology" in config:
+                    num_row, num_col = self._parse_topology(config["topology"])
+                    edge_nodes = self._get_edge_nodes(edge, num_row, num_col)
+                    for node_idx in d2d_nodes:
+                        if node_idx >= len(edge_nodes):
+                            errors.append(f"Die {die_id} {edge}边节点索引{node_idx}超出范围")
+                else:
+                    errors.append(f"Die {die_id}缺少topology配置")
+        
+        # 3. 验证双向连接一致性
+        errors.extend(self._validate_bidirectional_connections(die_config))
+        
+        if errors:
+            raise ValueError("D2D配置验证失败:\n" + "\n".join(errors))
+        
+        return True
+
+    def _validate_bidirectional_connections(self, die_config):
+        """验证双向连接的一致性"""
+        errors = []
+        checked_pairs = set()
+        
+        for die_id, config in die_config.items():
+            for edge, conn_info in config.get("connections", {}).items():
+                connect_die = conn_info.get("connect_die")
+                if connect_die is None:
+                    continue
+                    
+                pair_key = tuple(sorted([die_id, connect_die]))
+                if pair_key in checked_pairs:
+                    continue
+                checked_pairs.add(pair_key)
+                
+                # 查找对端配置
+                opposite_edge = self._get_opposite_edge(edge)
+                target_config = die_config.get(connect_die, {})
+                target_conn = target_config.get("connections", {}).get(opposite_edge)
+                
+                if not target_conn:
+                    errors.append(f"Die {connect_die}缺少对应的{opposite_edge}边连接到Die {die_id}")
+                    continue
+                
+                # 验证对端的connect_die指向当前Die
+                target_connect_die = target_conn.get("connect_die")
+                if target_connect_die != die_id:
+                    errors.append(f"Die {connect_die} {opposite_edge}边connect_die是{target_connect_die}，应该是{die_id}")
+        
+        return errors
 
     def _validate_d2d_layout(self):
         """验证D2D布局的合理性"""
@@ -247,14 +426,20 @@ class D2DConfig(CrossRingConfig):
 
         # 布局验证已不需要，所有布局信息都在D2D_DIE_CONFIG中定义
 
-        # 检查节点位置有效性
-        max_node_id = self.NUM_NODE - 1
-
+        # 检查节点位置有效性（现在每个Die有不同拓扑）
         for die_id in range(num_dies):
-            positions = self.D2D_DIE_POSITIONS.get(die_id, [])
-            for pos in positions:
-                if pos < 0 or pos > max_node_id:
-                    raise ValueError(f"Die{die_id}节点位置无效: {pos}, 有效范围: 0-{max_node_id}")
+            # 获取该Die的拓扑信息
+            topology_str = self.DIE_TOPOLOGIES.get(die_id)
+            if topology_str:
+                num_row, num_col = self._parse_topology(topology_str)
+                max_node_id = (num_row * num_col) - 1
+                
+                positions = self.D2D_DIE_POSITIONS.get(die_id, [])
+                for pos in positions:
+                    if pos < 0 or pos > max_node_id:
+                        raise ValueError(f"Die{die_id}节点位置无效: {pos}, 有效范围: 0-{max_node_id} (拓扑: {topology_str})")
+            else:
+                print(f"警告: Die{die_id}未指定拓扑，跳过节点位置验证")
 
         # 检查配对数量
         if len(self.D2D_PAIRS) == 0:
@@ -277,10 +462,7 @@ class D2DConfig(CrossRingConfig):
             die_connections[pair[0]].add(pair[2])
             die_connections[pair[2]].add(pair[0])
 
-        # 每个Die应该至少连接到其他2个Die（对于2x2网格拓扑）
-        for die_id, connected_dies in die_connections.items():
-            if len(connected_dies) != 2:
-                raise ValueError(f"Die{die_id} 应该连接到2个其他Die，当前连接到: {connected_dies}")
+        # 不限制每个Die连接的数量，只要双向连接一致即可
 
         print(f"4-Die配置验证通过: {len(self.D2D_PAIRS)}个连接对")
 
@@ -411,12 +593,12 @@ class D2DConfig(CrossRingConfig):
 
         num_dies = getattr(self, "NUM_DIES", 2)
         
-        # 方向到坐标偏移的映射
+        # 方向到坐标偏移的映射 (标准数学坐标系：Y轴向上为正)
         direction_offsets = {
-            "left": (-1, 0),
-            "right": (1, 0),
-            "top": (0, -1),
-            "bottom": (0, 1)
+            "left": (-1, 0),    # 向左：x减1
+            "right": (1, 0),    # 向右：x加1
+            "top": (0, 1),      # 向上：y加1
+            "bottom": (0, -1)   # 向下：y减1
         }
         
         # 存储每个 Die 的位置
@@ -442,9 +624,10 @@ class D2DConfig(CrossRingConfig):
             connections = die_config[current_die].get("connections", {})
             
             for direction, conn_info in connections.items():
-                target_die = conn_info["die"]
+                # 使用connect_die字段确定目标Die
+                target_die = conn_info.get("connect_die")
                 
-                if target_die in visited:
+                if target_die is None or target_die in visited:
                     continue
                     
                 # 根据方向计算目标 Die 的位置
@@ -467,16 +650,20 @@ class D2DConfig(CrossRingConfig):
             
             self.die_layout_positions = normalized_positions
             
-            # 推断布局类型
-            max_x = max(pos[0] for pos in normalized_positions.values())
-            max_y = max(pos[1] for pos in normalized_positions.values())
-            self.die_layout_type = f"{max_x + 1}x{max_y + 1}"
+            # 推断布局类型 (行x列格式)
+            max_x = max(pos[0] for pos in normalized_positions.values())  # 列数-1
+            max_y = max(pos[1] for pos in normalized_positions.values())  # 行数-1
+            num_cols = max_x + 1
+            num_rows = max_y + 1
+            self.die_layout_type = f"{num_rows}x{num_cols}"  # 行x列格式
             
             print(f"[D2D布局推断] 检测到 {self.die_layout_type} 布局:")
-            for die_id in range(num_dies):
-                if die_id in normalized_positions:
-                    x, y = normalized_positions[die_id]
-                    print(f"  Die{die_id}: ({x}, {y})")
+            # 按行优先顺序显示（从上到下，从左到右）
+            die_by_position = [(y, x, die_id) for die_id, (x, y) in normalized_positions.items()]
+            die_by_position.sort()  # 按(row, col)排序
+            
+            for row, col, die_id in die_by_position:
+                print(f"  Die{die_id}: ({col}, {row})")
         else:
             # 回退到默认布局
             self.die_layout_positions = {i: (i, 0) for i in range(num_dies)}

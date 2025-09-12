@@ -12,17 +12,19 @@ def main():
     D2D 仿真演示 - 包含完整的结果处理和可视化
     """
     # 使用D2DConfig替代CrossRingConfig，获得D2D特定配置功能
-    die_topo_type = "5x4"
+    # 现在每个Die的拓扑由D2D配置文件中的topology参数指定，无需die_config_file
     config = D2DConfig(
-        die_config_file="../config/topologies/topo_5x4.yaml",
         d2d_config_file="../config/topologies/d2d_config.yaml",
-    )  # Die拓扑配置  # D2D专用配置
+    )  # D2D专用配置，自动根据每个Die的topology加载对应拓扑文件
 
     # 定义拓扑结构
 
     print(f"配置信息:")
     print(f"  Die数量: {getattr(config, 'NUM_DIES', 2)}")
-    print(f"  每个Die: {die_topo_type} (5行4列)")
+    print(f"  Die拓扑配置:")
+    die_topologies = getattr(config, "DIE_TOPOLOGIES", {})
+    for die_id, topology in die_topologies.items():
+        print(f"    Die{die_id}: {topology}")
     print()
 
     # 初始化D2D仿真模型 - 启用完整功能和D2D可视化
@@ -31,7 +33,6 @@ def main():
         traffic_file_path=r"../test_data",
         traffic_config=[["d2d_data_0902.txt"]],
         model_type="REQ_RSP",
-        topo_type=die_topo_type,
         result_save_path="../Result/d2d_demo/",
         results_fig_save_path="../Result/d2d_demo/figures/",
         verbose=1,
@@ -49,7 +50,7 @@ def main():
     sim.initial()
 
     # 设置仿真参数
-    sim.end_time = 500  # 缩短测试周期以便调试
+    sim.end_time = 500  # 增加仿真时间以确保数据传输完成
     sim.print_interval = 500
 
     sim.run()

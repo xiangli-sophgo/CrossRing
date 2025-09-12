@@ -7,17 +7,34 @@ NUM_DIES: 2
 # 2-Die节点配置 (新的配置驱动方式)
 D2D_DIE_CONFIG:
   0:
-    num_row: 10
-    num_col: 4
+    topology: "5x4"             
     connections:
-      top: {die: 1, d2d_nodes: [0,1,2,3]}    # 下边：第1,2个位置（从左到右）
+      top: 
+        connect_die: 1             # top边连接到Die 1
+        d2d_nodes: [0, 1, 2, 3]    # D2D节点位置列表
+        node_to_die_mapping:       # 每个节点连接到哪个Die
+          0: 1  # 位置0的节点连接到Die 1
+          1: 1  # 位置1的节点连接到Die 1
+          2: 1  # 位置2的节点连接到Die 1
+          3: 1  # 位置3的节点连接到Die 1
   1:
-    num_row: 10
-    num_col: 4
+    topology: "5x4"              
     connections:
-      bottom: {die: 0, d2d_nodes: [0,1,2,3]}       # 上边：第1,2个位置（从左到右）
+      bottom:
+        connect_die: 0             # bottom边连接到Die 0
+        d2d_nodes: [0, 1, 2, 3]    # D2D节点位置列表
+        node_to_die_mapping:       # 每个节点连接到哪个Die
+          0: 0  # 位置0的节点连接到Die 0
+          1: 0  # 位置1的节点连接到Die 0
+          2: 0  # 位置2的节点连接到Die 0
+          3: 0  # 位置3的节点连接到Die 0
 
 
+
+# 网络基础参数
+NETWORK_FREQUENCY: 2
+FLIT_SIZE: 128
+BURST: 4
 
 # D2D 延迟配置 (cycles)
 D2D_AR_LATENCY: 10  # 地址读通道延迟

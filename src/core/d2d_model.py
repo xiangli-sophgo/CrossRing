@@ -67,6 +67,10 @@ class D2D_Model:
         # 设置跨Die连接
         self._setup_cross_die_connections()
 
+        # 初始化D2D路由器
+        from .d2d_router import D2DRouter
+        self.d2d_router = D2DRouter(self.config)
+
         # 初始化D2D链路状态可视化器
         self.d2d_link_state_vis = None
         if self.kwargs.get("plot_link_state", 0):
@@ -101,6 +105,10 @@ class D2D_Model:
 
             # 设置Die ID
             die_model.die_id = die_id
+            
+            # 调试：检查Die配置中的CHANNEL_SPEC和CH_NAME_LIST是否包含D2D
+            print(f"[调试] Die{die_id} CHANNEL_SPEC: {die_config.CHANNEL_SPEC}")
+            print(f"[调试] Die{die_id} CH_NAME_LIST: {die_config.CH_NAME_LIST}")
 
             # 初始化Die
             die_model.initial()
@@ -131,8 +139,26 @@ class D2D_Model:
             self.dies[die_id] = die_model
 
     def _create_die_config(self, die_id: int) -> CrossRingConfig:
-        """为每个Die创建独立的配置"""
-        die_config = copy.deepcopy(self.config)
+        """为每个Die创建独立的配置，根据topology加载对应的拓扑配置文件"""
+
+        # 获取Die的拓扑类型
+        die_topologies = getattr(self.config, "DIE_TOPOLOGIES", {})
+        topology_str = die_topologies.get(die_id)
+
+        if topology_str:
+            # 根据拓扑类型加载对应的配置文件
+            topo_config_path = f"../../config/topologies/topo_{topology_str}.yaml"
+            # print(f"为Die {die_id}加载拓扑配置: {topology_str} (文件: {topo_config_path})")
+
+            try:
+                from config.config import CrossRingConfig
+
+                die_config = CrossRingConfig(default_config=topo_config_path)
+            except Exception as e:
+                raise RuntimeError(f"加载Die {die_id}拓扑配置失败 ({topo_config_path}): {e}")
+        else:
+            # 没有指定拓扑是配置错误
+            raise ValueError(f"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型")
 
         # 设置Die ID
         die_config.DIE_ID = die_id
@@ -141,16 +167,48 @@ class D2D_Model:
         d2d_die_positions = getattr(self.config, "D2D_DIE_POSITIONS", {})
         d2d_positions = d2d_die_positions.get(die_id, [])
 
-        # 添加D2D节点到IP列表 (使用BaseModel期望的_0后缀格式)
-        if hasattr(die_config, "CH_NAME_LIST"):
-            if "d2d_rn_0" not in die_config.CH_NAME_LIST:
-                die_config.CH_NAME_LIST.append("d2d_rn_0")
-            if "d2d_sn_0" not in die_config.CH_NAME_LIST:
-                die_config.CH_NAME_LIST.append("d2d_sn_0")
+        # 添加D2D节点到CHANNEL_SPEC和CH_NAME_LIST
+        if hasattr(die_config, "CHANNEL_SPEC"):
+            # 更新CHANNEL_SPEC
+            if "d2d_rn" not in die_config.CHANNEL_SPEC:
+                die_config.CHANNEL_SPEC["d2d_rn"] = 1
+            if "d2d_sn" not in die_config.CHANNEL_SPEC:
+                die_config.CHANNEL_SPEC["d2d_sn"] = 1
+                
+            # 更新CH_NAME_LIST
+            if hasattr(die_config, "CH_NAME_LIST"):
+                if "d2d_rn_0" not in die_config.CH_NAME_LIST:
+                    die_config.CH_NAME_LIST.append("d2d_rn_0")
+                if "d2d_sn_0" not in die_config.CH_NAME_LIST:
+                    die_config.CH_NAME_LIST.append("d2d_sn_0")
 
         # 设置D2D节点的发送位置列表
         die_config.D2D_RN_SEND_POSITION_LIST = d2d_positions
         die_config.D2D_SN_SEND_POSITION_LIST = d2d_positions
+        
+        # 调试：检查D2D位置列表
+        print(f"[调试] Die{die_id} D2D_RN_SEND_POSITION_LIST: {d2d_positions}")
+        print(f"[调试] Die{die_id} D2D_SN_SEND_POSITION_LIST: {d2d_positions}")
+        
+        # 复制D2D配置中的网络基础参数到Die配置中
+        if hasattr(self.config, "NETWORK_FREQUENCY"):
+            die_config.NETWORK_FREQUENCY = self.config.NETWORK_FREQUENCY
+        if hasattr(self.config, "FLIT_SIZE"):
+            die_config.FLIT_SIZE = self.config.FLIT_SIZE
+        if hasattr(self.config, "BURST"):
+            die_config.BURST = self.config.BURST
+            
+        # 复制D2D延迟和带宽配置
+        d2d_config_keys = [
+            "D2D_AR_LATENCY", "D2D_R_LATENCY", "D2D_AW_LATENCY", 
+            "D2D_W_LATENCY", "D2D_B_LATENCY", "D2D_DBID_LATENCY",
+            "D2D_MAX_OUTSTANDING", "D2D_DATA_BW_LIMIT", "D2D_RN_BW_LIMIT", "D2D_SN_BW_LIMIT",
+            "D2D_RN_R_TRACKER_OSTD", "D2D_RN_W_TRACKER_OSTD", "D2D_RN_RDB_SIZE", "D2D_RN_WDB_SIZE",
+            "D2D_SN_R_TRACKER_OSTD", "D2D_SN_W_TRACKER_OSTD", "D2D_SN_RDB_SIZE", "D2D_SN_WDB_SIZE"
+        ]
+        for key in d2d_config_keys:
+            if hasattr(self.config, key):
+                setattr(die_config, key, getattr(self.config, key))
 
         return die_config
 
@@ -170,7 +228,7 @@ class D2D_Model:
         # 为当前Die的每个连接配对创建D2D_Sys实例
         for pair in d2d_pairs:
             die0_id, die0_node, die1_id, die1_node = pair
-            
+
             # 检查这个配对是否涉及当前Die
             if die0_id == die_id:
                 # 当前Die是源Die，创建到目标Die的D2D_Sys
@@ -185,7 +243,7 @@ class D2D_Model:
             else:
                 # 这个配对不涉及当前Die
                 continue
-            
+
             # 创建D2D_Sys实例，每个实例管理一个点对点连接
             d2d_sys = D2D_Sys(node_pos, die_id, target_die_id, target_node_pos, config)
 
@@ -213,7 +271,7 @@ class D2D_Model:
                 d2d_positions_set.add(die0_node)
             elif die1_id == die_id:
                 d2d_positions_set.add(die1_node)
-        
+
         d2d_positions_list = list(d2d_positions_set)
 
         # 设置D2D配置（保持向后兼容性）
@@ -235,51 +293,45 @@ class D2D_Model:
 
     def _setup_single_pair_connection(self, die0_id: int, die0_node: int, die1_id: int, die1_node: int):
         """为单个配对建立双向连接"""
-        
+
         # 建立Die0 -> Die1的连接
-        self._setup_directional_connection(
-            src_die_id=die0_id, src_node=die0_node,
-            dst_die_id=die1_id, dst_node=die1_node
-        )
-        
-        # 建立Die1 -> Die0的连接  
-        self._setup_directional_connection(
-            src_die_id=die1_id, src_node=die1_node,
-            dst_die_id=die0_id, dst_node=die0_node
-        )
+        self._setup_directional_connection(src_die_id=die0_id, src_node=die0_node, dst_die_id=die1_id, dst_node=die1_node)
+
+        # 建立Die1 -> Die0的连接
+        self._setup_directional_connection(src_die_id=die1_id, src_node=die1_node, dst_die_id=die0_id, dst_node=die0_node)
 
     def _setup_directional_connection(self, src_die_id: int, src_node: int, dst_die_id: int, dst_node: int):
         """建立单向连接"""
-        
+
         # 获取IP接口
         src_rn_key = ("d2d_rn_0", src_node)
         src_sn_key = ("d2d_sn_0", src_node)
         dst_sn_key = ("d2d_sn_0", dst_node)
         dst_rn_key = ("d2d_rn_0", dst_node)
-        
+
         src_die = self.dies[src_die_id]
         dst_die = self.dies[dst_die_id]
-        
+
         # 检查接口是否存在
         if src_rn_key not in src_die.ip_modules or dst_sn_key not in dst_die.ip_modules:
             return
-            
+
         src_rn = src_die.ip_modules[src_rn_key]
         dst_sn = dst_die.ip_modules[dst_sn_key]
         dst_rn = dst_die.ip_modules.get(dst_rn_key)
         src_sn = src_die.ip_modules.get(src_sn_key)
-        
+
         # 设置RN接口的目标Die连接（向后兼容）
         if dst_die_id not in src_rn.target_die_interfaces:
             src_rn.target_die_interfaces[dst_die_id] = []
         src_rn.target_die_interfaces[dst_die_id].append(dst_sn)
-        
+
         # 设置D2D_Sys的目标接口
         d2d_sys_key = f"{src_node}_to_{dst_die_id}_{dst_node}"
         if d2d_sys_key in src_die.d2d_systems:
             d2d_sys = src_die.d2d_systems[d2d_sys_key]
             d2d_sys.target_die_interfaces[dst_die_id] = {"sn": dst_sn, "rn": dst_rn}
-        
+
         # 设置SN接口的目标RN连接
         if src_sn and dst_rn:
             src_sn.target_die_interfaces[dst_die_id] = dst_rn
@@ -464,10 +516,13 @@ class D2D_Model:
 
         # 根据是否跨Die决定路由策略
         if src_die != dst_die:
-            # 跨Die：根据目标位置选择D2D节点
-            d2d_positions = self._get_die_d2d_positions(src_die)
-            intermediate_dest = self._select_d2d_node_for_target(dst_node, dst_ip, d2d_positions, die_model, dst_die)
+            # 跨Die：使用D2D路由器选择节点
+            intermediate_dest = self.d2d_router.select_d2d_node(src_die, dst_die, dst_node)
+            if intermediate_dest is None:
+                raise ValueError(f"D2D路由器返回None，但这是跨Die请求 Die{src_die}->Die{dst_die}")
+            
             # 找到对应的D2D_SN channel编号
+            d2d_positions = self._get_die_d2d_positions(src_die)
             d2d_index = d2d_positions.index(intermediate_dest) if intermediate_dest in d2d_positions else 0
             destination_type = f"d2d_sn_{d2d_index}"  # 跨Die时目标是D2D_SN，包含正确的编号
         else:
@@ -537,84 +592,7 @@ class D2D_Model:
         d2d_die_positions = getattr(self.config, "D2D_DIE_POSITIONS", {})
         return d2d_die_positions.get(die_id, [])
 
-    def _select_d2d_node_for_target(self, dst_node, dst_ip, d2d_positions, die_model: base_model, dst_die):
-        """根据目标DDR位置选择对应的D2D节点（VERTICAL布局）"""
-
-        # 只处理目标是DDR的情况
-        if not dst_ip.startswith("ddr"):
-            # 非DDR目标，返回第一个D2D节点
-            return d2d_positions[0] if d2d_positions else None
-
-        # 获取拓扑参数
-        num_col = die_model.config.NUM_COL  # 4列
-        dst_node = die_model.node_map(dst_node)
-
-        # 计算目标节点的行列位置
-        dst_row = dst_node // num_col
-        dst_col = dst_node % num_col
-
-        # Die0（上方）的映射规则
-        if dst_die == 0:
-            if dst_col == 0:  # 第一列
-                if dst_row == 3:  # 第4行
-                    d2d_index = 0
-                elif dst_row == 5:  # 第6行
-                    d2d_index = 1
-                elif dst_row == 7:  # 第8行
-                    d2d_index = 0
-                elif dst_row == 9:  # 第10行
-                    d2d_index = 1
-                else:
-                    d2d_index = 0  # 默认
-            elif dst_col == num_col - 1:  # 最后一列
-                if dst_row == 3:  # 第4行
-                    d2d_index = 3
-                elif dst_row == 5:  # 第6行
-                    d2d_index = 2
-                elif dst_row == 7:  # 第8行
-                    d2d_index = 3
-                elif dst_row == 9:  # 第10行
-                    d2d_index = 2
-                else:
-                    d2d_index = 2  # 默认
-            else:
-                d2d_index = 0  # 非边界列，使用默认
-
-        # Die1（下方）的映射规则
-        else:  # src_die == 1
-            if dst_col == 0:  # 第一列
-                if dst_row == 1:  # 第2行
-                    d2d_index = 0
-                elif dst_row == 3:  # 第4行
-                    d2d_index = 1
-                elif dst_row == 5:  # 第6行
-                    d2d_index = 0
-                elif dst_row == 7:  # 第8行
-                    d2d_index = 1
-                else:
-                    d2d_index = 0  # 默认
-            elif dst_col == num_col - 1:  # 最后一列
-                if dst_row == 1:  # 第2行
-                    d2d_index = 3
-                elif dst_row == 3:  # 第4行
-                    d2d_index = 2
-                elif dst_row == 5:  # 第6行
-                    d2d_index = 3
-                elif dst_row == 7:  # 第8行
-                    d2d_index = 2
-                else:
-                    d2d_index = 2  # 默认
-            else:
-                d2d_index = 0  # 非边界列，使用默认
-
-        # 确保索引在有效范围内
-        if not d2d_positions or d2d_index >= len(d2d_positions):
-            if d2d_positions:
-                d2d_index = 0
-            else:
-                return 0  # 如果d2d_positions为空，返回默认值
-
-        return d2d_positions[d2d_index] - num_col
+    # 旧的_select_d2d_node_for_target方法已被D2DRouter替代
 
     def _print_progress(self):
         """打印仿真进度"""

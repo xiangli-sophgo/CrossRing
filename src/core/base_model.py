@@ -851,7 +851,13 @@ class BaseModel:
 
                     else:
                         # —— rsp / data 网络：直接移动到 pre‑缓冲 ——
-                        network.IQ_channel_buffer[selected_ip_type][ip_pos].popleft()
+                        try:
+                            network.IQ_channel_buffer[selected_ip_type][ip_pos].popleft()
+                        except AttributeError as e:
+                            print(f"[错误调试] selected_ip_type: {selected_ip_type}, ip_pos: {ip_pos}")
+                            print(f"[错误调试] IQ_channel_buffer[{selected_ip_type}][{ip_pos}] 类型: {type(network.IQ_channel_buffer[selected_ip_type][ip_pos])}")
+                            print(f"[错误调试] IQ_channel_buffer[{selected_ip_type}][{ip_pos}] 值: {network.IQ_channel_buffer[selected_ip_type][ip_pos]}")
+                            raise e
                         queue_pre[ip_pos] = flit
 
                         if network_type == "rsp":

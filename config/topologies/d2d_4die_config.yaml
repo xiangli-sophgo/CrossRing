@@ -5,31 +5,78 @@ D2D_ENABLED: true
 NUM_DIES: 4
 
 # 4-Die节点配置 (新的配置驱动方式)
+# 布局: Die2 - Die3
+#      |     |
+#      Die1 - Die0
 D2D_DIE_CONFIG:
   0:
-    num_row: 5
-    num_col: 4
+    topology: "5x4"              
     connections:
-      left: {die: 1, d2d_nodes: [1, 2, 3]}        # 左边：第1,2,3个位置（从上到下）
-      top: {die: 3, d2d_nodes: [0, 1, 2]}       # 上边：第0,1,2个位置（从左到右）
+      left: # 连接到左侧的Die 1
+        connect_die: 1              # left边主要连接到Die 1
+        d2d_nodes: [1, 2, 3]        # 左边：第1,2,3个位置（从上到下）
+        node_to_die_mapping:
+          1: 2  # 节点1(最上边)连接到对角Die 2
+          2: 1  # 节点2连接到相邻Die 1
+          3: 1  # 节点3连接到相邻Die 1
+      top: # 连接到上方的Die 3
+        connect_die: 3              # top边主要连接到Die 3
+        d2d_nodes: [0, 1, 2]        # 上边：第0,1,2个位置（从左到右）
+        node_to_die_mapping:
+          0: 2  # 节点0(最左边)连接到对角Die 2
+          1: 3  # 节点1连接到相邻Die 3
+          2: 3  # 节点2连接到相邻Die 3
   1:
-    num_row: 5
-    num_col: 4
+    topology: "4x5"              
     connections:
-      right: {die: 0, d2d_nodes: [1, 2, 3]}         # 右边：第1,2,3个位置（从上到下）
-      top: {die: 2, d2d_nodes: [0, 1, 2]}       # 下边：第0,1,2个位置（从左到右）
+      right: # 连接到右侧的Die 0
+        connect_die: 0              # right边主要连接到Die 0
+        d2d_nodes: [1, 2, 3]         # 右边：第1,2,3个位置（从上到下）
+        node_to_die_mapping:
+          1: 3  # 节点1(最上边)连接到对角Die 3
+          2: 0  # 节点2连接到相邻Die 0
+          3: 0  # 节点3连接到相邻Die 0
+      top: # 连接到上方的Die 2
+        connect_die: 2              # top边主要连接到Die 2
+        d2d_nodes: [0, 1, 2]         # 上边：第0,1,2个位置（从左到右）
+        node_to_die_mapping:
+          0: 2  # 节点0(最左边)连接到相邻Die 2
+          1: 2  # 节点1连接到相邻Die 2
+          2: 3  # 节点2连接到对角Die 3
   2:
-    num_row: 5
-    num_col: 4
+    topology: "5x4"             
     connections:
-      bottom: {die: 1, d2d_nodes: [0, 1, 2]}          # 下边：第0,1,2个位置（从左到右）
-      right: {die: 3, d2d_nodes: [1, 2, 3]}        # 右边：第1,2,3个位置（从上到下）
+      bottom: # 连接到下方的Die 1
+        connect_die: 1              # bottom边主要连接到Die 1
+        d2d_nodes: [0, 1, 2]          # 下边：第0,1,2个位置（从左到右）
+        node_to_die_mapping:
+          0: 1  # 节点0(最左边)连接到相邻Die 1
+          1: 1  # 节点1连接到相邻Die 1
+          2: 0  # 节点2连接到对角Die 0
+      right: # 连接到右侧的Die 3
+        connect_die: 3              # right边主要连接到Die 3
+        d2d_nodes: [1, 2, 3]        # 右边：第1,2,3个位置（从上到下）
+        node_to_die_mapping:
+          1: 3  # 节点1(最上边)连接到相邻Die 3
+          2: 3  # 节点2连接到相邻Die 3
+          3: 0  # 节点3连接到对角Die 0
   3:
-    num_row: 5
-    num_col: 4
+    topology: "5x4"              
     connections:
-      left: {die: 2, d2d_nodes: [1, 2, 3]}         # 左边：第1,2,3个位置（从上到下）
-      bottom: {die: 0, d2d_nodes: [0, 1, 2]}          # 上边：第0,1,2个位置（从左到右）
+      left: # 连接到左侧的Die 2
+        connect_die: 2              # left边主要连接到Die 2
+        d2d_nodes: [1, 2, 3]         # 左边：第1,2,3个位置（从上到下）
+        node_to_die_mapping:
+          1: 2  # 节点1(最上边)连接到相邻Die 2
+          2: 2  # 节点2连接到相邻Die 2
+          3: 1  # 节点3连接到对角Die 1
+      bottom: # 连接到下方的Die 0
+        connect_die: 0              # bottom边主要连接到Die 0
+        d2d_nodes: [0, 1, 2]          # 下边：第0,1,2个位置（从左到右）
+        node_to_die_mapping:
+          0: 1  # 节点0(最左边)连接到对角Die 1
+          1: 0  # 节点1连接到相邻Die 0
+          2: 0  # 节点2连接到相邻Die 0
 
 
 # 多跳路由配置
