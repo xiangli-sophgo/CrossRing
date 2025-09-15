@@ -69,6 +69,7 @@ class D2D_Model:
 
         # 初始化D2D路由器
         from .d2d_router import D2DRouter
+
         self.d2d_router = D2DRouter(self.config)
 
         # 初始化D2D链路状态可视化器
@@ -105,10 +106,8 @@ class D2D_Model:
 
             # 设置Die ID
             die_model.die_id = die_id
-            
+
             # 调试：检查Die配置中的CHANNEL_SPEC和CH_NAME_LIST是否包含D2D
-            print(f"[调试] Die{die_id} CHANNEL_SPEC: {die_config.CHANNEL_SPEC}")
-            print(f"[调试] Die{die_id} CH_NAME_LIST: {die_config.CH_NAME_LIST}")
 
             # 初始化Die
             die_model.initial()
@@ -163,9 +162,11 @@ class D2D_Model:
         # 设置Die ID
         die_config.DIE_ID = die_id
 
-        # 获取当前Die的D2D节点位置
-        d2d_die_positions = getattr(self.config, "D2D_DIE_POSITIONS", {})
-        d2d_positions = d2d_die_positions.get(die_id, [])
+        # 获取当前Die的D2D节点位置（分别获取RN和SN位置）
+        d2d_rn_positions = getattr(self.config, "D2D_RN_POSITIONS", {})
+        d2d_sn_positions = getattr(self.config, "D2D_SN_POSITIONS", {})
+        rn_positions = d2d_rn_positions.get(die_id, [])
+        sn_positions = d2d_sn_positions.get(die_id, [])
 
         # 添加D2D节点到CHANNEL_SPEC和CH_NAME_LIST
         if hasattr(die_config, "CHANNEL_SPEC"):
@@ -174,7 +175,7 @@ class D2D_Model:
                 die_config.CHANNEL_SPEC["d2d_rn"] = 1
             if "d2d_sn" not in die_config.CHANNEL_SPEC:
                 die_config.CHANNEL_SPEC["d2d_sn"] = 1
-                
+
             # 更新CH_NAME_LIST
             if hasattr(die_config, "CH_NAME_LIST"):
                 if "d2d_rn_0" not in die_config.CH_NAME_LIST:
@@ -182,14 +183,10 @@ class D2D_Model:
                 if "d2d_sn_0" not in die_config.CH_NAME_LIST:
                     die_config.CH_NAME_LIST.append("d2d_sn_0")
 
-        # 设置D2D节点的发送位置列表
-        die_config.D2D_RN_SEND_POSITION_LIST = d2d_positions
-        die_config.D2D_SN_SEND_POSITION_LIST = d2d_positions
-        
-        # 调试：检查D2D位置列表
-        print(f"[调试] Die{die_id} D2D_RN_SEND_POSITION_LIST: {d2d_positions}")
-        print(f"[调试] Die{die_id} D2D_SN_SEND_POSITION_LIST: {d2d_positions}")
-        
+        # 设置D2D节点的发送位置列表（分别设置RN和SN）
+        die_config.D2D_RN_SEND_POSITION_LIST = rn_positions
+        die_config.D2D_SN_SEND_POSITION_LIST = sn_positions
+
         # 复制D2D配置中的网络基础参数到Die配置中
         if hasattr(self.config, "NETWORK_FREQUENCY"):
             die_config.NETWORK_FREQUENCY = self.config.NETWORK_FREQUENCY
@@ -197,14 +194,27 @@ class D2D_Model:
             die_config.FLIT_SIZE = self.config.FLIT_SIZE
         if hasattr(self.config, "BURST"):
             die_config.BURST = self.config.BURST
-            
+
         # 复制D2D延迟和带宽配置
         d2d_config_keys = [
-            "D2D_AR_LATENCY", "D2D_R_LATENCY", "D2D_AW_LATENCY", 
-            "D2D_W_LATENCY", "D2D_B_LATENCY", "D2D_DBID_LATENCY",
-            "D2D_MAX_OUTSTANDING", "D2D_DATA_BW_LIMIT", "D2D_RN_BW_LIMIT", "D2D_SN_BW_LIMIT",
-            "D2D_RN_R_TRACKER_OSTD", "D2D_RN_W_TRACKER_OSTD", "D2D_RN_RDB_SIZE", "D2D_RN_WDB_SIZE",
-            "D2D_SN_R_TRACKER_OSTD", "D2D_SN_W_TRACKER_OSTD", "D2D_SN_RDB_SIZE", "D2D_SN_WDB_SIZE"
+            "D2D_AR_LATENCY",
+            "D2D_R_LATENCY",
+            "D2D_AW_LATENCY",
+            "D2D_W_LATENCY",
+            "D2D_B_LATENCY",
+            "D2D_DBID_LATENCY",
+            "D2D_MAX_OUTSTANDING",
+            "D2D_DATA_BW_LIMIT",
+            "D2D_RN_BW_LIMIT",
+            "D2D_SN_BW_LIMIT",
+            "D2D_RN_R_TRACKER_OSTD",
+            "D2D_RN_W_TRACKER_OSTD",
+            "D2D_RN_RDB_SIZE",
+            "D2D_RN_WDB_SIZE",
+            "D2D_SN_R_TRACKER_OSTD",
+            "D2D_SN_W_TRACKER_OSTD",
+            "D2D_SN_RDB_SIZE",
+            "D2D_SN_WDB_SIZE",
         ]
         for key in d2d_config_keys:
             if hasattr(self.config, key):
@@ -288,7 +298,7 @@ class D2D_Model:
             return
 
         # 为每个D2D连接对建立双向连接
-        for die0_id, die0_node, die1_id, die1_node in d2d_pairs:
+        for i, (die0_id, die0_node, die1_id, die1_node) in enumerate(d2d_pairs):
             self._setup_single_pair_connection(die0_id, die0_node, die1_id, die1_node)
 
     def _setup_single_pair_connection(self, die0_id: int, die0_node: int, die1_id: int, die1_node: int):
@@ -306,8 +316,8 @@ class D2D_Model:
         # 获取IP接口
         src_rn_key = ("d2d_rn_0", src_node)
         src_sn_key = ("d2d_sn_0", src_node)
-        dst_sn_key = ("d2d_sn_0", dst_node)
-        dst_rn_key = ("d2d_rn_0", dst_node)
+        dst_sn_key = ("d2d_sn_0", dst_node + self.dies[dst_die_id].config.NUM_COL)
+        dst_rn_key = ("d2d_rn_0", dst_node + self.dies[dst_die_id].config.NUM_COL)
 
         src_die = self.dies[src_die_id]
         dst_die = self.dies[dst_die_id]
@@ -516,14 +526,24 @@ class D2D_Model:
 
         # 根据是否跨Die决定路由策略
         if src_die != dst_die:
-            # 跨Die：使用D2D路由器选择节点
-            intermediate_dest = self.d2d_router.select_d2d_node(src_die, dst_die, dst_node)
-            if intermediate_dest is None:
+            # 跨Die：使用D2D路由器选择节点，但需要根据请求类型选择正确的RN/SN节点
+            base_d2d_node = self.d2d_router.select_d2d_node(src_die, dst_die, dst_node)
+            if base_d2d_node is None:
                 raise ValueError(f"D2D路由器返回None，但这是跨Die请求 Die{src_die}->Die{dst_die}")
-            
-            # 找到对应的D2D_SN channel编号
-            d2d_positions = self._get_die_d2d_positions(src_die)
-            d2d_index = d2d_positions.index(intermediate_dest) if intermediate_dest in d2d_positions else 0
+
+            # 根据请求类型选择正确的D2D节点：
+            # 请求需要发送到D2D_SN（偶数行），响应从D2D_RN发出（奇数行）
+            d2d_sn_positions = getattr(self.config, "D2D_SN_POSITIONS", {}).get(src_die, [])
+
+            # 找到对应的D2D_SN节点位置和索引
+            if base_d2d_node in d2d_sn_positions:
+                intermediate_dest = base_d2d_node
+                d2d_index = d2d_sn_positions.index(base_d2d_node)
+            else:
+                # 如果路由器返回的不是SN位置，使用第一个可用的SN位置
+                intermediate_dest = d2d_sn_positions[0] if d2d_sn_positions else base_d2d_node
+                d2d_index = 0
+
             destination_type = f"d2d_sn_{d2d_index}"  # 跨Die时目标是D2D_SN，包含正确的编号
         else:
             # 本地：直接路由到目标
@@ -655,7 +675,6 @@ class D2D_Model:
             # 根据mode选择合适的网络
             if mode == "total":
                 network = die_model.data_network  # 使用data_network显示总带宽
-                # print(f"[调试] Die {die_id}: 使用data_network")
 
                 # 获取网络统计数据
                 stats = network.get_links_utilization_stats()
@@ -663,7 +682,6 @@ class D2D_Model:
 
             else:
                 network = die_model.req_network  # 默认使用req_network
-                # print(f"[调试] Die {die_id}: 使用req_network")
 
             die_networks[die_id] = network
 
@@ -686,11 +704,9 @@ class D2D_Model:
             # 创建新的D2D结果处理器并传递Die数据
             d2d_processor = D2DResultProcessor(self.config)
             d2d_processor.simulation_end_cycle = self.current_cycle
-            # print(f"[调试] 设置simulation_end_cycle为: {self.current_cycle}")
 
             # 检查是否已经有D2D处理器实例（避免重复计算）
             if hasattr(self, "_cached_d2d_processor") and self._cached_d2d_processor:
-                # print("[信息] 使用缓存的D2D处理器数据")
                 d2d_processor = self._cached_d2d_processor
             else:
                 # 第一次计算：收集D2D请求数据并计算正确的IP带宽

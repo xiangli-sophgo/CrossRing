@@ -32,9 +32,6 @@ class D2DRouter:
         # 构建路由表：{(src_die, dst_die): [可用的D2D节点列表]}
         self.d2d_routing_table = self._build_routing_table()
 
-        print(f"[D2D路由器] 初始化完成，共{len(self.d2d_pairs)}个连接对")
-        self._print_routing_table()
-
     def _build_routing_table(self) -> Dict[Tuple[int, int], List[int]]:
         """
         构建路由表：从D2D_PAIRS中提取每个Die到其他Die的可用连接
@@ -126,12 +123,6 @@ class D2DRouter:
             bool: True表示跨Die，False表示同Die内部
         """
         return src_die != dst_die
-
-    def _print_routing_table(self):
-        """打印路由表信息用于调试"""
-        print(f"[D2D路由器] 路由表:")
-        for (src_die, dst_die), nodes in sorted(self.d2d_routing_table.items()):
-            print(f"  Die{src_die} -> Die{dst_die}: {nodes}")
 
     def get_routing_stats(self) -> Dict:
         """

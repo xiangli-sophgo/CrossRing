@@ -152,7 +152,12 @@ class CrossRingConfig:
         else:
             return config_value
 
-    def _make_channels(self, key_types, value_factory=lambda: defaultdict(list)):  # 允许 None / callable / 静态对象
+    def _make_channels(self, key_types, value_factory=None):  # 允许 None / callable / 静态对象
+        # 如果没有提供value_factory，使用基于deque的默认工厂
+        if value_factory is None:
+            from collections import defaultdict, deque
+            value_factory = lambda: defaultdict(lambda: deque(maxlen=self.IQ_CH_FIFO_DEPTH))
+
         # 把非 callable 的默认值包装成 deepcopy，可避免共享引用
         if not callable(value_factory):
             static_value = copy.deepcopy(value_factory)

@@ -97,7 +97,7 @@ from concurrent.futures import ThreadPoolExecutor
 # ==================== 全局配置 ====================
 N_REPEATS = 1  # 每个配置的重复次数（无随机性，只需1次）
 N_JOBS = 7  # 并行作业数
-SIMULATION_TIME = 200  # 仿真时间
+SIMULATION_TIME = 5000  # 仿真时间
 VERBOSE = 0
 # 内存优化配置
 MAX_COMBINATIONS_IN_MEMORY = 100000  # 内存中最大组合数
@@ -132,20 +132,20 @@ FIFO_PARAMS = {
     # "EQ_CH_FIFO_DEPTH": {"range": [2, 16], "default": 4},
     "IQ_OUT_FIFO_DEPTH_HORIZONTAL": {"range": [2, 8], "default": 8},
     "IQ_OUT_FIFO_DEPTH_VERTICAL": {"range": [2, 8], "default": 8},
-    # "IQ_OUT_FIFO_DEPTH_EQ": {"range": [2, 16], "default": 8},
-    # "RB_OUT_FIFO_DEPTH": {"range": [2, 8], "default": 8},
-    # "RB_IN_FIFO_DEPTH": {"range": [2, 16], "default": 16},
-    # "EQ_IN_FIFO_DEPTH": {"range": [2, 16], "default": 16},
+    "IQ_OUT_FIFO_DEPTH_EQ": {"range": [2, 8], "default": 8},
+    "RB_OUT_FIFO_DEPTH": {"range": [2, 8], "default": 8},
+    "RB_IN_FIFO_DEPTH": {"range": [2, 12], "default": 16},
+    "EQ_IN_FIFO_DEPTH": {"range": [2, 12], "default": 16},
 }
 
 # ETag参数配置（包含约束关系）
 ETAG_PARAMS = {
-    # "TL_Etag_T2_UE_MAX": {"range": [1, 15], "default": 8, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
-    # "TL_Etag_T1_UE_MAX": {"range": [2, 15], "default": 15, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo_and_greater_than_t2", "corresponding_t2": "TL_Etag_T2_UE_MAX"},
-    # "TR_Etag_T2_UE_MAX": {"range": [1, 15], "default": 12, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
-    # "TU_Etag_T2_UE_MAX": {"range": [1, 15], "default": 8, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
-    # "TU_Etag_T1_UE_MAX": {"range": [2, 15], "default": 15, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo_and_greater_than_t2", "corresponding_t2": "TU_Etag_T2_UE_MAX"},
-    # "TD_Etag_T2_UE_MAX": {"range": [1, 15], "default": 12, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
+    "TL_Etag_T2_UE_MAX": {"range": [1, 11], "default": 8, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
+    "TL_Etag_T1_UE_MAX": {"range": [2, 11], "default": 15, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo_and_greater_than_t2", "corresponding_t2": "TL_Etag_T2_UE_MAX"},
+    "TR_Etag_T2_UE_MAX": {"range": [1, 11], "default": 12, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
+    "TU_Etag_T2_UE_MAX": {"range": [1, 11], "default": 8, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
+    "TU_Etag_T1_UE_MAX": {"range": [2, 11], "default": 15, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo_and_greater_than_t2", "corresponding_t2": "TU_Etag_T2_UE_MAX"},
+    "TD_Etag_T2_UE_MAX": {"range": [1, 11], "default": 12, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
 }
 
 # 合并所有参数

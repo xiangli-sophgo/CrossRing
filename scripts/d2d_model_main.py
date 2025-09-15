@@ -37,20 +37,19 @@ def main():
         results_fig_save_path="../Result/d2d_demo/figures/",
         verbose=1,
         print_d2d_trace=0,  # 启用D2D trace功能
-        show_d2d_trace_id=0,  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
+        show_d2d_trace_id=1,  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
         d2d_trace_sleep=0.0,  # 不暂停，加快调试as
         enable_flow_graph=1,  # 是否在仿真结束后自动生成流量图
         # D2D链路状态可视化参
         plot_link_state=0,  # 启用D2D链路状态可视化 12
         plot_start_cycle=100,  # 从第100周期开始可视化
-        # flow_graph_mode="total",  # 显示带宽值和使用率信息
     )
 
     # 初始化仿真
     sim.initial()
 
     # 设置仿真参数
-    sim.end_time = 500  # 增加仿真时间以确保数据传输完成
+    sim.end_time = 200  # 增加仿真时间以确保数据传输完成
     sim.print_interval = 500
 
     sim.run()
