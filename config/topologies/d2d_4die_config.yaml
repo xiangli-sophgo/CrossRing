@@ -10,79 +10,48 @@ SLICE_PER_LINK: 8
 BURST: 4
 NETWORK_FREQUENCY: 2
 
-# 4-Die节点配置 (新的配置驱动方式)
+# Die的XY坐标布局（左下角为原点）
 # 布局: Die2 - Die3
 #      |     |
 #      Die1 - Die0
-D2D_DIE_CONFIG:
-  0:
-    topology: "5x4"              
-    connections:
-      left: # 连接到左侧的Die 1
-        connect_die: 1              # left边主要连接到Die 1
-        d2d_nodes: [1, 2, 3]        # 左边：第1,2,3个位置（从上到下）
-        node_to_die_mapping:
-          1: 2  # 节点1(最上边)连接到对角Die 2
-          2: 1  # 节点2连接到相邻Die 1
-          3: 1  # 节点3连接到相邻Die 1
-      top: # 连接到上方的Die 3
-        connect_die: 3              # top边主要连接到Die 3
-        d2d_nodes: [0, 1, 2]        # 上边：第0,1,2个位置（从左到右）
-        node_to_die_mapping:
-          0: 2  # 节点0(最左边)连接到对角Die 2
-          1: 3  # 节点1连接到相邻Die 3
-          2: 3  # 节点2连接到相邻Die 3
-  1:
-    topology: "4x5"              
-    connections:
-      right: # 连接到右侧的Die 0
-        connect_die: 0              # right边主要连接到Die 0
-        d2d_nodes: [1, 2, 3]         # 右边：第1,2,3个位置（从上到下）
-        node_to_die_mapping:
-          1: 3  # 节点1(最上边)连接到对角Die 3
-          2: 0  # 节点2连接到相邻Die 0
-          3: 0  # 节点3连接到相邻Die 0
-      top: # 连接到上方的Die 2
-        connect_die: 2              # top边主要连接到Die 2
-        d2d_nodes: [2, 3, 4]         # 上边：第0,1,2个位置（从左到右）
-        node_to_die_mapping:
-          2: 2  # 节点0(最左边)连接到相邻Die 2
-          3: 2  # 节点1连接到相邻Die 2
-          4: 3  # 节点2连接到对角Die 3
-  2:
-    topology: "5x4"             
-    connections:
-      bottom: # 连接到下方的Die 1
-        connect_die: 1              # bottom边主要连接到Die 1
-        d2d_nodes: [1, 2, 3]          # 下边：第0,1,2个位置（从左到右）
-        node_to_die_mapping:
-          1: 1  # 节点0(最左边)连接到相邻Die 1
-          2: 1  # 节点1连接到相邻Die 1
-          3: 0  # 节点2连接到对角Die 0
-      right: # 连接到右侧的Die 3
-        connect_die: 3              # right边主要连接到Die 3
-        d2d_nodes: [1, 2, 3]        # 右边：第1,2,3个位置（从上到下）
-        node_to_die_mapping:
-          1: 3  # 节点1(最上边)连接到相邻Die 3
-          2: 3  # 节点2连接到相邻Die 3
-          3: 0  # 节点3连接到对角Die 0
-  3:
-    topology: "4x5"              
-    connections:
-      left: # 连接到左侧的Die 2
-        connect_die: 2              # left边主要连接到Die 2
-        d2d_nodes: [1, 2, 3]         # 左边：第1,2,3个位置（从上到下）
-        node_to_die_mapping:
-          1: 2  # 节点1(最上边)连接到相邻Die 2
-          2: 2  # 节点2连接到相邻Die 2
-          3: 1  # 节点3连接到对角Die 1
-      bottom: # 连接到下方的Die 0
-        connect_die: 0              # bottom边主要连接到Die 0
-        d2d_nodes: [1, 2, 3]          # 下边：第0,1,2个位置（从左到右）
-        node_to_die_mapping:
-          1: 1  # 节点0(最左边)连接到对角Die 1
-          2: 0  # 节点1连接到相邻Die 0
-          3: 0  # 节点2连接到相邻Die 0
+DIE_POSITIONS:
+  0: [1, 0]  # Die0在右下角
+  1: [0, 0]  # Die1在左下角
+  2: [0, 1]  # Die2在左上角
+  3: [1, 1]  # Die3在右上角
+
+# 每个Die的拓扑配置
+DIE_TOPOLOGIES:
+  0: "5x4"  # Die0使用5x4拓扑
+  1: "4x5"  # Die1使用4x5拓扑
+  2: "5x4"  # Die2使用5x4拓扑
+  3: "4x5"  # Die3使用4x5拓扑
+
+# D2D互联配置（单向配置，系统自动生成双向连接）
+# 格式: [源Die, 源物理节点, 目标Die, 目标物理节点]
+D2D_CONNECTIONS:
+  # 水平连接（底部）
+  - [0, 12, 1, 9]    # Die0左侧 <-> Die1右侧
+  - [0, 16, 1, 14]
+
+  # 水平连接（顶部）
+  - [2, 3, 3, 5]    # Die2右侧 <-> Die3左侧
+  - [2, 7, 3, 10]
+
+  # 垂直连接（左侧）
+  - [1, 0, 2, 17]   # Die1顶部 <-> Die2底部
+  - [1, 1, 2, 18]
+
+  # 垂直连接（右侧）
+  - [0, 1, 3, 18]   # Die0顶部 <-> Die3底部
+  - [0, 2, 3, 19]
+
+  # 对角连接（可选）
+  - [0, 4, 2, 11]   # Die0 <-> Die2 对角
+  - [0, 8, 2, 15]   # Die0 <-> Die2 对角
+  
+  - [1, 2, 3, 16]   # Die1 <-> Die3 对角
+  - [1, 3, 3, 17]   # Die1 <-> Die3 对角
 
 
 # 多跳路由配置
@@ -95,11 +64,8 @@ D2D_R_LATENCY: 10   # 读数据通道延迟
 D2D_AW_LATENCY: 10  # 地址写通道延迟
 D2D_W_LATENCY: 10   # 写数据通道延迟
 D2D_B_LATENCY: 10   # 写响应通道延迟
-D2D_DBID_LATENCY: 10 # DBID 信号延迟
-D2D_MAX_OUTSTANDING: 16  # 最大未完成事务数
 
-# D2D 带宽控制 - 保持不变
-D2D_DATA_BW_LIMIT: 64   # D2D数据通道带宽限制
+# D2D 带宽控制
 D2D_RN_BW_LIMIT: 128    # D2D RN 带宽限制 (GB/s)
 D2D_SN_BW_LIMIT: 128    # D2D SN 带宽限制 (GB/s)
 

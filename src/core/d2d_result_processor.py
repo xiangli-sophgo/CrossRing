@@ -60,6 +60,15 @@ class D2DResultProcessor(BandwidthAnalyzer):
     FLIT_SIZE_BYTES = 128  # 每个flit的字节数
     MAX_BANDWIDTH_NORMALIZATION = 256.0  # 最大带宽归一化值（GB/s）
 
+    # AXI通道常量定义（避免重复定义）
+    AXI_CHANNEL_DESCRIPTIONS = {
+        "AR": "读地址通道 (Address Read)",
+        "R": "读数据通道 (Read Data)",
+        "AW": "写地址通道 (Address Write)",
+        "W": "写数据通道 (Write Data)",
+        "B": "写响应通道 (Write Response)",
+    }
+
     def __init__(self, config, min_gap_threshold: int = 50):
         super().__init__(config, min_gap_threshold)
         self.d2d_requests: List[D2DRequestInfo] = []
@@ -81,7 +90,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             if hasattr(die_model, "data_network") and hasattr(die_model.data_network, "arrive_flits"):
                 self._collect_requests_from_network(die_model.data_network, die_id)
 
-    #         print(f"[D2D结果处理] 收集到 {len(self.d2d_requests)} 个跨Die请求")
 
     def _collect_requests_from_network(self, network, die_id: int):
         """从单个网络中收集跨Die请求"""
@@ -165,10 +173,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 latency_ns=latency_ns,
             )
         except (AttributeError, KeyError, ValueError) as e:
-            # print(f"[D2D结果处理] 提取请求信息失败 packet_id={packet_id}: {e}")
             return None
         except Exception as e:
-            # print(f"[D2D结果处理] 未预期的错误 packet_id={packet_id}: {e}")
             raise
 
     def save_d2d_requests_csv(self, output_path: str):
@@ -204,17 +210,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
         if read_requests:
             read_csv_path = os.path.join(output_path, "d2d_read_requests.csv")
             self._save_requests_to_csv(read_requests, read_csv_path, csv_header)
-        #             print(f"[D2D结果处理] 已保存 {len(read_requests)} 个读请求到 {read_csv_path}")
         # else:
-        #             print(f"[D2D结果处理] 无读请求数据，跳过读请求CSV文件生成")
 
         if write_requests:
             write_csv_path = os.path.join(output_path, "d2d_write_requests.csv")
             self._save_requests_to_csv(write_requests, write_csv_path, csv_header)
 
-    #             print(f"[D2D结果处理] 已保存 {len(write_requests)} 个写请求到 {write_csv_path}")
     # else:
-    #             print(f"[D2D结果处理] 无写请求数据，跳过写请求CSV文件生成")
 
     def _save_requests_to_csv(self, requests: List[D2DRequestInfo], file_path: str, header: List[str]):
         """保存请求列表到CSV文件"""
@@ -241,7 +243,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                         ]
                     )
         except (IOError, OSError) as e:
-            # print(f"[D2D结果处理] 保存CSV文件失败 {file_path}: {e}")
             raise
 
     def calculate_d2d_bandwidth(self) -> D2DBandwidthStats:
@@ -307,10 +308,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
             weighted_bw = (total_weighted_bw / total_weight) if total_weight > 0 else unweighted_bw
 
             # 调试信息：显示工作区间统计
-            # print(f"[D2D带宽] 工作区间数量: {len(working_intervals)}, 总权重: {total_weight}")
         else:
             weighted_bw = unweighted_bw
-            # print(f"[D2D带宽] 无有效工作区间，使用非加权带宽")
 
         return unweighted_bw, weighted_bw
 
@@ -415,7 +414,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             for line in report_lines:
                 f.write(line + "\n")
 
-        # print(f"\n[D2D结果处理] 带宽报告已保存到 {report_file}")
 
     def process_d2d_results(self, dies: Dict, output_path: str):
         """
@@ -425,7 +423,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             dies: Die模型字典
             output_path: 输出目录路径
         """
-        # print("\n[D2D结果处理] 开始处理D2D系统结果...")
 
         # 1. 收集跨Die请求数据
         self.collect_cross_die_requests(dies)
@@ -445,7 +442,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 6. 保存AXI通道统计到文件
         self.save_d2d_axi_channel_statistics(output_path, d2d_bandwidth, dies, self.config)
 
-        # print("[D2D结果处理] D2D结果处理完成!")
 
     def calculate_d2d_ip_bandwidth_data(self, dies: Dict):
         """
@@ -497,11 +493,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 基于D2D请求计算带宽
         self._calculate_bandwidth_from_d2d_requests(dies)
 
-        # print(f"[D2D结果处理] D2D IP带宽统计完成")
 
     def _calculate_bandwidth_from_d2d_requests(self, dies: Dict):
         """基于D2D请求计算各Die的IP带宽"""
-        # print(f"[D2D调试] 开始基于{len(self.d2d_requests)}个D2D请求计算IP带宽")
 
         # 计算仿真总时间（纳秒）
         if self.d2d_requests:
@@ -520,7 +514,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             if request.target_die in dies:
                 self._record_target_bandwidth(request, dies[request.target_die], sim_time_ns)
 
-        # print(f"[D2D调试] D2D请求带宽计算完成")
 
     def _record_source_bandwidth(self, request: "D2DRequestInfo", die_model, sim_time_ns: int):
         """记录源IP的发送带宽"""
@@ -540,10 +533,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 die_data[request.req_type][source_type_normalized][row, col] += bandwidth_gbps
                 die_data["total"][source_type_normalized][row, col] += bandwidth_gbps
 
-            # print(f"[D2D调试] 源IP带宽: Die{request.source_die} {source_type_normalized}({row},{col}) {request.req_type} = {bandwidth_gbps:.3f} GB/s")
 
         except Exception as e:
-            # print(f"[D2D调试] 记录源带宽失败: {e}")
             pass
 
     def _record_target_bandwidth(self, request: "D2DRequestInfo", die_model, sim_time_ns: int):
@@ -564,10 +555,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 die_data[request.req_type][target_type_normalized][row, col] += bandwidth_gbps
                 die_data["total"][target_type_normalized][row, col] += bandwidth_gbps
 
-            # print(f"[D2D调试] 目标IP带宽: Die{request.target_die} {target_type_normalized}({row},{col}) {request.req_type} = {bandwidth_gbps:.3f} GB/s")
 
         except Exception as e:
-            # print(f"[D2D调试] 记录目标带宽失败: {e}")
             pass
 
     def _normalize_d2d_ip_type(self, ip_type: str) -> str:
@@ -644,8 +633,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
         die_width = 16
         die_height = 10
 
-        # 使用推断的布局
-        die_offsets, figsize = self._calculate_die_offsets_from_layout(die_layout, die_layout_type, die_width, die_height)
+        # 使用推断的布局，传入dies和config进行对齐优化
+        die_offsets, figsize = self._calculate_die_offsets_from_layout(die_layout, die_layout_type, die_width, die_height, dies=dies, config=config)
 
         # 创建画布
         fig, ax = plt.subplots(figsize=figsize)
@@ -664,16 +653,12 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 绘制跨Die数据带宽连接
         try:
             if dies:
-                # print(f"[D2D流量图] 获取到{len(dies)}个Die模型")
                 # 计算D2D_Sys带宽统计
                 d2d_bandwidth = self._calculate_d2d_sys_bandwidth(dies)
-                # print(f"[D2D流量图] 计算得到的D2D带宽统计: {d2d_bandwidth}")
                 # 绘制跨Die连接，传入实际节点位置
                 self._draw_cross_die_connections(ax, d2d_bandwidth, die_node_positions, config, dies)
             # else:
-            # print("[D2D流量图] 警告：无法获取die模型，跳过跨Die连接绘制")
         except Exception as e:
-            # print(f"[D2D流量图] 绘制跨Die连接时出错: {e}")
             import traceback
 
             traceback.print_exc()
@@ -727,16 +712,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 # 统计有流量的链路
                 active_links = [l for l, v in links.items() if v > 0]
                 if len(active_links) > 0:
-                    # print(f"[信息] Die {die_id}: 绘制 {len(active_links)} 条有流量的链路")
                     pass
             except Exception as e:
-                # print(f"[D2D流量图] Die {die_id}: 获取链路统计数据失败: {e}")
                 import traceback
 
                 traceback.print_exc()
                 links = {}
         # else:
-        #             print(f"[警告] Die {die_id}: 网络对象缺少 get_links_utilization_stats 方法")
 
         # 获取网络节点
         if hasattr(network, "queues") and network.queues:
@@ -1060,14 +1042,11 @@ class D2DResultProcessor(BandwidthAnalyzer):
                             if bandwidth > 0.001:  # 降低阈值以便看到更多数据
                                 active_ips.append((ip_type.upper(), bandwidth))
                                 # if node % 10 == 0:  # 减少调试输出频率
-                                # print(f"[IP调试] Die {die_id} Node {node}: {ip_type.upper()} = {bandwidth:.3f}")
                 # else:
                 # 只为第一个节点打印一次，避免重复输出
                 # if node % 20 == 0:
-                # print(f"[信息] Die {die_id}: 模式'{mode}'暂无IP数据，可用模式: {list(die_processor.ip_bandwidth_data.keys())}")
             # else:
             # if node % 20 == 0:
-            # print(f"[信息] Die {die_id}: die_processor没有ip_bandwidth_data")
 
         # 如果没有从die_processors获取到数据，尝试从自身的ip_bandwidth_data获取，但要根据Die区分
         if not active_ips and hasattr(self, "ip_bandwidth_data") and self.ip_bandwidth_data is not None:
@@ -1080,7 +1059,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                     # 只显示属于该Die且有流量的IP
                     if bandwidth > 0.001 and ip_type.lower() in die_specific_ips:
                         active_ips.append((ip_type.upper(), bandwidth))
-        #                         print(f"[IP调试] Die {die_id} Node {node}: {ip_type.upper()} = {bandwidth:.3f}")
 
         # 始终绘制信息框 - 改为正方形
         # IP信息框位置和大小（正方形）
@@ -1159,22 +1137,18 @@ class D2DResultProcessor(BandwidthAnalyzer):
     def _shorten_ip_name(self, ip_name):
         """将IP类型名称缩短为单字母"""
         ip_name_upper = ip_name.upper()
-        if ip_name_upper.startswith("GDMA"):
-            return "G"
-        elif ip_name_upper.startswith("SDMA"):
-            return "S"
-        elif ip_name_upper.startswith("CDMA"):
-            return "C"
-        elif ip_name_upper.startswith("DDR"):
-            return "D"
-        elif ip_name_upper.startswith("L2M"):
-            return "L"
-        elif ip_name_upper.startswith("D2D_RN"):
-            return "DR"
-        elif ip_name_upper.startswith("D2D_SN"):
-            return "DS"
-        else:
-            return ip_name_upper[:2]  # 其他情况取前两个字母
+
+        # 使用字典映射简化条件判断
+        ip_mapping = {
+            "GDMA": "G", "SDMA": "S", "CDMA": "C",
+            "DDR": "D", "L2M": "L", "D2D_RN": "DR", "D2D_SN": "DS"
+        }
+
+        for prefix, short_name in ip_mapping.items():
+            if ip_name_upper.startswith(prefix):
+                return short_name
+
+        return ip_name_upper[:2]  # 其他情况取前两个字母
 
     def _calculate_d2d_sys_bandwidth(self, dies):
         """
@@ -1193,21 +1167,18 @@ class D2DResultProcessor(BandwidthAnalyzer):
         network_frequency = getattr(self.config, "NETWORK_FREQUENCY", 2)
         time_cycles = sim_end_cycle // network_frequency
 
-        # print(f"[D2D_Sys带宽] 仿真周期: {sim_end_cycle} cycles, 网络频率: {network_frequency}, 时间周期: {time_cycles}")
 
         for die_id, die_model in dies.items():
             d2d_sys_bandwidth[die_id] = {}
 
             # 从该Die的所有d2d_systems分别计算每个节点的带宽
             if hasattr(die_model, "d2d_systems"):
-                # print(f"[D2D_Sys调试] Die{die_id}有{len(die_model.d2d_systems)}个D2D系统")
 
                 for pos, d2d_sys in die_model.d2d_systems.items():
                     # 为每个节点单独计算带宽
                     node_bandwidth = {"AR": 0.0, "R": 0.0, "AW": 0.0, "W": 0.0, "B": 0.0}  # 读地址通道  # 读数据通道  # 写地址通道  # 写数据通道  # 写响应通道
 
                     if hasattr(d2d_sys, "axi_channel_flit_count"):
-                        # print(f"[D2D_Sys调试] Die{die_id}位置{pos}的AXI通道flit统计: {d2d_sys.axi_channel_flit_count}")
 
                         # 计算该节点各通道的带宽，与其他地方保持一致
                         for channel, flit_count in d2d_sys.axi_channel_flit_count.items():
@@ -1215,9 +1186,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                                 bandwidth = flit_count * 128 / time_cycles  # 与第652行的计算方式一致
                                 node_bandwidth[channel] = bandwidth
 
-                                # print(f"[D2D_Sys带宽] Die{die_id}节点{pos} {channel}通道: {flit_count} flits -> {bandwidth:.3f} 单位")
                     # else:
-                    # print(f"[D2D_Sys调试] Die{die_id}位置{pos}的D2D_Sys没有axi_channel_flit_count属性")
 
                     d2d_sys_bandwidth[die_id][pos] = node_bandwidth
 
@@ -1239,7 +1208,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             d2d_pairs = getattr(config, "D2D_PAIRS", [])
 
             if not d2d_pairs:
-                # print("[D2D连接] 警告：没有找到D2D_PAIRS配置")
                 return
 
             # 收集所有有流量的连接
@@ -1330,34 +1298,10 @@ class D2DResultProcessor(BandwidthAnalyzer):
             self._draw_inactive_d2d_connections(ax, d2d_pairs, active_connections, die_node_positions, dies)
 
         except Exception as e:
-            #             print(f"[D2D连接] 绘制跨Die连接失败: {e}")
             import traceback
 
             traceback.print_exc()
 
-    def _find_target_node_for_write(self, die0_node, die1_positions):
-        """根据D2D请求推断写数据的目标节点"""
-        # 简化逻辑：按索引对应
-        die0_positions = getattr(self.config, "D2D_DIE0_POSITIONS", [36, 37, 38, 39])
-        try:
-            index = die0_positions.index(die0_node)
-            if index < len(die1_positions):
-                return die1_positions[index]
-        except (ValueError, IndexError):
-            pass
-        return die1_positions[0] if die1_positions else None
-
-    def _find_target_node_for_read(self, die1_node, die0_positions):
-        """根据D2D请求推断读数据返回的目标节点"""
-        # 简化逻辑：按索引对应
-        die1_positions = getattr(self.config, "D2D_DIE1_POSITIONS", [4, 5, 6, 7])
-        try:
-            index = die1_positions.index(die1_node)
-            if index < len(die0_positions):
-                return die0_positions[index]
-        except (ValueError, IndexError):
-            pass
-        return die0_positions[0] if die0_positions else None
 
     def _draw_single_d2d_arrow(self, ax, start_node_x, start_node_y, end_node_x, end_node_y, ux, uy, perpx, perpy, bandwidth, arrow_type, connection_index):
         """
@@ -1422,7 +1366,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             # 绘制单个标签（与Die内部链路一致）
             ax.text(label_x, label_y, label_text, ha="center", va="center", fontsize=8, fontweight="normal", color=color)
 
-            # print(f"[D2D连接] 连接{connection_index}: {arrow_type}箭头, 带宽={bandwidth:.3f} GB/s")
 
     def save_d2d_axi_channel_statistics(self, output_path, d2d_bandwidth, dies, config):
         """
@@ -1465,13 +1408,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                                 flit_counts = d2d_sys.axi_channel_flit_count.copy()
 
                         # 写入各通道数据
-                        channel_descriptions = {
-                            "AR": "读地址通道 (Address Read)",
-                            "R": "读数据通道 (Read Data)",
-                            "AW": "写地址通道 (Address Write)",
-                            "W": "写数据通道 (Write Data)",
-                            "B": "写响应通道 (Write Response)",
-                        }
 
                         direction_mapping = {
                             "AR": f"Die{die_id}->Die{1-die_id}",  # 地址通道：发起方->目标方
@@ -1484,15 +1420,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
                         for channel, bandwidth in channels.items():
                             flit_count = flit_counts.get(channel, 0)
                             direction = direction_mapping.get(channel, f"Die{die_id}")
-                            description = channel_descriptions.get(channel, f"{channel} Channel")
+                            description = self.AXI_CHANNEL_DESCRIPTIONS.get(channel, f"{channel} Channel")
 
                             # 添加节点位置信息到CSV
                             writer.writerow([f"Die{die_id}_Node{node_pos}", channel, direction, f"{bandwidth:.6f}", flit_count, description])
 
-        #             print(f"[D2D AXI统计] 已保存AXI通道带宽统计到 {csv_path}")
 
         except (IOError, PermissionError) as e:
-            #             print(f"[D2D AXI统计] 保存CSV文件失败: {e}")
             return
 
         # 2. 生成汇总报告
@@ -1581,7 +1515,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 f.write("注意: 流量图中只显示数据通道(R+W)的带宽，\n")
                 f.write("      完整的AXI通道统计请参考CSV文件。\n")
 
-        #             print(f"[D2D AXI统计] 已保存AXI汇总报告到 {summary_path}")
 
         except (IOError, PermissionError) as e:
             print(f"[D2D AXI统计] 保存汇总报告失败: {e}")
@@ -1599,7 +1532,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 调用基类方法收集基本数据
         super().collect_requests_data(sim_model, simulation_end_cycle)
 
-        # print(f"[D2D调试] 开始修复D2D请求的original类型信息，总请求数: {len(self.requests)}")
 
         # D2D特殊处理：修复丢失的original类型信息
         fixed_count = 0
@@ -1618,7 +1550,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 if fixed:
                     fixed_count += 1
 
-        # print(f"[D2D调试] 修复了 {fixed_count} 个D2D请求的类型信息")
 
     def _fix_request_original_types(self, request: RequestInfo, sim_model) -> bool:
         """
@@ -1653,7 +1584,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                         if hasattr(first_flit, "d2d_target_type") and first_flit.d2d_target_type:
                             request.original_destination_type = first_flit.d2d_target_type
 
-                        # print(f"[D2D调试] 为请求修复类型: {request.original_source_type} -> {request.original_destination_type}")
                         return True
 
         except Exception as e:
@@ -1682,15 +1612,17 @@ class D2DResultProcessor(BandwidthAnalyzer):
         except Exception:
             return False
 
-    def _calculate_die_offsets_from_layout(self, die_layout, die_layout_type, die_width, die_height):
+    def _calculate_die_offsets_from_layout(self, die_layout, die_layout_type, die_width, die_height, dies=None, config=None):
         """
-        根据推断的 Die 布局计算绘图偏移量和画布大小
+        根据推断的 Die 布局计算绘图偏移量和画布大小，包含对齐优化
 
         Args:
             die_layout: Die 布局位置字典 {die_id: (x, y)}
             die_layout_type: 布局类型字符串，如 "2x2", "2x1" 等
             die_width: 单个 Die 的宽度
             die_height: 单个 Die 的高度
+            dies: Die模型字典 {die_id: die_model}，用于对齐计算
+            config: 配置对象，用于对齐计算
 
         Returns:
             (die_offsets, figsize): Die偏移量字典和画布大小
@@ -1704,16 +1636,30 @@ class D2DResultProcessor(BandwidthAnalyzer):
         max_y = max(pos[1] for pos in die_layout.values()) if die_layout else 0
 
         # 计算 Die 间距
-        die_spacing_x = die_width - 0  # 减小水平间距，让水平相邻的Die更近
-        die_spacing_y = die_height + 6.5  # 增加垂直间距，让垂直相邻的Die更远
+        die_spacing_x = die_width +0.8  # 减小水平间距，让水平相邻的Die更近
+        die_spacing_y = die_height + 0.8  # 增加垂直间距，让垂直相邻的Die更远
 
-        # 计算每个 Die 的绘图偏移量
+        # 计算每个 Die 的基础绘图偏移量
         die_offsets = {}
         for die_id, (grid_x, grid_y) in die_layout.items():
             offset_x = grid_x * die_spacing_x
             # 修正Y坐标：保持数学坐标系，grid_y越大显示越上方
             offset_y = grid_y * die_spacing_y  # Y 坐标向上为正，与推理坐标系一致
             die_offsets[die_id] = (offset_x, offset_y)
+
+        # 如果提供了dies和config，计算对齐偏移
+        if dies and config:
+            try:
+                alignment_offsets = self._calculate_die_alignment_offsets(dies, config)
+
+                # 应用对齐偏移
+                for die_id, (base_x, base_y) in die_offsets.items():
+                    if die_id in alignment_offsets:
+                        align_x, align_y = alignment_offsets[die_id]
+                        die_offsets[die_id] = (base_x + align_x, base_y + align_y)
+            except Exception as e:
+                # 对齐计算失败时使用默认布局
+                print(f"[对齐优化] 对齐计算失败，使用默认布局: {e}")
 
         # 根据布局大小自动调整画布尺寸 (单位转换为英寸)
         canvas_width = ((max_x + 1) * die_spacing_x + 8) / 10  # 转换为合理的英寸尺寸
@@ -1725,12 +1671,196 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         figsize = (canvas_width, canvas_height)
 
-        # print(f"[D2D布局] 使用 {die_layout_type} 布局，画布尺寸: {figsize}")
         for die_id, offset in die_offsets.items():
             grid_pos = die_layout.get(die_id, (0, 0))
-            # print(f"  Die{die_id}: 网格位置{grid_pos} -> 绘图偏移{offset}")
 
         return die_offsets, figsize
+
+    def _get_connection_type(self, from_die_pos, to_die_pos):
+        """
+        判断D2D连接类型
+
+        Args:
+            from_die_pos: 源Die的网格位置 (x, y)
+            to_die_pos: 目标Die的网格位置 (x, y)
+
+        Returns:
+            str: "vertical" | "horizontal" | "diagonal"
+        """
+        dx = abs(from_die_pos[0] - to_die_pos[0])
+        dy = abs(from_die_pos[1] - to_die_pos[1])
+
+        if dx == 0:  # X坐标相同，垂直连接
+            return "vertical"
+        elif dy == 0:  # Y坐标相同，水平连接
+            return "horizontal"
+        else:  # 对角连接
+            return "diagonal"
+
+    def _calculate_die_alignment_offsets(self, dies, config):
+        """
+        根据D2D连接计算Die位置偏移，使连接线对齐
+
+        Args:
+            dies: Die模型字典 {die_id: die_model}
+            config: 配置对象
+
+        Returns:
+            dict: {die_id: (offset_x, offset_y)} 额外的偏移量
+        """
+        d2d_pairs = getattr(config, "D2D_PAIRS", [])
+        die_layout = getattr(config, "die_layout_positions", {})
+
+        if not d2d_pairs or not die_layout:
+            return {}
+
+        # 收集各Die对之间的偏移需求，每对Die只保留偏移量最大的连接
+        alignment_constraints = {"vertical": {}, "horizontal": {}}  # {(die0, die1): 最大偏移需求}
+
+        for die0_id, die0_node, die1_id, die1_node in d2d_pairs:
+            from_die_pos = die_layout.get(die0_id, (0, 0))
+            to_die_pos = die_layout.get(die1_id, (0, 0))
+
+            conn_type = self._get_connection_type(from_die_pos, to_die_pos)
+
+            # 获取节点在各自Die内的物理位置
+            die0_model = dies.get(die0_id)
+            die1_model = dies.get(die1_id)
+
+            if die0_model and die1_model:
+                # 获取节点的行列位置
+                die0_cols = die0_model.config.NUM_COL
+                die1_cols = die1_model.config.NUM_COL
+                die1_node += die1_cols
+
+                # d2d_pairs中存储的已经是网络节点位置（在配置解析时已转换）
+                # 直接计算网络节点在绘图中的位置（与_draw_single_die_flow中的计算一致）
+                die0_row = die0_node // die0_cols
+                die0_col = die0_node % die0_cols
+                die1_row = die1_node // die1_cols
+                die1_col = die1_node % die1_cols
+
+                die_pair = (min(die0_id, die1_id), max(die0_id, die1_id))
+
+                if conn_type == "vertical":
+                    # 垂直连接：需要X对齐，计算实际偏移量
+                    die0_x = die0_col
+                    die1_x = die1_col
+
+                    die0_x *= 3
+                    die1_x *= 3
+
+                    offset_needed = abs(die0_x - die1_x)
+
+                    # 只保留偏移量最大的连接
+                    if die_pair not in alignment_constraints["vertical"] or offset_needed > alignment_constraints["vertical"][die_pair]["offset"]:
+                        alignment_constraints["vertical"][die_pair] = {
+                            "die0": die0_id,
+                            "die1": die1_id,
+                            "col0": die0_col,
+                            "col1": die1_col,
+                            "row0": die0_row,
+                            "row1": die1_row,
+                            "offset": offset_needed,
+                        }
+
+                elif conn_type == "horizontal":
+                    # 水平连接：需要Y对齐，计算实际偏移量
+                    die0_y = die0_row
+                    die1_y = die1_row
+
+                    die0_y *= -1.5
+                    die1_y *= -1.5
+
+                    offset_needed = abs(die0_y - die1_y)
+
+                    # 只保留偏移量最大的连接
+                    if die_pair not in alignment_constraints["horizontal"] or offset_needed > alignment_constraints["horizontal"][die_pair]["offset"]:
+                        alignment_constraints["horizontal"][die_pair] = {
+                            "die0": die0_id,
+                            "die1": die1_id,
+                            "row0": die0_row,
+                            "row1": die1_row,
+                            "col0": die0_col,
+                            "col1": die1_col,
+                            "offset": offset_needed,
+                        }
+
+        # 计算最优偏移量，固定Die 0作为参考点
+        die_offsets = {}
+        for die_id in die_layout.keys():
+            die_offsets[die_id] = [0.0, 0.0]  # [x_offset, y_offset]
+
+        # 固定Die 0作为参考点（偏移量保持为0）
+        reference_die = 0
+
+        # 处理垂直对齐约束（X方向）- 每对Die只处理一次
+        for die_pair, constraint in alignment_constraints["vertical"].items():
+            die0 = constraint["die0"]
+            die1 = constraint["die1"]
+            col0 = constraint["col0"]
+            col1 = constraint["col1"]
+            row0 = constraint["row0"]
+            row1 = constraint["row1"]
+
+            # 计算实际的X坐标差异（与_draw_single_die_flow中的坐标计算完全一致）
+            die0_x = col0
+            die1_x = col1
+
+            die0_x *= 3
+            die1_x *= 3
+
+            actual_x_diff = die0_x - die1_x
+
+            # 只移动非参考Die
+            if die0 == reference_die:
+                # 固定die0，移动die1，使用实际位置差异
+                die_offsets[die1][0] += actual_x_diff
+            elif die1 == reference_die:
+                # 固定die1，移动die0
+                die_offsets[die0][0] -= actual_x_diff
+            else:
+                # 两个都不是参考Die，选择ID较大的移动
+                if die0 > die1:
+                    die_offsets[die0][0] -= actual_x_diff
+                else:
+                    die_offsets[die1][0] += actual_x_diff
+
+        # 处理水平对齐约束（Y方向）- 每对Die只处理一次
+        for die_pair, constraint in alignment_constraints["horizontal"].items():
+            die0 = constraint["die0"]
+            die1 = constraint["die1"]
+            row0 = constraint["row0"]
+            row1 = constraint["row1"]
+            col0 = constraint["col0"]
+            col1 = constraint["col1"]
+
+            # 计算实际的Y坐标差异（与_draw_single_die_flow中的坐标计算完全一致）
+            die0_y = row0
+            die1_y = row1
+
+            die0_y *= -1.5
+            die1_y *= -1.5
+
+            actual_y_diff = die0_y - die1_y
+
+            # 只移动非参考Die
+            if die0 == reference_die:
+                # 固定die0，移动die1，使用实际位置差异
+                die_offsets[die1][1] += actual_y_diff
+            elif die1 == reference_die:
+                # 固定die1，移动die0
+                die_offsets[die0][1] -= actual_y_diff
+            else:
+                # 两个都不是参考Die，选择ID较大的移动
+                if die0 > die1:
+                    die_offsets[die0][1] -= actual_y_diff
+                else:
+                    die_offsets[die1][1] += actual_y_diff
+
+        # 转换为元组格式
+        return {die_id: tuple(offsets) for die_id, offsets in die_offsets.items()}
+
 
     def _draw_inactive_d2d_connections(self, ax, d2d_pairs, active_connections, die_node_positions, dies=None):
         """
@@ -1748,13 +1878,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
         for conn in active_connections:
             active_pairs.add((conn["from_die"], conn["from_node"], conn["to_die"], conn["to_node"]))
 
-        # 调试信息
-        #         print(f"[活跃连接] 总共{len(active_pairs)}个活跃连接: {active_pairs}")
-
-        # 为每个D2D连接对绘制缺失方向的灰色连接
-        #         print(f"[D2D连接对] 总共{len(d2d_pairs)}个D2D连接对: {d2d_pairs}")
         for die0_id, die0_node, die1_id, die1_node in d2d_pairs:
-            #             print(f"[处理连接对] Die{die0_id}节点{die0_node} -> Die{die1_id}节点{die1_node}")
             from_die_positions = die_node_positions.get(die0_id, {})
             to_die_positions = die_node_positions.get(die1_id, {})
 

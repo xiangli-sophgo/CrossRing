@@ -4,30 +4,25 @@
 D2D_ENABLED: true
 NUM_DIES: 2
 
-# 2-Die节点配置 (新的配置驱动方式)
-D2D_DIE_CONFIG:
-  0:
-    topology: "5x4"             
-    connections:
-      top: 
-        connect_die: 1             # top边连接到Die 1
-        d2d_nodes: [0, 1, 2, 3]    # D2D节点位置列表
-        node_to_die_mapping:       # 每个节点连接到哪个Die
-          0: 1  # 位置0的节点连接到Die 1
-          1: 1  # 位置1的节点连接到Die 1
-          2: 1  # 位置2的节点连接到Die 1
-          3: 1  # 位置3的节点连接到Die 1
-  1:
-    topology: "5x4"              
-    connections:
-      bottom:
-        connect_die: 0             # bottom边连接到Die 0
-        d2d_nodes: [0, 1, 2, 3]    # D2D节点位置列表
-        node_to_die_mapping:       # 每个节点连接到哪个Die
-          0: 0  # 位置0的节点连接到Die 0
-          1: 0  # 位置1的节点连接到Die 0
-          2: 0  # 位置2的节点连接到Die 0
-          3: 0  # 位置3的节点连接到Die 0
+# Die的XY坐标布局（左下角为原点）
+DIE_POSITIONS:
+  0: [0, 0]  # Die0在左下角
+  1: [0, 1]  # Die1在上方
+
+# 每个Die的拓扑配置
+DIE_TOPOLOGIES:
+  0: "5x4"  # Die0使用5x4拓扑
+  1: "5x4"  # Die1使用5x4拓扑
+
+# D2D互联配置（单向配置，系统自动生成双向连接）
+# 格式: [源Die, 源物理节点, 目标Die, 目标物理节点]
+# 物理节点ID使用数据流中的实际编号，通过node_map转换到网络位置
+D2D_CONNECTIONS:
+  # Die0顶部 <-> Die1底部
+  - [0, 0, 1, 16]   # Die0节点0 <-> Die1节点16
+  - [0, 1, 1, 17]   # Die0节点1 <-> Die1节点17
+  - [0, 2, 1, 18]   # Die0节点2 <-> Die1节点18
+  - [0, 3, 1, 19]   # Die0节点3 <-> Die1节点19
 
 
 
@@ -42,11 +37,8 @@ D2D_R_LATENCY: 10    # 读数据通道延迟
 D2D_AW_LATENCY: 10  # 地址写通道延迟
 D2D_W_LATENCY: 10    # 写数据通道延迟
 D2D_B_LATENCY: 10    # 写响应通道延迟
-D2D_DBID_LATENCY: 10 # DBID 信号延迟
-D2D_MAX_OUTSTANDING: 16  # 最大未完成事务数
 
 # D2D 带宽控制
-D2D_DATA_BW_LIMIT: 64  # D2D数据通道带宽限制 (与其他IP接口格式一致)
 D2D_RN_BW_LIMIT: 128    # D2D RN 带宽限制 (GB/s)
 D2D_SN_BW_LIMIT: 128    # D2D SN 带宽限制 (GB/s)
 

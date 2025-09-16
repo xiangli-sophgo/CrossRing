@@ -14,7 +14,7 @@ def main():
     # 使用D2DConfig替代CrossRingConfig，获得D2D特定配置功能
     # 现在每个Die的拓扑由D2D配置文件中的topology参数指定，无需die_config_file
     config = D2DConfig(
-        d2d_config_file="../config/topologies/d2d_config.yaml",
+        d2d_config_file="../config/topologies/d2d_4die_config.yaml",
     )  # D2D专用配置，自动根据每个Die的topology加载对应拓扑文件
 
     # 定义拓扑结构
@@ -36,8 +36,8 @@ def main():
         result_save_path="../Result/d2d_demo/",
         results_fig_save_path="../Result/d2d_demo/figures/",
         verbose=1,
-        print_d2d_trace=0,  # 启用D2D trace功能
-        show_d2d_trace_id=1,  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
+        print_d2d_trace=1,  # 启用D2D trace功能
+        show_d2d_trace_id=0,  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
         d2d_trace_sleep=0.0,  # 不暂停，加快调试as
         enable_flow_graph=1,  # 是否在仿真结束后自动生成流量图
         # D2D链路状态可视化参
@@ -49,7 +49,7 @@ def main():
     sim.initial()
 
     # 设置仿真参数
-    sim.end_time = 200  # 增加仿真时间以确保数据传输完成
+    sim.end_time = 100  # 增加仿真时间以确保数据传输完成
     sim.print_interval = 500
 
     sim.run()
