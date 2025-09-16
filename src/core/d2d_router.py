@@ -50,10 +50,10 @@ class D2DRouter:
             routing_table[key].append(node0)
 
             # Die1 -> Die0 的连接（双向）
-            key = (die1_id, die0_id)
-            if key not in routing_table:
-                routing_table[key] = []
-            routing_table[key].append(node1)
+            # key = (die1_id, die0_id)
+            # if key not in routing_table:
+            #     routing_table[key] = []
+            # routing_table[key].append(node1)
 
         # 对每个连接的节点列表排序，确保一致性
         for key in routing_table:

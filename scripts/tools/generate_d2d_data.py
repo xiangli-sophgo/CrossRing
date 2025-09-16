@@ -187,7 +187,16 @@ class D2DTrafficGenerator:
         return self.generate_cross_die_traffic(die_id, src_nodes, src_ip, die_id, dst_nodes, dst_ip, req_type, burst_length, bandwidth, end_time)
 
     def generate_mixed_traffic(
-        self, cross_die_ratio: float = 0.7, src_ip_config: Dict = None, dst_ip_config: Dict = None, req_type: str = "R", burst_length: int = 4, bandwidth: float = 64.0, end_time: int = 5000
+        self,
+        cross_die_ratio: float = 0.7,
+        src_ip_config: Dict = None,
+        dst_ip_config: Dict = None,
+        req_type: str = "R",
+        burst_length: int = 4,
+        bandwidth: float = 64.0,
+        end_time: int = 5000,
+        src_die: int = 0,
+        dst_die: int = 1,
     ) -> List[str]:
         """
         生成混合模式流量 (跨 die + 同 die)
@@ -200,6 +209,8 @@ class D2DTrafficGenerator:
             burst_length: 突发长度
             bandwidth: 带宽
             end_time: 结束时间
+            src_die: 源 Die ID，默认 0
+            dst_die: 目标 Die ID，默认 1
 
         Returns:
             List[str]: 混合流量条目列表
@@ -215,16 +226,16 @@ class D2DTrafficGenerator:
         cross_die_bandwidth = bandwidth * cross_die_ratio
         same_die_bandwidth = bandwidth * (1 - cross_die_ratio)
 
-        # 生成跨 die 流量 (Die 0 -> Die 1)
+        # 生成跨 die 流量 (src_die -> dst_die)
         for src_ip, src_nodes in src_ip_config.items():
             for dst_ip, dst_nodes in dst_ip_config.items():
-                cross_entries = self.generate_cross_die_traffic(0, src_nodes, src_ip, 1, dst_nodes, dst_ip, req_type, burst_length, cross_die_bandwidth, end_time)
+                cross_entries = self.generate_cross_die_traffic(src_die, src_nodes, src_ip, dst_die, dst_nodes, dst_ip, req_type, burst_length, cross_die_bandwidth, end_time)
                 traffic_entries.extend(cross_entries)
 
-        # 生成同 die 流量 (Die 0 内部)
+        # 生成同 die 流量 (src_die 内部)
         for src_ip, src_nodes in src_ip_config.items():
             for dst_ip, dst_nodes in dst_ip_config.items():
-                same_entries = self.generate_same_die_traffic(0, src_nodes, src_ip, dst_nodes, dst_ip, req_type, burst_length, same_die_bandwidth, end_time)
+                same_entries = self.generate_same_die_traffic(src_die, src_nodes, src_ip, dst_nodes, dst_ip, req_type, burst_length, same_die_bandwidth, end_time)
                 traffic_entries.extend(same_entries)
 
         return traffic_entries
@@ -312,6 +323,8 @@ class D2DTrafficGenerator:
         bandwidth: float = 64.0,
         end_time: int = 5000,
         cross_die_ratio: float = 0.7,
+        src_die: int = 0,
+        dst_die: int = 1,
     ):
         """
         生成 D2D 流量文件
@@ -326,6 +339,8 @@ class D2DTrafficGenerator:
             bandwidth: 带宽，单位 GB/s
             end_time: 结束时间，单位 ns
             cross_die_ratio: 跨 die 流量比例 (仅用于混合模式)
+            src_die: 源 Die ID，默认 0
+            dst_die: 目标 Die ID，默认 1
         """
         # 标准化配置
         src_config = self.create_ip_config(src_ip_config)
@@ -337,19 +352,19 @@ class D2DTrafficGenerator:
             # 只生成跨 die 流量
             for src_ip, src_nodes in src_config.items():
                 for dst_ip, dst_nodes in dst_config.items():
-                    entries = self.generate_cross_die_traffic(0, src_nodes, src_ip, 1, dst_nodes, dst_ip, req_type, burst_length, bandwidth, end_time)
+                    entries = self.generate_cross_die_traffic(src_die, src_nodes, src_ip, dst_die, dst_nodes, dst_ip, req_type, burst_length, bandwidth, end_time)
                     all_entries.extend(entries)
 
         elif traffic_mode == "same_die":
             # 只生成同 die 流量
             for src_ip, src_nodes in src_config.items():
                 for dst_ip, dst_nodes in dst_config.items():
-                    entries = self.generate_same_die_traffic(0, src_nodes, src_ip, dst_nodes, dst_ip, req_type, burst_length, bandwidth, end_time)
+                    entries = self.generate_same_die_traffic(src_die, src_nodes, src_ip, dst_nodes, dst_ip, req_type, burst_length, bandwidth, end_time)
                     all_entries.extend(entries)
 
         elif traffic_mode == "mixed":
             # 生成混合流量
-            all_entries = self.generate_mixed_traffic(cross_die_ratio, src_config, dst_config, req_type, burst_length, bandwidth, end_time)
+            all_entries = self.generate_mixed_traffic(cross_die_ratio, src_config, dst_config, req_type, burst_length, bandwidth, end_time, src_die, dst_die)
 
         else:
             raise ValueError(f"不支持的流量模式: {traffic_mode}")
@@ -366,6 +381,195 @@ class D2DTrafficGenerator:
         print(f"D2D 流量文件已生成: {filename}")
         print(f"总共生成了 {len(all_entries)} 条流量记录")
 
+    def generate_multi_die_pair_traffic_file(
+        self,
+        filename: str,
+        traffic_configs: List[Dict],
+        traffic_mode: str = "cross_die",
+        end_time: int = 5000,
+    ):
+        """
+        生成多个 Die 对之间的 D2D 流量文件，所有流量合并到一个文件中
+
+        Args:
+            filename: 输出文件名
+            traffic_configs: 流量配置列表，每个配置包含:
+                {
+                    "src_die": int,
+                    "dst_die": int,
+                    "src_ip_config": Dict[str, List[int]],
+                    "dst_ip_config": Dict[str, List[int]],
+                    "req_type": str,
+                    "burst_length": int,
+                    "bandwidth": float,
+                }
+            traffic_mode: 流量模式 ("cross_die", "same_die", "mixed")
+            end_time: 结束时间，单位 ns
+
+        Example:
+            traffic_configs = [
+                {
+                    "src_die": 0,
+                    "dst_die": 2,
+                    "src_ip_config": {"gdma_0": [6]},
+                    "dst_ip_config": {"ddr_0": [12]},
+                    "req_type": "R",
+                    "burst_length": 4,
+                    "bandwidth": 128.0,
+                },
+                {
+                    "src_die": 1,
+                    "dst_die": 3,
+                    "src_ip_config": {"gdma_1": [7]},
+                    "dst_ip_config": {"ddr_1": [13]},
+                    "req_type": "W",
+                    "burst_length": 8,
+                    "bandwidth": 64.0,
+                }
+            ]
+        """
+        all_entries = []
+
+        # 遍历每个流量配置，生成相应的流量数据
+        for config in traffic_configs:
+            # 提取配置参数
+            src_die = config["src_die"]
+            dst_die = config["dst_die"]
+            src_ip_config = config["src_ip_config"]
+            dst_ip_config = config["dst_ip_config"]
+            req_type = config.get("req_type", "R")
+            burst_length = config.get("burst_length", 4)
+            bandwidth = config.get("bandwidth", 64.0)
+            cross_die_ratio = config.get("cross_die_ratio", 0.7)
+
+            # 标准化配置
+            src_config = self.create_ip_config(src_ip_config)
+            dst_config = self.create_ip_config(dst_ip_config)
+
+            # 生成流量数据
+            config_entries = []
+
+            if traffic_mode == "cross_die":
+                # 只生成跨 die 流量
+                for src_ip, src_nodes in src_config.items():
+                    for dst_ip, dst_nodes in dst_config.items():
+                        entries = self.generate_cross_die_traffic(src_die, src_nodes, src_ip, dst_die, dst_nodes, dst_ip, req_type, burst_length, bandwidth, end_time)
+                        config_entries.extend(entries)
+
+            elif traffic_mode == "same_die":
+                # 只生成同 die 流量
+                for src_ip, src_nodes in src_config.items():
+                    for dst_ip, dst_nodes in dst_config.items():
+                        entries = self.generate_same_die_traffic(src_die, src_nodes, src_ip, dst_nodes, dst_ip, req_type, burst_length, bandwidth, end_time)
+                        config_entries.extend(entries)
+
+            elif traffic_mode == "mixed":
+                # 生成混合流量
+                config_entries = self.generate_mixed_traffic(cross_die_ratio, src_config, dst_config, req_type, burst_length, bandwidth, end_time, src_die, dst_die)
+
+            else:
+                raise ValueError(f"不支持的流量模式: {traffic_mode}")
+
+            # 将当前配置的流量数据添加到总列表
+            all_entries.extend(config_entries)
+            print(f"Die {src_die} -> Die {dst_die}: 生成了 {len(config_entries)} 条流量记录")
+
+        # 按时间排序并写入文件
+        all_entries.sort(key=lambda x: int(x.split(",")[0]))
+
+        with open(filename, "w") as f:
+            # 写入头部注释
+            f.write("# D2D Multi-Die-Pair Traffic\n")
+            f.write("# Format: inject_time, src_die, src_node, src_ip, dst_die, dst_node, dst_ip, req_type, burst_length\n")
+            f.writelines(all_entries)
+
+        print(f"多 Die 对 D2D 流量文件已生成: {filename}")
+        print(f"总共生成了 {len(all_entries)} 条流量记录")
+
+        # 打印配置总结
+        print("\n流量配置总结:")
+        for i, config in enumerate(traffic_configs, 1):
+            print(
+                f"  {i}. Die {config['src_die']} -> Die {config['dst_die']}: "
+                f"{config.get('bandwidth', 64.0)} GB/s, "
+                f"{config.get('req_type', 'R')} 请求, "
+                f"burst_length={config.get('burst_length', 4)}"
+            )
+
+
+def parse_die_pair(die_pair_str: str) -> tuple[int, int]:
+    """
+    解析 die 对字符串，如 "0-1" 或 "0-2"
+
+    Args:
+        die_pair_str: die 对字符串，格式为 "src_die-dst_die"
+
+    Returns:
+        tuple[int, int]: (src_die, dst_die)
+
+    Examples:
+        >>> parse_die_pair("0-1")
+        (0, 1)
+        >>> parse_die_pair("0-2")
+        (0, 2)
+    """
+    try:
+        parts = die_pair_str.split("-")
+        if len(parts) != 2:
+            raise ValueError(f"Die 对格式错误，期望 'src-dst'，得到: {die_pair_str}")
+
+        src_die = int(parts[0])
+        dst_die = int(parts[1])
+
+        if src_die < 0 or dst_die < 0:
+            raise ValueError(f"Die ID 不能为负数: src={src_die}, dst={dst_die}")
+
+        return src_die, dst_die
+
+    except ValueError as e:
+        if "invalid literal for int()" in str(e):
+            raise ValueError(f"Die ID 必须是整数: {die_pair_str}")
+        else:
+            raise
+
+
+def generate_d2d_data_with_die_pair(
+    filename: str,
+    die_pair: str,
+    topo: str = "5x4",
+    src_ip_type: str = "gdma",
+    dst_ip_type: str = "ddr",
+    traffic_mode: str = "cross_die",
+    req_type: str = "R",
+    burst_length: int = 4,
+    bandwidth: float = 64.0,
+    end_time: int = 5000,
+    cross_die_ratio: float = 0.7,
+):
+    """
+    便捷函数：使用字符串形式的 die 对生成 D2D 流量数据
+
+    Args:
+        filename: 输出文件名
+        die_pair: Die 对，格式为 "src_die-dst_die"，如 "0-1" 或 "0-2"
+        其他参数同 generate_d2d_data
+    """
+    src_die, dst_die = parse_die_pair(die_pair)
+    return generate_d2d_data(
+        filename=filename,
+        topo=topo,
+        src_ip_type=src_ip_type,
+        dst_ip_type=dst_ip_type,
+        traffic_mode=traffic_mode,
+        req_type=req_type,
+        burst_length=burst_length,
+        bandwidth=bandwidth,
+        end_time=end_time,
+        cross_die_ratio=cross_die_ratio,
+        src_die=src_die,
+        dst_die=dst_die,
+    )
+
 
 def generate_d2d_data(
     filename: str,
@@ -378,6 +582,8 @@ def generate_d2d_data(
     bandwidth: float = 64.0,
     end_time: int = 5000,
     cross_die_ratio: float = 0.7,
+    src_die: int = 0,
+    dst_die: int = 1,
 ):
     """
     便捷函数：生成 D2D 流量数据
@@ -393,6 +599,8 @@ def generate_d2d_data(
         bandwidth: 带宽，默认 64.0 GB/s
         end_time: 结束时间，默认 5000ns
         cross_die_ratio: 跨 die 流量比例，默认 0.7
+        src_die: 源 Die ID，默认 0
+        dst_die: 目标 Die ID，默认 1
     """
     # 创建生成器
     generator = D2DTrafficGenerator(die_topo=topo)
@@ -402,7 +610,55 @@ def generate_d2d_data(
     dst_config = {dst_ip_type: generator.get_ip_mapping(dst_ip_type)}
 
     # 生成流量文件
-    generator.generate_d2d_traffic_file(filename, src_config, dst_config, traffic_mode, req_type, burst_length, bandwidth, end_time, cross_die_ratio)
+    generator.generate_d2d_traffic_file(filename, src_config, dst_config, traffic_mode, req_type, burst_length, bandwidth, end_time, cross_die_ratio, src_die, dst_die)
+
+
+def generate_multi_die_pairs_example():
+    """
+    便捷函数：演示如何生成多个 Die 对的流量并合并到一个文件
+
+    这个示例生成了几个不同的 Die 对流量，并将它们合并到一个文件中按时间排序
+    """
+    print("=== 多 Die 对流量生成示例 ===\n")
+
+    # 创建生成器
+    generator = D2DTrafficGenerator(die_topo="5x4")
+
+    # 配置多个 Die 对之间的流量
+    traffic_configs = [
+        {
+            "src_die": 0,
+            "dst_die": 2,
+            "src_ip_config": {"gdma_0": [6]},
+            "dst_ip_config": {"ddr_0": [12]},
+            "req_type": "R",
+            "burst_length": 4,
+            "bandwidth": 128.0,
+        },
+        {
+            "src_die": 1,
+            "dst_die": 3,
+            "src_ip_config": {"gdma_1": [7]},
+            "dst_ip_config": {"ddr_1": [13]},
+            "req_type": "W",
+            "burst_length": 8,
+            "bandwidth": 64.0,
+        },
+        {
+            "src_die": 2,
+            "dst_die": 0,
+            "src_ip_config": {"gdma_2": [26]},
+            "dst_ip_config": {"ddr_2": [32]},
+            "req_type": "R",
+            "burst_length": 4,
+            "bandwidth": 96.0,
+        },
+    ]
+
+    # 生成合并的流量文件
+    generator.generate_multi_die_pair_traffic_file(filename="../../test_data/d2d_multi_die_pairs.txt", traffic_configs=traffic_configs, traffic_mode="cross_die", end_time=500)
+
+    print("\n示例文件已生成：../../test_data/d2d_multi_die_pairs.txt")
 
 
 def example():
@@ -412,29 +668,42 @@ def example():
     random.seed(42)
     np.random.seed(42)
 
-    # 示例1: 基本使用 - 快速生成跨 die 流量
-    print("示例1: 生成基本的跨 die 流量 (GDMA -> DDR)")
-    generate_d2d_data(filename="../../test_data/d2d_basic_cross_die.txt", traffic_mode="cross_die", req_type="R", bandwidth=64.0, end_time=2000)
+    # 示例1: 基本使用 - 快速生成跨 die 流量 (Die 0 -> Die 1)
+    print("示例1: 生成基本的跨 die 流量 (GDMA -> DDR, Die 0 -> Die 1)")
+    generate_d2d_data(filename="../../test_data/d2d_basic_cross_die_0_1.txt", traffic_mode="cross_die", req_type="R", bandwidth=64.0, end_time=2000, src_die=0, dst_die=1)
+    print()
+
+    # 示例1.5: 使用字符串指定 die 对 (Die 0 -> Die 2)
+    print("示例1.5: 使用字符串指定 die 对 (GDMA -> DDR, Die 0 -> Die 2)")
+    generate_d2d_data_with_die_pair(filename="../../test_data/d2d_basic_cross_die_0_2.txt", die_pair="0-2", traffic_mode="cross_die", req_type="R", bandwidth=64.0, end_time=2000)
     print()
 
     # 示例2: 生成同 die 流量
-    print("示例2: 生成同 die 流量 (GDMA -> DDR, Die 内部)")
-    generate_d2d_data(filename="../../test_data/d2d_same_die.txt", traffic_mode="same_die", req_type="W", bandwidth=32.0, end_time=1500)
+    print("示例2: 生成同 die 流量 (GDMA -> DDR, Die 2 内部)")
+    generate_d2d_data(filename="../../test_data/d2d_same_die.txt", traffic_mode="same_die", req_type="W", bandwidth=32.0, end_time=1500, src_die=2, dst_die=2)
     print()
 
-    # 示例3: 混合模式流量
-    print("示例3: 生成混合流量 (70% 跨 die + 30% 同 die)")
-    generate_d2d_data(filename="../../test_data/d2d_mixed_traffic.txt", traffic_mode="mixed", req_type="R", bandwidth=96.0, end_time=3000, cross_die_ratio=0.7)
+    # 示例3: 混合模式流量 (Die 1 -> Die 2)
+    print("示例3: 生成混合流量 (70% 跨 die + 30% 同 die, Die 1 -> Die 2)")
+    generate_d2d_data(filename="../../test_data/d2d_mixed_traffic.txt", traffic_mode="mixed", req_type="R", bandwidth=96.0, end_time=3000, cross_die_ratio=0.7, src_die=1, dst_die=2)
     print()
 
-    # 示例4: 高级用法 - 自定义配置
-    print("示例4: 高级用法 - 多种 IP 类型的混合流量")
+    # 示例4: 高级用法 - 自定义配置 (Die 0 -> Die 3)
+    print("示例4: 高级用法 - 多种 IP 类型的混合流量 (Die 0 -> Die 3)")
     generator = D2DTrafficGenerator(die_topo="5x4")
 
     # 自定义源和目标配置
-    custom_src_config = {"gdma": [6, 7], "sdma": [0, 1]}  # 使用部分 GDMA 节点  # 使用部分 SDMA 节点
+    # 源 Die (Die 0) 的 IP 配置
+    custom_src_config = {
+        "gdma": [6, 7],  # Die 0 上的部分 GDMA 节点
+        "sdma": [0, 1],  # Die 0 上的部分 SDMA 节点
+    }
 
-    custom_dst_config = {"ddr": [12, 13], "l2m": [18, 19]}  # 使用部分 DDR 节点  # 使用部分 L2M 节点
+    # 目标 Die (Die 3) 的 IP 配置
+    custom_dst_config = {
+        "ddr": [12, 13],  # Die 3 上的部分 DDR 节点
+        "l2m": [18, 19],  # Die 3 上的部分 L2M 节点
+    }
 
     generator.generate_d2d_traffic_file(
         filename="../../test_data/d2d_custom_config.txt",
@@ -445,6 +714,8 @@ def example():
         burst_length=4,
         bandwidth=80.0,
         end_time=2500,
+        src_die=0,
+        dst_die=3,
     )
     print()
 
@@ -452,9 +723,18 @@ def example():
     print("示例5: 批量生成多种配置的流量文件")
 
     batch_configs = [
-        {"name": "high_bandwidth_read", "filename": "../../test_data/d2d_high_bw_read.txt", "req_type": "R", "bandwidth": 128.0, "traffic_mode": "cross_die"},
-        {"name": "low_bandwidth_write", "filename": "../../test_data/d2d_low_bw_write.txt", "req_type": "W", "bandwidth": 32.0, "traffic_mode": "same_die"},
-        {"name": "mixed_heavy_load", "filename": "../../test_data/d2d_heavy_mixed.txt", "req_type": "R", "bandwidth": 156.0, "traffic_mode": "mixed", "cross_die_ratio": 0.8},
+        {"name": "high_bandwidth_read_0_1", "filename": "../../test_data/d2d_high_bw_read.txt", "req_type": "R", "bandwidth": 128.0, "traffic_mode": "cross_die", "src_die": 0, "dst_die": 1},
+        {"name": "low_bandwidth_write_2_3", "filename": "../../test_data/d2d_low_bw_write.txt", "req_type": "W", "bandwidth": 32.0, "traffic_mode": "same_die", "src_die": 2, "dst_die": 2},
+        {
+            "name": "mixed_heavy_load_1_3",
+            "filename": "../../test_data/d2d_heavy_mixed.txt",
+            "req_type": "R",
+            "bandwidth": 156.0,
+            "traffic_mode": "mixed",
+            "cross_die_ratio": 0.8,
+            "src_die": 1,
+            "dst_die": 3,
+        },
     ]
 
     for config in batch_configs:
@@ -465,34 +745,49 @@ def example():
 
     print("\n=== 所有示例完成! ===")
     print("生成的文件保存在 test_data/ 目录下")
+
+    # 示例6: 新功能演示 - 多 Die 对流量合并
+    print("\n示例6: 多 Die 对流量合并 (新功能)")
+    generate_multi_die_pairs_example()
+
     print("\n使用提示:")
     print("1. 可以通过修改 bandwidth, end_time, burst_length 等参数调整流量密度")
     print("2. 支持的 IP 类型: gdma, ddr, l2m, sdma, cdma")
     print("3. 支持的流量模式: cross_die, same_die, mixed")
     print("4. 可以使用 create_ip_config() 方法创建复杂的 IP 配置")
+    print("5. 支持自定义 Die 编号: src_die, dst_die 参数或使用 generate_d2d_data_with_die_pair('filename', '0-2')")
+    print("6. Die 对格式: '0-1', '0-2', '1-3' 等，支持任意 Die ID 组合")
+    print("7. 新功能: 使用 generate_multi_die_pair_traffic_file() 生成多个 Die 对的合并流量文件")
 
 
 if __name__ == "__main__":
     generator = D2DTrafficGenerator(die_topo="5x4")
 
-    # 自定义源和目标配置
-    custom_src_config = {
-        "gdma_0": [6],
-    }
+    traffic_configs = [
+        {
+            "src_die": 0,
+            "dst_die": 2,
+            "src_ip_config": {"gdma_0": [6]},
+            "dst_ip_config": {"ddr_0": [12]},
+            "req_type": "R",
+            "burst_length": 4,
+            "bandwidth": 128.0,
+        },
+        {
+            "src_die": 2,
+            "dst_die": 0,
+            "src_ip_config": {"gdma_1": [7]},
+            "dst_ip_config": {"ddr_1": [13]},
+            "req_type": "R",
+            "burst_length": 4,
+            "bandwidth": 64.0,
+        },
+    ]
 
-    custom_dst_config = {
-        "ddr_0": [12],
-        # "ddr_1": [12],
-    }
-
-    generator.generate_d2d_traffic_file(
-        filename="../../test_data/d2d_data_0902.txt",
-        src_ip_config=custom_src_config,
-        dst_ip_config=custom_dst_config,
+    generator.generate_multi_die_pair_traffic_file(
+        filename="../../test_data/d2d_data_0916.txt",
+        traffic_configs=traffic_configs,
         traffic_mode="cross_die",
-        req_type="R",
-        burst_length=4,
-        bandwidth=128.0,
         end_time=500,
     )
     print()

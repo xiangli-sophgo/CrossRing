@@ -87,6 +87,8 @@ class D2D_Model:
             die_config = self._create_die_config(die_id)
 
             # 创建BaseModel实例（D2D模式下禁用单个Die的结果保存路径）
+            # 只在第一个Die时启用verbose，避免重复打印
+            die_verbose = self.kwargs.get("verbose", 1) if die_id == 0 else 0
             die_model = BaseModel(
                 model_type=self.kwargs.get("model_type", "REQ_RSP"),
                 config=die_config,
@@ -101,7 +103,7 @@ class D2D_Model:
                 plot_start_cycle=self.kwargs.get("plot_start_cycle", 0),
                 print_trace=self.kwargs.get("print_trace", 0),
                 show_trace_id=self.kwargs.get("show_trace_id", 0),
-                verbose=self.kwargs.get("verbose", 1),
+                verbose=die_verbose,  # 只在第一个Die时启用verbose
             )
 
             # 设置Die ID
@@ -534,17 +536,15 @@ class D2D_Model:
             # 根据请求类型选择正确的D2D节点：
             # 请求需要发送到D2D_SN（偶数行），响应从D2D_RN发出（奇数行）
             d2d_sn_positions = getattr(self.config, "D2D_SN_POSITIONS", {}).get(src_die, [])
+            base_d2d_node -= die_model.config.NUM_COL
 
             # 找到对应的D2D_SN节点位置和索引
             if base_d2d_node in d2d_sn_positions:
                 intermediate_dest = base_d2d_node
-                d2d_index = d2d_sn_positions.index(base_d2d_node)
             else:
-                # 如果路由器返回的不是SN位置，使用第一个可用的SN位置
-                intermediate_dest = d2d_sn_positions[0] if d2d_sn_positions else base_d2d_node
-                d2d_index = 0
+                raise ValueError("未找到d2d_sn")
 
-            destination_type = f"d2d_sn_{d2d_index}"  # 跨Die时目标是D2D_SN，包含正确的编号
+            destination_type = f"d2d_sn_0"  # 跨Die时目标是D2D_SN，包含正确的编号
         else:
             # 本地：直接路由到目标
             intermediate_dest = die_model.node_map(dst_node, False)

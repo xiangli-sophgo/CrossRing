@@ -66,7 +66,7 @@ class CrossRingConfig:
         self.SN_DDR_W_TRACKER_OSTD = args.SN_DDR_W_TRACKER_OSTD
         self.SN_L2M_R_TRACKER_OSTD = args.SN_L2M_R_TRACKER_OSTD
         self.SN_L2M_W_TRACKER_OSTD = args.SN_L2M_W_TRACKER_OSTD
-        
+
         # 自动计算缓冲区大小（如果配置文件中设置为 "auto"）
         self.RN_RDB_SIZE = self._resolve_buffer_size(args.RN_RDB_SIZE, self.RN_R_TRACKER_OSTD * self.BURST)
         self.RN_WDB_SIZE = self._resolve_buffer_size(args.RN_WDB_SIZE, self.RN_W_TRACKER_OSTD * self.BURST)
@@ -103,8 +103,7 @@ class CrossRingConfig:
         self.IP_L2H_FIFO_DEPTH = args.IP_L2H_FIFO_DEPTH
         self.IP_H2L_H_FIFO_DEPTH = args.IP_H2L_H_FIFO_DEPTH
         self.IP_H2L_L_FIFO_DEPTH = args.IP_H2L_L_FIFO_DEPTH
-        
-        
+
         self.CHANNEL_SPEC = {
             "gdma": 2,  # → RN 侧
             "sdma": 2,  # → RN 侧
@@ -135,15 +134,15 @@ class CrossRingConfig:
             return value
         else:
             return int(value)
-    
+
     def _resolve_buffer_size(self, config_value, calculated_value):
         """
         解析缓冲区大小配置，支持自动计算
-        
+
         Args:
             config_value: 配置文件中的值，可以是数字或 "auto"
             calculated_value: 基于公式计算的值
-            
+
         Returns:
             int: 最终的缓冲区大小
         """
@@ -156,6 +155,7 @@ class CrossRingConfig:
         # 如果没有提供value_factory，使用基于deque的默认工厂
         if value_factory is None:
             from collections import defaultdict, deque
+
             value_factory = lambda: defaultdict(lambda: deque(maxlen=self.IQ_CH_FIFO_DEPTH))
 
         # 把非 callable 的默认值包装成 deepcopy，可避免共享引用
@@ -192,6 +192,8 @@ class CrossRingConfig:
             self.SDMA_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
             self.GDMA_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
             self.CDMA_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
+            self.D2D_RN_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
+            self.D2D_SN_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
 
         elif topo_type == "5x2":
             self.NUM_NODE = 20
@@ -203,6 +205,9 @@ class CrossRingConfig:
             self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
             self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
             self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+
         elif topo_type == "4x2":
             self.NUM_ROW = self.NUM_NODE // self.NUM_COL
             self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
@@ -210,6 +215,9 @@ class CrossRingConfig:
             self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
             self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
             self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+
         elif topo_type == "5x4":
             self.NUM_NODE = 40
             self.NUM_COL = 4
@@ -220,6 +228,9 @@ class CrossRingConfig:
             self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [9], [])
             self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [9], [])
             self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
+            self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
+            self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
+
         elif topo_type == "6x5":
             self.NUM_NODE = 60
             self.NUM_COL = 5
@@ -230,6 +241,8 @@ class CrossRingConfig:
             self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
             self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
             self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
+            self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
+            self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
 
         elif topo_type == "4x5":
             self.NUM_NODE = 40
@@ -241,6 +254,8 @@ class CrossRingConfig:
             self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
             self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
             self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
 
         else:
             self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
@@ -248,6 +263,8 @@ class CrossRingConfig:
             self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
             self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
             self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+            self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
 
     def generate_ip_positions(self, zero_rows=None, zero_cols=None):
         # 创建一个矩阵,初始值为1
@@ -371,8 +388,8 @@ class CrossRingConfig:
                     default_config = project_root / default_config
 
         if os.path.exists(default_config):
-            with open(default_config, "r", encoding='utf-8') as f:
-                if str(default_config).endswith(('.yaml', '.yml')):
+            with open(default_config, "r", encoding="utf-8") as f:
+                if str(default_config).endswith((".yaml", ".yml")):
                     default_config = yaml.safe_load(f)
                 else:
                     default_config = json.load(f)
@@ -458,8 +475,11 @@ class CrossRingConfig:
         parser.add_argument("--ENABLE_CROSSPOINT_CONFLICT_CHECK", type=bool, default=default_config["ENABLE_CROSSPOINT_CONFLICT_CHECK"], help="Enable crosspoint conflict checking for inject queue")
         parser.add_argument("--CROSSRING_VERSION", type=str, default=default_config["CROSSRING_VERSION"], help="CrossRing version (V1 or V2)")
         parser.add_argument("--ENABLE_IN_ORDER_EJECTION", type=bool, default=default_config["ENABLE_IN_ORDER_EJECTION"], help="Enable in-order ejection for src-dest pairs")
-        parser.add_argument("--IN_ORDER_EJECTION_PAIRS", type=list, default=default_config["IN_ORDER_EJECTION_PAIRS"], help="Specific src-dest pairs for in-order ejection. Empty list means all pairs.")
-        parser.add_argument("--IN_ORDER_PACKET_CATEGORIES", type=list, default=default_config.get("IN_ORDER_PACKET_CATEGORIES", ["REQ"]), help="Packet categories that need in-order delivery (REQ/RSP/DATA)")
-        
+        parser.add_argument(
+            "--IN_ORDER_EJECTION_PAIRS", type=list, default=default_config["IN_ORDER_EJECTION_PAIRS"], help="Specific src-dest pairs for in-order ejection. Empty list means all pairs."
+        )
+        parser.add_argument(
+            "--IN_ORDER_PACKET_CATEGORIES", type=list, default=default_config.get("IN_ORDER_PACKET_CATEGORIES", ["REQ"]), help="Packet categories that need in-order delivery (REQ/RSP/DATA)"
+        )
 
         return parser.parse_args()

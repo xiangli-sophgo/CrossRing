@@ -90,7 +90,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             if hasattr(die_model, "data_network") and hasattr(die_model.data_network, "arrive_flits"):
                 self._collect_requests_from_network(die_model.data_network, die_id)
 
-
     def _collect_requests_from_network(self, network, die_id: int):
         """从单个网络中收集跨Die请求"""
         for packet_id, flits in network.arrive_flits.items():
@@ -414,7 +413,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             for line in report_lines:
                 f.write(line + "\n")
 
-
     def process_d2d_results(self, dies: Dict, output_path: str):
         """
         完整的D2D结果处理流程
@@ -441,7 +439,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         # 6. 保存AXI通道统计到文件
         self.save_d2d_axi_channel_statistics(output_path, d2d_bandwidth, dies, self.config)
-
 
     def calculate_d2d_ip_bandwidth_data(self, dies: Dict):
         """
@@ -493,7 +490,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 基于D2D请求计算带宽
         self._calculate_bandwidth_from_d2d_requests(dies)
 
-
     def _calculate_bandwidth_from_d2d_requests(self, dies: Dict):
         """基于D2D请求计算各Die的IP带宽"""
 
@@ -514,7 +510,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             if request.target_die in dies:
                 self._record_target_bandwidth(request, dies[request.target_die], sim_time_ns)
 
-
     def _record_source_bandwidth(self, request: "D2DRequestInfo", die_model, sim_time_ns: int):
         """记录源IP的发送带宽"""
         try:
@@ -532,7 +527,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             if source_type_normalized in die_data[request.req_type]:
                 die_data[request.req_type][source_type_normalized][row, col] += bandwidth_gbps
                 die_data["total"][source_type_normalized][row, col] += bandwidth_gbps
-
 
         except Exception as e:
             pass
@@ -554,7 +548,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             if target_type_normalized in die_data[request.req_type]:
                 die_data[request.req_type][target_type_normalized][row, col] += bandwidth_gbps
                 die_data["total"][target_type_normalized][row, col] += bandwidth_gbps
-
 
         except Exception as e:
             pass
@@ -782,7 +775,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
                             empty_ratio = stats.get("empty_ratio", 0.0)
                             # 添加0次尝试比例和空闲比例到标签
-                            formatted_label += f"\n{zero_attempts_ratio*100:.0f}% {empty_ratio*100:.0f}%"
+                            # formatted_label += f"\n{zero_attempts_ratio*100:.0f}% {empty_ratio*100:.0f}%"
                     except:
                         # 如果获取统计数据失败，保持原标签
                         pass
@@ -1041,12 +1034,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                             # 临时降低阈值并添加调试信息
                             if bandwidth > 0.001:  # 降低阈值以便看到更多数据
                                 active_ips.append((ip_type.upper(), bandwidth))
-                                # if node % 10 == 0:  # 减少调试输出频率
-                # else:
-                # 只为第一个节点打印一次，避免重复输出
-                # if node % 20 == 0:
-            # else:
-            # if node % 20 == 0:
 
         # 如果没有从die_processors获取到数据，尝试从自身的ip_bandwidth_data获取，但要根据Die区分
         if not active_ips and hasattr(self, "ip_bandwidth_data") and self.ip_bandwidth_data is not None:
@@ -1083,10 +1070,10 @@ class D2DResultProcessor(BandwidthAnalyzer):
             # 有活跃IP时显示流量信息，使用简化名称
             if len(active_ips) <= 3:
                 # 少于3个IP时，每行显示一个
-                ip_text = "\n".join([f"{self._shorten_ip_name(ip)}: {bw:.1f}" for ip, bw in active_ips])
+                ip_text = "\n".join([f"{self._shorten_ip_name(ip)}" for ip, bw in active_ips])
             else:
                 # 多于3个IP时，压缩显示
-                ip_text = "\n".join([f"{self._shorten_ip_name(ip)}:{bw:.1f}" for ip, bw in active_ips])
+                ip_text = "\n".join([f"{self._shorten_ip_name(ip)}" for ip, bw in active_ips])
 
             ax.text(ip_x, ip_y, ip_text, ha="center", va="center", fontsize=6, color="darkblue", fontweight="normal")
         # 没有活跃IP时不显示任何文字，保持空白
@@ -1139,10 +1126,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
         ip_name_upper = ip_name.upper()
 
         # 使用字典映射简化条件判断
-        ip_mapping = {
-            "GDMA": "G", "SDMA": "S", "CDMA": "C",
-            "DDR": "D", "L2M": "L", "D2D_RN": "DR", "D2D_SN": "DS"
-        }
+        ip_mapping = {"GDMA": "G", "SDMA": "S", "CDMA": "C", "DDR": "D", "L2M": "L", "D2D_RN": "DR", "D2D_SN": "DS"}
 
         for prefix, short_name in ip_mapping.items():
             if ip_name_upper.startswith(prefix):
@@ -1167,7 +1151,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
         network_frequency = getattr(self.config, "NETWORK_FREQUENCY", 2)
         time_cycles = sim_end_cycle // network_frequency
 
-
         for die_id, die_model in dies.items():
             d2d_sys_bandwidth[die_id] = {}
 
@@ -1191,6 +1174,77 @@ class D2DResultProcessor(BandwidthAnalyzer):
                     d2d_sys_bandwidth[die_id][pos] = node_bandwidth
 
         return d2d_sys_bandwidth
+
+    def _calculate_d2d_node_positions(self, from_die_id, from_node, to_die_id, to_node, dies, config):
+        """
+        计算D2D连接的节点位置
+
+        Args:
+            from_die_id: 源Die ID
+            from_node: 源节点位置
+            to_die_id: 目标Die ID
+            to_node: 目标节点位置
+            dies: Die对象字典
+            config: 配置对象
+
+        Returns:
+            tuple: (from_node_pos, to_node_pos) 计算后的节点位置
+
+        Raises:
+            ValueError: 当连接类型未知或缺少dies参数时
+        """
+        # 获取Die布局位置
+        die_layout = getattr(config, "die_layout_positions", {})
+        from_die_pos = die_layout.get(from_die_id, (0, 0))
+        to_die_pos = die_layout.get(to_die_id, (0, 0))
+
+        # 判断连接方向：使用已有的连接类型判断方法
+        connection_type = self._get_connection_type(from_die_pos, to_die_pos)
+
+        if dies:
+            from_die_cols = dies[from_die_id].config.NUM_COL if from_die_id in dies else 4
+            to_die_cols = dies[to_die_id].config.NUM_COL if to_die_id in dies else 4
+        else:
+            # 需要dies参数来获取各Die的NUM_COL配置
+            raise ValueError(f"连接类型为{connection_type}时需要dies参数来获取各Die的NUM_COL配置")
+
+        if connection_type == "vertical":
+            # 垂直连接
+            from_node_pos = from_node - from_die_cols
+            to_node_pos = to_node
+        elif connection_type == "horizontal":
+            # 水平连接
+            from_node_pos = from_node + (from_die_cols if from_node in self.config.D2D_SN_POSITIONS[from_die_id] else 0)
+            to_node_pos = to_node + (to_die_cols if to_node in self.config.D2D_SN_POSITIONS[to_die_id] else 0)
+        elif connection_type == "diagonal":
+            # 对角连接
+            from_node_pos = from_node + (from_die_cols if from_node in self.config.D2D_SN_POSITIONS[from_die_id] else 0)
+            to_node_pos = to_node + (to_die_cols if to_node in self.config.D2D_SN_POSITIONS[to_die_id] else 0)
+        else:
+            raise ValueError(f"未知的连接类型: {connection_type}")
+
+        return from_node_pos, to_node_pos
+
+    def _calculate_arrow_vectors(self, from_x, from_y, to_x, to_y):
+        """
+        计算箭头方向向量
+
+        Args:
+            from_x, from_y: 起始点坐标
+            to_x, to_y: 终点坐标
+
+        Returns:
+            tuple: (ux, uy, perpx, perpy) 单位方向向量和垂直向量，如果长度为0则返回None
+        """
+        dx, dy = to_x - from_x, to_y - from_y
+        length = np.sqrt(dx * dx + dy * dy)
+
+        if length > 0:
+            ux, uy = dx / length, dy / length
+            perpx, perpy = -uy * 0.2, ux * 0.2
+            return ux, uy, perpx, perpy
+        else:
+            return None
 
     def _draw_cross_die_connections(self, ax, d2d_bandwidth, die_node_positions, config, dies=None):
         """
@@ -1252,47 +1306,31 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 from_node = conn["from_node"]
                 to_node = conn["to_node"]
 
-                # 根据Die布局位置判断连接方向，决定是否需要减去NUM_COL
+                # 获取连接类型
                 die_layout = getattr(config, "die_layout_positions", {})
                 from_die_pos = die_layout.get(conn["from_die"], (0, 0))
                 to_die_pos = die_layout.get(conn["to_die"], (0, 0))
+                connection_type = self._get_connection_type(from_die_pos, to_die_pos)
 
-                # 判断连接方向：如果是垂直连接(y坐标不同)，需要减去NUM_COL；水平连接(x坐标不同)则不需要
-                is_vertical_connection = from_die_pos[1] != to_die_pos[1]
-                if dies:
-                    from_die_cols = dies[conn["from_die"]].config.NUM_COL if conn["from_die"] in dies else 4
-                    to_die_cols = dies[conn["to_die"]].config.NUM_COL if conn["to_die"] in dies else 4
-                else:
-                    # 没有dies参数时报错
-                    raise ValueError("垂直连接需要dies参数来获取各Die的NUM_COL配置")
-
-                if is_vertical_connection:
-                    # 垂直连接：需要减去 NUM_COL，从具体Die的配置获取
-                    from_node_pos = from_node - from_die_cols
-                    to_node_pos = to_node
-                else:
-                    # 水平连接：不需要减去 NUM_COL
-                    from_node_pos = from_node - from_die_cols
-                    to_node_pos = to_node
+                # 计算节点位置
+                from_node_pos, to_node_pos = self._calculate_d2d_node_positions(
+                    conn["from_die"], from_node, conn["to_die"], to_node, dies, config
+                )
 
                 if from_node_pos not in from_die_positions or to_node_pos not in to_die_positions:
                     print(
-                        f"[D2D连接] 警告：找不到节点位置 - From: Die{conn['from_die']}节点{from_node}(pos:{from_node_pos}), To: Die{conn['to_die']}节点{to_node}(pos:{to_node_pos}), 连接方向:{'垂直' if is_vertical_connection else '水平'}"
+                        f"[D2D连接] 警告：找不到节点位置 - From: Die{conn['from_die']}节点{from_node}(pos:{from_node_pos}), To: Die{conn['to_die']}节点{to_node}(pos:{to_node_pos})"
                     )
                     continue
 
                 from_x, from_y = from_die_positions[from_node_pos]
                 to_x, to_y = to_die_positions[to_node_pos]
 
-                # 计算箭头方向
-                dx, dy = to_x - from_x, to_y - from_y
-                length = np.sqrt(dx * dx + dy * dy)
-
-                if length > 0:
-                    ux, uy = dx / length, dy / length
-                    perpx, perpy = -uy * 0.2, ux * 0.2
-
-                    self._draw_single_d2d_arrow(ax, from_x, from_y, to_x, to_y, ux, uy, perpx, perpy, conn["bandwidth"], conn["type"], i)
+                # 计算箭头向量
+                arrow_vectors = self._calculate_arrow_vectors(from_x, from_y, to_x, to_y)
+                if arrow_vectors is not None:
+                    ux, uy, perpx, perpy = arrow_vectors
+                    self._draw_single_d2d_arrow(ax, from_x, from_y, to_x, to_y, ux, uy, perpx, perpy, conn["bandwidth"], conn["type"], i, connection_type)
 
             # 为没有流量的D2D节点对绘制灰色连接线（显示潜在连接）
             self._draw_inactive_d2d_connections(ax, d2d_pairs, active_connections, die_node_positions, dies)
@@ -1302,8 +1340,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
             traceback.print_exc()
 
-
-    def _draw_single_d2d_arrow(self, ax, start_node_x, start_node_y, end_node_x, end_node_y, ux, uy, perpx, perpy, bandwidth, arrow_type, connection_index):
+    def _draw_single_d2d_arrow(self, ax, start_node_x, start_node_y, end_node_x, end_node_y, ux, uy, perpx, perpy, bandwidth, arrow_type, connection_index, connection_type=None):
         """
         绘制单个D2D箭头
 
@@ -1316,12 +1353,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
             bandwidth: 带宽值
             arrow_type: 箭头类型 ("write" 或 "read")
             connection_index: 连接索引（用于调试）
+            connection_type: 连接类型 ("vertical", "horizontal", "diagonal")
         """
         # 计算箭头起止坐标（留出节点空间）
-        start_x = start_node_x + ux * 0.5 + perpx
-        start_y = start_node_y + uy * 0.5 + perpy
-        end_x = end_node_x - ux * 0.5 + perpx
-        end_y = end_node_y - uy * 0.5 + perpy
+        start_x = start_node_x + ux * 0.8 + perpx
+        start_y = start_node_y + uy * 0.8 + perpy
+        end_x = end_node_x - ux * 0.8 + perpx
+        end_y = end_node_y - uy * 0.8 + perpy
 
         # 确定颜色和标签
         if bandwidth > 0.001:
@@ -1329,13 +1367,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
             intensity = min(bandwidth / self.MAX_BANDWIDTH_NORMALIZATION, 1.0)
             color = (intensity, 0, 0)  # 红色
             label_text = f"{bandwidth:.1f}"  # 只显示数值，不加GB/s后缀
-            linewidth = 3
+            linewidth = 2.5
             zorder = 5
         else:
             # 无数据流量 - 灰色实线
             color = (0.7, 0.7, 0.7)
             label_text = None  # 不显示0
-            linewidth = 3
+            linewidth = 2.5
             zorder = 4
 
         # 绘制箭头
@@ -1344,28 +1382,42 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         # 只在有流量时添加标签，参考Die内部链路的标记方式
         if label_text:
-            # 计算箭头中点和方向
-            mid_x = (start_x + end_x) / 2
-            mid_y = (start_y + end_y) / 2
             dx = end_x - start_x
             dy = end_y - start_y
 
-            # 判断是否为水平方向（跨Die连接通常是垂直的）
-            is_horizontal = abs(dx) > abs(dy)
+            # 对角连接使用靠近from的1/3处，其他连接使用中点
+            if connection_type == "diagonal":
+                # 对角连接：标签位置在靠近起始点的1/3处
+                label_x = start_x + dx * 0.33
+                label_y = start_y + dy * 0.33
 
-            # 根据方向计算标签偏移，参考Die内部链路的逻辑
-            if is_horizontal:
-                # 水平方向：标签稍微向上/下偏移
-                label_x = mid_x + dx * 0.15
-                label_y = mid_y + dy * 0.15
+                # 对角连接的偏移：根据连接方向适当偏移避免重叠
+                if abs(dx) > abs(dy):
+                    # 主要是水平方向
+                    label_y += (-dx * 0.10 if dy > 0 else dx * 0.10) 
+                else:
+                    # 主要是垂直方向
+                    label_x += (dy * 0.1 if dx > 0 else -dy * 0.1) 
             else:
-                # 垂直方向：标签向左/右偏移
-                label_x = mid_x + (dy * 0.3 if dx > 0 else -dy * 0.3)
-                label_y = mid_y - 0.15
+                # 垂直和水平连接：使用中点
+                mid_x = (start_x + end_x) / 2
+                mid_y = (start_y + end_y) / 2
+
+                # 判断是否为水平方向
+                is_horizontal = abs(dx) > abs(dy)
+
+                # 根据方向计算标签偏移，增加与箭头的距离
+                if is_horizontal:
+                    # 水平方向：标签根据方向向量向上/下偏移，远离箭头
+                    label_x = mid_x + dx * 0
+                    label_y = mid_y + (-dx * 0.15 if dy > 0 else dx * 0.15)  # 增加偏移距离
+                else:
+                    # 垂直方向：标签根据方向向量向左/右偏移，远离箭头
+                    label_x = mid_x + (dy * 0.4 if dx > 0 else -dy * 0.4)  # 增加偏移距离
+                    label_y = mid_y - 0.15
 
             # 绘制单个标签（与Die内部链路一致）
             ax.text(label_x, label_y, label_text, ha="center", va="center", fontsize=8, fontweight="normal", color=color)
-
 
     def save_d2d_axi_channel_statistics(self, output_path, d2d_bandwidth, dies, config):
         """
@@ -1424,7 +1476,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
                             # 添加节点位置信息到CSV
                             writer.writerow([f"Die{die_id}_Node{node_pos}", channel, direction, f"{bandwidth:.6f}", flit_count, description])
-
 
         except (IOError, PermissionError) as e:
             return
@@ -1515,7 +1566,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 f.write("注意: 流量图中只显示数据通道(R+W)的带宽，\n")
                 f.write("      完整的AXI通道统计请参考CSV文件。\n")
 
-
         except (IOError, PermissionError) as e:
             print(f"[D2D AXI统计] 保存汇总报告失败: {e}")
         except Exception as e:
@@ -1531,7 +1581,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
         """
         # 调用基类方法收集基本数据
         super().collect_requests_data(sim_model, simulation_end_cycle)
-
 
         # D2D特殊处理：修复丢失的original类型信息
         fixed_count = 0
@@ -1549,7 +1598,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 fixed = self._fix_request_original_types(request, sim_model)
                 if fixed:
                     fixed_count += 1
-
 
     def _fix_request_original_types(self, request: RequestInfo, sim_model) -> bool:
         """
@@ -1628,16 +1676,15 @@ class D2DResultProcessor(BandwidthAnalyzer):
             (die_offsets, figsize): Die偏移量字典和画布大小
         """
         if not die_layout:
-            # 默认2x1布局
-            return {0: (0, 0), 1: (die_width + 10, 0)}, (24, 14)
+            raise ValueError
 
         # 计算布局尺寸
         max_x = max(pos[0] for pos in die_layout.values()) if die_layout else 0
         max_y = max(pos[1] for pos in die_layout.values()) if die_layout else 0
 
         # 计算 Die 间距
-        die_spacing_x = die_width +0.8  # 减小水平间距，让水平相邻的Die更近
-        die_spacing_y = die_height + 0.8  # 增加垂直间距，让垂直相邻的Die更远
+        die_spacing_x = die_width + 0.8
+        die_spacing_y = die_height + (5.8 if len(die_layout.values()) == 2 else 0.8)
 
         # 计算每个 Die 的基础绘图偏移量
         die_offsets = {}
@@ -1861,7 +1908,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 转换为元组格式
         return {die_id: tuple(offsets) for die_id, offsets in die_offsets.items()}
 
-
     def _draw_inactive_d2d_connections(self, ax, d2d_pairs, active_connections, die_node_positions, dies=None):
         """
         为没有流量的D2D连接对绘制灰色连接线
@@ -1882,28 +1928,16 @@ class D2DResultProcessor(BandwidthAnalyzer):
             from_die_positions = die_node_positions.get(die0_id, {})
             to_die_positions = die_node_positions.get(die1_id, {})
 
-            # 根据Die布局位置判断连接方向，决定是否需要减去NUM_COL
+            # 获取连接类型
             die_layout = getattr(self.config, "die_layout_positions", {})
             from_die_pos = die_layout.get(die0_id, (0, 0))
             to_die_pos = die_layout.get(die1_id, (0, 0))
+            connection_type = self._get_connection_type(from_die_pos, to_die_pos)
 
-            # 判断连接方向：如果是垂直连接(y坐标不同)，需要减去NUM_COL；水平连接(x坐标不同)则不需要
-            is_vertical_connection = from_die_pos[1] != to_die_pos[1]
-
-            if dies:
-                from_die_cols = dies[die0_id].config.NUM_COL if die0_id in dies else 4
-                to_die_cols = dies[die1_id].config.NUM_COL if die1_id in dies else 4
-            else:
-                # 没有dies参数时报错
-                raise ValueError("垂直连接需要dies参数来获取各Die的NUM_COL配置")
-            if is_vertical_connection:
-                # 垂直连接：需要减去 NUM_COL，从具体Die的配置获取
-                from_node_pos = die0_node - from_die_cols
-                to_node_pos = die1_node
-            else:
-                # 水平连接：不需要减去 NUM_COL
-                from_node_pos = die0_node + (from_die_cols if die0_node in dies[die0_id].config.D2D_SN_SEND_POSITION_LIST else 0)
-                to_node_pos = die1_node + (to_die_cols if die1_node in dies[die1_id].config.D2D_SN_SEND_POSITION_LIST else 0)
+            # 计算节点位置
+            from_node_pos, to_node_pos = self._calculate_d2d_node_positions(
+                die0_id, die0_node, die1_id, die1_node, dies, self.config
+            )
 
             if from_node_pos not in from_die_positions or to_node_pos not in to_die_positions:
                 continue
@@ -1911,58 +1945,14 @@ class D2DResultProcessor(BandwidthAnalyzer):
             from_x, from_y = from_die_positions[from_node_pos]
             to_x, to_y = to_die_positions[to_node_pos]
 
-            dx, dy = to_x - from_x, to_y - from_y
-            length = np.sqrt(dx * dx + dy * dy)
-
-            if length > 0:
-                ux, uy = dx / length, dy / length
-                perpx, perpy = -uy * 0.2, ux * 0.2
+            # 计算箭头向量
+            arrow_vectors = self._calculate_arrow_vectors(from_x, from_y, to_x, to_y)
+            if arrow_vectors is not None:
+                ux, uy, perpx, perpy = arrow_vectors
 
                 # 检查两个方向是否有活跃连接
                 has_forward = (die0_id, die0_node, die1_id, die1_node) in active_pairs
-                has_reverse = (die1_id, die1_node, die0_id, die0_node) in active_pairs
 
                 # 如果正向没有活跃连接，绘制正向的灰色箭头
                 if not has_forward:
-                    self._draw_single_d2d_arrow(ax, from_x, from_y, to_x, to_y, ux, uy, perpx, perpy, 0.0, "inactive", f"inactive_forward_{die0_id}_{die1_id}")
-
-                # 如果反向没有活跃连接，绘制反向的灰色箭头
-                if not has_reverse:
-                    # 反向连接需要重新计算节点位置
-                    if is_vertical_connection:
-                        # 垂直连接时：反向的起始位置需要+NUM_COL，终止位置需要-NUM_COL
-                        reverse_from_node_pos = die1_node  # 反向起始：原to_node不需要减NUM_COL
-                        reverse_to_node_pos = die0_node - from_die_cols  # 反向终止：原from_node需要减NUM_COL
-                    else:
-                        # 水平连接：不需要调整
-                        reverse_from_node_pos = die1_node + (to_die_cols if die1_node in dies[die1_id].config.D2D_SN_SEND_POSITION_LIST else 0)
-                        reverse_to_node_pos = die0_node + (from_die_cols if die0_node in dies[die0_id].config.D2D_SN_SEND_POSITION_LIST else 0)
-
-                    # 检查反向节点位置是否有效
-                    if reverse_from_node_pos in to_die_positions and reverse_to_node_pos in from_die_positions:
-                        reverse_from_x, reverse_from_y = to_die_positions[reverse_from_node_pos]
-                        reverse_to_x, reverse_to_y = from_die_positions[reverse_to_node_pos]
-
-                        # 重新计算反向箭头方向
-                        reverse_dx, reverse_dy = reverse_to_x - reverse_from_x, reverse_to_y - reverse_from_y
-                        reverse_length = np.sqrt(reverse_dx * reverse_dx + reverse_dy * reverse_dy)
-
-                        if reverse_length > 0:
-                            reverse_ux, reverse_uy = reverse_dx / reverse_length, reverse_dy / reverse_length
-                            reverse_perpx, reverse_perpy = -reverse_uy * 0.1, reverse_ux * 0.1
-                            self._draw_single_d2d_arrow(
-                                ax,
-                                reverse_from_x,
-                                reverse_from_y,
-                                reverse_to_x,
-                                reverse_to_y,
-                                reverse_ux,
-                                reverse_uy,
-                                reverse_perpx,
-                                reverse_perpy,
-                                0.0,
-                                "inactive",
-                                f"inactive_reverse_{die1_id}_{die0_id}",
-                            )
-                    else:
-                        print(f"[反向连接] 无效节点位置: Die{die1_id}节点{reverse_from_node_pos} -> Die{die0_id}节点{reverse_to_node_pos}")
+                    self._draw_single_d2d_arrow(ax, from_x, from_y, to_x, to_y, ux, uy, perpx, perpy, 0.0, "inactive", f"inactive_forward_{die0_id}_{die1_id}", connection_type)

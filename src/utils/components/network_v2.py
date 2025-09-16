@@ -208,26 +208,32 @@ class Network:
                 if adjacency_matrix[i][j] == 1 and abs(i - j) != config.NUM_COL:
                     self.links[(i, j)] = [None] * config.SLICE_PER_LINK
                     self.links_flow_stat[(i, j)] = {
-                        "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                        "ITag_count": 0,
+                        "empty_count": 0,
+                        "total_cycles": 0,
                         # 按下环尝试次数分组的统计
                         "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
-                        "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
+                        "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                     }
                     self.links_tag[(i, j)] = [None] * config.SLICE_PER_LINK
             if i in range(0, config.NUM_COL):
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
                 self.links_flow_stat[(i, i)] = {
-                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                    "ITag_count": 0,
+                    "empty_count": 0,
+                    "total_cycles": 0,
                     # 按下环尝试次数分组的统计
                     "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
-                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
+                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                 }
                 self.links_flow_stat[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = {
-                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                    "ITag_count": 0,
+                    "empty_count": 0,
+                    "total_cycles": 0,
                     # 按下环尝试次数分组的统计
                     "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
-                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
+                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                 }
                 self.links_tag[(i, i)] = [None] * 2
                 self.links_tag[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
@@ -235,15 +241,14 @@ class Network:
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
                 self.links_flow_stat[(i, i)] = {
-                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0,
+                    "ITag_count": 0,
+                    "empty_count": 0,
+                    "total_cycles": 0,
                     # 按下环尝试次数分组的统计
                     "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
-                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0}
+                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                 }
-                self.links_flow_stat[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = {
-                    "T2_count": 0, "T1_count": 0, "T0_count": 0,
-                    "ITag_count": 0, "empty_count": 0, "total_cycles": 0
-                }
+                self.links_flow_stat[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = {"T2_count": 0, "T1_count": 0, "T0_count": 0, "ITag_count": 0, "empty_count": 0, "total_cycles": 0}
                 self.links_tag[(i, i)] = [None] * 2
                 self.links_tag[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
 
@@ -490,10 +495,10 @@ class Network:
         if available_positions and num_tags > 0:
             # 确保不超过可用位置数
             num_to_place = min(num_tags, len(available_positions))
-            
+
             if num_tags > len(available_positions):
                 print(f"Warning: Requested {num_tags} RB_ONLY tags but only {len(available_positions)} positions available in ring")
-            
+
             selected_positions = random.sample(available_positions, num_to_place)
 
             for link, slice_idx in selected_positions:
@@ -503,11 +508,10 @@ class Network:
 
         return placed_tags
 
-
     def _update_link_statistics_on_set(self, link, slice_index, new_flit, old_flit, cycle):
         """
         在设置链路slice时增量更新统计数据
-        
+
         Args:
             link: 链路tuple (src, dst)
             slice_index: slice索引
@@ -517,9 +521,9 @@ class Network:
         """
         if link not in self.links_flow_stat:
             return
-            
+
         # 根据新flit状态增加对应计数（每次设置slice时统计一次）
-        
+
         # 首先检查ITag，无论是否有flit都要检查
         if link in self.links_tag and slice_index < len(self.links_tag[link]):
             tag_info = self.links_tag[link][slice_index]
@@ -530,7 +534,7 @@ class Network:
                 else:
                     # 有其他类型的ITag标记
                     self.links_flow_stat[link]["ITag_count"] += 1
-        
+
         # 然后处理flit统计
         if new_flit is None:
             # slice为空，且没有非RB_ONLY的ITag标记，才是真正的空闲
@@ -539,7 +543,7 @@ class Network:
                 tag_info = self.links_tag[link][slice_index]
                 if tag_info is not None and not (isinstance(tag_info, list) and "RB_ONLY" in tag_info):
                     has_non_rb_tag = True
-            
+
             if not has_non_rb_tag:
                 self.links_flow_stat[link]["empty_count"] += 1
         else:
@@ -549,19 +553,19 @@ class Network:
     def _update_eject_attempts_stats(self, link, flit):
         """
         根据flit的下环尝试次数更新链路统计
-        
+
         Args:
             link: 链路标识 (i, j)
             flit: flit对象
         """
-        if not hasattr(flit, 'eject_attempts_h') or not hasattr(flit, 'eject_attempts_v'):
+        if not hasattr(flit, "eject_attempts_h") or not hasattr(flit, "eject_attempts_v"):
             return
-            
+
         # 判断链路方向并更新相应的统计
         i, j = link
         is_horizontal = abs(i - j) == 1  # 横向链路
-        is_vertical = abs(i - j) > 1     # 纵向链路
-        
+        is_vertical = abs(i - j) > 1  # 纵向链路
+
         if is_horizontal:
             # 横向链路，统计横向下环尝试次数
             attempts = flit.eject_attempts_h
@@ -588,21 +592,21 @@ class Network:
     def collect_cycle_end_link_statistics(self, cycle):
         """
         在每个周期结束时统计所有链路第一个slice位置的使用情况
-        
+
         Args:
             cycle: 当前周期
         """
         for link in self.links_flow_stat:
             if link not in self.links:
                 continue
-                
+
             # 只统计第一个slice位置(索引0)的使用情况
             slice_index = 0
             if slice_index >= len(self.links[link]):
                 continue
-                
+
             flit = self.links[link][slice_index]
-            
+
             # 首先检查ITag，无论是否有flit都要检查
             if link in self.links_tag and slice_index < len(self.links_tag[link]):
                 tag_info = self.links_tag[link][slice_index]
@@ -613,7 +617,7 @@ class Network:
                     else:
                         # 有其他类型的ITag标记
                         self.links_flow_stat[link]["ITag_count"] += 1
-            
+
             if flit is None:
                 # slice为空，且没有非RB_ONLY的ITag标记，才是真正的空闲
                 has_non_rb_tag = False
@@ -621,13 +625,13 @@ class Network:
                     tag_info = self.links_tag[link][slice_index]
                     if tag_info is not None and not (isinstance(tag_info, list) and "RB_ONLY" in tag_info):
                         has_non_rb_tag = True
-                
+
                 if not has_non_rb_tag:
                     self.links_flow_stat[link]["empty_count"] += 1
             else:
                 # slice被flit占用，按下环尝试次数分组统计
                 self._update_eject_attempts_stats(link, flit)
-            
+
             # 更新总周期计数
             self.links_flow_stat[link]["total_cycles"] += 1
 
@@ -635,7 +639,7 @@ class Network:
         """
         获取链路利用率统计信息
         返回每个链路各状态的比例
-        
+
         利用率计算说明：
         - 总slice-周期数 = 周期数 × 每个链路的slice数
         - 各状态比例 = 该状态的slice-周期数 / 总slice-周期数
@@ -644,40 +648,32 @@ class Network:
         stats = {}
         for link, link_stats in self.links_flow_stat.items():
             total_cycles = link_stats["total_cycles"]
-            
+
             if total_cycles > 0:
                 # 获取下环尝试次数统计
                 eject_attempts_h = link_stats.get("eject_attempts_h", {"0": 0, "1": 0, "2": 0, ">2": 0})
                 eject_attempts_v = link_stats.get("eject_attempts_v", {"0": 0, "1": 0, "2": 0, ">2": 0})
-                
+
                 # 计算flit总数
                 total_flit_h = sum(eject_attempts_h.values())
                 total_flit_v = sum(eject_attempts_v.values())
                 total_flit = total_flit_h + total_flit_v
-                
+
                 stats[link] = {
                     # 主要比例（基于total_cycles）
                     "utilization": total_flit / total_cycles,
                     "ITag_ratio": link_stats["ITag_count"] / total_cycles,
                     "empty_ratio": link_stats["empty_count"] / total_cycles,
-                    
                     # 详细flit分布（相对于total_cycles）
-                    "eject_attempts_h_ratios": {
-                        k: v / total_cycles if total_cycles > 0 else 0.0
-                        for k, v in eject_attempts_h.items()
-                    },
-                    "eject_attempts_v_ratios": {
-                        k: v / total_cycles if total_cycles > 0 else 0.0
-                        for k, v in eject_attempts_v.items()
-                    },
-                    
+                    "eject_attempts_h_ratios": {k: v / total_cycles if total_cycles > 0 else 0.0 for k, v in eject_attempts_h.items()},
+                    "eject_attempts_v_ratios": {k: v / total_cycles if total_cycles > 0 else 0.0 for k, v in eject_attempts_v.items()},
                     # 原始计数
                     "total_cycles": total_cycles,
                     "total_flit": total_flit,
                     "eject_attempts_h": eject_attempts_h,
                     "eject_attempts_v": eject_attempts_v,
                 }
-        
+
         return stats
 
     def _entry_available(self, dir_type, key, level):

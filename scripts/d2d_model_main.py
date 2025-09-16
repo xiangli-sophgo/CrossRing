@@ -15,7 +15,8 @@ def main():
     # 现在每个Die的拓扑由D2D配置文件中的topology参数指定，无需die_config_file
     config = D2DConfig(
         d2d_config_file="../config/topologies/d2d_4die_config.yaml",
-    )  # D2D专用配置，自动根据每个Die的topology加载对应拓扑文件
+        # d2d_config_file="../config/topologies/d2d_config.yaml",
+    )
 
     # 定义拓扑结构
 
@@ -31,25 +32,25 @@ def main():
     sim = D2D_Model(
         config=config,
         traffic_file_path=r"../test_data",
-        traffic_config=[["d2d_data_0902.txt"]],
+        traffic_config=[["d2d_data_0916.txt"]],
         model_type="REQ_RSP",
         result_save_path="../Result/d2d_demo/",
         results_fig_save_path="../Result/d2d_demo/figures/",
         verbose=1,
-        print_d2d_trace=1,  # 启用D2D trace功能
-        show_d2d_trace_id=0,  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
-        d2d_trace_sleep=0.0,  # 不暂停，加快调试as
+        print_d2d_trace=0,  # 启用D2D trace功能
+        show_d2d_trace_id=1,  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
+        d2d_trace_sleep=0.1,  # 不暂停，加快调试as
         enable_flow_graph=1,  # 是否在仿真结束后自动生成流量图
         # D2D链路状态可视化参
-        plot_link_state=0,  # 启用D2D链路状态可视化 12
-        plot_start_cycle=100,  # 从第100周期开始可视化
+        plot_link_state=1,  # 启用D2D链路状态可视化 12
+        plot_start_cycle=10,  # 从第100周期开始可视化
     )
 
     # 初始化仿真
     sim.initial()
 
     # 设置仿真参数
-    sim.end_time = 100  # 增加仿真时间以确保数据传输完成
+    sim.end_time = 5000  # 增加仿真时间以确保数据传输完成
     sim.print_interval = 500
 
     sim.run()
