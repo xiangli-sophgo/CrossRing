@@ -10,6 +10,16 @@ import yaml
 import networkx as nx
 import numpy as np
 import pandas as pd
+import matplotlib
+import sys
+
+if sys.platform == "darwin":  # macOS
+    try:
+        matplotlib.use("macosx")
+    except ImportError:
+        matplotlib.use("Agg")
+else:
+    matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
 from collections import defaultdict, namedtuple
@@ -271,6 +281,11 @@ class NodeState:
 class TheoreticalBandwidthCalculator:
     """理论带宽计算器"""
 
+    # 网络延迟参数 (ns) - 可直接在此处调整
+    INJECT_LATENCY = 2  # 注入延迟
+    EJECT_LATENCY = 2  # 弹出延迟
+    DIMENSION_CHANGE_LATENCY = 2  # 维度转换延迟（XY路由最多1次）
+
     def __init__(self, config_file: str, traffic_file: str):
         self.config = self._load_config(config_file)
         self.traffic_requests = self._load_traffic(traffic_file)
@@ -459,26 +474,37 @@ class TheoreticalBandwidthCalculator:
 
     def calculate_path_delay(self, src: int, dest: int) -> Tuple[int, int]:
         """
-        计算路径延迟
+        计算路径延迟，包括inject、eject和维度转换延迟
 
         Returns:
-            (跳数, 延迟ns)
+            (跳数, 总延迟ns)
         """
         if src == dest:
-            return 0, 0
+            # 即使是同一节点，也需要inject和eject延迟
+            same_node_delay = self.INJECT_LATENCY + self.EJECT_LATENCY
+            return 0, same_node_delay
 
         if src in self.shortest_paths and dest in self.shortest_paths[src]:
             path = self.shortest_paths[src][dest]
             hops = len(path) - 1
         else:
-            # 如果找不到路径，使用曼哈顿距离估算
-            hops = self._manhattan_distance(src, dest)
+            raise ValueError
 
-        # 计算延迟：跳数 × slice数量 / 网络频率，向上取整
+        # 计算基础路径延迟：跳数 × slice数量 / 网络频率，向上取整
         path_delay_cycles = hops * self.config.SLICE_PER_LINK
-        path_delay_ns = math.ceil(path_delay_cycles / self.config.NETWORK_FREQUENCY)
+        base_path_delay_ns = math.ceil(path_delay_cycles / self.config.NETWORK_FREQUENCY)
 
-        return hops, path_delay_ns
+        # 计算维度转换次数（XY路由）
+        src_row, src_col = divmod(src, self.config.NUM_COL)
+        dest_row, dest_col = divmod(dest, self.config.NUM_COL)
+
+        # 如果需要同时水平和垂直移动，则有1次维度转换
+        dimension_changes = 1 if (src_row != dest_row and src_col != dest_col) else 0
+
+        # 总延迟 = 基础路径延迟 + inject + eject + 维度转换延迟
+        total_delay_ns = base_path_delay_ns + self.INJECT_LATENCY + self.EJECT_LATENCY + (dimension_changes * self.DIMENSION_CHANGE_LATENCY)
+
+        return hops, total_delay_ns
 
     def _manhattan_distance(self, src: int, dest: int) -> int:
         """计算曼哈顿距离（用于估算跳数）"""
@@ -628,6 +654,8 @@ class TheoreticalBandwidthCalculator:
             raise ValueError(f"目标节点{request.dest_node}没有IP类型{request.dest_ip_type}")
 
         path_hops, path_delay = self.calculate_path_delay(request.source_node, request.dest_node)
+        if path_delay == 4:
+            print(request.source_node, request.dest_node)
 
         # 1. 发送CMD请求 (REQ通道)
         cmd_send_time = max(request.start_time, src_ip.next_send_time["REQ"])
@@ -672,6 +700,7 @@ class TheoreticalBandwidthCalculator:
 
         # 计算各种延迟
         cmd_latency = cmd_recv_time - cmd_send_time
+        # 数据延迟：从第一个数据flit发送开始到最后一个数据flit接收完成
         data_latency = data_recv_times[-1] - data_send_times[0]
         transaction_latency = completion_time - request.start_time
 
@@ -716,6 +745,8 @@ class TheoreticalBandwidthCalculator:
             raise ValueError(f"目标节点{request.dest_node}没有IP类型{request.dest_ip_type}")
 
         path_hops, path_delay = self.calculate_path_delay(request.source_node, request.dest_node)
+        if path_delay == 4:
+            print(request.source_node, request.dest_node)
 
         # 1. 发送CMD请求 (REQ通道)
         cmd_send_time = max(request.start_time, src_ip.next_send_time["REQ"])
@@ -900,7 +931,7 @@ def _save_csv_results(results, output_path, verbose=True):
             )
 
 
-def _print_statistics(results, calculator=None, verbose=True, print_latency_stats=True, print_bandwidth_limited=False):
+def _print_statistics(results, calculator=None, verbose=True, print_latency_stats=True):
     """打印统计信息"""
     if not verbose:
         return
@@ -936,7 +967,7 @@ def _print_statistics(results, calculator=None, verbose=True, print_latency_stat
 
                 for interval in working_intervals:
                     weight = interval.flit_count  # 权重是工作区间的flit数量
-                    bandwidth = interval.bandwidth_bytes_per_ns * 1e9 / 1e9  # 转换为GB/s
+                    bandwidth = interval.bandwidth_bytes_per_ns  # 转换为GB/s
                     total_weighted_bandwidth += bandwidth * weight
                     total_weight += weight
 
@@ -949,7 +980,7 @@ def _print_statistics(results, calculator=None, verbose=True, print_latency_stat
             min_start = min(r.start_time for r in group_results)
             max_completion = max(r.completion_time for r in group_results)
             time_span = max_completion - min_start
-            weighted_bandwidth = (total_bytes / time_span) * 1e9 / 1e9 if time_span > 0 else 0.0
+            weighted_bandwidth = (total_bytes / time_span) if time_span > 0 else 0.0
 
         # 获取该IP类型的RN IP实例数量
         num_rn_ips = len(rn_ip_count[ip_type])
@@ -989,12 +1020,6 @@ def _print_statistics(results, calculator=None, verbose=True, print_latency_stat
         # 事务延迟统计
         print(f"事务延迟 - 平均: {np.mean(all_trans_latencies):.1f} ns, " f"最小: {np.min(all_trans_latencies):.1f} ns, " f"最大: {np.max(all_trans_latencies):.1f} ns")
 
-    # 带宽限制影响（已移除）
-    # if print_bandwidth_limited:
-    #     limited_count = sum(1 for r in results if r.bandwidth_limited)
-    #     print(f"\n受带宽限制影响的事务: {limited_count}/{len(results)} "
-    #           f"({100.0 * limited_count / len(results):.1f}%)")
-
 
 def _plot_bandwidth_curve(results, base_name, topo_type, save_path, calculator=None):
     """绘制带宽曲线（基于工作区间）"""
@@ -1003,12 +1028,11 @@ def _plot_bandwidth_curve(results, base_name, topo_type, save_path, calculator=N
         plt.rcParams["font.sans-serif"] = ["SimHei", "Arial Unicode MS", "DejaVu Sans"]
         plt.rcParams["axes.unicode_minus"] = False
 
-        # 按IP类型和请求类型分组（区分读写）
+        # 按IP类型分组（与统计函数保持一致，不区分读写）
         type_groups = defaultdict(list)
         for result in results:
             ip_type = result.source_ip_type.split("_")[0].upper()
-            key = f"{ip_type}-{result.req_type}"
-            type_groups[key].append(result)
+            type_groups[ip_type].append(result)
 
         plt.figure(figsize=(12, 8))
 
@@ -1044,7 +1068,7 @@ def _plot_bandwidth_curve(results, base_name, topo_type, save_path, calculator=N
                 bandwidth = np.zeros_like(rel_times_us)
                 for j in range(len(rel_times_us)):
                     if rel_times[j] > 0:  # 使用ns时间避免精度问题
-                        bandwidth[j] = cumulative_bytes[j] / (rel_times[j] * 1e-9)  # GB/s
+                        bandwidth[j] = cumulative_bytes[j] / (rel_times[j])  # GB/s
                     else:
                         bandwidth[j] = 0.0
 
@@ -1084,8 +1108,8 @@ def main():
     # traffic_file_path = r"../../../C2C/traffic_data"
     # traffic_file_path = r"../../traffic/traffic0730"
     # traffic_file_path = r"../../example/"
-    # traffic_file_path = r"../../traffic/0617/"
-    traffic_file_path = r"../../traffic/DeepSeek_0616/step6_ch_map/"
+    traffic_file_path = r"../../traffic/0617/"
+    # traffic_file_path = r"../../traffic/DeepSeek_0616/step6_ch_map/"
     # traffic_file_path = r"../../traffic/RW_4x2_4x4/"
     # traffic_file_path = r"../../traffic/nxn_traffics"
 
@@ -1102,12 +1126,12 @@ def main():
             # r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
             # r"full_bw_R_4x5.txt"
-            # "LLama2_AllReduce.txt"
+            "LLama2_AllReduce.txt"
             # "test_data.txt"
             # "traffic_2260E_case1.txt",
             # "LLama2_AttentionFC.txt"
             # "W_8x8.txt"
-            "MLA_B32.txt"
+            # "MLA_B32.txt"
         ],
     ]
 
@@ -1142,7 +1166,6 @@ def main():
     save_csv_results = 1  # 保存CSV结果
     plot_bandwidth_curve = 1  # 绘制带宽曲线
     print_latency_stats = 1  # 打印延迟统计
-    print_bandwidth_limited = 1  # 打印带宽限制影响
 
     # ==================== 执行仿真 ====================
     # 根据拓扑类型选择配置文件
@@ -1190,7 +1213,7 @@ def main():
                     _save_csv_results(results, output_csv, verbose)
 
                 # 计算并输出统计信息
-                _print_statistics(results, calculator, verbose, print_latency_stats, print_bandwidth_limited)
+                _print_statistics(results, calculator, verbose, print_latency_stats)
 
                 # 绘制带宽曲线（如果启用）
                 if plot_bandwidth_curve:
