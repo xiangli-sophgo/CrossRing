@@ -50,7 +50,7 @@ def main():
     sim.initial()
 
     # 设置仿真参数
-    sim.end_time = 500  # 增加仿真时间以确保数据传输完成
+    sim.end_time = 5000  # 增加仿真时间以确保数据传输完成
     sim.print_interval = 500
 
     sim.run()

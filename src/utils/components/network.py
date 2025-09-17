@@ -568,7 +568,7 @@ class Network:
                     link_station = self.ring_bridge["TR"].get((next_node, target_eject_node_id))
                     can_use_T1 = self._entry_available("TR", (next_node, target_eject_node_id), "T1")
                     can_use_T2 = self._entry_available("TR", (next_node, target_eject_node_id), "T2")
-                    # TR方向尝试下环 - 需要保序的REQ禁止下环
+                    # TR方向尝试下环 - 需要保序的禁止下环
                     if self._need_in_order_check(flit):
                         # 需要保序的REQ不能从TR下环，继续绕环
                         link[flit.current_seat_index] = None
@@ -1162,10 +1162,6 @@ class Network:
         if hasattr(self.config, "IN_ORDER_PACKET_CATEGORIES"):
             if packet_category not in self.config.IN_ORDER_PACKET_CATEGORIES:
                 return False
-        else:
-            # 默认只有REQ类型需要保序（向后兼容）
-            if flit.req_type is None:
-                return False
 
         # 获取真实的src和dest
         src = flit.source_original if flit.source_original != -1 else flit.source
@@ -1180,12 +1176,13 @@ class Network:
 
     def _get_flit_packet_category(self, flit: Flit):
         """获取flit的包类型分类"""
-        if flit.req_type is not None:
-            return "REQ"
+        # 优先判断是否为数据包
+        if hasattr(flit, "flit_type") and flit.flit_type == "data":
+            return "DATA"
         elif flit.rsp_type is not None:
             return "RSP"
-        elif hasattr(flit, "flit_type") and flit.flit_type == "data":
-            return "DATA"
+        elif flit.req_type is not None:
+            return "REQ"
         else:
             return "REQ"  # 默认为REQ
 
@@ -1298,7 +1295,17 @@ class Network:
             elif current - next_node == -1:
                 flit.eject_attempts_h += 1
                 station = self.ring_bridge["TR"].get((new_current, new_next_node))
-                if self.config.RB_IN_FIFO_DEPTH > len(station) and self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX:
+                # 检查是否需要保序
+                if self._need_in_order_check(flit):
+                    # 需要保序的包不能从TR下环，设置延迟标志继续绕环
+                    if self.ETag_BOTHSIDE_UPGRADE:
+                        flit.ETag_priority = "T1"
+                    next_pos = next_node + 1 if next_node + 1 <= row_end else row_end
+                    flit.is_delay = True
+                    link[flit.current_seat_index] = None
+                    flit.current_link = (new_current, next_pos)
+                    flit.current_seat_index = 0
+                elif self.config.RB_IN_FIFO_DEPTH > len(station) and self.RB_UE_Counters["TR"].get((new_current, new_next_node))["T2"] < self.config.TR_Etag_T2_UE_MAX:
                     flit.current_link = (new_current, new_next_node)
                     link[flit.current_seat_index] = None
                     flit.current_seat_index = 1
@@ -1332,7 +1339,17 @@ class Network:
             elif current - next_node == -self.config.NUM_COL * 2:  # 纵向环向下TD
                 flit.eject_attempts_v += 1
                 eject_queue = self.eject_queues["TD"][next_node]
-                if self.config.EQ_IN_FIFO_DEPTH > len(eject_queue) and self.EQ_UE_Counters["TD"][next_node]["T2"] < self.config.TD_Etag_T2_UE_MAX:
+                # 检查是否需要保序
+                if self._need_in_order_check(flit):
+                    # 需要保序的包不能从TD下环，设置延迟标志继续绕环
+                    if self.ETag_BOTHSIDE_UPGRADE:
+                        flit.ETag_priority = "T1"
+                    next_pos = next_node + self.config.NUM_COL * 2 if next_node + self.config.NUM_COL * 2 <= col_end else col_end
+                    flit.is_delay = True
+                    link[flit.current_seat_index] = None
+                    flit.current_link = (next_node, next_pos)
+                    flit.current_seat_index = 0
+                elif self.config.EQ_IN_FIFO_DEPTH > len(eject_queue) and self.EQ_UE_Counters["TD"][next_node]["T2"] < self.config.TD_Etag_T2_UE_MAX:
                     link[flit.current_seat_index] = None
                     flit.current_seat_index = 0
                     flit.is_arrive = True
