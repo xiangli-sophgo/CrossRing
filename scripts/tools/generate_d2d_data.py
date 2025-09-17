@@ -788,6 +788,6 @@ if __name__ == "__main__":
         filename="../../test_data/d2d_data_0916.txt",
         traffic_configs=traffic_configs,
         traffic_mode="cross_die",
-        end_time=500,
+        end_time=100,
     )
     print()

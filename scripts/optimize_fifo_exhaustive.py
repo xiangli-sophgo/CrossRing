@@ -130,10 +130,10 @@ else:
 FIFO_PARAMS = {
     # "IQ_CH_FIFO_DEPTH": {"range": [2, 16], "default": 4},
     # "EQ_CH_FIFO_DEPTH": {"range": [2, 16], "default": 4},
-    "IQ_OUT_FIFO_DEPTH_HORIZONTAL": {"range": [2, 8], "default": 8},
-    "IQ_OUT_FIFO_DEPTH_VERTICAL": {"range": [2, 8], "default": 8},
-    "IQ_OUT_FIFO_DEPTH_EQ": {"range": [2, 8], "default": 8},
-    "RB_OUT_FIFO_DEPTH": {"range": [2, 8], "default": 8},
+    # "IQ_OUT_FIFO_DEPTH_HORIZONTAL": {"range": [2, 8], "default": 8},
+    # "IQ_OUT_FIFO_DEPTH_VERTICAL": {"range": [2, 8], "default": 8},
+    # "IQ_OUT_FIFO_DEPTH_EQ": {"range": [2, 8], "default": 8},
+    # "RB_OUT_FIFO_DEPTH": {"range": [2, 8], "default": 8},
     "RB_IN_FIFO_DEPTH": {"range": [2, 12], "default": 16},
     "EQ_IN_FIFO_DEPTH": {"range": [2, 12], "default": 16},
 }
@@ -227,16 +227,16 @@ def run_single_simulation_optimized(sim_params):
                 # 获取完整的仿真结果（配置+统计）
                 sim_results = sim.get_results()
                 bw = sim_results.get("mixed_avg_weighted_bw", 0)
-                
+
                 # 调试：如果带宽为0，打印可用的结果字段
                 if bw == 0:
                     print(f"Warning: bandwidth is 0 for combination {combination}")
                     print(f"Available result fields: {list(sim_results.keys())}")
                     # 尝试其他可能的带宽字段
                     for key in sim_results.keys():
-                        if 'bw' in key.lower() or 'bandwidth' in key.lower():
+                        if "bw" in key.lower() or "bandwidth" in key.lower():
                             print(f"  {key}: {sim_results[key]}")
-                
+
                 bw_list.append(bw)
 
                 # 只在第一次重复时保存完整结果，避免重复

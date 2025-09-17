@@ -209,13 +209,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
         if read_requests:
             read_csv_path = os.path.join(output_path, "d2d_read_requests.csv")
             self._save_requests_to_csv(read_requests, read_csv_path, csv_header)
-        # else:
+            print(f"读请求CSV, {len(read_requests)} 条记录: {read_csv_path}")
 
         if write_requests:
             write_csv_path = os.path.join(output_path, "d2d_write_requests.csv")
             self._save_requests_to_csv(write_requests, write_csv_path, csv_header)
+            print(f"写请求CSV, {len(write_requests)} 条记录: {write_csv_path}")
 
-    # else:
 
     def _save_requests_to_csv(self, requests: List[D2DRequestInfo], file_path: str, header: List[str]):
         """保存请求列表到CSV文件"""
@@ -412,6 +412,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
         with open(report_file, "w", encoding="utf-8") as f:
             for line in report_lines:
                 f.write(line + "\n")
+
+        print(f"D2D带宽分析报告: {report_file}")
 
     def process_d2d_results(self, dies: Dict, output_path: str):
         """
@@ -1387,9 +1389,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
             # 对角连接使用靠近from的1/3处，其他连接使用中点
             if connection_type == "diagonal":
-                # 对角连接：标签位置在靠近起始点的1/3处
-                label_x = start_x + dx * 0.33
-                label_y = start_y + dy * 0.33
+                # 对角连接
+                label_x = start_x + dx * 0.85
+                label_y = start_y + dy * 0.85
 
                 # 对角连接的偏移：根据连接方向适当偏移避免重叠
                 if abs(dx) > abs(dy):

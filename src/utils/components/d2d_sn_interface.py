@@ -319,7 +319,7 @@ class D2D_SN_Interface(IPInterface):
     def _handle_cross_die_transfer(self, flit):
         """处理跨Die转发（第二阶段：Die0_D2D_SN → Die1_D2D_RN）"""
         target_die_id = getattr(flit, "d2d_target_die", getattr(flit, "target_die_id", None))
-        if not target_die_id or not self.d2d_sys:
+        if target_die_id is None or not self.d2d_sys:
             return
 
         # 根据flit类型和请求类型选择AXI通道

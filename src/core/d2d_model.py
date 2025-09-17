@@ -473,8 +473,6 @@ class D2D_Model:
 
         # 检查每个Die的事务完成情况
         for die_id in range(self.num_dies):
-            other_die_id = 1 - die_id  # 另一个Die的ID (假设只有2个Die)
-
             # 读事务完成判断：检查读数据接收
             expected_read_flits = (self._local_read_requests[die_id] + self._cross_die_read_requests[die_id]) * burst_length
             actual_read_flits = self._actual_read_flits_received[die_id]
@@ -503,15 +501,26 @@ class D2D_Model:
 
     def _process_d2d_traffic(self, die_model: BaseModel):
         """处理D2D traffic注入"""
-        # 获取当前周期的D2D请求
-        pending_requests = self.d2d_traffic_scheduler.get_pending_requests(self.current_cycle)
+        # 获取当前周期的D2D请求（使用缓存避免重复获取）
+        if not hasattr(self, '_current_cycle_cache') or self._current_cycle_cache != self.current_cycle:
+            # 新周期，重新获取请求
+            self._current_cycle_cache = self.current_cycle
+            self._cached_pending_requests = self.d2d_traffic_scheduler.get_pending_requests(self.current_cycle)
 
+        pending_requests = self._cached_pending_requests
+
+        # 统计当前Die的请求数量
+        die_requests = []
         for req_data in pending_requests:
             # 检查这个请求是否属于当前Die
             src_die = req_data[1]  # src_die字段
             if src_die != die_model.die_id:
                 continue  # 不是当前Die的请求，跳过
+            die_requests.append(req_data)
 
+
+        # 处理属于当前Die的请求
+        for req_data in die_requests:
             # 处理单个D2D请求
             self._process_single_d2d_request(die_model, req_data)
 
@@ -644,10 +653,17 @@ class D2D_Model:
             actual_write_flits = getattr(self, "_actual_write_flits_received", {}).get(die_id, 0)
 
             # 计算期望接收的flit数量
-            # 修正：跨Die请求只在发起请求的Die统计，不重复计算
-            other_die_id = 1 - die_id
-            expected_read_flits = (local_read_reqs + getattr(self, "_cross_die_read_requests", {}).get(other_die_id, 0)) * 4
-            expected_write_flits = (local_write_reqs + getattr(self, "_cross_die_write_requests", {}).get(other_die_id, 0)) * 4
+            # 读期望：本Die本地读请求 + 本Die发起的跨Die读请求的返回数据
+            expected_read_flits = (local_read_reqs + cross_read_reqs) * 4
+
+            # 写期望：本Die本地写请求 + 所有其他Die向本Die发起的跨Die写请求
+            cross_write_to_this_die = 0
+            for other_die_id in range(self.num_dies):
+                if other_die_id != die_id:
+                    # 统计其他Die向本Die发起的跨Die写请求
+                    # 这里需要检查目标Die是否为当前die_id（暂时简化为所有跨Die写）
+                    cross_write_to_this_die += getattr(self, "_cross_die_write_requests", {}).get(other_die_id, 0)
+            expected_write_flits = (local_write_reqs + cross_write_to_this_die) * 4
 
             # print(f"  Die{die_id}: Req_cnt: {req_cnt}, In_Req: {in_req}, Rsp: {rsp}, " f"R_fn: {r_fn}, W_fn: {w_fn}, Trans_fn: {trans_fn}, Recv_fn: {recv_fn}, " f"D2D_done: {d2d_completed}")
             print(f"  Die{die_id}:")
@@ -843,6 +859,7 @@ class D2D_Model:
             # print("[信息] 保存D2D请求到CSV并生成带宽报告")
             d2d_processor.save_d2d_requests_csv(d2d_result_path)
             d2d_processor.generate_d2d_bandwidth_report(d2d_result_path)
+
 
         except Exception as e:
             import traceback
@@ -1365,15 +1382,19 @@ class D2D_Model:
 
         # 检查每个Die的数据接收完成情况
         for die_id in range(self.num_dies):
-            other_die_id = 1 - die_id  # 另一个Die的ID (假设只有2个Die)
-
             # 计算该Die期望接收的读数据flit数量
-            # 修正：跨Die请求只在发起请求的Die统计，不重复计算
-            expected_read_flits = (self._local_read_requests[die_id] + self._cross_die_read_requests[die_id]) * burst_length  # 本Die本地读请求  # 本Die发起的跨Die读请求的返回数据
+            # 读期望：本Die本地读请求 + 本Die发起的跨Die读请求的返回数据
+            expected_read_flits = (self._local_read_requests[die_id] + self._cross_die_read_requests[die_id]) * burst_length
 
             # 计算该Die期望接收的写数据flit数量
-            # 修正：跨Die请求只在发起请求的Die统计，不重复计算
-            expected_write_flits = (self._local_write_requests[die_id] + self._cross_die_write_requests[other_die_id]) * burst_length  # 本Die本地写请求  # 另一Die发起的跨Die写请求（目标是本Die）
+            # 写期望：本Die本地写请求 + 所有其他Die向本Die发起的跨Die写请求
+            cross_write_to_this_die = 0
+            for other_die_id in range(self.num_dies):
+                if other_die_id != die_id:
+                    # 统计其他Die向本Die发起的跨Die写请求
+                    # 这里需要检查目标Die是否为当前die_id（暂时简化为所有跨Die写）
+                    cross_write_to_this_die += self._cross_die_write_requests[other_die_id]
+            expected_write_flits = (self._local_write_requests[die_id] + cross_write_to_this_die) * burst_length
 
             # 检查实际接收数量是否达到期望
             actual_read = self._actual_read_flits_received[die_id]
