@@ -1,5 +1,6 @@
 import os
 import shutil
+import re
 
 
 def flatten_directory(directory):
@@ -48,11 +49,7 @@ def copy_files_with_suffix(input_path, output_path):
         print(f"处理子文件夹: {item}")
 
         # 查找该子文件夹下的output目录
-        output_dir = os.path.join(subfolder_path, "output")
-
-        if not os.path.exists(output_dir) or not os.path.isdir(output_dir):
-            print(f"  警告: 未找到output目录 - {output_dir}")
-            continue
+        output_dir = subfolder_path
 
         # 创建对应的输出目录（以子文件夹名称命名）
         dest_subfolder = os.path.join(output_path, item)
@@ -90,7 +87,88 @@ def copy_files_with_suffix(input_path, output_path):
                     # print(f"  复制文件：{file} -> {dest_file_path}")
                     files_copied += 1
 
-        # print(f"  从 {item} 复制了 {files_copied} 个文件")
+
+def merge_and_sort_files_by_folder(input_folder, output_folder):
+    """
+    将每个子文件夹中的所有CSV文件合并成一个文件，文件名为文件夹名称
+    提取格式：时间、源节点、源IP、目标地址、目标IP、请求类型、burst
+    """
+    # 确保输出目录存在
+    os.makedirs(output_folder, exist_ok=True)
+
+    # 遍历第一层子文件夹
+    for item in os.listdir(input_folder):
+        subfolder_path = os.path.join(input_folder, item)
+
+        # 只处理目录
+        if not os.path.isdir(subfolder_path):
+            continue
+
+        print(f"处理文件夹: {item}")
+        all_data = []
+
+        # 遍历该文件夹中的所有文件
+        for root, _, files in os.walk(subfolder_path):
+            for file in files:
+                # 只处理匹配的文件
+                if not (file.startswith("gmemTrace") or file.endswith("tdma_instance.csv")):
+                    continue
+
+                file_path = os.path.join(root, file)
+                if os.path.getsize(file_path) == 0:
+                    print(f"  跳过空文件: {file}")
+                    continue
+
+                # 从文件名提取TPU编号
+                tpu_match = re.search(r"tpu_(\d+)", file)
+                if not tpu_match:
+                    print(f"  警告: 无法从文件名中提取TPU编号: {file}")
+                    continue
+                tpu_num = tpu_match.group(1)
+
+                print(f"  处理文件: {file}")
+
+                # 读取文件内容
+                with open(file_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+
+                # 跳过标题行
+                if lines and lines[0].startswith("begin_req"):
+                    lines = lines[1:]
+
+                # 处理每一行数据
+                for line in lines:
+                    data = line.strip().split(",")
+                    if len(data) < 8:
+                        continue  # 跳过无效行
+
+                    # 提取所需字段：时间、源节点、源IP、目标地址、目标IP、请求类型、burst
+                    processed_data = [
+                        data[1],  # 时间 (end_req)
+                        tpu_num,  # 源节点 (TPU编号)
+                        "gdma",  # 源IP类型 (固定为gdma)
+                        data[4],  # 目标地址 (addr，保留原始地址)
+                        "ddr",  # 目标IP类型 (固定为ddr)
+                        data[5],  # 请求类型 (r/w)
+                        data[7],  # burst长度 (burst_len)
+                    ]
+                    all_data.append(processed_data)
+
+        if all_data:
+            # 按第一列（时间）进行数值排序
+            all_data.sort(key=lambda x: int(x[0]))
+
+            # 输出文件名为文件夹名称
+            output_file = os.path.join(output_folder, f"{item}.txt")
+
+            # 写入合并后的数据
+            with open(output_file, "w", encoding="utf-8") as f:
+                for data in all_data:
+                    f.write(",".join(data) + "\n")
+
+            print(f"  合并完成，共处理 {len(all_data)} 条记录，输出文件: {output_file}")
+        else:
+            print(f"  文件夹 {item} 中没有找到有效数据")
 
 
 def main(input_path, output_path=None):
@@ -100,15 +178,17 @@ def main(input_path, output_path=None):
 
     output_path = os.path.join(output_path, "step1_flatten")
 
-    # print(f"输入路径: {input_path}")
-    # print(f"输出路径: {output_path}")
-
+    # 第一步：复制文件并展平目录
     copy_files_with_suffix(input_path, output_path)
     flatten_directory(output_path)
+
+    # 第二步：将每个文件夹中的文件合并成一个文件，文件名为文件夹名称
+    merged_output_folder = os.path.join(output_path, "../merged")
+    merge_and_sort_files_by_folder(output_path, merged_output_folder)
 
     print("step1_flatten has been completed.")
 
 
 if __name__ == "__main__":
-    input_path = r"../../traffic/original/TPS175-DeepSeek3-671B-A37B-S4K-O1-W8A8-B64-16share/TPS175-DeepSeek3-671B-A37B-S4K-O1-W8A8-B64-16share"
+    input_path = r"../../traffic//DeepSeek_0918/step1_flatten/"
     main(input_path, output_path="../output")
