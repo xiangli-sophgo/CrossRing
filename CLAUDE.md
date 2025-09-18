@@ -254,3 +254,4 @@ destination_type = flit.d2d_origin_type  # "gdma_0"
 - **Results Location**: Results saved to `../Result/` (parent directory of project root)
 - **Traffic Processing**: Comprehensive traffic file parsing in `src/traffic_process/`
 - **Visualization**: Multiple visualization tools in `scripts/tools/`
+- 所有的输出都使用中文

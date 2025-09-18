@@ -38,7 +38,7 @@ def merge_and_sort_files(folder_path, output_path=None):
 # Example usage
 def main(folder_path=None, output_path=None):
     # folder_path = "../output/step2_hash_addr2node"
-    folder_path = "../output-v7-32/step2_hash_addr2node" if not folder_path else folder_path
+    folder_path = "../output/step2_hash_addr2node" if not folder_path else folder_path
     for subfolder in os.listdir(folder_path):
         subfolder = os.path.join(folder_path, subfolder)
         merge_and_sort_files(subfolder, output_path)

@@ -64,7 +64,7 @@ def copy_files_with_suffix(input_path, output_path):
         for root, dirs, files in os.walk(output_dir):
             for file in files:
                 # 检查文件后缀
-                if file.startswith("gmemTrace.CDMA") or file.endswith("tdma_instance.txt"):
+                if file.startswith("gmemTrace") or file.endswith("tdma_instance.csv"):
                     # 构造完整的文件路径
                     full_file_path = os.path.join(root, file)
 
@@ -110,5 +110,5 @@ def main(input_path, output_path=None):
 
 
 if __name__ == "__main__":
-    input_path = "Results_LlaMa2-70B-Patterns-v5"
+    input_path = r"../../traffic/original/TPS175-DeepSeek3-671B-A37B-S4K-O1-W8A8-B64-16share/TPS175-DeepSeek3-671B-A37B-S4K-O1-W8A8-B64-16share"
     main(input_path, output_path="../output")

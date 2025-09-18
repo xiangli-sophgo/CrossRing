@@ -10,91 +10,97 @@ from collections import defaultdict
 class RoundRobinScheduler:
     """
     使用索引管理的标准轮询调度器。
-    
+
     该调度器通过始终推进索引来确保真正的公平性，
     无论是否找到匹配项。这避免了原始remove+append方法
     中存在的饥饿问题。
-    
+
     主要特性:
     - O(1)索引更新（相比O(n)的remove操作）
     - 真正的公平性 - 所有候选项都有均等机会
     - 跨调用的索引持久性
     - 支持条件选择
     """
-    
+
     def __init__(self):
         """初始化轮询调度器。"""
         # 存储每个队列键的当前索引
         self.indices = defaultdict(int)
-        
+
         # 统计信息（可选，如不需要可删除）
-        self.stats = {
-            "total_selections": 0,
-            "successful_selections": 0,
-            "queue_accesses": defaultdict(int)
-        }
-    
-    def select(self, key: str, candidates: List[Any], 
-               check_func: Optional[Callable[[Any], bool]] = None) -> Tuple[Optional[Any], Optional[int]]:
+        self.stats = {"total_selections": 0, "successful_selections": 0, "queue_accesses": defaultdict(int)}
+
+    def select(self, key: str, candidates: List[Any], check_func: Optional[Callable[[Any], bool]] = None, move_to_end: bool = False) -> Tuple[Optional[Any], Optional[int]]:
         """
         使用轮询调度选择下一个候选项。
-        
+
         参数:
             key: 调度队列的唯一标识符（例如："IQ_TR_14_req"）
             candidates: 候选项列表
             check_func: 可选的候选项有效性检查函数
-            
+            move_to_end: 是否使用 remove+append 模式（默认False）
+                - False: 标准轮询模式，索引始终前进，确保严格公平性
+                - True: Remove+Append 模式，将命中项移到轮询末尾
+
         返回:
             (选中的候选项, 选中索引) 或 (None, None) 如果未找到
-            
-        关键点是索引总是前进，确保公平性。
+
+        两种模式说明:
+        - 标准模式: 每次调用索引都前进，所有候选项轮流获得机会
+        - Remove+Append模式: 被选中的项会暂时降低优先级，从下次轮询的末尾开始
         """
         if not candidates:
             return None, None
-            
+
         self.stats["total_selections"] += 1
         self.stats["queue_accesses"][key] += 1
-        
+
         current_idx = self.indices[key]
         candidates_len = len(candidates)
         start_idx = current_idx
-        
+
         # Try each candidate starting from current position
         for offset in range(candidates_len):
             idx = (current_idx + offset) % candidates_len
             candidate = candidates[idx]
-            
+
             # Check if candidate meets conditions
             if check_func is None or check_func(candidate):
                 # Found a valid candidate
                 self.stats["successful_selections"] += 1
-                
-                # CRITICAL: Always advance index for next call
-                # This ensures fairness - we don't start from the same position next time
-                self.indices[key] = (idx + 1) % candidates_len
-                
+
+                # 根据模式选择索引更新策略
+                if move_to_end:
+                    # Remove+Append 模式：保持当前索引不变
+                    # 这样被选中的项在下次调用时会被跳过，相当于移到了末尾
+                    self.indices[key] = current_idx % candidates_len
+                else:
+                    # 标准轮询模式：索引前进到下一个位置
+                    # 确保公平性 - 下次不从相同位置开始
+                    self.indices[key] = (idx + 1) % candidates_len
+
                 return candidate, idx
-        
+
         # No valid candidate found, but still advance index for fairness
         self.indices[key] = (current_idx + 1) % candidates_len
         return None, None
-    
+
     def get_current_index(self, key: str) -> int:
         """
         获取给定队列键的当前索引。
-        
+
         参数:
             key: 队列标识符
-            
+
         返回:
             当前索引（如果键不存在则返回0）
         """
         return self.indices.get(key, 0)
-    
+
     def set_index(self, key: str, index: int, candidates_len: int):
         """
         手动设置队列的索引。
-        
+
         参数:
             key: 队列标识符
             index: 新的索引位置
@@ -104,11 +110,11 @@ class RoundRobinScheduler:
             self.indices[key] = index % candidates_len
         else:
             self.indices[key] = 0
-    
+
     def reset_index(self, key: Optional[str] = None):
         """
         重置调度索引。
-        
+
         参数:
             key: 要重置的特定队列，或None重置所有
         """
@@ -116,33 +122,29 @@ class RoundRobinScheduler:
             self.indices.clear()
         else:
             self.indices[key] = 0
-    
+
     def get_stats(self) -> dict:
         """
         获取调度统计信息。
-        
+
         返回:
             包含调度统计信息的字典
         """
         success_rate = 0.0
         if self.stats["total_selections"] > 0:
             success_rate = self.stats["successful_selections"] / self.stats["total_selections"]
-            
+
         return {
             "total_selections": self.stats["total_selections"],
             "successful_selections": self.stats["successful_selections"],
             "success_rate": success_rate,
             "active_queues": len(self.indices),
-            "queue_accesses": dict(self.stats["queue_accesses"])
+            "queue_accesses": dict(self.stats["queue_accesses"]),
         }
-    
+
     def reset_stats(self):
         """重置所有统计信息。"""
-        self.stats = {
-            "total_selections": 0,
-            "successful_selections": 0,
-            "queue_accesses": defaultdict(int)
-        }
+        self.stats = {"total_selections": 0, "successful_selections": 0, "queue_accesses": defaultdict(int)}
 
 
 # 常用情况的辅助函数
