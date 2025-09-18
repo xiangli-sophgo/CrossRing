@@ -39,6 +39,7 @@ def main():
             # "LLama2_AttentionFC.txt"
             # "W_8x8.txt"
             # "MLA_B32.txt"
+            # "Add.txt"
         ],
     ]
 

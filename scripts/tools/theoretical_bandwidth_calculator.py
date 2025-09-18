@@ -6,7 +6,6 @@
 
 import math
 import csv
-import yaml
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -18,8 +17,6 @@ if sys.platform == "darwin":  # macOS
         matplotlib.use("macosx")
     except ImportError:
         matplotlib.use("Agg")
-else:
-    matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
 from collections import defaultdict, namedtuple
@@ -28,6 +25,7 @@ from typing import Dict, List, Tuple, Optional
 import argparse
 import sys
 import os
+from datetime import datetime
 
 # 添加配置路径
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -172,12 +170,12 @@ class Config:
     BURST: int = 4
     NETWORK_FREQUENCY: float = 2.0  # GHz
 
-    # 延迟配置 (cycles)
-    DDR_R_LATENCY: int = 80  # 40 * 2
+    # 延迟配置 (ns)
+    DDR_R_LATENCY: int = 40
     DDR_W_LATENCY: int = 0
-    L2M_R_LATENCY: int = 24  # 12 * 2
-    L2M_W_LATENCY: int = 32  # 16 * 2
-    SN_TRACKER_RELEASE_LATENCY: int = 80  # 40 * 2
+    L2M_R_LATENCY: int = 12
+    L2M_W_LATENCY: int = 16
+    SN_TRACKER_RELEASE_LATENCY: int = 40
 
     # Tracker配置 (Outstanding限制)
     RN_R_TRACKER_OSTD: int = 64
@@ -188,7 +186,7 @@ class Config:
     SN_L2M_W_TRACKER_OSTD: int = 64
 
     # 工作区间配置
-    MIN_GAP_THRESHOLD: int = 50  # ns，小于此值的间隔被视为同一工作区间
+    MIN_GAP_THRESHOLD: int = 20  # ns，小于此值的间隔被视为同一工作区间
 
     # 带宽限制 (GB/s)
     GDMA_BW_LIMIT: float = 128.0
@@ -282,12 +280,13 @@ class TheoreticalBandwidthCalculator:
     """理论带宽计算器"""
 
     # 网络延迟参数 (ns) - 可直接在此处调整
-    INJECT_LATENCY = 2  # 注入延迟
-    EJECT_LATENCY = 2  # 弹出延迟
-    DIMENSION_CHANGE_LATENCY = 2  # 维度转换延迟（XY路由最多1次）
+    INJECT_LATENCY = 0  # 注入延迟
+    EJECT_LATENCY = 0  # 弹出延迟
+    DIMENSION_CHANGE_LATENCY = 0  # 维度转换延迟（XY路由最多1次）
 
-    def __init__(self, config_file: str, traffic_file: str):
-        self.config = self._load_config(config_file)
+    def __init__(self, traffic_file: str):
+        self.config = Config()
+        self.config.__post_init__()
         self.traffic_requests = self._load_traffic(traffic_file)
 
         # 构建网络拓扑
@@ -305,28 +304,6 @@ class TheoreticalBandwidthCalculator:
 
         # 事务队列（用于tracker满时的重试）
         self.pending_requests = []
-
-    def _load_config(self, config_file: str) -> Config:
-        """加载配置文件"""
-        if not os.path.exists(config_file):
-            raise FileNotFoundError(f"配置文件不存在: {config_file}")
-
-        # 从YAML文件创建配置
-        with open(config_file, "r", encoding="utf-8") as f:
-            yaml_config = yaml.safe_load(f)
-
-        # 创建Config实例
-        config = Config()
-
-        # 更新配置参数
-        for key, value in yaml_config.items():
-            if hasattr(config, key):
-                setattr(config, key, value)
-
-        # 触发__post_init__来设置默认位置列表
-        config.__post_init__()
-
-        return config
 
     def _load_traffic(self, traffic_file: str) -> List[TrafficRequest]:
         """加载流量文件"""
@@ -654,8 +631,6 @@ class TheoreticalBandwidthCalculator:
             raise ValueError(f"目标节点{request.dest_node}没有IP类型{request.dest_ip_type}")
 
         path_hops, path_delay = self.calculate_path_delay(request.source_node, request.dest_node)
-        if path_delay == 4:
-            print(request.source_node, request.dest_node)
 
         # 1. 发送CMD请求 (REQ通道)
         cmd_send_time = max(request.start_time, src_ip.next_send_time["REQ"])
@@ -745,8 +720,6 @@ class TheoreticalBandwidthCalculator:
             raise ValueError(f"目标节点{request.dest_node}没有IP类型{request.dest_ip_type}")
 
         path_hops, path_delay = self.calculate_path_delay(request.source_node, request.dest_node)
-        if path_delay == 4:
-            print(request.source_node, request.dest_node)
 
         # 1. 发送CMD请求 (REQ通道)
         cmd_send_time = max(request.start_time, src_ip.next_send_time["REQ"])
@@ -821,12 +794,24 @@ class TheoreticalBandwidthCalculator:
             transaction_latency=transaction_latency,
         )
 
-    def simulate(self) -> List[TransactionResult]:
-        """执行仿真"""
+    def simulate(self, print_interval=1000, simulation_end_time=None) -> List[TransactionResult]:
+        """执行仿真
+
+        Args:
+            print_interval: 每处理多少个事务打印一次进度
+            simulation_end_time: 仿真结束时间(ns)，None表示处理所有事务
+        """
         print(f"开始仿真 {len(self.traffic_requests)} 个事务...")
+        if simulation_end_time is not None:
+            print(f"仿真结束时间: {simulation_end_time} ns")
 
         # 按开始时间排序处理
         sorted_requests = sorted(self.traffic_requests, key=lambda x: x.start_time)
+
+        # 如果设置了结束时间，过滤掉超出时间的请求
+        if simulation_end_time is not None:
+            sorted_requests = [req for req in sorted_requests if req.start_time <= simulation_end_time]
+            print(f"在结束时间内的事务数量: {len(sorted_requests)}")
 
         results = []
         retry_queue = []
@@ -872,7 +857,7 @@ class TheoreticalBandwidthCalculator:
                         # 其他错误，重新抛出
                         raise
 
-            if (i + 1) % 1000 == 0:
+            if (i + 1) % print_interval == 0:
                 print(f"已处理 {i + 1}/{len(sorted_requests)} 个事务")
 
         self.results = results
@@ -931,6 +916,363 @@ def _save_csv_results(results, output_path, verbose=True):
             )
 
 
+def _save_combined_csv_results(all_results_with_info, output_path, verbose=True):
+    """保存合并的CSV结果文件，包含流量文件信息"""
+    if verbose:
+        print(f"保存合并CSV结果到: {output_path}")
+
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+
+        # 写入头部（增加流量文件名列）
+        headers = [
+            "流量文件名",
+            "数据包ID",
+            "开始时间",
+            "完成时间",
+            "源节点",
+            "目标节点",
+            "源IP类型",
+            "目标IP类型",
+            "请求类型",
+            "突发长度",
+            "总字节数",
+            "路径跳数",
+            "路径延迟",
+            "命令延迟",
+            "数据延迟",
+            "事务延迟",
+        ]
+        writer.writerow(headers)
+
+        # 写入数据
+        for traffic_file, results in all_results_with_info:
+            for result in results:
+                writer.writerow(
+                    [
+                        traffic_file,
+                        result.packet_id,
+                        result.start_time,
+                        result.completion_time,
+                        result.source_node,
+                        result.dest_node,
+                        result.source_ip_type,
+                        result.dest_ip_type,
+                        result.req_type,
+                        result.burst_length,
+                        result.total_bytes,
+                        result.path_hops,
+                        result.path_delay,
+                        result.cmd_latency,
+                        result.data_latency,
+                        result.transaction_latency,
+                    ]
+                )
+
+
+def calculate_statistics_summary(results, calculator=None):
+    """
+    计算统计汇总结果
+
+    Args:
+        results: 事务结果列表
+        calculator: 计算器实例
+
+    Returns:
+        dict: 统计汇总字典
+    """
+    if not results:
+        return {}
+
+    # 按IP类型分组统计
+    type_groups = defaultdict(list)
+    rn_ip_count = defaultdict(set)
+
+    for result in results:
+        ip_type = result.source_ip_type.split("_")[0].upper()
+        type_groups[ip_type].append(result)
+
+        # 统计RN IP实例
+        rn_ip_instance = f"{result.source_node}-{result.source_ip_type}"
+        rn_ip_count[ip_type].add(rn_ip_instance)
+
+    # 计算带宽统计
+    bandwidth_stats = {}
+    total_bandwidth = 0.0
+    total_avg_bandwidth = 0.0
+
+    for ip_type, group_results in type_groups.items():
+        if not group_results:
+            continue
+
+        # 使用工作区间计算带宽
+        if calculator is not None:
+            working_intervals = calculator.calculate_working_intervals(group_results)
+
+            if working_intervals:
+                # 计算加权带宽：Σ(区间数据量 × 区间带宽) / Σ(区间数据量)
+                total_weighted_bandwidth = 0.0
+                total_data_bytes = 0.0
+
+                for interval in working_intervals:
+                    interval_bandwidth = interval.bandwidth_bytes_per_ns  # 区间带宽 (bytes/ns)
+                    interval_data_bytes = interval.total_bytes  # 区间数据量 (bytes)
+
+                    total_weighted_bandwidth += interval_data_bytes * interval_bandwidth
+                    total_data_bytes += interval_data_bytes
+
+                weighted_bandwidth = (total_weighted_bandwidth / total_data_bytes) if total_data_bytes > 0 else 0.0
+            else:
+                weighted_bandwidth = 0.0
+        else:
+            # calculator为None时，无法计算加权带宽
+            weighted_bandwidth = 0.0
+
+        # 获取IP实例数量
+        num_rn_ips = len(rn_ip_count[ip_type])
+        avg_bandwidth_per_ip = weighted_bandwidth / num_rn_ips if num_rn_ips > 0 else 0
+
+        bandwidth_stats[ip_type] = {"weighted_bandwidth": weighted_bandwidth, "avg_bandwidth_per_ip": avg_bandwidth_per_ip, "num_instances": num_rn_ips}
+
+        total_bandwidth += weighted_bandwidth
+        total_avg_bandwidth += avg_bandwidth_per_ip
+
+    # 计算延迟统计
+    all_cmd_latencies = [r.cmd_latency for r in results]
+    all_data_latencies = [r.data_latency for r in results]
+    all_trans_latencies = [r.transaction_latency for r in results]
+
+    # 计算工作区间数量
+    working_intervals_count = 0
+    if calculator is not None:
+        total_working_intervals = calculator.calculate_working_intervals(results)
+        working_intervals_count = len(total_working_intervals)
+
+    return {
+        "bandwidth_stats": bandwidth_stats,
+        "total_bandwidth": total_bandwidth,
+        "total_avg_bandwidth": total_avg_bandwidth,
+        "working_intervals_count": working_intervals_count,
+        "latency_stats": {
+            "cmd_latency": {"avg": np.mean(all_cmd_latencies), "min": np.min(all_cmd_latencies), "max": np.max(all_cmd_latencies)},
+            "data_latency": {"avg": np.mean(all_data_latencies), "min": np.min(all_data_latencies), "max": np.max(all_data_latencies)},
+            "trans_latency": {"avg": np.mean(all_trans_latencies), "min": np.min(all_trans_latencies), "max": np.max(all_trans_latencies)},
+        },
+        "total_transactions": len(results),
+    }
+
+
+def _save_statistics_summary(all_results_with_info, output_path, topo_type, verbose=True):
+    """保存统计汇总结果到标准CSV格式"""
+    if verbose:
+        print(f"保存统计汇总结果到: {output_path}")
+
+    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+
+        # 写入CSV头部
+        headers = [
+            "流量文件名",
+            "拓扑类型",
+            "生成时间",
+            "IP类型",
+            "加权带宽(GB/s)",
+            "平均每实例带宽(GB/s)",
+            "IP实例数量",
+            "总加权带宽(GB/s)",
+            "平均加权带宽(GB/s)",
+            "工作区间数",
+            "总事务数",
+            "CMD延迟_平均(ns)",
+            "CMD延迟_最小(ns)",
+            "CMD延迟_最大(ns)",
+            "数据延迟_平均(ns)",
+            "数据延迟_最小(ns)",
+            "数据延迟_最大(ns)",
+            "事务延迟_平均(ns)",
+            "事务延迟_最小(ns)",
+            "事务延迟_最大(ns)",
+        ]
+        writer.writerow(headers)
+
+        # 当前时间
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        for traffic_file, results, calculator in all_results_with_info:
+            # 使用保存的calculator实例来计算准确的工作区间
+            stats = calculate_statistics_summary(results, calculator)
+
+            if not stats:
+                continue
+
+            latency_stats = stats["latency_stats"]
+
+            # 为每个IP类型写入一行数据
+            for ip_type, bandwidth_info in stats["bandwidth_stats"].items():
+                row = [
+                    traffic_file,  # 流量文件名
+                    topo_type,  # 拓扑类型
+                    current_time,  # 生成时间
+                    ip_type,  # IP类型
+                    f"{bandwidth_info['weighted_bandwidth']:.2f}",  # 加权带宽
+                    f"{bandwidth_info['avg_bandwidth_per_ip']:.2f}",  # 平均每实例带宽
+                    bandwidth_info["num_instances"],  # IP实例数量
+                    f"{stats['total_bandwidth']:.2f}",  # 总加权带宽
+                    f"{stats['total_avg_bandwidth']:.2f}",  # 平均加权带宽
+                    stats["working_intervals_count"],  # 工作区间数
+                    stats["total_transactions"],  # 总事务数
+                    f"{latency_stats['cmd_latency']['avg']:.1f}",  # CMD延迟_平均
+                    f"{latency_stats['cmd_latency']['min']:.1f}",  # CMD延迟_最小
+                    f"{latency_stats['cmd_latency']['max']:.1f}",  # CMD延迟_最大
+                    f"{latency_stats['data_latency']['avg']:.1f}",  # 数据延迟_平均
+                    f"{latency_stats['data_latency']['min']:.1f}",  # 数据延迟_最小
+                    f"{latency_stats['data_latency']['max']:.1f}",  # 数据延迟_最大
+                    f"{latency_stats['trans_latency']['avg']:.1f}",  # 事务延迟_平均
+                    f"{latency_stats['trans_latency']['min']:.1f}",  # 事务延迟_最小
+                    f"{latency_stats['trans_latency']['max']:.1f}",  # 事务延迟_最大
+                ]
+                writer.writerow(row)
+
+            # 如果一个文件没有IP类型数据，至少写入文件级的汇总信息
+            if not stats["bandwidth_stats"]:
+                row = [
+                    traffic_file,  # 流量文件名
+                    topo_type,  # 拓扑类型
+                    current_time,  # 生成时间
+                    "N/A",  # IP类型
+                    "0.00",  # 加权带宽
+                    "0.00",  # 平均每实例带宽
+                    0,  # IP实例数量
+                    f"{stats['total_bandwidth']:.2f}",  # 总加权带宽
+                    f"{stats['total_avg_bandwidth']:.2f}",  # 平均加权带宽
+                    stats["working_intervals_count"],  # 工作区间数
+                    stats["total_transactions"],  # 总事务数
+                    f"{latency_stats['cmd_latency']['avg']:.1f}",  # CMD延迟_平均
+                    f"{latency_stats['cmd_latency']['min']:.1f}",  # CMD延迟_最小
+                    f"{latency_stats['cmd_latency']['max']:.1f}",  # CMD延迟_最大
+                    f"{latency_stats['data_latency']['avg']:.1f}",  # 数据延迟_平均
+                    f"{latency_stats['data_latency']['min']:.1f}",  # 数据延迟_最小
+                    f"{latency_stats['data_latency']['max']:.1f}",  # 数据延迟_最大
+                    f"{latency_stats['trans_latency']['avg']:.1f}",  # 事务延迟_平均
+                    f"{latency_stats['trans_latency']['min']:.1f}",  # 事务延迟_最小
+                    f"{latency_stats['trans_latency']['max']:.1f}",  # 事务延迟_最大
+                ]
+                writer.writerow(row)
+
+
+def process_traffic_folder(
+    traffic_folder_path,
+    topo_type,
+    result_save_path,
+    print_interval=1000,
+    simulation_end_time=None,
+    verbose=True,
+    save_individual_csv=True,
+    save_combined_csv=True,
+    plot_bandwidth_curve=False,
+    print_latency_stats=True,
+):
+    """
+    遍历文件夹中的所有流量文件并处理
+
+    Args:
+        traffic_folder_path: 流量文件夹路径
+        topo_type: 拓扑类型
+        result_save_path: 结果保存路径
+        print_interval: 打印间隔
+        simulation_end_time: 仿真结束时间
+        verbose: 是否详细输出
+        save_individual_csv: 是否保存单个CSV文件
+        save_combined_csv: 是否保存合并的CSV文件
+        plot_bandwidth_curve: 是否绘制带宽曲线
+        print_latency_stats: 是否打印延迟统计
+
+    Returns:
+        List[Tuple[str, List[TransactionResult], TheoreticalBandwidthCalculator]]: 所有结果列表
+    """
+    if not os.path.exists(traffic_folder_path):
+        raise FileNotFoundError(f"流量文件夹不存在: {traffic_folder_path}")
+
+    # 获取所有.txt文件
+    traffic_files = []
+    for file in os.listdir(traffic_folder_path):
+        if file.endswith(".txt") and not file.startswith("#"):
+            traffic_files.append(file)
+
+    if not traffic_files:
+        print(f"警告: 在文件夹 {traffic_folder_path} 中没有找到.txt流量文件")
+        return []
+
+    traffic_files.sort()  # 按文件名排序
+    print(f"找到 {len(traffic_files)} 个流量文件: {traffic_files}")
+
+    all_results_with_info = []  # List[Tuple[str, List[TransactionResult], TheoreticalBandwidthCalculator]]
+
+    for i, traffic_file in enumerate(traffic_files):
+        if verbose:
+            print(f"\n{'='*60}")
+            print(f"处理流量文件 {i+1}/{len(traffic_files)}: {traffic_file}")
+            print(f"拓扑类型: {topo_type}")
+            print(f"{'='*60}")
+
+        # 构建完整的流量文件路径
+        full_traffic_path = os.path.join(traffic_folder_path, traffic_file)
+
+        try:
+            # 创建理论带宽计算器
+            calculator = TheoreticalBandwidthCalculator(traffic_file=full_traffic_path)
+
+            # 执行仿真
+            results = calculator.simulate(print_interval=print_interval, simulation_end_time=simulation_end_time)
+
+            if not results:
+                print("警告: 没有有效的仿真结果")
+                continue
+
+            # 存储结果和calculator实例
+            all_results_with_info.append((traffic_file, results, calculator))
+
+            # 生成输出文件名
+            base_name = os.path.splitext(traffic_file)[0]
+
+            # 保存单个CSV结果
+            if save_individual_csv:
+                output_csv = os.path.join(result_save_path, f"{base_name}_{topo_type}_theoretical.csv")
+                _save_csv_results(results, output_csv, verbose)
+
+            # 计算并输出统计信息
+            if verbose:
+                _print_statistics(results, calculator, verbose, print_latency_stats)
+
+            # 绘制带宽曲线（如果启用）
+            if plot_bandwidth_curve:
+                _plot_bandwidth_curve(results, base_name, topo_type, result_save_path, calculator)
+
+        except Exception as e:
+            print(f"错误: 处理文件 {traffic_file} 时发生异常: {e}")
+            import traceback
+
+            traceback.print_exc()
+            continue
+
+    # 保存统计汇总结果
+    if save_combined_csv and all_results_with_info:
+        statistics_csv_path = os.path.join(result_save_path, f"statistics_summary_{topo_type}.csv")
+        _save_statistics_summary(all_results_with_info, statistics_csv_path, topo_type, verbose)
+
+        # 打印汇总统计信息
+        if verbose:
+            total_transactions = sum(len(results) for _, results, _ in all_results_with_info)
+            print(f"\n{'='*60}")
+            print(f"统计汇总信息:")
+            print(f"处理文件数: {len(all_results_with_info)}")
+            print(f"总事务数: {total_transactions}")
+            print(f"统计汇总结果保存到: {statistics_csv_path}")
+            print(f"{'='*60}")
+
+    return all_results_with_info
+
+
 def _print_statistics(results, calculator=None, verbose=True, print_latency_stats=True):
     """打印统计信息"""
     if not verbose:
@@ -961,26 +1303,20 @@ def _print_statistics(results, calculator=None, verbose=True, print_latency_stat
             working_intervals = calculator.calculate_working_intervals(group_results)
 
             if working_intervals:
-                # 计算加权带宽：各区间带宽按flit数量加权平均
+                # 计算加权带宽：Σ(区间数据量 × 区间带宽) / Σ(区间数据量)
                 total_weighted_bandwidth = 0.0
-                total_weight = 0
+                total_data_bytes = 0.0
 
                 for interval in working_intervals:
-                    weight = interval.flit_count  # 权重是工作区间的flit数量
-                    bandwidth = interval.bandwidth_bytes_per_ns  # 转换为GB/s
-                    total_weighted_bandwidth += bandwidth * weight
-                    total_weight += weight
+                    interval_bandwidth = interval.bandwidth_bytes_per_ns  # 区间带宽 (bytes/ns)
+                    interval_data_bytes = interval.total_bytes  # 区间数据量 (bytes)
 
-                weighted_bandwidth = (total_weighted_bandwidth / total_weight) if total_weight > 0 else 0.0
+                    total_weighted_bandwidth += interval_data_bytes * interval_bandwidth
+                    total_data_bytes += interval_data_bytes
+
+                weighted_bandwidth = (total_weighted_bandwidth / total_data_bytes) if total_data_bytes > 0 else 0.0
             else:
                 weighted_bandwidth = 0.0
-        else:
-            # 回退到简单计算
-            total_bytes = sum(r.total_bytes for r in group_results)
-            min_start = min(r.start_time for r in group_results)
-            max_completion = max(r.completion_time for r in group_results)
-            time_span = max_completion - min_start
-            weighted_bandwidth = (total_bytes / time_span) if time_span > 0 else 0.0
 
         # 获取该IP类型的RN IP实例数量
         num_rn_ips = len(rn_ip_count[ip_type])
@@ -1028,6 +1364,20 @@ def _plot_bandwidth_curve(results, base_name, topo_type, save_path, calculator=N
         plt.rcParams["font.sans-serif"] = ["SimHei", "Arial Unicode MS", "DejaVu Sans"]
         plt.rcParams["axes.unicode_minus"] = False
 
+        # 定义IP类型到颜色的映射
+        ip_color_map = {
+            "GDMA": "#1f77b4",  # 蓝色
+            "SDMA": "#ff7f0e",  # 橙色
+            "CDMA": "#2ca02c",  # 绿色
+            "DDR": "#d62728",  # 红色
+            "L2M": "#9467bd",  # 紫色
+            "DMA": "#8c564b",  # 棕色
+            "HBM": "#e377c2",  # 粉色
+            "SRAM": "#7f7f7f",  # 灰色
+            "L3": "#bcbd22",  # 橄榄色
+            "PCIe": "#17becf",  # 青色
+        }
+
         # 按IP类型分组（与统计函数保持一致，不区分读写）
         type_groups = defaultdict(list)
         for result in results:
@@ -1039,6 +1389,9 @@ def _plot_bandwidth_curve(results, base_name, topo_type, save_path, calculator=N
         for group_key, group_results in type_groups.items():
             if not group_results or calculator is None:
                 continue
+
+            # 获取该IP类型对应的颜色，如果没有定义则使用默认颜色
+            color = ip_color_map.get(group_key, "#000000")  # 默认黑色
 
             # 计算该分组的工作区间
             working_intervals = calculator.calculate_working_intervals(group_results)
@@ -1075,10 +1428,10 @@ def _plot_bandwidth_curve(results, base_name, topo_type, save_path, calculator=N
                 # 转换回绝对时间用于绘图
                 abs_times_us = (rel_times + interval.start_time) / 1000.0
 
-                # 为每个工作区间绘制独立的曲线段
+                # 为每个工作区间绘制独立的曲线段，使用固定颜色
                 # 只有第一个区间显示标签，避免重复
                 label = group_key if i == 0 else None
-                plt.plot(abs_times_us, bandwidth, label=label, drawstyle="steps-post")
+                plt.plot(abs_times_us, bandwidth, label=label, color=color, drawstyle="steps-post")
 
         plt.xlabel("时间 (μs)")
         plt.ylabel("带宽 (GB/s)")
@@ -1108,8 +1461,8 @@ def main():
     # traffic_file_path = r"../../../C2C/traffic_data"
     # traffic_file_path = r"../../traffic/traffic0730"
     # traffic_file_path = r"../../example/"
-    traffic_file_path = r"../../traffic/0617/"
-    # traffic_file_path = r"../../traffic/DeepSeek_0616/step6_ch_map/"
+    # traffic_file_path = r"../../traffic/0617/"
+    traffic_file_path = r"../../traffic/DeepSeek_0616/step6_ch_map/"
     # traffic_file_path = r"../../traffic/RW_4x2_4x4/"
     # traffic_file_path = r"../../traffic/nxn_traffics"
 
@@ -1126,40 +1479,27 @@ def main():
             # r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
             # r"full_bw_R_4x5.txt"
-            "LLama2_AllReduce.txt"
+            # "LLama2_AllReduce.txt"
             # "test_data.txt"
             # "traffic_2260E_case1.txt",
             # "LLama2_AttentionFC.txt"
             # "W_8x8.txt"
             # "MLA_B32.txt"
+            "Add.txt",
+            # "attn_fc.txt"
         ],
     ]
 
     # ==================== 输出配置 ====================
-    result_save_path = f"../../Result/TheoreticalBandwidth/"
+    # 生成时间戳目录
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    result_save_path = f"../../Result/TheoreticalBandwidth/{timestamp}/"
     results_fig_save_path = None
-    # results_fig_save_path = f"../../Result/Plt_Theoretical_BW/"
+    # results_fig_save_path = f"../../Result/Plt_Theoretical_BW/{timestamp}/"
 
     # ==================== 拓扑配置 ====================
-    # 拓扑类型到配置文件的映射
-    topo_config_map = {
-        "3x3": r"../../config/topologies/topo_3x3.yaml",
-        "4x4": r"../../config/topologies/topo_4x4.yaml",
-        "5x2": r"../../config/topologies/topo_5x2.yaml",
-        "5x4": r"../../config/topologies/topo_5x4.yaml",
-        "6x5": r"../../config/topologies/topo_6x5.yaml",
-        "8x8": r"../../config/topologies/topo_8x8.yaml",
-    }
-
-    # 默认拓扑类型
-    # topo_type = "4x9"
-    # topo_type = "9x4"
+    # 默认拓扑类型（现在仅用于文件命名）
     topo_type = "5x4"  # SG2262
-    # topo_type = "4x4"
-    # topo_type = "5x2"
-    # topo_type = "3x3"
-    # topo_type = "6x5"  # SG2260
-    # topo_type = "8x8"  # SG2260E
 
     # ==================== 仿真参数 ====================
     verbose = 1  # 详细输出
@@ -1167,64 +1507,103 @@ def main():
     plot_bandwidth_curve = 1  # 绘制带宽曲线
     print_latency_stats = 1  # 打印延迟统计
 
-    # ==================== 执行仿真 ====================
-    # 根据拓扑类型选择配置文件
-    config_path = topo_config_map.get(topo_type, r"../config/default.yaml")
+    # 进度打印和仿真控制参数
+    print_interval = 5000  # 每处理多少个事务打印一次进度
+    simulation_end_time = 10000  # 仿真结束时间(ns)，None表示处理所有事务
 
+    # 处理模式配置
+    process_entire_folder = 0  # True: 处理整个文件夹，False: 处理指定文件列表
+    save_individual_csv = 1  # 是否保存单个CSV文件
+    save_combined_csv = 1  # 是否保存合并的CSV文件
+
+    # ==================== 执行仿真 ====================
     # 确保输出路径存在
     os.makedirs(result_save_path, exist_ok=True)
     if results_fig_save_path:
         os.makedirs(results_fig_save_path, exist_ok=True)
 
-    # 处理所有流量配置
-    for config_group in traffic_config:
-        for traffic_file in config_group:
-            if verbose:
-                print(f"\n{'='*60}")
-                print(f"处理流量文件: {traffic_file}")
-                print(f"拓扑类型: {topo_type}")
-                print(f"配置文件: {config_path}")
-                print(f"{'='*60}")
+    # 根据处理模式选择执行方式
+    if process_entire_folder:
+        # 处理整个文件夹模式
+        if verbose:
+            print(f"\n{'='*60}")
+            print(f"文件夹处理模式")
+            print(f"流量文件夹: {traffic_file_path}")
+            print(f"拓扑类型: {topo_type}")
+            print(f"{'='*60}")
 
-            # 构建完整的流量文件路径
-            full_traffic_path = os.path.join(traffic_file_path, traffic_file)
+        try:
+            all_results = process_traffic_folder(
+                traffic_folder_path=traffic_file_path,
+                topo_type=topo_type,
+                result_save_path=result_save_path,
+                print_interval=print_interval,
+                simulation_end_time=simulation_end_time,
+                verbose=verbose,
+                save_individual_csv=save_individual_csv,
+                save_combined_csv=save_combined_csv,
+                plot_bandwidth_curve=plot_bandwidth_curve,
+                print_latency_stats=print_latency_stats,
+            )
 
-            if not os.path.exists(full_traffic_path):
-                print(f"警告: 流量文件不存在: {full_traffic_path}")
-                continue
+            if verbose and all_results:
+                print(f"\n文件夹处理完成！共处理 {len(all_results)} 个流量文件")
 
-            try:
-                # 创建理论带宽计算器
-                calculator = TheoreticalBandwidthCalculator(config_file=config_path, traffic_file=full_traffic_path)
+        except Exception as e:
+            print(f"错误: 处理文件夹时发生异常: {e}")
+            import traceback
 
-                # 执行仿真
-                results = calculator.simulate()
+            traceback.print_exc()
 
-                if not results:
-                    print("警告: 没有有效的仿真结果")
+    else:
+        # 处理指定文件列表模式
+        for config_group in traffic_config:
+            for traffic_file in config_group:
+                if verbose:
+                    print(f"\n{'='*60}")
+                    print(f"处理流量文件: {traffic_file}")
+                    print(f"拓扑类型: {topo_type}")
+                    print(f"{'='*60}")
+
+                # 构建完整的流量文件路径
+                full_traffic_path = os.path.join(traffic_file_path, traffic_file)
+
+                if not os.path.exists(full_traffic_path):
+                    print(f"警告: 流量文件不存在: {full_traffic_path}")
                     continue
 
-                # 生成输出文件名
-                base_name = os.path.splitext(traffic_file)[0]
-                output_csv = os.path.join(result_save_path, f"{base_name}_{topo_type}_theoretical.csv")
+                try:
+                    # 创建理论带宽计算器
+                    calculator = TheoreticalBandwidthCalculator(traffic_file=full_traffic_path)
 
-                # 保存CSV结果
-                if save_csv_results:
-                    _save_csv_results(results, output_csv, verbose)
+                    # 执行仿真
+                    results = calculator.simulate(print_interval=print_interval, simulation_end_time=simulation_end_time)
 
-                # 计算并输出统计信息
-                _print_statistics(results, calculator, verbose, print_latency_stats)
+                    if not results:
+                        print("警告: 没有有效的仿真结果")
+                        continue
 
-                # 绘制带宽曲线（如果启用）
-                if plot_bandwidth_curve:
-                    _plot_bandwidth_curve(results, base_name, topo_type, results_fig_save_path, calculator)
+                    # 生成输出文件名
+                    base_name = os.path.splitext(traffic_file)[0]
+                    output_csv = os.path.join(result_save_path, f"{base_name}_{topo_type}_theoretical.csv")
 
-            except Exception as e:
-                print(f"错误: 处理文件 {traffic_file} 时发生异常: {e}")
-                import traceback
+                    # 保存CSV结果
+                    if save_csv_results:
+                        _save_csv_results(results, output_csv, verbose)
 
-                traceback.print_exc()
-                continue
+                    # 计算并输出统计信息
+                    _print_statistics(results, calculator, verbose, print_latency_stats)
+
+                    # 绘制带宽曲线（如果启用）
+                    if plot_bandwidth_curve:
+                        _plot_bandwidth_curve(results, base_name, topo_type, results_fig_save_path, calculator)
+
+                except Exception as e:
+                    print(f"错误: 处理文件 {traffic_file} 时发生异常: {e}")
+                    import traceback
+
+                    traceback.print_exc()
+                    continue
 
     if verbose:
         print(f"\n{'='*60}")
@@ -1232,6 +1611,7 @@ def main():
         print(f"结果保存路径: {result_save_path}")
         if results_fig_save_path:
             print(f"图表保存路径: {results_fig_save_path}")
+        print(f"使用内置配置: Config类")
         print(f"{'='*60}")
 
 

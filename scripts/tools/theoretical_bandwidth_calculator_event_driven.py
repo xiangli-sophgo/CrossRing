@@ -21,8 +21,6 @@ if sys.platform == "darwin":  # macOS
         matplotlib.use("macosx")
     except ImportError:
         matplotlib.use("Agg")
-else:
-    matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
 from collections import defaultdict, namedtuple
@@ -215,11 +213,11 @@ class Config:
     BURST: int = 4
     NETWORK_FREQUENCY: float = 2.0  # GHz
 
-    # 延迟配置 (cycles)
-    DDR_R_LATENCY: int = 80  # 40 * 2
+    # 延迟配置 (ns)
+    DDR_R_LATENCY: int = 40  # 40 * 2
     DDR_W_LATENCY: int = 0
-    L2M_R_LATENCY: int = 24  # 12 * 2
-    L2M_W_LATENCY: int = 32  # 16 * 2
+    L2M_R_LATENCY: int = 12  # 12 * 2
+    L2M_W_LATENCY: int = 16  # 16 * 2
     SN_TRACKER_RELEASE_LATENCY: int = 80  # 40 * 2
 
     # Tracker配置 (Outstanding限制)
@@ -673,9 +671,7 @@ class EventDrivenCalculator:
             active_count = len(self.active_transactions)
             retry_count = len(self.retry_queue)
 
-            print(f"进度: {completed_count}/{self.total_requests} ({progress_percent:.1f}%) "
-                  f"- 活跃事务: {active_count}, 等待重试: {retry_count}, "
-                  f"当前时间: {self.current_time:.1f}ns")
+            print(f"进度: {completed_count}/{self.total_requests} ({progress_percent:.1f}%) " f"- 活跃事务: {active_count}, 等待重试: {retry_count}, " f"当前时间: {self.current_time:.1f}ns")
 
     # ==================== 事件处理器 ====================
 
@@ -1323,8 +1319,8 @@ def main():
     # traffic_file_path = r"../../../C2C/traffic_data"
     # traffic_file_path = r"../../traffic/traffic0730"
     # traffic_file_path = r"../../example/"
-    # traffic_file_path = r"../../traffic/0617/"
-    traffic_file_path = r"../../traffic/DeepSeek_0616/step6_ch_map/"
+    traffic_file_path = r"../../traffic/0617/"
+    # traffic_file_path = r"../../traffic/DeepSeek_0616/step6_ch_map/"
     # traffic_file_path = r"../../traffic/RW_4x2_4x4/"
     # traffic_file_path = r"../../traffic/nxn_traffics"
 
@@ -1341,12 +1337,13 @@ def main():
             # r"All2All_Combine.txt",
             # r"All2All_Dispatch.txt",
             # r"full_bw_R_4x5.txt"
-            # "LLama2_AllReduce.txt"
+            "LLama2_AllReduce.txt"
             # "test_data.txt"
             # "traffic_2260E_case1.txt",
             # "LLama2_AttentionFC.txt"
             # "W_8x8.txt"
-            "MLA_B32.txt"
+            # "MLA_B32.txt"
+            # "attn_fc.txt"
         ],
     ]
 
