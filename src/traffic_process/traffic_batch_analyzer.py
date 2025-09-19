@@ -3,10 +3,6 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import seaborn as sns
 from collections import defaultdict
-from matplotlib.font_manager import FontProperties
-import pandas as pd
-import numpy as np
-import time
 import csv
 
 
@@ -17,8 +13,9 @@ class AddressStat:
         self.results = []  # To store results for each directory
 
     def init_params(self):
-        self.shared_64_count = 0
-        self.shared_8_count = 0
+        self.shared_32ch_count = 0
+        self.shared_16ch_count = 0
+        self.shared_8ch_count = 0
         self.private_count = 0
         self.read_flit_count = 0
         self.write_flit_count = 0
@@ -29,13 +26,20 @@ class AddressStat:
 
     def classify_address(self, addr, flit_num):
         addr = int(addr, base=16)
-        if 0x04_0000_0000 <= addr < 0x08_0000_0000:
-            self.shared_64_count += flit_num
-        elif 0x08_0000_0000 <= addr < 0x10_0000_0000:
-            self.shared_8_count += flit_num
-        elif 0x10_0000_0000 <= addr < 0x20_0000_0000:
+        if 0x80000000 <= addr < 0x100000000:
+            # 32通道共享内存: 0x80000000 - 0xffffffff (2GB)
+            self.shared_32ch_count += flit_num
+        elif 0x100000000 <= addr < 0x500000000:
+            # 16通道共享内存: 0x100000000 - 0x4ffffffff (16GB)
+            self.shared_16ch_count += flit_num
+        elif 0x500000000 <= addr < 0x700000000:
+            # 8通道共享内存: 0x500000000 - 0x6ffffffff (8GB)
+            self.shared_8ch_count += flit_num
+        elif 0x700000000 <= addr < 0x1F00000000:
+            # 私有内存: 0x700000000 - 0x1effffffff (96GB)
             self.private_count += flit_num
         else:
+            # 未知地址范围，记录警告
             pass
 
     def process_file(self, file_path):
@@ -44,16 +48,17 @@ class AddressStat:
 
         for line in lines:
             data = line.strip().split(",")
-            if len(data) > 1:
+            # 新格式：时间,源节点,源IP,目标地址,目标IP,请求类型,burst长度
+            if len(data) >= 7:
                 time = int(data[0])
-                addr = data[1]
-                operation = data[2]
-                flit_num = int(data[-1])
+                addr = data[3]  # 目标地址在第4列
+                operation = data[5]  # 请求类型在第6列 (R/W)
+                flit_num = int(data[6])  # burst长度在第7列
 
                 try:
                     self.classify_address(addr, flit_num)
                 except ValueError as e:
-                    print(f"Error processing address in file {file_path}: {e}")
+                    print(f"文件 {file_path} 中地址处理错误: {e}")
 
                 if operation == "R":
                     self.read_flit_count += flit_num
@@ -62,7 +67,7 @@ class AddressStat:
                     self.write_flit_count += flit_num
                     self.time_distribution[time]["W"] += flit_num
                 else:
-                    print(f"Unknown operation '{operation}' in file {file_path}")
+                    print(f"文件 {file_path} 中未知操作类型 '{operation}'")
 
                 self.total_flit_count += flit_num
                 self.total_request_count += 1
@@ -71,20 +76,29 @@ class AddressStat:
             self.request_end_time = max(self.request_end_time, int(lines[-1].strip().split(",")[0]))
 
     def process_folder(self, input_folder, plot_data):
-        for root, dirs, files in os.walk(input_folder):
-            for file in files:
-                file_path = os.path.join(root, file)
-                if os.path.getsize(file_path) == 0:
-                    continue
-                self.process_file(file_path)
+        # 直接处理指定文件夹中的txt文件，不递归子目录
+        files = [f for f in os.listdir(input_folder) if f.endswith(".txt") and os.path.isfile(os.path.join(input_folder, f))]
 
-            if not files:
+        for file in files:
+            file_path = os.path.join(input_folder, file)
+            if os.path.getsize(file_path) == 0:
+                print(f"跳过空文件: {file}")
                 continue
 
-            # Calculate statistics
-            dir_name = root.rsplit("/", 1)[-1]
-            shared_64_percent = 100 * self.shared_64_count / self.total_flit_count if self.total_flit_count > 0 else 0
-            shared_8_percent = 100 * self.shared_8_count / self.total_flit_count if self.total_flit_count > 0 else 0
+            print(f"正在处理文件: {file}")
+            # 重置统计数据，为每个文件单独统计
+            self.init_params()
+            self.process_file(file_path)
+
+            if self.total_request_count == 0:
+                print(f"文件 {file} 中没有有效数据")
+                continue
+
+            # 计算统计信息（使用文件名作为标识）
+            file_name = os.path.splitext(file)[0]  # 去掉.txt扩展名
+            shared_32ch_percent = 100 * self.shared_32ch_count / self.total_flit_count if self.total_flit_count > 0 else 0
+            shared_16ch_percent = 100 * self.shared_16ch_count / self.total_flit_count if self.total_flit_count > 0 else 0
+            shared_8ch_percent = 100 * self.shared_8ch_count / self.total_flit_count if self.total_flit_count > 0 else 0
             private_percent = 100 * self.private_count / self.total_flit_count if self.total_flit_count > 0 else 0
             read_percent = 100 * self.read_flit_count / self.total_flit_count if self.total_flit_count > 0 else 0
             write_percent = 100 * self.write_flit_count / self.total_flit_count if self.total_flit_count > 0 else 0
@@ -93,42 +107,48 @@ class AddressStat:
             total_bandwidth = self.total_flit_count * 128 / (1024 * self.request_end_time) if self.request_end_time > 0 else 0
             total_flit_per_cycle = self.total_flit_count / (32 * self.request_end_time) if self.request_end_time > 0 else 0
 
-            # Print to console
-            print(f"Directory: {dir_name}")
-            print(f"64 shared flits: {self.shared_64_count}, {shared_64_percent:.1f} %")
-            print(f"8 shared flits: {self.shared_8_count}, {shared_8_percent:.1f} %")
-            print(f"Private flits: {self.private_count}, {private_percent:.1f} %")
-            print(f"Read flit: {self.read_flit_count}, {read_percent:.1f}%, {read_flit_per_cycle:.2f} flit/Cycle/IP")
-            print(f"Write flit: {self.write_flit_count}, {write_percent:.1f}%, {write_flit_per_cycle:.2f} flit/Cycle/IP")
-            print(f"Total flit num: {self.total_flit_count}, {total_bandwidth:.2f} TB/s, {total_flit_per_cycle:.2f} flit/Cycle/IP")
-            print(f"Total Request num: {self.total_request_count}")
-            print(f"Request end time: {self.request_end_time} \n")
+            # 控制台输出统计信息
+            print(f"文件: {file_name}")
+            print("=" * 50)
+            print("内存访问分布:")
+            print(f"  32通道共享内存: {self.shared_32ch_count:,} flits, {shared_32ch_percent:.1f}%")
+            print(f"  16通道共享内存: {self.shared_16ch_count:,} flits, {shared_16ch_percent:.1f}%")
+            print(f"  8通道共享内存:  {self.shared_8ch_count:,} flits, {shared_8ch_percent:.1f}%")
+            print(f"  私有内存:       {self.private_count:,} flits, {private_percent:.1f}%")
+            print("\n读写操作分布:")
+            print(f"  读操作: {self.read_flit_count:,} flits, {read_percent:.1f}%, {read_flit_per_cycle:.2f} flit/周期/IP")
+            print(f"  写操作: {self.write_flit_count:,} flits, {write_percent:.1f}%, {write_flit_per_cycle:.2f} flit/周期/IP")
+            print(f"\n总体统计:")
+            print(f"  总flit数量: {self.total_flit_count:,}, 总带宽: {total_bandwidth:.2f} TB/s")
+            print(f"  总请求数量: {self.total_request_count:,}")
+            print(f"  请求结束时间: {self.request_end_time:,} 周期")
+            print("=" * 50 + "\n")
 
-            # Store results for CSV
+            # 存储CSV结果
             self.results.append(
                 {
-                    "Traffic_name": dir_name,
-                    # "64_shared_flits": self.shared_64_count,
-                    "64_shared_percent": shared_64_percent / 100,
-                    # "8_shared_flits": self.shared_8_count,
-                    "8_shared_percent": shared_8_percent / 100,
-                    # "private_flits": self.private_count,
-                    "private_percent": private_percent / 100,
-                    # "read_flits": self.read_flit_count,
-                    "read_percent": read_percent / 100,
-                    # "read_flit_per_cycle": read_flit_per_cycle,
-                    # "write_flits": self.write_flit_count,
-                    "write_percent": write_percent / 100,
-                    # "write_flit_per_cycle": write_flit_per_cycle,
-                    "total_flits": self.total_flit_count,
-                    "total_bandwidth": total_bandwidth,
-                    # "total_flit_per_cycle": total_flit_per_cycle,
-                    "total_requests": self.total_request_count,
-                    "end_time": self.request_end_time,
+                    "流量名称": file_name,
+                    "32通道共享内存占比": shared_32ch_percent / 100,
+                    "16通道共享内存占比": shared_16ch_percent / 100,
+                    "8通道共享内存占比": shared_8ch_percent / 100,
+                    "私有内存占比": private_percent / 100,
+                    "读操作占比": read_percent / 100,
+                    "写操作占比": write_percent / 100,
+                    "总flit数量": self.total_flit_count,
+                    "总带宽TB_s": total_bandwidth,
+                    "总请求数量": self.total_request_count,
+                    "结束时间": self.request_end_time,
+                    "32通道flit数": self.shared_32ch_count,
+                    "16通道flit数": self.shared_16ch_count,
+                    "8通道flit数": self.shared_8ch_count,
+                    "私有内存flit数": self.private_count,
+                    "读flit数": self.read_flit_count,
+                    "写flit数": self.write_flit_count,
                 }
             )
-            if plot_data:
-                self.plot_time_distribution(dir_name, self.request_end_time // self.interval_num)
+            # 暂时注释绘图功能
+            # if plot_data:
+            #     self.plot_time_distribution(dir_name, self.request_end_time // self.interval_num)
             self.init_params()
 
     def aggregate_time_distribution(self, interval):
@@ -195,49 +215,51 @@ class AddressStat:
 
     def save_to_csv(self, output_file):
         if not self.results:
-            print("No results to save.")
+            print("没有结果可保存。")
             return
 
-        # Define the CSV fieldnames
+        # 定义CSV字段名
         fieldnames = [
-            "Traffic_name",
-            "end_time",
-            "total_requests",
-            "total_flits",
-            "total_bandwidth",
-            # "64_shared_flits",
-            # "8_shared_flits",
-            # "private_flits",
-            "64_shared_percent",
-            "8_shared_percent",
-            "private_percent",
-            # "read_flits",
-            # "read_flit_per_cycle",
-            "read_percent",
-            # "write_flits",
-            "write_percent",
-            # "write_flit_per_cycle",
-            # "total_flit_per_cycle",
+            "流量名称",
+            "结束时间",
+            "总请求数量",
+            "总flit数量",
+            "总带宽TB_s",
+            "32通道共享内存占比",
+            "16通道共享内存占比",
+            "8通道共享内存占比",
+            "私有内存占比",
+            "读操作占比",
+            "写操作占比",
+            "32通道flit数",
+            "16通道flit数",
+            "8通道flit数",
+            "私有内存flit数",
+            "读flit数",
+            "写flit数",
         ]
 
-        # Write to CSV
-        with open(output_file, "w", newline="") as csvfile:
+        # 按流量名称排序结果
+        sorted_results = sorted(self.results, key=lambda x: x["流量名称"])
+
+        # 写入CSV文件，使用UTF-8 BOM确保Excel正确显示中文
+        with open(output_file, "w", newline="", encoding="utf-8-sig") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(self.results)
+            writer.writerows(sorted_results)
 
-        print(f"Results saved to {output_file}")
+        print(f"结果已保存到: {output_file}")
 
     def run(self, input_folder, output_csv=None, plot_data=False):
         self.process_folder(input_folder, plot_data)
         if output_csv:
             self.save_to_csv(output_csv)
-        print("Processing has been completed.")
+        print("流量分析处理完成。")
 
 
 if __name__ == "__main__":
     stat = AddressStat(200)
     # Specify the output CSV file path
     output_csv = None
-    output_csv = r"../../Result/Data_csv/DeepSeek_traffic_stats_0722.csv"
-    stat.run(r"../../traffic/DeepSeek_0616/step1_flatten/", output_csv, plot_data=1)
+    output_csv = r"../../Result/Data_csv/DeepSeek_traffic_stats_0918.csv"
+    stat.run(r"../../traffic/DeepSeek_0918/merged/", output_csv, plot_data=0)

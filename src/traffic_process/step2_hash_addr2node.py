@@ -142,9 +142,9 @@ class AddressHasher:
             processed_data = [
                 data[1],  # end_req (请求结束时间)
                 self.ip2node(tpu_num),  # 源节点
-                "gdma",   # 源类型 (固定为gdma)
+                "gdma",  # 源类型 (固定为gdma)
                 self.ip2node(self.hash_all(addr=data[4])),  # 目标节点 (地址hash结果)
-                "ddr",    # 目标类型 (固定为ddr)
+                "ddr",  # 目标类型 (固定为ddr)
                 data[5],  # r/w (请求类型)
                 data[7],  # burst_len (burst长度)
             ]
@@ -157,7 +157,7 @@ class AddressHasher:
         # 确保输出目录存在
         output_file_path = os.path.join(output_folder, os.path.relpath(file_path, start=input_folder))
         # 将输出文件扩展名改为.txt
-        output_file_path = os.path.splitext(output_file_path)[0] + '.txt'
+        output_file_path = os.path.splitext(output_file_path)[0] + ".txt"
         os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
 
         # 将处理后的数据写入新文件
@@ -204,6 +204,6 @@ class AddressHasher:
 if __name__ == "__main__":
     hasher = AddressHasher()
 
-    input_folder = r"../output/step1_flatten"
+    input_folder = r"../../traffic/DeepSeek_0918/step1_flatten"
     output_folder = "../output/step2_hash_addr2node"
     hasher.run(input_folder, output_folder)
