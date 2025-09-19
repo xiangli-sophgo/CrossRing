@@ -32,7 +32,7 @@ def main():
     model_type = "REQ_RSP"
     # model_type = "Packet_Base"
 
-    config_path = r"../config/config2.json"
+    config_path = r"../config/topologies/topo_5x4.yaml"
     config = CrossRingConfig(config_path)
     if not config.TOPO_TYPE:
         # topo_type = "4x9"

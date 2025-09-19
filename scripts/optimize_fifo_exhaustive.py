@@ -1419,7 +1419,7 @@ def main():
     print("=" * 60)
 
     # 配置
-    config_path = "../config/config2.json"
+    config_path = "../config/topologies/topo_5x4.yaml"
     topo_type = "5x4"
     traffic_files = ["LLama2_AllReduce.txt"]
     traffic_weights = [1.0]

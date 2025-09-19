@@ -1109,7 +1109,7 @@ def find_optimal_parameters():
     assert len(traffic_files) == len(traffic_weights), "traffic文件数量和权重数量必须一致"
     assert abs(sum(traffic_weights) - 1.0) < 1e-6, "权重总和必须等于1"
 
-    config_path = r"../config/config2.json"
+    config_path = r"../config/topologies/topo_5x4.yaml"
     config = CrossRingConfig(config_path)
 
     # topo_type = "3x3"

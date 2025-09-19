@@ -512,7 +512,7 @@ def main():
     ]
 
     # 文件路径配置
-    config_path = "../config/config2.json"
+    config_path = "../config/topologies/topo_5x4.yaml"
     # traffic_path = "../traffic/traffic0730"
     traffic_path = "../traffic/0617"
     # 仿真配置

@@ -12,7 +12,7 @@ CDMA带宽并行行为分析脚本 - 修复版本
 
 Usage:
     python scripts/two_micro_batch.py \
-        --config ../config/config2.json \
+        --config ../config/topologies/topo_5x4.yaml \
         --traffic_path ../traffic/0617/ \
         --output_dir ../Result/cdma_analysis \
         --bandwidths 4 8 12 16 20 24 28 32 \
@@ -46,7 +46,7 @@ from src.core import REQ_RSP_model
 
 
 class CDMABandwidthAnalyzer:
-    def __init__(self, config_path="../config/config2.json", traffic_file_path="../traffic/0617/", output_dir="../Result/cdma_analysis/", cdma_bw_ranges=[4, 16, 32], run_timestamp=None):
+    def __init__(self, config_path="../config/topologies/topo_5x4.yaml", traffic_file_path="../traffic/0617/", output_dir="../Result/cdma_analysis/", cdma_bw_ranges=[4, 16, 32], run_timestamp=None):
         """
         初始化CDMA带宽分析器
 
@@ -609,7 +609,7 @@ def main():
     """命令行接口，执行CDMA带宽分析"""
 
     parser = argparse.ArgumentParser(description="CDMA bandwidth sweep - 优化版本")
-    parser.add_argument("--config", default="../config/config2.json", help="配置文件路径")
+    parser.add_argument("--config", default="../config/topologies/topo_5x4.yaml", help="配置文件路径")
     parser.add_argument("--traffic_path", default="../traffic/0617/", help="traffic文件目录")
     parser.add_argument("--output_dir", default=None, help="结果输出目录")
     parser.add_argument("--bandwidths", nargs="+", type=int, default=list(range(32, 3, -1)), help="待测试的CDMA带宽列表")

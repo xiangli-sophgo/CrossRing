@@ -392,7 +392,7 @@ def run_single_traffic(traffic_file, h_tags, v_tags, result_save_path):
         sim = None
         try:
             # 验证文件路径
-            config_path = os.path.abspath("../config/config2.json")
+            config_path = os.path.abspath("../config/topologies/topo_5x4.yaml")
             traffic_path = os.path.abspath("../traffic/0617")
 
             if not os.path.exists(config_path):

@@ -1,10 +1,8 @@
 import random
-from math import gcd
-from collections import defaultdict
 import numpy as np
 import itertools
-import random
 from itertools import product
+from abc import ABC, abstractmethod
 
 
 class TrafficGenerator:
@@ -33,6 +31,13 @@ class TrafficGenerator:
         return time_points
 
 
+def _create_traffic_generator(operation):
+    """创建流量生成器的工具函数"""
+    read_duration = 1280 if operation == "R" else 0
+    write_duration = 1280 if operation == "W" else 0
+    return TrafficGenerator(read_duration=read_duration, write_duration=write_duration)
+
+
 def group_numbers():
     """生成特殊分组的 4 个组（每组 8 个数字）"""
     points = list(range(32))
@@ -59,52 +64,28 @@ def group_numbers():
     return [group.tolist() for group in final_groups]
 
 
-def generate_data(topo, end_time, file_name, sdma_map, gdma_map, cdma_map, ddr_map, l2m_map, speed, burst, flow_type=0, mix_ratios=None, overlap=0, custom_mapping=None, req_type="R"):
-    """
-    :param custom_mapping: 自定义映射配置，格式如下：
-    {
-        'read': {
-            ('cdma', 12): [('ddr', 0), ('ddr', 1), ('ddr', 2), ('ddr', 3), ('ddr', 4), ('ddr', 5), ('ddr', 6), ('ddr', 7)],
-            ('cdma', 13): [('ddr', 8), ('ddr', 9), ('ddr', 10), ('ddr', 11), ('ddr', 12), ('ddr', 13), ('ddr', 14), ('ddr', 15)],
-            ('gdma', 0): [('l2m', 0), ('l2m', 1)]
-        },
-        'write': {
-            ('cdma', 12): [('l2m', 0), ('l2m', 1)],
-            ('cdma', 13): [('l2m', 2), ('l2m', 3)]
-        }
-    }
-    """
-    # 初始化流量生成器(默认读128ns+写128ns)
-    data_all = []
+class TrafficStrategy(ABC):
+    """流量生成策略抽象基类"""
 
-    def generate_entries(src_map, dest_map, operation, burst, flow_type, speed, end_time, dest_access_mode="random", overlap=True, src_type=None):
-        """
-        生成指定模式的流量条目，确保同一时刻所有dest都有访问
+    @abstractmethod
+    def generate(self, ip_maps, speed, burst, end_time, **kwargs):
+        """生成流量数据
 
         参数:
-        src_map: dict, 键为src_type(str)，值为对应的src_pos(list)
-        dest_map: dict, 键为dest_type(str)，值为对应的dest_pos(list)
-        operation: 'R' 或 'W'
-        burst: int, burst长度
-        flow_type: int, 1=8-shared, 2=private, 4=custom_mapping, 其他=32-shared
-        speed: dict, 支持IP类型特定带宽，格式: {burst: {ip_type: bandwidth}} 或 {burst: bandwidth}
-        end_time: int, 结束时间(ns)
-        dest_access_mode: 'round_robin' 或 'random'
-        overlap: bool, 是否让读写请求时间点重叠（True 时 time_offset 恒为 0）
-        src_type: str, 源IP类型（用于获取对应的带宽）
+        - ip_maps: IP映射字典 {'gdma': {...}, 'ddr': {...}, ...}
+        - speed: 带宽配置
+        - burst: burst长度
+        - end_time: 结束时间
+        - kwargs: 其他参数（overlap, req_type等）
         """
-        if dest_access_mode not in ("round_robin", "random"):
-            raise ValueError("dest_access_mode 必须是 'round_robin' 或 'random'")
-        read_duration = write_duration = 0
-        if operation == "R":
-            read_duration = 1280  # 增加到1280ns提高精确度
-        else:
-            write_duration = 1280  # 增加到1280ns提高精确度
-        generator = TrafficGenerator(read_duration=read_duration, write_duration=write_duration)
+        pass
 
-        is_read = operation == "R"
+    def _flatten_ip_items(self, ip_map):
+        """扁平化IP映射为(类型, 位置)列表"""
+        return [(ip_type, pos) for ip_type, poses in ip_map.items() for pos in poses]
 
-        # 获取适用的带宽值
+    def _get_effective_speed(self, speed, burst, src_type):
+        """获取有效带宽值"""
         effective_speed = speed
         if isinstance(speed, dict) and burst in speed:
             burst_speed = speed[burst]
@@ -114,180 +95,267 @@ def generate_data(topo, end_time, file_name, sdma_map, gdma_map, cdma_map, ddr_m
                 effective_speed = burst_speed["default"]
             elif not isinstance(burst_speed, dict):
                 effective_speed = burst_speed
+        return effective_speed
+
+    def _calculate_time_offset(self, overlap, is_read, generator):
+        """计算时间偏移的通用方法"""
+        if overlap:
+            return 0
+        else:
+            return 0 if is_read else generator.read_duration
+
+    def _get_source_types(self, src_type=None):
+        """获取源类型列表的通用方法"""
+        if src_type:
+            return [src_type] if isinstance(src_type, str) else src_type
+        return ["gdma", "sdma", "cdma"]
+
+    def _get_operations_for_source(self, src_type, req_type=None):
+        """根据源类型获取操作列表"""
+        if src_type == "gdma":
+            return [req_type] if req_type else ["R", "W"]
+        else:
+            return ["R", "W"]
+
+
+class TrafficDataGenerator:
+    """统一的流量数据生成器（不依赖拓扑）"""
+
+    def __init__(self):
+        """初始化生成器和各种策略"""
+        self.strategies = {
+            0: SharedTrafficStrategy(32),  # 32-shared
+            1: SharedTrafficStrategy(8),  # 8-shared
+            2: PrivateTrafficStrategy(),  # private
+            3: MixedTrafficStrategy(),  # mixed
+            4: CustomMappingStrategy(),  # custom mapping
+            5: MixedTrafficStrategy(),  # mixed variant
+        }
+
+    def generate(self, end_time, file_name, ip_maps, speed, burst, flow_type=0, **kwargs):
+        """主生成方法
+
+        参数:
+        - end_time: 结束时间
+        - file_name: 输出文件名
+        - ip_maps: IP映射字典 {'gdma': {...}, 'ddr': {...}, 'cdma': {...}, 'l2m': {...}, 'sdma': {...}}
+        - speed: 带宽配置
+        - burst: burst长度
+        - flow_type: 流量类型
+        - kwargs: 其他参数（mix_ratios, overlap, custom_mapping, req_type等）
+        """
+        # 根据flow_type选择策略
+        strategy = self.strategies.get(flow_type, self.strategies[0])
+
+        # 生成数据
+        data = strategy.generate(ip_maps, speed, burst, end_time, **kwargs)
+
+        # 保存到文件
+        self._save_to_file(data, file_name, end_time)
+
+    def _save_to_file(self, data, file_name, end_time):
+        """保存数据到文件"""
+        filtered_data = [line for line in data if int(line.split(",")[0]) < end_time]
+        with open(file_name, "w") as f:
+            f.writelines(sorted(filtered_data, key=lambda x: int(x.split(",")[0])))
+
+
+class SharedTrafficStrategy(TrafficStrategy):
+    """共享模式流量策略（支持8-shared和32-shared）"""
+
+    def __init__(self, share_size):
+        self.share_size = share_size
+
+    def generate(self, ip_maps, speed, burst, end_time, **kwargs):
+        """生成共享模式的流量数据"""
+        data_all = []
+        overlap = kwargs.get("overlap", 0)
+        req_type = kwargs.get("req_type", "R")
+
+        # 处理各种IP组合
+        for src_type in self._get_source_types():
+            if src_type in ip_maps and ip_maps[src_type]:
+                ops = self._get_operations_for_source(src_type, req_type)
+
+                for op in ops:
+                    dest_type = "ddr"
+                    if dest_type in ip_maps and ip_maps[dest_type]:
+                        entries = self._generate_shared_entries(ip_maps[src_type], ip_maps[dest_type], op, burst, speed, end_time, overlap, src_type)
+                        data_all.extend(entries)
+
+        return data_all
+
+    def _generate_shared_entries(self, src_map, dest_map, operation, burst, speed, end_time, overlap, src_type):
+        """生成共享模式的具体条目"""
+        generator = _create_traffic_generator(operation)
+        is_read = operation == "R"
+
+        # 获取有效带宽
+        effective_speed = self._get_effective_speed(speed, burst, src_type)
 
         time_pattern = generator.calculate_time_points(effective_speed, burst, is_read)
         entries = []
 
-        # 扁平化 src_map 和 dest_map
-        src_items = [(stype, pos) for stype, poses in src_map.items() for pos in poses]
-        dest_items = [(dtype, pos) for dtype, poses in dest_map.items() for pos in poses]
+        # 扁平化源和目标
+        src_items = self._flatten_ip_items(src_map)
+        dest_items = self._flatten_ip_items(dest_map)
 
-        # 为每个 src 单独创建轮询周期，顺序随机
-        dest_cycles = {}
-        for src_type, src in src_items:
-            shuffled = dest_items.copy()
-            random.shuffle(shuffled)
-            dest_cycles[(src_type, src)] = itertools.cycle(shuffled)
+        # 为8-shared使用分组逻辑
+        if self.share_size == 8:
+            groups = group_numbers()
+            # 为每个组创建目标列表
+            group_items = {gid: [item for item in dest_items if item[1] in g] for gid, g in enumerate(groups)}
 
-        # 预处理：轮询器 / 随机排列
-        if dest_access_mode == "round_robin":
-            if flow_type == 1:
-                groups = group_numbers()
-                group_cycles = {gid: itertools.cycle([item for item in dest_items if item[1] in g]) for gid, g in enumerate(groups)}
-        else:  # random
-            if flow_type == 1:
-                groups = group_numbers()
-                group_items = {gid: [item for item in dest_items if item[1] in g] for gid, g in enumerate(groups)}
-                generate_entries.group_access_idx = getattr(generate_entries, "group_access_idx", {})
-            else:
-                all_dest_combinations = list(product(*dest_map.values()))
-                random.shuffle(all_dest_combinations)
-                generate_entries.perm_idx = getattr(generate_entries, "perm_idx", 0)
-
-        # 生成条目 - 改为使用结束时间限制
         cycle = 0
         while True:
             base_time = cycle * generator.cycle_duration
 
-            # 根据 overlap 参数决定 time_offset
-            if overlap:
-                time_offset = 0
-            else:
-                time_offset = 0 if is_read else generator.read_duration
+            # 计算时间偏移
+            time_offset = self._calculate_time_offset(overlap, is_read, generator)
 
-            # 检查是否超过结束时间 - 检查这个周期内所有可能的时间点
-            max_time_in_cycle = base_time + time_offset + max(time_pattern) if time_pattern else base_time + time_offset
+            # 检查是否超过结束时间
             if base_time + time_offset >= end_time:
                 break
 
-            # 8-shared
-            if flow_type == 1:
-                groups = group_numbers()
-                for t in time_pattern:
+            for t in time_pattern:
+                if self.share_size == 8:  # 8-shared
                     for src_type, src in src_items:
+                        # 确定源所属的组
                         gid = next((i for i, g in enumerate(groups) if src in g), -1)
                         if gid < 0:
                             continue
 
-                        if dest_access_mode == "random":
-                            idx = generate_entries.group_access_idx.get(gid, 0) % len(group_items[gid])
-                            dest_type, dest = group_items[gid][idx]
-                            generate_entries.group_access_idx[gid] = idx + 1
-                        else:
-                            dest_type, dest = next(group_cycles[gid])
-
-                        timestamp = base_time + time_offset + t
-                        if timestamp < end_time:
-                            entries.append(f"{timestamp},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
-
-            # private
-            elif flow_type == 2:
-                for t in time_pattern:
-                    for src_type, src in src_items:
-                        # 优先匹配同号 dest
-                        match = next((item for item in dest_items if item[1] == src), None)
-                        if match:
-                            dest_type, dest = match
-                        else:
-                            if dest_access_mode == "random":
-                                perm = all_dest_combinations[generate_entries.perm_idx % len(all_dest_combinations)]
-                                dest_type, dest = perm[src_items.index((src_type, src)) % len(perm)]
-                                generate_entries.perm_idx += 1
-                            else:
-                                dest_type, dest = next(dest_cycles[(src_type, src)])
-
-                        timestamp = base_time + time_offset + t
-                        if timestamp < end_time:
-                            entries.append(f"{timestamp},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
-
-            # custom_mapping
-            elif flow_type == 4:
-                if custom_mapping and operation in custom_mapping:
-                    op_key = operation
-                    mapping = custom_mapping.get(op_key, {})
-
-                    for t in time_pattern:
-                        for src_type, src in src_items:
-                            # 查找该源DMA的自定义目标列表
-                            src_key = (src_type, src)
-                            if src_key in mapping:
-                                target_dests = mapping[src_key]
-                                # 轮询访问目标列表中的所有目标
-                                if not hasattr(generate_entries, "custom_cycles"):
-                                    generate_entries.custom_cycles = {}
-                                if src_key not in generate_entries.custom_cycles:
-                                    generate_entries.custom_cycles[src_key] = itertools.cycle(target_dests)
-
-                                dest_type, dest = next(generate_entries.custom_cycles[src_key])
-                                timestamp = base_time + time_offset + t
-                                if timestamp < end_time:
-                                    entries.append(f"{timestamp},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
-                            else:
-                                # 如果没有自定义映射，回退到默认行为
-                                if dest_access_mode == "random":
-                                    dest_type, dest = random.choice(dest_items)
-                                else:
-                                    dest_type, dest = next(dest_cycles[(src_type, src)])
-                                timestamp = base_time + time_offset + t
-                                if timestamp < end_time:
-                                    entries.append(f"{timestamp},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
-                else:
-                    # 没有自定义映射时，回退到默认32-shared行为
-                    for t in time_pattern:
-                        for src_type, src in src_items:
-                            if dest_access_mode == "random":
-                                dest_type, dest = random.choice(dest_items)
-                            else:
-                                dest_type, dest = next(dest_cycles[(src_type, src)])
+                        # 从对应组中随机选择目标
+                        if group_items[gid]:
+                            dest_type, dest = random.choice(group_items[gid])
                             timestamp = base_time + time_offset + t
                             if timestamp < end_time:
-                                entries.append(f"{timestamp},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
+                                entries.append(f"{timestamp},{src},{src_type},{dest},{dest_type},{operation},{burst}\n")
 
-            # 32-shared 或其他
-            else:
-                for t in time_pattern:
-                    if dest_access_mode == "random":
-                        generate_entries.dest_assignments = {}
-                        if t not in generate_entries.dest_assignments:
-                            shuffled = random.sample(dest_items, len(dest_items))
-                            generate_entries.dest_assignments[t] = itertools.cycle(shuffled)
-                        dest_cycle_t = generate_entries.dest_assignments[t]
-                    else:
-                        dest_cycle_t_dict = dest_cycles
+                else:  # 32-shared
                     for src_type, src in src_items:
-                        if dest_access_mode == "random":
-                            dest_type, dest = next(dest_cycle_t)
-                        else:
-                            dest_type, dest = next(dest_cycles[(src_type, src)])
+                        # 随机选择目标
+                        dest_type, dest = random.choice(dest_items)
                         timestamp = base_time + time_offset + t
                         if timestamp < end_time:
-                            entries.append(f"{timestamp},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
+                            entries.append(f"{timestamp},{src},{src_type},{dest},{dest_type},{operation},{burst}\n")
 
             cycle += 1
 
         return entries
 
-    def generate_mixed_entries(src_pos, src_type, dest_type, dest_pos, operation, burst, ratios, end_time):
-        """混合模式生成（保持原有逻辑，但区分读写时间）"""
+
+class PrivateTrafficStrategy(TrafficStrategy):
+    """私有模式流量策略"""
+
+    def generate(self, ip_maps, speed, burst, end_time, **kwargs):
+        """生成私有模式的流量数据"""
+        data_all = []
+        overlap = kwargs.get("overlap", 0)
+        req_type = kwargs.get("req_type", "R")
+
+        # 处理各种IP组合
+        for src_type in self._get_source_types():
+            if src_type in ip_maps and ip_maps[src_type]:
+                ops = self._get_operations_for_source(src_type, req_type)
+
+                for op in ops:
+                    dest_type = "ddr"
+                    if dest_type in ip_maps and ip_maps[dest_type]:
+                        entries = self._generate_private_entries(ip_maps[src_type], ip_maps[dest_type], op, burst, speed, end_time, overlap, src_type)
+                        data_all.extend(entries)
+
+        return data_all
+
+    def _generate_private_entries(self, src_map, dest_map, operation, burst, speed, end_time, overlap, src_type):
+        """生成私有模式的具体条目"""
+        generator = _create_traffic_generator(operation)
         is_read = operation == "R"
 
-        # 获取适用的带宽值
-        effective_speed = speed[burst]
-        if isinstance(speed[burst], dict) and src_type in speed[burst]:
-            effective_speed = speed[burst][src_type]
-        elif isinstance(speed[burst], dict) and "default" in speed[burst]:
-            effective_speed = speed[burst]["default"]
+        # 获取有效带宽
+        effective_speed = self._get_effective_speed(speed, burst, src_type)
 
+        time_pattern = generator.calculate_time_points(effective_speed, burst, is_read)
+        entries = []
+
+        # 扁平化源和目标
+        src_items = self._flatten_ip_items(src_map)
+        dest_items = self._flatten_ip_items(dest_map)
+
+        cycle = 0
+        while True:
+            base_time = cycle * generator.cycle_duration
+
+            # 计算时间偏移
+            time_offset = self._calculate_time_offset(overlap, is_read, generator)
+
+            # 检查是否超过结束时间
+            if base_time + time_offset >= end_time:
+                break
+
+            for t in time_pattern:
+                for src_type, src in src_items:
+                    # 私有模式：优先匹配同号目标
+                    match = next((item for item in dest_items if item[1] == src), None)
+                    if match:
+                        dest_type, dest = match
+                    else:
+                        # 如果没有匹配的，使用模运算
+                        dest_type, dest = dest_items[src % len(dest_items)]
+
+                    timestamp = base_time + time_offset + t
+                    if timestamp < end_time:
+                        entries.append(f"{timestamp},{src},{src_type},{dest},{dest_type},{operation},{burst}\n")
+
+            cycle += 1
+
+        return entries
+
+
+class MixedTrafficStrategy(TrafficStrategy):
+    """混合模式流量策略"""
+
+    def generate(self, ip_maps, speed, burst, end_time, **kwargs):
+        """生成混合模式的流量数据"""
+        mix_ratios = kwargs.get("mix_ratios", {0: 0.4, 1: 0.4, 2: 0.2})
+        overlap = kwargs.get("overlap", 0)
+
+        data_all = []
+
+        # 处理各种IP组合的混合流量
+        for src_type in self._get_source_types():
+            if src_type in ip_maps and ip_maps[src_type]:
+                # SDMA和CDMA: 读DDR + 写L2M
+                if src_type in ["sdma", "cdma"]:
+                    if "ddr" in ip_maps:
+                        entries = self._generate_mixed_entries(ip_maps[src_type], src_type, "ddr", ip_maps["ddr"], "R", burst, mix_ratios, speed, end_time)
+                        data_all.extend(entries)
+
+                    if "l2m" in ip_maps:
+                        entries = self._generate_mixed_entries(ip_maps[src_type], src_type, "l2m", ip_maps["l2m"], "W", burst, mix_ratios, speed, end_time)
+                        data_all.extend(entries)
+
+                # GDMA: 读L2M
+                elif src_type == "gdma":
+                    if "l2m" in ip_maps:
+                        entries = self._generate_mixed_entries(ip_maps[src_type], src_type, "l2m", ip_maps["l2m"], "R", burst, mix_ratios, speed, end_time)
+                        data_all.extend(entries)
+
+        return data_all
+
+    def _generate_mixed_entries(self, src_pos, src_type, dest_type, dest_pos, operation, burst, ratios, speed, end_time):
+        """混合模式生成（基于原有逻辑）"""
+        generator = _create_traffic_generator(operation)
+        is_read = operation == "R"
+
+        # 获取有效带宽
+        effective_speed = self._get_effective_speed(speed, burst, src_type)
+
+        # 计算各模式的带宽分配
         total_speed = effective_speed
         mode_speeds = {k: int(total_speed * v) for k, v in ratios.items()}
         dest_len = len(dest_pos)
         entries = []
-        read_duration = write_duration = 0
-        if operation == "R":
-            read_duration = 1280  # 增加到1280ns提高精确度
-        else:
-            write_duration = 1280  # 增加到1280ns提高精确度
-        generator = TrafficGenerator(read_duration=read_duration, write_duration=write_duration)
 
         cycle = 0
         while True:
@@ -307,20 +375,20 @@ def generate_data(topo, end_time, file_name, sdma_map, gdma_map, cdma_map, ddr_m
                 if mode == 0:  # 32-shared
                     shuffled_dest_pos = list(dest_pos)
                     random.shuffle(shuffled_dest_pos)
-                    dest_iter = iter(shuffled_dest_pos)  # 用迭代器逐个取
+                    dest_iter = iter(shuffled_dest_pos)
                 elif mode == 1:  # 8-shared
                     shuffled_group_dests = {}
                     for group in range(len(dest_pos) // 8):
                         group_dests = dest_pos[group * 8 : (group + 1) * 8]
                         random.shuffle(group_dests)
-                        shuffled_group_dests[group] = iter(group_dests)  # 每组一个迭代器
+                        shuffled_group_dests[group] = iter(group_dests)
 
                 for src in src_pos:
                     for t in time_pattern:
                         if mode == 0:  # 32-shared
                             try:
                                 dest = next(dest_iter)
-                            except StopIteration:  # 如果用完，重新打乱（可选）
+                            except StopIteration:
                                 random.shuffle(shuffled_dest_pos)
                                 dest_iter = iter(shuffled_dest_pos)
                                 dest = next(dest_iter)
@@ -329,7 +397,7 @@ def generate_data(topo, end_time, file_name, sdma_map, gdma_map, cdma_map, ddr_m
                             group = src // 8
                             try:
                                 dest = next(shuffled_group_dests[group])
-                            except StopIteration:  # 如果当前组用完，重新打乱（可选）
+                            except StopIteration:
                                 group_dests = dest_pos[group * 8 : (group + 1) * 8]
                                 random.shuffle(group_dests)
                                 shuffled_group_dests[group] = iter(group_dests)
@@ -340,510 +408,165 @@ def generate_data(topo, end_time, file_name, sdma_map, gdma_map, cdma_map, ddr_m
 
                         timestamp = base_time + time_offset + t
                         if timestamp < end_time:
-                            entries.append(f"{timestamp},{src},{src_type}," f"{dest},{dest_type},{operation},{burst}\n")
+                            entries.append(f"{timestamp},{src},{src_type},{dest},{dest_type},{operation},{burst}\n")
 
             cycle += 1
 
         return entries
 
-    if topo in ["4x4", "4x2"]:
-        data_all.extend(generate_entries(gdma_map, ddr_map, req_type, burst, flow_type, speed, end_time, overlap=overlap, src_type="gdma"))
-        # 添加CDMA相关的基础流量
-        if cdma_map:
-            data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed, end_time, overlap=overlap, src_type="cdma"))
-            data_all.extend(generate_entries(cdma_map, ddr_map, "W", burst, flow_type, speed, end_time, overlap=overlap, src_type="cdma"))
-        if sdma_map:
-            data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed, end_time, overlap=overlap, src_type="sdma"))
-            data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed, end_time, overlap=overlap, src_type="sdma"))
 
-    # 生成数据逻辑 - 增加CDMA相关的分支
-    if topo in ["4x9", "9x4", "4x5", "5x4"]:
-        if flow_type == 3:
-            mix_ratios = mix_ratios or {0: 0.4, 1: 0.4, 2: 0.2}
-            data_all.extend(generate_mixed_entries(sdma_map, "sdma", "ddr", ddr_map, "R", burst, mix_ratios))
-            data_all.extend(generate_mixed_entries(sdma_map, "sdma", "l2m", l2m_map, "W", burst, mix_ratios))
-            # 添加CDMA相关的混合流量
-            if cdma_map:
-                data_all.extend(generate_mixed_entries(cdma_map, "cdma", "ddr", ddr_map, "R", burst, mix_ratios))
-                data_all.extend(generate_mixed_entries(cdma_map, "cdma", "l2m", l2m_map, "W", burst, mix_ratios))
-        elif flow_type == 4:
-            # 使用自定义映射
-            if custom_mapping:
-                # 处理读操作
-                if "R" in custom_mapping:
-                    data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed, end_time, overlap=overlap, src_type="cdma"))
+class CustomMappingStrategy(TrafficStrategy):
+    """自定义映射流量策略"""
 
-                # 处理写操作
-                if "W" in custom_mapping:
-                    data_all.extend(generate_entries(cdma_map, ddr_map, "W", burst, flow_type, speed, end_time, overlap=overlap, src_type="cdma"))
-            else:
-                # 没有自定义映射时，使用默认行为
-                data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed, end_time, overlap=overlap, src_type="gdma"))
-                if cdma_map:
-                    data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed, end_time, overlap=overlap, src_type="cdma"))
-        else:
-            data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed, end_time, overlap=overlap, src_type="gdma"))
-            # 添加CDMA相关的基础流量
-            if cdma_map:
-                data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed, end_time, overlap=overlap, src_type="cdma"))
+    def generate(self, ip_maps, speed, burst, end_time, **kwargs):
+        """生成自定义映射的流量数据"""
+        custom_mapping = kwargs.get("custom_mapping", {})
+        overlap = kwargs.get("overlap", 0)
 
-    elif topo == "3x3":
-        if flow_type == 5:
-            mix_ratios = mix_ratios or {0: 0.4, 1: 0.4, 2: 0.2}
-            data_all.extend(generate_mixed_entries(sdma_map, "sdma", "ddr", ddr_map, "R", burst, mix_ratios))
-            data_all.extend(generate_mixed_entries(sdma_map, "sdma", "l2m", l2m_map, "W", burst, mix_ratios))
-            data_all.extend(generate_mixed_entries(gdma_map, "gdma", "l2m", l2m_map, "R", burst, mix_ratios))
-            # 添加CDMA相关的混合流量
-            if cdma_map:
-                data_all.extend(generate_mixed_entries(cdma_map, "cdma", "ddr", ddr_map, "R", burst, mix_ratios))
-                data_all.extend(generate_mixed_entries(cdma_map, "cdma", "l2m", l2m_map, "W", burst, mix_ratios))
-        elif flow_type == 4:
-            # 使用自定义映射
-            if custom_mapping:
-                # 处理读操作
-                if "R" in custom_mapping:
-                    # data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed[burst], end_time, overlap=overlap))
-                    data_all.extend(generate_entries(gdma_map, ddr_map, "R", burst, flow_type, speed, end_time, overlap=overlap, src_type="gdma"))
+        data_all = []
 
-                # 处理写操作
-                if "W" in custom_mapping:
-                    data_all.extend(generate_entries(cdma_map, l2m_map, "W", burst, flow_type, speed, end_time, overlap=overlap, src_type="cdma"))
-        else:
-            # 保持原有的逻辑
-            # data_all.extend(generate_entries(gdma_map, l2m_map, "R", burst, flow_type, speed[burst], end_time, overlap=overlap))
-            data_all.extend(generate_entries(gdma_map, ddr_map, "R", burst, flow_type, speed, end_time, overlap=overlap, src_type="gdma"))
-            # data_all.extend(generate_entries(gdma_map, ddr_map, "W", burst, flow_type, speed[burst], end_time, overlap=overlap))
-            # 添加CDMA相关的基础流量
-            if cdma_map:
-                data_all.extend(generate_entries(cdma_map, ddr_map, "R", burst, flow_type, speed, end_time, overlap=overlap, src_type="cdma"))
-                data_all.extend(generate_entries(cdma_map, ddr_map, "W", burst, flow_type, speed, end_time, overlap=overlap, src_type="cdma"))
-            # if sdma_map:
-            #     data_all.extend(generate_entries(sdma_map, ddr_map, "R", burst, flow_type, speed, end_time, overlap=overlap, src_type="sdma"))
-            #     data_all.extend(generate_entries(sdma_map, ddr_map, "W", burst, flow_type, speed, end_time, overlap=overlap, src_type="sdma"))
+        # 处理读操作
+        if "R" in custom_mapping:
+            for src_type in ["gdma", "cdma"]:
+                if src_type in ip_maps and ip_maps[src_type]:
+                    entries = self._generate_custom_entries(ip_maps[src_type], ip_maps.get("ddr", {}), "R", burst, speed, end_time, overlap, src_type, custom_mapping["R"])
+                    data_all.extend(entries)
 
-    # 过滤超出结束时间的数据并排序写入文件
-    filtered_data = [line for line in data_all if int(line.split(",")[0]) < end_time]
-    with open(file_name, "w") as f:
-        f.writelines(sorted(filtered_data, key=lambda x: int(x.split(",")[0])))
+        # 处理写操作
+        if "W" in custom_mapping:
+            for src_type in ["gdma", "cdma"]:
+                if src_type in ip_maps and ip_maps[src_type]:
+                    dest_map = ip_maps.get("l2m", {}) if src_type == "cdma" else ip_maps.get("ddr", {})
+                    entries = self._generate_custom_entries(ip_maps[src_type], dest_map, "W", burst, speed, end_time, overlap, src_type, custom_mapping["W"])
+                    data_all.extend(entries)
+
+        return data_all
+
+    def _generate_custom_entries(self, src_map, dest_map, operation, burst, speed, end_time, overlap, src_type, mapping):
+        """生成自定义映射的具体条目"""
+        generator = _create_traffic_generator(operation)
+        is_read = operation == "R"
+
+        # 获取有效带宽
+        effective_speed = self._get_effective_speed(speed, burst, src_type)
+
+        time_pattern = generator.calculate_time_points(effective_speed, burst, is_read)
+        entries = []
+
+        # 扁平化源
+        src_items = self._flatten_ip_items(src_map)
+
+        cycle = 0
+        while True:
+            base_time = cycle * generator.cycle_duration
+
+            # 计算时间偏移
+            time_offset = self._calculate_time_offset(overlap, is_read, generator)
+
+            # 检查是否超过结束时间
+            if base_time + time_offset >= end_time:
+                break
+
+            for t in time_pattern:
+                for src_type_key, src in src_items:
+                    # 查找该源的自定义目标列表
+                    src_key = (src_type_key, src)
+                    if src_key in mapping:
+                        target_dests = mapping[src_key]
+                        # 轮询访问目标列表中的所有目标
+                        if not hasattr(self, "custom_cycles"):
+                            self.custom_cycles = {}
+                        if src_key not in self.custom_cycles:
+                            self.custom_cycles[src_key] = itertools.cycle(target_dests)
+
+                        dest_type, dest = next(self.custom_cycles[src_key])
+                        timestamp = base_time + time_offset + t
+                        if timestamp < end_time:
+                            entries.append(f"{timestamp},{src},{src_type_key},{dest},{dest_type},{operation},{burst}\n")
+
+            cycle += 1
+
+        return entries
+
+
+def generate_data(topo, end_time, file_name, sdma_map, gdma_map, cdma_map, ddr_map, l2m_map, speed, burst, flow_type=0, mix_ratios=None, overlap=0, custom_mapping=None, req_type="R"):
+    """
+    流量数据生成函数 - 重构为使用新架构（向后兼容）
+
+    :param topo: 拓扑参数（已废弃，保留为兼容性）
+    :param end_time: 结束时间
+    :param file_name: 输出文件名
+    :param sdma_map: SDMA映射
+    :param gdma_map: GDMA映射
+    :param cdma_map: CDMA映射
+    :param ddr_map: DDR映射
+    :param l2m_map: L2M映射
+    :param speed: 带宽配置
+    :param burst: burst长度
+    :param flow_type: 流量类型
+    :param mix_ratios: 混合比例
+    :param overlap: 重叠参数
+    :param custom_mapping: 自定义映射配置
+    :param req_type: 请求类型
+    """
+    # 转换参数格式以适配新架构
+    ip_maps = {}
+
+    # 只添加非空的映射
+    if gdma_map:
+        ip_maps["gdma"] = gdma_map
+    if sdma_map:
+        ip_maps["sdma"] = sdma_map
+    if cdma_map:
+        ip_maps["cdma"] = cdma_map
+    if ddr_map:
+        ip_maps["ddr"] = ddr_map
+    if l2m_map:
+        ip_maps["l2m"] = l2m_map
+
+    # 创建新的生成器并生成数据
+    generator = TrafficDataGenerator()
+    generator.generate(
+        end_time=end_time, file_name=file_name, ip_maps=ip_maps, speed=speed, burst=burst, flow_type=flow_type, mix_ratios=mix_ratios, overlap=overlap, custom_mapping=custom_mapping, req_type=req_type
+    )
 
 
 # 示例使用
 if __name__ == "__main__":
     # 参数配置
     END_TIME = 6300  # 结束时间50000ns
-    TOPO = "4x2"
-    TOPO = "4x4"
-    REQ_TYEP = "R"
-    REQ_TYEP = "W"
-    C2C_TYPE = "wo"
-    # C2C_TYPE = "w"
-    SPARE_CORE = "wo"
-    # SPARE_CORE = "w"
-    FILE_NAME = f"../../test_data/2262_{TOPO}_{C2C_TYPE}c2c_{SPARE_CORE}SPC_{REQ_TYEP}.txt"
-    np.random.seed(715)
 
-    if TOPO == "5x4":
-        BURST = 4
-        NUM_IP = 16
-        SDMA_MAP = {}
-        GDMA_MAP = {}
+    np.random.seed(919)
 
-        CDMA_MAP = {
-            "cdma_0": [
-                16,
-                # 17,
-                # 18,
-                # 19,
-            ],
-        }
+    TOPO = "3x3"
+    REQ_TYPE = "R"
+    BURST = 4
+    NUM_IP = 64
+    FILE_NAME = f"../../test_data/{TOPO}_{REQ_TYPE}.txt"
 
-        DDR_MAP = {
-            # "ddr_0": range(NUM_IP),
-            # "ddr_1": range(NUM_IP),
-        }
-        L2M_MAP = {}
-
-        # 自定义映射配置：每个CDMA发送到特定的8个DDR
-        CUSTOM_MAPPING = {
-            "R": {
-                # ("cdma_0", 16): [
-                #     ("ddr_0", 0),
-                #     ("ddr_1", 0),
-                #     ("ddr_0", 4),
-                #     ("ddr_1", 4),
-                #     ("ddr_0", 8),
-                #     ("ddr_1", 8),
-                #     ("ddr_0", 12),
-                #     ("ddr_1", 12),
-                # ],
-                # ("cdma_0", 17): [
-                #     ("ddr_0", 1),
-                #     ("ddr_1", 1),
-                #     ("ddr_0", 5),
-                #     ("ddr_1", 5),
-                #     ("ddr_0", 9),
-                #     ("ddr_1", 9),
-                #     ("ddr_0", 13),
-                #     ("ddr_1", 13),
-                # ],
-                # ("cdma_0", 18): [
-                #     ("ddr_0", 2),
-                #     ("ddr_1", 2),
-                #     ("ddr_0", 6),
-                #     ("ddr_1", 6),
-                #     ("ddr_0", 10),
-                #     ("ddr_1", 10),
-                #     ("ddr_0", 14),
-                #     ("ddr_1", 14),
-                # ],
-                # ("cdma_0", 19): [
-                #     ("ddr_0", 3),
-                #     ("ddr_1", 3),
-                #     ("ddr_0", 7),
-                #     ("ddr_1", 7),
-                #     ("ddr_0", 11),
-                #     ("ddr_1", 11),
-                #     ("ddr_0", 15),
-                #     ("ddr_1", 15),
-                # ],
-            }
-        }
-
-    elif TOPO == "3x3":
-        BURST = 4
-        SDMA_MAP = {
-            # "sdma_0": [
-            #     # 0,
-            #     # 2,
-            #     # 6,
-            #     # 8,
-            # ],
-        }
-        GDMA_MAP = {
-            "gdma_0": [
-                3,
-                # 2,
-                # 6,
-                # 8,
-            ],
-            # "gdma_1": list(range(10)),
-        }
-        CDMA_MAP = {
-            # "cdma_0": [0, 2, 6, 8],
-        }
-        DDR_MAP = {
-            "ddr_0": [
-                4,
-                # 2,
-                # 3,
-                # 1,
-                # 6,
-                # 8,
-            ],
-            # "ddr_1": list(range(10)),
-            # "ddr_1": [0, 2, 3, 5, 6, 8],
-            # "ddr_2": [3, 5],
-            # "ddr_3": [3, 5],
-        }
-        L2M_MAP = {
-            # "l2m_0": [1, 7],
-            # "l2m_1": [1, 7],
-        }
-
-        CUSTOM_MAPPING = {}
-
-    elif TOPO == "4x4":
-        BURST = 4
-        NUM_IP = 16
-        SDMA_MAP = {
-            "sdma_0": [
-                15,
-            ],
-        }
-        GDMA_MAP = {
-            # "gdma_0": list(range((16))),
-            # 冗余core
-            "gdma_0": [
-                0,
-                1,
-                2,
-                # 3,
-                4,
-                5,
-                6,
-                7,
-                8,
-                9,
-                10,
-                11,
-                12,
-                13,
-                14,
-                15,
-            ],
-            "gdma_1": [13],
-        }
-        if SPARE_CORE == "wo":
-            GDMA_MAP = {
-                "gdma_0": list(range((16))),
-            }
-        CDMA_MAP = {
-            "cdma_0": [
-                14,
-                15,
-            ],
-            "cdma_1": [
-                14,
-            ],
-            "cdma_2": [
-                14,
-            ],
-            "cdma_3": [
-                14,
-            ],
-        }
-
-        DDR_MAP = {
-            "ddr_0": [
-                0,
-                3,
-                4,
-                7,
-                8,
-                11,
-                12,
-                15,
-            ],
-            "ddr_1": [
-                0,
-                3,
-                4,
-                7,
-                8,
-                11,
-                12,
-                15,
-            ],
-        }
-        L2M_MAP = {}
-
-        # 自定义映射配置：每个CDMA发送到特定的8个DDR
-        CUSTOM_MAPPING = {
-            "R": {
-                # ("cdma_0", 16): [
-                #     ("ddr_0", 0),
-                #     ("ddr_1", 0),
-                #     ("ddr_0", 4),
-                #     ("ddr_1", 4),
-                #     ("ddr_0", 8),
-                #     ("ddr_1", 8),
-                #     ("ddr_0", 12),
-                #     ("ddr_1", 12),
-                # ],
-                # ("cdma_0", 17): [
-                #     ("ddr_0", 1),
-                #     ("ddr_1", 1),
-                #     ("ddr_0", 5),
-                #     ("ddr_1", 5),
-                #     ("ddr_0", 9),
-                #     ("ddr_1", 9),
-                #     ("ddr_0", 13),
-                #     ("ddr_1", 13),
-                # ],
-                # ("cdma_0", 18): [
-                #     ("ddr_0", 2),
-                #     ("ddr_1", 2),
-                #     ("ddr_0", 6),
-                #     ("ddr_1", 6),
-                #     ("ddr_0", 10),
-                #     ("ddr_1", 10),
-                #     ("ddr_0", 14),
-                #     ("ddr_1", 14),
-                # ],
-                # ("cdma_0", 19): [
-                #     ("ddr_0", 3),
-                #     ("ddr_1", 3),
-                #     ("ddr_0", 7),
-                #     ("ddr_1", 7),
-                #     ("ddr_0", 11),
-                #     ("ddr_1", 11),
-                #     ("ddr_0", 15),
-                #     ("ddr_1", 15),
-                # ],
-            }
-        }
-
-    elif TOPO == "4x2":
-        BURST = 4
-        NUM_IP = 16
-        SDMA_MAP = {
-            "sdma_0": [
-                7,
-            ],
-        }
-        GDMA_MAP = {
-            "gdma_0": list(range((8))),
-            # "gdma_1": list(range((8))),
-            "gdma_1": [0, 2, 3, 4, 5, 6, 7],
-            "gdma_2": [6],
-        }
-        if SPARE_CORE == "wo":
-            GDMA_MAP = {
-                "gdma_0": list(range((8))),
-                "gdma_1": list(range((8))),
-            }
-
-        CDMA_MAP = {
-            "cdma_0": [
-                6,
-                7,
-            ],
-            "cdma_1": [
-                6,
-            ],
-            "cdma_2": [
-                6,
-            ],
-            "cdma_3": [
-                6,
-            ],
-        }
-
-        DDR_MAP = {
-            "ddr_0": list(range((8))),
-            "ddr_1": list(range((8))),
-        }
-        L2M_MAP = {}
-        CUSTOM_MAPPING = {}
+    SDMA_MAP = {}
+    GDMA_MAP = {
+        "gdma_0": list(range((32))),
+        # "gdma_1": list(range((16))),
+    }
+    DDR_MAP = {
+        "ddr_0": list(range((32))),
+        # "ddr_1": list(range((16))),
+    }
+    CDMA_MAP = {}
+    L2M_MAP = {}
+    CUSTOM_MAPPING = {}
 
     # 不同IP类型的带宽配置 (GB/s)
     SPEED = {
         1: {"gdma": 128, "sdma": 64, "cdma": 256},  # burst=1时各IP的带宽
         2: {"gdma": 128, "sdma": 64, "cdma": 256},  # burst=2时各IP的带宽
-        4: {"gdma": 105.3, "sdma": 32, "cdma": 25.2},  # burst=4时各IP的带宽
-        # 4: {"gdma": 115.2, "sdma": 0, "cdma": 0},  # burst=4时各IP的带宽
+        4: {"gdma": 128, "sdma": 32, "cdma": 25.2},  # burst=4时各IP的带宽
     }
-    if C2C_TYPE == "wo":
-        SPEED[4] = {"gdma": 115.2, "sdma": 0, "cdma": 0}
+
     overlap = 1
 
     # 生成数据，使用flow_type=4启用自定义映射
-    generate_data(TOPO, END_TIME, FILE_NAME, SDMA_MAP, GDMA_MAP, CDMA_MAP, DDR_MAP, L2M_MAP, SPEED, BURST, flow_type=3, overlap=overlap, custom_mapping=CUSTOM_MAPPING)
+    generate_data(TOPO, END_TIME, FILE_NAME, SDMA_MAP, GDMA_MAP, CDMA_MAP, DDR_MAP, L2M_MAP, SPEED, BURST, flow_type=3, overlap=overlap, custom_mapping=CUSTOM_MAPPING, req_type=REQ_TYPE)
 
     print(f"Traffic data generated successfully! {FILE_NAME}")
-
-
-def batch_generate_all_combinations():
-    """批量生成所有参数组合的数据流"""
-    import itertools
-
-    # 定义所有参数组合
-    TOPO_OPTIONS = ["4x2", "4x4"]
-    REQ_TYPE_OPTIONS = ["R", "W"]
-    C2C_TYPE_OPTIONS = ["wo", "w"]
-    SPARE_CORE_OPTIONS = ["wo", "w"]
-
-    END_TIME = 6300
-    np.random.seed(715)
-
-    # 遍历所有组合
-    for topo, req_type, c2c_type, spare_core in itertools.product(TOPO_OPTIONS, REQ_TYPE_OPTIONS, C2C_TYPE_OPTIONS, SPARE_CORE_OPTIONS):
-        print(f"生成配置: TOPO={topo}, REQ_TYPE={req_type}, C2C_TYPE={c2c_type}, SPARE_CORE={spare_core}")
-
-        # 生成文件名
-        file_name = f"../../test_data/2262_{topo}_{c2c_type}c2c_{spare_core}SPC_{req_type}.txt"
-
-        # 根据拓扑配置参数
-        if topo == "4x4":
-            BURST = 4
-            NUM_IP = 16
-
-            if spare_core == "wo":
-                GDMA_MAP = {
-                    "gdma_0": list(range(16)),
-                }
-            else:  # spare_core == "w"
-                GDMA_MAP = {
-                    "gdma_0": [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-                    "gdma_1": [13],
-                }
-            if c2c_type == "w":
-                SDMA_MAP = {
-                    "sdma_0": [15],
-                }
-                CDMA_MAP = {
-                    "cdma_0": [14, 15],
-                    "cdma_1": [14],
-                    "cdma_2": [14],
-                    "cdma_3": [14],
-                }
-            else:
-                CDMA_MAP = {}
-                SDMA_MAP = {}
-
-            DDR_MAP = {
-                "ddr_0": [0, 3, 4, 7, 8, 11, 12, 15],
-                "ddr_1": [0, 3, 4, 7, 8, 11, 12, 15],
-            }
-            L2M_MAP = {}
-
-        elif topo == "4x2":
-            BURST = 4
-            NUM_IP = 8
-
-            if spare_core == "wo":
-                GDMA_MAP = {
-                    "gdma_0": list(range(8)),
-                    "gdma_1": list(range(8)),
-                }
-            else:  # spare_core == "w"
-                GDMA_MAP = {
-                    "gdma_0": list(range(8)),
-                    "gdma_1": [0, 2, 3, 4, 5, 6, 7],
-                    "gdma_2": [6],
-                }
-            if c2c_type == "w":
-                SDMA_MAP = {
-                    "sdma_0": [7],
-                }
-                CDMA_MAP = {
-                    "cdma_0": [6, 7],
-                    "cdma_1": [6],
-                    "cdma_2": [6],
-                    "cdma_3": [6],
-                }
-            else:
-                CDMA_MAP = {}
-                SDMA_MAP = {}
-
-            DDR_MAP = {
-                "ddr_0": list(range(8)),
-                "ddr_1": list(range(8)),
-            }
-            L2M_MAP = {}
-
-        # 配置速度
-        SPEED = {
-            1: {"gdma": 128, "sdma": 64, "cdma": 256},
-            2: {"gdma": 128, "sdma": 64, "cdma": 256},
-            4: {"gdma": 105.3, "sdma": 32, "cdma": 25.2},
-        }
-
-        if c2c_type == "wo":
-            SPEED[4] = {"gdma": 115.2, "sdma": 0, "cdma": 0}
-
-        CUSTOM_MAPPING = {}
-        overlap = 1
-
-        # 生成数据
-        try:
-            generate_data(topo, END_TIME, file_name, SDMA_MAP, GDMA_MAP, CDMA_MAP, DDR_MAP, L2M_MAP, SPEED, BURST, flow_type=3, overlap=overlap, custom_mapping=CUSTOM_MAPPING, req_type=req_type)
-            print(f"✓ 成功生成: {file_name}")
-        except Exception as e:
-            print(f"✗ 生成失败: {file_name}, 错误: {e}")
-
-    print("批量生成完成！")
-
-
-# 如果要批量生成所有组合，取消下面的注释
-batch_generate_all_combinations()

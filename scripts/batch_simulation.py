@@ -262,7 +262,8 @@ def batch_simulate_all():
 
     # 参数设置
     model_type = "REQ_RSP"
-    config_path = r"../config/config2.json"
+    # 使用5x4拓扑的YAML配置文件
+    config_path = r"../config/topologies/topo_5x4.yaml"
     result_save_path = f"../Result/2262_0801_Sim/{model_type}/"
     traffic_base_path = "../test_data/"
 
