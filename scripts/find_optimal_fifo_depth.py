@@ -244,7 +244,8 @@ def find_optimal_fifo_depth():
                 sim.config.ITag_TRIGGER_Th_H = sim.config.ITag_TRIGGER_Th_V = 80
                 sim.config.ITag_MAX_NUM_H = sim.config.ITag_MAX_NUM_V = 1
                 sim.config.ETag_BOTHSIDE_UPGRADE = 0
-                sim.config.SLICE_PER_LINK = 8
+                sim.config.SLICE_PER_LINK_HORIZONTAL = 8
+                sim.config.SLICE_PER_LINK_VERTICAL = 8
 
                 sim.config.GDMA_RW_GAP = np.inf
                 sim.config.SDMA_RW_GAP = np.inf

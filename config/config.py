@@ -35,14 +35,13 @@ class CrossRingConfig:
         self.FLIT_SIZE = args.FLIT_SIZE
         self.SPARE_CORE_ROW = -1
         self.FAIL_CORE_POS = []
-        self.SLICE_PER_LINK = args.SLICE_PER_LINK
+        self.SLICE_PER_LINK_HORIZONTAL = args.SLICE_PER_LINK_HORIZONTAL
+        self.SLICE_PER_LINK_VERTICAL = args.SLICE_PER_LINK_VERTICAL
         self.RB_IN_FIFO_DEPTH = args.RB_IN_FIFO_DEPTH
         self.RB_OUT_FIFO_DEPTH = args.RB_OUT_FIFO_DEPTH
         self.IQ_OUT_FIFO_DEPTH_HORIZONTAL = args.IQ_OUT_FIFO_DEPTH_HORIZONTAL
         self.IQ_OUT_FIFO_DEPTH_VERTICAL = args.IQ_OUT_FIFO_DEPTH_VERTICAL
         self.IQ_OUT_FIFO_DEPTH_EQ = args.IQ_OUT_FIFO_DEPTH_EQ
-        # 保留 IQ_OUT_FIFO_DEPTH 用于向后兼容
-        self.IQ_OUT_FIFO_DEPTH = args.IQ_OUT_FIFO_DEPTH_HORIZONTAL
         self.EQ_IN_FIFO_DEPTH = args.EQ_IN_FIFO_DEPTH
         self.IQ_CH_FIFO_DEPTH = args.IQ_CH_FIFO_DEPTH
         self.EQ_CH_FIFO_DEPTH = args.EQ_CH_FIFO_DEPTH
@@ -410,15 +409,10 @@ class CrossRingConfig:
         parser.add_argument("--NUM_GDMA", type=int, default=default_config["NUM_GDMA"], help="Number of GDMA")
         parser.add_argument("--NUM_CDMA", type=int, default=default_config["NUM_CDMA"], help="Number of GDMA")
         parser.add_argument("--FLIT_SIZE", type=int, default=default_config["FLIT_SIZE"], help="Flit size")
-        parser.add_argument("--SLICE_PER_LINK", type=int, default=default_config["SLICE_PER_LINK"], help="Slice num per link, (num -2) equals to RTL slice num")
+        parser.add_argument("--SLICE_PER_LINK_HORIZONTAL", type=int, default=default_config["SLICE_PER_LINK_HORIZONTAL"], help="Slice num per horizontal link, (num -2) equals to RTL slice num")
+        parser.add_argument("--SLICE_PER_LINK_VERTICAL", type=int, default=default_config["SLICE_PER_LINK_VERTICAL"], help="Slice num per vertical link, (num -2) equals to RTL slice num")
         parser.add_argument("--RB_IN_FIFO_DEPTH", type=int, default=default_config["RB_IN_FIFO_DEPTH"], help="Depth of IN FIFOs in Ring Bridge")
         parser.add_argument("--RB_OUT_FIFO_DEPTH", type=int, default=default_config["RB_OUT_FIFO_DEPTH"], help="Depth of OUT FIFOs in Ring Bridge")
-        # 处理向后兼容性：如果只有 IQ_OUT_FIFO_DEPTH，使用它来初始化三个新参数
-        if "IQ_OUT_FIFO_DEPTH" in default_config and "IQ_OUT_FIFO_DEPTH_HORIZONTAL" not in default_config:
-            default_iq_depth = default_config["IQ_OUT_FIFO_DEPTH"]
-            default_config["IQ_OUT_FIFO_DEPTH_HORIZONTAL"] = default_iq_depth
-            default_config["IQ_OUT_FIFO_DEPTH_VERTICAL"] = default_iq_depth
-            default_config["IQ_OUT_FIFO_DEPTH_EQ"] = default_iq_depth
 
         parser.add_argument("--IQ_OUT_FIFO_DEPTH_HORIZONTAL", type=int, default=default_config.get("IQ_OUT_FIFO_DEPTH_HORIZONTAL", 6), help="Depth of IQ FIFOs for TR/TL in inject queues")
         parser.add_argument("--IQ_OUT_FIFO_DEPTH_VERTICAL", type=int, default=default_config.get("IQ_OUT_FIFO_DEPTH_VERTICAL", 6), help="Depth of IQ FIFOs for TU/TD in inject queues")

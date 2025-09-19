@@ -206,7 +206,15 @@ class Network:
         for i in range(config.NUM_NODE):
             for j in range(config.NUM_NODE):
                 if adjacency_matrix[i][j] == 1 and abs(i - j) != config.NUM_COL:
-                    self.links[(i, j)] = [None] * config.SLICE_PER_LINK
+                    # 判断链路类型：纵向链路还是横向链路
+                    if abs(i - j) == config.NUM_COL or abs(i - j) == config.NUM_COL * 2:
+                        # 纵向链路
+                        slice_count = config.SLICE_PER_LINK_VERTICAL
+                    else:
+                        # 横向链路
+                        slice_count = config.SLICE_PER_LINK_HORIZONTAL
+
+                    self.links[(i, j)] = [None] * slice_count
                     self.links_flow_stat[(i, j)] = {
                         "ITag_count": 0,
                         "empty_count": 0,
@@ -215,7 +223,7 @@ class Network:
                         "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
                         "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                     }
-                    self.links_tag[(i, j)] = [None] * config.SLICE_PER_LINK
+                    self.links_tag[(i, j)] = [None] * slice_count
             if i in range(0, config.NUM_COL):
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2

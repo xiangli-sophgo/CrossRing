@@ -60,7 +60,8 @@ class NetworkLinkVisualizer:
             self.EQ_depth = config.EQ_IN_FIFO_DEPTH
             self.RB_in_depth = config.RB_IN_FIFO_DEPTH
             self.RB_out_depth = config.RB_OUT_FIFO_DEPTH
-            self.slice_per_link = config.SLICE_PER_LINK
+            self.slice_per_link_horizontal = config.SLICE_PER_LINK_HORIZONTAL
+            self.slice_per_link_vertical = config.SLICE_PER_LINK_VERTICAL
             self.IQ_CH_depth = config.IQ_CH_FIFO_DEPTH
             self.EQ_CH_depth = config.EQ_CH_FIFO_DEPTH
             # 固定几何参数
@@ -984,7 +985,8 @@ class NetworkLinkVisualizer:
         # 当前点击选中的节点 (None 表示未选)
         self._selected_node = None
         # 绘制主网络的静态元素
-        self.slice_per_link = network.config.SLICE_PER_LINK
+        self.slice_per_link_horizontal = network.config.SLICE_PER_LINK_HORIZONTAL
+        self.slice_per_link_vertical = network.config.SLICE_PER_LINK_VERTICAL
         self.node_positions = self._calculate_layout()
         self.link_artists = {}  # 存储链路相关的静态信息
         self._colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
@@ -1323,7 +1325,14 @@ class NetworkLinkVisualizer:
         # 绘制所有链路的框架，这里不再赘述
         self.link_artists.clear()
         for src, dest in self.network.links.keys():
-            self._draw_link_frame(src, dest, slice_num=self.slice_per_link)
+            # 根据链路类型选择正确的 slice 数量
+            if abs(src - dest) == self.network.config.NUM_COL or abs(src - dest) == self.network.config.NUM_COL * 2:
+                # 纵向链路
+                slice_num = self.slice_per_link_vertical
+            else:
+                # 横向链路
+                slice_num = self.slice_per_link_horizontal
+            self._draw_link_frame(src, dest, slice_num=slice_num)
 
         # 根据节点位置自动调整显示范围
         if xs and ys:
@@ -1474,16 +1483,18 @@ class NetworkLinkVisualizer:
         # 队列框架中心点
         queue_center = (arrow_mid[0] + queue_dx, arrow_mid[1] + queue_dy)
 
-        # 队列框架的尺寸根据箭头方向决定
-        # 对于水平箭头：宽度为 queue_fixed_length，高度固定为 0.3（横版）
-        # 对于竖直箭头：宽度固定为 0.3，高度为 queue_fixed_length（竖版）
+        # 队列框架的尺寸根据箭头方向决定，动态调整长度保持 slice 接近正方形
+        # 期望的单个 slice 尺寸（接近正方形）
+        target_slice_size = 0.25
+        actual_slice_count = slice_num - 2  # 实际绘制的 slice 数量（减去首尾）
+
         is_horizontal = abs(dx) >= abs(dy)
         if is_horizontal:
-            queue_width = queue_fixed_length
             queue_height = 0.2
+            queue_width = target_slice_size * actual_slice_count if actual_slice_count > 0 else queue_fixed_length
         else:
             queue_width = 0.2
-            queue_height = queue_fixed_length
+            queue_height = target_slice_size * actual_slice_count if actual_slice_count > 0 else queue_fixed_length
 
         # 绘制队列框架矩形，中心位于 queue_center
         # queue = Rectangle((queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2), queue_width, queue_height, facecolor="white", edgecolor="black", linestyle="--")

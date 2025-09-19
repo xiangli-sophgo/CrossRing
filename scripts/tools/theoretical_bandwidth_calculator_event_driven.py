@@ -209,7 +209,8 @@ class Config:
     NUM_ROW: int = 10
     NUM_IP: int = 32
     FLIT_SIZE: int = 128
-    SLICE_PER_LINK: int = 8
+    SLICE_PER_LINK_HORIZONTAL: int = 8
+    SLICE_PER_LINK_VERTICAL: int = 8
     BURST: int = 4
     NETWORK_FREQUENCY: float = 2.0  # GHz
 
@@ -561,8 +562,18 @@ class EventDrivenCalculator:
         else:
             raise ValueError(f"找不到从节点{src}到节点{dest}的路径")
 
-        # 计算基础路径延迟：跳数 × slice数量 / 网络频率，向上取整
-        path_delay_cycles = hops * self.config.SLICE_PER_LINK
+        # 计算基础路径延迟：根据每个跳的链路类型累计 slice 数量
+        path_delay_cycles = 0
+        for i in range(len(path) - 1):
+            src_node = path[i]
+            dest_node = path[i + 1]
+            # 判断链路类型
+            if abs(src_node - dest_node) == self.config.NUM_COL or abs(src_node - dest_node) == self.config.NUM_COL * 2:
+                # 纵向链路
+                path_delay_cycles += self.config.SLICE_PER_LINK_VERTICAL
+            else:
+                # 横向链路
+                path_delay_cycles += self.config.SLICE_PER_LINK_HORIZONTAL
         base_path_delay_ns = math.ceil(path_delay_cycles / self.config.NETWORK_FREQUENCY)
 
         # 计算维度转换次数（XY路由）

@@ -186,8 +186,10 @@ class RingNetwork(Network):
             next_node = (i + 1) % self.num_nodes
             link_key = (i, next_node)
             if link_key not in self.links:
-                self.links[link_key] = [None] * self.config.SLICE_PER_LINK
-                self.links_tag[link_key] = [None] * self.config.SLICE_PER_LINK
+                # Ring 网络使用横向链路的 slice 数量
+                slice_count = getattr(self.config, 'SLICE_PER_LINK_HORIZONTAL', getattr(self.config, 'SLICE_PER_LINK', 8))
+                self.links[link_key] = [None] * slice_count
+                self.links_tag[link_key] = [None] * slice_count
                 self.links_flow_stat["read"][link_key] = 0
                 self.links_flow_stat["write"][link_key] = 0
 
@@ -195,8 +197,10 @@ class RingNetwork(Network):
             prev_node = (i - 1) % self.num_nodes
             link_key = (i, prev_node)
             if link_key not in self.links:
-                self.links[link_key] = [None] * self.config.SLICE_PER_LINK
-                self.links_tag[link_key] = [None] * self.config.SLICE_PER_LINK
+                # Ring 网络使用横向链路的 slice 数量
+                slice_count = getattr(self.config, 'SLICE_PER_LINK_HORIZONTAL', getattr(self.config, 'SLICE_PER_LINK', 8))
+                self.links[link_key] = [None] * slice_count
+                self.links_tag[link_key] = [None] * slice_count
                 self.links_flow_stat["read"][link_key] = 0
                 self.links_flow_stat["write"][link_key] = 0
 

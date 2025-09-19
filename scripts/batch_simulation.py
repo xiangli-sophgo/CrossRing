@@ -193,7 +193,8 @@ def run_single_simulation(traffic_file, topo_type, model_type, config_path, resu
     config.ITag_TRIGGER_Th_H = config.ITag_TRIGGER_Th_V = 80
     config.ITag_MAX_NUM_H = config.ITag_MAX_NUM_V = 1
     config.ETag_BOTHSIDE_UPGRADE = 0
-    config.SLICE_PER_LINK = 8
+    config.SLICE_PER_LINK_HORIZONTAL = 8
+    config.SLICE_PER_LINK_VERTICAL = 8
 
     config.GDMA_RW_GAP = np.inf
     config.SDMA_RW_GAP = np.inf

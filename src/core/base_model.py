@@ -1430,7 +1430,7 @@ class BaseModel:
                 current_node = col_start + i * interval
                 next_node = col_start + (i - 1) * interval
 
-                for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
+                for j in range(self.config.SLICE_PER_LINK_VERTICAL - 1, -1, -1):
                     if j == 0 and current_node == col_end:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
@@ -1448,7 +1448,7 @@ class BaseModel:
                 current_node = col_end - i * interval
                 next_node = col_end - (i - 1) * interval
 
-                for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
+                for j in range(self.config.SLICE_PER_LINK_VERTICAL - 1, -1, -1):
                     if j == 0 and current_node == col_start:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
                     elif j == 0:
@@ -1476,7 +1476,7 @@ class BaseModel:
 
             for i in range(1, self.config.NUM_COL):
                 current_node, next_node = row_start + i, row_start + i - 1
-                for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
+                for j in range(self.config.SLICE_PER_LINK_HORIZONTAL - 1, -1, -1):
                     if j == 0 and current_node == row_end:
                         if (current_node, current_node) in network.links_tag and (current_node, next_node) in network.links_tag:
                             network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
@@ -1496,7 +1496,7 @@ class BaseModel:
 
             for i in range(1, self.config.NUM_COL):
                 current_node, next_node = row_end - i, row_end - i + 1
-                for j in range(self.config.SLICE_PER_LINK - 1, -1, -1):
+                for j in range(self.config.SLICE_PER_LINK_HORIZONTAL - 1, -1, -1):
                     if j == 0 and current_node == row_start:
                         if (current_node, current_node) in network.links_tag and (current_node, next_node) in network.links_tag:
                             network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
