@@ -190,5 +190,5 @@ def main(input_path, output_path=None):
 
 
 if __name__ == "__main__":
-    input_path = r"../../traffic//DeepSeek_0918/step1_flatten/"
+    input_path = r"../../traffic/DeepSeek_0918/step1_flatten/"
     main(input_path, output_path="../output")

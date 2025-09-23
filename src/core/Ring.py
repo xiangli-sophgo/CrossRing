@@ -413,7 +413,6 @@ class RingModel(BaseModel):
                         elif network_type == "data":
                             req = self.req_network.send_flits[flit.packet_id][0]
                             flit.sync_latency_record(req)
-                            flit.data_entry_network_cycle = self.cycle
                             self.send_flits_num += 1
                             self.trans_flits_num += 1
                             if hasattr(flit, "traffic_id"):

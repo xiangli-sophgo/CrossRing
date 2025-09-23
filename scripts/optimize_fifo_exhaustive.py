@@ -134,18 +134,18 @@ FIFO_PARAMS = {
     # "IQ_OUT_FIFO_DEPTH_VERTICAL": {"range": [2, 8], "default": 8},
     # "IQ_OUT_FIFO_DEPTH_EQ": {"range": [2, 8], "default": 8},
     # "RB_OUT_FIFO_DEPTH": {"range": [2, 8], "default": 8},
-    "RB_IN_FIFO_DEPTH": {"range": [2, 12], "default": 16},
-    "EQ_IN_FIFO_DEPTH": {"range": [2, 12], "default": 16},
+    "RB_IN_FIFO_DEPTH": {"range": [2, 20], "default": 16},
+    # "EQ_IN_FIFO_DEPTH": {"range": [2, 12], "default": 16},
 }
 
 # ETag参数配置（包含约束关系）
 ETAG_PARAMS = {
-    "TL_Etag_T2_UE_MAX": {"range": [1, 11], "default": 8, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
-    "TL_Etag_T1_UE_MAX": {"range": [2, 11], "default": 15, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo_and_greater_than_t2", "corresponding_t2": "TL_Etag_T2_UE_MAX"},
-    "TR_Etag_T2_UE_MAX": {"range": [1, 11], "default": 12, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
-    "TU_Etag_T2_UE_MAX": {"range": [1, 11], "default": 8, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
-    "TU_Etag_T1_UE_MAX": {"range": [2, 11], "default": 15, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo_and_greater_than_t2", "corresponding_t2": "TU_Etag_T2_UE_MAX"},
-    "TD_Etag_T2_UE_MAX": {"range": [1, 11], "default": 12, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
+    "TL_Etag_T2_UE_MAX": {"range": [1, 19], "default": 8, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
+    "TL_Etag_T1_UE_MAX": {"range": [2, 19], "default": 15, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo_and_greater_than_t2", "corresponding_t2": "TL_Etag_T2_UE_MAX"},
+    "TR_Etag_T2_UE_MAX": {"range": [1, 19], "default": 12, "related_fifo": "RB_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
+    # "TU_Etag_T2_UE_MAX": {"range": [1, 11], "default": 8, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
+    # "TU_Etag_T1_UE_MAX": {"range": [2, 11], "default": 15, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo_and_greater_than_t2", "corresponding_t2": "TU_Etag_T2_UE_MAX"},
+    # "TD_Etag_T2_UE_MAX": {"range": [1, 11], "default": 12, "related_fifo": "EQ_IN_FIFO_DEPTH", "constraint": "less_than_fifo"},
 }
 
 # 合并所有参数

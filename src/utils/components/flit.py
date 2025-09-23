@@ -120,7 +120,6 @@ class Flit:
         "data_received_complete_cycle",
         "write_complete_received_cycle",  # 写完成响应接收时间
         "req_start_cycle",               # 请求开始处理时间（tracker消耗开始）
-        "data_entry_network_cycle",
         "rsp_entry_network_cycle",
         "transaction_latency",
         "cmd_latency",
@@ -228,7 +227,6 @@ class Flit:
         self.data_entry_noc_from_cake1_cycle = np.inf
         self.data_received_complete_cycle = np.inf
         self.write_complete_received_cycle = np.inf  # 写完成响应接收时间
-        self.data_entry_network_cycle = np.inf
         self.rsp_entry_network_cycle = np.inf
         self.transaction_latency = np.inf
         self.cmd_latency = np.inf

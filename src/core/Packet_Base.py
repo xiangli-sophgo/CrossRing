@@ -264,7 +264,6 @@ class Packet_Base_model(BaseModel):
                             queue_pre[flit.source] = flit
                             req = self.req_network.send_flits[flit.packet_id][0]
                             flit.sync_latency_record(req)
-                            flit.data_entry_network_cycle = self.cycle
                             if i == 0:
                                 self.send_read_flits_num_stat += 1
                                 self.node.sn_rdb[self.sn_type][ip_pos].pop(0)

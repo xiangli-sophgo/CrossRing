@@ -54,7 +54,6 @@ class RequestInfo:
     data_entry_noc_from_cake0_cycle: int = -1
     data_entry_noc_from_cake1_cycle: int = -1
     data_received_complete_cycle: int = -1
-    data_entry_network_cycle: int = -1
     rsp_entry_network_cycle: int = -1
     # 数据flit的尝试下环次数列表
     data_eject_attempts_h_list: List[int] = None
@@ -183,7 +182,7 @@ class BandwidthAnalyzer:
         self.network_frequency = config.NETWORK_FREQUENCY  # GHz
         self.plot_rn_bw_fig = plot_rn_bw_fig
         self.plot_flow_graph = plot_flow_graph
-        self.finish_cycle = -np.inf
+        self.finish_cycle = 0  # 修复：使用 0 而不是 -np.inf
 
         # 数据存储
         self.requests: List[RequestInfo] = []
@@ -196,6 +195,46 @@ class BandwidthAnalyzer:
 
         # 初始化节点位置
         self._initialize_node_positions()
+
+    @staticmethod
+    def is_valid_number(value) -> bool:
+        """检查数值是否有效（非 NaN/Inf）"""
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            return not (np.isnan(value) or np.isinf(value))
+        return False
+
+    @staticmethod
+    def sanitize_value(value, default=0.0):
+        """清理无效值，替换为默认值"""
+        if BandwidthAnalyzer.is_valid_number(value):
+            return value
+        return default
+
+    def validate_request(self, req: RequestInfo) -> bool:
+        """验证请求数据完整性"""
+        # 检查关键时间字段
+        if not self.is_valid_number(req.start_time):
+            return False
+        if not self.is_valid_number(req.end_time):
+            return False
+        if not self.is_valid_number(req.rn_end_time):
+            return False
+        if not self.is_valid_number(req.sn_end_time):
+            return False
+
+        # 检查数据大小字段
+        if not self.is_valid_number(req.total_bytes) or req.total_bytes <= 0:
+            return False
+        if not self.is_valid_number(req.burst_length) or req.burst_length <= 0:
+            return False
+
+        # 检查时间逻辑
+        if req.start_time > req.end_time:
+            return False
+
+        return True
 
     def _initialize_node_positions(self):
         """初始化RN和SN节点位置"""
@@ -223,15 +262,26 @@ class BandwidthAnalyzer:
             if not flits or len(flits) != flits[0].burst_length:
                 continue
 
-            representative_flit: Flit = flits[-1]
-            first_flit: Flit = flits[0]  # 用于获取entry时间戳
+            # 根据flit_id找到真正的第一个和最后一个flit
+            first_flit: Flit = min(flits, key=lambda f: f.flit_id)
+            representative_flit: Flit = max(flits, key=lambda f: f.flit_id)
 
-            # 计算不同角度的结束时间
+            # 计算不同角度的结束时间，并验证时间值有效性
+            if not self.is_valid_number(representative_flit.data_received_complete_cycle):
+                print(f"[警告] packet_id {packet_id}: data_received_complete_cycle 无效，跳过该请求")
+                continue
             network_end_time = representative_flit.data_received_complete_cycle // self.network_frequency
 
             if representative_flit.req_type == "read":
                 # 读请求：RN在收到数据时结束，SN在发出数据时结束
                 rn_end_time = representative_flit.data_received_complete_cycle // self.network_frequency  # RN收到数据
+
+                # # 验证 SN 结束时间
+                # if not self.is_valid_number(first_flit.data_entry_noc_from_cake1_cycle):
+                #     print(f"[警告] packet_id {packet_id}: data_entry_noc_from_cake1_cycle 无效，使用 0")
+                #     sn_end_time = 0
+                # else:
+                #     sn_end_time = first_flit.data_entry_noc_from_cake1_cycle // self.network_frequency  # SN发出数据
                 sn_end_time = first_flit.data_entry_noc_from_cake1_cycle // self.network_frequency  # SN发出数据
 
                 # 读请求：flit的source是SN(DDR/L2M)，destination是RN(SDMA/GDMA/CDMA)
@@ -241,6 +291,12 @@ class BandwidthAnalyzer:
                 actual_dest_type = representative_flit.original_destination_type  # 实际目标类型
             else:  # write
                 # 写请求：RN在发出数据时结束，SN在收到数据时结束
+                # 验证 RN 结束时间
+                # if not self.is_valid_number(first_flit.data_entry_noc_from_cake0_cycle):
+                #     print(f"[警告] packet_id {packet_id}: data_entry_noc_from_cake0_cycle 无效，使用 0")
+                #     rn_end_time = 0
+                # else:
+                # rn_end_time = first_flit.data_entry_noc_from_cake0_cycle // self.network_frequency  # RN发出数据
                 rn_end_time = first_flit.data_entry_noc_from_cake0_cycle // self.network_frequency  # RN发出数据
                 sn_end_time = representative_flit.data_received_complete_cycle // self.network_frequency  # SN收到数据
 
@@ -261,9 +317,20 @@ class BandwidthAnalyzer:
                 data_eject_attempts_h_list.append(data_flit.eject_attempts_h)
                 data_eject_attempts_v_list.append(data_flit.eject_attempts_v)
 
+            # 验证开始时间
+            if not self.is_valid_number(representative_flit.cmd_entry_cake0_cycle):
+                print(f"[警告] packet_id {packet_id}: cmd_entry_cake0_cycle 无效，跳过该请求")
+                continue
+            start_time = representative_flit.cmd_entry_cake0_cycle // self.network_frequency
+
+            # # 验证时间逻辑
+            # if start_time >= network_end_time or start_time > rn_end_time or start_time > sn_end_time:
+            #     print(f"[警告] packet_id {packet_id}: 时间逻辑错误 (start_time > end_time)，跳过该请求")
+            #     continue
+
             request_info = RequestInfo(
                 packet_id=packet_id,
-                start_time=representative_flit.cmd_entry_cake0_cycle // self.network_frequency,
+                start_time=start_time,
                 end_time=network_end_time,  # 整体网络结束时间
                 rn_end_time=rn_end_time,
                 sn_end_time=sn_end_time,
@@ -289,7 +356,6 @@ class BandwidthAnalyzer:
                 data_entry_noc_from_cake0_cycle=getattr(first_flit, "data_entry_noc_from_cake0_cycle", -1),
                 data_entry_noc_from_cake1_cycle=getattr(first_flit, "data_entry_noc_from_cake1_cycle", -1),
                 data_received_complete_cycle=getattr(representative_flit, "data_received_complete_cycle", -1),
-                data_entry_network_cycle=getattr(representative_flit, "data_entry_network_cycle", -1),
                 rsp_entry_network_cycle=getattr(representative_flit, "rsp_entry_network_cycle", -1),
                 # 数据flit的尝试下环次数列表
                 data_eject_attempts_h_list=data_eject_attempts_h_list,
@@ -317,8 +383,13 @@ class BandwidthAnalyzer:
             self.rn_bandwidth_time_series[port_key]["bytes"].append(representative_flit.burst_length * 128)
 
             # 更新finish_cycle
-            if representative_flit.data_received_complete_cycle != float("inf"):
+            if self.is_valid_number(representative_flit.data_received_complete_cycle):
                 self.finish_cycle = max(self.finish_cycle, representative_flit.data_received_complete_cycle)
+
+            # 验证请求完整性
+            if not self.validate_request(request_info):
+                print(f"[警告] packet_id {packet_id}: 请求数据验证失败，跳过该请求")
+                continue
 
             self.requests.append(request_info)
 
@@ -525,8 +596,8 @@ class BandwidthAnalyzer:
             # Prepare consistent color for this port_key's segments
             segment_color = None
             first_segment = True
-            # 去除nan
-            mask = ~np.isnan(raw_end)
+            # 去除nan和inf
+            mask = ~(np.isnan(raw_end) | np.isinf(raw_end))
             end_clean = raw_end[mask]
             start_clean = raw_start[mask]
             # 同步排序
@@ -609,9 +680,9 @@ class BandwidthAnalyzer:
             if not data_dict["time"]:
                 continue
 
-            # 排序时间戳并去除nan值
+            # 排序时间戳并去除nan和inf值
             raw_times = np.array(data_dict["time"])
-            clean_times = raw_times[~np.isnan(raw_times)]
+            clean_times = raw_times[~(np.isnan(raw_times) | np.isinf(raw_times))]
             times = np.sort(clean_times)
 
             if len(times) == 0:
@@ -793,7 +864,6 @@ class BandwidthAnalyzer:
                 data_entry_noc_from_cake0_cycle=req.data_entry_noc_from_cake0_cycle,
                 data_entry_noc_from_cake1_cycle=req.data_entry_noc_from_cake1_cycle,
                 data_received_complete_cycle=req.data_received_complete_cycle,
-                data_entry_network_cycle=req.data_entry_network_cycle,
                 rsp_entry_network_cycle=req.rsp_entry_network_cycle,
             )
             filtered_requests.append(temp_req)
@@ -823,7 +893,10 @@ class BandwidthAnalyzer:
         total_bytes = sum(req.total_bytes for req in filtered_requests)
 
         # 计算非加权带宽：总数据量 / 网络总时间 / IP数量
-        unweighted_bandwidth = (total_bytes / total_network_time) if total_network_time > 0 else 0.0
+        if total_network_time > 0 and self.is_valid_number(total_bytes) and total_bytes > 0:
+            unweighted_bandwidth = total_bytes / total_network_time
+        else:
+            unweighted_bandwidth = 0.0
 
         # 计算加权带宽：各区间带宽按flit数量加权平均
         if working_intervals:
@@ -833,12 +906,19 @@ class BandwidthAnalyzer:
             for interval in working_intervals:
                 weight = interval.flit_count  # 权重是工作时间段的flit数量
                 bandwidth = interval.bandwidth_bytes_per_ns  # bytes
-                total_weighted_bandwidth += bandwidth * weight
-                total_weight += weight
+
+                # 验证带宽值有效性
+                if self.is_valid_number(bandwidth) and self.is_valid_number(weight) and weight > 0:
+                    total_weighted_bandwidth += bandwidth * weight
+                    total_weight += weight
 
             weighted_bandwidth = (total_weighted_bandwidth / total_weight) if total_weight > 0 else 0.0
         else:
             weighted_bandwidth = 0.0
+
+        # 最终验证计算结果
+        unweighted_bandwidth = self.sanitize_value(unweighted_bandwidth, 0.0)
+        weighted_bandwidth = self.sanitize_value(weighted_bandwidth, 0.0)
 
         return BandwidthMetrics(
             unweighted_bandwidth=unweighted_bandwidth,
@@ -1847,7 +1927,7 @@ class BandwidthAnalyzer:
                     config_data["links_flow_stat"][f"{i},{j}"] = stats
 
             # 保存finish_cycle用于计算链路带宽
-            config_data["finish_cycle"] = float(self.finish_cycle)
+            config_data["finish_cycle"] = self.sanitize_value(self.finish_cycle, 0.0)
             config_data["network_name"] = getattr(network, "name", "Network")
 
         with open(config_file, "w", encoding="utf-8") as f:
@@ -1892,7 +1972,7 @@ class BandwidthAnalyzer:
         # 设置分析器属性
         # self.min_gap_threshold = config_data.get("min_gap_threshold", 50)
         self.network_frequency = config_data.get("network_frequency", 1.0)
-        self.finish_cycle = config_data.get("finish_cycle", 1000000)
+        self.finish_cycle = self.sanitize_value(config_data.get("finish_cycle", 0), 0)
 
         # 创建临时config对象
         class TempConfig:
@@ -1945,19 +2025,41 @@ class BandwidthAnalyzer:
                 src_dest_order_id = int(row.get("src_dest_order_id", -1))
                 packet_category = str(row.get("packet_category", ""))
 
+                # 验证并清理数据
+                try:
+                    packet_id = int(row["packet_id"])
+                    start_time = self.sanitize_value(row["start_time_ns"], 0)
+                    end_time = self.sanitize_value(row["end_time_ns"], 0)
+                    rn_end_time = self.sanitize_value(row["rn_end_time_ns"], 0)
+                    sn_end_time = self.sanitize_value(row["sn_end_time_ns"], 0)
+                    total_bytes = self.sanitize_value(row["total_bytes"], 0)
+                    burst_length = self.sanitize_value(row["burst_length"], 0)
+
+                    # 检查基本有效性
+                    if start_time <= 0 or end_time <= 0 or total_bytes <= 0 or burst_length <= 0:
+                        print(f"[警告] 跳过无效的读请求 packet_id {packet_id}")
+                        continue
+                    if start_time >= end_time:
+                        print(f"[警告] 跳过时间逻辑错误的读请求 packet_id {packet_id}")
+                        continue
+
+                except (ValueError, KeyError) as e:
+                    print(f"[警告] 跳过无法解析的读请求行: {e}")
+                    continue
+
                 request_info = RequestInfo(
-                    packet_id=int(row["packet_id"]),
-                    start_time=int(row["start_time_ns"]),
-                    end_time=int(row["end_time_ns"]),
-                    rn_end_time=int(row["end_time_ns"]),
-                    sn_end_time=int(row["end_time_ns"]),
+                    packet_id=packet_id,
+                    start_time=start_time,
+                    end_time=end_time,
+                    rn_end_time=rn_end_time,
+                    sn_end_time=sn_end_time,
                     req_type="read",
                     source_node=int(row["source_node"]),
                     dest_node=int(row["dest_node"]),
                     source_type=str(row["source_type"]),
                     dest_type=str(row["dest_type"]),
-                    burst_length=int(row["burst_length"]),
-                    total_bytes=int(row["burst_length"]) * 128,
+                    burst_length=burst_length,
+                    total_bytes=total_bytes,
                     cmd_latency=int(row["cmd_latency_ns"]),
                     data_latency=int(row["data_latency_ns"]),
                     transaction_latency=int(row["transaction_latency_ns"]),
@@ -1973,9 +2075,14 @@ class BandwidthAnalyzer:
                     data_entry_noc_from_cake0_cycle=int(row.get("data_entry_noc_from_cake0_cycle", -1)),
                     data_entry_noc_from_cake1_cycle=int(row.get("data_entry_noc_from_cake1_cycle", -1)),
                     data_received_complete_cycle=int(row.get("data_received_complete_cycle", -1)),
-                    data_entry_network_cycle=int(row.get("data_entry_network_cycle", -1)),
                     rsp_entry_network_cycle=int(row.get("rsp_entry_network_cycle", -1)),
                 )
+
+                # 验证请求完整性
+                if not self.validate_request(request_info):
+                    print(f"[警告] 跳过无效的读请求 packet_id {packet_id}")
+                    continue
+
                 self.requests.append(request_info)
 
                 # 更新节点位置信息（如果配置中没有）
@@ -1992,19 +2099,41 @@ class BandwidthAnalyzer:
                 src_dest_order_id = int(row.get("src_dest_order_id", -1))
                 packet_category = str(row.get("packet_category", ""))
 
+                # 验证并清理数据
+                try:
+                    packet_id = int(row["packet_id"])
+                    start_time = self.sanitize_value(row["start_time_ns"], 0)
+                    end_time = self.sanitize_value(row["end_time_ns"], 0)
+                    rn_end_time = self.sanitize_value(row["rn_end_time_ns"], 0)
+                    sn_end_time = self.sanitize_value(row["sn_end_time_ns"], 0)
+                    total_bytes = self.sanitize_value(row["total_bytes"], 0)
+                    burst_length = self.sanitize_value(row["burst_length"], 0)
+
+                    # 检查基本有效性
+                    if start_time <= 0 or end_time <= 0 or total_bytes <= 0 or burst_length <= 0:
+                        print(f"[警告] 跳过无效的写请求 packet_id {packet_id}")
+                        continue
+                    if start_time >= end_time:
+                        print(f"[警告] 跳过时间逻辑错误的写请求 packet_id {packet_id}")
+                        continue
+
+                except (ValueError, KeyError) as e:
+                    print(f"[警告] 跳过无法解析的写请求行: {e}")
+                    continue
+
                 request_info = RequestInfo(
-                    packet_id=int(row["packet_id"]),
-                    start_time=int(row["start_time_ns"]),
-                    end_time=int(row["end_time_ns"]),
-                    rn_end_time=int(row["end_time_ns"]),
-                    sn_end_time=int(row["end_time_ns"]),
+                    packet_id=packet_id,
+                    start_time=start_time,
+                    end_time=end_time,
+                    rn_end_time=rn_end_time,
+                    sn_end_time=sn_end_time,
                     req_type="write",
                     source_node=int(row["source_node"]),
                     dest_node=int(row["dest_node"]),
                     source_type=str(row["source_type"]),
                     dest_type=str(row["dest_type"]),
-                    burst_length=int(row["burst_length"]),
-                    total_bytes=int(row["burst_length"]) * 128,
+                    burst_length=burst_length,
+                    total_bytes=total_bytes,
                     cmd_latency=int(row["cmd_latency_ns"]),
                     data_latency=int(row["data_latency_ns"]),
                     transaction_latency=int(row["transaction_latency_ns"]),
@@ -2020,9 +2149,14 @@ class BandwidthAnalyzer:
                     data_entry_noc_from_cake0_cycle=int(row.get("data_entry_noc_from_cake0_cycle", -1)),
                     data_entry_noc_from_cake1_cycle=int(row.get("data_entry_noc_from_cake1_cycle", -1)),
                     data_received_complete_cycle=int(row.get("data_received_complete_cycle", -1)),
-                    data_entry_network_cycle=int(row.get("data_entry_network_cycle", -1)),
                     rsp_entry_network_cycle=int(row.get("rsp_entry_network_cycle", -1)),
                 )
+
+                # 验证请求完整性
+                if not self.validate_request(request_info):
+                    print(f"[警告] 跳过无效的写请求 packet_id {packet_id}")
+                    continue
+
                 self.requests.append(request_info)
 
                 # 更新节点位置信息（如果配置中没有）
@@ -2069,7 +2203,7 @@ class BandwidthAnalyzer:
 
         with open(report_file, "w", encoding="utf-8") as f:
             self._write_report_header(f, results)
-            self._write_network_overall_section(f, results["network_overall"])
+            self._write_network_overall_section(f, results)
             self._generate_ports_csv(results["rn_ports"], output_path)
 
         # 生成详细请求记录的CSV文件
@@ -2116,7 +2250,7 @@ class BandwidthAnalyzer:
         analyzer.rn_bandwidth_time_series = defaultdict(lambda: {"time": [], "start_times": [], "bytes": []})
         analyzer.plot_rn_bw_fig = plot_rn_bw
         analyzer.plot_flow_graph = plot_flow
-        analyzer.finish_cycle = -np.inf
+        analyzer.finish_cycle = 0  # 修复：使用 0 而不是 -np.inf
         analyzer.ip_bandwidth_data = None
         analyzer.min_gap_threshold = min_gap_threshold
 
@@ -2303,12 +2437,13 @@ class BandwidthAnalyzer:
 
         f.write("\n")
 
-    def _write_network_overall_section(self, f, network_overall):
+    def _write_network_overall_section(self, f, results):
         """写入网络整体带宽统计部分"""
         f.write("=" * 50 + "\n")
         f.write("网络带宽统计\n")
         f.write("=" * 50 + "\n\n")
 
+        network_overall = results["network_overall"]
         for operation in ["read", "write", "mixed"]:
             metrics = network_overall[operation]
             f.write(f"{operation.upper()} 操作带宽:\n")
@@ -2328,6 +2463,20 @@ class BandwidthAnalyzer:
                         f"持续{interval.duration}ns, {interval.flit_count}个flit, "
                         f"平均带宽{interval.bandwidth_bytes_per_ns / self.config.NUM_IP:.3f}GB/s\n"
                     )
+            f.write("\n")
+
+        # 添加绕环比例统计
+        circling_stats = results.get("circling_eject_stats", {})
+        if circling_stats:
+            f.write("绕环比例统计:\n")
+            h_ratio = circling_stats["horizontal"]["circling_ratio"]
+            v_ratio = circling_stats["vertical"]["circling_ratio"]
+            overall_ratio = circling_stats["overall"]["circling_ratio"]
+            f.write(f"  水平方向绕环比例: {h_ratio*100:.2f}%\n")
+            f.write(f"  垂直方向绕环比例: {v_ratio*100:.2f}%\n")
+            f.write(f"  整体绕环比例: {overall_ratio*100:.2f}%\n")
+            f.write(f"  水平绕环flit数: {circling_stats['horizontal']['circling_flits']}/{circling_stats['horizontal']['total_data_flits']}\n")
+            f.write(f"  垂直绕环flit数: {circling_stats['vertical']['circling_flits']}/{circling_stats['vertical']['total_data_flits']}\n")
             f.write("\n")
 
     def _generate_ports_csv(self, rn_ports: Dict[str, PortBandwidthMetrics], output_path: str):
@@ -2754,7 +2903,6 @@ class BandwidthAnalyzer:
             "data_entry_noc_from_cake0_cycle",
             "data_entry_noc_from_cake1_cycle",
             "data_received_complete_cycle",
-            "data_entry_network_cycle",
             "rsp_entry_network_cycle",
             # 新增的列
             "data_eject_attempts_h_list",
@@ -2788,7 +2936,6 @@ class BandwidthAnalyzer:
                     req.data_entry_noc_from_cake0_cycle,
                     req.data_entry_noc_from_cake1_cycle,
                     req.data_received_complete_cycle,
-                    req.data_entry_network_cycle,
                     req.rsp_entry_network_cycle,
                     # 新增的列
                     ",".join(map(str, req.data_eject_attempts_h_list)),  # 将列表转换为逗号分隔的字符串
@@ -2823,7 +2970,6 @@ class BandwidthAnalyzer:
                     req.data_entry_noc_from_cake0_cycle,
                     req.data_entry_noc_from_cake1_cycle,
                     req.data_received_complete_cycle,
-                    req.data_entry_network_cycle,
                     req.rsp_entry_network_cycle,
                     # 新增的列
                     ",".join(map(str, req.data_eject_attempts_h_list)),  # 将列表转换为逗号分隔的字符串
