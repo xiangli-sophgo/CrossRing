@@ -268,16 +268,16 @@ class IPInterface:
         try:
             if req.req_type == "read":
                 # 检查读请求资源
-                rdb_available = self.node.rn_rdb_count[ip_type][ip_pos] >= req.burst_length
-                tracker_available = self.node.rn_tracker_count["read"][ip_type][ip_pos] > 0
-                reserve_ok = self.node.rn_rdb_count[ip_type][ip_pos] > self.node.rn_rdb_reserve[ip_type][ip_pos] * req.burst_length
+                rdb_available = self.node.rn_rdb_count[ip_type][ip_pos]["count"] >= req.burst_length
+                tracker_available = self.node.rn_tracker_count["read"][ip_type][ip_pos]["count"] > 0
+                reserve_ok = self.node.rn_rdb_count[ip_type][ip_pos]["count"] > self.node.rn_rdb_reserve[ip_type][ip_pos] * req.burst_length
 
                 if not (rdb_available and tracker_available and reserve_ok):
                     return False
 
                 # 预占资源
-                self.node.rn_rdb_count[ip_type][ip_pos] -= req.burst_length
-                self.node.rn_tracker_count["read"][ip_type][ip_pos] -= 1
+                self.node.rn_rdb_count[ip_type][ip_pos]["count"] -= req.burst_length
+                self.node.rn_tracker_count["read"][ip_type][ip_pos]["count"] -= 1
                 self.node.rn_rdb[ip_type][ip_pos][req.packet_id] = []
                 req.cmd_entry_cake0_cycle = self.current_cycle  # 这里记录cycle
                 self.node.rn_tracker["read"][ip_type][ip_pos].append(req)
@@ -285,15 +285,15 @@ class IPInterface:
 
             elif req.req_type == "write":
                 # 检查写请求资源
-                wdb_available = self.node.rn_wdb_count[ip_type][ip_pos] >= req.burst_length
-                tracker_available = self.node.rn_tracker_count["write"][ip_type][ip_pos] > 0
+                wdb_available = self.node.rn_wdb_count[ip_type][ip_pos]["count"] >= req.burst_length
+                tracker_available = self.node.rn_tracker_count["write"][ip_type][ip_pos]["count"] > 0
 
                 if not (wdb_available and tracker_available):
                     return False
 
                 # 预占资源
-                self.node.rn_wdb_count[ip_type][ip_pos] -= req.burst_length
-                self.node.rn_tracker_count["write"][ip_type][ip_pos] -= 1
+                self.node.rn_wdb_count[ip_type][ip_pos]["count"] -= req.burst_length
+                self.node.rn_tracker_count["write"][ip_type][ip_pos]["count"] -= 1
                 self.node.rn_wdb[ip_type][ip_pos][req.packet_id] = []
                 req.cmd_entry_cake0_cycle = self.current_cycle  # 这里记录cycle
                 self.node.rn_tracker["write"][ip_type][ip_pos].append(req)
@@ -377,10 +377,10 @@ class IPInterface:
 
         if req.req_type == "read":
             if req.req_attr == "new":
-                if self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos] > 0:
+                if self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos]["count"] > 0:
                     req.sn_tracker_type = "ro"
                     self.node.sn_tracker[self.ip_type][self.ip_pos].append(req)
-                    self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos] -= 1
+                    self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos]["count"] -= 1
                     self.create_read_packet(req)
                     self.release_completed_sn_tracker(req)
                 else:
@@ -392,12 +392,12 @@ class IPInterface:
 
         elif req.req_type == "write":
             if req.req_attr == "new":
-                if self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos] > 0 and self.node.sn_wdb_count[self.ip_type][self.ip_pos] >= req.burst_length:
+                if self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos]["count"] > 0 and self.node.sn_wdb_count[self.ip_type][self.ip_pos]["count"] >= req.burst_length:
                     req.sn_tracker_type = "share"
                     self.node.sn_tracker[self.ip_type][self.ip_pos].append(req)
-                    self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos] -= 1
+                    self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos]["count"] -= 1
                     self.node.sn_wdb[self.ip_type][self.ip_pos][req.packet_id] = []
-                    self.node.sn_wdb_count[self.ip_type][self.ip_pos] -= req.burst_length
+                    self.node.sn_wdb_count[self.ip_type][self.ip_pos]["count"] -= req.burst_length
                     self.create_rsp(req, "datasend")
                 else:
                     self.create_rsp(req, "negative")
@@ -438,7 +438,7 @@ class IPInterface:
                 req.is_injected = False
                 req.path_index = 0
                 req.req_attr = "old"
-                self.node.rn_rdb_count[self.ip_type][self.ip_pos] += req.burst_length
+                self.node.rn_rdb_count[self.ip_type][self.ip_pos]["count"] += req.burst_length
                 if req.packet_id in self.node.rn_rdb[self.ip_type][self.ip_pos]:
                     self.node.rn_rdb[self.ip_type][self.ip_pos].pop(req.packet_id)
                 self.node.rn_rdb_reserve[self.ip_type][self.ip_pos] += 1
@@ -446,7 +446,7 @@ class IPInterface:
             elif rsp.rsp_type == "positive":
                 # 处理读重试
                 if req.req_attr == "new":
-                    self.node.rn_rdb_count[self.ip_type][self.ip_pos] += req.burst_length
+                    self.node.rn_rdb_count[self.ip_type][self.ip_pos]["count"] += req.burst_length
                     if req.packet_id in self.node.rn_rdb[self.ip_type][self.ip_pos]:
                         self.node.rn_rdb[self.ip_type][self.ip_pos].pop(req.packet_id)
                     self.node.rn_rdb_reserve[self.ip_type][self.ip_pos] += 1
@@ -501,8 +501,8 @@ class IPInterface:
                     else:
                         # 普通Die内写请求：发送数据并立即释放tracker
                         self.node.rn_tracker["write"][self.ip_type][self.ip_pos].remove(req)
-                        self.node.rn_wdb_count[self.ip_type][self.ip_pos] += req.burst_length
-                        self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos] += 1
+                        self.node.rn_wdb_count[self.ip_type][self.ip_pos]["count"] += req.burst_length
+                        self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos]["count"] += 1
                         self.node.rn_tracker_pointer["write"][self.ip_type][self.ip_pos] -= 1
                         
                 # 同时清理写缓冲
@@ -530,8 +530,8 @@ class IPInterface:
                 if req and self._is_cross_die_write_request(req):
                     # 这是跨Die写请求的最终B通道响应，现在可以释放tracker
                     self.node.rn_tracker["write"][self.ip_type][self.ip_pos].remove(req)
-                    self.node.rn_wdb_count[self.ip_type][self.ip_pos] += req.burst_length
-                    self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos] += 1
+                    self.node.rn_wdb_count[self.ip_type][self.ip_pos]["count"] += req.burst_length
+                    self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos]["count"] += 1
                     self.node.rn_tracker_pointer["write"][self.ip_type][self.ip_pos] -= 1
                     
                     # 更新D2D请求完成计数（只在源IP收到write_complete时记录，不在D2D_SN记录）
@@ -572,11 +572,11 @@ class IPInterface:
         # —— 1) 移除已完成的 tracker ——
         self.node.sn_tracker[self.ip_type][self.ip_pos].remove(req)
         # 释放一个 tracker 槽
-        self.node.sn_tracker_count[self.ip_type][req.sn_tracker_type][self.ip_pos] += 1
+        self.node.sn_tracker_count[self.ip_type][req.sn_tracker_type][self.ip_pos]["count"] += 1
 
         # —— 2) 对于写请求，还要释放写缓冲额度 ——
         if req.req_type == "write":
-            self.node.sn_wdb_count[self.ip_type][self.ip_pos] += req.burst_length
+            self.node.sn_wdb_count[self.ip_type][self.ip_pos]["count"] += req.burst_length
 
         # —— 3) 尝试给等待队列里的请求重新分配资源 ——
         wait_list = self.node.sn_req_wait[req.req_type][self.ip_type][self.ip_pos]
@@ -585,28 +585,28 @@ class IPInterface:
 
         if req.req_type == "write":
             # 写：既要有空 tracker，也要有足够 wdb_count
-            if self.node.sn_tracker_count[self.ip_type][req.sn_tracker_type][self.ip_pos] > 0 and self.node.sn_wdb_count[self.ip_type][self.ip_pos] > 0:
+            if self.node.sn_tracker_count[self.ip_type][req.sn_tracker_type][self.ip_pos]["count"] > 0 and self.node.sn_wdb_count[self.ip_type][self.ip_pos]["count"] > 0:
                 new_req = wait_list.pop(0)
                 new_req.sn_tracker_type = req.sn_tracker_type
 
                 # 分配 tracker + wdb
                 self.node.sn_tracker[self.ip_type][self.ip_pos].append(new_req)
-                self.node.sn_tracker_count[self.ip_type][new_req.sn_tracker_type][self.ip_pos] -= 1
+                self.node.sn_tracker_count[self.ip_type][new_req.sn_tracker_type][self.ip_pos]["count"] -= 1
 
-                self.node.sn_wdb_count[self.ip_type][self.ip_pos] -= new_req.burst_length
+                self.node.sn_wdb_count[self.ip_type][self.ip_pos]["count"] -= new_req.burst_length
 
                 # 发送 positive 响应
                 self.create_rsp(new_req, "positive")
 
         elif req.req_type == "read":
             # 读：只要有空 tracker 即可
-            if self.node.sn_tracker_count[self.ip_type][req.sn_tracker_type][self.ip_pos] > 0:
+            if self.node.sn_tracker_count[self.ip_type][req.sn_tracker_type][self.ip_pos]["count"] > 0:
                 new_req = wait_list.pop(0)
                 new_req.sn_tracker_type = req.sn_tracker_type
 
                 # 分配 tracker
                 self.node.sn_tracker[self.ip_type][self.ip_pos].append(new_req)
-                self.node.sn_tracker_count[self.ip_type][new_req.sn_tracker_type][self.ip_pos] -= 1
+                self.node.sn_tracker_count[self.ip_type][new_req.sn_tracker_type][self.ip_pos]["count"] -= 1
 
                 # 直接生成并发送读数据包
                 self.create_read_packet(new_req)
@@ -650,9 +650,9 @@ class IPInterface:
                 if req:
                     # 立即释放tracker和更新计数
                     self.node.rn_tracker["read"][self.ip_type][self.ip_pos].remove(req)
-                    self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos] += 1
+                    self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos]["count"] += 1
                     self.node.rn_tracker_pointer["read"][self.ip_type][self.ip_pos] -= 1
-                    self.node.rn_rdb_count[self.ip_type][self.ip_pos] += req.burst_length
+                    self.node.rn_rdb_count[self.ip_type][self.ip_pos]["count"] += req.burst_length
                     # 为所有flit设置完成时间戳和计算延迟
                     first_flit = self.data_network.send_flits[flit.packet_id][0]
                     # 记录最后到达时间

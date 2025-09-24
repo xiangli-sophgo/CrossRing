@@ -96,34 +96,45 @@ class Node:
                     self.setup_rn_trackers(ip_type, ip_pos)
 
     def setup_rn_trackers(self, ip_type, ip_pos):
-        """Setup read and write trackers for RN."""
+        """Setup read and write trackers for RN - 使用字典结构支持统一模式."""
         self.rn_rdb_recv[ip_type][ip_pos] = []
-        
-        # 为D2D_RN使用专用配置
-        if ip_type.startswith("d2d_rn"):
-            self.rn_rdb_count[ip_type][ip_pos] = getattr(self.config, "D2D_RN_RDB_SIZE", self.config.RN_RDB_SIZE)
-            self.rn_wdb_count[ip_type][ip_pos] = getattr(self.config, "D2D_RN_WDB_SIZE", self.config.RN_WDB_SIZE)
-        else:
-            self.rn_rdb_count[ip_type][ip_pos] = self.config.RN_RDB_SIZE
-            self.rn_wdb_count[ip_type][ip_pos] = self.config.RN_WDB_SIZE
-            
         self.rn_rdb_reserve[ip_type][ip_pos] = 0
         self.rn_wdb_send[ip_type][ip_pos] = []
         self.rn_wdb_reserve[ip_type][ip_pos] = 0
 
+        # 获取配置值
+        if ip_type.startswith("d2d_rn"):
+            rdb_size = getattr(self.config, "D2D_RN_RDB_SIZE", self.config.RN_RDB_SIZE)
+            wdb_size = getattr(self.config, "D2D_RN_WDB_SIZE", self.config.RN_WDB_SIZE)
+            r_tracker_count = getattr(self.config, "D2D_RN_R_TRACKER_OSTD", self.config.RN_R_TRACKER_OSTD)
+            w_tracker_count = getattr(self.config, "D2D_RN_W_TRACKER_OSTD", self.config.RN_W_TRACKER_OSTD)
+        else:
+            rdb_size = self.config.RN_RDB_SIZE
+            wdb_size = self.config.RN_WDB_SIZE
+            r_tracker_count = self.config.RN_R_TRACKER_OSTD
+            w_tracker_count = self.config.RN_W_TRACKER_OSTD
+
+        if self.config.UNIFIED_RW_TRACKER:
+            # 统一模式：读写共享同一个字典对象
+            shared_tracker = {"count": r_tracker_count}
+            shared_db = {"count": rdb_size}
+
+            # 读写指向同一个字典对象（引用共享）
+            self.rn_tracker_count["read"][ip_type][ip_pos] = shared_tracker
+            self.rn_tracker_count["write"][ip_type][ip_pos] = shared_tracker
+            self.rn_rdb_count[ip_type][ip_pos] = shared_db
+            self.rn_wdb_count[ip_type][ip_pos] = shared_db
+        else:
+            # 分离模式：独立的字典
+            self.rn_tracker_count["read"][ip_type][ip_pos] = {"count": r_tracker_count}
+            self.rn_tracker_count["write"][ip_type][ip_pos] = {"count": w_tracker_count}
+            self.rn_rdb_count[ip_type][ip_pos] = {"count": rdb_size}
+            self.rn_wdb_count[ip_type][ip_pos] = {"count": wdb_size}
+
+        # 其他初始化保持不变
         for req_type in ["read", "write"]:
             self.rn_tracker[req_type][ip_type][ip_pos] = []
             self.rn_tracker_wait[req_type][ip_type][ip_pos] = []
-            
-            # 为D2D_RN使用专用配置
-            if ip_type.startswith("d2d_rn"):
-                if req_type == "read":
-                    self.rn_tracker_count[req_type][ip_type][ip_pos] = getattr(self.config, "D2D_RN_R_TRACKER_OSTD", self.config.RN_R_TRACKER_OSTD)
-                else:
-                    self.rn_tracker_count[req_type][ip_type][ip_pos] = getattr(self.config, "D2D_RN_W_TRACKER_OSTD", self.config.RN_W_TRACKER_OSTD)
-            else:
-                self.rn_tracker_count[req_type][ip_type][ip_pos] = self.config.RN_R_TRACKER_OSTD if req_type == "read" else self.config.RN_W_TRACKER_OSTD
-                
             self.rn_tracker_pointer[req_type][ip_type][ip_pos] = -1
 
     def initialize_sn(self):
@@ -149,26 +160,47 @@ class Node:
                     self.setup_sn_trackers(key, ip_pos)
 
     def setup_sn_trackers(self, key, ip_pos):
-        """Setup trackers for SN."""
+        """Setup trackers for SN - 使用字典结构支持统一模式."""
         self.sn_rsp_queue[key][ip_pos] = []
         for req_type in ["read", "write"]:
             self.sn_req_wait[req_type][key][ip_pos] = []
         self.sn_wdb_recv[key][ip_pos] = []
         self.sn_tracker[key][ip_pos] = []
-        # if self.config.topo_type != "3x3":
+
+        # 获取配置值
         if key.startswith("ddr"):
-            self.sn_wdb_count[key][ip_pos] = self.config.SN_DDR_WDB_SIZE
-            self.sn_tracker_count[key]["ro"][ip_pos] = self.config.SN_DDR_R_TRACKER_OSTD
-            self.sn_tracker_count[key]["share"][ip_pos] = self.config.SN_DDR_W_TRACKER_OSTD
+            wdb_size = self.config.SN_DDR_WDB_SIZE
+            r_tracker_count = self.config.SN_DDR_R_TRACKER_OSTD
+            w_tracker_count = self.config.SN_DDR_W_TRACKER_OSTD
         elif key.startswith("l2m"):
-            self.sn_wdb_count[key][ip_pos] = self.config.SN_L2M_WDB_SIZE
-            self.sn_tracker_count[key]["ro"][ip_pos] = self.config.SN_L2M_R_TRACKER_OSTD
-            self.sn_tracker_count[key]["share"][ip_pos] = self.config.SN_L2M_W_TRACKER_OSTD
+            wdb_size = self.config.SN_L2M_WDB_SIZE
+            r_tracker_count = self.config.SN_L2M_R_TRACKER_OSTD
+            w_tracker_count = self.config.SN_L2M_W_TRACKER_OSTD
         elif key.startswith("d2d_sn"):
             # 为D2D_SN使用专用配置
-            self.sn_wdb_count[key][ip_pos] = getattr(self.config, "D2D_SN_WDB_SIZE", self.config.SN_DDR_WDB_SIZE)
-            self.sn_tracker_count[key]["ro"][ip_pos] = getattr(self.config, "D2D_SN_R_TRACKER_OSTD", self.config.SN_DDR_R_TRACKER_OSTD)
-            self.sn_tracker_count[key]["share"][ip_pos] = getattr(self.config, "D2D_SN_W_TRACKER_OSTD", self.config.SN_DDR_W_TRACKER_OSTD)
+            wdb_size = getattr(self.config, "D2D_SN_WDB_SIZE", self.config.SN_DDR_WDB_SIZE)
+            r_tracker_count = getattr(self.config, "D2D_SN_R_TRACKER_OSTD", self.config.SN_DDR_R_TRACKER_OSTD)
+            w_tracker_count = getattr(self.config, "D2D_SN_W_TRACKER_OSTD", self.config.SN_DDR_W_TRACKER_OSTD)
+        else:
+            # 默认使用DDR配置
+            wdb_size = self.config.SN_DDR_WDB_SIZE
+            r_tracker_count = self.config.SN_DDR_R_TRACKER_OSTD
+            w_tracker_count = self.config.SN_DDR_W_TRACKER_OSTD
+
+        if self.config.UNIFIED_RW_TRACKER:
+            # 统一模式：读写共享同一个字典对象
+            # SN使用"ro"和"share"来区分读写，统一模式下让它们指向同一个字典
+            shared_tracker = {"count": r_tracker_count}
+            shared_wdb = {"count": wdb_size}
+
+            self.sn_tracker_count[key]["ro"][ip_pos] = shared_tracker
+            self.sn_tracker_count[key]["share"][ip_pos] = shared_tracker
+            self.sn_wdb_count[key][ip_pos] = shared_wdb
+        else:
+            # 分离模式：独立的字典
+            self.sn_wdb_count[key][ip_pos] = {"count": wdb_size}
+            self.sn_tracker_count[key]["ro"][ip_pos] = {"count": r_tracker_count}
+            self.sn_tracker_count[key]["share"][ip_pos] = {"count": w_tracker_count}
 
 
 # 添加全局node_map函数，根据base_model的实现

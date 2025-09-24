@@ -264,9 +264,9 @@ class DualChannelIPInterface(IPInterface):
                 if req:
                     # 立即释放tracker和更新计数
                     self.node.rn_tracker["read"][self.ip_type][self.ip_pos].remove(req)
-                    self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos] += 1
+                    self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos]["count"] += 1
                     self.node.rn_tracker_pointer["read"][self.ip_type][self.ip_pos] -= 1
-                    self.node.rn_rdb_count[self.ip_type][self.ip_pos] += req.burst_length
+                    self.node.rn_rdb_count[self.ip_type][self.ip_pos]["count"] += req.burst_length
 
                     # 双通道时间戳同步：处理分散在两个通道的flit
                     self._sync_dual_channel_timestamps(flit.packet_id, req, "read", None)

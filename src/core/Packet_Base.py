@@ -104,7 +104,7 @@ class Packet_Base_model(BaseModel):
             if len(self.node.rn_rdb[self.rn_type][in_pos][packet_id]) == 0:
                 self.node.rn_rdb[self.rn_type][in_pos].pop(packet_id)
                 self.node.rn_rdb_recv[self.rn_type][in_pos].pop(0)
-                self.node.rn_rdb_count[self.rn_type][in_pos] += self.req_network.send_flits[packet_id][0].burst_length
+                self.node.rn_rdb_count[self.rn_type][in_pos]["count"] += self.req_network.send_flits[packet_id][0].burst_length
                 req = next(
                     (req for req in self.node.rn_tracker["read"][self.rn_type][in_pos] if req.packet_id == packet_id),
                     None,
@@ -115,7 +115,7 @@ class Packet_Base_model(BaseModel):
                     flit.leave_db_cycle = self.cycle
                 req.leave_db_cycle = self.cycle
                 self.node.rn_tracker["read"][self.rn_type][in_pos].remove(req)
-                self.node.rn_tracker_count["read"][self.rn_type][in_pos] += 1
+                self.node.rn_tracker_count["read"][self.rn_type][in_pos]["count"] += 1
                 self.node.rn_tracker_pointer["read"][self.rn_type][in_pos] -= 1
 
     def process_sn_received_data(self, in_pos):
@@ -126,7 +126,7 @@ class Packet_Base_model(BaseModel):
             if len(self.node.sn_wdb[self.sn_type][in_pos][packet_id]) == 0:
                 self.node.sn_wdb[self.sn_type][in_pos].pop(packet_id)
                 self.node.sn_wdb_recv[self.sn_type][in_pos].pop(0)
-                self.node.sn_wdb_count[self.sn_type][in_pos] += self.req_network.send_flits[packet_id][0].burst_length
+                self.node.sn_wdb_count[self.sn_type][in_pos]["count"] += self.req_network.send_flits[packet_id][0].burst_length
                 req = next(
                     (req for req in self.node.sn_tracker[self.sn_type][in_pos] if req.packet_id == packet_id),
                     None,
@@ -141,19 +141,19 @@ class Packet_Base_model(BaseModel):
 
                 # 没有延迟
                 # self.node.sn_tracker[self.sn_type][in_pos].remove(req)
-                # self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][in_pos] += 1
+                # self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][in_pos]["count"] += 1
 
                 # packet base: 收完数据发送rsp
                 self.create_rsp(req, "finish")
 
-                # if self.node.sn_wdb_count[self.sn_type][in_pos] > 0 and self.node.sn_req_wait["write"][self.sn_type][in_pos]:
+                # if self.node.sn_wdb_count[self.sn_type][in_pos]["count"] > 0 and self.node.sn_req_wait["write"][self.sn_type][in_pos]:
                 #     new_req = self.node.sn_req_wait["write"][self.sn_type][in_pos].pop(0)
                 #     new_req.sn_tracker_type = req.sn_tracker_type
                 #     new_req.req_attr = "old"
                 #     self.node.sn_tracker[self.sn_type][in_pos].append(new_req)
-                #     self.node.sn_tracker_count[self.sn_type][new_req.sn_tracker_type][in_pos] -= 1
+                #     self.node.sn_tracker_count[self.sn_type][new_req.sn_tracker_type][in_pos]["count"] -= 1
                 #     self.node.sn_wdb[self.sn_type][in_pos][new_req.packet_id] = []
-                #     self.node.sn_wdb_count[self.sn_type][in_pos] -= new_req.burst_length
+                #     self.node.sn_wdb_count[self.sn_type][in_pos]["count"] -= new_req.burst_length
                 #     self.create_rsp(new_req, "positive")
 
     def release_completed_sn_tracker(self):
@@ -163,7 +163,7 @@ class Packet_Base_model(BaseModel):
                 tracker_list = self.node.sn_tracker_release_time.pop(release_time)
                 for sn_type, in_pos, req in tracker_list:
                     self.node.sn_tracker[sn_type][in_pos].remove(req)
-                    self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos] += 1
+                    self.node.sn_tracker_count[sn_type][req.sn_tracker_type][in_pos]["count"] += 1
             else:
                 break
 
@@ -190,7 +190,7 @@ class Packet_Base_model(BaseModel):
                     if self.req_network.ip_read[self.rn_type][ip_pos]:
                         req = self.req_network.ip_read[self.rn_type][ip_pos][0]
                         if (
-                            self.node.rn_rdb_count[self.rn_type][ip_pos] > self.node.rn_rdb_reserve[self.rn_type][ip_pos] * req.burst_length
+                            self.node.rn_rdb_count[self.rn_type][ip_pos]["count"] > self.node.rn_rdb_reserve[self.rn_type][ip_pos] * req.burst_length
                             and self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0
                         ):
                             req.req_entry_network_cycle = self.cycle
@@ -198,17 +198,17 @@ class Packet_Base_model(BaseModel):
                             self.req_network.ip_read[self.rn_type][ip_pos].popleft()
                             self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
                             self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] -= 1
-                            self.node.rn_rdb_count[self.rn_type][ip_pos] -= req.burst_length
+                            self.node.rn_rdb_count[self.rn_type][ip_pos]["count"] -= req.burst_length
                             self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = []
                 elif req_type == "write":
                     if self.req_network.ip_write[self.rn_type][ip_pos]:
                         req = self.req_network.ip_write[self.rn_type][ip_pos][0]
-                        if self.node.rn_wdb_count[self.rn_type][ip_pos] >= req.burst_length and self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0:
+                        if self.node.rn_wdb_count[self.rn_type][ip_pos]["count"] >= req.burst_length and self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] > 0:
                             req.req_entry_network_cycle = self.cycle
                             self.req_network.ip_write[self.rn_type][ip_pos].popleft()
                             self.node.rn_tracker[req_type][self.rn_type][ip_pos].append(req)
                             self.node.rn_tracker_count[req_type][self.rn_type][ip_pos] -= 1
-                            self.node.rn_wdb_count[self.rn_type][ip_pos] -= req.burst_length
+                            self.node.rn_wdb_count[self.rn_type][ip_pos]["count"] -= req.burst_length
                             self.node.rn_wdb[self.rn_type][ip_pos][req.packet_id] = []
                             req.entry_db_cycle = self.cycle
                             self.create_write_packet(req)
@@ -271,14 +271,14 @@ class Packet_Base_model(BaseModel):
                                     # finish current req injection
                                     req = next((req for req in self.node.sn_tracker[self.sn_type][ip_pos] if req.packet_id == flit.packet_id), None)
                                     self.node.sn_tracker[self.sn_type][ip_pos].remove(req)
-                                    self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][ip_pos] += 1
+                                    self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][ip_pos]["count"] += 1
                                     # if self.node.sn_req_wait["read"][self.sn_type][ip_pos]:
                                     #     # If there is a waiting request, inject it
                                     #     new_req = self.node.sn_req_wait["read"][self.sn_type][ip_pos].pop(0)
                                     #     new_req.sn_tracker_type = req.sn_tracker_type
                                     #     new_req.req_attr = "old"
                                     #     self.node.sn_tracker[self.sn_type][ip_pos].append(new_req)
-                                    #     self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][ip_pos] -= 1
+                                    #     self.node.sn_tracker_count[self.sn_type][req.sn_tracker_type][ip_pos]["count"] -= 1
                                     #     self.create_rsp(new_req, "positive")
                             else:
                                 self.send_write_flits_num_stat += 1
@@ -289,11 +289,11 @@ class Packet_Base_model(BaseModel):
                                     #     # finish current req injection
                                     req = next((req for req in self.node.rn_tracker["write"][self.rn_type][ip_pos] if req.packet_id == flit.packet_id), None)
                                     #     self.node.rn_tracker["write"][self.rn_type][ip_pos].remove(req)
-                                    #     self.node.rn_tracker_count["write"][self.rn_type][ip_pos] += 1
+                                    #     self.node.rn_tracker_count["write"][self.rn_type][ip_pos]["count"] += 1
                                     #     self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos] -= 1
                                     self.node.rn_wdb_send[self.rn_type][ip_pos].pop(0)
                                     self.node.rn_wdb[self.rn_type][ip_pos].pop(req.packet_id)
-                                    self.node.rn_wdb_count[self.rn_type][ip_pos] += req.burst_length
+                                    self.node.rn_wdb_count[self.rn_type][ip_pos]["count"] += req.burst_length
                             self.trans_flits_num += 1
                             self.send_flits_num += 1
                             inject_flits[i] = None
@@ -315,7 +315,7 @@ class Packet_Base_model(BaseModel):
         # write_valid = len(self.node.rn_tracker["write"][self.rn_type][ip_pos]) - 1 > self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos]
 
     def select_inject_network(self, ip_pos):
-        read_old = self.node.rn_rdb_reserve[self.rn_type][ip_pos] > 0 and self.node.rn_rdb_count[self.rn_type][ip_pos] > self.config.BURST
+        read_old = self.node.rn_rdb_reserve[self.rn_type][ip_pos] > 0 and self.node.rn_rdb_count[self.rn_type][ip_pos]["count"] > self.config.BURST
         read_new = len(self.node.rn_tracker["read"][self.rn_type][ip_pos]) - 1 > self.node.rn_tracker_pointer["read"][self.rn_type][ip_pos]
         write_old = self.node.rn_wdb_reserve[self.rn_type][ip_pos] > 0
         write_new = len(self.node.rn_tracker["write"][self.rn_type][ip_pos]) - 1 > self.node.rn_tracker_pointer["write"][self.rn_type][ip_pos]
@@ -335,7 +335,7 @@ class Packet_Base_model(BaseModel):
                                 queue_pre[ip_pos] = req
                                 self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
                                 self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
-                                self.node.rn_rdb_count[self.rn_type][ip_pos] -= req.burst_length
+                                self.node.rn_rdb_count[self.rn_type][ip_pos]["count"] -= req.burst_length
                                 self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = []
                                 self.req_network.last_select[self.rn_type][ip_pos] = "read"
                 elif read_new:
@@ -386,7 +386,7 @@ class Packet_Base_model(BaseModel):
                             queue_pre[ip_pos] = req
                             self.node.rn_tracker_wait["read"][self.rn_type][ip_pos].remove(req)
                             self.node.rn_rdb_reserve[self.rn_type][ip_pos] -= 1
-                            self.node.rn_rdb_count[self.rn_type][ip_pos] -= req.burst_length
+                            self.node.rn_rdb_count[self.rn_type][ip_pos]["count"] -= req.burst_length
                             self.node.rn_rdb[self.rn_type][ip_pos][req.packet_id] = []
                             self.req_network.last_select[self.rn_type][ip_pos] = "read"
             elif read_new:
@@ -690,7 +690,7 @@ class Packet_Base_model(BaseModel):
                             elif flit.req_type == "write":
                                 # packet base: 到达的flit
                                 if flit.flit_id == 0:
-                                    if self.node.sn_wdb_count[self.sn_type][in_pos] > 0:
+                                    if self.node.sn_wdb_count[self.sn_type][in_pos]["count"] > 0:
                                         flit.sn_tracker_type = "share"
                                         req = next(
                                             (req for req in self.node.rn_tracker[flit.req_type][flit.source_type][flit.source] if req.packet_id == flit.packet_id),
@@ -698,9 +698,9 @@ class Packet_Base_model(BaseModel):
                                         )
                                         req.sn_tracker_type = "share"
                                         self.node.sn_tracker[self.sn_type][in_pos].append(req)
-                                        self.node.sn_tracker_count[self.sn_type]["share"][in_pos] -= 1
+                                        self.node.sn_tracker_count[self.sn_type]["share"][in_pos]["count"] -= 1
                                         # self.node.sn_wdb[self.sn_type][in_pos][req.packet_id] = []
-                                        self.node.sn_wdb_count[self.sn_type][in_pos] -= 1
+                                        self.node.sn_wdb_count[self.sn_type][in_pos]["count"] -= 1
 
                                         network.EQ_channel_buffer[ip_type][ip_pos].popleft()
                                         flit.arrival_cycle = self.cycle
@@ -710,9 +710,9 @@ class Packet_Base_model(BaseModel):
                                         network.recv_flits_num += 1
 
                                 else:
-                                    if self.node.sn_wdb_count[self.sn_type][in_pos] > 0:
+                                    if self.node.sn_wdb_count[self.sn_type][in_pos]["count"] > 0:
                                         # self.node.sn_wdb[self.sn_type][in_pos][req.packet_id] = []
-                                        self.node.sn_wdb_count[self.sn_type][in_pos] -= 1
+                                        self.node.sn_wdb_count[self.sn_type][in_pos]["count"] -= 1
                                         network.EQ_channel_buffer[ip_type][ip_pos].popleft()
                                         flit.arrival_cycle = self.cycle
                                         network.arrive_node_pre[ip_type][ip_pos] = flit
@@ -757,10 +757,10 @@ class Packet_Base_model(BaseModel):
     def _sn_handle_request(self, req, in_pos):
         """处理request类型的eject"""
         if req.req_type == "read":
-            if req.req_attr == "new" and self.node.sn_tracker_count[self.sn_type]["ro"][in_pos] > 0:
+            if req.req_attr == "new" and self.node.sn_tracker_count[self.sn_type]["ro"][in_pos]["count"] > 0:
                 req.sn_tracker_type = "ro"
                 self.node.sn_tracker[self.sn_type][in_pos].append(req)
-                self.node.sn_tracker_count[self.sn_type]["ro"][in_pos] -= 1
+                self.node.sn_tracker_count[self.sn_type]["ro"][in_pos]["count"] -= 1
                 self.create_read_packet(req)
                 return True
         return False
@@ -846,7 +846,7 @@ class Packet_Base_model(BaseModel):
                     req.req_state = "invalid"
                     req.is_injected = False
                     req.path_index = 0
-                    self.node.rn_rdb_count[self.rn_type][in_pos] += req.burst_length
+                    self.node.rn_rdb_count[self.rn_type][in_pos]["count"] += req.burst_length
                     self.node.rn_rdb[self.rn_type][in_pos].pop(req.packet_id)
                     self.node.rn_tracker_wait["read"][self.rn_type][in_pos].append(req)
             else:
@@ -874,7 +874,7 @@ class Packet_Base_model(BaseModel):
                     self.node.rn_tracker_wait["write"][self.rn_type][in_pos].append(req)
             elif rsp.rsp_type == "finish":
                 self.node.rn_tracker["write"][self.rn_type][in_pos].remove(req)
-                self.node.rn_tracker_count["write"][self.rn_type][in_pos] += 1
+                self.node.rn_tracker_count["write"][self.rn_type][in_pos]["count"] += 1
                 self.node.rn_tracker_pointer["write"][self.rn_type][in_pos] -= 1
             # else:
             #     self.node.rn_wdb_send[self.rn_type][in_pos].append(rsp.packet_id)

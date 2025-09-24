@@ -252,13 +252,13 @@ class D2D_SN_Interface(IPInterface):
         self.processed_write_requests.add(packet_id)
 
         # 检查D2D_SN的资源
-        has_tracker = self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos] > 0
-        has_databuffer = self.node.sn_wdb_count[self.ip_type][self.ip_pos] >= flit.burst_length
+        has_tracker = self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos]["count"] > 0
+        has_databuffer = self.node.sn_wdb_count[self.ip_type][self.ip_pos]["count"] >= flit.burst_length
 
         if has_tracker and has_databuffer:
             # 消耗资源
-            self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos] -= 1
-            self.node.sn_wdb_count[self.ip_type][self.ip_pos] -= flit.burst_length
+            self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos]["count"] -= 1
+            self.node.sn_wdb_count[self.ip_type][self.ip_pos]["count"] -= flit.burst_length
 
             # 记录tracker信息
             flit.sn_tracker_type = "write"
@@ -286,10 +286,10 @@ class D2D_SN_Interface(IPInterface):
         
         if flit.req_attr == "new":
             # 使用基类的SN tracker分配逻辑
-            if self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos] > 0:
+            if self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos]["count"] > 0:
                 flit.sn_tracker_type = "ro"
                 self.node.sn_tracker[self.ip_type][self.ip_pos].append(flit)
-                self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos] -= 1
+                self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos]["count"] -= 1
                 
                 # print(f"[D2D_SN] 分配RO tracker并转发跨Die读请求 packet_id={packet_id}, "
                 #       f"剩余tracker={self.node.sn_tracker_count[self.ip_type]['ro'][self.ip_pos]}")
@@ -460,12 +460,12 @@ class D2D_SN_Interface(IPInterface):
             
             # 释放tracker资源
             self.node.sn_tracker[self.ip_type][self.ip_pos].remove(tracker)
-            self.node.sn_tracker_count[self.ip_type][tracker_type][self.ip_pos] += 1
+            self.node.sn_tracker_count[self.ip_type][tracker_type][self.ip_pos]["count"] += 1
             
             # 对于读请求，通常不需要释放RDB（读缓冲由RN管理）
             # 对于写请求，需要释放WDB
             if hasattr(tracker, 'req_type') and tracker.req_type == "write":
-                self.node.sn_wdb_count[self.ip_type][self.ip_pos] += tracker.burst_length
+                self.node.sn_wdb_count[self.ip_type][self.ip_pos]["count"] += tracker.burst_length
             
             # print(f"[D2D_SN] 释放packet {packet_id}的{tracker_type} tracker资源")
             
@@ -485,11 +485,11 @@ class D2D_SN_Interface(IPInterface):
         # 检查是否有足够资源处理等待的请求
         if req_type == "read":
             # 读请求只需要RO tracker
-            if self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos] > 0:
+            if self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos]["count"] > 0:
                 new_req = wait_list.pop(0)
                 
                 # 分配资源并处理
-                self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos] -= 1
+                self.node.sn_tracker_count[self.ip_type]["ro"][self.ip_pos]["count"] -= 1
                 new_req.sn_tracker_type = "ro"
                 self.node.sn_tracker[self.ip_type][self.ip_pos].append(new_req)
                 
@@ -500,14 +500,14 @@ class D2D_SN_Interface(IPInterface):
                 
         elif req_type == "write":
             # 写请求需要share tracker和WDB
-            if (self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos] > 0 and
-                self.node.sn_wdb_count[self.ip_type][self.ip_pos] >= wait_list[0].burst_length):
+            if (self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos]["count"] > 0 and
+                self.node.sn_wdb_count[self.ip_type][self.ip_pos]["count"] >= wait_list[0].burst_length):
                 
                 new_req = wait_list.pop(0)
                 
                 # 分配资源
-                self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos] -= 1
-                self.node.sn_wdb_count[self.ip_type][self.ip_pos] -= new_req.burst_length
+                self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos]["count"] -= 1
+                self.node.sn_wdb_count[self.ip_type][self.ip_pos]["count"] -= new_req.burst_length
                 new_req.sn_tracker_type = "share"
                 self.node.sn_tracker[self.ip_type][self.ip_pos].append(new_req)
                 
@@ -641,8 +641,8 @@ class D2D_SN_Interface(IPInterface):
         if write_req:
             # 释放D2D_SN的tracker和资源
             self.node.sn_tracker[self.ip_type][self.ip_pos].remove(write_req)
-            self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos] += 1
-            self.node.sn_wdb_count[self.ip_type][self.ip_pos] += write_req.burst_length
+            self.node.sn_tracker_count[self.ip_type]["share"][self.ip_pos]["count"] += 1
+            self.node.sn_wdb_count[self.ip_type][self.ip_pos]["count"] += write_req.burst_length
 
             # 清理写数据缓冲
             if packet_id in self.node.sn_wdb[self.ip_type][self.ip_pos]:

@@ -1787,8 +1787,10 @@ class BaseModel:
         self.mixed_unweighted_bw_stat = mixed_metrics.unweighted_bandwidth
         self.mixed_weighted_bw_stat = mixed_metrics.weighted_bandwidth
         # Total average bandwidth stats (unweighted and weighted)
-        self.mixed_avg_unweighted_bw_stat = mixed_metrics.unweighted_bandwidth / self.config.NUM_IP
-        self.mixed_avg_weighted_bw_stat = mixed_metrics.weighted_bandwidth / self.config.NUM_IP
+        # 使用result_processor中动态计算的实际IP数量
+        actual_num_ip = self.result_processor.actual_num_ip or 1  # 避免除零错误
+        self.mixed_avg_unweighted_bw_stat = mixed_metrics.unweighted_bandwidth / actual_num_ip
+        self.mixed_avg_weighted_bw_stat = mixed_metrics.weighted_bandwidth / actual_num_ip
 
         # Mixed 延迟统计
         # CMD 混合

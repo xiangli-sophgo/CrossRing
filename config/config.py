@@ -21,17 +21,11 @@ class CrossRingConfig:
 
         args = self.parse_args(default_config)
         self.TOPO_TYPE = args.TOPO_TYPE
-        self.NUM_NODE = args.NUM_NODE
-        self.NUM_COL = args.NUM_COL
-        self.NUM_IP = args.NUM_IP
-        self.NUM_RN = args.NUM_RN
-        self.NUM_SN = args.NUM_SN
-        self.NUM_ROW = self.NUM_NODE // self.NUM_COL
-        self.NUM_SDMA = args.NUM_SDMA
-        self.NUM_GDMA = args.NUM_GDMA
-        self.NUM_CDMA = args.NUM_CDMA
-        self.NUM_DDR = args.NUM_DDR
-        self.NUM_L2M = args.NUM_L2M
+
+        # 从 TOPO_TYPE 自动计算拓扑参数
+        self.NUM_COL, self.NUM_ROW, self.NUM_NODE = self._parse_topo_type(self.TOPO_TYPE)
+        # 注意：NUM_IP, NUM_RN, NUM_SN, NUM_DDR, NUM_L2M, NUM_GDMA, NUM_SDMA, NUM_CDMA 等参数
+        # 现在从实际流量数据中动态获取，不再作为配置属性存储
         self.FLIT_SIZE = args.FLIT_SIZE
         self.SPARE_CORE_ROW = -1
         self.FAIL_CORE_POS = []
@@ -59,20 +53,9 @@ class CrossRingConfig:
         # self.reservation_num = args.reservation_num
         self.BURST = args.BURST
         self.NETWORK_FREQUENCY = args.NETWORK_FREQUENCY
-        self.RN_R_TRACKER_OSTD = args.RN_R_TRACKER_OSTD
-        self.RN_W_TRACKER_OSTD = args.RN_W_TRACKER_OSTD
-        self.SN_DDR_R_TRACKER_OSTD = args.SN_DDR_R_TRACKER_OSTD
-        self.SN_DDR_W_TRACKER_OSTD = args.SN_DDR_W_TRACKER_OSTD
-        self.SN_L2M_R_TRACKER_OSTD = args.SN_L2M_R_TRACKER_OSTD
-        self.SN_L2M_W_TRACKER_OSTD = args.SN_L2M_W_TRACKER_OSTD
 
-        # 自动计算缓冲区大小（如果配置文件中设置为 "auto"）
-        self.RN_RDB_SIZE = self._resolve_buffer_size(args.RN_RDB_SIZE, self.RN_R_TRACKER_OSTD * self.BURST)
-        self.RN_WDB_SIZE = self._resolve_buffer_size(args.RN_WDB_SIZE, self.RN_W_TRACKER_OSTD * self.BURST)
-        self.SN_DDR_RDB_SIZE = self._resolve_buffer_size(args.SN_DDR_RDB_SIZE, self.SN_DDR_R_TRACKER_OSTD * self.BURST)
-        self.SN_DDR_WDB_SIZE = self._resolve_buffer_size(args.SN_DDR_WDB_SIZE, self.SN_DDR_W_TRACKER_OSTD * self.BURST)
-        self.SN_L2M_RDB_SIZE = self._resolve_buffer_size(args.SN_L2M_RDB_SIZE, self.SN_L2M_R_TRACKER_OSTD * self.BURST)
-        self.SN_L2M_WDB_SIZE = self._resolve_buffer_size(args.SN_L2M_WDB_SIZE, self.SN_L2M_W_TRACKER_OSTD * self.BURST)
+        # 新的资源配置逻辑：databuffer为主配置，tracker自动推导
+        self._process_resource_config(args)
         # 带宽限制参数（统一TX和RX）
         self.GDMA_BW_LIMIT = args.GDMA_BW_LIMIT
         self.SDMA_BW_LIMIT = args.SDMA_BW_LIMIT
@@ -134,6 +117,53 @@ class CrossRingConfig:
         else:
             return int(value)
 
+    def _parse_tracker_ostd(self, value):
+        """
+        解析tracker数量参数，支持数字和 'auto' 字符串
+        """
+        if isinstance(value, str) and value.lower() == "auto":
+            return value
+        else:
+            return int(value)
+
+    def _parse_topo_type(self, topo_type):
+        """
+        从 TOPO_TYPE 解析拓扑参数
+
+        Args:
+            topo_type: 拓扑类型字符串，格式为 "AxB"
+
+        Returns:
+            tuple: (NUM_COL, NUM_ROW, NUM_NODE)
+
+        Raises:
+            ValueError: 当 TOPO_TYPE 格式无效时
+        """
+        if not topo_type:
+            raise ValueError("TOPO_TYPE参数不能为空")
+
+        if 'x' not in topo_type:
+            raise ValueError(f"TOPO_TYPE格式错误，应为 'AxB' 格式，当前值: {topo_type}")
+
+        parts = topo_type.split('x')
+        if len(parts) != 2:
+            raise ValueError(f"TOPO_TYPE格式错误，应为 'AxB' 格式，当前值: {topo_type}")
+
+        try:
+            rows_half = int(parts[0])  # A
+            cols = int(parts[1])       # B
+        except ValueError:
+            raise ValueError(f"TOPO_TYPE格式错误，应为数字格式 'AxB'，当前值: {topo_type}")
+
+        if rows_half <= 0 or cols <= 0:
+            raise ValueError(f"TOPO_TYPE参数必须为正整数，当前值: {topo_type}")
+
+        num_col = cols
+        num_row = rows_half * 2
+        num_node = num_col * num_row
+
+        return num_col, num_row, num_node
+
     def _resolve_buffer_size(self, config_value, calculated_value):
         """
         解析缓冲区大小配置，支持自动计算
@@ -149,6 +179,91 @@ class CrossRingConfig:
             return calculated_value
         else:
             return config_value
+
+    def _resolve_tracker_ostd(self, tracker_value, databuffer_size, burst):
+        """
+        根据databuffer size自动计算tracker数量
+
+        Args:
+            tracker_value: 配置文件中的tracker值，可以是数字或 "auto"
+            databuffer_size: 数据缓冲区大小
+            burst: 突发长度
+
+        Returns:
+            int: 最终的tracker OSTD数量
+        """
+        if isinstance(tracker_value, str) and tracker_value.lower() == "auto":
+            return databuffer_size // burst
+        return int(tracker_value)
+
+    def _process_resource_config(self, args):
+        """
+        处理资源配置的新方法：databuffer为主配置，tracker自动推导
+        """
+        # 1. 读取databuffer配置（主配置）
+        self.RN_RDB_SIZE = int(args.RN_RDB_SIZE) if not (isinstance(args.RN_RDB_SIZE, str) and args.RN_RDB_SIZE.lower() == "auto") else None
+        self.RN_WDB_SIZE = int(args.RN_WDB_SIZE) if not (isinstance(args.RN_WDB_SIZE, str) and args.RN_WDB_SIZE.lower() == "auto") else None
+        self.SN_DDR_RDB_SIZE = int(args.SN_DDR_RDB_SIZE) if not (isinstance(args.SN_DDR_RDB_SIZE, str) and args.SN_DDR_RDB_SIZE.lower() == "auto") else None
+        self.SN_DDR_WDB_SIZE = int(args.SN_DDR_WDB_SIZE) if not (isinstance(args.SN_DDR_WDB_SIZE, str) and args.SN_DDR_WDB_SIZE.lower() == "auto") else None
+        self.SN_L2M_RDB_SIZE = int(args.SN_L2M_RDB_SIZE) if not (isinstance(args.SN_L2M_RDB_SIZE, str) and args.SN_L2M_RDB_SIZE.lower() == "auto") else None
+        self.SN_L2M_WDB_SIZE = int(args.SN_L2M_WDB_SIZE) if not (isinstance(args.SN_L2M_WDB_SIZE, str) and args.SN_L2M_WDB_SIZE.lower() == "auto") else None
+
+        # 2. 读取tracker配置
+        rn_r_tracker = args.RN_R_TRACKER_OSTD
+        rn_w_tracker = args.RN_W_TRACKER_OSTD
+        sn_ddr_r_tracker = args.SN_DDR_R_TRACKER_OSTD
+        sn_ddr_w_tracker = args.SN_DDR_W_TRACKER_OSTD
+        sn_l2m_r_tracker = args.SN_L2M_R_TRACKER_OSTD
+        sn_l2m_w_tracker = args.SN_L2M_W_TRACKER_OSTD
+
+        # 3. 处理databuffer为auto的情况（tracker为主配置）
+        if self.RN_RDB_SIZE is None:
+            self.RN_R_TRACKER_OSTD = int(rn_r_tracker)
+            self.RN_RDB_SIZE = self.RN_R_TRACKER_OSTD * self.BURST
+        else:
+            # databuffer为主配置，计算或读取tracker
+            self.RN_R_TRACKER_OSTD = self._resolve_tracker_ostd(rn_r_tracker, self.RN_RDB_SIZE, self.BURST)
+
+        if self.RN_WDB_SIZE is None:
+            self.RN_W_TRACKER_OSTD = int(rn_w_tracker)
+            self.RN_WDB_SIZE = self.RN_W_TRACKER_OSTD * self.BURST
+        else:
+            self.RN_W_TRACKER_OSTD = self._resolve_tracker_ostd(rn_w_tracker, self.RN_WDB_SIZE, self.BURST)
+
+        if self.SN_DDR_RDB_SIZE is None:
+            self.SN_DDR_R_TRACKER_OSTD = int(sn_ddr_r_tracker)
+            self.SN_DDR_RDB_SIZE = self.SN_DDR_R_TRACKER_OSTD * self.BURST
+        else:
+            self.SN_DDR_R_TRACKER_OSTD = self._resolve_tracker_ostd(sn_ddr_r_tracker, self.SN_DDR_RDB_SIZE, self.BURST)
+
+        if self.SN_DDR_WDB_SIZE is None:
+            self.SN_DDR_W_TRACKER_OSTD = int(sn_ddr_w_tracker)
+            self.SN_DDR_WDB_SIZE = self.SN_DDR_W_TRACKER_OSTD * self.BURST
+        else:
+            self.SN_DDR_W_TRACKER_OSTD = self._resolve_tracker_ostd(sn_ddr_w_tracker, self.SN_DDR_WDB_SIZE, self.BURST)
+
+        if self.SN_L2M_RDB_SIZE is None:
+            self.SN_L2M_R_TRACKER_OSTD = int(sn_l2m_r_tracker)
+            self.SN_L2M_RDB_SIZE = self.SN_L2M_R_TRACKER_OSTD * self.BURST
+        else:
+            self.SN_L2M_R_TRACKER_OSTD = self._resolve_tracker_ostd(sn_l2m_r_tracker, self.SN_L2M_RDB_SIZE, self.BURST)
+
+        if self.SN_L2M_WDB_SIZE is None:
+            self.SN_L2M_W_TRACKER_OSTD = int(sn_l2m_w_tracker)
+            self.SN_L2M_WDB_SIZE = self.SN_L2M_W_TRACKER_OSTD * self.BURST
+        else:
+            self.SN_L2M_W_TRACKER_OSTD = self._resolve_tracker_ostd(sn_l2m_w_tracker, self.SN_L2M_WDB_SIZE, self.BURST)
+
+        # 4. 处理统一模式
+        self.UNIFIED_RW_TRACKER = getattr(args, "UNIFIED_RW_TRACKER", False)
+        if self.UNIFIED_RW_TRACKER:
+            # 写配置使用读配置
+            self.RN_W_TRACKER_OSTD = self.RN_R_TRACKER_OSTD
+            self.RN_WDB_SIZE = self.RN_RDB_SIZE
+            self.SN_DDR_W_TRACKER_OSTD = self.SN_DDR_R_TRACKER_OSTD
+            self.SN_DDR_WDB_SIZE = self.SN_DDR_RDB_SIZE
+            self.SN_L2M_W_TRACKER_OSTD = self.SN_L2M_R_TRACKER_OSTD
+            self.SN_L2M_WDB_SIZE = self.SN_L2M_RDB_SIZE
 
     def _make_channels(self, key_types, value_factory=None):  # 允许 None / callable / 静态对象
         # 如果没有提供value_factory，使用基于deque的默认工厂
@@ -185,85 +300,13 @@ class CrossRingConfig:
         self.L2M_W_LATENCY = self.L2M_W_LATENCY_original * self.NETWORK_FREQUENCY
 
     def topology_select(self, topo_type="default"):
-        if topo_type == "default":
-            self.DDR_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
-            self.L2M_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
-            self.SDMA_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
-            self.GDMA_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
-            self.CDMA_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
-            self.D2D_RN_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
-            self.D2D_SN_SEND_POSITION_LIST = [self.NUM_COL * 2 * (x // self.NUM_COL) + self.NUM_COL + x % self.NUM_COL for x in range(self.NUM_IP)]
-
-        elif topo_type == "5x2":
-            self.NUM_NODE = 20
-            self.NUM_COL = 2
-            self.NUM_IP = 16
-            self.NUM_ROW = self.NUM_NODE // self.NUM_COL
-            self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-
-        elif topo_type == "4x2":
-            self.NUM_ROW = self.NUM_NODE // self.NUM_COL
-            self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-
-        elif topo_type == "5x4":
-            self.NUM_NODE = 40
-            self.NUM_COL = 4
-            self.NUM_IP = 32
-            self.NUM_ROW = self.NUM_NODE // self.NUM_COL
-            self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [9], [])
-            self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [9], [])
-            self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [9], [])
-            self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0] + [9], [])
-            self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
-            self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
-            self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
-
-        elif topo_type == "6x5":
-            self.NUM_NODE = 60
-            self.NUM_COL = 5
-            self.NUM_IP = 8
-            self.NUM_ROW = self.NUM_NODE // self.NUM_COL
-            self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
-            self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
-            self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW - 1)], [])
-
-        elif topo_type == "4x5":
-            self.NUM_NODE = 40
-            self.NUM_COL = 5
-            self.NUM_IP = 32
-            self.NUM_ROW = self.NUM_NODE // self.NUM_COL
-            self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-
-        else:
-            self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-            self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
 
     def generate_ip_positions(self, zero_rows=None, zero_cols=None):
         # 创建一个矩阵,初始值为1
@@ -398,16 +441,9 @@ class CrossRingConfig:
         parser = argparse.ArgumentParser(description="Process simulation configuration parameters.")
 
         # 将 JSON 配置作为默认值
-        parser.add_argument("--NUM_NODE", type=int, default=default_config["NUM_NODE"], help="Number of nodes")
-        parser.add_argument("--NUM_COL", type=int, default=default_config["NUM_COL"], help="Number of columns")
-        parser.add_argument("--NUM_IP", type=int, default=default_config["NUM_IP"], help="Number of IP")
-        parser.add_argument("--NUM_RN", type=int, default=default_config["NUM_RN"], help="Number of RN")
-        parser.add_argument("--NUM_SN", type=int, default=default_config["NUM_SN"], help="Number of SN")
-        parser.add_argument("--NUM_DDR", type=int, default=default_config["NUM_DDR"], help="Number of DDRs")
-        parser.add_argument("--NUM_L2M", type=int, default=default_config["NUM_L2M"], help="Number of L2Ms")
-        parser.add_argument("--NUM_SDMA", type=int, default=default_config["NUM_SDMA"], help="Number of SDMAs")
-        parser.add_argument("--NUM_GDMA", type=int, default=default_config["NUM_GDMA"], help="Number of GDMA")
-        parser.add_argument("--NUM_CDMA", type=int, default=default_config["NUM_CDMA"], help="Number of GDMA")
+        # 注意：NUM_NODE, NUM_COL, NUM_ROW 现在从 TOPO_TYPE 自动推导，不再需要在配置文件中指定
+        # 注意：NUM_IP, NUM_RN, NUM_SN, NUM_DDR, NUM_L2M, NUM_GDMA, NUM_SDMA, NUM_CDMA 等参数
+        # 现在从实际流量数据中动态获取，不再需要在配置文件中指定
         parser.add_argument("--FLIT_SIZE", type=int, default=default_config["FLIT_SIZE"], help="Flit size")
         parser.add_argument("--SLICE_PER_LINK_HORIZONTAL", type=int, default=default_config["SLICE_PER_LINK_HORIZONTAL"], help="Slice num per horizontal link, (num -2) equals to RTL slice num")
         parser.add_argument("--SLICE_PER_LINK_VERTICAL", type=int, default=default_config["SLICE_PER_LINK_VERTICAL"], help="Slice num per vertical link, (num -2) equals to RTL slice num")
@@ -441,19 +477,22 @@ class CrossRingConfig:
 
         parser.add_argument("--BURST", type=int, default=default_config["BURST"], help="Burst length")
         parser.add_argument("--NETWORK_FREQUENCY", type=float, default=default_config["NETWORK_FREQUENCY"], help="Network frequency")
-        parser.add_argument("--RN_R_TRACKER_OSTD", type=int, default=default_config["RN_R_TRACKER_OSTD"], help="RN read tracker outstanding")
-        parser.add_argument("--RN_W_TRACKER_OSTD", type=int, default=default_config["RN_W_TRACKER_OSTD"], help="RN write tracker outstanding")
+        parser.add_argument("--RN_R_TRACKER_OSTD", type=self._parse_tracker_ostd, default=default_config["RN_R_TRACKER_OSTD"], help="RN read tracker outstanding (int or 'auto')")
+        parser.add_argument("--RN_W_TRACKER_OSTD", type=self._parse_tracker_ostd, default=default_config["RN_W_TRACKER_OSTD"], help="RN write tracker outstanding (int or 'auto')")
         parser.add_argument("--RN_RDB_SIZE", type=self._parse_buffer_size, default=default_config["RN_RDB_SIZE"], help="RN read buffer size (int or 'auto')")
         parser.add_argument("--RN_WDB_SIZE", type=self._parse_buffer_size, default=default_config["RN_WDB_SIZE"], help="RN write buffer size (int or 'auto')")
-        parser.add_argument("--SN_DDR_R_TRACKER_OSTD", type=int, default=default_config["SN_DDR_R_TRACKER_OSTD"], help="SN ddr read tracker outstanding")
-        parser.add_argument("--SN_DDR_W_TRACKER_OSTD", type=int, default=default_config["SN_DDR_W_TRACKER_OSTD"], help="SN ddr write tracker outstanding")
-        parser.add_argument("--SN_L2M_R_TRACKER_OSTD", type=int, default=default_config["SN_L2M_R_TRACKER_OSTD"], help="SN l2m read tracker outstanding")
-        parser.add_argument("--SN_L2M_W_TRACKER_OSTD", type=int, default=default_config["SN_L2M_W_TRACKER_OSTD"], help="SN l2m write tracker outstanding")
+        parser.add_argument("--SN_DDR_R_TRACKER_OSTD", type=self._parse_tracker_ostd, default=default_config["SN_DDR_R_TRACKER_OSTD"], help="SN ddr read tracker outstanding (int or 'auto')")
+        parser.add_argument("--SN_DDR_W_TRACKER_OSTD", type=self._parse_tracker_ostd, default=default_config["SN_DDR_W_TRACKER_OSTD"], help="SN ddr write tracker outstanding (int or 'auto')")
+        parser.add_argument("--SN_L2M_R_TRACKER_OSTD", type=self._parse_tracker_ostd, default=default_config["SN_L2M_R_TRACKER_OSTD"], help="SN l2m read tracker outstanding (int or 'auto')")
+        parser.add_argument("--SN_L2M_W_TRACKER_OSTD", type=self._parse_tracker_ostd, default=default_config["SN_L2M_W_TRACKER_OSTD"], help="SN l2m write tracker outstanding (int or 'auto')")
         parser.add_argument("--SN_DDR_RDB_SIZE", type=self._parse_buffer_size, default=default_config["SN_DDR_RDB_SIZE"], help="SN ddr read buffer size (int or 'auto')")
         parser.add_argument("--SN_DDR_WDB_SIZE", type=self._parse_buffer_size, default=default_config["SN_DDR_WDB_SIZE"], help="SN ddr write buffer size (int or 'auto')")
         parser.add_argument("--SN_L2M_RDB_SIZE", type=self._parse_buffer_size, default=default_config["SN_L2M_RDB_SIZE"], help="SN l2m read buffer size (int or 'auto')")
         parser.add_argument("--SN_L2M_WDB_SIZE", type=self._parse_buffer_size, default=default_config["SN_L2M_WDB_SIZE"], help="SN l2m write buffer size (int or 'auto')")
-        parser.add_argument("-tt", "--TOPO_TYPE", type=str, default="", help="Choose topology type id from [4x9, 4x5, 5x4, 9x4, 3x3]")
+        parser.add_argument(
+            "--UNIFIED_RW_TRACKER", type=lambda x: x.lower() == "true", default=default_config.get("UNIFIED_RW_TRACKER", False), help="Enable unified read/write tracker pool (true/false)"
+        )
+        parser.add_argument("-tt", "--TOPO_TYPE", type=str, default=default_config.get("TOPO_TYPE", ""), help="Choose topology type id from [4x9, 4x5, 5x4, 9x4, 3x3]")
         parser.add_argument("--TL_Etag_T1_UE_MAX", type=int, default=default_config["TL_Etag_T1_UE_MAX"], help="Horizontal cross point towards left T1 ETag FIFO Entry number")
         parser.add_argument("--TL_Etag_T2_UE_MAX", type=int, default=default_config["TL_Etag_T2_UE_MAX"], help="Horizontal cross point towards left T2 ETag FIFO Entry number")
         parser.add_argument("--TR_Etag_T2_UE_MAX", type=int, default=default_config["TR_Etag_T2_UE_MAX"], help="Horizontal cross point towards right T2 ETag FIFO Entry number")

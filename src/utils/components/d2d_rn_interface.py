@@ -113,13 +113,13 @@ class D2D_RN_Interface(IPInterface):
         packet_id = flit.packet_id
 
         # 检查D2D_RN的写资源
-        has_tracker = self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos] > 0
-        has_databuffer = self.node.rn_wdb_count[self.ip_type][self.ip_pos] >= flit.burst_length
+        has_tracker = self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos]["count"] > 0
+        has_databuffer = self.node.rn_wdb_count[self.ip_type][self.ip_pos]["count"] >= flit.burst_length
 
         if has_tracker and has_databuffer:
             # 消耗资源
-            self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos] -= 1
-            self.node.rn_wdb_count[self.ip_type][self.ip_pos] -= flit.burst_length
+            self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos]["count"] -= 1
+            self.node.rn_wdb_count[self.ip_type][self.ip_pos]["count"] -= flit.burst_length
 
             # 缓存写请求等待写数据
             self.cross_die_write_requests[packet_id] = flit
@@ -397,7 +397,7 @@ class D2D_RN_Interface(IPInterface):
                     self.cross_die_write_data_cache.pop(packet_id, None)
 
                     # 释放D2D_RN的tracker
-                    self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos] += 1
+                    self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos]["count"] += 1
 
                     # 修改响应类型为write_complete并通过B通道返回
                     rsp.rsp_type = "write_complete"
@@ -556,9 +556,9 @@ class D2D_RN_Interface(IPInterface):
         # 数据发送到AXI通道后，立即释放D2D_RN的tracker和RDB资源
         if tracker_req in self.node.rn_tracker["read"][self.ip_type][self.ip_pos]:
             self.node.rn_tracker["read"][self.ip_type][self.ip_pos].remove(tracker_req)
-            self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos] += 1
+            self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos]["count"] += 1
             self.node.rn_tracker_pointer["read"][self.ip_type][self.ip_pos] -= 1
-            self.node.rn_rdb_count[self.ip_type][self.ip_pos] += tracker_req.burst_length
+            self.node.rn_rdb_count[self.ip_type][self.ip_pos]["count"] += tracker_req.burst_length
 
             # print(f"[D2D_RN] 立即释放tracker资源 packet {getattr(first_flit, 'packet_id', '?')}: "
             #   f"tracker_count={self.node.rn_tracker_count['read'][self.ip_type][self.ip_pos]}, "

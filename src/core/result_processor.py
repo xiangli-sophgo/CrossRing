@@ -193,6 +193,12 @@ class BandwidthAnalyzer:
         self.read_ip_intervals = defaultdict(list)
         self.write_ip_intervals = defaultdict(list)
 
+        # 动态IP统计
+        self.unique_rn_ips = set()  # 存储 (node, type) 对
+        self.unique_sn_ips = set()  # 存储 (node, type) 对
+        self.ip_count_by_type = defaultdict(set)  # 按类型统计IP数量
+        self.actual_num_ip = 0  # 实际IP数量
+
         # 初始化节点位置
         self._initialize_node_positions()
 
@@ -237,7 +243,12 @@ class BandwidthAnalyzer:
         return True
 
     def _initialize_node_positions(self):
-        """初始化RN和SN节点位置"""
+        """初始化RN和SN节点位置
+
+        注意：节点位置现在主要从实际流量数据中动态获取，
+        这里只是初始化为空集合，具体位置在collect_ip_statistics()中确定
+        """
+        # 从配置文件初始化（向后兼容）
         if hasattr(self.config, "GDMA_SEND_POSITION_LIST"):
             self.rn_positions.update(self.config.GDMA_SEND_POSITION_LIST)
         if hasattr(self.config, "SDMA_SEND_POSITION_LIST"):
@@ -250,6 +261,40 @@ class BandwidthAnalyzer:
         if hasattr(self.config, "L2M_SEND_POSITION_LIST"):
             self.sn_positions.update(pos - self.config.NUM_COL for pos in self.config.L2M_SEND_POSITION_LIST)
             self.sn_positions.update(self.config.L2M_SEND_POSITION_LIST)
+
+        # 注意：实际位置将在collect_ip_statistics()中从流量数据动态确定
+
+    def collect_ip_statistics(self):
+        """从请求数据中动态统计IP信息"""
+        self.unique_rn_ips.clear()
+        self.unique_sn_ips.clear()
+        self.ip_count_by_type.clear()
+
+        for req in self.requests:
+            # RN端：source_node + source_type (如: (14, "gdma_0"))
+            self.unique_rn_ips.add((req.source_node, req.source_type))
+            # SN端：dest_node + dest_type (如: (4, "ddr_0"))
+            self.unique_sn_ips.add((req.dest_node, req.dest_type))
+
+        # 统计各类型IP数量
+        for node, ip_type in self.unique_rn_ips.union(self.unique_sn_ips):
+            base_type = ip_type.split("_")[0] if "_" in ip_type else ip_type  # gdma_0 -> gdma
+            ip_id = ip_type.split("_")[1] if "_" in ip_type else "0"
+            self.ip_count_by_type[base_type].add((node, ip_id))
+
+        # 计算总的unique IP数量（用于平均带宽计算）
+        self.actual_num_ip = len(self.unique_rn_ips)
+
+        # 更新rn_positions和sn_positions为实际使用的节点
+        self.rn_positions = set(node for node, _ in self.unique_rn_ips)
+        self.sn_positions = set(node for node, _ in self.unique_sn_ips)
+
+        # print(f"动态统计IP信息：")
+        # print(f"  RN IP数量: {len(self.unique_rn_ips)}")
+        # print(f"  SN IP数量: {len(self.unique_sn_ips)}")
+        # print(f"  总IP数量: {self.actual_num_ip}")
+        # for ip_type, ip_set in self.ip_count_by_type.items():
+        #     print(f"  {ip_type.upper()}: {len(ip_set)}个")
 
     def collect_requests_data(self, sim_model, simulation_end_cycle=None) -> None:
         """从sim_model收集请求数据"""
@@ -395,6 +440,9 @@ class BandwidthAnalyzer:
 
         # 按开始时间排序
         self.requests.sort(key=lambda x: x.start_time)
+
+        # 动态统计IP信息
+        self.collect_ip_statistics()
 
     def normalize_ip_type(self, ip_type):
         """标准化IP类型名称，去除数字后缀和处理特殊情况"""
@@ -2321,19 +2369,13 @@ class BandwidthAnalyzer:
         write_metrics = results["network_overall"]["write"]
         mixed_metrics = results["network_overall"]["mixed"]
 
-        print(f"网络整体带宽:")
-        print(f"  读带宽  - 非加权: {read_metrics.unweighted_bandwidth:.3f} GB/s, 加权: {read_metrics.weighted_bandwidth:.3f} GB/s")
-        print(f"  写带宽  - 非加权: {write_metrics.unweighted_bandwidth:.3f} GB/s, 加权: {write_metrics.weighted_bandwidth:.3f} GB/s")
-        print(f"  混合带宽 - 非加权: {mixed_metrics.unweighted_bandwidth:.3f} GB/s, 加权: {mixed_metrics.weighted_bandwidth:.3f} GB/s")
-        print(
-            f"  总带宽  - 非加权: {read_metrics.unweighted_bandwidth + write_metrics.unweighted_bandwidth:.3f} GB/s, 加权: {read_metrics.weighted_bandwidth + write_metrics.weighted_bandwidth:.3f} GB/s"
-        )
-        print(f"  读带宽  - 平均非加权: {read_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {read_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
-        print(f"  写带宽  - 平均非加权: {write_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {write_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
-        print(f"  混合带宽 - 平均非加权: {mixed_metrics.unweighted_bandwidth / self.config.NUM_IP:.3f} GB/s, 平均加权: {mixed_metrics.weighted_bandwidth / self.config.NUM_IP:.3f} GB/s")
-        print(
-            f"  总带宽  - 平均非加权: {(read_metrics.unweighted_bandwidth + write_metrics.unweighted_bandwidth) / self.config.NUM_IP:.3f} GB/s, 平均加权: {(read_metrics.weighted_bandwidth + write_metrics.weighted_bandwidth) / self.config.NUM_IP:.3f} GB/s"
-        )
+        # 使用实际IP数量或配置中的NUM_IP作为fallback
+        num_ip_for_avg = self.actual_num_ip or getattr(self.config, "NUM_IP", 1)
+
+        print(f"网络带宽:")
+        print(f"  读带宽:    {read_metrics.weighted_bandwidth:.3f} GB/s (平均: {read_metrics.weighted_bandwidth / num_ip_for_avg:.3f} GB/s)")
+        print(f"  写带宽:    {write_metrics.weighted_bandwidth:.3f} GB/s (平均: {write_metrics.weighted_bandwidth / num_ip_for_avg:.3f} GB/s)")
+        print(f"  混合带宽:  {mixed_metrics.weighted_bandwidth:.3f} GB/s (平均: {mixed_metrics.weighted_bandwidth / num_ip_for_avg:.3f} GB/s)")
 
         # 请求统计
         summary = results["summary"]
@@ -2444,11 +2486,21 @@ class BandwidthAnalyzer:
         f.write("=" * 50 + "\n\n")
 
         network_overall = results["network_overall"]
+        num_ip_for_avg = self.actual_num_ip or getattr(self.config, "NUM_IP", 1)
+
+        # 简化的带宽显示格式
+        read_metrics = network_overall["read"]
+        write_metrics = network_overall["write"]
+        mixed_metrics = network_overall["mixed"]
+
+        f.write("网络带宽:\n")
+        f.write(f"  读带宽:    {read_metrics.weighted_bandwidth:.3f} GB/s (平均: {read_metrics.weighted_bandwidth/num_ip_for_avg:.3f} GB/s)\n")
+        f.write(f"  写带宽:    {write_metrics.weighted_bandwidth:.3f} GB/s (平均: {write_metrics.weighted_bandwidth/num_ip_for_avg:.3f} GB/s)\n")
+        f.write(f"  混合带宽:  {mixed_metrics.weighted_bandwidth:.3f} GB/s (平均: {mixed_metrics.weighted_bandwidth/num_ip_for_avg:.3f} GB/s)\n\n")
+
         for operation in ["read", "write", "mixed"]:
             metrics = network_overall[operation]
-            f.write(f"{operation.upper()} 操作带宽:\n")
-            f.write(f"  非加权带宽: {metrics.unweighted_bandwidth:.3f} GB/s, 平均：{metrics.unweighted_bandwidth/self.config.NUM_IP:.3f}\n")
-            f.write(f"  加权带宽:   {metrics.weighted_bandwidth:.3f} GB/s, 平均：{metrics.weighted_bandwidth/self.config.NUM_IP:.3f}\n\n")
+            f.write(f"{operation.upper()} 操作详细信息:\n")
             f.write(f"  网络工作时间: {metrics.network_start_time} - {metrics.network_end_time} ns (总计 {metrics.network_end_time - metrics.network_start_time} ns)\n")
             f.write(f"  实际工作时间: {metrics.total_working_time} ns\n")
             f.write(f"  工作区间数: {len(metrics.working_intervals)}\n")
@@ -2461,7 +2513,7 @@ class BandwidthAnalyzer:
                     f.write(
                         f"    区间{i+1}: {interval.start_time}-{interval.end_time}ns, "
                         f"持续{interval.duration}ns, {interval.flit_count}个flit, "
-                        f"平均带宽{interval.bandwidth_bytes_per_ns / self.config.NUM_IP:.3f}GB/s\n"
+                        f"平均带宽{interval.bandwidth_bytes_per_ns / num_ip_for_avg:.3f}GB/s\n"
                     )
             f.write("\n")
 
