@@ -1,5 +1,4 @@
 # CrossRing 默认配置
-# 基于 config2.json 转换而来
 
 # 网络拓扑参数
 TOPO_TYPE: "5x4"  # 格式 AxB，自动计算拓扑参数
@@ -44,12 +43,12 @@ SN_L2M_RDB_SIZE: 192  # SN L2M读数据缓冲区
 SN_L2M_WDB_SIZE: 192  # SN L2M写数据缓冲区
 
 # 次要配置：跟踪器数量（自动计算：databuffer_size / BURST）
-RN_R_TRACKER_OSTD: auto    # = RN_RDB_SIZE / BURST = 192 / 4 = 48
-RN_W_TRACKER_OSTD: auto    # = RN_WDB_SIZE / BURST = 192 / 4 = 48
-SN_DDR_R_TRACKER_OSTD: auto # = SN_DDR_RDB_SIZE / BURST = 192 / 4 = 48
-SN_DDR_W_TRACKER_OSTD: auto # = SN_DDR_WDB_SIZE / BURST = 192 / 4 = 48
-SN_L2M_R_TRACKER_OSTD: auto # = SN_L2M_RDB_SIZE / BURST = 192 / 4 = 48
-SN_L2M_W_TRACKER_OSTD: auto # = SN_L2M_WDB_SIZE / BURST = 192 / 4 = 48
+RN_R_TRACKER_OSTD: auto    # = RN_RDB_SIZE / BURST 
+RN_W_TRACKER_OSTD: auto    # = RN_WDB_SIZE / BURST 
+SN_DDR_R_TRACKER_OSTD: auto # = SN_DDR_RDB_SIZE / BURST 
+SN_DDR_W_TRACKER_OSTD: auto # = SN_DDR_WDB_SIZE / BURST 
+SN_L2M_R_TRACKER_OSTD: auto # = SN_L2M_RDB_SIZE / BURST 
+SN_L2M_W_TRACKER_OSTD: auto # = SN_L2M_WDB_SIZE / BURST 
 
 # 资源模式配置
 UNIFIED_RW_TRACKER: false   # true=读写共享资源池，false=读写分离
