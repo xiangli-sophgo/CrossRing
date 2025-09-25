@@ -12,9 +12,10 @@ if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
 
 
 def main():
-    traffic_file_path = r"../test_data/"
+    # traffic_file_path = r"../test_data/"
     # traffic_file_path = r"../../C2C/traffic_data"
     # traffic_file_path = r"../traffic/traffic0730"
+    traffic_file_path = r"../traffic/DeepSeek_0922/hashed/"
     # traffic_file_path = r"../traffic/data_0922/"
     # traffic_file_path = r"../traffic/0617/"
     # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
@@ -35,13 +36,13 @@ def main():
             # r"All2All_Dispatch.txt",
             # r"full_bw_R_4x5.txt"
             # "LLama2_AllReduce.txt"
-            "data_0924_R.txt"
+            # "data_0924_R.txt"
             # "c2c_16_shared_burst2_W.txt"
             # "traffic_2260E_case1.txt",
             # "LLama2_AttentionFC.txt"
             # "W_8x8.txt"
             # "MLA_B32.txt"
-            # "Add.txt"
+            "Add.txt"
             # "mm_q_lora_a.txt"
             # "MLP_MoE.txt"
             # "output_embedding.txt"

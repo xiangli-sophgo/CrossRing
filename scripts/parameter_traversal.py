@@ -207,16 +207,31 @@ def run_parameter_combination(
 
         if isinstance(sim_results, dict) and sim_results:
             bw = sim_results.get("mixed_avg_weighted_bw", 0)
-            results[f"bw_{traffic_name}"] = bw
-            traffic_bw_list.append(bw)
 
-            # 保存其他仿真指标（去掉统计后缀）
-            for key, value in sim_results.items():
-                if key != "mixed_avg_weighted_bw" and isinstance(value, (int, float)):
-                    results[f"{key}_{traffic_name}"] = value
+            # 单个traffic文件时不添加后缀
+            if len(traffic_files) == 1:
+                results["bw"] = bw
+                traffic_bw_list.append(bw)
+
+                # 保存其他仿真指标（不添加后缀）
+                for key, value in sim_results.items():
+                    if key != "mixed_avg_weighted_bw" and isinstance(value, (int, float)):
+                        results[key] = value
+            else:
+                # 多个traffic文件时保留原逻辑
+                results[f"bw_{traffic_name}"] = bw
+                traffic_bw_list.append(bw)
+
+                # 保存其他仿真指标（添加后缀）
+                for key, value in sim_results.items():
+                    if key != "mixed_avg_weighted_bw" and isinstance(value, (int, float)):
+                        results[f"{key}_{traffic_name}"] = value
         else:
             traffic_bw_list.append(0)
-            results[f"bw_{traffic_name}"] = 0
+            if len(traffic_files) == 1:
+                results["bw"] = 0
+            else:
+                results[f"bw_{traffic_name}"] = 0
 
     # 计算综合指标
     weighted_bw = sum(bw * weight for bw, weight in zip(traffic_bw_list, traffic_weights))
@@ -603,8 +618,8 @@ def main():
         task_args.append((params_dict, traffic_files, traffic_weights, config_path, topo_type, traffic_path, output_dir))
 
     # 并行运行所有组合
-    results = []
     completed_count = 0
+    csv_path = os.path.join(output_dir, "results.csv")
 
     if max_workers > 1:
         print(f"使用 {max_workers} 个进程并行运行...")
@@ -617,22 +632,31 @@ def main():
                 params_dict = future_to_params[future]
                 try:
                     result = future.result()
-                    results.append(result)
                     completed_count += 1
                     print(f"完成: {completed_count}/{total_combinations}")
 
-                    # 定期保存中间结果
-                    if completed_count % 10 == 0 or completed_count == total_combinations:
-                        df = pd.DataFrame(results)
-                        df.to_csv(os.path.join(output_dir, "results.csv"), index=False)
+                    # 使用追加模式保存结果
+                    df_single = pd.DataFrame([result])
+                    if completed_count == 1:
+                        # 第一次写入，包含表头
+                        df_single.to_csv(csv_path, index=False, mode='w')
+                    else:
+                        # 后续追加，不包含表头
+                        df_single.to_csv(csv_path, index=False, mode='a', header=False)
 
                 except Exception as e:
                     print(f"参数组合 {params_dict} 运行失败: {e}")
                     # 添加失败的结果
                     failed_result = params_dict.copy()
                     failed_result.update({"weighted_bw": 0, "min_bw": 0, "error": str(e)})
-                    results.append(failed_result)
+
                     completed_count += 1
+                    # 同样追加失败的结果
+                    df_single = pd.DataFrame([failed_result])
+                    if completed_count == 1:
+                        df_single.to_csv(csv_path, index=False, mode='w')
+                    else:
+                        df_single.to_csv(csv_path, index=False, mode='a', header=False)
     else:
         print("使用单进程串行运行...")
         for i, args in enumerate(task_args):
@@ -641,21 +665,38 @@ def main():
 
             try:
                 result = run_single_combination(args)
-                results.append(result)
+                completed_count = i + 1
 
-                # 定期保存中间结果
-                if (i + 1) % 10 == 0 or i == total_combinations - 1:
-                    df = pd.DataFrame(results)
-                    df.to_csv(os.path.join(output_dir, "results.csv"), index=False)
+                # 使用追加模式保存结果
+                df_single = pd.DataFrame([result])
+                if completed_count == 1:
+                    # 第一次写入，包含表头
+                    df_single.to_csv(csv_path, index=False, mode='w')
+                else:
+                    # 后续追加，不包含表头
+                    df_single.to_csv(csv_path, index=False, mode='a', header=False)
 
             except Exception as e:
                 print(f"参数组合 {params_dict} 运行失败: {e}")
                 failed_result = params_dict.copy()
                 failed_result.update({"weighted_bw": 0, "min_bw": 0, "error": str(e)})
-                results.append(failed_result)
 
-    # 最终结果分析
-    results_df = pd.DataFrame(results)
+                completed_count = i + 1
+                # 同样追加失败的结果
+                df_single = pd.DataFrame([failed_result])
+                if completed_count == 1:
+                    df_single.to_csv(csv_path, index=False, mode='w')
+                else:
+                    df_single.to_csv(csv_path, index=False, mode='a', header=False)
+
+    # 最终结果分析 - 从CSV文件读取所有结果
+    print(f"从CSV文件读取结果: {csv_path}")
+    try:
+        results_df = pd.read_csv(csv_path)
+        print(f"成功读取 {len(results_df)} 条结果")
+    except Exception as e:
+        print(f"读取结果文件失败: {e}")
+        results_df = pd.DataFrame()  # 创建空DataFrame
 
     # 找出最优配置
     if not results_df.empty and "weighted_bw" in results_df.columns:
@@ -695,9 +736,35 @@ def main():
 
             # 添加最优配置的详细指标
             f.write("\n最优配置详细性能指标:\n")
-            for col in sorted(results_df.columns):
-                if ("_mean_" in col or "_max_" in col or "_min_" in col) and col in best_config:
-                    f.write(f"  {col}: {best_config[col]:.4f}\n")
+
+            # 定义要输出的关键性能指标
+            perf_metrics = [
+                "bw", "weighted_bw", "min_bw",
+                "mixed_weighted_bw", "mixed_unweighted_bw",
+                "read_weighted_bw", "read_unweighted_bw",
+                "write_weighted_bw", "write_unweighted_bw",
+                "Total_sum_BW",
+                "cmd_mixed_avg_latency", "cmd_mixed_max_latency",
+                "data_mixed_avg_latency", "data_mixed_max_latency",
+                "trans_mixed_avg_latency", "trans_mixed_max_latency",
+                "cmd_read_avg_latency", "cmd_read_max_latency",
+                "cmd_write_avg_latency", "cmd_write_max_latency",
+                "data_read_avg_latency", "data_read_max_latency",
+                "data_write_avg_latency", "data_write_max_latency",
+                "trans_read_avg_latency", "trans_read_max_latency",
+                "trans_write_avg_latency", "trans_write_max_latency"
+            ]
+
+            # 输出存在的性能指标
+            for metric in perf_metrics:
+                if metric in best_config and isinstance(best_config[metric], (int, float)):
+                    f.write(f"  {metric}: {best_config[metric]:.4f}\n")
+
+            # 如果有多个traffic文件，也输出带后缀的指标
+            if len(traffic_files) > 1:
+                for col in sorted(results_df.columns):
+                    if any(metric in col for metric in ["_bw", "_latency", "Total_sum_BW"]) and isinstance(best_config[col], (int, float)):
+                        f.write(f"  {col}: {best_config[col]:.4f}\n")
 
             f.write("\nTop 10 配置:\n")
             top10 = results_df.nlargest(10, "weighted_bw")
@@ -707,13 +774,8 @@ def main():
                     f.write(f"{param}={row[param]} ")
                 f.write(f"BW={row['weighted_bw']:.3f}\n")
 
-        # 保存最终的完整结果
-        final_csv_path = os.path.join(output_dir, "final_results.csv")
-        results_df.to_csv(final_csv_path, index=False)
-
-        final_json_path = os.path.join(output_dir, "final_results.json")
-        with open(final_json_path, "w", encoding="utf-8") as f:
-            json.dump(results, f, indent=2, ensure_ascii=False, default=str)
+        # 所有结果已在处理过程中追加保存到CSV文件
+        print(f"所有结果已保存到: {csv_path}")
 
         print(f"报告已生成: {report_path}")
     else:

@@ -1759,9 +1759,53 @@ class BaseModel:
         # Extract statistics (ending with "_stat")
         results = {key.rsplit("_stat", 1)[0]: value for key, value in sim_vars.items() if key.endswith("_stat")}
 
-        # Add configuration variables
-        config_var = {key: value for key, value in vars(self.config).items()}
-        results = {**config_var, **results}
+        # Define config whitelist (only YAML defined parameters)
+        config_whitelist = [
+            # Basic parameters
+            "TOPO_TYPE", "FLIT_SIZE", "SLICE_PER_LINK_HORIZONTAL", "SLICE_PER_LINK_VERTICAL",
+            "BURST", "NETWORK_FREQUENCY",
+
+            # Resource configuration
+            "RN_RDB_SIZE", "RN_WDB_SIZE", "SN_DDR_RDB_SIZE", "SN_DDR_WDB_SIZE",
+            "SN_L2M_RDB_SIZE", "SN_L2M_WDB_SIZE", "UNIFIED_RW_TRACKER",
+
+            # Latency configuration (using original values)
+            "DDR_R_LATENCY_original", "DDR_R_LATENCY_VAR_original", "DDR_W_LATENCY_original",
+            "L2M_R_LATENCY_original", "L2M_W_LATENCY_original", "SN_TRACKER_RELEASE_LATENCY_original",
+
+            # FIFO depths
+            "IQ_CH_FIFO_DEPTH", "EQ_CH_FIFO_DEPTH", "IQ_OUT_FIFO_DEPTH_HORIZONTAL",
+            "IQ_OUT_FIFO_DEPTH_VERTICAL", "IQ_OUT_FIFO_DEPTH_EQ", "RB_OUT_FIFO_DEPTH",
+            "RB_IN_FIFO_DEPTH", "EQ_IN_FIFO_DEPTH",
+
+            # ETag configuration
+            "TL_Etag_T1_UE_MAX", "TL_Etag_T2_UE_MAX", "TR_Etag_T2_UE_MAX",
+            "TU_Etag_T1_UE_MAX", "TU_Etag_T2_UE_MAX", "TD_Etag_T2_UE_MAX",
+            "ETag_BOTHSIDE_UPGRADE",
+
+            # ITag configuration
+            "ITag_TRIGGER_Th_H", "ITag_TRIGGER_Th_V", "ITag_MAX_NUM_H", "ITag_MAX_NUM_V",
+
+            # Feature switches
+            "ENABLE_CROSSPOINT_CONFLICT_CHECK", "ENABLE_IN_ORDER_EJECTION", "CROSSRING_VERSION",
+
+            # Bandwidth limits
+            "GDMA_BW_LIMIT", "SDMA_BW_LIMIT", "CDMA_BW_LIMIT", "DDR_BW_LIMIT", "L2M_BW_LIMIT",
+
+            # Other configurations
+            "GDMA_RW_GAP", "SDMA_RW_GAP", "IN_ORDER_EJECTION_PAIRS", "IN_ORDER_PACKET_CATEGORIES",
+
+            # Tag configuration
+            "RB_ONLY_TAG_NUM_HORIZONTAL", "RB_ONLY_TAG_NUM_VERTICAL",
+
+            # IP frequency transformation FIFO depths
+            "IP_L2H_FIFO_DEPTH", "IP_H2L_H_FIFO_DEPTH", "IP_H2L_L_FIFO_DEPTH"
+        ]
+
+        # Add selected configuration variables
+        for key in config_whitelist:
+            if hasattr(self.config, key):
+                results[key] = getattr(self.config, key)
 
         # Clear flit and packet IDs (assuming these are class methods)
         Flit.clear_flit_id()
@@ -1771,12 +1815,6 @@ class BaseModel:
         perf_stats = self.performance_monitor.get_summary()
         results.update(perf_stats)
 
-        # Add object pool statistics
-        flit_pool_stats = Flit.get_pool_stats()
-        results["flit_pool_size"] = flit_pool_stats["pool_size"]
-        results["flit_pool_created"] = flit_pool_stats["created_count"]
-        results["flit_pool_reuse_rate"] = (flit_pool_stats["created_count"] - flit_pool_stats["pool_size"]) / max(flit_pool_stats["created_count"], 1)
-
         # Add result processor analysis for port bandwidth data
         try:
             if hasattr(self, "result_processor") and self.result_processor:
@@ -1784,17 +1822,39 @@ class BaseModel:
                 self.result_processor.collect_requests_data(self, self.cycle)
                 bandwidth_analysis = self.result_processor.analyze_all_bandwidth()
 
-                # Include port averages in results
+                # Include port averages in results (both original dict and expanded fields)
                 if "port_averages" in bandwidth_analysis:
-                    results["port_averages"] = bandwidth_analysis["port_averages"]
+                    port_avg = bandwidth_analysis["port_averages"]
+                    results["port_averages"] = port_avg  # Keep original dict for compatibility
+
+                    # Expand port_averages dictionary into individual fields
+                    for key, value in port_avg.items():
+                        results[key] = value  # e.g., avg_gdma_bw, avg_gdma_read_bw, avg_gdma_write_bw
 
                 # Include other useful bandwidth metrics
                 if "Total_sum_BW" in bandwidth_analysis:
                     results["Total_sum_BW"] = bandwidth_analysis["Total_sum_BW"]
 
-                # Include circling eject stats
+                # Include circling eject stats (both original dict and expanded fields)
                 if "circling_eject_stats" in bandwidth_analysis:
-                    results["circling_eject_stats"] = bandwidth_analysis["circling_eject_stats"]
+                    circling_stats = bandwidth_analysis["circling_eject_stats"]
+                    results["circling_eject_stats"] = circling_stats  # Keep original dict for compatibility
+
+                    # Expand circling_eject_stats dictionary into individual fields
+                    if "horizontal" in circling_stats:
+                        results["circling_h_total_flits"] = circling_stats["horizontal"]["total_data_flits"]
+                        results["circling_h_circling_flits"] = circling_stats["horizontal"]["circling_flits"]
+                        results["circling_h_ratio"] = circling_stats["horizontal"]["circling_ratio"]
+
+                    if "vertical" in circling_stats:
+                        results["circling_v_total_flits"] = circling_stats["vertical"]["total_data_flits"]
+                        results["circling_v_circling_flits"] = circling_stats["vertical"]["circling_flits"]
+                        results["circling_v_ratio"] = circling_stats["vertical"]["circling_ratio"]
+
+                    if "overall" in circling_stats:
+                        results["circling_overall_total_flits"] = circling_stats["overall"]["total_data_flits"]
+                        results["circling_overall_circling_flits"] = circling_stats["overall"]["circling_flits"]
+                        results["circling_overall_ratio"] = circling_stats["overall"]["circling_ratio"]
 
         except Exception as e:
             if hasattr(self, "verbose") and self.verbose:

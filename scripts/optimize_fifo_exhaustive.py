@@ -351,7 +351,6 @@ class FIFOExhaustiveOptimizer:
         # 结果存储
         self.cache = {}  # 仿真结果缓存
         self.param_results = {}  # 每个参数的遍历结果
-        self.all_results = []  # 所有仿真结果
 
         # 周期性保存设置
         self.save_interval = 100  # 每100个仿真结果保存一次
@@ -447,10 +446,8 @@ class FIFOExhaustiveOptimizer:
                     try:
                         import json
 
-                        emergency_save = os.path.join(self.result_dir, "emergency_save.json")
-                        with open(emergency_save, "w", encoding="utf-8") as f:
-                            json.dump(self.all_results, f, indent=2, ensure_ascii=False)
-                        print(f"紧急保存完成: {emergency_save}")
+                        # 紧急保存功能已简化，结果实时保存到CSV文件
+                        print(f"结果已实时保存到: {self.csv_output_path}")
                     except:
                         print("紧急保存也失败了")
             else:
@@ -996,11 +993,9 @@ class FIFOExhaustiveOptimizer:
                         sim_params = (combination, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path)
                         try:
                             result = run_single_simulation_optimized(sim_params)
-                            self.all_results.append(result)
                             save_optimization_results_to_csv(result, self.csv_output_path)
                         except Exception as e:
                             error_result = {"combination": combination, "optimization_performance": 0, "error": str(e)}
-                            self.all_results.append(error_result)
                             save_optimization_results_to_csv(error_result, self.csv_output_path)
             else:
                 # 串行处理小批次
@@ -1008,18 +1003,17 @@ class FIFOExhaustiveOptimizer:
                     sim_params = (combination, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path)
                     try:
                         result = run_single_simulation_optimized(sim_params)
-                        self.all_results.append(result)
                         save_optimization_results_to_csv(result, self.csv_output_path)
                     except Exception as e:
                         error_result = {"combination": combination, "optimization_performance": 0, "error": str(e)}
-                        self.all_results.append(error_result)
                         save_optimization_results_to_csv(error_result, self.csv_output_path)
 
             total_processed += len(batch)
 
             # 定期保存中间结果
             if batch_count % 10 == 0:
-                self._save_intermediate_results(batch_count, -1)  # -1表示未知总批次数
+                # 中间结果保存已通过CSV追加模式实现
+                pass
 
         print(f"\n分批处理完成，总计处理 {total_processed:,} 个有效组合")
 
@@ -1082,7 +1076,6 @@ class FIFOExhaustiveOptimizer:
                         combination = future_to_combination[future]
                         try:
                             result = future.result()
-                            self.all_results.append(result)
                             # 立即保存到CSV
                             save_optimization_results_to_csv(result, self.csv_output_path)
                             completed += 1
@@ -1101,7 +1094,6 @@ class FIFOExhaustiveOptimizer:
                         except Exception as e:
                             print(f"仿真失败: {e}")
                             error_result = {"combination": combination, "performance": 0, "error": str(e)}
-                            self.all_results.append(error_result)
                             save_optimization_results_to_csv(error_result, self.csv_output_path)
                             completed += 1
 
@@ -1126,76 +1118,102 @@ class FIFOExhaustiveOptimizer:
             for i, sim_params in enumerate(tqdm(sim_params_list, desc="仿真进度")):
                 try:
                     result = run_single_simulation_optimized(sim_params)
-                    self.all_results.append(result)
                     save_optimization_results_to_csv(result, self.csv_output_path)
                 except Exception as e:
                     combination = sim_params[0]
                     error_result = {"combination": combination, "optimization_performance": 0, "error": str(e)}
-                    self.all_results.append(error_result)
                     save_optimization_results_to_csv(error_result, self.csv_output_path)
 
-                # 每完成100个组合保存一次中间结果
-                if (i + 1) % 100 == 0:
-                    self._save_intermediate_results_single(i + 1, len(valid_combinations))
+                # 中间结果保存已通过CSV追加模式实现
 
         # 分析结果
         self._analyze_results()
         self._print_best_result()
 
     def _print_best_result(self):
-        """打印最佳结果"""
-        if not self.all_results:
-            print("没有有效的仿真结果")
-            return
+        """打印最佳结果，从CSV文件读取"""
+        try:
+            # 从CSV文件读取所有结果
+            if not os.path.exists(self.csv_output_path):
+                print("没有找到CSV结果文件")
+                return
 
-        best_result = max(self.all_results, key=lambda x: x.get("performance", 0))
-        print(f"\n最佳配置性能: {best_result.get('performance', 0):.2f} GB/s")
-        print("最佳参数组合:")
-        for param_name in ALL_PARAMS.keys():
-            if param_name in best_result:
-                print(f"  {param_name}: {best_result[param_name]}")
+            df = pd.read_csv(self.csv_output_path)
+            if df.empty:
+                print("没有有效的仿真结果")
+                return
+
+            # 找到性能最好的结果
+            if 'performance' not in df.columns:
+                print("缺少performance列")
+                return
+
+            best_idx = df['performance'].idxmax()
+            best_result = df.iloc[best_idx]
+
+            print(f"\n最佳配置性能: {best_result['performance']:.2f} GB/s")
+            print("最佳参数组合:")
+            for param_name in ALL_PARAMS.keys():
+                if param_name in best_result:
+                    print(f"  {param_name}: {best_result[param_name]}")
+
+        except Exception as e:
+            print(f"读取最佳结果失败: {e}")
 
     def _analyze_results(self):
-        """分析所有结果，为每个参数生成统计数据"""
+        """分析所有结果，为每个参数生成统计数据，从CSV文件读取"""
         print("\n分析结果数据...")
 
-        # 为每个参数收集数据
-        # 只分析实际有数据的参数
-        actual_params = set()
-        if self.all_results:
-            # 从第一个结果中获取实际存在的参数
-            first_result = self.all_results[0]
-            actual_params = {k for k in first_result.keys() if k in ALL_PARAMS.keys()}
+        try:
+            # 从CSV文件读取所有结果
+            if not os.path.exists(self.csv_output_path):
+                print("没有找到CSV结果文件")
+                return
+
+            df = pd.read_csv(self.csv_output_path)
+            if df.empty:
+                print("没有有效的仿真结果")
+                return
+
+            # 为每个参数收集数据
+            # 只分析实际有数据的参数
+            actual_params = {k for k in df.columns if k in ALL_PARAMS.keys()}
             print(f"实际参数: {list(actual_params)}")
 
-        for param_name in actual_params:
-            param_data = []
+            for param_name in actual_params:
+                param_data = []
 
-            for result in self.all_results:
-                # 新格式：result直接包含所有参数和性能
-                if isinstance(result, dict) and param_name in result:
-                    performance = result.get("performance", 0)
-                    param_value = result[param_name]
+                for _, row in df.iterrows():
+                    # 从行中获取数据
+                    if param_name in row:
+                        performance = row.get("performance", 0)
+                        param_value = row[param_name]
 
-                    # 构造组合字典，保持兼容性
-                    combination = {k: v for k, v in result.items() if k in actual_params}
+                        # 构造组合字典，保持兼容性
+                        combination = {k: row[k] for k in actual_params if k in row}
 
-                    param_data.append({"param_name": param_name, "param_value": param_value, "performance": performance, "full_combination": combination})
+                        param_data.append({"param_name": param_name, "param_value": param_value, "performance": performance, "full_combination": combination})
 
-            self.param_results[param_name] = param_data
+                self.param_results[param_name] = param_data
 
-            # 统计信息
-            performances = [d["performance"] for d in param_data]
-            unique_values = set(d["param_value"] for d in param_data)
+                # 统计信息
+                if param_data:
+                    performances = [d["performance"] for d in param_data]
+                    unique_values = set(d["param_value"] for d in param_data)
 
-            print(f"{param_name}:")
-            if unique_values and performances:
-                print(f"  取值范围: {min(unique_values)} - {max(unique_values)}")
-                print(f"  数据点数: {len(param_data)}")
-                print(f"  性能范围: {min(performances):.2f} - {max(performances):.2f} GB/s")
-            else:
-                print(f"  无数据点")
-                print(f"  数据点数: 0")
+                    print(f"{param_name}:")
+                    if unique_values and performances:
+                        print(f"  取值范围: {min(unique_values)} - {max(unique_values)}")
+                        print(f"  数据点数: {len(param_data)}")
+                        print(f"  性能范围: {min(performances):.2f} - {max(performances):.2f} GB/s")
+                    else:
+                        print(f"  无数据点")
+                        print(f"  数据点数: 0")
+                else:
+                    print(f"{param_name}: 无数据")
+
+        except Exception as e:
+            print(f"分析结果失败: {e}")
 
     def visualize_parameter_results(self):
         """为每个参数生成独立的性能分布图"""
@@ -1350,66 +1368,9 @@ class FIFOExhaustiveOptimizer:
         print(f"摘要报告: {report_path}")
         print(f"CSV结果文件: {self.csv_output_path}")
 
-    def _save_intermediate_results(self, completed_batches: int, total_batches: int):
-        """保存中间结果，防止长时间运行后丢失数据"""
-        try:
-            # 保存已完成的结果
-            if self.all_results:
-                intermediate_file = os.path.join(self.result_dir, "raw_data", f"intermediate_results_batch_{completed_batches}.csv")
-                results_df = pd.DataFrame(self.all_results)
-                results_df.to_csv(intermediate_file, index=False)
+    # 中间结果保存功能已移除，现在使用CSV追加模式实时保存
 
-            # 保存缓存
-            cache_file = os.path.join(self.result_dir, "raw_data", f"intermediate_cache_batch_{completed_batches}.json")
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump(self.cache, f, indent=2, ensure_ascii=False)
-
-            # 生成中间进度报告
-            progress_file = os.path.join(self.result_dir, "raw_data", f"progress_batch_{completed_batches}.txt")
-            with open(progress_file, "w", encoding="utf-8") as f:
-                f.write(f"中间保存时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"已完成批次: {completed_batches}/{total_batches}\n")
-                f.write(f"已完成组合数: {len(self.all_results):,}\n")
-                if self.all_results:
-                    performances = [r["performance"] for r in self.all_results]
-                    f.write(f"当前最佳性能: {max(performances):.4f}\n")
-                    f.write(f"当前平均性能: {sum(performances)/len(performances):.4f}\n")
-
-            print(f"\n[保存] 中间结果已保存 (批次 {completed_batches}/{total_batches})")
-
-        except Exception as e:
-            print(f"[警告] 中间结果保存失败: {e}")
-
-    def _save_intermediate_results_single(self, completed_combinations: int, total_combinations: int):
-        """保存单核模式的中间结果"""
-        try:
-            # 保存已完成的结果
-            if self.all_results:
-                intermediate_file = os.path.join(self.result_dir, "raw_data", f"intermediate_results_combo_{completed_combinations}.csv")
-                results_df = pd.DataFrame(self.all_results)
-                results_df.to_csv(intermediate_file, index=False)
-
-            # 保存缓存
-            cache_file = os.path.join(self.result_dir, "raw_data", f"intermediate_cache_combo_{completed_combinations}.json")
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump(self.cache, f, indent=2, ensure_ascii=False)
-
-            # 生成中间进度报告
-            progress_file = os.path.join(self.result_dir, "raw_data", f"progress_combo_{completed_combinations}.txt")
-            with open(progress_file, "w", encoding="utf-8") as f:
-                f.write(f"中间保存时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"已完成组合: {completed_combinations}/{total_combinations}\n")
-                completion_rate = (completed_combinations / total_combinations) * 100
-                f.write(f"完成率: {completion_rate:.2f}%\n")
-                if self.all_results:
-                    performances = [r["performance"] for r in self.all_results]
-                    f.write(f"当前最佳性能: {max(performances):.4f}\n")
-                    f.write(f"当前平均性能: {sum(performances)/len(performances):.4f}\n")
-
-            print(f"\n[保存] 中间结果已保存 ({completed_combinations}/{total_combinations} 组合)")
-
-        except Exception as e:
-            print(f"[警告] 单核中间结果保存失败: {e}")
+    # 单核模式中间结果保存功能已移除，现在使用CSV追加模式实时保存
 
 
 def main():

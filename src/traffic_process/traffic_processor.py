@@ -67,21 +67,48 @@ class ProcessingConfig:
 
 
 class AddressHasher:
-    """地址哈希处理类"""
+    """地址哈希处理类 - 基于文档的XOR hash算法"""
 
-    def __init__(self, itlv_size=2048):
-        self.itlv_size = itlv_size
-        self.itlv_digit = itlv_size.bit_length() - 1
+    def __init__(self, interleave_size=256):
+        """
+        初始化地址hash器
+
+        Args:
+            interleave_size: 交织大小（位）
+            - 256: 256位 = 32字节交织
+            - 512: 512位 = 64字节交织
+        """
+        self.interleave_size = interleave_size
+
+        # 计算交织偏移
+        if interleave_size == 256:
+            self.interleave_offset = 0
+        elif interleave_size == 512:
+            self.interleave_offset = 1
+        else:
+            # 其他大小（如2048）
+            self.interleave_offset = 3
 
     def hash_all(self, addr, base=16):
-        """对地址进行哈希并返回节点号"""
-        addr = int(addr, base=base)
-        if 0x80000000 <= addr < 0x100000000:
+        """对地址进行哈希并返回(node_id, ip_type)"""
+        if isinstance(addr, str):
+            addr = int(addr, base=base)
+
+        # 根据地址范围选择hash方法
+        if 0x80000000 <= addr <= 0xFFFFFFFF:
             return self.shared_32ch(addr)
-        elif 0x100000000 <= addr < 0x500000000:
-            return self.shared_16ch(addr)
-        elif 0x500000000 <= addr < 0x700000000:
-            return self.shared_8ch(addr)
+        elif 0x100000000 <= addr <= 0x2FFFFFFFF:
+            return self.shared_16ch(addr, cluster_id=0)
+        elif 0x300000000 <= addr <= 0x4FFFFFFFF:
+            return self.shared_16ch(addr, cluster_id=1)
+        elif 0x500000000 <= addr <= 0x57FFFFFFF:
+            return self.shared_8ch(addr, cluster_id=0)
+        elif 0x580000000 <= addr <= 0x5FFFFFFFF:
+            return self.shared_8ch(addr, cluster_id=1)
+        elif 0x600000000 <= addr <= 0x67FFFFFFF:
+            return self.shared_8ch(addr, cluster_id=2)
+        elif 0x680000000 <= addr <= 0x6FFFFFFFF:
+            return self.shared_8ch(addr, cluster_id=3)
         elif 0x700000000 <= addr < 0x1F00000000:
             return self.private(addr)
         else:
@@ -90,71 +117,128 @@ class AddressHasher:
     def get_address_category(self, addr, base=16):
         """获取地址类别"""
         addr = int(addr, base=base)
-        if 0x80000000 <= addr < 0x100000000:
+        if 0x80000000 <= addr <= 0xFFFFFFFF:
             return "32CH_shared"
-        elif 0x100000000 <= addr < 0x500000000:
+        elif (0x100000000 <= addr <= 0x2FFFFFFFF) or (0x300000000 <= addr <= 0x4FFFFFFFF):
             return "16CH_shared"
-        elif 0x500000000 <= addr < 0x700000000:
+        elif (0x500000000 <= addr <= 0x57FFFFFFF) or (0x580000000 <= addr <= 0x5FFFFFFFF) or (0x600000000 <= addr <= 0x67FFFFFFF) or (0x680000000 <= addr <= 0x6FFFFFFFF):
             return "8CH_shared"
         elif 0x700000000 <= addr < 0x1F00000000:
             return "private"
         else:
             return "unknown"
 
+    def _xor_hash(self, addr, num_bits):
+        """通用XOR hash函数，从文档算法扩展"""
+        select = [0] * num_bits
+
+        # 从PA[6]开始，按num_bits间隔进行XOR
+        for i in range(num_bits):
+            bit_pos = 6 + i
+            while bit_pos < 48:
+                if addr & (1 << bit_pos):
+                    select[i] ^= 1
+                bit_pos += num_bits
+
+        # 组合选择位
+        result = 0
+        for i in range(num_bits):
+            result |= select[i] << i
+
+        return result
+
+    def _get_interleave_bit(self, memory_type):
+        """根据内存类型和交织大小确定交织位"""
+        if memory_type == "32CH":
+            # 32CH使用与16CH类似的交织位
+            base_bit = 11
+        elif memory_type == "16CH":
+            # 16CH: 256b用PA[11], 512b用PA[12]
+            base_bit = 11
+        elif memory_type == "8CH":
+            # 8CH: 256b用PA[10], 512b用PA[11]
+            base_bit = 10
+        elif memory_type == "private":
+            # Private可能使用固定的位
+            base_bit = 10
+        else:
+            base_bit = 10
+
+        # 加上交织偏移
+        return base_bit + self.interleave_offset
+
+    def _get_ip_in_node(self, addr, memory_type):
+        """根据交织位选择节点内的IP (0或1)"""
+        interleave_bit = self._get_interleave_bit(memory_type)
+        return (addr >> interleave_bit) & 1
+
     def shared_32ch(self, addr):
         """处理 32通道共享内存"""
-        assert 0x80000000 <= addr < 0x100000000
-        res = self.hash_addr2node(addr, 32)
-        assert res < 32
-        return res
+        # 5位hash选择32个逻辑通道中的一个
+        channel_index = self._xor_hash(addr, 5)
 
-    def shared_16ch(self, addr):
+        # 使用交织位选择节点内的DDR
+        ddr_in_node = self._get_ip_in_node(addr, "32CH")
+
+        # 32个逻辑通道映射到16个物理节点
+        # 每个节点处理2个逻辑通道
+        physical_node = channel_index % 16
+
+        return physical_node, f"ddr_{ddr_in_node}"
+
+    def shared_16ch(self, addr, cluster_id):
         """处理 16通道共享内存"""
-        assert 0x100000000 <= addr < 0x500000000
-        shared_16ch_size = 0x200000000
-        cluster_id = (addr - 0x100000000) // shared_16ch_size
-        hash_value = self.hash_addr2node(addr, 16)
-        return cluster_id * 16 + hash_value
+        # 4位hash选择16个逻辑通道中的一个
+        channel_index = self._xor_hash(addr, 4)
 
-    def shared_8ch(self, addr):
+        # 使用交织位选择节点内的DDR
+        ddr_in_node = self._get_ip_in_node(addr, "16CH")
+
+        # 16个通道分布在8个节点，每节点2个通道
+        if cluster_id == 0:
+            # 前16个通道，使用节点0-7
+            physical_node = channel_index // 2
+        else:
+            # 后16个通道，使用节点8-15
+            physical_node = 8 + (channel_index // 2)
+
+        return physical_node, f"ddr_{ddr_in_node}"
+
+    def shared_8ch(self, addr, cluster_id):
         """处理 8通道共享内存"""
-        assert 0x500000000 <= addr < 0x700000000
-        shared_8ch_size = 0x80000000
-        cluster_id = (addr - 0x500000000) // shared_8ch_size
-        hash_value = self.hash_addr2node(addr, 8)
-        return cluster_id * 8 + hash_value
+        # 3位hash选择8个逻辑通道中的一个
+        channel_index = self._xor_hash(addr, 3)
+
+        # 使用交织位选择节点内的DDR
+        ddr_in_node = self._get_ip_in_node(addr, "8CH")
+
+        # 8个通道分布在4个节点，每节点2个通道
+        nodes_per_cluster = 4
+        node_offset = channel_index // 2
+        physical_node = (cluster_id * nodes_per_cluster) + node_offset
+
+        return physical_node, f"ddr_{ddr_in_node}"
 
     def private(self, addr):
         """处理私有内存"""
-        assert 0x700000000 <= addr < 0x1F00000000
-        private_size = 0xC0000000
+        # 计算私有区域编号
+        private_size = 0xC0000000  # 3GB一个区域
         region_id = (addr - 0x700000000) // private_size
-        assert region_id < 32
-        return region_id
 
+        # 直接映射到节点
+        physical_node = region_id % 16
+
+        # 私有内存使用交织位选择DDR
+        ddr_in_node = self._get_ip_in_node(addr, "private")
+
+        return physical_node, f"ddr_{ddr_in_node}"
+
+    # 保留原有的hash_addr2node方法作为兼容，但不再使用
     def hash_addr2node(self, addr, node_num):
-        """地址到节点的哈希函数"""
-        assert (node_num & (node_num - 1) == 0) and node_num != 0
-
-        addr_valid = addr >> self.itlv_digit
+        """旧的地址到节点的哈希函数（保留兼容）"""
+        # 使用新的XOR hash算法
         sel_bits = int(math.log2(node_num))
-
-        sel_bit_vec = [[] for _ in range(sel_bits)]
-
-        i = 0
-        while addr_valid:
-            bit = addr_valid % 2
-            sel_bit_vec[i % sel_bits].append(bit)
-            i += 1
-            addr_valid >>= 1
-
-        sel_bit = [0] * sel_bits
-        for i in range(sel_bits):
-            for bit in sel_bit_vec[i]:
-                sel_bit[i] ^= bit
-
-        sel = sum(sel_bit[i] << i for i in range(sel_bits))
-        return sel
+        return self._xor_hash(addr, sel_bits)
 
     def ip2node(self, n):
         """IP编号到节点的映射"""
@@ -186,25 +270,61 @@ class AddressAnalyzer:
 
     def _analyze_single_folder(self, folder_name: str, data: List[List[str]]) -> Dict:
         """分析单个文件夹的数据"""
-        stats = {"32CH_shared": 0, "16CH_shared": 0, "8CH_shared": 0, "private": 0, "total": len(data), "max_time": 0}
+        stats = {
+            "32CH_shared_flit": 0,
+            "16CH_shared_flit": 0,
+            "8CH_shared_flit": 0,
+            "private_flit": 0,
+            "32CH_shared_req": 0,
+            "16CH_shared_req": 0,
+            "8CH_shared_req": 0,
+            "private_req": 0,
+            "read_flit": 0,
+            "write_flit": 0,
+            "read_req": 0,
+            "write_req": 0,
+            "total_req": len(data),
+            "total_flit": 0,
+            "max_time": 0,
+        }
 
         for row in data:
-            if len(row) >= 4:
+            if len(row) >= 7:
                 addr = row[3]  # 目标地址列
                 time_val = int(row[0]) if row[0].isdigit() else 0
+                burst_len = int(row[6]) if row[6].isdigit() else 1  # burst长度列
+                req_type = row[5]  # 请求类型 (r/w)
 
-                # 统计地址类别
+                # 累计总flit数
+                stats["total_flit"] += burst_len
+
+                # 统计地址类别的flit数量和请求数量
                 category = self.hasher.get_address_category(addr)
-                if category in stats:
-                    stats[category] += 1
+                if category in ["32CH_shared", "16CH_shared", "8CH_shared", "private"]:
+                    stats[f"{category}_flit"] += burst_len
+                    stats[f"{category}_req"] += 1
+
+                # 统计读写类型的flit数量和请求数量
+                if req_type.lower() == "r":
+                    stats["read_flit"] += burst_len
+                    stats["read_req"] += 1
+                elif req_type.lower() == "w":
+                    stats["write_flit"] += burst_len
+                    stats["write_req"] += 1
 
                 # 更新最大时间
                 stats["max_time"] = max(stats["max_time"], time_val)
+            else:
+                raise ValueError
 
-        # 计算百分比
-        if stats["total"] > 0:
+        # 计算基于flit数量的地址类别百分比
+        if stats["total_flit"] > 0:
             for key in ["32CH_shared", "16CH_shared", "8CH_shared", "private"]:
-                stats[f"{key}_percent"] = stats[key] / stats["total"] * 100
+                stats[f"{key}_flit_percent"] = stats[f"{key}_flit"] / stats["total_flit"] * 100
+
+            # 计算读写比例
+            stats["read_flit_percent"] = stats["read_flit"] / stats["total_flit"] * 100
+            stats["write_flit_percent"] = stats["write_flit"] / stats["total_flit"] * 100
 
         return stats
 
@@ -216,22 +336,27 @@ class AddressAnalyzer:
         # 生成详细统计报告
         csv_file = stats_dir / "traffic_statistics.csv"
 
-        with open(csv_file, "w", newline="", encoding="utf-8") as f:
+        with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.writer(f)
 
             # 写入表头
             headers = [
                 "文件夹名称",
-                "总记录数",
+                "总请求数",
+                "总flit数",
                 "最大时间",
-                "32CH_shared数量",
-                "32CH_shared百分比",
-                "16CH_shared数量",
-                "16CH_shared百分比",
-                "8CH_shared数量",
-                "8CH_shared百分比",
-                "private数量",
-                "private百分比",
+                "32CH_shared flit数",
+                "32CH_shared flit百分比",
+                "16CH_shared flit数",
+                "16CH_shared flit百分比",
+                "8CH_shared flit数",
+                "8CH_shared flit百分比",
+                "private flit数",
+                "private flit百分比",
+                "读 flit数",
+                "读 flit百分比",
+                "写 flit数",
+                "写 flit百分比",
             ]
             writer.writerow(headers)
 
@@ -239,16 +364,21 @@ class AddressAnalyzer:
             for folder_name, stats in analysis_results.items():
                 row = [
                     folder_name,
-                    stats["total"],
+                    stats["total_req"],
+                    stats["total_flit"],
                     stats["max_time"],
-                    stats["32CH_shared"],
-                    f"{stats.get('32CH_shared_percent', 0):.2f}%",
-                    stats["16CH_shared"],
-                    f"{stats.get('16CH_shared_percent', 0):.2f}%",
-                    stats["8CH_shared"],
-                    f"{stats.get('8CH_shared_percent', 0):.2f}%",
-                    stats["private"],
-                    f"{stats.get('private_percent', 0):.2f}%",
+                    stats["32CH_shared_flit"],
+                    f"{stats.get('32CH_shared_flit_percent', 0):.2f}%",
+                    stats["16CH_shared_flit"],
+                    f"{stats.get('16CH_shared_flit_percent', 0):.2f}%",
+                    stats["8CH_shared_flit"],
+                    f"{stats.get('8CH_shared_flit_percent', 0):.2f}%",
+                    stats["private_flit"],
+                    f"{stats.get('private_flit_percent', 0):.2f}%",
+                    stats["read_flit"],
+                    f"{stats.get('read_flit_percent', 0):.2f}%",
+                    stats["write_flit"],
+                    f"{stats.get('write_flit_percent', 0):.2f}%",
                 ]
                 writer.writerow(row)
 
@@ -268,20 +398,23 @@ class AddressAnalyzer:
                         # 获取原始数据
                         time_val = row[0]
                         tpu_num = row[1]
-                        src_type = row[2]
+                        src_type = row[2]  # "gdma"
                         addr = row[3]
-                        dst_type = row[4]
-                        req_type = row[5]
+                        dst_type = row[4]  # "ddr"
+                        req_type = row[5]  # "r"/"w"
                         burst_len = row[6]
 
-                        # 进行地址hash，不再使用IP映射
+                        # 进行地址hash得到目标节点和DDR
                         try:
-                            hashed_node = self.hasher.hash_all(addr)
-                            src_node = tpu_num                    # 直接使用TPU编号
-                            dst_node = str(hashed_node)           # 直接使用hash结果
+                            target_node, target_ip = self.hasher.hash_all(addr)
 
-                            # 写入hash后的数据: 时间,源节点,源类型,目标节点,目标类型,请求类型,burst长度
-                            hashed_row = [time_val, src_node, src_type, dst_node, dst_type, req_type, burst_len]
+                            # 源节点和源IP：TPU编号映射到节点和GDMA
+                            tpu_id = int(tpu_num)
+                            src_node = tpu_id // 2  # 源节点编号 (每节点2个GDMA)
+                            src_ip = f"gdma_{tpu_id % 2}"  # "gdma_0"或"gdma_1"
+
+                            # 写入hash后的数据: 时间,源节点,源IP,目标节点,目标IP,请求类型,burst长度
+                            hashed_row = [time_val, str(src_node), src_ip, str(target_node), target_ip, req_type, burst_len]  # 源节点编号  # "gdma_0" 或 "gdma_1"  # 目标节点编号  # "ddr_0" 或 "ddr_1"
                             f.write(",".join(hashed_row) + "\n")
 
                         except (ValueError, AssertionError) as e:
@@ -636,7 +769,7 @@ if __name__ == "__main__":
     # 每个位置的值: 1=执行, 0=跳过
 
     # 当前配置
-    PROCESS_STEPS = [1, 1, 1]  # [合并, 统计, hash]
+    PROCESS_STEPS = [0, 0, 1]  # [合并, 统计, hash]
 
     step_names = ["数据合并", "统计分析", "Hash处理"]
     enabled_steps = [step_names[i] for i, enabled in enumerate(PROCESS_STEPS) if enabled]

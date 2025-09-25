@@ -1048,24 +1048,35 @@ class BandwidthAnalyzer:
 
     def _calculate_port_bandwidth_averages(self, all_ports: Dict[str, "PortBandwidthMetrics"]) -> Dict[str, float]:
         """
-        计算每种端口类型的平均带宽
+        计算每种端口类型的平均带宽，支持读写分离
 
         Args:
             all_ports: 所有端口的带宽指标字典
 
         Returns:
-            一个包含每种端口类型平均带宽的字典
+            一个包含每种端口类型平均带宽的字典，包括读、写和混合带宽
         """
-        port_bw_groups = defaultdict(list)
+        port_bw_groups = defaultdict(lambda: {"read": [], "write": [], "mixed": []})
+
         for port_id, metrics in all_ports.items():
             port_type = port_id.split("_")[0]  # 提取端口类型 (gdma, sdma, cdma, ddr, l2m)
-            port_bw_groups[port_type].append(metrics.mixed_metrics.weighted_bandwidth)
+            port_bw_groups[port_type]["read"].append(metrics.read_metrics.weighted_bandwidth)
+            port_bw_groups[port_type]["write"].append(metrics.write_metrics.weighted_bandwidth)
+            port_bw_groups[port_type]["mixed"].append(metrics.mixed_metrics.weighted_bandwidth)
 
         avg_port_metrics = {}
-        for port_type, bw_list in port_bw_groups.items():
-            if bw_list:
-                # 使用 f-string 格式化键名
-                avg_port_metrics[f"avg_{port_type}_bw"] = sum(bw_list) / len(bw_list)
+        for port_type, bw_dict in port_bw_groups.items():
+            # 读操作平均带宽
+            if bw_dict["read"]:
+                avg_port_metrics[f"avg_{port_type}_read_bw"] = sum(bw_dict["read"]) / len(bw_dict["read"])
+
+            # 写操作平均带宽
+            if bw_dict["write"]:
+                avg_port_metrics[f"avg_{port_type}_write_bw"] = sum(bw_dict["write"]) / len(bw_dict["write"])
+
+            # 混合操作平均带宽（保持向后兼容）
+            if bw_dict["mixed"]:
+                avg_port_metrics[f"avg_{port_type}_bw"] = sum(bw_dict["mixed"]) / len(bw_dict["mixed"])
 
         return avg_port_metrics
 
