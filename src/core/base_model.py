@@ -19,7 +19,7 @@ import numpy as np
 from functools import lru_cache
 from src.core.result_processor import *
 from src.core.traffic_scheduler import TrafficScheduler
-from src.utils.components.round_robin import RoundRobinScheduler
+from src.utils.arbitration import create_arbiter_from_config
 import threading
 
 
@@ -197,10 +197,14 @@ class BaseModel:
         if self.config.ETag_BOTHSIDE_UPGRADE:
             self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
         
-        # Initialize round-robin schedulers for different queue types
-        self.iq_scheduler = RoundRobinScheduler()  # For IQ arbitration
-        self.eq_scheduler = RoundRobinScheduler()  # For EQ arbitration
-        self.rb_scheduler = RoundRobinScheduler()  # For RB arbitration
+        # Initialize arbiters based on configuration
+        arbitration_config = getattr(self.config, 'arbitration', {})
+
+        # Create arbiters for different queue types
+        default_config = arbitration_config.get('default', {'type': 'round_robin'})
+        self.iq_arbiter = create_arbiter_from_config(arbitration_config.get('iq', default_config))
+        self.eq_arbiter = create_arbiter_from_config(arbitration_config.get('eq', default_config))
+        self.rb_arbiter = create_arbiter_from_config(arbitration_config.get('rb', default_config))
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
@@ -830,8 +834,8 @@ class BaseModel:
                     
                     return True
                 
-                # Use round-robin scheduler to select IP type
-                selected_ip_type, _ = self.iq_scheduler.select(key, ip_types, check_ip_conditions)
+                # Use arbiter to select IP type
+                selected_ip_type, _ = self.iq_arbiter.select(ip_types, key, check_ip_conditions)
                 
                 if selected_ip_type:
                     flit = network.IQ_channel_buffer[selected_ip_type][ip_pos][0]
@@ -1214,8 +1218,8 @@ class BaseModel:
                 return False
             return cmp_func(station_flits[slot_idx].destination, next_pos)
         
-        # Use round-robin scheduler to select slot
-        selected_slot, _ = self.rb_scheduler.select(key, slots, check_rb_conditions)
+        # Use arbiter to select slot
+        selected_slot, _ = self.rb_arbiter.select(slots, key, check_rb_conditions)
         
         if selected_slot is not None:
             RB_flit = station_flits[selected_slot]
@@ -1280,7 +1284,7 @@ class BaseModel:
 
         flit.ETag_priority = "T2"
         # flit.used_entry_level = None
-        # Note: round_robin scheduling is now handled by the RoundRobinScheduler
+        # Note: arbitration is now handled by the unified arbiter system
 
     def Eject_Queue_arbitration(self, network: Network, flit_type):
         """处理eject的仲裁逻辑,根据flit类型处理不同的eject队列"""
@@ -1524,8 +1528,8 @@ class BaseModel:
                     return False
                 return True
             
-            # Use round-robin scheduler to select port
-            selected_port, _ = self.eq_scheduler.select(key, ports, check_eq_conditions)
+            # Use arbiter to select port
+            selected_port, _ = self.eq_arbiter.select(ports, key, check_eq_conditions)
             
             if selected_port is not None:
                 i = selected_port

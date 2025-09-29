@@ -204,11 +204,11 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name, max
 def main():
     parser = argparse.ArgumentParser(description="Network Traffic Processing and Simulation")
     parser.add_argument("--raw_traffic_input", default="../traffic/original/DeepSeek3-671B-A37B-S4K-O1-W8A8-B32-Decode/", help="Input traffic data path")
-    parser.add_argument("--traffic_output", default=r"../traffic/DeepSeek_0922", help="Output directory for processed data")
+    parser.add_argument("--traffic_output", default=r"../traffic/DeepSeek_0616", help="Output directory for processed data")
     parser.add_argument("--outstanding", type=int, default=2048, help="Outstanding number (must be power of 2)")
     parser.add_argument("--config", default="../config/topologies/topo_5x4.yaml", help="Simulation config file path")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="Simulation model type")
-    parser.add_argument("--results_file_name", default="DeepSeek0922_925_10us", help="Base name for results files")
+    parser.add_argument("--results_file_name", default="DeepSeek0616_929_10us_tb", help="Base name for results files")
     parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both")
     # parser.add_argument("--max_workers", type=int, default=None, help="Maximum number of parallel workers (default: number of CPU cores)")
     parser.add_argument("--max_workers", type=int, default=7, help="Maximum number of parallel workers (default: number of CPU cores)")
@@ -222,8 +222,8 @@ def main():
 
     if args.mode in [1, 2]:
         print("Running parallel simulations...")
-        # processed_data_path = f"{args.traffic_output}/step6_ch_map/"
-        processed_data_path = f"{args.traffic_output}/hashed/"
+        processed_data_path = f"{args.traffic_output}/step6_ch_map/"
+        # processed_data_path = f"{args.traffic_output}/hashed/"
         # processed_data_path = f"{args.traffic_output}"
         run_simulation(args.config, processed_data_path, args.model, args.results_file_name, args.max_workers)
 

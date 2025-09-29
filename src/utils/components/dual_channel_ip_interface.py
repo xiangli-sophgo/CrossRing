@@ -7,6 +7,7 @@ Extends IPInterface class to support dual-channel data transmission.
 from .ip_interface import IPInterface
 from .flit import Flit
 from ..channel_selector import DefaultChannelSelector
+from ..arbitration import create_arbiter_from_config
 from collections import deque
 import logging
 
@@ -38,8 +39,10 @@ class DualChannelIPInterface(IPInterface):
         else:
             self.channel_selector = channel_selector
 
-        # 2to1轮询仲裁计数器
-        self.eq_round_robin_counter = 0
+        # 创建双通道仲裁器（基于配置）
+        arbitration_config = getattr(config, 'arbitration', {})
+        dual_channel_arbiter_config = arbitration_config.get('dual_channel', {'type': 'round_robin'})
+        self.dual_channel_arbiter = create_arbiter_from_config(dual_channel_arbiter_config)
 
 
     def enqueue(self, flit, network_type, retry=False):
@@ -152,37 +155,38 @@ class DualChannelIPInterface(IPInterface):
         else:
             pos_index = self.ip_pos - self.config.NUM_COL
 
-        # 轮询选择通道
-        selected_flit = None
-        attempts = 0
+        # 使用统一仲裁器选择通道
+        channel_networks = [self.data_network_ch0, self.data_network_ch1]
 
-        while selected_flit is None and attempts < 2:
-            current_channel = self.eq_round_robin_counter % 2
-
-            # 选择对应的网络
-            target_network = self.data_network_ch0 if current_channel == 0 else self.data_network_ch1
-
-            # 尝试从当前通道的EQ buffer获取
+        def is_channel_valid(network):
+            """检查通道是否有待处理的数据"""
             try:
-                eq_buf = target_network.EQ_channel_buffer[self.ip_type][pos_index]
+                eq_buf = network.EQ_channel_buffer[self.ip_type][pos_index]
+                return len(eq_buf) > 0
+            except (KeyError, AttributeError):
+                return False
+
+        # 使用仲裁器选择通道
+        selected_network, channel_idx = self.dual_channel_arbiter.select(
+            candidates=channel_networks,
+            queue_id=f"dual_channel_{self.ip_type}_{self.ip_pos}",
+            is_valid=is_channel_valid
+        )
+
+        selected_flit = None
+        if selected_network is not None:
+            # 从选中的通道获取flit
+            try:
+                eq_buf = selected_network.EQ_channel_buffer[self.ip_type][pos_index]
                 if eq_buf:
                     selected_flit = eq_buf.popleft()
                     # 记录来源通道，用于统计
-                    selected_flit.ejected_from_channel = current_channel
+                    selected_flit.ejected_from_channel = channel_idx
                     # 确保data_channel_id与ejected_from_channel一致
                     if not hasattr(selected_flit, "data_channel_id"):
-                        selected_flit.data_channel_id = current_channel
-            except (KeyError, AttributeError) as e:
+                        selected_flit.data_channel_id = channel_idx
+            except (KeyError, AttributeError):
                 pass  # 该通道没有数据
-
-            if selected_flit:
-                # 成功选中，更新轮询计数器
-                self.eq_round_robin_counter = (self.eq_round_robin_counter + 1) % 2
-                break
-
-            # 当前通道没有数据，尝试另一个通道
-            self.eq_round_robin_counter = (self.eq_round_robin_counter + 1) % 2
-            attempts += 1
 
         # 如果选中了flit，放入h2l_fifo_h_pre
         if selected_flit:

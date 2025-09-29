@@ -106,6 +106,9 @@ class CrossRingConfig:
             and self.TD_Etag_T2_UE_MAX < self.EQ_IN_FIFO_DEPTH - 1
         ), "ETag parameter conditions are not met."
 
+        # 添加仲裁配置处理
+        self.arbitration = args.arbitration
+
         self.update_config(topo_type="default")
 
     def _parse_buffer_size(self, value):
@@ -513,6 +516,11 @@ class CrossRingConfig:
         )
         parser.add_argument(
             "--IN_ORDER_PACKET_CATEGORIES", type=list, default=default_config.get("IN_ORDER_PACKET_CATEGORIES", ["REQ"]), help="Packet categories that need in-order delivery (REQ/RSP/DATA)"
+        )
+
+        # 添加仲裁器配置支持
+        parser.add_argument(
+            "--arbitration", type=dict, default=default_config.get("arbitration", {}), help="Arbitration configuration for different queue types"
         )
 
         return parser.parse_args()

@@ -5,6 +5,7 @@ Implements 2:1 arbitration between RN and SN interfaces and token bucket rate li
 
 from collections import deque
 from .flit import TokenBucket, Flit
+from ..arbitration import create_arbiter_from_config
 import logging
 
 
@@ -46,8 +47,10 @@ class D2D_Sys:
         self.rn_pending_queue = deque()
         self.sn_pending_queue = deque()
         
-        # 轮询仲裁计数器
-        self.arbiter_counter = 0
+        # 创建仲裁器（基于配置）
+        arbitration_config = getattr(config, 'arbitration', {})
+        d2d_arbiter_config = arbitration_config.get('d2d', {'type': 'round_robin'})
+        self.arbiter = create_arbiter_from_config(d2d_arbiter_config)
         
         # AXI通道状态管理（类似network.send_flits）
         self.axi_channels = self._init_axi_channels(config)
@@ -180,47 +183,39 @@ class D2D_Sys:
         # 处理AXI通道传输
         self.step_axi_channels()
         
-        # 2:1轮询仲裁
-        selected_item = None
-        source = None
-        attempts = 0
-        
-        while selected_item is None and attempts < 2:
-            if self.arbiter_counter % 2 == 0:
-                # 选择RN队列
-                if self.rn_pending_queue:
-                    selected_item = self.rn_pending_queue[0]
-                    source = "RN"
-            else:
-                # 选择SN队列
-                if self.sn_pending_queue:
-                    selected_item = self.sn_pending_queue[0]
-                    source = "SN"
-            
-            if selected_item:
-                # 尝试注入到AXI通道
-                if self._inject_to_axi_channel(selected_item):
-                    # 注入成功，从队列中移除
-                    if source == "RN":
-                        self.rn_pending_queue.popleft()
-                        self.rn_transmit_count += 1
-                    else:
-                        self.sn_pending_queue.popleft()
-                        self.sn_transmit_count += 1
-                    
-                    self.total_transmit_count += 1
-                    break
+        # 使用统一仲裁器进行RN/SN仲裁
+        queue_candidates = [self.rn_pending_queue, self.sn_pending_queue]
+        queue_names = ["RN", "SN"]
+
+        def is_queue_valid(queue):
+            """检查队列是否有待处理的项目"""
+            return len(queue) > 0
+
+        # 使用仲裁器选择队列
+        selected_queue, queue_idx = self.arbiter.select(
+            candidates=queue_candidates,
+            queue_id=f"d2d_sys_{self.position}_to_{self.target_node_pos}",
+            is_valid=is_queue_valid
+        )
+
+        if selected_queue is not None and len(selected_queue) > 0:
+            selected_item = selected_queue[0]
+            source = queue_names[queue_idx]
+
+            # 尝试注入到AXI通道
+            if self._inject_to_axi_channel(selected_item):
+                # 注入成功，从队列中移除
+                selected_queue.popleft()
+
+                if source == "RN":
+                    self.rn_transmit_count += 1
                 else:
-                    # 注入失败（带宽不足），等待下个周期
-                    return
-            
-            # 尝试另一个队列
-            self.arbiter_counter = (self.arbiter_counter + 1) % 2
-            attempts += 1
-        
-        # 更新仲裁计数器
-        if selected_item:
-            self.arbiter_counter = (self.arbiter_counter + 1) % 2
+                    self.sn_transmit_count += 1
+
+                self.total_transmit_count += 1
+            else:
+                # 注入失败（带宽不足），等待下个周期
+                return
     
     def _determine_axi_channel(self, flit: Flit, interface_type: str) -> str:
         """
@@ -471,7 +466,7 @@ class D2D_Sys:
             'rn_queue_length': len(self.rn_pending_queue),
             'sn_queue_length': len(self.sn_pending_queue),
             'data_tokens_available': self.data_token_bucket.tokens,
-            'arbiter_state': 'RN' if self.arbiter_counter % 2 == 0 else 'SN',
+            'arbiter_type': getattr(self.arbiter, '__class__', type(self.arbiter)).__name__,
             'axi_channel_stats': self.axi_channel_stats.copy(),
             'axi_in_transit': axi_in_transit,
             'axi_bandwidth_tokens': {

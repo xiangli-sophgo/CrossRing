@@ -89,3 +89,59 @@ IN_ORDER_EJECTION_PAIRS: []
 # 需要保序的包类型 (REQ/RSP/DATA)
 IN_ORDER_PACKET_CATEGORIES:
   - "REQ"    # 只有REQ类型需要保序
+
+# ========== 仲裁器配置 ==========
+# 统一仲裁系统配置，支持多种仲裁算法
+arbitration:
+  # 全局默认仲裁器类型
+  default:
+    type: "round_robin"
+
+  # IQ队列仲裁器配置（注入队列仲裁）
+  # 用于在多个IP类型间进行仲裁选择
+  iq:
+    type: "round_robin"    # 标准轮询，确保各IP类型公平
+
+  # EQ队列仲裁器配置（输出队列仲裁）
+  # 用于在多个输出端口间进行仲裁选择
+  eq:
+    type: "round_robin"    # 标准轮询，确保各端口公平
+
+  # RB队列仲裁器配置（环桥仲裁）
+  # 用于在环间数据传输时的仲裁选择
+  rb:
+    type: "round_robin"    # 标准轮询，确保各方向公平
+
+  # 双通道仲裁器配置
+  # 用于双通道数据网络的通道选择
+  dual_channel:
+    type: "round_robin"    # 标准轮询
+    # 可选配置示例：
+    # type: "priority"     # 固定优先级
+    # priorities: [0, 1]   # 通道0优先级高于通道1
+
+# 仲裁器参数说明：
+#
+# round_robin: 标准轮询仲裁
+#   - 特点：绝对公平，无饥饿，可预测
+#   - 无需额外参数
+#
+# weighted: 加权轮询仲裁
+#   - 特点：支持差异化服务，保持相对公平
+#   - 参数：weights: [权重列表]，如 [3, 2, 1] 表示第0个候选权重3，第1个权重2，第2个权重1
+#
+# priority: 固定优先级仲裁
+#   - 特点：确定性，可能导致低优先级饥饿
+#   - 参数：priorities: [优先级列表]，数值越小优先级越高，如 [0, 1, 2]
+#
+# dynamic: 动态优先级仲裁
+#   - 特点：防饥饿，优先级根据等待时间动态调整
+#   - 参数：base_priorities: [基础优先级]，aging_factor: 老化因子（默认1.0）
+#
+# random: 随机仲裁
+#   - 特点：无偏向，不可预测，可能短期不公平
+#   - 参数：seed: 随机种子（可选，用于测试重现）
+#
+# token_bucket: 令牌桶仲裁
+#   - 特点：流量控制，支持突发，长期公平
+#   - 参数：bucket_size: 桶大小，refill_rate: 补充速率，port_rates: 各端口速率列表
