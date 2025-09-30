@@ -1,20 +1,19 @@
 """
-CrossRing NoC 统一仲裁系统
+CrossRing NoC 统一多对多仲裁系统
 
-提供多种仲裁算法的统一实现，直接操作候选对象，支持多队列管理。
-设计理念：仲裁器应该直接从候选对象中选择，而不是操作布尔列表。
+所有仲裁器都实现真正的多对多匹配，确保无资源冲突和全局优化。
+设计理念：NoC中的仲裁本质上是多输入争夺多输出的匹配问题。
 
 主要仲裁算法：
-- RoundRobinArbiter: 标准轮询仲裁
-- WeightedArbiter: 加权轮询仲裁
-- PriorityArbiter: 固定优先级仲裁
-- DynamicPriorityArbiter: 动态优先级仲裁
-- RandomArbiter: 随机仲裁
-- TokenBucketArbiter: 令牌桶仲裁
+- RoundRobinArbiter: 轮询多对多匹配
+- WeightedArbiter: 加权贪心匹配
+- PriorityArbiter: 优先级多对多匹配
+- DynamicPriorityArbiter: 动态优先级匹配
+- MaxWeightMatchingArbiter: iSLIP/LQF/OCF/PIM高级匹配算法
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any, Callable, Tuple
+from typing import List, Optional, Dict, Any, Tuple
 from collections import defaultdict
 import random
 import time
@@ -24,7 +23,10 @@ class Arbiter(ABC):
     """
     统一仲裁器基类
 
-    所有仲裁器的核心理念：直接从候选对象中选择，支持多队列独立状态管理。
+    核心理念：所有仲裁都是多对多匹配问题
+    - 输入：请求矩阵 (N个输入 × M个输出)
+    - 输出：匹配对列表 [(input_idx, output_idx), ...]
+    - 约束：每个输入最多匹配一个输出，每个输出最多匹配一个输入
     """
 
     def __init__(self):
@@ -34,97 +36,87 @@ class Arbiter(ABC):
 
         # 统计信息
         self.stats = defaultdict(lambda: {
-            'total_arbitrations': 0,
-            'successful_arbitrations': 0,
-            'grants_per_slot': defaultdict(int),
-            'starvation_counter': defaultdict(int)
+            'total_matches': 0,
+            'successful_matches': 0,
+            'total_matched_pairs': 0,
+            'input_utilization': defaultdict(int),
+            'output_utilization': defaultdict(int),
+            'input_starvation': defaultdict(int),
+            'output_starvation': defaultdict(int)
         })
 
-    def select(self, candidates: List[Any], queue_id: str = "default",
-               is_valid: Optional[Callable[[Any], bool]] = None) -> Tuple[Optional[Any], int]:
+    @abstractmethod
+    def match(self, request_matrix: List[List[bool]],
+              weight_matrix: Optional[List[List[float]]] = None,
+              queue_id: str = "default") -> List[Tuple[int, int]]:
         """
-        统一接口：从候选对象中选择一个
+        多对多匹配（唯一核心接口）
 
         参数:
-            candidates: 候选对象列表（任意类型）
+            request_matrix: NxM布尔矩阵，request_matrix[i][j]=True表示输入i请求输出j
+            weight_matrix: NxM权重矩阵（可选），用于优先级/加权仲裁
             queue_id: 队列标识符，支持多队列独立状态管理
-            is_valid: 可选的验证函数，判断候选对象是否有效
 
         返回:
-            (选中的对象, 索引) 或 (None, -1) 如果无有效候选
+            匹配对列表：[(input_idx, output_idx), ...]
+
+        约束:
+            - 每个input_idx在结果中最多出现一次
+            - 每个output_idx在结果中最多出现一次
+            - 只匹配request_matrix[i][j]=True的位置
         """
-        if not candidates:
-            return None, -1
-
-        # 初始化或更新队列状态
-        if queue_id not in self.queue_states or len(candidates) != self.queue_states[queue_id].get('size', 0):
-            self.queue_states[queue_id] = self._init_queue_state(len(candidates))
-
-        # 生成有效性掩码
-        valid_mask = []
-        for candidate in candidates:
-            if is_valid:
-                valid_mask.append(is_valid(candidate))
-            else:
-                # 默认：非None即有效
-                valid_mask.append(candidate is not None)
-
-        # 执行具体仲裁算法
-        selected_idx = self._do_arbitrate(queue_id, valid_mask)
-
-        # 更新统计信息
-        self._update_stats(queue_id, selected_idx, valid_mask)
-
-        if selected_idx >= 0:
-            return candidates[selected_idx], selected_idx
-        return None, -1
+        pass
 
     @abstractmethod
-    def _init_queue_state(self, size: int) -> Dict[str, Any]:
+    def _init_queue_state(self, num_inputs: int, num_outputs: int) -> Dict[str, Any]:
         """
         初始化队列状态
 
         参数:
-            size: 候选对象数量
+            num_inputs: 输入数量
+            num_outputs: 输出数量
 
         返回:
             队列状态字典
         """
         pass
 
-    @abstractmethod
-    def _do_arbitrate(self, queue_id: str, valid_mask: List[bool]) -> int:
-        """
-        执行具体的仲裁算法
-
-        参数:
-            queue_id: 队列标识符
-            valid_mask: 有效性掩码
-
-        返回:
-            选中的索引，-1表示无有效候选
-        """
-        pass
-
-    def _update_stats(self, queue_id: str, selected_idx: int, valid_mask: List[bool]):
-        """更新统计信息"""
+    def _update_stats(self, queue_id: str, matches: List[Tuple[int, int]],
+                     request_matrix: List[List[bool]]):
+        """更新匹配统计信息"""
         stats = self.stats[queue_id]
-        stats['total_arbitrations'] += 1
+        stats['total_matches'] += 1
 
-        if selected_idx >= 0:
-            stats['successful_arbitrations'] += 1
-            stats['grants_per_slot'][selected_idx] += 1
-            # 重置获得服务槽位的饥饿计数器
-            stats['starvation_counter'][selected_idx] = 0
+        if matches:
+            stats['successful_matches'] += 1
+            stats['total_matched_pairs'] += len(matches)
 
-        # 更新未获得服务槽位的饥饿计数器
-        for i, is_valid in enumerate(valid_mask):
-            if is_valid and i != selected_idx:
-                stats['starvation_counter'][i] += 1
+            # 更新端口利用率
+            matched_inputs = set()
+            matched_outputs = set()
+            for input_idx, output_idx in matches:
+                stats['input_utilization'][input_idx] += 1
+                stats['output_utilization'][output_idx] += 1
+                matched_inputs.add(input_idx)
+                matched_outputs.add(output_idx)
+
+            # 更新饥饿计数器
+            for i in range(len(request_matrix)):
+                if any(request_matrix[i]) and i not in matched_inputs:
+                    stats['input_starvation'][i] += 1
+                elif i in matched_inputs:
+                    stats['input_starvation'][i] = 0
+
+            for j in range(len(request_matrix[0]) if request_matrix else 0):
+                has_request = any(request_matrix[i][j] for i in range(len(request_matrix)))
+                if has_request and j not in matched_outputs:
+                    stats['output_starvation'][j] += 1
+                elif j in matched_outputs:
+                    stats['output_starvation'][j] = 0
 
     def get_stats(self, queue_id: str = None) -> Dict[str, Any]:
         """
-        获取统计信息
+        获取匹配统计信息
 
         参数:
             queue_id: 指定队列，None表示获取所有队列统计
@@ -137,31 +129,41 @@ class Arbiter(ABC):
                 return {}
 
             stats = self.stats[queue_id]
-            total = stats['total_arbitrations']
-            successful = stats['successful_arbitrations']
+            total = stats['total_matches']
+            successful = stats['successful_matches']
 
-            # 计算成功率
+            # 计算匹配成功率
             success_rate = successful / total if total > 0 else 0.0
 
-            # 计算公平性指标
-            grants = dict(stats['grants_per_slot'])
-            if successful > 0 and grants:
-                grant_values = list(grants.values())
-                avg_grants = sum(grant_values) / len(grant_values)
-                variance = sum((g - avg_grants) ** 2 for g in grant_values) / len(grant_values)
-                fairness_index = 1.0 / (1.0 + variance) if variance > 0 else 1.0
-            else:
-                fairness_index = 1.0
+            # 计算平均匹配数
+            avg_matched_pairs = stats['total_matched_pairs'] / successful if successful > 0 else 0.0
+
+            # 计算公平性指标（基于端口利用率）
+            input_utils = dict(stats['input_utilization'])
+            output_utils = dict(stats['output_utilization'])
+
+            def calc_fairness(utils):
+                if not utils:
+                    return 1.0
+                values = list(utils.values())
+                if sum(values) == 0:
+                    return 1.0
+                avg = sum(values) / len(values)
+                variance = sum((v - avg) ** 2 for v in values) / len(values)
+                return 1.0 / (1.0 + variance) if variance > 0 else 1.0
 
             return {
                 'queue_id': queue_id,
-                'total_arbitrations': total,
-                'successful_arbitrations': successful,
+                'total_matches': total,
+                'successful_matches': successful,
                 'success_rate': success_rate,
-                'grants_per_slot': grants,
-                'fairness_index': fairness_index,
-                'max_starvation': max(stats['starvation_counter'].values()) if stats['starvation_counter'] else 0,
-                'starving_slots': [i for i, count in stats['starvation_counter'].items() if count > 10]
+                'average_matched_pairs': avg_matched_pairs,
+                'input_utilization': input_utils,
+                'output_utilization': output_utils,
+                'input_fairness': calc_fairness(input_utils),
+                'output_fairness': calc_fairness(output_utils),
+                'max_input_starvation': max(stats['input_starvation'].values()) if stats['input_starvation'] else 0,
+                'max_output_starvation': max(stats['output_starvation'].values()) if stats['output_starvation'] else 0
             }
         else:
             # 返回所有队列的汇总统计
@@ -179,329 +181,269 @@ class Arbiter(ABC):
         """
         if queue_id:
             if queue_id in self.queue_states:
-                size = self.queue_states[queue_id].get('size', 0)
-                self.queue_states[queue_id] = self._init_queue_state(size)
+                state = self.queue_states[queue_id]
+                num_inputs = state.get('num_inputs', 1)
+                num_outputs = state.get('num_outputs', 1)
+                self.queue_states[queue_id] = self._init_queue_state(num_inputs, num_outputs)
             if queue_id in self.stats:
                 del self.stats[queue_id]
         else:
             # 重置所有队列
             for qid in list(self.queue_states.keys()):
-                size = self.queue_states[qid].get('size', 0)
-                self.queue_states[qid] = self._init_queue_state(size)
+                state = self.queue_states[qid]
+                num_inputs = state.get('num_inputs', 1)
+                num_outputs = state.get('num_outputs', 1)
+                self.queue_states[qid] = self._init_queue_state(num_inputs, num_outputs)
             self.stats.clear()
 
 
 class RoundRobinArbiter(Arbiter):
     """
-    标准轮询仲裁器
+    轮询多对多匹配仲裁器
 
-    按照固定的循环顺序依次给予各个候选访问权限，确保所有候选都有公平的机会。
     特点：
-    - 绝对公平性：长期来看每个候选获得相同的服务机会
-    - 饥饿免疫：任何候选都不会被永久阻塞
-    - 实现简单：硬件开销小，逻辑简单
-    - 可预测性：服务间隔固定，便于性能分析
+    - 双端轮询：输入和输出都维护轮询指针
+    - 全局公平：长期来看每个输入和输出都获得相同的服务机会
+    - 无冲突：确保每个输出只被一个输入占用
+    - 饥饿免疫：任何输入/输出都不会被永久阻塞
+
+    算法：
+    1. 按输入轮询顺序处理每个输入
+    2. 每个输入从其指针位置开始选择可用输出
+    3. 输入和输出的指针都会推进
     """
 
-    def _init_queue_state(self, size: int) -> Dict[str, Any]:
+    def _init_queue_state(self, num_inputs: int, num_outputs: int) -> Dict[str, Any]:
         """初始化轮询状态"""
         return {
-            'pointer': 0,
-            'size': size
+            'num_inputs': num_inputs,
+            'num_outputs': num_outputs,
+            'input_pointers': [0] * num_inputs,   # 每个输入的轮询指针
+            'output_pointers': [0] * num_outputs,  # 每个输出的轮询指针
+            'input_start': 0  # 输入处理起始位置（轮询）
         }
 
-    def _do_arbitrate(self, queue_id: str, valid_mask: List[bool]) -> int:
-        """执行轮询仲裁"""
-        if not any(valid_mask):
-            return -1
+    def match(self, request_matrix: List[List[bool]],
+              weight_matrix: Optional[List[List[float]]] = None,
+              queue_id: str = "default") -> List[Tuple[int, int]]:
+        """执行轮询多对多匹配"""
+        if not request_matrix or not request_matrix[0]:
+            return []
+
+        num_inputs = len(request_matrix)
+        num_outputs = len(request_matrix[0])
+
+        # 初始化或更新状态
+        if queue_id not in self.queue_states:
+            self.queue_states[queue_id] = self._init_queue_state(num_inputs, num_outputs)
 
         state = self.queue_states[queue_id]
-        n = len(valid_mask)
+        input_ptrs = state['input_pointers']
+        output_ptrs = state['output_pointers']
+        input_start = state['input_start']
 
-        # 从当前指针位置开始查找第一个有效候选
-        for i in range(n):
-            idx = (state['pointer'] + i) % n
-            if valid_mask[idx]:
-                # 找到有效候选，更新指针到下一个位置
-                state['pointer'] = (idx + 1) % n
-                return idx
+        matches = []
+        matched_outputs = set()
 
-        # 无有效候选也要移动指针保证公平性
-        state['pointer'] = (state['pointer'] + 1) % n
-        return -1
+        # 按轮询顺序处理每个输入
+        for i_offset in range(num_inputs):
+            input_idx = (input_start + i_offset) % num_inputs
 
-    def get_current_pointer(self, queue_id: str = "default") -> int:
-        """获取当前指针位置"""
+            # 检查该输入是否有请求
+            if not any(request_matrix[input_idx]):
+                continue
+
+            # 从该输入的指针位置开始查找可用输出
+            input_ptr = input_ptrs[input_idx]
+            for j_offset in range(num_outputs):
+                output_idx = (input_ptr + j_offset) % num_outputs
+
+                # 检查是否可以匹配
+                if (request_matrix[input_idx][output_idx] and
+                    output_idx not in matched_outputs):
+                    # 匹配成功
+                    matches.append((input_idx, output_idx))
+                    matched_outputs.add(output_idx)
+
+                    # 推进输入和输出指针
+                    input_ptrs[input_idx] = (output_idx + 1) % num_outputs
+                    output_ptrs[output_idx] = (input_idx + 1) % num_inputs
+
+                    break  # 该输入已匹配，处理下一个输入
+
+        # 推进输入起始位置（下次从不同的输入开始）
+        state['input_start'] = (input_start + 1) % num_inputs
+
+        # 更新统计
+        self._update_stats(queue_id, matches, request_matrix)
+
+        return matches
+
+    def get_pointers(self, queue_id: str = "default") -> Dict[str, Any]:
+        """获取当前指针状态"""
         if queue_id in self.queue_states:
-            return self.queue_states[queue_id].get('pointer', 0)
-        return 0
-
-    def set_pointer(self, position: int, queue_id: str = "default"):
-        """设置指针位置"""
-        if queue_id in self.queue_states:
-            size = self.queue_states[queue_id].get('size', 1)
-            self.queue_states[queue_id]['pointer'] = position % size
+            state = self.queue_states[queue_id]
+            return {
+                'input_pointers': state['input_pointers'][:],
+                'output_pointers': state['output_pointers'][:],
+                'input_start': state['input_start']
+            }
+        return {}
 
 
 class WeightedArbiter(Arbiter):
     """
-    加权轮询仲裁器
+    加权贪心多对多匹配仲裁器
 
-    为不同候选分配不同的权重，高权重候选在一轮中可能获得多次服务机会。
-    实现了在公平性基础上的差异化服务。
+    特点：
+    - 基于权重的贪心匹配：权重高的(input,output)对优先匹配
+    - 全局优化：按权重排序，从高到低依次匹配
+    - 无冲突：确保每个输出只被一个输入占用
+
+    算法：
+    1. 收集所有有效的(input, output, weight)三元组
+    2. 按权重降序排序
+    3. 从高到低依次匹配，跳过已占用的输入/输出
     """
 
-    def __init__(self, weights: Optional[List[int]] = None):
-        """
-        初始化加权轮询仲裁器
-
-        参数:
-            weights: 各候选的权重，如果为None则使用等权重
-        """
-        super().__init__()
-        self.default_weights = weights or []
-
-    def _init_queue_state(self, size: int) -> Dict[str, Any]:
-        """初始化加权状态"""
-        # 使用默认权重或等权重
-        if self.default_weights and len(self.default_weights) == size:
-            weights = self.default_weights[:]
-        else:
-            weights = [1] * size
-
+    def _init_queue_state(self, num_inputs: int, num_outputs: int) -> Dict[str, Any]:
+        """初始化状态"""
         return {
-            'weights': weights,
-            'credits': weights[:],
-            'pointer': 0,
-            'size': size
+            'num_inputs': num_inputs,
+            'num_outputs': num_outputs
         }
 
-    def _do_arbitrate(self, queue_id: str, valid_mask: List[bool]) -> int:
-        """执行加权轮询仲裁"""
-        if not any(valid_mask):
-            return -1
+    def match(self, request_matrix: List[List[bool]],
+              weight_matrix: Optional[List[List[float]]] = None,
+              queue_id: str = "default") -> List[Tuple[int, int]]:
+        """执行加权贪心匹配"""
+        if not request_matrix or not request_matrix[0]:
+            return []
 
-        state = self.queue_states[queue_id]
-        n = len(valid_mask)
+        num_inputs = len(request_matrix)
+        num_outputs = len(request_matrix[0])
 
-        # 查找有效且有信用的候选
-        for i in range(n):
-            idx = (state['pointer'] + i) % n
-            if valid_mask[idx] and state['credits'][idx] > 0:
-                state['credits'][idx] -= 1
-                state['pointer'] = (idx + 1) % n
+        # 初始化状态
+        if queue_id not in self.queue_states:
+            self.queue_states[queue_id] = self._init_queue_state(num_inputs, num_outputs)
 
-                # 检查是否需要重置信用
-                if all(c == 0 for c in state['credits']):
-                    state['credits'] = state['weights'][:]
+        # 如果没有提供权重矩阵，使用统一权重1.0
+        if weight_matrix is None:
+            weight_matrix = [[1.0 if request_matrix[i][j] else 0.0
+                            for j in range(num_outputs)]
+                           for i in range(num_inputs)]
 
-                return idx
+        # 收集所有有效的(input, output, weight)三元组
+        candidates = []
+        for i in range(num_inputs):
+            for j in range(num_outputs):
+                if request_matrix[i][j]:
+                    candidates.append((weight_matrix[i][j], i, j))
 
-        # 所有候选都没信用了，重置信用后重试
-        state['credits'] = state['weights'][:]
+        # 按权重降序排序
+        candidates.sort(reverse=True)
 
-        # 重新查找
-        for i in range(n):
-            idx = (state['pointer'] + i) % n
-            if valid_mask[idx] and state['credits'][idx] > 0:
-                state['credits'][idx] -= 1
-                state['pointer'] = (idx + 1) % n
-                return idx
+        # 贪心匹配
+        matches = []
+        matched_inputs = set()
+        matched_outputs = set()
 
-        return -1
+        for weight, input_idx, output_idx in candidates:
+            if input_idx not in matched_inputs and output_idx not in matched_outputs:
+                matches.append((input_idx, output_idx))
+                matched_inputs.add(input_idx)
+                matched_outputs.add(output_idx)
 
-    def set_weights(self, weights: List[int], queue_id: str = "default"):
-        """设置新的权重"""
-        if queue_id in self.queue_states:
-            state = self.queue_states[queue_id]
-            if len(weights) == state['size']:
-                state['weights'] = weights[:]
-                state['credits'] = weights[:]
+        # 更新统计
+        self._update_stats(queue_id, matches, request_matrix)
 
-    def get_weights(self, queue_id: str = "default") -> List[int]:
-        """获取当前权重配置"""
-        if queue_id in self.queue_states:
-            return self.queue_states[queue_id]['weights'][:]
-        return []
+        return matches
 
 
 class PriorityArbiter(Arbiter):
     """
-    固定优先级仲裁器
+    固定优先级多对多匹配仲裁器
 
-    按照预定的固定优先级顺序进行仲裁，优先级高的候选总是优先获得服务。
     特点：
-    - 简单实现：优先级顺序固定，逻辑简单
+    - 输入优先级：按输入优先级顺序处理
     - 确定性：相同输入产生相同输出
-    - 可能饥饿：低优先级候选可能被永久阻塞
+    - 可能饥饿：低优先级输入可能被永久阻塞
     - 适用场景：有明确优先级需求的系统
+
+    算法：
+    1. 按输入优先级排序（优先级值越小越优先）
+    2. 高优先级输入先选择输出
+    3. 每个输入选择第一个可用的输出
     """
 
-    def __init__(self, priorities: Optional[List[int]] = None):
+    def __init__(self, input_priorities: Optional[List[int]] = None):
         """
         初始化固定优先级仲裁器
 
         参数:
-            priorities: 各候选的优先级，数值越小优先级越高
+            input_priorities: 各输入的优先级，数值越小优先级越高
         """
         super().__init__()
-        self.default_priorities = priorities or []
+        self.default_input_priorities = input_priorities or []
 
-    def _init_queue_state(self, size: int) -> Dict[str, Any]:
+    def _init_queue_state(self, num_inputs: int, num_outputs: int) -> Dict[str, Any]:
         """初始化优先级状态"""
         # 使用默认优先级或按索引顺序
-        if self.default_priorities and len(self.default_priorities) == size:
-            priorities = self.default_priorities[:]
+        if self.default_input_priorities and len(self.default_input_priorities) == num_inputs:
+            input_priorities = self.default_input_priorities[:]
         else:
-            priorities = list(range(size))
+            input_priorities = list(range(num_inputs))
 
-        # 创建按优先级排序的索引列表
-        priority_order = sorted(range(size), key=lambda i: priorities[i])
+        # 创建按优先级排序的输入索引列表
+        input_order = sorted(range(num_inputs), key=lambda i: input_priorities[i])
 
         return {
-            'priorities': priorities,
-            'priority_order': priority_order,
-            'size': size
+            'num_inputs': num_inputs,
+            'num_outputs': num_outputs,
+            'input_priorities': input_priorities,
+            'input_order': input_order
         }
 
-    def _do_arbitrate(self, queue_id: str, valid_mask: List[bool]) -> int:
-        """执行优先级仲裁"""
-        if not any(valid_mask):
-            return -1
+    def match(self, request_matrix: List[List[bool]],
+              weight_matrix: Optional[List[List[float]]] = None,
+              queue_id: str = "default") -> List[Tuple[int, int]]:
+        """执行优先级匹配"""
+        if not request_matrix or not request_matrix[0]:
+            return []
+
+        num_inputs = len(request_matrix)
+        num_outputs = len(request_matrix[0])
+
+        # 初始化状态
+        if queue_id not in self.queue_states:
+            self.queue_states[queue_id] = self._init_queue_state(num_inputs, num_outputs)
 
         state = self.queue_states[queue_id]
+        input_order = state['input_order']
 
-        # 按优先级顺序查找第一个有效候选
-        for idx in state['priority_order']:
-            if valid_mask[idx]:
-                return idx
+        matches = []
+        matched_outputs = set()
 
-        return -1
+        # 按优先级顺序处理每个输入
+        for input_idx in input_order:
+            # 检查该输入是否有请求
+            if not any(request_matrix[input_idx]):
+                continue
 
-    def set_priorities(self, priorities: List[int], queue_id: str = "default"):
-        """设置新的优先级"""
-        if queue_id in self.queue_states:
-            state = self.queue_states[queue_id]
-            if len(priorities) == state['size']:
-                state['priorities'] = priorities[:]
-                state['priority_order'] = sorted(range(state['size']), key=lambda i: priorities[i])
+            # 找到第一个可用的输出
+            for output_idx in range(num_outputs):
+                if (request_matrix[input_idx][output_idx] and
+                    output_idx not in matched_outputs):
+                    # 匹配成功
+                    matches.append((input_idx, output_idx))
+                    matched_outputs.add(output_idx)
+                    break  # 该输入已匹配，处理下一个输入
 
+        # 更新统计
+        self._update_stats(queue_id, matches, request_matrix)
 
-class DynamicPriorityArbiter(Arbiter):
-    """
-    动态优先级仲裁器
+        return matches
 
-    根据饥饿时间动态调整候选优先级，长时间未获得服务的候选优先级会逐渐提升。
-    特点：
-    - 饥饿预防：避免任何候选被永久阻塞
-    - 动态调整：优先级根据历史服务情况变化
-    - 公平性：长期来看提供相对公平的服务
-    - 复杂度适中：需要维护动态优先级状态
-    """
-
-    def __init__(self, base_priorities: Optional[List[int]] = None, aging_factor: float = 1.0):
-        """
-        初始化动态优先级仲裁器
-
-        参数:
-            base_priorities: 基础优先级，如果为None则使用相等优先级
-            aging_factor: 老化因子，控制优先级提升速度
-        """
-        super().__init__()
-        self.default_base_priorities = base_priorities or []
-        self.aging_factor = aging_factor
-
-    def _init_queue_state(self, size: int) -> Dict[str, Any]:
-        """初始化动态优先级状态"""
-        if self.default_base_priorities and len(self.default_base_priorities) == size:
-            base_priorities = self.default_base_priorities[:]
-        else:
-            base_priorities = [0] * size
-
-        return {
-            'base_priorities': base_priorities,
-            'dynamic_priorities': base_priorities[:],
-            'size': size
-        }
-
-    def _do_arbitrate(self, queue_id: str, valid_mask: List[bool]) -> int:
-        """执行动态优先级仲裁"""
-        if not any(valid_mask):
-            return -1
-
-        state = self.queue_states[queue_id]
-        stats = self.stats[queue_id]
-
-        # 更新动态优先级（饥饿时间越长，优先级越高）
-        for i in range(len(valid_mask)):
-            starvation = stats['starvation_counter'].get(i, 0)
-            state['dynamic_priorities'][i] = state['base_priorities'][i] - starvation * self.aging_factor
-
-        # 在有效候选中找到优先级最高的（数值最小的）
-        requesting_indices = [i for i in range(len(valid_mask)) if valid_mask[i]]
-        if not requesting_indices:
-            return -1
-
-        # 选择优先级最高的候选
-        granted_idx = min(requesting_indices, key=lambda i: state['dynamic_priorities'][i])
-        return granted_idx
-
-    def set_aging_factor(self, aging_factor: float):
-        """设置老化因子"""
-        self.aging_factor = aging_factor
-
-    def get_dynamic_priorities(self, queue_id: str = "default") -> List[float]:
-        """获取当前动态优先级"""
-        if queue_id in self.queue_states:
-            return self.queue_states[queue_id]['dynamic_priorities'][:]
-        return []
-
-
-class RandomArbiter(Arbiter):
-    """
-    随机仲裁器
-
-    从有效的候选中随机选择一个进行授权。
-    特点：
-    - 简单实现：逻辑非常简单
-    - 无偏向性：不偏向任何特定候选
-    - 不可预测：服务顺序随机
-    - 可能不公平：短期内可能出现不公平现象
-    - 适用场景：对公平性要求不高但需要避免确定性偏向的系统
-    """
-
-    def __init__(self, seed: Optional[int] = None):
-        """
-        初始化随机仲裁器
-
-        参数:
-            seed: 随机种子，用于确保测试的可重现性
-        """
-        super().__init__()
-        if seed is not None:
-            random.seed(seed)
-
-    def _init_queue_state(self, size: int) -> Dict[str, Any]:
-        """初始化随机状态"""
-        return {'size': size}
-
-    def _do_arbitrate(self, queue_id: str, valid_mask: List[bool]) -> int:
-        """执行随机仲裁"""
-        if not any(valid_mask):
-            return -1
-
-        # 收集所有有效候选的索引
-        valid_indices = [i for i, is_valid in enumerate(valid_mask) if is_valid]
-
-        if not valid_indices:
-            return -1
-
-        # 随机选择一个
-        return random.choice(valid_indices)
-
-    def set_seed(self, seed: int):
-        """设置随机种子"""
-        random.seed(seed)
 
 
 class MaxWeightMatchingArbiter:
@@ -875,110 +817,12 @@ class MaxWeightMatchingArbiter:
                 state['wait_times'][input_idx][output_idx] = wait_time
 
 
-class TokenBucketArbiter(Arbiter):
-    """
-    令牌桶仲裁器
-
-    为每个候选维护一个令牌桶，候选获得服务需要消耗令牌，令牌以固定速率补充。
-    特点：
-    - 流量控制：可以控制每个候选的服务速率
-    - 突发支持：允许短期突发访问
-    - 长期公平：长期来看各候选获得相应的服务机会
-    - 实现复杂：需要维护令牌桶状态
-    """
-
-    def __init__(self, bucket_size: int = 10, refill_rate: float = 1.0,
-                 port_rates: Optional[List[float]] = None):
-        """
-        初始化令牌桶仲裁器
-
-        参数:
-            bucket_size: 每个候选的令牌桶大小
-            refill_rate: 默认令牌补充速率（令牌/周期）
-            port_rates: 各候选的令牌补充速率，如果为None则使用默认速率
-        """
-        super().__init__()
-        self.bucket_size = bucket_size
-        self.refill_rate = refill_rate
-        self.default_port_rates = port_rates or []
-
-    def _init_queue_state(self, size: int) -> Dict[str, Any]:
-        """初始化令牌桶状态"""
-        # 使用默认速率或统一速率
-        if self.default_port_rates and len(self.default_port_rates) == size:
-            port_rates = self.default_port_rates[:]
-        else:
-            port_rates = [self.refill_rate] * size
-
-        return {
-            'port_rates': port_rates,
-            'token_buckets': [self.bucket_size] * size,
-            'last_refill_time': time.time(),
-            'size': size
-        }
-
-    def _do_arbitrate(self, queue_id: str, valid_mask: List[bool]) -> int:
-        """执行令牌桶仲裁"""
-        if not any(valid_mask):
-            return -1
-
-        state = self.queue_states[queue_id]
-
-        # 补充令牌
-        self._refill_tokens(state)
-
-        # 找到有效且有令牌的候选
-        eligible_indices = []
-        for i, is_valid in enumerate(valid_mask):
-            if is_valid and state['token_buckets'][i] > 0:
-                eligible_indices.append(i)
-
-        if not eligible_indices:
-            return -1
-
-        # 使用轮询策略选择（也可以使用其他策略）
-        granted_idx = min(eligible_indices)
-
-        # 消耗令牌
-        state['token_buckets'][granted_idx] -= 1
-
-        return granted_idx
-
-    def _refill_tokens(self, state: Dict[str, Any]):
-        """补充令牌"""
-        current_time = time.time()
-        time_elapsed = current_time - state['last_refill_time']
-
-        for i in range(state['size']):
-            # 计算应该补充的令牌数
-            tokens_to_add = state['port_rates'][i] * time_elapsed
-            state['token_buckets'][i] = min(self.bucket_size,
-                                          state['token_buckets'][i] + tokens_to_add)
-
-        state['last_refill_time'] = current_time
-
-    def get_token_status(self, queue_id: str = "default") -> List[float]:
-        """获取各候选的令牌数量"""
-        if queue_id in self.queue_states:
-            return self.queue_states[queue_id]['token_buckets'][:]
-        return []
-
-    def set_bucket_size(self, bucket_size: int):
-        """设置令牌桶大小"""
-        self.bucket_size = bucket_size
-
-    def set_port_rates(self, port_rates: List[float], queue_id: str = "default"):
-        """设置各候选的令牌补充速率"""
-        if queue_id in self.queue_states:
-            state = self.queue_states[queue_id]
-            if len(port_rates) == state['size']:
-                state['port_rates'] = port_rates[:]
 
 
 # 工厂函数
 def create_arbiter(arbiter_type: str, **kwargs) -> Arbiter:
     """
-    根据类型创建单选仲裁器的工厂函数
+    根据类型创建仲裁器的工厂函数
 
     参数:
         arbiter_type: 仲裁器类型
@@ -994,9 +838,6 @@ def create_arbiter(arbiter_type: str, **kwargs) -> Arbiter:
         'round_robin': RoundRobinArbiter,
         'weighted': WeightedArbiter,
         'priority': PriorityArbiter,
-        'dynamic': DynamicPriorityArbiter,
-        'random': RandomArbiter,
-        'token_bucket': TokenBucketArbiter,
     }
 
     arbiter_class = arbiter_classes.get(arbiter_type)
@@ -1057,11 +898,12 @@ def create_arbiter_from_config(config: Dict[str, Any]):
     # 移除type字段，其余作为参数传递
     kwargs = {k: v for k, v in config.items() if k != 'type'}
 
-    # 检查是否是匹配仲裁器类型
+    # 检查是否是匹配仲裁器类型（iSLIP等高级算法）
     matching_types = ['max_weight_matching', 'islip', 'lqf', 'ocf', 'pim']
     if arbiter_type in matching_types:
         return create_matching_arbiter(arbiter_type, **kwargs)
     else:
+        # 基础仲裁器（轮询、加权、优先级）
         return create_arbiter(arbiter_type, **kwargs)
 
 
@@ -1081,21 +923,6 @@ def create_priority_arbiter(priorities: List[int]) -> PriorityArbiter:
     return PriorityArbiter(priorities=priorities)
 
 
-def create_dynamic_priority_arbiter(base_priorities: Optional[List[int]] = None,
-                                   aging_factor: float = 1.0) -> DynamicPriorityArbiter:
-    """创建动态优先级仲裁器"""
-    return DynamicPriorityArbiter(base_priorities=base_priorities, aging_factor=aging_factor)
-
-
-def create_random_arbiter(seed: Optional[int] = None) -> RandomArbiter:
-    """创建随机仲裁器"""
-    return RandomArbiter(seed=seed)
-
-
-def create_token_bucket_arbiter(bucket_size: int = 10, refill_rate: float = 1.0,
-                               port_rates: Optional[List[float]] = None) -> TokenBucketArbiter:
-    """创建令牌桶仲裁器"""
-    return TokenBucketArbiter(bucket_size=bucket_size, refill_rate=refill_rate, port_rates=port_rates)
 
 
 def create_max_weight_matching_arbiter(algorithm: str = "islip", iterations: int = 1,
@@ -1103,3 +930,5 @@ def create_max_weight_matching_arbiter(algorithm: str = "islip", iterations: int
     """创建最大权重匹配仲裁器"""
     return MaxWeightMatchingArbiter(algorithm=algorithm, iterations=iterations,
                                   weight_strategy=weight_strategy)
+
+
