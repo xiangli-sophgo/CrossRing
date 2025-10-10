@@ -13,11 +13,11 @@ if sys.platform == "darwin":  # macOS 的系统标识是 'darwin'
 
 def main():
     # traffic_file_path = r"../test_data/"
+    traffic_file_path = r"../traffic/0617/"
     # traffic_file_path = r"../../C2C/traffic_data"
     # traffic_file_path = r"../traffic/traffic0730"
     # traffic_file_path = r"../traffic/DeepSeek_0922/hashed/"
     # traffic_file_path = r"../traffic/data_0922/"
-    traffic_file_path = r"../traffic/0617/"
     # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
     # traffic_file_path = r"../traffic/RW_4x2_4x4/"
     # traffic_file_path = r"../traffic/nxn_traffics"
@@ -29,6 +29,7 @@ def main():
             # r"Read_burst4_2262HBM_v2.txt",
             # r"Write_burst4_2262HBM_v2.txt",
             # r"MLP_MoE.txt",
+            # "data_930_W.txt"
         ]
         * 1,
         [
@@ -97,8 +98,8 @@ def main():
         plot_flow_fig=1,
         flow_fig_show_CDMA=0,
         plot_RN_BW_fig=1,
-        plot_link_state=1,
-        plot_start_cycle=1500,
+        plot_link_state=0,
+        plot_start_cycle=500,
         print_trace=0,
         show_trace_id=[71],
         show_node_id=1,

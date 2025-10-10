@@ -8,6 +8,7 @@ import time
 import logging
 import os
 from typing import Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor
 
 from .base_model import BaseModel
 from .d2d_traffic_scheduler import D2DTrafficScheduler
@@ -47,6 +48,9 @@ class D2D_Model:
         # 流量图控制参数
         self.enable_flow_graph = kwargs.get("enable_flow_graph", True)  # 是否启用流量图绘制
         self.flow_graph_mode = kwargs.get("flow_graph_mode", "total")  # 流量图模式：total, utilization, ITag_ratio
+
+        # 并行化控制参数
+        self.enable_parallel = kwargs.get("enable_parallel", True)  # 是否启用Die级并行化（默认True）
 
         # 统计信息
         self.total_cross_die_requests = 0
@@ -357,6 +361,14 @@ class D2D_Model:
         simulation_start = time.perf_counter()
         tail_time = 6  # 类似BaseModel的tail_time逻辑
 
+        # 显示执行模式
+        if self.kwargs.get("verbose", 1):
+            parallel_mode = "并行" if self.enable_parallel else "串行"
+            print(f"\n=== D2D仿真开始 ({parallel_mode}模式) ===")
+            if self.enable_parallel:
+                print(f"  使用 {self.num_dies} 个线程并行执行 Die 内部处理")
+            print()
+
         # 主仿真循环
         while True:
             self.current_cycle += 1
@@ -370,10 +382,30 @@ class D2D_Model:
                 for ip_module in die_model.ip_modules.values():
                     ip_module.current_cycle = self.current_cycle
 
-            # 执行各Die的单周期步进
-            for die_id, die_model in self.dies.items():
-                # 调用Die的step方法
-                self._step_die(die_model)
+            # 在并行执行前预先获取当前周期的D2D请求（避免线程竞态条件）
+            self._current_cycle_cache = self.current_cycle
+            self._cached_pending_requests = self.d2d_traffic_scheduler.get_pending_requests(self.current_cycle)
+
+            # ============ Die级执行（可选并行化）============
+            if self.enable_parallel:
+                # 并行模式：两阶段执行
+                # 阶段1（并行）：执行各Die的内部处理
+                # 包括：Traffic注入、IP模块处理、网络仲裁和移动
+                with ThreadPoolExecutor(max_workers=self.num_dies) as executor:
+                    futures = [executor.submit(self._step_die_internal, die_model)
+                               for die_model in self.dies.values()]
+                    # 等待所有Die完成内部处理
+                    for future in futures:
+                        future.result()
+
+                # 阶段2（串行）：执行D2D通信处理
+                # 处理跨Die的AXI通道传输（避免heapq线程安全问题）
+                for die_model in self.dies.values():
+                    self._step_die_d2d(die_model)
+            else:
+                # 串行模式：使用原始的顺序执行
+                for die_model in self.dies.values():
+                    self._step_die(die_model)
 
             # D2D链路状态可视化更新
             if self.d2d_link_state_vis and self.current_cycle >= self.kwargs.get("plot_start_cycle", 0):
@@ -413,9 +445,13 @@ class D2D_Model:
         simulation_time = simulation_end - simulation_start
 
         if self.kwargs.get("verbose", 1):
-            print(f"D2D仿真耗时: {simulation_time:.2f} 秒")
+            parallel_mode = "并行" if self.enable_parallel else "串行"
+            print(f"\n=== D2D仿真完成 ({parallel_mode}模式) ===")
+            print(f"仿真耗时: {simulation_time:.2f} 秒")
             print(f"处理周期数: {self.current_cycle} 周期")
             print(f"仿真性能: {self.current_cycle / simulation_time:.0f} 周期/秒")
+            if self.enable_parallel:
+                print(f"并行加速: 使用了 {self.num_dies} 个线程处理 Die 内部逻辑")
 
             # 打印最终状态（使用print_interval的格式）
             print("\n仿真结束时的最终状态:")
@@ -442,6 +478,26 @@ class D2D_Model:
 
         # 调用BaseModel的step方法来执行标准的单周期步进
         die_model.step()
+
+    def _step_die_internal(self, die_model: BaseModel):
+        """
+        执行单个Die的内部处理（可并行执行）
+        包括：Traffic注入和Die内部网络处理
+        """
+        # 处理D2D Traffic注入
+        self._process_d2d_traffic(die_model)
+
+        # 调用BaseModel的step方法来执行标准的单周期步进
+        die_model.step()
+
+    def _step_die_d2d(self, die_model: BaseModel):
+        """
+        执行单个Die的D2D通信处理（需要同步）
+        处理跨Die的AXI通道传输
+        """
+        # 执行D2D_Sys的步进处理
+        for pos, d2d_sys in die_model.d2d_systems.items():
+            d2d_sys.step(self.current_cycle)
 
     def _check_all_completed(self):
         """检查所有Die是否都已完成仿真"""

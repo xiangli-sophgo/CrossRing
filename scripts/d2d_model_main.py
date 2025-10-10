@@ -3,13 +3,20 @@ D2D (Die-to-Die) 5x4拓扑演示
 包含完整的结果处理和可视化功能。
 """
 
+import cProfile
+import pstats
+from io import StringIO
+
 from src.core.d2d_model import D2D_Model
 from config.d2d_config import D2DConfig
 
 
-def main():
+def main(enable_profiling=False):
     """
     D2D 仿真演示 - 包含完整的结果处理和可视化
+
+    Args:
+        enable_profiling: 是否启用性能分析（默认False）
     """
     # 使用D2DConfig替代CrossRingConfig，获得D2D特定配置功能
     # 现在每个Die的拓扑由D2D配置文件中的topology参数指定，无需die_config_file
@@ -44,6 +51,8 @@ def main():
         # D2D链路状态可视化参
         plot_link_state=0,  # 启用D2D链路状态可视化 12
         plot_start_cycle=10,  # 从第100周期开始可视化
+        # 并行化控制
+        enable_parallel=0,  # 是否启用Die级并行化
     )
 
     # 初始化仿真
@@ -53,7 +62,23 @@ def main():
     sim.end_time = 5000  # 增加仿真时间以确保数据传输完成
     sim.print_interval = 500
 
-    sim.run()
+    # 运行仿真（可选性能分析）
+    if enable_profiling:
+        print("\n=== 启用性能分析模式 ===")
+        profiler = cProfile.Profile()
+        profiler.enable()
+        sim.run()
+        profiler.disable()
+
+        # 输出性能分析报告
+        print("\n=== 性能分析报告（Top 20 热点函数）===")
+        s = StringIO()
+        stats = pstats.Stats(profiler, stream=s)
+        stats.sort_stats("cumulative")
+        stats.print_stats(20)
+        print(s.getvalue())
+    else:
+        sim.run()
 
     # 调用D2D结果处理
     try:

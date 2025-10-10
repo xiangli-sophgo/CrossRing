@@ -183,24 +183,35 @@ class D2D_Sys:
         # 处理AXI通道传输
         self.step_axi_channels()
         
-        # 使用统一仲裁器进行RN/SN仲裁
-        queue_candidates = [self.rn_pending_queue, self.sn_pending_queue]
-        queue_names = ["RN", "SN"]
+        # 使用轮询仲裁器进行RN/SN仲裁
+        # 构建 2x1 请求矩阵 (2个输入源，1个输出通道)
+        # Row 0 = RN队列, Row 1 = SN队列, Col 0 = AXI通道
+        request_matrix = [
+            [len(self.rn_pending_queue) > 0],  # RN队列是否有数据
+            [len(self.sn_pending_queue) > 0]   # SN队列是否有数据
+        ]
 
-        def is_queue_valid(queue):
-            """检查队列是否有待处理的项目"""
-            return len(queue) > 0
-
-        # 使用仲裁器选择队列
-        selected_queue, queue_idx = self.arbiter.select(
-            candidates=queue_candidates,
-            queue_id=f"d2d_sys_{self.position}_to_{self.target_node_pos}",
-            is_valid=is_queue_valid
+        # 调用仲裁器的 match() 方法
+        matches = self.arbiter.match(
+            request_matrix=request_matrix,
+            queue_id=f"d2d_sys_{self.position}_to_{self.target_node_pos}"
         )
 
-        if selected_queue is not None and len(selected_queue) > 0:
+        # 处理匹配结果
+        if matches:
+            source_idx, _ = matches[0]  # 取第一个匹配（输出只有一个）
+
+            if source_idx == 0:
+                # RN队列获胜
+                selected_queue = self.rn_pending_queue
+                source = "RN"
+            else:
+                # SN队列获胜
+                selected_queue = self.sn_pending_queue
+                source = "SN"
+
+            # 从队列中取出第一个待发送项
             selected_item = selected_queue[0]
-            source = queue_names[queue_idx]
 
             # 尝试注入到AXI通道
             if self._inject_to_axi_channel(selected_item):

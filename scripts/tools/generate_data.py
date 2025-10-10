@@ -123,8 +123,8 @@ if __name__ == "__main__":
     # 配置参数
     END_TIME = 6300
     burst = 4
-    req_type = "R"
-    OUTPUT_FILE = f"../../test_data/data_0924_{req_type}.txt"
+    req_type = "W"
+    OUTPUT_FILE = f"../../test_data/data_930_{req_type}.txt"
 
     # 定义多个配置
     configs = [
@@ -132,10 +132,13 @@ if __name__ == "__main__":
             "src_map": {
                 "gdma_0": list(range(16)),
                 "gdma_1": list(range(16)),
+                # "gdma_0": [0, 2]
             },
             "dst_map": {
                 "ddr_0": list(range(16)),
                 "ddr_1": list(range(16)),
+                # "ddr_0": [4],
+                # "ddr_1": [7],
             },
             "speed": 128,
             "burst": burst,
