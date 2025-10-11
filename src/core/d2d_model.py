@@ -20,6 +20,133 @@ from config.config import CrossRingConfig
 from src.core import base_model
 
 
+def die_worker(die_id, die_config, d2d_input_queues, d2d_output_queues,
+               traffic_injection_queue, sync_barrier, end_time, print_interval, stats_queue, kwargs):
+    """
+    Die工作进程 - 在子进程中独立运行
+
+    关键设计：
+    - Die对象在子进程内部创建（不从主进程传递）
+    - 使用Barrier同步每个周期
+    - 通过Manager.Queue通信
+    - Traffic由主进程统一处理，通过injection queue分发
+
+    Args:
+        die_id: Die ID
+        die_config: Die配置对象（已序列化传入）
+        d2d_input_queues: 输入队列字典 {connection_key: Queue}
+        d2d_output_queues: 输出队列字典 {connection_key: Queue}
+        traffic_injection_queue: Traffic注入队列（主进程 -> worker）
+        sync_barrier: 周期同步屏障
+        end_time: 仿真结束周期
+        print_interval: 打印间隔
+        stats_queue: 统计信息队列
+        kwargs: 其他参数
+    """
+    import sys
+
+    # Windows编码修复
+    if sys.platform == "win32":
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+
+    # 在子进程中创建Die实例
+    die_model = BaseModel(
+        model_type=kwargs.get("model_type", "REQ_RSP"),
+        config=die_config,
+        topo_type=kwargs.get("topo_type", "5x4"),
+        traffic_file_path=kwargs.get("traffic_file_path", "../traffic/"),
+        traffic_config=kwargs.get("traffic_config", [["default.txt"]]),
+        result_save_path="",  # 子进程不保存
+        results_fig_save_path="",
+        plot_flow_fig=0,
+        plot_RN_BW_fig=0,
+        plot_link_state=0,
+        print_trace=0,
+        verbose=0,  # 禁用输出
+    )
+
+    # 设置Die ID
+    die_model.die_id = die_id
+
+    # 初始化
+    die_model.initial()
+
+    # D2D模式：不需要load_request_stream，traffic由主进程统一处理
+    # 只设置D2D输入队列
+    die_model.d2d_input_queues = d2d_input_queues
+
+    # 为d2d_sys设置输出队列（target_queue）
+    # 注意：只有D2D_Model才有d2d_systems属性
+    if hasattr(die_model, 'd2d_systems'):
+        for d2d_sys_key, d2d_sys in die_model.d2d_systems.items():
+            # 解析d2d_sys_key: "36_to_1_4" -> (src_die=die_id, src_node=36, dst_die=1, dst_node=4)
+            parts = d2d_sys_key.split('_to_')
+            src_node = int(parts[0])
+            dst_parts = parts[1].split('_')
+            dst_die = int(dst_parts[0])
+            dst_node = int(dst_parts[1])
+
+            conn_key = (die_id, src_node, dst_die, dst_node)
+            if conn_key in d2d_output_queues:
+                d2d_sys.target_queue = d2d_output_queues[conn_key]
+
+    # 主仿真循环
+    for cycle in range(1, end_time + 1):
+        # 周期开始同步
+        sync_barrier.wait()
+
+        # 更新周期
+        die_model.cycle = cycle
+        die_model.cycle_mod = cycle % die_model.config.NETWORK_FREQUENCY
+
+        # 更新所有IP模块的当前周期
+        for ip_module in die_model.ip_modules.values():
+            ip_module.current_cycle = cycle
+
+        # 更新所有d2d_sys的当前周期
+        if hasattr(die_model, 'd2d_systems'):
+            for d2d_sys in die_model.d2d_systems.values():
+                d2d_sys.current_cycle = cycle
+
+        # 从traffic注入队列读取Flit并注入到IP接口
+        while not traffic_injection_queue.empty():
+            try:
+                flit = traffic_injection_queue.get_nowait()
+                # 找到对应的IP接口并注入
+                ip_interface = die_model.ip_modules.get((flit.source_type, flit.source))
+                if ip_interface:
+                    ip_interface.enqueue(flit, "req")
+                else:
+                    print(f"[Die {die_id}] 警告: 找不到IP接口 ({flit.source_type}, {flit.source})")
+            except:
+                break
+
+        # 执行一个周期的step
+        die_model.step()
+
+        # 周期结束同步
+        sync_barrier.wait()
+
+        # 打印进度（只让Die 0打印）
+        if die_id == 0 and cycle % print_interval == 0 and cycle > 0:
+            print(f"Cycle {cycle}")
+
+    # 发送统计信息
+    try:
+        stats = {
+            'die_id': die_id,
+            'results': die_model.get_results() if hasattr(die_model, 'get_results') else {},
+            'total_flits': getattr(die_model, 'flit_num', 0),
+            'total_reqs': getattr(die_model, 'req_num', 0),
+        }
+        stats_queue.put(stats)
+    except Exception as e:
+        print(f"Die {die_id} 统计收集失败: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 class D2D_Model:
     """
     D2D仿真主类 - 管理多Die协调
@@ -32,7 +159,9 @@ class D2D_Model:
     def __init__(self, config: CrossRingConfig, traffic_config: list, **kwargs):
         self.config = config
         self.traffic_config = traffic_config
+        # 确保traffic_config也包含在kwargs中，以便传递给die_worker
         self.kwargs = kwargs
+        self.kwargs['traffic_config'] = traffic_config
         self.current_cycle = 0
 
         # 获取Die数量，默认为2
@@ -65,11 +194,16 @@ class D2D_Model:
         # 创建D2D专用的traffic调度器
         self.d2d_traffic_scheduler = D2DTrafficScheduler(traffic_config, self.kwargs.get("traffic_file_path", "../traffic/"), config)
 
-        # 创建Die实例
-        self._create_die_instances()
+        # 创建D2D队列（统一架构：串行和并行都使用队列）
+        self.d2d_queues = self._create_d2d_queues()
 
-        # 设置跨Die连接
-        self._setup_cross_die_connections()
+        # 创建Die实例（只在串行模式创建）
+        # 并行模式：Die在子进程中创建（避免序列化）
+        if not self.enable_parallel:
+            self._create_die_instances()
+
+        # 删除：_setup_cross_die_connections()
+        # 统一队列架构不再需要显式设置target_die_interfaces
 
         # 初始化D2D路由器
         from .d2d_router import D2DRouter
@@ -138,8 +272,8 @@ class D2D_Model:
             die_model.rsp_network.d2d_model = self
             die_model.data_network.d2d_model = self
 
-            # 替换或添加D2D节点
-            self._add_d2d_nodes_to_die(die_model, die_id)
+            # 替换或添加D2D节点（传入队列）
+            self._add_d2d_nodes_to_die(die_model, die_id, self.d2d_queues)
 
             self.dies[die_id] = die_model
 
@@ -228,7 +362,45 @@ class D2D_Model:
 
         return die_config
 
-    def _add_d2d_nodes_to_die(self, die_model: BaseModel, die_id: int):
+    def _create_d2d_queues(self):
+        """
+        创建D2D队列 - 统一队列架构
+
+        根据enable_parallel决定队列类型：
+        - enable_parallel=True: 使用Manager.Queue()（进程间通信）
+        - enable_parallel=False: 使用queue.Queue()（线程间通信，或串行模式）
+
+        Returns:
+            dict: {connection_key: Queue}
+                connection_key = (src_die, src_node, dst_die, dst_node)
+        """
+        # 根据并行模式选择队列类型
+        if self.enable_parallel:
+            from multiprocessing import Manager
+            manager = Manager()
+            queue_factory = lambda: manager.Queue()
+        else:
+            from queue import Queue
+            queue_factory = lambda: Queue()
+
+        # 为每个D2D连接对创建双向队列
+        queues = {}
+        d2d_pairs = getattr(self.config, "D2D_PAIRS", [])
+
+        for pair in d2d_pairs:
+            src_die, src_node, dst_die, dst_node = pair
+
+            # 创建正向队列：src_die → dst_die
+            forward_key = (src_die, src_node, dst_die, dst_node)
+            queues[forward_key] = queue_factory()
+
+            # 创建反向队列：dst_die → src_die
+            reverse_key = (dst_die, dst_node, src_die, src_node)
+            queues[reverse_key] = queue_factory()
+
+        return queues
+
+    def _add_d2d_nodes_to_die(self, die_model: BaseModel, die_id: int, d2d_queues: dict):
         """向Die添加D2D节点，基于D2D_PAIRS配置创建D2D_Sys实例"""
         config = die_model.config
 
@@ -260,8 +432,13 @@ class D2D_Model:
                 # 这个配对不涉及当前Die
                 continue
 
+            # 获取对应的目标队列
+            conn_key = (die_id, node_pos, target_die_id, target_node_pos)
+            target_queue = d2d_queues.get(conn_key)
+
             # 创建D2D_Sys实例，每个实例管理一个点对点连接
-            d2d_sys = D2D_Sys(node_pos, die_id, target_die_id, target_node_pos, config)
+            # 传入target_queue，实现统一队列架构
+            d2d_sys = D2D_Sys(node_pos, die_id, target_die_id, target_node_pos, config, target_queue=target_queue)
 
             # 获取BaseModel已创建的D2D接口
             d2d_rn = die_model.ip_modules.get(("d2d_rn_0", node_pos))
@@ -294,178 +471,241 @@ class D2D_Model:
         config.D2D_RN_POSITIONS = d2d_positions_list
         config.D2D_SN_POSITIONS = d2d_positions_list  # RN和SN通常在同一位置
 
-    def _setup_cross_die_connections(self):
-        """建立Die间的连接关系，基于D2D_PAIRS配置"""
-        # 从配置中获取D2D连接对
-        d2d_pairs = getattr(self.config, "D2D_PAIRS", [])
-
-        if not d2d_pairs:
-            print("警告: 没有找到D2D连接对配置")
-            return
-
-        # 为每个D2D连接对建立双向连接
-        for i, (die0_id, die0_node, die1_id, die1_node) in enumerate(d2d_pairs):
-            self._setup_single_pair_connection(die0_id, die0_node, die1_id, die1_node)
-
-    def _setup_single_pair_connection(self, die0_id: int, die0_node: int, die1_id: int, die1_node: int):
-        """为单个配对建立双向连接"""
-
-        # 建立Die0 -> Die1的连接
-        self._setup_directional_connection(src_die_id=die0_id, src_node=die0_node, dst_die_id=die1_id, dst_node=die1_node)
-
-        # 建立Die1 -> Die0的连接
-        self._setup_directional_connection(src_die_id=die1_id, src_node=die1_node, dst_die_id=die0_id, dst_node=die0_node)
-
-    def _setup_directional_connection(self, src_die_id: int, src_node: int, dst_die_id: int, dst_node: int):
-        """建立单向连接"""
-
-        # 获取IP接口
-        src_rn_key = ("d2d_rn_0", src_node)
-        src_sn_key = ("d2d_sn_0", src_node)
-        dst_sn_key = ("d2d_sn_0", dst_node + self.dies[dst_die_id].config.NUM_COL)
-        dst_rn_key = ("d2d_rn_0", dst_node + self.dies[dst_die_id].config.NUM_COL)
-
-        src_die = self.dies[src_die_id]
-        dst_die = self.dies[dst_die_id]
-
-        # 检查接口是否存在
-        if src_rn_key not in src_die.ip_modules or dst_sn_key not in dst_die.ip_modules:
-            return
-
-        src_rn = src_die.ip_modules[src_rn_key]
-        dst_sn = dst_die.ip_modules[dst_sn_key]
-        dst_rn = dst_die.ip_modules.get(dst_rn_key)
-        src_sn = src_die.ip_modules.get(src_sn_key)
-
-        # 设置RN接口的目标Die连接（向后兼容）
-        if dst_die_id not in src_rn.target_die_interfaces:
-            src_rn.target_die_interfaces[dst_die_id] = []
-        src_rn.target_die_interfaces[dst_die_id].append(dst_sn)
-
-        # 设置D2D_Sys的目标接口
-        d2d_sys_key = f"{src_node}_to_{dst_die_id}_{dst_node}"
-        if d2d_sys_key in src_die.d2d_systems:
-            d2d_sys = src_die.d2d_systems[d2d_sys_key]
-            d2d_sys.target_die_interfaces[dst_die_id] = {"sn": dst_sn, "rn": dst_rn}
-
-        # 设置SN接口的目标RN连接
-        if src_sn and dst_rn:
-            src_sn.target_die_interfaces[dst_die_id] = dst_rn
+    # 删除：_setup_cross_die_connections()及相关方法
+    # 统一队列架构不再需要这些方法：
+    # - _setup_cross_die_connections()
+    # - _setup_single_pair_connection()
+    # - _setup_directional_connection()
+    # 所有连接通过队列实现，d2d_sys直接写入target_queue
 
     def initial(self):
         """初始化D2D仿真"""
         # Dies已在构造函数中初始化
 
     def run(self):
-        """运行D2D仿真主循环"""
+        """运行D2D仿真主循环 - 统一队列架构"""
         simulation_start = time.perf_counter()
-        tail_time = 6  # 类似BaseModel的tail_time逻辑
 
-        # 显示执行模式
-        if self.kwargs.get("verbose", 1):
-            parallel_mode = "并行" if self.enable_parallel else "串行"
-            print(f"\n=== D2D仿真开始 ({parallel_mode}模式) ===")
-            if self.enable_parallel:
-                print(f"  使用 {self.num_dies} 个线程并行执行 Die 内部处理")
-            print()
+        # ============ 统一队列初始化（串行和并行都需要）============
+        input_queues = {die_id: {} for die_id in range(self.num_dies)}
+        output_queues = {die_id: {} for die_id in range(self.num_dies)}
 
-        # 主仿真循环
-        while True:
-            self.current_cycle += 1
+        for conn_key, queue in self.d2d_queues.items():
+            src_die, src_node, dst_die, dst_node = conn_key
+            output_queues[src_die][conn_key] = queue
+            input_queues[dst_die][conn_key] = queue
 
-            # 更新所有Die的当前周期和cycle_mod
-            for die_id, die_model in self.dies.items():
-                die_model.cycle = self.current_cycle
-                die_model.cycle_mod = self.current_cycle % die_model.config.NETWORK_FREQUENCY
+        if self.enable_parallel:
+            # ============ 进程并行模式 ============
+            from multiprocessing import Process, Manager
 
-                # 更新所有IP模块的当前周期
-                for ip_module in die_model.ip_modules.values():
-                    ip_module.current_cycle = self.current_cycle
+            manager = Manager()
+            # 主进程参与barrier：num_dies worker + 1 主进程
+            sync_barrier = manager.Barrier(self.num_dies + 1)
+            stats_queue = manager.Queue()
 
-            # 在并行执行前预先获取当前周期的D2D请求（避免线程竞态条件）
-            self._current_cycle_cache = self.current_cycle
-            self._cached_pending_requests = self.d2d_traffic_scheduler.get_pending_requests(self.current_cycle)
+            # 创建traffic注入队列（主进程 -> worker）
+            traffic_injection_queues = {}
+            for die_id in range(self.num_dies):
+                traffic_injection_queues[die_id] = manager.Queue()
 
-            # ============ Die级执行（可选并行化）============
-            if self.enable_parallel:
-                # 并行模式：两阶段执行
-                # 阶段1（并行）：执行各Die的内部处理
-                # 包括：Traffic注入、IP模块处理、网络仲裁和移动
-                with ThreadPoolExecutor(max_workers=self.num_dies) as executor:
-                    futures = [executor.submit(self._step_die_internal, die_model)
-                               for die_model in self.dies.values()]
-                    # 等待所有Die完成内部处理
-                    for future in futures:
-                        future.result()
+            # 创建helper BaseModel实例（用于主进程创建Flit）
+            # 这些实例只提供node_map和routes，不运行仿真
+            helper_dies = {}
+            for die_id in range(self.num_dies):
+                die_config = self._create_die_config(die_id)
+                helper_die = BaseModel(
+                    model_type=self.kwargs.get("model_type", "REQ_RSP"),
+                    config=die_config,
+                    topo_type=self.kwargs.get("topo_type", "5x4"),
+                    traffic_file_path=self.kwargs.get("traffic_file_path", "../traffic/"),
+                    traffic_config=self.traffic_config,
+                    result_save_path="",
+                    verbose=0,
+                )
+                helper_die.die_id = die_id
+                helper_die.initial()
+                helper_dies[die_id] = helper_die
 
-                # 阶段2（串行）：执行D2D通信处理
-                # 处理跨Die的AXI通道传输（避免heapq线程安全问题）
-                for die_model in self.dies.values():
-                    self._step_die_d2d(die_model)
-            else:
-                # 串行模式：使用原始的顺序执行
+            if self.kwargs.get("verbose", 1):
+                print(f"\n=== D2D仿真开始 (进程并行模式) ===")
+                print(f"  使用 {self.num_dies} 个进程并行执行")
+                print(f"  D2D队列数量: {len(self.d2d_queues)}")
+                print()
+
+            # 创建worker进程
+            processes = []
+            for die_id in range(self.num_dies):
+                die_config = self._create_die_config(die_id)
+
+                p = Process(
+                    target=die_worker,
+                    args=(
+                        die_id,
+                        die_config,
+                        input_queues[die_id],
+                        output_queues[die_id],
+                        traffic_injection_queues[die_id],  # 新增：traffic注入队列
+                        sync_barrier,
+                        self.end_time,
+                        self.print_interval,
+                        stats_queue,
+                        self.kwargs
+                    )
+                )
+                p.start()
+                processes.append(p)
+                if self.kwargs.get("verbose", 1):
+                    print(f"  启动进程 Die {die_id}")
+
+            # 主进程traffic分发循环（参与barrier同步）
+            try:
+                for cycle in range(1, self.end_time + 1):
+                    # 周期开始同步
+                    sync_barrier.wait()
+
+                    # 获取当前周期的D2D请求
+                    pending_requests = self.d2d_traffic_scheduler.get_pending_requests(cycle)
+
+                    # 为每个请求创建Flit并分发到对应Die的注入队列
+                    for req_data in pending_requests:
+                        src_die = req_data[1]  # src_die字段
+                        helper_die = helper_dies[src_die]
+
+                        # 创建Flit
+                        flit = self._create_flit_from_d2d_request(helper_die, req_data)
+
+                        # 放入对应Die的注入队列
+                        traffic_injection_queues[src_die].put(flit)
+
+                        # 收集统计信息
+                        dst_die = req_data[4]
+                        burst_length = req_data[8]
+                        if src_die != dst_die:
+                            self.d2d_requests_sent[src_die] += 1
+                            self.d2d_expected_flits[src_die] += burst_length
+
+                    # 周期结束同步
+                    sync_barrier.wait()
+
+                    # 打印进度
+                    if cycle % self.print_interval == 0 and self.kwargs.get("verbose", 1):
+                        print(f"Cycle {cycle}")
+
+            except KeyboardInterrupt:
+                print("\n主进程收到中断信号，终止仿真...")
+                for p in processes:
+                    p.terminate()
+                raise
+
+            # 等待所有worker进程完成
+            for i, p in enumerate(processes):
+                p.join(timeout=600)
+                if p.is_alive():
+                    print(f"  警告: Die {i} 进程超时，强制终止")
+                    p.terminate()
+                    p.join()
+
+            # 收集统计
+            self.die_stats = {}
+            while not stats_queue.empty():
+                stat = stats_queue.get()
+                self.die_stats[stat['die_id']] = stat
+
+            simulation_end = time.perf_counter()
+            simulation_time = simulation_end - simulation_start
+
+            if self.kwargs.get("verbose", 1):
+                print(f"\n=== D2D仿真完成 (进程并行) ===")
+                print(f"仿真耗时: {simulation_time:.2f} 秒")
+                print(f"处理周期数: {self.end_time} 周期")
+                print(f"仿真性能: {self.end_time / simulation_time:.0f} 周期/秒")
+                print(f"并行加速: 使用了 {self.num_dies} 个进程")
+
+        else:
+            # ============ 串行模式 ============
+            tail_time = 6
+
+            # 传递队列给每个Die
+            for die_id, die in self.dies.items():
+                die.d2d_input_queues = input_queues[die_id]
+
+            if self.kwargs.get("verbose", 1):
+                print(f"\n=== D2D仿真开始 (串行模式) ===")
+                print(f"  D2D队列数量: {len(self.d2d_queues)}")
+                print()
+
+            # 主仿真循环
+            while True:
+                self.current_cycle += 1
+
+                # 更新所有Die的当前周期和cycle_mod
+                for die_id, die_model in self.dies.items():
+                    die_model.cycle = self.current_cycle
+                    die_model.cycle_mod = self.current_cycle % die_model.config.NETWORK_FREQUENCY
+
+                    # 更新所有IP模块的当前周期
+                    for ip_module in die_model.ip_modules.values():
+                        ip_module.current_cycle = self.current_cycle
+
+                # 获取当前周期的D2D请求
+                self._current_cycle_cache = self.current_cycle
+                self._cached_pending_requests = self.d2d_traffic_scheduler.get_pending_requests(self.current_cycle)
+
+                # 串行执行各Die
                 for die_model in self.dies.values():
                     self._step_die(die_model)
 
-            # D2D链路状态可视化更新
-            if self.d2d_link_state_vis and self.current_cycle >= self.kwargs.get("plot_start_cycle", 0):
-                # 收集所有Die的所有网络数据
-                all_die_networks = []
-                for die_id in range(self.num_dies):
-                    die_model = self.dies[die_id]
-                    die_networks = [die_model.req_network, die_model.rsp_network, die_model.data_network]
-                    all_die_networks.append(die_networks)
+                # D2D链路状态可视化
+                if self.d2d_link_state_vis and self.current_cycle >= self.kwargs.get("plot_start_cycle", 0):
+                    all_die_networks = []
+                    for die_id in range(self.num_dies):
+                        die_model = self.dies[die_id]
+                        die_networks = [die_model.req_network, die_model.rsp_network, die_model.data_network]
+                        all_die_networks.append(die_networks)
+                    self.d2d_link_state_vis.update(all_die_networks, self.current_cycle)
 
-                # 更新可视化器
-                self.d2d_link_state_vis.update(all_die_networks, self.current_cycle)
+                # D2D Trace调试
+                if self.kwargs.get("print_d2d_trace", False):
+                    trace_ids = self.kwargs.get("show_d2d_trace_id", None)
+                    if trace_ids is not None:
+                        self.d2d_trace(trace_ids)
+                    else:
+                        self.debug_d2d_trace()
 
-            # D2D Trace调试（如果启用）
-            if self.kwargs.get("print_d2d_trace", False):
-                trace_ids = self.kwargs.get("show_d2d_trace_id", None)
-                if trace_ids is not None:
-                    self.d2d_trace(trace_ids)
-                else:
-                    self.debug_d2d_trace()
+                # 打印进度
+                if self.current_cycle % self.print_interval == 0 and self.current_cycle > 0:
+                    self._print_progress()
 
-            # 打印进度
-            if self.current_cycle % self.print_interval == 0 and self.current_cycle > 0:
+                # 检查结束条件
+                if self._check_all_completed() or self.current_cycle > self.end_time:
+                    if tail_time == 0:
+                        if self.kwargs.get("verbose", 1):
+                            print("D2D仿真完成！")
+                        break
+                    else:
+                        tail_time -= 1
+
+            # 仿真结束
+            simulation_end = time.perf_counter()
+            simulation_time = simulation_end - simulation_start
+
+            if self.kwargs.get("verbose", 1):
+                print(f"\n=== D2D仿真完成 (串行模式) ===")
+                print(f"仿真耗时: {simulation_time:.2f} 秒")
+                print(f"处理周期数: {self.current_cycle} 周期")
+                print(f"仿真性能: {self.current_cycle / simulation_time:.0f} 周期/秒")
+
+                # 打印最终状态
+                print("\n仿真结束时的最终状态:")
                 self._print_progress()
 
-            # 检查结束条件
-            if self._check_all_completed() or self.current_cycle > self.end_time:
-                if tail_time == 0:
-                    if self.kwargs.get("verbose", 1):
-                        print("D2D仿真完成！")
-                    break
-                else:
-                    tail_time -= 1
-
-        # 仿真结束
-        simulation_end = time.perf_counter()
-        simulation_time = simulation_end - simulation_start
-
-        if self.kwargs.get("verbose", 1):
-            parallel_mode = "并行" if self.enable_parallel else "串行"
-            print(f"\n=== D2D仿真完成 ({parallel_mode}模式) ===")
-            print(f"仿真耗时: {simulation_time:.2f} 秒")
-            print(f"处理周期数: {self.current_cycle} 周期")
-            print(f"仿真性能: {self.current_cycle / simulation_time:.0f} 周期/秒")
-            if self.enable_parallel:
-                print(f"并行加速: 使用了 {self.num_dies} 个线程处理 Die 内部逻辑")
-
-            # 打印最终状态（使用print_interval的格式）
-            print("\n仿真结束时的最终状态:")
-            self._print_progress()
-
-        # 根据参数决定是否生成流量图
-        if self.enable_flow_graph:
-            if self.kwargs.get("verbose", 1):
-                # print(f"\n生成D2D流量图 (模式: {self.flow_graph_mode})")
-                pass
-            try:
-                self.generate_combined_flow_graph(mode=self.flow_graph_mode, save_path=None, show_cdma=True)
-            except Exception as e:
-                print(f"流量图生成失败: {e}")
+            # 生成流量图
+            if self.enable_flow_graph:
+                try:
+                    self.generate_combined_flow_graph(mode=self.flow_graph_mode, save_path=None, show_cdma=True)
+                except Exception as e:
+                    print(f"流量图生成失败: {e}")
 
     def _step_die(self, die_model: BaseModel):
         """执行单个Die的单周期步进"""
@@ -580,8 +820,19 @@ class D2D_Model:
             # 处理单个D2D请求
             self._process_single_d2d_request(die_model, req_data)
 
-    def _process_single_d2d_request(self, die_model: BaseModel, req_data):
-        """处理单个D2D请求，参考BaseModel._process_single_request"""
+    def _create_flit_from_d2d_request(self, die_model: BaseModel, req_data):
+        """
+        从D2D请求创建Flit对象（不注入到IP接口）
+
+        用于主进程统一创建Flit，然后通过队列分发给worker
+
+        Args:
+            die_model: Die的BaseModel实例（用于node_map和routes）
+            req_data: D2D请求数据（10字段）
+
+        Returns:
+            创建好的Flit对象
+        """
         if len(req_data) < 10:
             raise ValueError(f"Invalid D2D request format: {req_data}")
 
@@ -593,53 +844,50 @@ class D2D_Model:
 
         # 根据是否跨Die决定路由策略
         if src_die != dst_die:
-            # 跨Die：使用D2D路由器选择节点，但需要根据请求类型选择正确的RN/SN节点
+            # 跨Die：使用D2D路由器选择节点
             base_d2d_node = self.d2d_router.select_d2d_node(src_die, dst_die, dst_node)
             if base_d2d_node is None:
                 raise ValueError(f"D2D路由器返回None，但这是跨Die请求 Die{src_die}->Die{dst_die}")
 
-            # 根据请求类型选择正确的D2D节点：
-            # 请求需要发送到D2D_SN（偶数行），响应从D2D_RN发出（奇数行）
+            # 选择D2D_SN节点
             d2d_sn_positions = getattr(self.config, "D2D_SN_POSITIONS", {}).get(src_die, [])
             base_d2d_node -= die_model.config.NUM_COL
 
-            # 找到对应的D2D_SN节点位置和索引
             if base_d2d_node in d2d_sn_positions:
                 intermediate_dest = base_d2d_node
             else:
                 raise ValueError("未找到d2d_sn")
 
-            destination_type = f"d2d_sn_0"  # 跨Die时目标是D2D_SN，包含正确的编号
+            destination_type = f"d2d_sn_0"
         else:
             # 本地：直接路由到目标
             intermediate_dest = die_model.node_map(dst_node, False)
             destination_type = dst_ip
 
-        # 创建flit（参考BaseModel._process_single_request）
+        # 创建flit
         from src.utils.components.flit import Flit
         from src.utils.components.node import Node
 
         path = die_model.routes[source_physical][intermediate_dest]
         req = Flit.create_flit(source_physical, intermediate_dest, path)
 
-        # 设置D2D统一属性（新设计）
-        req.d2d_origin_die = src_die  # 发起Die ID
-        req.d2d_origin_node = source_physical  # 发起节点源映射位置
-        req.d2d_origin_type = src_ip  # 发起IP类型
+        # 设置D2D统一属性
+        req.d2d_origin_die = src_die
+        req.d2d_origin_node = source_physical
+        req.d2d_origin_type = src_ip
 
-        req.d2d_target_die = dst_die  # 目标Die ID
-        # 目标节点源映射位置（统一保存源映射）
-        req.d2d_target_node = die_model.node_map(dst_node, True)  # 目标节点的源映射
-        req.d2d_target_type = dst_ip  # 目标IP类型
+        req.d2d_target_die = dst_die
+        req.d2d_target_node = die_model.node_map(dst_node, True)
+        req.d2d_target_type = dst_ip
 
-        # 设置标准属性（与BaseModel一致）
+        # 设置标准属性
         req.source_original = src_node
         req.destination_original = intermediate_dest
         req.flit_type = "req"
         req.departure_cycle = inject_time
         req.burst_length = burst_length
         req.source_type = f"{src_ip}_0" if "_" not in src_ip else src_ip
-        req.destination_type = destination_type  # 已经包含了正确的编号
+        req.destination_type = destination_type
         req.original_source_type = f"{src_ip}_0" if "_" not in src_ip else src_ip
         req.original_destination_type = f"{dst_ip}_0" if "_" not in dst_ip else dst_ip
         req.req_type = "read" if req_type == "R" else "write"
@@ -649,6 +897,18 @@ class D2D_Model:
 
         # 设置保序信息
         req.set_packet_category_and_order_id()
+
+        return req
+
+    def _process_single_d2d_request(self, die_model: BaseModel, req_data):
+        """处理单个D2D请求，参考BaseModel._process_single_request"""
+        # 创建Flit
+        req = self._create_flit_from_d2d_request(die_model, req_data)
+
+        # 解析数据以获取统计信息
+        src_die = req_data[1]
+        dst_die = req_data[4]
+        burst_length = req_data[8]
 
         # 记录跨Die统计（只对跨Die请求记录）
         if src_die != dst_die:

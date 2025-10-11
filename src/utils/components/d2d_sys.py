@@ -20,16 +20,17 @@ class D2D_Sys:
     4. 统计信息收集
     """
     
-    def __init__(self, node_pos: int, die_id: int, target_die_id: int, target_node_pos: int, config):
+    def __init__(self, node_pos: int, die_id: int, target_die_id: int, target_node_pos: int, config, target_queue=None):
         """
         初始化D2D传输系统
-        
+
         Args:
             node_pos: 当前节点位置
             die_id: 当前Die ID
             target_die_id: 目标Die ID
             target_node_pos: 目标节点位置
             config: 配置对象
+            target_queue: 目标队列（用于跨Die传输）
         """
         self.position = node_pos
         self.die_id = die_id
@@ -61,9 +62,9 @@ class D2D_Sys:
             rate=d2d_data_bw_limit / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
             bucket_size=d2d_data_bw_limit
         )
-        
-        # 目标Die的接口（由D2DModel设置）
-        self.target_die_interfaces = {}  # {die_id: {'rn': rn_interface, 'sn': sn_interface}}
+
+        # 目标队列（用于跨Die传输，替代原来的target_die_interfaces）
+        self.target_queue = target_queue
         
         # 统计信息
         self.rn_transmit_count = 0
@@ -398,62 +399,23 @@ class D2D_Sys:
     
     def _deliver_arrived_flit(self, flit: Flit):
         """
-        处理到达目标的flit
-        
+        投递flit到目标Die - 串行和并行完全相同！
+
+        统一队列架构：
+        - 不再需要判断目标Die、目标接口等
+        - 直接写入队列，由目标Die自己处理
+        - 包含到达周期信息，支持延迟模拟
+
         Args:
             flit: 到达的flit
         """
-        # 确定目标Die ID：
-        # 需要根据flit的传输方向判断目标
-        
-        # 检查是否为AXI传输中的flit
-        is_axi_flit = hasattr(flit, 'flit_position') and flit.flit_position and flit.flit_position.startswith('AXI_')
-        
-        if is_axi_flit:
-            # AXI传输中的flit：
-            # AXI_AR, AXI_AW: 请求类型，前往d2d_target_die
-            # AXI_R, AXI_B: 响应类型，返回d2d_origin_die
-            if flit.flit_position in ['AXI_AR', 'AXI_AW', 'AXI_W']:
-                target_die_id = flit.d2d_target_die
-            else:  # AXI_R, AXI_B
-                target_die_id = flit.d2d_origin_die  # 响应返回原始请求者Die
-        elif hasattr(flit, 'req_type') and flit.req_type:
-            # 普通请求flit：前往目标Die
-            target_die_id = flit.d2d_target_die
-        else:
-            # 普通响应/数据flit：返回原始源Die
-            target_die_id = flit.d2d_origin_die
-        
-        # 获取目标接口
-        if target_die_id is None or target_die_id not in self.target_die_interfaces:
-            # 添加更详细的调试信息
-            flit_info = f"flit_position={getattr(flit, 'flit_position', 'None')}, d2d_origin_die={getattr(flit, 'd2d_origin_die', 'None')}, d2d_target_die={getattr(flit, 'd2d_target_die', 'None')}, packet_id={getattr(flit, 'packet_id', 'None')}"
-            self.logger.error(f"目标Die {target_die_id} 的接口未设置，flit信息: {flit_info}")
+        if self.target_queue is None:
+            self.logger.error(f"目标队列未设置，无法投递flit packet_id={flit.packet_id}")
             return
-        
-        target_interfaces = self.target_die_interfaces[target_die_id]
-        
-        # 根据flit类型选择目标接口
-        if is_axi_flit:
-            # AXI传输：根据AXI通道类型判断
-            if flit.flit_position in ['AXI_AR', 'AXI_AW', 'AXI_W']:
-                # 请求/写通道 -> 发送到目标Die的RN（第二阶段：D2D_SN → D2D_RN）
-                target_interface = target_interfaces.get('rn')
-            else:  # AXI_R, AXI_B
-                # 响应通道 -> 发送到目标Die的SN（第五阶段：D2D_RN → D2D_SN）
-                target_interface = target_interfaces.get('sn')
-        elif hasattr(flit, 'req_type'):
-            # 普通请求flit -> 发送到目标Die的RN
-            target_interface = target_interfaces.get('rn')
-        else:
-            # 普通响应/数据flit -> 发送到目标Die的SN
-            target_interface = target_interfaces.get('sn')
-        
-        if target_interface:
-            # 调度跨Die接收（使用当前周期，因为已经经过了AXI延迟）
-            target_interface.schedule_cross_die_receive(flit, self.current_cycle)
-        else:
-            self.logger.error(f"无法找到合适的目标接口")
+
+        # 简单地写入队列，包含到达周期信息
+        # 格式：(arrival_cycle, flit)
+        self.target_queue.put((self.current_cycle, flit))
     
     
     def get_statistics(self) -> dict:

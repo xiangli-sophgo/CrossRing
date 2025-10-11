@@ -196,15 +196,15 @@ class BaseModel:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
             self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
-        
+
         # Initialize arbiters based on configuration
-        arbitration_config = getattr(self.config, 'arbitration', {})
+        arbitration_config = getattr(self.config, "arbitration", {})
 
         # Create arbiters for different queue types
-        default_config = arbitration_config.get('default', {'type': 'round_robin'})
-        self.iq_arbiter = create_arbiter_from_config(arbitration_config.get('iq', default_config))
-        self.eq_arbiter = create_arbiter_from_config(arbitration_config.get('eq', default_config))
-        self.rb_arbiter = create_arbiter_from_config(arbitration_config.get('rb', default_config))
+        default_config = arbitration_config.get("default", {"type": "round_robin"})
+        self.iq_arbiter = create_arbiter_from_config(arbitration_config.get("iq", default_config))
+        self.eq_arbiter = create_arbiter_from_config(arbitration_config.get("eq", default_config))
+        self.rb_arbiter = create_arbiter_from_config(arbitration_config.get("rb", default_config))
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
@@ -402,6 +402,17 @@ class BaseModel:
         self.performance_monitor = PerformanceMonitor()
         self.start_time = time.time()
 
+        self._step_flits, self._step_reqs, self._step_rsps = [], [], []
+
+        # D2D队列接收（由D2D_Model设置）
+        # 格式：{connection_key: Queue}
+        # connection_key = (src_die, src_node, dst_die, dst_node)
+        self.d2d_input_queues = {}
+
+        # D2D本地队列（用于存储已到达本Die但未到周期的消息）
+        # 格式：{connection_key: deque([(arrival_cycle, flit), ...])}
+        self.d2d_local_queues = {}
+
         # Initialize per-node FIFO ETag statistics after networks are created
         self._initialize_per_node_etag_stats()
 
@@ -434,8 +445,91 @@ class BaseModel:
                 self.RB_ETag_T0_per_channel[channel][node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
                 self.RB_total_flits_per_channel[channel][node_id] = {"TU": 0, "TD": 0, "TL": 0, "TR": 0}
 
+    def _process_cross_die_arrivals(self):
+        """
+        处理跨Die到达的flit - 串行和并行完全相同！
+
+        两级队列架构：
+        1. 共享队列（d2d_input_queues）：跨Die/进程传输
+        2. 本地队列（d2d_local_queues）：存储已到本Die但未到周期的消息
+
+        流程：
+        - 从共享队列批量转移到本地队列
+        - 处理本地队列头部已到期的消息
+        - 未到期的消息留在本地队列，不放回共享队列（避免顺序问题）
+        """
+        if not self.d2d_input_queues:
+            return
+
+        from collections import deque
+
+        # 第1步：从共享队列批量转移到本地队列
+        for conn_key, shared_queue in self.d2d_input_queues.items():
+            # 确保本地队列存在
+            if conn_key not in self.d2d_local_queues:
+                self.d2d_local_queues[conn_key] = deque()
+
+            # 批量转移：共享队列 → 本地队列
+            while not shared_queue.empty():
+                try:
+                    item = shared_queue.get(block=False)
+                    self.d2d_local_queues[conn_key].append(item)
+                except:
+                    break
+
+        # 第2步：处理本地队列头部已到期的消息
+        for conn_key, local_queue in self.d2d_local_queues.items():
+            while local_queue:
+                # Peek头部
+                arrival_cycle, flit = local_queue[0]
+
+                # 检查是否已到期
+                if arrival_cycle <= self.cycle:
+                    # 到期：取出并处理
+                    local_queue.popleft()
+                    self._deliver_to_local_interface(flit)
+                else:
+                    # 未到期：停止处理（后面的也不会到期，因为按时间排序）
+                    break
+
+    def _deliver_to_local_interface(self, flit):
+        """
+        将跨Die到达的flit投递到本地IP接口
+
+        d2d_sys在创建AXI flit时已经设置了：
+        - flit.destination_type: 目标接口类型（"d2d_rn_0"或"d2d_sn_0"）
+        - flit.destination: 目标节点位置
+
+        直接使用这些信息即可！
+        """
+        # 使用d2d_sys已经设置好的destination_type和destination
+        target_interface_type = getattr(flit, "destination_type", None)
+        target_node_pos = getattr(flit, "destination", None)
+
+        if target_interface_type is None or target_node_pos is None:
+            print(f"[错误] flit缺少destination信息 packet_id={flit.packet_id}")
+            print(f"  destination_type={target_interface_type}, destination={target_node_pos}")
+            return
+
+        # 获取目标接口
+        target_interface_key = (target_interface_type, target_node_pos + self.config.NUM_COL)
+        target_interface = self.ip_modules.get(target_interface_key)
+
+        if target_interface:
+            # 调用接口的跨Die接收方法（使用self.cycle而不是self.current_cycle）
+            target_interface.schedule_cross_die_receive(flit, self.cycle)
+        else:
+            # 接口不存在，记录错误（包含详细信息用于调试）
+            print(f"[错误] 无法找到目标接口 {target_interface_key} for flit packet_id={flit.packet_id}")
+            print(f"  flit.destination_type={target_interface_type}")
+            print(f"  flit.destination={target_node_pos}")
+            print(f"  可用的接口: {[k for k in self.ip_modules.keys() if k[0] in ['d2d_rn_0', 'd2d_sn_0']]}")
+
     def step(self):
         """Execute one simulation cycle step."""
+        # 处理跨Die到达的flit（统一队列架构）
+        self._process_cross_die_arrivals()
+
         # Tag moves
         self.release_completed_sn_tracker()
 
@@ -488,7 +582,7 @@ class BaseModel:
         simulation_start = time.perf_counter()
         self.load_request_stream()
         # Initialize step variables
-        self._step_flits, self._step_reqs, self._step_rsps = [], [], []
+        # self._step_flits, self._step_reqs, self._step_rsps = [], [], []
         self.cycle = 0
         tail_time = 6
 
@@ -810,9 +904,7 @@ class BaseModel:
                 row = []
                 for direction in directions_list:
                     # 检查是否可以注入到这个方向
-                    can_inject = self._check_iq_injection_conditions(
-                        network, ip_pos, ip_type, direction, network_type, ip_type_to_flit
-                    )
+                    can_inject = self._check_iq_injection_conditions(network, ip_pos, ip_type, direction, network_type, ip_type_to_flit)
                     row.append(can_inject)
                 request_matrix.append(row)
 
@@ -855,7 +947,7 @@ class BaseModel:
                         self.send_flits_num += 1
                         self.trans_flits_num += 1
 
-                        if hasattr(req, 'req_type'):
+                        if hasattr(req, "req_type"):
                             if req.req_type == "read":
                                 self.send_read_flits_num_stat += 1
                             elif req.req_type == "write":
@@ -1215,7 +1307,7 @@ class BaseModel:
                     network.ring_bridge["TL"][(pos, next_pos)][0] if network.ring_bridge["TL"][(pos, next_pos)] else None,
                     network.ring_bridge["TR"][(pos, next_pos)][0] if network.ring_bridge["TR"][(pos, next_pos)] else None,
                     network.inject_queues["TU"][pos][0] if pos in network.inject_queues["TU"] and network.inject_queues["TU"][pos] else None,
-                    network.inject_queues["TD"][pos][0] if pos in network.inject_queues["TD"] and network.inject_queues["TD"][pos] else None
+                    network.inject_queues["TD"][pos][0] if pos in network.inject_queues["TD"] and network.inject_queues["TD"][pos] else None,
                 ]
 
                 if not any(station_flits):
@@ -1226,20 +1318,14 @@ class BaseModel:
                 # output_directions: 0=EQ, 1=TU, 2=TD
                 slot_names = ["TL", "TR", "TU", "TD"]
                 output_dirs = ["EQ", "TU", "TD"]
-                direction_conditions = {
-                    "EQ": lambda d, n: d == n,
-                    "TU": lambda d, n: d < n,
-                    "TD": lambda d, n: d > n
-                }
+                direction_conditions = {"EQ": lambda d, n: d == n, "TU": lambda d, n: d < n, "TD": lambda d, n: d > n}
 
                 request_matrix = []
                 for slot_idx, flit in enumerate(station_flits):
                     row = []
                     for out_dir in output_dirs:
                         # 检查是否可以从这个slot转发到这个输出方向
-                        can_forward = self._check_rb_forward_conditions(
-                            network, flit, pos, next_pos, out_dir, direction_conditions[out_dir]
-                        )
+                        can_forward = self._check_rb_forward_conditions(network, flit, pos, next_pos, out_dir, direction_conditions[out_dir])
                         row.append(can_forward)
                     request_matrix.append(row)
 
@@ -1615,9 +1701,7 @@ class BaseModel:
             row = []
             for ip_type in ip_types_list:
                 # 检查是否可以从这个端口弹出到这个IP类型
-                can_eject = self._check_eq_eject_conditions(
-                    network, flit, ip_pos, port_idx, ip_type
-                )
+                can_eject = self._check_eq_eject_conditions(network, flit, ip_pos, port_idx, ip_type)
                 row.append(can_eject)
             request_matrix.append(row)
 
@@ -1892,44 +1976,71 @@ class BaseModel:
         # Define config whitelist (only YAML defined parameters)
         config_whitelist = [
             # Basic parameters
-            "TOPO_TYPE", "FLIT_SIZE", "SLICE_PER_LINK_HORIZONTAL", "SLICE_PER_LINK_VERTICAL",
-            "BURST", "NETWORK_FREQUENCY",
-
+            "TOPO_TYPE",
+            "FLIT_SIZE",
+            "SLICE_PER_LINK_HORIZONTAL",
+            "SLICE_PER_LINK_VERTICAL",
+            "BURST",
+            "NETWORK_FREQUENCY",
             # Resource configuration
-            "RN_RDB_SIZE", "RN_WDB_SIZE", "SN_DDR_RDB_SIZE", "SN_DDR_WDB_SIZE",
-            "SN_L2M_RDB_SIZE", "SN_L2M_WDB_SIZE", "UNIFIED_RW_TRACKER",
-
+            "RN_RDB_SIZE",
+            "RN_WDB_SIZE",
+            "SN_DDR_RDB_SIZE",
+            "SN_DDR_WDB_SIZE",
+            "SN_L2M_RDB_SIZE",
+            "SN_L2M_WDB_SIZE",
+            "UNIFIED_RW_TRACKER",
             # Latency configuration (using original values)
-            "DDR_R_LATENCY_original", "DDR_R_LATENCY_VAR_original", "DDR_W_LATENCY_original",
-            "L2M_R_LATENCY_original", "L2M_W_LATENCY_original", "SN_TRACKER_RELEASE_LATENCY_original",
-
+            "DDR_R_LATENCY_original",
+            "DDR_R_LATENCY_VAR_original",
+            "DDR_W_LATENCY_original",
+            "L2M_R_LATENCY_original",
+            "L2M_W_LATENCY_original",
+            "SN_TRACKER_RELEASE_LATENCY_original",
             # FIFO depths
-            "IQ_CH_FIFO_DEPTH", "EQ_CH_FIFO_DEPTH", "IQ_OUT_FIFO_DEPTH_HORIZONTAL",
-            "IQ_OUT_FIFO_DEPTH_VERTICAL", "IQ_OUT_FIFO_DEPTH_EQ", "RB_OUT_FIFO_DEPTH",
-            "RB_IN_FIFO_DEPTH", "EQ_IN_FIFO_DEPTH",
-
+            "IQ_CH_FIFO_DEPTH",
+            "EQ_CH_FIFO_DEPTH",
+            "IQ_OUT_FIFO_DEPTH_HORIZONTAL",
+            "IQ_OUT_FIFO_DEPTH_VERTICAL",
+            "IQ_OUT_FIFO_DEPTH_EQ",
+            "RB_OUT_FIFO_DEPTH",
+            "RB_IN_FIFO_DEPTH",
+            "EQ_IN_FIFO_DEPTH",
             # ETag configuration
-            "TL_Etag_T1_UE_MAX", "TL_Etag_T2_UE_MAX", "TR_Etag_T2_UE_MAX",
-            "TU_Etag_T1_UE_MAX", "TU_Etag_T2_UE_MAX", "TD_Etag_T2_UE_MAX",
+            "TL_Etag_T1_UE_MAX",
+            "TL_Etag_T2_UE_MAX",
+            "TR_Etag_T2_UE_MAX",
+            "TU_Etag_T1_UE_MAX",
+            "TU_Etag_T2_UE_MAX",
+            "TD_Etag_T2_UE_MAX",
             "ETag_BOTHSIDE_UPGRADE",
-
             # ITag configuration
-            "ITag_TRIGGER_Th_H", "ITag_TRIGGER_Th_V", "ITag_MAX_NUM_H", "ITag_MAX_NUM_V",
-
+            "ITag_TRIGGER_Th_H",
+            "ITag_TRIGGER_Th_V",
+            "ITag_MAX_NUM_H",
+            "ITag_MAX_NUM_V",
             # Feature switches
-            "ENABLE_CROSSPOINT_CONFLICT_CHECK", "ENABLE_IN_ORDER_EJECTION", "CROSSRING_VERSION",
-
+            "ENABLE_CROSSPOINT_CONFLICT_CHECK",
+            "ENABLE_IN_ORDER_EJECTION",
+            "CROSSRING_VERSION",
             # Bandwidth limits
-            "GDMA_BW_LIMIT", "SDMA_BW_LIMIT", "CDMA_BW_LIMIT", "DDR_BW_LIMIT", "L2M_BW_LIMIT",
-
+            "GDMA_BW_LIMIT",
+            "SDMA_BW_LIMIT",
+            "CDMA_BW_LIMIT",
+            "DDR_BW_LIMIT",
+            "L2M_BW_LIMIT",
             # Other configurations
-            "GDMA_RW_GAP", "SDMA_RW_GAP", "IN_ORDER_EJECTION_PAIRS", "IN_ORDER_PACKET_CATEGORIES",
-
+            "GDMA_RW_GAP",
+            "SDMA_RW_GAP",
+            "IN_ORDER_EJECTION_PAIRS",
+            "IN_ORDER_PACKET_CATEGORIES",
             # Tag configuration
-            "RB_ONLY_TAG_NUM_HORIZONTAL", "RB_ONLY_TAG_NUM_VERTICAL",
-
+            "RB_ONLY_TAG_NUM_HORIZONTAL",
+            "RB_ONLY_TAG_NUM_VERTICAL",
             # IP frequency transformation FIFO depths
-            "IP_L2H_FIFO_DEPTH", "IP_H2L_H_FIFO_DEPTH", "IP_H2L_L_FIFO_DEPTH"
+            "IP_L2H_FIFO_DEPTH",
+            "IP_H2L_H_FIFO_DEPTH",
+            "IP_H2L_L_FIFO_DEPTH",
         ]
 
         # Add selected configuration variables

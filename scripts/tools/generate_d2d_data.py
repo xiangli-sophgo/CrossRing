@@ -766,22 +766,22 @@ if __name__ == "__main__":
     traffic_configs = [
         {
             "src_die": 0,
-            "dst_die": 2,
+            "dst_die": 1,
             "src_ip_config": {"gdma_0": [6]},
             "dst_ip_config": {"ddr_0": [12]},
             "req_type": "R",
             "burst_length": 4,
             "bandwidth": 128.0,
         },
-        {
-            "src_die": 2,
-            "dst_die": 0,
-            "src_ip_config": {"gdma_1": [7]},
-            "dst_ip_config": {"ddr_1": [13]},
-            "req_type": "R",
-            "burst_length": 4,
-            "bandwidth": 64.0,
-        },
+        # {
+        #     "src_die": 2,
+        #     "dst_die": 0,
+        #     "src_ip_config": {"gdma_1": [7]},
+        #     "dst_ip_config": {"ddr_1": [13]},
+        #     "req_type": "R",
+        #     "burst_length": 4,
+        #     "bandwidth": 64.0,
+        # },
     ]
 
     generator.generate_multi_die_pair_traffic_file(

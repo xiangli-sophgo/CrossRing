@@ -21,8 +21,8 @@ def main(enable_profiling=False):
     # 使用D2DConfig替代CrossRingConfig，获得D2D特定配置功能
     # 现在每个Die的拓扑由D2D配置文件中的topology参数指定，无需die_config_file
     config = D2DConfig(
-        d2d_config_file="../config/topologies/d2d_4die_config.yaml",
-        # d2d_config_file="../config/topologies/d2d_config.yaml",
+        # d2d_config_file="../config/topologies/d2d_4die_config.yaml",
+        d2d_config_file="../config/topologies/d2d_config.yaml",
     )
 
     # 定义拓扑结构
@@ -39,7 +39,11 @@ def main(enable_profiling=False):
     sim = D2D_Model(
         config=config,
         traffic_file_path=r"../test_data",
-        traffic_config=[["d2d_data_0916.txt"]],
+        traffic_config=[
+            [
+                "d2d_data_0916.txt",
+            ],
+        ],
         model_type="REQ_RSP",
         result_save_path="../Result/d2d_demo/",
         results_fig_save_path="../Result/d2d_demo/figures/",
@@ -52,7 +56,7 @@ def main(enable_profiling=False):
         plot_link_state=0,  # 启用D2D链路状态可视化 12
         plot_start_cycle=10,  # 从第100周期开始可视化
         # 并行化控制
-        enable_parallel=0,  # 是否启用Die级并行化
+        enable_parallel=1,  # 是否启用Die级并行化
     )
 
     # 初始化仿真
