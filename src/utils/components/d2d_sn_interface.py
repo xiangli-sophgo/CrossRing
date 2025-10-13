@@ -4,7 +4,7 @@ Handles cross-die request reception and forwarding within the die.
 """
 
 from __future__ import annotations
-import heapq
+from collections import deque
 from .ip_interface import IPInterface
 from .flit import Flit
 import traceback
@@ -22,7 +22,7 @@ class D2D_SN_Interface(IPInterface):
 
         # D2D特有属性
         self.die_id = getattr(config, "DIE_ID", 0)  # 当前Die的ID
-        self.cross_die_receive_queue = []  # 使用heapq管理的接收队列 [(arrival_cycle, flit)]
+        self.cross_die_receive_queue = deque()  # FIFO队列用于跨Die接收
         self.target_die_interfaces = {}  # 将由D2D_Model设置 {die_id: d2d_rn_interface}
 
         # 防止重复处理AXI_B响应的记录 {(packet_id, cycle): True}
@@ -80,16 +80,19 @@ class D2D_SN_Interface(IPInterface):
     def schedule_cross_die_receive(self, flit: Flit, arrival_cycle: int):
         """
         调度跨Die接收 - 由对方Die的D2D_RN调用
+        注意：arrival_cycle参数保留用于接口兼容，但实际不使用，
+        因为D2D_Sys的AXI通道已经处理了传输延迟
         """
-        heapq.heappush(self.cross_die_receive_queue, (arrival_cycle, flit))
+        self.cross_die_receive_queue.append(flit)
         self.cross_die_requests_received += 1
 
     def process_cross_die_receives(self):
         """
-        处理到期的跨Die接收 - 在每个周期调用
+        处理跨Die接收队列 - 简单的FIFO处理
+        注意：不需要检查arrival_cycle，因为D2D_Sys已经保证flit在正确时间到达
         """
-        while self.cross_die_receive_queue and self.cross_die_receive_queue[0][0] <= self.current_cycle:
-            arrival_cycle, flit = heapq.heappop(self.cross_die_receive_queue)
+        while self.cross_die_receive_queue:
+            flit = self.cross_die_receive_queue.popleft()
             self.handle_received_cross_die_flit(flit)
 
     def handle_received_cross_die_flit(self, flit: Flit):
@@ -417,6 +420,12 @@ class D2D_SN_Interface(IPInterface):
         # 计算路径
         path = self.routes[source_mapped][destination_mapped] if destination_mapped in self.routes[source_mapped] else []
 
+        # 关键修复：确保packet_id在本Die的send_flits中初始化
+        # 这是必需的，因为packet_id是在Die1创建的，Die0的send_flits中没有这个key
+        # enqueue方法会自动将flit添加到send_flits[packet_id]列表中
+        if packet_id not in self.data_network.send_flits:
+            self.data_network.send_flits[packet_id] = []
+
         # 批量转发所有数据flits
         for i, flit in enumerate(data_flits):
             # 设置路由信息
@@ -429,6 +438,12 @@ class D2D_SN_Interface(IPInterface):
             flit.source_type = self.ip_type  # D2D_SN的类型
             flit.destination_type = getattr(first_flit, "d2d_origin_type", "gdma_0")
 
+            # 保留original类型信息（用于结果统计）
+            if not hasattr(flit, "original_source_type") or flit.original_source_type is None:
+                flit.original_source_type = getattr(first_flit, "original_source_type", None)
+            if not hasattr(flit, "original_destination_type") or flit.original_destination_type is None:
+                flit.original_destination_type = getattr(first_flit, "original_destination_type", None)
+
             # 标记为新的网络传输
             flit.is_injected = False
             flit.is_new_on_network = True
@@ -439,6 +454,7 @@ class D2D_SN_Interface(IPInterface):
                 flit.departure_cycle = self.current_cycle
 
             # 通过数据网络发送
+            # enqueue方法会自动将flit添加到send_flits[packet_id]列表中
             self.enqueue(flit, "data")
 
         # print(f"[D2D_SN] 批量转发packet {packet_id}的{len(data_flits)}个数据flits到Die{getattr(first_flit, 'd2d_origin_die', '?')}")

@@ -174,20 +174,40 @@ class IPInterface:
         if is_new_request and hasattr(flit, "req_type"):
             # 记录请求开始时间（tracker消耗开始）
             flit.req_start_cycle = self.current_cycle
-            
+
             # 判断是否为跨Die请求
-            is_cross_die = (hasattr(flit, "d2d_target_die") and 
-                           hasattr(flit, "d2d_origin_die") and 
+            is_cross_die = (hasattr(flit, "d2d_target_die") and
+                           hasattr(flit, "d2d_origin_die") and
                            flit.d2d_target_die != flit.d2d_origin_die)
-            
+
             # 只在真正的源IP记录请求统计，避免跨Die转发时重复记录
             should_record = self._should_record_request_issued(flit, is_cross_die)
             if should_record:
+                die_id = getattr(self.config, "DIE_ID", 0)
+
+                # 串行模式：使用d2d_model记录请求统计
                 d2d_model = getattr(self.req_network, 'd2d_model', None)
                 if d2d_model:
-                    die_id = getattr(self.config, "DIE_ID", 0)
                     d2d_model.record_request_issued(flit.packet_id, die_id, flit.req_type, is_cross_die)
-        
+                # 并行模式：更新共享统计
+                elif hasattr(self.node, 'die_model') and hasattr(self.node.die_model, '_shared_stats'):
+                    die_model = self.node.die_model
+                    shared_die_id = die_model._shared_stats_die_id
+                    die_stats = die_model._shared_stats[shared_die_id]
+
+                    if is_cross_die:
+                        if flit.req_type == 'read':
+                            die_stats['cross_read_requests'] += 1
+                        elif flit.req_type == 'write':
+                            die_stats['cross_write_requests'] += 1
+                    else:
+                        if flit.req_type == 'read':
+                            die_stats['local_read_requests'] += 1
+                        elif flit.req_type == 'write':
+                            die_stats['local_write_requests'] += 1
+
+                    die_model._shared_stats[shared_die_id] = die_stats  # 触发同步
+
         if network_type == "req" and self.networks[network_type]["send_flits"][flit.packet_id]:
             return True
         self.networks[network_type]["send_flits"][flit.packet_id].append(flit)
@@ -535,7 +555,7 @@ class IPInterface:
                     self.node.rn_tracker_pointer["write"][self.ip_type][self.ip_pos] -= 1
                     
                     # 更新D2D请求完成计数（只在源IP收到write_complete时记录，不在D2D_SN记录）
-                    if (hasattr(req, 'd2d_origin_die') and hasattr(req, 'd2d_target_die') and 
+                    if (hasattr(req, 'd2d_origin_die') and hasattr(req, 'd2d_target_die') and
                         hasattr(req, 'd2d_origin_type') and req.d2d_origin_type == self.ip_type):
                         die_id = getattr(self.config, 'DIE_ID', None)
                         if die_id is not None and req.d2d_origin_die == die_id:
@@ -544,6 +564,13 @@ class IPInterface:
                                 d2d_model.d2d_requests_completed[die_id] += 1
                                 # 记录write_complete响应的接收（只在真正的源IP记录）
                                 d2d_model.record_write_complete(req.packet_id, die_id)
+                            elif hasattr(self.node, 'die_model') and hasattr(self.node.die_model, '_shared_stats'):
+                                # 并行模式：更新共享统计
+                                die_model = self.node.die_model
+                                shared_die_id = die_model._shared_stats_die_id
+                                die_stats = die_model._shared_stats[shared_die_id]
+                                die_stats['write_complete_count'] += 1
+                                die_model._shared_stats[shared_die_id] = die_stats
 
     def _is_cross_die_write_request(self, req: Flit) -> bool:
         """检查是否为跨Die写请求"""
@@ -631,7 +658,14 @@ class IPInterface:
                             burst_length = getattr(flit, 'burst_length', 4)
                             # 使用新的统计方法记录跨Die读数据接收
                             d2d_model.record_read_data_received(flit.packet_id, die_id, burst_length, is_cross_die=True)
-            
+                        elif hasattr(self.node, 'die_model') and hasattr(self.node.die_model, '_shared_stats'):
+                            # 并行模式：更新共享统计中的跨Die读数据计数
+                            die_model = self.node.die_model
+                            shared_die_id = die_model._shared_stats_die_id
+                            die_stats = die_model._shared_stats[shared_die_id]
+                            die_stats['cross_read_flits'] += 1
+                            die_model._shared_stats[shared_die_id] = die_stats
+
             # 读数据到达RN端，需要收集到data buffer中
             self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
             
@@ -687,7 +721,14 @@ class IPInterface:
                         burst_length = getattr(flit, 'burst_length', 4)
                         # 记录跨Die写数据接收（每个flit都记录）
                         d2d_model.record_write_data_received(flit.packet_id, die_id, burst_length, is_cross_die=True)
-            
+                    elif hasattr(self.node, 'die_model') and hasattr(self.node.die_model, '_shared_stats'):
+                        # 并行模式：更新共享统计中的跨Die写数据计数
+                        die_model = self.node.die_model
+                        shared_die_id = die_model._shared_stats_die_id
+                        die_stats = die_model._shared_stats[shared_die_id]
+                        die_stats['cross_write_flits'] += 1
+                        die_model._shared_stats[shared_die_id] = die_stats
+
             self.node.sn_wdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
 
             # 检查是否收集完整个burst

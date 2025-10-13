@@ -4,7 +4,6 @@ Handles cross-die request initiation with AXI channel delays.
 """
 
 from __future__ import annotations
-import heapq
 from collections import deque
 from .ip_interface import IPInterface
 from .flit import Flit, TokenBucket
@@ -23,7 +22,7 @@ class D2D_RN_Interface(IPInterface):
 
         # D2D特有属性
         self.die_id = getattr(config, "DIE_ID", 0)  # 当前Die的ID
-        self.cross_die_receive_queue = []  # 使用heapq管理的接收队列 [(arrival_cycle, flit)]
+        self.cross_die_receive_queue = deque()  # FIFO队列用于跨Die接收
         self.target_die_interfaces = {}  # 将由D2D_Model设置 {die_id: d2d_sn_interface}
 
         # 防止重复发送write_complete响应的记录 {packet_id: True}
@@ -67,16 +66,19 @@ class D2D_RN_Interface(IPInterface):
     def schedule_cross_die_receive(self, flit: Flit, arrival_cycle: int):
         """
         调度跨Die接收 - 由对方Die的D2D_SN调用
+        注意：arrival_cycle参数保留用于接口兼容，但实际不使用，
+        因为D2D_Sys的AXI通道已经处理了传输延迟
         """
-        heapq.heappush(self.cross_die_receive_queue, (arrival_cycle, flit))
+        self.cross_die_receive_queue.append(flit)
         self.cross_die_requests_received += 1
 
     def process_cross_die_receives(self):
         """
-        处理到期的跨Die接收 - 在每个周期调用
+        处理跨Die接收队列 - 简单的FIFO处理
+        注意：不需要检查arrival_cycle，因为D2D_Sys已经保证flit在正确时间到达
         """
-        while self.cross_die_receive_queue and self.cross_die_receive_queue[0][0] <= self.current_cycle:
-            arrival_cycle, flit = heapq.heappop(self.cross_die_receive_queue)
+        while self.cross_die_receive_queue:
+            flit = self.cross_die_receive_queue.popleft()
             self.handle_received_cross_die_flit(flit)
 
     def handle_received_cross_die_flit(self, flit: Flit):
@@ -497,6 +499,13 @@ class D2D_RN_Interface(IPInterface):
                 burst_length = getattr(flit, "burst_length", 4)
                 # 这是跨Die读数据接收
                 d2d_model.record_read_data_received(flit.packet_id, self.die_id, burst_length, is_cross_die=True)
+            elif hasattr(self.node, 'die_model') and hasattr(self.node.die_model, '_shared_stats'):
+                # 并行模式：更新共享统计字典
+                shared_stats = self.node.die_model._shared_stats
+                if shared_stats is not None and self.die_id in shared_stats:
+                    die_stats = shared_stats[self.die_id]
+                    burst_length = getattr(flit, "burst_length", 4)
+                    die_stats['cross_read_flits'] += burst_length
 
             # 收集到data buffer中，但不更新网络的recv_flits_num
             if flit.packet_id not in self.node.rn_rdb[self.ip_type][self.ip_pos]:
