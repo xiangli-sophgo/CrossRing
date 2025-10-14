@@ -493,19 +493,8 @@ class D2D_RN_Interface(IPInterface):
             self.data_cir_h_num += getattr(flit, "eject_attempts_h", 0)
             self.data_cir_v_num += getattr(flit, "eject_attempts_v", 0)
 
-            # 记录读数据接收到D2D模型
-            d2d_model = getattr(self.req_network, "d2d_model", None)
-            if d2d_model:
-                burst_length = getattr(flit, "burst_length", 4)
-                # 这是跨Die读数据接收
-                d2d_model.record_read_data_received(flit.packet_id, self.die_id, burst_length, is_cross_die=True)
-            elif hasattr(self.node, 'die_model') and hasattr(self.node.die_model, '_shared_stats'):
-                # 并行模式：更新共享统计字典
-                shared_stats = self.node.die_model._shared_stats
-                if shared_stats is not None and self.die_id in shared_stats:
-                    die_stats = shared_stats[self.die_id]
-                    burst_length = getattr(flit, "burst_length", 4)
-                    die_stats['cross_read_flits'] += burst_length
+            # 注意：D2D_RN是中转节点，不统计数据接收
+            # 真正的统计在最终接收IP（如GDMA）的 ip_interface.py:_handle_received_data 中完成
 
             # 收集到data buffer中，但不更新网络的recv_flits_num
             if flit.packet_id not in self.node.rn_rdb[self.ip_type][self.ip_pos]:

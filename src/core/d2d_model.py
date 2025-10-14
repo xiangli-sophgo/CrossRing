@@ -140,6 +140,45 @@ def die_worker(die_id, die_config, d2d_input_queues, d2d_output_queues, traffic_
     # 只设置D2D输入队列
     die_model.d2d_input_queues = d2d_input_queues
 
+    # 为die_model添加统计接口方法，使其与串行模式d2d_model的接口一致
+    def record_read_data_received(packet_id, die_id, burst_length, is_cross_die=False):
+        """
+        记录读数据接收 - 并行模式实现
+        逻辑与串行模式D2D_Model.record_read_data_received保持一致
+        """
+        if hasattr(die_model, '_shared_stats') and die_model._shared_stats is not None:
+            shared_die_id = die_model._shared_stats_die_id
+            die_stats = die_model._shared_stats[shared_die_id]
+
+            # 按local/cross分类统计（与串行模式一致）
+            if is_cross_die:
+                die_stats['cross_read_flits'] += 1
+            else:
+                die_stats['local_read_flits'] += 1
+
+            die_model._shared_stats[shared_die_id] = die_stats
+
+    def record_write_data_received(packet_id, die_id, burst_length, is_cross_die=False):
+        """
+        记录写数据接收 - 并行模式实现
+        逻辑与串行模式D2D_Model.record_write_data_received保持一致
+        """
+        if hasattr(die_model, '_shared_stats') and die_model._shared_stats is not None:
+            shared_die_id = die_model._shared_stats_die_id
+            die_stats = die_model._shared_stats[shared_die_id]
+
+            # 按local/cross分类统计（与串行模式一致）
+            if is_cross_die:
+                die_stats['cross_write_flits'] += 1
+            else:
+                die_stats['local_write_flits'] += 1
+
+            die_model._shared_stats[shared_die_id] = die_stats
+
+    # 绑定方法到die_model实例
+    die_model.record_read_data_received = record_read_data_received
+    die_model.record_write_data_received = record_write_data_received
+
     # 为d2d_sys设置输出队列（target_queue）- 已在 _setup_d2d_systems_for_worker 中完成
     # 保留代码以兼容其他可能的初始化
     if hasattr(die_model, "d2d_systems"):
@@ -264,12 +303,53 @@ def die_worker(die_id, die_config, d2d_input_queues, d2d_output_queues, traffic_
                     serialized[packet_id].append(flit_data)
             return serialized
 
+        # 收集D2D统计所需的信息
+        d2d_rn_positions = getattr(die_model.config, "D2D_RN_POSITIONS", [])
+        d2d_sn_positions = getattr(die_model.config, "D2D_SN_POSITIONS", [])
+
+        d2d_stats = {}
+        # 收集D2D_RN统计
+        if d2d_rn_positions and len(d2d_rn_positions) > die_id:
+            d2d_rn_key = ("d2d_rn_0", d2d_rn_positions[die_id])
+            if d2d_rn_key in die_model.ip_modules:
+                rn_interface = die_model.ip_modules[d2d_rn_key]
+                if hasattr(rn_interface, 'get_statistics'):
+                    d2d_stats['d2d_rn'] = rn_interface.get_statistics()
+
+        # 收集D2D_SN统计
+        if d2d_sn_positions and len(d2d_sn_positions) > die_id:
+            d2d_sn_key = ("d2d_sn_0", d2d_sn_positions[die_id])
+            if d2d_sn_key in die_model.ip_modules:
+                sn_interface = die_model.ip_modules[d2d_sn_key]
+                if hasattr(sn_interface, 'get_statistics'):
+                    d2d_stats['d2d_sn'] = sn_interface.get_statistics()
+
+        # 收集D2D_Sys的AXI通道统计
+        axi_channel_stats = {}
+        if hasattr(die_model, "d2d_systems"):
+            for pos, d2d_sys in die_model.d2d_systems.items():
+                if hasattr(d2d_sys, "axi_channel_flit_count"):
+                    for channel, count in d2d_sys.axi_channel_flit_count.items():
+                        if channel not in axi_channel_stats:
+                            axi_channel_stats[channel] = 0
+                        axi_channel_stats[channel] += count
+
         stats = {
             "type": "final",  # 标记为最终统计
             "die_id": die_id,
             "results": die_model.get_results() if hasattr(die_model, "get_results") else {},
             "total_flits": getattr(die_model, "flit_num", 0),
             "total_reqs": getattr(die_model, "req_num", 0),
+            # 添加_collect_d2d_statistics需要的信息
+            "read_req": getattr(die_model, "read_req", 0),
+            "write_req": getattr(die_model, "write_req", 0),
+            "read_flit": getattr(die_model, "read_flit", 0),
+            "write_flit": getattr(die_model, "write_flit", 0),
+            "total_cycles": getattr(die_model, "cycle", 0),
+            "final_cycle": cycle,  # 记录最终周期
+            # D2D专有统计
+            "d2d_stats": d2d_stats,
+            "axi_channel_stats": axi_channel_stats,
             # 添加网络数据
             "data_network_send_flits": serialize_flits_dict(die_model.data_network.send_flits),
             "data_network_arrive_flits": serialize_flits_dict(die_model.data_network.arrive_flits),
@@ -778,6 +858,8 @@ class D2D_Model:
                             if self.kwargs.get("verbose", 1):
                                 print(f"\n所有任务完成，提前结束（周期{cycle}）")
                             should_stop.value = True
+                            # 保存最终周期和统计数据，用于后续打印最终状态
+                            self._final_cycle = cycle
                             # 再同步一轮让workers看到结束信号并退出
                             sync_barrier.wait()
                             sync_barrier.wait()
@@ -833,15 +915,30 @@ class D2D_Model:
             self.dies = helper_dies
             print("[主进程] Dies网络数据重建完成")
 
+            # 创建并缓存D2D处理器（供后续结果处理使用）
+            print("[主进程] 创建D2D结果处理器...")
+            d2d_processor = D2DResultProcessor(self.config)
+            final_cycle = getattr(self, '_final_cycle', self.end_time)
+            d2d_processor.simulation_end_cycle = final_cycle
+            d2d_processor.collect_cross_die_requests(self.dies)
+            d2d_processor.calculate_d2d_ip_bandwidth_data(self.dies)
+            self._cached_d2d_processor = d2d_processor
+            print("[主进程] D2D结果处理器创建完成")
+
             simulation_end = time.perf_counter()
             simulation_time = simulation_end - simulation_start
 
             if self.kwargs.get("verbose", 1):
                 print(f"\n=== D2D仿真完成 (进程并行) ===")
                 print(f"仿真耗时: {simulation_time:.2f} 秒")
-                print(f"处理周期数: {self.end_time} 周期")
-                print(f"仿真性能: {self.end_time / simulation_time:.0f} 周期/秒")
+                final_cycle = getattr(self, '_final_cycle', self.end_time)
+                print(f"处理周期数: {final_cycle} 周期")
+                print(f"仿真性能: {final_cycle / simulation_time:.0f} 周期/秒")
                 print(f"并行加速: 使用了 {self.num_dies} 个进程")
+
+                # 打印最终状态（使用已有的_print_progress_parallel函数）
+                print("\n仿真结束时的最终状态:")
+                self._print_progress_parallel(final_cycle, shared_stats)
 
         else:
             # ============ 串行模式 ============
@@ -1503,6 +1600,47 @@ class D2D_Model:
         """收集D2D专有统计信息"""
         d2d_stats = {"cross_die_requests": 0, "cross_die_responses": 0, "die_stats": {}}
 
+        # 并行模式：从收集的die_stats中读取
+        if self.enable_parallel:
+            if not hasattr(self, 'die_stats') or not self.die_stats:
+                return d2d_stats
+
+            for die_id, die_stat_data in self.die_stats.items():
+                die_stat = {
+                    "read_req": die_stat_data.get("read_req", 0),
+                    "write_req": die_stat_data.get("write_req", 0),
+                    "read_flit": die_stat_data.get("read_flit", 0),
+                    "write_flit": die_stat_data.get("write_flit", 0),
+                    "total_cycles": die_stat_data.get("total_cycles", 0),
+                }
+
+                # D2D专有统计（从worker进程收集的数据）
+                d2d_data = die_stat_data.get("d2d_stats", {})
+
+                if "d2d_rn" in d2d_data:
+                    rn_stats = d2d_data["d2d_rn"]
+                    die_stat["d2d_rn_sent"] = rn_stats.get("cross_die_requests_sent", 0)
+                    die_stat["d2d_rn_received"] = rn_stats.get("cross_die_responses_received", 0)
+                    d2d_stats["cross_die_requests"] += rn_stats.get("cross_die_requests_sent", 0)
+
+                if "d2d_sn" in d2d_data:
+                    sn_stats = d2d_data["d2d_sn"]
+                    die_stat["d2d_sn_received"] = sn_stats.get("cross_die_requests_received", 0)
+                    die_stat["d2d_sn_forwarded"] = sn_stats.get("cross_die_requests_forwarded", 0)
+                    die_stat["d2d_sn_responses"] = sn_stats.get("cross_die_responses_sent", 0)
+                    d2d_stats["cross_die_responses"] += sn_stats.get("cross_die_responses_sent", 0)
+
+                # AXI通道统计
+                axi_stats = die_stat_data.get("axi_channel_stats", {})
+                if axi_stats:
+                    die_stat["axi_channel_flit_count"] = axi_stats
+                    die_stat["total_axi_flits"] = sum(axi_stats.values())
+
+                d2d_stats["die_stats"][die_id] = die_stat
+
+            return d2d_stats
+
+        # 串行模式：直接从die_model读取
         for die_id, die_model in self.dies.items():
             die_stat = {
                 "read_req": die_model.read_req,

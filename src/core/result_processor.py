@@ -313,7 +313,7 @@ class BandwidthAnalyzer:
 
             # 计算不同角度的结束时间，并验证时间值有效性
             if not self.is_valid_number(representative_flit.data_received_complete_cycle):
-                print(f"[警告] packet_id {packet_id}: data_received_complete_cycle 无效，跳过该请求")
+                # print(f"[警告] packet_id {packet_id}: data_received_complete_cycle 无效，跳过该请求")
                 continue
             network_end_time = representative_flit.data_received_complete_cycle // self.network_frequency
 
@@ -416,7 +416,7 @@ class BandwidthAnalyzer:
                 source_backup = representative_flit.source_type or "UNKNOWN"
                 dest_backup = representative_flit.destination_type or "UNKNOWN"
                 port_key = f"{source_backup[:-2].upper() if len(source_backup) > 2 else source_backup.upper()} {representative_flit.req_type} {dest_backup[:3].upper()}"
-                print(f"[警告] 使用备选类型: {port_key} (original_source_type={actual_source_type}, original_destination_type={actual_dest_type})")
+                # print(f"[警告] 使用备选类型: {port_key} (original_source_type={actual_source_type}, original_destination_type={actual_dest_type})")
 
             if representative_flit.req_type == "read":
                 completion_time = rn_end_time

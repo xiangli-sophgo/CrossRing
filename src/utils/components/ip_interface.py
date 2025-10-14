@@ -652,19 +652,16 @@ class IPInterface:
                     # 这是跨Die请求的返回数据，需要通过网络或config获取Die信息
                     die_id = getattr(self.config, 'DIE_ID', None)
                     if die_id is not None and flit.d2d_origin_die == die_id:
-                        # 通过网络对象获取d2d_model引用
+                        # 统一的统计接口：串行模式使用d2d_model，并行模式使用die_model
+                        burst_length = getattr(flit, 'burst_length', 4)
+
+                        # 串行模式：通过网络对象获取d2d_model引用
                         d2d_model = getattr(self.req_network, 'd2d_model', None)
                         if d2d_model:
-                            burst_length = getattr(flit, 'burst_length', 4)
-                            # 使用新的统计方法记录跨Die读数据接收
                             d2d_model.record_read_data_received(flit.packet_id, die_id, burst_length, is_cross_die=True)
-                        elif hasattr(self.node, 'die_model') and hasattr(self.node.die_model, '_shared_stats'):
-                            # 并行模式：更新共享统计中的跨Die读数据计数
-                            die_model = self.node.die_model
-                            shared_die_id = die_model._shared_stats_die_id
-                            die_stats = die_model._shared_stats[shared_die_id]
-                            die_stats['cross_read_flits'] += 1
-                            die_model._shared_stats[shared_die_id] = die_stats
+                        # 并行模式：通过node获取die_model引用
+                        elif hasattr(self.node, 'die_model') and hasattr(self.node.die_model, 'record_read_data_received'):
+                            self.node.die_model.record_read_data_received(flit.packet_id, die_id, burst_length, is_cross_die=True)
 
             # 读数据到达RN端，需要收集到data buffer中
             self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
@@ -715,19 +712,16 @@ class IPInterface:
                 # 这是跨Die写请求的数据flit
                 die_id = getattr(self.config, 'DIE_ID', None)
                 if die_id is not None and flit.d2d_target_die == die_id:
-                    # 通过网络对象获取d2d_model引用
+                    # 统一的统计接口：串行模式使用d2d_model，并行模式使用die_model
+                    burst_length = getattr(flit, 'burst_length', 4)
+
+                    # 串行模式：通过网络对象获取d2d_model引用
                     d2d_model = getattr(self.req_network, 'd2d_model', None)
                     if d2d_model:
-                        burst_length = getattr(flit, 'burst_length', 4)
-                        # 记录跨Die写数据接收（每个flit都记录）
                         d2d_model.record_write_data_received(flit.packet_id, die_id, burst_length, is_cross_die=True)
-                    elif hasattr(self.node, 'die_model') and hasattr(self.node.die_model, '_shared_stats'):
-                        # 并行模式：更新共享统计中的跨Die写数据计数
-                        die_model = self.node.die_model
-                        shared_die_id = die_model._shared_stats_die_id
-                        die_stats = die_model._shared_stats[shared_die_id]
-                        die_stats['cross_write_flits'] += 1
-                        die_model._shared_stats[shared_die_id] = die_stats
+                    # 并行模式：通过node获取die_model引用
+                    elif hasattr(self.node, 'die_model') and hasattr(self.node.die_model, 'record_write_data_received'):
+                        self.node.die_model.record_write_data_received(flit.packet_id, die_id, burst_length, is_cross_die=True)
 
             self.node.sn_wdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
 
