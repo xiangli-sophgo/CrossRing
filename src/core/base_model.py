@@ -1408,17 +1408,18 @@ class BaseModel:
 
         if not link_occupied and not crosspoint_conflict:
             # Handle empty link cases with no crosspoint conflict
-            if network.links_tag[link][0] is None:
+            slot = network.links_tag[link][0]
+            if not slot.itag_reserved:
                 if self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction):
                     return flit
                 return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
             # Case 2: Has ITag reservation (no crosspoint conflict for reservations)
-            if network.links_tag[link][0] == [pos, direction]:
+            if slot.check_itag_match(pos, direction):
                 # 使用预约并更新双计数器
                 network.remain_tag[direction][pos] += 1
                 network.tagged_counter[direction][pos] -= 1  # 新增：更新tagged计数器
-                network.links_tag[link][0] = None
+                slot.clear_itag()
 
                 if self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction):
                     return flit
@@ -1466,10 +1467,11 @@ class BaseModel:
             network.itag_req_counter[direction][pos] += 1
 
         # 检查是否需要标记ITag（内联所有检查逻辑）
+        slot = network.links_tag[link][0]
         if (
             first_flit.wait_cycle_v >= self.config.ITag_TRIGGER_Th_V
             and not first_flit.itag_v
-            and network.links_tag[link][0] is None
+            and not slot.itag_reserved
             and network.tagged_counter[direction][pos] < self.config.ITag_MAX_NUM_V
             and network.itag_req_counter[direction][pos] > 0
             and network.remain_tag[direction][pos] > 0
@@ -1478,7 +1480,7 @@ class BaseModel:
             # 创建ITag标记（内联逻辑）
             network.remain_tag[direction][pos] -= 1
             network.tagged_counter[direction][pos] += 1
-            network.links_tag[link][0] = [pos, direction]
+            slot.reserve_itag(pos, direction)
             first_flit.itag_v = True
             self.ITag_v_num_stat += 1
 

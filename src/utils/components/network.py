@@ -14,6 +14,69 @@ import logging
 import inspect
 
 
+class LinkSlot:
+    """
+    链路Slot对象 - 封装slot_id和tag信息
+
+    Slot是链路上的基本传输单元，每个seat持有一个Slot对象。
+    Slot携带slot_id（全局唯一标识）和ITag信息。
+    """
+
+    def __init__(self, slot_id: int):
+        """
+        初始化LinkSlot
+
+        Args:
+            slot_id: 全局唯一的slot标识符
+        """
+        self.slot_id = slot_id
+
+        # ITag信息 (注入预约机制)
+        self.itag_reserved = False
+        self.itag_reserver_id = None
+        self.itag_direction = None
+
+    def reserve_itag(self, reserver_id: int, direction: str) -> bool:
+        """
+        预约ITag
+
+        Args:
+            reserver_id: 预约者节点ID
+            direction: 预约方向
+
+        Returns:
+            是否成功预约
+        """
+        if self.itag_reserved:
+            return False
+
+        self.itag_reserved = True
+        self.itag_reserver_id = reserver_id
+        self.itag_direction = direction
+        return True
+
+    def clear_itag(self) -> None:
+        """清除ITag预约"""
+        self.itag_reserved = False
+        self.itag_reserver_id = None
+        self.itag_direction = None
+
+    def check_itag_match(self, reserver_id: int, direction: str) -> bool:
+        """
+        检查ITag是否匹配
+
+        Args:
+            reserver_id: 预约者节点ID
+            direction: 预约方向
+
+        Returns:
+            是否匹配
+        """
+        return (self.itag_reserved and
+                self.itag_reserver_id == reserver_id and
+                self.itag_direction == direction)
+
+
 class Network:
     def __init__(self, config: CrossRingConfig, adjacency_matrix, name="network"):
         self.config = config
@@ -124,8 +187,11 @@ class Network:
             -2: ("IQ_TD", self.config.IQ_OUT_FIFO_DEPTH_VERTICAL),
         }
 
+        # Slot ID全局计数器（用于为每个seat分配唯一ID）
+        self.global_slot_id_counter = 0
+
         # ETag setup
-        self.T0_Etag_Order_FIFO = deque()  # 用于轮询选择 T0 Flit 的 Order FIFO
+        self.T0_Etag_Order_FIFO = deque()  # T0 Slot ID轮询队列（改为存储slot_id而非(node, flit)）
         self.RB_UE_Counters = {"TL": {}, "TR": {}}
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}
         self.ETag_BOTHSIDE_UPGRADE = False
@@ -199,7 +265,12 @@ class Network:
                         "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
                         "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                     }
-                    self.links_tag[(i, j)] = [None] * slice_count
+                    # 改造links_tag：创建Slot对象数组（每个seat一个Slot）
+                    self.links_tag[(i, j)] = [
+                        LinkSlot(slot_id=self.global_slot_id_counter + idx)
+                        for idx in range(slice_count)
+                    ]
+                    self.global_slot_id_counter += slice_count
             if i in range(0, config.NUM_COL):
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
@@ -219,8 +290,18 @@ class Network:
                     "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
                     "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                 }
-                self.links_tag[(i, i)] = [None] * 2
-                self.links_tag[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
+                # 改造links_tag：创建Slot对象数组（环形边界链路）
+                self.links_tag[(i, i)] = [
+                    LinkSlot(slot_id=self.global_slot_id_counter + idx)
+                    for idx in range(2)
+                ]
+                self.global_slot_id_counter += 2
+
+                self.links_tag[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [
+                    LinkSlot(slot_id=self.global_slot_id_counter + idx)
+                    for idx in range(2)
+                ]
+                self.global_slot_id_counter += 2
             if i % config.NUM_COL == 0 and (i // config.NUM_COL) % 2 != 0:
                 self.links[(i, i)] = [None] * 2
                 self.links[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
@@ -240,8 +321,17 @@ class Network:
                     "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
                     "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                 }
-                self.links_tag[(i, i)] = [None] * 2
-                self.links_tag[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
+                # 改造links_tag：创建Slot对象数组（垂直环形边界）
+                self.links_tag[(i, i)] = [
+                    LinkSlot(slot_id=self.global_slot_id_counter + idx)
+                    for idx in range(2)
+                ]
+                self.global_slot_id_counter += 2
+                self.links_tag[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [
+                    LinkSlot(slot_id=self.global_slot_id_counter + idx)
+                    for idx in range(2)
+                ]
+                self.global_slot_id_counter += 2
 
         for row in range(1, config.NUM_ROW, 2):
             for col in range(config.NUM_COL):
@@ -367,6 +457,74 @@ class Network:
             # flit.flit_position = f"EQ_{dir_type}"
         flit.used_entry_level = level
 
+    # ------------------------------------------------------------------
+    # T0 Slot轮询机制辅助方法
+    # ------------------------------------------------------------------
+
+    def _register_T0_slot(self, flit):
+        """
+        为Flit注册T0 Slot到轮询队列
+
+        当Flit从T1升级到T0时调用此方法，将当前Slot的slot_id注册到轮询队列。
+
+        Args:
+            flit: 要注册的Flit对象
+
+        Returns:
+            int: 分配的slot_id
+        """
+        # 获取当前Slot的slot_id
+        slot = self.links_tag[flit.current_link][flit.current_seat_index]
+        slot_id = slot.slot_id
+
+        # 注册到轮询队列
+        self.T0_Etag_Order_FIFO.append(slot_id)
+
+        # 记录在flit上（方便快速查询）
+        flit.T0_slot_id = slot_id
+
+        return slot_id
+
+    def _unregister_T0_slot(self, flit):
+        """
+        从轮询队列中注销T0 Slot
+
+        当Flit成功下环或被移除时调用此方法。
+
+        Args:
+            flit: 要注销的Flit对象
+        """
+        if not hasattr(flit, 'T0_slot_id') or flit.T0_slot_id is None:
+            return
+
+        # 从队列中移除
+        try:
+            self.T0_Etag_Order_FIFO.remove(flit.T0_slot_id)
+        except ValueError:
+            # slot_id不在队列中，可能已被移除
+            pass
+
+        # 清除flit上的标记（设置为None而不是删除，因为使用了__slots__）
+        flit.T0_slot_id = None
+
+    def _is_T0_slot_winner(self, flit):
+        """
+        检查Flit是否赢得T0轮询仲裁
+
+        Args:
+            flit: 要检查的Flit对象
+
+        Returns:
+            bool: 是否赢得仲裁
+        """
+        if not hasattr(flit, 'T0_slot_id') or flit.T0_slot_id is None:
+            return False
+
+        if not self.T0_Etag_Order_FIFO:
+            return False
+
+        return self.T0_Etag_Order_FIFO[0] == flit.T0_slot_id
+
     def error_log(self, flit, target_id, flit_id):
         if flit and flit.packet_id == target_id and flit.flit_id == flit_id:
             print(inspect.currentframe().f_back.f_code.co_name, self.cycle, flit)
@@ -434,9 +592,10 @@ class Network:
 
         if link_occupied or crosspoint_conflict:  # Link被占用或crosspoint冲突
             # 检查是否需要标记ITag（内联所有检查逻辑）
+            slot = self.links_tag[link][0]
             if (
                 link_occupied  # 只有当link被实际占用时才标记ITag
-                and self.links_tag[link][0] is None
+                and not slot.itag_reserved
                 and flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H
                 and self.tagged_counter[direction][current] < self.config.ITag_MAX_NUM_H
                 and self.itag_req_counter[direction][current] > 0
@@ -446,17 +605,18 @@ class Network:
                 # 创建ITag标记（内联逻辑）
                 self.remain_tag[direction][current] -= 1
                 self.tagged_counter[direction][current] += 1
-                self.links_tag[link][0] = [current, direction]
+                slot.reserve_itag(current, direction)
                 flit.itag_h = True
             return False
 
         else:  # Link空闲且无crosspoint冲突
-            if self.links_tag[link][0] is None:  # 无预约
+            slot = self.links_tag[link][0]
+            if not slot.itag_reserved:  # 无预约
                 return True  # 直接上环
             else:  # 有预约
-                if self.links_tag[link][0] == [current, direction]:  # 是自己的预约
+                if slot.check_itag_match(current, direction):  # 是自己的预约
                     # 使用预约（内联逻辑）
-                    self.links_tag[link][0] = None
+                    slot.clear_itag()
                     self.remain_tag[direction][current] += 1  # 修复：使用direction
                     self.tagged_counter[direction][current] -= 1
                     return True
@@ -470,9 +630,10 @@ class Network:
                 if self.excess_ITag_to_remove[direction][node_id] > 0:
                     # 寻找该节点创建的ITag并释放
                     for link, tag_info in self.links_tag.items():
-                        if tag_info[0] is not None and tag_info[0] == [node_id, direction] and link[0] == node_id:  # ITag回到创建节点
+                        slot = tag_info[0]
+                        if slot.itag_reserved and slot.check_itag_match(node_id, direction) and link[0] == node_id:  # ITag回到创建节点
                             # 释放多余ITag
-                            self.links_tag[link][0] = None
+                            slot.clear_itag()
                             self.tagged_counter[direction][node_id] -= 1
                             self.remain_tag[direction][node_id] += 1
                             self.excess_ITag_to_remove[direction][node_id] -= 1
@@ -603,7 +764,7 @@ class Network:
                         flit.current_seat_index = 1
                         if flit.ETag_priority == "T0":
                             # 若升级到T0则需要从T0队列中移除flit
-                            self.T0_Etag_Order_FIFO.remove((next_node, flit))
+                            self._unregister_T0_slot(flit)
                             if can_use_T1:
                                 self._occupy_entry("TR", (next_node, target_eject_node_id), "T1", flit)
                             else:
@@ -674,7 +835,7 @@ class Network:
                             elif flit.ETag_priority == "T1":
                                 if self._can_upgrade_to_T0_in_order(flit, next_node):
                                     flit.ETag_priority = "T0"
-                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
+                                    self._register_T0_slot(flit)
                             link[flit.current_seat_index] = None
                             next_pos = next_node - 1
                             flit.current_link = (next_node, next_pos)
@@ -683,18 +844,18 @@ class Network:
                     elif flit.ETag_priority == "T0":
                         if len(link_station) < self.config.RB_IN_FIFO_DEPTH:
                             # 按优先级尝试: T0专用 > T1 > T2
-                            if self.T0_Etag_Order_FIFO[0] == (next_node, flit) and can_use_T0:
+                            if self._is_T0_slot_winner(flit) and can_use_T0:
                                 # 使用T0专用entry
                                 self._occupy_entry("TL", (next_node, target_eject_node_id), "T0", flit)
                                 flit.is_delay = False
                                 flit.current_link = (next_node, target_eject_node_id)
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
-                                self.T0_Etag_Order_FIFO.popleft()
+                                self._unregister_T0_slot(flit)
                             elif can_use_T1:
                                 # 使用T1 entry
                                 self._occupy_entry("TL", (next_node, target_eject_node_id), "T1", flit)
-                                self.T0_Etag_Order_FIFO.remove((next_node, flit))
+                                self._unregister_T0_slot(flit)
                                 flit.is_delay = False
                                 flit.current_link = (next_node, target_eject_node_id)
                                 link[flit.current_seat_index] = None
@@ -702,7 +863,7 @@ class Network:
                             elif can_use_T2:
                                 # 使用T2 entry
                                 self._occupy_entry("TL", (next_node, target_eject_node_id), "T2", flit)
-                                self.T0_Etag_Order_FIFO.remove((next_node, flit))
+                                self._unregister_T0_slot(flit)
                                 flit.is_delay = False
                                 flit.current_link = (next_node, target_eject_node_id)
                                 link[flit.current_seat_index] = None
@@ -752,7 +913,7 @@ class Network:
                         flit.current_seat_index = 0
 
                         if flit.ETag_priority == "T0":
-                            self.T0_Etag_Order_FIFO.remove((next_node, flit))
+                            self._unregister_T0_slot(flit)
                             if can_use_T1:
                                 # T0使用T1 entry
                                 self._occupy_entry("TD", next_node, "T1", flit)
@@ -823,8 +984,8 @@ class Network:
                                 flit.ETag_priority = "T1"
                             elif flit.ETag_priority == "T1":
                                 if self._can_upgrade_to_T0_in_order(flit, next_node):
-                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
                                     flit.ETag_priority = "T0"
+                                    self._register_T0_slot(flit)
                             link[flit.current_seat_index] = None
                             next_pos = next_node - self.config.NUM_COL * 2
                             flit.current_link = (next_node, next_pos)
@@ -833,20 +994,20 @@ class Network:
                     elif flit.ETag_priority == "T0":
                         if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH and self._can_eject_in_order(flit, next_node):
                             # 按优先级尝试: T0专用 > T1 > T2
-                            if self.T0_Etag_Order_FIFO[0] == (next_node, flit) and can_use_T0:
+                            if self._is_T0_slot_winner(flit) and can_use_T0:
                                 # 使用T0专用entry
                                 self._occupy_entry("TU", next_node, "T0", flit)
                                 flit.is_delay = False
                                 flit.is_arrive = True
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
-                                self.T0_Etag_Order_FIFO.popleft()
+                                self._unregister_T0_slot(flit)
                                 # 新增：更新保序跟踪表
                                 self._update_order_tracking_table(flit)
                             elif can_use_T1:
                                 # 使用T1 entry
                                 self._occupy_entry("TU", next_node, "T1", flit)
-                                self.T0_Etag_Order_FIFO.remove((next_node, flit))
+                                self._unregister_T0_slot(flit)
                                 flit.is_delay = False
                                 flit.is_arrive = True
                                 link[flit.current_seat_index] = None
@@ -856,7 +1017,7 @@ class Network:
                             elif can_use_T2:
                                 # 使用T2 entry
                                 self._occupy_entry("TU", next_node, "T2", flit)
-                                self.T0_Etag_Order_FIFO.remove((next_node, flit))
+                                self._unregister_T0_slot(flit)
                                 flit.is_delay = False
                                 flit.is_arrive = True
                                 link[flit.current_seat_index] = None
@@ -916,8 +1077,8 @@ class Network:
                                 flit.ETag_priority = "T1"
                             elif flit.ETag_priority == "T1":
                                 if self._can_upgrade_to_T0_in_order(flit, next_node):
-                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
                                     flit.ETag_priority = "T0"
+                                    self._register_T0_slot(flit)
                             link[flit.current_seat_index] = None
                             next_pos = max(next_node - 1, row_start)
                             flit.current_link = (next_node, next_pos)
@@ -926,18 +1087,18 @@ class Network:
                     elif flit.ETag_priority == "T0":
                         if len(link_station) < self.config.RB_IN_FIFO_DEPTH:
                             # 按优先级尝试: T0专用 > T1 > T2
-                            if self.T0_Etag_Order_FIFO[0] == (next_node, flit) and can_use_T0:
+                            if self._is_T0_slot_winner(flit) and can_use_T0:
                                 # 使用T0专用entry
                                 self._occupy_entry("TL", (next_node, target_eject_node_id), "T0", flit)
                                 flit.is_delay = False
                                 flit.current_link = (next_node, target_eject_node_id)
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
-                                self.T0_Etag_Order_FIFO.popleft()
+                                self._unregister_T0_slot(flit)
                             elif can_use_T1:
                                 # 使用T1 entry
                                 self._occupy_entry("TL", (next_node, target_eject_node_id), "T1", flit)
-                                self.T0_Etag_Order_FIFO.remove((next_node, flit))
+                                self._unregister_T0_slot(flit)
                                 flit.is_delay = False
                                 flit.current_link = (next_node, target_eject_node_id)
                                 link[flit.current_seat_index] = None
@@ -945,7 +1106,7 @@ class Network:
                             elif can_use_T2:
                                 # 使用T2 entry
                                 self._occupy_entry("TL", (next_node, target_eject_node_id), "T2", flit)
-                                self.T0_Etag_Order_FIFO.remove((next_node, flit))
+                                self._unregister_T0_slot(flit)
                                 flit.is_delay = False
                                 flit.current_link = (next_node, target_eject_node_id)
                                 link[flit.current_seat_index] = None
@@ -994,7 +1155,7 @@ class Network:
 
                             # 根据使用的entry类型更新计数器
                             if flit.ETag_priority == "T0":
-                                self.T0_Etag_Order_FIFO.remove((next_node, flit))
+                                self._unregister_T0_slot(flit)
                                 if can_use_T1:
                                     # T0使用T1 entry
                                     self._occupy_entry("TR", (next_node, target_eject_node_id), "T1", flit)
@@ -1061,8 +1222,8 @@ class Network:
                                 flit.ETag_priority = "T1"
                             elif flit.ETag_priority == "T1":
                                 if self._can_upgrade_to_T0_in_order(flit, next_node):
-                                    self.T0_Etag_Order_FIFO.append((next_node, flit))
                                     flit.ETag_priority = "T0"
+                                    self._register_T0_slot(flit)
                             link[flit.current_seat_index] = None
                             next_pos = next_node - self.config.NUM_COL * 2 if next_node - self.config.NUM_COL * 2 >= col_start else col_start
                             flit.current_link = (next_node, next_pos)
@@ -1070,18 +1231,18 @@ class Network:
                     elif flit.ETag_priority == "T0":
                         if len(link_eject) < self.config.EQ_IN_FIFO_DEPTH:
                             # 按优先级尝试: T0专用 > T1 > T2
-                            if self.T0_Etag_Order_FIFO[0] == (next_node, flit) and can_use_T0:
+                            if self._is_T0_slot_winner(flit) and can_use_T0:
                                 # 使用T0专用entry
                                 self._occupy_entry("TU", next_node, "T0", flit)
                                 flit.is_delay = False
                                 flit.is_arrive = True
                                 link[flit.current_seat_index] = None
                                 flit.current_seat_index = 0
-                                self.T0_Etag_Order_FIFO.popleft()
+                                self._unregister_T0_slot(flit)
                             elif can_use_T1:
                                 # 使用T1 entry
                                 self._occupy_entry("TU", next_node, "T1", flit)
-                                self.T0_Etag_Order_FIFO.remove((next_node, flit))
+                                self._unregister_T0_slot(flit)
                                 flit.is_delay = False
                                 flit.is_arrive = True
                                 link[flit.current_seat_index] = None
@@ -1089,7 +1250,7 @@ class Network:
                             elif can_use_T2:
                                 # 使用T2 entry
                                 self._occupy_entry("TU", next_node, "T2", flit)
-                                self.T0_Etag_Order_FIFO.remove((next_node, flit))
+                                self._unregister_T0_slot(flit)
                                 flit.is_delay = False
                                 flit.is_arrive = True
                                 link[flit.current_seat_index] = None
@@ -1131,7 +1292,7 @@ class Network:
                             flit.current_seat_index = 0
                             # 根据使用的entry类型更新计数器
                             if flit.ETag_priority == "T0":
-                                self.T0_Etag_Order_FIFO.remove((next_node, flit))
+                                self._unregister_T0_slot(flit)
                                 if can_use_T1:
                                     # T0使用T1 entry
                                     self._occupy_entry("TD", next_node, "T1", flit)
@@ -1587,14 +1748,14 @@ class Network:
             flit = self.links[link][slice_index]
             # 首先检查ITag，无论是否有flit都要检查
             if link in self.links_tag and slice_index < len(self.links_tag[link]):
-                tag_info = self.links_tag[link][slice_index]
-                if tag_info is not None:
+                slot = self.links_tag[link][slice_index]
+                if slot.itag_reserved:
                     # 有ITag标记
                     self.links_flow_stat[link]["ITag_count"] += 1
 
             if flit is None:
                 # slice为空，且没有ITag标记，才是真正的空闲
-                if link not in self.links_tag or slice_index >= len(self.links_tag[link]) or self.links_tag[link][slice_index] is None:
+                if link not in self.links_tag or slice_index >= len(self.links_tag[link]) or not self.links_tag[link][slice_index].itag_reserved:
                     self.links_flow_stat[link]["empty_count"] += 1
             else:
                 # slice被flit占用，按下环尝试次数分组统计

@@ -8,7 +8,7 @@ import numpy as np
 from collections import deque, defaultdict
 from config.config import CrossRingConfig
 from .flit import Flit
-from .network import Network
+from .network import Network, LinkSlot
 import logging
 
 
@@ -58,9 +58,10 @@ class RingNetwork(Network):
                 if self.excess_ITag_to_remove[direction][node_id] > 0:
                     # Find ITags created by this node and release them
                     for link, tag_info in self.links_tag.items():
-                        if tag_info[0] is not None and tag_info[0] == [node_id, direction] and link[0] == node_id:
+                        slot = tag_info[0]
+                        if slot.itag_reserved and slot.check_itag_match(node_id, direction) and link[0] == node_id:
                             # Release excess ITag
-                            self.links_tag[link][0] = None
+                            slot.clear_itag()
                             self.tagged_counter[direction][node_id] -= 1
                             self.remain_tag[direction][node_id] += 1
                             self.excess_ITag_to_remove[direction][node_id] -= 1
@@ -85,8 +86,9 @@ class RingNetwork(Network):
             flit.wait_cycle_h += 1
 
             # Check if ITag should be created (inline all check logic)
+            slot = self.links_tag[link][0]
             if (
-                self.links_tag[link][0] is None
+                not slot.itag_reserved
                 and flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H
                 and self.tagged_counter[direction][current] < self.config.ITag_MAX_NUM_H
                 and self.itag_req_counter[direction][current] > 0
@@ -96,17 +98,18 @@ class RingNetwork(Network):
                 # Create ITag mark (inline logic)
                 self.remain_tag[direction][current] -= 1
                 self.tagged_counter[direction][current] += 1
-                self.links_tag[link][0] = [current, direction]
+                slot.reserve_itag(current, direction)
                 flit.itag_h = True
             return False
 
         else:  # Link free
-            if self.links_tag[link][0] is None:  # No reservation
+            slot = self.links_tag[link][0]
+            if not slot.itag_reserved:  # No reservation
                 return True  # Direct entry to ring
             else:  # Has reservation
-                if self.links_tag[link][0] == [current, direction]:  # Own reservation
+                if slot.check_itag_match(current, direction):  # Own reservation
                     # Use reservation (inline logic)
-                    self.links_tag[link][0] = None
+                    slot.clear_itag()
                     self.remain_tag[direction][current] += 1
                     self.tagged_counter[direction][current] -= 1
                     return True
@@ -189,7 +192,12 @@ class RingNetwork(Network):
                 # Ring 网络使用横向链路的 slice 数量
                 slice_count = getattr(self.config, 'SLICE_PER_LINK_HORIZONTAL', getattr(self.config, 'SLICE_PER_LINK', 8))
                 self.links[link_key] = [None] * slice_count
-                self.links_tag[link_key] = [None] * slice_count
+                # 改造links_tag：创建Slot对象数组
+                self.links_tag[link_key] = [
+                    LinkSlot(slot_id=self.global_slot_id_counter + idx)
+                    for idx in range(slice_count)
+                ]
+                self.global_slot_id_counter += slice_count
                 self.links_flow_stat["read"][link_key] = 0
                 self.links_flow_stat["write"][link_key] = 0
 
@@ -200,7 +208,12 @@ class RingNetwork(Network):
                 # Ring 网络使用横向链路的 slice 数量
                 slice_count = getattr(self.config, 'SLICE_PER_LINK_HORIZONTAL', getattr(self.config, 'SLICE_PER_LINK', 8))
                 self.links[link_key] = [None] * slice_count
-                self.links_tag[link_key] = [None] * slice_count
+                # 改造links_tag：创建Slot对象数组
+                self.links_tag[link_key] = [
+                    LinkSlot(slot_id=self.global_slot_id_counter + idx)
+                    for idx in range(slice_count)
+                ]
+                self.global_slot_id_counter += slice_count
                 self.links_flow_stat["read"][link_key] = 0
                 self.links_flow_stat["write"][link_key] = 0
 
@@ -234,7 +247,7 @@ class RingNetwork(Network):
         def fifo_has_space(curr_node, direction: str, level: str, flit) -> bool:
             """检查 dir×level FIFO 是否还有空位"""
             if level == "T0":
-                return self.T0_Etag_Order_FIFO[0] == (curr_node, flit) and self.ue_used[curr_node][(direction, level)] < self.ue_cap[curr_node][(direction, level)]
+                return self._is_T0_slot_winner(flit) and self.ue_used[curr_node][(direction, level)] < self.ue_cap[curr_node][(direction, level)]
             return self.ue_used[curr_node][(direction, level)] < self.ue_cap[curr_node][(direction, level)]
 
         def occupy_fifo(curr_node, direction: str, level: str) -> None:
@@ -266,11 +279,7 @@ class RingNetwork(Network):
                     # 处理T0优先级的特殊逻辑（与Network类保持一致）
                     if flit.ETag_priority == "T0":
                         # T0 flit使用entry时需要从T0队列中移除
-                        if hasattr(self, "T0_Etag_Order_FIFO"):
-                            try:
-                                self.T0_Etag_Order_FIFO.remove((curr_node, flit))
-                            except ValueError:
-                                pass  # flit不在队列中，忽略
+                        self._unregister_T0_slot(flit)
 
                     flit.is_arrive = True
                     return
@@ -281,8 +290,7 @@ class RingNetwork(Network):
             elif flit.ETag_priority == "T1":
                 flit.ETag_priority = "T0"
                 # T1升级到T0时，需要添加到T0队列中（与Network类保持一致）
-                if hasattr(self, "T0_Etag_Order_FIFO"):
-                    self.T0_Etag_Order_FIFO.append((curr_node, flit))
+                self._register_T0_slot(flit)
             # (若已是 T0 则保持不变)
 
             # 2-C. 升级后继续沿环前进

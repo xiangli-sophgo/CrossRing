@@ -97,7 +97,7 @@ def main():
         plot_flow_fig=1,
         flow_fig_show_CDMA=0,
         plot_RN_BW_fig=1,
-        plot_link_state=1,
+        plot_link_state=0,
         plot_start_cycle=1500,
         print_trace=0,
         show_trace_id=[71],
@@ -107,7 +107,7 @@ def main():
     np.random.seed(801)
 
     sim.initial()
-    sim.end_time = 6000
+    sim.end_time = 2000
     sim.print_interval = 2000
     sim.run()
 

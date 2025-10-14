@@ -110,6 +110,7 @@ class Flit:
         "is_tagged",
         "ETag_priority",
         "used_entry_level",
+        "T0_slot_id",  # T0轮询机制的slot ID
         "cmd_entry_cake0_cycle",
         "cmd_entry_noc_from_cake0_cycle",
         "cmd_entry_noc_from_cake1_cycle",
@@ -216,6 +217,7 @@ class Flit:
         self.ETag_priority = "T2"  # 默认优先级为 T2
         # 记录下环 / 弹出时实际占用的是哪一级 entry（"T0" / "T1" / "T2"）
         self.used_entry_level = None
+        self.T0_slot_id = None  # T0轮询机制的slot ID
         # Latency record
         self.req_start_cycle = np.inf  # 请求开始处理时间（tracker消耗开始）
         self.cmd_entry_cake0_cycle = np.inf
@@ -316,6 +318,8 @@ class Flit:
         self.wait_cycle_v = 0
         self.eject_attempts_h = 0
         self.eject_attempts_v = 0
+        self.ETag_priority = "T2"
+        self.T0_slot_id = None
         self.path_index = 0
         self.current_seat_index = -1
         self.current_link = None

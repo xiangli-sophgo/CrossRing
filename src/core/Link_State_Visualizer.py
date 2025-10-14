@@ -1811,7 +1811,12 @@ class NetworkLinkVisualizer:
                 tag = None
                 tag_list = tags_dict.get((src, dest), None)
                 if isinstance(tag_list, (list, tuple)) and len(tag_list) > idx_slice:
-                    tag = tag_list[idx_slice]
+                    slot = tag_list[idx_slice]
+                    # 从Slot对象中提取ITag信息
+                    if hasattr(slot, 'itag_reserved') and slot.itag_reserved:
+                        tag = [slot.itag_reserver_id, slot.itag_direction]
+                    else:
+                        tag = None
 
                 if slice is None:
                     # 如果有tag也要画三角
