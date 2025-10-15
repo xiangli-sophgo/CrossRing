@@ -82,6 +82,11 @@ class CrossRingConfig:
         self.ENABLE_IN_ORDER_EJECTION = args.ENABLE_IN_ORDER_EJECTION
         self.IN_ORDER_EJECTION_PAIRS = args.IN_ORDER_EJECTION_PAIRS
         self.IN_ORDER_PACKET_CATEGORIES = args.IN_ORDER_PACKET_CATEGORIES
+        # 方向控制参数
+        self.TL_ALLOWED_SOURCE_NODES = args.TL_ALLOWED_SOURCE_NODES
+        self.TR_ALLOWED_SOURCE_NODES = args.TR_ALLOWED_SOURCE_NODES
+        self.TU_ALLOWED_SOURCE_NODES = args.TU_ALLOWED_SOURCE_NODES
+        self.TD_ALLOWED_SOURCE_NODES = args.TD_ALLOWED_SOURCE_NODES
         self.IP_L2H_FIFO_DEPTH = args.IP_L2H_FIFO_DEPTH
         self.IP_H2L_H_FIFO_DEPTH = args.IP_H2L_H_FIFO_DEPTH
         self.IP_H2L_L_FIFO_DEPTH = args.IP_H2L_L_FIFO_DEPTH
@@ -516,6 +521,20 @@ class CrossRingConfig:
         )
         parser.add_argument(
             "--IN_ORDER_PACKET_CATEGORIES", type=list, default=default_config.get("IN_ORDER_PACKET_CATEGORIES", ["REQ"]), help="Packet categories that need in-order delivery (REQ/RSP/DATA)"
+        )
+
+        # 方向控制参数 - 保序下环方向白名单（物理节点ID列表）
+        parser.add_argument(
+            "--TL_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TL_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TL (left) direction"
+        )
+        parser.add_argument(
+            "--TR_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TR_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TR (right) direction"
+        )
+        parser.add_argument(
+            "--TU_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TU_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TU (up) direction"
+        )
+        parser.add_argument(
+            "--TD_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TD_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TD (down) direction"
         )
 
         # 添加仲裁器配置支持

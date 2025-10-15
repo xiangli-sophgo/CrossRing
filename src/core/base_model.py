@@ -752,6 +752,10 @@ class BaseModel:
 
     def _try_inject_to_direction(self, req: Flit, ip_type, ip_pos, direction, counts):
         """检查tracker空间并尝试注入到指定direction的pre缓冲"""
+        # 设置flit的允许下环方向（仅在第一次注入时设置）
+        if not hasattr(req, "allowed_eject_directions") or req.allowed_eject_directions is None:
+            req.allowed_eject_directions = self.req_network.determine_allowed_eject_directions(req)
+
         # 直接注入到指定direction的pre缓冲
         queue_pre = self.req_network.inject_queues_pre[direction]
         queue_pre[ip_pos] = req
@@ -843,6 +847,10 @@ class BaseModel:
                     self._try_inject_to_direction(flit, ip_type, ip_pos, direction, counts)
                 else:
                     # rsp / data 网络：直接移动到 pre‑缓冲
+                    # 设置flit的允许下环方向（仅在第一次注入时设置）
+                    if not hasattr(flit, "allowed_eject_directions") or flit.allowed_eject_directions is None:
+                        flit.allowed_eject_directions = network.determine_allowed_eject_directions(flit)
+
                     network.IQ_channel_buffer[ip_type][ip_pos].popleft()
                     queue_pre = network.inject_queues_pre[direction]
                     queue_pre[ip_pos] = flit

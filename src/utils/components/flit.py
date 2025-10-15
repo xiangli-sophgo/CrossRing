@@ -127,6 +127,7 @@ class Flit:
         "data_latency",
         "src_dest_order_id",
         "packet_category",
+        "allowed_eject_directions",  # 允许下环的方向列表
         "data_channel_id",
         # D2D相关属性
         "d2d_origin_die",      # 发起Die ID
@@ -236,6 +237,7 @@ class Flit:
         self.sn_rsp_generate_cycle = np.inf
         self.src_dest_order_id = -1
         self.packet_category = None
+        self.allowed_eject_directions = None  # 允许下环的方向列表
         self.data_channel_id = 0  # 默认数据通道0
 
     def sync_latency_record(self, flit):
@@ -326,6 +328,7 @@ class Flit:
         self.traffic_id = None
         self.src_dest_order_id = -1
         self.packet_category = None
+        self.allowed_eject_directions = None
         self.data_channel_id = 0
         # 重置D2D属性
         self.d2d_origin_die = None

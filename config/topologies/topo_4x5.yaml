@@ -96,6 +96,12 @@ IN_ORDER_EJECTION_PAIRS: []
 IN_ORDER_PACKET_CATEGORIES:
   - "REQ"    # 只有REQ类型需要保序
 
+# 方向控制配置 - 4x5拓扑 (20节点: 0-19, 布局: 行0: 0-4, 行1: 5-9, 行2: 10-14, 行3: 15-19)
+TL_ALLOWED_SOURCE_NODES: [3, 4, 8, 9, 13, 14, 18, 19]        # 向左：右半部(列3,4)
+TR_ALLOWED_SOURCE_NODES: [0, 1, 2, 5, 6, 7, 10, 11, 12, 15, 16, 17]  # 向右：左半部(列0-2)
+TU_ALLOWED_SOURCE_NODES: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]    # 向上：下半部(行2,3)
+TD_ALLOWED_SOURCE_NODES: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]      # 向下：上半部(行0,1)
+
 # IP 频率变换 FIFO 深度 (使用默认值)
 IP_L2H_FIFO_DEPTH: 3
 IP_H2L_H_FIFO_DEPTH: 2

@@ -124,23 +124,34 @@ if __name__ == "__main__":
     END_TIME = 6300
     burst = 4
     req_type = "R"
-    OUTPUT_FILE = f"../../test_data/data_0924_{req_type}.txt"
+    OUTPUT_FILE = f"../../test_data/data_1015_{req_type}.txt"
 
     # 定义多个配置
     configs = [
         {
             "src_map": {
-                "gdma_0": list(range(16)),
-                "gdma_1": list(range(16)),
+                "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7],
             },
             "dst_map": {
-                "ddr_0": list(range(16)),
-                "ddr_1": list(range(16)),
+                "ddr_0": [0, 1, 2, 3, 4, 5, 6, 7],
             },
             "speed": 128,
             "burst": burst,
             "req_type": req_type,
         },
+        # {
+        #     "src_map": {
+        #         "gdma_0": list(range(16)),
+        #         "gdma_1": list(range(16)),
+        #     },
+        #     "dst_map": {
+        #         "ddr_0": list(range(16)),
+        #         "ddr_1": list(range(16)),
+        #     },
+        #     "speed": 128,
+        #     "burst": burst,
+        #     "req_type": req_type,
+        # },
         # {
         #     "src_map": {
         #         "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],

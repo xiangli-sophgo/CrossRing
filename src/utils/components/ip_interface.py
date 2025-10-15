@@ -939,7 +939,12 @@ class IPInterface:
         rsp.flit_type = "rsp"
         rsp.rsp_type = rsp_type
         rsp.req_type = req.req_type
-        # 设置保序信息
+
+        # 设置原始节点ID（物理节点编号）- RSP从SN发出，发往RN
+        rsp.source_original = req.destination_original  # RSP从SN发出
+        rsp.destination_original = req.source_original  # RSP发往RN
+
+        # 设置保序信息（使用正确的source_original进行方向控制和保序跟踪）
         rsp.set_packet_category_and_order_id()
         rsp.packet_id = req.packet_id
         rsp.departure_cycle = cycle + self.config.NETWORK_FREQUENCY
