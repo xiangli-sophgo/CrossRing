@@ -695,15 +695,19 @@ class Network:
             col_end = col_start + self.config.NUM_NODE - self.config.NUM_COL * 2 if col_start >= 0 else -1
 
             link = self.links.get(flit.current_link)
-            # self.error_log(flit, 1032, 3)
+            # self.error_log(flit, 158, 3)
 
             # Plan non ring bridge moves
-            # Handling delay flits
-            if flit.is_delay:
-                return self._handle_delay_flit(flit, link, current, next_node, row_start, row_end, col_start, col_end)
-            # Handling regular flits
+            # 使用配置开关选择新旧实现
+            if hasattr(self.config, "USE_NEW_HANDLE") and self.config.USE_NEW_HANDLE:
+                # 新版本：统一处理delay和regular flit
+                return self._handle_flit(flit, link, current, next_node, row_start, row_end, col_start, col_end)
             else:
-                return self._handle_regular_flit(flit, link, current, next_node, row_start, row_end, col_start, col_end)
+                # 旧版本：分别处理delay和regular flit（保留作为备份）
+                if flit.is_delay:
+                    return self._handle_delay_flit(flit, link, current, next_node, row_start, row_end, col_start, col_end)
+                else:
+                    return self._handle_regular_flit(flit, link, current, next_node, row_start, row_end, col_start, col_end)
 
     def _handle_delay_flit(self, flit: Flit, link, current, next_node, row_start, row_end, col_start, col_end):
         # 1. 非链路末端
@@ -1662,6 +1666,392 @@ class Network:
         if self._sn_positions is None:
             self._sn_positions = list(set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST))
         return self._sn_positions
+
+    # ==================== 新的handle flit辅助函数 ====================
+
+    def _determine_etag_upgrade(self, flit, direction):
+        """
+        判断下环失败后的ETag升级目标
+
+        Args:
+            flit: 当前flit
+            direction: 尝试下环的方向 (TL/TR/TU/TD)
+
+        Returns:
+            str: 升级目标ETag等级 ("T0"/"T1") 或 None（不升级）
+        """
+        if flit.ETag_priority == "T0":
+            return None  # T0不再升级
+
+        # 判断是否是主方向（可升级到T0）
+        is_primary_direction = direction in ["TL", "TU"]
+
+        if flit.ETag_priority == "T2":
+            # T2 → T1升级规则
+            if is_primary_direction:
+                return "T1"  # 主方向无条件升级
+            else:
+                # 反方向需要配置开启
+                return "T1" if self.ETag_BOTHSIDE_UPGRADE else None
+
+        elif flit.ETag_priority == "T1":
+            # T1 → T0升级规则（只有主方向可以升级）
+            if is_primary_direction:
+                # 需要通过保序检查
+                target_node = flit.path[flit.path_index + 1] if flit.path_index + 1 < len(flit.path) else flit.path[flit.path_index]
+                if self._can_upgrade_to_T0_in_order(flit, target_node, direction):
+                    return "T0"
+            return None
+
+        return None
+
+    def _complete_eject(self, flit, direction, target_node, link, key, entry_level):
+        """
+        完成下环操作：设置flit状态、占用entry、更新跟踪表
+
+        Args:
+            flit: 当前flit
+            direction: 下环方向 (TL/TR/TU/TD)
+            target_node: 目标下环节点
+            link: 当前链路
+            key: entry的键（ring_bridge用tuple，eject_queues用int）
+            entry_level: 占用的entry等级 ("T0"/"T1"/"T2")
+        """
+        # 1. 取消T0注册（如果需要）
+        if flit.ETag_priority == "T0":
+            self._unregister_T0_slot(flit)
+
+        # 2. 设置flit状态
+        flit.is_delay = False
+        link[flit.current_seat_index] = None
+
+        if direction in ["TL", "TR"]:
+            # 横向环下环
+            flit.current_link = (flit.current_link[1], target_node)
+            flit.current_seat_index = 0 if direction == "TL" else 1
+        else:  # TU, TD
+            # 纵向环下环到最终目的地
+            flit.is_arrive = True
+            flit.current_seat_index = 0
+
+        # 3. 占用Entry
+        self._occupy_entry(direction, key, entry_level, flit)
+
+        # 4. 更新保序跟踪表
+        self._update_order_tracking_table(flit)
+
+    def _occupy_best_available_entry(self, flit, direction, key, target_node, link):
+        """
+        根据ETag优先级占用最佳可用Entry
+
+        优先级策略：
+        - T0: T0专用 → T1 → T2
+        - T1: T1 → T2
+        - T2: T2
+
+        Args:
+            flit: 当前flit
+            direction: 下环方向 (TL/TR/TU/TD)
+            key: entry的键
+            target_node: 目标下环节点
+            link: 当前链路
+
+        Returns:
+            bool: 是否成功占用Entry
+        """
+        # 检查各级entry可用性
+        can_use_T0 = self._entry_available(direction, key, "T0") if direction in ["TL", "TU"] else False
+        can_use_T1 = self._entry_available(direction, key, "T1")
+        can_use_T2 = self._entry_available(direction, key, "T2")
+
+        entry_to_use = None
+
+        if flit.ETag_priority == "T0":
+            # T0优先级：尝试T0专用 → T1 → T2
+            if self._is_T0_slot_winner(flit) and can_use_T0:
+                entry_to_use = "T0"
+            elif can_use_T1:
+                entry_to_use = "T1"
+            elif can_use_T2:
+                entry_to_use = "T2"
+        elif flit.ETag_priority == "T1":
+            # T1优先级：尝试T1 → T2
+            if can_use_T1:
+                entry_to_use = "T1"
+            elif can_use_T2:
+                entry_to_use = "T2"
+        elif flit.ETag_priority == "T2":
+            # T2优先级：只使用T2
+            if can_use_T2:
+                entry_to_use = "T2"
+
+        if entry_to_use:
+            self._complete_eject(flit, direction, target_node, link, key, entry_to_use)
+            return True
+
+        return False
+
+    def _try_eject(self, flit, direction, target_node, link):
+        """
+        尝试下环（适用于所有下环场景）
+
+        Args:
+            flit: 当前flit
+            direction: 下环方向 (TL/TR/TU/TD)
+            target_node: 目标下环节点
+            link: 当前链路
+
+        Returns:
+            bool: 是否成功下环
+        """
+        # 1. 获取队列和容量限制
+        if direction in ["TL", "TR"]:
+            # 横向环下环到ring_bridge
+            key = (flit.current_link[1], target_node)
+            queue = self.ring_bridge[direction][key]
+            capacity = self.config.RB_IN_FIFO_DEPTH
+        else:  # TU, TD
+            # 纵向环下环到eject_queues
+            key = flit.current_link[1]
+            queue = self.eject_queues[direction][key]
+            capacity = self.config.EQ_IN_FIFO_DEPTH
+
+        # 2. 检查队列容量
+        if len(queue) >= capacity:
+            return False
+
+        # 3. 检查保序条件
+        if not self._can_eject_in_order(flit, target_node, direction):
+            return False
+
+        # 4. 尝试占用最佳Entry
+        return self._occupy_best_available_entry(flit, direction, key, target_node, link)
+
+    def _continue_looping(self, flit, link, next_pos):
+        """
+        继续绕环
+
+        Args:
+            flit: 当前flit
+            link: 当前链路
+            next_pos: 下一个绕环位置
+        """
+        link[flit.current_seat_index] = None
+        old_link = flit.current_link
+        new_link = (flit.current_link[1], next_pos)
+
+        # 调试输出
+        if new_link[0] == new_link[1] and new_link not in self.links:
+            print(f"WARNING: Invalid self-loop link {new_link} for flit {flit.flit_id}")
+            print(f"  Old link: {old_link}, next_pos: {next_pos}")
+            print(f"  Path: {flit.path}, path_index: {flit.path_index}")
+            print(f"  is_delay: {flit.is_delay}, current_position: {flit.current_position}")
+
+        flit.current_link = new_link
+        flit.current_seat_index = 0
+
+    def _analyze_flit_state(self, flit, current, next_node, row_start, row_end, col_start, col_end):
+        """
+        分析flit当前状态，判断是否应该尝试下环
+
+        Args:
+            flit: 当前flit
+            current: 当前链路起点
+            next_node: 当前链路终点
+            row_start: 行起始节点
+            row_end: 行结束节点
+            col_start: 列起始节点
+            col_end: 列结束节点
+
+        Returns:
+            dict: {
+                'should_eject': bool,  # 是否应该尝试下环
+                'direction': str,      # 下环方向（TL/TR/TU/TD）
+                'next_pos': int        # 下次绕环的位置
+            }
+        """
+        # 判断方向和计算下一个绕环位置
+        if current == next_node:
+            # 边界情况：在环的边界
+            if next_node == row_start:
+                # 左边界
+                direction = "TR"
+                next_pos = next_node + 1
+            elif next_node == row_end:
+                # 右边界
+                direction = "TL"
+                next_pos = next_node - 1
+            elif next_node == col_start:
+                # 上边界
+                direction = "TD"
+                next_pos = next_node + self.config.NUM_COL * 2
+            elif next_node == col_end:
+                # 下边界
+                direction = "TU"
+                next_pos = next_node - self.config.NUM_COL * 2
+            else:
+                # 不应该到这里
+                direction = None
+                next_pos = next_node
+        elif abs(current - next_node) == 1:
+            # 非边界横向环
+            if current - next_node == 1:
+                # 向左
+                direction = "TL"
+                next_pos = max(next_node - 1, row_start)
+            else:
+                # 向右
+                direction = "TR"
+                next_pos = min(next_node + 1, row_end)
+        else:
+            # 非边界纵向环
+            if current - next_node == self.config.NUM_COL * 2:
+                # 向上
+                direction = "TU"
+                next_pos = max(next_node - self.config.NUM_COL * 2, col_start)
+            else:
+                # 向下
+                direction = "TD"
+                next_pos = min(next_node + self.config.NUM_COL * 2, col_end)
+
+        # 判断是否应该尝试下环：只有绕回到起始位置才尝试
+        should_eject = next_node == flit.current_position
+
+        return {"should_eject": should_eject, "direction": direction, "next_pos": next_pos}
+
+    def _handle_flit(self, flit: Flit, link, current, next_node, row_start, row_end, col_start, col_end):
+        """
+        处理flit在链路末端的行为（统一版本）
+
+        Args:
+            flit: 当前flit
+            link: 当前链路
+            current: 当前链路起点
+            next_node: 当前链路终点
+            row_start: 行起始节点
+            row_end: 行结束节点
+            col_start: 列起始节点
+            col_end: 列结束节点
+        """
+        # 1. 非链路末端：继续前进
+        if flit.current_seat_index < len(link) - 1:
+            link[flit.current_seat_index] = None
+            flit.current_seat_index += 1
+            return
+
+        # 2. Regular flit：先更新位置和路径索引
+        if not flit.is_delay:
+            flit.current_position = next_node
+            flit.path_index += 1
+
+        # 3. 计算路径信息（使用更新后的path_index）
+        has_next_step = flit.path_index + 1 < len(flit.path)
+        next_step = flit.path[flit.path_index + 1] if has_next_step else flit.path[flit.path_index]
+        final_destination = flit.path[-1]
+
+        # 4. 判断下环场景
+        if has_next_step:
+            # 还有后续路径
+            if next_node - next_step == self.config.NUM_COL:
+                # 场景1：需要从横向环下环到ring_bridge（进入纵向环）
+                state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
+                flit.eject_attempts_h += 1
+
+                success = self._try_eject(flit, state["direction"], next_step, link)
+
+                if success:
+                    # 下环成功（regular flit已在前面更新了position和path_index）
+                    return
+
+                # 下环失败：标记为delay flit并继续绕环
+                if not flit.is_delay:
+                    flit.is_delay = True
+
+                upgrade_to = self._determine_etag_upgrade(flit, state["direction"])
+                if upgrade_to:
+                    flit.ETag_priority = upgrade_to
+                    if upgrade_to == "T0":
+                        self._register_T0_slot(flit)
+
+                self._continue_looping(flit, link, state["next_pos"])
+            else:
+                # 不需要场景1下环
+                if flit.is_delay:
+                    # Delay flit：检查是否应该尝试场景2下环
+                    state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
+
+                    if state["should_eject"]:
+                        # 应该尝试下环到eject_queue
+                        row = next_node // self.config.NUM_COL
+                        if row % 2 == 0:
+                            flit.eject_attempts_v += 1
+                        else:
+                            flit.eject_attempts_h += 1
+
+                        success = self._try_eject(flit, state["direction"], final_destination, link)
+
+                        if success:
+                            return
+
+                        upgrade_to = self._determine_etag_upgrade(flit, state["direction"])
+                        if upgrade_to:
+                            flit.ETag_priority = upgrade_to
+                            if upgrade_to == "T0":
+                                self._register_T0_slot(flit)
+
+                    # 无论是否尝试下环，都继续绕环
+                    self._continue_looping(flit, link, state["next_pos"])
+                else:
+                    # Regular flit：正常移动到下一段（已在前面更新position和path_index）
+                    link[flit.current_seat_index] = None
+                    flit.current_link = (next_node, next_step)
+                    flit.current_seat_index = 0
+
+        else:
+            # 最后一步：判断是否到达最终目的地
+            if next_node == final_destination:
+                # 场景2：到达最终目的地，下环到eject_queue
+                state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
+
+                # 根据环的类型计数
+                if current == next_node:
+                    # 自环边界：根据行号判断是横向还是纵向环
+                    row = next_node // self.config.NUM_COL
+                    if row % 2 == 0:
+                        flit.eject_attempts_v += 1
+                    else:
+                        flit.eject_attempts_h += 1
+                elif abs(current - next_node) == 1:
+                    flit.eject_attempts_h += 1
+                else:
+                    flit.eject_attempts_v += 1
+
+                success = self._try_eject(flit, state["direction"], final_destination, link)
+
+                if success:
+                    if not flit.is_delay:
+                        flit.current_position = next_node
+                    flit.path_index += 1
+                    return
+
+                # 下环失败：继续绕环
+                if not flit.is_delay:
+                    flit.current_position = next_node
+                    flit.is_delay = True
+
+                upgrade_to = self._determine_etag_upgrade(flit, state["direction"])
+                if upgrade_to:
+                    flit.ETag_priority = upgrade_to
+                    if upgrade_to == "T0":
+                        self._register_T0_slot(flit)
+
+                self._continue_looping(flit, link, state["next_pos"])
+            else:
+                # 还没到达目的地，继续绕环
+                state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
+                self._continue_looping(flit, link, state["next_pos"])
+
+    # ==================== 原有的辅助函数 ====================
 
     def _update_link_statistics_on_set(self, link, slice_index, new_flit, old_flit, cycle):
         """

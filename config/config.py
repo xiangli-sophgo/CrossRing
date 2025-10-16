@@ -87,6 +87,7 @@ class CrossRingConfig:
         self.TR_ALLOWED_SOURCE_NODES = args.TR_ALLOWED_SOURCE_NODES
         self.TU_ALLOWED_SOURCE_NODES = args.TU_ALLOWED_SOURCE_NODES
         self.TD_ALLOWED_SOURCE_NODES = args.TD_ALLOWED_SOURCE_NODES
+        self.USE_NEW_HANDLE = args.USE_NEW_HANDLE
         self.IP_L2H_FIFO_DEPTH = args.IP_L2H_FIFO_DEPTH
         self.IP_H2L_H_FIFO_DEPTH = args.IP_H2L_H_FIFO_DEPTH
         self.IP_H2L_L_FIFO_DEPTH = args.IP_H2L_L_FIFO_DEPTH
@@ -535,6 +536,9 @@ class CrossRingConfig:
         )
         parser.add_argument(
             "--TD_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TD_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TD (down) direction"
+        )
+        parser.add_argument(
+            "--USE_NEW_HANDLE", type=bool, default=default_config.get("USE_NEW_HANDLE", False), help="Use new unified handle_flit implementation"
         )
 
         # 添加仲裁器配置支持

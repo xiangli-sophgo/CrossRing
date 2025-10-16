@@ -124,3 +124,6 @@ arbitration:
       algorithm: "lqf"  # Longest Queue First
       iterations: 2
       weight_strategy: "queue_length"
+
+# 功能开关
+USE_NEW_HANDLE: 1

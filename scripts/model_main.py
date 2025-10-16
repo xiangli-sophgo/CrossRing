@@ -100,7 +100,7 @@ def main():
         plot_link_state=0,
         plot_start_cycle=100,
         print_trace=0,
-        show_trace_id=[1032],
+        show_trace_id=[158],
         show_node_id=1,
         verbose=1,
     )
