@@ -125,19 +125,15 @@ class D2DTrafficGenerator:
 
         return time_sequence
 
-    def generate_cross_die_traffic(
-        self, src_die: int, src_nodes: List[int], src_ip: str, dst_die: int, dst_nodes: List[int], dst_ip: str, req_type: str, burst_length: int, bandwidth: float, end_time: int
-    ) -> List[str]:
+    def generate_cross_die_traffic(self, src_die: int, src_nodes: List[tuple], dst_die: int, dst_nodes: List[tuple], req_type: str, burst_length: int, bandwidth: float, end_time: int) -> List[str]:
         """
         生成跨 die 流量
 
         Args:
             src_die: 源 Die ID
-            src_nodes: 源节点列表
-            src_ip: 源 IP 类型
+            src_nodes: 源节点列表，格式为 [(node_id, ip_name), ...]
             dst_die: 目标 Die ID
-            dst_nodes: 目标节点列表
-            dst_ip: 目标 IP 类型
+            dst_nodes: 目标节点列表，格式为 [(node_id, ip_name), ...]
             req_type: 请求类型 ('R' 或 'W')
             burst_length: 突发长度
             bandwidth: 带宽，单位 GB/s
@@ -153,9 +149,9 @@ class D2DTrafficGenerator:
 
         # 为每个时间点生成流量
         for timestamp in time_sequence:
-            for src_node in src_nodes:
+            for src_node, src_ip in src_nodes:
                 # 随机选择目标节点
-                dst_node = random.choice(dst_nodes)
+                dst_node, dst_ip = random.choice(dst_nodes)
 
                 # 格式：inject_time, src_die, src_node, src_ip, dst_die, dst_node, dst_ip, req_type, burst_length
                 entry = f"{timestamp}, {src_die}, {src_node}, {src_ip}, {dst_die}, {dst_node}, {dst_ip}, {req_type}, {burst_length}\n"
@@ -163,18 +159,14 @@ class D2DTrafficGenerator:
 
         return traffic_entries
 
-    def generate_same_die_traffic(
-        self, die_id: int, src_nodes: List[int], src_ip: str, dst_nodes: List[int], dst_ip: str, req_type: str, burst_length: int, bandwidth: float, end_time: int
-    ) -> List[str]:
+    def generate_same_die_traffic(self, die_id: int, src_nodes: List[tuple], dst_nodes: List[tuple], req_type: str, burst_length: int, bandwidth: float, end_time: int) -> List[str]:
         """
         生成同 die 内流量
 
         Args:
             die_id: Die ID
-            src_nodes: 源节点列表
-            src_ip: 源 IP 类型
-            dst_nodes: 目标节点列表
-            dst_ip: 目标 IP 类型
+            src_nodes: 源节点列表，格式为 [(node_id, ip_name), ...]
+            dst_nodes: 目标节点列表，格式为 [(node_id, ip_name), ...]
             req_type: 请求类型 ('R' 或 'W')
             burst_length: 突发长度
             bandwidth: 带宽，单位 GB/s
@@ -184,7 +176,7 @@ class D2DTrafficGenerator:
             List[str]: D2D 流量条目列表
         """
         # 同 die 流量实际上就是跨 die 流量，但源和目标在同一个 die
-        return self.generate_cross_die_traffic(die_id, src_nodes, src_ip, die_id, dst_nodes, dst_ip, req_type, burst_length, bandwidth, end_time)
+        return self.generate_cross_die_traffic(die_id, src_nodes, die_id, dst_nodes, req_type, burst_length, bandwidth, end_time)
 
     def generate_mixed_traffic(
         self,
@@ -254,6 +246,58 @@ class D2DTrafficGenerator:
             return self.default_ip_mappings[ip_type]
         else:
             raise ValueError(f"未找到 IP 类型 '{ip_type}' 的映射")
+
+    @staticmethod
+    def get_rotated_node_mapping(rows: int = 5, cols: int = 4, rotation: int = 0) -> Dict[int, int]:
+        """
+        计算Die旋转后每个原始节点对应的新节点ID
+
+        Args:
+            rows: 原始布局的行数
+            cols: 原始布局的列数
+            rotation: 旋转角度，可选值：0, 90, 180, 270（顺时针）
+
+        Returns:
+            Dict[int, int]: {原始节点ID: 旋转后节点ID} 的映射字典
+
+        Example:
+            # Die1顺时针旋转90°后，Die0的节点0对应Die1的哪个节点
+            mapping = get_rotated_node_mapping(5, 4, 90)
+            die1_node = mapping[0]  # Die0节点0在Die1中的对应节点
+        """
+        mapping = {}
+        total_nodes = rows * cols
+
+        for node_id in range(total_nodes):
+            row = node_id // cols
+            col = node_id % cols
+
+            if rotation == 0:
+                # 无旋转
+                new_row, new_col = row, col
+                new_cols = cols
+            elif rotation == 90:
+                # 顺时针90°：5行4列 → 4行5列
+                new_row = col
+                new_col = rows - 1 - row
+                new_cols = rows
+            elif rotation == 180:
+                # 180°：5行4列 → 5行4列
+                new_row = rows - 1 - row
+                new_col = cols - 1 - col
+                new_cols = cols
+            elif rotation == 270:
+                # 顺时针270°：5行4列 → 4行5列
+                new_row = cols - 1 - col
+                new_col = row
+                new_cols = rows
+            else:
+                raise ValueError(f"不支持的旋转角度: {rotation}，只支持0/90/180/270")
+
+            new_node_id = new_row * new_cols + new_col
+            mapping[node_id] = new_node_id
+
+        return mapping
 
     def validate_node_range(self, nodes: List[int]) -> bool:
         """
@@ -359,32 +403,29 @@ class D2DTrafficGenerator:
             req_type = config.get("req_type", "R")
             burst_length = config.get("burst_length", 4)
             bandwidth = config.get("bandwidth", 64.0)
-            cross_die_ratio = config.get("cross_die_ratio", 0.7)
-
-            # 标准化配置
-            src_config = self.create_ip_config(src_ip_config)
-            dst_config = self.create_ip_config(dst_ip_config)
 
             # 生成流量数据
             config_entries = []
 
             if traffic_mode == "cross_die":
                 # 只生成跨 die 流量
-                for src_ip, src_nodes in src_config.items():
-                    for dst_ip, dst_nodes in dst_config.items():
-                        entries = self.generate_cross_die_traffic(src_die, src_nodes, src_ip, dst_die, dst_nodes, dst_ip, req_type, burst_length, bandwidth, end_time)
+                for src_ip, src_nodes in src_ip_config.items():
+                    for dst_ip, dst_nodes in dst_ip_config.items():
+                        # 转换为 [(node_id, ip_name), ...] 格式
+                        src_nodes_with_ip = [(node, src_ip) for node in src_nodes]
+                        dst_nodes_with_ip = [(node, dst_ip) for node in dst_nodes]
+                        entries = self.generate_cross_die_traffic(src_die, src_nodes_with_ip, dst_die, dst_nodes_with_ip, req_type, burst_length, bandwidth, end_time)
                         config_entries.extend(entries)
 
             elif traffic_mode == "same_die":
                 # 只生成同 die 流量
-                for src_ip, src_nodes in src_config.items():
-                    for dst_ip, dst_nodes in dst_config.items():
-                        entries = self.generate_same_die_traffic(src_die, src_nodes, src_ip, dst_nodes, dst_ip, req_type, burst_length, bandwidth, end_time)
+                for src_ip, src_nodes in src_ip_config.items():
+                    for dst_ip, dst_nodes in dst_ip_config.items():
+                        # 转换为 [(node_id, ip_name), ...] 格式
+                        src_nodes_with_ip = [(node, src_ip) for node in src_nodes]
+                        dst_nodes_with_ip = [(node, dst_ip) for node in dst_nodes]
+                        entries = self.generate_same_die_traffic(src_die, src_nodes_with_ip, dst_nodes_with_ip, req_type, burst_length, bandwidth, end_time)
                         config_entries.extend(entries)
-
-            elif traffic_mode == "mixed":
-                # 生成混合流量
-                config_entries = self.generate_mixed_traffic(cross_die_ratio, src_config, dst_config, req_type, burst_length, bandwidth, end_time, src_die, dst_die)
 
             else:
                 raise ValueError(f"不支持的流量模式: {traffic_mode}")
@@ -416,7 +457,14 @@ class D2DTrafficGenerator:
             )
 
 
-if __name__ == "__main__":
+def generate_simple_example():
+    """
+    生成简单的2Die流量示例
+
+    用于演示基本的D2D流量生成功能
+    - Die0 -> Die2: 128 GB/s
+    - Die2 -> Die0: 64 GB/s
+    """
     generator = D2DTrafficGenerator(die_topo="5x4")
 
     traffic_configs = [
@@ -425,6 +473,7 @@ if __name__ == "__main__":
             "dst_die": 2,
             "src_ip_config": {
                 "gdma_0": [6],
+                "gdma_1": [6],
             },
             "dst_ip_config": {
                 "ddr_0": [12],
@@ -449,9 +498,125 @@ if __name__ == "__main__":
     ]
 
     generator.generate_traffic_file(
-        filename="../../test_data/d2d_data_1016.txt",
+        filename="../../test_data/d2d_data_simple_example.txt",
         traffic_configs=traffic_configs,
         traffic_mode="cross_die",
         end_time=1000,
     )
+
+
+def generate_4die_stress_test():
+    """
+    生成4Die压力测试场景
+
+    包含4个测试场景：
+    1. 全互联均匀流量 - 所有Die之间互相通信
+    2. 环形单向流量 - Die0→Die1→Die2→Die3→Die0
+    3. 对角双向流量 - Die0↔Die2, Die1↔Die3
+    4. 热点集中流量 - 所有Die访问Die0
+
+    Die配置：
+    - 每个Die为5行4列（20个节点）
+    - Die0: 0°旋转（基准）
+    - Die1: 顺时针90°旋转
+    - Die2: 180°旋转
+    - Die3: 顺时针270°旋转
+    """
+    generator = D2DTrafficGenerator(die_topo="5x4")
+
+    # ========== 第1步：定义Die0的基础配置（5行4列=20节点） ==========
+    # Die0布局：
+    #  0   1   2   3
+    #  4   5   6   7
+    #  8   9  10  11
+    # 12  13  14  15
+    # 16  17  18  19
+
+    # Die0 GDMA配置：每个IP实例挂载的节点列表
+    die0_gdma_base = {
+        "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],  # 只有一个GDMA的节点
+        "gdma_1": [3, 15, 19],  # 有两个GDMA的节点上的第二个实例
+    }
+
+    # Die0 DDR配置：每个IP实例挂载的节点列表
+    die0_ddr_base = {
+        "ddr_0": [3, 7, 11, 15],  # 每个DDR节点的第一个实例
+        "ddr_1": [3, 7, 11, 15],  # 每个DDR节点的第二个实例
+    }
+
+    # ========== 第2步：计算Die1-3的旋转节点配置 ==========
+    rotations = {0: 0, 1: 90, 2: 180, 3: 270}
+    die_configs = {}
+
+    for die_id, rotation in rotations.items():
+        mapping = D2DTrafficGenerator.get_rotated_node_mapping(rows=5, cols=4, rotation=rotation)
+
+        # 应用旋转映射到每个IP实例的节点列表
+        gdma_config = {}
+        for ip_name, nodes in die0_gdma_base.items():
+            gdma_config[ip_name] = [mapping[node] for node in nodes]
+
+        ddr_config = {}
+        for ip_name, nodes in die0_ddr_base.items():
+            ddr_config[ip_name] = [mapping[node] for node in nodes]
+
+        die_configs[die_id] = {"gdma": gdma_config, "ddr": ddr_config}
+
+        # 打印排序后的配置
+        gdma_config_sorted = {ip: sorted(nodes) for ip, nodes in gdma_config.items()}
+        ddr_config_sorted = {ip: sorted(nodes) for ip, nodes in ddr_config.items()}
+
+        print(f"Die{die_id} (旋转{rotation}°):")
+        print(f"  GDMA配置: {gdma_config_sorted}")
+        print(f"  DDR配置: {ddr_config_sorted}")
+        print()
+
+    print("=" * 60)
+    print("生成场景：环形单向流量 (Die0→Die1→Die2→Die3→Die0)")
+    print("=" * 60)
+
+    traffic_configs_2 = []
+    ring_pairs = [
+        # (0, 1),
+        (2, 0),
+        # (1, 2),
+        # (2, 3),
+        # (3, 0),
+    ]
+    for src_die, dst_die in ring_pairs:
+        traffic_configs_2.append(
+            {
+                "src_die": src_die,
+                "dst_die": dst_die,
+                "src_ip_config": die_configs[src_die]["gdma"],
+                "dst_ip_config": die_configs[dst_die]["ddr"],
+                "req_type": "R",
+                "burst_length": 4,
+                "bandwidth": 128.0,  # 每个方向256GB/s
+            }
+        )
+
+    generator.generate_traffic_file(
+        filename="../../test_data/d2d_4die_1016.txt",
+        traffic_configs=traffic_configs_2,
+        traffic_mode="cross_die",
+        end_time=1000,
+    )
     print()
+
+    print()
+
+    print("=" * 60)
+    print("所有4个压力测试场景已生成完成！")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    # 生成简单的2Die示例
+    # generate_simple_example()
+
+    # 生成4Die压力测试场景
+    print("=" * 60)
+    print("开始生成4Die压力测试场景...")
+    print("=" * 60)
+    generate_4die_stress_test()
