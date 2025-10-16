@@ -126,4 +126,4 @@ arbitration:
       weight_strategy: "queue_length"
 
 # 功能开关
-USE_NEW_HANDLE: 1
+USE_NEW_HANDLE: 0

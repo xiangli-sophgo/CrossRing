@@ -125,7 +125,9 @@ class D2DTrafficGenerator:
 
         return time_sequence
 
-    def generate_cross_die_traffic(self, src_die: int, src_nodes: List[tuple], dst_die: int, dst_nodes: List[tuple], req_type: str, burst_length: int, bandwidth: float, end_time: int) -> List[str]:
+    def generate_cross_die_traffic(
+        self, src_die: int, src_nodes: List[tuple], dst_die: int, dst_nodes: List[tuple], req_type: str, burst_length: int, bandwidth: float, end_time: int
+    ) -> List[str]:
         """
         生成跨 die 流量
 
@@ -159,7 +161,9 @@ class D2DTrafficGenerator:
 
         return traffic_entries
 
-    def generate_same_die_traffic(self, die_id: int, src_nodes: List[tuple], dst_nodes: List[tuple], req_type: str, burst_length: int, bandwidth: float, end_time: int) -> List[str]:
+    def generate_same_die_traffic(
+        self, die_id: int, src_nodes: List[tuple], dst_nodes: List[tuple], req_type: str, burst_length: int, bandwidth: float, end_time: int
+    ) -> List[str]:
         """
         生成同 die 内流量
 
@@ -578,7 +582,7 @@ def generate_4die_stress_test():
     traffic_configs_2 = []
     ring_pairs = [
         # (0, 1),
-        (2, 0),
+        (1, 0),
         # (1, 2),
         # (2, 3),
         # (3, 0),

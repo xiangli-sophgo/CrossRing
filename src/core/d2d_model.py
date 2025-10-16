@@ -502,7 +502,7 @@ class D2D_Model:
     def _process_d2d_traffic(self, die_model: BaseModel):
         """处理D2D traffic注入"""
         # 获取当前周期的D2D请求（使用缓存避免重复获取）
-        if not hasattr(self, '_current_cycle_cache') or self._current_cycle_cache != self.current_cycle:
+        if not hasattr(self, "_current_cycle_cache") or self._current_cycle_cache != self.current_cycle:
             # 新周期，重新获取请求
             self._current_cycle_cache = self.current_cycle
             self._cached_pending_requests = self.d2d_traffic_scheduler.get_pending_requests(self.current_cycle)
@@ -517,7 +517,6 @@ class D2D_Model:
             if src_die != die_model.die_id:
                 continue  # 不是当前Die的请求，跳过
             die_requests.append(req_data)
-
 
         # 处理属于当前Die的请求
         for req_data in die_requests:
@@ -573,6 +572,7 @@ class D2D_Model:
 
         req.d2d_target_die = dst_die  # 目标Die ID
         # 目标节点源映射位置（统一保存源映射）
+        # bug: 应该是目标Die的node_map，而不是源Die的node_map
         req.d2d_target_node = die_model.node_map(dst_node, True)  # 目标节点的源映射
         req.d2d_target_type = dst_ip  # 目标IP类型
 
@@ -859,7 +859,6 @@ class D2D_Model:
             # print("[信息] 保存D2D请求到CSV并生成带宽报告")
             d2d_processor.save_d2d_requests_csv(d2d_result_path)
             d2d_processor.generate_d2d_bandwidth_report(d2d_result_path)
-
 
         except Exception as e:
             import traceback

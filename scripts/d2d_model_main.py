@@ -41,8 +41,8 @@ def main():
         result_save_path="../Result/d2d_demo/",
         results_fig_save_path="../Result/d2d_demo/figures/",
         verbose=1,
-        print_d2d_trace=0,  # 启用D2D trace功能
-        show_d2d_trace_id=[43],  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
+        print_d2d_trace=1,  # 启用D2D trace功能
+        show_d2d_trace_id=[3],  # 自动跟踪所有活跃packet，也可以指定特定ID如[1, 2]
         d2d_trace_sleep=0.1,  # 不暂停，加快调试as
         enable_flow_graph=1,  # 是否在仿真结束后自动生成流量图
         # D2D链路状态可视化参
@@ -54,7 +54,7 @@ def main():
     sim.initial()
 
     # 设置仿真参数
-    sim.end_time = 5000  # 增加仿真时间以确保数据传输完成
+    sim.end_time = 500  # 增加仿真时间以确保数据传输完成
     sim.print_interval = 1000
 
     sim.run()
