@@ -222,6 +222,30 @@ class D2D_Model:
             if hasattr(self.config, key):
                 setattr(die_config, key, getattr(self.config, key))
 
+        # 规范化 D2D tracker 配置：支持将 "auto" 解析为 databuffer_size // BURST
+        def _is_auto(value):
+            return isinstance(value, str) and value.lower() == "auto"
+
+        burst = getattr(die_config, "BURST", getattr(self.config, "BURST", 4))
+
+        # D2D_RN trackers
+        if hasattr(die_config, "D2D_RN_R_TRACKER_OSTD") and _is_auto(die_config.D2D_RN_R_TRACKER_OSTD):
+            rn_rdb = int(getattr(die_config, "D2D_RN_RDB_SIZE", getattr(self.config, "D2D_RN_RDB_SIZE", 0)))
+            die_config.D2D_RN_R_TRACKER_OSTD = rn_rdb // burst if burst else rn_rdb
+
+        if hasattr(die_config, "D2D_RN_W_TRACKER_OSTD") and _is_auto(die_config.D2D_RN_W_TRACKER_OSTD):
+            rn_wdb = int(getattr(die_config, "D2D_RN_WDB_SIZE", getattr(self.config, "D2D_RN_WDB_SIZE", 0)))
+            die_config.D2D_RN_W_TRACKER_OSTD = rn_wdb // burst if burst else rn_wdb
+
+        # D2D_SN trackers
+        if hasattr(die_config, "D2D_SN_R_TRACKER_OSTD") and _is_auto(die_config.D2D_SN_R_TRACKER_OSTD):
+            sn_rdb = int(getattr(die_config, "D2D_SN_RDB_SIZE", getattr(self.config, "D2D_SN_RDB_SIZE", 0)))
+            die_config.D2D_SN_R_TRACKER_OSTD = sn_rdb // burst if burst else sn_rdb
+
+        if hasattr(die_config, "D2D_SN_W_TRACKER_OSTD") and _is_auto(die_config.D2D_SN_W_TRACKER_OSTD):
+            sn_wdb = int(getattr(die_config, "D2D_SN_WDB_SIZE", getattr(self.config, "D2D_SN_WDB_SIZE", 0)))
+            die_config.D2D_SN_W_TRACKER_OSTD = sn_wdb // burst if burst else sn_wdb
+
         return die_config
 
     def _add_d2d_nodes_to_die(self, die_model: BaseModel, die_id: int):
@@ -572,8 +596,7 @@ class D2D_Model:
 
         req.d2d_target_die = dst_die  # 目标Die ID
         # 目标节点源映射位置（统一保存源映射）
-        # bug: 应该是目标Die的node_map，而不是源Die的node_map
-        req.d2d_target_node = die_model.node_map(dst_node, True)  # 目标节点的源映射
+        req.d2d_target_node = self.dies[dst_die].node_map(dst_node, True)  # 目标节点的源映射
         req.d2d_target_type = dst_ip  # 目标IP类型
 
         # 设置标准属性（与BaseModel一致）

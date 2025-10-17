@@ -37,17 +37,11 @@ class D2DRequestInfo:
 
 @dataclass
 class D2DBandwidthStats:
-    """D2D带宽统计数据结构"""
+    """D2D带宽统计数据结构（支持任意数量的Die间组合）"""
 
-    die0_to_die1_read_bw: float = 0.0
-    die0_to_die1_read_bw_weighted: float = 0.0
-    die0_to_die1_write_bw: float = 0.0
-    die0_to_die1_write_bw_weighted: float = 0.0
-
-    die1_to_die0_read_bw: float = 0.0
-    die1_to_die0_read_bw_weighted: float = 0.0
-    die1_to_die0_write_bw: float = 0.0
-    die1_to_die0_write_bw_weighted: float = 0.0
+    # 按 (src_die, dst_die) 记录读写带宽 (unweighted, weighted)
+    pair_read_bw: Dict[Tuple[int, int], Tuple[float, float]] = None
+    pair_write_bw: Dict[Tuple[int, int], Tuple[float, float]] = None
 
     total_read_requests: int = 0
     total_write_requests: int = 0
@@ -216,7 +210,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             self._save_requests_to_csv(write_requests, write_csv_path, csv_header)
             print(f"写请求CSV, {len(write_requests)} 条记录: {write_csv_path}")
 
-
     def _save_requests_to_csv(self, requests: List[D2DRequestInfo], file_path: str, header: List[str]):
         """保存请求列表到CSV文件"""
         try:
@@ -245,27 +238,27 @@ class D2DResultProcessor(BandwidthAnalyzer):
             raise
 
     def calculate_d2d_bandwidth(self) -> D2DBandwidthStats:
-        """计算D2D带宽统计"""
-        stats = D2DBandwidthStats()
+        """计算D2D带宽统计（支持多Die）"""
+        stats = D2DBandwidthStats(pair_read_bw={}, pair_write_bw={}, total_read_requests=0, total_write_requests=0, total_bytes_transferred=0)
 
-        # 按方向和类型分组请求
-        groups = {("0to1", "read"): [], ("0to1", "write"): [], ("1to0", "read"): [], ("1to0", "write"): []}
-
+        # 按 (src_die, dst_die) + 类型 分组
+        grouped: Dict[Tuple[int, int, str], List[D2DRequestInfo]] = {}
         for req in self.d2d_requests:
-            direction = "0to1" if req.source_die == 0 else "1to0"
-            key = (direction, req.req_type)
-            if key in groups:
-                groups[key].append(req)
+            if req.source_die is None or req.target_die is None:
+                continue
+            key = (int(req.source_die), int(req.target_die), req.req_type)
+            grouped.setdefault(key, []).append(req)
 
-        # 计算各组的带宽
-        stats.die0_to_die1_read_bw, stats.die0_to_die1_read_bw_weighted = self._calculate_bandwidth_for_group(groups[("0to1", "read")])
-        stats.die0_to_die1_write_bw, stats.die0_to_die1_write_bw_weighted = self._calculate_bandwidth_for_group(groups[("0to1", "write")])
-        stats.die1_to_die0_read_bw, stats.die1_to_die0_read_bw_weighted = self._calculate_bandwidth_for_group(groups[("1to0", "read")])
-        stats.die1_to_die0_write_bw, stats.die1_to_die0_write_bw_weighted = self._calculate_bandwidth_for_group(groups[("1to0", "write")])
+        # 计算所有组合的带宽
+        for (src_die, dst_die, req_type), reqs in grouped.items():
+            unweighted, weighted = self._calculate_bandwidth_for_group(reqs)
+            if req_type == "read":
+                stats.pair_read_bw[(src_die, dst_die)] = (unweighted, weighted)
+                stats.total_read_requests += len(reqs)
+            elif req_type == "write":
+                stats.pair_write_bw[(src_die, dst_die)] = (unweighted, weighted)
+                stats.total_write_requests += len(reqs)
 
-        # 统计总数
-        stats.total_read_requests = len(groups[("0to1", "read")]) + len(groups[("1to0", "read")])
-        stats.total_write_requests = len(groups[("0to1", "write")]) + len(groups[("1to0", "write")])
         stats.total_bytes_transferred = sum(req.data_bytes for req in self.d2d_requests)
 
         self.d2d_stats = stats
@@ -376,8 +369,12 @@ class D2DResultProcessor(BandwidthAnalyzer):
         return working_intervals
 
     def generate_d2d_bandwidth_report(self, output_path: str):
-        """生成D2D带宽报告，打印到屏幕并保存到txt文件"""
+        """生成D2D带宽报告（按任意Die组合逐项列出）"""
         stats = self.calculate_d2d_bandwidth()
+
+        # 汇总总带宽
+        total_unweighted = 0.0
+        total_weighted = 0.0
 
         # 生成报告内容
         report_lines = [
@@ -385,22 +382,35 @@ class D2DResultProcessor(BandwidthAnalyzer):
             "D2D带宽统计报告",
             "=" * 50,
             "",
-            "Die0 → Die1:",
-            f"  读带宽: {stats.die0_to_die1_read_bw:.2f} GB/s (加权: {stats.die0_to_die1_read_bw_weighted:.2f} GB/s)",
-            f"  写带宽: {stats.die0_to_die1_write_bw:.2f} GB/s (加权: {stats.die0_to_die1_write_bw_weighted:.2f} GB/s)",
-            "",
-            "Die1 → Die0:",
-            f"  读带宽: {stats.die1_to_die0_read_bw:.2f} GB/s (加权: {stats.die1_to_die0_read_bw_weighted:.2f} GB/s)",
-            f"  写带宽: {stats.die1_to_die0_write_bw:.2f} GB/s (加权: {stats.die1_to_die0_write_bw_weighted:.2f} GB/s)",
-            "",
-            "总计:",
-            f"  跨Die总带宽: {stats.die0_to_die1_read_bw + stats.die0_to_die1_write_bw + stats.die1_to_die0_read_bw + stats.die1_to_die0_write_bw:.2f} GB/s",
-            f"  跨Die加权总带宽: {stats.die0_to_die1_read_bw_weighted + stats.die0_to_die1_write_bw_weighted + stats.die1_to_die0_read_bw_weighted + stats.die1_to_die0_write_bw_weighted:.2f} GB/s",
-            f"  读请求数: {stats.total_read_requests}",
-            f"  写请求数: {stats.total_write_requests}",
-            f"  总传输字节数: {stats.total_bytes_transferred:,} bytes",
-            "=" * 50,
+            "按Die组合的读带宽 (GB/s):",
         ]
+
+        # 读带宽
+        for (src, dst), (uw, wt) in sorted(stats.pair_read_bw.items()):
+            report_lines.append(f"Die{src} → Die{dst} (Read):  {uw:.2f} (加权: {wt:.2f})")
+            total_unweighted += uw
+            total_weighted += wt
+
+        report_lines.extend(["", "按Die组合的写带宽 (GB/s):"])
+
+        # 写带宽
+        for (src, dst), (uw, wt) in sorted(stats.pair_write_bw.items()):
+            report_lines.append(f"Die{src} → Die{dst} (Write): {uw:.2f} (加权: {wt:.2f})")
+            total_unweighted += uw
+            total_weighted += wt
+
+        report_lines.extend(
+            [
+                "",
+                "总计:",
+                f"  跨Die总带宽: {total_unweighted:.2f} GB/s",
+                f"  跨Die加权总带宽: {total_weighted:.2f} GB/s",
+                f"  读请求数: {stats.total_read_requests}",
+                f"  写请求数: {stats.total_write_requests}",
+                f"  总传输字节数: {stats.total_bytes_transferred:,} bytes",
+                "=" * 50,
+            ]
+        )
 
         # 打印到屏幕
         for line in report_lines:
@@ -1315,14 +1325,10 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 connection_type = self._get_connection_type(from_die_pos, to_die_pos)
 
                 # 计算节点位置
-                from_node_pos, to_node_pos = self._calculate_d2d_node_positions(
-                    conn["from_die"], from_node, conn["to_die"], to_node, dies, config
-                )
+                from_node_pos, to_node_pos = self._calculate_d2d_node_positions(conn["from_die"], from_node, conn["to_die"], to_node, dies, config)
 
                 if from_node_pos not in from_die_positions or to_node_pos not in to_die_positions:
-                    print(
-                        f"[D2D连接] 警告：找不到节点位置 - From: Die{conn['from_die']}节点{from_node}(pos:{from_node_pos}), To: Die{conn['to_die']}节点{to_node}(pos:{to_node_pos})"
-                    )
+                    print(f"[D2D连接] 警告：找不到节点位置 - From: Die{conn['from_die']}节点{from_node}(pos:{from_node_pos}), To: Die{conn['to_die']}节点{to_node}(pos:{to_node_pos})")
                     continue
 
                 from_x, from_y = from_die_positions[from_node_pos]
@@ -1396,10 +1402,10 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 # 对角连接的偏移：根据连接方向适当偏移避免重叠
                 if abs(dx) > abs(dy):
                     # 主要是水平方向
-                    label_y += (-dx * 0.10 if dy > 0 else dx * 0.10) 
+                    label_y += -dx * 0.10 if dy > 0 else dx * 0.10
                 else:
                     # 主要是垂直方向
-                    label_x += (dy * 0.1 if dx > 0 else -dy * 0.1) 
+                    label_x += dy * 0.1 if dx > 0 else -dy * 0.1
             else:
                 # 垂直和水平连接：使用中点
                 mid_x = (start_x + end_x) / 2
@@ -1937,9 +1943,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             connection_type = self._get_connection_type(from_die_pos, to_die_pos)
 
             # 计算节点位置
-            from_node_pos, to_node_pos = self._calculate_d2d_node_positions(
-                die0_id, die0_node, die1_id, die1_node, dies, self.config
-            )
+            from_node_pos, to_node_pos = self._calculate_d2d_node_positions(die0_id, die0_node, die1_id, die1_node, dies, self.config)
 
             if from_node_pos not in from_die_positions or to_node_pos not in to_die_positions:
                 continue

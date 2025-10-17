@@ -125,9 +125,7 @@ class D2DTrafficGenerator:
 
         return time_sequence
 
-    def generate_cross_die_traffic(
-        self, src_die: int, src_nodes: List[tuple], dst_die: int, dst_nodes: List[tuple], req_type: str, burst_length: int, bandwidth: float, end_time: int
-    ) -> List[str]:
+    def generate_cross_die_traffic(self, src_die: int, src_nodes: List[tuple], dst_die: int, dst_nodes: List[tuple], req_type: str, burst_length: int, bandwidth: float, end_time: int) -> List[str]:
         """
         生成跨 die 流量
 
@@ -161,9 +159,7 @@ class D2DTrafficGenerator:
 
         return traffic_entries
 
-    def generate_same_die_traffic(
-        self, die_id: int, src_nodes: List[tuple], dst_nodes: List[tuple], req_type: str, burst_length: int, bandwidth: float, end_time: int
-    ) -> List[str]:
+    def generate_same_die_traffic(self, die_id: int, src_nodes: List[tuple], dst_nodes: List[tuple], req_type: str, burst_length: int, bandwidth: float, end_time: int) -> List[str]:
         """
         生成同 die 内流量
 
@@ -549,7 +545,8 @@ def generate_4die_stress_test():
     }
 
     # ========== 第2步：计算Die1-3的旋转节点配置 ==========
-    rotations = {0: 0, 1: 90, 2: 180, 3: 270}
+    # rotations = {0: 0, 1: 90, 2: 180, 3: 270}
+    rotations = {0: 0, 1: 180}
     die_configs = {}
 
     for die_id, rotation in rotations.items():
@@ -581,9 +578,18 @@ def generate_4die_stress_test():
 
     traffic_configs_2 = []
     ring_pairs = [
-        # (0, 1),
+        (0, 1),
+        # (0, 2),
+        # (0, 3),
         (1, 0),
         # (1, 2),
+        # (1, 3),
+        # (2, 0),
+        # (2, 1),
+        # (2, 3),
+        # (3, 0),
+        # (3, 1),
+        # (3, 2),
         # (2, 3),
         # (3, 0),
     ]
@@ -594,9 +600,9 @@ def generate_4die_stress_test():
                 "dst_die": dst_die,
                 "src_ip_config": die_configs[src_die]["gdma"],
                 "dst_ip_config": die_configs[dst_die]["ddr"],
-                "req_type": "R",
+                "req_type": "W",
                 "burst_length": 4,
-                "bandwidth": 128.0,  # 每个方向256GB/s
+                "bandwidth": 48.0,  # 每个方向256GB/s
             }
         )
 

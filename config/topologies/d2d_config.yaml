@@ -43,17 +43,17 @@ D2D_RN_BW_LIMIT: 128    # D2D RN 带宽限制 (GB/s)
 D2D_SN_BW_LIMIT: 128    # D2D SN 带宽限制 (GB/s)
 
 # D2D 资源管理配置
-# D2D_RN 跟踪器配置 (类似GDMA)
-D2D_RN_R_TRACKER_OSTD: 48   # D2D RN 读跟踪器 OSTD
-D2D_RN_W_TRACKER_OSTD: 48   # D2D RN 写跟踪器 OSTD
-D2D_RN_RDB_SIZE: 192        # D2D RN 读databuffer大小
-D2D_RN_WDB_SIZE: 192        # D2D RN 写databuffer大小
+# D2D_RN 配置 (类似GDMA)
+D2D_RN_RDB_SIZE: 512        # D2D RN 读databuffer大小
+D2D_RN_WDB_SIZE: 512        # D2D RN 写databuffer大小
+D2D_RN_R_TRACKER_OSTD: auto # = D2D_RN_RDB_SIZE / BURST
+D2D_RN_W_TRACKER_OSTD: auto # = D2D_RN_WDB_SIZE / BURST
 
-# D2D_SN 跟踪器配置 (类似DDR)
-D2D_SN_R_TRACKER_OSTD: 48   # D2D SN 读跟踪器 OSTD
-D2D_SN_W_TRACKER_OSTD: 48   # D2D SN 写跟踪器 OSTD
-D2D_SN_RDB_SIZE: 192        # D2D SN 读databuffer大小
-D2D_SN_WDB_SIZE: 192        # D2D SN 写databuffer大小
+# D2D_SN 配置 (类似DDR)
+D2D_SN_RDB_SIZE: 512        # D2D SN 读databuffer大小
+D2D_SN_WDB_SIZE: 512        # D2D SN 写databuffer大小
+D2D_SN_R_TRACKER_OSTD: auto # = D2D_SN_RDB_SIZE / BURST
+D2D_SN_W_TRACKER_OSTD: auto # = D2D_SN_WDB_SIZE / BURST
 
 # ========== D2D 仲裁器配置 ==========
 # D2D系统特定的仲裁器配置
@@ -66,25 +66,4 @@ arbitration:
     # type: "weighted"     # 加权轮询
     # weights: [2, 1]      # RN权重2，SN权重1
 
-# D2D仲裁器参数说明：
-#
-# round_robin: 标准轮询仲裁
-#   - 特点：绝对公平，无饥饿，可预测
-#   - 无需额外参数
-#   - 适合RN和SN接口公平竞争场景
-#
-# weighted: 加权轮询仲裁
-#   - 特点：支持差异化服务，保持相对公平
-#   - 参数：weights: [RN权重, SN权重]，如 [2, 1] 表示RN获得2倍于SN的服务机会
-#   - 适合需要给RN或SN不同优先级的场景
-#
-# priority: 固定优先级仲裁
-#   - 特点：确定性，可能导致低优先级饥饿
-#   - 参数：priorities: [0, 1] (RN优先级0，SN优先级1，数值越小优先级越高)
-#   - 适合有明确优先级要求的场景
-#
-# dynamic: 动态优先级仲裁
-#   - 特点：防饥饿，优先级根据等待时间动态调整
-#   - 参数：base_priorities: [0, 0]，aging_factor: 1.0
-#   - 适合需要防止接口饥饿的场景
 
