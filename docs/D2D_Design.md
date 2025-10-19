@@ -153,18 +153,18 @@ D2D系统包含两个独立的Die，每个Die内部包含完整的CrossRing网�
 
 #### 阶段4: Die1内部写请求处理
 ```
-时刻T5: Die1_D2D_RN → Die1_SN
-  - 转发写请求到目标SN节点
-  - Die1_SN检查资源并返回data_send响应
+时刻T5: Die1_D2D_RN → 目标SN(DDR/L2M)
+  - 将写请求转发给本地存储端SN（例如DDR或L2M）
+  - 目标SN检查自身资源后，按常规流程返回datasend给Die1_D2D_RN
 
-时刻T6: Die1_D2D_RN → Die1_SN  
-  - 收到data_send响应后，从缓存发送写数据到Die1_SN
-  - Die1_SN处理写操作（异步完成，不需要响应）
+时刻T6: Die1_D2D_RN → 目标SN  
+  - 接到datasend后，从缓存向目标SN发送全部写数据
+  - 目标SN负责将数据写入本地buffer，写完即可释放自己的tracker/WDB
 
-时刻T7: Die1_D2D_RN自行生成write_complete响应
-  - D2D_RN在发送完写数据后立即生成write_complete响应
-  - 释放D2D_RN自己的tracker
-  - 注意：不等待Die1_SN的响应
+时刻T7: Die1_D2D_RN生成write_complete响应
+  - 以“写数据已全部发送”为完成条件
+  - 构造AXI_B的write_complete，并准备回传
+  - 发送前保留上下文，发送后立即释放D2D_RN的写tracker/WDB
 ```
 
 #### 阶段5: 跨Die响应返回（B通道）
@@ -180,7 +180,8 @@ D2D系统包含两个独立的Die，每个Die内部包含完整的CrossRing网�
 ```
 时刻T9: Die0_D2D_SN → Die0_RN
   - 转发B通道写完成响应给原始RN
-  - Die0_RN收到B通道响应后才释放tracker
+  - Die0_D2D_SN在收到B响应后释放自己的写tracker/WDB
+  - Die0_RN收到B通道响应后才释放自身写tracker/WDB
   - 完成整个跨Die写事务
 ```
 
@@ -188,10 +189,10 @@ D2D系统包含两个独立的Die，每个Die内部包含完整的CrossRing网�
 
 | 组件 | Tracker消耗时机 | Tracker释放时机 |
 |------|----------------|----------------|
-| Die0_RN | 发送写请求时 | **收到B通道响应后**（跨Die特殊处理） |
-| Die0_D2D_SN | 接收写请求时 | 收到B通道响应后 |
-| Die1_D2D_RN | 接收W通道数据时 | 收到Die1_SN响应后 |
-| Die1_SN | 接收写请求时 | 发送写完成响应后（标准流程） |
+| Die0_RN（源业务RN） | 发送写请求时 | **收到B通道响应后** |
+| Die0_D2D_SN | 接收写请求时 | 收到B通道write_complete后 |
+| Die1_D2D_RN | 接收写请求时 | 全部写数据发送完成并生成B响应后 |
+| Die1_SN（目标DDR/L2M） | 接收写请求时 | 完成本地写入后（无回包） |
 
 **重要说明**: Die0_RN的tracker管理与普通Die内写操作不同，必须等到B通道响应才能释放，而不是在data_send响应后释放。
 
