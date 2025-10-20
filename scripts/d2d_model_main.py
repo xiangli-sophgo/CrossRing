@@ -46,7 +46,7 @@ def main():
         d2d_trace_sleep=0.1,  # 不暂停，加快调试as
         enable_flow_graph=1,  # 是否在仿真结束后自动生成流量图
         # D2D链路状态可视化参
-        plot_link_state=0,  # 启用D2D链路状态可视化 12
+        plot_link_state=0,  # 启用D2D链路状态可视化 
         plot_start_cycle=10,  # 从第100周期开始可视化
     )
 
@@ -54,7 +54,7 @@ def main():
     sim.initial()
 
     # 设置仿真参数
-    sim.end_time = 5000  # 增加仿真时间以确保数据传输完成
+    sim.end_time = 500  # 增加仿真时间以确保数据传输完成
     sim.print_interval = 1000
 
     # 运行仿真 - 支持Ctrl+C优雅中断

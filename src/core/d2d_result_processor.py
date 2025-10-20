@@ -113,7 +113,11 @@ class D2DResultProcessor(BandwidthAnalyzer):
     def _is_cross_die_request(self, flit: Flit) -> bool:
         """检查flit是否为跨Die请求"""
         return (
-            hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die") and flit.d2d_origin_die is not None and flit.d2d_target_die is not None and flit.d2d_origin_die != flit.d2d_target_die
+            hasattr(flit, "d2d_origin_die")
+            and hasattr(flit, "d2d_target_die")
+            and flit.d2d_origin_die is not None
+            and flit.d2d_target_die is not None
+            and flit.d2d_origin_die != flit.d2d_target_die
         )
 
     def _extract_d2d_info(self, first_flit: Flit, last_flit: Flit, packet_id: int) -> Optional[D2DRequestInfo]:
@@ -323,7 +327,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
                                     physical_row = matrix_row * 2  # 偶数行
                                     node_id = physical_row * num_col + matrix_col
 
-                                    all_rows.append([ip_instance, die_id, node_id, ip_type, f"{read_bw:.6f}", f"{write_bw:.6f}", f"{total_bw:.6f}"])  # IP实例名  # Die ID  # 节点ID  # IP类型
+                                    all_rows.append(
+                                        [ip_instance, die_id, node_id, ip_type, f"{read_bw:.6f}", f"{write_bw:.6f}", f"{total_bw:.6f}"]
+                                    )  # IP实例名  # Die ID  # 节点ID  # IP类型
 
                 # 排序：先按die_id，再按node_id，最后按ip_instance
                 all_rows.sort(key=lambda x: (int(x[1]), int(x[2]), x[0]))
@@ -463,7 +469,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 total_bytes = sum(req.data_bytes for req in interval_requests)
                 flit_count = sum(req.burst_length for req in interval_requests)
 
-                interval = WorkingInterval(start_time=start, end_time=end, duration=end - start, flit_count=flit_count, total_bytes=total_bytes, request_count=len(interval_requests))
+                interval = WorkingInterval(
+                    start_time=start, end_time=end, duration=end - start, flit_count=flit_count, total_bytes=total_bytes, request_count=len(interval_requests)
+                )
                 working_intervals.append(interval)
 
         return working_intervals
@@ -762,7 +770,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
             die_model = dies.get(die_id) if dies else None
 
             # 绘制单个Die的流量图并获取节点位置
-            node_positions = self._draw_single_die_flow(ax, network, die_model.config if die_model else config, die_id, offset_x, offset_y, mode, node_size, show_cdma, die_model, d2d_config=config)
+            node_positions = self._draw_single_die_flow(
+                ax, network, die_model.config if die_model else config, die_id, offset_x, offset_y, mode, node_size, show_cdma, die_model, d2d_config=config
+            )
             die_node_positions[die_id] = node_positions
 
             # 收集该Die使用的IP类型（只收集有实际带宽的IP）
@@ -817,6 +827,115 @@ class D2DResultProcessor(BandwidthAnalyzer):
             plt.close()
         else:
             plt.tight_layout(pad=0.3)  # 减少边距以节省空间
+            plt.show()
+
+    def draw_ip_bandwidth_heatmap(self, dies=None, config=None, mode="total", node_size=4000, save_path=None):
+        """
+        绘制IP带宽热力图，不显示链路带宽，只显示物理节点（偶数行）和IP带宽
+
+        Args:
+            dies: 字典 {die_id: die_model}，包含所有Die的模型对象
+            config: D2D配置对象
+            mode: 显示模式，支持 'read', 'write', 'total'
+            node_size: 节点大小（热力图中节点会更大）
+            save_path: 图片保存路径
+        """
+        if dies is None or len(dies) == 0:
+            print("警告: 没有提供Die数据")
+            return
+
+        if not hasattr(self, "die_ip_bandwidth_data") or not self.die_ip_bandwidth_data:
+            print("警告: 没有die_ip_bandwidth_data数据，跳过IP带宽热力图绘制")
+            return
+
+        # 获取推断的 Die 布局
+        die_layout = getattr(config, "die_layout_positions", {})
+        die_layout_type = getattr(config, "die_layout_type", "2x1")
+
+        # 根据布局设置画布大小和Die偏移
+        die_width = 16
+        die_height = 10
+
+        # 使用推断的布局
+        die_offsets, figsize = self._calculate_die_offsets_from_layout(
+            die_layout, die_layout_type, die_width, die_height, dies=dies, config=config
+        )
+
+        # 创建画布
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.set_aspect("equal")
+
+        # 收集所有IP类型和最大带宽值（用于归一化透明度）
+        all_bandwidths = []
+        used_ip_types = set()
+
+        for die_id in dies.keys():
+            if die_id in self.die_ip_bandwidth_data:
+                die_data = self.die_ip_bandwidth_data[die_id]
+                if mode in die_data:
+                    for ip_type, data_matrix in die_data[mode].items():
+                        # 收集所有非零带宽值
+                        nonzero_bw = data_matrix[data_matrix > 0.001]
+                        if len(nonzero_bw) > 0:
+                            all_bandwidths.extend(nonzero_bw.tolist())
+                            used_ip_types.add(ip_type.upper().split("_")[0])
+
+        # 计算全局带宽范围（用于透明度归一化）
+        max_bandwidth = max(all_bandwidths) if all_bandwidths else 1.0
+        min_bandwidth = min(all_bandwidths) if all_bandwidths else 0.0
+
+        # 为每个Die绘制IP热力图
+        for die_id, die_model in dies.items():
+            if die_id not in self.die_ip_bandwidth_data:
+                continue
+
+            offset_x, offset_y = die_offsets[die_id]
+            die_config = die_model.config
+
+            # 获取该Die的物理节点（只处理偶数行）
+            physical_nodes = []
+            for node in range(die_config.NUM_ROW * die_config.NUM_COL):
+                row = node // die_config.NUM_COL
+                if row % 2 == 0:  # 只保留偶数行
+                    physical_nodes.append(node)
+
+            # 为每个物理节点绘制IP热力图
+            for node in physical_nodes:
+                col = node % die_config.NUM_COL
+                row = node // die_config.NUM_COL
+
+                # 计算节点中心位置
+                x = col * 3 + offset_x
+                y = -row * 1.5 + offset_y
+
+                # 绘制该节点的IP热力图
+                self._draw_ip_heatmap_in_node(
+                    ax, x, y, node, die_id, die_config, mode,
+                    node_size, max_bandwidth, min_bandwidth
+                )
+
+        # 设置图表标题
+        title = f"IP Bandwidth Heatmap - {mode.capitalize()} Mode"
+        ax.set_title(title, fontsize=14, fontweight="bold", y=0.96)
+
+        # 添加IP类型颜色图例
+        self._add_ip_legend(ax, fig, used_ip_types)
+
+        # 添加透明度-带宽对应关系说明
+        self._add_bandwidth_alpha_legend(ax, fig, min_bandwidth, max_bandwidth)
+
+        # 自动调整坐标轴范围
+        ax.axis("equal")
+        ax.margins(0.05)
+        ax.axis("off")
+
+        # 保存或显示图片
+        if save_path:
+            plt.tight_layout(pad=0.3)
+            plt.savefig(save_path, dpi=150, bbox_inches="tight", pad_inches=0.1)
+            plt.close()
+        else:
+            plt.tight_layout(pad=0.3)
             plt.show()
 
     def _draw_single_die_flow(self, ax, network, config, die_id, offset_x, offset_y, mode="utilization", node_size=2000, show_cdma=True, die_model=None, d2d_config=None):
@@ -1371,6 +1490,165 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         return die_specific_ips
 
+    def _draw_ip_heatmap_in_node(self, ax, x, y, node, die_id, config, mode, node_size, max_bandwidth, min_bandwidth):
+        """
+        在指定位置绘制节点的IP带宽热力图
+
+        Args:
+            ax: matplotlib坐标轴
+            x, y: 节点中心位置
+            node: 节点ID
+            die_id: Die ID
+            config: Die配置
+            mode: 显示模式
+            node_size: 节点大小
+            max_bandwidth: 全局最大带宽（用于归一化）
+            min_bandwidth: 全局最小带宽（用于归一化）
+        """
+        from matplotlib.patches import Rectangle
+        from matplotlib import colors as mcolors
+
+        # IP类型颜色映射
+        ip_color_map = {
+            "GDMA": "#4472C4",  # 蓝色
+            "SDMA": "#ED7D31",  # 橙色
+            "CDMA": "#70AD47",  # 绿色
+            "DDR": "#C00000",   # 红色
+            "L2M": "#7030A0",   # 紫色
+            "D2D_RN": "#00B0F0",  # 青色
+            "D2D_SN": "#FFC000",  # 黄色
+        }
+
+        # 获取该节点的物理位置
+        physical_col = node % config.NUM_COL
+        physical_row = node // config.NUM_COL
+
+        # 收集该节点的所有IP及其带宽
+        active_ips = []
+        if die_id in self.die_ip_bandwidth_data:
+            die_data = self.die_ip_bandwidth_data[die_id]
+            if mode in die_data:
+                for ip_type, data_matrix in die_data[mode].items():
+                    if physical_row < data_matrix.shape[0] and physical_col < data_matrix.shape[1]:
+                        bandwidth = data_matrix[physical_row, physical_col]
+                        if bandwidth > 0.001:  # 阈值过滤
+                            active_ips.append((ip_type, bandwidth))
+
+        # 如果没有活跃的IP，绘制空节点
+        if not active_ips:
+            return
+
+        # 计算节点框大小
+        square_size = (node_size / 1000.0) * 0.3  # 根据node_size调整
+        node_box_size = square_size * 3.5  # 节点框大小
+
+        # 绘制节点外框
+        node_rect = Rectangle(
+            (x - node_box_size / 2, y - node_box_size / 2),
+            width=node_box_size,
+            height=node_box_size,
+            facecolor="white",
+            edgecolor="black",
+            linewidth=2,
+            zorder=1
+        )
+        ax.add_patch(node_rect)
+
+        # 按IP类型分组（去除实例编号）
+        from collections import defaultdict
+        ip_type_dict = defaultdict(list)
+        for ip_type, bw in active_ips:
+            base_type = ip_type.upper().split("_")[0]
+            ip_type_dict[base_type].append(bw)
+
+        # 按带宽总和排序
+        sorted_ip_types = sorted(ip_type_dict.items(), key=lambda x: sum(x[1]), reverse=True)
+
+        # 计算网格布局
+        num_ip_types = len(sorted_ip_types)
+        max_instances = max(len(instances) for instances in ip_type_dict.values())
+
+        # 计算IP方块大小和间距
+        available_size = node_box_size * 0.9
+        grid_spacing = square_size * 0.15
+
+        ip_block_width = (available_size - (max_instances - 1) * grid_spacing) / max_instances
+        ip_block_height = (available_size - (num_ip_types - 1) * grid_spacing) / num_ip_types
+        ip_block_size = min(ip_block_width, ip_block_height, square_size * 0.8)
+
+        # 计算总内容高度（用于垂直居中）
+        total_height = num_ip_types * ip_block_size + (num_ip_types - 1) * grid_spacing
+
+        # 绘制IP方块
+        row_idx = 0
+        for ip_type, bandwidths in sorted_ip_types:
+            num_instances = len(bandwidths)
+            ip_color = ip_color_map.get(ip_type, "#808080")
+
+            # 计算当前行的总宽度（用于水平居中）
+            row_width = num_instances * ip_block_size + (num_instances - 1) * grid_spacing
+
+            # 绘制该类型的所有实例
+            for col_idx, bandwidth in enumerate(bandwidths):
+                # 计算透明度：带宽越大，alpha越小（颜色越深）
+                alpha = self._calculate_bandwidth_alpha(bandwidth, min_bandwidth, max_bandwidth)
+
+                # 计算IP方块位置（水平和垂直居中）
+                ip_x = x - row_width / 2 + col_idx * (ip_block_size + grid_spacing)
+                ip_y = y + total_height / 2 - row_idx * (ip_block_size + grid_spacing)
+
+                # 绘制IP方块
+                ip_rect = Rectangle(
+                    (ip_x, ip_y - ip_block_size),
+                    width=ip_block_size,
+                    height=ip_block_size,
+                    facecolor=ip_color,
+                    edgecolor="black",
+                    linewidth=1,
+                    alpha=alpha,
+                    zorder=3
+                )
+                ax.add_patch(ip_rect)
+
+                # 在方块上显示带宽数值
+                bandwidth_text = f"{bandwidth:.1f}" if bandwidth >= 0.1 else f"{bandwidth:.2f}"
+                ax.text(
+                    ip_x + ip_block_size / 2,
+                    ip_y - ip_block_size / 2,
+                    bandwidth_text,
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    fontweight="bold",
+                    color="white" if alpha < 0.5 else "black",  # 深色背景用白字
+                    zorder=4
+                )
+
+            row_idx += 1
+
+    def _calculate_bandwidth_alpha(self, bandwidth, min_bandwidth, max_bandwidth):
+        """
+        根据带宽值计算透明度
+        带宽越大，alpha越小（颜色越深）
+
+        Args:
+            bandwidth: 当前带宽值
+            min_bandwidth: 最小带宽
+            max_bandwidth: 最大带宽
+
+        Returns:
+            alpha值 (0.2-1.0)
+        """
+        if max_bandwidth <= min_bandwidth:
+            return 0.6  # 默认中等透明度
+
+        # 归一化到 0-1
+        normalized = (bandwidth - min_bandwidth) / (max_bandwidth - min_bandwidth)
+
+        # 映射到 alpha 范围 (0.2-1.0)，带宽越大alpha越小
+        alpha = 1.0 - normalized * 0.8
+        return max(0.2, min(1.0, alpha))
+
     def _add_ip_legend(self, ax, fig, used_ip_types=None):
         """在图表右上角添加IP类型颜色图例（竖着显示，仅显示实际使用的IP）"""
         # IP类型颜色映射（与_draw_d2d_ip_info_box中一致）
@@ -1444,6 +1722,78 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 return short_name
 
         return ip_name_upper[:2]  # 其他情况取前两个字母
+
+    def _add_bandwidth_alpha_legend(self, ax, fig, min_bandwidth, max_bandwidth):
+        """
+        添加透明度-带宽对应关系的图例
+
+        Args:
+            ax: matplotlib坐标轴
+            fig: matplotlib图形对象
+            min_bandwidth: 最小带宽值
+            max_bandwidth: 最大带宽值
+        """
+        from matplotlib.patches import Rectangle
+        from matplotlib.lines import Line2D
+
+        # 如果带宽范围为0，不显示图例
+        if max_bandwidth <= min_bandwidth:
+            return
+
+        # 创建带宽范围说明文本
+        bandwidth_range_text = f"Bandwidth Range:\n{min_bandwidth:.2f} - {max_bandwidth:.2f} GB/s"
+
+        # 创建渐变色条来显示透明度变化
+        # 在图表左上角添加说明
+        legend_x = 0.02  # 左侧
+        legend_y = 0.98  # 顶部
+
+        # 添加文本说明
+        ax.text(
+            legend_x, legend_y,
+            bandwidth_range_text,
+            transform=ax.transAxes,
+            fontsize=9,
+            verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor='white', edgecolor='black', alpha=0.8)
+        )
+
+        # 在文本下方添加透明度示例
+        legend_y -= 0.12
+        bar_width = 0.08
+        bar_height = 0.02
+        num_steps = 5  # 显示5个渐变级别
+
+        for i in range(num_steps):
+            # 计算当前步骤的带宽和alpha
+            ratio = i / (num_steps - 1)
+            bandwidth_value = min_bandwidth + ratio * (max_bandwidth - min_bandwidth)
+            alpha = self._calculate_bandwidth_alpha(bandwidth_value, min_bandwidth, max_bandwidth)
+
+            # 绘制渐变方块
+            y_pos = legend_y - i * (bar_height + 0.01)
+            rect = Rectangle(
+                (legend_x, y_pos),
+                width=bar_width,
+                height=bar_height,
+                facecolor='gray',
+                edgecolor='black',
+                linewidth=0.5,
+                alpha=alpha,
+                transform=ax.transAxes,
+                zorder=10
+            )
+            ax.add_patch(rect)
+
+            # 添加对应的带宽标签
+            ax.text(
+                legend_x + bar_width + 0.01,
+                y_pos + bar_height / 2,
+                f"{bandwidth_value:.1f} GB/s",
+                transform=ax.transAxes,
+                fontsize=7,
+                verticalalignment='center'
+            )
 
     def _calculate_d2d_sys_bandwidth(self, dies):
         """
@@ -1599,17 +1949,51 @@ class D2DResultProcessor(BandwidthAnalyzer):
         dx_die = to_die_pos[0] - from_die_pos[0]
         dy_die = to_die_pos[1] - from_die_pos[1]
 
-        # 确定源节点应该投影到哪个边
-        if dx_die > 0:  # 目标在右侧
-            from_edge_x, from_edge_y = self._project_point_to_die_edge(from_x, from_y, from_die_boundary, "right")
-        else:  # 目标在左侧
-            from_edge_x, from_edge_y = self._project_point_to_die_edge(from_x, from_y, from_die_boundary, "left")
+        # 推断Die ID（基于标准2x2布局）
+        # Die布局: Die2(0,1) - Die3(1,1)
+        #          Die1(0,0) - Die0(1,0)
+        die_pos_to_id = {
+            (1, 0): 0,  # Die 0: 右下
+            (0, 0): 1,  # Die 1: 左下
+            (0, 1): 2,  # Die 2: 左上
+            (1, 1): 3,  # Die 3: 右上
+        }
 
-        # 确定目标节点应该投影到哪个边
-        if dx_die > 0:  # 源在左侧
-            to_edge_x, to_edge_y = self._project_point_to_die_edge(to_x, to_y, to_die_boundary, "left")
-        else:  # 源在右侧
-            to_edge_x, to_edge_y = self._project_point_to_die_edge(to_x, to_y, to_die_boundary, "right")
+        from_die_id = die_pos_to_id.get(tuple(from_die_pos))
+        to_die_id = die_pos_to_id.get(tuple(to_die_pos))
+
+        # 确定投影方向：根据较小Die ID的奇偶性
+        # Die 0 ↔ Die 2 (偶数ID): 使用水平投影（左右边）
+        # Die 1 ↔ Die 3 (奇数ID): 使用垂直投影（上下边）
+        if from_die_id is not None and to_die_id is not None:
+            min_die_id = min(from_die_id, to_die_id)
+            use_horizontal = min_die_id % 2 == 0
+        else:
+            # 如果无法推断Die ID，默认使用水平投影
+            use_horizontal = True
+
+        if use_horizontal:
+            # 水平投影（左右边）
+            if dx_die > 0:  # 目标在右侧
+                from_edge_x, from_edge_y = self._project_point_to_die_edge(from_x, from_y, from_die_boundary, "right")
+            else:  # 目标在左侧
+                from_edge_x, from_edge_y = self._project_point_to_die_edge(from_x, from_y, from_die_boundary, "left")
+
+            if dx_die > 0:  # 源在左侧
+                to_edge_x, to_edge_y = self._project_point_to_die_edge(to_x, to_y, to_die_boundary, "left")
+            else:  # 源在右侧
+                to_edge_x, to_edge_y = self._project_point_to_die_edge(to_x, to_y, to_die_boundary, "right")
+        else:
+            # 垂直投影（上下边）
+            if dy_die > 0:  # 目标在上侧
+                from_edge_x, from_edge_y = self._project_point_to_die_edge(from_x, from_y, from_die_boundary, "top")
+            else:  # 目标在下侧
+                from_edge_x, from_edge_y = self._project_point_to_die_edge(from_x, from_y, from_die_boundary, "bottom")
+
+            if dy_die > 0:  # 源在下侧
+                to_edge_x, to_edge_y = self._project_point_to_die_edge(to_x, to_y, to_die_boundary, "bottom")
+            else:  # 源在上侧
+                to_edge_x, to_edge_y = self._project_point_to_die_edge(to_x, to_y, to_die_boundary, "top")
 
         return from_edge_x, from_edge_y, to_edge_x, to_edge_y
 
@@ -1706,27 +2090,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 from_node_pos, to_node_pos = self._calculate_d2d_node_positions(conn["from_die"], from_node, conn["to_die"], to_node, dies, config)
 
                 if from_node_pos not in from_die_positions or to_node_pos not in to_die_positions:
-                    print(f"[D2D连接] 警告：找不到节点位置 - From: Die{conn['from_die']}节点{from_node}(pos:{from_node_pos}), To: Die{conn['to_die']}节点{to_node}(pos:{to_node_pos})")
+                    print(
+                        f"[D2D连接] 警告：找不到节点位置 - From: Die{conn['from_die']}节点{from_node}(pos:{from_node_pos}), To: Die{conn['to_die']}节点{to_node}(pos:{to_node_pos})"
+                    )
                     continue
 
                 from_x, from_y = from_die_positions[from_node_pos]
                 to_x, to_y = to_die_positions[to_node_pos]
-
-                # 对角连接需要将起止点投影到Die边缘
-                if connection_type == "diagonal" and die_offsets and dies:
-                    # 获取Die配置和偏移
-                    from_die = dies.get(conn["from_die"])
-                    to_die = dies.get(conn["to_die"])
-                    if from_die and to_die:
-                        from_offset_x, from_offset_y = die_offsets.get(conn["from_die"], (0, 0))
-                        to_offset_x, to_offset_y = die_offsets.get(conn["to_die"], (0, 0))
-
-                        # 计算Die边界
-                        from_boundary = self._calculate_die_boundary(from_offset_x, from_offset_y, from_die.config.NUM_COL, from_die.config.NUM_ROW)
-                        to_boundary = self._calculate_die_boundary(to_offset_x, to_offset_y, to_die.config.NUM_COL, to_die.config.NUM_ROW)
-
-                        # 投影到边缘
-                        from_x, from_y, to_x, to_y = self._project_diagonal_to_edge(from_x, from_y, to_x, to_y, from_die_pos, to_die_pos, from_boundary, to_boundary)
 
                 # 计算箭头向量
                 arrow_vectors = self._calculate_arrow_vectors(from_x, from_y, to_x, to_y)
@@ -1735,7 +2105,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                     self._draw_single_d2d_arrow(ax, from_x, from_y, to_x, to_y, ux, uy, perpx, perpy, conn["bandwidth"], conn["type"], i, connection_type)
 
             # 为没有流量的D2D节点对绘制灰色连接线（显示潜在连接）
-            self._draw_inactive_d2d_connections(ax, d2d_pairs, active_connections, die_node_positions, dies, die_offsets)
+            self._draw_inactive_d2d_connections(ax, d2d_pairs, active_connections, die_node_positions, dies)
 
         except Exception as e:
             import traceback
@@ -1760,13 +2130,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 计算箭头起止坐标（留出节点空间）
         # 对角连接需要调整偏移策略
         if connection_type == "diagonal":
-            # 对角连接：使用较小的垂直偏移，避免箭头离节点太远
-            node_offset = 1.2
-            perp_offset = 1.2  # 减小垂直偏移量
-            start_x = start_node_x + ux * node_offset + perpx * perp_offset
-            start_y = start_node_y + uy * node_offset + perpy * perp_offset
-            end_x = end_node_x - ux * node_offset + perpx * perp_offset
-            end_y = end_node_y - uy * node_offset + perpy * perp_offset
+            # 对角连接：坐标已经投影到边缘，只需要很小的偏移
+            node_offset = 1.4  # 从边缘稍微延伸出来
+            perp_offset = 1.4  # 垂直方向的小偏移
+            start_x = start_node_x + ux * node_offset + perpx * perp_offset + 0.4
+            start_y = start_node_y + uy * node_offset + perpy * perp_offset + 0.6
+            end_x = end_node_x - ux * node_offset + perpx * perp_offset + 0.4
+            end_y = end_node_y - uy * node_offset + perpy * perp_offset + 0.6
         else:
             # 水平/垂直连接：保持原有逻辑
             start_x = start_node_x + ux * 0.8 + perpx
