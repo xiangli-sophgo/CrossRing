@@ -14,8 +14,8 @@ def main():
     # 使用D2DConfig替代CrossRingConfig，获得D2D特定配置功能
     # 现在每个Die的拓扑由D2D配置文件中的topology参数指定，无需die_config_file
     config = D2DConfig(
-        # d2d_config_file="../config/topologies/d2d_4die_config.yaml",
-        d2d_config_file="../config/topologies/d2d_config.yaml",
+        d2d_config_file="../config/topologies/d2d_4die_config.yaml",
+        # d2d_config_file="../config/topologies/d2d_config.yaml",
     )
 
     # 定义拓扑结构
@@ -57,9 +57,11 @@ def main():
     sim.end_time = 5000  # 增加仿真时间以确保数据传输完成
     sim.print_interval = 1000
 
+    # 运行仿真 - 支持Ctrl+C优雅中断
+    print("\n提示: 按 Ctrl+C 可以随时中断仿真并查看当前结果\n")
     sim.run()
 
-    # 调用D2D结果处理
+    # 调用D2D结果处理 - 即使中断也会执行
     try:
         sim.process_d2d_comprehensive_results()
     except Exception as e:

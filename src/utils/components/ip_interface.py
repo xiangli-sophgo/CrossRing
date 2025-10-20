@@ -255,7 +255,14 @@ class IPInterface:
         flit.flit_position = "IP_inject"
 
         # 检查是否为新请求并记录统计
-        is_new_request = network_type == "req" and not self.networks[network_type]["send_flits"][flit.packet_id] and not retry
+        # 新请求必须满足：1) 请求网络 2) 本IP首次见到此packet_id 3) 非重试 4) 当前IP是原始发起IP
+        is_new_request = (
+            network_type == "req"
+            and not self.networks[network_type]["send_flits"][flit.packet_id]
+            and not retry
+            and hasattr(flit, "source_type")
+            and flit.source_type == self.ip_type
+        )
 
         if is_new_request and hasattr(flit, "req_type"):
             # 记录请求开始时间（tracker消耗开始）
@@ -264,13 +271,11 @@ class IPInterface:
             # 判断是否为跨Die请求
             is_cross_die = hasattr(flit, "d2d_target_die") and hasattr(flit, "d2d_origin_die") and flit.d2d_target_die != flit.d2d_origin_die
 
-            # 只在真正的源IP记录请求统计，避免跨Die转发时重复记录
-            should_record = self._should_record_request_issued(flit, is_cross_die)
-            if should_record:
-                d2d_model = getattr(self.req_network, "d2d_model", None)
-                if d2d_model:
-                    die_id = getattr(self.config, "DIE_ID", 0)
-                    d2d_model.record_request_issued(flit.packet_id, die_id, flit.req_type, is_cross_die)
+            # 记录请求统计
+            d2d_model = getattr(self.req_network, "d2d_model", None)
+            if d2d_model:
+                die_id = getattr(self.config, "DIE_ID", 0)
+                d2d_model.record_request_issued(flit.packet_id, die_id, flit.req_type, is_cross_die)
 
         if network_type == "req" and self.networks[network_type]["send_flits"][flit.packet_id]:
             return True

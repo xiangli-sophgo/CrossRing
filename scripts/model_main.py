@@ -54,9 +54,9 @@ def main():
     # model_type = "Packet_Base"
 
     results_fig_save_path = None
+    # results_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/"
 
     result_save_path = f"../Result/CrossRing/{model_type}/"
-    # results_fig_save_path = f"../Result/Plt_IP_BW/{model_type}/"
 
     # 拓扑类型到配置文件的映射
     topo_config_map = {
@@ -109,6 +109,9 @@ def main():
     sim.initial()
     sim.end_time = 10000
     sim.print_interval = 2000
+
+    # 运行仿真 - 支持Ctrl+C优雅中断
+    print("\n提示: 按 Ctrl+C 可以随时中断仿真并查看当前结果\n")
     sim.run()
 
 

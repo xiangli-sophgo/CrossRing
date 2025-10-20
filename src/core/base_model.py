@@ -502,23 +502,34 @@ class BaseModel:
         self.cycle = 0
         tail_time = 6
 
-        while True:
-            self.cycle += 1
-            self.cycle_mod = self.cycle % self.config.NETWORK_FREQUENCY
+        try:
+            while True:
+                self.cycle += 1
+                self.cycle_mod = self.cycle % self.config.NETWORK_FREQUENCY
 
-            # Execute one step
-            self.step()
+                # Execute one step
+                self.step()
 
-            if self.cycle / self.config.NETWORK_FREQUENCY % self.print_interval == 0:
-                self.log_summary()
+                if self.cycle / self.config.NETWORK_FREQUENCY % self.print_interval == 0:
+                    self.log_summary()
 
-            if self.is_completed() or self.cycle > self.end_time * self.config.NETWORK_FREQUENCY:
-                if tail_time == 0:
-                    if self.verbose:
-                        print("Finish!")
-                    break
-                else:
-                    tail_time -= 1
+                if self.is_completed() or self.cycle > self.end_time * self.config.NETWORK_FREQUENCY:
+                    if tail_time == 0:
+                        if self.verbose:
+                            print("Finish!")
+                        break
+                    else:
+                        tail_time -= 1
+
+        except KeyboardInterrupt:
+            print("\n仿真中断 (Ctrl+C)，正在优雅退出...")
+            # 不重新抛出异常，继续执行结果分析
+        except Exception as e:
+            print(f"\n仿真过程中出现错误: {e}")
+            raise
+        finally:
+            # 确保仿真结束状态被正确设置
+            pass
 
         # Performance evaluation
         self.print_data_statistic()

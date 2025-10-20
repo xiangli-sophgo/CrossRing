@@ -505,6 +505,71 @@ def generate_simple_example():
     )
 
 
+def _compute_die_configs(die0_gdma_base: Dict, die0_ddr_base: Dict, rotations: Dict[int, int]) -> Dict[int, Dict]:
+    """
+    计算所有Die的旋转节点配置
+
+    Args:
+        die0_gdma_base: Die0的GDMA基础配置
+        die0_ddr_base: Die0的DDR基础配置
+        rotations: Die旋转角度映射 {die_id: rotation_angle}
+
+    Returns:
+        Dict[int, Dict]: {die_id: {"gdma": {...}, "ddr": {...}}}
+    """
+    die_configs = {}
+
+    for die_id, rotation in rotations.items():
+        mapping = D2DTrafficGenerator.get_rotated_node_mapping(rows=5, cols=4, rotation=rotation)
+
+        gdma_config = {ip_name: [mapping[node] for node in nodes] for ip_name, nodes in die0_gdma_base.items()}
+        ddr_config = {ip_name: [mapping[node] for node in nodes] for ip_name, nodes in die0_ddr_base.items()}
+
+        die_configs[die_id] = {"gdma": gdma_config, "ddr": ddr_config}
+
+        # 打印配置
+        gdma_sorted = {ip: sorted(nodes) for ip, nodes in gdma_config.items()}
+        ddr_sorted = {ip: sorted(nodes) for ip, nodes in ddr_config.items()}
+        print(f"Die{die_id} (旋转{rotation}°):")
+        print(f"  GDMA配置: {gdma_sorted}")
+        print(f"  DDR配置: {ddr_sorted}")
+        print()
+
+    return die_configs
+
+
+def _generate_traffic_configs(die_configs: Dict, die_pairs: List[Tuple[int, int]], req_type: str = "W", burst_length: int = 4, bandwidth: float = 48.0) -> List[Dict]:
+    """
+    根据Die配置和通信对生成流量配置
+
+    Args:
+        die_configs: Die配置字典
+        die_pairs: Die通信对列表 [(src_die, dst_die), ...]
+        req_type: 请求类型
+        burst_length: 突发长度
+        bandwidth: 带宽
+
+    Returns:
+        List[Dict]: 流量配置列表
+    """
+    traffic_configs = []
+
+    for src_die, dst_die in die_pairs:
+        traffic_configs.append(
+            {
+                "src_die": src_die,
+                "dst_die": dst_die,
+                "src_ip_config": die_configs[src_die]["gdma"],
+                "dst_ip_config": die_configs[dst_die]["ddr"],
+                "req_type": req_type,
+                "burst_length": burst_length,
+                "bandwidth": bandwidth,
+            }
+        )
+
+    return traffic_configs
+
+
 def generate_4die_stress_test():
     """
     生成4Die压力测试场景
@@ -524,91 +589,39 @@ def generate_4die_stress_test():
     """
     generator = D2DTrafficGenerator(die_topo="5x4")
 
-    # ========== 第1步：定义Die0的基础配置（5行4列=20节点） ==========
-    # Die0布局：
-    #  0   1   2   3
-    #  4   5   6   7
-    #  8   9  10  11
-    # 12  13  14  15
-    # 16  17  18  19
-
-    # Die0 GDMA配置：每个IP实例挂载的节点列表
+    # Die0基础配置
     die0_gdma_base = {
-        "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],  # 只有一个GDMA的节点
-        "gdma_1": [3, 15, 19],  # 有两个GDMA的节点上的第二个实例
+        "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
+        "gdma_1": [3, 15, 19],
     }
-
-    # Die0 DDR配置：每个IP实例挂载的节点列表
     die0_ddr_base = {
-        "ddr_0": [3, 7, 11, 15],  # 每个DDR节点的第一个实例
-        "ddr_1": [3, 7, 11, 15],  # 每个DDR节点的第二个实例
+        "ddr_0": [3, 7, 11, 15],
+        "ddr_1": [3, 7, 11, 15],
     }
 
-    # ========== 第2步：计算Die1-3的旋转节点配置 ==========
-    # rotations = {0: 0, 1: 90, 2: 180, 3: 270}
-    rotations = {0: 0, 1: 180}
-    die_configs = {}
+    # 计算所有Die配置
+    # rotations = {0: 0, 1: 180}
+    rotations = {0: 0, 1: 90, 2: 180, 3: 270}
+    die_configs = _compute_die_configs(die0_gdma_base, die0_ddr_base, rotations)
 
-    for die_id, rotation in rotations.items():
-        mapping = D2DTrafficGenerator.get_rotated_node_mapping(rows=5, cols=4, rotation=rotation)
-
-        # 应用旋转映射到每个IP实例的节点列表
-        gdma_config = {}
-        for ip_name, nodes in die0_gdma_base.items():
-            gdma_config[ip_name] = [mapping[node] for node in nodes]
-
-        ddr_config = {}
-        for ip_name, nodes in die0_ddr_base.items():
-            ddr_config[ip_name] = [mapping[node] for node in nodes]
-
-        die_configs[die_id] = {"gdma": gdma_config, "ddr": ddr_config}
-
-        # 打印排序后的配置
-        gdma_config_sorted = {ip: sorted(nodes) for ip, nodes in gdma_config.items()}
-        ddr_config_sorted = {ip: sorted(nodes) for ip, nodes in ddr_config.items()}
-
-        print(f"Die{die_id} (旋转{rotation}°):")
-        print(f"  GDMA配置: {gdma_config_sorted}")
-        print(f"  DDR配置: {ddr_config_sorted}")
-        print()
-
+    # 生成流量
     print("=" * 60)
     print("生成场景：环形单向流量 (Die0→Die1→Die2→Die3→Die0)")
     print("=" * 60)
 
-    traffic_configs_2 = []
     ring_pairs = [
         (0, 1),
-        # (0, 2),
-        # (0, 3),
         (1, 0),
-        # (1, 2),
-        # (1, 3),
-        # (2, 0),
-        # (2, 1),
-        # (2, 3),
-        # (3, 0),
-        # (3, 1),
-        # (3, 2),
-        # (2, 3),
-        # (3, 0),
+        (0, 2),
+        (2, 0),
+        (0, 3),
+        (3, 0),
     ]
-    for src_die, dst_die in ring_pairs:
-        traffic_configs_2.append(
-            {
-                "src_die": src_die,
-                "dst_die": dst_die,
-                "src_ip_config": die_configs[src_die]["gdma"],
-                "dst_ip_config": die_configs[dst_die]["ddr"],
-                "req_type": "W",
-                "burst_length": 4,
-                "bandwidth": 48.0,  # 每个方向256GB/s
-            }
-        )
+    traffic_configs = _generate_traffic_configs(die_configs, ring_pairs, req_type="W", burst_length=4, bandwidth=48.0)
 
     generator.generate_traffic_file(
         filename="../../test_data/d2d_4die_1016.txt",
-        traffic_configs=traffic_configs_2,
+        traffic_configs=traffic_configs,
         traffic_mode="cross_die",
         end_time=1000,
     )

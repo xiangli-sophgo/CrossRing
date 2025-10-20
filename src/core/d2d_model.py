@@ -381,56 +381,67 @@ class D2D_Model:
         simulation_start = time.perf_counter()
         tail_time = 6  # 类似BaseModel的tail_time逻辑
 
-        # 主仿真循环
-        while True:
-            self.current_cycle += 1
+        try:
+            # 主仿真循环
+            while True:
+                self.current_cycle += 1
 
-            # 更新所有Die的当前周期和cycle_mod
-            for die_id, die_model in self.dies.items():
-                die_model.cycle = self.current_cycle
-                die_model.cycle_mod = self.current_cycle % die_model.config.NETWORK_FREQUENCY
+                # 更新所有Die的当前周期和cycle_mod
+                for die_id, die_model in self.dies.items():
+                    die_model.cycle = self.current_cycle
+                    die_model.cycle_mod = self.current_cycle % die_model.config.NETWORK_FREQUENCY
 
-                # 更新所有IP模块的当前周期
-                for ip_module in die_model.ip_modules.values():
-                    ip_module.current_cycle = self.current_cycle
+                    # 更新所有IP模块的当前周期
+                    for ip_module in die_model.ip_modules.values():
+                        ip_module.current_cycle = self.current_cycle
 
-            # 执行各Die的单周期步进
-            for die_id, die_model in self.dies.items():
-                # 调用Die的step方法
-                self._step_die(die_model)
+                # 执行各Die的单周期步进
+                for die_id, die_model in self.dies.items():
+                    # 调用Die的step方法
+                    self._step_die(die_model)
 
-            # D2D链路状态可视化更新
-            if self.d2d_link_state_vis and self.current_cycle >= self.kwargs.get("plot_start_cycle", 0):
-                # 收集所有Die的所有网络数据
-                all_die_networks = []
-                for die_id in range(self.num_dies):
-                    die_model = self.dies[die_id]
-                    die_networks = [die_model.req_network, die_model.rsp_network, die_model.data_network]
-                    all_die_networks.append(die_networks)
+                # D2D链路状态可视化更新
+                if self.d2d_link_state_vis and self.current_cycle >= self.kwargs.get("plot_start_cycle", 0):
+                    # 收集所有Die的所有网络数据
+                    all_die_networks = []
+                    for die_id in range(self.num_dies):
+                        die_model = self.dies[die_id]
+                        die_networks = [die_model.req_network, die_model.rsp_network, die_model.data_network]
+                        all_die_networks.append(die_networks)
 
-                # 更新可视化器
-                self.d2d_link_state_vis.update(all_die_networks, self.current_cycle)
+                    # 更新可视化器
+                    self.d2d_link_state_vis.update(all_die_networks, self.current_cycle)
 
-            # D2D Trace调试（如果启用）
-            if self.kwargs.get("print_d2d_trace", False):
-                trace_ids = self.kwargs.get("show_d2d_trace_id", None)
-                if trace_ids is not None:
-                    self.d2d_trace(trace_ids)
-                else:
-                    self.debug_d2d_trace()
+                # D2D Trace调试（如果启用）
+                if self.kwargs.get("print_d2d_trace", False):
+                    trace_ids = self.kwargs.get("show_d2d_trace_id", None)
+                    if trace_ids is not None:
+                        self.d2d_trace(trace_ids)
+                    else:
+                        self.debug_d2d_trace()
 
-            # 打印进度
-            if self.current_cycle % self.print_interval == 0 and self.current_cycle > 0:
-                self._print_progress()
+                # 打印进度
+                if self.current_cycle % self.print_interval == 0 and self.current_cycle > 0:
+                    self._print_progress()
 
-            # 检查结束条件
-            if self._check_all_completed() or self.current_cycle > self.end_time:
-                if tail_time == 0:
-                    if self.kwargs.get("verbose", 1):
-                        print("D2D仿真完成！")
-                    break
-                else:
-                    tail_time -= 1
+                # 检查结束条件
+                if self._check_all_completed() or self.current_cycle > self.end_time:
+                    if tail_time == 0:
+                        if self.kwargs.get("verbose", 1):
+                            print("D2D仿真完成！")
+                        break
+                    else:
+                        tail_time -= 1
+
+        except KeyboardInterrupt:
+            print("\n仿真中断 (Ctrl+C)，正在优雅退出...")
+            # 不重新抛出异常，继续执行结果分析
+        except Exception as e:
+            print(f"\n仿真过程中出现错误: {e}")
+            raise
+        finally:
+            # 确保仿真结束状态被正确设置
+            pass
 
         # 仿真结束
         simulation_end = time.perf_counter()
@@ -788,10 +799,8 @@ class D2D_Model:
             # 调用D2D专用的流量图绘制方法，传入die模型以支持跨Die带宽绘制
             d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=mode, save_path=save_path, show_cdma=show_cdma)
 
-            if save_path:
-                print(f"D2D组合流量图已保存: {save_path}")
-            else:
-                print("D2D组合流量图已显示")
+            # 流量图生成完成的提示放在这里会更合适
+            # 移动到process_d2d_comprehensive_results末尾统一显示
 
         except Exception as e:
             print(f"生成D2D组合流量图失败: {e}")
@@ -834,27 +843,30 @@ class D2D_Model:
         # 2. D2D专用结果处理
         self._process_d2d_specific_results()
 
-        # 3. 输出D2D专有统计信息（可选，现在主要依靠D2D专用报告）
-        # self._print_d2d_statistics(d2d_stats)
-
-        # 4. 不再生成重复的组合报告，D2D专用报告已足够
-
+        # 3. 显示流量图生成信息
+        print("\n" + "=" * 60)
+        print("生成D2D可视化图表")
         print("=" * 60)
+        results_fig_path = self.kwargs.get("results_fig_save_path", "../Result/")
+        if results_fig_path:
+            print(f"  - D2D组合流量图已保存到: {results_fig_path}")
+        else:
+            print("  - D2D组合流量图已显示")
+
+        # 4. 完成
+        print("\n" + "=" * 60)
         print("D2D综合结果分析完成")
         print("=" * 60)
 
     def _process_d2d_specific_results(self):
         """处理D2D专有的结果分析（跨Die请求记录和带宽统计）"""
         try:
-            print("\n处理D2D专用结果分析...")
-
             # 使用缓存的D2D处理器（如果存在），避免重复计算
             if hasattr(self, "_cached_d2d_processor") and self._cached_d2d_processor:
-                # print("[信息] 复用缓存的D2D处理器，避免重复计算")
                 d2d_processor = self._cached_d2d_processor
             else:
                 # 如果没有缓存，创建新的处理器
-                print("[警告] 没有找到缓存的D2D处理器，创建新实例")
+                print("\n[警告] 没有找到缓存的D2D处理器，创建新实例")
                 d2d_processor = D2DResultProcessor(self.config)
                 d2d_processor.simulation_end_cycle = self.current_cycle
                 d2d_processor.finish_cycle = self.current_cycle
@@ -877,10 +889,18 @@ class D2D_Model:
             result_save_path = self.kwargs.get("result_save_path", "../Result/")
             d2d_result_path = os.path.join(result_save_path, f"D2D_{timestamp}")
 
-            # 只执行保存和报告生成部分，避免重复计算
-            # print("[信息] 保存D2D请求到CSV并生成带宽报告")
-            d2d_processor.save_d2d_requests_csv(d2d_result_path)
+            # 步骤1: 生成带宽分析报告
+            print("\n" + "=" * 60)
+            print("D2D带宽统计分析")
+            print("=" * 60)
             d2d_processor.generate_d2d_bandwidth_report(d2d_result_path)
+
+            # 步骤2: 保存数据文件
+            print("\n" + "=" * 60)
+            print("保存D2D结果数据")
+            print("=" * 60)
+            d2d_processor.save_d2d_requests_csv(d2d_result_path)
+            d2d_processor.save_ip_bandwidth_to_csv(d2d_result_path)
 
         except Exception as e:
             import traceback
@@ -1557,6 +1577,14 @@ class D2D_Model:
             self._cross_die_read_requests = {i: 0 for i in range(self.num_dies)}
         if not hasattr(self, "_cross_die_write_requests"):
             self._cross_die_write_requests = {i: 0 for i in range(self.num_dies)}
+        if not hasattr(self, "_recorded_requests"):
+            self._recorded_requests = set()
+
+        # 防止重复记录同一个packet_id
+        if packet_id in self._recorded_requests:
+            return
+
+        self._recorded_requests.add(packet_id)
 
         if is_cross_die:
             if req_type == "read":

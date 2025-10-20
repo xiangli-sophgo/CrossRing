@@ -445,7 +445,7 @@ class BandwidthAnalyzer:
         self.collect_ip_statistics()
 
     def normalize_ip_type(self, ip_type):
-        """标准化IP类型名称，去除数字后缀和处理特殊情况"""
+        """标准化IP类型名称，保留实例编号（如gdma_0, gdma_1）"""
         if not ip_type:
             return "l2m"  # None或空字符串直接返回l2m
 
@@ -456,28 +456,23 @@ class BandwidthAnalyzer:
         if ip_type == "unknown" or ip_type.startswith("unknown"):
             return "l2m"  # 将unknown映射到l2m
 
-        # 处理D2D特殊类型
-        if ip_type.startswith("d2d_rn"):
-            return "d2d_rn"  # D2D_RN保持原类型
-        if ip_type.startswith("d2d_sn"):
-            return "d2d_sn"  # D2D_SN保持原类型
+        # 去除_ip后缀（如果存在）
+        if ip_type.endswith("_ip"):
+            ip_type = ip_type[:-3]
 
-        # 去除数字后缀 (如 gdma_0 -> gdma)
-        if "_" in ip_type:
-            base_type = ip_type.split("_")[0]
-        else:
-            base_type = ip_type
+        # 保留完整的IP实例名（包括编号，如gdma_0, sdma_1等）
+        # 只验证基本类型是否在支持列表中
+        base_type = ip_type.split("_")[0] if "_" in ip_type else ip_type
+        supported_types = ["sdma", "gdma", "cdma", "ddr", "l2m", "d2d"]
 
-        # 确保类型在支持的列表中
-        supported_types = ["sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"]
-        if base_type in supported_types:
-            return base_type
+        if base_type in supported_types or base_type.startswith("d2d"):
+            return ip_type  # 返回完整的实例名
         else:
-            # 如果不在支持列表中，映射到l2m
+            # 如果基本类型不在支持列表中，映射到l2m
             return "l2m"
 
     def calculate_ip_bandwidth_data(self):
-        """计算IP带宽数据矩阵"""
+        """计算IP带宽数据矩阵 - 支持区分IP实例（如gdma_0, gdma_1）"""
         rows = self.config.NUM_ROW
         cols = self.config.NUM_COL
         if getattr(self.sim_model, "topo_type_stat", None).startswith("Ring"):
@@ -486,36 +481,36 @@ class BandwidthAnalyzer:
         elif getattr(self.sim_model, "topo_type_stat", None) != "4x5":
             rows -= 1
 
-        # 初始化数据结构
+        # 第一步：收集所有IP实例名称
+        all_ip_instances = set()
+        for req in self.requests:
+            # 收集source_type
+            if req.source_type:
+                raw_source_type = req.source_type
+                if raw_source_type.endswith("_ip"):
+                    raw_source_type = raw_source_type[:-3]
+                source_type = self.normalize_ip_type(raw_source_type)
+                all_ip_instances.add(source_type)
+
+            # 收集dest_type
+            if hasattr(req, 'dest_type') and req.dest_type:
+                raw_dest_type = req.dest_type
+                if raw_dest_type.endswith("_ip"):
+                    raw_dest_type = raw_dest_type[:-3]
+                dest_type = self.normalize_ip_type(raw_dest_type)
+                all_ip_instances.add(dest_type)
+
+        # 第二步：动态初始化数据结构 - 为每个IP实例创建矩阵
         self.ip_bandwidth_data = {
-            "read": {
-                "sdma": np.zeros((rows, cols)),
-                "gdma": np.zeros((rows, cols)),
-                "cdma": np.zeros((rows, cols)),
-                "ddr": np.zeros((rows, cols)),
-                "l2m": np.zeros((rows, cols)),
-                "d2d_rn": np.zeros((rows, cols)),
-                "d2d_sn": np.zeros((rows, cols)),
-            },
-            "write": {
-                "sdma": np.zeros((rows, cols)),
-                "gdma": np.zeros((rows, cols)),
-                "cdma": np.zeros((rows, cols)),
-                "ddr": np.zeros((rows, cols)),
-                "l2m": np.zeros((rows, cols)),
-                "d2d_rn": np.zeros((rows, cols)),
-                "d2d_sn": np.zeros((rows, cols)),
-            },
-            "total": {
-                "sdma": np.zeros((rows, cols)),
-                "gdma": np.zeros((rows, cols)),
-                "cdma": np.zeros((rows, cols)),
-                "ddr": np.zeros((rows, cols)),
-                "l2m": np.zeros((rows, cols)),
-                "d2d_rn": np.zeros((rows, cols)),
-                "d2d_sn": np.zeros((rows, cols)),
-            },
+            "read": {},
+            "write": {},
+            "total": {},
         }
+
+        for ip_instance in all_ip_instances:
+            self.ip_bandwidth_data["read"][ip_instance] = np.zeros((rows, cols))
+            self.ip_bandwidth_data["write"][ip_instance] = np.zeros((rows, cols))
+            self.ip_bandwidth_data["total"][ip_instance] = np.zeros((rows, cols))
 
         # 处理RN端口（按照source_node分组，避免重复计算）
         rn_requests_by_source = defaultdict(list)
@@ -554,20 +549,20 @@ class BandwidthAnalyzer:
                 read_requests = [req for req in type_requests if req.req_type == "read"]
                 write_requests = [req for req in type_requests if req.req_type == "write"]
 
-                # 计算读带宽
+                # 计算读带宽 - 累加到同一位置(支持多实例)
                 if read_requests:
                     read_metrics = self.calculate_bandwidth_metrics(read_requests, "read")
-                    self.ip_bandwidth_data["read"][source_type][physical_row, physical_col] = read_metrics.weighted_bandwidth
+                    self.ip_bandwidth_data["read"][source_type][physical_row, physical_col] += read_metrics.weighted_bandwidth
 
-                # 计算写带宽
+                # 计算写带宽 - 累加到同一位置(支持多实例)
                 if write_requests:
                     write_metrics = self.calculate_bandwidth_metrics(write_requests, "write")
-                    self.ip_bandwidth_data["write"][source_type][physical_row, physical_col] = write_metrics.weighted_bandwidth
+                    self.ip_bandwidth_data["write"][source_type][physical_row, physical_col] += write_metrics.weighted_bandwidth
 
-                # 计算总带宽
+                # 计算总带宽 - 累加到同一位置(支持多实例)
                 if type_requests:
                     total_metrics = self.calculate_bandwidth_metrics(type_requests, operation_type=None)
-                    self.ip_bandwidth_data["total"][source_type][physical_row, physical_col] = total_metrics.weighted_bandwidth
+                    self.ip_bandwidth_data["total"][source_type][physical_row, physical_col] += total_metrics.weighted_bandwidth
 
         # 处理SN端口
         sn_requests_by_dest = defaultdict(list)
@@ -607,20 +602,20 @@ class BandwidthAnalyzer:
                 read_requests = [req for req in type_requests if req.req_type == "read"]
                 write_requests = [req for req in type_requests if req.req_type == "write"]
 
-                # 计算读带宽
+                # 计算读带宽 - 累加到同一位置(支持多实例)
                 if read_requests:
                     read_metrics = self.calculate_bandwidth_metrics(read_requests, "read")
-                    self.ip_bandwidth_data["read"][dest_type][physical_row, physical_col] = read_metrics.weighted_bandwidth
+                    self.ip_bandwidth_data["read"][dest_type][physical_row, physical_col] += read_metrics.weighted_bandwidth
 
-                # 计算写带宽
+                # 计算写带宽 - 累加到同一位置(支持多实例)
                 if write_requests:
                     write_metrics = self.calculate_bandwidth_metrics(write_requests, "write")
-                    self.ip_bandwidth_data["write"][dest_type][physical_row, physical_col] = write_metrics.weighted_bandwidth
+                    self.ip_bandwidth_data["write"][dest_type][physical_row, physical_col] += write_metrics.weighted_bandwidth
 
-                # 计算总带宽
+                # 计算总带宽 - 累加到同一位置(支持多实例)
                 if type_requests:
                     total_metrics = self.calculate_bandwidth_metrics(type_requests, operation_type=None)
-                    self.ip_bandwidth_data["total"][dest_type][physical_row, physical_col] = total_metrics.weighted_bandwidth
+                    self.ip_bandwidth_data["total"][dest_type][physical_row, physical_col] += total_metrics.weighted_bandwidth
 
     def plot_rn_bandwidth_curves_work_interval(self) -> float:
         """
@@ -1046,6 +1041,44 @@ class BandwidthAnalyzer:
         # 但基于已有的端口带宽计算结果
         self.calculate_ip_bandwidth_data()
 
+    def get_aggregated_ip_bandwidth(self, mode, base_type, row, col):
+        """
+        获取指定基本类型的聚合带宽（将所有实例的带宽相加）
+
+        Args:
+            mode: 'read', 'write', 或 'total'
+            base_type: 基本IP类型，如'sdma', 'gdma'等
+            row, col: 矩阵位置
+
+        Returns:
+            该位置所有同类型IP实例的带宽总和
+        """
+        if mode not in self.ip_bandwidth_data:
+            return 0.0
+
+        total_bandwidth = 0.0
+        base_type_lower = base_type.lower()
+
+        # 遍历所有IP实例，找到匹配基本类型的实例
+        for ip_instance, matrix in self.ip_bandwidth_data[mode].items():
+            # 提取基本类型
+            if ip_instance.lower().startswith('d2d'):
+                # D2D类型特殊处理
+                parts = ip_instance.lower().split('_')
+                if len(parts) >= 2:
+                    instance_base_type = '_'.join(parts[:2])
+                else:
+                    instance_base_type = parts[0]
+            else:
+                instance_base_type = ip_instance.split('_')[0].lower()
+
+            # 如果基本类型匹配，累加带宽
+            if instance_base_type == base_type_lower:
+                if row < matrix.shape[0] and col < matrix.shape[1]:
+                    total_bandwidth += matrix[row, col]
+
+        return total_bandwidth
+
     def _calculate_port_bandwidth_averages(self, all_ports: Dict[str, "PortBandwidthMetrics"]) -> Dict[str, float]:
         """
         计算每种端口类型的平均带宽，支持读写分离
@@ -1408,12 +1441,13 @@ class BandwidthAnalyzer:
         # IP颜色映射范围：动态最大值的60%阈值起红
         # 从 ip_bandwidth_data 提取所有带宽值，计算当前最大
         all_ip_vals = []
-        ip_services = ["sdma", "gdma", "cdma", "ddr", "l2m"]
-        if show_cdma and "cdma" in self.ip_bandwidth_data[mode]:
-            ip_services.append("cdma")
+        # 遍历所有IP实例的带宽矩阵
+        if mode in self.ip_bandwidth_data:
+            for ip_instance, matrix in self.ip_bandwidth_data[mode].items():
+                # 排除D2D相关IP（如果需要）
+                if not (ip_instance.lower().startswith('d2d') and not show_cdma):
+                    all_ip_vals.extend(matrix.flatten())
 
-        for svc in ip_services:
-            all_ip_vals.extend(self.ip_bandwidth_data[mode][svc].flatten())
         ip_mapping_max = max(all_ip_vals) if all_ip_vals else 0.0
         ip_mapping_min = max(0.6 * ip_mapping_max, 80)
 
@@ -1602,28 +1636,12 @@ class BandwidthAnalyzer:
                 )
                 ax.add_patch(right_rect)
 
-                # 获取IP带宽数据
-                if mode == "read":
-                    sdma_value = self.ip_bandwidth_data["read"]["sdma"][physical_row // 2, physical_col]
-                    gdma_value = self.ip_bandwidth_data["read"]["gdma"][physical_row // 2, physical_col]
-                    if show_cdma and "cdma" in self.ip_bandwidth_data["read"]:
-                        cdma_value = self.ip_bandwidth_data["read"]["cdma"][physical_row // 2, physical_col]
-                    ddr_value = self.ip_bandwidth_data["read"]["ddr"][physical_row // 2, physical_col]
-                    l2m_value = self.ip_bandwidth_data["read"]["l2m"][physical_row // 2, physical_col]
-                elif mode == "write":
-                    sdma_value = self.ip_bandwidth_data["write"]["sdma"][physical_row // 2, physical_col]
-                    gdma_value = self.ip_bandwidth_data["write"]["gdma"][physical_row // 2, physical_col]
-                    if show_cdma and "cdma" in self.ip_bandwidth_data["write"]:
-                        cdma_value = self.ip_bandwidth_data["write"]["cdma"][physical_row // 2, physical_col]
-                    ddr_value = self.ip_bandwidth_data["write"]["ddr"][physical_row // 2, physical_col]
-                    l2m_value = self.ip_bandwidth_data["write"]["l2m"][physical_row // 2, physical_col]
-                else:  # total
-                    sdma_value = self.ip_bandwidth_data["total"]["sdma"][physical_row // 2, physical_col]
-                    gdma_value = self.ip_bandwidth_data["total"]["gdma"][physical_row // 2, physical_col]
-                    if show_cdma and "cdma" in self.ip_bandwidth_data["total"]:
-                        cdma_value = self.ip_bandwidth_data["total"]["cdma"][physical_row // 2, physical_col]
-                    ddr_value = self.ip_bandwidth_data["total"]["ddr"][physical_row // 2, physical_col]
-                    l2m_value = self.ip_bandwidth_data["total"]["l2m"][physical_row // 2, physical_col]
+                # 获取IP带宽数据 - 使用聚合函数累加所有同类型IP实例的带宽
+                sdma_value = self.get_aggregated_ip_bandwidth(mode, "sdma", physical_row // 2, physical_col)
+                gdma_value = self.get_aggregated_ip_bandwidth(mode, "gdma", physical_row // 2, physical_col)
+                cdma_value = self.get_aggregated_ip_bandwidth(mode, "cdma", physical_row // 2, physical_col) if show_cdma else 0.0
+                ddr_value = self.get_aggregated_ip_bandwidth(mode, "ddr", physical_row // 2, physical_col)
+                l2m_value = self.get_aggregated_ip_bandwidth(mode, "l2m", physical_row // 2, physical_col)
 
                 # 定义颜色计算函数
                 def get_intensity_color(value):
