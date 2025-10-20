@@ -614,12 +614,6 @@ def generate_4die_stress_test():
     )
     print()
 
-    print()
-
-    print("=" * 60)
-    print("所有4个压力测试场景已生成完成！")
-    print("=" * 60)
-
 
 if __name__ == "__main__":
     # 生成简单的2Die示例

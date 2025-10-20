@@ -440,3 +440,97 @@ class FlitPool:
 
 # Global flit pool instance
 _flit_pool = FlitPool()
+
+
+def copy_flit_attributes(src_flit: Flit, dst_flit: Flit, attr_list: list):
+    """
+    复制flit属性的工具函数
+
+    Args:
+        src_flit: 源flit对象
+        dst_flit: 目标flit对象
+        attr_list: 要复制的属性名列表
+    """
+    for attr in attr_list:
+        if hasattr(src_flit, attr):
+            setattr(dst_flit, attr, getattr(src_flit, attr))
+
+
+# D2D属性预定义集合
+D2D_BASIC_ATTRS = [
+    "packet_id", "flit_id", "req_type", "burst_length", "traffic_id"
+]
+
+D2D_ORIGIN_TARGET_ATTRS = [
+    "d2d_origin_die", "d2d_origin_node", "d2d_origin_type",
+    "d2d_target_die", "d2d_target_node", "d2d_target_type"
+]
+
+D2D_REQUEST_ATTRS = D2D_BASIC_ATTRS + ["req_attr"] + D2D_ORIGIN_TARGET_ATTRS
+
+D2D_RESPONSE_ATTRS = D2D_BASIC_ATTRS + ["rsp_type", "flit_type", "is_last_flit"] + D2D_ORIGIN_TARGET_ATTRS
+
+D2D_DATA_ATTRS = D2D_BASIC_ATTRS + ["flit_type"] + D2D_ORIGIN_TARGET_ATTRS
+
+D2D_TIMESTAMP_ATTRS = [
+    "departure_cycle", "entry_db_cycle", "req_departure_cycle", "leave_db_cycle"
+]
+
+
+def create_d2d_flit_copy(src_flit: Flit, source: int = 0, destination: int = 0,
+                         path: list = None, attr_preset: str = "request") -> Flit:
+    """
+    创建D2D flit副本的统一方法
+
+    Args:
+        src_flit: 源flit（通常是AXI flit）
+        source: 新flit的源节点位置
+        destination: 新flit的目标节点位置
+        path: 新flit的路径
+        attr_preset: 属性预设类型，可选值：
+            - "request": 请求flit（包含req_attr）
+            - "response": 响应flit（包含rsp_type, flit_type, is_last_flit）
+            - "data": 数据flit（包含flit_type）
+            - "basic": 仅基础属性
+            - "with_timestamp": 基础属性 + 时间戳
+
+    Returns:
+        Flit: 新创建的flit副本
+
+    Examples:
+        # 创建跨Die读请求副本
+        new_flit = create_d2d_flit_copy(axi_flit, source=36, destination=4,
+                                        path=[36, 4], attr_preset="request")
+
+        # 创建跨Die写数据副本
+        data_flit = create_d2d_flit_copy(axi_flit, source=36, destination=4,
+                                         path=[36, 4], attr_preset="data")
+
+        # 创建响应flit副本
+        rsp_flit = create_d2d_flit_copy(axi_flit, source=4, destination=36,
+                                        path=[4, 36], attr_preset="response")
+    """
+    if path is None:
+        path = [source]
+
+    # 从对象池获取新flit
+    new_flit = _flit_pool.get_flit(source=source, destination=destination, path=path)
+
+    # 根据预设类型选择要复制的属性
+    if attr_preset == "request":
+        attr_list = D2D_REQUEST_ATTRS
+    elif attr_preset == "response":
+        attr_list = D2D_RESPONSE_ATTRS
+    elif attr_preset == "data":
+        attr_list = D2D_DATA_ATTRS
+    elif attr_preset == "with_timestamp":
+        attr_list = D2D_BASIC_ATTRS + D2D_ORIGIN_TARGET_ATTRS + D2D_TIMESTAMP_ATTRS
+    elif attr_preset == "basic":
+        attr_list = D2D_BASIC_ATTRS + D2D_ORIGIN_TARGET_ATTRS
+    else:
+        raise ValueError(f"未知的attr_preset类型: {attr_preset}")
+
+    # 复制属性
+    copy_flit_attributes(src_flit, new_flit, attr_list)
+
+    return new_flit

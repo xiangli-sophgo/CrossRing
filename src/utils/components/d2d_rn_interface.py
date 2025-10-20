@@ -81,8 +81,8 @@ class D2D_RN_Interface(IPInterface):
 
     def handle_received_cross_die_flit(self, flit: Flit):
         """
-        处理接收到的跨Die flit
-        区分写请求、写数据和其他类型
+        处理接收到的跨Die flit (AXI flit)
+        区分写请求、写数据和其他类型，处理完后回收AXI flit
         """
         # print(f"[D2D RN Debug] 接收到跨Die flit: packet_id={getattr(flit, 'packet_id', 'None')}, "
         #       f"req_type={getattr(flit, 'req_type', 'None')}, rsp_type={getattr(flit, 'rsp_type', 'None')}, "
@@ -93,18 +93,30 @@ class D2D_RN_Interface(IPInterface):
             # AXI_W通道的写数据
             # print(f"[D2D RN Debug] 处理AXI_W写数据")
             self.handle_cross_die_write_data(flit)
+            # 回收AXI flit
+            from .flit import _flit_pool
+            _flit_pool.return_flit(flit)
         elif hasattr(flit, "req_type") and flit.req_type == "write" and not (hasattr(flit, "flit_type") and flit.flit_type == "data"):
             # 跨Die写请求（非数据）
             # print(f"[D2D RN Debug] 处理跨Die写请求")
             self.handle_cross_die_write_request(flit)
+            # 回收AXI flit
+            from .flit import _flit_pool
+            _flit_pool.return_flit(flit)
         elif hasattr(flit, "flit_type") and flit.flit_type == "data" and hasattr(flit, "req_type") and flit.req_type == "write":
             # 传统写数据flit
             # print(f"[D2D RN Debug] 处理传统写数据")
             self.handle_cross_die_write_data(flit)
+            # 回收AXI flit
+            from .flit import _flit_pool
+            _flit_pool.return_flit(flit)
         else:
             # 其他类型（读请求等），使用原有逻辑
             # print(f"[D2D RN Debug] 处理其他类型flit（读数据等）")
             self.handle_other_cross_die_flit(flit)
+            # 回收AXI flit
+            from .flit import _flit_pool
+            _flit_pool.return_flit(flit)
 
     def handle_cross_die_write_request(self, flit: Flit):
         """
@@ -121,12 +133,17 @@ class D2D_RN_Interface(IPInterface):
             self.rn_tracker_count["write"]["count"] -= 1
             self.rn_wdb_count["count"] -= flit.burst_length
 
-            # 缓存写请求等待写数据
-            self.cross_die_write_requests[packet_id] = flit
+            # 创建flit副本保存写请求（因为AXI flit会被回收）
+            from .flit import create_d2d_flit_copy
+            write_req_copy = create_d2d_flit_copy(flit, source=0, destination=0,
+                                                  path=[0], attr_preset="request")
+
+            # 缓存写请求副本等待写数据
+            self.cross_die_write_requests[packet_id] = write_req_copy
             self.cross_die_write_data_cache[packet_id] = []
 
             # 添加到tracker list和更新pointer（修复：确保datasend响应处理器能找到请求）
-            self.rn_tracker["write"].append(flit)
+            self.rn_tracker["write"].append(write_req_copy)
             self.rn_tracker_pointer["write"] += 1
         else:
             # 资源不足：这违反了AXI协议！应该在D2D_SN预留资源
@@ -170,14 +187,12 @@ class D2D_RN_Interface(IPInterface):
         source_mapped = self.ip_pos
         path = self.routes[source_mapped][target_pos] if target_pos in self.routes[source_mapped] else []
 
-        from .flit import Flit
+        from .flit import create_d2d_flit_copy
 
-        local_write_req = Flit(source=source_mapped, destination=target_pos, path=path)
-
-        # 复制关键属性
-        for attr in ["packet_id", "req_type", "burst_length", "d2d_origin_die", "d2d_origin_node", "d2d_origin_type", "d2d_target_die", "d2d_target_node", "d2d_target_type"]:
-            if hasattr(write_req, attr):
-                setattr(local_write_req, attr, getattr(write_req, attr))
+        # 创建本地写请求flit（使用basic预设，因为不需要req_attr）
+        local_write_req = create_d2d_flit_copy(write_req, source=source_mapped,
+                                               destination=target_pos, path=path,
+                                               attr_preset="basic")
 
         local_write_req.source_type = self.ip_type
         local_write_req.destination_type = write_req.d2d_target_type
@@ -231,27 +246,12 @@ class D2D_RN_Interface(IPInterface):
         path = self.routes[source_mapped][target_pos] if target_pos in self.routes[source_mapped] else []
 
         # 创建新的请求flit，避免修改AXI传输的flit
-        from .flit import Flit
+        from .flit import create_d2d_flit_copy
 
-        new_flit = Flit(source=source_mapped, destination=target_pos, path=path)  # D2D_RN的位置  # 映射后的目标节点位置
-
-        # 复制关键属性（使用D2D统一属性）
-        for attr in [
-            "packet_id",
-            "flit_id",
-            "req_type",
-            "rsp_type",
-            "flit_type",
-            "d2d_origin_die",
-            "d2d_origin_node",
-            "d2d_origin_type",
-            "d2d_target_die",
-            "d2d_target_node",
-            "d2d_target_type",
-            "burst_length",
-        ]:
-            if hasattr(flit, attr):
-                setattr(new_flit, attr, getattr(flit, attr))
+        # 使用basic预设创建flit副本
+        new_flit = create_d2d_flit_copy(flit, source=source_mapped,
+                                        destination=target_pos, path=path,
+                                        attr_preset="basic")
 
         # 确保burst_length有默认值
         if not hasattr(new_flit, "burst_length") or new_flit.burst_length is None or new_flit.burst_length < 0:
@@ -458,10 +458,11 @@ class D2D_RN_Interface(IPInterface):
 
         write_req = self.cross_die_write_requests[packet_id]
 
-        # 创建write_complete响应 - 简化创建，让D2D_Sys处理AXI传输细节
-        from .flit import Flit
+        # 创建write_complete响应
+        from .flit import _flit_pool
+        from .flit import copy_flit_attributes
 
-        write_complete_rsp = Flit(source=self.ip_pos, destination=0, path=[self.ip_pos])  # D2D_Sys会重新设置  # D2D_Sys会重新设置  # 提供有效路径避免初始化错误，D2D_Sys会重新设置
+        write_complete_rsp = _flit_pool.get_flit(source=self.ip_pos, destination=0, path=[self.ip_pos])
 
         # 设置基本属性
         write_complete_rsp.packet_id = packet_id
@@ -470,10 +471,12 @@ class D2D_RN_Interface(IPInterface):
         write_complete_rsp.source_type = write_req.d2d_target_type  # 使用目标类型（DDR）作为响应源
         write_complete_rsp.destination_type = write_req.d2d_origin_type
 
-        # 复制D2D属性 - 这是关键信息
-        for attr in ["d2d_origin_die", "d2d_origin_node", "d2d_origin_type", "d2d_target_die", "d2d_target_node", "d2d_target_type"]:
-            if hasattr(write_req, attr):
-                setattr(write_complete_rsp, attr, getattr(write_req, attr))
+        # 复制D2D属性（仅复制origin/target属性）
+        copy_flit_attributes(write_req, write_complete_rsp,
+                           D2D_ORIGIN_TARGET_ATTRS if 'D2D_ORIGIN_TARGET_ATTRS' in dir() else [
+                               "d2d_origin_die", "d2d_origin_node", "d2d_origin_type",
+                               "d2d_target_die", "d2d_target_node", "d2d_target_type"
+                           ])
 
         # 通过AXI_B通道发送回源Die，明确指定B通道
         source_die_id = write_req.d2d_origin_die
@@ -599,16 +602,16 @@ class D2D_RN_Interface(IPInterface):
 
         for i, local_flit in enumerate(data_flits):
             # 创建新的跨Die读数据flit（从D2D_RN返回到D2D_SN）
-            from .flit import Flit
+            from .flit import _flit_pool, copy_flit_attributes
 
             # 计算跨Die返回路径：D2D_RN → D2D_SN
             source = self.ip_pos  # D2D_RN的位置
             destination = first_flit.d2d_origin_node  # 原始请求者的源映射位置
             path = [source]  # AXI传输不需要NoC路径
 
-            cross_die_flit = Flit(source, destination, path)
+            cross_die_flit = _flit_pool.get_flit(source, destination, path)
 
-            # 复制关键属性
+            # 设置基本属性
             cross_die_flit.sync_latency_record(tracker_req)
             cross_die_flit.source_original = self.ip_pos
             cross_die_flit.destination_original = first_flit.d2d_origin_node
@@ -624,15 +627,15 @@ class D2D_RN_Interface(IPInterface):
             cross_die_flit.destination_type = first_flit.d2d_origin_type
 
             # 继承D2D属性
-            for attr in ["d2d_origin_die", "d2d_origin_node", "d2d_origin_type",
-                        "d2d_target_die", "d2d_target_node", "d2d_target_type"]:
-                if hasattr(first_flit, attr):
-                    setattr(cross_die_flit, attr, getattr(first_flit, attr))
+            copy_flit_attributes(first_flit, cross_die_flit, [
+                "d2d_origin_die", "d2d_origin_node", "d2d_origin_type",
+                "d2d_target_die", "d2d_target_node", "d2d_target_type"
+            ])
 
             # 继承时间戳信息
-            for attr in ["departure_cycle", "entry_db_cycle", "req_departure_cycle", "leave_db_cycle"]:
-                if hasattr(local_flit, attr):
-                    setattr(cross_die_flit, attr, getattr(local_flit, attr))
+            copy_flit_attributes(local_flit, cross_die_flit, [
+                "departure_cycle", "entry_db_cycle", "req_departure_cycle", "leave_db_cycle"
+            ])
 
             cross_die_data_flits.append(cross_die_flit)
 

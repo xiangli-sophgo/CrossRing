@@ -351,7 +351,12 @@ class IPInterface:
 
         try:
             if req.req_type == "read":
-                # 检查读请求资源
+                # 如果是retry请求（req_attr="old"），资源已在第一次分配，直接返回
+                if req.req_attr == "old" and req.packet_id in self.rn_rdb:
+                    # Retry请求：tracker和databuffer已在第一次分配
+                    return True
+
+                # 检查读请求资源（仅新请求）
                 rdb_available = self.rn_rdb_count["count"] >= req.burst_length
                 tracker_available = self.rn_tracker_count["read"]["count"] > 0
                 reserve_ok = self.rn_rdb_count["count"] > self.rn_rdb_reserve * req.burst_length
@@ -359,7 +364,7 @@ class IPInterface:
                 if not (rdb_available and tracker_available and reserve_ok):
                     return False
 
-                # 预占资源
+                # 预占资源（仅新请求）
                 self.rn_rdb_count["count"] -= req.burst_length
                 self.rn_tracker_count["read"]["count"] -= 1
                 self.rn_rdb[req.packet_id] = []
@@ -368,14 +373,19 @@ class IPInterface:
                 self.rn_tracker_pointer["read"] += 1
 
             elif req.req_type == "write":
-                # 检查写请求资源
+                # 如果是retry请求（req_attr="old"），资源已在第一次分配，直接返回
+                if req.req_attr == "old" and req.packet_id in self.rn_wdb:
+                    # Retry请求：tracker和databuffer已在第一次分配
+                    return True
+
+                # 检查写请求资源（仅新请求）
                 wdb_available = self.rn_wdb_count["count"] >= req.burst_length
                 tracker_available = self.rn_tracker_count["write"]["count"] > 0
 
                 if not (wdb_available and tracker_available):
                     return False
 
-                # 预占资源
+                # 预占资源（仅新请求）
                 self.rn_wdb_count["count"] -= req.burst_length
                 self.rn_tracker_count["write"]["count"] -= 1
                 self.rn_wdb[req.packet_id] = []
@@ -521,18 +531,11 @@ class IPInterface:
                 req.is_injected = False
                 req.path_index = 0
                 req.req_attr = "old"
-                self.rn_rdb_count["count"] += req.burst_length
-                if req.packet_id in self.rn_rdb:
-                    self.rn_rdb.pop(req.packet_id)
-                self.rn_rdb_reserve += 1
+                # 保留rn_rdb和databuffer资源，等待positive后重试
+                # databuffer已在第一次分配，retry时不需要重复分配和释放
 
             elif rsp.rsp_type == "positive":
-                # 处理读重试
-                if req.req_attr == "new":
-                    self.rn_rdb_count["count"] += req.burst_length
-                    if req.packet_id in self.rn_rdb:
-                        self.rn_rdb.pop(req.packet_id)
-                    self.rn_rdb_reserve += 1
+                # 处理读重试：资源已在第一次分配，直接重新发送请求
                 req.req_state = "valid"
                 req.req_attr = "old"
                 req.is_injected = False
@@ -541,7 +544,6 @@ class IPInterface:
                 req.is_arrive = False
                 # 放入请求网络的inject_fifo
                 self.enqueue(req, "req", retry=True)
-                self.rn_rdb_reserve -= 1
 
         elif rsp.req_type == "write":
             if rsp.rsp_type == "negative":

@@ -94,56 +94,90 @@ class D2D_SN_Interface(IPInterface):
 
     def handle_received_cross_die_flit(self, flit: Flit):
         """
-        处理接收到的跨Die flit
-        根据flit类型进行相应处理
+        处理接收到的跨Die flit (AXI flit)
+        根据flit类型进行相应处理，处理完后回收AXI flit
         """
         # 优先检查是否为AXI_B的write_complete响应
         if hasattr(flit, "flit_position") and flit.flit_position and "AXI_B" in str(flit.flit_position):
             # AXI_B通道的写完成响应
-            self.forward_response_to_local_rn(flit)
+            self.handle_cross_die_write_complete_response(flit)
+            # 回收AXI flit（forward方法会创建新NoC flit）
+            from .flit import _flit_pool
+            _flit_pool.return_flit(flit)
             return  # 已处理，直接返回
         elif hasattr(flit, "flit_type") and flit.flit_type == "data":
             # 数据flit：检查是否为跨Die写数据
             if hasattr(flit, "req_type") and flit.req_type == "write":
                 self.handle_cross_die_write_data(flit)
+                # 回收AXI flit
+                from .flit import _flit_pool
+                _flit_pool.return_flit(flit)
             else:
                 # 其他数据（如读数据），调用父类处理
                 self._handle_received_data(flit)
+                # 回收AXI flit
+                from .flit import _flit_pool
+                _flit_pool.return_flit(flit)
         elif hasattr(flit, "req_type") and flit.req_type:
             # 请求flit：需要资源检查
             if flit.req_type == "read":
                 # 读请求：转发到Die内目标SN节点
                 self.forward_read_request_to_local_sn(flit)
+                # 回收AXI flit
+                from .flit import _flit_pool
+                _flit_pool.return_flit(flit)
             elif flit.req_type == "write":
                 # 写请求：需要先检查资源并返回data_send响应
                 self.handle_local_cross_die_write_request(flit)
+                # 回收AXI flit
+                from .flit import _flit_pool
+                _flit_pool.return_flit(flit)
         elif hasattr(flit, "rsp_type") and flit.rsp_type:
             # 响应：转发回Die内原始请求节点
             self.forward_response_to_local_rn(flit)
+            # 回收AXI flit
+            from .flit import _flit_pool
+            _flit_pool.return_flit(flit)
 
     def forward_read_request_to_local_sn(self, flit: Flit):
         """
         将跨Die读请求转发到本地目标SN节点
         """
-        # 更新flit的源和目标信息
-        # D2D属性已经包含原始信息，不需要单独保存
+        # 使用统一方法创建新的NoC flit
+        from .flit import create_d2d_flit_copy
 
         # 设置新的源为D2D_SN节点
-        flit.source = self.ip_pos
+        source = self.ip_pos
         # 使用D2D统一属性
         if hasattr(flit, "d2d_target_node"):
-            flit.destination = flit.d2d_target_node  # Die内目标节点源映射位置
+            destination = flit.d2d_target_node  # Die内目标节点源映射位置
         else:
-            flit.destination = getattr(flit, "target_node_id", self.ip_pos)  # 兼容旧属性
+            destination = getattr(flit, "target_node_id", self.ip_pos)  # 兼容旧属性
+
+        # 计算路径
+        path = self.routes[source][destination] if destination in self.routes[source] else [source]
+
+        # 创建请求flit副本
+        new_flit = create_d2d_flit_copy(flit, source=source, destination=destination,
+                                        path=path, attr_preset="request")
+
+        # 设置网络状态
+        new_flit.path_index = 0
+        new_flit.is_injected = False
+        new_flit.is_new_on_network = True
+        new_flit.current_position = self.ip_pos
 
         # 通过请求网络发送
-        self.networks["req"]["inject_fifo"].append(flit)
+        self.enqueue(new_flit, "req")
         self.cross_die_requests_forwarded += 1
 
     def forward_response_to_local_rn(self, flit: Flit):
         """
         将跨Die响应转发回本地原始请求节点
         """
+        # 使用统一方法创建新的NoC flit
+        from .flit import create_d2d_flit_copy
+
         # 使用D2D统一属性恢复原始目标信息
         # d2d_origin_node是源映射位置，转为目标映射位置（减去NUM_COL）
         destination = flit.d2d_origin_node - self.config.NUM_COL
@@ -155,34 +189,32 @@ class D2D_SN_Interface(IPInterface):
         else:
             path = [source]  # 如果没有路由，使用源节点作为路径
 
-        # 更新flit信息
-        flit.source = source
-        flit.destination = destination
-        flit.path = path
-        flit.path_index = 0
+        # 创建响应flit副本
+        new_flit = create_d2d_flit_copy(flit, source=source, destination=destination,
+                                        path=path, attr_preset="response")
+
+        new_flit.path_index = 0
 
         # 为write_complete响应设置正确的属性
-        if hasattr(flit, "rsp_type") and flit.rsp_type == "write_complete":
-            flit.req_type = "write"  # 写完成响应需要标记为write类型
+        if hasattr(new_flit, "rsp_type") and new_flit.rsp_type == "write_complete":
+            new_flit.req_type = "write"  # 写完成响应需要标记为write类型
             # 设置正确的source_type为D2D_SN自己（响应从D2D_SN发出）
-            flit.source_type = self.ip_type  # d2d_sn_0
+            new_flit.source_type = self.ip_type  # d2d_sn_0
             # 设置destination_type为原始请求者类型
-            flit.destination_type = flit.d2d_origin_type  # 原始请求者类型 (gdma_0)
-
-            # 不清除D2D属性，保持完整信息
+            new_flit.destination_type = new_flit.d2d_origin_type  # 原始请求者类型 (gdma_0)
 
         # 重置网络状态属性以确保能被正确inject
-        flit.is_injected = False
-        flit.is_new_on_network = True
-        flit.current_position = self.ip_pos
+        new_flit.is_injected = False
+        new_flit.is_new_on_network = True
+        new_flit.current_position = self.ip_pos
 
         # 根据响应类型选择网络
-        if hasattr(flit, "rsp_type") and flit.rsp_type == "read_data":
+        if hasattr(new_flit, "rsp_type") and new_flit.rsp_type == "read_data":
             # 读数据通过数据网络
-            self.networks["data"]["inject_fifo"].append(flit)
+            self.enqueue(new_flit, "data")
         else:
             # 写响应通过响应网络
-            self.networks["rsp"]["inject_fifo"].append(flit)
+            self.enqueue(new_flit, "rsp")
 
         self.cross_die_responses_sent += 1
 
@@ -368,6 +400,7 @@ class D2D_SN_Interface(IPInterface):
     def collect_cross_die_read_data(self, flit: Flit):
         """
         收集跨Die返回的读数据到sn_rdb，收齐burst后批量转发
+        注意: flit是AXI flit,需要复制到新flit后存储
         """
         packet_id = getattr(flit, "packet_id", -1)
         if packet_id == -1:
@@ -381,8 +414,15 @@ class D2D_SN_Interface(IPInterface):
         if packet_id not in self.sn_rdb:
             self.sn_rdb[packet_id] = []
 
+        # 创建新flit并复制AXI flit的属性（不直接存储AXI flit，因为它会被回收）
+        from .flit import create_d2d_flit_copy
+
+        # 创建临时flit用于存储（包含时间戳）
+        temp_flit = create_d2d_flit_copy(flit, source=0, destination=0,
+                                         path=[0], attr_preset="with_timestamp")
+
         # 添加到sn_rdb
-        self.sn_rdb[packet_id].append(flit)
+        self.sn_rdb[packet_id].append(temp_flit)
 
         # 检查是否收齐完整burst
         collected_flits = self.sn_rdb[packet_id]
@@ -397,6 +437,7 @@ class D2D_SN_Interface(IPInterface):
     def forward_collected_cross_die_data(self, packet_id: int, data_flits: list):
         """
         批量转发收齐的跨Die读数据到原始请求者
+        注意: data_flits是从collect_cross_die_read_data创建的temp_flit
         """
         if not data_flits:
             return
@@ -417,12 +458,12 @@ class D2D_SN_Interface(IPInterface):
         # 计算路径
         path = self.routes[source_mapped][destination_mapped] if destination_mapped in self.routes[source_mapped] else []
 
-        # 批量转发所有数据flits
+        # 批量转发所有数据flits（已经是独立的flit对象，直接更新属性）
         for i, flit in enumerate(data_flits):
-            # 设置路由信息
+            # 更新路由信息
             flit.source = source_mapped
             flit.destination = destination_mapped
-            flit.path = path.copy()  # 每个flit需要独立的路径副本
+            flit.path = path.copy()
             flit.path_index = 0
 
             # 设置类型信息
@@ -435,8 +476,7 @@ class D2D_SN_Interface(IPInterface):
             flit.current_position = self.ip_pos
 
             # 设置发送时间
-            if hasattr(flit, "departure_cycle"):
-                flit.departure_cycle = self.current_cycle
+            flit.departure_cycle = self.current_cycle
 
             # 通过数据网络发送
             self.enqueue(flit, "data")
@@ -622,10 +662,27 @@ class D2D_SN_Interface(IPInterface):
         if target_die_id is None or not self.d2d_sys:
             return
 
-        # 通过AW通道发送写请求，W通道发送数据
-        self.d2d_sys.enqueue_sn(write_req, target_die_id, self.d2d_aw_latency)
+        from .flit import create_d2d_flit_copy
+
+        # 创建新的AXI写请求flit
+        axi_write_req = create_d2d_flit_copy(write_req, source=self.ip_pos,
+                                             destination=0, path=[0],
+                                             attr_preset="request")
+
+        # 通过AW通道发送写请求（第三个参数传0，让系统自动判断channel）
+        self.d2d_sys.enqueue_sn(axi_write_req, target_die_id, 0)
+
+        # 为每个写数据flit创建AXI flit
         for flit in data_flits:
-            self.d2d_sys.enqueue_sn(flit, target_die_id, self.d2d_w_latency)
+            axi_data_flit = create_d2d_flit_copy(flit, source=self.ip_pos,
+                                                 destination=0, path=[0],
+                                                 attr_preset="data")
+            # 确保标记为写数据
+            axi_data_flit.flit_type = "data"
+            axi_data_flit.req_type = "write"
+
+            # 通过W通道发送写数据
+            self.d2d_sys.enqueue_sn(axi_data_flit, target_die_id, 0)
 
     def handle_cross_die_write_complete_response(self, flit: Flit):
         """
@@ -667,29 +724,23 @@ class D2D_SN_Interface(IPInterface):
         rsp_type = getattr(rsp, "rsp_type", "None")
         flit_position = getattr(rsp, "flit_position", "None")
 
-        # 检查是否为需要处理的跨Die写完成响应
-        if rsp_type == "write_complete" and hasattr(rsp, "d2d_origin_die") and hasattr(rsp, "d2d_target_die"):
-
+        # 只处理从AXI_B通道来的跨Die写完成响应（D2D_SN自己的业务）
+        if rsp_type == "write_complete" and flit_position == "AXI_B":
             # 防重复处理
             response_key = (packet_id, self.current_cycle)
             if response_key in self.processed_write_complete_responses:
                 return
 
-            if flit_position == "AXI_B":
-                # AXI_B通道的原始写完成响应
-                self.processed_write_complete_responses[response_key] = True
-                self.handle_cross_die_write_complete_response(rsp)
-                return
-            else:
-                # 非AXI_B的write_complete响应，只转发不处理tracker
-                # D2D_SN不应该有自己的write_complete处理逻辑
-                return
+            # AXI_B通道的原始写完成响应，需要释放D2D_SN的tracker
+            self.processed_write_complete_responses[response_key] = True
+            self.handle_cross_die_write_complete_response(rsp)
+            return
 
         # 检查req_type有效性
         if req_type in [None, "None"]:
             return
 
-        # 其他响应类型，调用父类处理
+        # 其他所有响应（包括已转发的write_complete），调用父类处理
         super()._handle_received_response(rsp)
 
     def get_statistics(self) -> dict:

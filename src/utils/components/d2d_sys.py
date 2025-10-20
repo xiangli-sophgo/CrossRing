@@ -377,7 +377,7 @@ class D2D_Sys:
         处理到达目标的flit
 
         Args:
-            flit: 到达的flit
+            flit: 到达的flit (AXI专用flit)
         """
         # 确定目标Die ID：
         # 需要根据flit的传输方向判断目标
@@ -405,6 +405,9 @@ class D2D_Sys:
             # 添加更详细的调试信息
             flit_info = f"flit_position={getattr(flit, 'flit_position', 'None')}, d2d_origin_die={getattr(flit, 'd2d_origin_die', 'None')}, d2d_target_die={getattr(flit, 'd2d_target_die', 'None')}, packet_id={getattr(flit, 'packet_id', 'None')}"
             self.logger.error(f"目标Die {target_die_id} 的接口未设置，flit信息: {flit_info}")
+            # 回收AXI flit
+            from .flit import _flit_pool
+            _flit_pool.return_flit(flit)
             return
 
         target_interfaces = self.target_die_interfaces[target_die_id]
@@ -426,10 +429,17 @@ class D2D_Sys:
             target_interface = target_interfaces.get("sn")
 
         if target_interface:
-            # 调度跨Die接收（使用当前周期，因为已经经过了AXI延迟）
+            # 在传递给目标接口前，先复制AXI flit的数据到新flit
+            # 这样接收方获得的是一个干净的flit对象，AXI flit可以立即回收
+            # 注意：这里只是传递flit引用，接收方需要创建新的NoC flit
             target_interface.schedule_cross_die_receive(flit, self.current_cycle)
+            # 重要：不能在这里回收！接收方还需要读取AXI flit的属性
+            # AXI flit会在接收方创建新NoC flit后由接收方负责回收
         else:
             self.logger.error(f"无法找到合适的目标接口")
+            # 回收AXI flit
+            from .flit import _flit_pool
+            _flit_pool.return_flit(flit)
 
     def get_statistics(self) -> dict:
         """
