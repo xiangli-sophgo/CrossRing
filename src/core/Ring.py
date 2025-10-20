@@ -12,7 +12,7 @@ import logging
 from src.core.base_model import BaseModel
 
 # from src.utils.routing_strategies import create_routing_strategy  # 暂时注释掉
-from src.utils.components import Flit, Network, Node, RingNetwork
+from src.utils.components import Flit, Network, RingNetwork
 from config.config import CrossRingConfig
 
 

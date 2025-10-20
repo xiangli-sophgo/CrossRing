@@ -144,6 +144,25 @@ class Flit:
 
     last_id = 0
 
+    # 全局order_id分配器（从Node类迁移）
+    _global_order_id_allocator = {}  # {(src, dest): {"REQ": next_id, "RSP": next_id, "DATA": next_id}}
+
+    @classmethod
+    def get_next_order_id(cls, src, dest, packet_category):
+        """获取下一个顺序ID"""
+        key = (src, dest)
+        if key not in cls._global_order_id_allocator:
+            cls._global_order_id_allocator[key] = {"REQ": 1, "RSP": 1, "DATA": 1}
+
+        current_id = cls._global_order_id_allocator[key][packet_category]
+        cls._global_order_id_allocator[key][packet_category] += 1
+        return current_id
+
+    @classmethod
+    def reset_order_ids(cls):
+        """重置所有顺序ID"""
+        cls._global_order_id_allocator.clear()
+
     def __init__(self, source, destination, path):
         self.source = source
         self.source_original = -1
@@ -272,10 +291,7 @@ class Flit:
         src = self.source_original if self.source_original != -1 else self.source
         dest = self.destination_original if self.destination_original != -1 else self.destination
 
-        # 导入Node类获取顺序ID
-        from .node import Node
-
-        self.src_dest_order_id = Node.get_next_order_id(src, dest, self.packet_category)
+        self.src_dest_order_id = Flit.get_next_order_id(src, dest, self.packet_category)
 
     def inject(self, network: "Network"):  # 使用字符串类型标注
         if self.path_index == 0 and not self.is_injected:

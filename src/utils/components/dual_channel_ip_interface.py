@@ -261,46 +261,46 @@ class DualChannelIPInterface(IPInterface):
 
         if flit.req_type == "read":
             # 读数据到达RN端，需要收集到data buffer中
-            self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
+            self.rn_rdb[flit.packet_id].append(flit)
             # 检查是否收集完整个burst
-            if len(self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id]) == flit.burst_length:
-                req = next((req for req in self.node.rn_tracker["read"][self.ip_type][self.ip_pos] if req.packet_id == flit.packet_id), None)
+            if len(self.rn_rdb[flit.packet_id]) == flit.burst_length:
+                req = next((req for req in self.rn_tracker["read"] if req.packet_id == flit.packet_id), None)
                 if req:
                     # 立即释放tracker和更新计数
-                    self.node.rn_tracker["read"][self.ip_type][self.ip_pos].remove(req)
-                    self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos]["count"] += 1
-                    self.node.rn_tracker_pointer["read"][self.ip_type][self.ip_pos] -= 1
-                    self.node.rn_rdb_count[self.ip_type][self.ip_pos]["count"] += req.burst_length
+                    self.rn_tracker["read"].remove(req)
+                    self.rn_tracker_count["read"]["count"] += 1
+                    self.rn_tracker_pointer["read"] -= 1
+                    self.rn_rdb_count["count"] += req.burst_length
 
                     # 双通道时间戳同步：处理分散在两个通道的flit
                     self._sync_dual_channel_timestamps(flit.packet_id, req, "read", None)
 
                     # 清理data buffer（数据已经收集完成）
-                    self.node.rn_rdb[self.ip_type][self.ip_pos].pop(flit.packet_id)
+                    self.rn_rdb.pop(flit.packet_id)
 
         elif flit.req_type == "write":
             # 写数据到达SN端，需要收集到data buffer中
-            self.node.sn_wdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
+            self.sn_wdb[flit.packet_id].append(flit)
             # 检查是否收集完整个burst
-            if len(self.node.sn_wdb[self.ip_type][self.ip_pos][flit.packet_id]) == flit.burst_length:
-                req = next((req for req in self.node.sn_tracker[self.ip_type][self.ip_pos] if req.packet_id == flit.packet_id), None)
+            if len(self.sn_wdb[flit.packet_id]) == flit.burst_length:
+                req = next((req for req in self.sn_tracker if req.packet_id == flit.packet_id), None)
                 if req:
                     # 设置tracker延迟释放时间
                     release_time = self.current_cycle + self.config.SN_TRACKER_RELEASE_LATENCY
 
                     # 初始化释放时间字典（如果不存在）
-                    if not hasattr(self.node, "sn_tracker_release_time"):
+                    if not hasattr(self, "sn_tracker_release_time"):
                         from collections import defaultdict
-                        self.node.sn_tracker_release_time = defaultdict(list)
+                        self.sn_tracker_release_time = defaultdict(list)
 
                     # 双通道时间戳同步：处理分散在两个通道的flit
                     self._sync_dual_channel_timestamps(flit.packet_id, req, "write", release_time)
 
                     # 清理data buffer（数据已经收集完成）
-                    self.node.sn_wdb[self.ip_type][self.ip_pos].pop(flit.packet_id)
+                    self.sn_wdb.pop(flit.packet_id)
 
                     # 添加到延迟释放队列
-                    self.node.sn_tracker_release_time[release_time].append((self.ip_type, self.ip_pos, req))
+                    self.sn_tracker_release_time[release_time].append((self.ip_type, self.ip_pos, req))
 
     def _sync_dual_channel_timestamps(self, packet_id, req, req_type, release_time=None):
         """同步双通道中同一packet的flit时间戳"""

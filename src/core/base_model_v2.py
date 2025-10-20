@@ -3,7 +3,7 @@ from collections import deque, defaultdict
 
 from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths, all_pairs_paths_directional
 from config.config import CrossRingConfig
-from src.utils.components import Flit, Node, TokenBucket, IPInterface
+from src.utils.components import Flit, TokenBucket, IPInterface
 from src.utils.components.network_v2 import Network as NetworkV2
 
 from src.core.Link_State_Visualizer import NetworkLinkVisualizer
@@ -593,13 +593,13 @@ class BaseModel:
 
     def release_completed_sn_tracker(self):
         """Check if any trackers can be released based on the current cycle."""
-        for release_time in sorted(self.node.sn_tracker_release_time.keys()):
+        for release_time in sorted(self.sn_tracker_release_time.keys()):
             if release_time > self.cycle:
                 continue
-            tracker_list = self.node.sn_tracker_release_time.pop(release_time)
+            tracker_list = self.sn_tracker_release_time.pop(release_time)
             for sn_type, ip_pos, req in tracker_list:
                 # 检查 tracker 是否还在列表中（避免重复释放）
-                if req in self.node.sn_tracker[sn_type][ip_pos]:
+                if req in self.sn_tracker:
                     ip_interface: IPInterface = self.ip_modules[(sn_type, ip_pos)]
                     ip_interface.release_completed_sn_tracker(req)
 
@@ -895,7 +895,7 @@ class BaseModel:
         req.original_destination_type = f"{req_data[4]}_0" if "_" not in req_data[4] else req_data[4]
         req.traffic_id = traffic_id  # 添加traffic_id标记
 
-        req.packet_id = Node.get_next_packet_id()
+        req.packet_id = BaseModel.get_next_packet_id()
         req.req_type = "read" if req_data[5] == "R" else "write"
         req.req_attr = "new"
         # req.cmd_entry_cake0_cycle = self.cycle
@@ -1848,7 +1848,7 @@ class BaseModel:
 
         # Clear flit and packet IDs (assuming these are class methods)
         Flit.clear_flit_id()
-        Node.clear_packet_id()
+        BaseModel.reset_packet_id()
 
         # Add performance statistics
         perf_stats = self.performance_monitor.get_summary()

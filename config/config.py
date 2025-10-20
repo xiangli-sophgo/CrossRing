@@ -43,6 +43,7 @@ class CrossRingConfig:
         self.ITag_TRIGGER_Th_V = args.ITag_TRIGGER_Th_V
         self.ITag_MAX_NUM_H = args.ITag_MAX_Num_H
         self.ITag_MAX_NUM_V = args.ITag_MAX_Num_V
+        # RB only tag 数量配置（仅在 network_v2 中生效）
         self.RB_ONLY_TAG_NUM_HORIZONTAL = args.RB_ONLY_TAG_NUM_HORIZONTAL
         self.RB_ONLY_TAG_NUM_VERTICAL = args.RB_ONLY_TAG_NUM_VERTICAL
         # 验证标签数量参数在有效范围内
@@ -87,7 +88,6 @@ class CrossRingConfig:
         self.TR_ALLOWED_SOURCE_NODES = args.TR_ALLOWED_SOURCE_NODES
         self.TU_ALLOWED_SOURCE_NODES = args.TU_ALLOWED_SOURCE_NODES
         self.TD_ALLOWED_SOURCE_NODES = args.TD_ALLOWED_SOURCE_NODES
-        self.USE_NEW_HANDLE = args.USE_NEW_HANDLE
         self.IP_L2H_FIFO_DEPTH = args.IP_L2H_FIFO_DEPTH
         self.IP_H2L_H_FIFO_DEPTH = args.IP_H2L_H_FIFO_DEPTH
         self.IP_H2L_L_FIFO_DEPTH = args.IP_H2L_L_FIFO_DEPTH
@@ -469,8 +469,8 @@ class CrossRingConfig:
         parser.add_argument("--ITag_TRIGGER_Th_V", type=int, default=default_config["ITag_TRIGGER_Th_V"], help="Vertical ring I-Tag trigger threshold")
         parser.add_argument("--ITag_MAX_Num_H", type=int, default=default_config["ITag_MAX_Num_H"], help="Maximum number of I-Tag reservations for horizontal ring XY nodes")
         parser.add_argument("--ITag_MAX_Num_V", type=int, default=default_config["ITag_MAX_Num_V"], help="Maximum number of I-Tag reservations for vertical ring XY nodes")
-        parser.add_argument("--RB_ONLY_TAG_NUM_HORIZONTAL", type=int, default=default_config["RB_ONLY_TAG_NUM_HORIZONTAL"], help="Number of RB only tags per horizontal ring")
-        parser.add_argument("--RB_ONLY_TAG_NUM_VERTICAL", type=int, default=default_config["RB_ONLY_TAG_NUM_VERTICAL"], help="Number of RB only tags per vertical ring")
+        parser.add_argument("--RB_ONLY_TAG_NUM_HORIZONTAL", type=int, default=default_config["RB_ONLY_TAG_NUM_HORIZONTAL"], help="Number of RB only tags per horizontal ring (only effective in base_model_v2/network_v2)")
+        parser.add_argument("--RB_ONLY_TAG_NUM_VERTICAL", type=int, default=default_config["RB_ONLY_TAG_NUM_VERTICAL"], help="Number of RB only tags per vertical ring (only effective in base_model_v2/network_v2)")
         # 带宽限制参数（统一TX和RX）
         parser.add_argument("--GDMA_BW_LIMIT", type=int, default=default_config["GDMA_BW_LIMIT"], help="GDMA Bandwidth limit.")
         parser.add_argument("--SDMA_BW_LIMIT", type=int, default=default_config["SDMA_BW_LIMIT"], help="SDMA Bandwidth limit.")
@@ -536,9 +536,6 @@ class CrossRingConfig:
         )
         parser.add_argument(
             "--TD_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TD_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TD (down) direction"
-        )
-        parser.add_argument(
-            "--USE_NEW_HANDLE", type=bool, default=default_config.get("USE_NEW_HANDLE", False), help="Use new unified handle_flit implementation"
         )
 
         # 添加仲裁器配置支持

@@ -3,7 +3,7 @@ from collections import deque, defaultdict
 
 from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths
 from config.config import CrossRingConfig
-from src.utils.components import Flit, Network, Node, TokenBucket, IPInterface
+from src.utils.components import Flit, Network, TokenBucket, IPInterface
 
 from src.core.Link_State_Visualizer import NetworkLinkVisualizer
 import matplotlib.pyplot as plt
@@ -118,6 +118,20 @@ def _parse_traffic_file(abs_path: str, net_freq: int):
 
 
 class BaseModel:
+    # 全局packet_id生成器（从Node类迁移）
+    _global_packet_id = 0
+
+    @classmethod
+    def get_next_packet_id(cls):
+        """获取下一个packet_id"""
+        cls._global_packet_id += 1
+        return cls._global_packet_id
+
+    @classmethod
+    def reset_packet_id(cls):
+        """重置packet_id计数器"""
+        cls._global_packet_id = 0
+
     def __init__(
         self,
         model_type,
@@ -228,7 +242,6 @@ class BaseModel:
         self.sn_positions_list = list(self.sn_positions)
         self.flit_positions_list = list(self.flit_positions)
         self.routes = find_shortest_paths(self.adjacency_matrix)
-        self.node = Node(self.config)
         self.ip_modules = {}
         for ip_pos in self.flit_positions:
             for ip_type in self.config.CH_NAME_LIST:
@@ -243,7 +256,6 @@ class BaseModel:
                         self.req_network,
                         self.rsp_network,
                         self.data_network,
-                        self.node,
                         self.routes,
                     )
                 elif ip_type == "d2d_sn_0":
@@ -256,7 +268,6 @@ class BaseModel:
                         self.req_network,
                         self.rsp_network,
                         self.data_network,
-                        self.node,
                         self.routes,
                     )
                 else:
@@ -268,7 +279,6 @@ class BaseModel:
                         self.req_network,
                         self.rsp_network,
                         self.data_network,
-                        self.node,
                         self.routes,
                     )
         self.flits = []
@@ -650,15 +660,16 @@ class BaseModel:
 
     def release_completed_sn_tracker(self):
         """Check if any trackers can be released based on the current cycle."""
-        for release_time in sorted(self.node.sn_tracker_release_time.keys()):
-            if release_time > self.cycle:
-                continue
-            tracker_list = self.node.sn_tracker_release_time.pop(release_time)
-            for sn_type, ip_pos, req in tracker_list:
-                # 检查 tracker 是否还在列表中（避免重复释放）
-                if req in self.node.sn_tracker[sn_type][ip_pos]:
-                    ip_interface: IPInterface = self.ip_modules[(sn_type, ip_pos)]
-                    ip_interface.release_completed_sn_tracker(req)
+        # 遍历所有IP模块，检查各自的tracker释放队列
+        for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
+            for release_time in sorted(ip_interface.sn_tracker_release_time.keys()):
+                if release_time > self.cycle:
+                    continue
+                tracker_list = ip_interface.sn_tracker_release_time.pop(release_time)
+                for req in tracker_list:
+                    # 检查 tracker 是否还在列表中（避免重复释放）
+                    if req in ip_interface.sn_tracker:
+                        ip_interface.release_completed_sn_tracker(req)
 
     def _move_pre_to_queues(self, network: Network, in_pos):
         """Move all items from pre-injection queues to injection queues for a given network."""
@@ -1021,7 +1032,7 @@ class BaseModel:
         req.original_destination_type = f"{req_data[4]}_0" if "_" not in req_data[4] else req_data[4]
         req.traffic_id = traffic_id  # 添加traffic_id标记
 
-        req.packet_id = Node.get_next_packet_id()
+        req.packet_id = BaseModel.get_next_packet_id()
         req.req_type = "read" if req_data[5] == "R" else "write"
         req.req_attr = "new"
         # req.cmd_entry_cake0_cycle = self.cycle
@@ -1949,7 +1960,7 @@ class BaseModel:
 
         # Clear flit and packet IDs (assuming these are class methods)
         Flit.clear_flit_id()
-        Node.clear_packet_id()
+        BaseModel.reset_packet_id()
 
         # Add performance statistics
         perf_stats = self.performance_monitor.get_summary()

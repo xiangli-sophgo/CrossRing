@@ -584,7 +584,6 @@ class D2D_Model:
 
         # 创建flit（参考BaseModel._process_single_request）
         from src.utils.components.flit import Flit
-        from src.utils.components.node import Node
 
         path = die_model.routes[source_physical][intermediate_dest]
         req = Flit.create_flit(source_physical, intermediate_dest, path)
@@ -612,7 +611,7 @@ class D2D_Model:
         req.req_type = "read" if req_type == "R" else "write"
         req.req_attr = "new"
         req.traffic_id = traffic_id
-        req.packet_id = Node.get_next_packet_id()
+        req.packet_id = BaseModel.get_next_packet_id()
 
         # 设置保序信息
         req.set_packet_category_and_order_id()

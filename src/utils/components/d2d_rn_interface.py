@@ -17,9 +17,9 @@ class D2D_RN_Interface(IPInterface):
     继承自IPInterface，复用所有现有功能
     """
 
-    def __init__(self, ip_type: str, ip_pos: int, config, req_network, rsp_network, data_network, node, routes, ip_id: int = None):
+    def __init__(self, ip_type: str, ip_pos: int, config, req_network, rsp_network, data_network, routes, ip_id: int = None):
         # 调用父类初始化
-        super().__init__(ip_type, ip_pos, config, req_network, rsp_network, data_network, node, routes, ip_id)
+        super().__init__(ip_type, ip_pos, config, req_network, rsp_network, data_network, routes, ip_id)
 
         # D2D特有属性
         self.die_id = getattr(config, "DIE_ID", 0)  # 当前Die的ID
@@ -113,17 +113,24 @@ class D2D_RN_Interface(IPInterface):
         packet_id = flit.packet_id
 
         # 检查D2D_RN的写资源
-        has_tracker = self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos]["count"] > 0
-        has_databuffer = self.node.rn_wdb_count[self.ip_type][self.ip_pos]["count"] >= flit.burst_length
+        has_tracker = self.rn_tracker_count["write"]["count"] > 0
+        has_databuffer = self.rn_wdb_count["count"] >= flit.burst_length
 
         if has_tracker and has_databuffer:
             # 消耗资源
-            self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos]["count"] -= 1
-            self.node.rn_wdb_count[self.ip_type][self.ip_pos]["count"] -= flit.burst_length
+            self.rn_tracker_count["write"]["count"] -= 1
+            self.rn_wdb_count["count"] -= flit.burst_length
 
             # 缓存写请求等待写数据
             self.cross_die_write_requests[packet_id] = flit
             self.cross_die_write_data_cache[packet_id] = []
+
+            # 添加到tracker list和更新pointer（修复：确保datasend响应处理器能找到请求）
+            self.rn_tracker["write"].append(flit)
+            self.rn_tracker_pointer["write"] += 1
+        else:
+            # 资源不足：这违反了AXI协议！应该在D2D_SN预留资源
+            logging.warning(f"[D2D_RN] packet_id={packet_id} 资源不足被丢弃! tracker={self.rn_tracker_count['write']['count']}, wdb={self.rn_wdb_count['count']}")
 
     def handle_cross_die_write_data(self, flit: Flit):
         """
@@ -174,7 +181,7 @@ class D2D_RN_Interface(IPInterface):
 
         local_write_req.source_type = self.ip_type
         local_write_req.destination_type = write_req.d2d_target_type
-        local_write_req.req_attr = "new"
+        local_write_req.req_attr = "old"  # 标记为old避免重复分配tracker（tracker已在handle_cross_die_write_request中分配）
 
         # 设置路径信息
         local_write_req.path_index = 0
@@ -185,8 +192,15 @@ class D2D_RN_Interface(IPInterface):
         # 发送写请求
         self.enqueue(local_write_req, "req")
 
-        # 准备写数据（将在收到data_send响应后发送）
-        self.node.rn_wdb[self.ip_type][self.ip_pos][write_req.packet_id] = data_flits
+        # 替换tracker list中的跨Die请求为本地写请求，确保create_write_packet使用正确的source/destination
+        tracker_list = self.rn_tracker["write"]
+        for i, req in enumerate(tracker_list):
+            if req.packet_id == write_req.packet_id:
+                tracker_list[i] = local_write_req
+                break
+
+        # 注意：不预填充wdb，让create_write_packet生成正确的Die内写数据
+        # 跨Die写数据已缓存在cross_die_write_data_cache中
 
         self.cross_die_requests_forwarded += 1
 
@@ -198,12 +212,12 @@ class D2D_RN_Interface(IPInterface):
         """
         packet_id = getattr(flit, "packet_id", None)
         req_type = getattr(flit, "req_type", "read")
-        
+
         # 确保burst_length有效（后面的代码需要用到）
         burst_length = getattr(flit, "burst_length", 4)
         if burst_length is None or burst_length <= 0:
             burst_length = 4
-        
+
         # print(f"[D2D_RN] 转发跨Die请求 packet_id={packet_id}, req_type={req_type} (tracker已在基类分配)")
 
         # 使用D2D统一属性获取目标节点位置
@@ -276,7 +290,7 @@ class D2D_RN_Interface(IPInterface):
 
         # 记录D2D_RN的tracker信息（用于后续数据返回时释放）
         if req_type == "read":
-            self.node.rn_tracker["read"][self.ip_type][self.ip_pos].append(new_flit)
+            self.rn_tracker["read"].append(new_flit)
             # 设置burst_length确保释放时正确计算databuffer
             new_flit.burst_length = burst_length
 
@@ -372,39 +386,64 @@ class D2D_RN_Interface(IPInterface):
 
         # 检查是否为跨Die写请求的datasend响应
         if hasattr(rsp, "rsp_type") and rsp.rsp_type == "datasend" and packet_id in self.cross_die_write_requests:
-            # 这是跨Die写请求的datasend响应，发送写数据后需要发送write_complete
+            # 这是跨Die写请求的datasend响应，需要发送跨Die写数据到DDR
 
-            # 调用父类处理（会发送写数据）
-            super()._handle_received_response(rsp)
+            # 获取tracker中的请求（已被替换为local_write_req）
+            req = next((r for r in self.rn_tracker["write"]
+                       if r.packet_id == packet_id), None)
+
+            if req and packet_id in self.cross_die_write_data_cache:
+                # 根据跨Die写数据重新创建Die内写数据（参考create_write_packet）
+                cross_die_data_flits = self.cross_die_write_data_cache[packet_id]
+                local_data_flits = []
+
+                for i, cross_die_flit in enumerate(cross_die_data_flits):
+                    # 创建新的Die内写数据flit
+                    from .flit import Flit
+                    local_flit = Flit(req.source, req.destination, req.path)
+
+                    # 复制关键属性
+                    local_flit.sync_latency_record(req)
+                    local_flit.source_original = req.source_original if hasattr(req, 'source_original') else req.source
+                    local_flit.destination_original = req.destination_original if hasattr(req, 'destination_original') else req.destination
+                    local_flit.flit_type = "data"
+                    local_flit.set_packet_category_and_order_id()
+                    local_flit.departure_cycle = self.current_cycle + i * self.config.NETWORK_FREQUENCY
+                    local_flit.req_departure_cycle = req.departure_cycle if hasattr(req, 'departure_cycle') else self.current_cycle
+                    local_flit.entry_db_cycle = req.entry_db_cycle if hasattr(req, 'entry_db_cycle') else self.current_cycle
+                    local_flit.source_type = req.source_type
+                    local_flit.destination_type = req.destination_type
+                    local_flit.original_source_type = getattr(req, 'original_source_type', req.source_type)
+                    local_flit.original_destination_type = getattr(req, 'original_destination_type', req.destination_type)
+                    local_flit.req_type = req.req_type
+                    local_flit.packet_id = req.packet_id
+                    local_flit.flit_id = i
+                    local_flit.burst_length = req.burst_length
+                    local_flit.traffic_id = getattr(req, 'traffic_id', 0)
+                    local_flit.is_last_flit = (i == len(cross_die_data_flits) - 1)
+
+                    # 继承D2D属性
+                    for attr in ["d2d_origin_die", "d2d_origin_node", "d2d_origin_type",
+                                "d2d_target_die", "d2d_target_node", "d2d_target_type"]:
+                        if hasattr(req, attr):
+                            setattr(local_flit, attr, getattr(req, attr))
+
+                    local_data_flits.append(local_flit)
+
+                # 发送新创建的Die内写数据
+                for flit in local_data_flits:
+                    self.enqueue(flit, "data")
+
+                # 清理wdb（不需要放到wdb，直接发送）
+                self.rn_wdb.pop(packet_id, None)
 
             # 防重复：检查是否已经发送过write_complete响应
             if packet_id not in self.sent_write_complete_responses:
                 # 发送写数据完成后，立即发送write_complete响应到AXI_B通道
+                # tracker会在send_cross_die_write_complete中释放
                 self.send_cross_die_write_complete(packet_id)
                 # 标记已发送
                 self.sent_write_complete_responses.add(packet_id)
-            return
-
-        # 检查是否为跨Die写完成响应
-        elif hasattr(rsp, "rsp_type") and rsp.rsp_type == "write_complete" and packet_id in self.cross_die_write_requests:
-            # 这是跨Die写请求的本地完成响应，需要通过B通道返回给源Die
-
-            # 防重复：检查是否已经发送过write_complete响应
-            if packet_id not in self.sent_write_complete_responses:
-                # 清理跨Die写相关缓存
-                if packet_id in self.cross_die_write_requests:
-                    write_req = self.cross_die_write_requests.pop(packet_id)
-                    self.cross_die_write_data_cache.pop(packet_id, None)
-
-                    # 释放D2D_RN的tracker
-                    self.node.rn_tracker_count["write"][self.ip_type][self.ip_pos]["count"] += 1
-
-                    # 修改响应类型为write_complete并通过B通道返回
-                    rsp.rsp_type = "write_complete"
-                    self.handle_cross_die_response(rsp)
-
-                    # 标记已发送
-                    self.sent_write_complete_responses.add(packet_id)
             return
 
         # 其他响应类型，调用父类处理
@@ -440,6 +479,19 @@ class D2D_RN_Interface(IPInterface):
         source_die_id = write_req.d2d_origin_die
         if self.d2d_sys and source_die_id is not None:
             self.d2d_sys.enqueue_rn(write_complete_rsp, source_die_id, self.d2d_b_latency, channel="B")
+
+        # 发送后立即释放D2D_RN的tracker和WDB资源（符合设计文档3.3节要求）
+        self.cross_die_write_requests.pop(packet_id)
+        self.cross_die_write_data_cache.pop(packet_id, None)
+        self.rn_tracker_count["write"]["count"] += 1
+        self.rn_wdb_count["count"] += write_req.burst_length
+
+        # 从tracker list中移除并更新pointer（通过packet_id查找，因为tracker可能已被替换为local_write_req）
+        tracker_list = self.rn_tracker["write"]
+        req_to_remove = next((r for r in tracker_list if r.packet_id == packet_id), None)
+        if req_to_remove:
+            tracker_list.remove(req_to_remove)
+            self.rn_tracker_pointer["write"] -= 1
 
     def process_inject_request(self, flit: Flit, network_type: str):
         """
@@ -499,17 +551,17 @@ class D2D_RN_Interface(IPInterface):
                 d2d_model.record_read_data_received(flit.packet_id, self.die_id, burst_length, is_cross_die=True)
 
             # 收集到data buffer中，但不更新网络的recv_flits_num
-            if flit.packet_id not in self.node.rn_rdb[self.ip_type][self.ip_pos]:
-                self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id] = []
-            self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id].append(flit)
+            if flit.packet_id not in self.rn_rdb:
+                self.rn_rdb[flit.packet_id] = []
+            self.rn_rdb[flit.packet_id].append(flit)
 
             # 注意：这里不调用父类的网络统计更新，避免跨Die数据被计入本Die的recv_flits_num
 
             # 检查是否收集完整个burst - 只有在刚好收齐时才处理一次
-            collected_flits = self.node.rn_rdb[self.ip_type][self.ip_pos][flit.packet_id]
+            collected_flits = self.rn_rdb[flit.packet_id]
             if len(collected_flits) == flit.burst_length:
                 # 找到对应的tracker但不释放
-                req = next((req for req in self.node.rn_tracker["read"][self.ip_type][self.ip_pos] if req.packet_id == flit.packet_id), None)
+                req = next((req for req in self.rn_tracker["read"] if req.packet_id == flit.packet_id), None)
 
                 if req:
                     # 设置D2D_RN节点的处理时间戳（但不设置最终完成时间）
@@ -529,7 +581,7 @@ class D2D_RN_Interface(IPInterface):
     def handle_cross_die_data_response(self, data_flits: list, tracker_req):
         """
         处理跨Die数据响应，发送回源Die
-        修复版本：数据发送后立即释放tracker资源
+        根据DDR返回的数据重新创建跨Die路由的读数据flit（类似写请求处理）
         """
         if not data_flits:
             return
@@ -542,29 +594,61 @@ class D2D_RN_Interface(IPInterface):
             # 不需要跨Die返回
             return
 
-        # 为每个数据flit准备跨Die传输
-        for i, flit in enumerate(data_flits):
-            # 修正flit_id：数据包应该有递增的flit_id (0, 1, 2, 3)
-            flit.flit_id = i
-            # 设置最后一个flit标记
-            flit.is_last_flit = i == len(data_flits) - 1
+        # 根据DDR返回的数据重新创建跨Die读数据flit
+        cross_die_data_flits = []
 
-            # 使用D2D_Sys进行AXI R通道传输
+        for i, local_flit in enumerate(data_flits):
+            # 创建新的跨Die读数据flit（从D2D_RN返回到D2D_SN）
+            from .flit import Flit
+
+            # 计算跨Die返回路径：D2D_RN → D2D_SN
+            source = self.ip_pos  # D2D_RN的位置
+            destination = first_flit.d2d_origin_node  # 原始请求者的源映射位置
+            path = [source]  # AXI传输不需要NoC路径
+
+            cross_die_flit = Flit(source, destination, path)
+
+            # 复制关键属性
+            cross_die_flit.sync_latency_record(tracker_req)
+            cross_die_flit.source_original = self.ip_pos
+            cross_die_flit.destination_original = first_flit.d2d_origin_node
+            cross_die_flit.flit_type = "data"
+            cross_die_flit.req_type = "read"
+            cross_die_flit.rsp_type = "read_data"
+            cross_die_flit.packet_id = first_flit.packet_id
+            cross_die_flit.flit_id = i
+            cross_die_flit.burst_length = first_flit.burst_length
+            cross_die_flit.traffic_id = getattr(first_flit, 'traffic_id', 0)
+            cross_die_flit.is_last_flit = (i == len(data_flits) - 1)
+            cross_die_flit.source_type = self.ip_type
+            cross_die_flit.destination_type = first_flit.d2d_origin_type
+
+            # 继承D2D属性
+            for attr in ["d2d_origin_die", "d2d_origin_node", "d2d_origin_type",
+                        "d2d_target_die", "d2d_target_node", "d2d_target_type"]:
+                if hasattr(first_flit, attr):
+                    setattr(cross_die_flit, attr, getattr(first_flit, attr))
+
+            # 继承时间戳信息
+            for attr in ["departure_cycle", "entry_db_cycle", "req_departure_cycle", "leave_db_cycle"]:
+                if hasattr(local_flit, attr):
+                    setattr(cross_die_flit, attr, getattr(local_flit, attr))
+
+            cross_die_data_flits.append(cross_die_flit)
+
+        # 通过AXI R通道发送新创建的跨Die读数据
+        for flit in cross_die_data_flits:
             if self.d2d_sys:
                 self.d2d_sys.enqueue_rn(flit, source_die_id, self.d2d_r_latency, channel="R")
 
         # 数据发送到AXI通道后，立即释放D2D_RN的tracker和RDB资源
-        if tracker_req in self.node.rn_tracker["read"][self.ip_type][self.ip_pos]:
-            self.node.rn_tracker["read"][self.ip_type][self.ip_pos].remove(tracker_req)
-            self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos]["count"] += 1
-            self.node.rn_tracker_pointer["read"][self.ip_type][self.ip_pos] -= 1
-            self.node.rn_rdb_count[self.ip_type][self.ip_pos]["count"] += tracker_req.burst_length
+        if tracker_req in self.rn_tracker["read"]:
+            self.rn_tracker["read"].remove(tracker_req)
+            self.rn_tracker_count["read"]["count"] += 1
+            self.rn_tracker_pointer["read"] -= 1
+            self.rn_rdb_count["count"] += tracker_req.burst_length
 
-            # print(f"[D2D_RN] 立即释放tracker资源 packet {getattr(first_flit, 'packet_id', '?')}: "
-            #   f"tracker_count={self.node.rn_tracker_count['read'][self.ip_type][self.ip_pos]}, "
-            #   f"rdb_count={self.node.rn_rdb_count[self.ip_type][self.ip_pos]}")
-
-        self.cross_die_data_responses_sent = getattr(self, "cross_die_data_responses_sent", 0) + len(data_flits)
+        self.cross_die_data_responses_sent = getattr(self, "cross_die_data_responses_sent", 0) + len(cross_die_data_flits)
 
     def get_statistics(self) -> dict:
         """获取D2D_RN统计信息"""
@@ -575,7 +659,7 @@ class D2D_RN_Interface(IPInterface):
             "cross_die_requests_received": self.cross_die_requests_received,
             "cross_die_requests_forwarded": self.cross_die_requests_forwarded,
             "pending_receives": len(self.cross_die_receive_queue),
-            "d2d_rn_tracker_count": self.node.rn_tracker_count["read"][self.ip_type][self.ip_pos],
-            "d2d_rn_rdb_count": self.node.rn_rdb_count[self.ip_type][self.ip_pos],
+            "d2d_rn_tracker_count": self.rn_tracker_count["read"],
+            "d2d_rn_rdb_count": self.rn_rdb_count,
         }
         return stats

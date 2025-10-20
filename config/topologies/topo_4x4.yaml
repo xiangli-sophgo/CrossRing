@@ -104,9 +104,6 @@ IP_L2H_FIFO_DEPTH: 3
 IP_H2L_H_FIFO_DEPTH: 2
 IP_H2L_L_FIFO_DEPTH: 2
 
-# 标签配置 (使用默认值)
+# 标签配置 (仅在 base_model_v2/network_v2 中生效，base_model/d2d_model 中无效)
 RB_ONLY_TAG_NUM_HORIZONTAL: 2
 RB_ONLY_TAG_NUM_VERTICAL: 3
-
-# 功能开关
-USE_NEW_HANDLE: false
