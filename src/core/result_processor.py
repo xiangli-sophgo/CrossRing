@@ -121,6 +121,24 @@ class BandwidthAnalyzer:
     6. 生成统一报告
     """
 
+    # ==================== 类常量定义 ====================
+    # IP类型颜色映射（统一定义，所有子类共享）
+    IP_COLOR_MAP = {
+        "GDMA": "#4472C4",  # 蓝色
+        "SDMA": "#ED7D31",  # 橙色
+        "CDMA": "#70AD47",  # 绿色
+        "DDR": "#C00000",  # 红色
+        "L2M": "#7030A0",  # 紫色
+        "D2D_RN": "#00B0F0",  # 青色
+        "D2D_SN": "#FFC000",  # 黄色
+        "OTHER": "#808080",  # 灰色
+    }
+
+    # IP类型分类
+    RN_TYPES = ["GDMA", "SDMA", "CDMA"]
+    SN_TYPES = ["DDR"]
+    MAX_ROWS = 3  # IP信息框最大行数
+
     def _calculate_latency_stats(self):
         """计算并返回延迟统计数据字典，过滤掉无穷大"""
         import math
@@ -1079,6 +1097,581 @@ class BandwidthAnalyzer:
 
         return total_bandwidth
 
+    def _calculate_bandwidth_alpha(self, bandwidth, min_bandwidth, max_bandwidth):
+        """
+        根据带宽值计算透明度
+        带宽越大，alpha越大（不透明度越高，颜色越深）
+
+        Args:
+            bandwidth: 当前带宽值
+            min_bandwidth: 最小带宽
+            max_bandwidth: 最大带宽
+
+        Returns:
+            alpha值 (0.2-1.0)
+        """
+        if max_bandwidth <= min_bandwidth:
+            return 0.6  # 默认中等透明度
+
+        # 归一化到 0-1
+        normalized = (bandwidth - min_bandwidth) / (max_bandwidth - min_bandwidth)
+
+        # 映射到 alpha 范围 (0.2-1.0)，带宽越大alpha越大
+        alpha = 0.2 + normalized * 0.8
+        return max(0.2, min(1.0, alpha))
+
+    def _draw_ip_info_box(self, ax, x, y, node, config, mode, square_size, max_ip_bandwidth=None, min_ip_bandwidth=None):
+        """
+        绘制IP信息框 - 在一个框内显示所有有流量的IP实例（使用小方块+透明度）
+
+        Args:
+            ax: matplotlib坐标轴
+            x, y: 节点中心位置
+            node: 节点ID
+            config: 配置对象
+            mode: 显示模式
+            square_size: 节点方块大小
+            max_ip_bandwidth: 全局最大IP带宽
+            min_ip_bandwidth: 全局最小IP带宽
+        """
+        from matplotlib.patches import Rectangle
+        from collections import defaultdict
+
+        # 计算物理位置
+        physical_col = node % config.NUM_COL
+        physical_row = node // config.NUM_COL
+
+        # 收集该节点所有有流量的IP类型
+        active_ips = []
+
+        # 从ip_bandwidth_data获取数据
+        if hasattr(self, "ip_bandwidth_data") and self.ip_bandwidth_data is not None:
+            if mode in self.ip_bandwidth_data:
+                mode_data = self.ip_bandwidth_data[mode]
+                for ip_type, data_matrix in mode_data.items():
+                    # 转换为偶数行索引
+                    matrix_row = physical_row // 2
+                    if matrix_row < data_matrix.shape[0] and physical_col < data_matrix.shape[1]:
+                        bandwidth = data_matrix[matrix_row, physical_col]
+                        if bandwidth > 0.001:
+                            active_ips.append((ip_type.upper(), bandwidth))
+
+        # 绘制IP信息框 - 正方形
+        ip_size = square_size * 3
+        ip_x = x - square_size - ip_size * 0.4
+        ip_y = y + 0.04
+
+        # 绘制IP信息框外框
+        ip_rect = Rectangle(
+            (ip_x - ip_size / 2, ip_y - ip_size / 2),
+            width=ip_size,
+            height=ip_size,
+            facecolor="lightyellow" if active_ips else "lightcyan",
+            edgecolor="black",
+            linewidth=1,
+            zorder=2,
+        )
+        ax.add_patch(ip_rect)
+
+        # 如果没有活跃IP，直接返回
+        if not active_ips:
+            return
+
+        # 按IP基本类型分组（去除实例编号）
+        ip_type_count = defaultdict(list)
+        for ip_type, bw in active_ips:
+            # 提取基本类型
+            base_type = ip_type.split("_")[0] if "_" in ip_type else ip_type
+            ip_type_count[base_type].append(bw)
+
+        # 按RN/SN分类排序，使用类常量
+        rn_ips = [(k, v) for k, v in ip_type_count.items() if k.upper() in self.RN_TYPES]
+        sn_ips = [(k, v) for k, v in ip_type_count.items() if k.upper() in self.SN_TYPES]
+        other_ips = [(k, v) for k, v in ip_type_count.items() if k.upper() not in self.RN_TYPES + self.SN_TYPES]
+
+        # 按带宽总和排序
+        rn_ips.sort(key=lambda x: sum(x[1]), reverse=True)
+        sn_ips.sort(key=lambda x: sum(x[1]), reverse=True)
+        other_ips.sort(key=lambda x: sum(x[1]), reverse=True)
+
+        # 构建最终显示列表（从上到下：RN -> SN -> Other）
+        display_rows = []
+        display_rows.extend(rn_ips)
+        display_rows.extend(sn_ips)
+
+        # 如果总行数超过self.MAX_ROWS，合并other_ips
+        if len(display_rows) + len(other_ips) > self.MAX_ROWS:
+            display_rows = display_rows[:self.MAX_ROWS]
+            for i, (ip_type, instances) in enumerate(other_ips):
+                target_row = i % len(display_rows)
+                display_rows[target_row] = (display_rows[target_row][0], display_rows[target_row][1] + instances)
+        else:
+            display_rows.extend(other_ips)
+            if len(display_rows) > self.MAX_ROWS:
+                display_rows = display_rows[:self.MAX_ROWS]
+
+        ip_type_count = dict(display_rows)
+
+        # 计算布局参数
+        num_ip_types = len(ip_type_count)
+        max_instances = max(len(instances) for instances in ip_type_count.values())
+
+        # 计算小方块大小和间距
+        available_width = ip_size * 0.98
+        available_height = ip_size * 0.98
+        grid_spacing = square_size * 0.10
+        row_spacing = square_size * 0.3
+
+        max_square_width = (available_width - (max_instances - 1) * grid_spacing) / max_instances
+        max_square_height = (available_height - (num_ip_types - 1) * row_spacing) / num_ip_types
+        grid_square_size = min(max_square_width, max_square_height, square_size * 1)
+
+        # 计算总内容高度
+        total_content_height = num_ip_types * grid_square_size + (num_ip_types - 1) * row_spacing
+
+        # 绘制IP小方块
+        row_idx = 0
+        for ip_type, instances in ip_type_count.items():
+            num_instances = len(instances)
+            base_type = ip_type.upper()
+            ip_color = self.IP_COLOR_MAP.get(base_type, self.IP_COLOR_MAP["OTHER"])
+
+            # 计算当前行的总宽度
+            row_width = num_instances * grid_square_size + (num_instances - 1) * grid_spacing
+
+            # 计算当前行的起始位置（水平居中）
+            row_start_x = ip_x - row_width / 2
+
+            # 计算当前行的垂直位置（垂直居中）
+            row_y = ip_y + total_content_height / 2 - row_idx * (grid_square_size + row_spacing) - grid_square_size / 2
+
+            # 绘制该类型的所有实例
+            for col_idx, bandwidth in enumerate(instances):
+                # 计算小方块位置
+                block_x = row_start_x + col_idx * (grid_square_size + grid_spacing) + grid_square_size / 2
+                block_y = row_y
+
+                # 计算透明度（使用全局带宽范围）
+                alpha = self._calculate_bandwidth_alpha(
+                    bandwidth,
+                    min_ip_bandwidth if min_ip_bandwidth is not None else 0,
+                    max_ip_bandwidth if max_ip_bandwidth is not None else 1
+                )
+
+                # 绘制小方块
+                ip_block = Rectangle(
+                    (block_x - grid_square_size / 2, block_y - grid_square_size / 2),
+                    width=grid_square_size,
+                    height=grid_square_size,
+                    facecolor=ip_color,
+                    edgecolor="black",
+                    linewidth=0.8,
+                    alpha=alpha,
+                    zorder=3,
+                )
+                ax.add_patch(ip_block)
+
+            row_idx += 1
+
+    def _add_ip_legend(self, ax, fig, used_ip_types=None):
+        """在图表右上角添加IP类型颜色图例（竖着显示，仅显示实际使用的IP）"""
+        # 使用类常量中的IP颜色映射
+        all_ip_legend_data = [(label, color) for label, color in self.IP_COLOR_MAP.items() if label != "OTHER"]
+
+        # 如果提供了used_ip_types，只显示实际使用的IP类型
+        if used_ip_types:
+            # 将实例名归并为基本类型（gdma_0, gdma_1 -> GDMA）
+            base_types = set()
+            for ip_instance in used_ip_types:
+                # 提取基本类型：gdma_0 -> gdma, d2d_rn_0 -> d2d_rn
+                if ip_instance.lower().startswith("d2d"):
+                    # D2D类型特殊处理：d2d_rn_0 -> d2d_rn
+                    parts = ip_instance.lower().split("_")
+                    if len(parts) >= 2:
+                        base_type = "_".join(parts[:2])  # d2d_rn
+                    else:
+                        base_type = parts[0]
+                else:
+                    base_type = ip_instance.split("_")[0]
+                base_types.add(base_type.upper())
+
+            # 只显示实际使用的基本类型
+            ip_legend_data = [(label, color) for label, color in all_ip_legend_data if label.upper() in base_types]
+        else:
+            ip_legend_data = all_ip_legend_data
+
+        # 如果没有要显示的IP类型，直接返回
+        if not ip_legend_data:
+            return
+
+        # 创建正方形图例标记
+        from matplotlib.lines import Line2D
+
+        legend_elements = []
+        for label, color in ip_legend_data:
+            # 使用正方形marker
+            legend_elements.append(Line2D([0], [0], marker="s", color="w", markerfacecolor=color, markeredgecolor="black", markersize=8, label=label, linewidth=0))
+
+        # 添加图例到右上角，竖着显示
+        ax.legend(
+            handles=legend_elements,
+            loc="upper right",
+            bbox_to_anchor=(1.0, 1.0),
+            ncol=1,  # 单列显示（竖着排列）
+            frameon=True,
+            fontsize=9,
+            title="IP Types",
+            title_fontsize=10,
+            edgecolor="black",
+            fancybox=False,
+        )
+
+    def _shorten_ip_name(self, ip_name):
+        """将IP类型名称缩短为单字母"""
+        ip_name_upper = ip_name.upper()
+
+        # 使用字典映射简化条件判断
+        ip_mapping = {"GDMA": "G", "SDMA": "S", "CDMA": "C", "DDR": "D", "L2M": "L", "D2D_RN": "DR", "D2D_SN": "DS"}
+
+        for prefix, short_name in ip_mapping.items():
+            if ip_name_upper.startswith(prefix):
+                return short_name
+
+        return ip_name_upper[:2]  # 其他情况取前两个字母
+
+    def _add_bandwidth_alpha_legend(self, ax, fig, min_bandwidth, max_bandwidth):
+        """
+        添加热力条形式的带宽图例
+
+        Args:
+            ax: matplotlib坐标轴
+            fig: matplotlib图形对象
+            min_bandwidth: 最小带宽值
+            max_bandwidth: 最大带宽值
+        """
+        from matplotlib.patches import Rectangle
+        from matplotlib.colorbar import ColorbarBase
+        from matplotlib.colors import LinearSegmentedColormap
+        import matplotlib.cm as cm
+        from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+        # 如果带宽范围为0，不显示图例
+        if max_bandwidth <= min_bandwidth:
+            return
+
+        # 创建插入的colorbar坐标轴，放在右上角IP图例下方
+        # 位置: [left, bottom, width, height] (相对于主坐标轴)
+        cax = inset_axes(
+            ax,
+            width="2%",  # 宽度，减小
+            height="20%",  # 高度，减小
+            loc="upper right",  # 位置改为右上
+            bbox_to_anchor=(-0.05, -0.35, 1, 1),  # 调整到IP图例下方
+            bbox_transform=ax.transAxes,
+            borderpad=0,
+        )
+
+        # 创建自定义colormap（从浅到深，模拟alpha效果）
+        # 使用灰度渐变，从浅灰到深灰
+        colors = ["#E0E0E0", "#B0B0B0", "#808080", "#505050", "#202020"]
+        n_bins = 100
+        cmap = LinearSegmentedColormap.from_list("bandwidth", colors, N=n_bins)
+
+        # 创建归一化对象
+        import matplotlib.colors as mcolors
+
+        norm = mcolors.Normalize(vmin=min_bandwidth, vmax=max_bandwidth)
+
+        # 创建colorbar
+        cb = ColorbarBase(cax, cmap=cmap, norm=norm, orientation="vertical")
+
+        # 设置colorbar标签
+        cb.set_label("IP BW (GB/s)", fontsize=8, labelpad=3)  # 缩短标签，减小字号
+
+        # 设置刻度标签字体大小
+        cax.tick_params(labelsize=7)  # 减小刻度字号
+
+        # 设置刻度数量
+        import numpy as np
+
+        n_ticks = 4  # 减少刻度数量
+        tick_values = np.linspace(min_bandwidth, max_bandwidth, n_ticks)
+        cb.set_ticks(tick_values)
+        cb.set_ticklabels([f"{v:.1f}" for v in tick_values])
+
+    def _draw_single_die_flow(self, ax, network, config, die_id=None, offset_x=0, offset_y=0, mode="utilization", node_size=2000, show_cdma=True, die_model=None, d2d_config=None, max_ip_bandwidth=None, min_ip_bandwidth=None):
+        """
+        绘制单个Die的流量图核心方法（父类通用版本）
+
+        Args:
+            ax: matplotlib坐标轴
+            network: 网络对象
+            config: 配置对象
+            die_id: Die ID（单Die场景可为None）
+            offset_x, offset_y: 坐标偏移（多Die场景使用）
+            mode: 显示模式
+            node_size: 节点大小
+            show_cdma: 是否显示CDMA
+            die_model: Die模型对象（D2D场景使用）
+            d2d_config: D2D配置对象（D2D场景使用）
+            max_ip_bandwidth, min_ip_bandwidth: 全局IP带宽范围（用于透明度归一化）
+
+        Returns:
+            pos: 节点位置字典
+        """
+        from matplotlib.patches import Rectangle, FancyArrowPatch
+        import networkx as nx
+        import numpy as np
+
+        # 创建NetworkX图
+        G = nx.DiGraph()
+
+        # 获取链路统计数据
+        links = {}
+        if hasattr(network, "get_links_utilization_stats") and callable(network.get_links_utilization_stats):
+            try:
+                utilization_stats = network.get_links_utilization_stats()
+                if mode == "utilization":
+                    links = {link: stats["utilization"] for link, stats in utilization_stats.items()}
+                elif mode == "ITag_ratio":
+                    links = {link: stats["ITag_ratio"] for link, stats in utilization_stats.items()}
+                elif mode == "total":
+                    time_cycles = getattr(self, "simulation_end_cycle", 1000) // config.NETWORK_FREQUENCY
+                    links = {}
+                    for link, stats in utilization_stats.items():
+                        total_flit = stats.get("total_flit", 0)
+                        if time_cycles > 0:
+                            bandwidth = total_flit * 128 / time_cycles
+                            links[link] = bandwidth
+                        else:
+                            links[link] = 0.0
+                else:
+                    links = {link: stats["utilization"] for link, stats in utilization_stats.items()}
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                links = {}
+
+        # 获取网络节点
+        if hasattr(network, "queues") and network.queues:
+            actual_nodes = list(network.queues.keys())
+        else:
+            actual_nodes = list(range(config.NUM_ROW * config.NUM_COL))
+
+        # 添加节点到图中
+        G.add_nodes_from(actual_nodes)
+
+        # 计算节点位置（应用偏移）
+        pos = {}
+        for node in actual_nodes:
+            x = node % config.NUM_COL
+            y = node // config.NUM_COL
+            if y % 2 == 1:  # 奇数行左移
+                x -= 0.24
+                y -= 0.5
+            pos[node] = (x * 3 + offset_x, -y * 1.5 + offset_y)
+
+        # 添加有权重的边
+        edge_labels = {}
+        edge_colors = []
+        for (i, j), value in links.items():
+            if i not in actual_nodes or j not in actual_nodes:
+                continue
+            if i == j:  # 过滤自环链路
+                continue
+
+            G.add_edge(i, j, weight=value)
+
+            # 计算显示值和颜色
+            if mode in ["utilization", "T2_ratio", "T1_ratio", "T0_ratio", "ITag_ratio"]:
+                display_value = float(value) if value else 0.0
+                formatted_label = f"{display_value*100:.1f}%" if display_value > 0 else ""
+                color_intensity = display_value
+            elif mode == "total":
+                display_value = float(value) if value else 0.0
+                formatted_label = f"{display_value:.1f}" if display_value > 0 else ""
+                color_intensity = min(display_value / 500.0, 1.0)
+            else:
+                display_value = float(value) if value else 0.0
+                formatted_label = f"{display_value:.1f}" if display_value > 0 else ""
+                color_intensity = min(display_value / 500.0, 1.0)
+
+            if display_value > 0:
+                edge_labels[(i, j)] = formatted_label
+                edge_colors.append((color_intensity, 0, 0))
+            else:
+                edge_colors.append((0.8, 0.8, 0.8))
+
+        # 计算节点大小
+        square_size = np.sqrt(node_size) / 100
+
+        # 绘制网络边
+        for (i, j), color in zip(G.edges(), edge_colors):
+            if i not in pos or j not in pos:
+                continue
+
+            x1, y1 = pos[i]
+            x2, y2 = pos[j]
+
+            if i != j:
+                dx, dy = x2 - x1, y2 - y1
+                length = np.sqrt(dx * dx + dy * dy)
+                if length > 0:
+                    dx, dy = dx / length, dy / length
+                    perp_dx, perp_dy = -dy * 0.1, dx * 0.1
+
+                    has_reverse = G.has_edge(j, i)
+                    if has_reverse:
+                        start_x = x1 + dx * square_size / 2 + perp_dx
+                        start_y = y1 + dy * square_size / 2 + perp_dy
+                        end_x = x2 - dx * square_size / 2 + perp_dx
+                        end_y = y2 - dy * square_size / 2 + perp_dy
+                    else:
+                        start_x = x1 + dx * square_size / 2
+                        start_y = y1 + dy * square_size / 2
+                        end_x = x2 - dx * square_size / 2
+                        end_y = y2 - dy * square_size / 2
+
+                    arrow = FancyArrowPatch(
+                        (start_x, start_y),
+                        (end_x, end_y),
+                        arrowstyle="-|>",
+                        mutation_scale=6,
+                        color=color,
+                        zorder=1,
+                        linewidth=1,
+                    )
+                    ax.add_patch(arrow)
+
+        # 绘制边标签
+        if edge_labels:
+            link_values = [float(links.get((i, j), 0)) for (i, j) in edge_labels.keys()]
+            link_mapping_max = max(link_values) if link_values else 0.0
+            link_mapping_min = max(0.6 * link_mapping_max, 100) if mode == "total" else 0.0
+
+            for (i, j), label in edge_labels.items():
+                if i in pos and j in pos:
+                    edge_value = float(links.get((i, j), 0))
+                    if edge_value == 0.0:
+                        continue
+
+                    if mode == "total":
+                        if edge_value <= link_mapping_min:
+                            intensity = 0.0
+                        else:
+                            intensity = (edge_value - link_mapping_min) / (link_mapping_max - link_mapping_min)
+                        intensity = min(max(intensity, 0.0), 1.0)
+                        color = (intensity, 0, 0)
+                    else:
+                        color = (edge_value, 0, 0)
+
+                    x1, y1 = pos[i]
+                    x2, y2 = pos[j]
+                    mid_x = (x1 + x2) / 2
+                    mid_y = (y1 + y2) / 2
+                    dx, dy = x2 - x1, y2 - y1
+
+                    has_reverse = G.has_edge(j, i)
+                    is_horizontal = abs(dx) > abs(dy)
+
+                    if has_reverse:
+                        if is_horizontal:
+                            perp_dx, perp_dy = -dy * 0.15 + 0.25, dx * 0.15
+                        else:
+                            perp_dx, perp_dy = -dy * 0.23, dx * 0.23 - 0.35
+                        label_x = mid_x + perp_dx
+                        label_y = mid_y + perp_dy
+                    else:
+                        if is_horizontal:
+                            label_x = mid_x + dx * 0.15
+                            label_y = mid_y + dy * 0.15
+                        else:
+                            label_x = mid_x + (-dy * 0.15 if dx > 0 else dy * 0.15)
+                            label_y = mid_y - 0.15
+
+                    ax.text(label_x, label_y, label, ha="center", va="center", fontsize=8, fontweight="normal", color=color)
+
+        # 绘制方形节点和IP信息
+        for node, (x, y) in pos.items():
+            # 绘制主节点方框
+            rect = Rectangle(
+                (x - square_size / 2, y - square_size / 2),
+                width=square_size,
+                height=square_size,
+                color="#E8F5E9",
+                ec="black",
+                zorder=2,
+            )
+            ax.add_patch(rect)
+
+            # 绘制IP信息 - 仅对偶数行节点显示
+            physical_row = node // config.NUM_COL
+            if physical_row % 2 == 0:
+                # 优先使用子类的_draw_d2d_ip_info_box（如果存在）
+                if hasattr(self, '_draw_d2d_ip_info_box') and die_id is not None:
+                    self._draw_d2d_ip_info_box(ax, x, y, node, config, mode, square_size, die_id, die_model, max_ip_bandwidth, min_ip_bandwidth)
+                else:
+                    # 否则使用父类的_draw_ip_info_box
+                    self._draw_ip_info_box(ax, x, y, node, config, mode, square_size, max_ip_bandwidth, min_ip_bandwidth)
+
+        # 添加Die标签（仅在多Die场景中）
+        if die_id is not None and pos:
+            xs = [p[0] for p in pos.values()]
+            ys = [p[1] for p in pos.values()]
+            die_center_x = (min(xs) + max(xs)) / 2
+            die_center_y = (min(ys) + max(ys)) / 2
+
+            # 尝试从配置获取布局信息
+            die_layout = None
+            if d2d_config and hasattr(d2d_config, "die_layout_positions"):
+                die_layout = d2d_config.die_layout_positions
+            elif hasattr(config, "die_layout_positions"):
+                die_layout = config.die_layout_positions
+
+            if die_layout and die_id in die_layout:
+                grid_x, grid_y = die_layout[die_id]
+                other_dies = [did for did in die_layout.keys() if did != die_id]
+
+                if other_dies:
+                    other_die_id = other_dies[0]
+                    other_grid_x, other_grid_y = die_layout[other_die_id]
+
+                    is_vertical_connection = grid_y != other_grid_y
+                    is_horizontal_connection = grid_x != other_grid_x
+
+                    if is_vertical_connection:
+                        if grid_x == 0:
+                            label_x = min(xs) - 3
+                            label_y = die_center_y
+                        else:
+                            label_x = max(xs) + 3
+                            label_y = die_center_y
+                    elif is_horizontal_connection:
+                        label_x = die_center_x
+                        label_y = min(ys) - 2
+                    else:
+                        label_x = die_center_x
+                        label_y = max(ys) + 2.5
+                else:
+                    label_x = die_center_x
+                    label_y = max(ys) + 2.5
+            else:
+                label_x = die_center_x
+                label_y = max(ys) + 2.5
+
+            ax.text(
+                label_x,
+                label_y,
+                f"Die {die_id}",
+                ha="center",
+                va="center",
+                fontsize=12,
+                fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.7, edgecolor="none"),
+            )
+
+        return pos
+
     def _calculate_port_bandwidth_averages(self, all_ports: Dict[str, "PortBandwidthMetrics"]) -> Dict[str, float]:
         """
         计算每种端口类型的平均带宽，支持读写分离
@@ -1332,621 +1925,55 @@ class BandwidthAnalyzer:
         # 确保IP带宽数据已计算
         self.precalculate_ip_bandwidth_data()
 
-        # 准备网络流数据
-        G = nx.DiGraph()
+        # 收集全局IP带宽范围（用于归一化透明度）
+        all_ip_bandwidths = []
+        if hasattr(self, "ip_bandwidth_data") and self.ip_bandwidth_data is not None:
+            if mode in self.ip_bandwidth_data:
+                mode_data = self.ip_bandwidth_data[mode]
+                for ip_type, data_matrix in mode_data.items():
+                    nonzero_bw = data_matrix[data_matrix > 0.001]
+                    if len(nonzero_bw) > 0:
+                        all_ip_bandwidths.extend(nonzero_bw.tolist())
 
-        # 处理新的网络流数据格式
-        links = {}
-        if hasattr(network, "get_links_utilization_stats") and callable(network.get_links_utilization_stats):
-            try:
-                utilization_stats = network.get_links_utilization_stats()
-                if mode == "utilization":
-                    # 显示链路利用率
-                    links = {link: stats["utilization"] for link, stats in utilization_stats.items()}
-                elif mode == "ITag_ratio":
-                    # 显示ITag标记比例
-                    links = {link: stats["ITag_ratio"] for link, stats in utilization_stats.items()}
-                elif mode == "total":
-                    # 计算带宽值：total_flit * 128 / time_cycles
-                    time_cycles = self.simulation_end_cycle // self.config.NETWORK_FREQUENCY
-                    links = {}
-                    for link, stats in utilization_stats.items():
-                        total_flit = stats.get("total_flit", 0)
-                        total_cycles = stats.get("total_cycles", 1)
-                        if time_cycles > 0:
-                            # 带宽 = flit数量 * flit_size / 时间
-                            bandwidth = total_flit * 128 / time_cycles
-                            links[link] = bandwidth
-                        else:
-                            links[link] = 0.0
-                else:  # 默认显示利用率
-                    links = {link: stats["utilization"] for link, stats in utilization_stats.items()}
-            except Exception as e:
-                print(f"警告: 获取链路统计数据失败: {e}，尝试使用旧格式")
-                # 回退到旧格式处理
-                links = self._handle_legacy_links_format(network, mode)
-        else:
-            # 使用旧格式处理
-            links = self._handle_legacy_links_format(network, mode)
-
-        # 检查是否获取到链路数据
-        if not links:
-            print(f"警告: 没有获取到链路数据，mode={mode}，网络类型={type(network).__name__}")
-            if hasattr(network, "links_flow_stat"):
-                print(f"network.links_flow_stat类型: {type(network.links_flow_stat)}")
-                if isinstance(network.links_flow_stat, dict):
-                    print(f"links_flow_stat键数量: {len(network.links_flow_stat)}")
-            # 如果没有链路数据，创建空图并返回
-            if save_path:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                ax.text(0.5, 0.5, f"无链路数据可显示\\nmode: {mode}", ha="center", va="center", transform=ax.transAxes, fontsize=12)
-                ax.set_xlim(0, 1)
-                ax.set_ylim(0, 1)
-                ax.axis("off")
-                plt.tight_layout()
-                plt.savefig(save_path, dpi=150, bbox_inches="tight")
-                plt.close()
-                print(f"已保存空图到: {save_path}")
-            return
-
-        link_values = []
-        for (i, j), value in links.items():
-            # 新格式的value已经是比例，旧格式需要转换
-            if mode in ["utilization", "T2_ratio", "T1_ratio", "T0_ratio", "ITag_ratio"]:
-                # 比例模式：直接使用比例值（0.0-1.0）并显示为百分比
-                display_value = float(value) if value else 0.0
-                link_values.append(display_value)
-                formatted_label = f"{display_value*100:.1f}%"
-            elif mode == "total":
-                # 带宽模式：直接使用计算好的带宽值
-                link_value = float(value) if value else 0.0
-                link_values.append(link_value)
-                formatted_label = f"{link_value:.1f}"
-            else:
-                # 其他旧格式：可能需要计算带宽
-                link_value = value * 128 / (self.simulation_end_cycle // self.config.NETWORK_FREQUENCY) if value else 0
-                link_values.append(link_value)
-                formatted_label = f"{link_value:.1f}"
-
-            # 为total模式添加0次尝试比例和空闲比例信息
-            if mode == "total" and hasattr(network, "get_links_utilization_stats") and callable(network.get_links_utilization_stats):
-                try:
-                    utilization_stats = network.get_links_utilization_stats()
-                    if (i, j) in utilization_stats:
-                        stats = utilization_stats[(i, j)]
-
-                        # 获取已经计算好的比例数据
-                        eject_attempts_h_ratios = stats.get("eject_attempts_h_ratios", {"0": 0.0, "1": 0.0, "2": 0.0, ">2": 0.0})
-                        eject_attempts_v_ratios = stats.get("eject_attempts_v_ratios", {"0": 0.0, "1": 0.0, "2": 0.0, ">2": 0.0})
-
-                        # 根据链路方向选择显示哪个方向的0次尝试比例
-                        if abs(i - j) == 1:  # 横向链路
-                            zero_attempts_ratio = eject_attempts_h_ratios.get("0", 0.0)
-                        else:  # 纵向链路
-                            zero_attempts_ratio = eject_attempts_v_ratios.get("0", 0.0)
-
-                        empty_ratio = stats.get("empty_ratio", 0.0)
-                        # 添加0次尝试比例和空闲比例到标签
-                        formatted_label += f"\n{zero_attempts_ratio*100:.0f}% {empty_ratio*100:.0f}%"
-                except:
-                    # 如果获取统计数据失败，保持原标签
-                    pass
-
-            G.add_edge(i, j, label=formatted_label)
-
-        # 链路颜色映射范围：动态最大值的60%阈值起红
-        link_mapping_max = max(link_values) if link_values else 0.0
-        link_mapping_min = max(0.6 * link_mapping_max, 100)
-
-        # IP颜色映射范围：动态最大值的60%阈值起红
-        # 从 ip_bandwidth_data 提取所有带宽值，计算当前最大
-        all_ip_vals = []
-        # 遍历所有IP实例的带宽矩阵
-        if mode in self.ip_bandwidth_data:
-            for ip_instance, matrix in self.ip_bandwidth_data[mode].items():
-                # 排除D2D相关IP（如果需要）
-                if not (ip_instance.lower().startswith('d2d') and not show_cdma):
-                    all_ip_vals.extend(matrix.flatten())
-
-        ip_mapping_max = max(all_ip_vals) if all_ip_vals else 0.0
-        ip_mapping_min = max(0.6 * ip_mapping_max, 80)
-
-        # 计算节点位置
-        pos = {}
-        for node in G.nodes():
-            x = node % self.config.NUM_COL
-            y = node // self.config.NUM_COL
-            if y % 2 == 1:  # 奇数行左移
-                x -= 0.25
-                y -= 0.6
-            pos[node] = (x * 3, -y * 1.5)
-
-        # 动态计算字体大小，添加最大值上限以避免过大
-        node_count = len(G.nodes())
-        base_font = 9
-        if node_count > 0:
-            dynamic_font = max(4, base_font * (65 / node_count) ** 0.5)
-        else:
-            dynamic_font = base_font  # 如果没有节点，使用默认字体大小
-        max_font = 14  # 最大字号上限，可以根据需要调整
-        dynamic_font = min(dynamic_font, max_font)
+        # 计算全局IP带宽范围（用于透明度归一化）
+        max_ip_bandwidth = max(all_ip_bandwidths) if all_ip_bandwidths else 1.0
+        min_ip_bandwidth = min(all_ip_bandwidths) if all_ip_bandwidths else 0.0
 
         # 创建图形
-        fig, ax = plt.subplots(figsize=(12, 10))  # 增大画布以容纳更多内容
+        fig, ax = plt.subplots(figsize=(12, 10))
         ax.set_aspect("equal")
 
-        # 调整方形节点大小
-        square_size = np.sqrt(node_size) / 100
+        # 调用通用的单Die绘制方法并获取节点位置
+        pos = self._draw_single_die_flow(
+            ax=ax,
+            network=network,
+            config=self.config,
+            die_id=None,
+            offset_x=0,
+            offset_y=0,
+            mode=mode,
+            node_size=node_size,
+            show_cdma=show_cdma,
+            die_model=None,
+            d2d_config=None,
+            max_ip_bandwidth=max_ip_bandwidth,
+            min_ip_bandwidth=min_ip_bandwidth,
+        )
 
-        # 绘制网络流图
-        nx.draw_networkx_nodes(G, pos, node_size=square_size, node_shape="s", ax=ax)
+        # 收集实际使用的IP类型
+        used_ip_types = set()
+        if hasattr(self, "ip_bandwidth_data") and self.ip_bandwidth_data is not None:
+            if mode in self.ip_bandwidth_data:
+                mode_data = self.ip_bandwidth_data[mode]
+                for ip_type, data_matrix in mode_data.items():
+                    if (data_matrix > 0.001).any():
+                        used_ip_types.add(ip_type.upper())
 
-        # 绘制方形节点并添加IP信息
-        for node, (x, y) in pos.items():
-            # 绘制主节点方框
-            rect = Rectangle(
-                (x - square_size / 2, y - square_size / 2),
-                width=square_size,
-                height=square_size,
-                color="lightblue",
-                ec="black",
-                zorder=2,
-            )
-            ax.add_patch(rect)
-            ax.text(x, y, str(node), ha="center", va="center", fontsize=dynamic_font)
+        # 添加IP类型颜色图例
+        self._add_ip_legend(ax, fig, used_ip_types)
 
-            # 在节点左侧添加IP信息
-            physical_row = node // self.config.NUM_COL
-            physical_col = node % self.config.NUM_COL
-
-            if physical_row % 2 == 0:
-                # IP信息框位置和大小
-                ip_width = square_size * 3.2
-                ip_height = square_size * 2.6
-                ip_x = x - square_size - ip_width / 2.5
-                ip_y = y + 0.26
-
-                # 绘制IP信息框外框
-                ip_rect = Rectangle(
-                    (ip_x - ip_width / 2, ip_y - ip_height / 2),
-                    width=ip_width,
-                    height=ip_height,
-                    color="white",
-                    ec="black",
-                    linewidth=1,
-                    zorder=2,
-                )
-                ax.add_patch(ip_rect)
-
-                # 绘制分割线：垂直线分割左右两部分
-                ax.plot(
-                    [ip_x, ip_x],
-                    [ip_y - ip_height / 2, ip_y + ip_height / 2],
-                    color="black",
-                    linewidth=1,
-                    zorder=3,
-                )
-
-                # 绘制水平线分割右侧上下两部分
-                ax.plot(
-                    [ip_x, ip_x + ip_width / 2],
-                    [ip_y, ip_y],
-                    color="black",
-                    linewidth=1,
-                    zorder=3,
-                )
-
-                # 左侧DMA区域分割
-                left_width = ip_width / 2
-
-                if show_cdma:
-                    # 三分区：SDMA、GDMA、CDMA
-                    dma_height = ip_height / 3
-                    # 绘制左侧的两条水平分割线
-                    for i in range(1, 3):
-                        line_y = ip_y - ip_height / 2 + i * dma_height
-                        ax.plot(
-                            [ip_x - ip_width / 2, ip_x],
-                            [line_y, line_y],
-                            color="black",
-                            linewidth=0.8,
-                            zorder=3,
-                        )
-                else:
-                    # 两分区：SDMA、GDMA
-                    dma_height = ip_height / 2
-                    # 绘制左侧的一条水平分割线
-                    line_y = ip_y
-                    ax.plot(
-                        [ip_x - ip_width / 2, ip_x],
-                        [line_y, line_y],
-                        color="black",
-                        linewidth=0.8,
-                        zorder=3,
-                    )
-
-                # 为左侧DMA区域填充颜色
-                dma_color = "honeydew"  # DMA区域统一颜色
-                right_color = "aliceblue"  # 右侧DDR/L2M区域颜色
-
-                if show_cdma:
-                    # SDMA区域（最上方）
-                    sdma_rect = Rectangle(
-                        (ip_x - ip_width / 2, ip_y + dma_height / 2),
-                        width=left_width,
-                        height=dma_height,
-                        color=dma_color,
-                        ec="none",
-                        zorder=2,
-                    )
-                    ax.add_patch(sdma_rect)
-
-                    # GDMA区域（中间）
-                    gdma_rect = Rectangle(
-                        (ip_x - ip_width / 2, ip_y - dma_height / 2),
-                        width=left_width,
-                        height=dma_height,
-                        color=dma_color,
-                        ec="none",
-                        zorder=2,
-                    )
-                    ax.add_patch(gdma_rect)
-
-                    # CDMA区域（最下方）
-                    cdma_rect = Rectangle(
-                        (ip_x - ip_width / 2, ip_y - ip_height / 2),
-                        width=left_width,
-                        height=dma_height,
-                        color=dma_color,
-                        ec="none",
-                        zorder=2,
-                    )
-                    ax.add_patch(cdma_rect)
-                else:
-                    # SDMA区域（上半部分）
-                    sdma_rect = Rectangle(
-                        (ip_x - ip_width / 2, ip_y),
-                        width=left_width,
-                        height=dma_height,
-                        color=dma_color,
-                        ec="none",
-                        zorder=2,
-                    )
-                    ax.add_patch(sdma_rect)
-
-                    # GDMA区域（下半部分）
-                    gdma_rect = Rectangle(
-                        (ip_x - ip_width / 2, ip_y - ip_height / 2),
-                        width=left_width,
-                        height=dma_height,
-                        color=dma_color,
-                        ec="none",
-                        zorder=2,
-                    )
-                    ax.add_patch(gdma_rect)
-
-                # 右侧DDR/L2M区域
-                right_rect = Rectangle(
-                    (ip_x, ip_y - ip_height / 2),
-                    width=ip_width / 2,
-                    height=ip_height,
-                    color=right_color,
-                    ec="none",
-                    zorder=2,
-                )
-                ax.add_patch(right_rect)
-
-                # 获取IP带宽数据 - 使用聚合函数累加所有同类型IP实例的带宽
-                sdma_value = self.get_aggregated_ip_bandwidth(mode, "sdma", physical_row // 2, physical_col)
-                gdma_value = self.get_aggregated_ip_bandwidth(mode, "gdma", physical_row // 2, physical_col)
-                cdma_value = self.get_aggregated_ip_bandwidth(mode, "cdma", physical_row // 2, physical_col) if show_cdma else 0.0
-                ddr_value = self.get_aggregated_ip_bandwidth(mode, "ddr", physical_row // 2, physical_col)
-                l2m_value = self.get_aggregated_ip_bandwidth(mode, "l2m", physical_row // 2, physical_col)
-
-                # 定义颜色计算函数
-                def get_intensity_color(value):
-                    if value <= ip_mapping_min:
-                        intensity = 0.0
-                    else:
-                        intensity = (value - ip_mapping_min) / (ip_mapping_max - ip_mapping_min)
-                    intensity = min(max(intensity, 0.0), 1.0)
-                    return (intensity, 0, 0)
-
-                if show_cdma:
-                    # 三分区布局
-                    # SDMA在最上方区域
-                    sdma_color_val = get_intensity_color(sdma_value)
-                    ax.text(
-                        ip_x - ip_width / 4,
-                        ip_y + dma_height,
-                        f"S:{sdma_value:.1f}",
-                        fontweight="bold",
-                        ha="center",
-                        va="center",
-                        fontsize=dynamic_font * 0.5,
-                        color=sdma_color_val,
-                    )
-
-                    # GDMA在中间区域
-                    gdma_color_val = get_intensity_color(gdma_value)
-                    ax.text(
-                        ip_x - ip_width / 4,
-                        ip_y,
-                        f"G:{gdma_value:.1f}",
-                        fontweight="bold",
-                        ha="center",
-                        va="center",
-                        fontsize=dynamic_font * 0.5,
-                        color=gdma_color_val,
-                    )
-
-                    # CDMA在最下方区域
-                    if "cdma" in self.ip_bandwidth_data[mode]:
-                        cdma_color_val = get_intensity_color(cdma_value)
-                        ax.text(
-                            ip_x - ip_width / 4,
-                            ip_y - dma_height,
-                            f"C:{cdma_value:.1f}",
-                            fontweight="bold",
-                            ha="center",
-                            va="center",
-                            fontsize=dynamic_font * 0.5,
-                            color=cdma_color_val,
-                        )
-                    else:
-                        # 如果没有CDMA数据，显示空值
-                        ax.text(
-                            ip_x - ip_width / 4,
-                            ip_y - dma_height,
-                            "C:0.0",
-                            fontweight="bold",
-                            ha="center",
-                            va="center",
-                            fontsize=dynamic_font * 0.5,
-                            color=(0, 0, 0),
-                        )
-                else:
-                    # 两分区布局
-                    # SDMA在上半区域
-                    sdma_color_val = get_intensity_color(sdma_value)
-                    ax.text(
-                        ip_x - ip_width / 4,
-                        ip_y + dma_height / 2,
-                        f"S:{sdma_value:.1f}",
-                        fontweight="bold",
-                        ha="center",
-                        va="center",
-                        fontsize=dynamic_font * 0.6,
-                        color=sdma_color_val,
-                    )
-
-                    # GDMA在下半区域
-                    gdma_color_val = get_intensity_color(gdma_value)
-                    ax.text(
-                        ip_x - ip_width / 4,
-                        ip_y - dma_height / 2,
-                        f"G:{gdma_value:.1f}",
-                        fontweight="bold",
-                        ha="center",
-                        va="center",
-                        fontsize=dynamic_font * 0.6,
-                        color=gdma_color_val,
-                    )
-
-                # L2M在右上区域
-                l2m_color_val = get_intensity_color(l2m_value)
-                ax.text(
-                    ip_x + ip_width / 4,
-                    ip_y + ip_height / 4,
-                    f"L:{l2m_value:.1f}",
-                    fontweight="bold",
-                    ha="center",
-                    va="center",
-                    fontsize=dynamic_font * 0.5,
-                    color=l2m_color_val,
-                )
-
-                # DDR在右下区域
-                ddr_color_val = get_intensity_color(ddr_value)
-                ax.text(
-                    ip_x + ip_width / 4,
-                    ip_y - ip_height / 4,
-                    f"D:{ddr_value:.1f}",
-                    fontweight="bold",
-                    ha="center",
-                    va="center",
-                    fontsize=dynamic_font * 0.5,
-                    color=ddr_color_val,
-                )
-
-        # 绘制边和边标签（保持原有逻辑）
-        edge_value_threshold = np.percentile(link_values, 90)
-
-        for i, j, data in G.edges(data=True):
-            x1, y1 = pos[i]
-            x2, y2 = pos[j]
-            # 根据流量值映射颜色，从标签中提取数值部分
-            label_text = data["label"]
-            if "\n" in label_text:
-                # 如果是多行标签，取第一行的数值部分
-                value = float(label_text.split("\n")[0])
-            else:
-                value = float(label_text)
-            # 链路60%阈值起红
-            if value <= link_mapping_min:
-                intensity = 0.0
-            else:
-                intensity = (value - link_mapping_min) / (link_mapping_max - link_mapping_min)
-            # clamp to [0,1]
-            intensity = min(max(intensity, 0.0), 1.0)
-            color = (intensity, 0, 0)
-
-            if i != j:  # 普通边
-                dx, dy = x2 - x1, y2 - y1
-                dist = np.hypot(dx, dy)
-                if dist > 0:
-                    dx, dy = dx / dist, dy / dist
-                    perp_dx, perp_dy = -dy * 0.1, dx * 0.1
-
-                    has_reverse = G.has_edge(j, i)
-                    if has_reverse:
-                        start_x = x1 + dx * square_size / 2 + perp_dx
-                        start_y = y1 + dy * square_size / 2 + perp_dy
-                        end_x = x2 - dx * square_size / 2 + perp_dx
-                        end_y = y2 - dy * square_size / 2 + perp_dy
-                    else:
-                        start_x = x1 + dx * square_size / 2
-                        start_y = y1 + dy * square_size / 2
-                        end_x = x2 - dx * square_size / 2
-                        end_y = y2 - dy * square_size / 2
-
-                    arrow = FancyArrowPatch(
-                        (start_x, start_y),
-                        (end_x, end_y),
-                        arrowstyle="-|>",
-                        mutation_scale=dynamic_font * 0.8,
-                        color=color,
-                        zorder=1,
-                        linewidth=1,
-                    )
-                    ax.add_patch(arrow)
-
-        # 绘制边标签（保持原有逻辑）
-        edge_labels = nx.get_edge_attributes(G, "label")
-        for edge, label in edge_labels.items():
-            i, j = edge
-            # 从标签中提取数值部分用于颜色映射
-            if "\n" in label:
-                # 如果是多行标签，取第一行的数值部分
-                first_line = label.split("\n")[0]
-                value = float(first_line)
-            else:
-                value = float(label)
-
-            if value == 0.0:
-                continue
-            # 根据带宽值映射标签颜色
-            # 链路60%阈值起红
-            if value <= link_mapping_min:
-                intensity = 0.0
-            else:
-                intensity = (value - link_mapping_min) / (link_mapping_max - link_mapping_min)
-            # clamp to [0,1]
-            intensity = min(max(intensity, 0.0), 1.0)
-            color = (intensity, 0, 0)
-
-            if i == j:
-                # 计算标签位置
-                original_row = i // self.config.NUM_COL
-                original_col = i % self.config.NUM_COL
-                x, y = pos[i]
-
-                offset = 0.17  # 标签偏移量
-                if original_row == 0:
-                    label_pos = (x, y + square_size / 2 + offset)
-                    angle = 0
-                elif original_row == self.config.NUM_ROW - 2:
-                    label_pos = (x, y - square_size / 2 - offset)
-                    angle = 0
-                elif original_col == 0:
-                    label_pos = (x - square_size / 2 - offset, y)
-                    angle = -90
-                elif original_col == self.config.NUM_COL - 1:
-                    label_pos = (x + square_size / 2 + offset, y)
-                    angle = 90
-                else:
-                    label_pos = (x, y + square_size / 2 + offset)
-                    angle = 0
-
-                # 自环链路只显示带宽，不显示比例信息
-                label_str = str(label)
-                if "\n" in label_str:
-                    # 如果是多行标签，只取第一行（带宽值）
-                    bandwidth_text = label_str.split("\n")[0]
-                else:
-                    bandwidth_text = label_str
-
-                ax.text(
-                    *label_pos,
-                    bandwidth_text,
-                    ha="center",
-                    va="center",
-                    color=color,
-                    fontweight="normal",
-                    fontsize=dynamic_font * 0.7,
-                    rotation=angle,
-                )
-
-            if i != j:
-                x1, y1 = pos[i]
-                x2, y2 = pos[j]
-                mid_x = (x1 + x2) / 2
-                mid_y = (y1 + y2) / 2
-                dx, dy = x2 - x1, y2 - y1
-                angle = np.degrees(np.arctan2(dy, dx))
-
-                has_reverse = G.has_edge(j, i)
-                is_horizontal = abs(dx) > abs(dy)
-
-                if has_reverse:
-                    if is_horizontal:
-                        perp_dx, perp_dy = -dy * 0.15 + 0.25, dx * 0.15
-                    else:
-                        perp_dx, perp_dy = -dy * 0.23, dx * 0.23 - 0.35
-                    label_x = mid_x + perp_dx
-                    label_y = mid_y + perp_dy
-                else:
-                    if is_horizontal:
-                        label_x = mid_x + dx * 0.15
-                        label_y = mid_y + dy * 0.15
-                    else:
-                        label_x = mid_x + (-dy * 0.15 if dx > 0 else dy * 0.15)
-                        label_y = mid_y - 0.15
-
-                # 检查是否为多行标签（包含比例信息）
-                label_str = str(label)
-                if "\n" in label_str:
-                    # 分别绘制带宽和比例
-                    lines = label_str.split("\n")
-                    bandwidth_text = lines[0]  # 带宽值
-                    ratio_text = lines[1] if len(lines) > 1 else ""  # 比例信息
-
-                    # 绘制带宽文本（较大字体）
-                    ax.text(
-                        label_x,
-                        label_y + 0.08,  # 增加向上偏移避免重叠
-                        bandwidth_text,
-                        ha="center",
-                        va="center",
-                        fontsize=dynamic_font * 0.7,  # 带宽用较大字体
-                        fontweight="normal",  # 去掉粗体
-                        color=color,
-                    )
-
-                    # 绘制比例文本（较小字体）
-                    if ratio_text:
-                        ax.text(
-                            label_x,
-                            label_y - 0.08,  # 增加向下偏移避免重叠
-                            ratio_text,
-                            ha="center",
-                            va="center",
-                            fontsize=dynamic_font * 0.5,  # 比例用较小字体
-                            fontweight="normal",
-                            color=color,
-                        )
-                else:
-                    # 单行标签，使用原有逻辑
-                    ax.text(
-                        label_x,
-                        label_y,
-                        label_str,
-                        ha="center",
-                        va="center",
-                        fontsize=dynamic_font * 0.7,  # 单行用较大字体
-                        fontweight="normal",  # 去掉粗体
-                        color=color,
-                    )
+        # 添加带宽透明度图例
+        self._add_bandwidth_alpha_legend(ax, fig, min_ip_bandwidth, max_ip_bandwidth)
 
         plt.axis("off")
         title = f"{network.name} - {mode.capitalize()} Bandwidth"

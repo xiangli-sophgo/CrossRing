@@ -62,7 +62,7 @@ def main():
         heatmap_mode="total",  # 可选: "total", "read", "write"
     )
 
-    model.setup_visualization(enable=1, update_interval=0.5, start_cycle=2000)
+    # model.setup_visualization(enable=1, update_interval=0.5, start_cycle=2000)
 
     # 运行仿真
     print("开始仿真")

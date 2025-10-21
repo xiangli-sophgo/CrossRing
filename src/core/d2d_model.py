@@ -229,10 +229,10 @@ class D2D_Model:
             self.d2d_link_state_vis = D2D_Link_State_Visualizer(self.num_dies, initial_network)
 
         if enable:
-            print(f"✅ 实时可视化已启用: 更新间隔={update_interval}s, 开始周期={start_cycle}")
+            print(f"- 实时可视化已启用: 更新间隔={update_interval}s, 开始周期={start_cycle}")
             print("   提示: 可视化窗口将在仿真开始后自动打开")
         else:
-            print("❌ 实时可视化已禁用")
+            print("- 实时可视化已禁用")
 
     def run_simulation(
         self,
