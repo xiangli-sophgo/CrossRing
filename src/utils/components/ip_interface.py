@@ -672,7 +672,7 @@ class IPInterface:
 
         if req.req_type == "write":
             # 写：既要有空 tracker，也要有足够 wdb_count
-            if self.sn_tracker_count[req.sn_tracker_type]["count"] > 0 and self.sn_wdb_count["count"] > 0:
+            if self.sn_tracker_count[req.sn_tracker_type]["count"] > 0 and self.sn_wdb_count["count"] >= wait_list[0].burst_length:
                 new_req = wait_list.pop(0)
                 new_req.sn_tracker_type = req.sn_tracker_type
 

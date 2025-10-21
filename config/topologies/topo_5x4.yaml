@@ -119,8 +119,8 @@ RB_ONLY_TAG_NUM_VERTICAL: 3
 arbitration:
   # 全局默认仲裁器类型
   default:
-    # type: "dynamic"
-      type: "islip"
-      algorithm: "lqf"  # Longest Queue First
-      iterations: 2
-      weight_strategy: "queue_length"
+    type: "round_robin"
+#       type: "islip"
+#       algorithm: "lqf"  # Longest Queue First
+#       iterations: 2
+#       weight_strategy: "queue_length"

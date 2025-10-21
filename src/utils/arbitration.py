@@ -219,14 +219,20 @@ class RoundRobinArbiter(Arbiter):
             'num_inputs': num_inputs,
             'num_outputs': num_outputs,
             'input_pointers': [0] * num_inputs,   # 每个输入的轮询指针
-            'output_pointers': [0] * num_outputs,  # 每个输出的轮询指针
-            'input_start': 0  # 输入处理起始位置（轮询）
+            'output_pointers': [0] * num_outputs  # 每个输出的轮询指针
         }
 
     def match(self, request_matrix: List[List[bool]],
               weight_matrix: Optional[List[List[float]]] = None,
               queue_id: str = "default") -> List[Tuple[int, int]]:
-        """执行轮询多对多匹配"""
+        """
+        执行标准多对多轮询仲裁
+
+        采用目标优先扫描策略，包含三个阶段：
+        1. 每个目标独立扫描选择请求者
+        2. 冲突消解（一个请求者被多个目标选中时）
+        3. 回填（被拒绝的目标重新扫描）
+        """
         if not request_matrix or not request_matrix[0]:
             return []
 
@@ -240,39 +246,76 @@ class RoundRobinArbiter(Arbiter):
         state = self.queue_states[queue_id]
         input_ptrs = state['input_pointers']
         output_ptrs = state['output_pointers']
-        input_start = state['input_start']
 
+        # === 阶段1：每个目标独立扫描选择请求者 ===
+        tentative_grants = {}  # {output_idx: input_idx}
+        assigned_inputs = set()
+
+        for output_idx in range(num_outputs):
+            output_ptr = output_ptrs[output_idx]
+            # 从该目标的轮询指针开始扫描请求者
+            for scan in range(num_inputs):
+                input_idx = (output_ptr + scan) % num_inputs
+
+                # 检查是否有有效请求且该请求者未被分配
+                if request_matrix[input_idx][output_idx] and input_idx not in assigned_inputs:
+                    tentative_grants[output_idx] = input_idx
+                    assigned_inputs.add(input_idx)
+                    break  # 该目标找到候选，进入下一个目标
+
+        # === 阶段2：冲突消解（一个请求者被多个目标选中） ===
+        # 构建 input_idx -> [output_idx列表] 映射
+        input_to_outputs = {}
+        for out_idx, in_idx in tentative_grants.items():
+            if in_idx not in input_to_outputs:
+                input_to_outputs[in_idx] = []
+            input_to_outputs[in_idx].append(out_idx)
+
+        # 处理冲突
+        for input_idx, output_list in input_to_outputs.items():
+            if len(output_list) > 1:
+                # 冲突：该请求者被多个目标选中
+                # 使用请求者的指针选择优先目标
+                input_ptr = input_ptrs[input_idx]
+                selected_output = None
+
+                for scan in range(num_outputs):
+                    candidate = (input_ptr + scan) % num_outputs
+                    if candidate in output_list:
+                        selected_output = candidate
+                        break
+
+                # 清除未被选中的暂定分配
+                for out_idx in output_list:
+                    if out_idx != selected_output:
+                        del tentative_grants[out_idx]
+                        assigned_inputs.discard(input_idx)
+
+                # 确保选中的仍在集合中
+                if selected_output is not None:
+                    assigned_inputs.add(input_idx)
+
+        # === 阶段3：回填（被拒绝的目标重新扫描） ===
+        for output_idx in range(num_outputs):
+            if output_idx not in tentative_grants:
+                # 该目标在冲突消解中失去了候选，重新扫描
+                output_ptr = output_ptrs[output_idx]
+                for scan in range(num_inputs):
+                    input_idx = (output_ptr + scan) % num_inputs
+
+                    if request_matrix[input_idx][output_idx] and input_idx not in assigned_inputs:
+                        tentative_grants[output_idx] = input_idx
+                        assigned_inputs.add(input_idx)
+                        break
+
+        # === 阶段4：生成最终匹配并更新指针 ===
         matches = []
-        matched_outputs = set()
-
-        # 按轮询顺序处理每个输入
-        for i_offset in range(num_inputs):
-            input_idx = (input_start + i_offset) % num_inputs
-
-            # 检查该输入是否有请求
-            if not any(request_matrix[input_idx]):
-                continue
-
-            # 从该输入的指针位置开始查找可用输出
-            input_ptr = input_ptrs[input_idx]
-            for j_offset in range(num_outputs):
-                output_idx = (input_ptr + j_offset) % num_outputs
-
-                # 检查是否可以匹配
-                if (request_matrix[input_idx][output_idx] and
-                    output_idx not in matched_outputs):
-                    # 匹配成功
-                    matches.append((input_idx, output_idx))
-                    matched_outputs.add(output_idx)
-
-                    # 推进输入和输出指针
-                    input_ptrs[input_idx] = (output_idx + 1) % num_outputs
-                    output_ptrs[output_idx] = (input_idx + 1) % num_inputs
-
-                    break  # 该输入已匹配，处理下一个输入
-
-        # 推进输入起始位置（下次从不同的输入开始）
-        state['input_start'] = (input_start + 1) % num_inputs
+        for output_idx, input_idx in tentative_grants.items():
+            matches.append((input_idx, output_idx))
+            # 更新目标指针：下次从成功匹配的请求者的下一个开始
+            output_ptrs[output_idx] = (input_idx + 1) % num_inputs
+            # 更新请求者指针：下次从成功匹配的目标的下一个开始
+            input_ptrs[input_idx] = (output_idx + 1) % num_outputs
 
         # 更新统计
         self._update_stats(queue_id, matches, request_matrix)
@@ -285,8 +328,7 @@ class RoundRobinArbiter(Arbiter):
             state = self.queue_states[queue_id]
             return {
                 'input_pointers': state['input_pointers'][:],
-                'output_pointers': state['output_pointers'][:],
-                'input_start': state['input_start']
+                'output_pointers': state['output_pointers'][:]
             }
         return {}
 
@@ -614,16 +656,14 @@ class MaxWeightMatchingArbiter:
                 if not requesting_inputs:
                     continue
 
-                # 从输出端指针位置开始轮询
+                # 从输出端指针位置开始轮询，选择第一个匹配的输入（标准iSLIP）
                 selected_input = None
-                max_weight = -1
 
                 for k in range(num_inputs):
                     i = (output_ptrs[j] + k) % num_inputs
                     if i in requesting_inputs:
-                        if weight_matrix[i][j] > max_weight:
-                            max_weight = weight_matrix[i][j]
-                            selected_input = i
+                        selected_input = i
+                        break  # 标准iSLIP：选择轮询顺序的第一个，不比较权重
 
                 if selected_input is not None:
                     grants[j] = selected_input
@@ -637,16 +677,14 @@ class MaxWeightMatchingArbiter:
                 if not granting_outputs:
                     continue
 
-                # 从输入端指针位置开始轮询
+                # 从输入端指针位置开始轮询，选择第一个匹配的输出（标准iSLIP）
                 selected_output = None
-                max_weight = -1
 
                 for k in range(num_outputs):
                     j = (input_ptrs[i] + k) % num_outputs
                     if j in granting_outputs:
-                        if weight_matrix[i][j] > max_weight:
-                            max_weight = weight_matrix[i][j]
-                            selected_output = j
+                        selected_output = j
+                        break  # 标准iSLIP：选择轮询顺序的第一个，不比较权重
 
                 if selected_output is not None:
                     matches.append((i, selected_output))

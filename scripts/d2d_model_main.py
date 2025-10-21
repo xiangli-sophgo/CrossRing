@@ -47,7 +47,7 @@ def main():
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
 
-    # model.setup_debug(trace_packets=[1], update_interval=0.1)
+    # model.setup_debug(trace_packets=[90], update_interval=0.1)
 
     model.setup_result_analysis(
         # 图片生成控制
@@ -62,13 +62,13 @@ def main():
         heatmap_mode="total",  # 可选: "total", "read", "write"
     )
 
-    # model.setup_visualization(enable=False, update_interval=1.0, start_cycle=10)
+    model.setup_visualization(enable=1, update_interval=0.5, start_cycle=2000)
 
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_cycles=5000,
-        print_interval=100,
+        max_cycles=50000,
+        print_interval=1000,
         results_analysis=True,
         verbose=1,
     )

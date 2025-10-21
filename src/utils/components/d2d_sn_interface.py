@@ -103,6 +103,7 @@ class D2D_SN_Interface(IPInterface):
             self.handle_cross_die_write_complete_response(flit)
             # 回收AXI flit（forward方法会创建新NoC flit）
             from .flit import _flit_pool
+
             _flit_pool.return_flit(flit)
             return  # 已处理，直接返回
         elif hasattr(flit, "flit_type") and flit.flit_type == "data":
@@ -111,12 +112,14 @@ class D2D_SN_Interface(IPInterface):
                 self.handle_cross_die_write_data(flit)
                 # 回收AXI flit
                 from .flit import _flit_pool
+
                 _flit_pool.return_flit(flit)
             else:
                 # 其他数据（如读数据），调用父类处理
                 self._handle_received_data(flit)
                 # 回收AXI flit
                 from .flit import _flit_pool
+
                 _flit_pool.return_flit(flit)
         elif hasattr(flit, "req_type") and flit.req_type:
             # 请求flit：需要资源检查
@@ -125,18 +128,21 @@ class D2D_SN_Interface(IPInterface):
                 self.forward_read_request_to_local_sn(flit)
                 # 回收AXI flit
                 from .flit import _flit_pool
+
                 _flit_pool.return_flit(flit)
             elif flit.req_type == "write":
                 # 写请求：需要先检查资源并返回data_send响应
                 self.handle_local_cross_die_write_request(flit)
                 # 回收AXI flit
                 from .flit import _flit_pool
+
                 _flit_pool.return_flit(flit)
         elif hasattr(flit, "rsp_type") and flit.rsp_type:
             # 响应：转发回Die内原始请求节点
             self.forward_response_to_local_rn(flit)
             # 回收AXI flit
             from .flit import _flit_pool
+
             _flit_pool.return_flit(flit)
 
     def forward_read_request_to_local_sn(self, flit: Flit):
@@ -158,8 +164,7 @@ class D2D_SN_Interface(IPInterface):
         path = self.routes[source][destination] if destination in self.routes[source] else [source]
 
         # 创建请求flit副本
-        new_flit = create_d2d_flit_copy(flit, source=source, destination=destination,
-                                        path=path, attr_preset="request")
+        new_flit = create_d2d_flit_copy(flit, source=source, destination=destination, path=path, attr_preset="request")
 
         # 设置网络状态
         new_flit.path_index = 0
@@ -190,8 +195,7 @@ class D2D_SN_Interface(IPInterface):
             path = [source]  # 如果没有路由，使用源节点作为路径
 
         # 创建响应flit副本
-        new_flit = create_d2d_flit_copy(flit, source=source, destination=destination,
-                                        path=path, attr_preset="response")
+        new_flit = create_d2d_flit_copy(flit, source=source, destination=destination, path=path, attr_preset="response")
 
         new_flit.path_index = 0
 
@@ -272,43 +276,39 @@ class D2D_SN_Interface(IPInterface):
     def handle_local_cross_die_write_request(self, flit: Flit):
         """
         处理本地接收的跨Die写请求
-        先返回data_send响应，收到数据后再跨Die传输
+        完全遵循基类ip_interface的retry逻辑
+
+        每个Die独立处理，不继承前一个Die的retry状态
         """
         packet_id = flit.packet_id
 
-        # 防重复处理：检查是否已经处理过这个写请求
-        if packet_id in self.processed_write_requests:
-            return
+        # 遵循基类逻辑：根据req_attr区分新请求和retry请求
+        if getattr(flit, "req_attr", "new") == "new":
+            # 新请求：检查资源
+            has_tracker = self.sn_tracker_count["share"]["count"] > 0
+            has_databuffer = self.sn_wdb_count["count"] >= flit.burst_length
 
-        # 标记为已处理
-        self.processed_write_requests.add(packet_id)
+            if has_tracker and has_databuffer:
+                # 分配资源并加入tracker（与基类一致）
+                flit.sn_tracker_type = "share"
+                self.sn_tracker.append(flit)
+                self.sn_tracker_count["share"]["count"] -= 1
+                self.sn_wdb[flit.packet_id] = []
+                self.sn_wdb_count["count"] -= flit.burst_length
 
-        # 检查D2D_SN的资源
-        has_tracker = self.sn_tracker_count["share"]["count"] > 0
-        has_databuffer = self.sn_wdb_count["count"] >= flit.burst_length
-
-        if has_tracker and has_databuffer:
-            # 消耗资源
-            self.sn_tracker_count["share"]["count"] -= 1
-            self.sn_wdb_count["count"] -= flit.burst_length
-
-            # 记录tracker信息
-            flit.sn_tracker_type = "write"
-            self.sn_tracker.append(flit)
-
-            # 创建data_send响应
-            data_send_rsp = self._create_response_flit(flit, "datasend")
-
-            # 发送data_send响应
-            self.enqueue(data_send_rsp, "rsp")
-
-            # 准备接收写数据的数据结构
-            self.sn_wdb[flit.packet_id] = []
-
+                # 发送datasend响应
+                data_send_rsp = self._create_response_flit(flit, "datasend")
+                self.enqueue(data_send_rsp, "rsp")
+            else:
+                # 资源不足：发送negative并加入等待队列（与基类一致）
+                negative_rsp = self._create_response_flit(flit, "negative")
+                self.enqueue(negative_rsp, "rsp")
+                self.sn_req_wait["write"].append(flit)
         else:
-            # 资源不足，发送negative响应
-            negative_rsp = self._create_response_flit(flit, "negative")
-            self.enqueue(negative_rsp, "rsp")
+            # retry请求（req_attr="old"）：直接发送datasend（与基类一致）
+            # flit已在等待队列处理时加入tracker，这里不需要再次分配资源
+            data_send_rsp = self._create_response_flit(flit, "datasend")
+            self.enqueue(data_send_rsp, "rsp")
 
     def _handle_cross_die_read_request(self, flit: Flit):
         """
@@ -418,8 +418,7 @@ class D2D_SN_Interface(IPInterface):
         from .flit import create_d2d_flit_copy
 
         # 创建临时flit用于存储（包含时间戳）
-        temp_flit = create_d2d_flit_copy(flit, source=0, destination=0,
-                                         path=[0], attr_preset="with_timestamp")
+        temp_flit = create_d2d_flit_copy(flit, source=0, destination=0, path=[0], attr_preset="with_timestamp")
 
         # 添加到sn_rdb
         self.sn_rdb[packet_id].append(temp_flit)
@@ -543,18 +542,18 @@ class D2D_SN_Interface(IPInterface):
             if self.sn_tracker_count["share"]["count"] > 0 and self.sn_wdb_count["count"] >= wait_list[0].burst_length:
 
                 new_req = wait_list.pop(0)
+                new_req.sn_tracker_type = "share"
 
-                # 分配资源
+                # 完全遵循基类逻辑：分配资源并加入tracker
+                self.sn_tracker.append(new_req)
                 self.sn_tracker_count["share"]["count"] -= 1
                 self.sn_wdb_count["count"] -= new_req.burst_length
-                new_req.sn_tracker_type = "share"
-                self.sn_tracker.append(new_req)
 
                 # 发送positive响应触发GDMA retry
                 positive_rsp = self._create_response_flit(new_req, "positive")
                 self.enqueue(positive_rsp, "rsp")
 
-                print(f"[D2D_SN] 发送positive响应触发写请求retry packet_id={new_req.packet_id}")
+                # print(f"[D2D_SN] 发送positive响应触发写请求retry packet_id={new_req.packet_id}")
 
     def forward_cross_die_data_to_requester(self, flit: Flit):
         """
@@ -665,18 +664,14 @@ class D2D_SN_Interface(IPInterface):
         from .flit import create_d2d_flit_copy
 
         # 创建新的AXI写请求flit
-        axi_write_req = create_d2d_flit_copy(write_req, source=self.ip_pos,
-                                             destination=0, path=[0],
-                                             attr_preset="request")
+        axi_write_req = create_d2d_flit_copy(write_req, source=self.ip_pos, destination=0, path=[0], attr_preset="request")
 
         # 通过AW通道发送写请求（第三个参数传0，让系统自动判断channel）
         self.d2d_sys.enqueue_sn(axi_write_req, target_die_id, 0)
 
         # 为每个写数据flit创建AXI flit
         for flit in data_flits:
-            axi_data_flit = create_d2d_flit_copy(flit, source=self.ip_pos,
-                                                 destination=0, path=[0],
-                                                 attr_preset="data")
+            axi_data_flit = create_d2d_flit_copy(flit, source=self.ip_pos, destination=0, path=[0], attr_preset="data")
             # 确保标记为写数据
             axi_data_flit.flit_type = "data"
             axi_data_flit.req_type = "write"
@@ -706,6 +701,9 @@ class D2D_SN_Interface(IPInterface):
 
             # 转发写完成响应给原始RN
             self.forward_response_to_local_rn(flit)
+
+            # 检查等待队列，处理等待的写请求
+            self._process_waiting_requests_after_release(write_req)
         else:
             # 没有找到tracker，可能是重复响应，尝试转发一次
             if not hasattr(self, "forwarded_responses"):

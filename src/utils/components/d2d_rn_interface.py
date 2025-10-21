@@ -196,7 +196,10 @@ class D2D_RN_Interface(IPInterface):
 
         local_write_req.source_type = self.ip_type
         local_write_req.destination_type = write_req.d2d_target_type
-        local_write_req.req_attr = "old"  # 标记为old避免重复分配tracker（tracker已在handle_cross_die_write_request中分配）
+
+        # 关键：设置为"new"让DDR进行SN资源检查（支持Die1的独立retry）
+        # D2D_RN的RN资源已在handle_cross_die_write_request中分配
+        local_write_req.req_attr = "new"
 
         # 设置路径信息
         local_write_req.path_index = 0
@@ -204,7 +207,7 @@ class D2D_RN_Interface(IPInterface):
         local_write_req.is_injected = False
         local_write_req.is_new_on_network = True
 
-        # 发送写请求
+        # 发送写请求（D2D_RN的enqueue会跳过RN资源检查）
         self.enqueue(local_write_req, "req")
 
         # 替换tracker list中的跨Die请求为本地写请求，确保create_write_packet使用正确的source/destination
@@ -222,8 +225,8 @@ class D2D_RN_Interface(IPInterface):
     def handle_other_cross_die_flit(self, flit: Flit):
         """
         处理其他类型的跨Die flit（读请求等）
-        注意：tracker资源已经在基类IPInterface的_check_and_reserve_resources()中分配
-        这里只负责跨Die转发逻辑
+        注意：这里预先分配D2D_RN的RN资源（第296行加入tracker）
+        转发时设置req_attr="new"让DDR进行SN资源检查（支持Die1的独立retry）
         """
         packet_id = getattr(flit, "packet_id", None)
         req_type = getattr(flit, "req_type", "read")
@@ -495,6 +498,24 @@ class D2D_RN_Interface(IPInterface):
         if req_to_remove:
             tracker_list.remove(req_to_remove)
             self.rn_tracker_pointer["write"] -= 1
+
+    def _check_and_reserve_resources(self, req: Flit) -> bool:
+        """
+        重写RN资源检查：对于跨Die请求，资源已在接收时预先分配
+
+        - 跨Die读请求：资源在handle_other_cross_die_flit中分配（第296行）
+        - 跨Die写请求：资源在handle_cross_die_write_request中分配
+        """
+        # 检查是否为已预分配资源的跨Die请求
+        is_cross_die_read = req.req_type == "read" and req in self.rn_tracker["read"]
+        is_cross_die_write = req.req_type == "write" and req.packet_id in self.cross_die_write_requests
+
+        if is_cross_die_read or is_cross_die_write:
+            # 资源已预先分配，跳过重复检查
+            return True
+
+        # 其他请求使用基类逻辑
+        return super()._check_and_reserve_resources(req)
 
     def process_inject_request(self, flit: Flit, network_type: str):
         """

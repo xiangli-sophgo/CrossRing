@@ -90,7 +90,6 @@ def test_pointer_advancement():
 
         print(f"\n第{round_num + 1}轮:")
         print(f"  匹配结果: {matches}")
-        print(f"  input_start: {pointers['input_start']}")
         print(f"  input_pointers: {pointers['input_pointers']}")
         print(f"  output_pointers: {pointers['output_pointers']}")
 
@@ -260,7 +259,6 @@ def test_idle_inputs():
 
         print(f"\n第{round_num + 1}轮:")
         print(f"  匹配结果: {matches}")
-        print(f"  input_start: {pointers['input_start']}")
         print(f"  input_pointers: {pointers['input_pointers']}")
 
     print("\n[OK] 空闲输入测试完成")

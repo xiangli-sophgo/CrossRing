@@ -204,12 +204,10 @@ class D2DResultProcessor(BandwidthAnalyzer):
         if read_requests:
             read_csv_path = os.path.join(output_path, "d2d_read_requests.csv")
             self._save_requests_to_csv(read_requests, read_csv_path, csv_header)
-            print(f"  - 读请求: {read_csv_path} ({len(read_requests)} 条记录)")
 
         if write_requests:
             write_csv_path = os.path.join(output_path, "d2d_write_requests.csv")
             self._save_requests_to_csv(write_requests, write_csv_path, csv_header)
-            print(f"  - 写请求: {write_csv_path} ({len(write_requests)} 条记录)")
 
     def _save_requests_to_csv(self, requests: List[D2DRequestInfo], file_path: str, header: List[str]):
         """保存请求列表到CSV文件"""
@@ -332,8 +330,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 # 写入所有数据行
                 for row in all_rows:
                     writer.writerow(row)
-
-            print(f"  - IP带宽: {csv_path} ({len(all_rows)} 条记录)")
 
         except (IOError, OSError) as e:
             print(f"警告: 保存IP带宽CSV失败 ({csv_path}): {e}")
@@ -823,11 +819,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 plt.tight_layout(pad=0.3)
                 plt.savefig(save_path, dpi=150, bbox_inches="tight", pad_inches=0.1)
             plt.close()
+            return save_path
         else:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message=".*not compatible with tight_layout.*")
                 plt.tight_layout(pad=0.3)
                 plt.show()
+            return None
 
     def draw_ip_bandwidth_heatmap(self, dies=None, config=None, mode="total", node_size=4000, save_path=None):
         """
@@ -999,11 +997,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 plt.tight_layout(pad=0.3)
                 plt.savefig(save_path, dpi=150, bbox_inches="tight", pad_inches=0.1)
             plt.close()
+            return save_path
         else:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message=".*not compatible with tight_layout.*")
                 plt.tight_layout(pad=0.3)
                 plt.show()
+            return None
 
     def _draw_single_die_flow(self, ax, network, config, die_id, offset_x, offset_y, mode="utilization", node_size=2000, show_cdma=True, die_model=None, d2d_config=None):
         """绘制单个Die的流量图，复用原有draw_flow_graph的核心逻辑"""

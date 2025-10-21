@@ -148,9 +148,9 @@ class D2D_Model:
         if self._debug_config["enabled"]:
             trace_info = f"跟踪packets={trace_packets}" if trace_packets else ""
             interval_info = f"更新间隔={update_interval}s" if update_interval > 0 else ""
-            print(f"✅ 调试模式已启用: {trace_info} {interval_info}".strip())
+            print(f"- 调试模式已启用: {trace_info} {interval_info}".strip())
         else:
-            print("❌ 调试模式已禁用")
+            print("- 调试模式已禁用")
 
     def setup_result_analysis(
         self,
@@ -995,16 +995,15 @@ class D2D_Model:
 
         try:
             # 调用D2D专用的流量图绘制方法，传入die模型以支持跨Die带宽绘制
-            d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=mode, save_path=save_path, show_cdma=show_cdma)
-
-            # 流量图生成完成的提示放在这里会更合适
-            # 移动到process_d2d_comprehensive_results末尾统一显示
+            saved_path = d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=mode, save_path=save_path, show_cdma=show_cdma)
+            return saved_path
 
         except Exception as e:
             print(f"生成D2D组合流量图失败: {e}")
             import traceback
 
             traceback.print_exc()
+            return None
 
     def run_with_flow_visualization(self, enable_flow_graph=True, flow_mode="total"):
         """
@@ -1018,15 +1017,19 @@ class D2D_Model:
         self.run()
 
         # 仿真完成后进行综合结果处理
+        combined_flow_path = None
         if enable_flow_graph:
-            self.generate_combined_flow_graph(mode=flow_mode)
+            combined_flow_path = self.generate_combined_flow_graph(mode=flow_mode, save_path="auto")
 
         # 处理D2D综合结果分析
-        self.process_d2d_comprehensive_results()
+        self.process_d2d_comprehensive_results(combined_flow_path=combined_flow_path)
 
-    def process_d2d_comprehensive_results(self):
+    def process_d2d_comprehensive_results(self, combined_flow_path=None):
         """
         处理D2D综合结果分析，复用现有的结果处理方法
+
+        Args:
+            combined_flow_path: generate_combined_flow_graph保存的文件路径（如果有）
         """
         print("\n" + "=" * 60)
         print("D2D仿真综合结果分析")
@@ -1038,26 +1041,33 @@ class D2D_Model:
         # 1. 跳过Die内部结果分析（D2D系统中Die内部没有数据流）
         die_results = {}
 
-        # 2. D2D专用结果处理
-        self._process_d2d_specific_results()
+        # 2. D2D专用结果处理，并收集保存的文件路径
+        saved_files = self._process_d2d_specific_results()
 
-        # 3. 显示流量图生成信息
-        print("\n" + "=" * 60)
-        print("生成D2D可视化图表")
-        print("=" * 60)
-        results_fig_path = self.kwargs.get("results_fig_save_path", "../Result/")
-        if results_fig_path:
-            print(f"  - D2D组合流量图已保存到: {results_fig_path}")
-        else:
-            print("  - D2D组合流量图已显示")
+        # 3. 添加组合流量图路径（如果有）
+        if combined_flow_path:
+            saved_files.insert(0, {"type": "D2D组合流量图", "path": combined_flow_path})
 
-        # 4. 完成
+        # 4. 统一显示所有保存的文件信息
+        if saved_files:
+            print("\n" + "=" * 60)
+            print("已保存文件")
+            print("=" * 60)
+            for file_info in saved_files:
+                if "count" in file_info:
+                    print(f"  - {file_info['type']}: {file_info['path']} ({file_info['count']} 条记录)")
+                else:
+                    print(f"  - {file_info['type']}: {file_info['path']}")
+
+        # 5. 完成
         print("\n" + "=" * 60)
         print("D2D综合结果分析完成")
         print("=" * 60)
 
     def _process_d2d_specific_results(self):
         """处理D2D专有的结果分析（跨Die请求记录和带宽统计）"""
+        saved_files = []
+
         try:
             # 使用缓存的D2D处理器（如果存在），避免重复计算
             if hasattr(self, "_cached_d2d_processor") and self._cached_d2d_processor:
@@ -1092,25 +1102,36 @@ class D2D_Model:
             d2d_processor.generate_d2d_bandwidth_report(d2d_result_path)
 
             # 步骤2: 保存数据文件（根据配置）
-            if self._result_analysis_config.get("export_d2d_requests_csv") or self._result_analysis_config.get("export_ip_bandwidth_csv"):
-                print("\n" + "=" * 60)
-                print("保存D2D结果数据")
-                print("=" * 60)
+            if self._result_analysis_config.get("export_d2d_requests_csv"):
+                read_requests = [req for req in d2d_processor.d2d_requests if req.req_type == "read"]
+                write_requests = [req for req in d2d_processor.d2d_requests if req.req_type == "write"]
 
-                if self._result_analysis_config.get("export_d2d_requests_csv"):
-                    d2d_processor.save_d2d_requests_csv(d2d_result_path)
-                    # print("  - D2D请求记录CSV已保存")
+                if read_requests:
+                    read_csv_path = os.path.join(d2d_result_path, "d2d_read_requests.csv")
+                    saved_files.append({"type": "读请求", "path": read_csv_path, "count": len(read_requests)})
 
-                if self._result_analysis_config.get("export_ip_bandwidth_csv"):
-                    d2d_processor.save_ip_bandwidth_to_csv(d2d_result_path)
-                    # print("  - IP带宽统计CSV已保存")
+                if write_requests:
+                    write_csv_path = os.path.join(d2d_result_path, "d2d_write_requests.csv")
+                    saved_files.append({"type": "写请求", "path": write_csv_path, "count": len(write_requests)})
+
+                d2d_processor.save_d2d_requests_csv(d2d_result_path)
+
+            if self._result_analysis_config.get("export_ip_bandwidth_csv"):
+                csv_path = os.path.join(d2d_result_path, "ip_bandwidth.csv")
+                d2d_processor.save_ip_bandwidth_to_csv(d2d_result_path)
+
+                # 计算保存的记录数
+                if hasattr(d2d_processor, "die_ip_bandwidth_data") and d2d_processor.die_ip_bandwidth_data:
+                    total_records = 0
+                    for die_data in d2d_processor.die_ip_bandwidth_data.values():
+                        all_ip_instances = set()
+                        for mode_data in die_data.values():
+                            all_ip_instances.update(mode_data.keys())
+                        total_records += len(all_ip_instances)
+                    saved_files.append({"type": "IP带宽", "path": csv_path, "count": total_records})
 
             # 步骤3: 生成流量图（如果启用）
             if self._result_analysis_config.get("flow_graph"):
-                print("\n" + "=" * 60)
-                print("生成D2D流量图")
-                print("=" * 60)
-
                 # 设置die_processors以便流量图显示IP信息
                 d2d_processor.die_processors = {}
                 for die_id, die_model in self.dies.items():
@@ -1132,25 +1153,18 @@ class D2D_Model:
                         d2d_processor.die_processors[die_id] = die_processor
 
                 save_path = self.kwargs.get("results_fig_save_path") if self._result_analysis_config.get("save_figures") else None
-                d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=self.flow_graph_mode, save_path=save_path, show_cdma=True)
-                if save_path:
-                    print(f"  - D2D流量图已保存到: {save_path}")
-                else:
-                    print("  - D2D流量图已显示")
+                flow_path = d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=self.flow_graph_mode, save_path=save_path, show_cdma=True)
+                if flow_path:
+                    saved_files.append({"type": "D2D流量图", "path": flow_path})
 
             # 步骤4: 生成IP带宽热力图（如果启用）
             if self._result_analysis_config.get("ip_bandwidth_heatmap"):
-                print("\n" + "=" * 60)
-                print("生成IP带宽热力图")
-                print("=" * 60)
                 save_path = self.kwargs.get("results_fig_save_path") if self._result_analysis_config.get("save_figures") else None
                 heatmap_mode = self._result_analysis_config.get("heatmap_mode", "total")
 
-                d2d_processor.draw_ip_bandwidth_heatmap(dies=self.dies, config=self.config, mode=heatmap_mode, node_size=2500, save_path=save_path)
-                if save_path:
-                    print(f"  - IP带宽热力图({heatmap_mode})已保存到: {save_path}")
-                else:
-                    print(f"  - IP带宽热力图({heatmap_mode})已显示")
+                heatmap_path = d2d_processor.draw_ip_bandwidth_heatmap(dies=self.dies, config=self.config, mode=heatmap_mode, node_size=2500, save_path=save_path)
+                if heatmap_path:
+                    saved_files.append({"type": f"IP带宽热力图({heatmap_mode})", "path": heatmap_path})
 
         except Exception as e:
             import traceback
@@ -1158,6 +1172,8 @@ class D2D_Model:
             print(f"警告: D2D专用结果处理失败: {e}")
             print("详细错误信息:")
             traceback.print_exc()
+
+        return saved_files
 
     def _collect_d2d_statistics(self):
         """收集D2D专有统计信息"""
