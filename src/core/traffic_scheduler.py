@@ -313,10 +313,10 @@ class TrafficScheduler:
             chain = SerialChain(chain_id, traffic_files)
             self.parallel_chains.append(chain)
 
-        if self.verbose:
-            print(f"Setup {len(self.parallel_chains)} parallel chains")
-            for chain in self.parallel_chains:
-                print(f"  {chain.chain_id}: {chain.traffic_files}")
+        # if self.verbose:
+        #     print(f"Setup {len(self.parallel_chains)} parallel chains")
+        #     for chain in self.parallel_chains:
+        #         print(f"  {chain.chain_id}: {chain.traffic_files}")
 
     def setup_single_chain(self, traffic_files: List[str]):
         """设置单条串行链（向后兼容）"""

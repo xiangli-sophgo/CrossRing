@@ -762,17 +762,22 @@ class IPInterface:
                     print(f"Warning: No RN tracker found for packet_id {flit.packet_id}")
 
         elif flit.req_type == "write":
-            # 检查是否为跨Die写数据，每个flit都需要更新D2D统计
-            if hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die") and flit.d2d_origin_die != flit.d2d_target_die:
-                # 这是跨Die写请求的数据flit
+            # D2D写数据统计（包括跨Die和Die内）
+            if hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die"):
                 die_id = getattr(self.config, "DIE_ID", None)
-                if die_id is not None and flit.d2d_target_die == die_id:
-                    # 通过网络对象获取d2d_model引用
+                if die_id is not None:
                     d2d_model = getattr(self.req_network, "d2d_model", None)
                     if d2d_model:
                         burst_length = getattr(flit, "burst_length", 4)
-                        # 记录跨Die写数据接收（每个flit都记录）
-                        d2d_model.record_write_data_received(flit.packet_id, die_id, burst_length, is_cross_die=True)
+                        is_cross_die = (flit.d2d_origin_die != flit.d2d_target_die)
+
+                        # 记录写数据接收：跨Die或Die内
+                        if is_cross_die and flit.d2d_target_die == die_id:
+                            # 跨Die写数据接收
+                            d2d_model.record_write_data_received(flit.packet_id, die_id, burst_length, is_cross_die=True)
+                        elif not is_cross_die:
+                            # Die内写数据接收
+                            d2d_model.record_write_data_received(flit.packet_id, die_id, burst_length, is_cross_die=False)
 
             # 确保sn_wdb中存在packet_id的列表（跨Die写数据可能没有预先创建）
             if flit.packet_id not in self.sn_wdb:

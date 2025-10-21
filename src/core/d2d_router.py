@@ -73,10 +73,10 @@ class D2DRouter:
         Args:
             src_die: 源Die ID
             dst_die: 目标Die ID
-            dst_node: 目标节点编号（用于负载均衡）
+            dst_node: 目标节点ID（用于负载均衡）
 
         Returns:
-            selected_d2d_node: 选中的D2D节点位置，如果不需要跨Die则返回None
+            selected_d2d_node: 选中的D2D_RN节点位置，如果不需要跨Die则返回None
         """
         # 检查是否跨Die
         if src_die == dst_die:
@@ -88,7 +88,7 @@ class D2DRouter:
         if not available_nodes:
             raise ValueError(f"没有从Die{src_die}到Die{dst_die}的D2D连接")
 
-        # 使用目标节点号进行负载均衡
+        # 使用目标节点ID进行负载均衡
         index = dst_node % len(available_nodes)
         selected_node = available_nodes[index]
 

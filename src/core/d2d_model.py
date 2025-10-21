@@ -28,9 +28,9 @@ class D2D_Model:
     3. 协调多Die的时钟同步
     """
 
-    def __init__(self, config: CrossRingConfig, traffic_config: list, **kwargs):
+    def __init__(self, config: CrossRingConfig, traffic_config: list = None, **kwargs):
         self.config = config
-        self.traffic_config = traffic_config
+        self.traffic_config = traffic_config or [[]]
         self.kwargs = kwargs
         self.current_cycle = 0
 
@@ -45,8 +45,32 @@ class D2D_Model:
         self.print_interval = getattr(config, "PRINT_INTERVAL", 1000)
 
         # 流量图控制参数
-        self.enable_flow_graph = kwargs.get("enable_flow_graph", True)  # 是否启用流量图绘制
-        self.flow_graph_mode = kwargs.get("flow_graph_mode", "total")  # 流量图模式：total, utilization, ITag_ratio
+        self.enable_flow_graph = False
+        self.flow_graph_mode = "total"
+
+        # 结果分析配置（通过setup_result_analysis设置）
+        self._result_analysis_config = {
+            "flow_graph": False,
+            "ip_bandwidth_heatmap": False,
+            "save_figures": True,
+            "export_d2d_requests_csv": True,
+            "export_ip_bandwidth_csv": True,
+            "heatmap_mode": "total",
+        }
+
+        # 调试配置（通过setup_debug设置）
+        self._debug_config = {
+            "enabled": False,
+            "trace_packets": [],
+            "update_interval": 0.1,
+        }
+
+        # 可视化配置（通过setup_visualization设置）
+        self._visualization_config = {
+            "enabled": False,
+            "update_interval": 1,
+            "start_cycle": 0,
+        }
 
         # 统计信息
         self.total_cross_die_requests = 0
@@ -58,8 +82,10 @@ class D2D_Model:
         self.d2d_requests_sent = {i: 0 for i in range(self.num_dies)}  # 每个Die发出的跨Die请求数
         self.d2d_requests_completed = {i: 0 for i in range(self.num_dies)}  # 每个Die完成的跨Die请求数
 
-        # 创建D2D专用的traffic调度器
-        self.d2d_traffic_scheduler = D2DTrafficScheduler(traffic_config, self.kwargs.get("traffic_file_path", "../traffic/"), config)
+        # 创建D2D专用的traffic调度器（如果提供了traffic_config）
+        self.d2d_traffic_scheduler = None
+        if traffic_config:
+            self.d2d_traffic_scheduler = D2DTrafficScheduler(traffic_config, self.kwargs.get("traffic_file_path", "../traffic/"), config)
 
         # 创建Die实例
         self._create_die_instances()
@@ -80,6 +106,175 @@ class D2D_Model:
             # 获取第一个Die的第一个网络作为初始网络（用于配置信息）
             initial_network = self.dies[0].req_network
             self.d2d_link_state_vis = D2D_Link_State_Visualizer(self.num_dies, initial_network)
+
+    # ==================== Setup Methods ====================
+
+    def setup_traffic_scheduler(self, traffic_file_path: str, traffic_chains: List[List[str]]) -> None:
+        """
+        配置流量调度器
+
+        Args:
+            traffic_file_path: 流量文件路径
+            traffic_chains: 流量链配置，每个链包含文件名列表
+        """
+        # 重新创建D2D traffic调度器
+        self.d2d_traffic_scheduler = D2DTrafficScheduler(traffic_chains, traffic_file_path, self.config)
+
+        # 更新kwargs中的traffic配置，以便Die实例使用
+        self.kwargs["traffic_file_path"] = traffic_file_path
+        self.traffic_config = traffic_chains
+
+    def setup_debug(self, trace_packets: List[int] = None, update_interval: float = 0.0) -> None:
+        """
+        配置调试模式
+
+        Args:
+            trace_packets: 要跟踪的packet ID列表
+            update_interval: 每个周期的暂停时间（用于实时观察）
+        """
+        self._debug_config["enabled"] = trace_packets is not None or update_interval > 0
+
+        if trace_packets:
+            self._debug_config["trace_packets"] = trace_packets
+            # 向后兼容：同步到kwargs
+            self.kwargs["show_d2d_trace_id"] = trace_packets
+            self.kwargs["print_d2d_trace"] = 1
+
+        if update_interval is not None:
+            self._debug_config["update_interval"] = update_interval
+            # 向后兼容：同步到kwargs
+            self.kwargs["d2d_trace_sleep"] = update_interval
+
+        if self._debug_config["enabled"]:
+            trace_info = f"跟踪packets={trace_packets}" if trace_packets else ""
+            interval_info = f"更新间隔={update_interval}s" if update_interval > 0 else ""
+            print(f"✅ 调试模式已启用: {trace_info} {interval_info}".strip())
+        else:
+            print("❌ 调试模式已禁用")
+
+    def setup_result_analysis(
+        self,
+        # 图片生成控制
+        flow_graph: bool = False,
+        ip_bandwidth_heatmap: bool = False,
+        save_figures: bool = True,
+        # CSV文件导出控制
+        export_d2d_requests_csv: bool = True,
+        export_ip_bandwidth_csv: bool = True,
+        # 通用设置
+        save_dir: str = "",
+        heatmap_mode: str = "total",
+    ) -> None:
+        """
+        配置结果分析
+
+        图片生成控制:
+            flow_graph: 是否生成流量图
+            ip_bandwidth_heatmap: 是否生成IP带宽热力图
+            save_figures: 是否保存图片
+
+        CSV文件导出控制:
+            export_d2d_requests_csv: 是否导出跨Die请求记录
+            export_ip_bandwidth_csv: 是否导出IP带宽统计
+
+        通用设置:
+            save_dir: 结果保存目录
+            heatmap_mode: 热力图模式 ("total", "read", "write")
+        """
+        self._result_analysis_config.update(
+            {
+                "flow_graph": flow_graph,
+                "ip_bandwidth_heatmap": ip_bandwidth_heatmap,
+                "save_figures": save_figures,
+                "export_d2d_requests_csv": export_d2d_requests_csv,
+                "export_ip_bandwidth_csv": export_ip_bandwidth_csv,
+                "heatmap_mode": heatmap_mode,
+            }
+        )
+
+        # 向后兼容：同步到实例变量
+        self.enable_flow_graph = flow_graph
+        self.kwargs["enable_flow_graph"] = flow_graph
+
+        # 更新结果保存路径
+        if save_dir:
+            self.kwargs["results_fig_save_path"] = save_dir
+
+    def setup_visualization(self, enable: bool = True, update_interval: float = 1.0, start_cycle: int = 0) -> None:
+        """
+        配置实时可视化
+
+        Args:
+            enable: 是否启用链路状态可视化
+            update_interval: 更新间隔（秒）
+            start_cycle: 开始可视化的周期
+        """
+        self._visualization_config.update(
+            {
+                "enabled": enable,
+                "update_interval": update_interval,
+                "start_cycle": start_cycle,
+            }
+        )
+
+        # 向后兼容：同步到kwargs
+        self.kwargs["plot_link_state"] = 1 if enable else 0
+        self.kwargs["plot_start_cycle"] = start_cycle
+
+        # 如果启用且尚未创建可视化器，则创建
+        if enable and self.d2d_link_state_vis is None and len(self.dies) > 0:
+            from .D2D_Link_State_Visualizer import D2D_Link_State_Visualizer
+
+            initial_network = self.dies[0].req_network
+            self.d2d_link_state_vis = D2D_Link_State_Visualizer(self.num_dies, initial_network)
+
+        if enable:
+            print(f"✅ 实时可视化已启用: 更新间隔={update_interval}s, 开始周期={start_cycle}")
+            print("   提示: 可视化窗口将在仿真开始后自动打开")
+        else:
+            print("❌ 实时可视化已禁用")
+
+    def run_simulation(
+        self,
+        max_cycles: int = None,
+        print_interval: int = None,
+        results_analysis: bool = True,
+        verbose: int = 1,
+    ) -> None:
+        """
+        运行D2D仿真并可选地处理结果
+
+        Args:
+            max_cycles: 最大仿真周期数（如果为None，使用配置中的END_TIME）
+            print_interval: 打印进度的间隔周期数（如果为None，使用配置中的PRINT_INTERVAL）
+            results_analysis: 仿真完成后是否自动处理结果
+            verbose: 详细程度（0=静默，1=正常，2=详细）
+        """
+        # 设置仿真参数
+        if max_cycles is not None:
+            self.end_time = max_cycles
+        if print_interval is not None:
+            self.print_interval = print_interval
+
+        # 初始化仿真
+        self.initial()
+
+        # 运行仿真
+        print("\n提示: 按 Ctrl+C 可以随时中断仿真并查看当前结果\n")
+
+        self.run()
+
+        # 处理结果（如果启用）
+        if results_analysis:
+            try:
+                self.process_d2d_comprehensive_results()
+            except Exception as e:
+                print(f"D2D结果处理失败: {e}")
+                import traceback
+
+                traceback.print_exc()
+
+    # ==================== Internal Methods ====================
 
     def _create_die_instances(self):
         """为每个Die创建独立的BaseModel实例"""
@@ -434,7 +629,7 @@ class D2D_Model:
                         tail_time -= 1
 
         except KeyboardInterrupt:
-            print("\n仿真中断 (Ctrl+C)，正在优雅退出...")
+            print("\n仿真中断 (Ctrl+C)，正在退出...")
             # 不重新抛出异常，继续执行结果分析
         except Exception as e:
             print(f"\n仿真过程中出现错误: {e}")
@@ -456,15 +651,18 @@ class D2D_Model:
             print("\n仿真结束时的最终状态:")
             self._print_progress()
 
-        # 根据参数决定是否生成流量图
-        if self.enable_flow_graph:
-            if self.kwargs.get("verbose", 1):
-                # print(f"\n生成D2D流量图 (模式: {self.flow_graph_mode})")
-                pass
-            try:
-                self.generate_combined_flow_graph(mode=self.flow_graph_mode, save_path=None, show_cdma=True)
-            except Exception as e:
-                print(f"流量图生成失败: {e}")
+        # 创建并缓存 D2D 结果处理器（供后续结果分析使用）
+        if not hasattr(self, "_cached_d2d_processor") or not self._cached_d2d_processor:
+            d2d_processor = D2DResultProcessor(self.config)
+            d2d_processor.simulation_end_cycle = self.current_cycle
+            d2d_processor.finish_cycle = self.current_cycle
+
+            # 收集数据
+            d2d_processor.collect_cross_die_requests(self.dies)
+            d2d_processor.calculate_d2d_ip_bandwidth_data(self.dies)
+
+            # 缓存处理器
+            self._cached_d2d_processor = d2d_processor
 
     def _step_die(self, die_model: BaseModel):
         """执行单个Die的单周期步进"""
@@ -883,8 +1081,6 @@ class D2D_Model:
                 d2d_processor.calculate_d2d_ip_bandwidth_data(self.dies)
 
             # 获取结果保存路径，添加时间戳
-            import time
-
             timestamp = int(time.time())
             result_save_path = self.kwargs.get("result_save_path", "../Result/")
             d2d_result_path = os.path.join(result_save_path, f"D2D_{timestamp}")
@@ -895,12 +1091,66 @@ class D2D_Model:
             print("=" * 60)
             d2d_processor.generate_d2d_bandwidth_report(d2d_result_path)
 
-            # 步骤2: 保存数据文件
-            print("\n" + "=" * 60)
-            print("保存D2D结果数据")
-            print("=" * 60)
-            d2d_processor.save_d2d_requests_csv(d2d_result_path)
-            d2d_processor.save_ip_bandwidth_to_csv(d2d_result_path)
+            # 步骤2: 保存数据文件（根据配置）
+            if self._result_analysis_config.get("export_d2d_requests_csv") or self._result_analysis_config.get("export_ip_bandwidth_csv"):
+                print("\n" + "=" * 60)
+                print("保存D2D结果数据")
+                print("=" * 60)
+
+                if self._result_analysis_config.get("export_d2d_requests_csv"):
+                    d2d_processor.save_d2d_requests_csv(d2d_result_path)
+                    # print("  - D2D请求记录CSV已保存")
+
+                if self._result_analysis_config.get("export_ip_bandwidth_csv"):
+                    d2d_processor.save_ip_bandwidth_to_csv(d2d_result_path)
+                    # print("  - IP带宽统计CSV已保存")
+
+            # 步骤3: 生成流量图（如果启用）
+            if self._result_analysis_config.get("flow_graph"):
+                print("\n" + "=" * 60)
+                print("生成D2D流量图")
+                print("=" * 60)
+
+                # 设置die_processors以便流量图显示IP信息
+                d2d_processor.die_processors = {}
+                for die_id, die_model in self.dies.items():
+                    if hasattr(die_model, "result_processor") and die_model.result_processor:
+                        die_processor = die_model.result_processor
+
+                        # 确保die_processor有sim_model引用
+                        if not hasattr(die_processor, "sim_model"):
+                            die_processor.sim_model = die_model
+
+                        # 确保die_model有topo_type_stat属性
+                        if not hasattr(die_model, "topo_type_stat"):
+                            die_model.topo_type_stat = self.kwargs.get("topo_type", "5x4")
+
+                        # 使用D2D处理器计算的该Die特定的IP带宽数据
+                        if hasattr(d2d_processor, "die_ip_bandwidth_data") and die_id in d2d_processor.die_ip_bandwidth_data:
+                            die_processor.ip_bandwidth_data = d2d_processor.die_ip_bandwidth_data[die_id]
+
+                        d2d_processor.die_processors[die_id] = die_processor
+
+                save_path = self.kwargs.get("results_fig_save_path") if self._result_analysis_config.get("save_figures") else None
+                d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=self.flow_graph_mode, save_path=save_path, show_cdma=True)
+                if save_path:
+                    print(f"  - D2D流量图已保存到: {save_path}")
+                else:
+                    print("  - D2D流量图已显示")
+
+            # 步骤4: 生成IP带宽热力图（如果启用）
+            if self._result_analysis_config.get("ip_bandwidth_heatmap"):
+                print("\n" + "=" * 60)
+                print("生成IP带宽热力图")
+                print("=" * 60)
+                save_path = self.kwargs.get("results_fig_save_path") if self._result_analysis_config.get("save_figures") else None
+                heatmap_mode = self._result_analysis_config.get("heatmap_mode", "total")
+
+                d2d_processor.draw_ip_bandwidth_heatmap(dies=self.dies, config=self.config, mode=heatmap_mode, node_size=2500, save_path=save_path)
+                if save_path:
+                    print(f"  - IP带宽热力图({heatmap_mode})已保存到: {save_path}")
+                else:
+                    print(f"  - IP带宽热力图({heatmap_mode})已显示")
 
         except Exception as e:
             import traceback

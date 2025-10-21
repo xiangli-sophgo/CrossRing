@@ -188,8 +188,8 @@ class BaseModel:
         self.show_trace_id = show_trace_id
         self.show_node_id = show_node_id
         self.verbose = verbose
-        if self.verbose:
-            print(f"\nModel Type: {model_type}, Topology: {self.topo_type_stat}, file_name: {self.file_name[:-4]}")
+        # if self.verbose:
+            # print(f"\nModel Type: {model_type}, Topology: {self.topo_type_stat}, file_name: {self.file_name[:-4]}")
         self.results_fig_save_path = None
         if result_save_path:
             self.result_save_path = self.result_save_path_original + str(topo_type) + "/" + self.file_name[:-4] + "/"
@@ -210,15 +210,15 @@ class BaseModel:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
         if self.config.ETag_BOTHSIDE_UPGRADE:
             self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
-        
+
         # Initialize arbiters based on configuration
-        arbitration_config = getattr(self.config, 'arbitration', {})
+        arbitration_config = getattr(self.config, "arbitration", {})
 
         # Create arbiters for different queue types
-        default_config = arbitration_config.get('default', {'type': 'round_robin'})
-        self.iq_arbiter = create_arbiter_from_config(arbitration_config.get('iq', default_config))
-        self.eq_arbiter = create_arbiter_from_config(arbitration_config.get('eq', default_config))
-        self.rb_arbiter = create_arbiter_from_config(arbitration_config.get('rb', default_config))
+        default_config = arbitration_config.get("default", {"type": "round_robin"})
+        self.iq_arbiter = create_arbiter_from_config(arbitration_config.get("iq", default_config))
+        self.eq_arbiter = create_arbiter_from_config(arbitration_config.get("eq", default_config))
+        self.rb_arbiter = create_arbiter_from_config(arbitration_config.get("rb", default_config))
         self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
         self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
         self.flit_positions = set(
@@ -522,7 +522,7 @@ class BaseModel:
                         tail_time -= 1
 
         except KeyboardInterrupt:
-            print("\n仿真中断 (Ctrl+C)，正在优雅退出...")
+            print("\n仿真中断 (Ctrl+C)，正在退出...")
             # 不重新抛出异常，继续执行结果分析
         except Exception as e:
             print(f"\n仿真过程中出现错误: {e}")
@@ -836,9 +836,7 @@ class BaseModel:
                 row = []
                 for direction in directions_list:
                     # 检查是否可以注入到这个方向
-                    can_inject = self._check_iq_injection_conditions(
-                        network, ip_pos, ip_type, direction, network_type, ip_type_to_flit
-                    )
+                    can_inject = self._check_iq_injection_conditions(network, ip_pos, ip_type, direction, network_type, ip_type_to_flit)
                     row.append(can_inject)
                 request_matrix.append(row)
 
@@ -885,7 +883,7 @@ class BaseModel:
                         self.send_flits_num += 1
                         self.trans_flits_num += 1
 
-                        if hasattr(req, 'req_type'):
+                        if hasattr(req, "req_type"):
                             if req.req_type == "read":
                                 self.send_read_flits_num_stat += 1
                             elif req.req_type == "write":
@@ -1245,7 +1243,7 @@ class BaseModel:
                     network.ring_bridge["TL"][(pos, next_pos)][0] if network.ring_bridge["TL"][(pos, next_pos)] else None,
                     network.ring_bridge["TR"][(pos, next_pos)][0] if network.ring_bridge["TR"][(pos, next_pos)] else None,
                     network.inject_queues["TU"][pos][0] if pos in network.inject_queues["TU"] and network.inject_queues["TU"][pos] else None,
-                    network.inject_queues["TD"][pos][0] if pos in network.inject_queues["TD"] and network.inject_queues["TD"][pos] else None
+                    network.inject_queues["TD"][pos][0] if pos in network.inject_queues["TD"] and network.inject_queues["TD"][pos] else None,
                 ]
 
                 if not any(station_flits):
@@ -1256,20 +1254,14 @@ class BaseModel:
                 # output_directions: 0=EQ, 1=TU, 2=TD
                 slot_names = ["TL", "TR", "TU", "TD"]
                 output_dirs = ["EQ", "TU", "TD"]
-                direction_conditions = {
-                    "EQ": lambda d, n: d == n,
-                    "TU": lambda d, n: d < n,
-                    "TD": lambda d, n: d > n
-                }
+                direction_conditions = {"EQ": lambda d, n: d == n, "TU": lambda d, n: d < n, "TD": lambda d, n: d > n}
 
                 request_matrix = []
                 for slot_idx, flit in enumerate(station_flits):
                     row = []
                     for out_dir in output_dirs:
                         # 检查是否可以从这个slot转发到这个输出方向
-                        can_forward = self._check_rb_forward_conditions(
-                            network, flit, pos, next_pos, out_dir, direction_conditions[out_dir]
-                        )
+                        can_forward = self._check_rb_forward_conditions(network, flit, pos, next_pos, out_dir, direction_conditions[out_dir])
                         row.append(can_forward)
                     request_matrix.append(row)
 
@@ -1647,9 +1639,7 @@ class BaseModel:
             row = []
             for ip_type in ip_types_list:
                 # 检查是否可以从这个端口弹出到这个IP类型
-                can_eject = self._check_eq_eject_conditions(
-                    network, flit, ip_pos, port_idx, ip_type
-                )
+                can_eject = self._check_eq_eject_conditions(network, flit, ip_pos, port_idx, ip_type)
                 row.append(can_eject)
             request_matrix.append(row)
 
@@ -1924,44 +1914,71 @@ class BaseModel:
         # Define config whitelist (only YAML defined parameters)
         config_whitelist = [
             # Basic parameters
-            "TOPO_TYPE", "FLIT_SIZE", "SLICE_PER_LINK_HORIZONTAL", "SLICE_PER_LINK_VERTICAL",
-            "BURST", "NETWORK_FREQUENCY",
-
+            "TOPO_TYPE",
+            "FLIT_SIZE",
+            "SLICE_PER_LINK_HORIZONTAL",
+            "SLICE_PER_LINK_VERTICAL",
+            "BURST",
+            "NETWORK_FREQUENCY",
             # Resource configuration
-            "RN_RDB_SIZE", "RN_WDB_SIZE", "SN_DDR_RDB_SIZE", "SN_DDR_WDB_SIZE",
-            "SN_L2M_RDB_SIZE", "SN_L2M_WDB_SIZE", "UNIFIED_RW_TRACKER",
-
+            "RN_RDB_SIZE",
+            "RN_WDB_SIZE",
+            "SN_DDR_RDB_SIZE",
+            "SN_DDR_WDB_SIZE",
+            "SN_L2M_RDB_SIZE",
+            "SN_L2M_WDB_SIZE",
+            "UNIFIED_RW_TRACKER",
             # Latency configuration (using original values)
-            "DDR_R_LATENCY_original", "DDR_R_LATENCY_VAR_original", "DDR_W_LATENCY_original",
-            "L2M_R_LATENCY_original", "L2M_W_LATENCY_original", "SN_TRACKER_RELEASE_LATENCY_original",
-
+            "DDR_R_LATENCY_original",
+            "DDR_R_LATENCY_VAR_original",
+            "DDR_W_LATENCY_original",
+            "L2M_R_LATENCY_original",
+            "L2M_W_LATENCY_original",
+            "SN_TRACKER_RELEASE_LATENCY_original",
             # FIFO depths
-            "IQ_CH_FIFO_DEPTH", "EQ_CH_FIFO_DEPTH", "IQ_OUT_FIFO_DEPTH_HORIZONTAL",
-            "IQ_OUT_FIFO_DEPTH_VERTICAL", "IQ_OUT_FIFO_DEPTH_EQ", "RB_OUT_FIFO_DEPTH",
-            "RB_IN_FIFO_DEPTH", "EQ_IN_FIFO_DEPTH",
-
+            "IQ_CH_FIFO_DEPTH",
+            "EQ_CH_FIFO_DEPTH",
+            "IQ_OUT_FIFO_DEPTH_HORIZONTAL",
+            "IQ_OUT_FIFO_DEPTH_VERTICAL",
+            "IQ_OUT_FIFO_DEPTH_EQ",
+            "RB_OUT_FIFO_DEPTH",
+            "RB_IN_FIFO_DEPTH",
+            "EQ_IN_FIFO_DEPTH",
             # ETag configuration
-            "TL_Etag_T1_UE_MAX", "TL_Etag_T2_UE_MAX", "TR_Etag_T2_UE_MAX",
-            "TU_Etag_T1_UE_MAX", "TU_Etag_T2_UE_MAX", "TD_Etag_T2_UE_MAX",
+            "TL_Etag_T1_UE_MAX",
+            "TL_Etag_T2_UE_MAX",
+            "TR_Etag_T2_UE_MAX",
+            "TU_Etag_T1_UE_MAX",
+            "TU_Etag_T2_UE_MAX",
+            "TD_Etag_T2_UE_MAX",
             "ETag_BOTHSIDE_UPGRADE",
-
             # ITag configuration
-            "ITag_TRIGGER_Th_H", "ITag_TRIGGER_Th_V", "ITag_MAX_NUM_H", "ITag_MAX_NUM_V",
-
+            "ITag_TRIGGER_Th_H",
+            "ITag_TRIGGER_Th_V",
+            "ITag_MAX_NUM_H",
+            "ITag_MAX_NUM_V",
             # Feature switches
-            "ENABLE_CROSSPOINT_CONFLICT_CHECK", "ENABLE_IN_ORDER_EJECTION", "CROSSRING_VERSION",
-
+            "ENABLE_CROSSPOINT_CONFLICT_CHECK",
+            "ENABLE_IN_ORDER_EJECTION",
+            "CROSSRING_VERSION",
             # Bandwidth limits
-            "GDMA_BW_LIMIT", "SDMA_BW_LIMIT", "CDMA_BW_LIMIT", "DDR_BW_LIMIT", "L2M_BW_LIMIT",
-
+            "GDMA_BW_LIMIT",
+            "SDMA_BW_LIMIT",
+            "CDMA_BW_LIMIT",
+            "DDR_BW_LIMIT",
+            "L2M_BW_LIMIT",
             # Other configurations
-            "GDMA_RW_GAP", "SDMA_RW_GAP", "IN_ORDER_EJECTION_PAIRS", "IN_ORDER_PACKET_CATEGORIES",
-
+            "GDMA_RW_GAP",
+            "SDMA_RW_GAP",
+            "IN_ORDER_EJECTION_PAIRS",
+            "IN_ORDER_PACKET_CATEGORIES",
             # Tag configuration
-            "RB_ONLY_TAG_NUM_HORIZONTAL", "RB_ONLY_TAG_NUM_VERTICAL",
-
+            "RB_ONLY_TAG_NUM_HORIZONTAL",
+            "RB_ONLY_TAG_NUM_VERTICAL",
             # IP frequency transformation FIFO depths
-            "IP_L2H_FIFO_DEPTH", "IP_H2L_H_FIFO_DEPTH", "IP_H2L_L_FIFO_DEPTH"
+            "IP_L2H_FIFO_DEPTH",
+            "IP_H2L_H_FIFO_DEPTH",
+            "IP_H2L_L_FIFO_DEPTH",
         ]
 
         # Add selected configuration variables

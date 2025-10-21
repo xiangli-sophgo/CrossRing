@@ -67,8 +67,8 @@ D2D_W_LATENCY: 10   # 写数据通道延迟
 D2D_B_LATENCY: 10   # 写响应通道延迟
 
 # D2D 带宽控制
-D2D_RN_BW_LIMIT: 128    # D2D RN 带宽限制 (GB/s)
-D2D_SN_BW_LIMIT: 128    # D2D SN 带宽限制 (GB/s)
+D2D_RN_BW_LIMIT: 192    # D2D RN 带宽限制 (GB/s)
+D2D_SN_BW_LIMIT: 192    # D2D SN 带宽限制 (GB/s)
 
 # D2D 资源管理配置
 # D2D_RN 配置
