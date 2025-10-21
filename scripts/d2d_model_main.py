@@ -41,8 +41,8 @@ def main():
     traffic_file_path = str(Path(__file__).parent.parent / "test_data")
     traffic_chains = [
         [
-            # "d2d_4die_1016.txt",
-            "d2d_data_1021.txt",
+            "d2d_4die_1016.txt",
+            # "d2d_data_1021.txt",
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)

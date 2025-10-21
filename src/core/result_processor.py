@@ -511,7 +511,7 @@ class BandwidthAnalyzer:
                 all_ip_instances.add(source_type)
 
             # 收集dest_type
-            if hasattr(req, 'dest_type') and req.dest_type:
+            if hasattr(req, "dest_type") and req.dest_type:
                 raw_dest_type = req.dest_type
                 if raw_dest_type.endswith("_ip"):
                     raw_dest_type = raw_dest_type[:-3]
@@ -1080,15 +1080,15 @@ class BandwidthAnalyzer:
         # 遍历所有IP实例，找到匹配基本类型的实例
         for ip_instance, matrix in self.ip_bandwidth_data[mode].items():
             # 提取基本类型
-            if ip_instance.lower().startswith('d2d'):
+            if ip_instance.lower().startswith("d2d"):
                 # D2D类型特殊处理
-                parts = ip_instance.lower().split('_')
+                parts = ip_instance.lower().split("_")
                 if len(parts) >= 2:
-                    instance_base_type = '_'.join(parts[:2])
+                    instance_base_type = "_".join(parts[:2])
                 else:
                     instance_base_type = parts[0]
             else:
-                instance_base_type = ip_instance.split('_')[0].lower()
+                instance_base_type = ip_instance.split("_")[0].lower()
 
             # 如果基本类型匹配，累加带宽
             if instance_base_type == base_type_lower:
@@ -1201,14 +1201,14 @@ class BandwidthAnalyzer:
 
         # 如果总行数超过self.MAX_ROWS，合并other_ips
         if len(display_rows) + len(other_ips) > self.MAX_ROWS:
-            display_rows = display_rows[:self.MAX_ROWS]
+            display_rows = display_rows[: self.MAX_ROWS]
             for i, (ip_type, instances) in enumerate(other_ips):
                 target_row = i % len(display_rows)
                 display_rows[target_row] = (display_rows[target_row][0], display_rows[target_row][1] + instances)
         else:
             display_rows.extend(other_ips)
             if len(display_rows) > self.MAX_ROWS:
-                display_rows = display_rows[:self.MAX_ROWS]
+                display_rows = display_rows[: self.MAX_ROWS]
 
         ip_type_count = dict(display_rows)
 
@@ -1252,11 +1252,7 @@ class BandwidthAnalyzer:
                 block_y = row_y
 
                 # 计算透明度（使用全局带宽范围）
-                alpha = self._calculate_bandwidth_alpha(
-                    bandwidth,
-                    min_ip_bandwidth if min_ip_bandwidth is not None else 0,
-                    max_ip_bandwidth if max_ip_bandwidth is not None else 1
-                )
+                alpha = self._calculate_bandwidth_alpha(bandwidth, min_ip_bandwidth if min_ip_bandwidth is not None else 0, max_ip_bandwidth if max_ip_bandwidth is not None else 1)
 
                 # 绘制小方块
                 ip_block = Rectangle(
@@ -1270,6 +1266,21 @@ class BandwidthAnalyzer:
                     zorder=3,
                 )
                 ax.add_patch(ip_block)
+
+                # 在小方块中显示带宽数值（仅单Die场景且方块足够大时显示）
+                if grid_square_size >= square_size * 0.4:
+                    bw_text = f"{bandwidth:.0f}" if bandwidth >= 10 else f"{bandwidth:.1f}"
+                    ax.text(
+                        block_x,
+                        block_y,
+                        bw_text,
+                        ha="center",
+                        va="center",
+                        fontsize=6,
+                        fontweight="normal",
+                        color="black",
+                        zorder=4,
+                    )
 
             row_idx += 1
 
@@ -1399,7 +1410,22 @@ class BandwidthAnalyzer:
         cb.set_ticks(tick_values)
         cb.set_ticklabels([f"{v:.1f}" for v in tick_values])
 
-    def _draw_single_die_flow(self, ax, network, config, die_id=None, offset_x=0, offset_y=0, mode="utilization", node_size=2000, show_cdma=True, die_model=None, d2d_config=None, max_ip_bandwidth=None, min_ip_bandwidth=None):
+    def _draw_single_die_flow(
+        self,
+        ax,
+        network,
+        config,
+        die_id=None,
+        offset_x=0,
+        offset_y=0,
+        mode="utilization",
+        node_size=2000,
+        show_cdma=True,
+        die_model=None,
+        d2d_config=None,
+        max_ip_bandwidth=None,
+        min_ip_bandwidth=None,
+    ):
         """
         绘制单个Die的流量图核心方法（父类通用版本）
 
@@ -1449,6 +1475,7 @@ class BandwidthAnalyzer:
                     links = {link: stats["utilization"] for link, stats in utilization_stats.items()}
             except Exception as e:
                 import traceback
+
                 traceback.print_exc()
                 links = {}
 
@@ -1467,8 +1494,8 @@ class BandwidthAnalyzer:
             x = node % config.NUM_COL
             y = node // config.NUM_COL
             if y % 2 == 1:  # 奇数行左移
-                x -= 0.24
-                y -= 0.5
+                x -= 0.35
+                y -= 0.35
             pos[node] = (x * 3 + offset_x, -y * 1.5 + offset_y)
 
         # 添加有权重的边
@@ -1576,9 +1603,9 @@ class BandwidthAnalyzer:
 
                     if has_reverse:
                         if is_horizontal:
-                            perp_dx, perp_dy = -dy * 0.15 + 0.25, dx * 0.15
+                            perp_dx, perp_dy = -dy * 0.15 + 0.25, dx * 0.08
                         else:
-                            perp_dx, perp_dy = -dy * 0.23, dx * 0.23 - 0.35
+                            perp_dx, perp_dy = -dy * 0.16, dx * 0.23 - 0.35
                         label_x = mid_x + perp_dx
                         label_y = mid_y + perp_dy
                     else:
@@ -1594,21 +1621,18 @@ class BandwidthAnalyzer:
         # 绘制方形节点和IP信息
         for node, (x, y) in pos.items():
             # 绘制主节点方框
-            rect = Rectangle(
-                (x - square_size / 2, y - square_size / 2),
-                width=square_size,
-                height=square_size,
-                color="#E8F5E9",
-                ec="black",
-                zorder=2,
-            )
+            rect = Rectangle((x - square_size / 2, y - square_size / 2), width=square_size, height=square_size, color="#E8F5E9", ec="black", zorder=2)
             ax.add_patch(rect)
+
+            # 绘制节点编号（仅单Die场景显示）
+            if die_id is None:
+                ax.text(x, y, str(node), ha="center", va="center", fontsize=10, fontweight="bold", color="black", zorder=3)
 
             # 绘制IP信息 - 仅对偶数行节点显示
             physical_row = node // config.NUM_COL
             if physical_row % 2 == 0:
                 # 优先使用子类的_draw_d2d_ip_info_box（如果存在）
-                if hasattr(self, '_draw_d2d_ip_info_box') and die_id is not None:
+                if hasattr(self, "_draw_d2d_ip_info_box") and die_id is not None:
                     self._draw_d2d_ip_info_box(ax, x, y, node, config, mode, square_size, die_id, die_model, max_ip_bandwidth, min_ip_bandwidth)
                 else:
                     # 否则使用父类的_draw_ip_info_box
@@ -1620,44 +1644,6 @@ class BandwidthAnalyzer:
             ys = [p[1] for p in pos.values()]
             die_center_x = (min(xs) + max(xs)) / 2
             die_center_y = (min(ys) + max(ys)) / 2
-
-            # 尝试从配置获取布局信息
-            die_layout = None
-            if d2d_config and hasattr(d2d_config, "die_layout_positions"):
-                die_layout = d2d_config.die_layout_positions
-            elif hasattr(config, "die_layout_positions"):
-                die_layout = config.die_layout_positions
-
-            if die_layout and die_id in die_layout:
-                grid_x, grid_y = die_layout[die_id]
-                other_dies = [did for did in die_layout.keys() if did != die_id]
-
-                if other_dies:
-                    other_die_id = other_dies[0]
-                    other_grid_x, other_grid_y = die_layout[other_die_id]
-
-                    is_vertical_connection = grid_y != other_grid_y
-                    is_horizontal_connection = grid_x != other_grid_x
-
-                    if is_vertical_connection:
-                        if grid_x == 0:
-                            label_x = min(xs) - 3
-                            label_y = die_center_y
-                        else:
-                            label_x = max(xs) + 3
-                            label_y = die_center_y
-                    elif is_horizontal_connection:
-                        label_x = die_center_x
-                        label_y = min(ys) - 2
-                    else:
-                        label_x = die_center_x
-                        label_y = max(ys) + 2.5
-                else:
-                    label_x = die_center_x
-                    label_y = max(ys) + 2.5
-            else:
-                label_x = die_center_x
-                label_y = max(ys) + 2.5
 
             ax.text(
                 label_x,
@@ -1975,20 +1961,17 @@ class BandwidthAnalyzer:
         # 添加带宽透明度图例
         self._add_bandwidth_alpha_legend(ax, fig, min_ip_bandwidth, max_ip_bandwidth)
 
-        plt.axis("off")
+        # 设置图表标题 - 调整标题位置避免被裁剪
         title = f"{network.name} - {mode.capitalize()} Bandwidth"
 
         if self.config.SPARE_CORE_ROW != -1:
             title += f"\nRow: {self.config.SPARE_CORE_ROW}, Failed cores: {self.config.FAIL_CORE_POS}, Spare cores: {self.config.spare_core_pos}"
-        plt.title(title, fontsize=20)
+        ax.set_title(title, fontsize=16, fontweight="bold", y=0.96)  # 降低标题位置避免被裁剪
 
-        # 设置坐标轴范围以确保所有节点都显示
-        if pos:
-            xs = [p[0] for p in pos.values()]
-            ys = [p[1] for p in pos.values()]
-            margin = 2.0  # 增加边距确保显示完整
-            ax.set_xlim(min(xs) - margin, max(xs) + margin)
-            ax.set_ylim(min(ys) - margin, max(ys) + margin)
+        # 自动调整坐标轴范围以确保所有内容都显示
+        ax.axis("equal")  # 保持纵横比
+        ax.margins(0.05)  # 设置边距以确保内容显示完整
+        ax.axis("off")  # 隐藏坐标轴
 
         plt.tight_layout()
 
@@ -2275,7 +2258,10 @@ class BandwidthAnalyzer:
         # 重建RN带宽时间序列数据
         self._rebuild_rn_bandwidth_time_series()
 
-        print(f"从CSV加载了 {len(self.requests)} 个请求 (读: {len([r for r in self.requests if r.req_type == 'read'])}, " f"写: {len([r for r in self.requests if r.req_type == 'write'])})")
+        print(
+            f"从CSV加载了 {len(self.requests)} 个请求 (读: {len([r for r in self.requests if r.req_type == 'read'])}, "
+            f"写: {len([r for r in self.requests if r.req_type == 'write'])})"
+        )
 
     def _rebuild_rn_bandwidth_time_series(self):
         """重建RN带宽时间序列数据"""
@@ -2331,7 +2317,9 @@ class BandwidthAnalyzer:
                 print(f"链路统计CSV： {output_path}link_statistics.csv")
 
     @staticmethod
-    def reanalyze_and_plot_from_csv(csv_folder: str, output_path: str = None, plot_rn_bw: bool = True, plot_flow: bool = False, show_cdma: bool = False, min_gap_threshold=50) -> Dict:
+    def reanalyze_and_plot_from_csv(
+        csv_folder: str, output_path: str = None, plot_rn_bw: bool = True, plot_flow: bool = False, show_cdma: bool = False, min_gap_threshold=50
+    ) -> Dict:
         """
         从CSV文件重新分析并绘图
 
@@ -2742,8 +2730,12 @@ class BandwidthAnalyzer:
 
             # 计算flits平均值
             read_flits_avg = sum(sum(iv.flit_count for iv in m.read_metrics.working_intervals) if m.read_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
-            write_flits_avg = sum(sum(iv.flit_count for iv in m.write_metrics.working_intervals) if m.write_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
-            mixed_flits_avg = sum(sum(iv.flit_count for iv in m.mixed_metrics.working_intervals) if m.mixed_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
+            write_flits_avg = sum(sum(iv.flit_count for iv in m.write_metrics.working_intervals) if m.write_metrics.working_intervals else 0 for m in metrics_list) / len(
+                metrics_list
+            )
+            mixed_flits_avg = sum(sum(iv.flit_count for iv in m.mixed_metrics.working_intervals) if m.mixed_metrics.working_intervals else 0 for m in metrics_list) / len(
+                metrics_list
+            )
 
             # 计算工作区间平均值
             read_intervals_avg = sum(len(m.read_metrics.working_intervals) for m in metrics_list) / len(metrics_list)
@@ -3587,7 +3579,9 @@ class BandwidthAnalyzer:
 
 
 # 便捷使用函数
-def analyze_bandwidth(sim_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False) -> Dict:
+def analyze_bandwidth(
+    sim_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False
+) -> Dict:
     """
     便捷的带宽分析函数
 
@@ -3630,7 +3624,9 @@ def replot_from_result_folder(csv_folder: str, plot_rn_bw: bool = True, plot_flo
     """
     output_path = csv_folder
 
-    results = BandwidthAnalyzer.reanalyze_and_plot_from_csv(csv_folder, output_path, plot_rn_bw=plot_rn_bw, plot_flow=plot_flow, show_cdma=show_cdma, min_gap_threshold=min_gap_threshold)
+    results = BandwidthAnalyzer.reanalyze_and_plot_from_csv(
+        csv_folder, output_path, plot_rn_bw=plot_rn_bw, plot_flow=plot_flow, show_cdma=show_cdma, min_gap_threshold=min_gap_threshold
+    )
 
     return results
 
