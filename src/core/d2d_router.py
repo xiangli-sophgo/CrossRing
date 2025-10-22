@@ -61,19 +61,19 @@ class D2DRouter:
 
         return routing_table
 
-    def select_d2d_node(self, src_die: int, dst_die: int, dst_node: int) -> Optional[int]:
+    def select_d2d_node(self, src_die: int, dst_die: int, dst_ip_id: int) -> Optional[int]:
         """
         选择D2D节点进行跨Die传输
 
         算法：
         1. 判断是否跨Die（src_die != dst_die）
         2. 获取可用的D2D节点列表
-        3. 使用dst_node % len(可用节点) 进行负载均衡
+        3. 使用dst_ip_id % len(可用节点) 进行负载均衡
 
         Args:
             src_die: 源Die ID
             dst_die: 目标Die ID
-            dst_node: 目标节点ID（用于负载均衡）
+            dst_ip_id: 目标IP编号（用于负载均衡，如ddr_2中的2）
 
         Returns:
             selected_d2d_node: 选中的D2D_RN节点位置，如果不需要跨Die则返回None
@@ -88,12 +88,9 @@ class D2DRouter:
         if not available_nodes:
             raise ValueError(f"没有从Die{src_die}到Die{dst_die}的D2D连接")
 
-        # 使用目标节点ID进行负载均衡
-        index = dst_node % len(available_nodes)
+        # 使用目标IP编号进行负载均衡
+        index = dst_ip_id % len(available_nodes)
         selected_node = available_nodes[index]
-
-        # print(f"[D2D路由] Die{src_die}->Die{dst_die}, 目标节点{dst_node}, "
-        #   f"可用D2D节点{available_nodes}, 选择节点{selected_node}(索引{index})")
 
         return selected_node
 

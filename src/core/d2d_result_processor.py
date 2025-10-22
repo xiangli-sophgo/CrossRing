@@ -16,7 +16,6 @@ from .result_processor import BandwidthAnalyzer, RequestInfo, BandwidthMetrics, 
 from src.utils.components.flit import Flit
 
 
-
 @dataclass
 class D2DRequestInfo:
     """D2D请求信息数据结构"""
@@ -33,7 +32,9 @@ class D2DRequestInfo:
     data_bytes: int
     start_time_ns: int
     end_time_ns: int
-    latency_ns: int
+    cmd_latency_ns: int
+    data_latency_ns: int
+    transaction_latency_ns: int
 
 
 @dataclass
@@ -113,31 +114,27 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
     def _is_d2d_request(self, flit: Flit) -> bool:
         """检查flit是否为D2D请求（包括Die内和跨Die请求）"""
-        return (
-            hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die") and flit.d2d_origin_die is not None and flit.d2d_target_die is not None
-        )
+        return hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die") and flit.d2d_origin_die is not None and flit.d2d_target_die is not None
 
     def _extract_d2d_info(self, first_flit: Flit, last_flit: Flit, packet_id: int) -> Optional[D2DRequestInfo]:
         """从flit中提取D2D请求信息"""
         try:
-            # 计算开始时间 - 优先使用req_start_cycle（tracker消耗开始）
-            if hasattr(first_flit, "req_start_cycle") and first_flit.req_start_cycle < float("inf"):
-                start_time_ns = first_flit.req_start_cycle // self.network_frequency
-            elif hasattr(first_flit, "cmd_entry_noc_from_cake0_cycle") and first_flit.cmd_entry_noc_from_cake0_cycle < float("inf"):
-                start_time_ns = first_flit.cmd_entry_noc_from_cake0_cycle // self.network_frequency
+            # 计算开始时间 - 使用cmd_entry_cake0_cycle（tracker消耗开始）
+            if hasattr(first_flit, "cmd_entry_cake0_cycle") and first_flit.cmd_entry_cake0_cycle < float("inf"):
+                start_time_ns = first_flit.cmd_entry_cake0_cycle // self.network_frequency
             else:
                 start_time_ns = 0
 
             # 计算结束时间 - 根据请求类型选择合适的时间戳
             req_type = getattr(first_flit, "req_type", "unknown")
             if req_type == "read":
-                # 读请求：使用data_received_complete_cycle（读数据到达时tracker释放）
+                # 读请求：使用data_received_complete_cycle
                 if hasattr(last_flit, "data_received_complete_cycle") and last_flit.data_received_complete_cycle < float("inf"):
                     end_time_ns = last_flit.data_received_complete_cycle // self.network_frequency
                 else:
                     end_time_ns = start_time_ns
             elif req_type == "write":
-                # 写请求：使用write_complete_received_cycle（写完成响应到达时tracker释放）
+                # 写请求：使用write_complete_received_cycle
                 if hasattr(first_flit, "write_complete_received_cycle") and first_flit.write_complete_received_cycle < float("inf"):
                     end_time_ns = first_flit.write_complete_received_cycle // self.network_frequency
                 else:
@@ -145,7 +142,19 @@ class D2DResultProcessor(BandwidthAnalyzer):
             else:
                 end_time_ns = start_time_ns
 
-            latency_ns = end_time_ns - start_time_ns if end_time_ns > start_time_ns else 0
+            # 从flit读取已计算的延迟值并转换为ns
+            cmd_latency_ns = 0
+            data_latency_ns = 0
+            transaction_latency_ns = 0
+
+            if hasattr(first_flit, "cmd_latency") and first_flit.cmd_latency < float("inf"):
+                cmd_latency_ns = int(first_flit.cmd_latency // self.network_frequency)
+
+            if hasattr(first_flit, "data_latency") and first_flit.data_latency < float("inf"):
+                data_latency_ns = int(first_flit.data_latency // self.network_frequency)
+
+            if hasattr(first_flit, "transaction_latency") and first_flit.transaction_latency < float("inf"):
+                transaction_latency_ns = int(first_flit.transaction_latency // self.network_frequency)
 
             # 计算数据量
             burst_length = getattr(first_flit, "burst_length", 1)
@@ -164,7 +173,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 data_bytes=data_bytes,
                 start_time_ns=start_time_ns,
                 end_time_ns=end_time_ns,
-                latency_ns=latency_ns,
+                cmd_latency_ns=cmd_latency_ns,
+                data_latency_ns=data_latency_ns,
+                transaction_latency_ns=transaction_latency_ns,
             )
         except (AttributeError, KeyError, ValueError) as e:
             return None
@@ -196,7 +207,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
             "burst_length",
             "start_time_ns",
             "end_time_ns",
-            "latency_ns",
+            "cmd_latency_ns",
+            "data_latency_ns",
+            "transaction_latency_ns",
             "data_bytes",
         ]
 
@@ -229,7 +242,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
                             req.burst_length,
                             req.start_time_ns,
                             req.end_time_ns,
-                            req.latency_ns,
+                            req.cmd_latency_ns,
+                            req.data_latency_ns,
+                            req.transaction_latency_ns,
                             req.data_bytes,
                         ]
                     )
@@ -331,6 +346,38 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 for row in all_rows:
                     writer.writerow(row)
 
+                # 计算并添加平均带宽统计
+                from collections import defaultdict
+
+                ip_type_groups = defaultdict(lambda: {"read": [], "write": [], "total": []})
+
+                # 按IP类型分组（去掉实例编号）
+                for row in all_rows:
+                    ip_type = row[3]  # IP类型列
+                    read_bw = float(row[4])  # 读带宽
+                    write_bw = float(row[5])  # 写带宽
+                    total_bw = float(row[6])  # 总带宽
+
+                    ip_type_groups[ip_type]["read"].append(read_bw)
+                    ip_type_groups[ip_type]["write"].append(write_bw)
+                    ip_type_groups[ip_type]["total"].append(total_bw)
+
+                # 添加空行分隔
+                writer.writerow([])
+                writer.writerow(["# 平均带宽统计（按IP类型）"])
+                writer.writerow(["ip_type", "avg_read_bandwidth_gbps", "avg_write_bandwidth_gbps", "avg_total_bandwidth_gbps", "instance_count"])
+
+                # 计算并写入平均值
+                for ip_type in sorted(ip_type_groups.keys()):
+                    group = ip_type_groups[ip_type]
+                    count = len(group["read"])
+
+                    avg_read = sum(group["read"]) / count if count > 0 else 0.0
+                    avg_write = sum(group["write"]) / count if count > 0 else 0.0
+                    avg_total = sum(group["total"]) / count if count > 0 else 0.0
+
+                    writer.writerow([ip_type, f"{avg_read:.6f}", f"{avg_write:.6f}", f"{avg_total:.6f}", count])
+
         except (IOError, OSError) as e:
             print(f"警告: 保存IP带宽CSV失败 ({csv_path}): {e}")
 
@@ -367,18 +414,12 @@ class D2DResultProcessor(BandwidthAnalyzer):
             return 0.0, 0.0
 
         # 计算总时间和总字节数
-        if len(requests) == 1:
-            # 单个请求，使用其延迟
-            total_time_ns = max(requests[0].latency_ns, 1)  # 避免除零
-        else:
-            # 多个请求，计算整体时间跨度
-            start_time = min(req.start_time_ns for req in requests)
-            end_time = max(req.end_time_ns for req in requests)
-            total_time_ns = max(end_time - start_time, 1)
-
+        start_time = min(req.start_time_ns for req in requests)
+        end_time = max(req.end_time_ns for req in requests)
+        total_time_ns = max(end_time - start_time, 1)
         total_bytes = sum(req.data_bytes for req in requests)
 
-        # 非加权带宽 (GB/s)
+        # 非加权带宽 (bytes/ns)
         unweighted_bw = (total_bytes / total_time_ns) if total_time_ns > 0 else 0.0
 
         # 加权带宽计算：使用工作区间方法
@@ -395,8 +436,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 total_weight += weight
 
             weighted_bw = (total_weighted_bw / total_weight) if total_weight > 0 else unweighted_bw
-
-            # 调试信息：显示工作区间统计
         else:
             weighted_bw = unweighted_bw
 
@@ -465,7 +504,159 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         return working_intervals
 
-    def generate_d2d_bandwidth_report(self, output_path: str):
+    def _calculate_d2d_latency_stats(self):
+        """计算D2D请求的延迟统计数据（cmd/data/transaction）"""
+        import math
+
+        stats = {
+            "cmd": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
+            "data": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
+            "trans": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
+        }
+
+        for req in self.d2d_requests:
+            # 转换为cycle（从ns）
+            cmd_latency_cycle = req.cmd_latency_ns * self.network_frequency if req.cmd_latency_ns < float("inf") else float("inf")
+            data_latency_cycle = req.data_latency_ns * self.network_frequency if req.data_latency_ns < float("inf") else float("inf")
+            trans_latency_cycle = req.transaction_latency_ns * self.network_frequency if req.transaction_latency_ns < float("inf") else float("inf")
+
+            # CMD
+            if math.isfinite(cmd_latency_cycle):
+                group = stats["cmd"][req.req_type]
+                group["sum"] += cmd_latency_cycle
+                group["count"] += 1
+                group["max"] = max(group["max"], cmd_latency_cycle)
+                mixed = stats["cmd"]["mixed"]
+                mixed["sum"] += cmd_latency_cycle
+                mixed["count"] += 1
+                mixed["max"] = max(mixed["max"], cmd_latency_cycle)
+
+            # Data
+            if math.isfinite(data_latency_cycle):
+                group = stats["data"][req.req_type]
+                group["sum"] += data_latency_cycle
+                group["count"] += 1
+                group["max"] = max(group["max"], data_latency_cycle)
+                mixed = stats["data"]["mixed"]
+                mixed["sum"] += data_latency_cycle
+                mixed["count"] += 1
+                mixed["max"] = max(mixed["max"], data_latency_cycle)
+
+            # Transaction
+            if math.isfinite(trans_latency_cycle):
+                group = stats["trans"][req.req_type]
+                group["sum"] += trans_latency_cycle
+                group["count"] += 1
+                group["max"] = max(group["max"], trans_latency_cycle)
+                mixed = stats["trans"]["mixed"]
+                mixed["sum"] += trans_latency_cycle
+                mixed["count"] += 1
+                mixed["max"] = max(mixed["max"], trans_latency_cycle)
+
+        return stats
+
+    def _collect_d2d_circuit_stats(self, dies: Dict):
+        """
+        从各Die收集绕环和Tag统计数据
+
+        Args:
+            dies: Die模型字典
+
+        Returns:
+            dict: 包含per_die和summary的统计数据
+        """
+        per_die_stats = {}
+
+        # 遍历每个Die收集数据
+        for die_id, die_model in dies.items():
+            # 基础统计
+            die_stats = {
+                "circuits": {
+                    "req_h": getattr(die_model, "req_cir_h_num_stat", 0),
+                    "req_v": getattr(die_model, "req_cir_v_num_stat", 0),
+                    "rsp_h": getattr(die_model, "rsp_cir_h_num_stat", 0),
+                    "rsp_v": getattr(die_model, "rsp_cir_v_num_stat", 0),
+                    "data_h": getattr(die_model, "data_cir_h_num_stat", 0),
+                    "data_v": getattr(die_model, "data_cir_v_num_stat", 0),
+                },
+                "wait_cycles": {
+                    "req_h": getattr(die_model, "req_wait_cycle_h_num_stat", 0),
+                    "req_v": getattr(die_model, "req_wait_cycle_v_num_stat", 0),
+                    "rsp_h": getattr(die_model, "rsp_wait_cycle_h_num_stat", 0),
+                    "rsp_v": getattr(die_model, "rsp_wait_cycle_v_num_stat", 0),
+                    "data_h": getattr(die_model, "data_wait_cycle_h_num_stat", 0),
+                    "data_v": getattr(die_model, "data_wait_cycle_v_num_stat", 0),
+                },
+                "retry": {
+                    "read": getattr(die_model, "read_retry_num_stat", 0),
+                    "write": getattr(die_model, "write_retry_num_stat", 0),
+                },
+                "etag": {
+                    "RB": {
+                        "T1": getattr(die_model, "RB_ETag_T1_num_stat", 0),
+                        "T0": getattr(die_model, "RB_ETag_T0_num_stat", 0),
+                    },
+                    "EQ": {
+                        "T1": getattr(die_model, "EQ_ETag_T1_num_stat", 0),
+                        "T0": getattr(die_model, "EQ_ETag_T0_num_stat", 0),
+                    },
+                },
+                "itag": {
+                    "h": getattr(die_model, "ITag_h_num_stat", 0),
+                    "v": getattr(die_model, "ITag_v_num_stat", 0),
+                },
+            }
+
+            # 计算绕环比例（如果Die有result_processor）
+            circling_stats = {"horizontal": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}, "vertical": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}, "overall": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}}
+
+            if hasattr(die_model, "result_processor") and die_model.result_processor:
+                try:
+                    circling_stats = die_model.result_processor.calculate_circling_eject_stats()
+                except Exception:
+                    pass
+
+            die_stats["circling_ratio"] = circling_stats
+
+            per_die_stats[die_id] = die_stats
+
+        # 计算汇总统计
+        summary_stats = {
+            "circuits": {"req_h": 0, "req_v": 0, "rsp_h": 0, "rsp_v": 0, "data_h": 0, "data_v": 0},
+            "wait_cycles": {"req_h": 0, "req_v": 0, "rsp_h": 0, "rsp_v": 0, "data_h": 0, "data_v": 0},
+            "retry": {"read": 0, "write": 0},
+            "etag": {"RB": {"T1": 0, "T0": 0}, "EQ": {"T1": 0, "T0": 0}},
+            "itag": {"h": 0, "v": 0},
+            "circling_ratio": {"horizontal": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}, "vertical": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}, "overall": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}},
+        }
+
+        for die_stats in per_die_stats.values():
+            for key in summary_stats["circuits"]:
+                summary_stats["circuits"][key] += die_stats["circuits"][key]
+            for key in summary_stats["wait_cycles"]:
+                summary_stats["wait_cycles"][key] += die_stats["wait_cycles"][key]
+            for key in summary_stats["retry"]:
+                summary_stats["retry"][key] += die_stats["retry"][key]
+            for tag_type in ["RB", "EQ"]:
+                for t in ["T1", "T0"]:
+                    summary_stats["etag"][tag_type][t] += die_stats["etag"][tag_type][t]
+            for key in summary_stats["itag"]:
+                summary_stats["itag"][key] += die_stats["itag"][key]
+
+            # 汇总绕环统计
+            for direction in ["horizontal", "vertical", "overall"]:
+                summary_stats["circling_ratio"][direction]["circling_flits"] += die_stats["circling_ratio"][direction]["circling_flits"]
+                summary_stats["circling_ratio"][direction]["total_data_flits"] += die_stats["circling_ratio"][direction]["total_data_flits"]
+
+        # 计算汇总绕环比例
+        for direction in ["horizontal", "vertical", "overall"]:
+            total = summary_stats["circling_ratio"][direction]["total_data_flits"]
+            circling = summary_stats["circling_ratio"][direction]["circling_flits"]
+            summary_stats["circling_ratio"][direction]["circling_ratio"] = circling / total if total > 0 else 0.0
+
+        return {"per_die": per_die_stats, "summary": summary_stats}
+
+    def generate_d2d_bandwidth_report(self, output_path: str, dies: Dict = None):
         """生成D2D带宽报告（按任意Die组合逐项列出）"""
         stats = self.calculate_d2d_bandwidth()
 
@@ -496,31 +687,123 @@ class D2DResultProcessor(BandwidthAnalyzer):
             total_unweighted += uw
             total_weighted += wt
 
+        # 计算延迟统计
+        latency_stats = self._calculate_d2d_latency_stats()
+
+        def _avg(cat, op):
+            s = latency_stats[cat][op]
+            return s["sum"] / s["count"] if s["count"] else 0.0
+
+        report_lines.extend(["", "延迟统计 (cycle):"])
+        for cat, label in [("cmd", "CMD"), ("data", "Data"), ("trans", "Trans")]:
+            line = (
+                f"  {label} 延迟  - "
+                f"读: avg {_avg(cat,'read'):.2f}, max {int(latency_stats[cat]['read']['max'])}; "
+                f"写: avg {_avg(cat,'write'):.2f}, max {int(latency_stats[cat]['write']['max'])}; "
+                f"混合: avg {_avg(cat,'mixed'):.2f}, max {int(latency_stats[cat]['mixed']['max'])}"
+            )
+            report_lines.append(line)
+
+        # 添加工作区间统计
+        read_requests = [r for r in self.d2d_requests if r.req_type == "read"]
+        write_requests = [r for r in self.d2d_requests if r.req_type == "write"]
+
+        read_intervals = self.calculate_d2d_working_intervals(read_requests)
+        write_intervals = self.calculate_d2d_working_intervals(write_requests)
+        mixed_intervals = self.calculate_d2d_working_intervals(self.d2d_requests)
+
         report_lines.extend(
             [
                 "",
-                "总计:",
-                f"  跨Die总带宽: {total_unweighted:.2f} GB/s",
-                f"  跨Die加权总带宽: {total_weighted:.2f} GB/s",
-                f"  读请求数: {stats.total_read_requests}",
-                f"  写请求数: {stats.total_write_requests}",
-                f"  总传输字节数: {stats.total_bytes_transferred:,} bytes",
-                "=" * 50,
+                "工作区间统计:",
+                f"  读操作工作区间: {len(read_intervals)}",
+                f"  写操作工作区间: {len(write_intervals)}",
+                f"  混合操作工作区间: {len(mixed_intervals)}",
             ]
         )
+
+        # 添加绕环统计
+        circuit_stats_data = None
+        if dies:
+            circuit_stats_data = self._collect_d2d_circuit_stats(dies)
+            summary = circuit_stats_data["summary"]
+
+            report_lines.extend(
+                [
+                    "",
+                    "-" * 60,
+                    "绕环与Tag统计（汇总）",
+                    "-" * 60,
+                    "  等待时间统计:",
+                    f"    REQ: 横向={summary['wait_cycles']['req_h']}, 纵向={summary['wait_cycles']['req_v']}",
+                    f"    RSP: 横向={summary['wait_cycles']['rsp_h']}, 纵向={summary['wait_cycles']['rsp_v']}",
+                    f"    DATA: 横向={summary['wait_cycles']['data_h']}, 纵向={summary['wait_cycles']['data_v']}",
+                    "  RB ETag统计:",
+                    f"    总计: T1={summary['etag']['RB']['T1']}, T0={summary['etag']['RB']['T0']}",
+                    "  EQ ETag统计:",
+                    f"    总计: T1={summary['etag']['EQ']['T1']}, T0={summary['etag']['EQ']['T0']}",
+                    "  ITag统计:",
+                    f"    总计: H={summary['itag']['h']}, V={summary['itag']['v']}",
+                    "  Retry数量:",
+                    f"    读: {summary['retry']['read']}, 写: {summary['retry']['write']}",
+                    "  下环尝试统计:",
+                    f"    REQ: 横向={summary['circuits']['req_h']}, 纵向={summary['circuits']['req_v']}",
+                    f"    RSP: 横向={summary['circuits']['rsp_h']}, 纵向={summary['circuits']['rsp_v']}",
+                    f"    DATA: 横向={summary['circuits']['data_h']}, 纵向={summary['circuits']['data_v']}",
+                    "  数据绕环比例:",
+                    f"    横向: {summary['circling_ratio']['horizontal']['circling_ratio']*100:.2f}% ({summary['circling_ratio']['horizontal']['circling_flits']}/{summary['circling_ratio']['horizontal']['total_data_flits']})",
+                    f"    纵向: {summary['circling_ratio']['vertical']['circling_ratio']*100:.2f}% ({summary['circling_ratio']['vertical']['circling_flits']}/{summary['circling_ratio']['vertical']['total_data_flits']})",
+                    f"    总体: {summary['circling_ratio']['overall']['circling_ratio']*100:.2f}% ({summary['circling_ratio']['overall']['circling_flits']}/{summary['circling_ratio']['overall']['total_data_flits']})",
+                ]
+            )
+
+        report_lines.append("-" * 60)
 
         # 打印到屏幕
         for line in report_lines:
             print(line)
 
-        # 保存到文件
+        # 保存到文件（包含每个Die的详细统计）
         os.makedirs(output_path, exist_ok=True)
         report_file = os.path.join(output_path, "d2d_bandwidth_summary.txt")
         with open(report_file, "w", encoding="utf-8") as f:
             for line in report_lines:
                 f.write(line + "\n")
 
-        print(f"\n报告已保存: {report_file}")
+            # 添加每个Die的详细统计
+            if dies and circuit_stats_data:
+                f.write("\n\n")
+                f.write("=" * 60 + "\n")
+                f.write("各Die详细统计\n")
+                f.write("=" * 60 + "\n\n")
+
+                for die_id in sorted(circuit_stats_data["per_die"].keys()):
+                    die_stats = circuit_stats_data["per_die"][die_id]
+                    f.write(f"Die {die_id}:\n")
+                    f.write("-" * 30 + "\n")
+                    f.write("  等待时间统计:\n")
+                    f.write(f"    REQ: 横向={die_stats['wait_cycles']['req_h']}, 纵向={die_stats['wait_cycles']['req_v']}\n")
+                    f.write(f"    RSP: 横向={die_stats['wait_cycles']['rsp_h']}, 纵向={die_stats['wait_cycles']['rsp_v']}\n")
+                    f.write(f"    DATA: 横向={die_stats['wait_cycles']['data_h']}, 纵向={die_stats['wait_cycles']['data_v']}\n")
+                    f.write("  RB ETag统计:\n")
+                    f.write(f"    T1={die_stats['etag']['RB']['T1']}, T0={die_stats['etag']['RB']['T0']}\n")
+                    f.write("  EQ ETag统计:\n")
+                    f.write(f"    T1={die_stats['etag']['EQ']['T1']}, T0={die_stats['etag']['EQ']['T0']}\n")
+                    f.write("  ITag统计:\n")
+                    f.write(f"    H={die_stats['itag']['h']}, V={die_stats['itag']['v']}\n")
+                    f.write("  Retry数量:\n")
+                    f.write(f"    读: {die_stats['retry']['read']}, 写: {die_stats['retry']['write']}\n")
+                    f.write("  下环尝试统计:\n")
+                    f.write(f"    REQ: 横向={die_stats['circuits']['req_h']}, 纵向={die_stats['circuits']['req_v']}\n")
+                    f.write(f"    RSP: 横向={die_stats['circuits']['rsp_h']}, 纵向={die_stats['circuits']['rsp_v']}\n")
+                    f.write(f"    DATA: 横向={die_stats['circuits']['data_h']}, 纵向={die_stats['circuits']['data_v']}\n")
+                    f.write("  数据绕环比例:\n")
+                    f.write(f"    横向: {die_stats['circling_ratio']['horizontal']['circling_ratio']*100:.2f}% ({die_stats['circling_ratio']['horizontal']['circling_flits']}/{die_stats['circling_ratio']['horizontal']['total_data_flits']})\n")
+                    f.write(f"    纵向: {die_stats['circling_ratio']['vertical']['circling_ratio']*100:.2f}% ({die_stats['circling_ratio']['vertical']['circling_flits']}/{die_stats['circling_ratio']['vertical']['total_data_flits']})\n")
+                    f.write(f"    总体: {die_stats['circling_ratio']['overall']['circling_ratio']*100:.2f}% ({die_stats['circling_ratio']['overall']['circling_flits']}/{die_stats['circling_ratio']['overall']['total_data_flits']})\n")
+                    f.write("\n")
+
+        return report_file
 
     def process_d2d_results(self, dies: Dict, output_path: str):
         """
@@ -541,7 +824,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
         self.save_d2d_requests_csv(output_path)
 
         # 4. 计算并输出带宽报告
-        self.generate_d2d_bandwidth_report(output_path)
+        self.generate_d2d_bandwidth_report(output_path, dies)
 
         # 5. 计算D2D_Sys AXI通道带宽统计
         d2d_bandwidth = self._calculate_d2d_sys_bandwidth(dies)
@@ -606,65 +889,63 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
     def _calculate_bandwidth_from_d2d_requests(self, dies: Dict):
         """基于D2D请求计算各Die的IP带宽"""
+        from collections import defaultdict
 
-        # 计算仿真总时间（纳秒）
-        if self.d2d_requests:
-            max_end_time = max(req.end_time_ns for req in self.d2d_requests)
-            sim_time_ns = max(max_end_time, 1)  # 避免除0
-        else:
-            sim_time_ns = 1
-
-        # 遍历每个D2D请求
+        # 第一步：按(die_id, source_node, source_type)分组source请求
+        source_groups = defaultdict(list)
         for request in self.d2d_requests:
-            # 对于源Die：记录source_type的发送带宽
             if request.source_die in dies:
-                self._record_source_bandwidth(request, dies[request.source_die], sim_time_ns)
+                source_type_normalized = self._normalize_d2d_ip_type(request.source_type)
+                key = (request.source_die, request.source_node, source_type_normalized)
+                source_groups[key].append(request)
 
-            # 对于目标Die：记录target_type的接收带宽
+        # 第二步：按(die_id, target_node, target_type)分组target请求
+        target_groups = defaultdict(list)
+        for request in self.d2d_requests:
             if request.target_die in dies:
-                self._record_target_bandwidth(request, dies[request.target_die], sim_time_ns)
+                target_type_normalized = self._normalize_d2d_ip_type(request.target_type)
+                key = (request.target_die, request.target_node, target_type_normalized)
+                target_groups[key].append(request)
 
-    def _record_source_bandwidth(self, request: "D2DRequestInfo", die_model, sim_time_ns: int):
-        """记录源IP的发送带宽"""
-        try:
-            # 标准化IP类型
-            source_type_normalized = self._normalize_d2d_ip_type(request.source_type)
+        # 第三步：处理source带宽
+        for (die_id, node, ip_type), requests in source_groups.items():
+            row, col = self._get_physical_position(node, dies[die_id])
 
-            # 计算物理位置
-            row, col = self._get_physical_position(request.source_node, die_model)
+            # 按req_type分组并计算带宽
+            read_reqs = [r for r in requests if r.req_type == "read"]
+            write_reqs = [r for r in requests if r.req_type == "write"]
 
-            # 计算带宽 (GB/s)
-            bandwidth_gbps = (request.data_bytes * 1e9) / (sim_time_ns * 1e9)  # GB/s
+            if read_reqs:
+                _, weighted_bw = self._calculate_bandwidth_for_group(read_reqs)
+                self.die_ip_bandwidth_data[die_id]["read"][ip_type][row, col] += weighted_bw
 
-            # 记录到对应Die的数据结构
-            die_data = self.die_ip_bandwidth_data[request.source_die]
-            if source_type_normalized in die_data[request.req_type]:
-                die_data[request.req_type][source_type_normalized][row, col] += bandwidth_gbps
-                die_data["total"][source_type_normalized][row, col] += bandwidth_gbps
+            if write_reqs:
+                _, weighted_bw = self._calculate_bandwidth_for_group(write_reqs)
+                self.die_ip_bandwidth_data[die_id]["write"][ip_type][row, col] += weighted_bw
 
-        except Exception as e:
-            pass
+            if requests:
+                _, weighted_bw = self._calculate_bandwidth_for_group(requests)
+                self.die_ip_bandwidth_data[die_id]["total"][ip_type][row, col] += weighted_bw
 
-    def _record_target_bandwidth(self, request: "D2DRequestInfo", die_model, sim_time_ns: int):
-        """记录目标IP的接收带宽"""
-        try:
-            # 标准化IP类型
-            target_type_normalized = self._normalize_d2d_ip_type(request.target_type)
+        # 第四步：处理target带宽
+        for (die_id, node, ip_type), requests in target_groups.items():
+            row, col = self._get_physical_position(node, dies[die_id])
 
-            # 计算物理位置
-            row, col = self._get_physical_position(request.target_node, die_model)
+            # 按req_type分组并计算带宽
+            read_reqs = [r for r in requests if r.req_type == "read"]
+            write_reqs = [r for r in requests if r.req_type == "write"]
 
-            # 计算带宽 (GB/s)
-            bandwidth_gbps = (request.data_bytes * 1e9) / (sim_time_ns * 1e9)  # GB/s
+            if read_reqs:
+                _, weighted_bw = self._calculate_bandwidth_for_group(read_reqs)
+                self.die_ip_bandwidth_data[die_id]["read"][ip_type][row, col] += weighted_bw
 
-            # 记录到对应Die的数据结构
-            die_data = self.die_ip_bandwidth_data[request.target_die]
-            if target_type_normalized in die_data[request.req_type]:
-                die_data[request.req_type][target_type_normalized][row, col] += bandwidth_gbps
-                die_data["total"][target_type_normalized][row, col] += bandwidth_gbps
+            if write_reqs:
+                _, weighted_bw = self._calculate_bandwidth_for_group(write_reqs)
+                self.die_ip_bandwidth_data[die_id]["write"][ip_type][row, col] += weighted_bw
 
-        except Exception as e:
-            pass
+            if requests:
+                _, weighted_bw = self._calculate_bandwidth_for_group(requests)
+                self.die_ip_bandwidth_data[die_id]["total"][ip_type][row, col] += weighted_bw
 
     def _normalize_d2d_ip_type(self, ip_type: str) -> str:
         """标准化D2D IP类型，保留实例编号（如gdma_0, ddr_1）"""
@@ -786,7 +1067,21 @@ class D2DResultProcessor(BandwidthAnalyzer):
             die_model = dies.get(die_id) if dies else None
 
             # 绘制单个Die的流量图并获取节点位置
-            node_positions = self._draw_single_die_flow(ax, network, die_model.config if die_model else config, die_id, offset_x, offset_y, mode, node_size, show_cdma, die_model, d2d_config=config, max_ip_bandwidth=max_ip_bandwidth, min_ip_bandwidth=min_ip_bandwidth)
+            node_positions = self._draw_single_die_flow(
+                ax,
+                network,
+                die_model.config if die_model else config,
+                die_id,
+                offset_x,
+                offset_y,
+                mode,
+                node_size,
+                show_cdma,
+                die_model,
+                d2d_config=config,
+                max_ip_bandwidth=max_ip_bandwidth,
+                min_ip_bandwidth=min_ip_bandwidth,
+            )
             die_node_positions[die_id] = node_positions
 
             # 收集该Die使用的IP类型（只收集有实际带宽的IP）
@@ -1032,7 +1327,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 plt.show()
             return None
 
-    def _draw_single_die_flow(self, ax, network, config, die_id, offset_x, offset_y, mode="utilization", node_size=2000, show_cdma=True, die_model=None, d2d_config=None, max_ip_bandwidth=None, min_ip_bandwidth=None):
+    def _draw_single_die_flow(
+        self, ax, network, config, die_id, offset_x, offset_y, mode="utilization", node_size=2000, show_cdma=True, die_model=None, d2d_config=None, max_ip_bandwidth=None, min_ip_bandwidth=None
+    ):
         """绘制单个Die的流量图，复用原有draw_flow_graph的核心逻辑"""
 
         # 创建NetworkX图
@@ -1069,7 +1366,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
                 traceback.print_exc()
                 links = {}
-        # else:
 
         # 获取网络节点
         if hasattr(network, "queues") and network.queues:
@@ -1290,7 +1586,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 (x - square_size / 2, y - square_size / 2),
                 width=square_size,
                 height=square_size,
-                color="#E8F5E9", 
+                color="#E8F5E9",
                 ec="black",
                 zorder=2,
             )
@@ -1451,7 +1747,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             # 如果总行数超过MAX_ROWS，将other_ips均匀分配到前面的行
             if len(display_rows) + len(other_ips) > self.MAX_ROWS:
                 # 只保留前MAX_ROWS行，将other_ips均匀分配
-                display_rows = display_rows[:self.MAX_ROWS]
+                display_rows = display_rows[: self.MAX_ROWS]
                 # 将other类型的实例均匀添加到现有行
                 for i, (ip_type, instances) in enumerate(other_ips):
                     target_row = i % len(display_rows)
@@ -1460,7 +1756,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 # 如果不超过MAX_ROWS，直接添加other类型
                 display_rows.extend(other_ips)
                 if len(display_rows) > self.MAX_ROWS:
-                    display_rows = display_rows[:self.MAX_ROWS]
+                    display_rows = display_rows[: self.MAX_ROWS]
 
             ip_type_count = dict(display_rows)
 
@@ -1479,7 +1775,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             # 计算小方块大小（确保不超出大框）
             max_square_width = (available_width - (max_instances - 1) * grid_spacing) / max_instances
             max_square_height = (available_height - (num_ip_types - 1) * row_spacing) / num_ip_types
-            grid_square_size = min(max_square_width, max_square_height, square_size * 1)
+            grid_square_size = min(max_square_width, max_square_height, square_size * 1.2)
 
             # 计算所有行的总高度
             total_content_height = num_ip_types * grid_square_size + (num_ip_types - 1) * row_spacing
@@ -1666,12 +1962,12 @@ class D2DResultProcessor(BandwidthAnalyzer):
         max_instances = max(len(instances) for instances in ip_type_dict.values())
 
         # 计算IP方块大小和间距
-        available_size = node_box_size * 0.92  # 增加可用空间比例
+        available_size = node_box_size * 1  # 增加可用空间比例
         grid_spacing = square_size * 0.1  # 减小间距
 
         ip_block_width = (available_size - (max_instances - 1) * grid_spacing) / max_instances
         ip_block_height = (available_size - (num_ip_types - 1) * grid_spacing) / num_ip_types
-        ip_block_size = min(ip_block_width, ip_block_height, square_size * 1.2)  # 增大IP方块最大尺寸
+        ip_block_size = min(ip_block_width, ip_block_height, square_size * 1.5)  # 增大IP方块最大尺寸
 
         # 计算总内容高度（用于垂直居中）
         total_height = num_ip_types * ip_block_size + (num_ip_types - 1) * grid_spacing
@@ -1767,7 +2063,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         # 创建colorbar
         cb = ColorbarBase(cax, cmap=cmap, norm=norm, orientation="vertical")
-
 
         # 设置colorbar标签
         cb.set_label("IP BW (GB/s)", fontsize=7, labelpad=2)  # 减小字号和间距

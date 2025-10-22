@@ -651,6 +651,13 @@ class D2D_Model:
             print("\n仿真结束时的最终状态:")
             self._print_progress()
 
+        # 收集每个Die的统计数据（从IPInterface累加到die_model层级）
+        for die_id, die_model in self.dies.items():
+            die_model.syn_IP_stat()
+            # 收集请求数据用于绕环统计
+            if hasattr(die_model, "result_processor") and die_model.result_processor:
+                die_model.result_processor.collect_requests_data(die_model, self.current_cycle)
+
         # 创建并缓存 D2D 结果处理器（供后续结果分析使用）
         if not hasattr(self, "_cached_d2d_processor") or not self._cached_d2d_processor:
             d2d_processor = D2DResultProcessor(self.config)
@@ -769,8 +776,10 @@ class D2D_Model:
 
         # 根据是否跨Die决定路由策略
         if src_die != dst_die:
-            # 跨Die：使用D2D路由器选择节点，但需要根据请求类型选择正确的RN/SN节点
-            base_d2d_node = self.d2d_router.select_d2d_node(src_die, dst_die, dst_node)
+            # 跨Die：使用D2D路由器选择节点，根据目标IP编号选择d2d_pair
+            # 从dst_ip提取IP编号（如"ddr_2"→2，"ddr"→0）
+            dst_ip_id = int(dst_ip.split("_")[1]) if "_" in dst_ip else 0
+            base_d2d_node = self.d2d_router.select_d2d_node(src_die, dst_die, dst_ip_id)
             if base_d2d_node is None:
                 raise ValueError(f"D2D路由器返回None，但这是跨Die请求 Die{src_die}->Die{dst_die}")
 
@@ -1096,10 +1105,9 @@ class D2D_Model:
             d2d_result_path = os.path.join(result_save_path, f"D2D_{timestamp}")
 
             # 步骤1: 生成带宽分析报告
-            print("\n" + "=" * 60)
-            print("D2D带宽统计分析")
-            print("=" * 60)
-            d2d_processor.generate_d2d_bandwidth_report(d2d_result_path)
+            report_file = d2d_processor.generate_d2d_bandwidth_report(d2d_result_path, self.dies)
+            if report_file:
+                saved_files.append({"type": "D2D带宽报告", "path": report_file})
 
             # 步骤2: 保存数据文件（根据配置）
             if self._result_analysis_config.get("export_d2d_requests_csv"):

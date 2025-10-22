@@ -617,6 +617,18 @@ class IPInterface:
 
                 # 对于跨Die写请求，需要特殊处理tracker释放
                 if req and self._is_cross_die_write_request(req):
+                    # 计算跨Die写请求的延迟（在释放tracker之前）
+                    if req.packet_id in self.data_network.send_flits:
+                        first_flit = self.data_network.send_flits[req.packet_id][0]
+                        complete_cycle = self.current_cycle
+
+                        for f in self.data_network.send_flits[req.packet_id]:
+                            f.sync_latency_record(req)
+                            # 计算延迟
+                            f.cmd_latency = f.cmd_received_by_cake0_cycle - f.cmd_entry_noc_from_cake0_cycle
+                            f.data_latency = f.data_received_complete_cycle - first_flit.data_entry_noc_from_cake0_cycle
+                            f.transaction_latency = complete_cycle - f.cmd_entry_cake0_cycle
+
                     # 这是跨Die写请求的最终B通道响应，现在可以释放tracker
                     self.rn_tracker["write"].remove(req)
                     self.rn_wdb_count["count"] += req.burst_length
@@ -797,42 +809,36 @@ class IPInterface:
                     flit.d2d_origin_die != flit.d2d_target_die
                 )
 
-                if is_cross_die_write:
-                    # 跨Die写数据：tracker由D2D_RN管理，本地SN只负责接收数据
-                    # 清理data buffer即可，不需要查找/释放tracker
+                # 找到对应的请求（跨Die和Die内都需要释放SN tracker）
+                req = next((req for req in self.sn_tracker if req.packet_id == flit.packet_id), None)
+                if req:
+                    # 设置tracker延迟释放时间
+                    release_time = self.current_cycle + self.config.SN_TRACKER_RELEASE_LATENCY
+
+                    # 释放时间字典已在__init__中初始化
+
+                    # 更新flit时间戳
+                    first_flit = next((flit for flit in self.data_network.send_flits[flit.packet_id] if flit.flit_id == 0), self.data_network.send_flits[flit.packet_id][0])
+                    # 记录最后到达时间
+                    complete_cycle = self.current_cycle
+
+                    for f in self.data_network.send_flits[flit.packet_id]:
+                        f.leave_db_cycle = release_time
+                        f.sync_latency_record(req)
+                        # 为所有flit设置receive时间戳，确保后续处理能获得正确值
+                        f.data_received_complete_cycle = complete_cycle
+                        # 计算延迟
+                        f.cmd_latency = f.cmd_received_by_cake0_cycle - f.cmd_entry_noc_from_cake0_cycle
+                        f.data_latency = complete_cycle - first_flit.data_entry_noc_from_cake0_cycle
+                        f.transaction_latency = complete_cycle + self.config.SN_TRACKER_RELEASE_LATENCY - f.cmd_entry_cake0_cycle
+
+                    # 清理data buffer（数据已经收集完成）
                     self.sn_wdb.pop(flit.packet_id)
+
+                    # 添加到延迟释放队列
+                    self.sn_tracker_release_time[release_time].append(req)
                 else:
-                    # 本地写数据：按正常流程处理tracker
-                    # 找到对应的请求
-                    req = next((req for req in self.sn_tracker if req.packet_id == flit.packet_id), None)
-                    if req:
-                        # 设置tracker延迟释放时间
-                        release_time = self.current_cycle + self.config.SN_TRACKER_RELEASE_LATENCY
-
-                        # 释放时间字典已在__init__中初始化
-
-                        # 更新flit时间戳
-                        first_flit = next((flit for flit in self.data_network.send_flits[flit.packet_id] if flit.flit_id == 0), self.data_network.send_flits[flit.packet_id][0])
-                        # 记录最后到达时间
-                        complete_cycle = self.current_cycle
-
-                        for f in self.data_network.send_flits[flit.packet_id]:
-                            f.leave_db_cycle = release_time
-                            f.sync_latency_record(req)
-                            # 为所有flit设置receive时间戳，确保后续处理能获得正确值
-                            f.data_received_complete_cycle = complete_cycle
-                            # 计算延迟
-                            f.cmd_latency = f.cmd_received_by_cake0_cycle - f.cmd_entry_noc_from_cake0_cycle
-                            f.data_latency = complete_cycle - first_flit.data_entry_noc_from_cake0_cycle
-                            f.transaction_latency = complete_cycle + self.config.SN_TRACKER_RELEASE_LATENCY - f.cmd_entry_cake0_cycle
-
-                        # 清理data buffer（数据已经收集完成）
-                        self.sn_wdb.pop(flit.packet_id)
-
-                        # 添加到延迟释放队列
-                        self.sn_tracker_release_time[release_time].append(req)
-                    else:
-                        print(f"Warning: No SN tracker found for packet_id {flit.packet_id}")
+                    print(f"Warning: No SN tracker found for packet_id {flit.packet_id}")
 
     def h2l_l_to_eject_fifo(self, network_type):
         """1GHz: h2l_fifo_l → 处理完成"""

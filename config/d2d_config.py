@@ -80,7 +80,6 @@ class D2DConfig:
         Raises:
             ValueError: 如枟缺少必需的配置项
         """
-        print("使用新格式D2D配置...")
 
         if not hasattr(self, "DIE_POSITIONS"):
             raise ValueError("新格式配置缺少DIE_POSITIONS")
@@ -97,8 +96,6 @@ class D2DConfig:
         self.D2D_PAIRS = pairs
         self._setup_die_positions_from_pairs(pairs)
         self._calculate_die_layout_type()
-
-        print(f"新格式配置生成 {len(pairs)} 个D2D连接对")
 
     def _generate_pairs_from_connections(self, connections: List[List[int]]) -> List[Tuple[int, int, int, int]]:
         """从D2D_CONNECTIONS生成配对关系
@@ -542,8 +539,6 @@ class D2DConfig:
             die_connections[pair[2]].add(pair[0])
 
         # 不限制每个Die连接的数量，只要双向连接一致即可
-
-        print(f"4-Die配置验证通过: {len(self.D2D_PAIRS)}个连接对")
 
     def get_die_boundary_nodes(self, die_id: int) -> Dict[str, List[int]]:
         """获取指定Die的边界节点

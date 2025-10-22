@@ -470,7 +470,18 @@ D2D_REQUEST_ATTRS = D2D_BASIC_ATTRS + ["req_attr"] + D2D_ORIGIN_TARGET_ATTRS
 
 D2D_RESPONSE_ATTRS = D2D_BASIC_ATTRS + ["rsp_type", "flit_type", "is_last_flit"] + D2D_ORIGIN_TARGET_ATTRS
 
-D2D_DATA_ATTRS = D2D_BASIC_ATTRS + ["flit_type"] + D2D_ORIGIN_TARGET_ATTRS
+D2D_LATENCY_TIMESTAMP_ATTRS = [
+    "cmd_entry_cake0_cycle",
+    "cmd_entry_noc_from_cake0_cycle",
+    "cmd_received_by_cake0_cycle",
+    "cmd_received_by_cake1_cycle",
+    "data_entry_noc_from_cake0_cycle",
+    "data_entry_noc_from_cake1_cycle",
+    "data_received_complete_cycle",
+    "write_complete_received_cycle"
+]
+
+D2D_DATA_ATTRS = D2D_BASIC_ATTRS + ["flit_type"] + D2D_ORIGIN_TARGET_ATTRS + D2D_LATENCY_TIMESTAMP_ATTRS
 
 D2D_TIMESTAMP_ATTRS = [
     "departure_cycle", "entry_db_cycle", "req_departure_cycle", "leave_db_cycle"

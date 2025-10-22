@@ -100,6 +100,52 @@ class D2D_Link_State_Visualizer(NetworkLinkVisualizer):
         network_name = network_names[self.current_network]
         title = f"Die {self.current_die}/{self.num_dies-1} - {network_name} Network"
         self.ax.set_title(title, fontsize=14, fontweight='bold')
+
+    def _reinitialize_for_current_network(self):
+        """为当前选中的网络重新初始化静态元素"""
+        if not hasattr(self, 'all_die_networks'):
+            return
+
+        # 获取当前选中的网络
+        if (self.current_die >= len(self.all_die_networks) or
+            self.current_network >= len(self.all_die_networks[self.current_die])):
+            return
+
+        current_network = self.all_die_networks[self.current_die][self.current_network]
+
+        # 更新基础网络引用
+        self.network = current_network
+
+        # 重新读取配置参数
+        self.cols = current_network.config.NUM_COL
+        self.slice_per_link_horizontal = current_network.config.SLICE_PER_LINK_HORIZONTAL
+        self.slice_per_link_vertical = current_network.config.SLICE_PER_LINK_VERTICAL
+
+        # 重新计算节点布局
+        self.node_positions = self._calculate_layout()
+
+        # 重新绘制静态元素
+        self._draw_static_elements()
+
+        # 清空piece_ax，避免重叠
+        self.piece_ax.clear()
+        self.piece_ax.axis("off")
+
+        # 重新创建piece_vis
+        self.piece_vis = self.PieceVisualizer(
+            current_network.config,
+            self.piece_ax,
+            highlight_callback=self._on_piece_highlight,
+            parent=self
+        )
+
+        # 清除节点选择
+        self._selected_node = None
+        if hasattr(self, "click_box"):
+            try:
+                self.click_box.remove()
+            except Exception:
+                pass
     
     def update(self, all_die_networks=None, cycle=None, skip_pause=False):
         """
@@ -184,12 +230,16 @@ class D2D_Link_State_Visualizer(NetworkLinkVisualizer):
             self.current_die = (self.current_die + 1) % self.num_dies
         else:
             self.current_die = (self.current_die - 1) % self.num_dies
-        
+
         # 更新选中的网络索引
         self.selected_network_index = self.current_die * 3 + self.current_network
+
+        # 重新初始化网络视图（因为不同Die的拓扑可能不同）
+        self._reinitialize_for_current_network()
+
         self._update_title()
         self._update_status_display()
-        
+
         # 刷新显示
         if hasattr(self, 'all_die_networks'):
             self.update(self.all_die_networks, cycle=self.cycle, skip_pause=True)
@@ -198,6 +248,10 @@ class D2D_Link_State_Visualizer(NetworkLinkVisualizer):
         """通过按钮选择网络类型"""
         self.current_network = network_type
         self.selected_network_index = self.current_die * 3 + self.current_network
+
+        # 重新初始化网络视图（因为不同网络类型的配置可能不同）
+        self._reinitialize_for_current_network()
+
         self._update_title()
         self._update_status_display()
         # 刷新显示
@@ -209,6 +263,10 @@ class D2D_Link_State_Visualizer(NetworkLinkVisualizer):
         if 0 <= die_id < self.num_dies:
             self.current_die = die_id
             self.selected_network_index = self.current_die * 3 + self.current_network
+
+            # 重新初始化网络视图（因为不同Die的拓扑可能不同）
+            self._reinitialize_for_current_network()
+
             self._update_title()
             self._update_status_display()
             # 刷新显示

@@ -41,13 +41,13 @@ def main():
     traffic_file_path = str(Path(__file__).parent.parent / "test_data")
     traffic_chains = [
         [
-            "d2d_4die_1016.txt",
-            # "d2d_data_1021.txt",
+            # "d2d_4die_1016.txt",
+            "d2d_data_1021.txt",
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
-
-    # model.setup_debug(trace_packets=[90], update_interval=0.1)
+    # model.setup_debug(trace_packets=[30], update_interval=0.1)
+    # model.setup_visualization(enable=1, update_interval=0.5, start_cycle=500)
 
     model.setup_result_analysis(
         # 图片生成控制
@@ -61,8 +61,6 @@ def main():
         save_dir="../Result/d2d_demo/",
         heatmap_mode="total",  # 可选: "total", "read", "write"
     )
-
-    # model.setup_visualization(enable=1, update_interval=0.5, start_cycle=2000)
 
     # 运行仿真
     print("开始仿真")
