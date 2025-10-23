@@ -5,9 +5,10 @@
 CrossRing NoC系统实现了针对请求（REQ）通道的包保序功能，确保在网络传输过程中来自同一源-目的对（source-destination pair）的请求包能够按照注入顺序到达目的地。该保序机制是CrossRing网络协议的核心特性之一，用于维护系统的一致性和正确性。
 
 ### 1.1 保序功能特点
+- **三种保序模式**：支持不保序(Mode 0)、单侧下环(Mode 1)、双侧下环(Mode 2)三种模式
 - **可配置的包类型保序**：通过配置参数指定需要保序的包类型（REQ/RSP/DATA的任意组合）
 - **节点级别保序**：以节点对为保序单元，同一节点内所有IP共享保序流
-- **配置驱动的方向控制**：通过YAML配置指定每个方向允许下环的源节点列表
+- **灵活的方向控制**：单侧模式固定TL/TU，双侧模式通过YAML配置指定各方向允许下环的源节点
 - **全局顺序**：基于全局顺序ID分配器确保包的顺序
 - **灵活配置**：可精确控制哪些包类型、哪些源-目的对需要保序，以及各方向的下环策略
 
@@ -24,20 +25,35 @@ CrossRing NoC系统实现了针对请求（REQ）通道的包保序功能，确�
 
 ### 2.2 保序策略
 
-**配置驱动的方向控制策略**：
+CrossRing支持三种保序模式，通过配置参数`ORDERING_PRESERVATION_MODE`选择：
 
-不同于固定的方向限制策略，新的保序机制通过配置参数灵活控制下环方向。系统在初始化时根据配置文件中的节点列表，确定每个源节点允许从哪些方向下环。
+#### Mode 0: 不保序
+- 禁用所有保序功能
+- 所有flit可以从任意方向下环
+- 性能最优，但不保证顺序
 
-**策略原理**：
-- 每个方向（TL/TR/TU/TD）维护一个允许下环的源节点白名单
-- flit在创建时根据其源节点查询白名单，确定允许的下环方向
-- flit在尝试下环时，仅在允许的方向进行保序下环
+#### Mode 1: 单侧下环
+- **固定方向限制**：只允许从TL（左）和TU（上）方向下环
+- TR（右）和TD（下）方向强制绕环
+- 简单可靠，避免死锁
+- 性能中等
 
-**典型配置示例**（4列×5行拓扑）：
+**单侧下环原理**：
+- 所有flit统一只能从TL/TU下环
+- 不依赖节点位置，配置简单
+- 保证不会产生环路死锁
+
+#### Mode 2: 双侧下环（方向配置）
+- **灵活方向控制**：通过配置文件指定各方向允许下环的源节点
+- 每个方向（TL/TR/TU/TD）维护一个允许下环的源节点列表
+- flit在创建时根据其源节点确定允许的下环方向
+- 性能最优，但需要正确配置以避免死锁
+
+**典型配置示例**（5列×4行拓扑）：
 - 左半部节点（列0,1）：允许从TR方向下环
 - 右半部节点（列2,3）：允许从TL方向下环
-- 上半部节点（行0-2）：允许从TU方向下环
-- 下半部节点（行3-4）：允许从TD方向下环
+- 上半部节点（行0-1）：允许从TD方向下环
+- 下半部节点（行2-3）：允许从TU方向下环
 
 这种配置方式可以灵活适配不同拓扑和性能需求。
 
@@ -60,16 +76,20 @@ global_order_id_allocator = defaultdict(lambda: {"REQ": 1, "RSP": 1, "DATA": 1})
 ### 3.2 保序跟踪表
 
 ```python
-# 位置：src/utils/components/node.py
-order_tracking_table = defaultdict(lambda: {"REQ": 0, "RSP": 0, "DATA": 0})
+# 位置：src/utils/components/network.py
+# 每个network（REQ/RSP/DATA）独立维护自己的tracking_table
+order_tracking_table = defaultdict(int)
 ```
 
-**功能**：每个节点本地维护的跟踪表，记录每个源-目的节点对的各类型包已下环的最大顺序ID。
+**功能**：每个网络（REQ/RSP/DATA）独立维护的跟踪表，记录每个源-目的节点对在各下环方向上已下环的最大顺序ID。
 
 **数据结构**：
-- Key: `(src_node, dest_node)` - 源节点和目标节点的物理拓扑节点ID元组
-- Value: 包含三种包类型的字典，记录已下环的最大顺序ID
-- **重要说明**：使用节点级别的键，同一源节点到同一目标节点的所有IP流量共享保序跟踪
+- Key: `(src_node, dest_node, direction)` - 源节点、目标节点和下环方向的三元组
+- Value: 该节点对在该方向上已下环的最大顺序ID
+- **重要说明**：
+  - **包含direction的原因**：CrossRing有水平环和垂直环，同一个flit可能需要先从水平环下环（如TL），再从垂直环下环（如TU）。如果key只用`(src, dest)`，第二次下环时会因为order_id已被记录而检查失败。
+  - **network独立**：每个network（REQ/RSP/DATA）维护独立的tracking_table，不需要在value中区分packet_category。
+  - **节点级别保序**：使用物理拓扑节点ID，同一源节点到同一目标节点的所有IP流量共享保序跟踪。
 
 ### 3.3 Flit保序属性
 
@@ -137,7 +157,9 @@ order_tracking_table = defaultdict(lambda: {"REQ": 0, "RSP": 0, "DATA": 0})
 检查顺序ID是否匹配：
 1. 从flit获取源和目标IP位置
 2. 通过逆向映射将IP位置转换为物理拓扑节点ID
-3. 使用节点ID作为键查询order_tracking_table
+3. 使用节点ID和下环方向作为键`(src, dest, direction)`查询order_tracking_table
+   - direction区分水平环和垂直环的下环
+   - 同一flit在不同环上的下环使用不同的tracking entry
 4. 检查flit.src_dest_order_id是否等于期望的下一个ID（当前记录值+1）
 5. 匹配则允许下环，否则继续绕环
 
@@ -145,8 +167,10 @@ order_tracking_table = defaultdict(lambda: {"REQ": 0, "RSP": 0, "DATA": 0})
 
 成功下环后更新跟踪表：
 1. 从flit获取源和目标IP位置并转换为节点ID
-2. 使用节点ID作为键更新order_tracking_table中该节点对的最大顺序ID
-3. 后续同一节点对的flit将期望更大的顺序ID
+2. 使用节点ID和下环方向作为键`(src, dest, direction)`更新order_tracking_table
+   - 记录该节点对在该下环方向上的最大顺序ID
+   - 水平环和垂直环的下环分别跟踪
+3. 后续同一节点对在同一方向的flit将期望更大的顺序ID
 
 ## 5. 基于配置的方向控制机制
 
@@ -217,10 +241,14 @@ CrossRing的保序机制采用**配置驱动的方向控制策略**，通过配�
 
 **位置**：配置文件（`config/topologies/*.yaml`）和 `config/config.py`
 
-#### 6.1.1 ENABLE_IN_ORDER_EJECTION
-- **类型**：boolean
-- **默认值**：true/false（根据具体配置）
-- **功能**：全局开关，控制是否启用保序功能
+#### 6.1.1 ORDERING_PRESERVATION_MODE
+- **类型**：int
+- **默认值**：0
+- **功能**：保序模式选择
+- **可选值**：
+  - 0: 不保序
+  - 1: 单侧下环（固定TL/TU）
+  - 2: 双侧下环（方向配置）
 
 #### 6.1.2 IN_ORDER_PACKET_CATEGORIES
 - **类型**：list
@@ -243,13 +271,47 @@ CrossRing的保序机制采用**配置驱动的方向控制策略**，通过配�
 
 ### 6.2 配置示例
 
-#### 6.2.1 完整配置示例（5×4拓扑）
+#### 6.2.1 Mode 0: 不保序配置示例
 
 ```yaml
 # config/topologies/topo_5x4.yaml
 
-# 启用保序功能
-ENABLE_IN_ORDER_EJECTION: 1
+# 禁用保序功能
+ORDERING_PRESERVATION_MODE: 0  # 不保序
+
+# 包类型配置（Mode 0下不生效）
+IN_ORDER_PACKET_CATEGORIES:
+  - "REQ"
+
+# 源-目的对配置（Mode 0下不生效）
+IN_ORDER_EJECTION_PAIRS: []
+```
+
+#### 6.2.2 Mode 1: 单侧下环配置示例
+
+```yaml
+# config/topologies/topo_5x4.yaml
+
+# 启用单侧下环
+ORDERING_PRESERVATION_MODE: 1  # 单侧下环(TL/TU)
+
+# 需要保序的包类型
+IN_ORDER_PACKET_CATEGORIES:
+  - "REQ"    # 只有REQ类型需要保序
+
+# 需要保序的源-目的对 (空列表表示全部保序)
+IN_ORDER_EJECTION_PAIRS: []
+
+# 方向配置在Mode 1下不生效，固定为TL/TU
+```
+
+#### 6.2.3 Mode 2: 双侧下环配置示例（5×4拓扑）
+
+```yaml
+# config/topologies/topo_5x4.yaml
+
+# 启用双侧下环
+ORDERING_PRESERVATION_MODE: 2  # 双侧下环(方向配置)
 
 # 需要保序的包类型
 IN_ORDER_PACKET_CATEGORIES:
@@ -287,6 +349,10 @@ TR_ALLOWED_SOURCE_NODES:
 
 # TU方向（上方向）：下半部节点允许下环
 TU_ALLOWED_SOURCE_NODES:
+  - 8    # 行2
+  - 9
+  - 10
+  - 11
   - 12   # 行3
   - 13
   - 14
@@ -306,10 +372,6 @@ TD_ALLOWED_SOURCE_NODES:
   - 5
   - 6
   - 7
-  - 8    # 行2
-  - 9
-  - 10
-  - 11
 ```
 
 #### 6.2.2 配置说明
@@ -335,17 +397,25 @@ TD_ALLOWED_SOURCE_NODES:
 ```
 开始
   ↓
-检查ENABLE_IN_ORDER_EJECTION
+检查ORDERING_PRESERVATION_MODE
+  ├── Mode 0 → 直接下环，不保序
+  ├── Mode 1 → 检查方向是否为TL或TU → 否 → 强制绕环
+  │             ↓
+  │            是 → 进入保序检查
+  └── Mode 2 → 检查当前方向是否在allowed_eject_directions中
+                ↓
+               是 → 进入保序检查
+                ↓
+               否 → 强制绕环
+
+保序检查流程：
+  判断包类型是否在IN_ORDER_PACKET_CATEGORIES中
   ↓
-判断包类型是否在IN_ORDER_PACKET_CATEGORIES中
+  检查源-目的对是否需要保序
   ↓
-检查源-目的对是否需要保序
-  ↓
-检查当前方向是否在allowed_eject_directions中
-  ├── 方向允许 → 执行保序检查 → 顺序正确？ → 是 → 下环成功，更新跟踪表
-  │                              ↓
-  │                             否 → 绕环等待
-  └── 方向不允许 → 强制绕环，可能进行ETag降级
+  执行顺序ID检查 → 顺序正确？ → 是 → 下环成功，更新跟踪表
+                   ↓
+                  否 → 绕环等待
 ```
 
 ### 7.2 保序检查详细流程
@@ -376,12 +446,19 @@ table[(src, dest)][packet_category] = flit.src_dest_order_id
 
 ## 8. 总结
 
-CrossRing的保序功能通过全局顺序ID分配、本地跟踪表维护和配置驱动的方向控制策略，实现了高效可靠的包保序机制。该设计在保证正确性的同时，通过灵活的配置参数，最小化了对系统性能的影响，并提供了良好的可扩展性。
+CrossRing的保序功能通过全局顺序ID分配、本地跟踪表维护和灵活的模式选择策略，实现了高效可靠的包保序机制。系统支持三种保序模式，从不保序到单侧下环再到双侧下环，可根据不同场景需求选择最合适的方案。该设计在保证正确性的同时，通过灵活的配置参数，最小化了对系统性能的影响，并提供了良好的可扩展性。
 
 关键特性总结：
+- ✅ **三种保序模式**：不保序、单侧下环(TL/TU)、双侧下环(方向配置)
 - ✅ **可配置包类型**：支持REQ/RSP/DATA的任意组合保序
-- ✅ **配置驱动方向控制**：通过配置灵活指定各方向下环策略
+- ✅ **灵活方向控制**：Mode 1固定方向，Mode 2灵活配置
 - ✅ **节点级别保序**：同一节点所有IP共享保序流
 - ✅ **全局一致性**：基于全局顺序ID分配器确保顺序
 - ✅ **本地化检查**：每个节点独立维护跟踪表，无需全局同步
 - ✅ **灵活扩展**：支持精确控制特定源-目的对的保序需求
+
+### 8.1 模式选择建议
+
+- **Mode 0 (不保序)**：适用于对顺序无要求的场景，性能最优
+- **Mode 1 (单侧下环)**：适用于需要简单可靠保序的场景，配置简单，避免死锁
+- **Mode 2 (双侧下环)**：适用于对性能要求较高的场景，需要根据拓扑正确配置方向

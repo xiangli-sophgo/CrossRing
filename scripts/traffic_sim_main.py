@@ -65,24 +65,31 @@ def run_single_simulation(sim_params):
 
         # 从配置文件获取拓扑类型，如果没有则使用默认值
         topo_type = config.TOPO_TYPE if config.TOPO_TYPE else topo_type
+
         # Create simulation instance
         sim: BaseModel = eval(f"{model_type}_model")(
             model_type=model_type,
             config=config,
             topo_type=topo_type,
-            traffic_file_path=traffic_path,
-            traffic_config=file_name,
-            result_save_path=result_save_path + file_name[:-4] + "/",
-            results_fig_save_path=results_fig_save_path,
-            plot_flow_fig=1,
-            plot_RN_BW_fig=1,
             verbose=0,
         )
 
-        sim.initial()
-        sim.end_time = 10000
-        sim.print_interval = 5000
-        sim.run()
+        # 配置流量调度器
+        sim.setup_traffic_scheduler(
+            traffic_file_path=traffic_path,
+            traffic_chains=file_name,
+        )
+
+        # 配置结果分析
+        sim.setup_result_analysis(
+            result_save_path=result_save_path + file_name[:-4] + "/",
+            results_fig_save_path=results_fig_save_path,
+            plot_flow_fig=True,
+            plot_RN_BW_fig=True,
+        )
+
+        # 运行仿真
+        sim.run_simulation(max_cycles=10000, print_interval=5000)
 
         # Get results
         results = sim.get_results()

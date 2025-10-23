@@ -298,12 +298,16 @@ class IPInterface:
             flit.flit_position = "L2H"
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
+            # 在真正发出时分配order_id（保证发出顺序=order_id顺序）
+            flit.set_packet_category_and_order_id()
 
         elif network_type == "rsp":
             # 响应网络：直接移动
             flit.flit_position = "L2H"
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
+            # 在真正发出时分配order_id（保证发出顺序=order_id顺序）
+            flit.set_packet_category_and_order_id()
 
         elif network_type == "data":
             # 数据网络：检查departure_cycle
@@ -317,6 +321,8 @@ class IPInterface:
             flit: Flit = net_info["inject_fifo"].popleft()
             flit.flit_position = "L2H"
             flit.start_inject = True
+            # 在真正发出时分配order_id（保证发出顺序=order_id顺序）
+            flit.set_packet_category_and_order_id()
             net_info["l2h_fifo_pre"] = flit
 
     def l2h_to_IQ_channel_buffer(self, network_type):
@@ -942,8 +948,7 @@ class IPInterface:
             flit.source_original = req.source_original
             flit.destination_original = req.destination_original
             flit.flit_type = "data"
-            # 设置保序信息
-            flit.set_packet_category_and_order_id()
+            # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
             flit.departure_cycle = (
                 cycle + self.config.DDR_W_LATENCY + i * self.config.NETWORK_FREQUENCY
                 if req.original_destination_type and req.original_destination_type.startswith("ddr")
@@ -1000,8 +1005,7 @@ class IPInterface:
             flit.destination_original = req.source_original
             flit.req_type = req.req_type
             flit.flit_type = "data"
-            # 设置保序信息
-            flit.set_packet_category_and_order_id()
+            # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
             if hasattr(req, "original_destination_type") and req.original_destination_type.startswith("ddr"):
                 latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
             elif hasattr(req, "destination_type") and req.destination_type and req.destination_type.startswith("ddr"):
@@ -1058,8 +1062,7 @@ class IPInterface:
         rsp.source_original = req.destination_original  # RSP从SN发出
         rsp.destination_original = req.source_original  # RSP发往RN
 
-        # 设置保序信息（使用正确的source_original进行方向控制和保序跟踪）
-        rsp.set_packet_category_and_order_id()
+        # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
         rsp.packet_id = req.packet_id
         rsp.departure_cycle = cycle + self.config.NETWORK_FREQUENCY
         rsp.req_departure_cycle = req.departure_cycle

@@ -36,30 +36,39 @@ def main():
         model_type=model_type,
         config=config,
         topo_type=topo_type,
+    )
+
+    # 配置流量调度器
+    sim.setup_traffic_scheduler(
         traffic_file_path=r"../traffic/0617",
-        traffic_config=[["LLama2_AllReduce.txt"]],
+        traffic_chains=[["LLama2_AllReduce.txt"]],
+    )
+
+    # 配置结果分析
+    sim.setup_result_analysis(
         result_save_path="../Result/simple_dual_channel/",
         results_fig_save_path="",
-        plot_flow_fig=0,
-        plot_RN_BW_fig=0,
-        plot_link_state=0,
-        plot_start_cycle=3000,
-        print_trace=0,
-        show_trace_id=10651,
+        plot_flow_fig=False,
+        plot_RN_BW_fig=False,
+    )
+
+    # 配置调试
+    sim.setup_debug(
+        print_trace=False,
+        show_trace_id=[10651],
         verbose=1,
     )
 
-    # 初始化仿真
-    sim.initial()
-
-    # 设置仿真参数
-    sim.end_time = 6000
-    sim.print_interval = 2000
+    # 配置可视化
+    sim.setup_visualization(
+        plot_link_state=False,
+        plot_start_cycle=3000,
+    )
 
     print("开始双通道仿真...")
 
     # 运行仿真
-    sim.run()
+    sim.run_simulation(max_cycles=6000, print_interval=2000)
 
 
 if __name__ == "__main__":

@@ -132,71 +132,161 @@ class BaseModel:
         """重置packet_id计数器"""
         cls._global_packet_id = 0
 
-    def __init__(
-        self,
-        model_type,
-        config: CrossRingConfig,
-        topo_type,
-        traffic_file_path,
-        result_save_path: str,
-        traffic_config,  # 可以是 "single_file.txt" 或者 [["file1.txt", "file2.txt"], ["file3.txt"]]
-        results_fig_save_path: str = "",
-        plot_flow_fig=False,
-        flow_fig_show_CDMA=False,
-        plot_RN_BW_fig=False,
-        plot_link_state=False,
-        plot_start_cycle=-1,
-        print_trace=False,
-        show_trace_id=0,
-        show_node_id=3,
-        verbose=0,
-    ):
+    def __init__(self, model_type, config: CrossRingConfig, topo_type, verbose: int = 0):
+        """
+        初始化BaseModel - 仅设置核心属性
+
+        Args:
+            model_type: 模型类型（REQ_RSP, Packet_Base, Feature）
+            config: CrossRingConfig配置对象
+            topo_type: 拓扑类型（如"5x4", "4x4"等）
+            verbose: 详细程度（0=静默，1=正常）
+        """
         self.model_type_stat = model_type
         self.config = config
         self.topo_type_stat = topo_type
-        self.traffic_file_path = traffic_file_path
+        self.verbose = verbose
+
+        # Traffic相关 - 通过setup_traffic_scheduler设置
+        self.traffic_file_path = None
+        self.traffic_scheduler = None
+        self.file_name = "unknown.txt"
+
+        # 结果保存路径 - 通过setup_result_analysis设置
         self.result_save_path = None
+        self.result_save_path_original = None
+        self.results_fig_save_path = None
 
-        # 初始化TrafficScheduler
-        self.traffic_scheduler = TrafficScheduler(config, traffic_file_path)
-        self.traffic_scheduler.set_verbose(verbose > 0)
+        # 可视化配置 - 通过setup_result_analysis设置
+        self.plot_flow_fig = False
 
-        # 处理traffic配置
-        if isinstance(traffic_config, str):
-            # 单个文件，向后兼容
-            self.file_name = traffic_config
-            self.traffic_scheduler.setup_single_chain([traffic_config])
-        elif isinstance(traffic_config, list):
-            # 多traffic链配置
-            self.traffic_scheduler.setup_parallel_chains(traffic_config)
-            self.file_name = self.traffic_scheduler.get_save_filename() + ".txt"
-        else:
-            raise ValueError("traffic_config must be a string (single file) or list of lists (multiple chains)")
+        # 链路状态可视化 - 通过setup_visualization设置
+        self.plot_link_state = False
+        self.plot_start_cycle = -1
 
-        self.result_save_path_original = result_save_path
-        self.plot_flow_fig = plot_flow_fig
-        self.flow_fig_show_CDMA = flow_fig_show_CDMA
-        self.plot_RN_BW_fig = plot_RN_BW_fig
-        self.plot_link_state = plot_link_state
-        self.plot_start_cycle = plot_start_cycle
-        self.print_trace = print_trace
+        # 调试配置 - 通过setup_debug设置
+        self.print_trace = False
+        self.show_trace_id = []
+        self.show_node_id = 3
+
+        # 内部状态标志
         self._done_flags = {
             "req": False,
             "rsp": False,
             "flit": False,
         }
-        self.show_trace_id = show_trace_id
-        self.show_node_id = show_node_id
-        self.verbose = verbose
-        # if self.verbose:
-            # print(f"\nModel Type: {model_type}, Topology: {self.topo_type_stat}, file_name: {self.file_name[:-4]}")
-        self.results_fig_save_path = None
+
+    def setup_traffic_scheduler(self, traffic_file_path: str, traffic_chains: list) -> None:
+        """
+        配置流量调度器
+
+        Args:
+            traffic_file_path: 流量文件路径
+            traffic_chains: 流量链配置，每个链包含文件名列表
+                           例如: [["file1.txt", "file2.txt"], ["file3.txt"]]
+        """
+        self.traffic_file_path = traffic_file_path
+
+        # 初始化TrafficScheduler
+        self.traffic_scheduler = TrafficScheduler(self.config, traffic_file_path)
+        self.traffic_scheduler.set_verbose(self.verbose > 0)
+
+        # 处理traffic配置
+        if isinstance(traffic_chains, str):
+            # 单个文件字符串
+            self.file_name = traffic_chains
+            self.traffic_scheduler.setup_single_chain([traffic_chains])
+        elif isinstance(traffic_chains, list):
+            # 多traffic链配置
+            self.traffic_scheduler.setup_parallel_chains(traffic_chains)
+            self.file_name = self.traffic_scheduler.get_save_filename() + ".txt"
+        else:
+            raise ValueError("traffic_chains必须是字符串(单文件)或列表(多链)")
+
+    def setup_result_analysis(
+        self,
+        result_save_path: str = "",
+        results_fig_save_path: str = "",
+        plot_flow_fig: bool = False,
+        plot_RN_BW_fig: bool = False,
+    ) -> None:
+        """
+        配置结果分析选项
+
+        Args:
+            result_save_path: 结果保存路径
+            results_fig_save_path: 图表保存路径
+            plot_flow_fig: 是否绘制流量图
+            plot_RN_BW_fig: 是否绘制RN带宽图
+        """
+        self.result_save_path_original = result_save_path
+        self.plot_flow_fig = plot_flow_fig
+        self.plot_RN_BW_fig = plot_RN_BW_fig
+
+        # 创建结果保存路径
         if result_save_path:
-            self.result_save_path = self.result_save_path_original + str(topo_type) + "/" + self.file_name[:-4] + "/"
+            self.result_save_path = f"{result_save_path}{self.topo_type_stat}/{self.file_name[:-4]}/"
             os.makedirs(self.result_save_path, exist_ok=True)
+
         if results_fig_save_path:
             self.results_fig_save_path = results_fig_save_path
             os.makedirs(self.results_fig_save_path, exist_ok=True)
+
+    def setup_debug(
+        self,
+        print_trace: bool = False,
+        show_trace_id: list = None,
+    ) -> None:
+        """
+        配置调试选项
+
+        Args:
+            print_trace: 是否打印trace信息
+            show_trace_id: 要跟踪的packet ID列表
+            show_node_id: 显示的节点ID
+        """
+        self.print_trace = print_trace
+        self.show_trace_id = show_trace_id if show_trace_id is not None else []
+
+    def setup_visualization(
+        self,
+        plot_link_state: bool = False,
+        plot_start_cycle: int = -1,
+        show_node_id: int = 3,
+    ) -> None:
+        """
+        配置实时可视化选项
+
+        Args:
+            plot_link_state: 是否启用链路状态可视化
+            plot_start_cycle: 开始可视化的周期
+        """
+        self.plot_link_state = plot_link_state
+        self.plot_start_cycle = plot_start_cycle
+        self.show_node_id = show_node_id
+
+    def run_simulation(
+        self,
+        max_cycles: int = 10000,
+        print_interval: int = 1000,
+    ) -> None:
+        """
+        运行仿真 - 统一入口，封装 initial() + run()
+
+        Args:
+            max_cycles: 最大仿真周期数
+            print_interval: 打印进度的间隔周期数
+        """
+        # 初始化
+        self.initial()
+
+        # 设置仿真参数（在initial()之后，避免被覆盖）
+        self.end_time = max_cycles
+        self.print_interval = print_interval
+
+        # 运行仿真
+        print("\n提示: 按 Ctrl+C 可以随时中断仿真并查看当前结果\n")
+        self.run()
 
     def initial(self):
         self.topo_type_stat = self.config.TOPO_TYPE
@@ -1031,8 +1121,7 @@ class BaseModel:
         req.source_original = req_data[1]
         req.destination_original = req_data[3]
         req.flit_type = "req"
-        # 设置保序信息
-        req.set_packet_category_and_order_id()
+        # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
         req.departure_cycle = req_data[0]
         req.burst_length = req_data[6]
         req.source_type = f"{req_data[2]}_0" if "_" not in req_data[2] else req_data[2]
@@ -1959,7 +2048,7 @@ class BaseModel:
             "ITag_MAX_NUM_V",
             # Feature switches
             "ENABLE_CROSSPOINT_CONFLICT_CHECK",
-            "ENABLE_IN_ORDER_EJECTION",
+            "ORDERING_PRESERVATION_MODE",
             "CROSSRING_VERSION",
             # Bandwidth limits
             "GDMA_BW_LIMIT",

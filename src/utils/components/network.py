@@ -86,8 +86,9 @@ class Network:
         self._sn_positions = None
         self._positions_cache_lock = None  # For thread safety if needed
 
-        # 保序跟踪表: {(src, dest): {"REQ": last_ejected_id, "RSP": last_ejected_id, "DATA": last_ejected_id}}
-        self.order_tracking_table = defaultdict(lambda: {"REQ": 0, "RSP": 0, "DATA": 0})
+        # 保序跟踪表: {(src, dest, direction): last_ejected_id}
+        # 每个network独立维护自己的tracking_table，不需要区分packet_category
+        self.order_tracking_table = defaultdict(int)
 
         self.current_cycle = []
         self.flits_num = []
@@ -699,14 +700,27 @@ class Network:
             col_end = col_start + self.config.NUM_NODE - self.config.NUM_COL * 2 if col_start >= 0 else -1
 
             link = self.links.get(flit.current_link)
-            # self.error_log(flit, 158, 3)
+            # self.error_log(flit, 1, 0)
 
             # Plan non ring bridge moves
             return self._handle_flit(flit, link, current, next_node, row_start, row_end, col_start, col_end)
 
+    def _position_to_physical_node(self, position):
+        """将position反向映射为物理节点ID（用于dest mapping）
+
+        dest mapping公式: position = node % NUM_COL + (node // NUM_COL) * 2 * NUM_COL
+        反向: node = (position // (2 * NUM_COL)) * NUM_COL + (position % NUM_COL)
+        """
+        row = position // (2 * self.config.NUM_COL)
+        col = position % self.config.NUM_COL
+        return row * self.config.NUM_COL + col
 
     def _can_eject_in_order(self, flit: Flit, target_eject_node, direction=None):
-        """检查flit是否可以按序下环（包含方向检查）"""
+        """检查flit是否可以按序下环（包含方向检查）
+
+        Args:
+            target_eject_node: 目标下环节点的position（映射后的位置），可能是中间节点
+        """
         # 先判断是否需要保序
         if not self._need_in_order_check(flit):
             return True
@@ -723,18 +737,26 @@ class Network:
         if flit.src_dest_order_id == -1 or flit.packet_category is None:
             return True
 
-        # 获取原始的src和dest
+        # 获取原始的src（物理节点ID）
         src = flit.source_original if flit.source_original != -1 else flit.source
+
+        # 使用最终目的地（而不是中间下环节点）作为key的dest
+        # destination_original或destination都是物理节点ID
         dest = flit.destination_original if flit.destination_original != -1 else flit.destination
 
-        # 检查是否是期望的下一个顺序ID
-        expected_order_id = self.order_tracking_table[(src, dest)][flit.packet_category] + 1
+        # 使用 (src物理ID, final_dest物理ID, direction) 作为键
+        key = (src, dest, direction)
 
-        return flit.src_dest_order_id == expected_order_id
+        # 检查是否是期望的下一个顺序ID
+        # 每个network只记录自己的order_id，不需要区分packet_category
+        expected_order_id = self.order_tracking_table[key] + 1
+
+        can_eject = flit.src_dest_order_id == expected_order_id
+        return can_eject
 
     def _need_in_order_check(self, flit: Flit):
         """判断该flit是否需要保序检查"""
-        if not self.config.ENABLE_IN_ORDER_EJECTION:
+        if self.config.ORDERING_PRESERVATION_MODE == 0:
             return False
 
         # 检查通道类型是否需要保序
@@ -767,7 +789,11 @@ class Network:
             return "REQ"  # 默认为REQ
 
     def _can_upgrade_to_T0_in_order(self, flit: Flit, node, direction=None):
-        """检查flit是否可以按序升级到T0（包含方向检查）"""
+        """检查flit是否可以按序升级到T0（包含方向检查）
+
+        Args:
+            node: 目标节点的position（映射后的位置），可能是中间节点
+        """
         # 先判断是否需要保序
         if not self._need_in_order_check(flit):
             return True
@@ -784,16 +810,26 @@ class Network:
         if flit.src_dest_order_id == -1 or flit.packet_category is None:
             return True
 
-        # 获取原始的src和dest
+        # 获取原始的src（物理节点ID）
         src = flit.source_original if flit.source_original != -1 else flit.source
+
+        # 使用最终目的地（而不是中间下环节点）
         dest = flit.destination_original if flit.destination_original != -1 else flit.destination
 
+        # 使用 (src物理ID, final_dest物理ID, direction) 作为键
+        key = (src, dest, direction)
+
         # 检查是否是期望的下一个顺序ID
-        expected_order_id = self.order_tracking_table[(src, dest)][flit.packet_category] + 1
+        # 每个network只记录自己的order_id，不需要区分packet_category
+        expected_order_id = self.order_tracking_table[key] + 1
         return flit.src_dest_order_id == expected_order_id
 
-    def _update_order_tracking_table(self, flit: Flit):
-        """更新保序跟踪表"""
+    def _update_order_tracking_table(self, flit: Flit, target_node: int, direction: str):
+        """更新保序跟踪表
+
+        Args:
+            target_node: 目标节点的position（映射后的位置），可能是中间节点
+        """
         # 先判断是否需要保序
         if not self._need_in_order_check(flit):
             return
@@ -805,12 +841,18 @@ class Network:
         if flit.src_dest_order_id == -1 or flit.packet_category is None:
             return
 
-        # 获取原始的src和dest
+        # 获取原始的src（物理节点ID）
         src = flit.source_original if flit.source_original != -1 else flit.source
+
+        # 使用最终目的地（而不是中间下环节点）
         dest = flit.destination_original if flit.destination_original != -1 else flit.destination
 
+        # 使用 (src物理ID, final_dest物理ID, direction) 作为键
+        key = (src, dest, direction)
+
         # 更新保序跟踪表
-        self.order_tracking_table[(src, dest)][flit.packet_category] = flit.src_dest_order_id
+        # 每个network只记录自己的order_id，不需要区分packet_category
+        self.order_tracking_table[key] = flit.src_dest_order_id
 
     def _init_direction_control(self):
         """初始化方向控制 - 使用物理节点ID集合（与配置文件和flit.source_original相同的编号）"""
@@ -824,20 +866,32 @@ class Network:
 
     def determine_allowed_eject_directions(self, flit: Flit):
         """确定flit允许的下环方向"""
-        if not self.config.ENABLE_IN_ORDER_EJECTION:
+        mode = self.config.ORDERING_PRESERVATION_MODE
+
+        # Mode 0: 不保序，所有方向都允许
+        if mode == 0:
             return None
 
-        # 获取原始源节点编号（物理节点ID，未经node_map映射）
-        src_node = flit.source_original if flit.source_original != -1 else flit.source
+        # Mode 1: 单侧下环，固定只允许TL和TU方向
+        if mode == 1:
+            return ["TL", "TU"]
 
-        # 检查各方向是否允许
-        allowed_dirs = []
-        for direction in ["TL", "TR", "TU", "TD"]:
-            # 空列表表示所有节点都允许
-            if len(self.allowed_source_nodes[direction]) == 0 or src_node in self.allowed_source_nodes[direction]:
-                allowed_dirs.append(direction)
+        # Mode 2: 双侧下环，根据方向配置决定
+        if mode == 2:
+            # 获取原始源节点编号（物理节点ID，未经node_map映射）
+            src_node = flit.source_original if flit.source_original != -1 else flit.source
 
-        return allowed_dirs if allowed_dirs else None
+            # 检查各方向是否允许
+            allowed_dirs = []
+            for direction in ["TL", "TR", "TU", "TD"]:
+                # 空列表表示所有节点都允许
+                if len(self.allowed_source_nodes[direction]) == 0 or src_node in self.allowed_source_nodes[direction]:
+                    allowed_dirs.append(direction)
+
+            return allowed_dirs if allowed_dirs else None
+
+        # 未知模式，默认不保序
+        return None
 
     def execute_moves(self, flit: Flit, cycle):
         if not flit.is_arrive:
@@ -845,8 +899,6 @@ class Network:
             if current - next_node != self.config.NUM_COL:
                 link = self.links.get(flit.current_link)
                 self.set_link_slice(flit.current_link, flit.current_seat_index, flit, cycle)
-                # link[flit.current_seat_index] = flit
-                # 移除原来的读写统计逻辑，改为使用新的状态统计
             else:
                 # 将 flit 放入 ring_bridge 的相应方向
                 if not flit.is_on_station:
@@ -855,8 +907,6 @@ class Network:
                     if direction is None:
                         return False
                     if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth and self.ring_bridge_pre[direction][flit.current_link] is None:
-                        # flit.flit_position = f"RB_{direction}"
-                        # self.ring_bridge[direction][flit.current_link].append(flit)
                         self.ring_bridge_pre[direction][flit.current_link] = flit
                         flit.is_on_station = True
             return False
@@ -1008,7 +1058,7 @@ class Network:
         self._occupy_entry(direction, key, entry_level, flit)
 
         # 4. 更新保序跟踪表
-        self._update_order_tracking_table(flit)
+        self._update_order_tracking_table(flit, target_node, direction)
 
     def _occupy_best_available_entry(self, flit, direction, key, target_node, link):
         """
@@ -1088,14 +1138,22 @@ class Network:
 
         # 2. 检查队列容量
         if len(queue) >= capacity:
+            # 队列满导致下环失败（不是保序原因）
             return False
 
         # 3. 检查保序条件
         if not self._can_eject_in_order(flit, target_node, direction):
+            # 保序检查失败，统计因保序被阻止的下环次数
+            if direction in ["TL", "TR"]:
+                flit.ordering_blocked_eject_h += 1
+            else:  # TU, TD
+                flit.ordering_blocked_eject_v += 1
             return False
 
         # 4. 尝试占用最佳Entry
-        return self._occupy_best_available_entry(flit, direction, key, target_node, link)
+        entry_success = self._occupy_best_available_entry(flit, direction, key, target_node, link)
+        # Entry不足导致下环失败（不是保序原因）
+        return entry_success
 
     def _continue_looping(self, flit, link, next_pos):
         """

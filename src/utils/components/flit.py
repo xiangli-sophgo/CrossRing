@@ -73,6 +73,8 @@ class Flit:
         "is_last_flit",
         "eject_attempts_v",
         "eject_attempts_h",
+        "ordering_blocked_eject_h",  # 因保序被阻止的横向下环次数
+        "ordering_blocked_eject_v",  # 因保序被阻止的纵向下环次数
         "wait_cycle_h",
         "wait_cycle_v",
         "path_index",
@@ -120,7 +122,7 @@ class Flit:
         "data_entry_noc_from_cake1_cycle",
         "data_received_complete_cycle",
         "write_complete_received_cycle",  # 写完成响应接收时间
-        "req_start_cycle",               # 请求开始处理时间（tracker消耗开始）
+        "req_start_cycle",  # 请求开始处理时间（tracker消耗开始）
         "rsp_entry_network_cycle",
         "transaction_latency",
         "cmd_latency",
@@ -130,12 +132,12 @@ class Flit:
         "allowed_eject_directions",  # 允许下环的方向列表
         "data_channel_id",
         # D2D相关属性
-        "d2d_origin_die",      # 发起Die ID
-        "d2d_origin_node",     # 发起节点源映射位置
-        "d2d_origin_type",     # 发起IP类型
-        "d2d_target_die",      # 目标Die ID
-        "d2d_target_node",     # 目标节点源映射位置
-        "d2d_target_type",     # 目标IP类型
+        "d2d_origin_die",  # 发起Die ID
+        "d2d_origin_node",  # 发起节点源映射位置
+        "d2d_origin_type",  # 发起IP类型
+        "d2d_target_die",  # 目标Die ID
+        "d2d_target_node",  # 目标节点源映射位置
+        "d2d_target_type",  # 目标IP类型
         "inject_time",
         # AXI传输相关属性
         "axi_end_cycle",
@@ -189,6 +191,8 @@ class Flit:
         self.is_last_flit = False
         self.eject_attempts_v = 0
         self.eject_attempts_h = 0
+        self.ordering_blocked_eject_h = 0
+        self.ordering_blocked_eject_v = 0
         self.wait_cycle_h = 0
         self.wait_cycle_v = 0
         self.path_index = 0
@@ -199,7 +203,7 @@ class Flit:
         self.sn_tracker_type = None
         # D2D新属性初始化
         self.d2d_origin_die = None
-        self.d2d_origin_node = None 
+        self.d2d_origin_node = None
         self.d2d_origin_type = None
         self.d2d_target_die = None
         self.d2d_target_node = None
@@ -278,14 +282,14 @@ class Flit:
     def set_packet_category_and_order_id(self):
         """根据flit的类型信息设置包类型和顺序ID"""
         # 确定包类型分类
-        if self.req_type is not None:
+        if self.flit_type == "req":
             self.packet_category = "REQ"
-        elif self.rsp_type is not None:
+        elif self.flit_type == "rsp":
             self.packet_category = "RSP"
         elif self.flit_type == "data":
             self.packet_category = "DATA"
         else:
-            self.packet_category = "REQ"  # 默认为REQ
+            raise ValueError(self.flit_type)
 
         # 获取原始的src和dest用于顺序ID分配
         src = self.source_original if self.source_original != -1 else self.source
@@ -336,6 +340,8 @@ class Flit:
         self.wait_cycle_v = 0
         self.eject_attempts_h = 0
         self.eject_attempts_v = 0
+        self.ordering_blocked_eject_h = 0
+        self.ordering_blocked_eject_v = 0
         self.ETag_priority = "T2"
         self.T0_slot_id = None
         self.path_index = 0
@@ -457,14 +463,9 @@ def copy_flit_attributes(src_flit: Flit, dst_flit: Flit, attr_list: list):
 
 
 # D2D属性预定义集合
-D2D_BASIC_ATTRS = [
-    "packet_id", "flit_id", "req_type", "burst_length", "traffic_id"
-]
+D2D_BASIC_ATTRS = ["packet_id", "flit_id", "req_type", "burst_length", "traffic_id"]
 
-D2D_ORIGIN_TARGET_ATTRS = [
-    "d2d_origin_die", "d2d_origin_node", "d2d_origin_type",
-    "d2d_target_die", "d2d_target_node", "d2d_target_type"
-]
+D2D_ORIGIN_TARGET_ATTRS = ["d2d_origin_die", "d2d_origin_node", "d2d_origin_type", "d2d_target_die", "d2d_target_node", "d2d_target_type"]
 
 D2D_REQUEST_ATTRS = D2D_BASIC_ATTRS + ["req_attr"] + D2D_ORIGIN_TARGET_ATTRS
 
@@ -478,18 +479,15 @@ D2D_LATENCY_TIMESTAMP_ATTRS = [
     "data_entry_noc_from_cake0_cycle",
     "data_entry_noc_from_cake1_cycle",
     "data_received_complete_cycle",
-    "write_complete_received_cycle"
+    "write_complete_received_cycle",
 ]
 
 D2D_DATA_ATTRS = D2D_BASIC_ATTRS + ["flit_type"] + D2D_ORIGIN_TARGET_ATTRS + D2D_LATENCY_TIMESTAMP_ATTRS
 
-D2D_TIMESTAMP_ATTRS = [
-    "departure_cycle", "entry_db_cycle", "req_departure_cycle", "leave_db_cycle"
-]
+D2D_TIMESTAMP_ATTRS = ["departure_cycle", "entry_db_cycle", "req_departure_cycle", "leave_db_cycle"]
 
 
-def create_d2d_flit_copy(src_flit: Flit, source: int = 0, destination: int = 0,
-                         path: list = None, attr_preset: str = "request") -> Flit:
+def create_d2d_flit_copy(src_flit: Flit, source: int = 0, destination: int = 0, path: list = None, attr_preset: str = "request") -> Flit:
     """
     创建D2D flit副本的统一方法
 

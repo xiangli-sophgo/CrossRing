@@ -58,6 +58,9 @@ class RequestInfo:
     # 数据flit的尝试下环次数列表
     data_eject_attempts_h_list: List[int] = None
     data_eject_attempts_v_list: List[int] = None
+    # 数据flit因保序被阻止的下环次数列表
+    data_ordering_blocked_h_list: List[int] = None
+    data_ordering_blocked_v_list: List[int] = None
 
     def __post_init__(self):
         # 初始化列表，避免None值
@@ -65,6 +68,10 @@ class RequestInfo:
             self.data_eject_attempts_h_list = []
         if self.data_eject_attempts_v_list is None:
             self.data_eject_attempts_v_list = []
+        if self.data_ordering_blocked_h_list is None:
+            self.data_ordering_blocked_h_list = []
+        if self.data_ordering_blocked_v_list is None:
+            self.data_ordering_blocked_v_list = []
 
 
 @dataclass
@@ -376,9 +383,13 @@ class BandwidthAnalyzer:
             # 收集每个数据flit的尝试下环次数
             data_eject_attempts_h_list = []
             data_eject_attempts_v_list = []
+            data_ordering_blocked_h_list = []
+            data_ordering_blocked_v_list = []
             for data_flit in flits:
                 data_eject_attempts_h_list.append(data_flit.eject_attempts_h)
                 data_eject_attempts_v_list.append(data_flit.eject_attempts_v)
+                data_ordering_blocked_h_list.append(data_flit.ordering_blocked_eject_h)
+                data_ordering_blocked_v_list.append(data_flit.ordering_blocked_eject_v)
 
             # 验证开始时间
             if not self.is_valid_number(representative_flit.cmd_entry_cake0_cycle):
@@ -423,6 +434,9 @@ class BandwidthAnalyzer:
                 # 数据flit的尝试下环次数列表
                 data_eject_attempts_h_list=data_eject_attempts_h_list,
                 data_eject_attempts_v_list=data_eject_attempts_v_list,
+                # 数据flit因保序被阻止的下环次数列表
+                data_ordering_blocked_h_list=data_ordering_blocked_h_list,
+                data_ordering_blocked_v_list=data_ordering_blocked_v_list,
             )
 
             # 收集RN带宽时间序列数据
@@ -1420,7 +1434,6 @@ class BandwidthAnalyzer:
         offset_y=0,
         mode="utilization",
         node_size=2000,
-        show_cdma=True,
         die_model=None,
         d2d_config=None,
         max_ip_bandwidth=None,
@@ -1437,7 +1450,6 @@ class BandwidthAnalyzer:
             offset_x, offset_y: 坐标偏移（多Die场景使用）
             mode: 显示模式
             node_size: 节点大小
-            show_cdma: 是否显示CDMA
             die_model: Die模型对象（D2D场景使用）
             d2d_config: D2D配置对象（D2D场景使用）
             max_ip_bandwidth, min_ip_bandwidth: 全局IP带宽范围（用于透明度归一化）
@@ -1500,11 +1512,9 @@ class BandwidthAnalyzer:
 
         # 添加有权重的边
         edge_labels = {}
-        edge_colors = []
+        edge_colors = {}
         for (i, j), value in links.items():
             if i not in actual_nodes or j not in actual_nodes:
-                continue
-            if i == j:  # 过滤自环链路
                 continue
 
             G.add_edge(i, j, weight=value)
@@ -1525,17 +1535,19 @@ class BandwidthAnalyzer:
 
             if display_value > 0:
                 edge_labels[(i, j)] = formatted_label
-                edge_colors.append((color_intensity, 0, 0))
+                edge_colors[(i, j)] = (color_intensity, 0, 0)
             else:
-                edge_colors.append((0.8, 0.8, 0.8))
+                edge_colors[(i, j)] = (0.8, 0.8, 0.8)
 
         # 计算节点大小
         square_size = np.sqrt(node_size) / 100
 
         # 绘制网络边
-        for (i, j), color in zip(G.edges(), edge_colors):
+        for (i, j) in G.edges():
             if i not in pos or j not in pos:
                 continue
+
+            color = edge_colors.get((i, j), (0.8, 0.8, 0.8))
 
             x1, y1 = pos[i]
             x2, y2 = pos[j]
@@ -1592,31 +1604,72 @@ class BandwidthAnalyzer:
                     else:
                         color = (edge_value, 0, 0)
 
-                    x1, y1 = pos[i]
-                    x2, y2 = pos[j]
-                    mid_x = (x1 + x2) / 2
-                    mid_y = (y1 + y2) / 2
-                    dx, dy = x2 - x1, y2 - y1
+                    # 自环链路特殊处理：根据节点位置决定标签显示位置
+                    if i == j:
+                        original_row = i // config.NUM_COL
+                        original_col = i % config.NUM_COL
+                        x, y = pos[i]
 
-                    has_reverse = G.has_edge(j, i)
-                    is_horizontal = abs(dx) > abs(dy)
-
-                    if has_reverse:
-                        if is_horizontal:
-                            perp_dx, perp_dy = -dy * 0.15 + 0.25, dx * 0.08
+                        offset = 0.17
+                        if original_row == 0:
+                            label_pos = (x, y + square_size / 2 + offset)
+                            angle = 0
+                        elif original_row == config.NUM_ROW - 2:
+                            label_pos = (x, y - square_size / 2 - offset)
+                            angle = 0
+                        elif original_col == 0:
+                            label_pos = (x - square_size / 2 - offset, y)
+                            angle = -90
+                        elif original_col == config.NUM_COL - 1:
+                            label_pos = (x + square_size / 2 + offset, y)
+                            angle = 90
                         else:
-                            perp_dx, perp_dy = -dy * 0.16, dx * 0.23 - 0.35
-                        label_x = mid_x + perp_dx
-                        label_y = mid_y + perp_dy
+                            label_pos = (x, y + square_size / 2 + offset)
+                            angle = 0
+
+                        # 自环链路只显示带宽，不显示比例信息
+                        label_str = str(label)
+                        if "\n" in label_str:
+                            bandwidth_text = label_str.split("\n")[0]
+                        else:
+                            bandwidth_text = label_str
+
+                        ax.text(
+                            *label_pos,
+                            bandwidth_text,
+                            ha="center",
+                            va="center",
+                            color=color,
+                            fontweight="normal",
+                            fontsize=8,
+                            rotation=angle,
+                        )
                     else:
-                        if is_horizontal:
-                            label_x = mid_x + dx * 0.15
-                            label_y = mid_y + dy * 0.15
-                        else:
-                            label_x = mid_x + (-dy * 0.15 if dx > 0 else dy * 0.15)
-                            label_y = mid_y - 0.15
+                        x1, y1 = pos[i]
+                        x2, y2 = pos[j]
+                        mid_x = (x1 + x2) / 2
+                        mid_y = (y1 + y2) / 2
+                        dx, dy = x2 - x1, y2 - y1
 
-                    ax.text(label_x, label_y, label, ha="center", va="center", fontsize=8, fontweight="normal", color=color)
+                        has_reverse = G.has_edge(j, i)
+                        is_horizontal = abs(dx) > abs(dy)
+
+                        if has_reverse:
+                            if is_horizontal:
+                                perp_dx, perp_dy = -dy * 0.15 + 0.25, dx * 0.08
+                            else:
+                                perp_dx, perp_dy = -dy * 0.16, dx * 0.23 - 0.35
+                            label_x = mid_x + perp_dx
+                            label_y = mid_y + perp_dy
+                        else:
+                            if is_horizontal:
+                                label_x = mid_x + dx * 0.15
+                                label_y = mid_y + dy * 0.15
+                            else:
+                                label_x = mid_x + (-dy * 0.15 if dx > 0 else dy * 0.15)
+                                label_y = mid_y - 0.15
+
+                        ax.text(label_x, label_y, label, ha="center", va="center", fontsize=8, fontweight="normal", color=color)
 
         # 绘制方形节点和IP信息
         for node, (x, y) in pos.items():
@@ -1771,6 +1824,10 @@ class BandwidthAnalyzer:
         circling_eject_stats = self.calculate_circling_eject_stats()
         results["circling_eject_stats"] = circling_eject_stats
 
+        # 计算保序导致的绕环统计信息并添加到结果中
+        ordering_blocked_stats = self.calculate_ordering_blocked_stats()
+        results["ordering_blocked_stats"] = ordering_blocked_stats
+
         # 控制台输出重要数据
         if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
             self._print_summary_to_console(results)
@@ -1790,7 +1847,7 @@ class BandwidthAnalyzer:
             if self.sim_model.topo_type_stat.startswith("Ring"):
                 self.draw_ring_flow_graph(self.sim_model.data_network, save_path=flow_save_path)
             else:
-                self.draw_flow_graph(self.sim_model.data_network, mode="total", save_path=flow_save_path, show_cdma=self.sim_model.flow_fig_show_CDMA)
+                self.draw_flow_graph(self.sim_model.data_network, mode="total", save_path=flow_save_path)
 
         return results
 
@@ -1895,7 +1952,7 @@ class BandwidthAnalyzer:
         except Exception as e:
             print(f"导出链路统计数据时发生错误: {e}")
 
-    def draw_flow_graph(self, network: Network, mode="utilization", node_size=2000, save_path=None, show_cdma=True):
+    def draw_flow_graph(self, network: Network, mode="utilization", node_size=2000, save_path=None):
         """
         绘制合并的网络流图和IP
 
@@ -1906,7 +1963,6 @@ class BandwidthAnalyzer:
                     - 'total': 带宽模式，显示link带宽和0次尝试/空闲比例
         :param node_size: 节点大小
         :param save_path: 图片保存路径
-        :param show_cdma: 是否展示CDMA，True显示SDMA/GDMA/CDMA三分区，False显示SDMA/GDMA两分区
         """
         # 确保IP带宽数据已计算
         self.precalculate_ip_bandwidth_data()
@@ -1939,7 +1995,6 @@ class BandwidthAnalyzer:
             offset_y=0,
             mode=mode,
             node_size=node_size,
-            show_cdma=show_cdma,
             die_model=None,
             d2d_config=None,
             max_ip_bandwidth=max_ip_bandwidth,
@@ -2318,7 +2373,7 @@ class BandwidthAnalyzer:
 
     @staticmethod
     def reanalyze_and_plot_from_csv(
-        csv_folder: str, output_path: str = None, plot_rn_bw: bool = True, plot_flow: bool = False, show_cdma: bool = False, min_gap_threshold=50
+        csv_folder: str, output_path: str = None, plot_rn_bw: bool = True, plot_flow: bool = False, min_gap_threshold=50
     ) -> Dict:
         """
         从CSV文件重新分析并绘图
@@ -2360,7 +2415,6 @@ class BandwidthAnalyzer:
                 self.verbose = True
                 self.file_name = "replot"
                 self.topo_type_stat = getattr(config, "TOPO_TYPE", "unknown")
-                self.flow_fig_show_CDMA = show_cdma  # 默认显示CDMA
 
         analyzer.sim_model = TempBaseModel(output_path, analyzer.config)
 
@@ -2376,7 +2430,7 @@ class BandwidthAnalyzer:
 
             # 生成流图
             flow_save_path = os.path.join(output_path, f"flow_graph_{analyzer.config.TOPO_TYPE}_replot.png")
-            analyzer.draw_flow_graph(analyzer.temp_network, mode="total", save_path=flow_save_path, show_cdma=show_cdma)
+            analyzer.draw_flow_graph(analyzer.temp_network, mode="total", save_path=flow_save_path)
             print(f"网络带宽图已保存: {flow_save_path}")
 
         elif plot_flow:
@@ -2449,6 +2503,18 @@ class BandwidthAnalyzer:
             v_ratio = circling_stats["vertical"]["circling_ratio"]
             overall_ratio = circling_stats["overall"]["circling_ratio"]
             print(f"  绕环比例: H: {h_ratio*100:.2f}%, V: {v_ratio*100:.2f}%, Overall: {overall_ratio*100:.2f}%")
+
+        # 保序导致的绕环比例统计
+        ordering_blocked_stats = results.get("ordering_blocked_stats", {})
+        if ordering_blocked_stats:
+            h_ratio = ordering_blocked_stats["horizontal"]["ordering_blocked_ratio"]
+            v_ratio = ordering_blocked_stats["vertical"]["ordering_blocked_ratio"]
+            overall_ratio = ordering_blocked_stats["overall"]["ordering_blocked_ratio"]
+            print(f"  保序导致绕环比例: H: {h_ratio*100:.2f}%, V: {v_ratio*100:.2f}%, Overall: {overall_ratio*100:.2f}%")
+            # 调试信息
+            debug_info = ordering_blocked_stats.get("debug", {})
+            if debug_info:
+                print(f"  [调试] 被保序阻止但未绕环的flit: H: {debug_info.get('h_only_blocked_no_circling', 0)}, V: {debug_info.get('v_only_blocked_no_circling', 0)}")
 
         # 工作区间统计
         print(f"\n工作区间统计:")
@@ -2573,6 +2639,20 @@ class BandwidthAnalyzer:
             f.write(f"  整体绕环比例: {overall_ratio*100:.2f}%\n")
             f.write(f"  水平绕环flit数: {circling_stats['horizontal']['circling_flits']}/{circling_stats['horizontal']['total_data_flits']}\n")
             f.write(f"  垂直绕环flit数: {circling_stats['vertical']['circling_flits']}/{circling_stats['vertical']['total_data_flits']}\n")
+            f.write("\n")
+
+        # 添加保序导致的绕环比例统计
+        ordering_blocked_stats = results.get("ordering_blocked_stats", {})
+        if ordering_blocked_stats:
+            f.write("保序导致绕环比例统计:\n")
+            h_ratio = ordering_blocked_stats["horizontal"]["ordering_blocked_ratio"]
+            v_ratio = ordering_blocked_stats["vertical"]["ordering_blocked_ratio"]
+            overall_ratio = ordering_blocked_stats["overall"]["ordering_blocked_ratio"]
+            f.write(f"  水平方向保序导致绕环比例: {h_ratio*100:.2f}%\n")
+            f.write(f"  垂直方向保序导致绕环比例: {v_ratio*100:.2f}%\n")
+            f.write(f"  整体保序导致绕环比例: {overall_ratio*100:.2f}%\n")
+            f.write(f"  水平保序阻止flit数: {ordering_blocked_stats['horizontal']['ordering_blocked_flits']}/{ordering_blocked_stats['horizontal']['total_data_flits']}\n")
+            f.write(f"  垂直保序阻止flit数: {ordering_blocked_stats['vertical']['ordering_blocked_flits']}/{ordering_blocked_stats['vertical']['total_data_flits']}\n")
             f.write("\n")
 
     def _generate_ports_csv(self, rn_ports: Dict[str, PortBandwidthMetrics], output_path: str):
@@ -3577,6 +3657,75 @@ class BandwidthAnalyzer:
 
         return results
 
+    def calculate_ordering_blocked_stats(self):
+        """
+        计算因保序要求导致的绕环统计信息。
+        统计维度：只要flit的ordering_blocked_count > 0就算一个被保序阻止的flit。
+
+        Returns:
+            dict: 包含保序导致绕环统计信息的字典。
+        """
+        # 初始化计数器
+        total_data_flits_h = 0
+        total_data_flits_v = 0
+        ordering_blocked_flits_h = 0  # 水平方向因保序被阻止的flit数
+        ordering_blocked_flits_v = 0  # 垂直方向因保序被阻止的flit数
+
+        # 调试统计：统计ordering_blocked > 0但eject_attempts <= 1的flit
+        debug_h_only_blocked = 0
+        debug_v_only_blocked = 0
+
+        # 遍历所有请求，收集数据flit的保序阻止次数
+        for req in self.requests:
+            # 处理水平方向
+            for i, blocked_count in enumerate(req.data_ordering_blocked_h_list):
+                total_data_flits_h += 1
+                if blocked_count > 0:
+                    ordering_blocked_flits_h += 1
+                    # 调试：检查是否有只被保序阻止但没绕环的flit
+                    if i < len(req.data_eject_attempts_h_list) and req.data_eject_attempts_h_list[i] <= 1:
+                        debug_h_only_blocked += 1
+
+            # 处理垂直方向
+            for i, blocked_count in enumerate(req.data_ordering_blocked_v_list):
+                total_data_flits_v += 1
+                if blocked_count > 0:
+                    ordering_blocked_flits_v += 1
+                    # 调试：检查是否有只被保序阻止但没绕环的flit
+                    if i < len(req.data_eject_attempts_v_list) and req.data_eject_attempts_v_list[i] <= 1:
+                        debug_v_only_blocked += 1
+
+        # 计算比例
+        ordering_blocked_ratio_h = ordering_blocked_flits_h / total_data_flits_h if total_data_flits_h > 0 else 0.0
+        ordering_blocked_ratio_v = ordering_blocked_flits_v / total_data_flits_v if total_data_flits_v > 0 else 0.0
+
+        # 准备结果字典
+        results = {
+            "horizontal": {
+                "total_data_flits": total_data_flits_h,
+                "ordering_blocked_flits": ordering_blocked_flits_h,
+                "ordering_blocked_ratio": ordering_blocked_ratio_h,
+            },
+            "vertical": {
+                "total_data_flits": total_data_flits_v,
+                "ordering_blocked_flits": ordering_blocked_flits_v,
+                "ordering_blocked_ratio": ordering_blocked_ratio_v,
+            },
+            # 整体统计
+            "overall": {
+                "total_data_flits": total_data_flits_h + total_data_flits_v,
+                "ordering_blocked_flits": ordering_blocked_flits_h + ordering_blocked_flits_v,
+                "ordering_blocked_ratio": (ordering_blocked_flits_h + ordering_blocked_flits_v) / (total_data_flits_h + total_data_flits_v) if (total_data_flits_h + total_data_flits_v) > 0 else 0.0,
+            },
+            # 调试信息
+            "debug": {
+                "h_only_blocked_no_circling": debug_h_only_blocked,
+                "v_only_blocked_no_circling": debug_v_only_blocked,
+            },
+        }
+
+        return results
+
 
 # 便捷使用函数
 def analyze_bandwidth(
@@ -3609,7 +3758,7 @@ def analyze_bandwidth(
     return results
 
 
-def replot_from_result_folder(csv_folder: str, plot_rn_bw: bool = True, plot_flow: bool = True, output_filename: str = None, show_cdma: bool = False, min_gap_threshold=50) -> Dict:
+def replot_from_result_folder(csv_folder: str, plot_rn_bw: bool = True, plot_flow: bool = True, output_filename: str = None, min_gap_threshold=50) -> Dict:
     """
     便捷函数：从CSV文件夹重新分析并绘制所有图表
 
@@ -3625,7 +3774,7 @@ def replot_from_result_folder(csv_folder: str, plot_rn_bw: bool = True, plot_flo
     output_path = csv_folder
 
     results = BandwidthAnalyzer.reanalyze_and_plot_from_csv(
-        csv_folder, output_path, plot_rn_bw=plot_rn_bw, plot_flow=plot_flow, show_cdma=show_cdma, min_gap_threshold=min_gap_threshold
+        csv_folder, output_path, plot_rn_bw=plot_rn_bw, plot_flow=plot_flow, min_gap_threshold=min_gap_threshold
     )
 
     return results
@@ -3678,7 +3827,6 @@ def main():
     # 1. 从CSV重新分析和绘图
     total_bw = replot_from_result_folder(
         r"../../Result/CrossRing/TMB/5x4/p_MLP_MoE_All2All_Dispatch",
-        show_cdma=True,
         min_gap_threshold=1000,
     )
 

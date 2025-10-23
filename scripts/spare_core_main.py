@@ -70,27 +70,25 @@ def main():
             for spare_core_row in range(0, 9, 2):
                 result_part_save_path = f"{failed_core_num}_{spare_core_row}_{repeat_time}/"
 
-                if model_type == "REQ_RSP":
-                    sim = REQ_RSP_model(
-                        model_type=model_type,
-                        config=config,
-                        topo_type=topo_type,
-                        traffic_file_path=traffic_file_path,
-                        file_name=file_name,
-                        result_save_path=result_root_save_path + result_part_save_path,
-                        results_fig_save_path=results_fig_save_path,
-                        plot_flow_fig=1,
-                    )
-                elif model_type == "Packet_Base":
-                    sim = Packet_Base_model(
-                        model_type=model_type,
-                        config=config,
-                        topo_type=topo_type,
-                        traffic_file_path=traffic_file_path,
-                        file_name=file_name,
-                        result_save_path=result_root_save_path + result_part_save_path,
-                        results_fig_save_path=results_fig_save_path,
-                    )
+                # 创建模型实例
+                sim = eval(f"{model_type}_model")(
+                    model_type=model_type,
+                    config=config,
+                    topo_type=topo_type,
+                )
+
+                # 配置流量调度器
+                sim.setup_traffic_scheduler(
+                    traffic_file_path=traffic_file_path,
+                    traffic_chains=file_name,
+                )
+
+                # 配置结果分析
+                sim.setup_result_analysis(
+                    result_save_path=result_root_save_path + result_part_save_path,
+                    results_fig_save_path=results_fig_save_path,
+                    plot_flow_fig=True,
+                )
 
                 # profiler = cProfile.Profile()
                 # profiler.enable()
@@ -137,11 +135,8 @@ def main():
                 sim.config.L2M_W_LATENCY_original = 16
                 sim.config.spare_core_change(spare_core_row, failed_core_num, failed_core_poses)
 
-                # sim.config.update_config()
-                sim.initial()
-                # sim.end_time = 2000
-                sim.print_interval = 1000
-                sim.run()
+                # 运行仿真
+                sim.run_simulation(max_cycles=sim.end_time, print_interval=1000)
 
                 results = sim.get_results()
 

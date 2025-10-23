@@ -216,30 +216,39 @@ def run_single_simulation(traffic_file, topo_type, model_type, config_path, resu
         model_type=model_type,
         config=config,
         topo_type=topo_type,
+    )
+
+    # 配置流量调度器
+    sim.setup_traffic_scheduler(
         traffic_file_path=traffic_file_path + "/",
-        traffic_config=traffic_config,
+        traffic_chains=traffic_config,
+    )
+
+    # 配置结果分析
+    sim.setup_result_analysis(
         result_save_path=result_save_path,
         results_fig_save_path=result_save_path,
-        plot_flow_fig=1,
-        flow_fig_show_CDMA=1,
-        plot_RN_BW_fig=1,
-        plot_link_state=0,
+        plot_flow_fig=True,
+        plot_RN_BW_fig=True,
+    )
+
+    # 配置调试
+    sim.setup_debug(
+        print_trace=False,
+        show_trace_id=[],
+    )
+
+    # 配置可视化
+    sim.setup_visualization(
+        plot_link_state=False,
         plot_start_cycle=1000,
-        print_trace=0,
-        show_trace_id=0,
-        show_node_id=4,
-        verbose=0,  # 减少输出
     )
 
     np.random.seed(801)
 
     # 运行仿真
-    sim.initial()
-    sim.end_time = 6000  # 与生成数据流的END_TIME一致
-    sim.print_interval = 2000
-
     start_time = time.time()
-    sim.run()
+    sim.run_simulation(max_cycles=6000, print_interval=2000)
     end_time = time.time()
 
     print(f"完成仿真: {traffic_file}, 耗时: {end_time - start_time:.2f}秒")

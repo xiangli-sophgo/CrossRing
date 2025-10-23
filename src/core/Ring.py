@@ -130,7 +130,6 @@ class RingModel(BaseModel):
             "traffic_config": kwargs.get("traffic_config", []),
             "results_fig_save_path": kwargs.get("results_fig_save_path", ""),
             "plot_flow_fig": kwargs.get("plot_flow_fig", False),
-            "flow_fig_show_CDMA": kwargs.get("flow_fig_show_CDMA", False),
             "plot_RN_BW_fig": kwargs.get("plot_RN_BW_fig", False),
             "plot_link_state": kwargs.get("plot_link_state", False),
             "plot_start_cycle": kwargs.get("plot_start_cycle", -1),

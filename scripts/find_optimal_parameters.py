@@ -1140,14 +1140,21 @@ def find_optimal_parameters():
         for rpt in range(N_REPEATS):
             cfg = CrossRingConfig(config_path)
             cfg.TOPO_TYPE = topo_type
+
             sim = REQ_RSP_model(
                 model_type=model_type,
                 config=cfg,
                 topo_type=topo_type,
-                traffic_file_path=traffic_file_path,
-                traffic_config=traffic_file,
-                result_save_path=result_root_save_path,
                 verbose=0,
+            )
+
+            sim.setup_traffic_scheduler(
+                traffic_file_path=traffic_file_path,
+                traffic_chains=traffic_file,
+            )
+
+            sim.setup_result_analysis(
+                result_save_path=result_root_save_path,
             )
 
             # --- 固定平台参数 ------------------------------
@@ -1268,10 +1275,7 @@ def find_optimal_parameters():
             sim.config.ETag_BOTHSIDE_UPGRADE = param9
 
             try:
-                sim.initial()
-                sim.end_time = 10000
-                sim.print_interval = 10000
-                sim.run()
+                sim.run_simulation(max_cycles=10000, print_interval=10000)
                 bw = sim.get_results().get("Total_sum_BW", 0)
             except Exception as e:
                 print(f"[{traffic_file}][RPT {rpt}] Sim failed for params: {param1}, {param2}, {param3}, {param4}, {param5}, {param6}, {param7}, {param8}, {param9}")

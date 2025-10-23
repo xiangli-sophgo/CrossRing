@@ -471,7 +471,6 @@ class CDMABandwidthAnalyzer:
                 traffic_config=traffic_files,
                 result_save_path=f"../Result/CrossRing/TMB/{self.run_timestamp}/bw_{cdma_bw_limit}/",
                 results_fig_save_path=f"{self.output_dir}/figs/",
-                flow_fig_show_CDMA=1,
                 plot_flow_fig=1,
                 plot_RN_BW_fig=1,
                 verbose=1,

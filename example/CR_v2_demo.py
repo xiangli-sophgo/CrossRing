@@ -33,8 +33,12 @@ def run_CR_v2_demo():
         model_type="REQ_RSP",
         config=config,
         topo_type="5x2",
+    )
+
+    # 配置流量调度器
+    sim.setup_traffic_scheduler(
         traffic_file_path=f"../traffic/0617",
-        traffic_config=[
+        traffic_chains=[
             # ["Read_burst4_2262HBM_v2.txt"],
             [
                 # "Read_burst4_2262HBM_v2.txt",
@@ -42,24 +46,31 @@ def run_CR_v2_demo():
                 "W_5x2.txt"
             ],
         ],
-        # traffic_file_path=f"../test_data/",
-        # traffic_config=[["test1.txt"]],
-        result_save_path=result_dir + "/",
-        verbose=1,  # 启用详细输出
-        print_trace=0,
-        show_trace_id=1014,
-        plot_link_state=1,
-        plot_start_cycle=2000,
-        plot_flow_fig=1,
-        plot_RN_BW_fig=1,
     )
 
-    sim.initial()
-    sim.end_time = 6000
-    sim.print_interval = 1000
+    # 配置结果分析
+    sim.setup_result_analysis(
+        result_save_path=result_dir + "/",
+        plot_flow_fig=True,
+        plot_RN_BW_fig=True,
+    )
 
+    # 配置调试
+    sim.setup_debug(
+        print_trace=False,
+        show_trace_id=[1014],
+        verbose=1,
+    )
+
+    # 配置可视化
+    sim.setup_visualization(
+        plot_link_state=True,
+        plot_start_cycle=2000,
+    )
+
+    # 运行仿真
     start_time = time.time()
-    sim.run()
+    sim.run_simulation(max_cycles=6000, print_interval=1000)
     end_time = time.time()
 
     print(f"\n✓ 仿真完成! 用时: {end_time - start_time:.2f}秒")

@@ -410,7 +410,7 @@ class D2D_RN_Interface(IPInterface):
                     local_flit.source_original = req.source_original if hasattr(req, 'source_original') else req.source
                     local_flit.destination_original = req.destination_original if hasattr(req, 'destination_original') else req.destination
                     local_flit.flit_type = "data"
-                    local_flit.set_packet_category_and_order_id()
+                    # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
                     local_flit.departure_cycle = self.current_cycle + i * self.config.NETWORK_FREQUENCY
                     local_flit.req_departure_cycle = req.departure_cycle if hasattr(req, 'departure_cycle') else self.current_cycle
                     local_flit.entry_db_cycle = req.entry_db_cycle if hasattr(req, 'entry_db_cycle') else self.current_cycle

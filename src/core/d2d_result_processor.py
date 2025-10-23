@@ -984,7 +984,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         return row, col
 
-    def draw_d2d_flow_graph(self, die_networks=None, dies=None, config=None, mode="utilization", node_size=1200, save_path=None, show_cdma=True):
+    def draw_d2d_flow_graph(self, die_networks=None, dies=None, config=None, mode="utilization", node_size=1200, save_path=None):
         """
         绘制D2D双Die流量图，根据D2D_LAYOUT配置动态调整Die排列
 
@@ -995,7 +995,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             mode: 显示模式，支持 'utilization', 'total', 'ITag_ratio' 等
             node_size: 节点大小
             save_path: 图片保存路径
-            show_cdma: 是否显示CDMA
         """
 
         # 兼容旧的调用方式
@@ -1076,7 +1075,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 offset_y,
                 mode,
                 node_size,
-                show_cdma,
                 die_model,
                 d2d_config=config,
                 max_ip_bandwidth=max_ip_bandwidth,
@@ -1328,7 +1326,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             return None
 
     def _draw_single_die_flow(
-        self, ax, network, config, die_id, offset_x, offset_y, mode="utilization", node_size=2000, show_cdma=True, die_model=None, d2d_config=None, max_ip_bandwidth=None, min_ip_bandwidth=None
+        self, ax, network, config, die_id, offset_x, offset_y, mode="utilization", node_size=2000, die_model=None, d2d_config=None, max_ip_bandwidth=None, min_ip_bandwidth=None
     ):
         """绘制单个Die的流量图，复用原有draw_flow_graph的核心逻辑"""
 
@@ -1389,13 +1387,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         # 添加有权重的边
         edge_labels = {}
-        edge_colors = []
+        edge_colors = {}
         for (i, j), value in links.items():
             if i not in actual_nodes or j not in actual_nodes:
-                continue
-
-            # 过滤自环链路（自己到自己）
-            if i == j:
                 continue
 
             G.add_edge(i, j, weight=value)
@@ -1440,17 +1434,19 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
             if display_value > 0:
                 edge_labels[(i, j)] = formatted_label
-                edge_colors.append((color_intensity, 0, 0))  # 红色渐变
+                edge_colors[(i, j)] = (color_intensity, 0, 0)  # 红色渐变
             else:
-                edge_colors.append((0.8, 0.8, 0.8))  # 灰色用于零值
+                edge_colors[(i, j)] = (0.8, 0.8, 0.8)  # 灰色用于零值
 
         # 计算节点大小
         square_size = np.sqrt(node_size) / 100
 
         # 绘制网络边 - 按照原始flow图的方式绘制双向箭头
-        for (i, j), color in zip(G.edges(), edge_colors):
+        for (i, j) in G.edges():
             if i not in pos or j not in pos:
                 continue
+
+            color = edge_colors.get((i, j), (0.8, 0.8, 0.8))
 
             x1, y1 = pos[i]
             x2, y2 = pos[j]
@@ -1516,68 +1512,109 @@ class D2DResultProcessor(BandwidthAnalyzer):
                         # 利用率模式：同样使用红色渐变
                         color = (edge_value, 0, 0)  # 直接使用利用率作为红色强度
 
-                    x1, y1 = pos[i]
-                    x2, y2 = pos[j]
-                    mid_x = (x1 + x2) / 2
-                    mid_y = (y1 + y2) / 2
-                    dx, dy = x2 - x1, y2 - y1
+                    # 自环链路特殊处理：根据节点位置决定标签显示位置
+                    if i == j:
+                        original_row = i // config.NUM_COL
+                        original_col = i % config.NUM_COL
+                        x, y = pos[i]
 
-                    # 检查是否有反向边
-                    has_reverse = G.has_edge(j, i)
-                    is_horizontal = abs(dx) > abs(dy)
-
-                    # 计算标签位置偏移（参考原始实现）
-                    if has_reverse:
-                        if is_horizontal:
-                            perp_dx, perp_dy = -dy * 0.15 + 0.25, dx * 0.15
+                        offset = 0.17
+                        if original_row == 0:
+                            label_pos = (x, y + square_size / 2 + offset)
+                            angle = 0
+                        elif original_row == config.NUM_ROW - 2:
+                            label_pos = (x, y - square_size / 2 - offset)
+                            angle = 0
+                        elif original_col == 0:
+                            label_pos = (x - square_size / 2 - offset, y)
+                            angle = -90
+                        elif original_col == config.NUM_COL - 1:
+                            label_pos = (x + square_size / 2 + offset, y)
+                            angle = 90
                         else:
-                            perp_dx, perp_dy = -dy * 0.23, dx * 0.23 - 0.35
-                        label_x = mid_x + perp_dx
-                        label_y = mid_y + perp_dy
-                    else:
-                        if is_horizontal:
-                            label_x = mid_x + dx * 0.15
-                            label_y = mid_y + dy * 0.15
+                            label_pos = (x, y + square_size / 2 + offset)
+                            angle = 0
+
+                        # 自环链路只显示带宽，不显示比例信息
+                        label_str = str(label)
+                        if "\n" in label_str:
+                            bandwidth_text = label_str.split("\n")[0]
                         else:
-                            label_x = mid_x + (-dy * 0.15 if dx > 0 else dy * 0.15)
-                            label_y = mid_y - 0.15
+                            bandwidth_text = label_str
 
-                    # 绘制标签文本（无背景框）- 支持多行显示
-                    # 检查是否为多行标签（包含比例信息）
-                    label_str = str(label)
-                    if "\n" in label_str:
-                        # 分别绘制带宽和比例（参考原始实现）
-                        lines = label_str.split("\n")
-                        bandwidth_text = lines[0]  # 带宽值
-                        ratio_text = lines[1] if len(lines) > 1 else ""  # 比例信息
-
-                        # 绘制带宽文本（较大字体）
                         ax.text(
-                            label_x,
-                            label_y + 0.12,  # 向上偏移
+                            *label_pos,
                             bandwidth_text,
                             ha="center",
                             va="center",
-                            fontsize=8,  # 带宽用较大字体
-                            fontweight="normal",
                             color=color,
+                            fontweight="normal",
+                            fontsize=8,
+                            rotation=angle,
                         )
+                    else:
+                        x1, y1 = pos[i]
+                        x2, y2 = pos[j]
+                        mid_x = (x1 + x2) / 2
+                        mid_y = (y1 + y2) / 2
+                        dx, dy = x2 - x1, y2 - y1
 
-                        # 绘制比例文本（较小字体）
-                        if ratio_text:
+                        # 检查是否有反向边
+                        has_reverse = G.has_edge(j, i)
+                        is_horizontal = abs(dx) > abs(dy)
+
+                        # 计算标签位置偏移（参考原始实现）
+                        if has_reverse:
+                            if is_horizontal:
+                                perp_dx, perp_dy = -dy * 0.15 + 0.25, dx * 0.15
+                            else:
+                                perp_dx, perp_dy = -dy * 0.23, dx * 0.23 - 0.35
+                            label_x = mid_x + perp_dx
+                            label_y = mid_y + perp_dy
+                        else:
+                            if is_horizontal:
+                                label_x = mid_x + dx * 0.15
+                                label_y = mid_y + dy * 0.15
+                            else:
+                                label_x = mid_x + (-dy * 0.15 if dx > 0 else dy * 0.15)
+                                label_y = mid_y - 0.15
+
+                        # 绘制标签文本（无背景框）- 支持多行显示
+                        # 检查是否为多行标签（包含比例信息）
+                        label_str = str(label)
+                        if "\n" in label_str:
+                            # 分别绘制带宽和比例（参考原始实现）
+                            lines = label_str.split("\n")
+                            bandwidth_text = lines[0]  # 带宽值
+                            ratio_text = lines[1] if len(lines) > 1 else ""  # 比例信息
+
+                            # 绘制带宽文本（较大字体）
                             ax.text(
                                 label_x,
-                                label_y - 0.2,  # 向下偏移
-                                ratio_text,
+                                label_y + 0.12,  # 向上偏移
+                                bandwidth_text,
                                 ha="center",
                                 va="center",
-                                fontsize=6,  # 比例用较小字体
+                                fontsize=8,  # 带宽用较大字体
                                 fontweight="normal",
                                 color=color,
                             )
-                    else:
-                        # 单行标签
-                        ax.text(label_x, label_y, label, ha="center", va="center", fontsize=8, fontweight="normal", color=color)
+
+                            # 绘制比例文本（较小字体）
+                            if ratio_text:
+                                ax.text(
+                                    label_x,
+                                    label_y - 0.2,  # 向下偏移
+                                    ratio_text,
+                                    ha="center",
+                                    va="center",
+                                    fontsize=6,  # 比例用较小字体
+                                    fontweight="normal",
+                                    color=color,
+                                )
+                        else:
+                            # 单行标签
+                            ax.text(label_x, label_y, label, ha="center", va="center", fontsize=8, fontweight="normal", color=color)
 
         # 绘制方形节点和IP信息
         for node, (x, y) in pos.items():

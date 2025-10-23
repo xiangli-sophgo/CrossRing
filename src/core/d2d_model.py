@@ -281,30 +281,33 @@ class D2D_Model:
         for die_id in range(self.num_dies):
             die_config = self._create_die_config(die_id)
 
-            # 创建BaseModel实例（D2D模式下禁用单个Die的结果保存路径）
+            # 创建BaseModel实例 - 使用新的简化构造函数
             # 只在第一个Die时启用verbose，避免重复打印
             die_verbose = self.kwargs.get("verbose", 1) if die_id == 0 else 0
             die_model = BaseModel(
                 model_type=self.kwargs.get("model_type", "REQ_RSP"),
                 config=die_config,
                 topo_type=self.kwargs.get("topo_type", "5x4"),
-                traffic_file_path=self.kwargs.get("traffic_file_path", "../traffic/"),
-                traffic_config=self.traffic_config,
-                result_save_path="",  # 禁用单个Die的结果保存，避免生成Die_0/Die_1文件夹
-                results_fig_save_path="",  # 禁用单个Die的图片保存，避免生成figure文件夹
-                plot_flow_fig=0,  # 禁用单个Die的流图生成
-                plot_RN_BW_fig=0,  # 禁用单个Die的带宽图生成
-                plot_link_state=0,  # 禁用单个Die的可视化，使用D2D统一可视化
-                plot_start_cycle=self.kwargs.get("plot_start_cycle", 0),
-                print_trace=self.kwargs.get("print_trace", 0),
-                show_trace_id=self.kwargs.get("show_trace_id", 0),
-                verbose=die_verbose,  # 只在第一个Die时启用verbose
+                verbose=die_verbose,
             )
 
             # 设置Die ID
             die_model.die_id = die_id
 
-            # 调试：检查Die配置中的CHANNEL_SPEC和CH_NAME_LIST是否包含D2D
+            # 使用新的setup方法配置流量调度器
+            if self.traffic_config:
+                die_model.setup_traffic_scheduler(
+                    traffic_file_path=self.kwargs.get("traffic_file_path", "../traffic/"),
+                    traffic_chains=self.traffic_config,
+                )
+
+            # 使用新的setup方法配置结果分析（D2D模式下禁用单个Die的结果保存）
+            die_model.setup_result_analysis(
+                result_save_path="",  # 禁用单个Die的结果保存，避免生成Die_0/Die_1文件夹
+                results_fig_save_path="",  # 禁用单个Die的图片保存
+                plot_flow_fig=False,  # 禁用单个Die的流图生成
+                plot_RN_BW_fig=False,  # 禁用单个Die的带宽图生成
+            )
 
             # 初始化Die
             die_model.initial()
@@ -831,8 +834,7 @@ class D2D_Model:
         req.traffic_id = traffic_id
         req.packet_id = BaseModel.get_next_packet_id()
 
-        # 设置保序信息
-        req.set_packet_category_and_order_id()
+        # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
 
         # 记录跨Die统计（只对跨Die请求记录）
         if src_die != dst_die:
@@ -916,14 +918,13 @@ class D2D_Model:
             print(f"    Read - Requests: Local={local_read_reqs}, Cross={cross_read_reqs} | Data: Local={local_read_data}, Cross={cross_read_data}")
             print(f"    Write - Requests: Local={local_write_reqs}, Cross={cross_write_reqs} | Data: Local={local_write_data}, Cross={cross_write_data}")
 
-    def generate_combined_flow_graph(self, mode="total", save_path=None, show_cdma=True):
+    def generate_combined_flow_graph(self, mode="total", save_path=None):
         """
         生成D2D双Die组合流量图
 
         Args:
             mode: 显示模式，支持 'utilization', 'total', 'ITag_ratio' 等
             save_path: 图片保存路径
-            show_cdma: 是否显示CDMA
         """
         # 收集网络对象
         die_networks = {}
@@ -1004,7 +1005,7 @@ class D2D_Model:
 
         try:
             # 调用D2D专用的流量图绘制方法，传入die模型以支持跨Die带宽绘制
-            saved_path = d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=mode, save_path=save_path, show_cdma=show_cdma)
+            saved_path = d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=mode, save_path=save_path)
             return saved_path
 
         except Exception as e:
@@ -1093,7 +1094,6 @@ class D2D_Model:
                 d2d_processor.results_fig_save_path = self.kwargs.get("results_fig_save_path", "../Result/")
                 d2d_processor.file_name = "d2d_system"
                 d2d_processor.verbose = self.kwargs.get("verbose", 1)
-                d2d_processor.flow_fig_show_CDMA = True
 
                 # 收集数据（如果没有缓存的话）
                 d2d_processor.collect_cross_die_requests(self.dies)
@@ -1161,7 +1161,7 @@ class D2D_Model:
                         d2d_processor.die_processors[die_id] = die_processor
 
                 save_path = self.kwargs.get("results_fig_save_path") if self._result_analysis_config.get("save_figures") else None
-                flow_path = d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=self.flow_graph_mode, save_path=save_path, show_cdma=True)
+                flow_path = d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=self.flow_graph_mode, save_path=save_path)
                 if flow_path:
                     saved_files.append({"type": "D2D流量图", "path": flow_path})
 

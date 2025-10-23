@@ -19,23 +19,28 @@ def main():
         model_type=model_type,
         config=config,
         topo_type=topo_type,
-        traffic_file_path="",
-        traffic_config=[["test_data.txt"]],
-        result_save_path="../Result/",
-        results_fig_save_path="",
-        plot_flow_fig=1,
-        plot_RN_BW_fig=0,
-        plot_link_state=0,
         verbose=1,
     )
 
-    sim.initial()
-    # Set simulation parameters
-    sim.end_time = 1000
-    sim.print_interval = 1000
+    # Configure traffic scheduler
+    sim.setup_traffic_scheduler(
+        traffic_file_path="",
+        traffic_chains=[["test_data.txt"]],
+    )
+
+    # Configure result analysis
+    sim.setup_result_analysis(
+        result_save_path="../Result/",
+        results_fig_save_path="",
+        plot_flow_fig=True,
+        plot_RN_BW_fig=False,
+    )
+
+    # Configure visualization
+    sim.setup_visualization(plot_link_state=False)
 
     # Run the simulation
-    sim.run()
+    sim.run_simulation(max_cycles=1000, print_interval=1000)
 
 
 if __name__ == "__main__":
