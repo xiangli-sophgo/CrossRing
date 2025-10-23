@@ -15,13 +15,14 @@ def main():
     """运行CrossRing仿真 - 使用新的简化配置接口"""
 
     # ==================== 流量配置 ====================
-    # traffic_file_path = r"../traffic/0617/"
-    traffic_file_path = r"../test_data"
+    traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
+    # traffic_file_path = r"../test_data"
     traffic_config = [
         [
-            # "LLama2_AllReduce.txt"
-            "data_1022_W.txt"
+            "LLama2_AllReduce.txt"
+            # "data_1022_W.txt"
             # "data_1022_R.txt"
+            # "MLP.txt"
         ],
     ]
 

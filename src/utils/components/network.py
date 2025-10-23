@@ -731,10 +731,10 @@ class Network:
                 return False  # 方向不允许，不能下环
 
         # 确保flit已设置保序信息
-        if not hasattr(flit, "src_dest_order_id") or not hasattr(flit, "packet_category"):
+        if not hasattr(flit, "src_dest_order_id"):
             return True
 
-        if flit.src_dest_order_id == -1 or flit.packet_category is None:
+        if flit.src_dest_order_id == -1:
             return True
 
         # 获取原始的src（物理节点ID）
@@ -804,10 +804,7 @@ class Network:
                 return False  # 方向不允许，不能升级到T0
 
         # 确保flit已设置保序信息
-        if not hasattr(flit, "src_dest_order_id") or not hasattr(flit, "packet_category"):
-            return True
-
-        if flit.src_dest_order_id == -1 or flit.packet_category is None:
+        if not hasattr(flit, "src_dest_order_id"):
             return True
 
         # 获取原始的src（物理节点ID）
@@ -838,7 +835,7 @@ class Network:
         if not hasattr(flit, "src_dest_order_id") or not hasattr(flit, "packet_category"):
             return
 
-        if flit.src_dest_order_id == -1 or flit.packet_category is None:
+        if flit.src_dest_order_id == -1:
             return
 
         # 获取原始的src（物理节点ID）
@@ -880,6 +877,7 @@ class Network:
         if mode == 2:
             # 获取原始源节点编号（物理节点ID，未经node_map映射）
             src_node = flit.source_original if flit.source_original != -1 else flit.source
+            # self.error_log(flit, 1, 3)
 
             # 检查各方向是否允许
             allowed_dirs = []

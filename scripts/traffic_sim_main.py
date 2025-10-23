@@ -1,7 +1,6 @@
 from src.traffic_process import step1_flatten, step2_hash_addr2node, step6_map_to_ch
 from src.core import *
 import os
-from src.utils.component import Flit, Network, Node
 from config.config import CrossRingConfig
 import csv
 import argparse
@@ -215,10 +214,10 @@ def main():
     parser.add_argument("--outstanding", type=int, default=2048, help="Outstanding number (must be power of 2)")
     parser.add_argument("--config", default="../config/topologies/topo_5x4.yaml", help="Simulation config file path")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="Simulation model type")
-    parser.add_argument("--results_file_name", default="DeepSeek0616_1016_10us_all", help="Base name for results files")
+    parser.add_argument("--results_file_name", default="DeepSeek0616_1023_10us_dc_req", help="Base name for results files")
     parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both")
     # parser.add_argument("--max_workers", type=int, default=None, help="Maximum number of parallel workers (default: number of CPU cores)")
-    parser.add_argument("--max_workers", type=int, default=7, help="Maximum number of parallel workers (default: number of CPU cores)")
+    parser.add_argument("--max_workers", type=int, default=16, help="Maximum number of parallel workers (default: number of CPU cores)")
 
     args = parser.parse_args()
     np.random.seed(922)

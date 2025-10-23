@@ -1543,7 +1543,7 @@ class BandwidthAnalyzer:
         square_size = np.sqrt(node_size) / 100
 
         # 绘制网络边
-        for (i, j) in G.edges():
+        for i, j in G.edges():
             if i not in pos or j not in pos:
                 continue
 
@@ -2313,10 +2313,7 @@ class BandwidthAnalyzer:
         # 重建RN带宽时间序列数据
         self._rebuild_rn_bandwidth_time_series()
 
-        print(
-            f"从CSV加载了 {len(self.requests)} 个请求 (读: {len([r for r in self.requests if r.req_type == 'read'])}, "
-            f"写: {len([r for r in self.requests if r.req_type == 'write'])})"
-        )
+        print(f"从CSV加载了 {len(self.requests)} 个请求 (读: {len([r for r in self.requests if r.req_type == 'read'])}, " f"写: {len([r for r in self.requests if r.req_type == 'write'])})")
 
     def _rebuild_rn_bandwidth_time_series(self):
         """重建RN带宽时间序列数据"""
@@ -2372,9 +2369,7 @@ class BandwidthAnalyzer:
                 print(f"链路统计CSV： {output_path}link_statistics.csv")
 
     @staticmethod
-    def reanalyze_and_plot_from_csv(
-        csv_folder: str, output_path: str = None, plot_rn_bw: bool = True, plot_flow: bool = False, min_gap_threshold=50
-    ) -> Dict:
+    def reanalyze_and_plot_from_csv(csv_folder: str, output_path: str = None, plot_rn_bw: bool = True, plot_flow: bool = False, min_gap_threshold=50) -> Dict:
         """
         从CSV文件重新分析并绘图
 
@@ -2512,9 +2507,9 @@ class BandwidthAnalyzer:
             overall_ratio = ordering_blocked_stats["overall"]["ordering_blocked_ratio"]
             print(f"  保序导致绕环比例: H: {h_ratio*100:.2f}%, V: {v_ratio*100:.2f}%, Overall: {overall_ratio*100:.2f}%")
             # 调试信息
-            debug_info = ordering_blocked_stats.get("debug", {})
-            if debug_info:
-                print(f"  [调试] 被保序阻止但未绕环的flit: H: {debug_info.get('h_only_blocked_no_circling', 0)}, V: {debug_info.get('v_only_blocked_no_circling', 0)}")
+            # debug_info = ordering_blocked_stats.get("debug", {})
+            # if debug_info:
+            #     print(f"  [调试] 被保序阻止但未绕环的flit: H: {debug_info.get('h_only_blocked_no_circling', 0)}, V: {debug_info.get('v_only_blocked_no_circling', 0)}")
 
         # 工作区间统计
         print(f"\n工作区间统计:")
@@ -2810,12 +2805,8 @@ class BandwidthAnalyzer:
 
             # 计算flits平均值
             read_flits_avg = sum(sum(iv.flit_count for iv in m.read_metrics.working_intervals) if m.read_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
-            write_flits_avg = sum(sum(iv.flit_count for iv in m.write_metrics.working_intervals) if m.write_metrics.working_intervals else 0 for m in metrics_list) / len(
-                metrics_list
-            )
-            mixed_flits_avg = sum(sum(iv.flit_count for iv in m.mixed_metrics.working_intervals) if m.mixed_metrics.working_intervals else 0 for m in metrics_list) / len(
-                metrics_list
-            )
+            write_flits_avg = sum(sum(iv.flit_count for iv in m.write_metrics.working_intervals) if m.write_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
+            mixed_flits_avg = sum(sum(iv.flit_count for iv in m.mixed_metrics.working_intervals) if m.mixed_metrics.working_intervals else 0 for m in metrics_list) / len(metrics_list)
 
             # 计算工作区间平均值
             read_intervals_avg = sum(len(m.read_metrics.working_intervals) for m in metrics_list) / len(metrics_list)
@@ -3717,20 +3708,13 @@ class BandwidthAnalyzer:
                 "ordering_blocked_flits": ordering_blocked_flits_h + ordering_blocked_flits_v,
                 "ordering_blocked_ratio": (ordering_blocked_flits_h + ordering_blocked_flits_v) / (total_data_flits_h + total_data_flits_v) if (total_data_flits_h + total_data_flits_v) > 0 else 0.0,
             },
-            # 调试信息
-            "debug": {
-                "h_only_blocked_no_circling": debug_h_only_blocked,
-                "v_only_blocked_no_circling": debug_v_only_blocked,
-            },
         }
 
         return results
 
 
 # 便捷使用函数
-def analyze_bandwidth(
-    sim_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False
-) -> Dict:
+def analyze_bandwidth(sim_model, config, output_path: str = "./bandwidth_analysis", min_gap_threshold: int = 50, plot_rn_bw_fig: bool = False, plot_flow_graph: bool = False) -> Dict:
     """
     便捷的带宽分析函数
 
@@ -3773,9 +3757,7 @@ def replot_from_result_folder(csv_folder: str, plot_rn_bw: bool = True, plot_flo
     """
     output_path = csv_folder
 
-    results = BandwidthAnalyzer.reanalyze_and_plot_from_csv(
-        csv_folder, output_path, plot_rn_bw=plot_rn_bw, plot_flow=plot_flow, min_gap_threshold=min_gap_threshold
-    )
+    results = BandwidthAnalyzer.reanalyze_and_plot_from_csv(csv_folder, output_path, plot_rn_bw=plot_rn_bw, plot_flow=plot_flow, min_gap_threshold=min_gap_threshold)
 
     return results
 

@@ -285,7 +285,7 @@ class BaseModel:
         self.print_interval = print_interval
 
         # 运行仿真
-        print("\n提示: 按 Ctrl+C 可以随时中断仿真并查看当前结果\n")
+        # print("\n提示: 按 Ctrl+C 可以随时中断仿真并查看当前结果\n")
         self.run()
 
     def initial(self):
@@ -868,6 +868,11 @@ class BaseModel:
         if not hasattr(req, "allowed_eject_directions") or req.allowed_eject_directions is None:
             req.allowed_eject_directions = self.req_network.determine_allowed_eject_directions(req)
 
+        # 在IQ仲裁输出到inject_queues_pre时分配order_id
+        src = req.source_original if req.source_original != -1 else req.source
+        dest = req.destination_original if req.destination_original != -1 else req.destination
+        req.src_dest_order_id = Flit.get_next_order_id(src, dest, req.flit_type.upper())
+
         # 直接注入到指定direction的pre缓冲
         queue_pre = self.req_network.inject_queues_pre[direction]
         queue_pre[ip_pos] = req
@@ -960,6 +965,11 @@ class BaseModel:
                     # 设置flit的允许下环方向（仅在第一次注入时设置）
                     if not hasattr(flit, "allowed_eject_directions") or flit.allowed_eject_directions is None:
                         flit.allowed_eject_directions = network.determine_allowed_eject_directions(flit)
+
+                    # 在IQ仲裁输出到inject_queues_pre时分配order_id
+                    src = flit.source_original if flit.source_original != -1 else flit.source
+                    dest = flit.destination_original if flit.destination_original != -1 else flit.destination
+                    flit.src_dest_order_id = Flit.get_next_order_id(src, dest, flit.flit_type.upper())
 
                     network.IQ_channel_buffer[ip_type][ip_pos].popleft()
                     queue_pre = network.inject_queues_pre[direction]

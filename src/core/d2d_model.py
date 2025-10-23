@@ -260,7 +260,7 @@ class D2D_Model:
         self.initial()
 
         # 运行仿真
-        print("\n提示: 按 Ctrl+C 可以随时中断仿真并查看当前结果\n")
+        # print("\n提示: 按 Ctrl+C 可以随时中断仿真并查看当前结果\n")
 
         self.run()
 

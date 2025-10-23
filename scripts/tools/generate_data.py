@@ -130,14 +130,14 @@ if __name__ == "__main__":
     configs = [
         {
             "src_map": {
-                "gdma_0": [0, 3, 7],
-                # "gdma_0": [0],
+                "gdma_0": [5],
+                "gdma_1": [5],
             },
             "dst_map": {
-                "ddr_0": [2],
-                # "ddr_0": [11],
+                "ddr_0": [0],
+                "ddr_1": [0],
             },
-            "speed": 128,
+            "speed": 64,
             "burst": burst,
             "req_type": req_type,
         },

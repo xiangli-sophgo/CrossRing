@@ -6,21 +6,9 @@ This file is kept for backward compatibility and will be removed in future versi
 """
 
 # Import all classes from the new modular structure for backward compatibility
-from .components import (
-    Flit, 
-    TokenBucket, 
-    Node, 
-    IPInterface, 
-    RingIPInterface, 
-    create_ring_ip_interface,
-    Network, 
-    RingNetwork
-)
+from .components import Flit, TokenBucket, IPInterface, RingIPInterface, create_ring_ip_interface, Network, RingNetwork
 
 # Issue deprecation warning when this file is imported
 import warnings
-warnings.warn(
-    "src.utils.component is deprecated. Please use 'from src.utils.components import ...' instead.",
-    DeprecationWarning,
-    stacklevel=2
-)
+
+warnings.warn("src.utils.component is deprecated. Please use 'from src.utils.components import ...' instead.", DeprecationWarning, stacklevel=2)

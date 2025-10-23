@@ -298,16 +298,12 @@ class IPInterface:
             flit.flit_position = "L2H"
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
-            # 在真正发出时分配order_id（保证发出顺序=order_id顺序）
-            flit.set_packet_category_and_order_id()
 
         elif network_type == "rsp":
             # 响应网络：直接移动
             flit.flit_position = "L2H"
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
-            # 在真正发出时分配order_id（保证发出顺序=order_id顺序）
-            flit.set_packet_category_and_order_id()
 
         elif network_type == "data":
             # 数据网络：检查departure_cycle
@@ -321,8 +317,6 @@ class IPInterface:
             flit: Flit = net_info["inject_fifo"].popleft()
             flit.flit_position = "L2H"
             flit.start_inject = True
-            # 在真正发出时分配order_id（保证发出顺序=order_id顺序）
-            flit.set_packet_category_and_order_id()
             net_info["l2h_fifo_pre"] = flit
 
     def l2h_to_IQ_channel_buffer(self, network_type):

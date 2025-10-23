@@ -291,12 +291,6 @@ class Flit:
         else:
             raise ValueError(self.flit_type)
 
-        # 获取原始的src和dest用于顺序ID分配
-        src = self.source_original if self.source_original != -1 else self.source
-        dest = self.destination_original if self.destination_original != -1 else self.destination
-
-        self.src_dest_order_id = Flit.get_next_order_id(src, dest, self.packet_category)
-
     def inject(self, network: "Network"):  # 使用字符串类型标注
         if self.path_index == 0 and not self.is_injected:
             if len(self.path) > 1:  # Ensure there is a next position
