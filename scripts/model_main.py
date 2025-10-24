@@ -15,12 +15,12 @@ def main():
     """运行CrossRing仿真 - 使用新的简化配置接口"""
 
     # ==================== 流量配置 ====================
-    traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
-    # traffic_file_path = r"../test_data"
+    # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
+    traffic_file_path = r"../test_data"
     traffic_config = [
         [
-            "LLama2_AllReduce.txt"
-            # "data_1022_W.txt"
+            # "LLama2_AllReduce.txt"
+            "data_1022_W.txt"
             # "data_1022_R.txt"
             # "MLP.txt"
         ],
@@ -41,10 +41,10 @@ def main():
         "8x8": r"../config/topologies/topo_8x8.yaml",
     }
 
-    topo_type = "5x4"  # SG2262
+    # topo_type = "5x4"  # SG2262
     # topo_type = "4x4"
     # topo_type = "5x2"
-    # topo_type = "3x3"
+    topo_type = "3x3"
     # topo_type = "6x5"  # SG2260
     # topo_type = "8x8"  # SG2260E
 
@@ -68,7 +68,7 @@ def main():
 
     sim.setup_result_analysis(
         plot_flow_fig=1,
-        plot_RN_BW_fig=1,
+        plot_RN_BW_fig=0,
         result_save_path=f"../Result/CrossRing/{model_type}/",
         results_fig_save_path=None,  # f"../Result/Plt_IP_BW/{model_type}/"
     )
@@ -76,7 +76,7 @@ def main():
     # sim.setup_visualization(plot_link_state=1, plot_start_cycle=200, show_node_id=1)
     np.random.seed(801)
 
-    sim.run_simulation(max_cycles=10000, print_interval=200)
+    sim.run_simulation(max_cycles=1000, print_interval=200)
 
 
 if __name__ == "__main__":

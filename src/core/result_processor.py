@@ -510,8 +510,6 @@ class BandwidthAnalyzer:
         if getattr(self.sim_model, "topo_type_stat", None).startswith("Ring"):
             rows = self.config.RING_NUM_NODE // 2
             cols = 2
-        elif getattr(self.sim_model, "topo_type_stat", None) != "4x5":
-            rows -= 1
 
         # 第一步：收集所有IP实例名称
         all_ip_instances = set()
@@ -573,7 +571,7 @@ class BandwidthAnalyzer:
                     physical_row = self.config.RING_NUM_NODE - 1 - source_node
             else:
                 physical_col = source_node % cols
-                physical_row = source_node // cols // 2
+                physical_row = source_node // cols
 
             # 为每种类型计算带宽
             for source_type, type_requests in by_type.items():
@@ -626,7 +624,7 @@ class BandwidthAnalyzer:
                     physical_row = self.config.RING_NUM_NODE - 1 - dest_node
             else:
                 physical_col = dest_node % cols
-                physical_row = dest_node // cols // 2
+                physical_row = dest_node // cols
 
             # 为每种类型计算带宽
             for dest_type, type_requests in by_type.items():
@@ -1163,29 +1161,12 @@ class BandwidthAnalyzer:
             if mode in self.ip_bandwidth_data:
                 mode_data = self.ip_bandwidth_data[mode]
                 for ip_type, data_matrix in mode_data.items():
-                    # 转换为偶数行索引
-                    matrix_row = physical_row // 2
+                    # 新架构：所有节点都是IP节点，直接使用physical_row
+                    matrix_row = physical_row
                     if matrix_row < data_matrix.shape[0] and physical_col < data_matrix.shape[1]:
                         bandwidth = data_matrix[matrix_row, physical_col]
                         if bandwidth > 0.001:
                             active_ips.append((ip_type.upper(), bandwidth))
-
-        # 绘制IP信息框 - 正方形
-        ip_size = square_size * 3
-        ip_x = x - square_size - ip_size * 0.4
-        ip_y = y + 0.04
-
-        # 绘制IP信息框外框
-        ip_rect = Rectangle(
-            (ip_x - ip_size / 2, ip_y - ip_size / 2),
-            width=ip_size,
-            height=ip_size,
-            facecolor="lightyellow" if active_ips else "lightcyan",
-            edgecolor="black",
-            linewidth=1,
-            zorder=2,
-        )
-        ax.add_patch(ip_rect)
 
         # 如果没有活跃IP，直接返回
         if not active_ips:
@@ -1226,19 +1207,19 @@ class BandwidthAnalyzer:
 
         ip_type_count = dict(display_rows)
 
-        # 计算布局参数
+        # 计算布局参数 - 新架构：在节点内部绘制
         num_ip_types = len(ip_type_count)
         max_instances = max(len(instances) for instances in ip_type_count.values())
 
-        # 计算小方块大小和间距
-        available_width = ip_size * 0.98
-        available_height = ip_size * 0.98
+        # 计算小方块大小和间距（使用节点内部空间）
+        available_width = square_size * 0.90
+        available_height = square_size * 0.90
         grid_spacing = square_size * 0.10
-        row_spacing = square_size * 0.3
+        row_spacing = square_size * 0.1
 
         max_square_width = (available_width - (max_instances - 1) * grid_spacing) / max_instances
         max_square_height = (available_height - (num_ip_types - 1) * row_spacing) / num_ip_types
-        grid_square_size = min(max_square_width, max_square_height, square_size * 1)
+        grid_square_size = min(max_square_width, max_square_height, square_size * 0.5)
 
         # 计算总内容高度
         total_content_height = num_ip_types * grid_square_size + (num_ip_types - 1) * row_spacing
@@ -1253,11 +1234,11 @@ class BandwidthAnalyzer:
             # 计算当前行的总宽度
             row_width = num_instances * grid_square_size + (num_instances - 1) * grid_spacing
 
-            # 计算当前行的起始位置（水平居中）
-            row_start_x = ip_x - row_width / 2
+            # 计算当前行的起始位置（水平居中在节点内部）
+            row_start_x = x - row_width / 2
 
-            # 计算当前行的垂直位置（垂直居中）
-            row_y = ip_y + total_content_height / 2 - row_idx * (grid_square_size + row_spacing) - grid_square_size / 2
+            # 计算当前行的垂直位置（垂直居中在节点内部）
+            row_y = y + total_content_height / 2 - row_idx * (grid_square_size + row_spacing) - grid_square_size / 2
 
             # 绘制该类型的所有实例
             for col_idx, bandwidth in enumerate(instances):
@@ -1281,7 +1262,7 @@ class BandwidthAnalyzer:
                 )
                 ax.add_patch(ip_block)
 
-                # 在小方块中显示带宽数值（仅单Die场景且方块足够大时显示）
+                # 在小方块中显示带宽数值（方块足够大时显示）
                 if grid_square_size >= square_size * 0.4:
                     bw_text = f"{bandwidth:.0f}" if bandwidth >= 10 else f"{bandwidth:.1f}"
                     ax.text(
@@ -1290,7 +1271,7 @@ class BandwidthAnalyzer:
                         bw_text,
                         ha="center",
                         va="center",
-                        fontsize=6,
+                        fontsize=10,
                         fontweight="normal",
                         color="black",
                         zorder=4,
@@ -1500,20 +1481,26 @@ class BandwidthAnalyzer:
         # 添加节点到图中
         G.add_nodes_from(actual_nodes)
 
-        # 计算节点位置（应用偏移）
+        # 计算节点位置（应用偏移）- 新架构：所有节点在标准网格位置，横纵间距相同
         pos = {}
+        node_spacing = 3.0  # 统一的节点间距
         for node in actual_nodes:
             x = node % config.NUM_COL
             y = node // config.NUM_COL
-            if y % 2 == 1:  # 奇数行左移
-                x -= 0.35
-                y -= 0.35
-            pos[node] = (x * 3 + offset_x, -y * 1.5 + offset_y)
+            pos[node] = (x * node_spacing + offset_x, -y * node_spacing + offset_y)
 
         # 添加有权重的边
         edge_labels = {}
         edge_colors = {}
-        for (i, j), value in links.items():
+        for link_key, value in links.items():
+            # 处理新架构：link可能是(i, j)或(i, j, 'h'/'v')
+            if len(link_key) == 2:
+                i, j = link_key
+            elif len(link_key) == 3:
+                i, j, _ = link_key  # 忽略方向标识
+            else:
+                continue
+
             if i not in actual_nodes or j not in actual_nodes:
                 continue
 
@@ -1539,8 +1526,8 @@ class BandwidthAnalyzer:
             else:
                 edge_colors[(i, j)] = (0.8, 0.8, 0.8)
 
-        # 计算节点大小
-        square_size = np.sqrt(node_size) / 100
+        # 计算节点大小 - 新架构：增大节点以容纳内部IP方块
+        square_size = np.sqrt(node_size) / 50
 
         # 绘制网络边
         for i, j in G.edges():
@@ -1654,22 +1641,30 @@ class BandwidthAnalyzer:
                         has_reverse = G.has_edge(j, i)
                         is_horizontal = abs(dx) > abs(dy)
 
+                        # 新架构：标签放在link中间，双向link根据方向放在不同侧
                         if has_reverse:
                             if is_horizontal:
-                                perp_dx, perp_dy = -dy * 0.15 + 0.25, dx * 0.08
+                                # 水平link：向右(i<j)放上方，向左(i>j)放下方
+                                if i < j:
+                                    label_x = mid_x
+                                    label_y = mid_y + 0.2
+                                else:
+                                    label_x = mid_x
+                                    label_y = mid_y - 0.2
                             else:
-                                perp_dx, perp_dy = -dy * 0.16, dx * 0.23 - 0.35
-                            label_x = mid_x + perp_dx
-                            label_y = mid_y + perp_dy
+                                # 垂直link：向下(i<j)放右侧，向上(i>j)放左侧
+                                if i < j:
+                                    label_x = mid_x + 0.45
+                                    label_y = mid_y
+                                else:
+                                    label_x = mid_x - 0.45
+                                    label_y = mid_y
                         else:
-                            if is_horizontal:
-                                label_x = mid_x + dx * 0.15
-                                label_y = mid_y + dy * 0.15
-                            else:
-                                label_x = mid_x + (-dy * 0.15 if dx > 0 else dy * 0.15)
-                                label_y = mid_y - 0.15
+                            # 单向link：标签直接放在中间
+                            label_x = mid_x
+                            label_y = mid_y
 
-                        ax.text(label_x, label_y, label, ha="center", va="center", fontsize=8, fontweight="normal", color=color)
+                        ax.text(label_x, label_y, label, ha="center", va="center", fontsize=12, fontweight="normal", color=color)
 
         # 绘制方形节点和IP信息
         for node, (x, y) in pos.items():
@@ -1677,19 +1672,8 @@ class BandwidthAnalyzer:
             rect = Rectangle((x - square_size / 2, y - square_size / 2), width=square_size, height=square_size, color="#E8F5E9", ec="black", zorder=2)
             ax.add_patch(rect)
 
-            # 绘制节点编号（仅单Die场景显示）
-            if die_id is None:
-                ax.text(x, y, str(node), ha="center", va="center", fontsize=10, fontweight="bold", color="black", zorder=3)
-
-            # 绘制IP信息 - 仅对偶数行节点显示
-            physical_row = node // config.NUM_COL
-            if physical_row % 2 == 0:
-                # 优先使用子类的_draw_d2d_ip_info_box（如果存在）
-                if hasattr(self, "_draw_d2d_ip_info_box") and die_id is not None:
-                    self._draw_d2d_ip_info_box(ax, x, y, node, config, mode, square_size, die_id, die_model, max_ip_bandwidth, min_ip_bandwidth)
-                else:
-                    # 否则使用父类的_draw_ip_info_box
-                    self._draw_ip_info_box(ax, x, y, node, config, mode, square_size, max_ip_bandwidth, min_ip_bandwidth)
+            # 绘制IP信息 - 新架构：所有节点都显示IP信息
+            self._draw_ip_info_box(ax, x, y, node, config, mode, square_size, max_ip_bandwidth, min_ip_bandwidth)
 
         # 添加Die标签（仅在多Die场景中）
         if die_id is not None and pos:
@@ -2064,9 +2048,17 @@ class BandwidthAnalyzer:
             network = self.sim_model.data_network
             if hasattr(network, "links_flow_stat"):
                 config_data["links_flow_stat"] = {}
-                # 新格式：直接是 {(i,j): {统计数据}} 的格式
-                for (i, j), stats in network.links_flow_stat.items():
-                    config_data["links_flow_stat"][f"{i},{j}"] = stats
+                # 新架构：key可能是(i,j)或(i,j,'h'/'v')格式
+                for link_key, stats in network.links_flow_stat.items():
+                    if len(link_key) == 2:
+                        i, j = link_key
+                        key_str = f"{i},{j}"
+                    elif len(link_key) == 3:
+                        i, j, direction = link_key
+                        key_str = f"{i},{j},{direction}"
+                    else:
+                        continue
+                    config_data["links_flow_stat"][key_str] = stats
 
             # 保存finish_cycle用于计算链路带宽
             config_data["finish_cycle"] = self.sanitize_value(self.finish_cycle, 0.0)

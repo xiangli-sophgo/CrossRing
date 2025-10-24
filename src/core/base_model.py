@@ -309,11 +309,10 @@ class BaseModel:
         self.iq_arbiter = create_arbiter_from_config(arbitration_config.get("iq", default_config))
         self.eq_arbiter = create_arbiter_from_config(arbitration_config.get("eq", default_config))
         self.rb_arbiter = create_arbiter_from_config(arbitration_config.get("rb", default_config))
-        self.rn_positions = set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)
-        self.sn_positions = set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST)
-        self.flit_positions = set(
-            self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST + self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST
-        )
+        # 新架构: 所有节点都可以作为IP节点
+        self.rn_positions = set(range(self.config.NUM_NODE))
+        self.sn_positions = set(range(self.config.NUM_NODE))
+        self.flit_positions = set(range(self.config.NUM_NODE))
 
         # 缓存位置列表以避免重复转换
         self.rn_positions_list = list(self.rn_positions)
@@ -331,7 +330,8 @@ class BaseModel:
         self.rn_positions_list = list(self.rn_positions)
         self.sn_positions_list = list(self.sn_positions)
         self.flit_positions_list = list(self.flit_positions)
-        self.routes = find_shortest_paths(self.adjacency_matrix)
+        # 使用新的XY/YX确定性路由替代networkx最短路径
+        self.routes = self._build_routing_table()
         self.ip_modules = {}
         for ip_pos in self.flit_positions:
             for ip_type in self.config.CH_NAME_LIST:
@@ -385,40 +385,22 @@ class BaseModel:
         self.flit_num, self.req_num, self.rsp_num = 0, 0, 0
         self.new_write_req = []
         self.IQ_directions = ["TR", "TL", "TU", "TD", "EQ"]
+        # 新架构: 物理直接映射, 相邻节点差值简化
+        # TR: +1 (向右), TL: -1 (向左), TU: -NUM_COL (向上), TD: +NUM_COL (向下)
         self.IQ_direction_conditions = {
-            "TR": lambda flit: flit.path[1] - flit.path[0] == 1 and flit.source - flit.destination != self.config.NUM_COL,
-            "TL": lambda flit: flit.path[1] - flit.path[0] == -1 and flit.source - flit.destination != self.config.NUM_COL,
-            "TU": lambda flit: (
-                len(flit.path) >= 3
-                and flit.path[2] - flit.path[1] == -self.config.NUM_COL * 2
-                and flit.path[1] - flit.path[0] == -self.config.NUM_COL
-                and flit.source - flit.destination != self.config.NUM_COL
-            ),
-            "TD": lambda flit: (
-                len(flit.path) >= 3
-                and flit.path[2] - flit.path[1] == self.config.NUM_COL * 2
-                and flit.path[1] - flit.path[0] == -self.config.NUM_COL
-                and flit.source - flit.destination != self.config.NUM_COL
-            ),
-            "EQ": lambda flit: flit.source - flit.destination == self.config.NUM_COL,
+            "TR": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == 1,
+            "TL": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == -1,
+            "TU": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == -self.config.NUM_COL,
+            "TD": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == self.config.NUM_COL,
+            "EQ": lambda flit: len(flit.path) == 1,  # 源=目标,直接下环
         }
-        # 如果只有1列，禁用横向和垂直环注入，仅保留EQ方向
+        # 如果只有1列，禁用横向注入，仅保留垂直和EQ方向
         if self.config.NUM_COL <= 1:
             self.IQ_directions = ["EQ", "TU", "TD"]
             self.IQ_direction_conditions = {
-                "TU": lambda flit: (
-                    len(flit.path) >= 3
-                    and flit.path[2] - flit.path[1] == -self.config.NUM_COL * 2
-                    and flit.path[1] - flit.path[0] == -self.config.NUM_COL
-                    and flit.source - flit.destination != self.config.NUM_COL
-                ),
-                "TD": lambda flit: (
-                    len(flit.path) >= 3
-                    and flit.path[2] - flit.path[1] == self.config.NUM_COL * 2
-                    and flit.path[1] - flit.path[0] == -self.config.NUM_COL
-                    and flit.source - flit.destination != self.config.NUM_COL
-                ),
-                "EQ": lambda flit: flit.source - flit.destination == self.config.NUM_COL,
+                "TU": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == -self.config.NUM_COL,
+                "TD": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == self.config.NUM_COL,
+                "EQ": lambda flit: len(flit.path) == 1,
             }
         self.read_ip_intervals = defaultdict(list)  # 存储每个IP的读请求时间区间
         self.write_ip_intervals = defaultdict(list)  # 存储每个IP的写请求时间区间
@@ -429,9 +411,10 @@ class BaseModel:
             "data": self.flit_positions,
         }
 
+        # 新架构: 所有节点都可以作为IP节点
         self.dma_rw_counts = self.config._make_channels(
             ("gdma", "sdma", "cdma"),
-            {ip: {"read": 0, "write": 0} for ip in set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST)},
+            {ip: {"read": 0, "write": 0} for ip in range(self.config.NUM_NODE)},
         )
 
         self.rn_bandwidth = {
@@ -775,7 +758,7 @@ class BaseModel:
     def _move_pre_to_queues(self, network: Network, in_pos):
         """Move all items from pre-injection queues to injection queues for a given network."""
         # ===  注入队列 *_pre → *_FIFO ===
-        ip_pos = in_pos - self.config.NUM_COL  # 本列对应的 IP 位置
+        ip_pos = in_pos  # 新架构: in_pos和ip_pos是同一个节点
 
         # IQ_channel_buffer_pre → IQ_channel_buffer
         for ip_type in network.IQ_channel_buffer_pre.keys():
@@ -802,24 +785,24 @@ class BaseModel:
         for direction in ["TL", "TR"]:
             queue_pre = network.ring_bridge_pre[direction]
             queue = network.ring_bridge[direction]
-            key = (in_pos, ip_pos)
-            if queue_pre[key] and len(queue[key]) < self.config.RB_IN_FIFO_DEPTH:
-                flit = queue_pre[key]
+            # 新架构: ring_bridge键直接使用节点号in_pos
+            if queue_pre[in_pos] and len(queue[in_pos]) < self.config.RB_IN_FIFO_DEPTH:
+                flit = queue_pre[in_pos]
                 flit.flit_position = f"RB_{direction}"
-                queue[key].append(flit)
-                queue_pre[key] = None
+                queue[in_pos].append(flit)
+                queue_pre[in_pos] = None
 
         # RB_OUT_PRE → RB_OUT
         for fifo_pos in ("EQ", "TU", "TD"):
             queue_pre = network.ring_bridge_pre[fifo_pos]
             queue = network.ring_bridge[fifo_pos]
-            key = (in_pos, ip_pos)
-            if queue_pre[key] and len(queue[key]) < self.config.RB_OUT_FIFO_DEPTH:
-                flit = queue_pre[key]
+            # 新架构: ring_bridge键直接使用节点号in_pos
+            if queue_pre[in_pos] and len(queue[in_pos]) < self.config.RB_OUT_FIFO_DEPTH:
+                flit = queue_pre[in_pos]
                 flit.is_arrive = fifo_pos == "EQ"
                 flit.flit_position = f"RB_{fifo_pos}"
-                queue[key].append(flit)
-                queue_pre[key] = None
+                queue[in_pos].append(flit)
+                queue_pre[in_pos] = None
 
         # EQ_IN_PRE → EQ_IN
         for fifo_pos in ("TU", "TD"):
@@ -914,7 +897,7 @@ class BaseModel:
             # 1. 收集所有可能的 ip_types 和 directions
             all_ip_types = set()
             for direction in self.IQ_directions:
-                rr_queue = network.round_robin["IQ"][direction][ip_pos - self.config.NUM_COL]
+                rr_queue = network.round_robin["IQ"][direction][ip_pos]  # 新架构: 直接使用ip_pos
                 all_ip_types.update(rr_queue)
 
             if not all_ip_types:
@@ -1000,7 +983,7 @@ class BaseModel:
             bool: 是否可以注入
         """
         # 检查round_robin队列中是否有这个ip_type
-        rr_queue = network.round_robin["IQ"][direction][ip_pos - self.config.NUM_COL]
+        rr_queue = network.round_robin["IQ"][direction][ip_pos]  # 新架构: 直接使用ip_pos
         if ip_type not in rr_queue:
             return False
 
@@ -1121,8 +1104,8 @@ class BaseModel:
     def _process_single_request(self, req_data):
         """处理单个请求"""
         # 解析请求数据（注意最后一个元素是traffic_id）
-        source = self.node_map(req_data[1])
-        destination = self.node_map(req_data[3], False)
+        source = req_data[1]  # 物理直接映射,无需node_map转换
+        destination = req_data[3]  # 物理直接映射,无需node_map转换
         path = self.routes[source][destination]
         traffic_id = req_data[7]  # 最后一个元素是traffic_id
 
@@ -1299,7 +1282,7 @@ class BaseModel:
         self.Eject_Queue_arbitration(network, flit_type)
 
         for flit in ring_bridge_EQ_flits:
-            if flit.is_arrive:
+            if flit.is_arrive and flit in flits:
                 flits.remove(flit)
 
         for direction, inject_queues in network.inject_queues.items():
@@ -1331,55 +1314,58 @@ class BaseModel:
 
         对每个ring bridge节点，构建 input_slots × output_directions 的请求矩阵，
         使用匹配算法进行全局优化，确保每个slot只转发到一个方向。
+
+        新架构: 每个节点都有Ring Bridge (参考C2C设计)
         """
-        for col in range(1, self.config.NUM_ROW, 2):
-            for row in range(self.config.NUM_COL):
-                pos = col * self.config.NUM_COL + row
-                next_pos = pos - self.config.NUM_COL
+        # 遍历所有节点作为Ring Bridge
+        for pos in range(self.config.NUM_NODE):
+            # 新架构: Ring Bridge在本节点,键直接使用节点号
+            next_pos = pos  # 保留用于兼容性（queue_id等使用）
 
-                # 1. 获取各输入槽位的flit
-                station_flits = [
-                    network.ring_bridge["TL"][(pos, next_pos)][0] if network.ring_bridge["TL"][(pos, next_pos)] else None,
-                    network.ring_bridge["TR"][(pos, next_pos)][0] if network.ring_bridge["TR"][(pos, next_pos)] else None,
-                    network.inject_queues["TU"][pos][0] if pos in network.inject_queues["TU"] and network.inject_queues["TU"][pos] else None,
-                    network.inject_queues["TD"][pos][0] if pos in network.inject_queues["TD"] and network.inject_queues["TD"][pos] else None,
-                ]
+            # 1. 获取各输入槽位的flit
+            station_flits = [
+                network.ring_bridge["TL"][pos][0] if network.ring_bridge["TL"][pos] else None,
+                network.ring_bridge["TR"][pos][0] if network.ring_bridge["TR"][pos] else None,
+                network.inject_queues["TU"][pos][0] if pos in network.inject_queues["TU"] and network.inject_queues["TU"][pos] else None,
+                network.inject_queues["TD"][pos][0] if pos in network.inject_queues["TD"] and network.inject_queues["TD"][pos] else None,
+            ]
 
-                if not any(station_flits):
-                    continue
+            if not any(station_flits):
+                continue
 
-                # 2. 构建请求矩阵 (input_slots × output_directions)
-                # input_slots: 0=TL, 1=TR, 2=TU, 3=TD
-                # output_directions: 0=EQ, 1=TU, 2=TD
-                slot_names = ["TL", "TR", "TU", "TD"]
-                output_dirs = ["EQ", "TU", "TD"]
-                direction_conditions = {"EQ": lambda d, n: d == n, "TU": lambda d, n: d < n, "TD": lambda d, n: d > n}
+            # 2. 构建请求矩阵 (input_slots × output_directions)
+            # input_slots: 0=TL, 1=TR, 2=TU, 3=TD
+            # output_directions: 0=EQ, 1=TU, 2=TD
+            slot_names = ["TL", "TR", "TU", "TD"]
+            output_dirs = ["EQ", "TU", "TD"]
+            direction_conditions = {"EQ": lambda d, n: d == n, "TU": lambda d, n: d < n, "TD": lambda d, n: d > n}
 
-                request_matrix = []
-                for slot_idx, flit in enumerate(station_flits):
-                    row = []
-                    for out_dir in output_dirs:
-                        # 检查是否可以从这个slot转发到这个输出方向
-                        can_forward = self._check_rb_forward_conditions(network, flit, pos, next_pos, out_dir, direction_conditions[out_dir])
-                        row.append(can_forward)
-                    request_matrix.append(row)
+            request_matrix = []
+            for slot_idx, flit in enumerate(station_flits):
+                row = []
+                for out_dir in output_dirs:
+                    # 检查是否可以从这个slot转发到这个输出方向
+                    can_forward = self._check_rb_forward_conditions(network, flit, pos, next_pos, out_dir, direction_conditions[out_dir])
+                    row.append(can_forward)
+                request_matrix.append(row)
 
-                # 3. 执行匹配
-                if not any(any(row) for row in request_matrix):
-                    continue
+            # 3. 执行匹配
+            if not any(any(row) for row in request_matrix):
+                continue
 
-                queue_id = f"RB_pos{pos}_{next_pos}"
-                matches = self.rb_arbiter.match(request_matrix, queue_id=queue_id)
+            queue_id = f"RB_pos{pos}_{next_pos}"
+            matches = self.rb_arbiter.match(request_matrix, queue_id=queue_id)
 
-                # 4. 根据匹配结果处理转发
-                for slot_idx, out_dir_idx in matches:
-                    out_dir = output_dirs[out_dir_idx]
-                    flit = station_flits[slot_idx]
+            # 4. 根据匹配结果处理转发
+            for slot_idx, out_dir_idx in matches:
+                out_dir = output_dirs[out_dir_idx]
+                flit = station_flits[slot_idx]
 
-                    if flit:
-                        network.ring_bridge_pre[out_dir][(pos, next_pos)] = flit
-                        station_flits[slot_idx] = None  # 标记为已使用
-                        self._update_ring_bridge(network, pos, next_pos, out_dir, slot_idx)
+                if flit:
+                    # 新架构: ring_bridge_pre键直接使用节点号
+                    network.ring_bridge_pre[out_dir][pos] = flit
+                    station_flits[slot_idx] = None  # 标记为已使用
+                    self._update_ring_bridge(network, pos, next_pos, out_dir, slot_idx)
 
     def _check_rb_forward_conditions(self, network, flit, pos, next_pos, out_dir, cmp_func):
         """
@@ -1400,19 +1386,21 @@ class BaseModel:
             return False
 
         # 检查输出FIFO是否满
-        if len(network.ring_bridge[out_dir][(pos, next_pos)]) >= self.config.RB_OUT_FIFO_DEPTH:
+        # 新架构: ring_bridge键直接使用节点号
+        if len(network.ring_bridge[out_dir][pos]) >= self.config.RB_OUT_FIFO_DEPTH:
             return False
 
         # 检查目的地条件
-        return cmp_func(flit.destination, next_pos)
+        return cmp_func(flit.destination, pos)
 
     def RB_inject_vertical(self, network: Network):
         RB_inject_flits = []
         for ip_pos in self.flit_positions:
-            next_pos = ip_pos - self.config.NUM_COL
+            next_pos = ip_pos  # 新架构: in_pos和ip_pos相同
+            # 垂直方向的邻居节点 (上/下)
             up_node, down_node = (
-                next_pos - self.config.NUM_COL * 2,
-                next_pos + self.config.NUM_COL * 2,
+                next_pos - self.config.NUM_COL,  # 上方邻居
+                next_pos + self.config.NUM_COL,  # 下方邻居
             )
             if up_node < 0:
                 up_node = next_pos
@@ -1432,21 +1420,24 @@ class BaseModel:
         return RB_inject_flits
 
     def _update_ring_bridge(self, network: Network, pos, next_pos, direction, index):
-        """更新transfer stations"""
+        """更新transfer stations
+
+        新架构: ring_bridge键直接使用节点号pos，next_pos参数保留用于兼容性
+        """
         if index == 0:
-            flit = network.ring_bridge["TL"][(pos, next_pos)].popleft()
+            flit = network.ring_bridge["TL"][pos].popleft()
             if flit.used_entry_level == "T0":
-                network.RB_UE_Counters["TL"][(pos, next_pos)]["T0"] -= 1
+                network.RB_UE_Counters["TL"][pos]["T0"] -= 1
             elif flit.used_entry_level == "T1":
-                network.RB_UE_Counters["TL"][(pos, next_pos)]["T1"] -= 1
+                network.RB_UE_Counters["TL"][pos]["T1"] -= 1
             elif flit.used_entry_level == "T2":
-                network.RB_UE_Counters["TL"][(pos, next_pos)]["T2"] -= 1
+                network.RB_UE_Counters["TL"][pos]["T2"] -= 1
         elif index == 1:
-            flit = network.ring_bridge["TR"][(pos, next_pos)].popleft()
+            flit = network.ring_bridge["TR"][pos].popleft()
             if flit.used_entry_level == "T1":
-                network.RB_UE_Counters["TR"][(pos, next_pos)]["T1"] -= 1
+                network.RB_UE_Counters["TR"][pos]["T1"] -= 1
             elif flit.used_entry_level == "T2":
-                network.RB_UE_Counters["TR"][(pos, next_pos)]["T2"] -= 1
+                network.RB_UE_Counters["TR"][pos]["T2"] -= 1
         elif index == 2:
             flit = network.inject_queues["TU"][pos].popleft()
         elif index == 3:
@@ -1498,25 +1489,29 @@ class BaseModel:
 
         # 2. 统一处理eject_queues和ring_bridge
         for in_pos in in_pos_position:
-            ip_pos = in_pos - self.config.NUM_COL
+            ip_pos = in_pos  # 新架构: in_pos和ip_pos是同一个节点
             # 构造eject_flits
             eject_flits = (
                 [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["TU", "TD"]]
                 + [network.inject_queues[fifo_pos][in_pos][0] if network.inject_queues[fifo_pos][in_pos] else None for fifo_pos in ["EQ"]]
-                + [network.ring_bridge["EQ"][(in_pos, ip_pos)][0] if network.ring_bridge["EQ"][(in_pos, ip_pos)] else None]
+                + [network.ring_bridge["EQ"][in_pos][0] if network.ring_bridge["EQ"][in_pos] else None]  # 新架构: 键直接使用节点号
             )
             if not any(eject_flits):
                 continue
             self._move_to_eject_queues_pre(network, eject_flits, ip_pos)
 
     def _process_ring_bridge_inject(self, network: Network, dir_key, pos, next_pos, curr_node, opposite_node):
+        """处理ring bridge的注入
+
+        新架构: ring_bridge键直接使用节点号pos，next_pos参数保留用于兼容性
+        """
         direction = dir_key  # "TU" or "TD"
         link = (next_pos, opposite_node)
 
         # Early return if ring bridge is not active for this direction and position
-        if not network.ring_bridge[dir_key][(pos, next_pos)]:
+        if not network.ring_bridge[dir_key][pos]:
             return None
-        flit = network.ring_bridge[dir_key][(pos, next_pos)][0]
+        flit = network.ring_bridge[dir_key][pos][0]
         # self.error_log(flit, 10651, 1)
         # Case 1: No flit in the link
         link_occupied = network.links[link][0] is not None
@@ -1550,11 +1545,14 @@ class BaseModel:
         return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
     def _update_flit_state(self, network: Network, ts_key, ip_pos, next_pos, target_node, direction):
-        """更新Flit状态并处理ITag需求变化"""
+        """更新Flit状态并处理ITag需求变化
+
+        新架构: ring_bridge键直接使用节点号ip_pos，next_pos参数保留用于兼容性
+        """
         if network.links[(next_pos, target_node)][0] is not None:
             return False
 
-        flit: Flit = network.ring_bridge[ts_key][(ip_pos, next_pos)].popleft()
+        flit: Flit = network.ring_bridge[ts_key][ip_pos].popleft()
 
         # 检查这个Flit是否曾经申请过ITag → 减少需求计数
         if flit.wait_cycle_v >= self.config.ITag_TRIGGER_Th_V:
@@ -1577,11 +1575,14 @@ class BaseModel:
         return True
 
     def _handle_wait_cycles(self, network: Network, ts_key, pos, next_pos, direction, link):
-        """处理等待周期和ITag标记逻辑"""
-        if not network.ring_bridge[ts_key][(pos, next_pos)]:
+        """处理等待周期和ITag标记逻辑
+
+        新架构: ring_bridge键直接使用节点号pos，next_pos参数保留用于兼容性
+        """
+        if not network.ring_bridge[ts_key][pos]:
             return None
 
-        first_flit = network.ring_bridge[ts_key][(pos, next_pos)][0]
+        first_flit = network.ring_bridge[ts_key][pos][0]
         first_flit.wait_cycle_v += 1
         # 检查第一个Flit刚达到阈值 → 增加需求计数
         if first_flit.wait_cycle_v == self.config.ITag_TRIGGER_Th_V:
@@ -1606,7 +1607,8 @@ class BaseModel:
             self.ITag_v_num_stat += 1
 
         # 更新所有Flit的等待时间并检查新的需求
-        for i, flit in enumerate(network.ring_bridge[ts_key][(pos, next_pos)]):
+        # 新架构: ring_bridge键直接使用节点号pos
+        for i, flit in enumerate(network.ring_bridge[ts_key][pos]):
             if i == 0:
                 continue
             flit.wait_cycle_v += 1
@@ -1624,69 +1626,76 @@ class BaseModel:
     def _tag_move(self, network: Network):
         # 第一部分：纵向环处理
         for col_start in range(self.config.NUM_COL):
-            interval = self.config.NUM_COL * 2  # 8
-            col_end = col_start + interval * (self.config.NUM_ROW // 2 - 1)  # col_start + 32
+            interval = self.config.NUM_COL  # 新架构: 直接使用NUM_COL
+            col_end = col_start + interval * (self.config.NUM_ROW - 1)  # 最后一行节点
 
-            # 保存起始位置的tag
-            last_position = network.links_tag[(col_start, col_start)][0]
+            # 保存起始位置的tag（使用垂直自环键）
+            v_key_start = (col_start, col_start, 'v')
+            last_position = network.links_tag[v_key_start][0]
 
             # 前向传递：从起点到终点
-            network.links_tag[(col_start, col_start)][0] = network.links_tag[(col_start + interval, col_start)][-1]
+            network.links_tag[v_key_start][0] = network.links_tag[(col_start + interval, col_start)][-1]
 
-            for i in range(1, self.config.NUM_ROW // 2):  # range(1, 5) = [1,2,3,4]
+            for i in range(1, self.config.NUM_ROW):  # 新架构: 遍历所有行
                 current_node = col_start + i * interval
                 next_node = col_start + (i - 1) * interval
 
                 for j in range(self.config.SLICE_PER_LINK_VERTICAL - 1, -1, -1):
                     if j == 0 and current_node == col_end:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
+                        v_key_current = (current_node, current_node, 'v')
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[v_key_current][-1]
                     elif j == 0:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node + interval, current_node)][-1]
                     else:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
 
-            # 终点自环处理
-            network.links_tag[(col_end, col_end)][-1] = network.links_tag[(col_end, col_end)][0]
-            network.links_tag[(col_end, col_end)][0] = network.links_tag[(col_end - interval, col_end)][-1]
+            # 终点自环处理（使用垂直自环键）
+            v_key_end = (col_end, col_end, 'v')
+            network.links_tag[v_key_end][-1] = network.links_tag[v_key_end][0]
+            network.links_tag[v_key_end][0] = network.links_tag[(col_end - interval, col_end)][-1]
 
             # 回程传递：从终点回到起点
             # 修复：确保处理所有回程连接
-            for i in range(1, self.config.NUM_ROW // 2):  # range(1, 5) = [1,2,3,4]
+            for i in range(1, self.config.NUM_ROW):  # 新架构: 遍历所有行
                 current_node = col_end - i * interval
                 next_node = col_end - (i - 1) * interval
 
                 for j in range(self.config.SLICE_PER_LINK_VERTICAL - 1, -1, -1):
                     if j == 0 and current_node == col_start:
-                        network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
+                        v_key_current = (current_node, current_node, 'v')
+                        network.links_tag[(current_node, next_node)][j] = network.links_tag[v_key_current][-1]
                     elif j == 0:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node - interval, current_node)][-1]
                     else:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
 
-            # 起点自环处理
-            network.links_tag[(col_start, col_start)][-1] = last_position
+            # 起点自环处理（使用垂直自环键）
+            network.links_tag[v_key_start][-1] = last_position
 
-        # 第二部分：横向环处理（保持原逻辑）
+        # 第二部分：横向环处理
         # Skip horizontal tag movement if only one column or links_tag missing
         if self.config.NUM_COL <= 1:
             return
-        for row_start in range(self.config.NUM_COL, self.config.NUM_NODE, self.config.NUM_COL * 2):
+        # 新架构: 遍历所有行 (包括第一行row=0)
+        for row_start in range(0, self.config.NUM_NODE, self.config.NUM_COL):
             row_end = row_start + self.config.NUM_COL - 1
-            # Existence check for links_tag entry
-            if (row_start, row_start) not in network.links_tag:
+            # 使用水平自环键
+            h_key_start = (row_start, row_start, 'h')
+            if h_key_start not in network.links_tag:
                 continue
-            last_position = network.links_tag[(row_start, row_start)][0]
+            last_position = network.links_tag[h_key_start][0]
             if (row_start + 1, row_start) in network.links_tag:
-                network.links_tag[(row_start, row_start)][0] = network.links_tag[(row_start + 1, row_start)][-1]
+                network.links_tag[h_key_start][0] = network.links_tag[(row_start + 1, row_start)][-1]
             else:
-                network.links_tag[(row_start, row_start)][0] = last_position
+                network.links_tag[h_key_start][0] = last_position
 
             for i in range(1, self.config.NUM_COL):
                 current_node, next_node = row_start + i, row_start + i - 1
                 for j in range(self.config.SLICE_PER_LINK_HORIZONTAL - 1, -1, -1):
                     if j == 0 and current_node == row_end:
-                        if (current_node, current_node) in network.links_tag and (current_node, next_node) in network.links_tag:
-                            network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
+                        h_key_end = (current_node, current_node, 'h')
+                        if h_key_end in network.links_tag and (current_node, next_node) in network.links_tag:
+                            network.links_tag[(current_node, next_node)][j] = network.links_tag[h_key_end][-1]
                     elif j == 0:
                         if (current_node + 1, current_node) in network.links_tag and (current_node, next_node) in network.links_tag:
                             network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node + 1, current_node)][-1]
@@ -1694,19 +1703,21 @@ class BaseModel:
                         if (current_node, next_node) in network.links_tag:
                             network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
 
-            if (row_end, row_end) in network.links_tag:
-                network.links_tag[(row_end, row_end)][-1] = network.links_tag[(row_end, row_end)][0]
+            h_key_end = (row_end, row_end, 'h')
+            if h_key_end in network.links_tag:
+                network.links_tag[h_key_end][-1] = network.links_tag[h_key_end][0]
                 if (row_end - 1, row_end) in network.links_tag:
-                    network.links_tag[(row_end, row_end)][0] = network.links_tag[(row_end - 1, row_end)][-1]
+                    network.links_tag[h_key_end][0] = network.links_tag[(row_end - 1, row_end)][-1]
                 else:
-                    network.links_tag[(row_end, row_end)][0] = last_position
+                    network.links_tag[h_key_end][0] = last_position
 
             for i in range(1, self.config.NUM_COL):
                 current_node, next_node = row_end - i, row_end - i + 1
                 for j in range(self.config.SLICE_PER_LINK_HORIZONTAL - 1, -1, -1):
                     if j == 0 and current_node == row_start:
-                        if (current_node, current_node) in network.links_tag and (current_node, next_node) in network.links_tag:
-                            network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, current_node)][-1]
+                        h_key_current = (current_node, current_node, 'h')
+                        if h_key_current in network.links_tag and (current_node, next_node) in network.links_tag:
+                            network.links_tag[(current_node, next_node)][j] = network.links_tag[h_key_current][-1]
                     elif j == 0:
                         if (current_node - 1, current_node) in network.links_tag and (current_node, next_node) in network.links_tag:
                             network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node - 1, current_node)][-1]
@@ -1714,8 +1725,8 @@ class BaseModel:
                         if (current_node, next_node) in network.links_tag:
                             network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
 
-            if (row_start, row_start) in network.links_tag:
-                network.links_tag[(row_start, row_start)][-1] = last_position
+            if h_key_start in network.links_tag:
+                network.links_tag[h_key_start][-1] = last_position
 
     def _move_to_eject_queues_pre(self, network: Network, eject_flits, ip_pos):
         """
@@ -1755,7 +1766,7 @@ class BaseModel:
             flit = eject_flits[port_idx]
 
             if flit:
-                in_pos = ip_pos + self.config.NUM_COL
+                in_pos = ip_pos  # 新架构: in_pos和ip_pos是同一个节点
                 network.EQ_channel_buffer_pre[ip_type][ip_pos] = flit
                 flit.is_arrive = True
                 flit.arrival_eject_cycle = self.cycle
@@ -1779,7 +1790,8 @@ class BaseModel:
                 elif port_idx == 2:  # IQ
                     removed_flit = network.inject_queues["EQ"][in_pos].popleft()
                 elif port_idx == 3:  # RB
-                    removed_flit = network.ring_bridge["EQ"][(in_pos, ip_pos)].popleft()
+                    # 新架构: ring_bridge键直接使用节点号in_pos
+                    removed_flit = network.ring_bridge["EQ"][in_pos].popleft()
 
                 # 获取通道类型
                 flit_channel_type = getattr(flit, "flit_type", "req")
@@ -1979,21 +1991,91 @@ class BaseModel:
         # return weighted_sum / total_count if total_count > 0 else 0.0
         return total_count * 128 / total_interval_time if total_interval_time > 0 else 0.0
 
-    @lru_cache(maxsize=1024)
-    def node_map(self, node, is_source=True):
-        if is_source:
-            # if self.topo_type_stat in ["5x4"]:
-            #     # return self.config.GDMA_SEND_POSITION_LIST[node] if node < 16 else self.config.SDMA_SEND_POSITION_LIST[node % 16]
-            #     return self.config.GDMA_SEND_POSITION_LIST[node] if node < 16 else self.config.CDMA_SEND_POSITION_LIST[node - 16]
-            # elif self.topo_type_stat == "6x5":
-            #     return node % self.config.NUM_COL + self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
-            return node % self.config.NUM_COL + self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
-        else:
-            # if self.topo_type_stat in ["5x4"]:
-            #     return self.config.DDR_SEND_POSITION_LIST[node] - self.config.NUM_COL if node < 16 else self.config.L2M_SEND_POSITION_LIST[node % 16] - self.config.NUM_COL
-            # elif self.topo_type_stat == "6x5":
-            #     return node % self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
-            return node % self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
+
+    def _calculate_path_xy(self, src, dst):
+        """
+        XY路由: 先水平后垂直 (参考C2C实现)
+
+        Args:
+            src: 源节点ID
+            dst: 目标节点ID
+
+        Returns:
+            路径列表 [src, ..., dst]
+        """
+        if src == dst:
+            return [src]
+
+        path = [src]
+        current = src
+        src_row, src_col = divmod(src, self.config.NUM_COL)
+        dst_row, dst_col = divmod(dst, self.config.NUM_COL)
+
+        # 1. 水平移动
+        while src_col != dst_col:
+            src_col += 1 if dst_col > src_col else -1
+            current = src_row * self.config.NUM_COL + src_col
+            path.append(current)
+
+        # 2. 垂直移动
+        while src_row != dst_row:
+            src_row += 1 if dst_row > src_row else -1
+            current = src_row * self.config.NUM_COL + src_col
+            path.append(current)
+
+        return path
+
+    def _calculate_path_yx(self, src, dst):
+        """
+        YX路由: 先垂直后水平 (参考C2C实现)
+
+        Args:
+            src: 源节点ID
+            dst: 目标节点ID
+
+        Returns:
+            路径列表 [src, ..., dst]
+        """
+        if src == dst:
+            return [src]
+
+        path = [src]
+        current = src
+        src_row, src_col = divmod(src, self.config.NUM_COL)
+        dst_row, dst_col = divmod(dst, self.config.NUM_COL)
+
+        # 1. 垂直移动
+        while src_row != dst_row:
+            src_row += 1 if dst_row > src_row else -1
+            current = src_row * self.config.NUM_COL + src_col
+            path.append(current)
+
+        # 2. 水平移动
+        while src_col != dst_col:
+            src_col += 1 if dst_col > src_col else -1
+            current = src_row * self.config.NUM_COL + src_col
+            path.append(current)
+
+        return path
+
+    def _build_routing_table(self):
+        """
+        构建路由表: 预计算所有节点对的路径
+
+        新架构: 使用XY/YX确定性路由替代networkx最短路径
+        """
+        routing_strategy = getattr(self.config, "ROUTING_STRATEGY", "XY")
+
+        routes = {}
+        for src in range(self.config.NUM_NODE):
+            routes[src] = {}
+            for dst in range(self.config.NUM_NODE):
+                if routing_strategy == "YX":
+                    routes[src][dst] = self._calculate_path_yx(src, dst)
+                else:  # 默认XY路由
+                    routes[src][dst] = self._calculate_path_xy(src, dst)
+
+        return routes
 
     def get_results(self):
         """

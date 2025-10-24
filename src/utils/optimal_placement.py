@@ -133,33 +133,27 @@ def create_adjacency_matrix(topology_type, num_nodes, cols=0):
                 adjacency_matrix[node][node + 1] = 1
                 adjacency_matrix[node + 1][node] = 1
     elif topology_type == "CrossRing":
+        # CrossRing拓扑实现为简洁的Mesh (参考C2C仓库)
+        # 节点按二维网格排列,与上下左右邻居连接,无环形回绕
+        num_rows = num_nodes // cols
         for node in range(num_nodes):
-            if (node // cols) % 2 == 0:
-                if node < cols:
-                    adjacency_matrix[node][node + cols * 2] = 1
-                elif node >= num_nodes - cols * 2:
-                    adjacency_matrix[node][node - cols * 2] = 1
-                else:
-                    adjacency_matrix[node][node + cols * 2] = 1
-                    adjacency_matrix[node][node - cols * 2] = 1
-            else:
-                # connect vertically backward
-                adjacency_matrix[node][node - cols] = 1
-                # only add horizontal neighbors if more than one column
-                if cols > 1:
-                    # left neighbor (column +1)
-                    if node % cols == 0:
-                        if node + 1 < num_nodes:
-                            adjacency_matrix[node][node + 1] = 1
-                    # right neighbor (column -1)
-                    elif node % cols == cols - 1:
-                        if node - 1 >= 0:
-                            adjacency_matrix[node][node - 1] = 1
-                    else:
-                        if node + 1 < num_nodes:
-                            adjacency_matrix[node][node + 1] = 1
-                        if node - 1 >= 0:
-                            adjacency_matrix[node][node - 1] = 1
+            row, col = divmod(node, cols)
+
+            # 水平连接 (左右邻居)
+            if col > 0:
+                left_neighbor = node - 1
+                adjacency_matrix[node][left_neighbor] = 1
+            if col < cols - 1:
+                right_neighbor = node + 1
+                adjacency_matrix[node][right_neighbor] = 1
+
+            # 垂直连接 (上下邻居)
+            if row > 0:
+                up_neighbor = node - cols
+                adjacency_matrix[node][up_neighbor] = 1
+            if row < num_rows - 1:
+                down_neighbor = node + cols
+                adjacency_matrix[node][down_neighbor] = 1
     elif topology_type == "CrossRing_v2":
         rows = num_nodes // 2  # 每列的行数
 

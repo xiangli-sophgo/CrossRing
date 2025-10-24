@@ -403,7 +403,8 @@ class CrossPoint:
             # 横向环下环到ring_bridge
             if ring_bridge is None:
                 return False
-            key = (flit.current_link[1], target_node)
+            current_node = flit.current_link[1]
+            key = current_node  # 新架构: ring_bridge键直接使用节点号
             queue = ring_bridge[direction][key]
             capacity = self.config.RB_IN_FIFO_DEPTH
         else:  # TU, TD

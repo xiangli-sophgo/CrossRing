@@ -159,16 +159,16 @@ class CrossRingConfig:
             raise ValueError(f"TOPO_TYPE格式错误，应为 'AxB' 格式，当前值: {topo_type}")
 
         try:
-            rows_half = int(parts[0])  # A
-            cols = int(parts[1])       # B
+            rows = int(parts[0])  # A (直接表示物理行数)
+            cols = int(parts[1])  # B (直接表示物理列数)
         except ValueError:
             raise ValueError(f"TOPO_TYPE格式错误，应为数字格式 'AxB'，当前值: {topo_type}")
 
-        if rows_half <= 0 or cols <= 0:
+        if rows <= 0 or cols <= 0:
             raise ValueError(f"TOPO_TYPE参数必须为正整数，当前值: {topo_type}")
 
         num_col = cols
-        num_row = rows_half * 2
+        num_row = rows  # 物理行数,不再乘以2
         num_node = num_col * num_row
 
         return num_col, num_row, num_node
@@ -309,13 +309,8 @@ class CrossRingConfig:
         self.L2M_W_LATENCY = self.L2M_W_LATENCY_original * self.NETWORK_FREQUENCY
 
     def topology_select(self, topo_type="default"):
-        self.DDR_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-        self.L2M_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-        self.SDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-        self.GDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-        self.CDMA_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-        self.D2D_RN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
-        self.D2D_SN_SEND_POSITION_LIST = self.generate_ip_positions([i for i in range(self.NUM_ROW) if i % 2 == 0], [])
+        # 新架构: 所有节点都可以作为IP节点，不再需要SEND_POSITION_LIST
+        pass
 
     def generate_ip_positions(self, zero_rows=None, zero_cols=None):
         # 创建一个矩阵,初始值为1

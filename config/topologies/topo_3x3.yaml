@@ -1,4 +1,8 @@
-# 3x3 拓扑配置 (18节点)
+# 3x3 拓扑配置 (9节点 - 新架构物理直接映射)
+# 节点布局:
+#   行0: 0-2
+#   行1: 3-5
+#   行2: 6-8
 TOPO_TYPE: "3x3"
 
 # 基本参数
@@ -83,11 +87,15 @@ IN_ORDER_EJECTION_PAIRS: []
 IN_ORDER_PACKET_CATEGORIES:
   - "REQ"    # 只有REQ类型需要保序
 
-# 方向控制配置 - 3x3拓扑 (9节点: 0-8, 布局: 行0: 0-2, 行1: 3-5, 行2: 6-8)
-TL_ALLOWED_SOURCE_NODES: [2, 5, 8]          # 向左：右半部(列2)
-TR_ALLOWED_SOURCE_NODES: [0, 1, 3, 4, 6, 7]  # 向右：左半部(列0,1)
-TU_ALLOWED_SOURCE_NODES: [6, 7, 8]          # 向上：下半部(行2)
-TD_ALLOWED_SOURCE_NODES: [0, 1, 2, 3, 4, 5]  # 向下：上半部(行0,1)
+# 方向控制配置 - 3x3拓扑新架构 (9节点: 0-8)
+# 节点布局 (row * NUM_COL + col):
+#   0  1  2   (行0)
+#   3  4  5   (行1)
+#   6  7  8   (行2)
+TL_ALLOWED_SOURCE_NODES: [2, 5, 8]           # 向左: 列2(右侧)
+TR_ALLOWED_SOURCE_NODES: [0, 1, 3, 4, 6, 7]  # 向右: 列0,1(左侧,中间)
+TU_ALLOWED_SOURCE_NODES: [6, 7, 8]           # 向上: 行2(下侧)
+TD_ALLOWED_SOURCE_NODES: [0, 1, 2, 3, 4, 5]  # 向下: 行0,1(上侧,中间)
 
 # IP 频率变换 FIFO 深度 (使用默认值)
 IP_L2H_FIFO_DEPTH: 3

@@ -965,8 +965,8 @@ class BaseModel:
     def _process_single_request(self, req_data):
         """处理单个请求"""
         # 解析请求数据（注意最后一个元素是traffic_id）
-        source = self.node_map(req_data[1])
-        destination = self.node_map(req_data[3], False)
+        source = req_data[1]  # 物理直接映射,无需node_map转换
+        destination = req_data[3]  # 物理直接映射,无需node_map转换
         path = self.routes[source][destination]
         traffic_id = req_data[7]  # 最后一个元素是traffic_id
 
@@ -1909,12 +1909,6 @@ class BaseModel:
         # return weighted_sum / total_count if total_count > 0 else 0.0
         return total_count * 128 / total_interval_time if total_interval_time > 0 else 0.0
 
-    @lru_cache(maxsize=1024)
-    def node_map(self, node, is_source=True):
-        if is_source:
-            return node % self.config.NUM_COL + self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
-        else:
-            return node % self.config.NUM_COL + node // self.config.NUM_COL * 2 * self.config.NUM_COL
 
     def get_results(self):
         """

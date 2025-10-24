@@ -204,60 +204,69 @@ class Network:
         # 方向控制初始化 - 将物理节点ID转换为IP位置集合
         self._init_direction_control()
 
-        for ip_pos in set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST):
-            self.cross_point["horizontal"][ip_pos]["TL"] = [None] * 2
-            self.cross_point["horizontal"][ip_pos]["TR"] = [None] * 2
-            self.cross_point["vertical"][ip_pos]["TU"] = [None] * 2
-            self.cross_point["vertical"][ip_pos]["TD"] = [None] * 2
-            self.inject_queues["TL"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
-            self.inject_queues["TR"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
-            self.inject_queues["TU"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
-            self.inject_queues["TD"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
-            self.inject_queues["EQ"][ip_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_EQ)
-            self.inject_queues_pre["TL"][ip_pos] = None
-            self.inject_queues_pre["TR"][ip_pos] = None
-            self.inject_queues_pre["TU"][ip_pos] = None
-            self.inject_queues_pre["TD"][ip_pos] = None
-            self.inject_queues_pre["EQ"][ip_pos] = None
-            for key in self.config.CH_NAME_LIST:
-                self.IQ_channel_buffer_pre[key][ip_pos] = None
-                self.EQ_channel_buffer_pre[key][ip_pos - config.NUM_COL] = None
-            for key in self.arrive_node_pre:
-                self.arrive_node_pre[key][ip_pos - config.NUM_COL] = None
-            self.eject_queues["TU"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
-            self.eject_queues["TD"][ip_pos - config.NUM_COL] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
-            self.eject_queues_in_pre["TU"][ip_pos - config.NUM_COL] = None
-            self.eject_queues_in_pre["TD"][ip_pos - config.NUM_COL] = None
-            self.EQ_UE_Counters["TU"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0, "T0": 0}
-            self.EQ_UE_Counters["TD"][ip_pos - config.NUM_COL] = {"T2": 0, "T1": 0}
+        # 新架构: 为所有节点初始化所有资源（不区分IP节点和非IP节点）
+        for node_pos in range(config.NUM_NODE):
+            # CrossPoint
+            self.cross_point["horizontal"][node_pos]["TL"] = [None] * 2
+            self.cross_point["horizontal"][node_pos]["TR"] = [None] * 2
+            self.cross_point["vertical"][node_pos]["TU"] = [None] * 2
+            self.cross_point["vertical"][node_pos]["TD"] = [None] * 2
 
+            # Inject/Eject queues
+            self.inject_queues["TL"][node_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
+            self.inject_queues["TR"][node_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_HORIZONTAL)
+            self.inject_queues["TU"][node_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
+            self.inject_queues["TD"][node_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_VERTICAL)
+            self.inject_queues["EQ"][node_pos] = deque(maxlen=config.IQ_OUT_FIFO_DEPTH_EQ)
+            self.inject_queues_pre["TL"][node_pos] = None
+            self.inject_queues_pre["TR"][node_pos] = None
+            self.inject_queues_pre["TU"][node_pos] = None
+            self.inject_queues_pre["TD"][node_pos] = None
+            self.inject_queues_pre["EQ"][node_pos] = None
+
+            self.eject_queues["TU"][node_pos] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
+            self.eject_queues["TD"][node_pos] = deque(maxlen=config.EQ_IN_FIFO_DEPTH)
+            self.eject_queues_in_pre["TU"][node_pos] = None
+            self.eject_queues_in_pre["TD"][node_pos] = None
+
+            # EQ UE Counters
+            self.EQ_UE_Counters["TU"][node_pos] = {"T2": 0, "T1": 0, "T0": 0}
+            self.EQ_UE_Counters["TD"][node_pos] = {"T2": 0, "T1": 0}
+
+            # Channel buffers
+            for key in self.config.CH_NAME_LIST:
+                self.IQ_channel_buffer_pre[key][node_pos] = None
+                self.EQ_channel_buffer_pre[key][node_pos] = None
+            for key in self.arrive_node_pre:
+                self.arrive_node_pre[key][node_pos] = None
+
+            # Round robin
             for key in self.round_robin.keys():
                 if key == "IQ":
                     for fifo_name in ["TR", "TL", "TU", "TD", "EQ"]:
-                        self.round_robin[key][fifo_name][ip_pos] = deque()
-                        self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque()
+                        self.round_robin[key][fifo_name][node_pos] = deque()
                         for ch_name in self.IQ_channel_buffer.keys():
-                            self.round_robin[key][fifo_name][ip_pos].append(ch_name)
-                            self.round_robin[key][fifo_name][ip_pos - config.NUM_COL].append(ch_name)
+                            self.round_robin[key][fifo_name][node_pos].append(ch_name)
                 elif key == "EQ":
                     for ch_name in self.IQ_channel_buffer.keys():
-                        self.round_robin[key][ch_name][ip_pos] = deque([0, 1, 2, 3])
-                        self.round_robin[key][ch_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3])
+                        self.round_robin[key][ch_name][node_pos] = deque([0, 1, 2, 3])
                 else:
                     for fifo_name in ["TU", "TD", "EQ"]:
-                        self.round_robin[key][fifo_name][ip_pos] = deque([0, 1, 2, 3])
-                        self.round_robin[key][fifo_name][ip_pos - config.NUM_COL] = deque([0, 1, 2, 3])
+                        self.round_robin[key][fifo_name][node_pos] = deque([0, 1, 2, 3])
 
-            self.inject_time[ip_pos] = []
-            self.eject_time[ip_pos - config.NUM_COL] = []
-            self.avg_inject_time[ip_pos] = 0
-            self.avg_eject_time[ip_pos - config.NUM_COL] = 1
+            # Timing statistics
+            self.inject_time[node_pos] = []
+            self.eject_time[node_pos] = []
+            self.avg_inject_time[node_pos] = 0
+            self.avg_eject_time[node_pos] = 1
 
+        # 新架构: 基于C2C的link初始化逻辑
+        # 1. 创建普通链路（根据邻接矩阵）
         for i in range(config.NUM_NODE):
             for j in range(config.NUM_NODE):
-                if adjacency_matrix[i][j] == 1 and i - j != config.NUM_COL:
+                if adjacency_matrix[i][j] == 1:
                     # 判断链路类型：纵向链路还是横向链路
-                    if abs(i - j) == config.NUM_COL or abs(i - j) == config.NUM_COL * 2:
+                    if abs(i - j) == config.NUM_COL:
                         # 纵向链路
                         slice_count = config.SLICE_PER_LINK_VERTICAL
                     else:
@@ -269,102 +278,80 @@ class Network:
                         "ITag_count": 0,
                         "empty_count": 0,
                         "total_cycles": 0,
-                        # 按下环尝试次数分组的统计
                         "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
                         "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                     }
-                    # 改造links_tag：创建Slot对象数组（每个seat一个Slot）
                     self.links_tag[(i, j)] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(slice_count)]
                     self.global_slot_id_counter += slice_count
-            if i in range(0, config.NUM_COL):
-                self.links[(i, i)] = [None] * 2
-                self.links[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [None] * 2
-                self.links_flow_stat[(i, i)] = {
+
+        # 2. 为边缘节点创建自环链路（用于Tag循环）
+        for node_id in range(config.NUM_NODE):
+            row = node_id // config.NUM_COL
+            col = node_id % config.NUM_COL
+
+            # 检查是否需要水平自环（左右边缘）
+            if col == 0 or col == config.NUM_COL - 1:
+                key = (node_id, node_id, 'h')  # 水平自环
+                self.links[key] = [None] * 2
+                self.links_flow_stat[key] = {
                     "ITag_count": 0,
                     "empty_count": 0,
                     "total_cycles": 0,
-                    # 按下环尝试次数分组的统计
                     "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
                     "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                 }
-                self.links_flow_stat[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = {
+                self.links_tag[key] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(2)]
+                self.global_slot_id_counter += 2
+
+            # 检查是否需要垂直自环（上下边缘）
+            if row == 0 or row == config.NUM_ROW - 1:
+                key = (node_id, node_id, 'v')  # 垂直自环
+                self.links[key] = [None] * 2
+                self.links_flow_stat[key] = {
                     "ITag_count": 0,
                     "empty_count": 0,
                     "total_cycles": 0,
-                    # 按下环尝试次数分组的统计
                     "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
                     "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
                 }
-                # 改造links_tag：创建Slot对象数组（环形边界链路）
-                self.links_tag[(i, i)] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(2)]
+                self.links_tag[key] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(2)]
                 self.global_slot_id_counter += 2
 
-                self.links_tag[(i + config.NUM_NODE - config.NUM_COL * 2, i + config.NUM_NODE - config.NUM_COL * 2)] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(2)]
-                self.global_slot_id_counter += 2
-            if i % config.NUM_COL == 0 and (i // config.NUM_COL) % 2 != 0:
-                self.links[(i, i)] = [None] * 2
-                self.links[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [None] * 2
-                self.links_flow_stat[(i, i)] = {
-                    "ITag_count": 0,
-                    "empty_count": 0,
-                    "total_cycles": 0,
-                    # 按下环尝试次数分组的统计
-                    "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
-                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
-                }
-                self.links_flow_stat[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = {
-                    "ITag_count": 0,
-                    "empty_count": 0,
-                    "total_cycles": 0,
-                    # 按下环尝试次数分组的统计
-                    "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
-                    "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
-                }
-                # 改造links_tag：创建Slot对象数组（垂直环形边界）
-                self.links_tag[(i, i)] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(2)]
-                self.global_slot_id_counter += 2
-                self.links_tag[(i + config.NUM_COL - 1, i + config.NUM_COL - 1)] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(2)]
-                self.global_slot_id_counter += 2
+        for pos in range(config.NUM_NODE):
+            # 新架构: Ring Bridge在同一节点，键直接使用节点号
+            self.ring_bridge["TL"][pos] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
+            self.ring_bridge["TR"][pos] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
+            self.ring_bridge["TU"][pos] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
+            self.ring_bridge["TD"][pos] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
+            self.ring_bridge["EQ"][pos] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
 
-        for row in range(1, config.NUM_ROW, 2):
-            for col in range(config.NUM_COL):
-                pos = row * config.NUM_COL + col
-                next_pos = pos - config.NUM_COL
-                self.ring_bridge["TL"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
-                self.ring_bridge["TR"][(pos, next_pos)] = deque(maxlen=config.RB_IN_FIFO_DEPTH)
-                self.ring_bridge["TU"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
-                self.ring_bridge["TD"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
-                self.ring_bridge["EQ"][(pos, next_pos)] = deque(maxlen=config.RB_OUT_FIFO_DEPTH)
+            self.ring_bridge_pre["TL"][pos] = None
+            self.ring_bridge_pre["TR"][pos] = None
+            self.ring_bridge_pre["TU"][pos] = None
+            self.ring_bridge_pre["TD"][pos] = None
+            self.ring_bridge_pre["EQ"][pos] = None
 
-                self.ring_bridge_pre["TL"][(pos, next_pos)] = None
-                self.ring_bridge_pre["TR"][(pos, next_pos)] = None
-                self.ring_bridge_pre["TU"][(pos, next_pos)] = None
-                self.ring_bridge_pre["TD"][(pos, next_pos)] = None
-                self.ring_bridge_pre["EQ"][(pos, next_pos)] = None
+            self.RB_UE_Counters["TL"][pos] = {"T2": 0, "T1": 0, "T0": 0}
+            self.RB_UE_Counters["TR"][pos] = {"T2": 0, "T1": 0}
 
-                self.RB_UE_Counters["TL"][(pos, next_pos)] = {"T2": 0, "T1": 0, "T0": 0}
-                self.RB_UE_Counters["TR"][(pos, next_pos)] = {"T2": 0, "T1": 0}
-
+        # 新架构: 所有节点都可以作为IP节点
         for ip_type in self.num_recv.keys():
-            source_positions = getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST")
-            for source in source_positions:
-                destination = source - config.NUM_COL
+            for source in range(config.NUM_NODE):
+                destination = source  # 新架构: source和destination是同一节点
                 self.num_send[ip_type][source] = 0
                 self.num_recv[ip_type][destination] = 0
                 self.per_send_throughput[ip_type][source] = 0
                 self.per_recv_throughput[ip_type][destination] = 0
 
         for ip_type in self.IQ_channel_buffer.keys():
-            for ip_index in getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST"):
-                ip_recv_index = ip_index - config.NUM_COL
+            for ip_index in range(config.NUM_NODE):
                 self.IQ_channel_buffer[ip_type][ip_index] = deque(maxlen=config.IQ_CH_FIFO_DEPTH)
-                self.EQ_channel_buffer[ip_type][ip_recv_index] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
                 self.EQ_channel_buffer[ip_type][ip_index] = deque(maxlen=config.EQ_CH_FIFO_DEPTH)
         for ip_type in self.last_select.keys():
-            for ip_index in getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST"):
+            for ip_index in range(config.NUM_NODE):
                 self.last_select[ip_type][ip_index] = "write"
         for ip_type in self.throughput.keys():
-            for ip_index in getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST"):
+            for ip_index in range(config.NUM_NODE):
                 self.throughput[ip_type][ip_index] = [0, 0, 10000000, 0]
 
         # 初始化RB_CAPACITY和EQ_CAPACITY (所有CrossPoint共享)
@@ -418,9 +405,8 @@ class Network:
         from .cross_point import CrossPoint
 
         self.crosspoints = {}
-        all_ip_positions = set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST)
-
-        for ip_pos in all_ip_positions:
+        # 新架构: 所有节点都有CrossPoint
+        for ip_pos in range(config.NUM_NODE):
             # 创建horizontal和vertical CrossPoint
             cp_h = CrossPoint(ip_pos, "horizontal", config, network_ref=self)
             cp_v = CrossPoint(ip_pos, "vertical", config, network_ref=self)
@@ -474,18 +460,21 @@ class Network:
         self.links[link][slice_index] = flit
 
     def can_move_to_next(self, flit, current, next_node):
-        # 1. flit不进入Cross Point
-        if flit.source - flit.destination == self.config.NUM_COL:
+        # 新架构: 判断是否直接到EQ（source和destination相同）
+        if flit.source == flit.destination or len(flit.path) <= 1:
             return len(self.inject_queues["EQ"]) < self.config.IQ_OUT_FIFO_DEPTH_EQ
-        elif current - next_node == self.config.NUM_COL:
-            # 向 Ring Bridge 移动. v1.3 在IQ中分TU和TD两个FIFO
-            if len(flit.path) > 2 and flit.path[2] - flit.path[1] == self.config.NUM_COL * 2:
-                return len(self.inject_queues["TD"][current]) < self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
-            elif len(flit.path) > 2 and flit.path[2] - flit.path[1] == -self.config.NUM_COL * 2:
-                return len(self.inject_queues["TU"][current]) < self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
-            else:
-                raise Exception(f"Invalid path: {flit.path}")
 
+        # 纵向环移动（上下方向）
+        if abs(current - next_node) == self.config.NUM_COL:
+            # 判断向上还是向下
+            if next_node > current:
+                # 向下移动
+                return len(self.inject_queues["TD"][current]) < self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
+            else:
+                # 向上移动
+                return len(self.inject_queues["TU"][current]) < self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
+
+        # 横向环移动（左右方向）
         direction = "TR" if next_node == current + 1 else "TL"
         link = (current, next_node)
 
@@ -538,37 +527,94 @@ class Network:
             self.crosspoints[ip_pos]["vertical"].update_excess_ITag()
 
     def update_cross_point(self):
-        for ip_pos in set(self.config.DDR_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST + self.config.GDMA_SEND_POSITION_LIST):
-            left_pos = ip_pos - 1 if ip_pos % self.config.NUM_COL != 0 else ip_pos
-            right_pos = ip_pos + 1 if ip_pos % self.config.NUM_COL != self.config.NUM_COL - 1 else ip_pos
-            up_pos = ip_pos - self.config.NUM_COL * 3 if ip_pos // self.config.NUM_COL != 1 else ip_pos - self.config.NUM_COL
-            down_pos = ip_pos + self.config.NUM_COL * 1 if ip_pos // self.config.NUM_COL != self.config.NUM_ROW - 1 else ip_pos - self.config.NUM_COL
+        """新架构: 基于物理直接映射的CrossPoint更新"""
+        # 新架构: 所有节点都有CrossPoint
+        for ip_pos in range(self.config.NUM_NODE):
+            row = ip_pos // self.config.NUM_COL
+            col = ip_pos % self.config.NUM_COL
 
-            # Update cross point connections
-            self.cross_point["horizontal"][ip_pos]["TR"] = [self.links[(left_pos, ip_pos)][-1], self.links[(ip_pos, right_pos)][0]]
-            self.cross_point["horizontal"][ip_pos]["TL"] = [self.links[(ip_pos, left_pos)][0], self.links[(right_pos, ip_pos)][-1]]
-            self.cross_point["vertical"][ip_pos]["TU"] = [self.links[(down_pos, ip_pos - self.config.NUM_COL)][-1], self.links[(ip_pos - self.config.NUM_COL, up_pos)][0]]
-            self.cross_point["vertical"][ip_pos]["TD"] = [self.links[(ip_pos - self.config.NUM_COL, down_pos)][0], self.links[(up_pos, ip_pos - self.config.NUM_COL)][-1]]
+            # 计算物理邻居位置
+            left_pos = ip_pos - 1 if col > 0 else None
+            right_pos = ip_pos + 1 if col < self.config.NUM_COL - 1 else None
+            up_pos = ip_pos - self.config.NUM_COL if row > 0 else None
+            down_pos = ip_pos + self.config.NUM_COL if row < self.config.NUM_ROW - 1 else None
 
-            # Update crosspoint conflict status pipeline queue based on [-1] positions having flits
-            # For horizontal crosspoint conflicts - update pipeline queue
-            new_tr_conflict = self.links[(left_pos, ip_pos)][-1] is not None
-            new_tl_conflict = self.links[(right_pos, ip_pos)][-1] is not None
+            # 水平CrossPoint连接 - TR方向 (向右)
+            if right_pos is not None:
+                # 有右邻居: arrival来自左邻居, departure去往右邻居
+                arrival_link = (left_pos, ip_pos) if left_pos is not None else (ip_pos, ip_pos, 'h')
+                departure_link = (ip_pos, right_pos)
+            else:
+                # 右边界: 使用水平自环
+                arrival_link = (left_pos, ip_pos) if left_pos is not None else (ip_pos, ip_pos, 'h')
+                departure_link = (ip_pos, ip_pos, 'h')
 
-            # Insert new state at front and keep queue length = 2
+            arrival_slice = self.links[arrival_link][-1] if arrival_link in self.links else None
+            departure_slice = self.links[departure_link][0] if departure_link in self.links else None
+            self.cross_point["horizontal"][ip_pos]["TR"] = [arrival_slice, departure_slice]
+
+            # 水平CrossPoint连接 - TL方向 (向左)
+            if left_pos is not None:
+                # 有左邻居: arrival来自右邻居, departure去往左邻居
+                arrival_link = (right_pos, ip_pos) if right_pos is not None else (ip_pos, ip_pos, 'h')
+                departure_link = (ip_pos, left_pos)
+            else:
+                # 左边界: 使用水平自环
+                arrival_link = (right_pos, ip_pos) if right_pos is not None else (ip_pos, ip_pos, 'h')
+                departure_link = (ip_pos, ip_pos, 'h')
+
+            arrival_slice = self.links[arrival_link][-1] if arrival_link in self.links else None
+            departure_slice = self.links[departure_link][0] if departure_link in self.links else None
+            self.cross_point["horizontal"][ip_pos]["TL"] = [arrival_slice, departure_slice]
+
+            # 垂直CrossPoint连接 - TU方向 (向上)
+            if up_pos is not None:
+                # 有上邻居: arrival来自下邻居, departure去往上邻居
+                arrival_link = (down_pos, ip_pos) if down_pos is not None else (ip_pos, ip_pos, 'v')
+                departure_link = (ip_pos, up_pos)
+            else:
+                # 上边界: 使用垂直自环
+                arrival_link = (down_pos, ip_pos) if down_pos is not None else (ip_pos, ip_pos, 'v')
+                departure_link = (ip_pos, ip_pos, 'v')
+
+            arrival_slice = self.links[arrival_link][-1] if arrival_link in self.links else None
+            departure_slice = self.links[departure_link][0] if departure_link in self.links else None
+            self.cross_point["vertical"][ip_pos]["TU"] = [arrival_slice, departure_slice]
+
+            # 垂直CrossPoint连接 - TD方向 (向下)
+            if down_pos is not None:
+                # 有下邻居: arrival来自上邻居, departure去往下邻居
+                arrival_link = (up_pos, ip_pos) if up_pos is not None else (ip_pos, ip_pos, 'v')
+                departure_link = (ip_pos, down_pos)
+            else:
+                # 下边界: 使用垂直自环
+                arrival_link = (up_pos, ip_pos) if up_pos is not None else (ip_pos, ip_pos, 'v')
+                departure_link = (ip_pos, ip_pos, 'v')
+
+            arrival_slice = self.links[arrival_link][-1] if arrival_link in self.links else None
+            departure_slice = self.links[departure_link][0] if departure_link in self.links else None
+            self.cross_point["vertical"][ip_pos]["TD"] = [arrival_slice, departure_slice]
+
+            # 更新CrossPoint冲突状态 (基于arrival slice是否有flit)
+            # 水平冲突
+            tr_arrival_link = (left_pos, ip_pos) if left_pos is not None else (ip_pos, ip_pos, 'h')
+            tl_arrival_link = (right_pos, ip_pos) if right_pos is not None else (ip_pos, ip_pos, 'h')
+            new_tr_conflict = self.links[tr_arrival_link][-1] is not None if tr_arrival_link in self.links else False
+            new_tl_conflict = self.links[tl_arrival_link][-1] is not None if tl_arrival_link in self.links else False
+
             self.crosspoint_conflict["horizontal"][ip_pos]["TR"].insert(0, new_tr_conflict)
             self.crosspoint_conflict["horizontal"][ip_pos]["TR"] = self.crosspoint_conflict["horizontal"][ip_pos]["TR"][:2]
-
             self.crosspoint_conflict["horizontal"][ip_pos]["TL"].insert(0, new_tl_conflict)
             self.crosspoint_conflict["horizontal"][ip_pos]["TL"] = self.crosspoint_conflict["horizontal"][ip_pos]["TL"][:2]
 
-            # For vertical crosspoint conflicts - update pipeline queue
-            new_tu_conflict = self.links[(down_pos, ip_pos - self.config.NUM_COL)][-1] is not None
-            new_td_conflict = self.links[(up_pos, ip_pos - self.config.NUM_COL)][-1] is not None
+            # 垂直冲突
+            tu_arrival_link = (down_pos, ip_pos) if down_pos is not None else (ip_pos, ip_pos, 'v')
+            td_arrival_link = (up_pos, ip_pos) if up_pos is not None else (ip_pos, ip_pos, 'v')
+            new_tu_conflict = self.links[tu_arrival_link][-1] is not None if tu_arrival_link in self.links else False
+            new_td_conflict = self.links[td_arrival_link][-1] is not None if td_arrival_link in self.links else False
 
             self.crosspoint_conflict["vertical"][ip_pos]["TU"].insert(0, new_tu_conflict)
             self.crosspoint_conflict["vertical"][ip_pos]["TU"] = self.crosspoint_conflict["vertical"][ip_pos]["TU"][:2]
-
             self.crosspoint_conflict["vertical"][ip_pos]["TD"].insert(0, new_td_conflict)
             self.crosspoint_conflict["vertical"][ip_pos]["TD"] = self.crosspoint_conflict["vertical"][ip_pos]["TD"][:2]
 
@@ -584,42 +630,47 @@ class Network:
             flit.is_arrive = False
             flit.is_on_station = False
             flit.current_link = (current, next_node)
-            if flit.source - flit.destination == self.config.NUM_COL:
+
+            # 新架构: 判断是否到达目的地
+            if next_node == flit.destination:
                 flit.is_arrive = True
-            elif current - next_node == self.config.NUM_COL:
-                if len(flit.path) > 2 and flit.path[flit.path_index + 2] - next_node == 2 * self.config.NUM_COL:
-                    flit.current_seat_index = -1
-                elif len(flit.path) > 2 and flit.path[flit.path_index + 2] - next_node == -2 * self.config.NUM_COL:
-                    flit.current_seat_index = -2
+            elif abs(current - next_node) == self.config.NUM_COL:
+                # 纵向移动（向上或向下）
+                if len(flit.path) > flit.path_index + 2:
+                    next_next_node = flit.path[flit.path_index + 2]
+                    if next_next_node - next_node == self.config.NUM_COL:
+                        flit.current_seat_index = -1  # 继续向下
+                    elif next_next_node - next_node == -self.config.NUM_COL:
+                        flit.current_seat_index = -2  # 继续向上
+                    else:
+                        flit.current_seat_index = 0  # 其他方向
+                else:
+                    flit.current_seat_index = 0
             else:
+                # 横向移动
                 flit.current_seat_index = 0
 
             return
 
         # 计算行和列的起始和结束点
-        current, next_node = flit.current_link
-        if current - next_node != self.config.NUM_COL:
+        current, next_node = flit.current_link[:2] if len(flit.current_link) == 3 else flit.current_link
+
+        # 新架构: 所有普通link（包括纵向link）都需要处理
+        # 只有自环link（current == next_node）才是ring_bridge
+        if current != next_node:
             row_start = (current // self.config.NUM_COL) * self.config.NUM_COL
-            row_start = row_start if (row_start // self.config.NUM_COL) % 2 != 0 else -1
-            row_end = row_start + self.config.NUM_COL - 1 if row_start > 0 else -1
-            col_start = current % (self.config.NUM_COL * 2)
-            col_start = col_start if col_start < self.config.NUM_COL else -1
-            col_end = col_start + self.config.NUM_NODE - self.config.NUM_COL * 2 if col_start >= 0 else -1
+            row_end = row_start + self.config.NUM_COL - 1
+            col_start = current % self.config.NUM_COL
+            col_end = col_start + self.config.NUM_NODE - self.config.NUM_COL
 
             link = self.links.get(flit.current_link)
 
-            # Plan non ring bridge moves
+            # Plan non ring bridge moves (包括横向和纵向link)
             return self._handle_flit(flit, link, current, next_node, row_start, row_end, col_start, col_end)
 
     def _position_to_physical_node(self, position):
-        """将position反向映射为物理节点ID（用于dest mapping）
-
-        dest mapping公式: position = node % NUM_COL + (node // NUM_COL) * 2 * NUM_COL
-        反向: node = (position // (2 * NUM_COL)) * NUM_COL + (position % NUM_COL)
-        """
-        row = position // (2 * self.config.NUM_COL)
-        col = position % self.config.NUM_COL
-        return row * self.config.NUM_COL + col
+        """新架构: position就是physical node ID，无需映射"""
+        return position
 
     def _can_eject_in_order(self, flit: Flit, target_eject_node, direction=None):
         """检查flit是否可以按序下环（包含方向检查）
@@ -799,35 +850,44 @@ class Network:
 
     def execute_moves(self, flit: Flit, cycle):
         if not flit.is_arrive:
-            current, next_node = flit.current_link
-            if current - next_node != self.config.NUM_COL:
+            current, next_node = flit.current_link[:2] if len(flit.current_link) == 3 else flit.current_link
+            if current != next_node:
+                # 新架构: flit在普通link上
                 link = self.links.get(flit.current_link)
                 self.set_link_slice(flit.current_link, flit.current_seat_index, flit, cycle)
             else:
-                # 将 flit 放入 ring_bridge 的相应方向
+                # 新架构: flit在ring_bridge上（同一节点的自环）
                 if not flit.is_on_station:
                     # 使用字典映射 seat_index 到 ring_bridge 的方向和深度限制
                     direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
                     if direction is None:
                         return False
-                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][flit.current_link]) < max_depth and self.ring_bridge_pre[direction][flit.current_link] is None:
-                        self.ring_bridge_pre[direction][flit.current_link] = flit
+                    # 新架构: ring_bridge键直接使用节点号
+                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][current]) < max_depth and self.ring_bridge_pre[direction][current] is None:
+                        self.ring_bridge_pre[direction][current] = flit
                         flit.is_on_station = True
             return False
         else:
             if flit.current_link is not None:
-                current, next_node = flit.current_link
+                current, next_node = flit.current_link[:2] if len(flit.current_link) == 3 else flit.current_link
             flit.arrival_network_cycle = cycle
 
-            if flit.source - flit.destination == self.config.NUM_COL:
+            # 新架构: 判断是否直接到EQ（source和destination相同或路径长度为1）
+            if flit.source == flit.destination or len(flit.path) <= 1:
                 flit.flit_position = f"IQ_EQ"
                 flit.is_arrived = True
 
                 return True
-            elif current - next_node == self.config.NUM_COL * 2 or (current == next_node and current not in range(0, self.config.NUM_COL)):
-                direction = "TU"
-                queue = self.eject_queues["TU"]
-                queue_pre = self.eject_queues_in_pre["TU"]
+            elif current == next_node:  # 新架构: Ring Bridge在同一节点
+                # 根据destination判断下环方向
+                if flit.destination < current:
+                    direction = "TU"  # 目标在上方
+                    queue = self.eject_queues["TU"]
+                    queue_pre = self.eject_queues_in_pre["TU"]
+                else:
+                    direction = "TD"  # 目标在下方
+                    queue = self.eject_queues["TD"]
+                    queue_pre = self.eject_queues_in_pre["TD"]
             else:
                 direction = "TD"
                 queue = self.eject_queues["TD"]
@@ -844,16 +904,16 @@ class Network:
 
     @property
     def rn_positions(self):
-        """Cached property for RN positions"""
+        """Cached property for RN positions - 新架构: 所有节点"""
         if self._rn_positions is None:
-            self._rn_positions = list(set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST))
+            self._rn_positions = list(range(self.config.NUM_NODE))
         return self._rn_positions
 
     @property
     def sn_positions(self):
-        """Cached property for SN positions"""
+        """Cached property for SN positions - 新架构: 所有节点"""
         if self._sn_positions is None:
-            self._sn_positions = list(set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST))
+            self._sn_positions = list(range(self.config.NUM_NODE))
         return self._sn_positions
 
     def clear_position_cache(self):
@@ -864,31 +924,23 @@ class Network:
 
     @property
     def all_ip_positions(self):
-        """Cached property for all IP positions"""
+        """Cached property for all IP positions - 新架构: 所有节点"""
         if self._all_ip_positions is None:
-            self._all_ip_positions = list(
-                set(
-                    self.config.DDR_SEND_POSITION_LIST
-                    + self.config.SDMA_SEND_POSITION_LIST
-                    + self.config.CDMA_SEND_POSITION_LIST
-                    + self.config.L2M_SEND_POSITION_LIST
-                    + self.config.GDMA_SEND_POSITION_LIST
-                )
-            )
+            self._all_ip_positions = list(range(self.config.NUM_NODE))
         return self._all_ip_positions
 
     @property
     def rn_positions(self):
-        """Cached property for RN positions"""
+        """Cached property for RN positions - 新架构: 所有节点"""
         if self._rn_positions is None:
-            self._rn_positions = list(set(self.config.GDMA_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.CDMA_SEND_POSITION_LIST))
+            self._rn_positions = list(range(self.config.NUM_NODE))
         return self._rn_positions
 
     @property
     def sn_positions(self):
-        """Cached property for SN positions"""
+        """Cached property for SN positions - 新架构: 所有节点"""
         if self._sn_positions is None:
-            self._sn_positions = list(set(self.config.DDR_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST))
+            self._sn_positions = list(range(self.config.NUM_NODE))
         return self._sn_positions
 
     # ==================== 新的handle flit辅助函数 ====================
@@ -897,21 +949,38 @@ class Network:
         """
         继续绕环
 
+        新架构: 纵向link是直接连接，不应该创建自环
+        只有边界节点的自环才是合法的（用于Tag circulation）
+
         Args:
             flit: 当前flit
             link: 当前链路
             next_pos: 下一个绕环位置
         """
         link[flit.current_seat_index] = None
-        old_link = flit.current_link
-        new_link = (flit.current_link[1], next_pos)
+        current_node = flit.current_link[1]
 
-        # 调试输出
-        if new_link[0] == new_link[1] and new_link not in self.links:
-            print(f"WARNING: Invalid self-loop link {new_link} for flit {flit.flit_id}")
-            print(f"  Old link: {old_link}, next_pos: {next_pos}")
+        # 新架构: 如果next_pos等于current_node且不是真正的自环边界，说明到达目的地
+        if next_pos == current_node:
+            new_link = (current_node, next_pos)
+            if new_link not in self.links:
+                # 这不是合法的自环，flit应该已经到达目的地
+                flit.is_arrive = True
+                flit.current_link = new_link
+                return
+
+        new_link = (current_node, next_pos)
+
+        # 新架构: 检查是否是合法的link
+        if new_link not in self.links:
+            # 如果link不存在，说明这是旧架构的逻辑
+            # 新架构中所有纵向移动都是直接连接，不经过自环
+            # 这种情况下flit应该直接到达目的地，设置为arrived
+            print(f"WARNING: Invalid link {new_link} for flit {flit.flit_id}, marking as arrived")
             print(f"  Path: {flit.path}, path_index: {flit.path_index}")
-            print(f"  is_delay: {flit.is_delay}, current_position: {flit.current_position}")
+            flit.is_arrive = True
+            flit.current_link = new_link  # 仍然设置link，后续execute_moves会处理
+            return
 
         flit.current_link = new_link
         flit.current_seat_index = 0
@@ -950,11 +1019,11 @@ class Network:
             elif next_node == col_start:
                 # 上边界
                 direction = "TD"
-                next_pos = next_node + self.config.NUM_COL * 2
+                next_pos = next_node + self.config.NUM_COL
             elif next_node == col_end:
                 # 下边界
                 direction = "TU"
-                next_pos = next_node - self.config.NUM_COL * 2
+                next_pos = next_node - self.config.NUM_COL
             else:
                 # 不应该到这里
                 direction = None
@@ -964,21 +1033,37 @@ class Network:
             if current - next_node == 1:
                 # 向左
                 direction = "TL"
-                next_pos = max(next_node - 1, row_start)
+                # 检查是否已经到达左边界
+                if next_node == row_start:
+                    next_pos = next_node  # 已到边界，标记为当前位置
+                else:
+                    next_pos = next_node - 1
             else:
                 # 向右
                 direction = "TR"
-                next_pos = min(next_node + 1, row_end)
+                # 检查是否已经到达右边界
+                if next_node == row_end:
+                    next_pos = next_node  # 已到边界，标记为当前位置
+                else:
+                    next_pos = next_node + 1
         else:
             # 非边界纵向环
-            if current - next_node == self.config.NUM_COL * 2:
+            if current - next_node == self.config.NUM_COL:
                 # 向上
                 direction = "TU"
-                next_pos = max(next_node - self.config.NUM_COL * 2, col_start)
+                # 检查是否已经到达上边界
+                if next_node == col_start:
+                    next_pos = next_node  # 已到边界，标记为当前位置
+                else:
+                    next_pos = next_node - self.config.NUM_COL
             else:
                 # 向下
                 direction = "TD"
-                next_pos = min(next_node + self.config.NUM_COL * 2, col_end)
+                # 检查是否已经到达下边界
+                if next_node == col_end:
+                    next_pos = next_node  # 已到边界，标记为当前位置
+                else:
+                    next_pos = next_node + self.config.NUM_COL
 
         # 判断是否应该尝试下环：只有绕回到起始位置才尝试
         should_eject = next_node == flit.current_position
@@ -1018,40 +1103,13 @@ class Network:
         # 4. 判断下环场景
         if has_next_step:
             # 还有后续路径
-            if next_node - next_step == self.config.NUM_COL:
-                # 场景1：需要从横向环下环到ring_bridge（进入纵向环）
-                state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
-                flit.eject_attempts_h += 1
-
-                # 获取对应的CrossPoint对象
-                # 下环发生在next_node (链路终点，IP节点)
-                cp_type = "horizontal" if state["direction"] in ["TL", "TR"] else "vertical"
-                if next_node not in self.crosspoints:
-                    # next_node不是IP节点，跳过下环
-                    self._continue_looping(flit, link, state["next_pos"])
-                    return
-
-                crosspoint = self.crosspoints[next_node][cp_type]
-
-                success = crosspoint._try_eject(
-                    flit, state["direction"], next_step, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues, can_eject_in_order_func=self._can_eject_in_order
-                )
-
-                if success:
-                    # 下环成功（regular flit已在前面更新了position和path_index）
-                    return
-
-                # 下环失败：标记为delay flit并继续绕环
-                if not flit.is_delay:
-                    flit.is_delay = True
-
-                upgrade_to = crosspoint._determine_etag_upgrade(flit, state["direction"])
-                if upgrade_to:
-                    flit.ETag_priority = upgrade_to
-                    if upgrade_to == "T0":
-                        crosspoint._register_T0_slot(flit)
-
-                self._continue_looping(flit, link, state["next_pos"])
+            if abs(next_node - next_step) == self.config.NUM_COL:
+                # 新架构：纵向移动（向上或向下）
+                # 直接从当前节点移动到下一个节点，不需要经过ring_bridge
+                link[flit.current_seat_index] = None
+                flit.current_link = (next_node, next_step)
+                flit.current_seat_index = 0
+                return
             else:
                 # 不需要场景1下环
                 if flit.is_delay:
@@ -1118,7 +1176,8 @@ class Network:
                 # 获取对应的CrossPoint对象
                 cp_type = "horizontal" if state["direction"] in ["TL", "TR"] else "vertical"
 
-                crosspoint = self.crosspoints[next_node + self.config.NUM_COL][cp_type]
+                # 新架构: crosspoint直接在目标节点，不需要+NUM_COL偏移
+                crosspoint = self.crosspoints[next_node][cp_type]
 
                 success = crosspoint._try_eject(
                     flit, state["direction"], final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues, can_eject_in_order_func=self._can_eject_in_order
@@ -1284,7 +1343,7 @@ class Network:
 
     def update_fifo_stats_after_move(self, in_pos):
         """在move操作后批量更新所有FIFO统计"""
-        ip_pos = in_pos - self.config.NUM_COL
+        ip_pos = in_pos  # 新架构: in_pos和ip_pos是同一节点
 
         # IQ统计 - inject_queues
         for direction in ["TR", "TL", "TU", "TD", "EQ"]:
@@ -1310,15 +1369,15 @@ class Network:
                 self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type] = max(self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type], depth)
 
         # RB统计 - ring_bridge
-        key = (in_pos, ip_pos)
+        # 新架构: ring_bridge键直接使用节点号
         for direction in ["TR", "TL", "TU", "TD", "EQ"]:
-            if key in self.ring_bridge.get(direction, {}):
-                depth = len(self.ring_bridge[direction][key])
-                if key not in self.fifo_depth_sum["RB"][direction]:
-                    self.fifo_depth_sum["RB"][direction][key] = 0
-                    self.fifo_max_depth["RB"][direction][key] = 0
-                self.fifo_depth_sum["RB"][direction][key] += depth
-                self.fifo_max_depth["RB"][direction][key] = max(self.fifo_max_depth["RB"][direction][key], depth)
+            if in_pos in self.ring_bridge.get(direction, {}):
+                depth = len(self.ring_bridge[direction][in_pos])
+                if in_pos not in self.fifo_depth_sum["RB"][direction]:
+                    self.fifo_depth_sum["RB"][direction][in_pos] = 0
+                    self.fifo_max_depth["RB"][direction][in_pos] = 0
+                self.fifo_depth_sum["RB"][direction][in_pos] += depth
+                self.fifo_max_depth["RB"][direction][in_pos] = max(self.fifo_max_depth["RB"][direction][in_pos], depth)
 
         # EQ统计 - eject_queues
         for direction in ["TU", "TD"]:
