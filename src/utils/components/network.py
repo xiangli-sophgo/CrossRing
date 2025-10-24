@@ -114,10 +114,6 @@ class Network:
         self.links_state_snapshots = []
         # ITag setup
         self.links_tag = {}
-        self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
-        self.tagged_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}  # 环上已标记ITag数
-        self.itag_req_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}  # FIFO中ITag需求数
-        self.excess_ITag_to_remove = {"TL": {}, "TR": {}, "TD": {}, "TU": {}}
 
         # 每个FIFO Entry的等待计数器
         self.fifo_counters = {"TL": {}, "TR": {}}
@@ -193,11 +189,17 @@ class Network:
         # Slot ID全局计数器（用于为每个seat分配唯一ID）
         self.global_slot_id_counter = 0
 
-        # ETag setup
+        # ETag setup (这些数据结构由Network管理，CrossPoint共享引用)
         self.T0_Etag_Order_FIFO = deque()  # T0 Slot ID轮询队列（改为存储slot_id而非(node, flit)）
-        self.RB_UE_Counters = {"TL": {}, "TR": {}}
-        self.EQ_UE_Counters = {"TU": {}, "TD": {}}
+        self.RB_UE_Counters = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}  # 所有CrossPoint共享
+        self.EQ_UE_Counters = {"TU": {}, "TD": {}}  # 所有CrossPoint共享
         self.ETag_BOTHSIDE_UPGRADE = False
+
+        # ITag setup (这些数据结构由Network管理，CrossPoint共享引用)
+        self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
+        self.tagged_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
+        self.itag_req_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
+        self.excess_ITag_to_remove = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
 
         # 方向控制初始化 - 将物理节点ID转换为IP位置集合
         self._init_direction_control()
@@ -343,17 +345,6 @@ class Network:
                 self.RB_UE_Counters["TL"][(pos, next_pos)] = {"T2": 0, "T1": 0, "T0": 0}
                 self.RB_UE_Counters["TR"][(pos, next_pos)] = {"T2": 0, "T1": 0}
 
-                for direction in ["TL", "TR"]:
-                    self.remain_tag[direction][pos] = config.ITag_MAX_NUM_H
-                    self.itag_req_counter[direction][pos] = 0
-                    self.tagged_counter[direction][pos] = 0
-                    self.excess_ITag_to_remove[direction][pos] = 0
-                for direction in ["TU", "TD"]:
-                    self.remain_tag[direction][pos] = config.ITag_MAX_NUM_V
-                    self.itag_req_counter[direction][pos] = 0
-                    self.tagged_counter[direction][pos] = 0
-                    self.excess_ITag_to_remove[direction][pos] = 0
-
         for ip_type in self.num_recv.keys():
             source_positions = getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST")
             for source in source_positions:
@@ -376,145 +367,71 @@ class Network:
             for ip_index in getattr(config, f"{ip_type[:-2].upper()}_SEND_POSITION_LIST"):
                 self.throughput[ip_type][ip_index] = [0, 0, 10000000, 0]
 
-        self.RB_CAPACITY = {"TL": {}, "TR": {}}
+        # 初始化RB_CAPACITY和EQ_CAPACITY (所有CrossPoint共享)
+        self.RB_CAPACITY = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
         self.EQ_CAPACITY = {"TU": {}, "TD": {}}
 
-        # TL capacity
+        # 容量计算辅助函数
         def _cap_tl(lvl):
             if lvl == "T2":
-                return self.config.TL_Etag_T2_UE_MAX
+                return config.TL_Etag_T2_UE_MAX
             if lvl == "T1":
-                return self.config.TL_Etag_T1_UE_MAX - self.config.TL_Etag_T2_UE_MAX
+                return config.TL_Etag_T1_UE_MAX - config.TL_Etag_T2_UE_MAX
             if lvl == "T0":
-                return self.config.RB_IN_FIFO_DEPTH - self.config.TL_Etag_T1_UE_MAX
+                return config.RB_IN_FIFO_DEPTH - config.TL_Etag_T1_UE_MAX
 
-        # TR capacity
         def _cap_tr(lvl):
             if lvl == "T2":
-                return self.config.TR_Etag_T2_UE_MAX
+                return config.TR_Etag_T2_UE_MAX
             if lvl == "T1":
-                return self.config.RB_IN_FIFO_DEPTH - self.config.TR_Etag_T2_UE_MAX
-            return 0  # TR 无 T0
+                return config.RB_IN_FIFO_DEPTH - config.TR_Etag_T2_UE_MAX
+            return 0
 
-        # TU capacity
         def _cap_tu(lvl):
             if lvl == "T2":
-                return self.config.TU_Etag_T2_UE_MAX
+                return config.TU_Etag_T2_UE_MAX
             if lvl == "T1":
-                return self.config.TU_Etag_T1_UE_MAX - self.config.TU_Etag_T2_UE_MAX
+                return config.TU_Etag_T1_UE_MAX - config.TU_Etag_T2_UE_MAX
             if lvl == "T0":
-                return self.config.EQ_IN_FIFO_DEPTH - self.config.TU_Etag_T1_UE_MAX
+                return config.EQ_IN_FIFO_DEPTH - config.TU_Etag_T1_UE_MAX
 
-        # TD capacity
         def _cap_td(lvl):
             if lvl == "T2":
-                return self.config.TD_Etag_T2_UE_MAX
+                return config.TD_Etag_T2_UE_MAX
             if lvl == "T1":
-                return self.config.EQ_IN_FIFO_DEPTH - self.config.TD_Etag_T2_UE_MAX
-            return 0  # TD 无 T0
+                return config.EQ_IN_FIFO_DEPTH - config.TD_Etag_T2_UE_MAX
+            return 0
 
+        # 为所有RB pair设置容量
         for pair in self.RB_UE_Counters["TL"]:
             self.RB_CAPACITY["TL"][pair] = {lvl: _cap_tl(lvl) for lvl in ("T0", "T1", "T2")}
         for pair in self.RB_UE_Counters["TR"]:
             self.RB_CAPACITY["TR"][pair] = {lvl: _cap_tr(lvl) for lvl in ("T1", "T2")}
 
+        # 为所有EQ位置设置容量
         for pos in self.EQ_UE_Counters["TU"]:
             self.EQ_CAPACITY["TU"][pos] = {lvl: _cap_tu(lvl) for lvl in ("T0", "T1", "T2")}
         for pos in self.EQ_UE_Counters["TD"]:
             self.EQ_CAPACITY["TD"][pos] = {lvl: _cap_td(lvl) for lvl in ("T1", "T2")}
 
-    def _entry_available(self, dir_type, key, level):
-        if dir_type in ("TL", "TR"):
-            cap = self.RB_CAPACITY[dir_type][key][level]
-            occ = self.RB_UE_Counters[dir_type][key][level]
-        else:
-            cap = self.EQ_CAPACITY[dir_type][key][level]
-            occ = self.EQ_UE_Counters[dir_type][key][level]
-        return occ < cap
+        # 创建CrossPoint对象
+        from .cross_point import CrossPoint
 
-    # ------------------------------------------------------------------
-    def _occupy_entry(self, dir_type, key, level, flit):
-        """
-        统一处理占用计数器，并记录 flit.used_entry_level
-        dir_type : "TL"|"TR"|"TU"|"TD"
-        key      : (cur,next) for RB  or  dest_pos for EQ
-        level    : "T0"/"T1"/"T2"
-        """
-        if dir_type in ("TL", "TR"):
-            self.RB_UE_Counters[dir_type][key][level] += 1
-            # flit.flit_position = f"RB_{dir_type}"
-        else:
-            self.EQ_UE_Counters[dir_type][key][level] += 1
-            # flit.flit_position = f"EQ_{dir_type}"
-        flit.used_entry_level = level
+        self.crosspoints = {}
+        all_ip_positions = set(config.DDR_SEND_POSITION_LIST + config.SDMA_SEND_POSITION_LIST + config.CDMA_SEND_POSITION_LIST + config.L2M_SEND_POSITION_LIST + config.GDMA_SEND_POSITION_LIST)
 
-    # ------------------------------------------------------------------
-    # T0 Slot轮询机制辅助方法
-    # ------------------------------------------------------------------
+        for ip_pos in all_ip_positions:
+            # 创建horizontal和vertical CrossPoint
+            cp_h = CrossPoint(ip_pos, "horizontal", config, network_ref=self)
+            cp_v = CrossPoint(ip_pos, "vertical", config, network_ref=self)
 
-    def _register_T0_slot(self, flit):
-        """
-        为Flit注册T0 Slot到轮询队列
+            # 设置ITag配置
+            cp_h.setup_itag("TL", ip_pos, config.ITag_MAX_NUM_H)
+            cp_h.setup_itag("TR", ip_pos, config.ITag_MAX_NUM_H)
+            cp_v.setup_itag("TU", ip_pos, config.ITag_MAX_NUM_V)
+            cp_v.setup_itag("TD", ip_pos, config.ITag_MAX_NUM_V)
 
-        当Flit从T1升级到T0时调用此方法，将当前Slot的slot_id注册到轮询队列。
-
-        Args:
-            flit: 要注册的Flit对象
-
-        Returns:
-            int: 分配的slot_id
-        """
-        # 获取当前Slot的slot_id
-        slot = self.links_tag[flit.current_link][flit.current_seat_index]
-        slot_id = slot.slot_id
-
-        # 注册到轮询队列
-        self.T0_Etag_Order_FIFO.append(slot_id)
-
-        # 记录在flit上（方便快速查询）
-        flit.T0_slot_id = slot_id
-
-        return slot_id
-
-    def _unregister_T0_slot(self, flit):
-        """
-        从轮询队列中注销T0 Slot
-
-        当Flit成功下环或被移除时调用此方法。
-
-        Args:
-            flit: 要注销的Flit对象
-        """
-        if not hasattr(flit, "T0_slot_id") or flit.T0_slot_id is None:
-            return
-
-        # 从队列中移除
-        try:
-            self.T0_Etag_Order_FIFO.remove(flit.T0_slot_id)
-        except ValueError:
-            # slot_id不在队列中，可能已被移除
-            pass
-
-        # 清除flit上的标记（设置为None而不是删除，因为使用了__slots__）
-        flit.T0_slot_id = None
-
-    def _is_T0_slot_winner(self, flit):
-        """
-        检查Flit是否赢得T0轮询仲裁
-
-        Args:
-            flit: 要检查的Flit对象
-
-        Returns:
-            bool: 是否赢得仲裁
-        """
-        if not hasattr(flit, "T0_slot_id") or flit.T0_slot_id is None:
-            return False
-
-        if not self.T0_Etag_Order_FIFO:
-            return False
-
-        return self.T0_Etag_Order_FIFO[0] == flit.T0_slot_id
+            self.crosspoints[ip_pos] = {"horizontal": cp_h, "vertical": cp_v}
 
     def error_log(self, flit, target_id, flit_id):
         if flit and flit.packet_id == target_id and flit.flit_id == flit_id:
@@ -615,20 +532,10 @@ class Network:
 
     def update_excess_ITag(self):
         """在主循环中调用，处理多余ITag释放"""
-        # 处理多余ITag释放（简化版）
-        for direction in ["TL", "TR"]:
-            for node_id in set(self.config.DDR_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST + self.config.GDMA_SEND_POSITION_LIST):
-                if self.excess_ITag_to_remove[direction][node_id] > 0:
-                    # 寻找该节点创建的ITag并释放
-                    for link, tag_info in self.links_tag.items():
-                        slot = tag_info[0]
-                        if slot.itag_reserved and slot.check_itag_match(node_id, direction) and link[0] == node_id:  # ITag回到创建节点
-                            # 释放多余ITag
-                            slot.clear_itag()
-                            self.tagged_counter[direction][node_id] -= 1
-                            self.remain_tag[direction][node_id] += 1
-                            self.excess_ITag_to_remove[direction][node_id] -= 1
-                            break  # 一次只释放一个
+        # 调用所有CrossPoint的update_excess_ITag方法
+        for ip_pos in self.crosspoints:
+            self.crosspoints[ip_pos]["horizontal"].update_excess_ITag()
+            self.crosspoints[ip_pos]["vertical"].update_excess_ITag()
 
     def update_cross_point(self):
         for ip_pos in set(self.config.DDR_SEND_POSITION_LIST + self.config.SDMA_SEND_POSITION_LIST + self.config.L2M_SEND_POSITION_LIST + self.config.GDMA_SEND_POSITION_LIST):
@@ -700,7 +607,6 @@ class Network:
             col_end = col_start + self.config.NUM_NODE - self.config.NUM_COL * 2 if col_start >= 0 else -1
 
             link = self.links.get(flit.current_link)
-            # self.error_log(flit, 1, 0)
 
             # Plan non ring bridge moves
             return self._handle_flit(flit, link, current, next_node, row_start, row_end, col_start, col_end)
@@ -987,172 +893,6 @@ class Network:
 
     # ==================== 新的handle flit辅助函数 ====================
 
-    def _determine_etag_upgrade(self, flit, direction):
-        """
-        判断下环失败后的ETag升级目标
-
-        Args:
-            flit: 当前flit
-            direction: 尝试下环的方向 (TL/TR/TU/TD)
-
-        Returns:
-            str: 升级目标ETag等级 ("T0"/"T1") 或 None（不升级）
-        """
-        if flit.ETag_priority == "T0":
-            return None  # T0不再升级
-
-        # 判断是否是主方向（可升级到T0）
-        is_primary_direction = direction in ["TL", "TU"]
-
-        if flit.ETag_priority == "T2":
-            # T2 → T1升级规则
-            if is_primary_direction:
-                return "T1"  # 主方向无条件升级
-            else:
-                # 反方向需要配置开启
-                return "T1" if self.ETag_BOTHSIDE_UPGRADE else None
-
-        elif flit.ETag_priority == "T1":
-            # T1 → T0升级规则（只有主方向可以升级）
-            if is_primary_direction:
-                # 需要通过保序检查
-                target_node = flit.path[flit.path_index + 1] if flit.path_index + 1 < len(flit.path) else flit.path[flit.path_index]
-                if self._can_upgrade_to_T0_in_order(flit, target_node, direction):
-                    return "T0"
-            return None
-
-        return None
-
-    def _complete_eject(self, flit, direction, target_node, link, key, entry_level):
-        """
-        完成下环操作：设置flit状态、占用entry、更新跟踪表
-
-        Args:
-            flit: 当前flit
-            direction: 下环方向 (TL/TR/TU/TD)
-            target_node: 目标下环节点
-            link: 当前链路
-            key: entry的键（ring_bridge用tuple，eject_queues用int）
-            entry_level: 占用的entry等级 ("T0"/"T1"/"T2")
-        """
-        # 1. 取消T0注册（如果需要）
-        if flit.ETag_priority == "T0":
-            self._unregister_T0_slot(flit)
-
-        # 2. 设置flit状态
-        flit.is_delay = False
-        link[flit.current_seat_index] = None
-
-        if direction in ["TL", "TR"]:
-            # 横向环下环
-            flit.current_link = (flit.current_link[1], target_node)
-            flit.current_seat_index = 0 if direction == "TL" else 1
-        else:  # TU, TD
-            # 纵向环下环到最终目的地
-            flit.is_arrive = True
-            flit.current_seat_index = 0
-
-        # 3. 占用Entry
-        self._occupy_entry(direction, key, entry_level, flit)
-
-        # 4. 更新保序跟踪表
-        self._update_order_tracking_table(flit, target_node, direction)
-
-    def _occupy_best_available_entry(self, flit, direction, key, target_node, link):
-        """
-        根据ETag优先级占用最佳可用Entry
-
-        优先级策略：
-        - T0: T0专用 → T1 → T2
-        - T1: T1 → T2
-        - T2: T2
-
-        Args:
-            flit: 当前flit
-            direction: 下环方向 (TL/TR/TU/TD)
-            key: entry的键
-            target_node: 目标下环节点
-            link: 当前链路
-
-        Returns:
-            bool: 是否成功占用Entry
-        """
-        # 检查各级entry可用性
-        can_use_T0 = self._entry_available(direction, key, "T0") if direction in ["TL", "TU"] else False
-        can_use_T1 = self._entry_available(direction, key, "T1")
-        can_use_T2 = self._entry_available(direction, key, "T2")
-
-        entry_to_use = None
-
-        if flit.ETag_priority == "T0":
-            # T0优先级：尝试T0专用 → T1 → T2
-            if self._is_T0_slot_winner(flit) and can_use_T0:
-                entry_to_use = "T0"
-            elif can_use_T1:
-                entry_to_use = "T1"
-            elif can_use_T2:
-                entry_to_use = "T2"
-        elif flit.ETag_priority == "T1":
-            # T1优先级：尝试T1 → T2
-            if can_use_T1:
-                entry_to_use = "T1"
-            elif can_use_T2:
-                entry_to_use = "T2"
-        elif flit.ETag_priority == "T2":
-            # T2优先级：只使用T2
-            if can_use_T2:
-                entry_to_use = "T2"
-
-        if entry_to_use:
-            self._complete_eject(flit, direction, target_node, link, key, entry_to_use)
-            return True
-
-        return False
-
-    def _try_eject(self, flit, direction, target_node, link):
-        """
-        尝试下环（适用于所有下环场景）
-
-        Args:
-            flit: 当前flit
-            direction: 下环方向 (TL/TR/TU/TD)
-            target_node: 目标下环节点
-            link: 当前链路
-
-        Returns:
-            bool: 是否成功下环
-        """
-        # 1. 获取队列和容量限制
-        if direction in ["TL", "TR"]:
-            # 横向环下环到ring_bridge
-            key = (flit.current_link[1], target_node)
-            queue = self.ring_bridge[direction][key]
-            capacity = self.config.RB_IN_FIFO_DEPTH
-        else:  # TU, TD
-            # 纵向环下环到eject_queues
-            key = flit.current_link[1]
-            queue = self.eject_queues[direction][key]
-            capacity = self.config.EQ_IN_FIFO_DEPTH
-
-        # 2. 检查队列容量
-        if len(queue) >= capacity:
-            # 队列满导致下环失败（不是保序原因）
-            return False
-
-        # 3. 检查保序条件
-        if not self._can_eject_in_order(flit, target_node, direction):
-            # 保序检查失败，统计因保序被阻止的下环次数
-            if direction in ["TL", "TR"]:
-                flit.ordering_blocked_eject_h += 1
-            else:  # TU, TD
-                flit.ordering_blocked_eject_v += 1
-            return False
-
-        # 4. 尝试占用最佳Entry
-        entry_success = self._occupy_best_available_entry(flit, direction, key, target_node, link)
-        # Entry不足导致下环失败（不是保序原因）
-        return entry_success
-
     def _continue_looping(self, flit, link, next_pos):
         """
         继续绕环
@@ -1283,7 +1023,19 @@ class Network:
                 state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
                 flit.eject_attempts_h += 1
 
-                success = self._try_eject(flit, state["direction"], next_step, link)
+                # 获取对应的CrossPoint对象
+                # 下环发生在next_node (链路终点，IP节点)
+                cp_type = "horizontal" if state["direction"] in ["TL", "TR"] else "vertical"
+                if next_node not in self.crosspoints:
+                    # next_node不是IP节点，跳过下环
+                    self._continue_looping(flit, link, state["next_pos"])
+                    return
+
+                crosspoint = self.crosspoints[next_node][cp_type]
+
+                success = crosspoint._try_eject(
+                    flit, state["direction"], next_step, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues, can_eject_in_order_func=self._can_eject_in_order
+                )
 
                 if success:
                     # 下环成功（regular flit已在前面更新了position和path_index）
@@ -1293,11 +1045,11 @@ class Network:
                 if not flit.is_delay:
                     flit.is_delay = True
 
-                upgrade_to = self._determine_etag_upgrade(flit, state["direction"])
+                upgrade_to = crosspoint._determine_etag_upgrade(flit, state["direction"])
                 if upgrade_to:
                     flit.ETag_priority = upgrade_to
                     if upgrade_to == "T0":
-                        self._register_T0_slot(flit)
+                        crosspoint._register_T0_slot(flit)
 
                 self._continue_looping(flit, link, state["next_pos"])
             else:
@@ -1314,16 +1066,27 @@ class Network:
                         else:
                             flit.eject_attempts_h += 1
 
-                        success = self._try_eject(flit, state["direction"], final_destination, link)
+                        # 获取对应的CrossPoint对象
+                        cp_type = "horizontal" if state["direction"] in ["TL", "TR"] else "vertical"
+                        if next_node not in self.crosspoints:
+                            # next_node不是IP节点，跳过下环
+                            self._continue_looping(flit, link, state["next_pos"])
+                            return
+
+                        crosspoint = self.crosspoints[next_node][cp_type]
+
+                        success = crosspoint._try_eject(
+                            flit, state["direction"], final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues, can_eject_in_order_func=self._can_eject_in_order
+                        )
 
                         if success:
                             return
 
-                        upgrade_to = self._determine_etag_upgrade(flit, state["direction"])
+                        upgrade_to = crosspoint._determine_etag_upgrade(flit, state["direction"])
                         if upgrade_to:
                             flit.ETag_priority = upgrade_to
                             if upgrade_to == "T0":
-                                self._register_T0_slot(flit)
+                                crosspoint._register_T0_slot(flit)
 
                     # 无论是否尝试下环，都继续绕环
                     self._continue_looping(flit, link, state["next_pos"])
@@ -1352,7 +1115,14 @@ class Network:
                 else:
                     flit.eject_attempts_v += 1
 
-                success = self._try_eject(flit, state["direction"], final_destination, link)
+                # 获取对应的CrossPoint对象
+                cp_type = "horizontal" if state["direction"] in ["TL", "TR"] else "vertical"
+
+                crosspoint = self.crosspoints[next_node + self.config.NUM_COL][cp_type]
+
+                success = crosspoint._try_eject(
+                    flit, state["direction"], final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues, can_eject_in_order_func=self._can_eject_in_order
+                )
 
                 if success:
                     if not flit.is_delay:
@@ -1365,11 +1135,11 @@ class Network:
                     flit.current_position = next_node
                     flit.is_delay = True
 
-                upgrade_to = self._determine_etag_upgrade(flit, state["direction"])
+                upgrade_to = crosspoint._determine_etag_upgrade(flit, state["direction"])
                 if upgrade_to:
                     flit.ETag_priority = upgrade_to
                     if upgrade_to == "T0":
-                        self._register_T0_slot(flit)
+                        crosspoint._register_T0_slot(flit)
 
                 self._continue_looping(flit, link, state["next_pos"])
             else:

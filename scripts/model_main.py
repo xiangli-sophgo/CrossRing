@@ -72,11 +72,11 @@ def main():
         result_save_path=f"../Result/CrossRing/{model_type}/",
         results_fig_save_path=None,  # f"../Result/Plt_IP_BW/{model_type}/"
     )
-    # sim.setup_debug(print_trace=1, show_trace_id=[3073])
+    # sim.setup_debug(print_trace=1, show_trace_id=[1])
     # sim.setup_visualization(plot_link_state=1, plot_start_cycle=200, show_node_id=1)
     np.random.seed(801)
 
-    sim.run_simulation(max_cycles=10000, print_interval=2000)
+    sim.run_simulation(max_cycles=10000, print_interval=200)
 
 
 if __name__ == "__main__":
