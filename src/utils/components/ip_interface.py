@@ -415,13 +415,8 @@ class IPInterface:
             return  # 预缓冲已占用
 
         try:
-            # 接收，CrossRing使用 ip_pos - NUM_COL，Ring使用 ip_pos
-            if hasattr(self.config, "RING_NUM_NODE") and self.config.RING_NUM_NODE > 0:
-                # Ring topology: eject at same position as inject
-                pos_index = self.ip_pos
-            else:
-                # CrossRing topology: eject at ip_pos - NUM_COL
-                pos_index = self.ip_pos - self.config.NUM_COL
+            # 新架构：直接使用 ip_pos
+            pos_index = self.ip_pos
 
             eq_buf = network.EQ_channel_buffer[self.ip_type][pos_index]
             if not eq_buf:
@@ -978,21 +973,11 @@ class IPInterface:
         """创建读数据包并放入数据网络inject_fifo"""
         cycle = getattr(self, "current_cycle", 0)
         for i in range(req.burst_length):
-            # Ring拓扑：数据包从当前SN位置返回到原始请求者位置
-            if hasattr(self.config, "RING_NUM_NODE"):
-                # Ring拓扑
-                source = req.destination  # 当前SN位置
-                destination = req.source  # 原始请求者位置
-            else:
-                # 原始网格拓扑逻辑
-                source = req.destination + self.config.NUM_COL
-                destination = req.source - self.config.NUM_COL
+            # 新架构：数据包直接反向，无需偏移
+            source = req.destination
+            destination = req.source
 
-            # Ring拓扑：使用Ring路由策略动态计算数据包路径
-            if hasattr(self.config, "RING_NUM_NODE") and hasattr(self, "ring_model") and self.ring_model:
-                path = self.ring_model._get_ring_path(source, destination)
-            else:
-                path = self.routes[source][destination]
+            path = self.routes[source][destination]
             flit = Flit(source, destination, path)
             flit.sync_latency_record(req)
             flit.source_original = req.destination_original
@@ -1037,14 +1022,9 @@ class IPInterface:
         cycle = getattr(self, "current_cycle", 0)
 
         # 检查是否为Ring拓扑
-        if hasattr(self.config, "RING_NUM_NODE"):
-            # Ring拓扑：响应直接从目标节点返回到源节点
-            source = req.destination
-            destination = req.source
-        else:
-            # 原始网格拓扑逻辑
-            source = req.destination + self.config.NUM_COL
-            destination = req.source - self.config.NUM_COL
+        # 新架构：响应直接反向，无需偏移
+        source = req.destination
+        destination = req.source
 
         path = self.routes[source][destination]
         rsp = Flit(source, destination, path)

@@ -2863,27 +2863,16 @@ class BandwidthAnalyzer:
 
     def reverse_node_map(self, mapped_id, num_col):
         """
-        将映射后的节点ID反向映射回原始节点编号
-        原始映射公式: mapped_id = node % num_col + num_col + node // num_col * 2 * num_col
+        新架构：直接1:1映射，无需反向转换
 
         Args:
-            mapped_id: 映射后的节点ID (ip_pos)
-            num_col: 列数 (NUM_COL)
+            mapped_id: 节点ID
+            num_col: 列数 (未使用)
 
         Returns:
-            int: 原始节点编号
+            int: 节点编号（与输入相同）
         """
-        # 减去偏移量num_col
-        temp = mapped_id - num_col
-
-        # 计算原始行和列
-        col = temp % num_col
-        row = temp // (2 * num_col)
-
-        # 恢复原始节点编号
-        node = row * num_col + col
-
-        return node
+        return mapped_id
 
     def _generate_etag_per_node_fifo_csv(self, output_path: str):
         """

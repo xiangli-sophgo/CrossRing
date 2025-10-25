@@ -675,9 +675,9 @@ class NetworkLinkVisualizer:
             # Eject
             for lane, patches in self.eq_patches.items():
                 if "_" in lane:
-                    q = EQ_Ch.get(lane, [])[self.node_id - self.cols]
+                    q = EQ_Ch.get(lane, [])[self.node_id]
                 else:
-                    q = EQ.get(lane, [])[self.node_id - self.cols]
+                    q = EQ.get(lane, [])[self.node_id]
                 for idx, p in enumerate(patches):
                     t = self.eq_texts[lane][idx]
                     if idx < len(q):
@@ -708,11 +708,7 @@ class NetworkLinkVisualizer:
                             self.patch_info_map.pop(p, None)
             # Ring Bridge
             for lane, patches in self.rb_patches.items():
-                q = (
-                    RB.get(lane, [])[(self.node_id, self.node_id - self.cols)]
-                    if (self.node_id, self.node_id - self.cols) in RB.get(lane, [])
-                    else RB.get(lane, [])[(self.node_id - self.cols, self.node_id)]
-                )
+                q = RB.get(lane, [])[self.node_id]
                 for idx, p in enumerate(patches):
                     t = self.rb_texts[lane][idx]
                     if idx < len(q):
@@ -996,6 +992,7 @@ class NetworkLinkVisualizer:
         # ============  flit‑click tracking ==============
         self.tracked_pid = None  # 当前追踪的 packet_id (None = 不追踪)
         self.rect_info_map = {}  # rect → (text_obj, packet_id)
+        self.node_pair_slots = {}  # 存储节点对的slot位置，用于双向link对齐
         self.fig.canvas.mpl_connect("button_press_event", self._on_flit_click)
         # 绑定节点点击事件
         self.fig.canvas.mpl_connect("button_press_event", self._on_click)
@@ -1131,23 +1128,16 @@ class NetworkLinkVisualizer:
         if event.button != 1 or event.inaxes is not self.ax:
             return
 
-        # 找到距离最近的节点（阈值0.35）
+        # 检查是否点击到节点方块
         sel_node = None
-        min_d = float("inf")
         for nid, (x_ll, y_ll) in self.node_positions.items():
-            cx, cy = x_ll + 0.25, y_ll + 0.25  # 节点中心
-            d = np.hypot(event.xdata - cx, event.ydata - cy)
-            if d < min_d and d < 0.35:
-                min_d = d
+            # 节点方块大小为0.5x0.5
+            if x_ll <= event.xdata <= x_ll + 0.5 and y_ll <= event.ydata <= y_ll + 0.5:
                 sel_node = nid
+                break
 
         if sel_node is None:
             return
-
-        raw_node = sel_node
-        # 如果节点在偶数行，上面代码决定高亮时要加一行
-        if (sel_node // self.cols) % 2 == 0:
-            sel_node += self.cols
 
         self._selected_node = sel_node
 
@@ -1158,22 +1148,9 @@ class NetworkLinkVisualizer:
             except Exception:
                 pass
 
-        # 重画新的高亮框
-        row = raw_node // self.cols
-        nodes_to_box = [raw_node]
-        if row % 2 == 0 and (raw_node + self.cols) in self.node_positions:
-            nodes_to_box.append(raw_node + self.cols)
-        elif row % 2 == 1 and (raw_node - self.cols) in self.node_positions:
-            nodes_to_box.append(raw_node - self.cols)
-
-        xs = [self.node_positions[n][0] for n in nodes_to_box]
-        ys = [self.node_positions[n][1] for n in nodes_to_box]
-        llx = min(xs)
-        lly = min(ys)
-        width = max(xs) - min(xs) + 0.5
-        height = max(ys) - min(ys) + 0.5
-
-        self.click_box = Rectangle((llx, lly), width, height, facecolor="none", edgecolor="red", linewidth=1.2, linestyle="--")
+        # 重画新的高亮框（仅高亮被点击的节点）
+        x_ll, y_ll = self.node_positions[sel_node]
+        self.click_box = Rectangle((x_ll, y_ll), 0.5, 0.5, facecolor="none", edgecolor="red", linewidth=1.2, linestyle="--")
         self.ax.add_patch(self.click_box)
 
         # 清空并绘制右侧 Piece 视图
@@ -1299,11 +1276,7 @@ class NetworkLinkVisualizer:
         pos = {}
         for node in range(self.network.config.NUM_ROW * self.network.config.NUM_COL):
             x, y = node % self.network.config.NUM_COL, node // self.network.config.NUM_COL
-            # 为了美观，按照行列计算位置，并添加些许偏移
-            if y % 2 == 1:  # 奇数行左移
-                x -= 0.2
-                y -= 0.6
-            pos[node] = (x * 4, -y * 1.8)
+            pos[node] = (x * 4, -y * 4)
         return pos
 
     def _draw_static_elements(self):
@@ -1324,7 +1297,9 @@ class NetworkLinkVisualizer:
 
         # 绘制所有链路的框架，这里不再赘述
         self.link_artists.clear()
-        for src, dest in self.network.links.keys():
+        for link_key in self.network.links.keys():
+            # 处理2-tuple或3-tuple格式的link key
+            src, dest = link_key[:2] if len(link_key) >= 2 else link_key
             # 根据链路类型选择正确的 slice 数量
             if abs(src - dest) == self.network.config.NUM_COL or abs(src - dest) == self.network.config.NUM_COL * 2:
                 # 纵向链路
@@ -1496,23 +1471,81 @@ class NetworkLinkVisualizer:
             queue_width = 0.2
             queue_height = target_slice_size * actual_slice_count if actual_slice_count > 0 else queue_fixed_length
 
-        # 绘制队列框架矩形，中心位于 queue_center
-        # queue = Rectangle((queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2), queue_width, queue_height, facecolor="white", edgecolor="black", linestyle="--")
-        # self.ax.add_patch(queue)
+        # 新实现：slices沿link方向排列，而非侧面队列框架
+        # 计算垂直于link的方向向量
+        perp_dx, perp_dy = -dy, dx  # 旋转90度
 
-        slices = self.split_queue_into_slices(
-            (queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2),
-            queue_width,
-            queue_height,
-            slice_num - 2,
-            is_horizontal,
-            facecolor="white",
-            edgecolor="black",
-            linestyle="--",
-        )
+        # Slice参数
+        slot_size = 0.1
+        slot_spacing = 0.0
+        side_offset = 0.12  # 距离link中心线的距离
 
-        for slice in slices:
-            self.ax.add_patch(slice)
+        # 计算link的实际起止点（去除节点占用部分）
+        node_radius = 0.25
+        link_start_x = src_center[0] + dx * node_radius
+        link_start_y = src_center[1] + dy * node_radius
+        link_end_x = dest_center[0] - dx * node_radius
+        link_end_y = dest_center[1] - dy * node_radius
+
+        # Link长度
+        link_length = np.hypot(link_end_x - link_start_x, link_end_y - link_start_y)
+
+        # 计算slices排列区域
+        total_length = (slice_num - 2) * slot_size + (slice_num - 3) * slot_spacing
+        start_offset = (link_length - total_length) / 2
+
+        # 节点对，用于双向link对齐
+        node_pair = (min(src, dest), max(src, dest))
+        link_id = f"{src}-{dest}"
+
+        # 检查是否已经为这对节点创建了slices
+        if node_pair in self.node_pair_slots:
+            # 复用已有位置
+            existing_slots = self.node_pair_slots[node_pair]
+            # 根据方向选择对应侧
+            is_forward = src < dest
+            target_side = "side1" if is_forward else "side2"
+            target_slots = [s for s in existing_slots if s[1].startswith(target_side)]
+
+            if not is_forward:
+                # 反向link需要反转slice顺序
+                target_slots = list(reversed(target_slots))
+
+            for slot_pos, slot_id in target_slots:
+                slot_x, slot_y = slot_pos
+                slot = Rectangle((slot_x, slot_y), slot_size, slot_size,
+                               facecolor="white", edgecolor="gray",
+                               linewidth=0.8, linestyle="--")
+                self.ax.add_patch(slot)
+                self.rect_info_map[slot] = (None, None)
+        else:
+            # 首次创建，在link两侧都绘制
+            slot_positions_list = []
+
+            for side_name, side_sign in [("side1", 1), ("side2", -1)]:
+                for i in range(1, slice_num - 1):  # 跳过首尾
+                    # 沿link方向的位置
+                    along_dist = start_offset + (i - 1) * (slot_size + slot_spacing)
+                    progress = along_dist / link_length if link_length > 0 else 0
+
+                    center_x = link_start_x + progress * (link_end_x - link_start_x)
+                    center_y = link_start_y + progress * (link_end_y - link_start_y)
+
+                    # 垂直偏移
+                    slot_x = center_x + perp_dx * side_offset * side_sign - slot_size / 2
+                    slot_y = center_y + perp_dy * side_offset * side_sign - slot_size / 2
+
+                    slot = Rectangle((slot_x, slot_y), slot_size, slot_size,
+                                   facecolor="white", edgecolor="gray",
+                                   linewidth=0.8, linestyle="--")
+                    self.ax.add_patch(slot)
+
+                    slot_id = f"{side_name}_{i}"
+                    slot_positions_list.append(((slot_x, slot_y), slot_id))
+                    self.rect_info_map[slot] = (None, None)
+
+            # 记录供反向link复用
+            self.node_pair_slots[node_pair] = slot_positions_list
         # 绘制箭头连接线，并使用 annotate 添加箭头头部
         self.ax.annotate("", xy=dest_arrow, xycoords="data", xytext=src_arrow, textcoords="data", arrowprops=dict(arrowstyle="->", color="blue", lw=1.5))
 
@@ -1592,7 +1625,9 @@ class NetworkLinkVisualizer:
         if cycle is not None and self.networks is not None:
             for i, net in enumerate(self.networks):
                 # 构建快照（存储 Flit 对象或 None）
-                snap = {(s, d): [f if f is not None else None for f in flits] for (s, d), flits in net.links.items()}
+                # 处理2-tuple或3-tuple格式的link key
+                snap = {link_key[:2]: [f if f is not None else None for f in flits]
+                        for link_key, flits in net.links.items()}
                 meta = {
                     "network_name": net.name,
                     # 不再保存高亮状态到历史
@@ -1609,14 +1644,18 @@ class NetworkLinkVisualizer:
         # 渲染当前选中网络的快照
         if self.networks is not None:
             current_net = self.networks[self.selected_network_index]
-            render_snap = {(s, d): [f if f is not None else None for f in flits] for (s, d), flits in current_net.links.items()}
+            # 处理2-tuple或3-tuple格式的link key
+            render_snap = {link_key[:2]: [f if f is not None else None for f in flits]
+                          for link_key, flits in current_net.links.items()}
             self._render_snapshot(render_snap)
             # 若已有选中节点，实时更新右侧 Piece 视图
             if self._selected_node is not None:
                 self._refresh_piece_view()
             self.ax.set_title(current_net.name)
         else:
-            self._render_snapshot({(src, dest): [f if f is not None else None for f in flits] for (src, dest), flits in self.network.links.items()})
+            # 处理2-tuple或3-tuple格式的link key
+            self._render_snapshot({link_key[:2]: [f if f is not None else None for f in flits]
+                                  for link_key, flits in self.network.links.items()})
             # 若已有选中节点，实时更新右侧 Piece 视图
             if self._selected_node is not None:
                 self._refresh_piece_view()

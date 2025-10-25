@@ -774,8 +774,8 @@ class D2D_Model:
         # 解析D2D请求数据
         (inject_time, src_die, src_node, src_ip, dst_die, dst_node, dst_ip, req_type, burst_length, traffic_id) = req_data
 
-        # 使用die_model的node_map进行节点映射
-        source_physical = die_model.node_map(src_node, True)
+        # 新架构：直接使用节点编号，无需映射
+        source_physical = src_node
 
         # 根据是否跨Die决定路由策略
         if src_die != dst_die:
@@ -799,8 +799,8 @@ class D2D_Model:
 
             destination_type = f"d2d_sn_0"  # 跨Die时目标是D2D_SN，包含正确的编号
         else:
-            # 本地：直接路由到目标
-            intermediate_dest = die_model.node_map(dst_node, False)
+            # 新架构：本地路由直接使用目标节点，无需映射
+            intermediate_dest = dst_node
             destination_type = dst_ip
 
         # 创建flit（参考BaseModel._process_single_request）
@@ -815,8 +815,8 @@ class D2D_Model:
         req.d2d_origin_type = src_ip  # 发起IP类型
 
         req.d2d_target_die = dst_die  # 目标Die ID
-        # 目标节点源映射位置（统一保存源映射）
-        req.d2d_target_node = self.dies[dst_die].node_map(dst_node, True)  # 目标节点的源映射
+        # 新架构：目标节点直接使用物理编号，无需映射
+        req.d2d_target_node = dst_node
         req.d2d_target_type = dst_ip  # 目标IP类型
 
         # 设置标准属性（与BaseModel一致）

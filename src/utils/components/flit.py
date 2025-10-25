@@ -306,7 +306,18 @@ class Flit:
     def __repr__(self):
         req_attr = "O" if self.req_attr == "old" else "N"
         type_display = self.rsp_type[:3] if self.rsp_type else self.req_type[0]
-        flit_position = f"{self.current_position}:{self.flit_position}" if self.flit_position != "Link" else f"{self.current_link[0]}->{self.current_link[1]}:{self.current_seat_index}, "
+
+        # 处理flit位置显示
+        if self.flit_position != "Link":
+            flit_position = f"{self.current_position}:{self.flit_position}"
+        elif self.current_link is None:
+            flit_position = f"{self.current_position}:None"
+        else:
+            # 处理3元组（Ring Bridge）和2元组（普通link）
+            link_start = self.current_link[0]
+            link_end = self.current_link[1]
+            flit_position = f"{link_start}->{link_end}:{self.current_seat_index}"
+
         finish_status = "F" if self.is_finish else ""
         eject_status = "E" if self.is_ejected else ""
         ITag_H = "H" if self.itag_h else ""

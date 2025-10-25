@@ -634,6 +634,7 @@ class Network:
             # 新架构: 判断是否到达目的地
             if next_node == flit.destination:
                 flit.is_arrive = True
+                flit.current_seat_index = 0  # 直达目的地也需要设置seat_index
             elif abs(current - next_node) == self.config.NUM_COL:
                 # 纵向移动（向上或向下）
                 if len(flit.path) > flit.path_index + 2:
@@ -1097,19 +1098,60 @@ class Network:
 
         # 3. 计算路径信息（使用更新后的path_index）
         has_next_step = flit.path_index + 1 < len(flit.path)
-        next_step = flit.path[flit.path_index + 1] if has_next_step else flit.path[flit.path_index]
+        next_step = flit.path[flit.path_index + 1] if has_next_step else flit.path[-1]
         final_destination = flit.path[-1]
 
         # 4. 判断下环场景
         if has_next_step:
             # 还有后续路径
-            if abs(next_node - next_step) == self.config.NUM_COL:
-                # 新架构：纵向移动（向上或向下）
-                # 直接从当前节点移动到下一个节点，不需要经过ring_bridge
-                link[flit.current_seat_index] = None
-                flit.current_link = (next_node, next_step)
-                flit.current_seat_index = 0
-                return
+
+            # 判断下一跳是否是纵向移动
+            next_link_is_vertical = abs(next_node - next_step) == self.config.NUM_COL
+
+            if next_link_is_vertical:
+                # 下一跳是纵向link
+                # 检查当前link是横向还是纵向
+                current_link_is_horizontal = abs(current - next_node) == 1
+
+                if current_link_is_horizontal:
+                    # 场景1：横向环→纵向环，需要经过Ring Bridge下环
+                    state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
+
+                    # 获取对应的CrossPoint对象
+                    cp_type = "horizontal"
+                    if next_node not in self.crosspoints:
+                        # next_node不是IP节点，跳过下环
+                        self._continue_looping(flit, link, state["next_pos"])
+                        return
+
+                    crosspoint = self.crosspoints[next_node][cp_type]
+
+                    # 尝试下环到Ring Bridge（TU或TD）
+                    success = crosspoint._try_eject(
+                        flit, state["direction"], final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues, can_eject_in_order_func=self._can_eject_in_order
+                    )
+
+                    if success:
+                        return
+
+                    # 下环失败，继续绕横向环
+                    upgrade_to = crosspoint._determine_etag_upgrade(flit, state["direction"])
+                    if upgrade_to:
+                        flit.ETag_priority = upgrade_to
+                        if upgrade_to == "T0":
+                            crosspoint._register_T0_slot(flit)
+
+                    self._continue_looping(flit, link, state["next_pos"])
+                    return
+                else:
+                    # 纵向环→纵向环，可以直接移动（同一维度）
+                    # 保持原有逻辑：在plan阶段完成跳转，标记跳过execute
+                    link[flit.current_seat_index] = None
+                    flit.path_index += 1  # 更新path_index因为跳过了一步
+                    flit.current_link = (next_node, next_step)
+                    flit.current_seat_index = 0
+                    # 注意：这里直接修改了link，后续execute_moves需要正确处理
+                    return
             else:
                 # 不需要场景1下环
                 if flit.is_delay:
