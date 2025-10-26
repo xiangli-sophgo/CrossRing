@@ -1390,8 +1390,63 @@ class BaseModel:
         if len(network.ring_bridge[out_dir][pos]) >= self.config.RB_OUT_FIFO_DEPTH:
             return False
 
-        # 检查目的地条件
-        return cmp_func(flit.destination, pos)
+        # 基于路径的下一跳判断，避免在XY路由的横向阶段提前下竖向环
+        next_hop = self._get_next_hop_for_node(flit, pos)
+
+        if out_dir == "EQ":
+            final_dest = flit.destination_original if getattr(flit, "destination_original", -1) != -1 else flit.destination
+            return final_dest == pos
+
+        if next_hop is None:
+            return False
+
+        # 只允许在确实需要向上/向下移动时进入TU/TD
+        diff = next_hop - pos
+        if out_dir == "TU":
+            return diff < 0 and diff % self.config.NUM_COL == 0
+        if out_dir == "TD":
+            return diff > 0 and diff % self.config.NUM_COL == 0
+
+        return False
+
+    def _get_next_hop_for_node(self, flit, current_node):
+        """
+        根据flit的路径与path_index定位当前节点的下一跳。
+
+        Returns:
+            int | None: 下一跳节点ID，若不存在或无法确定则返回None。
+        """
+        path = getattr(flit, "path", None)
+        if not path:
+            return None
+
+        path_len = len(path)
+        if path_len <= 1:
+            return None
+
+        path_index = getattr(flit, "path_index", None)
+        candidate_idx = None
+
+        if isinstance(path_index, int):
+            for offset in (0, -1, 1):
+                idx = path_index + offset
+                if 0 <= idx < path_len and path[idx] == current_node:
+                    candidate_idx = idx
+                    break
+
+        if candidate_idx is None:
+            # Fallback: 从后向前搜索当前节点
+            try:
+                reverse_idx = path[::-1].index(current_node)
+                candidate_idx = path_len - 1 - reverse_idx
+            except ValueError:
+                return None
+
+        if candidate_idx + 1 < path_len:
+            next_hop = path[candidate_idx + 1]
+            if next_hop != current_node:
+                return next_hop
+        return None
 
     def RB_inject_vertical(self, network: Network):
         RB_inject_flits = []

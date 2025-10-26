@@ -291,7 +291,7 @@ class Network:
 
             # 检查是否需要水平自环（左右边缘）
             if col == 0 or col == config.NUM_COL - 1:
-                key = (node_id, node_id, 'h')  # 水平自环
+                key = (node_id, node_id, "h")  # 水平自环
                 self.links[key] = [None] * 2
                 self.links_flow_stat[key] = {
                     "ITag_count": 0,
@@ -305,7 +305,7 @@ class Network:
 
             # 检查是否需要垂直自环（上下边缘）
             if row == 0 or row == config.NUM_ROW - 1:
-                key = (node_id, node_id, 'v')  # 垂直自环
+                key = (node_id, node_id, "v")  # 垂直自环
                 self.links[key] = [None] * 2
                 self.links_flow_stat[key] = {
                     "ITag_count": 0,
@@ -542,12 +542,12 @@ class Network:
             # 水平CrossPoint连接 - TR方向 (向右)
             if right_pos is not None:
                 # 有右邻居: arrival来自左邻居, departure去往右邻居
-                arrival_link = (left_pos, ip_pos) if left_pos is not None else (ip_pos, ip_pos, 'h')
+                arrival_link = (left_pos, ip_pos) if left_pos is not None else (ip_pos, ip_pos, "h")
                 departure_link = (ip_pos, right_pos)
             else:
                 # 右边界: 使用水平自环
-                arrival_link = (left_pos, ip_pos) if left_pos is not None else (ip_pos, ip_pos, 'h')
-                departure_link = (ip_pos, ip_pos, 'h')
+                arrival_link = (left_pos, ip_pos) if left_pos is not None else (ip_pos, ip_pos, "h")
+                departure_link = (ip_pos, ip_pos, "h")
 
             arrival_slice = self.links[arrival_link][-1] if arrival_link in self.links else None
             departure_slice = self.links[departure_link][0] if departure_link in self.links else None
@@ -556,12 +556,12 @@ class Network:
             # 水平CrossPoint连接 - TL方向 (向左)
             if left_pos is not None:
                 # 有左邻居: arrival来自右邻居, departure去往左邻居
-                arrival_link = (right_pos, ip_pos) if right_pos is not None else (ip_pos, ip_pos, 'h')
+                arrival_link = (right_pos, ip_pos) if right_pos is not None else (ip_pos, ip_pos, "h")
                 departure_link = (ip_pos, left_pos)
             else:
                 # 左边界: 使用水平自环
-                arrival_link = (right_pos, ip_pos) if right_pos is not None else (ip_pos, ip_pos, 'h')
-                departure_link = (ip_pos, ip_pos, 'h')
+                arrival_link = (right_pos, ip_pos) if right_pos is not None else (ip_pos, ip_pos, "h")
+                departure_link = (ip_pos, ip_pos, "h")
 
             arrival_slice = self.links[arrival_link][-1] if arrival_link in self.links else None
             departure_slice = self.links[departure_link][0] if departure_link in self.links else None
@@ -570,12 +570,12 @@ class Network:
             # 垂直CrossPoint连接 - TU方向 (向上)
             if up_pos is not None:
                 # 有上邻居: arrival来自下邻居, departure去往上邻居
-                arrival_link = (down_pos, ip_pos) if down_pos is not None else (ip_pos, ip_pos, 'v')
+                arrival_link = (down_pos, ip_pos) if down_pos is not None else (ip_pos, ip_pos, "v")
                 departure_link = (ip_pos, up_pos)
             else:
                 # 上边界: 使用垂直自环
-                arrival_link = (down_pos, ip_pos) if down_pos is not None else (ip_pos, ip_pos, 'v')
-                departure_link = (ip_pos, ip_pos, 'v')
+                arrival_link = (down_pos, ip_pos) if down_pos is not None else (ip_pos, ip_pos, "v")
+                departure_link = (ip_pos, ip_pos, "v")
 
             arrival_slice = self.links[arrival_link][-1] if arrival_link in self.links else None
             departure_slice = self.links[departure_link][0] if departure_link in self.links else None
@@ -584,12 +584,12 @@ class Network:
             # 垂直CrossPoint连接 - TD方向 (向下)
             if down_pos is not None:
                 # 有下邻居: arrival来自上邻居, departure去往下邻居
-                arrival_link = (up_pos, ip_pos) if up_pos is not None else (ip_pos, ip_pos, 'v')
+                arrival_link = (up_pos, ip_pos) if up_pos is not None else (ip_pos, ip_pos, "v")
                 departure_link = (ip_pos, down_pos)
             else:
                 # 下边界: 使用垂直自环
-                arrival_link = (up_pos, ip_pos) if up_pos is not None else (ip_pos, ip_pos, 'v')
-                departure_link = (ip_pos, ip_pos, 'v')
+                arrival_link = (up_pos, ip_pos) if up_pos is not None else (ip_pos, ip_pos, "v")
+                departure_link = (ip_pos, ip_pos, "v")
 
             arrival_slice = self.links[arrival_link][-1] if arrival_link in self.links else None
             departure_slice = self.links[departure_link][0] if departure_link in self.links else None
@@ -597,8 +597,8 @@ class Network:
 
             # 更新CrossPoint冲突状态 (基于arrival slice是否有flit)
             # 水平冲突
-            tr_arrival_link = (left_pos, ip_pos) if left_pos is not None else (ip_pos, ip_pos, 'h')
-            tl_arrival_link = (right_pos, ip_pos) if right_pos is not None else (ip_pos, ip_pos, 'h')
+            tr_arrival_link = (left_pos, ip_pos) if left_pos is not None else (ip_pos, ip_pos, "h")
+            tl_arrival_link = (right_pos, ip_pos) if right_pos is not None else (ip_pos, ip_pos, "h")
             new_tr_conflict = self.links[tr_arrival_link][-1] is not None if tr_arrival_link in self.links else False
             new_tl_conflict = self.links[tl_arrival_link][-1] is not None if tl_arrival_link in self.links else False
 
@@ -608,8 +608,8 @@ class Network:
             self.crosspoint_conflict["horizontal"][ip_pos]["TL"] = self.crosspoint_conflict["horizontal"][ip_pos]["TL"][:2]
 
             # 垂直冲突
-            tu_arrival_link = (down_pos, ip_pos) if down_pos is not None else (ip_pos, ip_pos, 'v')
-            td_arrival_link = (up_pos, ip_pos) if up_pos is not None else (ip_pos, ip_pos, 'v')
+            tu_arrival_link = (down_pos, ip_pos) if down_pos is not None else (ip_pos, ip_pos, "v")
+            td_arrival_link = (up_pos, ip_pos) if up_pos is not None else (ip_pos, ip_pos, "v")
             new_tu_conflict = self.links[tu_arrival_link][-1] is not None if tu_arrival_link in self.links else False
             new_td_conflict = self.links[td_arrival_link][-1] is not None if td_arrival_link in self.links else False
 
@@ -873,8 +873,10 @@ class Network:
                         flit.is_on_station = True
             return False
         else:
-            if flit.current_link is not None:
-                current, next_node = flit.current_link[:2] if len(flit.current_link) == 3 else flit.current_link
+            if flit.current_link is None:
+                flit.arrival_network_cycle = cycle
+                return True
+            current, next_node = flit.current_link[:2] if len(flit.current_link) == 3 else flit.current_link
             flit.arrival_network_cycle = cycle
 
             # 新架构: 判断是否直接到EQ（source和destination相同或路径长度为1）
@@ -898,8 +900,6 @@ class Network:
                 queue = self.eject_queues["TD"]
                 queue_pre = self.eject_queues_in_pre["TD"]
 
-            # flit.flit_position = f"EQ_{direction}"
-            # queue[next_node].append(flit)
             if queue_pre[next_node]:
                 return False
             else:
@@ -1138,10 +1138,7 @@ class Network:
 
             # 尝试下环
             success = crosspoint._try_eject(
-                flit, eject_direction, final_destination, link,
-                ring_bridge=self.ring_bridge,
-                eject_queues=self.eject_queues,
-                can_eject_in_order_func=self._can_eject_in_order
+                flit, eject_direction, final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues, can_eject_in_order_func=self._can_eject_in_order
             )
 
             if success:

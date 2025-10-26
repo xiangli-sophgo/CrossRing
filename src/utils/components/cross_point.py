@@ -494,6 +494,19 @@ class CrossPoint:
 
         final_dest = flit.path[-1]
 
+        # 根据当前crosspoint维度过滤不匹配的链路方向，避免错误下环
+        if hasattr(flit, "current_link") and flit.current_link is not None and len(flit.current_link) >= 2:
+            u, v = flit.current_link[:2]
+            hop_diff = abs(u - v)
+            if self.direction == "horizontal":
+                # 横向环：只处理横向链路（同一行且列差为1）
+                if hop_diff != 1 or (u // self.config.NUM_COL) != (v // self.config.NUM_COL):
+                    return False, "", ""
+            elif self.direction == "vertical":
+                # 纵向环：只处理纵向链路（列相同且行差为NUM_COL）
+                if hop_diff != self.config.NUM_COL or (u % self.config.NUM_COL) != (v % self.config.NUM_COL):
+                    return False, "", ""
+
         # 1. 检查是否到达最终目标
         if current_node == final_dest:
             # 根据当前CrossPoint类型决定下环目标

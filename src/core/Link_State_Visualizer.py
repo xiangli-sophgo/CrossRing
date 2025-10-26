@@ -1282,7 +1282,7 @@ class NetworkLinkVisualizer:
             ys.append(y)
             node_rect = Rectangle((x, y), 0.5, 0.5, facecolor="lightblue", edgecolor="black")
             self.ax.add_patch(node_rect)
-            self.ax.text(x + 0.22, y + 0.24, f"{node}", ha="center", va="center", fontsize=12)
+            self.ax.text(x + 0.25, y + 0.25, f"{node}", ha="center", va="center", fontsize=12)
 
         # 绘制所有链路的框架，这里不再赘述
         self.link_artists.clear()
@@ -1417,9 +1417,7 @@ class NetworkLinkVisualizer:
 
             for slot_pos, slot_id in target_slots:
                 slot_x, slot_y = slot_pos
-                slot = Rectangle((slot_x, slot_y), slot_size, slot_size,
-                               facecolor="white", edgecolor="gray",
-                               linewidth=0.8, linestyle="--")
+                slot = Rectangle((slot_x, slot_y), slot_size, slot_size, facecolor="white", edgecolor="gray", linewidth=0.8, linestyle="--")
                 self.ax.add_patch(slot)
                 self.rect_info_map[slot] = (None, None)
         else:
@@ -1439,9 +1437,7 @@ class NetworkLinkVisualizer:
                     slot_x = center_x + perp_dx * side_offset * side_sign - slot_size / 2
                     slot_y = center_y + perp_dy * side_offset * side_sign - slot_size / 2
 
-                    slot = Rectangle((slot_x, slot_y), slot_size, slot_size,
-                                   facecolor="white", edgecolor="gray",
-                                   linewidth=0.8, linestyle="--")
+                    slot = Rectangle((slot_x, slot_y), slot_size, slot_size, facecolor="white", edgecolor="gray", linewidth=0.8, linestyle="--")
                     self.ax.add_patch(slot)
 
                     slot_id = f"{side_name}_{i}"
