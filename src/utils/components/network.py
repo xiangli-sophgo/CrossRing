@@ -851,6 +851,10 @@ class Network:
 
     def execute_moves(self, flit: Flit, cycle):
         if not flit.is_arrive:
+            # 修复: 处理current_link=None的情况(flit已下环到ring_bridge/eject_queue)
+            if flit.current_link is None:
+                return True  # flit已离开link,不需要执行moves
+
             current, next_node = flit.current_link[:2] if len(flit.current_link) == 3 else flit.current_link
             if current != next_node:
                 # 新架构: flit在普通link上
@@ -1091,162 +1095,92 @@ class Network:
             flit.current_seat_index += 1
             return
 
-        # 2. Regular flit：先更新位置和路径索引
+        # 2. 更新current_position(不使用path_index)
         if not flit.is_delay:
             flit.current_position = next_node
-            flit.path_index += 1
 
-        # 3. 计算路径信息（使用更新后的path_index）
-        has_next_step = flit.path_index + 1 < len(flit.path)
-        next_step = flit.path[flit.path_index + 1] if has_next_step else flit.path[-1]
+        # 3. 判断是否需要下环（使用CrossPoint的新方法）
         final_destination = flit.path[-1]
 
-        # 4. 判断下环场景
-        if has_next_step:
-            # 还有后续路径
+        # 先尝试水平CrossPoint判断
+        should_eject_h = False
+        eject_target_h = ""
+        eject_direction_h = ""
+        if next_node in self.crosspoints and "horizontal" in self.crosspoints[next_node]:
+            cp_h = self.crosspoints[next_node]["horizontal"]
+            should_eject_h, eject_target_h, eject_direction_h = cp_h.should_eject_flit(flit, next_node)
 
-            # 判断下一跳是否是纵向移动
-            next_link_is_vertical = abs(next_node - next_step) == self.config.NUM_COL
+        # 再尝试垂直CrossPoint判断
+        should_eject_v = False
+        eject_target_v = ""
+        eject_direction_v = ""
+        if next_node in self.crosspoints and "vertical" in self.crosspoints[next_node]:
+            cp_v = self.crosspoints[next_node]["vertical"]
+            should_eject_v, eject_target_v, eject_direction_v = cp_v.should_eject_flit(flit, next_node)
 
-            if next_link_is_vertical:
-                # 下一跳是纵向link
-                # 检查当前link是横向还是纵向
-                current_link_is_horizontal = abs(current - next_node) == 1
-
-                if current_link_is_horizontal:
-                    # 场景1：横向环→纵向环，需要经过Ring Bridge下环
-                    state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
-
-                    # 获取对应的CrossPoint对象
-                    cp_type = "horizontal"
-                    if next_node not in self.crosspoints:
-                        # next_node不是IP节点，跳过下环
-                        self._continue_looping(flit, link, state["next_pos"])
-                        return
-
-                    crosspoint = self.crosspoints[next_node][cp_type]
-
-                    # 尝试下环到Ring Bridge（TU或TD）
-                    success = crosspoint._try_eject(
-                        flit, state["direction"], final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues, can_eject_in_order_func=self._can_eject_in_order
-                    )
-
-                    if success:
-                        return
-
-                    # 下环失败，继续绕横向环
-                    upgrade_to = crosspoint._determine_etag_upgrade(flit, state["direction"])
-                    if upgrade_to:
-                        flit.ETag_priority = upgrade_to
-                        if upgrade_to == "T0":
-                            crosspoint._register_T0_slot(flit)
-
-                    self._continue_looping(flit, link, state["next_pos"])
-                    return
-                else:
-                    # 纵向环→纵向环，可以直接移动（同一维度）
-                    # 保持原有逻辑：在plan阶段完成跳转，标记跳过execute
-                    link[flit.current_seat_index] = None
-                    flit.path_index += 1  # 更新path_index因为跳过了一步
-                    flit.current_link = (next_node, next_step)
-                    flit.current_seat_index = 0
-                    # 注意：这里直接修改了link，后续execute_moves需要正确处理
-                    return
+        # 4. 处理下环
+        if should_eject_h or should_eject_v:
+            # 确定使用哪个CrossPoint
+            if should_eject_h:
+                crosspoint = self.crosspoints[next_node]["horizontal"]
+                eject_direction = eject_direction_h
+                eject_target = eject_target_h
             else:
-                # 不需要场景1下环
-                if flit.is_delay:
-                    # Delay flit：检查是否应该尝试场景2下环
-                    state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
+                crosspoint = self.crosspoints[next_node]["vertical"]
+                eject_direction = eject_direction_v
+                eject_target = eject_target_v
 
-                    if state["should_eject"]:
-                        # 应该尝试下环到eject_queue
-                        row = next_node // self.config.NUM_COL
-                        if row % 2 == 0:
-                            flit.eject_attempts_v += 1
-                        else:
-                            flit.eject_attempts_h += 1
-
-                        # 获取对应的CrossPoint对象
-                        cp_type = "horizontal" if state["direction"] in ["TL", "TR"] else "vertical"
-                        if next_node not in self.crosspoints:
-                            # next_node不是IP节点，跳过下环
-                            self._continue_looping(flit, link, state["next_pos"])
-                            return
-
-                        crosspoint = self.crosspoints[next_node][cp_type]
-
-                        success = crosspoint._try_eject(
-                            flit, state["direction"], final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues, can_eject_in_order_func=self._can_eject_in_order
-                        )
-
-                        if success:
-                            return
-
-                        upgrade_to = crosspoint._determine_etag_upgrade(flit, state["direction"])
-                        if upgrade_to:
-                            flit.ETag_priority = upgrade_to
-                            if upgrade_to == "T0":
-                                crosspoint._register_T0_slot(flit)
-
-                    # 无论是否尝试下环，都继续绕环
-                    self._continue_looping(flit, link, state["next_pos"])
-                else:
-                    # Regular flit：正常移动到下一段（已在前面更新position和path_index）
-                    link[flit.current_seat_index] = None
-                    flit.current_link = (next_node, next_step)
-                    flit.current_seat_index = 0
-
-        else:
-            # 最后一步：判断是否到达最终目的地
-            if next_node == final_destination:
-                # 场景2：到达最终目的地，下环到eject_queue
-                state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
-
-                # 根据环的类型计数
-                if current == next_node:
-                    # 自环边界：根据行号判断是横向还是纵向环
-                    row = next_node // self.config.NUM_COL
-                    if row % 2 == 0:
-                        flit.eject_attempts_v += 1
-                    else:
-                        flit.eject_attempts_h += 1
-                elif abs(current - next_node) == 1:
-                    flit.eject_attempts_h += 1
-                else:
-                    flit.eject_attempts_v += 1
-
-                # 获取对应的CrossPoint对象
-                cp_type = "horizontal" if state["direction"] in ["TL", "TR"] else "vertical"
-
-                # 新架构: crosspoint直接在目标节点，不需要+NUM_COL偏移
-                crosspoint = self.crosspoints[next_node][cp_type]
-
-                success = crosspoint._try_eject(
-                    flit, state["direction"], final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues, can_eject_in_order_func=self._can_eject_in_order
-                )
-
-                if success:
-                    if not flit.is_delay:
-                        flit.current_position = next_node
-                    flit.path_index += 1
-                    return
-
-                # 下环失败：继续绕环
-                if not flit.is_delay:
-                    flit.current_position = next_node
-                    flit.is_delay = True
-
-                upgrade_to = crosspoint._determine_etag_upgrade(flit, state["direction"])
-                if upgrade_to:
-                    flit.ETag_priority = upgrade_to
-                    if upgrade_to == "T0":
-                        crosspoint._register_T0_slot(flit)
-
-                self._continue_looping(flit, link, state["next_pos"])
+            # 统计下环尝试次数
+            if eject_direction in ["TL", "TR"]:
+                flit.eject_attempts_h += 1
             else:
-                # 还没到达目的地，继续绕环
-                state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
-                self._continue_looping(flit, link, state["next_pos"])
+                flit.eject_attempts_v += 1
+
+            # 尝试下环
+            success = crosspoint._try_eject(
+                flit, eject_direction, final_destination, link,
+                ring_bridge=self.ring_bridge,
+                eject_queues=self.eject_queues,
+                can_eject_in_order_func=self._can_eject_in_order
+            )
+
+            if success:
+                # 下环成功
+                return
+
+            # 下环失败：E-Tag升级
+            if not flit.is_delay:
+                flit.is_delay = True
+
+            upgrade_to = crosspoint._determine_etag_upgrade(flit, eject_direction)
+            if upgrade_to:
+                flit.ETag_priority = upgrade_to
+                if upgrade_to == "T0":
+                    crosspoint._register_T0_slot(flit)
+
+            # 继续绕环
+            state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
+            self._continue_looping(flit, link, state["next_pos"])
+            return
+
+        # 5. 不需要下环：继续移动
+        # 动态查找下一跳节点
+        try:
+            current_path_index = flit.path.index(next_node)
+            if current_path_index + 1 < len(flit.path):
+                next_hop = flit.path[current_path_index + 1]
+                # 正常移动到下一段link
+                link[flit.current_seat_index] = None
+                flit.current_link = (next_node, next_hop)
+                flit.current_seat_index = 0
+                return
+        except ValueError:
+            # next_node不在path中,可能是绕环
+            pass
+
+        # 6. 如果到了这里,说明next_node不在路径中或已经是最后一个节点,继续绕环
+        state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
+        self._continue_looping(flit, link, state["next_pos"])
 
     # ==================== 原有的辅助函数 ====================
 

@@ -349,30 +349,36 @@ class CrossPoint:
             direction: 下环方向 (TL/TR/TU/TD)
             target_node: 目标下环节点
             link: 当前链路
-            key: entry的键（ring_bridge用tuple，eject_queues用int）
+            key: entry的键（ring_bridge用节点号，eject_queues用节点号）
             entry_level: 占用的entry等级 ("T0"/"T1"/"T2")
         """
         # 1. 取消T0注册（如果需要）
         if flit.ETag_priority == "T0":
             self._unregister_T0_slot(flit)
 
-        # 2. 设置flit状态
-        flit.is_delay = False
+        # 2. 清空当前link位置
         link[flit.current_seat_index] = None
 
+        # 3. 根据下环目标设置flit状态
         if direction in ["TL", "TR"]:
-            # 横向环下环
-            flit.current_link = (flit.current_link[1], target_node)
-            flit.current_seat_index = 0 if direction == "TL" else 1
+            # 横向环下环到ring_bridge
+            # 修复: 不设置错误的current_link自环,改为设置flit_position标记
+            flit.is_delay = False
+            flit.current_link = None  # 清空current_link
+            flit.current_seat_index = -1  # 重置seat_index
+            flit.flit_position = f"RB_{direction}"  # 标记在ring_bridge中
         else:  # TU, TD
             # 纵向环下环到最终目的地
+            flit.is_delay = False
             flit.is_arrive = True
+            flit.current_link = None
             flit.current_seat_index = 0
+            flit.flit_position = f"EQ_{direction}"  # 标记在eject_queue中
 
-        # 3. 占用Entry
+        # 4. 占用Entry
         self._occupy_entry(direction, key, entry_level, flit)
 
-        # 4. 更新保序跟踪表 - 调用network的方法
+        # 5. 更新保序跟踪表 - 调用network的方法
         if self.network and hasattr(self.network, "_update_order_tracking_table"):
             self.network._update_order_tracking_table(flit, target_node, direction)
 
@@ -434,3 +440,141 @@ class CrossPoint:
 
         # 5. 尝试占用最佳Entry
         return self._occupy_best_available_entry(flit, direction, key, target_node, link)
+
+    # ------------------------------------------------------------------
+    # 维度判断和下环决策方法（借鉴C2C设计）
+    # ------------------------------------------------------------------
+
+    def _needs_dimension_move(self, current_node: int, next_node: int, dimension: str) -> bool:
+        """
+        判断从当前节点到下一节点是否需要指定维度移动
+
+        Args:
+            current_node: 当前节点ID
+            next_node: 下一节点ID
+            dimension: 维度类型 ("vertical"或"horizontal")
+
+        Returns:
+            bool: 是否需要该维度的移动
+        """
+        num_col = self.config.NUM_COL
+
+        if dimension == "vertical":
+            # 垂直移动：行号不同
+            return (current_node // num_col) != (next_node // num_col)
+        else:  # horizontal
+            # 水平移动：列号不同
+            return (current_node % num_col) != (next_node % num_col)
+
+    def _needs_vertical_move(self, current_node: int, next_node: int) -> bool:
+        """判断从当前节点到下一节点是否需要垂直移动"""
+        return self._needs_dimension_move(current_node, next_node, "vertical")
+
+    def _needs_horizontal_move(self, current_node: int, next_node: int) -> bool:
+        """判断从当前节点到下一节点是否需要水平移动"""
+        return self._needs_dimension_move(current_node, next_node, "horizontal")
+
+    def should_eject_flit(self, flit: Flit, current_node: int) -> tuple:
+        """
+        基于路径信息的下环决策逻辑（借鉴C2C设计）
+
+        使用flit的path动态查找当前位置，判断是否需要下环
+
+        Args:
+            flit: 要判断的flit
+            current_node: 当前所在节点
+
+        Returns:
+            tuple: (是否下环: bool, 下环目标: str, 下环方向: str)
+                   下环目标: "RB"(Ring Bridge) / "EQ"(Eject Queue) / ""
+                   下环方向: "TL"/"TR"/"TU"/"TD" / ""
+        """
+        if not flit.path or len(flit.path) == 0:
+            return False, "", ""
+
+        final_dest = flit.path[-1]
+
+        # 1. 检查是否到达最终目标
+        if current_node == final_dest:
+            # 根据当前CrossPoint类型决定下环目标
+            if self.direction == "horizontal":
+                # 水平CrossPoint: 需要通过Ring Bridge转到垂直环
+                return True, "RB", self._get_eject_direction_horizontal(current_node, final_dest)
+            else:  # vertical
+                # 垂直CrossPoint: 直接下环到目的地
+                return True, "EQ", self._get_eject_direction_vertical(current_node, final_dest)
+
+        # 2. 查找当前节点在路径中的位置
+        try:
+            path_index = flit.path.index(current_node)
+            if path_index < len(flit.path) - 1:
+                next_node = flit.path[path_index + 1]
+
+                # 3. 判断下一跳是否需要维度转换
+                if self.direction == "horizontal":
+                    # 水平CrossPoint: 检查下一跳是否需要垂直移动
+                    if self._needs_vertical_move(current_node, next_node):
+                        # 需要从横向环转到纵向环,通过Ring Bridge下环
+                        direction = self._get_eject_direction_horizontal(current_node, next_node)
+                        return True, "RB", direction
+                elif self.direction == "vertical":
+                    # 垂直CrossPoint: 检查下一跳是否需要水平移动
+                    if self._needs_horizontal_move(current_node, next_node):
+                        # 需要从纵向环转到横向环,通过Ring Bridge下环
+                        direction = self._get_eject_direction_vertical(current_node, next_node)
+                        return True, "RB", direction
+        except ValueError:
+            # 当前节点不在路径中,可能是绕环情况
+            # 检查是否绕环到达了目标节点
+            if current_node == final_dest:
+                if self.direction == "horizontal":
+                    return True, "RB", self._get_eject_direction_horizontal(current_node, final_dest)
+                else:
+                    return True, "EQ", self._get_eject_direction_vertical(current_node, final_dest)
+
+        # 4. 不需要下环,继续在当前环传输
+        return False, "", ""
+
+    def _get_eject_direction_horizontal(self, current_node: int, target_node: int) -> str:
+        """
+        获取水平CrossPoint的下环方向
+
+        根据当前节点在横向环上的位置，确定应该从哪个方向下环
+
+        Args:
+            current_node: 当前节点ID
+            target_node: 目标节点ID
+
+        Returns:
+            str: "TL"或"TR"
+        """
+        # 简化逻辑:根据行号奇偶性决定
+        # 偶数行:从左向右(TL下环)
+        # 奇数行:从右向左(TR下环)
+        row = current_node // self.config.NUM_COL
+        if row % 2 == 0:
+            return "TL"
+        else:
+            return "TR"
+
+    def _get_eject_direction_vertical(self, current_node: int, target_node: int) -> str:
+        """
+        获取垂直CrossPoint的下环方向
+
+        根据当前节点在纵向环上的位置，确定应该从哪个方向下环
+
+        Args:
+            current_node: 当前节点ID
+            target_node: 目标节点ID
+
+        Returns:
+            str: "TU"或"TD"
+        """
+        # 简化逻辑:根据列号奇偶性决定
+        # 偶数列:从上向下(TU下环)
+        # 奇数列:从下向上(TD下环)
+        col = current_node % self.config.NUM_COL
+        if col % 2 == 0:
+            return "TU"
+        else:
+            return "TD"

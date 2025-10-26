@@ -1323,74 +1323,6 @@ class NetworkLinkVisualizer:
         src_center = (src_pos[0] + half_w, src_pos[1] + half_h)
 
         if is_self_loop:
-            # # 判断节点是否在边界
-            # rows, cols = self.network.config.NUM_ROW, self.network.config.NUM_COL
-            # row, col = src // cols, src % cols
-
-            # # 确定节点在哪个边界并设置相应的箭头和队列位置
-            # is_left_edge = col == 0 and row % 2 == 1
-            # is_right_edge = col == cols - 1 and row % 2 == 1
-            # is_top_edge = row == 0 and row % 2 == 0
-            # is_bottom_edge = row == rows - 2 and row % 2 == 0
-
-            # # 只处理边界节点，内部节点不添加自环
-            # if not (is_left_edge or is_right_edge or is_top_edge or is_bottom_edge):
-            #     return
-
-            # # 根据边界位置设置自环方向和队列位置
-            # loop_offset = 0.1  # 自环与节点的距离
-            # queue_width = 0.2
-            # queue_height = queue_fixed_length / 3.5
-
-            # # 确定箭头和队列的位置及方向
-            # if is_top_edge:  # 最上边，从右到左
-            #     # src_arrow = (src_center[0] + half_w, src_center[1] + loop_offset)
-            #     # dest_arrow = (src_center[0] - half_w, src_center[1] + loop_offset)
-            #     queue_center = (src_center[0], src_center[1] + loop_offset + queue_height / 2)
-            #     is_horizontal = True
-            #     is_forward = False  # 从右到左
-            # elif is_bottom_edge:  # 最下边，从左到右
-            #     # src_arrow = (src_center[0] - half_w, src_center[1] - loop_offset)
-            #     # dest_arrow = (src_center[0] + half_w, src_center[1] - loop_offset)
-            #     queue_center = (src_center[0], src_center[1] - loop_offset - queue_height / 2)
-            #     is_horizontal = True
-            #     is_forward = True  # 从左到右
-            # elif is_left_edge:  # 最左边，从上到下
-            #     # src_arrow = (src_center[0] - loop_offset, src_center[1] + half_h)
-            #     # dest_arrow = (src_center[0] - loop_offset, src_center[1] - half_h)
-            #     queue_center = (src_center[0] - loop_offset * 1.5 - queue_width, src_center[1])
-            #     is_horizontal = False
-            #     is_forward = False  # 从上到下
-            # elif is_right_edge:  # 最右边，从下到上
-            #     # src_arrow = (src_center[0] + loop_offset, src_center[1] - half_h)
-            #     # dest_arrow = (src_center[0] + loop_offset, src_center[1] + half_h)
-            #     queue_center = (src_center[0] + loop_offset * 1.5 + queue_width, src_center[1])
-            #     is_horizontal = False
-            #     is_forward = True  # 从下到上
-
-            # # 根据是水平还是垂直方向调整队列尺寸
-            # if is_horizontal:
-            #     queue_width, queue_height = queue_height, queue_width
-
-            # # 绘制自环箭头
-            # # self.ax.annotate("", xy=dest_arrow, xycoords="data", xytext=src_arrow,
-            # # textcoords="data", arrowprops=dict(arrowstyle="->", color="blue", lw=2))
-
-            # # 绘制队列框架
-            # q_ll = (queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2)
-            # queue = Rectangle(q_ll, queue_width, queue_height, facecolor="white", edgecolor="black", linestyle="--")
-            # self.ax.add_patch(queue)
-
-            # # 存储链路绘制信息
-            # link_id = f"{src}-{dest}"
-            # self.link_artists[link_id] = {
-            #     "queue_center": queue_center,
-            #     "queue_width": queue_width,
-            #     "queue_height": queue_height,
-            #     "is_horizontal": is_horizontal,
-            #     "is_forward": is_forward,
-            #     "is_self_loop": True,
-            # }
             return
 
         # 非自环链路的处理逻辑
@@ -1427,37 +1359,20 @@ class NetworkLinkVisualizer:
         # 箭头中点，用于队列框架的参考位置
         arrow_mid = ((src_arrow[0] + dest_arrow[0]) / 2, (src_arrow[1] + dest_arrow[1]) / 2)
 
-        # 根据箭头方向确定队列框架放置在箭头的哪一侧：
-        # 对于水平箭头（|dx|>=|dy|）：dx<0表示箭头向左，队列放在上方；dx>0表示向右，队列放在下方。
-        # 对于竖直箭头：dy>0表示箭头向上，队列放在右侧；dy<0表示向下，队列放在左侧。
-        queue_offset = 0.15  # 队列框架中心与箭头中点的偏移量
-        if abs(dx) >= abs(dy):
-            # 水平箭头：队列偏移仅影响 y 坐标
-            if dx < 0:
-                queue_dx, queue_dy = 0.4, queue_offset  # 向上
-            else:
-                queue_dx, queue_dy = 0.4, -queue_offset  # 向下
-        else:
-            # 竖直箭头：队列偏移仅影响 x 坐标
-            if dy > 0:
-                queue_dx, queue_dy = queue_offset, -0.2  # 向右
-            else:
-                queue_dx, queue_dy = -queue_offset, -0.2  # 向左
-
         # 队列框架中心点
-        queue_center = (arrow_mid[0] + queue_dx, arrow_mid[1] + queue_dy)
+        queue_center = (arrow_mid[0], arrow_mid[1])
 
         # 队列框架的尺寸根据箭头方向决定，动态调整长度保持 slice 接近正方形
         # 期望的单个 slice 尺寸（接近正方形）
-        target_slice_size = 0.25
+        target_slice_size = 0.4
         actual_slice_count = slice_num - 2  # 实际绘制的 slice 数量（减去首尾）
 
         is_horizontal = abs(dx) >= abs(dy)
         if is_horizontal:
-            queue_height = 0.2
+            queue_height = 0.4
             queue_width = target_slice_size * actual_slice_count if actual_slice_count > 0 else queue_fixed_length
         else:
-            queue_width = 0.2
+            queue_width = 0.4
             queue_height = target_slice_size * actual_slice_count if actual_slice_count > 0 else queue_fixed_length
 
         # 新实现：slices沿link方向排列，而非侧面队列框架
@@ -1465,9 +1380,9 @@ class NetworkLinkVisualizer:
         perp_dx, perp_dy = -dy, dx  # 旋转90度
 
         # Slice参数
-        slot_size = 0.1
+        slot_size = 0.2
         slot_spacing = 0.0
-        side_offset = 0.12  # 距离link中心线的距离
+        side_offset = 0.25  # 距离link中心线的距离
 
         # 计算link的实际起止点（去除节点占用部分）
         node_radius = 0.25
@@ -1549,42 +1464,6 @@ class NetworkLinkVisualizer:
             "is_self_loop": False,
         }
 
-    def split_queue_into_slices(self, q_ll, queue_width, queue_height, slice_num, is_horizontal=True, **kwargs):
-        """
-        将队列矩形分割成 slice_num 个小矩形，支持横向或纵向切割
-
-        参数:
-            q_ll: 队列左下角坐标 (x, y)
-            queue_width: 队列总宽度
-            queue_height: 队列高度
-            slice_num: 座位数量
-            is_horizontal:
-                - True（默认）: 横向切割（沿宽度方向，生成多个等宽小矩形）
-                - False: 纵向切割（沿高度方向，生成多个等高小矩形）
-            **kwargs: 传递给 Rectangle 的其他参数（如 facecolor, edgecolor 等）
-
-        返回:
-            list: 包含 slice_num 个小矩形的列表
-        """
-        slices = []
-
-        if is_horizontal:
-            # 横向切割（沿宽度方向）
-            slice_width = queue_width / slice_num
-            for i in range(slice_num):
-                slice_ll = (q_ll[0] + i * slice_width, q_ll[1])
-                slice = Rectangle(slice_ll, slice_width, queue_height, **kwargs)
-                slices.append(slice)
-        else:
-            # 纵向切割（沿高度方向）
-            slice_height = queue_height / slice_num
-            for i in range(slice_num):
-                slice_ll = (q_ll[0], q_ll[1] + i * slice_height)
-                slice = Rectangle(slice_ll, queue_width, slice_height, **kwargs)
-                slices.append(slice)
-
-        return slices
-
     def update(self, networks=None, cycle=None, skip_pause=False):
         """
         更新每条链路队列中 flit 的显示
@@ -1615,8 +1494,7 @@ class NetworkLinkVisualizer:
             for i, net in enumerate(self.networks):
                 # 构建快照（存储 Flit 对象或 None）
                 # 处理2-tuple或3-tuple格式的link key
-                snap = {link_key[:2]: [f if f is not None else None for f in flits]
-                        for link_key, flits in net.links.items()}
+                snap = {link_key[:2]: [f if f is not None else None for f in flits] for link_key, flits in net.links.items()}
                 meta = {
                     "network_name": net.name,
                     # 不再保存高亮状态到历史
@@ -1634,8 +1512,7 @@ class NetworkLinkVisualizer:
         if self.networks is not None:
             current_net = self.networks[self.selected_network_index]
             # 处理2-tuple或3-tuple格式的link key
-            render_snap = {link_key[:2]: [f if f is not None else None for f in flits]
-                          for link_key, flits in current_net.links.items()}
+            render_snap = {link_key[:2]: [f if f is not None else None for f in flits] for link_key, flits in current_net.links.items()}
             self._render_snapshot(render_snap)
             # 若已有选中节点，实时更新右侧 Piece 视图
             if self._selected_node is not None:
@@ -1643,8 +1520,7 @@ class NetworkLinkVisualizer:
             self.ax.set_title(current_net.name)
         else:
             # 处理2-tuple或3-tuple格式的link key
-            self._render_snapshot({link_key[:2]: [f if f is not None else None for f in flits]
-                                  for link_key, flits in self.network.links.items()})
+            self._render_snapshot({link_key[:2]: [f if f is not None else None for f in flits] for link_key, flits in self.network.links.items()})
             # 若已有选中节点，实时更新右侧 Piece 视图
             if self._selected_node is not None:
                 self._refresh_piece_view()
@@ -1707,7 +1583,7 @@ class NetworkLinkVisualizer:
         key = event.key
 
         # 数字键1-3选择对应网络 (REQ=1, RSP=2, DATA=3)
-        if key in ['1', '2', '3']:
+        if key in ["1", "2", "3"]:
             network_idx = int(key) - 1
             if 0 <= network_idx < len(self.histories):
                 self.selected_network_index = network_idx
@@ -1770,14 +1646,6 @@ class NetworkLinkVisualizer:
             cyc, snap, meta = current_history[self._play_idx]
 
             # 保存当前的高亮状态
-            current_use_highlight = self.use_highlight
-            current_highlight_pid = self.highlight_pid
-            current_tracked_pid = self.tracked_pid
-
-            # 不再从meta恢复高亮状态，而是保持当前状态
-            # self.use_highlight = meta.get("use_highlight", False)
-            # self.highlight_pid = meta.get("expected_pid", 0)
-
             self.ax.set_title(meta.get("network_name", ""))
             self.status_text.set_text(f"Paused\ncycle {cyc} ({self._play_idx+1}/{len(current_history)})")
             self._draw_state(snap)
@@ -1805,8 +1673,8 @@ class NetworkLinkVisualizer:
                     pass
             info["flit_artists"] = []
 
-        slot_size = 0.1  # slot方块边长
-        flit_size = 0.09  # flit方块边长(略小于slot)
+        slot_size = 0.2  # slot方块边长
+        flit_size = 0.2  # flit方块边长(略小于slot)
 
         for (src, dest), flit_list in snapshot.items():
             link_id = f"{src}-{dest}"
@@ -1855,7 +1723,7 @@ class NetworkLinkVisualizer:
                 tag_list = tags_dict.get((src, dest), None)
                 if isinstance(tag_list, (list, tuple)) and len(tag_list) > idx_slice:
                     slot_obj = tag_list[idx_slice]
-                    if hasattr(slot_obj, 'itag_reserved') and slot_obj.itag_reserved:
+                    if hasattr(slot_obj, "itag_reserved") and slot_obj.itag_reserved:
                         tag = [slot_obj.itag_reserver_id, slot_obj.itag_direction]
 
                 if flit is None:
@@ -1936,7 +1804,7 @@ class NetworkLinkVisualizer:
         self.fig.canvas.draw_idle()
 
     _ETAG_ALPHA = {"T0": 1.0, "T1": 1.0, "T2": 0.85}  # T0  # T1  # T2
-    _ETAG_LW = {"T0": 1, "T1": 1, "T2": 0}  # T0  # T1  # T2
+    _ETAG_LW = {"T0": 2, "T1": 2, "T2": 1}  # T0  # T1  # T2
     _ETAG_EDGE = {"T0": 2, "T1": 1, "T2": 0}
     _ITAG_ALPHA = {True: 1.0, False: 0.85}
     _ITAG_LW = {True: 1.0, False: 0}
