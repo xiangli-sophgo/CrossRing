@@ -1052,20 +1052,9 @@ class NetworkLinkVisualizer:
         self.piece_ax.clear()
         self.piece_ax.axis("off")
         self.piece_vis.draw_piece_for_node(self._selected_node, self.network)
-        # 初始化时绘制高亮框
-        raw_center = self._selected_node
-        row0 = raw_center // cols
-        nodes_center = [raw_center]
-        if row0 % 2 == 0 and raw_center + cols in self.node_positions:
-            nodes_center.append(raw_center + cols)
-        elif row0 % 2 == 1 and raw_center - cols in self.node_positions:
-            nodes_center.append(raw_center - cols)
-        xs0 = [self.node_positions[n][0] for n in nodes_center]
-        ys0 = [self.node_positions[n][1] for n in nodes_center]
-        llx0, lly0 = min(xs0), min(ys0)
-        w0 = max(xs0) - min(xs0) + 0.5
-        h0 = max(ys0) - min(ys0) + 0.5
-        self.click_box = Rectangle((llx0, lly0), w0, h0, facecolor="none", edgecolor="red", linewidth=1.2, linestyle="--")
+        # 初始化时绘制高亮框（仅高亮当前选中节点）
+        x_ll, y_ll = self.node_positions[self._selected_node]
+        self.click_box = Rectangle((x_ll, y_ll), 0.5, 0.5, facecolor="none", edgecolor="red", linewidth=1.2, linestyle="--")
         self.ax.add_patch(self.click_box)
         self.fig.canvas.draw_idle()
 
@@ -1816,68 +1805,68 @@ class NetworkLinkVisualizer:
                     pass
             info["flit_artists"] = []
 
-        margin = 0.02
-        flit_size = 0.15  # 单个 flit 方块边长
+        slot_size = 0.1  # slot方块边长
+        flit_size = 0.09  # flit方块边长(略小于slot)
+
         for (src, dest), flit_list in snapshot.items():
             link_id = f"{src}-{dest}"
             if link_id not in self.link_artists:
                 continue
 
+            # 获取link的方向信息
             info = self.link_artists[link_id]
-            queue_center = info["queue_center"]
-            queue_width = info["queue_width"]
-            queue_height = info["queue_height"]
             is_horizontal = info["is_horizontal"]
             is_forward = info["is_forward"]
-            is_self_loop = info.get("is_self_loop", False)
 
-            q_ll = (queue_center[0] - queue_width / 2, queue_center[1] - queue_height / 2)
-
-            num_slices = len(flit_list) - 2
-            if num_slices == 0:
+            # 获取slot位置
+            node_pair = (min(src, dest), max(src, dest))
+            if node_pair not in self.node_pair_slots:
                 continue
 
-            # 计算 slice 间距，确保所有 slice 都能显示
-            if is_horizontal:
-                spacing = (queue_width - 2 * margin) / num_slices
-            else:
-                spacing = (queue_height - 2 * margin) / num_slices
+            # 根据方向选择对应侧的slots
+            all_slots = self.node_pair_slots[node_pair]
+            target_side = "side1" if src < dest else "side2"
+            target_slots = [s for s in all_slots if s[1].startswith(target_side)]
+
+            if src >= dest:
+                # 反向link需要反转slot顺序
+                target_slots = list(reversed(target_slots))
+
+            num_slices = len(flit_list) - 2
+            if num_slices == 0 or num_slices != len(target_slots):
+                continue
 
             flit_artists = []
-            for i, slice in enumerate(flit_list[1:-1]):
-                # Determine index in original flit_list (offset by 1 because we skipped first element)
+            for i, flit in enumerate(flit_list[1:-1]):
+                if i >= len(target_slots):
+                    break
+
+                # 获取slot位置
+                slot_pos, slot_id = target_slots[i]
+                slot_x, slot_y = slot_pos
+
+                # 计算flit在slot中心的位置
+                x = slot_x + slot_size / 2
+                y = slot_y + slot_size / 2
+
+                # 获取tag信息
                 idx_slice = i + 1
                 tag = None
                 tag_list = tags_dict.get((src, dest), None)
                 if isinstance(tag_list, (list, tuple)) and len(tag_list) > idx_slice:
-                    slot = tag_list[idx_slice]
-                    # 从Slot对象中提取ITag信息
-                    if hasattr(slot, 'itag_reserved') and slot.itag_reserved:
-                        tag = [slot.itag_reserver_id, slot.itag_direction]
-                    else:
-                        tag = None
+                    slot_obj = tag_list[idx_slice]
+                    if hasattr(slot_obj, 'itag_reserved') and slot_obj.itag_reserved:
+                        tag = [slot_obj.itag_reserver_id, slot_obj.itag_direction]
 
-                if slice is None:
-                    # 如果有tag也要画三角
+                if flit is None:
+                    # 空slot，如果有tag画三角
                     if tag is not None:
-                        if is_horizontal:
-                            x = q_ll[0] + margin + (i + 0.5) * spacing
-                            if not is_forward:
-                                x = q_ll[0] + queue_width - margin - (i + 0.5) * spacing
-                            y = queue_center[1]
-                        else:
-                            y = q_ll[1] + margin + (i + 0.5) * spacing
-                            if not is_forward:
-                                y = q_ll[1] + queue_height - margin - (i + 0.5) * spacing
-                            x = queue_center[0]
-
-                        t_size = flit_size * 0.6  # 增大三角形尺寸
-                        # 在正中心绘制正三角形
+                        t_size = flit_size * 0.6
                         triangle = plt.Polygon(
                             [
-                                (x, y + t_size / 2),  # 顶点
-                                (x - t_size / 2, y - t_size / 4),  # 左下
-                                (x + t_size / 2, y - t_size / 4),  # 右下
+                                (x, y + t_size / 2),
+                                (x - t_size / 2, y - t_size / 4),
+                                (x + t_size / 2, y - t_size / 4),
                             ],
                             color="red",
                         )
@@ -1885,22 +1874,8 @@ class NetworkLinkVisualizer:
                         self.ax.add_patch(triangle)
                         flit_artists.append(triangle)
                     continue
-                # slice 是 Flit 实例
-                flit = slice
 
-                # ---------- 位置 ----------
-                if is_horizontal:
-                    x = q_ll[0] + margin + (i + 0.5) * spacing
-                    y = queue_center[1]
-                    if not is_forward:  # 向左
-                        x = q_ll[0] + queue_width - margin - (i + 0.5) * spacing
-                else:
-                    x = queue_center[0]
-                    y = q_ll[1] + margin + (i + 0.5) * spacing
-                    if not is_forward:  # 向下
-                        y = q_ll[1] + queue_height - margin - (i + 0.5) * spacing
-
-                # ---------- 绘制矩形 ----------
+                # 绘制flit矩形
                 face, alpha, lw, edge = self._get_flit_style(
                     flit,
                     use_highlight=self.use_highlight,
@@ -1919,54 +1894,37 @@ class NetworkLinkVisualizer:
                 self.ax.add_patch(rect)
                 flit_artists.append(rect)
 
-                # ---------- 文本标签 ----------
+                # 文本标签
                 pid, fid = flit.packet_id, flit.flit_id
                 label = f"{pid}.{fid}"
+
                 if is_horizontal:
                     # 标签放上下
-                    y_text = y - flit_size * 2 - 0.1 if is_forward else y + flit_size * 2 + 0.1
-                    txt = self.ax.text(
-                        x,
-                        y_text,
-                        label,
-                        ha="center",
-                        va="center",
-                        fontsize=8,
-                    )
-                    txt.set_visible(self.use_highlight and pid == self.tracked_pid)
-                    self.rect_info_map[rect] = (txt, flit, tag)
-                    flit_artists.append(txt)
+                    y_text = y - slot_size * 2 if is_forward else y + slot_size * 2
+                    txt = self.ax.text(x, y_text, label, ha="center", va="center", fontsize=8)
                 else:
                     # 标签放左右
-                    text_x = x + flit_size * 1.1 if is_forward else x - flit_size * 1.1
+                    text_x = x + slot_size * 2 if is_forward else x - slot_size * 2
                     ha = "left" if is_forward else "right"
-                    txt = self.ax.text(
-                        text_x,
-                        y,
-                        label,
-                        ha=ha,
-                        va="center",
-                        fontsize=8,
-                    )
-                    txt.set_visible(self.use_highlight and pid == self.tracked_pid)
-                    self.rect_info_map[rect] = (txt, flit, tag)
-                    flit_artists.append(txt)
+                    txt = self.ax.text(text_x, y, label, ha=ha, va="center", fontsize=8)
 
-                # Draw a small red triangle if tag is not None (using links_tag)
+                txt.set_visible(self.use_highlight and pid == self.tracked_pid)
+                self.rect_info_map[rect] = (txt, flit, tag)
+                flit_artists.append(txt)
+
+                # 绘制tag三角形
                 if tag is not None:
-                    t_size = flit_size * 0.6  # 增大三角形尺寸
-                    # 在 flit 正中心绘制正三角形
+                    t_size = flit_size * 0.6
                     triangle = plt.Polygon(
                         [
-                            (x, y + t_size / 2),  # 顶点
-                            (x - t_size / 2, y - t_size / 4),  # 左下
-                            (x + t_size / 2, y - t_size / 4),  # 右下
+                            (x, y + t_size / 2),
+                            (x - t_size / 2, y - t_size / 4),
+                            (x + t_size / 2, y - t_size / 4),
                         ],
                         color="red",
                     )
                     triangle.tag_val = tag
                     self.ax.add_patch(triangle)
-                    # Also include triangle in flit_artists so it is removed on next frame
                     flit_artists.append(triangle)
 
             # 保存此链路新生成的图元
