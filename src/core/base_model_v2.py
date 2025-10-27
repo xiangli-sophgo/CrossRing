@@ -155,6 +155,7 @@ class BaseModel:
         self.print_trace = False
         self.show_trace_id = []
         self.show_node_id = 3
+        self.update_interval = 0.0
 
         # 内部状态标志
         self._done_flags = {
@@ -223,6 +224,7 @@ class BaseModel:
         self,
         print_trace: bool = False,
         show_trace_id: list = None,
+        update_interval: float = 0.0,
     ) -> None:
         """
         配置调试选项
@@ -230,10 +232,11 @@ class BaseModel:
         Args:
             print_trace: 是否打印trace信息
             show_trace_id: 要跟踪的packet ID列表
-            show_node_id: 显示的节点ID
+            update_interval: 每个周期的暂停时间（秒），用于实时观察
         """
         self.print_trace = print_trace
         self.show_trace_id = show_trace_id if show_trace_id is not None else []
+        self.update_interval = update_interval
 
     def setup_visualization(
         self,
@@ -1074,7 +1077,8 @@ class BaseModel:
             if last_flit.is_finish:
                 self._done_flags[net_type] = True
 
-        time.sleep(0.3)
+        if self.update_interval > 0:
+            time.sleep(self.update_interval)
 
     def _flit_move(self, network: NetworkV2, flits, flit_type):
         # link 上的flit移动

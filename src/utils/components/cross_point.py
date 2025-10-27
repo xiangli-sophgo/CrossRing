@@ -359,21 +359,40 @@ class CrossPoint:
         # 2. 清空当前link位置
         link[flit.current_seat_index] = None
 
-        # 3. 根据下环目标设置flit状态
+        # 3. 根据下环目标设置flit状态并添加到pre缓冲
         if direction in ["TL", "TR"]:
             # 横向环下环到ring_bridge
-            # 修复: 不设置错误的current_link自环,改为设置flit_position标记
             flit.is_delay = False
-            flit.current_link = None  # 清空current_link
-            flit.current_seat_index = -1  # 重置seat_index
-            flit.flit_position = f"RB_{direction}"  # 标记在ring_bridge中
+            flit.current_link = None
+            flit.current_seat_index = -1
+            flit.flit_position = f"RB_{direction}"
+
+            # 添加到ring_bridge_pre缓冲位（带检查）
+            if self.network:
+                if self.network.ring_bridge_pre[direction][key] is not None:
+                    raise RuntimeError(
+                        f"[Cycle {self.network.cycle}] ring_bridge_pre[{direction}][{key}] 已被占用！"
+                        f"当前flit: {self.network.ring_bridge_pre[direction][key]}, "
+                        f"尝试添加: {flit}"
+                    )
+                self.network.ring_bridge_pre[direction][key] = flit
         else:  # TU, TD
-            # 纵向环下环到最终目的地
+            # 纵向环下环到eject_queues（最终目的地节点，但还未到IP）
             flit.is_delay = False
-            flit.is_arrive = True
+            flit.is_arrive = False  # 还未到IP模块，保持False
             flit.current_link = None
             flit.current_seat_index = 0
-            flit.flit_position = f"EQ_{direction}"  # 标记在eject_queue中
+            flit.flit_position = f"EQ_{direction}"
+
+            # 添加到eject_queues_in_pre缓冲位（带检查）
+            if self.network:
+                if self.network.eject_queues_in_pre[direction][key] is not None:
+                    raise RuntimeError(
+                        f"[Cycle {self.network.cycle}] eject_queues_in_pre[{direction}][{key}] 已被占用！"
+                        f"当前flit: {self.network.eject_queues_in_pre[direction][key]}, "
+                        f"尝试添加: {flit}"
+                    )
+                self.network.eject_queues_in_pre[direction][key] = flit
 
         # 4. 占用Entry
         self._occupy_entry(direction, key, entry_level, flit)
@@ -512,10 +531,10 @@ class CrossPoint:
             # 根据当前CrossPoint类型决定下环目标
             if self.direction == "horizontal":
                 # 水平CrossPoint: 需要通过Ring Bridge转到垂直环
-                return True, "RB", self._get_eject_direction_horizontal(current_node, final_dest)
+                return True, "RB", self._get_eject_direction_horizontal(flit, current_node, final_dest)
             else:  # vertical
                 # 垂直CrossPoint: 直接下环到目的地
-                return True, "EQ", self._get_eject_direction_vertical(current_node, final_dest)
+                return True, "EQ", self._get_eject_direction_vertical(flit, current_node, final_dest)
 
         # 2. 查找当前节点在路径中的位置
         try:
@@ -528,66 +547,78 @@ class CrossPoint:
                     # 水平CrossPoint: 检查下一跳是否需要垂直移动
                     if self._needs_vertical_move(current_node, next_node):
                         # 需要从横向环转到纵向环,通过Ring Bridge下环
-                        direction = self._get_eject_direction_horizontal(current_node, next_node)
+                        direction = self._get_eject_direction_horizontal(flit, current_node, next_node)
                         return True, "RB", direction
                 elif self.direction == "vertical":
                     # 垂直CrossPoint: 检查下一跳是否需要水平移动
                     if self._needs_horizontal_move(current_node, next_node):
                         # 需要从纵向环转到横向环,通过Ring Bridge下环
-                        direction = self._get_eject_direction_vertical(current_node, next_node)
+                        direction = self._get_eject_direction_vertical(flit, current_node, next_node)
                         return True, "RB", direction
         except ValueError:
             # 当前节点不在路径中,可能是绕环情况
             # 检查是否绕环到达了目标节点
             if current_node == final_dest:
                 if self.direction == "horizontal":
-                    return True, "RB", self._get_eject_direction_horizontal(current_node, final_dest)
+                    return True, "RB", self._get_eject_direction_horizontal(flit, current_node, final_dest)
                 else:
-                    return True, "EQ", self._get_eject_direction_vertical(current_node, final_dest)
+                    return True, "EQ", self._get_eject_direction_vertical(flit, current_node, final_dest)
 
         # 4. 不需要下环,继续在当前环传输
         return False, "", ""
 
-    def _get_eject_direction_horizontal(self, current_node: int, target_node: int) -> str:
+    def _get_eject_direction_horizontal(self, flit: Flit, current_node: int, target_node: int) -> str:
         """
         获取水平CrossPoint的下环方向
 
-        根据当前节点在横向环上的位置，确定应该从哪个方向下环
+        根据flit的实际移动方向确定应该从哪个方向下环
 
         Args:
+            flit: 当前flit对象
             current_node: 当前节点ID
             target_node: 目标节点ID
 
         Returns:
             str: "TL"或"TR"
         """
-        # 简化逻辑:根据行号奇偶性决定
-        # 偶数行:从左向右(TL下环)
-        # 奇数行:从右向左(TR下环)
-        row = current_node // self.config.NUM_COL
-        if row % 2 == 0:
-            return "TL"
-        else:
-            return "TR"
+        prev_node = flit.current_link[0]
+        curr_node = flit.current_link[1]
 
-    def _get_eject_direction_vertical(self, current_node: int, target_node: int) -> str:
+        prev_col = prev_node % self.config.NUM_COL
+        curr_col = curr_node % self.config.NUM_COL
+
+        # 比较列号判断移动方向
+        if curr_col > prev_col or (prev_col == self.config.NUM_COL - 1 and curr_col == 0):
+            # 向右移动 -> 从右侧下环
+            return "TR"
+        else:
+            # 向左移动 -> 从左侧下环
+            return "TL"
+
+    def _get_eject_direction_vertical(self, flit: Flit, current_node: int, target_node: int) -> str:
         """
         获取垂直CrossPoint的下环方向
 
-        根据当前节点在纵向环上的位置，确定应该从哪个方向下环
+        根据flit的实际移动方向确定应该从哪个方向下环
 
         Args:
+            flit: 当前flit对象
             current_node: 当前节点ID
             target_node: 目标节点ID
 
         Returns:
             str: "TU"或"TD"
         """
-        # 简化逻辑:根据列号奇偶性决定
-        # 偶数列:从上向下(TU下环)
-        # 奇数列:从下向上(TD下环)
-        col = current_node % self.config.NUM_COL
-        if col % 2 == 0:
-            return "TU"
-        else:
+        prev_node = flit.current_link[0]
+        curr_node = flit.current_link[1]
+
+        prev_row = prev_node // self.config.NUM_COL
+        curr_row = curr_node // self.config.NUM_COL
+
+        # 比较行号判断移动方向
+        if curr_row > prev_row:
+            # 向下移动 -> 从下侧下环
             return "TD"
+        else:
+            # 向上移动 -> 从上侧下环
+            return "TU"

@@ -633,7 +633,7 @@ class Network:
 
             # 新架构: 判断是否到达目的地
             if next_node == flit.destination:
-                flit.is_arrive = True
+                # 不设置is_arrive，只有到IP模块才设置
                 flit.current_seat_index = 0  # 直达目的地也需要设置seat_index
             elif abs(current - next_node) == self.config.NUM_COL:
                 # 纵向移动（向上或向下）
@@ -659,15 +659,10 @@ class Network:
         # 新架构: 所有普通link（包括纵向link）都需要处理
         # 只有自环link（current == next_node）才是ring_bridge
         if current != next_node:
-            row_start = (current // self.config.NUM_COL) * self.config.NUM_COL
-            row_end = row_start + self.config.NUM_COL - 1
-            col_start = current % self.config.NUM_COL
-            col_end = col_start + self.config.NUM_NODE - self.config.NUM_COL
-
             link = self.links.get(flit.current_link)
 
             # Plan non ring bridge moves (包括横向和纵向link)
-            return self._handle_flit(flit, link, current, next_node, row_start, row_end, col_start, col_end)
+            return self._handle_flit(flit, link, current, next_node)
 
     def _position_to_physical_node(self, position):
         """新架构: position就是physical node ID，无需映射"""
@@ -850,62 +845,26 @@ class Network:
         return None
 
     def execute_moves(self, flit: Flit, cycle):
-        if not flit.is_arrive:
-            # 修复: 处理current_link=None的情况(flit已下环到ring_bridge/eject_queue)
-            if flit.current_link is None:
-                return True  # flit已离开link,不需要执行moves
-
-            current, next_node = flit.current_link[:2] if len(flit.current_link) == 3 else flit.current_link
-            if current != next_node:
-                # 新架构: flit在普通link上
-                link = self.links.get(flit.current_link)
-                self.set_link_slice(flit.current_link, flit.current_seat_index, flit, cycle)
-            else:
-                # 新架构: flit在ring_bridge上（同一节点的自环）
-                if not flit.is_on_station:
-                    # 使用字典映射 seat_index 到 ring_bridge 的方向和深度限制
-                    direction, max_depth = self.ring_bridge_map.get(flit.current_seat_index, (None, None))
-                    if direction is None:
-                        return False
-                    # 新架构: ring_bridge键直接使用节点号
-                    if direction in self.ring_bridge.keys() and len(self.ring_bridge[direction][current]) < max_depth and self.ring_bridge_pre[direction][current] is None:
-                        self.ring_bridge_pre[direction][current] = flit
-                        flit.is_on_station = True
-            return False
-        else:
-            if flit.current_link is None:
-                flit.arrival_network_cycle = cycle
-                return True
-            current, next_node = flit.current_link[:2] if len(flit.current_link) == 3 else flit.current_link
+        # 情况1：is_arrive=True（已在IP模块）
+        # 这种情况不应该在flits列表中，如果出现说明有bug
+        if flit.is_arrive:
             flit.arrival_network_cycle = cycle
+            return True  # 异常移除
 
-            # 新架构: 判断是否直接到EQ（source和destination相同或路径长度为1）
-            if flit.source == flit.destination or len(flit.path) <= 1:
-                flit.flit_position = f"IQ_EQ"
-                flit.is_arrived = True
+        # 情况2：current_link=None（已下环到pre缓冲）
+        # flit已离开Link系统，应该从flits列表移除
+        if flit.current_link is None:
+            return True  # 正常移除
 
-                return True
-            elif current == next_node:  # 新架构: Ring Bridge在同一节点
-                # 根据destination判断下环方向
-                if flit.destination < current:
-                    direction = "TU"  # 目标在上方
-                    queue = self.eject_queues["TU"]
-                    queue_pre = self.eject_queues_in_pre["TU"]
-                else:
-                    direction = "TD"  # 目标在下方
-                    queue = self.eject_queues["TD"]
-                    queue_pre = self.eject_queues_in_pre["TD"]
-            else:
-                direction = "TD"
-                queue = self.eject_queues["TD"]
-                queue_pre = self.eject_queues_in_pre["TD"]
+        # 情况3：在Link上传输
+        current, next_node = flit.current_link[:2] if len(flit.current_link) == 3 else flit.current_link
+        if current != next_node:
+            # 普通link传输
+            self.set_link_slice(flit.current_link, flit.current_seat_index, flit, cycle)
+        else:
+            raise ValueError(flit.current_link)
 
-            if queue_pre[next_node]:
-                return False
-            else:
-                queue_pre[next_node] = flit
-                flit.itag_v = False
-                return True
+        return False  # 保留在flits列表
 
     @property
     def rn_positions(self):
@@ -990,7 +949,7 @@ class Network:
         flit.current_link = new_link
         flit.current_seat_index = 0
 
-    def _analyze_flit_state(self, flit, current, next_node, row_start, row_end, col_start, col_end):
+    def _analyze_flit_state(self, flit, current, next_node):
         """
         分析flit当前状态，判断是否应该尝试下环
 
@@ -998,10 +957,6 @@ class Network:
             flit: 当前flit
             current: 当前链路起点
             next_node: 当前链路终点
-            row_start: 行起始节点
-            row_end: 行结束节点
-            col_start: 列起始节点
-            col_end: 列结束节点
 
         Returns:
             dict: {
@@ -1010,6 +965,16 @@ class Network:
                 'next_pos': int        # 下次绕环的位置
             }
         """
+        # 计算边界条件
+        row = next_node // self.config.NUM_COL
+        col = next_node % self.config.NUM_COL
+        num_rows = self.config.NUM_NODE // self.config.NUM_COL
+
+        row_start = row * self.config.NUM_COL
+        row_end = row_start + self.config.NUM_COL - 1
+        col_start = col
+        col_end = col + (num_rows - 1) * self.config.NUM_COL
+
         # 判断方向和计算下一个绕环位置
         if current == next_node:
             # 边界情况：在环的边界
@@ -1075,7 +1040,7 @@ class Network:
 
         return {"should_eject": should_eject, "direction": direction, "next_pos": next_pos}
 
-    def _handle_flit(self, flit: Flit, link, current, next_node, row_start, row_end, col_start, col_end):
+    def _handle_flit(self, flit: Flit, link, current, next_node):
         """
         处理flit在链路末端的行为（统一版本）
 
@@ -1084,10 +1049,6 @@ class Network:
             link: 当前链路
             current: 当前链路起点
             next_node: 当前链路终点
-            row_start: 行起始节点
-            row_end: 行结束节点
-            col_start: 列起始节点
-            col_end: 列结束节点
         """
         # 1. 非链路末端：继续前进
         if flit.current_seat_index < len(link) - 1:
@@ -1156,7 +1117,7 @@ class Network:
                     crosspoint._register_T0_slot(flit)
 
             # 继续绕环
-            state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
+            state = self._analyze_flit_state(flit, current, next_node)
             self._continue_looping(flit, link, state["next_pos"])
             return
 
@@ -1176,7 +1137,7 @@ class Network:
             pass
 
         # 6. 如果到了这里,说明next_node不在路径中或已经是最后一个节点,继续绕环
-        state = self._analyze_flit_state(flit, current, next_node, row_start, row_end, col_start, col_end)
+        state = self._analyze_flit_state(flit, current, next_node)
         self._continue_looping(flit, link, state["next_pos"])
 
     # ==================== 原有的辅助函数 ====================
