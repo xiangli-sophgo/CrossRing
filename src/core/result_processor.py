@@ -338,7 +338,7 @@ class BandwidthAnalyzer:
 
             # 计算不同角度的结束时间，并验证时间值有效性
             if not self.is_valid_number(representative_flit.data_received_complete_cycle):
-                print(f"[警告] packet_id {packet_id}: data_received_complete_cycle 无效，跳过该请求")
+                # print(f"[警告] packet_id {packet_id}: data_received_complete_cycle 无效，跳过该请求")
                 continue
             network_end_time = representative_flit.data_received_complete_cycle // self.network_frequency
 
@@ -382,7 +382,7 @@ class BandwidthAnalyzer:
 
             # 验证开始时间
             if not self.is_valid_number(representative_flit.cmd_entry_cake0_cycle):
-                print(f"[警告] packet_id {packet_id}: cmd_entry_cake0_cycle 无效，跳过该请求")
+                # print(f"[警告] packet_id {packet_id}: cmd_entry_cake0_cycle 无效，跳过该请求")
                 continue
             start_time = representative_flit.cmd_entry_cake0_cycle // self.network_frequency
 
@@ -449,7 +449,7 @@ class BandwidthAnalyzer:
 
             # 验证请求完整性
             if not self.validate_request(request_info):
-                print(f"[警告] packet_id {packet_id}: 请求数据验证失败，跳过该请求")
+                # print(f"[警告] packet_id {packet_id}: 请求数据验证失败，跳过该请求")
                 continue
 
             self.requests.append(request_info)

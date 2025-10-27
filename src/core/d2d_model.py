@@ -535,13 +535,16 @@ class D2D_Model:
         self._setup_directional_connection(src_die_id=die1_id, src_node=die1_node, dst_die_id=die0_id, dst_node=die0_node)
 
     def _setup_directional_connection(self, src_die_id: int, src_node: int, dst_die_id: int, dst_node: int):
-        """建立单向连接"""
+        """建立单向连接
 
-        # 获取IP接口
+        节点编号直接就是网络位置，不需要映射转换
+        """
+
+        # 获取IP接口 - 节点编号直接作为网络位置使用
         src_rn_key = ("d2d_rn_0", src_node)
         src_sn_key = ("d2d_sn_0", src_node)
-        dst_sn_key = ("d2d_sn_0", dst_node + self.dies[dst_die_id].config.NUM_COL)
-        dst_rn_key = ("d2d_rn_0", dst_node + self.dies[dst_die_id].config.NUM_COL)
+        dst_sn_key = ("d2d_sn_0", dst_node)
+        dst_rn_key = ("d2d_rn_0", dst_node)
 
         src_die = self.dies[src_die_id]
         dst_die = self.dies[dst_die_id]
@@ -782,21 +785,13 @@ class D2D_Model:
             # 跨Die：使用D2D路由器选择节点，根据目标IP编号选择d2d_pair
             # 从dst_ip提取IP编号（如"ddr_2"→2，"ddr"→0）
             dst_ip_id = int(dst_ip.split("_")[1]) if "_" in dst_ip else 0
-            base_d2d_node = self.d2d_router.select_d2d_node(src_die, dst_die, dst_ip_id)
-            if base_d2d_node is None:
+            d2d_node = self.d2d_router.select_d2d_node(src_die, dst_die, dst_ip_id)
+            if d2d_node is None:
                 raise ValueError(f"D2D路由器返回None，但这是跨Die请求 Die{src_die}->Die{dst_die}")
 
-            # 根据请求类型选择正确的D2D节点：
-            # 请求需要发送到D2D_SN（偶数行），响应从D2D_RN发出（奇数行）
-            d2d_sn_positions = getattr(self.config, "D2D_SN_POSITIONS", {}).get(src_die, [])
-            base_d2d_node -= die_model.config.NUM_COL
-
-            # 找到对应的D2D_SN节点位置和索引
-            if base_d2d_node in d2d_sn_positions:
-                intermediate_dest = base_d2d_node
-            else:
-                raise ValueError("未找到d2d_sn")
-
+            # 节点编号直接就是网络位置，不需要RN/SN转换
+            # D2D节点既可以作为RN（发起方）也可以作为SN（接收方）
+            intermediate_dest = d2d_node
             destination_type = f"d2d_sn_0"  # 跨Die时目标是D2D_SN，包含正确的编号
         else:
             # 新架构：本地路由直接使用目标节点，无需映射

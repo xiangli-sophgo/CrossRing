@@ -46,13 +46,13 @@ def main():
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
-    # model.setup_debug(trace_packets=[30], update_interval=0.1)
+    # model.setup_debug(trace_packets=[1], update_interval=0.1)
     # model.setup_visualization(enable=1, update_interval=0.5, start_cycle=500)
 
     model.setup_result_analysis(
         # 图片生成控制
         flow_graph=1,
-        ip_bandwidth_heatmap=1,
+        ip_bandwidth_heatmap=0,
         save_figures=0,
         # CSV文件导出控制
         export_d2d_requests_csv=1,
@@ -65,7 +65,7 @@ def main():
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_cycles=50000,
+        max_cycles=500,
         print_interval=1000,
         results_analysis=True,
         verbose=1,

@@ -924,7 +924,11 @@ class Network:
         # 验证seat_index合法性
         new_link_length = len(self.links[new_link])
         if flit.current_seat_index >= new_link_length:
-            raise RuntimeError(f"[Cycle {self.cycle}] Invalid seat_index {flit.current_seat_index} " f"for link {new_link} with length {new_link_length}. " f"Flit: {flit.packet_id}.{flit.flit_id}")
+            raise RuntimeError(
+                f"[Cycle {self.cycle}] Invalid seat_index {flit.current_seat_index} "
+                f"for link {new_link} with length {new_link_length}. "
+                f"Flit: {flit.packet_id}.{flit.flit_id}"
+            )
 
     def _analyze_flit_state(self, flit, current, next_node):
         """
@@ -1082,6 +1086,18 @@ class Network:
                 flit.eject_attempts_h += 1
             else:
                 flit.eject_attempts_v += 1
+
+            # 保序方向检查：如果方向不允许，直接绕环，不尝试下环，不升级ETag
+            if hasattr(flit, "allowed_eject_directions") and flit.allowed_eject_directions is not None:
+                if eject_direction not in flit.allowed_eject_directions:
+                    # 方向不允许，直接继续绕环
+                    if eject_direction in ["TL", "TR"]:
+                        flit.ordering_blocked_eject_h += 1
+                    else:
+                        flit.ordering_blocked_eject_v += 1
+                    state = self._analyze_flit_state(flit, current, next_node)
+                    self._continue_looping(flit, link, state["next_pos"])
+                    return
 
             # 尝试下环
             success, fail_reason = crosspoint._try_eject(

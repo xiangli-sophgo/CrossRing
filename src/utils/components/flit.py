@@ -172,7 +172,11 @@ class Flit:
             key = (src_node, dest_node)
 
         if key not in cls._global_order_id_allocator:
-            cls._global_order_id_allocator[key] = {"REQ": 1, "RSP": 1, "DATA": 1}
+            cls._global_order_id_allocator[key] = {"REQ": 1, "RSP": 1, "DATA": 1, "FLIT": 1}
+
+        # 如果packet_category不在字典中，则添加它
+        if packet_category not in cls._global_order_id_allocator[key]:
+            cls._global_order_id_allocator[key][packet_category] = 1
 
         current_id = cls._global_order_id_allocator[key][packet_category]
         cls._global_order_id_allocator[key][packet_category] += 1

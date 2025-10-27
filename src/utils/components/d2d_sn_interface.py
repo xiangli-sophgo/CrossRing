@@ -65,8 +65,14 @@ class D2D_SN_Interface(IPInterface):
         """创建响应flit的通用方法"""
         from .flit import Flit
 
-        dest_pos = destination_pos if destination_pos is not None else (req_flit.source - self.config.NUM_COL)
-        path = self.routes[self.ip_pos][dest_pos] if dest_pos in self.routes[self.ip_pos] else []
+        # 节点编号直接就是网络位置，不需要映射转换
+        dest_pos = destination_pos if destination_pos is not None else req_flit.source
+
+        # 检查路由表中是否存在该路径
+        if dest_pos not in self.routes.get(self.ip_pos, {}):
+            raise ValueError(f"路由表中找不到从{self.ip_pos}到{dest_pos}的路径")
+
+        path = self.routes[self.ip_pos][dest_pos]
 
         response = Flit(source=self.ip_pos, destination=dest_pos, path=path)
         response.packet_id = req_flit.packet_id
@@ -185,7 +191,7 @@ class D2D_SN_Interface(IPInterface):
 
         # 使用D2D统一属性恢复原始目标信息
         # d2d_origin_node是源映射位置，转为目标映射位置（减去NUM_COL）
-        destination = flit.d2d_origin_node - self.config.NUM_COL
+        destination = flit.d2d_origin_node
         source = self.ip_pos
 
         # 计算正确的路径
@@ -452,7 +458,7 @@ class D2D_SN_Interface(IPInterface):
 
         # 计算目标映射位置
         source_mapped = self.ip_pos  # D2D_SN的位置(36)
-        destination_mapped = original_source_mapped - self.config.NUM_COL
+        destination_mapped = original_source_mapped
 
         # 计算路径
         path = self.routes[source_mapped][destination_mapped] if destination_mapped in self.routes[source_mapped] else []
@@ -569,7 +575,7 @@ class D2D_SN_Interface(IPInterface):
         source_mapped = self.ip_pos  # D2D_SN的位置(36)
 
         # d2d_origin_node存储的是源映射位置，转为目标映射位置（减去NUM_COL）
-        destination_mapped = original_source_mapped - self.config.NUM_COL
+        destination_mapped = original_source_mapped
 
         # 计算从源映射到目标映射的路径
         # 即使是同一个物理节点，源映射和目标映射也应该不同

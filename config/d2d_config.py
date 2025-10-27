@@ -100,11 +100,16 @@ class D2DConfig:
     def _generate_pairs_from_connections(self, connections: List[List[int]]) -> List[Tuple[int, int, int, int]]:
         """从D2D_CONNECTIONS生成配对关系
 
+        配置文件中的节点编号直接就是网络节点位置，不需要任何映射转换。
+        一个网络节点可以同时作为RN和SN使用（双向通信）。
+
         Args:
             connections: D2D连接配置列表，每个元素为[src_die, src_node, dst_die, dst_node]
+                        src_node和dst_node直接是网络节点位置
 
         Returns:
             配对关系列表，每个元素为(die0_id, node0, die1_id, node1)
+                        node0和node1是网络节点位置
 
         Raises:
             ValueError: 如果连接配置格式错误或Die/节点ID超出范围
@@ -127,27 +132,25 @@ class D2DConfig:
             src_num_row, src_num_col = self._parse_topology(src_topology)
             dst_num_row, dst_num_col = self._parse_topology(dst_topology)
 
+            # 网络节点总数 = 行数 × 列数
             max_src_node = src_num_row * src_num_col - 1
             max_dst_node = dst_num_row * dst_num_col - 1
 
             if src_node > max_src_node:
-                raise ValueError(f"源节点ID超出范围: {src_node} > {max_src_node} (Die{src_die}, 拓扑{src_topology})")
+                raise ValueError(f"源节点位置超出范围: {src_node} > {max_src_node} (Die{src_die}, 拓扑{src_topology})")
             if dst_node > max_dst_node:
-                raise ValueError(f"目标节点ID超出范围: {dst_node} > {max_dst_node} (Die{dst_die}, 拓扑{dst_topology})")
+                raise ValueError(f"目标节点位置超出范围: {dst_node} > {max_dst_node} (Die{dst_die}, 拓扑{dst_topology})")
 
-            src_pos_rn = src_node % src_num_col + src_num_col + src_node // src_num_col * 2 * src_num_col
-            src_pos_sn = src_node % src_num_col + src_node // src_num_col * 2 * src_num_col
-
-            dst_pos_rn = dst_node % dst_num_col + dst_num_col + dst_node // dst_num_col * 2 * dst_num_col
-            dst_pos_sn = dst_node % dst_num_col + dst_node // dst_num_col * 2 * dst_num_col
-
-            pairs.append((src_die, src_pos_rn, dst_die, dst_pos_sn))
-            pairs.append((dst_die, dst_pos_rn, src_die, src_pos_sn))
+            # 直接使用节点位置，生成双向配对
+            pairs.append((src_die, src_node, dst_die, dst_node))
+            pairs.append((dst_die, dst_node, src_die, src_node))
 
         return pairs
 
     def _setup_die_positions_from_pairs(self, pairs: List[Tuple[int, int, int, int]]) -> None:
         """从配对关系中设置各Die的D2D节点位置
+
+        现在不再区分RN/SN，所有D2D节点既可以作为RN也可以作为SN。
 
         Args:
             pairs: D2D配对关系列表
@@ -156,35 +159,23 @@ class D2DConfig:
 
         for die_id in range(num_dies):
             all_positions = []
-            rn_positions = []
-            sn_positions = []
 
             for pair in pairs:
+                # 收集当前Die作为源的节点
                 if pair[0] == die_id:
                     all_positions.append(pair[1])
-                    node_pos = pair[1]
-                    topology_str = self.DIE_TOPOLOGIES.get(die_id, "5x4")
-                    _, num_col = self._parse_topology(topology_str)
-                    network_row = node_pos // num_col
-                    if network_row % 2 == 0:
-                        sn_positions.append(node_pos)
-                    else:
-                        rn_positions.append(node_pos)
 
+                # 收集当前Die作为目标的节点
                 if pair[2] == die_id:
                     all_positions.append(pair[3])
-                    node_pos = pair[3]
-                    topology_str = self.DIE_TOPOLOGIES.get(die_id, "5x4")
-                    _, num_col = self._parse_topology(topology_str)
-                    network_row = node_pos // num_col
-                    if network_row % 2 == 0:
-                        sn_positions.append(node_pos)
-                    else:
-                        rn_positions.append(node_pos)
 
-            self.D2D_DIE_POSITIONS[die_id] = list(set(all_positions))
-            self.D2D_RN_POSITIONS[die_id] = list(set(rn_positions))
-            self.D2D_SN_POSITIONS[die_id] = list(set(sn_positions))
+            # 去重并排序
+            unique_positions = list(set(all_positions))
+
+            self.D2D_DIE_POSITIONS[die_id] = unique_positions
+            # RN和SN位置列表与总位置列表相同（不再区分）
+            self.D2D_RN_POSITIONS[die_id] = unique_positions
+            self.D2D_SN_POSITIONS[die_id] = unique_positions
 
     def _parse_topology(self, topology_str: str) -> Tuple[int, int]:
         """解析拓扑字符串获取行列信息
@@ -211,45 +202,30 @@ class D2DConfig:
             raise ValueError(f"解析拓扑 '{topology_str}' 失败: {e}")
 
     def _get_edge_nodes(self, edge: str, num_row: int, num_col: int, interface_type: Optional[str] = None) -> List[int]:
-        """获取指定边的所有节点
+        """获取指定边的所有物理节点
 
         Args:
             edge: 边界方向 ("top", "bottom", "left", "right")
-            num_row: 逻辑行数
-            num_col: 列数
-            interface_type: 接口类型 ("rn" 或 "sn")，用于区分奇偶行
+            num_row: 物理行数
+            num_col: 物理列数
+            interface_type: 保留参数，为兼容性，不再使用
 
         Returns:
-            边界节点列表
+            物理边界节点列表（物理节点编号 = 物理行号 × 列数 + 物理列号）
         """
+        # 现在直接返回物理边缘节点，不区分RN/SN
         if edge == "top":
-            if interface_type == "rn":
-                return list(range(num_col, 2 * num_col))
-            elif interface_type == "sn":
-                return list(range(0, num_col))
-            else:
-                return list(range(0, num_col))
+            # 上边：第0行的所有节点 [0, 1, 2, ..., num_col-1]
+            return list(range(0, num_col))
         elif edge == "bottom":
-            if interface_type == "rn":
-                return list(range((num_row - 1) * num_col, num_row * num_col))
-            elif interface_type == "sn":
-                return list(range((num_row - 2) * num_col, (num_row - 1) * num_col))
-            else:
-                return list(range((num_row - 1) * num_col, num_row * num_col))
+            # 下边：最后一行的所有节点 [(num_row-1)*num_col, ..., num_row*num_col-1]
+            return list(range((num_row - 1) * num_col, num_row * num_col))
         elif edge == "left":
-            if interface_type == "rn":
-                return [row * num_col for row in range(1, num_row, 2)]
-            elif interface_type == "sn":
-                return [row * num_col for row in range(0, num_row, 2)]
-            else:
-                return [row * num_col for row in range(num_row)]
+            # 左边：每行的第0列节点 [0, num_col, 2*num_col, ...]
+            return [row * num_col for row in range(num_row)]
         elif edge == "right":
-            if interface_type == "rn":
-                return [row * num_col + (num_col - 1) for row in range(1, num_row, 2)]
-            elif interface_type == "sn":
-                return [row * num_col + (num_col - 1) for row in range(0, num_row, 2)]
-            else:
-                return [row * num_col + (num_col - 1) for row in range(num_row)]
+            # 右边：每行的最后一列节点 [num_col-1, 2*num_col-1, ...]
+            return [row * num_col + (num_col - 1) for row in range(num_row)]
         else:
             return []
 

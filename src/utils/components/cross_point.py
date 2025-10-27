@@ -441,14 +441,14 @@ class CrossPoint:
             queue = eject_queues[direction][key]
             capacity = self.config.EQ_IN_FIFO_DEPTH
 
-        # 2. 检查保序条件（第一优先级）
-        if can_eject_in_order_func and not can_eject_in_order_func(flit, target_node, direction):
-            # 保序检查失败
-            if direction in ["TL", "TR"]:
-                flit.ordering_blocked_eject_h += 1
-            else:
-                flit.ordering_blocked_eject_v += 1
-            return False, "order"
+        # # 2. 检查保序条件（第一优先级）
+        # if can_eject_in_order_func and not can_eject_in_order_func(flit, target_node, direction):
+        #     # 保序检查失败
+        #     if direction in ["TL", "TR"]:
+        #         flit.ordering_blocked_eject_h += 1
+        #     else:
+        #         flit.ordering_blocked_eject_v += 1
+        #     return False, "order"
 
         # 3. 检查队列容量（第二优先级）
         if len(queue) >= capacity:
@@ -519,7 +519,7 @@ class CrossPoint:
         if hasattr(flit, "current_link") and flit.current_link is not None and len(flit.current_link) >= 2:
             u, v = flit.current_link[:2]
             hop_diff = abs(u - v)
-            is_self_loop = (u == v)  # 自环
+            is_self_loop = u == v  # 自环
 
             if self.direction == "horizontal":
                 # 横向环：处理横向链路或横向自环

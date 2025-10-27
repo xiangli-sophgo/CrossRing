@@ -337,7 +337,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
                                     physical_row = matrix_row * 2  # 偶数行
                                     node_id = physical_row * num_col + matrix_col
 
-                                    all_rows.append([ip_instance, die_id, node_id, ip_type, f"{read_bw:.6f}", f"{write_bw:.6f}", f"{total_bw:.6f}"])  # IP实例名  # Die ID  # 节点ID  # IP类型
+                                    all_rows.append(
+                                        [ip_instance, die_id, node_id, ip_type, f"{read_bw:.6f}", f"{write_bw:.6f}", f"{total_bw:.6f}"]
+                                    )  # IP实例名  # Die ID  # 节点ID  # IP类型
 
                 # 排序：先按die_id，再按node_id，最后按ip_instance
                 all_rows.sort(key=lambda x: (int(x[1]), int(x[2]), x[0]))
@@ -499,7 +501,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 total_bytes = sum(req.data_bytes for req in interval_requests)
                 flit_count = sum(req.burst_length for req in interval_requests)
 
-                interval = WorkingInterval(start_time=start, end_time=end, duration=end - start, flit_count=flit_count, total_bytes=total_bytes, request_count=len(interval_requests))
+                interval = WorkingInterval(
+                    start_time=start, end_time=end, duration=end - start, flit_count=flit_count, total_bytes=total_bytes, request_count=len(interval_requests)
+                )
                 working_intervals.append(interval)
 
         return working_intervals
@@ -608,7 +612,11 @@ class D2DResultProcessor(BandwidthAnalyzer):
             }
 
             # 计算绕环比例（如果Die有result_processor）
-            circling_stats = {"horizontal": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}, "vertical": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}, "overall": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}}
+            circling_stats = {
+                "horizontal": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0},
+                "vertical": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0},
+                "overall": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0},
+            }
 
             if hasattr(die_model, "result_processor") and die_model.result_processor:
                 try:
@@ -627,7 +635,11 @@ class D2DResultProcessor(BandwidthAnalyzer):
             "retry": {"read": 0, "write": 0},
             "etag": {"RB": {"T1": 0, "T0": 0}, "EQ": {"T1": 0, "T0": 0}},
             "itag": {"h": 0, "v": 0},
-            "circling_ratio": {"horizontal": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}, "vertical": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}, "overall": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}},
+            "circling_ratio": {
+                "horizontal": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0},
+                "vertical": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0},
+                "overall": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0},
+            },
         }
 
         for die_stats in per_die_stats.values():
@@ -798,9 +810,15 @@ class D2DResultProcessor(BandwidthAnalyzer):
                     f.write(f"    RSP: 横向={die_stats['circuits']['rsp_h']}, 纵向={die_stats['circuits']['rsp_v']}\n")
                     f.write(f"    DATA: 横向={die_stats['circuits']['data_h']}, 纵向={die_stats['circuits']['data_v']}\n")
                     f.write("  数据绕环比例:\n")
-                    f.write(f"    横向: {die_stats['circling_ratio']['horizontal']['circling_ratio']*100:.2f}% ({die_stats['circling_ratio']['horizontal']['circling_flits']}/{die_stats['circling_ratio']['horizontal']['total_data_flits']})\n")
-                    f.write(f"    纵向: {die_stats['circling_ratio']['vertical']['circling_ratio']*100:.2f}% ({die_stats['circling_ratio']['vertical']['circling_flits']}/{die_stats['circling_ratio']['vertical']['total_data_flits']})\n")
-                    f.write(f"    总体: {die_stats['circling_ratio']['overall']['circling_ratio']*100:.2f}% ({die_stats['circling_ratio']['overall']['circling_flits']}/{die_stats['circling_ratio']['overall']['total_data_flits']})\n")
+                    f.write(
+                        f"    横向: {die_stats['circling_ratio']['horizontal']['circling_ratio']*100:.2f}% ({die_stats['circling_ratio']['horizontal']['circling_flits']}/{die_stats['circling_ratio']['horizontal']['total_data_flits']})\n"
+                    )
+                    f.write(
+                        f"    纵向: {die_stats['circling_ratio']['vertical']['circling_ratio']*100:.2f}% ({die_stats['circling_ratio']['vertical']['circling_flits']}/{die_stats['circling_ratio']['vertical']['total_data_flits']})\n"
+                    )
+                    f.write(
+                        f"    总体: {die_stats['circling_ratio']['overall']['circling_ratio']*100:.2f}% ({die_stats['circling_ratio']['overall']['circling_flits']}/{die_stats['circling_ratio']['overall']['total_data_flits']})\n"
+                    )
                     f.write("\n")
 
         return report_file
@@ -868,9 +886,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             # 从每个Die的config获取其拓扑配置
             rows = die_model.config.NUM_ROW
             cols = die_model.config.NUM_COL
-            # D2D系统使用5x4拓扑，调整行数
-            if getattr(self, "topo_type_stat", "5x4") != "4x5":
-                rows -= 1
 
             # 为该Die的每个IP实例创建矩阵
             self.die_ip_bandwidth_data[die_id] = {
@@ -978,13 +993,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
         row = node_id // cols
         col = node_id % cols
 
-        # 如果是奇数行，调整到偶数行显示（因为奇偶数行是同一个物理节点）
-        if row % 2 == 1:
-            row = row - 1  # 奇数行变成偶数行
-
         return row, col
 
-    def draw_d2d_flow_graph(self, die_networks=None, dies=None, config=None, mode="utilization", node_size=1200, save_path=None):
+    def draw_d2d_flow_graph(self, die_networks=None, dies=None, config=None, mode="utilization", node_size=2500, save_path=None):
         """
         绘制D2D双Die流量图，根据D2D_LAYOUT配置动态调整Die排列
 
@@ -1209,23 +1220,20 @@ class D2DResultProcessor(BandwidthAnalyzer):
             offset_x, offset_y = die_offsets[die_id]
             die_config = die_model.config
 
-            # 获取该Die的物理节点（只处理偶数行）
-            physical_nodes = []
-            for node in range(die_config.NUM_ROW * die_config.NUM_COL):
-                row = node // die_config.NUM_COL
-                if row % 2 == 0:  # 只保留偶数行
-                    physical_nodes.append(node)
+            # 获取该Die的所有节点
+            physical_nodes = list(range(die_config.NUM_ROW * die_config.NUM_COL))
 
             # 为每个物理节点绘制IP热力图，并收集位置信息
             xs = []
             ys = []
+            node_spacing = 3.0  # 统一的节点间距
             for node in physical_nodes:
                 col = node % die_config.NUM_COL
                 row = node // die_config.NUM_COL
 
-                # 计算节点中心位置
-                x = col * 3 + offset_x
-                y = -row * 1.5 + offset_y
+                # 计算节点中心位置 - 标准网格布局
+                x = col * node_spacing + offset_x
+                y = -row * node_spacing + offset_y
                 xs.append(x)
                 ys.append(y)
 
@@ -1376,23 +1384,30 @@ class D2DResultProcessor(BandwidthAnalyzer):
         G.add_nodes_from(actual_nodes)
 
         # 计算节点位置（应用偏移）
+        # 现在不区分RN/SN行，所有节点在标准网格位置，横纵间距相同
         pos = {}
+        node_spacing = 3.0  # 统一的节点间距
         for node in actual_nodes:
             x = node % config.NUM_COL
             y = node // config.NUM_COL
-            if y % 2 == 1:  # 奇数行左移
-                x -= 0.24
-                y -= 0.5
-            pos[node] = (x * 3 + offset_x, -y * 1.5 + offset_y)  # 调整节点间距，更紧凑
+            pos[node] = (x * node_spacing + offset_x, -y * node_spacing + offset_y)
 
         # 添加有权重的边
         edge_labels = {}
         edge_colors = {}
-        for (i, j), value in links.items():
-            if i not in actual_nodes or j not in actual_nodes:
+        self_loop_labels = {}  # 单独存储自环link: {(node, direction): (label, color)}
+        for link_key, value in links.items():
+            # 处理新架构：link可能是(i, j)或(i, j, 'h'/'v')
+            if len(link_key) == 2:
+                i, j = link_key
+                direction = None
+            elif len(link_key) == 3:
+                i, j, direction = link_key  # 保留方向标识
+            else:
                 continue
 
-            G.add_edge(i, j, weight=value)
+            if i not in actual_nodes or j not in actual_nodes:
+                continue
 
             # 计算显示值和颜色
             if mode in ["utilization", "T2_ratio", "T1_ratio", "T0_ratio", "ITag_ratio"]:
@@ -1433,16 +1448,30 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 color_intensity = min(display_value / 500.0, 1.0)
 
             if display_value > 0:
-                edge_labels[(i, j)] = formatted_label
-                edge_colors[(i, j)] = (color_intensity, 0, 0)  # 红色渐变
+                color = (color_intensity, 0, 0)
             else:
-                edge_colors[(i, j)] = (0.8, 0.8, 0.8)  # 灰色用于零值
+                color = (0.8, 0.8, 0.8)
 
-        # 计算节点大小
-        square_size = np.sqrt(node_size) / 100
+            # 自环link单独存储，保留方向信息
+            if i == j:
+                if direction:  # 有方向标识
+                    self_loop_labels[(i, direction)] = (formatted_label, color)
+                else:  # 无方向标识的自环
+                    self_loop_labels[(i, "unknown")] = (formatted_label, color)
+            else:
+                # 非自环边添加到图中
+                G.add_edge(i, j, weight=value)
+                if display_value > 0:
+                    edge_labels[(i, j)] = formatted_label
+                    edge_colors[(i, j)] = color
+                else:
+                    edge_colors[(i, j)] = color
+
+        # 计算节点大小 - 新架构：增大节点以容纳内部IP方块
+        square_size = np.sqrt(node_size) / 50
 
         # 绘制网络边 - 按照原始flow图的方式绘制双向箭头
-        for (i, j) in G.edges():
+        for i, j in G.edges():
             if i not in pos or j not in pos:
                 continue
 
@@ -1477,144 +1506,104 @@ class D2DResultProcessor(BandwidthAnalyzer):
                         (start_x, start_y),
                         (end_x, end_y),
                         arrowstyle="-|>",
-                        mutation_scale=6,  # 较小的箭头
+                        mutation_scale=10,
                         color=color,
                         zorder=1,
                         linewidth=1,
                     )
                     ax.add_patch(arrow)
 
-        # 绘制边标签 - 使用正确的显示方式（无背景框，偏移位置，颜色映射）
+        # 绘制非自环边标签
         if edge_labels:
-            # 计算颜色映射范围
             link_values = [float(links.get((i, j), 0)) for (i, j) in edge_labels.keys()]
             link_mapping_max = max(link_values) if link_values else 0.0
             link_mapping_min = max(0.6 * link_mapping_max, 100) if mode == "total" else 0.0
 
             for (i, j), label in edge_labels.items():
                 if i in pos and j in pos:
-                    # 获取边的值用于颜色映射
                     edge_value = float(links.get((i, j), 0))
-
-                    # 计算颜色强度
                     if edge_value == 0.0:
-                        continue  # 跳过零值边
+                        continue
 
                     if mode == "total":
-                        # 带宽模式：使用红色渐变
                         if edge_value <= link_mapping_min:
                             intensity = 0.0
                         else:
                             intensity = (edge_value - link_mapping_min) / (link_mapping_max - link_mapping_min)
                         intensity = min(max(intensity, 0.0), 1.0)
-                        color = (intensity, 0, 0)  # 红色渐变
+                        color = (intensity, 0, 0)
                     else:
-                        # 利用率模式：同样使用红色渐变
-                        color = (edge_value, 0, 0)  # 直接使用利用率作为红色强度
+                        color = (edge_value, 0, 0)
 
-                    # 自环链路特殊处理：根据节点位置决定标签显示位置
-                    if i == j:
-                        original_row = i // config.NUM_COL
-                        original_col = i % config.NUM_COL
-                        x, y = pos[i]
+                    x1, y1 = pos[i]
+                    x2, y2 = pos[j]
+                    mid_x = (x1 + x2) / 2
+                    mid_y = (y1 + y2) / 2
+                    dx, dy = x2 - x1, y2 - y1
 
-                        offset = 0.17
-                        if original_row == 0:
-                            label_pos = (x, y + square_size / 2 + offset)
-                            angle = 0
-                        elif original_row == config.NUM_ROW - 2:
-                            label_pos = (x, y - square_size / 2 - offset)
-                            angle = 0
-                        elif original_col == 0:
-                            label_pos = (x - square_size / 2 - offset, y)
-                            angle = -90
-                        elif original_col == config.NUM_COL - 1:
-                            label_pos = (x + square_size / 2 + offset, y)
-                            angle = 90
+                    has_reverse = G.has_edge(j, i)
+                    is_horizontal = abs(dx) > abs(dy)
+
+                    # 新架构：标签放在link中间，双向link根据方向放在不同侧
+                    if has_reverse:
+                        if is_horizontal:
+                            # 水平link：向右(i<j)放上方，向左(i>j)放下方
+                            if i < j:
+                                label_x = mid_x
+                                label_y = mid_y + 0.35
+                            else:
+                                label_x = mid_x
+                                label_y = mid_y - 0.35
                         else:
-                            label_pos = (x, y + square_size / 2 + offset)
-                            angle = 0
-
-                        # 自环链路只显示带宽，不显示比例信息
-                        label_str = str(label)
-                        if "\n" in label_str:
-                            bandwidth_text = label_str.split("\n")[0]
-                        else:
-                            bandwidth_text = label_str
-
-                        ax.text(
-                            *label_pos,
-                            bandwidth_text,
-                            ha="center",
-                            va="center",
-                            color=color,
-                            fontweight="normal",
-                            fontsize=8,
-                            rotation=angle,
-                        )
+                            # 垂直link：向下(i<j)放右侧，向上(i>j)放左侧
+                            if i < j:
+                                label_x = mid_x + 0.70
+                                label_y = mid_y
+                            else:
+                                label_x = mid_x - 0.70
+                                label_y = mid_y
                     else:
-                        x1, y1 = pos[i]
-                        x2, y2 = pos[j]
-                        mid_x = (x1 + x2) / 2
-                        mid_y = (y1 + y2) / 2
-                        dx, dy = x2 - x1, y2 - y1
+                        # 单向link：标签直接放在中间
+                        label_x = mid_x
+                        label_y = mid_y
 
-                        # 检查是否有反向边
-                        has_reverse = G.has_edge(j, i)
-                        is_horizontal = abs(dx) > abs(dy)
+                    ax.text(label_x, label_y, label, ha="center", va="center", fontsize=7, fontweight="normal", color=color)
 
-                        # 计算标签位置偏移（参考原始实现）
-                        if has_reverse:
-                            if is_horizontal:
-                                perp_dx, perp_dy = -dy * 0.15 + 0.25, dx * 0.15
-                            else:
-                                perp_dx, perp_dy = -dy * 0.23, dx * 0.23 - 0.35
-                            label_x = mid_x + perp_dx
-                            label_y = mid_y + perp_dy
-                        else:
-                            if is_horizontal:
-                                label_x = mid_x + dx * 0.15
-                                label_y = mid_y + dy * 0.15
-                            else:
-                                label_x = mid_x + (-dy * 0.15 if dx > 0 else dy * 0.15)
-                                label_y = mid_y - 0.15
+        # 绘制自环边标签
+        for (node, direction), (label, color) in self_loop_labels.items():
+            if node not in pos or not label:
+                continue
 
-                        # 绘制标签文本（无背景框）- 支持多行显示
-                        # 检查是否为多行标签（包含比例信息）
-                        label_str = str(label)
-                        if "\n" in label_str:
-                            # 分别绘制带宽和比例（参考原始实现）
-                            lines = label_str.split("\n")
-                            bandwidth_text = lines[0]  # 带宽值
-                            ratio_text = lines[1] if len(lines) > 1 else ""  # 比例信息
+            x, y = pos[node]
+            original_row = node // config.NUM_COL
+            original_col = node % config.NUM_COL
 
-                            # 绘制带宽文本（较大字体）
-                            ax.text(
-                                label_x,
-                                label_y + 0.12,  # 向上偏移
-                                bandwidth_text,
-                                ha="center",
-                                va="center",
-                                fontsize=8,  # 带宽用较大字体
-                                fontweight="normal",
-                                color=color,
-                            )
-
-                            # 绘制比例文本（较小字体）
-                            if ratio_text:
-                                ax.text(
-                                    label_x,
-                                    label_y - 0.2,  # 向下偏移
-                                    ratio_text,
-                                    ha="center",
-                                    va="center",
-                                    fontsize=6,  # 比例用较小字体
-                                    fontweight="normal",
-                                    color=color,
-                                )
-                        else:
-                            # 单行标签
-                            ax.text(label_x, label_y, label, ha="center", va="center", fontsize=8, fontweight="normal", color=color)
+            # 根据节点位置和自环方向决定标签位置
+            if direction == "h":
+                # 横向自环：根据列位置决定放左边还是右边
+                offset = 0.1
+                if original_col == 0:
+                    # 最左列：放左边，文本旋转-90度（从下往上读）
+                    label_pos = (x - square_size / 2 - offset, y)
+                    ax.text(*label_pos, f"{label}", ha="center", va="center", color=color, fontweight="normal", fontsize=6, rotation=90)
+                else:
+                    # 最右列：放右边，文本旋转90度（从上往下读）
+                    label_pos = (x + square_size / 2 + offset, y)
+                    ax.text(*label_pos, f"{label}", ha="center", va="center", color=color, fontweight="normal", fontsize=6, rotation=-90)
+            elif direction == "v":
+                # 纵向自环：根据行位置决定放上边还是下边
+                if original_row == 0:
+                    # 最上行：放上边
+                    label_pos = (x, y + square_size / 2)
+                    ax.text(*label_pos, f"{label}", ha="center", va="bottom", color=color, fontweight="normal", fontsize=6, rotation=0)
+                else:
+                    # 其他行：放下边
+                    label_pos = (x, y - square_size / 2)
+                    ax.text(*label_pos, f"{label}", ha="center", va="top", color=color, fontweight="normal", fontsize=6, rotation=0)
+            else:
+                # 未知方向：放上边
+                label_pos = (x, y + square_size / 2)
+                ax.text(*label_pos, f"{label}", ha="center", va="bottom", color=color, fontweight="normal", fontsize=6, rotation=0)
 
         # 绘制方形节点和IP信息
         for node, (x, y) in pos.items():
@@ -1629,10 +1618,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
             )
             ax.add_patch(rect)
 
-            # 为D2D流量图添加简化的IP信息显示 - 仅对偶数行节点显示，并区分Die
-            physical_row = node // config.NUM_COL
-            if physical_row % 2 == 0:
-                self._draw_d2d_ip_info_box(ax, x, y, node, config, mode, square_size, die_id, die_model, max_ip_bandwidth, min_ip_bandwidth)
+            # 绘制IP信息 - 新架构：所有节点都显示IP信息
+            self._draw_d2d_ip_info_box(ax, x, y, node, config, mode, square_size, die_id, die_model, max_ip_bandwidth, min_ip_bandwidth)
 
         # 添加Die标签 - 根据连接方向智能放置
         if pos:
@@ -1703,7 +1690,25 @@ class D2DResultProcessor(BandwidthAnalyzer):
         return pos
 
     def _draw_d2d_ip_info_box(self, ax, x, y, node, config, mode, square_size, die_id=None, die_model=None, max_ip_bandwidth=None, min_ip_bandwidth=None):
-        """为D2D流量图绘制简化的IP信息框 - 在一个框内显示所有有流量的IP"""
+        """
+        绘制IP信息框 - 在节点内部显示所有有流量的IP实例（使用小方块+透明度）
+        与基类_draw_ip_info_box保持一致
+
+        Args:
+            ax: matplotlib坐标轴
+            x, y: 节点中心位置
+            node: 节点ID
+            config: 配置对象
+            mode: 显示模式
+            square_size: 节点方块大小
+            die_id: Die ID
+            die_model: Die模型
+            max_ip_bandwidth: 全局最大IP带宽
+            min_ip_bandwidth: 全局最小IP带宽
+        """
+        from matplotlib.patches import Rectangle
+        from collections import defaultdict
+
         # 计算物理位置
         physical_col = node % config.NUM_COL
         physical_row = node // config.NUM_COL
@@ -1711,153 +1716,112 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 收集该节点所有有流量的IP类型
         active_ips = []
 
-        # 首先尝试从die_processors获取数据
-        if hasattr(self, "die_processors") and die_id is not None and die_id in self.die_processors:
-            die_processor = self.die_processors[die_id]
-            if hasattr(die_processor, "ip_bandwidth_data") and die_processor.ip_bandwidth_data is not None:
-                # 检查是否有对应模式的数据
-                if mode in die_processor.ip_bandwidth_data:
-                    mode_data = die_processor.ip_bandwidth_data[mode]
-                    for ip_type, data_matrix in mode_data.items():
-                        if physical_row < data_matrix.shape[0] and physical_col < data_matrix.shape[1]:
-                            bandwidth = data_matrix[physical_row, physical_col]
-                            # 临时降低阈值并添加调试信息
-                            if bandwidth > 0.001:  # 降低阈值以便看到更多数据
-                                active_ips.append((ip_type.upper(), bandwidth))
+        # 从die_ip_bandwidth_data获取数据（D2D的带宽数据结构）
+        if hasattr(self, "die_ip_bandwidth_data") and die_id is not None and die_id in self.die_ip_bandwidth_data:
+            if mode in self.die_ip_bandwidth_data[die_id]:
+                mode_data = self.die_ip_bandwidth_data[die_id][mode]
+                for ip_type, data_matrix in mode_data.items():
+                    matrix_row = physical_row
+                    if matrix_row < data_matrix.shape[0] and physical_col < data_matrix.shape[1]:
+                        bandwidth = data_matrix[matrix_row, physical_col]
+                        if bandwidth > 0.001:
+                            active_ips.append((ip_type.upper(), bandwidth))
 
-        # 如果没有从die_processors获取到数据，尝试从自身的ip_bandwidth_data获取，但要根据Die区分
-        if not active_ips and hasattr(self, "ip_bandwidth_data") and self.ip_bandwidth_data is not None:
-            # 根据D2D请求过滤，只显示属于该Die的IP带宽
-            die_specific_ips = self._get_die_specific_ips(node, die_id, die_model)
+        # 如果没有活跃IP，直接返回
+        if not active_ips:
+            return
 
-            for ip_type, data_matrix in self.ip_bandwidth_data.get(mode, {}).items():
-                if physical_row < data_matrix.shape[0] and physical_col < data_matrix.shape[1]:
-                    bandwidth = data_matrix[physical_row, physical_col]
-                    # 只显示属于该Die且有流量的IP
-                    if bandwidth > 0.001 and ip_type.lower() in die_specific_ips:
-                        active_ips.append((ip_type.upper(), bandwidth))
+        # 按IP基本类型分组（去除实例编号）
+        ip_type_count = defaultdict(list)
+        for ip_type, bw in active_ips:
+            # 提取基本类型
+            base_type = ip_type.split("_")[0] if "_" in ip_type else ip_type
+            ip_type_count[base_type].append(bw)
 
-        # 始终绘制信息框 - 改为正方形
-        # IP信息框位置和大小（正方形）
-        ip_size = square_size * 3  # 正方形大小
-        ip_x = x - square_size - ip_size * 0.4
-        ip_y = y + 0.04
+        # 按RN/SN分类排序，使用类常量
+        rn_ips = [(k, v) for k, v in ip_type_count.items() if k.upper() in self.RN_TYPES]
+        sn_ips = [(k, v) for k, v in ip_type_count.items() if k.upper() in self.SN_TYPES]
+        other_ips = [(k, v) for k, v in ip_type_count.items() if k.upper() not in self.RN_TYPES + self.SN_TYPES]
 
-        # 绘制IP信息框
-        ip_rect = Rectangle(
-            (ip_x - ip_size / 2, ip_y - ip_size / 2),
-            width=ip_size,
-            height=ip_size,
-            facecolor="lightyellow" if active_ips else "lightcyan",
-            edgecolor="black",
-            linewidth=1,
-            zorder=2,
-        )
-        ax.add_patch(ip_rect)
+        # 按带宽总和排序
+        rn_ips.sort(key=lambda x: sum(x[1]), reverse=True)
+        sn_ips.sort(key=lambda x: sum(x[1]), reverse=True)
+        other_ips.sort(key=lambda x: sum(x[1]), reverse=True)
 
-        # 在框内显示内容
-        if active_ips:
-            # 按IP基本类型分组（去除实例编号），统计每种类型的数量
-            from collections import defaultdict
+        # 构建最终显示列表（从上到下：RN -> SN -> Other）
+        display_rows = []
+        display_rows.extend(rn_ips)
+        display_rows.extend(sn_ips)
 
-            ip_type_count = defaultdict(list)
-            for ip_type, bw in active_ips:
-                # 提取基本类型：gdma_0 -> GDMA, ddr_1 -> DDR
-                base_type = ip_type.split("_")[0] if "_" in ip_type else ip_type
-                ip_type_count[base_type].append(bw)
-
-            # RN类型(GDMA/SDMA/CDMA)和SN类型(DDR)分组
-            rn_ips = [(k, v) for k, v in ip_type_count.items() if k.upper() in self.RN_TYPES]
-            sn_ips = [(k, v) for k, v in ip_type_count.items() if k.upper() in self.SN_TYPES]
-            other_ips = [(k, v) for k, v in ip_type_count.items() if k.upper() not in self.RN_TYPES + self.SN_TYPES]
-
-            # 按带宽总和排序
-            rn_ips.sort(key=lambda x: sum(x[1]), reverse=True)
-            sn_ips.sort(key=lambda x: sum(x[1]), reverse=True)
-            other_ips.sort(key=lambda x: sum(x[1]), reverse=True)
-
-            # 构建最终显示列表(从上到下:RN -> SN)
-            display_rows = []
-            display_rows.extend(rn_ips)
-            display_rows.extend(sn_ips)
-
-            # 如果总行数超过MAX_ROWS，将other_ips均匀分配到前面的行
-            if len(display_rows) + len(other_ips) > self.MAX_ROWS:
-                # 只保留前MAX_ROWS行，将other_ips均匀分配
+        # 如果总行数超过self.MAX_ROWS，合并other_ips
+        if len(display_rows) + len(other_ips) > self.MAX_ROWS:
+            display_rows = display_rows[: self.MAX_ROWS]
+            for i, (ip_type, instances) in enumerate(other_ips):
+                target_row = i % len(display_rows)
+                display_rows[target_row] = (display_rows[target_row][0], display_rows[target_row][1] + instances)
+        else:
+            display_rows.extend(other_ips)
+            if len(display_rows) > self.MAX_ROWS:
                 display_rows = display_rows[: self.MAX_ROWS]
-                # 将other类型的实例均匀添加到现有行
-                for i, (ip_type, instances) in enumerate(other_ips):
-                    target_row = i % len(display_rows)
-                    display_rows[target_row] = (display_rows[target_row][0], display_rows[target_row][1] + instances)
-            else:
-                # 如果不超过MAX_ROWS，直接添加other类型
-                display_rows.extend(other_ips)
-                if len(display_rows) > self.MAX_ROWS:
-                    display_rows = display_rows[: self.MAX_ROWS]
 
-            ip_type_count = dict(display_rows)
+        ip_type_count = dict(display_rows)
 
-            # 计算布局参数
-            num_ip_types = len(ip_type_count)  # 行数 = IP类型数（最多3行）
-            max_instances = max(len(instances) for instances in ip_type_count.values())  # 最大列数 = 最多实例数
+        # 计算布局参数 - 新架构：在节点内部绘制
+        num_ip_types = len(ip_type_count)
+        max_instances = max(len(instances) for instances in ip_type_count.values())
 
-            # 计算每个小方块的大小和间距，确保适应ip_size大框
-            available_width = ip_size * 0.98  # 可用宽度
-            available_height = ip_size * 0.98  # 可用高度
+        # 计算小方块大小和间距（使用节点内部空间）
+        available_width = square_size * 0.85
+        available_height = square_size * 0.85
+        grid_spacing = square_size * 0.05
+        row_spacing = square_size * 0.05
 
-            # 根据可用空间和实例数计算小方块大小
-            grid_spacing = square_size * 0.10  # 小方块之间的间距
-            row_spacing = square_size * 0.3  # 行之间的间距
+        max_square_width = (available_width - (max_instances - 1) * grid_spacing) / max_instances
+        max_square_height = (available_height - (num_ip_types - 1) * row_spacing) / num_ip_types
+        grid_square_size = min(max_square_width, max_square_height, square_size * 0.5)
 
-            # 计算小方块大小（确保不超出大框）
-            max_square_width = (available_width - (max_instances - 1) * grid_spacing) / max_instances
-            max_square_height = (available_height - (num_ip_types - 1) * row_spacing) / num_ip_types
-            grid_square_size = min(max_square_width, max_square_height, square_size * 1.2)
+        # 计算总内容高度
+        total_content_height = num_ip_types * grid_square_size + (num_ip_types - 1) * row_spacing
 
-            # 计算所有行的总高度
-            total_content_height = num_ip_types * grid_square_size + (num_ip_types - 1) * row_spacing
+        # 绘制IP小方块
+        row_idx = 0
+        for ip_type, instances in ip_type_count.items():
+            num_instances = len(instances)
+            base_type = ip_type.upper()
+            ip_color = self.IP_COLOR_MAP.get(base_type, self.IP_COLOR_MAP["OTHER"])
 
-            # 按行绘制小方块（每行一种IP类型），垂直居中
-            row_idx = 0
-            for ip_type, instances in ip_type_count.items():
-                num_instances = len(instances)
-                # 提取基本类型以获取颜色
-                base_type = ip_type.upper()
-                ip_color = self.IP_COLOR_MAP.get(base_type, "#808080")  # 默认灰色
+            # 计算当前行的总宽度
+            row_width = num_instances * grid_square_size + (num_instances - 1) * grid_spacing
 
-                # 计算当前行内容的总宽度
-                row_width = num_instances * grid_square_size + (num_instances - 1) * grid_spacing
+            # 计算当前行的起始位置（水平居中在节点内部）
+            row_start_x = x - row_width / 2
 
-                # 计算当前行的起始位置（水平居中）
-                row_start_x = ip_x - row_width / 2
+            # 计算当前行的垂直位置（垂直居中在节点内部）
+            row_y = y + total_content_height / 2 - row_idx * (grid_square_size + row_spacing) - grid_square_size / 2
 
-                # 计算当前行的垂直位置（垂直居中）
-                row_y = ip_y + total_content_height / 2 - row_idx * (grid_square_size + row_spacing) - grid_square_size / 2
+            # 绘制该类型的所有实例
+            for col_idx, bandwidth in enumerate(instances):
+                # 计算小方块位置
+                block_x = row_start_x + col_idx * (grid_square_size + grid_spacing) + grid_square_size / 2
+                block_y = row_y
 
-                # 在当前行绘制该类型的所有实例
-                for col_idx, bandwidth in enumerate(instances):
-                    # 计算小方块位置
-                    block_x = row_start_x + col_idx * (grid_square_size + grid_spacing) + grid_square_size / 2
-                    block_y = row_y
+                # 计算透明度（使用全局带宽范围）
+                alpha = self._calculate_bandwidth_alpha(bandwidth, min_ip_bandwidth if min_ip_bandwidth is not None else 0, max_ip_bandwidth if max_ip_bandwidth is not None else 1)
 
-                    # 计算透明度（使用全局最大/最小带宽，与热力图保持一致）
-                    alpha = self._calculate_bandwidth_alpha(bandwidth, min_ip_bandwidth if min_ip_bandwidth is not None else 0, max_ip_bandwidth if max_ip_bandwidth is not None else 1)
+                # 绘制小方块
+                ip_block = Rectangle(
+                    (block_x - grid_square_size / 2, block_y - grid_square_size / 2),
+                    width=grid_square_size,
+                    height=grid_square_size,
+                    facecolor=ip_color,
+                    edgecolor="black",
+                    linewidth=0.8,
+                    alpha=alpha,
+                    zorder=3,
+                )
+                ax.add_patch(ip_block)
 
-                    # 绘制小方块（使用透明度表示带宽大小）
-                    ip_block = Rectangle(
-                        (block_x - grid_square_size / 2, block_y - grid_square_size / 2),
-                        width=grid_square_size,
-                        height=grid_square_size,
-                        facecolor=ip_color,
-                        edgecolor="black",
-                        linewidth=0.8,
-                        alpha=alpha,  # 使用透明度
-                        zorder=3,
-                    )
-                    ax.add_patch(ip_block)
-
-                row_idx += 1
-        # 没有活跃IP时不显示任何文字，保持空白
+            row_idx += 1
 
     def _get_die_specific_ips(self, node, die_id, die_model=None):
         """根据D2D请求确定该Die该节点的IP类型"""
@@ -2028,7 +1992,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 ip_y = y + total_height / 2 - row_idx * (ip_block_size + grid_spacing)
 
                 # 绘制IP方块
-                ip_rect = Rectangle((ip_x, ip_y - ip_block_size), width=ip_block_size, height=ip_block_size, facecolor=ip_color, edgecolor="black", linewidth=1, alpha=alpha, zorder=3)
+                ip_rect = Rectangle(
+                    (ip_x, ip_y - ip_block_size), width=ip_block_size, height=ip_block_size, facecolor=ip_color, edgecolor="black", linewidth=1, alpha=alpha, zorder=3
+                )
                 ax.add_patch(ip_rect)
 
                 # 在方块上显示带宽数值
@@ -2086,7 +2052,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
             return
 
         # 创建插入的colorbar坐标轴，放在右上角IP图例下方
-        cax = inset_axes(ax, width="2%", height="18%", loc="upper right", bbox_to_anchor=(-0.05, -0.35, 1, 1), bbox_transform=ax.transAxes, borderpad=0)  # 减小宽度  # 减小高度  # 调整到IP图例下方
+        cax = inset_axes(
+            ax, width="2%", height="18%", loc="upper right", bbox_to_anchor=(-0.05, -0.35, 1, 1), bbox_transform=ax.transAxes, borderpad=0
+        )  # 减小宽度  # 减小高度  # 调整到IP图例下方
 
         # 创建灰度渐变colormap
         colors = ["#E0E0E0", "#B0B0B0", "#808080", "#505050", "#202020"]
@@ -2178,27 +2146,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 判断连接方向：使用已有的连接类型判断方法
         connection_type = self._get_connection_type(from_die_pos, to_die_pos)
 
-        if dies:
-            from_die_cols = dies[from_die_id].config.NUM_COL if from_die_id in dies else 4
-            to_die_cols = dies[to_die_id].config.NUM_COL if to_die_id in dies else 4
-        else:
-            # 需要dies参数来获取各Die的NUM_COL配置
-            raise ValueError(f"连接类型为{connection_type}时需要dies参数来获取各Die的NUM_COL配置")
-
-        if connection_type == "vertical":
-            # 垂直连接
-            from_node_pos = from_node - from_die_cols
-            to_node_pos = to_node
-        elif connection_type == "horizontal":
-            # 水平连接
-            from_node_pos = from_node + (from_die_cols if from_node in self.config.D2D_SN_POSITIONS[from_die_id] else 0)
-            to_node_pos = to_node + (to_die_cols if to_node in self.config.D2D_SN_POSITIONS[to_die_id] else 0)
-        elif connection_type == "diagonal":
-            # 对角连接
-            from_node_pos = from_node + (from_die_cols if from_node in self.config.D2D_SN_POSITIONS[from_die_id] else 0)
-            to_node_pos = to_node + (to_die_cols if to_node in self.config.D2D_SN_POSITIONS[to_die_id] else 0)
-        else:
-            raise ValueError(f"未知的连接类型: {connection_type}")
+        # 新架构：节点编号就是物理节点编号，不需要额外的映射转换
+        from_node_pos = from_node
+        to_node_pos = to_node
 
         return from_node_pos, to_node_pos
 
@@ -2406,7 +2356,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 from_node_pos, to_node_pos = self._calculate_d2d_node_positions(conn["from_die"], from_node, conn["to_die"], to_node, dies, config)
 
                 if from_node_pos not in from_die_positions or to_node_pos not in to_die_positions:
-                    print(f"[D2D连接] 警告：找不到节点位置 - From: Die{conn['from_die']}节点{from_node}(pos:{from_node_pos}), To: Die{conn['to_die']}节点{to_node}(pos:{to_node_pos})")
+                    print(
+                        f"[D2D连接] 警告：找不到节点位置 - From: Die{conn['from_die']}节点{from_node}(pos:{from_node_pos}), To: Die{conn['to_die']}节点{to_node}(pos:{to_node_pos})"
+                    )
                     continue
 
                 from_x, from_y = from_die_positions[from_node_pos]
@@ -2795,8 +2747,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
         max_y = max(pos[1] for pos in die_layout.values()) if die_layout else 0
 
         # 计算 Die 间距
-        die_spacing_x = die_width + 0.8
-        die_spacing_y = die_height + (5.8 if len(die_layout.values()) == 2 else 0.8)
+        die_spacing_x = die_width + 1.5
+        die_spacing_y = die_height + (5.8 if len(die_layout.values()) == 2 else 1.5)
 
         # 计算每个 Die 的基础绘图偏移量
         die_offsets = {}
@@ -2890,10 +2842,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 # 获取节点的行列位置
                 die0_cols = die0_model.config.NUM_COL
                 die1_cols = die1_model.config.NUM_COL
-                die1_node += die1_cols
 
-                # d2d_pairs中存储的已经是网络节点位置（在配置解析时已转换）
-                # 直接计算网络节点在绘图中的位置（与_draw_single_die_flow中的计算一致）
+                # 新架构：节点编号就是物理节点编号，直接计算行列位置
+                # 与_draw_single_die_flow中的计算一致
                 die0_row = die0_node // die0_cols
                 die0_col = die0_node % die0_cols
                 die1_row = die1_node // die1_cols
@@ -2928,8 +2879,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
                     die0_y = die0_row
                     die1_y = die1_row
 
-                    die0_y *= -1.5
-                    die1_y *= -1.5
+                    # 使用统一的节点间距3.0
+                    die0_y *= -3
+                    die1_y *= -3
 
                     offset_needed = abs(die0_y - die1_y)
 
@@ -2998,8 +2950,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
             die0_y = row0
             die1_y = row1
 
-            die0_y *= -1.5
-            die1_y *= -1.5
+            # 使用统一的节点间距3.0
+            die0_y *= -3
+            die1_y *= -3
 
             actual_y_diff = die0_y - die1_y
 
