@@ -81,6 +81,7 @@ class CrossRingConfig:
         self.ENABLE_CROSSPOINT_CONFLICT_CHECK = args.ENABLE_CROSSPOINT_CONFLICT_CHECK
         self.CROSSRING_VERSION = args.CROSSRING_VERSION
         self.ORDERING_PRESERVATION_MODE = args.ORDERING_PRESERVATION_MODE
+        self.ORDERING_GRANULARITY = args.ORDERING_GRANULARITY
         self.IN_ORDER_EJECTION_PAIRS = args.IN_ORDER_EJECTION_PAIRS
         self.IN_ORDER_PACKET_CATEGORIES = args.IN_ORDER_PACKET_CATEGORIES
         # 方向控制参数
@@ -512,6 +513,7 @@ class CrossRingConfig:
         parser.add_argument("--ENABLE_CROSSPOINT_CONFLICT_CHECK", type=bool, default=default_config["ENABLE_CROSSPOINT_CONFLICT_CHECK"], help="Enable crosspoint conflict checking for inject queue")
         parser.add_argument("--CROSSRING_VERSION", type=str, default=default_config["CROSSRING_VERSION"], help="CrossRing version (V1 or V2)")
         parser.add_argument("--ORDERING_PRESERVATION_MODE", type=int, default=default_config["ORDERING_PRESERVATION_MODE"], help="Ordering preservation mode: 0=disabled, 1=single-side(TL/TU), 2=dual-side(direction-config)")
+        parser.add_argument("--ORDERING_GRANULARITY", type=int, default=default_config.get("ORDERING_GRANULARITY", 1), help="Ordering granularity: 0=IP-level, 1=Node-level")
         parser.add_argument(
             "--IN_ORDER_EJECTION_PAIRS", type=list, default=default_config["IN_ORDER_EJECTION_PAIRS"], help="Specific src-dest pairs for in-order ejection. Empty list means all pairs."
         )

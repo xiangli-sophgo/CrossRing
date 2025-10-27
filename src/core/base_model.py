@@ -774,6 +774,21 @@ class BaseModel:
             queue = network.inject_queues[direction]
             if queue_pre[in_pos] and len(queue[in_pos]) < self.config.RB_OUT_FIFO_DEPTH:
                 flit = queue_pre[in_pos]
+
+                # 在上环时分配order_id（只在首次上环时分配）
+                if flit.src_dest_order_id == -1:
+                    src_node = flit.source_original if flit.source_original != -1 else flit.source
+                    dest_node = flit.destination_original if flit.destination_original != -1 else flit.destination
+                    src_type = flit.original_source_type if flit.original_source_type else flit.source_type
+                    dest_type = flit.original_destination_type if flit.original_destination_type else flit.destination_type
+
+                    flit.src_dest_order_id = Flit.get_next_order_id(
+                        src_node, src_type,
+                        dest_node, dest_type,
+                        flit.flit_type.upper(),
+                        self.config.ORDERING_GRANULARITY
+                    )
+
                 flit.departure_inject_cycle = self.cycle
                 flit.flit_position = f"IQ_{direction}"
                 queue[in_pos].append(flit)
@@ -848,11 +863,6 @@ class BaseModel:
         # 设置flit的允许下环方向（仅在第一次注入时设置）
         if not hasattr(req, "allowed_eject_directions") or req.allowed_eject_directions is None:
             req.allowed_eject_directions = self.req_network.determine_allowed_eject_directions(req)
-
-        # 在IQ仲裁输出到inject_queues_pre时分配order_id
-        src = req.source_original if req.source_original != -1 else req.source
-        dest = req.destination_original if req.destination_original != -1 else req.destination
-        req.src_dest_order_id = Flit.get_next_order_id(src, dest, req.flit_type.upper())
 
         # 直接注入到指定direction的pre缓冲
         queue_pre = self.req_network.inject_queues_pre[direction]
@@ -953,11 +963,6 @@ class BaseModel:
                     # 设置flit的允许下环方向（仅在第一次注入时设置）
                     if not hasattr(flit, "allowed_eject_directions") or flit.allowed_eject_directions is None:
                         flit.allowed_eject_directions = network.determine_allowed_eject_directions(flit)
-
-                    # 在IQ仲裁输出到inject_queues_pre时分配order_id
-                    src = flit.source_original if flit.source_original != -1 else flit.source
-                    dest = flit.destination_original if flit.destination_original != -1 else flit.destination
-                    flit.src_dest_order_id = Flit.get_next_order_id(src, dest, flit.flit_type.upper())
 
                     network.IQ_channel_buffer[ip_type][ip_pos].popleft()
                     queue_pre = network.inject_queues_pre[direction]

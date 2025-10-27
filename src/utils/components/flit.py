@@ -150,9 +150,27 @@ class Flit:
     _global_order_id_allocator = {}  # {(src, dest): {"REQ": next_id, "RSP": next_id, "DATA": next_id}}
 
     @classmethod
-    def get_next_order_id(cls, src, dest, packet_category):
-        """获取下一个顺序ID"""
-        key = (src, dest)
+    def get_next_order_id(cls, src_node, src_type, dest_node, dest_type, packet_category, granularity):
+        """
+        获取下一个顺序ID
+
+        Args:
+            src_node: 源节点ID
+            src_type: 源IP类型（如"gdma_0"）
+            dest_node: 目标节点ID
+            dest_type: 目标IP类型（如"ddr_1"）
+            packet_category: 包类型（"REQ"/"RSP"/"DATA"）
+            granularity: 保序粒度（0=IP层级, 1=节点层级）
+
+        Returns:
+            int: 分配的顺序ID
+        """
+        # 根据粒度构造key
+        if granularity == 0:  # IP层级
+            key = (src_node, src_type, dest_node, dest_type)
+        else:  # 节点层级（granularity == 1）
+            key = (src_node, dest_node)
+
         if key not in cls._global_order_id_allocator:
             cls._global_order_id_allocator[key] = {"REQ": 1, "RSP": 1, "DATA": 1}
 

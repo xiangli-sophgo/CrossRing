@@ -6,8 +6,10 @@ CrossRing NoC系统实现了针对请求（REQ）通道的包保序功能，确�
 
 ### 1.1 保序功能特点
 - **三种保序模式**：支持不保序(Mode 0)、单侧下环(Mode 1)、双侧下环(Mode 2)三种模式
+- **两种保序粒度**：支持IP层级保序和节点层级保序，灵活适配不同场景需求
 - **可配置的包类型保序**：通过配置参数指定需要保序的包类型（REQ/RSP/DATA的任意组合）
-- **节点级别保序**：以节点对为保序单元，同一节点内所有IP共享保序流
+- **IP层级保序**：每个IP对独立维护保序流，精细控制
+- **节点层级保序**：以节点对为保序单元，同一节点内所有IP共享保序流
 - **灵活的方向控制**：单侧模式固定TL/TU，双侧模式通过YAML配置指定各方向允许下环的源节点
 - **全局顺序**：基于全局顺序ID分配器确保包的顺序
 - **灵活配置**：可精确控制哪些包类型、哪些源-目的对需要保序，以及各方向的下环策略
@@ -57,21 +59,62 @@ CrossRing支持三种保序模式，通过配置参数`ORDERING_PRESERVATION_MOD
 
 这种配置方式可以灵活适配不同拓扑和性能需求。
 
+### 2.3 保序粒度
+
+CrossRing支持两种保序粒度，通过配置参数`ORDERING_GRANULARITY`选择：
+
+#### Granularity 0: IP层级保序
+- **独立保序流**：每个源IP到目标IP维护独立的顺序ID序列
+- **精细控制**：不同IP对之间互不干扰
+- **典型场景**：需要严格区分不同IP流量的保序需求
+
+**示例**（节点5有2个GDMA，节点8有2个DDR）：
+- `(node5, gdma_0) → (node8, ddr_0)` 独立保序流
+- `(node5, gdma_0) → (node8, ddr_1)` 独立保序流
+- `(node5, gdma_1) → (node8, ddr_0)` 独立保序流
+- `(node5, gdma_1) → (node8, ddr_1)` 独立保序流
+
+**order_id分配器key格式**：`(src_node_id, src_ip_type, dest_node_id, dest_ip_type)`
+- 例如：`(5, "gdma_0", 8, "ddr_1")`
+
+#### Granularity 1: 节点层级保序
+- **共享保序流**：同一源节点到同一目标节点的所有IP共享一个顺序ID序列
+- **简化管理**：减少保序流数量，降低tracking开销
+- **典型场景**：节点间流量需要整体保序
+
+**示例**（节点5所有IP到节点8所有IP）：
+- 节点5的所有IP（gdma_0, gdma_1, sdma_0等）到节点8的所有IP共享一个保序流
+- 无论源IP和目标IP是哪个，只要源节点=5，目标节点=8，就使用同一个order_id序列
+
+**order_id分配器key格式**：`(src_node_id, dest_node_id)`
+- 例如：`(5, 8)`
+
 ## 3. 关键数据结构
 
 ### 3.1 全局顺序ID分配器
 
 ```python
-# 位置：src/utils/components/node.py
-global_order_id_allocator = defaultdict(lambda: {"REQ": 1, "RSP": 1, "DATA": 1})
+# 位置：src/utils/components/flit.py
+_global_order_id_allocator = {}  # {key: {"REQ": next_id, "RSP": next_id, "DATA": next_id}}
 ```
 
-**功能**：为每个(源节点, 目标节点, 包类型)三元组维护全局唯一的顺序ID序列。
+**功能**：为每个保序流维护全局唯一的顺序ID序列，根据保序粒度使用不同的key结构。
 
 **数据结构**：
-- Key: `(src_node, dest_node)` - 源节点和目标节点的物理拓扑节点ID元组
+- Key结构取决于 `ORDERING_GRANULARITY` 配置：
+  - **IP层级（granularity=0）**：`(src_node_id, src_ip_type, dest_node_id, dest_ip_type)`
+    - 例如：`(5, "gdma_0", 8, "ddr_1")`
+    - 每个IP对独立维护顺序ID
+  - **节点层级（granularity=1）**：`(src_node_id, dest_node_id)`
+    - 例如：`(5, 8)`
+    - 同一节点对的所有IP共享顺序ID
 - Value: 包含三种包类型的字典，每种类型维护下一个待分配的ID
-- **重要说明**：Key使用物理拓扑节点ID，而非网络IP位置。同一节点的所有IP（如GDMA、SDMA等）到同一目标节点共享保序流
+  - `{"REQ": 1, "RSP": 1, "DATA": 1}`
+
+**Key构造说明**：
+- 使用flit的 `source/destination` 属性（直接为节点ID，无需映射）
+- 使用flit的 `source_type/destination_type` 属性（IP层级时使用）
+- IP层级key更精细，节点层级key更简化
 
 ### 3.2 保序跟踪表
 
@@ -128,10 +171,23 @@ order_tracking_table = defaultdict(int)
 
 ### 4.3 顺序ID分配流程
 
-1. **flit注入时**：在flit注入到网络时分配顺序ID
-2. **节点ID转换**：将源IP位置和目标IP位置转换为节点ID
-3. **ID分配**：使用节点ID作为键，为该节点对分配顺序ID
-4. **包类型判断**：根据flit的req_type、rsp_type等属性判断包类型
+**分配时机**：在CrossPoint上环处理时分配order_id
+
+1. **上环时刻**：在 `inject_queues_pre → inject_queues` 转移时（`_CP_process`函数）
+2. **首次分配检查**：只在flit首次上环时分配（`flit.src_dest_order_id == -1`）
+3. **获取源和目标信息**：
+   - 节点ID：使用 `flit.source/destination` (已是节点ID)
+   - IP类型：使用 `flit.source_type/destination_type`
+   - 使用original属性处理D2D场景
+4. **根据粒度构造key**：
+   - IP层级：`(src_node, src_type, dest_node, dest_type)`
+   - 节点层级：`(src_node, dest_node)`
+5. **分配order_id**：调用 `Flit.get_next_order_id()` 获取唯一ID
+
+**为何在上环时分配**：
+- 确保只有真正上环的flit才分配order_id
+- 避免在channel buffer阶段分配造成顺序混乱
+- 与保序检查时机（下环时）形成对称
 
 ### 4.4 保序检查机制
 
@@ -250,19 +306,27 @@ CrossRing的保序机制采用**配置驱动的方向控制策略**，通过配�
   - 1: 单侧下环（固定TL/TU）
   - 2: 双侧下环（方向配置）
 
-#### 6.1.2 IN_ORDER_PACKET_CATEGORIES
+#### 6.1.2 ORDERING_GRANULARITY
+- **类型**：int
+- **默认值**：1
+- **功能**：保序粒度选择
+- **可选值**：
+  - 0: IP层级保序（每个IP对独立保序）
+  - 1: 节点层级保序（同节点内所有IP共享保序）
+
+#### 6.1.3 IN_ORDER_PACKET_CATEGORIES
 - **类型**：list
 - **默认值**：`["REQ"]`
 - **功能**：指定需要保序的包类型列表
 - **可选值**：`["REQ", "RSP", "DATA"]` 的任意组合
 
-#### 6.1.3 IN_ORDER_EJECTION_PAIRS
+#### 6.1.4 IN_ORDER_EJECTION_PAIRS
 - **类型**：list of pairs
 - **默认值**：`[]`（空列表表示全部源-目的对都保序）
 - **功能**：指定需要保序的特定源-目的对
 - **格式**：`[[src1, dest1], [src2, dest2], ...]`
 
-#### 6.1.4 方向控制参数
+#### 6.1.5 方向控制参数
 - **参数名称**：`TL_ALLOWED_SOURCE_NODES`, `TR_ALLOWED_SOURCE_NODES`, `TU_ALLOWED_SOURCE_NODES`, `TD_ALLOWED_SOURCE_NODES`
 - **类型**：list
 - **默认值**：`[]`（空列表表示所有源节点都允许）
@@ -278,6 +342,7 @@ CrossRing的保序机制采用**配置驱动的方向控制策略**，通过配�
 
 # 禁用保序功能
 ORDERING_PRESERVATION_MODE: 0  # 不保序
+ORDERING_GRANULARITY: 1  # 0=IP层级, 1=节点层级 (Mode 0下不生效)
 
 # 包类型配置（Mode 0下不生效）
 IN_ORDER_PACKET_CATEGORIES:
@@ -294,6 +359,7 @@ IN_ORDER_EJECTION_PAIRS: []
 
 # 启用单侧下环
 ORDERING_PRESERVATION_MODE: 1  # 单侧下环(TL/TU)
+ORDERING_GRANULARITY: 1  # 0=IP层级, 1=节点层级
 
 # 需要保序的包类型
 IN_ORDER_PACKET_CATEGORIES:
@@ -312,6 +378,7 @@ IN_ORDER_EJECTION_PAIRS: []
 
 # 启用双侧下环
 ORDERING_PRESERVATION_MODE: 2  # 双侧下环(方向配置)
+ORDERING_GRANULARITY: 1  # 0=IP层级, 1=节点层级
 
 # 需要保序的包类型
 IN_ORDER_PACKET_CATEGORIES:
@@ -450,12 +517,15 @@ CrossRing的保序功能通过全局顺序ID分配、本地跟踪表维护和灵
 
 关键特性总结：
 - ✅ **三种保序模式**：不保序、单侧下环(TL/TU)、双侧下环(方向配置)
+- ✅ **两种保序粒度**：IP层级（精细控制）、节点层级（简化管理）
 - ✅ **可配置包类型**：支持REQ/RSP/DATA的任意组合保序
 - ✅ **灵活方向控制**：Mode 1固定方向，Mode 2灵活配置
-- ✅ **节点级别保序**：同一节点所有IP共享保序流
+- ✅ **IP层级保序**：每个IP对独立维护保序流，精细控制
+- ✅ **节点层级保序**：同一节点所有IP共享保序流，简化管理
 - ✅ **全局一致性**：基于全局顺序ID分配器确保顺序
 - ✅ **本地化检查**：每个节点独立维护跟踪表，无需全局同步
 - ✅ **灵活扩展**：支持精确控制特定源-目的对的保序需求
+- ✅ **上环时分配**：order_id在CP上环时分配，确保顺序正确
 
 ### 8.1 模式选择建议
 
