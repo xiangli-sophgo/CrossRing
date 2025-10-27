@@ -346,27 +346,16 @@ class BandwidthAnalyzer:
                 # 读请求：RN在收到数据时结束，SN在发出数据时结束
                 rn_end_time = representative_flit.data_received_complete_cycle // self.network_frequency  # RN收到数据
 
-                # # 验证 SN 结束时间
-                # if not self.is_valid_number(first_flit.data_entry_noc_from_cake1_cycle):
-                #     print(f"[警告] packet_id {packet_id}: data_entry_noc_from_cake1_cycle 无效，使用 0")
-                #     sn_end_time = 0
-                # else:
-                #     sn_end_time = first_flit.data_entry_noc_from_cake1_cycle // self.network_frequency  # SN发出数据
                 sn_end_time = first_flit.data_entry_noc_from_cake1_cycle // self.network_frequency  # SN发出数据
 
                 # 读请求：flit的source是SN(DDR/L2M)，destination是RN(SDMA/GDMA/CDMA)
-                actual_source_node = representative_flit.destination + (self.config.NUM_COL if not self.sim_model.topo_type_stat.startswith("Ring") else 0)  # 实际发起请求的节点
-                actual_dest_node = representative_flit.source - (self.config.NUM_COL if not self.sim_model.topo_type_stat.startswith("Ring") else 0)  # 实际目标节点
+                actual_source_node = representative_flit.destination  # 实际发起请求的节点
+                actual_dest_node = representative_flit.source  # 实际目标节点
                 actual_source_type = representative_flit.original_source_type  # 实际发起请求的类型
                 actual_dest_type = representative_flit.original_destination_type  # 实际目标类型
             else:  # write
                 # 写请求：RN在发出数据时结束，SN在收到数据时结束
-                # 验证 RN 结束时间
-                # if not self.is_valid_number(first_flit.data_entry_noc_from_cake0_cycle):
-                #     print(f"[警告] packet_id {packet_id}: data_entry_noc_from_cake0_cycle 无效，使用 0")
-                #     rn_end_time = 0
-                # else:
-                # rn_end_time = first_flit.data_entry_noc_from_cake0_cycle // self.network_frequency  # RN发出数据
+
                 rn_end_time = first_flit.data_entry_noc_from_cake0_cycle // self.network_frequency  # RN发出数据
                 sn_end_time = representative_flit.data_received_complete_cycle // self.network_frequency  # SN收到数据
 
@@ -396,11 +385,6 @@ class BandwidthAnalyzer:
                 print(f"[警告] packet_id {packet_id}: cmd_entry_cake0_cycle 无效，跳过该请求")
                 continue
             start_time = representative_flit.cmd_entry_cake0_cycle // self.network_frequency
-
-            # # 验证时间逻辑
-            # if start_time >= network_end_time or start_time > rn_end_time or start_time > sn_end_time:
-            #     print(f"[警告] packet_id {packet_id}: 时间逻辑错误 (start_time > end_time)，跳过该请求")
-            #     continue
 
             request_info = RequestInfo(
                 packet_id=packet_id,
@@ -608,7 +592,7 @@ class BandwidthAnalyzer:
             for req in node_requests:
                 # 提取dest_type的前缀（去掉_ip后缀），处理None值
                 if req.dest_type:
-                    raw_dest_type = req.dest_type.lower()[:-2] if req.dest_type.endswith("_ip") else req.dest_type.lower()
+                    raw_dest_type = req.dest_type[:-3] if req.dest_type.endswith("_ip") else req.dest_type
                     dest_type = self.normalize_ip_type(raw_dest_type)
                 else:
                     dest_type = self.normalize_ip_type(None)
@@ -778,10 +762,6 @@ class BandwidthAnalyzer:
                 print(f"{port_key} Final Bandwidth: {bandwidth[mask][-1]:.2f} GB/s")
 
             total_bw += bandwidth[mask][-1]
-
-        # if hasattr(self, "sim_model") and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
-        # print(f"Total Bandwidth: {total_bw:.2f} GB/s")
-        # print("=" * 60)
 
         if self.plot_rn_bw_fig:
             plt.xlabel("Time (us)")
@@ -1492,19 +1472,19 @@ class BandwidthAnalyzer:
         # 添加有权重的边
         edge_labels = {}
         edge_colors = {}
+        self_loop_labels = {}  # 单独存储自环link: {(node, direction): (label, color)}
         for link_key, value in links.items():
             # 处理新架构：link可能是(i, j)或(i, j, 'h'/'v')
             if len(link_key) == 2:
                 i, j = link_key
+                direction = None
             elif len(link_key) == 3:
-                i, j, _ = link_key  # 忽略方向标识
+                i, j, direction = link_key  # 保留方向标识
             else:
                 continue
 
             if i not in actual_nodes or j not in actual_nodes:
                 continue
-
-            G.add_edge(i, j, weight=value)
 
             # 计算显示值和颜色
             if mode in ["utilization", "T2_ratio", "T1_ratio", "T0_ratio", "ITag_ratio"]:
@@ -1521,10 +1501,24 @@ class BandwidthAnalyzer:
                 color_intensity = min(display_value / 500.0, 1.0)
 
             if display_value > 0:
-                edge_labels[(i, j)] = formatted_label
-                edge_colors[(i, j)] = (color_intensity, 0, 0)
+                color = (color_intensity, 0, 0)
             else:
-                edge_colors[(i, j)] = (0.8, 0.8, 0.8)
+                color = (0.8, 0.8, 0.8)
+
+            # 自环link单独存储，保留方向信息
+            if i == j:
+                if direction:  # 有方向标识
+                    self_loop_labels[(i, direction)] = (formatted_label, color)
+                else:  # 无方向标识的自环
+                    self_loop_labels[(i, "unknown")] = (formatted_label, color)
+            else:
+                # 非自环边添加到图中
+                G.add_edge(i, j, weight=value)
+                if display_value > 0:
+                    edge_labels[(i, j)] = formatted_label
+                    edge_colors[(i, j)] = color
+                else:
+                    edge_colors[(i, j)] = color
 
         # 计算节点大小 - 新架构：增大节点以容纳内部IP方块
         square_size = np.sqrt(node_size) / 50
@@ -1562,14 +1556,14 @@ class BandwidthAnalyzer:
                         (start_x, start_y),
                         (end_x, end_y),
                         arrowstyle="-|>",
-                        mutation_scale=6,
+                        mutation_scale=10,
                         color=color,
                         zorder=1,
                         linewidth=1,
                     )
                     ax.add_patch(arrow)
 
-        # 绘制边标签
+        # 绘制非自环边标签
         if edge_labels:
             link_values = [float(links.get((i, j), 0)) for (i, j) in edge_labels.keys()]
             link_mapping_max = max(link_values) if link_values else 0.0
@@ -1591,80 +1585,71 @@ class BandwidthAnalyzer:
                     else:
                         color = (edge_value, 0, 0)
 
-                    # 自环链路特殊处理：根据节点位置决定标签显示位置
-                    if i == j:
-                        original_row = i // config.NUM_COL
-                        original_col = i % config.NUM_COL
-                        x, y = pos[i]
+                    x1, y1 = pos[i]
+                    x2, y2 = pos[j]
+                    mid_x = (x1 + x2) / 2
+                    mid_y = (y1 + y2) / 2
+                    dx, dy = x2 - x1, y2 - y1
 
-                        offset = 0.17
-                        if original_row == 0:
-                            label_pos = (x, y + square_size / 2 + offset)
-                            angle = 0
-                        elif original_row == config.NUM_ROW - 2:
-                            label_pos = (x, y - square_size / 2 - offset)
-                            angle = 0
-                        elif original_col == 0:
-                            label_pos = (x - square_size / 2 - offset, y)
-                            angle = -90
-                        elif original_col == config.NUM_COL - 1:
-                            label_pos = (x + square_size / 2 + offset, y)
-                            angle = 90
-                        else:
-                            label_pos = (x, y + square_size / 2 + offset)
-                            angle = 0
+                    has_reverse = G.has_edge(j, i)
+                    is_horizontal = abs(dx) > abs(dy)
 
-                        # 自环链路只显示带宽，不显示比例信息
-                        label_str = str(label)
-                        if "\n" in label_str:
-                            bandwidth_text = label_str.split("\n")[0]
-                        else:
-                            bandwidth_text = label_str
-
-                        ax.text(
-                            *label_pos,
-                            bandwidth_text,
-                            ha="center",
-                            va="center",
-                            color=color,
-                            fontweight="normal",
-                            fontsize=8,
-                            rotation=angle,
-                        )
-                    else:
-                        x1, y1 = pos[i]
-                        x2, y2 = pos[j]
-                        mid_x = (x1 + x2) / 2
-                        mid_y = (y1 + y2) / 2
-                        dx, dy = x2 - x1, y2 - y1
-
-                        has_reverse = G.has_edge(j, i)
-                        is_horizontal = abs(dx) > abs(dy)
-
-                        # 新架构：标签放在link中间，双向link根据方向放在不同侧
-                        if has_reverse:
-                            if is_horizontal:
-                                # 水平link：向右(i<j)放上方，向左(i>j)放下方
-                                if i < j:
-                                    label_x = mid_x
-                                    label_y = mid_y + 0.2
-                                else:
-                                    label_x = mid_x
-                                    label_y = mid_y - 0.2
+                    # 新架构：标签放在link中间，双向link根据方向放在不同侧
+                    if has_reverse:
+                        if is_horizontal:
+                            # 水平link：向右(i<j)放上方，向左(i>j)放下方
+                            if i < j:
+                                label_x = mid_x
+                                label_y = mid_y + 0.25
                             else:
-                                # 垂直link：向下(i<j)放右侧，向上(i>j)放左侧
-                                if i < j:
-                                    label_x = mid_x + 0.45
-                                    label_y = mid_y
-                                else:
-                                    label_x = mid_x - 0.45
-                                    label_y = mid_y
+                                label_x = mid_x
+                                label_y = mid_y - 0.25
                         else:
-                            # 单向link：标签直接放在中间
-                            label_x = mid_x
-                            label_y = mid_y
+                            # 垂直link：向下(i<j)放右侧，向上(i>j)放左侧
+                            if i < j:
+                                label_x = mid_x + 0.45
+                                label_y = mid_y
+                            else:
+                                label_x = mid_x - 0.45
+                                label_y = mid_y
+                    else:
+                        # 单向link：标签直接放在中间
+                        label_x = mid_x
+                        label_y = mid_y
 
-                        ax.text(label_x, label_y, label, ha="center", va="center", fontsize=12, fontweight="normal", color=color)
+                    ax.text(label_x, label_y, label, ha="center", va="center", fontsize=12, fontweight="normal", color=color)
+
+        # 绘制自环边标签
+        for (node, direction), (label, color) in self_loop_labels.items():
+            if node not in pos or not label:
+                continue
+
+            x, y = pos[node]
+            original_row = node // config.NUM_COL
+            original_col = node % config.NUM_COL
+
+            # 根据节点位置和自环方向决定标签位置
+            if direction == "h":
+                # 横向自环：根据列位置决定放左边还是右边
+                offset = 0.1
+                if original_col == 0:
+                    # 最左列：放左边，文本旋转-90度（从下往上读）
+                    label_pos = (x - square_size / 2 - offset, y)
+                    ax.text(*label_pos, f"{label}", ha="center", va="center", color=color, fontweight="normal", fontsize=10, rotation=90)
+                else:
+                    # 最右列：放右边，文本旋转90度（从上往下读）
+                    label_pos = (x + square_size / 2 + offset, y)
+                    ax.text(*label_pos, f"{label}", ha="center", va="center", color=color, fontweight="normal", fontsize=10, rotation=-90)
+            elif direction == "v":
+                # 纵向自环：根据行位置决定放上边还是下边
+                if original_row == 0:
+                    # 最上行：放上边
+                    label_pos = (x, y + square_size / 2)
+                    ax.text(*label_pos, f"{label}", ha="center", va="bottom", color=color, fontweight="normal", fontsize=10, rotation=0)
+                else:
+                    # 倒数第二行：放下边
+                    label_pos = (x, y - square_size / 2)
+                    ax.text(*label_pos, f"{label}", ha="center", va="top", color=color, fontweight="normal", fontsize=10, rotation=0)
 
         # 绘制方形节点和IP信息
         for node, (x, y) in pos.items():
@@ -2005,14 +1990,14 @@ class BandwidthAnalyzer:
 
         if self.config.SPARE_CORE_ROW != -1:
             title += f"\nRow: {self.config.SPARE_CORE_ROW}, Failed cores: {self.config.FAIL_CORE_POS}, Spare cores: {self.config.spare_core_pos}"
-        ax.set_title(title, fontsize=16, fontweight="bold", y=0.96)  # 降低标题位置避免被裁剪
+        ax.set_title(title, fontsize=16, fontweight="bold", y=1.02)  # 提高标题位置，使图形整体下移
 
         # 自动调整坐标轴范围以确保所有内容都显示
         ax.axis("equal")  # 保持纵横比
         ax.margins(0.05)  # 设置边距以确保内容显示完整
         ax.axis("off")  # 隐藏坐标轴
 
-        plt.tight_layout()
+        plt.tight_layout(pad=1.5)  # 增加padding使图形与标题有更多间距
 
         if save_path:
             plt.savefig(
@@ -3398,6 +3383,18 @@ class BandwidthAnalyzer:
                     ax.text(x, y - node_h / 2 + 0.15, f"...+{len(lines)-max_lines}", ha="center", va="center", fontsize=8, style="italic", zorder=7)
             else:
                 ax.text(x, y, str(nid), ha="center", va="center", fontsize=16, fontweight="bold", zorder=7)
+
+            # 添加自环带宽标注
+            h_self_loop_flow = links_stat.get((nid, nid, "h"), 0)
+            v_self_loop_flow = links_stat.get((nid, nid, "v"), 0)
+
+            if h_self_loop_flow > 0:
+                h_bw = (h_self_loop_flow * 128) / (self.simulation_end_cycle // self.config.NETWORK_FREQUENCY) if getattr(self, "simulation_end_cycle", 0) > 0 else 0
+                ax.text(x + node_w / 2 + 0.3, y, f"H:{h_bw:.1f}", fontsize=10, ha="left", va="center", fontweight="bold", color="red", zorder=7)
+
+            if v_self_loop_flow > 0:
+                v_bw = (v_self_loop_flow * 128) / (self.simulation_end_cycle // self.config.NETWORK_FREQUENCY) if getattr(self, "simulation_end_cycle", 0) > 0 else 0
+                ax.text(x - node_w / 2 - 0.3, y, f"V:{v_bw:.1f}", fontsize=10, ha="right", va="center", fontweight="bold", color="blue", zorder=7)
 
         plt.title("Ring Topology", fontsize=18, fontweight="bold", pad=20)
         if pos:

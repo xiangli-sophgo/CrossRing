@@ -532,13 +532,8 @@ class BaseModel:
         self.ip_inject_to_network()
 
         # Network arbitration and movement
-        self._inject_queue_arbitration(self.req_network, self.rn_positions_list, "req")
         self._step_reqs = self.move_flits_in_network(self.req_network, self._step_reqs, "req")
-
-        self._inject_queue_arbitration(self.rsp_network, self.sn_positions_list, "rsp")
         self._step_rsps = self.move_flits_in_network(self.rsp_network, self._step_rsps, "rsp")
-
-        self._inject_queue_arbitration(self.data_network, self.flit_positions_list, "data")
         self._step_flits = self.move_flits_in_network(self.data_network, self._step_flits, "data")
 
         self.network_to_ip_eject()
@@ -845,7 +840,7 @@ class BaseModel:
 
     def move_flits_in_network(self, network, flits, flit_type):
         """Process injection queues and move flits."""
-        flits = self._flit_move(network, flits, flit_type)
+        flits = self._network_cycle_process(network, flits, flit_type)
         return flits
 
     def _try_inject_to_direction(self, req: Flit, ip_type, ip_pos, direction, counts):
@@ -880,27 +875,34 @@ class BaseModel:
     # ------------------------------------------------------------------
     # IQ仲裁：把 channel‑buffer 的 flit/req/rsp 放到 inject_queues_pre
     # ------------------------------------------------------------------
-    def _inject_queue_arbitration(self, network, ip_positions, network_type):
-        """
-        使用多对多匹配的IQ仲裁（全局最优）
+    # ------------------------------------------------------------------
+    # 模块化处理函数：IQ, Link, RB, EQ, CP
+    # ------------------------------------------------------------------
+    def _IQ_process(self, network: Network, flit_type: str):
+        """IQ模块：IQ仲裁处理
 
-        Parameters
-        ----------
-        network : Network
-            要操作的网络实例 (req / rsp / data)
-        ip_positions : Iterable[int]
-            需要遍历的 IP 物理位置集合
-        network_type : str
-            "req" | "rsp" | "data"
+        从channel buffer移动到inject_queues_pre
 
-        对每个ip_pos，构建 ip_types × directions 的请求矩阵，
-        使用匹配算法进行全局优化，确保每个IP类型只注入到一个方向。
+        Args:
+            network: 网络实例 (req_network / rsp_network / data_network)
+            flit_type: flit类型 ("req" / "rsp" / "data")
         """
+        # 根据flit_type确定ip_positions
+        if flit_type == "req":
+            ip_positions = self.rn_positions_list
+        elif flit_type == "rsp":
+            ip_positions = self.sn_positions_list
+        elif flit_type == "data":
+            ip_positions = self.flit_positions_list
+        else:
+            return  # 不合法的flit_type
+
+        # IQ仲裁逻辑（原_inject_queue_arbitration的内容）
         for ip_pos in ip_positions:
             # 1. 收集所有可能的 ip_types 和 directions
             all_ip_types = set()
             for direction in self.IQ_directions:
-                rr_queue = network.round_robin["IQ"][direction][ip_pos]  # 新架构: 直接使用ip_pos
+                rr_queue = network.round_robin["IQ"][direction][ip_pos]
                 all_ip_types.update(rr_queue)
 
             if not all_ip_types:
@@ -917,7 +919,7 @@ class BaseModel:
                 row = []
                 for direction in directions_list:
                     # 检查是否可以注入到这个方向
-                    can_inject = self._check_iq_injection_conditions(network, ip_pos, ip_type, direction, network_type, ip_type_to_flit)
+                    can_inject = self._check_iq_injection_conditions(network, ip_pos, ip_type, direction, flit_type, ip_type_to_flit)
                     row.append(can_inject)
                 request_matrix.append(row)
 
@@ -925,7 +927,7 @@ class BaseModel:
             if not any(any(row) for row in request_matrix):
                 continue  # 没有有效请求
 
-            queue_id = f"IQ_pos{ip_pos}_{network_type}"
+            queue_id = f"IQ_pos{ip_pos}_{flit_type}"
             matches = self.iq_arbiter.match(request_matrix, queue_id=queue_id)
 
             # 4. 根据匹配结果处理注入
@@ -938,7 +940,7 @@ class BaseModel:
                     continue
 
                 # 执行注入
-                if network_type == "req":
+                if flit_type == "req":
                     counts = None
                     if not ip_type.startswith("d2d_rn"):
                         counts = self.dma_rw_counts[ip_type][ip_pos]
@@ -961,9 +963,9 @@ class BaseModel:
                     queue_pre = network.inject_queues_pre[direction]
                     queue_pre[ip_pos] = flit
 
-                    if network_type == "rsp":
+                    if flit_type == "rsp":
                         flit.rsp_entry_network_cycle = self.cycle
-                    elif network_type == "data":
+                    elif flit_type == "data":
                         req = self.req_network.send_flits[flit.packet_id][0]
                         flit.sync_latency_record(req)
                         self.send_flits_num += 1
@@ -977,6 +979,197 @@ class BaseModel:
 
                         if hasattr(flit, "traffic_id"):
                             self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "sent_flit")
+
+    def _Link_process(self, network: Network, flits):
+        """Link模块：Link传输处理
+
+        处理Link上的flit移动
+
+        Args:
+            network: 网络实例
+            flits: 当前网络中的flit列表
+
+        Returns:
+            tuple: (更新后的flits列表, ring_bridge_EQ_flits列表)
+        """
+        # 筛选Link上的flit和识别ring_bridge_EQ_flits
+        link_flits, ring_bridge_EQ_flits = [], []
+        for flit in flits:
+            if flit.flit_position == "Link":
+                link_flits.append(flit)
+            if flit.current_link[0] - flit.current_link[1] == self.config.NUM_COL and flit.current_link[1] == flit.destination:
+                ring_bridge_EQ_flits.append(flit)
+
+        # 执行Link上的移动
+        for flit in link_flits:
+            network.plan_move(flit, self.cycle)
+        for flit in link_flits:
+            if network.execute_moves(flit, self.cycle):
+                flits.remove(flit)
+
+        return flits, ring_bridge_EQ_flits
+
+    def _RB_process(self, network: Network):
+        """RB模块：Ring Bridge仲裁处理
+
+        使用多对多匹配的Ring Bridge仲裁（全局最优）
+
+        Args:
+            network: 网络实例
+        """
+        # 遍历所有节点作为Ring Bridge
+        for pos in range(self.config.NUM_NODE):
+            # 新架构: Ring Bridge在本节点,键直接使用节点号
+            next_pos = pos  # 保留用于兼容性（queue_id等使用）
+
+            # 1. 获取各输入槽位的flit
+            station_flits = [
+                network.ring_bridge["TL"][pos][0] if network.ring_bridge["TL"][pos] else None,
+                network.ring_bridge["TR"][pos][0] if network.ring_bridge["TR"][pos] else None,
+                network.inject_queues["TU"][pos][0] if pos in network.inject_queues["TU"] and network.inject_queues["TU"][pos] else None,
+                network.inject_queues["TD"][pos][0] if pos in network.inject_queues["TD"] and network.inject_queues["TD"][pos] else None,
+            ]
+
+            if not any(station_flits):
+                continue
+
+            # 2. 构建请求矩阵 (input_slots × output_directions)
+            # input_slots: 0=TL, 1=TR, 2=TU, 3=TD
+            # output_directions: 0=EQ, 1=TU, 2=TD
+            slot_names = ["TL", "TR", "TU", "TD"]
+            output_dirs = ["EQ", "TU", "TD"]
+            direction_conditions = {"EQ": lambda d, n: d == n, "TU": lambda d, n: d < n, "TD": lambda d, n: d > n}
+
+            request_matrix = []
+            for slot_idx, flit in enumerate(station_flits):
+                row = []
+                for out_dir in output_dirs:
+                    # 检查是否可以从这个slot转发到这个输出方向
+                    can_forward = self._check_rb_forward_conditions(network, flit, pos, next_pos, out_dir, direction_conditions[out_dir])
+                    row.append(can_forward)
+                request_matrix.append(row)
+
+            # 3. 执行匹配
+            if not any(any(row) for row in request_matrix):
+                continue
+
+            queue_id = f"RB_pos{pos}_{next_pos}"
+            matches = self.rb_arbiter.match(request_matrix, queue_id=queue_id)
+
+            # 4. 根据匹配结果处理转发
+            for slot_idx, out_dir_idx in matches:
+                out_dir = output_dirs[out_dir_idx]
+                flit = station_flits[slot_idx]
+
+                if flit:
+                    # 新架构: ring_bridge_pre键直接使用节点号
+                    network.ring_bridge_pre[out_dir][pos] = flit
+                    station_flits[slot_idx] = None  # 标记为已使用
+                    self._update_ring_bridge(network, pos, next_pos, out_dir, slot_idx)
+
+    def _EQ_process(self, network: Network, flit_type: str):
+        """EQ模块：Eject Queue仲裁处理
+
+        处理eject的仲裁逻辑，根据flit类型处理不同的eject队列
+
+        Args:
+            network: 网络实例
+            flit_type: flit类型 ("req" / "rsp" / "data")
+        """
+        # 1. 映射flit_type到对应的positions
+        in_pos_position = self.type_to_positions.get(flit_type)
+        if in_pos_position is None:
+            return  # 不合法的flit_type
+
+        # 2. 统一处理eject_queues和ring_bridge
+        for in_pos in in_pos_position:
+            ip_pos = in_pos  # 新架构: in_pos和ip_pos是同一个节点
+            # 构造eject_flits
+            eject_flits = (
+                [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["TU", "TD"]]
+                + [network.inject_queues[fifo_pos][in_pos][0] if network.inject_queues[fifo_pos][in_pos] else None for fifo_pos in ["EQ"]]
+                + [network.ring_bridge["EQ"][in_pos][0] if network.ring_bridge["EQ"][in_pos] else None]  # 新架构: 键直接使用节点号
+            )
+            if not any(eject_flits):
+                continue
+            self._move_to_eject_queues_pre(network, eject_flits, ip_pos)
+
+    def _CP_process(self, network: Network, flits, flit_type: str, ring_bridge_EQ_flits):
+        """CP模块：CrossPoint处理
+
+        处理CrossPoint的上环和下环逻辑
+
+        Args:
+            network: 网络实例
+            flits: 当前网络中的flit列表
+            flit_type: flit类型 ("req" / "rsp" / "data")
+            ring_bridge_EQ_flits: 需要下环的flit列表
+
+        Returns:
+            list: 更新后的flits列表
+        """
+        # 1. 清理已到达的flit
+        for flit in ring_bridge_EQ_flits:
+            if flit.is_arrive and flit in flits:
+                flits.remove(flit)
+
+        # 2. 横向环注入（调用process_inject_queues）
+        for direction in ["TL", "TR"]:  # 只处理横向环注入
+            inject_queues = network.inject_queues[direction]
+            num, IQ_inject_flits = self.process_inject_queues(network, inject_queues, direction)
+            if num == 0 and not IQ_inject_flits:
+                continue
+            if flit_type == "req":
+                self.req_num += num
+            elif flit_type == "rsp":
+                self.rsp_num += num
+            elif flit_type == "data":
+                self.flit_num += num
+            for flit in IQ_inject_flits:
+                if flit not in flits:
+                    flits.append(flit)
+
+        # 3. 纵向环注入（调用RB_inject_vertical）
+        RB_inject_flits = self.RB_inject_vertical(network)
+        for flit in RB_inject_flits:
+            if flit not in flits:
+                flits.append(flit)
+
+        # 4. 更新ITag和CrossPoint状态
+        network.update_excess_ITag()
+        network.update_cross_point()
+
+        return flits
+
+    def _network_cycle_process(self, network: Network, flits, flit_type: str):
+        """网络周期处理：协调各模块完成一个完整的网络周期
+
+        处理顺序：IQ注入 -> Link传输 -> RB仲裁 -> EQ下环 -> CP处理
+
+        Args:
+            network: 网络实例
+            flits: 当前网络中的flit列表
+            flit_type: flit类型 ("req" / "rsp" / "data")
+
+        Returns:
+            list: 更新后的flits列表
+        """
+        # 1. IQ模块：IQ仲裁
+        self._IQ_process(network, flit_type)
+
+        # 2. Link模块：Link传输
+        flits, ring_bridge_EQ_flits = self._Link_process(network, flits)
+
+        # 3. RB模块：Ring Bridge仲裁
+        self._RB_process(network)
+
+        # 4. EQ模块：Eject Queue仲裁
+        self._EQ_process(network, flit_type)
+
+        # 5. CP模块：CrossPoint处理（包含上环和下环）
+        flits = self._CP_process(network, flits, flit_type, ring_bridge_EQ_flits)
+
+        return flits
 
     def _check_iq_injection_conditions(self, network, ip_pos, ip_type, direction, network_type, flit_cache):
         """
@@ -1265,111 +1458,6 @@ class BaseModel:
         if has_active_flit and self.update_interval > 0:
             time.sleep(self.update_interval)
 
-    def _flit_move(self, network: Network, flits, flit_type):
-        # link 上的flit移动
-        link_flits, ring_bridge_EQ_flits = [], []
-        for flit in flits:
-            if flit.flit_position == "Link":
-                link_flits.append(flit)
-            if flit.current_link[0] - flit.current_link[1] == self.config.NUM_COL and flit.current_link[1] == flit.destination:
-                ring_bridge_EQ_flits.append(flit)
-        for flit in link_flits:
-            network.plan_move(flit, self.cycle)
-        for flit in link_flits:
-            if network.execute_moves(flit, self.cycle):
-                flits.remove(flit)
-
-        self.Ring_Bridge_arbitration(network)
-
-        # eject arbitration
-        self.Eject_Queue_arbitration(network, flit_type)
-
-        for flit in ring_bridge_EQ_flits:
-            if flit.is_arrive and flit in flits:
-                flits.remove(flit)
-
-        for direction, inject_queues in network.inject_queues.items():
-            num, IQ_inject_flits = self.process_inject_queues(network, inject_queues, direction)
-            if num == 0 and not IQ_inject_flits:
-                continue
-            if flit_type == "req":
-                self.req_num += num
-            elif flit_type == "rsp":
-                self.rsp_num += num
-            elif flit_type == "data":
-                self.flit_num += num
-            for flit in IQ_inject_flits:
-                if flit not in flits:
-                    flits.append(flit)
-
-        RB_inject_flits = self.RB_inject_vertical(network)
-        for flit in RB_inject_flits:
-            if flit not in flits:
-                flits.append(flit)
-
-        network.update_excess_ITag()
-        network.update_cross_point()
-        return flits
-
-    def Ring_Bridge_arbitration(self, network: Network):
-        """
-        使用多对多匹配的Ring Bridge仲裁（全局最优）
-
-        对每个ring bridge节点，构建 input_slots × output_directions 的请求矩阵，
-        使用匹配算法进行全局优化，确保每个slot只转发到一个方向。
-
-        新架构: 每个节点都有Ring Bridge (参考C2C设计)
-        """
-        # 遍历所有节点作为Ring Bridge
-        for pos in range(self.config.NUM_NODE):
-            # 新架构: Ring Bridge在本节点,键直接使用节点号
-            next_pos = pos  # 保留用于兼容性（queue_id等使用）
-
-            # 1. 获取各输入槽位的flit
-            station_flits = [
-                network.ring_bridge["TL"][pos][0] if network.ring_bridge["TL"][pos] else None,
-                network.ring_bridge["TR"][pos][0] if network.ring_bridge["TR"][pos] else None,
-                network.inject_queues["TU"][pos][0] if pos in network.inject_queues["TU"] and network.inject_queues["TU"][pos] else None,
-                network.inject_queues["TD"][pos][0] if pos in network.inject_queues["TD"] and network.inject_queues["TD"][pos] else None,
-            ]
-
-            if not any(station_flits):
-                continue
-
-            # 2. 构建请求矩阵 (input_slots × output_directions)
-            # input_slots: 0=TL, 1=TR, 2=TU, 3=TD
-            # output_directions: 0=EQ, 1=TU, 2=TD
-            slot_names = ["TL", "TR", "TU", "TD"]
-            output_dirs = ["EQ", "TU", "TD"]
-            direction_conditions = {"EQ": lambda d, n: d == n, "TU": lambda d, n: d < n, "TD": lambda d, n: d > n}
-
-            request_matrix = []
-            for slot_idx, flit in enumerate(station_flits):
-                row = []
-                for out_dir in output_dirs:
-                    # 检查是否可以从这个slot转发到这个输出方向
-                    can_forward = self._check_rb_forward_conditions(network, flit, pos, next_pos, out_dir, direction_conditions[out_dir])
-                    row.append(can_forward)
-                request_matrix.append(row)
-
-            # 3. 执行匹配
-            if not any(any(row) for row in request_matrix):
-                continue
-
-            queue_id = f"RB_pos{pos}_{next_pos}"
-            matches = self.rb_arbiter.match(request_matrix, queue_id=queue_id)
-
-            # 4. 根据匹配结果处理转发
-            for slot_idx, out_dir_idx in matches:
-                out_dir = output_dirs[out_dir_idx]
-                flit = station_flits[slot_idx]
-
-                if flit:
-                    # 新架构: ring_bridge_pre键直接使用节点号
-                    network.ring_bridge_pre[out_dir][pos] = flit
-                    station_flits[slot_idx] = None  # 标记为已使用
-                    self._update_ring_bridge(network, pos, next_pos, out_dir, slot_idx)
-
     def _check_rb_forward_conditions(self, network, flit, pos, next_pos, out_dir, cmp_func):
         """
         检查是否可以从slot转发到输出方向
@@ -1536,27 +1624,6 @@ class BaseModel:
         flit.ETag_priority = "T2"
         # flit.used_entry_level = None
         # Note: arbitration is now handled by the unified arbiter system
-
-    def Eject_Queue_arbitration(self, network: Network, flit_type):
-        """处理eject的仲裁逻辑,根据flit类型处理不同的eject队列"""
-
-        # 1. 映射flit_type到对应的positions
-        in_pos_position = self.type_to_positions.get(flit_type)
-        if in_pos_position is None:
-            return  # 不合法的flit_type
-
-        # 2. 统一处理eject_queues和ring_bridge
-        for in_pos in in_pos_position:
-            ip_pos = in_pos  # 新架构: in_pos和ip_pos是同一个节点
-            # 构造eject_flits
-            eject_flits = (
-                [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["TU", "TD"]]
-                + [network.inject_queues[fifo_pos][in_pos][0] if network.inject_queues[fifo_pos][in_pos] else None for fifo_pos in ["EQ"]]
-                + [network.ring_bridge["EQ"][in_pos][0] if network.ring_bridge["EQ"][in_pos] else None]  # 新架构: 键直接使用节点号
-            )
-            if not any(eject_flits):
-                continue
-            self._move_to_eject_queues_pre(network, eject_flits, ip_pos)
 
     def _process_ring_bridge_inject(self, network: Network, dir_key, pos, next_pos, curr_node, opposite_node):
         """处理ring bridge的注入

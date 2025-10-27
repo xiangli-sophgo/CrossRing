@@ -121,7 +121,7 @@ class NetworkLinkVisualizer:
             self.current_highlight_flit = None
 
         def _draw_arrows(self):
-            # TODO: not Finished
+
             # 1. 模块几何信息（必须与 _draw_modules 中的保持一致）
             IQ_x, IQ_y, IQ_w, IQ_h = -4, 0.0, self.inject_module_size
             EQ_x, EQ_y, EQ_w, EQ_h = 0.0, 4, self.eject_module_size
@@ -740,6 +740,8 @@ class NetworkLinkVisualizer:
             # Cross Point Horizontal
             for lane, patches in self.cph_patches.items():
                 q = CP_H.get(self.node_id, [])[lane]
+                if lane == 'TL':
+                    q = q[::-1]
                 for idx, p in enumerate(patches):
                     t = self.cph_texts[lane][idx]
                     if idx < len(q):
@@ -776,6 +778,8 @@ class NetworkLinkVisualizer:
             # Cross Point Vertical
             for lane, patches in self.cpv_patches.items():
                 q = CP_V.get(self.node_id, [])[lane]
+                if lane == "TD":
+                    q = q[::-1]
                 for idx, p in enumerate(patches):
                     t = self.cpv_texts[lane][idx]
                     if idx < len(q):
@@ -816,49 +820,6 @@ class NetworkLinkVisualizer:
                 # 若未处于高亮模式，如无点击则清空
                 if not self.use_highlight and self.current_highlight_flit is None:
                     self.info_text.set_text("")
-
-        # ------------------------------------------------------------------ #
-        #  点击 flit 矩形时显示 / 隐藏文字                                      #
-        # ------------------------------------------------------------------ #
-
-        # _ETAG_ALPHA = {"T0": 1.0, "T1": 1.0, "T2": 0.75}  # T0  # T1  # T2
-        # _ETAG_LW = {"T0": 2.5, "T1": 1, "T2": 0}  # T0  # T1  # T2
-        # _ETAG_EDGE = {"T0": "red", "T1": "black", "T2": "black"}
-
-        # def _get_flit_style(self, flit, use_highlight=True, expected_packet_id=0, highlight_color=None):
-        #     """
-        #     返回 (facecolor, alpha, linewidth)
-        #     - facecolor 仍沿用 _get_flit_color 的逻辑（高亮 / 调色板）
-        #     - alpha / linewidth 由 flit.etag 决定
-        #     """
-        #     face = self._get_flit_color(flit, use_highlight, expected_packet_id, highlight_color)
-
-        #     etag = getattr(flit, "ETag_priority", "T2")  # 缺省视为 T0
-        #     alpha = self._ETAG_ALPHA.get(etag, 1.0)
-        #     lw = self._ETAG_LW.get(etag, 0)
-        #     edge_coloe = self._ETAG_EDGE.get(etag, "black")
-
-        #     return face, alpha, lw, edge_coloe
-
-        # def _get_flit_color(self, flit, use_highlight=True, expected_packet_id=1, highlight_color=None):
-        #     """获取颜色，支持多种PID格式：
-        #     - 单个值 (packet_id 或 flit_id)
-        #     - 元组 (packet_id, flit_id)
-        #     - 字典 {'packet_id': x, 'flit_id': y}
-
-        #     新增参数:
-        #     - use_highlight: 是否启用高亮功能(默认False)
-        #     - expected_packet_id: 期望的packet_id值
-        #     - highlight_color: 高亮颜色(默认为红色)
-        #     """
-
-        #     # 高亮模式：目标 flit → 红，其余 → 灰
-        #     if use_highlight:
-        #         hl = highlight_color or "red"
-        #         return hl if flit.packet_id == expected_packet_id else "lightgrey"
-
-        #     # 普通模式：直接取调色板色
-        #     return self._colors[flit.packet_id % len(self._colors)]
 
         def _on_click(self, event):
             if event.inaxes != self.ax:
@@ -956,22 +917,7 @@ class NetworkLinkVisualizer:
         self.cols = network.config.NUM_COL
         # ---- Figure & Sub‑Axes ------------------------------------------------
         self.fig = plt.figure(figsize=(15, 10), constrained_layout=True)
-        # 全屏显示
-        # try:
-        #     mng = self.fig.canvas.manager
-        #     # 尝试不同的最大化方法
-        #     if hasattr(mng, 'window'):
-        #         if hasattr(mng.window, 'wm_state'):
-        #             mng.window.wm_state('zoomed')  # Windows/Linux
-        #         elif hasattr(mng.window, 'showMaximized'):
-        #             mng.window.showMaximized()  # Qt backend
-        #         elif hasattr(mng.window, 'maximize'):
-        #             mng.window.maximize()  # Mac
-        #     elif hasattr(mng, 'full_screen_toggle'):
-        #         mng.full_screen_toggle()  # 备选方案
-        # except Exception:
-        #     # 如果自动最大化失败，至少增大窗口尺寸
-        #     self.fig.set_size_inches(15, 10)
+
         gs = self.fig.add_gridspec(1, 2, width_ratios=[1.3, 1], left=0.02, right=0.98, top=0.95, bottom=0.08)
         self.ax = self.fig.add_subplot(gs[0])  # 主网络视图
         self.piece_ax = self.fig.add_subplot(gs[1])  # 右侧 Piece 视图
@@ -986,6 +932,8 @@ class NetworkLinkVisualizer:
         self.node_positions = self._calculate_layout()
         self.link_artists = {}  # 存储链路相关的静态信息
         self._colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        # 节点大小参数（统一管理，方便调整）
+        self.node_size = 0.8
 
         self.cycle = 0
         self.paused = False
@@ -1054,7 +1002,7 @@ class NetworkLinkVisualizer:
         self.piece_vis.draw_piece_for_node(self._selected_node, self.network)
         # 初始化时绘制高亮框（仅高亮当前选中节点）
         x_ll, y_ll = self.node_positions[self._selected_node]
-        self.click_box = Rectangle((x_ll, y_ll), 0.5, 0.5, facecolor="none", edgecolor="red", linewidth=1.2, linestyle="--")
+        self.click_box = Rectangle((x_ll, y_ll), self.node_size, self.node_size, facecolor="none", edgecolor="red", linewidth=1.2, linestyle="--")
         self.ax.add_patch(self.click_box)
         self.fig.canvas.draw_idle()
 
@@ -1120,8 +1068,8 @@ class NetworkLinkVisualizer:
         # 检查是否点击到节点方块
         sel_node = None
         for nid, (x_ll, y_ll) in self.node_positions.items():
-            # 节点方块大小为0.5x0.5
-            if x_ll <= event.xdata <= x_ll + 0.5 and y_ll <= event.ydata <= y_ll + 0.5:
+            # 节点方块大小
+            if x_ll <= event.xdata <= x_ll + self.node_size and y_ll <= event.ydata <= y_ll + self.node_size:
                 sel_node = nid
                 break
 
@@ -1139,7 +1087,7 @@ class NetworkLinkVisualizer:
 
         # 重画新的高亮框（仅高亮被点击的节点）
         x_ll, y_ll = self.node_positions[sel_node]
-        self.click_box = Rectangle((x_ll, y_ll), 0.5, 0.5, facecolor="none", edgecolor="red", linewidth=1.2, linestyle="--")
+        self.click_box = Rectangle((x_ll, y_ll), self.node_size, self.node_size, facecolor="none", edgecolor="red", linewidth=1.2, linestyle="--")
         self.ax.add_patch(self.click_box)
 
         # 清空并绘制右侧 Piece 视图
@@ -1280,11 +1228,11 @@ class NetworkLinkVisualizer:
         for node, (x, y) in self.node_positions.items():
             xs.append(x)
             ys.append(y)
-            node_rect = Rectangle((x, y), 0.5, 0.5, facecolor="lightblue", edgecolor="black")
+            node_rect = Rectangle((x, y), self.node_size, self.node_size, facecolor="lightblue", edgecolor="black")
             self.ax.add_patch(node_rect)
-            self.ax.text(x + 0.25, y + 0.25, f"{node}", ha="center", va="center", fontsize=12)
+            self.ax.text(x + self.node_size / 2, y + self.node_size / 2, f"{node}", ha="center", va="center", fontsize=12)
 
-        # 绘制所有链路的框架，这里不再赘述
+        # 绘制所有链路的框架
         self.link_artists.clear()
         for link_key in self.network.links.keys():
             # 处理2-tuple或3-tuple格式的link key
@@ -1303,8 +1251,8 @@ class NetworkLinkVisualizer:
             # 计算边界，并设定一定的补充边距
             margin_x = (max(xs) - min(xs)) * 0.1
             margin_y = (max(ys) - min(ys)) * 0.1
-            self.ax.set_xlim(min(xs) - margin_x, max(xs) + margin_x + 0.5)
-            self.ax.set_ylim(min(ys) - margin_y, max(ys) + margin_y + 0.5)
+            self.ax.set_xlim(min(xs) - margin_x, max(xs) + margin_x + self.node_size)
+            self.ax.set_ylim(min(ys) - margin_y, max(ys) + margin_y + self.node_size)
 
         self.ax.axis("off")
         # self.fig.tight_layout(rect=[0, 0.1, 1, 1])
@@ -1314,8 +1262,8 @@ class NetworkLinkVisualizer:
         is_self_loop = src == dest
 
         # 节点矩形尺寸
-        node_width = 0.5
-        node_height = 0.5
+        node_width = self.node_size
+        node_height = self.node_size
         half_w, half_h = node_width / 2, node_height / 2
 
         # 获取节点信息
@@ -1689,7 +1637,7 @@ class NetworkLinkVisualizer:
 
             # 根据方向选择对应侧的slots
             all_slots = self.node_pair_slots[node_pair]
-            target_side = "side1" if src < dest else "side2"
+            target_side = "side2" if src < dest else "side1"
             target_slots = [s for s in all_slots if s[1].startswith(target_side)]
 
             if src >= dest:

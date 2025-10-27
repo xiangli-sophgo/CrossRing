@@ -401,7 +401,7 @@ class CrossPoint:
         if self.network and hasattr(self.network, "_update_order_tracking_table"):
             self.network._update_order_tracking_table(flit, target_node, direction)
 
-    def _try_eject(self, flit: Flit, direction: str, target_node: int, link: list, ring_bridge: dict = None, eject_queues: dict = None, can_eject_in_order_func=None) -> bool:
+    def _try_eject(self, flit: Flit, direction: str, target_node: int, link: list, ring_bridge: dict = None, eject_queues: dict = None, can_eject_in_order_func=None) -> tuple:
         """
         尝试下环（适用于所有下环场景）
 
@@ -421,13 +421,14 @@ class CrossPoint:
             can_eject_in_order_func: 保序检查函数
 
         Returns:
-            bool: 是否成功下环
+            tuple: (是否成功: bool, 失败原因: str)
+                失败原因: "" (成功), "order" (保序), "capacity" (容量), "entry" (Entry不足)
         """
         # 1. 获取队列和容量限制
         if direction in ["TL", "TR"]:
             # 横向环下环到ring_bridge
             if ring_bridge is None:
-                return False
+                return False, "capacity"
             current_node = flit.current_link[1]
             key = current_node  # 新架构: ring_bridge键直接使用节点号
             queue = ring_bridge[direction][key]
@@ -435,7 +436,7 @@ class CrossPoint:
         else:  # TU, TD
             # 纵向环下环到eject_queues
             if eject_queues is None:
-                return False
+                return False, "capacity"
             key = flit.current_link[1]
             queue = eject_queues[direction][key]
             capacity = self.config.EQ_IN_FIFO_DEPTH
@@ -447,18 +448,19 @@ class CrossPoint:
                 flit.ordering_blocked_eject_h += 1
             else:
                 flit.ordering_blocked_eject_v += 1
-            return False
+            return False, "order"
 
         # 3. 检查队列容量（第二优先级）
         if len(queue) >= capacity:
-            return False
+            return False, "capacity"
 
         # 4. 检查是否有对应等级的entry可用（第三优先级）
         if not self._has_available_entry_for_flit(flit, direction, key):
-            return False
+            return False, "entry"
 
         # 5. 尝试占用最佳Entry
-        return self._occupy_best_available_entry(flit, direction, key, target_node, link)
+        success = self._occupy_best_available_entry(flit, direction, key, target_node, link)
+        return (True, "") if success else (False, "entry")
 
     # ------------------------------------------------------------------
     # 维度判断和下环决策方法（借鉴C2C设计）
@@ -517,13 +519,21 @@ class CrossPoint:
         if hasattr(flit, "current_link") and flit.current_link is not None and len(flit.current_link) >= 2:
             u, v = flit.current_link[:2]
             hop_diff = abs(u - v)
+            is_self_loop = (u == v)  # 自环
+
             if self.direction == "horizontal":
-                # 横向环：只处理横向链路（同一行且列差为1）
-                if hop_diff != 1 or (u // self.config.NUM_COL) != (v // self.config.NUM_COL):
+                # 横向环：处理横向链路或横向自环
+                if not is_self_loop and (hop_diff != 1 or (u // self.config.NUM_COL) != (v // self.config.NUM_COL)):
+                    return False, "", ""
+                # 如果是自环，检查是否为横向自环
+                if is_self_loop and len(flit.current_link) == 3 and flit.current_link[2] != "h":
                     return False, "", ""
             elif self.direction == "vertical":
-                # 纵向环：只处理纵向链路（列相同且行差为NUM_COL）
-                if hop_diff != self.config.NUM_COL or (u % self.config.NUM_COL) != (v % self.config.NUM_COL):
+                # 纵向环：处理纵向链路或纵向自环
+                if not is_self_loop and (hop_diff != self.config.NUM_COL or (u % self.config.NUM_COL) != (v % self.config.NUM_COL)):
+                    return False, "", ""
+                # 如果是自环，检查是否为纵向自环
+                if is_self_loop and len(flit.current_link) == 3 and flit.current_link[2] != "v":
                     return False, "", ""
 
         # 1. 检查是否到达最终目标
@@ -584,10 +594,17 @@ class CrossPoint:
         prev_node = flit.current_link[0]
         curr_node = flit.current_link[1]
 
+        # 自环：根据节点所在边缘判断流动方向
+        if prev_node == curr_node:
+            col = curr_node % self.config.NUM_COL
+            # 左边缘 -> 向右流动 -> TR
+            # 右边缘 -> 向左流动 -> TL
+            return "TR" if col == 0 else "TL"
+
+        # 非自环：比较列号判断移动方向
         prev_col = prev_node % self.config.NUM_COL
         curr_col = curr_node % self.config.NUM_COL
 
-        # 比较列号判断移动方向
         if curr_col > prev_col or (prev_col == self.config.NUM_COL - 1 and curr_col == 0):
             # 向右移动 -> 从右侧下环
             return "TR"
@@ -612,10 +629,18 @@ class CrossPoint:
         prev_node = flit.current_link[0]
         curr_node = flit.current_link[1]
 
+        # 自环：根据节点所在边缘判断流动方向
+        if prev_node == curr_node:
+            row = curr_node // self.config.NUM_COL
+            num_rows = self.config.NUM_NODE // self.config.NUM_COL
+            # 上边缘 -> 向下流动 -> TD
+            # 下边缘 -> 向上流动 -> TU
+            return "TD" if row == 0 else "TU"
+
+        # 非自环：比较行号判断移动方向
         prev_row = prev_node // self.config.NUM_COL
         curr_row = curr_node // self.config.NUM_COL
 
-        # 比较行号判断移动方向
         if curr_row > prev_row:
             # 向下移动 -> 从下侧下环
             return "TD"

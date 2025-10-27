@@ -177,15 +177,6 @@ class Network:
             "EQ": {"TU": {}, "TD": {}, "CH_buffer": {}},
         }
 
-        # # channel buffer setup
-
-        self.ring_bridge_map = {
-            0: ("TL", self.config.RB_IN_FIFO_DEPTH),
-            1: ("TR", self.config.RB_IN_FIFO_DEPTH),
-            -1: ("IQ_TU", self.config.IQ_OUT_FIFO_DEPTH_VERTICAL),
-            -2: ("IQ_TD", self.config.IQ_OUT_FIFO_DEPTH_VERTICAL),
-        }
-
         # Slot ID全局计数器（用于为每个seat分配唯一ID）
         self.global_slot_id_counter = 0
 
@@ -631,37 +622,18 @@ class Network:
             flit.is_on_station = False
             flit.current_link = (current, next_node)
 
-            # 新架构: 判断是否到达目的地
-            if next_node == flit.destination:
-                # 不设置is_arrive，只有到IP模块才设置
-                flit.current_seat_index = 0  # 直达目的地也需要设置seat_index
-            elif abs(current - next_node) == self.config.NUM_COL:
-                # 纵向移动（向上或向下）
-                if len(flit.path) > flit.path_index + 2:
-                    next_next_node = flit.path[flit.path_index + 2]
-                    if next_next_node - next_node == self.config.NUM_COL:
-                        flit.current_seat_index = -1  # 继续向下
-                    elif next_next_node - next_node == -self.config.NUM_COL:
-                        flit.current_seat_index = -2  # 继续向上
-                    else:
-                        flit.current_seat_index = 0  # 其他方向
-                else:
-                    flit.current_seat_index = 0
-            else:
-                # 横向移动
-                flit.current_seat_index = 0
+            # 所有情况下seat_index都从0开始（link头部）
+            flit.current_seat_index = 0
 
             return
 
         # 计算行和列的起始和结束点
         current, next_node = flit.current_link[:2] if len(flit.current_link) == 3 else flit.current_link
 
-        # 新架构: 所有普通link（包括纵向link）都需要处理
-        # 只有自环link（current == next_node）才是ring_bridge
-        if current != next_node:
-            link = self.links.get(flit.current_link)
-
-            # Plan non ring bridge moves (包括横向和纵向link)
+        # 处理所有link（包括普通link和自环）
+        link = self.links.get(flit.current_link)
+        if link is not None:
+            # Plan moves for all links including self-loops
             return self._handle_flit(flit, link, current, next_node)
 
     def _position_to_physical_node(self, position):
@@ -856,13 +828,10 @@ class Network:
         if flit.current_link is None:
             return True  # 正常移除
 
-        # 情况3：在Link上传输
-        current, next_node = flit.current_link[:2] if len(flit.current_link) == 3 else flit.current_link
-        if current != next_node:
-            # 普通link传输
-            self.set_link_slice(flit.current_link, flit.current_seat_index, flit, cycle)
-        else:
-            raise ValueError(flit.current_link)
+        # 情况3：在Link上传输（包括普通link和自环）
+        # 自环link使用3元组格式: (node, node, "h"/"v")
+        # 普通link使用2元组格式: (u, v)
+        self.set_link_slice(flit.current_link, flit.current_seat_index, flit, cycle)
 
         return False  # 保留在flits列表
 
@@ -924,30 +893,38 @@ class Network:
         link[flit.current_seat_index] = None
         current_node = flit.current_link[1]
 
-        # 新架构: 如果next_pos等于current_node且不是真正的自环边界，说明到达目的地
+        # 判断当前link是横向还是纵向（用于确定自环类型）
+        if len(flit.current_link) == 3:
+            # 当前已经是自环
+            link_type = flit.current_link[2]
+        else:
+            # 普通link：根据距离判断
+            u, v = flit.current_link[:2]
+            if abs(u - v) == self.config.NUM_COL:
+                link_type = "v"  # 纵向
+            else:
+                link_type = "h"  # 横向
+
+        # 构造新link
         if next_pos == current_node:
+            # 自环：使用3元组格式
+            new_link = (current_node, next_pos, link_type)
+        else:
+            # 普通link：使用2元组格式
             new_link = (current_node, next_pos)
-            if new_link not in self.links:
-                # 这不是合法的自环，flit应该已经到达目的地
-                flit.is_arrive = True
-                flit.current_link = new_link
-                return
 
-        new_link = (current_node, next_pos)
-
-        # 新架构: 检查是否是合法的link
+        # 检查link是否存在
         if new_link not in self.links:
-            # 如果link不存在，说明这是旧架构的逻辑
-            # 新架构中所有纵向移动都是直接连接，不经过自环
-            # 这种情况下flit应该直接到达目的地，设置为arrived
-            print(f"WARNING: Invalid link {new_link} for flit {flit.flit_id}, marking as arrived")
-            print(f"  Path: {flit.path}, path_index: {flit.path_index}")
-            flit.is_arrive = True
-            flit.current_link = new_link  # 仍然设置link，后续execute_moves会处理
-            return
+            raise ValueError(new_link)
 
+        # 设置新link和seat_index
         flit.current_link = new_link
-        flit.current_seat_index = 0
+        flit.current_seat_index = 0  # 总是从头开始
+
+        # 验证seat_index合法性
+        new_link_length = len(self.links[new_link])
+        if flit.current_seat_index >= new_link_length:
+            raise RuntimeError(f"[Cycle {self.cycle}] Invalid seat_index {flit.current_seat_index} " f"for link {new_link} with length {new_link_length}. " f"Flit: {flit.packet_id}.{flit.flit_id}")
 
     def _analyze_flit_state(self, flit, current, next_node):
         """
@@ -977,27 +954,32 @@ class Network:
 
         # 判断方向和计算下一个绕环位置
         if current == next_node:
-            # 边界情况：在环的边界
-            if next_node == row_start:
-                # 左边界
-                direction = "TR"
-                next_pos = next_node + 1
-            elif next_node == row_end:
-                # 右边界
-                direction = "TL"
-                next_pos = next_node - 1
-            elif next_node == col_start:
-                # 上边界
-                direction = "TD"
-                next_pos = next_node + self.config.NUM_COL
-            elif next_node == col_end:
-                # 下边界
-                direction = "TU"
-                next_pos = next_node - self.config.NUM_COL
+            # flit在自环上，确定离开自环后的反向移动
+            if len(flit.current_link) == 3 and flit.current_link[2] == "v":
+                # 纵向自环
+                if row == 0:
+                    # 上边界 → 向下
+                    direction = "TD"
+                    next_pos = next_node + self.config.NUM_COL
+                else:
+                    # 下边界 → 向上
+                    direction = "TU"
+                    next_pos = next_node - self.config.NUM_COL
+            elif len(flit.current_link) == 3 and flit.current_link[2] == "h":
+                # 横向自环
+                if col == 0:
+                    # 左边界 → 向右
+                    direction = "TR"
+                    next_pos = next_node + 1
+                else:
+                    # 右边界 → 向左
+                    direction = "TL"
+                    next_pos = next_node - 1
             else:
-                # 不应该到这里
-                direction = None
-                next_pos = next_node
+                # fallback: 非法情况
+                return {"should_eject": False, "direction": "", "next_pos": next_node}
+
+            return {"should_eject": False, "direction": direction, "next_pos": next_pos}
         elif abs(current - next_node) == 1:
             # 非边界横向环
             if current - next_node == 1:
@@ -1005,7 +987,8 @@ class Network:
                 direction = "TL"
                 # 检查是否已经到达左边界
                 if next_node == row_start:
-                    next_pos = next_node  # 已到边界，标记为当前位置
+                    # 已到左边界，进入自环
+                    next_pos = next_node
                 else:
                     next_pos = next_node - 1
             else:
@@ -1013,7 +996,8 @@ class Network:
                 direction = "TR"
                 # 检查是否已经到达右边界
                 if next_node == row_end:
-                    next_pos = next_node  # 已到边界，标记为当前位置
+                    # 已到右边界，进入自环
+                    next_pos = next_node
                 else:
                     next_pos = next_node + 1
         else:
@@ -1023,7 +1007,8 @@ class Network:
                 direction = "TU"
                 # 检查是否已经到达上边界
                 if next_node == col_start:
-                    next_pos = next_node  # 已到边界，标记为当前位置
+                    # 已到上边界，进入自环
+                    next_pos = next_node
                 else:
                     next_pos = next_node - self.config.NUM_COL
             else:
@@ -1031,7 +1016,8 @@ class Network:
                 direction = "TD"
                 # 检查是否已经到达下边界
                 if next_node == col_end:
-                    next_pos = next_node  # 已到边界，标记为当前位置
+                    # 已到下边界，进入自环
+                    next_pos = next_node
                 else:
                     next_pos = next_node + self.config.NUM_COL
 
@@ -1098,7 +1084,7 @@ class Network:
                 flit.eject_attempts_v += 1
 
             # 尝试下环
-            success = crosspoint._try_eject(
+            success, fail_reason = crosspoint._try_eject(
                 flit, eject_direction, final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues, can_eject_in_order_func=self._can_eject_in_order
             )
 
@@ -1106,7 +1092,12 @@ class Network:
                 # 下环成功
                 return
 
-            # 下环失败：E-Tag升级
+            # 下环失败：根据失败原因决定是否继续绕环
+            # fail_reason可能是: "order" (保序), "capacity" (容量), "entry" (Entry不足)
+            # 所有情况下都继续绕环，避免卡在自环上
+            should_continue_loop = True
+
+            # E-Tag升级
             if not flit.is_delay:
                 flit.is_delay = True
 
@@ -1117,27 +1108,42 @@ class Network:
                     crosspoint._register_T0_slot(flit)
 
             # 继续绕环
-            state = self._analyze_flit_state(flit, current, next_node)
-            self._continue_looping(flit, link, state["next_pos"])
+            if should_continue_loop:
+                state = self._analyze_flit_state(flit, current, next_node)
+                self._continue_looping(flit, link, state["next_pos"])
             return
 
         # 5. 不需要下环：继续移动
-        # 动态查找下一跳节点
+        # 先分析flit状态，判断是否需要通过自环绕过边界
+        state = self._analyze_flit_state(flit, current, next_node)
+
+        # 如果需要进入自环（next_pos == next_node），则进入自环绕过边界
+        if state["next_pos"] == next_node:
+            # 到达边界，需要进入自环
+            self._continue_looping(flit, link, state["next_pos"])
+            return
+
+        # 否则，尝试按path正常移动
         try:
             current_path_index = flit.path.index(next_node)
             if current_path_index + 1 < len(flit.path):
                 next_hop = flit.path[current_path_index + 1]
-                # 正常移动到下一段link
-                link[flit.current_seat_index] = None
-                flit.current_link = (next_node, next_hop)
-                flit.current_seat_index = 0
-                return
+                # 检查path的下一跳是否与分析得到的next_pos一致
+                if next_hop == state["next_pos"]:
+                    # 一致，正常移动
+                    link[flit.current_seat_index] = None
+                    flit.current_link = (next_node, next_hop)
+                    flit.current_seat_index = 0
+                    return
+                else:
+                    # 不一致，说明需要绕环（path可能穿过边界）
+                    self._continue_looping(flit, link, state["next_pos"])
+                    return
         except ValueError:
-            # next_node不在path中,可能是绕环
+            # next_node不在path中,继续绕环
             pass
 
-        # 6. 如果到了这里,说明next_node不在路径中或已经是最后一个节点,继续绕环
-        state = self._analyze_flit_state(flit, current, next_node)
+        # 6. 继续绕环
         self._continue_looping(flit, link, state["next_pos"])
 
     # ==================== 原有的辅助函数 ====================
@@ -1179,14 +1185,20 @@ class Network:
         根据flit的下环尝试次数更新链路统计
 
         Args:
-            link: 链路标识 (i, j)
+            link: 链路标识 (i, j) 或 (i, j, type)
             flit: flit对象
         """
         if not hasattr(flit, "eject_attempts_h") or not hasattr(flit, "eject_attempts_v"):
             return
 
         # 判断链路方向并更新相应的统计
-        i, j = link
+        # 处理3元组自环和2元组普通link
+        if len(link) == 3:
+            i, j, link_direction = link
+        else:
+            i, j = link
+            link_direction = None
+
         is_self_loop = i == j  # 自环链路
         is_horizontal = abs(i - j) == 1  # 横向链路
         is_vertical = abs(i - j) > 1  # 纵向链路
