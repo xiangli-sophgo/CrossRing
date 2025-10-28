@@ -6,8 +6,12 @@ D2D系统专用结果处理器
 
 import os
 import csv
+import math
+import warnings
+import traceback
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import networkx as nx
 from matplotlib.patches import Rectangle, FancyArrowPatch
 from typing import Dict, List, Tuple, Optional
@@ -65,12 +69,137 @@ class D2DResultProcessor(BandwidthAnalyzer):
         "B": "写响应通道 (Write Response)",
     }
 
+    # 统计数据结构模板
+    _LATENCY_STAT_TEMPLATE = {"sum": 0, "max": 0, "count": 0}
+    _CIRCLING_STAT_TEMPLATE = {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}
+
     def __init__(self, config, min_gap_threshold: int = 50):
         super().__init__(config, min_gap_threshold)
         self.d2d_requests: List[D2DRequestInfo] = []
         self.d2d_stats = D2DBandwidthStats()
         # 修复网络频率属性问题
         self.network_frequency = getattr(config, "NETWORK_FREQUENCY", 2)
+
+    @staticmethod
+    def _create_latency_stats() -> Dict:
+        """创建延迟统计数据结构"""
+        template = D2DResultProcessor._LATENCY_STAT_TEMPLATE
+        return {
+            "cmd": {"read": template.copy(), "write": template.copy(), "mixed": template.copy()},
+            "data": {"read": template.copy(), "write": template.copy(), "mixed": template.copy()},
+            "trans": {"read": template.copy(), "write": template.copy(), "mixed": template.copy()},
+        }
+
+    @staticmethod
+    def _create_circling_stats() -> Dict:
+        """创建绕环统计数据结构"""
+        template = D2DResultProcessor._CIRCLING_STAT_TEMPLATE
+        return {
+            "horizontal": template.copy(),
+            "vertical": template.copy(),
+            "overall": template.copy(),
+        }
+
+    @staticmethod
+    def _update_latency_stat(stat_dict: Dict, req_type: str, latency_cycle: float) -> None:
+        """更新延迟统计数据"""
+        group = stat_dict[req_type]
+        group["sum"] += latency_cycle
+        group["count"] += 1
+        group["max"] = max(group["max"], latency_cycle)
+
+        mixed = stat_dict["mixed"]
+        mixed["sum"] += latency_cycle
+        mixed["count"] += 1
+        mixed["max"] = max(mixed["max"], latency_cycle)
+
+    @staticmethod
+    def get_rotated_node_mapping(rows: int = 5, cols: int = 4, rotation: int = 0) -> Dict[int, int]:
+        """
+        计算Die旋转后每个原始节点对应的新节点ID
+
+        Args:
+            rows: 原始布局的行数
+            cols: 原始布局的列数
+            rotation: 旋转角度，可选值：0, 90, 180, 270（顺时针）
+
+        Returns:
+            Dict[int, int]: {原始节点ID: 旋转后节点ID} 的映射字典
+
+        Example:
+            # Die1顺时针旋转90°后，原始节点0对应旋转后的哪个节点
+            mapping = get_rotated_node_mapping(5, 4, 90)
+            rotated_node = mapping[0]
+        """
+        mapping = {}
+        total_nodes = rows * cols
+
+        for node_id in range(total_nodes):
+            row = node_id // cols
+            col = node_id % cols
+
+            if rotation == 0:
+                # 无旋转
+                new_row, new_col = row, col
+                new_cols = cols
+            elif rotation == 90:
+                # 顺时针90°：5行4列 → 4行5列
+                new_row = col
+                new_col = rows - 1 - row
+                new_cols = rows
+            elif rotation == 180:
+                # 180°：5行4列 → 5行4列
+                new_row = rows - 1 - row
+                new_col = cols - 1 - col
+                new_cols = cols
+            elif rotation == 270:
+                # 顺时针270°：5行4列 → 4行5列
+                new_row = cols - 1 - col
+                new_col = row
+                new_cols = rows
+            else:
+                raise ValueError(f"不支持的旋转角度: {rotation}，只支持0/90/180/270")
+
+            new_node_id = new_row * new_cols + new_col
+            mapping[node_id] = new_node_id
+
+        return mapping
+
+    @staticmethod
+    def _format_circuit_stats(stats: Dict, prefix: str = "  ") -> List[str]:
+        """
+        格式化绕环统计数据为文本行
+
+        Args:
+            stats: 统计数据字典
+            prefix: 行前缀（用于缩进）
+
+        Returns:
+            格式化的文本行列表
+        """
+        lines = [
+            f"{prefix}等待时间统计:",
+            f"{prefix}  REQ: 横向={stats['wait_cycles']['req_h']}, 纵向={stats['wait_cycles']['req_v']}",
+            f"{prefix}  RSP: 横向={stats['wait_cycles']['rsp_h']}, 纵向={stats['wait_cycles']['rsp_v']}",
+            f"{prefix}  DATA: 横向={stats['wait_cycles']['data_h']}, 纵向={stats['wait_cycles']['data_v']}",
+            f"{prefix}RB ETag统计:",
+            f"{prefix}  T1={stats['etag']['RB']['T1']}, T0={stats['etag']['RB']['T0']}",
+            f"{prefix}EQ ETag统计:",
+            f"{prefix}  T1={stats['etag']['EQ']['T1']}, T0={stats['etag']['EQ']['T0']}",
+            f"{prefix}ITag统计:",
+            f"{prefix}  H={stats['itag']['h']}, V={stats['itag']['v']}",
+            f"{prefix}Retry数量:",
+            f"{prefix}  读: {stats['retry']['read']}, 写: {stats['retry']['write']}",
+            f"{prefix}下环尝试统计:",
+            f"{prefix}  REQ: 横向={stats['circuits']['req_h']}, 纵向={stats['circuits']['req_v']}",
+            f"{prefix}  RSP: 横向={stats['circuits']['rsp_h']}, 纵向={stats['circuits']['rsp_v']}",
+            f"{prefix}  DATA: 横向={stats['circuits']['data_h']}, 纵向={stats['circuits']['data_v']}",
+            f"{prefix}数据绕环比例:",
+            f"{prefix}  横向: {stats['circling_ratio']['horizontal']['circling_ratio']*100:.2f}% ({stats['circling_ratio']['horizontal']['circling_flits']}/{stats['circling_ratio']['horizontal']['total_data_flits']})",
+            f"{prefix}  纵向: {stats['circling_ratio']['vertical']['circling_ratio']*100:.2f}% ({stats['circling_ratio']['vertical']['circling_flits']}/{stats['circling_ratio']['vertical']['total_data_flits']})",
+            f"{prefix}  总体: {stats['circling_ratio']['overall']['circling_ratio']*100:.2f}% ({stats['circling_ratio']['overall']['circling_flits']}/{stats['circling_ratio']['overall']['total_data_flits']})",
+        ]
+        return lines
 
     def collect_cross_die_requests(self, dies: Dict):
         """
@@ -337,9 +466,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                                     physical_row = matrix_row * 2  # 偶数行
                                     node_id = physical_row * num_col + matrix_col
 
-                                    all_rows.append(
-                                        [ip_instance, die_id, node_id, ip_type, f"{read_bw:.6f}", f"{write_bw:.6f}", f"{total_bw:.6f}"]
-                                    )  # IP实例名  # Die ID  # 节点ID  # IP类型
+                                    all_rows.append([ip_instance, die_id, node_id, ip_type, f"{read_bw:.6f}", f"{write_bw:.6f}", f"{total_bw:.6f}"])  # IP实例名  # Die ID  # 节点ID  # IP类型
 
                 # 排序：先按die_id，再按node_id，最后按ip_instance
                 all_rows.sort(key=lambda x: (int(x[1]), int(x[2]), x[0]))
@@ -501,61 +628,25 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 total_bytes = sum(req.data_bytes for req in interval_requests)
                 flit_count = sum(req.burst_length for req in interval_requests)
 
-                interval = WorkingInterval(
-                    start_time=start, end_time=end, duration=end - start, flit_count=flit_count, total_bytes=total_bytes, request_count=len(interval_requests)
-                )
+                interval = WorkingInterval(start_time=start, end_time=end, duration=end - start, flit_count=flit_count, total_bytes=total_bytes, request_count=len(interval_requests))
                 working_intervals.append(interval)
 
         return working_intervals
 
     def _calculate_d2d_latency_stats(self):
         """计算D2D请求的延迟统计数据（cmd/data/transaction）"""
-        import math
+        stats = self._create_latency_stats()
 
-        stats = {
-            "cmd": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
-            "data": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
-            "trans": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
-        }
+        # 定义延迟字段映射
+        latency_fields = [("cmd", "cmd_latency_ns"), ("data", "data_latency_ns"), ("trans", "transaction_latency_ns")]
 
         for req in self.d2d_requests:
-            # 转换为cycle（从ns）
-            cmd_latency_cycle = req.cmd_latency_ns * self.network_frequency if req.cmd_latency_ns < float("inf") else float("inf")
-            data_latency_cycle = req.data_latency_ns * self.network_frequency if req.data_latency_ns < float("inf") else float("inf")
-            trans_latency_cycle = req.transaction_latency_ns * self.network_frequency if req.transaction_latency_ns < float("inf") else float("inf")
+            for category, field_name in latency_fields:
+                latency_ns = getattr(req, field_name, float("inf"))
+                latency_cycle = latency_ns * self.network_frequency if latency_ns < float("inf") else float("inf")
 
-            # CMD
-            if math.isfinite(cmd_latency_cycle):
-                group = stats["cmd"][req.req_type]
-                group["sum"] += cmd_latency_cycle
-                group["count"] += 1
-                group["max"] = max(group["max"], cmd_latency_cycle)
-                mixed = stats["cmd"]["mixed"]
-                mixed["sum"] += cmd_latency_cycle
-                mixed["count"] += 1
-                mixed["max"] = max(mixed["max"], cmd_latency_cycle)
-
-            # Data
-            if math.isfinite(data_latency_cycle):
-                group = stats["data"][req.req_type]
-                group["sum"] += data_latency_cycle
-                group["count"] += 1
-                group["max"] = max(group["max"], data_latency_cycle)
-                mixed = stats["data"]["mixed"]
-                mixed["sum"] += data_latency_cycle
-                mixed["count"] += 1
-                mixed["max"] = max(mixed["max"], data_latency_cycle)
-
-            # Transaction
-            if math.isfinite(trans_latency_cycle):
-                group = stats["trans"][req.req_type]
-                group["sum"] += trans_latency_cycle
-                group["count"] += 1
-                group["max"] = max(group["max"], trans_latency_cycle)
-                mixed = stats["trans"]["mixed"]
-                mixed["sum"] += trans_latency_cycle
-                mixed["count"] += 1
-                mixed["max"] = max(mixed["max"], trans_latency_cycle)
+                if math.isfinite(latency_cycle):
+                    self._update_latency_stat(stats[category], req.req_type, latency_cycle)
 
         return stats
 
@@ -612,11 +703,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             }
 
             # 计算绕环比例（如果Die有result_processor）
-            circling_stats = {
-                "horizontal": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0},
-                "vertical": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0},
-                "overall": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0},
-            }
+            circling_stats = self._create_circling_stats()
 
             if hasattr(die_model, "result_processor") and die_model.result_processor:
                 try:
@@ -635,11 +722,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             "retry": {"read": 0, "write": 0},
             "etag": {"RB": {"T1": 0, "T0": 0}, "EQ": {"T1": 0, "T0": 0}},
             "itag": {"h": 0, "v": 0},
-            "circling_ratio": {
-                "horizontal": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0},
-                "vertical": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0},
-                "overall": {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0},
-            },
+            "circling_ratio": self._create_circling_stats(),
         }
 
         for die_stats in per_die_stats.values():
@@ -740,34 +823,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
             circuit_stats_data = self._collect_d2d_circuit_stats(dies)
             summary = circuit_stats_data["summary"]
 
-            report_lines.extend(
-                [
-                    "",
-                    "-" * 60,
-                    "绕环与Tag统计（汇总）",
-                    "-" * 60,
-                    "  等待时间统计:",
-                    f"    REQ: 横向={summary['wait_cycles']['req_h']}, 纵向={summary['wait_cycles']['req_v']}",
-                    f"    RSP: 横向={summary['wait_cycles']['rsp_h']}, 纵向={summary['wait_cycles']['rsp_v']}",
-                    f"    DATA: 横向={summary['wait_cycles']['data_h']}, 纵向={summary['wait_cycles']['data_v']}",
-                    "  RB ETag统计:",
-                    f"    总计: T1={summary['etag']['RB']['T1']}, T0={summary['etag']['RB']['T0']}",
-                    "  EQ ETag统计:",
-                    f"    总计: T1={summary['etag']['EQ']['T1']}, T0={summary['etag']['EQ']['T0']}",
-                    "  ITag统计:",
-                    f"    总计: H={summary['itag']['h']}, V={summary['itag']['v']}",
-                    "  Retry数量:",
-                    f"    读: {summary['retry']['read']}, 写: {summary['retry']['write']}",
-                    "  下环尝试统计:",
-                    f"    REQ: 横向={summary['circuits']['req_h']}, 纵向={summary['circuits']['req_v']}",
-                    f"    RSP: 横向={summary['circuits']['rsp_h']}, 纵向={summary['circuits']['rsp_v']}",
-                    f"    DATA: 横向={summary['circuits']['data_h']}, 纵向={summary['circuits']['data_v']}",
-                    "  数据绕环比例:",
-                    f"    横向: {summary['circling_ratio']['horizontal']['circling_ratio']*100:.2f}% ({summary['circling_ratio']['horizontal']['circling_flits']}/{summary['circling_ratio']['horizontal']['total_data_flits']})",
-                    f"    纵向: {summary['circling_ratio']['vertical']['circling_ratio']*100:.2f}% ({summary['circling_ratio']['vertical']['circling_flits']}/{summary['circling_ratio']['vertical']['total_data_flits']})",
-                    f"    总体: {summary['circling_ratio']['overall']['circling_ratio']*100:.2f}% ({summary['circling_ratio']['overall']['circling_flits']}/{summary['circling_ratio']['overall']['total_data_flits']})",
-                ]
-            )
+            report_lines.extend(["", "-" * 60, "绕环与Tag统计（汇总）", "-" * 60])
+            report_lines.extend(self._format_circuit_stats(summary, prefix="  "))
 
         report_lines.append("-" * 60)
 
@@ -793,32 +850,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
                     die_stats = circuit_stats_data["per_die"][die_id]
                     f.write(f"Die {die_id}:\n")
                     f.write("-" * 30 + "\n")
-                    f.write("  等待时间统计:\n")
-                    f.write(f"    REQ: 横向={die_stats['wait_cycles']['req_h']}, 纵向={die_stats['wait_cycles']['req_v']}\n")
-                    f.write(f"    RSP: 横向={die_stats['wait_cycles']['rsp_h']}, 纵向={die_stats['wait_cycles']['rsp_v']}\n")
-                    f.write(f"    DATA: 横向={die_stats['wait_cycles']['data_h']}, 纵向={die_stats['wait_cycles']['data_v']}\n")
-                    f.write("  RB ETag统计:\n")
-                    f.write(f"    T1={die_stats['etag']['RB']['T1']}, T0={die_stats['etag']['RB']['T0']}\n")
-                    f.write("  EQ ETag统计:\n")
-                    f.write(f"    T1={die_stats['etag']['EQ']['T1']}, T0={die_stats['etag']['EQ']['T0']}\n")
-                    f.write("  ITag统计:\n")
-                    f.write(f"    H={die_stats['itag']['h']}, V={die_stats['itag']['v']}\n")
-                    f.write("  Retry数量:\n")
-                    f.write(f"    读: {die_stats['retry']['read']}, 写: {die_stats['retry']['write']}\n")
-                    f.write("  下环尝试统计:\n")
-                    f.write(f"    REQ: 横向={die_stats['circuits']['req_h']}, 纵向={die_stats['circuits']['req_v']}\n")
-                    f.write(f"    RSP: 横向={die_stats['circuits']['rsp_h']}, 纵向={die_stats['circuits']['rsp_v']}\n")
-                    f.write(f"    DATA: 横向={die_stats['circuits']['data_h']}, 纵向={die_stats['circuits']['data_v']}\n")
-                    f.write("  数据绕环比例:\n")
-                    f.write(
-                        f"    横向: {die_stats['circling_ratio']['horizontal']['circling_ratio']*100:.2f}% ({die_stats['circling_ratio']['horizontal']['circling_flits']}/{die_stats['circling_ratio']['horizontal']['total_data_flits']})\n"
-                    )
-                    f.write(
-                        f"    纵向: {die_stats['circling_ratio']['vertical']['circling_ratio']*100:.2f}% ({die_stats['circling_ratio']['vertical']['circling_flits']}/{die_stats['circling_ratio']['vertical']['total_data_flits']})\n"
-                    )
-                    f.write(
-                        f"    总体: {die_stats['circling_ratio']['overall']['circling_ratio']*100:.2f}% ({die_stats['circling_ratio']['overall']['circling_flits']}/{die_stats['circling_ratio']['overall']['total_data_flits']})\n"
-                    )
+                    for line in self._format_circuit_stats(die_stats, prefix="  "):
+                        f.write(line + "\n")
                     f.write("\n")
 
         return report_file
@@ -1030,13 +1063,20 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 获取推断的 Die 布局
         die_layout = getattr(config, "die_layout_positions", {})
         die_layout_type = getattr(config, "die_layout_type", "2x1")
+        die_rotations = getattr(config, "DIE_ROTATIONS", {})
 
         # 根据布局设置画布大小和Die偏移
-        die_width = 16
-        die_height = 10
+        # 注意：所有Die使用相同的基础拓扑（5x4），但旋转会影响实际尺寸
+        base_die_rows = 5
+        base_die_cols = 4
+        node_spacing = 3.0  # 与_draw_single_die_flow中的node_spacing保持一致
+
+        die_width = (base_die_cols - 1) * node_spacing
+        die_height = (base_die_rows - 1) * node_spacing
 
         # 使用推断的布局，传入dies和config进行对齐优化
-        die_offsets, figsize = self._calculate_die_offsets_from_layout(die_layout, die_layout_type, die_width, die_height, dies=dies, config=config)
+        # 传入die_rotations以便计算时考虑旋转后的实际尺寸
+        die_offsets, figsize = self._calculate_die_offsets_from_layout(die_layout, die_layout_type, die_width, die_height, dies=dies, config=config, die_rotations=die_rotations)
 
         # 创建画布
         fig, ax = plt.subplots(figsize=figsize)
@@ -1069,12 +1109,21 @@ class D2DResultProcessor(BandwidthAnalyzer):
         max_ip_bandwidth = max(all_ip_bandwidths) if all_ip_bandwidths else 1.0
         min_ip_bandwidth = min(all_ip_bandwidths) if all_ip_bandwidths else 0.0
 
+        # 获取Die旋转配置
+        die_rotations = getattr(config, "DIE_ROTATIONS", {})
+
         # 为每个Die绘制流量图并收集节点位置
         die_node_positions = {}
         used_ip_types = set()  # 收集实际使用的IP类型
         for die_id, network in die_networks_for_draw.items():
             offset_x, offset_y = die_offsets[die_id]
             die_model = dies.get(die_id) if dies else None
+            die_rotation = die_rotations.get(die_id, 0)  # 获取该Die的旋转角度，默认0度
+            # 文本需要反方向旋转以保持正向可读
+            # 特殊处理180度旋转：-180度和180度都是倒置，应该用0度保持水平
+            text_rotation = -die_rotation
+            if abs(text_rotation) == 180:
+                text_rotation = 0
 
             # 绘制单个Die的流量图并获取节点位置
             node_positions = self._draw_single_die_flow(
@@ -1090,6 +1139,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 d2d_config=config,
                 max_ip_bandwidth=max_ip_bandwidth,
                 min_ip_bandwidth=min_ip_bandwidth,
+                rotation=text_rotation,
+                die_rotation=die_rotation,
             )
             die_node_positions[die_id] = node_positions
 
@@ -1122,39 +1173,36 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 self._draw_cross_die_connections(ax, d2d_bandwidth, die_node_positions, config, dies, die_offsets)
             # else:
         except Exception as e:
-            import traceback
-
             traceback.print_exc()
 
-        # 设置图表标题和坐标轴 - 缩小标题字体并调整位置
+        # 设置图表标题和坐标轴
         title = f"D2D Flow Graph"
-        ax.set_title(title, fontsize=14, fontweight="bold", y=0.96)  # 降低标题位置避免被裁剪
+        ax.set_title(title, fontsize=14, fontweight="bold", y=0.96)  # 标题位置稍微远离图表
 
-        # 添加IP类型颜色图例（只显示实际使用的IP类型）
-        self._add_ip_legend(ax, fig, used_ip_types)
+        # 添加IP类型颜色图例（只有存在IP类型时才绘制）
+        if used_ip_types:
+            self._add_ip_legend(ax, fig, used_ip_types)
 
         # 添加IP带宽热力条图例
         self._add_flow_graph_bandwidth_colorbar(ax, fig, dies, mode)
 
         # 自动调整坐标轴范围以确保所有内容都显示
         ax.axis("equal")  # 保持纵横比
-        ax.margins(0.05)  # 恢复边距以确保内容显示完整
+        ax.margins(0.08)  # 增大边距以确保上下都显示完整
         ax.axis("off")  # 隐藏坐标轴
 
         # 保存或显示图片
-        import warnings
-
         if save_path:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message=".*not compatible with tight_layout.*")
-                plt.tight_layout(pad=0.3)
-                plt.savefig(save_path, dpi=150, bbox_inches="tight", pad_inches=0.1)
+                plt.tight_layout(pad=0.5)  # 增大padding留出更多空间
+                plt.savefig(save_path, dpi=150, bbox_inches="tight", pad_inches=0.2)
             plt.close()
             return save_path
         else:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message=".*not compatible with tight_layout.*")
-                plt.tight_layout(pad=0.3)
+                plt.tight_layout(pad=0.5)
                 plt.show()
             return None
 
@@ -1180,13 +1228,20 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 获取推断的 Die 布局
         die_layout = getattr(config, "die_layout_positions", {})
         die_layout_type = getattr(config, "die_layout_type", "2x1")
+        die_rotations = getattr(config, "DIE_ROTATIONS", {})
 
         # 根据布局设置画布大小和Die偏移
-        die_width = 16
-        die_height = 10
+        # 使用与flow图一致的计算方式
+        node_spacing = 3.0  # 与节点绘制中的node_spacing保持一致
+        # 从第一个Die获取拓扑尺寸
+        first_die = list(dies.values())[0]
+        base_die_rows = first_die.config.NUM_ROW
+        base_die_cols = first_die.config.NUM_COL
+        die_width = (base_die_cols - 1) * node_spacing
+        die_height = (base_die_rows - 1) * node_spacing
 
         # 使用推断的布局
-        die_offsets, figsize = self._calculate_die_offsets_from_layout(die_layout, die_layout_type, die_width, die_height, dies=dies, config=config)
+        die_offsets, figsize = self._calculate_die_offsets_from_layout(die_layout, die_layout_type, die_width, die_height, dies=dies, config=config, die_rotations=die_rotations)
 
         # 创建画布
         fig, ax = plt.subplots(figsize=figsize)
@@ -1220,20 +1275,50 @@ class D2DResultProcessor(BandwidthAnalyzer):
             offset_x, offset_y = die_offsets[die_id]
             die_config = die_model.config
 
+            # 获取该Die的旋转角度
+            die_rotation = die_rotations.get(die_id, 0)
+
             # 获取该Die的所有节点
             physical_nodes = list(range(die_config.NUM_ROW * die_config.NUM_COL))
+
+            # 原始拓扑尺寸
+            orig_rows = die_config.NUM_ROW
+            orig_cols = die_config.NUM_COL
 
             # 为每个物理节点绘制IP热力图，并收集位置信息
             xs = []
             ys = []
             node_spacing = 3.0  # 统一的节点间距
             for node in physical_nodes:
-                col = node % die_config.NUM_COL
-                row = node // die_config.NUM_COL
+                # 计算原始坐标
+                orig_row = node // orig_cols
+                orig_col = node % orig_cols
 
-                # 计算节点中心位置 - 标准网格布局
-                x = col * node_spacing + offset_x
-                y = -row * node_spacing + offset_y
+                # 根据Die旋转角度变换坐标
+                if die_rotation == 0 or abs(die_rotation) == 360:
+                    # 0度：不旋转
+                    new_row = orig_row
+                    new_col = orig_col
+                elif abs(die_rotation) == 90 or abs(die_rotation) == -270:
+                    # 顺时针90度：(row, col) → (col, rows-1-row)
+                    new_row = orig_col
+                    new_col = orig_rows - 1 - orig_row
+                elif abs(die_rotation) == 180:
+                    # 180度：(row, col) → (rows-1-row, cols-1-col)
+                    new_row = orig_rows - 1 - orig_row
+                    new_col = orig_cols - 1 - orig_col
+                elif abs(die_rotation) == 270 or abs(die_rotation) == -90:
+                    # 顺时针270度（逆时针90度）：(row, col) → (cols-1-col, row)
+                    new_row = orig_cols - 1 - orig_col
+                    new_col = orig_row
+                else:
+                    # 其他角度：保持原样
+                    new_row = orig_row
+                    new_col = orig_col
+
+                # 计算实际位置
+                x = new_col * node_spacing + offset_x
+                y = -new_row * node_spacing + offset_y
                 xs.append(x)
                 ys.append(y)
 
@@ -1250,6 +1335,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
             ys = die_positions[die_id]["ys"]
             die_center_x = (min(xs) + max(xs)) / 2
             die_center_y = (min(ys) + max(ys)) / 2
+
+            # 获取Die旋转角度（文字反向旋转以保持可读）
+            die_rotation = die_rotations.get(die_id, 0)
+            rotation = -die_rotation
+            # 特殊处理180度旋转：-180度和180度都是倒置，应该用0度保持水平
+            if abs(rotation) == 180:
+                rotation = 0
 
             # 根据Die布局确定标签位置
             if die_id in die_layout:
@@ -1299,6 +1391,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 fontsize=12,
                 fontweight="bold",
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.7, edgecolor="none"),
+                rotation=0,  # Die标签统一水平显示
             )
 
         # 设置图表标题
@@ -1317,8 +1410,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
         ax.axis("off")
 
         # 保存或显示图片
-        import warnings
-
         if save_path:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message=".*not compatible with tight_layout.*")
@@ -1334,9 +1425,30 @@ class D2DResultProcessor(BandwidthAnalyzer):
             return None
 
     def _draw_single_die_flow(
-        self, ax, network, config, die_id, offset_x, offset_y, mode="utilization", node_size=2000, die_model=None, d2d_config=None, max_ip_bandwidth=None, min_ip_bandwidth=None
+        self,
+        ax,
+        network,
+        config,
+        die_id,
+        offset_x,
+        offset_y,
+        mode="utilization",
+        node_size=2000,
+        die_model=None,
+        d2d_config=None,
+        max_ip_bandwidth=None,
+        min_ip_bandwidth=None,
+        rotation=0,
+        die_rotation=0,
     ):
-        """绘制单个Die的流量图，复用原有draw_flow_graph的核心逻辑"""
+        """
+        绘制单个Die的流量图，复用原有draw_flow_graph的核心逻辑
+
+        Args:
+            rotation: 文字旋转角度（用于保持文字可读）
+            die_rotation: Die整体旋转角度（用于计算节点位置）
+        """
+        import math
 
         # 创建NetworkX图
         G = nx.DiGraph()
@@ -1368,8 +1480,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 if len(active_links) > 0:
                     pass
             except Exception as e:
-                import traceback
-
                 traceback.print_exc()
                 links = {}
 
@@ -1383,14 +1493,46 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 添加节点到图中
         G.add_nodes_from(actual_nodes)
 
-        # 计算节点位置（应用偏移）
+        # 计算节点位置（应用偏移和旋转）
         # 现在不区分RN/SN行，所有节点在标准网格位置，横纵间距相同
         pos = {}
         node_spacing = 3.0  # 统一的节点间距
+
+        # 原始拓扑尺寸
+        orig_rows = config.NUM_ROW
+        orig_cols = config.NUM_COL
+
         for node in actual_nodes:
-            x = node % config.NUM_COL
-            y = node // config.NUM_COL
-            pos[node] = (x * node_spacing + offset_x, -y * node_spacing + offset_y)
+            # 计算原始坐标
+            orig_row = node // orig_cols
+            orig_col = node % orig_cols
+
+            # 根据Die旋转角度变换坐标（使用die_rotation而不是rotation）
+            if die_rotation == 0 or abs(die_rotation) == 360:
+                # 0度：不旋转
+                new_row = orig_row
+                new_col = orig_col
+            elif abs(die_rotation) == 90 or abs(die_rotation) == -270:
+                # 顺时针90度：(row, col) → (col, rows-1-row)
+                new_row = orig_col
+                new_col = orig_rows - 1 - orig_row
+            elif abs(die_rotation) == 180:
+                # 180度：(row, col) → (rows-1-row, cols-1-col)
+                new_row = orig_rows - 1 - orig_row
+                new_col = orig_cols - 1 - orig_col
+            elif abs(die_rotation) == 270 or abs(die_rotation) == -90:
+                # 顺时针270度（逆时针90度）：(row, col) → (cols-1-col, row)
+                new_row = orig_cols - 1 - orig_col
+                new_col = orig_row
+            else:
+                # 其他角度：保持原样
+                new_row = orig_row
+                new_col = orig_col
+
+            # 计算实际位置
+            x = new_col * node_spacing + offset_x
+            y = -new_row * node_spacing + offset_y
+            pos[node] = (x, y)
 
         # 添加有权重的边
         edge_labels = {}
@@ -1506,7 +1648,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                         (start_x, start_y),
                         (end_x, end_y),
                         arrowstyle="-|>",
-                        mutation_scale=10,
+                        mutation_scale=8,
                         color=color,
                         zorder=1,
                         linewidth=1,
@@ -1542,32 +1684,62 @@ class D2DResultProcessor(BandwidthAnalyzer):
                     dx, dy = x2 - x1, y2 - y1
 
                     has_reverse = G.has_edge(j, i)
-                    is_horizontal = abs(dx) > abs(dy)
+
+                    # 判断链路方向：
+                    # 1. Die内部方向：用于计算标签偏移位置
+                    # 2. 屏幕方向：用于判断标签是否需要旋转90度
+                    orig_i_row = i // config.NUM_COL
+                    orig_i_col = i % config.NUM_COL
+                    orig_j_row = j // config.NUM_COL
+                    orig_j_col = j % config.NUM_COL
+                    is_horizontal_in_die = orig_i_row == orig_j_row  # Die内部：同行 = 水平链路
+                    is_horizontal_on_screen = abs(dx) > abs(dy)  # 屏幕上：基于屏幕坐标判断
 
                     # 新架构：标签放在link中间，双向link根据方向放在不同侧
+                    # 偏移需要根据Die旋转角度进行变换
                     if has_reverse:
-                        if is_horizontal:
-                            # 水平link：向右(i<j)放上方，向左(i>j)放下方
+                        # 根据旋转角度决定偏移量大小
+                        # 90/270度旋转时，水平和垂直互换，偏移量大小也需要互换
+                        is_90_or_270 = abs(die_rotation) in [90, 270]
+
+                        # 计算Die内部坐标系的偏移
+                        # 基于Die内部节点编号关系（i和j），保证旋转后相对位置一致
+                        if is_horizontal_in_die:
+                            # Die内水平link
+                            offset_magnitude = 0.70 if is_90_or_270 else 0.35
+
+                            # 基于Die内部节点编号：i<j表示向右，标签放下方（Die内坐标系）
                             if i < j:
-                                label_x = mid_x
-                                label_y = mid_y + 0.35
+                                offset_x_die, offset_y_die = 0, -offset_magnitude  # Die内下方
                             else:
-                                label_x = mid_x
-                                label_y = mid_y - 0.35
+                                offset_x_die, offset_y_die = 0, offset_magnitude  # Die内上方
                         else:
-                            # 垂直link：向下(i<j)放右侧，向上(i>j)放左侧
+                            # Die内垂直link
+                            offset_magnitude = 0.35 if is_90_or_270 else 0.70
+
+                            # 基于Die内部节点编号：i<j表示向下，标签放右侧（Die内坐标系）
                             if i < j:
-                                label_x = mid_x + 0.70
-                                label_y = mid_y
+                                offset_x_die, offset_y_die = offset_magnitude, 0  # Die内右侧
                             else:
-                                label_x = mid_x - 0.70
-                                label_y = mid_y
+                                offset_x_die, offset_y_die = -offset_magnitude, 0  # Die内左侧
+
+                        # 将Die内部偏移旋转到屏幕坐标系
+                        angle_rad = math.radians(die_rotation)
+                        cos_a = math.cos(angle_rad)
+                        sin_a = math.sin(angle_rad)
+                        offset_x_screen = offset_x_die * cos_a - offset_y_die * sin_a
+                        offset_y_screen = offset_x_die * sin_a + offset_y_die * cos_a
+
+                        label_x = mid_x + offset_x_screen
+                        label_y = mid_y - offset_y_screen  # Y轴翻转（屏幕坐标）
                     else:
                         # 单向link：标签直接放在中间
                         label_x = mid_x
                         label_y = mid_y
 
-                    ax.text(label_x, label_y, label, ha="center", va="center", fontsize=7, fontweight="normal", color=color)
+                    # 所有link标记文字都保持水平可读（rotation=0）
+                    # 不根据link方向或Die旋转改变文字方向
+                    ax.text(label_x, label_y, label, ha="center", va="center", fontsize=8, fontweight="normal", color=color, rotation=0)
 
         # 绘制自环边标签
         for (node, direction), (label, color) in self_loop_labels.items():
@@ -1578,32 +1750,75 @@ class D2DResultProcessor(BandwidthAnalyzer):
             original_row = node // config.NUM_COL
             original_col = node % config.NUM_COL
 
-            # 根据节点位置和自环方向决定标签位置
-            if direction == "h":
-                # 横向自环：根据列位置决定放左边还是右边
-                offset = 0.1
-                if original_col == 0:
-                    # 最左列：放左边，文本旋转-90度（从下往上读）
-                    label_pos = (x - square_size / 2 - offset, y)
-                    ax.text(*label_pos, f"{label}", ha="center", va="center", color=color, fontweight="normal", fontsize=6, rotation=90)
-                else:
-                    # 最右列：放右边，文本旋转90度（从上往下读）
-                    label_pos = (x + square_size / 2 + offset, y)
-                    ax.text(*label_pos, f"{label}", ha="center", va="center", color=color, fontweight="normal", fontsize=6, rotation=-90)
-            elif direction == "v":
-                # 纵向自环：根据行位置决定放上边还是下边
-                if original_row == 0:
-                    # 最上行：放上边
-                    label_pos = (x, y + square_size / 2)
-                    ax.text(*label_pos, f"{label}", ha="center", va="bottom", color=color, fontweight="normal", fontsize=6, rotation=0)
-                else:
-                    # 其他行：放下边
-                    label_pos = (x, y - square_size / 2)
-                    ax.text(*label_pos, f"{label}", ha="center", va="top", color=color, fontweight="normal", fontsize=6, rotation=0)
+            # Step 1: 判断旋转后的屏幕方向
+            if die_rotation in [90, 270]:
+                # 90/270度：横纵互换
+                screen_direction = "v" if direction == "h" else "h"
             else:
-                # 未知方向：放上边
-                label_pos = (x, y + square_size / 2)
-                ax.text(*label_pos, f"{label}", ha="center", va="bottom", color=color, fontweight="normal", fontsize=6, rotation=0)
+                # 0/180度：方向不变
+                screen_direction = direction
+
+            # Step 2: 计算旋转后的行列（用于判断边界）
+            orig_rows = config.NUM_ROW
+            orig_cols = config.NUM_COL
+            if abs(die_rotation) == 90 or abs(die_rotation) == -270:
+                # 顺时针90度
+                rotated_row = original_col
+                rotated_col = orig_rows - 1 - original_row
+                rotated_rows = orig_cols
+                rotated_cols = orig_rows
+            elif abs(die_rotation) == 180:
+                # 180度
+                rotated_row = orig_rows - 1 - original_row
+                rotated_col = orig_cols - 1 - original_col
+                rotated_rows = orig_rows
+                rotated_cols = orig_cols
+            elif abs(die_rotation) == 270 or abs(die_rotation) == -90:
+                # 顺时针270度
+                rotated_row = orig_cols - 1 - original_col
+                rotated_col = original_row
+                rotated_rows = orig_cols
+                rotated_cols = orig_rows
+            else:
+                # 0度
+                rotated_row = original_row
+                rotated_col = original_col
+                rotated_rows = orig_rows
+                rotated_cols = orig_cols
+
+            # Step 3: 根据屏幕方向和边界位置计算Die内部偏移
+            # Step 4: 直接在屏幕坐标系定义偏移量（不需要旋转变换）
+            offset_dist = 0.3
+            if screen_direction == "h":
+                # 屏幕水平自环：放左右两边
+                if rotated_col == 0:
+                    # 屏幕左边
+                    offset_x_screen = -square_size / 2 - offset_dist
+                    offset_y_screen = 0
+                    text_rotation = 90  # 从下往上读
+                else:
+                    # 屏幕右边
+                    offset_x_screen = square_size / 2 + offset_dist
+                    offset_y_screen = 0
+                    text_rotation = -90  # 从上往下读
+            else:
+                # 屏幕垂直自环：放上下两边
+                if rotated_row == 0:
+                    # 屏幕上边（Y轴向上为正）
+                    offset_x_screen = 0
+                    offset_y_screen = square_size / 2 + offset_dist
+                    text_rotation = 0  # 水平
+                else:
+                    # 屏幕下边
+                    offset_x_screen = 0
+                    offset_y_screen = -square_size / 2 - offset_dist
+                    text_rotation = 0  # 水平
+
+            label_x = x + offset_x_screen
+            label_y = y + offset_y_screen  # 直接使用屏幕坐标系偏移
+
+            # Step 5: 绘制标签
+            ax.text(label_x, label_y, f"{label}", ha="center", va="center", color=color, fontweight="normal", fontsize=8, rotation=text_rotation)
 
         # 绘制方形节点和IP信息
         for node, (x, y) in pos.items():
@@ -1619,7 +1834,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             ax.add_patch(rect)
 
             # 绘制IP信息 - 新架构：所有节点都显示IP信息
-            self._draw_d2d_ip_info_box(ax, x, y, node, config, mode, square_size, die_id, die_model, max_ip_bandwidth, min_ip_bandwidth)
+            self._draw_d2d_ip_info_box(ax, x, y, node, config, mode, square_size, die_id, die_model, max_ip_bandwidth, min_ip_bandwidth, rotation=rotation)
 
         # 添加Die标签 - 根据连接方向智能放置
         if pos:
@@ -1684,12 +1899,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 fontsize=12,
                 fontweight="bold",
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.7, edgecolor="none"),
+                rotation=0,  # Die标签统一水平显示
             )
 
         # 返回节点位置信息供跨Die连接使用
         return pos
 
-    def _draw_d2d_ip_info_box(self, ax, x, y, node, config, mode, square_size, die_id=None, die_model=None, max_ip_bandwidth=None, min_ip_bandwidth=None):
+    def _draw_d2d_ip_info_box(self, ax, x, y, node, config, mode, square_size, die_id=None, die_model=None, max_ip_bandwidth=None, min_ip_bandwidth=None, rotation=0):
         """
         绘制IP信息框 - 在节点内部显示所有有流量的IP实例（使用小方块+透明度）
         与基类_draw_ip_info_box保持一致
@@ -1992,9 +2208,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 ip_y = y + total_height / 2 - row_idx * (ip_block_size + grid_spacing)
 
                 # 绘制IP方块
-                ip_rect = Rectangle(
-                    (ip_x, ip_y - ip_block_size), width=ip_block_size, height=ip_block_size, facecolor=ip_color, edgecolor="black", linewidth=1, alpha=alpha, zorder=3
-                )
+                ip_rect = Rectangle((ip_x, ip_y - ip_block_size), width=ip_block_size, height=ip_block_size, facecolor=ip_color, edgecolor="black", linewidth=1, alpha=alpha, zorder=3)
                 ax.add_patch(ip_rect)
 
                 # 在方块上显示带宽数值
@@ -2026,7 +2240,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
         from matplotlib.colorbar import ColorbarBase
         from matplotlib.colors import LinearSegmentedColormap
         from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-        import numpy as np
 
         # 收集所有IP带宽数据以确定范围
         all_bandwidths = []
@@ -2052,9 +2265,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
             return
 
         # 创建插入的colorbar坐标轴，放在右上角IP图例下方
-        cax = inset_axes(
-            ax, width="2%", height="18%", loc="upper right", bbox_to_anchor=(-0.05, -0.35, 1, 1), bbox_transform=ax.transAxes, borderpad=0
-        )  # 减小宽度  # 减小高度  # 调整到IP图例下方
+        cax = inset_axes(ax, width="2%", height="18%", loc="upper right", bbox_to_anchor=(-0.05, -0.35, 1, 1), bbox_transform=ax.transAxes, borderpad=0)  # 减小宽度  # 减小高度  # 调整到IP图例下方
 
         # 创建灰度渐变colormap
         colors = ["#E0E0E0", "#B0B0B0", "#808080", "#505050", "#202020"]
@@ -2062,8 +2273,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
         cmap = LinearSegmentedColormap.from_list("bandwidth", colors, N=n_bins)
 
         # 创建归一化对象
-        import matplotlib.colors as mcolors
-
         norm = mcolors.Normalize(vmin=min_bandwidth, vmax=max_bandwidth)
 
         # 创建colorbar
@@ -2198,68 +2407,46 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
     def _project_diagonal_to_edge(self, from_x, from_y, to_x, to_y, from_die_pos, to_die_pos, from_die_boundary, to_die_boundary):
         """
-        将对角连接的起止点投影到Die边缘
+        将对角连接的起止点投影到Die边缘（基于节点在Die内的相对位置）
 
         Args:
             from_x, from_y: 源节点坐标
             to_x, to_y: 目标节点坐标
-            from_die_pos: 源Die的布局位置 (x, y)
-            to_die_pos: 目标Die的布局位置 (x, y)
+            from_die_pos: 源Die的布局位置 (x, y) [未使用，保留接口兼容性]
+            to_die_pos: 目标Die的布局位置 (x, y) [未使用，保留接口兼容性]
             from_die_boundary: 源Die边界
             to_die_boundary: 目标Die边界
 
         Returns:
             tuple: (from_x, from_y, to_x, to_y) 投影后的坐标
         """
-        # 计算Die之间的相对方向
-        dx_die = to_die_pos[0] - from_die_pos[0]
-        dy_die = to_die_pos[1] - from_die_pos[1]
+        # 计算源节点到各边界的距离
+        from_dist_left = abs(from_x - from_die_boundary["left"])
+        from_dist_right = abs(from_x - from_die_boundary["right"])
+        from_dist_top = abs(from_y - from_die_boundary["top"])
+        from_dist_bottom = abs(from_y - from_die_boundary["bottom"])
 
-        # 推断Die ID（基于标准2x2布局）
-        # Die布局: Die2(0,1) - Die3(1,1)
-        #          Die1(0,0) - Die0(1,0)
-        die_pos_to_id = {
-            (1, 0): 0,  # Die 0: 右下
-            (0, 0): 1,  # Die 1: 左下
-            (0, 1): 2,  # Die 2: 左上
-            (1, 1): 3,  # Die 3: 右上
-        }
+        # 计算目标节点到各边界的距离
+        to_dist_left = abs(to_x - to_die_boundary["left"])
+        to_dist_right = abs(to_x - to_die_boundary["right"])
+        to_dist_top = abs(to_y - to_die_boundary["top"])
+        to_dist_bottom = abs(to_y - to_die_boundary["bottom"])
 
-        from_die_id = die_pos_to_id.get(tuple(from_die_pos))
-        to_die_id = die_pos_to_id.get(tuple(to_die_pos))
+        # 源节点：选择最近的边进行投影
+        from_h_edge = "left" if from_dist_left < from_dist_right else "right"
+        from_v_edge = "top" if from_dist_top < from_dist_bottom else "bottom"
 
-        # 确定投影方向：根据较小Die ID的奇偶性
-        # Die 0 ↔ Die 2 (偶数ID): 使用水平投影（左右边）
-        # Die 1 ↔ Die 3 (奇数ID): 使用垂直投影（上下边）
-        if from_die_id is not None and to_die_id is not None:
-            min_die_id = min(from_die_id, to_die_id)
-            use_horizontal = min_die_id % 2 == 0
-        else:
-            # 如果无法推断Die ID，默认使用水平投影
-            use_horizontal = True
+        # 目标节点：选择最近的边进行投影
+        to_h_edge = "left" if to_dist_left < to_dist_right else "right"
+        to_v_edge = "top" if to_dist_top < to_dist_bottom else "bottom"
 
-        if use_horizontal:
-            # 水平投影（左右边）
-            if dx_die > 0:  # 目标在右侧
-                from_edge_x, from_edge_y = self._project_point_to_die_edge(from_x, from_y, from_die_boundary, "right")
-            else:  # 目标在左侧
-                from_edge_x, from_edge_y = self._project_point_to_die_edge(from_x, from_y, from_die_boundary, "left")
+        # 投影到水平边（X坐标取边界值，Y坐标保持节点坐标）
+        from_edge_x = from_die_boundary[from_h_edge]
+        to_edge_x = to_die_boundary[to_h_edge]
 
-            if dx_die > 0:  # 源在左侧
-                to_edge_x, to_edge_y = self._project_point_to_die_edge(to_x, to_y, to_die_boundary, "left")
-            else:  # 源在右侧
-                to_edge_x, to_edge_y = self._project_point_to_die_edge(to_x, to_y, to_die_boundary, "right")
-        else:
-            # 垂直投影（上下边）
-            if dy_die > 0:  # 目标在上侧
-                from_edge_x, from_edge_y = self._project_point_to_die_edge(from_x, from_y, from_die_boundary, "top")
-            else:  # 目标在下侧
-                from_edge_x, from_edge_y = self._project_point_to_die_edge(from_x, from_y, from_die_boundary, "bottom")
-
-            if dy_die > 0:  # 源在下侧
-                to_edge_x, to_edge_y = self._project_point_to_die_edge(to_x, to_y, to_die_boundary, "bottom")
-            else:  # 源在上侧
-                to_edge_x, to_edge_y = self._project_point_to_die_edge(to_x, to_y, to_die_boundary, "top")
+        # 投影到垂直边（Y坐标取边界值，X坐标保持节点坐标）
+        from_edge_y = from_die_boundary[from_v_edge]
+        to_edge_y = to_die_boundary[to_v_edge]
 
         return from_edge_x, from_edge_y, to_edge_x, to_edge_y
 
@@ -2304,81 +2491,87 @@ class D2DResultProcessor(BandwidthAnalyzer):
             if not d2d_pairs:
                 return
 
-            # 收集所有有流量的连接
-            active_connections = []
+            # 获取Die布局信息
+            die_layout = getattr(config, "die_layout_positions", {})
 
-            # 遍历所有D2D连接对
+            # 遍历所有D2D连接对，统一绘制所有连接（活跃+非活跃）
+            arrow_index = 0
             for die0_id, die0_node, die1_id, die1_node in d2d_pairs:
                 # D2D带宽数据使用复合键格式：'源节点_to_目标Die_目标节点'
                 # 例如：'5_to_1_37' 表示节点5到Die1节点37的连接
 
-                # 构造复合键
-                key_0to1 = f"{die0_node}_to_{die1_id}_{die1_node}"  # Die0 -> Die1
-                key_1to0 = f"{die1_node}_to_{die0_id}_{die0_node}"  # Die1 -> Die0
+                # 双向检查流量并绘制
+                directions = [
+                    (die0_id, die0_node, die1_id, die1_node),  # Die0 -> Die1
+                    (die1_id, die1_node, die0_id, die0_node),  # Die1 -> Die0
+                ]
 
-                # 检查写数据流量 (W通道) - 双向都要检查
-                w_bw_0to1 = d2d_bandwidth.get(die0_id, {}).get(key_0to1, {}).get("W", 0.0)
-                w_bw_1to0 = d2d_bandwidth.get(die1_id, {}).get(key_1to0, {}).get("W", 0.0)
+                for from_die, from_node, to_die, to_node in directions:
+                    # 构造复合键
+                    key = f"{from_node}_to_{to_die}_{to_node}"
 
-                # 检查读数据返回流量 (R通道) - 双向都要检查
-                r_bw_0to1 = d2d_bandwidth.get(die0_id, {}).get(key_0to1, {}).get("R", 0.0)
-                r_bw_1to0 = d2d_bandwidth.get(die1_id, {}).get(key_1to0, {}).get("R", 0.0)
+                    # 检查写数据流量 (W通道)
+                    w_bw = d2d_bandwidth.get(from_die, {}).get(key, {}).get("W", 0.0)
+                    # 检查读数据返回流量 (R通道)
+                    r_bw = d2d_bandwidth.get(from_die, {}).get(key, {}).get("R", 0.0)
 
-                # 添加有流量的连接
-                if w_bw_0to1 > 0.001:
-                    active_connections.append({"type": "write", "from_die": die0_id, "from_node": die0_node, "to_die": die1_id, "to_node": die1_node, "bandwidth": w_bw_0to1})
+                    # 获取节点位置
+                    from_die_positions = die_node_positions.get(from_die, {})
+                    to_die_positions = die_node_positions.get(to_die, {})
 
-                if w_bw_1to0 > 0.001:
-                    active_connections.append({"type": "write", "from_die": die1_id, "from_node": die1_node, "to_die": die0_id, "to_node": die0_node, "bandwidth": w_bw_1to0})
+                    if from_node not in from_die_positions or to_node not in to_die_positions:
+                        continue
 
-                if r_bw_0to1 > 0.001:
-                    active_connections.append({"type": "read", "from_die": die0_id, "from_node": die0_node, "to_die": die1_id, "to_node": die1_node, "bandwidth": r_bw_0to1})
+                    from_x, from_y = from_die_positions[from_node]
+                    to_x, to_y = to_die_positions[to_node]
 
-                if r_bw_1to0 > 0.001:
-                    active_connections.append({"type": "read", "from_die": die1_id, "from_node": die1_node, "to_die": die0_id, "to_node": die0_node, "bandwidth": r_bw_1to0})
+                    from_die_pos = die_layout.get(from_die, (0, 0))
+                    to_die_pos = die_layout.get(to_die, (0, 0))
+                    connection_type = self._get_connection_type(from_die_pos, to_die_pos)
 
-            # 绘制所有活跃连接
-            for i, conn in enumerate(active_connections):
-                # 使用实际节点位置
-                from_die_positions = die_node_positions.get(conn["from_die"], {})
-                to_die_positions = die_node_positions.get(conn["to_die"], {})
+                    # 对角连接：围绕连线中点顺时针旋转
+                    if connection_type == "diagonal":
+                        # 计算连线中点
+                        mid_x = (from_x + to_x) / 2
+                        mid_y = (from_y + to_y) / 2
 
-                from_node = conn["from_node"]
-                to_node = conn["to_node"]
+                        # 顺时针旋转10度（角度转弧度）
+                        angle = -8 * np.pi / 180  # 负号表示顺时针
+                        cos_a = np.cos(angle)
+                        sin_a = np.sin(angle)
 
-                # 获取连接类型
-                die_layout = getattr(config, "die_layout_positions", {})
-                from_die_pos = die_layout.get(conn["from_die"], (0, 0))
-                to_die_pos = die_layout.get(conn["to_die"], (0, 0))
-                connection_type = self._get_connection_type(from_die_pos, to_die_pos)
+                        # 旋转起点
+                        dx_from = from_x - mid_x
+                        dy_from = from_y - mid_y
+                        from_x = mid_x + dx_from * cos_a - dy_from * sin_a
+                        from_y = mid_y + dx_from * sin_a + dy_from * cos_a
 
-                # 计算节点位置
-                from_node_pos, to_node_pos = self._calculate_d2d_node_positions(conn["from_die"], from_node, conn["to_die"], to_node, dies, config)
+                        # 旋转终点
+                        dx_to = to_x - mid_x
+                        dy_to = to_y - mid_y
+                        to_x = mid_x + dx_to * cos_a - dy_to * sin_a
+                        to_y = mid_y + dx_to * sin_a + dy_to * cos_a
 
-                if from_node_pos not in from_die_positions or to_node_pos not in to_die_positions:
-                    print(
-                        f"[D2D连接] 警告：找不到节点位置 - From: Die{conn['from_die']}节点{from_node}(pos:{from_node_pos}), To: Die{conn['to_die']}节点{to_node}(pos:{to_node_pos})"
-                    )
-                    continue
+                    # 计算箭头向量
+                    arrow_vectors = self._calculate_arrow_vectors(from_x, from_y, to_x, to_y)
+                    if arrow_vectors is None:
+                        continue
 
-                from_x, from_y = from_die_positions[from_node_pos]
-                to_x, to_y = to_die_positions[to_node_pos]
-
-                # 计算箭头向量
-                arrow_vectors = self._calculate_arrow_vectors(from_x, from_y, to_x, to_y)
-                if arrow_vectors is not None:
                     ux, uy, perpx, perpy = arrow_vectors
-                    self._draw_single_d2d_arrow(ax, from_x, from_y, to_x, to_y, ux, uy, perpx, perpy, conn["bandwidth"], conn["type"], i, connection_type)
 
-            # 为没有流量的D2D节点对绘制灰色连接线（显示潜在连接）
-            self._draw_inactive_d2d_connections(ax, d2d_pairs, active_connections, die_node_positions, dies)
+                    # 合并读写通道带宽（同一AXI通道）
+                    total_bw = w_bw + r_bw
+
+                    # 绘制单条箭头，显示总带宽
+                    self._draw_single_d2d_arrow(ax, from_x, from_y, to_x, to_y, ux, uy, perpx, perpy, total_bw, arrow_index, connection_type)
+                    arrow_index += 1
 
         except Exception as e:
             import traceback
 
             traceback.print_exc()
 
-    def _draw_single_d2d_arrow(self, ax, start_node_x, start_node_y, end_node_x, end_node_y, ux, uy, perpx, perpy, bandwidth, arrow_type, connection_index, connection_type=None):
+    def _draw_single_d2d_arrow(self, ax, start_node_x, start_node_y, end_node_x, end_node_y, ux, uy, perpx, perpy, bandwidth, connection_index, connection_type=None):
         """
         绘制单个D2D箭头
 
@@ -2388,27 +2581,25 @@ class D2DResultProcessor(BandwidthAnalyzer):
             end_node_x, end_node_y: 结束节点坐标
             ux, uy: 单位方向向量
             perpx, perpy: 垂直方向向量
-            bandwidth: 带宽值
-            arrow_type: 箭头类型 ("write" 或 "read")
+            bandwidth: 带宽值（读写合并后的总带宽）
             connection_index: 连接索引（用于调试）
             connection_type: 连接类型 ("vertical", "horizontal", "diagonal")
         """
         # 计算箭头起止坐标（留出节点空间）
         # 对角连接需要调整偏移策略
         if connection_type == "diagonal":
-            # 对角连接：坐标已经投影到边缘，只需要很小的偏移
-            node_offset = 1.4  # 从边缘稍微延伸出来
-            perp_offset = 1.4  # 垂直方向的小偏移
-            start_x = start_node_x + ux * node_offset + perpx * perp_offset + 0.4
-            start_y = start_node_y + uy * node_offset + perpy * perp_offset + 0.6
-            end_x = end_node_x - ux * node_offset + perpx * perp_offset + 0.4
-            end_y = end_node_y - uy * node_offset + perpy * perp_offset + 0.6
+            node_offset = 1.2  # 从边缘稍微延伸出来
+            perp_offset = 1.2  # 垂直方向的小偏移
+            start_x = start_node_x + ux * node_offset + perpx * perp_offset
+            start_y = start_node_y + uy * node_offset + perpy * perp_offset
+            end_x = end_node_x - ux * node_offset + perpx * perp_offset
+            end_y = end_node_y - uy * node_offset + perpy * perp_offset
         else:
             # 水平/垂直连接：保持原有逻辑
-            start_x = start_node_x + ux * 0.8 + perpx
-            start_y = start_node_y + uy * 0.8 + perpy
-            end_x = end_node_x - ux * 0.8 + perpx
-            end_y = end_node_y - uy * 0.8 + perpy
+            start_x = start_node_x + ux * 1.2 + perpx
+            start_y = start_node_y + uy * 1.2 + perpy
+            end_x = end_node_x - ux * 1.2 + perpx
+            end_y = end_node_y - uy * 1.2 + perpy
 
         # 确定颜色和标签
         if bandwidth > 0.001:
@@ -2445,10 +2636,10 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 # 右上→左下(dx>0,dy<0) → 上方; 左下→右上(dx<0,dy>0) → 上方
                 if (dx > 0 and dy > 0) or (dx > 0 and dy < 0):
                     # 右下→左上 或 右上→左下 → 放上方
-                    label_y = label_y_base + 0.5
+                    label_y = label_y_base + 0.6
                 else:
                     # 左上→右下 或 左下→右上 → 放下方
-                    label_y = label_y_base - 0.5
+                    label_y = label_y_base - 0.6
             else:
                 # 垂直和水平连接：使用中点
                 mid_x = (start_x + end_x) / 2
@@ -2468,8 +2659,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                     label_y = mid_y - 0.15
 
             # 计算箭头角度(以度为单位)
-            import numpy as np
-
             angle_rad = np.arctan2(dy, dx)  # 计算弧度
             angle_deg = np.degrees(angle_rad)  # 转换为角度
 
@@ -2634,8 +2823,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             print(f"[D2D AXI统计] 保存汇总报告失败: {e}")
         except Exception as e:
             print(f"[D2D AXI统计] 生成报告时发生未预期的错误: {e}")
-            import traceback
-
             traceback.print_exc()
 
     def collect_requests_data(self, sim_model, simulation_end_cycle=None) -> None:
@@ -2724,17 +2911,18 @@ class D2DResultProcessor(BandwidthAnalyzer):
         except Exception:
             return False
 
-    def _calculate_die_offsets_from_layout(self, die_layout, die_layout_type, die_width, die_height, dies=None, config=None):
+    def _calculate_die_offsets_from_layout(self, die_layout, die_layout_type, die_width, die_height, dies=None, config=None, die_rotations=None):
         """
         根据推断的 Die 布局计算绘图偏移量和画布大小，包含对齐优化
 
         Args:
             die_layout: Die 布局位置字典 {die_id: (x, y)}
             die_layout_type: 布局类型字符串，如 "2x2", "2x1" 等
-            die_width: 单个 Die 的宽度
-            die_height: 单个 Die 的高度
+            die_width: 基础Die的宽度（旋转前）
+            die_height: 基础Die的高度（旋转前）
             dies: Die模型字典 {die_id: die_model}，用于对齐计算
             config: 配置对象，用于对齐计算
+            die_rotations: Die旋转角度字典 {die_id: rotation}
 
         Returns:
             (die_offsets, figsize): Die偏移量字典和画布大小
@@ -2742,20 +2930,42 @@ class D2DResultProcessor(BandwidthAnalyzer):
         if not die_layout:
             raise ValueError
 
+        if die_rotations is None:
+            die_rotations = {}
+
         # 计算布局尺寸
         max_x = max(pos[0] for pos in die_layout.values()) if die_layout else 0
         max_y = max(pos[1] for pos in die_layout.values()) if die_layout else 0
 
-        # 计算 Die 间距
-        die_spacing_x = die_width + 1.5
-        die_spacing_y = die_height + (5.8 if len(die_layout.values()) == 2 else 1.5)
+        # 计算每个Die旋转后的实际尺寸
+        die_sizes = {}
+        for die_id in die_layout.keys():
+            rotation = die_rotations.get(die_id, 0)
+            if rotation in [90, 270]:
+                # 90度或270度旋转：宽高互换
+                die_sizes[die_id] = (die_height, die_width)
+            else:
+                # 0度或180度旋转：宽高不变
+                die_sizes[die_id] = (die_width, die_height)
 
-        # 计算每个 Die 的基础绘图偏移量
-        die_offsets = {}
+        # 计算每行每列的最大尺寸
+        max_width_per_col = {}
+        max_height_per_row = {}
         for die_id, (grid_x, grid_y) in die_layout.items():
-            offset_x = grid_x * die_spacing_x
-            # 修正Y坐标：保持数学坐标系，grid_y越大显示越上方
-            offset_y = grid_y * die_spacing_y  # Y 坐标向上为正，与推理坐标系一致
+            w, h = die_sizes[die_id]
+            max_width_per_col[grid_x] = max(max_width_per_col.get(grid_x, 0), w)
+            max_height_per_row[grid_y] = max(max_height_per_row.get(grid_y, 0), h)
+
+        # 计算每个Die的偏移量（累加前面所有Die的尺寸）
+        die_offsets = {}
+        gap_x = 7.0  # Die之间的横向间隙
+        gap_y = 5.0 if len(die_layout.values()) == 2 else 1
+
+        for die_id, (grid_x, grid_y) in die_layout.items():
+            # X方向：累加左侧所有列的宽度 + 间隙
+            offset_x = sum(max_width_per_col.get(x, 0) + gap_x for x in range(grid_x))
+            # Y方向：累加下方所有行的高度 + 间隙
+            offset_y = sum(max_height_per_row.get(y, 0) + gap_y for y in range(grid_y))
             die_offsets[die_id] = (offset_x, offset_y)
 
         # 如果提供了dies和config，计算对齐偏移
@@ -2772,18 +2982,19 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 # 对齐计算失败时使用默认布局
                 print(f"[对齐优化] 对齐计算失败，使用默认布局: {e}")
 
-        # 根据布局大小自动调整画布尺寸 (单位转换为英寸)
-        canvas_width = ((max_x + 1) * die_spacing_x + 8) / 10  # 转换为合理的英寸尺寸
-        canvas_height = ((max_y + 1) * die_spacing_y + 8) / 10  # 转换为合理的英寸尺寸
+        # 计算总的画布尺寸（基于累加后的实际尺寸）
+        total_width = sum(max_width_per_col.get(x, 0) for x in range(max_x + 1)) + gap_x * max_x + 2
+        total_height = sum(max_height_per_row.get(y, 0) for y in range(max_y + 1)) + gap_y * max_y + 2
+
+        # 转换为英寸尺寸（假设每个单位 = 0.3英寸）
+        canvas_width = total_width * 0.3
+        canvas_height = total_height * 0.3
 
         # 限制画布尺寸范围
-        canvas_width = max(min(canvas_width, 16), 10)  # 10-16英寸
-        canvas_height = max(min(canvas_height, 12), 8)  # 8-12英寸
+        canvas_width = max(min(canvas_width, 20), 10)  # 10-20英寸
+        canvas_height = max(min(canvas_height, 16), 8)  # 8-16英寸
 
         figsize = (canvas_width, canvas_height)
-
-        for die_id, offset in die_offsets.items():
-            grid_pos = die_layout.get(die_id, (0, 0))
 
         return die_offsets, figsize
 
@@ -2808,6 +3019,34 @@ class D2DResultProcessor(BandwidthAnalyzer):
         else:  # 对角连接
             return "diagonal"
 
+    def _apply_rotation(self, orig_row, orig_col, rows, cols, rotation):
+        """
+        根据旋转角度计算节点的旋转后行列位置
+
+        Args:
+            orig_row: 原始行号
+            orig_col: 原始列号
+            rows: 总行数
+            cols: 总列数
+            rotation: 旋转角度（0, 90, 180, 270）
+
+        Returns:
+            tuple: (new_row, new_col) 旋转后的行列位置
+        """
+        if rotation == 0 or abs(rotation) == 360:
+            return orig_row, orig_col
+        elif abs(rotation) == 90 or abs(rotation) == -270:
+            # 顺时针90度：(row, col) → (col, rows-1-row)
+            return orig_col, rows - 1 - orig_row
+        elif abs(rotation) == 180:
+            # 180度：(row, col) → (rows-1-row, cols-1-col)
+            return rows - 1 - orig_row, cols - 1 - orig_col
+        elif abs(rotation) == 270 or abs(rotation) == -90:
+            # 顺时针270度：(row, col) → (cols-1-col, row)
+            return cols - 1 - orig_col, orig_row
+        else:
+            return orig_row, orig_col
+
     def _calculate_die_alignment_offsets(self, dies, config):
         """
         根据D2D连接计算Die位置偏移，使连接线对齐
@@ -2821,6 +3060,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
         """
         d2d_pairs = getattr(config, "D2D_PAIRS", [])
         die_layout = getattr(config, "die_layout_positions", {})
+        die_rotations = getattr(config, "DIE_ROTATIONS", {})
 
         if not d2d_pairs or not die_layout:
             return {}
@@ -2839,16 +3079,24 @@ class D2DResultProcessor(BandwidthAnalyzer):
             die1_model = dies.get(die1_id)
 
             if die0_model and die1_model:
-                # 获取节点的行列位置
+                # 获取节点的原始行列位置和旋转角度
                 die0_cols = die0_model.config.NUM_COL
+                die0_rows = die0_model.config.NUM_ROW
                 die1_cols = die1_model.config.NUM_COL
+                die1_rows = die1_model.config.NUM_ROW
 
-                # 新架构：节点编号就是物理节点编号，直接计算行列位置
-                # 与_draw_single_die_flow中的计算一致
-                die0_row = die0_node // die0_cols
-                die0_col = die0_node % die0_cols
-                die1_row = die1_node // die1_cols
-                die1_col = die1_node % die1_cols
+                die0_rotation = die_rotations.get(die0_id, 0)
+                die1_rotation = die_rotations.get(die1_id, 0)
+
+                # 计算原始行列位置
+                die0_orig_row = die0_node // die0_cols
+                die0_orig_col = die0_node % die0_cols
+                die1_orig_row = die1_node // die1_cols
+                die1_orig_col = die1_node % die1_cols
+
+                # 计算旋转后的行列位置（与_draw_single_die_flow中的逻辑一致）
+                die0_row, die0_col = self._apply_rotation(die0_orig_row, die0_orig_col, die0_rows, die0_cols, die0_rotation)
+                die1_row, die1_col = self._apply_rotation(die1_orig_row, die1_orig_col, die1_rows, die1_cols, die1_rotation)
 
                 die_pair = (min(die0_id, die1_id), max(die0_id, die1_id))
 
@@ -2972,67 +3220,3 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         # 转换为元组格式
         return {die_id: tuple(offsets) for die_id, offsets in die_offsets.items()}
-
-    def _draw_inactive_d2d_connections(self, ax, d2d_pairs, active_connections, die_node_positions, dies=None, die_offsets=None):
-        """
-        为没有流量的D2D连接对绘制灰色连接线
-
-        Args:
-            ax: matplotlib轴对象
-            d2d_pairs: D2D连接对列表 [(die0_id, die0_node, die1_id, die1_node), ...]
-            active_connections: 活跃连接列表
-            die_node_positions: Die节点位置 {die_id: {node: (x, y)}}
-            dies: Die对象字典，用于获取各Die的NUM_COL配置
-            die_offsets: Die偏移量字典 {die_id: (offset_x, offset_y)}
-        """
-        # 获取所有活跃连接的节点对
-        active_pairs = set()
-        for conn in active_connections:
-            active_pairs.add((conn["from_die"], conn["from_node"], conn["to_die"], conn["to_node"]))
-
-        for die0_id, die0_node, die1_id, die1_node in d2d_pairs:
-            from_die_positions = die_node_positions.get(die0_id, {})
-            to_die_positions = die_node_positions.get(die1_id, {})
-
-            # 获取连接类型
-            die_layout = getattr(self.config, "die_layout_positions", {})
-            from_die_pos = die_layout.get(die0_id, (0, 0))
-            to_die_pos = die_layout.get(die1_id, (0, 0))
-            connection_type = self._get_connection_type(from_die_pos, to_die_pos)
-
-            # 计算节点位置
-            from_node_pos, to_node_pos = self._calculate_d2d_node_positions(die0_id, die0_node, die1_id, die1_node, dies, self.config)
-
-            if from_node_pos not in from_die_positions or to_node_pos not in to_die_positions:
-                continue
-
-            from_x, from_y = from_die_positions[from_node_pos]
-            to_x, to_y = to_die_positions[to_node_pos]
-
-            # 对角连接需要将起止点投影到Die边缘
-            if connection_type == "diagonal" and die_offsets and dies:
-                # 获取Die配置和偏移
-                from_die = dies.get(die0_id)
-                to_die = dies.get(die1_id)
-                if from_die and to_die:
-                    from_offset_x, from_offset_y = die_offsets.get(die0_id, (0, 0))
-                    to_offset_x, to_offset_y = die_offsets.get(die1_id, (0, 0))
-
-                    # 计算Die边界
-                    from_boundary = self._calculate_die_boundary(from_offset_x, from_offset_y, from_die.config.NUM_COL, from_die.config.NUM_ROW)
-                    to_boundary = self._calculate_die_boundary(to_offset_x, to_offset_y, to_die.config.NUM_COL, to_die.config.NUM_ROW)
-
-                    # 投影到边缘
-                    from_x, from_y, to_x, to_y = self._project_diagonal_to_edge(from_x, from_y, to_x, to_y, from_die_pos, to_die_pos, from_boundary, to_boundary)
-
-            # 计算箭头向量
-            arrow_vectors = self._calculate_arrow_vectors(from_x, from_y, to_x, to_y)
-            if arrow_vectors is not None:
-                ux, uy, perpx, perpy = arrow_vectors
-
-                # 检查两个方向是否有活跃连接
-                has_forward = (die0_id, die0_node, die1_id, die1_node) in active_pairs
-
-                # 如果正向没有活跃连接，绘制正向的灰色箭头
-                if not has_forward:
-                    self._draw_single_d2d_arrow(ax, from_x, from_y, to_x, to_y, ux, uy, perpx, perpy, 0.0, "inactive", f"inactive_forward_{die0_id}_{die1_id}", connection_type)

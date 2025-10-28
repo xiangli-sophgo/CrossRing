@@ -337,9 +337,21 @@ class RingModel(BaseModel):
                 network.routing_strategy = self.routing_strategy
 
             # 配置ETag支持（复用CrossRing的ETag逻辑）
-            if self.config.ETag_BOTHSIDE_UPGRADE:
-                if hasattr(network, "ETag_BOTHSIDE_UPGRADE"):
-                    network.ETag_BOTHSIDE_UPGRADE = True
+            # 智能设置各network的双侧升级：全局配置 OR (双侧下环 AND 在保序列表中)
+            if hasattr(network, "ETag_BOTHSIDE_UPGRADE"):
+                # 根据network名称确定包类型
+                packet_type = None
+                if "Request" in network.name:
+                    packet_type = "REQ"
+                elif "Response" in network.name:
+                    packet_type = "RSP"
+                elif "Data" in network.name:
+                    packet_type = "DATA"
+
+                network.ETag_BOTHSIDE_UPGRADE = (
+                    self.config.ETag_BOTHSIDE_UPGRADE or
+                    (packet_type and self.config.ORDERING_PRESERVATION_MODE == 2 and packet_type in self.config.IN_ORDER_PACKET_CATEGORIES)
+                )
 
     def _inject_queue_arbitration(self, network, ip_positions, network_type):
         """

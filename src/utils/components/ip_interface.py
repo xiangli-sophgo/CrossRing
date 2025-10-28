@@ -714,17 +714,27 @@ class IPInterface:
         self.data_cir_v_num += flit.eject_attempts_v
         if flit.req_type == "read":
             # 检查是否为跨Die返回的数据，更新D2D统计
+            die_id = getattr(self.config, "DIE_ID", None)
+            d2d_model = getattr(self.req_network, "d2d_model", None)
+
             if hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die"):
                 if flit.d2d_origin_die != flit.d2d_target_die:
-                    # 这是跨Die请求的返回数据，需要通过网络或config获取Die信息
-                    die_id = getattr(self.config, "DIE_ID", None)
+                    # 这是跨Die请求的返回数据
                     if die_id is not None and flit.d2d_origin_die == die_id:
-                        # 通过网络对象获取d2d_model引用
-                        d2d_model = getattr(self.req_network, "d2d_model", None)
                         if d2d_model:
                             burst_length = getattr(flit, "burst_length", 4)
-                            # 使用新的统计方法记录跨Die读数据接收
+                            # 记录跨Die读数据接收
                             d2d_model.record_read_data_received(flit.packet_id, die_id, burst_length, is_cross_die=True)
+                else:
+                    # d2d属性存在但origin_die == target_die，这是Die内本地请求
+                    if die_id is not None and d2d_model:
+                        burst_length = getattr(flit, "burst_length", 4)
+                        d2d_model.record_read_data_received(flit.packet_id, die_id, burst_length, is_cross_die=False)
+            else:
+                # 没有d2d属性，这是本地读请求的返回数据
+                if die_id is not None and d2d_model:
+                    burst_length = getattr(flit, "burst_length", 4)
+                    d2d_model.record_read_data_received(flit.packet_id, die_id, burst_length, is_cross_die=False)
 
             # 读数据到达RN端，需要收集到data buffer中
             self.rn_rdb[flit.packet_id].append(flit)
@@ -770,21 +780,26 @@ class IPInterface:
 
         elif flit.req_type == "write":
             # D2D写数据统计（包括跨Die和Die内）
-            if hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die"):
-                die_id = getattr(self.config, "DIE_ID", None)
-                if die_id is not None:
-                    d2d_model = getattr(self.req_network, "d2d_model", None)
-                    if d2d_model:
-                        burst_length = getattr(flit, "burst_length", 4)
-                        is_cross_die = (flit.d2d_origin_die != flit.d2d_target_die)
+            die_id = getattr(self.config, "DIE_ID", None)
+            d2d_model = getattr(self.req_network, "d2d_model", None)
 
-                        # 记录写数据接收：跨Die或Die内
-                        if is_cross_die and flit.d2d_target_die == die_id:
-                            # 跨Die写数据接收
-                            d2d_model.record_write_data_received(flit.packet_id, die_id, burst_length, is_cross_die=True)
-                        elif not is_cross_die:
-                            # Die内写数据接收
-                            d2d_model.record_write_data_received(flit.packet_id, die_id, burst_length, is_cross_die=False)
+            if hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die"):
+                if die_id is not None and d2d_model:
+                    burst_length = getattr(flit, "burst_length", 4)
+                    is_cross_die = (flit.d2d_origin_die != flit.d2d_target_die)
+
+                    # 记录写数据接收：跨Die或Die内
+                    if is_cross_die and flit.d2d_target_die == die_id:
+                        # 跨Die写数据接收
+                        d2d_model.record_write_data_received(flit.packet_id, die_id, burst_length, is_cross_die=True)
+                    elif not is_cross_die:
+                        # Die内写数据接收
+                        d2d_model.record_write_data_received(flit.packet_id, die_id, burst_length, is_cross_die=False)
+            else:
+                # 没有d2d属性，这是本地写数据
+                if die_id is not None and d2d_model:
+                    burst_length = getattr(flit, "burst_length", 4)
+                    d2d_model.record_write_data_received(flit.packet_id, die_id, burst_length, is_cross_die=False)
 
             # 确保sn_wdb中存在packet_id的列表（跨Die写数据可能没有预先创建）
             if flit.packet_id not in self.sn_wdb:

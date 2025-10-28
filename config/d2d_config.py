@@ -39,6 +39,7 @@ class D2DConfig:
         self._generate_d2d_pairs()
         self._update_channel_spec_for_d2d()
         self._validate_d2d_layout()
+        self.update_latency()
 
     def _init_d2d_config(self):
         """初始化D2D基础配置"""
@@ -57,10 +58,25 @@ class D2DConfig:
         self.CHANNEL_SPEC: Dict[str, int] = {}
         self.CH_NAME_LIST: List[str] = []
         self.DIE_TOPOLOGIES: Dict[int, str] = {}
+        self.DIE_ROTATIONS: Dict[int, int] = {}
 
         self.NETWORK_FREQUENCY: Optional[int] = None
         self.FLIT_SIZE: Optional[int] = None
         self.BURST: Optional[int] = None
+
+        # D2D延迟配置 (原始ns值)
+        self.D2D_AR_LATENCY_original: Optional[float] = None
+        self.D2D_R_LATENCY_original: Optional[float] = None
+        self.D2D_AW_LATENCY_original: Optional[float] = None
+        self.D2D_W_LATENCY_original: Optional[float] = None
+        self.D2D_B_LATENCY_original: Optional[float] = None
+
+        # D2D延迟配置 (转换后的cycles值)
+        self.D2D_AR_LATENCY: Optional[int] = None
+        self.D2D_R_LATENCY: Optional[int] = None
+        self.D2D_AW_LATENCY: Optional[int] = None
+        self.D2D_W_LATENCY: Optional[int] = None
+        self.D2D_B_LATENCY: Optional[int] = None
 
     def _generate_d2d_pairs(self) -> None:
         """生成D2D配对关系
@@ -342,9 +358,16 @@ class D2DConfig:
                 else:
                     d2d_config = json.load(f)
 
+            # D2D延迟配置项列表
+            d2d_latency_keys = ["D2D_AR_LATENCY", "D2D_R_LATENCY", "D2D_AW_LATENCY", "D2D_W_LATENCY", "D2D_B_LATENCY"]
+
             for key, value in d2d_config.items():
-                if key.startswith("D2D_") or key in ["NUM_DIES", "D2D_DIE_CONFIG", "DIE_POSITIONS", "DIE_TOPOLOGIES", "NETWORK_FREQUENCY", "FLIT_SIZE", "BURST"]:
-                    setattr(self, key, value)
+                if key.startswith("D2D_") or key in ["NUM_DIES", "D2D_DIE_CONFIG", "DIE_POSITIONS", "DIE_TOPOLOGIES", "DIE_ROTATIONS", "NETWORK_FREQUENCY", "FLIT_SIZE", "BURST"]:
+                    # D2D延迟配置保存为_original后缀
+                    if key in d2d_latency_keys:
+                        setattr(self, f"{key}_original", value)
+                    else:
+                        setattr(self, key, value)
 
             print(f"成功加载D2D配置文件: {d2d_config_file}")
             if hasattr(self, "D2D_DIE_CONFIG"):
@@ -630,3 +653,24 @@ class D2DConfig:
             num_rows = max_y + 1
             self.die_layout_type = f"{num_rows}x{num_cols}"
             print(f"Die布局类型: {self.die_layout_type}")
+
+    def update_latency(self):
+        """将D2D延迟配置从ns转换为cycles
+
+        转换公式: latency_cycles = latency_ns * NETWORK_FREQUENCY
+        其中NETWORK_FREQUENCY为GHz，例如2表示2GHz
+        """
+        if not self.NETWORK_FREQUENCY:
+            raise ValueError("必须先设置NETWORK_FREQUENCY才能转换延迟配置")
+
+        # 转换各个延迟配置
+        if self.D2D_AR_LATENCY_original is not None:
+            self.D2D_AR_LATENCY = int(self.D2D_AR_LATENCY_original * self.NETWORK_FREQUENCY)
+        if self.D2D_R_LATENCY_original is not None:
+            self.D2D_R_LATENCY = int(self.D2D_R_LATENCY_original * self.NETWORK_FREQUENCY)
+        if self.D2D_AW_LATENCY_original is not None:
+            self.D2D_AW_LATENCY = int(self.D2D_AW_LATENCY_original * self.NETWORK_FREQUENCY)
+        if self.D2D_W_LATENCY_original is not None:
+            self.D2D_W_LATENCY = int(self.D2D_W_LATENCY_original * self.NETWORK_FREQUENCY)
+        if self.D2D_B_LATENCY_original is not None:
+            self.D2D_B_LATENCY = int(self.D2D_B_LATENCY_original * self.NETWORK_FREQUENCY)

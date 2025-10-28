@@ -14,15 +14,19 @@ DIE_TOPOLOGIES:
   0: "5x4"  # Die0使用5x4拓扑
   1: "5x4"  # Die1使用5x4拓扑
 
+DIE_ROTATIONS:
+  0: 0    # Die0不旋转
+  1: 180   # Die1顺时针旋转180度
+
 # D2D互联配置（单向配置，系统自动生成双向连接）
 # 格式: [源Die, 源物理节点, 目标Die, 目标物理节点]
 # 物理节点ID使用数据流中的实际编号，通过node_map转换到网络位置
 D2D_CONNECTIONS:
   # Die0顶部 <-> Die1底部
-  - [0, 0, 1, 16]   # Die0节点0 <-> Die1节点16
-  - [0, 1, 1, 17]   # Die0节点1 <-> Die1节点17
-  - [0, 2, 1, 18]   # Die0节点2 <-> Die1节点18
-  - [0, 3, 1, 19]   # Die0节点3 <-> Die1节点19
+  - [0, 0, 1, 3]   # Die0节点0 <-> Die1节点16
+  - [0, 1, 1, 2]   # Die0节点1 <-> Die1节点17
+  - [0, 2, 1, 1]   # Die0节点2 <-> Die1节点18
+  - [0, 3, 1, 0]   # Die0节点3 <-> Die1节点19
 
 
 
@@ -31,12 +35,12 @@ NETWORK_FREQUENCY: 2
 FLIT_SIZE: 128
 BURST: 4
 
-# D2D 延迟配置 (cycles)
-D2D_AR_LATENCY: 10  # 地址读通道延迟
-D2D_R_LATENCY: 10    # 读数据通道延迟
-D2D_AW_LATENCY: 10  # 地址写通道延迟
-D2D_W_LATENCY: 10    # 写数据通道延迟
-D2D_B_LATENCY: 10    # 写响应通道延迟
+# D2D 延迟配置 (ns) - 会在配置加载时转换为cycles
+D2D_AR_LATENCY: 20   # 地址读通道延迟 (ns)
+D2D_R_LATENCY: 20    # 读数据通道延迟 (ns)
+D2D_AW_LATENCY: 20   # 地址写通道延迟 (ns)
+D2D_W_LATENCY: 20    # 写数据通道延迟 (ns)
+D2D_B_LATENCY: 20    # 写响应通道延迟 (ns)
 
 # D2D 带宽控制
 D2D_RN_BW_LIMIT: 128    # D2D RN 带宽限制 (GB/s)

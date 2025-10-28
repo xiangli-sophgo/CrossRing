@@ -598,11 +598,12 @@ def generate_4die_stress_test():
     die0_ddr_base = {
         "ddr_0": [3, 7, 11, 15],
         "ddr_1": [3, 7, 11, 15],
+        # "ddr_0": [0],
     }
 
     # 计算所有Die配置
     # rotations = {0: 0, 1: 180}
-    rotations = {0: 0, 1: 90, 2: 180, 3: 270}
+    rotations = {0: 0, 1: 0, 2: 0, 3: 0}
     die_configs = _compute_die_configs(die0_gdma_base, die0_ddr_base, rotations)
 
     # 生成流量
@@ -613,10 +614,10 @@ def generate_4die_stress_test():
     ring_pairs = [
         (0, 0),
         (1, 1),
-        # (2, 2),
-        # (3, 3),
-        (0, 1),
-        (1, 0),
+        (2, 2),
+        (3, 3),
+        # (0, 1),
+        # (1, 0),
         # (0, 2),
         # (2, 0),
         # (0, 3),
@@ -631,16 +632,16 @@ def generate_4die_stress_test():
     traffic_configs = _generate_traffic_configs(
         die_configs,
         ring_pairs,
-        req_type="W",
+        req_type="R",
         burst_length=4,
-        bandwidth=11.52,
+        bandwidth=46.08,
     )
 
     generator.generate_traffic_file(
-        filename="../../test_data/d2d_data_1021.txt",
+        filename="../../test_data/d2d_16_share_R_1028.txt",
         traffic_configs=traffic_configs,
         traffic_mode="cross_die",
-        end_time=1000,
+        end_time=5000,
     )
     print()
 

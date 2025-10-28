@@ -1087,17 +1087,18 @@ class Network:
             else:
                 flit.eject_attempts_v += 1
 
-            # 保序方向检查：如果方向不允许，直接绕环，不尝试下环，不升级ETag
-            if hasattr(flit, "allowed_eject_directions") and flit.allowed_eject_directions is not None:
-                if eject_direction not in flit.allowed_eject_directions:
-                    # 方向不允许，直接继续绕环
-                    if eject_direction in ["TL", "TR"]:
-                        flit.ordering_blocked_eject_h += 1
-                    else:
-                        flit.ordering_blocked_eject_v += 1
-                    state = self._analyze_flit_state(flit, current, next_node)
-                    self._continue_looping(flit, link, state["next_pos"])
-                    return
+            # 保序方向检查：只对需要保序的包类型进行方向检查
+            if self._need_in_order_check(flit):
+                if hasattr(flit, "allowed_eject_directions") and flit.allowed_eject_directions is not None:
+                    if eject_direction not in flit.allowed_eject_directions:
+                        # 方向不允许，直接继续绕环
+                        if eject_direction in ["TL", "TR"]:
+                            flit.ordering_blocked_eject_h += 1
+                        else:
+                            flit.ordering_blocked_eject_v += 1
+                        state = self._analyze_flit_state(flit, current, next_node)
+                        self._continue_looping(flit, link, state["next_pos"])
+                        return
 
             # 尝试下环
             success, fail_reason = crosspoint._try_eject(

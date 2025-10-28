@@ -303,6 +303,8 @@ class BandwidthAnalyzer:
 
         # 统计各类型IP数量
         for node, ip_type in self.unique_rn_ips.union(self.unique_sn_ips):
+            if ip_type is None:
+                continue
             base_type = ip_type.split("_")[0] if "_" in ip_type else ip_type  # gdma_0 -> gdma
             ip_id = ip_type.split("_")[1] if "_" in ip_type else "0"
             self.ip_count_by_type[base_type].add((node, ip_id))
@@ -1840,7 +1842,16 @@ class BandwidthAnalyzer:
 
             # 准备CSV数据
             csv_data = []
-            for (src, dst), stats in utilization_stats.items():
+            for link_key, stats in utilization_stats.items():
+                # 处理新架构：link可能是(i, j)或(i, j, 'h'/'v')
+                if len(link_key) == 2:
+                    src, dst = link_key
+                    direction = ""
+                elif len(link_key) == 3:
+                    src, dst, direction = link_key
+                else:
+                    continue
+
                 # 获取下环尝试次数统计数据
                 eject_h = stats.get("eject_attempts_h", {"0": 0, "1": 0, "2": 0, ">2": 0})
                 eject_v = stats.get("eject_attempts_v", {"0": 0, "1": 0, "2": 0, ">2": 0})
@@ -1850,6 +1861,7 @@ class BandwidthAnalyzer:
                 row = {
                     "source_node": src,
                     "destination_node": dst,
+                    "direction": direction,
                     "utilization": f"{stats.get('utilization', 0.0)*100:.2f}%",
                     "ITag_ratio": f"{stats.get('ITag_ratio', 0.0)*100:.2f}%",
                     "empty_ratio": f"{stats.get('empty_ratio', 0.0)*100:.2f}%",
@@ -1883,6 +1895,7 @@ class BandwidthAnalyzer:
                 fieldnames = [
                     "source_node",
                     "destination_node",
+                    "direction",
                     # 下环尝试次数比例（按用户要求放在前面）
                     "eject_attempts_h_0_ratio",
                     "eject_attempts_h_1_ratio",
@@ -1997,7 +2010,7 @@ class BandwidthAnalyzer:
         ax.margins(0.05)  # 设置边距以确保内容显示完整
         ax.axis("off")  # 隐藏坐标轴
 
-        plt.tight_layout(pad=1.5)  # 增加padding使图形与标题有更多间距
+        plt.tight_layout(pad=1.5)
 
         if save_path:
             plt.savefig(

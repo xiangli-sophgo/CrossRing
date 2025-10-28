@@ -152,10 +152,10 @@ class CrossRingConfig:
         if not topo_type:
             raise ValueError("TOPO_TYPE参数不能为空")
 
-        if 'x' not in topo_type:
+        if "x" not in topo_type:
             raise ValueError(f"TOPO_TYPE格式错误，应为 'AxB' 格式，当前值: {topo_type}")
 
-        parts = topo_type.split('x')
+        parts = topo_type.split("x")
         if len(parts) != 2:
             raise ValueError(f"TOPO_TYPE格式错误，应为 'AxB' 格式，当前值: {topo_type}")
 
@@ -414,9 +414,6 @@ class CrossRingConfig:
         self.GDMA_SEND_POSITION_LIST = [pos_mapping.get(pos, pos) for pos in self.GDMA_SEND_POSITION_LIST]  # 如果在映射表中则替换,否则保持原位置
         print(f"spare core: row: {self.SPARE_CORE_ROW}, id: {self.spare_core}, fail core: {self.FAIL_CORE_POS}, used spare core: {self.spare_core_pos}")
 
-    def finish_del(self):
-        del self.DDR_SEND_POSITION_LIST, self.L2M_SEND_POSITION_LIST, self.GDMA_SEND_POSITION_LIST, self.SDMA_SEND_POSITION_LIST
-
     def parse_args(self, default_config):
         # Handle relative paths by resolving from the caller's directory
         if not os.path.isabs(default_config):
@@ -465,8 +462,15 @@ class CrossRingConfig:
         parser.add_argument("--ITag_TRIGGER_Th_V", type=int, default=default_config["ITag_TRIGGER_Th_V"], help="Vertical ring I-Tag trigger threshold")
         parser.add_argument("--ITag_MAX_Num_H", type=int, default=default_config["ITag_MAX_Num_H"], help="Maximum number of I-Tag reservations for horizontal ring XY nodes")
         parser.add_argument("--ITag_MAX_Num_V", type=int, default=default_config["ITag_MAX_Num_V"], help="Maximum number of I-Tag reservations for vertical ring XY nodes")
-        parser.add_argument("--RB_ONLY_TAG_NUM_HORIZONTAL", type=int, default=default_config["RB_ONLY_TAG_NUM_HORIZONTAL"], help="Number of RB only tags per horizontal ring (only effective in base_model_v2/network_v2)")
-        parser.add_argument("--RB_ONLY_TAG_NUM_VERTICAL", type=int, default=default_config["RB_ONLY_TAG_NUM_VERTICAL"], help="Number of RB only tags per vertical ring (only effective in base_model_v2/network_v2)")
+        parser.add_argument(
+            "--RB_ONLY_TAG_NUM_HORIZONTAL",
+            type=int,
+            default=default_config["RB_ONLY_TAG_NUM_HORIZONTAL"],
+            help="Number of RB only tags per horizontal ring (only effective in base_model_v2/network_v2)",
+        )
+        parser.add_argument(
+            "--RB_ONLY_TAG_NUM_VERTICAL", type=int, default=default_config["RB_ONLY_TAG_NUM_VERTICAL"], help="Number of RB only tags per vertical ring (only effective in base_model_v2/network_v2)"
+        )
         # 带宽限制参数（统一TX和RX）
         parser.add_argument("--GDMA_BW_LIMIT", type=int, default=default_config["GDMA_BW_LIMIT"], help="GDMA Bandwidth limit.")
         parser.add_argument("--SDMA_BW_LIMIT", type=int, default=default_config["SDMA_BW_LIMIT"], help="SDMA Bandwidth limit.")
@@ -512,7 +516,12 @@ class CrossRingConfig:
         parser.add_argument("--SDMA_RW_GAP", type=int, default=default_config["SDMA_RW_GAP"], help="SDMA read and write cmd num gap")
         parser.add_argument("--ENABLE_CROSSPOINT_CONFLICT_CHECK", type=bool, default=default_config["ENABLE_CROSSPOINT_CONFLICT_CHECK"], help="Enable crosspoint conflict checking for inject queue")
         parser.add_argument("--CROSSRING_VERSION", type=str, default=default_config["CROSSRING_VERSION"], help="CrossRing version (V1 or V2)")
-        parser.add_argument("--ORDERING_PRESERVATION_MODE", type=int, default=default_config["ORDERING_PRESERVATION_MODE"], help="Ordering preservation mode: 0=disabled, 1=single-side(TL/TU), 2=dual-side(direction-config)")
+        parser.add_argument(
+            "--ORDERING_PRESERVATION_MODE",
+            type=int,
+            default=default_config["ORDERING_PRESERVATION_MODE"],
+            help="Ordering preservation mode: 0=disabled, 1=single-side(TL/TU), 2=dual-side(direction-config)",
+        )
         parser.add_argument("--ORDERING_GRANULARITY", type=int, default=default_config.get("ORDERING_GRANULARITY", 1), help="Ordering granularity: 0=IP-level, 1=Node-level")
         parser.add_argument(
             "--IN_ORDER_EJECTION_PAIRS", type=list, default=default_config["IN_ORDER_EJECTION_PAIRS"], help="Specific src-dest pairs for in-order ejection. Empty list means all pairs."
@@ -522,22 +531,12 @@ class CrossRingConfig:
         )
 
         # 方向控制参数 - 保序下环方向白名单（物理节点ID列表）
-        parser.add_argument(
-            "--TL_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TL_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TL (left) direction"
-        )
-        parser.add_argument(
-            "--TR_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TR_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TR (right) direction"
-        )
-        parser.add_argument(
-            "--TU_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TU_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TU (up) direction"
-        )
-        parser.add_argument(
-            "--TD_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TD_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TD (down) direction"
-        )
+        parser.add_argument("--TL_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TL_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TL (left) direction")
+        parser.add_argument("--TR_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TR_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TR (right) direction")
+        parser.add_argument("--TU_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TU_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TU (up) direction")
+        parser.add_argument("--TD_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TD_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TD (down) direction")
 
         # 添加仲裁器配置支持
-        parser.add_argument(
-            "--arbitration", type=dict, default=default_config.get("arbitration", {}), help="Arbitration configuration for different queue types"
-        )
+        parser.add_argument("--arbitration", type=dict, default=default_config.get("arbitration", {}), help="Arbitration configuration for different queue types")
 
         return parser.parse_args()

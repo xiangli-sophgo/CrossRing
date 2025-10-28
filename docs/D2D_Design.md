@@ -428,14 +428,18 @@ class D2D_Interface:
 
 ```json
 {
-  "D2D_AR_LATENCY": 10,     // AXI AR通道延迟（周期）
-  "D2D_R_LATENCY": 8,       // AXI R通道延迟（周期）
-  "D2D_AW_LATENCY": 10,     // AXI AW通道延迟（周期）
-  "D2D_W_LATENCY": 2,       // AXI W通道延迟（周期）
-  "D2D_B_LATENCY": 8,       // AXI B通道延迟（周期）
-  "D2D_DBID_LATENCY": 5     // DBIDValid信号延迟（周期）
+  "D2D_AR_LATENCY": 5,      // AXI AR通道延迟（ns，会在配置加载时转换为cycles）
+  "D2D_R_LATENCY": 4,       // AXI R通道延迟（ns，会在配置加载时转换为cycles）
+  "D2D_AW_LATENCY": 5,      // AXI AW通道延迟（ns，会在配置加载时转换为cycles）
+  "D2D_W_LATENCY": 1,       // AXI W通道延迟（ns，会在配置加载时转换为cycles）
+  "D2D_B_LATENCY": 4,       // AXI B通道延迟（ns，会在配置加载时转换为cycles）
+  "D2D_DBID_LATENCY": 3     // DBIDValid信号延迟（ns，会在配置加载时转换为cycles）
 }
 ```
+
+**注意**: 延迟配置采用ns（纳秒）单位，在D2DConfig加载配置时会自动转换为cycles：
+- 转换公式：`latency_cycles = latency_ns * NETWORK_FREQUENCY`
+- 例如：NETWORK_FREQUENCY=2GHz时，5ns → 10 cycles
 
 ### 5.2 带宽限制
 
@@ -520,12 +524,12 @@ D2D_DIE_CONFIG:
     connections:
       left: {die: 0, d2d_nodes: [1, 2]}     # 连接Die0，使用左边第1,2个位置
 
-# D2D延迟配置
-D2D_AR_LATENCY: 10
-D2D_R_LATENCY: 8
-D2D_AW_LATENCY: 10
-D2D_W_LATENCY: 2
-D2D_B_LATENCY: 8
+# D2D延迟配置 (ns)
+D2D_AR_LATENCY: 5   # AXI AR通道延迟 (ns)
+D2D_R_LATENCY: 4    # AXI R通道延迟 (ns)
+D2D_AW_LATENCY: 5   # AXI AW通道延迟 (ns)
+D2D_W_LATENCY: 1    # AXI W通道延迟 (ns)
+D2D_B_LATENCY: 4    # AXI B通道延迟 (ns)
 ```
 
 #### 8.1.2 4-Die配置示例

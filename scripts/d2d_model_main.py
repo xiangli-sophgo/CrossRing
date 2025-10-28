@@ -41,8 +41,8 @@ def main():
     traffic_file_path = str(Path(__file__).parent.parent / "test_data")
     traffic_chains = [
         [
-            # "d2d_4die_1016.txt",
-            "d2d_data_1021.txt",
+            "d2d_16_share_R_1028.txt",
+            # "d2d_data_1021.txt",
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
@@ -52,7 +52,7 @@ def main():
     model.setup_result_analysis(
         # 图片生成控制
         flow_graph=1,
-        ip_bandwidth_heatmap=0,
+        ip_bandwidth_heatmap=1,
         save_figures=0,
         # CSV文件导出控制
         export_d2d_requests_csv=1,
@@ -65,9 +65,8 @@ def main():
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_cycles=500,
-        print_interval=1000,
-        results_analysis=True,
+        max_cycles=5000,
+        print_interval=200,
         verbose=1,
     )
 

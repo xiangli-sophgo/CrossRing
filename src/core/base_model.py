@@ -301,8 +301,20 @@ class BaseModel:
         self.result_processor = BandwidthAnalyzer(self.config, min_gap_threshold=200, plot_rn_bw_fig=self.plot_RN_BW_fig, plot_flow_graph=self.plot_flow_fig)
         if self.plot_link_state:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
-        if self.config.ETag_BOTHSIDE_UPGRADE:
-            self.req_network.ETag_BOTHSIDE_UPGRADE = self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.data_network.ETag_BOTHSIDE_UPGRADE = True
+
+        # 智能设置各network的双侧升级：全局配置 OR (双侧下环 AND 在保序列表中)
+        self.req_network.ETag_BOTHSIDE_UPGRADE = (
+            self.config.ETag_BOTHSIDE_UPGRADE or
+            (self.config.ORDERING_PRESERVATION_MODE == 2 and "REQ" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        )
+        self.rsp_network.ETag_BOTHSIDE_UPGRADE = (
+            self.config.ETag_BOTHSIDE_UPGRADE or
+            (self.config.ORDERING_PRESERVATION_MODE == 2 and "RSP" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        )
+        self.data_network.ETag_BOTHSIDE_UPGRADE = (
+            self.config.ETag_BOTHSIDE_UPGRADE or
+            (self.config.ORDERING_PRESERVATION_MODE == 2 and "DATA" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        )
 
         # Initialize arbiters based on configuration
         arbitration_config = getattr(self.config, "arbitration", {})
@@ -2215,7 +2227,6 @@ class BaseModel:
             dict: A combined dictionary of configuration variables and statistics.
         """
         # Get all variables from the sim instance
-        self.config.finish_del()
 
         sim_vars = vars(self)
 

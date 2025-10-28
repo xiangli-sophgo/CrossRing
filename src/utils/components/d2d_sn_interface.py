@@ -46,12 +46,12 @@ class D2D_SN_Interface(IPInterface):
                 bucket_size=d2d_sn_bw_limit,
             )
 
-        # 获取D2D延迟配置
-        self.d2d_ar_latency = getattr(config, "D2D_AR_LATENCY", 10)
-        self.d2d_r_latency = getattr(config, "D2D_R_LATENCY", 8)
-        self.d2d_aw_latency = getattr(config, "D2D_AW_LATENCY", 10)
-        self.d2d_w_latency = getattr(config, "D2D_W_LATENCY", 2)
-        self.d2d_b_latency = getattr(config, "D2D_B_LATENCY", 8)
+        # 获取D2D延迟配置（已转换为cycles）
+        self.d2d_ar_latency = config.D2D_AR_LATENCY
+        self.d2d_r_latency = config.D2D_R_LATENCY
+        self.d2d_aw_latency = config.D2D_AW_LATENCY
+        self.d2d_w_latency = config.D2D_W_LATENCY
+        self.d2d_b_latency = config.D2D_B_LATENCY
 
         # 跨Die请求统计
         self.cross_die_requests_received = 0

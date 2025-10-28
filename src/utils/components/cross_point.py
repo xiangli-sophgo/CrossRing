@@ -212,7 +212,9 @@ class CrossPoint:
         if flit.ETag_priority == "T0":
             return None
 
-        ETag_BOTHSIDE_UPGRADE = getattr(self.config, "ETag_BOTHSIDE_UPGRADE", False)
+        # 优先从network读取配置，否则使用全局config
+        ETag_BOTHSIDE_UPGRADE = getattr(self.network, "ETag_BOTHSIDE_UPGRADE",
+                                        getattr(self.config, "ETag_BOTHSIDE_UPGRADE", False))
 
         if flit.ETag_priority == "T2":
             # T2 -> T1 升级

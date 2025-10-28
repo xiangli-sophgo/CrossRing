@@ -419,13 +419,16 @@ D2D_DIE_CONFIG:
 D2D_MULTI_HOP_ENABLED: true
 D2D_ROUTING_ALGORITHM: "shortest_path"
 
-# D2D 延迟配置 (cycles)
-D2D_AR_LATENCY: 10      # 地址读通道延迟
-D2D_R_LATENCY: 10       # 读数据通道延迟
-D2D_AW_LATENCY: 10      # 地址写通道延迟
-D2D_W_LATENCY: 10       # 写数据通道延迟
-D2D_B_LATENCY: 10       # 写响应通道延迟
-D2D_DBID_LATENCY: 10    # DBID 信号延迟
+# D2D 延迟配置 (ns) - 会在配置加载时转换为cycles
+D2D_AR_LATENCY: 5       # 地址读通道延迟 (ns)
+D2D_R_LATENCY: 5        # 读数据通道延迟 (ns)
+D2D_AW_LATENCY: 5       # 地址写通道延迟 (ns)
+D2D_W_LATENCY: 5        # 写数据通道延迟 (ns)
+D2D_B_LATENCY: 5        # 写响应通道延迟 (ns)
+D2D_DBID_LATENCY: 3     # DBID 信号延迟 (ns)
+
+# 注：延迟配置使用ns单位，D2DConfig.update_latency()会自动转换为cycles
+# 转换公式：latency_cycles = latency_ns * NETWORK_FREQUENCY
 D2D_MAX_OUTSTANDING: 16 # 最大未完成事务数
 
 # D2D 带宽控制
