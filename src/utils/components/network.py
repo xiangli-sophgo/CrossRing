@@ -669,8 +669,14 @@ class Network:
         # destination_original或destination都是物理节点ID
         dest = flit.destination_original if flit.destination_original != -1 else flit.destination
 
-        # 使用 (src物理ID, final_dest物理ID, direction) 作为键
-        key = (src, dest, direction)
+        # 根据保序粒度构造key
+        if self.config.ORDERING_GRANULARITY == 0:  # IP层级
+            # 获取IP类型信息
+            src_type = flit.original_source_type if flit.original_source_type else flit.source_type
+            dest_type = flit.original_destination_type if flit.original_destination_type else flit.destination_type
+            key = (src, src_type, dest, dest_type, direction)
+        else:  # 节点层级（granularity == 1）
+            key = (src, dest, direction)
 
         # 检查是否是期望的下一个顺序ID
         # 每个network只记录自己的order_id，不需要区分packet_category
@@ -769,8 +775,14 @@ class Network:
         # 使用最终目的地（而不是中间下环节点）
         dest = flit.destination_original if flit.destination_original != -1 else flit.destination
 
-        # 使用 (src物理ID, final_dest物理ID, direction) 作为键
-        key = (src, dest, direction)
+        # 根据保序粒度构造key（与_can_eject_in_order保持一致）
+        if self.config.ORDERING_GRANULARITY == 0:  # IP层级
+            # 获取IP类型信息
+            src_type = flit.original_source_type if flit.original_source_type else flit.source_type
+            dest_type = flit.original_destination_type if flit.original_destination_type else flit.destination_type
+            key = (src, src_type, dest, dest_type, direction)
+        else:  # 节点层级（granularity == 1）
+            key = (src, dest, direction)
 
         # 更新保序跟踪表
         # 每个network只记录自己的order_id，不需要区分packet_category

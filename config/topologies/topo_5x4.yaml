@@ -95,12 +95,12 @@ CROSSRING_VERSION: "V1"
 IN_ORDER_EJECTION_PAIRS: []
 ENABLE_CROSSPOINT_CONFLICT_CHECK: 0
 ORDERING_PRESERVATION_MODE: 2  # 0=不保序, 1=单侧下环(TL/TU), 2=双侧下环(白名单)
-ORDERING_GRANULARITY: 1  # 0=IP层级, 1=节点层级
+ORDERING_GRANULARITY: 0  # 0=IP层级, 1=节点层级
 # 需要保序的包类型 (REQ/RSP/DATA)
 IN_ORDER_PACKET_CATEGORIES:
   - "REQ"    # 只有REQ类型需要保序
-  # - "RSP"
-  # - "DATA"
+  - "RSP"
+  - "DATA"
 
 # 双侧下环方向配置 - 5x4拓扑 (20节点: 0-19, 布局: 行0: 0-3, 行1: 4-7, 行2: 8-11, 行3: 12-15, 行4: 16-19)
 TL_ALLOWED_SOURCE_NODES: [2, 3, 6, 7, 10, 11, 14, 15, 18, 19]  
