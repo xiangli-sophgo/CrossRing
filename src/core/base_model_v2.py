@@ -197,6 +197,7 @@ class BaseModel:
         results_fig_save_path: str = "",
         plot_flow_fig: bool = False,
         plot_RN_BW_fig: bool = False,
+        fifo_utilization_heatmap: bool = False,
     ) -> None:
         """
         配置结果分析选项
@@ -206,10 +207,12 @@ class BaseModel:
             results_fig_save_path: 图表保存路径
             plot_flow_fig: 是否绘制流量图
             plot_RN_BW_fig: 是否绘制RN带宽图
+            fifo_utilization_heatmap: 是否绘制FIFO使用率热力图
         """
         self.result_save_path_original = result_save_path
         self.plot_flow_fig = plot_flow_fig
         self.plot_RN_BW_fig = plot_RN_BW_fig
+        self.fifo_utilization_heatmap = fifo_utilization_heatmap
 
         # 创建结果保存路径
         if result_save_path:
@@ -1907,6 +1910,39 @@ class BaseModel:
         # Trans 混合
         self.trans_mixed_avg_latency_stat = (latency_stats["trans"]["mixed"]["sum"] / latency_stats["trans"]["mixed"]["count"]) if latency_stats["trans"]["mixed"]["count"] else 0.0
         self.trans_mixed_max_latency_stat = latency_stats["trans"]["mixed"]["max"]
+
+        # FIFO使用率热力图生成
+        if getattr(self, "fifo_utilization_heatmap", False):
+            try:
+                from src.core.fifo_heatmap_visualizer import create_fifo_heatmap
+
+                # 计算总周期数
+                total_cycles = self.cycle // self.config.NETWORK_FREQUENCY
+
+                # 构造dies字典（单Die情况）
+                dies = {0: self}
+
+                # 确定保存路径
+                if self.result_save_path:
+                    fifo_save_path = f"{self.result_save_path}fifo_utilization_heatmap.html"
+                else:
+                    fifo_save_path = None
+
+                # 生成FIFO热力图
+                fifo_heatmap_path = create_fifo_heatmap(
+                    dies=dies,
+                    config=self.config,
+                    total_cycles=total_cycles,
+                    die_layout=None,
+                    die_rotations=None,
+                    save_path=fifo_save_path
+                )
+
+                if fifo_heatmap_path and self.verbose:
+                    print(f"FIFO使用率热力图: {fifo_heatmap_path}")
+            except Exception as e:
+                if self.verbose:
+                    print(f"警告: FIFO使用率热力图生成失败: {e}")
 
     def calculate_ip_bandwidth(self, intervals):
         """计算给定区间的加权带宽"""

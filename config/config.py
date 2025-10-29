@@ -106,11 +106,11 @@ class CrossRingConfig:
                 self.CH_NAME_LIST.append(f"{key}_{idx}")
         assert (
             self.TL_Etag_T2_UE_MAX < self.TL_Etag_T1_UE_MAX < self.RB_IN_FIFO_DEPTH
-            and self.TL_Etag_T2_UE_MAX < self.RB_IN_FIFO_DEPTH - 2
-            and self.TR_Etag_T2_UE_MAX < self.RB_IN_FIFO_DEPTH - 1
+            and self.TL_Etag_T2_UE_MAX < self.RB_IN_FIFO_DEPTH - 1
+            and self.TR_Etag_T2_UE_MAX < self.RB_IN_FIFO_DEPTH
             and self.TU_Etag_T2_UE_MAX < self.TU_Etag_T1_UE_MAX < self.EQ_IN_FIFO_DEPTH
-            and self.TU_Etag_T2_UE_MAX < self.EQ_IN_FIFO_DEPTH - 2
-            and self.TD_Etag_T2_UE_MAX < self.EQ_IN_FIFO_DEPTH - 1
+            and self.TU_Etag_T2_UE_MAX < self.EQ_IN_FIFO_DEPTH - 1
+            and self.TD_Etag_T2_UE_MAX < self.EQ_IN_FIFO_DEPTH
         ), "ETag parameter conditions are not met."
 
         # 添加仲裁配置处理

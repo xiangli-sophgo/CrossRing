@@ -157,6 +157,7 @@ class D2D_Model:
         # 图片生成控制
         flow_graph: bool = False,
         ip_bandwidth_heatmap: bool = False,
+        fifo_utilization_heatmap: bool = False,
         save_figures: bool = True,
         # CSV文件导出控制
         export_d2d_requests_csv: bool = True,
@@ -171,6 +172,7 @@ class D2D_Model:
         图片生成控制:
             flow_graph: 是否生成流量图
             ip_bandwidth_heatmap: 是否生成IP带宽热力图
+            fifo_utilization_heatmap: 是否生成FIFO使用率热力图
             save_figures: 是否保存图片
 
         CSV文件导出控制:
@@ -185,6 +187,7 @@ class D2D_Model:
             {
                 "flow_graph": flow_graph,
                 "ip_bandwidth_heatmap": ip_bandwidth_heatmap,
+                "fifo_utilization_heatmap": fifo_utilization_heatmap,
                 "save_figures": save_figures,
                 "export_d2d_requests_csv": export_d2d_requests_csv,
                 "export_ip_bandwidth_csv": export_ip_bandwidth_csv,
@@ -195,6 +198,7 @@ class D2D_Model:
         # 向后兼容：同步到实例变量
         self.enable_flow_graph = flow_graph
         self.kwargs["enable_flow_graph"] = flow_graph
+        self.fifo_utilization_heatmap = fifo_utilization_heatmap
 
         # 更新结果保存路径
         if save_dir:
@@ -1168,6 +1172,35 @@ class D2D_Model:
                 heatmap_path = d2d_processor.draw_ip_bandwidth_heatmap(dies=self.dies, config=self.config, mode=heatmap_mode, node_size=2500, save_path=save_path)
                 if heatmap_path:
                     saved_files.append({"type": f"IP带宽热力图({heatmap_mode})", "path": heatmap_path})
+
+            # 步骤5: 生成FIFO使用率热力图（如果启用）
+            should_plot_fifo = self._result_analysis_config.get("fifo_utilization_heatmap") or getattr(self, "fifo_utilization_heatmap", False)
+            if should_plot_fifo:
+                from src.core.fifo_heatmap_visualizer import create_fifo_heatmap
+
+                # 计算总周期数
+                total_cycles = self.current_cycle // self.config.NETWORK_FREQUENCY
+
+                # 确定保存路径
+                should_save = self._result_analysis_config.get("save_figures", True)
+                if should_save:
+                    save_dir = self.kwargs.get("results_fig_save_path", "../Result")
+                    fifo_save_path = f"{save_dir}/fifo_utilization_heatmap.html"
+                else:
+                    fifo_save_path = None
+
+                # 生成FIFO热力图
+                fifo_heatmap_path = create_fifo_heatmap(
+                    dies=self.dies,
+                    config=self.config,
+                    total_cycles=total_cycles,
+                    die_layout=getattr(self.config, "die_layout_positions", None),
+                    die_rotations=getattr(self.config, "DIE_ROTATIONS", None),
+                    save_path=fifo_save_path
+                )
+
+                if fifo_heatmap_path:
+                    saved_files.append({"type": "FIFO使用率热力图", "path": fifo_heatmap_path})
 
         except Exception as e:
             import traceback

@@ -67,16 +67,17 @@ def main():
     sim.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_config)
 
     sim.setup_result_analysis(
-        plot_flow_fig=1,
-        plot_RN_BW_fig=1,
+        plot_flow_fig=0,
+        plot_RN_BW_fig=0,
+        fifo_utilization_heatmap=1,
         result_save_path=f"../Result/CrossRing/{model_type}/",
         results_fig_save_path=None,  # f"../Result/Plt_IP_BW/{model_type}/"
     )
     # sim.setup_debug(print_trace=1, show_trace_id=[17], update_interval=0.1)
-    # sim.setup_visualization(plot_link_state=1, plot_start_cycle=600, show_node_id=1)
+    sim.setup_visualization(plot_link_state=1, plot_start_cycle=600, show_node_id=1)
     np.random.seed(801)
 
-    sim.run_simulation(max_cycles=10000, print_interval=200)
+    sim.run_simulation(max_cycles=500, print_interval=200)
 
 
 if __name__ == "__main__":

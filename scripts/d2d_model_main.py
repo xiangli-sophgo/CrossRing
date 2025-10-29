@@ -51,8 +51,9 @@ def main():
 
     model.setup_result_analysis(
         # 图片生成控制
-        flow_graph=1,
+        flow_graph=0,
         ip_bandwidth_heatmap=1,
+        fifo_utilization_heatmap=1,
         save_figures=0,
         # CSV文件导出控制
         export_d2d_requests_csv=1,
@@ -65,7 +66,7 @@ def main():
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_cycles=5000,
+        max_cycles=50,
         print_interval=200,
         verbose=1,
     )
