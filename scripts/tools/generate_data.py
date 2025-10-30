@@ -121,7 +121,7 @@ if __name__ == "__main__":
     random.seed(919)
 
     # 配置参数
-    END_TIME = 6000
+    END_TIME = 1000
     burst = 4
     req_type = "R"
     OUTPUT_FILE = f"../../test_data/data_1022_{req_type}.txt"
@@ -131,13 +131,13 @@ if __name__ == "__main__":
         {
             "src_map": {
                 "gdma_0": [0],
-                # "gdma_1": [4],
+                "gdma_1": [0],
                 # "gdma_0": range(9),
                 # "gdma_1": range(9),
             },
             "dst_map": {
                 "ddr_0": [5],
-                # "ddr_1": [0, 2],
+                "ddr_1": [5],
                 # "ddr_0": range(9),
                 # "ddr_1": range(9),
             },

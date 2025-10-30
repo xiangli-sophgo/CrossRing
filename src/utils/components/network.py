@@ -1099,25 +1099,24 @@ class Network:
             else:
                 flit.eject_attempts_v += 1
 
-            # 保序方向检查：只对需要保序的包类型进行方向检查
-            if self._need_in_order_check(flit):
-                if hasattr(flit, "allowed_eject_directions") and flit.allowed_eject_directions is not None:
-                    if eject_direction not in flit.allowed_eject_directions:
-                        # 方向不允许，直接继续绕环
-                        # 仅在首次尝试下环时记录为"保序导致绕环"，避免重复计数已绕环的flit
-                        if eject_direction in ["TL", "TR"]:
-                            if flit.eject_attempts_h <= 1:
-                                flit.ordering_blocked_eject_h += 1
-                        else:
-                            if flit.eject_attempts_v <= 1:
-                                flit.ordering_blocked_eject_v += 1
-                        state = self._analyze_flit_state(flit, current, next_node)
-                        self._continue_looping(flit, link, state["next_pos"])
-                        return
+            # 保序检查：统一检查方向和order_id
+            # _can_eject_in_order内部会先判断是否需要保序检查
+            if not self._can_eject_in_order(flit, final_destination, eject_direction):
+                # 保序检查失败（方向不对或order_id不对），继续绕环
+                # 仅在首次尝试下环时记录为"保序导致绕环"
+                if eject_direction in ["TL", "TR"]:
+                    if flit.eject_attempts_h <= 1:
+                        flit.ordering_blocked_eject_h += 1
+                else:
+                    if flit.eject_attempts_v <= 1:
+                        flit.ordering_blocked_eject_v += 1
+                state = self._analyze_flit_state(flit, current, next_node)
+                self._continue_looping(flit, link, state["next_pos"])
+                return
 
-            # 尝试下环
+            # 尝试下环（只检查资源：队列容量和entry）
             success, fail_reason = crosspoint._try_eject(
-                flit, eject_direction, final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues, can_eject_in_order_func=self._can_eject_in_order
+                flit, eject_direction, final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues
             )
 
             if success:

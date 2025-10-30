@@ -213,8 +213,7 @@ class CrossPoint:
             return None
 
         # 优先从network读取配置，否则使用全局config
-        ETag_BOTHSIDE_UPGRADE = getattr(self.network, "ETag_BOTHSIDE_UPGRADE",
-                                        getattr(self.config, "ETag_BOTHSIDE_UPGRADE", False))
+        ETag_BOTHSIDE_UPGRADE = getattr(self.network, "ETag_BOTHSIDE_UPGRADE", getattr(self.config, "ETag_BOTHSIDE_UPGRADE", False))
 
         if flit.ETag_priority == "T2":
             # T2 -> T1 升级
@@ -372,11 +371,7 @@ class CrossPoint:
             # 添加到ring_bridge_pre缓冲位（带检查）
             if self.network:
                 if self.network.ring_bridge_pre[direction][key] is not None:
-                    raise RuntimeError(
-                        f"[Cycle {self.network.cycle}] ring_bridge_pre[{direction}][{key}] 已被占用！"
-                        f"当前flit: {self.network.ring_bridge_pre[direction][key]}, "
-                        f"尝试添加: {flit}"
-                    )
+                    raise RuntimeError(f"[Cycle {self.network.cycle}] ring_bridge_pre[{direction}][{key}] 已被占用！" f"当前flit: {self.network.ring_bridge_pre[direction][key]}, " f"尝试添加: {flit}")
                 self.network.ring_bridge_pre[direction][key] = flit
         else:  # TU, TD
             # 纵向环下环到eject_queues（最终目的地节点，但还未到IP）
@@ -390,9 +385,7 @@ class CrossPoint:
             if self.network:
                 if self.network.eject_queues_in_pre[direction][key] is not None:
                     raise RuntimeError(
-                        f"[Cycle {self.network.cycle}] eject_queues_in_pre[{direction}][{key}] 已被占用！"
-                        f"当前flit: {self.network.eject_queues_in_pre[direction][key]}, "
-                        f"尝试添加: {flit}"
+                        f"[Cycle {self.network.cycle}] eject_queues_in_pre[{direction}][{key}] 已被占用！" f"当前flit: {self.network.eject_queues_in_pre[direction][key]}, " f"尝试添加: {flit}"
                     )
                 self.network.eject_queues_in_pre[direction][key] = flit
 
@@ -403,15 +396,16 @@ class CrossPoint:
         if self.network and hasattr(self.network, "_update_order_tracking_table"):
             self.network._update_order_tracking_table(flit, target_node, direction)
 
-    def _try_eject(self, flit: Flit, direction: str, target_node: int, link: list, ring_bridge: dict = None, eject_queues: dict = None, can_eject_in_order_func=None) -> tuple:
+    def _try_eject(self, flit: Flit, direction: str, target_node: int, link: list, ring_bridge: dict = None, eject_queues: dict = None) -> tuple:
         """
         尝试下环（适用于所有下环场景）
 
         检查顺序：
-        1. 保序条件
-        2. 队列容量
-        3. 对应等级的entry可用性
-        4. 占用最佳Entry
+        1. 队列容量
+        2. 对应等级的entry可用性
+        3. 占用最佳Entry
+
+        注意：保序检查（方向和order_id）由调用方在外层完成
 
         Args:
             flit: 当前flit
@@ -420,11 +414,10 @@ class CrossPoint:
             link: 当前链路
             ring_bridge: ring_bridge队列字典
             eject_queues: eject_queues队列字典
-            can_eject_in_order_func: 保序检查函数
 
         Returns:
             tuple: (是否成功: bool, 失败原因: str)
-                失败原因: "" (成功), "order" (保序), "capacity" (容量), "entry" (Entry不足)
+                失败原因: "" (成功), "capacity" (容量), "entry" (Entry不足)
         """
         # 1. 获取队列和容量限制
         if direction in ["TL", "TR"]:
@@ -443,24 +436,15 @@ class CrossPoint:
             queue = eject_queues[direction][key]
             capacity = self.config.EQ_IN_FIFO_DEPTH
 
-        # # 2. 检查保序条件（第一优先级）
-        # if can_eject_in_order_func and not can_eject_in_order_func(flit, target_node, direction):
-        #     # 保序检查失败
-        #     if direction in ["TL", "TR"]:
-        #         flit.ordering_blocked_eject_h += 1
-        #     else:
-        #         flit.ordering_blocked_eject_v += 1
-        #     return False, "order"
-
-        # 3. 检查队列容量（第二优先级）
+        # 2. 检查队列容量（第二优先级）
         if len(queue) >= capacity:
             return False, "capacity"
 
-        # 4. 检查是否有对应等级的entry可用（第三优先级）
+        # 3. 检查是否有对应等级的entry可用（第三优先级）
         if not self._has_available_entry_for_flit(flit, direction, key):
             return False, "entry"
 
-        # 5. 尝试占用最佳Entry
+        # 4. 尝试占用最佳Entry
         success = self._occupy_best_available_entry(flit, direction, key, target_node, link)
         return (True, "") if success else (False, "entry")
 
