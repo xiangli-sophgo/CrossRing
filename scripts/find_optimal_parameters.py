@@ -1,5 +1,6 @@
 import sys
 import os
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.core import *
@@ -745,7 +746,7 @@ def create_optimization_history(trials, save_dir):
     fig.add_trace(go.Scatter(x=trial_numbers, y=best_values, mode="lines+markers", name="最佳值历史", line=dict(color="green")), row=1, col=2)
 
     # Trial状态分布
-    states = [t.state.name if hasattr(t.state, 'name') else str(t.state) for t in trials]
+    states = [t.state.name if hasattr(t.state, "name") else str(t.state) for t in trials]
     state_counts = pd.Series(states).value_counts()
     fig.add_trace(go.Pie(labels=state_counts.index, values=state_counts.values, name="状态"), row=2, col=1)
 
@@ -1275,7 +1276,7 @@ def find_optimal_parameters():
             sim.config.ETag_BOTHSIDE_UPGRADE = param9
 
             try:
-                sim.run_simulation(max_cycles=10000, print_interval=10000)
+                sim.run_simulation(max_time=10000, print_interval=10000)
                 bw = sim.get_results().get("Total_sum_BW", 0)
             except Exception as e:
                 print(f"[{traffic_file}][RPT {rpt}] Sim failed for params: {param1}, {param2}, {param3}, {param4}, {param5}, {param6}, {param7}, {param8}, {param9}")

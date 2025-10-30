@@ -86,7 +86,10 @@ SDMA_RW_GAP: .inf  # numpy.inf
 # 通道规格
 CHANNEL_SPEC:
   gdma: 2
+  sdma: 0
+  cdma: 0
   ddr: 2
+  l2m: 0
 
 # 带宽限制 (GB/s) - 注释掉表示无限制
 GDMA_BW_LIMIT: 128
@@ -111,7 +114,7 @@ IN_ORDER_PACKET_CATEGORIES:
 TL_ALLOWED_SOURCE_NODES: [2, 3, 6, 7, 10, 11, 14, 15, 18, 19]  
 TR_ALLOWED_SOURCE_NODES: [0, 1, 4, 5, 8, 9, 12, 13, 16, 17]    
 TU_ALLOWED_SOURCE_NODES: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]      
-TD_ALLOWED_SOURCE_NODES: [0, 1, 2, 3, 4, 5, 6, 7 ] 
+TD_ALLOWED_SOURCE_NODES: [0, 1, 2, 3, 4, 5, 6, 7] 
 
 # IP 频率变换 FIFO 深度 (使用默认值)
 IP_L2H_FIFO_DEPTH: 3

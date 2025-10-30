@@ -88,7 +88,7 @@ def run_single_simulation(sim_params):
         )
 
         # 运行仿真
-        sim.run_simulation(max_cycles=10000, print_interval=5000)
+        sim.run_simulation(max_time=10000, print_interval=5000)
 
         # Get results
         results = sim.get_results()

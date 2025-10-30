@@ -93,13 +93,7 @@ class CrossRingConfig:
         self.IP_H2L_H_FIFO_DEPTH = args.IP_H2L_H_FIFO_DEPTH
         self.IP_H2L_L_FIFO_DEPTH = args.IP_H2L_L_FIFO_DEPTH
 
-        self.CHANNEL_SPEC = {
-            "gdma": 2,  # → RN 侧
-            "sdma": 2,  # → RN 侧
-            "cdma": 2,  # → RN 侧
-            "ddr": 2,  # → SN 侧
-            "l2m": 2,  # → SN 侧
-        }
+        self.CHANNEL_SPEC = args.CHANNEL_SPEC
         self.CH_NAME_LIST = []
         for key in self.CHANNEL_SPEC:
             for idx in range(self.CHANNEL_SPEC[key]):
@@ -538,5 +532,13 @@ class CrossRingConfig:
 
         # 添加仲裁器配置支持
         parser.add_argument("--arbitration", type=dict, default=default_config.get("arbitration", {}), help="Arbitration configuration for different queue types")
+
+        # 通道规格配置
+        parser.add_argument(
+            "--CHANNEL_SPEC",
+            type=dict,
+            default=default_config.get("CHANNEL_SPEC", {"gdma": 2, "sdma": 2, "cdma": 2, "ddr": 2, "l2m": 2}),
+            help="Channel specification for different IP types"
+        )
 
         return parser.parse_args()

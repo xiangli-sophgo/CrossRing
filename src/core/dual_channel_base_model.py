@@ -170,8 +170,7 @@ class DualChannelBaseModel(BaseModel):
 
         simulation_end = time.perf_counter()
         simulation_time = simulation_end - simulation_start
-        self.performance_monitor.method_times["total_simulation"] = [simulation_time]
-        self.performance_monitor.call_counts["total_simulation"] = 1
+        self.simulation_total_time = simulation_time
 
         if self.verbose:
             print(f"Simulation completed in {simulation_time:.2f} seconds")

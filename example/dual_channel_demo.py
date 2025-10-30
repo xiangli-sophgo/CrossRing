@@ -68,7 +68,7 @@ def main():
     print("开始双通道仿真...")
 
     # 运行仿真
-    sim.run_simulation(max_cycles=6000, print_interval=2000)
+    sim.run_simulation(max_time=6000, print_interval=2000)
 
 
 if __name__ == "__main__":

@@ -937,11 +937,6 @@ class NetworkLinkVisualizer:
 
         self.cycle = 0
         self.paused = False
-        # ============  平滑动画配置 ==============
-        self.enable_smooth = True  # 是否启用平滑动画
-        self.animation_frames = 10  # 每个cycle的插值帧数（越大越平滑但越慢）
-        self._prev_snapshot = None  # 上一帧的flit位置快照
-        self._just_animated = False  # 标记是否刚完成动画(避免重复暂停)
         # ============  flit‑click tracking ==============
         self.tracked_pid = None  # 当前追踪的 packet_id (None = 不追踪)
         self.rect_info_map = {}  # rect → (text_obj, packet_id)
@@ -1457,57 +1452,19 @@ class NetworkLinkVisualizer:
                 }
                 self.histories[i].append((cycle, snap, meta))
 
-        # 保存上一帧快照（用于平滑动画插值）
-        _prev = getattr(self, "last_snapshot", None)
-        # 检查是否是初始帧或切换了网络
-        last_network_idx = getattr(self, "_last_network_idx", None)
-        is_first_frame = _prev is None or not isinstance(_prev, dict) or len(_prev) == 0
-        network_switched = last_network_idx is not None and last_network_idx != self.selected_network_index
-
-        if is_first_frame or network_switched:
-            self._prev_snapshot = None
-            # 清除旧的快照，避免跨网络插值
-            if network_switched:
-                self.last_snapshot = None
-                self._clear_dynamic_artists()
-        else:
-            self._prev_snapshot = _prev
-
         # 渲染当前选中网络的快照
         if self.networks is not None:
             current_net = self.networks[self.selected_network_index]
             # 处理2-tuple或3-tuple格式的link key
             render_snap = {link_key[:2]: [f if f is not None else None for f in flits] for link_key, flits in current_net.links.items()}
-
-            # 平滑动画：若启用且非暂停且有上一帧数据，进行插值渲染
-            if self.enable_smooth and not self.paused and self._prev_snapshot is not None and not skip_pause:
-                self._render_snapshot_with_interpolation(self._prev_snapshot, render_snap)
-                self._just_animated = True
-            else:
-                self._render_snapshot(render_snap)
-
-            # 保存当前快照和网络索引供下次使用
-            self.last_snapshot = copy.deepcopy(render_snap)
-            self._last_network_idx = self.selected_network_index
-
+            self._render_snapshot(render_snap)
             # 若已有选中节点，实时更新右侧 Piece 视图
             if self._selected_node is not None:
                 self._refresh_piece_view()
             self.ax.set_title(current_net.name)
         else:
             # 处理2-tuple或3-tuple格式的link key
-            render_snap = {link_key[:2]: [f if f is not None else None for f in flits] for link_key, flits in self.network.links.items()}
-
-            # 平滑动画：若启用且非暂停且有上一帧数据，进行插值渲染
-            if self.enable_smooth and not self.paused and self._prev_snapshot is not None and not skip_pause:
-                self._render_snapshot_with_interpolation(self._prev_snapshot, render_snap)
-                self._just_animated = True
-            else:
-                self._render_snapshot(render_snap)
-
-            # 保存当前快照供下次使用
-            self.last_snapshot = copy.deepcopy(render_snap)
-
+            self._render_snapshot({link_key[:2]: [f if f is not None else None for f in flits] for link_key, flits in self.network.links.items()})
             # 若已有选中节点，实时更新右侧 Piece 视图
             if self._selected_node is not None:
                 self._refresh_piece_view()
@@ -1515,11 +1472,7 @@ class NetworkLinkVisualizer:
         if cycle and self.cycle % 10 == 0:
             self._update_status_display()
         if not skip_pause:
-            if getattr(self, "_just_animated", False):
-                # 动画阶段已消耗本周期的时间，这里不再额外暂停
-                self._just_animated = False
-            else:
-                plt.pause(self.pause_interval)
+            plt.pause(self.pause_interval)
         return self.ax.patches
 
     def _update_status_display(self):
@@ -1642,195 +1595,8 @@ class NetworkLinkVisualizer:
             self._draw_state(snap)
             self._refresh_piece_view()
 
-    def _render_snapshot_with_interpolation(self, prev_snapshot, curr_snapshot):
-        """
-        渲染带插值信息的快照，使flit在slot之间平滑移动
-        Args:
-            prev_snapshot: 上一帧的快照 {(src, dest): [flit_list]}
-            curr_snapshot: 当前帧的快照 {(src, dest): [flit_list]}
-        """
-        # 动态计算帧数：pause_interval越小，帧数越少
-        # 当速度很快时（pause_interval < 0.05），减少帧数以提高响应速度
-        n_frames = max(2, min(10, int(self.pause_interval * 100)))
-        frame_interval = self.pause_interval / n_frames  # 根据总暂停时间计算每帧间隔
-
-        for frame_idx in range(n_frames + 1):
-            t = frame_idx / n_frames  # 插值参数 0→1
-
-            # 计算插值后的快照（包括消失的flit）
-            interpolated_snap = self._interpolate_snapshots(prev_snapshot, curr_snapshot, t)
-
-            # 渲染插值帧
-            self._render_snapshot(interpolated_snap)
-
-            # 刷新画布
-            self.fig.canvas.draw_idle()
-            self.fig.canvas.flush_events()
-
-            # 等待帧间隔（最后一帧不等待）
-            if frame_idx < n_frames:
-                plt.pause(frame_interval)
-
-    def _interpolate_snapshots(self, prev_snap, curr_snap, t):
-        """
-        在两个快照之间进行线性插值，使flit按比例在slot之间移动
-        Args:
-            prev_snap: 上一帧快照
-            curr_snap: 当前帧快照
-            t: 插值参数 (0=上一帧位置, 1=当前帧位置)
-        Returns:
-            插值后的快照，包含位置插值信息和消失的flit
-        """
-        # 构建flit ID到位置的映射
-        prev_flit_positions = self._build_flit_position_map(prev_snap)
-        curr_flit_positions = self._build_flit_position_map(curr_snap)
-
-        # 对于当前帧中的每个flit，计算插值位置
-        interpolated = {}
-
-        # 首先处理当前帧中存在的flit
-        for link_key, flit_list in curr_snap.items():
-            interpolated[link_key] = list(flit_list)  # 复制列表
-
-            for slot_idx, flit in enumerate(flit_list):
-                if flit is None:
-                    continue
-
-                # 构建flit唯一标识
-                flit_id = (getattr(flit, "packet_id", None), getattr(flit, "flit_id", None))
-
-                # 查找该flit在上一帧的位置
-                prev_info = prev_flit_positions.get(flit_id)
-
-                if prev_info is not None:
-                    # Flit在上一帧存在，需要插值
-                    prev_link, prev_slot = prev_info
-
-                    # 只有在同一link上移动时才插值，否则直接显示在当前位置
-                    if prev_link == link_key:
-                        # 创建带插值信息的flit代理
-                        flit_attrs = {}
-                        for k in dir(flit):
-                            if not k.startswith('_'):
-                                try:
-                                    flit_attrs[k] = getattr(flit, k)
-                                except AttributeError:
-                                    pass
-                        proxy = SimpleNamespace(
-                            **flit_attrs,
-                            _interp_t=t,
-                            _prev_slot=prev_slot,
-                            _curr_slot=slot_idx
-                        )
-                        interpolated[link_key][slot_idx] = proxy
-
-        # 然后处理消失的flit（在上一帧存在但当前帧不存在）
-        # 使用单独的结构存储消失的flit，避免与正常flit冲突
-        fading_out_flits = {}
-
-        for link_key, prev_flit_list in prev_snap.items():
-            # prev_flit_list格式: [srcNode, slot0, slot1, ..., slotN, destNode]
-            # 只处理中间的slot（跳过首尾Node）
-            for slot_idx in range(1, len(prev_flit_list) - 1):
-                prev_flit = prev_flit_list[slot_idx]
-                if prev_flit is None:
-                    continue
-
-                # 构建flit唯一标识
-                flit_id = (getattr(prev_flit, "packet_id", None), getattr(prev_flit, "flit_id", None))
-
-                # 检查该flit是否在当前帧消失或移动到了其他链路
-                curr_pos = curr_flit_positions.get(flit_id)
-                if curr_pos is None or curr_pos[0] != link_key:
-                    # Flit消失了，需要显示它从上一位置移出的过程
-                    # 创建一个"离开"状态的代理
-                    flit_attrs = {}
-                    for k in dir(prev_flit):
-                        if not k.startswith('_'):
-                            try:
-                                flit_attrs[k] = getattr(prev_flit, k)
-                            except AttributeError:
-                                pass
-
-                    # 消失flit：在原位置收缩（不移动到下一个slot）
-                    # _prev_slot和_curr_slot都设为当前slot，表示不移动
-                    proxy = SimpleNamespace(
-                        **flit_attrs,
-                        _interp_t=t,
-                        _prev_slot=slot_idx,
-                        _curr_slot=slot_idx,  # 保持在原位置
-                        _fading_out=True
-                    )
-                    # 存储消失的flit，key使用(link_key, slot_idx)
-                    if link_key not in fading_out_flits:
-                        fading_out_flits[link_key] = []
-                    fading_out_flits[link_key].append((slot_idx, proxy))
-
-        # 将消失的flit添加回interpolated
-        # 注意：只有当该slot当前为None时才放入，避免覆盖新flit
-        for link_key, fading_list in fading_out_flits.items():
-            if link_key not in interpolated:
-                # 如果link不在interpolated中，需要创建
-                max_slot = max(slot_idx for slot_idx, _ in fading_list)
-                interpolated[link_key] = [None] * (max_slot + 2)  # +2确保有足够空间
-
-            for slot_idx, proxy in fading_list:
-                # 扩展列表如果需要
-                while slot_idx >= len(interpolated[link_key]):
-                    interpolated[link_key].append(None)
-
-                # 只有当前slot为None时才放入消失的flit，避免覆盖新来的flit
-                # 如果slot已被占据，说明新flit到来，旧flit的消失动画就不显示了
-                current_val = interpolated[link_key][slot_idx]
-                if current_val is None:
-                    interpolated[link_key][slot_idx] = proxy
-                else:
-                    if isinstance(current_val, list):
-                        slot_payload = current_val
-                    else:
-                        slot_payload = [current_val]
-                    slot_payload.append(proxy)
-                    interpolated[link_key][slot_idx] = slot_payload
-
-        return interpolated
-
-    def _build_flit_position_map(self, snapshot):
-        """
-        构建flit ID到位置的映射
-        Returns:
-            {(packet_id, flit_id): (link_key, slot_index)}
-        """
-        position_map = {}
-        for link_key, flit_list in snapshot.items():
-            for slot_idx, slot_content in enumerate(flit_list):
-                for entry in self._flatten_slot_entries(slot_content):
-                    if entry is None or not hasattr(entry, "packet_id"):
-                        continue
-                    flit_id = (getattr(entry, "packet_id", None), getattr(entry, "flit_id", None))
-                    position_map[flit_id] = (link_key, slot_idx)
-        return position_map
-
     def _draw_state(self, snapshot):
         self._render_snapshot(snapshot)
-
-    def _clear_dynamic_artists(self):
-        """移除当前所有flit和关联文本图元"""
-        self.rect_info_map.clear()
-        for info in self.link_artists.values():
-            for art in info.get("flit_artists", []):
-                try:
-                    art.remove()
-                except Exception:
-                    pass
-            info["flit_artists"] = []
-
-    def _flatten_slot_entries(self, slot_content):
-        """展开slot内容，支持嵌套list/tuple结构"""
-        if isinstance(slot_content, (list, tuple)):
-            for item in slot_content:
-                yield from self._flatten_slot_entries(item)
-        else:
-            yield slot_content
 
     def _render_snapshot(self, snapshot):
         # Determine tag source: use historical tags during replay, else live network tags
@@ -1840,7 +1606,16 @@ class NetworkLinkVisualizer:
             tags_dict = getattr(self.network, "links_tag", {})
         # keep snapshot for later info refresh
         self.last_snapshot = snapshot
-        self._clear_dynamic_artists()
+        # 重置 flit→文本映射
+        self.rect_info_map.clear()
+        # 清掉上一帧的 flit 图元
+        for link_id, info in self.link_artists.items():
+            for art in info.get("flit_artists", []):
+                try:
+                    art.remove()
+                except Exception:
+                    pass
+            info["flit_artists"] = []
 
         slot_size = 0.2  # slot方块边长
         flit_size = 0.2  # flit方块边长(略小于slot)
@@ -1874,8 +1649,7 @@ class NetworkLinkVisualizer:
                 continue
 
             flit_artists = []
-            slot_segment = flit_list[1:-1]
-            for i, slot_content in enumerate(slot_segment):
+            for i, flit in enumerate(flit_list[1:-1]):
                 if i >= len(target_slots):
                     break
 
@@ -1883,10 +1657,9 @@ class NetworkLinkVisualizer:
                 slot_pos, slot_id = target_slots[i]
                 slot_x, slot_y = slot_pos
 
-                base_x = slot_x + slot_size / 2
-                base_y = slot_y + slot_size / 2
-
-                entries = [entry for entry in self._flatten_slot_entries(slot_content) if entry is not None]
+                # 计算flit在slot中心的位置
+                x = slot_x + slot_size / 2
+                y = slot_y + slot_size / 2
 
                 # 获取tag信息
                 idx_slice = i + 1
@@ -1897,107 +1670,68 @@ class NetworkLinkVisualizer:
                     if hasattr(slot_obj, "itag_reserved") and slot_obj.itag_reserved:
                         tag = [slot_obj.itag_reserver_id, slot_obj.itag_direction]
 
-                for entry in entries:
-                    if not hasattr(entry, "packet_id"):
-                        continue
-                    x = base_x
-                    y = base_y
+                if flit is None:
+                    # 空slot，如果有tag画三角
+                    if tag is not None:
+                        t_size = flit_size * 0.6
+                        triangle = plt.Polygon(
+                            [
+                                (x, y + t_size / 2),
+                                (x - t_size / 2, y - t_size / 4),
+                                (x + t_size / 2, y - t_size / 4),
+                            ],
+                            color="red",
+                        )
+                        triangle.tag_val = tag
+                        self.ax.add_patch(triangle)
+                        flit_artists.append(triangle)
+                    continue
 
-                    # 用于收缩动画的flit尺寸
-                    draw_width = flit_size
-                    draw_height = flit_size
-                    draw_x = x
-                    draw_y = y
+                # 绘制flit矩形
+                face, alpha, lw, edge = self._get_flit_style(
+                    flit,
+                    use_highlight=self.use_highlight,
+                    expected_packet_id=self.highlight_pid,
+                )
 
-                    if hasattr(entry, "_interp_t") and hasattr(entry, "_prev_slot") and hasattr(entry, "_curr_slot"):
-                        t = entry._interp_t
-                        prev_slot_in_list = entry._prev_slot
-                        curr_slot_in_list = entry._curr_slot
-                        is_fading_out = getattr(entry, "_fading_out", False)
+                rect = Rectangle(
+                    (x - flit_size / 2, y - flit_size / 2),
+                    flit_size,
+                    flit_size,
+                    facecolor=face,
+                    linewidth=lw,
+                    alpha=alpha,
+                    edgecolor=edge,
+                )
+                self.ax.add_patch(rect)
+                flit_artists.append(rect)
 
-                        if prev_slot_in_list >= 1:
-                            prev_slot_idx_in_targets = prev_slot_in_list - 1
+                # 文本标签
+                pid, fid = flit.packet_id, flit.flit_id
+                label = f"{pid}.{fid}"
 
-                            if is_fading_out:
-                                # 消失flit：在原位置按方向收缩
-                                # 不移动位置，只改变矩形大小
-                                if is_horizontal:
-                                    # 水平收缩
-                                    draw_width = flit_size * (1.0 - t)
-                                    if is_forward:
-                                        # 前进向右：固定右边，左边向右收缩
-                                        draw_x = x + flit_size / 2 - draw_width / 2
-                                    else:
-                                        # 前进向左：固定左边，右边向左收缩
-                                        draw_x = x - flit_size / 2 + draw_width / 2
-                                else:
-                                    # 垂直收缩
-                                    draw_height = flit_size * (1.0 - t)
-                                    if is_forward:
-                                        # 前进向上：固定上边，底边向上收缩
-                                        draw_y = y + flit_size / 2 - draw_height / 2
-                                    else:
-                                        # 前进向下：固定下边，顶边向下收缩
-                                        draw_y = y - flit_size / 2 + draw_height / 2
-                            elif curr_slot_in_list >= 1:
-                                # 正常移动的flit
-                                curr_slot_idx_in_targets = curr_slot_in_list - 1
-                                if curr_slot_idx_in_targets == i and prev_slot_idx_in_targets < len(target_slots):
-                                    prev_slot_pos, _ = target_slots[prev_slot_idx_in_targets]
-                                    prev_x = prev_slot_pos[0] + slot_size / 2
-                                    prev_y = prev_slot_pos[1] + slot_size / 2
-                                    draw_x = prev_x + t * (x - prev_x)
-                                    draw_y = prev_y + t * (y - prev_y)
+                if is_horizontal:
+                    # 标签放上下
+                    y_text = y - slot_size * 2 if is_forward else y + slot_size * 2
+                    txt = self.ax.text(x, y_text, label, ha="center", va="center", fontsize=8)
+                else:
+                    # 标签放左右
+                    text_x = x + slot_size * 2 if is_forward else x - slot_size * 2
+                    ha = "left" if is_forward else "right"
+                    txt = self.ax.text(text_x, y, label, ha=ha, va="center", fontsize=8)
 
-                    face, alpha, lw, edge = self._get_flit_style(
-                        entry,
-                        use_highlight=self.use_highlight,
-                        expected_packet_id=self.highlight_pid,
-                    )
+                txt.set_visible(self.use_highlight and pid == self.tracked_pid)
+                self.rect_info_map[rect] = (txt, flit, tag)
+                flit_artists.append(txt)
 
-                    # 消失flit的透明度也随时间降低
-                    if getattr(entry, "_fading_out", False):
-                        alpha = max(0.2, alpha * (1.0 - entry._interp_t))
-
-                    rect = Rectangle(
-                        (draw_x - draw_width / 2, draw_y - draw_height / 2),
-                        draw_width,
-                        draw_height,
-                        facecolor=face,
-                        linewidth=lw,
-                        alpha=alpha,
-                        edgecolor=edge,
-                    )
-                    self.ax.add_patch(rect)
-                    flit_artists.append(rect)
-
-                    # 文本标签
-                    pid, fid = entry.packet_id, entry.flit_id
-                    label = f"{pid}.{fid}"
-
-                    if is_horizontal:
-                        y_text = draw_y - slot_size * 2 if is_forward else draw_y + slot_size * 2
-                        txt = self.ax.text(draw_x, y_text, label, ha="center", va="center", fontsize=8)
-                    else:
-                        text_x = draw_x + slot_size * 2 if is_forward else draw_x - slot_size * 2
-                        ha = "left" if is_forward else "right"
-                        txt = self.ax.text(text_x, draw_y, label, ha=ha, va="center", fontsize=8)
-
-                    # 消失flit的文本透明度也降低
-                    if getattr(entry, "_fading_out", False):
-                        txt.set_alpha(max(0.2, 0.8 * (1.0 - entry._interp_t)))
-
-                    txt.set_visible(self.use_highlight and pid == self.tracked_pid)
-                    self.rect_info_map[rect] = (txt, entry, tag)
-                    flit_artists.append(txt)
-
+                # 绘制tag三角形
                 if tag is not None:
                     t_size = flit_size * 0.6
                     triangle = plt.Polygon(
                         [
-                            (base_x, base_y + t_size / 2),
-                            (base_x - t_size / 2, base_y - t_size / 4),
-                            (base_x + t_size / 2, base_y - t_size / 4),
+                            (x, y + t_size / 2),
+                            (x - t_size / 2, y - t_size / 4),
+                            (x + t_size / 2, y - t_size / 4),
                         ],
                         color="red",
                     )
@@ -2067,6 +1801,19 @@ class NetworkLinkVisualizer:
         # 普通模式：直接取调色板色
         return self._palette_color(flit.packet_id)
 
+    def _on_select_network(self, idx):
+        """切换显示网络索引 idx（0/1/2）"""
+        self.selected_network_index = idx
+        # 刷新显示（调用 update 渲染当前网络）
+        if self.networks is not None:
+            self.update(
+                self.networks,
+                cycle=None,
+                # expected_packet_id=self.highlight_pid,
+                # use_highlight=self.use_highlight,
+                skip_pause=True,
+            )
+
     # ------------------------------------------------------------------
     # (removed hover annotation and motion event handler)
     # ------------------------------------------------------------------
@@ -2100,7 +1847,6 @@ class NetworkLinkVisualizer:
     def _on_select_network(self, idx):
         """切换显示网络索引 idx（0/1/2）"""
         self.selected_network_index = idx
-        self._clear_dynamic_artists()
         # 刷新显示（调用 update 渲染当前网络）
         if self.networks is not None:
             self.update(

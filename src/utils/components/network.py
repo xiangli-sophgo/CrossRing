@@ -1104,10 +1104,13 @@ class Network:
                 if hasattr(flit, "allowed_eject_directions") and flit.allowed_eject_directions is not None:
                     if eject_direction not in flit.allowed_eject_directions:
                         # 方向不允许，直接继续绕环
+                        # 仅在首次尝试下环时记录为"保序导致绕环"，避免重复计数已绕环的flit
                         if eject_direction in ["TL", "TR"]:
-                            flit.ordering_blocked_eject_h += 1
+                            if flit.eject_attempts_h <= 1:
+                                flit.ordering_blocked_eject_h += 1
                         else:
-                            flit.ordering_blocked_eject_v += 1
+                            if flit.eject_attempts_v <= 1:
+                                flit.ordering_blocked_eject_v += 1
                         state = self._analyze_flit_state(flit, current, next_node)
                         self._continue_looping(flit, link, state["next_pos"])
                         return

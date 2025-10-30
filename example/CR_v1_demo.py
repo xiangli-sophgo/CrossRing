@@ -40,7 +40,7 @@ def main():
     sim.setup_visualization(plot_link_state=False)
 
     # Run the simulation
-    sim.run_simulation(max_cycles=1000, print_interval=1000)
+    sim.run_simulation(max_time=1000, print_interval=1000)
 
 
 if __name__ == "__main__":

@@ -248,7 +248,7 @@ def run_single_simulation(traffic_file, topo_type, model_type, config_path, resu
 
     # 运行仿真
     start_time = time.time()
-    sim.run_simulation(max_cycles=6000, print_interval=2000)
+    sim.run_simulation(max_time=6000, print_interval=2000)
     end_time = time.time()
 
     print(f"完成仿真: {traffic_file}, 耗时: {end_time - start_time:.2f}秒")

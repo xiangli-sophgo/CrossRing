@@ -23,100 +23,6 @@ from src.utils.arbitration import create_arbiter_from_config
 import threading
 
 
-class PerformanceMonitor:
-    """Performance monitoring utility for tracking simulation metrics"""
-
-    def __init__(self):
-        self.method_times = {}
-        self.call_counts = {}
-        self.cache_hits = {}
-        self.cache_misses = {}
-
-    def time_method(self, method_name):
-        """Decorator to time method execution"""
-
-        def decorator(func):
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                start_time = time.perf_counter()
-                result = func(*args, **kwargs)
-                end_time = time.perf_counter()
-
-                execution_time = end_time - start_time
-                if method_name not in self.method_times:
-                    self.method_times[method_name] = []
-                    self.call_counts[method_name] = 0
-
-                self.method_times[method_name].append(execution_time)
-                self.call_counts[method_name] += 1
-
-                return result
-
-            return wrapper
-
-        return decorator
-
-    def record_cache_hit(self, cache_name):
-        """Record a cache hit"""
-        if cache_name not in self.cache_hits:
-            self.cache_hits[cache_name] = 0
-        self.cache_hits[cache_name] += 1
-
-    def record_cache_miss(self, cache_name):
-        """Record a cache miss"""
-        if cache_name not in self.cache_misses:
-            self.cache_misses[cache_name] = 0
-        self.cache_misses[cache_name] += 1
-
-    def get_summary(self):
-        """Get performance summary statistics"""
-        summary = {}
-
-        # Method timing statistics
-        for method_name, times in self.method_times.items():
-            if times:
-                summary[f"{method_name}_avg_time"] = sum(times) / len(times)
-                summary[f"{method_name}_total_time"] = sum(times)
-                summary[f"{method_name}_call_count"] = self.call_counts[method_name]
-                summary[f"{method_name}_max_time"] = max(times)
-                summary[f"{method_name}_min_time"] = min(times)
-
-        # Cache statistics
-        for cache_name in set(list(self.cache_hits.keys()) + list(self.cache_misses.keys())):
-            hits = self.cache_hits.get(cache_name, 0)
-            misses = self.cache_misses.get(cache_name, 0)
-            total = hits + misses
-
-            summary[f"{cache_name}_cache_hits"] = hits
-            summary[f"{cache_name}_cache_misses"] = misses
-            summary[f"{cache_name}_cache_hit_rate"] = hits / total if total > 0 else 0
-
-        return summary
-
-
-@lru_cache(maxsize=None)
-def _parse_traffic_file(abs_path: str, net_freq: int):
-    """
-    解析 traffic 文件并缓存结果。
-    返回 (lines, (read_req, write_req, read_flit, write_flit))
-    """
-    lines = []
-    read_req = write_req = read_flit = write_flit = 0
-    with open(abs_path, "r") as f:
-        for raw in f:
-            t, src, src_t, dst, dst_t, op, burst = raw.strip().split(",")
-            burst = int(burst)
-            tup = (int(t) * net_freq, int(src), src_t, int(dst), dst_t, op, burst)
-            lines.append(tup)
-            if op == "R":
-                read_req += 1
-                read_flit += burst
-            else:
-                write_req += 1
-                write_flit += burst
-    return lines, (read_req, write_req, read_flit, write_flit)
-
-
 class BaseModel:
     # 全局packet_id生成器（从Node类迁移）
     _global_packet_id = 0
@@ -273,7 +179,7 @@ class BaseModel:
 
     def run_simulation(
         self,
-        max_cycles: int = 10000,
+        max_time: int = 10000,
         print_interval: int = 1000,
     ) -> None:
         """
@@ -287,7 +193,7 @@ class BaseModel:
         self.initial()
 
         # 设置仿真参数（在initial()之后，避免被覆盖）
-        self.end_time = max_cycles
+        self.end_time = max_time
         self.print_interval = print_interval
 
         # 运行仿真
@@ -306,18 +212,9 @@ class BaseModel:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
 
         # 智能设置各network的双侧升级：全局配置 OR (双侧下环 AND 在保序列表中)
-        self.req_network.ETag_BOTHSIDE_UPGRADE = (
-            self.config.ETag_BOTHSIDE_UPGRADE or
-            (self.config.ORDERING_PRESERVATION_MODE == 2 and "REQ" in self.config.IN_ORDER_PACKET_CATEGORIES)
-        )
-        self.rsp_network.ETag_BOTHSIDE_UPGRADE = (
-            self.config.ETag_BOTHSIDE_UPGRADE or
-            (self.config.ORDERING_PRESERVATION_MODE == 2 and "RSP" in self.config.IN_ORDER_PACKET_CATEGORIES)
-        )
-        self.data_network.ETag_BOTHSIDE_UPGRADE = (
-            self.config.ETag_BOTHSIDE_UPGRADE or
-            (self.config.ORDERING_PRESERVATION_MODE == 2 and "DATA" in self.config.IN_ORDER_PACKET_CATEGORIES)
-        )
+        self.req_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE == 2 and "REQ" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE == 2 and "RSP" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        self.data_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE == 2 and "DATA" in self.config.IN_ORDER_PACKET_CATEGORIES)
 
         # Initialize arbiters based on configuration
         arbitration_config = getattr(self.config, "arbitration", {})
@@ -499,9 +396,8 @@ class BaseModel:
         self.total_unweighted_bw_stat = 0
         self.total_weighted_bw_stat = 0
 
-        # Performance monitoring
-        self.performance_monitor = PerformanceMonitor()
-        self.start_time = time.time()
+        # Performance monitoring - simple simulation time tracking
+        self.simulation_start_time = None
 
         # Initialize per-node FIFO ETag statistics after networks are created
         self._initialize_per_node_etag_stats()
@@ -631,8 +527,7 @@ class BaseModel:
         # Record simulation performance
         simulation_end = time.perf_counter()
         simulation_time = simulation_end - simulation_start
-        self.performance_monitor.method_times["total_simulation"] = [simulation_time]
-        self.performance_monitor.call_counts["total_simulation"] = 1
+        self.simulation_total_time = simulation_time
 
         if self.verbose:
             print(f"Simulation completed in {simulation_time:.2f} seconds")
@@ -789,21 +684,6 @@ class BaseModel:
             queue = network.inject_queues[direction]
             if queue_pre[in_pos] and len(queue[in_pos]) < self.config.RB_OUT_FIFO_DEPTH:
                 flit = queue_pre[in_pos]
-
-                # 在上环时分配order_id（只在首次上环时分配）
-                if flit.src_dest_order_id == -1:
-                    src_node = flit.source_original if flit.source_original != -1 else flit.source
-                    dest_node = flit.destination_original if flit.destination_original != -1 else flit.destination
-                    src_type = flit.original_source_type if flit.original_source_type else flit.source_type
-                    dest_type = flit.original_destination_type if flit.original_destination_type else flit.destination_type
-
-                    flit.src_dest_order_id = Flit.get_next_order_id(
-                        src_node, src_type,
-                        dest_node, dest_type,
-                        flit.flit_type.upper(),
-                        self.config.ORDERING_GRANULARITY
-                    )
-
                 flit.departure_inject_cycle = self.cycle
                 flit.flit_position = f"IQ_{direction}"
                 queue[in_pos].append(flit)
@@ -1672,6 +1552,13 @@ class BaseModel:
             slot = network.links_tag[link][0]
             if not slot.itag_reserved:
                 if self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction):
+                    # 首次上环时分配order_id（从RB进入垂直环）
+                    if flit.src_dest_order_id == -1:
+                        src_node = flit.source_original if flit.source_original != -1 else flit.source
+                        dest_node = flit.destination_original if flit.destination_original != -1 else flit.destination
+                        src_type = flit.original_source_type if flit.original_source_type else flit.source_type
+                        dest_type = flit.original_destination_type if flit.original_destination_type else flit.destination_type
+                        flit.src_dest_order_id = Flit.get_next_order_id(src_node, src_type, dest_node, dest_type, flit.flit_type.upper(), self.config.ORDERING_GRANULARITY)
                     return flit
                 return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
@@ -1683,6 +1570,13 @@ class BaseModel:
                 slot.clear_itag()
 
                 if self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction):
+                    # 首次上环时分配order_id（从RB进入垂直环）
+                    if flit.src_dest_order_id == -1:
+                        src_node = flit.source_original if flit.source_original != -1 else flit.source
+                        dest_node = flit.destination_original if flit.destination_original != -1 else flit.destination
+                        src_type = flit.original_source_type if flit.original_source_type else flit.source_type
+                        dest_type = flit.original_destination_type if flit.original_destination_type else flit.destination_type
+                        flit.src_dest_order_id = Flit.get_next_order_id(src_node, src_type, dest_node, dest_type, flit.flit_type.upper(), self.config.ORDERING_GRANULARITY)
                     return flit
                 return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
 
@@ -1775,7 +1669,7 @@ class BaseModel:
             col_end = col_start + interval * (self.config.NUM_ROW - 1)  # 最后一行节点
 
             # 保存起始位置的tag（使用垂直自环键）
-            v_key_start = (col_start, col_start, 'v')
+            v_key_start = (col_start, col_start, "v")
             last_position = network.links_tag[v_key_start][0]
 
             # 前向传递：从起点到终点
@@ -1787,7 +1681,7 @@ class BaseModel:
 
                 for j in range(self.config.SLICE_PER_LINK_VERTICAL - 1, -1, -1):
                     if j == 0 and current_node == col_end:
-                        v_key_current = (current_node, current_node, 'v')
+                        v_key_current = (current_node, current_node, "v")
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[v_key_current][-1]
                     elif j == 0:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node + interval, current_node)][-1]
@@ -1795,7 +1689,7 @@ class BaseModel:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
 
             # 终点自环处理（使用垂直自环键）
-            v_key_end = (col_end, col_end, 'v')
+            v_key_end = (col_end, col_end, "v")
             network.links_tag[v_key_end][-1] = network.links_tag[v_key_end][0]
             network.links_tag[v_key_end][0] = network.links_tag[(col_end - interval, col_end)][-1]
 
@@ -1807,7 +1701,7 @@ class BaseModel:
 
                 for j in range(self.config.SLICE_PER_LINK_VERTICAL - 1, -1, -1):
                     if j == 0 and current_node == col_start:
-                        v_key_current = (current_node, current_node, 'v')
+                        v_key_current = (current_node, current_node, "v")
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[v_key_current][-1]
                     elif j == 0:
                         network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node - interval, current_node)][-1]
@@ -1825,7 +1719,7 @@ class BaseModel:
         for row_start in range(0, self.config.NUM_NODE, self.config.NUM_COL):
             row_end = row_start + self.config.NUM_COL - 1
             # 使用水平自环键
-            h_key_start = (row_start, row_start, 'h')
+            h_key_start = (row_start, row_start, "h")
             if h_key_start not in network.links_tag:
                 continue
             last_position = network.links_tag[h_key_start][0]
@@ -1838,7 +1732,7 @@ class BaseModel:
                 current_node, next_node = row_start + i, row_start + i - 1
                 for j in range(self.config.SLICE_PER_LINK_HORIZONTAL - 1, -1, -1):
                     if j == 0 and current_node == row_end:
-                        h_key_end = (current_node, current_node, 'h')
+                        h_key_end = (current_node, current_node, "h")
                         if h_key_end in network.links_tag and (current_node, next_node) in network.links_tag:
                             network.links_tag[(current_node, next_node)][j] = network.links_tag[h_key_end][-1]
                     elif j == 0:
@@ -1848,7 +1742,7 @@ class BaseModel:
                         if (current_node, next_node) in network.links_tag:
                             network.links_tag[(current_node, next_node)][j] = network.links_tag[(current_node, next_node)][j - 1]
 
-            h_key_end = (row_end, row_end, 'h')
+            h_key_end = (row_end, row_end, "h")
             if h_key_end in network.links_tag:
                 network.links_tag[h_key_end][-1] = network.links_tag[h_key_end][0]
                 if (row_end - 1, row_end) in network.links_tag:
@@ -1860,7 +1754,7 @@ class BaseModel:
                 current_node, next_node = row_end - i, row_end - i + 1
                 for j in range(self.config.SLICE_PER_LINK_HORIZONTAL - 1, -1, -1):
                     if j == 0 and current_node == row_start:
-                        h_key_current = (current_node, current_node, 'h')
+                        h_key_current = (current_node, current_node, "h")
                         if h_key_current in network.links_tag and (current_node, next_node) in network.links_tag:
                             network.links_tag[(current_node, next_node)][j] = network.links_tag[h_key_current][-1]
                     elif j == 0:
@@ -2027,6 +1921,14 @@ class BaseModel:
                 if flit.wait_cycle_h == self.config.ITag_TRIGGER_Th_H and direction != "EQ":
                     network.itag_req_counter[direction][ip_pos] += 1
                 if flit.inject(network):
+                    # 首次上环时分配order_id
+                    if flit.src_dest_order_id == -1:
+                        src_node = flit.source_original if flit.source_original != -1 else flit.source
+                        dest_node = flit.destination_original if flit.destination_original != -1 else flit.destination
+                        src_type = flit.original_source_type if flit.original_source_type else flit.source_type
+                        dest_type = flit.original_destination_type if flit.original_destination_type else flit.destination_type
+                        flit.src_dest_order_id = Flit.get_next_order_id(src_node, src_type, dest_node, dest_type, flit.flit_type.upper(), self.config.ORDERING_GRANULARITY)
+
                     network.inject_num += 1
                     flit_num += 1
                     flit.departure_network_cycle = self.cycle
@@ -2137,14 +2039,7 @@ class BaseModel:
                     fifo_save_path = None
 
                 # 生成FIFO热力图
-                fifo_heatmap_path = create_fifo_heatmap(
-                    dies=dies,
-                    config=self.config,
-                    total_cycles=total_cycles,
-                    die_layout=None,
-                    die_rotations=None,
-                    save_path=fifo_save_path
-                )
+                fifo_heatmap_path = create_fifo_heatmap(dies=dies, config=self.config, total_cycles=total_cycles, die_layout=None, die_rotations=None, save_path=fifo_save_path)
 
                 if fifo_heatmap_path and self.verbose:
                     print(f"FIFO使用率热力图: {fifo_heatmap_path}")
@@ -2168,7 +2063,6 @@ class BaseModel:
 
         # return weighted_sum / total_count if total_count > 0 else 0.0
         return total_count * 128 / total_interval_time if total_interval_time > 0 else 0.0
-
 
     def _calculate_path_xy(self, src, dst):
         """
@@ -2266,8 +2160,84 @@ class BaseModel:
 
         sim_vars = vars(self)
 
-        # Extract statistics (ending with "_stat")
-        results = {key.rsplit("_stat", 1)[0]: value for key, value in sim_vars.items() if key.endswith("_stat")}
+        # Extract statistics (ending with "_stat") and translate to Chinese
+        stat_name_map = {
+            "model_type": "模型类型",
+            "topo_type": "拓扑类型",
+            "file_name": "数据流名称",
+            "send_read_flits_num": "发送读flit数",
+            "send_write_flits_num": "发送写flit数",
+            "R_finish_time": "读完成时间",
+            "W_finish_time": "写完成时间",
+            "Total_finish_time": "总完成时间",
+            "R_tail_latency": "读尾延迟",
+            "W_tail_latency": "写尾延迟",
+            # CMD延迟
+            "cmd_read_avg_latency": "命令延迟_读_平均",
+            "cmd_read_max_latency": "命令延迟_读_最大",
+            "cmd_write_avg_latency": "命令延迟_写_平均",
+            "cmd_write_max_latency": "命令延迟_写_最大",
+            "cmd_mixed_avg_latency": "命令延迟_混合_平均",
+            "cmd_mixed_max_latency": "命令延迟_混合_最大",
+            # Data延迟
+            "data_read_avg_latency": "数据延迟_读_平均",
+            "data_read_max_latency": "数据延迟_读_最大",
+            "data_write_avg_latency": "数据延迟_写_平均",
+            "data_write_max_latency": "数据延迟_写_最大",
+            "data_mixed_avg_latency": "数据延迟_混合_平均",
+            "data_mixed_max_latency": "数据延迟_混合_最大",
+            # Transaction延迟
+            "trans_read_avg_latency": "事务延迟_读_平均",
+            "trans_read_max_latency": "事务延迟_读_最大",
+            "trans_write_avg_latency": "事务延迟_写_平均",
+            "trans_write_max_latency": "事务延迟_写_最大",
+            "trans_mixed_avg_latency": "事务延迟_混合_平均",
+            "trans_mixed_max_latency": "事务延迟_混合_最大",
+            # Circling统计
+            "req_cir_h_num": "请求横向环次数",
+            "req_cir_v_num": "请求纵向环次数",
+            "rsp_cir_h_num": "响应横向环次数",
+            "rsp_cir_v_num": "响应纵向环次数",
+            "data_cir_h_num": "数据横向环次数",
+            "data_cir_v_num": "数据纵向环次数",
+            # Wait Cycle统计
+            "req_wait_cycle_h_num": "请求横向等待周期",
+            "req_wait_cycle_v_num": "请求纵向等待周期",
+            "rsp_wait_cycle_h_num": "响应横向等待周期",
+            "rsp_wait_cycle_v_num": "响应纵向等待周期",
+            "data_wait_cycle_h_num": "数据横向等待周期",
+            "data_wait_cycle_v_num": "数据纵向等待周期",
+            # Retry统计
+            "read_retry_num": "读重试次数",
+            "write_retry_num": "写重试次数",
+            # ETag统计
+            "EQ_ETag_T1_num": "EQ ETag_T1数量",
+            "EQ_ETag_T0_num": "EQ ETag_T0数量",
+            "RB_ETag_T1_num": "RB ETag_T1数量",
+            "RB_ETag_T0_num": "RB ETag_T0数量",
+            # ITag统计
+            "ITag_h_num": "ITag横向数量",
+            "ITag_v_num": "ITag纵向数量",
+            # 带宽统计
+            "Total_sum_BW": "总和带宽",
+            "read_unweighted_bw": "带宽_读_非加权",
+            "read_weighted_bw": "带宽_读_加权",
+            "write_unweighted_bw": "带宽_写_非加权",
+            "write_weighted_bw": "带宽_写_加权",
+            "mixed_unweighted_bw": "带宽_混合_非加权",
+            "mixed_weighted_bw": "带宽_混合_加权",
+            "mixed_avg_unweighted_bw": "带宽_混合_平均非加权",
+            "mixed_avg_weighted_bw": "带宽_混合_平均加权",
+            "total_unweighted_bw": "带宽_总_非加权",
+            "total_weighted_bw": "带宽_总_加权",
+        }
+
+        results = {}
+        for key, value in sim_vars.items():
+            if key.endswith("_stat"):
+                base_key = key.rsplit("_stat", 1)[0]
+                chinese_key = stat_name_map.get(base_key, base_key)
+                results[chinese_key] = value
 
         # Define config whitelist (only YAML defined parameters)
         config_whitelist = [
@@ -2348,10 +2318,6 @@ class BaseModel:
         Flit.clear_flit_id()
         BaseModel.reset_packet_id()
 
-        # Add performance statistics
-        perf_stats = self.performance_monitor.get_summary()
-        results.update(perf_stats)
-
         # Add result processor analysis for port bandwidth data
         try:
             if hasattr(self, "result_processor") and self.result_processor:
@@ -2364,34 +2330,74 @@ class BaseModel:
                     port_avg = bandwidth_analysis["port_averages"]
                     results["port_averages"] = port_avg  # Keep original dict for compatibility
 
-                    # Expand port_averages dictionary into individual fields
+                    # Expand port_averages dictionary into individual fields with Chinese names
+                    # Pattern: avg_{port}_{op}_bw -> 平均带宽_{端口}_{操作}
+                    port_name_map = {
+                        "avg_gdma_read_bw": "平均带宽_GDMA_读",
+                        "avg_gdma_write_bw": "平均带宽_GDMA_写",
+                        "avg_gdma_bw": "平均带宽_GDMA_混合",
+                        "avg_sdma_read_bw": "平均带宽_SDMA_读",
+                        "avg_sdma_write_bw": "平均带宽_SDMA_写",
+                        "avg_sdma_bw": "平均带宽_SDMA_混合",
+                        "avg_cdma_read_bw": "平均带宽_CDMA_读",
+                        "avg_cdma_write_bw": "平均带宽_CDMA_写",
+                        "avg_cdma_bw": "平均带宽_CDMA_混合",
+                        "avg_ddr_read_bw": "平均带宽_DDR_读",
+                        "avg_ddr_write_bw": "平均带宽_DDR_写",
+                        "avg_ddr_bw": "平均带宽_DDR_混合",
+                        "avg_l2m_read_bw": "平均带宽_L2M_读",
+                        "avg_l2m_write_bw": "平均带宽_L2M_写",
+                        "avg_l2m_bw": "平均带宽_L2M_混合",
+                    }
                     for key, value in port_avg.items():
-                        results[key] = value  # e.g., avg_gdma_bw, avg_gdma_read_bw, avg_gdma_write_bw
+                        chinese_key = port_name_map.get(key, key)
+                        results[chinese_key] = value
 
                 # Include other useful bandwidth metrics
                 if "Total_sum_BW" in bandwidth_analysis:
-                    results["Total_sum_BW"] = bandwidth_analysis["Total_sum_BW"]
+                    results["总和带宽"] = bandwidth_analysis["Total_sum_BW"]
 
                 # Include circling eject stats (both original dict and expanded fields)
                 if "circling_eject_stats" in bandwidth_analysis:
                     circling_stats = bandwidth_analysis["circling_eject_stats"]
                     results["circling_eject_stats"] = circling_stats  # Keep original dict for compatibility
 
-                    # Expand circling_eject_stats dictionary into individual fields
+                    # Expand circling_eject_stats dictionary into individual fields with Chinese names
                     if "horizontal" in circling_stats:
-                        results["circling_h_total_flits"] = circling_stats["horizontal"]["total_data_flits"]
-                        results["circling_h_circling_flits"] = circling_stats["horizontal"]["circling_flits"]
-                        results["circling_h_ratio"] = circling_stats["horizontal"]["circling_ratio"]
+                        results["绕环_横向_总flit数"] = circling_stats["horizontal"]["total_data_flits"]
+                        results["绕环_横向_绕环flit数"] = circling_stats["horizontal"]["circling_flits"]
+                        results["绕环_横向_比例"] = circling_stats["horizontal"]["circling_ratio"]
 
                     if "vertical" in circling_stats:
-                        results["circling_v_total_flits"] = circling_stats["vertical"]["total_data_flits"]
-                        results["circling_v_circling_flits"] = circling_stats["vertical"]["circling_flits"]
-                        results["circling_v_ratio"] = circling_stats["vertical"]["circling_ratio"]
+                        results["绕环_纵向_总flit数"] = circling_stats["vertical"]["total_data_flits"]
+                        results["绕环_纵向_绕环flit数"] = circling_stats["vertical"]["circling_flits"]
+                        results["绕环_纵向_比例"] = circling_stats["vertical"]["circling_ratio"]
 
                     if "overall" in circling_stats:
-                        results["circling_overall_total_flits"] = circling_stats["overall"]["total_data_flits"]
-                        results["circling_overall_circling_flits"] = circling_stats["overall"]["circling_flits"]
-                        results["circling_overall_ratio"] = circling_stats["overall"]["circling_ratio"]
+                        results["绕环_整体_总flit数"] = circling_stats["overall"]["total_data_flits"]
+                        results["绕环_整体_绕环flit数"] = circling_stats["overall"]["circling_flits"]
+                        results["绕环_整体_比例"] = circling_stats["overall"]["circling_ratio"]
+
+                # Include ordering blocked stats (both original dict and expanded fields)
+                if "ordering_blocked_stats" in bandwidth_analysis:
+                    ordering_stats = bandwidth_analysis["ordering_blocked_stats"]
+                    results["ordering_blocked_stats"] = ordering_stats  # Keep original dict for compatibility
+
+                    # Expand ordering_blocked_stats dictionary into individual fields
+                    if "horizontal" in ordering_stats:
+                        results["保序阻止_横向_总flit数"] = ordering_stats["horizontal"]["total_data_flits"]
+                        results["保序阻止_横向_被阻止flit数"] = ordering_stats["horizontal"]["ordering_blocked_flits"]
+                        results["保序阻止_横向_比例"] = ordering_stats["horizontal"]["ordering_blocked_ratio"]
+
+                    if "vertical" in ordering_stats:
+                        results["保序阻止_纵向_总flit数"] = ordering_stats["vertical"]["total_data_flits"]
+                        results["保序阻止_纵向_被阻止flit数"] = ordering_stats["vertical"]["ordering_blocked_flits"]
+                        results["保序阻止_纵向_比例"] = ordering_stats["vertical"]["ordering_blocked_ratio"]
+
+                    if "overall" in ordering_stats:
+                        results["保序阻止_整体_总flit数"] = ordering_stats["overall"]["total_data_flits"]
+                        results["保序阻止_整体_被阻止flit数"] = ordering_stats["overall"]["ordering_blocked_flits"]
+                        results["保序阻止_整体_比例"] = ordering_stats["overall"]["ordering_blocked_ratio"]
 
         except Exception as e:
             if hasattr(self, "verbose") and self.verbose:
