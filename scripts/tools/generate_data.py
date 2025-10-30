@@ -121,27 +121,31 @@ if __name__ == "__main__":
     random.seed(919)
 
     # 配置参数
-    END_TIME = 1000
+    END_TIME = 6000
     burst = 4
-    req_type = "R"
-    OUTPUT_FILE = f"../../test_data/data_1022_{req_type}.txt"
+    req_type = "W"
+    OUTPUT_FILE = f"../../test_data/data_1030_{req_type}.txt"
 
     # 定义多个配置
     configs = [
         {
             "src_map": {
-                "gdma_0": [0],
-                "gdma_1": [0],
+                # "gdma_0": [0],
+                # "gdma_1": [0],
                 # "gdma_0": range(9),
                 # "gdma_1": range(9),
+                "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
+                "gdma_1": [3, 15, 19],
             },
             "dst_map": {
-                "ddr_0": [5],
-                "ddr_1": [5],
+                # "ddr_0": [5],
+                # "ddr_1": [5],
                 # "ddr_0": range(9),
                 # "ddr_1": range(9),
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
             },
-            "speed": 128,
+            "speed": 46.08,
             "burst": burst,
             "req_type": req_type,
         },

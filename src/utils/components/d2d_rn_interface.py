@@ -545,12 +545,29 @@ class D2D_RN_Interface(IPInterface):
     def eject_step(self, cycle):
         """
         重写eject_step方法，处理从本地网络接收到的跨Die读数据并发送回原始请求者
+        D2D_RN的h2l_l FIFO运行在2GHz频率(每半个周期处理一次)，而不是默认的1GHz
         """
-        # 调用父类的eject_step方法
-        ejected_flits = super().eject_step(cycle)
+        self.current_cycle = cycle
+        cycle_mod = cycle % self.config.NETWORK_FREQUENCY
 
-        # 跨Die读数据的处理已经在_handle_received_data中的handle_cross_die_data_response方法中统一处理
-        # 这里不需要再单独处理，避免重复发送
+        ejected_flits = []
+
+        # 2GHz 操作(每半个网络周期执行一次)
+        for net_type in ["req", "rsp", "data"]:
+            self.EQ_channel_buffer_to_h2l_pre(net_type)
+            self.h2l_h_to_h2l_l_pre(net_type)
+
+            # 关键修改:h2l_l_to_eject_fifo在2GHz域执行(移除cycle_mod==0限制)
+            flit = self.h2l_l_to_eject_fifo(net_type)
+            if flit:
+                ejected_flits.append(flit)
+                # 处理接收到的flit
+                if net_type == "req":
+                    self._handle_received_request(flit)
+                elif net_type == "rsp":
+                    self._handle_received_response(flit)
+                elif net_type == "data":
+                    self._handle_received_data(flit)
 
         return ejected_flits
 

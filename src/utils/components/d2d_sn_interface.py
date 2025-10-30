@@ -242,9 +242,29 @@ class D2D_SN_Interface(IPInterface):
     def eject_step(self, cycle):
         """
         重写eject_step方法，在eject阶段处理写请求的资源检查和跨Die转发
+        D2D_SN的h2l_l FIFO运行在2GHz频率(每半个周期处理一次)，而不是默认的1GHz
         """
-        # 调用父类的eject_step方法
-        ejected_flits = super().eject_step(cycle)
+        self.current_cycle = cycle
+        cycle_mod = cycle % self.config.NETWORK_FREQUENCY
+
+        ejected_flits = []
+
+        # 2GHz 操作(每半个网络周期执行一次)
+        for net_type in ["req", "rsp", "data"]:
+            self.EQ_channel_buffer_to_h2l_pre(net_type)
+            self.h2l_h_to_h2l_l_pre(net_type)
+
+            # 关键修改:h2l_l_to_eject_fifo在2GHz域执行(移除cycle_mod==0限制)
+            flit = self.h2l_l_to_eject_fifo(net_type)
+            if flit:
+                ejected_flits.append(flit)
+                # 处理接收到的flit
+                if net_type == "req":
+                    self._handle_received_request(flit)
+                elif net_type == "rsp":
+                    self._handle_received_response(flit)
+                elif net_type == "data":
+                    self._handle_received_data(flit)
 
         # 检查ejected的flit
         if ejected_flits:

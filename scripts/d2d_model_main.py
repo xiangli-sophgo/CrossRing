@@ -41,32 +41,31 @@ def main():
     traffic_file_path = str(Path(__file__).parent.parent / "test_data")
     traffic_chains = [
         [
-            "d2d_16_share_R_1028.txt",
+            "d2d_64_share_W_1030.txt",
             # "d2d_data_1021.txt",
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
-    # model.setup_debug(trace_packets=[1], update_interval=0.1)
+    model.setup_debug(trace_packets=[8022, 8721], update_interval=0.0)
     # model.setup_visualization(enable=1, update_interval=0.5, start_cycle=500)
 
     model.setup_result_analysis(
         # 图片生成控制
-        flow_graph=0,
-        ip_bandwidth_heatmap=0,
+        flow_graph=1,
+        ip_bandwidth_heatmap=1,
         fifo_utilization_heatmap=1,
         save_figures=0,
         # CSV文件导出控制
         export_d2d_requests_csv=1,
         export_ip_bandwidth_csv=1,
         # 通用设置
-        save_dir="../Result/d2d_demo/",
         heatmap_mode="total",  # 可选: "total", "read", "write"
     )
 
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_cycles=800,
+        max_time=6000,
         print_interval=200,
         verbose=1,
     )

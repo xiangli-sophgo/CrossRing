@@ -1193,6 +1193,14 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         # 保存或显示图片
         if save_path:
+            # 如果save_path是文件夹，自动生成文件名
+            if os.path.isdir(save_path) or (not save_path.endswith('.png') and not save_path.endswith('.jpg')):
+                filename = f"d2d_flow_graph_{mode}.png"
+                save_path = os.path.join(save_path, filename)
+
+            # 确保目录存在
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message=".*not compatible with tight_layout.*")
                 plt.tight_layout(pad=0.5)  # 增大padding留出更多空间
@@ -1411,6 +1419,14 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         # 保存或显示图片
         if save_path:
+            # 如果save_path是文件夹，自动生成文件名
+            if os.path.isdir(save_path) or (not save_path.endswith('.png') and not save_path.endswith('.jpg')):
+                filename = f"ip_bandwidth_heatmap_{mode}.png"
+                save_path = os.path.join(save_path, filename)
+
+            # 确保目录存在
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", message=".*not compatible with tight_layout.*")
                 plt.tight_layout(pad=0.3)
@@ -2670,7 +2686,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
             # 垂直方向(±90度)的文字也跟随箭头方向旋转
             # 绘制单个标签,文字方向跟随箭头角度
-            ax.text(label_x, label_y, label_text, ha="center", va="center", fontsize=8, fontweight="normal", color=color, rotation=angle_deg, rotation_mode="anchor")
+            ax.text(label_x, label_y, label_text, ha="center", va="center", fontsize=6, fontweight="normal", color=color, rotation=angle_deg, rotation_mode="anchor")
 
     def save_d2d_axi_channel_statistics(self, output_path, d2d_bandwidth, dies, config):
         """

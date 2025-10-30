@@ -117,16 +117,18 @@ class BaseModel:
         plot_flow_fig: bool = False,
         plot_RN_BW_fig: bool = False,
         fifo_utilization_heatmap: bool = False,
+        save_fig: bool = True,
     ) -> None:
         """
         配置结果分析选项
 
         Args:
             result_save_path: 结果保存路径
-            results_fig_save_path: 图表保存路径
+            results_fig_save_path: 图表保存路径（已弃用，使用save_fig控制图像保存）
             plot_flow_fig: 是否绘制流量图
             plot_RN_BW_fig: 是否绘制RN带宽图
             fifo_utilization_heatmap: 是否绘制FIFO使用率热力图
+            save_fig: 是否保存图像到数据流保存目录，默认True
         """
         self.result_save_path_original = result_save_path
         self.plot_flow_fig = plot_flow_fig
@@ -138,9 +140,14 @@ class BaseModel:
             self.result_save_path = f"{result_save_path}{self.topo_type_stat}/{self.file_name[:-4]}/"
             os.makedirs(self.result_save_path, exist_ok=True)
 
-        if results_fig_save_path:
+        # 根据save_fig参数决定图像保存位置
+        if save_fig and result_save_path:
+            self.results_fig_save_path = self.result_save_path
+        elif results_fig_save_path:
             self.results_fig_save_path = results_fig_save_path
             os.makedirs(self.results_fig_save_path, exist_ok=True)
+        else:
+            self.results_fig_save_path = None
 
     def setup_debug(
         self,
@@ -1932,6 +1939,7 @@ class BaseModel:
                     network.inject_num += 1
                     flit_num += 1
                     flit.departure_network_cycle = self.cycle
+                    self.error_log(flit, 8022, -1)
                     network.plan_move(flit, self.cycle)
                     network.execute_moves(flit, self.cycle)
                     flits.append(flit)

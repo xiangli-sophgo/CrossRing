@@ -34,6 +34,10 @@ class D2D_Model:
         self.kwargs = kwargs
         self.current_cycle = 0
 
+        # 保存结果路径
+        self.result_save_path = kwargs.get("result_save_path", "../Result/")
+        self.results_fig_save_path = kwargs.get("results_fig_save_path", "../Result/figures/")
+
         # 获取Die数量，默认为2
         self.num_dies = getattr(config, "NUM_DIES", 2)
 
@@ -200,9 +204,10 @@ class D2D_Model:
         self.kwargs["enable_flow_graph"] = flow_graph
         self.fifo_utilization_heatmap = fifo_utilization_heatmap
 
-        # 更新结果保存路径
-        if save_dir:
-            self.kwargs["results_fig_save_path"] = save_dir
+        # 更新结果保存路径 - 默认使用result_save_path
+        if not save_dir:
+            save_dir = self.result_save_path
+        self.kwargs["results_fig_save_path"] = save_dir
 
     def setup_visualization(self, enable: bool = True, update_interval: float = 1.0, start_cycle: int = 0) -> None:
         """
@@ -240,7 +245,7 @@ class D2D_Model:
 
     def run_simulation(
         self,
-        max_cycles: int = None,
+        max_time: int = None,
         print_interval: int = None,
         results_analysis: bool = True,
         verbose: int = 1,
@@ -249,16 +254,21 @@ class D2D_Model:
         运行D2D仿真并可选地处理结果
 
         Args:
-            max_cycles: 最大仿真周期数（如果为None，使用配置中的END_TIME）
-            print_interval: 打印进度的间隔周期数（如果为None，使用配置中的PRINT_INTERVAL）
+            max_time: 最大仿真时间（ns）（如果为None，使用配置中的END_TIME）
+            print_interval: 打印进度的间隔时间（ns）（如果为None，使用配置中的PRINT_INTERVAL）
             results_analysis: 仿真完成后是否自动处理结果
             verbose: 详细程度（0=静默，1=正常，2=详细）
         """
-        # 设置仿真参数
-        if max_cycles is not None:
-            self.end_time = max_cycles
+        # 获取网络频率（GHz）
+        network_frequency = self.config.NETWORK_FREQUENCY
+        if not network_frequency:
+            raise ValueError("必须在配置中设置NETWORK_FREQUENCY才能运行仿真")
+
+        # 设置仿真参数 - 将ns转换为cycles
+        if max_time is not None:
+            self.end_time = int(max_time * network_frequency)
         if print_interval is not None:
-            self.print_interval = print_interval
+            self.print_interval = int(print_interval * network_frequency)
 
         # 初始化仿真
         self.initial()
@@ -1159,14 +1169,16 @@ class D2D_Model:
 
                         d2d_processor.die_processors[die_id] = die_processor
 
-                save_path = self.kwargs.get("results_fig_save_path") if self._result_analysis_config.get("save_figures") else None
+                # 统一使用d2d_result_path保存图片
+                save_path = d2d_result_path if self._result_analysis_config.get("save_figures") else None
                 flow_path = d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=self.flow_graph_mode, save_path=save_path)
                 if flow_path:
                     saved_files.append({"type": "D2D流量图", "path": flow_path})
 
             # 步骤4: 生成IP带宽热力图（如果启用）
             if self._result_analysis_config.get("ip_bandwidth_heatmap"):
-                save_path = self.kwargs.get("results_fig_save_path") if self._result_analysis_config.get("save_figures") else None
+                # 统一使用d2d_result_path保存图片
+                save_path = d2d_result_path if self._result_analysis_config.get("save_figures") else None
                 heatmap_mode = self._result_analysis_config.get("heatmap_mode", "total")
 
                 heatmap_path = d2d_processor.draw_ip_bandwidth_heatmap(dies=self.dies, config=self.config, mode=heatmap_mode, node_size=2500, save_path=save_path)

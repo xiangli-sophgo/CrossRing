@@ -451,7 +451,6 @@ class Network:
         self.links[link][slice_index] = flit
 
     def can_move_to_next(self, flit, current, next_node):
-        # 新架构: 判断是否直接到EQ（source和destination相同）
         if flit.source == flit.destination or len(flit.path) <= 1:
             return len(self.inject_queues["EQ"]) < self.config.IQ_OUT_FIFO_DEPTH_EQ
 
