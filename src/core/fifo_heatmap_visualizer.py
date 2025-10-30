@@ -169,18 +169,12 @@ class FIFOUtilizationCollector:
             self.fifo_utilization_data[die_id] = {}
 
             # 收集三个网络的数据
-            network_types = [
-                ('req', 'req_network'),
-                ('rsp', 'rsp_network'),
-                ('data', 'data_network')
-            ]
+            network_types = [("req", "req_network"), ("rsp", "rsp_network"), ("data", "data_network")]
 
             for network_type, network_attr in network_types:
                 if hasattr(die_model, network_attr):
                     network = getattr(die_model, network_attr)
-                    self.fifo_utilization_data[die_id][network_type] = self.collect_from_network(
-                        network, die_id, total_cycles, network_type
-                    )
+                    self.fifo_utilization_data[die_id][network_type] = self.collect_from_network(network, die_id, total_cycles, network_type)
                 else:
                     print(f"警告: Die {die_id} 没有{network_attr}属性")
 
@@ -271,7 +265,7 @@ class FIFOHeatmapVisualizer:
         if save_path:
             # 生成HTML并注入JavaScript交互代码
             self._save_html_with_click_events(fig, save_path, fifo_options, len(dies))
-            print(f"FIFO使用率热力图已保存到: {save_path}")
+            # print(f"FIFO使用率热力图已保存到: {save_path}")
             return save_path
         else:
             fig.show()
@@ -285,7 +279,7 @@ class FIFOHeatmapVisualizer:
             List[Tuple]: [(显示名称, fifo_category, fifo_type, network_type), ...]
         """
         options = []
-        network_display = {'req': 'Req', 'rsp': 'Rsp', 'data': 'Data'}
+        network_display = {"req": "Req", "rsp": "Rsp", "data": "Data"}
 
         for die_id, networks_data in self.fifo_data.items():
             for network_type, die_data in networks_data.items():
@@ -362,11 +356,14 @@ class FIFOHeatmapVisualizer:
 
         # 创建子图布局: 1行2列 (50% + 50%)
         fig = make_subplots(
-            rows=1, cols=2, column_widths=[0.5, 0.5], subplot_titles=("FIFO使用率热力图", "CrossRing架构图"), specs=[[{"type": "heatmap"}, {"type": "scatter"}]], horizontal_spacing=0.08
+            rows=1, cols=2, column_widths=[0.5, 0.5], subplot_titles=("FIFO使用率热力图", "CrossRing架构图"), specs=[[{"type": "scatter"}, {"type": "scatter"}]], horizontal_spacing=0.08
         )
 
+        # 计算画布范围（用于坐标轴设置）
+        die_offsets, max_x, max_y = self._calculate_die_offsets_from_layout(die_layout, die_rotations, dies)
+
         # 为每个FIFO类型和统计模式创建热力图trace
-        traces_data = self._create_heatmap_traces(fifo_options, dies)
+        traces_data = self._create_heatmap_traces(fifo_options, dies, die_layout, die_rotations)
 
         # 将所有traces添加到左侧子图（初始时只显示第一个选项的峰值模式）
         default_option = fifo_options[0]
@@ -374,11 +371,13 @@ class FIFOHeatmapVisualizer:
 
         for option in fifo_options:
             for mode in ["avg", "peak"]:
-                traces = traces_data[(option, mode)]
-                for trace in traces:
-                    # 只有默认选项的默认模式可见
-                    trace.visible = option == default_option and mode == default_mode
-                    fig.add_trace(trace, row=1, col=1)
+                trace = traces_data[(option, mode)]
+                # 只有默认选项的默认模式可见
+                trace.visible = option == default_option and mode == default_mode
+                fig.add_trace(trace, row=1, col=1)
+
+        # 添加Die边框和标签
+        self._add_die_borders_and_labels(fig, dies, die_layout, die_rotations)
 
         # 添加右侧架构图
         self._add_architecture_diagram(fig, fifo_options, dies)
@@ -392,13 +391,24 @@ class FIFOHeatmapVisualizer:
             width=1800,
             height=900,
             plot_bgcolor="white",
-            margin=dict(t=100, b=50, l=80, r=80),  # 减少顶部边距
+            margin=dict(t=80, b=20, l=20, r=20),  # 紧凑布局，减少边距
             showlegend=False,
         )
 
-        # 隐藏左侧热力图的坐标轴，设置正方形比例
-        fig.update_xaxes(showgrid=False, zeroline=False, showticklabels=False, title="", row=1, col=1)
-        fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False, title="", autorange="reversed", scaleanchor="x", scaleratio=1, row=1, col=1)
+        # 左侧热力图坐标轴设置（自动缩放）
+        fig.update_xaxes(
+            showgrid=False,
+            zeroline=False,
+            showticklabels=False,
+            title="",
+            scaleanchor="y1",
+            scaleratio=1,
+            autorange=True,
+            automargin=True,
+            row=1,
+            col=1,
+        )
+        fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False, title="", autorange=True, automargin=True, row=1, col=1)
 
         # 隐藏右侧架构图的坐标轴
         fig.update_xaxes(showgrid=False, zeroline=False, showticklabels=False, title="", row=1, col=2)
@@ -406,99 +416,232 @@ class FIFOHeatmapVisualizer:
 
         return fig
 
-    def _calculate_node_positions(self, dies: Dict, die_layout: Dict, die_rotations: Dict) -> Dict:
+    def _calculate_die_offsets_from_layout(self, die_layout: Dict, die_rotations: Dict, dies: Dict) -> Tuple[Dict, float, float]:
         """
-        计算所有Die的节点位置
+        根据die_layout计算每个Die的偏移量（改进的对齐算法）
+
+        Args:
+            die_layout: Die布局 {die_id: (grid_x, grid_y)}
+            die_rotations: Die旋转角度 {die_id: rotation}
+            dies: Die字典 {die_id: die_model}
 
         Returns:
-            Dict: {die_id: {node_id: (x, y)}}
+            (die_offsets, max_x, max_y): Die偏移量字典和画布最大坐标
         """
-        node_spacing = 3.0
-        die_spacing = 5.0
+        if not die_layout:
+            # 默认布局：所有Die水平排列
+            die_layout = {die_id: (die_id, 0) for die_id in dies.keys()}
 
-        positions = {}
+        if not die_rotations:
+            die_rotations = {die_id: 0 for die_id in dies.keys()}
 
+        # 节点间距和Die间距（根据Die数量自适应）
+        if len(dies) == 1:
+            node_spacing = 1  # 单Die时节点更紧密
+        else:
+            node_spacing = 2.15  # 多Die时节点稍微松散
+        die_gap = 1.5  # Die之间的间距
+
+        # 计算每个Die旋转后的实际尺寸（以像素计）
+        die_sizes = {}
         for die_id, die_model in dies.items():
-            die_config = die_model.config
-            rows = die_config.NUM_ROW
-            cols = die_config.NUM_COL
+            rows = die_model.config.NUM_ROW
+            cols = die_model.config.NUM_COL
             rotation = die_rotations.get(die_id, 0)
 
-            # 计算Die偏移
-            grid_x, grid_y = die_layout.get(die_id, (die_id, 0))
-
-            # 根据旋转计算Die实际尺寸
             if rotation in [90, 270, -90, -270]:
-                die_width = (rows - 1) * node_spacing
-                die_height = (cols - 1) * node_spacing
+                # 90度或270度旋转：宽高互换
+                width = (rows - 1) * node_spacing
+                height = (cols - 1) * node_spacing
             else:
-                die_width = (cols - 1) * node_spacing
-                die_height = (rows - 1) * node_spacing
+                # 0度或180度旋转：宽高不变
+                width = (cols - 1) * node_spacing
+                height = (rows - 1) * node_spacing
 
-            offset_x = grid_x * (die_width + die_spacing)
-            offset_y = -grid_y * (die_height + die_spacing)
+            die_sizes[die_id] = (width, height)
 
-            # 计算每个节点的位置
-            positions[die_id] = {}
-            for node_id in range(rows * cols):
-                orig_row = node_id // cols
-                orig_col = node_id % cols
+        # 构建网格结构：记录每个网格位置的Die
+        grid_dies = {}
+        for die_id, (grid_x, grid_y) in die_layout.items():
+            grid_dies[(grid_x, grid_y)] = die_id
 
-                # 应用旋转
-                if rotation == 0:
-                    new_row, new_col = orig_row, orig_col
-                elif rotation in [90, -270]:
-                    new_row = orig_col
-                    new_col = rows - 1 - orig_row
-                elif rotation in [180, -180]:
-                    new_row = rows - 1 - orig_row
-                    new_col = cols - 1 - orig_col
-                elif rotation in [270, -90]:
-                    new_row = cols - 1 - orig_col
-                    new_col = orig_row
-                else:
-                    new_row, new_col = orig_row, orig_col
+        # 获取网格范围
+        all_grid_x = [pos[0] for pos in die_layout.values()]
+        all_grid_y = [pos[1] for pos in die_layout.values()]
+        min_grid_x, max_grid_x = min(all_grid_x), max(all_grid_x)
+        min_grid_y, max_grid_y = min(all_grid_y), max(all_grid_y)
 
-                x = new_col * node_spacing + offset_x
-                y = -new_row * node_spacing + offset_y
-                positions[die_id][node_id] = (x, y)
+        # 两步对齐算法：
+        # 步骤1: 计算每行每列的累积位置（基于左侧和下侧的Die）
+        col_positions = {}  # grid_x -> 该列左边界的x坐标
+        row_positions = {}  # grid_y -> 该行下边界的y坐标
 
-        return positions
+        # 从左到右计算列位置
+        current_x = 0
+        for grid_x in range(min_grid_x, max_grid_x + 1):
+            col_positions[grid_x] = current_x
+            # 找出这一列中最宽的Die
+            max_width = 0
+            for grid_y in range(min_grid_y, max_grid_y + 1):
+                if (grid_x, grid_y) in grid_dies:
+                    die_id = grid_dies[(grid_x, grid_y)]
+                    width, _ = die_sizes[die_id]
+                    max_width = max(max_width, width)
+            current_x += max_width + die_gap
 
-    def _create_heatmap_traces(self, fifo_options: List[Tuple[str, str, str, str]], dies: Dict) -> Dict:
+        # 从下到上计算行位置
+        current_y = 0
+        for grid_y in range(min_grid_y, max_grid_y + 1):
+            row_positions[grid_y] = current_y
+            # 找出这一行中最高的Die
+            max_height = 0
+            for grid_x in range(min_grid_x, max_grid_x + 1):
+                if (grid_x, grid_y) in grid_dies:
+                    die_id = grid_dies[(grid_x, grid_y)]
+                    _, height = die_sizes[die_id]
+                    max_height = max(max_height, height)
+            current_y += max_height + die_gap
+
+        # 步骤2: 根据行列位置和对齐规则确定每个Die的偏移
+        die_offsets = {}
+        for die_id, (grid_x, grid_y) in die_layout.items():
+            width, height = die_sizes[die_id]
+
+            # 获取该格子的基准位置
+            base_x = col_positions[grid_x]
+            base_y = row_positions[grid_y]
+
+            # 计算该列和该行的最大尺寸
+            col_max_width = 0
+            for gy in range(min_grid_y, max_grid_y + 1):
+                if (grid_x, gy) in grid_dies:
+                    w, _ = die_sizes[grid_dies[(grid_x, gy)]]
+                    col_max_width = max(col_max_width, w)
+
+            row_max_height = 0
+            for gx in range(min_grid_x, max_grid_x + 1):
+                if (gx, grid_y) in grid_dies:
+                    _, h = die_sizes[grid_dies[(gx, grid_y)]]
+                    row_max_height = max(row_max_height, h)
+
+            # 对齐策略：
+            # X方向：最左列左对齐，最右列右对齐，其他列左对齐
+            if grid_x == min_grid_x:
+                offset_x = base_x  # 左对齐
+            elif grid_x == max_grid_x:
+                offset_x = base_x + col_max_width - width  # 右对齐
+            else:
+                offset_x = base_x  # 左对齐
+
+            # Y方向：最下行下对齐，最上行上对齐，其他行下对齐
+            if grid_y == min_grid_y:
+                offset_y = base_y  # 下对齐
+            elif grid_y == max_grid_y:
+                offset_y = base_y + row_max_height - height  # 上对齐
+            else:
+                offset_y = base_y  # 下对齐
+
+            die_offsets[die_id] = (offset_x, offset_y)
+
+        # 计算画布范围
+        max_x = col_positions[max_grid_x]
+        for grid_y in range(min_grid_y, max_grid_y + 1):
+            if (max_grid_x, grid_y) in grid_dies:
+                die_id = grid_dies[(max_grid_x, grid_y)]
+                width, _ = die_sizes[die_id]
+                max_x = max(max_x, col_positions[max_grid_x] + width)
+
+        max_y = row_positions[max_grid_y]
+        for grid_x in range(min_grid_x, max_grid_x + 1):
+            if (grid_x, max_grid_y) in grid_dies:
+                die_id = grid_dies[(grid_x, max_grid_y)]
+                _, height = die_sizes[die_id]
+                max_y = max(max_y, row_positions[max_grid_y] + height)
+
+        return die_offsets, max_x, max_y
+
+    def _apply_rotation(self, orig_row: int, orig_col: int, rows: int, cols: int, rotation: int) -> Tuple[int, int]:
         """
-        为所有FIFO选项和统计模式创建热力图traces
+        应用Die旋转变换
+
+        Args:
+            orig_row: 原始行号
+            orig_col: 原始列号
+            rows: Die总行数
+            cols: Die总列数
+            rotation: 旋转角度（0/90/180/270）
 
         Returns:
-            Dict: {(option_tuple, mode): [traces]}
+            (new_row, new_col): 旋转后的行列号
         """
+        if rotation == 0:
+            return orig_row, orig_col
+        elif rotation in [90, -270]:
+            return orig_col, rows - 1 - orig_row
+        elif rotation in [180, -180]:
+            return rows - 1 - orig_row, cols - 1 - orig_col
+        elif rotation in [270, -90]:
+            return cols - 1 - orig_col, orig_row
+        else:
+            # 未知旋转角度，不应用旋转
+            return orig_row, orig_col
+
+    def _create_heatmap_traces(self, fifo_options: List[Tuple[str, str, str, str]], dies: Dict, die_layout: Dict, die_rotations: Dict) -> Dict:
+        """
+        为所有FIFO选项和统计模式创建热力图traces（使用Scatter支持多Die布局）
+
+        Returns:
+            Dict: {(option_tuple, mode): trace}
+        """
+        # 计算Die偏移量
+        die_offsets, max_x, max_y = self._calculate_die_offsets_from_layout(die_layout, die_rotations, dies)
+
+        # 节点间距（根据Die数量自适应）
+        if len(dies) == 1:
+            node_spacing = 0.8  # 单Die时节点更紧密
+            size = 130
+        else:
+            node_spacing = 1.7  # 多Die时节点稍微松散
+            size = 56
+
         traces_data = {}
 
         for option in fifo_options:
             option_name, fifo_category, fifo_type, network_type = option
 
             for mode in ["avg", "peak"]:
-                traces = []
+                # 收集所有Die的所有节点数据
+                all_x = []
+                all_y = []
+                all_colors = []
+                all_hover_texts = []
+                all_text_labels = []
 
-                # 为每个Die创建heatmap trace
+                # 为每个Die收集数据
                 for die_id in sorted(self.fifo_data.keys()):
                     die_model = dies[die_id]
                     die_config = die_model.config
                     rows = die_config.NUM_ROW
                     cols = die_config.NUM_COL
+                    rotation = die_rotations.get(die_id, 0)
+                    offset_x, offset_y = die_offsets[die_id]
 
                     networks_data = self.fifo_data[die_id]
                     die_data = networks_data.get(network_type, {})
                     category_data = die_data.get(fifo_category, {})
 
-                    # 创建使用率矩阵（行x列）
-                    utilization_matrix = np.full((rows, cols), np.nan)
-                    hover_matrix = [["" for _ in range(cols)] for _ in range(rows)]
-                    text_matrix = [["" for _ in range(cols)] for _ in range(rows)]  # 用于显示在方块上的文本
+                    # === 先遍历一遍，记录本die所有节点旋转后的new_row最大值，用于底对齐 ===
+                    rotated_rows = [self._apply_rotation(node_id // cols, node_id % cols, rows, cols, rotation)[0] for node_id in range(rows * cols)]
+                    max_new_row = max(rotated_rows)
 
                     for node_id in range(rows * cols):
-                        row = node_id // cols
-                        col = node_id % cols
+                        orig_row = node_id // cols
+                        orig_col = node_id % cols
+                        new_row, new_col = self._apply_rotation(orig_row, orig_col, rows, cols, rotation)
+
+                        # 统一底对齐：y轴方向用 max_new_row-new_row
+                        y = offset_y + (max_new_row - new_row) * node_spacing
+                        x = offset_x + new_col * node_spacing
 
                         node_data = category_data.get(node_id, {})
                         fifo_info = node_data.get(fifo_type)
@@ -509,48 +652,82 @@ class FIFOHeatmapVisualizer:
                             avg_depth = fifo_info["avg_depth"]
                             peak_depth = fifo_info["peak_depth"]
 
-                            utilization_matrix[row, col] = util_value
-                            text_matrix[row][col] = f"{util_value:.1f}%"  # 显示使用率百分比
+                            all_x.append(x)
+                            all_y.append(y)
+                            all_colors.append(util_value)
+                            all_text_labels.append(f"{util_value:.1f}%")
 
-                            network_display = {'req': 'Request', 'rsp': 'Response', 'data': 'Data'}
+                            network_display = {"req": "Request", "rsp": "Response", "data": "Data"}
                             net_label = network_display.get(network_type, network_type)
                             hover_text = (
-                                f"Die {die_id} - 节点 {node_id} ({row},{col})<br>"
+                                f"Die {die_id} - 节点 {node_id} ({orig_row},{orig_col})<br>"
                                 f"网络: {net_label}<br>"
                                 f"FIFO: {option_name}<br>"
                                 f"平均: {fifo_info['avg']:.1f}% ({avg_depth:.2f}/{capacity})<br>"
                                 f"峰值: {fifo_info['peak']:.1f}% ({peak_depth}/{capacity})<br>"
                                 f"容量: {capacity}"
                             )
-                            hover_matrix[row][col] = hover_text
-                        else:
-                            hover_matrix[row][col] = f"Die {die_id} - 节点 {node_id}<br>无数据"
-                            text_matrix[row][col] = ""  # 无数据时不显示文本
+                            all_hover_texts.append(hover_text)
 
-                    # 创建Heatmap trace
-                    trace = go.Heatmap(
-                        z=utilization_matrix,
-                        x=list(range(cols)),
-                        y=list(range(rows)),
-                        text=text_matrix,  # 在方块上显示的文本
-                        texttemplate="%{text}",  # 文本模板
-                        textfont={"size": 16},  # 文本字体大小
-                        colorscale="RdYlGn_r",  # 红-黄-绿反转（红色=高使用率）
-                        zmin=0,
-                        zmax=100,
-                        colorbar=dict(title="使用率 (%)", x=-0.15, xanchor="left", len=0.7) if die_id == max(self.fifo_data.keys()) else None,  # 移到左边
-                        showscale=die_id == max(self.fifo_data.keys()),
-                        hovertext=hover_matrix,
-                        hoverinfo="text",
-                        name=f"Die {die_id}",
-                        xgap=1,  # 网格间隙
-                        ygap=1,
-                    )
-                    traces.append(trace)
+                # 创建单个Scatter trace（包含所有Die的所有节点）
+                trace = go.Scatter(
+                    x=all_x,
+                    y=all_y,
+                    mode="markers+text",
+                    marker=dict(
+                        size=size,  # ← 增大节点尺寸
+                        symbol="square",
+                        color=all_colors,
+                        colorscale="RdYlGn_r",
+                        cmin=0,
+                        cmax=100,
+                        colorbar=dict(title="使用率 (%)", thickness=18, tickmode="array", x=-0.15),
+                        line=dict(width=1, color="black"),
+                    ),
+                    text=all_text_labels,
+                    textfont=dict(size=14, color="black"),  # 增大字体
+                    textposition="middle center",
+                    hovertext=all_hover_texts,
+                    hoverinfo="text",
+                    showlegend=False,
+                )
 
-                traces_data[(option, mode)] = traces
+                traces_data[(option, mode)] = trace
 
         return traces_data
+
+    def _add_die_borders_and_labels(self, fig: go.Figure, dies: Dict, die_layout: Dict, die_rotations: Dict):
+        """
+        添加Die边框和标签
+
+        Args:
+            fig: Plotly图形对象
+            dies: Die字典
+            die_layout: Die布局
+            die_rotations: Die旋转角度
+        """
+        # 计算Die偏移量
+        die_offsets, _, _ = self._calculate_die_offsets_from_layout(die_layout, die_rotations, dies)
+
+        # 节点间距（根据Die数量自适应，与trace生成保持一致）
+        if len(dies) == 1:
+            node_spacing = 0.1  # 单Die时节点更紧密
+        else:
+            node_spacing = 1.6  # 多Die时节点稍微松散
+
+        for die_id, die_model in dies.items():
+            rows = die_model.config.NUM_ROW
+            cols = die_model.config.NUM_COL
+            rotation = die_rotations.get(die_id, 0)
+            offset_x, offset_y = die_offsets[die_id]
+
+            # 计算Die实际尺寸（考虑旋转）
+            if rotation in [90, 270, -90, -270]:
+                die_width = (rows - 1) * node_spacing
+                die_height = (cols - 1) * node_spacing
+            else:
+                die_width = (cols - 1) * node_spacing
+                die_height = (rows - 1) * node_spacing
 
     def _add_mode_buttons(self, fig: go.Figure, fifo_options: List[Tuple[str, str, str, str]], traces_data: Dict):
         """添加平均/峰值切换按钮和网络类型切换按钮"""
@@ -603,7 +780,7 @@ class FIFOHeatmapVisualizer:
                     bordercolor="blue",
                     font=dict(size=12),
                     type="buttons",
-                )
+                ),
             ]
         )
 
@@ -769,8 +946,8 @@ class FIFOHeatmapVisualizer:
             fifo_options: FIFO选项列表（四元组）
             num_dies: Die数量
         """
-        # 先生成基础HTML
-        html_string = fig.to_html(include_plotlyjs="cdn")
+        # 先生成基础HTML（使用本地内嵌Plotly，避免CDN加载失败）
+        html_string = fig.to_html(include_plotlyjs=True)
 
         # 创建FIFO选项映射 (用于JavaScript查找)
         # key: "category_fifo_type_network_type" -> index
@@ -780,8 +957,8 @@ class FIFOHeatmapVisualizer:
             fifo_map[key] = idx
 
         # 计算trace索引
-        # 左侧热力图: len(fifo_options) * 2 (avg+peak) * num_dies 个traces
-        num_heatmap_traces = len(fifo_options) * 2 * num_dies
+        # 左侧热力图: len(fifo_options) * 2 (avg+peak) 个traces（每个FIFO选项+模式1个trace包含所有Die）
+        num_heatmap_traces = len(fifo_options) * 2
 
         # 右侧架构图的traces从 num_heatmap_traces 开始
 
@@ -830,15 +1007,19 @@ class FIFOHeatmapVisualizer:
             plotDiv.on('plotly_click', function(data) {{
                 const clickedPoint = data.points[0];
                 const traceIndex = clickedPoint.curveNumber;
+                console.log('点击trace索引:', traceIndex, '热力图trace数:', numHeatmapTraces);
 
                 if (traceIndex >= numHeatmapTraces) {{
                     const customdata = clickedPoint.customdata;
+                    console.log('customdata:', customdata);
                     if (customdata && customdata.length >= 2) {{
                         const category = customdata[0];
                         const fifoType = customdata[1];
+                        console.log('点击FIFO:', category, fifoType);
 
                         // 使用当前选中的网络类型
                         const key = category + '_' + fifoType + '_' + currentNetworkType;
+                        console.log('查找key:', key);
 
                         let fifoIndex = fifoMap[key];
                         if (fifoIndex === undefined) {{
@@ -849,14 +1030,19 @@ class FIFOHeatmapVisualizer:
                                     fifoIndex = fifoMap[tryKey];
                                     currentNetworkType = net;
                                     updateNetworkButtonHighlight();
+                                    console.log('在网络', net, '找到FIFO, index:', fifoIndex);
                                     break;
                                 }}
                             }}
+                        }} else {{
+                            console.log('找到FIFO index:', fifoIndex);
                         }}
                         if (fifoIndex !== undefined) {{
                             currentFifoIndex = fifoIndex;
                             updateCurrentFifoInfo();
                             updateHeatmapVisibility();
+                        }} else {{
+                            console.warn('未找到FIFO:', category, fifoType);
                         }}
                     }}
                 }}
@@ -877,13 +1063,11 @@ class FIFOHeatmapVisualizer:
                 const update = {{}};
                 const visibility = [];
 
-                // 计算哪些traces应该可见
+                // 计算哪些traces应该可见（每个FIFO选项+模式组合1个trace）
                 for (let i = 0; i < numFifoOptions; i++) {{
                     for (let mode of ['avg', 'peak']) {{
-                        for (let die = 0; die < numDies; die++) {{
-                            const shouldShow = (i === currentFifoIndex && mode === currentMode);
-                            visibility.push(shouldShow);
-                        }}
+                        const shouldShow = (i === currentFifoIndex && mode === currentMode);
+                        visibility.push(shouldShow);
                     }}
                 }}
 
@@ -893,6 +1077,7 @@ class FIFOHeatmapVisualizer:
                 }}
 
                 update.visible = visibility;
+                console.log('更新trace可见性:', visibility.filter(v => v).length, '个可见,', 'currentFifoIndex:', currentFifoIndex, 'currentMode:', currentMode);
                 Plotly.restyle(plotDiv, update);
 
                 // 更新架构图高亮
@@ -929,46 +1114,69 @@ class FIFOHeatmapVisualizer:
                 Plotly.relayout(plotDiv, {{'shapes': newShapes}});
             }}
 
-            // 获取所有按钮（两组）
-            const allButtons = plotDiv.querySelectorAll('.updatemenu-button');
+            // 等待按钮渲染完成后绑定事件
+            function setupButtonListeners() {{
+                const allButtons = plotDiv.querySelectorAll('.updatemenu-button');
+                console.log('找到按钮数量:', allButtons.length);
 
-            // 第一组：平均/峰值按钮（前2个）
-            const modeButtons = Array.from(allButtons).slice(0, 2);
-            // 第二组：网络类型按钮（后3个）
-            const networkButtons = Array.from(allButtons).slice(2, 5);
+                if (allButtons.length < 5) {{
+                    console.warn('按钮未完全渲染，重试...');
+                    setTimeout(setupButtonListeners, 200);
+                    return;
+                }}
 
-            // 监听平均/峰值按钮点击
-            modeButtons.forEach((btn, idx) => {{
-                btn.addEventListener('click', function(e) {{
-                    setTimeout(() => {{
-                        // 移除同组按钮的active类
-                        modeButtons.forEach(b => b.classList.remove('active'));
-                        // 添加到当前按钮
-                        this.classList.add('active');
+                // 第一组：平均/峰值按钮（前2个）
+                const modeButtons = Array.from(allButtons).slice(0, 2);
+                // 第二组：网络类型按钮（后3个）
+                const networkButtons = Array.from(allButtons).slice(2, 5);
+                console.log('模式按钮数量:', modeButtons.length, '网络按钮数量:', networkButtons.length);
 
-                        currentMode = (idx === 0) ? 'avg' : 'peak';
-                        updateHeatmapVisibility();
-                    }}, 10);
+                // 监听平均/峰值按钮点击
+                modeButtons.forEach((btn, idx) => {{
+                    btn.addEventListener('click', function(e) {{
+                        console.log('点击模式按钮:', idx === 0 ? 'avg' : 'peak');
+                        setTimeout(() => {{
+                            // 移除同组按钮的active类
+                            modeButtons.forEach(b => b.classList.remove('active'));
+                            // 添加到当前按钮
+                            this.classList.add('active');
+
+                            currentMode = (idx === 0) ? 'avg' : 'peak';
+                            updateHeatmapVisibility();
+                        }}, 10);
+                    }});
                 }});
-            }});
 
-            // 监听网络类型按钮点击
-            networkButtons.forEach((btn, idx) => {{
-                btn.addEventListener('click', function(e) {{
-                    setTimeout(() => {{
-                        // 移除同组按钮的active类
-                        networkButtons.forEach(b => b.classList.remove('active'));
-                        // 添加到当前按钮
-                        this.classList.add('active');
-
+                // 监听网络类型按钮点击
+                networkButtons.forEach((btn, idx) => {{
+                    btn.addEventListener('click', function(e) {{
                         const networks = ['req', 'rsp', 'data'];
-                        currentNetworkType = networks[idx];
+                        console.log('点击网络按钮:', networks[idx]);
+                        setTimeout(() => {{
+                            // 移除同组按钮的active类
+                            networkButtons.forEach(b => b.classList.remove('active'));
+                            // 添加到当前按钮
+                            this.classList.add('active');
 
-                        // 切换到当前FIFO在新网络中的对应项
-                        switchToNetwork(currentNetworkType);
-                    }}, 10);
+                            currentNetworkType = networks[idx];
+
+                            // 切换到当前FIFO在新网络中的对应项
+                            switchToNetwork(currentNetworkType);
+                        }}, 10);
+                    }});
                 }});
-            }});
+
+                // 初始化按钮高亮状态
+                if (modeButtons.length > 0) {{
+                    modeButtons[1].classList.add('active');  // 峰值
+                }}
+                if (networkButtons.length > 0) {{
+                    networkButtons[2].classList.add('active');  // Data
+                }}
+            }}
+
+            // 启动按钮监听器设置
+            setupButtonListeners();
 
             // 切换到指定网络类型
             function switchToNetwork(networkType) {{
@@ -988,20 +1196,14 @@ class FIFOHeatmapVisualizer:
 
             // 更新网络按钮高亮
             function updateNetworkButtonHighlight() {{
+                const allButtons = plotDiv.querySelectorAll('.updatemenu-button');
+                const networkButtons = Array.from(allButtons).slice(2, 5);
                 networkButtons.forEach(b => b.classList.remove('active'));
                 const networks = ['req', 'rsp', 'data'];
                 const netIdx = networks.indexOf(currentNetworkType);
                 if (netIdx >= 0 && netIdx < networkButtons.length) {{
                     networkButtons[netIdx].classList.add('active');
                 }}
-            }}
-
-            // 初始化按钮高亮状态
-            if (modeButtons.length > 0) {{
-                modeButtons[1].classList.add('active');  // 峰值
-            }}
-            if (networkButtons.length > 0) {{
-                networkButtons[2].classList.add('active');  // Data
             }}
 
             // 初始化时高亮默认FIFO

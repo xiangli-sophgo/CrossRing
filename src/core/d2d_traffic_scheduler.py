@@ -9,7 +9,7 @@ import os
 import logging
 from typing import List, Dict, Tuple, Optional, Iterator
 from collections import defaultdict, deque
-from .traffic_scheduler import TrafficFileReader, TrafficScheduler
+from .traffic_scheduler import TrafficFileReader, TrafficScheduler, SerialChain
 
 
 class D2DTrafficFileReader(TrafficFileReader):
@@ -116,7 +116,21 @@ class D2DTrafficScheduler(TrafficScheduler):
         self.readers = []
         self.pending_requests = defaultdict(list)
         self.received_flit = defaultdict(int)
+
+        # 初始化parallel_chains用于get_save_filename()
+        self.parallel_chains = []
+        self._create_parallel_chains_from_config(traffic_config)
+
         self._create_d2d_readers(traffic_config)
+
+    def _create_parallel_chains_from_config(self, traffic_config):
+        """根据traffic_config创建parallel_chains结构，用于get_save_filename()"""
+        for i, traffic_files in enumerate(traffic_config):
+            if not traffic_files:
+                continue
+            chain_id = f"chain_{i}"
+            chain = SerialChain(chain_id, traffic_files)
+            self.parallel_chains.append(chain)
 
     def _create_d2d_readers(self, traffic_config):
         """创建D2D文件读取器"""

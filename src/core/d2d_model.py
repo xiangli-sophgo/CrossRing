@@ -1098,10 +1098,10 @@ class D2D_Model:
                 d2d_processor.collect_cross_die_requests(self.dies)
                 d2d_processor.calculate_d2d_ip_bandwidth_data(self.dies)
 
-            # 获取结果保存路径，添加时间戳
-            timestamp = int(time.time())
+            # 获取结果保存路径，使用流量文件名
             result_save_path = self.kwargs.get("result_save_path", "../Result/")
-            d2d_result_path = os.path.join(result_save_path, f"D2D_{timestamp}")
+            traffic_name = self.d2d_traffic_scheduler.get_save_filename()
+            d2d_result_path = os.path.join(result_save_path, f"{self.num_dies}die", traffic_name)
 
             # 步骤1: 生成带宽分析报告
             report_file = d2d_processor.generate_d2d_bandwidth_report(d2d_result_path, self.dies)
@@ -1181,13 +1181,9 @@ class D2D_Model:
                 # 计算总周期数
                 total_cycles = self.current_cycle // self.config.NETWORK_FREQUENCY
 
-                # 确定保存路径
-                should_save = self._result_analysis_config.get("save_figures", True)
-                if should_save:
-                    save_dir = self.kwargs.get("results_fig_save_path", "../Result")
-                    fifo_save_path = f"{save_dir}/fifo_utilization_heatmap.html"
-                else:
-                    fifo_save_path = None
+                # 确定保存路径（保存到带时间戳的D2D结果文件夹中）
+                # fifo_utilization_heatmap为真时就保存文件
+                fifo_save_path = os.path.join(d2d_result_path, "fifo_utilization_heatmap.html")
 
                 # 生成FIFO热力图
                 fifo_heatmap_path = create_fifo_heatmap(
