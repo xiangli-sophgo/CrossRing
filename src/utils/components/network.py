@@ -451,10 +451,17 @@ class Network:
         self.links[link][slice_index] = flit
 
     def can_move_to_next(self, flit, current, next_node):
+        """
+        简化版本：只检查FIFO深度，I-Tag逻辑已移至CrossPoint
+
+        用于EQ/TU/TD本地注入的FIFO深度检查
+        TR/TL方向的注入已由CrossPoint管理，不再使用此方法
+        """
         if flit.source == flit.destination or len(flit.path) <= 1:
+            # 本地注入到EQ
             return len(self.inject_queues["EQ"]) < self.config.IQ_OUT_FIFO_DEPTH_EQ
 
-        # 纵向环移动（上下方向）
+        # 纵向环移动（上下方向） - 本地注入到TU/TD
         if abs(current - next_node) == self.config.NUM_COL:
             # 判断向上还是向下
             if next_node > current:
@@ -464,49 +471,8 @@ class Network:
                 # 向上移动
                 return len(self.inject_queues["TU"][current]) < self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
 
-        # 横向环移动（左右方向）
-        direction = "TR" if next_node == current + 1 else "TL"
-        link = (current, next_node)
-
-        # 横向环处理
-        link_occupied = self.links[link][0] is not None
-
-        # 检查crosspoint冲突（如果启用了此功能）
-        crosspoint_conflict = False
-        if hasattr(self.config, "ENABLE_CROSSPOINT_CONFLICT_CHECK") and self.config.ENABLE_CROSSPOINT_CONFLICT_CHECK:
-            # Use the last element of the pipeline queue (previous cycle's conflict status)
-            crosspoint_conflict = self.crosspoint_conflict["horizontal"][current][direction][-1]
-
-        if link_occupied or crosspoint_conflict:  # Link被占用或crosspoint冲突
-            # 检查是否需要标记ITag（内联所有检查逻辑）
-            slot = self.links_tag[link][0]
-            if (
-                link_occupied  # 只有当link被实际占用时才标记ITag
-                and not slot.itag_reserved
-                and flit.wait_cycle_h > self.config.ITag_TRIGGER_Th_H
-                and self.tagged_counter[direction][current] < self.config.ITag_MAX_NUM_H
-                and self.itag_req_counter[direction][current] > 0
-                and self.remain_tag[direction][current] > 0
-            ):
-
-                # 创建ITag标记（内联逻辑）
-                self.remain_tag[direction][current] -= 1
-                self.tagged_counter[direction][current] += 1
-                slot.reserve_itag(current, direction)
-                flit.itag_h = True
-            return False
-
-        else:  # Link空闲且无crosspoint冲突
-            slot = self.links_tag[link][0]
-            if not slot.itag_reserved:  # 无预约
-                return True  # 直接上环
-            else:  # 有预约
-                if slot.check_itag_match(current, direction):  # 是自己的预约
-                    # 使用预约（内联逻辑）
-                    slot.clear_itag()
-                    self.remain_tag[direction][current] += 1  # 修复：使用direction
-                    self.tagged_counter[direction][current] -= 1
-                    return True
+        # 横向环移动（TR/TL）已由CrossPoint处理，此路径不应到达
+        # 保留兼容性，返回False
         return False
 
     def update_excess_ITag(self):

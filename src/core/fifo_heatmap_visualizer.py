@@ -806,8 +806,8 @@ class FIFOHeatmapVisualizer:
         # 通道缓冲（水平排列在顶部，小长方形）
         ch_start_x = iq_x + 0.8
         ch_y = iq_y + iq_h - 2
-        ch_width = 0.7
-        ch_height = 1.5
+        ch_width = 0.8
+        ch_height = 1.6
         ch_spacing = 0.9
         for i, ch_name in enumerate(ch_names):
             x_pos = ch_start_x + i * ch_spacing
@@ -819,19 +819,19 @@ class FIFOHeatmapVisualizer:
         directions = ["TL", "TR"]
         for i, direction in enumerate(directions):
             x_pos = iq_x + 1.5 + i * dir_spacing
-            self._draw_fifo_item(fig, x_pos, dir_y, 1.0, 1.8, direction, ("IQ", direction), fifo_options)
+            self._draw_fifo_item(fig, x_pos, dir_y, 1.2, 2.0, direction, ("IQ", direction), fifo_options)
 
         # EQ（右侧最上方，横向长方形）
         eq_x = iq_x + iq_w - 2.5
         eq_y = iq_y + iq_h - 3.5
-        self._draw_fifo_item(fig, eq_x, eq_y, 1.8, 1, "EQ", ("IQ", "EQ"), fifo_options)
+        self._draw_fifo_item(fig, eq_x, eq_y, 2.2, 1.0, "EQ", ("IQ", "EQ"), fifo_options)
 
         # TU/TD（右侧下方，横向长方形）
         other_dirs = ["TU", "TD"]
         for i, direction in enumerate(other_dirs):
             x_pos = iq_x + iq_w - 2.5
             y_pos = iq_y + 2 + i * 2
-            self._draw_fifo_item(fig, x_pos, y_pos, 1.8, 1, direction, ("IQ", direction), fifo_options)
+            self._draw_fifo_item(fig, x_pos, y_pos, 2.2, 1.0, direction, ("IQ", direction), fifo_options)
 
         # === Ring Bridge (右下) ===
         rb_x, rb_y = 14, 0
@@ -839,20 +839,20 @@ class FIFOHeatmapVisualizer:
         self._draw_module_box(fig, rb_x, rb_y, rb_w, rb_h, "Ring Bridge", "lightyellow")
 
         # EQ (左上角，长方形)
-        self._draw_fifo_item(fig, rb_x + 1, rb_y + rb_h - 2.5, 1, 1.8, "EQ", ("RB", "EQ"), fifo_options)
+        self._draw_fifo_item(fig, rb_x + 1, rb_y + rb_h - 2.5, 1.2, 2.0, "EQ", ("RB", "EQ"), fifo_options)
 
         # TL, TR (左侧下方水平排列，小长方形）
         for i, direction in enumerate(["TL", "TR"]):
             x_pos = rb_x + 1 + i * 2.2
             y_pos = rb_y + 1.5
-            self._draw_fifo_item(fig, x_pos, y_pos, 1, 1.8, direction, ("RB", direction), fifo_options)
+            self._draw_fifo_item(fig, x_pos, y_pos, 1.2, 2.0, direction, ("RB", direction), fifo_options)
 
         # TU, TD (右上角垂直排列，小长方形)
         rb_right_dirs = ["TU", "TD"]
         for i, direction in enumerate(rb_right_dirs):
             x_pos = rb_x + rb_w - 2.5
             y_pos = rb_y + rb_h - 2.5 - i * 2.2
-            self._draw_fifo_item(fig, x_pos, y_pos, 1.8, 1, direction, ("RB", direction), fifo_options)
+            self._draw_fifo_item(fig, x_pos, y_pos, 2.2, 1.0, direction, ("RB", direction), fifo_options)
 
         # === Eject Queue (右上) ===
         eq_x, eq_y = 14, 12
@@ -862,16 +862,16 @@ class FIFOHeatmapVisualizer:
         # 通道缓冲（垂直排列在左侧，小长方形）
         eq_ch_start_y = eq_y + eq_h - 1.2
         eq_ch_x = eq_x + 1
-        eq_ch_spacing = 0.65
+        eq_ch_spacing = 0.8
         for i, ch_name in enumerate(ch_names):
             y_pos = eq_ch_start_y - i * eq_ch_spacing
-            self._draw_fifo_item(fig, eq_ch_x, y_pos, 1.5, 0.5, ch_name, ("EQ_CH", ch_name), fifo_options)
+            self._draw_fifo_item(fig, eq_ch_x, y_pos, 1.6, 0.8, ch_name, ("EQ_CH", ch_name), fifo_options)
 
         # TU, TD (右侧纵向，小长方形）
         for i, direction in enumerate(["TU", "TD"]):
             x_pos = eq_x + eq_w - 2.5
             y_pos = eq_y + eq_h - 2.5 - i * 2.2
-            self._draw_fifo_item(fig, x_pos, y_pos, 1.8, 1, direction, ("EQ", direction), fifo_options)
+            self._draw_fifo_item(fig, x_pos, y_pos, 2.2, 1.0, direction, ("EQ", direction), fifo_options)
 
         # 设置右侧子图的范围
         fig.update_xaxes(range=[-1, 26], row=1, col=2)

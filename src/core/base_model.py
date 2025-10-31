@@ -1,4 +1,3 @@
-import numpy as np
 from collections import deque, defaultdict
 
 from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths
@@ -7,16 +6,10 @@ from src.utils.components import Flit, Network, TokenBucket, IPInterface
 
 from src.core.Link_State_Visualizer import NetworkLinkVisualizer
 import matplotlib.pyplot as plt
-
 import os
 import sys, time
 import inspect, logging
-from functools import wraps
-
-import matplotlib.pyplot as plt
-import numpy as np
-
-from functools import lru_cache
+from functools import wraps, lru_cache
 from src.core.result_processor import *
 from src.core.traffic_scheduler import TrafficScheduler
 from src.utils.arbitration import create_arbiter_from_config
@@ -231,15 +224,6 @@ class BaseModel:
         self.iq_arbiter = create_arbiter_from_config(arbitration_config.get("iq", default_config))
         self.eq_arbiter = create_arbiter_from_config(arbitration_config.get("eq", default_config))
         self.rb_arbiter = create_arbiter_from_config(arbitration_config.get("rb", default_config))
-        # 新架构: 所有节点都可以作为IP节点
-        self.rn_positions = set(range(self.config.NUM_NODE))
-        self.sn_positions = set(range(self.config.NUM_NODE))
-        self.flit_positions = set(range(self.config.NUM_NODE))
-
-        # 缓存位置列表以避免重复转换
-        self.rn_positions_list = list(self.rn_positions)
-        self.sn_positions_list = list(self.sn_positions)
-        self.flit_positions_list = list(self.flit_positions)
 
         # 缓存网络类型到IP类型的映射
         self.network_ip_types = {
@@ -247,23 +231,18 @@ class BaseModel:
             "rsp": [ip_type for ip_type in self.config.CH_NAME_LIST if ip_type.startswith("ddr") or ip_type.startswith("l2m")],
             "data": self.config.CH_NAME_LIST,  # data网络不筛选
         }
-
-        # Pre-calculate frequently used lists to avoid repeated conversions
-        self.rn_positions_list = list(self.rn_positions)
-        self.sn_positions_list = list(self.sn_positions)
-        self.flit_positions_list = list(self.flit_positions)
         # 使用新的XY/YX确定性路由替代networkx最短路径
         self.routes = self._build_routing_table()
         self.ip_modules = {}
-        for ip_pos in self.flit_positions:
+        for node_id in range(self.config.NUM_NODE):
             for ip_type in self.config.CH_NAME_LIST:
                 # 检查是否是D2D接口类型
                 if ip_type == "d2d_rn_0":
                     from src.utils.components.d2d_rn_interface import D2D_RN_Interface
 
-                    self.ip_modules[(ip_type, ip_pos)] = D2D_RN_Interface(
+                    self.ip_modules[(ip_type, node_id)] = D2D_RN_Interface(
                         ip_type,
-                        ip_pos,
+                        node_id,
                         self.config,
                         self.req_network,
                         self.rsp_network,
@@ -273,9 +252,9 @@ class BaseModel:
                 elif ip_type == "d2d_sn_0":
                     from src.utils.components.d2d_sn_interface import D2D_SN_Interface
 
-                    self.ip_modules[(ip_type, ip_pos)] = D2D_SN_Interface(
+                    self.ip_modules[(ip_type, node_id)] = D2D_SN_Interface(
                         ip_type,
-                        ip_pos,
+                        node_id,
                         self.config,
                         self.req_network,
                         self.rsp_network,
@@ -284,9 +263,9 @@ class BaseModel:
                     )
                 else:
                     # 普通IP接口
-                    self.ip_modules[(ip_type, ip_pos)] = IPInterface(
+                    self.ip_modules[(ip_type, node_id)] = IPInterface(
                         ip_type,
-                        ip_pos,
+                        node_id,
                         self.config,
                         self.req_network,
                         self.rsp_network,
@@ -326,12 +305,6 @@ class BaseModel:
             }
         self.read_ip_intervals = defaultdict(list)  # 存储每个IP的读请求时间区间
         self.write_ip_intervals = defaultdict(list)  # 存储每个IP的写请求时间区间
-
-        self.type_to_positions = {
-            "req": self.sn_positions,
-            "rsp": self.rn_positions,
-            "data": self.flit_positions,
-        }
 
         # 新架构: 所有节点都可以作为IP节点
         self.dma_rw_counts = self.config._make_channels(
@@ -604,9 +577,9 @@ class BaseModel:
             self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "received_flit")
 
     def syn_IP_stat(self):
-        for ip_pos in self.flit_positions_list:
+        for node_id in range(self.config.NUM_NODE):
             for ip_type in self.config.CH_NAME_LIST:
-                ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
+                ip_interface: IPInterface = self.ip_modules[(ip_type, node_id)]
                 if self.model_type_stat == "REQ_RSP":
                     self.read_retry_num_stat += ip_interface.read_retry_num_stat
                     self.write_retry_num_stat += ip_interface.write_retry_num_stat
@@ -637,19 +610,19 @@ class BaseModel:
             self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle)
 
     def ip_inject_to_network(self):
-        for ip_pos in self.flit_positions_list:
+        for node_id in range(self.config.NUM_NODE):
             for ip_type in self.config.CH_NAME_LIST:
                 # 检查IP接口是否存在，避免KeyError
-                ip_key = (ip_type, ip_pos)
+                ip_key = (ip_type, node_id)
                 if ip_key in self.ip_modules:
                     ip_interface: IPInterface = self.ip_modules[ip_key]
                     ip_interface.inject_step(self.cycle)
 
     def network_to_ip_eject(self):
         """从网络到IP的eject步骤，并更新received_flit统计"""
-        for ip_pos in self.flit_positions_list:
+        for node_id in range(self.config.NUM_NODE):
             for ip_type in self.config.CH_NAME_LIST:
-                ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
+                ip_interface: IPInterface = self.ip_modules[(ip_type, node_id)]
                 # 执行eject，获取已到达目的IP的flit列表
                 ejected_flits = ip_interface.eject_step(self.cycle)
                 # 更新TrafficScheduler中的received_flit统计
@@ -660,7 +633,7 @@ class BaseModel:
     def release_completed_sn_tracker(self):
         """Check if any trackers can be released based on the current cycle."""
         # 遍历所有IP模块，检查各自的tracker释放队列
-        for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
+        for (ip_type, node_id), ip_interface in self.ip_modules.items():
             for release_time in sorted(ip_interface.sn_tracker_release_time.keys()):
                 if release_time > self.cycle:
                     continue
@@ -670,78 +643,75 @@ class BaseModel:
                     if req in ip_interface.sn_tracker:
                         ip_interface.release_completed_sn_tracker(req)
 
-    def _move_pre_to_queues(self, network: Network, in_pos):
+    def _move_pre_to_queues(self, network: Network, node_id):
         """Move all items from pre-injection queues to injection queues for a given network."""
         # ===  注入队列 *_pre → *_FIFO ===
-        ip_pos = in_pos  # 新架构: in_pos和ip_pos是同一个节点
 
         # IQ_channel_buffer_pre → IQ_channel_buffer
         for ip_type in network.IQ_channel_buffer_pre.keys():
             queue_pre = network.IQ_channel_buffer_pre[ip_type]
             queue = network.IQ_channel_buffer[ip_type]
-            if queue_pre[in_pos] and len(queue[in_pos]) < self.config.IQ_CH_FIFO_DEPTH:
-                flit = queue_pre[in_pos]
+            if queue_pre[node_id] and len(queue[node_id]) < self.config.IQ_CH_FIFO_DEPTH:
+                flit = queue_pre[node_id]
                 flit.flit_position = "IQ_CH"
-                queue[in_pos].append(flit)
-                queue_pre[in_pos] = None
+                queue[node_id].append(flit)
+                queue_pre[node_id] = None
 
         # IQ_pre → IQ_OUT
         for direction in self.IQ_directions:
             queue_pre = network.inject_queues_pre[direction]
             queue = network.inject_queues[direction]
-            if queue_pre[in_pos] and len(queue[in_pos]) < self.config.RB_OUT_FIFO_DEPTH:
-                flit = queue_pre[in_pos]
+            if queue_pre[node_id] and len(queue[node_id]) < self.config.RB_OUT_FIFO_DEPTH:
+                flit = queue_pre[node_id]
                 flit.departure_inject_cycle = self.cycle
                 flit.flit_position = f"IQ_{direction}"
-                queue[in_pos].append(flit)
-                queue_pre[in_pos] = None
+                queue[node_id].append(flit)
+                queue_pre[node_id] = None
 
         # RB_IN_PRE → RB_IN
         for direction in ["TL", "TR"]:
             queue_pre = network.ring_bridge_pre[direction]
             queue = network.ring_bridge[direction]
-            # 新架构: ring_bridge键直接使用节点号in_pos
-            if queue_pre[in_pos] and len(queue[in_pos]) < self.config.RB_IN_FIFO_DEPTH:
-                flit = queue_pre[in_pos]
+            if queue_pre[node_id] and len(queue[node_id]) < self.config.RB_IN_FIFO_DEPTH:
+                flit = queue_pre[node_id]
                 flit.flit_position = f"RB_{direction}"
-                queue[in_pos].append(flit)
-                queue_pre[in_pos] = None
+                queue[node_id].append(flit)
+                queue_pre[node_id] = None
 
         # RB_OUT_PRE → RB_OUT
         for fifo_pos in ("EQ", "TU", "TD"):
             queue_pre = network.ring_bridge_pre[fifo_pos]
             queue = network.ring_bridge[fifo_pos]
-            # 新架构: ring_bridge键直接使用节点号in_pos
-            if queue_pre[in_pos] and len(queue[in_pos]) < self.config.RB_OUT_FIFO_DEPTH:
-                flit = queue_pre[in_pos]
+            if queue_pre[node_id] and len(queue[node_id]) < self.config.RB_OUT_FIFO_DEPTH:
+                flit = queue_pre[node_id]
                 flit.is_arrive = fifo_pos == "EQ"
                 flit.flit_position = f"RB_{fifo_pos}"
-                queue[in_pos].append(flit)
-                queue_pre[in_pos] = None
+                queue[node_id].append(flit)
+                queue_pre[node_id] = None
 
         # EQ_IN_PRE → EQ_IN
         for fifo_pos in ("TU", "TD"):
             queue_pre = network.eject_queues_in_pre[fifo_pos]
             queue = network.eject_queues[fifo_pos]
-            if queue_pre[ip_pos] and len(queue[ip_pos]) < self.config.EQ_IN_FIFO_DEPTH:
-                flit = queue_pre[ip_pos]
+            if queue_pre[node_id] and len(queue[node_id]) < self.config.EQ_IN_FIFO_DEPTH:
+                flit = queue_pre[node_id]
                 flit.is_arrive = fifo_pos == "EQ"
                 flit.flit_position = f"EQ_{fifo_pos}"
-                queue[ip_pos].append(flit)
-                queue_pre[ip_pos] = None
+                queue[node_id].append(flit)
+                queue_pre[node_id] = None
 
         # EQ_channel_buffer_pre → EQ_channel_buffer
         for ip_type in network.EQ_channel_buffer_pre.keys():
             queue_pre = network.EQ_channel_buffer_pre[ip_type]
             queue = network.EQ_channel_buffer[ip_type]
-            if queue_pre[ip_pos] and len(queue[ip_pos]) < self.config.EQ_CH_FIFO_DEPTH:
-                flit = queue_pre[ip_pos]
+            if queue_pre[node_id] and len(queue[node_id]) < self.config.EQ_CH_FIFO_DEPTH:
+                flit = queue_pre[node_id]
                 flit.flit_position = "EQ_CH"
-                queue[ip_pos].append(flit)
-                queue_pre[ip_pos] = None
+                queue[node_id].append(flit)
+                queue_pre[node_id] = None
 
         # 更新FIFO统计
-        network.update_fifo_stats_after_move(in_pos)
+        network.update_fifo_stats_after_move(node_id)
 
     def print_data_statistic(self):
         if self.verbose:
@@ -760,7 +730,7 @@ class BaseModel:
         flits = self._network_cycle_process(network, flits, flit_type)
         return flits
 
-    def _try_inject_to_direction(self, req: Flit, ip_type, ip_pos, direction, counts):
+    def _try_inject_to_direction(self, req: Flit, ip_type, node_id, direction, counts):
         """检查tracker空间并尝试注入到指定direction的pre缓冲"""
         # 设置flit的允许下环方向（仅在第一次注入时设置）
         if not hasattr(req, "allowed_eject_directions") or req.allowed_eject_directions is None:
@@ -768,10 +738,10 @@ class BaseModel:
 
         # 直接注入到指定direction的pre缓冲
         queue_pre = self.req_network.inject_queues_pre[direction]
-        queue_pre[ip_pos] = req
+        queue_pre[node_id] = req
 
         # 从channel buffer移除
-        self.req_network.IQ_channel_buffer[ip_type][ip_pos].popleft()
+        self.req_network.IQ_channel_buffer[ip_type][node_id].popleft()
 
         # 更新计数和状态
         if req.req_attr == "new":  # 只有新请求才更新计数器和tracker
@@ -799,22 +769,12 @@ class BaseModel:
             network: 网络实例 (req_network / rsp_network / data_network)
             flit_type: flit类型 ("req" / "rsp" / "data")
         """
-        # 根据flit_type确定ip_positions
-        if flit_type == "req":
-            ip_positions = self.rn_positions_list
-        elif flit_type == "rsp":
-            ip_positions = self.sn_positions_list
-        elif flit_type == "data":
-            ip_positions = self.flit_positions_list
-        else:
-            return  # 不合法的flit_type
-
-        # IQ仲裁逻辑（原_inject_queue_arbitration的内容）
-        for ip_pos in ip_positions:
+        # 所有节点都可以作为IP节点
+        for node_id in range(self.config.NUM_NODE):
             # 1. 收集所有可能的 ip_types 和 directions
             all_ip_types = set()
             for direction in self.IQ_directions:
-                rr_queue = network.round_robin["IQ"][direction][ip_pos]
+                rr_queue = network.round_robin["IQ"][direction][node_id]
                 all_ip_types.update(rr_queue)
 
             if not all_ip_types:
@@ -831,7 +791,7 @@ class BaseModel:
                 row = []
                 for direction in directions_list:
                     # 检查是否可以注入到这个方向
-                    can_inject = self._check_iq_injection_conditions(network, ip_pos, ip_type, direction, flit_type, ip_type_to_flit)
+                    can_inject = self._check_iq_injection_conditions(network, node_id, ip_type, direction, flit_type, ip_type_to_flit)
                     row.append(can_inject)
                 request_matrix.append(row)
 
@@ -839,7 +799,7 @@ class BaseModel:
             if not any(any(row) for row in request_matrix):
                 continue  # 没有有效请求
 
-            queue_id = f"IQ_pos{ip_pos}_{flit_type}"
+            queue_id = f"IQ_pos{node_id}_{flit_type}"
             matches = self.iq_arbiter.match(request_matrix, queue_id=queue_id)
 
             # 4. 根据匹配结果处理注入
@@ -855,20 +815,20 @@ class BaseModel:
                 if flit_type == "req":
                     counts = None
                     if not ip_type.startswith("d2d_rn"):
-                        counts = self.dma_rw_counts[ip_type][ip_pos]
+                        counts = self.dma_rw_counts[ip_type][node_id]
                     else:
-                        counts = self.dma_rw_counts.get(ip_type, {}).get(ip_pos, {"read": 0, "write": 0})
+                        counts = self.dma_rw_counts.get(ip_type, {}).get(node_id, {"read": 0, "write": 0})
 
-                    self._try_inject_to_direction(flit, ip_type, ip_pos, direction, counts)
+                    self._try_inject_to_direction(flit, ip_type, node_id, direction, counts)
                 else:
                     # rsp / data 网络：直接移动到 pre‑缓冲
                     # 设置flit的允许下环方向（仅在第一次注入时设置）
                     if not hasattr(flit, "allowed_eject_directions") or flit.allowed_eject_directions is None:
                         flit.allowed_eject_directions = network.determine_allowed_eject_directions(flit)
 
-                    network.IQ_channel_buffer[ip_type][ip_pos].popleft()
+                    network.IQ_channel_buffer[ip_type][node_id].popleft()
                     queue_pre = network.inject_queues_pre[direction]
-                    queue_pre[ip_pos] = flit
+                    queue_pre[node_id] = flit
 
                     if flit_type == "rsp":
                         flit.rsp_entry_network_cycle = self.cycle
@@ -897,24 +857,24 @@ class BaseModel:
             flits: 当前网络中的flit列表
 
         Returns:
-            tuple: (更新后的flits列表, ring_bridge_EQ_flits列表)
+            list: 更新后的flits列表
         """
-        # 筛选Link上的flit和识别ring_bridge_EQ_flits
-        link_flits, ring_bridge_EQ_flits = [], []
+        # 第一步：对Link上的flit执行plan_move
         for flit in flits:
             if flit.flit_position == "Link":
-                link_flits.append(flit)
-            if flit.current_link[0] - flit.current_link[1] == self.config.NUM_COL and flit.current_link[1] == flit.destination:
-                ring_bridge_EQ_flits.append(flit)
+                network.plan_move(flit, self.cycle)
 
-        # 执行Link上的移动
-        for flit in link_flits:
-            network.plan_move(flit, self.cycle)
-        for flit in link_flits:
+        # 第二步：执行execute_moves并收集需要移除的flit
+        executed_flits = set()
+        for flit in flits:
             if network.execute_moves(flit, self.cycle):
-                flits.remove(flit)
+                executed_flits.add(id(flit))
 
-        return flits, ring_bridge_EQ_flits
+        # 第三步：一次过滤重建列表（O(n)，比多次remove快）
+        if executed_flits:
+            flits[:] = [flit for flit in flits if id(flit) not in executed_flits]
+
+        return flits
 
     def _RB_process(self, network: Network):
         """RB模块：Ring Bridge仲裁处理
@@ -972,7 +932,7 @@ class BaseModel:
                     # 新架构: ring_bridge_pre键直接使用节点号
                     network.ring_bridge_pre[out_dir][pos] = flit
                     station_flits[slot_idx] = None  # 标记为已使用
-                    self._update_ring_bridge(network, pos, next_pos, out_dir, slot_idx)
+                    self._update_ring_bridge(network, pos, out_dir, slot_idx)
 
     def _EQ_process(self, network: Network, flit_type: str):
         """EQ模块：Eject Queue仲裁处理
@@ -983,64 +943,54 @@ class BaseModel:
             network: 网络实例
             flit_type: flit类型 ("req" / "rsp" / "data")
         """
-        # 1. 映射flit_type到对应的positions
-        in_pos_position = self.type_to_positions.get(flit_type)
-        if in_pos_position is None:
-            return  # 不合法的flit_type
-
-        # 2. 统一处理eject_queues和ring_bridge
-        for in_pos in in_pos_position:
-            ip_pos = in_pos  # 新架构: in_pos和ip_pos是同一个节点
+        # 遍历所有节点处理eject_queues和ring_bridge
+        for node_id in range(self.config.NUM_NODE):
             # 构造eject_flits
             eject_flits = (
-                [network.eject_queues[fifo_pos][ip_pos][0] if network.eject_queues[fifo_pos][ip_pos] else None for fifo_pos in ["TU", "TD"]]
-                + [network.inject_queues[fifo_pos][in_pos][0] if network.inject_queues[fifo_pos][in_pos] else None for fifo_pos in ["EQ"]]
-                + [network.ring_bridge["EQ"][in_pos][0] if network.ring_bridge["EQ"][in_pos] else None]  # 新架构: 键直接使用节点号
+                [network.eject_queues[fifo_pos][node_id][0] if network.eject_queues[fifo_pos][node_id] else None for fifo_pos in ["TU", "TD"]]
+                + [network.inject_queues[fifo_pos][node_id][0] if network.inject_queues[fifo_pos][node_id] else None for fifo_pos in ["EQ"]]
+                + [network.ring_bridge["EQ"][node_id][0] if network.ring_bridge["EQ"][node_id] else None]
             )
             if not any(eject_flits):
                 continue
-            self._move_to_eject_queues_pre(network, eject_flits, ip_pos)
+            self._move_to_eject_queues_pre(network, eject_flits, node_id)
 
-    def _CP_process(self, network: Network, flits, flit_type: str, ring_bridge_EQ_flits):
+    def _CP_process(self, network: Network, flits, flit_type: str):
         """CP模块：CrossPoint处理
 
-        处理CrossPoint的上环和下环逻辑
+        处理CrossPoint的上环逻辑
 
         Args:
             network: 网络实例
             flits: 当前网络中的flit列表
             flit_type: flit类型 ("req" / "rsp" / "data")
-            ring_bridge_EQ_flits: 需要下环的flit列表
 
         Returns:
             list: 更新后的flits列表
         """
-        # 1. 清理已到达的flit
-        for flit in ring_bridge_EQ_flits:
-            if flit.is_arrive and flit in flits:
-                flits.remove(flit)
+        # CrossPoint注入（TL/TR/TU/TD四个方向）
+        for direction in ["TL", "TR", "TU", "TD"]:
+            # 获取对应的队列（数据结构都是dict[node_pos] -> deque）
+            if direction in ["TL", "TR"]:
+                queues = network.inject_queues[direction]
+            else:  # TU/TD
+                queues = network.ring_bridge[direction]
 
-        # 2. 横向环注入（调用process_inject_queues）
-        for direction in ["TL", "TR"]:  # 只处理横向环注入
-            inject_queues = network.inject_queues[direction]
-            num, IQ_inject_flits = self.process_inject_queues(network, inject_queues, direction)
-            if num == 0 and not IQ_inject_flits:
-                continue
-            if flit_type == "req":
-                self.req_num += num
-            elif flit_type == "rsp":
-                self.rsp_num += num
-            elif flit_type == "data":
-                self.flit_num += num
-            for flit in IQ_inject_flits:
+            num, injected_flits = self.process_inject_queues(network, queues, direction)
+
+            # 横向注入需要更新统计
+            if direction in ["TL", "TR"] and num > 0:
+                if flit_type == "req":
+                    self.req_num += num
+                elif flit_type == "rsp":
+                    self.rsp_num += num
+                elif flit_type == "data":
+                    self.flit_num += num
+
+            # 添加注入的flit到列表
+            for flit in injected_flits:
                 if flit not in flits:
                     flits.append(flit)
-
-        # 3. 纵向环注入（调用RB_inject_vertical）
-        RB_inject_flits = self.RB_inject_vertical(network)
-        for flit in RB_inject_flits:
-            if flit not in flits:
-                flits.append(flit)
 
         # 4. 更新ITag和CrossPoint状态
         network.update_excess_ITag()
@@ -1065,7 +1015,7 @@ class BaseModel:
         self._IQ_process(network, flit_type)
 
         # 2. Link模块：Link传输
-        flits, ring_bridge_EQ_flits = self._Link_process(network, flits)
+        flits = self._Link_process(network, flits)
 
         # 3. RB模块：Ring Bridge仲裁
         self._RB_process(network)
@@ -1074,11 +1024,11 @@ class BaseModel:
         self._EQ_process(network, flit_type)
 
         # 5. CP模块：CrossPoint处理（包含上环和下环）
-        flits = self._CP_process(network, flits, flit_type, ring_bridge_EQ_flits)
+        flits = self._CP_process(network, flits, flit_type)
 
         return flits
 
-    def _check_iq_injection_conditions(self, network, ip_pos, ip_type, direction, network_type, flit_cache):
+    def _check_iq_injection_conditions(self, network, node_id, ip_type, direction, network_type, flit_cache):
         """
         检查是否可以从ip_type注入到direction
 
@@ -1086,13 +1036,13 @@ class BaseModel:
             bool: 是否可以注入
         """
         # 检查round_robin队列中是否有这个ip_type
-        rr_queue = network.round_robin["IQ"][direction][ip_pos]  # 新架构: 直接使用ip_pos
+        rr_queue = network.round_robin["IQ"][direction][node_id]
         if ip_type not in rr_queue:
             return False
 
         # 检查pre槽是否占用
         queue_pre = network.inject_queues_pre[direction]
-        if queue_pre[ip_pos]:
+        if queue_pre[node_id]:
             return False
 
         # 检查FIFO是否满
@@ -1104,7 +1054,7 @@ class BaseModel:
         else:  # EQ
             fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_EQ
 
-        if len(queue[ip_pos]) >= fifo_depth:
+        if len(queue[node_id]) >= fifo_depth:
             return False
 
         # 网络特定 ip_type 过滤
@@ -1114,10 +1064,10 @@ class BaseModel:
             return False
 
         # 检查channel‑buffer是否为空
-        if not network.IQ_channel_buffer[ip_type][ip_pos]:
+        if not network.IQ_channel_buffer[ip_type][node_id]:
             return False
 
-        flit = network.IQ_channel_buffer[ip_type][ip_pos][0]
+        flit = network.IQ_channel_buffer[ip_type][node_id][0]
 
         # 缓存flit供后续使用
         flit_cache[(ip_type, direction)] = flit
@@ -1130,7 +1080,7 @@ class BaseModel:
         if network_type == "req":
             if not ip_type.startswith("d2d_rn"):
                 max_gap = self.config.GDMA_RW_GAP if ip_type.startswith("gdma") else self.config.SDMA_RW_GAP
-                counts = self.dma_rw_counts[ip_type][ip_pos]
+                counts = self.dma_rw_counts[ip_type][node_id]
                 rd, wr = counts["read"], counts["write"]
                 if flit.req_type == "read" and abs(rd + 1 - wr) >= max_gap:
                     return False
@@ -1141,15 +1091,15 @@ class BaseModel:
 
     def move_pre_to_queues_all(self):
         #  所有 IPInterface 的 *_pre → FIFO
-        for ip_pos in self.flit_positions_list:
+        for node_id in range(self.config.NUM_NODE):
             for ip_type in self.config.CH_NAME_LIST:
-                self.ip_modules[(ip_type, ip_pos)].move_pre_to_fifo()
+                self.ip_modules[(ip_type, node_id)].move_pre_to_fifo()
 
         # 所有网络的 *_pre → FIFO
-        for in_pos in self.flit_positions_list:
-            self._move_pre_to_queues(self.req_network, in_pos)
-            self._move_pre_to_queues(self.rsp_network, in_pos)
-            self._move_pre_to_queues(self.data_network, in_pos)
+        for node_id in range(self.config.NUM_NODE):
+            self._move_pre_to_queues(self.req_network, node_id)
+            self._move_pre_to_queues(self.rsp_network, node_id)
+            self._move_pre_to_queues(self.data_network, node_id)
 
     def update_throughput_metrics(self, flits):
         """Update throughput metrics based on flit counts."""
@@ -1233,17 +1183,17 @@ class BaseModel:
 
         try:
             # 通过IPInterface处理请求
-            ip_pos = req.source
+            node_id = req.source
             ip_type = req.source_type
 
-            ip_interface: IPInterface = self.ip_modules[(ip_type, ip_pos)]
+            ip_interface: IPInterface = self.ip_modules[(ip_type, node_id)]
             if ip_interface is None:
-                raise ValueError(f"IP module setup error for ({ip_type}, {ip_pos})!")
+                raise ValueError(f"IP module setup error for ({ip_type}, {node_id})!")
 
             # 检查IP接口是否能接受新请求（可选的流控机制）
             if hasattr(ip_interface, "can_accept_request") and not ip_interface.can_accept_request():
                 if self.traffic_scheduler.verbose:
-                    print(f"Warning: IP interface ({ip_type}, {ip_pos}) is busy, request may be delayed")
+                    print(f"Warning: IP interface ({ip_type}, {node_id}) is busy, request may be delayed")
 
             ip_interface.enqueue(req, "req")
 
@@ -1446,36 +1396,11 @@ class BaseModel:
                 return next_hop
         return None
 
-    def RB_inject_vertical(self, network: Network):
-        RB_inject_flits = []
-        for ip_pos in self.flit_positions:
-            next_pos = ip_pos  # 新架构: in_pos和ip_pos相同
-            # 垂直方向的邻居节点 (上/下)
-            up_node, down_node = (
-                next_pos - self.config.NUM_COL,  # 上方邻居
-                next_pos + self.config.NUM_COL,  # 下方邻居
-            )
-            if up_node < 0:
-                up_node = next_pos
-            if down_node >= self.config.NUM_NODE:
-                down_node = next_pos
-
-            # 处理TU方向
-            TU_inject_flit = self._process_ring_bridge_inject(network, "TU", ip_pos, next_pos, down_node, up_node)
-            if TU_inject_flit:
-                RB_inject_flits.append(TU_inject_flit)
-
-            # 处理TD方向
-            TD_inject_flit = self._process_ring_bridge_inject(network, "TD", ip_pos, next_pos, up_node, down_node)
-            if TD_inject_flit:
-                RB_inject_flits.append(TD_inject_flit)
-
-        return RB_inject_flits
-
-    def _update_ring_bridge(self, network: Network, pos, next_pos, direction, index):
+    def _update_ring_bridge(self, network: Network, pos, direction, index):
         """更新transfer stations
 
         新架构: ring_bridge键直接使用节点号pos，next_pos参数保留用于兼容性
+        TU/TD方向由CrossPoint处理，flit作为参数传入，不再从队列pop
         """
         if index == 0:
             flit = network.ring_bridge["TL"][pos].popleft()
@@ -1529,140 +1454,6 @@ class BaseModel:
                     self.RB_ETag_T0_per_channel[channel_type][pos][direction] += 1
 
         flit.ETag_priority = "T2"
-        # flit.used_entry_level = None
-        # Note: arbitration is now handled by the unified arbiter system
-
-    def _process_ring_bridge_inject(self, network: Network, dir_key, pos, next_pos, curr_node, opposite_node):
-        """处理ring bridge的注入
-
-        新架构: ring_bridge键直接使用节点号pos，next_pos参数保留用于兼容性
-        """
-        direction = dir_key  # "TU" or "TD"
-        link = (next_pos, opposite_node)
-
-        # Early return if ring bridge is not active for this direction and position
-        if not network.ring_bridge[dir_key][pos]:
-            return None
-        flit = network.ring_bridge[dir_key][pos][0]
-        # self.error_log(flit, 10651, 1)
-        # Case 1: No flit in the link
-        link_occupied = network.links[link][0] is not None
-
-        # Check crosspoint conflict for vertical injection (if enabled)
-        crosspoint_conflict = False
-        if hasattr(self.config, "ENABLE_CROSSPOINT_CONFLICT_CHECK") and self.config.ENABLE_CROSSPOINT_CONFLICT_CHECK:
-            # Use the last element of the pipeline queue (previous cycle's conflict status)
-            crosspoint_conflict = network.crosspoint_conflict["vertical"][pos][direction][-1]
-
-        if not link_occupied and not crosspoint_conflict:
-            # Handle empty link cases with no crosspoint conflict
-            slot = network.links_tag[link][0]
-            if not slot.itag_reserved:
-                if self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction):
-                    # 首次上环时分配order_id（从RB进入垂直环）
-                    if flit.src_dest_order_id == -1:
-                        src_node = flit.source_original if flit.source_original != -1 else flit.source
-                        dest_node = flit.destination_original if flit.destination_original != -1 else flit.destination
-                        src_type = flit.original_source_type if flit.original_source_type else flit.source_type
-                        dest_type = flit.original_destination_type if flit.original_destination_type else flit.destination_type
-                        flit.src_dest_order_id = Flit.get_next_order_id(src_node, src_type, dest_node, dest_type, flit.flit_type.upper(), self.config.ORDERING_GRANULARITY)
-                    return flit
-                return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
-
-            # Case 2: Has ITag reservation (no crosspoint conflict for reservations)
-            if slot.check_itag_match(pos, direction):
-                # 使用预约并更新双计数器
-                network.remain_tag[direction][pos] += 1
-                network.tagged_counter[direction][pos] -= 1  # 新增：更新tagged计数器
-                slot.clear_itag()
-
-                if self._update_flit_state(network, dir_key, pos, next_pos, opposite_node, direction):
-                    # 首次上环时分配order_id（从RB进入垂直环）
-                    if flit.src_dest_order_id == -1:
-                        src_node = flit.source_original if flit.source_original != -1 else flit.source
-                        dest_node = flit.destination_original if flit.destination_original != -1 else flit.destination
-                        src_type = flit.original_source_type if flit.original_source_type else flit.source_type
-                        dest_type = flit.original_destination_type if flit.original_destination_type else flit.destination_type
-                        flit.src_dest_order_id = Flit.get_next_order_id(src_node, src_type, dest_node, dest_type, flit.flit_type.upper(), self.config.ORDERING_GRANULARITY)
-                    return flit
-                return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
-
-        # Case 3: Link occupied or crosspoint conflict - cannot inject
-        return self._handle_wait_cycles(network, dir_key, pos, next_pos, direction, link)
-
-    def _update_flit_state(self, network: Network, ts_key, ip_pos, next_pos, target_node, direction):
-        """更新Flit状态并处理ITag需求变化
-
-        新架构: ring_bridge键直接使用节点号ip_pos，next_pos参数保留用于兼容性
-        """
-        if network.links[(next_pos, target_node)][0] is not None:
-            return False
-
-        flit: Flit = network.ring_bridge[ts_key][ip_pos].popleft()
-
-        # 检查这个Flit是否曾经申请过ITag → 减少需求计数
-        if flit.wait_cycle_v >= self.config.ITag_TRIGGER_Th_V:
-            network.itag_req_counter[direction][ip_pos] -= 1
-
-            # 检查多余预约（内联逻辑）
-            excess = network.tagged_counter[direction][ip_pos] - network.itag_req_counter[direction][ip_pos]
-            if excess > 0:
-                network.excess_ITag_to_remove[direction][ip_pos] += excess
-
-        # 更新Flit位置
-        flit.current_position = next_pos
-        flit.path_index += 1
-        flit.is_new_on_network = False
-        flit.itag_v = False
-        flit.current_link = (next_pos, target_node)
-        flit.current_seat_index = 0
-        flit.flit_position = "Link"
-        network.execute_moves(flit, self.cycle)
-        return True
-
-    def _handle_wait_cycles(self, network: Network, ts_key, pos, next_pos, direction, link):
-        """处理等待周期和ITag标记逻辑
-
-        新架构: ring_bridge键直接使用节点号pos，next_pos参数保留用于兼容性
-        """
-        if not network.ring_bridge[ts_key][pos]:
-            return None
-
-        first_flit = network.ring_bridge[ts_key][pos][0]
-        first_flit.wait_cycle_v += 1
-        # 检查第一个Flit刚达到阈值 → 增加需求计数
-        if first_flit.wait_cycle_v == self.config.ITag_TRIGGER_Th_V:
-            network.itag_req_counter[direction][pos] += 1
-
-        # 检查是否需要标记ITag（内联所有检查逻辑）
-        slot = network.links_tag[link][0]
-        if (
-            first_flit.wait_cycle_v >= self.config.ITag_TRIGGER_Th_V
-            and not first_flit.itag_v
-            and not slot.itag_reserved
-            and network.tagged_counter[direction][pos] < self.config.ITag_MAX_NUM_V
-            and network.itag_req_counter[direction][pos] > 0
-            and network.remain_tag[direction][pos] > 0
-        ):
-
-            # 创建ITag标记（内联逻辑）
-            network.remain_tag[direction][pos] -= 1
-            network.tagged_counter[direction][pos] += 1
-            slot.reserve_itag(pos, direction)
-            first_flit.itag_v = True
-            self.ITag_v_num_stat += 1
-
-        # 更新所有Flit的等待时间并检查新的需求
-        # 新架构: ring_bridge键直接使用节点号pos
-        for i, flit in enumerate(network.ring_bridge[ts_key][pos]):
-            if i == 0:
-                continue
-            flit.wait_cycle_v += 1
-            # 检查其他Flit是否刚达到阈值
-            if i > 0 and flit.wait_cycle_v == self.config.ITag_TRIGGER_Th_V:
-                network.itag_req_counter[direction][pos] += 1
-
-        return None
 
     def tag_move_all_networks(self):
         self._tag_move(self.req_network)
@@ -1774,7 +1565,7 @@ class BaseModel:
             if h_key_start in network.links_tag:
                 network.links_tag[h_key_start][-1] = last_position
 
-    def _move_to_eject_queues_pre(self, network: Network, eject_flits, ip_pos):
+    def _move_to_eject_queues_pre(self, network: Network, eject_flits, node_id):
         """
         使用多对多匹配的EQ仲裁（全局最优）
 
@@ -1795,7 +1586,7 @@ class BaseModel:
             row = []
             for ip_type in ip_types_list:
                 # 检查是否可以从这个端口弹出到这个IP类型
-                can_eject = self._check_eq_eject_conditions(network, flit, ip_pos, port_idx, ip_type)
+                can_eject = self._check_eq_eject_conditions(network, flit, node_id, port_idx, ip_type)
                 row.append(can_eject)
             request_matrix.append(row)
 
@@ -1803,7 +1594,7 @@ class BaseModel:
         if not any(any(row) for row in request_matrix):
             return
 
-        queue_id = f"EQ_pos{ip_pos}"
+        queue_id = f"EQ_pos{node_id}"
         matches = self.eq_arbiter.match(request_matrix, queue_id=queue_id)
 
         # 4. 根据匹配结果处理弹出
@@ -1812,92 +1603,90 @@ class BaseModel:
             flit = eject_flits[port_idx]
 
             if flit:
-                in_pos = ip_pos  # 新架构: in_pos和ip_pos是同一个节点
-                network.EQ_channel_buffer_pre[ip_type][ip_pos] = flit
+                network.EQ_channel_buffer_pre[ip_type][node_id] = flit
                 flit.is_arrive = True
                 flit.arrival_eject_cycle = self.cycle
                 eject_flits[port_idx] = None
 
                 # 从对应的队列中移除flit
                 if port_idx == 0:  # TU
-                    removed_flit = network.eject_queues["TU"][ip_pos].popleft()
+                    removed_flit = network.eject_queues["TU"][node_id].popleft()
                     if removed_flit.used_entry_level == "T0":
-                        network.EQ_UE_Counters["TU"][ip_pos]["T0"] -= 1
+                        network.EQ_UE_Counters["TU"][node_id]["T0"] -= 1
                     elif removed_flit.used_entry_level == "T1":
-                        network.EQ_UE_Counters["TU"][ip_pos]["T1"] -= 1
+                        network.EQ_UE_Counters["TU"][node_id]["T1"] -= 1
                     elif removed_flit.used_entry_level == "T2":
-                        network.EQ_UE_Counters["TU"][ip_pos]["T2"] -= 1
+                        network.EQ_UE_Counters["TU"][node_id]["T2"] -= 1
                 elif port_idx == 1:  # TD
-                    removed_flit = network.eject_queues["TD"][ip_pos].popleft()
+                    removed_flit = network.eject_queues["TD"][node_id].popleft()
                     if removed_flit.used_entry_level == "T1":
-                        network.EQ_UE_Counters["TD"][ip_pos]["T1"] -= 1
+                        network.EQ_UE_Counters["TD"][node_id]["T1"] -= 1
                     elif removed_flit.used_entry_level == "T2":
-                        network.EQ_UE_Counters["TD"][ip_pos]["T2"] -= 1
+                        network.EQ_UE_Counters["TD"][node_id]["T2"] -= 1
                 elif port_idx == 2:  # IQ
-                    removed_flit = network.inject_queues["EQ"][in_pos].popleft()
+                    removed_flit = network.inject_queues["EQ"][node_id].popleft()
                 elif port_idx == 3:  # RB
-                    # 新架构: ring_bridge键直接使用节点号in_pos
-                    removed_flit = network.ring_bridge["EQ"][in_pos].popleft()
+                    removed_flit = network.ring_bridge["EQ"][node_id].popleft()
 
                 # 获取通道类型
                 flit_channel_type = getattr(flit, "flit_type", "req")
 
                 # 更新总数据量统计
-                if in_pos in self.EQ_total_flits_per_node:
+                if node_id in self.EQ_total_flits_per_node:
                     if port_idx == 0:  # TU direction
-                        self.EQ_total_flits_per_node[in_pos]["TU"] += 1
+                        self.EQ_total_flits_per_node[node_id]["TU"] += 1
                     elif port_idx == 1:  # TD direction
-                        self.EQ_total_flits_per_node[in_pos]["TD"] += 1
+                        self.EQ_total_flits_per_node[node_id]["TD"] += 1
 
                 # 更新按通道分类的总数据量统计
-                if in_pos in self.EQ_total_flits_per_channel.get(flit_channel_type, {}):
+                if node_id in self.EQ_total_flits_per_channel.get(flit_channel_type, {}):
                     if port_idx == 0:  # TU direction
-                        self.EQ_total_flits_per_channel[flit_channel_type][in_pos]["TU"] += 1
+                        self.EQ_total_flits_per_channel[flit_channel_type][node_id]["TU"] += 1
                     elif port_idx == 1:  # TD direction
-                        self.EQ_total_flits_per_channel[flit_channel_type][in_pos]["TD"] += 1
+                        self.EQ_total_flits_per_channel[flit_channel_type][node_id]["TD"] += 1
 
                 if flit.ETag_priority == "T1":
                     self.EQ_ETag_T1_num_stat += 1
                     # Update per-node FIFO statistics (only for TU and TD directions)
-                    if ip_pos in self.EQ_ETag_T1_per_node_fifo:
+                    if node_id in self.EQ_ETag_T1_per_node_fifo:
                         if port_idx == 0:  # TU direction
-                            self.EQ_ETag_T1_per_node_fifo[ip_pos]["TU"] += 1
+                            self.EQ_ETag_T1_per_node_fifo[node_id]["TU"] += 1
                         elif port_idx == 1:  # TD direction
-                            self.EQ_ETag_T1_per_node_fifo[ip_pos]["TD"] += 1
+                            self.EQ_ETag_T1_per_node_fifo[node_id]["TD"] += 1
 
                     # Update per-channel statistics
-                    if ip_pos in self.EQ_ETag_T1_per_channel.get(flit_channel_type, {}):
+                    if node_id in self.EQ_ETag_T1_per_channel.get(flit_channel_type, {}):
                         if port_idx == 0:  # TU direction
-                            self.EQ_ETag_T1_per_channel[flit_channel_type][ip_pos]["TU"] += 1
+                            self.EQ_ETag_T1_per_channel[flit_channel_type][node_id]["TU"] += 1
                         elif port_idx == 1:  # TD direction
-                            self.EQ_ETag_T1_per_channel[flit_channel_type][ip_pos]["TD"] += 1
+                            self.EQ_ETag_T1_per_channel[flit_channel_type][node_id]["TD"] += 1
 
                 elif flit.ETag_priority == "T0":
                     self.EQ_ETag_T0_num_stat += 1
                     # Update per-node FIFO statistics (only for TU and TD directions)
-                    if in_pos in self.EQ_ETag_T0_per_node_fifo:
+                    if node_id in self.EQ_ETag_T0_per_node_fifo:
                         if port_idx == 0:  # TU direction
-                            self.EQ_ETag_T0_per_node_fifo[in_pos]["TU"] += 1
+                            self.EQ_ETag_T0_per_node_fifo[node_id]["TU"] += 1
                         elif port_idx == 1:  # TD direction
-                            self.EQ_ETag_T0_per_node_fifo[in_pos]["TD"] += 1
+                            self.EQ_ETag_T0_per_node_fifo[node_id]["TD"] += 1
 
                     # Update per-channel statistics
-                    if in_pos in self.EQ_ETag_T0_per_channel.get(flit_channel_type, {}):
+                    if node_id in self.EQ_ETag_T0_per_channel.get(flit_channel_type, {}):
                         if port_idx == 0:  # TU direction
-                            self.EQ_ETag_T0_per_channel[flit_channel_type][in_pos]["TU"] += 1
+                            self.EQ_ETag_T0_per_channel[flit_channel_type][node_id]["TU"] += 1
                         elif port_idx == 1:  # TD direction
-                            self.EQ_ETag_T0_per_channel[flit_channel_type][in_pos]["TD"] += 1
+                            self.EQ_ETag_T0_per_channel[flit_channel_type][node_id]["TD"] += 1
 
                 flit.ETag_priority = "T2"
 
-    def _check_eq_eject_conditions(self, network, flit, ip_pos, port_idx, ip_type):
+    def _check_eq_eject_conditions(self, network, flit, node_id, port_idx, ip_type):
         """
         检查是否可以从端口弹出到IP类型
 
         Args:
             network: 网络实例
             flit: 待弹出的flit
-            ip_pos: IP位置
+            node_id: 节点ID
             port_idx: 端口索引 (0=TU, 1=TD, 2=IQ, 3=RB)
             ip_type: IP类型
 
@@ -1912,59 +1701,81 @@ class BaseModel:
             return False
 
         # 检查EQ channel buffer是否满
-        if len(network.EQ_channel_buffer[ip_type][ip_pos]) >= network.config.EQ_CH_FIFO_DEPTH:
+        if len(network.EQ_channel_buffer[ip_type][node_id]) >= network.config.EQ_CH_FIFO_DEPTH:
             return False
 
         return True
 
     def process_inject_queues(self, network: Network, inject_queues, direction):
+        """统一的CrossPoint注入处理（支持TL/TR/TU/TD四个方向）
+
+        Args:
+            inject_queues: 对于TL/TR是network.inject_queues[direction]
+                          对于TU/TD是network.ring_bridge[direction]
+            direction: TL/TR/TU/TD
+        """
         flit_num = 0
         flits = []
-        for ip_pos, queue in inject_queues.items():
-            if queue and queue[0]:
-                flit: Flit = queue.popleft()
 
-                # 检查是否需要生成Buffer_Reach_Th信号
-                if flit.wait_cycle_h == self.config.ITag_TRIGGER_Th_H and direction != "EQ":
-                    network.itag_req_counter[direction][ip_pos] += 1
-                if flit.inject(network):
-                    # 首次上环时分配order_id
-                    if flit.src_dest_order_id == -1:
-                        src_node = flit.source_original if flit.source_original != -1 else flit.source
-                        dest_node = flit.destination_original if flit.destination_original != -1 else flit.destination
-                        src_type = flit.original_source_type if flit.original_source_type else flit.source_type
-                        dest_type = flit.original_destination_type if flit.original_destination_type else flit.destination_type
-                        flit.src_dest_order_id = Flit.get_next_order_id(src_node, src_type, dest_node, dest_type, flit.flit_type.upper(), self.config.ORDERING_GRANULARITY)
+        # 判断是横向还是纵向
+        is_horizontal = direction in ["TL", "TR"]
+        cp_type = "horizontal" if is_horizontal else "vertical"
+        wait_attr = "wait_cycle_h" if is_horizontal else "wait_cycle_v"
+        itag_attr = "itag_h" if is_horizontal else "itag_v"
+        threshold = self.config.ITag_TRIGGER_Th_H if is_horizontal else self.config.ITag_TRIGGER_Th_V
 
+        for node_id, queue in inject_queues.items():
+            if not queue or not queue[0]:
+                continue
+
+            # 1. 检查是否需要生成Buffer_Reach_Th信号
+            flit = queue[0]
+            if getattr(flit, wait_attr) == threshold:
+                network.itag_req_counter[direction][node_id] += 1
+
+            # 2. 获取CrossPoint并调用统一的注入方法
+            crosspoint = network.crosspoints[node_id][cp_type]
+            injected_flit = crosspoint.process_inject(node_id, queue, direction, self.cycle)
+
+            if injected_flit:
+                # 3. 首次上环时分配order_id
+                if injected_flit.src_dest_order_id == -1:
+                    src_node = injected_flit.source_original if injected_flit.source_original != -1 else injected_flit.source
+                    dest_node = injected_flit.destination_original if injected_flit.destination_original != -1 else injected_flit.destination
+                    src_type = injected_flit.original_source_type if injected_flit.original_source_type else injected_flit.source_type
+                    dest_type = injected_flit.original_destination_type if injected_flit.original_destination_type else injected_flit.destination_type
+                    injected_flit.src_dest_order_id = Flit.get_next_order_id(
+                        src_node, src_type, dest_node, dest_type,
+                        injected_flit.flit_type.upper(), self.config.ORDERING_GRANULARITY
+                    )
+
+                # 4. 横向注入需要更新inject_num统计
+                if is_horizontal:
                     network.inject_num += 1
                     flit_num += 1
-                    flit.departure_network_cycle = self.cycle
-                    self.error_log(flit, 8022, -1)
-                    network.plan_move(flit, self.cycle)
-                    network.execute_moves(flit, self.cycle)
-                    flits.append(flit)
 
-                    # 生成Reduce_ITag_Req信号
-                    if flit.itag_h and direction not in ["EQ", "TU", "TD"]:
-                        network.itag_req_counter[direction][ip_pos] -= 1
-                        flit.itag_h = False
+                # 5. 纵向注入需要更新flit状态
+                if not is_horizontal:
+                    injected_flit.current_position = node_id
+                    injected_flit.path_index += 1
 
-                    if direction in ["EQ", "TU", "TD"]:
-                        queue.appendleft(flit)
-                        flit.itag_h = False
-                else:
-                    queue.appendleft(flit)
-                    # 更新FIFO中所有Flit的等待时间
-                    if direction in ["TR", "TL"]:
-                        for f in queue:
-                            f.wait_cycle_h += 1
-                            # 检查新达到阈值的Flit
-                            if f.wait_cycle_h == self.config.ITag_TRIGGER_Th_H:
-                                flit.itag_h = True
-                                if direction != "EQ":
-                                    network.itag_req_counter[direction][ip_pos] += 1
-                if flit.itag_h:
+                # 6. 设置is_new_on_network（CrossPoint已经注入到link）
+                injected_flit.is_new_on_network = False
+                flits.append(injected_flit)
+
+                # 7. ITag释放处理（统一逻辑）
+                if getattr(injected_flit, wait_attr) >= threshold:
+                    network.itag_req_counter[direction][node_id] -= 1
+                    excess = network.tagged_counter[direction][node_id] - network.itag_req_counter[direction][node_id]
+                    if excess > 0:
+                        network.excess_ITag_to_remove[direction][node_id] += excess
+
+            # 8. ITag统计
+            if queue and queue[0] and getattr(queue[0], itag_attr, False):
+                if is_horizontal:
                     self.ITag_h_num_stat += 1
+                else:
+                    self.ITag_v_num_stat += 1
 
         return flit_num, flits
 
@@ -2054,23 +1865,6 @@ class BaseModel:
             except Exception as e:
                 if self.verbose:
                     print(f"警告: FIFO使用率热力图生成失败: {e}")
-
-    def calculate_ip_bandwidth(self, intervals):
-        """计算给定区间的加权带宽"""
-        total_count = 0
-        total_interval_time = 0
-        # finish_time = self.cycle // self.config.network_frequency
-        for start, end, count in intervals:
-            if start >= end:
-                continue  # 跳过无效区间
-            interval_time = end - start
-            # bandwidth = (count * 128) / duration  # 计算该区间的带宽（不除以IP总数）
-            # weighted_sum += bandwidth * count  # 加权求和
-            total_count += count
-            total_interval_time += interval_time
-
-        # return weighted_sum / total_count if total_count > 0 else 0.0
-        return total_count * 128 / total_interval_time if total_interval_time > 0 else 0.0
 
     def _calculate_path_xy(self, src, dst):
         """
@@ -2421,9 +2215,6 @@ class BaseModel:
             "simulation_cycles": self.cycle,
             "total_flits_processed": self.trans_flits_num,
             "flit_pool_stats": Flit.get_pool_stats(),
-            "cache_hit_info": {
-                "node_map_cache_size": getattr(self.node_map, "cache_info", lambda: {"hits": 0, "misses": 0})(),
-            },
         }
 
         # Add I/O performance stats if available

@@ -633,3 +633,203 @@ class CrossPoint:
         else:
             # 向上移动 -> 从上侧下环
             return "TU"
+
+    # ------------------------------------------------------------------
+    # 上环逻辑 - 统一的注入管理
+    # ------------------------------------------------------------------
+
+    def _can_inject_to_link(self, flit: Flit, link: tuple, direction: str, cycle: int) -> bool:
+        """
+        检查flit是否可以上环到指定link（统一的I-Tag检查逻辑）
+
+        检查流程：
+        1. 检查link是否被占用
+        2. 如果占用：
+           - 检查是否已有I-Tag预约
+           - 如果没有预约且等待时间达到阈值，尝试创建I-Tag
+        3. 如果未占用：
+           - 检查是否有I-Tag预约
+           - 如果没有预约，可以直接注入
+           - 如果有预约且是自己的预约，可以使用预约注入
+
+        Args:
+            flit: 要注入的flit
+            link: 目标link (current, next_node)
+            direction: 注入方向 ("TL"/"TR"/"TU"/"TD")
+            cycle: 当前周期
+
+        Returns:
+            bool: 是否可以注入
+        """
+        if self.network is None:
+            return False
+
+        current_pos = link[0]
+        link_occupied = self.network.links[link][0] is not None
+        slot = self.network.links_tag[link][0]
+
+        # 区分横向和纵向配置
+        is_horizontal = direction in ["TL", "TR"]
+        wait_cycle = flit.wait_cycle_h if is_horizontal else flit.wait_cycle_v
+        trigger_threshold = self.config.ITag_TRIGGER_Th_H if is_horizontal else self.config.ITag_TRIGGER_Th_V
+        max_itag = self.config.ITag_MAX_NUM_H if is_horizontal else self.config.ITag_MAX_NUM_V
+
+        if link_occupied:
+            # Link被占用
+            if not slot.itag_reserved:
+                # 没有预约，尝试创建I-Tag
+                if (
+                    wait_cycle > trigger_threshold
+                    and self.tagged_counter[direction][current_pos] < max_itag
+                    and self.remain_tag[direction][current_pos] > 0
+                    and self.itag_req_counter[direction][current_pos] == 0
+                ):
+                    # 创建I-Tag预约
+                    self.remain_tag[direction][current_pos] -= 1
+                    self.tagged_counter[direction][current_pos] += 1
+                    slot.reserve_itag(current_pos, direction)
+                    if is_horizontal:
+                        flit.itag_h = True
+                    else:
+                        flit.itag_v = True
+                return False
+            elif slot.check_itag_match(current_pos, direction):
+                # 有预约且是自己的预约，可以使用
+                return True
+            else:
+                # 有预约但不是自己的
+                return False
+        else:
+            # Link未占用
+            if not slot.itag_reserved:
+                # 没有预约，直接注入
+                return True
+            elif slot.check_itag_match(current_pos, direction):
+                # 有预约且是自己的预约，使用预约
+                return True
+            else:
+                # 有预约但不是自己的
+                return False
+
+    def _inject_flit_to_link(self, flit: Flit, link: tuple, direction: str, cycle: int) -> bool:
+        """
+        统一的上环执行方法
+
+        执行流程：
+        1. 注入flit到link的第0个slice
+        2. 释放I-Tag预约（如果使用了预约）
+        3. 重置E-Tag显示优先级为T2
+        4. 更新统计计数器
+
+        Args:
+            flit: 要注入的flit
+            link: 目标link
+            direction: 注入方向
+            cycle: 当前周期
+
+        Returns:
+            bool: 是否注入成功
+        """
+        if self.network is None:
+            return False
+
+        current_pos = link[0]
+        slot = self.network.links_tag[link][0]
+        is_horizontal = direction in ["TL", "TR"]
+
+        # 1. 注入到link（直接赋值）
+        self.network.links[link][0] = flit
+        flit.current_link = link
+        flit.current_seat_index = 0
+        flit.flit_position = "Link"
+        flit.is_new_on_network = True  # 标记为新上环，下一cycle的plan_move会检测并跳过移动
+
+        # 2. 处理I-Tag释放
+        if slot.itag_reserved and slot.check_itag_match(current_pos, direction):
+            # 使用了预约，释放
+            slot.clear_itag()
+            self.remain_tag[direction][current_pos] += 1
+            self.tagged_counter[direction][current_pos] -= 1
+
+        # 清除flit上的I-Tag标记
+        if is_horizontal and flit.itag_h:
+            flit.itag_h = False
+        elif not is_horizontal and flit.itag_v:
+            flit.itag_v = False
+
+        # 3. 重置E-Tag显示优先级为T2
+        flit.ETag_priority = "T2"
+
+        # 4. 更新统计（network层会处理）
+        return True
+
+    def _increment_wait_cycles(self, queue: "deque", direction: str):
+        """
+        统一的等待时间管理方法
+
+        为队列中所有flit增加等待时间
+
+        Args:
+            queue: 注入队列（deque）
+            direction: 方向 ("TL"/"TR"/"TU"/"TD")
+        """
+        is_horizontal = direction in ["TL", "TR"]
+
+        for flit in queue:
+            if flit:
+                if is_horizontal:
+                    flit.wait_cycle_h += 1
+                else:
+                    flit.wait_cycle_v += 1
+
+    def process_inject(self, node_pos: int, queue: "deque", direction: str, cycle: int) -> Optional[Flit]:
+        """
+        统一的注入处理（支持TL/TR/TU/TD四个方向）
+
+        Args:
+            node_pos: 节点位置
+            queue: inject_queues（TL/TR）或ring_bridge（TU/TD）队列
+            direction: 注入方向 ("TL"/"TR"/"TU"/"TD")
+            cycle: 当前周期
+
+        Returns:
+            成功注入的flit，失败返回None
+        """
+        if not queue or not queue[0]:
+            return None
+
+        if direction not in self.managed_directions:
+            return None
+
+        flit = queue[0]  # 先peek
+
+        # 计算目标link（根据方向不同采用不同策略）
+        if direction in ["TL", "TR"]:
+            # 横向注入：从flit的path获取下一个节点
+            if len(flit.path) <= 1:
+                return None
+            link = (flit.source, flit.path[1])
+        else:  # TU/TD
+            # 纵向注入：根据方向计算垂直邻居
+            num_col = self.config.NUM_COL
+            opposite_node = node_pos - num_col if direction == "TU" else node_pos + num_col
+            link = (node_pos, opposite_node)
+
+        # 检查是否可以注入
+        if self._can_inject_to_link(flit, link, direction, cycle):
+            # 可以注入，从队列取出
+            flit = queue.popleft()
+
+            # 执行注入
+            success = self._inject_flit_to_link(flit, link, direction, cycle)
+
+            if success:
+                return flit
+            else:
+                # 注入失败，放回队列
+                queue.appendleft(flit)
+                return None
+        else:
+            # 不能注入，更新等待时间
+            self._increment_wait_cycles(queue, direction)
+            return None
