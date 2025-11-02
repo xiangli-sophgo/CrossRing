@@ -22,8 +22,17 @@ from datetime import datetime
 logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
 
 
-# 定义8种配置组合
+# 定义9种配置组合
 STRATEGY_CONFIGS = [
+    # Mode 0: 无保序 - 1种配置
+    {
+        "mode": 0,
+        "granularity": 0,
+        "channels": [],
+        "name": "M0_NoOrder",
+        "desc": "无保序（基准对照）"
+    },
+
     # Mode 1: 单侧下环 (TL/TU固定) - 4种组合
     {
         "mode": 1,
@@ -194,7 +203,7 @@ def save_results_to_csv(results_data):
     csv_file_exists = os.path.isfile(output_csv)
 
     if use_portalocker:
-        with open(output_csv, mode="a", newline="", encoding="utf-8") as output_csv_file:
+        with open(output_csv, mode="a", newline="", encoding="utf-8-sig") as output_csv_file:
             # 锁定文件（跨平台）
             portalocker.lock(output_csv_file, portalocker.LOCK_EX)
 
@@ -212,7 +221,7 @@ def save_results_to_csv(results_data):
             save_results_to_csv._lock = threading.Lock()
 
         with save_results_to_csv._lock:
-            with open(output_csv, mode="a", newline="", encoding="utf-8") as output_csv_file:
+            with open(output_csv, mode="a", newline="", encoding="utf-8-sig") as output_csv_file:
                 writer = csv.DictWriter(output_csv_file, fieldnames=results.keys())
                 if not csv_file_exists:
                     writer.writeheader()
@@ -254,27 +263,35 @@ def run_comparison_simulation(
     result_save_base_path = f"../Result/CrossRing/{model_type}/ordering_comparison/"
     results_fig_save_base_path = f"../Result/Plt_IP_BW/{model_type}/ordering_comparison/"
 
-    # CSV文件名包含时间戳
+    # 为每个策略创建独立的CSV文件
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_csv = os.path.join(
-        r"../Result/Traffic_result_csv/",
-        f"ordering_comparison_{timestamp}.csv"
-    )
+    csv_dir = os.path.join(r"../Result/Traffic_result_csv/", f"ordering_comparison_{timestamp}")
+    os.makedirs(csv_dir, exist_ok=True)
+
+    strategy_csv_map = {}
+    for strategy in STRATEGY_CONFIGS:
+        csv_path = os.path.join(csv_dir, f"{strategy['name']}.csv")
+        strategy_csv_map[strategy['name']] = csv_path
 
     os.makedirs(result_save_base_path, exist_ok=True)
-    os.makedirs(os.path.dirname(output_csv), exist_ok=True)
 
     # 确定worker数量
     if max_workers is None:
         max_workers = multiprocessing.cpu_count()
 
     print(f"使用 {max_workers} 个并行worker")
-    print(f"结果将保存到: {output_csv}\n")
+    print(f"结果将保存到目录: {csv_dir}")
+    print(f"每个策略独立的CSV文件:")
+    for strategy_name, csv_path in strategy_csv_map.items():
+        print(f"  - {strategy_name}: {os.path.basename(csv_path)}")
+    print()
 
-    # 准备所有仿真参数
-    sim_params_list = []
-    for file_name in file_names:
-        for strategy in STRATEGY_CONFIGS:
+    # 按策略分组准备仿真参数
+    strategy_params_map = {}
+    for strategy in STRATEGY_CONFIGS:
+        strategy_params_map[strategy['name']] = []
+        output_csv = strategy_csv_map[strategy['name']]
+        for file_name in file_names:
             sim_params = (
                 config_path,
                 traffic_path,
@@ -285,34 +302,47 @@ def run_comparison_simulation(
                 results_fig_save_base_path,
                 output_csv
             )
-            sim_params_list.append(sim_params)
+            strategy_params_map[strategy['name']].append(sim_params)
 
-    # 运行并行仿真
+    # 按策略串行执行,每个策略内部并行处理多个流量文件
     start_time = time.time()
+    total_simulations = len(file_names) * len(STRATEGY_CONFIGS)
+    global_completed = 0
 
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        # 提交所有仿真任务
-        future_to_params = {
-            executor.submit(run_single_simulation, params): params
-            for params in sim_params_list
-        }
+    for strategy_idx, (strategy_name, sim_params_list) in enumerate(strategy_params_map.items(), 1):
+        strategy_start_time = time.time()
 
-        # 处理完成的仿真并保存结果
-        completed = 0
-        total = len(sim_params_list)
+        print("\n" + "=" * 80)
+        print(f"策略 {strategy_idx}/{len(STRATEGY_CONFIGS)}: {strategy_name}")
+        print(f"CSV文件: {os.path.basename(strategy_csv_map[strategy_name])}")
+        print(f"流量文件数: {len(sim_params_list)}")
+        print("=" * 80 + "\n")
 
-        for future in future_to_params:
-            params = future_to_params[future]
-            file_name = params[3]
-            strategy_name = params[4]["name"]
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # 提交当前策略的所有仿真任务
+            future_to_params = {
+                executor.submit(run_single_simulation, params): params
+                for params in sim_params_list
+            }
 
-            try:
-                result_data = future.result()
-                save_results_to_csv(result_data)
-                completed += 1
-                print(f"进度: {completed}/{total} 个仿真已完成 ({completed*100/total:.1f}%)")
-            except Exception:
-                logging.exception(f"处理结果失败: {file_name} [{strategy_name}]")
+            # 处理完成的仿真并保存结果
+            strategy_completed = 0
+
+            for future in future_to_params:
+                params = future_to_params[future]
+                file_name = params[3]
+
+                try:
+                    result_data = future.result()
+                    save_results_to_csv(result_data)
+                    strategy_completed += 1
+                    global_completed += 1
+                    print(f"[{strategy_name}] 进度: {strategy_completed}/{len(sim_params_list)} | 总进度: {global_completed}/{total_simulations} ({global_completed*100/total_simulations:.1f}%)")
+                except Exception:
+                    logging.exception(f"处理结果失败: {file_name} [{strategy_name}]")
+
+        strategy_elapsed = time.time() - strategy_start_time
+        print(f"\n[{strategy_name}] 完成! 耗时: {strategy_elapsed:.2f}秒 ({strategy_elapsed/60:.1f}分钟)")
 
     end_time = time.time()
     elapsed = end_time - start_time
@@ -320,8 +350,8 @@ def run_comparison_simulation(
     print("\n" + "=" * 80)
     print(f"所有仿真完成!")
     print(f"总耗时: {elapsed:.2f} 秒 ({elapsed/60:.1f} 分钟)")
-    print(f"平均每个仿真: {elapsed/total:.2f} 秒")
-    print(f"结果CSV: {output_csv}")
+    print(f"平均每个仿真: {elapsed/total_simulations:.2f} 秒")
+    print(f"结果目录: {csv_dir}")
     print("=" * 80)
 
 

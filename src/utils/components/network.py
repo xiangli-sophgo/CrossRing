@@ -576,21 +576,6 @@ class Network:
 
     def plan_move(self, flit, cycle):
         self.cycle = cycle
-        if flit.is_new_on_network:
-            # current = flit.source
-            current = flit.path[flit.path_index]
-            next_node = flit.path[flit.path_index + 1]
-            flit.current_position = current
-            flit.is_new_on_network = False
-            flit.flit_position = "Link"
-            flit.is_arrive = False
-            flit.is_on_station = False
-            flit.current_link = (current, next_node)
-
-            # 所有情况下seat_index都从0开始（link头部）
-            flit.current_seat_index = 0
-
-            return
 
         # 计算行和列的起始和结束点
         current, next_node = flit.current_link[:2] if len(flit.current_link) == 3 else flit.current_link
@@ -901,11 +886,7 @@ class Network:
         # 验证seat_index合法性
         new_link_length = len(self.links[new_link])
         if flit.current_seat_index >= new_link_length:
-            raise RuntimeError(
-                f"[Cycle {self.cycle}] Invalid seat_index {flit.current_seat_index} "
-                f"for link {new_link} with length {new_link_length}. "
-                f"Flit: {flit.packet_id}.{flit.flit_id}"
-            )
+            raise RuntimeError(f"[Cycle {self.cycle}] Invalid seat_index {flit.current_seat_index} " f"for link {new_link} with length {new_link_length}. " f"Flit: {flit.packet_id}.{flit.flit_id}")
 
     def _analyze_flit_state(self, flit, current, next_node):
         """
@@ -1080,9 +1061,7 @@ class Network:
                 return
 
             # 尝试下环（只检查资源：队列容量和entry）
-            success, fail_reason = crosspoint._try_eject(
-                flit, eject_direction, final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues
-            )
+            success, fail_reason = crosspoint._try_eject(flit, eject_direction, final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues)
 
             if success:
                 # 下环成功

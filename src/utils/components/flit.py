@@ -99,7 +99,6 @@ class Flit:
         "start_inject",
         "is_injected",
         "is_ejected",
-        "is_new_on_network",
         "is_on_station",
         "is_delay",
         "is_arrive",
@@ -249,7 +248,6 @@ class Flit:
         self.start_inject = False
         self.is_injected = False
         self.is_ejected = False
-        self.is_new_on_network = True
         self.is_on_station = False
         self.is_delay = False
         self.is_arrive = False
@@ -320,7 +318,6 @@ class Flit:
                 if network.can_move_to_next(self, self.source, next_position):
                     self.current_position = self.source
                     self.is_injected = True
-                    self.is_new_on_network = True
                     self.current_link = None
                     return True
         return False
@@ -360,7 +357,6 @@ class Flit:
         self.is_arrive = False
         self.is_injected = False
         self.is_ejected = False
-        self.is_new_on_network = True
         self.is_on_station = False
         self.is_delay = False
         self.wait_cycle_h = 0

@@ -207,7 +207,6 @@ class D2D_RN_Interface(IPInterface):
         local_write_req.path_index = 0
         local_write_req.current_position = self.ip_pos
         local_write_req.is_injected = False
-        local_write_req.is_new_on_network = True
 
         # 发送写请求（D2D_RN的enqueue会跳过RN资源检查）
         self.enqueue(local_write_req, "req")
@@ -288,7 +287,6 @@ class D2D_RN_Interface(IPInterface):
         new_flit.path_index = 0
         new_flit.current_position = self.ip_pos
         new_flit.is_injected = False
-        new_flit.is_new_on_network = True
         new_flit.req_attr = "new"  # 标记为新请求，消耗资源
 
         # 记录D2D_RN的tracker信息（用于后续数据返回时释放）

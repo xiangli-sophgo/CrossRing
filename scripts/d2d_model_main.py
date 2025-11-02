@@ -46,7 +46,7 @@ def main():
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
-    model.setup_debug(trace_packets=[8022, 8721], update_interval=0.0)
+    # model.setup_debug(trace_packets=[8022, 8721], update_interval=0.0)
     # model.setup_visualization(enable=1, update_interval=0.5, start_cycle=500)
 
     model.setup_result_analysis(

@@ -13,6 +13,7 @@ from matplotlib.patches import Rectangle, FancyArrowPatch, Patch
 from matplotlib.lines import Line2D
 import matplotlib.colors as mcolors
 from functools import lru_cache
+import warnings
 
 # 移除循环引用
 import time, sys
@@ -718,6 +719,7 @@ class BandwidthAnalyzer:
             if self.plot_rn_bw_fig and hasattr(self, "sim_model") and getattr(self.sim_model, "results_fig_save_path", None):
                 rn_save_path = os.path.join(self.sim_model.results_fig_save_path, f"rn_bandwidth_{self.config.TOPO_TYPE}_{self.sim_model.file_name}_{time.time_ns()}.png")
                 fig.savefig(rn_save_path, bbox_inches="tight")
+                plt.close(fig)
             else:
                 plt.show()
 
@@ -775,6 +777,7 @@ class BandwidthAnalyzer:
             if self.plot_rn_bw_fig and hasattr(self, "sim_model") and getattr(self.sim_model, "results_fig_save_path", None):
                 rn_save_path = os.path.join(self.sim_model.results_fig_save_path, f"rn_bandwidth_{self.config.TOPO_TYPE}_{self.sim_model.file_name}.png")
                 fig.savefig(rn_save_path, bbox_inches="tight")
+                plt.close(fig)
             else:
                 plt.show()
 
@@ -2010,7 +2013,10 @@ class BandwidthAnalyzer:
         ax.margins(0.05)  # 设置边距以确保内容显示完整
         ax.axis("off")  # 隐藏坐标轴
 
-        plt.tight_layout(pad=1.5)
+        # 抑制tight_layout警告
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            plt.tight_layout(pad=1.5)
 
         if save_path:
             plt.savefig(
@@ -3416,7 +3422,9 @@ class BandwidthAnalyzer:
             m = 2.0
             ax.set_xlim(min(xs) - m, max(xs) + m)
             ax.set_ylim(min(ys) - m, max(ys) + m)
-        plt.tight_layout()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            plt.tight_layout()
 
         if save_path:
             fig.savefig(save_path, dpi=300, bbox_inches="tight")

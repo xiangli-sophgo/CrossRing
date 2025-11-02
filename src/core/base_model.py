@@ -1759,8 +1759,6 @@ class BaseModel:
                     injected_flit.current_position = node_id
                     injected_flit.path_index += 1
 
-                # 6. 设置is_new_on_network（CrossPoint已经注入到link）
-                injected_flit.is_new_on_network = False
                 flits.append(injected_flit)
 
                 # 7. ITag释放处理（统一逻辑）

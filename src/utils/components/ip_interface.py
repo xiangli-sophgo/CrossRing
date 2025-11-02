@@ -540,7 +540,6 @@ class IPInterface:
                 req.req_attr = "old"
                 req.is_injected = False
                 req.path_index = 0
-                req.is_new_on_network = True
                 req.is_arrive = False
                 # 重置order_id，让网络层重新分配
                 req.src_dest_order_id = -1
@@ -564,7 +563,6 @@ class IPInterface:
                 req.is_injected = False
                 req.path_index = 0
                 req.req_attr = "old"
-                req.is_new_on_network = True
                 req.is_arrive = False
                 # 重置order_id，让网络层重新分配
                 req.src_dest_order_id = -1

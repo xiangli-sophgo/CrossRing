@@ -175,7 +175,6 @@ class D2D_SN_Interface(IPInterface):
         # 设置网络状态
         new_flit.path_index = 0
         new_flit.is_injected = False
-        new_flit.is_new_on_network = True
         new_flit.current_position = self.ip_pos
 
         # 通过请求网络发送
@@ -215,7 +214,6 @@ class D2D_SN_Interface(IPInterface):
 
         # 重置网络状态属性以确保能被正确inject
         new_flit.is_injected = False
-        new_flit.is_new_on_network = True
         new_flit.current_position = self.ip_pos
 
         # 根据响应类型选择网络
@@ -497,7 +495,6 @@ class D2D_SN_Interface(IPInterface):
 
             # 标记为新的网络传输
             flit.is_injected = False
-            flit.is_new_on_network = True
             flit.current_position = self.ip_pos
 
             # 设置发送时间
@@ -615,7 +612,6 @@ class D2D_SN_Interface(IPInterface):
 
         # 标记为新的网络传输
         flit.is_injected = False
-        flit.is_new_on_network = True
         flit.current_position = self.ip_pos
 
         # 清除可能影响inject的旧属性

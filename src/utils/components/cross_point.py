@@ -675,7 +675,8 @@ class CrossPoint:
         max_itag = self.config.ITag_MAX_NUM_H if is_horizontal else self.config.ITag_MAX_NUM_V
 
         if link_occupied:
-            # Link被占用
+            # Link被占用，无论是否有ITag都不能注入
+            # 但可以在没有预约时尝试创建ITag（为下次空闲时预约）
             if not slot.itag_reserved:
                 # 没有预约，尝试创建I-Tag
                 if (
@@ -692,13 +693,8 @@ class CrossPoint:
                         flit.itag_h = True
                     else:
                         flit.itag_v = True
-                return False
-            elif slot.check_itag_match(current_pos, direction):
-                # 有预约且是自己的预约，可以使用
-                return True
-            else:
-                # 有预约但不是自己的
-                return False
+            # 无论如何都不能注入到被占用的slice
+            return False
         else:
             # Link未占用
             if not slot.itag_reserved:
@@ -742,7 +738,6 @@ class CrossPoint:
         flit.current_link = link
         flit.current_seat_index = 0
         flit.flit_position = "Link"
-        flit.is_new_on_network = True  # 标记为新上环，下一cycle的plan_move会检测并跳过移动
 
         # 2. 处理I-Tag释放
         if slot.itag_reserved and slot.check_itag_match(current_pos, direction):
