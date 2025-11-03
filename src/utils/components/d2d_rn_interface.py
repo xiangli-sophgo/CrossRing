@@ -719,6 +719,8 @@ class D2D_RN_Interface(IPInterface):
             cross_die_flit.is_last_flit = i == len(data_flits) - 1
             cross_die_flit.source_type = self.ip_type
             cross_die_flit.destination_type = first_flit.d2d_origin_type
+            cross_die_flit.original_source_type = first_flit.d2d_target_type
+            cross_die_flit.original_destination_type = first_flit.d2d_origin_type
 
             # 继承D2D属性
             copy_flit_attributes(first_flit, cross_die_flit, ["d2d_origin_die", "d2d_origin_node", "d2d_origin_type", "d2d_target_die", "d2d_target_node", "d2d_target_type"])

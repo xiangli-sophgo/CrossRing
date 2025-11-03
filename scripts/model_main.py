@@ -15,14 +15,12 @@ def main():
     """运行CrossRing仿真 - 使用新的简化配置接口"""
 
     # ==================== 流量配置 ====================
-    traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
-    # traffic_file_path = r"../test_data"
+    # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
+    traffic_file_path = r"../test_data"
     traffic_config = [
         [
-            "LLama2_AllReduce.txt"
-            # "data_1022_W.txt"
-            # "data_1022_R.txt"
-            # "data_1030_W.txt"
+            # "LLama2_AllReduce.txt"
+            "data_1030_W.txt"
             # "MLP_MoE.txt"
         ],
     ]
@@ -42,10 +40,10 @@ def main():
         "8x8": r"../config/topologies/topo_8x8.yaml",
     }
 
-    topo_type = "5x4"  # SG2262
+    # topo_type = "5x4"  # SG2262
     # topo_type = "4x4"
     # topo_type = "5x2"
-    # topo_type = "3x3"
+    topo_type = "3x3"
     # topo_type = "6x5"  # SG2260
     # topo_type = "8x8"  # SG2260E
 

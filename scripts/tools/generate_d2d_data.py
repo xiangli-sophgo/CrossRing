@@ -577,11 +577,6 @@ def generate_4die_stress_test():
     """
     生成4Die压力测试场景
 
-    包含4个测试场景：
-    1. 全互联均匀流量 - 所有Die之间互相通信
-    2. 环形单向流量 - Die0→Die1→Die2→Die3→Die0
-    3. 对角双向流量 - Die0↔Die2, Die1↔Die3
-    4. 热点集中流量 - 所有Die访问Die0
 
     Die配置：
     - 每个Die为5行4列（20个节点）
@@ -594,15 +589,16 @@ def generate_4die_stress_test():
 
     # Die0基础配置
     die0_gdma_base = {
-        "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
-        "gdma_1": [3, 15, 19],
-        # "gdma_0": [12, 13, 14],
-        # "gdma_1": [12, 13, 14],
+        # "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
+        # "gdma_1": [3, 15, 19],
+        "gdma_0": [0, 4],
+        "gdma_1": [0, 4],
     }
     die0_ddr_base = {
+        # "ddr_0": [3, 7, 11, 15],
+        # "ddr_1": [3, 7, 11, 15],
         "ddr_0": [3, 7, 11, 15],
-        "ddr_1": [3, 7, 11, 15],
-        # "ddr_0": [0],
+        # "ddr_0": [7],
     }
 
     # 计算所有Die配置
@@ -616,11 +612,11 @@ def generate_4die_stress_test():
     print("=" * 60)
 
     ring_pairs = [
-        (0, 0),
+        # (0, 0),
         # (1, 1),
         # (2, 2),
         # (3, 3),
-        # (0, 1),
+        (0, 1),
         # (1, 0),
         # (0, 2),
         # (2, 0),
@@ -633,13 +629,14 @@ def generate_4die_stress_test():
         # (2, 3),
         # (3, 2),
     ]
-    req_type = "R"
+    req_type = "W"
     traffic_configs = _generate_traffic_configs(
         die_configs,
         ring_pairs,
         req_type=req_type,
         burst_length=4,
-        bandwidth=11.52,
+        # bandwidth=11.52,
+        bandwidth=128,
     )
 
     generator.generate_traffic_file(

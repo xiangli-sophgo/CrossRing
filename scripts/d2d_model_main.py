@@ -14,8 +14,8 @@ def main():
 
     # 创建配置和模型
     config = D2DConfig(
-        # d2d_config_file="../config/topologies/d2d_2die_config.yaml",
-        d2d_config_file="../config/topologies/d2d_4die_config.yaml",
+        d2d_config_file="../config/topologies/d2d_2die_config.yaml",
+        # d2d_config_file="../config/topologies/d2d_4die_config.yaml",
     )
 
     # 创建模型
@@ -32,14 +32,14 @@ def main():
     traffic_file_path = str(Path(__file__).parent.parent / "test_data")
     traffic_chains = [
         [
-            # "d2d_64_share_W_1030.txt",
-            "d2d_64_share_R_1030.txt",
+            "d2d_64_share_W_1030.txt",
+            # "d2d_64_share_R_1030.txt",
             # "d2d_data_1021.txt",
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
     # model.setup_debug(trace_packets=[23], update_interval=0.1)
-    model.setup_visualization(enable=1, update_interval=0.5, start_cycle=0)
+    model.setup_visualization(enable=1, update_interval=0.5, start_cycle=500)
 
     model.setup_result_analysis(
         # 图片生成控制
@@ -57,7 +57,7 @@ def main():
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_time=10000,
+        max_time=20000,
         print_interval=200,
         verbose=1,
     )

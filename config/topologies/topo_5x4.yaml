@@ -11,12 +11,17 @@ NETWORK_FREQUENCY: 2
 
 # ========== 新的资源配置结构 ==========
 # 主配置：数据缓冲区大小
+# RN_RDB_SIZE: 256      # RN读数据缓冲区
+# RN_WDB_SIZE: 256      # RN写数据缓冲区
+# SN_DDR_RDB_SIZE: 256  # SN DDR读数据缓冲区
+# SN_DDR_WDB_SIZE: 256  # SN DDR写数据缓冲区
+SN_L2M_RDB_SIZE: 256  # SN L2M读数据缓冲区
+SN_L2M_WDB_SIZE: 256  # SN L2M写数据缓冲区
+
 RN_RDB_SIZE: 256      # RN读数据缓冲区
 RN_WDB_SIZE: 256      # RN写数据缓冲区
 SN_DDR_RDB_SIZE: 256  # SN DDR读数据缓冲区
 SN_DDR_WDB_SIZE: 256  # SN DDR写数据缓冲区
-SN_L2M_RDB_SIZE: 256  # SN L2M读数据缓冲区
-SN_L2M_WDB_SIZE: 256  # SN L2M写数据缓冲区
 
 # 次要配置：跟踪器数量（自动计算：databuffer_size / BURST）
 RN_R_TRACKER_OSTD: auto    # = RN_RDB_SIZE / BURST 
