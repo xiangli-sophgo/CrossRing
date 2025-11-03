@@ -616,11 +616,11 @@ def generate_4die_stress_test():
     print("=" * 60)
 
     ring_pairs = [
-        # (0, 0),
-        (1, 1),
+        (0, 0),
+        # (1, 1),
         # (2, 2),
         # (3, 3),
-        (0, 1),
+        # (0, 1),
         # (1, 0),
         # (0, 2),
         # (2, 0),
@@ -633,13 +633,13 @@ def generate_4die_stress_test():
         # (2, 3),
         # (3, 2),
     ]
-    req_type = "W"
+    req_type = "R"
     traffic_configs = _generate_traffic_configs(
         die_configs,
         ring_pairs,
         req_type=req_type,
         burst_length=4,
-        bandwidth=64,
+        bandwidth=11.52,
     )
 
     generator.generate_traffic_file(

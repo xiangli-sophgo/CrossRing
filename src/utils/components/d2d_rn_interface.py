@@ -23,7 +23,16 @@ class D2D_RN_Interface(IPInterface):
 
         # D2D特有属性
         self.die_id = getattr(config, "DIE_ID", 0)  # 当前Die的ID
-        self.cross_die_receive_queue = []  # 使用heapq管理的接收队列 [(arrival_cycle, flit)]
+
+        # 每个AXI通道独立的接收FIFO队列 {channel_type: deque([(arrival_cycle, flit)])}
+        self.cross_die_receive_queues = {
+            "AR": deque(),
+            "R": deque(),
+            "AW": deque(),
+            "W": deque(),
+            "B": deque()
+        }
+
         self.target_die_interfaces = {}  # 将由D2D_Model设置 {die_id: d2d_sn_interface}
 
         # 防止重复发送write_complete响应的记录 {packet_id: True}
@@ -64,20 +73,69 @@ class D2D_RN_Interface(IPInterface):
         # 跨Die写请求追踪 {packet_id: write_request_flit}
         self.cross_die_write_requests = {}
 
+    def _get_flit_channel_type(self, flit: Flit) -> str:
+        """
+        从flit属性判断AXI通道类型
+
+        Args:
+            flit: 待判断的flit
+
+        Returns:
+            str: AXI通道类型 ("AR", "R", "AW", "W", "B")
+        """
+        # 优先检查flit_position (AXI flit有明确标记)
+        if hasattr(flit, "flit_position") and flit.flit_position:
+            flit_pos = str(flit.flit_position)
+            if "AXI_AR" in flit_pos:
+                return "AR"
+            if "AXI_R" in flit_pos:
+                return "R"
+            if "AXI_AW" in flit_pos:
+                return "AW"
+            if "AXI_W" in flit_pos:
+                return "W"
+            if "AXI_B" in flit_pos:
+                return "B"
+
+        # 备用判断：根据flit类型和属性
+        if hasattr(flit, "flit_type") and flit.flit_type == "data":
+            if hasattr(flit, "write_data") or (hasattr(flit, "req_type") and flit.req_type == "write"):
+                return "W"
+            else:
+                return "R"
+
+        if hasattr(flit, "req_type"):
+            if flit.req_type == "read":
+                return "AR"
+            elif flit.req_type == "write":
+                return "AW"
+
+        if hasattr(flit, "rsp_type"):
+            if flit.rsp_type in ["datasend", "read_data"]:
+                return "R"
+            elif flit.rsp_type in ["write_ack", "write_response"]:
+                return "B"
+
+        # 默认返回AR
+        return "AR"
+
     def schedule_cross_die_receive(self, flit: Flit, arrival_cycle: int):
         """
         调度跨Die接收 - 由对方Die的D2D_SN调用
         """
-        heapq.heappush(self.cross_die_receive_queue, (arrival_cycle, flit))
+        channel_type = self._get_flit_channel_type(flit)
+        self.cross_die_receive_queues[channel_type].append((arrival_cycle, flit))
         self.cross_die_requests_received += 1
 
     def process_cross_die_receives(self):
         """
         处理到期的跨Die接收 - 在每个周期调用
+        遍历5个AXI通道的FIFO队列，处理到期的flit
         """
-        while self.cross_die_receive_queue and self.cross_die_receive_queue[0][0] <= self.current_cycle:
-            arrival_cycle, flit = heapq.heappop(self.cross_die_receive_queue)
-            self.handle_received_cross_die_flit(flit)
+        for channel_type, queue in self.cross_die_receive_queues.items():
+            while queue and queue[0][0] <= self.current_cycle:
+                arrival_cycle, flit = queue.popleft()
+                self.handle_received_cross_die_flit(flit)
 
     def handle_received_cross_die_flit(self, flit: Flit):
         """
@@ -528,13 +586,21 @@ class D2D_RN_Interface(IPInterface):
 
     def inject_step(self, cycle):
         """
-        重写inject_step方法，在inject阶段处理跨Die接收
+        重写inject_step方法，支持2GHz inject操作
+        在inject阶段处理跨Die接收，并以2GHz频率注入到网络
         """
+        self.current_cycle = cycle
+
         # 首先处理跨Die接收队列
         self.process_cross_die_receives()
 
-        # 调用父类的inject_step方法
-        super().inject_step(cycle)
+        # 2GHz inject操作（每个cycle执行，不受cycle_mod限制）
+        for net_type in ["req", "rsp", "data"]:
+            self.inject_to_l2h_pre(net_type)
+
+        # 2GHz操作：l2h_pre到IQ_channel_buffer
+        for net_type in ["req", "rsp", "data"]:
+            self.l2h_to_IQ_channel_buffer(net_type)
 
     def eject_step(self, cycle):
         """
@@ -684,7 +750,7 @@ class D2D_RN_Interface(IPInterface):
             "cross_die_responses_received": self.cross_die_responses_received,
             "cross_die_requests_received": self.cross_die_requests_received,
             "cross_die_requests_forwarded": self.cross_die_requests_forwarded,
-            "pending_receives": len(self.cross_die_receive_queue),
+            "pending_receives": sum(len(q) for q in self.cross_die_receive_queues.values()),
             "d2d_rn_tracker_count": self.rn_tracker_count["read"],
             "d2d_rn_rdb_count": self.rn_rdb_count,
         }

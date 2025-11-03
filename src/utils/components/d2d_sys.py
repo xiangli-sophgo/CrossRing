@@ -161,44 +161,66 @@ class D2D_Sys:
         # 处理AXI通道传输
         self.step_axi_channels()
 
-        # 使用轮询仲裁器进行RN/SN仲裁
-        # 构建 2x1 请求矩阵 (2个输入源，1个输出通道)
-        # Row 0 = RN队列, Row 1 = SN队列, Col 0 = AXI通道
-        request_matrix = [[len(self.rn_pending_queue) > 0], [len(self.sn_pending_queue) > 0]]  # RN队列是否有数据  # SN队列是否有数据
+        # === 5个AXI通道独立并行处理 ===
+        for channel_type in ["AR", "R", "AW", "W", "B"]:
+            # 从RN队列查找该通道的第一个item
+            rn_item = self._find_first_channel_item(self.rn_pending_queue, channel_type)
 
-        # 调用仲裁器的 match() 方法
-        matches = self.arbiter.match(request_matrix=request_matrix, queue_id=f"d2d_sys_{self.position}_to_{self.target_node_pos}")
+            # 从SN队列查找该通道的第一个item
+            sn_item = self._find_first_channel_item(self.sn_pending_queue, channel_type)
 
-        # 处理匹配结果
-        if matches:
-            source_idx, _ = matches[0]  # 取第一个匹配（输出只有一个）
+            # 如果该通道两个队列都没有待发送的flit，跳过
+            if not rn_item and not sn_item:
+                continue
 
-            if source_idx == 0:
-                # RN队列获胜
-                selected_queue = self.rn_pending_queue
-                source = "RN"
-            else:
-                # SN队列获胜
-                selected_queue = self.sn_pending_queue
-                source = "SN"
+            # 构建该通道专用的2x1仲裁矩阵
+            request_matrix = [[rn_item is not None], [sn_item is not None]]
 
-            # 从队列中取出第一个待发送项
-            selected_item = selected_queue[0]
+            # 使用轮询仲裁器进行RN vs SN仲裁（每个通道独立仲裁）
+            matches = self.arbiter.match(request_matrix=request_matrix, queue_id=f"d2d_sys_{self.position}_ch_{channel_type}")
 
-            # 尝试注入到AXI通道
-            if self._inject_to_axi_channel(selected_item):
-                # 注入成功，从队列中移除
-                selected_queue.popleft()
+            if matches:
+                source_idx, _ = matches[0]
 
-                if source == "RN":
-                    self.rn_transmit_count += 1
+                # 选择获胜的item和队列
+                if source_idx == 0:
+                    selected_item = rn_item
+                    selected_queue = self.rn_pending_queue
+                    source = "RN"
                 else:
-                    self.sn_transmit_count += 1
+                    selected_item = sn_item
+                    selected_queue = self.sn_pending_queue
+                    source = "SN"
 
-                self.total_transmit_count += 1
-            else:
-                # 注入失败（带宽不足），等待下个周期
-                return
+                # 尝试注入到AXI通道（会检查token bucket）
+                if self._inject_to_axi_channel(selected_item):
+                    # 注入成功，从队列中移除
+                    selected_queue.remove(selected_item)
+
+                    # 更新统计
+                    if source == "RN":
+                        self.rn_transmit_count += 1
+                    else:
+                        self.sn_transmit_count += 1
+
+                    self.total_transmit_count += 1
+                # 注入失败（该通道token不足），继续处理其他通道
+
+    def _find_first_channel_item(self, queue, channel_type: str):
+        """
+        从队列中查找第一个匹配指定通道类型的item
+
+        Args:
+            queue: 待搜索的队列 (rn_pending_queue或sn_pending_queue)
+            channel_type: AXI通道类型 ("AR", "R", "AW", "W", "B")
+
+        Returns:
+            匹配的item或None
+        """
+        for item in queue:
+            if item["channel_type"] == channel_type:
+                return item
+        return None
 
     def _determine_axi_channel(self, flit: Flit, interface_type: str) -> str:
         """

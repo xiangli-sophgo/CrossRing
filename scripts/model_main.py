@@ -75,7 +75,7 @@ def main():
         save_fig=0,
     )
     # sim.setup_debug(print_trace=1, show_trace_id=[2036, 2028], update_interval=0.1)
-    # sim.setup_visualization(plot_link_state=1, plot_start_cycle=3000, show_node_id=1)
+    sim.setup_visualization(plot_link_state=1, plot_start_cycle=300, show_node_id=1)
     np.random.seed(801)
 
     sim.run_simulation(max_time=6000, print_interval=200)

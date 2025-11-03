@@ -74,18 +74,18 @@ D2D_W_LATENCY: 20   # 写数据通道延迟 (ns)
 D2D_B_LATENCY: 20   # 写响应通道延迟 (ns)
 
 # D2D 带宽控制
-D2D_RN_BW_LIMIT: 192    # D2D RN 带宽限制 (GB/s)
-D2D_SN_BW_LIMIT: 192    # D2D SN 带宽限制 (GB/s)
+D2D_RN_BW_LIMIT: 256    # D2D RN 带宽限制 (GB/s)
+D2D_SN_BW_LIMIT: 256    # D2D SN 带宽限制 (GB/s)
 
 # D2D 资源管理配置
 # D2D_RN 配置
-D2D_RN_RDB_SIZE: 128        # D2D RN 读databuffer大小
-D2D_RN_WDB_SIZE: 128        # D2D RN 写databuffer大小
+D2D_RN_RDB_SIZE: 512        # D2D RN 读databuffer大小
+D2D_RN_WDB_SIZE: 512        # D2D RN 写databuffer大小
 D2D_RN_R_TRACKER_OSTD: auto # = D2D_RN_RDB_SIZE / BURST
 D2D_RN_W_TRACKER_OSTD: auto # = D2D_RN_WDB_SIZE / BURST
 
 # D2D_SN 配置
-D2D_SN_RDB_SIZE: 128        # D2D SN 读databuffer大小
-D2D_SN_WDB_SIZE: 128        # D2D SN 写databuffer大小
+D2D_SN_RDB_SIZE: 512        # D2D SN 读databuffer大小
+D2D_SN_WDB_SIZE: 512        # D2D SN 写databuffer大小
 D2D_SN_R_TRACKER_OSTD: auto # = D2D_SN_RDB_SIZE / BURST
 D2D_SN_W_TRACKER_OSTD: auto # = D2D_SN_WDB_SIZE / BURST

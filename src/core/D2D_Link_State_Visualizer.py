@@ -15,19 +15,19 @@ class D2D_Link_State_Visualizer(NetworkLinkVisualizer):
     def __init__(self, num_dies, initial_network=None):
         """
         初始化D2D可视化器
-        
+
         Args:
             num_dies: Die数量（2, 4, 8等）
             initial_network: 初始网络对象（用于获取配置信息）
         """
-        # 使用initial_network初始化父类
-        super().__init__(initial_network)
-        
-        # D2D特定属性
+        # D2D特定属性（必须在调用父类__init__之前设置，因为父类会调用_update_button_states）
         self.num_dies = num_dies
         self.current_die = 0  # 当前显示的Die索引
         self.current_network = 2  # 当前网络索引 (0=REQ, 1=RSP, 2=DATA)
-        
+
+        # 使用initial_network初始化父类
+        super().__init__(initial_network)
+
         # 重新初始化以支持多Die多网络
         self._reinitialize_for_d2d()
     
@@ -90,15 +90,42 @@ class D2D_Link_State_Visualizer(NetworkLinkVisualizer):
         
         # 更新选中的网络索引（转换为单个索引）
         self.selected_network_index = self.current_die * 3 + self.current_network
-        
+
         # 更新显示标题
         self._update_title()
-    
+
+        # 更新按钮状态（高亮选中的按钮）
+        self._update_button_states()
+
+        # 更新状态显示（设置初始Die信息）
+        self._update_status_display()
+
+    def _update_button_states(self):
+        """重写按钮状态更新，添加Die按钮支持"""
+        # 调用父类方法更新网络类型按钮（REQ/RSP/DATA）
+        # 注意：需要临时设置selected_network_index为current_network
+        saved_index = self.selected_network_index
+        self.selected_network_index = self.current_network
+        super()._update_button_states()
+        self.selected_network_index = saved_index
+
+        # 更新Die按钮（如果已创建）
+        if hasattr(self, 'die_buttons'):
+            for idx, btn in enumerate(self.die_buttons):
+                if idx == self.current_die:
+                    btn.color = 'lightblue'  # 选中
+                    btn.hovercolor = 'cornflowerblue'
+                else:
+                    btn.color = '0.85'  # 未选中
+                    btn.hovercolor = '0.95'
+                btn.ax.set_facecolor(btn.color)
+
+            self.fig.canvas.draw_idle()
+
     def _update_title(self):
         """更新显示标题"""
-        network_names = ["REQ", "RSP", "DATA"]
-        network_name = network_names[self.current_network]
-        title = f"Die {self.current_die}/{self.num_dies-1} - {network_name} Network"
+        # 左上角状态已包含Die和网络信息，标题可以留空或显示通用标题
+        title = "D2D Network Visualization"
         self.ax.set_title(title, fontsize=14, fontweight='bold')
 
     def _reinitialize_for_current_network(self):
@@ -126,6 +153,16 @@ class D2D_Link_State_Visualizer(NetworkLinkVisualizer):
 
         # 重新绘制静态元素
         self._draw_static_elements()
+
+        # 重新创建status_text（因为_draw_static_elements中的ax.clear()会清除它）
+        self.status_text = self.ax.text(
+            -0.1, 1, "",
+            transform=self.ax.transAxes,
+            fontsize=12,
+            fontweight="bold",
+            verticalalignment="top"
+        )
+        self._update_status_display()  # 更新状态文本内容
 
         # 清空piece_ax，避免重叠
         self.piece_ax.clear()
@@ -159,28 +196,30 @@ class D2D_Link_State_Visualizer(NetworkLinkVisualizer):
         # 保存所有Die的网络数据
         if all_die_networks is not None:
             self.all_die_networks = all_die_networks
-            
-            # 选择当前显示的网络
-            if (self.current_die < len(all_die_networks) and 
-                self.current_network < len(all_die_networks[self.current_die])):
+
+            # 选择当前显示的网络（使用try-except处理索引错误）
+            try:
                 current_network = all_die_networks[self.current_die][self.current_network]
-                
+
                 # 设置networks为包含所有网络的完整列表，但只更新当前选择的网络
                 all_networks = []
                 for die_networks in all_die_networks:
                     all_networks.extend(die_networks)
                 self.networks = all_networks
-                
+
                 # 调用父类的update方法
                 return super().update(all_networks, cycle, skip_pause)
-        
+            except (IndexError, TypeError) as e:
+                # 索引越界或类型错误，返回默认处理
+                pass
+
         # 如果没有网络数据，调用父类默认处理
         return super().update(None, cycle, skip_pause)
     
     def _on_key(self, event):
         """重写按键事件处理，增加D2D特定按键功能"""
         key = event.key
-        
+
         # 数字键1-3选择网络类型
         if key in ['1', '2', '3']:
             network_idx = int(key) - 1
@@ -189,40 +228,76 @@ class D2D_Link_State_Visualizer(NetworkLinkVisualizer):
                 self.selected_network_index = self.current_die * 3 + self.current_network
                 self._update_title()
                 self._update_status_display()
-                # 刷新显示
+                self._update_button_states()
+                # 刷新显示（cycle=None避免重复保存快照）
                 if hasattr(self, 'all_die_networks'):
-                    self.update(self.all_die_networks, cycle=self.cycle, skip_pause=True)
+                    self.update(self.all_die_networks, cycle=None, skip_pause=True)
                 return
-        
+
         # D键切换Die（正向）
         elif key == 'd':
             self._switch_die(forward=True)
             return
-        
+
         # Shift+D键切换Die（反向）
         elif key == 'D':  # Shift+d
             self._switch_die(forward=False)
             return
-        
+
+        # 空格键：先调用父类处理，然后添加Die信息
+        elif key == ' ':
+            super()._on_key(event)
+            # 在父类处理后，添加Die信息到status_text
+            self._add_die_info_to_status()
+            return
+
+        # 左右键切换历史快照：先调用父类处理，然后添加Die信息
+        elif self.paused and key in {"left", "right"}:
+            super()._on_key(event)
+            # 在父类处理后，添加Die信息到status_text
+            self._add_die_info_to_status()
+            return
+
         # 其他按键调用父类处理
         super()._on_key(event)
     
-    def _update_status_display(self):
-        """重写状态显示，添加Die信息"""
-        if self.paused:
-            # 暂停状态
-            self.status_text.set_color("orange")
-            return
-        
-        # 添加Die信息到状态显示
+    def _add_die_info_to_status(self):
+        """在status_text中添加Die信息"""
+        import re
         network_names = ["REQ", "RSP", "DATA"]
         network_name = network_names[self.current_network]
-        status = f"Running... cycle: {self.cycle}\nDie {self.current_die} - {network_name}\nInterval: {self.pause_interval:.2f}"
-        color = "green"
 
-        # 更新状态文本
+        # 获取当前status_text的内容
+        current_text = self.status_text.get_text()
+
+        # 移除所有旧的Die行（匹配"Die X - XXX"模式，避免堆叠）
+        current_text = re.sub(r'\nDie \d+ - \w+', '', current_text)
+
+        # 添加当前Die信息
+        die_info = f"\nDie {self.current_die} - {network_name}"
+        self.status_text.set_text(current_text + die_info)
+
+    def _update_status_display(self):
+        """重写状态显示，添加Die信息"""
+        network_names = ["REQ", "RSP", "DATA"]
+        network_name = network_names[self.current_network]
+
+        if self.paused:
+            # 暂停状态：显示暂停信息，但包含Die和网络信息
+            if hasattr(self, '_play_idx') and self._play_idx is not None:
+                # 如果有播放索引，在父类设置的文本基础上添加Die信息
+                self._add_die_info_to_status()
+            else:
+                # 简单暂停状态
+                status = f"Paused\nDie {self.current_die} - {network_name}"
+                self.status_text.set_text(status)
+            self.status_text.set_color("orange")
+            return
+
+        # 运行状态：添加Die信息到状态显示
+        status = f"Running... cycle: {self.cycle}\nDie {self.current_die} - {network_name}\nInterval: {self.pause_interval:.2f}"
         self.status_text.set_text(status)
-        self.status_text.set_color(color)
+        self.status_text.set_color("green")
     
     def _switch_die(self, forward=True):
         """切换Die"""
@@ -234,42 +309,39 @@ class D2D_Link_State_Visualizer(NetworkLinkVisualizer):
         # 更新选中的网络索引
         self.selected_network_index = self.current_die * 3 + self.current_network
 
-        # 重新初始化网络视图（因为不同Die的拓扑可能不同）
-        self._reinitialize_for_current_network()
-
+        # 更新标题和状态显示
         self._update_title()
         self._update_status_display()
+        self._update_button_states()
 
-        # 刷新显示
+        # 刷新显示（cycle=None避免重复保存快照）
         if hasattr(self, 'all_die_networks'):
-            self.update(self.all_die_networks, cycle=self.cycle, skip_pause=True)
-    
+            self.update(self.all_die_networks, cycle=None, skip_pause=True)
+
     def _on_select_network_type(self, network_type):
         """通过按钮选择网络类型"""
         self.current_network = network_type
         self.selected_network_index = self.current_die * 3 + self.current_network
 
-        # 重新初始化网络视图（因为不同网络类型的配置可能不同）
-        self._reinitialize_for_current_network()
-
+        # 更新标题和状态显示
         self._update_title()
         self._update_status_display()
-        # 刷新显示
+        self._update_button_states()
+        # 刷新显示（cycle=None避免重复保存快照）
         if hasattr(self, 'all_die_networks'):
-            self.update(self.all_die_networks, cycle=self.cycle, skip_pause=True)
-    
+            self.update(self.all_die_networks, cycle=None, skip_pause=True)
+
     def _on_select_die(self, die_id):
         """通过按钮选择Die"""
         if 0 <= die_id < self.num_dies:
             self.current_die = die_id
             self.selected_network_index = self.current_die * 3 + self.current_network
 
-            # 重新初始化网络视图（因为不同Die的拓扑可能不同）
-            self._reinitialize_for_current_network()
-
+            # 更新标题和状态显示
             self._update_title()
             self._update_status_display()
-            # 刷新显示
+            self._update_button_states()
+            # 刷新显示（cycle=None避免重复保存快照）
             if hasattr(self, 'all_die_networks'):
-                self.update(self.all_die_networks, cycle=self.cycle, skip_pause=True)
-    
+                self.update(self.all_die_networks, cycle=None, skip_pause=True)
+

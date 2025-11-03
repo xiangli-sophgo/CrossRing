@@ -627,6 +627,15 @@ class D2D_Model:
                     # 更新可视化器
                     self.d2d_link_state_vis.update(all_die_networks, self.current_cycle)
 
+                    # 暂停阻塞机制 - 与基类保持一致
+                    import matplotlib.pyplot as plt
+                    while self.d2d_link_state_vis.paused and not self.d2d_link_state_vis.should_stop:
+                        plt.pause(0.05)  # 阻塞在这里，不推进仿真
+
+                    # 检查停止信号
+                    if self.d2d_link_state_vis.should_stop:
+                        break  # 退出主循环
+
                 # D2D Trace调试（如果启用）
                 if self.kwargs.get("print_d2d_trace", False):
                     trace_ids = self.kwargs.get("show_d2d_trace_id", None)

@@ -984,6 +984,9 @@ class NetworkLinkVisualizer:
         self._play_idx = None  # 暂停时正在浏览的 history 索引
         self._draw_static_elements()
 
+        # 初始化按钮状态
+        self._update_button_states()
+
         # 初始化时显示中心节点
         rows, cols = self.network.config.NUM_ROW, self.network.config.NUM_COL
         # 取中间行列
@@ -1531,11 +1534,13 @@ class NetworkLinkVisualizer:
             network_idx = int(key) - 1
             if 0 <= network_idx < len(self.histories):
                 self.selected_network_index = network_idx
-                # 刷新显示
+                # 更新按钮状态
+                self._update_button_states()
+                # 刷新显示（cycle=None避免重复保存快照）
                 if self.networks is not None:
-                    self.update(self.networks, cycle=self.cycle, skip_pause=True)
+                    self.update(self.networks, cycle=None, skip_pause=True)
                 else:
-                    self.update(None, cycle=self.cycle, skip_pause=True)
+                    self.update(None, cycle=None, skip_pause=True)
                 return
 
         # 使用当前选中网络的历史
@@ -1801,9 +1806,25 @@ class NetworkLinkVisualizer:
         # 普通模式：直接取调色板色
         return self._palette_color(flit.packet_id)
 
+    def _update_button_states(self):
+        """更新按钮的视觉状态（高亮选中的按钮）"""
+        # 更新网络类型按钮（REQ/RSP/DATA）
+        for idx, btn in enumerate(self.buttons):
+            if idx == self.selected_network_index:
+                btn.color = 'lightblue'  # 选中
+                btn.hovercolor = 'cornflowerblue'
+            else:
+                btn.color = '0.85'  # 未选中（浅灰色）
+                btn.hovercolor = '0.95'
+            btn.ax.set_facecolor(btn.color)
+
+        self.fig.canvas.draw_idle()
+
     def _on_select_network(self, idx):
         """切换显示网络索引 idx（0/1/2）"""
         self.selected_network_index = idx
+        # 更新按钮状态
+        self._update_button_states()
         # 刷新显示（调用 update 渲染当前网络）
         if self.networks is not None:
             self.update(
@@ -1838,15 +1859,17 @@ class NetworkLinkVisualizer:
             self.tags_btn.label.set_text("Show Flits")
         else:
             self.tags_btn.label.set_text("Show Tags")
-        # 刷新当前网络视图（保留当前 cycle 并跳过暂停等待）
+        # 刷新当前网络视图（cycle=None避免重复保存快照）
         if self.networks is not None:
-            self.update(self.networks, cycle=self.cycle, skip_pause=True)
+            self.update(self.networks, cycle=None, skip_pause=True)
         else:
-            self.update(None, cycle=self.cycle, skip_pause=True)
+            self.update(None, cycle=None, skip_pause=True)
 
     def _on_select_network(self, idx):
         """切换显示网络索引 idx（0/1/2）"""
         self.selected_network_index = idx
+        # 更新按钮状态
+        self._update_button_states()
         # 刷新显示（调用 update 渲染当前网络）
         if self.networks is not None:
             self.update(
