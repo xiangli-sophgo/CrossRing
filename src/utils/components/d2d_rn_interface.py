@@ -321,11 +321,7 @@ class D2D_RN_Interface(IPInterface):
         new_flit.source_type = self.ip_type  # D2D_RN的类型
         new_flit.destination_type = flit.d2d_target_type or "ddr_0"  # 使用D2D统一属性，提供默认值
 
-        # 设置原始类型信息，用于创建返回路径
-        new_flit.original_source_type = flit.d2d_origin_type or "gdma_0"  # 原始源类型，提供默认值
-        new_flit.original_destination_type = flit.d2d_target_type or "ddr_0"  # 使用D2D目标类型
-        new_flit.destination_original = new_flit.destination  # 当前目标位置
-        new_flit.source_original = flit.d2d_origin_node  # 原始源位置（源映射）
+        # D2D传输不设置original_*属性，辅助函数会从d2d_*属性推断
 
         # 保持D2D属性传递，确保后续处理能够正确识别
         if hasattr(flit, "d2d_origin_die"):
@@ -463,8 +459,7 @@ class D2D_RN_Interface(IPInterface):
 
                     # 复制关键属性
                     local_flit.sync_latency_record(req)
-                    local_flit.source_original = req.source_original if hasattr(req, "source_original") else req.source
-                    local_flit.destination_original = req.destination_original if hasattr(req, "destination_original") else req.destination
+                    # D2D传输不设置_original属性，辅助函数会从d2d_*属性推断
                     local_flit.flit_type = "data"
                     # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
                     local_flit.departure_cycle = self.current_cycle + i * self.config.NETWORK_FREQUENCY
@@ -472,8 +467,7 @@ class D2D_RN_Interface(IPInterface):
                     local_flit.entry_db_cycle = req.entry_db_cycle if hasattr(req, "entry_db_cycle") else self.current_cycle
                     local_flit.source_type = req.source_type
                     local_flit.destination_type = req.destination_type
-                    local_flit.original_source_type = getattr(req, "original_source_type", req.source_type)
-                    local_flit.original_destination_type = getattr(req, "original_destination_type", req.destination_type)
+                    # D2D传输不设置original_*属性
                     local_flit.req_type = req.req_type
                     local_flit.packet_id = req.packet_id
                     local_flit.flit_id = i
@@ -707,8 +701,7 @@ class D2D_RN_Interface(IPInterface):
 
             # 设置基本属性
             cross_die_flit.sync_latency_record(tracker_req)
-            cross_die_flit.source_original = self.ip_pos
-            cross_die_flit.destination_original = first_flit.d2d_origin_node
+            # D2D传输不设置_original属性，辅助函数会从d2d_*属性推断
             cross_die_flit.flit_type = "data"
             cross_die_flit.req_type = "read"
             cross_die_flit.rsp_type = "read_data"
@@ -719,8 +712,7 @@ class D2D_RN_Interface(IPInterface):
             cross_die_flit.is_last_flit = i == len(data_flits) - 1
             cross_die_flit.source_type = self.ip_type
             cross_die_flit.destination_type = first_flit.d2d_origin_type
-            cross_die_flit.original_source_type = first_flit.d2d_target_type
-            cross_die_flit.original_destination_type = first_flit.d2d_origin_type
+            # D2D传输不设置original_*属性
 
             # 继承D2D属性
             copy_flit_attributes(first_flit, cross_die_flit, ["d2d_origin_die", "d2d_origin_node", "d2d_origin_type", "d2d_target_die", "d2d_target_node", "d2d_target_type"])

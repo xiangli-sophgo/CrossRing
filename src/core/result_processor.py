@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple, Optional, NamedTuple
 from dataclasses import dataclass
 from enum import Enum
 from src.utils.components import *
+from src.utils.components.flit import get_original_source_type, get_original_destination_type
 import matplotlib.pyplot as plt
 import networkx as nx
 from matplotlib.patches import Rectangle, FancyArrowPatch, Patch
@@ -354,8 +355,8 @@ class BandwidthAnalyzer:
                 # 读请求：flit的source是SN(DDR/L2M)，destination是RN(SDMA/GDMA/CDMA)
                 actual_source_node = representative_flit.destination  # 实际发起请求的节点
                 actual_dest_node = representative_flit.source  # 实际目标节点
-                actual_source_type = representative_flit.original_source_type  # 实际发起请求的类型
-                actual_dest_type = representative_flit.original_destination_type  # 实际目标类型
+                actual_source_type = get_original_source_type(representative_flit)  # 实际发起请求的类型
+                actual_dest_type = get_original_destination_type(representative_flit)  # 实际目标类型
             else:  # write
                 # 写请求：RN在发出数据时结束，SN在收到数据时结束
 
@@ -365,8 +366,8 @@ class BandwidthAnalyzer:
                 # 写请求：flit的source是RN(SDMA/GDMA/CDMA)，destination是SN(DDR/L2M)
                 actual_source_node = representative_flit.source  # 实际发起请求的节点
                 actual_dest_node = representative_flit.destination  # 实际目标节点
-                actual_source_type = representative_flit.original_source_type  # 实际发起请求的类型
-                actual_dest_type = representative_flit.original_destination_type  # 实际目标类型
+                actual_source_type = get_original_source_type(representative_flit)  # 实际发起请求的类型
+                actual_dest_type = get_original_destination_type(representative_flit)  # 实际目标类型
 
             # 收集保序信息
             src_dest_order_id = getattr(representative_flit, "src_dest_order_id", -1)
@@ -435,7 +436,7 @@ class BandwidthAnalyzer:
                 source_backup = representative_flit.source_type or "UNKNOWN"
                 dest_backup = representative_flit.destination_type or "UNKNOWN"
                 port_key = f"{source_backup[:-2].upper() if len(source_backup) > 2 else source_backup.upper()} {representative_flit.req_type} {dest_backup[:3].upper()}"
-                print(f"[警告] 使用备选类型: {port_key} (original_source_type={actual_source_type}, original_destination_type={actual_dest_type})")
+                # print(f"[警告] 使用备选类型: {port_key} (original_source_type={actual_source_type}, original_destination_type={actual_dest_type})")
 
             if representative_flit.req_type == "read":
                 completion_time = rn_end_time

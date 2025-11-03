@@ -76,6 +76,7 @@ D2D_B_LATENCY: 20   # 写响应通道延迟 (ns)
 # D2D 带宽控制
 D2D_RN_BW_LIMIT: 256    # D2D RN 带宽限制 (GB/s)
 D2D_SN_BW_LIMIT: 256    # D2D SN 带宽限制 (GB/s)
+D2D_AXI_BANDWIDTH: 256  # AXI通道统一带宽限制 (GB/s)，所有通道使用此值但有独立令牌桶
 
 # D2D 资源管理配置
 # D2D_RN 配置

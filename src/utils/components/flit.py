@@ -50,13 +50,9 @@ class TokenBucket:
 class Flit:
     __slots__ = [
         "source",
-        "source_original",
         "destination",
-        "destination_original",
         "source_type",
         "destination_type",
-        "original_source_type",
-        "original_destination_type",
         "burst_length",
         "path",
         "flit_position",
@@ -188,13 +184,9 @@ class Flit:
 
     def __init__(self, source, destination, path):
         self.source = source
-        self.source_original = -1
         self.destination = destination
-        self.destination_original = -1
         self.source_type = None
         self.destination_type = None
-        self.original_source_type = None
-        self.original_destination_type = None
         self.burst_length = -1
         self.path = path
         self.flit_position = ""
@@ -566,3 +558,80 @@ def create_d2d_flit_copy(src_flit: Flit, source: int = 0, destination: int = 0, 
     copy_flit_attributes(src_flit, new_flit, attr_list)
 
     return new_flit
+
+
+# ============================================================================
+# 原始节点信息获取辅助函数
+# 用于统一获取flit的原始源/目标节点信息，替代已废弃的_original属性
+# ============================================================================
+
+def get_original_source_node(flit: Flit) -> int:
+    """
+    获取flit的原始源节点位置（物理ID）
+
+    优先返回D2D跨Die请求的原始发起者节点，否则返回当前源节点。
+    用于替代已废弃的 source_original 属性。
+
+    Args:
+        flit: 要查询的flit对象
+
+    Returns:
+        int: 原始源节点位置（源映射）
+    """
+    if hasattr(flit, "d2d_origin_node") and flit.d2d_origin_node is not None:
+        return flit.d2d_origin_node
+    return flit.source
+
+
+def get_original_destination_node(flit: Flit) -> int:
+    """
+    获取flit的原始目标节点位置（物理ID）
+
+    优先返回D2D跨Die请求的最终目标节点，否则返回当前目标节点。
+    用于替代已废弃的 destination_original 属性。
+
+    Args:
+        flit: 要查询的flit对象
+
+    Returns:
+        int: 原始目标节点位置（源映射）
+    """
+    if hasattr(flit, "d2d_target_node") and flit.d2d_target_node is not None:
+        return flit.d2d_target_node
+    return flit.destination
+
+
+def get_original_source_type(flit: Flit) -> Optional[str]:
+    """
+    获取flit的原始源IP类型
+
+    优先返回D2D跨Die请求的原始发起者IP类型，否则返回当前源IP类型。
+    用于替代已废弃的 original_source_type 属性。
+
+    Args:
+        flit: 要查询的flit对象
+
+    Returns:
+        Optional[str]: 原始源IP类型（如 "gdma_0", "ddr_0" 等），无则返回None
+    """
+    if hasattr(flit, "d2d_origin_type") and flit.d2d_origin_type:
+        return flit.d2d_origin_type
+    return getattr(flit, "source_type", None)
+
+
+def get_original_destination_type(flit: Flit) -> Optional[str]:
+    """
+    获取flit的原始目标IP类型
+
+    优先返回D2D跨Die请求的最终目标IP类型，否则返回当前目标IP类型。
+    用于替代已废弃的 original_destination_type 属性。
+
+    Args:
+        flit: 要查询的flit对象
+
+    Returns:
+        Optional[str]: 原始目标IP类型（如 "gdma_0", "ddr_0" 等），无则返回None
+    """
+    if hasattr(flit, "d2d_target_type") and flit.d2d_target_type:
+        return flit.d2d_target_type
+    return getattr(flit, "destination_type", None)

@@ -629,6 +629,7 @@ class D2D_Model:
 
                     # 暂停阻塞机制 - 与基类保持一致
                     import matplotlib.pyplot as plt
+
                     while self.d2d_link_state_vis.paused and not self.d2d_link_state_vis.should_stop:
                         plt.pause(0.05)  # 阻塞在这里，不推进仿真
 
@@ -838,15 +839,13 @@ class D2D_Model:
         req.d2d_target_type = dst_ip  # 目标IP类型
 
         # 设置标准属性（与BaseModel一致）
-        req.source_original = src_node
-        req.destination_original = intermediate_dest
+        # D2D传输不设置_original属性，辅助函数会从d2d_*属性推断
         req.flit_type = "req"
         req.departure_cycle = inject_time
         req.burst_length = burst_length
         req.source_type = f"{src_ip}_0" if "_" not in src_ip else src_ip
         req.destination_type = destination_type  # 已经包含了正确的编号
-        req.original_source_type = f"{src_ip}_0" if "_" not in src_ip else src_ip
-        req.original_destination_type = f"{dst_ip}_0" if "_" not in dst_ip else dst_ip
+        # D2D传输不设置original_*属性
         req.req_type = "read" if req_type == "R" else "write"
         req.req_attr = "new"
         req.traffic_id = traffic_id
@@ -1066,6 +1065,9 @@ class D2D_Model:
         # 收集D2D专有统计信息
         d2d_stats = self._collect_d2d_statistics()
 
+        # 打印D2D专有统计信息
+        # self._print_d2d_statistics(d2d_stats)
+
         # 1. 跳过Die内部结果分析（D2D系统中Die内部没有数据流）
         die_results = {}
 
@@ -1213,7 +1215,7 @@ class D2D_Model:
                     total_cycles=total_cycles,
                     die_layout=getattr(self.config, "die_layout_positions", None),
                     die_rotations=getattr(self.config, "DIE_ROTATIONS", None),
-                    save_path=fifo_save_path
+                    save_path=fifo_save_path,
                 )
 
                 if fifo_heatmap_path:
@@ -1270,16 +1272,10 @@ class D2D_Model:
 
             # 收集D2D_Sys的AXI通道统计
             if hasattr(die_model, "d2d_systems"):
-                die_stat["axi_channel_flit_count"] = {}
-                total_axi_flits = 0
+                die_stat["axi_systems"] = []
                 for pos, d2d_sys in die_model.d2d_systems.items():
-                    if hasattr(d2d_sys, "axi_channel_flit_count"):
-                        for channel, count in d2d_sys.axi_channel_flit_count.items():
-                            if channel not in die_stat["axi_channel_flit_count"]:
-                                die_stat["axi_channel_flit_count"][channel] = 0
-                            die_stat["axi_channel_flit_count"][channel] += count
-                            total_axi_flits += count
-                die_stat["total_axi_flits"] = total_axi_flits
+                    sys_stats = d2d_sys.get_statistics()
+                    die_stat["axi_systems"].append({"position": pos, "target_die": d2d_sys.target_die_id, "stats": sys_stats})
 
             d2d_stats["die_stats"][die_id] = die_stat
 
@@ -1297,10 +1293,31 @@ class D2D_Model:
                 print(f"  D2D_RN: 发送={stat['d2d_rn_sent']}, 接收={stat['d2d_rn_received']}")
             if "d2d_sn_received" in stat:
                 print(f"  D2D_SN: 接收={stat['d2d_sn_received']}, 转发={stat['d2d_sn_forwarded']}, 响应={stat['d2d_sn_responses']}")
-            if "axi_channel_flit_count" in stat and stat["axi_channel_flit_count"]:
-                print(f"  AXI通道传输统计 (总计: {stat.get('total_axi_flits', 0)} flits):")
-                for channel, count in stat["axi_channel_flit_count"].items():
-                    print(f"    {channel}: {count} flits")
+
+            # 打印AXI通道详细统计
+            if "axi_systems" in stat:
+                for axi_sys in stat["axi_systems"]:
+                    print(f"\n  D2D_Sys (Die{die_id} → Die{axi_sys['target_die']}):")
+                    sys_stats = axi_sys["stats"]
+                    print(f"    总周期: {sys_stats.get('total_cycles', 0)}")
+                    print(
+                        f"    仲裁统计: RN={sys_stats.get('rn_transmit_count', 0)}, "
+                        + f"SN={sys_stats.get('sn_transmit_count', 0)}, "
+                        + f"总计={sys_stats.get('total_transmit_count', 0)}"
+                    )
+
+                    # AXI通道统计
+                    axi_stats = sys_stats.get("axi_channel_stats", {})
+                    axi_util = sys_stats.get("axi_utilization_pct", {})
+                    print(f"    AXI通道统计:")
+                    for ch in ["AW", "W", "B", "AR", "R"]:
+                        if ch in axi_stats:
+                            ch_stat = axi_stats[ch]
+                            util = axi_util.get(ch, 0)
+                            print(f"      {ch:3s}: Inj={ch_stat['injected']:5d}, " + f"Eje={ch_stat['ejected']:5d}, " + f"Thr={ch_stat['throttled']:5d}, " + f"Util={util:5.1f}%")
+
+                    # 队列状态
+                    print(f"    队列: RN={sys_stats.get('rn_queue_length', 0)}, " + f"SN={sys_stats.get('sn_queue_length', 0)}")
 
     def _generate_d2d_combined_report(self, die_results, d2d_stats):
         """生成D2D组合报告，基于现有的结果分析"""

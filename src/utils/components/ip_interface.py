@@ -8,7 +8,14 @@ from __future__ import annotations
 import numpy as np
 from collections import deque, defaultdict
 from config.config import CrossRingConfig
-from .flit import Flit, TokenBucket
+from .flit import (
+    Flit,
+    TokenBucket,
+    get_original_source_node,
+    get_original_destination_node,
+    get_original_source_type,
+    get_original_destination_type,
+)
 import logging
 import inspect
 
@@ -934,21 +941,20 @@ class IPInterface:
             path = self.routes[source][destination]
             flit = Flit(source, destination, path)
             flit.sync_latency_record(req)
-            flit.source_original = req.source_original
-            flit.destination_original = req.destination_original
             flit.flit_type = "data"
             # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
+            # 根据目标IP类型选择延迟
+            dest_type = get_original_destination_type(req)
             flit.departure_cycle = (
                 cycle + self.config.DDR_W_LATENCY + i * self.config.NETWORK_FREQUENCY
-                if req.original_destination_type and req.original_destination_type.startswith("ddr")
+                if dest_type and dest_type.startswith("ddr")
                 else cycle + self.config.L2M_W_LATENCY + i * self.config.NETWORK_FREQUENCY
             )
             flit.req_departure_cycle = req.departure_cycle
             flit.entry_db_cycle = req.entry_db_cycle
             flit.source_type = req.source_type
             flit.destination_type = req.destination_type
-            flit.original_source_type = req.original_source_type
-            flit.original_destination_type = req.original_destination_type
+            # Die内传输：不需要设置_original属性，辅助函数会使用source/destination
             flit.req_type = req.req_type
             flit.packet_id = req.packet_id
             flit.flit_id = i
@@ -980,12 +986,11 @@ class IPInterface:
             path = self.routes[source][destination]
             flit = Flit(source, destination, path)
             flit.sync_latency_record(req)
-            flit.source_original = req.destination_original
-            flit.destination_original = req.source_original
+            # Die内传输不设置_original属性，D2D传输继承d2d_*属性即可
             flit.req_type = req.req_type
             flit.flit_type = "data"
             # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
-            if hasattr(req, "original_destination_type") and req.original_destination_type.startswith("ddr"):
+            if get_original_destination_type(req).startswith("ddr"):
                 latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
             elif hasattr(req, "destination_type") and req.destination_type and req.destination_type.startswith("ddr"):
                 latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
@@ -996,8 +1001,7 @@ class IPInterface:
             flit.req_departure_cycle = req.departure_cycle
             flit.source_type = getattr(req, "destination_type", None)
             flit.destination_type = getattr(req, "source_type", None)
-            flit.original_source_type = getattr(req, "original_source_type", None)
-            flit.original_destination_type = getattr(req, "original_destination_type", None)
+            # Die内传输不设置original_*属性，辅助函数会自动从d2d_*属性推断
             flit.packet_id = req.packet_id
             flit.flit_id = i
             flit.burst_length = req.burst_length
@@ -1032,9 +1036,7 @@ class IPInterface:
         rsp.rsp_type = rsp_type
         rsp.req_type = req.req_type
 
-        # 设置原始节点ID（物理节点编号）- RSP从SN发出，发往RN
-        rsp.source_original = req.destination_original  # RSP从SN发出
-        rsp.destination_original = req.source_original  # RSP发往RN
+        # Die内传输不设置_original属性，D2D传输继承d2d_*属性即可
 
         # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
         rsp.packet_id = req.packet_id

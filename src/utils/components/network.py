@@ -9,7 +9,14 @@ import numpy as np
 from collections import deque, defaultdict
 from typing import Optional, Dict, List, Any, Tuple
 from config.config import CrossRingConfig
-from .flit import Flit, TokenBucket
+from .flit import (
+    Flit,
+    TokenBucket,
+    get_original_source_node,
+    get_original_destination_node,
+    get_original_source_type,
+    get_original_destination_type,
+)
 import logging
 import inspect
 
@@ -613,17 +620,17 @@ class Network:
             return True
 
         # 获取原始的src（物理节点ID）
-        src = flit.source_original if flit.source_original != -1 else flit.source
+        src = get_original_source_node(flit)
 
         # 使用最终目的地（而不是中间下环节点）作为key的dest
-        # destination_original或destination都是物理节点ID
-        dest = flit.destination_original if flit.destination_original != -1 else flit.destination
+        # 使用辅助函数统一获取原始节点ID
+        dest = get_original_destination_node(flit)
 
         # 根据保序粒度构造key
         if self.config.ORDERING_GRANULARITY == 0:  # IP层级
             # 获取IP类型信息
-            src_type = flit.original_source_type if flit.original_source_type else flit.source_type
-            dest_type = flit.original_destination_type if flit.original_destination_type else flit.destination_type
+            src_type = get_original_source_type(flit)
+            dest_type = get_original_destination_type(flit)
             key = (src, src_type, dest, dest_type, direction)
         else:  # 节点层级（granularity == 1）
             key = (src, dest, direction)
@@ -647,8 +654,8 @@ class Network:
                 return False
 
         # 获取真实的src和dest
-        src = flit.source_original if flit.source_original != -1 else flit.source
-        dest = flit.destination_original if flit.destination_original != -1 else flit.destination
+        src = get_original_source_node(flit)
+        dest = get_original_destination_node(flit)
 
         # 如果未配置特定对或配置为空，则全部保序
         if not hasattr(self.config, "IN_ORDER_EJECTION_PAIRS") or len(self.config.IN_ORDER_EJECTION_PAIRS) == 0:
@@ -689,10 +696,10 @@ class Network:
             return True
 
         # 获取原始的src（物理节点ID）
-        src = flit.source_original if flit.source_original != -1 else flit.source
+        src = get_original_source_node(flit)
 
         # 使用最终目的地（而不是中间下环节点）
-        dest = flit.destination_original if flit.destination_original != -1 else flit.destination
+        dest = get_original_destination_node(flit)
 
         # 使用 (src物理ID, final_dest物理ID, direction) 作为键
         key = (src, dest, direction)
@@ -720,16 +727,16 @@ class Network:
             return
 
         # 获取原始的src（物理节点ID）
-        src = flit.source_original if flit.source_original != -1 else flit.source
+        src = get_original_source_node(flit)
 
         # 使用最终目的地（而不是中间下环节点）
-        dest = flit.destination_original if flit.destination_original != -1 else flit.destination
+        dest = get_original_destination_node(flit)
 
         # 根据保序粒度构造key（与_can_eject_in_order保持一致）
         if self.config.ORDERING_GRANULARITY == 0:  # IP层级
             # 获取IP类型信息
-            src_type = flit.original_source_type if flit.original_source_type else flit.source_type
-            dest_type = flit.original_destination_type if flit.original_destination_type else flit.destination_type
+            src_type = get_original_source_type(flit)
+            dest_type = get_original_destination_type(flit)
             key = (src, src_type, dest, dest_type, direction)
         else:  # 节点层级（granularity == 1）
             key = (src, dest, direction)
@@ -739,7 +746,7 @@ class Network:
         self.order_tracking_table[key] = flit.src_dest_order_id
 
     def _init_direction_control(self):
-        """初始化方向控制 - 使用物理节点ID集合（与配置文件和flit.source_original相同的编号）"""
+        """初始化方向控制 - 使用物理节点ID集合（与配置文件和原始源节点相同的编号）"""
         # 为每个方向构建允许的源节点集合（物理节点ID）
         self.allowed_source_nodes = {
             "TL": set(self.config.TL_ALLOWED_SOURCE_NODES),
@@ -763,7 +770,7 @@ class Network:
         # Mode 2: 双侧下环，根据方向配置决定
         if mode == 2:
             # 获取原始源节点编号（物理节点ID，未经node_map映射）
-            src_node = flit.source_original if flit.source_original != -1 else flit.source
+            src_node = get_original_source_node(flit)
             # self.error_log(flit, 1, 3)
 
             # 检查各方向是否允许

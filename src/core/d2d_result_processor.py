@@ -17,7 +17,7 @@ from matplotlib.patches import Rectangle, FancyArrowPatch
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from .result_processor import BandwidthAnalyzer, RequestInfo, BandwidthMetrics, WorkingInterval
-from src.utils.components.flit import Flit
+from src.utils.components.flit import Flit, get_original_source_type, get_original_destination_type
 
 
 @dataclass
@@ -2844,88 +2844,10 @@ class D2DResultProcessor(BandwidthAnalyzer):
     def collect_requests_data(self, sim_model, simulation_end_cycle=None) -> None:
         """
         重写基类方法，增加D2D特殊处理
-        修复D2D跨Die请求的original_source_type和original_destination_type问题
+        不再需要修复original_*属性，辅助函数会自动从d2d_*属性推断
         """
-        # 调用基类方法收集基本数据
+        # 调用基类方法收集基本数据（内部使用辅助函数读取original_*属性）
         super().collect_requests_data(sim_model, simulation_end_cycle)
-
-        # D2D特殊处理：修复丢失的original类型信息
-        fixed_count = 0
-
-        for i, request in enumerate(self.requests):
-            # 检查是否需要修复
-            need_fix = False
-            if not hasattr(request, "original_source_type") or not request.original_source_type:
-                need_fix = True
-            if not hasattr(request, "original_destination_type") or not request.original_destination_type:
-                need_fix = True
-
-            if need_fix:
-                # 尝试从相关的arrive_flits中找到对应的flit并恢复d2d属性
-                fixed = self._fix_request_original_types(request, sim_model)
-                if fixed:
-                    fixed_count += 1
-
-    def _fix_request_original_types(self, request: RequestInfo, sim_model) -> bool:
-        """
-        尝试修复单个请求的original类型信息
-        通过查找网络中对应的flit来恢复d2d属性
-        """
-        try:
-            # 根据请求的开始和结束时间、节点位置等信息查找对应的flit
-            target_networks = []
-
-            # 检查数据网络
-            if hasattr(sim_model, "data_network") and hasattr(sim_model.data_network, "arrive_flits"):
-                target_networks.append(sim_model.data_network)
-
-            # 检查请求网络
-            if hasattr(sim_model, "request_network") and hasattr(sim_model.request_network, "arrive_flits"):
-                target_networks.append(sim_model.request_network)
-
-            for network in target_networks:
-                for packet_id, flits in network.arrive_flits.items():
-                    if not flits:
-                        continue
-
-                    first_flit = flits[0]
-
-                    # 匹配条件：时间窗口、节点位置、请求类型
-                    if self._is_matching_flit(request, first_flit):
-                        # 找到匹配的flit，尝试从d2d属性恢复原始类型
-                        if hasattr(first_flit, "d2d_origin_type") and first_flit.d2d_origin_type:
-                            request.original_source_type = first_flit.d2d_origin_type
-
-                        if hasattr(first_flit, "d2d_target_type") and first_flit.d2d_target_type:
-                            request.original_destination_type = first_flit.d2d_target_type
-
-                        return True
-
-        except Exception as e:
-            print(f"[D2D调试] 修复请求类型失败: {e}")
-        return False
-
-    def _is_matching_flit(self, request: RequestInfo, flit) -> bool:
-        """检查flit是否与request匹配"""
-        try:
-            # 检查时间窗口（允许一定误差）
-            flit_start_time = getattr(flit, "cmd_entry_noc_from_cake0_cycle", 0) // self.network_frequency
-            time_diff = abs(flit_start_time - request.start_time)
-            if time_diff > 10:  # 允许10ns误差
-                return False
-
-            # 检查请求类型
-            if hasattr(flit, "req_type") and request.req_type != flit.req_type:
-                return False
-
-            # 检查D2D属性存在性
-            if not (hasattr(flit, "d2d_origin_type") or hasattr(flit, "d2d_target_type")):
-                return False
-
-            return True
-
-        except Exception:
-            return False
 
     def _calculate_die_offsets_from_layout(self, die_layout, die_layout_type, die_width, die_height, dies=None, config=None, die_rotations=None):
         """

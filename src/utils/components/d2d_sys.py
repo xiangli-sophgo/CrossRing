@@ -80,6 +80,10 @@ class D2D_Sys:
         # AXI通道传输的flit计数（用于计算带宽）
         self.axi_channel_flit_count = {"AR": 0, "R": 0, "AW": 0, "W": 0, "B": 0}  # 读地址通道  # 读数据通道  # 写地址通道  # 写数据通道  # 写响应通道
 
+        # AXI通道利用率统计
+        self.axi_channel_active_cycles = {"AR": 0, "R": 0, "AW": 0, "W": 0, "B": 0}
+        self.total_step_cycles = 0
+
         # 关联的RN和SN接口（由D2DModel设置）
         self.rn_interface = None
         self.sn_interface = None
@@ -94,20 +98,23 @@ class D2D_Sys:
     def _init_axi_channels(self, config):
         """初始化AXI通道配置"""
         channels = {}
+
+        # 所有通道使用统一的AXI带宽配置，但每个通道有独立的TokenBucket
+        axi_bandwidth = getattr(config, "D2D_AXI_BANDWIDTH", 256)
+
         channel_configs = [
-            ("AR", "D2D_AR_LATENCY", 10, "D2D_AR_BANDWIDTH", 128),
-            ("R", "D2D_R_LATENCY", 8, "D2D_R_BANDWIDTH", 128),
-            ("AW", "D2D_AW_LATENCY", 10, "D2D_AW_BANDWIDTH", 128),
-            ("W", "D2D_W_LATENCY", 2, "D2D_W_BANDWIDTH", 128),
-            ("B", "D2D_B_LATENCY", 8, "D2D_B_BANDWIDTH", 128),
+            ("AR", "D2D_AR_LATENCY", 10),
+            ("R", "D2D_R_LATENCY", 8),
+            ("AW", "D2D_AW_LATENCY", 10),
+            ("W", "D2D_W_LATENCY", 2),
+            ("B", "D2D_B_LATENCY", 8),
         ]
 
-        for channel_name, latency_key, latency_default, bw_key, bw_default in channel_configs:
-            bandwidth = getattr(config, bw_key, bw_default)
+        for channel_name, latency_key, latency_default in channel_configs:
             channels[channel_name] = {
                 "send_flits": {},
                 "latency": getattr(config, latency_key, latency_default),
-                "bandwidth_limiter": TokenBucket(rate=bandwidth / config.NETWORK_FREQUENCY / config.FLIT_SIZE, bucket_size=bandwidth),
+                "bandwidth_limiter": TokenBucket(rate=axi_bandwidth / config.NETWORK_FREQUENCY / config.FLIT_SIZE, bucket_size=axi_bandwidth),
             }
 
         return channels
@@ -152,6 +159,12 @@ class D2D_Sys:
             current_cycle: 当前周期
         """
         self.current_cycle = current_cycle
+        self.total_step_cycles += 1
+
+        # 统计每个通道当前cycle是否有flit在传输
+        for channel_type, channel in self.axi_channels.items():
+            if channel["send_flits"]:  # 如果有flit在传输中
+                self.axi_channel_active_cycles[channel_type] += 1
 
         # 更新所有令牌桶
         self.data_token_bucket.refill(current_cycle)
@@ -426,9 +439,10 @@ class D2D_Sys:
         if target_die_id is None or target_die_id not in self.target_die_interfaces:
             # 添加更详细的调试信息
             flit_info = f"flit_position={getattr(flit, 'flit_position', 'None')}, d2d_origin_die={getattr(flit, 'd2d_origin_die', 'None')}, d2d_target_die={getattr(flit, 'd2d_target_die', 'None')}, packet_id={getattr(flit, 'packet_id', 'None')}"
-            self.logger.error(f"目标Die {target_die_id} 的接口未设置，flit信息: {flit_info}")
+            # self.logger.error(f"目标Die {target_die_id} 的接口未设置，flit信息: {flit_info}")
             # 回收AXI flit
             from .flit import _flit_pool
+
             _flit_pool.return_flit(flit)
             return
 
@@ -461,6 +475,7 @@ class D2D_Sys:
             self.logger.error(f"无法找到合适的目标接口")
             # 回收AXI flit
             from .flit import _flit_pool
+
             _flit_pool.return_flit(flit)
 
     def get_statistics(self) -> dict:
@@ -488,5 +503,12 @@ class D2D_Sys:
             "axi_channel_stats": self.axi_channel_stats.copy(),
             "axi_in_transit": axi_in_transit,
             "axi_bandwidth_tokens": {channel_type: channel["bandwidth_limiter"].tokens for channel_type, channel in self.axi_channels.items()},
+            "axi_utilization_pct": {
+                ch: (self.axi_channel_active_cycles[ch] / self.total_step_cycles * 100
+                     if self.total_step_cycles > 0 else 0)
+                for ch in ["AR", "R", "AW", "W", "B"]
+            },
+            "axi_active_cycles": self.axi_channel_active_cycles.copy(),
+            "total_cycles": self.total_step_cycles,
         }
         return stats

@@ -3,6 +3,12 @@ from collections import deque, defaultdict
 from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths
 from config.config import CrossRingConfig
 from src.utils.components import Flit, Network, TokenBucket, IPInterface
+from src.utils.components.flit import (
+    get_original_source_node,
+    get_original_destination_node,
+    get_original_source_type,
+    get_original_destination_type,
+)
 
 from src.core.Link_State_Visualizer import NetworkLinkVisualizer
 import matplotlib.pyplot as plt
@@ -53,7 +59,6 @@ class BaseModel:
 
         # 结果保存路径 - 通过setup_result_analysis设置
         self.result_save_path = None
-        self.result_save_path_original = None
         self.results_fig_save_path = None
 
         # 可视化配置 - 通过setup_result_analysis设置
@@ -123,7 +128,6 @@ class BaseModel:
             fifo_utilization_heatmap: 是否绘制FIFO使用率热力图
             save_fig: 是否保存图像到数据流保存目录，默认True
         """
-        self.result_save_path_original = result_save_path
         self.plot_flow_fig = plot_flow_fig
         self.plot_RN_BW_fig = plot_RN_BW_fig
         self.fifo_utilization_heatmap = fifo_utilization_heatmap
@@ -212,9 +216,15 @@ class BaseModel:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
 
         # 智能设置各network的双侧升级：全局配置 OR (双侧下环 AND 在保序列表中)
-        self.req_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE == 2 and "REQ" in self.config.IN_ORDER_PACKET_CATEGORIES)
-        self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE == 2 and "RSP" in self.config.IN_ORDER_PACKET_CATEGORIES)
-        self.data_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE == 2 and "DATA" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        self.req_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (
+            self.config.ORDERING_PRESERVATION_MODE == 2 and "REQ" in self.config.IN_ORDER_PACKET_CATEGORIES
+        )
+        self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (
+            self.config.ORDERING_PRESERVATION_MODE == 2 and "RSP" in self.config.IN_ORDER_PACKET_CATEGORIES
+        )
+        self.data_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (
+            self.config.ORDERING_PRESERVATION_MODE == 2 and "DATA" in self.config.IN_ORDER_PACKET_CATEGORIES
+        )
 
         # Initialize arbiters based on configuration
         arbitration_config = getattr(self.config, "arbitration", {})
@@ -715,7 +725,11 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
+            print(
+                f"Data statistic: Read: {self.read_req, self.read_flit}, "
+                f"Write: {self.write_req, self.write_flit}, "
+                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
+            )
 
     def log_summary(self):
         if self.verbose:
@@ -909,6 +923,7 @@ class BaseModel:
 
             request_matrix = []
             for slot_idx, flit in enumerate(station_flits):
+                self.error_log(station_flits[slot_idx], 2, 0)
                 row = []
                 for out_dir in output_dirs:
                     # 检查是否可以从这个slot转发到这个输出方向
@@ -1164,16 +1179,14 @@ class BaseModel:
 
         # 创建flit对象 (使用对象池)
         req = Flit.create_flit(source, destination, path)
-        req.source_original = req_data[1]
-        req.destination_original = req_data[3]
         req.flit_type = "req"
         # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
         req.departure_cycle = req_data[0]
         req.burst_length = req_data[6]
         req.source_type = f"{req_data[2]}_0" if "_" not in req_data[2] else req_data[2]
         req.destination_type = f"{req_data[4]}_0" if "_" not in req_data[4] else req_data[4]
-        req.original_source_type = f"{req_data[2]}_0" if "_" not in req_data[2] else req_data[2]
-        req.original_destination_type = f"{req_data[4]}_0" if "_" not in req_data[4] else req_data[4]
+        # Die内请求：source/destination即为原始节点，无需设置_original属性
+        # 辅助函数会自动使用source/destination作为回退值
         req.traffic_id = traffic_id  # 添加traffic_id标记
 
         req.packet_id = BaseModel.get_next_packet_id()
@@ -1342,7 +1355,7 @@ class BaseModel:
         next_hop = self._get_next_hop_for_node(flit, pos)
 
         if out_dir == "EQ":
-            final_dest = flit.destination_original if getattr(flit, "destination_original", -1) != -1 else flit.destination
+            final_dest = flit.destination
             return final_dest == pos
 
         if next_hop is None:
@@ -1364,6 +1377,7 @@ class BaseModel:
         Returns:
             int | None: 下一跳节点ID，若不存在或无法确定则返回None。
         """
+        self.error_log(flit, 2, 0)
         path = getattr(flit, "path", None)
         if not path:
             return None
@@ -1740,13 +1754,12 @@ class BaseModel:
             if injected_flit:
                 # 3. 首次上环时分配order_id
                 if injected_flit.src_dest_order_id == -1:
-                    src_node = injected_flit.source_original if injected_flit.source_original != -1 else injected_flit.source
-                    dest_node = injected_flit.destination_original if injected_flit.destination_original != -1 else injected_flit.destination
-                    src_type = injected_flit.original_source_type if injected_flit.original_source_type else injected_flit.source_type
-                    dest_type = injected_flit.original_destination_type if injected_flit.original_destination_type else injected_flit.destination_type
+                    src_node = get_original_source_node(injected_flit)
+                    dest_node = get_original_destination_node(injected_flit)
+                    src_type = get_original_source_type(injected_flit)
+                    dest_type = get_original_destination_type(injected_flit)
                     injected_flit.src_dest_order_id = Flit.get_next_order_id(
-                        src_node, src_type, dest_node, dest_type,
-                        injected_flit.flit_type.upper(), self.config.ORDERING_GRANULARITY
+                        src_node, src_type, dest_node, dest_type, injected_flit.flit_type.upper(), self.config.ORDERING_GRANULARITY
                     )
 
                 # 4. 横向注入需要更新inject_num统计
