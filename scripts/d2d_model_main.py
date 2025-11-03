@@ -14,8 +14,8 @@ def main():
 
     # 创建配置和模型
     config = D2DConfig(
-        d2d_config_file="../config/topologies/d2d_4die_config.yaml",
         # d2d_config_file="../config/topologies/d2d_2die_config.yaml",
+        d2d_config_file="../config/topologies/d2d_4die_config.yaml",
     )
 
     # 显示配置信息
@@ -46,14 +46,14 @@ def main():
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
-    # model.setup_debug(trace_packets=[8022, 8721], update_interval=0.0)
+    # model.setup_debug(trace_packets=[1], update_interval=0.0)
     # model.setup_visualization(enable=1, update_interval=0.5, start_cycle=500)
 
     model.setup_result_analysis(
         # 图片生成控制
         flow_graph=1,
         ip_bandwidth_heatmap=1,
-        fifo_utilization_heatmap=1,
+        fifo_utilization_heatmap=0,
         save_figures=0,
         # CSV文件导出控制
         export_d2d_requests_csv=1,

@@ -7,7 +7,7 @@ from __future__ import annotations
 import heapq
 from collections import deque
 from .ip_interface import IPInterface
-from .flit import Flit, TokenBucket
+from .flit import Flit, TokenBucket, D2D_ORIGIN_TARGET_ATTRS
 import logging
 
 
@@ -475,11 +475,7 @@ class D2D_RN_Interface(IPInterface):
         copy_flit_attributes(
             write_req,
             write_complete_rsp,
-            (
-                D2D_ORIGIN_TARGET_ATTRS
-                if "D2D_ORIGIN_TARGET_ATTRS" in dir()
-                else ["d2d_origin_die", "d2d_origin_node", "d2d_origin_type", "d2d_target_die", "d2d_target_node", "d2d_target_type"]
-            ),
+            D2D_ORIGIN_TARGET_ATTRS,
         )
 
         # 通过AXI_B通道发送回源Die，明确指定B通道
@@ -559,13 +555,6 @@ class D2D_RN_Interface(IPInterface):
             flit = self.h2l_l_to_eject_fifo(net_type)
             if flit:
                 ejected_flits.append(flit)
-                # 处理接收到的flit
-                if net_type == "req":
-                    self._handle_received_request(flit)
-                elif net_type == "rsp":
-                    self._handle_received_response(flit)
-                elif net_type == "data":
-                    self._handle_received_data(flit)
 
         return ejected_flits
 

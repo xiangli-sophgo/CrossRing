@@ -596,7 +596,8 @@ def generate_4die_stress_test():
     die0_gdma_base = {
         "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
         "gdma_1": [3, 15, 19],
-        # "gdma_0": [12],
+        # "gdma_0": [12, 13, 14],
+        # "gdma_1": [12, 13, 14],
     }
     die0_ddr_base = {
         "ddr_0": [3, 7, 11, 15],
@@ -615,22 +616,22 @@ def generate_4die_stress_test():
     print("=" * 60)
 
     ring_pairs = [
-        (0, 0),
+        # (0, 0),
         (1, 1),
-        (2, 2),
-        (3, 3),
+        # (2, 2),
+        # (3, 3),
         (0, 1),
-        (1, 0),
-        (0, 2),
-        (2, 0),
-        (0, 3),
-        (3, 0),
-        (1, 2),
-        (2, 1),
-        (1, 3),
-        (3, 1),
-        (2, 3),
-        (3, 2),
+        # (1, 0),
+        # (0, 2),
+        # (2, 0),
+        # (0, 3),
+        # (3, 0),
+        # (1, 2),
+        # (2, 1),
+        # (1, 3),
+        # (3, 1),
+        # (2, 3),
+        # (3, 2),
     ]
     req_type = "W"
     traffic_configs = _generate_traffic_configs(
@@ -638,14 +639,14 @@ def generate_4die_stress_test():
         ring_pairs,
         req_type=req_type,
         burst_length=4,
-        bandwidth=11.52,
+        bandwidth=64,
     )
 
     generator.generate_traffic_file(
         filename=f"../../test_data/d2d_64_share_{req_type}_1030.txt",
         traffic_configs=traffic_configs,
         traffic_mode="cross_die",
-        end_time=6000,
+        end_time=3000,
     )
     print()
 

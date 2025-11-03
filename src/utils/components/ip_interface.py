@@ -10,6 +10,7 @@ from collections import deque, defaultdict
 from config.config import CrossRingConfig
 from .flit import Flit, TokenBucket
 import logging
+import inspect
 
 
 # IPInterface的Ring支持扩展
@@ -194,22 +195,16 @@ class IPInterface:
 
         # 根据IP类型设置SN tracker数量
         if ip_type.startswith("ddr"):
-            self.sn_tracker_count = {
-                "ro": {"count": config.SN_DDR_R_TRACKER_OSTD},
-                "share": {"count": config.SN_DDR_W_TRACKER_OSTD}
-            }
+            self.sn_tracker_count = {"ro": {"count": config.SN_DDR_R_TRACKER_OSTD}, "share": {"count": config.SN_DDR_W_TRACKER_OSTD}}
             self.sn_wdb_count = {"count": config.SN_DDR_WDB_SIZE}
         elif ip_type.startswith("l2m"):
-            self.sn_tracker_count = {
-                "ro": {"count": config.SN_L2M_R_TRACKER_OSTD},
-                "share": {"count": config.SN_L2M_W_TRACKER_OSTD}
-            }
+            self.sn_tracker_count = {"ro": {"count": config.SN_L2M_R_TRACKER_OSTD}, "share": {"count": config.SN_L2M_W_TRACKER_OSTD}}
             self.sn_wdb_count = {"count": config.SN_L2M_WDB_SIZE}
         elif ip_type.startswith("d2d_sn"):
             # D2D_SN使用专用配置
             self.sn_tracker_count = {
                 "ro": {"count": getattr(config, "D2D_SN_R_TRACKER_OSTD", config.SN_DDR_R_TRACKER_OSTD)},
-                "share": {"count": getattr(config, "D2D_SN_W_TRACKER_OSTD", config.SN_DDR_W_TRACKER_OSTD)}
+                "share": {"count": getattr(config, "D2D_SN_W_TRACKER_OSTD", config.SN_DDR_W_TRACKER_OSTD)},
             }
             self.sn_wdb_count = {"count": getattr(config, "D2D_SN_WDB_SIZE", config.SN_DDR_WDB_SIZE)}
         else:
@@ -256,13 +251,7 @@ class IPInterface:
 
         # 检查是否为新请求并记录统计
         # 新请求必须满足：1) 请求网络 2) 本IP首次见到此packet_id 3) 非重试 4) 当前IP是原始发起IP
-        is_new_request = (
-            network_type == "req"
-            and not self.networks[network_type]["send_flits"][flit.packet_id]
-            and not retry
-            and hasattr(flit, "source_type")
-            and flit.source_type == self.ip_type
-        )
+        is_new_request = network_type == "req" and not self.networks[network_type]["send_flits"][flit.packet_id] and not retry and hasattr(flit, "source_type") and flit.source_type == self.ip_type
 
         if is_new_request and hasattr(flit, "req_type"):
             # 记录请求开始时间（tracker消耗开始）
@@ -512,12 +501,6 @@ class IPInterface:
             self.write_retry_num_stat += 1
 
         req = next((req for req in self.rn_tracker[rsp.req_type] if req.packet_id == rsp.packet_id), None)
-        if not req:
-            # For Ring topology, ignore spurious positive responses for read requests
-            if hasattr(self.config, "RING_NUM_NODE") and self.config.RING_NUM_NODE > 0 and rsp.req_type == "read" and rsp.rsp_type == "positive":
-                return  # Silently ignore - this is expected for Ring read completions
-            # logging.warning(f"RSP {rsp} do not have REQ")
-            return
 
         req.sync_latency_record(rsp)
 
@@ -788,7 +771,7 @@ class IPInterface:
             if hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die"):
                 if die_id is not None and d2d_model:
                     burst_length = getattr(flit, "burst_length", 4)
-                    is_cross_die = (flit.d2d_origin_die != flit.d2d_target_die)
+                    is_cross_die = flit.d2d_origin_die != flit.d2d_target_die
 
                     # 记录写数据接收：跨Die或Die内
                     if is_cross_die and flit.d2d_target_die == die_id:
@@ -814,11 +797,11 @@ class IPInterface:
 
                 # 检查是否为跨Die写数据（tracker由D2D_RN管理，不在本地SN中）
                 is_cross_die_write = (
-                    hasattr(flit, "d2d_origin_die") and
-                    hasattr(flit, "d2d_target_die") and
-                    flit.d2d_origin_die is not None and
-                    flit.d2d_target_die is not None and
-                    flit.d2d_origin_die != flit.d2d_target_die
+                    hasattr(flit, "d2d_origin_die")
+                    and hasattr(flit, "d2d_target_die")
+                    and flit.d2d_origin_die is not None
+                    and flit.d2d_target_die is not None
+                    and flit.d2d_origin_die != flit.d2d_target_die
                 )
 
                 # 找到对应的请求（跨Die和Die内都需要释放SN tracker）
@@ -1064,6 +1047,10 @@ class IPInterface:
 
         # 将响应放入响应网络的inject_fifo
         self.enqueue(rsp, "rsp")
+
+    def error_log(self, flit, target_id, flit_id):
+        if flit and flit.packet_id == target_id and flit.flit_id == flit_id:
+            print(inspect.currentframe().f_back.f_code.co_name, flit)
 
 
 def create_ring_ip_interface(ip_type, ip_pos, config, req_network, rsp_network, data_network, node, routes):
