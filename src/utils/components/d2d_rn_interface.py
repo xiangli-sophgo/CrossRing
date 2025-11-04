@@ -251,6 +251,9 @@ class D2D_RN_Interface(IPInterface):
         local_write_req.source_type = self.ip_type
         local_write_req.destination_type = write_req.d2d_target_type
 
+        # 记录经过的D2D_RN节点
+        local_write_req.d2d_rn_node = self.ip_pos
+
         # 关键：设置为"new"让DDR进行SN资源检查（支持Die1的独立retry）
         # D2D_RN的RN资源已在handle_cross_die_write_request中分配
         local_write_req.req_attr = "new"
@@ -330,6 +333,9 @@ class D2D_RN_Interface(IPInterface):
             new_flit.d2d_target_node = flit.d2d_target_node
         if hasattr(flit, "d2d_target_type"):
             new_flit.d2d_target_type = flit.d2d_target_type
+
+        # 记录经过的D2D_RN节点
+        new_flit.d2d_rn_node = self.ip_pos
 
         # 设置网络状态
         new_flit.path_index = 0
@@ -704,6 +710,9 @@ class D2D_RN_Interface(IPInterface):
             # 继承D2D属性
             copy_flit_attributes(first_flit, cross_die_flit, ["d2d_origin_die", "d2d_origin_node", "d2d_origin_type", "d2d_target_die", "d2d_target_node", "d2d_target_type"])
 
+            # 记录经过的D2D_RN节点
+            cross_die_flit.d2d_rn_node = self.ip_pos
+
             # 继承时间戳信息
             copy_flit_attributes(local_flit, cross_die_flit, ["departure_cycle", "entry_db_cycle", "req_departure_cycle", "leave_db_cycle"])
 
@@ -736,3 +745,29 @@ class D2D_RN_Interface(IPInterface):
             "d2d_rn_rdb_count": self.rn_rdb_count,
         }
         return stats
+
+    def enqueue(self, flit: Flit, network_type: str, retry=False):
+        """重写enqueue方法，记录D2D节点注入NoC的时间戳"""
+        current_cycle = getattr(self, "current_cycle", 0)
+        flit.d2d_noc_inject_cycle = current_cycle
+        super().enqueue(flit, network_type, retry)
+
+    def h2l_l_to_eject_fifo(self, network_type):
+        """重写h2l_l_to_eject_fifo方法，记录D2D节点从NoC弹出的时间戳"""
+        net_info = self.networks[network_type]
+        if not net_info["h2l_fifo_l"]:
+            return None
+
+        current_cycle = getattr(self, "current_cycle", 0)
+        if network_type == "data" and self.rx_token_bucket:
+            self.rx_token_bucket.refill(current_cycle)
+            if not self.rx_token_bucket.consume():
+                return None
+
+        flit = net_info["h2l_fifo_l"].popleft()
+        flit.d2d_noc_eject_cycle = current_cycle
+
+        # 调用父类的处理逻辑（统计接收flit数量）
+        net_info["network"].recv_flits_num += 1
+
+        return flit

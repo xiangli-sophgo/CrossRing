@@ -617,25 +617,27 @@ class D2D_Model:
 
                 # D2D链路状态可视化更新
                 if self.d2d_link_state_vis and self.current_cycle >= self.kwargs.get("plot_start_cycle", 0):
-                    # 收集所有Die的所有网络数据
-                    all_die_networks = []
-                    for die_id in range(self.num_dies):
-                        die_model = self.dies[die_id]
-                        die_networks = [die_model.req_network, die_model.rsp_network, die_model.data_network]
-                        all_die_networks.append(die_networks)
+                    # 检查停止信号 - 如果已停止则完全跳过可视化
+                    if not self.d2d_link_state_vis.should_stop:
+                        # 收集所有Die的所有网络数据
+                        all_die_networks = []
+                        for die_id in range(self.num_dies):
+                            die_model = self.dies[die_id]
+                            die_networks = [die_model.req_network, die_model.rsp_network, die_model.data_network]
+                            all_die_networks.append(die_networks)
 
-                    # 更新可视化器
-                    self.d2d_link_state_vis.update(all_die_networks, self.current_cycle)
+                        # 更新可视化器
+                        try:
+                            self.d2d_link_state_vis.update(all_die_networks, self.current_cycle)
+                        except Exception as e:
+                            # 窗口已关闭，设置停止标志
+                            self.d2d_link_state_vis.should_stop = True
 
-                    # 暂停阻塞机制 - 与基类保持一致
-                    import matplotlib.pyplot as plt
+                        # 暂停阻塞机制 - 与基类保持一致
+                        import matplotlib.pyplot as plt
 
-                    while self.d2d_link_state_vis.paused and not self.d2d_link_state_vis.should_stop:
-                        plt.pause(0.05)  # 阻塞在这里，不推进仿真
-
-                    # 检查停止信号
-                    if self.d2d_link_state_vis.should_stop:
-                        break  # 退出主循环
+                        while self.d2d_link_state_vis.paused and not self.d2d_link_state_vis.should_stop:
+                            plt.pause(0.05)  # 阻塞在这里，不推进仿真
 
                 # D2D Trace调试（如果启用）
                 if self.kwargs.get("print_d2d_trace", False):
@@ -767,7 +769,7 @@ class D2D_Model:
 
             # 检查D2D_Sys的AXI通道是否空闲
             d2d_sys_idle = True
-            if hasattr(die_model, 'd2d_systems'):
+            if hasattr(die_model, "d2d_systems"):
                 for pos, d2d_sys in die_model.d2d_systems.items():
                     if d2d_sys.send_flits:  # 如果AXI通道中有flits
                         d2d_sys_idle = False
@@ -952,7 +954,9 @@ class D2D_Model:
             print(f"    Read - Requests: Local={local_read_completed}/{local_read_reqs}, Cross={cross_read_completed}/{cross_read_reqs} | Data: Local={local_read_data}, Cross={cross_read_data}")
 
             # 写请求统计(显示完成数/总数)
-            print(f"    Write - Requests: Local={local_write_completed}/{local_write_reqs}, Cross={cross_write_completed}/{cross_write_reqs} | Data: Local={local_write_data}, Cross={cross_write_data}")
+            print(
+                f"    Write - Requests: Local={local_write_completed}/{local_write_reqs}, Cross={cross_write_completed}/{cross_write_reqs} | Data: Local={local_write_data}, Cross={cross_write_data}"
+            )
 
     def generate_combined_flow_graph(self, mode="total", save_path=None):
         """
@@ -1085,7 +1089,7 @@ class D2D_Model:
         d2d_stats = self._collect_d2d_statistics()
 
         # 打印D2D专有统计信息
-        self._print_d2d_statistics(d2d_stats)
+        # self._print_d2d_statistics(d2d_stats)
 
         # 1. 跳过Die内部结果分析（D2D系统中Die内部没有数据流）
         die_results = {}
@@ -1319,11 +1323,7 @@ class D2D_Model:
                     print(f"\n  D2D_Sys (Die{die_id} → Die{axi_sys['target_die']}):")
                     sys_stats = axi_sys["stats"]
                     print(f"    总周期: {sys_stats.get('total_cycles', 0)}")
-                    print(
-                        f"    仲裁统计: RN={sys_stats.get('rn_transmit_count', 0)}, "
-                        + f"SN={sys_stats.get('sn_transmit_count', 0)}, "
-                        + f"总计={sys_stats.get('total_transmit_count', 0)}"
-                    )
+                    print(f"    仲裁统计: RN={sys_stats.get('rn_transmit_count', 0)}, " + f"SN={sys_stats.get('sn_transmit_count', 0)}, " + f"总计={sys_stats.get('total_transmit_count', 0)}")
 
                     # AXI通道统计
                     axi_stats = sys_stats.get("axi_channel_stats", {})

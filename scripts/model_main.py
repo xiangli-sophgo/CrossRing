@@ -16,11 +16,16 @@ def main():
 
     # ==================== 流量配置 ====================
     # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
-    traffic_file_path = r"../test_data"
+    # traffic_file_path = r"../test_data"
+    traffic_file_path = r"../traffic/sim_d2d_traffic"
     traffic_config = [
         [
             # "LLama2_AllReduce.txt"
-            "data_1030_W.txt"
+            # "data_sim_16_share_W_1104.txt"
+            # "data_sim_16_share_d2d_W_1104.txt"
+            # "data_sim_16_share_d2d_W_1104.txt"
+            # "data_sim_64_share_d2d_R_1104.txt"
+            "data_sim_64_share_d2d_W_1104.txt"
             # "MLP_MoE.txt"
         ],
     ]
@@ -40,10 +45,10 @@ def main():
         "8x8": r"../config/topologies/topo_8x8.yaml",
     }
 
-    # topo_type = "5x4"  # SG2262
+    topo_type = "5x4"  # SG2262
     # topo_type = "4x4"
     # topo_type = "5x2"
-    topo_type = "3x3"
+    # topo_type = "3x3"
     # topo_type = "6x5"  # SG2260
     # topo_type = "8x8"  # SG2260E
 
@@ -73,10 +78,10 @@ def main():
         save_fig=0,
     )
     # sim.setup_debug(print_trace=1, show_trace_id=[2036, 2028], update_interval=0.1)
-    sim.setup_visualization(plot_link_state=1, plot_start_cycle=300, show_node_id=1)
+    # sim.setup_visualization(plot_link_state=1, plot_start_cycle=300, show_node_id=1)
     np.random.seed(801)
 
-    sim.run_simulation(max_time=6000, print_interval=200)
+    sim.run_simulation(max_time=4000, print_interval=200)
 
 
 if __name__ == "__main__":

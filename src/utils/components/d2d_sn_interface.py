@@ -231,6 +231,9 @@ class D2D_SN_Interface(IPInterface):
         # 创建请求flit副本
         new_flit = create_d2d_flit_copy(flit, source=source, destination=destination, path=path, attr_preset="request")
 
+        # 记录经过的D2D_SN节点
+        new_flit.d2d_sn_node = self.ip_pos
+
         # 设置网络状态
         new_flit.path_index = 0
         new_flit.is_injected = False
@@ -260,6 +263,9 @@ class D2D_SN_Interface(IPInterface):
 
         # 创建响应flit副本
         new_flit = create_d2d_flit_copy(flit, source=source, destination=destination, path=path, attr_preset="response")
+
+        # 记录经过的D2D_SN节点
+        new_flit.d2d_sn_node = self.ip_pos
 
         new_flit.path_index = 0
 
@@ -747,6 +753,9 @@ class D2D_SN_Interface(IPInterface):
         # 创建新的AXI写请求flit
         axi_write_req = create_d2d_flit_copy(write_req, source=self.ip_pos, destination=0, path=[0], attr_preset="request")
 
+        # 记录经过的D2D_SN节点
+        axi_write_req.d2d_sn_node = self.ip_pos
+
         # 通过AW通道发送写请求（第三个参数传0，让系统自动判断channel）
         self.d2d_sys.enqueue_sn(axi_write_req, target_die_id, 0)
 
@@ -756,6 +765,9 @@ class D2D_SN_Interface(IPInterface):
             # 确保标记为写数据
             axi_data_flit.flit_type = "data"
             axi_data_flit.req_type = "write"
+
+            # 记录经过的D2D_SN节点
+            axi_data_flit.d2d_sn_node = self.ip_pos
 
             # 通过W通道发送写数据
             self.d2d_sys.enqueue_sn(axi_data_flit, target_die_id, 0)
@@ -834,3 +846,29 @@ class D2D_SN_Interface(IPInterface):
             "cross_die_receive_queue_size": sum(len(q) for q in self.cross_die_receive_queues.values()),
         }
         return stats
+
+    def enqueue(self, flit: Flit, network_type: str, retry=False):
+        """重写enqueue方法，记录D2D节点注入NoC的时间戳"""
+        current_cycle = getattr(self, "current_cycle", 0)
+        flit.d2d_noc_inject_cycle = current_cycle
+        super().enqueue(flit, network_type, retry)
+
+    def h2l_l_to_eject_fifo(self, network_type):
+        """重写h2l_l_to_eject_fifo方法，记录D2D节点从NoC弹出的时间戳"""
+        net_info = self.networks[network_type]
+        if not net_info["h2l_fifo_l"]:
+            return None
+
+        current_cycle = getattr(self, "current_cycle", 0)
+        if network_type == "data" and self.rx_token_bucket:
+            self.rx_token_bucket.refill(current_cycle)
+            if not self.rx_token_bucket.consume():
+                return None
+
+        flit = net_info["h2l_fifo_l"].popleft()
+        flit.d2d_noc_eject_cycle = current_cycle
+
+        # 调用父类的处理逻辑（统计接收flit数量）
+        net_info["network"].recv_flits_num += 1
+
+        return flit

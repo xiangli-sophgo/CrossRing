@@ -150,33 +150,6 @@ class RingModel(BaseModel):
         logging.info(f"Ring topology initialized: {self.config.RING_NUM_NODE} nodes, " f"routing strategy: {self.config.ROUTING_STRATEGY}")
         self.initial()
 
-    def node_map(self, node, is_source=True):
-        if self.config.RING_NUM_NODE == 10:
-            node_map_dict = {
-                0: 0,
-                1: 9,
-                2: 1,
-                3: 8,
-                4: 2,
-                5: 7,
-                6: 3,
-                7: 6,
-                8: 4,
-                9: 5,
-            }
-        elif self.config.RING_NUM_NODE == 8:
-            node_map_dict = {
-                0: 0,
-                1: 7,
-                2: 1,
-                3: 6,
-                4: 2,
-                5: 5,
-                6: 3,
-                7: 4,
-            }
-        return node_map_dict[node]
-
     def _create_simple_routing_strategy(self):
         """创建简单的路由策略"""
 

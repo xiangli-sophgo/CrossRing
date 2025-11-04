@@ -639,10 +639,10 @@ def main():
                     df_single = pd.DataFrame([result])
                     if completed_count == 1:
                         # 第一次写入，包含表头
-                        df_single.to_csv(csv_path, index=False, mode='w')
+                        df_single.to_csv(csv_path, index=False, mode='w', encoding='utf-8-sig')
                     else:
                         # 后续追加，不包含表头
-                        df_single.to_csv(csv_path, index=False, mode='a', header=False)
+                        df_single.to_csv(csv_path, index=False, mode='a', header=False, encoding='utf-8-sig')
 
                 except Exception as e:
                     print(f"参数组合 {params_dict} 运行失败: {e}")
@@ -654,9 +654,9 @@ def main():
                     # 同样追加失败的结果
                     df_single = pd.DataFrame([failed_result])
                     if completed_count == 1:
-                        df_single.to_csv(csv_path, index=False, mode='w')
+                        df_single.to_csv(csv_path, index=False, mode='w', encoding='utf-8-sig')
                     else:
-                        df_single.to_csv(csv_path, index=False, mode='a', header=False)
+                        df_single.to_csv(csv_path, index=False, mode='a', header=False, encoding='utf-8-sig')
     else:
         print("使用单进程串行运行...")
         for i, args in enumerate(task_args):
@@ -671,10 +671,10 @@ def main():
                 df_single = pd.DataFrame([result])
                 if completed_count == 1:
                     # 第一次写入，包含表头
-                    df_single.to_csv(csv_path, index=False, mode='w')
+                    df_single.to_csv(csv_path, index=False, mode='w', encoding='utf-8-sig')
                 else:
                     # 后续追加，不包含表头
-                    df_single.to_csv(csv_path, index=False, mode='a', header=False)
+                    df_single.to_csv(csv_path, index=False, mode='a', header=False, encoding='utf-8-sig')
 
             except Exception as e:
                 print(f"参数组合 {params_dict} 运行失败: {e}")
@@ -685,9 +685,9 @@ def main():
                 # 同样追加失败的结果
                 df_single = pd.DataFrame([failed_result])
                 if completed_count == 1:
-                    df_single.to_csv(csv_path, index=False, mode='w')
+                    df_single.to_csv(csv_path, index=False, mode='w', encoding='utf-8-sig')
                 else:
-                    df_single.to_csv(csv_path, index=False, mode='a', header=False)
+                    df_single.to_csv(csv_path, index=False, mode='a', header=False, encoding='utf-8-sig')
 
     # 最终结果分析 - 从CSV文件读取所有结果
     print(f"从CSV文件读取结果: {csv_path}")

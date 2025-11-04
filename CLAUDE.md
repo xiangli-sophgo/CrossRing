@@ -101,20 +101,19 @@ The D2D (Die-to-Die) communication uses a unified attribute design for clear sta
 ```python
 # Transaction-level attributes (immutable throughout transaction)
 d2d_origin_die      # Initiator Die ID (e.g., 0)
-d2d_origin_node     # Initiator node source mapping (e.g., 36 for GDMA)
+d2d_origin_node     # Initiator node physical ID (e.g., 36 for GDMA)
 d2d_origin_type     # Initiator IP type (e.g., "gdma_0")
 
 d2d_target_die      # Target Die ID (e.g., 1)
-d2d_target_node     # Target node source mapping (e.g., 4 for DDR)
+d2d_target_node     # Target node physical ID (e.g., 4 for DDR)
 d2d_target_type     # Target IP type (e.g., "ddr_0")
 ```
 
 #### Key Design Principles
 
-1. **Unified Source Mapping**: All `d2d_*_node` attributes store source mapping positions
-2. **Path Calculation**: Use `node_map(node, is_source=False)` to convert to destination mapping when calculating paths
-3. **Clear Naming**: `d2d_` prefix distinguishes D2D attributes from Die-internal attributes
-4. **Immutable Transaction Info**: D2D attributes remain constant throughout the transaction lifecycle
+1. **Physical Node IDs**: All `d2d_*_node` attributes store physical node IDs directly
+2. **Clear Naming**: `d2d_` prefix distinguishes D2D attributes from Die-internal attributes
+3. **Immutable Transaction Info**: D2D attributes remain constant throughout the transaction lifecycle
 
 #### Usage Examples
 
@@ -125,7 +124,7 @@ if hasattr(flit, "d2d_target_die") and flit.d2d_target_die != self.die_id:
 
 # Data return to originator (Stage 6)
 source = self.ip_pos  # D2D_SN source position (36)
-destination = node_map(flit.d2d_origin_node, is_source=False)  # GDMA destination (32)
+destination = flit.d2d_origin_node  # GDMA destination physical ID (14)
 destination_type = flit.d2d_origin_type  # "gdma_0"
 ```
 

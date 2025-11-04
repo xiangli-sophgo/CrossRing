@@ -355,8 +355,9 @@ class BandwidthAnalyzer:
                 # 读请求：flit的source是SN(DDR/L2M)，destination是RN(SDMA/GDMA/CDMA)
                 actual_source_node = representative_flit.destination  # 实际发起请求的节点
                 actual_dest_node = representative_flit.source  # 实际目标节点
-                actual_source_type = get_original_source_type(representative_flit)  # 实际发起请求的类型
-                actual_dest_type = get_original_destination_type(representative_flit)  # 实际目标类型
+                # 读请求中需要交换type获取逻辑，因为flit.source_type=DDR但actual_source_node=GDMA
+                actual_source_type = get_original_destination_type(representative_flit)  # 实际发起请求的类型(GDMA)
+                actual_dest_type = get_original_source_type(representative_flit)  # 实际目标类型(DDR)
             else:  # write
                 # 写请求：RN在发出数据时结束，SN在收到数据时结束
 
@@ -1441,7 +1442,7 @@ class BandwidthAnalyzer:
                 elif mode == "ITag_ratio":
                     links = {link: stats["ITag_ratio"] for link, stats in utilization_stats.items()}
                 elif mode == "total":
-                    time_cycles = getattr(self, "simulation_end_cycle", 1000) // config.NETWORK_FREQUENCY
+                    time_cycles = getattr(self, "simulation_end_cycle", 1000) / config.NETWORK_FREQUENCY
                     links = {}
                     for link, stats in utilization_stats.items():
                         total_flit = stats.get("total_flit", 0)

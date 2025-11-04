@@ -115,7 +115,7 @@ def save_intermediate_result(study, trial, output_csv_path):
 
     # 保存CSV
     if records:
-        pd.DataFrame(records).to_csv(output_csv_path, index=False)
+        pd.DataFrame(records).to_csv(output_csv_path, index=False, encoding='utf-8-sig')
         if trial.number % 10 == 0:
             print(f"已完成 {len(records)} 个试验，中间结果已保存到: {output_csv_path}")
 
@@ -190,7 +190,7 @@ def run_parameter_range_analysis(h_range, v_range, traffic_files, traffic_weight
 
     # 保存结果
     csv_path = os.path.join(result_save_path, f"parameter_range_analysis_{datetime.now().strftime('%m%d_%H%M')}.csv")
-    results_df.to_csv(csv_path, index=False)
+    results_df.to_csv(csv_path, index=False, encoding='utf-8-sig')
     logger.info(f"参数范围分析结果已保存: {csv_path}")
 
     # 输出分析摘要
@@ -669,7 +669,7 @@ if __name__ == "__main__":
 
         if final_records:
             final_df = pd.DataFrame(final_records)
-            final_df.to_csv(output_csv, index=False)
+            final_df.to_csv(output_csv, index=False, encoding='utf-8-sig')
 
         print("\n" + "=" * 60)
         print("RB_ONLY标签数量优化完成!")

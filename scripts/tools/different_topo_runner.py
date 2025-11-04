@@ -248,7 +248,7 @@ class CrossRingBatchRunner:
             return
 
         df = pd.DataFrame(self.results)
-        df.to_csv(self.csv_output_path, index=False)
+        df.to_csv(self.csv_output_path, index=False, encoding='utf-8-sig')
         print(f"Results saved to {self.csv_output_path} ({len(self.results)} records)")
 
     def generate_summary_report(self):

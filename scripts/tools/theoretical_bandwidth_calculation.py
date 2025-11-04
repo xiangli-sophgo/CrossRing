@@ -573,7 +573,7 @@ class NoC_Simulator:
         plt.show()
 
         if self.save_req_trace:
-            with open("sim_trace.csv", "w", newline="") as f:
+            with open("sim_trace.csv", "w", newline="", encoding="utf-8-sig") as f:
                 wr = csv.writer(f)
                 wr.writerow(["req", "dma", "type", "mem_port", "mem_type", "cmd", "cmd_t", "sn_recv_t", "sn_sends", "rn_sends", "read_recv", "write_recv"])
                 for r in sorted(self.requests.values(), key=lambda x: x.req_id):

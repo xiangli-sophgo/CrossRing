@@ -128,15 +128,20 @@ class Flit:
         "data_channel_id",
         # D2D相关属性
         "d2d_origin_die",  # 发起Die ID
-        "d2d_origin_node",  # 发起节点源映射位置
+        "d2d_origin_node",  # 发起节点物理ID
         "d2d_origin_type",  # 发起IP类型
         "d2d_target_die",  # 目标Die ID
-        "d2d_target_node",  # 目标节点源映射位置
+        "d2d_target_node",  # 目标节点物理ID
         "d2d_target_type",  # 目标IP类型
+        "d2d_sn_node",  # 经过的D2D_SN节点物理ID
+        "d2d_rn_node",  # 经过的D2D_RN节点物理ID
         "inject_time",
         # AXI传输相关属性
         "axi_end_cycle",
         "axi_start_cycle",
+        # D2D NoC端口时间戳
+        "d2d_noc_inject_cycle",  # D2D节点注入NoC的时间
+        "d2d_noc_eject_cycle",  # D2D节点从NoC弹出的时间
     ]
 
     last_id = 0
@@ -221,6 +226,8 @@ class Flit:
         self.d2d_target_die = None
         self.d2d_target_node = None
         self.d2d_target_type = None
+        self.d2d_sn_node = None
+        self.d2d_rn_node = None
         self.inject_time = None
         self.init_param()
 
@@ -274,6 +281,8 @@ class Flit:
         self.packet_category = None
         self.allowed_eject_directions = None  # 允许下环的方向列表
         self.data_channel_id = 0  # 默认数据通道0
+        self.d2d_noc_inject_cycle = np.inf  # D2D NoC注入时间
+        self.d2d_noc_eject_cycle = np.inf  # D2D NoC弹出时间
 
     def sync_latency_record(self, flit):
         if flit.req_type == "read":
@@ -374,6 +383,8 @@ class Flit:
         self.d2d_target_die = None
         self.d2d_target_node = None
         self.d2d_target_type = None
+        self.d2d_sn_node = None
+        self.d2d_rn_node = None
         self.inject_time = None
 
         # Reset timing fields
@@ -480,7 +491,7 @@ def copy_flit_attributes(src_flit: Flit, dst_flit: Flit, attr_list: list):
 # D2D属性预定义集合
 D2D_BASIC_ATTRS = ["packet_id", "flit_id", "req_type", "burst_length", "traffic_id"]
 
-D2D_ORIGIN_TARGET_ATTRS = ["d2d_origin_die", "d2d_origin_node", "d2d_origin_type", "d2d_target_die", "d2d_target_node", "d2d_target_type"]
+D2D_ORIGIN_TARGET_ATTRS = ["d2d_origin_die", "d2d_origin_node", "d2d_origin_type", "d2d_target_die", "d2d_target_node", "d2d_target_type", "d2d_sn_node", "d2d_rn_node"]
 
 D2D_REQUEST_ATTRS = D2D_BASIC_ATTRS + ["req_attr"] + D2D_ORIGIN_TARGET_ATTRS
 

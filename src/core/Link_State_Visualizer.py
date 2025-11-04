@@ -518,9 +518,9 @@ class NetworkLinkVisualizer:
 
                         # inner patch (dynamic flit) - no border when empty
                         inner = Rectangle(
-                            (slot_x + square * 0.12, slot_y + square * 0.12),
-                            square * 0.76,
-                            square * 0.76,
+                            (slot_x, slot_y),
+                            square,
+                            square,
                             edgecolor="none",
                             facecolor="none",
                             linewidth=0,
@@ -588,9 +588,9 @@ class NetworkLinkVisualizer:
 
                         # inner patch (dynamic flit) - no border when empty
                         inner = Rectangle(
-                            (slot_x + square * 0.12, slot_y + square * 0.12),
-                            square * 0.76,
-                            square * 0.76,
+                            (slot_x, slot_y),
+                            square,
+                            square,
                             edgecolor="none",
                             facecolor="none",
                             linewidth=0,
@@ -740,7 +740,7 @@ class NetworkLinkVisualizer:
             # Cross Point Horizontal
             for lane, patches in self.cph_patches.items():
                 q = CP_H.get(self.node_id, [])[lane]
-                if lane == 'TL':
+                if lane == "TL":
                     q = q[::-1]
                 for idx, p in enumerate(patches):
                     t = self.cph_texts[lane][idx]
@@ -945,6 +945,8 @@ class NetworkLinkVisualizer:
         # 绑定节点点击事件
         self.fig.canvas.mpl_connect("button_press_event", self._on_click)
         self.fig.canvas.mpl_connect("key_press_event", self._on_key)
+        # 绑定窗口关闭事件
+        self.fig.canvas.mpl_connect("close_event", self._on_close)
         # 颜色/高亮控制
         self.use_highlight = False
         self.highlight_pid = 0
@@ -1423,17 +1425,23 @@ class NetworkLinkVisualizer:
         - 向上的链路: 横向标签在右侧
         - 向下的链路: 横向标签在左侧
         """
+        # 检查窗口是否仍然存在
+        if not plt.fignum_exists(self.fig.number):
+            self.should_stop = True
+            return False
+
         # 接收并保存多网络列表
         if networks is not None:
             self.networks = networks
+
+        # 检查停止标志
+        if self.should_stop:
+            return False
 
         # 若暂停且非跳过暂停调用，则仅保持 GUI 响应；不推进模拟
         if self.paused and not skip_pause:
             plt.pause(self.pause_interval)
             return self.ax.patches
-
-        if self.should_stop:
-            return False
         self.cycle = cycle
 
         # 记录所有网络的历史快照
@@ -1474,7 +1482,8 @@ class NetworkLinkVisualizer:
             self.ax.set_title(self.network.name)
         if cycle and self.cycle % 10 == 0:
             self._update_status_display()
-        if not skip_pause:
+        # 检查停止标志，避免不必要的pause
+        if not skip_pause and not self.should_stop:
             plt.pause(self.pause_interval)
         return self.ax.patches
 
@@ -1525,6 +1534,11 @@ class NetworkLinkVisualizer:
             self.piece_vis.draw_piece_for_node(self._selected_node, live_net)
 
         self.fig.canvas.draw_idle()
+
+    def _on_close(self, event):
+        """窗口关闭时设置停止标志"""
+        self.should_stop = True
+        # print("可视化窗口已关闭，仿真将继续运行...")
 
     def _on_key(self, event):
         key = event.key
@@ -1811,11 +1825,11 @@ class NetworkLinkVisualizer:
         # 更新网络类型按钮（REQ/RSP/DATA）
         for idx, btn in enumerate(self.buttons):
             if idx == self.selected_network_index:
-                btn.color = 'lightblue'  # 选中
-                btn.hovercolor = 'cornflowerblue'
+                btn.color = "lightblue"  # 选中
+                btn.hovercolor = "cornflowerblue"
             else:
-                btn.color = '0.85'  # 未选中（浅灰色）
-                btn.hovercolor = '0.95'
+                btn.color = "0.85"  # 未选中（浅灰色）
+                btn.hovercolor = "0.95"
             btn.ax.set_facecolor(btn.color)
 
         self.fig.canvas.draw_idle()

@@ -1422,7 +1422,7 @@ def save_intermediate_result(study, trial):
         records.append(rec)
 
     # 保存CSV
-    pd.DataFrame(records).to_csv(output_csv, index=False)
+    pd.DataFrame(records).to_csv(output_csv, index=False, encoding='utf-8-sig')
 
     # 保存进度并创建实时可视化
     save_progress_callback(study, trial)
@@ -1618,7 +1618,7 @@ if __name__ == "__main__":
         final_records.append(rec)
 
     final_df = pd.DataFrame(final_records)
-    final_df.to_csv(output_csv, index=False)
+    final_df.to_csv(output_csv, index=False, encoding='utf-8-sig')
 
     print("\n" + "=" * 60)
     print("优化完成!")

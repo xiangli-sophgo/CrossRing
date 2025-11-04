@@ -604,14 +604,25 @@ class BaseModel:
         if self.print_trace:
             self.flit_trace(self.show_trace_id)
         if self.plot_link_state:
-            while self.link_state_vis.paused and not self.link_state_vis.should_stop:
-                plt.pause(0.05)
+            # 检查停止信号 - 如果已停止则完全跳过可视化
             if self.link_state_vis.should_stop:
                 return
             if self.cycle < self.plot_start_cycle:
                 return
 
-            self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle)
+            # 暂停阻塞机制
+            while self.link_state_vis.paused and not self.link_state_vis.should_stop:
+                plt.pause(0.05)
+
+            # 再次检查停止信号（可能在暂停期间被设置）
+            if self.link_state_vis.should_stop:
+                return
+
+            try:
+                self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle)
+            except Exception as e:
+                # 窗口已关闭，设置停止标志
+                self.link_state_vis.should_stop = True
 
     def ip_inject_to_network(self):
         for node_id in range(self.config.NUM_NODE):

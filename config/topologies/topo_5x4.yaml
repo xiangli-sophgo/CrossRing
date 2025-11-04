@@ -91,10 +91,12 @@ SDMA_RW_GAP: .inf  # numpy.inf
 # 通道规格
 CHANNEL_SPEC:
   gdma: 2
-  sdma: 0
+  sdma: 1
   cdma: 0
   ddr: 2
-  l2m: 0
+  l2m: 1
+
+
 
 # 带宽限制 (GB/s) - 注释掉表示无限制
 GDMA_BW_LIMIT: 128

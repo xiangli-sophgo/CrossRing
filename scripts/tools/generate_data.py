@@ -114,9 +114,39 @@ def generate_traffic_from_configs(configs, end_time, output_file):
             f.write(f"{timestamp},{src_pos},{src_type},{dst_pos},{dst_type},{req_type},{burst}\n")
 
 
-# 示例使用
-if __name__ == "__main__":
-    # 设置随机种子
+def generate_sim_16_share_traffic():
+    np.random.seed(919)
+    random.seed(919)
+
+    # 配置参数
+    END_TIME = 6000
+    burst = 4
+    req_type = "R"
+    OUTPUT_FILE = f"../../test_data/data_sim_16_share_{req_type}_1104.txt"
+
+    # 定义多个配置
+    configs = [
+        {
+            "src_map": {
+                "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
+                "gdma_1": [3, 15, 19],
+            },
+            "dst_map": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "speed": 46.08,
+            "burst": burst,
+            "req_type": req_type,
+        },
+    ]
+
+    # 生成数据
+    generate_traffic_from_configs(configs, END_TIME, OUTPUT_FILE)
+    print(f"流量数据生成成功！文件：{OUTPUT_FILE}")
+
+
+def generate_sim_64_share_d2d_traffic():
     np.random.seed(919)
     random.seed(919)
 
@@ -124,85 +154,163 @@ if __name__ == "__main__":
     END_TIME = 6000
     burst = 4
     req_type = "W"
-    OUTPUT_FILE = f"../../test_data/data_1030_{req_type}.txt"
+    OUTPUT_FILE = f"../../test_data/data_sim_64_share_d2d_{req_type}_1104.txt"
 
     # 定义多个配置
     configs = [
         {
             "src_map": {
-                # "gdma_0": [1, 4, 7],
-                # "gdma_1": [0],
-                # "gdma_0": range(9),
-                "gdma_1": range(9),
-                # "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
-                # "gdma_1": [3, 15, 19],
+                "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
+                "gdma_1": [3, 15, 19],
             },
             "dst_map": {
-                "ddr_0": [4],
-                # "ddr_1": [4],
-                # "ddr_0": range(9),
-                # "ddr_1": range(9),
-                # "ddr_0": [3, 7, 11, 15],
-                # "ddr_1": [3, 7, 11, 15],
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
             },
-            "speed": 128,
+            "speed": 11.52,
             "burst": burst,
             "req_type": req_type,
         },
-        # {
-        #     "src_map": {
-        #         "gdma_0": list(range(16)),
-        #         "gdma_1": list(range(16)),
-        #     },
-        #     "dst_map": {
-        #         "ddr_0": list(range(16)),
-        #         "ddr_1": list(range(16)),
-        #     },
-        #     "speed": 128,
-        #     "burst": burst,
-        #     "req_type": req_type,
-        # },
-        # {
-        #     "src_map": {
-        #         "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
-        #         "gdma_1": [3, 15, 19],
-        #     },
-        #     "dst_map": {
-        #         "ddr_0": [3, 7, 11, 15],
-        #         "ddr_1": [3, 7, 11, 15],
-        #     },
-        #     "speed": 51.2,
-        #     "burst": burst,
-        #     "req_type": req_type,
-        # },
-        # {
-        #     "src_map": {
-        #         "cdma_0": [18],
-        #         "cdma_1": [18],
-        #     },
-        #     "dst_map": {
-        #         "ddr_0": [3, 7, 11, 15],
-        #         "ddr_1": [3, 7, 11, 15],
-        #     },
-        #     "speed": 56,
-        #     "burst": burst,
-        #     "req_type": "R",
-        # },
-        # {
-        #     "src_map": {
-        #         "cdma_0": [18],
-        #         "cdma_1": [18],
-        #     },
-        #     "dst_map": {
-        #         "ddr_0": [3, 7, 11, 15],
-        #         "ddr_1": [3, 7, 11, 15],
-        #     },
-        #     "speed": 56,
-        #     "burst": burst,
-        #     "req_type": "W",
-        # },
+        {
+            "src_map": {
+                "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
+                "gdma_1": [3, 15, 19],
+            },
+            "dst_map": {
+                "l2m_0": [1, 2, 4, 8, 12, 16],
+            },
+            "speed": 34.56,
+            "burst": burst,
+            "req_type": req_type,
+        },
+        {
+            "src_map": {
+                "sdma_0": [1, 2, 4, 8, 12, 16],
+            },
+            "dst_map": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "speed": 115.2,
+            "burst": burst,
+            "req_type": req_type,
+        },
     ]
 
     # 生成数据
     generate_traffic_from_configs(configs, END_TIME, OUTPUT_FILE)
     print(f"流量数据生成成功！文件：{OUTPUT_FILE}")
+
+
+def generate_sim_16_share_d2d_traffic():
+    np.random.seed(919)
+    random.seed(919)
+
+    # 配置参数
+    END_TIME = 6000
+    burst = 4
+    req_type = "R"
+    OUTPUT_FILE = f"../../test_data/data_sim_16_share_d2d_{req_type}_1104.txt"
+
+    # 定义多个配置
+    configs = [
+        {
+            "src_map": {
+                "gdma_0": [1],
+            },
+            "dst_map": {
+                "l2m_0": [1],
+            },
+            "speed": 76.8,
+            "burst": burst,
+            "req_type": "W" if req_type == "R" else "R",
+        },
+        {
+            "src_map": {
+                "gdma_0": [2],
+            },
+            "dst_map": {
+                "l2m_0": [2],
+            },
+            "speed": 76.8,
+            "burst": burst,
+            "req_type": "W" if req_type == "R" else "R",
+        },
+        {
+            "src_map": {
+                "gdma_0": [4],
+            },
+            "dst_map": {
+                "l2m_0": [4],
+            },
+            "speed": 76.8,
+            "burst": burst,
+            "req_type": "W" if req_type == "R" else "R",
+        },
+        {
+            "src_map": {
+                "gdma_0": [8],
+            },
+            "dst_map": {
+                "l2m_0": [8],
+            },
+            "speed": 76.8,
+            "burst": burst,
+            "req_type": "W" if req_type == "R" else "R",
+        },
+        {
+            "src_map": {
+                "gdma_0": [12],
+            },
+            "dst_map": {
+                "l2m_0": [12],
+            },
+            "speed": 76.8,
+            "burst": burst,
+            "req_type": "W" if req_type == "R" else "R",
+        },
+        {
+            "src_map": {
+                "gdma_0": [13],
+            },
+            "dst_map": {
+                "l2m_0": [16],
+            },
+            "speed": 76.8,
+            "burst": burst,
+            "req_type": "W" if req_type == "R" else "R",
+        },
+        {
+            "src_map": {
+                "gdma_0": [1, 2, 4, 8, 12, 13],
+            },
+            "dst_map": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "speed": 76.8,
+            "burst": burst,
+            "req_type": req_type,
+        },
+        {
+            "src_map": {
+                "sdma_0": [1, 2, 4, 8, 12, 13],
+            },
+            "dst_map": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "speed": 76.8,
+            "burst": burst,
+            "req_type": "W" if req_type == "R" else "R",
+        },
+    ]
+
+    # 生成数据
+    generate_traffic_from_configs(configs, END_TIME, OUTPUT_FILE)
+    print(f"流量数据生成成功！文件：{OUTPUT_FILE}")
+
+
+# 示例使用
+if __name__ == "__main__":
+    generate_sim_16_share_d2d_traffic()
