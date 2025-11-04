@@ -1544,7 +1544,7 @@ class BandwidthAnalyzer:
                 length = np.sqrt(dx * dx + dy * dy)
                 if length > 0:
                     dx, dy = dx / length, dy / length
-                    perp_dx, perp_dy = -dy * 0.1, dx * 0.1
+                    perp_dx, perp_dy = dy * 0.1, -dx * 0.1
 
                     has_reverse = G.has_edge(j, i)
                     if has_reverse:
@@ -1606,17 +1606,17 @@ class BandwidthAnalyzer:
                             # 水平link：向右(i<j)放上方，向左(i>j)放下方
                             if i < j:
                                 label_x = mid_x
-                                label_y = mid_y + 0.25
+                                label_y = mid_y - 0.25
                             else:
                                 label_x = mid_x
-                                label_y = mid_y - 0.25
+                                label_y = mid_y + 0.25
                         else:
                             # 垂直link：向下(i<j)放右侧，向上(i>j)放左侧
                             if i < j:
-                                label_x = mid_x + 0.45
+                                label_x = mid_x - 0.45
                                 label_y = mid_y
                             else:
-                                label_x = mid_x - 0.45
+                                label_x = mid_x + 0.45
                                 label_y = mid_y
                     else:
                         # 单向link：标签直接放在中间

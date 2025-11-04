@@ -215,7 +215,7 @@ class FIFOUtilizationCollector:
             return getattr(config, "EQ_IN_FIFO_DEPTH", 8)
 
         elif fifo_category == "EQ_CH":
-            return getattr(config, "IQ_CH_FIFO_DEPTH", 4)  # EQ_CH和IQ_CH容量相同
+            return getattr(config, "EQ_CH_FIFO_DEPTH", 4)  # EQ_CH和IQ_CH容量相同
 
         return 0
 

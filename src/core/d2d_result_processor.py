@@ -1188,13 +1188,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         # 自动调整坐标轴范围以确保所有内容都显示
         ax.axis("equal")  # 保持纵横比
-        ax.margins(0.08)  # 增大边距以确保上下都显示完整
+        ax.margins(0.1)  # 增大边距以确保上下都显示完整
         ax.axis("off")  # 隐藏坐标轴
 
         # 保存或显示图片
         if save_path:
             # 如果save_path是文件夹，自动生成文件名
-            if os.path.isdir(save_path) or (not save_path.endswith('.png') and not save_path.endswith('.jpg')):
+            if os.path.isdir(save_path) or (not save_path.endswith(".png") and not save_path.endswith(".jpg")):
                 filename = f"d2d_flow_graph_{mode}.png"
                 save_path = os.path.join(save_path, filename)
 
@@ -1420,7 +1420,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 保存或显示图片
         if save_path:
             # 如果save_path是文件夹，自动生成文件名
-            if os.path.isdir(save_path) or (not save_path.endswith('.png') and not save_path.endswith('.jpg')):
+            if os.path.isdir(save_path) or (not save_path.endswith(".png") and not save_path.endswith(".jpg")):
                 filename = f"ip_bandwidth_heatmap_{mode}.png"
                 save_path = os.path.join(save_path, filename)
 
@@ -1645,7 +1645,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                     dx, dy = dx / length, dy / length
 
                     # 计算垂直偏移
-                    perp_dx, perp_dy = -dy * 0.1, dx * 0.1
+                    perp_dx, perp_dy = dy * 0.1, -dx * 0.1
 
                     # 检查是否有反向边
                     has_reverse = G.has_edge(j, i)
@@ -1726,18 +1726,18 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
                             # 基于Die内部节点编号：i<j表示向右，标签放下方（Die内坐标系）
                             if i < j:
-                                offset_x_die, offset_y_die = 0, -offset_magnitude  # Die内下方
+                                offset_x_die, offset_y_die = 0, offset_magnitude  # Die内下方
                             else:
-                                offset_x_die, offset_y_die = 0, offset_magnitude  # Die内上方
+                                offset_x_die, offset_y_die = 0, -offset_magnitude  # Die内上方
                         else:
                             # Die内垂直link
                             offset_magnitude = 0.35 if is_90_or_270 else 0.70
 
                             # 基于Die内部节点编号：i<j表示向下，标签放右侧（Die内坐标系）
                             if i < j:
-                                offset_x_die, offset_y_die = offset_magnitude, 0  # Die内右侧
+                                offset_x_die, offset_y_die = -offset_magnitude, 0  # Die内右侧
                             else:
-                                offset_x_die, offset_y_die = -offset_magnitude, 0  # Die内左侧
+                                offset_x_die, offset_y_die = offset_magnitude, 0  # Die内左侧
 
                         # 将Die内部偏移旋转到屏幕坐标系
                         angle_rad = math.radians(die_rotation)
@@ -2686,7 +2686,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
             # 垂直方向(±90度)的文字也跟随箭头方向旋转
             # 绘制单个标签,文字方向跟随箭头角度
-            ax.text(label_x, label_y, label_text, ha="center", va="center", fontsize=6, fontweight="normal", color=color, rotation=angle_deg, rotation_mode="anchor")
+            ax.text(label_x, label_y, label_text, ha="center", va="center", fontsize=8, fontweight="normal", color=color, rotation=angle_deg, rotation_mode="anchor")
 
     def save_d2d_axi_channel_statistics(self, output_path, d2d_bandwidth, dies, config):
         """
@@ -2929,8 +2929,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
         canvas_height = total_height * 0.3
 
         # 限制画布尺寸范围
-        canvas_width = max(min(canvas_width, 20), 10)  # 10-20英寸
-        canvas_height = max(min(canvas_height, 16), 8)  # 8-16英寸
+        canvas_width = max(min(canvas_width, 20), 14)  # 10-20英寸
+        canvas_height = max(min(canvas_height, 16), 10)  # 8-16英寸
 
         figsize = (canvas_width, canvas_height)
 

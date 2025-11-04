@@ -751,7 +751,8 @@ class D2D_Model:
                 return False  # 读数据接收未完成
 
             # 写事务完成判断：检查write_complete响应接收
-            expected_write_complete = self._local_write_requests[die_id] + self._cross_die_write_requests[die_id]  # 该Die发起的所有写请求
+            # 注意：只有跨Die写请求才有write_complete响应，Die内写请求通过延迟释放tracker结束
+            expected_write_complete = self._cross_die_write_requests[die_id]  # 只统计跨Die写请求
             actual_write_complete = self._write_complete_received[die_id]
 
             if actual_write_complete < expected_write_complete:
@@ -764,7 +765,15 @@ class D2D_Model:
             # 检查是否有新的写请求待处理
             write_completed = not die_model.new_write_req
 
-            if not (trans_completed and write_completed):
+            # 检查D2D_Sys的AXI通道是否空闲
+            d2d_sys_idle = True
+            if hasattr(die_model, 'd2d_systems'):
+                for pos, d2d_sys in die_model.d2d_systems.items():
+                    if d2d_sys.send_flits:  # 如果AXI通道中有flits
+                        d2d_sys_idle = False
+                        break
+
+            if not (trans_completed and write_completed and d2d_sys_idle):
                 return False
 
         return True
@@ -932,8 +941,18 @@ class D2D_Model:
             local_write_data = getattr(self, "_local_write_flits_received", {}).get(die_id, 0)
             cross_write_data = getattr(self, "_cross_write_flits_received", {}).get(die_id, 0)
 
-            print(f"    Read - Requests: Local={local_read_reqs}, Cross={cross_read_reqs} | Data: Local={local_read_data}, Cross={cross_read_data}")
-            print(f"    Write - Requests: Local={local_write_reqs}, Cross={cross_write_reqs} | Data: Local={local_write_data}, Cross={cross_write_data}")
+            # 计算完成情况
+            burst_length = 4
+            local_read_completed = local_read_data // burst_length if burst_length > 0 else 0
+            cross_read_completed = cross_read_data // burst_length if burst_length > 0 else 0
+            local_write_completed = local_write_data // burst_length if burst_length > 0 else 0
+            cross_write_completed = getattr(self, "_write_complete_received", {}).get(die_id, 0)
+
+            # 读请求统计(显示完成数/总数)
+            print(f"    Read - Requests: Local={local_read_completed}/{local_read_reqs}, Cross={cross_read_completed}/{cross_read_reqs} | Data: Local={local_read_data}, Cross={cross_read_data}")
+
+            # 写请求统计(显示完成数/总数)
+            print(f"    Write - Requests: Local={local_write_completed}/{local_write_reqs}, Cross={cross_write_completed}/{cross_write_reqs} | Data: Local={local_write_data}, Cross={cross_write_data}")
 
     def generate_combined_flow_graph(self, mode="total", save_path=None):
         """
@@ -1066,7 +1085,7 @@ class D2D_Model:
         d2d_stats = self._collect_d2d_statistics()
 
         # 打印D2D专有统计信息
-        # self._print_d2d_statistics(d2d_stats)
+        self._print_d2d_statistics(d2d_stats)
 
         # 1. 跳过Die内部结果分析（D2D系统中Die内部没有数据流）
         die_results = {}
@@ -1201,8 +1220,8 @@ class D2D_Model:
             if should_plot_fifo:
                 from src.core.fifo_heatmap_visualizer import create_fifo_heatmap
 
-                # 计算总周期数
-                total_cycles = self.current_cycle // self.config.NETWORK_FREQUENCY
+                # 计算总周期数(使用物理周期数,因为depth_sum在每个物理周期累加)
+                total_cycles = self.current_cycle
 
                 # 确定保存路径（保存到带时间戳的D2D结果文件夹中）
                 # fifo_utilization_heatmap为真时就保存文件
@@ -1211,7 +1230,7 @@ class D2D_Model:
                 # 生成FIFO热力图
                 fifo_heatmap_path = create_fifo_heatmap(
                     dies=self.dies,
-                    config=self.config,
+                    config=self.dies[0].config,
                     total_cycles=total_cycles,
                     die_layout=getattr(self.config, "die_layout_positions", None),
                     die_rotations=getattr(self.config, "DIE_ROTATIONS", None),

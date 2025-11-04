@@ -216,15 +216,9 @@ class BaseModel:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
 
         # 智能设置各network的双侧升级：全局配置 OR (双侧下环 AND 在保序列表中)
-        self.req_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (
-            self.config.ORDERING_PRESERVATION_MODE == 2 and "REQ" in self.config.IN_ORDER_PACKET_CATEGORIES
-        )
-        self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (
-            self.config.ORDERING_PRESERVATION_MODE == 2 and "RSP" in self.config.IN_ORDER_PACKET_CATEGORIES
-        )
-        self.data_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (
-            self.config.ORDERING_PRESERVATION_MODE == 2 and "DATA" in self.config.IN_ORDER_PACKET_CATEGORIES
-        )
+        self.req_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE == 2 and "REQ" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE == 2 and "RSP" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        self.data_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE == 2 and "DATA" in self.config.IN_ORDER_PACKET_CATEGORIES)
 
         # Initialize arbiters based on configuration
         arbitration_config = getattr(self.config, "arbitration", {})
@@ -671,7 +665,16 @@ class BaseModel:
         for direction in self.IQ_directions:
             queue_pre = network.inject_queues_pre[direction]
             queue = network.inject_queues[direction]
-            if queue_pre[node_id] and len(queue[node_id]) < self.config.RB_OUT_FIFO_DEPTH:
+
+            # 根据方向选择对应的FIFO深度
+            if direction in ["TR", "TL"]:
+                fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_HORIZONTAL
+            elif direction in ["TU", "TD"]:
+                fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_VERTICAL
+            else:  # EQ
+                fifo_depth = self.config.IQ_OUT_FIFO_DEPTH_EQ
+
+            if queue_pre[node_id] and len(queue[node_id]) < fifo_depth:
                 flit = queue_pre[node_id]
                 flit.departure_inject_cycle = self.cycle
                 flit.flit_position = f"IQ_{direction}"
@@ -725,11 +728,7 @@ class BaseModel:
 
     def print_data_statistic(self):
         if self.verbose:
-            print(
-                f"Data statistic: Read: {self.read_req, self.read_flit}, "
-                f"Write: {self.write_req, self.write_flit}, "
-                f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}"
-            )
+            print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
         if self.verbose:
@@ -923,7 +922,6 @@ class BaseModel:
 
             request_matrix = []
             for slot_idx, flit in enumerate(station_flits):
-                self.error_log(station_flits[slot_idx], 2, 0)
                 row = []
                 for out_dir in output_dirs:
                     # 检查是否可以从这个slot转发到这个输出方向
@@ -1377,7 +1375,6 @@ class BaseModel:
         Returns:
             int | None: 下一跳节点ID，若不存在或无法确定则返回None。
         """
-        self.error_log(flit, 2, 0)
         path = getattr(flit, "path", None)
         if not path:
             return None
@@ -1758,9 +1755,7 @@ class BaseModel:
                     dest_node = get_original_destination_node(injected_flit)
                     src_type = get_original_source_type(injected_flit)
                     dest_type = get_original_destination_type(injected_flit)
-                    injected_flit.src_dest_order_id = Flit.get_next_order_id(
-                        src_node, src_type, dest_node, dest_type, injected_flit.flit_type.upper(), self.config.ORDERING_GRANULARITY
-                    )
+                    injected_flit.src_dest_order_id = Flit.get_next_order_id(src_node, src_type, dest_node, dest_type, injected_flit.flit_type.upper(), self.config.ORDERING_GRANULARITY)
 
                 # 4. 横向注入需要更新inject_num统计
                 if is_horizontal:
@@ -1856,8 +1851,8 @@ class BaseModel:
             try:
                 from src.core.fifo_heatmap_visualizer import create_fifo_heatmap
 
-                # 计算总周期数
-                total_cycles = self.cycle // self.config.NETWORK_FREQUENCY
+                # 计算总周期数(使用物理周期数,因为depth_sum在每个物理周期累加)
+                total_cycles = self.cycle
 
                 # 构造dies字典（单Die情况）
                 dies = {0: self}

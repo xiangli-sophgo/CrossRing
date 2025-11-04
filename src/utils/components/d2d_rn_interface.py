@@ -25,13 +25,7 @@ class D2D_RN_Interface(IPInterface):
         self.die_id = getattr(config, "DIE_ID", 0)  # 当前Die的ID
 
         # 每个AXI通道独立的接收FIFO队列 {channel_type: deque([(arrival_cycle, flit)])}
-        self.cross_die_receive_queues = {
-            "AR": deque(),
-            "R": deque(),
-            "AW": deque(),
-            "W": deque(),
-            "B": deque()
-        }
+        self.cross_die_receive_queues = {"AR": deque(), "R": deque(), "AW": deque(), "W": deque(), "B": deque()}
 
         self.target_die_interfaces = {}  # 将由D2D_Model设置 {die_id: d2d_sn_interface}
 
@@ -633,13 +627,6 @@ class D2D_RN_Interface(IPInterface):
             self.data_wait_cycles_v += getattr(flit, "wait_cycle_v", 0)
             self.data_cir_h_num += getattr(flit, "eject_attempts_h", 0)
             self.data_cir_v_num += getattr(flit, "eject_attempts_v", 0)
-
-            # 记录读数据接收到D2D模型
-            d2d_model = getattr(self.req_network, "d2d_model", None)
-            if d2d_model:
-                burst_length = getattr(flit, "burst_length", 4)
-                # 这是跨Die读数据接收
-                d2d_model.record_read_data_received(flit.packet_id, self.die_id, burst_length, is_cross_die=True)
 
             # 收集到data buffer中，但不更新网络的recv_flits_num
             if flit.packet_id not in self.rn_rdb:

@@ -460,7 +460,7 @@ class D2DTrafficGenerator:
             )
 
 
-def generate_simple_example():
+def generate_example():
     """
     生成简单的2Die流量示例
 
@@ -473,35 +473,261 @@ def generate_simple_example():
     traffic_configs = [
         {
             "src_die": 0,
-            "dst_die": 2,
+            "dst_die": 1,
             "src_ip_config": {
-                "gdma_0": [6],
-                "gdma_1": [6],
+                "gdma_0": [0, 4, 8],
+                # "gdma_1": [6],
             },
             "dst_ip_config": {
-                "ddr_0": [12],
+                "ddr_0": [3, 7],
             },
             "req_type": "R",
             "burst_length": 4,
             "bandwidth": 128.0,
         },
-        {
-            "src_die": 2,
-            "dst_die": 0,
-            "src_ip_config": {
-                "gdma_1": [7],
-            },
-            "dst_ip_config": {
-                "ddr_1": [13],
-            },
-            "req_type": "R",
-            "burst_length": 4,
-            "bandwidth": 64.0,
-        },
     ]
 
     generator.generate_traffic_file(
         filename="../../test_data/d2d_data_simple_example.txt",
+        traffic_configs=traffic_configs,
+        traffic_mode="cross_die",
+        end_time=1000,
+    )
+
+
+def generate_16_shared_traffic():
+    generator = D2DTrafficGenerator(die_topo="5x4")
+
+    req_type = "W"
+    traffic_configs = [
+        {
+            "src_die": 0,
+            "dst_die": 1,
+            "src_ip_config": {
+                "gdma_0": [12, 13],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": req_type,
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 1,
+            "dst_die": 2,
+            "src_ip_config": {
+                "gdma_0": [12, 13],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": req_type,
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 2,
+            "dst_die": 3,
+            "src_ip_config": {
+                "gdma_0": [12, 13],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": req_type,
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 3,
+            "dst_die": 0,
+            "src_ip_config": {
+                "gdma_0": [12, 13],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": req_type,
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 0,
+            "dst_die": 2,
+            "src_ip_config": {
+                "gdma_0": [4, 8],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": req_type,
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 1,
+            "dst_die": 3,
+            "src_ip_config": {
+                "gdma_0": [4, 8],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": req_type,
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 2,
+            "dst_die": 0,
+            "src_ip_config": {
+                "gdma_0": [4, 8],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": req_type,
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 3,
+            "dst_die": 1,
+            "src_ip_config": {
+                "gdma_0": [4, 8],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": req_type,
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 0,
+            "dst_die": 3,
+            "src_ip_config": {
+                "gdma_0": [1, 2],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": req_type,
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 1,
+            "dst_die": 0,
+            "src_ip_config": {
+                "gdma_0": [1, 2],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": req_type,
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 2,
+            "dst_die": 1,
+            "src_ip_config": {
+                "gdma_0": [1, 2],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": req_type,
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 3,
+            "dst_die": 2,
+            "src_ip_config": {
+                "gdma_0": [1, 2],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": req_type,
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 0,
+            "dst_die": 0,
+            "src_ip_config": {
+                "gdma_0": [1, 2, 4, 8, 12, 13],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": "W" if req_type == "R" else "R",
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 1,
+            "dst_die": 1,
+            "src_ip_config": {
+                "gdma_0": [1, 2, 4, 8, 12, 13],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": "W" if req_type == "R" else "R",
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 2,
+            "dst_die": 2,
+            "src_ip_config": {
+                "gdma_0": [1, 2, 4, 8, 12, 13],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": "W" if req_type == "R" else "R",
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+        {
+            "src_die": 3,
+            "dst_die": 3,
+            "src_ip_config": {
+                "gdma_0": [1, 2, 4, 8, 12, 13],
+            },
+            "dst_ip_config": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "req_type": "W" if req_type == "R" else "R",
+            "burst_length": 4,
+            "bandwidth": 76.8,
+        },
+    ]
+
+    generator.generate_traffic_file(
+        filename=f"../../test_data/d2d_16_share_D2D_{req_type}_1104.txt",
         traffic_configs=traffic_configs,
         traffic_mode="cross_die",
         end_time=1000,
@@ -573,17 +799,10 @@ def _generate_traffic_configs(die_configs: Dict, die_pairs: List[Tuple[int, int]
     return traffic_configs
 
 
-def generate_4die_stress_test():
+def generate_64_share_traffic():
     """
-    生成4Die压力测试场景
+    生成多Die数据流
 
-
-    Die配置：
-    - 每个Die为5行4列（20个节点）
-    - Die0: 0°旋转（基准）
-    - Die1: 顺时针90°旋转
-    - Die2: 180°旋转
-    - Die3: 顺时针270°旋转
     """
     generator = D2DTrafficGenerator(die_topo="5x4")
 
@@ -612,24 +831,24 @@ def generate_4die_stress_test():
     print("=" * 60)
 
     ring_pairs = [
-        # (0, 0),
-        # (1, 1),
-        # (2, 2),
-        # (3, 3),
-        # (0, 1),
-        # (1, 0),
+        (0, 0),
+        (1, 1),
+        (2, 2),
+        (3, 3),
+        (0, 1),
+        (1, 0),
         (0, 2),
         (2, 0),
-        # (0, 3),
-        # (3, 0),
-        # (1, 2),
-        # (2, 1),
-        # (1, 3),
-        # (3, 1),
-        # (2, 3),
-        # (3, 2),
+        (0, 3),
+        (3, 0),
+        (1, 2),
+        (2, 1),
+        (1, 3),
+        (3, 1),
+        (2, 3),
+        (3, 2),
     ]
-    req_type = "R"
+    req_type = "W"
     traffic_configs = _generate_traffic_configs(
         die_configs,
         ring_pairs,
@@ -640,20 +859,17 @@ def generate_4die_stress_test():
     )
 
     generator.generate_traffic_file(
-        filename=f"../../test_data/d2d_64_share_{req_type}_1030.txt",
+        filename=f"../../test_data/d2d_64_share_D2D_{req_type}_1104.txt",
         traffic_configs=traffic_configs,
         traffic_mode="cross_die",
-        end_time=1000,
+        end_time=4000,
     )
     print()
 
 
 if __name__ == "__main__":
     # 生成简单的2Die示例
-    # generate_simple_example()
+    generate_example()
 
-    # 生成4Die压力测试场景
-    print("=" * 60)
-    print("开始生成4Die压力测试场景...")
-    print("=" * 60)
-    generate_4die_stress_test()
+    # generate_64_share_traffic()
+    # generate_16_shared_traffic()

@@ -36,16 +36,16 @@ FLIT_SIZE: 128
 BURST: 4
 
 # D2D 延迟配置 (ns) - 会在配置加载时转换为cycles
-D2D_AR_LATENCY: 0   # 地址读通道延迟 (ns)
-D2D_R_LATENCY: 0    # 读数据通道延迟 (ns)
-D2D_AW_LATENCY: 0   # 地址写通道延迟 (ns)
-D2D_W_LATENCY: 0    # 写数据通道延迟 (ns)
-D2D_B_LATENCY: 0    # 写响应通道延迟 (ns)
+D2D_AR_LATENCY: 20   # 地址读通道延迟 (ns)
+D2D_R_LATENCY: 20    # 读数据通道延迟 (ns)
+D2D_AW_LATENCY: 20   # 地址写通道延迟 (ns)
+D2D_W_LATENCY: 20    # 写数据通道延迟 (ns)
+D2D_B_LATENCY: 20    # 写响应通道延迟 (ns)
 
 # D2D 带宽控制
-D2D_AXI_BANDWIDTH: 256  # AXI通道统一带宽限制 (GB/s)，所有通道使用此值但有独立令牌桶
-D2D_RN_BW_LIMIT: 256    # D2D RN 带宽限制 (GB/s)
-D2D_SN_BW_LIMIT: 256    # D2D SN 带宽限制 (GB/s)
+D2D_AXI_BANDWIDTH: 192  # AXI通道统一带宽限制 (GB/s)，所有通道使用此值但有独立令牌桶
+D2D_RN_BW_LIMIT: 192    # D2D RN 带宽限制 (GB/s)
+D2D_SN_BW_LIMIT: 192    # D2D SN 带宽限制 (GB/s)
 
 # D2D 资源管理配置
 # D2D_RN 配置 (类似GDMA)

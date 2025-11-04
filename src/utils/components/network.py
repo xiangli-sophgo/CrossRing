@@ -466,7 +466,7 @@ class Network:
         """
         if flit.source == flit.destination or len(flit.path) <= 1:
             # 本地注入到EQ
-            return len(self.inject_queues["EQ"]) < self.config.IQ_OUT_FIFO_DEPTH_EQ
+            return len(self.inject_queues["EQ"][current]) < self.config.IQ_OUT_FIFO_DEPTH_EQ
 
         # 纵向环移动（上下方向） - 本地注入到TU/TD
         if abs(current - next_node) == self.config.NUM_COL:
