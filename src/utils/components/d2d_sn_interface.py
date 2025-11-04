@@ -231,8 +231,8 @@ class D2D_SN_Interface(IPInterface):
         # 创建请求flit副本
         new_flit = create_d2d_flit_copy(flit, source=source, destination=destination, path=path, attr_preset="request")
 
-        # 记录经过的D2D_SN节点
-        new_flit.d2d_sn_node = self.ip_pos
+        # 保持已有的d2d_sn_node(在eject阶段已设置)，不要覆盖
+        # create_d2d_flit_copy会复制d2d_sn_node属性
 
         # 设置网络状态
         new_flit.path_index = 0
@@ -264,8 +264,11 @@ class D2D_SN_Interface(IPInterface):
         # 创建响应flit副本
         new_flit = create_d2d_flit_copy(flit, source=source, destination=destination, path=path, attr_preset="response")
 
-        # 记录经过的D2D_SN节点
-        new_flit.d2d_sn_node = self.ip_pos
+        # D2D节点追踪：
+        # - 如果是跨Die响应返回(已有d2d_sn_node)，保持原值
+        # - 如果是Die内响应(没有d2d_sn_node)，设置当前节点
+        if not hasattr(flit, "d2d_sn_node") or flit.d2d_sn_node is None:
+            new_flit.d2d_sn_node = self.ip_pos
 
         new_flit.path_index = 0
 
@@ -339,6 +342,18 @@ class D2D_SN_Interface(IPInterface):
                     and flit.d2d_origin_die is not None
                     and flit.d2d_target_die != flit.d2d_origin_die
                 ):
+                    # 记录跨Die请求/数据经过的D2D_SN节点
+                    if not hasattr(flit, "d2d_sn_node") or flit.d2d_sn_node is None:
+                        flit.d2d_sn_node = self.ip_pos
+
+                        # 同时设置对应的d2d_rn_node（从配置或d2d_sys获取）
+                        if not hasattr(flit, "d2d_rn_node") or flit.d2d_rn_node is None:
+                            # 从d2d_sys获取目标Die的D2D_RN节点位置
+                            target_die = flit.d2d_target_die
+                            if hasattr(self, "d2d_sys") and self.d2d_sys and target_die is not None:
+                                # d2d_sys.target_die_rn_pos 存储的是目标Die的D2D_RN物理位置
+                                flit.d2d_rn_node = self.d2d_sys.target_die_rn_pos
+
                     # 检查flit类型：数据flit vs 请求flit
                     if hasattr(flit, "flit_type") and flit.flit_type == "data":
                         # 检查是否是从AXI跨Die传输来的数据（已经在handle_received_cross_die_flit中处理过）
@@ -753,8 +768,8 @@ class D2D_SN_Interface(IPInterface):
         # 创建新的AXI写请求flit
         axi_write_req = create_d2d_flit_copy(write_req, source=self.ip_pos, destination=0, path=[0], attr_preset="request")
 
-        # 记录经过的D2D_SN节点
-        axi_write_req.d2d_sn_node = self.ip_pos
+        # 保持已有的d2d_sn_node(在eject阶段已设置)
+        # create_d2d_flit_copy会复制d2d_sn_node属性
 
         # 通过AW通道发送写请求（第三个参数传0，让系统自动判断channel）
         self.d2d_sys.enqueue_sn(axi_write_req, target_die_id, 0)
@@ -846,29 +861,3 @@ class D2D_SN_Interface(IPInterface):
             "cross_die_receive_queue_size": sum(len(q) for q in self.cross_die_receive_queues.values()),
         }
         return stats
-
-    def enqueue(self, flit: Flit, network_type: str, retry=False):
-        """重写enqueue方法，记录D2D节点注入NoC的时间戳"""
-        current_cycle = getattr(self, "current_cycle", 0)
-        flit.d2d_noc_inject_cycle = current_cycle
-        super().enqueue(flit, network_type, retry)
-
-    def h2l_l_to_eject_fifo(self, network_type):
-        """重写h2l_l_to_eject_fifo方法，记录D2D节点从NoC弹出的时间戳"""
-        net_info = self.networks[network_type]
-        if not net_info["h2l_fifo_l"]:
-            return None
-
-        current_cycle = getattr(self, "current_cycle", 0)
-        if network_type == "data" and self.rx_token_bucket:
-            self.rx_token_bucket.refill(current_cycle)
-            if not self.rx_token_bucket.consume():
-                return None
-
-        flit = net_info["h2l_fifo_l"].popleft()
-        flit.d2d_noc_eject_cycle = current_cycle
-
-        # 调用父类的处理逻辑（统计接收flit数量）
-        net_info["network"].recv_flits_num += 1
-
-        return flit

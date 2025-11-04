@@ -311,6 +311,8 @@ class D2D_Sys:
             "d2d_target_die",
             "d2d_target_node",
             "d2d_target_type",
+            "d2d_sn_node",
+            "d2d_rn_node",
             "req_attr",
             "packet_id",
             "flit_id",

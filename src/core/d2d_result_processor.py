@@ -39,8 +39,8 @@ class D2DRequestInfo:
     cmd_latency_ns: int
     data_latency_ns: int
     transaction_latency_ns: int
-    d2d_sn_node: int = None  # 经过的D2D_SN节点物理ID
-    d2d_rn_node: int = None  # 经过的D2D_RN节点物理ID
+    d2d_sn_node: int = None  # D2D_SN节点物理ID
+    d2d_rn_node: int = None  # D2D_RN节点物理ID
 
 
 @dataclass
@@ -213,9 +213,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
         self.d2d_requests.clear()
 
         for die_id, die_model in dies.items():
-            # 检查数据网络中的arrive_flits
+            # 检查数据网络中的arrive_flits（读数据返回）
             if hasattr(die_model, "data_network") and hasattr(die_model.data_network, "arrive_flits"):
                 self._collect_requests_from_network(die_model.data_network, die_id)
+
+            # 检查响应网络中的arrive_flits（写完成响应）
+            if hasattr(die_model, "rsp_network") and hasattr(die_model.rsp_network, "arrive_flits"):
+                self._collect_requests_from_network(die_model.rsp_network, die_id)
 
     def _collect_requests_from_network(self, network, die_id: int):
         """从单个网络中收集跨Die请求"""
@@ -224,9 +228,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 continue
 
             first_flit = flits[0]
+
             # 改进数据验证
-            if not hasattr(first_flit, "burst_length") or len(flits) != first_flit.burst_length:
-                continue
+            # 对于write_complete响应，只有单个flit，不需要检查burst_length
+            is_write_complete = hasattr(first_flit, "rsp_type") and first_flit.rsp_type == "write_complete"
+            if not is_write_complete:
+                if not hasattr(first_flit, "burst_length") or len(flits) != first_flit.burst_length:
+                    continue
 
             last_flit = flits[-1]
 
@@ -291,6 +299,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
             burst_length = getattr(first_flit, "burst_length", 1)
             data_bytes = burst_length * self.FLIT_SIZE_BYTES
 
+            d2d_sn_node = getattr(first_flit, "d2d_sn_node", None)
+            d2d_rn_node = getattr(first_flit, "d2d_rn_node", None)
+
             return D2DRequestInfo(
                 packet_id=packet_id,
                 source_die=getattr(first_flit, "d2d_origin_die", 0),
@@ -307,8 +318,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 cmd_latency_ns=cmd_latency_ns,
                 data_latency_ns=data_latency_ns,
                 transaction_latency_ns=transaction_latency_ns,
-                d2d_sn_node=getattr(first_flit, "d2d_sn_node", None),
-                d2d_rn_node=getattr(first_flit, "d2d_rn_node", None),
+                d2d_sn_node=d2d_sn_node,
+                d2d_rn_node=d2d_rn_node,
             )
         except (AttributeError, KeyError, ValueError) as e:
             return None
@@ -471,8 +482,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                                 # 只保存有带宽的数据（任一模式大于阈值）
                                 if read_bw > 0.001 or write_bw > 0.001 or total_bw > 0.001:
                                     # 计算节点ID
-                                    physical_row = matrix_row * 2  # 偶数行
-                                    node_id = physical_row * num_col + matrix_col
+                                    node_id = matrix_row * num_col + matrix_col
 
                                     all_rows.append([ip_instance, die_id, node_id, ip_type, f"{read_bw:.6f}", f"{write_bw:.6f}", f"{total_bw:.6f}"])  # IP实例名  # Die ID  # 节点ID  # IP类型
 
@@ -920,6 +930,16 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 target_type = self._normalize_d2d_ip_type(raw_target)
                 die_ip_instances[request.target_die].add(target_type)
 
+            # 收集D2D_SN（跨Die请求）
+            if request.source_die != request.target_die and request.d2d_sn_node is not None:
+                if request.source_die in dies:
+                    die_ip_instances[request.source_die].add("d2d_sn")
+
+            # 收集D2D_RN（跨Die请求）
+            if request.source_die != request.target_die and request.d2d_rn_node is not None:
+                if request.target_die in dies:
+                    die_ip_instances[request.target_die].add("d2d_rn")
+
         # 第二步：为每个Die动态创建IP带宽数据结构
         self.die_ip_bandwidth_data = {}
 
@@ -942,9 +962,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         # 基于D2D请求计算带宽
         self._calculate_bandwidth_from_d2d_requests(dies)
-
-        # 添加D2D节点的带宽统计
-        self._calculate_d2d_node_bandwidth(dies)
 
     def _calculate_bandwidth_from_d2d_requests(self, dies: Dict):
         """基于D2D请求计算各Die的IP带宽"""
@@ -988,6 +1005,66 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         # 第四步：处理target带宽
         for (die_id, node, ip_type), requests in target_groups.items():
+            row, col = self._get_physical_position(node, dies[die_id])
+
+            # 按req_type分组并计算带宽
+            read_reqs = [r for r in requests if r.req_type == "read"]
+            write_reqs = [r for r in requests if r.req_type == "write"]
+
+            if read_reqs:
+                _, weighted_bw = self._calculate_bandwidth_for_group(read_reqs)
+                self.die_ip_bandwidth_data[die_id]["read"][ip_type][row, col] += weighted_bw
+
+            if write_reqs:
+                _, weighted_bw = self._calculate_bandwidth_for_group(write_reqs)
+                self.die_ip_bandwidth_data[die_id]["write"][ip_type][row, col] += weighted_bw
+
+            if requests:
+                _, weighted_bw = self._calculate_bandwidth_for_group(requests)
+                self.die_ip_bandwidth_data[die_id]["total"][ip_type][row, col] += weighted_bw
+
+        # 第五步：处理D2D_SN节点带宽（所有跨Die请求都经过D2D_SN）
+        d2d_sn_groups = defaultdict(list)
+        for request in self.d2d_requests:
+            # 只处理跨Die请求，且d2d_sn_node不为None
+            if request.source_die != request.target_die and request.d2d_sn_node is not None:
+                # D2D_SN节点在源Die上
+                key = (request.source_die, request.d2d_sn_node, "d2d_sn")
+                d2d_sn_groups[key].append(request)
+
+        for (die_id, node, ip_type), requests in d2d_sn_groups.items():
+            if die_id not in dies:
+                continue
+            row, col = self._get_physical_position(node, dies[die_id])
+
+            # 按req_type分组并计算带宽
+            read_reqs = [r for r in requests if r.req_type == "read"]
+            write_reqs = [r for r in requests if r.req_type == "write"]
+
+            if read_reqs:
+                _, weighted_bw = self._calculate_bandwidth_for_group(read_reqs)
+                self.die_ip_bandwidth_data[die_id]["read"][ip_type][row, col] += weighted_bw
+
+            if write_reqs:
+                _, weighted_bw = self._calculate_bandwidth_for_group(write_reqs)
+                self.die_ip_bandwidth_data[die_id]["write"][ip_type][row, col] += weighted_bw
+
+            if requests:
+                _, weighted_bw = self._calculate_bandwidth_for_group(requests)
+                self.die_ip_bandwidth_data[die_id]["total"][ip_type][row, col] += weighted_bw
+
+        # 第六步：处理D2D_RN节点带宽（所有跨Die请求都经过D2D_RN）
+        d2d_rn_groups = defaultdict(list)
+        for request in self.d2d_requests:
+            # 只处理跨Die请求，且d2d_rn_node不为None
+            if request.source_die != request.target_die and request.d2d_rn_node is not None:
+                # D2D_RN节点在目标Die上
+                key = (request.target_die, request.d2d_rn_node, "d2d_rn")
+                d2d_rn_groups[key].append(request)
+
+        for (die_id, node, ip_type), requests in d2d_rn_groups.items():
+            if die_id not in dies:
+                continue
             row, col = self._get_physical_position(node, dies[die_id])
 
             # 按req_type分组并计算带宽
@@ -1103,9 +1180,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                         if mode in die_processor.ip_bandwidth_data:
                             mode_data = die_processor.ip_bandwidth_data[mode]
                             for ip_type, data_matrix in mode_data.items():
-                                # 过滤D2D节点，不在flow图统计中
-                                if ip_type.startswith("d2d_sn") or ip_type.startswith("d2d_rn"):
-                                    continue
                                 nonzero_bw = data_matrix[data_matrix > 0.001]
                                 if len(nonzero_bw) > 0:
                                     all_ip_bandwidths.extend(nonzero_bw.tolist())
@@ -1115,9 +1189,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             if mode in self.ip_bandwidth_data:
                 mode_data = self.ip_bandwidth_data[mode]
                 for ip_type, data_matrix in mode_data.items():
-                    # 过滤D2D节点，不在flow图统计中
-                    if ip_type.startswith("d2d_sn") or ip_type.startswith("d2d_rn"):
-                        continue
                     nonzero_bw = data_matrix[data_matrix > 0.001]
                     if len(nonzero_bw) > 0:
                         all_ip_bandwidths.extend(nonzero_bw.tolist())
@@ -1168,9 +1239,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                     if mode in die_processor.ip_bandwidth_data:
                         mode_data = die_processor.ip_bandwidth_data[mode]
                         for ip_type, data_matrix in mode_data.items():
-                            # 过滤D2D节点，不在图例中显示
-                            if ip_type.startswith("d2d_sn") or ip_type.startswith("d2d_rn"):
-                                continue
                             # 检查该IP类型在任意位置是否有带宽 > 0.001
                             if (data_matrix > 0.001).any():
                                 used_ip_types.add(ip_type.upper())
@@ -1180,9 +1248,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             if mode in self.ip_bandwidth_data:
                 mode_data = self.ip_bandwidth_data[mode]
                 for ip_type, data_matrix in mode_data.items():
-                    # 过滤D2D节点，不在图例中显示
-                    if ip_type.startswith("d2d_sn") or ip_type.startswith("d2d_rn"):
-                        continue
                     # 检查该IP类型在任意位置是否有带宽 > 0.001
                     if (data_matrix > 0.001).any():
                         used_ip_types.add(ip_type.upper())
@@ -1287,9 +1352,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 die_data = self.die_ip_bandwidth_data[die_id]
                 if mode in die_data:
                     for ip_type, data_matrix in die_data[mode].items():
-                        # 过滤D2D节点，不在热力图中显示
-                        if ip_type.startswith("d2d_sn") or ip_type.startswith("d2d_rn"):
-                            continue
                         # 收集所有非零带宽值
                         nonzero_bw = data_matrix[data_matrix > 0.001]
                         if len(nonzero_bw) > 0:
@@ -1505,7 +1567,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 elif mode == "ITag_ratio":
                     links = {link: stats["ITag_ratio"] for link, stats in utilization_stats.items()}
                 elif mode == "total":
-                    time_cycles = getattr(self, "simulation_end_cycle", 1000) / config.NETWORK_FREQUENCY
+                    time_cycles = getattr(self, "simulation_end_cycle", 1000) // config.NETWORK_FREQUENCY
                     links = {}
                     for link, stats in utilization_stats.items():
                         total_flit = stats.get("total_flit", 0)
@@ -1979,9 +2041,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             if mode in self.die_ip_bandwidth_data[die_id]:
                 mode_data = self.die_ip_bandwidth_data[die_id][mode]
                 for ip_type, data_matrix in mode_data.items():
-                    # 过滤D2D节点，不在flow图中显示
-                    if ip_type.startswith("d2d_sn") or ip_type.startswith("d2d_rn"):
-                        continue
                     matrix_row = physical_row
                     if matrix_row < data_matrix.shape[0] and physical_col < data_matrix.shape[1]:
                         bandwidth = data_matrix[matrix_row, physical_col]
@@ -2155,9 +2214,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             die_data = self.die_ip_bandwidth_data[die_id]
             if mode in die_data:
                 for ip_type, data_matrix in die_data[mode].items():
-                    # 过滤D2D节点，不在热力图中显示
-                    if ip_type.startswith("d2d_sn") or ip_type.startswith("d2d_rn"):
-                        continue
                     if physical_row < data_matrix.shape[0] and physical_col < data_matrix.shape[1]:
                         bandwidth = data_matrix[physical_row, physical_col]
                         if bandwidth > 0.001:  # 阈值过滤
@@ -3190,75 +3246,3 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
         # 转换为元组格式
         return {die_id: tuple(offsets) for die_id, offsets in die_offsets.items()}
-
-    def _calculate_d2d_node_bandwidth(self, dies: Dict):
-        """
-        计算D2D_SN和D2D_RN节点的NoC端口带宽
-        基于d2d_requests中记录的准确D2D节点ID（d2d_sn_node和d2d_rn_node）
-        """
-        from collections import defaultdict
-
-        # 按D2D节点分组请求 - key: (die_id, node_id, ip_type)
-        d2d_node_groups = defaultdict(lambda: {"read": [], "write": []})
-
-        # 调试：检查请求中的D2D节点ID
-        debug_d2d_nodes = {"sn": set(), "rn": set()}
-        for request in self.d2d_requests:
-            if request.d2d_sn_node is not None:
-                debug_d2d_nodes["sn"].add((request.source_die, request.d2d_sn_node))
-            if request.d2d_rn_node is not None:
-                debug_d2d_nodes["rn"].add((request.target_die, request.d2d_rn_node))
-
-        if debug_d2d_nodes["sn"] or debug_d2d_nodes["rn"]:
-            print(f"\n=== D2D节点带宽计算调试 ===")
-            print(f"D2D_SN节点: {sorted(debug_d2d_nodes['sn'])}")
-            print(f"D2D_RN节点: {sorted(debug_d2d_nodes['rn'])}")
-            print(f"总请求数: {len(self.d2d_requests)}")
-
-        for request in self.d2d_requests:
-            # 使用记录的准确D2D节点ID
-            if request.d2d_sn_node is not None and request.source_die in dies:
-                die_model = dies[request.source_die]
-                # 查找对应的D2D_SN类型
-                for (ip_type, ip_pos), ip_interface in die_model.ip_modules.items():
-                    if ip_type.startswith("d2d_sn") and ip_pos == request.d2d_sn_node:
-                        key = (request.source_die, ip_pos, ip_type)
-                        d2d_node_groups[key][request.req_type].append(request)
-                        break
-
-            if request.d2d_rn_node is not None and request.target_die in dies:
-                die_model = dies[request.target_die]
-                # 查找对应的D2D_RN类型
-                for (ip_type, ip_pos), ip_interface in die_model.ip_modules.items():
-                    if ip_type.startswith("d2d_rn") and ip_pos == request.d2d_rn_node:
-                        key = (request.target_die, ip_pos, ip_type)
-                        d2d_node_groups[key][request.req_type].append(request)
-                        break
-
-        # 计算每个D2D节点的带宽
-        for (die_id, node_id, ip_type), req_groups in d2d_node_groups.items():
-            die_model = dies[die_id]
-            row, col = self._get_physical_position(node_id, die_model)
-
-            # 确保该D2D节点在数据结构中存在
-            for mode in ["read", "write", "total"]:
-                if ip_type not in self.die_ip_bandwidth_data[die_id][mode]:
-                    rows = die_model.config.NUM_ROW
-                    cols = die_model.config.NUM_COL
-                    self.die_ip_bandwidth_data[die_id][mode][ip_type] = np.zeros((rows, cols))
-
-            # 计算读带宽
-            if req_groups["read"]:
-                _, weighted_bw = self._calculate_bandwidth_for_group(req_groups["read"])
-                self.die_ip_bandwidth_data[die_id]["read"][ip_type][row, col] += weighted_bw
-
-            # 计算写带宽
-            if req_groups["write"]:
-                _, weighted_bw = self._calculate_bandwidth_for_group(req_groups["write"])
-                self.die_ip_bandwidth_data[die_id]["write"][ip_type][row, col] += weighted_bw
-
-            # 计算总带宽
-            all_requests = req_groups["read"] + req_groups["write"]
-            if all_requests:
-                _, weighted_bw = self._calculate_bandwidth_for_group(all_requests)
-                self.die_ip_bandwidth_data[die_id]["total"][ip_type][row, col] += weighted_bw

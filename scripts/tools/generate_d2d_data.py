@@ -869,7 +869,7 @@ def generate_64_share_traffic():
 
 if __name__ == "__main__":
     # 生成简单的2Die示例
-    generate_example()
+    # generate_example()
 
-    # generate_64_share_traffic()
+    generate_64_share_traffic()
     # generate_16_shared_traffic()

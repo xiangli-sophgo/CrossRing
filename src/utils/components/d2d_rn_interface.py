@@ -508,7 +508,10 @@ class D2D_RN_Interface(IPInterface):
         if packet_id not in self.cross_die_write_requests:
             return
 
-        write_req = self.cross_die_write_requests[packet_id]
+        # 从tracker获取请求（已被替换为包含d2d_rn_node的local_write_req）
+        tracker_req = next((r for r in self.rn_tracker["write"] if r.packet_id == packet_id), None)
+        if not tracker_req:
+            return
 
         # 创建write_complete响应
         from .flit import _flit_pool
@@ -520,18 +523,18 @@ class D2D_RN_Interface(IPInterface):
         write_complete_rsp.packet_id = packet_id
         write_complete_rsp.rsp_type = "write_complete"
         write_complete_rsp.req_type = "write"  # 设置req_type为write，让D2D_SN能正确识别
-        write_complete_rsp.source_type = write_req.d2d_target_type  # 使用目标类型（DDR）作为响应源
-        write_complete_rsp.destination_type = write_req.d2d_origin_type
+        write_complete_rsp.source_type = tracker_req.d2d_target_type  # 使用目标类型（DDR）作为响应源
+        write_complete_rsp.destination_type = tracker_req.d2d_origin_type
 
-        # 复制D2D属性（仅复制origin/target属性）
+        # 复制D2D属性（从tracker_req复制，包含完整的D2D属性包括d2d_rn_node）
         copy_flit_attributes(
-            write_req,
+            tracker_req,
             write_complete_rsp,
             D2D_ORIGIN_TARGET_ATTRS,
         )
 
         # 通过AXI_B通道发送回源Die，明确指定B通道
-        source_die_id = write_req.d2d_origin_die
+        source_die_id = tracker_req.d2d_origin_die
         if self.d2d_sys and source_die_id is not None:
             self.d2d_sys.enqueue_rn(write_complete_rsp, source_die_id, self.d2d_b_latency, channel="B")
 
@@ -539,7 +542,7 @@ class D2D_RN_Interface(IPInterface):
         self.cross_die_write_requests.pop(packet_id)
         self.cross_die_write_data_cache.pop(packet_id, None)
         self.rn_tracker_count["write"]["count"] += 1
-        self.rn_wdb_count["count"] += write_req.burst_length
+        self.rn_wdb_count["count"] += tracker_req.burst_length
 
         # 从tracker list中移除并更新pointer（通过packet_id查找，因为tracker可能已被替换为local_write_req）
         tracker_list = self.rn_tracker["write"]
@@ -704,11 +707,14 @@ class D2D_RN_Interface(IPInterface):
             cross_die_flit.traffic_id = getattr(first_flit, "traffic_id", 0)
             cross_die_flit.is_last_flit = i == len(data_flits) - 1
             cross_die_flit.source_type = self.ip_type
-            cross_die_flit.destination_type = first_flit.d2d_origin_type
             # D2D传输不设置original_*属性
 
-            # 继承D2D属性
-            copy_flit_attributes(first_flit, cross_die_flit, ["d2d_origin_die", "d2d_origin_node", "d2d_origin_type", "d2d_target_die", "d2d_target_node", "d2d_target_type"])
+            # 继承D2D属性（从tracker_req复制，因为DDR返回的数据flit不包含这些属性）
+            # tracker_req是D2D_RN保存的请求flit，包含完整的D2D跨Die属性
+            copy_flit_attributes(tracker_req, cross_die_flit, ["d2d_origin_die", "d2d_origin_node", "d2d_origin_type", "d2d_target_die", "d2d_target_node", "d2d_target_type", "d2d_sn_node"])
+
+            # 设置destination_type（必须在copy_flit_attributes之后，使用已复制的d2d_origin_type）
+            cross_die_flit.destination_type = cross_die_flit.d2d_origin_type
 
             # 记录经过的D2D_RN节点
             cross_die_flit.d2d_rn_node = self.ip_pos
@@ -745,29 +751,3 @@ class D2D_RN_Interface(IPInterface):
             "d2d_rn_rdb_count": self.rn_rdb_count,
         }
         return stats
-
-    def enqueue(self, flit: Flit, network_type: str, retry=False):
-        """重写enqueue方法，记录D2D节点注入NoC的时间戳"""
-        current_cycle = getattr(self, "current_cycle", 0)
-        flit.d2d_noc_inject_cycle = current_cycle
-        super().enqueue(flit, network_type, retry)
-
-    def h2l_l_to_eject_fifo(self, network_type):
-        """重写h2l_l_to_eject_fifo方法，记录D2D节点从NoC弹出的时间戳"""
-        net_info = self.networks[network_type]
-        if not net_info["h2l_fifo_l"]:
-            return None
-
-        current_cycle = getattr(self, "current_cycle", 0)
-        if network_type == "data" and self.rx_token_bucket:
-            self.rx_token_bucket.refill(current_cycle)
-            if not self.rx_token_bucket.consume():
-                return None
-
-        flit = net_info["h2l_fifo_l"].popleft()
-        flit.d2d_noc_eject_cycle = current_cycle
-
-        # 调用父类的处理逻辑（统计接收flit数量）
-        net_info["network"].recv_flits_num += 1
-
-        return flit
