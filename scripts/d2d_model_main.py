@@ -37,6 +37,8 @@ def main():
             # "d2d_16_share_D2D_W_1104.txt"
             # "d2d_64_share_D2D_R_1104.txt",
             # "d2d_64_share_D2D_W_1104.txt",
+            # "d2d_16_share_W_1104.txt"
+            # "d2d_16_share_R_1104.txt"
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
@@ -59,7 +61,7 @@ def main():
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_time=1000,
+        max_time=5000,
         print_interval=200,
         verbose=1,
     )

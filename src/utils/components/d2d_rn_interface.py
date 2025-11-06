@@ -583,17 +583,19 @@ class D2D_RN_Interface(IPInterface):
 
     def inject_step(self, cycle):
         """
-        重写inject_step方法，支持2GHz inject操作
-        在inject阶段处理跨Die接收，并以2GHz频率注入到网络
+        重写inject_step方法
+        在inject阶段处理跨Die接收，inject_to_l2h_pre以1GHz频率运行
         """
         self.current_cycle = cycle
+        cycle_mod = cycle % self.config.NETWORK_FREQUENCY
 
         # 首先处理跨Die接收队列
         self.process_cross_die_receives()
 
-        # 2GHz inject操作（每个cycle执行，不受cycle_mod限制）
-        for net_type in ["req", "rsp", "data"]:
-            self.inject_to_l2h_pre(net_type)
+        # 1GHz inject操作（每个网络周期执行一次）
+        if cycle_mod == 0:
+            for net_type in ["req", "rsp", "data"]:
+                self.inject_to_l2h_pre(net_type)
 
         # 2GHz操作：l2h_pre到IQ_channel_buffer
         for net_type in ["req", "rsp", "data"]:
@@ -602,7 +604,7 @@ class D2D_RN_Interface(IPInterface):
     def eject_step(self, cycle):
         """
         重写eject_step方法，处理从本地网络接收到的跨Die读数据并发送回原始请求者
-        D2D_RN的h2l_l FIFO运行在2GHz频率(每半个周期处理一次)，而不是默认的1GHz
+        D2D_RN的h2l_l FIFO运行在1GHz频率
         """
         self.current_cycle = cycle
         cycle_mod = cycle % self.config.NETWORK_FREQUENCY
@@ -614,10 +616,12 @@ class D2D_RN_Interface(IPInterface):
             self.EQ_channel_buffer_to_h2l_pre(net_type)
             self.h2l_h_to_h2l_l_pre(net_type)
 
-            # 关键修改:h2l_l_to_eject_fifo在2GHz域执行(移除cycle_mod==0限制)
-            flit = self.h2l_l_to_eject_fifo(net_type)
-            if flit:
-                ejected_flits.append(flit)
+        # 1GHz 操作（每个网络周期执行一次）
+        if cycle_mod == 0:
+            for net_type in ["req", "rsp", "data"]:
+                flit = self.h2l_l_to_eject_fifo(net_type)
+                if flit:
+                    ejected_flits.append(flit)
 
         return ejected_flits
 

@@ -311,6 +311,37 @@ def generate_sim_16_share_d2d_traffic():
     print(f"流量数据生成成功！文件：{OUTPUT_FILE}")
 
 
+def generate_example_traffic():
+    np.random.seed(919)
+    random.seed(919)
+
+    # 配置参数
+    END_TIME = 6000
+    burst = 4
+    req_type = "R"
+    OUTPUT_FILE = f"../../test_data/data_{req_type}_1104.txt"
+
+    # 定义多个配置
+    configs = [
+        {
+            "src_map": {
+                "gdma_0": [0],
+            },
+            "dst_map": {
+                "ddr_0": [3],
+            },
+            "speed": 46.08,
+            "burst": burst,
+            "req_type": req_type,
+        },
+    ]
+
+    # 生成数据
+    generate_traffic_from_configs(configs, END_TIME, OUTPUT_FILE)
+    print(f"流量数据生成成功！文件：{OUTPUT_FILE}")
+
+
 # 示例使用
 if __name__ == "__main__":
-    generate_sim_16_share_d2d_traffic()
+    # generate_sim_16_share_d2d_traffic()
+    generate_example_traffic()

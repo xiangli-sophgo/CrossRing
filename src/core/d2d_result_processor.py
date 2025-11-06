@@ -661,10 +661,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
         for req in self.d2d_requests:
             for category, field_name in latency_fields:
                 latency_ns = getattr(req, field_name, float("inf"))
-                latency_cycle = latency_ns * self.network_frequency if latency_ns < float("inf") else float("inf")
 
-                if math.isfinite(latency_cycle):
-                    self._update_latency_stat(stats[category], req.req_type, latency_cycle)
+                if math.isfinite(latency_ns):
+                    self._update_latency_stat(stats[category], req.req_type, latency_ns)
 
         return stats
 

@@ -473,17 +473,17 @@ def generate_example():
     traffic_configs = [
         {
             "src_die": 0,
-            "dst_die": 1,
+            "dst_die": 0,
             "src_ip_config": {
-                "gdma_0": [0, 4, 8],
+                "gdma_0": [0],
                 # "gdma_1": [6],
             },
             "dst_ip_config": {
-                "ddr_0": [3, 7],
+                "ddr_0": [3],
             },
             "req_type": "R",
             "burst_length": 4,
-            "bandwidth": 128.0,
+            "bandwidth": 46.08,
         },
     ]
 
@@ -495,10 +495,10 @@ def generate_example():
     )
 
 
-def generate_16_shared_traffic():
+def generate_16_share_d2d_traffic():
     generator = D2DTrafficGenerator(die_topo="5x4")
 
-    req_type = "W"
+    req_type = "R"
     traffic_configs = [
         {
             "src_die": 0,
@@ -730,7 +730,7 @@ def generate_16_shared_traffic():
         filename=f"../../test_data/d2d_16_share_D2D_{req_type}_1104.txt",
         traffic_configs=traffic_configs,
         traffic_mode="cross_die",
-        end_time=1000,
+        end_time=6000,
     )
 
 
@@ -799,7 +799,7 @@ def _generate_traffic_configs(die_configs: Dict, die_pairs: List[Tuple[int, int]
     return traffic_configs
 
 
-def generate_64_share_traffic():
+def generate_64_share_d2d_traffic():
     """
     生成多Die数据流
 
@@ -848,7 +848,7 @@ def generate_64_share_traffic():
         (2, 3),
         (3, 2),
     ]
-    req_type = "W"
+    req_type = "R"
     traffic_configs = _generate_traffic_configs(
         die_configs,
         ring_pairs,
@@ -862,14 +862,83 @@ def generate_64_share_traffic():
         filename=f"../../test_data/d2d_64_share_D2D_{req_type}_1104.txt",
         traffic_configs=traffic_configs,
         traffic_mode="cross_die",
-        end_time=4000,
+        end_time=6000,
+    )
+    print()
+
+
+def generate_16_share_traffic():
+    """
+    生成多Die数据流
+
+    """
+    generator = D2DTrafficGenerator(die_topo="5x4")
+
+    # Die0基础配置
+    die0_gdma_base = {
+        "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
+        "gdma_1": [3, 15, 19],
+        # "gdma_0": [0, 4],
+        # "gdma_1": [0, 4],
+    }
+    die0_ddr_base = {
+        "ddr_0": [3, 7, 11, 15],
+        "ddr_1": [3, 7, 11, 15],
+        # "ddr_0": [3, 7, 11, 15],
+        # "ddr_0": [7],
+    }
+
+    # 计算所有Die配置
+    # rotations = {0: 0, 1: 180}
+    rotations = {0: 0, 1: 0, 2: 0, 3: 0}
+    die_configs = _compute_die_configs(die0_gdma_base, die0_ddr_base, rotations)
+
+    # 生成流量
+    print("=" * 60)
+    print("生成场景：环形单向流量 (Die0→Die1→Die2→Die3→Die0)")
+    print("=" * 60)
+
+    ring_pairs = [
+        (0, 0),
+        (1, 1),
+        (2, 2),
+        (3, 3),
+        # (0, 1),
+        # (1, 0),
+        # (0, 2),
+        # (2, 0),
+        # (0, 3),
+        # (3, 0),
+        # (1, 2),
+        # (2, 1),
+        # (1, 3),
+        # (3, 1),
+        # (2, 3),
+        # (3, 2),
+    ]
+    req_type = "W"
+    traffic_configs = _generate_traffic_configs(
+        die_configs,
+        ring_pairs,
+        req_type=req_type,
+        burst_length=4,
+        bandwidth=46.08,
+        # bandwidth=128,
+    )
+
+    generator.generate_traffic_file(
+        filename=f"../../test_data/d2d_16_share_{req_type}_1104.txt",
+        traffic_configs=traffic_configs,
+        traffic_mode="cross_die",
+        end_time=6000,
     )
     print()
 
 
 if __name__ == "__main__":
     # 生成简单的2Die示例
-    # generate_example()
+    generate_example()
 
-    generate_64_share_traffic()
-    # generate_16_shared_traffic()
+    # generate_64_share_traffic()
+    # generate_16_share_d2d_traffic()
+    # generate_16_share_traffic()
