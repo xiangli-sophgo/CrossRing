@@ -183,6 +183,11 @@ class Network:
             "RB": {"TR": {}, "TL": {}, "TU": {}, "TD": {}, "EQ": {}},
             "EQ": {"TU": {}, "TD": {}, "CH_buffer": {}},
         }
+        self.fifo_flit_count = {
+            "IQ": {"CH_buffer": {}, "TR": {}, "TL": {}, "TU": {}, "TD": {}, "EQ": {}},
+            "RB": {"TR": {}, "TL": {}, "TU": {}, "TD": {}, "EQ": {}},
+            "EQ": {"TU": {}, "TD": {}, "CH_buffer": {}},
+        }
 
         # Slot ID全局计数器（用于为每个seat分配唯一ID）
         self.global_slot_id_counter = 0
@@ -1329,6 +1334,26 @@ class Network:
                     self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type] = 0
                 self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos][ip_type] += depth
                 self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type] = max(self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type], depth)
+
+    def increment_fifo_flit_count(self, category: str, fifo_type: str, pos: int, ip_type: str = None):
+        """更新FIFO的flit计数
+
+        Args:
+            category: FIFO类别 ("IQ"/"RB"/"EQ")
+            fifo_type: FIFO类型 ("CH_buffer"/"TR"/"TL"/"TU"/"TD"/"EQ")
+            pos: 节点位置
+            ip_type: IP类型（仅CH_buffer需要）
+        """
+        if fifo_type == "CH_buffer":
+            if pos not in self.fifo_flit_count[category][fifo_type]:
+                self.fifo_flit_count[category][fifo_type][pos] = {}
+            if ip_type not in self.fifo_flit_count[category][fifo_type][pos]:
+                self.fifo_flit_count[category][fifo_type][pos][ip_type] = 0
+            self.fifo_flit_count[category][fifo_type][pos][ip_type] += 1
+        else:
+            if pos not in self.fifo_flit_count[category][fifo_type]:
+                self.fifo_flit_count[category][fifo_type][pos] = 0
+            self.fifo_flit_count[category][fifo_type][pos] += 1
 
     def get_links_utilization_stats(self):
         """

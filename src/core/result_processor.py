@@ -3481,12 +3481,20 @@ class BandwidthAnalyzer:
                                     max_depth = network.fifo_max_depth[category][fifo_type][pos][ip_type]
                                     capacity = capacities[category][fifo_type]
 
+                                    # 获取flit_count
+                                    flit_count = 0
+                                    if pos in network.fifo_flit_count[category][fifo_type]:
+                                        if ip_type in network.fifo_flit_count[category][fifo_type][pos]:
+                                            flit_count = network.fifo_flit_count[category][fifo_type][pos][ip_type]
+
                                     key = f"{pos}_{ip_type}"
                                     results[net_name][category][fifo_type][key] = {
                                         "avg_depth": avg_depth,
                                         "max_depth": max_depth,
                                         "avg_utilization": avg_depth / capacity * 100,
                                         "max_utilization": max_depth / capacity * 100,
+                                        "flit_count": flit_count,
+                                        "avg_throughput": flit_count / total_cycles if total_cycles > 0 else 0,
                                     }
                     else:
                         # 其他FIFO类型
@@ -3495,11 +3503,18 @@ class BandwidthAnalyzer:
                             max_depth = network.fifo_max_depth[category][fifo_type][pos]
                             capacity = capacities[category][fifo_type]
 
+                            # 获取flit_count
+                            flit_count = 0
+                            if pos in network.fifo_flit_count[category][fifo_type]:
+                                flit_count = network.fifo_flit_count[category][fifo_type][pos]
+
                             results[net_name][category][fifo_type][pos] = {
                                 "avg_depth": avg_depth,
                                 "max_depth": max_depth,
                                 "avg_utilization": avg_depth / capacity * 100,
                                 "max_utilization": max_depth / capacity * 100,
+                                "flit_count": flit_count,
+                                "avg_throughput": flit_count / total_cycles if total_cycles > 0 else 0,
                             }
 
         return results
@@ -3519,7 +3534,7 @@ class BandwidthAnalyzer:
 
         # 准备CSV数据
         rows = []
-        headers = ["网络", "类别", "FIFO类型", "位置", "平均使用率(%)", "最大使用率(%)", "平均深度", "最大深度"]
+        headers = ["网络", "类别", "FIFO类型", "位置", "平均使用率(%)", "最大使用率(%)", "平均深度", "最大深度", "累计flit数", "平均吞吐量(flit/cycle)"]
 
         # 只处理data通道的数据
         if "data" in fifo_stats:
@@ -3536,6 +3551,8 @@ class BandwidthAnalyzer:
                             "最大使用率(%)": f"{stats['max_utilization']:.2f}",
                             "平均深度": f"{stats['avg_depth']:.2f}",
                             "最大深度": stats["max_depth"],
+                            "累计flit数": stats.get("flit_count", 0),
+                            "平均吞吐量(flit/cycle)": f"{stats.get('avg_throughput', 0):.4f}",
                         }
                         rows.append(row)
 

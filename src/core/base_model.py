@@ -670,6 +670,7 @@ class BaseModel:
                 flit = queue_pre[node_id]
                 flit.flit_position = "IQ_CH"
                 queue[node_id].append(flit)
+                network.increment_fifo_flit_count("IQ", "CH_buffer", node_id, ip_type)
                 queue_pre[node_id] = None
 
         # IQ_pre → IQ_OUT
@@ -690,6 +691,7 @@ class BaseModel:
                 flit.departure_inject_cycle = self.cycle
                 flit.flit_position = f"IQ_{direction}"
                 queue[node_id].append(flit)
+                network.increment_fifo_flit_count("IQ", direction, node_id)
                 queue_pre[node_id] = None
 
         # RB_IN_PRE → RB_IN
@@ -700,6 +702,7 @@ class BaseModel:
                 flit = queue_pre[node_id]
                 flit.flit_position = f"RB_{direction}"
                 queue[node_id].append(flit)
+                network.increment_fifo_flit_count("RB", direction, node_id)
                 queue_pre[node_id] = None
 
         # RB_OUT_PRE → RB_OUT
@@ -711,6 +714,7 @@ class BaseModel:
                 flit.is_arrive = fifo_pos == "EQ"
                 flit.flit_position = f"RB_{fifo_pos}"
                 queue[node_id].append(flit)
+                network.increment_fifo_flit_count("RB", fifo_pos, node_id)
                 queue_pre[node_id] = None
 
         # EQ_IN_PRE → EQ_IN
@@ -722,6 +726,7 @@ class BaseModel:
                 flit.is_arrive = fifo_pos == "EQ"
                 flit.flit_position = f"EQ_{fifo_pos}"
                 queue[node_id].append(flit)
+                network.increment_fifo_flit_count("EQ", fifo_pos, node_id)
                 queue_pre[node_id] = None
 
         # EQ_channel_buffer_pre → EQ_channel_buffer
@@ -732,6 +737,7 @@ class BaseModel:
                 flit = queue_pre[node_id]
                 flit.flit_position = "EQ_CH"
                 queue[node_id].append(flit)
+                network.increment_fifo_flit_count("EQ", "CH_buffer", node_id, ip_type)
                 queue_pre[node_id] = None
 
         # 更新FIFO统计

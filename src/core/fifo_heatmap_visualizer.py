@@ -62,9 +62,13 @@ class FIFOUtilizationCollector:
                 avg_util = (depth_sum / total_cycles / capacity * 100) if capacity > 0 else 0
                 peak_util = (max_depth / capacity * 100) if capacity > 0 else 0
 
+                # 获取flit_count
+                flit_count = network.fifo_flit_count["IQ"][direction].get(node_pos, 0)
+
                 die_data["IQ"][node_pos][direction] = {
                     "avg": avg_util,
                     "peak": peak_util,
+                    "flit_count": flit_count,
                     "capacity": capacity,
                     "avg_depth": depth_sum / total_cycles if total_cycles > 0 else 0,
                     "peak_depth": max_depth,
@@ -82,9 +86,15 @@ class FIFOUtilizationCollector:
                 avg_util = (depth_sum / total_cycles / capacity * 100) if capacity > 0 else 0
                 peak_util = (max_depth / capacity * 100) if capacity > 0 else 0
 
+                # 获取flit_count for CH_buffer
+                flit_count = 0
+                if node_pos in network.fifo_flit_count["IQ"].get("CH_buffer", {}):
+                    flit_count = network.fifo_flit_count["IQ"]["CH_buffer"][node_pos].get(ip_type, 0)
+
                 die_data["IQ_CH"][node_pos][ip_type] = {
                     "avg": avg_util,
                     "peak": peak_util,
+                    "flit_count": flit_count,
                     "capacity": capacity,
                     "avg_depth": depth_sum / total_cycles if total_cycles > 0 else 0,
                     "peak_depth": max_depth,
@@ -102,9 +112,13 @@ class FIFOUtilizationCollector:
                 avg_util = (depth_sum / total_cycles / capacity * 100) if capacity > 0 else 0
                 peak_util = (max_depth / capacity * 100) if capacity > 0 else 0
 
+                # 获取flit_count
+                flit_count = network.fifo_flit_count["RB"][direction].get(node_pos, 0)
+
                 die_data["RB"][node_pos][direction] = {
                     "avg": avg_util,
                     "peak": peak_util,
+                    "flit_count": flit_count,
                     "capacity": capacity,
                     "avg_depth": depth_sum / total_cycles if total_cycles > 0 else 0,
                     "peak_depth": max_depth,
@@ -122,9 +136,13 @@ class FIFOUtilizationCollector:
                 avg_util = (depth_sum / total_cycles / capacity * 100) if capacity > 0 else 0
                 peak_util = (max_depth / capacity * 100) if capacity > 0 else 0
 
+                # 获取flit_count
+                flit_count = network.fifo_flit_count["EQ"][direction].get(node_pos, 0)
+
                 die_data["EQ"][node_pos][direction] = {
                     "avg": avg_util,
                     "peak": peak_util,
+                    "flit_count": flit_count,
                     "capacity": capacity,
                     "avg_depth": depth_sum / total_cycles if total_cycles > 0 else 0,
                     "peak_depth": max_depth,
@@ -142,9 +160,15 @@ class FIFOUtilizationCollector:
                 avg_util = (depth_sum / total_cycles / capacity * 100) if capacity > 0 else 0
                 peak_util = (max_depth / capacity * 100) if capacity > 0 else 0
 
+                # 获取flit_count for EQ CH_buffer
+                flit_count = 0
+                if node_pos in network.fifo_flit_count["EQ"].get("CH_buffer", {}):
+                    flit_count = network.fifo_flit_count["EQ"]["CH_buffer"][node_pos].get(ip_type, 0)
+
                 die_data["EQ_CH"][node_pos][ip_type] = {
                     "avg": avg_util,
                     "peak": peak_util,
+                    "flit_count": flit_count,
                     "capacity": capacity,
                     "avg_depth": depth_sum / total_cycles if total_cycles > 0 else 0,
                     "peak_depth": max_depth,
@@ -365,12 +389,12 @@ class FIFOHeatmapVisualizer:
         # 为每个FIFO类型和统计模式创建热力图trace
         traces_data = self._create_heatmap_traces(fifo_options, dies, die_layout, die_rotations)
 
-        # 将所有traces添加到左侧子图（初始时只显示第一个选项的峰值模式）
+        # 将所有traces添加到左侧子图（初始时只显示第一个选项的平均模式）
         default_option = fifo_options[0]
-        default_mode = "peak"
+        default_mode = "avg"
 
         for option in fifo_options:
-            for mode in ["avg", "peak"]:
+            for mode in ["avg", "peak", "flit_count"]:
                 trace = traces_data[(option, mode)]
                 # 只有默认选项的默认模式可见
                 trace.visible = option == default_option and mode == default_mode
@@ -606,10 +630,30 @@ class FIFOHeatmapVisualizer:
 
         traces_data = {}
 
+        # 预扫描：计算所有FIFO的flit_count全局最大值（用于统一颜色范围）
+        global_max_flit_count = 0
+        for option in fifo_options:
+            option_name, fifo_category, fifo_type, network_type = option
+            for die_id in sorted(self.fifo_data.keys()):
+                networks_data = self.fifo_data[die_id]
+                die_data = networks_data.get(network_type, {})
+                category_data = die_data.get(fifo_category, {})
+
+                for node_data in category_data.values():
+                    if isinstance(node_data, dict):
+                        fifo_info = node_data.get(fifo_type)
+                        if fifo_info and isinstance(fifo_info, dict):
+                            flit_count = fifo_info.get("flit_count", 0)
+                            global_max_flit_count = max(global_max_flit_count, flit_count)
+
+        # 确保至少为1，避免除零
+        if global_max_flit_count == 0:
+            global_max_flit_count = 1
+
         for option in fifo_options:
             option_name, fifo_category, fifo_type, network_type = option
 
-            for mode in ["avg", "peak"]:
+            for mode in ["avg", "peak", "flit_count"]:
                 # 收集所有Die的所有节点数据
                 all_x = []
                 all_y = []
@@ -647,15 +691,23 @@ class FIFOHeatmapVisualizer:
                         fifo_info = node_data.get(fifo_type)
 
                         if fifo_info is not None:
-                            util_value = fifo_info[mode]
                             capacity = fifo_info["capacity"]
                             avg_depth = fifo_info["avg_depth"]
                             peak_depth = fifo_info["peak_depth"]
+                            flit_count = fifo_info.get("flit_count", 0)
+
+                            # 根据模式选择显示的值
+                            if mode == "flit_count":
+                                display_value = flit_count
+                                text_label = f"{int(flit_count)}"  # 确保显示为整数
+                            else:
+                                display_value = fifo_info[mode]
+                                text_label = f"{display_value:.1f}%"
 
                             all_x.append(x)
                             all_y.append(y)
-                            all_colors.append(util_value)
-                            all_text_labels.append(f"{util_value:.1f}%")
+                            all_colors.append(display_value)
+                            all_text_labels.append(text_label)
 
                             network_display = {"req": "Request", "rsp": "Response", "data": "Data"}
                             net_label = network_display.get(network_type, network_type)
@@ -665,9 +717,26 @@ class FIFOHeatmapVisualizer:
                                 f"FIFO: {option_name}<br>"
                                 f"平均: {fifo_info['avg']:.1f}% ({avg_depth:.2f}/{capacity})<br>"
                                 f"峰值: {fifo_info['peak']:.1f}% ({peak_depth}/{capacity})<br>"
+                                f"累计: {flit_count} flits<br>"
                                 f"容量: {capacity}"
                             )
                             all_hover_texts.append(hover_text)
+
+                # 根据模式配置colorscale和colorbar
+                if mode == "flit_count":
+                    # flit_count模式：使用全局最大值和统一配色方案
+                    colorscale = "RdYlGn_r"
+                    cmin = 0
+                    cmax = global_max_flit_count
+                    colorbar_title = "累计Flit数"
+                    colorbar_config = dict(title=colorbar_title, thickness=18, x=-0.15, tickformat="d")  # 整数格式，不显示小数点
+                else:
+                    # 使用率模式：0-100%
+                    colorscale = "RdYlGn_r"
+                    cmin = 0
+                    cmax = 100
+                    colorbar_title = "使用率 (%)"
+                    colorbar_config = dict(title=colorbar_title, thickness=18, tickmode="array", x=-0.15)
 
                 # 创建单个Scatter trace（包含所有Die的所有节点）
                 trace = go.Scatter(
@@ -678,14 +747,14 @@ class FIFOHeatmapVisualizer:
                         size=size,  # ← 增大节点尺寸
                         symbol="square",
                         color=all_colors,
-                        colorscale="RdYlGn_r",
-                        cmin=0,
-                        cmax=100,
-                        colorbar=dict(title="使用率 (%)", thickness=18, tickmode="array", x=-0.15),
+                        colorscale=colorscale,
+                        cmin=cmin,
+                        cmax=cmax,
+                        colorbar=colorbar_config,
                         line=dict(width=1, color="black"),
                     ),
                     text=all_text_labels,
-                    textfont=dict(size=14, color="black"),  # 增大字体
+                    textfont=dict(size=14, color="black"),
                     textposition="middle center",
                     hovertext=all_hover_texts,
                     hoverinfo="text",
@@ -732,10 +801,15 @@ class FIFOHeatmapVisualizer:
     def _add_mode_buttons(self, fig: go.Figure, fifo_options: List[Tuple[str, str, str, str]], traces_data: Dict):
         """添加平均/峰值切换按钮和网络类型切换按钮"""
 
-        # 创建平均/峰值按钮
+        # 创建平均/峰值/Flit计数按钮
         mode_buttons = []
-        for target_mode in ["avg", "peak"]:
-            mode_label = "平均使用率" if target_mode == "avg" else "峰值使用率"
+        for target_mode in ["avg", "peak", "flit_count"]:
+            if target_mode == "avg":
+                mode_label = "平均使用率"
+            elif target_mode == "peak":
+                mode_label = "峰值使用率"
+            else:  # flit_count
+                mode_label = "Flit计数"
             button = dict(label=mode_label, method="skip")
             mode_buttons.append(button)
 
@@ -957,8 +1031,8 @@ class FIFOHeatmapVisualizer:
             fifo_map[key] = idx
 
         # 计算trace索引
-        # 左侧热力图: len(fifo_options) * 2 (avg+peak) 个traces（每个FIFO选项+模式1个trace包含所有Die）
-        num_heatmap_traces = len(fifo_options) * 2
+        # 左侧热力图: len(fifo_options) * 3 (avg+peak+flit_count) 个traces（每个FIFO选项+模式1个trace包含所有Die）
+        num_heatmap_traces = len(fifo_options) * 3
 
         # 右侧架构图的traces从 num_heatmap_traces 开始
 
@@ -989,7 +1063,7 @@ class FIFOHeatmapVisualizer:
 
     // 当前选中的状态
     let currentFifoIndex = 0;  // 默认第一个FIFO
-    let currentMode = 'peak';  // 默认峰值模式
+    let currentMode = 'avg';  // 默认平均模式
     let currentNetworkType = 'data';  // 默认data网络
     let currentCategory = null;  // 当前FIFO类别
     let currentFifoType = null;  // 当前FIFO类型
@@ -1065,7 +1139,7 @@ class FIFOHeatmapVisualizer:
 
                 // 计算哪些traces应该可见（每个FIFO选项+模式组合1个trace）
                 for (let i = 0; i < numFifoOptions; i++) {{
-                    for (let mode of ['avg', 'peak']) {{
+                    for (let mode of ['avg', 'peak', 'flit_count']) {{
                         const shouldShow = (i === currentFifoIndex && mode === currentMode);
                         visibility.push(shouldShow);
                     }}
@@ -1119,29 +1193,30 @@ class FIFOHeatmapVisualizer:
                 const allButtons = plotDiv.querySelectorAll('.updatemenu-button');
                 console.log('找到按钮数量:', allButtons.length);
 
-                if (allButtons.length < 5) {{
+                if (allButtons.length < 6) {{
                     console.warn('按钮未完全渲染，重试...');
                     setTimeout(setupButtonListeners, 200);
                     return;
                 }}
 
-                // 第一组：平均/峰值按钮（前2个）
-                const modeButtons = Array.from(allButtons).slice(0, 2);
+                // 第一组：平均/峰值/Flit计数按钮（前3个）
+                const modeButtons = Array.from(allButtons).slice(0, 3);
                 // 第二组：网络类型按钮（后3个）
-                const networkButtons = Array.from(allButtons).slice(2, 5);
+                const networkButtons = Array.from(allButtons).slice(3, 6);
                 console.log('模式按钮数量:', modeButtons.length, '网络按钮数量:', networkButtons.length);
 
-                // 监听平均/峰值按钮点击
+                // 监听平均/峰值/Flit计数按钮点击
                 modeButtons.forEach((btn, idx) => {{
                     btn.addEventListener('click', function(e) {{
-                        console.log('点击模式按钮:', idx === 0 ? 'avg' : 'peak');
+                        const modeNames = ['avg', 'peak', 'flit_count'];
+                        console.log('点击模式按钮:', modeNames[idx]);
                         setTimeout(() => {{
                             // 移除同组按钮的active类
                             modeButtons.forEach(b => b.classList.remove('active'));
                             // 添加到当前按钮
                             this.classList.add('active');
 
-                            currentMode = (idx === 0) ? 'avg' : 'peak';
+                            currentMode = modeNames[idx];
                             updateHeatmapVisibility();
                         }}, 10);
                     }});
@@ -1168,7 +1243,7 @@ class FIFOHeatmapVisualizer:
 
                 // 初始化按钮高亮状态
                 if (modeButtons.length > 0) {{
-                    modeButtons[1].classList.add('active');  // 峰值
+                    modeButtons[0].classList.add('active');  // 平均
                 }}
                 if (networkButtons.length > 0) {{
                     networkButtons[2].classList.add('active');  // Data

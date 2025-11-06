@@ -1219,7 +1219,14 @@ class D2D_Model:
                 if heatmap_path:
                     saved_files.append({"type": f"IP带宽热力图({heatmap_mode})", "path": heatmap_path})
 
-            # 步骤5: 生成FIFO使用率热力图（如果启用）
+            # 步骤5: 生成FIFO使用率CSV文件（汇总所有Die的数据）
+            should_export_fifo_csv = self._result_analysis_config.get("export_fifo_usage_csv", True)
+            if should_export_fifo_csv:
+                fifo_csv_path = os.path.join(d2d_result_path, "fifo_usage_statistics.csv")
+                self._generate_d2d_fifo_usage_csv(fifo_csv_path)
+                saved_files.append({"type": "FIFO使用率统计", "path": fifo_csv_path})
+
+            # 步骤6: 生成FIFO使用率热力图（如果启用）
             should_plot_fifo = self._result_analysis_config.get("fifo_utilization_heatmap") or getattr(self, "fifo_utilization_heatmap", False)
             if should_plot_fifo:
                 from src.core.fifo_heatmap_visualizer import create_fifo_heatmap
@@ -1252,6 +1259,56 @@ class D2D_Model:
             traceback.print_exc()
 
         return saved_files
+
+    def _generate_d2d_fifo_usage_csv(self, output_path: str):
+        """生成D2D系统的FIFO使用率CSV文件（包含所有Die的数据和Die ID列）"""
+        import csv
+
+        # 准备CSV数据
+        rows = []
+        headers = ["Die ID", "网络", "类别", "FIFO类型", "位置", "平均使用率(%)", "最大使用率(%)", "平均深度", "最大深度", "累计flit数", "平均吞吐量(flit/cycle)"]
+
+        # 遍历每个Die并收集FIFO统计
+        for die_id, die_model in self.dies.items():
+            # 直接使用die_model的result_processor
+            if not hasattr(die_model, "result_processor") or not die_model.result_processor:
+                print(f"警告: Die {die_id} 没有result_processor，跳过FIFO统计")
+                continue
+
+            result_processor = die_model.result_processor
+
+            # 获取该Die的FIFO统计
+            fifo_stats = result_processor.process_fifo_usage_statistics(die_model)
+
+            # 只处理data网络的数据
+            if "data" in fifo_stats:
+                net_data = fifo_stats["data"]
+                for category, category_data in net_data.items():
+                    for fifo_type, fifo_data in category_data.items():
+                        for pos, stats in fifo_data.items():
+                            row = {
+                                "Die ID": die_id,
+                                "网络": "data",
+                                "类别": category,
+                                "FIFO类型": fifo_type,
+                                "位置": pos,
+                                "平均使用率(%)": f"{stats['avg_utilization']:.2f}",
+                                "最大使用率(%)": f"{stats['max_utilization']:.2f}",
+                                "平均深度": f"{stats['avg_depth']:.2f}",
+                                "最大深度": stats["max_depth"],
+                                "累计flit数": stats.get("flit_count", 0),
+                                "平均吞吐量(flit/cycle)": f"{stats.get('avg_throughput', 0):.4f}",
+                            }
+                            rows.append(row)
+
+        # 写入CSV文件（使用UTF-8 with BOM编码，防止Excel打开乱码）
+        with open(output_path, "w", newline="", encoding="utf-8-sig") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=headers)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        if self.kwargs.get("verbose", 1):
+            print(f"FIFO使用率统计CSV已保存: {output_path}")
 
     def _collect_d2d_statistics(self):
         """收集D2D专有统计信息"""
