@@ -151,11 +151,12 @@ class BandwidthAnalyzer:
     def _calculate_latency_stats(self):
         """计算并返回延迟统计数据字典，过滤掉无穷大"""
         import math
+        import numpy as np
 
         stats = {
-            "cmd": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
-            "data": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
-            "trans": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
+            "cmd": {"read": {"sum": 0, "max": 0, "count": 0, "values": []}, "write": {"sum": 0, "max": 0, "count": 0, "values": []}, "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}},
+            "data": {"read": {"sum": 0, "max": 0, "count": 0, "values": []}, "write": {"sum": 0, "max": 0, "count": 0, "values": []}, "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}},
+            "trans": {"read": {"sum": 0, "max": 0, "count": 0, "values": []}, "write": {"sum": 0, "max": 0, "count": 0, "values": []}, "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}},
         }
         for r in self.requests:
             # CMD
@@ -164,30 +165,50 @@ class BandwidthAnalyzer:
                 group["sum"] += r.cmd_latency
                 group["count"] += 1
                 group["max"] = max(group["max"], r.cmd_latency)
+                group["values"].append(r.cmd_latency)
                 mixed = stats["cmd"]["mixed"]
                 mixed["sum"] += r.cmd_latency
                 mixed["count"] += 1
                 mixed["max"] = max(mixed["max"], r.cmd_latency)
+                mixed["values"].append(r.cmd_latency)
             # Data
             if math.isfinite(r.data_latency):
                 group = stats["data"][r.req_type]
                 group["sum"] += r.data_latency
                 group["count"] += 1
                 group["max"] = max(group["max"], r.data_latency)
+                group["values"].append(r.data_latency)
                 mixed = stats["data"]["mixed"]
                 mixed["sum"] += r.data_latency
                 mixed["count"] += 1
                 mixed["max"] = max(mixed["max"], r.data_latency)
+                mixed["values"].append(r.data_latency)
             # Transaction
             if math.isfinite(r.transaction_latency):
                 group = stats["trans"][r.req_type]
                 group["sum"] += r.transaction_latency
                 group["count"] += 1
                 group["max"] = max(group["max"], r.transaction_latency)
+                group["values"].append(r.transaction_latency)
                 mixed = stats["trans"]["mixed"]
                 mixed["sum"] += r.transaction_latency
                 mixed["count"] += 1
                 mixed["max"] = max(mixed["max"], r.transaction_latency)
+                mixed["values"].append(r.transaction_latency)
+
+        # 计算百分位数
+        for category in ["cmd", "data", "trans"]:
+            for req_type in ["read", "write", "mixed"]:
+                values = stats[category][req_type]["values"]
+                if len(values) > 0:
+                    stats[category][req_type]["p95"] = np.percentile(values, 95)
+                    stats[category][req_type]["p99"] = np.percentile(values, 99)
+                else:
+                    stats[category][req_type]["p95"] = 0.0
+                    stats[category][req_type]["p99"] = 0.0
+                # 删除values列表以节省内存
+                del stats[category][req_type]["values"]
+
         return stats
 
     def __init__(

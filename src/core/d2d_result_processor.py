@@ -72,7 +72,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
     }
 
     # 统计数据结构模板
-    _LATENCY_STAT_TEMPLATE = {"sum": 0, "max": 0, "count": 0}
+    _LATENCY_STAT_TEMPLATE = {"sum": 0, "max": 0, "count": 0, "values": []}
     _CIRCLING_STAT_TEMPLATE = {"circling_flits": 0, "total_data_flits": 0, "circling_ratio": 0.0}
 
     def __init__(self, config, min_gap_threshold: int = 50):
@@ -109,11 +109,13 @@ class D2DResultProcessor(BandwidthAnalyzer):
         group["sum"] += latency_cycle
         group["count"] += 1
         group["max"] = max(group["max"], latency_cycle)
+        group["values"].append(latency_cycle)
 
         mixed = stat_dict["mixed"]
         mixed["sum"] += latency_cycle
         mixed["count"] += 1
         mixed["max"] = max(mixed["max"], latency_cycle)
+        mixed["values"].append(latency_cycle)
 
     @staticmethod
     def get_rotated_node_mapping(rows: int = 5, cols: int = 4, rotation: int = 0) -> Dict[int, int]:
@@ -653,6 +655,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
     def _calculate_d2d_latency_stats(self):
         """计算D2D请求的延迟统计数据（cmd/data/transaction）"""
+        import numpy as np
+
         stats = self._create_latency_stats()
 
         # 定义延迟字段映射
@@ -664,6 +668,19 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
                 if math.isfinite(latency_ns):
                     self._update_latency_stat(stats[category], req.req_type, latency_ns)
+
+        # 计算百分位数
+        for category in ["cmd", "data", "trans"]:
+            for req_type in ["read", "write", "mixed"]:
+                values = stats[category][req_type]["values"]
+                if len(values) > 0:
+                    stats[category][req_type]["p95"] = np.percentile(values, 95)
+                    stats[category][req_type]["p99"] = np.percentile(values, 99)
+                else:
+                    stats[category][req_type]["p95"] = 0.0
+                    stats[category][req_type]["p99"] = 0.0
+                # 删除values列表以节省内存
+                del stats[category][req_type]["values"]
 
         return stats
 

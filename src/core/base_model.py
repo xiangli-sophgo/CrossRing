@@ -1829,18 +1829,30 @@ class BaseModel:
         # CMD 延迟
         self.cmd_read_avg_latency_stat = (latency_stats["cmd"]["read"]["sum"] / latency_stats["cmd"]["read"]["count"]) if latency_stats["cmd"]["read"]["count"] else 0.0
         self.cmd_read_max_latency_stat = latency_stats["cmd"]["read"]["max"]
+        self.cmd_read_p95_latency_stat = latency_stats["cmd"]["read"]["p95"]
+        self.cmd_read_p99_latency_stat = latency_stats["cmd"]["read"]["p99"]
         self.cmd_write_avg_latency_stat = (latency_stats["cmd"]["write"]["sum"] / latency_stats["cmd"]["write"]["count"]) if latency_stats["cmd"]["write"]["count"] else 0.0
         self.cmd_write_max_latency_stat = latency_stats["cmd"]["write"]["max"]
+        self.cmd_write_p95_latency_stat = latency_stats["cmd"]["write"]["p95"]
+        self.cmd_write_p99_latency_stat = latency_stats["cmd"]["write"]["p99"]
         # Data 延迟
         self.data_read_avg_latency_stat = (latency_stats["data"]["read"]["sum"] / latency_stats["data"]["read"]["count"]) if latency_stats["data"]["read"]["count"] else 0.0
         self.data_read_max_latency_stat = latency_stats["data"]["read"]["max"]
+        self.data_read_p95_latency_stat = latency_stats["data"]["read"]["p95"]
+        self.data_read_p99_latency_stat = latency_stats["data"]["read"]["p99"]
         self.data_write_avg_latency_stat = (latency_stats["data"]["write"]["sum"] / latency_stats["data"]["write"]["count"]) if latency_stats["data"]["write"]["count"] else 0.0
         self.data_write_max_latency_stat = latency_stats["data"]["write"]["max"]
+        self.data_write_p95_latency_stat = latency_stats["data"]["write"]["p95"]
+        self.data_write_p99_latency_stat = latency_stats["data"]["write"]["p99"]
         # Transaction 延迟
         self.trans_read_avg_latency_stat = (latency_stats["trans"]["read"]["sum"] / latency_stats["trans"]["read"]["count"]) if latency_stats["trans"]["read"]["count"] else 0.0
         self.trans_read_max_latency_stat = latency_stats["trans"]["read"]["max"]
+        self.trans_read_p95_latency_stat = latency_stats["trans"]["read"]["p95"]
+        self.trans_read_p99_latency_stat = latency_stats["trans"]["read"]["p99"]
         self.trans_write_avg_latency_stat = (latency_stats["trans"]["write"]["sum"] / latency_stats["trans"]["write"]["count"]) if latency_stats["trans"]["write"]["count"] else 0.0
         self.trans_write_max_latency_stat = latency_stats["trans"]["write"]["max"]
+        self.trans_write_p95_latency_stat = latency_stats["trans"]["write"]["p95"]
+        self.trans_write_p99_latency_stat = latency_stats["trans"]["write"]["p99"]
 
         # Mixed 带宽统计
         mixed_metrics = results["network_overall"]["mixed"]
@@ -1856,12 +1868,18 @@ class BaseModel:
         # CMD 混合
         self.cmd_mixed_avg_latency_stat = (latency_stats["cmd"]["mixed"]["sum"] / latency_stats["cmd"]["mixed"]["count"]) if latency_stats["cmd"]["mixed"]["count"] else 0.0
         self.cmd_mixed_max_latency_stat = latency_stats["cmd"]["mixed"]["max"]
+        self.cmd_mixed_p95_latency_stat = latency_stats["cmd"]["mixed"]["p95"]
+        self.cmd_mixed_p99_latency_stat = latency_stats["cmd"]["mixed"]["p99"]
         # Data 混合
         self.data_mixed_avg_latency_stat = (latency_stats["data"]["mixed"]["sum"] / latency_stats["data"]["mixed"]["count"]) if latency_stats["data"]["mixed"]["count"] else 0.0
         self.data_mixed_max_latency_stat = latency_stats["data"]["mixed"]["max"]
+        self.data_mixed_p95_latency_stat = latency_stats["data"]["mixed"]["p95"]
+        self.data_mixed_p99_latency_stat = latency_stats["data"]["mixed"]["p99"]
         # Trans 混合
         self.trans_mixed_avg_latency_stat = (latency_stats["trans"]["mixed"]["sum"] / latency_stats["trans"]["mixed"]["count"]) if latency_stats["trans"]["mixed"]["count"] else 0.0
         self.trans_mixed_max_latency_stat = latency_stats["trans"]["mixed"]["max"]
+        self.trans_mixed_p95_latency_stat = latency_stats["trans"]["mixed"]["p95"]
+        self.trans_mixed_p99_latency_stat = latency_stats["trans"]["mixed"]["p99"]
 
         # FIFO使用率热力图生成
         if getattr(self, "fifo_utilization_heatmap", False):

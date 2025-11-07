@@ -1,6 +1,8 @@
 import os
 from typing import List, Dict, Tuple, Optional, Iterator
 from collections import defaultdict, deque
+from math import ceil
+from src.utils.components.flit import TokenBucket
 
 
 class TrafficFileReader:
@@ -247,11 +249,12 @@ class SerialChain:
         """检查是否还有待处理的请求"""
         return len(self.pending_requests) > 0
 
-    def get_ready_requests(self, current_cycle: int) -> List[Tuple]:
+    def get_ready_requests(self, current_cycle: int, traffic_scheduler=None) -> List[Tuple]:
         """获取所有准备就绪的请求（批量处理）
 
         Args:
             current_cycle: 当前网络周期数
+            traffic_scheduler: TrafficScheduler实例，用于带宽检查
 
         Returns:
             准备就绪的请求列表，每个请求的时间是网络周期数
@@ -261,10 +264,39 @@ class SerialChain:
         # 检查队列头部的所有准备就绪请求
         while self.pending_requests:
             next_req = self.pending_requests[0]
-            if next_req[0] <= current_cycle:  # 网络周期数比较：请求时间 <= 当前周期
-                ready_requests.append(self.pending_requests.popleft())
-            else:
+
+            # 时间检查
+            if next_req[0] > current_cycle:
                 break  # 遇到未到时间的请求，停止
+
+            # 带宽检查（如果启用）
+            if traffic_scheduler and traffic_scheduler.bw_limit_enabled:
+                src_node = next_req[1]
+                src_type = next_req[2]
+                burst_length = next_req[6]
+                ip_key = (src_node, src_type)
+
+                # 检查是否需要限制此IP
+                if ip_key in traffic_scheduler.ip_token_buckets:
+                    token_bucket = traffic_scheduler.ip_token_buckets[ip_key]
+                    token_bucket.refill(current_cycle)
+
+                    # 尝试消费tokens（基于flit数量）
+                    if not token_bucket.consume(burst_length):
+                        # Token不足，计算需要等待的周期数
+                        deficit = burst_length - token_bucket.tokens
+                        wait_cycles = ceil(deficit / token_bucket.rate)
+
+                        # 更新请求的时间戳
+                        new_timestamp = current_cycle + wait_cycles
+                        updated_req = (new_timestamp,) + next_req[1:]
+
+                        # 替换队列中的请求
+                        self.pending_requests[0] = updated_req
+                        break  # 本周期无法注入，等待下次
+
+            # 时间已到且token充足，准备就绪
+            ready_requests.append(self.pending_requests.popleft())
 
         return ready_requests
 
@@ -301,6 +333,10 @@ class TrafficScheduler:
         self.ring_config = None
         self.use_ring_mapping = False
 
+        # IP级别带宽限制
+        self.ip_token_buckets: Dict[Tuple[int, str], TokenBucket] = {}  # {(node_id, ip_type): TokenBucket}
+        self.bw_limit_enabled = False
+
     def setup_parallel_chains(self, chains_config: List[List[str]]):
         """设置并行的串行链"""
         self.parallel_chains.clear()
@@ -321,6 +357,52 @@ class TrafficScheduler:
     def setup_single_chain(self, traffic_files: List[str]):
         """设置单条串行链（向后兼容）"""
         self.setup_parallel_chains([traffic_files])
+
+    def setup_ip_bandwidth_limits(self, target_ips: List[str], bw_limit: float):
+        """设置IP级别的带宽限制
+
+        Args:
+            target_ips: 目标IP类型列表，例如 ["gdma", "ddr", "sdma"]
+            bw_limit: 带宽限制值 (GB/s)
+        """
+        self.ip_token_buckets.clear()
+        self.bw_limit_enabled = True
+
+        # 扫描所有traffic文件，收集涉及的IP实例
+        ip_instances = set()  # {(node_id, ip_type)}
+
+        for chain in self.parallel_chains:
+            for traffic_file in chain.traffic_files:
+                abs_path = os.path.join(self.traffic_file_path, traffic_file)
+                with open(abs_path, "r") as f:
+                    for line in f:
+                        parts = line.strip().split(",")
+                        if len(parts) < 7:
+                            continue
+
+                        src_node = int(parts[1])
+                        src_type = parts[2]
+
+                        # 检查源IP是否在目标列表中（忽略大小写）
+                        for target_ip in target_ips:
+                            if src_type.lower().startswith(target_ip.lower()):
+                                ip_instances.add((src_node, src_type))
+
+        # 为每个IP实例创建TokenBucket
+        # rate: 基于flit数量计算，每个flit消耗1个token
+        # IP侧工作在1GHz，网络侧工作在NETWORK_FREQUENCY(2GHz)
+        # TrafficScheduler使用网络周期计数，所以需要转换到网络频率
+        #
+        # bw_limit (GB/s) = 带宽限制
+        # FLIT_SIZE (bytes) = 每个flit的字节数
+        # 每秒flit数 = bw_limit * 10^9 / FLIT_SIZE
+        # 每IP周期(1GHz)的flit数 = bw_limit / FLIT_SIZE
+        # 每网络周期(NETWORK_FREQUENCY)的flit数 = (bw_limit / FLIT_SIZE) / NETWORK_FREQUENCY
+        token_rate = bw_limit / self.config.FLIT_SIZE / self.config.NETWORK_FREQUENCY
+        bucket_size = token_rate * 100  # 允许100周期的burst
+
+        for ip_key in ip_instances:
+            self.ip_token_buckets[ip_key] = TokenBucket(rate=token_rate, bucket_size=bucket_size)
 
     def start_initial_traffics(self):
         """启动每条链的第一个traffic"""
@@ -415,7 +497,7 @@ class TrafficScheduler:
 
         # 遍历所有链，获取所有准备就绪的请求
         for chain in self.parallel_chains:
-            chain_requests = chain.get_ready_requests(current_cycle)
+            chain_requests = chain.get_ready_requests(current_cycle, traffic_scheduler=self)
             ready_requests.extend(chain_requests)
 
             # 更新注入统计

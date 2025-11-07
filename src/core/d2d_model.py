@@ -1307,8 +1307,8 @@ class D2D_Model:
             writer.writeheader()
             writer.writerows(rows)
 
-        if self.kwargs.get("verbose", 1):
-            print(f"FIFO使用率统计CSV已保存: {output_path}")
+        # if self.kwargs.get("verbose", 1):
+        #     print(f"FIFO使用率统计CSV已保存: {output_path}")
 
     def _collect_d2d_statistics(self):
         """收集D2D专有统计信息"""
