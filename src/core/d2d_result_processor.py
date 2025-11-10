@@ -229,7 +229,9 @@ class D2DResultProcessor(BandwidthAnalyzer):
             if not flits:
                 continue
 
-            first_flit = flits[0]
+            # 使用flit_id选择first和representative flit，与基类保持一致
+            first_flit = min(flits, key=lambda f: f.flit_id)
+            representative_flit = max(flits, key=lambda f: f.flit_id)
 
             # 改进数据验证
             # 对于write_complete响应，只有单个flit，不需要检查burst_length
@@ -237,8 +239,6 @@ class D2DResultProcessor(BandwidthAnalyzer):
             if not is_write_complete:
                 if not hasattr(first_flit, "burst_length") or len(flits) != first_flit.burst_length:
                     continue
-
-            last_flit = flits[-1]
 
             # 检查是否为D2D请求（包括Die内和跨Die）
             if not self._is_d2d_request(first_flit):
@@ -249,7 +249,7 @@ class D2DResultProcessor(BandwidthAnalyzer):
                 continue
 
             # 提取D2D信息
-            d2d_info = self._extract_d2d_info(first_flit, last_flit, packet_id)
+            d2d_info = self._extract_d2d_info(first_flit, representative_flit, packet_id)
             if d2d_info:
                 self.d2d_requests.append(d2d_info)
 
@@ -257,27 +257,27 @@ class D2DResultProcessor(BandwidthAnalyzer):
         """检查flit是否为D2D请求（包括Die内和跨Die请求）"""
         return hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die") and flit.d2d_origin_die is not None and flit.d2d_target_die is not None
 
-    def _extract_d2d_info(self, first_flit: Flit, last_flit: Flit, packet_id: int) -> Optional[D2DRequestInfo]:
+    def _extract_d2d_info(self, first_flit: Flit, representative_flit: Flit, packet_id: int) -> Optional[D2DRequestInfo]:
         """从flit中提取D2D请求信息"""
         try:
             # 计算开始时间 - 使用cmd_entry_cake0_cycle（tracker消耗开始）
-            if hasattr(first_flit, "cmd_entry_cake0_cycle") and first_flit.cmd_entry_cake0_cycle < float("inf"):
-                start_time_ns = first_flit.cmd_entry_cake0_cycle // self.network_frequency
+            if hasattr(representative_flit, "cmd_entry_cake0_cycle") and representative_flit.cmd_entry_cake0_cycle < float("inf"):
+                start_time_ns = representative_flit.cmd_entry_cake0_cycle // self.network_frequency
             else:
                 start_time_ns = 0
 
             # 计算结束时间 - 根据请求类型选择合适的时间戳
-            req_type = getattr(first_flit, "req_type", "unknown")
+            req_type = getattr(representative_flit, "req_type", "unknown")
             if req_type == "read":
                 # 读请求：使用data_received_complete_cycle
-                if hasattr(last_flit, "data_received_complete_cycle") and last_flit.data_received_complete_cycle < float("inf"):
-                    end_time_ns = last_flit.data_received_complete_cycle // self.network_frequency
+                if hasattr(representative_flit, "data_received_complete_cycle") and representative_flit.data_received_complete_cycle < float("inf"):
+                    end_time_ns = representative_flit.data_received_complete_cycle // self.network_frequency
                 else:
                     end_time_ns = start_time_ns
             elif req_type == "write":
                 # 写请求：使用write_complete_received_cycle
-                if hasattr(first_flit, "write_complete_received_cycle") and first_flit.write_complete_received_cycle < float("inf"):
-                    end_time_ns = first_flit.write_complete_received_cycle // self.network_frequency
+                if hasattr(representative_flit, "write_complete_received_cycle") and representative_flit.write_complete_received_cycle < float("inf"):
+                    end_time_ns = representative_flit.write_complete_received_cycle // self.network_frequency
                 else:
                     end_time_ns = start_time_ns
             else:

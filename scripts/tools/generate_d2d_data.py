@@ -878,14 +878,10 @@ def generate_16_share_traffic():
     die0_gdma_base = {
         "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
         "gdma_1": [3, 15, 19],
-        # "gdma_0": [0, 4],
-        # "gdma_1": [0, 4],
     }
     die0_ddr_base = {
         "ddr_0": [3, 7, 11, 15],
         "ddr_1": [3, 7, 11, 15],
-        # "ddr_0": [3, 7, 11, 15],
-        # "ddr_0": [7],
     }
 
     # 计算所有Die配置
@@ -903,18 +899,6 @@ def generate_16_share_traffic():
         (1, 1),
         (2, 2),
         (3, 3),
-        # (0, 1),
-        # (1, 0),
-        # (0, 2),
-        # (2, 0),
-        # (0, 3),
-        # (3, 0),
-        # (1, 2),
-        # (2, 1),
-        # (1, 3),
-        # (3, 1),
-        # (2, 3),
-        # (3, 2),
     ]
     req_type = "W"
     traffic_configs = _generate_traffic_configs(
@@ -923,7 +907,6 @@ def generate_16_share_traffic():
         req_type=req_type,
         burst_length=4,
         bandwidth=46.08,
-        # bandwidth=128,
     )
 
     generator.generate_traffic_file(
@@ -936,9 +919,10 @@ def generate_16_share_traffic():
 
 
 if __name__ == "__main__":
+    np.random.seed(1220)
     # 生成简单的2Die示例
-    generate_example()
+    # generate_example()
 
     # generate_64_share_traffic()
     # generate_16_share_d2d_traffic()
-    # generate_16_share_traffic()
+    generate_16_share_traffic()

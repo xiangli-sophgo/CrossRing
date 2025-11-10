@@ -15,8 +15,9 @@ import matplotlib.pyplot as plt
 import os
 import sys, time
 import inspect, logging
+import numpy as np
 from functools import wraps, lru_cache
-from src.core.result_processor import *
+from src.analysis.analyzers import SingleDieAnalyzer, RequestInfo, BandwidthMetrics, WorkingInterval
 from src.core.traffic_scheduler import TrafficScheduler
 from src.utils.arbitration import create_arbiter_from_config
 import threading
@@ -211,7 +212,7 @@ class BaseModel:
         self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.data_network = Network(self.config, self.adjacency_matrix, name="Data Network")
-        self.result_processor = BandwidthAnalyzer(self.config, min_gap_threshold=200, plot_rn_bw_fig=self.plot_RN_BW_fig, plot_flow_graph=self.plot_flow_fig)
+        self.result_processor = SingleDieAnalyzer(self.config, min_gap_threshold=200, plot_rn_bw_fig=self.plot_RN_BW_fig, plot_flow_graph=self.plot_flow_fig)
         if self.plot_link_state:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
 
@@ -514,9 +515,8 @@ class BaseModel:
         self.simulation_total_time = simulation_time
 
         if self.verbose:
-            print(f"Simulation completed in {simulation_time:.2f} seconds")
-            print(f"Processed {self.cycle} cycles")
-            print(f"Performance: {self.cycle / simulation_time:.0f} cycles/second")
+            print()
+            print(f"Simulation completed in {simulation_time:.2f} seconds, Performance: {self.cycle / simulation_time:.0f} cycles/second")
 
     def update_finish_time_stats(self):
         """从traffic_scheduler和result_processor获取结束时间并更新统计"""

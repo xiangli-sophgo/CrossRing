@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 
 from .base_model import BaseModel
 from .d2d_traffic_scheduler import D2DTrafficScheduler
-from .d2d_result_processor import D2DResultProcessor
+from src.analysis.analyzers import D2DAnalyzer
 from src.utils.components.d2d_rn_interface import D2D_RN_Interface
 from src.utils.components.d2d_sn_interface import D2D_SN_Interface
 from config.config import CrossRingConfig
@@ -692,7 +692,7 @@ class D2D_Model:
 
         # 创建并缓存 D2D 结果处理器（供后续结果分析使用）
         if not hasattr(self, "_cached_d2d_processor") or not self._cached_d2d_processor:
-            d2d_processor = D2DResultProcessor(self.config)
+            d2d_processor = D2DAnalyzer(self.config)
             d2d_processor.simulation_end_cycle = self.current_cycle
             d2d_processor.finish_cycle = self.current_cycle
 
@@ -999,7 +999,7 @@ class D2D_Model:
             d2d_processor = self.result_processor
         else:
             # 创建新的D2D结果处理器并传递Die数据
-            d2d_processor = D2DResultProcessor(self.config)
+            d2d_processor = D2DAnalyzer(self.config)
             d2d_processor.simulation_end_cycle = self.current_cycle
 
             # 检查是否已经有D2D处理器实例（避免重复计算）
@@ -1128,7 +1128,7 @@ class D2D_Model:
             else:
                 # 如果没有缓存，创建新的处理器
                 print("\n[警告] 没有找到缓存的D2D处理器，创建新实例")
-                d2d_processor = D2DResultProcessor(self.config)
+                d2d_processor = D2DAnalyzer(self.config)
                 d2d_processor.simulation_end_cycle = self.current_cycle
                 d2d_processor.finish_cycle = self.current_cycle
 

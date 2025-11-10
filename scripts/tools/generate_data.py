@@ -115,8 +115,8 @@ def generate_traffic_from_configs(configs, end_time, output_file):
 
 
 def generate_sim_16_share_traffic():
-    np.random.seed(919)
-    random.seed(919)
+    np.random.seed(1110)
+    random.seed(1110)
 
     # 配置参数
     END_TIME = 6000
@@ -343,5 +343,6 @@ def generate_example_traffic():
 
 # 示例使用
 if __name__ == "__main__":
+    generate_sim_16_share_traffic()
     # generate_sim_16_share_d2d_traffic()
-    generate_example_traffic()
+    # generate_example_traffic()
