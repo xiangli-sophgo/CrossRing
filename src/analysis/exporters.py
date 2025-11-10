@@ -10,16 +10,13 @@
 import os
 import csv
 import json
+from collections import defaultdict
 from typing import Dict, List, Optional, Any
 from .analyzers import RequestInfo, D2DRequestInfo, PortBandwidthMetrics, BandwidthMetrics
 
 
 class CSVExporter:
     """CSV导出器 - 导出请求数据、端口带宽和链路统计到CSV文件"""
-
-    def __init__(self):
-        """初始化CSV导出器"""
-        pass
 
     def generate_detailed_request_csv(
         self,
@@ -61,78 +58,23 @@ class CSVExporter:
             "data_entry_noc_from_cake1_cycle",
             "data_received_complete_cycle",
             "rsp_entry_network_cycle",
-            # 新增的列
             "data_eject_attempts_h_list",
             "data_eject_attempts_v_list",
         ]
 
-        # 生成读请求CSV
-        read_csv_file = os.path.join(output_path, "read_requests.csv")
-        with open(read_csv_file, "w", encoding="utf-8-sig", newline="") as f:
-            f.write(",".join(csv_header) + "\n")
-            for req in read_requests:
-                row = [
-                    req.packet_id,
-                    req.start_time,
-                    req.end_time,
-                    req.source_node,
-                    req.source_type,
-                    req.dest_node,
-                    req.dest_type,
-                    req.burst_length,
-                    req.cmd_latency,
-                    req.data_latency,
-                    req.transaction_latency,
-                    req.src_dest_order_id,
-                    req.packet_category,
-                    req.cmd_entry_cake0_cycle,
-                    req.cmd_entry_noc_from_cake0_cycle,
-                    req.cmd_entry_noc_from_cake1_cycle,
-                    req.cmd_received_by_cake0_cycle,
-                    req.cmd_received_by_cake1_cycle,
-                    req.data_entry_noc_from_cake0_cycle,
-                    req.data_entry_noc_from_cake1_cycle,
-                    req.data_received_complete_cycle,
-                    req.rsp_entry_network_cycle,
-                    # 新增的列
-                    ",".join(map(str, req.data_eject_attempts_h_list)),
-                    ",".join(map(str, req.data_eject_attempts_v_list)),
-                ]
-                f.write(",".join(map(str, row)) + "\n")
+        # 生成读写CSV文件
+        read_csv_file = None
+        write_csv_file = None
 
-        # 生成写请求CSV
-        write_csv_file = os.path.join(output_path, "write_requests.csv")
-        with open(write_csv_file, "w", encoding="utf-8-sig", newline="") as f:
-            f.write(",".join(csv_header) + "\n")
-            for req in write_requests:
-                row = [
-                    req.packet_id,
-                    req.start_time,
-                    req.end_time,
-                    req.source_node,
-                    req.source_type,
-                    req.dest_node,
-                    req.dest_type,
-                    req.burst_length,
-                    req.cmd_latency,
-                    req.data_latency,
-                    req.transaction_latency,
-                    req.src_dest_order_id,
-                    req.packet_category,
-                    req.cmd_entry_cake0_cycle,
-                    req.cmd_entry_noc_from_cake0_cycle,
-                    req.cmd_entry_noc_from_cake1_cycle,
-                    req.cmd_received_by_cake0_cycle,
-                    req.cmd_received_by_cake1_cycle,
-                    req.data_entry_noc_from_cake0_cycle,
-                    req.data_entry_noc_from_cake1_cycle,
-                    req.data_received_complete_cycle,
-                    req.rsp_entry_network_cycle,
-                    # 新增的列
-                    ",".join(map(str, req.data_eject_attempts_h_list)),
-                    ",".join(map(str, req.data_eject_attempts_v_list)),
-                ]
-                f.write(",".join(map(str, row)) + "\n")
+        if read_requests:
+            read_csv_file = self._write_request_csv_file(
+                read_requests, output_path, "read", csv_header
+            )
+
+        if write_requests:
+            write_csv_file = self._write_request_csv_file(
+                write_requests, output_path, "write", csv_header
+            )
 
         # 打印统计信息
         if read_requests or write_requests:
@@ -142,6 +84,58 @@ class CSVExporter:
                 print(f"  读请求CSV, {len(read_requests)} 条记录:  {read_csv_file}")
             if write_requests:
                 print(f"  写请求CSV, {len(write_requests)} 条记录:  {write_csv_file}")
+
+    def _write_request_csv_file(
+        self,
+        requests: List[RequestInfo],
+        output_path: str,
+        req_type: str,
+        csv_header: List[str]
+    ) -> str:
+        """
+        将请求列表写入CSV文件
+
+        Args:
+            requests: RequestInfo列表
+            output_path: 输出目录路径
+            req_type: 请求类型 ("read" 或 "write")
+            csv_header: CSV文件头
+
+        Returns:
+            str: CSV文件路径
+        """
+        csv_file = os.path.join(output_path, f"{req_type}_requests.csv")
+        with open(csv_file, "w", encoding="utf-8-sig", newline="") as f:
+            f.write(",".join(csv_header) + "\n")
+            for req in requests:
+                row = [
+                    req.packet_id,
+                    req.start_time,
+                    req.end_time,
+                    req.source_node,
+                    req.source_type,
+                    req.dest_node,
+                    req.dest_type,
+                    req.burst_length,
+                    req.cmd_latency,
+                    req.data_latency,
+                    req.transaction_latency,
+                    req.src_dest_order_id,
+                    req.packet_category,
+                    req.cmd_entry_cake0_cycle,
+                    req.cmd_entry_noc_from_cake0_cycle,
+                    req.cmd_entry_noc_from_cake1_cycle,
+                    req.cmd_received_by_cake0_cycle,
+                    req.cmd_received_by_cake1_cycle,
+                    req.data_entry_noc_from_cake0_cycle,
+                    req.data_entry_noc_from_cake1_cycle,
+                    req.data_received_complete_cycle,
+                    req.rsp_entry_network_cycle,
+                    ",".join(map(str, req.data_eject_attempts_h_list)),
+                    ",".join(map(str, req.data_eject_attempts_v_list)),
+                ]
+                f.write(",".join(map(str, row)) + "\n")
+        return csv_file
 
     def generate_ports_csv(
         self,
@@ -278,8 +272,6 @@ class CSVExporter:
             f: CSV文件句柄
             all_ports: 所有端口的带宽指标字典
         """
-        from collections import defaultdict
-
         # 按端口类型分组
         port_groups = defaultdict(list)
         for port_id, metrics in all_ports.items():
@@ -627,8 +619,6 @@ class CSVExporter:
                     writer.writerow(row)
 
                 # 计算并添加平均带宽统计
-                from collections import defaultdict
-
                 ip_type_groups = defaultdict(lambda: {"read": [], "write": [], "total": []})
 
                 # 按IP类型分组（去掉实例编号）
@@ -823,10 +813,6 @@ class CSVExporter:
 
 class ReportGenerator:
     """报告生成器 - 生成文本格式的统计报告"""
-
-    def __init__(self):
-        """初始化报告生成器"""
-        pass
 
     def generate_unified_report(
         self,
@@ -1050,61 +1036,9 @@ class ReportGenerator:
 
         return lines
 
-    def _format_bandwidth_section(self, title: str, metrics: BandwidthMetrics) -> List[str]:
-        """
-        格式化带宽数据段
-
-        Args:
-            title: 段落标题
-            metrics: BandwidthMetrics对象
-
-        Returns:
-            格式化的文本行列表
-        """
-        lines = [
-            f"\n{title}:",
-            f"  非加权带宽: {metrics.unweighted_bandwidth:.6f} GB/s",
-            f"  加权带宽: {metrics.weighted_bandwidth:.6f} GB/s",
-            f"  总字节数: {metrics.total_bytes}",
-            f"  总请求数: {metrics.total_requests}",
-            f"  工作时间: {metrics.total_working_time} ns",
-            f"  网络时间: {metrics.network_end_time - metrics.network_start_time} ns",
-        ]
-        return lines
-
-    def _format_latency_section(self, latency_stats: Dict) -> List[str]:
-        """
-        格式化延迟统计段
-
-        Args:
-            latency_stats: 延迟统计字典
-
-        Returns:
-            格式化的文本行列表
-        """
-        lines = ["\n延迟统计:"]
-
-        for category in ["cmd", "data", "trans"]:
-            category_name = {"cmd": "命令", "data": "数据", "trans": "事务"}[category]
-            lines.append(f"\n  {category_name}延迟:")
-
-            for req_type in ["read", "write", "mixed"]:
-                stats = latency_stats[category][req_type]
-                if stats["count"] > 0:
-                    avg = stats["sum"] / stats["count"]
-                    type_name = {"read": "读", "write": "写", "mixed": "混合"}[req_type]
-                    lines.append(f"    {type_name}: 平均={avg:.2f}ns, 最大={stats['max']}ns, "
-                               f"P95={stats.get('p95', 0):.2f}ns, P99={stats.get('p99', 0):.2f}ns")
-
-        return lines
-
 
 class JSONExporter:
     """JSON导出器 - 导出统计结果到JSON文件"""
-
-    def __init__(self):
-        """初始化JSON导出器"""
-        pass
 
     def generate_json_report(
         self,

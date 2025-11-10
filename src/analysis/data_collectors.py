@@ -185,135 +185,84 @@ class RequestCollector:
         read_csv = os.path.join(csv_folder, "read_requests.csv")
         write_csv = os.path.join(csv_folder, "write_requests.csv")
 
-        # 处理读请求
-        if os.path.exists(read_csv):
-            df_read = pd.read_csv(read_csv)
-            for _, row in df_read.iterrows():
-                # 处理保序字段（向后兼容）
-                src_dest_order_id = int(row.get("src_dest_order_id", -1))
-                packet_category = str(row.get("packet_category", ""))
-
-                # 验证并清理数据
-                try:
-                    packet_id = int(row["packet_id"])
-                    start_time = DataValidator.sanitize_value(row["start_time_ns"], 0)
-                    end_time = DataValidator.sanitize_value(row["end_time_ns"], 0)
-                    rn_end_time = DataValidator.sanitize_value(row["rn_end_time_ns"], 0)
-                    sn_end_time = DataValidator.sanitize_value(row["sn_end_time_ns"], 0)
-                    total_bytes = DataValidator.sanitize_value(row["total_bytes"], 0)
-                    burst_length = DataValidator.sanitize_value(row["burst_length"], 0)
-
-                    # 检查基本有效性
-                    if start_time <= 0 or end_time <= 0 or total_bytes <= 0 or burst_length <= 0:
-                        continue
-                    if start_time >= end_time:
-                        continue
-
-                except (ValueError, KeyError) as e:
-                    continue
-
-                request_info = RequestInfo(
-                    packet_id=packet_id,
-                    start_time=start_time,
-                    end_time=end_time,
-                    rn_end_time=rn_end_time,
-                    sn_end_time=sn_end_time,
-                    req_type="read",
-                    source_node=int(row["source_node"]),
-                    dest_node=int(row["dest_node"]),
-                    source_type=str(row["source_type"]),
-                    dest_type=str(row["dest_type"]),
-                    burst_length=burst_length,
-                    total_bytes=total_bytes,
-                    cmd_latency=int(row["cmd_latency_ns"]),
-                    data_latency=int(row["data_latency_ns"]),
-                    transaction_latency=int(row["transaction_latency_ns"]),
-                    # 保序字段
-                    src_dest_order_id=src_dest_order_id,
-                    packet_category=packet_category,
-                    # cycle数据字段 (向后兼容)
-                    cmd_entry_cake0_cycle=int(row.get("cmd_entry_cake0_cycle", -1)),
-                    cmd_entry_noc_from_cake0_cycle=int(row.get("cmd_entry_noc_from_cake0_cycle", -1)),
-                    cmd_entry_noc_from_cake1_cycle=int(row.get("cmd_entry_noc_from_cake1_cycle", -1)),
-                    cmd_received_by_cake0_cycle=int(row.get("cmd_received_by_cake0_cycle", -1)),
-                    cmd_received_by_cake1_cycle=int(row.get("cmd_received_by_cake1_cycle", -1)),
-                    data_entry_noc_from_cake0_cycle=int(row.get("data_entry_noc_from_cake0_cycle", -1)),
-                    data_entry_noc_from_cake1_cycle=int(row.get("data_entry_noc_from_cake1_cycle", -1)),
-                    data_received_complete_cycle=int(row.get("data_received_complete_cycle", -1)),
-                    rsp_entry_network_cycle=int(row.get("rsp_entry_network_cycle", -1)),
-                )
-
-                # 验证请求完整性
-                if not DataValidator.validate_request(request_info):
-                    continue
-
-                self.requests.append(request_info)
-
-        # 处理写请求
-        if os.path.exists(write_csv):
-            df_write = pd.read_csv(write_csv)
-            for _, row in df_write.iterrows():
-                # 处理保序字段（向后兼容）
-                src_dest_order_id = int(row.get("src_dest_order_id", -1))
-                packet_category = str(row.get("packet_category", ""))
-
-                # 验证并清理数据
-                try:
-                    packet_id = int(row["packet_id"])
-                    start_time = DataValidator.sanitize_value(row["start_time_ns"], 0)
-                    end_time = DataValidator.sanitize_value(row["end_time_ns"], 0)
-                    rn_end_time = DataValidator.sanitize_value(row["rn_end_time_ns"], 0)
-                    sn_end_time = DataValidator.sanitize_value(row["sn_end_time_ns"], 0)
-                    total_bytes = DataValidator.sanitize_value(row["total_bytes"], 0)
-                    burst_length = DataValidator.sanitize_value(row["burst_length"], 0)
-
-                    # 检查基本有效性
-                    if start_time <= 0 or end_time <= 0 or total_bytes <= 0 or burst_length <= 0:
-                        continue
-                    if start_time >= end_time:
-                        continue
-
-                except (ValueError, KeyError) as e:
-                    continue
-
-                request_info = RequestInfo(
-                    packet_id=packet_id,
-                    start_time=start_time,
-                    end_time=end_time,
-                    rn_end_time=rn_end_time,
-                    sn_end_time=sn_end_time,
-                    req_type="write",
-                    source_node=int(row["source_node"]),
-                    dest_node=int(row["dest_node"]),
-                    source_type=str(row["source_type"]),
-                    dest_type=str(row["dest_type"]),
-                    burst_length=burst_length,
-                    total_bytes=total_bytes,
-                    cmd_latency=int(row["cmd_latency_ns"]),
-                    data_latency=int(row["data_latency_ns"]),
-                    transaction_latency=int(row["transaction_latency_ns"]),
-                    # 保序字段
-                    src_dest_order_id=src_dest_order_id,
-                    packet_category=packet_category,
-                    # cycle数据字段 (向后兼容)
-                    cmd_entry_cake0_cycle=int(row.get("cmd_entry_cake0_cycle", -1)),
-                    cmd_entry_noc_from_cake0_cycle=int(row.get("cmd_entry_noc_from_cake0_cycle", -1)),
-                    cmd_entry_noc_from_cake1_cycle=int(row.get("cmd_entry_noc_from_cake1_cycle", -1)),
-                    cmd_received_by_cake0_cycle=int(row.get("cmd_received_by_cake0_cycle", -1)),
-                    cmd_received_by_cake1_cycle=int(row.get("cmd_received_by_cake1_cycle", -1)),
-                    data_entry_noc_from_cake0_cycle=int(row.get("data_entry_noc_from_cake0_cycle", -1)),
-                    data_entry_noc_from_cake1_cycle=int(row.get("data_entry_noc_from_cake1_cycle", -1)),
-                    data_received_complete_cycle=int(row.get("data_received_complete_cycle", -1)),
-                    rsp_entry_network_cycle=int(row.get("rsp_entry_network_cycle", -1)),
-                )
-
-                # 验证请求完整性
-                if not DataValidator.validate_request(request_info):
-                    continue
-
-                self.requests.append(request_info)
+        # 处理读写请求
+        self._load_requests_from_single_csv(read_csv, "read")
+        self._load_requests_from_single_csv(write_csv, "write")
 
         return self.requests
+
+    def _load_requests_from_single_csv(self, csv_path: str, req_type: str):
+        """
+        从单个CSV文件加载请求数据
+
+        Args:
+            csv_path: CSV文件路径
+            req_type: 请求类型 ("read" 或 "write")
+        """
+        if not os.path.exists(csv_path):
+            return
+
+        df = pd.read_csv(csv_path)
+        for _, row in df.iterrows():
+            # 处理保序字段（向后兼容）
+            src_dest_order_id = int(row.get("src_dest_order_id", -1))
+            packet_category = str(row.get("packet_category", ""))
+
+            # 验证并清理数据
+            try:
+                packet_id = int(row["packet_id"])
+                start_time = DataValidator.sanitize_value(row["start_time_ns"], 0)
+                end_time = DataValidator.sanitize_value(row["end_time_ns"], 0)
+                rn_end_time = DataValidator.sanitize_value(row["rn_end_time_ns"], 0)
+                sn_end_time = DataValidator.sanitize_value(row["sn_end_time_ns"], 0)
+                total_bytes = DataValidator.sanitize_value(row["total_bytes"], 0)
+                burst_length = DataValidator.sanitize_value(row["burst_length"], 0)
+
+                # 检查基本有效性
+                if start_time <= 0 or end_time <= 0 or total_bytes <= 0 or burst_length <= 0:
+                    continue
+                if start_time >= end_time:
+                    continue
+
+            except (ValueError, KeyError) as e:
+                continue
+
+            request_info = RequestInfo(
+                packet_id=packet_id,
+                start_time=start_time,
+                end_time=end_time,
+                rn_end_time=rn_end_time,
+                sn_end_time=sn_end_time,
+                req_type=req_type,
+                source_node=int(row["source_node"]),
+                dest_node=int(row["dest_node"]),
+                source_type=str(row["source_type"]),
+                dest_type=str(row["dest_type"]),
+                burst_length=burst_length,
+                total_bytes=total_bytes,
+                cmd_latency=int(row["cmd_latency_ns"]),
+                data_latency=int(row["data_latency_ns"]),
+                transaction_latency=int(row["transaction_latency_ns"]),
+                # 保序字段
+                src_dest_order_id=src_dest_order_id,
+                packet_category=packet_category,
+                # cycle数据字段 (向后兼容)
+                cmd_entry_cake0_cycle=int(row.get("cmd_entry_cake0_cycle", -1)),
+                cmd_entry_noc_from_cake0_cycle=int(row.get("cmd_entry_noc_from_cake0_cycle", -1)),
+                cmd_entry_noc_from_cake1_cycle=int(row.get("cmd_entry_noc_from_cake1_cycle", -1)),
+                cmd_received_by_cake0_cycle=int(row.get("cmd_received_by_cake0_cycle", -1)),
+                cmd_received_by_cake1_cycle=int(row.get("cmd_received_by_cake1_cycle", -1)),
+                data_entry_noc_from_cake0_cycle=int(row.get("data_entry_noc_from_cake0_cycle", -1)),
+                data_entry_noc_from_cake1_cycle=int(row.get("data_entry_noc_from_cake1_cycle", -1)),
+                data_received_complete_cycle=int(row.get("data_received_complete_cycle", -1)),
+                rsp_entry_network_cycle=int(row.get("rsp_entry_network_cycle", -1)),
+            )
+
+            # 验证请求完整性
+            if not DataValidator.validate_request(request_info):
+                continue
+
+            self.requests.append(request_info)
 
     def collect_cross_die_requests(self, dies: Dict) -> List[D2DRequestInfo]:
         """
@@ -385,6 +334,22 @@ class RequestCollector:
             flit.d2d_target_die is not None
         )
 
+    def _get_time_value(self, flit, attr_name: str, default: float = 0) -> float:
+        """获取flit的时间值并转换为ns"""
+        if attr_name and hasattr(flit, attr_name):
+            value = getattr(flit, attr_name)
+            if value < float("inf"):
+                return value // self.network_frequency
+        return default
+
+    def _get_latency_value(self, flit, attr_name: str) -> int:
+        """获取flit的延迟值并转换为ns"""
+        if hasattr(flit, attr_name):
+            value = getattr(flit, attr_name)
+            if value < float("inf"):
+                return int(value // self.network_frequency)
+        return 0
+
     def _extract_d2d_info(self, first_flit, representative_flit, packet_id: int) -> Optional[D2DRequestInfo]:
         """
         从flit中提取D2D请求信息
@@ -398,42 +363,20 @@ class RequestCollector:
             D2DRequestInfo对象或None
         """
         try:
-            # 计算开始时间 - 使用cmd_entry_cake0_cycle（tracker消耗开始）
-            if hasattr(representative_flit, "cmd_entry_cake0_cycle") and representative_flit.cmd_entry_cake0_cycle < float("inf"):
-                start_time_ns = representative_flit.cmd_entry_cake0_cycle // self.network_frequency
-            else:
-                start_time_ns = 0
+            # 计算开始时间和结束时间
+            start_time_ns = self._get_time_value(representative_flit, "cmd_entry_cake0_cycle", 0)
 
-            # 计算结束时间 - 根据请求类型选择合适的时间戳
             req_type = getattr(representative_flit, "req_type", "unknown")
-            if req_type == "read":
-                # 读请求：使用data_received_complete_cycle
-                if hasattr(representative_flit, "data_received_complete_cycle") and representative_flit.data_received_complete_cycle < float("inf"):
-                    end_time_ns = representative_flit.data_received_complete_cycle // self.network_frequency
-                else:
-                    end_time_ns = start_time_ns
-            elif req_type == "write":
-                # 写请求：使用write_complete_received_cycle
-                if hasattr(representative_flit, "write_complete_received_cycle") and representative_flit.write_complete_received_cycle < float("inf"):
-                    end_time_ns = representative_flit.write_complete_received_cycle // self.network_frequency
-                else:
-                    end_time_ns = start_time_ns
-            else:
-                end_time_ns = start_time_ns
+            end_time_field = {
+                "read": "data_received_complete_cycle",
+                "write": "write_complete_received_cycle"
+            }.get(req_type)
+            end_time_ns = self._get_time_value(representative_flit, end_time_field, start_time_ns) if end_time_field else start_time_ns
 
             # 从flit读取已计算的延迟值并转换为ns
-            cmd_latency_ns = 0
-            data_latency_ns = 0
-            transaction_latency_ns = 0
-
-            if hasattr(first_flit, "cmd_latency") and first_flit.cmd_latency < float("inf"):
-                cmd_latency_ns = int(first_flit.cmd_latency // self.network_frequency)
-
-            if hasattr(first_flit, "data_latency") and first_flit.data_latency < float("inf"):
-                data_latency_ns = int(first_flit.data_latency // self.network_frequency)
-
-            if hasattr(first_flit, "transaction_latency") and first_flit.transaction_latency < float("inf"):
-                transaction_latency_ns = int(first_flit.transaction_latency // self.network_frequency)
+            cmd_latency_ns = self._get_latency_value(first_flit, "cmd_latency")
+            data_latency_ns = self._get_latency_value(first_flit, "data_latency")
+            transaction_latency_ns = self._get_latency_value(first_flit, "transaction_latency")
 
             # 计算数据量
             burst_length = getattr(first_flit, "burst_length", 1)
@@ -470,9 +413,59 @@ class RequestCollector:
 class LatencyStatsCollector:
     """延迟统计收集器 - 计算CMD、Data、Transaction延迟统计"""
 
-    def __init__(self):
-        """初始化延迟统计收集器"""
-        pass
+    @staticmethod
+    def _init_latency_stats_structure() -> Dict:
+        """初始化延迟统计数据结构"""
+        return {
+            "cmd": {
+                "read": {"sum": 0, "max": 0, "count": 0, "values": []},
+                "write": {"sum": 0, "max": 0, "count": 0, "values": []},
+                "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}
+            },
+            "data": {
+                "read": {"sum": 0, "max": 0, "count": 0, "values": []},
+                "write": {"sum": 0, "max": 0, "count": 0, "values": []},
+                "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}
+            },
+            "trans": {
+                "read": {"sum": 0, "max": 0, "count": 0, "values": []},
+                "write": {"sum": 0, "max": 0, "count": 0, "values": []},
+                "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}
+            },
+        }
+
+    @staticmethod
+    def _update_latency_stats(stats: Dict, category: str, req_type: str, latency_value: float):
+        """更新延迟统计数据"""
+        if not math.isfinite(latency_value):
+            return
+
+        group = stats[category][req_type]
+        group["sum"] += latency_value
+        group["count"] += 1
+        group["max"] = max(group["max"], latency_value)
+        group["values"].append(latency_value)
+
+        mixed = stats[category]["mixed"]
+        mixed["sum"] += latency_value
+        mixed["count"] += 1
+        mixed["max"] = max(mixed["max"], latency_value)
+        mixed["values"].append(latency_value)
+
+    @staticmethod
+    def _finalize_latency_stats(stats: Dict) -> Dict:
+        """计算百分位数并清理临时数据"""
+        for category in ["cmd", "data", "trans"]:
+            for req_type in ["read", "write", "mixed"]:
+                values = stats[category][req_type]["values"]
+                if len(values) > 0:
+                    stats[category][req_type]["p95"] = np.percentile(values, 95)
+                    stats[category][req_type]["p99"] = np.percentile(values, 99)
+                else:
+                    stats[category][req_type]["p95"] = 0.0
+                    stats[category][req_type]["p99"] = 0.0
+                del stats[category][req_type]["values"]
+        return stats
 
     def calculate_latency_stats(self, requests: List[RequestInfo]) -> Dict:
         """
@@ -484,81 +477,14 @@ class LatencyStatsCollector:
         Returns:
             延迟统计字典，包含read/write/mixed三种类型的cmd/data/trans延迟统计
         """
-        stats = {
-            "cmd": {
-                "read": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "write": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}
-            },
-            "data": {
-                "read": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "write": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}
-            },
-            "trans": {
-                "read": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "write": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}
-            },
-        }
+        stats = self._init_latency_stats_structure()
 
         for r in requests:
-            # CMD延迟统计
-            if math.isfinite(r.cmd_latency):
-                group = stats["cmd"][r.req_type]
-                group["sum"] += r.cmd_latency
-                group["count"] += 1
-                group["max"] = max(group["max"], r.cmd_latency)
-                group["values"].append(r.cmd_latency)
+            self._update_latency_stats(stats, "cmd", r.req_type, r.cmd_latency)
+            self._update_latency_stats(stats, "data", r.req_type, r.data_latency)
+            self._update_latency_stats(stats, "trans", r.req_type, r.transaction_latency)
 
-                mixed = stats["cmd"]["mixed"]
-                mixed["sum"] += r.cmd_latency
-                mixed["count"] += 1
-                mixed["max"] = max(mixed["max"], r.cmd_latency)
-                mixed["values"].append(r.cmd_latency)
-
-            # Data延迟统计
-            if math.isfinite(r.data_latency):
-                group = stats["data"][r.req_type]
-                group["sum"] += r.data_latency
-                group["count"] += 1
-                group["max"] = max(group["max"], r.data_latency)
-                group["values"].append(r.data_latency)
-
-                mixed = stats["data"]["mixed"]
-                mixed["sum"] += r.data_latency
-                mixed["count"] += 1
-                mixed["max"] = max(mixed["max"], r.data_latency)
-                mixed["values"].append(r.data_latency)
-
-            # Transaction延迟统计
-            if math.isfinite(r.transaction_latency):
-                group = stats["trans"][r.req_type]
-                group["sum"] += r.transaction_latency
-                group["count"] += 1
-                group["max"] = max(group["max"], r.transaction_latency)
-                group["values"].append(r.transaction_latency)
-
-                mixed = stats["trans"]["mixed"]
-                mixed["sum"] += r.transaction_latency
-                mixed["count"] += 1
-                mixed["max"] = max(mixed["max"], r.transaction_latency)
-                mixed["values"].append(r.transaction_latency)
-
-        # 计算百分位数
-        for category in ["cmd", "data", "trans"]:
-            for req_type in ["read", "write", "mixed"]:
-                values = stats[category][req_type]["values"]
-                if len(values) > 0:
-                    stats[category][req_type]["p95"] = np.percentile(values, 95)
-                    stats[category][req_type]["p99"] = np.percentile(values, 99)
-                else:
-                    stats[category][req_type]["p95"] = 0.0
-                    stats[category][req_type]["p99"] = 0.0
-                # 删除values列表以节省内存
-                del stats[category][req_type]["values"]
-
-        return stats
+        return self._finalize_latency_stats(stats)
 
     def calculate_d2d_latency_stats(self, d2d_requests: List[D2DRequestInfo]) -> Dict:
         """
@@ -570,23 +496,7 @@ class LatencyStatsCollector:
         Returns:
             D2D延迟统计字典
         """
-        stats = {
-            "cmd": {
-                "read": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "write": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}
-            },
-            "data": {
-                "read": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "write": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}
-            },
-            "trans": {
-                "read": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "write": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}
-            },
-        }
+        stats = self._init_latency_stats_structure()
 
         # 定义延迟字段映射
         latency_fields = [("cmd", "cmd_latency_ns"), ("data", "data_latency_ns"), ("trans", "transaction_latency_ns")]
@@ -594,43 +504,13 @@ class LatencyStatsCollector:
         for req in d2d_requests:
             for category, field_name in latency_fields:
                 latency_ns = getattr(req, field_name, float("inf"))
+                self._update_latency_stats(stats, category, req.req_type, latency_ns)
 
-                if math.isfinite(latency_ns):
-                    req_type = req.req_type
-                    group = stats[category][req_type]
-                    group["sum"] += latency_ns
-                    group["count"] += 1
-                    group["max"] = max(group["max"], latency_ns)
-                    group["values"].append(latency_ns)
-
-                    mixed = stats[category]["mixed"]
-                    mixed["sum"] += latency_ns
-                    mixed["count"] += 1
-                    mixed["max"] = max(mixed["max"], latency_ns)
-                    mixed["values"].append(latency_ns)
-
-        # 计算百分位数
-        for category in ["cmd", "data", "trans"]:
-            for req_type in ["read", "write", "mixed"]:
-                values = stats[category][req_type]["values"]
-                if len(values) > 0:
-                    stats[category][req_type]["p95"] = np.percentile(values, 95)
-                    stats[category][req_type]["p99"] = np.percentile(values, 99)
-                else:
-                    stats[category][req_type]["p95"] = 0.0
-                    stats[category][req_type]["p99"] = 0.0
-                # 删除values列表以节省内存
-                del stats[category][req_type]["values"]
-
-        return stats
+        return self._finalize_latency_stats(stats)
 
 
 class CircuitStatsCollector:
     """绕环统计收集器 - 统计数据flit绕环次数和保序阻塞"""
-
-    def __init__(self):
-        """初始化绕环统计收集器"""
-        pass
 
     def calculate_circling_eject_stats(self, requests: List[RequestInfo]) -> Dict:
         """
@@ -798,47 +678,44 @@ class CircuitStatsCollector:
                         for pos, ip_types_data in network.fifo_depth_sum[category][fifo_type].items():
                             if isinstance(ip_types_data, dict):
                                 for ip_type, sum_depth in ip_types_data.items():
-                                    avg_depth = sum_depth / total_cycles
                                     max_depth = network.fifo_max_depth[category][fifo_type][pos][ip_type]
                                     capacity = capacities[category][fifo_type]
-
-                                    # 获取flit_count
                                     flit_count = 0
                                     if pos in network.fifo_flit_count[category][fifo_type]:
                                         if ip_type in network.fifo_flit_count[category][fifo_type][pos]:
                                             flit_count = network.fifo_flit_count[category][fifo_type][pos][ip_type]
 
                                     key = f"{pos}_{ip_type}"
-                                    results[net_name][category][fifo_type][key] = {
-                                        "avg_depth": avg_depth,
-                                        "max_depth": max_depth,
-                                        "avg_utilization": avg_depth / capacity * 100,
-                                        "max_utilization": max_depth / capacity * 100,
-                                        "flit_count": flit_count,
-                                        "avg_throughput": flit_count / total_cycles if total_cycles > 0 else 0,
-                                    }
+                                    results[net_name][category][fifo_type][key] = self._calculate_fifo_stats(
+                                        sum_depth, max_depth, capacity, flit_count, total_cycles
+                                    )
                     else:
                         # 其他FIFO类型
                         for pos, sum_depth in network.fifo_depth_sum[category][fifo_type].items():
-                            avg_depth = sum_depth / total_cycles
                             max_depth = network.fifo_max_depth[category][fifo_type][pos]
                             capacity = capacities[category][fifo_type]
-
-                            # 获取flit_count
                             flit_count = 0
                             if pos in network.fifo_flit_count[category][fifo_type]:
                                 flit_count = network.fifo_flit_count[category][fifo_type][pos]
 
-                            results[net_name][category][fifo_type][pos] = {
-                                "avg_depth": avg_depth,
-                                "max_depth": max_depth,
-                                "avg_utilization": avg_depth / capacity * 100,
-                                "max_utilization": max_depth / capacity * 100,
-                                "flit_count": flit_count,
-                                "avg_throughput": flit_count / total_cycles if total_cycles > 0 else 0,
-                            }
+                            results[net_name][category][fifo_type][pos] = self._calculate_fifo_stats(
+                                sum_depth, max_depth, capacity, flit_count, total_cycles
+                            )
 
         return results
+
+    @staticmethod
+    def _calculate_fifo_stats(sum_depth: float, max_depth: int, capacity: int, flit_count: int, total_cycles: int) -> Dict:
+        """计算单个FIFO的统计数据"""
+        avg_depth = sum_depth / total_cycles
+        return {
+            "avg_depth": avg_depth,
+            "max_depth": max_depth,
+            "avg_utilization": avg_depth / capacity * 100,
+            "max_utilization": max_depth / capacity * 100,
+            "flit_count": flit_count,
+            "avg_throughput": flit_count / total_cycles if total_cycles > 0 else 0,
+        }
 
     def generate_fifo_usage_csv(self, model, output_path: str = None):
         """生成FIFO使用率CSV文件（仅统计data通道）"""
