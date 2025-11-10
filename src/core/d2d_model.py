@@ -1263,22 +1263,23 @@ class D2D_Model:
     def _generate_d2d_fifo_usage_csv(self, output_path: str):
         """生成D2D系统的FIFO使用率CSV文件（包含所有Die的数据和Die ID列）"""
         import csv
+        from src.analysis.data_collectors import CircuitStatsCollector
 
         # 准备CSV数据
         rows = []
         headers = ["Die ID", "网络", "类别", "FIFO类型", "位置", "平均使用率(%)", "最大使用率(%)", "平均深度", "最大深度", "累计flit数", "平均吞吐量(flit/cycle)"]
 
+        # 创建CircuitStatsCollector实例
+        circuit_collector = CircuitStatsCollector()
+
         # 遍历每个Die并收集FIFO统计
         for die_id, die_model in self.dies.items():
-            # 直接使用die_model的result_processor
-            if not hasattr(die_model, "result_processor") or not die_model.result_processor:
-                print(f"警告: Die {die_id} 没有result_processor，跳过FIFO统计")
+            # 直接使用CircuitStatsCollector处理FIFO统计
+            try:
+                fifo_stats = circuit_collector.process_fifo_usage_statistics(die_model)
+            except Exception as e:
+                print(f"警告: Die {die_id} FIFO统计处理失败: {e}")
                 continue
-
-            result_processor = die_model.result_processor
-
-            # 获取该Die的FIFO统计
-            fifo_stats = result_processor.process_fifo_usage_statistics(die_model)
 
             # 只处理data网络的数据
             if "data" in fifo_stats:

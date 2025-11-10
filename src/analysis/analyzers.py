@@ -1638,7 +1638,7 @@ class D2DAnalyzer:
 
     def draw_ip_bandwidth_heatmap(self, dies=None, config=None, mode="total", node_size=4000, save_path=None):
         """
-        绘制IP带宽热力图(委托给HeatmapVisualizer)
+        绘制IP带宽热力图(委托给FlowGraphRenderer)
 
         Args:
             dies: Die模型字典
@@ -1652,16 +1652,12 @@ class D2DAnalyzer:
             print("警告: 没有die_ip_bandwidth_data数据，跳过IP带宽热力图绘制")
             return None
 
-        # 委托给HeatmapVisualizer处理
-        if hasattr(self, 'heatmap_visualizer'):
-            return self.heatmap_visualizer.draw_d2d_ip_bandwidth_heatmap(
-                die_ip_bandwidth_data=self.die_ip_bandwidth_data,
-                dies=dies,
-                config=config,
-                mode=mode,
-                node_size=node_size,
-                save_path=save_path
-            )
-        else:
-            print("警告: HeatmapVisualizer未初始化，跳过IP带宽热力图绘制")
-            return None
+        # 委托给FlowGraphRenderer处理（使用draw_ip_bandwidth_heatmap方法）
+        return self.flow_visualizer.draw_ip_bandwidth_heatmap(
+            dies=dies,
+            config=config,
+            die_ip_bandwidth_data=self.die_ip_bandwidth_data,
+            mode=mode,
+            node_size=node_size,
+            save_path=save_path
+        )
