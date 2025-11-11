@@ -92,7 +92,7 @@ SDMA_RW_GAP: .inf  # numpy.inf
 CHANNEL_SPEC:
   gdma: 2
   sdma: 1
-  cdma: 0
+  cdma: 2
   ddr: 2
   l2m: 1
 

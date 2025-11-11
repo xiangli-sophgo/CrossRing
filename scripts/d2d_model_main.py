@@ -48,10 +48,11 @@ def main():
 
     model.setup_result_analysis(
         # 图片生成控制
-        flow_graph=1,
-        ip_bandwidth_heatmap=1,
-        fifo_utilization_heatmap=1,
-        save_figures=0,
+        flow_graph=0,  # 生成PNG静态流量图
+        flow_graph_interactive=1,  # 生成HTML交互式流量图(新增)
+        ip_bandwidth_heatmap=0,
+        fifo_utilization_heatmap=0,
+        save_figures=1,  # 保存图片文件
         # CSV文件导出控制
         export_d2d_requests_csv=1,
         export_ip_bandwidth_csv=1,

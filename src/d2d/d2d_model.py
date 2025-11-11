@@ -157,6 +157,7 @@ class D2D_Model:
         self,
         # 图片生成控制
         flow_graph: bool = False,
+        flow_graph_interactive: bool = False,  # 新增：交互式flow图
         ip_bandwidth_heatmap: bool = False,
         fifo_utilization_heatmap: bool = False,
         save_figures: bool = True,
@@ -171,7 +172,8 @@ class D2D_Model:
         配置结果分析
 
         图片生成控制:
-            flow_graph: 是否生成流量图
+            flow_graph: 是否生成流量图（PNG/静态）
+            flow_graph_interactive: 是否生成交互式流量图（HTML）
             ip_bandwidth_heatmap: 是否生成IP带宽热力图
             fifo_utilization_heatmap: 是否生成FIFO使用率热力图
             save_figures: 是否保存图片
@@ -187,6 +189,7 @@ class D2D_Model:
         self._result_analysis_config.update(
             {
                 "flow_graph": flow_graph,
+                "flow_graph_interactive": flow_graph_interactive,  # 新增
                 "ip_bandwidth_heatmap": ip_bandwidth_heatmap,
                 "fifo_utilization_heatmap": fifo_utilization_heatmap,
                 "save_figures": save_figures,
@@ -1207,7 +1210,40 @@ class D2D_Model:
                 save_path = d2d_result_path if self._result_analysis_config.get("save_figures") else None
                 flow_path = d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=self.flow_graph_mode, save_path=save_path)
                 if flow_path:
-                    saved_files.append({"type": "D2D流量图", "path": flow_path})
+                    saved_files.append({"type": "D2D流量图(PNG)", "path": flow_path})
+
+            # 步骤3.5: 生成交互式流量图（如果启用）
+            if self._result_analysis_config.get("flow_graph_interactive"):
+                # 设置die_processors（与静态版本相同）
+                d2d_processor.die_processors = {}
+                for die_id, die_model in self.dies.items():
+                    if hasattr(die_model, "result_processor") and die_model.result_processor:
+                        die_processor = die_model.result_processor
+
+                        if not hasattr(die_processor, "sim_model"):
+                            die_processor.sim_model = die_model
+
+                        if not hasattr(die_model, "topo_type_stat"):
+                            die_model.topo_type_stat = self.kwargs.get("topo_type", "5x4")
+
+                        if hasattr(d2d_processor, "die_ip_bandwidth_data") and die_id in d2d_processor.die_ip_bandwidth_data:
+                            die_processor.ip_bandwidth_data = d2d_processor.die_ip_bandwidth_data[die_id]
+
+                        d2d_processor.die_processors[die_id] = die_processor
+
+                # 生成HTML文件
+                save_path = d2d_result_path if self._result_analysis_config.get("save_figures") else None
+                if save_path:
+                    # 为HTML文件创建独立的文件名
+                    html_save_path = os.path.join(save_path, f"d2d_flow_graph_{self.flow_graph_mode}_interactive.html")
+                else:
+                    html_save_path = None
+
+                interactive_flow_path = d2d_processor.draw_d2d_flow_graph_interactive(
+                    dies=self.dies, config=self.config, mode=self.flow_graph_mode, save_path=html_save_path
+                )
+                if interactive_flow_path:
+                    saved_files.append({"type": "D2D流量图(HTML交互式)", "path": interactive_flow_path})
 
             # 步骤4: 生成IP带宽热力图（如果启用）
             if self._result_analysis_config.get("ip_bandwidth_heatmap"):

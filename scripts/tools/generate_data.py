@@ -312,27 +312,61 @@ def generate_sim_16_share_d2d_traffic():
 
 
 def generate_example_traffic():
-    np.random.seed(919)
-    random.seed(919)
+    np.random.seed(1111)
+    random.seed(1111)
 
     # 配置参数
-    END_TIME = 6000
+    END_TIME = 10000
     burst = 4
     req_type = "R"
-    OUTPUT_FILE = f"../../test_data/data_{req_type}_1111.txt"
+    OUTPUT_FILE = f"../../test_data/data_burst{burst}_{req_type}_1111.txt"
 
     # 定义多个配置
     configs = [
         {
+            # "src_map": {
+            #     "gdma_0": [0],
+            # },
+            # "dst_map": {
+            #     "ddr_0": [3],
+            # },
             "src_map": {
-                "gdma_0": [0],
+                "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
+                "gdma_1": [3, 15, 19],
             },
             "dst_map": {
-                "ddr_0": [3],
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
             },
-            "speed": 128,
+            "speed": 40 * 0.9,
             "burst": burst,
             "req_type": req_type,
+        },
+        {
+            "src_map": {
+                "cdma_0": [18],
+                "cdma_1": [18],
+            },
+            "dst_map": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "speed": 56 * 0.9,
+            "burst": burst,
+            "req_type": req_type,
+        },
+        {
+            "src_map": {
+                "cdma_0": [18],
+                "cdma_1": [18],
+            },
+            "dst_map": {
+                "ddr_0": [3, 7, 11, 15],
+                "ddr_1": [3, 7, 11, 15],
+            },
+            "speed": 56 * 0.9,
+            "burst": burst,
+            "req_type": "W" if req_type == "R" else "R",
         },
     ]
 

@@ -82,6 +82,7 @@ class D2DAnalyzer:
         from .data_collectors import RequestCollector, LatencyStatsCollector, CircuitStatsCollector
         from .result_visualizers import BandwidthPlotter
         from .flow_graph_renderer import FlowGraphRenderer
+        from .interactive_flow_graph_renderer import InteractiveFlowGraphRenderer
         from .exporters import CSVExporter, ReportGenerator, JSONExporter
 
         self.config = config
@@ -101,6 +102,7 @@ class D2DAnalyzer:
         self.circuit_collector = CircuitStatsCollector()
         self.visualizer = BandwidthPlotter()
         self.flow_visualizer = FlowGraphRenderer()
+        self.interactive_flow_visualizer = InteractiveFlowGraphRenderer()  # 交互式渲染器
         self.exporter = CSVExporter()
         self.report_generator = ReportGenerator()
         self.json_exporter = JSONExporter()
@@ -880,6 +882,30 @@ class D2DAnalyzer:
             save_path: 保存路径
         """
         self.flow_visualizer.draw_d2d_flow_graph(
+            die_networks=die_networks,
+            dies=dies,
+            config=config,
+            die_ip_bandwidth_data=die_ip_bandwidth_data if die_ip_bandwidth_data else self.die_ip_bandwidth_data if hasattr(self, "die_ip_bandwidth_data") else None,
+            mode=mode,
+            save_path=save_path,
+        )
+
+    def draw_d2d_flow_graph_interactive(self, die_networks: Dict = None, dies: Dict = None, config=None, die_ip_bandwidth_data: Dict = None, mode: str = "total", save_path: str = None):
+        """
+        绘制D2D流图（交互式版本，生成HTML文件）
+
+        Args:
+            die_networks: Die网络字典
+            dies: Die模型字典
+            config: 配置对象
+            die_ip_bandwidth_data: Die IP带宽数据
+            mode: 显示模式
+            save_path: 保存路径（会自动转换为.html后缀）
+
+        Returns:
+            str: 生成的HTML文件路径
+        """
+        return self.interactive_flow_visualizer.draw_d2d_flow_graph(
             die_networks=die_networks,
             dies=dies,
             config=config,
