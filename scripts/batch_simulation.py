@@ -2,9 +2,9 @@
 批量仿真脚本 - 遍历仿真所有生成的数据流
 """
 
-from src.core import *
+from src.noc import *
 import os
-from src.utils.components import *
+from src.utils.flit import Flit
 from config.config import CrossRingConfig
 import matplotlib
 import numpy as np

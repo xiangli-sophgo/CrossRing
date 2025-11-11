@@ -19,7 +19,7 @@ from find_optimal_parameters import (
     create_optimization_history,
     create_parameter_correlation,
 )
-from src.core import *
+from src.noc import *
 from src.utils.component import Flit, Network, Node
 from config.config import CrossRingConfig
 import numpy as np

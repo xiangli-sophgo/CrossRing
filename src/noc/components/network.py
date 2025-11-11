@@ -9,7 +9,7 @@ import numpy as np
 from collections import deque, defaultdict
 from typing import Optional, Dict, List, Any, Tuple
 from config.config import CrossRingConfig
-from .flit import (
+from src.utils.flit import (
     Flit,
     TokenBucket,
     get_original_source_node,

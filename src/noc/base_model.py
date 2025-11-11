@@ -1,16 +1,18 @@
 from collections import deque, defaultdict
 
-from src.utils.optimal_placement import create_adjacency_matrix, find_shortest_paths
+from src.noc.topology_utils import create_adjacency_matrix, find_shortest_paths
 from config.config import CrossRingConfig
-from src.utils.components import Flit, Network, TokenBucket, IPInterface
-from src.utils.components.flit import (
+from src.utils.flit import (
+    Flit,
+    TokenBucket,
     get_original_source_node,
     get_original_destination_node,
     get_original_source_type,
     get_original_destination_type,
 )
+from src.noc.components import Network, IPInterface
 
-from src.core.Link_State_Visualizer import NetworkLinkVisualizer
+from src.analysis.Link_State_Visualizer import NetworkLinkVisualizer
 import matplotlib.pyplot as plt
 import os
 import sys, time
@@ -18,7 +20,7 @@ import inspect, logging
 import numpy as np
 from functools import wraps, lru_cache
 from src.analysis.analyzers import SingleDieAnalyzer, RequestInfo, BandwidthMetrics, WorkingInterval
-from src.core.traffic_scheduler import TrafficScheduler
+from src.noc.traffic_scheduler import TrafficScheduler
 from src.utils.arbitration import create_arbiter_from_config
 import threading
 
@@ -243,7 +245,7 @@ class BaseModel:
             for ip_type in self.config.CH_NAME_LIST:
                 # 检查是否是D2D接口类型
                 if ip_type == "d2d_rn_0":
-                    from src.utils.components.d2d_rn_interface import D2D_RN_Interface
+                    from src.d2d.components import D2D_RN_Interface
 
                     self.ip_modules[(ip_type, node_id)] = D2D_RN_Interface(
                         ip_type,
@@ -255,7 +257,7 @@ class BaseModel:
                         self.routes,
                     )
                 elif ip_type == "d2d_sn_0":
-                    from src.utils.components.d2d_sn_interface import D2D_SN_Interface
+                    from src.d2d.components import D2D_SN_Interface
 
                     self.ip_modules[(ip_type, node_id)] = D2D_SN_Interface(
                         ip_type,
@@ -1884,7 +1886,7 @@ class BaseModel:
         # FIFO使用率热力图生成
         if getattr(self, "fifo_utilization_heatmap", False):
             try:
-                from src.core.fifo_heatmap_visualizer import create_fifo_heatmap
+                from src.analysis.fifo_heatmap_visualizer import create_fifo_heatmap
 
                 # 计算总周期数(使用物理周期数,因为depth_sum在每个物理周期累加)
                 total_cycles = self.cycle

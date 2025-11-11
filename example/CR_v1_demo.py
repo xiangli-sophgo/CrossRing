@@ -1,4 +1,4 @@
-from src.core import *
+from src.noc import *
 from config.config import CrossRingConfig
 import numpy as np
 

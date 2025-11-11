@@ -1,4 +1,4 @@
-from src.core import *
+from src.noc import *
 import os
 from src.utils.component import Flit, Network, Node
 from config.config import CrossRingConfig

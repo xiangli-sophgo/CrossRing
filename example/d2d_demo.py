@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.append("..")
-from src.core.d2d_model import D2D_Model
+from src.d2d.d2d_model import D2D_Model
 from config.d2d_config import D2DConfig
 
 

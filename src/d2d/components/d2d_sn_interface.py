@@ -6,8 +6,8 @@ Handles cross-die request reception and forwarding within the die.
 from __future__ import annotations
 import heapq
 from collections import deque
-from .ip_interface import IPInterface
-from .flit import Flit
+from src.noc.components import IPInterface
+from src.utils.flit import Flit
 import traceback
 
 
@@ -45,7 +45,7 @@ class D2D_SN_Interface(IPInterface):
         if not self.tx_token_bucket and not self.rx_token_bucket:
             # 如果父类没有设置带宽限制，使用D2D_SN专用配置
             d2d_sn_bw_limit = getattr(config, "D2D_SN_BW_LIMIT", 128)
-            from .flit import TokenBucket
+            from src.utils.flit import TokenBucket
 
             self.tx_token_bucket = TokenBucket(
                 rate=d2d_sn_bw_limit / config.NETWORK_FREQUENCY / config.FLIT_SIZE,
@@ -119,7 +119,7 @@ class D2D_SN_Interface(IPInterface):
 
     def _create_response_flit(self, req_flit: Flit, rsp_type: str, destination_pos: int = None) -> Flit:
         """创建响应flit的通用方法"""
-        from .flit import Flit
+        from src.utils.flit import Flit
 
         # 节点编号直接就是网络位置，不需要映射转换
         dest_pos = destination_pos if destination_pos is not None else req_flit.source
@@ -167,7 +167,7 @@ class D2D_SN_Interface(IPInterface):
             # AXI_B通道的写完成响应
             self.handle_cross_die_write_complete_response(flit)
             # 回收AXI flit（forward方法会创建新NoC flit）
-            from .flit import _flit_pool
+            from src.utils.flit import _flit_pool
 
             _flit_pool.return_flit(flit)
             return  # 已处理，直接返回
@@ -176,14 +176,14 @@ class D2D_SN_Interface(IPInterface):
             if hasattr(flit, "req_type") and flit.req_type == "write":
                 self.handle_cross_die_write_data(flit)
                 # 回收AXI flit
-                from .flit import _flit_pool
+                from src.utils.flit import _flit_pool
 
                 _flit_pool.return_flit(flit)
             else:
                 # 其他数据（如读数据），调用父类处理
                 self._handle_received_data(flit)
                 # 回收AXI flit
-                from .flit import _flit_pool
+                from src.utils.flit import _flit_pool
 
                 _flit_pool.return_flit(flit)
         elif hasattr(flit, "req_type") and flit.req_type:
@@ -192,21 +192,21 @@ class D2D_SN_Interface(IPInterface):
                 # 读请求：转发到Die内目标SN节点
                 self.forward_read_request_to_local_sn(flit)
                 # 回收AXI flit
-                from .flit import _flit_pool
+                from src.utils.flit import _flit_pool
 
                 _flit_pool.return_flit(flit)
             elif flit.req_type == "write":
                 # 写请求：需要先检查资源并返回data_send响应
                 self.handle_local_cross_die_write_request(flit)
                 # 回收AXI flit
-                from .flit import _flit_pool
+                from src.utils.flit import _flit_pool
 
                 _flit_pool.return_flit(flit)
         elif hasattr(flit, "rsp_type") and flit.rsp_type:
             # 响应：转发回Die内原始请求节点
             self.forward_response_to_local_rn(flit)
             # 回收AXI flit
-            from .flit import _flit_pool
+            from src.utils.flit import _flit_pool
 
             _flit_pool.return_flit(flit)
 
@@ -215,7 +215,7 @@ class D2D_SN_Interface(IPInterface):
         将跨Die读请求转发到本地目标SN节点
         """
         # 使用统一方法创建新的NoC flit
-        from .flit import create_d2d_flit_copy
+        from src.utils.flit import create_d2d_flit_copy
 
         # 设置新的源为D2D_SN节点
         source = self.ip_pos
@@ -248,7 +248,7 @@ class D2D_SN_Interface(IPInterface):
         将跨Die响应转发回本地原始请求节点
         """
         # 使用统一方法创建新的NoC flit
-        from .flit import create_d2d_flit_copy
+        from src.utils.flit import create_d2d_flit_copy
 
         # 使用D2D统一属性恢复原始目标信息
         # d2d_origin_node是源映射位置，转为目标映射位置（减去NUM_COL）
@@ -523,7 +523,7 @@ class D2D_SN_Interface(IPInterface):
             self.sn_rdb[packet_id] = []
 
         # 创建新flit并复制AXI flit的属性（不直接存储AXI flit，因为它会被回收）
-        from .flit import create_d2d_flit_copy
+        from src.utils.flit import create_d2d_flit_copy
 
         # 创建临时flit用于存储（包含时间戳）
         temp_flit = create_d2d_flit_copy(flit, source=0, destination=0, path=[0], attr_preset="with_timestamp")
@@ -767,7 +767,7 @@ class D2D_SN_Interface(IPInterface):
         if target_die_id is None or not self.d2d_sys:
             return
 
-        from .flit import create_d2d_flit_copy
+        from src.utils.flit import create_d2d_flit_copy
 
         # 创建新的AXI写请求flit
         axi_write_req = create_d2d_flit_copy(write_req, source=self.ip_pos, destination=0, path=[0], attr_preset="request")

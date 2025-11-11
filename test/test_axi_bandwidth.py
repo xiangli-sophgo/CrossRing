@@ -20,7 +20,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.core.d2d_model import D2D_Model
+from src.d2d.d2d_model import D2D_Model
 from config.d2d_config import D2DConfig
 
 

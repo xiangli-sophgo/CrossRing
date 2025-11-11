@@ -11,7 +11,7 @@ CrossPoint组件 - 管理NoC节点的上环/下环逻辑
 from collections import deque, defaultdict
 from typing import Dict, Optional, Any, Tuple
 from config.config import CrossRingConfig
-from .flit import Flit
+from src.utils.flit import Flit
 
 
 class CrossPoint:

@@ -80,7 +80,8 @@ class D2DAnalyzer:
         from collections import defaultdict
         from .core_calculators import DataValidator, TimeIntervalCalculator, BandwidthCalculator
         from .data_collectors import RequestCollector, LatencyStatsCollector, CircuitStatsCollector
-        from .visualizers import BandwidthPlotter, FlowGraphRenderer
+        from .result_visualizers import BandwidthPlotter
+        from .flow_graph_renderer import FlowGraphRenderer
         from .exporters import CSVExporter, ReportGenerator, JSONExporter
 
         self.config = config

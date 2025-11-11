@@ -17,9 +17,7 @@ if sys.platform == "darwin":  # macOS
         matplotlib.use("macosx")
     except ImportError:
         matplotlib.use("Agg")
-# else:
-#     # 其他系统默认使用Agg (无GUI后端)
-#     matplotlib.use("Agg")
+
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -34,6 +32,8 @@ import warnings
 import os
 import math
 import traceback
+
+
 
 
 class FlowGraphRenderer:
@@ -318,6 +318,7 @@ class FlowGraphRenderer:
 
                         # 应用旋转矩阵变换
                         import math
+
                         angle_rad = math.radians(rotation)
                         cos_a = math.cos(angle_rad)
                         sin_a = math.sin(angle_rad)
@@ -425,11 +426,19 @@ class FlowGraphRenderer:
             # 绘制IP信息
             if ip_bandwidth_data is not None:
                 self._draw_ip_info_in_node(
-                    ax, x, y, node, config, mode, square_size, ip_bandwidth_data,
-                    max_ip_bandwidth, min_ip_bandwidth,
+                    ax,
+                    x,
+                    y,
+                    node,
+                    config,
+                    mode,
+                    square_size,
+                    ip_bandwidth_data,
+                    max_ip_bandwidth,
+                    min_ip_bandwidth,
                     die_id=die_id,
                     is_d2d_scenario=is_d2d_scenario,
-                    show_bandwidth_value=show_ip_bandwidth_value
+                    show_bandwidth_value=show_ip_bandwidth_value,
                 )
 
         return pos
@@ -498,9 +507,7 @@ class FlowGraphRenderer:
             plt.show()
 
     def _draw_ip_info_in_node(
-        self, ax, x, y, node, config, mode, square_size, ip_bandwidth_data,
-        max_ip_bandwidth=None, min_ip_bandwidth=None,
-        die_id=None, is_d2d_scenario=False, show_bandwidth_value=True
+        self, ax, x, y, node, config, mode, square_size, ip_bandwidth_data, max_ip_bandwidth=None, min_ip_bandwidth=None, die_id=None, is_d2d_scenario=False, show_bandwidth_value=True
     ):
         """
         在节点内绘制IP信息（小方块+透明度）
@@ -548,7 +555,7 @@ class FlowGraphRenderer:
 
             for ip_type, data_matrix in mode_data.items():
                 # D2D场景下过滤掉 d2d_rn 和 d2d_sn 类型
-                if is_d2d_scenario and ip_type.lower() in ['d2d_rn', 'd2d_sn']:
+                if is_d2d_scenario and ip_type.lower() in ["d2d_rn", "d2d_sn"]:
                     continue
 
                 matrix_row = physical_row
@@ -770,7 +777,9 @@ class FlowGraphRenderer:
 
         return die_offsets, figsize
 
-    def draw_d2d_flow_graph(self, die_networks: Dict = None, dies: Dict = None, config=None, die_ip_bandwidth_data: Dict = None, mode: str = "utilization", node_size: int = 2500, save_path: str = None):
+    def draw_d2d_flow_graph(
+        self, die_networks: Dict = None, dies: Dict = None, config=None, die_ip_bandwidth_data: Dict = None, mode: str = "utilization", node_size: int = 2500, save_path: str = None
+    ):
         """
         绘制D2D系统流量图（多Die布局）
 
@@ -813,10 +822,7 @@ class FlowGraphRenderer:
         die_height = (base_die_rows - 1) * node_spacing
 
         # 使用动态布局计算
-        die_offsets, figsize = self._calculate_die_offsets_from_layout(
-            die_layout, die_layout_type, die_width, die_height,
-            dies=dies, config=config, die_rotations=die_rotations
-        )
+        die_offsets, figsize = self._calculate_die_offsets_from_layout(die_layout, die_layout_type, die_width, die_height, dies=dies, config=config, die_rotations=die_rotations)
 
         # 创建画布
         fig, ax = plt.subplots(figsize=figsize)
@@ -950,6 +956,7 @@ class FlowGraphRenderer:
                 self._draw_cross_die_connections(ax, d2d_bandwidth, die_node_positions, config, dies, die_offsets)
             except Exception as e:
                 import traceback
+
                 traceback.print_exc()
 
         # 收集所有使用的IP类型（用于图例，过滤掉d2d_rn和d2d_sn）
@@ -959,7 +966,7 @@ class FlowGraphRenderer:
                 if mode in die_data:
                     for ip_type in die_data[mode].keys():
                         # 过滤掉D2D专用节点
-                        if ip_type.lower() not in ['d2d_rn', 'd2d_sn']:
+                        if ip_type.lower() not in ["d2d_rn", "d2d_sn"]:
                             used_ip_types.add(ip_type.upper().split("_")[0])
 
         # 添加IP类型图例
@@ -1047,6 +1054,7 @@ class FlowGraphRenderer:
             tuple: (ux, uy, perpx, perpy) 单位方向向量和垂直向量，如果长度为0则返回None
         """
         import numpy as np
+
         dx, dy = to_x - from_x, to_y - from_y
         length = np.sqrt(dx * dx + dy * dy)
 
@@ -1258,6 +1266,7 @@ class FlowGraphRenderer:
         基于推断的布局和D2D_PAIRS配置绘制连接
         """
         import numpy as np
+
         try:
             # 使用推断的D2D连接对
             d2d_pairs = config.D2D_PAIRS
@@ -1339,6 +1348,7 @@ class FlowGraphRenderer:
 
         except Exception as e:
             import traceback
+
             traceback.print_exc()
 
     def _draw_single_d2d_arrow(self, ax, start_node_x, start_node_y, end_node_x, end_node_y, ux, uy, perpx, perpy, bandwidth, connection_index, connection_type=None):
@@ -1377,14 +1387,7 @@ class FlowGraphRenderer:
             zorder = 4
 
         # 绘制箭头
-        arrow = FancyArrowPatch(
-            (start_x, start_y), (end_x, end_y),
-            arrowstyle="-|>",
-            mutation_scale=10,
-            color=color,
-            linewidth=linewidth,
-            zorder=zorder
-        )
+        arrow = FancyArrowPatch((start_x, start_y), (end_x, end_y), arrowstyle="-|>", mutation_scale=10, color=color, linewidth=linewidth, zorder=zorder)
         ax.add_patch(arrow)
 
         # 只在有流量时添加标签
@@ -1426,23 +1429,9 @@ class FlowGraphRenderer:
                 angle_deg += 180
 
             # 绘制标签
-            ax.text(
-                label_x, label_y, label_text,
-                ha="center", va="center",
-                fontsize=8, fontweight="normal",
-                color=color, rotation=angle_deg,
-                rotation_mode="anchor"
-            )
+            ax.text(label_x, label_y, label_text, ha="center", va="center", fontsize=8, fontweight="normal", color=color, rotation=angle_deg, rotation_mode="anchor")
 
-    def draw_ip_bandwidth_heatmap(
-        self,
-        dies: Dict = None,
-        config=None,
-        die_ip_bandwidth_data: Dict = None,
-        mode: str = "total",
-        node_size: int = 4000,
-        save_path: Optional[str] = None
-    ):
+    def draw_ip_bandwidth_heatmap(self, dies: Dict = None, config=None, die_ip_bandwidth_data: Dict = None, mode: str = "total", node_size: int = 4000, save_path: Optional[str] = None):
         """
         绘制IP带宽热力图（不显示链路，只显示节点和IP带宽）
 
@@ -1486,10 +1475,7 @@ class FlowGraphRenderer:
         die_height = (base_die_rows - 1) * node_spacing
 
         # 计算Die偏移量和画布大小
-        die_offsets, figsize = self._calculate_die_offsets_from_layout(
-            die_layout, die_layout_type, die_width, die_height,
-            dies=dies, config=config, die_rotations=die_rotations
-        )
+        die_offsets, figsize = self._calculate_die_offsets_from_layout(die_layout, die_layout_type, die_width, die_height, dies=dies, config=config, die_rotations=die_rotations)
 
         # 创建画布
         fig, ax = plt.subplots(figsize=figsize)
@@ -1505,7 +1491,7 @@ class FlowGraphRenderer:
                 if mode in die_data:
                     for ip_type, data_matrix in die_data[mode].items():
                         # 过滤掉 d2d_rn 和 d2d_sn 类型
-                        if ip_type.lower() in ['d2d_rn', 'd2d_sn']:
+                        if ip_type.lower() in ["d2d_rn", "d2d_sn"]:
                             continue
 
                         nonzero_bw = data_matrix[data_matrix > 0.001]
@@ -1539,9 +1525,7 @@ class FlowGraphRenderer:
                 orig_col = node % orig_cols
 
                 # 应用旋转
-                new_row, new_col = self._apply_die_rotation(
-                    orig_row, orig_col, orig_rows, orig_cols, die_rotation
-                )
+                new_row, new_col = self._apply_die_rotation(orig_row, orig_col, orig_rows, orig_cols, die_rotation)
 
                 x = new_col * node_spacing + offset_x
                 y = -new_row * node_spacing + offset_y
@@ -1549,17 +1533,10 @@ class FlowGraphRenderer:
                 ys.append(y)
 
                 # 绘制节点（热力图样式）
-                self._draw_heatmap_node(
-                    ax, x, y, node, die_id, die_config,
-                    die_ip_bandwidth_data, mode, node_size,
-                    max_bandwidth, min_bandwidth
-                )
+                self._draw_heatmap_node(ax, x, y, node, die_id, die_config, die_ip_bandwidth_data, mode, node_size, max_bandwidth, min_bandwidth)
 
             if xs and ys:
-                die_positions[die_id] = {
-                    "xs": xs, "ys": ys,
-                    "offset_x": offset_x, "offset_y": offset_y
-                }
+                die_positions[die_id] = {"xs": xs, "ys": ys, "offset_x": offset_x, "offset_y": offset_y}
 
         # 添加Die标签
         self._add_die_labels_for_heatmap(ax, die_positions, die_layout, die_rotations)
@@ -1581,9 +1558,7 @@ class FlowGraphRenderer:
 
         # 保存或显示
         if save_path:
-            if os.path.isdir(save_path) or (
-                not save_path.endswith(".png") and not save_path.endswith(".jpg")
-            ):
+            if os.path.isdir(save_path) or (not save_path.endswith(".png") and not save_path.endswith(".jpg")):
                 filename = f"ip_bandwidth_heatmap_{mode}.png"
                 save_path = os.path.join(save_path, filename)
 
@@ -1602,11 +1577,7 @@ class FlowGraphRenderer:
                 plt.show()
             return None
 
-    def _draw_heatmap_node(
-        self, ax, x, y, node, die_id, config,
-        die_ip_bandwidth_data, mode, node_size,
-        max_bandwidth, min_bandwidth
-    ):
+    def _draw_heatmap_node(self, ax, x, y, node, die_id, config, die_ip_bandwidth_data, mode, node_size, max_bandwidth, min_bandwidth):
         """绘制热力图样式的节点（特殊背景色 + IP方块）"""
         from matplotlib.patches import Rectangle
         from collections import defaultdict
@@ -1623,7 +1594,7 @@ class FlowGraphRenderer:
             if mode in die_data:
                 for ip_type, data_matrix in die_data[mode].items():
                     # 过滤掉 d2d_rn 和 d2d_sn 类型
-                    if ip_type.lower() in ['d2d_rn', 'd2d_sn']:
+                    if ip_type.lower() in ["d2d_rn", "d2d_sn"]:
                         continue
 
                     if physical_row < data_matrix.shape[0] and physical_col < data_matrix.shape[1]:
@@ -1675,8 +1646,7 @@ class FlowGraphRenderer:
         # RN/SN分类排序
         rn_ips = [(k, v) for k, v in ip_type_dict.items() if k.upper() in RN_TYPES]
         sn_ips = [(k, v) for k, v in ip_type_dict.items() if k.upper() in SN_TYPES]
-        other_ips = [(k, v) for k, v in ip_type_dict.items()
-                     if k.upper() not in RN_TYPES + SN_TYPES]
+        other_ips = [(k, v) for k, v in ip_type_dict.items() if k.upper() not in RN_TYPES + SN_TYPES]
 
         rn_ips.sort(key=lambda x: sum(x[1]), reverse=True)
         sn_ips.sort(key=lambda x: sum(x[1]), reverse=True)
@@ -1791,12 +1761,14 @@ class FlowGraphRenderer:
                         label_y = min(ys) - 2
 
             ax.text(
-                label_x, label_y,
+                label_x,
+                label_y,
                 f"Die {die_id}",
-                ha="center", va="center",
-                fontsize=12, fontweight="bold",
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue",
-                         alpha=0.7, edgecolor="none"),
+                ha="center",
+                va="center",
+                fontsize=12,
+                fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.7, edgecolor="none"),
                 rotation=0,
             )
 
@@ -1808,16 +1780,10 @@ class FlowGraphRenderer:
         legend_elements = []
         for ip_type in sorted(used_ip_types):
             color = IP_COLOR_MAP.get(ip_type, "#808080")
-            legend_elements.append(Patch(facecolor=color, edgecolor='black', label=ip_type))
+            legend_elements.append(Patch(facecolor=color, edgecolor="black", label=ip_type))
 
         if legend_elements:
-            ax.legend(
-                handles=legend_elements,
-                loc='upper right',
-                fontsize=8,
-                framealpha=0.9,
-                title="IP Types"
-            )
+            ax.legend(handles=legend_elements, loc="upper right", fontsize=8, framealpha=0.9, title="IP Types")
 
     def _add_bandwidth_range_legend(self, ax, min_bw, max_bw):
         """添加带宽透明度对应关系colorbar"""
@@ -1839,7 +1805,7 @@ class FlowGraphRenderer:
             loc="upper right",
             bbox_to_anchor=(-0.05, -0.35, 1, 1),  # 位置：IP图例下方
             bbox_transform=ax.transAxes,
-            borderpad=0
+            borderpad=0,
         )
 
         # 创建灰度渐变colormap（从浅到深）
@@ -1865,329 +1831,3 @@ class FlowGraphRenderer:
         cb.set_ticklabels([f"{v:.1f}" for v in tick_values])
 
 
-class BandwidthPlotter:
-    """带宽曲线绘制器 - 绘制时间序列带宽曲线"""
-
-    def __init__(self):
-        """初始化带宽曲线绘制器"""
-        pass
-
-    def plot_rn_bandwidth_curves(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None) -> float:
-        """
-        绘制RN带宽时间曲线
-
-        Args:
-            rn_bandwidth_time_series: RN带宽时间序列数据
-                格式: {port_key: {"time": [...], "start_times": [...], "bytes": [...]}}
-            network_frequency: 网络频率 (GHz)
-            save_path: 保存路径
-
-        Returns:
-            float: 曲线下面积（用于带宽积分计算）
-        """
-        fig = plt.figure(figsize=(12, 8))
-        total_bw = 0
-
-        for port_key, data_dict in rn_bandwidth_time_series.items():
-            if not data_dict.get("time"):
-                continue
-
-            # 排序时间戳并去除nan和inf值
-            raw_times = np.array(data_dict["time"])
-            clean_times = raw_times[~(np.isnan(raw_times) | np.isinf(raw_times))]
-            times = np.sort(clean_times)
-
-            if len(times) == 0:
-                continue
-
-            # 计算累积带宽
-            cum_counts = np.arange(1, len(times) + 1)
-            bandwidth = (cum_counts * 128 * 4) / times  # bytes/ns转换为GB/s
-
-            # 只显示前100%的时间段
-            t = np.percentile(times, 100)
-            mask = times <= t
-
-            (line,) = plt.plot(times[mask] / 1000, bandwidth[mask], drawstyle="default", label=f"{port_key}")
-            plt.text(times[mask][-1] / 1000, bandwidth[mask][-1], f"{bandwidth[mask][-1]:.2f}", va="center", color=line.get_color(), fontsize=12)
-
-            total_bw += bandwidth[mask][-1]
-
-        plt.xlabel("Time (us)")
-        plt.ylabel("Bandwidth (GB/s)")
-        plt.title("RN Bandwidth")
-        plt.legend()
-        plt.grid(True)
-
-        if save_path:
-            fig.savefig(save_path, bbox_inches="tight")
-            plt.close(fig)
-        else:
-            plt.show()
-
-        return total_bw
-
-    def plot_rn_bandwidth_curves_work_interval(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None) -> float:
-        """
-        绘制RN带宽工作区间曲线（去除空闲时段）
-
-        Args:
-            rn_bandwidth_time_series: RN带宽时间序列数据
-            network_frequency: 网络频率
-            save_path: 保存路径
-
-        Returns:
-            float: 工作区间内的带宽积分
-        """
-        # 简化实现：调用主函数
-        return self.plot_rn_bandwidth_curves(rn_bandwidth_time_series, network_frequency, save_path)
-
-
-class HeatmapDrawer:
-    """热图绘制器 - 绘制IP带宽热图"""
-
-    def __init__(self):
-        """初始化热图绘制器"""
-        self.IP_COLOR_MAP = IP_COLOR_MAP
-
-    def draw_ip_bandwidth_heatmap(self, die_ip_bandwidth_data: Dict, dies: Dict = None, config=None, mode: str = "total", node_size: int = 4000, save_path: str = None):
-        """
-        绘制IP带宽热图（支持多Die）
-
-        Args:
-            die_ip_bandwidth_data: IP带宽数据字典
-                格式: {die_id: {mode: {ip_type: bandwidth_matrix}}}
-            dies: Die模型字典
-            config: 配置对象
-            mode: 显示模式 ("read", "write", "total")
-            node_size: 节点大小
-            save_path: 保存路径
-        """
-        if not die_ip_bandwidth_data:
-            print("警告: 没有die_ip_bandwidth_data数据，跳过IP带宽热力图绘制")
-            return
-
-        # 创建画布
-        fig, ax = plt.subplots(figsize=(14, 10))
-        ax.set_aspect("equal")
-
-        # 收集所有IP类型和最大带宽值
-        all_bandwidths = []
-        used_ip_types = set()
-
-        for die_id in die_ip_bandwidth_data.keys():
-            if die_id in die_ip_bandwidth_data:
-                die_data = die_ip_bandwidth_data[die_id]
-                if mode in die_data:
-                    for ip_type, data_matrix in die_data[mode].items():
-                        nonzero_bw = data_matrix[data_matrix > 0.001]
-                        if len(nonzero_bw) > 0:
-                            all_bandwidths.extend(nonzero_bw.tolist())
-                            used_ip_types.add(ip_type.upper().split("_")[0])
-
-        # 计算全局带宽范围
-        max_bandwidth = max(all_bandwidths) if all_bandwidths else 1.0
-        min_bandwidth = min(all_bandwidths) if all_bandwidths else 0.0
-
-        # 绘制每个Die的热图
-        node_spacing = 3.0
-        for idx, (die_id, die_data) in enumerate(die_ip_bandwidth_data.items()):
-            if mode not in die_data:
-                continue
-
-            offset_x = idx * 15
-            offset_y = 0
-
-            die_model = dies[die_id] if dies and die_id in dies else None
-            die_config = die_model.config if die_model else config
-
-            # 绘制该Die的节点热图
-            for node in range(die_config.NUM_ROW * die_config.NUM_COL):
-                row = node // die_config.NUM_COL
-                col = node % die_config.NUM_COL
-
-                x = col * node_spacing + offset_x
-                y = -row * node_spacing + offset_y
-
-                # 绘制该节点的IP热图
-                self._draw_ip_heatmap_in_node(ax, x, y, node, die_id, die_data, mode, node_size, max_bandwidth, min_bandwidth)
-
-        # 设置图表
-        plt.title(f"IP Bandwidth Heatmap - {mode.capitalize()}", fontsize=14, fontweight="bold")
-        ax.axis("equal")
-        ax.margins(0.1)
-        ax.axis("off")
-
-        if save_path:
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            plt.savefig(save_path, dpi=150, bbox_inches="tight")
-            plt.close()
-        else:
-            plt.show()
-
-    def _draw_ip_heatmap_in_node(self, ax, x, y, node, die_id, die_data, mode, node_size, max_bandwidth, min_bandwidth):
-        """
-        在指定位置绘制节点的IP带宽热力图
-
-        Args:
-            ax: matplotlib坐标轴
-            x, y: 节点中心位置
-            node: 节点ID
-            die_id: Die ID
-            die_data: Die带宽数据
-            mode: 显示模式
-            node_size: 节点大小
-            max_bandwidth: 全局最大带宽
-            min_bandwidth: 全局最小带宽
-        """
-        from matplotlib.patches import Rectangle
-
-        # 收集该节点的所有IP及其带宽
-        active_ips = []
-        if mode in die_data:
-            for ip_type, data_matrix in die_data[mode].items():
-                # 简化：假设节点对应矩阵的某个位置
-                # 实际应该根据节点的row/col计算
-                bandwidth = 0
-                if hasattr(data_matrix, "shape"):
-                    if data_matrix.size > node:
-                        bandwidth = data_matrix.flat[node]
-                if bandwidth > 0.001:
-                    active_ips.append((ip_type, bandwidth))
-
-        # 计算节点框大小
-        square_size = (node_size / 1000.0) * 0.3
-        node_box_size = square_size * 3.98
-
-        # 绘制节点外框
-        node_fill = Rectangle(
-            (x - node_box_size / 2, y - node_box_size / 2),
-            width=node_box_size,
-            height=node_box_size,
-            facecolor="#FFF9C4" if active_ips else "#F5F5F5",
-            edgecolor="black",
-            linewidth=0.8,
-            alpha=0.3 if active_ips else 1.0,
-            zorder=1,
-        )
-        ax.add_patch(node_fill)
-
-        if not active_ips:
-            return
-
-        # 绘制IP热图方块
-        for idx, (ip_type, bandwidth) in enumerate(active_ips):
-            # 计算方块位置
-            ip_y = y + (idx - len(active_ips) / 2) * 0.3
-            ip_size = 0.2
-
-            # 计算颜色
-            base_type = ip_type.upper().split("_")[0]
-            base_color = self.IP_COLOR_MAP.get(base_type, self.IP_COLOR_MAP["OTHER"])
-
-            # 根据带宽调整透明度
-            if max_bandwidth > min_bandwidth:
-                alpha = (bandwidth - min_bandwidth) / (max_bandwidth - min_bandwidth)
-            else:
-                alpha = 1.0
-
-            ip_rect = Rectangle(
-                (x - ip_size / 2, ip_y - ip_size / 2),
-                width=ip_size,
-                height=ip_size,
-                facecolor=base_color,
-                edgecolor="black",
-                linewidth=0.5,
-                alpha=alpha,
-                zorder=2,
-            )
-            ax.add_patch(ip_rect)
-
-
-class IPInfoBoxDrawer:
-    """IP信息框绘制器 - 绘制节点上的IP信息和带宽"""
-
-    def __init__(self):
-        """初始化IP信息框绘制器"""
-        self.IP_COLOR_MAP = IP_COLOR_MAP
-
-    def draw_ip_info_box(self, ax, x: float, y: float, node: int, config, mode: str, square_size: float, max_ip_bandwidth: float = None, min_ip_bandwidth: float = None):
-        """
-        在单Die场景下绘制IP信息框
-
-        Args:
-            ax: matplotlib axes对象
-            x: X坐标
-            y: Y坐标
-            node: 节点ID
-            config: 配置对象
-            mode: 显示模式
-            square_size: 方框大小
-            max_ip_bandwidth: 最大IP带宽（用于归一化）
-            min_ip_bandwidth: 最小IP带宽
-        """
-        # 简化实现：绘制节点编号
-        ax.text(x, y, str(node), ha="center", va="center", fontsize=10, fontweight="bold", zorder=3)
-
-    def draw_d2d_ip_info_box(
-        self,
-        ax,
-        x: float,
-        y: float,
-        node: int,
-        config,
-        mode: str,
-        square_size: float,
-        die_id: int = None,
-        die_model=None,
-        max_ip_bandwidth: float = None,
-        min_ip_bandwidth: float = None,
-        rotation: int = 0,
-    ):
-        """
-        在D2D场景下绘制IP信息框
-
-        Args:
-            ax: matplotlib axes对象
-            x: X坐标
-            y: Y坐标
-            node: 节点ID
-            config: 配置对象
-            mode: 显示模式
-            square_size: 方框大小
-            die_id: Die ID
-            die_model: Die模型对象
-            max_ip_bandwidth: 最大IP带宽
-            min_ip_bandwidth: 最小IP带宽
-            rotation: Die旋转角度
-        """
-        # 简化实现：绘制节点编号
-        ax.text(x, y, f"D{die_id}N{node}", ha="center", va="center", fontsize=8, fontweight="bold", zorder=3, rotation=rotation)
-
-    def _get_ip_color(self, ip_type: str, bandwidth: float, max_bw: float, min_bw: float) -> str:
-        """
-        根据IP类型和带宽获取颜色
-
-        Args:
-            ip_type: IP类型（如"gdma", "ddr"）
-            bandwidth: 当前带宽
-            max_bw: 最大带宽
-            min_bw: 最小带宽
-
-        Returns:
-            str: 十六进制颜色代码
-        """
-        # 获取基础颜色
-        base_color = IP_COLOR_MAP.get(ip_type.upper(), IP_COLOR_MAP["OTHER"])
-
-        # 根据带宽调整亮度
-        if max_bw > min_bw:
-            intensity = (bandwidth - min_bw) / (max_bw - min_bw)
-        else:
-            intensity = 1.0
-
-        # 将hex颜色转换为RGB并调整亮度
-        rgb = mcolors.hex2color(base_color)
-        # 线性插值：从白色(1,1,1)到基础色
-        adjusted_rgb = tuple(1.0 - intensity * (1.0 - c) for c in rgb)
-        return mcolors.rgb2hex(adjusted_rgb)

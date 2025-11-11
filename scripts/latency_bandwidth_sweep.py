@@ -15,7 +15,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.core.REQ_RSP import REQ_RSP_model
+from src.noc.REQ_RSP import REQ_RSP_model
 from config.config import CrossRingConfig
 import pandas as pd
 import plotly.graph_objects as go

@@ -3,7 +3,7 @@
 一个示例脚本，用于演示双通道数据功能。
 """
 
-from src.core.dual_channel_base_model import DualChannelBaseModel
+from src.noc.dual_channel_base_model import DualChannelBaseModel
 from config.dual_channel_config import DualChannelConfig
 import numpy as np
 

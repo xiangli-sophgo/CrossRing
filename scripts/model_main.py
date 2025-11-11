@@ -1,6 +1,6 @@
-from src.core import *
+from src.noc import *
 import os
-from src.utils.components import *
+from src.utils.flit import Flit
 from config.config import CrossRingConfig
 import matplotlib
 import numpy as np

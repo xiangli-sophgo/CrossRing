@@ -6,8 +6,8 @@ Handles cross-die request initiation with AXI channel delays.
 from __future__ import annotations
 import heapq
 from collections import deque
-from .ip_interface import IPInterface
-from .flit import Flit, TokenBucket, D2D_ORIGIN_TARGET_ATTRS
+from src.noc.components import IPInterface
+from src.utils.flit import Flit, TokenBucket, D2D_ORIGIN_TARGET_ATTRS
 import logging
 
 
@@ -146,7 +146,7 @@ class D2D_RN_Interface(IPInterface):
             # print(f"[D2D RN Debug] 处理AXI_W写数据")
             self.handle_cross_die_write_data(flit)
             # 回收AXI flit
-            from .flit import _flit_pool
+            from src.utils.flit import _flit_pool
 
             _flit_pool.return_flit(flit)
         elif hasattr(flit, "req_type") and flit.req_type == "write" and not (hasattr(flit, "flit_type") and flit.flit_type == "data"):
@@ -154,7 +154,7 @@ class D2D_RN_Interface(IPInterface):
             # print(f"[D2D RN Debug] 处理跨Die写请求")
             self.handle_cross_die_write_request(flit)
             # 回收AXI flit
-            from .flit import _flit_pool
+            from src.utils.flit import _flit_pool
 
             _flit_pool.return_flit(flit)
         elif hasattr(flit, "flit_type") and flit.flit_type == "data" and hasattr(flit, "req_type") and flit.req_type == "write":
@@ -162,7 +162,7 @@ class D2D_RN_Interface(IPInterface):
             # print(f"[D2D RN Debug] 处理传统写数据")
             self.handle_cross_die_write_data(flit)
             # 回收AXI flit
-            from .flit import _flit_pool
+            from src.utils.flit import _flit_pool
 
             _flit_pool.return_flit(flit)
         else:
@@ -170,7 +170,7 @@ class D2D_RN_Interface(IPInterface):
             # print(f"[D2D RN Debug] 处理其他类型flit（读数据等）")
             self.handle_other_cross_die_flit(flit)
             # 回收AXI flit
-            from .flit import _flit_pool
+            from src.utils.flit import _flit_pool
 
             _flit_pool.return_flit(flit)
 
@@ -190,7 +190,7 @@ class D2D_RN_Interface(IPInterface):
             self.rn_wdb_count["count"] -= flit.burst_length
 
             # 创建flit副本保存写请求（因为AXI flit会被回收）
-            from .flit import create_d2d_flit_copy
+            from src.utils.flit import create_d2d_flit_copy
 
             write_req_copy = create_d2d_flit_copy(flit, source=0, destination=0, path=[0], attr_preset="request")
 
@@ -243,7 +243,7 @@ class D2D_RN_Interface(IPInterface):
         source_mapped = self.ip_pos
         path = self.routes[source_mapped][target_pos] if target_pos in self.routes[source_mapped] else []
 
-        from .flit import create_d2d_flit_copy
+        from src.utils.flit import create_d2d_flit_copy
 
         # 创建本地写请求flit（使用basic预设，因为不需要req_attr）
         local_write_req = create_d2d_flit_copy(write_req, source=source_mapped, destination=target_pos, path=path, attr_preset="basic")
@@ -305,7 +305,7 @@ class D2D_RN_Interface(IPInterface):
         path = self.routes[source_mapped][target_pos] if target_pos in self.routes[source_mapped] else []
 
         # 创建新的请求flit，避免修改AXI传输的flit
-        from .flit import create_d2d_flit_copy
+        from src.utils.flit import create_d2d_flit_copy
 
         # 使用basic预设创建flit副本
         new_flit = create_d2d_flit_copy(flit, source=source_mapped, destination=target_pos, path=path, attr_preset="basic")
@@ -453,7 +453,7 @@ class D2D_RN_Interface(IPInterface):
 
                 for i, cross_die_flit in enumerate(cross_die_data_flits):
                     # 创建新的Die内写数据flit
-                    from .flit import Flit
+                    from src.utils.flit import Flit
 
                     local_flit = Flit(req.source, req.destination, req.path)
 
@@ -514,8 +514,8 @@ class D2D_RN_Interface(IPInterface):
             return
 
         # 创建write_complete响应
-        from .flit import _flit_pool
-        from .flit import copy_flit_attributes
+        from src.utils.flit import _flit_pool
+        from src.utils.flit import copy_flit_attributes
 
         write_complete_rsp = _flit_pool.get_flit(source=self.ip_pos, destination=0, path=[self.ip_pos])
 
@@ -690,7 +690,7 @@ class D2D_RN_Interface(IPInterface):
 
         for i, local_flit in enumerate(data_flits):
             # 创建新的跨Die读数据flit（从D2D_RN返回到D2D_SN）
-            from .flit import _flit_pool, copy_flit_attributes
+            from src.utils.flit import _flit_pool, copy_flit_attributes
 
             # 计算跨Die返回路径：D2D_RN → D2D_SN
             source = self.ip_pos  # D2D_RN的位置

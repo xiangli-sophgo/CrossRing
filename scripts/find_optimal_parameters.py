@@ -3,7 +3,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.core import *
+from src.noc import *
 from src.utils.component import Flit, Network, Node
 from config.config import CrossRingConfig
 import numpy as np

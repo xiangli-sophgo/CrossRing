@@ -42,7 +42,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 from config.config import CrossRingConfig
-from src.core.base_model import BaseModel
+from src.noc.base_model import BaseModel
 
 # 移除日志配置
 

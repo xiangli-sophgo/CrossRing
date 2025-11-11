@@ -5,9 +5,9 @@ Extends IPInterface class to support dual-channel data transmission.
 """
 
 from .ip_interface import IPInterface
-from .flit import Flit
-from ..channel_selector import DefaultChannelSelector
-from ..arbitration import create_arbiter_from_config
+from src.utils.flit import Flit
+from src.noc.channel_selector import DefaultChannelSelector
+from src.utils.arbitration import create_arbiter_from_config
 from collections import deque
 import logging
 

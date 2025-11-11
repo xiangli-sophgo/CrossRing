@@ -8,7 +8,7 @@ import os
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.core.fifo_heatmap_visualizer import FIFOUtilizationCollector, FIFOHeatmapVisualizer, create_fifo_heatmap
+from src.analysis.fifo_heatmap_visualizer import FIFOUtilizationCollector, FIFOHeatmapVisualizer, create_fifo_heatmap
 from config.config import CrossRingConfig
 import json
 

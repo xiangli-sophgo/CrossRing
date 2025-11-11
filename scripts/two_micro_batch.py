@@ -42,7 +42,7 @@ sys.path.append("../src")
 sys.path.append("../config")
 
 from config.config import CrossRingConfig
-from src.core import REQ_RSP_model
+from src.noc import REQ_RSP_model
 
 
 class CDMABandwidthAnalyzer:

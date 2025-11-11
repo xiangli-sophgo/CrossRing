@@ -9,7 +9,7 @@ import os
 import logging
 from typing import List, Dict, Tuple, Optional, Iterator
 from collections import defaultdict, deque
-from .traffic_scheduler import TrafficFileReader, TrafficScheduler, SerialChain
+from src.noc.traffic_scheduler import TrafficFileReader, TrafficScheduler, SerialChain
 
 
 class D2DTrafficFileReader(TrafficFileReader):

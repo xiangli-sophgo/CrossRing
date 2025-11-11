@@ -1,5 +1,5 @@
 from src.traffic_process import step1_flatten, step2_hash_addr2node, step6_map_to_ch
-from src.core import *
+from src.noc import *
 import os
 from config.config import CrossRingConfig
 import csv

@@ -18,8 +18,7 @@ from collections import defaultdict
 from .analyzers import RequestInfo, FLIT_SIZE_BYTES
 from .d2d_analyzer import D2DRequestInfo
 from .core_calculators import DataValidator
-from src.utils.components import Flit
-from src.utils.components.flit import get_original_source_type, get_original_destination_type
+from src.utils.flit import Flit, get_original_source_type, get_original_destination_type
 
 
 class RequestCollector:

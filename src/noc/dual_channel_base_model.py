@@ -8,10 +8,9 @@ import time
 import matplotlib.pyplot as plt
 
 from .base_model import BaseModel
-from src.utils.components.network import Network
-from src.utils.components.dual_channel_ip_interface import DualChannelIPInterface
-from src.utils.channel_selector import DefaultChannelSelector
-from .Dual_Channel_Link_State_Visualizer import DualChannelNetworkLinkVisualizer
+from src.noc.components import Network, DualChannelIPInterface
+from src.noc.channel_selector import DefaultChannelSelector
+from src.analysis.Dual_Channel_Link_State_Visualizer import DualChannelNetworkLinkVisualizer
 import logging
 
 

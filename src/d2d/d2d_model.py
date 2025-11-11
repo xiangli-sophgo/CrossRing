@@ -9,14 +9,11 @@ import logging
 import os
 from typing import Dict, List, Optional
 
-from .base_model import BaseModel
+from src.noc.base_model import BaseModel
 from .d2d_traffic_scheduler import D2DTrafficScheduler
 from src.analysis.d2d_analyzer import D2DAnalyzer
-from src.utils.components.d2d_rn_interface import D2D_RN_Interface
-from src.utils.components.d2d_sn_interface import D2D_SN_Interface
+from src.d2d.components import D2D_RN_Interface, D2D_SN_Interface
 from config.config import CrossRingConfig
-
-from src.core import base_model
 
 
 class D2D_Model:
@@ -105,7 +102,7 @@ class D2D_Model:
         # 初始化D2D链路状态可视化器
         self.d2d_link_state_vis = None
         if self.kwargs.get("plot_link_state", 0):
-            from .D2D_Link_State_Visualizer import D2D_Link_State_Visualizer
+            from src.analysis.D2D_Link_State_Visualizer import D2D_Link_State_Visualizer
 
             # 获取第一个Die的第一个网络作为初始网络（用于配置信息）
             initial_network = self.dies[0].req_network
@@ -232,7 +229,7 @@ class D2D_Model:
 
         # 如果启用且尚未创建可视化器，则创建
         if enable and self.d2d_link_state_vis is None and len(self.dies) > 0:
-            from .D2D_Link_State_Visualizer import D2D_Link_State_Visualizer
+            from src.analysis.D2D_Link_State_Visualizer import D2D_Link_State_Visualizer
 
             initial_network = self.dies[0].req_network
             self.d2d_link_state_vis = D2D_Link_State_Visualizer(self.num_dies, initial_network)
@@ -471,7 +468,7 @@ class D2D_Model:
             return
 
         # 创建D2D_Sys并关联已有的D2D接口
-        from src.utils.components.d2d_sys import D2D_Sys
+        from src.d2d.components import D2D_Sys
 
         # 为当前Die的每个连接配对创建D2D_Sys实例
         for pair in d2d_pairs:
@@ -835,7 +832,7 @@ class D2D_Model:
             destination_type = dst_ip
 
         # 创建flit（参考BaseModel._process_single_request）
-        from src.utils.components.flit import Flit
+        from src.utils.flit import Flit
 
         path = die_model.routes[source_physical][intermediate_dest]
         req = Flit.create_flit(source_physical, intermediate_dest, path)
@@ -1232,7 +1229,7 @@ class D2D_Model:
             # 步骤6: 生成FIFO使用率热力图（如果启用）
             should_plot_fifo = self._result_analysis_config.get("fifo_utilization_heatmap") or getattr(self, "fifo_utilization_heatmap", False)
             if should_plot_fifo:
-                from src.core.fifo_heatmap_visualizer import create_fifo_heatmap
+                from src.analysis.fifo_heatmap_visualizer import create_fifo_heatmap
 
                 # 计算总周期数(使用物理周期数,因为depth_sum在每个物理周期累加)
                 total_cycles = self.current_cycle

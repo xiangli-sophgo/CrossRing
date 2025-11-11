@@ -5,7 +5,7 @@ D2D (Die-to-Die) 仿真主脚本
 """
 
 from pathlib import Path
-from src.core.d2d_model import D2D_Model
+from src.d2d.d2d_model import D2D_Model
 from config.d2d_config import D2DConfig
 
 

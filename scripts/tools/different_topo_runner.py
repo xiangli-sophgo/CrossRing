@@ -1,4 +1,4 @@
-from src.core import *
+from src.noc import *
 import os
 import pandas as pd
 import numpy as np
