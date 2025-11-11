@@ -15,19 +15,19 @@ def main():
     """运行CrossRing仿真 - 使用新的简化配置接口"""
 
     # ==================== 流量配置 ====================
-    # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
-    traffic_file_path = r"../test_data"
+    traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
+    # traffic_file_path = r"../test_data"
     # traffic_file_path = r"../traffic/sim_d2d_traffic"
     traffic_config = [
         [
-            # "LLama2_AllReduce.txt"
+            "LLama2_AllReduce.txt"
             # "data_sim_16_share_R_1104.txt"
             # "data_sim_16_share_W_1104.txt"
             # "data_sim_16_share_d2d_W_1104.txt"
             # "data_sim_16_share_d2d_W_1104.txt"
             # "data_sim_64_share_d2d_R_1104.txt"
             # "data_sim_64_share_d2d_W_1104.txt"
-            "data_burst4_W_1111.txt"
+            # "data_burst4_W_1111.txt"
         ],
     ]
 
@@ -72,8 +72,8 @@ def main():
     sim.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_config)
 
     sim.setup_result_analysis(
-        plot_flow_fig=1,
-        plot_RN_BW_fig=1,
+        plot_RN_BW_fig=0,
+        flow_graph_interactive=1,  # 生成交互式流量图
         fifo_utilization_heatmap=1,
         result_save_path=f"../Result/CrossRing/{model_type}/",
         save_fig=0,
@@ -82,7 +82,7 @@ def main():
     # sim.setup_visualization(plot_link_state=1, plot_start_cycle=300, show_node_id=1)
     np.random.seed(801)
 
-    sim.run_simulation(max_time=6000, print_interval=200)
+    sim.run_simulation(max_time=600, print_interval=200)
 
 
 if __name__ == "__main__":

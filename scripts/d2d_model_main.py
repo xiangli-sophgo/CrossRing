@@ -48,8 +48,7 @@ def main():
 
     model.setup_result_analysis(
         # 图片生成控制
-        flow_graph=0,  # 生成PNG静态流量图
-        flow_graph_interactive=1,  # 生成HTML交互式流量图(新增)
+        flow_graph_interactive=1,  # 生成HTML交互式流量图
         ip_bandwidth_heatmap=0,
         fifo_utilization_heatmap=0,
         save_figures=1,  # 保存图片文件

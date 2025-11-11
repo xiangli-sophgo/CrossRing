@@ -187,6 +187,7 @@ class SingleDieAnalyzer:
         min_gap_threshold: int = 200,
         plot_rn_bw_fig: bool = False,
         plot_flow_graph: bool = False,
+        flow_graph_interactive: bool = False,
     ):
         """
         初始化单Die分析器
@@ -195,13 +196,15 @@ class SingleDieAnalyzer:
             config: 网络配置对象
             min_gap_threshold: 工作区间合并阈值(ns)，小于此值的间隔被视为同一工作区间
             plot_rn_bw_fig: 是否绘制RN带宽曲线图
-            plot_flow_graph: 是否绘制流量图
+            plot_flow_graph: 是否绘制静态流量图（PNG）
+            flow_graph_interactive: 是否绘制交互式流量图（HTML）
         """
         from collections import defaultdict
         from .core_calculators import DataValidator, TimeIntervalCalculator, BandwidthCalculator
         from .data_collectors import RequestCollector, LatencyStatsCollector, CircuitStatsCollector
         from .result_visualizers import BandwidthPlotter
         from .flow_graph_renderer import FlowGraphRenderer
+        from .interactive_flow_graph_renderer import InteractiveFlowGraphRenderer
         from .exporters import CSVExporter, ReportGenerator
 
         self.config = config
@@ -209,6 +212,7 @@ class SingleDieAnalyzer:
         self.network_frequency = config.NETWORK_FREQUENCY  # GHz
         self.plot_rn_bw_fig = plot_rn_bw_fig
         self.plot_flow_graph = plot_flow_graph
+        self.flow_graph_interactive = flow_graph_interactive
         self.finish_cycle = 0
         self.sim_model = None  # 添加sim_model引用
 
@@ -236,6 +240,7 @@ class SingleDieAnalyzer:
         self.circuit_collector = CircuitStatsCollector()
         self.visualizer = BandwidthPlotter()
         self.flow_visualizer = FlowGraphRenderer()
+        self.interactive_flow_visualizer = InteractiveFlowGraphRenderer()
         self.exporter = CSVExporter()
         self.report_generator = ReportGenerator()
 
@@ -409,7 +414,7 @@ class SingleDieAnalyzer:
         results["Total_sum_BW"] = total_bandwidth
         results["summary"]["Total_sum_BW"] = total_bandwidth
 
-        # 绘制流图
+        # 绘制静态流图（PNG）
         if self.plot_flow_graph and self.sim_model:
             # 先计算IP带宽数据
             self.calculate_ip_bandwidth_data()
@@ -429,6 +434,33 @@ class SingleDieAnalyzer:
 
             if flow_save_path:
                 saved_figures.append(("流图", flow_save_path))
+
+        # 绘制交互式流图（HTML）
+        if self.flow_graph_interactive and self.sim_model:
+            # 如果之前没有计算IP带宽数据，则计算
+            if self.ip_bandwidth_data is None:
+                self.calculate_ip_bandwidth_data()
+
+            if self.sim_model.results_fig_save_path:
+                import os
+
+                html_fname = f"flow_graph_total_interactive.html"
+                html_save_path = os.path.join(self.sim_model.results_fig_save_path, html_fname)
+            else:
+                html_save_path = None
+
+            # 目前单Die只支持网格拓扑的交互式流图
+            if not self.sim_model.topo_type_stat.startswith("Ring"):
+                self.interactive_flow_visualizer.draw_flow_graph(
+                    network=self.sim_model.data_network,
+                    ip_bandwidth_data=self.ip_bandwidth_data,
+                    config=self.config,
+                    mode="total",
+                    save_path=html_save_path
+                )
+
+                if html_save_path:
+                    saved_figures.append(("交互式流图", html_save_path))
 
         # 保存图片路径到results中,供后续打印使用
         results["saved_figures"] = saved_figures

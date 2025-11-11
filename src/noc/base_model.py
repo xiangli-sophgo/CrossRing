@@ -66,6 +66,7 @@ class BaseModel:
 
         # 可视化配置 - 通过setup_result_analysis设置
         self.plot_flow_fig = False
+        self.flow_graph_interactive = False
 
         # 链路状态可视化 - 通过setup_visualization设置
         self.plot_link_state = False
@@ -116,6 +117,7 @@ class BaseModel:
         result_save_path: str = "",
         results_fig_save_path: str = "",
         plot_flow_fig: bool = False,
+        flow_graph_interactive: bool = False,
         plot_RN_BW_fig: bool = False,
         fifo_utilization_heatmap: bool = False,
         save_fig: bool = True,
@@ -126,12 +128,14 @@ class BaseModel:
         Args:
             result_save_path: 结果保存路径
             results_fig_save_path: 图表保存路径（已弃用，使用save_fig控制图像保存）
-            plot_flow_fig: 是否绘制流量图
+            plot_flow_fig: 是否绘制静态流量图（PNG）
+            flow_graph_interactive: 是否绘制交互式流量图（HTML）
             plot_RN_BW_fig: 是否绘制RN带宽图
             fifo_utilization_heatmap: 是否绘制FIFO使用率热力图
             save_fig: 是否保存图像到数据流保存目录，默认True
         """
         self.plot_flow_fig = plot_flow_fig
+        self.flow_graph_interactive = flow_graph_interactive
         self.plot_RN_BW_fig = plot_RN_BW_fig
         self.fifo_utilization_heatmap = fifo_utilization_heatmap
 
@@ -139,15 +143,16 @@ class BaseModel:
         if result_save_path:
             self.result_save_path = f"{result_save_path}{self.topo_type_stat}/{self.file_name[:-4]}/"
             os.makedirs(self.result_save_path, exist_ok=True)
-
-        # 根据save_fig参数决定图像保存位置
-        if save_fig and result_save_path:
+            # 交互式流图始终保存到result_save_path
             self.results_fig_save_path = self.result_save_path
         elif results_fig_save_path:
             self.results_fig_save_path = results_fig_save_path
             os.makedirs(self.results_fig_save_path, exist_ok=True)
         else:
             self.results_fig_save_path = None
+
+        # save_fig参数现在只控制静态PNG图片的生成,不影响交互式HTML流图
+        self.save_fig = save_fig
 
     def setup_debug(
         self,
@@ -214,7 +219,13 @@ class BaseModel:
         self.req_network = Network(self.config, self.adjacency_matrix, name="Request Network")
         self.rsp_network = Network(self.config, self.adjacency_matrix, name="Response Network")
         self.data_network = Network(self.config, self.adjacency_matrix, name="Data Network")
-        self.result_processor = SingleDieAnalyzer(self.config, min_gap_threshold=200, plot_rn_bw_fig=self.plot_RN_BW_fig, plot_flow_graph=self.plot_flow_fig)
+        self.result_processor = SingleDieAnalyzer(
+            self.config,
+            min_gap_threshold=200,
+            plot_rn_bw_fig=self.plot_RN_BW_fig,
+            plot_flow_graph=self.plot_flow_fig,
+            flow_graph_interactive=self.flow_graph_interactive
+        )
         if self.plot_link_state:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
 
