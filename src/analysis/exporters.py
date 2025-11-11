@@ -12,17 +12,14 @@ import csv
 import json
 from collections import defaultdict
 from typing import Dict, List, Optional, Any
-from .analyzers import RequestInfo, D2DRequestInfo, PortBandwidthMetrics, BandwidthMetrics
+from .analyzers import RequestInfo, PortBandwidthMetrics, BandwidthMetrics
+from .d2d_analyzer import D2DRequestInfo
 
 
 class CSVExporter:
     """CSV导出器 - 导出请求数据、端口带宽和链路统计到CSV文件"""
 
-    def generate_detailed_request_csv(
-        self,
-        requests: List[RequestInfo],
-        output_path: str
-    ) -> None:
+    def generate_detailed_request_csv(self, requests: List[RequestInfo], output_path: str) -> None:
         """
         生成详细的请求CSV文件（分离读写）
 
@@ -67,14 +64,10 @@ class CSVExporter:
         write_csv_file = None
 
         if read_requests:
-            read_csv_file = self._write_request_csv_file(
-                read_requests, output_path, "read", csv_header
-            )
+            read_csv_file = self._write_request_csv_file(read_requests, output_path, "read", csv_header)
 
         if write_requests:
-            write_csv_file = self._write_request_csv_file(
-                write_requests, output_path, "write", csv_header
-            )
+            write_csv_file = self._write_request_csv_file(write_requests, output_path, "write", csv_header)
 
         # 打印统计信息
         if read_requests or write_requests:
@@ -85,13 +78,7 @@ class CSVExporter:
             if write_requests:
                 print(f"  写请求CSV, {len(write_requests)} 条记录:  {write_csv_file}")
 
-    def _write_request_csv_file(
-        self,
-        requests: List[RequestInfo],
-        output_path: str,
-        req_type: str,
-        csv_header: List[str]
-    ) -> str:
+    def _write_request_csv_file(self, requests: List[RequestInfo], output_path: str, req_type: str, csv_header: List[str]) -> str:
         """
         将请求列表写入CSV文件
 
@@ -137,14 +124,7 @@ class CSVExporter:
                 f.write(",".join(map(str, row)) + "\n")
         return csv_file
 
-    def generate_ports_csv(
-        self,
-        rn_ports: Dict[str, PortBandwidthMetrics],
-        output_path: str,
-        sn_ports: Dict[str, PortBandwidthMetrics] = None,
-        config: Any = None,
-        topo_type: str = None
-    ) -> None:
+    def generate_ports_csv(self, rn_ports: Dict[str, PortBandwidthMetrics], output_path: str, sn_ports: Dict[str, PortBandwidthMetrics] = None, config: Any = None, topo_type: str = None) -> None:
         """
         生成端口带宽CSV文件
 
@@ -209,21 +189,8 @@ class CSVExporter:
                 # 提取节点索引
                 idx = int(port_id.rsplit("_", 1)[1])
 
-                # 计算coordinate
-                if topo_type and topo_type.startswith("Ring"):
-                    # Ring拓扑：直接使用节点编号
-                    coordinate = str(idx)
-                elif config:
-                    # CrossRing拓扑：从左下角开始算x/y
-                    cols = getattr(config, "NUM_COL", 4)
-                    rows = getattr(config, "NUM_ROW", 5)
-                    # 原编号从左上角行优先递增
-                    row_from_top = idx // cols
-                    col = idx % cols
-                    row = rows - 1 - row_from_top
-                    coordinate = f"x{col}_y{row}"
-                else:
-                    coordinate = str(idx)
+                # 直接使用节点编号作为coordinate
+                coordinate = str(idx)
 
                 # 统计flit数量
                 read_flits = sum(iv.flit_count for iv in metrics.read_metrics.working_intervals) if metrics.read_metrics.working_intervals else 0
@@ -325,11 +292,7 @@ class CSVExporter:
             ]
             f.write(",".join(avg_row) + "\n")
 
-    def export_link_statistics_csv(
-        self,
-        network,
-        csv_path: str
-    ) -> None:
+    def export_link_statistics_csv(self, network, csv_path: str) -> None:
         """
         导出链路统计数据到CSV
 
@@ -439,11 +402,7 @@ class CSVExporter:
         except Exception as e:
             print(f"导出链路统计数据时发生错误: {e}")
 
-    def save_d2d_requests_csv(
-        self,
-        d2d_requests: List[D2DRequestInfo],
-        output_path: str
-    ) -> None:
+    def save_d2d_requests_csv(self, d2d_requests: List[D2DRequestInfo], output_path: str) -> None:
         """
         保存D2D请求到CSV文件
 
@@ -517,12 +476,7 @@ class CSVExporter:
         except (IOError, OSError) as e:
             raise
 
-    def save_ip_bandwidth_to_csv(
-        self,
-        die_ip_bandwidth_data: Dict,
-        config,
-        output_path: str
-    ) -> None:
+    def save_ip_bandwidth_to_csv(self, die_ip_bandwidth_data: Dict, config, output_path: str) -> None:
         """
         保存所有Die的IP带宽数据到单个CSV文件
 
@@ -561,10 +515,6 @@ class CSVExporter:
                 all_rows = []
 
                 for die_id, die_data in die_ip_bandwidth_data.items():
-                    # 获取该Die的配置信息
-                    num_col = getattr(config, "NUM_COL", 4)
-                    num_row = getattr(config, "NUM_ROW", 5)
-
                     # 获取三种模式的数据
                     read_data = die_data.get("read", {})
                     write_data = die_data.get("write", {})
@@ -606,8 +556,8 @@ class CSVExporter:
 
                                 # 只保存有带宽的数据（任一模式大于阈值）
                                 if read_bw > 0.001 or write_bw > 0.001 or total_bw > 0.001:
-                                    # 计算节点ID
-                                    node_id = matrix_row * num_col + matrix_col
+                                    # 计算节点ID（从矩阵索引计算）
+                                    node_id = matrix_row * cols + matrix_col
 
                                     all_rows.append([ip_instance, die_id, node_id, ip_type, f"{read_bw:.6f}", f"{write_bw:.6f}", f"{total_bw:.6f}"])
 
@@ -651,13 +601,7 @@ class CSVExporter:
         except (IOError, OSError) as e:
             print(f"警告: 保存IP带宽CSV失败 ({csv_path}): {e}")
 
-    def save_d2d_axi_channel_statistics(
-        self,
-        output_path: str,
-        d2d_bandwidth: Dict,
-        dies: Dict = None,
-        config: Any = None
-    ) -> None:
+    def save_d2d_axi_channel_statistics(self, output_path: str, d2d_bandwidth: Dict, dies: Dict = None, config: Any = None) -> None:
         """
         保存所有AXI通道的带宽统计到文件
 
@@ -771,7 +715,7 @@ class CSVExporter:
                     # 详细的节点对连接统计
                     if config:
                         f.write("详细节点对连接:\n")
-                        d2d_pairs = getattr(config, "D2D_PAIRS", [])
+                        d2d_pairs = config.D2D_PAIRS
 
                         if d2d_pairs:
                             for i, (die0_id, die0_node, die1_id, die1_node) in enumerate(d2d_pairs):
@@ -780,17 +724,7 @@ class CSVExporter:
                                 if die0_w > 0 or die1_r > 0:
                                     f.write(f"  连接{i}: Die{die0_id}节点{die0_node} <-> Die{die1_id}节点{die1_node}\n")
                                     f.write(f"    写数据: {die0_w:.3f} GB/s, 读数据: {die1_r:.3f} GB/s\n")
-                        else:
-                            # 向后兼容
-                            die0_positions = getattr(config, "D2D_DIE0_POSITIONS", [])
-                            die1_positions = getattr(config, "D2D_DIE1_POSITIONS", [])
-                            if die0_positions and die1_positions:
-                                for i, (die0_pos, die1_pos) in enumerate(zip(die0_positions, die1_positions)):
-                                    die0_w = d2d_bandwidth.get(0, {}).get(die0_pos, {}).get("W", 0.0)
-                                    die1_r = d2d_bandwidth.get(1, {}).get(die1_pos, {}).get("R", 0.0)
-                                    if die0_w > 0 or die1_r > 0:
-                                        f.write(f"  连接{i}: Die0节点{die0_pos} <-> Die1节点{die1_pos}\n")
-                                        f.write(f"    写数据: {die0_w:.3f} GB/s, 读数据: {die1_r:.3f} GB/s\n")
+
                         f.write("\n")
 
                 # 通道利用率分析
@@ -814,12 +748,7 @@ class CSVExporter:
 class ReportGenerator:
     """报告生成器 - 生成文本格式的统计报告"""
 
-    def generate_unified_report(
-        self,
-        results: Dict,
-        output_path: str,
-        num_ip: int = 1
-    ) -> None:
+    def generate_unified_report(self, results: Dict, output_path: str, num_ip: int = 1) -> None:
         """
         生成统一的文本报告
 
@@ -854,13 +783,13 @@ class ReportGenerator:
             # 延迟统计
             latency_stats = summary.get("latency_stats", {})
             if latency_stats:
-                f.write("\n延迟统计 (cycle):\n")
+                f.write("\n延迟统计 (ns):\n")
                 for cat, label in [("cmd", "CMD"), ("data", "Data"), ("trans", "Trans")]:
                     if cat in latency_stats:
                         rl = latency_stats[cat]
-                        read_avg = rl['read']['sum'] / rl['read']['count'] if rl['read']['count'] else 0.0
-                        write_avg = rl['write']['sum'] / rl['write']['count'] if rl['write']['count'] else 0.0
-                        mixed_avg = rl['mixed']['sum'] / rl['mixed']['count'] if rl['mixed']['count'] else 0.0
+                        read_avg = rl["read"]["sum"] / rl["read"]["count"] if rl["read"]["count"] else 0.0
+                        write_avg = rl["write"]["sum"] / rl["write"]["count"] if rl["write"]["count"] else 0.0
+                        mixed_avg = rl["mixed"]["sum"] / rl["mixed"]["count"] if rl["mixed"]["count"] else 0.0
                         f.write(
                             f"  {label} 延迟 - "
                             f"读 avg {read_avg:.2f}, max {rl['read']['max']}; "
@@ -899,14 +828,7 @@ class ReportGenerator:
                         f.write(f"  请求总数: {metrics.total_requests}\n")
                         f.write("\n")
 
-    def generate_d2d_bandwidth_report(
-        self,
-        output_path: str,
-        d2d_stats: Any = None,
-        d2d_requests: List = None,
-        latency_stats: Dict = None,
-        circuit_stats: Dict = None
-    ) -> str:
+    def generate_d2d_bandwidth_report(self, output_path: str, d2d_stats: Any = None, d2d_requests: List = None, latency_stats: Dict = None, circuit_stats: Dict = None) -> str:
         """
         生成D2D带宽报告
 
@@ -952,11 +874,12 @@ class ReportGenerator:
 
         # 延迟统计
         if latency_stats:
+
             def _avg(cat, op):
                 s = latency_stats[cat][op]
                 return s["sum"] / s["count"] if s["count"] else 0.0
 
-            report_lines.extend(["", "延迟统计 (cycle):"])
+            report_lines.extend(["", "延迟统计 (ns):"])
             for cat, label in [("cmd", "CMD"), ("data", "Data"), ("trans", "Trans")]:
                 if cat in latency_stats:
                     line = (
@@ -1040,11 +963,7 @@ class ReportGenerator:
 class JSONExporter:
     """JSON导出器 - 导出统计结果到JSON文件"""
 
-    def generate_json_report(
-        self,
-        results: Dict,
-        json_file: str
-    ) -> None:
+    def generate_json_report(self, results: Dict, json_file: str) -> None:
         """
         生成JSON格式的统计报告
 
@@ -1113,12 +1032,7 @@ class JSONExporter:
         with open(json_file, "w", encoding="utf-8") as f:
             json.dump(serializable_results, f, indent=2, ensure_ascii=False)
 
-    def save_config_json(
-        self,
-        config: Any,
-        output_path: str,
-        additional_data: Dict = None
-    ) -> None:
+    def save_config_json(self, config: Any, output_path: str, additional_data: Dict = None) -> None:
         """
         保存配置和额外数据到JSON
 
@@ -1128,12 +1042,12 @@ class JSONExporter:
             additional_data: 额外要保存的数据字典
         """
         config_data = {
-            "network_frequency": getattr(config, "NETWORK_FREQUENCY", 2.0),
-            "burst": getattr(config, "BURST", 4),
-            "topo_type": getattr(config, "TOPO_TYPE", "unknown"),
-            "num_ip": getattr(config, "NUM_IP", 1),
-            "num_col": getattr(config, "NUM_COL", 4),
-            "num_row": getattr(config, "NUM_ROW", 5),
+            "network_frequency": config.NETWORK_FREQUENCY,
+            "burst": config.BURST,
+            "topo_type": config.TOPO_TYPE,
+            "num_ip": config.NUM_IP,
+            "num_col": config.NUM_COL,
+            "num_row": config.NUM_ROW,
         }
 
         if additional_data:

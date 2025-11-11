@@ -2423,7 +2423,8 @@ class D2DResultProcessor(BandwidthAnalyzer):
         # 使用simulation_end_cycle来计算时间，与其他带宽计算保持一致
         sim_end_cycle = getattr(self, "simulation_end_cycle", 1000)
         network_frequency = getattr(self.config, "NETWORK_FREQUENCY", 2)
-        time_cycles = sim_end_cycle // network_frequency
+        flit_size = getattr(self.config, "FLIT_SIZE", 128)
+        time_ns = sim_end_cycle / network_frequency
 
         for die_id, die_model in dies.items():
             d2d_sys_bandwidth[die_id] = {}
@@ -2437,10 +2438,10 @@ class D2DResultProcessor(BandwidthAnalyzer):
 
                     if hasattr(d2d_sys, "axi_channel_flit_count"):
 
-                        # 计算该节点各通道的带宽，与其他地方保持一致
+                        # 计算该节点各通道的带宽：(flit数 × flit大小) / 时间(ns) = bytes/ns = GB/s
                         for channel, flit_count in d2d_sys.axi_channel_flit_count.items():
-                            if channel in node_bandwidth and flit_count > 0 and time_cycles > 0:
-                                bandwidth = flit_count * 128 / time_cycles  # 与第652行的计算方式一致
+                            if channel in node_bandwidth and flit_count > 0 and time_ns > 0:
+                                bandwidth = (flit_count * flit_size) / time_ns
                                 node_bandwidth[channel] = bandwidth
 
                     # else:

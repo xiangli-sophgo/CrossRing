@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 
 from .base_model import BaseModel
 from .d2d_traffic_scheduler import D2DTrafficScheduler
-from src.analysis.analyzers import D2DAnalyzer
+from src.analysis.d2d_analyzer import D2DAnalyzer
 from src.utils.components.d2d_rn_interface import D2D_RN_Interface
 from src.utils.components.d2d_sn_interface import D2D_SN_Interface
 from config.config import CrossRingConfig
@@ -699,6 +699,7 @@ class D2D_Model:
             # 收集数据
             d2d_processor.collect_cross_die_requests(self.dies)
             d2d_processor.calculate_d2d_ip_bandwidth_data(self.dies)
+            d2d_processor.analyze_d2d_results()
 
             # 缓存处理器
             self._cached_d2d_processor = d2d_processor
@@ -1009,6 +1010,7 @@ class D2D_Model:
                 # 第一次计算：收集D2D请求数据并计算正确的IP带宽
                 d2d_processor.collect_cross_die_requests(self.dies)
                 d2d_processor.calculate_d2d_ip_bandwidth_data(self.dies)
+                d2d_processor.analyze_d2d_results()
                 # 缓存处理器供后续使用
                 self._cached_d2d_processor = d2d_processor
 
@@ -1141,6 +1143,7 @@ class D2D_Model:
                 # 收集数据（如果没有缓存的话）
                 d2d_processor.collect_cross_die_requests(self.dies)
                 d2d_processor.calculate_d2d_ip_bandwidth_data(self.dies)
+                d2d_processor.analyze_d2d_results()
 
             # 获取结果保存路径，使用流量文件名
             result_save_path = self.kwargs.get("result_save_path", "../Result/")

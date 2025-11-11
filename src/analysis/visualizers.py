@@ -17,9 +17,9 @@ if sys.platform == "darwin":  # macOS
         matplotlib.use("macosx")
     except ImportError:
         matplotlib.use("Agg")
-else:
-    # 其他系统默认使用Agg (无GUI后端)
-    matplotlib.use("Agg")
+# else:
+#     # 其他系统默认使用Agg (无GUI后端)
+#     matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -99,12 +99,13 @@ class FlowGraphRenderer:
                 elif mode == "ITag_ratio":
                     links = {link: stats["ITag_ratio"] for link, stats in utilization_stats.items()}
                 elif mode == "total":
-                    time_cycles = getattr(network, "simulation_end_cycle", 1000) // config.NETWORK_FREQUENCY
                     links = {}
                     for link, stats in utilization_stats.items():
-                        total_flit = stats.get("total_flit", 0)
-                        if time_cycles > 0:
-                            bandwidth = total_flit * 128 / time_cycles
+                        total_flit = stats["total_flit"]
+                        total_cycles = stats["total_cycles"]
+                        if total_cycles > 0:
+                            time_ns = total_cycles / config.NETWORK_FREQUENCY
+                            bandwidth = total_flit * 128 / time_ns
                             links[link] = bandwidth
                         else:
                             links[link] = 0.0
@@ -560,10 +561,10 @@ class FlowGraphRenderer:
         if not active_ips:
             return
 
-        # 按IP基本类型分组（去除实例编号）
+        # 按IP基本类型分组,但保留每个实例的独立带宽值
         ip_type_count = defaultdict(list)
         for ip_type, bw in active_ips:
-            # 提取基本类型
+            # 提取基本类型(如ddr_0 -> DDR)
             base_type = ip_type.split("_")[0] if "_" in ip_type else ip_type
             ip_type_count[base_type].append(bw)
 
@@ -616,6 +617,7 @@ class FlowGraphRenderer:
         row_idx = 0
         for ip_type, instances in ip_type_count.items():
             num_instances = len(instances)
+            # ip_type已经是基本类型,直接用于颜色映射
             base_type = ip_type.upper()
             ip_color = IP_COLOR_MAP.get(base_type, IP_COLOR_MAP["OTHER"])
 
@@ -798,9 +800,9 @@ class FlowGraphRenderer:
             die_networks_for_draw = {die_id: die_model.data_network for die_id, die_model in dies.items()}
 
         # 获取布局配置
-        die_layout = getattr(config, "die_layout_positions", {})
-        die_layout_type = getattr(config, "die_layout_type", "2x1")
-        die_rotations = getattr(config, "DIE_ROTATIONS", {})
+        die_layout = config.die_layout_positions
+        die_layout_type = config.die_layout_type
+        die_rotations = config.DIE_ROTATIONS
 
         # 计算Die尺寸和偏移量
         base_die_rows = 5  # 默认5x4拓扑
@@ -1003,10 +1005,11 @@ class FlowGraphRenderer:
         """
         d2d_sys_bandwidth = {}
 
-        # 从config获取仿真参数
-        sim_end_cycle = getattr(config, "simulation_end_cycle", 1000)
-        network_frequency = getattr(config, "NETWORK_FREQUENCY", 2)
-        time_cycles = sim_end_cycle // network_frequency
+        # 从dies中获取仿真周期（从第一个die的cycle获取）
+        sim_end_cycle = next(iter(dies.values())).cycle
+        network_frequency = config.NETWORK_FREQUENCY
+        flit_size = config.FLIT_SIZE
+        time_ns = sim_end_cycle / network_frequency
 
         for die_id, die_model in dies.items():
             d2d_sys_bandwidth[die_id] = {}
@@ -1021,9 +1024,9 @@ class FlowGraphRenderer:
                     if hasattr(d2d_sys, "axi_channel_flit_count"):
                         # 计算该节点各通道的带宽
                         for channel, flit_count in d2d_sys.axi_channel_flit_count.items():
-                            # 计算带宽：flit数 * 128字节 * 频率 / 时间周期 = GB/s
-                            if time_cycles > 0:
-                                bandwidth_gbps = (flit_count * 128 * network_frequency) / time_cycles
+                            # 计算带宽：(flit数 × flit大小) / 时间(ns) = bytes/ns = GB/s
+                            if time_ns > 0:
+                                bandwidth_gbps = (flit_count * flit_size) / time_ns
                                 node_bandwidth[channel] = bandwidth_gbps
 
                     # 将pos_key和通道带宽存储在d2d_sys_bandwidth中
@@ -1114,9 +1117,9 @@ class FlowGraphRenderer:
         Returns:
             dict: {die_id: (offset_x, offset_y)} 额外的偏移量
         """
-        d2d_pairs = getattr(config, "D2D_PAIRS", [])
-        die_layout = getattr(config, "die_layout_positions", {})
-        die_rotations = getattr(config, "DIE_ROTATIONS", {})
+        d2d_pairs = config.D2D_PAIRS
+        die_layout = config.die_layout_positions
+        die_rotations = config.DIE_ROTATIONS
 
         if not d2d_pairs or not die_layout:
             return {}
@@ -1257,13 +1260,13 @@ class FlowGraphRenderer:
         import numpy as np
         try:
             # 使用推断的D2D连接对
-            d2d_pairs = getattr(config, "D2D_PAIRS", [])
+            d2d_pairs = config.D2D_PAIRS
 
             if not d2d_pairs:
                 return
 
             # 获取Die布局信息
-            die_layout = getattr(config, "die_layout_positions", {})
+            die_layout = config.die_layout_positions
 
             # 遍历所有D2D连接对
             arrow_index = 0
@@ -1358,7 +1361,7 @@ class FlowGraphRenderer:
             end_y = end_node_y - uy * 1.2 + perpy
 
         # 确定颜色和标签
-        MAX_BANDWIDTH_NORMALIZATION = 100.0  # 归一化基准
+        # MAX_BANDWIDTH_NORMALIZATION = 100.0  # 归一化基准
         if bandwidth > 0.001:
             # 有数据流量
             intensity = min(bandwidth / MAX_BANDWIDTH_NORMALIZATION, 1.0)
@@ -1470,9 +1473,9 @@ class FlowGraphRenderer:
             return None
 
         # 获取Die布局配置
-        die_layout = getattr(config, "die_layout_positions", {})
-        die_layout_type = getattr(config, "die_layout_type", "2x1")
-        die_rotations = getattr(config, "DIE_ROTATIONS", {})
+        die_layout = config.die_layout_positions
+        die_layout_type = config.die_layout_type
+        die_rotations = config.DIE_ROTATIONS
 
         # 计算Die尺寸
         node_spacing = 3.0

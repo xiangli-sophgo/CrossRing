@@ -12,11 +12,9 @@ CrossRing 分析模块
 # 数据类和常量
 from .analyzers import (
     RequestInfo,
-    D2DRequestInfo,
     WorkingInterval,
     BandwidthMetrics,
     PortBandwidthMetrics,
-    D2DBandwidthStats,
     IP_COLOR_MAP,
     RN_TYPES,
     SN_TYPES,
@@ -25,6 +23,12 @@ from .analyzers import (
     MAX_BANDWIDTH_NORMALIZATION,
     AXI_CHANNEL_DESCRIPTIONS,
     SingleDieAnalyzer,
+)
+
+# D2D相关类从d2d_analyzer导入
+from .d2d_analyzer import (
+    D2DRequestInfo,
+    D2DBandwidthStats,
     D2DAnalyzer,
 )
 

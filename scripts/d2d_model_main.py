@@ -62,7 +62,7 @@ def main():
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_time=400,
+        max_time=500,
         print_interval=200,
         verbose=1,
     )

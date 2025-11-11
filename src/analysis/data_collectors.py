@@ -15,7 +15,8 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Any
 from collections import defaultdict
-from .analyzers import RequestInfo, D2DRequestInfo, FLIT_SIZE_BYTES
+from .analyzers import RequestInfo, FLIT_SIZE_BYTES
+from .d2d_analyzer import D2DRequestInfo
 from .core_calculators import DataValidator
 from src.utils.components import Flit
 from src.utils.components.flit import get_original_source_type, get_original_destination_type
@@ -298,9 +299,11 @@ class RequestCollector:
             representative_flit = max(flits, key=lambda f: f.flit_id)
 
             # 改进数据验证
-            # 对于write_complete响应，只有单个flit，不需要检查burst_length
-            is_write_complete = hasattr(first_flit, "rsp_type") and first_flit.rsp_type == "write_complete"
-            if not is_write_complete:
+            # 对于特殊响应（write_complete, datasend, negative等），不需要检查burst_length
+            rsp_type = getattr(first_flit, "rsp_type", None)
+            is_special_response = rsp_type in ["write_complete", "datasend", "negative", "positive"]
+
+            if not is_special_response:
                 if not hasattr(first_flit, "burst_length") or len(flits) != first_flit.burst_length:
                     continue
 
@@ -327,12 +330,14 @@ class RequestCollector:
         Returns:
             bool: 是否为D2D请求
         """
-        return (
-            hasattr(flit, "d2d_origin_die") and
-            hasattr(flit, "d2d_target_die") and
-            flit.d2d_origin_die is not None and
-            flit.d2d_target_die is not None
-        )
+        has_origin = hasattr(flit, "d2d_origin_die")
+        has_target = hasattr(flit, "d2d_target_die")
+        origin_not_none = has_origin and flit.d2d_origin_die is not None
+        target_not_none = has_target and flit.d2d_target_die is not None
+
+        result = has_origin and has_target and origin_not_none and target_not_none
+
+        return result
 
     def _get_time_value(self, flit, attr_name: str, default: float = 0) -> float:
         """获取flit的时间值并转换为ns"""
@@ -367,10 +372,7 @@ class RequestCollector:
             start_time_ns = self._get_time_value(representative_flit, "cmd_entry_cake0_cycle", 0)
 
             req_type = getattr(representative_flit, "req_type", "unknown")
-            end_time_field = {
-                "read": "data_received_complete_cycle",
-                "write": "write_complete_received_cycle"
-            }.get(req_type)
+            end_time_field = {"read": "data_received_complete_cycle", "write": "write_complete_received_cycle"}.get(req_type)
             end_time_ns = self._get_time_value(representative_flit, end_time_field, start_time_ns) if end_time_field else start_time_ns
 
             # 从flit读取已计算的延迟值并转换为ns
@@ -417,21 +419,9 @@ class LatencyStatsCollector:
     def _init_latency_stats_structure() -> Dict:
         """初始化延迟统计数据结构"""
         return {
-            "cmd": {
-                "read": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "write": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}
-            },
-            "data": {
-                "read": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "write": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}
-            },
-            "trans": {
-                "read": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "write": {"sum": 0, "max": 0, "count": 0, "values": []},
-                "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}
-            },
+            "cmd": {"read": {"sum": 0, "max": 0, "count": 0, "values": []}, "write": {"sum": 0, "max": 0, "count": 0, "values": []}, "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}},
+            "data": {"read": {"sum": 0, "max": 0, "count": 0, "values": []}, "write": {"sum": 0, "max": 0, "count": 0, "values": []}, "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}},
+            "trans": {"read": {"sum": 0, "max": 0, "count": 0, "values": []}, "write": {"sum": 0, "max": 0, "count": 0, "values": []}, "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}},
         }
 
     @staticmethod
@@ -686,9 +676,7 @@ class CircuitStatsCollector:
                                             flit_count = network.fifo_flit_count[category][fifo_type][pos][ip_type]
 
                                     key = f"{pos}_{ip_type}"
-                                    results[net_name][category][fifo_type][key] = self._calculate_fifo_stats(
-                                        sum_depth, max_depth, capacity, flit_count, total_cycles
-                                    )
+                                    results[net_name][category][fifo_type][key] = self._calculate_fifo_stats(sum_depth, max_depth, capacity, flit_count, total_cycles)
                     else:
                         # 其他FIFO类型
                         for pos, sum_depth in network.fifo_depth_sum[category][fifo_type].items():
@@ -698,9 +686,7 @@ class CircuitStatsCollector:
                             if pos in network.fifo_flit_count[category][fifo_type]:
                                 flit_count = network.fifo_flit_count[category][fifo_type][pos]
 
-                            results[net_name][category][fifo_type][pos] = self._calculate_fifo_stats(
-                                sum_depth, max_depth, capacity, flit_count, total_cycles
-                            )
+                            results[net_name][category][fifo_type][pos] = self._calculate_fifo_stats(sum_depth, max_depth, capacity, flit_count, total_cycles)
 
         return results
 

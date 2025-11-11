@@ -319,7 +319,7 @@ def generate_example_traffic():
     END_TIME = 6000
     burst = 4
     req_type = "R"
-    OUTPUT_FILE = f"../../test_data/data_{req_type}_1104.txt"
+    OUTPUT_FILE = f"../../test_data/data_{req_type}_1111.txt"
 
     # 定义多个配置
     configs = [
@@ -330,7 +330,7 @@ def generate_example_traffic():
             "dst_map": {
                 "ddr_0": [3],
             },
-            "speed": 46.08,
+            "speed": 128,
             "burst": burst,
             "req_type": req_type,
         },
@@ -343,6 +343,6 @@ def generate_example_traffic():
 
 # 示例使用
 if __name__ == "__main__":
-    generate_sim_16_share_traffic()
+    # generate_sim_16_share_traffic()
     # generate_sim_16_share_d2d_traffic()
-    # generate_example_traffic()
+    generate_example_traffic()

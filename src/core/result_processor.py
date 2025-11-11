@@ -1463,12 +1463,13 @@ class BandwidthAnalyzer:
                 elif mode == "ITag_ratio":
                     links = {link: stats["ITag_ratio"] for link, stats in utilization_stats.items()}
                 elif mode == "total":
-                    time_cycles = getattr(self, "simulation_end_cycle", 1000) / config.NETWORK_FREQUENCY
                     links = {}
                     for link, stats in utilization_stats.items():
-                        total_flit = stats.get("total_flit", 0)
-                        if time_cycles > 0:
-                            bandwidth = total_flit * 128 / time_cycles
+                        total_flit = stats["total_flit"]
+                        total_cycles = stats["total_cycles"]
+                        if total_cycles > 0:
+                            time_ns = total_cycles / config.NETWORK_FREQUENCY
+                            bandwidth = total_flit * 128 / time_ns
                             links[link] = bandwidth
                         else:
                             links[link] = 0.0
