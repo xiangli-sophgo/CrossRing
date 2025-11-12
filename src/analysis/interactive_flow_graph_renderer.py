@@ -579,6 +579,7 @@ class InteractiveFlowGraphRenderer:
                         hover_text = (
                             f"<b>链路: {i} → {j}</b><br>"
                             f"带宽: {bandwidth:.2f} GB/s<br>"
+                            f"flit数量: {total_flit}<br>"
                             f"有效利用率: {effective_ratio:.1f}%<br>"
                             f"总利用率: {utilization:.1f}%<br>"
                             # f"下环尝试次数0: {attempts_0:.1f}%<br>"
@@ -810,7 +811,15 @@ class InteractiveFlowGraphRenderer:
         return f"rgba({r}, {g}, {b}, {alpha})"
 
     def draw_d2d_flow_graph(
-        self, die_networks: Dict = None, dies: Dict = None, config=None, die_ip_bandwidth_data: Dict = None, mode: str = "utilization", node_size: int = 2500, save_path: str = None, show_fig: bool = False
+        self,
+        die_networks: Dict = None,
+        dies: Dict = None,
+        config=None,
+        die_ip_bandwidth_data: Dict = None,
+        mode: str = "utilization",
+        node_size: int = 2500,
+        save_path: str = None,
+        show_fig: bool = False,
     ):
         """
         绘制D2D系统流量图（多Die布局）- 交互式版本
