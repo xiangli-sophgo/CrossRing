@@ -120,19 +120,19 @@ class BaseModel:
         flow_graph_interactive: bool = False,
         plot_RN_BW_fig: bool = False,
         fifo_utilization_heatmap: bool = False,
-        save_fig: bool = True,
+        show_fig: bool = False,
     ) -> None:
         """
         配置结果分析选项
 
         Args:
             result_save_path: 结果保存路径
-            results_fig_save_path: 图表保存路径（已弃用，使用save_fig控制图像保存）
+            results_fig_save_path: 图表保存路径（已弃用，使用show_fig控制图像显示）
             plot_flow_fig: 是否绘制静态流量图（PNG）
             flow_graph_interactive: 是否绘制交互式流量图（HTML）
             plot_RN_BW_fig: 是否绘制RN带宽图
             fifo_utilization_heatmap: 是否绘制FIFO使用率热力图
-            save_fig: 是否保存图像到数据流保存目录，默认True
+            show_fig: 是否显示图像（在浏览器中打开），默认True
         """
         self.plot_flow_fig = plot_flow_fig
         self.flow_graph_interactive = flow_graph_interactive
@@ -151,8 +151,8 @@ class BaseModel:
         else:
             self.results_fig_save_path = None
 
-        # save_fig参数现在只控制静态PNG图片的生成,不影响交互式HTML流图
-        self.save_fig = save_fig
+        # show_fig参数控制是否在浏览器中显示图像
+        self.show_fig = show_fig
 
     def setup_debug(
         self,
@@ -224,7 +224,8 @@ class BaseModel:
             min_gap_threshold=200,
             plot_rn_bw_fig=self.plot_RN_BW_fig,
             plot_flow_graph=self.plot_flow_fig,
-            flow_graph_interactive=self.flow_graph_interactive
+            flow_graph_interactive=self.flow_graph_interactive,
+            show_fig=self.show_fig
         )
         if self.plot_link_state:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)

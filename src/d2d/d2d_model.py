@@ -53,7 +53,7 @@ class D2D_Model:
         self._result_analysis_config = {
             "flow_graph": False,
             "ip_bandwidth_heatmap": False,
-            "save_figures": True,
+            "show_fig": False,
             "export_d2d_requests_csv": True,
             "export_ip_bandwidth_csv": True,
             "heatmap_mode": "total",
@@ -160,7 +160,7 @@ class D2D_Model:
         flow_graph_interactive: bool = False,  # 新增：交互式flow图
         ip_bandwidth_heatmap: bool = False,
         fifo_utilization_heatmap: bool = False,
-        save_figures: bool = True,
+        show_fig: bool = False,
         # CSV文件导出控制
         export_d2d_requests_csv: bool = True,
         export_ip_bandwidth_csv: bool = True,
@@ -176,7 +176,7 @@ class D2D_Model:
             flow_graph_interactive: 是否生成交互式流量图（HTML）
             ip_bandwidth_heatmap: 是否生成IP带宽热力图
             fifo_utilization_heatmap: 是否生成FIFO使用率热力图
-            save_figures: 是否保存图片
+            show_fig: 是否在浏览器中显示图像
 
         CSV文件导出控制:
             export_d2d_requests_csv: 是否导出跨Die请求记录
@@ -192,7 +192,7 @@ class D2D_Model:
                 "flow_graph_interactive": flow_graph_interactive,  # 新增
                 "ip_bandwidth_heatmap": ip_bandwidth_heatmap,
                 "fifo_utilization_heatmap": fifo_utilization_heatmap,
-                "save_figures": save_figures,
+                "show_fig": show_fig,
                 "export_d2d_requests_csv": export_d2d_requests_csv,
                 "export_ip_bandwidth_csv": export_ip_bandwidth_csv,
                 "heatmap_mode": heatmap_mode,
@@ -1207,7 +1207,7 @@ class D2D_Model:
                         d2d_processor.die_processors[die_id] = die_processor
 
                 # 统一使用d2d_result_path保存图片
-                save_path = d2d_result_path if self._result_analysis_config.get("save_figures") else None
+                save_path = d2d_result_path
                 flow_path = d2d_processor.draw_d2d_flow_graph(dies=self.dies, config=self.config, mode=self.flow_graph_mode, save_path=save_path)
                 if flow_path:
                     saved_files.append({"type": "D2D流量图(PNG)", "path": flow_path})
@@ -1231,24 +1231,23 @@ class D2D_Model:
 
                         d2d_processor.die_processors[die_id] = die_processor
 
-                # 生成HTML文件
-                save_path = d2d_result_path if self._result_analysis_config.get("save_figures") else None
-                if save_path:
+                # 生成HTML文件（总是保存）
+                if d2d_result_path:
                     # 为HTML文件创建独立的文件名
-                    html_save_path = os.path.join(save_path, f"d2d_flow_graph_{self.flow_graph_mode}_interactive.html")
+                    html_save_path = os.path.join(d2d_result_path, f"d2d_flow_graph_{self.flow_graph_mode}_interactive.html")
                 else:
                     html_save_path = None
 
                 interactive_flow_path = d2d_processor.draw_d2d_flow_graph_interactive(
-                    dies=self.dies, config=self.config, mode=self.flow_graph_mode, save_path=html_save_path
+                    dies=self.dies, config=self.config, mode=self.flow_graph_mode, save_path=html_save_path, show_fig=self._result_analysis_config.get("show_fig", False)
                 )
-                if interactive_flow_path:
+                if interactive_flow_path and isinstance(interactive_flow_path, str):
                     saved_files.append({"type": "D2D流量图(HTML交互式)", "path": interactive_flow_path})
 
             # 步骤4: 生成IP带宽热力图（如果启用）
             if self._result_analysis_config.get("ip_bandwidth_heatmap"):
                 # 统一使用d2d_result_path保存图片
-                save_path = d2d_result_path if self._result_analysis_config.get("save_figures") else None
+                save_path = d2d_result_path
                 heatmap_mode = self._result_analysis_config.get("heatmap_mode", "total")
 
                 heatmap_path = d2d_processor.draw_ip_bandwidth_heatmap(dies=self.dies, config=self.config, mode=heatmap_mode, node_size=2500, save_path=save_path)

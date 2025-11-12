@@ -1379,6 +1379,18 @@ class Network:
                 total_flit_v = sum(eject_attempts_v.values())
                 total_flit = total_flit_h + total_flit_v
 
+                # 计算合并的eject_attempts分布(横向+纵向)
+                total_flit_with_attempts = total_flit
+                if total_flit_with_attempts > 0:
+                    merged_attempts = {
+                        "0": (eject_attempts_h["0"] + eject_attempts_v["0"]) / total_flit_with_attempts,
+                        "1": (eject_attempts_h["1"] + eject_attempts_v["1"]) / total_flit_with_attempts,
+                        "2": (eject_attempts_h["2"] + eject_attempts_v["2"]) / total_flit_with_attempts,
+                        ">2": (eject_attempts_h[">2"] + eject_attempts_v[">2"]) / total_flit_with_attempts,
+                    }
+                else:
+                    merged_attempts = {"0": 0.0, "1": 0.0, "2": 0.0, ">2": 0.0}
+
                 stats[link] = {
                     # 主要比例（基于total_cycles）
                     "utilization": total_flit / total_cycles,
@@ -1387,6 +1399,10 @@ class Network:
                     # 详细flit分布（相对于total_cycles）
                     "eject_attempts_h_ratios": {k: v / total_cycles if total_cycles > 0 else 0.0 for k, v in eject_attempts_h.items()},
                     "eject_attempts_v_ratios": {k: v / total_cycles if total_cycles > 0 else 0.0 for k, v in eject_attempts_v.items()},
+                    # 合并的eject_attempts分布（相对于total_flit）
+                    "eject_attempts_merged_ratios": merged_attempts,
+                    # 有效利用率（eject_attempts=0的flit占比）
+                    "effective_ratio": merged_attempts["0"],
                     # 原始计数
                     "total_cycles": total_cycles,
                     "total_flit": total_flit,

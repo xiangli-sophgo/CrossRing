@@ -324,50 +324,51 @@ def generate_example_traffic():
     # 定义多个配置
     configs = [
         {
+            "src_map": {
+                "gdma_0": [0, 2],
+            },
+            "dst_map": {
+                "ddr_0": [3],
+            },
             # "src_map": {
-            #     "gdma_0": [0],
+            #     "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
+            #     "gdma_1": [3, 15, 19],
             # },
             # "dst_map": {
-            #     "ddr_0": [3],
+            #     "ddr_0": [3, 7, 11, 15],
+            #     "ddr_1": [3, 7, 11, 15],
             # },
-            "src_map": {
-                "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
-                "gdma_1": [3, 15, 19],
-            },
-            "dst_map": {
-                "ddr_0": [3, 7, 11, 15],
-                "ddr_1": [3, 7, 11, 15],
-            },
-            "speed": 40 * 0.9,
+            # "speed": 40 * 0.9,
+            "speed": 128,
             "burst": burst,
             "req_type": req_type,
         },
-        {
-            "src_map": {
-                "cdma_0": [18],
-                "cdma_1": [18],
-            },
-            "dst_map": {
-                "ddr_0": [3, 7, 11, 15],
-                "ddr_1": [3, 7, 11, 15],
-            },
-            "speed": 56 * 0.9,
-            "burst": burst,
-            "req_type": req_type,
-        },
-        {
-            "src_map": {
-                "cdma_0": [18],
-                "cdma_1": [18],
-            },
-            "dst_map": {
-                "ddr_0": [3, 7, 11, 15],
-                "ddr_1": [3, 7, 11, 15],
-            },
-            "speed": 56 * 0.9,
-            "burst": burst,
-            "req_type": "W" if req_type == "R" else "R",
-        },
+        # {
+        #     "src_map": {
+        #         "cdma_0": [18],
+        #         "cdma_1": [18],
+        #     },
+        #     "dst_map": {
+        #         "ddr_0": [3, 7, 11, 15],
+        #         "ddr_1": [3, 7, 11, 15],
+        #     },
+        #     "speed": 56 * 0.9,
+        #     "burst": burst,
+        #     "req_type": req_type,
+        # },
+        # {
+        #     "src_map": {
+        #         "cdma_0": [18],
+        #         "cdma_1": [18],
+        #     },
+        #     "dst_map": {
+        #         "ddr_0": [3, 7, 11, 15],
+        #         "ddr_1": [3, 7, 11, 15],
+        #     },
+        #     "speed": 56 * 0.9,
+        #     "burst": burst,
+        #     "req_type": "W" if req_type == "R" else "R",
+        # },
     ]
 
     # 生成数据

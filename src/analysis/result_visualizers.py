@@ -33,8 +33,7 @@ import warnings
 import os
 import math
 import traceback
-
-
+import plotly.graph_objects as go
 
 
 class BandwidthPlotter:
@@ -44,20 +43,21 @@ class BandwidthPlotter:
         """初始化带宽曲线绘制器"""
         pass
 
-    def plot_rn_bandwidth_curves(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None) -> float:
+    def plot_rn_bandwidth_curves(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None, show_fig: bool = False) -> float:
         """
-        绘制RN带宽时间曲线
+        绘制RN带宽时间曲线（Plotly交互式版本）
 
         Args:
             rn_bandwidth_time_series: RN带宽时间序列数据
                 格式: {port_key: {"time": [...], "start_times": [...], "bytes": [...]}}
             network_frequency: 网络频率 (GHz)
-            save_path: 保存路径
+            save_path: 保存路径（.html文件）
+            show_fig: 是否在浏览器中显示图像
 
         Returns:
             float: 曲线下面积（用于带宽积分计算）
         """
-        fig = plt.figure(figsize=(12, 8))
+        fig = go.Figure()
         total_bw = 0
 
         for port_key, data_dict in rn_bandwidth_time_series.items():
@@ -80,26 +80,40 @@ class BandwidthPlotter:
             t = np.percentile(times, 100)
             mask = times <= t
 
-            (line,) = plt.plot(times[mask] / 1000, bandwidth[mask], drawstyle="default", label=f"{port_key}")
-            plt.text(times[mask][-1] / 1000, bandwidth[mask][-1], f"{bandwidth[mask][-1]:.2f}", va="center", color=line.get_color(), fontsize=12)
+            times_us = times[mask] / 1000  # 转换为微秒
+            bandwidth_filtered = bandwidth[mask]
+            final_bw = bandwidth_filtered[-1]
 
-            total_bw += bandwidth[mask][-1]
+            # 添加曲线轨迹
+            fig.add_trace(go.Scatter(x=times_us, y=bandwidth_filtered, mode="lines", name=port_key, hovertemplate="<b>%{fullData.name}</b><br>时间: %{x:.2f} us<br>带宽: %{y:.2f} GB/s<extra></extra>"))
 
-        plt.xlabel("Time (us)")
-        plt.ylabel("Bandwidth (GB/s)")
-        plt.title("RN Bandwidth")
-        plt.legend()
-        plt.grid(True)
+            # 添加末尾文本标注
+            fig.add_annotation(x=times_us[-1], y=final_bw, text=f"{final_bw:.2f}", showarrow=False, xanchor="left", yanchor="middle", font=dict(size=12))
+
+            total_bw += final_bw
+
+        # 设置图表布局
+        fig.update_layout(
+            title="RN Bandwidth",
+            xaxis_title="Time (us)",
+            yaxis_title="Bandwidth (GB/s)",
+            hovermode="closest",
+            showlegend=True,
+            width=1200,
+            height=800,
+            xaxis=dict(showgrid=True),
+            yaxis=dict(showgrid=True),
+        )
 
         if save_path:
-            fig.savefig(save_path, bbox_inches="tight")
-            plt.close(fig)
-        else:
-            plt.show()
+            fig.write_html(save_path)
+
+        if show_fig:
+            fig.show()
 
         return total_bw
 
-    def plot_rn_bandwidth_curves_work_interval(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None) -> float:
+    def plot_rn_bandwidth_curves_work_interval(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None, show_fig: bool = False) -> float:
         """
         绘制RN带宽工作区间曲线（去除空闲时段）
 
@@ -107,12 +121,13 @@ class BandwidthPlotter:
             rn_bandwidth_time_series: RN带宽时间序列数据
             network_frequency: 网络频率
             save_path: 保存路径
+            show_fig: 是否在浏览器中显示图像
 
         Returns:
             float: 工作区间内的带宽积分
         """
         # 简化实现：调用主函数
-        return self.plot_rn_bandwidth_curves(rn_bandwidth_time_series, network_frequency, save_path)
+        return self.plot_rn_bandwidth_curves(rn_bandwidth_time_series, network_frequency, save_path, show_fig)
 
 
 class HeatmapDrawer:

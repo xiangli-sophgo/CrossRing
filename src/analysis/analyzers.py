@@ -88,7 +88,6 @@ class RequestInfo:
 
 
 @dataclass
-
 @dataclass
 class WorkingInterval:
     """工作区间数据结构"""
@@ -188,6 +187,7 @@ class SingleDieAnalyzer:
         plot_rn_bw_fig: bool = False,
         plot_flow_graph: bool = False,
         flow_graph_interactive: bool = False,
+        show_fig: bool = False,
     ):
         """
         初始化单Die分析器
@@ -198,6 +198,7 @@ class SingleDieAnalyzer:
             plot_rn_bw_fig: 是否绘制RN带宽曲线图
             plot_flow_graph: 是否绘制静态流量图（PNG）
             flow_graph_interactive: 是否绘制交互式流量图（HTML）
+            show_fig: 是否在浏览器中显示图像
         """
         from collections import defaultdict
         from .core_calculators import DataValidator, TimeIntervalCalculator, BandwidthCalculator
@@ -213,6 +214,7 @@ class SingleDieAnalyzer:
         self.plot_rn_bw_fig = plot_rn_bw_fig
         self.plot_flow_graph = plot_flow_graph
         self.flow_graph_interactive = flow_graph_interactive
+        self.show_fig = show_fig
         self.finish_cycle = 0
         self.sim_model = None  # 添加sim_model引用
 
@@ -396,14 +398,14 @@ class SingleDieAnalyzer:
         # 绘制RN带宽曲线并计算Total_sum_BW
         if self.plot_rn_bw_fig and self.sim_model:
             if self.sim_model.results_fig_save_path:
-                import time, os
+                import os
 
-                rn_save_path = os.path.join(self.sim_model.results_fig_save_path, f"rn_bandwidth_{self.config.TOPO_TYPE}_{self.sim_model.file_name}_{time.time_ns()}.png")
+                rn_save_path = os.path.join(self.sim_model.results_fig_save_path, f"rn_bandwidth_curve.html")
             else:
                 rn_save_path = None
 
             total_bandwidth = self.visualizer.plot_rn_bandwidth_curves_work_interval(
-                rn_bandwidth_time_series=self.rn_bandwidth_time_series, network_frequency=self.network_frequency, save_path=rn_save_path
+                rn_bandwidth_time_series=self.rn_bandwidth_time_series, network_frequency=self.network_frequency, save_path=rn_save_path, show_fig=self.show_fig
             )
 
             if rn_save_path:
@@ -452,11 +454,7 @@ class SingleDieAnalyzer:
             # 目前单Die只支持网格拓扑的交互式流图
             if not self.sim_model.topo_type_stat.startswith("Ring"):
                 self.interactive_flow_visualizer.draw_flow_graph(
-                    network=self.sim_model.data_network,
-                    ip_bandwidth_data=self.ip_bandwidth_data,
-                    config=self.config,
-                    mode="total",
-                    save_path=html_save_path
+                    network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, mode="total", save_path=html_save_path, show_fig=self.show_fig
                 )
 
                 if html_save_path:
@@ -706,6 +704,7 @@ class SingleDieAnalyzer:
         # 导出链路统计数据到CSV
         if hasattr(self.sim_model, "data_network") and self.sim_model.data_network:
             import os
+
             link_stats_csv = os.path.join(output_path, "link_statistics.csv")
             self.exporter.export_link_statistics_csv(self.sim_model.data_network, link_stats_csv)
 
@@ -825,5 +824,3 @@ class SingleDieAnalyzer:
                         f"写: avg {_avg(key,'write'):.2f}, max {latency_stats[key]['write']['max']}；"
                         f"混合: avg {_avg(key,'mixed'):.2f}, max {latency_stats[key]['mixed']['max']}"
                     )
-
-

@@ -35,7 +35,7 @@ class InteractiveFlowGraphRenderer:
         """初始化交互式流量图渲染器"""
         pass
 
-    def draw_flow_graph(self, network, ip_bandwidth_data: Dict = None, config=None, mode: str = "utilization", node_size: int = 2000, save_path: str = None):
+    def draw_flow_graph(self, network, ip_bandwidth_data: Dict = None, config=None, mode: str = "utilization", node_size: int = 2000, save_path: str = None, show_fig: bool = False):
         """
         绘制单Die网络流量图(交互式版本)
 
@@ -46,6 +46,7 @@ class InteractiveFlowGraphRenderer:
             mode: 可视化模式
             node_size: 节点大小
             save_path: 保存路径（如果为None则返回fig对象）
+            show_fig: 是否在浏览器中显示图像
 
         Returns:
             str: 保存的HTML文件路径，如果save_path为None则返回fig对象
@@ -119,6 +120,11 @@ class InteractiveFlowGraphRenderer:
                 save_path = save_path.replace(".png", ".html").replace(".jpg", ".html")
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             fig.write_html(save_path, include_plotlyjs="cdn", config={"displayModeBar": True})
+
+        if show_fig:
+            fig.show()
+
+        if save_path:
             return save_path
         else:
             return fig
@@ -551,7 +557,8 @@ class InteractiveFlowGraphRenderer:
                     if utilization_stats and (i, j) in utilization_stats:
                         stats = utilization_stats[(i, j)]
                         utilization = stats.get("utilization", 0) * 100
-                        idle_rate = (1 - stats.get("utilization", 0)) * 100
+                        empty_ratio = stats.get("empty_ratio", 0) * 100
+                        effective_ratio = stats.get("effective_ratio", 0) * 100
                         total_flit = stats.get("total_flit", 0)
                         total_cycles = stats.get("total_cycles", 0)
 
@@ -562,7 +569,24 @@ class InteractiveFlowGraphRenderer:
                         else:
                             bandwidth = 0
 
-                        hover_text = f"<b>链路: {i} → {j}</b><br>" f"利用率: {utilization:.1f}%<br>" f"空闲率: {idle_rate:.1f}%<br>" f"带宽: {bandwidth:.2f} GB/s"
+                        # 获取eject_attempts分布
+                        merged_ratios = stats.get("eject_attempts_merged_ratios", {"0": 0, "1": 0, "2": 0, ">2": 0})
+                        attempts_0 = merged_ratios.get("0", 0) * 100
+                        attempts_1 = merged_ratios.get("1", 0) * 100
+                        attempts_2 = merged_ratios.get("2", 0) * 100
+                        attempts_gt2 = merged_ratios.get(">2", 0) * 100
+
+                        hover_text = (
+                            f"<b>链路: {i} → {j}</b><br>"
+                            f"带宽: {bandwidth:.2f} GB/s<br>"
+                            f"有效利用率: {effective_ratio:.1f}%<br>"
+                            f"总利用率: {utilization:.1f}%<br>"
+                            # f"下环尝试次数0: {attempts_0:.1f}%<br>"
+                            # f"下环尝试次数1: {attempts_1:.1f}%<br>"
+                            # f"下环尝试次数2: {attempts_2:.1f}%<br>"
+                            f"下环尝试次数大于2占比: {attempts_gt2:.1f}%<br>"
+                            f"空闲率: {empty_ratio:.1f}%"
+                        )
                     else:
                         hover_text = f"<b>链路: {i} → {j}</b><br>值: {label}"
 
@@ -786,7 +810,7 @@ class InteractiveFlowGraphRenderer:
         return f"rgba({r}, {g}, {b}, {alpha})"
 
     def draw_d2d_flow_graph(
-        self, die_networks: Dict = None, dies: Dict = None, config=None, die_ip_bandwidth_data: Dict = None, mode: str = "utilization", node_size: int = 2500, save_path: str = None
+        self, die_networks: Dict = None, dies: Dict = None, config=None, die_ip_bandwidth_data: Dict = None, mode: str = "utilization", node_size: int = 2500, save_path: str = None, show_fig: bool = False
     ):
         """
         绘制D2D系统流量图（多Die布局）- 交互式版本
@@ -799,6 +823,7 @@ class InteractiveFlowGraphRenderer:
             mode: 可视化模式
             node_size: 节点大小
             save_path: 保存路径
+            show_fig: 是否在浏览器中显示图像
 
         Returns:
             str: 保存的HTML文件路径，如果save_path为None则返回fig对象
@@ -989,6 +1014,11 @@ class InteractiveFlowGraphRenderer:
                 save_path = save_path.replace(".png", ".html").replace(".jpg", ".html")
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             fig.write_html(save_path, include_plotlyjs="cdn", config={"displayModeBar": True})
+
+        if show_fig:
+            fig.show()
+
+        if save_path:
             return save_path
         else:
             return fig
@@ -1248,10 +1278,7 @@ class InteractiveFlowGraphRenderer:
 
         # 绘制箭头
         hover_text = (
-            f"D2D连接: Die{from_die}(节点{from_node}) → Die{to_die}(节点{to_node})<br>"
-            f"总带宽: {total_bandwidth:.2f} GB/s<br>"
-            f"写通道(W): {w_bw:.2f} GB/s<br>"
-            f"读通道(R): {r_bw:.2f} GB/s"
+            f"D2D连接: Die{from_die}(节点{from_node}) → Die{to_die}(节点{to_node})<br>" f"总带宽: {total_bandwidth:.2f} GB/s<br>" f"写通道(W): {w_bw:.2f} GB/s<br>" f"读通道(R): {r_bw:.2f} GB/s"
         )
 
         fig.add_annotation(
@@ -1564,11 +1591,7 @@ class InteractiveFlowGraphRenderer:
                     cmin=min_bw,
                     cmax=max_bw,
                     colorbar=dict(
-                        title=dict(
-                            text="IP BW<br>(GB/s)",
-                            side="right",
-                            font=dict(size=10)
-                        ),
+                        title=dict(text="IP BW<br>(GB/s)", side="right", font=dict(size=10)),
                         tickfont=dict(size=9),
                         len=0.3,  # colorbar长度
                         thickness=15,  # colorbar宽度
