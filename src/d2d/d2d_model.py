@@ -1212,6 +1212,9 @@ class D2D_Model:
                 if flow_path:
                     saved_files.append({"type": "D2D流量图(PNG)", "path": flow_path})
 
+            # 收集D2D集成报告的图表
+            d2d_charts_to_merge = []
+
             # 步骤3.5: 生成交互式流量图（如果启用）
             if self._result_analysis_config.get("flow_graph_interactive"):
                 # 设置die_processors（与静态版本相同）
@@ -1231,18 +1234,12 @@ class D2D_Model:
 
                         d2d_processor.die_processors[die_id] = die_processor
 
-                # 生成HTML文件（总是保存）
-                if d2d_result_path:
-                    # 为HTML文件创建独立的文件名
-                    html_save_path = os.path.join(d2d_result_path, f"d2d_flow_graph_{self.flow_graph_mode}_interactive.html")
-                else:
-                    html_save_path = None
-
-                interactive_flow_path = d2d_processor.draw_d2d_flow_graph_interactive(
-                    dies=self.dies, config=self.config, mode=self.flow_graph_mode, save_path=html_save_path, show_fig=self._result_analysis_config.get("show_fig", False)
+                # 获取Figure对象用于集成报告
+                flow_fig = d2d_processor.draw_d2d_flow_graph_interactive(
+                    dies=self.dies, config=self.config, mode=self.flow_graph_mode, return_fig=True
                 )
-                if interactive_flow_path and isinstance(interactive_flow_path, str):
-                    saved_files.append({"type": "D2D流量图(HTML交互式)", "path": interactive_flow_path})
+                if flow_fig:
+                    d2d_charts_to_merge.append(("D2D流量图", flow_fig, None))
 
             # 步骤4: 生成IP带宽热力图（如果启用）
             if self._result_analysis_config.get("ip_bandwidth_heatmap"):
@@ -1261,7 +1258,7 @@ class D2D_Model:
                 self._generate_d2d_fifo_usage_csv(fifo_csv_path)
                 saved_files.append({"type": "FIFO使用率统计", "path": fifo_csv_path})
 
-            # 步骤6: 生成FIFO使用率热力图（如果启用）
+            # 步骤6: 生成FIFO使用率热力图（如果启用）- D2D通常不使用
             should_plot_fifo = self._result_analysis_config.get("fifo_utilization_heatmap") or getattr(self, "fifo_utilization_heatmap", False)
             if should_plot_fifo:
                 from src.analysis.fifo_heatmap_visualizer import create_fifo_heatmap
@@ -1285,6 +1282,23 @@ class D2D_Model:
 
                 if fifo_heatmap_path:
                     saved_files.append({"type": "FIFO使用率热力图", "path": fifo_heatmap_path})
+
+            # 步骤7: 生成D2D集成可视化报告（合并所有图表）
+            if d2d_charts_to_merge:
+                from src.analysis.integrated_visualizer import create_integrated_report
+
+                integrated_save_path = os.path.join(d2d_result_path, "result_analysis.html")
+                integrated_path = create_integrated_report(
+                    charts_config=d2d_charts_to_merge, save_path=integrated_save_path, show_fig=self._result_analysis_config.get("show_fig", False)
+                )
+                if integrated_path:
+                    saved_files.append({"type": "集成可视化报告", "path": integrated_path})
+                    print(f"集成可视化报告: {integrated_save_path}")
+                    # 打印包含的图表
+                    chart_titles = [title for title, _, _ in d2d_charts_to_merge]
+                    for title in chart_titles:
+                        print(f"  包含图表:")
+                        print(f"    - {title}")
 
         except Exception as e:
             import traceback

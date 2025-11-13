@@ -25,88 +25,23 @@ logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
 # 定义9种配置组合
 STRATEGY_CONFIGS = [
     # Mode 0: 无保序 - 1种配置
-    {
-        "mode": 0,
-        "granularity": 0,
-        "channels": [],
-        "name": "M0_NoOrder",
-        "desc": "无保序（基准对照）"
-    },
-
+    {"mode": 0, "granularity": 0, "channels": [], "name": "M0_NoOrder", "desc": "无保序（基准对照）"},
     # Mode 1: 单侧下环 (TL/TU固定) - 4种组合
-    {
-        "mode": 1,
-        "granularity": 0,
-        "channels": ["REQ"],
-        "name": "M1_IP_REQ",
-        "desc": "单侧下环+IP层级+仅REQ保序"
-    },
-    {
-        "mode": 1,
-        "granularity": 0,
-        "channels": ["REQ", "RSP", "DATA"],
-        "name": "M1_IP_ALL",
-        "desc": "单侧下环+IP层级+全通道保序"
-    },
-    {
-        "mode": 1,
-        "granularity": 1,
-        "channels": ["REQ"],
-        "name": "M1_Node_REQ",
-        "desc": "单侧下环+节点层级+仅REQ保序"
-    },
-    {
-        "mode": 1,
-        "granularity": 1,
-        "channels": ["REQ", "RSP", "DATA"],
-        "name": "M1_Node_ALL",
-        "desc": "单侧下环+节点层级+全通道保序"
-    },
-
+    {"mode": 1, "granularity": 0, "channels": ["REQ"], "name": "M1_IP_REQ", "desc": "单侧下环+IP层级+仅REQ保序"},
+    {"mode": 1, "granularity": 0, "channels": ["REQ", "RSP", "DATA"], "name": "M1_IP_ALL", "desc": "单侧下环+IP层级+全通道保序"},
+    {"mode": 1, "granularity": 1, "channels": ["REQ"], "name": "M1_Node_REQ", "desc": "单侧下环+节点层级+仅REQ保序"},
+    {"mode": 1, "granularity": 1, "channels": ["REQ", "RSP", "DATA"], "name": "M1_Node_ALL", "desc": "单侧下环+节点层级+全通道保序"},
     # Mode 2: 双侧下环 (白名单配置) - 4种组合
-    {
-        "mode": 2,
-        "granularity": 0,
-        "channels": ["REQ"],
-        "name": "M2_IP_REQ",
-        "desc": "双侧下环+IP层级+仅REQ保序"
-    },
-    {
-        "mode": 2,
-        "granularity": 0,
-        "channels": ["REQ", "RSP", "DATA"],
-        "name": "M2_IP_ALL",
-        "desc": "双侧下环+IP层级+全通道保序"
-    },
-    {
-        "mode": 2,
-        "granularity": 1,
-        "channels": ["REQ"],
-        "name": "M2_Node_REQ",
-        "desc": "双侧下环+节点层级+仅REQ保序"
-    },
-    {
-        "mode": 2,
-        "granularity": 1,
-        "channels": ["REQ", "RSP", "DATA"],
-        "name": "M2_Node_ALL",
-        "desc": "双侧下环+节点层级+全通道保序"
-    },
+    {"mode": 2, "granularity": 0, "channels": ["REQ"], "name": "M2_IP_REQ", "desc": "双侧下环+IP层级+仅REQ保序"},
+    {"mode": 2, "granularity": 0, "channels": ["REQ", "RSP", "DATA"], "name": "M2_IP_ALL", "desc": "双侧下环+IP层级+全通道保序"},
+    {"mode": 2, "granularity": 1, "channels": ["REQ"], "name": "M2_Node_REQ", "desc": "双侧下环+节点层级+仅REQ保序"},
+    {"mode": 2, "granularity": 1, "channels": ["REQ", "RSP", "DATA"], "name": "M2_Node_ALL", "desc": "双侧下环+节点层级+全通道保序"},
 ]
 
 
 def run_single_simulation(sim_params):
     """运行单个仿真 - 针对特定流量文件和特定保序策略配置"""
-    (
-        config_path,
-        traffic_path,
-        model_type,
-        file_name,
-        strategy,
-        result_save_base_path,
-        results_fig_save_base_path,
-        output_csv
-    ) = sim_params
+    (config_path, traffic_path, model_type, file_name, strategy, result_save_base_path, output_csv) = sim_params
 
     try:
         print(f"[{strategy['name']}] 开始仿真: {file_name} (进程 {os.getpid()})")
@@ -154,13 +89,13 @@ def run_single_simulation(sim_params):
 
         # 配置结果分析 - 每个策略独立保存
         strategy_result_path = f"{result_save_base_path}/{strategy['name']}/{file_name[:-4]}/"
-        strategy_fig_path = f"{results_fig_save_base_path}/{strategy['name']}/"
 
         sim.setup_result_analysis(
             result_save_path=strategy_result_path,
-            results_fig_save_path=strategy_fig_path,
-            plot_flow_fig=True,
-            plot_RN_BW_fig=True,
+            plot_RN_BW_fig=1,
+            flow_graph_interactive=1,
+            fifo_utilization_heatmap=1,
+            show_fig=0,
         )
 
         # 运行仿真
@@ -195,6 +130,7 @@ def save_results_to_csv(results_data):
     # 使用portalocker确保跨平台文件锁
     try:
         import portalocker
+
         use_portalocker = True
     except ImportError:
         print("警告: portalocker不可用，使用threading.Lock替代")
@@ -230,13 +166,7 @@ def save_results_to_csv(results_data):
     print(f"[{strategy_name}] CSV已保存: {file_name}")
 
 
-def run_comparison_simulation(
-    config_path,
-    traffic_path,
-    model_type,
-    results_base_name,
-    max_workers=None
-):
+def run_comparison_simulation(config_path, traffic_path, model_type, results_base_name, max_workers=None):
     """运行保序策略对比仿真"""
 
     # 获取所有流量文件
@@ -260,8 +190,7 @@ def run_comparison_simulation(
     print("=" * 80 + "\n")
 
     # 设置结果路径
-    result_save_base_path = f"../Result/CrossRing/{model_type}/ordering_comparison/"
-    results_fig_save_base_path = f"../Result/Plt_IP_BW/{model_type}/ordering_comparison/"
+    result_save_base_path = f"../Result/CrossRing/{model_type}/{results_base_name}/"
 
     # 为每个策略创建独立的CSV文件
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -271,7 +200,7 @@ def run_comparison_simulation(
     strategy_csv_map = {}
     for strategy in STRATEGY_CONFIGS:
         csv_path = os.path.join(csv_dir, f"{strategy['name']}.csv")
-        strategy_csv_map[strategy['name']] = csv_path
+        strategy_csv_map[strategy["name"]] = csv_path
 
     os.makedirs(result_save_base_path, exist_ok=True)
 
@@ -289,20 +218,11 @@ def run_comparison_simulation(
     # 按策略分组准备仿真参数
     strategy_params_map = {}
     for strategy in STRATEGY_CONFIGS:
-        strategy_params_map[strategy['name']] = []
-        output_csv = strategy_csv_map[strategy['name']]
+        strategy_params_map[strategy["name"]] = []
+        output_csv = strategy_csv_map[strategy["name"]]
         for file_name in file_names:
-            sim_params = (
-                config_path,
-                traffic_path,
-                model_type,
-                file_name,
-                strategy,
-                result_save_base_path,
-                results_fig_save_base_path,
-                output_csv
-            )
-            strategy_params_map[strategy['name']].append(sim_params)
+            sim_params = (config_path, traffic_path, model_type, file_name, strategy, result_save_base_path, output_csv)
+            strategy_params_map[strategy["name"]].append(sim_params)
 
     # 按策略串行执行,每个策略内部并行处理多个流量文件
     start_time = time.time()
@@ -320,10 +240,7 @@ def run_comparison_simulation(
 
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # 提交当前策略的所有仿真任务
-            future_to_params = {
-                executor.submit(run_single_simulation, params): params
-                for params in sim_params_list
-            }
+            future_to_params = {executor.submit(run_single_simulation, params): params for params in sim_params_list}
 
             # 处理完成的仿真并保存结果
             strategy_completed = 0
@@ -357,33 +274,11 @@ def run_comparison_simulation(
 
 def main():
     parser = argparse.ArgumentParser(description="保序策略对比仿真")
-    parser.add_argument(
-        "--traffic_path",
-        default="../traffic/DeepSeek_0616/step6_ch_map/",
-        help="流量数据路径"
-    )
-    parser.add_argument(
-        "--config",
-        default="../config/topologies/topo_5x4.yaml",
-        help="仿真配置文件路径"
-    )
-    parser.add_argument(
-        "--model",
-        default="REQ_RSP",
-        choices=["Feature", "REQ_RSP", "Packet_Base"],
-        help="仿真模型类型"
-    )
-    parser.add_argument(
-        "--results_base_name",
-        default="ordering_comparison",
-        help="结果文件基础名称"
-    )
-    parser.add_argument(
-        "--max_workers",
-        type=int,
-        default=16,
-        help="最大并行worker数量"
-    )
+    parser.add_argument("--traffic_path", default="../traffic/DeepSeek_0616/step6_ch_map/", help="流量数据路径")
+    parser.add_argument("--config", default="../config/topologies/topo_5x4.yaml", help="仿真配置文件路径")
+    parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="仿真模型类型")
+    parser.add_argument("--results_base_name", default="ordering_comparison_1113", help="结果文件基础名称")
+    parser.add_argument("--max_workers", type=int, default=16, help="最大并行worker数量")
 
     args = parser.parse_args()
     np.random.seed(922)
@@ -397,13 +292,7 @@ def main():
     print(f"并行度: {args.max_workers}")
     print("=" * 80 + "\n")
 
-    run_comparison_simulation(
-        args.config,
-        args.traffic_path,
-        args.model,
-        args.results_base_name,
-        args.max_workers
-    )
+    run_comparison_simulation(args.config, args.traffic_path, args.model, args.results_base_name, args.max_workers)
 
 
 if __name__ == "__main__":

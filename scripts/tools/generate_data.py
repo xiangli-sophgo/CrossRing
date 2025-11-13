@@ -328,7 +328,7 @@ def generate_example_traffic():
                 "gdma_0": [0, 2],
             },
             "dst_map": {
-                "ddr_0": [3],
+                "ddr_0": [5],
             },
             # "src_map": {
             #     "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],

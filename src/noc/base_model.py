@@ -225,7 +225,8 @@ class BaseModel:
             plot_rn_bw_fig=self.plot_RN_BW_fig,
             plot_flow_graph=self.plot_flow_fig,
             flow_graph_interactive=self.flow_graph_interactive,
-            show_fig=self.show_fig
+            show_fig=self.show_fig,
+            verbose=self.verbose,
         )
         if self.plot_link_state:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
@@ -1839,7 +1840,9 @@ class BaseModel:
         latency_stats = self.result_processor._calculate_latency_stats()
 
         # FIFO使用率统计
-        self.result_processor.generate_fifo_usage_csv(self)
+        fifo_csv_path = self.result_processor.generate_fifo_usage_csv(self)
+        if fifo_csv_path and self.verbose:
+            print(f"FIFO使用率统计CSV: {fifo_csv_path}")
         # CMD 延迟
         self.cmd_read_avg_latency_stat = (latency_stats["cmd"]["read"]["sum"] / latency_stats["cmd"]["read"]["count"]) if latency_stats["cmd"]["read"]["count"] else 0.0
         self.cmd_read_max_latency_stat = latency_stats["cmd"]["read"]["max"]
@@ -1895,7 +1898,7 @@ class BaseModel:
         self.trans_mixed_p95_latency_stat = latency_stats["trans"]["mixed"]["p95"]
         self.trans_mixed_p99_latency_stat = latency_stats["trans"]["mixed"]["p99"]
 
-        # FIFO使用率热力图生成
+        # FIFO使用率热力图 - 收集到结果处理器中
         if getattr(self, "fifo_utilization_heatmap", False):
             try:
                 from src.analysis.fifo_heatmap_visualizer import create_fifo_heatmap
@@ -1906,20 +1909,90 @@ class BaseModel:
                 # 构造dies字典（单Die情况）
                 dies = {0: self}
 
-                # 确定保存路径
-                if self.result_save_path:
-                    fifo_save_path = f"{self.result_save_path}fifo_utilization_heatmap.html"
+                # 获取Figure和JavaScript（不保存）
+                fifo_fig, fifo_js = create_fifo_heatmap(
+                    dies=dies, config=self.config, total_cycles=total_cycles, die_layout=None, die_rotations=None, save_path=None, show_fig=False, return_fig_and_js=True
+                )
+
+                # 将FIFO图表添加到结果处理器的图表列表中
+                if not hasattr(self.result_processor, "charts_to_merge"):
+                    self.result_processor.charts_to_merge = []
+                # FIFO热力图插入到流量图和RN带宽之间（索引1位置）
+                if len(self.result_processor.charts_to_merge) > 0:
+                    self.result_processor.charts_to_merge.insert(1, ("FIFO使用率热力图", fifo_fig, fifo_js))
                 else:
-                    fifo_save_path = None
+                    self.result_processor.charts_to_merge.append(("FIFO使用率热力图", fifo_fig, fifo_js))
 
-                # 生成FIFO热力图
-                fifo_heatmap_path = create_fifo_heatmap(dies=dies, config=self.config, total_cycles=total_cycles, die_layout=None, die_rotations=None, save_path=fifo_save_path)
-
-                if fifo_heatmap_path and self.verbose:
-                    print(f"FIFO使用率热力图: {fifo_heatmap_path}")
             except Exception as e:
                 if self.verbose:
                     print(f"警告: FIFO使用率热力图生成失败: {e}")
+
+        # 生成集成HTML（所有图表收集完毕后）
+        self._generate_integrated_visualization()
+
+    def _generate_integrated_visualization(self):
+        """生成集成的可视化HTML报告"""
+        if not hasattr(self.result_processor, "charts_to_merge"):
+            return
+
+        all_charts = self.result_processor.charts_to_merge
+        if not all_charts:
+            return
+
+        # 确保顺序：流量图 → FIFO热力图 → RN带宽曲线 → 结果分析
+        ordered_charts = []
+        flow_chart = None
+        fifo_chart = None
+        rn_chart = None
+        bandwidth_report = None
+
+        for title, fig, custom_js in all_charts:
+            if "流量图" in title:
+                flow_chart = (title, fig, custom_js)
+            elif "FIFO" in title:
+                fifo_chart = (title, fig, custom_js)
+            elif "结果分析" in title or "带宽分析报告" in title:
+                bandwidth_report = (title, fig, custom_js)
+            elif "RN" in title or "带宽曲线" in title:
+                rn_chart = (title, fig, custom_js)
+
+        # 按顺序添加
+        if flow_chart:
+            ordered_charts.append(flow_chart)
+        if fifo_chart:
+            ordered_charts.append(fifo_chart)
+        if rn_chart:
+            ordered_charts.append(rn_chart)
+        if bandwidth_report:
+            ordered_charts.append(bandwidth_report)
+
+        if not ordered_charts:
+            return
+
+        try:
+            from src.analysis.integrated_visualizer import create_integrated_report
+
+            # 确定保存路径
+            if self.result_save_path:
+                save_path = f"{self.result_save_path}result_analysis.html"
+            else:
+                return
+
+            # 生成集成HTML
+            integrated_path = create_integrated_report(charts_config=ordered_charts, save_path=save_path, show_fig=self.show_fig)
+
+            if integrated_path and self.verbose:
+                print(f"结果分析报告: {integrated_path}")
+                # print("  包含图表:")
+                # for title, _, _ in ordered_charts:
+                #     print(f"    - {title}")
+
+        except Exception as e:
+            if self.verbose:
+                print(f"警告: 集成HTML生成失败: {e}")
+                import traceback
+
+                traceback.print_exc()
 
     def _calculate_path_xy(self, src, dst):
         """

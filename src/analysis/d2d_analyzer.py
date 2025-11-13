@@ -890,7 +890,7 @@ class D2DAnalyzer:
             save_path=save_path,
         )
 
-    def draw_d2d_flow_graph_interactive(self, die_networks: Dict = None, dies: Dict = None, config=None, die_ip_bandwidth_data: Dict = None, mode: str = "total", save_path: str = None, show_fig: bool = False):
+    def draw_d2d_flow_graph_interactive(self, die_networks: Dict = None, dies: Dict = None, config=None, die_ip_bandwidth_data: Dict = None, mode: str = "total", save_path: str = None, show_fig: bool = False, return_fig: bool = False):
         """
         绘制D2D流图（交互式版本，生成HTML文件）
 
@@ -902,9 +902,10 @@ class D2DAnalyzer:
             mode: 显示模式
             save_path: 保存路径（会自动转换为.html后缀）
             show_fig: 是否在浏览器中显示图像
+            return_fig: 是否返回Figure对象（用于集成报告）
 
         Returns:
-            str: 生成的HTML文件路径
+            str or Figure: 如果return_fig=True返回Figure对象，否则返回HTML文件路径
         """
         return self.interactive_flow_visualizer.draw_d2d_flow_graph(
             die_networks=die_networks,
@@ -914,6 +915,7 @@ class D2DAnalyzer:
             mode=mode,
             save_path=save_path,
             show_fig=show_fig,
+            return_fig=return_fig,
         )
 
     def draw_ip_bandwidth_heatmap(self, dies=None, config=None, mode="total", node_size=4000, save_path=None):

@@ -43,7 +43,7 @@ class BandwidthPlotter:
         """初始化带宽曲线绘制器"""
         pass
 
-    def plot_rn_bandwidth_curves(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None, show_fig: bool = False) -> float:
+    def plot_rn_bandwidth_curves(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None, show_fig: bool = False, return_fig: bool = False):
         """
         绘制RN带宽时间曲线（Plotly交互式版本）
 
@@ -53,9 +53,10 @@ class BandwidthPlotter:
             network_frequency: 网络频率 (GHz)
             save_path: 保存路径（.html文件）
             show_fig: 是否在浏览器中显示图像
+            return_fig: 是否返回Figure对象而不是保存文件
 
         Returns:
-            float: 曲线下面积（用于带宽积分计算）
+            float or tuple: 如果return_fig=False，返回总带宽；如果return_fig=True，返回(总带宽, Figure对象)
         """
         fig = go.Figure()
         total_bw = 0
@@ -93,8 +94,7 @@ class BandwidthPlotter:
             total_bw += final_bw
 
         # 设置图表布局
-        fig.update_layout(
-            title="RN Bandwidth",
+        layout_config = dict(
             xaxis_title="Time (us)",
             yaxis_title="Bandwidth (GB/s)",
             hovermode="closest",
@@ -105,6 +105,15 @@ class BandwidthPlotter:
             yaxis=dict(showgrid=True),
         )
 
+        # 只在非集成模式下显示标题
+        if not return_fig:
+            layout_config["title"] = "RN Bandwidth"
+
+        fig.update_layout(**layout_config)
+
+        if return_fig:
+            return total_bw, fig
+
         if save_path:
             fig.write_html(save_path)
 
@@ -113,7 +122,7 @@ class BandwidthPlotter:
 
         return total_bw
 
-    def plot_rn_bandwidth_curves_work_interval(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None, show_fig: bool = False) -> float:
+    def plot_rn_bandwidth_curves_work_interval(self, rn_bandwidth_time_series: Dict, network_frequency: float = 2.0, save_path: str = None, show_fig: bool = False, return_fig: bool = False):
         """
         绘制RN带宽工作区间曲线（去除空闲时段）
 
@@ -122,12 +131,13 @@ class BandwidthPlotter:
             network_frequency: 网络频率
             save_path: 保存路径
             show_fig: 是否在浏览器中显示图像
+            return_fig: 是否返回Figure对象
 
         Returns:
-            float: 工作区间内的带宽积分
+            float or tuple: 如果return_fig=False，返回带宽积分；如果return_fig=True，返回(带宽积分, Figure对象)
         """
         # 简化实现：调用主函数
-        return self.plot_rn_bandwidth_curves(rn_bandwidth_time_series, network_frequency, save_path, show_fig)
+        return self.plot_rn_bandwidth_curves(rn_bandwidth_time_series, network_frequency, save_path, show_fig, return_fig)
 
 
 class HeatmapDrawer:

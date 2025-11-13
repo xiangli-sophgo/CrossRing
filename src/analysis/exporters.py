@@ -19,6 +19,15 @@ from .d2d_analyzer import D2DRequestInfo
 class CSVExporter:
     """CSV导出器 - 导出请求数据、端口带宽和链路统计到CSV文件"""
 
+    def __init__(self, verbose: int = 0):
+        """
+        初始化CSV导出器
+
+        Args:
+            verbose: 详细程度（0=静默，1=正常）
+        """
+        self.verbose = verbose
+
     def generate_detailed_request_csv(self, requests: List[RequestInfo], output_path: str) -> None:
         """
         生成详细的请求CSV文件（分离读写）
@@ -69,8 +78,8 @@ class CSVExporter:
         if write_requests:
             write_csv_file = self._write_request_csv_file(write_requests, output_path, "write", csv_header)
 
-        # 打印统计信息
-        if read_requests or write_requests:
+        # 打印统计信息（仅在verbose模式下）
+        if self.verbose >= 1 and (read_requests or write_requests):
             print("\n" + "=" * 60)
             print(f"详细请求记录统计:")
             if read_requests:
@@ -750,7 +759,7 @@ class ReportGenerator:
 
     def generate_unified_report(self, results: Dict, output_path: str, num_ip: int = 1) -> None:
         """
-        生成统一的文本报告
+        生成统一的文本报告（已禁用，不再生成txt文件）
 
         Args:
             results: 统计结果字典，包含:
@@ -762,6 +771,9 @@ class ReportGenerator:
             output_path: 输出目录路径
             num_ip: IP数量（用于平均带宽计算）
         """
+        # 不再生成txt报告文件
+        return
+
         os.makedirs(output_path, exist_ok=True)
 
         report_file = os.path.join(output_path, "bandwidth_analysis_report.txt")
@@ -827,6 +839,159 @@ class ReportGenerator:
                         f.write(f"  工作区间数: {len(metrics.working_intervals)}\n")
                         f.write(f"  请求总数: {metrics.total_requests}\n")
                         f.write("\n")
+
+    def generate_summary_report_html(self, results: Dict, num_ip: int = 1, circuit_stats: Dict = None) -> str:
+        """
+        生成HTML格式的结果摘要
+
+        Args:
+            results: 带宽分析结果字典
+            num_ip: IP数量（用于平均带宽计算）
+            circuit_stats: 绕环与Tag统计
+
+        Returns:
+            str: HTML格式的报告内容
+        """
+        html_parts = []
+        summary = results.get("summary", {})
+        network_overall = results.get("network_overall", {})
+
+        # 网络带宽
+        html_parts.append('<div class="report-section">')
+        html_parts.append("<h3>网络带宽</h3>")
+        html_parts.append('<table class="report-table">')
+        html_parts.append("<tbody>")
+
+        read_metrics = network_overall.get("read")
+        write_metrics = network_overall.get("write")
+        mixed_metrics = network_overall.get("mixed")
+
+        read_bw = read_metrics.weighted_bandwidth if read_metrics else 0.0
+        write_bw = write_metrics.weighted_bandwidth if write_metrics else 0.0
+        mixed_bw = mixed_metrics.weighted_bandwidth if mixed_metrics else 0.0
+
+        read_avg = read_bw / num_ip if num_ip > 0 else 0.0
+        write_avg = write_bw / num_ip if num_ip > 0 else 0.0
+        mixed_avg = mixed_bw / num_ip if num_ip > 0 else 0.0
+
+        html_parts.append(f"<tr><td>读带宽</td><td class='num-cell'>总: {read_bw:.3f} GB/s</td><td class='num-cell'>平均: {read_avg:.3f} GB/s</td></tr>")
+        html_parts.append(f"<tr><td>写带宽</td><td class='num-cell'>总: {write_bw:.3f} GB/s</td><td class='num-cell'>平均: {write_avg:.3f} GB/s</td></tr>")
+        html_parts.append(f"<tr><td>混合带宽</td><td class='num-cell'>总: {mixed_bw:.3f} GB/s</td><td class='num-cell'>平均: {mixed_avg:.3f} GB/s</td></tr>")
+        html_parts.append("</tbody>")
+        html_parts.append("</table>")
+        html_parts.append("</div>")
+
+        # 请求统计
+        html_parts.append('<div class="report-section">')
+        html_parts.append("<h3>请求统计</h3>")
+        html_parts.append('<table class="report-table">')
+        html_parts.append("<tbody>")
+
+        total_req = summary.get("total_requests", 0)
+        read_req = summary.get("read_requests", 0)
+        write_req = summary.get("write_requests", 0)
+        total_read_flits = summary.get("total_read_flits", 0)
+        total_write_flits = summary.get("total_write_flits", 0)
+
+        html_parts.append(f'<tr><td>请求数</td><td class="num-cell">读: {read_req}</td><td class="num-cell">写: {write_req}</td><td class="num-cell">总计: {total_req}</td></tr>')
+        html_parts.append(
+            f'<tr><td>flit数</td><td class="num-cell">读: {total_read_flits}</td><td class="num-cell">写: {total_write_flits}</td><td class="num-cell">总计: {total_read_flits + total_write_flits}</td></tr>'
+        )
+        html_parts.append(
+            f'<tr><td>Retry</td><td class="num-cell">读: {circuit_stats.get("read_retry_num", 0)}</td><td class="num-cell">写: {circuit_stats.get("write_retry_num", 0)}</td><td class="num-cell">总计: {circuit_stats.get("read_retry_num", 0) + circuit_stats.get("write_retry_num", 0)}</td></tr>'
+        )
+        html_parts.append("</tbody>")
+        html_parts.append("</table>")
+        html_parts.append("</div>")
+
+        # 绕环与Tag统计
+        if circuit_stats:
+            html_parts.append('<div class="report-section">')
+            html_parts.append("<h3>绕环与Tag统计</h3>")
+
+            html_parts.append('<table class="report-table">')
+            html_parts.append("<tbody>")
+            html_parts.append(f'<tr><td>ITag</td><td class="num-cell">横向: {circuit_stats.get("ITag_h_num", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("ITag_v_num", 0)}</td></tr>')
+            html_parts.append(f'<tr><td>RB ETag</td><td class="num-cell">T1: {circuit_stats.get("RB_ETag_T1_num", 0)}</td><td class="num-cell">T0: {circuit_stats.get("RB_ETag_T0_num", 0)}</td></tr>')
+            html_parts.append(f'<tr><td>EQ ETag</td><td class="num-cell">T1: {circuit_stats.get("EQ_ETag_T1_num", 0)}</td><td class="num-cell">T0: {circuit_stats.get("EQ_ETag_T0_num", 0)}</td></tr>')
+            html_parts.append(
+                f'<tr><td>Circuits req</td><td class="num-cell">横向: {circuit_stats.get("req_circuits_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("req_circuits_v", 0)}</td></tr>'
+            )
+            html_parts.append(
+                f'<tr><td>Circuits rsp</td><td class="num-cell">横向: {circuit_stats.get("rsp_circuits_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("rsp_circuits_v", 0)}</td></tr>'
+            )
+            html_parts.append(
+                f'<tr><td>Circuits data</td><td class="num-cell">横向: {circuit_stats.get("data_circuits_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("data_circuits_v", 0)}</td></tr>'
+            )
+            html_parts.append(
+                f'<tr><td>Wait cycle req</td><td class="num-cell">横向: {circuit_stats.get("req_wait_cycles_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("req_wait_cycles_v", 0)}</td></tr>'
+            )
+            html_parts.append(
+                f'<tr><td>Wait cycle rsp</td><td class="num-cell">横向: {circuit_stats.get("rsp_wait_cycles_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("rsp_wait_cycles_v", 0)}</td></tr>'
+            )
+            html_parts.append(
+                f'<tr><td>Wait cycle data</td><td class="num-cell">横向: {circuit_stats.get("data_wait_cycles_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("data_wait_cycles_v", 0)}</td></tr>'
+            )
+            html_parts.append("</tbody>")
+            html_parts.append("</table>")
+
+        # 绕环比例统计（独立表格）
+        circling_stats = results.get("circling_eject_stats", {})
+        if circling_stats:
+            html_parts.append('<table class="report-table">')
+            html_parts.append("<tbody>")
+
+            h_ratio = circling_stats.get("horizontal", {}).get("circling_ratio", 0.0) * 100
+            v_ratio = circling_stats.get("vertical", {}).get("circling_ratio", 0.0) * 100
+            overall_ratio = circling_stats.get("overall", {}).get("circling_ratio", 0.0) * 100
+            html_parts.append(
+                f"<tr><td>绕环比例</td><td class='num-cell'>横向: {h_ratio:.2f}%</td><td class='num-cell'>纵向: {v_ratio:.2f}%</td><td class='num-cell'>总体: {overall_ratio:.2f}%</td></tr>"
+            )
+
+            # 保序导致的绕环比例
+            ordering_blocked_stats = results.get("ordering_blocked_stats", {})
+            if ordering_blocked_stats:
+                h_ord_ratio = ordering_blocked_stats.get("horizontal", {}).get("ordering_blocked_ratio", 0.0) * 100
+                v_ord_ratio = ordering_blocked_stats.get("vertical", {}).get("ordering_blocked_ratio", 0.0) * 100
+                overall_ord_ratio = ordering_blocked_stats.get("overall", {}).get("ordering_blocked_ratio", 0.0) * 100
+                html_parts.append(
+                    f"<tr><td>保序导致绕环比例</td><td class='num-cell'>横向: {h_ord_ratio:.2f}%</td><td class='num-cell'>纵向: {v_ord_ratio:.2f}%</td><td class='num-cell'>总体: {overall_ord_ratio:.2f}%</td></tr>"
+                )
+
+            html_parts.append("</tbody>")
+            html_parts.append("</table>")
+
+        if circuit_stats or circling_stats:
+            html_parts.append("</div>")
+        html_parts.append("</div>")
+
+        # 延迟统计
+        latency_stats = results.get("latency_stats", {})  # 修复: 从results顶层获取
+        if latency_stats:
+            html_parts.append('<div class="report-section">')
+            html_parts.append("<h3>延迟统计 (单位: ns)</h3>")
+            html_parts.append('<table class="report-table">')
+            html_parts.append("<tbody>")
+
+            for cat, label in [("cmd", "CMD"), ("data", "Data"), ("trans", "Trans")]:
+                if cat in latency_stats:
+                    rl = latency_stats[cat]
+                    read_avg = rl["read"]["sum"] / rl["read"]["count"] if rl["read"]["count"] else 0.0
+                    write_avg = rl["write"]["sum"] / rl["write"]["count"] if rl["write"]["count"] else 0.0
+                    mixed_avg = rl["mixed"]["sum"] / rl["mixed"]["count"] if rl["mixed"]["count"] else 0.0
+
+                    html_parts.append(f"<tr>")
+                    html_parts.append(f"<td>{label}延迟</td>")
+                    html_parts.append(f"<td class='num-cell'>读: 平均 {read_avg:.1f} / 最大 {rl['read']['max']}</td>")
+                    html_parts.append(f"<td class='num-cell'>写: 平均 {write_avg:.1f} / 最大 {rl['write']['max']}</td>")
+                    html_parts.append(f"<td class='num-cell'>混合: 平均 {mixed_avg:.1f} / 最大 {rl['mixed']['max']}</td>")
+                    html_parts.append(f"</tr>")
+
+            html_parts.append("</tbody>")
+            html_parts.append("</table>")
+            html_parts.append("</div>")
+
+        return "\n".join(html_parts)
 
     def generate_d2d_bandwidth_report(self, output_path: str, d2d_stats: Any = None, d2d_requests: List = None, latency_stats: Dict = None, circuit_stats: Dict = None) -> str:
         """

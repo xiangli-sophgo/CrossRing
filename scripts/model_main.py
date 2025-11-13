@@ -72,7 +72,7 @@ def main():
     sim.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_config)
 
     sim.setup_result_analysis(
-        plot_RN_BW_fig=1,
+        plot_RN_BW_fig=0,
         flow_graph_interactive=1,  # 生成交互式流量图
         fifo_utilization_heatmap=1,
         result_save_path=f"../Result/CrossRing/{model_type}/",
@@ -82,7 +82,7 @@ def main():
     # sim.setup_visualization(plot_link_state=1, plot_start_cycle=1500, show_node_id=1)
     np.random.seed(801)
 
-    sim.run_simulation(max_time=6000, print_interval=200)
+    sim.run_simulation(max_time=600, print_interval=200)
 
 
 if __name__ == "__main__":

@@ -35,21 +35,26 @@ class InteractiveFlowGraphRenderer:
         """初始化交互式流量图渲染器"""
         pass
 
-    def draw_flow_graph(self, network, ip_bandwidth_data: Dict = None, config=None, mode: str = "utilization", node_size: int = 2000, save_path: str = None, show_fig: bool = False):
+    def draw_flow_graph(
+        self, network, ip_bandwidth_data: Dict = None, config=None, mode: str = "utilization", node_size: int = 2000, save_path: str = None, show_fig: bool = False, return_fig: bool = False, req_network=None, rsp_network=None
+    ):
         """
         绘制单Die网络流量图(交互式版本)
 
         Args:
-            network: Network对象
+            network: Network对象（data_network，用于向后兼容）
             ip_bandwidth_data: IP带宽数据字典
             config: 配置对象
             mode: 可视化模式
             node_size: 节点大小
             save_path: 保存路径（如果为None则返回fig对象）
             show_fig: 是否在浏览器中显示图像
+            return_fig: 是否返回Figure对象而不是保存文件
+            req_network: 请求网络对象（可选，用于通道分离显示）
+            rsp_network: 响应网络对象（可选，用于通道分离显示）
 
         Returns:
-            str: 保存的HTML文件路径，如果save_path为None则返回fig对象
+            str or Figure: 如果return_fig=True，返回Figure对象；否则返回保存路径或fig对象
         """
         # 如果没有传入config，尝试从network获取
         if config is None and hasattr(network, "config"):
@@ -72,17 +77,142 @@ class InteractiveFlowGraphRenderer:
         # 创建图形
         fig = go.Figure()
 
-        # 调用单Die绘制方法
-        self.draw_single_die_flow(
-            fig=fig,
-            network=network,
-            config=config,
-            ip_bandwidth_data=ip_bandwidth_data,
-            mode=mode,
-            node_size=node_size,
-            max_ip_bandwidth=max_ip_bandwidth,
-            min_ip_bandwidth=min_ip_bandwidth,
-        )
+        # 判断是否启用三通道分离显示
+        enable_channel_switch = (req_network is not None and rsp_network is not None)
+
+        if enable_channel_switch:
+            # 三通道模式：先用data_network绘制基础结构（nodes、annotations等）
+            # 只绘制nodes，不绘制links
+            base_trace_count = len(fig.data)
+
+            # 使用data_network绘制基础结构（nodes和IP信息）
+            pos = self.draw_single_die_flow(
+                fig=fig,
+                network=network,
+                config=config,
+                ip_bandwidth_data=ip_bandwidth_data,
+                mode=mode,
+                node_size=node_size,
+                max_ip_bandwidth=max_ip_bandwidth,
+                min_ip_bandwidth=min_ip_bandwidth,
+                draw_links=False,  # 不绘制links，只绘制nodes
+            )
+
+            # 基础traces（nodes等）的数量
+            num_base_traces = len(fig.data) - base_trace_count
+
+            # 为三个通道分别绘制links
+            networks = {
+                "请求": req_network,
+                "响应": rsp_network,
+                "数据": network  # data_network
+            }
+
+            trace_indices = {}
+            annotation_indices = {}  # 记录每个通道的annotation范围
+
+            for channel_idx, (channel_name, net) in enumerate(networks.items()):
+                trace_start_idx = len(fig.data)
+                annotation_start_idx = len(fig.layout.annotations) if fig.layout.annotations else 0
+
+                # 只绘制该通道的links（不绘制nodes和annotations）
+                # 为每个通道绘制自环标签（随通道切换）
+                self._draw_channel_links_only(
+                    fig=fig,
+                    network=net,
+                    config=config,
+                    pos=pos,
+                    mode=mode,
+                    node_size=node_size,
+                    draw_self_loops=True,  # 所有通道都绘制自环
+                )
+
+                trace_end_idx = len(fig.data)
+                annotation_end_idx = len(fig.layout.annotations) if fig.layout.annotations else 0
+
+                trace_indices[channel_name] = (trace_start_idx, trace_end_idx)
+                annotation_indices[channel_name] = (annotation_start_idx, annotation_end_idx)
+
+                # 设置初始可见性：默认显示数据通道
+                for i in range(trace_start_idx, trace_end_idx):
+                    fig.data[i].visible = (channel_name == "数据")
+
+                # 设置annotations的初始可见性
+                if fig.layout.annotations:
+                    for i in range(annotation_start_idx, annotation_end_idx):
+                        fig.layout.annotations[i].visible = (channel_name == "数据")
+
+            # 添加通道切换按钮
+            buttons = []
+            for channel_name in ["请求", "响应", "数据"]:
+                start_idx, end_idx = trace_indices[channel_name]
+                # 创建visibility数组：基础traces始终可见，只切换link traces
+                visibility = [True] * num_base_traces  # 基础traces始终可见
+                for ch_name in ["请求", "响应", "数据"]:
+                    s, e = trace_indices[ch_name]
+                    visibility.extend([ch_name == channel_name] * (e - s))
+
+                # 创建完整的annotation列表，包含所有属性和可见性
+                updated_annotations = []
+                if fig.layout.annotations:
+                    for i, ann in enumerate(fig.layout.annotations):
+                        # 复制annotation的所有属性
+                        ann_dict = ann.to_plotly_json()
+                        # 确定这个annotation属于哪个通道
+                        ann_channel = None
+                        for ch_name in ["请求", "响应", "数据"]:
+                            ann_start, ann_end = annotation_indices[ch_name]
+                            if ann_start <= i < ann_end:
+                                ann_channel = ch_name
+                                break
+                        # 设置可见性
+                        ann_dict["visible"] = (ann_channel == channel_name)
+                        updated_annotations.append(ann_dict)
+
+                buttons.append(
+                    dict(
+                        label=channel_name,
+                        method="update",
+                        args=[
+                            {"visible": visibility},
+                            {
+                                "title": f"流量图 - {channel_name}通道",
+                                "annotations": updated_annotations
+                            }
+                        ]
+                    )
+                )
+
+            updatemenus = [
+                dict(
+                    buttons=buttons,
+                    direction="left",  # 改为水平并列排放
+                    pad={"r": 10, "t": 10},
+                    showactive=True,
+                    active=2,  # 默认选中"数据"通道
+                    x=0.5,  # 居中
+                    y=1.12,
+                    xanchor="center",
+                    yanchor="top",
+                    bgcolor="lightblue",
+                    bordercolor="blue",
+                    font=dict(size=12),
+                    type="buttons",
+                )
+            ]
+        else:
+            # 单通道模式（向后兼容）
+            self.draw_single_die_flow(
+                fig=fig,
+                network=network,
+                config=config,
+                ip_bandwidth_data=ip_bandwidth_data,
+                mode=mode,
+                node_size=node_size,
+                max_ip_bandwidth=max_ip_bandwidth,
+                min_ip_bandwidth=min_ip_bandwidth,
+            )
+            updatemenus = None
 
         # 收集使用的IP类型(用于legend)
         used_ip_types = set()
@@ -92,6 +222,9 @@ class InteractiveFlowGraphRenderer:
                 if data_matrix.sum() > 0.001:  # 只包含有数据的IP类型
                     used_ip_types.add(ip_type)
 
+        # 记录添加legend/colorbar前的trace数量
+        num_traces_before_legend = len(fig.data)
+
         # 添加IP类型Legend
         if used_ip_types:
             self._add_ip_legend_plotly(fig, used_ip_types)
@@ -100,19 +233,44 @@ class InteractiveFlowGraphRenderer:
         if max_ip_bandwidth and min_ip_bandwidth:
             self._add_bandwidth_colorbar_plotly(fig, min_ip_bandwidth, max_ip_bandwidth)
 
+        # 记录legend/colorbar的trace数量
+        num_legend_colorbar_traces = len(fig.data) - num_traces_before_legend
+
+        # 修正三通道模式的visibility数组，确保legend/colorbar始终可见
+        if enable_channel_switch and updatemenus:
+            for button in updatemenus[0]["buttons"]:
+                # 在visibility数组末尾添加True，使legend/colorbar始终可见
+                button["args"][0]["visible"].extend([True] * num_legend_colorbar_traces)
+
         # 设置布局
-        title = f"Network Flow - {mode.capitalize()}"
-        fig.update_layout(
-            title=dict(text=title, font=dict(size=16)),
+        layout_config = dict(
             showlegend=True,
             hovermode="closest",
             plot_bgcolor="white",
-            xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-            yaxis=dict(showgrid=False, showticklabels=False, zeroline=False, scaleanchor="x", scaleratio=1),
-            margin=dict(l=20, r=20, t=50, b=20),
+            xaxis=dict(showgrid=False, showticklabels=False, zeroline=False, constrain="domain"),
+            yaxis=dict(showgrid=False, showticklabels=False, zeroline=False, scaleanchor="x", scaleratio=1, constrain="domain"),
+            margin=dict(l=50, r=50, t=80, b=50, autoexpand=True),
             width=1200,
             height=1000,
+            autosize=True,
         )
+
+        # 只在非集成模式下显示标题
+        if not return_fig:
+            if enable_channel_switch:
+                title = "流量图 - 数据通道"  # 默认标题
+            else:
+                title = f"Network Flow - {mode.capitalize()}"
+            layout_config["title"] = dict(text=title, font=dict(size=16))
+
+        # 添加通道切换按钮
+        if enable_channel_switch and updatemenus:
+            layout_config["updatemenus"] = updatemenus
+
+        fig.update_layout(**layout_config)
+
+        if return_fig:
+            return fig
 
         if save_path:
             # 生成HTML文件
@@ -148,6 +306,8 @@ class InteractiveFlowGraphRenderer:
         is_d2d_scenario: bool = False,
         show_ip_bandwidth_value: bool = True,
         link_label_fontsize: int = 12,
+        show_link_labels: bool = True,
+        draw_links: bool = True,
     ):
         """
         在指定的figure上绘制单个Die的流量图(交互式版本)
@@ -242,48 +402,60 @@ class InteractiveFlowGraphRenderer:
         # 绘制节点背景
         self._draw_nodes(fig, pos, square_size, actual_nodes, config=config, ip_bandwidth_data=ip_bandwidth_data, mode=mode, die_id=die_id, is_d2d_scenario=is_d2d_scenario)
 
-        # 绘制链路箭头
-        edge_labels = {}
-        edge_colors = {}
-        for link_key, value in links.items():
-            # 处理link格式
-            if len(link_key) == 2:
-                i, j = link_key
-                direction = None
-            elif len(link_key) == 3:
-                i, j, direction = link_key
-            else:
-                continue
+        # 绘制链路箭头（可选）
+        if draw_links:
+            edge_labels = {}
+            edge_colors = {}
+            self_loop_labels = {}  # 存储自环标签
+            for link_key, value in links.items():
+                # 处理link格式
+                if len(link_key) == 2:
+                    i, j = link_key
+                    direction = None
+                elif len(link_key) == 3:
+                    i, j, direction = link_key
+                else:
+                    continue
 
-            if i not in actual_nodes or j not in actual_nodes:
-                continue
+                if i not in actual_nodes or j not in actual_nodes:
+                    continue
 
-            # 计算显示值和颜色
-            if mode in ["utilization", "T2_ratio", "T1_ratio", "T0_ratio", "ITag_ratio"]:
-                display_value = float(value) if value else 0.0
-                formatted_label = f"{display_value*100:.1f}%" if display_value > 0 else ""
-                color_intensity = display_value
-            elif mode == "total":
-                display_value = float(value) if value else 0.0
-                formatted_label = f"{display_value:.1f}" if display_value > 0 else ""
-                color_intensity = min(display_value / 500.0, 1.0)
-            else:
-                display_value = float(value) if value else 0.0
-                formatted_label = f"{display_value:.1f}" if display_value > 0 else ""
-                color_intensity = min(display_value / 500.0, 1.0)
+                # 计算显示值和颜色
+                if mode in ["utilization", "T2_ratio", "T1_ratio", "T0_ratio", "ITag_ratio"]:
+                    display_value = float(value) if value else 0.0
+                    formatted_label = f"{display_value*100:.1f}%" if display_value > 0 else ""
+                    color_intensity = display_value
+                elif mode == "total":
+                    display_value = float(value) if value else 0.0
+                    formatted_label = f"{display_value:.1f}" if display_value > 0 else ""
+                    color_intensity = min(display_value / 500.0, 1.0)
+                else:
+                    display_value = float(value) if value else 0.0
+                    formatted_label = f"{display_value:.1f}" if display_value > 0 else ""
+                    color_intensity = min(display_value / 500.0, 1.0)
 
-            if display_value > 0:
-                color = (color_intensity, 0, 0)
-            else:
-                color = (0.8, 0.8, 0.8)
+                if display_value > 0:
+                    color = (color_intensity, 0, 0)
+                else:
+                    color = (0.8, 0.8, 0.8)
 
-            # 跳过自环
-            if i != j:
-                edge_labels[(i, j)] = formatted_label
-                edge_colors[(i, j)] = color
+                # 区分自环和普通链路
+                if i == j:
+                    # 自环link单独存储
+                    if direction:
+                        self_loop_labels[(i, direction)] = (formatted_label, color)
+                    else:
+                        self_loop_labels[(i, "unknown")] = (formatted_label, color)
+                else:
+                    edge_labels[(i, j)] = formatted_label
+                    edge_colors[(i, j)] = color
 
-        # 绘制链路箭头（传递完整的统计数据用于hover）
-        self._draw_link_arrows(fig, pos, edge_labels, edge_colors, links, config, square_size, rotation, link_label_fontsize, utilization_stats, is_d2d_scenario)
+            # 绘制链路箭头（传递完整的统计数据用于hover）
+            self._draw_link_arrows(fig, pos, edge_labels, edge_colors, links, config, square_size, rotation, link_label_fontsize, utilization_stats, is_d2d_scenario, show_link_labels)
+
+            # 绘制自环标签
+            if self_loop_labels and show_link_labels:  # 只在需要显示标签时绘制
+                self._draw_self_loop_labels(fig, pos, self_loop_labels, config, square_size, rotation, link_label_fontsize, utilization_stats)
 
         # 批量收集所有节点的IP方块
         if ip_bandwidth_data is not None:
@@ -421,11 +593,12 @@ class InteractiveFlowGraphRenderer:
                 )
             )
 
-    def _draw_link_arrows(self, fig, pos, edge_labels, edge_colors, links, config, square_size, rotation, fontsize, utilization_stats=None, is_d2d_scenario=False):
+    def _draw_link_arrows(self, fig, pos, edge_labels, edge_colors, links, config, square_size, rotation, fontsize, utilization_stats=None, is_d2d_scenario=False, show_labels=True):
         """绘制链路箭头（批量优化版本，增强hover信息）
 
         Args:
             is_d2d_scenario: 是否为D2D场景，影响标签偏移量大小
+            show_labels: 是否显示链路文本标签
         """
         import math
 
@@ -447,6 +620,10 @@ class InteractiveFlowGraphRenderer:
 
         for (i, j), label in edge_labels.items():
             if i not in pos or j not in pos:
+                continue
+
+            # 跳过自环（由_draw_self_loop_labels单独处理）
+            if i == j:
                 continue
 
             color = edge_colors.get((i, j), (0.8, 0.8, 0.8))
@@ -510,6 +687,18 @@ class InteractiveFlowGraphRenderer:
                         orig_j_row = j // config.NUM_COL
                         is_horizontal_in_die = orig_i_row == orig_j_row
 
+                        # 根据label长度计算额外偏移
+                        label_str = str(label)
+                        text_length = len(label_str)
+                        if text_length <= 3:
+                            length_factor = 1.0
+                        elif text_length <= 4:
+                            length_factor = 1.15
+                        elif text_length <= 5:
+                            length_factor = 1.30
+                        else:
+                            length_factor = 1.50
+
                         # 根据场景和Die内部方向计算偏移量
                         # D2D场景使用较大偏移(0.70/0.35)，单Die场景使用较小偏移(0.25/0.15)
                         is_90_or_270 = abs(rotation) in [90, 270]
@@ -517,13 +706,13 @@ class InteractiveFlowGraphRenderer:
                         if is_d2d_scenario:
                             # D2D场景：使用原来的大偏移量
                             if is_horizontal_in_die:
-                                offset_magnitude = 0.70 if is_90_or_270 else 0.35
+                                offset_magnitude = (0.70 if is_90_or_270 else 0.35) * length_factor
                                 if i < j:
                                     offset_x_die, offset_y_die = 0, offset_magnitude
                                 else:
                                     offset_x_die, offset_y_die = 0, -offset_magnitude
                             else:
-                                offset_magnitude = 0.35 if is_90_or_270 else 0.70
+                                offset_magnitude = (0.35 if is_90_or_270 else 0.70) * length_factor
                                 if i < j:
                                     offset_x_die, offset_y_die = -offset_magnitude, 0
                                 else:
@@ -531,13 +720,13 @@ class InteractiveFlowGraphRenderer:
                         else:
                             # 单Die场景：使用较小偏移量
                             if is_horizontal_in_die:
-                                offset_magnitude = 0.30 if is_90_or_270 else 0.20
+                                offset_magnitude = (0.30 if is_90_or_270 else 0.20) * length_factor
                                 if i < j:
                                     offset_x_die, offset_y_die = 0, offset_magnitude
                                 else:
                                     offset_x_die, offset_y_die = 0, -offset_magnitude
                             else:
-                                offset_magnitude = 0.20 if is_90_or_270 else 0.30
+                                offset_magnitude = (0.20 if is_90_or_270 else 0.30) * length_factor
                                 if i < j:
                                     offset_x_die, offset_y_die = -offset_magnitude, 0
                                 else:
@@ -602,7 +791,7 @@ class InteractiveFlowGraphRenderer:
             fig.add_annotation(**ann)
 
         # 按颜色分组绘制标签（避免重复绘制）
-        if label_x_list:
+        if show_labels and label_x_list:
             # 按颜色分组（包含hover信息）
             color_groups = {}
             for x, y, text, color, hover in zip(label_x_list, label_y_list, label_text_list, label_color_list, label_hover_list):
@@ -628,6 +817,299 @@ class InteractiveFlowGraphRenderer:
                         hoverinfo="text",
                     )
                 )
+
+    def _draw_channel_links_only(self, fig, network, config, pos, mode, node_size, draw_self_loops=False):
+        """
+        只绘制指定network的链路traces（不绘制nodes和annotations）
+
+        Args:
+            fig: plotly Figure对象
+            network: Network对象
+            config: 配置对象
+            pos: 节点位置字典
+            mode: 可视化模式
+            node_size: 节点大小
+            draw_self_loops: 是否绘制自环标签（避免重复）
+        """
+        # 获取链路统计数据
+        links = {}
+        utilization_stats = {}
+        if hasattr(network, "get_links_utilization_stats") and callable(network.get_links_utilization_stats):
+            try:
+                utilization_stats = network.get_links_utilization_stats()
+                if mode == "utilization":
+                    links = {link: stats["utilization"] for link, stats in utilization_stats.items()}
+                elif mode == "ITag_ratio":
+                    links = {link: stats["ITag_ratio"] for link, stats in utilization_stats.items()}
+                elif mode == "total":
+                    links = {}
+                    for link, stats in utilization_stats.items():
+                        total_flit = stats["total_flit"]
+                        total_cycles = stats["total_cycles"]
+                        if total_cycles > 0:
+                            time_ns = total_cycles / config.NETWORK_FREQUENCY
+                            bandwidth = total_flit * 128 / time_ns
+                            links[link] = bandwidth
+                        else:
+                            links[link] = 0.0
+                else:
+                    links = {link: stats["utilization"] for link, stats in utilization_stats.items()}
+            except Exception as e:
+                links = {}
+
+        # 计算节点大小
+        square_size = np.sqrt(node_size) / 50
+
+        # 获取实际节点列表
+        if hasattr(network, "queues") and network.queues:
+            actual_nodes = list(network.queues.keys())
+        else:
+            actual_nodes = list(range(config.NUM_ROW * config.NUM_COL))
+
+        # 准备链路数据
+        edge_labels = {}
+        edge_colors = {}
+        self_loop_labels = {}
+
+        for link_key, value in links.items():
+            # 处理link格式
+            if len(link_key) == 2:
+                i, j = link_key
+                direction = None
+            elif len(link_key) == 3:
+                i, j, direction = link_key
+            else:
+                continue
+
+            if i not in actual_nodes or j not in actual_nodes:
+                continue
+
+            # 计算显示值和颜色
+            if mode in ["utilization", "T2_ratio", "T1_ratio", "T0_ratio", "ITag_ratio"]:
+                display_value = float(value) if value else 0.0
+                formatted_label = f"{display_value*100:.1f}%" if display_value > 0 else ""
+                color_intensity = display_value
+            elif mode == "total":
+                display_value = float(value) if value else 0.0
+                formatted_label = f"{display_value:.1f}" if display_value > 0 else ""
+                color_intensity = min(display_value / 500.0, 1.0)
+            else:
+                display_value = float(value) if value else 0.0
+                formatted_label = f"{display_value:.1f}" if display_value > 0 else ""
+                color_intensity = min(display_value / 500.0, 1.0)
+
+            if display_value > 0:
+                color = (color_intensity, 0, 0)
+            else:
+                color = (0.8, 0.8, 0.8)
+
+            # 区分自环和普通链路
+            if i == j:
+                # 只为有带宽的自环创建标签（避免显示0值）
+                if display_value > 0:
+                    if direction:
+                        self_loop_labels[(i, direction)] = (formatted_label, color)
+                    else:
+                        self_loop_labels[(i, "unknown")] = (formatted_label, color)
+            else:
+                edge_labels[(i, j)] = formatted_label
+                edge_colors[(i, j)] = color
+
+        # 绘制链路箭头（带文本标签）
+        self._draw_link_arrows(fig, pos, edge_labels, edge_colors, links, config, square_size, rotation=0, fontsize=12, utilization_stats=utilization_stats, is_d2d_scenario=False, show_labels=True)
+
+        # 绘制自环标签（只在需要时绘制，避免重复）
+        if draw_self_loops and self_loop_labels:
+            self._draw_self_loop_labels(fig, pos, self_loop_labels, config, square_size, rotation=0, fontsize=12, utilization_stats=utilization_stats)
+
+    def _draw_self_loop_labels(self, fig, pos, self_loop_labels, config, square_size, rotation, fontsize, utilization_stats):
+        """
+        绘制自环链路标签（Plotly版本，支持hover）
+
+        Args:
+            fig: Plotly图形对象
+            pos: 节点位置字典
+            self_loop_labels: 自环标签字典 {(node, direction): (label, color)}
+            config: 配置对象
+            square_size: 节点方块大小
+            rotation: Die旋转角度
+            fontsize: 字体大小
+            utilization_stats: 链路统计数据字典
+        """
+        # 按颜色和旋转角度分组收集标签数据
+        label_groups = {}  # {(color_str, text_rotation): {"x": [], "y": [], "text": [], "hover": []}}
+
+        for (node, direction), (label, color) in self_loop_labels.items():
+            if node not in pos or not label:
+                continue
+
+            x, y = pos[node]
+            original_row = node // config.NUM_COL
+            original_col = node % config.NUM_COL
+
+            # Step 1: 判断旋转后的屏幕方向
+            if rotation in [90, 270, -270]:
+                # 90/270度：横纵互换
+                screen_direction = "v" if direction == "h" else "h"
+            else:
+                # 0/180度：方向不变
+                screen_direction = direction
+
+            # Step 2: 计算旋转后的行列（用于判断边界）
+            orig_rows = config.NUM_ROW
+            orig_cols = config.NUM_COL
+            if abs(rotation) == 90 or abs(rotation) == -270:
+                # 顺时针90度
+                rotated_row = original_col
+                rotated_col = orig_rows - 1 - original_row
+                rotated_rows = orig_cols
+                rotated_cols = orig_rows
+            elif abs(rotation) == 180:
+                # 180度
+                rotated_row = orig_rows - 1 - original_row
+                rotated_col = orig_cols - 1 - original_col
+                rotated_rows = orig_rows
+                rotated_cols = orig_cols
+            elif abs(rotation) == 270 or abs(rotation) == -90:
+                # 顺时针270度
+                rotated_row = orig_cols - 1 - original_col
+                rotated_col = original_row
+                rotated_rows = orig_cols
+                rotated_cols = orig_rows
+            else:
+                # 0度
+                rotated_row = original_row
+                rotated_col = original_col
+                rotated_rows = orig_rows
+                rotated_cols = orig_cols
+
+            # Step 3: 根据屏幕方向和边界位置计算偏移量
+            offset_dist = 0.3
+            if screen_direction == "h":
+                # 屏幕水平自环：放左右两边（水平显示，避免annotation不受visibility控制）
+                if rotated_col == 0:
+                    # 屏幕左边
+                    offset_x_screen = -square_size / 2 - offset_dist
+                    offset_y_screen = 0
+                    text_rotation = 90
+                else:
+                    # 屏幕右边
+                    offset_x_screen = square_size / 2 + offset_dist
+                    offset_y_screen = 0
+                    text_rotation = -90
+            else:
+                # 屏幕垂直自环：放上下两边
+                if rotated_row == 0:
+                    # 屏幕上边
+                    offset_x_screen = 0
+                    offset_y_screen = square_size / 2 + offset_dist
+                    text_rotation = 0  # 水平
+                else:
+                    # 屏幕下边
+                    offset_x_screen = 0
+                    offset_y_screen = -square_size / 2 - offset_dist
+                    text_rotation = 0  # 水平
+
+            label_x = x + offset_x_screen
+            label_y = y + offset_y_screen
+
+            # 转换颜色格式
+            color_str = f"rgb({int(color[0]*255)}, {int(color[1]*255)}, {int(color[2]*255)})"
+
+            # 构建hover信息（自环链路 i == j）
+            direction_label = "横向" if direction == "h" else "纵向"
+            if utilization_stats and (node, node, direction) in utilization_stats:
+                stats = utilization_stats[(node, node, direction)]
+                utilization = stats.get("utilization", 0) * 100
+                empty_ratio = stats.get("empty_ratio", 0) * 100
+                effective_ratio = stats.get("effective_ratio", 0) * 100
+                total_flit = stats.get("total_flit", 0)
+                total_cycles = stats.get("total_cycles", 0)
+
+                # 计算带宽
+                if total_cycles > 0:
+                    time_ns = total_cycles / config.NETWORK_FREQUENCY
+                    bandwidth = total_flit * 128 / time_ns
+                else:
+                    bandwidth = 0
+
+                # 获取eject_attempts分布（完整获取所有字段，与普通链路保持一致）
+                merged_ratios = stats.get("eject_attempts_merged_ratios", {"0": 0, "1": 0, "2": 0, ">2": 0})
+                attempts_0 = merged_ratios.get("0", 0) * 100
+                attempts_1 = merged_ratios.get("1", 0) * 100
+                attempts_2 = merged_ratios.get("2", 0) * 100
+                attempts_gt2 = merged_ratios.get(">2", 0) * 100
+
+                hover_text = (
+                    f"<b>链路: {node} → {node} ({direction_label}自环)</b><br>"
+                    f"带宽: {bandwidth:.2f} GB/s<br>"
+                    f"flit数量: {total_flit}<br>"
+                    f"有效利用率: {effective_ratio:.1f}%<br>"
+                    f"总利用率: {utilization:.1f}%<br>"
+                    # f"下环尝试次数0: {attempts_0:.1f}%<br>"
+                    # f"下环尝试次数1: {attempts_1:.1f}%<br>"
+                    # f"下环尝试次数2: {attempts_2:.1f}%<br>"
+                    f"下环尝试次数大于2占比: {attempts_gt2:.1f}%<br>"
+                    f"空闲率: {empty_ratio:.1f}%"
+                )
+            else:
+                hover_text = f"<b>链路: {node} → {node} ({direction_label}自环)</b><br>值: {label}"
+
+            # 按颜色和旋转角度分组
+            group_key = (color_str, text_rotation)
+            if group_key not in label_groups:
+                label_groups[group_key] = {"x": [], "y": [], "text": [], "hover": []}
+
+            label_groups[group_key]["x"].append(label_x)
+            label_groups[group_key]["y"].append(label_y)
+            label_groups[group_key]["text"].append(label)
+            label_groups[group_key]["hover"].append(hover_text)
+
+        # 为每个分组创建scatter trace或annotation（根据是否需要旋转）
+        for (color_str, text_rotation), data in label_groups.items():
+            if text_rotation == 0:
+                # 水平文本：使用scatter trace支持hover
+                fig.add_trace(
+                    go.Scatter(
+                        x=data["x"],
+                        y=data["y"],
+                        mode="text",
+                        text=data["text"],
+                        textfont=dict(size=fontsize + 2, color=color_str, family="Arial"),
+                        textposition="middle center",
+                        showlegend=False,
+                        hovertext=data["hover"],
+                        hoverinfo="text",
+                        hoverlabel=dict(bgcolor="#333", font=dict(color="white")),  # 统一深色背景
+                    )
+                )
+            else:
+                # 旋转文本：使用annotation（但annotation不支持hover）
+                # 为了支持hover，添加一个不可见的scatter点
+                fig.add_trace(
+                    go.Scatter(
+                        x=data["x"],
+                        y=data["y"],
+                        mode="markers",
+                        marker=dict(size=15, opacity=0),  # 不可见的标记点
+                        showlegend=False,
+                        hovertext=data["hover"],
+                        hoverinfo="text",
+                        hoverlabel=dict(bgcolor="#333", font=dict(color="white")),  # 统一深色背景
+                    )
+                )
+                # 添加旋转文本annotation
+                for x, y, text in zip(data["x"], data["y"], data["text"]):
+                    fig.add_annotation(
+                        x=x,
+                        y=y,
+                        text=text,
+                        showarrow=False,
+                        font=dict(size=fontsize + 2, color=color_str, family="Arial"),
+                        xanchor="center",
+                        yanchor="middle",
+                        textangle=text_rotation,
+                    )
 
     def _collect_ip_info_shapes(
         self, x, y, node, config, mode, square_size, ip_bandwidth_data, max_ip_bandwidth=None, min_ip_bandwidth=None, die_id=None, is_d2d_scenario=False, show_bandwidth_value=True
@@ -820,6 +1302,7 @@ class InteractiveFlowGraphRenderer:
         node_size: int = 2500,
         save_path: str = None,
         show_fig: bool = False,
+        return_fig: bool = False,
     ):
         """
         绘制D2D系统流量图（多Die布局）- 交互式版本
@@ -1002,12 +1485,10 @@ class InteractiveFlowGraphRenderer:
             self._add_bandwidth_colorbar_plotly(fig, min_ip_bandwidth, max_ip_bandwidth)
 
         # 设置布局
-        title = f"D2D Flow Graph - {mode.capitalize()}"
         canvas_width = int(figsize[0] * 100)
         canvas_height = int(figsize[1] * 100)
 
-        fig.update_layout(
-            title=dict(text=title, font=dict(size=14)),
+        layout_config = dict(
             showlegend=True,
             hovermode="closest",
             plot_bgcolor="white",
@@ -1017,6 +1498,16 @@ class InteractiveFlowGraphRenderer:
             width=canvas_width,
             height=canvas_height,
         )
+
+        # 只在非集成模式下显示标题
+        if not return_fig:
+            title = f"D2D Flow Graph - {mode.capitalize()}"
+            layout_config["title"] = dict(text=title, font=dict(size=14))
+
+        fig.update_layout(**layout_config)
+
+        if return_fig:
+            return fig
 
         if save_path:
             if not save_path.endswith(".html"):
@@ -1326,8 +1817,19 @@ class InteractiveFlowGraphRenderer:
                     label_x = mid_x
                     label_y = mid_y + (0.5 if dx > 0 else -0.5)
                 else:
+                    # 垂直链路：根据数字长度动态调整偏移量
                     label_x = mid_x + (dy * 0.1 if dx > 0 else -dy * 0.1)
-                    label_y = mid_y - 0.15
+                    # 根据数字位数调整偏移：数字越长，偏移越大
+                    text_length = len(label_text)
+                    if text_length <= 3:  # 例如 "1.0"
+                        y_offset = 0.12
+                    elif text_length <= 4:  # 例如 "10.0"
+                        y_offset = 0.15
+                    elif text_length <= 5:  # 例如 "100.0"
+                        y_offset = 0.18
+                    else:  # 更长的数字
+                        y_offset = 0.22
+                    label_y = mid_y - y_offset
 
             # 计算箭头角度（使用原始方向，与matplotlib版本保持一致）
             angle_rad = np.arctan2(dy, dx)

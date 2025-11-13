@@ -65,6 +65,16 @@ class FIFOUtilizationCollector:
                 # 获取flit_count
                 flit_count = network.fifo_flit_count["IQ"][direction].get(node_pos, 0)
 
+                # ITag统计 (只统计TR/TL横向注入)
+                itag_cumulative = 0
+                itag_rate = 0.0
+                if direction in ["TR", "TL"]:
+                    if direction in network.fifo_itag_cumulative_count["IQ"]:
+                        if node_pos in network.fifo_itag_cumulative_count["IQ"][direction]:
+                            itag_cumulative = network.fifo_itag_cumulative_count["IQ"][direction][node_pos]
+                            if flit_count > 0 and total_cycles > 0:
+                                itag_rate = itag_cumulative / (total_cycles * flit_count) * 100
+
                 die_data["IQ"][node_pos][direction] = {
                     "avg": avg_util,
                     "peak": peak_util,
@@ -72,6 +82,14 @@ class FIFOUtilizationCollector:
                     "capacity": capacity,
                     "avg_depth": depth_sum / total_cycles if total_cycles > 0 else 0,
                     "peak_depth": max_depth,
+                    "itag_cumulative_count": itag_cumulative,
+                    "itag_rate": itag_rate,
+                    "etag_t0_cumulative": 0,
+                    "etag_t1_cumulative": 0,
+                    "etag_t2_cumulative": 0,
+                    "etag_t0_rate": 0.0,
+                    "etag_t1_rate": 0.0,
+                    "etag_t2_rate": 0.0,
                 }
 
         # 收集IQ通道缓冲数据 (IQ_channel_buffer)
@@ -115,6 +133,37 @@ class FIFOUtilizationCollector:
                 # 获取flit_count
                 flit_count = network.fifo_flit_count["RB"][direction].get(node_pos, 0)
 
+                # ITag统计 (只统计TU/TD纵向转向)
+                itag_cumulative = 0
+                itag_rate = 0.0
+                if direction in ["TU", "TD"]:
+                    if direction in network.fifo_itag_cumulative_count["RB"]:
+                        if node_pos in network.fifo_itag_cumulative_count["RB"][direction]:
+                            itag_cumulative = network.fifo_itag_cumulative_count["RB"][direction][node_pos]
+                            if flit_count > 0 and total_cycles > 0:
+                                itag_rate = itag_cumulative / (total_cycles * flit_count) * 100
+
+                # ETag统计 (只统计TL/TR横向下环)
+                etag_t0_cumulative = 0
+                etag_t1_cumulative = 0
+                etag_t2_cumulative = 0
+                etag_t0_rate = 0.0
+                etag_t1_rate = 0.0
+                etag_t2_rate = 0.0
+                if direction in ["TL", "TR"]:
+                    if direction in network.fifo_etag_entry_count["RB"]:
+                        if node_pos in network.fifo_etag_entry_count["RB"][direction]:
+                            etag_dist = network.fifo_etag_entry_count["RB"][direction][node_pos]
+                            etag_t0_cumulative = etag_dist["T0"]
+                            etag_t1_cumulative = etag_dist["T1"]
+                            etag_t2_cumulative = etag_dist["T2"]
+
+                            total_etag = etag_t0_cumulative + etag_t1_cumulative + etag_t2_cumulative
+                            if total_etag > 0:
+                                etag_t0_rate = etag_t0_cumulative / total_etag * 100
+                                etag_t1_rate = etag_t1_cumulative / total_etag * 100
+                                etag_t2_rate = etag_t2_cumulative / total_etag * 100
+
                 die_data["RB"][node_pos][direction] = {
                     "avg": avg_util,
                     "peak": peak_util,
@@ -122,6 +171,14 @@ class FIFOUtilizationCollector:
                     "capacity": capacity,
                     "avg_depth": depth_sum / total_cycles if total_cycles > 0 else 0,
                     "peak_depth": max_depth,
+                    "itag_cumulative_count": itag_cumulative,
+                    "itag_rate": itag_rate,
+                    "etag_t0_cumulative": etag_t0_cumulative,
+                    "etag_t1_cumulative": etag_t1_cumulative,
+                    "etag_t2_cumulative": etag_t2_cumulative,
+                    "etag_t0_rate": etag_t0_rate,
+                    "etag_t1_rate": etag_t1_rate,
+                    "etag_t2_rate": etag_t2_rate,
                 }
 
         # 收集EQ下环队列数据 (eject_queues)
@@ -139,6 +196,26 @@ class FIFOUtilizationCollector:
                 # 获取flit_count
                 flit_count = network.fifo_flit_count["EQ"][direction].get(node_pos, 0)
 
+                # ETag统计 (TU/TD纵向下环)
+                etag_t0_cumulative = 0
+                etag_t1_cumulative = 0
+                etag_t2_cumulative = 0
+                etag_t0_rate = 0.0
+                etag_t1_rate = 0.0
+                etag_t2_rate = 0.0
+                if direction in network.fifo_etag_entry_count["EQ"]:
+                    if node_pos in network.fifo_etag_entry_count["EQ"][direction]:
+                        etag_dist = network.fifo_etag_entry_count["EQ"][direction][node_pos]
+                        etag_t0_cumulative = etag_dist["T0"]
+                        etag_t1_cumulative = etag_dist["T1"]
+                        etag_t2_cumulative = etag_dist["T2"]
+
+                        total_etag = etag_t0_cumulative + etag_t1_cumulative + etag_t2_cumulative
+                        if total_etag > 0:
+                            etag_t0_rate = etag_t0_cumulative / total_etag * 100
+                            etag_t1_rate = etag_t1_cumulative / total_etag * 100
+                            etag_t2_rate = etag_t2_cumulative / total_etag * 100
+
                 die_data["EQ"][node_pos][direction] = {
                     "avg": avg_util,
                     "peak": peak_util,
@@ -146,6 +223,14 @@ class FIFOUtilizationCollector:
                     "capacity": capacity,
                     "avg_depth": depth_sum / total_cycles if total_cycles > 0 else 0,
                     "peak_depth": max_depth,
+                    "itag_cumulative_count": 0,
+                    "itag_rate": 0.0,
+                    "etag_t0_cumulative": etag_t0_cumulative,
+                    "etag_t1_cumulative": etag_t1_cumulative,
+                    "etag_t2_cumulative": etag_t2_cumulative,
+                    "etag_t0_rate": etag_t0_rate,
+                    "etag_t1_rate": etag_t1_rate,
+                    "etag_t2_rate": etag_t2_rate,
                 }
 
         # 收集EQ通道缓冲数据 (EQ_channel_buffer)
@@ -258,7 +343,7 @@ class FIFOHeatmapVisualizer:
         self.config = config
         self.fifo_data = fifo_data
 
-    def create_interactive_heatmap(self, dies: Dict, die_layout: Optional[Dict] = None, die_rotations: Optional[Dict] = None, save_path: Optional[str] = None) -> Optional[str]:
+    def create_interactive_heatmap(self, dies: Dict, die_layout: Optional[Dict] = None, die_rotations: Optional[Dict] = None, save_path: Optional[str] = None, show_fig: bool = False, return_fig_and_js: bool = False):
         """
         创建交互式FIFO使用率热力图
 
@@ -267,9 +352,11 @@ class FIFOHeatmapVisualizer:
             die_layout: Die布局 {die_id: (grid_x, grid_y)}
             die_rotations: Die旋转角度 {die_id: rotation}
             save_path: HTML文件保存路径
+            show_fig: 是否在浏览器中显示
+            return_fig_and_js: 是否返回(Figure, JavaScript)元组而不是保存文件
 
         Returns:
-            str: 保存路径（如果提供）
+            str or tuple: 如果return_fig_and_js=True，返回(Figure对象, JavaScript字符串)；否则返回保存路径
         """
         if not self.fifo_data:
             print("警告: 没有FIFO数据可供可视化")
@@ -283,13 +370,22 @@ class FIFOHeatmapVisualizer:
             return None
 
         # 创建图形
-        fig = self._create_plotly_figure(dies, die_layout, die_rotations, fifo_options)
+        fig = self._create_plotly_figure(dies, die_layout, die_rotations, fifo_options, return_fig_and_js)
+
+        # 如果只返回Figure和JavaScript
+        if return_fig_and_js:
+            js_code = self._generate_custom_javascript(fifo_options, len(dies))
+            return fig, js_code
 
         # 保存或显示
         if save_path:
             # 生成HTML并注入JavaScript交互代码
             self._save_html_with_click_events(fig, save_path, fifo_options, len(dies))
             # print(f"FIFO使用率热力图已保存到: {save_path}")
+            if show_fig:
+                import webbrowser
+                import os
+                webbrowser.open('file://' + os.path.abspath(save_path))
             return save_path
         else:
             fig.show()
@@ -303,7 +399,7 @@ class FIFOHeatmapVisualizer:
             List[Tuple]: [(显示名称, fifo_category, fifo_type, network_type), ...]
         """
         options = []
-        network_display = {"req": "Req", "rsp": "Rsp", "data": "Data"}
+        network_display = {"req": "请求", "rsp": "响应", "data": "数据"}
 
         for die_id, networks_data in self.fifo_data.items():
             for network_type, die_data in networks_data.items():
@@ -359,7 +455,7 @@ class FIFOHeatmapVisualizer:
         options.sort(key=sort_key)
         return options
 
-    def _create_plotly_figure(self, dies: Dict, die_layout: Optional[Dict], die_rotations: Optional[Dict], fifo_options: List[Tuple[str, str, str, str]]) -> go.Figure:
+    def _create_plotly_figure(self, dies: Dict, die_layout: Optional[Dict], die_rotations: Optional[Dict], fifo_options: List[Tuple[str, str, str, str]], hide_subplot_titles: bool = False) -> go.Figure:
         """
         创建Plotly交互式图形 - 左侧热力图 + 右侧架构图
 
@@ -368,6 +464,7 @@ class FIFOHeatmapVisualizer:
             die_layout: Die布局
             die_rotations: Die旋转
             fifo_options: FIFO选项列表
+            hide_subplot_titles: 是否隐藏子图标题（用于集成报告）
 
         Returns:
             go.Figure: Plotly图形对象
@@ -379,8 +476,9 @@ class FIFOHeatmapVisualizer:
             die_rotations = {die_id: 0 for die_id in dies.keys()}
 
         # 创建子图布局: 1行2列 (50% + 50%)
+        subplot_titles = None if hide_subplot_titles else ("FIFO使用率热力图", "CrossRing架构图")
         fig = make_subplots(
-            rows=1, cols=2, column_widths=[0.5, 0.5], subplot_titles=("FIFO使用率热力图", "CrossRing架构图"), specs=[[{"type": "scatter"}, {"type": "scatter"}]], horizontal_spacing=0.08
+            rows=1, cols=2, column_widths=[0.5, 0.5], subplot_titles=subplot_titles, specs=[[{"type": "scatter"}, {"type": "scatter"}]], horizontal_spacing=0.08
         )
 
         # 计算画布范围（用于坐标轴设置）
@@ -389,8 +487,13 @@ class FIFOHeatmapVisualizer:
         # 为每个FIFO类型和统计模式创建热力图trace
         traces_data = self._create_heatmap_traces(fifo_options, dies, die_layout, die_rotations)
 
-        # 将所有traces添加到左侧子图（初始时只显示第一个选项的平均模式）
-        default_option = fifo_options[0]
+        # 将所有traces添加到左侧子图（初始时显示第一个data网络选项的平均模式）
+        # 查找第一个data网络的FIFO选项
+        default_option = fifo_options[0]  # 默认值
+        for option in fifo_options:
+            if option[3] == "data":  # network_type是元组的第4个元素
+                default_option = option
+                break
         default_mode = "avg"
 
         for option in fifo_options:
@@ -711,6 +814,30 @@ class FIFOHeatmapVisualizer:
 
                             network_display = {"req": "Request", "rsp": "Response", "data": "Data"}
                             net_label = network_display.get(network_type, network_type)
+
+                            # 构建Tag统计信息
+                            tag_info = []
+
+                            # ITag统计（只有IQ_OUT TR/TL和RB_OUT TU/TD有ITag）
+                            itag_cumulative = fifo_info.get("itag_cumulative_count", 0)
+                            itag_rate = fifo_info.get("itag_rate", 0.0)
+                            if itag_cumulative > 0:
+                                tag_info.append(f"ITag: {itag_cumulative} ({itag_rate:.2f}%)")
+
+                            # ETag统计（只有RB_IN TL/TR和EQ_IN TU/TD有ETag）
+                            etag_t0 = fifo_info.get("etag_t0_cumulative", 0)
+                            etag_t1 = fifo_info.get("etag_t1_cumulative", 0)
+                            etag_t2 = fifo_info.get("etag_t2_cumulative", 0)
+                            etag_t0_rate = fifo_info.get("etag_t0_rate", 0.0)
+                            etag_t1_rate = fifo_info.get("etag_t1_rate", 0.0)
+                            etag_t2_rate = fifo_info.get("etag_t2_rate", 0.0)
+
+                            if etag_t0 > 0 or etag_t1 > 0 or etag_t2 > 0:
+                                tag_info.append(f"ETag T0: {etag_t0} ({etag_t0_rate:.2f}%)")
+                                tag_info.append(f"ETag T1: {etag_t1} ({etag_t1_rate:.2f}%)")
+                                tag_info.append(f"ETag T2: {etag_t2} ({etag_t2_rate:.2f}%)")
+
+                            # 组装hover文本
                             hover_text = (
                                 f"Die {die_id} - 节点 {node_id} ({orig_row},{orig_col})<br>"
                                 f"网络: {net_label}<br>"
@@ -720,6 +847,11 @@ class FIFOHeatmapVisualizer:
                                 f"累计: {flit_count} flits<br>"
                                 f"容量: {capacity}"
                             )
+
+                            # 添加Tag信息（如果有）
+                            if tag_info:
+                                hover_text += "<br>" + "<br>".join(tag_info)
+
                             all_hover_texts.append(hover_text)
 
                 # 根据模式配置colorscale和colorbar
@@ -816,7 +948,7 @@ class FIFOHeatmapVisualizer:
         # 创建网络类型切换按钮
         network_buttons = []
         for network_type in ["req", "rsp", "data"]:
-            network_label = {"req": "Request", "rsp": "Response", "data": "Data"}[network_type]
+            network_label = {"req": "请求", "rsp": "响应", "data": "数据"}[network_type]
             button = dict(label=network_label, method="skip")
             network_buttons.append(button)
 
@@ -829,7 +961,7 @@ class FIFOHeatmapVisualizer:
                     direction="left",
                     pad={"r": 10, "t": 10},
                     showactive=True,
-                    active=1,  # 初始高亮峰值
+                    active=0,  # 初始高亮平均使用率
                     x=0.3,
                     xanchor="center",
                     y=1.12,  # 提高位置避免与标题重叠
@@ -845,7 +977,7 @@ class FIFOHeatmapVisualizer:
                     direction="left",
                     pad={"r": 10, "t": 10},
                     showactive=True,
-                    active=2,  # 初始高亮Data
+                    active=2,  # 初始高亮数据
                     x=0.7,
                     xanchor="center",
                     y=1.12,  # 提高位置避免与标题重叠
@@ -1010,19 +1142,17 @@ class FIFOHeatmapVisualizer:
             col=2,
         )
 
-    def _save_html_with_click_events(self, fig: go.Figure, save_path: str, fifo_options: List[Tuple[str, str, str, str]], num_dies: int):
+    def _generate_custom_javascript(self, fifo_options: List[Tuple[str, str, str, str]], num_dies: int) -> str:
         """
-        保存HTML文件并注入JavaScript代码来处理FIFO点击事件
+        生成FIFO热力图的自定义JavaScript代码
 
         Args:
-            fig: Plotly图形对象
-            save_path: 保存路径
             fifo_options: FIFO选项列表（四元组）
             num_dies: Die数量
-        """
-        # 先生成基础HTML（使用本地内嵌Plotly，避免CDN加载失败）
-        html_string = fig.to_html(include_plotlyjs=True)
 
+        Returns:
+            str: JavaScript代码字符串
+        """
         # 创建FIFO选项映射 (用于JavaScript查找)
         # key: "category_fifo_type_network_type" -> index
         fifo_map = {}
@@ -1031,10 +1161,7 @@ class FIFOHeatmapVisualizer:
             fifo_map[key] = idx
 
         # 计算trace索引
-        # 左侧热力图: len(fifo_options) * 3 (avg+peak+flit_count) 个traces（每个FIFO选项+模式1个trace包含所有Die）
         num_heatmap_traces = len(fifo_options) * 3
-
-        # 右侧架构图的traces从 num_heatmap_traces 开始
 
         # 创建FIFO选项的详细信息（用于JavaScript）
         fifo_options_js = [[opt[0], opt[1], opt[2], opt[3]] for opt in fifo_options]
@@ -1287,6 +1414,23 @@ class FIFOHeatmapVisualizer:
     }});
 </script>
 """
+        return js_code
+
+    def _save_html_with_click_events(self, fig: go.Figure, save_path: str, fifo_options: List[Tuple[str, str, str, str]], num_dies: int):
+        """
+        保存HTML文件并注入JavaScript代码来处理FIFO点击事件
+
+        Args:
+            fig: Plotly图形对象
+            save_path: 保存路径
+            fifo_options: FIFO选项列表（四元组）
+            num_dies: Die数量
+        """
+        # 先生成基础HTML（使用本地内嵌Plotly，避免CDN加载失败）
+        html_string = fig.to_html(include_plotlyjs=True)
+
+        # 生成自定义JavaScript代码
+        js_code = self._generate_custom_javascript(fifo_options, num_dies)
 
         # 在</body>之前注入JavaScript
         html_string = html_string.replace("</body>", js_code + "</body>")
@@ -1296,7 +1440,7 @@ class FIFOHeatmapVisualizer:
             f.write(html_string)
 
 
-def create_fifo_heatmap(dies: Dict, config, total_cycles: int, die_layout: Optional[Dict] = None, die_rotations: Optional[Dict] = None, save_path: Optional[str] = None) -> Optional[str]:
+def create_fifo_heatmap(dies: Dict, config, total_cycles: int, die_layout: Optional[Dict] = None, die_rotations: Optional[Dict] = None, save_path: Optional[str] = None, show_fig: bool = False, return_fig_and_js: bool = False):
     """
     便捷函数：一键创建FIFO使用率热力图
 
@@ -1307,9 +1451,11 @@ def create_fifo_heatmap(dies: Dict, config, total_cycles: int, die_layout: Optio
         die_layout: Die布局
         die_rotations: Die旋转
         save_path: 保存路径
+        show_fig: 是否在浏览器中显示
+        return_fig_and_js: 是否返回(Figure, JavaScript)元组
 
     Returns:
-        str: 保存路径（如果提供）
+        str or tuple: 如果return_fig_and_js=True，返回(Figure, JavaScript)；否则返回保存路径
     """
     # 收集数据
     collector = FIFOUtilizationCollector(config)
@@ -1317,4 +1463,4 @@ def create_fifo_heatmap(dies: Dict, config, total_cycles: int, die_layout: Optio
 
     # 创建可视化
     visualizer = FIFOHeatmapVisualizer(config, fifo_data)
-    return visualizer.create_interactive_heatmap(dies, die_layout, die_rotations, save_path)
+    return visualizer.create_interactive_heatmap(dies, die_layout, die_rotations, save_path, show_fig, return_fig_and_js)

@@ -41,7 +41,7 @@ class CrossPoint:
             self.EQ_UE_Counters = network_ref.EQ_UE_Counters
             self.RB_CAPACITY = network_ref.RB_CAPACITY
             self.EQ_CAPACITY = network_ref.EQ_CAPACITY
-            self.T0_Etag_Order_FIFO = network_ref.T0_Etag_Order_FIFO
+            self.T0_Etag_Order_FIFO = network_ref.T0_Etag_Order_FIFO  # 字典结构，包含4个方向的FIFO
             # I-Tag: 预约管理 (共享Network的数据结构)
             self.remain_tag = network_ref.remain_tag
             self.tagged_counter = network_ref.tagged_counter
@@ -53,7 +53,7 @@ class CrossPoint:
             self.EQ_UE_Counters = {"TU": {}, "TD": {}}
             self.RB_CAPACITY = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
             self.EQ_CAPACITY = {"TU": {}, "TD": {}}
-            self.T0_Etag_Order_FIFO = None
+            self.T0_Etag_Order_FIFO = {"TL": None, "TR": None, "TU": None, "TD": None}
             self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
             self.tagged_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
             self.itag_req_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
@@ -77,6 +77,22 @@ class CrossPoint:
     # ------------------------------------------------------------------
     # E-Tag: Entry管理方法
     # ------------------------------------------------------------------
+
+    def _record_etag_entry(self, flit: Flit, fifo_category: str, direction: str, node_pos: int):
+        """记录flit进入FIFO时的ETag等级"""
+        if self.network is None:
+            return
+
+        etag = flit.ETag_priority
+
+        # 初始化统计字典
+        if node_pos not in self.network.fifo_etag_entry_count[fifo_category][direction]:
+            self.network.fifo_etag_entry_count[fifo_category][direction][node_pos] = {
+                "T0": 0, "T1": 0, "T2": 0
+            }
+
+        # 累加ETag等级计数
+        self.network.fifo_etag_entry_count[fifo_category][direction][node_pos][etag] += 1
 
     def _entry_available(self, dir_type: str, key: Any, level: str) -> bool:
         """
@@ -118,7 +134,7 @@ class CrossPoint:
     # E-Tag: T0轮询机制
     # ------------------------------------------------------------------
 
-    def _register_T0_slot(self, flit: Flit) -> int:
+    def _register_T0_slot(self, flit: Flit, direction: str) -> int:
         """
         为Flit注册T0 Slot到轮询队列
 
@@ -126,22 +142,31 @@ class CrossPoint:
 
         Args:
             flit: 要注册的Flit对象
+            direction: 下环方向 ("TL"/"TR"/"TU"/"TD")
 
         Returns:
             int: 分配的slot_id
         """
-        if self.T0_Etag_Order_FIFO is None:
-            raise RuntimeError("T0_Etag_Order_FIFO未初始化")
+        # 检查方向有效性
+        if direction not in ["TL", "TR", "TU", "TD"]:
+            raise ValueError(f"未知方向: {direction}")
+
+        # 获取该方向的FIFO队列
+        fifo = self.T0_Etag_Order_FIFO[direction]
+
+        if fifo is None:
+            raise RuntimeError(f"T0_Etag_Order_FIFO[{direction}]未初始化")
 
         # 获取当前Slot的slot_id
         slot = self.network.links_tag[flit.current_link][flit.current_seat_index]
         slot_id = slot.slot_id
 
-        # 注册到轮询队列
-        self.T0_Etag_Order_FIFO.append(slot_id)
+        # 注册到对应的轮询队列
+        fifo.append(slot_id)
 
-        # 记录在flit上
+        # 记录在flit上（改为记录方向而非类型）
         flit.T0_slot_id = slot_id
+        flit.T0_fifo_direction = direction
 
         return slot_id
 
@@ -154,20 +179,31 @@ class CrossPoint:
         Args:
             flit: 要注销的Flit对象
         """
-        if self.T0_Etag_Order_FIFO is None:
-            return
-
         if not hasattr(flit, "T0_slot_id") or flit.T0_slot_id is None:
             return
 
-        # 从队列中移除
+        # 根据flit记录的方向获取对应的FIFO
+        if not hasattr(flit, "T0_fifo_direction") or flit.T0_fifo_direction is None:
+            return
+
+        direction = flit.T0_fifo_direction
+        if direction not in ["TL", "TR", "TU", "TD"]:
+            return
+
+        fifo = self.T0_Etag_Order_FIFO[direction]
+
+        if fifo is None:
+            return
+
+        # 从对应队列中移除
         try:
-            self.T0_Etag_Order_FIFO.remove(flit.T0_slot_id)
+            fifo.remove(flit.T0_slot_id)
         except ValueError:
             pass
 
         # 清除flit上的标记
         flit.T0_slot_id = None
+        flit.T0_fifo_direction = None
 
     def _is_T0_slot_winner(self, flit: Flit) -> bool:
         """
@@ -179,16 +215,23 @@ class CrossPoint:
         Returns:
             bool: 是否赢得仲裁
         """
-        if self.T0_Etag_Order_FIFO is None:
-            return False
-
         if not hasattr(flit, "T0_slot_id") or flit.T0_slot_id is None:
             return False
 
-        if not self.T0_Etag_Order_FIFO:
+        # 根据flit记录的方向获取对应的FIFO
+        if not hasattr(flit, "T0_fifo_direction") or flit.T0_fifo_direction is None:
             return False
 
-        return self.T0_Etag_Order_FIFO[0] == flit.T0_slot_id
+        direction = flit.T0_fifo_direction
+        if direction not in ["TL", "TR", "TU", "TD"]:
+            return False
+
+        fifo = self.T0_Etag_Order_FIFO[direction]
+
+        if fifo is None or not fifo:
+            return False
+
+        return fifo[0] == flit.T0_slot_id
 
     # ------------------------------------------------------------------
     # E-Tag: 升级机制
@@ -223,9 +266,12 @@ class CrossPoint:
                 return "T1" if ETag_BOTHSIDE_UPGRADE else None
 
         elif flit.ETag_priority == "T1":
-            # T1 -> T0 升级（只有TL/TU能升级）
+            # T1 -> T0 升级
             if direction in ["TL", "TU"]:
                 return "T0"
+            elif direction in ["TR", "TD"]:
+                # TR/TD只有在双侧下环保序时才能升级到T0
+                return "T0" if (self.config.ORDERING_PRESERVATION_MODE == 2 and ETag_BOTHSIDE_UPGRADE) else None
 
         return None
 
@@ -274,7 +320,15 @@ class CrossPoint:
             bool: 是否有可用的entry
         """
         # 检查各级entry可用性
-        can_use_T0 = self._entry_available(direction, key, "T0") if direction in ["TL", "TU"] else False
+        # T0 Entry检查：TL/TU总是可以；TR/TD只有在双侧下环保序时
+        ETag_BOTHSIDE_UPGRADE = getattr(self.network, "ETag_BOTHSIDE_UPGRADE", getattr(self.config, "ETag_BOTHSIDE_UPGRADE", False))
+        if direction in ["TL", "TU"]:
+            can_use_T0 = self._entry_available(direction, key, "T0")
+        elif direction in ["TR", "TD"]:
+            can_use_T0 = self._entry_available(direction, key, "T0") if (self.config.ORDERING_PRESERVATION_MODE == 2 and ETag_BOTHSIDE_UPGRADE) else False
+        else:
+            can_use_T0 = False
+
         can_use_T1 = self._entry_available(direction, key, "T1")
         can_use_T2 = self._entry_available(direction, key, "T2")
 
@@ -373,6 +427,8 @@ class CrossPoint:
                 if self.network.ring_bridge_pre[direction][key] is not None:
                     raise RuntimeError(f"[Cycle {self.network.cycle}] ring_bridge_pre[{direction}][{key}] 已被占用！" f"当前flit: {self.network.ring_bridge_pre[direction][key]}, " f"尝试添加: {flit}")
                 self.network.ring_bridge_pre[direction][key] = flit
+                # 记录ETag入队统计
+                self._record_etag_entry(flit, "RB", direction, key)
         else:  # TU, TD
             # 纵向环下环到eject_queues（最终目的地节点，但还未到IP）
             flit.is_delay = False
@@ -388,6 +444,8 @@ class CrossPoint:
                         f"[Cycle {self.network.cycle}] eject_queues_in_pre[{direction}][{key}] 已被占用！" f"当前flit: {self.network.eject_queues_in_pre[direction][key]}, " f"尝试添加: {flit}"
                     )
                 self.network.eject_queues_in_pre[direction][key] = flit
+                # 记录ETag入队统计
+                self._record_etag_entry(flit, "EQ", direction, key)
 
         # 4. 占用Entry
         self._occupy_entry(direction, key, entry_level, flit)

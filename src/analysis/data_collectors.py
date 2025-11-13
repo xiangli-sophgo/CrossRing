@@ -116,9 +116,9 @@ class RequestCollector:
                 dest_type=actual_dest_type,  # 使用修正后的目标类型
                 burst_length=representative_flit.burst_length,
                 total_bytes=representative_flit.burst_length * 128,
-                cmd_latency=representative_flit.cmd_latency // self.network_frequency,
-                data_latency=representative_flit.data_latency // self.network_frequency,
-                transaction_latency=representative_flit.transaction_latency // self.network_frequency,
+                cmd_latency=int(representative_flit.cmd_latency / self.network_frequency),
+                data_latency=int(representative_flit.data_latency / self.network_frequency),
+                transaction_latency=int(representative_flit.transaction_latency / self.network_frequency),
                 # 保序相关字段
                 src_dest_order_id=src_dest_order_id,
                 packet_category=packet_category,
@@ -351,7 +351,7 @@ class RequestCollector:
         if hasattr(flit, attr_name):
             value = getattr(flit, attr_name)
             if value < float("inf"):
-                return int(value // self.network_frequency)
+                return int(value / self.network_frequency)
         return 0
 
     def _extract_d2d_info(self, first_flit, representative_flit, packet_id: int) -> Optional[D2DRequestInfo]:
@@ -675,7 +675,19 @@ class CircuitStatsCollector:
                                             flit_count = network.fifo_flit_count[category][fifo_type][pos][ip_type]
 
                                     key = f"{pos}_{ip_type}"
-                                    results[net_name][category][fifo_type][key] = self._calculate_fifo_stats(sum_depth, max_depth, capacity, flit_count, total_cycles)
+                                    base_stats = self._calculate_fifo_stats(sum_depth, max_depth, capacity, flit_count, total_cycles)
+                                    # CH_buffer不统计Tag，补充空字段
+                                    results[net_name][category][fifo_type][key] = {
+                                        **base_stats,
+                                        "itag_cumulative_count": 0,
+                                        "itag_rate": 0.0,
+                                        "etag_t0_cumulative": 0,
+                                        "etag_t1_cumulative": 0,
+                                        "etag_t2_cumulative": 0,
+                                        "etag_t0_rate": 0.0,
+                                        "etag_t1_rate": 0.0,
+                                        "etag_t2_rate": 0.0,
+                                    }
                     else:
                         # 其他FIFO类型
                         for pos, sum_depth in network.fifo_depth_sum[category][fifo_type].items():
@@ -685,7 +697,54 @@ class CircuitStatsCollector:
                             if pos in network.fifo_flit_count[category][fifo_type]:
                                 flit_count = network.fifo_flit_count[category][fifo_type][pos]
 
-                            results[net_name][category][fifo_type][pos] = self._calculate_fifo_stats(sum_depth, max_depth, capacity, flit_count, total_cycles)
+                            # 基础统计
+                            base_stats = self._calculate_fifo_stats(sum_depth, max_depth, capacity, flit_count, total_cycles)
+
+                            # === ITag统计 ===
+                            itag_cumulative = 0
+                            itag_rate = 0.0
+                            if category in network.fifo_itag_cumulative_count:
+                                if fifo_type in network.fifo_itag_cumulative_count[category]:
+                                    if pos in network.fifo_itag_cumulative_count[category][fifo_type]:
+                                        itag_cumulative = network.fifo_itag_cumulative_count[category][fifo_type][pos]
+                                        # ITag率 = ITag累计次数 / (总周期数 × 累计flit数) × 100%
+                                        if flit_count > 0 and total_cycles > 0:
+                                            itag_rate = itag_cumulative / (total_cycles * flit_count) * 100
+
+                            # === ETag统计 ===
+                            etag_t0_cumulative = 0
+                            etag_t1_cumulative = 0
+                            etag_t2_cumulative = 0
+                            etag_t0_rate = 0.0
+                            etag_t1_rate = 0.0
+                            etag_t2_rate = 0.0
+
+                            if category in network.fifo_etag_entry_count:
+                                if fifo_type in network.fifo_etag_entry_count[category]:
+                                    if pos in network.fifo_etag_entry_count[category][fifo_type]:
+                                        etag_dist = network.fifo_etag_entry_count[category][fifo_type][pos]
+                                        etag_t0_cumulative = etag_dist["T0"]
+                                        etag_t1_cumulative = etag_dist["T1"]
+                                        etag_t2_cumulative = etag_dist["T2"]
+
+                                        total_etag = etag_t0_cumulative + etag_t1_cumulative + etag_t2_cumulative
+                                        if total_etag > 0:
+                                            etag_t0_rate = etag_t0_cumulative / total_etag * 100
+                                            etag_t1_rate = etag_t1_cumulative / total_etag * 100
+                                            etag_t2_rate = etag_t2_cumulative / total_etag * 100
+
+                            # 合并所有统计
+                            results[net_name][category][fifo_type][pos] = {
+                                **base_stats,
+                                "itag_cumulative_count": itag_cumulative,
+                                "itag_rate": itag_rate,
+                                "etag_t0_cumulative": etag_t0_cumulative,
+                                "etag_t1_cumulative": etag_t1_cumulative,
+                                "etag_t2_cumulative": etag_t2_cumulative,
+                                "etag_t0_rate": etag_t0_rate,
+                                "etag_t1_rate": etag_t1_rate,
+                                "etag_t2_rate": etag_t2_rate,
+                            }
 
         return results
 
@@ -717,7 +776,14 @@ class CircuitStatsCollector:
 
         # 准备CSV数据
         rows = []
-        headers = ["网络", "类别", "FIFO类型", "位置", "平均使用率(%)", "最大使用率(%)", "平均深度", "最大深度", "累计flit数", "平均吞吐量(flit/cycle)"]
+        headers = [
+            "网络", "类别", "FIFO类型", "位置",
+            "平均使用率(%)", "最大使用率(%)", "平均深度", "最大深度",
+            "累计flit数", "平均吞吐量(flit/cycle)",
+            "ITag累计次数", "ITag率(%)",
+            "ETag_T0累计次数", "ETag_T1累计次数", "ETag_T2累计次数",
+            "ETag_T0率(%)", "ETag_T1率(%)", "ETag_T2率(%)"
+        ]
 
         # 只处理data通道的数据
         if "data" in fifo_stats:
@@ -734,8 +800,17 @@ class CircuitStatsCollector:
                             "最大使用率(%)": f"{stats['max_utilization']:.2f}",
                             "平均深度": f"{stats['avg_depth']:.2f}",
                             "最大深度": stats["max_depth"],
-                            "累计flit数": stats.get("flit_count", 0),
-                            "平均吞吐量(flit/cycle)": f"{stats.get('avg_throughput', 0):.4f}",
+                            "累计flit数": stats["flit_count"],
+                            "平均吞吐量(flit/cycle)": f"{stats['avg_throughput']:.4f}",
+                            # Tag字段
+                            "ITag累计次数": stats["itag_cumulative_count"],
+                            "ITag率(%)": f"{stats['itag_rate']:.2f}",
+                            "ETag_T0累计次数": stats["etag_t0_cumulative"],
+                            "ETag_T1累计次数": stats["etag_t1_cumulative"],
+                            "ETag_T2累计次数": stats["etag_t2_cumulative"],
+                            "ETag_T0率(%)": f"{stats['etag_t0_rate']:.2f}",
+                            "ETag_T1率(%)": f"{stats['etag_t1_rate']:.2f}",
+                            "ETag_T2率(%)": f"{stats['etag_t2_rate']:.2f}",
                         }
                         rows.append(row)
 
@@ -744,3 +819,5 @@ class CircuitStatsCollector:
             writer = csv.DictWriter(csvfile, fieldnames=headers)
             writer.writeheader()
             writer.writerows(rows)
+
+        return output_path

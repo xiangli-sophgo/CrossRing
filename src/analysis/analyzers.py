@@ -12,6 +12,7 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional, TYPE_CHECKING
 from enum import Enum
+import os
 
 # 避免循环导入,只在类型检查时导入
 if TYPE_CHECKING:
@@ -188,6 +189,7 @@ class SingleDieAnalyzer:
         plot_flow_graph: bool = False,
         flow_graph_interactive: bool = False,
         show_fig: bool = False,
+        verbose: int = 0,
     ):
         """
         初始化单Die分析器
@@ -199,6 +201,7 @@ class SingleDieAnalyzer:
             plot_flow_graph: 是否绘制静态流量图（PNG）
             flow_graph_interactive: 是否绘制交互式流量图（HTML）
             show_fig: 是否在浏览器中显示图像
+            verbose: 详细程度（0=静默，1=正常）
         """
         from collections import defaultdict
         from .core_calculators import DataValidator, TimeIntervalCalculator, BandwidthCalculator
@@ -215,6 +218,7 @@ class SingleDieAnalyzer:
         self.plot_flow_graph = plot_flow_graph
         self.flow_graph_interactive = flow_graph_interactive
         self.show_fig = show_fig
+        self.verbose = verbose
         self.finish_cycle = 0
         self.sim_model = None  # 添加sim_model引用
 
@@ -243,7 +247,7 @@ class SingleDieAnalyzer:
         self.visualizer = BandwidthPlotter()
         self.flow_visualizer = FlowGraphRenderer()
         self.interactive_flow_visualizer = InteractiveFlowGraphRenderer()
-        self.exporter = CSVExporter()
+        self.exporter = CSVExporter(verbose=self.verbose)
         self.report_generator = ReportGenerator()
 
     def collect_ip_statistics(self):
@@ -362,6 +366,24 @@ class SingleDieAnalyzer:
                 "rsp_circuits_v": getattr(self.sim_model, "rsp_cir_v_num_stat", 0),
                 "data_circuits_h": getattr(self.sim_model, "data_cir_h_num_stat", 0),
                 "data_circuits_v": getattr(self.sim_model, "data_cir_v_num_stat", 0),
+                # Wait cycle统计
+                "req_wait_cycles_h": getattr(self.sim_model, "req_wait_cycle_h_num_stat", 0),
+                "req_wait_cycles_v": getattr(self.sim_model, "req_wait_cycle_v_num_stat", 0),
+                "rsp_wait_cycles_h": getattr(self.sim_model, "rsp_wait_cycle_h_num_stat", 0),
+                "rsp_wait_cycles_v": getattr(self.sim_model, "rsp_wait_cycle_v_num_stat", 0),
+                "data_wait_cycles_h": getattr(self.sim_model, "data_wait_cycle_h_num_stat", 0),
+                "data_wait_cycles_v": getattr(self.sim_model, "data_wait_cycle_v_num_stat", 0),
+                # Retry统计
+                "read_retry_num": getattr(self.sim_model, "read_retry_num_stat", 0),
+                "write_retry_num": getattr(self.sim_model, "write_retry_num_stat", 0),
+                # ETag统计
+                "RB_ETag_T1_num": getattr(self.sim_model, "RB_ETag_T1_num_stat", 0),
+                "RB_ETag_T0_num": getattr(self.sim_model, "RB_ETag_T0_num_stat", 0),
+                "EQ_ETag_T1_num": getattr(self.sim_model, "EQ_ETag_T1_num_stat", 0),
+                "EQ_ETag_T0_num": getattr(self.sim_model, "EQ_ETag_T0_num_stat", 0),
+                # ITag统计
+                "ITag_h_num": getattr(self.sim_model, "ITag_h_num_stat", 0),
+                "ITag_v_num": getattr(self.sim_model, "ITag_v_num_stat", 0),
             }
 
         results = {
@@ -395,21 +417,20 @@ class SingleDieAnalyzer:
         # 保存的图片路径列表
         saved_figures = []
 
+        # 收集需要合并的图表
+        charts_to_merge = []  # [(title, fig, custom_js), ...]
+
         # 绘制RN带宽曲线并计算Total_sum_BW
+        rn_fig = None
         if self.plot_rn_bw_fig and self.sim_model:
-            if self.sim_model.results_fig_save_path:
-                import os
-
-                rn_save_path = os.path.join(self.sim_model.results_fig_save_path, f"rn_bandwidth_curve.html")
-            else:
-                rn_save_path = None
-
-            total_bandwidth = self.visualizer.plot_rn_bandwidth_curves_work_interval(
-                rn_bandwidth_time_series=self.rn_bandwidth_time_series, network_frequency=self.network_frequency, save_path=rn_save_path, show_fig=self.show_fig
+            total_bandwidth, rn_fig = self.visualizer.plot_rn_bandwidth_curves_work_interval(
+                rn_bandwidth_time_series=self.rn_bandwidth_time_series,
+                network_frequency=self.network_frequency,
+                save_path=None,  # 不保存独立文件
+                show_fig=False,  # 不显示
+                return_fig=True,  # 返回Figure对象
             )
-
-            if rn_save_path:
-                saved_figures.append(("RN带宽曲线", rn_save_path))
+            charts_to_merge.append(("RN带宽曲线", rn_fig, None))
         else:
             total_bandwidth = network_overall.get("mixed", self._empty_metrics()).weighted_bandwidth
 
@@ -438,27 +459,34 @@ class SingleDieAnalyzer:
                 saved_figures.append(("流图", flow_save_path))
 
         # 绘制交互式流图（HTML）
+        flow_fig = None
         if self.flow_graph_interactive and self.sim_model:
             # 如果之前没有计算IP带宽数据，则计算
             if self.ip_bandwidth_data is None:
                 self.calculate_ip_bandwidth_data()
 
-            if self.sim_model.results_fig_save_path:
-                import os
-
-                html_fname = f"flow_graph_total_interactive.html"
-                html_save_path = os.path.join(self.sim_model.results_fig_save_path, html_fname)
-            else:
-                html_save_path = None
-
             # 目前单Die只支持网格拓扑的交互式流图
             if not self.sim_model.topo_type_stat.startswith("Ring"):
-                self.interactive_flow_visualizer.draw_flow_graph(
-                    network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, mode="total", save_path=html_save_path, show_fig=self.show_fig
+                flow_fig = self.interactive_flow_visualizer.draw_flow_graph(
+                    network=self.sim_model.data_network,
+                    ip_bandwidth_data=self.ip_bandwidth_data,
+                    config=self.config,
+                    mode="total",
+                    save_path=None,  # 不保存独立文件
+                    show_fig=False,  # 不显示
+                    return_fig=True,  # 返回Figure对象
+                    req_network=self.sim_model.req_network,  # 传入请求网络
+                    rsp_network=self.sim_model.rsp_network,  # 传入响应网络
                 )
+                # 流量图放在最前面（按用户要求顺序）
+                charts_to_merge.insert(0, ("流量图", flow_fig, None))
 
-                if html_save_path:
-                    saved_figures.append(("交互式流图", html_save_path))
+        # 将收集的图表保存到result_processor中，供base_model后续合并
+        if self.sim_model and hasattr(self.sim_model, "result_processor"):
+            if not hasattr(self.sim_model.result_processor, "charts_to_merge"):
+                self.sim_model.result_processor.charts_to_merge = []
+            # 将当前收集的图表合并到result_processor
+            self.sim_model.result_processor.charts_to_merge.extend(charts_to_merge)
 
         # 保存图片路径到results中,供后续打印使用
         results["saved_figures"] = saved_figures
@@ -708,12 +736,26 @@ class SingleDieAnalyzer:
             link_stats_csv = os.path.join(output_path, "link_statistics.csv")
             self.exporter.export_link_statistics_csv(self.sim_model.data_network, link_stats_csv)
 
+        # 生成HTML格式的结果摘要，添加到集成报告中
+        if self.sim_model and hasattr(self.sim_model, "result_processor"):
+            # 使用actual_num_ip
+            num_ip = self.actual_num_ip if hasattr(self, "actual_num_ip") else 1
+
+            # 获取circuit_stats
+            circuit_stats = results.get("summary", {}).get("circuit_stats", {})
+
+            # 生成HTML版本
+            report_html = self.report_generator.generate_summary_report_html(results=results, num_ip=num_ip, circuit_stats=circuit_stats)
+
+            # 添加到图表列表末尾
+            if not hasattr(self.sim_model.result_processor, "charts_to_merge"):
+                self.sim_model.result_processor.charts_to_merge = []
+            self.sim_model.result_processor.charts_to_merge.append(("结果分析", None, report_html))
+
         # 打印文件生成提示
         if self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
             import os
 
-            report_file = os.path.join(output_path, "bandwidth_analysis_report.txt")
-            print(f"带宽分析报告： {report_file}")
             print(f"具体端口的统计CSV： {output_path}ports_bandwidth.csv")
             if hasattr(self.sim_model, "data_network") and self.sim_model.data_network:
                 print(f"链路统计CSV： {output_path}link_statistics.csv")
@@ -746,7 +788,7 @@ class SingleDieAnalyzer:
     def _print_summary_to_console(self, results: Dict) -> None:
         """输出重要数据到控制台"""
         print("\n" + "=" * 60)
-        print("网络带宽分析结果摘要")
+        print("结果分析")
         print("=" * 60)
 
         # 网络整体带宽
@@ -815,7 +857,7 @@ class SingleDieAnalyzer:
                 s = latency_stats[cat][op]
                 return s["sum"] / s["count"] if s["count"] else 0.0
 
-            print("\n延迟统计 (单位: cycle)")
+            print("\n延迟统计 (单位: ns)")
             for key, label in [("cmd", "CMD"), ("data", "Data"), ("trans", "Trans")]:
                 if key in latency_stats:
                     print(
@@ -824,3 +866,67 @@ class SingleDieAnalyzer:
                         f"写: avg {_avg(key,'write'):.2f}, max {latency_stats[key]['write']['max']}；"
                         f"混合: avg {_avg(key,'mixed'):.2f}, max {latency_stats[key]['mixed']['max']}"
                     )
+
+    def _generate_integrated_html(self, results: Dict):
+        """生成集成的HTML可视化报告"""
+        if not self.sim_model or not hasattr(self.sim_model, "result_processor"):
+            return
+
+        # 获取所有收集的图表
+        all_charts = getattr(self.sim_model.result_processor, "charts_to_merge", [])
+        if not all_charts:
+            return
+
+        # 确保顺序：流量图 → FIFO热力图 → RN带宽曲线
+        # 重新排序图表
+        ordered_charts = []
+        flow_chart = None
+        fifo_chart = None
+        rn_chart = None
+
+        for title, fig, custom_js in all_charts:
+            if "流量图" in title:
+                flow_chart = (title, fig, custom_js)
+            elif "FIFO" in title:
+                fifo_chart = (title, fig, custom_js)
+            elif "RN" in title or "带宽" in title:
+                rn_chart = (title, fig, custom_js)
+
+        # 按顺序添加
+        if flow_chart:
+            ordered_charts.append(flow_chart)
+        if fifo_chart:
+            ordered_charts.append(fifo_chart)
+        if rn_chart:
+            ordered_charts.append(rn_chart)
+
+        # 如果没有图表，直接返回
+        if not ordered_charts:
+            return
+
+        try:
+            from src.analysis.integrated_visualizer import create_integrated_report
+
+            # 确定保存路径
+            if self.sim_model.results_fig_save_path:
+                import os
+
+                save_path = os.path.join(self.sim_model.results_fig_save_path, "result_analysis.html")
+            else:
+                return
+
+            # 生成集成HTML
+            integrated_path = create_integrated_report(charts_config=ordered_charts, save_path=save_path, show_fig=self.show_fig)
+
+            if integrated_path and self.sim_model.verbose:
+                print(f"结果分析报告: {integrated_path}")
+                print("  包含图表:")
+                for title, _, _ in ordered_charts:
+                    print(f"    - {title}")
+
+        except Exception as e:
+            if self.sim_model.verbose:
+                print(f"警告: 集成HTML生成失败: {e}")
+                import traceback
+
+                traceback.print_exc()

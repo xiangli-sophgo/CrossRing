@@ -189,11 +189,31 @@ class Network:
             "EQ": {"TU": {}, "TD": {}, "CH_buffer": {}},
         }
 
+        # ITag累计次数统计（每周期累加FIFO中带ITag的flit数）
+        self.fifo_itag_cumulative_count = {
+            "IQ": {"TR": {}, "TL": {}},  # IQ_OUT (横向注入)
+            "RB": {"TU": {}, "TD": {}},  # RB_OUT (纵向转向)
+        }
+
+        # ETag入队统计（flit进入pre缓冲区时的ETag等级快照）
+        # 存储累计次数（每次flit入队时+1）
+        self.fifo_etag_entry_count = {
+            "RB": {
+                "TR": {},  # {node_pos: {"T0": count, "T1": count, "T2": count}}
+                "TL": {},
+            },
+            "EQ": {
+                "TU": {},
+                "TD": {},
+            },
+        }
+
         # Slot ID全局计数器（用于为每个seat分配唯一ID）
         self.global_slot_id_counter = 0
 
         # ETag setup (这些数据结构由Network管理，CrossPoint共享引用)
-        self.T0_Etag_Order_FIFO = deque()  # T0 Slot ID轮询队列（改为存储slot_id而非(node, flit)）
+        # T0 Slot ID轮询队列：每个方向独立的FIFO（改为存储slot_id而非(node, flit)）
+        self.T0_Etag_Order_FIFO = {"TL": deque(), "TR": deque(), "TU": deque(), "TD": deque()}
         self.RB_UE_Counters = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}  # 所有CrossPoint共享
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}  # 所有CrossPoint共享
         self.ETag_BOTHSIDE_UPGRADE = False
@@ -234,7 +254,7 @@ class Network:
 
             # EQ UE Counters
             self.EQ_UE_Counters["TU"][node_pos] = {"T2": 0, "T1": 0, "T0": 0}
-            self.EQ_UE_Counters["TD"][node_pos] = {"T2": 0, "T1": 0}
+            self.EQ_UE_Counters["TD"][node_pos] = {"T2": 0, "T1": 0, "T0": 0}
 
             # Channel buffers
             for key in self.config.CH_NAME_LIST:
@@ -335,7 +355,7 @@ class Network:
             self.ring_bridge_pre["EQ"][pos] = None
 
             self.RB_UE_Counters["TL"][pos] = {"T2": 0, "T1": 0, "T0": 0}
-            self.RB_UE_Counters["TR"][pos] = {"T2": 0, "T1": 0}
+            self.RB_UE_Counters["TR"][pos] = {"T2": 0, "T1": 0, "T0": 0}
 
         # 新架构: 所有节点都可以作为IP节点
         for ip_type in self.num_recv.keys():
@@ -371,6 +391,10 @@ class Network:
                 return config.RB_IN_FIFO_DEPTH - config.TL_Etag_T1_UE_MAX
 
         def _cap_tr(lvl):
+            # 双侧下环保序模式：TR完全复用TL的配置
+            if config.ORDERING_PRESERVATION_MODE == 2:
+                return _cap_tl(lvl)
+            # 其他模式：TR使用独立配置
             if lvl == "T2":
                 return config.TR_Etag_T2_UE_MAX
             if lvl == "T1":
@@ -386,6 +410,10 @@ class Network:
                 return config.EQ_IN_FIFO_DEPTH - config.TU_Etag_T1_UE_MAX
 
         def _cap_td(lvl):
+            # 双侧下环保序模式：TD完全复用TU的配置
+            if config.ORDERING_PRESERVATION_MODE == 2:
+                return _cap_tu(lvl)
+            # 其他模式：TD使用独立配置
             if lvl == "T2":
                 return config.TD_Etag_T2_UE_MAX
             if lvl == "T1":
@@ -396,13 +424,13 @@ class Network:
         for pair in self.RB_UE_Counters["TL"]:
             self.RB_CAPACITY["TL"][pair] = {lvl: _cap_tl(lvl) for lvl in ("T0", "T1", "T2")}
         for pair in self.RB_UE_Counters["TR"]:
-            self.RB_CAPACITY["TR"][pair] = {lvl: _cap_tr(lvl) for lvl in ("T1", "T2")}
+            self.RB_CAPACITY["TR"][pair] = {lvl: _cap_tr(lvl) for lvl in ("T0", "T1", "T2")}
 
         # 为所有EQ位置设置容量
         for pos in self.EQ_UE_Counters["TU"]:
             self.EQ_CAPACITY["TU"][pos] = {lvl: _cap_tu(lvl) for lvl in ("T0", "T1", "T2")}
         for pos in self.EQ_UE_Counters["TD"]:
-            self.EQ_CAPACITY["TD"][pos] = {lvl: _cap_td(lvl) for lvl in ("T1", "T2")}
+            self.EQ_CAPACITY["TD"][pos] = {lvl: _cap_td(lvl) for lvl in ("T0", "T1", "T2")}
 
         # 创建CrossPoint对象
         from .cross_point import CrossPoint
@@ -1092,7 +1120,7 @@ class Network:
             if upgrade_to:
                 flit.ETag_priority = upgrade_to
                 if upgrade_to == "T0":
-                    crosspoint._register_T0_slot(flit)
+                    crosspoint._register_T0_slot(flit, eject_direction)
 
             # 继续绕环
             if should_continue_loop:
@@ -1335,6 +1363,25 @@ class Network:
                 self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos][ip_type] += depth
                 self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type] = max(self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type], depth)
 
+        # === ITag累计统计 ===
+        # IQ_OUT统计 (只统计TR/TL横向注入)
+        for direction in ["TR", "TL"]:
+            if direction in self.inject_queues and in_pos in self.inject_queues[direction]:
+                itag_count = sum(1 for flit in self.inject_queues[direction][in_pos] if getattr(flit, "itag_h", False))
+
+                if in_pos not in self.fifo_itag_cumulative_count["IQ"][direction]:
+                    self.fifo_itag_cumulative_count["IQ"][direction][in_pos] = 0
+                self.fifo_itag_cumulative_count["IQ"][direction][in_pos] += itag_count
+
+        # RB_OUT统计 (TU/TD纵向转向)
+        for direction in ["TU", "TD"]:
+            if direction in self.ring_bridge and in_pos in self.ring_bridge[direction]:
+                itag_count = sum(1 for flit in self.ring_bridge[direction][in_pos] if getattr(flit, "itag_v", False))
+
+                if in_pos not in self.fifo_itag_cumulative_count["RB"][direction]:
+                    self.fifo_itag_cumulative_count["RB"][direction][in_pos] = 0
+                self.fifo_itag_cumulative_count["RB"][direction][in_pos] += itag_count
+
     def increment_fifo_flit_count(self, category: str, fifo_type: str, pos: int, ip_type: str = None):
         """更新FIFO的flit计数
 
@@ -1379,17 +1426,13 @@ class Network:
                 total_flit_v = sum(eject_attempts_v.values())
                 total_flit = total_flit_h + total_flit_v
 
-                # 计算合并的eject_attempts分布(横向+纵向)
-                total_flit_with_attempts = total_flit
-                if total_flit_with_attempts > 0:
-                    merged_attempts = {
-                        "0": (eject_attempts_h["0"] + eject_attempts_v["0"]) / total_flit_with_attempts,
-                        "1": (eject_attempts_h["1"] + eject_attempts_v["1"]) / total_flit_with_attempts,
-                        "2": (eject_attempts_h["2"] + eject_attempts_v["2"]) / total_flit_with_attempts,
-                        ">2": (eject_attempts_h[">2"] + eject_attempts_v[">2"]) / total_flit_with_attempts,
-                    }
-                else:
-                    merged_attempts = {"0": 0.0, "1": 0.0, "2": 0.0, ">2": 0.0}
+                # 计算合并的eject_attempts分布(横向+纵向)，基于total_cycles
+                merged_attempts = {
+                    "0": (eject_attempts_h["0"] + eject_attempts_v["0"]) / total_cycles,
+                    "1": (eject_attempts_h["1"] + eject_attempts_v["1"]) / total_cycles,
+                    "2": (eject_attempts_h["2"] + eject_attempts_v["2"]) / total_cycles,
+                    ">2": (eject_attempts_h[">2"] + eject_attempts_v[">2"]) / total_cycles,
+                }
 
                 stats[link] = {
                     # 主要比例（基于total_cycles）
@@ -1399,9 +1442,9 @@ class Network:
                     # 详细flit分布（相对于total_cycles）
                     "eject_attempts_h_ratios": {k: v / total_cycles if total_cycles > 0 else 0.0 for k, v in eject_attempts_h.items()},
                     "eject_attempts_v_ratios": {k: v / total_cycles if total_cycles > 0 else 0.0 for k, v in eject_attempts_v.items()},
-                    # 合并的eject_attempts分布（相对于total_flit）
+                    # 合并的eject_attempts分布（基于total_cycles）
                     "eject_attempts_merged_ratios": merged_attempts,
-                    # 有效利用率（eject_attempts=0的flit占比）
+                    # 有效利用率（eject_attempts=0的flit占总周期的比例）
                     "effective_ratio": merged_attempts["0"],
                     # 原始计数
                     "total_cycles": total_cycles,

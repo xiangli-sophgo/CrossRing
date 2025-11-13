@@ -50,7 +50,7 @@ def main():
         # 图片生成控制
         flow_graph_interactive=1,  # 生成HTML交互式流量图
         ip_bandwidth_heatmap=0,
-        fifo_utilization_heatmap=0,
+        fifo_utilization_heatmap=1,
         show_fig=1,  # 在浏览器中显示图像
         # CSV文件导出控制
         export_d2d_requests_csv=1,
