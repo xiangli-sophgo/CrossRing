@@ -62,6 +62,7 @@ ITag_MAX_Num_V: 1
 
 # 其他配置
 ETag_BOTHSIDE_UPGRADE: 0
+ORDERING_ETAG_UPGRADE_MODE: 0
 GDMA_RW_GAP: .inf  # numpy.inf
 SDMA_RW_GAP: .inf  # numpy.inf
 

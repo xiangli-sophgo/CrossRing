@@ -82,7 +82,7 @@ def main():
     # sim.setup_visualization(plot_link_state=1, plot_start_cycle=1500, show_node_id=1)
     np.random.seed(801)
 
-    sim.run_simulation(max_time=600, print_interval=200)
+    sim.run_simulation(max_time=6000, print_interval=200)
 
 
 if __name__ == "__main__":

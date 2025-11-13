@@ -496,12 +496,20 @@ class FIFOHeatmapVisualizer:
                 break
         default_mode = "avg"
 
+        # 批量收集所有traces并设置subplot坐标
+        all_traces = []
         for option in fifo_options:
             for mode in ["avg", "peak", "flit_count"]:
                 trace = traces_data[(option, mode)]
                 # 只有默认选项的默认模式可见
                 trace.visible = option == default_option and mode == default_mode
-                fig.add_trace(trace, row=1, col=1)
+                # 设置subplot位置 (row=1, col=1对应xaxis, yaxis)
+                trace.xaxis = "x"
+                trace.yaxis = "y"
+                all_traces.append(trace)
+
+        # 批量添加所有traces（直接扩展fig.data）
+        fig.add_traces(all_traces)
 
         # 添加Die边框和标签
         self._add_die_borders_and_labels(fig, dies, die_layout, die_rotations)

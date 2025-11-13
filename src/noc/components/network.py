@@ -1096,6 +1096,18 @@ class Network:
                 else:
                     if flit.eject_attempts_v <= 1:
                         flit.ordering_blocked_eject_v += 1
+
+                # 模式1：保序失败时也升级ETag
+                if self.config.ORDERING_ETAG_UPGRADE_MODE == 1:
+                    if not flit.is_delay:
+                        flit.is_delay = True
+
+                    upgrade_to = crosspoint._determine_etag_upgrade(flit, eject_direction)
+                    if upgrade_to:
+                        flit.ETag_priority = upgrade_to
+                        if upgrade_to == "T0":
+                            crosspoint._register_T0_slot(flit, eject_direction)
+
                 state = self._analyze_flit_state(flit, current, next_node)
                 self._continue_looping(flit, link, state["next_pos"])
                 return

@@ -228,6 +228,7 @@ class SingleDieAnalyzer:
         self.sn_positions = set()
         self.rn_bandwidth_time_series = defaultdict(lambda: {"time": [], "start_times": [], "bytes": []})
         self.ip_bandwidth_data = None
+        self._ip_bandwidth_data_cached = None  # IP带宽数据缓存
         self.read_ip_intervals = defaultdict(list)
         self.write_ip_intervals = defaultdict(list)
 
@@ -334,6 +335,8 @@ class SingleDieAnalyzer:
 
     def analyze_all_bandwidth(self) -> Dict:
         """执行完整的带宽分析"""
+        import time
+
         if not self.requests:
             raise ValueError("没有请求数据，请先调用 collect_requests_data()")
 
@@ -423,6 +426,7 @@ class SingleDieAnalyzer:
         # 绘制RN带宽曲线并计算Total_sum_BW
         rn_fig = None
         if self.plot_rn_bw_fig and self.sim_model:
+            t_start = time.time()
             total_bandwidth, rn_fig = self.visualizer.plot_rn_bandwidth_curves_work_interval(
                 rn_bandwidth_time_series=self.rn_bandwidth_time_series,
                 network_frequency=self.network_frequency,
@@ -600,7 +604,12 @@ class SingleDieAnalyzer:
         return avg_port_metrics
 
     def calculate_ip_bandwidth_data(self):
-        """计算IP带宽数据矩阵 - 支持区分IP实例"""
+        """计算IP带宽数据矩阵 - 支持区分IP实例（带缓存优化）"""
+        # 如果缓存存在，直接返回
+        if self._ip_bandwidth_data_cached is not None:
+            self.ip_bandwidth_data = self._ip_bandwidth_data_cached
+            return
+
         import numpy as np
         from collections import defaultdict
 
@@ -711,6 +720,9 @@ class SingleDieAnalyzer:
                 if type_requests:
                     total_metrics = self.calculator.calculate_bandwidth_metrics(type_requests, None)
                     self.ip_bandwidth_data["total"][dest_type][physical_row, physical_col] += total_metrics.weighted_bandwidth
+
+        # 保存到缓存
+        self._ip_bandwidth_data_cached = self.ip_bandwidth_data
 
     def generate_unified_report(self, results: Dict, output_path: str) -> None:
         """

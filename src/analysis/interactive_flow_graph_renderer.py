@@ -24,8 +24,57 @@ from typing import Dict, List, Optional, Tuple, Any
 from collections import defaultdict
 import os
 import warnings
+from functools import lru_cache
 
 from .analyzers import IP_COLOR_MAP, MAX_BANDWIDTH_NORMALIZATION, RN_TYPES, SN_TYPES
+
+
+@lru_cache(maxsize=8)
+def _calculate_node_positions_cached(num_rows: int, num_cols: int, num_nodes: int, rotation: int, offset_x: float, offset_y: float, node_spacing: float = 3.0) -> tuple:
+    """
+    计算节点位置（带缓存优化）
+
+    Args:
+        num_rows: 原始拓扑行数
+        num_cols: 原始拓扑列数
+        num_nodes: 节点总数
+        rotation: 旋转角度
+        offset_x: X轴偏移
+        offset_y: Y轴偏移
+        node_spacing: 节点间距
+
+    Returns:
+        tuple: ((node_id, (x, y)), ...) 节点位置元组，可哈希
+    """
+    pos_list = []
+    for node in range(num_nodes):
+        # 计算原始坐标
+        orig_row = node // num_cols
+        orig_col = node % num_cols
+
+        # 根据旋转角度变换坐标
+        if rotation == 0 or abs(rotation) == 360:
+            new_row = orig_row
+            new_col = orig_col
+        elif abs(rotation) == 90 or abs(rotation) == -270:
+            new_row = orig_col
+            new_col = num_rows - 1 - orig_row
+        elif abs(rotation) == 180:
+            new_row = num_rows - 1 - orig_row
+            new_col = num_cols - 1 - orig_col
+        elif abs(rotation) == 270 or abs(rotation) == -90:
+            new_row = num_cols - 1 - orig_col
+            new_col = orig_row
+        else:
+            new_row = orig_row
+            new_col = orig_col
+
+        # 计算实际位置
+        x = new_col * node_spacing + offset_x
+        y = -new_row * node_spacing + offset_y
+        pos_list.append((node, (x, y)))
+
+    return tuple(pos_list)
 
 
 class InteractiveFlowGraphRenderer:
@@ -36,7 +85,17 @@ class InteractiveFlowGraphRenderer:
         pass
 
     def draw_flow_graph(
-        self, network, ip_bandwidth_data: Dict = None, config=None, mode: str = "utilization", node_size: int = 2000, save_path: str = None, show_fig: bool = False, return_fig: bool = False, req_network=None, rsp_network=None
+        self,
+        network,
+        ip_bandwidth_data: Dict = None,
+        config=None,
+        mode: str = "utilization",
+        node_size: int = 2000,
+        save_path: str = None,
+        show_fig: bool = False,
+        return_fig: bool = False,
+        req_network=None,
+        rsp_network=None,
     ):
         """
         绘制单Die网络流量图(交互式版本)
@@ -56,6 +115,8 @@ class InteractiveFlowGraphRenderer:
         Returns:
             str or Figure: 如果return_fig=True，返回Figure对象；否则返回保存路径或fig对象
         """
+        import time
+
         # 如果没有传入config，尝试从network获取
         if config is None and hasattr(network, "config"):
             config = network.config
@@ -78,7 +139,7 @@ class InteractiveFlowGraphRenderer:
         fig = go.Figure()
 
         # 判断是否启用三通道分离显示
-        enable_channel_switch = (req_network is not None and rsp_network is not None)
+        enable_channel_switch = req_network is not None and rsp_network is not None
 
         if enable_channel_switch:
             # 三通道模式：先用data_network绘制基础结构（nodes、annotations等）
@@ -102,22 +163,18 @@ class InteractiveFlowGraphRenderer:
             num_base_traces = len(fig.data) - base_trace_count
 
             # 为三个通道分别绘制links
-            networks = {
-                "请求": req_network,
-                "响应": rsp_network,
-                "数据": network  # data_network
-            }
+            networks = {"请求": req_network, "响应": rsp_network, "数据": network}  # data_network
 
             trace_indices = {}
             annotation_indices = {}  # 记录每个通道的annotation范围
+            all_channel_annotations = []  # 收集所有通道的annotations
 
             for channel_idx, (channel_name, net) in enumerate(networks.items()):
                 trace_start_idx = len(fig.data)
-                annotation_start_idx = len(fig.layout.annotations) if fig.layout.annotations else 0
+                annotation_start_idx = len(all_channel_annotations)  # 基于收集列表的索引
 
-                # 只绘制该通道的links（不绘制nodes和annotations）
-                # 为每个通道绘制自环标签（随通道切换）
-                self._draw_channel_links_only(
+                # 只绘制该通道的links，返回annotations而不是直接添加
+                channel_anns = self._draw_channel_links_only(
                     fig=fig,
                     network=net,
                     config=config,
@@ -127,20 +184,35 @@ class InteractiveFlowGraphRenderer:
                     draw_self_loops=True,  # 所有通道都绘制自环
                 )
 
+                # 收集annotations
+                all_channel_annotations.extend(channel_anns)
+
                 trace_end_idx = len(fig.data)
-                annotation_end_idx = len(fig.layout.annotations) if fig.layout.annotations else 0
+                annotation_end_idx = len(all_channel_annotations)
 
                 trace_indices[channel_name] = (trace_start_idx, trace_end_idx)
                 annotation_indices[channel_name] = (annotation_start_idx, annotation_end_idx)
 
                 # 设置初始可见性：默认显示数据通道
                 for i in range(trace_start_idx, trace_end_idx):
-                    fig.data[i].visible = (channel_name == "数据")
+                    fig.data[i].visible = channel_name == "数据"
 
-                # 设置annotations的初始可见性
-                if fig.layout.annotations:
-                    for i in range(annotation_start_idx, annotation_end_idx):
-                        fig.layout.annotations[i].visible = (channel_name == "数据")
+            # 一次性添加所有annotations
+            existing_anns = list(fig.layout.annotations) if fig.layout.annotations else []
+            num_existing_anns = len(existing_anns)  # 记录原有annotations数量
+
+            for i, ann in enumerate(all_channel_annotations):
+                # 确定annotation属于哪个通道
+                ann_channel = None
+                for ch_name in ["请求", "响应", "数据"]:
+                    ann_start, ann_end = annotation_indices[ch_name]
+                    if ann_start <= i < ann_end:
+                        ann_channel = ch_name
+                        break
+                # 设置初始可见性
+                ann["visible"] = ann_channel == "数据"
+
+            fig.layout.annotations = existing_anns + all_channel_annotations
 
             # 添加通道切换按钮
             buttons = []
@@ -159,29 +231,23 @@ class InteractiveFlowGraphRenderer:
                         # 复制annotation的所有属性
                         ann_dict = ann.to_plotly_json()
                         # 确定这个annotation属于哪个通道
-                        ann_channel = None
-                        for ch_name in ["请求", "响应", "数据"]:
-                            ann_start, ann_end = annotation_indices[ch_name]
-                            if ann_start <= i < ann_end:
-                                ann_channel = ch_name
-                                break
-                        # 设置可见性
-                        ann_dict["visible"] = (ann_channel == channel_name)
+                        if i < num_existing_anns:
+                            # 原有annotations（如IP信息），始终可见
+                            ann_dict["visible"] = True
+                        else:
+                            # 新添加的channel annotations
+                            channel_ann_idx = i - num_existing_anns
+                            ann_channel = None
+                            for ch_name in ["请求", "响应", "数据"]:
+                                ann_start, ann_end = annotation_indices[ch_name]
+                                if ann_start <= channel_ann_idx < ann_end:
+                                    ann_channel = ch_name
+                                    break
+                            # 设置可见性
+                            ann_dict["visible"] = ann_channel == channel_name
                         updated_annotations.append(ann_dict)
 
-                buttons.append(
-                    dict(
-                        label=channel_name,
-                        method="update",
-                        args=[
-                            {"visible": visibility},
-                            {
-                                "title": f"流量图 - {channel_name}通道",
-                                "annotations": updated_annotations
-                            }
-                        ]
-                    )
-                )
+                buttons.append(dict(label=channel_name, method="update", args=[{"visible": visibility}, {"annotations": updated_annotations}]))
 
             updatemenus = [
                 dict(
@@ -254,14 +320,6 @@ class InteractiveFlowGraphRenderer:
             height=1000,
             autosize=True,
         )
-
-        # 只在非集成模式下显示标题
-        if not return_fig:
-            if enable_channel_switch:
-                title = "流量图 - 数据通道"  # 默认标题
-            else:
-                title = f"Network Flow - {mode.capitalize()}"
-            layout_config["title"] = dict(text=title, font=dict(size=16))
 
         # 添加通道切换按钮
         if enable_channel_switch and updatemenus:
@@ -363,38 +421,16 @@ class InteractiveFlowGraphRenderer:
             # 默认5x4拓扑
             actual_nodes = list(range(config.NUM_ROW * config.NUM_COL))
 
-        # 计算节点位置
-        pos = {}
+        # 计算节点位置（使用缓存优化）
         node_spacing = 3.0
         orig_rows = config.NUM_ROW
         orig_cols = config.NUM_COL
+        num_nodes = orig_rows * orig_cols
 
-        for node in actual_nodes:
-            # 计算原始坐标
-            orig_row = node // orig_cols
-            orig_col = node % orig_cols
-
-            # 根据旋转角度变换坐标
-            if rotation == 0 or abs(rotation) == 360:
-                new_row = orig_row
-                new_col = orig_col
-            elif abs(rotation) == 90 or abs(rotation) == -270:
-                new_row = orig_col
-                new_col = orig_rows - 1 - orig_row
-            elif abs(rotation) == 180:
-                new_row = orig_rows - 1 - orig_row
-                new_col = orig_cols - 1 - orig_col
-            elif abs(rotation) == 270 or abs(rotation) == -90:
-                new_row = orig_cols - 1 - orig_col
-                new_col = orig_row
-            else:
-                new_row = orig_row
-                new_col = orig_col
-
-            # 计算实际位置
-            x = new_col * node_spacing + offset_x
-            y = -new_row * node_spacing + offset_y
-            pos[node] = (x, y)
+        # 调用缓存函数获取位置
+        pos_tuple = _calculate_node_positions_cached(orig_rows, orig_cols, num_nodes, rotation, offset_x, offset_y, node_spacing)
+        # 转换为字典
+        pos = dict(pos_tuple)
 
         # 计算节点大小
         square_size = np.sqrt(node_size) / 50
@@ -485,7 +521,7 @@ class InteractiveFlowGraphRenderer:
                 current_shapes = list(fig.layout.shapes) if fig.layout.shapes else []
                 fig.update_layout(shapes=current_shapes + all_ip_shapes)
 
-            # 批量添加IP标签annotations
+            # 批量添加IP标签annotations（使用循环，Plotly内部会优化）
             for ann in all_ip_annotations:
                 fig.add_annotation(**ann)
 
@@ -596,6 +632,9 @@ class InteractiveFlowGraphRenderer:
     def _draw_link_arrows(self, fig, pos, edge_labels, edge_colors, links, config, square_size, rotation, fontsize, utilization_stats=None, is_d2d_scenario=False, show_labels=True):
         """绘制链路箭头（批量优化版本，增强hover信息）
 
+        Returns:
+            list: annotations列表
+
         Args:
             is_d2d_scenario: 是否为D2D场景，影响标签偏移量大小
             show_labels: 是否显示链路文本标签
@@ -642,18 +681,23 @@ class InteractiveFlowGraphRenderer:
                 # 检查是否有反向边
                 has_reverse = (j, i) in graph_edges
 
+                # 计算节点框的半宽度（从节点中心到边缘）
+                # 节点框大小为 square_size，但实际需要考虑IP方块等元素，尾部需要更大偏移
+                node_half_size_head = square_size / 2  # 头部：使用节点框边缘
+                node_half_size_tail = square_size * (0.35 if abs(i - j) != 1 else 0.45)
+
                 if has_reverse:
                     # 双向链路：偏移
-                    start_x = x1 + dx * square_size / 2 + perp_dx
-                    start_y = y1 + dy * square_size / 2 + perp_dy
-                    end_x = x2 - dx * square_size / 2 + perp_dx
-                    end_y = y2 - dy * square_size / 2 + perp_dy
+                    start_x = x1 + dx * node_half_size_tail + perp_dx
+                    start_y = y1 + dy * node_half_size_tail + perp_dy
+                    end_x = x2 - dx * node_half_size_head + perp_dx
+                    end_y = y2 - dy * node_half_size_head + perp_dy
                 else:
                     # 单向链路：不偏移
-                    start_x = x1 + dx * square_size / 2
-                    start_y = y1 + dy * square_size / 2
-                    end_x = x2 - dx * square_size / 2
-                    end_y = y2 - dy * square_size / 2
+                    start_x = x1 + dx * node_half_size_tail
+                    start_y = y1 + dy * node_half_size_tail
+                    end_x = x2 - dx * node_half_size_head
+                    end_y = y2 - dy * node_half_size_head
 
                 # 收集箭头annotation（缩小箭头）
                 arrow_annotations.append(
@@ -668,8 +712,8 @@ class InteractiveFlowGraphRenderer:
                         ayref="y",
                         showarrow=True,
                         arrowhead=2,
-                        arrowsize=0.8,  # 从1减小到0.8
-                        arrowwidth=1.5,  # 从2减小到1.5
+                        arrowsize=0.8,
+                        arrowwidth=1.5,
                         arrowcolor=color_str,
                         standoff=0,
                     )
@@ -677,6 +721,8 @@ class InteractiveFlowGraphRenderer:
 
                 # 收集标签数据（使用scatter代替annotation）
                 if label:
+                    start_x += dx * square_size * (0.15 if abs(i - j) != 1 else 0.05)
+                    start_y += dy * square_size * (0.15 if abs(i - j) != 1 else 0.05)
                     mid_x = (start_x + end_x) / 2
                     mid_y = (start_y + end_y) / 2
 
@@ -786,10 +832,6 @@ class InteractiveFlowGraphRenderer:
                     label_color_list.append(color_str)
                     label_hover_list.append(hover_text)
 
-        # 批量添加箭头annotations
-        for ann in arrow_annotations:
-            fig.add_annotation(**ann)
-
         # 按颜色分组绘制标签（避免重复绘制）
         if show_labels and label_x_list:
             # 按颜色分组（包含hover信息）
@@ -818,6 +860,9 @@ class InteractiveFlowGraphRenderer:
                     )
                 )
 
+        # 返回箭头annotations
+        return arrow_annotations
+
     def _draw_channel_links_only(self, fig, network, config, pos, mode, node_size, draw_self_loops=False):
         """
         只绘制指定network的链路traces（不绘制nodes和annotations）
@@ -830,7 +875,11 @@ class InteractiveFlowGraphRenderer:
             mode: 可视化模式
             node_size: 节点大小
             draw_self_loops: 是否绘制自环标签（避免重复）
+
+        Returns:
+            list: 该通道的annotations列表
         """
+        channel_annotations = []  # 收集该通道的所有annotations
         # 获取链路统计数据
         links = {}
         utilization_stats = {}
@@ -870,6 +919,8 @@ class InteractiveFlowGraphRenderer:
         edge_labels = {}
         edge_colors = {}
         self_loop_labels = {}
+
+        network_name = getattr(network, "name", "Unknown")
 
         for link_key, value in links.items():
             # 处理link格式
@@ -915,12 +966,18 @@ class InteractiveFlowGraphRenderer:
                 edge_labels[(i, j)] = formatted_label
                 edge_colors[(i, j)] = color
 
-        # 绘制链路箭头（带文本标签）
-        self._draw_link_arrows(fig, pos, edge_labels, edge_colors, links, config, square_size, rotation=0, fontsize=12, utilization_stats=utilization_stats, is_d2d_scenario=False, show_labels=True)
+        # 绘制链路箭头（带文本标签）- 收集返回的annotations
+        arrow_anns = self._draw_link_arrows(
+            fig, pos, edge_labels, edge_colors, links, config, square_size, rotation=0, fontsize=12, utilization_stats=utilization_stats, is_d2d_scenario=False, show_labels=True
+        )
+        channel_annotations.extend(arrow_anns)
 
-        # 绘制自环标签（只在需要时绘制，避免重复）
+        # 绘制自环标签（只在需要时绘制，避免重复）- 收集返回的annotations
         if draw_self_loops and self_loop_labels:
-            self._draw_self_loop_labels(fig, pos, self_loop_labels, config, square_size, rotation=0, fontsize=12, utilization_stats=utilization_stats)
+            selfloop_anns = self._draw_self_loop_labels(fig, pos, self_loop_labels, config, square_size, rotation=0, fontsize=12, utilization_stats=utilization_stats)
+            channel_annotations.extend(selfloop_anns)
+
+        return channel_annotations
 
     def _draw_self_loop_labels(self, fig, pos, self_loop_labels, config, square_size, rotation, fontsize, utilization_stats):
         """
@@ -935,7 +992,11 @@ class InteractiveFlowGraphRenderer:
             rotation: Die旋转角度
             fontsize: 字体大小
             utilization_stats: 链路统计数据字典
+
+        Returns:
+            list: annotations列表
         """
+        selfloop_annotations = []  # 收集该方法的所有annotations
         # 按颜色和旋转角度分组收集标签数据
         label_groups = {}  # {(color_str, text_rotation): {"x": [], "y": [], "text": [], "hover": []}}
 
@@ -1098,18 +1159,25 @@ class InteractiveFlowGraphRenderer:
                         hoverlabel=dict(bgcolor="#333", font=dict(color="white")),  # 统一深色背景
                     )
                 )
-                # 添加旋转文本annotation
+                # 批量添加旋转文本annotation
+                annotations = []
                 for x, y, text in zip(data["x"], data["y"], data["text"]):
-                    fig.add_annotation(
-                        x=x,
-                        y=y,
-                        text=text,
-                        showarrow=False,
-                        font=dict(size=fontsize + 2, color=color_str, family="Arial"),
-                        xanchor="center",
-                        yanchor="middle",
-                        textangle=text_rotation,
+                    annotations.append(
+                        dict(
+                            x=x,
+                            y=y,
+                            text=text,
+                            showarrow=False,
+                            font=dict(size=fontsize + 2, color=color_str, family="Arial"),
+                            xanchor="center",
+                            yanchor="middle",
+                            textangle=text_rotation,
+                        )
                     )
+                # 收集旋转文本annotations
+                selfloop_annotations.extend(annotations)
+
+        return selfloop_annotations
 
     def _collect_ip_info_shapes(
         self, x, y, node, config, mode, square_size, ip_bandwidth_data, max_ip_bandwidth=None, min_ip_bandwidth=None, die_id=None, is_d2d_scenario=False, show_bandwidth_value=True

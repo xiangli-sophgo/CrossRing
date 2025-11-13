@@ -61,6 +61,10 @@ class BandwidthPlotter:
         fig = go.Figure()
         total_bw = 0
 
+        # 批量收集traces和annotations
+        all_traces = []
+        all_annotations = []
+
         for port_key, data_dict in rn_bandwidth_time_series.items():
             if not data_dict.get("time"):
                 continue
@@ -85,13 +89,33 @@ class BandwidthPlotter:
             bandwidth_filtered = bandwidth[mask]
             final_bw = bandwidth_filtered[-1]
 
-            # 添加曲线轨迹
-            fig.add_trace(go.Scatter(x=times_us, y=bandwidth_filtered, mode="lines", name=port_key, hovertemplate="<b>%{fullData.name}</b><br>时间: %{x:.2f} us<br>带宽: %{y:.2f} GB/s<extra></extra>"))
+            # 收集曲线轨迹
+            all_traces.append(go.Scatter(
+                x=times_us,
+                y=bandwidth_filtered,
+                mode="lines",
+                name=port_key,
+                hovertemplate="<b>%{fullData.name}</b><br>时间: %{x:.2f} us<br>带宽: %{y:.2f} GB/s<extra></extra>"
+            ))
 
-            # 添加末尾文本标注
-            fig.add_annotation(x=times_us[-1], y=final_bw, text=f"{final_bw:.2f}", showarrow=False, xanchor="left", yanchor="middle", font=dict(size=12))
+            # 收集末尾文本标注
+            all_annotations.append(dict(
+                x=times_us[-1],
+                y=final_bw,
+                text=f"{final_bw:.2f}",
+                showarrow=False,
+                xanchor="left",
+                yanchor="middle",
+                font=dict(size=12)
+            ))
 
             total_bw += final_bw
+
+        # 批量添加所有traces和annotations
+        if all_traces:
+            fig.add_traces(all_traces)
+        for ann in all_annotations:
+            fig.add_annotation(**ann)
 
         # 设置图表布局
         layout_config = dict(

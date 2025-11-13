@@ -76,6 +76,7 @@ class CrossRingConfig:
         self.TU_Etag_T2_UE_MAX = args.TU_Etag_T2_UE_MAX
         self.TD_Etag_T2_UE_MAX = args.TD_Etag_T2_UE_MAX
         self.ETag_BOTHSIDE_UPGRADE = args.ETag_BOTHSIDE_UPGRADE
+        self.ORDERING_ETAG_UPGRADE_MODE = args.ORDERING_ETAG_UPGRADE_MODE
         self.GDMA_RW_GAP = args.GDMA_RW_GAP
         self.SDMA_RW_GAP = args.SDMA_RW_GAP
         self.ENABLE_CROSSPOINT_CONFLICT_CHECK = args.ENABLE_CROSSPOINT_CONFLICT_CHECK
@@ -503,6 +504,7 @@ class CrossRingConfig:
         parser.add_argument("--TU_Etag_T2_UE_MAX", type=int, default=default_config["TU_Etag_T2_UE_MAX"], help="Vertical cross point towards up T2 ETag FIFO Entry number")
         parser.add_argument("--TD_Etag_T2_UE_MAX", type=int, default=default_config["TD_Etag_T2_UE_MAX"], help="Vertical cross point towards down T2 ETag FIFO Entry number")
         parser.add_argument("--ETag_BOTHSIDE_UPGRADE", type=int, default=default_config["ETag_BOTHSIDE_UPGRADE"], help="ETag upgrade method")
+        parser.add_argument("--ORDERING_ETAG_UPGRADE_MODE", type=int, default=default_config["ORDERING_ETAG_UPGRADE_MODE"], help="Ordering ETag upgrade mode: 0=only resource fail, 1=any eject fail")
         parser.add_argument("--IP_L2H_FIFO_DEPTH", type=int, default=default_config["IP_L2H_FIFO_DEPTH"], help="IP frequency change l2h fifo depth")
         parser.add_argument("--IP_H2L_H_FIFO_DEPTH", type=int, default=default_config["IP_H2L_H_FIFO_DEPTH"], help="IP frequency change h2l high frequency fifo depth")
         parser.add_argument("--IP_H2L_L_FIFO_DEPTH", type=int, default=default_config["IP_H2L_L_FIFO_DEPTH"], help="IP frequency change h2l low frequency fifo depth")
