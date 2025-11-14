@@ -256,12 +256,15 @@ class IPInterface:
             "rn_wdb": {"allocations": [], "releases": []},
             "sn_ro": {"allocations": [], "releases": []},
             "sn_share": {"allocations": [], "releases": []},
-            "sn_wdb": {"allocations": [], "releases": []}
+            "sn_wdb": {"allocations": [], "releases": []},
+            "read_retry": {"allocations": [], "releases": []},
+            "write_retry": {"allocations": [], "releases": []}
         }
 
         self.tracker_total_allocated = {
             "rn_read": 0, "rn_write": 0, "rn_rdb": 0, "rn_wdb": 0,
-            "sn_ro": 0, "sn_share": 0, "sn_wdb": 0
+            "sn_ro": 0, "sn_share": 0, "sn_wdb": 0,
+            "read_retry": 0, "write_retry": 0
         }
 
         self.tracker_block_events = []
@@ -273,7 +276,9 @@ class IPInterface:
             "rn_wdb": self.rn_wdb_count["count"],
             "sn_ro": self.sn_tracker_count["ro"]["count"],
             "sn_share": self.sn_tracker_count["share"]["count"],
-            "sn_wdb": self.sn_wdb_count["count"]
+            "sn_wdb": self.sn_wdb_count["count"],
+            "read_retry": None,
+            "write_retry": None
         }
 
     def enqueue(self, flit: Flit, network_type: str, retry=False):
@@ -725,6 +730,9 @@ class IPInterface:
                 self._record_tracker_allocation("sn_share")
                 self._record_tracker_allocation("sn_wdb")
 
+                # 记录retry释放（写请求成功处理，发送positive前记录）
+                self._record_tracker_release("write_retry")
+
                 # 发送 positive 响应
                 self.create_rsp(new_req, "positive")
 
@@ -738,6 +746,9 @@ class IPInterface:
                 self.sn_tracker.append(new_req)
                 self.sn_tracker_count[new_req.sn_tracker_type]["count"] -= 1
                 self._record_tracker_allocation("sn_ro")
+
+                # 记录retry释放（读请求成功处理）
+                self._record_tracker_release("read_retry")
 
                 # 直接生成并发送读数据包
                 self.create_read_packet(new_req)
@@ -1093,6 +1104,11 @@ class IPInterface:
         rsp.destination_type = req.source_type
         rsp.sync_latency_record(req)
         rsp.sn_rsp_generate_cycle = cycle
+
+        # 记录negative响应（retry分配）
+        if rsp_type == "negative":
+            retry_type = "read_retry" if req.req_type == "read" else "write_retry"
+            self._record_tracker_allocation(retry_type)
 
         # 将响应放入响应网络的inject_fifo
         self.enqueue(rsp, "rsp")

@@ -409,8 +409,7 @@ class D2D_SN_Interface(IPInterface):
                 self.enqueue(data_send_rsp, "rsp")
             else:
                 # 资源不足：发送negative并加入等待队列（与基类一致）
-                negative_rsp = self._create_response_flit(flit, "negative")
-                self.enqueue(negative_rsp, "rsp")
+                self.create_rsp(flit, "negative")
                 self.sn_req_wait["write"].append(flit)
         else:
             # retry请求（req_attr="old"）：直接发送datasend（与基类一致）

@@ -395,10 +395,12 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
 
             // Tracker类型映射
             const trackerNames = {{
-                'rn_read': 'RN读Tracker',
-                'rn_write': 'RN写Tracker',
-                'sn_ro': 'SN只读Tracker(RO)',
-                'sn_share': 'SN共享Tracker(Share)'
+                'rn_read': 'RN读',
+                'rn_write': 'RN写',
+                'sn_ro': 'SN读',
+                'sn_share': 'SN写',
+                'read_retry': 'SN读Retry',
+                'write_retry': 'SN写Retry'
             }};
 
             // 为每种tracker类型创建曲线
@@ -482,9 +484,9 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
                 }},
                 height: 450,
                 width: 600,
-                margin: {{ l: 60, r: 20, t: 50, b: 50 }},
-                hovermode: 'closest',  // 改为closest，只显示最近的曲线信息
-                legend: {{ orientation: 'h', y: 1.12 }}
+                margin: {{ l: 60, r: 20, t: 80, b: 50 }},
+                hovermode: 'closest',
+                legend: {{ orientation: 'h', y: 1.05, xanchor: 'center', x: 0.5 }}
             }};
 
             // 渲染图表
