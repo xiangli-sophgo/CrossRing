@@ -248,6 +248,34 @@ class IPInterface:
                 self.rn_rdb_count["count"] = rdb_size
                 self.rn_wdb_count["count"] = wdb_size
 
+        # ========== Tracker使用情况记录（事件驱动） ==========
+        self.tracker_events = {
+            "rn_read": {"allocations": [], "releases": []},
+            "rn_write": {"allocations": [], "releases": []},
+            "rn_rdb": {"allocations": [], "releases": []},
+            "rn_wdb": {"allocations": [], "releases": []},
+            "sn_ro": {"allocations": [], "releases": []},
+            "sn_share": {"allocations": [], "releases": []},
+            "sn_wdb": {"allocations": [], "releases": []}
+        }
+
+        self.tracker_total_allocated = {
+            "rn_read": 0, "rn_write": 0, "rn_rdb": 0, "rn_wdb": 0,
+            "sn_ro": 0, "sn_share": 0, "sn_wdb": 0
+        }
+
+        self.tracker_block_events = []
+
+        self.tracker_total_config = {
+            "rn_read": self.rn_tracker_count["read"]["count"],
+            "rn_write": self.rn_tracker_count["write"]["count"],
+            "rn_rdb": self.rn_rdb_count["count"],
+            "rn_wdb": self.rn_wdb_count["count"],
+            "sn_ro": self.sn_tracker_count["ro"]["count"],
+            "sn_share": self.sn_tracker_count["share"]["count"],
+            "sn_wdb": self.sn_wdb_count["count"]
+        }
+
     def enqueue(self, flit: Flit, network_type: str, retry=False):
         """IP 核把flit丢进对应网络的 inject_fifo"""
         if retry:
@@ -368,6 +396,8 @@ class IPInterface:
                 # 预占资源（仅新请求）
                 self.rn_rdb_count["count"] -= req.burst_length
                 self.rn_tracker_count["read"]["count"] -= 1
+                self._record_tracker_allocation("rn_read")
+                self._record_tracker_allocation("rn_rdb")
                 self.rn_rdb[req.packet_id] = []
                 req.cmd_entry_cake0_cycle = self.current_cycle  # 这里记录cycle
                 self.rn_tracker["read"].append(req)
@@ -389,6 +419,8 @@ class IPInterface:
                 # 预占资源（仅新请求）
                 self.rn_wdb_count["count"] -= req.burst_length
                 self.rn_tracker_count["write"]["count"] -= 1
+                self._record_tracker_allocation("rn_write")
+                self._record_tracker_allocation("rn_wdb")
                 self.rn_wdb[req.packet_id] = []
                 req.cmd_entry_cake0_cycle = self.current_cycle  # 这里记录cycle
                 self.rn_tracker["write"].append(req)
@@ -470,10 +502,12 @@ class IPInterface:
                     req.sn_tracker_type = "ro"
                     self.sn_tracker.append(req)
                     self.sn_tracker_count["ro"]["count"] -= 1
+                    self._record_tracker_allocation("sn_ro")
                     self.create_read_packet(req)
                     self.release_completed_sn_tracker(req)
                 else:
                     self.create_rsp(req, "negative")
+                    self._record_tracker_block("sn_ro")
                     self.sn_req_wait[req.req_type].append(req)
             else:
                 self.create_read_packet(req)
@@ -487,9 +521,12 @@ class IPInterface:
                     self.sn_tracker_count["share"]["count"] -= 1
                     self.sn_wdb[req.packet_id] = []
                     self.sn_wdb_count["count"] -= req.burst_length
+                    self._record_tracker_allocation("sn_share")
+                    self._record_tracker_allocation("sn_wdb")
                     self.create_rsp(req, "datasend")
                 else:
                     self.create_rsp(req, "negative")
+                    self._record_tracker_block("sn_share")
                     self.sn_req_wait[req.req_type].append(req)
             else:
                 self.create_rsp(req, "datasend")
@@ -580,6 +617,8 @@ class IPInterface:
                         self.rn_tracker["write"].remove(req)
                         self.rn_wdb_count["count"] += req.burst_length
                         self.rn_tracker_count["write"]["count"] += 1
+                        self._record_tracker_release("rn_write")
+                        self._record_tracker_release("rn_wdb")
                         self.rn_tracker_pointer["write"] -= 1
 
                 # 同时清理写缓冲
@@ -620,6 +659,8 @@ class IPInterface:
                     self.rn_tracker["write"].remove(req)
                     self.rn_wdb_count["count"] += req.burst_length
                     self.rn_tracker_count["write"]["count"] += 1
+                    self._record_tracker_release("rn_write")
+                    self._record_tracker_release("rn_wdb")
                     self.rn_tracker_pointer["write"] -= 1
 
                     # 更新D2D请求完成计数（只在源IP收到write_complete时记录，不在D2D_SN记录）
@@ -659,10 +700,12 @@ class IPInterface:
         self.sn_tracker.remove(req)
         # 释放一个 tracker 槽
         self.sn_tracker_count[req.sn_tracker_type]["count"] += 1
+        self._record_tracker_release(f"sn_{req.sn_tracker_type}")
 
         # —— 2) 对于写请求，还要释放写缓冲额度 ——
         if req.req_type == "write":
             self.sn_wdb_count["count"] += req.burst_length
+            self._record_tracker_release("sn_wdb")
 
         # —— 3) 尝试给等待队列里的请求重新分配资源 ——
         wait_list = self.sn_req_wait[req.req_type]
@@ -678,8 +721,9 @@ class IPInterface:
                 # 分配 tracker + wdb
                 self.sn_tracker.append(new_req)
                 self.sn_tracker_count[new_req.sn_tracker_type]["count"] -= 1
-
                 self.sn_wdb_count["count"] -= new_req.burst_length
+                self._record_tracker_allocation("sn_share")
+                self._record_tracker_allocation("sn_wdb")
 
                 # 发送 positive 响应
                 self.create_rsp(new_req, "positive")
@@ -693,6 +737,7 @@ class IPInterface:
                 # 分配 tracker
                 self.sn_tracker.append(new_req)
                 self.sn_tracker_count[new_req.sn_tracker_type]["count"] -= 1
+                self._record_tracker_allocation("sn_ro")
 
                 # 直接生成并发送读数据包
                 self.create_read_packet(new_req)
@@ -747,6 +792,8 @@ class IPInterface:
                     # 立即释放tracker和更新计数
                     self.rn_tracker["read"].remove(req)
                     self.rn_tracker_count["read"]["count"] += 1
+                    self._record_tracker_release("rn_read")
+                    self._record_tracker_release("rn_rdb")
                     self.rn_tracker_pointer["read"] -= 1
                     self.rn_rdb_count["count"] += req.burst_length
                     # 为所有flit设置完成时间戳和计算延迟
@@ -1053,6 +1100,36 @@ class IPInterface:
     def error_log(self, flit, target_id, flit_id):
         if flit and flit.packet_id == target_id and flit.flit_id == flit_id:
             print(inspect.currentframe().f_back.f_code.co_name, flit)
+
+    # ========== Tracker记录方法 ==========
+    def _record_tracker_allocation(self, tracker_type: str):
+        """记录tracker分配事件"""
+        if self.tracker_total_config.get(tracker_type, 0) == 0:
+            return
+        cycle = getattr(self, "current_cycle", 0)
+        self.tracker_events[tracker_type]["allocations"].append(cycle)
+        self.tracker_total_allocated[tracker_type] += 1
+
+    def _record_tracker_release(self, tracker_type: str):
+        """记录tracker释放事件"""
+        if self.tracker_total_config.get(tracker_type, 0) == 0:
+            return
+        cycle = getattr(self, "current_cycle", 0)
+        self.tracker_events[tracker_type]["releases"].append(cycle)
+
+    def _record_tracker_block(self, tracker_type: str):
+        """记录tracker阻塞事件"""
+        cycle = getattr(self, "current_cycle", 0)
+        self.tracker_block_events.append({"cycle": cycle, "tracker_type": tracker_type})
+
+    def get_tracker_usage_data(self):
+        """获取tracker使用数据"""
+        return {
+            "events": self.tracker_events,
+            "total_allocated": self.tracker_total_allocated,
+            "block_events": self.tracker_block_events,
+            "total_config": self.tracker_total_config
+        }
 
 
 def create_ring_ip_interface(ip_type, ip_pos, config, req_network, rsp_network, data_network, node, routes):

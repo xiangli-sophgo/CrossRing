@@ -497,6 +497,11 @@ class InteractiveFlowGraphRenderer:
         if ip_bandwidth_data is not None:
             all_ip_shapes = []
             all_ip_annotations = []
+            # 添加用于点击事件的不可见scatter点
+            ip_click_x = []
+            ip_click_y = []
+            ip_click_text = []
+            ip_click_customdata = []
 
             for node, (x, y) in pos.items():
                 ip_shapes, ip_annotations = self._collect_ip_info_shapes(
@@ -516,6 +521,36 @@ class InteractiveFlowGraphRenderer:
                 all_ip_shapes.extend(ip_shapes)
                 all_ip_annotations.extend(ip_annotations)
 
+                # 为每个活跃IP添加不可见的点用于捕获点击事件
+                # 需要计算每个IP方块的实际位置，而不是节点中心
+                if ip_bandwidth_data is not None:
+                    if is_d2d_scenario and die_id is not None:
+                        mode_data = ip_bandwidth_data.get(die_id, {}).get(mode, {})
+                    else:
+                        mode_data = ip_bandwidth_data.get(mode, {})
+
+                    physical_row = node // config.NUM_COL
+                    physical_col = node % config.NUM_COL
+
+                    # 收集该节点的所有活跃IP及其带宽
+                    active_ips = {}
+                    for ip_type, data_matrix in mode_data.items():
+                        if is_d2d_scenario and ip_type.lower() in ["d2d_rn", "d2d_sn"]:
+                            continue
+                        if physical_row < data_matrix.shape[0] and physical_col < data_matrix.shape[1]:
+                            bandwidth = data_matrix[physical_row, physical_col]
+                            if bandwidth > 0.001:
+                                active_ips[ip_type] = bandwidth
+
+                    # 为每个活跃IP创建scatter点，位置对应IP方块的实际位置
+                    if active_ips:
+                        ip_positions = self._calculate_ip_block_positions(x, y, active_ips, square_size)
+                        for ip_type, (ip_x, ip_y, ip_size) in ip_positions.items():
+                            ip_click_x.append(ip_x)
+                            ip_click_y.append(ip_y)
+                            ip_click_text.append(f"{ip_type} @ Pos {node}")
+                            ip_click_customdata.append([die_id if die_id is not None else 0, ip_type, node])
+
             # 批量添加IP方块shapes
             if all_ip_shapes:
                 current_shapes = list(fig.layout.shapes) if fig.layout.shapes else []
@@ -524,6 +559,27 @@ class InteractiveFlowGraphRenderer:
             # 批量添加IP标签annotations（使用循环，Plotly内部会优化）
             for ann in all_ip_annotations:
                 fig.add_annotation(**ann)
+
+            # 添加不可见的scatter点用于捕获点击事件（每个IP方块一个点）
+            if ip_click_x:
+                fig.add_trace(
+                    go.Scatter(
+                        x=ip_click_x,
+                        y=ip_click_y,
+                        mode="markers",
+                        marker=dict(
+                            size=square_size * 16,  # 约为IP方块大小，确保覆盖
+                            opacity=0.0,  # 稍微可见，便于调试（生产环境可改为0.01）
+                            color="rgba(0,0,0,0.05)",
+                            line=dict(width=0),
+                        ),
+                        text=ip_click_text,
+                        customdata=ip_click_customdata,
+                        hoverinfo="text",
+                        showlegend=False,
+                        name="IP Click Handler",
+                    )
+                )
 
         return pos
 
@@ -1359,6 +1415,91 @@ class InteractiveFlowGraphRenderer:
         g = int(hex_color[2:4], 16)
         b = int(hex_color[4:6], 16)
         return f"rgba({r}, {g}, {b}, {alpha})"
+
+    def _calculate_ip_block_positions(self, node_x, node_y, active_ips, square_size):
+        """
+        计算节点内每个IP方块的中心位置（复用_draw_ip_blocks_in_node的布局逻辑）
+
+        Args:
+            node_x: 节点中心X坐标
+            node_y: 节点中心Y坐标
+            active_ips: {ip_type: bandwidth} 字典
+            square_size: 节点方块大小
+
+        Returns:
+            {ip_type: (ip_x, ip_y, ip_size)} 字典
+        """
+        # 与_draw_ip_blocks_in_node中的布局逻辑保持一致
+        MAX_ROWS = 3
+        ip_type_count = {}
+
+        # 按IP类型分组统计实例
+        for ip_type, bandwidth in active_ips.items():
+            base_type = ip_type.rsplit("_", 1)[0]  # 去掉最后的数字
+            if base_type not in ip_type_count:
+                ip_type_count[base_type] = []
+            ip_type_count[base_type].append(bandwidth)
+
+        # 优先显示规则（与_draw_ip_blocks_in_node保持一致）
+        priority_types = ["gdma", "ddr", "sdma", "cdma"]
+        display_rows = []
+
+        for ptype in priority_types:
+            if ptype in ip_type_count:
+                display_rows.append((ptype, ip_type_count[ptype]))
+
+        other_ips = [(k, v) for k, v in ip_type_count.items() if k not in priority_types]
+        if other_ips:
+            if len(display_rows) + len(other_ips) > MAX_ROWS:
+                remaining_slots = MAX_ROWS - len(display_rows)
+                for i, (otype, instances) in enumerate(other_ips):
+                    if i < remaining_slots:
+                        display_rows.append((otype, instances))
+                    else:
+                        target_row = i % len(display_rows)
+                        display_rows[target_row] = (display_rows[target_row][0], display_rows[target_row][1] + instances)
+            else:
+                display_rows.extend(other_ips)
+
+        ip_type_count = dict(display_rows)
+
+        # 计算布局参数
+        num_ip_types = len(ip_type_count)
+        max_instances = max(len(instances) for instances in ip_type_count.values())
+
+        available_width = square_size * 0.90
+        available_height = square_size * 0.90
+        grid_spacing = square_size * 0.10
+        row_spacing = square_size * 0.1
+
+        max_square_width = (available_width - (max_instances - 1) * grid_spacing) / max_instances
+        max_square_height = (available_height - (num_ip_types - 1) * row_spacing) / num_ip_types
+        grid_square_size = min(max_square_width, max_square_height, square_size * 0.5)
+
+        total_content_height = num_ip_types * grid_square_size + (num_ip_types - 1) * row_spacing
+
+        # 计算每个IP方块的位置
+        ip_positions = {}
+        row_idx = 0
+
+        for base_type, instances in ip_type_count.items():
+            num_instances = len(instances)
+            row_width = num_instances * grid_square_size + (num_instances - 1) * grid_spacing
+            row_start_x = node_x - row_width / 2
+            row_y = node_y + total_content_height / 2 - row_idx * (grid_square_size + row_spacing) - grid_square_size / 2
+
+            for col_idx in range(num_instances):
+                block_x = row_start_x + col_idx * (grid_square_size + grid_spacing) + grid_square_size / 2
+                block_y = row_y
+
+                # 找到对应的完整ip_type名称
+                ip_type_full = f"{base_type}_{col_idx}"
+                if ip_type_full in active_ips:
+                    ip_positions[ip_type_full] = (block_x, block_y, grid_square_size)
+
+            row_idx += 1
+
+        return ip_positions
 
     def draw_d2d_flow_graph(
         self,

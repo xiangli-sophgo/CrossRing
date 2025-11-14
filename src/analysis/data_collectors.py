@@ -821,3 +821,167 @@ class CircuitStatsCollector:
             writer.writerows(rows)
 
         return output_path
+
+
+class TrackerDataCollector:
+    """Tracker使用情况数据收集器 - 从仿真模型收集IP的tracker使用数据"""
+
+    def __init__(self):
+        """初始化Tracker数据收集器"""
+        self.tracker_data = {}
+
+    def collect_tracker_data(self, sim_model) -> Dict:
+        """
+        从仿真模型收集所有IP的tracker使用数据
+
+        Args:
+            sim_model: 仿真模型对象
+
+        Returns:
+            tracker数据字典，格式：
+            {
+                die_id: {
+                    ip_type: {
+                        ip_pos: {
+                            "usage_history": {...},
+                            "block_events": [...],
+                            "total_config": {...}
+                        }
+                    }
+                }
+            }
+        """
+        self.tracker_data.clear()
+
+        # 获取die_id
+        die_id = getattr(sim_model.config, "DIE_ID", 0)
+
+        # 初始化die数据结构
+        if die_id not in self.tracker_data:
+            self.tracker_data[die_id] = {}
+
+        # 遍历所有IP模块
+        # ip_modules的格式是 {(ip_type, node_id): ip_module_instance}
+        for (ip_type, ip_pos), ip_module in sim_model.ip_modules.items():
+            if ip_type not in self.tracker_data[die_id]:
+                self.tracker_data[die_id][ip_type] = {}
+
+            # 获取IP的tracker使用数据
+            tracker_usage_data = ip_module.get_tracker_usage_data()
+
+            # 只保存有数据的IP
+            if self._has_tracker_data(tracker_usage_data):
+                self.tracker_data[die_id][ip_type][ip_pos] = tracker_usage_data
+
+        return self.tracker_data
+
+    def _has_tracker_data(self, tracker_usage_data: Dict) -> bool:
+        """检查是否有有效的tracker数据"""
+        events = tracker_usage_data.get("events", {})
+        total_allocated = tracker_usage_data.get("total_allocated", {})
+        block_events = tracker_usage_data.get("block_events", [])
+
+        # 检查是否有任何事件
+        for tracker_type, event_data in events.items():
+            if len(event_data.get("allocations", [])) > 0:
+                return True
+            if len(event_data.get("releases", [])) > 0:
+                return True
+
+        # 检查总分配次数
+        for count in total_allocated.values():
+            if count > 0:
+                return True
+
+        # 检查是否有阻塞事件
+        if len(block_events) > 0:
+            return True
+
+        return False
+
+    def save_to_json(self, output_dir: str, filename: str = "tracker_data.json"):
+        """
+        将tracker数据保存为JSON文件
+
+        Args:
+            output_dir: 输出目录
+            filename: 文件名
+
+        Returns:
+            保存的文件路径
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, filename)
+
+        # 转换数据格式为可序列化的格式
+        serializable_data = self._convert_to_serializable(self.tracker_data)
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(serializable_data, f, indent=2, ensure_ascii=False)
+
+        return output_path
+
+    def _convert_to_serializable(self, data: Dict) -> Dict:
+        """将数据转换为JSON可序列化的格式（新格式：事件驱动）"""
+        result = {}
+
+        for die_id, die_data in data.items():
+            result[str(die_id)] = {}
+            for ip_type, ip_type_data in die_data.items():
+                result[str(die_id)][ip_type] = {}
+                for ip_pos, ip_data in ip_type_data.items():
+                    # 新格式：直接使用events、total_allocated、block_events
+                    result[str(die_id)][ip_type][str(ip_pos)] = {
+                        "events": ip_data["events"],
+                        "total_allocated": ip_data["total_allocated"],
+                        "block_events": ip_data["block_events"],
+                        "total_config": ip_data["total_config"]
+                    }
+
+        return result
+
+    @staticmethod
+    def load_from_json(file_path: str) -> Dict:
+        """
+        从JSON文件加载tracker数据
+
+        Args:
+            file_path: JSON文件路径
+
+        Returns:
+            tracker数据字典
+        """
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # 转换回原始格式
+        result = {}
+        for die_id_str, die_data in data.items():
+            die_id = int(die_id_str)
+            result[die_id] = {}
+            for ip_type, ip_type_data in die_data.items():
+                result[die_id][ip_type] = {}
+                for ip_pos_str, ip_data in ip_type_data.items():
+                    ip_pos = int(ip_pos_str)
+
+                    # 转换usage_history：从list of dicts转换为list of tuples
+                    usage_history_converted = {}
+                    for tracker_type, history in ip_data["usage_history"].items():
+                        usage_history_converted[tracker_type] = [
+                            (entry["cycle"], entry["available"], entry["total"])
+                            for entry in history
+                        ]
+
+                    # 转换block_events：从list of dicts转换为list of tuples
+                    block_events_converted = [
+                        (event["cycle"], event["tracker_type"], event["reason"])
+                        for event in ip_data["block_events"]
+                    ]
+
+                    result[die_id][ip_type][ip_pos] = {
+                        "usage_history": usage_history_converted,
+                        "block_events": block_events_converted,
+                        "total_config": ip_data["total_config"]
+                    }
+
+        return result

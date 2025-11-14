@@ -316,19 +316,20 @@ def generate_example_traffic():
     random.seed(1111)
 
     # 配置参数
-    END_TIME = 10000
+    END_TIME = 1000
     burst = 4
-    req_type = "R"
+    req_type = "W"
     OUTPUT_FILE = f"../../test_data/data_burst{burst}_{req_type}_1111.txt"
 
     # 定义多个配置
     configs = [
         {
             "src_map": {
-                "gdma_0": [0, 2],
+                "gdma_0": [0, 1],
+                # "gdma_1": [0],
             },
             "dst_map": {
-                "ddr_0": [5],
+                "ddr_0": [2],
             },
             # "src_map": {
             #     "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],

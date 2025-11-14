@@ -277,7 +277,7 @@ def main():
     parser.add_argument("--traffic_path", default="../traffic/DeepSeek_0616/step6_ch_map/", help="流量数据路径")
     parser.add_argument("--config", default="../config/topologies/topo_5x4.yaml", help="仿真配置文件路径")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="仿真模型类型")
-    parser.add_argument("--results_base_name", default="ordering_comparison_1113", help="结果文件基础名称")
+    parser.add_argument("--results_base_name", default="ordering_comparison_ETag_upgrade_1113", help="结果文件基础名称")
     parser.add_argument("--max_workers", type=int, default=16, help="最大并行worker数量")
 
     args = parser.parse_args()

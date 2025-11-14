@@ -1825,6 +1825,15 @@ class BaseModel:
         self.result_processor.collect_requests_data(self, self.cycle)
         results = self.result_processor.analyze_all_bandwidth()
         self.result_processor.generate_unified_report(results, self.result_save_path)
+
+        # 收集tracker使用数据（但暂不注入，等HTML生成后再注入）
+        from src.analysis.data_collectors import TrackerDataCollector
+        self._tracker_collector = TrackerDataCollector()
+        tracker_data = self._tracker_collector.collect_tracker_data(self)
+        self._tracker_json_path = self._tracker_collector.save_to_json(self.result_save_path, "tracker_data.json")
+        if self.verbose:
+            print(f"Tracker使用数据已保存: {self._tracker_json_path}")
+
         self.Total_sum_BW_stat = results["Total_sum_BW"]
 
         # 额外带宽统计
@@ -1986,6 +1995,17 @@ class BaseModel:
                 # print("  包含图表:")
                 # for title, _, _ in ordered_charts:
                 #     print(f"    - {title}")
+
+            # HTML生成完成后，注入tracker交互功能
+            if integrated_path and hasattr(self, "_tracker_json_path") and os.path.exists(self._tracker_json_path):
+                try:
+                    from src.analysis.tracker_html_injector import inject_tracker_functionality
+                    inject_tracker_functionality(integrated_path, self._tracker_json_path)
+                    if self.verbose:
+                        print(f"Tracker交互功能已添加到HTML报告")
+                except Exception as e:
+                    if self.verbose:
+                        print(f"警告: Tracker交互功能注入失败: {e}")
 
         except Exception as e:
             if self.verbose:

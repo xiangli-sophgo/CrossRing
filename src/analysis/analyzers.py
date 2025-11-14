@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional, TYPE_CHECKING
 from enum import Enum
 import os
+import psutil
 
 # 避免循环导入,只在类型检查时导入
 if TYPE_CHECKING:
@@ -803,6 +804,15 @@ class SingleDieAnalyzer:
         print("结果分析")
         print("=" * 60)
 
+        # 内存使用统计
+        process = psutil.Process()
+        mem_info = process.memory_info()
+        system_mem = psutil.virtual_memory()
+
+        print(f"内存使用:")
+        print(f"  进程内存: RSS {mem_info.rss / 1024 / 1024:.2f} MB, VMS {mem_info.vms / 1024 / 1024:.2f} MB")
+        print(f"  系统内存: {system_mem.percent:.1f}% (可用 {system_mem.available / 1024 / 1024 / 1024:.2f} GB / 总计 {system_mem.total / 1024 / 1024 / 1024:.2f} GB)")
+
         # 网络整体带宽
         read_metrics = results["network_overall"]["read"]
         write_metrics = results["network_overall"]["write"]
@@ -811,7 +821,7 @@ class SingleDieAnalyzer:
         # 使用实际IP数量
         num_ip_for_avg = self.actual_num_ip or 1
 
-        print(f"网络带宽:")
+        print(f"\n网络带宽:")
         print(f"  读带宽:    {read_metrics.weighted_bandwidth:.3f} GB/s (平均: {read_metrics.weighted_bandwidth / num_ip_for_avg:.3f} GB/s)")
         print(f"  写带宽:    {write_metrics.weighted_bandwidth:.3f} GB/s (平均: {write_metrics.weighted_bandwidth / num_ip_for_avg:.3f} GB/s)")
         print(f"  混合带宽:  {mixed_metrics.weighted_bandwidth:.3f} GB/s (平均: {mixed_metrics.weighted_bandwidth / num_ip_for_avg:.3f} GB/s)")

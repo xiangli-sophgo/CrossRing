@@ -10,6 +10,7 @@
 import os
 import csv
 import json
+import psutil
 from collections import defaultdict
 from typing import Dict, List, Optional, Any
 from .analyzers import RequestInfo, PortBandwidthMetrics, BandwidthMetrics
@@ -808,6 +809,24 @@ class ReportGenerator:
                             f"写 avg {write_avg:.2f}, max {rl['write']['max']}; "
                             f"混合 avg {mixed_avg:.2f}, max {rl['mixed']['max']}\n"
                         )
+
+            # 内存使用统计
+            f.write("\n" + "=" * 50 + "\n")
+            f.write("内存使用统计\n")
+            f.write("=" * 50 + "\n\n")
+
+            process = psutil.Process()
+            mem_info = process.memory_info()
+            f.write(f"进程内存:\n")
+            f.write(f"  RSS (物理内存): {mem_info.rss / 1024 / 1024:.2f} MB\n")
+            f.write(f"  VMS (虚拟内存): {mem_info.vms / 1024 / 1024:.2f} MB\n")
+
+            # 获取系统内存信息
+            system_mem = psutil.virtual_memory()
+            f.write(f"\n系统内存:\n")
+            f.write(f"  总内存: {system_mem.total / 1024 / 1024 / 1024:.2f} GB\n")
+            f.write(f"  可用内存: {system_mem.available / 1024 / 1024 / 1024:.2f} GB\n")
+            f.write(f"  使用率: {system_mem.percent:.1f}%\n")
 
             # 网络带宽统计
             f.write("\n" + "=" * 50 + "\n")
