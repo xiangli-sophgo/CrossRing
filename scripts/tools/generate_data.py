@@ -325,11 +325,11 @@ def generate_example_traffic():
     configs = [
         {
             "src_map": {
-                "gdma_0": [0, 1],
-                # "gdma_1": [0],
+                "gdma_0": [0],
+                "gdma_1": [0],
             },
             "dst_map": {
-                "ddr_0": [2],
+                "ddr_0": [1],
             },
             # "src_map": {
             #     "gdma_0": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
