@@ -1293,6 +1293,10 @@ class D2D_Model:
                     except Exception as e:
                         print(f"警告: 生成RN带宽曲线失败: {e}")
 
+            # 步骤6.7: 生成D2D延迟分布图
+            d2d_analysis_results = d2d_processor.analyze_d2d_results()
+            latency_distribution_figs = d2d_analysis_results.get("latency_distribution_figs", [])
+
             # 步骤7: 按顺序排列图表并添加统计摘要
             ordered_charts = []
             flow_chart = None
@@ -1304,13 +1308,17 @@ class D2D_Model:
                 elif "FIFO" in title:
                     fifo_chart = (title, fig, custom_js)
 
-            # 按顺序添加：流量图 → RN曲线 → FIFO热力图 → 统计摘要
+            # 按顺序添加：流量图 → RN曲线 → FIFO热力图 → 延迟分布图 → 统计摘要
             if flow_chart:
                 ordered_charts.append(flow_chart)
             if rn_chart:
                 ordered_charts.append(rn_chart)
             if fifo_chart:
                 ordered_charts.append(fifo_chart)
+            # 添加D2D延迟分布图
+            for latency_chart in latency_distribution_figs:
+                title, fig = latency_chart
+                ordered_charts.append((title, fig, None))
             # 添加统计摘要HTML（最后）
             if d2d_summary_html:
                 ordered_charts.append(("D2D结果分析", None, d2d_summary_html))
