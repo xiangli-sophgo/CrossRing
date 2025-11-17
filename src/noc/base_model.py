@@ -120,7 +120,7 @@ class BaseModel:
         flow_graph_interactive: bool = False,
         plot_RN_BW_fig: bool = False,
         fifo_utilization_heatmap: bool = False,
-        show_fig: bool = False,
+        show_result_analysis: bool = False,
     ) -> None:
         """
         配置结果分析选项
@@ -132,7 +132,7 @@ class BaseModel:
             flow_graph_interactive: 是否绘制交互式流量图（HTML）
             plot_RN_BW_fig: 是否绘制RN带宽图
             fifo_utilization_heatmap: 是否绘制FIFO使用率热力图
-            show_fig: 是否显示图像（在浏览器中打开），默认True
+            show_result_analysis: 是否显示结果分析（在浏览器中打开），默认True
         """
         self.plot_flow_fig = plot_flow_fig
         self.flow_graph_interactive = flow_graph_interactive
@@ -152,7 +152,7 @@ class BaseModel:
             self.results_fig_save_path = None
 
         # show_fig参数控制是否在浏览器中显示图像
-        self.show_fig = show_fig
+        self.show_result_analysis = show_result_analysis
 
     def setup_debug(
         self,
@@ -225,7 +225,7 @@ class BaseModel:
             plot_rn_bw_fig=self.plot_RN_BW_fig,
             plot_flow_graph=self.plot_flow_fig,
             flow_graph_interactive=self.flow_graph_interactive,
-            show_fig=self.show_fig,
+            show_result_analysis=self.show_result_analysis,
             verbose=self.verbose,
         )
         if self.plot_link_state:
@@ -1828,11 +1828,12 @@ class BaseModel:
 
         # 收集tracker使用数据（但暂不注入，等HTML生成后再注入）
         from src.analysis.data_collectors import TrackerDataCollector
+
         self._tracker_collector = TrackerDataCollector()
         tracker_data = self._tracker_collector.collect_tracker_data(self)
         self._tracker_json_path = self._tracker_collector.save_to_json(self.result_save_path, "tracker_data.json")
-        if self.verbose:
-            print(f"Tracker使用数据已保存: {self._tracker_json_path}")
+        # if self.verbose:
+        # print(f"Tracker使用数据已保存: {self._tracker_json_path}")
 
         self.Total_sum_BW_stat = results["Total_sum_BW"]
 
@@ -1988,21 +1989,19 @@ class BaseModel:
                 return
 
             # 生成集成HTML
-            integrated_path = create_integrated_report(charts_config=ordered_charts, save_path=save_path, show_fig=self.show_fig)
+            integrated_path = create_integrated_report(charts_config=ordered_charts, save_path=save_path, show_result_analysis=self.show_result_analysis)
 
             if integrated_path and self.verbose:
                 print(f"结果分析报告: {integrated_path}")
-                # print("  包含图表:")
-                # for title, _, _ in ordered_charts:
-                #     print(f"    - {title}")
 
             # HTML生成完成后，注入tracker交互功能
             if integrated_path and hasattr(self, "_tracker_json_path") and os.path.exists(self._tracker_json_path):
                 try:
                     from src.analysis.tracker_html_injector import inject_tracker_functionality
+
                     inject_tracker_functionality(integrated_path, self._tracker_json_path)
-                    if self.verbose:
-                        print(f"Tracker交互功能已添加到HTML报告")
+                    # if self.verbose:
+                        # print(f"Tracker交互功能已添加到HTML报告")
                 except Exception as e:
                     if self.verbose:
                         print(f"警告: Tracker交互功能注入失败: {e}")

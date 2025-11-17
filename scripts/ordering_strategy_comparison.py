@@ -95,7 +95,7 @@ def run_single_simulation(sim_params):
             plot_RN_BW_fig=1,
             flow_graph_interactive=1,
             fifo_utilization_heatmap=1,
-            show_fig=0,
+            show_result_analysis=0,
         )
 
         # 运行仿真

@@ -53,6 +53,7 @@ class D2D_Model:
         self._result_analysis_config = {
             "flow_graph": False,
             "ip_bandwidth_heatmap": False,
+            "plot_rn_bw_fig": False,  # RN带宽曲线图
             "show_fig": False,
             "export_d2d_requests_csv": True,
             "export_ip_bandwidth_csv": True,
@@ -160,6 +161,7 @@ class D2D_Model:
         flow_graph_interactive: bool = False,  # 新增：交互式flow图
         ip_bandwidth_heatmap: bool = False,
         fifo_utilization_heatmap: bool = False,
+        plot_rn_bw_fig: bool = False,  # 新增：RN带宽曲线图
         show_fig: bool = False,
         # CSV文件导出控制
         export_d2d_requests_csv: bool = True,
@@ -176,6 +178,7 @@ class D2D_Model:
             flow_graph_interactive: 是否生成交互式流量图（HTML）
             ip_bandwidth_heatmap: 是否生成IP带宽热力图
             fifo_utilization_heatmap: 是否生成FIFO使用率热力图
+            plot_rn_bw_fig: 是否生成RN带宽曲线图（IP tracker曲线）
             show_fig: 是否在浏览器中显示图像
 
         CSV文件导出控制:
@@ -192,6 +195,7 @@ class D2D_Model:
                 "flow_graph_interactive": flow_graph_interactive,  # 新增
                 "ip_bandwidth_heatmap": ip_bandwidth_heatmap,
                 "fifo_utilization_heatmap": fifo_utilization_heatmap,
+                "plot_rn_bw_fig": plot_rn_bw_fig,  # 新增
                 "show_fig": show_fig,
                 "export_d2d_requests_csv": export_d2d_requests_csv,
                 "export_ip_bandwidth_csv": export_ip_bandwidth_csv,
@@ -320,7 +324,7 @@ class D2D_Model:
                 result_save_path="",  # 禁用单个Die的结果保存，避免生成Die_0/Die_1文件夹
                 results_fig_save_path="",  # 禁用单个Die的图片保存
                 plot_flow_fig=False,  # 禁用单个Die的流图生成
-                plot_RN_BW_fig=False,  # 禁用单个Die的带宽图生成
+                plot_RN_BW_fig=True,  # 启用RN带宽数据收集（不保存图片，用于D2D集成）
             )
 
             # 初始化Die
@@ -1083,41 +1087,21 @@ class D2D_Model:
         Args:
             combined_flow_path: generate_combined_flow_graph保存的文件路径（如果有）
         """
-        print("\n" + "=" * 60)
-        print("D2D仿真综合结果分析")
-        print("=" * 60)
-
-        # 收集D2D专有统计信息
-        d2d_stats = self._collect_d2d_statistics()
-
-        # 打印D2D专有统计信息
-        # self._print_d2d_statistics(d2d_stats)
-
-        # 1. 跳过Die内部结果分析（D2D系统中Die内部没有数据流）
-        die_results = {}
-
-        # 2. D2D专用结果处理，并收集保存的文件路径
+        # D2D专用结果处理，并收集保存的文件路径
         saved_files = self._process_d2d_specific_results()
 
         # 3. 添加组合流量图路径（如果有）
         if combined_flow_path:
             saved_files.insert(0, {"type": "D2D组合流量图", "path": combined_flow_path})
 
-        # 4. 统一显示所有保存的文件信息
+        # 4. 简化文件保存提示，与单Die风格保持一致
         if saved_files:
-            print("\n" + "=" * 60)
-            print("已保存文件")
-            print("=" * 60)
+            print()
             for file_info in saved_files:
                 if "count" in file_info:
-                    print(f"  - {file_info['type']}: {file_info['path']} ({file_info['count']} 条记录)")
+                    print(f"{file_info['type']}CSV: {file_info['path']}")
                 else:
-                    print(f"  - {file_info['type']}: {file_info['path']}")
-
-        # 5. 完成
-        print("\n" + "=" * 60)
-        print("D2D综合结果分析完成")
-        print("=" * 60)
+                    print(f"{file_info['type']}已保存: {file_info['path']}")
 
     def _process_d2d_specific_results(self):
         """处理D2D专有的结果分析（跨Die请求记录和带宽统计）"""
@@ -1150,10 +1134,13 @@ class D2D_Model:
             traffic_name = self.d2d_traffic_scheduler.get_save_filename()
             d2d_result_path = os.path.join(result_save_path, f"{self.num_dies}die", traffic_name)
 
-            # 步骤1: 生成带宽分析报告
+            # 步骤1: 生成带宽分析报告（txt文件）
             report_file = d2d_processor.generate_d2d_bandwidth_report(d2d_result_path, self.dies)
             if report_file:
                 saved_files.append({"type": "D2D带宽报告", "path": report_file})
+
+            # 步骤1.5: 生成D2D统计摘要HTML（用于集成报告）
+            d2d_summary_html = d2d_processor.generate_d2d_summary_report_html(dies=self.dies)
 
             # 步骤2: 保存数据文件（根据配置）
             if self._result_analysis_config.get("export_d2d_requests_csv"):
@@ -1235,9 +1222,7 @@ class D2D_Model:
                         d2d_processor.die_processors[die_id] = die_processor
 
                 # 获取Figure对象用于集成报告
-                flow_fig = d2d_processor.draw_d2d_flow_graph_interactive(
-                    dies=self.dies, config=self.config, mode=self.flow_graph_mode, return_fig=True
-                )
+                flow_fig = d2d_processor.draw_d2d_flow_graph_interactive(dies=self.dies, config=self.config, mode=self.flow_graph_mode, return_fig=True)
                 if flow_fig:
                     d2d_charts_to_merge.append(("D2D流量图", flow_fig, None))
 
@@ -1258,7 +1243,7 @@ class D2D_Model:
                 self._generate_d2d_fifo_usage_csv(fifo_csv_path)
                 saved_files.append({"type": "FIFO使用率统计", "path": fifo_csv_path})
 
-            # 步骤6: 生成FIFO使用率热力图（如果启用）- D2D通常不使用
+            # 步骤6: 生成FIFO使用率热力图（如果启用）- 只集成到HTML报告，不单独保存
             should_plot_fifo = self._result_analysis_config.get("fifo_utilization_heatmap") or getattr(self, "fifo_utilization_heatmap", False)
             if should_plot_fifo:
                 from src.analysis.fifo_heatmap_visualizer import create_fifo_heatmap
@@ -1266,39 +1251,109 @@ class D2D_Model:
                 # 计算总周期数(使用物理周期数,因为depth_sum在每个物理周期累加)
                 total_cycles = self.current_cycle
 
-                # 确定保存路径（保存到带时间戳的D2D结果文件夹中）
-                # fifo_utilization_heatmap为真时就保存文件
-                fifo_save_path = os.path.join(d2d_result_path, "fifo_utilization_heatmap.html")
-
-                # 生成FIFO热力图
-                fifo_heatmap_path = create_fifo_heatmap(
+                # 生成FIFO热力图（只用于集成报告，不保存单独文件）
+                fifo_fig, fifo_js = create_fifo_heatmap(
                     dies=self.dies,
                     config=self.dies[0].config,
                     total_cycles=total_cycles,
                     die_layout=getattr(self.config, "die_layout_positions", None),
                     die_rotations=getattr(self.config, "DIE_ROTATIONS", None),
-                    save_path=fifo_save_path,
+                    save_path=None,  # 不保存独立文件
+                    show_fig=False,
+                    return_fig_and_js=True  # 返回Figure和JS
                 )
+                if fifo_fig:
+                    d2d_charts_to_merge.append(("FIFO使用率热力图", fifo_fig, fifo_js))
 
-                if fifo_heatmap_path:
-                    saved_files.append({"type": "FIFO使用率热力图", "path": fifo_heatmap_path})
+            # 步骤6.5: 生成RN带宽曲线图（如果启用）
+            rn_chart = None
+            if self._result_analysis_config.get("plot_rn_bw_fig"):
+                from src.analysis.result_visualizers import plot_rn_bandwidth_curves_work_interval
 
-            # 步骤7: 生成D2D集成可视化报告（合并所有图表）
-            if d2d_charts_to_merge:
+                # 收集所有Die的RN带宽时序数据
+                all_die_rn_data = {}
+                for die_id, die_model in self.dies.items():
+                    if hasattr(die_model, "result_processor") and die_model.result_processor:
+                        die_processor = die_model.result_processor
+                        if hasattr(die_processor, "rn_bandwidth_time_series") and die_processor.rn_bandwidth_time_series:
+                            all_die_rn_data[f"Die{die_id}"] = die_processor.rn_bandwidth_time_series
+
+                # 如果有数据则生成曲线
+                if all_die_rn_data:
+                    try:
+                        rn_fig = plot_rn_bandwidth_curves_work_interval(
+                            rn_bandwidth_time_series=all_die_rn_data,
+                            show_fig=False,  # 不直接显示
+                            save_path=None,  # 不保存独立文件
+                            return_fig=True  # 返回Figure对象
+                        )
+                        if rn_fig:
+                            rn_chart = ("IP Tracker曲线", rn_fig, None)
+                            saved_files.append({"type": "IP Tracker曲线", "path": "集成到HTML报告中"})
+                    except Exception as e:
+                        print(f"警告: 生成RN带宽曲线失败: {e}")
+
+            # 步骤7: 按顺序排列图表并添加统计摘要
+            ordered_charts = []
+            flow_chart = None
+            fifo_chart = None
+
+            for title, fig, custom_js in d2d_charts_to_merge:
+                if "流量图" in title:
+                    flow_chart = (title, fig, custom_js)
+                elif "FIFO" in title:
+                    fifo_chart = (title, fig, custom_js)
+
+            # 按顺序添加：流量图 → RN曲线 → FIFO热力图 → 统计摘要
+            if flow_chart:
+                ordered_charts.append(flow_chart)
+            if rn_chart:
+                ordered_charts.append(rn_chart)
+            if fifo_chart:
+                ordered_charts.append(fifo_chart)
+            # 添加统计摘要HTML（最后）
+            if d2d_summary_html:
+                ordered_charts.append(("D2D结果分析", None, d2d_summary_html))
+
+            # 步骤7.5: 收集所有Die的tracker使用数据
+            from src.analysis.data_collectors import TrackerDataCollector
+
+            tracker_collector = TrackerDataCollector()
+            # 第一个die调用collect_tracker_data会clear，后续die需要手动添加数据
+            first_die = True
+            for die_id, die_model in self.dies.items():
+                if first_die:
+                    tracker_data = tracker_collector.collect_tracker_data(die_model)
+                    first_die = False
+                else:
+                    # 对于后续die，手动收集数据而不clear
+                    die_id_from_model = getattr(die_model.config, "DIE_ID", die_id)
+                    if die_id_from_model not in tracker_collector.tracker_data:
+                        tracker_collector.tracker_data[die_id_from_model] = {}
+
+                    for (ip_type, ip_pos), ip_module in die_model.ip_modules.items():
+                        if ip_type not in tracker_collector.tracker_data[die_id_from_model]:
+                            tracker_collector.tracker_data[die_id_from_model][ip_type] = {}
+
+                        tracker_usage_data = ip_module.get_tracker_usage_data()
+                        if tracker_collector._has_tracker_data(tracker_usage_data):
+                            tracker_collector.tracker_data[die_id_from_model][ip_type][ip_pos] = tracker_usage_data
+
+            tracker_json_path = tracker_collector.save_to_json(d2d_result_path, "tracker_data.json")
+
+            # 步骤8: 生成D2D集成可视化报告（合并所有图表）
+            if ordered_charts:
                 from src.analysis.integrated_visualizer import create_integrated_report
 
                 integrated_save_path = os.path.join(d2d_result_path, "result_analysis.html")
-                integrated_path = create_integrated_report(
-                    charts_config=d2d_charts_to_merge, save_path=integrated_save_path, show_fig=self._result_analysis_config.get("show_fig", False)
-                )
+                integrated_path = create_integrated_report(charts_config=ordered_charts, save_path=integrated_save_path, show_result_analysis=self._result_analysis_config.get("show_fig", False))
+
+                # 步骤8.5: 注入tracker功能到HTML
+                if integrated_path and tracker_json_path:
+                    from src.analysis.tracker_html_injector import inject_tracker_functionality
+                    inject_tracker_functionality(integrated_path, tracker_json_path)
                 if integrated_path:
                     saved_files.append({"type": "集成可视化报告", "path": integrated_path})
-                    print(f"集成可视化报告: {integrated_save_path}")
-                    # 打印包含的图表
-                    chart_titles = [title for title, _, _ in d2d_charts_to_merge]
-                    for title in chart_titles:
-                        print(f"  包含图表:")
-                        print(f"    - {title}")
 
         except Exception as e:
             import traceback

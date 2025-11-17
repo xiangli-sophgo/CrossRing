@@ -487,11 +487,18 @@ class InteractiveFlowGraphRenderer:
                     edge_colors[(i, j)] = color
 
             # 绘制链路箭头（传递完整的统计数据用于hover）
-            self._draw_link_arrows(fig, pos, edge_labels, edge_colors, links, config, square_size, rotation, link_label_fontsize, utilization_stats, is_d2d_scenario, show_link_labels)
+            link_arrow_anns = self._draw_link_arrows(fig, pos, edge_labels, edge_colors, links, config, square_size, rotation, link_label_fontsize, utilization_stats, is_d2d_scenario, show_link_labels)
+            # 将箭头annotations添加到figure
+            if link_arrow_anns:
+                existing_anns = list(fig.layout.annotations) if fig.layout.annotations else []
+                fig.layout.annotations = existing_anns + link_arrow_anns
 
             # 绘制自环标签
             if self_loop_labels and show_link_labels:  # 只在需要显示标签时绘制
-                self._draw_self_loop_labels(fig, pos, self_loop_labels, config, square_size, rotation, link_label_fontsize, utilization_stats)
+                selfloop_anns = self._draw_self_loop_labels(fig, pos, self_loop_labels, config, square_size, rotation, link_label_fontsize, utilization_stats)
+                if selfloop_anns:
+                    existing_anns = list(fig.layout.annotations) if fig.layout.annotations else []
+                    fig.layout.annotations = existing_anns + selfloop_anns
 
         # 批量收集所有节点的IP方块
         if ip_bandwidth_data is not None:
@@ -919,7 +926,7 @@ class InteractiveFlowGraphRenderer:
         # 返回箭头annotations
         return arrow_annotations
 
-    def _draw_channel_links_only(self, fig, network, config, pos, mode, node_size, draw_self_loops=False):
+    def _draw_channel_links_only(self, fig, network, config, pos, mode, node_size, draw_self_loops=False, rotation=0, is_d2d_scenario=False, fontsize=12):
         """
         只绘制指定network的链路traces（不绘制nodes和annotations）
 
@@ -1024,13 +1031,13 @@ class InteractiveFlowGraphRenderer:
 
         # 绘制链路箭头（带文本标签）- 收集返回的annotations
         arrow_anns = self._draw_link_arrows(
-            fig, pos, edge_labels, edge_colors, links, config, square_size, rotation=0, fontsize=12, utilization_stats=utilization_stats, is_d2d_scenario=False, show_labels=True
+            fig, pos, edge_labels, edge_colors, links, config, square_size, rotation=rotation, fontsize=fontsize, utilization_stats=utilization_stats, is_d2d_scenario=is_d2d_scenario, show_labels=True
         )
         channel_annotations.extend(arrow_anns)
 
         # 绘制自环标签（只在需要时绘制，避免重复）- 收集返回的annotations
         if draw_self_loops and self_loop_labels:
-            selfloop_anns = self._draw_self_loop_labels(fig, pos, self_loop_labels, config, square_size, rotation=0, fontsize=12, utilization_stats=utilization_stats)
+            selfloop_anns = self._draw_self_loop_labels(fig, pos, self_loop_labels, config, square_size, rotation=rotation, fontsize=fontsize, utilization_stats=utilization_stats)
             channel_annotations.extend(selfloop_anns)
 
         return channel_annotations
@@ -1512,6 +1519,7 @@ class InteractiveFlowGraphRenderer:
         save_path: str = None,
         show_fig: bool = False,
         return_fig: bool = False,
+        enable_channel_switch: bool = True,
     ):
         """
         绘制D2D系统流量图（多Die布局）- 交互式版本
@@ -1595,7 +1603,20 @@ class InteractiveFlowGraphRenderer:
         max_ip_bandwidth = max(all_ip_bandwidths) if all_ip_bandwidths else None
         min_ip_bandwidth = min(all_ip_bandwidths) if all_ip_bandwidths else None
 
-        # 为每个Die绘制流量图
+        # 收集每个Die的三个网络（用于通道切换）
+        die_req_networks = {}
+        die_rsp_networks = {}
+        die_data_networks = {}
+        if enable_channel_switch and dies:
+            for die_id, die_model in dies.items():
+                if hasattr(die_model, 'req_network') and die_model.req_network:
+                    die_req_networks[die_id] = die_model.req_network
+                if hasattr(die_model, 'rsp_network') and die_model.rsp_network:
+                    die_rsp_networks[die_id] = die_model.rsp_network
+                if hasattr(die_model, 'data_network') and die_model.data_network:
+                    die_data_networks[die_id] = die_model.data_network
+
+        # 为每个Die绘制流量图（节点和IP方块，暂不绘制links）
         die_node_positions = {}
         for die_id, network in die_networks_for_draw.items():
             offset_x, offset_y = die_offsets[die_id]
@@ -1620,49 +1641,49 @@ class InteractiveFlowGraphRenderer:
                 is_d2d_scenario=True,
                 show_ip_bandwidth_value=False,
                 link_label_fontsize=8,
+                draw_links=not enable_channel_switch,  # 如果启用通道切换，则不在这里绘制links
             )
             die_node_positions[die_id] = node_positions
 
         # 添加Die标签
+        # 首先计算所有Die的中心X坐标，找出最左和最右的Die
+        die_centers = {}
+        for die_id in die_node_positions.keys():
+            node_positions = die_node_positions[die_id]
+            if node_positions:
+                xs = [p[0] for p in node_positions.values()]
+                die_center_x = (min(xs) + max(xs)) / 2
+                die_centers[die_id] = (die_center_x, min(xs), max(xs))
+
+        # 找出最左和最右的Die
+        if die_centers:
+            leftmost_die = min(die_centers.keys(), key=lambda d: die_centers[d][0])
+            rightmost_die = max(die_centers.keys(), key=lambda d: die_centers[d][0])
+
+        # 为每个Die添加标签
         for die_id in die_node_positions.keys():
             node_positions = die_node_positions[die_id]
             if node_positions:
                 xs = [p[0] for p in node_positions.values()]
                 ys = [p[1] for p in node_positions.values()]
-                die_center_x = (min(xs) + max(xs)) / 2
                 die_center_y = (min(ys) + max(ys)) / 2
 
-                # 智能标签位置（复用原有逻辑）
-                if die_id in die_layout:
-                    grid_x, grid_y = die_layout[die_id]
-                    other_dies = [did for did in die_layout.keys() if did != die_id]
-
-                    if other_dies:
-                        other_die_id = other_dies[0]
-                        other_grid_x, other_grid_y = die_layout[other_die_id]
-
-                        is_vertical_connection = grid_y != other_grid_y
-                        is_horizontal_connection = grid_x != other_grid_x
-
-                        if is_vertical_connection:
-                            if grid_x == 0:
-                                label_x = min(xs) - 3
-                                label_y = die_center_y
-                            else:
-                                label_x = max(xs) + 3
-                                label_y = die_center_y
-                        elif is_horizontal_connection:
-                            label_x = die_center_x
-                            label_y = min(ys) - 2
-                        else:
-                            label_x = die_center_x
-                            label_y = max(ys) + 2.5
-                    else:
-                        label_x = die_center_x
-                        label_y = max(ys) + 2.5
+                # 智能标签位置：最左侧Die放左边，最右侧Die放右边
+                if die_id == leftmost_die:
+                    label_x = min(xs) - 4
+                elif die_id == rightmost_die:
+                    label_x = max(xs) + 4
                 else:
-                    label_x = die_center_x
-                    label_y = max(ys) + 2.5
+                    # 中间的Die根据位置决定
+                    die_center_x = die_centers[die_id][0]
+                    left_center = die_centers[leftmost_die][0]
+                    right_center = die_centers[rightmost_die][0]
+                    if abs(die_center_x - left_center) < abs(die_center_x - right_center):
+                        label_x = min(xs) - 4
+                    else:
+                        label_x = max(xs) + 4
+
+                label_y = die_center_y
 
                 fig.add_annotation(
                     x=label_x,
@@ -1675,15 +1696,164 @@ class InteractiveFlowGraphRenderer:
                     opacity=0.7,
                 )
 
-        # 绘制跨Die连接
-        if dies and len(dies) > 1:
-            try:
-                d2d_bandwidth = self._calculate_d2d_sys_bandwidth(dies, config)
-                self._draw_cross_die_connections(fig, d2d_bandwidth, die_node_positions, config, dies, die_offsets)
-            except Exception as e:
-                import traceback
+        # 如果启用通道切换，分别为三个通道绘制links
+        if enable_channel_switch and (die_req_networks or die_rsp_networks or die_data_networks):
+            # 记录基础traces数量（节点等）
+            num_base_traces = len(fig.data)
 
-                traceback.print_exc()
+            # 准备三个通道的网络字典
+            networks_dict = {
+                "请求": die_req_networks,
+                "响应": die_rsp_networks,
+                "数据": die_data_networks
+            }
+
+            trace_indices = {}
+            annotation_indices = {}
+            all_channel_annotations = []
+
+            for channel_name, die_networks in networks_dict.items():
+                if not die_networks:
+                    continue
+
+                trace_start_idx = len(fig.data)
+                annotation_start_idx = len(all_channel_annotations)
+
+                # 为每个Die绘制该通道的links
+                for die_id, network in die_networks.items():
+                    if die_id not in die_node_positions:
+                        continue
+
+                    node_positions = die_node_positions[die_id]
+                    die_model = dies.get(die_id)
+
+                    if not die_model:
+                        continue
+
+                    # 获取该Die的旋转角度
+                    die_rotation = die_rotations.get(die_id, 0)
+
+                    # 使用_draw_channel_links_only绘制该通道的links
+                    channel_anns = self._draw_channel_links_only(
+                        fig=fig,
+                        network=network,
+                        config=die_model.config,
+                        pos=node_positions,
+                        mode=mode,
+                        node_size=node_size,
+                        draw_self_loops=True,
+                        rotation=die_rotation,
+                        is_d2d_scenario=True,
+                        fontsize=8,
+                    )
+                    all_channel_annotations.extend(channel_anns)
+
+                # 绘制该通道的跨Die连接（如果有多个Die）
+                if dies and len(dies) > 1:
+                    try:
+                        d2d_bandwidth = self._calculate_d2d_sys_bandwidth(dies, config)
+                        cross_die_anns = self._draw_cross_die_connections(fig, d2d_bandwidth, die_node_positions, config, dies, die_offsets, channel_name=channel_name)
+                        if cross_die_anns:
+                            all_channel_annotations.extend(cross_die_anns)
+                    except Exception as e:
+                        import traceback
+                        traceback.print_exc()
+
+                trace_end_idx = len(fig.data)
+                annotation_end_idx = len(all_channel_annotations)
+
+                trace_indices[channel_name] = (trace_start_idx, trace_end_idx)
+                annotation_indices[channel_name] = (annotation_start_idx, annotation_end_idx)
+
+                # 设置初始可见性：默认显示数据通道
+                for i in range(trace_start_idx, trace_end_idx):
+                    fig.data[i].visible = (channel_name == "数据")
+
+            # 一次性添加所有annotations
+            existing_anns = list(fig.layout.annotations) if fig.layout.annotations else []
+            num_existing_anns = len(existing_anns)
+
+            for i, ann in enumerate(all_channel_annotations):
+                # 确定annotation属于哪个通道
+                ann_channel = None
+                for ch_name in ["请求", "响应", "数据"]:
+                    if ch_name not in annotation_indices:
+                        continue
+                    ann_start, ann_end = annotation_indices[ch_name]
+                    if ann_start <= i < ann_end:
+                        ann_channel = ch_name
+                        break
+                # 设置初始可见性
+                ann["visible"] = (ann_channel == "数据")
+
+            fig.layout.annotations = existing_anns + all_channel_annotations
+
+            # 添加通道切换按钮
+            buttons = []
+            for channel_name in ["请求", "响应", "数据"]:
+                if channel_name not in trace_indices:
+                    continue
+
+                start_idx, end_idx = trace_indices[channel_name]
+                # 创建visibility数组：基础traces始终可见，只切换link traces
+                visibility = [True] * num_base_traces  # 基础traces始终可见
+                for ch_name in ["请求", "响应", "数据"]:
+                    if ch_name not in trace_indices:
+                        continue
+                    s, e = trace_indices[ch_name]
+                    visibility.extend([ch_name == channel_name] * (e - s))
+
+                # 创建完整的annotation列表，包含所有属性和可见性
+                updated_annotations = []
+                if fig.layout.annotations:
+                    for i, ann in enumerate(fig.layout.annotations):
+                        # 复制annotation的所有属性
+                        ann_dict = ann.to_plotly_json() if hasattr(ann, 'to_plotly_json') else dict(ann)
+                        # 确定这个annotation属于哪个通道
+                        if i < num_existing_anns:
+                            # 原有annotations（Die标签等），始终可见
+                            ann_dict["visible"] = True
+                        else:
+                            # 新添加的channel annotations
+                            channel_ann_idx = i - num_existing_anns
+                            ann_channel = None
+                            for ch_name in ["请求", "响应", "数据"]:
+                                if ch_name not in annotation_indices:
+                                    continue
+                                ann_start, ann_end = annotation_indices[ch_name]
+                                if ann_start <= channel_ann_idx < ann_end:
+                                    ann_channel = ch_name
+                                    break
+                            # 设置可见性
+                            ann_dict["visible"] = (ann_channel == channel_name)
+                        updated_annotations.append(ann_dict)
+
+                buttons.append(
+                    dict(
+                        label=channel_name,
+                        method="update",
+                        args=[
+                            {"visible": visibility},
+                            {"annotations": updated_annotations}
+                        ],
+                    )
+                )
+
+            # 暂不设置updatemenus，等添加完跨Die链路、legend、colorbar后再设置
+            # （为了能在按钮的visibility数组中包含这些额外的traces）
+
+        # 记录三通道traces结束位置（包括跨Die连接）
+        num_traces_after_channels = len(fig.data) if enable_channel_switch and (die_req_networks or die_rsp_networks or die_data_networks) else 0
+
+        # 如果没有启用三通道切换，绘制默认的跨Die连接
+        if not (enable_channel_switch and (die_req_networks or die_rsp_networks or die_data_networks)):
+            if dies and len(dies) > 1:
+                try:
+                    d2d_bandwidth = self._calculate_d2d_sys_bandwidth(dies, config)
+                    self._draw_cross_die_connections(fig, d2d_bandwidth, die_node_positions, config, dies, die_offsets, channel_name=None)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
 
         # 添加IP类型Legend
         if used_ip_types:
@@ -1692,6 +1862,31 @@ class InteractiveFlowGraphRenderer:
         # 添加带宽Colorbar
         if all_ip_bandwidths and max_ip_bandwidth and min_ip_bandwidth:
             self._add_bandwidth_colorbar_plotly(fig, min_ip_bandwidth, max_ip_bandwidth)
+
+        # 如果启用了三通道切换，现在更新按钮的visibility数组以包含跨Die链路、legend、colorbar
+        if enable_channel_switch and (die_req_networks or die_rsp_networks or die_data_networks) and buttons:
+            num_extra_traces = len(fig.data) - num_traces_after_channels
+            if num_extra_traces > 0:
+                # 为每个按钮的visibility数组添加额外的True值
+                for button in buttons:
+                    button["args"][0]["visible"].extend([True] * num_extra_traces)
+
+            # 现在设置updatemenus
+            fig.update_layout(
+                updatemenus=[
+                    dict(
+                        type="buttons",
+                        direction="left",
+                        buttons=buttons,
+                        pad={"r": 10, "t": 5},
+                        showactive=True,
+                        x=0.5,
+                        xanchor="center",
+                        y=1.05,  # 从1.15降到1.05，减小按钮与图表间距
+                        yanchor="top",
+                    )
+                ]
+            )
 
         # 设置布局
         canvas_width = int(figsize[0] * 100)
@@ -1703,9 +1898,15 @@ class InteractiveFlowGraphRenderer:
             plot_bgcolor="white",
             xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
             yaxis=dict(showgrid=False, showticklabels=False, zeroline=False, scaleanchor="x", scaleratio=1),
-            margin=dict(l=20, r=20, t=50, b=20),
+            margin=dict(l=20, r=50, t=40, b=20),  # 减小上边距t从50到40，减小左右边距更紧凑
             width=canvas_width,
             height=canvas_height,
+            legend=dict(
+                x=1.0,  # 放到右侧，与colorbar对齐
+                y=0.8,  # 放到colorbar上方
+                xanchor="left",
+                yanchor="top",
+            ),
         )
 
         # 只在非集成模式下显示标题
@@ -1857,18 +2058,27 @@ class InteractiveFlowGraphRenderer:
         else:
             return "diagonal"
 
-    def _draw_cross_die_connections(self, fig, d2d_bandwidth, die_node_positions, config, dies=None, die_offsets=None):
+    def _draw_cross_die_connections(self, fig, d2d_bandwidth, die_node_positions, config, dies=None, die_offsets=None, channel_name=None):
         """
-        绘制跨Die数据带宽连接（只显示R和W通道的数据流）- Plotly版本
+        绘制跨Die带宽连接 - Plotly版本
 
         Args:
             fig: plotly Figure对象
-            d2d_bandwidth: D2D带宽数据
+            d2d_bandwidth: D2D带宽数据（AXI通道统计）
             die_node_positions: 各Die的节点位置
             config: 配置对象
             dies: Die模型字典
             die_offsets: Die偏移量
+            channel_name: 通道名称 ("请求"/"响应"/"数据"/None)
+                - "请求": AR + AW（地址通道）
+                - "数据": W + R（数据通道）
+                - "响应": B（响应通道）
+                - None: W + R（向后兼容）
+
+        Returns:
+            list: 添加的annotation列表
         """
+        added_annotations = []
         try:
             d2d_pairs = config.D2D_PAIRS
             if not d2d_pairs:
@@ -1887,9 +2097,39 @@ class InteractiveFlowGraphRenderer:
                 for from_die, from_node, to_die, to_node in directions:
                     key = f"{from_node}_to_{to_die}_{to_node}"
 
-                    # 检查读写数据流量
-                    w_bw = d2d_bandwidth.get(from_die, {}).get(key, {}).get("W", 0.0)
-                    r_bw = d2d_bandwidth.get(from_die, {}).get(key, {}).get("R", 0.0)
+                    # 获取所有AXI通道的带宽（用于hover显示）
+                    all_channel_bw = {
+                        "AR": d2d_bandwidth.get(from_die, {}).get(key, {}).get("AR", 0.0),
+                        "AW": d2d_bandwidth.get(from_die, {}).get(key, {}).get("AW", 0.0),
+                        "W": d2d_bandwidth.get(from_die, {}).get(key, {}).get("W", 0.0),
+                        "R": d2d_bandwidth.get(from_die, {}).get(key, {}).get("R", 0.0),
+                        "B": d2d_bandwidth.get(from_die, {}).get(key, {}).get("B", 0.0),
+                    }
+
+                    # 根据通道筛选带宽
+                    if channel_name == "请求":
+                        # 请求通道：AR + AW（地址通道）
+                        ar_bw = all_channel_bw["AR"]
+                        aw_bw = all_channel_bw["AW"]
+                        total_bw = ar_bw + aw_bw
+                        w_bw = aw_bw  # 写地址
+                        r_bw = ar_bw  # 读地址
+                    elif channel_name == "数据":
+                        # 数据通道：W + R（数据通道）
+                        w_bw = all_channel_bw["W"]
+                        r_bw = all_channel_bw["R"]
+                        total_bw = w_bw + r_bw
+                    elif channel_name == "响应":
+                        # 响应通道：B（响应通道）
+                        b_bw = all_channel_bw["B"]
+                        total_bw = b_bw
+                        w_bw = b_bw  # 写响应
+                        r_bw = 0.0
+                    else:
+                        # 默认（向后兼容）：W + R
+                        w_bw = all_channel_bw["W"]
+                        r_bw = all_channel_bw["R"]
+                        total_bw = w_bw + r_bw
 
                     # 获取节点位置
                     from_die_positions = die_node_positions.get(from_die, {})
@@ -1924,11 +2164,10 @@ class InteractiveFlowGraphRenderer:
                         to_x = mid_x + dx_to * cos_a - dy_to * sin_a
                         to_y = mid_y + dx_to * sin_a + dy_to * cos_a
 
-                    # 合并读写通道带宽
-                    total_bw = w_bw + r_bw
-
-                    # 绘制D2D箭头
-                    self._draw_single_d2d_arrow_plotly(fig, from_x, from_y, to_x, to_y, total_bw, from_die, from_node, to_die, to_node, connection_type, w_bw, r_bw)
+                    # 绘制D2D箭头（total_bw已经在上面根据通道计算好了）
+                    anns = self._draw_single_d2d_arrow_plotly(fig, from_x, from_y, to_x, to_y, total_bw, from_die, from_node, to_die, to_node, connection_type, w_bw, r_bw, channel_name=channel_name, all_channel_bw=all_channel_bw)
+                    if anns:
+                        added_annotations.extend(anns)
                     arrow_index += 1
 
         except Exception as e:
@@ -1936,7 +2175,9 @@ class InteractiveFlowGraphRenderer:
 
             traceback.print_exc()
 
-    def _draw_single_d2d_arrow_plotly(self, fig, start_x, start_y, end_x, end_y, total_bandwidth, from_die, from_node, to_die, to_node, connection_type=None, w_bw=0.0, r_bw=0.0):
+        return added_annotations
+
+    def _draw_single_d2d_arrow_plotly(self, fig, start_x, start_y, end_x, end_y, total_bandwidth, from_die, from_node, to_die, to_node, connection_type=None, w_bw=0.0, r_bw=0.0, channel_name=None, all_channel_bw=None):
         """
         绘制单个D2D箭头（Plotly版本）
 
@@ -1950,7 +2191,13 @@ class InteractiveFlowGraphRenderer:
             connection_type: 连接类型
             w_bw: 写通道带宽
             r_bw: 读通道带宽
+            channel_name: 通道名称（用于生成hover信息）
+            all_channel_bw: 所有AXI通道的带宽字典 {"AR": xx, "AW": xx, "W": xx, "R": xx, "B": xx}
+
+        Returns:
+            list: 添加的annotation列表（箭头annotation + 文本annotation）
         """
+        added_annotations = []
         dx = end_x - start_x
         dy = end_y - start_y
         length = np.sqrt(dx * dx + dy * dy)
@@ -1985,12 +2232,67 @@ class InteractiveFlowGraphRenderer:
             color_str = "rgb(179, 179, 179)"  # 灰色
             label_text = None
 
-        # 绘制箭头
-        hover_text = (
-            f"D2D连接: Die{from_die}(节点{from_node}) → Die{to_die}(节点{to_node})<br>" f"总带宽: {total_bandwidth:.2f} GB/s<br>" f"写通道(W): {w_bw:.2f} GB/s<br>" f"读通道(R): {r_bw:.2f} GB/s"
-        )
+        # 生成全面的hover文本（显示所有通道，然后突出当前通道）
+        if all_channel_bw:
+            hover_text = (
+                f"D2D连接: Die{from_die}(节点{from_node}) → Die{to_die}(节点{to_node})<br>"
+                f"<br>"
+                f"【所有AXI通道带宽】<br>"
+                f"  AR (读地址): {all_channel_bw['AR']:.2f} GB/s<br>"
+                f"  AW (写地址): {all_channel_bw['AW']:.2f} GB/s<br>"
+                f"  W  (写数据): {all_channel_bw['W']:.2f} GB/s<br>"
+                f"  R  (读数据): {all_channel_bw['R']:.2f} GB/s<br>"
+                f"  B  (写响应): {all_channel_bw['B']:.2f} GB/s<br>"
+            )
 
-        fig.add_annotation(
+            # 根据当前通道添加高亮信息
+            if channel_name == "请求":
+                hover_text += (
+                    f"<br>"
+                    f"【当前通道: 请求】<br>"
+                    f"  总带宽: {total_bandwidth:.2f} GB/s<br>"
+                    f"  写地址(AW): {w_bw:.2f} GB/s<br>"
+                    f"  读地址(AR): {r_bw:.2f} GB/s"
+                )
+            elif channel_name == "响应":
+                hover_text += (
+                    f"<br>"
+                    f"【当前通道: 响应】<br>"
+                    f"  总带宽: {total_bandwidth:.2f} GB/s<br>"
+                    f"  写响应(B): {w_bw:.2f} GB/s"
+                )
+            else:  # "数据"
+                hover_text += (
+                    f"<br>"
+                    f"【当前通道: 数据】<br>"
+                    f"  总带宽: {total_bandwidth:.2f} GB/s<br>"
+                    f"  写数据(W): {w_bw:.2f} GB/s<br>"
+                    f"  读数据(R): {r_bw:.2f} GB/s"
+                )
+        else:
+            # 兼容旧版：如果没有all_channel_bw，使用原来的简单格式
+            if channel_name == "请求":
+                hover_text = (
+                    f"D2D连接: Die{from_die}(节点{from_node}) → Die{to_die}(节点{to_node})<br>"
+                    f"请求通道总带宽: {total_bandwidth:.2f} GB/s<br>"
+                    f"写地址(AW): {w_bw:.2f} GB/s<br>"
+                    f"读地址(AR): {r_bw:.2f} GB/s"
+                )
+            elif channel_name == "响应":
+                hover_text = (
+                    f"D2D连接: Die{from_die}(节点{from_node}) → Die{to_die}(节点{to_node})<br>"
+                    f"响应通道总带宽: {total_bandwidth:.2f} GB/s<br>"
+                    f"写响应(B): {w_bw:.2f} GB/s"
+                )
+            else:  # "数据" 或 None
+                hover_text = (
+                    f"D2D连接: Die{from_die}(节点{from_node}) → Die{to_die}(节点{to_node})<br>"
+                    f"数据通道总带宽: {total_bandwidth:.2f} GB/s<br>"
+                    f"写数据(W): {w_bw:.2f} GB/s<br>"
+                    f"读数据(R): {r_bw:.2f} GB/s"
+                )
+
+        arrow_ann = dict(
             x=arrow_end_x,
             y=arrow_end_y,
             ax=arrow_start_x,
@@ -2007,6 +2309,7 @@ class InteractiveFlowGraphRenderer:
             standoff=0,
             hovertext=hover_text,
         )
+        added_annotations.append(arrow_ann)
 
         # 添加标签（只在有流量时）
         if label_text:
@@ -2062,30 +2365,34 @@ class InteractiveFlowGraphRenderer:
                 elif angle_deg < -90:
                     angle_deg += 180
 
-            fig.add_annotation(
+            # 使用annotation添加旋转文本（支持textangle）
+            text_ann = dict(
                 x=label_x,
                 y=label_y,
                 text=label_text,
                 showarrow=False,
-                font=dict(size=12, color=color_str),
+                font=dict(size=12, color=color_str),  # 从10增大到12
+                textangle=angle_deg,
                 xref="x",
                 yref="y",
-                textangle=angle_deg,
             )
+            added_annotations.append(text_ann)
 
-            # 在标签位置添加透明的scatter点用于hover
+            # 使用透明scatter提供hover功能（annotation的hover功能有限）
             fig.add_trace(
                 go.Scatter(
                     x=[label_x],
                     y=[label_y],
                     mode="markers",
-                    marker=dict(size=20, color="rgba(0,0,0,0)"),  # 透明标记
+                    marker=dict(size=20, color="rgba(0,0,0,0)"),  # 完全透明的标记
                     hovertext=hover_text,
                     hoverinfo="text",
                     showlegend=False,
                     name="",
                 )
             )
+
+        return added_annotations
 
     def _apply_rotation(self, orig_row, orig_col, rows, cols, rotation):
         """
@@ -2315,7 +2622,7 @@ class InteractiveFlowGraphRenderer:
                         tickfont=dict(size=9),
                         len=0.3,  # colorbar长度
                         thickness=15,  # colorbar宽度
-                        x=1.02,  # 位置：右侧
+                        x=1.0,  # 位置：从1.02调整到1.0，更靠近图表
                         y=0.5,  # 垂直居中
                         xanchor="left",
                         yanchor="middle",

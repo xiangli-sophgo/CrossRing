@@ -360,7 +360,7 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
 
                 // 延迟渲染图表，确保DOM已插入
                 setTimeout(() => {{
-                    createTrackerChart(item.ipData, item.ipType, item.ipPos, `tracker-chart-${{index}}`);
+                    createTrackerChart(item.ipData, item.ipType, item.ipPos, `tracker-chart-${{index}}`, item.dieId);
                 }}, 10);
             }});
         }}
@@ -379,8 +379,8 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             trackerQueue.length = 0; // 清空队列
         }}
 
-        function createTrackerChart(ipData, ipType, ipPos, targetDivId) {{
-            console.log(`[Tracker] createTrackerChart调用: ipType=${{ipType}}, ipPos=${{ipPos}}, targetDiv=${{targetDivId}}`);
+        function createTrackerChart(ipData, ipType, ipPos, targetDivId, dieId) {{
+            console.log(`[Tracker] createTrackerChart调用: dieId=${{dieId}}, ipType=${{ipType}}, ipPos=${{ipPos}}, targetDiv=${{targetDivId}}`);
             console.log('[Tracker] ipData:', ipData);
 
             const trackerEvents = ipData.events;
@@ -475,8 +475,10 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
             }});
 
             // 布局
+            // 标题格式：单Die时不显示Die ID，多Die时显示
+            const titleText = (dieId !== undefined && dieId !== null) ? `${{ipType}}@${{ipPos}}@DIE${{dieId}}` : `${{ipType}}@${{ipPos}}`;
             const layout = {{
-                title: `${{ipType}}@${{ipPos}}`,
+                title: titleText,
                 xaxis: {{ title: '时间 (ns)' }},
                 yaxis: {{
                     title: '使用个数',

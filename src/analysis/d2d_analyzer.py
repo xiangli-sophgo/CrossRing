@@ -653,10 +653,6 @@ class D2DAnalyzer:
 
         report_lines.append("-" * 60)
 
-        # 打印到屏幕
-        for line in report_lines:
-            print(line)
-
         # 保存到文件（包含每个Die的详细统计）
         import os
 
@@ -682,6 +678,34 @@ class D2DAnalyzer:
                     f.write("\n")
 
         return report_file
+
+    def generate_d2d_summary_report_html(self, dies=None):
+        """
+        生成D2D HTML格式的统计摘要
+
+        Args:
+            dies: Die模型字典（用于绕环统计）
+
+        Returns:
+            str: HTML格式的报告内容
+        """
+        from .exporters import ReportGenerator
+
+        # 收集延迟统计
+        latency_stats = self._calculate_d2d_latency_stats()
+
+        # 收集绕环统计
+        circuit_stats_data = None
+        if dies:
+            circuit_stats_data = self._collect_d2d_circuit_stats(dies)
+
+        # 调用ReportGenerator生成HTML
+        report_generator = ReportGenerator()
+        html_content = report_generator.generate_d2d_summary_report_html(
+            d2d_stats=self.d2d_stats, d2d_requests=self.d2d_requests, latency_stats=latency_stats, circuit_stats=circuit_stats_data
+        )
+
+        return html_content
 
     def _calculate_d2d_latency_stats(self):
         """计算D2D请求的延迟统计数据（cmd/data/transaction）"""

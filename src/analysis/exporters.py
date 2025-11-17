@@ -79,14 +79,7 @@ class CSVExporter:
         if write_requests:
             write_csv_file = self._write_request_csv_file(write_requests, output_path, "write", csv_header)
 
-        # 打印统计信息（仅在verbose模式下）
-        if self.verbose >= 1 and (read_requests or write_requests):
-            print("\n" + "=" * 60)
-            print(f"详细请求记录统计:")
-            if read_requests:
-                print(f"  读请求CSV, {len(read_requests)} 条记录:  {read_csv_file}")
-            if write_requests:
-                print(f"  写请求CSV, {len(write_requests)} 条记录:  {write_csv_file}")
+        # 打印统计信息已移除
 
     def _write_request_csv_file(self, requests: List[RequestInfo], output_path: str, req_type: str, csv_header: List[str]) -> str:
         """
@@ -933,24 +926,24 @@ class ReportGenerator:
             html_parts.append(f'<tr><td>ITag</td><td class="num-cell">横向: {circuit_stats.get("ITag_h_num", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("ITag_v_num", 0)}</td></tr>')
             html_parts.append(f'<tr><td>RB ETag</td><td class="num-cell">T1: {circuit_stats.get("RB_ETag_T1_num", 0)}</td><td class="num-cell">T0: {circuit_stats.get("RB_ETag_T0_num", 0)}</td></tr>')
             html_parts.append(f'<tr><td>EQ ETag</td><td class="num-cell">T1: {circuit_stats.get("EQ_ETag_T1_num", 0)}</td><td class="num-cell">T0: {circuit_stats.get("EQ_ETag_T0_num", 0)}</td></tr>')
-            html_parts.append(
-                f'<tr><td>Circuits req</td><td class="num-cell">横向: {circuit_stats.get("req_circuits_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("req_circuits_v", 0)}</td></tr>'
-            )
-            html_parts.append(
-                f'<tr><td>Circuits rsp</td><td class="num-cell">横向: {circuit_stats.get("rsp_circuits_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("rsp_circuits_v", 0)}</td></tr>'
-            )
-            html_parts.append(
-                f'<tr><td>Circuits data</td><td class="num-cell">横向: {circuit_stats.get("data_circuits_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("data_circuits_v", 0)}</td></tr>'
-            )
-            html_parts.append(
-                f'<tr><td>Wait cycle req</td><td class="num-cell">横向: {circuit_stats.get("req_wait_cycles_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("req_wait_cycles_v", 0)}</td></tr>'
-            )
-            html_parts.append(
-                f'<tr><td>Wait cycle rsp</td><td class="num-cell">横向: {circuit_stats.get("rsp_wait_cycles_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("rsp_wait_cycles_v", 0)}</td></tr>'
-            )
-            html_parts.append(
-                f'<tr><td>Wait cycle data</td><td class="num-cell">横向: {circuit_stats.get("data_wait_cycles_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("data_wait_cycles_v", 0)}</td></tr>'
-            )
+            # html_parts.append(
+            #     f'<tr><td>Circuits req</td><td class="num-cell">横向: {circuit_stats.get("req_circuits_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("req_circuits_v", 0)}</td></tr>'
+            # )
+            # html_parts.append(
+            #     f'<tr><td>Circuits rsp</td><td class="num-cell">横向: {circuit_stats.get("rsp_circuits_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("rsp_circuits_v", 0)}</td></tr>'
+            # )
+            # html_parts.append(
+            #     f'<tr><td>Circuits data</td><td class="num-cell">横向: {circuit_stats.get("data_circuits_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("data_circuits_v", 0)}</td></tr>'
+            # )
+            # html_parts.append(
+            #     f'<tr><td>Wait cycle req</td><td class="num-cell">横向: {circuit_stats.get("req_wait_cycles_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("req_wait_cycles_v", 0)}</td></tr>'
+            # )
+            # html_parts.append(
+            #     f'<tr><td>Wait cycle rsp</td><td class="num-cell">横向: {circuit_stats.get("rsp_wait_cycles_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("rsp_wait_cycles_v", 0)}</td></tr>'
+            # )
+            # html_parts.append(
+            #     f'<tr><td>Wait cycle data</td><td class="num-cell">横向: {circuit_stats.get("data_wait_cycles_h", 0)}</td><td class="num-cell">纵向: {circuit_stats.get("data_wait_cycles_v", 0)}</td></tr>'
+            # )
             html_parts.append("</tbody>")
             html_parts.append("</table>")
 
@@ -1005,6 +998,112 @@ class ReportGenerator:
                     html_parts.append(f"<td class='num-cell'>写: 平均 {write_avg:.1f} / 最大 {rl['write']['max']}</td>")
                     html_parts.append(f"<td class='num-cell'>混合: 平均 {mixed_avg:.1f} / 最大 {rl['mixed']['max']}</td>")
                     html_parts.append(f"</tr>")
+
+            html_parts.append("</tbody>")
+            html_parts.append("</table>")
+            html_parts.append("</div>")
+
+        return "\n".join(html_parts)
+
+    def generate_d2d_summary_report_html(self, d2d_stats: Any = None, d2d_requests: List = None, latency_stats: Dict = None, circuit_stats: Dict = None) -> str:
+        """
+        生成D2D HTML格式的结果摘要
+
+        Args:
+            d2d_stats: D2D带宽统计对象（包含pair_read_bw, pair_write_bw）
+            d2d_requests: D2D请求列表（可选）
+            latency_stats: 延迟统计字典（可选）
+            circuit_stats: 绕环统计字典（可选）
+
+        Returns:
+            str: HTML格式的报告内容
+        """
+        html_parts = []
+
+        # D2D带宽统计
+        if d2d_stats:
+            html_parts.append('<div class="report-section">')
+            html_parts.append("<h3>D2D带宽统计</h3>")
+            html_parts.append('<table class="report-table">')
+            html_parts.append("<tbody>")
+
+            # 读带宽
+            total_read_unweighted = 0.0
+            total_read_weighted = 0.0
+            for (src, dst), (uw, wt) in sorted(d2d_stats.pair_read_bw.items()):
+                html_parts.append(f'<tr><td>Die{src} → Die{dst} 读带宽</td><td class="num-cell">{uw:.3f} GB/s</td><td class="num-cell">加权: {wt:.3f} GB/s</td></tr>')
+                total_read_unweighted += uw
+                total_read_weighted += wt
+
+            # 写带宽
+            total_write_unweighted = 0.0
+            total_write_weighted = 0.0
+            for (src, dst), (uw, wt) in sorted(d2d_stats.pair_write_bw.items()):
+                html_parts.append(f'<tr><td>Die{src} → Die{dst} 写带宽</td><td class="num-cell">{uw:.3f} GB/s</td><td class="num-cell">加权: {wt:.3f} GB/s</td></tr>')
+                total_write_unweighted += uw
+                total_write_weighted += wt
+
+            # 总计
+            html_parts.append(f'<tr><td><strong>总带宽</strong></td><td class="num-cell"><strong>{total_read_unweighted + total_write_unweighted:.3f} GB/s</strong></td><td class="num-cell"><strong>加权: {total_read_weighted + total_write_weighted:.3f} GB/s</strong></td></tr>')
+
+            html_parts.append("</tbody>")
+            html_parts.append("</table>")
+            html_parts.append("</div>")
+
+        # 请求统计
+        if d2d_requests:
+            html_parts.append('<div class="report-section">')
+            html_parts.append("<h3>D2D请求统计</h3>")
+            html_parts.append('<table class="report-table">')
+            html_parts.append("<tbody>")
+
+            read_req = len([r for r in d2d_requests if r.req_type == "read"])
+            write_req = len([r for r in d2d_requests if r.req_type == "write"])
+            total_req = len(d2d_requests)
+
+            html_parts.append(f'<tr><td>请求数</td><td class="num-cell">读: {read_req}</td><td class="num-cell">写: {write_req}</td><td class="num-cell">总计: {total_req}</td></tr>')
+
+            html_parts.append("</tbody>")
+            html_parts.append("</table>")
+            html_parts.append("</div>")
+
+        # 延迟统计
+        if latency_stats:
+            html_parts.append('<div class="report-section">')
+            html_parts.append("<h3>D2D延迟统计 (单位: ns)</h3>")
+            html_parts.append('<table class="report-table">')
+            html_parts.append("<tbody>")
+
+            for cat, label in [("cmd", "CMD"), ("data", "Data"), ("trans", "Trans")]:
+                if cat in latency_stats:
+                    rl = latency_stats[cat]
+                    read_avg = rl["read"]["sum"] / rl["read"]["count"] if rl["read"]["count"] else 0.0
+                    write_avg = rl["write"]["sum"] / rl["write"]["count"] if rl["write"]["count"] else 0.0
+                    mixed_avg = rl["mixed"]["sum"] / rl["mixed"]["count"] if rl["mixed"]["count"] else 0.0
+
+                    html_parts.append(f"<tr>")
+                    html_parts.append(f"<td>{label}延迟</td>")
+                    html_parts.append(f"<td class='num-cell'>读: 平均 {read_avg:.1f} / 最大 {rl['read']['max']}</td>")
+                    html_parts.append(f"<td class='num-cell'>写: 平均 {write_avg:.1f} / 最大 {rl['write']['max']}</td>")
+                    html_parts.append(f"<td class='num-cell'>混合: 平均 {mixed_avg:.1f} / 最大 {rl['mixed']['max']}</td>")
+                    html_parts.append(f"</tr>")
+
+            html_parts.append("</tbody>")
+            html_parts.append("</table>")
+            html_parts.append("</div>")
+
+        # 绕环与Tag统计（汇总）
+        if circuit_stats:
+            summary = circuit_stats.get("summary", circuit_stats)
+            html_parts.append('<div class="report-section">')
+            html_parts.append("<h3>绕环与Tag统计（汇总）</h3>")
+            html_parts.append('<table class="report-table">')
+            html_parts.append("<tbody>")
+
+            html_parts.append(f'<tr><td>ITag</td><td class="num-cell">横向: {summary.get("ITag_h_num", 0)}</td><td class="num-cell">纵向: {summary.get("ITag_v_num", 0)}</td></tr>')
+            html_parts.append(f'<tr><td>RB ETag</td><td class="num-cell">T1: {summary.get("RB_ETag_T1_num", 0)}</td><td class="num-cell">T0: {summary.get("RB_ETag_T0_num", 0)}</td></tr>')
+            html_parts.append(f'<tr><td>EQ ETag</td><td class="num-cell">T1: {summary.get("EQ_ETag_T1_num", 0)}</td><td class="num-cell">T0: {summary.get("EQ_ETag_T0_num", 0)}</td></tr>')
+            html_parts.append(f'<tr><td>Retry</td><td class="num-cell">读: {summary.get("read_retry_num", 0)}</td><td class="num-cell">写: {summary.get("write_retry_num", 0)}</td></tr>')
 
             html_parts.append("</tbody>")
             html_parts.append("</table>")
@@ -1081,10 +1180,6 @@ class ReportGenerator:
             report_lines.extend(self._format_circuit_stats(summary, prefix="  "))
 
         report_lines.append("-" * 60)
-
-        # 打印到屏幕
-        for line in report_lines:
-            print(line)
 
         # 保存到文件
         with open(report_file, "w", encoding="utf-8") as f:

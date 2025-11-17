@@ -88,10 +88,10 @@ SDMA_RW_GAP: .inf  # numpy.inf
 # 通道规格
 CHANNEL_SPEC:
   gdma: 2
-  sdma: 1
+  sdma: 0
   cdma: 2
   ddr: 2
-  l2m: 1
+  l2m: 0
 
 
 

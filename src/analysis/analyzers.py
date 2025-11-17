@@ -189,7 +189,7 @@ class SingleDieAnalyzer:
         plot_rn_bw_fig: bool = False,
         plot_flow_graph: bool = False,
         flow_graph_interactive: bool = False,
-        show_fig: bool = False,
+        show_result_analysis: bool = False,
         verbose: int = 0,
     ):
         """
@@ -218,7 +218,7 @@ class SingleDieAnalyzer:
         self.plot_rn_bw_fig = plot_rn_bw_fig
         self.plot_flow_graph = plot_flow_graph
         self.flow_graph_interactive = flow_graph_interactive
-        self.show_fig = show_fig
+        self.show_fig = show_result_analysis
         self.verbose = verbose
         self.finish_cycle = 0
         self.sim_model = None  # 添加sim_model引用
@@ -769,6 +769,7 @@ class SingleDieAnalyzer:
         if self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
             import os
 
+            print()
             print(f"具体端口的统计CSV： {output_path}ports_bandwidth.csv")
             if hasattr(self.sim_model, "data_network") and self.sim_model.data_network:
                 print(f"链路统计CSV： {output_path}link_statistics.csv")
@@ -799,95 +800,8 @@ class SingleDieAnalyzer:
         return self.latency_collector.calculate_latency_stats(self.requests)
 
     def _print_summary_to_console(self, results: Dict) -> None:
-        """输出重要数据到控制台"""
-        print("\n" + "=" * 60)
-        print("结果分析")
-        print("=" * 60)
-
-        # 内存使用统计
-        process = psutil.Process()
-        mem_info = process.memory_info()
-        system_mem = psutil.virtual_memory()
-
-        print(f"内存使用:")
-        print(f"  进程内存: RSS {mem_info.rss / 1024 / 1024:.2f} MB, VMS {mem_info.vms / 1024 / 1024:.2f} MB")
-        print(f"  系统内存: {system_mem.percent:.1f}% (可用 {system_mem.available / 1024 / 1024 / 1024:.2f} GB / 总计 {system_mem.total / 1024 / 1024 / 1024:.2f} GB)")
-
-        # 网络整体带宽
-        read_metrics = results["network_overall"]["read"]
-        write_metrics = results["network_overall"]["write"]
-        mixed_metrics = results["network_overall"]["mixed"]
-
-        # 使用实际IP数量
-        num_ip_for_avg = self.actual_num_ip or 1
-
-        print(f"\n网络带宽:")
-        print(f"  读带宽:    {read_metrics.weighted_bandwidth:.3f} GB/s (平均: {read_metrics.weighted_bandwidth / num_ip_for_avg:.3f} GB/s)")
-        print(f"  写带宽:    {write_metrics.weighted_bandwidth:.3f} GB/s (平均: {write_metrics.weighted_bandwidth / num_ip_for_avg:.3f} GB/s)")
-        print(f"  混合带宽:  {mixed_metrics.weighted_bandwidth:.3f} GB/s (平均: {mixed_metrics.weighted_bandwidth / num_ip_for_avg:.3f} GB/s)")
-
-        # 请求统计
-        summary = results["summary"]
-        print(f"\n请求统计:")
-        print(f"  总请求数: {summary['total_requests']} (读: {summary['read_requests']}, 写: {summary['write_requests']})")
-        print(f"  总flit数: {summary['total_read_flits'] + summary['total_write_flits']} (读: {summary['total_read_flits']}, 写: {summary['total_write_flits']})")
-
-        # Circuit统计
-        circuit_stats = summary.get("circuit_stats", {})
-        print(f"\n绕环与Tag统计:")
-        if circuit_stats:
-            print(f"  Circuits req  - h: {circuit_stats.get('req_circuits_h', 0)}, v: {circuit_stats.get('req_circuits_v', 0)}")
-            print(f"  Circuits rsp  - h: {circuit_stats.get('rsp_circuits_h', 0)}, v: {circuit_stats.get('rsp_circuits_v', 0)}")
-            print(f"  Circuits data - h: {circuit_stats.get('data_circuits_h', 0)}, v: {circuit_stats.get('data_circuits_v', 0)}")
-            print(f"  Wait cycle req  - h: {circuit_stats.get('req_wait_cycles_h', 0)}, v: {circuit_stats.get('req_wait_cycles_v', 0)}")
-            print(f"  Wait cycle rsp  - h: {circuit_stats.get('rsp_wait_cycles_h', 0)}, v: {circuit_stats.get('rsp_wait_cycles_v', 0)}")
-            print(f"  Wait cycle data - h: {circuit_stats.get('data_wait_cycles_h', 0)}, v: {circuit_stats.get('data_wait_cycles_v', 0)}")
-            print(f"  RB ETag - T1: {circuit_stats.get('RB_ETag_T1_num', 0)}, T0: {circuit_stats.get('RB_ETag_T0_num', 0)}")
-            print(f"  EQ ETag - T1: {circuit_stats.get('EQ_ETag_T1_num', 0)}, T0: {circuit_stats.get('EQ_ETag_T0_num', 0)}")
-            print(f"  ITag - h: {circuit_stats.get('ITag_h_num', 0)}, v: {circuit_stats.get('ITag_v_num', 0)}")
-            print(f"  Retry - read: {circuit_stats.get('read_retry_num', 0)}, write: {circuit_stats.get('write_retry_num', 0)}")
-
-        # 绕环比例统计
-        circling_stats = results.get("circling_eject_stats", {})
-        if circling_stats:
-            h_ratio = circling_stats["horizontal"]["circling_ratio"]
-            v_ratio = circling_stats["vertical"]["circling_ratio"]
-            overall_ratio = circling_stats["overall"]["circling_ratio"]
-            print(f"  绕环比例: H: {h_ratio*100:.2f}%, V: {v_ratio*100:.2f}%, Overall: {overall_ratio*100:.2f}%")
-
-        # 保序导致的绕环比例统计
-        ordering_blocked_stats = results.get("ordering_blocked_stats", {})
-        if ordering_blocked_stats:
-            h_ratio = ordering_blocked_stats["horizontal"]["ordering_blocked_ratio"]
-            v_ratio = ordering_blocked_stats["vertical"]["ordering_blocked_ratio"]
-            overall_ratio = ordering_blocked_stats["overall"]["ordering_blocked_ratio"]
-            print(f"  保序导致绕环比例: H: {h_ratio*100:.2f}%, V: {v_ratio*100:.2f}%, Overall: {overall_ratio*100:.2f}%")
-
-        # 工作区间统计
-        print(f"\n工作区间统计:")
-        print(f"  读操作工作区间: {len(read_metrics.working_intervals)}")
-        print(f"  写操作工作区间: {len(write_metrics.working_intervals)}")
-        print(f"  混合操作工作区间: {len(mixed_metrics.working_intervals)}")
-
-        print("=" * 60)
-
-        # 延迟统计
-        latency_stats = results.get("latency_stats", {})
-        if latency_stats:
-
-            def _avg(cat, op):
-                s = latency_stats[cat][op]
-                return s["sum"] / s["count"] if s["count"] else 0.0
-
-            print("\n延迟统计 (单位: ns)")
-            for key, label in [("cmd", "CMD"), ("data", "Data"), ("trans", "Trans")]:
-                if key in latency_stats:
-                    print(
-                        f"  {label} 延迟  - "
-                        f"读: avg {_avg(key,'read'):.2f}, max {latency_stats[key]['read']['max']}；"
-                        f"写: avg {_avg(key,'write'):.2f}, max {latency_stats[key]['write']['max']}；"
-                        f"混合: avg {_avg(key,'mixed'):.2f}, max {latency_stats[key]['mixed']['max']}"
-                    )
+        """输出重要数据到控制台（已禁用）"""
+        pass
 
     def _generate_integrated_html(self, results: Dict):
         """生成集成的HTML可视化报告"""
@@ -938,17 +852,7 @@ class SingleDieAnalyzer:
                 return
 
             # 生成集成HTML
-            integrated_path = create_integrated_report(charts_config=ordered_charts, save_path=save_path, show_fig=self.show_fig)
-
-            if integrated_path and self.sim_model.verbose:
-                print(f"结果分析报告: {integrated_path}")
-                print("  包含图表:")
-                for title, _, _ in ordered_charts:
-                    print(f"    - {title}")
+            integrated_path = create_integrated_report(charts_config=ordered_charts, save_path=save_path, show_result_analysis=self.show_fig)
 
         except Exception as e:
-            if self.sim_model.verbose:
-                print(f"警告: 集成HTML生成失败: {e}")
-                import traceback
-
-                traceback.print_exc()
+            pass

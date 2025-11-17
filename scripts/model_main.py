@@ -56,7 +56,6 @@ def main():
     # ==================== 创建配置和模型 ====================
     config_path = topo_config_map.get(topo_type, r"../config/default.yaml")
     config = CrossRingConfig(config_path)
-    config.CROSSRING_VERSION = "V1"
 
     # 从配置文件获取拓扑类型，如果没有则使用默认值
     topo_type = config.TOPO_TYPE if config.TOPO_TYPE else topo_type
@@ -76,7 +75,7 @@ def main():
         flow_graph_interactive=1,  # 生成交互式流量图
         fifo_utilization_heatmap=1,
         result_save_path=f"../Result/CrossRing/{model_type}/",
-        show_fig=1,
+        show_result_analysis=1,
     )
     # sim.setup_debug(print_trace=1, show_trace_id=[2036, 2028], update_interval=0.1)
     # sim.setup_visualization(plot_link_state=1, plot_start_cycle=1500, show_node_id=1)

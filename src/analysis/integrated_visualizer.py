@@ -303,7 +303,7 @@ class IntegratedVisualizer:
         return "\n".join(indented_lines)
 
 
-def create_integrated_report(charts_config: List[Tuple[str, go.Figure, Optional[str]]], save_path: str, show_fig: bool = False) -> str:
+def create_integrated_report(charts_config: List[Tuple[str, go.Figure, Optional[str]]], save_path: str, show_result_analysis: bool = False) -> str:
     """
     便捷函数：创建集成报告
 
@@ -323,4 +323,4 @@ def create_integrated_report(charts_config: List[Tuple[str, go.Figure, Optional[
     if not visualizer.charts:
         return None
 
-    return visualizer.generate_html(save_path, show_fig)
+    return visualizer.generate_html(save_path, show_result_analysis)
