@@ -208,8 +208,8 @@ class SingleDieAnalyzer:
         from .core_calculators import DataValidator, TimeIntervalCalculator, BandwidthCalculator
         from .data_collectors import RequestCollector, LatencyStatsCollector, CircuitStatsCollector
         from .result_visualizers import BandwidthPlotter
-        from .flow_graph_renderer import FlowGraphRenderer
-        from .interactive_flow_graph_renderer import InteractiveFlowGraphRenderer
+        # from .flow_graph_renderer import FlowGraphRenderer  # 已弃用
+        from .single_die_flow_renderer import SingleDieFlowRenderer
         from .exporters import CSVExporter, ReportGenerator
 
         self.config = config
@@ -247,8 +247,8 @@ class SingleDieAnalyzer:
         self.latency_collector = LatencyStatsCollector()
         self.circuit_collector = CircuitStatsCollector()
         self.visualizer = BandwidthPlotter()
-        self.flow_visualizer = FlowGraphRenderer()
-        self.interactive_flow_visualizer = InteractiveFlowGraphRenderer()
+        # self.flow_visualizer = FlowGraphRenderer()  # 已弃用
+        self.interactive_flow_visualizer = SingleDieFlowRenderer()
         self.exporter = CSVExporter(verbose=self.verbose)
         self.report_generator = ReportGenerator()
 

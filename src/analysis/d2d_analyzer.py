@@ -81,8 +81,8 @@ class D2DAnalyzer:
         from .core_calculators import DataValidator, TimeIntervalCalculator, BandwidthCalculator
         from .data_collectors import RequestCollector, LatencyStatsCollector, CircuitStatsCollector
         from .result_visualizers import BandwidthPlotter
-        from .flow_graph_renderer import FlowGraphRenderer
-        from .interactive_flow_graph_renderer import InteractiveFlowGraphRenderer
+        # from .flow_graph_renderer import FlowGraphRenderer  # 已弃用
+        from .d2d_flow_renderer import D2DFlowRenderer
         from .exporters import CSVExporter, ReportGenerator, JSONExporter
 
         self.config = config
@@ -101,8 +101,8 @@ class D2DAnalyzer:
         self.latency_collector = LatencyStatsCollector()
         self.circuit_collector = CircuitStatsCollector()
         self.visualizer = BandwidthPlotter()
-        self.flow_visualizer = FlowGraphRenderer()
-        self.interactive_flow_visualizer = InteractiveFlowGraphRenderer()  # 交互式渲染器
+        # self.flow_visualizer = FlowGraphRenderer()  # 已弃用
+        self.interactive_flow_visualizer = D2DFlowRenderer()  # D2D交互式渲染器
         self.exporter = CSVExporter()
         self.report_generator = ReportGenerator()
         self.json_exporter = JSONExporter()

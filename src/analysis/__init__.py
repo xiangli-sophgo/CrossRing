@@ -54,7 +54,7 @@ from .exporters import (
 )
 
 # 可视化器
-from .flow_graph_renderer import FlowGraphRenderer
+# from .flow_graph_renderer import FlowGraphRenderer  # 已弃用
 from .result_visualizers import (
     BandwidthPlotter,
     HeatmapDrawer,
