@@ -442,8 +442,13 @@ class LatencyStatsCollector:
         mixed["values"].append(latency_value)
 
     @staticmethod
-    def _finalize_latency_stats(stats: Dict) -> Dict:
-        """计算百分位数并清理临时数据"""
+    def _finalize_latency_stats(stats: Dict, keep_raw_values: bool = True) -> Dict:
+        """计算百分位数并清理临时数据
+
+        Args:
+            stats: 延迟统计字典
+            keep_raw_values: 是否保留原始延迟值列表,默认为True以支持分布图绘制
+        """
         for category in ["cmd", "data", "trans"]:
             for req_type in ["read", "write", "mixed"]:
                 values = stats[category][req_type]["values"]
@@ -453,7 +458,8 @@ class LatencyStatsCollector:
                 else:
                     stats[category][req_type]["p95"] = 0.0
                     stats[category][req_type]["p99"] = 0.0
-                del stats[category][req_type]["values"]
+                if not keep_raw_values:
+                    del stats[category][req_type]["values"]
         return stats
 
     def calculate_latency_stats(self, requests: List[RequestInfo]) -> Dict:

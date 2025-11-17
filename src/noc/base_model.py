@@ -1949,12 +1949,13 @@ class BaseModel:
         if not all_charts:
             return
 
-        # 确保顺序：流量图 → FIFO热力图 → RN带宽曲线 → 结果分析
+        # 确保顺序：流量图 → FIFO热力图 → RN带宽曲线 → 延迟分布图 → 结果分析
         ordered_charts = []
         flow_chart = None
         fifo_chart = None
         rn_chart = None
         bandwidth_report = None
+        latency_charts = []  # 延迟分布图列表
 
         for title, fig, custom_js in all_charts:
             if "流量图" in title:
@@ -1965,6 +1966,8 @@ class BaseModel:
                 bandwidth_report = (title, fig, custom_js)
             elif "RN" in title or "带宽曲线" in title:
                 rn_chart = (title, fig, custom_js)
+            elif "延迟分布" in title:
+                latency_charts.append((title, fig, custom_js))
 
         # 按顺序添加
         if flow_chart:
@@ -1973,6 +1976,8 @@ class BaseModel:
             ordered_charts.append(fifo_chart)
         if rn_chart:
             ordered_charts.append(rn_chart)
+        # 添加所有延迟分布图
+        ordered_charts.extend(latency_charts)
         if bandwidth_report:
             ordered_charts.append(bandwidth_report)
 

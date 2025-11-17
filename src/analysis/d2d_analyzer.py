@@ -84,6 +84,7 @@ class D2DAnalyzer:
         # from .flow_graph_renderer import FlowGraphRenderer  # 已弃用
         from .d2d_flow_renderer import D2DFlowRenderer
         from .exporters import CSVExporter, ReportGenerator, JSONExporter
+        from .latency_distribution_plotter import LatencyDistributionPlotter
 
         self.config = config
         self.min_gap_threshold = min_gap_threshold
@@ -217,6 +218,7 @@ class D2DAnalyzer:
                 "total_requests": 0,
                 "read_requests": 0,
                 "write_requests": 0,
+                "latency_distribution_figs": [],
             }
 
         # 计算D2D带宽统计
@@ -230,12 +232,32 @@ class D2DAnalyzer:
         read_requests = [r for r in self.d2d_requests if r.req_type == "read"]
         write_requests = [r for r in self.d2d_requests if r.req_type == "write"]
 
+        # 生成延迟分布图
+        latency_distribution_figs = []
+        if latency_stats and any(
+            latency_stats.get(cat, {}).get(req_type, {}).get("values", [])
+            for cat in ["cmd", "data", "trans"]
+            for req_type in ["read", "write", "mixed"]
+        ):
+            from .latency_distribution_plotter import LatencyDistributionPlotter
+            latency_plotter = LatencyDistributionPlotter(latency_stats, title_prefix="D2D")
+
+            # 生成直方图+CDF组合图
+            hist_cdf_fig = latency_plotter.plot_histogram_with_cdf(return_fig=True)
+
+            # 添加到图表列表
+            latency_distribution_figs = [
+                ("D2D延迟分布-直方图+CDF", hist_cdf_fig),
+                # ("D2D延迟分布-小提琴图", violin_fig),  # 暂时隐藏
+            ]
+
         return {
             "d2d_stats": self.d2d_stats,
             "latency_stats": latency_stats,
             "total_requests": len(self.d2d_requests),
             "read_requests": len(read_requests),
             "write_requests": len(write_requests),
+            "latency_distribution_figs": latency_distribution_figs,
         }
 
     def process_d2d_results(self, dies: Dict, output_path: str):

@@ -208,9 +208,11 @@ class SingleDieAnalyzer:
         from .core_calculators import DataValidator, TimeIntervalCalculator, BandwidthCalculator
         from .data_collectors import RequestCollector, LatencyStatsCollector, CircuitStatsCollector
         from .result_visualizers import BandwidthPlotter
+
         # from .flow_graph_renderer import FlowGraphRenderer  # 已弃用
         from .single_die_flow_renderer import SingleDieFlowRenderer
         from .exporters import CSVExporter, ReportGenerator
+        from .latency_distribution_plotter import LatencyDistributionPlotter
 
         self.config = config
         self.min_gap_threshold = min_gap_threshold
@@ -424,6 +426,19 @@ class SingleDieAnalyzer:
         # 收集需要合并的图表
         charts_to_merge = []  # [(title, fig, custom_js), ...]
 
+        # 生成延迟分布图
+        if latency_stats and any(latency_stats.get(cat, {}).get(req_type, {}).get("values", []) for cat in ["cmd", "data", "trans"] for req_type in ["read", "write", "mixed"]):
+            from .latency_distribution_plotter import LatencyDistributionPlotter
+
+            latency_plotter = LatencyDistributionPlotter(latency_stats, title_prefix="NoC")
+
+            # 生成直方图+CDF组合图
+            hist_cdf_fig = latency_plotter.plot_histogram_with_cdf(return_fig=True)
+
+            # 添加到图表列表
+            charts_to_merge.append(("延迟分布", hist_cdf_fig, None))
+            # charts_to_merge.append(("NoC延迟分布-小提琴图", violin_fig, None))  # 暂时隐藏
+
         # 绘制RN带宽曲线并计算Total_sum_BW
         rn_fig = None
         if self.plot_rn_bw_fig and self.sim_model:
@@ -456,9 +471,13 @@ class SingleDieAnalyzer:
                 flow_save_path = None
 
             if self.sim_model.topo_type_stat.startswith("Ring"):
-                self.flow_visualizer.draw_ring_flow_graph(network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, save_path=flow_save_path)
+                self.flow_visualizer.draw_ring_flow_graph(
+                    network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, save_path=flow_save_path
+                )
             else:
-                self.flow_visualizer.draw_flow_graph(network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, mode="total", save_path=flow_save_path)
+                self.flow_visualizer.draw_flow_graph(
+                    network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, mode="total", save_path=flow_save_path
+                )
 
             if flow_save_path:
                 saved_figures.append(("流图", flow_save_path))
@@ -579,7 +598,9 @@ class SingleDieAnalyzer:
 
     def _empty_metrics(self) -> BandwidthMetrics:
         """返回空的BandwidthMetrics"""
-        return BandwidthMetrics(unweighted_bandwidth=0.0, weighted_bandwidth=0.0, working_intervals=[], total_working_time=0, network_start_time=0, network_end_time=0, total_bytes=0, total_requests=0)
+        return BandwidthMetrics(
+            unweighted_bandwidth=0.0, weighted_bandwidth=0.0, working_intervals=[], total_working_time=0, network_start_time=0, network_end_time=0, total_bytes=0, total_requests=0
+        )
 
     def _calculate_port_bandwidth_averages(self, all_ports: Dict[str, PortBandwidthMetrics]) -> Dict[str, float]:
         """计算每种端口类型的平均带宽"""
