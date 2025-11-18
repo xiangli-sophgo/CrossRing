@@ -466,6 +466,11 @@ class BaseModel:
         if completed_traffics and self.verbose:
             print(f"Completed traffics: {completed_traffics}")
 
+        # 处理延迟释放的Entry
+        self._process_pending_entry_release(self.req_network)
+        self._process_pending_entry_release(self.rsp_network)
+        self._process_pending_entry_release(self.data_network)
+
     def is_completed(self):
         """Check if this die's simulation is completed."""
         traffic_completed = self.traffic_scheduler.is_all_completed()
@@ -1505,18 +1510,14 @@ class BaseModel:
         """
         if index == 0:
             flit = network.ring_bridge["TL"][pos].popleft()
-            if flit.used_entry_level == "T0":
-                network.RB_UE_Counters["TL"][pos]["T0"] -= 1
-            elif flit.used_entry_level == "T1":
-                network.RB_UE_Counters["TL"][pos]["T1"] -= 1
-            elif flit.used_entry_level == "T2":
-                network.RB_UE_Counters["TL"][pos]["T2"] -= 1
+            # TL方向：延迟释放Entry，记录到pending列表
+            if flit.used_entry_level in ("T0", "T1", "T2"):
+                network.RB_pending_entry_release["TL"][pos].append((flit.used_entry_level, self.cycle + 1))
         elif index == 1:
             flit = network.ring_bridge["TR"][pos].popleft()
-            if flit.used_entry_level == "T1":
-                network.RB_UE_Counters["TR"][pos]["T1"] -= 1
-            elif flit.used_entry_level == "T2":
-                network.RB_UE_Counters["TR"][pos]["T2"] -= 1
+            # TR方向：延迟释放Entry，记录到pending列表
+            if flit.used_entry_level in ("T1", "T2"):
+                network.RB_pending_entry_release["TR"][pos].append((flit.used_entry_level, self.cycle + 1))
         elif index == 2:
             flit = network.inject_queues["TU"][pos].popleft()
         elif index == 3:
@@ -1701,19 +1702,13 @@ class BaseModel:
                 flit = source_fifo.popleft()
                 network.EQ_arbiter_input_fifo_pre[port_name][node_id] = flit
 
-                # 对于TU/TD端口，需要更新UE计数器
+                # 对于TU/TD端口，延迟释放Entry
                 if port_name == "TU":
-                    if flit.used_entry_level == "T0":
-                        network.EQ_UE_Counters["TU"][node_id]["T0"] -= 1
-                    elif flit.used_entry_level == "T1":
-                        network.EQ_UE_Counters["TU"][node_id]["T1"] -= 1
-                    elif flit.used_entry_level == "T2":
-                        network.EQ_UE_Counters["TU"][node_id]["T2"] -= 1
+                    if flit.used_entry_level in ("T0", "T1", "T2"):
+                        network.EQ_pending_entry_release["TU"][node_id].append((flit.used_entry_level, self.cycle + 1))
                 elif port_name == "TD":
-                    if flit.used_entry_level == "T1":
-                        network.EQ_UE_Counters["TD"][node_id]["T1"] -= 1
-                    elif flit.used_entry_level == "T2":
-                        network.EQ_UE_Counters["TD"][node_id]["T2"] -= 1
+                    if flit.used_entry_level in ("T1", "T2"):
+                        network.EQ_pending_entry_release["TD"][node_id].append((flit.used_entry_level, self.cycle + 1))
 
     def _move_to_eject_queues_pre(self, network: Network, eject_flits, node_id):
         """
@@ -1813,6 +1808,52 @@ class BaseModel:
                             self.EQ_ETag_T0_per_channel[flit_channel_type][node_id]["TD"] += 1
 
                 flit.ETag_priority = "T2"
+
+    def _process_pending_entry_release(self, network):
+        """处理延迟释放的Entry计数器
+
+        在每个cycle末尾调用，检查并释放所有到期(cycle <= current_cycle)的Entry
+        """
+        # 处理RB TL方向
+        for node_id, pending_list in network.RB_pending_entry_release["TL"].items():
+            to_remove = []
+            for idx, (level, release_cycle) in enumerate(pending_list):
+                if release_cycle <= self.cycle:
+                    network.RB_UE_Counters["TL"][node_id][level] -= 1
+                    to_remove.append(idx)
+            # 从后往前删除，避免索引变化
+            for idx in reversed(to_remove):
+                pending_list.pop(idx)
+
+        # 处理RB TR方向
+        for node_id, pending_list in network.RB_pending_entry_release["TR"].items():
+            to_remove = []
+            for idx, (level, release_cycle) in enumerate(pending_list):
+                if release_cycle <= self.cycle:
+                    network.RB_UE_Counters["TR"][node_id][level] -= 1
+                    to_remove.append(idx)
+            for idx in reversed(to_remove):
+                pending_list.pop(idx)
+
+        # 处理EQ TU方向
+        for node_id, pending_list in network.EQ_pending_entry_release["TU"].items():
+            to_remove = []
+            for idx, (level, release_cycle) in enumerate(pending_list):
+                if release_cycle <= self.cycle:
+                    network.EQ_UE_Counters["TU"][node_id][level] -= 1
+                    to_remove.append(idx)
+            for idx in reversed(to_remove):
+                pending_list.pop(idx)
+
+        # 处理EQ TD方向
+        for node_id, pending_list in network.EQ_pending_entry_release["TD"].items():
+            to_remove = []
+            for idx, (level, release_cycle) in enumerate(pending_list):
+                if release_cycle <= self.cycle:
+                    network.EQ_UE_Counters["TD"][node_id][level] -= 1
+                    to_remove.append(idx)
+            for idx in reversed(to_remove):
+                pending_list.pop(idx)
 
     def _check_eq_eject_conditions(self, network, flit, node_id, port_idx, ip_type):
         """

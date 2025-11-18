@@ -1,0 +1,22 @@
+[server]
+# 减少文件监视器开销
+fileWatcherType = "none"
+
+# 更快的重新运行
+runOnSave = false
+
+[browser]
+# 收集使用统计
+gatherUsageStats = false
+
+[theme]
+# 简洁主题
+primaryColor = "#FF4B4B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#262730"
+
+[client]
+# 工具栏模式
+toolbarMode = "minimal"
+showErrorDetails = false

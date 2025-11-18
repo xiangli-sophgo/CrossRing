@@ -107,7 +107,7 @@ class D2DAnalyzer:
         self.latency_collector = LatencyStatsCollector()
         self.circuit_collector = CircuitStatsCollector()
         self.visualizer = BandwidthPlotter()
-        # self.flow_visualizer = FlowGraphRenderer()  # 已弃用
+        self.flow_visualizer = D2DFlowRenderer()  # 用于静态PNG流图
         self.interactive_flow_visualizer = D2DFlowRenderer()  # D2D交互式渲染器
         self.exporter = CSVExporter()
         self.report_generator = ReportGenerator()

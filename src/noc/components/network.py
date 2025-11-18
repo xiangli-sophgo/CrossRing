@@ -224,6 +224,10 @@ class Network:
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}  # 所有CrossPoint共享
         self.ETag_BOTHSIDE_UPGRADE = False
 
+        # 延迟释放Entry机制：存储待释放的Entry信息 {node_id: [(level, release_cycle), ...]}
+        self.RB_pending_entry_release = {"TL": defaultdict(list), "TR": defaultdict(list)}
+        self.EQ_pending_entry_release = {"TU": defaultdict(list), "TD": defaultdict(list)}
+
         # ITag setup (这些数据结构由Network管理，CrossPoint共享引用)
         self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
         self.tagged_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}

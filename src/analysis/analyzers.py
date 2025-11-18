@@ -249,7 +249,7 @@ class SingleDieAnalyzer:
         self.latency_collector = LatencyStatsCollector()
         self.circuit_collector = CircuitStatsCollector()
         self.visualizer = BandwidthPlotter()
-        # self.flow_visualizer = FlowGraphRenderer()  # 已弃用
+        self.flow_visualizer = SingleDieFlowRenderer()  # 用于静态PNG流图
         self.interactive_flow_visualizer = SingleDieFlowRenderer()
         self.exporter = CSVExporter(verbose=self.verbose)
         self.report_generator = ReportGenerator()
