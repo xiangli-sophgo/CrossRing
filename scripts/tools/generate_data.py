@@ -379,6 +379,6 @@ def generate_example_traffic():
 
 # 示例使用
 if __name__ == "__main__":
-    # generate_sim_16_share_traffic()
+    generate_sim_16_share_traffic()
     # generate_sim_16_share_d2d_traffic()
-    generate_example_traffic()
+    # generate_example_traffic()

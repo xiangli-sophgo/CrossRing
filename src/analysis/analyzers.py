@@ -557,9 +557,9 @@ class SingleDieAnalyzer:
                 read_reqs = [r for r in type_requests if r.req_type == "read"]
                 write_reqs = [r for r in type_requests if r.req_type == "write"]
 
-                read_metrics = self.calculator.calculate_bandwidth_metrics(read_reqs, "read") if read_reqs else self._empty_metrics()
-                write_metrics = self.calculator.calculate_bandwidth_metrics(write_reqs, "write") if write_reqs else self._empty_metrics()
-                mixed_metrics = self.calculator.calculate_bandwidth_metrics(type_requests, None)
+                read_metrics = self.calculator.calculate_bandwidth_metrics(read_reqs, "read", "rn") if read_reqs else self._empty_metrics()
+                write_metrics = self.calculator.calculate_bandwidth_metrics(write_reqs, "write", "rn") if write_reqs else self._empty_metrics()
+                mixed_metrics = self.calculator.calculate_bandwidth_metrics(type_requests, None, "rn")
 
                 port_metrics[port_id] = PortBandwidthMetrics(port_id=port_id, read_metrics=read_metrics, write_metrics=write_metrics, mixed_metrics=mixed_metrics)
 
@@ -588,9 +588,9 @@ class SingleDieAnalyzer:
                 read_reqs = [r for r in type_requests if r.req_type == "read"]
                 write_reqs = [r for r in type_requests if r.req_type == "write"]
 
-                read_metrics = self.calculator.calculate_bandwidth_metrics(read_reqs, "read") if read_reqs else self._empty_metrics()
-                write_metrics = self.calculator.calculate_bandwidth_metrics(write_reqs, "write") if write_reqs else self._empty_metrics()
-                mixed_metrics = self.calculator.calculate_bandwidth_metrics(type_requests, None)
+                read_metrics = self.calculator.calculate_bandwidth_metrics(read_reqs, "read", "sn") if read_reqs else self._empty_metrics()
+                write_metrics = self.calculator.calculate_bandwidth_metrics(write_reqs, "write", "sn") if write_reqs else self._empty_metrics()
+                mixed_metrics = self.calculator.calculate_bandwidth_metrics(type_requests, None, "sn")
 
                 port_metrics[port_id] = PortBandwidthMetrics(port_id=port_id, read_metrics=read_metrics, write_metrics=write_metrics, mixed_metrics=mixed_metrics)
 

@@ -374,6 +374,20 @@ class RequestCollector:
             end_time_field = {"read": "data_received_complete_cycle", "write": "write_complete_received_cycle"}.get(req_type)
             end_time_ns = self._get_time_value(representative_flit, end_time_field, start_time_ns) if end_time_field else start_time_ns
 
+            # 提取RN/SN端时间戳(仅不跨DIE请求使用)
+            source_die = getattr(first_flit, "d2d_origin_die", 0)
+            target_die = getattr(first_flit, "d2d_target_die", 1)
+            rn_end_time_ns = None
+            sn_end_time_ns = None
+
+            if source_die == target_die:  # 不跨DIE请求
+                if req_type == "read":
+                    rn_end_time_ns = self._get_time_value(representative_flit, "data_received_complete_cycle", start_time_ns)
+                    sn_end_time_ns = self._get_time_value(first_flit, "data_entry_noc_from_cake1_cycle", start_time_ns)
+                elif req_type == "write":
+                    rn_end_time_ns = self._get_time_value(first_flit, "data_entry_noc_from_cake0_cycle", start_time_ns)
+                    sn_end_time_ns = self._get_time_value(representative_flit, "data_received_complete_cycle", start_time_ns)
+
             # 从flit读取已计算的延迟值并转换为ns
             cmd_latency_ns = self._get_latency_value(first_flit, "cmd_latency")
             data_latency_ns = self._get_latency_value(first_flit, "data_latency")
@@ -388,8 +402,8 @@ class RequestCollector:
 
             return D2DRequestInfo(
                 packet_id=packet_id,
-                source_die=getattr(first_flit, "d2d_origin_die", 0),
-                target_die=getattr(first_flit, "d2d_target_die", 1),
+                source_die=source_die,
+                target_die=target_die,
                 source_node=getattr(first_flit, "d2d_origin_node", 0),
                 target_node=getattr(first_flit, "d2d_target_node", 0),
                 source_type=getattr(first_flit, "d2d_origin_type", ""),
@@ -399,6 +413,8 @@ class RequestCollector:
                 data_bytes=data_bytes,
                 start_time_ns=start_time_ns,
                 end_time_ns=end_time_ns,
+                rn_end_time_ns=rn_end_time_ns,
+                sn_end_time_ns=sn_end_time_ns,
                 cmd_latency_ns=cmd_latency_ns,
                 data_latency_ns=data_latency_ns,
                 transaction_latency_ns=transaction_latency_ns,

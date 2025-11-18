@@ -893,6 +893,52 @@ class ReportGenerator:
         html_parts.append("</table>")
         html_parts.append("</div>")
 
+        # 端口带宽统计（按IP类型平均）
+        rn_ports = results.get("rn_ports", {})
+        sn_ports = results.get("sn_ports", {})
+        all_ports = {**rn_ports, **sn_ports}
+
+        if all_ports:
+            html_parts.append('<div class="report-section">')
+            html_parts.append("<h3>端口带宽统计</h3>")
+            html_parts.append('<table class="report-table">')
+            html_parts.append("<thead>")
+            html_parts.append("<tr><th>IP类型</th><th>读带宽 (GB/s)</th><th>写带宽 (GB/s)</th><th>混合带宽 (GB/s)</th></tr>")
+            html_parts.append("</thead>")
+            html_parts.append("<tbody>")
+
+            # 按IP基础类型分组（如gdma、ddr）
+            from collections import defaultdict
+
+            ip_type_groups = defaultdict(list)
+            for port_id, metrics in all_ports.items():
+                # 提取基础IP类型（gdma_0 -> gdma）
+                base_type = port_id.split("_")[0]
+                ip_type_groups[base_type].append(metrics)
+
+            # 计算每种IP类型的平均带宽（使用加权带宽）
+            for base_type in sorted(ip_type_groups.keys()):
+                metrics_list = ip_type_groups[base_type]
+                count = len(metrics_list)
+
+                # 计算平均值（只使用加权带宽）
+                read_avg = sum(m.read_metrics.weighted_bandwidth for m in metrics_list) / count
+                write_avg = sum(m.write_metrics.weighted_bandwidth for m in metrics_list) / count
+                mixed_avg = sum(m.mixed_metrics.weighted_bandwidth for m in metrics_list) / count
+
+                html_parts.append(
+                    f"<tr>"
+                    f"<td>{base_type.upper()}</td>"
+                    f"<td class='num-cell'>{read_avg:.3f}</td>"
+                    f"<td class='num-cell'>{write_avg:.3f}</td>"
+                    f"<td class='num-cell'>{mixed_avg:.3f}</td>"
+                    f"</tr>"
+                )
+
+            html_parts.append("</tbody>")
+            html_parts.append("</table>")
+            html_parts.append("</div>")
+
         # 请求统计
         html_parts.append('<div class="report-section">')
         html_parts.append("<h3>请求统计</h3>")
@@ -1005,7 +1051,7 @@ class ReportGenerator:
 
         return "\n".join(html_parts)
 
-    def generate_d2d_summary_report_html(self, d2d_stats: Any = None, d2d_requests: List = None, latency_stats: Dict = None, circuit_stats: Dict = None) -> str:
+    def generate_d2d_summary_report_html(self, d2d_stats: Any = None, d2d_requests: List = None, latency_stats: Dict = None, circuit_stats: Dict = None, die_ip_bandwidth_data: Dict = None) -> str:
         """
         生成D2D HTML格式的结果摘要
 
@@ -1014,46 +1060,49 @@ class ReportGenerator:
             d2d_requests: D2D请求列表（可选）
             latency_stats: 延迟统计字典（可选）
             circuit_stats: 绕环统计字典（可选）
+            die_ip_bandwidth_data: Die IP带宽数据（可选）{die_id: {mode: {ip_instance: matrix}}}
 
         Returns:
             str: HTML格式的报告内容
         """
         html_parts = []
 
-        # D2D带宽统计
-        if d2d_stats:
-            html_parts.append('<div class="report-section">')
-            html_parts.append("<h3>D2D带宽统计</h3>")
-            html_parts.append('<table class="report-table">')
-            html_parts.append("<tbody>")
+        # # D2D带宽统计
+        # if d2d_stats:
+        #     html_parts.append('<div class="report-section">')
+        #     html_parts.append("<h3>D2D带宽统计</h3>")
+        #     html_parts.append('<table class="report-table">')
+        #     html_parts.append("<tbody>")
 
-            # 读带宽
-            total_read_unweighted = 0.0
-            total_read_weighted = 0.0
-            for (src, dst), (uw, wt) in sorted(d2d_stats.pair_read_bw.items()):
-                html_parts.append(f'<tr><td>Die{src} → Die{dst} 读带宽</td><td class="num-cell">{uw:.3f} GB/s</td><td class="num-cell">加权: {wt:.3f} GB/s</td></tr>')
-                total_read_unweighted += uw
-                total_read_weighted += wt
+        #     # 读带宽
+        #     total_read_unweighted = 0.0
+        #     total_read_weighted = 0.0
+        #     for (src, dst), (uw, wt) in sorted(d2d_stats.pair_read_bw.items()):
+        #         html_parts.append(f'<tr><td>Die{src} → Die{dst} 读带宽</td><td class="num-cell">{uw:.3f} GB/s</td><td class="num-cell">加权: {wt:.3f} GB/s</td></tr>')
+        #         total_read_unweighted += uw
+        #         total_read_weighted += wt
 
-            # 写带宽
-            total_write_unweighted = 0.0
-            total_write_weighted = 0.0
-            for (src, dst), (uw, wt) in sorted(d2d_stats.pair_write_bw.items()):
-                html_parts.append(f'<tr><td>Die{src} → Die{dst} 写带宽</td><td class="num-cell">{uw:.3f} GB/s</td><td class="num-cell">加权: {wt:.3f} GB/s</td></tr>')
-                total_write_unweighted += uw
-                total_write_weighted += wt
+        #     # 写带宽
+        #     total_write_unweighted = 0.0
+        #     total_write_weighted = 0.0
+        #     for (src, dst), (uw, wt) in sorted(d2d_stats.pair_write_bw.items()):
+        #         html_parts.append(f'<tr><td>Die{src} → Die{dst} 写带宽</td><td class="num-cell">{uw:.3f} GB/s</td><td class="num-cell">加权: {wt:.3f} GB/s</td></tr>')
+        #         total_write_unweighted += uw
+        #         total_write_weighted += wt
 
-            # 总计
-            html_parts.append(f'<tr><td><strong>总带宽</strong></td><td class="num-cell"><strong>{total_read_unweighted + total_write_unweighted:.3f} GB/s</strong></td><td class="num-cell"><strong>加权: {total_read_weighted + total_write_weighted:.3f} GB/s</strong></td></tr>')
+        #     # 总计
+        #     html_parts.append(
+        #         f'<tr><td><strong>总带宽</strong></td><td class="num-cell"><strong>{total_read_unweighted + total_write_unweighted:.3f} GB/s</strong></td><td class="num-cell"><strong>加权: {total_read_weighted + total_write_weighted:.3f} GB/s</strong></td></tr>'
+        #     )
 
-            html_parts.append("</tbody>")
-            html_parts.append("</table>")
-            html_parts.append("</div>")
+        #     html_parts.append("</tbody>")
+        #     html_parts.append("</table>")
+        #     html_parts.append("</div>")
 
         # 请求统计
         if d2d_requests:
             html_parts.append('<div class="report-section">')
-            html_parts.append("<h3>D2D请求统计</h3>")
+            html_parts.append("<h3>请求统计</h3>")
             html_parts.append('<table class="report-table">')
             html_parts.append("<tbody>")
 
@@ -1063,8 +1112,100 @@ class ReportGenerator:
 
             html_parts.append(f'<tr><td>请求数</td><td class="num-cell">读: {read_req}</td><td class="num-cell">写: {write_req}</td><td class="num-cell">总计: {total_req}</td></tr>')
 
+            # retry统计
+            if circuit_stats:
+                summary = circuit_stats.get("summary", circuit_stats)
+                html_parts.append(
+                    f'<tr><td>Retry</td><td class="num-cell">读: {summary.get("read_retry_num", 0)}</td><td class="num-cell">写: {summary.get("write_retry_num", 0)}</td><td class="num-cell">总计: {summary.get("read_retry_num", 0) + summary.get("write_retry_num", 0)}</td></tr>'
+                )
+
             html_parts.append("</tbody>")
             html_parts.append("</table>")
+            html_parts.append("</div>")
+
+        # 端口带宽统计（所有Die整体平均）
+        if die_ip_bandwidth_data:
+            html_parts.append('<div class="report-section">')
+            html_parts.append("<h3>端口带宽统计</h3>")
+
+            # 收集所有Die的数据以计算整体平均
+            from collections import defaultdict
+
+            all_dies_ip_type_groups = defaultdict(lambda: {"read": [], "write": [], "total": []})
+
+            # 遍历所有Die收集数据
+            for die_id in die_ip_bandwidth_data.keys():
+                die_data = die_ip_bandwidth_data[die_id]
+                if not die_data:
+                    continue
+
+                # 获取三种模式的数据
+                read_data = die_data.get("read", {})
+                write_data = die_data.get("write", {})
+                total_data = die_data.get("total", {})
+
+                # 收集所有IP实例
+                all_ip_instances = set(read_data.keys()) | set(write_data.keys()) | set(total_data.keys())
+                if not all_ip_instances:
+                    continue
+
+                for ip_instance in all_ip_instances:
+                    # 提取IP基本类型
+                    if ip_instance.lower().startswith("d2d"):
+                        parts = ip_instance.lower().split("_")
+                        ip_type = "_".join(parts[:2]) if len(parts) >= 2 else parts[0]
+                    else:
+                        ip_type = ip_instance.split("_")[0]
+
+                    # 获取矩阵
+                    read_matrix = read_data.get(ip_instance)
+                    write_matrix = write_data.get(ip_instance)
+                    total_matrix = total_data.get(ip_instance)
+
+                    # 计算该IP实例的总带宽（矩阵中所有非零值的和）
+                    if read_matrix is not None:
+                        read_bw = float(read_matrix.sum())
+                        if read_bw > 0.001:
+                            all_dies_ip_type_groups[ip_type]["read"].append(read_bw)
+
+                    if write_matrix is not None:
+                        write_bw = float(write_matrix.sum())
+                        if write_bw > 0.001:
+                            all_dies_ip_type_groups[ip_type]["write"].append(write_bw)
+
+                    if total_matrix is not None:
+                        total_bw = float(total_matrix.sum())
+                        if total_bw > 0.001:
+                            all_dies_ip_type_groups[ip_type]["total"].append(total_bw)
+
+            # 显示所有Die的整体平均带宽
+            if all_dies_ip_type_groups:
+                html_parts.append('<table class="report-table">')
+                html_parts.append("<thead>")
+                html_parts.append("<tr><th>IP类型</th><th>读带宽 (GB/s)</th><th>写带宽 (GB/s)</th><th>混合带宽 (GB/s)</th></tr>")
+                html_parts.append("</thead>")
+                html_parts.append("<tbody>")
+
+                # 计算所有Die的整体平均
+                for ip_type in sorted(all_dies_ip_type_groups.keys()):
+                    group = all_dies_ip_type_groups[ip_type]
+
+                    read_avg = sum(group["read"]) / len(group["read"]) if group["read"] else 0.0
+                    write_avg = sum(group["write"]) / len(group["write"]) if group["write"] else 0.0
+                    total_avg = sum(group["total"]) / len(group["total"]) if group["total"] else 0.0
+
+                    html_parts.append(
+                        f"<tr>"
+                        f"<td>{ip_type.upper()}</td>"
+                        f"<td class='num-cell'>{read_avg:.3f}</td>"
+                        f"<td class='num-cell'>{write_avg:.3f}</td>"
+                        f"<td class='num-cell'>{total_avg:.3f}</td>"
+                        f"</tr>"
+                    )
+
+                html_parts.append("</tbody>")
+                html_parts.append("</table>")
+
             html_parts.append("</div>")
 
         # 延迟统计

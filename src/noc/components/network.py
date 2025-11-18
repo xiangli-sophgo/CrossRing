@@ -111,6 +111,12 @@ class Network:
         self.EQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
         self.IQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
         self.EQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
+        # IQ仲裁输入FIFO (深度2 + pre缓冲，按IP类型分类)
+        self.IQ_arbiter_input_fifo = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
+        self.IQ_arbiter_input_fifo_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
+        # EQ仲裁输入FIFO (深度2 + pre缓冲，4个输入端口，每个端口一个FIFO)
+        self.EQ_arbiter_input_fifo = {"TU": {}, "TD": {}, "IQ": {}, "RB": {}}
+        self.EQ_arbiter_input_fifo_pre = {"TU": {}, "TD": {}, "IQ": {}, "RB": {}}
         self.links = {}
         self.cross_point = {"horizontal": defaultdict(lambda: defaultdict(list)), "vertical": defaultdict(lambda: defaultdict(list))}
         # Crosspoint conflict status: maintains pipeline queue [current_cycle, previous_cycle]
@@ -260,6 +266,14 @@ class Network:
             for key in self.config.CH_NAME_LIST:
                 self.IQ_channel_buffer_pre[key][node_pos] = None
                 self.EQ_channel_buffer_pre[key][node_pos] = None
+                # IQ仲裁输入FIFO初始化（按IP类型分类）
+                self.IQ_arbiter_input_fifo[key][node_pos] = deque(maxlen=2)
+                self.IQ_arbiter_input_fifo_pre[key][node_pos] = None
+
+            # EQ仲裁输入FIFO初始化（4个输入端口，每个端口一个FIFO）
+            for input_port in ["TU", "TD", "IQ", "RB"]:
+                self.EQ_arbiter_input_fifo[input_port][node_pos] = deque(maxlen=2)
+                self.EQ_arbiter_input_fifo_pre[input_port][node_pos] = None
             for key in self.arrive_node_pre:
                 self.arrive_node_pre[key][node_pos] = None
 

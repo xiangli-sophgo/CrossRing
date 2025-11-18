@@ -36,15 +36,16 @@ def main():
             # "d2d_16_share_D2D_R_1104.txt",
             # "d2d_16_share_D2D_W_1104.txt"
             # "d2d_64_share_D2D_R_1104.txt",
-            "d2d_64_share_D2D_W_1104.txt",
+            # "d2d_64_share_D2D_W_1104.txt",
             # "d2d_16_share_W_1104.txt"
             # "d2d_16_share_R_1104.txt"
             # "data_sim_16_share_W_1110.txt"
+            "2261_c2c_16_share_W_1118.txt"
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
     # model.setup_debug(trace_packets=[1], update_interval=0.1)
-    # model.setup_visualization(enable=1, update_interval=0.5, start_cycle=1000)
+    # model.setup_visualization(enable=1, update_interval=0.5, start_cycle=200)
 
     model.setup_result_analysis(
         # 图片生成控制
@@ -52,7 +53,7 @@ def main():
         ip_bandwidth_heatmap=0,
         plot_rn_bw_fig=0,
         fifo_utilization_heatmap=1,
-        show_fig=1,  # 在浏览器中显示图像
+        show_result_analysis=1,  # 在浏览器中显示图像
         # CSV文件导出控制
         export_d2d_requests_csv=1,
         export_ip_bandwidth_csv=1,
@@ -63,7 +64,7 @@ def main():
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_time=100,
+        max_time=200,
         print_interval=200,
         verbose=1,
     )

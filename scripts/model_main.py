@@ -15,8 +15,8 @@ def main():
     """运行CrossRing仿真 - 使用新的简化配置接口"""
 
     # ==================== 流量配置 ====================
-    traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
-    # traffic_file_path = r"../test_data"
+    # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
+    traffic_file_path = r"../test_data"
     # traffic_file_path = r"../traffic/sim_d2d_traffic"
     traffic_config = [
         [
@@ -78,7 +78,7 @@ def main():
         show_result_analysis=1,
     )
     # sim.setup_debug(print_trace=1, show_trace_id=[2036, 2028], update_interval=0.1)
-    # sim.setup_visualization(plot_link_state=1, plot_start_cycle=1500, show_node_id=1)
+    # sim.setup_visualization(plot_link_state=1, plot_start_cycle=1000, show_node_id=1)
     np.random.seed(801)
 
     sim.run_simulation(max_time=5000, print_interval=200)

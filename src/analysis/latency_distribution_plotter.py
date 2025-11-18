@@ -67,8 +67,8 @@ class LatencyDistributionPlotter:
                 f"{self.LATENCY_LABELS['data']} (ns)",
                 f"{self.LATENCY_LABELS['trans']} (ns)",
             ],
-            specs=[[{"secondary_y": True}], [{"secondary_y": True}], [{"secondary_y": True}]],
-            vertical_spacing=0.15,
+            specs=[[{}], [{}], [{}]],
+            vertical_spacing=0.08,
         )
 
         categories = ["cmd", "data", "trans"]
@@ -79,7 +79,7 @@ class LatencyDistributionPlotter:
             if len(values) == 0:
                 continue
 
-            # 添加直方图(主Y轴)
+            # 添加直方图
             fig.add_trace(
                 go.Histogram(
                     x=values,
@@ -93,35 +93,13 @@ class LatencyDistributionPlotter:
                 ),
                 row=row_idx,
                 col=1,
-                secondary_y=False,
             )
-
-            # 计算并添加CDF曲线(次Y轴)
-            sorted_values = np.sort(values)
-            cdf = np.arange(1, len(sorted_values) + 1) / len(sorted_values)
-
-            p95 = self.latency_stats[category]["mixed"].get("p95", 0)
-            p99 = self.latency_stats[category]["mixed"].get("p99", 0)
-
-            # 添加CDF曲线到次Y轴
-            cdf_trace = go.Scatter(
-                x=sorted_values,
-                y=cdf,
-                mode="lines",
-                name="CDF",
-                line=dict(color="#d62728", width=3),
-                showlegend=(row_idx == 1),
-                legendgroup="cdf",
-                hovertemplate="延迟: %{x:.1f} ns<br>" + "百分位: %{y:.2%}<br>" + f"<extra>P95: {p95:.1f} ns<br>P99: {p99:.1f} ns</extra>",
-            )
-            fig.add_trace(cdf_trace, row=row_idx, col=1, secondary_y=True)
 
             # 在当前子图上添加统计值的垂直线标注
             mean_val = np.mean(values)
             p50_val = np.percentile(values, 50)
             p95_val = self.latency_stats[category]["mixed"].get("p95", 0)
             p99_val = self.latency_stats[category]["mixed"].get("p99", 0)
-            max_val = np.max(values)
 
             # 添加垂直线标注统计值位置
             # 使用不同的y高度来错开标注,避免重叠
@@ -144,9 +122,8 @@ class LatencyDistributionPlotter:
                 )
 
                 # 添加文本标注 - 必须明确指定subplot的坐标系
-                # row_idx=1 -> x, y  row_idx=2 -> x2, y3  row_idx=3 -> x3, y5
                 xref = "x" if row_idx == 1 else f"x{row_idx}"
-                yref = "y" if row_idx == 1 else f"y{(row_idx - 1) * 2 + 1}"
+                yref = "y" if row_idx == 1 else f"y{row_idx}"
 
                 fig.add_annotation(
                     x=stat_val,
@@ -155,7 +132,7 @@ class LatencyDistributionPlotter:
                     xref=xref,
                     text=f"{stat_name}: {stat_val:.1f}ns",
                     showarrow=False,
-                    font=dict(size=9, color=color),
+                    font=dict(size=14, color=color),
                     bgcolor="rgba(255, 255, 255, 0.9)",
                     bordercolor=color,
                     borderwidth=1,
@@ -165,22 +142,16 @@ class LatencyDistributionPlotter:
         # 设置所有子图的轴标签
         for row_idx in range(1, 4):
             fig.update_xaxes(title_text="延迟 (ns)", row=row_idx, col=1)
-            fig.update_yaxes(title_text="频次", secondary_y=False, row=row_idx, col=1)
-            fig.update_yaxes(title_text="累积概率", range=[0, 1.05], secondary_y=True, row=row_idx, col=1)
+            fig.update_yaxes(title_text="频次", row=row_idx, col=1)
 
         fig.update_layout(
-            height=1200,
+            height=1800,
+            width=1600,
             hovermode="closest",
             showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=1.005, xanchor="left", x=0.01),
+            margin=dict(l=120, r=40, t=20, b=20),
         )
-
-        # 确保所有次Y轴都正确配置并可见
-        for row_idx in range(1, 4):
-            yaxis2_name = f"yaxis{row_idx * 2}"
-            fig.layout[yaxis2_name].update(
-                side="right", overlaying=f"y" if row_idx == 1 else f"y{(row_idx-1)*2+1}", showgrid=False, visible=True, showticklabels=True  # 必须显示网格才能看到轴
-            )
 
         # 调整子图标题位置,避免与垂直线标注重叠
         for annotation in fig["layout"]["annotations"]:

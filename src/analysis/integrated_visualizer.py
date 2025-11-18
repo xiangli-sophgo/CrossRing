@@ -170,7 +170,7 @@ class IntegratedVisualizer:
         }
         .chart-container {
             width: 100%;
-            min-height: 600px;
+            height: auto;
         }
         /* FIFO热力图按钮样式 */
         .updatemenu-button.active {

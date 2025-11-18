@@ -186,24 +186,30 @@ class NetworkLinkVisualizer:
             ch_names = self.config.CH_NAME_LIST
             # ------- absolute positions (keep spacing param) ----------
             # ------------------- unified module configs ------------------- #
+            # IQ arbiter lanes: 每个IP类型一个arbiter FIFO
+            iq_arbiter_lanes = ["arb_" + ch for ch in ch_names]
+
             iq_config = dict(
                 title="Inject Queue",
-                lanes=ch_names + ["TL", "TR", "TD", "TU", "EQ"],
-                depths=[self.IQ_CH_depth] * len(ch_names) + [self.IQ_depth_horizontal, self.IQ_depth_horizontal, self.IQ_depth_vertical, self.IQ_depth_vertical, self.IQ_depth_eq],
-                orientations=["vertical"] * len(ch_names) + ["vertical"] * 2 + ["horizontal"] * 3,
-                h_pos=["top"] * len(ch_names) + ["bottom"] * 2 + ["mid"] * 3,
-                v_pos=["left"] * len(ch_names) + ["left"] * 2 + ["right"] * 3,
+                lanes=ch_names + iq_arbiter_lanes + ["TL", "TR", "TD", "TU", "EQ"],
+                depths=[self.IQ_CH_depth] * len(ch_names) + [2] * len(ch_names) + [self.IQ_depth_horizontal, self.IQ_depth_horizontal, self.IQ_depth_vertical, self.IQ_depth_vertical, self.IQ_depth_eq],
+                orientations=["vertical"] * len(ch_names) + ["vertical"] * len(ch_names) + ["vertical"] * 2 + ["horizontal"] * 3,
+                h_pos=["top"] * len(ch_names) + ["top2"] * len(ch_names) + ["bottom"] * 2 + ["mid"] * 3,
+                v_pos=["left"] * len(ch_names) + ["left"] * len(ch_names) + ["left"] * 2 + ["right"] * 3,
                 patch_dict=self.iq_patches,
                 text_dict=self.iq_texts,
             )
 
+            # EQ arbiter lanes: 4个输入端口各一个arbiter FIFO
+            eq_arbiter_lanes = ["arb_TD", "arb_TU", "arb_IQ", "arb_RB"]
+
             eq_config = dict(
                 title="Eject Queue",
-                lanes=ch_names + ["TU", "TD"],
-                depths=[self.EQ_CH_depth] * len(ch_names) + [self.EQ_depth] * 2,
-                orientations=["horizontal"] * len(ch_names) + ["horizontal"] * 2,
-                h_pos=["top"] * len(ch_names) + ["bottom"] * 2,
-                v_pos=["left"] * len(ch_names) + ["right", "right"],
+                lanes=ch_names + ["TD", "TU"] + eq_arbiter_lanes,
+                depths=[self.EQ_CH_depth] * len(ch_names) + [self.EQ_depth] * 2 + [2] * 4,
+                orientations=["horizontal"] * len(ch_names) + ["horizontal"] * 2 + ["horizontal"] * 4,
+                h_pos=["top"] * len(ch_names) + ["bottom"] * 2 + ["mid"] * 4,
+                v_pos=["left"] * len(ch_names) + ["right", "right"] + ["mid"] * 4,
                 patch_dict=self.eq_patches,
                 text_dict=self.eq_texts,
             )
@@ -471,7 +477,8 @@ class NetworkLinkVisualizer:
                         lane_y = y + (idx_in_group * self.fifo_gap) + self.gap_hv
                         text_va = "top"
                     elif hpos == "mid":
-                        lane_y = y + module_height / 2 + (idx_in_group - 1) * self.fifo_gap
+                        offset = (idx_in_group - (group_size - 1) / 2) * self.fifo_gap
+                        lane_y = y + module_height / 2 + offset
                         text_va = "center"
                     else:
                         raise ValueError(f"Unknown h_position: {hpos}")
@@ -496,6 +503,14 @@ class NetworkLinkVisualizer:
                         raise ValueError(f"Unknown v_position: {vpos}")
                     if lane[:2] in ["TL", "TR", "TU", "TD", "EQ"]:
                         self.ax.text(text_x, lane_y + square / 2, lane[:2].upper(), ha=ha, va="center", fontsize=fontsize)
+                    elif lane.startswith("arb_"):
+                        # EQ arbiter显示标签，IQ arbiter不显示
+                        if title == "Eject Queue":
+                            port_name = lane.replace("arb_", "")
+                            label = port_name + "_Ar"
+                            # 标签放在FIFO右侧
+                            label_x = lane_x + depth * (square + gap) + self.text_gap
+                            self.ax.text(label_x, lane_y + square / 2, label, ha="left", va="center", fontsize=fontsize)
                     else:
                         self.ax.text(text_x, lane_y + square / 2, lane[0].upper() + lane[-1], ha=ha, va="center", fontsize=fontsize)
                     patch_dict[lane] = []
@@ -552,13 +567,22 @@ class NetworkLinkVisualizer:
                         text_y = y + module_height - depth * (square + gap) - self.gap_hv - self.text_gap
                         slot_dir = 1
                         va = "top"
+                    elif hpos == "top2":
+                        # top2: 紧跟在top组下方，所有arbiter FIFO使用相同的起始y坐标
+                        # 从top组底部开始（top组的lane_y就是其底部位置）
+                        top_group_bottom = y + module_height - self.IQ_CH_depth * (square + gap) - self.gap_hv
+                        lane_y = top_group_bottom - self.fifo_gap - depth * (square + gap)
+                        text_y = lane_y - self.text_gap
+                        slot_dir = 1
+                        va = "top"
                     elif hpos == "bottom":
                         lane_y = y + self.gap_hv
                         text_y = y + self.gap_hv + depth * (square + gap) + self.text_gap
                         slot_dir = 1
                         va = "bottom"
                     elif hpos == "mid" or hpos is None:
-                        lane_y = y - (depth / 2) * (square + gap)
+                        lane_y = y + module_height / 2 - (depth / 2) * (square + gap)
+                        text_y = y + module_height / 2 - (depth / 2) * (square + gap) - self.text_gap
                         slot_dir = 1
                         va = "center"
                     else:
@@ -566,6 +590,12 @@ class NetworkLinkVisualizer:
 
                     if lane[:2] in ["TL", "TR", "TU", "TD", "EQ"]:
                         self.ax.text(lane_x + square / 2, text_y, lane[:2].upper(), ha="center", va=va, fontsize=fontsize)
+                    elif lane.startswith("arb_"):
+                        # EQ arbiter显示标签，IQ arbiter不显示
+                        if title == "Eject Queue":
+                            port_name = lane.replace("arb_", "")
+                            label = port_name + "_Ar"
+                            self.ax.text(lane_x + square / 2, text_y, label, ha="center", va=va, fontsize=fontsize)
                     else:
                         self.ax.text(lane_x + square / 2, text_y, lane[0].upper() + lane[-1], ha="center", va=va, fontsize=fontsize)
                     patch_dict[lane] = []
@@ -640,7 +670,12 @@ class NetworkLinkVisualizer:
             CP_V = network.cross_point["vertical"]
             # Inject
             for lane, patches in self.iq_patches.items():
-                if "_" in lane:
+                if lane.startswith("arb_"):
+                    # IQ arbiter输入FIFO：从lane名提取IP类型
+                    # "arb_gdma_0" -> "gdma_0"
+                    ip_type = lane.replace("arb_", "")
+                    q = network.IQ_arbiter_input_fifo[ip_type][self.node_id]
+                elif "_" in lane:
                     q = IQ_Ch.get(lane, [])[self.node_id]
                 else:
                     q = IQ.get(lane, [])[self.node_id]
@@ -674,7 +709,12 @@ class NetworkLinkVisualizer:
                             self.patch_info_map.pop(p, None)
             # Eject
             for lane, patches in self.eq_patches.items():
-                if "_" in lane:
+                if lane.startswith("arb_"):
+                    # EQ arbiter输入FIFO：从lane名提取端口名
+                    # "arb_TU" -> "TU"
+                    port_name = lane.replace("arb_", "")
+                    q = network.EQ_arbiter_input_fifo[port_name][self.node_id]
+                elif "_" in lane:
                     q = EQ_Ch.get(lane, [])[self.node_id]
                 else:
                     q = EQ.get(lane, [])[self.node_id]

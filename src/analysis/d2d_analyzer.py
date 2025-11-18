@@ -33,6 +33,8 @@ class D2DRequestInfo:
     cmd_latency_ns: int
     data_latency_ns: int
     transaction_latency_ns: int
+    rn_end_time_ns: int = None  # RN端结束时间(仅不跨DIE请求使用)
+    sn_end_time_ns: int = None  # SN端结束时间(仅不跨DIE请求使用)
     d2d_sn_node: int = None  # D2D_SN节点物理ID
     d2d_rn_node: int = None  # D2D_RN节点物理ID
 
@@ -54,6 +56,8 @@ class D2DBandwidthStats:
             self.pair_read_bw = {}
         if self.pair_write_bw is None:
             self.pair_write_bw = {}
+
+
 class D2DAnalyzer:
     """
     D2D跨Die分析器
@@ -81,6 +85,7 @@ class D2DAnalyzer:
         from .core_calculators import DataValidator, TimeIntervalCalculator, BandwidthCalculator
         from .data_collectors import RequestCollector, LatencyStatsCollector, CircuitStatsCollector
         from .result_visualizers import BandwidthPlotter
+
         # from .flow_graph_renderer import FlowGraphRenderer  # 已弃用
         from .d2d_flow_renderer import D2DFlowRenderer
         from .exporters import CSVExporter, ReportGenerator, JSONExporter
@@ -234,12 +239,9 @@ class D2DAnalyzer:
 
         # 生成延迟分布图
         latency_distribution_figs = []
-        if latency_stats and any(
-            latency_stats.get(cat, {}).get(req_type, {}).get("values", [])
-            for cat in ["cmd", "data", "trans"]
-            for req_type in ["read", "write", "mixed"]
-        ):
+        if latency_stats and any(latency_stats.get(cat, {}).get(req_type, {}).get("values", []) for cat in ["cmd", "data", "trans"] for req_type in ["read", "write", "mixed"]):
             from .latency_distribution_plotter import LatencyDistributionPlotter
+
             latency_plotter = LatencyDistributionPlotter(latency_stats, title_prefix="D2D")
 
             # 生成直方图+CDF组合图
@@ -247,7 +249,7 @@ class D2DAnalyzer:
 
             # 添加到图表列表
             latency_distribution_figs = [
-                ("D2D延迟分布-直方图+CDF", hist_cdf_fig),
+                ("延迟分布", hist_cdf_fig),
                 # ("D2D延迟分布-小提琴图", violin_fig),  # 暂时隐藏
             ]
 
@@ -400,40 +402,40 @@ class D2DAnalyzer:
         for (die_id, node, ip_type), requests in source_groups.items():
             row, col = self._get_physical_position(node, dies[die_id])
 
-            # 按req_type分组并计算带宽
+            # 按req_type分组并计算带宽(使用RN端时间戳)
             read_reqs = [r for r in requests if r.req_type == "read"]
             write_reqs = [r for r in requests if r.req_type == "write"]
 
             if read_reqs:
-                _, weighted_bw = self._calculate_bandwidth_for_group(read_reqs)
+                _, weighted_bw = self._calculate_bandwidth_for_group(read_reqs, endpoint_type="rn")
                 self.die_ip_bandwidth_data[die_id]["read"][ip_type][row, col] += weighted_bw
 
             if write_reqs:
-                _, weighted_bw = self._calculate_bandwidth_for_group(write_reqs)
+                _, weighted_bw = self._calculate_bandwidth_for_group(write_reqs, endpoint_type="rn")
                 self.die_ip_bandwidth_data[die_id]["write"][ip_type][row, col] += weighted_bw
 
             if requests:
-                _, weighted_bw = self._calculate_bandwidth_for_group(requests)
+                _, weighted_bw = self._calculate_bandwidth_for_group(requests, endpoint_type="rn")
                 self.die_ip_bandwidth_data[die_id]["total"][ip_type][row, col] += weighted_bw
 
         # 第四步：处理target带宽
         for (die_id, node, ip_type), requests in target_groups.items():
             row, col = self._get_physical_position(node, dies[die_id])
 
-            # 按req_type分组并计算带宽
+            # 按req_type分组并计算带宽(使用SN端时间戳)
             read_reqs = [r for r in requests if r.req_type == "read"]
             write_reqs = [r for r in requests if r.req_type == "write"]
 
             if read_reqs:
-                _, weighted_bw = self._calculate_bandwidth_for_group(read_reqs)
+                _, weighted_bw = self._calculate_bandwidth_for_group(read_reqs, endpoint_type="sn")
                 self.die_ip_bandwidth_data[die_id]["read"][ip_type][row, col] += weighted_bw
 
             if write_reqs:
-                _, weighted_bw = self._calculate_bandwidth_for_group(write_reqs)
+                _, weighted_bw = self._calculate_bandwidth_for_group(write_reqs, endpoint_type="sn")
                 self.die_ip_bandwidth_data[die_id]["write"][ip_type][row, col] += weighted_bw
 
             if requests:
-                _, weighted_bw = self._calculate_bandwidth_for_group(requests)
+                _, weighted_bw = self._calculate_bandwidth_for_group(requests, endpoint_type="sn")
                 self.die_ip_bandwidth_data[die_id]["total"][ip_type][row, col] += weighted_bw
 
         # 第五步：处理D2D_SN节点带宽（所有跨Die请求都经过D2D_SN）
@@ -503,8 +505,19 @@ class D2DAnalyzer:
         col = node % cols
         return row, col
 
-    def _calculate_bandwidth_for_group(self, requests: list) -> tuple:
-        """计算请求组的带宽（非加权和加权）"""
+    def _calculate_bandwidth_for_group(self, requests: list, endpoint_type: str = None) -> tuple:
+        """计算请求组的带宽（非加权和加权）
+
+        Args:
+            requests: 请求列表
+            endpoint_type: 端点类型 ("rn", "sn", None)
+                - "rn": 使用RN端时间戳(不跨DIE请求),或end_time(跨DIE请求)
+                - "sn": 使用SN端时间戳(不跨DIE请求),或end_time(跨DIE请求)
+                - None: 使用end_time
+
+        Returns:
+            (unweighted_bandwidth, weighted_bandwidth)
+        """
         if not requests:
             return 0.0, 0.0
 
@@ -515,14 +528,22 @@ class D2DAnalyzer:
             if hasattr(r, "start_time_ns"):
                 # 创建一个简单的对象模拟RequestInfo
                 class _TempRequest:
-                    def __init__(self, d2d_req):
+                    def __init__(self, d2d_req, endpoint_type):
                         self.packet_id = d2d_req.packet_id
                         self.start_time = d2d_req.start_time_ns
-                        self.end_time = d2d_req.end_time_ns
+
+                        # 根据endpoint_type选择结束时间
+                        if endpoint_type == "rn" and d2d_req.rn_end_time_ns is not None:
+                            self.end_time = d2d_req.rn_end_time_ns
+                        elif endpoint_type == "sn" and d2d_req.sn_end_time_ns is not None:
+                            self.end_time = d2d_req.sn_end_time_ns
+                        else:
+                            self.end_time = d2d_req.end_time_ns
+
                         self.total_bytes = d2d_req.data_bytes
                         self.burst_length = d2d_req.burst_length
 
-                converted_requests.append(_TempRequest(r))
+                converted_requests.append(_TempRequest(r, endpoint_type))
             else:
                 converted_requests.append(r)
 
@@ -724,7 +745,11 @@ class D2DAnalyzer:
         # 调用ReportGenerator生成HTML
         report_generator = ReportGenerator()
         html_content = report_generator.generate_d2d_summary_report_html(
-            d2d_stats=self.d2d_stats, d2d_requests=self.d2d_requests, latency_stats=latency_stats, circuit_stats=circuit_stats_data
+            d2d_stats=self.d2d_stats,
+            d2d_requests=self.d2d_requests,
+            latency_stats=latency_stats,
+            circuit_stats=circuit_stats_data,
+            die_ip_bandwidth_data=self.die_ip_bandwidth_data
         )
 
         return html_content
@@ -936,7 +961,17 @@ class D2DAnalyzer:
             save_path=save_path,
         )
 
-    def draw_d2d_flow_graph_interactive(self, die_networks: Dict = None, dies: Dict = None, config=None, die_ip_bandwidth_data: Dict = None, mode: str = "total", save_path: str = None, show_fig: bool = False, return_fig: bool = False):
+    def draw_d2d_flow_graph_interactive(
+        self,
+        die_networks: Dict = None,
+        dies: Dict = None,
+        config=None,
+        die_ip_bandwidth_data: Dict = None,
+        mode: str = "total",
+        save_path: str = None,
+        show_fig: bool = False,
+        return_fig: bool = False,
+    ):
         """
         绘制D2D流图（交互式版本，生成HTML文件）
 

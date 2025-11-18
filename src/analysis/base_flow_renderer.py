@@ -100,6 +100,7 @@ class BaseFlowRenderer:
             return cols - 1 - orig_col, orig_row
         else:
             return orig_row, orig_col
+
     def __init__(self):
         """初始化单Die流量图渲染器"""
         pass
@@ -329,13 +330,13 @@ class BaseFlowRenderer:
                         if is_d2d_scenario:
                             # D2D场景：使用原来的大偏移量
                             if is_horizontal_in_die:
-                                offset_magnitude = (0.70 if is_90_or_270 else 0.35) * length_factor
+                                offset_magnitude = (0.45 if is_90_or_270 else 0.25) * length_factor
                                 if i < j:
                                     offset_x_die, offset_y_die = 0, offset_magnitude
                                 else:
                                     offset_x_die, offset_y_die = 0, -offset_magnitude
                             else:
-                                offset_magnitude = (0.35 if is_90_or_270 else 0.70) * length_factor
+                                offset_magnitude = (0.25 if is_90_or_270 else 0.45) * length_factor
                                 if i < j:
                                     offset_x_die, offset_y_die = -offset_magnitude, 0
                                 else:
@@ -998,6 +999,7 @@ class BaseFlowRenderer:
                 hoverinfo="skip",
             )
         )
+
     def draw_single_die_flow(
         self,
         fig,
@@ -1075,7 +1077,9 @@ class BaseFlowRenderer:
             edge_labels, edge_colors, self_loop_labels = LinkDataProcessor.process_links_for_drawing(links, actual_nodes, mode)
 
             # 绘制链路箭头（传递完整的统计数据用于hover）
-            link_arrow_anns = self._draw_link_arrows(fig, pos, edge_labels, edge_colors, links, config, square_size, rotation, link_label_fontsize, utilization_stats, is_d2d_scenario, show_link_labels)
+            link_arrow_anns = self._draw_link_arrows(
+                fig, pos, edge_labels, edge_colors, links, config, square_size, rotation, link_label_fontsize, utilization_stats, is_d2d_scenario, show_link_labels
+            )
             # 将箭头annotations添加到figure
             if link_arrow_anns:
                 existing_anns = list(fig.layout.annotations) if fig.layout.annotations else []

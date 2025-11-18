@@ -162,7 +162,7 @@ class D2D_Model:
         ip_bandwidth_heatmap: bool = False,
         fifo_utilization_heatmap: bool = False,
         plot_rn_bw_fig: bool = False,  # 新增：RN带宽曲线图
-        show_fig: bool = False,
+        show_result_analysis: bool = False,
         # CSV文件导出控制
         export_d2d_requests_csv: bool = True,
         export_ip_bandwidth_csv: bool = True,
@@ -179,7 +179,7 @@ class D2D_Model:
             ip_bandwidth_heatmap: 是否生成IP带宽热力图
             fifo_utilization_heatmap: 是否生成FIFO使用率热力图
             plot_rn_bw_fig: 是否生成RN带宽曲线图（IP tracker曲线）
-            show_fig: 是否在浏览器中显示图像
+            show_result_analysis: 是否在浏览器中显示图像
 
         CSV文件导出控制:
             export_d2d_requests_csv: 是否导出跨Die请求记录
@@ -196,7 +196,7 @@ class D2D_Model:
                 "ip_bandwidth_heatmap": ip_bandwidth_heatmap,
                 "fifo_utilization_heatmap": fifo_utilization_heatmap,
                 "plot_rn_bw_fig": plot_rn_bw_fig,  # 新增
-                "show_fig": show_fig,
+                "show_fig": show_result_analysis,
                 "export_d2d_requests_csv": export_d2d_requests_csv,
                 "export_ip_bandwidth_csv": export_ip_bandwidth_csv,
                 "heatmap_mode": heatmap_mode,
@@ -1260,7 +1260,7 @@ class D2D_Model:
                     die_rotations=getattr(self.config, "DIE_ROTATIONS", None),
                     save_path=None,  # 不保存独立文件
                     show_fig=False,
-                    return_fig_and_js=True  # 返回Figure和JS
+                    return_fig_and_js=True,  # 返回Figure和JS
                 )
                 if fifo_fig:
                     d2d_charts_to_merge.append(("FIFO使用率热力图", fifo_fig, fifo_js))
@@ -1282,10 +1282,7 @@ class D2D_Model:
                 if all_die_rn_data:
                     try:
                         rn_fig = plot_rn_bandwidth_curves_work_interval(
-                            rn_bandwidth_time_series=all_die_rn_data,
-                            show_fig=False,  # 不直接显示
-                            save_path=None,  # 不保存独立文件
-                            return_fig=True  # 返回Figure对象
+                            rn_bandwidth_time_series=all_die_rn_data, show_fig=False, save_path=None, return_fig=True  # 不直接显示  # 不保存独立文件  # 返回Figure对象
                         )
                         if rn_fig:
                             rn_chart = ("IP Tracker曲线", rn_fig, None)
@@ -1359,6 +1356,7 @@ class D2D_Model:
                 # 步骤8.5: 注入tracker功能到HTML
                 if integrated_path and tracker_json_path:
                     from src.analysis.tracker_html_injector import inject_tracker_functionality
+
                     inject_tracker_functionality(integrated_path, tracker_json_path)
                 if integrated_path:
                     saved_files.append({"type": "集成可视化报告", "path": integrated_path})

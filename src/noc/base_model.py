@@ -688,6 +688,15 @@ class BaseModel:
                 network.increment_fifo_flit_count("IQ", "CH_buffer", node_id, ip_type)
                 queue_pre[node_id] = None
 
+        # IQ_arbiter_input_fifo_pre → IQ_arbiter_input_fifo
+        for ip_type in network.IQ_arbiter_input_fifo_pre.keys():
+            queue_pre = network.IQ_arbiter_input_fifo_pre[ip_type]
+            queue = network.IQ_arbiter_input_fifo[ip_type]
+            if queue_pre[node_id] and len(queue[node_id]) < 2:
+                flit = queue_pre[node_id]
+                queue[node_id].append(flit)
+                queue_pre[node_id] = None
+
         # IQ_pre → IQ_OUT
         for direction in self.IQ_directions:
             queue_pre = network.inject_queues_pre[direction]
@@ -744,6 +753,15 @@ class BaseModel:
                 network.increment_fifo_flit_count("EQ", fifo_pos, node_id)
                 queue_pre[node_id] = None
 
+        # EQ_arbiter_input_fifo_pre → EQ_arbiter_input_fifo
+        for port_name in ["TU", "TD", "IQ", "RB"]:
+            queue_pre = network.EQ_arbiter_input_fifo_pre[port_name]
+            queue = network.EQ_arbiter_input_fifo[port_name]
+            if queue_pre[node_id] and len(queue[node_id]) < 2:
+                flit = queue_pre[node_id]
+                queue[node_id].append(flit)
+                queue_pre[node_id] = None
+
         # EQ_channel_buffer_pre → EQ_channel_buffer
         for ip_type in network.EQ_channel_buffer_pre.keys():
             queue_pre = network.EQ_channel_buffer_pre[ip_type]
@@ -785,8 +803,8 @@ class BaseModel:
         queue_pre = self.req_network.inject_queues_pre[direction]
         queue_pre[node_id] = req
 
-        # 从channel buffer移除
-        self.req_network.IQ_channel_buffer[ip_type][node_id].popleft()
+        # 从仲裁输入FIFO移除
+        self.req_network.IQ_arbiter_input_fifo[ip_type][node_id].popleft()
 
         # 更新计数和状态
         if req.req_attr == "new":  # 只有新请求才更新计数器和tracker
@@ -805,10 +823,36 @@ class BaseModel:
     # ------------------------------------------------------------------
     # 模块化处理函数：IQ, Link, RB, EQ, CP
     # ------------------------------------------------------------------
+    def _move_IQ_channel_buffer_to_arbiter_input(self, network: Network):
+        """IQ模块：将IQ_channel_buffer移动到仲裁输入FIFO的pre缓冲
+
+        从IQ_channel_buffer移动到IQ_arbiter_input_fifo_pre
+
+        Args:
+            network: 网络实例 (req_network / rsp_network / data_network)
+        """
+        for node_id in range(self.config.NUM_NODE):
+            for ip_type in network.IQ_channel_buffer.keys():
+                # 检查源FIFO是否有数据
+                if not network.IQ_channel_buffer[ip_type][node_id]:
+                    continue
+
+                # 检查目标pre缓冲是否为空
+                if network.IQ_arbiter_input_fifo_pre[ip_type][node_id] is not None:
+                    continue
+
+                # 检查目标FIFO是否有空间
+                if len(network.IQ_arbiter_input_fifo[ip_type][node_id]) >= 2:
+                    continue
+
+                # 移动flit到pre缓冲
+                flit = network.IQ_channel_buffer[ip_type][node_id].popleft()
+                network.IQ_arbiter_input_fifo_pre[ip_type][node_id] = flit
+
     def _IQ_process(self, network: Network, flit_type: str):
         """IQ模块：IQ仲裁处理
 
-        从channel buffer移动到inject_queues_pre
+        从IQ_arbiter_input_fifo移动到inject_queues_pre
 
         Args:
             network: 网络实例 (req_network / rsp_network / data_network)
@@ -871,7 +915,7 @@ class BaseModel:
                     if not hasattr(flit, "allowed_eject_directions") or flit.allowed_eject_directions is None:
                         flit.allowed_eject_directions = network.determine_allowed_eject_directions(flit)
 
-                    network.IQ_channel_buffer[ip_type][node_id].popleft()
+                    network.IQ_arbiter_input_fifo[ip_type][node_id].popleft()
                     queue_pre = network.inject_queues_pre[direction]
                     queue_pre[node_id] = flit
 
@@ -990,12 +1034,13 @@ class BaseModel:
         """
         # 遍历所有节点处理eject_queues和ring_bridge
         for node_id in range(self.config.NUM_NODE):
-            # 构造eject_flits
-            eject_flits = (
-                [network.eject_queues[fifo_pos][node_id][0] if network.eject_queues[fifo_pos][node_id] else None for fifo_pos in ["TU", "TD"]]
-                + [network.inject_queues[fifo_pos][node_id][0] if network.inject_queues[fifo_pos][node_id] else None for fifo_pos in ["EQ"]]
-                + [network.ring_bridge["EQ"][node_id][0] if network.ring_bridge["EQ"][node_id] else None]
-            )
+            # 从仲裁输入FIFO构造eject_flits
+            eject_flits = [
+                network.EQ_arbiter_input_fifo["TU"][node_id][0] if network.EQ_arbiter_input_fifo["TU"][node_id] else None,
+                network.EQ_arbiter_input_fifo["TD"][node_id][0] if network.EQ_arbiter_input_fifo["TD"][node_id] else None,
+                network.EQ_arbiter_input_fifo["IQ"][node_id][0] if network.EQ_arbiter_input_fifo["IQ"][node_id] else None,
+                network.EQ_arbiter_input_fifo["RB"][node_id][0] if network.EQ_arbiter_input_fifo["RB"][node_id] else None,
+            ]
             if not any(eject_flits):
                 continue
             self._move_to_eject_queues_pre(network, eject_flits, node_id)
@@ -1046,7 +1091,14 @@ class BaseModel:
     def _network_cycle_process(self, network: Network, flits, flit_type: str):
         """网络周期处理：协调各模块完成一个完整的网络周期
 
-        处理顺序：IQ注入 -> Link传输 -> RB仲裁 -> EQ下环 -> CP处理
+        处理顺序：
+        1. IQ_channel_buffer → IQ仲裁输入FIFO
+        2. IQ仲裁（从仲裁输入FIFO读取）
+        3. Link传输
+        4. RB仲裁
+        5. EQ输入端口 → EQ仲裁输入FIFO
+        6. EQ仲裁（从仲裁输入FIFO读取）
+        7. CP处理
 
         Args:
             network: 网络实例
@@ -1056,7 +1108,10 @@ class BaseModel:
         Returns:
             list: 更新后的flits列表
         """
-        # 1. IQ模块：IQ仲裁
+        # 1a. 移动IQ_channel_buffer到仲裁输入FIFO
+        self._move_IQ_channel_buffer_to_arbiter_input(network)
+
+        # 1b. IQ模块：IQ仲裁（从仲裁输入FIFO读取）
         self._IQ_process(network, flit_type)
 
         # 2. Link模块：Link传输
@@ -1065,7 +1120,10 @@ class BaseModel:
         # 3. RB模块：Ring Bridge仲裁
         self._RB_process(network)
 
-        # 4. EQ模块：Eject Queue仲裁
+        # 4a. 移动EQ输入端口到仲裁输入FIFO
+        self._move_eject_queues_to_arbiter_input(network)
+
+        # 4b. EQ模块：Eject Queue仲裁（从仲裁输入FIFO读取）
         self._EQ_process(network, flit_type)
 
         # 5. CP模块：CrossPoint处理（包含上环和下环）
@@ -1108,11 +1166,11 @@ class BaseModel:
         if network_type == "rsp" and not (ip_type.startswith("ddr") or ip_type.startswith("l2m") or ip_type.startswith("d2d_sn")):
             return False
 
-        # 检查channel‑buffer是否为空
-        if not network.IQ_channel_buffer[ip_type][node_id]:
+        # 检查仲裁输入FIFO是否为空
+        if not network.IQ_arbiter_input_fifo[ip_type][node_id]:
             return False
 
-        flit = network.IQ_channel_buffer[ip_type][node_id][0]
+        flit = network.IQ_arbiter_input_fifo[ip_type][node_id][0]
 
         # 缓存flit供后续使用
         flit_cache[(ip_type, direction)] = flit
@@ -1608,6 +1666,55 @@ class BaseModel:
             if h_key_start in network.links_tag:
                 network.links_tag[h_key_start][-1] = last_position
 
+    def _move_eject_queues_to_arbiter_input(self, network: Network):
+        """EQ模块：将4个输入端口的数据移动到仲裁输入FIFO的pre缓冲
+
+        从[TU, TD, IQ, RB]输入端口移动到EQ_arbiter_input_fifo_pre
+        同时从原始队列弹出，并更新相关计数器
+
+        Args:
+            network: 网络实例 (req_network / rsp_network / data_network)
+        """
+        for node_id in range(self.config.NUM_NODE):
+            # 定义4个输入端口的来源
+            input_ports_info = [
+                ("TU", network.eject_queues["TU"][node_id]),
+                ("TD", network.eject_queues["TD"][node_id]),
+                ("IQ", network.inject_queues["EQ"][node_id]),
+                ("RB", network.ring_bridge["EQ"][node_id]),
+            ]
+
+            for port_name, source_fifo in input_ports_info:
+                # 检查源FIFO是否有数据
+                if not source_fifo:
+                    continue
+
+                # 检查目标pre缓冲是否为空
+                if network.EQ_arbiter_input_fifo_pre[port_name][node_id] is not None:
+                    continue
+
+                # 检查目标FIFO是否有空间
+                if len(network.EQ_arbiter_input_fifo[port_name][node_id]) >= 2:
+                    continue
+
+                # 从源FIFO弹出flit并移动到pre缓冲
+                flit = source_fifo.popleft()
+                network.EQ_arbiter_input_fifo_pre[port_name][node_id] = flit
+
+                # 对于TU/TD端口，需要更新UE计数器
+                if port_name == "TU":
+                    if flit.used_entry_level == "T0":
+                        network.EQ_UE_Counters["TU"][node_id]["T0"] -= 1
+                    elif flit.used_entry_level == "T1":
+                        network.EQ_UE_Counters["TU"][node_id]["T1"] -= 1
+                    elif flit.used_entry_level == "T2":
+                        network.EQ_UE_Counters["TU"][node_id]["T2"] -= 1
+                elif port_name == "TD":
+                    if flit.used_entry_level == "T1":
+                        network.EQ_UE_Counters["TD"][node_id]["T1"] -= 1
+                    elif flit.used_entry_level == "T2":
+                        network.EQ_UE_Counters["TD"][node_id]["T2"] -= 1
+
     def _move_to_eject_queues_pre(self, network: Network, eject_flits, node_id):
         """
         使用多对多匹配的EQ仲裁（全局最优）
@@ -1651,25 +1758,10 @@ class BaseModel:
                 flit.arrival_eject_cycle = self.cycle
                 eject_flits[port_idx] = None
 
-                # 从对应的队列中移除flit
-                if port_idx == 0:  # TU
-                    removed_flit = network.eject_queues["TU"][node_id].popleft()
-                    if removed_flit.used_entry_level == "T0":
-                        network.EQ_UE_Counters["TU"][node_id]["T0"] -= 1
-                    elif removed_flit.used_entry_level == "T1":
-                        network.EQ_UE_Counters["TU"][node_id]["T1"] -= 1
-                    elif removed_flit.used_entry_level == "T2":
-                        network.EQ_UE_Counters["TU"][node_id]["T2"] -= 1
-                elif port_idx == 1:  # TD
-                    removed_flit = network.eject_queues["TD"][node_id].popleft()
-                    if removed_flit.used_entry_level == "T1":
-                        network.EQ_UE_Counters["TD"][node_id]["T1"] -= 1
-                    elif removed_flit.used_entry_level == "T2":
-                        network.EQ_UE_Counters["TD"][node_id]["T2"] -= 1
-                elif port_idx == 2:  # IQ
-                    removed_flit = network.inject_queues["EQ"][node_id].popleft()
-                elif port_idx == 3:  # RB
-                    removed_flit = network.ring_bridge["EQ"][node_id].popleft()
+                # 从仲裁输入FIFO中移除flit（UE计数器已在_move_eject_queues_to_arbiter_input中更新）
+                port_names = ["TU", "TD", "IQ", "RB"]
+                port_name = port_names[port_idx]
+                removed_flit = network.EQ_arbiter_input_fifo[port_name][node_id].popleft()
 
                 # 获取通道类型
                 flit_channel_type = getattr(flit, "flit_type", "req")
