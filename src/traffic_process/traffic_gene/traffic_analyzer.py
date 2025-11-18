@@ -99,7 +99,7 @@ class TrafficAnalyzer:
 
         # 按时间窗口统计请求数
         time_bins = pd.cut(self.df['timestamp'], bins=bins)
-        counts = self.df.groupby(time_bins).size()
+        counts = self.df.groupby(time_bins, observed=False).size()
 
         # 获取时间窗口的中点
         bin_centers = [interval.mid for interval in counts.index]
@@ -274,7 +274,7 @@ class TrafficAnalyzer:
         """
         stats = self.get_statistics()
 
-        # 创建表格数据
+        # 创建表格数据 - 所有值转为字符串以避免Arrow序列化错误
         data = {
             "指标": [
                 "总请求数",
@@ -294,10 +294,10 @@ class TrafficAnalyzer:
                 f"{stats['write_requests']:,}",
                 f"{stats['read_ratio']:.1%}",
                 f"{stats['write_ratio']:.1%}",
-                stats['time_range'],
-                stats['unique_src_nodes'],
-                stats['unique_dst_nodes'],
-                stats['unique_pairs'],
+                str(stats['time_range']),
+                str(stats['unique_src_nodes']),
+                str(stats['unique_dst_nodes']),
+                str(stats['unique_pairs']),
                 f"{stats['avg_burst']:.2f}"
             ]
         }

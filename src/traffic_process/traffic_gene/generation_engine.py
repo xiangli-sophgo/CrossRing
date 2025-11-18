@@ -102,7 +102,7 @@ def generate_traffic_from_config(config, end_time):
 
 def generate_traffic_from_configs(
     configs,
-    end_time,
+    end_time=None,
     output_file=None,
     random_seed=42,
     return_dataframe=True
@@ -111,7 +111,7 @@ def generate_traffic_from_configs(
     根据多个配置生成并合并流量数据
 
     :param configs: 配置列表
-    :param end_time: 结束时间
+    :param end_time: 结束时间（废弃，现使用配置中的end_time）
     :param output_file: 输出文件路径(可选,为None则不写文件)
     :param random_seed: 随机种子
     :param return_dataframe: 是否返回DataFrame
@@ -123,9 +123,10 @@ def generate_traffic_from_configs(
 
     all_data = []
 
-    # 为每个配置生成数据
+    # 为每个配置生成数据，使用配置自己的end_time
     for config in configs:
-        data = generate_traffic_from_config(config, end_time)
+        config_end_time = config.get("end_time", end_time if end_time else 6000)
+        data = generate_traffic_from_config(config, config_end_time)
         all_data.extend(data)
 
     # 按时间和源位置排序
@@ -143,13 +144,23 @@ def generate_traffic_from_configs(
                 f.write(f"{timestamp},{src_pos},{src_type},{dst_pos},{dst_type},{req_type},{burst}\n")
         file_path = str(output_path.absolute())
 
-    # 转换为DataFrame
+    # 转换为DataFrame,显式指定数据类型避免Arrow序列化错误
     df = None
     if return_dataframe:
         df = pd.DataFrame(
             all_data,
             columns=["timestamp", "src_pos", "src_type", "dst_pos", "dst_type", "req_type", "burst"]
         )
+        # 确保数据类型正确
+        df = df.astype({
+            "timestamp": "int64",
+            "src_pos": "int64",
+            "src_type": "str",
+            "dst_pos": "int64",
+            "dst_type": "str",
+            "req_type": "str",
+            "burst": "int64"
+        })
 
     # 返回结果
     if output_file and return_dataframe:
@@ -287,7 +298,7 @@ def split_traffic_by_source(input_file, output_dir=None, num_col=4, num_row=5, v
             src_node = parts[1]
             src_ip = parts[2]
 
-            # 按(src_node, src_ip)分组
+            # 按(src_node, src_ip)分组 - 每个节点上的每个IP都是独立的
             key = (src_node, src_ip)
             traffic_by_source[key].append(line)
 
@@ -298,22 +309,24 @@ def split_traffic_by_source(input_file, output_dir=None, num_col=4, num_row=5, v
     result_files = []
 
     for (src_node, src_ip), lines in sorted(traffic_by_source.items()):
+        # 提取源IP索引号
+        src_ip_index = extract_ip_index(src_ip)
+
+        # 将源节点转换为(x,y)坐标
+        src_x, src_y = node_id_to_xy(int(src_node), num_col, num_row)
+
         # 提取第一行的目标信息作为文件名参考
         first_line_parts = lines[0].split(",")
         dst_node = first_line_parts[3].strip()
-        dst_ip = first_line_parts[4].strip()
-
-        # 提取源IP和目标IP的索引号
-        src_ip_index = extract_ip_index(src_ip)
-        dst_ip_index = extract_ip_index(dst_ip)
 
         # 将目标节点转换为(x,y)坐标
-        dst_x, dst_y = node_id_to_xy(dst_node, num_col, num_row)
+        dst_x, dst_y = node_id_to_xy(int(dst_node), num_col, num_row)
 
-        # 文件名格式: master_p{src_ip_index}_x{dst_x}_y{dst_y}.txt
-        filename = f"master_p{src_ip_index}_x{dst_x}_y{dst_y}.txt"
+        # 文件名格式: master_p{src_ip_index}_x{src_x}_y{src_y}.txt
+        # 注意: 这里使用源节点的坐标,而不是目标节点
+        filename = f"master_p{src_ip_index}_x{src_x}_y{src_y}.txt"
 
-        # 直接在输出目录中创建文件，不创建子目录
+        # 直接在输出目录中创建文件
         output_file = output_dir / filename
 
         with open(output_file, "w", encoding="utf-8") as f:
@@ -333,6 +346,119 @@ def split_traffic_by_source(input_file, output_dir=None, num_col=4, num_row=5, v
 
                 # 格式: inject_time,(p{target_ip_index},x{x},y{y}),req_type,burst_length
                 formatted_line = f"{inject_time},(p{target_ip_index},x{x},y{y}),{req_type},{burst_length}"
+                f.write(formatted_line + "\n")
+
+        result_files.append({
+            "filename": filename,
+            "count": len(lines),
+            "path": str(output_file.absolute())
+        })
+
+        if verbose:
+            print(f"  {filename}: {len(lines)} 条请求 -> {output_file}")
+
+    if verbose:
+        print(f"\n拆分完成! 输出目录: {output_dir}")
+
+    return {
+        "output_dir": str(output_dir.absolute()),
+        "files": result_files,
+        "total_sources": len(traffic_by_source)
+    }
+
+
+def split_d2d_traffic_by_source(input_file, output_dir=None, num_col=4, num_row=5, verbose=True):
+    """
+    按源IP拆分D2D traffic文件
+
+    Args:
+        input_file: 输入D2D traffic文件路径
+        output_dir: 输出目录路径
+        num_col: 网络列数，默认4(5x4拓扑)
+        num_row: 网络行数，默认5(5x4拓扑)
+        verbose: 是否打印详细信息
+
+    Returns:
+        拆分结果字典
+    """
+    input_path = Path(input_file)
+
+    if not input_path.exists():
+        raise FileNotFoundError(f"输入文件不存在: {input_file}")
+
+    # 确定输出目录
+    if output_dir is None:
+        output_dir = input_path.parent / input_path.stem
+    else:
+        output_dir = Path(output_dir)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # 收集每个源IP的请求
+    traffic_by_source = defaultdict(list)
+
+    if verbose:
+        print(f"读取D2D文件: {input_file}")
+
+    with open(input_file, "r", encoding="utf-8") as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+
+            if not line or line.startswith("#"):
+                continue
+
+            # D2D格式: timestamp,src_die,src_node,src_ip,dst_die,dst_node,dst_ip,req_type,burst
+            parts = [p.strip() for p in line.split(",")]
+
+            if len(parts) != 9:
+                if verbose:
+                    print(f"警告: 第{line_num}行格式错误，应为9个字段，实际为{len(parts)}个，跳过该行")
+                continue
+
+            # 提取源Die、源节点和源IP
+            src_die = parts[1]
+            src_node = parts[2]
+            src_ip = parts[3]
+
+            # 按(src_die, src_node, src_ip)分组
+            key = (src_die, src_node, src_ip)
+            traffic_by_source[key].append(line)
+
+    if verbose:
+        print(f"\n找到 {len(traffic_by_source)} 个不同的源IP")
+
+    result_files = []
+
+    for (src_die, src_node, src_ip), lines in sorted(traffic_by_source.items()):
+        # 提取源IP索引号
+        src_ip_index = extract_ip_index(src_ip)
+
+        # 将源节点转换为(x,y)坐标
+        src_x, src_y = node_id_to_xy(int(src_node), num_col, num_row)
+
+        # 文件名格式: master_D{die_id}_p{src_ip_index}_x{src_x}_y{src_y}.txt
+        filename = f"master_D{src_die}_p{src_ip_index}_x{src_x}_y{src_y}.txt"
+
+        output_file = output_dir / filename
+
+        with open(output_file, "w", encoding="utf-8") as f:
+            for line in lines:
+                parts = [p.strip() for p in line.split(",")]
+                inject_time = parts[0]
+                dst_die = parts[4]
+                dst_node_id = parts[5]
+                dst_ip_name = parts[6]
+                req_type = parts[7]
+                burst_length = parts[8]
+
+                # 提取目标IP索引
+                target_ip_index = extract_ip_index(dst_ip_name)
+
+                # 将目标节点转换为(x,y)坐标
+                x, y = node_id_to_xy(int(dst_node_id), num_col, num_row)
+
+                # 格式: inject_time,(D{dst_die},p{target_ip_index},x{x},y{y}),req_type,burst_length
+                formatted_line = f"{inject_time},(D{dst_die},p{target_ip_index},x{x},y{y}),{req_type},{burst_length}"
                 f.write(formatted_line + "\n")
 
         result_files.append({
@@ -421,7 +547,7 @@ def generate_d2d_traffic_from_config(config, end_time):
 
 def generate_d2d_traffic_from_configs(
     configs,
-    end_time,
+    end_time=None,
     output_file=None,
     random_seed=42,
     return_dataframe=True
@@ -430,7 +556,7 @@ def generate_d2d_traffic_from_configs(
     根据多个D2D配置生成并合并流量数据
 
     :param configs: D2D配置列表
-    :param end_time: 结束时间
+    :param end_time: 结束时间（废弃，现使用配置中的end_time）
     :param output_file: 输出文件路径(可选,为None则不写文件)
     :param random_seed: 随机种子
     :param return_dataframe: 是否返回DataFrame
@@ -442,9 +568,10 @@ def generate_d2d_traffic_from_configs(
 
     all_data = []
 
-    # 为每个配置生成数据
+    # 为每个配置生成数据，使用配置自己的end_time
     for config in configs:
-        data = generate_d2d_traffic_from_config(config, end_time)
+        config_end_time = config.get("end_time", end_time if end_time else 6000)
+        data = generate_d2d_traffic_from_config(config, config_end_time)
         all_data.extend(data)
 
     # 按时间和源位置排序
@@ -462,13 +589,25 @@ def generate_d2d_traffic_from_configs(
                 f.write(f"{timestamp},{src_die},{src_pos},{src_type},{dst_die},{dst_pos},{dst_type},{req_type},{burst}\n")
         file_path = str(output_path.absolute())
 
-    # 转换为DataFrame
+    # 转换为DataFrame,显式指定数据类型避免Arrow序列化错误
     df = None
     if return_dataframe:
         df = pd.DataFrame(
             all_data,
             columns=["timestamp", "src_die", "src_pos", "src_type", "dst_die", "dst_pos", "dst_type", "req_type", "burst"]
         )
+        # 确保数据类型正确
+        df = df.astype({
+            "timestamp": "int64",
+            "src_die": "int64",
+            "src_pos": "int64",
+            "src_type": "str",
+            "dst_die": "int64",
+            "dst_pos": "int64",
+            "dst_type": "str",
+            "req_type": "str",
+            "burst": "int64"
+        })
 
     # 返回结果
     if output_file and return_dataframe:

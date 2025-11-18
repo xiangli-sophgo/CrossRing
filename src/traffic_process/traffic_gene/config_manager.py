@@ -18,6 +18,7 @@ class TrafficConfig:
     speed: float  # 带宽 (GB/s)
     burst: int  # burst长度
     req_type: str  # 请求类型 ("R" 或 "W")
+    end_time: int = 6000  # 仿真时长 (ns)
     config_id: int = 0  # 配置ID
     src_die: int = 0  # 源Die编号 (D2D模式使用)
     dst_die: int = 0  # 目标Die编号 (D2D模式使用)
