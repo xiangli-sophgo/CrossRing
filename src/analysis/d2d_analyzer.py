@@ -33,8 +33,6 @@ class D2DRequestInfo:
     cmd_latency_ns: int
     data_latency_ns: int
     transaction_latency_ns: int
-    rn_end_time_ns: int = None  # RN端结束时间(仅不跨DIE请求使用)
-    sn_end_time_ns: int = None  # SN端结束时间(仅不跨DIE请求使用)
     d2d_sn_node: int = None  # D2D_SN节点物理ID
     d2d_rn_node: int = None  # D2D_RN节点物理ID
 
@@ -532,13 +530,8 @@ class D2DAnalyzer:
                         self.packet_id = d2d_req.packet_id
                         self.start_time = d2d_req.start_time_ns
 
-                        # 根据endpoint_type选择结束时间
-                        if endpoint_type == "rn" and d2d_req.rn_end_time_ns is not None:
-                            self.end_time = d2d_req.rn_end_time_ns
-                        elif endpoint_type == "sn" and d2d_req.sn_end_time_ns is not None:
-                            self.end_time = d2d_req.sn_end_time_ns
-                        else:
-                            self.end_time = d2d_req.end_time_ns
+                        # 统一使用整体end_time
+                        self.end_time = d2d_req.end_time_ns
 
                         self.total_bytes = d2d_req.data_bytes
                         self.burst_length = d2d_req.burst_length

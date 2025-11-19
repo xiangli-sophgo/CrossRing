@@ -126,8 +126,14 @@ class DualChannelIPInterface(IPInterface):
         # 更新时间戳
         if flit.req_type == "read" and flit.flit_id == 0:
             flit.data_entry_noc_from_cake1_cycle = self.current_cycle
+            # 更新RequestTracker
+            if hasattr(self, 'request_tracker') and self.request_tracker:
+                self.request_tracker.update_timestamp(flit.packet_id, 'data_entry_noc_from_cake1_cycle', self.current_cycle)
         elif flit.req_type == "write" and flit.flit_id == 0:
             flit.data_entry_noc_from_cake0_cycle = self.current_cycle
+            # 更新RequestTracker
+            if hasattr(self, 'request_tracker') and self.request_tracker:
+                self.request_tracker.update_timestamp(flit.packet_id, 'data_entry_noc_from_cake0_cycle', self.current_cycle)
 
     def EQ_channel_buffer_to_h2l_pre(self, network_type):
         """重写EQ到H2L方法，实现2to1轮询仲裁"""
@@ -333,7 +339,16 @@ class DualChannelIPInterface(IPInterface):
             f.sync_latency_record(req)
             # 为所有flit设置receive时间戳，确保后续处理能获得正确值
             f.data_received_complete_cycle = complete_cycle
-            
+
+        # 更新RequestTracker的timestamp（循环外更新一次即可）
+        if hasattr(self, 'request_tracker') and self.request_tracker:
+            self.request_tracker.update_timestamp(packet_id, 'data_received_complete_cycle', complete_cycle)
+            if req_type == "read":
+                self.request_tracker.update_timestamp(packet_id, 'data_entry_noc_from_cake1_cycle', first_flit.data_entry_noc_from_cake1_cycle)
+            else:  # write
+                self.request_tracker.update_timestamp(packet_id, 'data_entry_noc_from_cake0_cycle', first_flit.data_entry_noc_from_cake0_cycle)
+
+        for f in all_flits:
             # 计算延迟
             if req_type == "read":
                 f.cmd_latency = f.cmd_received_by_cake1_cycle - f.cmd_entry_noc_from_cake0_cycle

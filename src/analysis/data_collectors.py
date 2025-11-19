@@ -37,101 +37,109 @@ class RequestCollector:
 
     def collect_requests_data(self, sim_model, simulation_end_cycle=None) -> List[RequestInfo]:
         """
-        从仿真模型收集请求数据
+        从RequestTracker收集请求数据（完全重构版本）
 
         Args:
             sim_model: 仿真模型对象
             simulation_end_cycle: 仿真结束周期
 
         Returns:
-            RequestInfo列表
+            RequestInfo列表（仅包含已完成的请求）
         """
         self.requests.clear()
 
-        for packet_id, flits in sim_model.data_network.arrive_flits.items():
-            if not flits or len(flits) != flits[0].burst_length:
+        # 检查是否有request_tracker
+        if not hasattr(sim_model, 'request_tracker') or not sim_model.request_tracker:
+            raise RuntimeError("sim_model没有request_tracker属性，请确保BaseModel已正确初始化")
+
+        request_tracker = sim_model.request_tracker
+
+        # 仅处理已完成的请求
+        completed_requests = request_tracker.get_completed_requests()
+
+        for packet_id, lifecycle in completed_requests.items():
+            # 从lifecycle获取所有时间戳
+            timestamps = lifecycle.timestamps
+            if not timestamps:
+                # 如果没有预收集，现在收集
+                timestamps = request_tracker.collect_timestamps_from_flits(packet_id)
+
+            # 基本信息来自lifecycle
+            req_type = lifecycle.op_type
+
+            # 确定end_time（根据是否跨Die选择时间戳）
+            if req_type == "read":
+                end_time_cycle = timestamps.get('data_received_complete_cycle', float('inf'))
+            elif req_type == "write":
+                # 根据是否跨Die选择时间戳
+                source_die = getattr(lifecycle, 'source_die', 0)
+                target_die = getattr(lifecycle, 'target_die', 0)
+
+                if source_die != target_die:  # 跨Die（D2D请求）
+                    end_time_cycle = timestamps.get('write_complete_received_cycle', float('inf'))
+                else:  # 不跨Die（NoC请求）
+                    end_time_cycle = timestamps.get('data_received_complete_cycle', float('inf'))
+            else:
                 continue
 
-            # 根据flit_id找到真正的第一个和最后一个flit
-            first_flit: Flit = min(flits, key=lambda f: f.flit_id)
-            representative_flit: Flit = max(flits, key=lambda f: f.flit_id)
+            # 验证必需时间戳
+            start_time_cycle = timestamps.get('cmd_entry_cake0_cycle', float('inf'))
+            if start_time_cycle >= float('inf') or end_time_cycle >= float('inf'):
+                if packet_id <= 3:
+                    print(f"[DEBUG] 跳过packet_id={packet_id}, timestamps={list(timestamps.keys())}, end_time_cycle={end_time_cycle}")
+                continue  # 跳过无效请求
 
-            # 计算不同角度的结束时间，并验证时间值有效性
-            if not DataValidator.is_valid_number(representative_flit.data_received_complete_cycle):
-                continue
-            network_end_time = representative_flit.data_received_complete_cycle // self.network_frequency
+            # 转换为ns
+            start_time = start_time_cycle // self.network_frequency
+            end_time = end_time_cycle // self.network_frequency
 
-            if representative_flit.req_type == "read":
-                # 读请求：RN在收到数据时结束，SN在发出数据时结束
-                rn_end_time = representative_flit.data_received_complete_cycle // self.network_frequency  # RN收到数据
-                sn_end_time = first_flit.data_entry_noc_from_cake1_cycle // self.network_frequency  # SN发出数据
+            # 源目标节点信息来自lifecycle
+            actual_source_node = lifecycle.source
+            actual_dest_node = lifecycle.destination
+            actual_source_type = lifecycle.source_type
+            actual_dest_type = lifecycle.dest_type
 
-                # 读请求：flit的source是SN(DDR/L2M)，destination是RN(SDMA/GDMA/CDMA)
-                actual_source_node = representative_flit.destination  # 实际发起请求的节点
-                actual_dest_node = representative_flit.source  # 实际目标节点
-                # 读请求中需要交换type获取逻辑，因为flit.source_type=DDR但actual_source_node=GDMA
-                actual_source_type = get_original_destination_type(representative_flit)  # 实际发起请求的类型(GDMA)
-                actual_dest_type = get_original_source_type(representative_flit)  # 实际目标类型(DDR)
-            else:  # write
-                # 写请求：RN在发出数据时结束，SN在收到数据时结束
-                rn_end_time = first_flit.data_entry_noc_from_cake0_cycle // self.network_frequency  # RN发出数据
-                sn_end_time = representative_flit.data_received_complete_cycle // self.network_frequency  # SN收到数据
+            # 从data_flits收集下环统计
+            data_eject_attempts_h_list = [f.eject_attempts_h for f in lifecycle.data_flits]
+            data_eject_attempts_v_list = [f.eject_attempts_v for f in lifecycle.data_flits]
+            data_ordering_blocked_h_list = [f.ordering_blocked_eject_h for f in lifecycle.data_flits]
+            data_ordering_blocked_v_list = [f.ordering_blocked_eject_v for f in lifecycle.data_flits]
 
-                # 写请求：flit的source是RN(SDMA/GDMA/CDMA)，destination是SN(DDR/L2M)
-                actual_source_node = representative_flit.source  # 实际发起请求的节点
-                actual_dest_node = representative_flit.destination  # 实际目标节点
-                actual_source_type = get_original_source_type(representative_flit)  # 实际发起请求的类型
-                actual_dest_type = get_original_destination_type(representative_flit)  # 实际目标类型
+            # 保序信息（从第一个flit获取）
+            first_flit = lifecycle.data_flits[0] if lifecycle.data_flits else None
+            src_dest_order_id = getattr(first_flit, "src_dest_order_id", -1) if first_flit else -1
+            packet_category = getattr(first_flit, "packet_category", "") if first_flit else ""
 
-            # 收集保序信息
-            src_dest_order_id = getattr(representative_flit, "src_dest_order_id", -1)
-            packet_category = getattr(representative_flit, "packet_category", "")
-
-            # 收集每个数据flit的尝试下环次数
-            data_eject_attempts_h_list = []
-            data_eject_attempts_v_list = []
-            data_ordering_blocked_h_list = []
-            data_ordering_blocked_v_list = []
-            for data_flit in flits:
-                data_eject_attempts_h_list.append(data_flit.eject_attempts_h)
-                data_eject_attempts_v_list.append(data_flit.eject_attempts_v)
-                data_ordering_blocked_h_list.append(data_flit.ordering_blocked_eject_h)
-                data_ordering_blocked_v_list.append(data_flit.ordering_blocked_eject_v)
-
-            # 验证开始时间
-            if not DataValidator.is_valid_number(representative_flit.cmd_entry_cake0_cycle):
-                continue
-            start_time = representative_flit.cmd_entry_cake0_cycle // self.network_frequency
+            # 计算延迟
+            cmd_latency, data_latency, transaction_latency = self._calculate_latencies(lifecycle, timestamps)
 
             request_info = RequestInfo(
                 packet_id=packet_id,
                 start_time=start_time,
-                end_time=network_end_time,  # 整体网络结束时间
-                rn_end_time=rn_end_time,
-                sn_end_time=sn_end_time,
-                req_type=representative_flit.req_type,
-                source_node=actual_source_node,  # 使用修正后的源节点
-                dest_node=actual_dest_node,  # 使用修正后的目标节点
-                source_type=actual_source_type,  # 使用修正后的源类型
-                dest_type=actual_dest_type,  # 使用修正后的目标类型
-                burst_length=representative_flit.burst_length,
-                total_bytes=representative_flit.burst_length * 128,
-                cmd_latency=int(representative_flit.cmd_latency / self.network_frequency),
-                data_latency=int(representative_flit.data_latency / self.network_frequency),
-                transaction_latency=int(representative_flit.transaction_latency / self.network_frequency),
+                end_time=end_time,
+                req_type=req_type,
+                source_node=actual_source_node,
+                dest_node=actual_dest_node,
+                source_type=actual_source_type,
+                dest_type=actual_dest_type,
+                burst_length=lifecycle.burst_size,
+                total_bytes=lifecycle.burst_size * 128,
+                cmd_latency=cmd_latency,
+                data_latency=data_latency,
+                transaction_latency=transaction_latency,
                 # 保序相关字段
                 src_dest_order_id=src_dest_order_id,
                 packet_category=packet_category,
-                # 所有cycle数据字段
-                cmd_entry_cake0_cycle=getattr(representative_flit, "cmd_entry_cake0_cycle", -1),
-                cmd_entry_noc_from_cake0_cycle=getattr(representative_flit, "cmd_entry_noc_from_cake0_cycle", -1),
-                cmd_entry_noc_from_cake1_cycle=getattr(representative_flit, "cmd_entry_noc_from_cake1_cycle", -1),
-                cmd_received_by_cake0_cycle=getattr(representative_flit, "cmd_received_by_cake0_cycle", -1),
-                cmd_received_by_cake1_cycle=getattr(representative_flit, "cmd_received_by_cake1_cycle", -1),
-                data_entry_noc_from_cake0_cycle=getattr(first_flit, "data_entry_noc_from_cake0_cycle", -1),
-                data_entry_noc_from_cake1_cycle=getattr(first_flit, "data_entry_noc_from_cake1_cycle", -1),
-                data_received_complete_cycle=getattr(representative_flit, "data_received_complete_cycle", -1),
-                rsp_entry_network_cycle=getattr(representative_flit, "rsp_entry_network_cycle", -1),
+                # 所有cycle数据字段（从timestamps获取）
+                cmd_entry_cake0_cycle=timestamps.get('cmd_entry_cake0_cycle', -1),
+                cmd_entry_noc_from_cake0_cycle=timestamps.get('cmd_entry_noc_from_cake0_cycle', -1),
+                cmd_entry_noc_from_cake1_cycle=timestamps.get('cmd_entry_noc_from_cake1_cycle', -1),
+                cmd_received_by_cake0_cycle=timestamps.get('cmd_received_by_cake0_cycle', -1),
+                cmd_received_by_cake1_cycle=timestamps.get('cmd_received_by_cake1_cycle', -1),
+                data_entry_noc_from_cake0_cycle=timestamps.get('data_entry_noc_from_cake0_cycle', -1),
+                data_entry_noc_from_cake1_cycle=timestamps.get('data_entry_noc_from_cake1_cycle', -1),
+                data_received_complete_cycle=timestamps.get('data_received_complete_cycle', -1),
+                rsp_entry_network_cycle=timestamps.get('rsp_entry_network_cycle', -1),
                 # 数据flit的尝试下环次数列表
                 data_eject_attempts_h_list=data_eject_attempts_h_list,
                 data_eject_attempts_v_list=data_eject_attempts_v_list,
@@ -140,16 +148,116 @@ class RequestCollector:
                 data_ordering_blocked_v_list=data_ordering_blocked_v_list,
             )
 
-            # 验证请求完整性
-            if not DataValidator.validate_request(request_info):
-                continue
-
             self.requests.append(request_info)
 
         # 按开始时间排序
         self.requests.sort(key=lambda x: x.start_time)
 
         return self.requests
+
+    def _calculate_latencies(self, lifecycle, timestamps):
+        """计算延迟指标"""
+
+        # 判断是否跨Die
+        source_die = getattr(lifecycle, 'source_die', 0)
+        target_die = getattr(lifecycle, 'target_die', 0)
+        is_cross_die = (source_die != target_die)
+
+        if lifecycle.op_type == "read":
+            # 读请求延迟计算
+            cmd_entry = timestamps.get('cmd_entry_noc_from_cake0_cycle', float('inf'))
+
+            if is_cross_die:  # D2D读请求
+                cmd_received = timestamps.get('cmd_received_by_cake1_cycle', float('inf'))
+                data_entry = timestamps.get('data_entry_noc_from_cake1_cycle', float('inf'))
+            else:  # NoC读请求
+                cmd_received = timestamps.get('cmd_received_by_cake0_cycle', float('inf'))
+                data_entry = timestamps.get('data_entry_noc_from_cake0_cycle', float('inf'))
+
+            data_received = timestamps.get('data_received_complete_cycle', float('inf'))
+
+            if cmd_entry < float('inf') and cmd_received < float('inf'):
+                cmd_latency = int((cmd_received - cmd_entry) / self.network_frequency)
+            else:
+                cmd_latency = -1
+
+            if data_entry < float('inf') and data_received < float('inf'):
+                data_latency = int((data_received - data_entry) / self.network_frequency)
+            else:
+                data_latency = -1
+        else:  # write
+            # 写请求延迟计算
+            cmd_entry = timestamps.get('cmd_entry_noc_from_cake0_cycle', float('inf'))
+            cmd_received = timestamps.get('cmd_received_by_cake0_cycle', float('inf'))
+            data_entry = timestamps.get('data_entry_noc_from_cake0_cycle', float('inf'))
+            data_received = timestamps.get('data_received_complete_cycle', float('inf'))
+
+            if cmd_entry < float('inf') and cmd_received < float('inf'):
+                cmd_latency = int((cmd_received - cmd_entry) / self.network_frequency)
+            else:
+                cmd_latency = -1
+
+            if data_entry < float('inf') and data_received < float('inf'):
+                data_latency = int((data_received - data_entry) / self.network_frequency)
+            else:
+                data_latency = -1
+
+        # 事务延迟
+        start_cycle = timestamps.get('cmd_entry_cake0_cycle', float('inf'))
+        end_cycle = lifecycle.completed_cycle
+        if start_cycle < float('inf') and end_cycle < float('inf'):
+            transaction_latency = int((end_cycle - start_cycle) / self.network_frequency)
+        else:
+            transaction_latency = -1
+
+        return cmd_latency, data_latency, transaction_latency
+
+    def _calculate_d2d_latencies(self, lifecycle, timestamps):
+        """计算D2D请求的延迟指标"""
+
+        if lifecycle.op_type == "read":
+            # 读请求延迟计算
+            cmd_entry = timestamps.get('cmd_entry_noc_from_cake0_cycle', float('inf'))
+            cmd_received = timestamps.get('cmd_received_by_cake1_cycle', float('inf'))
+            data_entry = timestamps.get('data_entry_noc_from_cake1_cycle', float('inf'))
+            data_received = timestamps.get('data_received_complete_cycle', float('inf'))
+
+            if cmd_entry < float('inf') and cmd_received < float('inf'):
+                cmd_latency = int((cmd_received - cmd_entry) / self.network_frequency)
+            else:
+                cmd_latency = -1
+
+            if data_entry < float('inf') and data_received < float('inf'):
+                data_latency = int((data_received - data_entry) / self.network_frequency)
+            else:
+                data_latency = -1
+        else:  # write
+            # 写请求延迟计算
+            cmd_entry = timestamps.get('cmd_entry_noc_from_cake0_cycle', float('inf'))
+            cmd_received = timestamps.get('cmd_received_by_cake0_cycle', float('inf'))
+            data_entry = timestamps.get('data_entry_noc_from_cake0_cycle', float('inf'))
+            data_received = timestamps.get('data_received_complete_cycle', float('inf'))
+
+            if cmd_entry < float('inf') and cmd_received < float('inf'):
+                cmd_latency = int((cmd_received - cmd_entry) / self.network_frequency)
+            else:
+                cmd_latency = -1
+
+            if data_entry < float('inf') and data_received < float('inf'):
+                data_latency = int((data_received - data_entry) / self.network_frequency)
+            else:
+                data_latency = -1
+
+        # 事务延迟
+        start_cycle = timestamps.get('cmd_entry_cake0_cycle', float('inf'))
+        end_cycle = lifecycle.completed_cycle
+
+        if start_cycle < float('inf') and end_cycle < float('inf'):
+            transaction_latency = int((end_cycle - start_cycle) / self.network_frequency)
+        else:
+            transaction_latency = -1
+
+        return cmd_latency, data_latency, transaction_latency
 
     def load_requests_from_csv(self, csv_folder: str, config_dict: Dict = None) -> List[RequestInfo]:
         """
@@ -264,9 +372,14 @@ class RequestCollector:
 
             self.requests.append(request_info)
 
+        # 按开始时间排序
+        self.requests.sort(key=lambda x: x.start_time)
+
+        return self.requests
+
     def collect_cross_die_requests(self, dies: Dict) -> List[D2DRequestInfo]:
         """
-        从多个Die的网络中收集跨Die请求数据
+        从多个Die的网络中收集跨Die请求数据（基于RequestTracker重构版本）
 
         Args:
             dies: Dict[die_id, die_model] - Die模型字典
@@ -276,14 +389,79 @@ class RequestCollector:
         """
         self.d2d_requests.clear()
 
+        # 找到全局RequestTracker（应该在第一个Die中）
+        request_tracker = None
         for die_id, die_model in dies.items():
-            # 检查数据网络中的arrive_flits（读数据返回）
-            if hasattr(die_model, "data_network") and hasattr(die_model.data_network, "arrive_flits"):
-                self._collect_requests_from_network(die_model.data_network, die_id)
+            if hasattr(die_model, 'request_tracker') and die_model.request_tracker:
+                request_tracker = die_model.request_tracker
+                break
 
-            # 检查响应网络中的arrive_flits（写完成响应）
-            if hasattr(die_model, "rsp_network") and hasattr(die_model.rsp_network, "arrive_flits"):
-                self._collect_requests_from_network(die_model.rsp_network, die_id)
+        if not request_tracker:
+            print("[WARNING] collect_cross_die_requests: 未找到RequestTracker，使用旧方法从arrive_flits收集")
+            # 回退到旧方法
+            for die_id, die_model in dies.items():
+                if hasattr(die_model, "data_network") and hasattr(die_model.data_network, "arrive_flits"):
+                    self._collect_requests_from_network(die_model.data_network, die_id)
+                if hasattr(die_model, "rsp_network") and hasattr(die_model.rsp_network, "arrive_flits"):
+                    self._collect_requests_from_network(die_model.rsp_network, die_id)
+            return self.d2d_requests
+
+        # 从RequestTracker收集已完成的请求
+        completed_requests = request_tracker.get_completed_requests()
+
+        for packet_id, lifecycle in completed_requests.items():
+            # 只收集D2D请求
+            if not lifecycle.is_cross_die:
+                continue
+
+            # 收集时间戳
+            timestamps = lifecycle.timestamps
+            if not timestamps:
+                timestamps = request_tracker.collect_timestamps_from_flits(packet_id)
+
+            # 计算延迟
+            cmd_latency, data_latency, transaction_latency = self._calculate_d2d_latencies(lifecycle, timestamps)
+
+            # 计算时间
+            start_time_ns = int(lifecycle.created_cycle / self.network_frequency)
+            end_time_ns = int(lifecycle.completed_cycle / self.network_frequency)
+            rn_end_time_ns = self._calculate_rn_end_time(lifecycle, timestamps)
+            sn_end_time_ns = self._calculate_sn_end_time(lifecycle, timestamps)
+
+            # 从flit获取D2D节点信息
+            first_flit = None
+            if lifecycle.request_flits:
+                first_flit = lifecycle.request_flits[0]
+            elif lifecycle.response_flits:
+                first_flit = lifecycle.response_flits[0]
+            elif lifecycle.data_flits:
+                first_flit = lifecycle.data_flits[0]
+
+            d2d_sn_node = getattr(first_flit, "d2d_sn_node", None) if first_flit else None
+            d2d_rn_node = getattr(first_flit, "d2d_rn_node", None) if first_flit else None
+
+            d2d_info = D2DRequestInfo(
+                packet_id=packet_id,
+                source_die=lifecycle.origin_die,
+                target_die=lifecycle.target_die,
+                source_node=lifecycle.source,
+                target_node=lifecycle.destination,
+                source_type=lifecycle.source_type,
+                target_type=lifecycle.dest_type,
+                req_type=lifecycle.op_type,
+                burst_length=lifecycle.burst_size,
+                data_bytes=lifecycle.burst_size * 128,
+                start_time_ns=start_time_ns,
+                end_time_ns=end_time_ns,
+                rn_end_time_ns=rn_end_time_ns,
+                sn_end_time_ns=sn_end_time_ns,
+                cmd_latency_ns=cmd_latency,
+                data_latency_ns=data_latency,
+                transaction_latency_ns=transaction_latency,
+                d2d_sn_node=d2d_sn_node,
+                d2d_rn_node=d2d_rn_node,
+            )
+            self.d2d_requests.append(d2d_info)
 
         return self.d2d_requests
 
@@ -338,12 +516,29 @@ class RequestCollector:
 
         return result
 
-    def _get_time_value(self, flit, attr_name: str, default: float = 0) -> float:
-        """获取flit的时间值并转换为ns"""
+    def _get_time_value(self, flit, attr_name: str, default: float = 0, allow_default: bool = True) -> float:
+        """
+        获取flit的时间值并转换为ns
+
+        Args:
+            flit: flit对象
+            attr_name: 属性名称
+            default: 默认值
+            allow_default: 是否允许使用默认值，False时如果字段无效会报错
+        """
         if attr_name and hasattr(flit, attr_name):
             value = getattr(flit, attr_name)
             if value < float("inf"):
                 return value // self.network_frequency
+
+        if not allow_default:
+            raise ValueError(
+                f"[ERROR] Required timestamp field '{attr_name}' is invalid or missing!\n"
+                f"  Flit has attribute: {hasattr(flit, attr_name)}\n"
+                f"  Value: {getattr(flit, attr_name, 'N/A')}\n"
+                f"  Flit packet_id: {getattr(flit, 'packet_id', 'N/A')}\n"
+                f"  Flit req_type: {getattr(flit, 'req_type', 'N/A')}"
+            )
         return default
 
     def _get_latency_value(self, flit, attr_name: str) -> int:
@@ -368,25 +563,16 @@ class RequestCollector:
         """
         try:
             # 计算开始时间和结束时间
-            start_time_ns = self._get_time_value(representative_flit, "cmd_entry_cake0_cycle", 0)
+            start_time_ns = self._get_time_value(representative_flit, "cmd_entry_cake0_cycle", 0, allow_default=False)
 
             req_type = getattr(representative_flit, "req_type", "unknown")
             end_time_field = {"read": "data_received_complete_cycle", "write": "write_complete_received_cycle"}.get(req_type)
-            end_time_ns = self._get_time_value(representative_flit, end_time_field, start_time_ns) if end_time_field else start_time_ns
 
-            # 提取RN/SN端时间戳(仅不跨DIE请求使用)
-            source_die = getattr(first_flit, "d2d_origin_die", 0)
-            target_die = getattr(first_flit, "d2d_target_die", 1)
-            rn_end_time_ns = None
-            sn_end_time_ns = None
+            # 对于end_time字段，不允许使用默认值，必须有有效值
+            if not end_time_field:
+                raise ValueError(f"Unknown req_type: {req_type} for packet {packet_id}")
 
-            if source_die == target_die:  # 不跨DIE请求
-                if req_type == "read":
-                    rn_end_time_ns = self._get_time_value(representative_flit, "data_received_complete_cycle", start_time_ns)
-                    sn_end_time_ns = self._get_time_value(first_flit, "data_entry_noc_from_cake1_cycle", start_time_ns)
-                elif req_type == "write":
-                    rn_end_time_ns = self._get_time_value(first_flit, "data_entry_noc_from_cake0_cycle", start_time_ns)
-                    sn_end_time_ns = self._get_time_value(representative_flit, "data_received_complete_cycle", start_time_ns)
+            end_time_ns = self._get_time_value(representative_flit, end_time_field, 0, allow_default=False)
 
             # 从flit读取已计算的延迟值并转换为ns
             cmd_latency_ns = self._get_latency_value(first_flit, "cmd_latency")
@@ -399,6 +585,9 @@ class RequestCollector:
 
             d2d_sn_node = getattr(first_flit, "d2d_sn_node", None)
             d2d_rn_node = getattr(first_flit, "d2d_rn_node", None)
+
+            source_die = getattr(first_flit, "d2d_origin_die", 0)
+            target_die = getattr(first_flit, "d2d_target_die", 1)
 
             return D2DRequestInfo(
                 packet_id=packet_id,
@@ -413,8 +602,6 @@ class RequestCollector:
                 data_bytes=data_bytes,
                 start_time_ns=start_time_ns,
                 end_time_ns=end_time_ns,
-                rn_end_time_ns=rn_end_time_ns,
-                sn_end_time_ns=sn_end_time_ns,
                 cmd_latency_ns=cmd_latency_ns,
                 data_latency_ns=data_latency_ns,
                 transaction_latency_ns=transaction_latency_ns,

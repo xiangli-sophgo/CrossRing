@@ -801,6 +801,18 @@ class D2D_SN_Interface(IPInterface):
         write_req = next((req for req in self.sn_tracker if req.packet_id == packet_id), None)
 
         if write_req:
+            # 更新RequestTracker的时间戳（关键修复！）
+            if hasattr(self, 'request_tracker') and self.request_tracker:
+                self.request_tracker.update_timestamp(
+                    packet_id,
+                    'write_complete_received_cycle',
+                    self.current_cycle
+                )
+                # 从所有flit收集时间戳
+                self.request_tracker.collect_timestamps_from_flits(packet_id)
+                # 标记跨Die写请求完成
+                self.request_tracker.mark_request_completed(packet_id, self.current_cycle)
+
             # 释放D2D_SN的tracker和资源
             self.sn_tracker.remove(write_req)
             self.sn_tracker_count["share"]["count"] += 1

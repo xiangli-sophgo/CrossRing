@@ -16,11 +16,11 @@ def main():
 
     # ==================== 流量配置 ====================
     # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
-    traffic_file_path = r"../test_data"
-    # traffic_file_path = r"../traffic/sim_d2d_traffic"
+    # traffic_file_path = r"../test_data"
+    traffic_file_path = r"../traffic"
     traffic_config = [
         [
-            "LLama2_AllReduce.txt"
+            # "LLama2_AllReduce.txt"
             # "data_sim_16_share_R_1104.txt"
             # "data_sim_16_share_W_1104.txt"
             # "data_sim_16_share_d2d_W_1104.txt"
@@ -28,6 +28,7 @@ def main():
             # "data_sim_64_share_d2d_R_1104.txt"
             # "data_sim_64_share_d2d_W_1104.txt"
             # "data_burst4_W_1111.txt"
+            "traffic_20251119_152813.txt"
         ],
     ]
 
@@ -81,7 +82,7 @@ def main():
     # sim.setup_visualization(plot_link_state=1, plot_start_cycle=1000, show_node_id=1)
     np.random.seed(801)
 
-    sim.run_simulation(max_time=5000, print_interval=200)
+    sim.run_simulation(max_time=2000, print_interval=200)
 
 
 if __name__ == "__main__":

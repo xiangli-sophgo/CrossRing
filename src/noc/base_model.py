@@ -10,6 +10,7 @@ from src.utils.flit import (
     get_original_source_type,
     get_original_destination_type,
 )
+from src.utils.request_tracker import RequestTracker
 from src.noc.components import Network, IPInterface
 
 from src.analysis.Link_State_Visualizer import NetworkLinkVisualizer
@@ -84,6 +85,10 @@ class BaseModel:
             "rsp": False,
             "flit": False,
         }
+
+        # 请求追踪器
+        network_freq = getattr(config, "NETWORK_FREQUENCY", 2.0)
+        self.request_tracker = RequestTracker(network_frequency=network_freq)
 
     def setup_traffic_scheduler(self, traffic_file_path: str, traffic_chains: list) -> None:
         """
@@ -292,6 +297,11 @@ class BaseModel:
                         self.data_network,
                         self.routes,
                     )
+
+        # 为所有IP接口设置request_tracker
+        for ip_interface in self.ip_modules.values():
+            ip_interface.request_tracker = self.request_tracker
+
         self.flits = []
         self.throughput_time = []
         self.data_count = 0
@@ -1287,6 +1297,22 @@ class BaseModel:
         req.req_attr = "new"
         # req.cmd_entry_cake0_cycle = self.cycle
 
+        # 在RequestTracker中开始追踪请求
+        if hasattr(self, "request_tracker") and self.request_tracker:
+            self.request_tracker.start_request(
+                packet_id=req.packet_id,
+                source=source,
+                destination=destination,
+                source_type=req_data[2],
+                dest_type=req_data[4],
+                op_type=req.req_type,
+                burst_size=req_data[6],
+                cycle=self.cycle,
+                is_cross_die=False,  # NoC内部请求不跨Die
+                origin_die=None,
+                target_die=None,
+            )
+
         try:
             # 通过IPInterface处理请求
             node_id = req.source
@@ -2139,7 +2165,7 @@ class BaseModel:
 
                     inject_tracker_functionality(integrated_path, self._tracker_json_path)
                     # if self.verbose:
-                        # print(f"Tracker交互功能已添加到HTML报告")
+                    # print(f"Tracker交互功能已添加到HTML报告")
                 except Exception as e:
                     if self.verbose:
                         print(f"警告: Tracker交互功能注入失败: {e}")

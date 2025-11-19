@@ -14,6 +14,7 @@ from .d2d_traffic_scheduler import D2DTrafficScheduler
 from src.analysis.d2d_analyzer import D2DAnalyzer
 from src.d2d.components import D2D_RN_Interface, D2D_SN_Interface
 from config.config import CrossRingConfig
+from src.utils.request_tracker import RequestTracker
 
 
 class D2D_Model:
@@ -83,6 +84,11 @@ class D2D_Model:
         self.d2d_received_flits = {i: 0 for i in range(self.num_dies)}  # 每个Die实际接收的跨Die数据包数
         self.d2d_requests_sent = {i: 0 for i in range(self.num_dies)}  # 每个Die发出的跨Die请求数
         self.d2d_requests_completed = {i: 0 for i in range(self.num_dies)}  # 每个Die完成的跨Die请求数
+
+        # 创建全局RequestTracker（所有Die共享）
+        network_freq = getattr(config, 'NETWORK_FREQUENCY', 2.0)
+        self.request_tracker = RequestTracker(network_frequency=network_freq)
+        print(f"[D2D RequestTracker] 已初始化全局请求追踪器，网络频率={network_freq} GHz")
 
         # 创建D2D专用的traffic调度器（如果提供了traffic_config）
         self.d2d_traffic_scheduler = None
@@ -311,6 +317,9 @@ class D2D_Model:
 
             # 设置Die ID
             die_model.die_id = die_id
+
+            # 共享全局RequestTracker（关键！所有Die使用同一个tracker）
+            die_model.request_tracker = self.request_tracker
 
             # 使用新的setup方法配置流量调度器
             if self.traffic_config:
@@ -866,6 +875,23 @@ class D2D_Model:
         req.req_attr = "new"
         req.traffic_id = traffic_id
         req.packet_id = BaseModel.get_next_packet_id()
+
+        # 在RequestTracker中开始追踪请求
+        if hasattr(self, 'request_tracker') and self.request_tracker:
+            is_cross_die = (src_die != dst_die)
+            self.request_tracker.start_request(
+                packet_id=req.packet_id,
+                source=source_physical,
+                destination=dst_node,
+                source_type=src_ip,
+                dest_type=dst_ip,
+                op_type=req.req_type,
+                burst_size=burst_length,
+                cycle=self.current_cycle,
+                is_cross_die=is_cross_die,
+                origin_die=src_die,
+                target_die=dst_die
+            )
 
         # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
 

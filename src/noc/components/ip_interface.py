@@ -309,6 +309,16 @@ class IPInterface:
         if network_type == "req" and self.networks[network_type]["send_flits"][flit.packet_id]:
             return True
         self.networks[network_type]["send_flits"][flit.packet_id].append(flit)
+
+        # 添加flit到RequestTracker
+        if hasattr(self, 'request_tracker') and self.request_tracker:
+            if network_type == "req":
+                self.request_tracker.add_request_flit(flit.packet_id, flit)
+            elif network_type == "rsp":
+                self.request_tracker.add_response_flit(flit.packet_id, flit)
+            elif network_type == "data":
+                self.request_tracker.add_data_flit(flit.packet_id, flit)
+
         return True
 
     def inject_to_l2h_pre(self, network_type):
@@ -370,14 +380,26 @@ class IPInterface:
         # 更新cycle统计
         if network_type == "req" and flit.req_attr == "new":
             flit.cmd_entry_noc_from_cake0_cycle = self.current_cycle
+            # 更新RequestTracker
+            if hasattr(self, 'request_tracker') and self.request_tracker:
+                self.request_tracker.update_timestamp(flit.packet_id, 'cmd_entry_noc_from_cake0_cycle', self.current_cycle)
         elif network_type == "rsp":
             flit.cmd_entry_noc_from_cake1_cycle = self.current_cycle
+            # 更新RequestTracker
+            if hasattr(self, 'request_tracker') and self.request_tracker:
+                self.request_tracker.update_timestamp(flit.packet_id, 'cmd_entry_noc_from_cake1_cycle', self.current_cycle)
         elif network_type == "data":
             # 只为第一个data flit设置entry时间戳
             if flit.req_type == "read" and flit.flit_id == 0:
                 flit.data_entry_noc_from_cake1_cycle = self.current_cycle
+                # 更新RequestTracker
+                if hasattr(self, 'request_tracker') and self.request_tracker:
+                    self.request_tracker.update_timestamp(flit.packet_id, 'data_entry_noc_from_cake1_cycle', self.current_cycle)
             elif flit.req_type == "write" and flit.flit_id == 0:
                 flit.data_entry_noc_from_cake0_cycle = self.current_cycle
+                # 更新RequestTracker
+                if hasattr(self, 'request_tracker') and self.request_tracker:
+                    self.request_tracker.update_timestamp(flit.packet_id, 'data_entry_noc_from_cake0_cycle', self.current_cycle)
 
     def _check_and_reserve_resources(self, req):
         """检查并预占新请求所需的资源"""
@@ -405,6 +427,11 @@ class IPInterface:
                 self._record_tracker_allocation("rn_rdb")
                 self.rn_rdb[req.packet_id] = []
                 req.cmd_entry_cake0_cycle = self.current_cycle  # 这里记录cycle
+
+                # 更新RequestTracker的timestamp
+                if hasattr(self, 'request_tracker') and self.request_tracker:
+                    self.request_tracker.update_timestamp(req.packet_id, 'cmd_entry_cake0_cycle', self.current_cycle)
+
                 self.rn_tracker["read"].append(req)
                 self.rn_tracker_pointer["read"] += 1
 
@@ -428,6 +455,11 @@ class IPInterface:
                 self._record_tracker_allocation("rn_wdb")
                 self.rn_wdb[req.packet_id] = []
                 req.cmd_entry_cake0_cycle = self.current_cycle  # 这里记录cycle
+
+                # 更新RequestTracker的timestamp
+                if hasattr(self, 'request_tracker') and self.request_tracker:
+                    self.request_tracker.update_timestamp(req.packet_id, 'cmd_entry_cake0_cycle', self.current_cycle)
+
                 self.rn_tracker["write"].append(req)
                 self.rn_tracker_pointer["write"] += 1
 
@@ -501,6 +533,11 @@ class IPInterface:
         self.req_cir_v_num += req.eject_attempts_v
         req.cmd_received_by_cake1_cycle = self.current_cycle
 
+        # 添加到RequestTracker
+        if hasattr(self, 'request_tracker') and self.request_tracker:
+            self.request_tracker.add_request_flit(req.packet_id, req)
+            self.request_tracker.update_timestamp(req.packet_id, 'cmd_received_by_cake1_cycle', self.current_cycle)
+
         if req.req_type == "read":
             if req.req_attr == "new":
                 if self.sn_tracker_count["ro"]["count"] > 0:
@@ -544,6 +581,11 @@ class IPInterface:
         self.rsp_cir_h_num += rsp.eject_attempts_h
         self.rsp_cir_v_num += rsp.eject_attempts_v
         rsp.cmd_received_by_cake0_cycle = self.current_cycle
+
+        # 添加到RequestTracker
+        if hasattr(self, 'request_tracker') and self.request_tracker:
+            self.request_tracker.add_response_flit(rsp.packet_id, rsp)
+            self.request_tracker.update_timestamp(rsp.packet_id, 'cmd_received_by_cake0_cycle', self.current_cycle)
         if rsp.req_type == "read" and rsp.rsp_type == "negative":
             self.read_retry_num_stat += 1
         elif rsp.req_type == "write" and rsp.rsp_type == "negative":
@@ -635,6 +677,11 @@ class IPInterface:
                 if req:
                     # 记录写完成响应接收时间（所有写请求都需要记录）
                     req.write_complete_received_cycle = self.current_cycle
+
+                    # 标记写请求完成
+                    if hasattr(self, 'request_tracker') and self.request_tracker:
+                        self.request_tracker.update_timestamp(rsp.packet_id, 'write_complete_received_cycle', self.current_cycle)
+                        self.request_tracker.mark_request_completed(rsp.packet_id, self.current_cycle)
 
                     # 同时更新arrive_flits中对应packet的所有flit的时间戳
                     if req.packet_id in self.req_network.arrive_flits:
@@ -787,6 +834,10 @@ class IPInterface:
             # 读数据到达RN端，需要收集到data buffer中
             self.rn_rdb[flit.packet_id].append(flit)
 
+            # 添加到RequestTracker
+            if hasattr(self, 'request_tracker') and self.request_tracker:
+                self.request_tracker.add_data_flit(flit.packet_id, flit)
+
             # 如果是跨Die数据且完成了整个burst，更新请求完成计数
             if hasattr(flit, "d2d_origin_die") and hasattr(flit, "d2d_target_die"):
                 if flit.d2d_origin_die != flit.d2d_target_die:
@@ -798,6 +849,10 @@ class IPInterface:
                                 d2d_model.d2d_requests_completed[die_id] += 1
             # 检查是否收集完整个burst
             if len(self.rn_rdb[flit.packet_id]) == flit.burst_length:
+                # 标记读请求完成
+                if hasattr(self, 'request_tracker') and self.request_tracker:
+                    self.request_tracker.mark_request_completed(flit.packet_id, self.current_cycle)
+
                 req = next((req for req in self.rn_tracker["read"] if req.packet_id == flit.packet_id), None)
                 if req:
                     # 立即释放tracker和更新计数
@@ -812,6 +867,7 @@ class IPInterface:
                     # 记录最后到达时间
                     complete_cycle = self.current_cycle
 
+                    # 同时更新tracker中的data_flits和network中的send_flits
                     for f in self.data_network.send_flits[flit.packet_id]:
                         f.leave_db_cycle = self.current_cycle
                         f.sync_latency_record(req)
@@ -821,6 +877,16 @@ class IPInterface:
                         f.cmd_latency = f.cmd_received_by_cake1_cycle - f.cmd_entry_noc_from_cake0_cycle
                         f.data_latency = complete_cycle - first_flit.data_entry_noc_from_cake1_cycle
                         f.transaction_latency = complete_cycle - f.cmd_entry_cake0_cycle
+
+                    # 同步更新tracker中的data_flits时间戳并重新收集
+                    if hasattr(self, 'request_tracker') and self.request_tracker:
+                        lifecycle = self.request_tracker.active_requests.get(flit.packet_id) or \
+                                  self.request_tracker.completed_requests.get(flit.packet_id)
+                        if lifecycle:
+                            for f in lifecycle.data_flits:
+                                f.data_received_complete_cycle = complete_cycle
+                            # 重新收集时间戳以确保timestamps字典被更新
+                            self.request_tracker.collect_timestamps_from_flits(flit.packet_id)
 
                     # 清理data buffer（数据已经收集完成）
                     self.rn_rdb.pop(flit.packet_id)
@@ -891,6 +957,16 @@ class IPInterface:
                         f.cmd_latency = f.cmd_received_by_cake0_cycle - f.cmd_entry_noc_from_cake0_cycle
                         f.data_latency = complete_cycle - first_flit.data_entry_noc_from_cake0_cycle
                         f.transaction_latency = complete_cycle + self.config.SN_TRACKER_RELEASE_LATENCY - f.cmd_entry_cake0_cycle
+
+                    # 更新RequestTracker的timestamp
+                    if hasattr(self, 'request_tracker') and self.request_tracker:
+                        self.request_tracker.update_timestamp(flit.packet_id, 'data_received_complete_cycle', complete_cycle)
+                        self.request_tracker.update_timestamp(flit.packet_id, 'data_entry_noc_from_cake0_cycle', first_flit.data_entry_noc_from_cake0_cycle)
+
+                        # 对于NoC内部写请求，数据到达SN端即完成（不需要write_complete响应）
+                        # 但是对于跨Die写请求，需要等待write_complete响应（在RN端处理）
+                        if not is_cross_die_write:
+                            self.request_tracker.mark_request_completed(flit.packet_id, complete_cycle)
 
                     # 清理data buffer（数据已经收集完成）
                     self.sn_wdb.pop(flit.packet_id)

@@ -45,8 +45,6 @@ class RequestInfo:
     packet_id: int
     start_time: int  # ns
     end_time: int  # ns (整体网络结束时间)
-    rn_end_time: int  # ns (RN端口结束时间)
-    sn_end_time: int  # ns (SN端口结束时间)
     req_type: str  # 'read' or 'write'
     source_node: int
     dest_node: int
@@ -328,7 +326,7 @@ class SingleDieAnalyzer:
                 dest_backup = getattr(req, "dest_type", "UNKNOWN") or "UNKNOWN"
                 port_key = f"{source_backup[:-2].upper() if len(source_backup) > 2 else source_backup.upper()} {req.req_type} {dest_backup[:3].upper()}"
 
-            completion_time = req.rn_end_time
+            completion_time = req.end_time
             self.rn_bandwidth_time_series[port_key]["time"].append(completion_time)
             self.rn_bandwidth_time_series[port_key]["start_times"].append(req.start_time)
             self.rn_bandwidth_time_series[port_key]["bytes"].append(req.burst_length * 128)
@@ -471,13 +469,9 @@ class SingleDieAnalyzer:
                 flow_save_path = None
 
             if self.sim_model.topo_type_stat.startswith("Ring"):
-                self.flow_visualizer.draw_ring_flow_graph(
-                    network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, save_path=flow_save_path
-                )
+                self.flow_visualizer.draw_ring_flow_graph(network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, save_path=flow_save_path)
             else:
-                self.flow_visualizer.draw_flow_graph(
-                    network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, mode="total", save_path=flow_save_path
-                )
+                self.flow_visualizer.draw_flow_graph(network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, mode="total", save_path=flow_save_path)
 
             if flow_save_path:
                 saved_figures.append(("流图", flow_save_path))
@@ -598,9 +592,7 @@ class SingleDieAnalyzer:
 
     def _empty_metrics(self) -> BandwidthMetrics:
         """返回空的BandwidthMetrics"""
-        return BandwidthMetrics(
-            unweighted_bandwidth=0.0, weighted_bandwidth=0.0, working_intervals=[], total_working_time=0, network_start_time=0, network_end_time=0, total_bytes=0, total_requests=0
-        )
+        return BandwidthMetrics(unweighted_bandwidth=0.0, weighted_bandwidth=0.0, working_intervals=[], total_working_time=0, network_start_time=0, network_end_time=0, total_bytes=0, total_requests=0)
 
     def _calculate_port_bandwidth_averages(self, all_ports: Dict[str, PortBandwidthMetrics]) -> Dict[str, float]:
         """计算每种端口类型的平均带宽"""

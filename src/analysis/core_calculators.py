@@ -64,10 +64,6 @@ class DataValidator:
             return False
         if not DataValidator.is_valid_number(req.end_time):
             return False
-        if not DataValidator.is_valid_number(req.rn_end_time):
-            return False
-        if not DataValidator.is_valid_number(req.sn_end_time):
-            return False
 
         # 检查数据大小字段
         if not DataValidator.is_valid_number(req.total_bytes) or req.total_bytes <= 0:
@@ -155,14 +151,7 @@ class TimeIntervalCalculator:
             total_bytes = sum(req.total_bytes for req in interval_requests)
             flit_count = sum(req.burst_length for req in interval_requests)
 
-            interval = WorkingInterval(
-                start_time=start,
-                end_time=end,
-                duration=end - start,
-                flit_count=flit_count,
-                total_bytes=total_bytes,
-                request_count=len(interval_requests)
-            )
+            interval = WorkingInterval(start_time=start, end_time=end, duration=end - start, flit_count=flit_count, total_bytes=total_bytes, request_count=len(interval_requests))
             working_intervals.append(interval)
 
         return working_intervals
@@ -208,12 +197,7 @@ class BandwidthCalculator:
         """
         self.time_interval_calculator = time_interval_calculator
 
-    def calculate_bandwidth_metrics(
-        self,
-        requests: List[RequestInfo],
-        operation_type: str = None,
-        endpoint_type: str = "network"
-    ) -> BandwidthMetrics:
+    def calculate_bandwidth_metrics(self, requests: List[RequestInfo], operation_type: str = None, endpoint_type: str = "network") -> BandwidthMetrics:
         """
         计算指定操作类型的带宽指标
 
@@ -232,21 +216,14 @@ class BandwidthCalculator:
             if operation_type is not None and req.req_type != operation_type:
                 continue
 
-            # 根据endpoint_type选择正确的结束时间
-            if endpoint_type == "rn":
-                end_time = req.rn_end_time
-            elif endpoint_type == "sn":
-                end_time = req.sn_end_time
-            else:  # network
-                end_time = req.end_time
+            # 统一使用整体end_time
+            end_time = req.end_time
 
-            # 创建临时请求对象，使用正确的结束时间
+            # 创建临时请求对象
             temp_req = RequestInfo(
                 packet_id=req.packet_id,
                 start_time=req.start_time,
                 end_time=end_time,
-                rn_end_time=req.rn_end_time,
-                sn_end_time=req.sn_end_time,
                 req_type=req.req_type,
                 source_node=req.source_node,
                 dest_node=req.dest_node,
@@ -318,6 +295,7 @@ class BandwidthCalculator:
                     total_weight += weight
 
             weighted_bandwidth = (total_weighted_bandwidth / total_weight) if total_weight > 0 else 0.0
+
         else:
             weighted_bandwidth = 0.0
 

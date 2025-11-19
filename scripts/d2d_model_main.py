@@ -41,7 +41,8 @@ def main():
             # "d2d_16_share_W_1104.txt"
             # "d2d_16_share_R_1104.txt"
             # "data_sim_16_share_W_1110.txt"
-            "2261_c2c_16_share_R.txt"
+            # "2261_c2c_16_share_R.txt"
+            "traffic_20251119_123538.txt"
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
@@ -65,7 +66,7 @@ def main():
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_time=5000,
+        max_time=400,
         print_interval=200,
         verbose=1,
     )
@@ -73,15 +74,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # 保持程序运行，让matplotlib图表持续显示
-    try:
-        import matplotlib.pyplot as plt
-
-        if plt.get_fignums():  # 如果有打开的图形
-            print("\n图表已显示，按Ctrl+C或关闭图形窗口退出程序")
-            plt.show(block=True)  # 阻塞显示，直到用户关闭所有图形窗口
-    except KeyboardInterrupt:
-        print("\n程序已退出")
-    except Exception as e:
-        print(f"显示图表时出错: {e}")
-        pass
