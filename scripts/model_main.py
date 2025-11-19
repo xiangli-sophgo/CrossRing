@@ -86,4 +86,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import traceback, logging
+
+    logging.basicConfig(level=logging.INFO)
+    try:
+        main()
+    except Exception:
+        logging.error("Unhandled exception:\n%s", traceback.format_exc())
+        import sys
+
+        sys.exit(1)

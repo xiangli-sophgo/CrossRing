@@ -354,6 +354,10 @@ def init_session_state():
     if "config_version" not in st.session_state:
         st.session_state.config_version = 0
 
+    # 配置加载模式
+    if "config_load_mode" not in st.session_state:
+        st.session_state.config_load_mode = "replace"
+
 
 # ==================== 缓存函数 ====================
 
@@ -773,9 +777,29 @@ def render_ip_mount_section():
 
                     st.markdown("</div>", unsafe_allow_html=True)
 
+    # 拓扑图标题
+    st.markdown("---")
+    st.subheader("拓扑图")
+
+    # 计算链路带宽（从配置区域获取选项）
+    link_bandwidth = None
+    show_bandwidth = st.session_state.get("show_link_bandwidth", False)
+    if show_bandwidth:
+        routing_type = st.session_state.get("bandwidth_routing_type", "XY")
+        configs = get_cached_configs(st.session_state.config_manager, st.session_state.config_version)
+        if configs and st.session_state.node_ips:
+            try:
+                from src.traffic_process.traffic_gene.static_bandwidth_analyzer import compute_link_bandwidth
+
+                link_bandwidth = compute_link_bandwidth(
+                    topo_type=st.session_state.topo_type, node_ips=st.session_state.node_ips, configs=configs, routing_type=routing_type
+                )
+            except Exception as e:
+                show_error(f"带宽计算失败: {str(e)}")
+
     # 绘制拓扑图
     visualizer = get_topology_visualizer(st.session_state.topo_type)
-    fig = visualizer.draw_topology_grid(selected_src=set(), selected_dst=set(), node_ips=st.session_state.node_ips)
+    fig = visualizer.draw_topology_grid(selected_src=set(), selected_dst=set(), node_ips=st.session_state.node_ips, link_bandwidth=link_bandwidth)
     st.plotly_chart(fig, use_container_width=True, key="topology_display")
 
     # 节点IP管理面板
@@ -1104,6 +1128,12 @@ def render_config_section():
                                 else:
                                     st.error("配置验证失败:\n" + "\n".join(errors))
 
+    # 带宽显示选项（放在添加配置下方）
+    mini_divider()
+    show_bandwidth = st.checkbox("显示链路带宽", value=False, key="show_link_bandwidth", help="显示基于当前配置计算的静态链路带宽")
+    if show_bandwidth:
+        routing_type = st.selectbox("路由算法", ["XY", "YX"], index=0, key="bandwidth_routing_type", help="XY: 先水平后垂直; YX: 先垂直后水平")
+
 
 def render_config_list():
     """配置列表区域（全宽显示）"""
@@ -1123,7 +1153,7 @@ def render_config_list():
 
     # 保存配置对话框
     if st.session_state.get("show_save_config_dialog", False):
-        st.markdown('<div class="dialog-container">', unsafe_allow_html=True)
+        # st.markdown('<div class="dialog-container">', unsafe_allow_html=True)
         st.markdown("**保存数据流配置**")
 
         config_name = st.text_input("配置名称", placeholder="例如: gdma_to_ddr_test", help="用于标识此配置集的名称", key="save_config_name_bottom")
@@ -1184,6 +1214,15 @@ def render_config_list():
         st.markdown('<div class="dialog-container">', unsafe_allow_html=True)
         st.markdown("**加载数据流配置**")
 
+        # 加载模式选择
+        load_mode = st.radio(
+            "加载模式",
+            ["替换现有配置", "合并到现有配置"],
+            horizontal=True,
+            help="替换: 清空现有配置后加载 | 合并: 将新配置添加到现有配置",
+            key="config_load_mode_radio",
+        )
+
         save_dir = project_root / "config" / "traffic_configs"
         if save_dir.exists():
             save_files = sorted(save_dir.glob("*.json"), reverse=True)
@@ -1218,12 +1257,15 @@ def render_config_list():
                                 if data["topo_type"] != st.session_state.topo_type:
                                     show_warning(f"加载的配置是 {data['topo_type']} 拓扑,当前是 {st.session_state.topo_type}")
 
-                                # 清空现有配置
+                                # 根据选择的模式处理
                                 rows, cols = map(int, st.session_state.topo_type.split("x"))
                                 num_nodes = rows * cols
-                                st.session_state.config_manager = ConfigManager(num_nodes)
 
-                                # 加载配置
+                                # 只在"替换模式"时重新初始化
+                                if load_mode == "替换现有配置":
+                                    st.session_state.config_manager = ConfigManager(num_nodes)
+
+                                # 加载配置（两种模式都执行）
                                 for config_dict in data["configs"]:
                                     config = TrafficConfig(
                                         src_map=config_dict["src_map"],
@@ -1239,6 +1281,7 @@ def render_config_list():
 
                                     st.session_state.config_manager.add_config(config)
 
+                                st.session_state.config_version += 1  # 更新版本号用于缓存失效
                                 st.session_state.show_load_config_dialog = False
                                 show_success("配置加载成功")
                             except Exception as e:

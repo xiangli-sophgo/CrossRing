@@ -104,7 +104,7 @@ class TopologyVisualizer:
             return f"{node_id}<br>{ip_type.upper()}"
         return str(node_id)
 
-    def draw_topology_grid(self, selected_src: Set[int] = None, selected_dst: Set[int] = None, show_legend: bool = True, node_ips: Dict[int, List[str]] = None, show_links: bool = True) -> go.Figure:
+    def draw_topology_grid(self, selected_src: Set[int] = None, selected_dst: Set[int] = None, show_legend: bool = True, node_ips: Dict[int, List[str]] = None, show_links: bool = True, link_bandwidth: Dict[Tuple[Tuple[int, int], Tuple[int, int]], float] = None) -> go.Figure:
         """
         绘制交互式拓扑网格
 
@@ -113,11 +113,13 @@ class TopologyVisualizer:
         :param show_legend: 是否显示图例
         :param node_ips: 节点挂载的IP列表 {node_id: [ip_list]}
         :param show_links: 是否显示节点间链路
+        :param link_bandwidth: 链路带宽字典 {((x1,y1), (x2,y2)): bandwidth_GB/s}
         :return: Plotly Figure对象
         """
         selected_src = selected_src or set()
         selected_dst = selected_dst or set()
         node_ips = node_ips or {}
+        link_bandwidth = link_bandwidth or {}
 
         # 创建图形
         fig = go.Figure()
@@ -127,7 +129,11 @@ class TopologyVisualizer:
 
         # 添加链路（在节点之前绘制，避免遮挡）
         if show_links:
-            self._add_network_links(fig)
+            self._add_network_links(fig, link_bandwidth)
+
+        # 添加链路带宽标注
+        if link_bandwidth:
+            self._add_bandwidth_labels(fig, link_bandwidth)
 
         # 绘制节点矩形（不使用scatter避免圆圈）
         for node_id in range(self.num_nodes):
@@ -172,7 +178,7 @@ class TopologyVisualizer:
 
         # 更新布局
         fig.update_layout(
-            title=dict(text=f"{self.topo_type} NoC拓扑结构", x=0.5, xanchor="center"),
+            title=dict(text=f"{self.topo_type} NoC拓扑图", x=0.5, xanchor="center"),
             xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, autorange=True),
             yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, scaleanchor="x", scaleratio=1, autorange=True),
             width=1000,
@@ -189,11 +195,10 @@ class TopologyVisualizer:
 
         return fig
 
-    def _add_network_links(self, fig: go.Figure):
+    def _add_network_links(self, fig: go.Figure, link_bandwidth: Dict[Tuple[Tuple[int, int], Tuple[int, int]], float] = None):
         """添加网络链路箭头"""
         # 链路样式配置
-        link_color = "#808080"  # 灰色
-        arrow_size = 1.2
+        arrow_size = 0.8  # 减小箭头头部大小
         arrow_width = 2.5
         offset = 0.08  # 双向链路偏移量
 
@@ -219,19 +224,88 @@ class TopologyVisualizer:
             x1, y1 = self.get_node_position(node1)
             x2, y2 = self.get_node_position(node2)
 
-            # 双向链路，绘制两个带偏移的箭头
+            # 双向链路，每个方向单独获取颜色
             if direction == "horizontal":
                 # 水平链路：上下偏移
                 # node1 -> node2 (上方箭头)
-                self._add_arrow_annotation(fig, x1, y1, x2, y2, 0, offset, link_color, arrow_size, arrow_width)  # y方向偏移
+                color1 = self._get_directional_link_color(node1, node2, link_bandwidth)
+                self._add_arrow_annotation(fig, x1, y1, x2, y2, 0, offset, color1, arrow_size, arrow_width)
                 # node2 -> node1 (下方箭头)
-                self._add_arrow_annotation(fig, x2, y2, x1, y1, 0, -offset, link_color, arrow_size, arrow_width)  # y方向偏移
+                color2 = self._get_directional_link_color(node2, node1, link_bandwidth)
+                self._add_arrow_annotation(fig, x2, y2, x1, y1, 0, -offset, color2, arrow_size, arrow_width)
             else:  # vertical
                 # 垂直链路：左右偏移
                 # node1 -> node2 (右侧箭头)
-                self._add_arrow_annotation(fig, x1, y1, x2, y2, offset, 0, link_color, arrow_size, arrow_width)  # x方向偏移
+                color1 = self._get_directional_link_color(node1, node2, link_bandwidth)
+                self._add_arrow_annotation(fig, x1, y1, x2, y2, offset, 0, color1, arrow_size, arrow_width)
                 # node2 -> node1 (左侧箭头)
-                self._add_arrow_annotation(fig, x2, y2, x1, y1, -offset, 0, link_color, arrow_size, arrow_width)  # x方向偏移
+                color2 = self._get_directional_link_color(node2, node1, link_bandwidth)
+                self._add_arrow_annotation(fig, x2, y2, x1, y1, -offset, 0, color2, arrow_size, arrow_width)
+
+    def _get_directional_link_color(self, src_node: int, dst_node: int, link_bandwidth: Dict = None) -> str:
+        """
+        根据单向链路带宽返回颜色
+
+        :param src_node: 源节点ID
+        :param dst_node: 目标节点ID
+        :param link_bandwidth: 链路带宽字典 {((col1,row1), (col2,row2)): bandwidth}
+        :return: 颜色字符串
+        """
+        if not link_bandwidth:
+            return "#808080"  # 默认灰色
+
+        # 将节点ID转换为坐标
+        src_row, src_col = src_node // self.cols, src_node % self.cols
+        dst_row, dst_col = dst_node // self.cols, dst_node % self.cols
+        src_pos = (src_col, src_row)
+        dst_pos = (dst_col, dst_row)
+
+        # 查找单向带宽
+        bandwidth = link_bandwidth.get((src_pos, dst_pos), 0)
+
+        if bandwidth <= 0:
+            return "#808080"  # 无流量，灰色
+
+        # 根据带宽大小返回颜色
+        if bandwidth < 50:
+            return "#00FF00"  # 绿色 - 低负载
+        elif bandwidth < 100:
+            return "#FFA500"  # 橙色 - 中等负载
+        else:
+            return "#FF0000"  # 红色 - 高负载
+
+    def _get_link_color(self, node1: int, node2: int, link_bandwidth: Dict = None) -> str:
+        """
+        根据链路带宽返回颜色（已废弃，保留用于兼容）
+
+        :param node1: 源节点ID
+        :param node2: 目标节点ID
+        :param link_bandwidth: 链路带宽字典 {((col1,row1), (col2,row2)): bandwidth}
+        :return: 颜色字符串
+        """
+        if not link_bandwidth:
+            return "#808080"  # 默认灰色
+
+        # 将节点ID转换为坐标
+        row1, col1 = node1 // self.cols, node1 % self.cols
+        row2, col2 = node2 // self.cols, node2 % self.cols
+        pos1 = (col1, row1)
+        pos2 = (col2, row2)
+
+        # 查找对应的带宽
+        bandwidth = link_bandwidth.get((pos1, pos2), 0) + link_bandwidth.get((pos2, pos1), 0)
+
+        if bandwidth <= 0:
+            return "#808080"  # 无流量，灰色
+
+        # 根据带宽大小返回颜色（从蓝色到红色渐变）
+        # 使用简单的分段着色
+        if bandwidth < 50:
+            return "#00FF00"  # 绿色 - 低负载
+        elif bandwidth < 100:
+            return "#FFA500"  # 橙色 - 中等负载
+        else:
+            return "#FF0000"  # 红色 - 高负载
 
     def _add_arrow_annotation(self, fig: go.Figure, x_start: float, y_start: float, x_end: float, y_end: float, offset_x: float, offset_y: float, color: str, arrow_size: float, arrow_width: float):
         """添加单个箭头标注"""
@@ -300,6 +374,59 @@ class TopologyVisualizer:
             arrowcolor=color,
             opacity=0.6,
         )
+
+    def _add_bandwidth_labels(self, fig: go.Figure, link_bandwidth: Dict[Tuple[Tuple[int, int], Tuple[int, int]], float]):
+        """
+        在链路上添加带宽标注
+
+        :param fig: Plotly Figure对象
+        :param link_bandwidth: 链路带宽字典 {((col1,row1), (col2,row2)): bandwidth_GB/s}
+        """
+        for (src_pos, dst_pos), bandwidth in link_bandwidth.items():
+            if bandwidth <= 0:
+                continue
+
+            # 将坐标转换为节点ID
+            src_col, src_row = src_pos
+            dst_col, dst_row = dst_pos
+            src_node = src_row * self.cols + src_col
+            dst_node = dst_row * self.cols + dst_col
+
+            # 获取节点位置
+            x1, y1 = self.get_node_position(src_node)
+            x2, y2 = self.get_node_position(dst_node)
+
+            # 计算链路中点位置
+            mid_x = (x1 + x2) / 2
+            mid_y = (y1 + y2) / 2
+
+            # 判断链路方向，调整文本位置
+            if src_row == dst_row:
+                # 水平链路，文本偏移到上方
+                text_y = mid_y + 0.15
+                text_x = mid_x
+            else:
+                # 垂直链路，根据方向放在箭头两侧
+                # src -> dst: 如果src在上(src_row < dst_row)，箭头在右侧，标注也在右侧
+                # dst -> src: 如果dst在上(dst_row < src_row)，箭头在右侧，标注也在右侧
+                if src_row < dst_row:
+                    # src在上，dst在下，箭头方向向下在右侧
+                    text_x = mid_x + 0.15
+                else:
+                    # dst在上，src在下，箭头方向向上在左侧
+                    text_x = mid_x - 0.15
+                text_y = mid_y
+
+            # 添加带宽文本标注(不带方框)
+            fig.add_annotation(
+                x=text_x,
+                y=text_y,
+                text=f"{bandwidth:.1f}",
+                showarrow=False,
+                font=dict(size=14, color="red", family="Arial"),  # 增大字体从10到14
+                xanchor="center",
+                yanchor="middle",
+            )
 
     def _add_grid_lines(self, fig: go.Figure):
         """添加网格线"""
