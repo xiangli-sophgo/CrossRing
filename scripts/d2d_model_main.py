@@ -29,7 +29,8 @@ def main():
 
     # 配置各种选项
     # 配置数据流
-    traffic_file_path = str(Path(__file__).parent.parent / "test_data")
+    # traffic_file_path = str(Path(__file__).parent.parent / "test_data")
+    traffic_file_path = str(Path(__file__).parent.parent / "traffic")
     traffic_chains = [
         [
             # "d2d_data_simple_example.txt",
@@ -40,7 +41,7 @@ def main():
             # "d2d_16_share_W_1104.txt"
             # "d2d_16_share_R_1104.txt"
             # "data_sim_16_share_W_1110.txt"
-            "2261_c2c_16_share_W_1118.txt"
+            "2261_c2c_16_share_R.txt"
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)

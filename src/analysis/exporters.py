@@ -1244,7 +1244,6 @@ class ReportGenerator:
             html_parts.append(f'<tr><td>ITag</td><td class="num-cell">横向: {summary.get("ITag_h_num", 0)}</td><td class="num-cell">纵向: {summary.get("ITag_v_num", 0)}</td></tr>')
             html_parts.append(f'<tr><td>RB ETag</td><td class="num-cell">T1: {summary.get("RB_ETag_T1_num", 0)}</td><td class="num-cell">T0: {summary.get("RB_ETag_T0_num", 0)}</td></tr>')
             html_parts.append(f'<tr><td>EQ ETag</td><td class="num-cell">T1: {summary.get("EQ_ETag_T1_num", 0)}</td><td class="num-cell">T0: {summary.get("EQ_ETag_T0_num", 0)}</td></tr>')
-            html_parts.append(f'<tr><td>Retry</td><td class="num-cell">读: {summary.get("read_retry_num", 0)}</td><td class="num-cell">写: {summary.get("write_retry_num", 0)}</td></tr>')
 
             html_parts.append("</tbody>")
             html_parts.append("</table>")

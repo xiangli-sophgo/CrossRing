@@ -147,20 +147,7 @@ class TopologyVisualizer:
                 opacity=0.8
             )
 
-            # 添加节点ID文本（简化版，减少渲染负担）
-            # 白色描边（4个方向即可）
-            for dx, dy in [(0, 0.025), (0.025, 0), (0, -0.025), (-0.025, 0)]:
-                fig.add_annotation(
-                    x=x + dx,
-                    y=y + dy,
-                    text=str(node_id),
-                    showarrow=False,
-                    font=dict(size=14, color="white", family="Arial Black"),
-                    xanchor="center",
-                    yanchor="middle"
-                )
-
-            # 中心黑色文字
+            # 添加节点ID文本（黑色，无描边）
             fig.add_annotation(
                 x=x,
                 y=y,
