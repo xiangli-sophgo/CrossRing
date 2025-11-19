@@ -288,7 +288,7 @@ class NetworkLinkVisualizer:
             # self.eject_module_size = (rb_w, h_eq)
             # self.rb_module_size = (rb_w, rb_h)
             self.inject_module_size = (rb_h, w_iq)
-            self.eject_module_size = (h_eq, rb_w)
+            self.eject_module_size = (h_eq * 1.5, rb_w)  # 增加EQ高度50%
             self.rb_module_size = (rb_h, rb_w)
             # self.inject_module_size = (6, 4)
             # self.eject_module_size = (4, 6)
@@ -674,11 +674,19 @@ class NetworkLinkVisualizer:
                     # IQ arbiter输入FIFO：从lane名提取IP类型
                     # "arb_gdma_0" -> "gdma_0"
                     ip_type = lane.replace("arb_", "")
+                    if self.node_id >= len(network.IQ_arbiter_input_fifo.get(ip_type, [])):
+                        continue
                     q = network.IQ_arbiter_input_fifo[ip_type][self.node_id]
                 elif "_" in lane:
-                    q = IQ_Ch.get(lane, [])[self.node_id]
+                    ch_list = IQ_Ch.get(lane, [])
+                    if self.node_id >= len(ch_list):
+                        continue
+                    q = ch_list[self.node_id]
                 else:
-                    q = IQ.get(lane, [])[self.node_id]
+                    iq_list = IQ.get(lane, [])
+                    if self.node_id >= len(iq_list):
+                        continue
+                    q = iq_list[self.node_id]
                 for idx, p in enumerate(patches):
                     t = self.iq_texts[lane][idx]
                     if idx < len(q):
@@ -713,11 +721,19 @@ class NetworkLinkVisualizer:
                     # EQ arbiter输入FIFO：从lane名提取端口名
                     # "arb_TU" -> "TU"
                     port_name = lane.replace("arb_", "")
+                    if self.node_id >= len(network.EQ_arbiter_input_fifo.get(port_name, [])):
+                        continue
                     q = network.EQ_arbiter_input_fifo[port_name][self.node_id]
                 elif "_" in lane:
-                    q = EQ_Ch.get(lane, [])[self.node_id]
+                    ch_list = EQ_Ch.get(lane, [])
+                    if self.node_id >= len(ch_list):
+                        continue
+                    q = ch_list[self.node_id]
                 else:
-                    q = EQ.get(lane, [])[self.node_id]
+                    eq_list = EQ.get(lane, [])
+                    if self.node_id >= len(eq_list):
+                        continue
+                    q = eq_list[self.node_id]
                 for idx, p in enumerate(patches):
                     t = self.eq_texts[lane][idx]
                     if idx < len(q):

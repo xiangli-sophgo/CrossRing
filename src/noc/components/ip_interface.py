@@ -677,21 +677,25 @@ class IPInterface:
                 if req:
                     # 记录写完成响应接收时间（所有写请求都需要记录）
                     req.write_complete_received_cycle = self.current_cycle
+                    req.data_received_complete_cycle = self.current_cycle  # 写完成即数据接收完成
 
                     # 标记写请求完成
                     if hasattr(self, 'request_tracker') and self.request_tracker:
                         self.request_tracker.update_timestamp(rsp.packet_id, 'write_complete_received_cycle', self.current_cycle)
+                        self.request_tracker.update_timestamp(rsp.packet_id, 'data_received_complete_cycle', self.current_cycle)
                         self.request_tracker.mark_request_completed(rsp.packet_id, self.current_cycle)
 
                     # 同时更新arrive_flits中对应packet的所有flit的时间戳
                     if req.packet_id in self.req_network.arrive_flits:
                         for flit in self.req_network.arrive_flits[req.packet_id]:
                             flit.write_complete_received_cycle = self.current_cycle
+                            flit.data_received_complete_cycle = self.current_cycle
 
                     # 同时更新数据网络中对应packet的所有flit的时间戳（用于结果统计）
                     if req.packet_id in self.data_network.arrive_flits:
                         for flit in self.data_network.arrive_flits[req.packet_id]:
                             flit.write_complete_received_cycle = self.current_cycle
+                            flit.data_received_complete_cycle = self.current_cycle
 
                 # 对于跨Die写请求，需要特殊处理tracker释放
                 if req and self._is_cross_die_write_request(req):

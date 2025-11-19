@@ -70,13 +70,8 @@ SDMA_RW_GAP: .inf  # numpy.inf
 ENABLE_CROSSPOINT_CONFLICT_CHECK: 0
 ENABLE_IN_ORDER_EJECTION: 0
 
-# 通道规格
-CHANNEL_SPEC:
-  gdma: 2
-  sdma: 2
-  cdma: 1
-  ddr: 2
-  l2m: 2
+# 通道规格 - 已废弃,现在从traffic文件自动推断
+# CHANNEL_SPEC配置已移除,IP接口将根据traffic文件中实际使用的IP类型动态创建
 
 # 带宽限制 (GB/s) - 注释掉表示无限制
 # GDMA_BW_LIMIT: 16

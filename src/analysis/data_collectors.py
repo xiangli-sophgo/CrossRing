@@ -72,10 +72,7 @@ class RequestCollector:
                 end_time_cycle = timestamps.get('data_received_complete_cycle', float('inf'))
             elif req_type == "write":
                 # 根据是否跨Die选择时间戳
-                source_die = getattr(lifecycle, 'source_die', 0)
-                target_die = getattr(lifecycle, 'target_die', 0)
-
-                if source_die != target_die:  # 跨Die（D2D请求）
+                if lifecycle.origin_die != lifecycle.target_die:  # 跨Die（D2D请求）
                     end_time_cycle = timestamps.get('write_complete_received_cycle', float('inf'))
                 else:  # 不跨Die（NoC请求）
                     end_time_cycle = timestamps.get('data_received_complete_cycle', float('inf'))
@@ -85,8 +82,6 @@ class RequestCollector:
             # 验证必需时间戳
             start_time_cycle = timestamps.get('cmd_entry_cake0_cycle', float('inf'))
             if start_time_cycle >= float('inf') or end_time_cycle >= float('inf'):
-                if packet_id <= 3:
-                    print(f"[DEBUG] 跳过packet_id={packet_id}, timestamps={list(timestamps.keys())}, end_time_cycle={end_time_cycle}")
                 continue  # 跳过无效请求
 
             # 转换为ns

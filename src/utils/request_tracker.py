@@ -45,10 +45,10 @@ class RequestLifecycle:
     # 状态管理
     current_state: RequestState = RequestState.CREATED
 
-    # D2D属性（可选）
+    # D2D属性（默认为0表示单Die场景）
     is_cross_die: bool = False
-    origin_die: Optional[int] = None
-    target_die: Optional[int] = None
+    origin_die: int = 0
+    target_die: int = 0
 
     # Flit追踪（核心功能）
     request_flits: List[Any] = field(default_factory=list)
@@ -95,6 +95,11 @@ class RequestTracker:
             cycle: 创建周期
             **kwargs: 可选参数（is_cross_die, origin_die, target_die等）
         """
+        # 获取die信息，如果未指定则默认为0（单Die场景）
+        origin_die = kwargs.get('origin_die', 0)
+        target_die = kwargs.get('target_die', 0)
+        is_cross_die = kwargs.get('is_cross_die', False) or (origin_die != target_die)
+
         lifecycle = RequestLifecycle(
             packet_id=packet_id,
             source=source,
@@ -104,9 +109,9 @@ class RequestTracker:
             op_type=op_type,
             burst_size=burst_size,
             created_cycle=cycle,
-            is_cross_die=kwargs.get('is_cross_die', False),
-            origin_die=kwargs.get('origin_die'),
-            target_die=kwargs.get('target_die')
+            is_cross_die=is_cross_die,
+            origin_die=origin_die,
+            target_die=target_die
         )
         self.active_requests[packet_id] = lifecycle
 

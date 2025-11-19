@@ -106,14 +106,15 @@ class Network:
         self.inject_queues_pre = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
         self.eject_queues = {"TU": {}, "TD": {}}
         self.eject_queues_in_pre = {"TU": {}, "TD": {}}
-        self.arrive_node_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        self.IQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
-        self.EQ_channel_buffer = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
-        self.IQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
-        self.EQ_channel_buffer_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
+        # Channel buffers - 延迟到initialize_buffers()中创建
+        self.arrive_node_pre = {}
+        self.IQ_channel_buffer = {}
+        self.EQ_channel_buffer = {}
+        self.IQ_channel_buffer_pre = {}
+        self.EQ_channel_buffer_pre = {}
         # IQ仲裁输入FIFO (深度2 + pre缓冲，按IP类型分类)
-        self.IQ_arbiter_input_fifo = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
-        self.IQ_arbiter_input_fifo_pre = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m", "d2d_rn", "d2d_sn"))
+        self.IQ_arbiter_input_fifo = {}
+        self.IQ_arbiter_input_fifo_pre = {}
         # EQ仲裁输入FIFO (深度2 + pre缓冲，4个输入端口，每个端口一个FIFO)
         self.EQ_arbiter_input_fifo = {"TU": {}, "TD": {}, "IQ": {}, "RB": {}}
         self.EQ_arbiter_input_fifo_pre = {"TU": {}, "TD": {}, "IQ": {}, "RB": {}}
@@ -161,22 +162,24 @@ class Network:
         self.max_circuits_h = None
         self.avg_circuits_v = None
         self.max_circuits_v = None
-        self.circuits_flit_h = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        self.circuits_flit_v = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        # Circuit统计 - 延迟初始化
+        self.circuits_flit_h = {}
+        self.circuits_flit_v = {}
         self.gdma_recv = 0
         self.gdma_remainder = 0
         self.gdma_count = 512
         self.l2m_recv = 0
         self.l2m_remainder = 0
         self.sdma_send = []
-        self.num_send = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        self.num_recv = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        self.per_send_throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        self.per_recv_throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        self.send_throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        self.recv_throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        self.last_select = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
-        self.throughput = self.config._make_channels(("sdma", "gdma", "cdma", "ddr", "l2m"))
+        # 吞吐量统计 - 延迟初始化
+        self.num_send = {}
+        self.num_recv = {}
+        self.per_send_throughput = {}
+        self.per_recv_throughput = {}
+        self.send_throughput = {}
+        self.recv_throughput = {}
+        self.last_select = {}
+        self.throughput = {}
 
         # FIFO使用率统计
         self.fifo_depth_sum = {
@@ -266,34 +269,14 @@ class Network:
             self.EQ_UE_Counters["TU"][node_pos] = {"T2": 0, "T1": 0, "T0": 0}
             self.EQ_UE_Counters["TD"][node_pos] = {"T2": 0, "T1": 0, "T0": 0}
 
-            # Channel buffers
-            for key in self.config.CH_NAME_LIST:
-                self.IQ_channel_buffer_pre[key][node_pos] = None
-                self.EQ_channel_buffer_pre[key][node_pos] = None
-                # IQ仲裁输入FIFO初始化（按IP类型分类）
-                self.IQ_arbiter_input_fifo[key][node_pos] = deque(maxlen=2)
-                self.IQ_arbiter_input_fifo_pre[key][node_pos] = None
+            # Channel buffers - 延迟到initialize_buffers()中初始化
 
             # EQ仲裁输入FIFO初始化（4个输入端口，每个端口一个FIFO）
             for input_port in ["TU", "TD", "IQ", "RB"]:
                 self.EQ_arbiter_input_fifo[input_port][node_pos] = deque(maxlen=2)
                 self.EQ_arbiter_input_fifo_pre[input_port][node_pos] = None
-            for key in self.arrive_node_pre:
-                self.arrive_node_pre[key][node_pos] = None
 
-            # Round robin
-            for key in self.round_robin.keys():
-                if key == "IQ":
-                    for fifo_name in ["TR", "TL", "TU", "TD", "EQ"]:
-                        self.round_robin[key][fifo_name][node_pos] = deque()
-                        for ch_name in self.IQ_channel_buffer.keys():
-                            self.round_robin[key][fifo_name][node_pos].append(ch_name)
-                elif key == "EQ":
-                    for ch_name in self.IQ_channel_buffer.keys():
-                        self.round_robin[key][ch_name][node_pos] = deque([0, 1, 2, 3])
-                else:
-                    for fifo_name in ["TU", "TD", "EQ"]:
-                        self.round_robin[key][fifo_name][node_pos] = deque([0, 1, 2, 3])
+            # Round robin - 延迟到initialize_buffers()中初始化(依赖IQ_channel_buffer.keys())
 
             # Timing statistics
             self.inject_time[node_pos] = []
@@ -467,6 +450,74 @@ class Network:
             cp_v.setup_itag("TD", ip_pos, config.ITag_MAX_NUM_V)
 
             self.crosspoints[ip_pos] = {"horizontal": cp_h, "vertical": cp_v}
+
+    def initialize_buffers(self):
+        """
+        延迟初始化channel buffer - 在IP接口创建后调用
+
+        根据config.CH_NAME_LIST动态创建所有与IP类型相关的buffer和统计结构
+        """
+        from collections import defaultdict, deque
+
+        # 1. 直接根据CH_NAME_LIST创建channel buffer(不使用_make_channels)
+        for ip_type in self.config.CH_NAME_LIST:
+            # 为每个IP类型创建buffer字典
+            self.IQ_channel_buffer[ip_type] = defaultdict(lambda: deque(maxlen=self.config.IQ_CH_FIFO_DEPTH))
+            self.EQ_channel_buffer[ip_type] = defaultdict(lambda: deque(maxlen=self.config.EQ_CH_FIFO_DEPTH))
+            # pre buffer需要用普通dict,因为None是有效值
+            self.IQ_channel_buffer_pre[ip_type] = {}
+            self.EQ_channel_buffer_pre[ip_type] = {}
+            self.IQ_arbiter_input_fifo[ip_type] = defaultdict(lambda: deque(maxlen=2))
+            self.IQ_arbiter_input_fifo_pre[ip_type] = {}
+
+            # 为普通IP类型创建统计结构(排除d2d)
+            if not ip_type.startswith("d2d"):
+                base_type = ip_type.split('_')[0]
+                if base_type not in ["d2d"]:
+                    # 使用ip_type作为key而不是base_type
+                    self.circuits_flit_h[ip_type] = defaultdict(lambda: deque(maxlen=self.config.IQ_CH_FIFO_DEPTH))
+                    self.circuits_flit_v[ip_type] = defaultdict(lambda: deque(maxlen=self.config.IQ_CH_FIFO_DEPTH))
+                    self.num_send[ip_type] = {ip: 0 for ip in range(self.config.NUM_NODE)}
+                    self.num_recv[ip_type] = {ip: 0 for ip in range(self.config.NUM_NODE)}
+                    self.per_send_throughput[ip_type] = {ip: 0 for ip in range(self.config.NUM_NODE)}
+                    self.per_recv_throughput[ip_type] = {ip: 0 for ip in range(self.config.NUM_NODE)}
+                    self.send_throughput[ip_type] = {ip: 0 for ip in range(self.config.NUM_NODE)}
+                    self.recv_throughput[ip_type] = {ip: 0 for ip in range(self.config.NUM_NODE)}
+                    self.last_select[ip_type] = {ip: None for ip in range(self.config.NUM_NODE)}
+                    self.throughput[ip_type] = {ip: 0 for ip in range(self.config.NUM_NODE)}
+
+                    # arrive_node_pre (不包含d2d)
+                    if ip_type not in self.arrive_node_pre:
+                        self.arrive_node_pre[ip_type] = defaultdict(lambda: deque(maxlen=self.config.IQ_CH_FIFO_DEPTH))
+
+        # 2. 为每个节点初始化channel buffer的pre和仲裁FIFO
+        for node_pos in range(self.config.NUM_NODE):
+            for key in self.config.CH_NAME_LIST:
+                # 初始化pre为None
+                self.IQ_channel_buffer_pre[key][node_pos] = None
+                self.EQ_channel_buffer_pre[key][node_pos] = None
+                # 初始化仲裁FIFO(已经通过defaultdict创建,这里确保显式初始化)
+                if node_pos not in self.IQ_arbiter_input_fifo[key]:
+                    self.IQ_arbiter_input_fifo[key][node_pos] = deque(maxlen=2)
+                self.IQ_arbiter_input_fifo_pre[key][node_pos] = None
+
+            # 初始化arrive_node_pre
+            for key in self.arrive_node_pre:
+                self.arrive_node_pre[key][node_pos] = None
+
+            # 3. 初始化round_robin队列(依赖IQ_channel_buffer.keys())
+            for key in self.round_robin.keys():
+                if key == "IQ":
+                    for fifo_name in ["TR", "TL", "TU", "TD", "EQ"]:
+                        self.round_robin[key][fifo_name][node_pos] = deque()
+                        for ch_name in self.IQ_channel_buffer.keys():
+                            self.round_robin[key][fifo_name][node_pos].append(ch_name)
+                elif key == "EQ":
+                    for ch_name in self.IQ_channel_buffer.keys():
+                        self.round_robin[key][ch_name][node_pos] = deque([0, 1, 2, 3])
+                else:
+                    for fifo_name in ["TU", "TD", "EQ"]:
+                        self.round_robin[key][fifo_name][node_pos] = deque([0, 1, 2, 3])
 
     def error_log(self, flit, target_id, flit_id):
         if flit and flit.packet_id == target_id and flit.flit_id == flit_id:

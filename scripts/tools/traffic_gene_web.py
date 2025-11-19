@@ -13,9 +13,6 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-# 配置页面，减少加载闪烁
-st.set_page_config(page_title="数据流生成工具", page_icon="🗺️", layout="wide", initial_sidebar_state="expanded")  # 保持展开，避免来回跳动
-
 # 添加项目路径到Python路径
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -29,6 +26,292 @@ from src.traffic_process.traffic_gene.generation_engine import generate_traffic_
 # ==================== 页面配置 ====================
 
 st.set_page_config(page_title="数据流生成工具", layout="wide", initial_sidebar_state="expanded")
+
+
+# ==================== UI配置常量 ====================
+
+
+class UIConfig:
+    """UI配置常量 - Mac风格设计"""
+
+    # 布局比例
+    MAIN_COLS_RATIO = [1.2, 1.8]
+    IP_MOUNT_COLS_RATIO = [2.5, 2.5, 1]
+    PARAM_COLS_RATIO = [1, 1, 1]
+    BTN_ROW_RATIO = [1.5, 1.5, 7]
+
+    # 配置卡片
+    CARDS_PER_ROW = 4
+
+    # 拓扑范围
+    TOPO_MIN = 2
+    TOPO_MAX = 10
+
+    # 默认参数值
+    DEFAULT_END_TIME = 6000
+    DEFAULT_SPEED = 128.0
+    DEFAULT_BURST = 4
+
+    # 参数范围
+    END_TIME_RANGE = (100, 100000, 100)
+    SPEED_RANGE = (0.1, 128.0, 0.01)
+    BURST_RANGE = (1, 64, 1)
+
+
+def load_custom_css():
+    """加载Mac风格CSS样式"""
+    st.markdown(
+        """
+        <style>
+        /* Mac风格全局设置 */
+        @import url('https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@300;400;500;600;700&display=swap');
+
+        :root {
+            --primary-color: #007AFF;
+            --success-color: #34C759;
+            --warning-color: #FF9500;
+            --danger-color: #FF3B30;
+            --gray-1: #F5F5F7;
+            --gray-2: #E5E5EA;
+            --gray-3: #D1D1D6;
+            --gray-4: #8E8E93;
+            --gray-5: #48484A;
+            --text-primary: #1D1D1F;
+            --text-secondary: #6E6E73;
+            --border-radius: 12px;
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+            --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+            --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+        }
+
+        /* 主容器 */
+        .main .block-container {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+            max-width: 100%;
+        }
+
+        /* 优雅分隔线 */
+        .section-divider {
+            height: 1px;
+            background: linear-gradient(to right, transparent, var(--gray-2) 20%, var(--gray-2) 80%, transparent);
+            margin: 2.5rem 0;
+        }
+
+        .mini-divider {
+            height: 1px;
+            background: var(--gray-2);
+            margin: 1.5rem 0;
+        }
+
+        /* 标题样式 */
+        h1, h2, h3 {
+            font-weight: 600 !important;
+            color: var(--text-primary) !important;
+            letter-spacing: -0.02em;
+        }
+
+        h1 {
+            font-size: 2.5rem !important;
+            margin-bottom: 0.5rem !important;
+        }
+
+        h2 {
+            font-size: 1.75rem !important;
+            margin-top: 2rem !important;
+        }
+
+        h3 {
+            font-size: 1.25rem !important;
+            margin-top: 1.5rem !important;
+        }
+
+        /* 副标题 */
+        .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            font-weight: 400;
+            margin-top: 0.5rem;
+        }
+
+        /* 配置卡片 - Mac风格 */
+        .stContainer > div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {
+            background: white;
+            border: 1px solid var(--gray-2);
+            border-radius: var(--border-radius);
+            padding: 1.25rem;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .stContainer > div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"]:hover {
+            border-color: var(--primary-color);
+            box-shadow: var(--shadow-md);
+            transform: translateY(-2px);
+        }
+
+        /* 按钮样式 - Mac风格 */
+        .stButton > button {
+            border-radius: 8px !important;
+            font-weight: 500 !important;
+            padding: 0.5rem 1rem !important;
+            border: none !important;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            letter-spacing: -0.01em !important;
+        }
+
+        .stButton > button[kind="primary"] {
+            background: var(--primary-color) !important;
+            color: white !important;
+        }
+
+        .stButton > button[kind="primary"]:hover {
+            background: #0051D5 !important;
+            box-shadow: var(--shadow-md) !important;
+        }
+
+        .stButton > button[kind="secondary"] {
+            background: var(--gray-1) !important;
+            color: var(--text-primary) !important;
+        }
+
+        .stButton > button[kind="secondary"]:hover {
+            background: var(--gray-2) !important;
+        }
+
+        /* 输入框样式 */
+        .stTextInput > div > div > input,
+        .stNumberInput > div > div > input,
+        .stSelectbox > div > div > div {
+            border-radius: 8px !important;
+            border: 1px solid var(--gray-3) !important;
+            padding: 0.5rem 0.75rem !important;
+            font-size: 0.95rem !important;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        }
+
+        .stTextInput > div > div > input:focus,
+        .stNumberInput > div > div > input:focus {
+            border-color: var(--primary-color) !important;
+            box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1) !important;
+        }
+
+        /* 多选框样式 */
+        .stMultiSelect [data-baseweb="tag"] {
+            background-color: var(--primary-color) !important;
+            border-radius: 6px !important;
+        }
+
+        /* Toast通知样式 */
+        .stToast {
+            border-radius: 12px !important;
+            box-shadow: var(--shadow-lg) !important;
+        }
+
+        /* 对话框容器 */
+        .dialog-container {
+            background: var(--gray-1);
+            border-left: 3px solid var(--primary-color);
+            padding: 1.5rem;
+            border-radius: var(--border-radius);
+            margin: 1.5rem 0;
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* 统计卡片 */
+        .stat-card {
+            background: linear-gradient(135deg, var(--primary-color) 0%, #5856D6 100%);
+            color: white;
+            padding: 1.25rem;
+            border-radius: var(--border-radius);
+            text-align: center;
+            box-shadow: var(--shadow-md);
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            line-height: 1;
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            font-weight: 400;
+        }
+
+        /* 帮助文本 */
+        .help-text {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        /* 隐藏Streamlit默认元素 */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+
+        /* Expander样式 */
+        .streamlit-expanderHeader {
+            border-radius: 8px !important;
+            background-color: var(--gray-1) !important;
+            font-weight: 500 !important;
+        }
+        </style>
+    """,
+        unsafe_allow_html=True,
+    )
+
+
+# ==================== 分隔符组件 ====================
+
+
+def section_divider():
+    """主分节分隔线"""
+    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+
+
+def mini_divider():
+    """次要分隔线"""
+    st.markdown('<div class="mini-divider"></div>', unsafe_allow_html=True)
+
+
+# ==================== 反馈函数 ====================
+
+
+def show_success(message: str):
+    """显示成功提示"""
+    st.toast(message, icon="✅")
+
+
+def show_error(message: str):
+    """显示错误提示"""
+    st.toast(message, icon="❌")
+
+
+def show_info(message: str):
+    """显示信息提示"""
+    st.toast(message, icon="ℹ️")
+
+
+def show_warning(message: str):
+    """显示警告提示"""
+    st.toast(message, icon="⚠️")
+
+
+# ==================== IP类型判断函数 ====================
+
+
+def is_src_ip_type(ip_type: str) -> bool:
+    """判断是否为源IP类型(包含dma或rn)"""
+    ip_lower = ip_type.lower()
+    return "dma" in ip_lower or "rn" in ip_lower
+
+
+def is_dst_ip_type(ip_type: str) -> bool:
+    """判断是否为目标IP类型(ddr或l2m)"""
+    return ip_type.lower() in {"ddr", "l2m"}
 
 
 # ==================== 会话状态初始化 ====================
@@ -79,6 +362,7 @@ def init_session_state():
 def get_cached_configs(_config_manager, version):
     """缓存配置列表获取，避免重复deepcopy"""
     import copy
+
     return copy.deepcopy(_config_manager.configs)
 
 
@@ -226,7 +510,7 @@ def handle_node_click(node_id: int):
     # 避免重复挂载
     if current_ip not in st.session_state.node_ips[node_id]:
         st.session_state.node_ips[node_id].append(current_ip)
-        st.success(f"✅ {current_ip} 已挂载到节点 {node_id}", icon="✅")
+        show_success(f"{current_ip} 已挂载到节点 {node_id}")
 
 
 # ==================== 主界面 ====================
@@ -234,26 +518,30 @@ def handle_node_click(node_id: int):
 
 def render_main_ui():
     """渲染主界面"""
-    # 标题（带使用说明）
-    col_title, col_help = st.columns([4, 1])
-    with col_title:
-        st.title("数据流生成可视化工具")
-    with col_help:
-        with st.expander("📖 使用说明"):
-            st.markdown(
-                """
-            1. 选择拓扑类型和数据流模式
-            2. 挂载IP到节点
-            3. 配置数据流参数
-            4. 添加到配置列表
-            5. 生成数据流文件(可选拆分)
-            6. 查看结果分析
+    # 加载CSS样式
+    load_custom_css()
+
+    # 标题区域
+    st.markdown("<h1>数据流生成工具</h1>", unsafe_allow_html=True)
+
+    with st.expander("使用说明", expanded=False):
+        st.markdown(
             """
-            )
-    st.markdown("---")
+        **操作流程:**
+        1. 选择拓扑类型和数据流模式
+        2. 挂载IP到节点
+        3. 配置数据流参数
+        4. 添加到配置列表
+        5. 生成数据流文件
+        6. 查看结果分析 (可选拆分)
+        """,
+            unsafe_allow_html=True,
+        )
+
+    section_divider()
 
     # 主区域 - 分为左右两栏
-    col_left, col_right = st.columns([1, 1.5])
+    col_left, col_right = st.columns(UIConfig.MAIN_COLS_RATIO)
 
     # 左栏 - 拓扑可视化（使用fragment实现局部刷新）
     with col_left:
@@ -270,10 +558,10 @@ def render_main_ui():
 @st.fragment
 def render_ip_mount_section():
     """IP挂载区域（独立刷新）"""
-    st.subheader("🗺️ IP挂载")
+    st.subheader("IP 挂载")
 
     # 拓扑类型输入
-    topo_input = st.text_input("拓扑类型", value=st.session_state.topo_type, placeholder="如: 5x4, 4X3, 4,3", help="支持格式: 5x4, 5X4, 5,4 等", key="topo_type_input")
+    topo_input = st.text_input("拓扑类型", value=st.session_state.topo_type, placeholder="例如: 5x4, 4X3, 4,3", help="支持格式: 行x列 (2-10)", key="topo_type_input")
 
     # 解析拓扑类型输入
     def parse_topology(input_str):
@@ -288,7 +576,7 @@ def render_ip_mount_section():
         if match:
             rows = int(match.group(1))
             cols = int(match.group(2))
-            if 2 <= rows <= 10 and 2 <= cols <= 10:
+            if UIConfig.TOPO_MIN <= rows <= UIConfig.TOPO_MAX and UIConfig.TOPO_MIN <= cols <= UIConfig.TOPO_MAX:
                 return f"{rows}x{cols}"
         return None
 
@@ -306,60 +594,61 @@ def render_ip_mount_section():
                 st.session_state.selected_dst_nodes = set()
                 st.rerun()
         else:
-            st.error("❌ 拓扑格式错误，请使用如 5x4, 4X3, 4,3 等格式（行列范围: 2-10）")
+            st.error(f"拓扑格式错误,请使用如 5x4, 4X3, 4,3 等格式(行列范围: {UIConfig.TOPO_MIN}-{UIConfig.TOPO_MAX})")
 
-    st.markdown("---")
+    mini_divider()
 
     # IP挂载区
-    st.markdown("支持格式: 节点ID可以是单个`0`、多个`0,1,2`、范围`0-3`")
-    col_ip, col_node, col_btn = st.columns([2, 2, 1])
+    st.caption("支持格式: 单节点 `0` | 多节点 `0,1,2` | 范围 `0-3`")
 
+    col_ip, col_node = st.columns(2)
     with col_ip:
-        current_ip = st.text_input("IP名称", value=st.session_state.current_ip, placeholder="如: gdma_0", key="ip_input")
+        current_ip = st.text_input("IP 名称", value=st.session_state.current_ip, placeholder="例如: gdma_0", key="ip_input")
         st.session_state.current_ip = current_ip
 
     with col_node:
-        target_node = st.text_input("节点ID", placeholder="如: 0 或 0,1,2", key="node_input")
+        target_node = st.text_input("目标节点", placeholder="例如: 0 或 0,1,2", key="node_input")
 
-    with col_btn:
-        st.markdown("<br>", unsafe_allow_html=True)  # 垂直对齐
-        if st.button("➕ 挂载", use_container_width=True):
-            if current_ip.strip() and target_node.strip():
-                # 解析节点ID
-                visualizer = get_topology_visualizer(st.session_state.topo_type)
-                try:
-                    node_ids = visualizer.parse_node_ids(target_node)
-                    mount_count = 0
-                    for node_id in node_ids:
-                        if node_id not in st.session_state.node_ips:
-                            st.session_state.node_ips[node_id] = []
-                        if current_ip.strip() not in st.session_state.node_ips[node_id]:
-                            st.session_state.node_ips[node_id].append(current_ip.strip())
-                            mount_count += 1
-                    if mount_count > 0:
-                        st.toast(f"✅ {current_ip} 已挂载到 {mount_count} 个节点", icon="✅")
-                    else:
-                        st.toast(f"ℹ️ {current_ip} 已存在于选中节点", icon="ℹ️")
-                except ValueError as e:
-                    st.toast(f"❌ {str(e)}", icon="❌")
-            else:
-                st.toast("❌ 请输入IP名称和节点ID", icon="❌")
+    if st.button("挂载到节点", use_container_width=True, type="primary"):
+        if current_ip.strip() and target_node.strip():
+            # 解析节点ID
+            visualizer = get_topology_visualizer(st.session_state.topo_type)
+            try:
+                node_ids = visualizer.parse_node_ids(target_node)
+                mount_count = 0
+                for node_id in node_ids:
+                    if node_id not in st.session_state.node_ips:
+                        st.session_state.node_ips[node_id] = []
+                    if current_ip.strip() not in st.session_state.node_ips[node_id]:
+                        st.session_state.node_ips[node_id].append(current_ip.strip())
+                        mount_count += 1
+                if mount_count > 0:
+                    show_success(f"{current_ip} 已挂载到 {mount_count} 个节点")
+                else:
+                    show_info(f"{current_ip} 已存在于选中节点")
+            except ValueError as e:
+                show_error(str(e))
+        else:
+            show_error("请输入IP名称和节点ID")
+
+    mini_divider()
 
     # IP挂载管理
     col_save, col_load = st.columns(2)
     with col_save:
-        if st.button("💾 保存挂载", use_container_width=True, disabled=not st.session_state.node_ips):
+        if st.button("保存挂载配置", use_container_width=True, disabled=not st.session_state.node_ips):
             st.session_state.show_save_dialog = True
 
-    # 保存对话框（不需要rerun，自然刷新）
+    # 保存对话框
     if st.session_state.get("show_save_dialog", False):
-        st.markdown("##### 💾 保存IP挂载配置")
+        st.markdown('<div class="dialog-container">', unsafe_allow_html=True)
+        st.markdown("**保存 IP 挂载配置**")
 
-        save_name = st.text_input("配置名称", placeholder="如: gdma_ddr_test", help="用于标识此配置的名称", key="save_name_mount")
+        save_name = st.text_input("配置名称", placeholder="例如: gdma_ddr_test", help="用于标识此配置", key="save_name_mount")
 
         col_confirm, col_cancel = st.columns(2)
         with col_confirm:
-            if st.button("✅ 确认保存", use_container_width=True, key="save_confirm_mount"):
+            if st.button("确认保存", use_container_width=True, type="primary", key="save_confirm_mount"):
                 if save_name.strip():
                     # 保存到JSON文件
                     save_dir = project_root / "config" / "ip_mounts"
@@ -377,107 +666,121 @@ def render_ip_mount_section():
                         json.dump(save_data, f, indent=2, ensure_ascii=False)
 
                     st.session_state.show_save_dialog = False
-                    st.toast(f"✅ 已保存为 {save_name}", icon="✅")
+                    show_success(f"已保存为 {save_name}")
                 else:
-                    st.error("❌ 请输入配置名称")
+                    show_error("请输入配置名称")
 
         with col_cancel:
-            if st.button("❌ 取消", use_container_width=True, key="save_cancel_mount"):
+            if st.button("取消", use_container_width=True, key="save_cancel_mount"):
                 st.session_state.show_save_dialog = False
 
-        st.markdown("---")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with col_load:
-        # 查找可用的保存文件
-        save_dir = project_root / "config" / "ip_mounts"
-        if save_dir.exists():
-            save_files = sorted(save_dir.glob("*.json"), reverse=True)
-            if save_files:
-                if st.button("📂 加载挂载", use_container_width=True):
-                    st.session_state.show_load_dialog = True
+        # 始终显示加载按钮
+        if st.button("加载挂载配置", use_container_width=True):
+            st.session_state.show_load_dialog = True
 
     # 加载对话框
     if st.session_state.get("show_load_dialog", False):
+        st.markdown("**加载 IP 挂载配置**")
+
         save_dir = project_root / "config" / "ip_mounts"
-        save_files = sorted(save_dir.glob("*.json"), reverse=True)
 
-        if save_files:
-            file_options = {}
-            for f in save_files:
-                # 读取文件获取拓扑类型和名称
-                try:
-                    with open(f, "r", encoding="utf-8") as fp:
-                        data = json.load(fp)
-                        name = data.get("name", f.stem)
-                        topo = data.get("topo_type", "unknown")
-                        timestamp = data.get("timestamp", "")
-                        label = f"{name} ({topo}) - {timestamp}"
-                        file_options[label] = f
-                except:
-                    continue
+        if not save_dir.exists():
+            st.info("暂无保存的配置文件")
+            if st.button("关闭", use_container_width=True, key="close_load_empty"):
+                st.session_state.show_load_dialog = False
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            save_files = sorted(save_dir.glob("*.json"), reverse=True)
 
-            if file_options:
-                selected_file = st.selectbox("选择要加载的挂载配置", options=list(file_options.keys()), key="load_file_select")
+            if not save_files:
+                st.info("暂无保存的配置文件")
+                if st.button("关闭", use_container_width=True, key="close_load_no_files"):
+                    st.session_state.show_load_dialog = False
+                    st.rerun()
+                st.markdown("</div>", unsafe_allow_html=True)
+            else:
+                file_options = {}
+                for f in save_files:
+                    try:
+                        with open(f, "r", encoding="utf-8") as fp:
+                            data = json.load(fp)
+                            name = data.get("name", f.stem)
+                            topo = data.get("topo_type", "unknown")
+                            timestamp = data.get("timestamp", "")
+                            label = f"{name} ({topo}) - {timestamp}"
+                            file_options[label] = f
+                    except:
+                        continue
 
-                col_confirm, col_delete, col_cancel = st.columns(3)
-                with col_confirm:
-                    if st.button("✅ 加载", use_container_width=True, key="load_confirm_mount"):
-                        try:
-                            load_path = file_options[selected_file]
-                            with open(load_path, "r", encoding="utf-8") as f:
-                                data = json.load(f)
-
-                            # 检查拓扑类型是否匹配
-                            if data["topo_type"] != st.session_state.topo_type:
-                                st.warning(f"⚠️ 加载的配置是 {data['topo_type']} 拓扑，当前是 {st.session_state.topo_type}")
-
-                            # 获取当前拓扑的最大节点数
-                            rows, cols = map(int, st.session_state.topo_type.split("x"))
-                            max_node_id = rows * cols - 1
-
-                            # 加载IP挂载数据并检查节点范围
-                            node_ips_data = {int(k): v for k, v in data["node_ips"].items()}
-                            invalid_nodes = [node_id for node_id in node_ips_data.keys() if node_id > max_node_id]
-
-                            if invalid_nodes:
-                                st.error(f"❌ 加载失败: 节点 {invalid_nodes} 超过当前拓扑最大节点ID {max_node_id}")
-                            else:
-                                st.session_state.node_ips = node_ips_data
-                                st.session_state.show_load_dialog = False
-                                st.toast(f"✅ 已加载配置", icon="✅")
-                        except Exception as e:
-                            st.error(f"❌ 加载失败: {str(e)}")
-
-                with col_delete:
-                    if st.button("🗑️ 删除", use_container_width=True, type="secondary", key="load_delete_mount"):
-                        try:
-                            load_path = file_options[selected_file]
-                            load_path.unlink()  # 删除文件
-                            st.toast(f"✅ 已删除配置", icon="✅")
-                            # 如果没有文件了，关闭对话框
-                            remaining_files = list(save_dir.glob("*.json"))
-                            if not remaining_files:
-                                st.session_state.show_load_dialog = False
-                        except Exception as e:
-                            st.error(f"❌ 删除失败: {str(e)}")
-
-                with col_cancel:
-                    if st.button("❌ 取消", use_container_width=True, key="load_cancel_mount"):
+                if not file_options:
+                    st.info("暂无有效的配置文件")
+                    if st.button("关闭", use_container_width=True, key="close_load_invalid"):
                         st.session_state.show_load_dialog = False
+                        st.rerun()
+                    st.markdown("</div>", unsafe_allow_html=True)
+                else:
+                    selected_file = st.selectbox("选择配置", options=list(file_options.keys()), key="load_file_select")
 
-    st.markdown("---")
+                    col_confirm, col_delete, col_cancel = st.columns(3)
+                    with col_confirm:
+                        if st.button("加载", use_container_width=True, type="primary", key="load_confirm_mount"):
+                            try:
+                                load_path = file_options[selected_file]
+                                with open(load_path, "r", encoding="utf-8") as f:
+                                    data = json.load(f)
 
-    # 绘制拓扑图(仅用于显示,不捕获点击)
+                                # 检查拓扑类型是否匹配
+                                if data["topo_type"] != st.session_state.topo_type:
+                                    show_warning(f"加载的配置是 {data['topo_type']} 拓扑,当前是 {st.session_state.topo_type}")
+
+                                # 获取当前拓扑的最大节点数
+                                rows, cols = map(int, st.session_state.topo_type.split("x"))
+                                max_node_id = rows * cols - 1
+
+                                # 加载IP挂载数据并检查节点范围
+                                node_ips_data = {int(k): v for k, v in data["node_ips"].items()}
+                                invalid_nodes = [node_id for node_id in node_ips_data.keys() if node_id > max_node_id]
+
+                                if invalid_nodes:
+                                    show_error(f"加载失败: 节点 {invalid_nodes} 超过当前拓扑最大节点ID {max_node_id}")
+                                else:
+                                    st.session_state.node_ips = node_ips_data
+                                    st.session_state.show_load_dialog = False
+                                    show_success("配置加载成功")
+                            except Exception as e:
+                                show_error(f"加载失败: {str(e)}")
+
+                    with col_delete:
+                        if st.button("删除", use_container_width=True, type="secondary", key="load_delete_mount"):
+                            try:
+                                load_path = file_options[selected_file]
+                                load_path.unlink()
+                                show_success("配置已删除")
+                                remaining_files = list(save_dir.glob("*.json"))
+                                if not remaining_files:
+                                    st.session_state.show_load_dialog = False
+                            except Exception as e:
+                                show_error(f"删除失败: {str(e)}")
+
+                    with col_cancel:
+                        if st.button("取消", use_container_width=True, key="load_cancel_mount"):
+                            st.session_state.show_load_dialog = False
+                            st.rerun()
+
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+    # 绘制拓扑图
     visualizer = get_topology_visualizer(st.session_state.topo_type)
-
     fig = visualizer.draw_topology_grid(selected_src=set(), selected_dst=set(), node_ips=st.session_state.node_ips)
-
-    # 显示拓扑图(不捕获点击事件)
     st.plotly_chart(fig, use_container_width=True, key="topology_display")
 
-    # 节点IP管理面板(折叠显示)
-    st.markdown("---")
-    with st.expander("📋 已挂载IP列表", expanded=False):
+    # 节点IP管理面板
+    mini_divider()
+    with st.expander("已挂载 IP 列表", expanded=False):
         if st.session_state.node_ips:
             # 按IP类型分组显示
             ip_to_nodes = {}
@@ -495,18 +798,16 @@ def render_ip_mount_section():
                 with col_ip:
                     st.markdown(f"**{ip}**: 节点 {node_str}")
                 with col_del:
-                    if st.button("🗑️", key=f"del_ip_{ip}", use_container_width=True):
-                        # 从所有节点中删除该IP
+                    if st.button("删除", key=f"del_ip_{ip}", use_container_width=True):
                         for node_id in nodes:
                             if node_id in st.session_state.node_ips:
                                 if ip in st.session_state.node_ips[node_id]:
                                     st.session_state.node_ips[node_id].remove(ip)
-                                # 如果节点没有IP了，删除该节点
                                 if not st.session_state.node_ips[node_id]:
                                     del st.session_state.node_ips[node_id]
 
-            st.markdown("---")
-            if st.button("🗑️ 清空所有IP", use_container_width=True):
+            mini_divider()
+            if st.button("清空所有 IP", use_container_width=True, type="secondary"):
                 st.session_state.node_ips = {}
         else:
             st.info("暂无挂载的IP")
@@ -514,29 +815,27 @@ def render_ip_mount_section():
 
 def render_config_section():
     """配置管理区域"""
-    st.subheader("⚙️ 数据流配置")
+    st.subheader("数据流配置")
 
     # 数据流模式选择
     traffic_mode = st.selectbox("数据流模式", ["NoC", "D2D"], index=0 if st.session_state.traffic_mode == "NoC" else 1, key="traffic_mode_select")
     if traffic_mode != st.session_state.traffic_mode:
         st.session_state.traffic_mode = traffic_mode
 
-    st.markdown("---")
+    mini_divider()
 
     # 获取已挂载IP的节点列表
     nodes_with_ips = sorted([node for node, ips in st.session_state.node_ips.items() if ips])
 
     if not nodes_with_ips:
-        st.warning("⚠️ 请先在拓扑图中挂载IP到节点")
+        st.warning("请先在拓扑图中挂载IP到节点")
     else:
-        # 配置模式选择(在表单外面,实现实时切换)
-        config_mode = st.radio(
-            "配置模式", ["具体配置", "批量配置"], horizontal=True, help="具体配置: 精确指定某个节点的IP到另一个节点的IP; 批量配置: 按IP具体配置配置(如所有gdma到所有ddr)"
-        )
+        # 配置模式选择
+        config_mode = st.radio("配置模式", ["具体配置", "批量配置"], horizontal=True, help="具体配置: 精确指定某个节点的IP到另一个节点的IP; 批量配置: 按IP类型配置(如所有gdma到所有ddr)")
 
-        # D2D模式的Die对选择(移到form外面,实现实时更新)
+        # D2D模式的Die对选择
         if st.session_state.traffic_mode == "D2D":
-            st.write("**Die对配置 (可多选):**")
+            st.markdown("**Die 对配置 (可多选):**")
 
             # 初始化session state
             if "last_selected_template" not in st.session_state:
@@ -544,7 +843,7 @@ def render_config_section():
             if "selected_die_pairs" not in st.session_state:
                 st.session_state.selected_die_pairs = []
 
-            # 模板快捷选择(在form外面)
+            # 模板快捷选择
             die_templates = load_die_templates()
             template_names = ["自定义"] + list(die_templates.keys())
             selected_template = st.selectbox("快速模板", options=template_names, key="die_template_select")
@@ -552,18 +851,16 @@ def render_config_section():
             # Die对多选
             die_pair_options = generate_die_pair_options(4)
 
-            # 如果模板变化，使用模板默认值；否则保持为空让用户手动选择
+            # 如果模板变化,使用模板默认值
             default_pairs = []
             if selected_template != st.session_state.last_selected_template:
                 st.session_state.last_selected_template = selected_template
                 if selected_template != "自定义":
                     default_pairs = die_templates[selected_template]
 
-            selected_die_pairs = st.multiselect(
-                "选择Die对", options=die_pair_options, default=default_pairs, label_visibility="collapsed", key="die_pairs_multiselect"
-            )
+            selected_die_pairs = st.multiselect("Die 对", options=die_pair_options, default=default_pairs, key="die_pairs_multiselect")
 
-            st.markdown("---")
+            mini_divider()
 
         # 配置表单（禁用回车提交）
         with st.form("config_form", enter_to_submit=False):
@@ -631,21 +928,38 @@ def render_config_section():
                 st.write("**目标IP类型 (可多选):**")
                 dst_ip_types = st.multiselect("选择目标IP类型", options=dst_ip_options, default=[], label_visibility="collapsed")
 
-            st.markdown("---")
+            mini_divider()
 
-            # 参数配置 - 第一行：仿真时长、带宽、Burst
-            col_p1, col_p2, col_p3 = st.columns(3)
+            # 参数配置
+            st.markdown("**流量参数配置**")
+            col_p1, col_p2, col_p3 = st.columns(UIConfig.PARAM_COLS_RATIO)
             with col_p1:
-                end_time = st.number_input("仿真时长 (ns)", min_value=100, max_value=100000, value=6000, step=100)
+                end_time = st.number_input(
+                    "仿真时长 (ns)",
+                    min_value=UIConfig.END_TIME_RANGE[0],
+                    max_value=UIConfig.END_TIME_RANGE[1],
+                    value=UIConfig.DEFAULT_END_TIME,
+                    step=UIConfig.END_TIME_RANGE[2],
+                    help="数据流仿真的总时长",
+                )
             with col_p2:
-                speed = st.number_input("IP带宽 (GB/s)", min_value=0.1, max_value=128.0, value=128.0, step=0.01, format="%.2f")
+                speed = st.number_input(
+                    "IP 带宽 (GB/s)",
+                    min_value=UIConfig.SPEED_RANGE[0],
+                    max_value=UIConfig.SPEED_RANGE[1],
+                    value=UIConfig.DEFAULT_SPEED,
+                    step=UIConfig.SPEED_RANGE[2],
+                    format="%.2f",
+                    help="IP接口的数据传输带宽",
+                )
             with col_p3:
-                burst = st.number_input("Burst长度", min_value=1, max_value=64, value=4, step=1)
+                burst = st.number_input(
+                    "Burst 长度", min_value=UIConfig.BURST_RANGE[0], max_value=UIConfig.BURST_RANGE[1], value=UIConfig.DEFAULT_BURST, step=UIConfig.BURST_RANGE[2], help="突发传输的数据包长度"
+                )
 
-            # 第二行：请求类型
-            req_type = st.radio("请求类型", ["R", "W"], horizontal=True)
+            req_type = st.radio("请求类型", ["R", "W"], horizontal=True, help="R=读请求, W=写请求")
 
-            submit_button = st.form_submit_button("➕ 添加配置", use_container_width=True, type="primary")
+            submit_button = st.form_submit_button("添加配置", use_container_width=True, type="primary")
 
             if submit_button:
                 if config_mode == "具体配置":
@@ -696,12 +1010,12 @@ def render_config_section():
                                         error_messages.extend([f"{die_pair}: {e}" for e in errors])
 
                                 if success_count > 0:
-                                    st.success(f"✅ 成功添加 {success_count} 个配置!")
+                                    st.success(f"成功添加 {success_count} 个配置!")
                                     if error_messages:
-                                        st.warning("⚠️ 部分配置失败:\n" + "\n".join(error_messages))
+                                        st.warning("部分配置失败:\n" + "\n".join(error_messages))
                                     st.rerun()
                                 else:
-                                    st.error("❌ 所有配置验证失败:\n" + "\n".join(error_messages))
+                                    st.error("所有配置验证失败:\n" + "\n".join(error_messages))
                         else:
                             # NoC模式：单个配置
                             config = TrafficConfig(src_map=src_map, dst_map=dst_map, speed=speed, burst=burst, req_type=req_type, end_time=end_time)
@@ -711,10 +1025,10 @@ def render_config_section():
 
                             if success:
                                 st.session_state.config_version += 1
-                                st.success("✅ 配置添加成功!")
+                                st.success("配置添加成功!")
                                 st.rerun()
                             else:
-                                st.error("❌ 配置验证失败:\n" + "\n".join(errors))
+                                st.error("配置验证失败:\n" + "\n".join(errors))
 
                 else:
                     # 模式2验证和处理 - 批量配置
@@ -770,12 +1084,12 @@ def render_config_section():
                                             error_messages.extend([f"{die_pair}: {e}" for e in errors])
 
                                     if success_count > 0:
-                                        st.success(f"✅ 成功添加 {success_count} 个配置!")
+                                        st.success(f"成功添加 {success_count} 个配置!")
                                         if error_messages:
-                                            st.warning("⚠️ 部分配置失败:\n" + "\n".join(error_messages))
+                                            st.warning("部分配置失败:\n" + "\n".join(error_messages))
                                         st.rerun()
                                     else:
-                                        st.error("❌ 所有配置验证失败:\n" + "\n".join(error_messages))
+                                        st.error("所有配置验证失败:\n" + "\n".join(error_messages))
                             else:
                                 # NoC模式：单个配置
                                 config = TrafficConfig(src_map=src_map, dst_map=dst_map, speed=speed, burst=burst, req_type=req_type, end_time=end_time)
@@ -785,37 +1099,38 @@ def render_config_section():
 
                                 if success:
                                     st.session_state.config_version += 1
-                                    st.success("✅ 配置添加成功!")
+                                    st.success("配置添加成功!")
                                     st.rerun()
                                 else:
-                                    st.error("❌ 配置验证失败:\n" + "\n".join(errors))
+                                    st.error("配置验证失败:\n" + "\n".join(errors))
 
 
 def render_config_list():
     """配置列表区域（全宽显示）"""
-    st.markdown("---")
-    st.subheader("📋 已配置列表")
+    mini_divider()
+    st.subheader("已配置列表")
 
     configs = get_cached_configs(st.session_state.config_manager, st.session_state.config_version)
 
     # 操作按钮行
     col_btn1, col_btn2, col_spacer = st.columns([1, 1, 8])
     with col_btn1:
-        if st.button("💾 保存配置", use_container_width=True, disabled=not configs):
+        if st.button("保存配置", use_container_width=True, disabled=not configs):
             st.session_state.show_save_config_dialog = True
     with col_btn2:
-        if st.button("📂 加载配置", use_container_width=True):
+        if st.button("加载配置", use_container_width=True):
             st.session_state.show_load_config_dialog = True
 
     # 保存配置对话框
     if st.session_state.get("show_save_config_dialog", False):
-        st.markdown("##### 💾 保存数据流配置")
+        st.markdown('<div class="dialog-container">', unsafe_allow_html=True)
+        st.markdown("**保存数据流配置**")
 
-        config_name = st.text_input("配置名称", placeholder="如: gdma_to_ddr_test", help="用于标识此配置集的名称", key="save_config_name_bottom")
+        config_name = st.text_input("配置名称", placeholder="例如: gdma_to_ddr_test", help="用于标识此配置集的名称", key="save_config_name_bottom")
 
         col_confirm, col_cancel = st.columns(2)
         with col_confirm:
-            if st.button("✅ 确认保存", use_container_width=True, key="save_config_confirm_bottom"):
+            if st.button("确认保存", use_container_width=True, type="primary", key="save_config_confirm_bottom"):
                 if config_name.strip():
                     # 保存到JSON文件
                     save_dir = project_root / "config" / "traffic_configs"
@@ -854,19 +1169,20 @@ def render_config_list():
                         json.dump(save_data, f, indent=2, ensure_ascii=False)
 
                     st.session_state.show_save_config_dialog = False
-                    st.toast(f"✅ 已保存为 {config_name}", icon="✅")
+                    show_success(f"已保存为 {config_name}")
                 else:
-                    st.error("❌ 请输入配置名称")
+                    show_error("请输入配置名称")
 
         with col_cancel:
-            if st.button("❌ 取消", use_container_width=True, key="save_config_cancel_bottom"):
+            if st.button("取消", use_container_width=True, key="save_config_cancel_bottom"):
                 st.session_state.show_save_config_dialog = False
 
-        st.markdown("---")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # 加载配置对话框
     if st.session_state.get("show_load_config_dialog", False):
-        st.markdown("##### 📂 加载数据流配置")
+        st.markdown('<div class="dialog-container">', unsafe_allow_html=True)
+        st.markdown("**加载数据流配置**")
 
         save_dir = project_root / "config" / "traffic_configs"
         if save_dir.exists():
@@ -888,11 +1204,11 @@ def render_config_list():
                         continue
 
                 if file_options:
-                    selected_file = st.selectbox("选择要加载的配置", options=list(file_options.keys()), key="load_config_select_bottom")
+                    selected_file = st.selectbox("选择配置", options=list(file_options.keys()), key="load_config_select_bottom")
 
                     col_confirm, col_delete, col_cancel = st.columns(3)
                     with col_confirm:
-                        if st.button("✅ 加载", use_container_width=True, key="load_config_confirm_bottom"):
+                        if st.button("加载", use_container_width=True, type="primary", key="load_config_confirm_bottom"):
                             try:
                                 load_path = file_options[selected_file]
                                 with open(load_path, "r", encoding="utf-8") as f:
@@ -900,7 +1216,7 @@ def render_config_list():
 
                                 # 检查拓扑类型
                                 if data["topo_type"] != st.session_state.topo_type:
-                                    st.warning(f"⚠️ 加载的配置是 {data['topo_type']} 拓扑，当前是 {st.session_state.topo_type}")
+                                    show_warning(f"加载的配置是 {data['topo_type']} 拓扑,当前是 {st.session_state.topo_type}")
 
                                 # 清空现有配置
                                 rows, cols = map(int, st.session_state.topo_type.split("x"))
@@ -915,7 +1231,7 @@ def render_config_list():
                                         speed=config_dict["speed"],
                                         burst=config_dict["burst"],
                                         req_type=config_dict["req_type"],
-                                        end_time=config_dict.get("end_time", 6000),
+                                        end_time=config_dict.get("end_time", UIConfig.DEFAULT_END_TIME),
                                     )
                                     if "src_die" in config_dict:
                                         config.src_die = config_dict["src_die"]
@@ -924,24 +1240,24 @@ def render_config_list():
                                     st.session_state.config_manager.add_config(config)
 
                                 st.session_state.show_load_config_dialog = False
-                                st.toast(f"✅ 已加载配置", icon="✅")
+                                show_success("配置加载成功")
                             except Exception as e:
-                                st.error(f"❌ 加载失败: {str(e)}")
+                                show_error(f"加载失败: {str(e)}")
 
                     with col_delete:
-                        if st.button("🗑️ 删除", use_container_width=True, type="secondary", key="delete_config_btn_bottom"):
+                        if st.button("删除", use_container_width=True, type="secondary", key="delete_config_btn_bottom"):
                             try:
                                 load_path = file_options[selected_file]
                                 load_path.unlink()
-                                st.toast(f"✅ 已删除配置", icon="✅")
+                                show_success("配置已删除")
                                 remaining_files = list(save_dir.glob("*.json"))
                                 if not remaining_files:
                                     st.session_state.show_load_config_dialog = False
                             except Exception as e:
-                                st.error(f"❌ 删除失败: {str(e)}")
+                                show_error(f"删除失败: {str(e)}")
 
                     with col_cancel:
-                        if st.button("❌ 取消", use_container_width=True, key="load_config_cancel_bottom"):
+                        if st.button("取消", use_container_width=True, key="load_config_cancel_bottom"):
                             st.session_state.show_load_config_dialog = False
                 else:
                     st.info("暂无保存的配置")
@@ -950,7 +1266,7 @@ def render_config_list():
         else:
             st.info("暂无保存的配置")
 
-        st.markdown("---")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     # 配置列表显示
     if configs:
@@ -1010,17 +1326,14 @@ def render_config_list():
                         with cols[j]:
                             with st.container(border=True):
                                 # 简化为单行显示
-                                st.markdown(
-                                    f"**#{config.config_id}** {src_summary}→{dst_summary} | "
-                                    f"{config.end_time}ns | {config.speed}GB/s | B{config.burst} | {config.req_type}"
-                                )
+                                st.markdown(f"**#{config.config_id}** {src_summary}→{dst_summary} | " f"{config.end_time}ns | {config.speed}GB/s | B{config.burst} | {config.req_type}")
                                 st.button("删除", key=f"del_bottom_{config.config_id}", use_container_width=True, on_click=delete_config_callback, args=(config.config_id,))
     else:
         st.info("暂无配置，请添加配置或加载已保存的配置")
 
     # 生成按钮
-    st.markdown("---")
-    st.subheader("🚀 生成数据流文件")
+    mini_divider()
+    st.subheader("生成数据流文件")
 
     col_gen1, col_gen2 = st.columns([3, 1])
 
@@ -1038,9 +1351,9 @@ def render_config_list():
     # 数据流拆分选项
     enable_split = st.checkbox("拆分数据流文件(按源IP)", value=False, help="生成后自动按源IP拆分数据流文件,输出目录为输出文件名(去掉.txt)")
 
-    if st.button("🚀 生成数据流文件", type="primary", use_container_width=True):
+    if st.button("生成数据流文件", type="primary", use_container_width=True):
         if not configs:
-            st.error("❌ 请先添加至少一个配置!")
+            st.error("请先添加至少一个配置!")
         else:
             # 生成数据流
             with st.spinner("正在生成数据流文件..."):
@@ -1065,7 +1378,7 @@ def render_config_list():
                 st.session_state.generated_traffic = df
                 st.session_state.last_file_path = file_path
 
-            st.success(f"✅ 数据流文件生成成功: {file_path}")
+            st.success(f"数据流文件生成成功: {file_path}")
 
             # 拆分数据流文件
             if enable_split:
@@ -1085,15 +1398,15 @@ def render_config_list():
                             split_result = split_traffic_by_source(input_file=file_path, output_dir=str(split_dir), num_col=cols, num_row=rows, verbose=False)
 
                         st.session_state.split_result = split_result
-                        st.success(f"✅ 数据流拆分完成! 输出目录: {split_result['output_dir']}")
+                        st.success(f"数据流拆分完成! 输出目录: {split_result['output_dir']}")
                         st.info(f"共生成 {split_result['total_sources']} 个拆分文件")
 
                     except Exception as e:
-                        st.error(f"❌ 拆分失败: {e}")
+                        st.error(f"拆分失败: {e}")
 
             # 提供下载按钮
             with open(file_path, "r") as f:
-                st.download_button(label="📥 下载数据流文件", data=f.read(), file_name=final_filename, mime="text/plain")
+                st.download_button(label="下载数据流文件", data=f.read(), file_name=final_filename, mime="text/plain")
 
 
 # ==================== 主程序入口 ====================

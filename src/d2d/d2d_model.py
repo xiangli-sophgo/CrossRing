@@ -86,7 +86,7 @@ class D2D_Model:
         self.d2d_requests_completed = {i: 0 for i in range(self.num_dies)}  # 每个Die完成的跨Die请求数
 
         # 创建全局RequestTracker（所有Die共享）
-        network_freq = getattr(config, 'NETWORK_FREQUENCY', 2.0)
+        network_freq = getattr(config, "NETWORK_FREQUENCY", 2.0)
         self.request_tracker = RequestTracker(network_frequency=network_freq)
         print(f"[D2D RequestTracker] 已初始化全局请求追踪器，网络频率={network_freq} GHz")
 
@@ -396,19 +396,9 @@ class D2D_Model:
         sn_positions = d2d_sn_positions.get(die_id, [])
 
         # 添加D2D节点到CHANNEL_SPEC和CH_NAME_LIST
-        if hasattr(die_config, "CHANNEL_SPEC"):
-            # 更新CHANNEL_SPEC
-            if "d2d_rn" not in die_config.CHANNEL_SPEC:
-                die_config.CHANNEL_SPEC["d2d_rn"] = 1
-            if "d2d_sn" not in die_config.CHANNEL_SPEC:
-                die_config.CHANNEL_SPEC["d2d_sn"] = 1
-
-            # 更新CH_NAME_LIST
-            if hasattr(die_config, "CH_NAME_LIST"):
-                if "d2d_rn_0" not in die_config.CH_NAME_LIST:
-                    die_config.CH_NAME_LIST.append("d2d_rn_0")
-                if "d2d_sn_0" not in die_config.CH_NAME_LIST:
-                    die_config.CH_NAME_LIST.append("d2d_sn_0")
+        # if hasattr(die_config, "CHANNEL_SPEC"):
+        # D2D IP接口现在由BaseModel根据D2D_CONNECTIONS动态创建,不再需要手动添加
+        # CHANNEL_SPEC和CH_NAME_LIST将在traffic解析后自动推断和更新
 
         # 设置D2D节点的发送位置列表（分别设置RN和SN）
         die_config.D2D_RN_SEND_POSITION_LIST = rn_positions
@@ -877,8 +867,8 @@ class D2D_Model:
         req.packet_id = BaseModel.get_next_packet_id()
 
         # 在RequestTracker中开始追踪请求
-        if hasattr(self, 'request_tracker') and self.request_tracker:
-            is_cross_die = (src_die != dst_die)
+        if hasattr(self, "request_tracker") and self.request_tracker:
+            is_cross_die = src_die != dst_die
             self.request_tracker.start_request(
                 packet_id=req.packet_id,
                 source=source_physical,
@@ -890,7 +880,7 @@ class D2D_Model:
                 cycle=self.current_cycle,
                 is_cross_die=is_cross_die,
                 origin_die=src_die,
-                target_die=dst_die
+                target_die=dst_die,
             )
 
         # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）

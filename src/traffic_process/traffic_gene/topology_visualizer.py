@@ -13,16 +13,16 @@ IP_COLOR_MAP = {
     "gdma": "#4472C4",  # 蓝色
     "sdma": "#ED7D31",  # 橙色
     "cdma": "#70AD47",  # 绿色
-    "ddr": "#C00000",   # 红色
-    "l2m": "#7030A0",   # 紫色
+    "ddr": "#C00000",  # 红色
+    "l2m": "#7030A0",  # 紫色
 }
 
 # 节点选择状态颜色
 SELECT_COLOR = {
-    "source": "#87CEEB",     # 天蓝色 - 源节点
-    "destination": "#FFB6C1", # 粉色 - 目标节点
-    "both": "#DDA0DD",       # 梅红色 - 既是源又是目标
-    "default": "#F0F0F0",    # 浅灰色 - 未选中的普通节点
+    "source": "#87CEEB",  # 天蓝色 - 源节点
+    "destination": "#FFB6C1",  # 粉色 - 目标节点
+    "both": "#DDA0DD",  # 梅红色 - 既是源又是目标
+    "default": "#F0F0F0",  # 浅灰色 - 未选中的普通节点
     "ip_default": "#FFFFFF",  # 白色 - 未选中的IP节点
 }
 
@@ -36,7 +36,7 @@ class TopologyVisualizer:
         :param ip_mappings: IP位置映射字典
         """
         self.topo_type = topo_type
-        self.rows, self.cols = map(int, topo_type.split('x'))
+        self.rows, self.cols = map(int, topo_type.split("x"))
         self.num_nodes = self.rows * self.cols
         self.ip_mappings = ip_mappings or {}
 
@@ -52,12 +52,7 @@ class TopologyVisualizer:
         # y坐标翻转,使得节点0在左上角
         return (col, self.rows - 1 - row)
 
-    def get_node_color(
-        self,
-        node_id: int,
-        selected_src: Set[int],
-        selected_dst: Set[int]
-    ) -> str:
+    def get_node_color(self, node_id: int, selected_src: Set[int], selected_dst: Set[int]) -> str:
         """
         获取节点颜色(根据IP类型和选中状态)
 
@@ -109,13 +104,7 @@ class TopologyVisualizer:
             return f"{node_id}<br>{ip_type.upper()}"
         return str(node_id)
 
-    def draw_topology_grid(
-        self,
-        selected_src: Set[int] = None,
-        selected_dst: Set[int] = None,
-        show_legend: bool = True,
-        node_ips: Dict[int, List[str]] = None
-    ) -> go.Figure:
+    def draw_topology_grid(self, selected_src: Set[int] = None, selected_dst: Set[int] = None, show_legend: bool = True, node_ips: Dict[int, List[str]] = None, show_links: bool = True) -> go.Figure:
         """
         绘制交互式拓扑网格
 
@@ -123,6 +112,7 @@ class TopologyVisualizer:
         :param selected_dst: 选中的目标节点集合
         :param show_legend: 是否显示图例
         :param node_ips: 节点挂载的IP列表 {node_id: [ip_list]}
+        :param show_links: 是否显示节点间链路
         :return: Plotly Figure对象
         """
         selected_src = selected_src or set()
@@ -132,31 +122,23 @@ class TopologyVisualizer:
         # 创建图形
         fig = go.Figure()
 
+        # 添加网格线
+        self._add_grid_lines(fig)
+
+        # 添加链路（在节点之前绘制，避免遮挡）
+        if show_links:
+            self._add_network_links(fig)
+
         # 绘制节点矩形（不使用scatter避免圆圈）
         for node_id in range(self.num_nodes):
             x, y = self.get_node_position(node_id)
             color = self.get_node_color(node_id, selected_src, selected_dst)
 
             # 绘制节点矩形框
-            fig.add_shape(
-                type="rect",
-                x0=x - 0.35, y0=y - 0.35,
-                x1=x + 0.35, y1=y + 0.35,
-                fillcolor=color,
-                line=dict(color="black", width=2),
-                opacity=0.8
-            )
+            fig.add_shape(type="rect", x0=x - 0.25, y0=y - 0.25, x1=x + 0.25, y1=y + 0.25, fillcolor=color, line=dict(color="black", width=2), opacity=0.8)
 
             # 添加节点ID文本（黑色，无描边）
-            fig.add_annotation(
-                x=x,
-                y=y,
-                text=str(node_id),
-                showarrow=False,
-                font=dict(size=14, color="black", family="Arial Black"),
-                xanchor="center",
-                yanchor="middle"
-            )
+            fig.add_annotation(x=x, y=y, text=str(node_id), showarrow=False, font=dict(size=14, color="black", family="Arial Black"), xanchor="center", yanchor="middle")
 
         # 添加透明scatter用于点击事件捕获
         node_x = [self.get_node_position(i)[0] for i in range(self.num_nodes)]
@@ -171,55 +153,34 @@ class TopologyVisualizer:
                 hover_text += f"<br>挂载IP: {', '.join(ips)}"
             hover_texts.append(hover_text)
 
-        fig.add_trace(go.Scatter(
-            x=node_x,
-            y=node_y,
-            mode='markers',
-            marker=dict(
-                size=40,
-                color='rgba(0,0,0,0)',  # 完全透明
-                line=dict(width=0)
-            ),
-            hovertext=hover_texts,
-            hoverinfo="text",
-            customdata=list(range(self.num_nodes)),
-            showlegend=False,
-            name="节点"
-        ))
-
-        # 添加网格线
-        self._add_grid_lines(fig)
+        fig.add_trace(
+            go.Scatter(
+                x=node_x,
+                y=node_y,
+                mode="markers",
+                marker=dict(size=40, color="rgba(0,0,0,0)", line=dict(width=0)),  # 完全透明
+                hovertext=hover_texts,
+                hoverinfo="text",
+                customdata=list(range(self.num_nodes)),
+                showlegend=False,
+                name="节点",
+            )
+        )
 
         # 在节点内部添加IP小方块
         self._add_ip_markers(fig, node_ips)
 
         # 更新布局
         fig.update_layout(
-            title=dict(
-                text=f"{self.topo_type} NoC拓扑结构",
-                x=0.5,
-                xanchor='center'
-            ),
-            xaxis=dict(
-                showgrid=False,
-                zeroline=False,
-                showticklabels=False,
-                autorange=True
-            ),
-            yaxis=dict(
-                showgrid=False,
-                zeroline=False,
-                showticklabels=False,
-                scaleanchor="x",
-                scaleratio=1,
-                autorange=True
-            ),
+            title=dict(text=f"{self.topo_type} NoC拓扑结构", x=0.5, xanchor="center"),
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, autorange=True),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, scaleanchor="x", scaleratio=1, autorange=True),
             width=1000,
             height=800,
-            hovermode='closest',
+            hovermode="closest",
             showlegend=show_legend,
-            plot_bgcolor='white',
-            margin=dict(l=20, r=20, t=50, b=80)  # 下方留空给图例
+            plot_bgcolor="white",
+            margin=dict(l=20, r=20, t=50, b=80),  # 下方留空给图例
         )
 
         # 添加图例说明
@@ -228,25 +189,122 @@ class TopologyVisualizer:
 
         return fig
 
+    def _add_network_links(self, fig: go.Figure):
+        """添加网络链路箭头"""
+        # 链路样式配置
+        link_color = "#808080"  # 灰色
+        arrow_size = 1.2
+        arrow_width = 2.5
+        offset = 0.08  # 双向链路偏移量
+
+        # 收集所有链路（避免重复）
+        links = []
+
+        # 水平链路（同一行相邻节点）
+        for row in range(self.rows):
+            for col in range(self.cols - 1):
+                node1 = row * self.cols + col
+                node2 = row * self.cols + col + 1
+                links.append((node1, node2, "horizontal"))
+
+        # 垂直链路（同一列相邻节点）
+        for col in range(self.cols):
+            for row in range(self.rows - 1):
+                node1 = row * self.cols + col
+                node2 = (row + 1) * self.cols + col
+                links.append((node1, node2, "vertical"))
+
+        # 绘制链路箭头
+        for node1, node2, direction in links:
+            x1, y1 = self.get_node_position(node1)
+            x2, y2 = self.get_node_position(node2)
+
+            # 双向链路，绘制两个带偏移的箭头
+            if direction == "horizontal":
+                # 水平链路：上下偏移
+                # node1 -> node2 (上方箭头)
+                self._add_arrow_annotation(fig, x1, y1, x2, y2, 0, offset, link_color, arrow_size, arrow_width)  # y方向偏移
+                # node2 -> node1 (下方箭头)
+                self._add_arrow_annotation(fig, x2, y2, x1, y1, 0, -offset, link_color, arrow_size, arrow_width)  # y方向偏移
+            else:  # vertical
+                # 垂直链路：左右偏移
+                # node1 -> node2 (右侧箭头)
+                self._add_arrow_annotation(fig, x1, y1, x2, y2, offset, 0, link_color, arrow_size, arrow_width)  # x方向偏移
+                # node2 -> node1 (左侧箭头)
+                self._add_arrow_annotation(fig, x2, y2, x1, y1, -offset, 0, link_color, arrow_size, arrow_width)  # x方向偏移
+
+    def _add_arrow_annotation(self, fig: go.Figure, x_start: float, y_start: float, x_end: float, y_end: float, offset_x: float, offset_y: float, color: str, arrow_size: float, arrow_width: float):
+        """添加单个箭头标注"""
+        # 节点矩形边界为 ±0.25
+        node_boundary = 0.28
+
+        # 计算方向向量（使用原始位置，不含偏移）
+        dx = x_end - x_start
+        dy = y_end - y_start
+        length = (dx**2 + dy**2) ** 0.5
+
+        if length == 0:
+            return
+
+        # 归一化方向向量
+        dx_norm = dx / length
+        dy_norm = dy / length
+
+        # 应用偏移到实际绘制位置
+        x_start_offset = x_start + offset_x
+        y_start_offset = y_start + offset_y
+        x_end_offset = x_end + offset_x
+        y_end_offset = y_end + offset_y
+
+        # 调整起点和终点，避免与节点重叠
+        line_start_x = x_start_offset + dx_norm * node_boundary
+        line_start_y = y_start_offset + dy_norm * node_boundary
+        line_end_x = x_end_offset - dx_norm * node_boundary
+        line_end_y = y_end_offset - dy_norm * node_boundary
+
+        # 计算箭头参考长度（需要足够大以确保在各种缩放下都能正确渲染）
+        arrow_ref_length = 0.12
+
+        # 箭头起点（从这里开始画箭头）
+        arrow_start_x = line_end_x - dx_norm * arrow_ref_length
+        arrow_start_y = line_end_y - dy_norm * arrow_ref_length
+
+        # 绘制连接线（到箭头起点）
+        fig.add_shape(
+            type="line",
+            x0=line_start_x,
+            y0=line_start_y,
+            x1=arrow_start_x,
+            y1=arrow_start_y,
+            line=dict(
+                color=color,
+                width=arrow_width,
+            ),
+            opacity=0.6,
+        )
+
+        # 在终点添加箭头标记
+        fig.add_annotation(
+            x=line_end_x,
+            y=line_end_y,
+            ax=arrow_start_x,
+            ay=arrow_start_y,
+            xref="x",
+            yref="y",
+            axref="x",
+            ayref="y",
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=arrow_size,
+            arrowwidth=arrow_width,
+            arrowcolor=color,
+            opacity=0.6,
+        )
+
     def _add_grid_lines(self, fig: go.Figure):
         """添加网格线"""
-        # 垂直线
-        for i in range(self.cols + 1):
-            fig.add_shape(
-                type="line",
-                x0=i - 0.5, y0=-0.5,
-                x1=i - 0.5, y1=self.rows - 0.5,
-                line=dict(color="lightgray", width=1)
-            )
-
-        # 水平线
-        for i in range(self.rows + 1):
-            fig.add_shape(
-                type="line",
-                x0=-0.5, y0=i - 0.5,
-                x1=self.cols - 0.5, y1=i - 0.5,
-                line=dict(color="lightgray", width=1)
-            )
+        # 不再绘制网格线，链路箭头已经显示了节点间的连接关系
+        pass
 
     def _add_ip_markers(self, fig: go.Figure, node_ips: Dict[int, List[str]]):
         """在节点内部添加IP小方块标记，分两行显示：第一行RN类型，第二行SN类型"""
@@ -254,9 +312,9 @@ class TopologyVisualizer:
             return
 
         # RN类型（所有dma）
-        rn_types = {'gdma', 'sdma', 'cdma'}
+        rn_types = {"gdma", "sdma", "cdma"}
         # SN类型（ddr、l2m等）
-        sn_types = {'ddr', 'l2m'}
+        sn_types = {"ddr", "l2m"}
 
         for node_id, ip_list in node_ips.items():
             if not ip_list:
@@ -270,7 +328,7 @@ class TopologyVisualizer:
             sn_ips = []
 
             for ip in ip_list:
-                ip_type = ip.split('_')[0].lower() if '_' in ip else ip.lower()
+                ip_type = ip.split("_")[0].lower() if "_" in ip else ip.lower()
                 if ip_type in rn_types:
                     rn_ips.append(ip)
                 elif ip_type in sn_types:
@@ -278,24 +336,24 @@ class TopologyVisualizer:
 
             # 按编号排序（提取_后面的数字）
             def get_ip_index(ip):
-                parts = ip.split('_')
+                parts = ip.split("_")
                 return int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else 0
 
             rn_ips.sort(key=get_ip_index)
             sn_ips.sort(key=get_ip_index)
 
-            # IP方块大小
-            marker_size = 0.22
-            spacing = 0.25  # 方块之间的间距
+            # IP方块大小（节点总宽度0.5，需要留出边距）
+            marker_size = 0.2  # 方块大小
+            spacing = 0.25  # 方块之间的间距（中心到中心的距离）
 
             # 第一行：RN类型（上方）
             if rn_ips:
-                row_y = y + 0.15  # 上方位置
+                row_y = y + 0.12  # 上方位置
                 self._draw_ip_row(fig, rn_ips, x, row_y, marker_size, spacing)
 
             # 第二行：SN类型（下方）
             if sn_ips:
-                row_y = y - 0.15  # 下方位置
+                row_y = y - 0.12  # 下方位置
                 self._draw_ip_row(fig, sn_ips, x, row_y, marker_size, spacing)
 
     def _draw_ip_row(self, fig: go.Figure, ip_list: List[str], center_x: float, row_y: float, marker_size: float, spacing: float):
@@ -312,37 +370,29 @@ class TopologyVisualizer:
             marker_x = start_x + i * spacing
 
             # 获取IP类型和颜色
-            ip_type = ip.split('_')[0] if '_' in ip else ip
+            ip_type = ip.split("_")[0] if "_" in ip else ip
             ip_color = IP_COLOR_MAP.get(ip_type.lower(), "#808080")
 
             # 绘制小方块
             fig.add_shape(
                 type="rect",
-                x0=marker_x - marker_size/2,
-                y0=row_y - marker_size/2,
-                x1=marker_x + marker_size/2,
-                y1=row_y + marker_size/2,
+                x0=marker_x - marker_size / 2,
+                y0=row_y - marker_size / 2,
+                x1=marker_x + marker_size / 2,
+                y1=row_y + marker_size / 2,
                 fillcolor=ip_color,
                 line=dict(color="black", width=2),
-                opacity=0.9
+                opacity=0.9,
             )
 
             # 添加IP标签
             ip_label = self._get_ip_short_label(ip)
-            fig.add_annotation(
-                x=marker_x,
-                y=row_y,
-                text=ip_label,
-                showarrow=False,
-                font=dict(size=7, color="white", family="Arial Black"),
-                xanchor="center",
-                yanchor="middle"
-            )
+            fig.add_annotation(x=marker_x, y=row_y, text=ip_label, showarrow=False, font=dict(size=9, color="white", family="Arial Black"), xanchor="center", yanchor="middle")  # 增大字体
 
     def _get_ip_short_label(self, ip: str) -> str:
         """获取IP的简短标签"""
         # 例如: "gdma_0" -> "G0", "ddr_1" -> "D1"
-        parts = ip.split('_')
+        parts = ip.split("_")
         if len(parts) == 2:
             type_name = parts[0]
             index = parts[1]
@@ -355,7 +405,7 @@ class TopologyVisualizer:
         mounted_ip_types = set()
         for ips in node_ips.values():
             for ip in ips:
-                ip_type = ip.split('_')[0] if '_' in ip else ip
+                ip_type = ip.split("_")[0] if "_" in ip else ip
                 mounted_ip_types.add(ip_type.lower())
 
         # 只显示已挂载的IP类型
@@ -389,23 +439,10 @@ class TopologyVisualizer:
             x_pos = x_start + i * item_width
 
             # 添加颜色方块
-            fig.add_shape(
-                type="rect",
-                x0=x_pos, y0=y_pos - 0.12,
-                x1=x_pos + 0.24, y1=y_pos + 0.12,
-                fillcolor=color,
-                line=dict(color="black", width=1)
-            )
+            fig.add_shape(type="rect", x0=x_pos, y0=y_pos - 0.12, x1=x_pos + 0.24, y1=y_pos + 0.12, fillcolor=color, line=dict(color="black", width=1))
 
             # 添加文字标签
-            fig.add_annotation(
-                x=x_pos + 0.35,
-                y=y_pos,
-                text=label,
-                showarrow=False,
-                xanchor="left",
-                font=dict(size=10, color="black")
-            )
+            fig.add_annotation(x=x_pos + 0.35, y=y_pos, text=label, showarrow=False, xanchor="left", font=dict(size=10, color="black"))
 
     def parse_click_data(self, click_data: dict) -> int:
         """
@@ -414,15 +451,15 @@ class TopologyVisualizer:
         :param click_data: Streamlit返回的click_data字典
         :return: 节点ID
         """
-        if not click_data or 'points' not in click_data:
+        if not click_data or "points" not in click_data:
             return None
 
-        points = click_data['points']
+        points = click_data["points"]
         if not points:
             return None
 
         # 从customdata获取节点ID
-        node_id = points[0].get('customdata')
+        node_id = points[0].get("customdata")
         return node_id
 
     def parse_node_ids(self, node_input: str) -> List[int]:
@@ -445,7 +482,7 @@ class TopologyVisualizer:
         node_ids = set()
 
         # 按逗号分隔
-        parts = node_input.split(',')
+        parts = node_input.split(",")
 
         for part in parts:
             part = part.strip()
@@ -453,10 +490,10 @@ class TopologyVisualizer:
                 continue
 
             # 检查是否是范围表达式
-            if '-' in part:
+            if "-" in part:
                 # 范围: "6-7"
                 try:
-                    start, end = part.split('-')
+                    start, end = part.split("-")
                     start_id = int(start.strip())
                     end_id = int(end.strip())
 

@@ -92,7 +92,7 @@ class BaseModel:
 
     def setup_traffic_scheduler(self, traffic_file_path: str, traffic_chains: list) -> None:
         """
-        配置流量调度器
+        配置流量调度器并提取IP需求
 
         Args:
             traffic_file_path: 流量文件路径
@@ -101,11 +101,14 @@ class BaseModel:
         """
         self.traffic_file_path = traffic_file_path
 
-        # 初始化TrafficScheduler
+        # 1. 提取traffic文件中的IP需求
+        self._extract_ip_requirements_from_traffic(traffic_file_path, traffic_chains)
+
+        # 2. 初始化TrafficScheduler
         self.traffic_scheduler = TrafficScheduler(self.config, traffic_file_path)
         self.traffic_scheduler.set_verbose(self.verbose > 0)
 
-        # 处理traffic配置
+        # 3. 处理traffic配置
         if isinstance(traffic_chains, str):
             # 单个文件字符串
             self.file_name = traffic_chains
@@ -116,6 +119,43 @@ class BaseModel:
             self.file_name = self.traffic_scheduler.get_save_filename() + ".txt"
         else:
             raise ValueError("traffic_chains必须是字符串(单文件)或列表(多链)")
+
+    def _extract_ip_requirements_from_traffic(self, traffic_file_path: str, traffic_chains):
+        """
+        从traffic文件中提取IP接口需求
+
+        Args:
+            traffic_file_path: traffic文件基础路径
+            traffic_chains: traffic文件链配置
+        """
+        from src.utils.traffic_ip_extractor import TrafficIPExtractor
+        import os
+
+        extractor = TrafficIPExtractor()
+
+        # 收集所有要解析的traffic文件
+        traffic_files = []
+        if isinstance(traffic_chains, str):
+            traffic_files = [os.path.join(traffic_file_path, traffic_chains)]
+        elif isinstance(traffic_chains, list):
+            for chain in traffic_chains:
+                if isinstance(chain, list):
+                    for file_name in chain:
+                        traffic_files.append(os.path.join(traffic_file_path, file_name))
+                else:
+                    traffic_files.append(os.path.join(traffic_file_path, chain))
+
+        # 解析所有traffic文件
+        result = extractor.extract_from_multiple_files(traffic_files)
+        self._required_ips = result["required_ips"]
+        self._has_cross_die_traffic = result["has_cross_die"]
+
+        # 提取唯一的IP类型
+        ip_types = TrafficIPExtractor.get_unique_ip_types(self._required_ips)
+
+        # 更新config的CH_NAME_LIST和CHANNEL_SPEC
+        self.config.update_channel_list_from_ips(ip_types)
+        self.config.infer_channel_spec_from_ips(ip_types)
 
     def setup_result_analysis(
         self,
@@ -258,45 +298,10 @@ class BaseModel:
         }
         # 使用新的XY/YX确定性路由替代networkx最短路径
         self.routes = self._build_routing_table()
+
+        # 动态创建IP接口
         self.ip_modules = {}
-        for node_id in range(self.config.NUM_NODE):
-            for ip_type in self.config.CH_NAME_LIST:
-                # 检查是否是D2D接口类型
-                if ip_type == "d2d_rn_0":
-                    from src.d2d.components import D2D_RN_Interface
-
-                    self.ip_modules[(ip_type, node_id)] = D2D_RN_Interface(
-                        ip_type,
-                        node_id,
-                        self.config,
-                        self.req_network,
-                        self.rsp_network,
-                        self.data_network,
-                        self.routes,
-                    )
-                elif ip_type == "d2d_sn_0":
-                    from src.d2d.components import D2D_SN_Interface
-
-                    self.ip_modules[(ip_type, node_id)] = D2D_SN_Interface(
-                        ip_type,
-                        node_id,
-                        self.config,
-                        self.req_network,
-                        self.rsp_network,
-                        self.data_network,
-                        self.routes,
-                    )
-                else:
-                    # 普通IP接口
-                    self.ip_modules[(ip_type, node_id)] = IPInterface(
-                        ip_type,
-                        node_id,
-                        self.config,
-                        self.req_network,
-                        self.rsp_network,
-                        self.data_network,
-                        self.routes,
-                    )
+        self._create_dynamic_ip_interfaces()
 
         # 为所有IP接口设置request_tracker
         for ip_interface in self.ip_modules.values():
@@ -411,6 +416,108 @@ class BaseModel:
 
         # Initialize per-node FIFO ETag statistics after networks are created
         self._initialize_per_node_etag_stats()
+
+        # 初始化Network的channel buffer(延迟初始化)
+        self.req_network.initialize_buffers()
+        self.rsp_network.initialize_buffers()
+        self.data_network.initialize_buffers()
+
+    def _create_dynamic_ip_interfaces(self):
+        """
+        动态创建IP接口 - 只创建traffic中实际使用的IP
+
+        根据traffic文件解析结果和D2D配置创建IP接口:
+        1. 为traffic中出现的(node_id, ip_type)创建普通IP接口
+        2. 根据D2D_CONNECTIONS配置创建d2d_rn和d2d_sn接口
+        """
+        # 1. 收集需要创建的IP列表
+        required_ips = set()
+
+        # 从traffic中提取的IP需求
+        if hasattr(self, '_required_ips'):
+            required_ips.update(self._required_ips)
+
+        # 2. 添加D2D接口(根据D2D_CONNECTIONS配置)
+        if hasattr(self.config, 'D2D_CONNECTIONS') and self.config.D2D_CONNECTIONS:
+            d2d_ips = self._get_d2d_ips_from_config()
+            required_ips.update(d2d_ips)
+
+        # 3. 创建IP接口
+        for node_id, ip_type in required_ips:
+            self._create_single_ip_interface(ip_type, node_id)
+
+    def _get_d2d_ips_from_config(self):
+        """
+        从D2D_CONNECTIONS配置中提取需要创建的D2D IP接口
+
+        Returns:
+            Set[(node_id, ip_type)]: D2D IP接口集合
+        """
+        d2d_ips = set()
+
+        if not hasattr(self.config, 'D2D_CONNECTIONS'):
+            return d2d_ips
+
+        # D2D_CONNECTIONS格式: [[src_die, src_node, dst_die, dst_node], ...]
+        for connection in self.config.D2D_CONNECTIONS:
+            src_die, src_node, dst_die, dst_node = connection
+
+            # 为源节点和目标节点都创建d2d_rn_0和d2d_sn_0
+            d2d_ips.add((src_node, "d2d_rn_0"))
+            d2d_ips.add((src_node, "d2d_sn_0"))
+            d2d_ips.add((dst_node, "d2d_rn_0"))
+            d2d_ips.add((dst_node, "d2d_sn_0"))
+
+        return d2d_ips
+
+    def _create_single_ip_interface(self, ip_type, node_id):
+        """
+        创建单个IP接口
+
+        Args:
+            ip_type: IP类型 (如"gdma_0", "d2d_rn_0")
+            node_id: 节点ID
+        """
+        # 避免重复创建
+        if (ip_type, node_id) in self.ip_modules:
+            return
+
+        # 根据IP类型创建相应的接口
+        if ip_type == "d2d_rn_0":
+            from src.d2d.components import D2D_RN_Interface
+
+            self.ip_modules[(ip_type, node_id)] = D2D_RN_Interface(
+                ip_type,
+                node_id,
+                self.config,
+                self.req_network,
+                self.rsp_network,
+                self.data_network,
+                self.routes,
+            )
+        elif ip_type == "d2d_sn_0":
+            from src.d2d.components import D2D_SN_Interface
+
+            self.ip_modules[(ip_type, node_id)] = D2D_SN_Interface(
+                ip_type,
+                node_id,
+                self.config,
+                self.req_network,
+                self.rsp_network,
+                self.data_network,
+                self.routes,
+            )
+        else:
+            # 普通IP接口
+            self.ip_modules[(ip_type, node_id)] = IPInterface(
+                ip_type,
+                node_id,
+                self.config,
+                self.req_network,
+                self.rsp_network,
+                self.data_network,
+                self.routes,
+            )
 
     def _initialize_per_node_etag_stats(self):
         """Initialize per-node FIFO ETag statistics dictionaries."""
@@ -611,24 +718,23 @@ class BaseModel:
             self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "received_flit")
 
     def syn_IP_stat(self):
-        for node_id in range(self.config.NUM_NODE):
-            for ip_type in self.config.CH_NAME_LIST:
-                ip_interface: IPInterface = self.ip_modules[(ip_type, node_id)]
-                if self.model_type_stat == "REQ_RSP":
-                    self.read_retry_num_stat += ip_interface.read_retry_num_stat
-                    self.write_retry_num_stat += ip_interface.write_retry_num_stat
-                self.req_cir_h_num_stat += ip_interface.req_cir_h_num
-                self.req_cir_v_num_stat += ip_interface.req_cir_v_num
-                self.rsp_cir_h_num_stat += ip_interface.rsp_cir_h_num
-                self.rsp_cir_v_num_stat += ip_interface.rsp_cir_v_num
-                self.data_cir_h_num_stat += ip_interface.data_cir_h_num
-                self.data_cir_v_num_stat += ip_interface.data_cir_v_num
-                self.req_wait_cycle_h_num_stat += ip_interface.req_wait_cycles_h
-                self.req_wait_cycle_v_num_stat += ip_interface.req_wait_cycles_v
-                self.rsp_wait_cycle_h_num_stat += ip_interface.rsp_wait_cycles_h
-                self.rsp_wait_cycle_v_num_stat += ip_interface.rsp_wait_cycles_v
-                self.data_wait_cycle_h_num_stat += ip_interface.data_wait_cycles_h
-                self.data_wait_cycle_v_num_stat += ip_interface.data_wait_cycles_v
+        # 直接遍历实际创建的IP接口(动态挂载模式)
+        for (ip_type, node_id), ip_interface in self.ip_modules.items():
+            if self.model_type_stat == "REQ_RSP":
+                self.read_retry_num_stat += ip_interface.read_retry_num_stat
+                self.write_retry_num_stat += ip_interface.write_retry_num_stat
+            self.req_cir_h_num_stat += ip_interface.req_cir_h_num
+            self.req_cir_v_num_stat += ip_interface.req_cir_v_num
+            self.rsp_cir_h_num_stat += ip_interface.rsp_cir_h_num
+            self.rsp_cir_v_num_stat += ip_interface.rsp_cir_v_num
+            self.data_cir_h_num_stat += ip_interface.data_cir_h_num
+            self.data_cir_v_num_stat += ip_interface.data_cir_v_num
+            self.req_wait_cycle_h_num_stat += ip_interface.req_wait_cycles_h
+            self.req_wait_cycle_v_num_stat += ip_interface.req_wait_cycles_v
+            self.rsp_wait_cycle_h_num_stat += ip_interface.rsp_wait_cycles_h
+            self.rsp_wait_cycle_v_num_stat += ip_interface.rsp_wait_cycles_v
+            self.data_wait_cycle_h_num_stat += ip_interface.data_wait_cycles_h
+            self.data_wait_cycle_v_num_stat += ip_interface.data_wait_cycles_v
 
     def debug_func(self):
         if self.print_trace:
@@ -665,15 +771,14 @@ class BaseModel:
 
     def network_to_ip_eject(self):
         """从网络到IP的eject步骤，并更新received_flit统计"""
-        for node_id in range(self.config.NUM_NODE):
-            for ip_type in self.config.CH_NAME_LIST:
-                ip_interface: IPInterface = self.ip_modules[(ip_type, node_id)]
-                # 执行eject，获取已到达目的IP的flit列表
-                ejected_flits = ip_interface.eject_step(self.cycle)
-                # 更新TrafficScheduler中的received_flit统计
-                if ejected_flits:
-                    for flit in ejected_flits:
-                        self.update_traffic_completion_stats(flit)
+        # 直接遍历实际创建的IP接口(动态挂载模式)
+        for (ip_type, node_id), ip_interface in self.ip_modules.items():
+            # 执行eject，获取已到达目的IP的flit列表
+            ejected_flits = ip_interface.eject_step(self.cycle)
+            # 更新TrafficScheduler中的received_flit统计
+            if ejected_flits:
+                for flit in ejected_flits:
+                    self.update_traffic_completion_stats(flit)
 
     def release_completed_sn_tracker(self):
         """Check if any trackers can be released based on the current cycle."""
@@ -1209,9 +1314,9 @@ class BaseModel:
 
     def move_pre_to_queues_all(self):
         #  所有 IPInterface 的 *_pre → FIFO
-        for node_id in range(self.config.NUM_NODE):
-            for ip_type in self.config.CH_NAME_LIST:
-                self.ip_modules[(ip_type, node_id)].move_pre_to_fifo()
+        # 直接遍历实际创建的IP接口(动态挂载模式)
+        for (ip_type, node_id), ip_interface in self.ip_modules.items():
+            ip_interface.move_pre_to_fifo()
 
         # 所有网络的 *_pre → FIFO
         for node_id in range(self.config.NUM_NODE):

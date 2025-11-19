@@ -94,11 +94,10 @@ class CrossRingConfig:
         self.IP_H2L_H_FIFO_DEPTH = args.IP_H2L_H_FIFO_DEPTH
         self.IP_H2L_L_FIFO_DEPTH = args.IP_H2L_L_FIFO_DEPTH
 
-        self.CHANNEL_SPEC = args.CHANNEL_SPEC
-        self.CH_NAME_LIST = []
-        for key in self.CHANNEL_SPEC:
-            for idx in range(self.CHANNEL_SPEC[key]):
-                self.CH_NAME_LIST.append(f"{key}_{idx}")
+        # CHANNEL_SPEC现在为可选配置,主要用于向后兼容和可视化
+        # 实际的IP接口将从traffic文件动态推断
+        self.CHANNEL_SPEC = getattr(args, 'CHANNEL_SPEC', {})
+        self.CH_NAME_LIST = []  # 将在traffic解析后填充
         assert (
             self.TL_Etag_T2_UE_MAX < self.TL_Etag_T1_UE_MAX < self.RB_IN_FIFO_DEPTH
             and self.TL_Etag_T2_UE_MAX < self.RB_IN_FIFO_DEPTH - 1
@@ -292,10 +291,7 @@ class CrossRingConfig:
         self.update_latency()
         self.topology_select(topo_type)
         self.SN_TRACKER_RELEASE_LATENCY = self.SN_TRACKER_RELEASE_LATENCY_original * self.NETWORK_FREQUENCY
-        self.CH_NAME_LIST = []
-        for key in self.CHANNEL_SPEC:
-            for idx in range(self.CHANNEL_SPEC[key]):
-                self.CH_NAME_LIST.append(f"{key}_{idx}")
+        # CH_NAME_LIST现在由traffic解析后更新,此处不再重新生成
 
     def update_latency(self):
         self.DDR_R_LATENCY = self.DDR_R_LATENCY_original * self.NETWORK_FREQUENCY
@@ -307,6 +303,51 @@ class CrossRingConfig:
     def topology_select(self, topo_type="default"):
         # 新架构: 所有节点都可以作为IP节点，不再需要SEND_POSITION_LIST
         pass
+
+    def update_channel_list_from_ips(self, ip_types):
+        """
+        从IP类型列表更新CH_NAME_LIST
+
+        Args:
+            ip_types: IP类型列表,如["gdma_0", "gdma_1", "ddr_0"]
+        """
+        self.CH_NAME_LIST = sorted(list(ip_types))
+
+    def infer_channel_spec_from_ips(self, ip_types):
+        """
+        从IP类型列表反向推断CHANNEL_SPEC
+
+        Args:
+            ip_types: IP类型列表,如["gdma_0", "gdma_1", "ddr_0"]
+
+        Returns:
+            推断的CHANNEL_SPEC字典,如{"gdma": 2, "ddr": 1}
+        """
+        from collections import defaultdict
+
+        channel_counts = defaultdict(set)
+
+        for ip_type in ip_types:
+            if '_' in ip_type:
+                parts = ip_type.rsplit('_', 1)
+                base_type = parts[0]
+                idx_str = parts[1]
+
+                try:
+                    idx = int(idx_str)
+                    channel_counts[base_type].add(idx)
+                except ValueError:
+                    # 无法解析为数字,跳过
+                    pass
+
+        # 计算每种类型的数量(最大索引+1)
+        channel_spec = {}
+        for base_type, indices in channel_counts.items():
+            if indices:
+                channel_spec[base_type] = max(indices) + 1
+
+        self.CHANNEL_SPEC = channel_spec
+        return channel_spec
 
     def generate_ip_positions(self, zero_rows=None, zero_cols=None):
         # 创建一个矩阵,初始值为1
