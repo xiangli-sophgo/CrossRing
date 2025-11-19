@@ -20,7 +20,12 @@ sys.path.insert(0, str(project_root))
 from src.traffic_process.traffic_gene.topology_visualizer import TopologyVisualizer, get_default_ip_mappings
 from src.traffic_process.traffic_gene.config_manager import ConfigManager, TrafficConfig
 from src.traffic_process.traffic_gene.traffic_analyzer import TrafficAnalyzer
-from src.traffic_process.traffic_gene.generation_engine import generate_traffic_from_configs, generate_d2d_traffic_from_configs, split_traffic_by_source, split_d2d_traffic_by_source
+from src.traffic_process.traffic_gene.generation_engine import (
+    generate_traffic_from_configs,
+    generate_d2d_traffic_from_configs,
+    split_traffic_by_source,
+    split_d2d_traffic_by_source,
+)
 
 
 # ==================== 页面配置 ====================
@@ -161,13 +166,26 @@ def load_custom_css():
         }
 
         .stButton > button[kind="primary"] {
+            background-color: var(--primary-color) !important;
             background: var(--primary-color) !important;
             color: white !important;
         }
 
         .stButton > button[kind="primary"]:hover {
+            background-color: #0051D5 !important;
             background: #0051D5 !important;
             box-shadow: var(--shadow-md) !important;
+        }
+
+        /* 强制覆盖Streamlit默认主题色 */
+        button[data-testid="baseButton-primary"] {
+            background-color: #007AFF !important;
+            background: #007AFF !important;
+        }
+
+        button[data-testid="baseButton-primary"]:hover {
+            background-color: #0051D5 !important;
+            background: #0051D5 !important;
         }
 
         .stButton > button[kind="secondary"] {
@@ -791,9 +809,7 @@ def render_ip_mount_section():
             try:
                 from src.traffic_process.traffic_gene.static_bandwidth_analyzer import compute_link_bandwidth
 
-                link_bandwidth = compute_link_bandwidth(
-                    topo_type=st.session_state.topo_type, node_ips=st.session_state.node_ips, configs=configs, routing_type=routing_type
-                )
+                link_bandwidth = compute_link_bandwidth(topo_type=st.session_state.topo_type, node_ips=st.session_state.node_ips, configs=configs, routing_type=routing_type)
             except Exception as e:
                 show_error(f"带宽计算失败: {str(e)}")
 
@@ -855,7 +871,9 @@ def render_config_section():
         st.warning("请先在拓扑图中挂载IP到节点")
     else:
         # 配置模式选择
-        config_mode = st.radio("配置模式", ["具体配置", "批量配置"], horizontal=True, help="具体配置: 精确指定某个节点的IP到另一个节点的IP; 批量配置: 按IP类型配置(如所有gdma到所有ddr)")
+        config_mode = st.radio(
+            "配置模式", ["具体配置", "批量配置"], horizontal=True, help="具体配置: 精确指定某个节点的IP到另一个节点的IP; 批量配置: 按IP类型配置(如所有gdma到所有ddr)"
+        )
 
         # D2D模式的Die对选择
         if st.session_state.traffic_mode == "D2D":
@@ -978,7 +996,12 @@ def render_config_section():
                 )
             with col_p3:
                 burst = st.number_input(
-                    "Burst 长度", min_value=UIConfig.BURST_RANGE[0], max_value=UIConfig.BURST_RANGE[1], value=UIConfig.DEFAULT_BURST, step=UIConfig.BURST_RANGE[2], help="突发传输的数据包长度"
+                    "Burst 长度",
+                    min_value=UIConfig.BURST_RANGE[0],
+                    max_value=UIConfig.BURST_RANGE[1],
+                    value=UIConfig.DEFAULT_BURST,
+                    step=UIConfig.BURST_RANGE[2],
+                    help="突发传输的数据包长度",
                 )
 
             req_type = st.radio("请求类型", ["R", "W"], horizontal=True, help="R=读请求, W=写请求")
@@ -1128,10 +1151,12 @@ def render_config_section():
                                 else:
                                     st.error("配置验证失败:\n" + "\n".join(errors))
 
-    # 带宽显示选项（放在添加配置下方）
+    # 带宽计算选项（放在添加配置下方）
     mini_divider()
-    show_bandwidth = st.checkbox("显示链路带宽", value=False, key="show_link_bandwidth", help="显示基于当前配置计算的静态链路带宽")
-    if show_bandwidth:
+    if st.button("计算静态链路带宽", use_container_width=True, type="primary", help="基于当前配置计算静态链路带宽"):
+        st.session_state.show_link_bandwidth = True
+
+    if st.session_state.get("show_link_bandwidth", False):
         routing_type = st.selectbox("路由算法", ["XY", "YX"], index=0, key="bandwidth_routing_type", help="XY: 先水平后垂直; YX: 先垂直后水平")
 
 
@@ -1369,7 +1394,9 @@ def render_config_list():
                         with cols[j]:
                             with st.container(border=True):
                                 # 简化为单行显示
-                                st.markdown(f"**#{config.config_id}** {src_summary}→{dst_summary} | " f"{config.end_time}ns | {config.speed}GB/s | B{config.burst} | {config.req_type}")
+                                st.markdown(
+                                    f"**#{config.config_id}** {src_summary}→{dst_summary} | " f"{config.end_time}ns | {config.speed}GB/s | B{config.burst} | {config.req_type}"
+                                )
                                 st.button("删除", key=f"del_bottom_{config.config_id}", use_container_width=True, on_click=delete_config_callback, args=(config.config_id,))
     else:
         st.info("暂无配置，请添加配置或加载已保存的配置")

@@ -58,7 +58,8 @@ class StaticBandwidthAnalyzer:
         转换TrafficConfig列表为flow字典
 
         Returns:
-            {((src_x, src_y), (dst_x, dst_y)): bandwidth}
+            {((flow_src_x, flow_src_y), (flow_dst_x, flow_dst_y)): bandwidth}
+            注意: 对于读请求，flow_src是目标IP，flow_dst是源IP（数据流向相反）
         """
         flow = {}
 
@@ -74,9 +75,13 @@ class StaticBandwidthAnalyzer:
                 dst_nodes.extend(nodes)
 
             # 计算每对源-目标的带宽
+            # speed表示每个源IP的总发送带宽，平均分配给所有目标
             if src_nodes and dst_nodes:
-                total_bandwidth = config.speed  # GB/s
-                bandwidth_per_pair = total_bandwidth / (len(src_nodes) * len(dst_nodes))
+                bandwidth_per_src = config.speed  # 每个源IP的总带宽 (GB/s)
+                bandwidth_per_pair = bandwidth_per_src / len(dst_nodes)  # 每个源-目标对的带宽
+
+                # 根据请求类型确定数据流向
+                req_type = getattr(config, 'req_type', 'W')  # 默认写请求
 
                 # 生成流量字典
                 for src_node in src_nodes:
@@ -84,7 +89,13 @@ class StaticBandwidthAnalyzer:
                         src_pos = self._node_id_to_pos(src_node)
                         dst_pos = self._node_id_to_pos(dst_node)
 
-                        flow_key = (src_pos, dst_pos)
+                        # 读请求: 数据从目标IP流向源IP (DDR → GDMA)
+                        # 写请求: 数据从源IP流向目标IP (GDMA → DDR)
+                        if req_type == 'R':
+                            flow_key = (dst_pos, src_pos)  # 反向：目标 → 源
+                        else:
+                            flow_key = (src_pos, dst_pos)  # 正向：源 → 目标
+
                         if flow_key not in flow:
                             flow[flow_key] = 0.0
                         flow[flow_key] += bandwidth_per_pair

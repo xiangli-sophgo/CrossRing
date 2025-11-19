@@ -402,20 +402,23 @@ class TopologyVisualizer:
 
             # 判断链路方向，调整文本位置
             if src_row == dst_row:
-                # 水平链路，文本偏移到上方
-                text_y = mid_y + 0.15
+                # 水平链路：从左到右在上方，从右到左在下方
                 text_x = mid_x
-            else:
-                # 垂直链路，根据方向放在箭头两侧
-                # src -> dst: 如果src在上(src_row < dst_row)，箭头在右侧，标注也在右侧
-                # dst -> src: 如果dst在上(dst_row < src_row)，箭头在右侧，标注也在右侧
-                if src_row < dst_row:
-                    # src在上，dst在下，箭头方向向下在右侧
-                    text_x = mid_x + 0.15
+                if src_col < dst_col:
+                    # 从左到右（箭头在上方）
+                    text_y = mid_y + 0.15
                 else:
-                    # dst在上，src在下，箭头方向向上在左侧
-                    text_x = mid_x - 0.15
+                    # 从右到左（箭头在下方）
+                    text_y = mid_y - 0.15
+            else:
+                # 垂直链路：增加偏移量避免与箭头重叠
                 text_y = mid_y
+                if src_row < dst_row:
+                    # 从上到下（箭头在右侧），标注也在右侧
+                    text_x = mid_x + 0.25
+                else:
+                    # 从下到上（箭头在左侧），标注也在左侧
+                    text_x = mid_x - 0.25
 
             # 添加带宽文本标注(不带方框)
             fig.add_annotation(
