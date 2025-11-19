@@ -6,7 +6,7 @@ pydantic-settings==2.5.2
 
 # 异步和WebSocket支持
 websockets==13.1
-python-multipart==0.0.12
+python-multipart==0.0.18
 aiofiles==24.1.0
 
 # CORS和安全
