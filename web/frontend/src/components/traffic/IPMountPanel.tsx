@@ -11,14 +11,18 @@ import {
   Tag,
   Row,
   Col,
-  Upload
+  Upload,
+  Modal,
+  Select,
+  Collapse
 } from 'antd'
 import {
   ApiOutlined,
   DeleteOutlined,
   ClearOutlined,
   DownloadOutlined,
-  UploadOutlined
+  UploadOutlined,
+  SaveOutlined
 } from '@ant-design/icons'
 import type { IPMount } from '../../types/ipMount'
 import {
@@ -26,8 +30,13 @@ import {
   batchMountIP,
   getMounts,
   deleteMount,
-  clearAllMounts
+  clearAllMounts,
+  saveMountsToFile,
+  listMountFiles,
+  loadMountsFromFile
 } from '../../api/ipMount'
+
+const { Option } = Select
 
 interface IPMountPanelProps {
   topology: string
@@ -40,6 +49,11 @@ const IPMountPanel: React.FC<IPMountPanelProps> = ({ topology, onMountsChange })
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [saveModalVisible, setSaveModalVisible] = useState(false)
+  const [saveFileName, setSaveFileName] = useState('')
+  const [loadModalVisible, setLoadModalVisible] = useState(false)
+  const [availableFiles, setAvailableFiles] = useState<any[]>([])
+  const [selectedFile, setSelectedFile] = useState<string>('')
 
   // 加载已挂载的IP
   const loadMounts = async () => {
@@ -118,9 +132,9 @@ const IPMountPanel: React.FC<IPMountPanelProps> = ({ topology, onMountsChange })
       // 找出该IP类型的所有节点
       const nodesToDelete = mounts.filter(m => m.ip_type === ipType)
 
-      // 逐个删除
+      // 逐个删除，传递ip_type参数只删除指定类型
       for (const mount of nodesToDelete) {
-        await deleteMount(topology, mount.node_id)
+        await deleteMount(topology, mount.node_id, ipType)
       }
 
       message.success(`已删除 ${ipType} 的所有挂载`)
@@ -141,6 +155,65 @@ const IPMountPanel: React.FC<IPMountPanelProps> = ({ topology, onMountsChange })
       onMountsChange?.()
     } catch (error) {
       message.error('清空失败')
+      console.error(error)
+    }
+  }
+
+  // 打开保存对话框
+  const handleOpenSaveModal = () => {
+    if (mounts.length === 0) {
+      message.warning('当前没有IP挂载配置可保存')
+      return
+    }
+    const defaultName = `ip_mounts_${topology}_${new Date().toISOString().slice(0,10)}`
+    setSaveFileName(defaultName)
+    setSaveModalVisible(true)
+  }
+
+  // 保存配置到文件
+  const handleSaveToFile = async () => {
+    if (!saveFileName.trim()) {
+      message.error('请输入文件名')
+      return
+    }
+
+    try {
+      const response = await saveMountsToFile(topology, saveFileName)
+      message.success(response.message)
+      setSaveModalVisible(false)
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '保存失败')
+      console.error(error)
+    }
+  }
+
+  // 打开加载对话框
+  const handleOpenLoadModal = async () => {
+    try {
+      const response = await listMountFiles()
+      setAvailableFiles(response.files)
+      setLoadModalVisible(true)
+    } catch (error: any) {
+      message.error('获取文件列表失败')
+      console.error(error)
+    }
+  }
+
+  // 从文件加载配置
+  const handleLoadFromFile = async () => {
+    if (!selectedFile) {
+      message.error('请选择要加载的文件')
+      return
+    }
+
+    try {
+      const response = await loadMountsFromFile(topology, selectedFile)
+      message.success(response.message)
+      setLoadModalVisible(false)
+      loadMounts()
+      onMountsChange?.()
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '加载失败')
       console.error(error)
     }
   }
@@ -279,7 +352,6 @@ const IPMountPanel: React.FC<IPMountPanelProps> = ({ topology, onMountsChange })
           <ApiOutlined />
           <span>IP节点挂载</span>
           <Tag color="purple">{mounts.length} 个挂载</Tag>
-          <Tag color="cyan">已自动保存到 config/ip_mounts/{topology}.json</Tag>
         </Space>
       }
       extra={
@@ -289,26 +361,20 @@ const IPMountPanel: React.FC<IPMountPanelProps> = ({ topology, onMountsChange })
           </Button>
           <Button
             size="small"
-            icon={<DownloadOutlined />}
-            onClick={handleExport}
+            icon={<SaveOutlined />}
+            onClick={handleOpenSaveModal}
             disabled={mounts.length === 0}
+            type="primary"
           >
-            导出副本
+            保存
           </Button>
           <Button
             size="small"
             icon={<UploadOutlined />}
-            onClick={() => fileInputRef.current?.click()}
+            onClick={handleOpenLoadModal}
           >
             导入
           </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            style={{ display: 'none' }}
-            onChange={handleImport}
-          />
           <Popconfirm
             title="确认清空所有IP挂载？"
             onConfirm={handleClearAll}
@@ -348,14 +414,77 @@ const IPMountPanel: React.FC<IPMountPanelProps> = ({ topology, onMountsChange })
         </Form>
       </Card>
 
-      <Table
-        columns={columns}
-        dataSource={groupedData}
-        rowKey="ip_type"
-        pagination={false}
-        loading={refreshing}
-        size="small"
-      />
+      <Collapse ghost>
+        <Collapse.Panel header={`挂载详情 (${mounts.length} 个)`} key="1">
+          <Table
+            columns={columns}
+            dataSource={groupedData}
+            rowKey="ip_type"
+            pagination={false}
+            loading={refreshing}
+            size="small"
+          />
+        </Collapse.Panel>
+      </Collapse>
+
+      {/* 保存配置对话框 */}
+      <Modal
+        title="保存IP挂载配置"
+        open={saveModalVisible}
+        onOk={handleSaveToFile}
+        onCancel={() => setSaveModalVisible(false)}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <div>
+            <label>文件名：</label>
+            <Input
+              value={saveFileName}
+              onChange={(e) => setSaveFileName(e.target.value)}
+              placeholder="请输入文件名"
+              suffix=".json"
+              style={{ marginTop: 8 }}
+            />
+          </div>
+          <div style={{ color: '#8c8c8c', fontSize: 12 }}>
+            文件将保存到: config/ip_mounts/{saveFileName || '...'}.json
+          </div>
+        </Space>
+      </Modal>
+
+      {/* 加载配置对话框 */}
+      <Modal
+        title="加载IP挂载配置"
+        open={loadModalVisible}
+        onOk={handleLoadFromFile}
+        onCancel={() => setLoadModalVisible(false)}
+        okText="加载"
+        cancelText="取消"
+        width={600}
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <div>从 config/ip_mounts 目录选择文件:</div>
+          <Select
+            value={selectedFile}
+            onChange={setSelectedFile}
+            placeholder="请选择配置文件"
+            style={{ width: '100%' }}
+            showSearch
+          >
+            {availableFiles.map(file => (
+              <Option key={file.filename} value={file.filename}>
+                {file.filename} ({new Date(file.modified * 1000).toLocaleString()})
+              </Option>
+            ))}
+          </Select>
+          {availableFiles.length === 0 && (
+            <div style={{ color: '#8c8c8c', fontSize: 12 }}>
+              没有找到可用的配置文件
+            </div>
+          )}
+        </Space>
+      </Modal>
     </Card>
   )
 }

@@ -441,7 +441,7 @@ class D2D_Sys:
         if target_die_id is None or target_die_id not in self.target_die_interfaces:
             # 添加更详细的调试信息
             flit_info = f"flit_position={getattr(flit, 'flit_position', 'None')}, d2d_origin_die={getattr(flit, 'd2d_origin_die', 'None')}, d2d_target_die={getattr(flit, 'd2d_target_die', 'None')}, packet_id={getattr(flit, 'packet_id', 'None')}"
-            # self.logger.error(f"目标Die {target_die_id} 的接口未设置，flit信息: {flit_info}")
+            self.logger.error(f"目标Die {target_die_id} 的接口未设置，flit信息: {flit_info}")
             # 回收AXI flit
             from src.utils.flit import _flit_pool
 

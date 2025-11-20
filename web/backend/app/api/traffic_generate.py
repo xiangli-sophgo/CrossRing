@@ -21,8 +21,9 @@ from app.api.traffic_config import _load_configs
 
 router = APIRouter(prefix="/api/traffic/generate", tags=["流量生成"])
 
-# 输出目录
-OUTPUT_DIR = Path(__file__).parent.parent.parent / "data" / "generated_traffic"
+# 输出目录 - 指向项目根目录的traffic文件夹
+# Path: web/backend/app/api/traffic_generate.py -> 需要5个parent到达CrossRing根目录
+OUTPUT_DIR = Path(__file__).parent.parent.parent.parent.parent / "traffic"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -32,6 +33,7 @@ class TrafficGenerateRequest(BaseModel):
     mode: str = Field(..., description="流量模式: noc 或 d2d")
     split_by_source: bool = Field(default=False, description="是否按源IP分割")
     random_seed: int = Field(default=42, description="随机种子")
+    filename: Optional[str] = Field(default=None, description="自定义文件名（不含扩展名）")
 
 
 class TrafficGenerateResponse(BaseModel):
@@ -55,20 +57,40 @@ def _build_traffic_configs_for_engine(
 
     :param topology: 拓扑类型
     :param mode: 模式 (noc/d2d)
-    :param ip_mounts: IP挂载字典 {node_id: IPMount}
+    :param ip_mounts: IP挂载字典 {node_id: [IPMount]}
     :param traffic_configs: 流量配置字典 {config_id: TrafficConfig}
     :return: 引擎配置列表
     """
-    # 创建 IP类型 -> 节点位置 的映射
-    ip_to_positions = {}
-    for node_id, mount in ip_mounts.items():
-        ip_type = mount.ip_type
-        position = mount.position
-        coord = (position["row"], position["col"])
+    # 创建 "节点X-IP类型" -> 节点ID 的映射
+    # 同时创建 IP类型 -> 节点ID列表 的映射（用于向后兼容）
+    ip_label_to_node_id = {}
+    ip_type_to_node_ids = {}
 
-        if ip_type not in ip_to_positions:
-            ip_to_positions[ip_type] = []
-        ip_to_positions[ip_type].append(coord)
+    for node_id, mounts in ip_mounts.items():
+        # 处理列表格式
+        if isinstance(mounts, list):
+            for mount in mounts:
+                ip_type = mount.ip_type
+
+                # 格式: "节点X-IP类型"
+                ip_label = f"节点{node_id}-{ip_type}"
+                ip_label_to_node_id[ip_label] = node_id
+
+                # 同时保存IP类型映射（向后兼容）
+                if ip_type not in ip_type_to_node_ids:
+                    ip_type_to_node_ids[ip_type] = []
+                ip_type_to_node_ids[ip_type].append(node_id)
+        else:
+            # 处理旧格式（单个对象）
+            mount = mounts
+            ip_type = mount.ip_type
+
+            ip_label = f"节点{node_id}-{ip_type}"
+            ip_label_to_node_id[ip_label] = node_id
+
+            if ip_type not in ip_type_to_node_ids:
+                ip_type_to_node_ids[ip_type] = []
+            ip_type_to_node_ids[ip_type].append(node_id)
 
     engine_configs = []
 
@@ -77,15 +99,34 @@ def _build_traffic_configs_for_engine(
         src_ip = config.source_ip
         dst_ip = config.target_ip
 
-        # 检查IP是否已挂载
-        if src_ip not in ip_to_positions:
+        # 检查是新格式还是旧格式
+        # 新格式: "节点X-IP类型"
+        # 旧格式: "IP类型"
+        if src_ip in ip_label_to_node_id:
+            # 新格式: 单个节点-IP对
+            src_node_id = ip_label_to_node_id[src_ip]
+            src_ip_type = src_ip.split('-')[1]  # 提取IP类型
+            src_map = {src_ip_type: [src_node_id]}
+        elif src_ip in ip_type_to_node_ids:
+            # 旧格式: IP类型
+            src_map = {src_ip: ip_type_to_node_ids[src_ip]}
+        else:
             raise ValueError(f"源IP {src_ip} 未挂载到拓扑")
-        if dst_ip not in ip_to_positions:
+
+        if dst_ip in ip_label_to_node_id:
+            # 新格式: 单个节点-IP对
+            dst_node_id = ip_label_to_node_id[dst_ip]
+            dst_ip_type = dst_ip.split('-')[1]  # 提取IP类型
+            dst_map = {dst_ip_type: [dst_node_id]}
+        elif dst_ip in ip_type_to_node_ids:
+            # 旧格式: IP类型
+            dst_map = {dst_ip: ip_type_to_node_ids[dst_ip]}
+        else:
             raise ValueError(f"目标IP {dst_ip} 未挂载到拓扑")
 
         engine_config = {
-            "src_map": {src_ip: ip_to_positions[src_ip]},
-            "dst_map": {dst_ip: ip_to_positions[dst_ip]},
+            "src_map": src_map,
+            "dst_map": dst_map,
             "speed": config.speed_gbps,
             "burst": config.burst_length,
             "req_type": config.request_type,
@@ -139,8 +180,18 @@ async def generate_traffic(request: TrafficGenerateRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
     # 生成输出文件路径
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = OUTPUT_DIR / f"traffic_{request.topology}_{request.mode}_{timestamp}.csv"
+    if request.filename:
+        # 使用用户指定的文件名
+        filename = request.filename.strip()
+        # 确保文件名安全
+        filename = filename.replace("/", "_").replace("\\", "_")
+        if not filename.endswith('.txt'):
+            filename += '.txt'
+        output_file = OUTPUT_DIR / filename
+    else:
+        # 使用默认时间戳文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = OUTPUT_DIR / f"traffic_{timestamp}.txt"
 
     try:
         # 调用流量生成引擎

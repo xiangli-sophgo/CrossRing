@@ -11,6 +11,8 @@ export interface TrafficConfig {
   request_type: 'R' | 'W'
   end_time_ns: number
   created_at: string
+  source_die?: number
+  target_die?: number
 }
 
 export interface TrafficConfigCreate {
@@ -55,6 +57,7 @@ export interface TrafficGenerateRequest {
   mode: string
   split_by_source: boolean
   random_seed: number
+  filename?: string
 }
 
 export interface TrafficGenerateResponse {

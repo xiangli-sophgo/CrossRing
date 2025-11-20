@@ -1,0 +1,14 @@
+{
+  "ff1ad638-bb53-4311-9355-4456c51a1837": {
+    "source_ip": "节点0-gdma_0",
+    "target_ip": "节点11-ddr_0",
+    "speed_gbps": 128.0,
+    "burst_length": 4,
+    "request_type": "R",
+    "end_time_ns": 6000,
+    "id": "ff1ad638-bb53-4311-9355-4456c51a1837",
+    "topology": "5x4",
+    "mode": "noc",
+    "created_at": "2025-11-20T16:31:06.656995"
+  }
+}

@@ -88,7 +88,7 @@ class D2D_Model:
         # 创建全局RequestTracker（所有Die共享）
         network_freq = getattr(config, "NETWORK_FREQUENCY", 2.0)
         self.request_tracker = RequestTracker(network_frequency=network_freq)
-        print(f"[D2D RequestTracker] 已初始化全局请求追踪器，网络频率={network_freq} GHz")
+        # print(f"[D2D RequestTracker] 已初始化全局请求追踪器，网络频率={network_freq} GHz")
 
         # 创建D2D专用的traffic调度器（如果提供了traffic_config）
         self.d2d_traffic_scheduler = None
@@ -139,6 +139,7 @@ class D2D_Model:
         for die_id, die_model in self.dies.items():
             # 为Die设置空的traffic scheduler（D2D场景下不使用，但需要避免None）
             from src.noc.traffic_scheduler import TrafficScheduler
+
             die_model.traffic_scheduler = TrafficScheduler(die_model.config, traffic_file_path)
             die_model.traffic_scheduler.set_verbose(False)
 
@@ -146,12 +147,13 @@ class D2D_Model:
             required_ips = die_ip_requirements.get(die_id, set())
 
             # 添加D2D接口需求
-            if hasattr(self.config, 'D2D_CONNECTIONS') and self.config.D2D_CONNECTIONS:
+            if hasattr(self.config, "D2D_CONNECTIONS") and self.config.D2D_CONNECTIONS:
                 d2d_ips = self._get_d2d_ips_for_die(die_id)
                 required_ips.update(d2d_ips)
 
             # 更新config的CH_NAME_LIST和CHANNEL_SPEC
             from src.utils.traffic_ip_extractor import TrafficIPExtractor
+
             ip_types = TrafficIPExtractor.get_unique_ip_types(required_ips)
             die_model.config.update_channel_list_from_ips(ip_types)
             die_model.config.infer_channel_spec_from_ips(ip_types)
@@ -172,6 +174,9 @@ class D2D_Model:
 
             # 重新关联D2D_Sys和接口
             self._add_d2d_nodes_to_die(die_model, die_id)
+
+        # 重新设置跨Die连接（因为IP接口和d2d_systems被重新创建）
+        self._setup_cross_die_connections()
 
     def setup_debug(self, trace_packets: List[int] = None, update_interval: float = 0.0) -> None:
         """
@@ -2254,13 +2259,13 @@ class D2D_Model:
             if not os.path.exists(file_path):
                 continue
 
-            with open(file_path, 'r') as f:
+            with open(file_path, "r") as f:
                 for line in f:
                     line = line.strip()
-                    if not line or line.startswith('#'):
+                    if not line or line.startswith("#"):
                         continue
 
-                    parts = [p.strip() for p in line.split(',')]
+                    parts = [p.strip() for p in line.split(",")]
 
                     # D2D格式: inject_time, src_die, src_node, src_ip, dst_die, dst_node, dst_ip, req_type, burst
                     if len(parts) >= 9:
@@ -2297,7 +2302,7 @@ class D2D_Model:
         """
         d2d_ips = set()
 
-        if not hasattr(self.config, 'D2D_CONNECTIONS'):
+        if not hasattr(self.config, "D2D_CONNECTIONS"):
             return d2d_ips
 
         # D2D_CONNECTIONS格式: [[src_die, src_node, dst_die, dst_node], ...]
@@ -2386,17 +2391,13 @@ class D2D_Model:
             for ip_type in ip_types:
                 # 如果该IP类型还没有buffer，创建完整的buffer结构
                 if ip_type not in network.IQ_channel_buffer:
-                    network.IQ_channel_buffer[ip_type] = defaultdict(
-                        lambda: deque(maxlen=network.config.IQ_CH_FIFO_DEPTH)
-                    )
+                    network.IQ_channel_buffer[ip_type] = defaultdict(lambda: deque(maxlen=network.config.IQ_CH_FIFO_DEPTH))
                     network.IQ_channel_buffer_pre[ip_type] = {}
                     network.IQ_arbiter_input_fifo[ip_type] = defaultdict(lambda: deque(maxlen=2))
                     network.IQ_arbiter_input_fifo_pre[ip_type] = {}
 
                 if ip_type not in network.EQ_channel_buffer:
-                    network.EQ_channel_buffer[ip_type] = defaultdict(
-                        lambda: deque(maxlen=network.config.EQ_CH_FIFO_DEPTH)
-                    )
+                    network.EQ_channel_buffer[ip_type] = defaultdict(lambda: deque(maxlen=network.config.EQ_CH_FIFO_DEPTH))
                     network.EQ_channel_buffer_pre[ip_type] = {}
 
             # 为所有节点初始化pre buffer和仲裁FIFO（模仿initialize_buffers的行为）

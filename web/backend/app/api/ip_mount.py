@@ -108,8 +108,8 @@ async def mount_ip(request: IPMountRequest):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-    # 保存配置
-    _save_mounts(request.topology, mounts)
+    # 不自动保存，等待用户手动保存
+    # _save_mounts(request.topology, mounts)
 
     return IPMountResponse(
         success=True,
@@ -165,8 +165,8 @@ async def batch_mount_ip(request: BatchMountRequest):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-    # 保存配置
-    _save_mounts(request.topology, mounts)
+    # 不自动保存，等待用户手动保存
+    # _save_mounts(request.topology, mounts)
 
     return IPMountResponse(
         success=True,
@@ -232,8 +232,8 @@ async def delete_mount(topology: str, node_id: int, ip_type: str = None):
         deleted_mounts = mounts.pop(node_id)
         deleted_info = {"node_id": node_id, "ips": [m.ip_type for m in deleted_mounts]}
 
-    # 保存配置
-    _save_mounts(topology, mounts)
+    # 不自动保存，等待用户手动保存
+    # _save_mounts(topology, mounts)
 
     return {
         "success": True,
@@ -254,11 +254,118 @@ async def clear_all_mounts(topology: str):
     count = len(ip_mounts[topology])
     ip_mounts[topology] = {}
 
-    # 保存配置（空配置）
-    _save_mounts(topology, {})
+    # 不自动保存，等待用户手动保存
+    # _save_mounts(topology, {})
 
     return {
         "success": True,
         "message": f"成功清空 {count} 个IP挂载",
         "cleared": count
+    }
+
+
+@router.get("/files/list")
+async def list_mount_files():
+    """
+    列出所有可用的IP挂载配置文件
+    """
+    files = []
+    if CONFIG_DIR.exists():
+        for file_path in CONFIG_DIR.glob("*.json"):
+            files.append({
+                "filename": file_path.name,
+                "path": str(file_path),
+                "size": file_path.stat().st_size,
+                "modified": file_path.stat().st_mtime
+            })
+
+    # 按修改时间倒序排列
+    files.sort(key=lambda x: x["modified"], reverse=True)
+
+    return {
+        "files": files,
+        "total": len(files),
+        "directory": str(CONFIG_DIR)
+    }
+
+
+@router.post("/{topology}/load")
+async def load_mounts_from_file(topology: str, request: dict):
+    """
+    从指定文件加载IP挂载配置
+    """
+    filename = request.get("filename", "").strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+
+    # 确保文件名安全
+    filename = filename.replace("/", "_").replace("\\", "_")
+    if not filename.endswith(".json"):
+        filename += ".json"
+
+    file_path = CONFIG_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"文件 {filename} 不存在")
+
+    # 读取文件
+    with open(file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    # 转换为内存格式
+    mounts = {}
+    for k, v in data.items():
+        node_id = int(k)
+        if isinstance(v, list):
+            mounts[node_id] = [IPMount(**mount) for mount in v]
+        else:
+            mounts[node_id] = [IPMount(**v)]
+
+    # 加载到内存
+    ip_mounts[topology] = mounts
+
+    # 自动保存到当前拓扑的配置文件
+    _save_mounts(topology, mounts)
+
+    # 统计数量
+    mount_count = sum(len(v) for v in mounts.values())
+
+    return {
+        "success": True,
+        "message": f"成功从 {filename} 加载 {mount_count} 个IP挂载并保存到 {topology}.json",
+        "filename": filename,
+        "count": mount_count
+    }
+
+
+@router.post("/{topology}/save")
+async def save_mounts_to_file(topology: str, request: dict):
+    """
+    保存当前IP挂载配置到指定文件名
+    """
+    filename = request.get("filename", "").strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+
+    # 确保文件名安全（去除路径分隔符）
+    filename = filename.replace("/", "_").replace("\\", "_")
+    if not filename.endswith(".json"):
+        filename += ".json"
+
+    # 加载当前配置
+    if topology not in ip_mounts:
+        ip_mounts[topology] = _load_mounts(topology)
+
+    # 保存到指定文件名
+    config_path = CONFIG_DIR / filename
+    mounts = ip_mounts[topology]
+    data = {str(k): [m.model_dump() for m in v] for k, v in mounts.items()}
+
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    return {
+        "success": True,
+        "message": f"配置已保存到 {filename}",
+        "filename": filename,
+        "path": str(config_path)
     }

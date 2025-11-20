@@ -32,6 +32,7 @@ function App() {
   const [nodeInfoLoading, setNodeInfoLoading] = useState(false)
   const [trafficMode, setTrafficMode] = useState<'noc' | 'd2d'>('noc')
   const [mounts, setMounts] = useState<IPMount[]>([])
+  const [mountsVersion, setMountsVersion] = useState(0)
 
   // 加载可用拓扑类型
   const loadTopologies = async () => {
@@ -64,6 +65,7 @@ function App() {
     try {
       const data = await getMounts(selectedTopo)
       setMounts(data.mounts)
+      setMountsVersion(prev => prev + 1)
     } catch (error) {
       console.error('加载IP挂载失败:', error)
     }
@@ -156,7 +158,7 @@ function App() {
                   onMountsChange={loadMounts}
                 />
 
-                <Card title="流量配置与生成">
+                <Card title="数据流配置与生成" size="small">
                   <Space direction="vertical" style={{ width: '100%' }} size="middle">
                     <Space>
                       <Text>流量模式:</Text>
@@ -165,7 +167,7 @@ function App() {
                         <Option value="d2d">D2D 模式</Option>
                       </Select>
                     </Space>
-                    <TrafficConfigPanel topology={selectedTopo} mode={trafficMode} />
+                    <TrafficConfigPanel topology={selectedTopo} mode={trafficMode} mountsVersion={mountsVersion} />
                   </Space>
                 </Card>
               </Space>

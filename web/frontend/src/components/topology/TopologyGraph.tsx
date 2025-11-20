@@ -557,18 +557,12 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
                 <Col span={4} key={type}>
                   <Space>
                     <div style={{
-                      width: 40,
+                      width: 30,
                       height: 30,
                       backgroundColor: config.bg,
                       border: `2px solid ${config.border}`,
-                      borderRadius: 4,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 9,
-                      color: '#fff',
-                      fontWeight: 'bold'
-                    }}>{config.label}</div>
+                      borderRadius: 4
+                    }}></div>
                     <span>{config.label}</span>
                   </Space>
                 </Col>

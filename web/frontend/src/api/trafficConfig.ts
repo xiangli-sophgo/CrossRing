@@ -68,3 +68,26 @@ export const listGeneratedFiles = async () => {
   const response = await client.get('/api/traffic/generate/list')
   return response.data
 }
+
+export const listConfigFiles = async () => {
+  const response = await client.get('/api/traffic/config/files/list')
+  return response.data
+}
+
+export const loadConfigsFromFile = async (
+  topology: string,
+  mode: string,
+  filename: string,
+  loadMode: 'replace' | 'append'
+) => {
+  const response = await client.post(`/api/traffic/config/${topology}/${mode}/load`, {
+    filename,
+    mode: loadMode
+  })
+  return response.data
+}
+
+export const saveConfigsToFile = async (topology: string, mode: string, filename: string) => {
+  const response = await client.post(`/api/traffic/config/${topology}/${mode}/save`, { filename })
+  return response.data
+}

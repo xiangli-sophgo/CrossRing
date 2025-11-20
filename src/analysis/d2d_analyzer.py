@@ -191,8 +191,6 @@ class D2DAnalyzer:
                 packet_id=d2d_req.packet_id,
                 start_time=d2d_req.start_time_ns,
                 end_time=d2d_req.end_time_ns,
-                rn_end_time=d2d_req.end_time_ns,
-                sn_end_time=d2d_req.end_time_ns,
                 req_type=d2d_req.req_type,
                 source_node=d2d_req.source_node,
                 dest_node=d2d_req.target_node,
@@ -367,6 +365,12 @@ class D2DAnalyzer:
                     temp_collector = RequestCollector(network_frequency=self.network_frequency)
                     cmd_latency, data_latency, transaction_latency = temp_collector._calculate_latencies(lifecycle, timestamps)
 
+                    # 从data_flits收集绕环统计数据
+                    data_eject_attempts_h_list = [f.eject_attempts_h for f in lifecycle.data_flits]
+                    data_eject_attempts_v_list = [f.eject_attempts_v for f in lifecycle.data_flits]
+                    data_ordering_blocked_h_list = [f.ordering_blocked_eject_h for f in lifecycle.data_flits]
+                    data_ordering_blocked_v_list = [f.ordering_blocked_eject_v for f in lifecycle.data_flits]
+
                     # 转换为RequestInfo格式以便后续计算
                     from src.analysis.analyzers import RequestInfo
                     req_info = RequestInfo(
@@ -383,6 +387,10 @@ class D2DAnalyzer:
                         cmd_latency=cmd_latency if cmd_latency >= 0 else 0,
                         data_latency=data_latency if data_latency >= 0 else 0,
                         transaction_latency=transaction_latency if transaction_latency >= 0 else 0,
+                        data_eject_attempts_h_list=data_eject_attempts_h_list,
+                        data_eject_attempts_v_list=data_eject_attempts_v_list,
+                        data_ordering_blocked_h_list=data_ordering_blocked_h_list,
+                        data_ordering_blocked_v_list=data_ordering_blocked_v_list,
                     )
                     all_die_requests[die_id].append(req_info)
 
@@ -838,18 +846,18 @@ class D2DAnalyzer:
             for line in report_lines:
                 f.write(line + "\n")
 
-            # 添加每个Die的详细统计
+            # 添加每个Die的详细统计（不包含绕环比例）
             if dies and circuit_stats_data:
                 f.write("\n\n")
                 f.write("=" * 60 + "\n")
-                f.write("各Die详细统计\n")
+                f.write("各Die详细统计（D2D绕环比例见上方汇总）\n")
                 f.write("=" * 60 + "\n\n")
 
                 for die_id in sorted(circuit_stats_data["per_die"].keys()):
                     die_stats = circuit_stats_data["per_die"][die_id]
                     f.write(f"Die {die_id}:\n")
                     f.write("-" * 30 + "\n")
-                    for line in self._format_circuit_stats(die_stats, prefix="  "):
+                    for line in self._format_circuit_stats(die_stats, prefix="  ", skip_circling=True):
                         f.write(line + "\n")
                     f.write("\n")
 
@@ -1012,46 +1020,53 @@ class D2DAnalyzer:
                 "ITag_v_num": die_model.ITag_v_num_stat,
             }
 
-            # 计算绕环比例（如果Die有result_processor）
-            circling_stats = {
-                "horizontal": {"circling_flits": 0, "total_flits": 0, "circling_ratio": 0.0},
-                "vertical": {"circling_flits": 0, "total_flits": 0, "circling_ratio": 0.0},
-                "overall": {"circling_flits": 0, "total_flits": 0, "circling_ratio": 0.0},
-            }
-            if hasattr(die_model, "result_processor") and die_model.result_processor:
-                try:
-                    circling_stats = die_model.result_processor.calculate_circling_eject_stats()
-                except Exception:
-                    pass
-
-            die_stats["circling_ratio"] = circling_stats
             per_die_stats[die_id] = die_stats
 
-            # 汇总到summary
+            # 汇总到summary (不包括绕环比例)
             for key in summary_stats.keys():
                 if key == "circling_ratio":
-                    for direction in ["horizontal", "vertical", "overall"]:
-                        summary_stats["circling_ratio"][direction]["circling_flits"] += die_stats["circling_ratio"][direction]["circling_flits"]
-                        summary_stats["circling_ratio"][direction]["total_flits"] += die_stats["circling_ratio"][direction]["total_flits"]
+                    continue  # 跳过绕环比例，稍后使用全局请求计算
                 elif key in die_stats:
                     summary_stats[key] += die_stats[key]
 
-        # 计算汇总的绕环比例
-        for direction in ["horizontal", "vertical", "overall"]:
-            total = summary_stats["circling_ratio"][direction]["total_flits"]
-            circling = summary_stats["circling_ratio"][direction]["circling_flits"]
-            summary_stats["circling_ratio"][direction]["circling_ratio"] = circling / total if total > 0 else 0.0
+        # 使用全局D2D请求计算绕环比例
+        from .data_collectors import CircuitStatsCollector
+        circuit_collector = CircuitStatsCollector()
+
+        # 将all_die_requests字典合并为请求列表
+        all_requests = []
+        if isinstance(self.all_die_requests, dict):
+            for die_requests in self.all_die_requests.values():
+                all_requests.extend(die_requests)
+        else:
+            all_requests = self.all_die_requests
+
+        global_circling_stats = circuit_collector.calculate_circling_eject_stats(all_requests)
+
+        # 更新summary中的绕环统计
+        summary_stats["circling_ratio"]["horizontal"]["circling_flits"] = global_circling_stats["horizontal"]["circling_flits"]
+        summary_stats["circling_ratio"]["horizontal"]["total_flits"] = global_circling_stats["horizontal"]["total_data_flits"]
+        summary_stats["circling_ratio"]["horizontal"]["circling_ratio"] = global_circling_stats["horizontal"]["circling_ratio"]
+
+        summary_stats["circling_ratio"]["vertical"]["circling_flits"] = global_circling_stats["vertical"]["circling_flits"]
+        summary_stats["circling_ratio"]["vertical"]["total_flits"] = global_circling_stats["vertical"]["total_data_flits"]
+        summary_stats["circling_ratio"]["vertical"]["circling_ratio"] = global_circling_stats["vertical"]["circling_ratio"]
+
+        summary_stats["circling_ratio"]["overall"]["circling_flits"] = global_circling_stats["overall"]["circling_flits"]
+        summary_stats["circling_ratio"]["overall"]["total_flits"] = global_circling_stats["overall"]["total_data_flits"]
+        summary_stats["circling_ratio"]["overall"]["circling_ratio"] = global_circling_stats["overall"]["circling_ratio"]
 
         return {"per_die": per_die_stats, "summary": summary_stats}
 
     @staticmethod
-    def _format_circuit_stats(stats: Dict, prefix: str = "  ") -> List[str]:
+    def _format_circuit_stats(stats: Dict, prefix: str = "  ", skip_circling: bool = False) -> List[str]:
         """
         格式化绕环统计数据为文本行
 
         Args:
             stats: 统计数据字典
             prefix: 每行的前缀
+            skip_circling: 是否跳过绕环比例显示
 
         Returns:
             格式化的文本行列表
@@ -1068,7 +1083,7 @@ class D2DAnalyzer:
         lines.append(f"{prefix}ITag - h: {stats.get('ITag_h_num', 0)}, v: {stats.get('ITag_v_num', 0)}")
         lines.append(f"{prefix}Retry - read: {stats.get('read_retry_num', 0)}, write: {stats.get('write_retry_num', 0)}")
 
-        if "circling_ratio" in stats:
+        if not skip_circling and "circling_ratio" in stats:
             h_ratio = stats["circling_ratio"]["horizontal"]["circling_ratio"]
             v_ratio = stats["circling_ratio"]["vertical"]["circling_ratio"]
             overall_ratio = stats["circling_ratio"]["overall"]["circling_ratio"]

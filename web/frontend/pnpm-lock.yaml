@@ -45,6 +45,9 @@ importers:
       '@types/react':
         specifier: ^18.3.11
         version: 18.3.27
+      '@types/react-cytoscapejs':
+        specifier: ^1.2.6
+        version: 1.2.6
       '@types/react-dom':
         specifier: ^18.3.1
         version: 18.3.7(@types/react@18.3.27)
@@ -605,6 +608,9 @@ packages:
 
   '@types/prop-types@15.7.15':
     resolution: {integrity: sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==}
+
+  '@types/react-cytoscapejs@1.2.6':
+    resolution: {integrity: sha512-Nivfky/kuzT4BtIXpv5hV79Kfn+DUiBiftQeCvFCLUhqxz2ADgUxMYdHtxAUpfHiYZYuU9CWM8tGBTaybTH5+A==}
 
   '@types/react-dom@18.3.7':
     resolution: {integrity: sha512-MEe3UeoENYVFXzoXEWsvcpg6ZvlrFNlOQ7EOsvhI3CfAXwzPfO8Qwuxd40nepsYKqyyVQnTdEfv68q91yLcKrQ==}
@@ -2171,6 +2177,11 @@ snapshots:
   '@types/json-schema@7.0.15': {}
 
   '@types/prop-types@15.7.15': {}
+
+  '@types/react-cytoscapejs@1.2.6':
+    dependencies:
+      '@types/react': 18.3.27
+      cytoscape: 3.33.1
 
   '@types/react-dom@18.3.7(@types/react@18.3.27)':
     dependencies:

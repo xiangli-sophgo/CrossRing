@@ -27,12 +27,30 @@ export const getMounts = async (topology: string): Promise<IPMountListResponse> 
   return response.data
 }
 
-export const deleteMount = async (topology: string, nodeId: number) => {
-  const response = await client.delete(`/api/ip-mount/${topology}/nodes/${nodeId}`)
+export const deleteMount = async (topology: string, nodeId: number, ipType?: string) => {
+  const url = ipType
+    ? `/api/ip-mount/${topology}/nodes/${nodeId}?ip_type=${ipType}`
+    : `/api/ip-mount/${topology}/nodes/${nodeId}`
+  const response = await client.delete(url)
   return response.data
 }
 
 export const clearAllMounts = async (topology: string) => {
   const response = await client.delete(`/api/ip-mount/${topology}`)
+  return response.data
+}
+
+export const saveMountsToFile = async (topology: string, filename: string) => {
+  const response = await client.post(`/api/ip-mount/${topology}/save`, { filename })
+  return response.data
+}
+
+export const listMountFiles = async () => {
+  const response = await client.get('/api/ip-mount/files/list')
+  return response.data
+}
+
+export const loadMountsFromFile = async (topology: string, filename: string) => {
+  const response = await client.post(`/api/ip-mount/${topology}/load`, { filename })
   return response.data
 }
