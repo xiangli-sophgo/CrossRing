@@ -32,17 +32,23 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
     const type = ipType.split('_')[0].toLowerCase()
     switch (type) {
       case 'gdma':
-        return { bg: '#1890ff', border: '#096dd9' }
+        return { bg: '#5B8FF9', border: '#3A6FD9' }  // 蓝色
+      case 'sdma':
+        return { bg: '#5B8FF9', border: '#3A6FD9' }  // 蓝色
+      case 'cdma':
+        return { bg: '#5AD8A6', border: '#3AB886' }  // 绿色
       case 'npu':
-        return { bg: '#722ed1', border: '#531dab' }
+        return { bg: '#722ed1', border: '#531dab' }  // 紫色
       case 'ddr':
-        return { bg: '#13c2c2', border: '#08979c' }
+        return { bg: '#E8684A', border: '#C8482A' }  // 红色
+      case 'l2m':
+        return { bg: '#E8684A', border: '#C8482A' }  // 红色
       case 'pcie':
-        return { bg: '#fa8c16', border: '#d46b08' }
+        return { bg: '#fa8c16', border: '#d46b08' }  // 橙色
       case 'eth':
-        return { bg: '#52c41a', border: '#389e0d' }
+        return { bg: '#52c41a', border: '#389e0d' }  // 绿色
       default:
-        return { bg: '#eb2f96', border: '#c41d7f' }
+        return { bg: '#eb2f96', border: '#c41d7f' }  // 粉红色
     }
   }
 
@@ -77,11 +83,11 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
       const nodeMounts = mountMap.get(node.id)
       const hasMounts = nodeMounts && nodeMounts.length > 0
 
-      // 背景节点（方框）- z-index较低
+      // 背景节点（方框）
       nodes.push({
         data: {
           id: `node-${node.id}`,
-          label: hasMounts ? '' : `${node.id}`,  // 有IP时不显示节点ID
+          label: `${node.id}`,  // 始终显示节点ID
           nodeId: node.id,
           row: node.row,
           col: node.col,
@@ -93,13 +99,40 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
         },
         classes: hasMounts ? 'mounted-node' : 'unmounted',
         style: {
-          'z-index': 1
+          'z-index': 1,
+          'text-events': 'yes',
         }
       })
 
       // 为每个IP创建独立节点（IP块）- z-index较高
       if (nodeMounts && nodeMounts.length > 0) {
-        nodeMounts.forEach((mount, idx) => {
+        // IP类型分类：RN类型在第一排，SN类型在第二排
+        const rnTypes = ['gdma', 'sdma', 'cdma', 'npu', 'pcie', 'eth']
+        const snTypes = ['ddr', 'l2m']
+
+        // 对IP进行分类和排序
+        const sortedMounts = [...nodeMounts].sort((a, b) => {
+          const aType = a.ip_type.split('_')[0].toLowerCase()
+          const bType = b.ip_type.split('_')[0].toLowerCase()
+          const aNum = parseInt(a.ip_type.split('_')[1] || '0')
+          const bNum = parseInt(b.ip_type.split('_')[1] || '0')
+
+          const aIsRN = rnTypes.includes(aType)
+          const bIsRN = rnTypes.includes(bType)
+
+          // 先按类型分组（RN在前，SN在后）
+          if (aIsRN && !bIsRN) return -1
+          if (!aIsRN && bIsRN) return 1
+
+          // 同组内按编号排序
+          return aNum - bNum
+        })
+
+        // 分别统计RN和SN的数量
+        let rnCount = 0
+        let snCount = 0
+
+        sortedMounts.forEach((mount, idx) => {
           const colors = getIPTypeColor(mount.ip_type)
           // 提取IP类型缩写：gdma_0 -> G0, ddr_1 -> D1
           const parts = mount.ip_type.split('_')
@@ -107,11 +140,26 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
           const number = parts[1] || '0'
           const shortLabel = `${typeAbbr}${number}`
 
+          // 判断IP类型
+          const ipType = mount.ip_type.split('_')[0].toLowerCase()
+          const isRN = rnTypes.includes(ipType)
+
           // 计算IP块位置（在父节点内部）
           const baseX = node.col * 150 + 75
           const baseY = node.row * 150 + 75
-          const offsetX = (idx % 2) * 28 - 14  // 左右排列，间距28
-          const offsetY = Math.floor(idx / 2) * 28 - 14  // 上下排列
+
+          let offsetX, offsetY
+          if (isRN) {
+            // RN类型：第一排（上方）
+            offsetX = (rnCount % 2) * 28 - 14  // 左右排列
+            offsetY = -Math.floor(rnCount / 2) * 28 - 14  // 从上往下
+            rnCount++
+          } else {
+            // SN类型：第二排（下方）
+            offsetX = (snCount % 2) * 28 - 14  // 左右排列
+            offsetY = Math.floor(snCount / 2) * 28 + 14  // 从中间往下
+            snCount++
+          }
 
           nodes.push({
             data: {
@@ -128,10 +176,31 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
             },
             classes: 'ip-block',
             locked: true,  // 锁定IP块位置
+            selectable: false,  // 不可选中
             style: {
               'z-index': 10
             }
           })
+        })
+
+        // 添加节点编号文本层（最上层）
+        nodes.push({
+          data: {
+            id: `label-${node.id}`,
+            label: `${node.id}`,
+            parentNodeId: node.id,
+          },
+          position: {
+            x: node.col * 150 + 75,
+            y: node.row * 150 + 75,
+          },
+          classes: 'node-label',
+          locked: true,
+          grabbable: false,
+          selectable: false,
+          style: {
+            'z-index': 100
+          }
         })
       }
     })
@@ -139,7 +208,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
     // 为每条边创建两条分开的线（双向）
     const edges: any[] = []
     data.edges.forEach((edge, idx) => {
-      // 正向边
+      // 正向边 - 偏移到一侧
       edges.push({
         data: {
           id: `edge-${idx}-forward`,
@@ -147,9 +216,10 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
           target: `node-${edge.target}`,
           direction: edge.direction,
           type: edge.type,
+          offset: 1,  // 正向偏移
         }
       })
-      // 反向边
+      // 反向边 - 偏移到另一侧
       edges.push({
         data: {
           id: `edge-${idx}-backward`,
@@ -157,6 +227,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
           target: `node-${edge.source}`,
           direction: edge.direction,
           type: edge.type,
+          offset: -1,  // 反向偏移
         }
       })
     })
@@ -165,7 +236,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
   }, [data, mounts])
 
   const stylesheet: any[] = [
-    // 背景节点样式 - 固定大小的正方形容器
+    // 背景节点样式 - 固定大小的正方形容器(统一浅灰色)
     {
       selector: 'node.mounted-node, node.unmounted',
       style: {
@@ -173,15 +244,17 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
         'width': 70,
         'height': 70,
         'label': 'data(label)',
-        'text-valign': 'bottom',
+        'text-valign': 'center',
         'text-halign': 'center',
-        'text-margin-y': 5,
-        'background-color': '#f5f5f5',
+        'background-color': '#d9d9d9',
         'border-width': 2,
-        'border-color': '#8c8c8c',
-        'color': '#595959',
-        'font-size': '12px',
+        'border-color': '#bfbfbf',
+        'color': '#000000',
+        'font-size': '14px',
         'font-weight': 'bold',
+        'text-outline-width': 2,
+        'text-outline-color': '#ffffff',
+        'z-index': 20,  // 文字层级最高
       }
     },
     // IP块样式 - 独立节点
@@ -205,25 +278,30 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
         'events': 'yes',  // 允许事件
       }
     },
-    // 已挂载的父节点
+    // 节点编号文本层 - 最上层显示
     {
-      selector: '.mounted-node',
+      selector: '.node-label',
       style: {
-        'background-color': '#fafafa',
-        'border-color': '#d9d9d9',
+        'shape': 'rectangle',
+        'width': 1,
+        'height': 1,
+        'background-opacity': 0,
+        'border-width': 0,
+        'label': 'data(label)',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'color': '#000000',
+        'font-size': '14px',
+        'font-weight': 'bold',
+        'text-outline-width': 2,
+        'text-outline-color': '#ffffff',
+        'z-index': 100,
+        'events': 'no',  // 不响应事件
       }
     },
-    // 未挂载节点
+    // 选中节点（仅背景节点）
     {
-      selector: 'node.unmounted',
-      style: {
-        'background-color': '#d9d9d9',
-        'border-color': '#bfbfbf',
-      }
-    },
-    // 选中节点
-    {
-      selector: 'node:selected',
+      selector: 'node.mounted-node:selected, node.unmounted:selected',
       style: {
         'background-color': '#ff4d4f',
         'border-width': 4,
@@ -248,7 +326,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
         'opacity': 0.3,
       }
     },
-    // 基础边样式 - 两条分开的平行直线箭头
+    // 基础边样式 - 使用taxi实现平行直线箭头
     {
       selector: 'edge',
       style: {
@@ -256,19 +334,16 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
         'line-color': '#bfbfbf',
         'target-arrow-color': '#bfbfbf',
         'target-arrow-shape': 'triangle',
-        'curve-style': 'segments',
-        'segment-distances': (ele: any) => {
-          const sourceId = ele.data('source')
-          const targetId = ele.data('target')
-          const isForward = sourceId.localeCompare(targetId) < 0
-          // 正向边向一侧偏移,反向边向另一侧偏移
-          return isForward ? [8] : [-8]
+        'curve-style': 'taxi',
+        'taxi-direction': (ele: any) => {
+          return ele.data('direction') === 'horizontal' ? 'horizontal' : 'vertical'
         },
-        'segment-weights': [0.5],
+        'taxi-turn': (ele: any) => {
+          const offset = ele.data('offset') || 0
+          return offset * 8 + 'px'
+        },
         'arrow-scale': 1.0,
         'opacity': 0.7,
-        'source-endpoint': 'outside-to-node',
-        'target-endpoint': 'outside-to-node',
       }
     },
     // 高亮边
@@ -292,6 +367,12 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
 
   const handleCyInit = (cy: Cytoscape.Core) => {
     cyRef.current = cy
+
+    // 初始化后自动居中显示
+    setTimeout(() => {
+      cy.fit(undefined, 50)
+      cy.center()
+    }, 100)
 
     // 添加背景节点点击事件
     cy.on('tap', 'node.mounted-node, node.unmounted', (evt) => {
@@ -363,6 +444,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
   const handleFit = () => {
     if (cyRef.current) {
       cyRef.current.fit(undefined, 50)
+      cyRef.current.center()
     }
   }
 
@@ -381,15 +463,16 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
         })
       })
 
-      // 重置缩放和位置
+      // 重置缩放和位置并居中
       cyRef.current.fit(undefined, 50)
+      cyRef.current.center()
     }
   }
 
   if (!data) {
     return (
-      <Card style={{ height: 600 }}>
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 550 }}>
+      <Card>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 'calc(100vh - 250px)', minHeight: 750 }}>
           <span style={{ color: '#8c8c8c' }}>请选择拓扑类型</span>
         </div>
       </Card>
@@ -398,7 +481,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
 
   return (
     <>
-      <Card style={{ height: 600 }}>
+      <Card>
         <Row style={{ marginBottom: 16 }} align="middle">
           <Col span={12}>
             <Space>
@@ -420,7 +503,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
             </Space>
           </Col>
         </Row>
-        <div style={{ height: 540, border: '1px solid #d9d9d9', borderRadius: 4, background: '#fafafa' }}>
+        <div style={{ height: 'calc(100vh - 310px)', minHeight: 740, border: '1px solid #d9d9d9', borderRadius: 4, background: '#fafafa' }}>
           <CytoscapeComponent
             elements={elements}
             style={{ width: '100%', height: '100%' }}
@@ -442,32 +525,15 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
       {/* 图例 */}
       <Card title="图例" size="small">
         <Row gutter={[16, 8]}>
-          {/* 未挂载节点 - 始终显示 */}
-          <Col span={4}>
-            <Space>
-              <div style={{
-                width: 40,
-                height: 30,
-                backgroundColor: '#d9d9d9',
-                border: '2px solid #bfbfbf',
-                borderRadius: 4,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 10,
-                color: '#fff',
-                fontWeight: 'bold'
-              }}>0</div>
-              <span>未挂载</span>
-            </Space>
-          </Col>
-
           {/* 动态显示已挂载的IP类型 */}
           {(() => {
             const ipTypeColors: Record<string, { bg: string; border: string; label: string }> = {
-              'gdma': { bg: '#1890ff', border: '#096dd9', label: 'GDMA' },
+              'gdma': { bg: '#5B8FF9', border: '#3A6FD9', label: 'GDMA' },
+              'sdma': { bg: '#5B8FF9', border: '#3A6FD9', label: 'SDMA' },
+              'cdma': { bg: '#5AD8A6', border: '#3AB886', label: 'CDMA' },
               'npu': { bg: '#722ed1', border: '#531dab', label: 'NPU' },
-              'ddr': { bg: '#13c2c2', border: '#08979c', label: 'DDR' },
+              'ddr': { bg: '#E8684A', border: '#C8482A', label: 'DDR' },
+              'l2m': { bg: '#E8684A', border: '#C8482A', label: 'L2M' },
               'pcie': { bg: '#fa8c16', border: '#d46b08', label: 'PCIe' },
               'eth': { bg: '#52c41a', border: '#389e0d', label: 'ETH' },
               'other': { bg: '#eb2f96', border: '#c41d7f', label: '其他' }
@@ -509,30 +575,6 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
               )
             })
           })()}
-
-          {/* 链路类型 - 始终显示 */}
-          <Col span={6}>
-            <Space>
-              <div style={{
-                width: 40,
-                height: 6,
-                backgroundColor: '#bfbfbf',
-                borderRadius: 2,
-              }}></div>
-              <span>双向链路</span>
-            </Space>
-          </Col>
-          <Col span={6}>
-            <Space>
-              <div style={{
-                width: 40,
-                height: 6,
-                backgroundColor: '#faad14',
-                borderRadius: 2,
-              }}></div>
-              <span>高亮链路</span>
-            </Space>
-          </Col>
         </Row>
       </Card>
     </>

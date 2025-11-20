@@ -17,8 +17,8 @@ router = APIRouter(prefix="/api/ip-mount", tags=["IP挂载管理"])
 # 格式: {topology: {node_id: [IPMount]}}  # 支持一个节点多个IP
 ip_mounts: Dict[str, Dict[int, List[IPMount]]] = {}
 
-# 配置文件路径
-CONFIG_DIR = Path(__file__).parent.parent.parent / "data" / "ip_mounts"
+# 配置文件路径 - 指向项目根目录的config/ip_mounts
+CONFIG_DIR = Path(__file__).parent.parent.parent.parent.parent / "config" / "ip_mounts"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 

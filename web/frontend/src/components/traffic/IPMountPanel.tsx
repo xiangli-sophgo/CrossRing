@@ -279,6 +279,7 @@ const IPMountPanel: React.FC<IPMountPanelProps> = ({ topology, onMountsChange })
           <ApiOutlined />
           <span>IP节点挂载</span>
           <Tag color="purple">{mounts.length} 个挂载</Tag>
+          <Tag color="cyan">已自动保存到 config/ip_mounts/{topology}.json</Tag>
         </Space>
       }
       extra={
@@ -292,7 +293,7 @@ const IPMountPanel: React.FC<IPMountPanelProps> = ({ topology, onMountsChange })
             onClick={handleExport}
             disabled={mounts.length === 0}
           >
-            导出
+            导出副本
           </Button>
           <Button
             size="small"

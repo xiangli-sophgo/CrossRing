@@ -214,7 +214,18 @@ class D2DAnalyzer:
         Returns:
             Dict: 包含所有D2D分析结果的字典
         """
-        if not self.d2d_requests:
+        # 计算D2D带宽统计
+        self.d2d_stats = self.calculate_d2d_bandwidth()
+
+        # 计算延迟统计（包括跨Die和Die内部请求）
+        latency_stats = self._calculate_d2d_latency_stats()
+
+        # 检查是否有任何请求（跨Die或Die内部）
+        total_all_requests = len(self.d2d_requests)
+        if hasattr(self, 'all_die_requests'):
+            total_all_requests += sum(len(reqs) for reqs in self.all_die_requests.values())
+
+        if total_all_requests == 0:
             return {
                 "d2d_stats": self.d2d_stats,
                 "latency_stats": {},
@@ -224,31 +235,33 @@ class D2DAnalyzer:
                 "latency_distribution_figs": [],
             }
 
-        # 计算D2D带宽统计
-        self.d2d_stats = self.calculate_d2d_bandwidth()
-
-        # 计算延迟统计
-        request_infos = self._convert_d2d_to_request_info(self.d2d_requests)
-        latency_stats = self.latency_collector.calculate_latency_stats(request_infos)
-
         # 统计请求数量
         read_requests = [r for r in self.d2d_requests if r.req_type == "read"]
         write_requests = [r for r in self.d2d_requests if r.req_type == "write"]
 
         # 生成延迟分布图
         latency_distribution_figs = []
-        if latency_stats and any(latency_stats.get(cat, {}).get(req_type, {}).get("values", []) for cat in ["cmd", "data", "trans"] for req_type in ["read", "write", "mixed"]):
+
+        # 检查是否有延迟数据（只检查mixed类型）
+        has_latency_values = False
+        if latency_stats:
+            for cat in ["cmd", "data", "trans"]:
+                mixed_values = latency_stats.get(cat, {}).get("mixed", {}).get("values", [])
+                if len(mixed_values) > 0:
+                    has_latency_values = True
+                    break
+
+        if has_latency_values:
             from .latency_distribution_plotter import LatencyDistributionPlotter
 
             latency_plotter = LatencyDistributionPlotter(latency_stats, title_prefix="D2D")
 
-            # 生成直方图+CDF组合图
-            hist_cdf_fig = latency_plotter.plot_histogram_with_cdf(return_fig=True)
+            # 生成直方图
+            hist_fig = latency_plotter.plot_histogram_with_cdf(return_fig=True)
 
             # 添加到图表列表
             latency_distribution_figs = [
-                ("延迟分布", hist_cdf_fig),
-                # ("D2D延迟分布-小提琴图", violin_fig),  # 暂时隐藏
+                ("延迟分布", hist_fig),
             ]
 
         return {
@@ -322,10 +335,66 @@ class D2DAnalyzer:
         from collections import defaultdict
 
         # 第一步：收集所有IP实例名称（按Die分组）
+        # 同时收集所有请求（包括Die内部和跨Die请求）
         die_ip_instances = {}
+        all_die_requests = {}  # {die_id: [requests]}
+
         for die_id in dies.keys():
             die_ip_instances[die_id] = set()
+            all_die_requests[die_id] = []
 
+        # 从每个Die的RequestTracker收集Die内部请求
+        for die_id, die_model in dies.items():
+            if hasattr(die_model, 'request_tracker') and die_model.request_tracker:
+                completed_requests = die_model.request_tracker.get_completed_requests()
+
+                for packet_id, lifecycle in completed_requests.items():
+                    # 只收集Die内部请求（非跨Die）
+                    if lifecycle.is_cross_die:
+                        continue
+
+                    # 只收集属于该Die的请求（通过origin_die判断）
+                    if hasattr(lifecycle, 'origin_die') and lifecycle.origin_die != die_id:
+                        continue
+
+                    # 计算延迟
+                    timestamps = lifecycle.timestamps
+                    if not timestamps:
+                        timestamps = die_model.request_tracker.collect_timestamps_from_flits(packet_id)
+
+                    # 使用data_collectors的延迟计算方法
+                    from src.analysis.data_collectors import RequestCollector
+                    temp_collector = RequestCollector(network_frequency=self.network_frequency)
+                    cmd_latency, data_latency, transaction_latency = temp_collector._calculate_latencies(lifecycle, timestamps)
+
+                    # 转换为RequestInfo格式以便后续计算
+                    from src.analysis.analyzers import RequestInfo
+                    req_info = RequestInfo(
+                        packet_id=packet_id,
+                        start_time=int(lifecycle.created_cycle / self.network_frequency),
+                        end_time=int(lifecycle.completed_cycle / self.network_frequency),
+                        req_type=lifecycle.op_type,
+                        burst_length=lifecycle.burst_size,
+                        total_bytes=lifecycle.burst_size * 128,
+                        source_node=lifecycle.source,
+                        dest_node=lifecycle.destination,
+                        source_type=lifecycle.source_type,
+                        dest_type=lifecycle.dest_type,
+                        cmd_latency=cmd_latency if cmd_latency >= 0 else 0,
+                        data_latency=data_latency if data_latency >= 0 else 0,
+                        transaction_latency=transaction_latency if transaction_latency >= 0 else 0,
+                    )
+                    all_die_requests[die_id].append(req_info)
+
+                    # 收集IP类型
+                    if lifecycle.source_type:
+                        source_type = self.normalize_ip_type(lifecycle.source_type, default_fallback="other")
+                        die_ip_instances[die_id].add(source_type)
+                    if lifecycle.dest_type:
+                        dest_type = self.normalize_ip_type(lifecycle.dest_type, default_fallback="other")
+                        die_ip_instances[die_id].add(dest_type)
+
+        # 从跨Die请求中收集IP实例
         for request in self.d2d_requests:
             # 收集source_type
             if request.source_die in dies and request.source_type:
@@ -373,12 +442,19 @@ class D2DAnalyzer:
                 self.die_ip_bandwidth_data[die_id]["write"][ip_instance] = np.zeros((rows, cols))
                 self.die_ip_bandwidth_data[die_id]["total"][ip_instance] = np.zeros((rows, cols))
 
-        # 基于D2D请求计算带宽
+        # 保存all_die_requests以便延迟统计使用
+        self.all_die_requests = all_die_requests
+
+        # 计算跨Die请求带宽
         self._calculate_bandwidth_from_d2d_requests(dies)
+
+        # 计算Die内部请求带宽
+        self._calculate_bandwidth_from_die_internal_requests(dies, all_die_requests)
 
     def _calculate_bandwidth_from_d2d_requests(self, dies: Dict):
         """基于D2D请求计算各Die的IP带宽"""
         from collections import defaultdict
+
 
         # 第一步：按(die_id, source_node, source_type)分组source请求
         source_groups = defaultdict(list)
@@ -495,6 +571,70 @@ class D2DAnalyzer:
             if requests:
                 _, weighted_bw = self._calculate_bandwidth_for_group(requests)
                 self.die_ip_bandwidth_data[die_id]["total"][ip_type][row, col] += weighted_bw
+
+    def _calculate_bandwidth_from_die_internal_requests(self, dies: Dict, all_die_requests: Dict):
+        """基于Die内部请求计算各Die的IP带宽"""
+        from collections import defaultdict
+
+
+        for die_id, requests in all_die_requests.items():
+            if die_id not in dies or not requests:
+                continue
+
+
+            # 按(source_node, source_type)分组source请求
+            source_groups = defaultdict(list)
+            for req in requests:
+                if req.source_type:
+                    source_type = self.normalize_ip_type(req.source_type, default_fallback="other")
+                    key = (req.source_node, source_type)
+                    source_groups[key].append(req)
+
+            # 按(dest_node, dest_type)分组target请求
+            target_groups = defaultdict(list)
+            for req in requests:
+                if req.dest_type:
+                    dest_type = self.normalize_ip_type(req.dest_type, default_fallback="other")
+                    key = (req.dest_node, dest_type)
+                    target_groups[key].append(req)
+
+            # 处理source带宽
+            for (node, ip_type), reqs in source_groups.items():
+                row, col = self._get_physical_position(node, dies[die_id])
+
+                read_reqs = [r for r in reqs if r.req_type == "read"]
+                write_reqs = [r for r in reqs if r.req_type == "write"]
+
+                if read_reqs:
+                    _, weighted_bw = self._calculate_bandwidth_for_group(read_reqs, endpoint_type="rn")
+                    self.die_ip_bandwidth_data[die_id]["read"][ip_type][row, col] += weighted_bw
+
+                if write_reqs:
+                    _, weighted_bw = self._calculate_bandwidth_for_group(write_reqs, endpoint_type="rn")
+                    self.die_ip_bandwidth_data[die_id]["write"][ip_type][row, col] += weighted_bw
+
+                if reqs:
+                    _, weighted_bw = self._calculate_bandwidth_for_group(reqs, endpoint_type="rn")
+                    self.die_ip_bandwidth_data[die_id]["total"][ip_type][row, col] += weighted_bw
+
+            # 处理target带宽
+            for (node, ip_type), reqs in target_groups.items():
+                row, col = self._get_physical_position(node, dies[die_id])
+
+                read_reqs = [r for r in reqs if r.req_type == "read"]
+                write_reqs = [r for r in reqs if r.req_type == "write"]
+
+                if read_reqs:
+                    _, weighted_bw = self._calculate_bandwidth_for_group(read_reqs, endpoint_type="sn")
+                    self.die_ip_bandwidth_data[die_id]["read"][ip_type][row, col] += weighted_bw
+
+                if write_reqs:
+                    _, weighted_bw = self._calculate_bandwidth_for_group(write_reqs, endpoint_type="sn")
+                    self.die_ip_bandwidth_data[die_id]["write"][ip_type][row, col] += weighted_bw
+
+                if reqs:
+                    _, weighted_bw = self._calculate_bandwidth_for_group(reqs, endpoint_type="sn")
+                    self.die_ip_bandwidth_data[die_id]["total"][ip_type][row, col] += weighted_bw
 
     def _get_physical_position(self, node: int, die_model) -> tuple:
         """获取节点的物理行列位置"""
@@ -748,15 +888,16 @@ class D2DAnalyzer:
         return html_content
 
     def _calculate_d2d_latency_stats(self):
-        """计算D2D请求的延迟统计数据（cmd/data/transaction）"""
+        """计算D2D请求和Die内部请求的延迟统计数据（cmd/data/transaction）"""
         import numpy as np
 
         stats = {
-            "cmd": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
-            "data": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
-            "trans": {"read": {"sum": 0, "max": 0, "count": 0}, "write": {"sum": 0, "max": 0, "count": 0}, "mixed": {"sum": 0, "max": 0, "count": 0}},
+            "cmd": {"read": {"sum": 0, "max": 0, "count": 0, "values": []}, "write": {"sum": 0, "max": 0, "count": 0, "values": []}, "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}},
+            "data": {"read": {"sum": 0, "max": 0, "count": 0, "values": []}, "write": {"sum": 0, "max": 0, "count": 0, "values": []}, "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}},
+            "trans": {"read": {"sum": 0, "max": 0, "count": 0, "values": []}, "write": {"sum": 0, "max": 0, "count": 0, "values": []}, "mixed": {"sum": 0, "max": 0, "count": 0, "values": []}},
         }
 
+        # 统计跨Die请求（D2DRequestInfo）
         for req in self.d2d_requests:
             req_type = req.req_type
             # 延迟字段映射: D2DRequestInfo使用_ns后缀
@@ -764,13 +905,46 @@ class D2DAnalyzer:
             for lat_type, lat_attr in latency_fields:
                 if hasattr(req, lat_attr):
                     lat_val = getattr(req, lat_attr)
-                    if not np.isinf(lat_val):
+                    if not np.isinf(lat_val) and lat_val > 0:
                         stats[lat_type][req_type]["sum"] += lat_val
                         stats[lat_type][req_type]["max"] = max(stats[lat_type][req_type]["max"], lat_val)
                         stats[lat_type][req_type]["count"] += 1
+                        stats[lat_type][req_type]["values"].append(lat_val)
                         stats[lat_type]["mixed"]["sum"] += lat_val
                         stats[lat_type]["mixed"]["max"] = max(stats[lat_type]["mixed"]["max"], lat_val)
                         stats[lat_type]["mixed"]["count"] += 1
+                        stats[lat_type]["mixed"]["values"].append(lat_val)
+
+        # 统计Die内部请求（RequestInfo）
+        if hasattr(self, 'all_die_requests'):
+            for die_id, requests in self.all_die_requests.items():
+                for req in requests:
+                    req_type = req.req_type
+                    # 延迟字段映射: RequestInfo不使用_ns后缀
+                    latency_fields = [("cmd", "cmd_latency"), ("data", "data_latency"), ("trans", "transaction_latency")]
+                    for lat_type, lat_attr in latency_fields:
+                        if hasattr(req, lat_attr):
+                            lat_val = getattr(req, lat_attr)
+                            if not np.isinf(lat_val) and lat_val > 0:
+                                stats[lat_type][req_type]["sum"] += lat_val
+                                stats[lat_type][req_type]["max"] = max(stats[lat_type][req_type]["max"], lat_val)
+                                stats[lat_type][req_type]["count"] += 1
+                                stats[lat_type][req_type]["values"].append(lat_val)
+                                stats[lat_type]["mixed"]["sum"] += lat_val
+                                stats[lat_type]["mixed"]["max"] = max(stats[lat_type]["mixed"]["max"], lat_val)
+                                stats[lat_type]["mixed"]["count"] += 1
+                                stats[lat_type]["mixed"]["values"].append(lat_val)
+
+        # 计算百分位数（p95, p99）
+        for cat in ["cmd", "data", "trans"]:
+            for req_type in ["read", "write", "mixed"]:
+                values = stats[cat][req_type]["values"]
+                if len(values) > 0:
+                    stats[cat][req_type]["p95"] = np.percentile(values, 95)
+                    stats[cat][req_type]["p99"] = np.percentile(values, 99)
+                else:
+                    stats[cat][req_type]["p95"] = 0.0
+                    stats[cat][req_type]["p99"] = 0.0
 
         return stats
 

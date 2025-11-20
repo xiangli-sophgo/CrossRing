@@ -7,7 +7,7 @@ import copy
 import time
 import logging
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from src.noc.base_model import BaseModel
 from .d2d_traffic_scheduler import D2DTrafficScheduler
@@ -131,6 +131,47 @@ class D2D_Model:
         # 更新kwargs中的traffic配置，以便Die实例使用
         self.kwargs["traffic_file_path"] = traffic_file_path
         self.traffic_config = traffic_chains
+
+        # 分析全局traffic，为每个Die提取IP需求
+        die_ip_requirements = self._extract_die_ip_requirements(traffic_file_path, traffic_chains)
+
+        # 为每个Die动态创建IP接口
+        for die_id, die_model in self.dies.items():
+            # 为Die设置空的traffic scheduler（D2D场景下不使用，但需要避免None）
+            from src.noc.traffic_scheduler import TrafficScheduler
+            die_model.traffic_scheduler = TrafficScheduler(die_model.config, traffic_file_path)
+            die_model.traffic_scheduler.set_verbose(False)
+
+            # 获取该Die需要的IP列表
+            required_ips = die_ip_requirements.get(die_id, set())
+
+            # 添加D2D接口需求
+            if hasattr(self.config, 'D2D_CONNECTIONS') and self.config.D2D_CONNECTIONS:
+                d2d_ips = self._get_d2d_ips_for_die(die_id)
+                required_ips.update(d2d_ips)
+
+            # 更新config的CH_NAME_LIST和CHANNEL_SPEC
+            from src.utils.traffic_ip_extractor import TrafficIPExtractor
+            ip_types = TrafficIPExtractor.get_unique_ip_types(required_ips)
+            die_model.config.update_channel_list_from_ips(ip_types)
+            die_model.config.infer_channel_spec_from_ips(ip_types)
+
+            # 创建IP接口
+            die_model.ip_modules = {}
+            for node_id, ip_type in required_ips:
+                self._create_ip_interface_for_die(die_model, ip_type, node_id)
+
+            # 为所有IP接口设置request_tracker
+            for ip_interface in die_model.ip_modules.values():
+                ip_interface.request_tracker = die_model.request_tracker
+
+            # 重新初始化Network buffers（包括round_robin队列）
+            die_model.req_network.initialize_buffers()
+            die_model.rsp_network.initialize_buffers()
+            die_model.data_network.initialize_buffers()
+
+            # 重新关联D2D_Sys和接口
+            self._add_d2d_nodes_to_die(die_model, die_id)
 
     def setup_debug(self, trace_packets: List[int] = None, update_interval: float = 0.0) -> None:
         """
@@ -320,13 +361,6 @@ class D2D_Model:
 
             # 共享全局RequestTracker（关键！所有Die使用同一个tracker）
             die_model.request_tracker = self.request_tracker
-
-            # 使用新的setup方法配置流量调度器
-            if self.traffic_config:
-                die_model.setup_traffic_scheduler(
-                    traffic_file_path=self.kwargs.get("traffic_file_path", "../traffic/"),
-                    traffic_chains=self.traffic_config,
-                )
 
             # 使用新的setup方法配置结果分析（D2D模式下禁用单个Die的结果保存）
             die_model.setup_result_analysis(
@@ -2187,3 +2221,190 @@ class D2D_Model:
                 trace_sleep_time = self.kwargs.get("d2d_trace_sleep", 0)
                 if trace_sleep_time > 0:
                     time.sleep(trace_sleep_time)
+
+    # ==================== IP Management Helpers ====================
+
+    def _extract_die_ip_requirements(self, traffic_file_path: str, traffic_chains: List[List[str]]) -> Dict[int, Set[Tuple[int, str]]]:
+        """
+        从全局traffic文件中提取各Die的IP需求
+
+        Args:
+            traffic_file_path: traffic文件基础路径
+            traffic_chains: traffic文件链配置
+
+        Returns:
+            字典 {die_id: Set[(node_id, ip_type)]}
+        """
+        import os
+        from src.utils.traffic_ip_extractor import TrafficIPExtractor
+
+        die_ip_requirements = {i: set() for i in range(self.num_dies)}
+
+        # 收集所有traffic文件
+        traffic_files = []
+        for chain in traffic_chains:
+            if isinstance(chain, list):
+                for file_name in chain:
+                    traffic_files.append(os.path.join(traffic_file_path, file_name))
+            else:
+                traffic_files.append(os.path.join(traffic_file_path, chain))
+
+        # 解析每个traffic文件
+        for file_path in traffic_files:
+            if not os.path.exists(file_path):
+                continue
+
+            with open(file_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+
+                    parts = [p.strip() for p in line.split(',')]
+
+                    # D2D格式: inject_time, src_die, src_node, src_ip, dst_die, dst_node, dst_ip, req_type, burst
+                    if len(parts) >= 9:
+                        try:
+                            src_die = int(parts[1])
+                            src_node = int(parts[2])
+                            src_ip = parts[3].strip()
+                            dst_die = int(parts[4])
+                            dst_node = int(parts[5])
+                            dst_ip = parts[6].strip()
+
+                            # 为源Die添加源IP
+                            if src_die < self.num_dies:
+                                die_ip_requirements[src_die].add((src_node, src_ip))
+
+                            # 为目标Die添加目标IP
+                            if dst_die < self.num_dies:
+                                die_ip_requirements[dst_die].add((dst_node, dst_ip))
+
+                        except (ValueError, IndexError):
+                            continue
+
+        return die_ip_requirements
+
+    def _get_d2d_ips_for_die(self, die_id: int) -> Set[Tuple[int, str]]:
+        """
+        获取指定Die需要的D2D接口
+
+        Args:
+            die_id: Die ID
+
+        Returns:
+            Set[(node_id, ip_type)]
+        """
+        d2d_ips = set()
+
+        if not hasattr(self.config, 'D2D_CONNECTIONS'):
+            return d2d_ips
+
+        # D2D_CONNECTIONS格式: [[src_die, src_node, dst_die, dst_node], ...]
+        for connection in self.config.D2D_CONNECTIONS:
+            src_die, src_node, dst_die, dst_node = connection
+
+            # 如果该Die参与此连接，添加D2D接口
+            if src_die == die_id:
+                d2d_ips.add((src_node, "d2d_rn_0"))
+                d2d_ips.add((src_node, "d2d_sn_0"))
+
+            if dst_die == die_id:
+                d2d_ips.add((dst_node, "d2d_rn_0"))
+                d2d_ips.add((dst_node, "d2d_sn_0"))
+
+        return d2d_ips
+
+    def _create_ip_interface_for_die(self, die_model, ip_type: str, node_id: int):
+        """
+        为指定Die创建单个IP接口
+
+        Args:
+            die_model: Die的BaseModel实例
+            ip_type: IP类型 (如"gdma_0", "d2d_rn_0")
+            node_id: 节点ID
+        """
+        from src.noc.components.ip_interface import IPInterface
+
+        # 避免重复创建
+        if (ip_type, node_id) in die_model.ip_modules:
+            return
+
+        # 根据IP类型创建相应的接口
+        if ip_type == "d2d_rn_0":
+            from src.d2d.components import D2D_RN_Interface
+
+            die_model.ip_modules[(ip_type, node_id)] = D2D_RN_Interface(
+                ip_type,
+                node_id,
+                die_model.config,
+                die_model.req_network,
+                die_model.rsp_network,
+                die_model.data_network,
+                die_model.routes,
+            )
+        elif ip_type == "d2d_sn_0":
+            from src.d2d.components import D2D_SN_Interface
+
+            die_model.ip_modules[(ip_type, node_id)] = D2D_SN_Interface(
+                ip_type,
+                node_id,
+                die_model.config,
+                die_model.req_network,
+                die_model.rsp_network,
+                die_model.data_network,
+                die_model.routes,
+            )
+        else:
+            # 普通IP接口
+            die_model.ip_modules[(ip_type, node_id)] = IPInterface(
+                ip_type,
+                node_id,
+                die_model.config,
+                die_model.req_network,
+                die_model.rsp_network,
+                die_model.data_network,
+                die_model.routes,
+            )
+
+    def _initialize_network_buffers_for_ips(self, die_model, required_ips: Set[Tuple[int, str]]):
+        """
+        为新创建的IP接口初始化Network缓冲区
+
+        Args:
+            die_model: Die的BaseModel实例
+            required_ips: IP需求集合 Set[(node_id, ip_type)]
+        """
+        from collections import deque, defaultdict
+
+        # 提取所有IP类型
+        ip_types = set(ip_type for _, ip_type in required_ips)
+
+        # 为每个network初始化buffer
+        for network in [die_model.req_network, die_model.rsp_network, die_model.data_network]:
+            # 为每个IP类型创建buffer结构
+            for ip_type in ip_types:
+                # 如果该IP类型还没有buffer，创建完整的buffer结构
+                if ip_type not in network.IQ_channel_buffer:
+                    network.IQ_channel_buffer[ip_type] = defaultdict(
+                        lambda: deque(maxlen=network.config.IQ_CH_FIFO_DEPTH)
+                    )
+                    network.IQ_channel_buffer_pre[ip_type] = {}
+                    network.IQ_arbiter_input_fifo[ip_type] = defaultdict(lambda: deque(maxlen=2))
+                    network.IQ_arbiter_input_fifo_pre[ip_type] = {}
+
+                if ip_type not in network.EQ_channel_buffer:
+                    network.EQ_channel_buffer[ip_type] = defaultdict(
+                        lambda: deque(maxlen=network.config.EQ_CH_FIFO_DEPTH)
+                    )
+                    network.EQ_channel_buffer_pre[ip_type] = {}
+
+            # 为所有节点初始化pre buffer和仲裁FIFO（模仿initialize_buffers的行为）
+            for ip_type in ip_types:
+                for node_pos in range(network.config.NUM_NODE):
+                    if node_pos not in network.IQ_channel_buffer_pre[ip_type]:
+                        network.IQ_channel_buffer_pre[ip_type][node_pos] = None
+                    if node_pos not in network.EQ_channel_buffer_pre[ip_type]:
+                        network.EQ_channel_buffer_pre[ip_type][node_pos] = None
+                    if node_pos not in network.IQ_arbiter_input_fifo_pre[ip_type]:
+                        network.IQ_arbiter_input_fifo_pre[ip_type][node_pos] = None

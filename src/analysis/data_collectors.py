@@ -420,8 +420,6 @@ class RequestCollector:
             # 计算时间
             start_time_ns = int(lifecycle.created_cycle / self.network_frequency)
             end_time_ns = int(lifecycle.completed_cycle / self.network_frequency)
-            rn_end_time_ns = self._calculate_rn_end_time(lifecycle, timestamps)
-            sn_end_time_ns = self._calculate_sn_end_time(lifecycle, timestamps)
 
             # 从flit获取D2D节点信息
             first_flit = None
@@ -448,8 +446,6 @@ class RequestCollector:
                 data_bytes=lifecycle.burst_size * 128,
                 start_time_ns=start_time_ns,
                 end_time_ns=end_time_ns,
-                rn_end_time_ns=rn_end_time_ns,
-                sn_end_time_ns=sn_end_time_ns,
                 cmd_latency_ns=cmd_latency,
                 data_latency_ns=data_latency,
                 transaction_latency_ns=transaction_latency,

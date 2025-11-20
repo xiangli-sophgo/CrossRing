@@ -799,19 +799,8 @@ def render_ip_mount_section():
     st.markdown("---")
     st.subheader("拓扑图")
 
-    # 计算链路带宽（从配置区域获取选项）
-    link_bandwidth = None
-    show_bandwidth = st.session_state.get("show_link_bandwidth", False)
-    if show_bandwidth:
-        routing_type = st.session_state.get("bandwidth_routing_type", "XY")
-        configs = get_cached_configs(st.session_state.config_manager, st.session_state.config_version)
-        if configs and st.session_state.node_ips:
-            try:
-                from src.traffic_process.traffic_gene.static_bandwidth_analyzer import compute_link_bandwidth
-
-                link_bandwidth = compute_link_bandwidth(topo_type=st.session_state.topo_type, node_ips=st.session_state.node_ips, configs=configs, routing_type=routing_type)
-            except Exception as e:
-                show_error(f"带宽计算失败: {str(e)}")
+    # 获取已计算的链路带宽（从session_state缓存中读取）
+    link_bandwidth = st.session_state.get("cached_link_bandwidth", None)
 
     # 绘制拓扑图
     visualizer = get_topology_visualizer(st.session_state.topo_type)
@@ -871,9 +860,7 @@ def render_config_section():
         st.warning("请先在拓扑图中挂载IP到节点")
     else:
         # 配置模式选择
-        config_mode = st.radio(
-            "配置模式", ["具体配置", "批量配置"], horizontal=True, help="具体配置: 精确指定某个节点的IP到另一个节点的IP; 批量配置: 按IP类型配置(如所有gdma到所有ddr)"
-        )
+        config_mode = st.radio("配置模式", ["具体配置", "批量配置"], horizontal=True, help="具体配置: 精确指定某个节点的IP到另一个节点的IP; 批量配置: 按IP类型配置(如所有gdma到所有ddr)")
 
         # D2D模式的Die对选择
         if st.session_state.traffic_mode == "D2D":
@@ -1153,11 +1140,36 @@ def render_config_section():
 
     # 带宽计算选项（放在添加配置下方）
     mini_divider()
-    if st.button("计算静态链路带宽", use_container_width=True, type="primary", help="基于当前配置计算静态链路带宽"):
-        st.session_state.show_link_bandwidth = True
+    # 判断是否为D2D模式
+    is_d2d_mode = any(
+        getattr(cfg, 'src_die', 0) != getattr(cfg, 'dst_die', 0)
+        for cfg in st.session_state.config_manager.configs
+    )
+    routing_type = st.selectbox("路由算法", ["XY", "YX"], index=0, key="bandwidth_routing_type", help="XY: 先水平后垂直; YX: 先垂直后水平")
 
-    if st.session_state.get("show_link_bandwidth", False):
-        routing_type = st.selectbox("路由算法", ["XY", "YX"], index=0, key="bandwidth_routing_type", help="XY: 先水平后垂直; YX: 先垂直后水平")
+    if st.button(
+        "计算静态链路带宽",
+        use_container_width=True,
+        type="primary",
+        disabled=is_d2d_mode,
+        help="D2D模式暂不支持静态链路带宽计算" if is_d2d_mode else "基于当前配置计算静态链路带宽"
+    ):
+        # 执行带宽计算
+        configs = get_cached_configs(st.session_state.config_manager, st.session_state.config_version)
+        if configs and st.session_state.node_ips:
+            try:
+                from src.traffic_process.traffic_gene.static_bandwidth_analyzer import compute_link_bandwidth
+                link_bandwidth = compute_link_bandwidth(
+                    topo_type=st.session_state.topo_type,
+                    node_ips=st.session_state.node_ips,
+                    configs=configs,
+                    routing_type=routing_type
+                )
+                st.session_state.cached_link_bandwidth = link_bandwidth
+                st.success("静态链路带宽计算完成！")
+                st.rerun()
+            except Exception as e:
+                st.error(f"带宽计算失败: {str(e)}")
 
 
 def render_config_list():
@@ -1168,13 +1180,16 @@ def render_config_list():
     configs = get_cached_configs(st.session_state.config_manager, st.session_state.config_version)
 
     # 操作按钮行
-    col_btn1, col_btn2, col_spacer = st.columns([1, 1, 8])
+    col_btn1, col_btn2, col_btn3, col_spacer = st.columns([1, 1, 1, 7])
     with col_btn1:
         if st.button("保存配置", use_container_width=True, disabled=not configs):
             st.session_state.show_save_config_dialog = True
     with col_btn2:
         if st.button("加载配置", use_container_width=True):
             st.session_state.show_load_config_dialog = True
+    with col_btn3:
+        if st.button("清空所有配置", use_container_width=True, disabled=not configs, type="secondary"):
+            st.session_state.show_clear_all_dialog = True
 
     # 保存配置对话框
     if st.session_state.get("show_save_config_dialog", False):
@@ -1236,7 +1251,7 @@ def render_config_list():
 
     # 加载配置对话框
     if st.session_state.get("show_load_config_dialog", False):
-        st.markdown('<div class="dialog-container">', unsafe_allow_html=True)
+        # st.markdown('<div class="dialog-container">', unsafe_allow_html=True)
         st.markdown("**加载数据流配置**")
 
         # 加载模式选择
@@ -1336,6 +1351,27 @@ def render_config_list():
 
         st.markdown("</div>", unsafe_allow_html=True)
 
+    # 清空所有配置对话框
+    if st.session_state.get("show_clear_all_dialog", False):
+        st.markdown("**清空所有配置**")
+        st.warning(f"确定要清空所有 {len(configs)} 个配置吗？此操作不可恢复！")
+
+        col_confirm, col_cancel = st.columns(2)
+        with col_confirm:
+            if st.button("确认清空", use_container_width=True, type="primary", key="clear_all_confirm"):
+                st.session_state.config_manager.configs.clear()
+                st.session_state.config_version += 1
+                st.session_state.show_clear_all_dialog = False
+                # 清空缓存的带宽计算结果
+                if "cached_link_bandwidth" in st.session_state:
+                    del st.session_state.cached_link_bandwidth
+                st.success("已清空所有配置")
+                st.rerun()
+        with col_cancel:
+            if st.button("取消", use_container_width=True, key="clear_all_cancel"):
+                st.session_state.show_clear_all_dialog = False
+                st.rerun()
+
     # 配置列表显示
     if configs:
         # 简化的IP摘要函数
@@ -1394,9 +1430,7 @@ def render_config_list():
                         with cols[j]:
                             with st.container(border=True):
                                 # 简化为单行显示
-                                st.markdown(
-                                    f"**#{config.config_id}** {src_summary}→{dst_summary} | " f"{config.end_time}ns | {config.speed}GB/s | B{config.burst} | {config.req_type}"
-                                )
+                                st.markdown(f"**#{config.config_id}** {src_summary}→{dst_summary} | " f"{config.end_time}ns | {config.speed}GB/s | B{config.burst} | {config.req_type}")
                                 st.button("删除", key=f"del_bottom_{config.config_id}", use_container_width=True, on_click=delete_config_callback, args=(config.config_id,))
     else:
         st.info("暂无配置，请添加配置或加载已保存的配置")

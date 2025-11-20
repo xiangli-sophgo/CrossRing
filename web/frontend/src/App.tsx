@@ -142,7 +142,7 @@ function App() {
 
               {/* 节点信息 */}
               {topoData && (
-                <NodeInfoPanel nodeInfo={nodeInfo} loading={nodeInfoLoading} />
+                <NodeInfoPanel nodeInfo={nodeInfo} loading={nodeInfoLoading} mounts={mounts} />
               )}
             </Space>
           </Col>

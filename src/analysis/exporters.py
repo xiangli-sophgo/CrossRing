@@ -1162,21 +1162,24 @@ class ReportGenerator:
                     write_matrix = write_data.get(ip_instance)
                     total_matrix = total_data.get(ip_instance)
 
-                    # 计算该IP实例的总带宽（矩阵中所有非零值的和）
+                    # 计算该IP实例的平均带宽（矩阵中所有非零值的平均）
                     if read_matrix is not None:
-                        read_bw = float(read_matrix.sum())
-                        if read_bw > 0.001:
-                            all_dies_ip_type_groups[ip_type]["read"].append(read_bw)
+                        non_zero_values = read_matrix[read_matrix > 0.001]
+                        if len(non_zero_values) > 0:
+                            read_avg = float(non_zero_values.mean())
+                            all_dies_ip_type_groups[ip_type]["read"].append(read_avg)
 
                     if write_matrix is not None:
-                        write_bw = float(write_matrix.sum())
-                        if write_bw > 0.001:
-                            all_dies_ip_type_groups[ip_type]["write"].append(write_bw)
+                        non_zero_values = write_matrix[write_matrix > 0.001]
+                        if len(non_zero_values) > 0:
+                            write_avg = float(non_zero_values.mean())
+                            all_dies_ip_type_groups[ip_type]["write"].append(write_avg)
 
                     if total_matrix is not None:
-                        total_bw = float(total_matrix.sum())
-                        if total_bw > 0.001:
-                            all_dies_ip_type_groups[ip_type]["total"].append(total_bw)
+                        non_zero_values = total_matrix[total_matrix > 0.001]
+                        if len(non_zero_values) > 0:
+                            total_avg = float(non_zero_values.mean())
+                            all_dies_ip_type_groups[ip_type]["total"].append(total_avg)
 
             # 显示所有Die的整体平均带宽
             if all_dies_ip_type_groups:
@@ -1237,16 +1240,30 @@ class ReportGenerator:
         if circuit_stats:
             summary = circuit_stats.get("summary", circuit_stats)
             html_parts.append('<div class="report-section">')
-            html_parts.append("<h3>绕环与Tag统计（汇总）</h3>")
+            html_parts.append("<h3>绕环与Tag统计</h3>")
+
+            # 第一个表格：Tag统计
             html_parts.append('<table class="report-table">')
             html_parts.append("<tbody>")
-
             html_parts.append(f'<tr><td>ITag</td><td class="num-cell">横向: {summary.get("ITag_h_num", 0)}</td><td class="num-cell">纵向: {summary.get("ITag_v_num", 0)}</td></tr>')
             html_parts.append(f'<tr><td>RB ETag</td><td class="num-cell">T1: {summary.get("RB_ETag_T1_num", 0)}</td><td class="num-cell">T0: {summary.get("RB_ETag_T0_num", 0)}</td></tr>')
             html_parts.append(f'<tr><td>EQ ETag</td><td class="num-cell">T1: {summary.get("EQ_ETag_T1_num", 0)}</td><td class="num-cell">T0: {summary.get("EQ_ETag_T0_num", 0)}</td></tr>')
-
             html_parts.append("</tbody>")
             html_parts.append("</table>")
+
+            # 第二个表格：绕环比例统计
+            circling_ratio = summary.get("circling_ratio", {})
+            if circling_ratio:
+                h_ratio = circling_ratio.get("horizontal", {}).get("circling_ratio", 0.0) * 100
+                v_ratio = circling_ratio.get("vertical", {}).get("circling_ratio", 0.0) * 100
+                overall_ratio = circling_ratio.get("overall", {}).get("circling_ratio", 0.0) * 100
+
+                html_parts.append('<table class="report-table">')
+                html_parts.append("<tbody>")
+                html_parts.append(f'<tr><td>绕环比例</td><td class="num-cell">横向: {h_ratio:.2f}%</td><td class="num-cell">纵向: {v_ratio:.2f}%</td><td class="num-cell">总体: {overall_ratio:.2f}%</td></tr>')
+                html_parts.append("</tbody>")
+                html_parts.append("</table>")
+
             html_parts.append("</div>")
 
         return "\n".join(html_parts)
@@ -1357,14 +1374,14 @@ class ReportGenerator:
         lines = []
 
         # Circuits统计
-        lines.append(f"{prefix}Circuits req  - h: {stats.get('req_circuits_h', 0)}, v: {stats.get('req_circuits_v', 0)}")
-        lines.append(f"{prefix}Circuits rsp  - h: {stats.get('rsp_circuits_h', 0)}, v: {stats.get('rsp_circuits_v', 0)}")
-        lines.append(f"{prefix}Circuits data - h: {stats.get('data_circuits_h', 0)}, v: {stats.get('data_circuits_v', 0)}")
+        lines.append(f"{prefix}Circuits req  - h: {stats.get('circuits_req_h', 0)}, v: {stats.get('circuits_req_v', 0)}")
+        lines.append(f"{prefix}Circuits rsp  - h: {stats.get('circuits_rsp_h', 0)}, v: {stats.get('circuits_rsp_v', 0)}")
+        lines.append(f"{prefix}Circuits data - h: {stats.get('circuits_data_h', 0)}, v: {stats.get('circuits_data_v', 0)}")
 
         # Wait cycles统计
-        lines.append(f"{prefix}Wait cycle req  - h: {stats.get('req_wait_cycles_h', 0)}, v: {stats.get('req_wait_cycles_v', 0)}")
-        lines.append(f"{prefix}Wait cycle rsp  - h: {stats.get('rsp_wait_cycles_h', 0)}, v: {stats.get('rsp_wait_cycles_v', 0)}")
-        lines.append(f"{prefix}Wait cycle data - h: {stats.get('data_wait_cycles_h', 0)}, v: {stats.get('data_wait_cycles_v', 0)}")
+        lines.append(f"{prefix}Wait cycle req  - h: {stats.get('wait_cycle_req_h', 0)}, v: {stats.get('wait_cycle_req_v', 0)}")
+        lines.append(f"{prefix}Wait cycle rsp  - h: {stats.get('wait_cycle_rsp_h', 0)}, v: {stats.get('wait_cycle_rsp_v', 0)}")
+        lines.append(f"{prefix}Wait cycle data - h: {stats.get('wait_cycle_data_h', 0)}, v: {stats.get('wait_cycle_data_v', 0)}")
 
         # ETag统计
         lines.append(f"{prefix}RB ETag - T1: {stats.get('RB_ETag_T1_num', 0)}, T0: {stats.get('RB_ETag_T0_num', 0)}")

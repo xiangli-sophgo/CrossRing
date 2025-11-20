@@ -363,7 +363,7 @@ class FIFOHeatmapVisualizer:
             return None
 
         # 获取所有可用的FIFO类型选项
-        fifo_options = self._get_available_fifo_types()
+        fifo_options = self._get_available_fifo_types(dies)
 
         if not fifo_options:
             print("警告: 没有找到可用的FIFO类型")
@@ -391,15 +391,25 @@ class FIFOHeatmapVisualizer:
             fig.show()
             return None
 
-    def _get_available_fifo_types(self) -> List[Tuple[str, str, str, str]]:
+    def _get_available_fifo_types(self, dies: Dict) -> List[Tuple[str, str, str, str]]:
         """
         获取所有可用的FIFO类型（支持三网络）
+
+        Args:
+            dies: Die字典
 
         Returns:
             List[Tuple]: [(显示名称, fifo_category, fifo_type, network_type), ...]
         """
         options = []
         network_display = {"req": "请求", "rsp": "响应", "data": "数据"}
+
+        # 获取配置中的CH_NAME_LIST（从任意一个Die获取）
+        ch_name_list = []
+        if dies:
+            first_die = list(dies.values())[0]
+            if hasattr(first_die, "config") and hasattr(first_die.config, "CH_NAME_LIST"):
+                ch_name_list = first_die.config.CH_NAME_LIST
 
         for die_id, networks_data in self.fifo_data.items():
             for network_type, die_data in networks_data.items():
@@ -413,13 +423,21 @@ class FIFOHeatmapVisualizer:
                         if option_tuple not in options:
                             options.append(option_tuple)
 
-                # IQ通道缓冲
-                for node_pos, ip_types in die_data.get("IQ_CH", {}).items():
-                    for ip_type in ip_types.keys():
+                # IQ通道缓冲 - 使用配置中的CH_NAME_LIST
+                if ch_name_list:
+                    for ip_type in ch_name_list:
                         option_name = f"IQ_CH-{ip_type} ({net_label})"
                         option_tuple = (option_name, "IQ_CH", ip_type, network_type)
                         if option_tuple not in options:
                             options.append(option_tuple)
+                else:
+                    # 降级方案：从已收集的数据获取
+                    for node_pos, ip_types in die_data.get("IQ_CH", {}).items():
+                        for ip_type in ip_types.keys():
+                            option_name = f"IQ_CH-{ip_type} ({net_label})"
+                            option_tuple = (option_name, "IQ_CH", ip_type, network_type)
+                            if option_tuple not in options:
+                                options.append(option_tuple)
 
                 # RB
                 for node_pos, directions in die_data.get("RB", {}).items():
@@ -437,13 +455,21 @@ class FIFOHeatmapVisualizer:
                         if option_tuple not in options:
                             options.append(option_tuple)
 
-                # EQ通道缓冲
-                for node_pos, ip_types in die_data.get("EQ_CH", {}).items():
-                    for ip_type in ip_types.keys():
+                # EQ通道缓冲 - 使用配置中的CH_NAME_LIST
+                if ch_name_list:
+                    for ip_type in ch_name_list:
                         option_name = f"EQ_CH-{ip_type} ({net_label})"
                         option_tuple = (option_name, "EQ_CH", ip_type, network_type)
                         if option_tuple not in options:
                             options.append(option_tuple)
+                else:
+                    # 降级方案：从已收集的数据获取
+                    for node_pos, ip_types in die_data.get("EQ_CH", {}).items():
+                        for ip_type in ip_types.keys():
+                            option_name = f"EQ_CH-{ip_type} ({net_label})"
+                            option_tuple = (option_name, "EQ_CH", ip_type, network_type)
+                            if option_tuple not in options:
+                                options.append(option_tuple)
 
         # 排序：先按category，再按network_type，最后按名称
         def sort_key(item):
@@ -801,6 +827,9 @@ class FIFOHeatmapVisualizer:
                         node_data = category_data.get(node_id, {})
                         fifo_info = node_data.get(fifo_type)
 
+                        # 对于channel buffer (IQ_CH/EQ_CH)，即使没有配置也显示空白格子
+                        is_channel_buffer = fifo_category in ["IQ_CH", "EQ_CH"]
+
                         if fifo_info is not None:
                             capacity = fifo_info["capacity"]
                             avg_depth = fifo_info["avg_depth"]
@@ -860,6 +889,30 @@ class FIFOHeatmapVisualizer:
                             if tag_info:
                                 hover_text += "<br>" + "<br>".join(tag_info)
 
+                            all_hover_texts.append(hover_text)
+
+                        elif is_channel_buffer:
+                            # 对于channel buffer，没有配置时显示空白（灰色）
+                            all_x.append(x)
+                            all_y.append(y)
+                            all_colors.append(0)  # 设置为0显示灰色
+
+                            # 根据模式显示不同格式
+                            if mode == "flit_count":
+                                text_label = "0"  # 数字模式显示0
+                            else:
+                                text_label = "0.0%"  # 百分比模式显示0.0%
+                            all_text_labels.append(text_label)
+
+                            network_display = {"req": "Request", "rsp": "Response", "data": "Data"}
+                            net_label = network_display.get(network_type, network_type)
+
+                            hover_text = (
+                                f"Die {die_id} - 节点 {node_id} ({orig_row},{orig_col})<br>"
+                                f"网络: {net_label}<br>"
+                                f"FIFO: {option_name}<br>"
+                                f"状态: 未配置"
+                            )
                             all_hover_texts.append(hover_text)
 
                 # 根据模式配置colorscale和colorbar
