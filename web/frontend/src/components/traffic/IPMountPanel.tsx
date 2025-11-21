@@ -91,7 +91,7 @@ const IPMountPanel: React.FC<IPMountPanelProps> = ({ topology, onMountsChange })
         for (const part of parts) {
           const trimmed = part.trim()
           if (trimmed.includes('-')) {
-            const [start, end] = trimmed.split('-').map(x => parseInt(x.trim()))
+            const [start, end] = trimmed.split('-').map((x: string) => parseInt(x.trim()))
             for (let i = start; i <= end; i++) {
               nodeIds.push(i)
             }

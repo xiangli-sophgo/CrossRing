@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from typing import Dict, List
 import json
 from pathlib import Path
+from app.config import TRAFFIC_CONFIGS_DIR
 import uuid
 from datetime import datetime
 
@@ -21,9 +22,8 @@ router = APIRouter(prefix="/api/traffic/config", tags=["流量配置"])
 # 格式: {topology: {mode: {config_id: TrafficConfig}}}
 traffic_configs: Dict[str, Dict[str, Dict[str, TrafficConfig]]] = {}
 
-# 配置文件路径 - 指向项目根目录的config/traffic_configs
-# Path: web/backend/app/api/traffic_config.py -> 需要5个parent到达CrossRing根目录
-CONFIG_DIR = Path(__file__).parent.parent.parent.parent.parent / "config" / "traffic_configs"
+# 配置文件路径
+CONFIG_DIR = TRAFFIC_CONFIGS_DIR
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 

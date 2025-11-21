@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from typing import Dict, List
 import json
 from pathlib import Path
+from app.config import IP_MOUNTS_DIR
 
 from app.models.ip_mount import (
     IPMountRequest,
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/api/ip-mount", tags=["IP挂载管理"])
 ip_mounts: Dict[str, Dict[int, List[IPMount]]] = {}
 
 # 配置文件路径 - 指向项目根目录的config/ip_mounts
-CONFIG_DIR = Path(__file__).parent.parent.parent.parent.parent / "config" / "ip_mounts"
+CONFIG_DIR = IP_MOUNTS_DIR
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
 

@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
-import { Layout, Typography, Card, Space, message, Select, Row, Col } from 'antd'
+import { useState, useEffect, useCallback } from 'react'
+import { Layout, Typography, Card, Space, message, Select, Table, Tag } from 'antd'
 import { AppstoreOutlined } from '@ant-design/icons'
 import TopologyGraph from './components/topology/TopologyGraph'
+import MultiDieTopologyGraph from './components/topology/MultiDieTopologyGraph'
 import NodeInfoPanel from './components/topology/NodeInfoPanel'
 import IPMountPanel from './components/traffic/IPMountPanel'
 import TrafficConfigPanel from './components/traffic/TrafficConfigPanel'
@@ -9,7 +10,7 @@ import { getAvailableTopologies, getTopology, getNodeInfo } from './api/topology
 import { getMounts } from './api/ipMount'
 import type { TopologyData, TopologyInfo } from './types/topology'
 import type { IPMount } from './types/ipMount'
-import type { BandwidthComputeResponse } from './types/staticBandwidth'
+import type { BandwidthComputeResponse, D2DLayoutInfo, FlowInfo } from './types/staticBandwidth'
 
 const { Header, Content } = Layout
 const { Title, Text } = Typography
@@ -22,6 +23,7 @@ interface NodeInfo {
   neighbors: number[]
   degree: number
   topology: string
+  die_id?: number  // D2D模式下的Die编号
 }
 
 function App() {
@@ -35,8 +37,17 @@ function App() {
   const [mounts, setMounts] = useState<IPMount[]>([])
   const [mountsVersion, setMountsVersion] = useState(0)
   const [linkBandwidth, setLinkBandwidth] = useState<Record<string, number> | Record<string, Record<string, number>>>({})
+  const [linkComposition, setLinkComposition] = useState<Record<string, any[]>>({})
   const [bandwidthMode, setBandwidthMode] = useState<'noc' | 'd2d'>('noc')
   const [selectedDie, setSelectedDie] = useState<number>(0)
+  const [d2dLayout, setD2dLayout] = useState<D2DLayoutInfo | null>(null)
+  const [selectedLinkKey, setSelectedLinkKey] = useState<string>('')
+  const [selectedLinkFlows, setSelectedLinkFlows] = useState<FlowInfo[]>([])
+  const [topoWidth, setTopoWidth] = useState<number | null>(null)
+
+  const handleTopoWidthChange = useCallback((width: number) => {
+    setTopoWidth(width)
+  }, [])
 
   // 加载可用拓扑类型
   const loadTopologies = async () => {
@@ -76,10 +87,14 @@ function App() {
   }
 
   // 处理节点点击
-  const handleNodeClick = async (nodeId: number) => {
+  const handleNodeClick = async (nodeId: number, dieId?: number) => {
     setNodeInfoLoading(true)
     try {
       const info = await getNodeInfo(selectedTopo, nodeId)
+      // D2D模式下添加die_id
+      if (dieId !== undefined) {
+        info.die_id = dieId
+      }
       setNodeInfo(info)
       console.log('节点信息:', info)
     } catch (error) {
@@ -93,10 +108,25 @@ function App() {
   // 处理带宽计算完成
   const handleBandwidthComputed = (data: BandwidthComputeResponse) => {
     setLinkBandwidth(data.link_bandwidth)
+    setLinkComposition(data.link_composition || {})
     setBandwidthMode(data.mode)
-    // D2D模式时重置选中的Die为0
+    setSelectedLinkKey('')
+    setSelectedLinkFlows([])
+    // D2D模式时重置选中的Die为0，并设置布局
     if (data.mode === 'd2d') {
       setSelectedDie(0)
+      setD2dLayout(data.d2d_layout || null)
+    } else {
+      setD2dLayout(null)
+    }
+  }
+
+  // 处理链路点击
+  const handleLinkClick = (linkKey: string, composition: FlowInfo[]) => {
+    setSelectedLinkKey(linkKey)
+    setSelectedLinkFlows(composition)
+    if (!linkKey) {
+      setNodeInfo(null)
     }
   }
 
@@ -142,33 +172,75 @@ function App() {
       </Header>
 
       <Content style={{ padding: '24px 50px' }}>
-        <Row gutter={24}>
+        <div style={{ display: 'flex', width: '100%', gap: 24, overflow: 'hidden' }}>
           {/* 左侧：拓扑可视化 */}
-          <Col span={10}>
+          <div style={{ flexShrink: 0 }}>
             <Space direction="vertical" size="large" style={{ width: '100%' }}>
-              {/* 拓扑图 */}
-              <TopologyGraph
-                data={topoData}
-                mounts={mounts}
-                loading={topoLoading}
-                onNodeClick={handleNodeClick}
-                linkBandwidth={linkBandwidth}
-                bandwidthMode={bandwidthMode}
-                selectedDie={selectedDie}
-                onDieChange={setSelectedDie}
-              />
-
-
+              {/* 拓扑图 - D2D模式显示多Die视图 */}
+              {bandwidthMode === 'd2d' && d2dLayout ? (
+                <MultiDieTopologyGraph
+                  data={topoData}
+                  mounts={mounts}
+                  loading={topoLoading}
+                  linkBandwidth={linkBandwidth as Record<string, Record<string, number>>}
+                  linkComposition={linkComposition}
+                  d2dLayout={d2dLayout}
+                  onNodeClick={handleNodeClick}
+                  onLinkClick={handleLinkClick}
+                  onWidthChange={handleTopoWidthChange}
+                />
+              ) : (
+                <TopologyGraph
+                  data={topoData}
+                  mounts={mounts}
+                  loading={topoLoading}
+                  onNodeClick={handleNodeClick}
+                  linkBandwidth={linkBandwidth}
+                  linkComposition={linkComposition}
+                  bandwidthMode={bandwidthMode}
+                  selectedDie={selectedDie}
+                  onDieChange={setSelectedDie}
+                  onLinkClick={handleLinkClick}
+                  onWidthChange={handleTopoWidthChange}
+                />
+              )}
 
               {/* 节点信息 */}
-              {topoData && (
+              {topoData && nodeInfo && (
                 <NodeInfoPanel nodeInfo={nodeInfo} loading={nodeInfoLoading} mounts={mounts} />
               )}
+
+              {/* 链路带宽组成 */}
+              {selectedLinkKey && selectedLinkFlows.length > 0 && topoData && (
+                <Card title={`链路带宽组成 (节点${(() => {
+                  const [src, dst] = selectedLinkKey.split('-')
+                  const [srcCol, srcRow] = src.split(',').map(Number)
+                  const [dstCol, dstRow] = dst.split(',').map(Number)
+                  const srcNode = srcRow * topoData.cols + srcCol
+                  const dstNode = dstRow * topoData.cols + dstCol
+                  return `${srcNode} → ${dstNode}`
+                })()})`} size="small">
+                  <Table
+                    dataSource={selectedLinkFlows.map((flow, idx) => ({ ...flow, key: idx }))}
+                    columns={[
+                      { title: '源', dataIndex: 'src_node', width: 40, align: 'center' as const },
+                      { title: '源IP', dataIndex: 'src_ip', width: 70, align: 'center' as const, render: (ip: string) => <Tag color="blue" style={{ fontSize: 10 }}>{ip}</Tag> },
+                      { title: '目标', dataIndex: 'dst_node', width: 40, align: 'center' as const },
+                      { title: '目标IP', dataIndex: 'dst_ip', width: 70, align: 'center' as const, render: (ip: string) => <Tag color="green" style={{ fontSize: 10 }}>{ip}</Tag> },
+                      { title: 'GB/s', dataIndex: 'bandwidth', width: 50, align: 'center' as const, render: (bw: number) => bw.toFixed(1) },
+                      { title: '类型', dataIndex: 'req_type', width: 40, align: 'center' as const, render: (t: string) => <Tag color={t === 'R' ? 'cyan' : 'orange'}>{t}</Tag> },
+                    ]}
+                    size="small"
+                    pagination={false}
+                    scroll={{ y: 200 }}
+                  />
+                </Card>
+              )}
             </Space>
-          </Col>
+          </div>
 
           {/* 右侧：IP挂载和流量配置 */}
-          <Col span={14}>
+          <div style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
             {topoData && (
               <Space direction="vertical" size="large" style={{ width: '100%' }}>
                 <IPMountPanel
@@ -195,8 +267,8 @@ function App() {
                 </Card>
               </Space>
             )}
-          </Col>
-        </Row>
+          </div>
+        </div>
       </Content>
     </Layout>
   )

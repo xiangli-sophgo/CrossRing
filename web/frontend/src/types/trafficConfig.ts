@@ -19,8 +19,8 @@ export interface TrafficConfig {
 export interface TrafficConfigCreate {
   topology: string
   mode: 'noc' | 'd2d'
-  source_ip: string
-  target_ip: string
+  source_ip: string | string[]
+  target_ip: string | string[]
   speed_gbps: number
   burst_length: number
   request_type: 'R' | 'W'

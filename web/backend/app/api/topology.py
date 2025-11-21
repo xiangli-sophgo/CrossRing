@@ -90,7 +90,7 @@ async def get_topology(topo_type: str):
         "metadata": {
             "row_links": rows * (cols - 1),
             "col_links": cols * (rows - 1),
-            "total_links": len(edges)
+            "total_links": len(edges) * 2
         }
     }
 

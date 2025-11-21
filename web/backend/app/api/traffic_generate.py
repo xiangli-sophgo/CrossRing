@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from typing import List, Dict, Optional
 from pathlib import Path
+from app.config import TRAFFIC_OUTPUT_DIR
 import json
 import io
 import zipfile
@@ -21,9 +22,8 @@ from app.api.traffic_config import _load_configs
 
 router = APIRouter(prefix="/api/traffic/generate", tags=["流量生成"])
 
-# 输出目录 - 指向项目根目录的traffic文件夹
-# Path: web/backend/app/api/traffic_generate.py -> 需要5个parent到达CrossRing根目录
-OUTPUT_DIR = Path(__file__).parent.parent.parent.parent.parent / "traffic"
+# 输出目录
+OUTPUT_DIR = TRAFFIC_OUTPUT_DIR
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 

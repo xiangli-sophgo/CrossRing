@@ -417,7 +417,7 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
         topology,
         mode,
         split_by_source: false,
-        random_seed: useFixedSeed ? randomSeed : Date.now(),
+        random_seed: useFixedSeed ? randomSeed : (Date.now() % (2**32 - 1)),
         filename: trafficFileName
       })
 
@@ -636,20 +636,21 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
       groupData.targetDetailsByDie[config.target_die] = {}
 
       // 处理所有目标IP
+      const targetDieKey = config.target_die as number
       targetIps.forEach(tgtIp => {
         const tgtFullType = tgtIp.includes('-') ? tgtIp.split('-')[1] : tgtIp
         const tgtNode = extractNodeFromIp(tgtIp)
 
-        if (!groupData.targetDetailsByDie[config.target_die][tgtFullType]) {
-          groupData.targetDetailsByDie[config.target_die][tgtFullType] = []
+        if (!groupData.targetDetailsByDie[targetDieKey][tgtFullType]) {
+          groupData.targetDetailsByDie[targetDieKey][tgtFullType] = []
         }
 
         if (tgtNode !== null) {
           // 有明确的节点ID，使用它
-          groupData.targetDetailsByDie[config.target_die][tgtFullType].push(tgtNode)
+          groupData.targetDetailsByDie[targetDieKey][tgtFullType].push(tgtNode)
         } else if (ipTypeToNodes[tgtFullType]) {
           // 没有节点ID，从IP挂载中查找该类型的所有节点
-          groupData.targetDetailsByDie[config.target_die][tgtFullType] = ipTypeToNodes[tgtFullType]
+          groupData.targetDetailsByDie[targetDieKey][tgtFullType] = ipTypeToNodes[tgtFullType]
         }
       })
     }
@@ -674,23 +675,78 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
     }
   })
 
+  // 编辑字段的处理函数
+  const handleFieldUpdate = async (record: any, field: string, value: number) => {
+    try {
+      await Promise.all(
+        record.configIds.map(async (configId: string) => {
+          const originalConfig = configs.find((c: TrafficConfig) => c.id === configId)
+          if (!originalConfig) return
+
+          await updateTrafficConfig(topology, mode, configId, {
+            topology: originalConfig.topology,
+            mode: originalConfig.mode,
+            source_ip: originalConfig.source_ip,
+            target_ip: originalConfig.target_ip,
+            speed_gbps: field === 'speed_gbps' ? value : originalConfig.speed_gbps,
+            burst_length: field === 'burst_length' ? value : originalConfig.burst_length,
+            request_type: originalConfig.request_type,
+            end_time_ns: field === 'end_time_ns' ? value : originalConfig.end_time_ns,
+            source_die: originalConfig.source_die,
+            target_die: originalConfig.target_die
+          })
+        })
+      )
+      message.success('更新成功')
+      loadConfigs()
+    } catch (error) {
+      message.error('更新失败')
+      console.error(error)
+    }
+  }
+
+  // IP类型到颜色的映射
+  const getIPColor = (ipType: string): string => {
+    const type = ipType.toLowerCase()
+    switch (type) {
+      case 'gdma':
+      case 'sdma':
+        return '#5B8FF9'  // 蓝色
+      case 'cdma':
+        return '#5AD8A6'  // 绿色
+      case 'ddr':
+      case 'l2m':
+        return '#E8684A'  // 红色
+      case 'npu':
+        return '#722ed1'  // 紫色
+      case 'pcie':
+        return '#13c2c2'  // 青色
+      case 'eth':
+        return '#eb2f96'  // 粉色
+      default:
+        return '#8c8c8c'  // 灰色
+    }
+  }
+
   const columns = [
     {
       title: '源IP',
       dataIndex: 'sourceBaseType',
       key: 'sourceBaseType',
-      width: 150,
+      width: 100,
+      align: 'center' as const,
       render: (sourceBaseType: string) => (
-        <Tag color="blue">{sourceBaseType}</Tag>
+        <Tag color={getIPColor(sourceBaseType)}>{sourceBaseType}</Tag>
       )
     },
     {
       title: '目标IP',
       dataIndex: 'targetBaseType',
       key: 'targetBaseType',
-      width: 150,
+      width: 100,
+      align: 'center' as const,
       render: (targetBaseType: string) => (
-        <Tag color="green">{targetBaseType}</Tag>
+        <Tag color={getIPColor(targetBaseType)}>{targetBaseType}</Tag>
       )
     },
     ...(mode === 'd2d' ? [{
@@ -698,6 +754,7 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
       dataIndex: 'source_die',
       key: 'source_die',
       width: 100,
+      align: 'center' as const,
       render: (sourceDie: number) => {
         if (sourceDie === undefined || sourceDie === null) {
           return null
@@ -716,20 +773,51 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
       ),
       dataIndex: 'speed_gbps',
       key: 'speed_gbps',
-      width: 80,
-      render: (speed: number) => `${speed} GB/s`
+      width: 100,
+      align: 'center' as const,
+      render: (speed: number, record: any) => (
+        <InputNumber
+          size="small"
+          defaultValue={speed}
+          min={0.1}
+          max={256}
+          step={0.1}
+          style={{ width: 80 }}
+          onChange={(value) => {
+            if (value !== null && value !== speed) {
+              handleFieldUpdate(record, 'speed_gbps', value)
+            }
+          }}
+        />
+      )
     },
     {
       title: 'Burst',
       dataIndex: 'burst_length',
       key: 'burst_length',
-      width: 80
+      width: 100,
+      align: 'center' as const,
+      render: (burst: number, record: any) => (
+        <InputNumber
+          size="small"
+          defaultValue={burst}
+          min={1}
+          max={16}
+          style={{ width: 60 }}
+          onChange={(value) => {
+            if (value !== null && value !== burst) {
+              handleFieldUpdate(record, 'burst_length', value)
+            }
+          }}
+        />
+      )
     },
     {
       title: '类型',
       dataIndex: 'request_type',
       key: 'request_type',
-      width: 80,
+      width: 100,
+      align: 'center' as const,
       render: (type: string, record: any) => (
         <Tag
           color={type === 'R' ? 'cyan' : 'orange'}
@@ -744,13 +832,28 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
       title: '结束时间',
       dataIndex: 'end_time_ns',
       key: 'end_time_ns',
-      width: 80,
-      render: (time: number) => `${time} ns`
+      width: 100,
+      align: 'center' as const,
+      render: (time: number, record: any) => (
+        <InputNumber
+          size="small"
+          defaultValue={time}
+          min={100}
+          max={100000}
+          style={{ width: 80 }}
+          onChange={(value) => {
+            if (value !== null && value !== time) {
+              handleFieldUpdate(record, 'end_time_ns', value)
+            }
+          }}
+        />
+      )
     },
     {
       title: '操作',
       key: 'action',
       width: 100,
+      align: 'center' as const,
       render: (record: any) => (
         <Button
           type="link"
@@ -1018,7 +1121,7 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
                 {mode === 'd2d' && record.target_dies && record.target_dies.size > 0 ? (
                   <div>
                     <strong>目标DIE详情：</strong>
-                    {Array.from(record.target_dies).sort((a, b) => a - b).map((targetDie: number) => (
+                    {Array.from(record.target_dies as Set<number>).sort((a: number, b: number) => a - b).map((targetDie: number) => (
                       <div key={targetDie} style={{ marginLeft: 16, marginTop: 8 }}>
                         <Tag color="purple">{targetDie}</Tag>
                         <div style={{ marginLeft: 32, marginTop: 4 }}>

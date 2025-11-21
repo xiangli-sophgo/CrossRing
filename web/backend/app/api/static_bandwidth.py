@@ -3,10 +3,11 @@ from typing import Dict, Tuple, List, Optional, Union
 from pydantic import BaseModel, Field
 from pathlib import Path
 import yaml
+from app.config import TOPOLOGIES_DIR
 
 # 导入 CrossRing 静态带宽分析模块
 from src.traffic_process.traffic_gene.static_bandwidth_analyzer import (
-    compute_link_bandwidth,
+    StaticBandwidthAnalyzer,
     compute_d2d_link_bandwidth,
 )
 
@@ -14,7 +15,7 @@ from app.api.ip_mount import _load_mounts
 from app.api.traffic_config import _load_configs
 
 # D2D配置文件目录
-D2D_CONFIG_DIR = Path(__file__).parent.parent.parent.parent.parent / "config" / "topologies"
+D2D_CONFIG_DIR = TOPOLOGIES_DIR
 
 router = APIRouter(prefix="/api/traffic/bandwidth", tags=["静态带宽分析"])
 
@@ -35,6 +36,24 @@ class BandwidthStatistics(BaseModel):
     num_active_links: int = Field(..., description="活动链路数量")
 
 
+class D2DLayoutInfo(BaseModel):
+    """D2D布局信息"""
+    die_positions: Dict[str, List[int]] = Field(default={}, description="Die位置: {die_id: [x, y]}")
+    die_rotations: Dict[str, int] = Field(default={}, description="Die旋转角度: {die_id: rotation}")
+    d2d_connections: List[List[int]] = Field(default=[], description="D2D连接: [[src_die, src_node, dst_die, dst_node], ...]")
+    num_dies: int = Field(default=1, description="Die数量")
+
+
+class FlowInfo(BaseModel):
+    """流量信息"""
+    src_node: int
+    src_ip: str
+    dst_node: int
+    dst_ip: str
+    bandwidth: float
+    req_type: str
+
+
 class BandwidthComputeResponse(BaseModel):
     """静态带宽计算响应"""
     success: bool
@@ -44,9 +63,14 @@ class BandwidthComputeResponse(BaseModel):
         default={},
         description="链路带宽字典。NoC模式: {link_key: bw}; D2D模式: {die_id: {link_key: bw}}"
     )
+    link_composition: Dict[str, List[FlowInfo]] = Field(
+        default={},
+        description="链路带宽组成: {link_key: [{src_node, src_ip, dst_node, dst_ip, bandwidth, req_type}, ...]}"
+    )
     statistics: Union[BandwidthStatistics, Dict[str, BandwidthStatistics]] = Field(
         description="统计信息。NoC模式: 单个统计; D2D模式: {die_id: 统计}"
     )
+    d2d_layout: Optional[D2DLayoutInfo] = Field(default=None, description="D2D布局信息（仅D2D模式）")
 
 
 def _load_d2d_config(config_filename: Optional[str] = None) -> Optional[Dict]:
@@ -290,28 +314,42 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
                         num_active_links=0
                     )
 
+            # 构建D2D布局信息
+            die_positions = d2d_config.get('DIE_POSITIONS', {})
+            die_rotations = d2d_config.get('DIE_ROTATIONS', {})
+            d2d_layout = D2DLayoutInfo(
+                die_positions={str(k): v for k, v in die_positions.items()},
+                die_rotations={str(k): v for k, v in die_rotations.items()},
+                d2d_connections=d2d_connections,
+                num_dies=num_dies
+            )
+
             return BandwidthComputeResponse(
                 success=True,
                 message=f"成功计算D2D静态链路带宽 (路由算法: {request.routing_type}, {num_dies}个Die)",
                 mode="d2d",
                 link_bandwidth=link_bandwidth_str,
-                statistics=statistics_dict
+                statistics=statistics_dict,
+                d2d_layout=d2d_layout
             )
 
         else:
-            # NoC模式：使用原有逻辑
-            link_bandwidth_dict = compute_link_bandwidth(
+            # NoC模式：使用StaticBandwidthAnalyzer
+            analyzer = StaticBandwidthAnalyzer(
                 topo_type=request.topology,
                 node_ips=node_ips,
-                configs=configs_list,
-                routing_type=request.routing_type
+                configs=configs_list
             )
+            link_bandwidth_dict = analyzer.compute(request.routing_type)
 
             # 转换字典key为字符串格式
             link_bandwidth_str = {}
             for (src_pos, dst_pos), bandwidth in link_bandwidth_dict.items():
                 key = f"{src_pos[0]},{src_pos[1]}-{dst_pos[0]},{dst_pos[1]}"
                 link_bandwidth_str[key] = bandwidth
+
+            # 获取链路组成
+            link_composition = analyzer.get_link_composition()
 
             # 计算统计信息
             active_bandwidths = [bw for bw in link_bandwidth_dict.values() if bw > 0]
@@ -336,6 +374,7 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
                 message=f"成功计算静态链路带宽 (路由算法: {request.routing_type})",
                 mode="noc",
                 link_bandwidth=link_bandwidth_str,
+                link_composition=link_composition,
                 statistics=statistics
             )
 

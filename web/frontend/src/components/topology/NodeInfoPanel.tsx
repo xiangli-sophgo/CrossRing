@@ -9,6 +9,7 @@ interface NodeInfo {
   neighbors: number[]
   degree: number
   topology: string
+  die_id?: number
 }
 
 interface NodeInfoPanelProps {
@@ -75,7 +76,7 @@ const NodeInfoPanel: React.FC<NodeInfoPanelProps> = ({ nodeInfo, loading, mounts
       title={
         <Space>
           <NodeIndexOutlined />
-          <span>节点 {nodeInfo.node_id} 详细信息</span>
+          <span>{nodeInfo.die_id !== undefined ? `Die${nodeInfo.die_id} 节点${nodeInfo.node_id}` : `节点 ${nodeInfo.node_id}`} 详细信息</span>
         </Space>
       }
       size="small"

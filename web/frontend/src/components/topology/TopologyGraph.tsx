@@ -5,6 +5,7 @@ import { Card, Space, Tag, Button, Row, Col, Select } from 'antd'
 import { ZoomInOutlined, ZoomOutOutlined, AimOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { TopologyData } from '../../types/topology'
 import type { IPMount } from '../../types/ipMount'
+import type { FlowInfo } from '../../types/staticBandwidth'
 
 interface TopologyGraphProps {
   data: TopologyData | null
@@ -14,18 +15,42 @@ interface TopologyGraphProps {
   // NoC模式: Record<string, number>
   // D2D模式: Record<string, Record<string, number>>
   linkBandwidth?: Record<string, number> | Record<string, Record<string, number>>
+  linkComposition?: Record<string, FlowInfo[]>
   bandwidthMode?: 'noc' | 'd2d'
   selectedDie?: number
   onDieChange?: (dieId: number) => void
+  onLinkClick?: (linkKey: string, composition: FlowInfo[]) => void
+  onWidthChange?: (width: number) => void
 }
 
 const TopologyGraph: React.FC<TopologyGraphProps> = ({
-  data, mounts, loading, onNodeClick, linkBandwidth,
-  bandwidthMode = 'noc', selectedDie = 0, onDieChange
+  data, mounts, loading, onNodeClick, linkBandwidth, linkComposition,
+  bandwidthMode = 'noc', selectedDie = 0, onDieChange, onLinkClick, onWidthChange
 }) => {
   const [elements, setElements] = useState<any[]>([])
   const [selectedNode, setSelectedNode] = useState<number | null>(null)
   const cyRef = useRef<Cytoscape.Core | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  // 监听容器大小变化，自动重新fit
+  useEffect(() => {
+    if (!containerRef.current) return
+    const resizeObserver = new ResizeObserver(() => {
+      if (cyRef.current) {
+        cyRef.current.resize()
+        setTimeout(() => {
+          cyRef.current?.fit(undefined, 50)
+          cyRef.current?.center()
+        }, 50)
+      }
+      // 通知父组件宽度变化
+      if (containerRef.current && onWidthChange) {
+        onWidthChange(containerRef.current.offsetWidth)
+      }
+    })
+    resizeObserver.observe(containerRef.current)
+    return () => resizeObserver.disconnect()
+  }, [onWidthChange])
 
   // 创建节点ID到挂载信息列表的映射（一个节点可以有多个IP）
   const mountMap = new Map<number, IPMount[]>()
@@ -108,12 +133,15 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
     }
   }
 
-  // 根据带宽获取颜色
+  // 根据带宽获取颜色（0-256映射到浅红-深红）
   const getBandwidthColor = (bandwidth: number): string => {
     if (bandwidth === 0) return '#bfbfbf'  // 灰色 - 无流量
-    if (bandwidth < 50) return '#52c41a'    // 绿色 - 低负载
-    if (bandwidth < 100) return '#fa8c16'   // 橙色 - 中等负载
-    return '#f5222d'                        // 红色 - 高负载
+    const ratio = Math.min(bandwidth / 256, 1)  // 0-256 映射到 0-1
+    // 从浅红(255,180,180)到深红(200,0,0)
+    const r = Math.round(255 - ratio * 55)
+    const g = Math.round(180 * (1 - ratio))
+    const b = Math.round(180 * (1 - ratio))
+    return `rgb(${r},${g},${b})`
   }
 
   // 根据带宽获取线宽
@@ -157,80 +185,88 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
       // 为每个IP创建独立节点（IP块）- z-index较高
       if (nodeMounts && nodeMounts.length > 0) {
-        // IP类型分类：RN类型在第一排，SN类型在第二排
-        const rnTypes = ['gdma', 'sdma', 'cdma', 'npu', 'pcie', 'eth']
-        const snTypes = ['ddr', 'l2m']
-
-        // 对IP进行分类和排序
-        const sortedMounts = [...nodeMounts].sort((a, b) => {
-          const aType = a.ip_type.split('_')[0].toLowerCase()
-          const bType = b.ip_type.split('_')[0].toLowerCase()
-          const aNum = parseInt(a.ip_type.split('_')[1] || '0')
-          const bNum = parseInt(b.ip_type.split('_')[1] || '0')
-
-          const aIsRN = rnTypes.includes(aType)
-          const bIsRN = rnTypes.includes(bType)
-
-          // 先按类型分组（RN在前，SN在后）
-          if (aIsRN && !bIsRN) return -1
-          if (!aIsRN && bIsRN) return 1
-
-          // 同组内按编号排序
-          return aNum - bNum
+        // 按IP类型分组
+        const ipByType: Record<string, typeof nodeMounts> = {}
+        nodeMounts.forEach(mount => {
+          const baseType = mount.ip_type.split('_')[0].toLowerCase()
+          if (!ipByType[baseType]) ipByType[baseType] = []
+          ipByType[baseType].push(mount)
         })
 
-        // 分别统计RN和SN的数量
-        let rnCount = 0
-        let snCount = 0
+        // 按优先级排序IP类型
+        const priorityTypes = ['gdma', 'ddr', 'sdma', 'cdma', 'npu', 'pcie', 'eth', 'l2m', 'd2d']
+        const sortedTypes = Object.keys(ipByType).sort((a, b) => {
+          const aIdx = priorityTypes.indexOf(a)
+          const bIdx = priorityTypes.indexOf(b)
+          const aPriority = aIdx >= 0 ? aIdx : priorityTypes.length
+          const bPriority = bIdx >= 0 ? bIdx : priorityTypes.length
+          return aPriority - bPriority
+        })
 
-        sortedMounts.forEach((mount, idx) => {
-          const colors = getIPTypeColor(mount.ip_type)
-          // 提取IP类型缩写：gdma_0 -> G0, ddr_1 -> D1
-          const parts = mount.ip_type.split('_')
-          const typeAbbr = parts[0].charAt(0).toUpperCase()
-          const number = parts[1] || '0'
-          const shortLabel = `${typeAbbr}${number}`
+        // 计算布局参数
+        const numRows = sortedTypes.length
+        const maxColsInRow = Math.max(...sortedTypes.map(t => ipByType[t].length))
 
-          // 判断IP类型
-          const ipType = mount.ip_type.split('_')[0].toLowerCase()
-          const isRN = rnTypes.includes(ipType)
+        // 动态计算IP块大小：根据行数和列数调整
+        const baseSize = 24
+        const maxSize = 28
+        const minSize = 18
+        let ipSize = baseSize
+        if (numRows <= 2 && maxColsInRow <= 2) {
+          ipSize = maxSize  // IP少时放大
+        } else if (numRows >= 4 || maxColsInRow >= 4) {
+          ipSize = minSize  // IP多时缩小
+        }
 
-          // 计算IP块位置（在父节点内部）
-          const baseX = node.col * 150 + 75
-          const baseY = node.row * 150 + 75
+        const spacing = ipSize + 4  // 间距
 
-          let offsetX, offsetY
-          if (isRN) {
-            // RN类型：第一排（上方）
-            offsetX = (rnCount % 2) * 28 - 14  // 左右排列
-            offsetY = -Math.floor(rnCount / 2) * 28 - 14  // 从上往下
-            rnCount++
-          } else {
-            // SN类型：第二排（下方）
-            offsetX = (snCount % 2) * 28 - 14  // 左右排列
-            offsetY = Math.floor(snCount / 2) * 28 + 14  // 从中间往下
-            snCount++
-          }
+        // 计算总高度，用于垂直居中
+        const totalHeight = numRows * spacing
+        const startY = -totalHeight / 2 + spacing / 2
 
-          nodes.push({
-            data: {
-              id: `ip-${node.id}-${idx}`,
-              label: shortLabel,
-              ipType: mount.ip_type,
-              parentNodeId: node.id,  // 记录父节点ID但不设置parent
-              bgColor: colors.bg,
-              borderColor: colors.border,
-            },
-            position: {
-              x: baseX + offsetX,
-              y: baseY + offsetY,
-            },
-            classes: 'ip-block',
-            locked: true,  // 锁定IP块位置
-            selectable: false,  // 不可选中
-            style: {
-              'z-index': 10
-            }
+        // 计算IP块位置基准
+        const baseX = node.col * 150 + 75
+        const baseY = node.row * 150 + 75
+
+        // 绘制每行IP块
+        sortedTypes.forEach((baseType, rowIdx) => {
+          const rowMounts = ipByType[baseType]
+          const numCols = rowMounts.length
+          // 该行水平居中
+          const totalWidth = numCols * spacing
+          const startX = -totalWidth / 2 + spacing / 2
+
+          rowMounts.forEach((mount, colIdx) => {
+            const colors = getIPTypeColor(mount.ip_type)
+            const parts = mount.ip_type.split('_')
+            const typeAbbr = parts[0].charAt(0).toUpperCase()
+            const number = parts[1] || '0'
+            const shortLabel = `${typeAbbr}${number}`
+
+            const offsetX = startX + colIdx * spacing
+            const offsetY = startY + rowIdx * spacing
+
+            nodes.push({
+              data: {
+                id: `ip-${node.id}-${baseType}-${colIdx}`,
+                label: shortLabel,
+                ipType: mount.ip_type,
+                parentNodeId: node.id,
+                bgColor: colors.bg,
+                borderColor: colors.border,
+                ipSize: ipSize
+              },
+              position: {
+                x: baseX + offsetX,
+                y: baseY + offsetY,
+              },
+              classes: 'ip-block',
+              locked: true,
+              selectable: false,
+              style: {
+                'z-index': 10
+              }
+            })
           })
         })
 
@@ -259,7 +295,11 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
     // 为每条边创建两条分开的线（双向）
     const edges: any[] = []
     data.edges.forEach((edge, idx) => {
+      const cols = data.cols
       // 正向边 - 偏移到一侧
+      const srcPos = nodeIdToPos(edge.source, cols)
+      const dstPos = nodeIdToPos(edge.target, cols)
+      const forwardLinkKey = `${srcPos.col},${srcPos.row}-${dstPos.col},${dstPos.row}`
       const forwardBandwidth = getLinkBandwidth(edge.source, edge.target)
       edges.push({
         data: {
@@ -272,10 +312,12 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
           bandwidth: forwardBandwidth,
           bandwidthColor: getBandwidthColor(forwardBandwidth),
           bandwidthWidth: getBandwidthWidth(forwardBandwidth),
-          label: forwardBandwidth > 0 ? forwardBandwidth.toFixed(1) : ''
+          label: forwardBandwidth > 0 ? forwardBandwidth.toFixed(1) : '',
+          linkKey: forwardLinkKey
         }
       })
       // 反向边 - 偏移到另一侧
+      const backwardLinkKey = `${dstPos.col},${dstPos.row}-${srcPos.col},${srcPos.row}`
       const backwardBandwidth = getLinkBandwidth(edge.target, edge.source)
       edges.push({
         data: {
@@ -288,7 +330,8 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
           bandwidth: backwardBandwidth,
           bandwidthColor: getBandwidthColor(backwardBandwidth),
           bandwidthWidth: getBandwidthWidth(backwardBandwidth),
-          label: backwardBandwidth > 0 ? backwardBandwidth.toFixed(1) : ''
+          label: backwardBandwidth > 0 ? backwardBandwidth.toFixed(1) : '',
+          linkKey: backwardLinkKey
         }
       })
     })
@@ -318,13 +361,13 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
         'z-index': 20,  // 文字层级最高
       }
     },
-    // IP块样式 - 独立节点
+    // IP块样式 - 独立节点（动态大小）
     {
       selector: '.ip-block',
       style: {
         'shape': 'rectangle',
-        'width': 24,
-        'height': 24,
+        'width': (ele: any) => ele.data('ipSize') || 24,
+        'height': (ele: any) => ele.data('ipSize') || 24,
         'label': 'data(label)',
         'text-valign': 'center',
         'text-halign': 'center',
@@ -332,11 +375,14 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
         'border-width': 1,
         'border-color': 'data(borderColor)',
         'color': '#fff',
-        'font-size': '9px',
+        'font-size': (ele: any) => {
+          const size = ele.data('ipSize') || 24
+          return size >= 28 ? '12px' : '10px'
+        },
         'font-weight': 'bold',
         'text-outline-width': 0,
         'z-index': 10,
-        'events': 'yes',  // 允许事件
+        'events': 'yes',
       }
     },
     // 节点编号文本层 - 最上层显示
@@ -486,7 +532,6 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
       const node = evt.target
       const nodeId = node.data('nodeId')
 
-      highlightNode(cy, nodeId)
       setSelectedNode(nodeId)
 
       if (onNodeClick) {
@@ -499,7 +544,6 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
       const ipNode = evt.target
       const parentNodeId = ipNode.data('parentNodeId')
 
-      highlightNode(cy, parentNodeId)
       setSelectedNode(parentNodeId)
 
       if (onNodeClick) {
@@ -507,33 +551,28 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
       }
     })
 
-    // 点击空白处取消高亮
-    cy.on('tap', (evt) => {
-      if (evt.target === cy) {
-        clearHighlight(cy)
-        setSelectedNode(null)
+    // 点击边时显示带宽组成
+    cy.on('tap', 'edge', (evt) => {
+      const edge = evt.target
+      const linkKey = edge.data('linkKey')
+      if (onLinkClick) {
+        if (linkKey && linkComposition && linkComposition[linkKey]) {
+          onLinkClick(linkKey, linkComposition[linkKey])
+        } else {
+          onLinkClick('', [])
+        }
       }
     })
-  }
 
-  const highlightNode = (cy: Cytoscape.Core, nodeId: number) => {
-    // 重置所有样式
-    cy.nodes().removeClass('highlighted dimmed')
-    cy.edges().removeClass('highlighted dimmed')
-
-    const selectedNode = cy.getElementById(`node-${nodeId}`)
-
-    // 只高亮选中节点，不显示邻居节点
-    selectedNode.addClass('highlighted')
-
-    // 暗化其他所有节点和边
-    cy.nodes().difference(selectedNode).addClass('dimmed')
-    cy.edges().addClass('dimmed')
-  }
-
-  const clearHighlight = (cy: Cytoscape.Core) => {
-    cy.nodes().removeClass('highlighted dimmed')
-    cy.edges().removeClass('highlighted dimmed')
+    // 点击空白处
+    cy.on('tap', (evt) => {
+      if (evt.target === cy) {
+        setSelectedNode(null)
+        if (onLinkClick) {
+          onLinkClick('', [])
+        }
+      }
+    })
   }
 
   const handleZoomIn = () => {
@@ -557,8 +596,6 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
   const handleReset = () => {
     if (cyRef.current && data) {
-      // 清除高亮
-      clearHighlight(cyRef.current)
       setSelectedNode(null)
 
       // 重置节点位置
@@ -588,7 +625,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
   return (
     <>
-      <Card>
+      <Card style={{ width: 'fit-content', minWidth: 500 }}>
         <Row style={{ marginBottom: 16 }} align="middle">
           <Col span={12}>
             <Space>
@@ -596,9 +633,6 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
               <Tag color="blue">{data.total_nodes} 节点</Tag>
               <Tag color="green">{data.metadata.total_links} 链路</Tag>
               <Tag color="orange">{mounts.length} 已挂载</Tag>
-              {selectedNode !== null && (
-                <Tag color="purple">已选中节点 {selectedNode}</Tag>
-              )}
             </Space>
           </Col>
           <Col span={12} style={{ textAlign: 'right' }}>
@@ -627,7 +661,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
             </Space>
           </Col>
         </Row>
-        <div style={{ height: 'calc(100vh - 310px)', minHeight: 740, border: '1px solid #d9d9d9', borderRadius: 4, background: '#fafafa' }}>
+        <div ref={containerRef} style={{ height: 'calc(100vh - 200px)', minHeight: 400, maxWidth: 'calc(100vw - 900px)', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fafafa', resize: 'both', overflow: 'hidden' }}>
           <CytoscapeComponent
             elements={elements}
             style={{ width: '100%', height: '100%' }}
@@ -695,6 +729,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
           })()}
         </Row>
       </Card>
+
     </>
   )
 }

@@ -30,6 +30,9 @@ class StaticBandwidthAnalyzer:
         # 链路带宽字典: {((src_x, src_y), (dst_x, dst_y)): bandwidth}
         self.link_bandwidth: Dict[Tuple[Tuple[int, int], Tuple[int, int]], float] = {}
 
+        # 链路带宽组成: {link_key: [{src_node, src_ip, dst_node, dst_ip, bandwidth}, ...]}
+        self.link_composition: Dict[Tuple[Tuple[int, int], Tuple[int, int]], List[Dict]] = {}
+
     def _parse_topo(self, topo_type: str) -> Tuple[int, int]:
         """解析拓扑类型字符串"""
         parts = topo_type.split("x")
@@ -53,75 +56,81 @@ class StaticBandwidthAnalyzer:
         col_idx, row_idx = pos
         return row_idx * self.num_col + col_idx
 
-    def _convert_flow_config(self) -> Dict[Tuple[Tuple[int, int], Tuple[int, int]], float]:
+    def _convert_flow_config(self) -> List[Dict]:
         """
-        转换TrafficConfig列表为flow字典
+        转换TrafficConfig列表为flow列表
 
         Returns:
-            {((flow_src_x, flow_src_y), (flow_dst_x, flow_dst_y)): bandwidth}
-            注意: 对于读请求，flow_src是目标IP，flow_dst是源IP（数据流向相反）
+            [{flow_src, flow_dst, src_node, src_ip, dst_node, dst_ip, bandwidth, req_type}, ...]
         """
-        flow = {}
+        flows = []
 
         for config in self.configs:
-            # 提取源节点列表
-            src_nodes = []
+            # 提取源节点和IP类型
+            src_node_ips = []
             for ip_type, nodes in config.src_map.items():
-                src_nodes.extend(nodes)
+                for node in nodes:
+                    src_node_ips.append((node, ip_type))
 
-            # 提取目标节点列表
-            dst_nodes = []
+            # 提取目标节点和IP类型
+            dst_node_ips = []
             for ip_type, nodes in config.dst_map.items():
-                dst_nodes.extend(nodes)
+                for node in nodes:
+                    dst_node_ips.append((node, ip_type))
 
-            # 计算每对源-目标的带宽
-            # speed表示每个源IP的总发送带宽，平均分配给所有目标
-            if src_nodes and dst_nodes:
-                bandwidth_per_src = config.speed  # 每个源IP的总带宽 (GB/s)
-                bandwidth_per_pair = bandwidth_per_src / len(dst_nodes)  # 每个源-目标对的带宽
+            if src_node_ips and dst_node_ips:
+                bandwidth_per_src = config.speed
+                bandwidth_per_pair = bandwidth_per_src / len(dst_node_ips)
+                req_type = getattr(config, 'req_type', 'W')
 
-                # 根据请求类型确定数据流向
-                req_type = getattr(config, 'req_type', 'W')  # 默认写请求
-
-                # 生成流量字典
-                for src_node in src_nodes:
-                    for dst_node in dst_nodes:
+                for src_node, src_ip in src_node_ips:
+                    for dst_node, dst_ip in dst_node_ips:
                         src_pos = self._node_id_to_pos(src_node)
                         dst_pos = self._node_id_to_pos(dst_node)
 
-                        # 读请求: 数据从目标IP流向源IP (DDR → GDMA)
-                        # 写请求: 数据从源IP流向目标IP (GDMA → DDR)
                         if req_type == 'R':
-                            flow_key = (dst_pos, src_pos)  # 反向：目标 → 源
+                            flow_src, flow_dst = dst_pos, src_pos
                         else:
-                            flow_key = (src_pos, dst_pos)  # 正向：源 → 目标
+                            flow_src, flow_dst = src_pos, dst_pos
 
-                        if flow_key not in flow:
-                            flow[flow_key] = 0.0
-                        flow[flow_key] += bandwidth_per_pair
+                        flows.append({
+                            'flow_src': flow_src,
+                            'flow_dst': flow_dst,
+                            'src_node': src_node,
+                            'src_ip': src_ip,
+                            'dst_node': dst_node,
+                            'dst_ip': dst_ip,
+                            'bandwidth': bandwidth_per_pair,
+                            'req_type': req_type
+                        })
 
-        return flow
+        return flows
 
     def _static_initial(self):
         """初始化所有可能的链路，带宽设为0"""
         self.link_bandwidth = {}
+        self.link_composition = {}
         for i in range(self.num_col):
             for j in range(self.num_row):
                 pos = (i, j)
                 # 东向链路
                 if i + 1 < self.num_col:
                     self.link_bandwidth[(pos, (i + 1, j))] = 0
+                    self.link_composition[(pos, (i + 1, j))] = []
                 # 西向链路
                 if i - 1 >= 0:
                     self.link_bandwidth[(pos, (i - 1, j))] = 0
+                    self.link_composition[(pos, (i - 1, j))] = []
                 # 北向链路 (y轴正方向)
                 if j + 1 < self.num_row:
                     self.link_bandwidth[(pos, (i, j + 1))] = 0
+                    self.link_composition[(pos, (i, j + 1))] = []
                 # 南向链路 (y轴负方向)
                 if j - 1 >= 0:
                     self.link_bandwidth[(pos, (i, j - 1))] = 0
+                    self.link_composition[(pos, (i, j - 1))] = []
 
-    def _link_bandwidth_xy(self, source: Tuple[int, int], target: Tuple[int, int], bandwidth: float):
+    def _link_bandwidth_xy(self, source: Tuple[int, int], target: Tuple[int, int], bandwidth: float, flow_info: Dict = None):
         """
         使用XY路由计算链路带宽
 
@@ -149,10 +158,13 @@ class StaticBandwidthAnalyzer:
             link_key = (node, next_node)
             if link_key not in self.link_bandwidth:
                 self.link_bandwidth[link_key] = 0
+                self.link_composition[link_key] = []
             self.link_bandwidth[link_key] += bandwidth
+            if flow_info:
+                self.link_composition[link_key].append(flow_info)
             node = next_node
 
-    def _link_bandwidth_yx(self, source: Tuple[int, int], target: Tuple[int, int], bandwidth: float):
+    def _link_bandwidth_yx(self, source: Tuple[int, int], target: Tuple[int, int], bandwidth: float, flow_info: Dict = None):
         """
         使用YX路由计算链路带宽
 
@@ -180,19 +192,38 @@ class StaticBandwidthAnalyzer:
             link_key = (node, next_node)
             if link_key not in self.link_bandwidth:
                 self.link_bandwidth[link_key] = 0
+                self.link_composition[link_key] = []
             self.link_bandwidth[link_key] += bandwidth
+            if flow_info:
+                self.link_composition[link_key].append(flow_info)
             node = next_node
 
     def _compute_bandwidth(self, routing_type: str):
         """根据路由类型计算所有流量的链路带宽"""
-        flow = self._convert_flow_config()
+        flows = self._convert_flow_config()
 
         if routing_type == "XY":
-            for (src, dst), bw in flow.items():
-                self._link_bandwidth_xy(src, dst, bw)
+            for flow in flows:
+                flow_info = {
+                    'src_node': flow['src_node'],
+                    'src_ip': flow['src_ip'],
+                    'dst_node': flow['dst_node'],
+                    'dst_ip': flow['dst_ip'],
+                    'bandwidth': flow['bandwidth'],
+                    'req_type': flow['req_type']
+                }
+                self._link_bandwidth_xy(flow['flow_src'], flow['flow_dst'], flow['bandwidth'], flow_info)
         elif routing_type == "YX":
-            for (src, dst), bw in flow.items():
-                self._link_bandwidth_yx(src, dst, bw)
+            for flow in flows:
+                flow_info = {
+                    'src_node': flow['src_node'],
+                    'src_ip': flow['src_ip'],
+                    'dst_node': flow['dst_node'],
+                    'dst_ip': flow['dst_ip'],
+                    'bandwidth': flow['bandwidth'],
+                    'req_type': flow['req_type']
+                }
+                self._link_bandwidth_yx(flow['flow_src'], flow['flow_dst'], flow['bandwidth'], flow_info)
         else:
             raise ValueError(f"不支持的路由类型: {routing_type}. 必须是 'XY' 或 'YX'")
 
@@ -213,6 +244,20 @@ class StaticBandwidthAnalyzer:
         self._compute_bandwidth(routing_type)
 
         return self.link_bandwidth
+
+    def get_link_composition(self) -> Dict[str, List[Dict]]:
+        """
+        获取链路带宽组成
+
+        Returns:
+            {link_key_str: [{src_node, src_ip, dst_node, dst_ip, bandwidth, req_type}, ...]}
+        """
+        result = {}
+        for link_key, flows in self.link_composition.items():
+            if flows:  # 只返回有流量的链路
+                key_str = f"{link_key[0][0]},{link_key[0][1]}-{link_key[1][0]},{link_key[1][1]}"
+                result[key_str] = flows
+        return result
 
     def get_statistics(self) -> Dict[str, float]:
         """
