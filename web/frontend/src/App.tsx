@@ -9,6 +9,7 @@ import { getAvailableTopologies, getTopology, getNodeInfo } from './api/topology
 import { getMounts } from './api/ipMount'
 import type { TopologyData, TopologyInfo } from './types/topology'
 import type { IPMount } from './types/ipMount'
+import type { BandwidthComputeResponse } from './types/staticBandwidth'
 
 const { Header, Content } = Layout
 const { Title, Text } = Typography
@@ -33,6 +34,7 @@ function App() {
   const [trafficMode, setTrafficMode] = useState<'noc' | 'd2d'>('noc')
   const [mounts, setMounts] = useState<IPMount[]>([])
   const [mountsVersion, setMountsVersion] = useState(0)
+  const [linkBandwidth, setLinkBandwidth] = useState<Record<string, number>>({})
 
   // 加载可用拓扑类型
   const loadTopologies = async () => {
@@ -84,6 +86,11 @@ function App() {
     } finally {
       setNodeInfoLoading(false)
     }
+  }
+
+  // 处理带宽计算完成
+  const handleBandwidthComputed = (data: BandwidthComputeResponse) => {
+    setLinkBandwidth(data.link_bandwidth)
   }
 
   // 初始化
@@ -138,9 +145,10 @@ function App() {
                 mounts={mounts}
                 loading={topoLoading}
                 onNodeClick={handleNodeClick}
+                linkBandwidth={linkBandwidth}
               />
 
-              
+
 
               {/* 节点信息 */}
               {topoData && (
@@ -150,7 +158,7 @@ function App() {
           </Col>
 
           {/* 右侧：IP挂载和流量配置 */}
-          <Col span={12}>
+          <Col span={14}>
             {topoData && (
               <Space direction="vertical" size="large" style={{ width: '100%' }}>
                 <IPMountPanel
@@ -167,7 +175,12 @@ function App() {
                         <Option value="d2d">D2D 模式</Option>
                       </Select>
                     </Space>
-                    <TrafficConfigPanel topology={selectedTopo} mode={trafficMode} mountsVersion={mountsVersion} />
+                    <TrafficConfigPanel
+                      topology={selectedTopo}
+                      mode={trafficMode}
+                      mountsVersion={mountsVersion}
+                      onBandwidthComputed={handleBandwidthComputed}
+                    />
                   </Space>
                 </Card>
               </Space>

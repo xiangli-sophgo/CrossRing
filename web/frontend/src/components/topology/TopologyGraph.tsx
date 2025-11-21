@@ -11,9 +11,10 @@ interface TopologyGraphProps {
   mounts: IPMount[]
   loading?: boolean
   onNodeClick?: (nodeId: number) => void
+  linkBandwidth?: Record<string, number>  // key格式: 'x1,y1-x2,y2'
 }
 
-const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, onNodeClick }) => {
+const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, onNodeClick, linkBandwidth }) => {
   const [elements, setElements] = useState<any[]>([])
   const [selectedNode, setSelectedNode] = useState<number | null>(null)
   const cyRef = useRef<Cytoscape.Core | null>(null)
@@ -71,6 +72,40 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
       default:
         return 'ip-other'
     }
+  }
+
+  // 节点ID转坐标：CrossRing格式为 row*cols + col
+  const nodeIdToPos = (nodeId: number, cols: number): {col: number, row: number} => {
+    return {
+      col: nodeId % cols,
+      row: Math.floor(nodeId / cols)
+    }
+  }
+
+  // 获取链路带宽
+  const getLinkBandwidth = (sourceId: number, targetId: number): number => {
+    if (!linkBandwidth || !data) return 0
+    const cols = data.cols
+    const srcPos = nodeIdToPos(sourceId, cols)
+    const dstPos = nodeIdToPos(targetId, cols)
+    const key = `${srcPos.col},${srcPos.row}-${dstPos.col},${dstPos.row}`
+    return linkBandwidth[key] || 0
+  }
+
+  // 根据带宽获取颜色
+  const getBandwidthColor = (bandwidth: number): string => {
+    if (bandwidth === 0) return '#bfbfbf'  // 灰色 - 无流量
+    if (bandwidth < 50) return '#52c41a'    // 绿色 - 低负载
+    if (bandwidth < 100) return '#fa8c16'   // 橙色 - 中等负载
+    return '#f5222d'                        // 红色 - 高负载
+  }
+
+  // 根据带宽获取线宽
+  const getBandwidthWidth = (bandwidth: number): number => {
+    if (bandwidth === 0) return 2
+    if (bandwidth < 50) return 2
+    if (bandwidth < 100) return 3
+    return 4
   }
 
   useEffect(() => {
@@ -209,6 +244,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
     const edges: any[] = []
     data.edges.forEach((edge, idx) => {
       // 正向边 - 偏移到一侧
+      const forwardBandwidth = getLinkBandwidth(edge.source, edge.target)
       edges.push({
         data: {
           id: `edge-${idx}-forward`,
@@ -217,9 +253,14 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
           direction: edge.direction,
           type: edge.type,
           offset: 1,  // 正向偏移
+          bandwidth: forwardBandwidth,
+          bandwidthColor: getBandwidthColor(forwardBandwidth),
+          bandwidthWidth: getBandwidthWidth(forwardBandwidth),
+          label: forwardBandwidth > 0 ? forwardBandwidth.toFixed(1) : ''
         }
       })
       // 反向边 - 偏移到另一侧
+      const backwardBandwidth = getLinkBandwidth(edge.target, edge.source)
       edges.push({
         data: {
           id: `edge-${idx}-backward`,
@@ -228,12 +269,16 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
           direction: edge.direction,
           type: edge.type,
           offset: -1,  // 反向偏移
+          bandwidth: backwardBandwidth,
+          bandwidthColor: getBandwidthColor(backwardBandwidth),
+          bandwidthWidth: getBandwidthWidth(backwardBandwidth),
+          label: backwardBandwidth > 0 ? backwardBandwidth.toFixed(1) : ''
         }
       })
     })
 
     setElements([...nodes, ...edges])
-  }, [data, mounts])
+  }, [data, mounts, linkBandwidth])
 
   const stylesheet: any[] = [
     // 背景节点样式 - 固定大小的正方形容器(统一浅灰色)
@@ -326,24 +371,47 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
         'opacity': 0.3,
       }
     },
-    // 基础边样式 - 使用taxi实现平行直线箭头
+    // 基础边样式 - 使用endpoint实现平行分开的直线箭头
     {
       selector: 'edge',
       style: {
-        'width': 2,
-        'line-color': '#bfbfbf',
-        'target-arrow-color': '#bfbfbf',
+        'width': 'data(bandwidthWidth)',
+        'line-color': 'data(bandwidthColor)',
+        'target-arrow-color': 'data(bandwidthColor)',
         'target-arrow-shape': 'triangle',
-        'curve-style': 'taxi',
-        'taxi-direction': (ele: any) => {
-          return ele.data('direction') === 'horizontal' ? 'horizontal' : 'vertical'
-        },
-        'taxi-turn': (ele: any) => {
+        'target-arrow-fill': 'filled',
+        'curve-style': 'straight',
+        'edge-distances': 'node-position',
+        'source-distance-from-node': 36,
+        'target-distance-from-node': 36,
+        'label': 'data(label)',
+        'font-size': 12,
+        'color': '#d32029',
+        'text-background-color': '#fff',
+        'text-background-opacity': 0.8,
+        'text-background-padding': '2px',
+        'source-endpoint': (ele: any) => {
           const offset = ele.data('offset') || 0
-          return offset * 8 + 'px'
+          const direction = ele.data('direction')
+          if (direction === 'horizontal') {
+            // 水平连接：上下偏移
+            return offset > 0 ? '0 -8' : '0 8'
+          } else {
+            // 垂直连接：左右偏移
+            return offset > 0 ? '-8 0' : '8 0'
+          }
         },
-        'arrow-scale': 1.0,
-        'opacity': 0.7,
+        'target-endpoint': (ele: any) => {
+          const offset = ele.data('offset') || 0
+          const direction = ele.data('direction')
+          if (direction === 'horizontal') {
+            return offset > 0 ? '0 -8' : '0 8'
+          } else {
+            return offset > 0 ? '-8 0' : '8 0'
+          }
+        },
+        'arrow-scale': 1.2,
+        'opacity': 0.8,
       }
     },
     // 高亮边
@@ -524,7 +592,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
 
       {/* 图例 */}
       <Card title="图例" size="small">
-        <Row gutter={[16, 8]}>
+        <Row gutter={[16, 8]} justify="center">
           {/* 动态显示已挂载的IP类型 */}
           {(() => {
             const ipTypeColors: Record<string, { bg: string; border: string; label: string }> = {

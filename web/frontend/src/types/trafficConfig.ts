@@ -4,15 +4,16 @@ export interface TrafficConfig {
   id: string
   topology: string
   mode: 'noc' | 'd2d'
-  source_ip: string
-  target_ip: string
+  source_ip: string | string[]
+  target_ip: string | string[]
   speed_gbps: number
   burst_length: number
   request_type: 'R' | 'W'
   end_time_ns: number
   created_at: string
-  source_die?: number
-  target_die?: number
+  source_die?: number  // 已废弃，保留向后兼容
+  target_die?: number  // 已废弃，保留向后兼容
+  die_pairs?: number[][]  // DIE对列表，格式: [[source_die, target_die], ...]
 }
 
 export interface TrafficConfigCreate {
@@ -24,6 +25,8 @@ export interface TrafficConfigCreate {
   burst_length: number
   request_type: 'R' | 'W'
   end_time_ns: number
+  source_die?: number
+  target_die?: number
 }
 
 export interface BatchTrafficConfigCreate {
@@ -35,8 +38,9 @@ export interface BatchTrafficConfigCreate {
   burst_length: number
   request_type: 'R' | 'W'
   end_time_ns: number
-  source_die?: number
-  target_die?: number
+  source_die?: number  // 已废弃，保留向后兼容
+  target_die?: number  // 已废弃，保留向后兼容
+  die_pairs?: number[][]  // DIE对列表，格式: [[source_die, target_die], ...]
 }
 
 export interface TrafficConfigResponse {

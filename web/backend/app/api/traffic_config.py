@@ -81,7 +81,9 @@ async def create_traffic_config(request: TrafficConfigCreate):
         burst_length=request.burst_length,
         request_type=request.request_type,
         end_time_ns=request.end_time_ns,
-        created_at=datetime.now()
+        created_at=datetime.now(),
+        source_die=request.source_die,
+        target_die=request.target_die
     )
 
     # 保存到内存
@@ -102,41 +104,99 @@ async def create_batch_traffic_config(request: BatchTrafficConfigCreate):
     """
     批量创建流量配置
 
-    为所有源IP和目标IP的组合创建配置
+    创建一个配置存储IP列表，而不是展开所有组合
+    D2D模式：支持多个DIE对（使用die_pairs字段）
     """
     _ensure_topology_mode(request.topology, request.mode)
 
-    created_configs = []
+    config_id = str(uuid.uuid4())
 
-    # 为每个源IP和目标IP组合创建配置
-    for source_ip in request.source_ips:
-        for target_ip in request.target_ips:
-            config_id = str(uuid.uuid4())
+    # 处理D2D多DIE对支持
+    die_pairs_value = None
+    source_die_value = None
+    target_die_value = None
 
-            config = TrafficConfig(
-                id=config_id,
-                topology=request.topology,
-                mode=request.mode,
-                source_ip=source_ip,
-                target_ip=target_ip,
-                speed_gbps=request.speed_gbps,
-                burst_length=request.burst_length,
-                request_type=request.request_type,
-                end_time_ns=request.end_time_ns,
-                created_at=datetime.now()
-            )
+    if request.mode == "d2d":
+        # 优先使用die_pairs（新格式）
+        if request.die_pairs:
+            die_pairs_value = request.die_pairs
+        # 回退到旧格式（向后兼容）
+        elif request.source_die is not None and request.target_die is not None:
+            die_pairs_value = [[request.source_die, request.target_die]]
+            source_die_value = request.source_die
+            target_die_value = request.target_die
 
-            traffic_configs[request.topology][request.mode][config_id] = config
-            created_configs.append(config)
+    # 创建一个配置存储IP列表
+    config = TrafficConfig(
+        id=config_id,
+        topology=request.topology,
+        mode=request.mode,
+        source_ip=request.source_ips,  # 存储列表
+        target_ip=request.target_ips,  # 存储列表
+        speed_gbps=request.speed_gbps,
+        burst_length=request.burst_length,
+        request_type=request.request_type,
+        end_time_ns=request.end_time_ns,
+        created_at=datetime.now(),
+        source_die=source_die_value,
+        target_die=target_die_value,
+        die_pairs=die_pairs_value
+    )
+
+    traffic_configs[request.topology][request.mode][config_id] = config
 
     # 保存到文件
     _save_configs(request.topology, request.mode, traffic_configs[request.topology][request.mode])
 
+    # 计算实际组合数
+    combo_count = len(request.source_ips) * len(request.target_ips)
+    if die_pairs_value:
+        combo_count *= len(die_pairs_value)
+
+    message_text = f"成功创建流量配置（{len(request.source_ips)}源 × {len(request.target_ips)}目标"
+    if die_pairs_value:
+        message_text += f" × {len(die_pairs_value)}DIE对"
+    message_text += f" = {combo_count}个组合）"
+
     return TrafficConfigResponse(
         success=True,
-        message=f"成功创建 {len(created_configs)} 个流量配置",
-        config=None
+        message=message_text,
+        config=config
     )
+
+
+@router.get("/files/list")
+async def list_config_files():
+    """
+    列出所有可用的流量配置文件
+    """
+    files = []
+    if CONFIG_DIR.exists():
+        for file_path in CONFIG_DIR.glob("*.json"):
+            stat = file_path.stat()
+            # 解析文件名获取拓扑和模式信息
+            filename = file_path.stem  # 不包含.json后缀
+            parts = filename.split('_')
+            topology = parts[0] if len(parts) > 0 else "unknown"
+            mode = parts[1] if len(parts) > 1 else "unknown"
+
+            files.append({
+                "filename": file_path.name,
+                "path": str(file_path),
+                "topology": topology,
+                "mode": mode,
+                "size": stat.st_size,
+                "modified": stat.st_mtime
+            })
+
+    # 按修改时间倒序排列
+    files.sort(key=lambda x: x["modified"], reverse=True)
+
+    return {
+        "files": files,
+        "total": len(files),
+        "directory": str(CONFIG_DIR)
+    }
 
 
 @router.get("/{topology}/{mode}", response_model=TrafficConfigListResponse)
@@ -197,7 +257,9 @@ async def update_traffic_config(
         burst_length=request.burst_length,
         request_type=request.request_type,
         end_time_ns=request.end_time_ns,
-        created_at=old_config.created_at
+        created_at=old_config.created_at,
+        source_die=request.source_die,
+        target_die=request.target_die
     )
 
     traffic_configs[topology][mode][config_id] = updated_config
@@ -251,40 +313,6 @@ async def clear_all_configs(topology: str, mode: str):
         "success": True,
         "message": f"成功清空 {count} 个流量配置",
         "cleared": count
-    }
-
-
-@router.get("/files/list")
-async def list_config_files():
-    """
-    列出所有可用的流量配置文件
-    """
-    files = []
-    if CONFIG_DIR.exists():
-        for file_path in CONFIG_DIR.glob("*.json"):
-            stat = file_path.stat()
-            # 解析文件名获取拓扑和模式信息
-            filename = file_path.stem  # 不包含.json后缀
-            parts = filename.split('_')
-            topology = parts[0] if len(parts) > 0 else "unknown"
-            mode = parts[1] if len(parts) > 1 else "unknown"
-
-            files.append({
-                "filename": file_path.name,
-                "path": str(file_path),
-                "topology": topology,
-                "mode": mode,
-                "size": stat.st_size,
-                "modified": stat.st_mtime
-            })
-
-    # 按修改时间倒序排列
-    files.sort(key=lambda x: x["modified"], reverse=True)
-
-    return {
-        "files": files,
-        "total": len(files),
-        "directory": str(CONFIG_DIR)
     }
 
 

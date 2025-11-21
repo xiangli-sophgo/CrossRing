@@ -8,7 +8,6 @@ import {
   Table,
   Space,
   message,
-  Popconfirm,
   Tag,
   Select,
   Row,
@@ -27,7 +26,8 @@ import {
   UploadOutlined,
   DownOutlined,
   UpOutlined,
-  QuestionCircleOutlined
+  QuestionCircleOutlined,
+  CalculatorOutlined
 } from '@ant-design/icons'
 import type { TrafficConfig } from '../../types/trafficConfig'
 import type { IPMount } from '../../types/ipMount'
@@ -41,9 +41,12 @@ import {
   downloadTrafficFile,
   listConfigFiles,
   loadConfigsFromFile,
-  saveConfigsToFile
+  saveConfigsToFile,
+  updateTrafficConfig
 } from '../../api/trafficConfig'
 import { getMounts } from '../../api/ipMount'
+import { computeStaticBandwidth } from '../../api/staticBandwidth'
+import type { BandwidthComputeResponse } from '../../types/staticBandwidth'
 
 const { Option } = Select
 
@@ -51,9 +54,10 @@ interface TrafficConfigPanelProps {
   topology: string
   mode: 'noc' | 'd2d'
   mountsVersion?: number
+  onBandwidthComputed?: (bandwidthData: BandwidthComputeResponse) => void
 }
 
-const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode, mountsVersion }) => {
+const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode, mountsVersion, onBandwidthComputed }) => {
   const [form] = Form.useForm()
   const [configs, setConfigs] = useState<TrafficConfig[]>([])
   const [loading, setLoading] = useState(false)
@@ -73,6 +77,8 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
   const [loadingFiles, setLoadingFiles] = useState(false)
   const [trafficFileName, setTrafficFileName] = useState('')
   const [selectedDiePairs, setSelectedDiePairs] = useState<string[]>([])
+  const [routingType, setRoutingType] = useState<'XY' | 'YX'>('XY')
+  const [computing, setComputing] = useState(false)
 
   // 加载流量配置
   const loadConfigs = async () => {
@@ -193,7 +199,7 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
       const expandedSourceIPs = expandAllIPs(selectedSourceIPs)
       const expandedTargetIPs = expandAllIPs(selectedTargetIPs)
 
-      // D2D模式：为每个DIE对创建配置
+      // D2D模式：按源DIE分组创建配置
       if (mode === 'd2d') {
         // 验证DIE对选择
         if (selectedDiePairs.length === 0) {
@@ -201,11 +207,22 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
           return
         }
 
-        // 为每个DIE对创建配置
-        const promises = []
-        for (const diePair of selectedDiePairs) {
-          // 解析DIE对，格式: "0->1"
+        // 按源DIE分组DIE对
+        const diePairsBySourceDie: Record<number, number[]> = {}
+        selectedDiePairs.forEach(diePair => {
           const [sourceDie, targetDie] = diePair.split('->').map(Number)
+          if (!diePairsBySourceDie[sourceDie]) {
+            diePairsBySourceDie[sourceDie] = []
+          }
+          diePairsBySourceDie[sourceDie].push(targetDie)
+        })
+
+        // 为每个源DIE创建一个配置
+        const promises = []
+        for (const [sourceDie, targetDies] of Object.entries(diePairsBySourceDie)) {
+          const sourceDieNum = Number(sourceDie)
+          // 构建die_pairs: [[sourceDie, targetDie1], [sourceDie, targetDie2], ...]
+          const diePairsArray = targetDies.map(targetDie => [sourceDieNum, targetDie])
 
           const configData = {
             topology,
@@ -216,14 +233,15 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
             burst_length: values.burst_length,
             request_type: values.request_type,
             end_time_ns: values.end_time_ns,
-            source_die: sourceDie,
-            target_die: targetDie
+            die_pairs: diePairsArray  // 该源DIE的所有目标DIE
           }
           promises.push(createBatchTrafficConfig(configData))
         }
+
         await Promise.all(promises)
+        const totalSourceDies = Object.keys(diePairsBySourceDie).length
         const totalConfigs = expandedSourceIPs.length * expandedTargetIPs.length * selectedDiePairs.length
-        message.success(`成功创建 ${totalConfigs} 个流量配置`)
+        message.success(`成功创建 ${totalSourceDies} 个配置（共 ${totalConfigs} 个组合）`)
       } else {
         // NoC模式
         const configData = {
@@ -236,14 +254,11 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
           request_type: values.request_type,
           end_time_ns: values.end_time_ns
         }
-        await createBatchTrafficConfig(configData)
-        message.success(`成功创建 ${expandedSourceIPs.length * expandedTargetIPs.length} 个流量配置`)
+        const result = await createBatchTrafficConfig(configData)
+        message.success(result.message)
       }
 
-      form.resetFields()
-      setSelectedSourceIPs([])
-      setSelectedTargetIPs([])
-      setSelectedDiePairs([])
+      // 不清空表单，保留已选配置方便继续添加
       loadConfigs()
     } catch (error: any) {
       message.error(error.response?.data?.detail || '创建失败')
@@ -274,6 +289,87 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
     } catch (error) {
       message.error('清空失败')
       console.error(error)
+    }
+  }
+
+  // 切换请求类型
+  const handleToggleRequestType = async (record: any) => {
+    try {
+      // 获取该记录的所有配置ID
+      const configIds = record.configIds || []
+
+      // 新的请求类型
+      const newRequestType = record.request_type === 'R' ? 'W' : 'R'
+
+      // 批量更新所有相关配置
+      await Promise.all(
+        configIds.map(async (configId: string) => {
+          // 从原始configs中找到对应的配置
+          const originalConfig = configs.find((c: TrafficConfig) => c.id === configId)
+          if (!originalConfig) return
+
+          // 更新配置
+          await updateTrafficConfig(topology, mode, configId, {
+            topology: originalConfig.topology,
+            mode: originalConfig.mode,
+            source_ip: Array.isArray(originalConfig.source_ip)
+              ? originalConfig.source_ip[0]
+              : originalConfig.source_ip,
+            target_ip: Array.isArray(originalConfig.target_ip)
+              ? originalConfig.target_ip[0]
+              : originalConfig.target_ip,
+            speed_gbps: originalConfig.speed_gbps,
+            burst_length: originalConfig.burst_length,
+            request_type: newRequestType,
+            end_time_ns: originalConfig.end_time_ns,
+            source_die: originalConfig.source_die,
+            target_die: originalConfig.target_die
+          })
+        })
+      )
+
+      message.success(`已切换为 ${newRequestType} 类型`)
+      loadConfigs()
+    } catch (error) {
+      message.error('切换失败')
+      console.error(error)
+    }
+  }
+
+  // 计算静态链路带宽
+  const handleComputeBandwidth = async () => {
+    if (configs.length === 0) {
+      message.warning('请先添加流量配置')
+      return
+    }
+
+    if (mode === 'd2d') {
+      message.warning('D2D模式暂不支持静态带宽计算')
+      return
+    }
+
+    setComputing(true)
+    try {
+      const result = await computeStaticBandwidth({
+        topology,
+        mode,
+        routing_type: routingType
+      })
+
+      if (result.success) {
+        message.success(`${result.message}\n最大带宽: ${result.statistics.max_bandwidth.toFixed(2)} GB/s`)
+        // 通过回调函数将带宽数据传递给父组件
+        if (onBandwidthComputed) {
+          onBandwidthComputed(result)
+        }
+      } else {
+        message.error('带宽计算失败')
+      }
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '带宽计算失败')
+      console.error(error)
+    } finally {
+      setComputing(false)
     }
   }
 
@@ -375,127 +471,169 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
     }
   }
 
-  // 将配置按IP类型分组（不区分编号）
-  const groupedConfigs = configs.reduce((groups: any[], config: TrafficConfig) => {
-    // 提取IP类型和编号
-    const sourceFullType = config.source_ip.includes('-')
-      ? config.source_ip.split('-')[1]
-      : config.source_ip
-    const targetFullType = config.target_ip.includes('-')
-      ? config.target_ip.split('-')[1]
-      : config.target_ip
+  // 将配置按IP类型分组（不再合并不同配置）
+  const groupedConfigs = configs.filter((config: TrafficConfig) => {
+    // 过滤掉无效配置
+    return config.source_ip && config.target_ip
+  }).map((config: TrafficConfig) => {
+    // 处理IP（支持字符串或数组）
+    const sourceIps = Array.isArray(config.source_ip) ? config.source_ip : [config.source_ip]
+    const targetIps = Array.isArray(config.target_ip) ? config.target_ip : [config.target_ip]
+
+    // 提取第一个IP的类型作为组的代表
+    const firstSourceIp = sourceIps[0]
+    const firstTargetIp = targetIps[0]
+
+    if (!firstSourceIp || !firstTargetIp) {
+      console.error('Invalid config:', config)
+      return null
+    }
+
+    const sourceFullType = firstSourceIp.includes('-')
+      ? firstSourceIp.split('-')[1]
+      : firstSourceIp
+    const targetFullType = firstTargetIp.includes('-')
+      ? firstTargetIp.split('-')[1]
+      : firstTargetIp
 
     // 提取基础类型（去掉编号，如 gdma_0 -> gdma）
     const sourceBaseType = sourceFullType.split('_')[0]
     const targetBaseType = targetFullType.split('_')[0]
 
-    // 查找是否已存在相同参数的组
-    // D2D模式下还需要匹配源DIE
-    const existingGroup = groups.find(g => {
-      const baseMatch =
-        g.sourceBaseType === sourceBaseType &&
-        g.targetBaseType === targetBaseType &&
-        g.speed_gbps === config.speed_gbps &&
-        g.burst_length === config.burst_length &&
-        g.request_type === config.request_type &&
-        g.end_time_ns === config.end_time_ns
+    // 对于IP列表，提取所有节点信息
+    const extractNodeFromIp = (ip: string) => {
+      return ip.includes('-') ? parseInt(ip.split('-')[0].replace('节点', '')) : null
+    }
 
-      // D2D模式下需要匹配源DIE
-      if (mode === 'd2d' && config.source_die !== undefined) {
-        return baseMatch && g.source_die === config.source_die
+    // 创建 IP类型 -> 节点列表 的映射（从IP挂载中）
+    const ipTypeToNodes: Record<string, number[]> = {}
+    mounts.forEach(mount => {
+      if (!ipTypeToNodes[mount.ip_type]) {
+        ipTypeToNodes[mount.ip_type] = []
       }
-      return baseMatch
+      ipTypeToNodes[mount.ip_type].push(mount.node_id)
     })
 
-    const sourceNode = config.source_ip.includes('-')
-      ? parseInt(config.source_ip.split('-')[0].replace('节点', ''))
-      : null
-    const targetNode = config.target_ip.includes('-')
-      ? parseInt(config.target_ip.split('-')[0].replace('节点', ''))
-      : null
+    // 创建配置对应的显示组
+    const details: Record<string, number[]> = {}
 
-    if (existingGroup) {
-      // 添加到现有组的详细信息
-      if (!existingGroup.details[sourceFullType]) {
-        existingGroup.details[sourceFullType] = []
-      }
-      if (sourceNode !== null && !existingGroup.details[sourceFullType].includes(sourceNode)) {
-        existingGroup.details[sourceFullType].push(sourceNode)
-      }
+    // 处理所有源IP
+    sourceIps.forEach(srcIp => {
+      const srcFullType = srcIp.includes('-') ? srcIp.split('-')[1] : srcIp
+      const srcNode = extractNodeFromIp(srcIp)
 
-      // D2D模式下按目标DIE分组目标IP
-      if (mode === 'd2d' && config.target_die !== undefined) {
-        if (!existingGroup.target_dies) {
-          existingGroup.target_dies = new Set()
+      if (srcNode !== null) {
+        // 有明确的节点ID，使用它
+        if (!details[srcFullType]) {
+          details[srcFullType] = []
         }
-        existingGroup.target_dies.add(config.target_die)
+        details[srcFullType].push(srcNode)
+      } else if (ipTypeToNodes[srcFullType]) {
+        // 没有节点ID，从IP挂载中查找该类型的所有节点
+        details[srcFullType] = ipTypeToNodes[srcFullType]
+      }
+    })
 
-        if (!existingGroup.targetDetailsByDie) {
-          existingGroup.targetDetailsByDie = {}
-        }
-        if (!existingGroup.targetDetailsByDie[config.target_die]) {
-          existingGroup.targetDetailsByDie[config.target_die] = {}
-        }
-        if (!existingGroup.targetDetailsByDie[config.target_die][targetFullType]) {
-          existingGroup.targetDetailsByDie[config.target_die][targetFullType] = []
-        }
-        if (targetNode !== null && !existingGroup.targetDetailsByDie[config.target_die][targetFullType].includes(targetNode)) {
-          existingGroup.targetDetailsByDie[config.target_die][targetFullType].push(targetNode)
-        }
-      } else {
-        // 非D2D模式使用原有逻辑
-        if (!existingGroup.details[targetFullType]) {
-          existingGroup.details[targetFullType] = []
-        }
-        if (targetNode !== null && !existingGroup.details[targetFullType].includes(targetNode)) {
-          existingGroup.details[targetFullType].push(targetNode)
-        }
-      }
+    // 处理所有目标IP (非D2D模式)
+    if (mode !== 'd2d') {
+      targetIps.forEach(tgtIp => {
+        const tgtFullType = tgtIp.includes('-') ? tgtIp.split('-')[1] : tgtIp
+        const tgtNode = extractNodeFromIp(tgtIp)
 
-      existingGroup.configIds.push(config.id)
-    } else {
-      // 创建新组
-      const details: Record<string, number[]> = {}
-      if (sourceNode !== null) {
-        details[sourceFullType] = [sourceNode]
-      }
-      if (targetNode !== null && mode !== 'd2d') {
-        details[targetFullType] = [targetNode]
-      }
-
-      const groupData: any = {
-        key: `${sourceBaseType}-${targetBaseType}-${config.speed_gbps}-${config.burst_length}-${config.request_type}`,
-        sourceBaseType,
-        targetBaseType,
-        details,
-        speed_gbps: config.speed_gbps,
-        burst_length: config.burst_length,
-        request_type: config.request_type,
-        end_time_ns: config.end_time_ns,
-        configIds: [config.id]
-      }
-
-      // D2D模式添加DIE信息和按DIE分组的目标IP
-      if (config.source_die !== undefined) {
-        groupData.source_die = config.source_die
-      }
-      if (config.target_die !== undefined) {
-        groupData.target_die = config.target_die
-        groupData.target_dies = new Set([config.target_die])
-        groupData.targetDetailsByDie = {
-          [config.target_die]: {
-            [targetFullType]: targetNode !== null ? [targetNode] : []
+        if (tgtNode !== null) {
+          // 有明确的节点ID，使用它
+          if (!details[tgtFullType]) {
+            details[tgtFullType] = []
           }
+          details[tgtFullType].push(tgtNode)
+        } else if (ipTypeToNodes[tgtFullType]) {
+          // 没有节点ID，从IP挂载中查找该类型的所有节点
+          details[tgtFullType] = ipTypeToNodes[tgtFullType]
         }
-      }
-
-      groups.push(groupData)
+      })
     }
-    return groups
-  }, [])
+
+    const groupData: any = {
+      key: config.id,
+      sourceBaseType,
+      targetBaseType,
+      details,
+      speed_gbps: config.speed_gbps,
+      burst_length: config.burst_length,
+      request_type: config.request_type,
+      end_time_ns: config.end_time_ns,
+      configIds: [config.id]
+    }
+
+    // D2D模式添加DIE信息和按DIE分组的目标IP
+    if (config.die_pairs && config.die_pairs.length > 0) {
+      // 使用新的die_pairs字段
+      // 所有die_pairs应该有相同的源DIE（按源DIE分组的配置）
+      const firstPair = config.die_pairs[0]
+      groupData.source_die = firstPair[0]
+      groupData.die_pairs = config.die_pairs
+      groupData.target_dies = new Set(config.die_pairs.map((pair: any) => pair[1]))
+      groupData.targetDetailsByDie = {}
+
+      // 为每个目标DIE处理目标IP
+      config.die_pairs.forEach((pair: any) => {
+        const [, targetDie] = pair
+
+        if (!groupData.targetDetailsByDie[targetDie]) {
+          groupData.targetDetailsByDie[targetDie] = {}
+        }
+
+        // 处理所有目标IP（每个目标DIE都有完整的目标IP列表）
+        targetIps.forEach(tgtIp => {
+          const tgtFullType = tgtIp.includes('-') ? tgtIp.split('-')[1] : tgtIp
+          const tgtNode = extractNodeFromIp(tgtIp)
+
+          if (!groupData.targetDetailsByDie[targetDie][tgtFullType]) {
+            groupData.targetDetailsByDie[targetDie][tgtFullType] = []
+          }
+
+          if (tgtNode !== null) {
+            // 有明确的节点ID，使用它
+            groupData.targetDetailsByDie[targetDie][tgtFullType].push(tgtNode)
+          } else if (ipTypeToNodes[tgtFullType]) {
+            // 没有节点ID，从IP挂载中查找该类型的所有节点
+            groupData.targetDetailsByDie[targetDie][tgtFullType] = ipTypeToNodes[tgtFullType]
+          }
+        })
+      })
+    } else if (config.source_die !== undefined && config.target_die !== undefined) {
+      // 向后兼容旧格式
+      groupData.source_die = config.source_die
+      groupData.target_die = config.target_die
+      groupData.target_dies = new Set([config.target_die])
+      groupData.targetDetailsByDie = {}
+      groupData.targetDetailsByDie[config.target_die] = {}
+
+      // 处理所有目标IP
+      targetIps.forEach(tgtIp => {
+        const tgtFullType = tgtIp.includes('-') ? tgtIp.split('-')[1] : tgtIp
+        const tgtNode = extractNodeFromIp(tgtIp)
+
+        if (!groupData.targetDetailsByDie[config.target_die][tgtFullType]) {
+          groupData.targetDetailsByDie[config.target_die][tgtFullType] = []
+        }
+
+        if (tgtNode !== null) {
+          // 有明确的节点ID，使用它
+          groupData.targetDetailsByDie[config.target_die][tgtFullType].push(tgtNode)
+        } else if (ipTypeToNodes[tgtFullType]) {
+          // 没有节点ID，从IP挂载中查找该类型的所有节点
+          groupData.targetDetailsByDie[config.target_die][tgtFullType] = ipTypeToNodes[tgtFullType]
+        }
+      })
+    }
+
+    return groupData
+  }).filter(g => g !== null)
 
   // 对每组的详细信息节点ID进行排序
   groupedConfigs.forEach(g => {
+    if (!g || !g.details) return
     Object.keys(g.details).forEach(key => {
       g.details[key].sort((a: number, b: number) => a - b)
     })
@@ -534,25 +672,11 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
       dataIndex: 'source_die',
       key: 'source_die',
       width: 100,
-      render: (sourceDie: number, record: any) => {
-        // 收集该组中所有目标DIE
-        const targetDies = record.target_dies ? Array.from(record.target_dies).sort((a: number, b: number) => a - b) : []
-
-        // 如果sourceDie未定义,返回空
+      render: (sourceDie: number) => {
         if (sourceDie === undefined || sourceDie === null) {
           return null
         }
-
-        return (
-          <div>
-            <Tag color="purple">{sourceDie}</Tag>
-            {targetDies.length > 0 && (
-              <div style={{ marginTop: 4, fontSize: '12px', color: '#666' }}>
-                → {targetDies.join(', ')}
-              </div>
-            )}
-          </div>
-        )
+        return <Tag color="purple">{sourceDie}</Tag>
       }
     }] : []),
     {
@@ -580,8 +704,14 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
       dataIndex: 'request_type',
       key: 'request_type',
       width: 80,
-      render: (type: string) => (
-        <Tag color={type === 'R' ? 'cyan' : 'orange'}>{type}</Tag>
+      render: (type: string, record: any) => (
+        <Tag
+          color={type === 'R' ? 'cyan' : 'orange'}
+          style={{ cursor: 'pointer' }}
+          onClick={() => handleToggleRequestType(record)}
+        >
+          {type}
+        </Tag>
       )
     },
     {
@@ -596,9 +726,12 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
       key: 'action',
       width: 100,
       render: (record: any) => (
-        <Popconfirm
-          title={`确认删除此组配置(${record.configIds.length}个)？`}
-          onConfirm={async () => {
+        <Button
+          type="link"
+          danger
+          icon={<DeleteOutlined />}
+          size="small"
+          onClick={async () => {
             try {
               // 删除该组的所有配置
               await Promise.all(record.configIds.map((id: string) => deleteTrafficConfig(topology, mode, id)))
@@ -608,13 +741,9 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
               message.error('删除失败')
             }
           }}
-          okText="确认"
-          cancelText="取消"
         >
-          <Button type="link" danger icon={<DeleteOutlined />} size="small">
-            删除
-          </Button>
-        </Popconfirm>
+          删除
+        </Button>
       )
     }
   ]
@@ -649,16 +778,14 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
           >
             加载
           </Button>
-          <Popconfirm
-            title="确认清空所有流量配置？"
-            onConfirm={handleClearAll}
-            okText="确认"
-            cancelText="取消"
+          <Button
+            size="small"
+            danger
+            icon={<ClearOutlined />}
+            onClick={handleClearAll}
           >
-            <Button size="small" danger icon={<ClearOutlined />}>
-              清空
-            </Button>
-          </Popconfirm>
+            清空
+          </Button>
         </Space>
       }
     >
@@ -839,24 +966,6 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
             </Col>
           </Row>
         </Form>
-        <Space style={{ marginTop: 16, width: '100%', justifyContent: 'center' }}>
-          <Input
-            placeholder="输入文件名"
-            value={trafficFileName}
-            onChange={(e) => setTrafficFileName(e.target.value)}
-            style={{ width: 600 }}
-            suffix=".txt"
-          />
-          <Button
-            type="primary"
-            icon={<ThunderboltOutlined />}
-            onClick={handleGenerate}
-            loading={generating}
-            disabled={configs.length === 0}
-          >
-            生成数据流
-          </Button>
-        </Space>
       </Card>
 
       <Table
@@ -922,6 +1031,50 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
           defaultExpandAllRows: false
         }}
       />
+
+      {/* 计算静态链路带宽 */}
+      <div style={{ marginTop: 16, width: '100%', textAlign: 'center' }}>
+        <Space>
+          <span>路由算法:</span>
+          <Select
+            value={routingType}
+            onChange={setRoutingType}
+            style={{ width: 100 }}
+          >
+            <Option value="XY">XY路由</Option>
+            <Option value="YX">YX路由</Option>
+          </Select>
+          <Button
+            type="default"
+            icon={<CalculatorOutlined />}
+            onClick={handleComputeBandwidth}
+            loading={computing}
+            disabled={configs.length === 0 || mode === 'd2d'}
+          >
+            计算静态链路带宽
+          </Button>
+        </Space>
+      </div>
+
+      {/* 生成数据流 */}
+      <Space style={{ marginTop: 16, width: '100%', justifyContent: 'center' }}>
+        <Input
+          placeholder="输入文件名"
+          value={trafficFileName}
+          onChange={(e) => setTrafficFileName(e.target.value)}
+          style={{ width: 600 }}
+          suffix=".txt"
+        />
+        <Button
+          type="primary"
+          icon={<ThunderboltOutlined />}
+          onClick={handleGenerate}
+          loading={generating}
+          disabled={configs.length === 0}
+        >
+          生成数据流
+        </Button>
+      </Space>
 
       {/* 保存配置对话框 */}
       <Modal

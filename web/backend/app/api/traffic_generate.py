@@ -99,46 +99,94 @@ def _build_traffic_configs_for_engine(
         src_ip = config.source_ip
         dst_ip = config.target_ip
 
-        # 检查是新格式还是旧格式
-        # 新格式: "节点X-IP类型"
-        # 旧格式: "IP类型"
-        if src_ip in ip_label_to_node_id:
-            # 新格式: 单个节点-IP对
-            src_node_id = ip_label_to_node_id[src_ip]
-            src_ip_type = src_ip.split('-')[1]  # 提取IP类型
-            src_map = {src_ip_type: [src_node_id]}
-        elif src_ip in ip_type_to_node_ids:
-            # 旧格式: IP类型
-            src_map = {src_ip: ip_type_to_node_ids[src_ip]}
+        # 处理source_ip（支持字符串或列表）
+        src_ips = [src_ip] if isinstance(src_ip, str) else src_ip
+        src_map = {}
+
+        for ip in src_ips:
+            if ip in ip_label_to_node_id:
+                # 新格式: "节点X-IP类型"
+                node_id = ip_label_to_node_id[ip]
+                ip_type = ip.split('-')[1]
+                if ip_type not in src_map:
+                    src_map[ip_type] = []
+                src_map[ip_type].append(node_id)
+            elif ip in ip_type_to_node_ids:
+                # 旧格式: "IP类型"
+                if ip not in src_map:
+                    src_map[ip] = []
+                src_map[ip].extend(ip_type_to_node_ids[ip])
+            else:
+                raise ValueError(f"源IP {ip} 未挂载到拓扑")
+
+        # 处理target_ip（支持字符串或列表）
+        dst_ips = [dst_ip] if isinstance(dst_ip, str) else dst_ip
+        dst_map = {}
+
+        for ip in dst_ips:
+            if ip in ip_label_to_node_id:
+                # 新格式: "节点X-IP类型"
+                node_id = ip_label_to_node_id[ip]
+                ip_type = ip.split('-')[1]
+                if ip_type not in dst_map:
+                    dst_map[ip_type] = []
+                dst_map[ip_type].append(node_id)
+            elif ip in ip_type_to_node_ids:
+                # 旧格式: "IP类型"
+                if ip not in dst_map:
+                    dst_map[ip] = []
+                dst_map[ip].extend(ip_type_to_node_ids[ip])
+            else:
+                raise ValueError(f"目标IP {ip} 未挂载到拓扑")
+
+        # D2D模式：需要为每个DIE对生成独立的引擎配置
+        if mode == "d2d":
+            # 优先使用die_pairs（新格式）
+            if hasattr(config, 'die_pairs') and config.die_pairs:
+                # 计算每个DIE对分配的带宽：总带宽 / DIE对数量
+                num_die_pairs = len(config.die_pairs)
+                speed_per_pair = config.speed_gbps / num_die_pairs
+
+                # 为每个DIE对创建一个引擎配置
+                for die_pair in config.die_pairs:
+                    src_die, dst_die = die_pair
+                    engine_config = {
+                        "src_map": src_map,
+                        "dst_map": dst_map,
+                        "speed": speed_per_pair,
+                        "burst": config.burst_length,
+                        "req_type": config.request_type,
+                        "end_time": config.end_time_ns,
+                        "src_die": src_die,
+                        "dst_die": dst_die
+                    }
+                    engine_configs.append(engine_config)
+            # 回退到旧格式
+            elif hasattr(config, 'source_die') and config.source_die is not None:
+                engine_config = {
+                    "src_map": src_map,
+                    "dst_map": dst_map,
+                    "speed": config.speed_gbps,
+                    "burst": config.burst_length,
+                    "req_type": config.request_type,
+                    "end_time": config.end_time_ns,
+                    "src_die": config.source_die,
+                    "dst_die": config.target_die
+                }
+                engine_configs.append(engine_config)
+            else:
+                raise ValueError(f"D2D配置缺少DIE信息: {config_id}")
         else:
-            raise ValueError(f"源IP {src_ip} 未挂载到拓扑")
-
-        if dst_ip in ip_label_to_node_id:
-            # 新格式: 单个节点-IP对
-            dst_node_id = ip_label_to_node_id[dst_ip]
-            dst_ip_type = dst_ip.split('-')[1]  # 提取IP类型
-            dst_map = {dst_ip_type: [dst_node_id]}
-        elif dst_ip in ip_type_to_node_ids:
-            # 旧格式: IP类型
-            dst_map = {dst_ip: ip_type_to_node_ids[dst_ip]}
-        else:
-            raise ValueError(f"目标IP {dst_ip} 未挂载到拓扑")
-
-        engine_config = {
-            "src_map": src_map,
-            "dst_map": dst_map,
-            "speed": config.speed_gbps,
-            "burst": config.burst_length,
-            "req_type": config.request_type,
-            "end_time": config.end_time_ns
-        }
-
-        # D2D模式需要额外的die信息
-        if mode == "d2d" and hasattr(config, 'source_die') and hasattr(config, 'target_die'):
-            engine_config["source_die"] = config.source_die
-            engine_config["target_die"] = config.target_die
-
-        engine_configs.append(engine_config)
+            # NoC模式：一个配置生成一个引擎配置
+            engine_config = {
+                "src_map": src_map,
+                "dst_map": dst_map,
+                "speed": config.speed_gbps,
+                "burst": config.burst_length,
+                "req_type": config.request_type,
+                "end_time": config.end_time_ns
+            }
+            engine_configs.append(engine_config)
 
     return engine_configs
 

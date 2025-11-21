@@ -43,7 +43,7 @@ def main():
             # "data_sim_16_share_W_1110.txt"
             # "2261_c2c_16_share_R.txt"
             "2261_c2c_64share_d2d_R.txt"
-            # "traffic_20251120_163527.txt"
+            # "2261_test.txt"
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
