@@ -8,6 +8,16 @@ const client = axios.create({
 })
 
 /**
+ * 获取可用的D2D配置文件列表
+ */
+export const getD2DConfigs = async (): Promise<{
+  configs: Array<{ filename: string; num_dies: number; connections: number }>
+}> => {
+  const response = await client.get('/api/traffic/bandwidth/d2d-configs')
+  return response.data
+}
+
+/**
  * 计算静态链路带宽
  */
 export const computeStaticBandwidth = async (

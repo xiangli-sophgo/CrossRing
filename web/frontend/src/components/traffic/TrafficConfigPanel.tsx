@@ -15,7 +15,8 @@ import {
   Divider,
   Modal,
   Radio,
-  Tooltip
+  Tooltip,
+  Checkbox
 } from 'antd'
 import {
   SettingOutlined,
@@ -45,7 +46,7 @@ import {
   updateTrafficConfig
 } from '../../api/trafficConfig'
 import { getMounts } from '../../api/ipMount'
-import { computeStaticBandwidth } from '../../api/staticBandwidth'
+import { computeStaticBandwidth, getD2DConfigs } from '../../api/staticBandwidth'
 import type { BandwidthComputeResponse } from '../../types/staticBandwidth'
 
 const { Option } = Select
@@ -79,6 +80,10 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
   const [selectedDiePairs, setSelectedDiePairs] = useState<string[]>([])
   const [routingType, setRoutingType] = useState<'XY' | 'YX'>('XY')
   const [computing, setComputing] = useState(false)
+  const [useFixedSeed, setUseFixedSeed] = useState(false)
+  const [randomSeed, setRandomSeed] = useState(42)
+  const [d2dConfigs, setD2DConfigs] = useState<Array<{ filename: string; num_dies: number; connections: number }>>([])
+  const [selectedD2DConfig, setSelectedD2DConfig] = useState<string>('')
 
   // 加载流量配置
   const loadConfigs = async () => {
@@ -144,10 +149,29 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
     }
   }
 
+  // 加载D2D配置文件列表
+  const loadD2DConfigs = async () => {
+    try {
+      const data = await getD2DConfigs()
+      setD2DConfigs(data.configs)
+      if (data.configs.length > 0 && !selectedD2DConfig) {
+        setSelectedD2DConfig(data.configs[0].filename)
+      }
+    } catch (error) {
+      console.error('加载D2D配置失败:', error)
+    }
+  }
+
   useEffect(() => {
     loadConfigs()
     loadMounts()
   }, [topology, mode, mountsVersion])
+
+  useEffect(() => {
+    if (mode === 'd2d') {
+      loadD2DConfigs()
+    }
+  }, [mode])
 
   // 展开"全部XXX"为具体IP列表
   const expandAllIPs = (selectedIPs: string[]): string[] => {
@@ -312,12 +336,8 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
           await updateTrafficConfig(topology, mode, configId, {
             topology: originalConfig.topology,
             mode: originalConfig.mode,
-            source_ip: Array.isArray(originalConfig.source_ip)
-              ? originalConfig.source_ip[0]
-              : originalConfig.source_ip,
-            target_ip: Array.isArray(originalConfig.target_ip)
-              ? originalConfig.target_ip[0]
-              : originalConfig.target_ip,
+            source_ip: originalConfig.source_ip,
+            target_ip: originalConfig.target_ip,
             speed_gbps: originalConfig.speed_gbps,
             burst_length: originalConfig.burst_length,
             request_type: newRequestType,
@@ -343,21 +363,27 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
       return
     }
 
-    if (mode === 'd2d') {
-      message.warning('D2D模式暂不支持静态带宽计算')
-      return
-    }
-
     setComputing(true)
     try {
       const result = await computeStaticBandwidth({
         topology,
         mode,
-        routing_type: routingType
+        routing_type: routingType,
+        d2d_config_file: mode === 'd2d' ? selectedD2DConfig : undefined
       })
 
       if (result.success) {
-        message.success(`${result.message}\n最大带宽: ${result.statistics.max_bandwidth.toFixed(2)} GB/s`)
+        // 根据模式显示不同的统计信息
+        if (result.mode === 'd2d') {
+          // D2D模式：显示所有Die中的最大带宽
+          const stats = result.statistics as Record<string, { max_bandwidth: number }>
+          const maxBw = Math.max(...Object.values(stats).map(s => s.max_bandwidth))
+          message.success(`${result.message}\n最大带宽: ${maxBw.toFixed(2)} GB/s`)
+        } else {
+          // NoC模式
+          const stats = result.statistics as { max_bandwidth: number }
+          message.success(`${result.message}\n最大带宽: ${stats.max_bandwidth.toFixed(2)} GB/s`)
+        }
         // 通过回调函数将带宽数据传递给父组件
         if (onBandwidthComputed) {
           onBandwidthComputed(result)
@@ -391,7 +417,7 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
         topology,
         mode,
         split_by_source: false,
-        random_seed: 42,
+        random_seed: useFixedSeed ? randomSeed : Date.now(),
         filename: trafficFileName
       })
 
@@ -1044,12 +1070,29 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
             <Option value="XY">XY路由</Option>
             <Option value="YX">YX路由</Option>
           </Select>
+          {mode === 'd2d' && (
+            <>
+              <span>D2D配置:</span>
+              <Select
+                value={selectedD2DConfig}
+                onChange={setSelectedD2DConfig}
+                style={{ width: 180 }}
+                placeholder="选择D2D配置"
+              >
+                {d2dConfigs.map(config => (
+                  <Option key={config.filename} value={config.filename}>
+                    {config.filename.replace('.yaml', '')} ({config.num_dies}Die)
+                  </Option>
+                ))}
+              </Select>
+            </>
+          )}
           <Button
             type="default"
             icon={<CalculatorOutlined />}
             onClick={handleComputeBandwidth}
             loading={computing}
-            disabled={configs.length === 0 || mode === 'd2d'}
+            disabled={configs.length === 0 || (mode === 'd2d' && !selectedD2DConfig)}
           >
             计算静态链路带宽
           </Button>
@@ -1057,14 +1100,33 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
       </div>
 
       {/* 生成数据流 */}
-      <Space style={{ marginTop: 16, width: '100%', justifyContent: 'center' }}>
-        <Input
-          placeholder="输入文件名"
-          value={trafficFileName}
-          onChange={(e) => setTrafficFileName(e.target.value)}
-          style={{ width: 600 }}
-          suffix=".txt"
-        />
+      <Space direction="vertical" style={{ marginTop: 16, width: '100%', alignItems: 'center' }}>
+        <Space>
+          <Input
+            placeholder="输入文件名"
+            value={trafficFileName}
+            onChange={(e) => setTrafficFileName(e.target.value)}
+            style={{ width: 600 }}
+            suffix=".txt"
+          />
+        </Space>
+        <Space direction="vertical" size="small" style={{ width: 600 }}>
+          <Checkbox
+            checked={useFixedSeed}
+            onChange={(e) => setUseFixedSeed(e.target.checked)}
+          >
+            使用固定随机种子
+          </Checkbox>
+          {useFixedSeed && (
+            <InputNumber
+              value={randomSeed}
+              onChange={(value) => setRandomSeed(value || 42)}
+              min={0}
+              style={{ width: '100%' }}
+              placeholder="输入随机种子（默认42）"
+            />
+          )}
+        </Space>
         <Button
           type="primary"
           icon={<ThunderboltOutlined />}

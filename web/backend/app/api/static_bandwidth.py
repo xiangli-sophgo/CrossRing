@@ -1,12 +1,20 @@
 from fastapi import APIRouter, HTTPException
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Optional, Union
 from pydantic import BaseModel, Field
+from pathlib import Path
+import yaml
 
 # 导入 CrossRing 静态带宽分析模块
-from src.traffic_process.traffic_gene.static_bandwidth_analyzer import compute_link_bandwidth
+from src.traffic_process.traffic_gene.static_bandwidth_analyzer import (
+    compute_link_bandwidth,
+    compute_d2d_link_bandwidth,
+)
 
 from app.api.ip_mount import _load_mounts
 from app.api.traffic_config import _load_configs
+
+# D2D配置文件目录
+D2D_CONFIG_DIR = Path(__file__).parent.parent.parent.parent.parent / "config" / "topologies"
 
 router = APIRouter(prefix="/api/traffic/bandwidth", tags=["静态带宽分析"])
 
@@ -16,6 +24,7 @@ class BandwidthComputeRequest(BaseModel):
     topology: str = Field(..., description="拓扑类型")
     mode: str = Field(..., description="流量模式: noc 或 d2d")
     routing_type: str = Field(default="XY", description="路由算法: XY 或 YX")
+    d2d_config_file: Optional[str] = Field(default=None, description="D2D配置文件名（仅D2D模式）")
 
 
 class BandwidthStatistics(BaseModel):
@@ -30,8 +39,68 @@ class BandwidthComputeResponse(BaseModel):
     """静态带宽计算响应"""
     success: bool
     message: str
-    link_bandwidth: Dict[str, float] = Field(default={}, description="链路带宽字典 (key格式: 'x1,y1-x2,y2')")
-    statistics: BandwidthStatistics
+    mode: str = Field(default="noc", description="流量模式: noc 或 d2d")
+    link_bandwidth: Union[Dict[str, float], Dict[str, Dict[str, float]]] = Field(
+        default={},
+        description="链路带宽字典。NoC模式: {link_key: bw}; D2D模式: {die_id: {link_key: bw}}"
+    )
+    statistics: Union[BandwidthStatistics, Dict[str, BandwidthStatistics]] = Field(
+        description="统计信息。NoC模式: 单个统计; D2D模式: {die_id: 统计}"
+    )
+
+
+def _load_d2d_config(config_filename: Optional[str] = None) -> Optional[Dict]:
+    """加载D2D配置文件"""
+    if config_filename:
+        # 加载指定的配置文件
+        config_file = D2D_CONFIG_DIR / config_filename
+        if config_file.exists():
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+                if config.get('D2D_ENABLED', False):
+                    return config
+        return None
+
+    # 未指定时，尝试加载默认配置文件
+    config_files = [
+        D2D_CONFIG_DIR / f"d2d_2die_config.yaml",
+        D2D_CONFIG_DIR / f"d2d_4die_config.yaml",
+    ]
+
+    for config_file in config_files:
+        if config_file.exists():
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+                if config.get('D2D_ENABLED', False):
+                    return config
+
+    return None
+
+
+def _list_d2d_configs() -> List[Dict]:
+    """列出所有可用的D2D配置文件"""
+    configs = []
+    if D2D_CONFIG_DIR.exists():
+        for config_file in D2D_CONFIG_DIR.glob("d2d_*_config.yaml"):
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    config = yaml.safe_load(f)
+                    if config.get('D2D_ENABLED', False):
+                        configs.append({
+                            "filename": config_file.name,
+                            "num_dies": config.get('NUM_DIES', 2),
+                            "connections": len(config.get('D2D_CONNECTIONS', []))
+                        })
+            except Exception:
+                pass
+    return configs
+
+
+@router.get("/d2d-configs")
+async def list_d2d_configs():
+    """获取可用的D2D配置文件列表"""
+    configs = _list_d2d_configs()
+    return {"configs": configs}
 
 
 @router.post("/compute", response_model=BandwidthComputeResponse)
@@ -41,14 +110,8 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
 
     基于当前的IP挂载和流量配置，计算NoC拓扑中每条链路的静态带宽。
     使用指定的路由算法(XY或YX)进行计算。
+    支持NoC和D2D两种模式。
     """
-    # 检查模式
-    if request.mode.lower() == "d2d":
-        raise HTTPException(
-            status_code=400,
-            detail="D2D模式暂不支持静态链路带宽计算"
-        )
-
     # 验证路由类型
     if request.routing_type not in ["XY", "YX"]:
         raise HTTPException(
@@ -101,15 +164,17 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
             for ip in src_ips:
                 # 提取IP类型：支持 "节点X-IP类型" 或 "IP类型" 格式
                 if '-' in ip:
-                    ip_type = ip.split('-')[1]  # "节点18-cdma_0" -> "cdma_0"
+                    # "节点18-cdma_0" -> 节点ID=18, IP类型=cdma_0
+                    node_id = int(ip.split('-')[0].replace('节点', ''))
+                    ip_type = ip.split('-')[1]
+                    if ip_type not in src_map:
+                        src_map[ip_type] = []
+                    src_map[ip_type].append(node_id)
                 else:
-                    ip_type = ip  # "cdma_0" -> "cdma_0"
-
-                if ip_type in ip_to_nodes:
-                    src_map[ip_type] = ip_to_nodes[ip_type]
-                else:
-                    # 可能IP没有挂载，跳过
-                    continue
+                    # "cdma_0" -> 所有该类型节点
+                    ip_type = ip
+                    if ip_type in ip_to_nodes:
+                        src_map[ip_type] = ip_to_nodes[ip_type]
 
             # 处理target_ip
             dst_ips = [config.target_ip] if isinstance(config.target_ip, str) else config.target_ip
@@ -117,26 +182,36 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
             for ip in dst_ips:
                 # 提取IP类型：支持 "节点X-IP类型" 或 "IP类型" 格式
                 if '-' in ip:
-                    ip_type = ip.split('-')[1]  # "节点3-ddr_0" -> "ddr_0"
+                    # "节点3-ddr_0" -> 节点ID=3, IP类型=ddr_0
+                    node_id = int(ip.split('-')[0].replace('节点', ''))
+                    ip_type = ip.split('-')[1]
+                    if ip_type not in dst_map:
+                        dst_map[ip_type] = []
+                    dst_map[ip_type].append(node_id)
                 else:
-                    ip_type = ip  # "ddr_0" -> "ddr_0"
-
-                if ip_type in ip_to_nodes:
-                    dst_map[ip_type] = ip_to_nodes[ip_type]
-                else:
-                    continue
+                    # "ddr_0" -> 所有该类型节点
+                    ip_type = ip
+                    if ip_type in ip_to_nodes:
+                        dst_map[ip_type] = ip_to_nodes[ip_type]
 
             # 如果有有效的源和目标，创建配置
             if src_map and dst_map:
                 # 创建一个类似config_manager.TrafficConfig的对象
                 class AnalyzerConfig:
-                    def __init__(self, src_map, dst_map, speed, burst, req_type, end_time):
+                    def __init__(self, src_map, dst_map, speed, burst, req_type, end_time, die_pairs=None):
                         self.src_map = src_map
                         self.dst_map = dst_map
                         self.speed = speed
                         self.burst = burst
                         self.req_type = req_type
                         self.end_time = end_time
+                        self.die_pairs = die_pairs
+
+                # D2D模式：获取die_pairs
+                die_pairs = None
+                if request.mode.lower() == "d2d":
+                    if hasattr(config, 'die_pairs') and config.die_pairs:
+                        die_pairs = config.die_pairs
 
                 analyzer_config = AnalyzerConfig(
                     src_map=src_map,
@@ -144,7 +219,8 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
                     speed=config.speed_gbps,
                     burst=config.burst_length,
                     req_type=config.request_type,
-                    end_time=config.end_time_ns
+                    end_time=config.end_time_ns,
+                    die_pairs=die_pairs
                 )
                 configs_list.append(analyzer_config)
 
@@ -154,45 +230,114 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
                 detail="没有有效的流量配置可用于带宽计算（可能IP未正确挂载）"
             )
 
-        # 调用静态带宽分析器
-        link_bandwidth_dict = compute_link_bandwidth(
-            topo_type=request.topology,
-            node_ips=node_ips,
-            configs=configs_list,
-            routing_type=request.routing_type
-        )
+        # 根据模式选择不同的计算方法
+        if request.mode.lower() == "d2d":
+            # D2D模式：加载D2D配置
+            d2d_config = _load_d2d_config(request.d2d_config_file)
+            if not d2d_config:
+                raise HTTPException(
+                    status_code=400,
+                    detail="未找到D2D配置文件"
+                )
 
-        # 转换字典key为字符串格式 (FastAPI不支持tuple key的JSON序列化)
-        # {((x1,y1), (x2,y2)): bw} -> {"x1,y1-x2,y2": bw}
-        link_bandwidth_str = {}
-        for (src_pos, dst_pos), bandwidth in link_bandwidth_dict.items():
-            key = f"{src_pos[0]},{src_pos[1]}-{dst_pos[0]},{dst_pos[1]}"
-            link_bandwidth_str[key] = bandwidth
+            # 获取D2D连接配置
+            d2d_connections = d2d_config.get('D2D_CONNECTIONS', [])
+            num_dies = d2d_config.get('NUM_DIES', 2)
 
-        # 计算统计信息
-        active_bandwidths = [bw for bw in link_bandwidth_dict.values() if bw > 0]
+            # 生成双向D2D配对
+            d2d_pairs = []
+            for conn in d2d_connections:
+                src_die, src_node, dst_die, dst_node = conn
+                d2d_pairs.append((src_die, src_node, dst_die, dst_node))
+                d2d_pairs.append((dst_die, dst_node, src_die, src_node))
 
-        if active_bandwidths:
-            statistics = BandwidthStatistics(
-                max_bandwidth=max(active_bandwidths),
-                sum_bandwidth=sum(active_bandwidths),
-                avg_bandwidth=sum(active_bandwidths) / len(active_bandwidths),
-                num_active_links=len(active_bandwidths)
+            # 调用D2D静态带宽分析器
+            die_link_bandwidth_dict = compute_d2d_link_bandwidth(
+                topo_type=request.topology,
+                node_ips=node_ips,
+                configs=configs_list,
+                d2d_pairs=d2d_pairs,
+                routing_type=request.routing_type,
+                num_dies=num_dies
             )
+
+            # 转换字典格式
+            link_bandwidth_str = {}
+            statistics_dict = {}
+
+            for die_id, link_bw in die_link_bandwidth_dict.items():
+                die_key = str(die_id)
+                link_bandwidth_str[die_key] = {}
+
+                for (src_pos, dst_pos), bandwidth in link_bw.items():
+                    key = f"{src_pos[0]},{src_pos[1]}-{dst_pos[0]},{dst_pos[1]}"
+                    link_bandwidth_str[die_key][key] = bandwidth
+
+                # 计算每个Die的统计信息
+                active_bandwidths = [bw for bw in link_bw.values() if bw > 0]
+                if active_bandwidths:
+                    statistics_dict[die_key] = BandwidthStatistics(
+                        max_bandwidth=max(active_bandwidths),
+                        sum_bandwidth=sum(active_bandwidths),
+                        avg_bandwidth=sum(active_bandwidths) / len(active_bandwidths),
+                        num_active_links=len(active_bandwidths)
+                    )
+                else:
+                    statistics_dict[die_key] = BandwidthStatistics(
+                        max_bandwidth=0.0,
+                        sum_bandwidth=0.0,
+                        avg_bandwidth=0.0,
+                        num_active_links=0
+                    )
+
+            return BandwidthComputeResponse(
+                success=True,
+                message=f"成功计算D2D静态链路带宽 (路由算法: {request.routing_type}, {num_dies}个Die)",
+                mode="d2d",
+                link_bandwidth=link_bandwidth_str,
+                statistics=statistics_dict
+            )
+
         else:
-            statistics = BandwidthStatistics(
-                max_bandwidth=0.0,
-                sum_bandwidth=0.0,
-                avg_bandwidth=0.0,
-                num_active_links=0
+            # NoC模式：使用原有逻辑
+            link_bandwidth_dict = compute_link_bandwidth(
+                topo_type=request.topology,
+                node_ips=node_ips,
+                configs=configs_list,
+                routing_type=request.routing_type
             )
 
-        return BandwidthComputeResponse(
-            success=True,
-            message=f"成功计算静态链路带宽 (路由算法: {request.routing_type})",
-            link_bandwidth=link_bandwidth_str,
-            statistics=statistics
-        )
+            # 转换字典key为字符串格式
+            link_bandwidth_str = {}
+            for (src_pos, dst_pos), bandwidth in link_bandwidth_dict.items():
+                key = f"{src_pos[0]},{src_pos[1]}-{dst_pos[0]},{dst_pos[1]}"
+                link_bandwidth_str[key] = bandwidth
+
+            # 计算统计信息
+            active_bandwidths = [bw for bw in link_bandwidth_dict.values() if bw > 0]
+
+            if active_bandwidths:
+                statistics = BandwidthStatistics(
+                    max_bandwidth=max(active_bandwidths),
+                    sum_bandwidth=sum(active_bandwidths),
+                    avg_bandwidth=sum(active_bandwidths) / len(active_bandwidths),
+                    num_active_links=len(active_bandwidths)
+                )
+            else:
+                statistics = BandwidthStatistics(
+                    max_bandwidth=0.0,
+                    sum_bandwidth=0.0,
+                    avg_bandwidth=0.0,
+                    num_active_links=0
+                )
+
+            return BandwidthComputeResponse(
+                success=True,
+                message=f"成功计算静态链路带宽 (路由算法: {request.routing_type})",
+                mode="noc",
+                link_bandwidth=link_bandwidth_str,
+                statistics=statistics
+            )
 
     except Exception as e:
         raise HTTPException(

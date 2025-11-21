@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 import Cytoscape from 'cytoscape'
-import { Card, Space, Tag, Button, Row, Col } from 'antd'
+import { Card, Space, Tag, Button, Row, Col, Select } from 'antd'
 import { ZoomInOutlined, ZoomOutOutlined, AimOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { TopologyData } from '../../types/topology'
 import type { IPMount } from '../../types/ipMount'
@@ -11,10 +11,18 @@ interface TopologyGraphProps {
   mounts: IPMount[]
   loading?: boolean
   onNodeClick?: (nodeId: number) => void
-  linkBandwidth?: Record<string, number>  // key格式: 'x1,y1-x2,y2'
+  // NoC模式: Record<string, number>
+  // D2D模式: Record<string, Record<string, number>>
+  linkBandwidth?: Record<string, number> | Record<string, Record<string, number>>
+  bandwidthMode?: 'noc' | 'd2d'
+  selectedDie?: number
+  onDieChange?: (dieId: number) => void
 }
 
-const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, onNodeClick, linkBandwidth }) => {
+const TopologyGraph: React.FC<TopologyGraphProps> = ({
+  data, mounts, loading, onNodeClick, linkBandwidth,
+  bandwidthMode = 'noc', selectedDie = 0, onDieChange
+}) => {
   const [elements, setElements] = useState<any[]>([])
   const [selectedNode, setSelectedNode] = useState<number | null>(null)
   const cyRef = useRef<Cytoscape.Core | null>(null)
@@ -89,7 +97,15 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
     const srcPos = nodeIdToPos(sourceId, cols)
     const dstPos = nodeIdToPos(targetId, cols)
     const key = `${srcPos.col},${srcPos.row}-${dstPos.col},${dstPos.row}`
-    return linkBandwidth[key] || 0
+
+    if (bandwidthMode === 'd2d') {
+      // D2D模式：从选中的Die获取带宽
+      const dieBandwidth = (linkBandwidth as Record<string, Record<string, number>>)[String(selectedDie)]
+      return dieBandwidth ? (dieBandwidth[key] || 0) : 0
+    } else {
+      // NoC模式：直接获取带宽
+      return (linkBandwidth as Record<string, number>)[key] || 0
+    }
   }
 
   // 根据带宽获取颜色
@@ -278,7 +294,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
     })
 
     setElements([...nodes, ...edges])
-  }, [data, mounts, linkBandwidth])
+  }, [data, mounts, linkBandwidth, bandwidthMode, selectedDie])
 
   const stylesheet: any[] = [
     // 背景节点样式 - 固定大小的正方形容器(统一浅灰色)
@@ -390,6 +406,29 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
         'text-background-color': '#fff',
         'text-background-opacity': 0.8,
         'text-background-padding': '2px',
+        'text-margin-x': (ele: any) => {
+          const offset = ele.data('offset') || 0
+          const direction = ele.data('direction')
+          if (direction === 'vertical') {
+            // 垂直链路：根据文本长度动态左右偏移
+            const label = ele.data('label') || ''
+            const textLength = label.length
+            const textWidth = textLength * 7.2  // 估算文本宽度
+            const baseOffset = 4
+            const dynamicOffset = baseOffset + textWidth / 2
+            return offset > 0 ? -dynamicOffset : dynamicOffset
+          }
+          return 0
+        },
+        'text-margin-y': (ele: any) => {
+          const offset = ele.data('offset') || 0
+          const direction = ele.data('direction')
+          if (direction === 'horizontal') {
+            // 水平链路：固定上下偏移
+            return offset > 0 ? -10 : 10
+          }
+          return 0
+        },
         'source-endpoint': (ele: any) => {
           const offset = ele.data('offset') || 0
           const direction = ele.data('direction')
@@ -564,6 +603,23 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({ data, mounts, loading, on
           </Col>
           <Col span={12} style={{ textAlign: 'right' }}>
             <Space>
+              {bandwidthMode === 'd2d' && linkBandwidth && (
+                <Space>
+                  <span>Die:</span>
+                  <Select
+                    value={selectedDie}
+                    onChange={onDieChange}
+                    size="small"
+                    style={{ width: 80 }}
+                  >
+                    {Object.keys(linkBandwidth).map(dieId => (
+                      <Select.Option key={dieId} value={Number(dieId)}>
+                        Die {dieId}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                </Space>
+              )}
               <Button size="small" icon={<ZoomInOutlined />} onClick={handleZoomIn}>放大</Button>
               <Button size="small" icon={<ZoomOutOutlined />} onClick={handleZoomOut}>缩小</Button>
               <Button size="small" icon={<AimOutlined />} onClick={handleFit}>适应</Button>

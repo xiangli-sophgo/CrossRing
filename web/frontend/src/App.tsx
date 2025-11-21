@@ -34,7 +34,9 @@ function App() {
   const [trafficMode, setTrafficMode] = useState<'noc' | 'd2d'>('noc')
   const [mounts, setMounts] = useState<IPMount[]>([])
   const [mountsVersion, setMountsVersion] = useState(0)
-  const [linkBandwidth, setLinkBandwidth] = useState<Record<string, number>>({})
+  const [linkBandwidth, setLinkBandwidth] = useState<Record<string, number> | Record<string, Record<string, number>>>({})
+  const [bandwidthMode, setBandwidthMode] = useState<'noc' | 'd2d'>('noc')
+  const [selectedDie, setSelectedDie] = useState<number>(0)
 
   // 加载可用拓扑类型
   const loadTopologies = async () => {
@@ -91,6 +93,11 @@ function App() {
   // 处理带宽计算完成
   const handleBandwidthComputed = (data: BandwidthComputeResponse) => {
     setLinkBandwidth(data.link_bandwidth)
+    setBandwidthMode(data.mode)
+    // D2D模式时重置选中的Die为0
+    if (data.mode === 'd2d') {
+      setSelectedDie(0)
+    }
   }
 
   // 初始化
@@ -146,6 +153,9 @@ function App() {
                 loading={topoLoading}
                 onNodeClick={handleNodeClick}
                 linkBandwidth={linkBandwidth}
+                bandwidthMode={bandwidthMode}
+                selectedDie={selectedDie}
+                onDieChange={setSelectedDie}
               />
 
 
