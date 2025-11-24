@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from 'react'
+import { useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 import Cytoscape from 'cytoscape'
 import { Card, Space, Tag, Button, Row, Col, message } from 'antd'
@@ -14,6 +14,8 @@ interface MultiDieTopologyGraphProps {
   loading?: boolean
   // D2D模式: {die_id: {link_key: bw}}
   linkBandwidth?: Record<string, Record<string, number>>
+  // D2D跨Die链路带宽: {'{src_die}-{src_node}-{dst_die}-{dst_node}': bw}
+  d2dLinkBandwidth?: Record<string, number>
   linkComposition?: Record<string, any[]>
   d2dLayout: D2DLayoutInfo
   onNodeClick?: (nodeId: number, dieId?: number) => void
@@ -69,9 +71,9 @@ const getRotatedDieSize = (
   return { width: cols * NODE_SPACING, height: rows * NODE_SPACING }
 }
 
-const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
-  data, mounts, loading, linkBandwidth, linkComposition, d2dLayout, onNodeClick, onLinkClick, onWidthChange
-}) => {
+const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTopologyGraphProps>(({
+  data, mounts, loading, linkBandwidth, d2dLinkBandwidth, linkComposition, d2dLayout, onNodeClick, onLinkClick, onWidthChange
+}, ref) => {
   const cyRef = useRef<Cytoscape.Core | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
 
@@ -135,12 +137,15 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
     }
   }
 
-  // 根据带宽获取颜色
+  // 根据带宽获取颜色（0-256映射到浅红-深红）
   const getBandwidthColor = (bandwidth: number): string => {
-    if (bandwidth === 0) return '#bfbfbf'
-    if (bandwidth < 50) return '#52c41a'
-    if (bandwidth < 100) return '#fa8c16'
-    return '#f5222d'
+    if (bandwidth === 0) return '#bfbfbf'  // 灰色 - 无流量
+    const ratio = Math.min(bandwidth / 256, 1)  // 0-256 映射到 0-1
+    // 从浅红(255,180,180)到深红(200,0,0)
+    const r = Math.round(255 - ratio * 55)
+    const g = Math.round(180 * (1 - ratio))
+    const b = Math.round(180 * (1 - ratio))
+    return `rgb(${r},${g},${b})`
   }
 
   // 根据带宽获取线宽
@@ -370,13 +375,13 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
           const maxColsInRow = Math.max(...sortedTypes.map(t => ipByType[t].length))
 
           // 动态计算IP块大小：根据行数和列数调整
-          const baseSize = 24
-          const maxSize = 30
-          const minSize = 18
+          const baseSize = 30
+          const maxSize = 32
+          const minSize = 26
           let ipSize = baseSize
-          if (numRows <= 2 && maxColsInRow <= 2) {
+          if (numRows <= 1 && maxColsInRow <= 1) {
             ipSize = maxSize  // IP少时放大
-          } else if (numRows >= 4 || maxColsInRow >= 4) {
+          } else if (numRows >= 2 || maxColsInRow >= 2) {
             ipSize = minSize  // IP多时缩小
           }
 
@@ -384,7 +389,7 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
 
           // 计算总高度，用于垂直居中
           const totalHeight = numRows * spacing
-          const startY = -totalHeight / 2 + spacing / 2
+          const startY = -totalHeight / 2+ spacing / 2
 
           // 绘制每行IP块
           sortedTypes.forEach((baseType, rowIdx) => {
@@ -452,8 +457,13 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
         const srcRotated = calculateRotatedPosition(edge.source, cols, rows, rotation)
         const dstRotated = calculateRotatedPosition(edge.target, cols, rows, rotation)
 
-        // 根据旋转后的位置计算实际方向
+        // 根据旋转后的视觉位置计算方向
         const actualDirection = srcRotated.row === dstRotated.row ? 'horizontal' : 'vertical'
+
+        // 确定偏移符号：视觉上水平时向右的在下，视觉上垂直时向下的在左
+        const isForwardPositive = actualDirection === 'horizontal'
+          ? (dstRotated.col > srcRotated.col)
+          : (dstRotated.row > srcRotated.row)
 
         // 正向 - 使用原始坐标查询带宽
         const fwdKey = `${srcOrigCol},${srcOrigRow}-${dstOrigCol},${dstOrigRow}`
@@ -464,7 +474,7 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
             source: `die-${dieId}-node-${edge.source}`,
             target: `die-${dieId}-node-${edge.target}`,
             direction: actualDirection,
-            offset: 1,
+            offset: isForwardPositive ? 1 : -1,
             bandwidth: fwdBw,
             bandwidthColor: getBandwidthColor(fwdBw),
             bandwidthWidth: getBandwidthWidth(fwdBw),
@@ -483,7 +493,7 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
             source: `die-${dieId}-node-${edge.target}`,
             target: `die-${dieId}-node-${edge.source}`,
             direction: actualDirection,
-            offset: -1,
+            offset: isForwardPositive ? -1 : 1,
             bandwidth: bwdBw,
             bandwidthColor: getBandwidthColor(bwdBw),
             bandwidthWidth: getBandwidthWidth(bwdBw),
@@ -516,11 +526,29 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
       const dstX = dstRotated.col * NODE_SPACING + dstOffset.x
       const dstY = dstRotated.row * NODE_SPACING + dstOffset.y
 
-      // 根据连接方向决定偏移方向
-      const d2dDirection = Math.abs(dstX - srcX) > Math.abs(dstY - srcY) ? 'horizontal' : 'vertical'
+      // 根据Die网格位置判断方向（统一使用getConnType）
+      const srcDiePos = die_positions[srcDieStr]
+      const dstDiePos = die_positions[dstDieStr]
+      const d2dDirection = getConnType(srcDiePos, dstDiePos)
 
-      // 确定偏移符号：水平方向时向右的在上，垂直方向时向下的在右
-      const isForwardPositive = d2dDirection === 'horizontal' ? (dstX > srcX) : (dstY > srcY)
+      // 确定偏移符号：水平方向时向右的在下，垂直方向时向下的在左，对角线使用水平方向判断
+      const isForwardPositive = d2dDirection === 'horizontal'
+        ? (dstX > srcX)
+        : d2dDirection === 'vertical'
+          ? (dstY > srcY)
+          : (dstX > srcX)  // 对角线使用水平方向判断
+
+      // 生成linkKey用于点击事件（带 d2d- 前缀）
+      const fwdLinkKey = `d2d-${srcDie}-${srcNode}-${dstDie}-${dstNode}`
+      const bwdLinkKey = `d2d-${dstDie}-${dstNode}-${srcDie}-${srcNode}`
+
+      // 生成用于查询带宽的 key（不带前缀，与后端返回格式一致）
+      const fwdBandwidthKey = `${srcDie}-${srcNode}-${dstDie}-${dstNode}`
+      const bwdBandwidthKey = `${dstDie}-${dstNode}-${srcDie}-${srcNode}`
+
+      // 从后端获取D2D链路带宽
+      const fwdBandwidth = d2dLinkBandwidth?.[fwdBandwidthKey] || 0
+      const bwdBandwidth = d2dLinkBandwidth?.[bwdBandwidthKey] || 0
 
       // 正向
       edges.push({
@@ -530,7 +558,12 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
           target: `die-${dstDie}-node-${dstNode}`,
           d2dConnection: true,
           direction: d2dDirection,
-          offset: isForwardPositive ? 1 : -1
+          offset: isForwardPositive ? 1 : -1,
+          bandwidth: fwdBandwidth,
+          bandwidthColor: getBandwidthColor(fwdBandwidth),
+          bandwidthWidth: getBandwidthWidth(fwdBandwidth),
+          linkKey: fwdLinkKey,
+          label: fwdBandwidth > 0 ? fwdBandwidth.toFixed(1) : ''
         },
         classes: 'd2d-edge'
       })
@@ -542,14 +575,19 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
           target: `die-${srcDie}-node-${srcNode}`,
           d2dConnection: true,
           direction: d2dDirection,
-          offset: isForwardPositive ? -1 : 1
+          offset: isForwardPositive ? -1 : 1,
+          bandwidth: bwdBandwidth,
+          bandwidthColor: getBandwidthColor(bwdBandwidth),
+          bandwidthWidth: getBandwidthWidth(bwdBandwidth),
+          linkKey: bwdLinkKey,
+          label: bwdBandwidth > 0 ? bwdBandwidth.toFixed(1) : ''
         },
         classes: 'd2d-edge'
       })
     })
 
     return [...nodes, ...edges]
-  }, [data, d2dLayout, linkBandwidth, mountMap])
+  }, [data, d2dLayout, linkBandwidth, d2dLinkBandwidth, mountMap])
 
   const stylesheet: any[] = [
     // Die标签样式
@@ -641,7 +679,7 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
           const offset = ele.data('offset') || 0
           const direction = ele.data('direction')
           if (direction === 'horizontal') {
-            return offset > 0 ? '0 -8' : '0 8'
+            return offset > 0 ? '0 8' : '0 -8'
           } else {
             return offset > 0 ? '-8 0' : '8 0'
           }
@@ -650,23 +688,51 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
           const offset = ele.data('offset') || 0
           const direction = ele.data('direction')
           if (direction === 'horizontal') {
-            return offset > 0 ? '0 -8' : '0 8'
+            return offset > 0 ? '0 8' : '0 -8'
           } else {
             return offset > 0 ? '-8 0' : '8 0'
           }
         },
         'arrow-scale': 1.0,
         'opacity': 0.8,
-        'z-index': 5
+        'z-index': 5,
+        // 带宽标签样式
+        'label': 'data(label)',
+        'font-size': 16,
+        'color': '#d32029',
+        'text-background-color': '#fff',
+        'text-background-opacity': 0.8,
+        'text-background-padding': '2px',
+        'text-margin-x': (ele: any) => {
+          const offset = ele.data('offset') || 0
+          const direction = ele.data('direction')
+          if (direction === 'vertical') {
+            const label = ele.data('label') || ''
+            const textLength = label.length
+            const textWidth = textLength * 7.2
+            const baseOffset = 8
+            const dynamicOffset = baseOffset + textWidth / 2
+            return offset > 0 ? -dynamicOffset : dynamicOffset
+          }
+          return 0
+        },
+        'text-margin-y': (ele: any) => {
+          const offset = ele.data('offset') || 0
+          const direction = ele.data('direction')
+          if (direction === 'horizontal') {
+            return offset > 0 ? 12 : -12
+          }
+          return 0
+        }
       }
     },
     // D2D跨Die连接样式（双向粗虚线箭头）
     {
       selector: '.d2d-edge',
       style: {
-        'width': 4,
-        'line-color': '#8c8c8c',
-        'target-arrow-color': '#8c8c8c',
+        'width': 'data(bandwidthWidth)',
+        'line-color': 'data(bandwidthColor)',
+        'target-arrow-color': 'data(bandwidthColor)',
         'target-arrow-shape': 'triangle',
         'curve-style': 'straight',
         'line-style': 'dashed',
@@ -676,8 +742,23 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
         'source-endpoint': (ele: any) => {
           const offset = ele.data('offset') || 0
           const direction = ele.data('direction')
-          if (direction === 'horizontal') {
-            return offset > 0 ? '0 -8' : '0 8'
+          if (direction === 'diagonal') {
+            // 对角线：使用统一方向计算垂直向量（避免正反向重叠）
+            const source = ele.source().position()
+            const target = ele.target().position()
+            let dx = target.x - source.x
+            let dy = target.y - source.y
+            // 统一使用从左到右的方向作为参考
+            if (dx < 0) {
+              dx = -dx
+              dy = -dy
+            }
+            const length = Math.sqrt(dx * dx + dy * dy)
+            const perpX = (-dy / length) * 10
+            const perpY = (dx / length) * 10
+            return offset > 0 ? `${perpX} ${perpY}` : `${-perpX} ${-perpY}`
+          } else if (direction === 'horizontal') {
+            return offset > 0 ? '0 8' : '0 -8'
           } else {
             return offset > 0 ? '-8 0' : '8 0'
           }
@@ -685,15 +766,85 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
         'target-endpoint': (ele: any) => {
           const offset = ele.data('offset') || 0
           const direction = ele.data('direction')
-          if (direction === 'horizontal') {
-            return offset > 0 ? '0 -8' : '0 8'
+          if (direction === 'diagonal') {
+            // 对角线：使用统一方向计算垂直向量（避免正反向重叠）
+            const source = ele.source().position()
+            const target = ele.target().position()
+            let dx = target.x - source.x
+            let dy = target.y - source.y
+            // 统一使用从左到右的方向作为参考
+            if (dx < 0) {
+              dx = -dx
+              dy = -dy
+            }
+            const length = Math.sqrt(dx * dx + dy * dy)
+            const perpX = (-dy / length) * 10
+            const perpY = (dx / length) * 10
+            return offset > 0 ? `${perpX} ${perpY}` : `${-perpX} ${-perpY}`
+          } else if (direction === 'horizontal') {
+            return offset > 0 ? '0 8' : '0 -8'
           } else {
             return offset > 0 ? '-8 0' : '8 0'
           }
         },
-        'arrow-scale': 1.3,
+        'arrow-scale': 1.9,
         'opacity': 0.9,
-        'z-index': 20
+        'z-index': 20,
+        // 带宽标签样式
+        'label': 'data(label)',
+        'font-size': 20,
+        'color': '#d32029',
+        'text-background-color': '#fff',
+        'text-background-opacity': 0.8,
+        'text-background-padding': '2px',
+        // 标签自动跟随边的方向旋转
+        'text-rotation': 'autorotate',
+        'text-margin-x': (ele: any) => {
+          const offset = ele.data('offset') || 0
+          const direction = ele.data('direction')
+
+          if (direction === 'diagonal') {
+            // 对角线：
+            const source = ele.source().position()
+            const target = ele.target().position()
+            const dx = target.x - source.x
+            const dy = target.y - source.y
+            const length = Math.sqrt(dx * dx + dy * dy)
+            // 标签总是向target方向（箭头头部）移动1/3
+            const shiftAlongEdge = length / 3
+            const shiftX = (dx / length) * shiftAlongEdge
+            // 垂直于边的偏移：向右的箭头标签在下，向左的箭头标签在上
+            const perpShift = (dx > 0 ? offset : -offset) * 15
+            const perpX = -(dy / length) * perpShift
+            return shiftX + perpX
+          } else if (direction === 'vertical') {
+            return offset > 0 ? -16 : 16
+          }
+          return 0
+        },
+        'text-margin-y': (ele: any) => {
+          const offset = ele.data('offset') || 0
+          const direction = ele.data('direction')
+
+          if (direction === 'diagonal') {
+            // 对角线：
+            const source = ele.source().position()
+            const target = ele.target().position()
+            const dx = target.x - source.x
+            const dy = target.y - source.y
+            const length = Math.sqrt(dx * dx + dy * dy)
+            // 标签总是向target方向（箭头头部）移动1/3
+            const shiftAlongEdge = length / 3
+            const shiftY = (dy / length) * shiftAlongEdge
+            // 垂直于边的偏移：向右的箭头标签在下，向左的箭头标签在上
+            const perpShift = (dx > 0 ? offset : -offset) * 15
+            const perpY = (dx / length) * perpShift
+            return shiftY + perpY
+          } else if (direction === 'horizontal') {
+            return offset > 0 ? 14 : -14
+          }
+          return 0
+        }
       }
     }
   ]
@@ -723,8 +874,17 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
       }
     })
 
-    // 边点击事件
+    // Die内部链路点击事件
     cy.on('tap', 'edge.internal-edge', (evt) => {
+      const linkKey = evt.target.data('linkKey')
+      if (linkKey && onLinkClick) {
+        const composition = linkComposition?.[linkKey] || []
+        onLinkClick(linkKey, composition)
+      }
+    })
+
+    // D2D跨Die链路点击事件
+    cy.on('tap', 'edge.d2d-edge', (evt) => {
       const linkKey = evt.target.data('linkKey')
       if (linkKey && onLinkClick) {
         const composition = linkComposition?.[linkKey] || []
@@ -755,6 +915,11 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
     }
   }
 
+  // 暴露saveLayout方法给父组件
+  useImperativeHandle(ref, () => ({
+    saveLayout: handleSaveLayout
+  }))
+
   if (!data) {
     return (
       <Card>
@@ -780,7 +945,6 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
             <Button size="small" icon={<ZoomInOutlined />} onClick={handleZoomIn}>放大</Button>
             <Button size="small" icon={<ZoomOutOutlined />} onClick={handleZoomOut}>缩小</Button>
             <Button size="small" icon={<AimOutlined />} onClick={handleFit}>适应</Button>
-            <Button size="small" icon={<SaveOutlined />} onClick={handleSaveLayout} type="primary">保存布局</Button>
           </Space>
         </Col>
       </Row>
@@ -863,6 +1027,8 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
       </Card>
     </Card>
   )
-}
+})
+
+MultiDieTopologyGraph.displayName = 'MultiDieTopologyGraph'
 
 export default MultiDieTopologyGraph

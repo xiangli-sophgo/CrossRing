@@ -356,9 +356,6 @@ const IPMountPanel: React.FC<IPMountPanelProps> = ({ topology, onMountsChange })
       }
       extra={
         <Space>
-          <Button size="small" onClick={loadMounts} loading={refreshing}>
-            刷新
-          </Button>
           <Button
             size="small"
             icon={<SaveOutlined />}

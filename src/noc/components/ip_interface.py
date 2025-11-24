@@ -87,6 +87,10 @@ class IPInterface:
         h2l_h_depth = config.IP_H2L_H_FIFO_DEPTH
         h2l_l_depth = config.IP_H2L_L_FIFO_DEPTH
 
+        # 处理延迟配置
+        self.sn_processing_latency = getattr(config, 'SN_PROCESSING_LATENCY', 0)
+        self.rn_processing_latency = getattr(config, 'RN_PROCESSING_LATENCY', 0)
+
         self.networks = {
             "req": {
                 "network": req_network,
@@ -339,7 +343,10 @@ class IPInterface:
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
 
         elif network_type == "rsp":
-            # 响应网络：直接移动
+            # 响应网络：检查departure_cycle
+            current_cycle = getattr(self, "current_cycle", 0)
+            if hasattr(flit, "departure_cycle") and flit.departure_cycle > current_cycle:
+                return  # 还没到发送时间
             flit.flit_position = "L2H"
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
@@ -514,7 +521,7 @@ class IPInterface:
         if len(net_info["h2l_fifo_l"]) >= net_info["h2l_fifo_l"].maxlen:
             return
 
-        # 从H级FIFO传输到L级预缓冲
+        # 从H级FIFO传输到L级预缓冲（不设置延迟，直接传输）
         flit = net_info["h2l_fifo_h"].popleft()
         flit.flit_position = "H2L_L"
         net_info["h2l_fifo_l_pre"] = flit
@@ -987,11 +994,14 @@ class IPInterface:
             return
 
         current_cycle = getattr(self, "current_cycle", 0)
+
+        # 带宽限制检查（仅数据网络）
         if network_type == "data" and self.rx_token_bucket:
             self.rx_token_bucket.refill(current_cycle)
             if not self.rx_token_bucket.consume():
                 return
 
+        # 出队flit
         flit = net_info["h2l_fifo_l"].popleft()
         flit.flit_position = "IP_eject"
         flit.is_finish = True
@@ -1042,7 +1052,7 @@ class IPInterface:
                 net_info["h2l_fifo_h"].append(net_info["h2l_fifo_h_pre"])
                 net_info["h2l_fifo_h_pre"] = None
 
-            # h2l_fifo_l_pre → h2l_fifo_l
+            # h2l_fifo_l_pre → h2l_fifo_l (直接移动)
             if net_info["h2l_fifo_l_pre"] is not None and len(net_info["h2l_fifo_l"]) < net_info["h2l_fifo_l"].maxlen:
                 net_info["h2l_fifo_l"].append(net_info["h2l_fifo_l_pre"])
                 net_info["h2l_fifo_l_pre"] = None
@@ -1084,9 +1094,9 @@ class IPInterface:
             # 根据目标IP类型选择延迟
             dest_type = get_original_destination_type(req)
             flit.departure_cycle = (
-                cycle + self.config.DDR_W_LATENCY + i * self.config.NETWORK_FREQUENCY
+                cycle + self.config.DDR_W_LATENCY + i * self.config.NETWORK_FREQUENCY + self.rn_processing_latency
                 if dest_type and dest_type.startswith("ddr")
-                else cycle + self.config.L2M_W_LATENCY + i * self.config.NETWORK_FREQUENCY
+                else cycle + self.config.L2M_W_LATENCY + i * self.config.NETWORK_FREQUENCY + self.rn_processing_latency
             )
             flit.req_departure_cycle = req.departure_cycle
             flit.entry_db_cycle = req.entry_db_cycle
@@ -1134,7 +1144,7 @@ class IPInterface:
                 latency = np.random.uniform(low=self.config.DDR_R_LATENCY - self.config.DDR_R_LATENCY_VAR, high=self.config.DDR_R_LATENCY + self.config.DDR_R_LATENCY_VAR, size=None)
             else:
                 latency = self.config.L2M_R_LATENCY
-            flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY
+            flit.departure_cycle = cycle + latency + i * self.config.NETWORK_FREQUENCY + self.sn_processing_latency
             flit.entry_db_cycle = cycle
             flit.req_departure_cycle = req.departure_cycle
             flit.source_type = getattr(req, "destination_type", None)
@@ -1178,7 +1188,7 @@ class IPInterface:
 
         # 保序信息将在inject_fifo出队时分配（inject_to_l2h_pre）
         rsp.packet_id = req.packet_id
-        rsp.departure_cycle = cycle + self.config.NETWORK_FREQUENCY
+        rsp.departure_cycle = cycle + self.config.NETWORK_FREQUENCY + self.sn_processing_latency
         rsp.req_departure_cycle = req.departure_cycle
         rsp.source_type = req.destination_type
         rsp.destination_type = req.source_type

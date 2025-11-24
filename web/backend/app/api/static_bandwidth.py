@@ -67,6 +67,10 @@ class BandwidthComputeResponse(BaseModel):
         default={},
         description="链路带宽组成: {link_key: [{src_node, src_ip, dst_node, dst_ip, bandwidth, req_type}, ...]}"
     )
+    d2d_link_bandwidth: Dict[str, float] = Field(
+        default={},
+        description="D2D跨Die链路带宽: {'{src_die}-{src_node}-{dst_die}-{dst_node}': bandwidth}"
+    )
     statistics: Union[BandwidthStatistics, Dict[str, BandwidthStatistics]] = Field(
         description="统计信息。NoC模式: 单个统计; D2D模式: {die_id: 统计}"
     )
@@ -276,7 +280,7 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
                 d2d_pairs.append((dst_die, dst_node, src_die, src_node))
 
             # 调用D2D静态带宽分析器
-            die_link_bandwidth_dict = compute_d2d_link_bandwidth(
+            die_link_bandwidth_dict, d2d_link_bandwidth_dict, link_composition = compute_d2d_link_bandwidth(
                 topo_type=request.topology,
                 node_ips=node_ips,
                 configs=configs_list,
@@ -314,6 +318,12 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
                         num_active_links=0
                     )
 
+            # 转换D2D链路带宽为字符串格式
+            d2d_link_bandwidth_str = {}
+            for (src_die, src_node, dst_die, dst_node), bandwidth in d2d_link_bandwidth_dict.items():
+                key = f"{src_die}-{src_node}-{dst_die}-{dst_node}"
+                d2d_link_bandwidth_str[key] = bandwidth
+
             # 构建D2D布局信息
             die_positions = d2d_config.get('DIE_POSITIONS', {})
             die_rotations = d2d_config.get('DIE_ROTATIONS', {})
@@ -329,6 +339,8 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
                 message=f"成功计算D2D静态链路带宽 (路由算法: {request.routing_type}, {num_dies}个Die)",
                 mode="d2d",
                 link_bandwidth=link_bandwidth_str,
+                d2d_link_bandwidth=d2d_link_bandwidth_str,
+                link_composition=link_composition,
                 statistics=statistics_dict,
                 d2d_layout=d2d_layout
             )

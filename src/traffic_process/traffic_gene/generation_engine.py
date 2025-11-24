@@ -436,8 +436,8 @@ def split_d2d_traffic_by_source(input_file, output_dir=None, num_col=4, num_row=
         # 将源节点转换为(x,y)坐标
         src_x, src_y = node_id_to_xy(int(src_node), num_col, num_row)
 
-        # 文件名格式: master_D{die_id}_p{src_ip_index}_x{src_x}_y{src_y}.txt
-        filename = f"master_D{src_die}_p{src_ip_index}_x{src_x}_y{src_y}.txt"
+        # 文件名格式: master_d{die_id}_p{src_ip_index}_x{src_x}_y{src_y}.txt
+        filename = f"master_d{src_die}_p{src_ip_index}_x{src_x}_y{src_y}.txt"
 
         output_file = output_dir / filename
 

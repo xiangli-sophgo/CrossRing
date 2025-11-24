@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Layout, Typography, Card, Space, message, Select, Table, Tag } from 'antd'
-import { AppstoreOutlined } from '@ant-design/icons'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Layout, Typography, Card, Space, message, Select, Table, Tag, Button } from 'antd'
+import { AppstoreOutlined, SaveOutlined } from '@ant-design/icons'
 import TopologyGraph from './components/topology/TopologyGraph'
 import MultiDieTopologyGraph from './components/topology/MultiDieTopologyGraph'
 import NodeInfoPanel from './components/topology/NodeInfoPanel'
@@ -43,6 +43,9 @@ function App() {
   const [d2dLayout, setD2dLayout] = useState<D2DLayoutInfo | null>(null)
   const [selectedLinkKey, setSelectedLinkKey] = useState<string>('')
   const [selectedLinkFlows, setSelectedLinkFlows] = useState<FlowInfo[]>([])
+  const [d2dLinkBandwidth, setD2dLinkBandwidth] = useState<Record<string, number>>({})
+  const topoGraphRef = useRef<{ saveLayout: () => void }>(null)
+  const multiDieTopoGraphRef = useRef<{ saveLayout: () => void }>(null)
 
   // 加载可用拓扑类型
   const loadTopologies = async () => {
@@ -111,8 +114,10 @@ function App() {
     if (data.mode === 'd2d') {
       setSelectedDie(0)
       setD2dLayout(data.d2d_layout || null)
+      setD2dLinkBandwidth(data.d2d_link_bandwidth || {})
     } else {
       setD2dLayout(null)
+      setD2dLinkBandwidth({})
     }
   }
 
@@ -122,6 +127,17 @@ function App() {
     setSelectedLinkFlows(composition)
     if (!linkKey) {
       setNodeInfo(null)
+    }
+  }
+
+  // 保存布局
+  const handleSaveLayout = () => {
+    if (bandwidthMode === 'd2d' && multiDieTopoGraphRef.current) {
+      multiDieTopoGraphRef.current.saveLayout()
+    } else if (topoGraphRef.current) {
+      topoGraphRef.current.saveLayout()
+    } else {
+      message.warning('请先加载拓扑图')
     }
   }
 
@@ -147,9 +163,19 @@ function App() {
         alignItems: 'center',
         justifyContent: 'space-between'
       }}>
-        <Title level={3} style={{ color: 'white', margin: 0 }}>
-          <AppstoreOutlined /> NoC Web 工具
-        </Title>
+        <Space>
+          <Title level={3} style={{ color: 'white', margin: 0 }}>
+            <AppstoreOutlined /> NoC Web 工具
+          </Title>
+          <Button
+            type="primary"
+            icon={<SaveOutlined />}
+            onClick={handleSaveLayout}
+            style={{ marginLeft: 16 }}
+          >
+            保存布局
+          </Button>
+        </Space>
         <Space>
           <Text style={{ color: '#8c8c8c' }}>选择拓扑:</Text>
           <Select
@@ -174,10 +200,12 @@ function App() {
               {/* 拓扑图 - D2D模式显示多Die视图 */}
               {bandwidthMode === 'd2d' && d2dLayout ? (
                 <MultiDieTopologyGraph
+                  ref={multiDieTopoGraphRef}
                   data={topoData}
                   mounts={mounts}
                   loading={topoLoading}
                   linkBandwidth={linkBandwidth as Record<string, Record<string, number>>}
+                  d2dLinkBandwidth={d2dLinkBandwidth}
                   linkComposition={linkComposition}
                   d2dLayout={d2dLayout}
                   onNodeClick={handleNodeClick}
@@ -185,6 +213,7 @@ function App() {
                 />
               ) : (
                 <TopologyGraph
+                  ref={topoGraphRef}
                   data={topoData}
                   mounts={mounts}
                   loading={topoLoading}

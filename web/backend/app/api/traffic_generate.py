@@ -44,6 +44,7 @@ class TrafficGenerateResponse(BaseModel):
     total_lines: int = 0
     file_size: int = 0
     generation_time_ms: float = 0
+    split_files: Optional[List[Dict]] = None
 
 
 def _build_traffic_configs_for_engine(
@@ -117,7 +118,7 @@ def _build_traffic_configs_for_engine(
                     src_map[ip] = []
                 src_map[ip].extend(ip_type_to_node_ids[ip])
             else:
-                raise ValueError(f"源IP {ip} 未挂载到拓扑")
+                raise ValueError(f"源IP {ip} 未挂载到拓扑。请检查IP挂载配置是否包含此IP。")
 
         # 处理target_ip（支持字符串或列表）
         dst_ips = [dst_ip] if isinstance(dst_ip, str) else dst_ip
@@ -137,7 +138,7 @@ def _build_traffic_configs_for_engine(
                     dst_map[ip] = []
                 dst_map[ip].extend(ip_type_to_node_ids[ip])
             else:
-                raise ValueError(f"目标IP {ip} 未挂载到拓扑")
+                raise ValueError(f"目标IP {ip} 未挂载到拓扑。请检查IP挂载配置是否包含此IP。")
 
         # D2D模式：需要为每个DIE对生成独立的引擎配置
         if mode == "d2d":
@@ -264,29 +265,24 @@ async def generate_traffic(request: TrafficGenerateRequest):
         file_size = Path(file_path).stat().st_size if file_path else 0
 
         # 如果需要按源IP分割
+        split_result = None
         if request.split_by_source:
-            split_output_dir = OUTPUT_DIR / f"split_{request.topology}_{request.mode}_{timestamp}"
+            split_output_dir = OUTPUT_DIR / request.filename
             split_output_dir.mkdir(parents=True, exist_ok=True)
 
             if request.mode == "d2d":
-                split_files = split_d2d_traffic_by_source(
+                split_result = split_d2d_traffic_by_source(
                     input_file=file_path,
                     output_dir=str(split_output_dir)
                 )
             else:
-                split_files = split_traffic_by_source(
+                split_result = split_traffic_by_source(
                     input_file=file_path,
                     output_dir=str(split_output_dir)
                 )
 
-            # 创建zip文件包含所有分割文件
-            zip_path = OUTPUT_DIR / f"traffic_{request.topology}_{request.mode}_{timestamp}_split.zip"
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for split_file in split_files:
-                    zipf.write(split_file, Path(split_file).name)
-
-            file_path = str(zip_path)
-            file_size = zip_path.stat().st_size
+            file_path = str(split_output_dir)
+            file_size = 0
 
     except Exception as e:
         raise HTTPException(
@@ -300,23 +296,30 @@ async def generate_traffic(request: TrafficGenerateRequest):
 
     return TrafficGenerateResponse(
         success=True,
-        message=f"成功生成流量文件，共 {total_lines} 行",
+        message=f"成功生成流量文件，共 {total_lines} 行" if not split_result else f"成功拆分流量文件为 {split_result['total_sources']} 个文件",
         file_path=file_path,
         total_lines=total_lines,
         file_size=file_size,
-        generation_time_ms=generation_time_ms
+        generation_time_ms=generation_time_ms,
+        split_files=split_result['files'] if split_result else None
     )
 
 
-@router.get("/download/{filename}")
+@router.get("/download/{filename:path}")
 async def download_traffic_file(filename: str):
     """
-    下载生成的流量文件
+    下载生成的流量文件（支持文件夹内文件）
+    filename可以是：
+    - 单个文件名
+    - folder_name/master_xxx.txt (文件夹内文件)
     """
     file_path = OUTPUT_DIR / filename
 
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=400, detail="不能下载文件夹")
 
     # 确定文件类型
     if filename.endswith('.zip'):

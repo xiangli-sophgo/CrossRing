@@ -69,6 +69,8 @@ class CrossRingConfig:
         self.L2M_R_LATENCY_original = args.L2M_R_LATENCY
         self.L2M_W_LATENCY_original = args.L2M_W_LATENCY
         self.SN_TRACKER_RELEASE_LATENCY_original = args.SN_TRACKER_RELEASE_LATENCY
+        self.SN_PROCESSING_LATENCY_original = getattr(args, 'SN_PROCESSING_LATENCY', 0)
+        self.RN_PROCESSING_LATENCY_original = getattr(args, 'RN_PROCESSING_LATENCY', 0)
         self.TL_Etag_T1_UE_MAX = args.TL_Etag_T1_UE_MAX
         self.TL_Etag_T2_UE_MAX = args.TL_Etag_T2_UE_MAX
         self.TR_Etag_T2_UE_MAX = args.TR_Etag_T2_UE_MAX
@@ -299,6 +301,8 @@ class CrossRingConfig:
         self.DDR_W_LATENCY = self.DDR_W_LATENCY_original * self.NETWORK_FREQUENCY
         self.L2M_R_LATENCY = self.L2M_R_LATENCY_original * self.NETWORK_FREQUENCY
         self.L2M_W_LATENCY = self.L2M_W_LATENCY_original * self.NETWORK_FREQUENCY
+        self.SN_PROCESSING_LATENCY = int(self.SN_PROCESSING_LATENCY_original * self.NETWORK_FREQUENCY)
+        self.RN_PROCESSING_LATENCY = int(self.RN_PROCESSING_LATENCY_original * self.NETWORK_FREQUENCY)
 
     def topology_select(self, topo_type="default"):
         # 新架构: 所有节点都可以作为IP节点，不再需要SEND_POSITION_LIST
@@ -519,6 +523,8 @@ class CrossRingConfig:
         parser.add_argument("--L2M_R_LATENCY", type=int, default=default_config["L2M_R_LATENCY"], help="DDR latency")
         parser.add_argument("--L2M_W_LATENCY", type=int, default=default_config["L2M_W_LATENCY"], help="DDR latency")
         parser.add_argument("--SN_TRACKER_RELEASE_LATENCY", type=int, default=default_config["SN_TRACKER_RELEASE_LATENCY"], help="SN tracker release latency")
+        parser.add_argument("--SN_PROCESSING_LATENCY", type=int, default=default_config.get("SN_PROCESSING_LATENCY", 0), help="SN processing latency (ns)")
+        parser.add_argument("--RN_PROCESSING_LATENCY", type=int, default=default_config.get("RN_PROCESSING_LATENCY", 0), help="RN processing latency (ns)")
 
         parser.add_argument("--BURST", type=int, default=default_config["BURST"], help="Burst length")
         parser.add_argument("--NETWORK_FREQUENCY", type=float, default=default_config["NETWORK_FREQUENCY"], help="Network frequency")

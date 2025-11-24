@@ -41,6 +41,8 @@ export interface BandwidthComputeResponse {
   link_bandwidth: Record<string, number> | Record<string, Record<string, number>>
   // 链路带宽组成
   link_composition?: Record<string, FlowInfo[]>
+  // D2D跨Die链路带宽 (key格式: '{src_die}-{src_node}-{dst_die}-{dst_node}')
+  d2d_link_bandwidth?: Record<string, number>
   // NoC模式: BandwidthStatistics
   // D2D模式: Record<string, BandwidthStatistics> (key格式: {die_id: statistics})
   statistics: BandwidthStatistics | Record<string, BandwidthStatistics>

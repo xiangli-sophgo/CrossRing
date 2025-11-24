@@ -1,0 +1,33 @@
+{
+  "0": [
+    {
+      "node_id": 0,
+      "ip_type": "gdma_0",
+      "topology": "5x4",
+      "position": {
+        "row": 0,
+        "col": 0
+      }
+    },
+    {
+      "node_id": 0,
+      "ip_type": "gdma_1",
+      "topology": "5x4",
+      "position": {
+        "row": 0,
+        "col": 0
+      }
+    }
+  ],
+  "1": [
+    {
+      "node_id": 1,
+      "ip_type": "ddr_0",
+      "topology": "5x4",
+      "position": {
+        "row": 0,
+        "col": 1
+      }
+    }
+  ]
+}

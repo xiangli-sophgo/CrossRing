@@ -78,9 +78,9 @@ def main():
         result_save_path=f"../Result/CrossRing/{model_type}/",
         show_result_analysis=1,
     )
-    # sim.setup_debug(print_trace=1, show_trace_id=[1], update_interval=0.1)
+    # sim.setup_debug(print_trace=1, show_trace_id=[2], update_interval=0.1)
     # sim.setup_visualization(plot_link_state=1, plot_start_cycle=0, show_node_id=1)
-    np.random.seed(801)
+    # np.random.seed(801)
 
     sim.run_simulation(max_time=4000, print_interval=200)
 

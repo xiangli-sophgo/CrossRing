@@ -16,8 +16,10 @@ import {
   Modal,
   Radio,
   Tooltip,
-  Checkbox
+  Checkbox,
+  Dropdown
 } from 'antd'
+import type { MenuProps } from 'antd'
 import {
   SettingOutlined,
   DeleteOutlined,
@@ -84,6 +86,9 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
   const [randomSeed, setRandomSeed] = useState(42)
   const [d2dConfigs, setD2DConfigs] = useState<Array<{ filename: string; num_dies: number; connections: number }>>([])
   const [selectedD2DConfig, setSelectedD2DConfig] = useState<string>('')
+  const [enableSplit, setEnableSplit] = useState(false)
+  const [splitFiles, setSplitFiles] = useState<Array<{ filename: string; count: number; path: string }>>([])
+  const [showSplitModal, setShowSplitModal] = useState(false)
 
   // 加载流量配置
   const loadConfigs = async () => {
@@ -357,6 +362,59 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
     }
   }
 
+  // 批量切换所有配置的类型
+  const handleBatchToggleType = async (targetType: 'R' | 'W' | 'toggle') => {
+    if (configs.length === 0) {
+      message.warning('没有可切换的配置')
+      return
+    }
+
+    Modal.confirm({
+      title: '确认批量切换',
+      content: `确定要将所有 ${configs.length} 个配置的类型${
+        targetType === 'toggle' ? '进行切换' : `切换为 ${targetType}`
+      }吗？`,
+      onOk: async () => {
+        try {
+          // 批量更新所有配置
+          await Promise.all(
+            configs.map(async (config: TrafficConfig) => {
+              let newRequestType: 'R' | 'W'
+              if (targetType === 'toggle') {
+                newRequestType = config.request_type === 'R' ? 'W' : 'R'
+              } else {
+                newRequestType = targetType
+              }
+
+              // 如果类型相同，跳过更新
+              if (newRequestType === config.request_type) return
+
+              await updateTrafficConfig(topology, mode, config.id, {
+                topology: config.topology,
+                mode: config.mode,
+                source_ip: config.source_ip,
+                target_ip: config.target_ip,
+                speed_gbps: config.speed_gbps,
+                burst_length: config.burst_length,
+                request_type: newRequestType,
+                end_time_ns: config.end_time_ns,
+                source_die: config.source_die,
+                target_die: config.target_die,
+                die_pairs: config.die_pairs
+              })
+            })
+          )
+
+          message.success('批量切换成功')
+          loadConfigs()
+        } catch (error) {
+          message.error('批量切换失败')
+          console.error(error)
+        }
+      }
+    })
+  }
+
   // 计算静态链路带宽
   const handleComputeBandwidth = async () => {
     if (configs.length === 0) {
@@ -417,14 +475,20 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
       const result = await generateTraffic({
         topology,
         mode,
-        split_by_source: false,
+        split_by_source: enableSplit,
         random_seed: useFixedSeed ? randomSeed : (Date.now() % (2**32 - 1)),
         filename: trafficFileName
       })
 
-      message.success(
-        `流量生成成功！共 ${result.total_lines} 行，耗时 ${result.generation_time_ms.toFixed(0)}ms`
-      )
+      if (result.split_files && result.split_files.length > 0) {
+        setSplitFiles(result.split_files)
+        setShowSplitModal(true)
+        message.success(result.message + `，耗时 ${result.generation_time_ms.toFixed(0)}ms`)
+      } else {
+        message.success(
+          `流量生成成功！共 ${result.total_lines} 行，耗时 ${result.generation_time_ms.toFixed(0)}ms`
+        )
+      }
     } catch (error: any) {
       message.error(error.response?.data?.detail || '流量生成失败')
       console.error(error)
@@ -815,7 +879,33 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
       )
     },
     {
-      title: '类型',
+      title: () => {
+        const menuItems: MenuProps['items'] = [
+          {
+            key: 'toggle',
+            label: '切换全部',
+            onClick: () => handleBatchToggleType('toggle')
+          },
+          {
+            key: 'setR',
+            label: '全部切换为 R',
+            onClick: () => handleBatchToggleType('R')
+          },
+          {
+            key: 'setW',
+            label: '全部切换为 W',
+            onClick: () => handleBatchToggleType('W')
+          }
+        ]
+
+        return (
+          <Dropdown menu={{ items: menuItems }} trigger={['click']}>
+            <span style={{ cursor: 'pointer', userSelect: 'none' }}>
+              类型 <DownOutlined style={{ fontSize: 10 }} />
+            </span>
+          </Dropdown>
+        )
+      },
       dataIndex: 'request_type',
       key: 'request_type',
       width: 100,
@@ -1215,23 +1305,32 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
             suffix=".txt"
           />
         </Space>
-        <Space direction="vertical" size="small" style={{ width: 600 }}>
+        <Space size="large" style={{ width: 600 }}>
           <Checkbox
             checked={useFixedSeed}
             onChange={(e) => setUseFixedSeed(e.target.checked)}
           >
             使用固定随机种子
           </Checkbox>
-          {useFixedSeed && (
-            <InputNumber
-              value={randomSeed}
-              onChange={(value) => setRandomSeed(value || 42)}
-              min={0}
-              style={{ width: '100%' }}
-              placeholder="输入随机种子（默认42）"
-            />
-          )}
+          <Checkbox
+            checked={enableSplit}
+            onChange={(e) => setEnableSplit(e.target.checked)}
+          >
+            按源IP拆分流量文件
+            <Tooltip title="生成后自动将流量文件按源IP拆分成多个独立文件，存放在以文件名命名的文件夹中。文件名格式：NoC模式为 master_p{ip_index}_x{x}_y{y}.txt，D2D模式为 master_d{die_id}_p{ip_index}_x{x}_y{y}.txt">
+              <QuestionCircleOutlined style={{ marginLeft: 4, color: '#999' }} />
+            </Tooltip>
+          </Checkbox>
         </Space>
+        {useFixedSeed && (
+          <InputNumber
+            value={randomSeed}
+            onChange={(value) => setRandomSeed(value || 42)}
+            min={0}
+            style={{ width: 600 }}
+            placeholder="输入随机种子（默认42）"
+          />
+        )}
         <Button
           type="primary"
           icon={<ThunderboltOutlined />}
@@ -1315,6 +1414,62 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
             </Radio.Group>
           </div>
         </Space>
+      </Modal>
+
+      {/* 拆分文件列表对话框 */}
+      <Modal
+        title="拆分文件列表"
+        open={showSplitModal}
+        onCancel={() => setShowSplitModal(false)}
+        footer={[
+          <Button key="close" onClick={() => setShowSplitModal(false)}>
+            关闭
+          </Button>
+        ]}
+        width={700}
+      >
+        <div style={{ marginBottom: 16 }}>
+          共生成 {splitFiles.length} 个拆分文件
+        </div>
+        <Table
+          dataSource={splitFiles.map((file, idx) => ({ ...file, key: idx }))}
+          columns={[
+            {
+              title: '文件名',
+              dataIndex: 'filename',
+              key: 'filename',
+              width: 300
+            },
+            {
+              title: '行数',
+              dataIndex: 'count',
+              key: 'count',
+              width: 100,
+              align: 'center' as const
+            },
+            {
+              title: '操作',
+              key: 'action',
+              width: 100,
+              align: 'center' as const,
+              render: (_, record) => (
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => {
+                    const folderName = trafficFileName
+                    downloadTrafficFile(`${folderName}/${record.filename}`)
+                  }}
+                >
+                  下载
+                </Button>
+              )
+            }
+          ]}
+          size="small"
+          pagination={false}
+          scroll={{ y: 400 }}
+        />
       </Modal>
     </Card>
   )

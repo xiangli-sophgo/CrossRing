@@ -71,4 +71,9 @@ export interface TrafficGenerateResponse {
   total_lines: number
   file_size: number
   generation_time_ms: number
+  split_files?: Array<{
+    filename: string
+    count: number
+    path: string
+  }>
 }

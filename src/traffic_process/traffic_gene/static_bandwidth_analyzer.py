@@ -348,6 +348,15 @@ class D2DStaticBandwidthAnalyzer:
         # 每个Die的链路带宽字典: {die_id: {((src_x, src_y), (dst_x, dst_y)): bandwidth}}
         self.die_link_bandwidth: Dict[int, Dict[Tuple[Tuple[int, int], Tuple[int, int]], float]] = {}
 
+        # D2D跨Die链路带宽字典: {(src_die, src_node, dst_die, dst_node): bandwidth}
+        self.d2d_link_bandwidth: Dict[Tuple[int, int, int, int], float] = {}
+
+        # Die内部链路组成: {die_id: {((src_x, src_y), (dst_x, dst_y)): [flow_info, ...]}}
+        self.die_link_composition: Dict[int, Dict[Tuple[Tuple[int, int], Tuple[int, int]], List[Dict]]] = {}
+
+        # D2D跨Die链路组成: {(src_die, src_node, dst_die, dst_node): [flow_info, ...]}
+        self.d2d_link_composition: Dict[Tuple[int, int, int, int], List[Dict]] = {}
+
         # 构建D2D路由表
         self.d2d_routing_table = self._build_d2d_routing_table()
 
@@ -438,11 +447,13 @@ class D2DStaticBandwidthAnalyzer:
                     self.die_link_bandwidth[die_id][(pos, (i, j - 1))] = 0
 
     def _add_path_bandwidth_xy(
-        self, die_id: int, source: Tuple[int, int], target: Tuple[int, int], bandwidth: float
+        self, die_id: int, source: Tuple[int, int], target: Tuple[int, int], bandwidth: float, flow_info: Dict = None
     ):
         """使用XY路由添加路径带宽到指定Die"""
         if die_id not in self.die_link_bandwidth:
             self._static_initial(die_id)
+        if die_id not in self.die_link_composition:
+            self.die_link_composition[die_id] = {}
 
         node = source
         while True:
@@ -464,14 +475,23 @@ class D2DStaticBandwidthAnalyzer:
             if link_key not in self.die_link_bandwidth[die_id]:
                 self.die_link_bandwidth[die_id][link_key] = 0
             self.die_link_bandwidth[die_id][link_key] += bandwidth
+
+            # 记录链路组成
+            if flow_info:
+                if link_key not in self.die_link_composition[die_id]:
+                    self.die_link_composition[die_id][link_key] = []
+                self.die_link_composition[die_id][link_key].append(flow_info)
+
             node = next_node
 
     def _add_path_bandwidth_yx(
-        self, die_id: int, source: Tuple[int, int], target: Tuple[int, int], bandwidth: float
+        self, die_id: int, source: Tuple[int, int], target: Tuple[int, int], bandwidth: float, flow_info: Dict = None
     ):
         """使用YX路由添加路径带宽到指定Die"""
         if die_id not in self.die_link_bandwidth:
             self._static_initial(die_id)
+        if die_id not in self.die_link_composition:
+            self.die_link_composition[die_id] = {}
 
         node = source
         while True:
@@ -493,6 +513,13 @@ class D2DStaticBandwidthAnalyzer:
             if link_key not in self.die_link_bandwidth[die_id]:
                 self.die_link_bandwidth[die_id][link_key] = 0
             self.die_link_bandwidth[die_id][link_key] += bandwidth
+
+            # 记录链路组成
+            if flow_info:
+                if link_key not in self.die_link_composition[die_id]:
+                    self.die_link_composition[die_id][link_key] = []
+                self.die_link_composition[die_id][link_key].append(flow_info)
+
             node = next_node
 
     def compute(self, routing_type: str = "XY") -> Dict[int, Dict[Tuple[Tuple[int, int], Tuple[int, int]], float]]:
@@ -541,10 +568,26 @@ class D2DStaticBandwidthAnalyzer:
 
             req_type = getattr(config, 'req_type', 'W')
             bandwidth_per_src = config.speed
-            bandwidth_per_pair = bandwidth_per_src / len(dst_nodes)
+
+            # 计算总的目标数：考虑所有die_pairs中的目标Die数量
+            num_target_dies = len(set([pair[1] for pair in die_pairs]))  # 去重统计目标Die数
+            total_targets = len(dst_nodes) * num_target_dies
+            bandwidth_per_pair = bandwidth_per_src / total_targets if total_targets > 0 else 0
+
+            # 调试打印
+            print(f"[DEBUG] bandwidth_per_pair计算:")
+            print(f"  die_pairs: {die_pairs}")
+            print(f"  目标Die列表: {[pair[1] for pair in die_pairs]}")
+            print(f"  去重后目标Die数 (num_target_dies): {num_target_dies}")
+            print(f"  单Die目标节点数 (len(dst_nodes)): {len(dst_nodes)}")
+            print(f"  总目标数 (total_targets): {total_targets}")
+            print(f"  源IP速率 (bandwidth_per_src): {bandwidth_per_src}")
+            print(f"  每对带宽 (bandwidth_per_pair): {bandwidth_per_pair}")
+            print(f"  源节点数: {len(src_nodes)}, 目标节点数: {len(dst_nodes)}")
 
             # 为每个源-目标对和每个Die对计算带宽
             for src_idx, src_node in enumerate(src_nodes):
+                src_ip_type = src_ip_types[src_idx]
                 for dst_idx, dst_node in enumerate(dst_nodes):
                     dst_ip_type = dst_ip_types[dst_idx]
                     dst_ip_id = self._extract_ip_id(dst_ip_type)
@@ -555,14 +598,24 @@ class D2DStaticBandwidthAnalyzer:
                     for die_pair in die_pairs:
                         src_die, dst_die = die_pair[0], die_pair[1]
 
+                        # 创建流量信息
+                        flow_info = {
+                            'src_node': src_node,
+                            'src_ip': src_ip_type,
+                            'dst_node': dst_node,
+                            'dst_ip': dst_ip_type,
+                            'bandwidth': bandwidth_per_pair,
+                            'req_type': req_type
+                        }
+
                         if src_die == dst_die:
                             # Die内流量
                             if req_type == 'R':
                                 # 读请求：数据从目标流向源
-                                add_path_fn(src_die, dst_pos, src_pos, bandwidth_per_pair)
+                                add_path_fn(src_die, dst_pos, src_pos, bandwidth_per_pair, flow_info)
                             else:
                                 # 写请求：数据从源流向目标
-                                add_path_fn(src_die, src_pos, dst_pos, bandwidth_per_pair)
+                                add_path_fn(src_die, src_pos, dst_pos, bandwidth_per_pair, flow_info)
                         else:
                             # 跨Die流量
                             d2d_sn_node, d2d_rn_node = self._select_d2d_nodes(src_die, dst_die, dst_ip_id)
@@ -572,17 +625,60 @@ class D2DStaticBandwidthAnalyzer:
                             if req_type == 'R':
                                 # 读请求：数据从目标Die返回源Die
                                 # 目标Die: 目标IP → D2D_RN
-                                add_path_fn(dst_die, dst_pos, d2d_rn_pos, bandwidth_per_pair)
+                                add_path_fn(dst_die, dst_pos, d2d_rn_pos, bandwidth_per_pair, flow_info)
                                 # 源Die: D2D_SN → 源IP
-                                add_path_fn(src_die, d2d_sn_pos, src_pos, bandwidth_per_pair)
+                                add_path_fn(src_die, d2d_sn_pos, src_pos, bandwidth_per_pair, flow_info)
+
+                                # 累加D2D链路带宽（目标Die → 源Die）
+                                d2d_key = (dst_die, d2d_rn_node, src_die, d2d_sn_node)
+                                self.d2d_link_bandwidth[d2d_key] = self.d2d_link_bandwidth.get(d2d_key, 0.0) + bandwidth_per_pair
+                                # 记录D2D链路组成
+                                if d2d_key not in self.d2d_link_composition:
+                                    self.d2d_link_composition[d2d_key] = []
+                                self.d2d_link_composition[d2d_key].append(flow_info)
                             else:
                                 # 写请求：数据从源Die发送到目标Die
                                 # 源Die: 源IP → D2D_SN
-                                add_path_fn(src_die, src_pos, d2d_sn_pos, bandwidth_per_pair)
+                                add_path_fn(src_die, src_pos, d2d_sn_pos, bandwidth_per_pair, flow_info)
                                 # 目标Die: D2D_RN → 目标IP
-                                add_path_fn(dst_die, d2d_rn_pos, dst_pos, bandwidth_per_pair)
+                                add_path_fn(dst_die, d2d_rn_pos, dst_pos, bandwidth_per_pair, flow_info)
+
+                                # 累加D2D链路带宽（源Die → 目标Die）
+                                d2d_key = (src_die, d2d_sn_node, dst_die, d2d_rn_node)
+                                self.d2d_link_bandwidth[d2d_key] = self.d2d_link_bandwidth.get(d2d_key, 0.0) + bandwidth_per_pair
+                                # 记录D2D链路组成
+                                if d2d_key not in self.d2d_link_composition:
+                                    self.d2d_link_composition[d2d_key] = []
+                                self.d2d_link_composition[d2d_key].append(flow_info)
 
         return self.die_link_bandwidth
+
+    def get_link_composition(self) -> Dict[str, List[Dict]]:
+        """
+        获取链路带宽组成信息（包括Die内部和跨Die链路）
+
+        Returns:
+            字典格式: {link_key: [flow_info, ...]}
+            - Die内部链路: key="x1,y1-x2,y2"
+            - D2D跨Die链路: key="src_die-src_node-dst_die-dst_node"
+        """
+        result = {}
+
+        # Die内部链路
+        for die_id, link_comp in self.die_link_composition.items():
+            for link_key, flows in link_comp.items():
+                # 转换为字符串格式
+                src_pos, dst_pos = link_key
+                key = f"{src_pos[0]},{src_pos[1]}-{dst_pos[0]},{dst_pos[1]}"
+                result[key] = flows
+
+        # D2D跨Die链路
+        for d2d_key, flows in self.d2d_link_composition.items():
+            src_die, src_node, dst_die, dst_node = d2d_key
+            key = f"{src_die}-{src_node}-{dst_die}-{dst_node}"
+            result[key] = flows
+
+        return result
 
     def get_statistics(self) -> Dict[int, Dict[str, float]]:
         """获取每个Die的链路带宽统计信息"""
@@ -613,7 +709,7 @@ def compute_d2d_link_bandwidth(
     d2d_pairs: List[Tuple[int, int, int, int]],
     routing_type: str = "XY",
     num_dies: int = 2,
-) -> Dict[int, Dict[Tuple[Tuple[int, int], Tuple[int, int]], float]]:
+) -> Tuple[Dict[int, Dict[Tuple[Tuple[int, int], Tuple[int, int]], float]], Dict[Tuple[int, int, int, int], float], Dict[str, List[Dict]]]:
     """
     便捷函数: 计算D2D静态链路带宽
 
@@ -626,7 +722,11 @@ def compute_d2d_link_bandwidth(
         num_dies: Die数量
 
     Returns:
-        每个Die的链路带宽字典: {die_id: {((src_x, src_y), (dst_x, dst_y)): bandwidth_GB/s}}
+        (die_link_bandwidth, d2d_link_bandwidth, link_composition)
+        - die_link_bandwidth: {die_id: {((src_x, src_y), (dst_x, dst_y)): bandwidth_GB/s}}
+        - d2d_link_bandwidth: {(src_die, src_node, dst_die, dst_node): bandwidth_GB/s}
+        - link_composition: {link_key: [flow_info, ...]}
     """
     analyzer = D2DStaticBandwidthAnalyzer(topo_type, node_ips, configs, d2d_pairs, num_dies)
-    return analyzer.compute(routing_type)
+    analyzer.compute(routing_type)
+    return analyzer.die_link_bandwidth, analyzer.d2d_link_bandwidth, analyzer.get_link_composition()

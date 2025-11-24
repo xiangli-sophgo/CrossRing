@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 import Cytoscape from 'cytoscape'
 import { Card, Space, Tag, Button, Row, Col, Select, message } from 'antd'
-import { ZoomInOutlined, ZoomOutOutlined, AimOutlined, SaveOutlined } from '@ant-design/icons'
+import { ZoomInOutlined, ZoomOutOutlined, AimOutlined, SaveOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { TopologyData } from '../../types/topology'
 import type { IPMount } from '../../types/ipMount'
 import type { FlowInfo } from '../../types/staticBandwidth'
@@ -24,10 +24,10 @@ interface TopologyGraphProps {
   onWidthChange?: (width: number) => void
 }
 
-const TopologyGraph: React.FC<TopologyGraphProps> = ({
+const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>(({
   data, mounts, loading, onNodeClick, linkBandwidth, linkComposition,
   bandwidthMode = 'noc', selectedDie = 0, onDieChange, onLinkClick, onWidthChange
-}) => {
+}, ref) => {
   const [elements, setElements] = useState<any[]>([])
   const [selectedNode, setSelectedNode] = useState<number | null>(null)
   const cyRef = useRef<Cytoscape.Core | null>(null)
@@ -55,15 +55,6 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
     resizeObserver.observe(containerRef.current)
     return () => resizeObserver.disconnect()
   }, [onWidthChange])
-
-  // 创建节点ID到挂载信息列表的映射（一个节点可以有多个IP）
-  const mountMap = new Map<number, IPMount[]>()
-  mounts.forEach(mount => {
-    if (!mountMap.has(mount.node_id)) {
-      mountMap.set(mount.node_id, [])
-    }
-    mountMap.get(mount.node_id)!.push(mount)
-  })
 
   // IP类型到颜色的映射
   const getIPTypeColor = (ipType: string): { bg: string; border: string } => {
@@ -159,6 +150,15 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
   useEffect(() => {
     if (!data) return
 
+    // 创建节点ID到挂载信息列表的映射（一个节点可以有多个IP）
+    const mountMap = new Map<number, IPMount[]>()
+    mounts.forEach(mount => {
+      if (!mountMap.has(mount.node_id)) {
+        mountMap.set(mount.node_id, [])
+      }
+      mountMap.get(mount.node_id)!.push(mount)
+    })
+
     // 转换为Cytoscape格式，使用独立节点显示IP块（不使用复合节点）
     const nodes: any[] = []
 
@@ -213,12 +213,12 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
         // 动态计算IP块大小：根据行数和列数调整
         const baseSize = 24
-        const maxSize = 28
-        const minSize = 18
+        const maxSize = 36
+        const minSize = 28
         let ipSize = baseSize
-        if (numRows <= 2 && maxColsInRow <= 2) {
+        if (numRows <= 1 && maxColsInRow <= 1) {
           ipSize = maxSize  // IP少时放大
-        } else if (numRows >= 4 || maxColsInRow >= 4) {
+        } else if (numRows >= 2 || maxColsInRow >= 2) {
           ipSize = minSize  // IP多时缩小
         }
 
@@ -342,6 +342,16 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
     setElements([...nodes, ...edges])
   }, [data, mounts, linkBandwidth, bandwidthMode, selectedDie])
+
+  // 当elements更新后，刷新Cytoscape布局
+  useEffect(() => {
+    if (cyRef.current && elements.length > 0) {
+      setTimeout(() => {
+        cyRef.current?.fit(undefined, 50)
+        cyRef.current?.center()
+      }, 50)
+    }
+  }, [elements])
 
   const stylesheet: any[] = [
     // 背景节点样式 - 固定大小的正方形容器(统一浅灰色)
@@ -607,6 +617,24 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
     }
   }
 
+  const handleRefresh = () => {
+    if (cyRef.current) {
+      // 强制重新运行布局
+      cyRef.current.layout({ name: 'preset' }).run()
+
+      setTimeout(() => {
+        cyRef.current?.fit(undefined, 50)
+        cyRef.current?.center()
+        message.success('已刷新显示')
+      }, 50)
+    }
+  }
+
+  // 暴露saveLayout方法给父组件
+  useImperativeHandle(ref, () => ({
+    saveLayout: handleSaveLayout
+  }))
+
   if (!data) {
     return (
       <Card>
@@ -619,42 +647,42 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
   return (
     <>
-      <Card style={{ width: 'fit-content' }}>
-        <Row style={{ marginBottom: 16 }} align="middle">
-          <Col span={12}>
-            <Space>
-              <span>拓扑: {data.type}</span>
-              <Tag color="blue">{data.total_nodes} 节点</Tag>
-              <Tag color="green">{data.metadata.total_links} 链路</Tag>
-              <Tag color="orange">{mounts.length} 已挂载</Tag>
-            </Space>
-          </Col>
-          <Col span={12} style={{ textAlign: 'right' }}>
-            <Space>
-              {bandwidthMode === 'd2d' && linkBandwidth && (
-                <Space>
-                  <span>Die:</span>
-                  <Select
-                    value={selectedDie}
-                    onChange={onDieChange}
-                    size="small"
-                    style={{ width: 80 }}
-                  >
-                    {Object.keys(linkBandwidth).map(dieId => (
-                      <Select.Option key={dieId} value={Number(dieId)}>
-                        Die {dieId}
-                      </Select.Option>
-                    ))}
-                  </Select>
-                </Space>
-              )}
-              <Button size="small" icon={<ZoomInOutlined />} onClick={handleZoomIn}>放大</Button>
-              <Button size="small" icon={<ZoomOutOutlined />} onClick={handleZoomOut}>缩小</Button>
-              <Button size="small" icon={<AimOutlined />} onClick={handleFit}>适应</Button>
-              <Button size="small" icon={<SaveOutlined />} onClick={handleSaveLayout} type="primary">保存布局</Button>
-            </Space>
-          </Col>
-        </Row>
+      <Card
+        style={{ width: 'fit-content' }}
+        title={
+          <Space>
+            <span>拓扑: {data.type}</span>
+            <Tag color="blue">{data.total_nodes} 节点</Tag>
+            <Tag color="green">{data.metadata.total_links} 链路</Tag>
+            <Tag color="orange">{mounts.length} 已挂载</Tag>
+          </Space>
+        }
+        extra={
+          <Space>
+            {bandwidthMode === 'd2d' && linkBandwidth && (
+              <Space>
+                <span>Die:</span>
+                <Select
+                  value={selectedDie}
+                  onChange={onDieChange}
+                  size="small"
+                  style={{ width: 80 }}
+                >
+                  {Object.keys(linkBandwidth).map(dieId => (
+                    <Select.Option key={dieId} value={Number(dieId)}>
+                      Die {dieId}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </Space>
+            )}
+            <Button size="small" icon={<ReloadOutlined />} onClick={handleRefresh}>刷新显示</Button>
+            <Button size="small" icon={<ZoomInOutlined />} onClick={handleZoomIn}>放大</Button>
+            <Button size="small" icon={<ZoomOutOutlined />} onClick={handleZoomOut}>缩小</Button>
+            <Button size="small" icon={<AimOutlined />} onClick={handleFit}>适应</Button>
+          </Space>
+        }
+      >
         <div
           ref={containerRef}
           style={{
@@ -670,6 +698,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
           }}
         >
           <CytoscapeComponent
+            key={`topo-cy-${mounts.length}-${mounts.map(m => `${m.node_id}-${m.ip_type}`).join(',')}`}
             elements={elements}
             style={{ width: '100%', height: '100%' }}
             stylesheet={stylesheet}
@@ -739,6 +768,8 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
     </>
   )
-}
+})
+
+TopologyGraph.displayName = 'TopologyGraph'
 
 export default TopologyGraph

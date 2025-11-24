@@ -247,6 +247,11 @@ async def update_traffic_config(
     # 保留原ID和创建时间，更新其他字段
     old_config = traffic_configs[topology][mode][config_id]
 
+    # 处理 die_pairs 字段（优先使用请求中的值，否则保留旧值）
+    die_pairs_value = request.die_pairs if request.die_pairs is not None else old_config.die_pairs
+    source_die_value = request.source_die if request.source_die is not None else old_config.source_die
+    target_die_value = request.target_die if request.target_die is not None else old_config.target_die
+
     updated_config = TrafficConfig(
         id=config_id,
         topology=request.topology,
@@ -258,8 +263,9 @@ async def update_traffic_config(
         request_type=request.request_type,
         end_time_ns=request.end_time_ns,
         created_at=old_config.created_at,
-        source_die=request.source_die,
-        target_die=request.target_die
+        source_die=source_die_value,
+        target_die=target_die_value,
+        die_pairs=die_pairs_value
     )
 
     traffic_configs[topology][mode][config_id] = updated_config
