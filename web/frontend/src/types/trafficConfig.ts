@@ -27,6 +27,7 @@ export interface TrafficConfigCreate {
   end_time_ns: number
   source_die?: number
   target_die?: number
+  die_pairs?: number[][]
 }
 
 export interface BatchTrafficConfigCreate {
