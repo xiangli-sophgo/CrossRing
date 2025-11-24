@@ -43,11 +43,6 @@ function App() {
   const [d2dLayout, setD2dLayout] = useState<D2DLayoutInfo | null>(null)
   const [selectedLinkKey, setSelectedLinkKey] = useState<string>('')
   const [selectedLinkFlows, setSelectedLinkFlows] = useState<FlowInfo[]>([])
-  const [topoWidth, setTopoWidth] = useState<number | null>(null)
-
-  const handleTopoWidthChange = useCallback((width: number) => {
-    setTopoWidth(width)
-  }, [])
 
   // 加载可用拓扑类型
   const loadTopologies = async () => {
@@ -174,7 +169,7 @@ function App() {
       <Content style={{ padding: '24px 50px' }}>
         <div style={{ display: 'flex', width: '100%', gap: 24, overflow: 'hidden' }}>
           {/* 左侧：拓扑可视化 */}
-          <div style={{ flexShrink: 0 }}>
+          <div style={{ flexShrink: 0, overflow: 'visible' }}>
             <Space direction="vertical" size="large" style={{ width: '100%' }}>
               {/* 拓扑图 - D2D模式显示多Die视图 */}
               {bandwidthMode === 'd2d' && d2dLayout ? (
@@ -187,7 +182,6 @@ function App() {
                   d2dLayout={d2dLayout}
                   onNodeClick={handleNodeClick}
                   onLinkClick={handleLinkClick}
-                  onWidthChange={handleTopoWidthChange}
                 />
               ) : (
                 <TopologyGraph
@@ -201,7 +195,6 @@ function App() {
                   selectedDie={selectedDie}
                   onDieChange={setSelectedDie}
                   onLinkClick={handleLinkClick}
-                  onWidthChange={handleTopoWidthChange}
                 />
               )}
 
@@ -219,7 +212,7 @@ function App() {
                   const srcNode = srcRow * topoData.cols + srcCol
                   const dstNode = dstRow * topoData.cols + dstCol
                   return `${srcNode} → ${dstNode}`
-                })()})`} size="small">
+                })()})`} size="small" style={{ maxWidth: '100%' }}>
                   <Table
                     dataSource={selectedLinkFlows.map((flow, idx) => ({ ...flow, key: idx }))}
                     columns={[
@@ -232,7 +225,7 @@ function App() {
                     ]}
                     size="small"
                     pagination={false}
-                    scroll={{ y: 200 }}
+                    scroll={{ y: 200, x: 'max-content' }}
                   />
                 </Card>
               )}
@@ -240,7 +233,7 @@ function App() {
           </div>
 
           {/* 右侧：IP挂载和流量配置 */}
-          <div style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
+          <div style={{ flex: 1, minWidth: '300px', overflow: 'auto' }}>
             {topoData && (
               <Space direction="vertical" size="large" style={{ width: '100%' }}>
                 <IPMountPanel

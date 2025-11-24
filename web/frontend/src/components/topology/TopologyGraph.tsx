@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 import Cytoscape from 'cytoscape'
-import { Card, Space, Tag, Button, Row, Col, Select } from 'antd'
-import { ZoomInOutlined, ZoomOutOutlined, AimOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Card, Space, Tag, Button, Row, Col, Select, message } from 'antd'
+import { ZoomInOutlined, ZoomOutOutlined, AimOutlined, SaveOutlined } from '@ant-design/icons'
 import type { TopologyData } from '../../types/topology'
 import type { IPMount } from '../../types/ipMount'
 import type { FlowInfo } from '../../types/staticBandwidth'
+import { useLayoutStore } from '../../store/layoutStore'
 
 interface TopologyGraphProps {
   data: TopologyData | null
@@ -32,14 +33,17 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
   const cyRef = useRef<Cytoscape.Core | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
 
-  // 监听容器大小变化，自动重新fit
+  // 从store获取保存的容器尺寸
+  const { singleDieWidth, singleDieHeight, setSingleDieSize } = useLayoutStore()
+
+  // 监听容器大小变化，自动调整画布并适应
   useEffect(() => {
     if (!containerRef.current) return
     const resizeObserver = new ResizeObserver(() => {
       if (cyRef.current) {
         cyRef.current.resize()
         setTimeout(() => {
-          cyRef.current?.fit(undefined, 50)
+          cyRef.current?.fit(undefined, 10)
           cyRef.current?.center()
         }, 50)
       }
@@ -594,22 +598,12 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
     }
   }
 
-  const handleReset = () => {
-    if (cyRef.current && data) {
-      setSelectedNode(null)
-
-      // 重置节点位置
-      data.nodes.forEach(node => {
-        const cyNode = cyRef.current!.getElementById(`node-${node.id}`)
-        cyNode.position({
-          x: node.col * 150 + 75,
-          y: node.row * 150 + 75,
-        })
-      })
-
-      // 重置缩放和位置并居中
-      cyRef.current.fit(undefined, 50)
-      cyRef.current.center()
+  const handleSaveLayout = () => {
+    if (containerRef.current) {
+      const width = containerRef.current.offsetWidth
+      const height = containerRef.current.offsetHeight
+      setSingleDieSize(width, height)
+      message.success('布局已保存')
     }
   }
 
@@ -625,7 +619,7 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
   return (
     <>
-      <Card style={{ width: 'fit-content', minWidth: 500 }}>
+      <Card style={{ width: 'fit-content' }}>
         <Row style={{ marginBottom: 16 }} align="middle">
           <Col span={12}>
             <Space>
@@ -657,11 +651,24 @@ const TopologyGraph: React.FC<TopologyGraphProps> = ({
               <Button size="small" icon={<ZoomInOutlined />} onClick={handleZoomIn}>放大</Button>
               <Button size="small" icon={<ZoomOutOutlined />} onClick={handleZoomOut}>缩小</Button>
               <Button size="small" icon={<AimOutlined />} onClick={handleFit}>适应</Button>
-              <Button size="small" icon={<ReloadOutlined />} onClick={handleReset}>重置</Button>
+              <Button size="small" icon={<SaveOutlined />} onClick={handleSaveLayout} type="primary">保存布局</Button>
             </Space>
           </Col>
         </Row>
-        <div ref={containerRef} style={{ height: 'calc(100vh - 200px)', minHeight: 400, maxWidth: 'calc(100vw - 900px)', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fafafa', resize: 'both', overflow: 'hidden' }}>
+        <div
+          ref={containerRef}
+          style={{
+            width: singleDieWidth,
+            height: singleDieHeight,
+            minWidth: '30vw',
+            maxWidth: '60vw',
+            border: '1px solid #d9d9d9',
+            borderRadius: 4,
+            background: '#fafafa',
+            resize: 'both',
+            overflow: 'hidden'
+          }}
+        >
           <CytoscapeComponent
             elements={elements}
             style={{ width: '100%', height: '100%' }}

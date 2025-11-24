@@ -1,11 +1,12 @@
 import { useEffect, useRef, useMemo } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 import Cytoscape from 'cytoscape'
-import { Card, Space, Tag, Button, Row, Col } from 'antd'
-import { ZoomInOutlined, ZoomOutOutlined, AimOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Card, Space, Tag, Button, Row, Col, message } from 'antd'
+import { ZoomInOutlined, ZoomOutOutlined, AimOutlined, SaveOutlined } from '@ant-design/icons'
 import type { TopologyData } from '../../types/topology'
 import type { IPMount } from '../../types/ipMount'
 import type { D2DLayoutInfo } from '../../types/staticBandwidth'
+import { useLayoutStore } from '../../store/layoutStore'
 
 interface MultiDieTopologyGraphProps {
   data: TopologyData | null
@@ -74,14 +75,17 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
   const cyRef = useRef<Cytoscape.Core | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
 
-  // 监听容器大小变化，自动重新fit
+  // 从store获取保存的容器尺寸
+  const { multiDieWidth, multiDieHeight, setMultiDieSize } = useLayoutStore()
+
+  // 监听容器大小变化，自动调整画布并适应
   useEffect(() => {
     if (!containerRef.current) return
     const resizeObserver = new ResizeObserver(() => {
       if (cyRef.current) {
         cyRef.current.resize()
         setTimeout(() => {
-          cyRef.current?.fit(undefined, 20)
+          cyRef.current?.fit(undefined, 10)
           cyRef.current?.center()
         }, 50)
       }
@@ -438,14 +442,21 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
       // 绘制Die内部链路
       const dieBandwidth = linkBandwidth?.[dieId] || {}
       data.edges.forEach((edge, idx) => {
+        // 计算原始坐标（用于查询后端带宽数据）
+        const srcOrigRow = Math.floor(edge.source / cols)
+        const srcOrigCol = edge.source % cols
+        const dstOrigRow = Math.floor(edge.target / cols)
+        const dstOrigCol = edge.target % cols
+
+        // 计算旋转后的坐标（用于确定渲染方向）
         const srcRotated = calculateRotatedPosition(edge.source, cols, rows, rotation)
         const dstRotated = calculateRotatedPosition(edge.target, cols, rows, rotation)
 
         // 根据旋转后的位置计算实际方向
         const actualDirection = srcRotated.row === dstRotated.row ? 'horizontal' : 'vertical'
 
-        // 正向
-        const fwdKey = `${srcRotated.col},${srcRotated.row}-${dstRotated.col},${dstRotated.row}`
+        // 正向 - 使用原始坐标查询带宽
+        const fwdKey = `${srcOrigCol},${srcOrigRow}-${dstOrigCol},${dstOrigRow}`
         const fwdBw = dieBandwidth[fwdKey] || 0
         edges.push({
           data: {
@@ -457,13 +468,14 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
             bandwidth: fwdBw,
             bandwidthColor: getBandwidthColor(fwdBw),
             bandwidthWidth: getBandwidthWidth(fwdBw),
-            linkKey: fwdKey
+            linkKey: fwdKey,
+            label: fwdBw > 0 ? fwdBw.toFixed(1) : ''
           },
           classes: 'internal-edge'
         })
 
-        // 反向
-        const bwdKey = `${dstRotated.col},${dstRotated.row}-${srcRotated.col},${srcRotated.row}`
+        // 反向 - 使用原始坐标查询带宽
+        const bwdKey = `${dstOrigCol},${dstOrigRow}-${srcOrigCol},${srcOrigRow}`
         const bwdBw = dieBandwidth[bwdKey] || 0
         edges.push({
           data: {
@@ -475,7 +487,8 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
             bandwidth: bwdBw,
             bandwidthColor: getBandwidthColor(bwdBw),
             bandwidthWidth: getBandwidthWidth(bwdBw),
-            linkKey: bwdKey
+            linkKey: bwdKey,
+            label: bwdBw > 0 ? bwdBw.toFixed(1) : ''
           },
           classes: 'internal-edge'
         })
@@ -733,9 +746,13 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
     cyRef.current?.fit(undefined, 20)
     cyRef.current?.center()
   }
-  const handleReset = () => {
-    cyRef.current?.fit(undefined, 20)
-    cyRef.current?.center()
+  const handleSaveLayout = () => {
+    if (containerRef.current) {
+      const width = containerRef.current.offsetWidth
+      const height = containerRef.current.offsetHeight
+      setMultiDieSize(width, height)
+      message.success('布局已保存')
+    }
   }
 
   if (!data) {
@@ -749,7 +766,7 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
   }
 
   return (
-    <Card style={{ width: 'fit-content', minWidth: 500 }}>
+    <Card style={{ width: 'fit-content' }}>
       <Row style={{ marginBottom: 16 }} align="middle">
         <Col span={12}>
           <Space>
@@ -763,11 +780,24 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
             <Button size="small" icon={<ZoomInOutlined />} onClick={handleZoomIn}>放大</Button>
             <Button size="small" icon={<ZoomOutOutlined />} onClick={handleZoomOut}>缩小</Button>
             <Button size="small" icon={<AimOutlined />} onClick={handleFit}>适应</Button>
-            <Button size="small" icon={<ReloadOutlined />} onClick={handleReset}>重置</Button>
+            <Button size="small" icon={<SaveOutlined />} onClick={handleSaveLayout} type="primary">保存布局</Button>
           </Space>
         </Col>
       </Row>
-      <div ref={containerRef} style={{ height: 'calc(100vh - 280px)', minHeight: 400, maxWidth: 'calc(100vw - 900px)', border: '1px solid #d9d9d9', borderRadius: 4, background: '#fafafa', resize: 'both', overflow: 'hidden' }}>
+      <div
+        ref={containerRef}
+        style={{
+          width: multiDieWidth,
+          height: multiDieHeight,
+          minWidth: '30vw',
+          maxWidth: '60vw',
+          border: '1px solid #d9d9d9',
+          borderRadius: 4,
+          background: '#fafafa',
+          resize: 'both',
+          overflow: 'hidden'
+        }}
+      >
         <CytoscapeComponent
           key={`cy-${JSON.stringify(d2dLayout)}-${mounts.length}-${JSON.stringify(mounts.map(m => m.node_id + m.ip_type))}`}
           elements={elements}
@@ -776,7 +806,7 @@ const MultiDieTopologyGraph: React.FC<MultiDieTopologyGraphProps> = ({
           cy={handleCyInit}
           layout={{ name: 'preset' }}
           userZoomingEnabled={true}
-          userPanningEnabled={true}
+          userPanningEnabled={false}
           autoungrabify={true}
           boxSelectionEnabled={false}
         />

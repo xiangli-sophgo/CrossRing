@@ -343,7 +343,8 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
             request_type: newRequestType,
             end_time_ns: originalConfig.end_time_ns,
             source_die: originalConfig.source_die,
-            target_die: originalConfig.target_die
+            target_die: originalConfig.target_die,
+            die_pairs: originalConfig.die_pairs
           })
         })
       )
@@ -693,7 +694,8 @@ const TrafficConfigPanel: React.FC<TrafficConfigPanelProps> = ({ topology, mode,
             request_type: originalConfig.request_type,
             end_time_ns: field === 'end_time_ns' ? value : originalConfig.end_time_ns,
             source_die: originalConfig.source_die,
-            target_die: originalConfig.target_die
+            target_die: originalConfig.target_die,
+            die_pairs: originalConfig.die_pairs
           })
         })
       )
