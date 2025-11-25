@@ -1,0 +1,16 @@
+# Node modules
+frontend/node_modules/
+
+# Python
+backend/__pycache__/
+*.pyc
+
+# Build outputs (keep dist for deployment)
+# frontend/dist/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local

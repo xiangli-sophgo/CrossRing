@@ -96,33 +96,48 @@ def run_single_simulation(sim_params):
         return (file_name, None, output_csv)
 
 
-def save_results_to_csv(results_data):
-    """Save simulation results to CSV file with thread safety"""
+def save_results_to_csv(results_data, db_manager=None, experiment_id=None, save_csv=True):
+    """Save simulation results to CSV file and/or database"""
     import portalocker
 
     file_name, results, output_csv = results_data
 
     if results is None:
-        print(f"Skipping CSV write for {file_name} due to simulation error")
+        print(f"Skipping save for {file_name} due to simulation error")
         return
 
-    with open(output_csv, mode="a", newline="", encoding="utf-8-sig") as output_csv_file:
-        # Lock the file for exclusive access (cross-platform)
-        portalocker.lock(output_csv_file, portalocker.LOCK_EX)
+    # CSV 写入（可选）
+    if save_csv:
+        with open(output_csv, mode="a", newline="", encoding="utf-8-sig") as output_csv_file:
+            # Lock the file for exclusive access (cross-platform)
+            portalocker.lock(output_csv_file, portalocker.LOCK_EX)
 
-        # 在锁内检查文件是否为空来决定是否写header
-        output_csv_file.seek(0, 2)  # 移到文件末尾
-        write_header = output_csv_file.tell() == 0
+            # 在锁内检查文件是否为空来决定是否写header
+            output_csv_file.seek(0, 2)  # 移到文件末尾
+            write_header = output_csv_file.tell() == 0
 
-        writer = csv.DictWriter(output_csv_file, fieldnames=results.keys())
-        if write_header:
-            writer.writeheader()
-        writer.writerow(results)
+            writer = csv.DictWriter(output_csv_file, fieldnames=results.keys())
+            if write_header:
+                writer.writeheader()
+            writer.writerow(results)
 
-    print(f"Results for {file_name} saved to CSV")
+        print(f"Results for {file_name} saved to CSV")
+
+    # 数据库写入
+    if db_manager is not None and experiment_id is not None:
+        try:
+            performance = results.get("带宽_DDR_混合", results.get("mixed_avg_weighted_bw", 0))
+            db_manager.add_result(
+                experiment_id=experiment_id,
+                config_params=results,
+                performance=performance,
+                result_details={},
+            )
+        except Exception as db_e:
+            print(f"数据库写入失败: {db_e}")
 
 
-def run_simulation(config_path, traffic_path, model_type, results_file_name, max_workers=None):
+def run_simulation(config_path, traffic_path, model_type, results_file_name, max_workers=None, save_to_db=False, experiment_name=None, save_csv=True):
     """Run network simulation with processed data using parallel processing"""
 
     # Get all processed traffic files
@@ -141,9 +156,26 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name, max
     output_csv = os.path.join(r"../Result/Traffic_result_csv/", f"{results_file_name}.csv")
     os.makedirs(result_save_path, exist_ok=True)
 
-    # Ensure the CSV output directory exists
-    csv_dir = os.path.dirname(output_csv)
-    os.makedirs(csv_dir, exist_ok=True)
+    # Ensure the CSV output directory exists (if saving CSV)
+    if save_csv:
+        csv_dir = os.path.dirname(output_csv)
+        os.makedirs(csv_dir, exist_ok=True)
+
+    # 数据库初始化
+    db_manager = None
+    experiment_id = None
+    if save_to_db:
+        from src.database import ResultManager
+        db_manager = ResultManager()
+        exp_name = experiment_name or f"noc_{results_file_name}"
+        experiment_id = db_manager.create_experiment(
+            name=exp_name,
+            experiment_type="noc",
+            config_path=config_path,
+            description=f"NoC 流量仿真 - {results_file_name}",
+            total_combinations=len(file_names),
+        )
+        print(f"数据库实验已创建: {exp_name} (ID: {experiment_id})")
 
     # Determine number of workers
     if max_workers is None:
@@ -170,11 +202,16 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name, max
             file_name = future_to_file[future]
             try:
                 result_data = future.result()
-                save_results_to_csv(result_data)
+                save_results_to_csv(result_data, db_manager, experiment_id, save_csv)
                 completed += 1
                 print(f"Progress: {completed}/{len(file_names)} simulations completed")
             except Exception:
                 logging.exception(f"Error processing {file_name}")
+
+    # 更新实验状态
+    if db_manager and experiment_id:
+        db_manager.update_experiment_status(experiment_id, "completed")
+        print(f"数据库实验状态已更新为 completed")
 
     end_time = time.time()
     print(f"All simulations completed in {end_time - start_time:.2f} seconds")
@@ -193,6 +230,9 @@ def main():
     parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both")
     # parser.add_argument("--max_workers", type=int, default=None, help="Maximum number of parallel workers (default: number of CPU cores)")
     parser.add_argument("--max_workers", type=int, default=16, help="Maximum number of parallel workers (default: number of CPU cores)")
+    parser.add_argument("--save_to_db", action="store_true", help="是否保存到数据库")
+    parser.add_argument("--experiment_name", type=str, default=None, help="数据库中的实验名称")
+    parser.add_argument("--no_csv", action="store_true", help="不生成CSV文件")
 
     args = parser.parse_args()
     import numpy as np
@@ -208,7 +248,16 @@ def main():
         processed_data_path = f"{args.traffic_output}/step6_ch_map/"
         # processed_data_path = f"{args.traffic_output}/hashed/"
         # processed_data_path = f"{args.traffic_output}"
-        run_simulation(args.config, processed_data_path, args.model, args.results_file_name, args.max_workers)
+        run_simulation(
+            args.config,
+            processed_data_path,
+            args.model,
+            args.results_file_name,
+            args.max_workers,
+            args.save_to_db,
+            args.experiment_name,
+            not args.no_csv,
+        )
 
 
 if __name__ == "__main__":

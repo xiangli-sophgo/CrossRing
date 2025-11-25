@@ -206,36 +206,56 @@ def run_single_d2d_simulation(sim_params):
         return (traffic_file, None, output_csv)
 
 
-def save_results_to_csv(results_data):
+def save_results_to_csv(results_data, db_manager=None, experiment_id=None, save_csv=True):
     """
-    保存结果到 CSV（线程安全）
+    保存结果到 CSV 和/或数据库
 
     Args:
         results_data: (traffic_file, results, output_csv) 元组
+        db_manager: ResultManager 实例（可选）
+        experiment_id: 实验 ID（可选）
+        save_csv: 是否保存到 CSV 文件
     """
     file_name, results, output_csv = results_data
 
     if results is None:
-        print(f"跳过 {file_name} 的 CSV 写入（仿真错误）")
+        print(f"跳过 {file_name} 的保存（仿真错误）")
         return
 
-    # 确保目录存在
-    os.makedirs(os.path.dirname(output_csv), exist_ok=True)
+    # CSV 写入（可选）
+    if save_csv:
+        # 确保目录存在
+        os.makedirs(os.path.dirname(output_csv), exist_ok=True)
 
-    with open(output_csv, mode="a", newline="", encoding="utf-8-sig") as f:
-        portalocker.lock(f, portalocker.LOCK_EX)
+        with open(output_csv, mode="a", newline="", encoding="utf-8-sig") as f:
+            portalocker.lock(f, portalocker.LOCK_EX)
 
-        # 检查文件是否为空
-        f.seek(0, 2)
-        write_header = f.tell() == 0
+            # 检查文件是否为空
+            f.seek(0, 2)
+            write_header = f.tell() == 0
 
-        writer = csv.DictWriter(f, fieldnames=results.keys())
-        if write_header:
-            writer.writeheader()
-        writer.writerow(results)
+            writer = csv.DictWriter(f, fieldnames=results.keys())
+            if write_header:
+                writer.writeheader()
+            writer.writerow(results)
+
+        print(f"{file_name} 已保存到 CSV")
+
+    # 数据库写入
+    if db_manager is not None and experiment_id is not None:
+        try:
+            performance = results.get("带宽_DDR_混合", 0)
+            db_manager.add_result(
+                experiment_id=experiment_id,
+                config_params=results,
+                performance=performance,
+                result_details={},
+            )
+        except Exception as db_e:
+            print(f"数据库写入失败: {db_e}")
 
 
-def run_d2d_simulation(d2d_config_path, traffic_path, results_folder_name, max_workers, sim_config):
+def run_d2d_simulation(d2d_config_path, traffic_path, results_folder_name, max_workers, sim_config, save_to_db=False, experiment_name=None, save_csv=True):
     """
     批量运行 D2D 仿真
 
@@ -245,6 +265,9 @@ def run_d2d_simulation(d2d_config_path, traffic_path, results_folder_name, max_w
         results_folder_name: 结果保存文件夹名称
         max_workers: 并行工作进程数
         sim_config: 仿真配置字典
+        save_to_db: 是否保存到数据库
+        experiment_name: 数据库中的实验名称
+        save_csv: 是否生成 CSV 文件
     """
     # 获取流量文件列表
     traffic_files = [f for f in os.listdir(traffic_path) if f.endswith(".txt")]
@@ -261,8 +284,24 @@ def run_d2d_simulation(d2d_config_path, traffic_path, results_folder_name, max_w
     os.makedirs(result_base_path, exist_ok=True)
 
     # 如果 CSV 文件已存在，删除它（重新开始）
-    if os.path.exists(output_csv):
+    if save_csv and os.path.exists(output_csv):
         os.remove(output_csv)
+
+    # 数据库初始化
+    db_manager = None
+    experiment_id = None
+    if save_to_db:
+        from src.database import ResultManager
+        db_manager = ResultManager()
+        exp_name = experiment_name or f"d2d_{results_folder_name}"
+        experiment_id = db_manager.create_experiment(
+            name=exp_name,
+            experiment_type="d2d",
+            config_path=d2d_config_path,
+            description=f"D2D 仿真 - {results_folder_name}",
+            total_combinations=len(traffic_files),
+        )
+        print(f"数据库实验已创建: {exp_name} (ID: {experiment_id})")
 
     # 准备参数列表
     sim_params_list = []
@@ -285,11 +324,19 @@ def run_d2d_simulation(d2d_config_path, traffic_path, results_folder_name, max_w
         for future in as_completed(futures):
             file_name = futures[future]
             result = future.result()
-            save_results_to_csv(result)
+            save_results_to_csv(result, db_manager, experiment_id, save_csv)
             completed += 1
             print(f"进度: {completed}/{len(traffic_files)} 完成 - {file_name}")
 
-    print(f"\n仿真完成！结果保存到: {output_csv}")
+    # 更新实验状态
+    if db_manager and experiment_id:
+        db_manager.update_experiment_status(experiment_id, "completed")
+        print(f"数据库实验状态已更新为 completed")
+
+    if save_csv:
+        print(f"\n仿真完成！结果保存到: {output_csv}")
+    else:
+        print(f"\n仿真完成！")
 
 
 def main():
@@ -314,8 +361,15 @@ def main():
         "export_ip_bw_csv": True,  # 是否导出IP带宽CSV
     }
 
+    # ========== 数据库配置 ==========
+    save_to_db = False  # 是否保存到数据库
+    experiment_name = None  # 数据库中的实验名称，None 时自动生成
+
+    # ========== CSV 配置 ==========
+    save_csv = True  # 是否生成 CSV 文件
+
     # 运行仿真
-    run_d2d_simulation(d2d_config_path, traffic_path, results_folder_name, max_workers, sim_config)
+    run_d2d_simulation(d2d_config_path, traffic_path, results_folder_name, max_workers, sim_config, save_to_db, experiment_name, save_csv)
 
 
 if __name__ == "__main__":
