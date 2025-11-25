@@ -5,9 +5,8 @@ from config.config import CrossRingConfig
 import csv
 import argparse
 import multiprocessing
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import time
-import numpy as np
 import logging
 
 # logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(filename)s:%(lineno)d: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
@@ -19,7 +18,7 @@ def process_traffic_data(input_path, output_path, outstanding_num):
     # Validate outstanding_num
     assert isinstance(outstanding_num, int), "outstanding_num must be integer or out of range."
     assert outstanding_num > 0, "outstanding_num must be positive integer."
-    assert outstanding_num & outstanding_num - 1 == 0, "outstanding_num must be a power of 2."
+    assert (outstanding_num & (outstanding_num - 1)) == 0, "outstanding_num must be a power of 2."
 
     outstanding_digit = outstanding_num.bit_length() - 1
 
@@ -37,6 +36,12 @@ def process_traffic_data(input_path, output_path, outstanding_num):
     step6_map_to_ch.main(f"{output_path}/step5_data_merge", f"{output_path}/step6_ch_map")
 
 
+# 模型类型到类的映射
+MODEL_CLASS_MAP = {
+    "REQ_RSP": REQ_RSP_model,
+}
+
+
 def run_single_simulation(sim_params):
     """Run a single simulation - designed to be called in parallel"""
     (config_path, traffic_path, model_type, results_file_name, file_name, result_save_path, results_fig_save_path, output_csv) = sim_params
@@ -44,29 +49,19 @@ def run_single_simulation(sim_params):
     try:
         print(f"Starting simulation for {file_name} on process {os.getpid()}")
 
-        # 拓扑类型到配置文件的映射
-        topo_config_map = {
-            "3x3": r"../config/topologies/topo_3x3.yaml",
-            "4x4": r"../config/topologies/topo_4x4.yaml",
-            "5x2": r"../config/topologies/topo_5x2.yaml",
-            "5x4": r"../config/topologies/topo_5x4.yaml",
-            "6x5": r"../config/topologies/topo_6x5.yaml",
-            "8x8": r"../config/topologies/topo_8x8.yaml",
-        }
-
-        # 默认拓扑类型
-        topo_type = "5x4"  # Default topology
-
-        # 根据拓扑类型选择配置文件
-        actual_config_path = topo_config_map.get(topo_type, config_path)
-        config = CrossRingConfig(actual_config_path)
+        config = CrossRingConfig(config_path)
         config.CROSSRING_VERSION = "V1"
 
-        # 从配置文件获取拓扑类型，如果没有则使用默认值
-        topo_type = config.TOPO_TYPE if config.TOPO_TYPE else topo_type
+        # 从配置文件获取拓扑类型
+        topo_type = config.TOPO_TYPE
+
+        # 获取模型类
+        model_class = MODEL_CLASS_MAP.get(model_type)
+        if model_class is None:
+            raise ValueError(f"Unknown model type: {model_type}")
 
         # Create simulation instance
-        sim: BaseModel = eval(f"{model_type}_model")(
+        sim: BaseModel = model_class(
             model_type=model_type,
             config=config,
             topo_type=topo_type,
@@ -103,47 +98,26 @@ def run_single_simulation(sim_params):
 
 def save_results_to_csv(results_data):
     """Save simulation results to CSV file with thread safety"""
+    import portalocker
+
     file_name, results, output_csv = results_data
 
     if results is None:
         print(f"Skipping CSV write for {file_name} due to simulation error")
         return
 
-    # Use portalocker for cross-platform file locking
-    try:
-        import portalocker
+    with open(output_csv, mode="a", newline="", encoding="utf-8-sig") as output_csv_file:
+        # Lock the file for exclusive access (cross-platform)
+        portalocker.lock(output_csv_file, portalocker.LOCK_EX)
 
-        use_portalocker = True
-    except ImportError:
-        print("Warning: portalocker not available, using threading.Lock instead")
-        use_portalocker = False
+        # 在锁内检查文件是否为空来决定是否写header
+        output_csv_file.seek(0, 2)  # 移到文件末尾
+        write_header = output_csv_file.tell() == 0
 
-    csv_file_exists = os.path.isfile(output_csv)
-
-    if use_portalocker:
-        with open(output_csv, mode="a", newline="", encoding="utf-8-sig") as output_csv_file:
-            # Lock the file for exclusive access (cross-platform)
-            portalocker.lock(output_csv_file, portalocker.LOCK_EX)
-
-            writer = csv.DictWriter(output_csv_file, fieldnames=results.keys())
-            if not csv_file_exists:
-                writer.writeheader()
-            writer.writerow(results)
-
-            # File is automatically unlocked when closed
-    else:
-        # Fallback: use a global lock (less ideal but works)
-        import threading
-
-        if not hasattr(save_results_to_csv, "_lock"):
-            save_results_to_csv._lock = threading.Lock()
-
-        with save_results_to_csv._lock:
-            with open(output_csv, mode="a", newline="", encoding="utf-8-sig") as output_csv_file:
-                writer = csv.DictWriter(output_csv_file, fieldnames=results.keys())
-                if not csv_file_exists:
-                    writer.writeheader()
-                writer.writerow(results)
+        writer = csv.DictWriter(output_csv_file, fieldnames=results.keys())
+        if write_header:
+            writer.writeheader()
+        writer.writerow(results)
 
     print(f"Results for {file_name} saved to CSV")
 
@@ -190,9 +164,9 @@ def run_simulation(config_path, traffic_path, model_type, results_file_name, max
         # Submit all simulation tasks
         future_to_file = {executor.submit(run_single_simulation, params): params[4] for params in sim_params_list}
 
-        # Process completed simulations and save results
+        # Process completed simulations and save results (按完成顺序处理)
         completed = 0
-        for future in future_to_file:
+        for future in as_completed(future_to_file):
             file_name = future_to_file[future]
             try:
                 result_data = future.result()
@@ -221,6 +195,8 @@ def main():
     parser.add_argument("--max_workers", type=int, default=16, help="Maximum number of parallel workers (default: number of CPU cores)")
 
     args = parser.parse_args()
+    import numpy as np
+
     np.random.seed(922)
 
     if args.mode in [0, 2]:

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react'
+import { useEffect, useRef, useState, useMemo, forwardRef, useImperativeHandle } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 import Cytoscape from 'cytoscape'
 import { Card, Space, Tag, Button, Row, Col, Select, message } from 'antd'
@@ -28,7 +28,6 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
   data, mounts, loading, onNodeClick, linkBandwidth, linkComposition,
   bandwidthMode = 'noc', selectedDie = 0, onDieChange, onLinkClick, onWidthChange
 }, ref) => {
-  const [elements, setElements] = useState<any[]>([])
   const [selectedNode, setSelectedNode] = useState<number | null>(null)
   const cyRef = useRef<Cytoscape.Core | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -147,8 +146,9 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
     return 4
   }
 
-  useEffect(() => {
-    if (!data) return
+  // 使用 useMemo 同步计算 elements，确保 mounts 变化时立即更新
+  const elements = useMemo(() => {
+    if (!data) return []
 
     // 创建节点ID到挂载信息列表的映射（一个节点可以有多个IP）
     const mountMap = new Map<number, IPMount[]>()
@@ -211,18 +211,23 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
         const numRows = sortedTypes.length
         const maxColsInRow = Math.max(...sortedTypes.map(t => ipByType[t].length))
 
-        // 动态计算IP块大小：根据行数和列数调整
-        const baseSize = 24
-        const maxSize = 36
-        const minSize = 28
-        let ipSize = baseSize
-        if (numRows <= 1 && maxColsInRow <= 1) {
-          ipSize = maxSize  // IP少时放大
-        } else if (numRows >= 2 || maxColsInRow >= 2) {
-          ipSize = minSize  // IP多时缩小
+        // 动态计算IP块大小：根据行数和列数调整，确保不超出节点框(70x70)
+        const nodeBoxSize = 70
+        const minGap = 2  // 最小间隙
+        // 根据最大维度计算合适的IP块大小
+        const maxDim = Math.max(numRows, maxColsInRow)
+        let ipSize: number
+        if (maxDim <= 1) {
+          ipSize = 36  // 单个IP时放大
+        } else if (maxDim === 2) {
+          ipSize = 28  // 2个时适中
+        } else {
+          // 3个及以上：动态计算以适应节点框
+          ipSize = Math.floor((nodeBoxSize - minGap * (maxDim + 1)) / maxDim)
+          ipSize = Math.max(ipSize, 16)  // 最小16px
         }
 
-        const spacing = ipSize + 4  // 间距
+        const spacing = ipSize + minGap  // 间距
 
         // 计算总高度，用于垂直居中
         const totalHeight = numRows * spacing
@@ -340,18 +345,8 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
       })
     })
 
-    setElements([...nodes, ...edges])
+    return [...nodes, ...edges]
   }, [data, mounts, linkBandwidth, bandwidthMode, selectedDie])
-
-  // 当elements更新后，刷新Cytoscape布局
-  useEffect(() => {
-    if (cyRef.current && elements.length > 0) {
-      setTimeout(() => {
-        cyRef.current?.fit(undefined, 50)
-        cyRef.current?.center()
-      }, 50)
-    }
-  }, [elements])
 
   const stylesheet: any[] = [
     // 背景节点样式 - 固定大小的正方形容器(统一浅灰色)

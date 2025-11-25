@@ -134,7 +134,7 @@ class D2D_Model:
 
         # 加载traffic元数据并计算静态带宽（如果有）
         meta_data = self._load_traffic_metadata(traffic_file_path, traffic_chains)
-        if meta_data and self.kwargs.get('verbose', 0):
+        if meta_data and self.kwargs.get("verbose", 0):
             self._compute_static_bandwidth(meta_data)
 
         # 分析全局traffic，为每个Die提取IP需求
@@ -214,11 +214,9 @@ class D2D_Model:
     def setup_result_analysis(
         self,
         # 图片生成控制
-        flow_graph: bool = False,
-        flow_graph_interactive: bool = False,  # 新增：交互式flow图
-        ip_bandwidth_heatmap: bool = False,
-        fifo_utilization_heatmap: bool = False,
-        plot_rn_bw_fig: bool = False,  # 新增：RN带宽曲线图
+        flow_graph_interactive: bool = True,
+        fifo_utilization_heatmap: bool = True,
+        plot_rn_bw_fig: bool = False,
         show_result_analysis: bool = False,
         # CSV文件导出控制
         export_d2d_requests_csv: bool = True,
@@ -231,9 +229,7 @@ class D2D_Model:
         配置结果分析
 
         图片生成控制:
-            flow_graph: 是否生成流量图（PNG/静态）
             flow_graph_interactive: 是否生成交互式流量图（HTML）
-            ip_bandwidth_heatmap: 是否生成IP带宽热力图
             fifo_utilization_heatmap: 是否生成FIFO使用率热力图
             plot_rn_bw_fig: 是否生成RN带宽曲线图（IP tracker曲线）
             show_result_analysis: 是否在浏览器中显示图像
@@ -248,11 +244,9 @@ class D2D_Model:
         """
         self._result_analysis_config.update(
             {
-                "flow_graph": flow_graph,
-                "flow_graph_interactive": flow_graph_interactive,  # 新增
-                "ip_bandwidth_heatmap": ip_bandwidth_heatmap,
+                "flow_graph_interactive": flow_graph_interactive,
                 "fifo_utilization_heatmap": fifo_utilization_heatmap,
-                "plot_rn_bw_fig": plot_rn_bw_fig,  # 新增
+                "plot_rn_bw_fig": plot_rn_bw_fig,
                 "show_fig": show_result_analysis,
                 "export_d2d_requests_csv": export_d2d_requests_csv,
                 "export_ip_bandwidth_csv": export_ip_bandwidth_csv,
@@ -261,8 +255,6 @@ class D2D_Model:
         )
 
         # 向后兼容：同步到实例变量
-        self.enable_flow_graph = flow_graph
-        self.kwargs["enable_flow_graph"] = flow_graph
         self.fifo_utilization_heatmap = fifo_utilization_heatmap
 
         # 更新结果保存路径 - 默认使用result_save_path
@@ -960,6 +952,9 @@ class D2D_Model:
 
     def _print_progress(self):
         """打印仿真进度"""
+        if self.kwargs.get("verbose", 1) == 0:
+            return
+
         cycle_time = self.current_cycle // getattr(self.config, "NETWORK_FREQUENCY", 2)
 
         # 先打印总体时间信息
@@ -1154,8 +1149,8 @@ class D2D_Model:
         if combined_flow_path:
             saved_files.insert(0, {"type": "D2D组合流量图", "path": combined_flow_path})
 
-        # 4. 简化文件保存提示，与单Die风格保持一致
-        if saved_files:
+        # 4. 简化文件保存提示，与单Die风格保持一致（仅在verbose>0时显示）
+        if saved_files and self.kwargs.get("verbose", 1) > 0:
             print()
             for file_info in saved_files:
                 if "count" in file_info:
@@ -1283,8 +1278,11 @@ class D2D_Model:
 
                 # 获取静态带宽数据（如果有）
                 static_bandwidth = None
-                if hasattr(self, 'static_link_bandwidth') and self.static_link_bandwidth:
+                if hasattr(self, "static_link_bandwidth") and self.static_link_bandwidth:
                     static_bandwidth = self.static_link_bandwidth
+                    # 添加跨Die静态带宽数据
+                    if hasattr(self, "static_d2d_link_bandwidth") and self.static_d2d_link_bandwidth:
+                        static_bandwidth["d2d"] = self.static_d2d_link_bandwidth
 
                 # 获取Figure对象用于集成报告
                 flow_fig = d2d_processor.draw_d2d_flow_graph_interactive(dies=self.dies, config=self.config, mode=self.flow_graph_mode, return_fig=True, static_bandwidth=static_bandwidth)
@@ -1333,7 +1331,7 @@ class D2D_Model:
             # 步骤6.5: 生成RN带宽曲线图（如果启用）
             rn_chart = None
             if self._result_analysis_config.get("plot_rn_bw_fig"):
-                from src.analysis.result_visualizers import plot_rn_bandwidth_curves_work_interval
+                from src.analysis.result_visualizers import BandwidthPlotter
 
                 # 收集所有Die的RN带宽时序数据
                 all_die_rn_data = {}
@@ -1346,9 +1344,8 @@ class D2D_Model:
                 # 如果有数据则生成曲线
                 if all_die_rn_data:
                     try:
-                        rn_fig = plot_rn_bandwidth_curves_work_interval(
-                            rn_bandwidth_time_series=all_die_rn_data, show_fig=False, save_path=None, return_fig=True  # 不直接显示  # 不保存独立文件  # 返回Figure对象
-                        )
+                        plotter = BandwidthPlotter()
+                        rn_fig = plotter.plot_rn_bandwidth_curves_work_interval(rn_bandwidth_time_series=all_die_rn_data, show_fig=False, save_path=None, return_fig=True)
                         if rn_fig:
                             rn_chart = ("IP Tracker曲线", rn_fig, None)
                             saved_files.append({"type": "IP Tracker曲线", "path": "集成到HTML报告中"})
@@ -1623,7 +1620,8 @@ class D2D_Model:
                     f.write(f"  D2D_SN: 接收={stat['d2d_sn_received']}, 转发={stat['d2d_sn_forwarded']}, 响应={stat['d2d_sn_responses']}\n")
                 f.write("\n")
 
-        print(f"\nD2D组合报告已保存: {combined_report_file}")
+        if self.kwargs.get("verbose", 1) > 0:
+            print(f"\nD2D组合报告已保存: {combined_report_file}")
 
     def _print_cycle_header_once(self, has_active_flits=True):
         """只在每个周期打印一次周期标题"""
@@ -2272,14 +2270,14 @@ class D2D_Model:
             full_path = os.path.join(traffic_file_path, traffic_file)
 
             # 读取第一行查找元数据
-            with open(full_path, 'r') as f:
+            with open(full_path, "r") as f:
                 first_line = f.readline().strip()
-                if first_line.startswith('# TRAFFIC_META:'):
-                    meta_str = first_line[len('# TRAFFIC_META:'):].strip()
+                if first_line.startswith("# TRAFFIC_META:"):
+                    meta_str = first_line[len("# TRAFFIC_META:") :].strip()
                     meta_data = json.loads(meta_str)
                     return meta_data
         except Exception as e:
-            if self.kwargs.get('verbose', 0):
+            if self.kwargs.get("verbose", 0):
                 print(f"[INFO] 无法加载traffic元数据: {e}")
 
         return None
@@ -2289,7 +2287,7 @@ class D2D_Model:
         基于元数据计算静态链路带宽
 
         Args:
-            meta_data: 从traffic文件加载的元数据
+            meta_data: 从traffic文件加载的元数据（只包含configs）
         """
         try:
             # 重建TrafficConfig对象（简化版本）
@@ -2297,45 +2295,46 @@ class D2D_Model:
                 def __init__(self, data):
                     self.__dict__.update(data)
 
-            configs = [SimpleConfig(cfg) for cfg in meta_data['configs']]
+            configs = [SimpleConfig(cfg) for cfg in meta_data["configs"]]
 
             # D2D模式 - 计算各Die的链路带宽和跨Die带宽
             from src.traffic_process.traffic_gene.static_bandwidth_analyzer import compute_d2d_link_bandwidth
 
-            d2d_config = meta_data.get('d2d_config', {})
-            d2d_pairs = d2d_config.get('d2d_pairs', [])
-            num_dies = d2d_config.get('num_dies', self.num_dies)
+            # 从仿真配置获取topo_type
+            topo_type = self.dies[0].config.TOPO_TYPE
+
+            # 从配置获取D2D连接，构建d2d_pairs
+            d2d_pairs = []
+            if hasattr(self.config, "D2D_CONNECTIONS") and self.config.D2D_CONNECTIONS:
+                for conn in self.config.D2D_CONNECTIONS:
+                    src_die, src_node, dst_die, dst_node = conn
+                    d2d_pairs.append((src_die, src_node, dst_die, dst_node))
+                    d2d_pairs.append((dst_die, dst_node, src_die, src_node))
 
             # 计算D2D静态带宽
-            die_link_bandwidth, d2d_link_bandwidth, link_composition = compute_d2d_link_bandwidth(
-                topo_type=meta_data['topo_type'],
-                node_ips=meta_data['node_ips'],
-                configs=configs,
-                d2d_pairs=d2d_pairs,
-                routing_type=meta_data.get('routing_type', 'XY'),
-                num_dies=num_dies
-            )
+            die_link_bandwidth, d2d_link_bandwidth, link_composition = compute_d2d_link_bandwidth(topo_type=topo_type, configs=configs, d2d_pairs=d2d_pairs, routing_type="XY", num_dies=self.num_dies)
 
             # 保存D2D带宽数据：{die_id: {link_key: bw}, ...} 和跨Die链路
             self.static_link_bandwidth = die_link_bandwidth
             self.static_d2d_link_bandwidth = d2d_link_bandwidth
 
-            if self.kwargs.get('verbose', 0):
-                total_active_links = sum(sum(1 for bw in die_bw.values() if bw > 0) for die_bw in die_link_bandwidth.values())
-                active_d2d_links = sum(1 for bw in d2d_link_bandwidth.values() if bw > 0)
-                print(f"[INFO] 静态带宽分析完成（D2D模式）: {total_active_links} 条Die内活跃链路, {active_d2d_links} 条跨Die链路")
+            # if self.kwargs.get('verbose', 0):
+            # total_active_links = sum(sum(1 for bw in die_bw.values() if bw > 0) for die_bw in die_link_bandwidth.values())
+            # active_d2d_links = sum(1 for bw in d2d_link_bandwidth.values() if bw > 0)
+            # print(f"[INFO] 静态带宽分析完成（D2D模式）: {total_active_links} 条Die内活跃链路, {active_d2d_links} 条跨Die链路")
 
-            # 保存元数据供可视化使用
-            self.static_bw_metadata = meta_data
+            # 保存configs供可视化使用
+            self.static_bw_configs = configs
 
         except Exception as e:
-            if self.kwargs.get('verbose', 0):
+            if self.kwargs.get("verbose", 0):
                 print(f"[WARNING] 静态带宽计算失败: {e}")
                 import traceback
+
                 traceback.print_exc()
             self.static_link_bandwidth = None
             self.static_d2d_link_bandwidth = None
-            self.static_bw_metadata = None
+            self.static_bw_configs = None
 
     # ==================== IP Management Helpers ====================
 

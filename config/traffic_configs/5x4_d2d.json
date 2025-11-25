@@ -1,25 +1,56 @@
 {
-  "5bdbd1a7-ef16-4fe5-9909-feccc3595434": {
+  "4df9c267-bc70-48eb-8fec-b15e79e7ebd6": {
     "source_ip": [
-      "节点0-gdma_0"
+      "节点0-gdma_0",
+      "节点1-gdma_0",
+      "节点2-gdma_0",
+      "节点3-gdma_0",
+      "节点3-gdma_1",
+      "节点4-gdma_0",
+      "节点5-gdma_0",
+      "节点6-gdma_0",
+      "节点7-gdma_0",
+      "节点8-gdma_0",
+      "节点9-gdma_0",
+      "节点10-gdma_0",
+      "节点11-gdma_0",
+      "节点12-gdma_0",
+      "节点13-gdma_0",
+      "节点14-gdma_0",
+      "节点15-gdma_0",
+      "节点15-gdma_1",
+      "节点19-gdma_0",
+      "节点19-gdma_1"
     ],
     "target_ip": [
       "节点11-ddr_0"
     ],
-    "speed_gbps": 128.0,
+    "speed_gbps": 36.0,
     "burst_length": 4,
     "request_type": "R",
     "end_time_ns": 6000,
-    "id": "5bdbd1a7-ef16-4fe5-9909-feccc3595434",
+    "id": "4df9c267-bc70-48eb-8fec-b15e79e7ebd6",
     "topology": "5x4",
     "mode": "d2d",
-    "created_at": "2025-11-25T00:14:11.586598",
+    "created_at": "2025-11-25T14:40:51.311103",
     "source_die": null,
     "target_die": null,
     "die_pairs": [
       [
         0,
+        0
+      ],
+      [
+        0,
         1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
       ]
     ]
   }

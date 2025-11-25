@@ -278,35 +278,15 @@ async def generate_traffic(request: TrafficGenerateRequest):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_file = OUTPUT_DIR / f"traffic_{timestamp}.txt"
 
-    # 构建元数据所需参数
-    node_ips = {}
-    for node_id, mounts in ip_mounts.items():
-        if isinstance(mounts, list):
-            node_ips[node_id] = [mount.ip_type for mount in mounts]
-        else:
-            node_ips[node_id] = [mounts.ip_type]
-
-    topo_type = request.topology
-    routing_type = "XY"  # 默认XY路由
-
-    # D2D模式：加载D2D配置
-    d2d_config = None
-    if request.mode == "d2d":
-        d2d_config = _load_d2d_config_for_topology(request.topology)
-
     try:
-        # 调用流量生成引擎
+        # 调用流量生成引擎（元数据只保留configs）
         if request.mode == "d2d":
             file_path, df = generate_d2d_traffic_from_configs(
                 configs=engine_configs,
                 end_time=None,
                 output_file=str(output_file),
                 random_seed=request.random_seed,
-                return_dataframe=True,
-                topo_type=topo_type,
-                routing_type=routing_type,
-                node_ips=node_ips,
-                d2d_config=d2d_config
+                return_dataframe=True
             )
         else:
             file_path, df = generate_traffic_from_configs(
@@ -314,10 +294,7 @@ async def generate_traffic(request: TrafficGenerateRequest):
                 end_time=None,
                 output_file=str(output_file),
                 random_seed=request.random_seed,
-                return_dataframe=True,
-                topo_type=topo_type,
-                routing_type=routing_type,
-                node_ips=node_ips
+                return_dataframe=True
             )
 
         total_lines = len(df) if df is not None else 0

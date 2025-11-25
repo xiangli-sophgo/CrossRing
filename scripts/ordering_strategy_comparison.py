@@ -27,15 +27,15 @@ STRATEGY_CONFIGS = [
     # Mode 0: 无保序 - 1种配置
     {"mode": 0, "granularity": 0, "channels": [], "name": "M0_NoOrder", "desc": "无保序（基准对照）"},
     # Mode 1: 单侧下环 (TL/TU固定) - 4种组合
-    {"mode": 1, "granularity": 0, "channels": ["REQ"], "name": "M1_IP_REQ", "desc": "单侧下环+IP层级+仅REQ保序"},
-    {"mode": 1, "granularity": 0, "channels": ["REQ", "RSP", "DATA"], "name": "M1_IP_ALL", "desc": "单侧下环+IP层级+全通道保序"},
-    {"mode": 1, "granularity": 1, "channels": ["REQ"], "name": "M1_Node_REQ", "desc": "单侧下环+节点层级+仅REQ保序"},
-    {"mode": 1, "granularity": 1, "channels": ["REQ", "RSP", "DATA"], "name": "M1_Node_ALL", "desc": "单侧下环+节点层级+全通道保序"},
+    # {"mode": 1, "granularity": 0, "channels": ["REQ"], "name": "M1_IP_REQ", "desc": "单侧下环+IP层级+仅REQ保序"},
+    # {"mode": 1, "granularity": 0, "channels": ["REQ", "RSP", "DATA"], "name": "M1_IP_ALL", "desc": "单侧下环+IP层级+全通道保序"},
+    # {"mode": 1, "granularity": 1, "channels": ["REQ"], "name": "M1_Node_REQ", "desc": "单侧下环+节点层级+仅REQ保序"},
+    # {"mode": 1, "granularity": 1, "channels": ["REQ", "RSP", "DATA"], "name": "M1_Node_ALL", "desc": "单侧下环+节点层级+全通道保序"},
     # Mode 2: 双侧下环 (白名单配置) - 4种组合
-    {"mode": 2, "granularity": 0, "channels": ["REQ"], "name": "M2_IP_REQ", "desc": "双侧下环+IP层级+仅REQ保序"},
-    {"mode": 2, "granularity": 0, "channels": ["REQ", "RSP", "DATA"], "name": "M2_IP_ALL", "desc": "双侧下环+IP层级+全通道保序"},
-    {"mode": 2, "granularity": 1, "channels": ["REQ"], "name": "M2_Node_REQ", "desc": "双侧下环+节点层级+仅REQ保序"},
-    {"mode": 2, "granularity": 1, "channels": ["REQ", "RSP", "DATA"], "name": "M2_Node_ALL", "desc": "双侧下环+节点层级+全通道保序"},
+    # {"mode": 2, "granularity": 0, "channels": ["REQ"], "name": "M2_IP_REQ", "desc": "双侧下环+IP层级+仅REQ保序"},
+    # {"mode": 2, "granularity": 0, "channels": ["REQ", "RSP", "DATA"], "name": "M2_IP_ALL", "desc": "双侧下环+IP层级+全通道保序"},
+    # {"mode": 2, "granularity": 1, "channels": ["REQ"], "name": "M2_Node_REQ", "desc": "双侧下环+节点层级+仅REQ保序"},
+    # {"mode": 2, "granularity": 1, "channels": ["REQ", "RSP", "DATA"], "name": "M2_Node_ALL", "desc": "双侧下环+节点层级+全通道保序"},
 ]
 
 

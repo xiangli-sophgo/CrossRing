@@ -11,17 +11,15 @@ from dataclasses import dataclass
 class StaticBandwidthAnalyzer:
     """静态链路带宽分析器"""
 
-    def __init__(self, topo_type: str, node_ips: Dict[int, List[str]], configs: List):
+    def __init__(self, topo_type: str, configs: List):
         """
         初始化静态带宽分析器
 
         Args:
             topo_type: 拓扑类型，如 "5x4"
-            node_ips: 节点IP映射，格式 {节点ID: [IP列表]}
-            configs: TrafficConfig列表
+            configs: TrafficConfig列表（包含src_map/dst_map）
         """
         self.topo_type = topo_type
-        self.node_ips = node_ips
         self.configs = configs
 
         # 解析拓扑参数
@@ -295,7 +293,6 @@ class StaticBandwidthAnalyzer:
 
 def compute_link_bandwidth(
     topo_type: str,
-    node_ips: Dict[int, List[str]],
     configs: List,
     routing_type: str = "XY",
 ) -> Dict[Tuple[Tuple[int, int], Tuple[int, int]], float]:
@@ -304,14 +301,13 @@ def compute_link_bandwidth(
 
     Args:
         topo_type: 拓扑类型，如 "5x4"
-        node_ips: 节点IP映射，格式 {节点ID: [IP列表]}
-        configs: TrafficConfig列表
+        configs: TrafficConfig列表（包含src_map/dst_map）
         routing_type: 路由算法，"XY" 或 "YX"
 
     Returns:
         链路带宽字典: {((src_x, src_y), (dst_x, dst_y)): bandwidth_GB/s}
     """
-    analyzer = StaticBandwidthAnalyzer(topo_type, node_ips, configs)
+    analyzer = StaticBandwidthAnalyzer(topo_type, configs)
     return analyzer.compute(routing_type)
 
 
@@ -321,7 +317,6 @@ class D2DStaticBandwidthAnalyzer:
     def __init__(
         self,
         topo_type: str,
-        node_ips: Dict[int, List[str]],
         configs: List,
         d2d_pairs: List[Tuple[int, int, int, int]],
         num_dies: int = 2,
@@ -331,13 +326,11 @@ class D2DStaticBandwidthAnalyzer:
 
         Args:
             topo_type: 拓扑类型，如 "5x4"
-            node_ips: 节点IP映射，格式 {节点ID: [IP列表]}
-            configs: TrafficConfig列表（包含die_pairs字段）
+            configs: TrafficConfig列表（包含die_pairs和src_map/dst_map）
             d2d_pairs: D2D连接配对列表 [(src_die, src_node, dst_die, dst_node), ...]
             num_dies: Die数量
         """
         self.topo_type = topo_type
-        self.node_ips = node_ips
         self.configs = configs
         self.d2d_pairs = d2d_pairs
         self.num_dies = num_dies
@@ -563,8 +556,10 @@ class D2DStaticBandwidthAnalyzer:
             # 获取die_pairs
             die_pairs = getattr(config, 'die_pairs', None)
             if not die_pairs:
-                # 没有die_pairs，当作Die内流量处理
-                die_pairs = [[0, 0]]
+                # 从 src_die/dst_die 构建 die_pairs
+                src_die = getattr(config, 'src_die', 0)
+                dst_die = getattr(config, 'dst_die', 0)
+                die_pairs = [[src_die, dst_die]]
 
             req_type = getattr(config, 'req_type', 'W')
             bandwidth_per_src = config.speed
@@ -695,7 +690,6 @@ class D2DStaticBandwidthAnalyzer:
 
 def compute_d2d_link_bandwidth(
     topo_type: str,
-    node_ips: Dict[int, List[str]],
     configs: List,
     d2d_pairs: List[Tuple[int, int, int, int]],
     routing_type: str = "XY",
@@ -706,8 +700,7 @@ def compute_d2d_link_bandwidth(
 
     Args:
         topo_type: 拓扑类型，如 "5x4"
-        node_ips: 节点IP映射，格式 {节点ID: [IP列表]}
-        configs: TrafficConfig列表（包含die_pairs字段）
+        configs: TrafficConfig列表（包含die_pairs和src_map/dst_map）
         d2d_pairs: D2D连接配对列表
         routing_type: 路由算法，"XY" 或 "YX"
         num_dies: Die数量
@@ -718,6 +711,6 @@ def compute_d2d_link_bandwidth(
         - d2d_link_bandwidth: {(src_die, src_node, dst_die, dst_node): bandwidth_GB/s}
         - link_composition: {link_key: [flow_info, ...]}
     """
-    analyzer = D2DStaticBandwidthAnalyzer(topo_type, node_ips, configs, d2d_pairs, num_dies)
+    analyzer = D2DStaticBandwidthAnalyzer(topo_type, configs, d2d_pairs, num_dies)
     analyzer.compute(routing_type)
     return analyzer.die_link_bandwidth, analyzer.d2d_link_bandwidth, analyzer.get_link_composition()

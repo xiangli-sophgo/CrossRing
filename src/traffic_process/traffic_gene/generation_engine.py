@@ -146,14 +146,10 @@ def generate_traffic_from_configs(
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(output_file, "w") as f:
-            # 写入元数据行（如果提供了必要参数）
-            if topo_type and node_ips:
+            # 写入元数据行 - 只保留configs
+            if configs:
                 import json
                 meta_data = {
-                    "version": "1.0",
-                    "topo_type": topo_type,
-                    "routing_type": routing_type,
-                    "node_ips": node_ips,
                     "configs": [
                         {k: v for k, v in cfg.items() if not k.startswith('_')} if isinstance(cfg, dict) else cfg.__dict__
                         for cfg in configs
@@ -616,23 +612,15 @@ def generate_d2d_traffic_from_configs(
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(output_file, "w") as f:
-            # 写入元数据行（如果提供了必要参数）
-            if topo_type and node_ips:
+            # 写入元数据行 - 只保留configs
+            if configs:
                 import json
                 meta_data = {
-                    "version": "1.0",
-                    "topo_type": topo_type,
-                    "routing_type": routing_type,
-                    "node_ips": node_ips,
                     "configs": [
                         {k: v for k, v in cfg.items() if not k.startswith('_')} if isinstance(cfg, dict) else cfg.__dict__
                         for cfg in configs
                     ]
                 }
-                # D2D专用配置
-                if d2d_config:
-                    meta_data["d2d_config"] = d2d_config
-
                 meta_json = json.dumps(meta_data, separators=(',', ':'), ensure_ascii=False)
                 f.write(f"# TRAFFIC_META: {meta_json}\n")
 

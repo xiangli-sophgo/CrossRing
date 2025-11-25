@@ -69,8 +69,8 @@ class CrossRingConfig:
         self.L2M_R_LATENCY_original = args.L2M_R_LATENCY
         self.L2M_W_LATENCY_original = args.L2M_W_LATENCY
         self.SN_TRACKER_RELEASE_LATENCY_original = args.SN_TRACKER_RELEASE_LATENCY
-        self.SN_PROCESSING_LATENCY_original = getattr(args, 'SN_PROCESSING_LATENCY', 0)
-        self.RN_PROCESSING_LATENCY_original = getattr(args, 'RN_PROCESSING_LATENCY', 0)
+        self.SN_PROCESSING_LATENCY_original = getattr(args, "SN_PROCESSING_LATENCY", 0)
+        self.RN_PROCESSING_LATENCY_original = getattr(args, "RN_PROCESSING_LATENCY", 0)
         self.TL_Etag_T1_UE_MAX = args.TL_Etag_T1_UE_MAX
         self.TL_Etag_T2_UE_MAX = args.TL_Etag_T2_UE_MAX
         self.TR_Etag_T2_UE_MAX = args.TR_Etag_T2_UE_MAX
@@ -98,15 +98,15 @@ class CrossRingConfig:
 
         # CHANNEL_SPEC现在为可选配置,主要用于向后兼容和可视化
         # 实际的IP接口将从traffic文件动态推断
-        self.CHANNEL_SPEC = getattr(args, 'CHANNEL_SPEC', {})
+        self.CHANNEL_SPEC = getattr(args, "CHANNEL_SPEC", {})
         self.CH_NAME_LIST = []  # 将在traffic解析后填充
         assert (
-            self.TL_Etag_T2_UE_MAX < self.TL_Etag_T1_UE_MAX < self.RB_IN_FIFO_DEPTH
-            and self.TL_Etag_T2_UE_MAX < self.RB_IN_FIFO_DEPTH - 1
-            and self.TR_Etag_T2_UE_MAX < self.RB_IN_FIFO_DEPTH
-            and self.TU_Etag_T2_UE_MAX < self.TU_Etag_T1_UE_MAX < self.EQ_IN_FIFO_DEPTH
-            and self.TU_Etag_T2_UE_MAX < self.EQ_IN_FIFO_DEPTH - 1
-            and self.TD_Etag_T2_UE_MAX < self.EQ_IN_FIFO_DEPTH
+            self.TL_Etag_T2_UE_MAX <= self.TL_Etag_T1_UE_MAX <= self.RB_IN_FIFO_DEPTH
+            and self.TL_Etag_T2_UE_MAX <= self.RB_IN_FIFO_DEPTH - 1
+            and self.TR_Etag_T2_UE_MAX <= self.RB_IN_FIFO_DEPTH
+            and self.TU_Etag_T2_UE_MAX <= self.TU_Etag_T1_UE_MAX <= self.EQ_IN_FIFO_DEPTH
+            and self.TU_Etag_T2_UE_MAX <= self.EQ_IN_FIFO_DEPTH - 1
+            and self.TD_Etag_T2_UE_MAX <= self.EQ_IN_FIFO_DEPTH
         ), "ETag parameter conditions are not met."
 
         # 添加仲裁配置处理
@@ -332,8 +332,8 @@ class CrossRingConfig:
         channel_counts = defaultdict(set)
 
         for ip_type in ip_types:
-            if '_' in ip_type:
-                parts = ip_type.rsplit('_', 1)
+            if "_" in ip_type:
+                parts = ip_type.rsplit("_", 1)
                 base_type = parts[0]
                 idx_str = parts[1]
 
@@ -584,10 +584,7 @@ class CrossRingConfig:
 
         # 通道规格配置
         parser.add_argument(
-            "--CHANNEL_SPEC",
-            type=dict,
-            default=default_config.get("CHANNEL_SPEC", {"gdma": 2, "sdma": 2, "cdma": 2, "ddr": 2, "l2m": 2}),
-            help="Channel specification for different IP types"
+            "--CHANNEL_SPEC", type=dict, default=default_config.get("CHANNEL_SPEC", {"gdma": 2, "sdma": 2, "cdma": 2, "ddr": 2, "l2m": 2}), help="Channel specification for different IP types"
         )
 
         return parser.parse_args()

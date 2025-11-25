@@ -181,11 +181,11 @@ class D2DFlowRenderer(BaseFlowRenderer):
         die_data_networks = {}
         if enable_channel_switch and dies:
             for die_id, die_model in dies.items():
-                if hasattr(die_model, 'req_network') and die_model.req_network:
+                if hasattr(die_model, "req_network") and die_model.req_network:
                     die_req_networks[die_id] = die_model.req_network
-                if hasattr(die_model, 'rsp_network') and die_model.rsp_network:
+                if hasattr(die_model, "rsp_network") and die_model.rsp_network:
                     die_rsp_networks[die_id] = die_model.rsp_network
-                if hasattr(die_model, 'data_network') and die_model.data_network:
+                if hasattr(die_model, "data_network") and die_model.data_network:
                     die_data_networks[die_id] = die_model.data_network
 
         # 为每个Die绘制流量图（节点和IP方块，暂不绘制links）
@@ -276,11 +276,7 @@ class D2DFlowRenderer(BaseFlowRenderer):
             # 初始化通道管理器（用于D2D多Die场景，传入die_networks字典）
             channel_manager = ChannelSwitchManager()
             # 为D2D场景准备网络字典 (每个通道包含多个Die的网络)
-            networks_dict = {
-                "请求": die_req_networks if die_req_networks else {},
-                "响应": die_rsp_networks if die_rsp_networks else {},
-                "数据": die_data_networks if die_data_networks else {}
-            }
+            networks_dict = {"请求": die_req_networks if die_req_networks else {}, "响应": die_rsp_networks if die_rsp_networks else {}, "数据": die_data_networks if die_data_networks else {}}
 
             # 保存原有annotations（Die标签等）
             existing_anns = list(fig.layout.annotations) if fig.layout.annotations else []
@@ -331,11 +327,16 @@ class D2DFlowRenderer(BaseFlowRenderer):
                 if dies and len(dies) > 1:
                     try:
                         d2d_bandwidth = self._calculate_d2d_sys_bandwidth(dies, config)
-                        cross_die_anns = self._draw_cross_die_connections(fig, d2d_bandwidth, die_node_positions, config, dies, die_offsets, channel_name=channel_name)
+                        # 提取跨Die静态带宽数据
+                        static_d2d_bw = None
+                        if static_bandwidth and isinstance(static_bandwidth, dict):
+                            static_d2d_bw = static_bandwidth.get('d2d', None)
+                        cross_die_anns = self._draw_cross_die_connections(fig, d2d_bandwidth, die_node_positions, config, dies, die_offsets, channel_name=channel_name, static_d2d_bandwidth=static_d2d_bw)
                         if cross_die_anns:
                             channel_manager.add_annotations(cross_die_anns)
                     except Exception as e:
                         import traceback
+
                         traceback.print_exc()
 
                 trace_end_idx = len(fig.data)
@@ -347,7 +348,7 @@ class D2DFlowRenderer(BaseFlowRenderer):
 
                 # 设置初始可见性：默认显示数据通道
                 for i in range(trace_start_idx, trace_end_idx):
-                    fig.data[i].visible = (channel_name == "数据")
+                    fig.data[i].visible = channel_name == "数据"
 
             # 设置annotations初始可见性
             for i, ann in enumerate(channel_manager.all_annotations):
@@ -359,18 +360,13 @@ class D2DFlowRenderer(BaseFlowRenderer):
                     if ann_start <= i < ann_end:
                         ann_channel = ch_name
                         break
-                ann["visible"] = (ann_channel == "数据")
+                ann["visible"] = ann_channel == "数据"
 
             # 一次性添加所有annotations
             fig.layout.annotations = existing_anns + channel_manager.all_annotations
 
             # 创建通道切换按钮（传入基础traces数量和原有annotations数量）
-            buttons = channel_manager.create_buttons(
-                fig=fig,
-                num_extra_traces=0,  # 先不包含legend/colorbar，稍后更新
-                num_base_traces=num_base_traces,
-                num_existing_annotations=len(existing_anns)
-            )
+            buttons = channel_manager.create_buttons(fig=fig, num_extra_traces=0, num_base_traces=num_base_traces, num_existing_annotations=len(existing_anns))  # 先不包含legend/colorbar，稍后更新
 
             # 暂不设置updatemenus，等添加完跨Die链路、legend、colorbar后再设置
             # （为了能在按钮的visibility数组中包含这些额外的traces）
@@ -383,9 +379,14 @@ class D2DFlowRenderer(BaseFlowRenderer):
             if dies and len(dies) > 1:
                 try:
                     d2d_bandwidth = self._calculate_d2d_sys_bandwidth(dies, config)
-                    self._draw_cross_die_connections(fig, d2d_bandwidth, die_node_positions, config, dies, die_offsets, channel_name=None)
+                    # 提取跨Die静态带宽数据
+                    static_d2d_bw = None
+                    if static_bandwidth and isinstance(static_bandwidth, dict):
+                        static_d2d_bw = static_bandwidth.get('d2d', None)
+                    self._draw_cross_die_connections(fig, d2d_bandwidth, die_node_positions, config, dies, die_offsets, channel_name=None, static_d2d_bandwidth=static_d2d_bw)
                 except Exception as e:
                     import traceback
+
                     traceback.print_exc()
 
         # 添加IP类型Legend
@@ -591,7 +592,7 @@ class D2DFlowRenderer(BaseFlowRenderer):
         else:
             return "diagonal"
 
-    def _draw_cross_die_connections(self, fig, d2d_bandwidth, die_node_positions, config, dies=None, die_offsets=None, channel_name=None):
+    def _draw_cross_die_connections(self, fig, d2d_bandwidth, die_node_positions, config, dies=None, die_offsets=None, channel_name=None, static_d2d_bandwidth=None):
         """
         绘制跨Die带宽连接 - Plotly版本
 
@@ -607,6 +608,7 @@ class D2DFlowRenderer(BaseFlowRenderer):
                 - "数据": W + R（数据通道）
                 - "响应": B（响应通道）
                 - None: W + R（向后兼容）
+            static_d2d_bandwidth: 静态D2D带宽数据 {(src_die, src_node, dst_die, dst_node): bandwidth_GB/s}
 
         Returns:
             list: 添加的annotation列表
@@ -697,8 +699,16 @@ class D2DFlowRenderer(BaseFlowRenderer):
                         to_x = mid_x + dx_to * cos_a - dy_to * sin_a
                         to_y = mid_y + dx_to * sin_a + dy_to * cos_a
 
+                    # 获取静态带宽（如果有）
+                    static_bw = None
+                    if static_d2d_bandwidth:
+                        static_key = (from_die, from_node, to_die, to_node)
+                        static_bw = static_d2d_bandwidth.get(static_key, None)
+
                     # 绘制D2D箭头（total_bw已经在上面根据通道计算好了）
-                    anns = self._draw_single_d2d_arrow_plotly(fig, from_x, from_y, to_x, to_y, total_bw, from_die, from_node, to_die, to_node, connection_type, w_bw, r_bw, channel_name=channel_name, all_channel_bw=all_channel_bw)
+                    anns = self._draw_single_d2d_arrow_plotly(
+                        fig, from_x, from_y, to_x, to_y, total_bw, from_die, from_node, to_die, to_node, connection_type, w_bw, r_bw, channel_name=channel_name, all_channel_bw=all_channel_bw, static_bw=static_bw
+                    )
                     if anns:
                         added_annotations.extend(anns)
                     arrow_index += 1
@@ -710,7 +720,9 @@ class D2DFlowRenderer(BaseFlowRenderer):
 
         return added_annotations
 
-    def _draw_single_d2d_arrow_plotly(self, fig, start_x, start_y, end_x, end_y, total_bandwidth, from_die, from_node, to_die, to_node, connection_type=None, w_bw=0.0, r_bw=0.0, channel_name=None, all_channel_bw=None):
+    def _draw_single_d2d_arrow_plotly(
+        self, fig, start_x, start_y, end_x, end_y, total_bandwidth, from_die, from_node, to_die, to_node, connection_type=None, w_bw=0.0, r_bw=0.0, channel_name=None, all_channel_bw=None, static_bw=None
+    ):
         """
         绘制单个D2D箭头（Plotly版本）
 
@@ -726,6 +738,7 @@ class D2DFlowRenderer(BaseFlowRenderer):
             r_bw: 读通道带宽
             channel_name: 通道名称（用于生成hover信息）
             all_channel_bw: 所有AXI通道的带宽字典 {"AR": xx, "AW": xx, "W": xx, "R": xx, "B": xx}
+            static_bw: 静态带宽（GB/s）
 
         Returns:
             list: 添加的annotation列表（箭头annotation + 文本annotation）
@@ -740,7 +753,7 @@ class D2DFlowRenderer(BaseFlowRenderer):
 
         # 归一化方向向量
         ux, uy = dx / length, dy / length
-        perpx, perpy = uy * 0.2, -ux * 0.2  # 调换符号
+        perpx, perpy = uy * 0.2, -ux * 0.2
 
         # 计算箭头起止坐标（留出节点空间）
         if connection_type == "diagonal":
@@ -770,6 +783,13 @@ class D2DFlowRenderer(BaseFlowRenderer):
             hover_text = (
                 f"D2D连接: Die{from_die}(节点{from_node}) → Die{to_die}(节点{to_node})<br>"
                 f"<br>"
+            )
+
+            # 添加静态带宽信息（如果有）
+            if static_bw is not None:
+                hover_text += f"【静态带宽】: {static_bw:.2f} GB/s<br><br>"
+
+            hover_text += (
                 f"【所有AXI通道带宽】<br>"
                 f"  AR (读地址): {all_channel_bw['AR']:.2f} GB/s<br>"
                 f"  AW (写地址): {all_channel_bw['AW']:.2f} GB/s<br>"
@@ -780,50 +800,13 @@ class D2DFlowRenderer(BaseFlowRenderer):
 
             # 根据当前通道添加高亮信息
             if channel_name == "请求":
-                hover_text += (
-                    f"<br>"
-                    f"【当前通道: 请求】<br>"
-                    f"  总带宽: {total_bandwidth:.2f} GB/s<br>"
-                    f"  写地址(AW): {w_bw:.2f} GB/s<br>"
-                    f"  读地址(AR): {r_bw:.2f} GB/s"
-                )
+                hover_text += f"<br>" f"【当前通道: 请求】<br>" f"  总带宽: {total_bandwidth:.2f} GB/s<br>" f"  写地址(AW): {w_bw:.2f} GB/s<br>" f"  读地址(AR): {r_bw:.2f} GB/s"
             elif channel_name == "响应":
-                hover_text += (
-                    f"<br>"
-                    f"【当前通道: 响应】<br>"
-                    f"  总带宽: {total_bandwidth:.2f} GB/s<br>"
-                    f"  写响应(B): {w_bw:.2f} GB/s"
-                )
+                hover_text += f"<br>" f"【当前通道: 响应】<br>" f"  总带宽: {total_bandwidth:.2f} GB/s<br>" f"  写响应(B): {w_bw:.2f} GB/s"
             else:  # "数据"
-                hover_text += (
-                    f"<br>"
-                    f"【当前通道: 数据】<br>"
-                    f"  总带宽: {total_bandwidth:.2f} GB/s<br>"
-                    f"  写数据(W): {w_bw:.2f} GB/s<br>"
-                    f"  读数据(R): {r_bw:.2f} GB/s"
-                )
+                hover_text += f"<br>" f"【当前通道: 数据】<br>" f"  总带宽: {total_bandwidth:.2f} GB/s<br>" f"  写数据(W): {w_bw:.2f} GB/s<br>" f"  读数据(R): {r_bw:.2f} GB/s"
         else:
-            # 兼容旧版：如果没有all_channel_bw，使用原来的简单格式
-            if channel_name == "请求":
-                hover_text = (
-                    f"D2D连接: Die{from_die}(节点{from_node}) → Die{to_die}(节点{to_node})<br>"
-                    f"请求通道总带宽: {total_bandwidth:.2f} GB/s<br>"
-                    f"写地址(AW): {w_bw:.2f} GB/s<br>"
-                    f"读地址(AR): {r_bw:.2f} GB/s"
-                )
-            elif channel_name == "响应":
-                hover_text = (
-                    f"D2D连接: Die{from_die}(节点{from_node}) → Die{to_die}(节点{to_node})<br>"
-                    f"响应通道总带宽: {total_bandwidth:.2f} GB/s<br>"
-                    f"写响应(B): {w_bw:.2f} GB/s"
-                )
-            else:  # "数据" 或 None
-                hover_text = (
-                    f"D2D连接: Die{from_die}(节点{from_node}) → Die{to_die}(节点{to_node})<br>"
-                    f"数据通道总带宽: {total_bandwidth:.2f} GB/s<br>"
-                    f"写数据(W): {w_bw:.2f} GB/s<br>"
-                    f"读数据(R): {r_bw:.2f} GB/s"
-                )
+            raise ValueError("没有数据")
 
         arrow_ann = dict(
             x=arrow_end_x,
@@ -850,9 +833,9 @@ class D2DFlowRenderer(BaseFlowRenderer):
                 label_x = arrow_start_x + (arrow_end_x - arrow_start_x) * 0.85
                 label_y_base = arrow_start_y + (arrow_end_y - arrow_start_y) * 0.85
                 if (dx > 0 and dy > 0) or (dx > 0 and dy < 0):
-                    label_y = label_y_base + 0.6
-                else:
                     label_y = label_y_base - 0.6
+                else:
+                    label_y = label_y_base + 0.6
             else:
                 mid_x = (arrow_start_x + arrow_end_x) / 2
                 mid_y = (arrow_start_y + arrow_end_y) / 2
@@ -860,10 +843,10 @@ class D2DFlowRenderer(BaseFlowRenderer):
 
                 if is_horizontal:
                     label_x = mid_x
-                    label_y = mid_y + (0.5 if dx > 0 else -0.5)
+                    label_y = mid_y + (-0.5 if dx > 0 else 0.5)
                 else:
                     # 垂直链路：根据数字长度动态调整偏移量
-                    label_x = mid_x + (dy * 0.1 if dx > 0 else -dy * 0.1)
+                    label_x = mid_x + (-dy * 0.1 if dx > 0 else dy * 0.1)
                     # 根据数字位数调整偏移：数字越长，偏移越大
                     text_length = len(label_text)
                     if text_length <= 3:  # 例如 "1.0"

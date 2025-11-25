@@ -369,9 +369,9 @@ class D2DConfig:
                     else:
                         setattr(self, key, value)
 
-            print(f"成功加载D2D配置文件: {d2d_config_file}")
-            if hasattr(self, "D2D_DIE_CONFIG"):
-                print(f"D2D_DIE_CONFIG包含 {len(self.D2D_DIE_CONFIG)} 个Die配置")
+            # print(f"成功加载D2D配置文件: {d2d_config_file}")
+            # if hasattr(self, "D2D_DIE_CONFIG"):
+            # print(f"D2D_DIE_CONFIG包含 {len(self.D2D_DIE_CONFIG)} 个Die配置")
 
         except FileNotFoundError as e:
             raise FileNotFoundError(f"D2D配置文件不存在: {d2d_config_file}")
@@ -652,7 +652,7 @@ class D2DConfig:
             num_cols = max_x + 1
             num_rows = max_y + 1
             self.die_layout_type = f"{num_rows}x{num_cols}"
-            print(f"Die布局类型: {self.die_layout_type}")
+            # print(f"Die布局类型: {self.die_layout_type}")
 
     def update_latency(self):
         """将D2D延迟配置从ns转换为cycles

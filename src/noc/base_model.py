@@ -212,7 +212,7 @@ class BaseModel:
         基于元数据计算静态链路带宽（NoC单Die模式）
 
         Args:
-            meta_data: 从traffic文件加载的元数据
+            meta_data: 从traffic文件加载的元数据（只包含configs）
         """
         try:
             from src.traffic_process.traffic_gene.static_bandwidth_analyzer import compute_link_bandwidth
@@ -224,16 +224,18 @@ class BaseModel:
 
             configs = [SimpleConfig(cfg) for cfg in meta_data['configs']]
 
+            # 从仿真配置获取topo_type
+            topo_type = self.config.TOPO_TYPE
+
             # 计算静态带宽
             self.static_link_bandwidth = compute_link_bandwidth(
-                topo_type=meta_data['topo_type'],
-                node_ips=meta_data['node_ips'],
+                topo_type=topo_type,
                 configs=configs,
-                routing_type=meta_data.get('routing_type', 'XY')
+                routing_type='XY'  # 默认XY路由
             )
 
-            # 保存元数据供可视化使用
-            self.static_bw_metadata = meta_data
+            # 保存configs供可视化使用
+            self.static_bw_configs = configs
 
             if self.verbose:
                 active_links = sum(1 for bw in self.static_link_bandwidth.values() if bw > 0)
@@ -242,7 +244,37 @@ class BaseModel:
             if self.verbose:
                 print(f"[WARNING] 静态带宽计算失败: {e}")
             self.static_link_bandwidth = None
-            self.static_bw_metadata = None
+            self.static_bw_configs = None
+
+    def _extract_node_ips_from_configs(self, configs) -> dict:
+        """
+        从configs中提取node_ips映射
+
+        Args:
+            configs: TrafficConfig列表
+
+        Returns:
+            {node_id: [ip_type_list]}
+        """
+        node_ips = {}
+        for config in configs:
+            # 从src_map提取
+            if hasattr(config, 'src_map'):
+                for ip_type, nodes in config.src_map.items():
+                    for node in nodes:
+                        if node not in node_ips:
+                            node_ips[node] = []
+                        if ip_type not in node_ips[node]:
+                            node_ips[node].append(ip_type)
+            # 从dst_map提取
+            if hasattr(config, 'dst_map'):
+                for ip_type, nodes in config.dst_map.items():
+                    for node in nodes:
+                        if node not in node_ips:
+                            node_ips[node] = []
+                        if ip_type not in node_ips[node]:
+                            node_ips[node].append(ip_type)
+        return node_ips
 
     def _generate_static_bandwidth_figure(self):
         """
@@ -255,27 +287,25 @@ class BaseModel:
         if not hasattr(self, 'static_link_bandwidth') or not self.static_link_bandwidth:
             return None
 
-        if not hasattr(self, 'static_bw_metadata') or not self.static_bw_metadata:
+        if not hasattr(self, 'static_bw_configs') or not self.static_bw_configs:
             return None
 
         try:
             from src.traffic_process.traffic_gene.cytoscape_bandwidth_visualizer import CytoscapeBandwidthVisualizer
 
-            meta_data = self.static_bw_metadata
+            # 从configs中提取node_ips
+            node_ips = self._extract_node_ips_from_configs(self.static_bw_configs)
 
-            # 转换node_ips的键为整数（JSON反序列化后会变成字符串）
-            node_ips = {int(k): v for k, v in meta_data['node_ips'].items()}
+            # 从仿真配置获取topo_type
+            topo_type = self.config.TOPO_TYPE
 
-            # 确定模式
-            mode = 'd2d' if 'd2d_config' in meta_data else 'noc'
-
-            # 创建Cytoscape可视化器
+            # 创建Cytoscape可视化器（NoC模式）
             viz = CytoscapeBandwidthVisualizer(
-                topo_type=meta_data['topo_type'],
-                mode=mode,
+                topo_type=topo_type,
+                mode='noc',
                 link_bandwidth=self.static_link_bandwidth,
                 node_ips=node_ips,
-                d2d_config=meta_data.get('d2d_config', None)
+                d2d_config=None
             )
 
             # 生成HTML片段

@@ -284,7 +284,6 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
             # 调用D2D静态带宽分析器
             die_link_bandwidth_dict, d2d_link_bandwidth_dict, link_composition = compute_d2d_link_bandwidth(
                 topo_type=request.topology,
-                node_ips=node_ips,
                 configs=configs_list,
                 d2d_pairs=d2d_pairs,
                 routing_type=request.routing_type,
@@ -351,7 +350,6 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
             # NoC模式：使用StaticBandwidthAnalyzer
             analyzer = StaticBandwidthAnalyzer(
                 topo_type=request.topology,
-                node_ips=node_ips,
                 configs=configs_list
             )
             link_bandwidth_dict = analyzer.compute(request.routing_type)

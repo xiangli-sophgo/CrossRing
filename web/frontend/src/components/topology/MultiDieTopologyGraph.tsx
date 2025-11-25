@@ -374,18 +374,23 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
           const numRows = sortedTypes.length
           const maxColsInRow = Math.max(...sortedTypes.map(t => ipByType[t].length))
 
-          // 动态计算IP块大小：根据行数和列数调整
-          const baseSize = 30
-          const maxSize = 32
-          const minSize = 26
-          let ipSize = baseSize
-          if (numRows <= 1 && maxColsInRow <= 1) {
-            ipSize = maxSize  // IP少时放大
-          } else if (numRows >= 2 || maxColsInRow >= 2) {
-            ipSize = minSize  // IP多时缩小
+          // 动态计算IP块大小：根据行数和列数调整，确保不超出节点框(70x70)
+          const nodeBoxSize = 70
+          const minGap = 2  // 最小间隙
+          // 根据最大维度计算合适的IP块大小
+          const maxDim = Math.max(numRows, maxColsInRow)
+          let ipSize: number
+          if (maxDim <= 1) {
+            ipSize = 32  // 单个IP时放大
+          } else if (maxDim === 2) {
+            ipSize = 26  // 2个时适中
+          } else {
+            // 3个及以上：动态计算以适应节点框
+            ipSize = Math.floor((nodeBoxSize - minGap * (maxDim + 1)) / maxDim)
+            ipSize = Math.max(ipSize, 16)  // 最小16px
           }
 
-          const spacing = ipSize + 4  // 间距
+          const spacing = ipSize + minGap  // 间距
 
           // 计算总高度，用于垂直居中
           const totalHeight = numRows * spacing
@@ -851,6 +856,7 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
 
   const handleCyInit = (cy: Cytoscape.Core) => {
     cyRef.current = cy
+
     setTimeout(() => {
       cy.fit(undefined, 20)
       cy.center()

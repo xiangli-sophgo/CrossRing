@@ -52,6 +52,8 @@ RB_IN_FIFO_DEPTH: 16
 EQ_IN_FIFO_DEPTH: 16
 # RB_IN_FIFO_DEPTH: 8
 # EQ_IN_FIFO_DEPTH: 8
+# RB_IN_FIFO_DEPTH: 2
+# EQ_IN_FIFO_DEPTH: 2
 
 # ETag 配置
 TL_Etag_T2_UE_MAX: 8
@@ -68,12 +70,12 @@ TD_Etag_T2_UE_MAX: 12
 # TU_Etag_T1_UE_MAX: 7
 # TD_Etag_T2_UE_MAX: 6
 
-# TL_Etag_T2_UE_MAX: 0
-# TL_Etag_T1_UE_MAX: 3
-# TR_Etag_T2_UE_MAX: 3
-# TU_Etag_T2_UE_MAX: 0
-# TU_Etag_T1_UE_MAX: 3
-# TD_Etag_T2_UE_MAX: 0
+# TL_Etag_T2_UE_MAX: 1
+# TL_Etag_T1_UE_MAX: 1
+# TR_Etag_T2_UE_MAX: 1
+# TU_Etag_T2_UE_MAX: 1
+# TU_Etag_T1_UE_MAX: 1
+# TD_Etag_T2_UE_MAX: 1
 
 # ITag 配置
 ITag_TRIGGER_Th_H: 80
