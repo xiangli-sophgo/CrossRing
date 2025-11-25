@@ -105,7 +105,10 @@ def generate_traffic_from_configs(
     end_time=None,
     output_file=None,
     random_seed=42,
-    return_dataframe=True
+    return_dataframe=True,
+    topo_type=None,
+    routing_type="XY",
+    node_ips=None
 ):
     """
     根据多个配置生成并合并流量数据
@@ -115,6 +118,9 @@ def generate_traffic_from_configs(
     :param output_file: 输出文件路径(可选,为None则不写文件)
     :param random_seed: 随机种子
     :param return_dataframe: 是否返回DataFrame
+    :param topo_type: 拓扑类型（如"5x4"），用于元数据
+    :param routing_type: 路由算法（"XY"或"YX"），用于静态带宽计算
+    :param node_ips: 节点IP映射字典，用于静态带宽计算
     :return: (file_path, dataframe) 或 file_path 或 dataframe
     """
     # 设置随机种子
@@ -140,6 +146,23 @@ def generate_traffic_from_configs(
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(output_file, "w") as f:
+            # 写入元数据行（如果提供了必要参数）
+            if topo_type and node_ips:
+                import json
+                meta_data = {
+                    "version": "1.0",
+                    "topo_type": topo_type,
+                    "routing_type": routing_type,
+                    "node_ips": node_ips,
+                    "configs": [
+                        {k: v for k, v in cfg.items() if not k.startswith('_')} if isinstance(cfg, dict) else cfg.__dict__
+                        for cfg in configs
+                    ]
+                }
+                meta_json = json.dumps(meta_data, separators=(',', ':'), ensure_ascii=False)
+                f.write(f"# TRAFFIC_META: {meta_json}\n")
+
+            # 写入traffic数据
             for timestamp, src_pos, src_type, dst_pos, dst_type, req_type, burst in all_data:
                 f.write(f"{timestamp},{src_pos},{src_type},{dst_pos},{dst_type},{req_type},{burst}\n")
         file_path = str(output_path.absolute())
@@ -550,7 +573,11 @@ def generate_d2d_traffic_from_configs(
     end_time=None,
     output_file=None,
     random_seed=42,
-    return_dataframe=True
+    return_dataframe=True,
+    topo_type=None,
+    routing_type="XY",
+    node_ips=None,
+    d2d_config=None
 ):
     """
     根据多个D2D配置生成并合并流量数据
@@ -560,6 +587,10 @@ def generate_d2d_traffic_from_configs(
     :param output_file: 输出文件路径(可选,为None则不写文件)
     :param random_seed: 随机种子
     :param return_dataframe: 是否返回DataFrame
+    :param topo_type: 拓扑类型（如"5x4"），用于元数据
+    :param routing_type: 路由算法（"XY"或"YX"），用于静态带宽计算
+    :param node_ips: 节点IP映射字典，用于静态带宽计算
+    :param d2d_config: D2D配置字典（包含num_dies, d2d_connections）
     :return: (file_path, dataframe) 或 file_path 或 dataframe
     """
     # 设置随机种子
@@ -585,6 +616,27 @@ def generate_d2d_traffic_from_configs(
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(output_file, "w") as f:
+            # 写入元数据行（如果提供了必要参数）
+            if topo_type and node_ips:
+                import json
+                meta_data = {
+                    "version": "1.0",
+                    "topo_type": topo_type,
+                    "routing_type": routing_type,
+                    "node_ips": node_ips,
+                    "configs": [
+                        {k: v for k, v in cfg.items() if not k.startswith('_')} if isinstance(cfg, dict) else cfg.__dict__
+                        for cfg in configs
+                    ]
+                }
+                # D2D专用配置
+                if d2d_config:
+                    meta_data["d2d_config"] = d2d_config
+
+                meta_json = json.dumps(meta_data, separators=(',', ':'), ensure_ascii=False)
+                f.write(f"# TRAFFIC_META: {meta_json}\n")
+
+            # 写入traffic数据
             for timestamp, src_die, src_pos, src_type, dst_die, dst_pos, dst_type, req_type, burst in all_data:
                 f.write(f"{timestamp},{src_die},{src_pos},{src_type},{dst_die},{dst_pos},{dst_type},{req_type},{burst}\n")
         file_path = str(output_path.absolute())

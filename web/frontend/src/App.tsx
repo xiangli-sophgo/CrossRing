@@ -234,19 +234,34 @@ function App() {
 
               {/* 链路带宽组成 */}
               {selectedLinkKey && selectedLinkFlows.length > 0 && topoData && (
-                <Card title={`链路带宽组成 (节点${(() => {
-                  const [src, dst] = selectedLinkKey.split('-')
-                  const [srcCol, srcRow] = src.split(',').map(Number)
-                  const [dstCol, dstRow] = dst.split(',').map(Number)
-                  const srcNode = srcRow * topoData.cols + srcCol
-                  const dstNode = dstRow * topoData.cols + dstCol
-                  return `${srcNode} → ${dstNode}`
+                <Card title={`链路带宽组成 (${(() => {
+                  // D2D链路格式: d2d-{src_die}-{src_node}-{dst_die}-{dst_node}
+                  if (selectedLinkKey.startsWith('d2d-')) {
+                    const parts = selectedLinkKey.split('-')
+                    if (parts.length === 5) {
+                      const srcDie = parts[1], srcNode = parts[2], dstDie = parts[3], dstNode = parts[4]
+                      return `Die${srcDie}-节点${srcNode} → Die${dstDie}-节点${dstNode}`
+                    }
+                  }
+                  // DIE内链路格式: {die_id}-{col},{row}-{col},{row}
+                  const parts = selectedLinkKey.split('-')
+                  if (parts.length === 3 && parts[1].includes(',') && parts[2].includes(',')) {
+                    const dieId = parts[0]
+                    const [srcCol, srcRow] = parts[1].split(',').map(Number)
+                    const [dstCol, dstRow] = parts[2].split(',').map(Number)
+                    const srcNode = srcRow * topoData.cols + srcCol
+                    const dstNode = dstRow * topoData.cols + dstCol
+                    return `Die${dieId}-节点${srcNode} → 节点${dstNode}`
+                  }
+                  return selectedLinkKey
                 })()})`} size="small" style={{ maxWidth: '100%' }}>
                   <Table
                     dataSource={selectedLinkFlows.map((flow, idx) => ({ ...flow, key: idx }))}
                     columns={[
+                      { title: '源DIE', dataIndex: 'src_die', width: 50, align: 'center' as const, render: (die: number | null | undefined) => die !== null && die !== undefined ? <Tag color="purple">{die}</Tag> : <span style={{ color: '#999' }}>-</span> },
                       { title: '源', dataIndex: 'src_node', width: 40, align: 'center' as const },
                       { title: '源IP', dataIndex: 'src_ip', width: 70, align: 'center' as const, render: (ip: string) => <Tag color="blue" style={{ fontSize: 10 }}>{ip}</Tag> },
+                      { title: '目标DIE', dataIndex: 'dst_die', width: 50, align: 'center' as const, render: (die: number | null | undefined) => die !== null && die !== undefined ? <Tag color="purple">{die}</Tag> : <span style={{ color: '#999' }}>-</span> },
                       { title: '目标', dataIndex: 'dst_node', width: 40, align: 'center' as const },
                       { title: '目标IP', dataIndex: 'dst_ip', width: 70, align: 'center' as const, render: (ip: string) => <Tag color="green" style={{ fontSize: 10 }}>{ip}</Tag> },
                       { title: 'GB/s', dataIndex: 'bandwidth', width: 50, align: 'center' as const, render: (bw: number) => bw.toFixed(1) },

@@ -2,10 +2,11 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from typing import List, Dict, Optional
 from pathlib import Path
-from app.config import TRAFFIC_OUTPUT_DIR
+from app.config import TRAFFIC_OUTPUT_DIR, TOPOLOGIES_DIR
 import json
 import io
 import zipfile
+import yaml
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -192,6 +193,41 @@ def _build_traffic_configs_for_engine(
     return engine_configs
 
 
+def _load_d2d_config_for_topology(topology: str) -> Optional[Dict]:
+    """
+    为指定拓扑加载D2D配置
+
+    Args:
+        topology: 拓扑类型（如 "5x4"）
+
+    Returns:
+        D2D配置字典，包含 num_dies 和 d2d_connections，如果未找到则返回None
+    """
+    # 尝试加载拓扑特定的D2D配置
+    config_file = TOPOLOGIES_DIR / f"d2d_{topology}_config.yaml"
+    if config_file.exists():
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+            if config.get('D2D_ENABLED', False):
+                return {
+                    "num_dies": config.get('NUM_DIES', 2),
+                    "d2d_connections": config.get('D2D_CONNECTIONS', [])
+                }
+
+    # 回退到默认配置
+    default_config = TOPOLOGIES_DIR / "d2d_2die_config.yaml"
+    if default_config.exists():
+        with open(default_config, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+            if config.get('D2D_ENABLED', False):
+                return {
+                    "num_dies": config.get('NUM_DIES', 2),
+                    "d2d_connections": config.get('D2D_CONNECTIONS', [])
+                }
+
+    return None
+
+
 @router.post("/", response_model=TrafficGenerateResponse)
 async def generate_traffic(request: TrafficGenerateRequest):
     """
@@ -242,6 +278,22 @@ async def generate_traffic(request: TrafficGenerateRequest):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_file = OUTPUT_DIR / f"traffic_{timestamp}.txt"
 
+    # 构建元数据所需参数
+    node_ips = {}
+    for node_id, mounts in ip_mounts.items():
+        if isinstance(mounts, list):
+            node_ips[node_id] = [mount.ip_type for mount in mounts]
+        else:
+            node_ips[node_id] = [mounts.ip_type]
+
+    topo_type = request.topology
+    routing_type = "XY"  # 默认XY路由
+
+    # D2D模式：加载D2D配置
+    d2d_config = None
+    if request.mode == "d2d":
+        d2d_config = _load_d2d_config_for_topology(request.topology)
+
     try:
         # 调用流量生成引擎
         if request.mode == "d2d":
@@ -250,7 +302,11 @@ async def generate_traffic(request: TrafficGenerateRequest):
                 end_time=None,
                 output_file=str(output_file),
                 random_seed=request.random_seed,
-                return_dataframe=True
+                return_dataframe=True,
+                topo_type=topo_type,
+                routing_type=routing_type,
+                node_ips=node_ips,
+                d2d_config=d2d_config
             )
         else:
             file_path, df = generate_traffic_from_configs(
@@ -258,7 +314,10 @@ async def generate_traffic(request: TrafficGenerateRequest):
                 end_time=None,
                 output_file=str(output_file),
                 random_seed=request.random_seed,
-                return_dataframe=True
+                return_dataframe=True,
+                topo_type=topo_type,
+                routing_type=routing_type,
+                node_ips=node_ips
             )
 
         total_lines = len(df) if df is not None else 0

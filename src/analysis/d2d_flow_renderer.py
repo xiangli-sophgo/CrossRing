@@ -90,6 +90,7 @@ class D2DFlowRenderer(BaseFlowRenderer):
         show_fig: bool = False,
         return_fig: bool = False,
         enable_channel_switch: bool = True,
+        static_bandwidth: Dict = None,
     ):
         """
         绘制D2D系统流量图（多Die布局）- 交互式版本
@@ -103,6 +104,7 @@ class D2DFlowRenderer(BaseFlowRenderer):
             node_size: 节点大小
             save_path: 保存路径
             show_fig: 是否在浏览器中显示图像
+            static_bandwidth: 静态带宽数据字典 {die_id: {link_key: bw}, d2d_key: bw}
 
         Returns:
             str: 保存的HTML文件路径，如果save_path为None则返回fig对象
@@ -304,6 +306,11 @@ class D2DFlowRenderer(BaseFlowRenderer):
                     # 获取该Die的旋转角度
                     die_rotation = die_rotations.get(die_id, 0)
 
+                    # 提取该Die的静态带宽数据
+                    die_static_bw = None
+                    if static_bandwidth and isinstance(static_bandwidth, dict):
+                        die_static_bw = static_bandwidth.get(die_id, None)
+
                     # 使用_draw_channel_links_only绘制该通道的links
                     channel_anns = self._draw_channel_links_only(
                         fig=fig,
@@ -316,6 +323,7 @@ class D2DFlowRenderer(BaseFlowRenderer):
                         rotation=die_rotation,
                         is_d2d_scenario=True,
                         fontsize=8,
+                        static_bandwidth=die_static_bw,
                     )
                     channel_manager.add_annotations(channel_anns)
 
@@ -732,7 +740,7 @@ class D2DFlowRenderer(BaseFlowRenderer):
 
         # 归一化方向向量
         ux, uy = dx / length, dy / length
-        perpx, perpy = -uy * 0.2, ux * 0.2
+        perpx, perpy = uy * 0.2, -ux * 0.2  # 调换符号
 
         # 计算箭头起止坐标（留出节点空间）
         if connection_type == "diagonal":

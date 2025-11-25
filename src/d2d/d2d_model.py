@@ -132,6 +132,11 @@ class D2D_Model:
         self.kwargs["traffic_file_path"] = traffic_file_path
         self.traffic_config = traffic_chains
 
+        # 加载traffic元数据并计算静态带宽（如果有）
+        meta_data = self._load_traffic_metadata(traffic_file_path, traffic_chains)
+        if meta_data and self.kwargs.get('verbose', 0):
+            self._compute_static_bandwidth(meta_data)
+
         # 分析全局traffic，为每个Die提取IP需求
         die_ip_requirements = self._extract_die_ip_requirements(traffic_file_path, traffic_chains)
 
@@ -1276,8 +1281,13 @@ class D2D_Model:
 
                         d2d_processor.die_processors[die_id] = die_processor
 
+                # 获取静态带宽数据（如果有）
+                static_bandwidth = None
+                if hasattr(self, 'static_link_bandwidth') and self.static_link_bandwidth:
+                    static_bandwidth = self.static_link_bandwidth
+
                 # 获取Figure对象用于集成报告
-                flow_fig = d2d_processor.draw_d2d_flow_graph_interactive(dies=self.dies, config=self.config, mode=self.flow_graph_mode, return_fig=True)
+                flow_fig = d2d_processor.draw_d2d_flow_graph_interactive(dies=self.dies, config=self.config, mode=self.flow_graph_mode, return_fig=True, static_bandwidth=static_bandwidth)
                 if flow_fig:
                     d2d_charts_to_merge.append(("D2D流量图", flow_fig, None))
 
@@ -2226,6 +2236,106 @@ class D2D_Model:
                 trace_sleep_time = self.kwargs.get("d2d_trace_sleep", 0)
                 if trace_sleep_time > 0:
                     time.sleep(trace_sleep_time)
+
+    # ==================== Static Bandwidth Analysis ====================
+
+    def _load_traffic_metadata(self, traffic_file_path: str, traffic_chains):
+        """
+        从traffic文件加载元数据
+
+        Args:
+            traffic_file_path: traffic文件基础路径
+            traffic_chains: traffic链配置
+
+        Returns:
+            dict: 元数据字典，如果无法加载则返回None
+        """
+        import json
+        import os
+
+        try:
+            # 获取第一个traffic文件
+            if isinstance(traffic_chains, str):
+                traffic_file = traffic_chains
+            elif isinstance(traffic_chains, list) and len(traffic_chains) > 0:
+                first_chain = traffic_chains[0]
+                if isinstance(first_chain, list) and len(first_chain) > 0:
+                    traffic_file = first_chain[0]
+                elif isinstance(first_chain, str):
+                    traffic_file = first_chain
+                else:
+                    return None
+            else:
+                return None
+
+            # 构建完整路径
+            full_path = os.path.join(traffic_file_path, traffic_file)
+
+            # 读取第一行查找元数据
+            with open(full_path, 'r') as f:
+                first_line = f.readline().strip()
+                if first_line.startswith('# TRAFFIC_META:'):
+                    meta_str = first_line[len('# TRAFFIC_META:'):].strip()
+                    meta_data = json.loads(meta_str)
+                    return meta_data
+        except Exception as e:
+            if self.kwargs.get('verbose', 0):
+                print(f"[INFO] 无法加载traffic元数据: {e}")
+
+        return None
+
+    def _compute_static_bandwidth(self, meta_data: dict):
+        """
+        基于元数据计算静态链路带宽
+
+        Args:
+            meta_data: 从traffic文件加载的元数据
+        """
+        try:
+            # 重建TrafficConfig对象（简化版本）
+            class SimpleConfig:
+                def __init__(self, data):
+                    self.__dict__.update(data)
+
+            configs = [SimpleConfig(cfg) for cfg in meta_data['configs']]
+
+            # D2D模式 - 计算各Die的链路带宽和跨Die带宽
+            from src.traffic_process.traffic_gene.static_bandwidth_analyzer import compute_d2d_link_bandwidth
+
+            d2d_config = meta_data.get('d2d_config', {})
+            d2d_pairs = d2d_config.get('d2d_pairs', [])
+            num_dies = d2d_config.get('num_dies', self.num_dies)
+
+            # 计算D2D静态带宽
+            die_link_bandwidth, d2d_link_bandwidth, link_composition = compute_d2d_link_bandwidth(
+                topo_type=meta_data['topo_type'],
+                node_ips=meta_data['node_ips'],
+                configs=configs,
+                d2d_pairs=d2d_pairs,
+                routing_type=meta_data.get('routing_type', 'XY'),
+                num_dies=num_dies
+            )
+
+            # 保存D2D带宽数据：{die_id: {link_key: bw}, ...} 和跨Die链路
+            self.static_link_bandwidth = die_link_bandwidth
+            self.static_d2d_link_bandwidth = d2d_link_bandwidth
+
+            if self.kwargs.get('verbose', 0):
+                total_active_links = sum(sum(1 for bw in die_bw.values() if bw > 0) for die_bw in die_link_bandwidth.values())
+                active_d2d_links = sum(1 for bw in d2d_link_bandwidth.values() if bw > 0)
+                print(f"[INFO] 静态带宽分析完成（D2D模式）: {total_active_links} 条Die内活跃链路, {active_d2d_links} 条跨Die链路")
+
+            # 保存元数据供可视化使用
+            self.static_bw_metadata = meta_data
+
+        except Exception as e:
+            if self.kwargs.get('verbose', 0):
+                print(f"[WARNING] 静态带宽计算失败: {e}")
+                import traceback
+                traceback.print_exc()
+            self.static_link_bandwidth = None
+            self.static_d2d_link_bandwidth = None
+            self.static_bw_metadata = None
 
     # ==================== IP Management Helpers ====================
 

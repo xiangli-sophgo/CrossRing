@@ -31,6 +31,7 @@ def main():
     # 配置数据流
     # traffic_file_path = str(Path(__file__).parent.parent / "test_data")
     traffic_file_path = str(Path(__file__).parent.parent / "traffic")
+    # traffic_file_path = str(Path(__file__).parent.parent / "traffic" / "2261_traffic")
     traffic_chains = [
         [
             # "d2d_data_simple_example.txt",
@@ -42,8 +43,9 @@ def main():
             # "d2d_16_share_R_1104.txt"
             # "data_sim_16_share_W_1110.txt"
             # "2261_c2c_16_share_R.txt"
-            "2261_c2c_64share_d2d_R.txt"
-            # "2261_test.txt"
+            # "2261_c2c_64share_d2d_R.txt"
+            # "2261_16share_R.txt"
+            "test_d2d.txt"
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
@@ -67,7 +69,7 @@ def main():
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_time=6000,
+        max_time=600,
         print_interval=200,
         verbose=1,
     )

@@ -485,6 +485,11 @@ class SingleDieAnalyzer:
 
             # 目前单Die只支持网格拓扑的交互式流图
             if not self.sim_model.topo_type_stat.startswith("Ring"):
+                # 获取静态带宽数据（如果有）
+                static_bandwidth = None
+                if hasattr(self.sim_model, 'static_link_bandwidth') and self.sim_model.static_link_bandwidth:
+                    static_bandwidth = self.sim_model.static_link_bandwidth
+
                 flow_fig = self.interactive_flow_visualizer.draw_flow_graph(
                     network=self.sim_model.data_network,
                     ip_bandwidth_data=self.ip_bandwidth_data,
@@ -495,6 +500,7 @@ class SingleDieAnalyzer:
                     return_fig=True,  # 返回Figure对象
                     req_network=self.sim_model.req_network,  # 传入请求网络
                     rsp_network=self.sim_model.rsp_network,  # 传入响应网络
+                    static_bandwidth=static_bandwidth,  # 传入静态带宽数据
                 )
                 # 流量图放在最前面（按用户要求顺序）
                 charts_to_merge.insert(0, ("流量图", flow_fig, None))

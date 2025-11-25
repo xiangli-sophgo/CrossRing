@@ -120,6 +120,11 @@ class BaseModel:
         else:
             raise ValueError("traffic_chains必须是字符串(单文件)或列表(多链)")
 
+        # 4. 加载traffic元数据并计算静态带宽（如果有）
+        meta_data = self._load_traffic_metadata(traffic_file_path, traffic_chains)
+        if meta_data and self.verbose:
+            self._compute_static_bandwidth(meta_data)
+
     def _extract_ip_requirements_from_traffic(self, traffic_file_path: str, traffic_chains):
         """
         从traffic文件中提取IP接口需求
@@ -156,6 +161,133 @@ class BaseModel:
         # 更新config的CH_NAME_LIST和CHANNEL_SPEC
         self.config.update_channel_list_from_ips(ip_types)
         self.config.infer_channel_spec_from_ips(ip_types)
+
+    def _load_traffic_metadata(self, traffic_file_path: str, traffic_chains):
+        """
+        从traffic文件第一行读取元数据
+
+        Args:
+            traffic_file_path: traffic文件基础路径
+            traffic_chains: traffic文件链配置
+
+        Returns:
+            元数据字典，如果没有元数据则返回None
+        """
+        import os
+        import json
+
+        try:
+            # 获取第一个traffic文件
+            first_file = None
+            if isinstance(traffic_chains, str):
+                first_file = traffic_chains
+            elif isinstance(traffic_chains, list) and len(traffic_chains) > 0:
+                first_chain = traffic_chains[0]
+                if isinstance(first_chain, list) and len(first_chain) > 0:
+                    first_file = first_chain[0]
+                elif isinstance(first_chain, str):
+                    first_file = first_chain
+
+            if not first_file:
+                return None
+
+            file_path = os.path.join(traffic_file_path, first_file)
+
+            # 读取第一行
+            with open(file_path, 'r') as f:
+                first_line = f.readline().strip()
+
+            # 检查是否是元数据行
+            if first_line.startswith('# TRAFFIC_META:'):
+                meta_json = first_line.replace('# TRAFFIC_META:', '').strip()
+                return json.loads(meta_json)
+        except Exception as e:
+            if self.verbose:
+                print(f"[INFO] 无法加载traffic元数据: {e}")
+
+        return None
+
+    def _compute_static_bandwidth(self, meta_data: dict):
+        """
+        基于元数据计算静态链路带宽（NoC单Die模式）
+
+        Args:
+            meta_data: 从traffic文件加载的元数据
+        """
+        try:
+            from src.traffic_process.traffic_gene.static_bandwidth_analyzer import compute_link_bandwidth
+
+            # 重建TrafficConfig对象（简化版本）
+            class SimpleConfig:
+                def __init__(self, data):
+                    self.__dict__.update(data)
+
+            configs = [SimpleConfig(cfg) for cfg in meta_data['configs']]
+
+            # 计算静态带宽
+            self.static_link_bandwidth = compute_link_bandwidth(
+                topo_type=meta_data['topo_type'],
+                node_ips=meta_data['node_ips'],
+                configs=configs,
+                routing_type=meta_data.get('routing_type', 'XY')
+            )
+
+            # 保存元数据供可视化使用
+            self.static_bw_metadata = meta_data
+
+            if self.verbose:
+                active_links = sum(1 for bw in self.static_link_bandwidth.values() if bw > 0)
+                print(f"[INFO] 静态带宽分析完成（基于traffic元数据）: {active_links} 条活跃链路")
+        except Exception as e:
+            if self.verbose:
+                print(f"[WARNING] 静态带宽计算失败: {e}")
+            self.static_link_bandwidth = None
+            self.static_bw_metadata = None
+
+    def _generate_static_bandwidth_figure(self):
+        """
+        生成静态带宽拓扑图（使用Cytoscape.js交互式可视化）
+
+        Returns:
+            (None, html_snippet)元组，其中html_snippet是Cytoscape的HTML代码，
+            如果无法生成则返回None
+        """
+        if not hasattr(self, 'static_link_bandwidth') or not self.static_link_bandwidth:
+            return None
+
+        if not hasattr(self, 'static_bw_metadata') or not self.static_bw_metadata:
+            return None
+
+        try:
+            from src.traffic_process.traffic_gene.cytoscape_bandwidth_visualizer import CytoscapeBandwidthVisualizer
+
+            meta_data = self.static_bw_metadata
+
+            # 转换node_ips的键为整数（JSON反序列化后会变成字符串）
+            node_ips = {int(k): v for k, v in meta_data['node_ips'].items()}
+
+            # 确定模式
+            mode = 'd2d' if 'd2d_config' in meta_data else 'noc'
+
+            # 创建Cytoscape可视化器
+            viz = CytoscapeBandwidthVisualizer(
+                topo_type=meta_data['topo_type'],
+                mode=mode,
+                link_bandwidth=self.static_link_bandwidth,
+                node_ips=node_ips,
+                d2d_config=meta_data.get('d2d_config', None)
+            )
+
+            # 生成HTML片段
+            html_snippet = viz.generate_html_snippet()
+
+            # 返回(None, html)表示自定义HTML内容
+            return (None, html_snippet)
+
+        except Exception as e:
+            if self.verbose:
+                print(f"[WARNING] 静态带宽图生成失败: {e}")
+            return None
 
     def setup_result_analysis(
         self,
@@ -1352,7 +1484,12 @@ class BaseModel:
                 abs_path = os.path.join(self.traffic_file_path, traffic_file)
                 with open(abs_path, "r") as f:
                     for line in f:
-                        parts = line.strip().split(",")
+                        line = line.strip()
+                        # 跳过空行和注释行（元数据行）
+                        if not line or line.startswith("#"):
+                            continue
+
+                        parts = line.split(",")
                         if len(parts) >= 7:
                             op, burst = parts[5], int(parts[6])
                             if op == "R":

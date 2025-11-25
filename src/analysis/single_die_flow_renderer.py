@@ -89,6 +89,7 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
         return_fig: bool = False,
         req_network=None,
         rsp_network=None,
+        static_bandwidth=None,
     ):
         """
         绘制单Die网络流量图(交互式版本)
@@ -104,6 +105,7 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
             return_fig: 是否返回Figure对象而不是保存文件
             req_network: 请求网络对象（可选，用于通道分离显示）
             rsp_network: 响应网络对象（可选，用于通道分离显示）
+            static_bandwidth: 静态带宽数据字典
 
         Returns:
             str or Figure: 如果return_fig=True，返回Figure对象；否则返回保存路径或fig对象
@@ -172,6 +174,7 @@ class SingleDieFlowRenderer(BaseFlowRenderer):
                     mode=mode,
                     node_size=node_size,
                     draw_self_loops=True,  # 所有通道都绘制自环
+                    static_bandwidth=static_bandwidth,
                 )
 
                 # 收集annotations到管理器

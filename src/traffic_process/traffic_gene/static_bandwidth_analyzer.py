@@ -574,17 +574,6 @@ class D2DStaticBandwidthAnalyzer:
             total_targets = len(dst_nodes) * num_target_dies
             bandwidth_per_pair = bandwidth_per_src / total_targets if total_targets > 0 else 0
 
-            # 调试打印
-            print(f"[DEBUG] bandwidth_per_pair计算:")
-            print(f"  die_pairs: {die_pairs}")
-            print(f"  目标Die列表: {[pair[1] for pair in die_pairs]}")
-            print(f"  去重后目标Die数 (num_target_dies): {num_target_dies}")
-            print(f"  单Die目标节点数 (len(dst_nodes)): {len(dst_nodes)}")
-            print(f"  总目标数 (total_targets): {total_targets}")
-            print(f"  源IP速率 (bandwidth_per_src): {bandwidth_per_src}")
-            print(f"  每对带宽 (bandwidth_per_pair): {bandwidth_per_pair}")
-            print(f"  源节点数: {len(src_nodes)}, 目标节点数: {len(dst_nodes)}")
-
             # 为每个源-目标对和每个Die对计算带宽
             for src_idx, src_node in enumerate(src_nodes):
                 src_ip_type = src_ip_types[src_idx]
@@ -605,7 +594,9 @@ class D2DStaticBandwidthAnalyzer:
                             'dst_node': dst_node,
                             'dst_ip': dst_ip_type,
                             'bandwidth': bandwidth_per_pair,
-                            'req_type': req_type
+                            'req_type': req_type,
+                            'src_die': src_die,
+                            'dst_die': dst_die
                         }
 
                         if src_die == dst_die:
@@ -667,9 +658,9 @@ class D2DStaticBandwidthAnalyzer:
         # Die内部链路
         for die_id, link_comp in self.die_link_composition.items():
             for link_key, flows in link_comp.items():
-                # 转换为字符串格式
+                # 转换为字符串格式，包含die_id以区分不同Die的相同位置链路
                 src_pos, dst_pos = link_key
-                key = f"{src_pos[0]},{src_pos[1]}-{dst_pos[0]},{dst_pos[1]}"
+                key = f"{die_id}-{src_pos[0]},{src_pos[1]}-{dst_pos[0]},{dst_pos[1]}"
                 result[key] = flows
 
         # D2D跨Die链路

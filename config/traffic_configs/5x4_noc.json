@@ -1,20 +1,19 @@
 {
-  "c549bb2e-307b-4d40-ba67-77de53bb4861": {
+  "5fbd4822-5794-4370-8fa0-1e658067ac2d": {
     "source_ip": [
-      "节点0-gdma_0",
-      "节点0-gdma_1"
+      "节点0-gdma_0"
     ],
     "target_ip": [
-      "节点1-ddr_0"
+      "节点11-ddr_0"
     ],
     "speed_gbps": 128.0,
     "burst_length": 4,
     "request_type": "R",
     "end_time_ns": 6000,
-    "id": "c549bb2e-307b-4d40-ba67-77de53bb4861",
+    "id": "5fbd4822-5794-4370-8fa0-1e658067ac2d",
     "topology": "5x4",
     "mode": "noc",
-    "created_at": "2025-11-24T14:31:58.751143",
+    "created_at": "2025-11-24T22:55:54.761695",
     "source_die": null,
     "target_die": null,
     "die_pairs": null

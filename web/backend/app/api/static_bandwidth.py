@@ -52,6 +52,8 @@ class FlowInfo(BaseModel):
     dst_ip: str
     bandwidth: float
     req_type: str
+    src_die: Optional[int] = None
+    dst_die: Optional[int] = None
 
 
 class BandwidthComputeResponse(BaseModel):

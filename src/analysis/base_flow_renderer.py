@@ -207,7 +207,7 @@ class BaseFlowRenderer:
                 )
             )
 
-    def _draw_link_arrows(self, fig, pos, edge_labels, edge_colors, links, config, square_size, rotation, fontsize, utilization_stats=None, is_d2d_scenario=False, show_labels=True):
+    def _draw_link_arrows(self, fig, pos, edge_labels, edge_colors, links, config, square_size, rotation, fontsize, utilization_stats=None, is_d2d_scenario=False, show_labels=True, static_bandwidth=None):
         """绘制链路箭头（批量优化版本，增强hover信息）
 
         Returns:
@@ -216,6 +216,7 @@ class BaseFlowRenderer:
         Args:
             is_d2d_scenario: 是否为D2D场景，影响标签偏移量大小
             show_labels: 是否显示链路文本标签
+            static_bandwidth: 静态带宽数据字典 {((src_col, src_row), (dst_col, dst_row)): bandwidth}
         """
         import math
 
@@ -375,12 +376,21 @@ class BaseFlowRenderer:
                         total_flit = stats.get("total_flit", 0)
                         total_cycles = stats.get("total_cycles", 0)
 
-                        # 计算带宽
+                        # 计算实际带宽
                         if total_cycles > 0:
                             time_ns = total_cycles / config.NETWORK_FREQUENCY
                             bandwidth = total_flit * 128 / time_ns
                         else:
                             bandwidth = 0
+
+                        # 获取静态带宽（如果有）
+                        static_bw = None
+                        if static_bandwidth:
+                            # 将节点ID转换为坐标
+                            i_row, i_col = i // config.NUM_COL, i % config.NUM_COL
+                            j_row, j_col = j // config.NUM_COL, j % config.NUM_COL
+                            link_key = ((i_col, i_row), (j_col, j_row))
+                            static_bw = static_bandwidth.get(link_key, None)
 
                         # 获取eject_attempts分布
                         merged_ratios = stats.get("eject_attempts_merged_ratios", {"0": 0, "1": 0, "2": 0, ">2": 0})
@@ -389,9 +399,11 @@ class BaseFlowRenderer:
                         attempts_2 = merged_ratios.get("2", 0) * 100
                         attempts_gt2 = merged_ratios.get(">2", 0) * 100
 
-                        hover_text = (
-                            f"<b>链路: {i} → {j}</b><br>"
-                            f"带宽: {bandwidth:.2f} GB/s<br>"
+                        hover_text = f"<b>链路: {i} → {j}</b><br>"
+                        if static_bw is not None:
+                            hover_text += f"静态带宽: {static_bw:.2f} GB/s<br>"
+                        hover_text += (
+                            f"实际带宽: {bandwidth:.2f} GB/s<br>"
                             f"flit数量: {total_flit}<br>"
                             f"有效利用率: {effective_ratio:.1f}%<br>"
                             f"总利用率: {utilization:.1f}%<br>"
@@ -441,7 +453,7 @@ class BaseFlowRenderer:
         # 返回箭头annotations
         return arrow_annotations
 
-    def _draw_channel_links_only(self, fig, network, config, pos, mode, node_size, draw_self_loops=False, rotation=0, is_d2d_scenario=False, fontsize=12):
+    def _draw_channel_links_only(self, fig, network, config, pos, mode, node_size, draw_self_loops=False, rotation=0, is_d2d_scenario=False, fontsize=12, static_bandwidth=None):
         """
         只绘制指定network的链路traces（不绘制nodes和annotations）
 
@@ -453,6 +465,7 @@ class BaseFlowRenderer:
             mode: 可视化模式
             node_size: 节点大小
             draw_self_loops: 是否绘制自环标签（避免重复）
+            static_bandwidth: 静态带宽数据字典
 
         Returns:
             list: 该通道的annotations列表
@@ -476,7 +489,7 @@ class BaseFlowRenderer:
 
         # 绘制链路箭头（带文本标签）- 收集返回的annotations
         arrow_anns = self._draw_link_arrows(
-            fig, pos, edge_labels, edge_colors, links, config, square_size, rotation=rotation, fontsize=fontsize, utilization_stats=utilization_stats, is_d2d_scenario=is_d2d_scenario, show_labels=True
+            fig, pos, edge_labels, edge_colors, links, config, square_size, rotation=rotation, fontsize=fontsize, utilization_stats=utilization_stats, is_d2d_scenario=is_d2d_scenario, show_labels=True, static_bandwidth=static_bandwidth
         )
         channel_annotations.extend(arrow_anns)
 

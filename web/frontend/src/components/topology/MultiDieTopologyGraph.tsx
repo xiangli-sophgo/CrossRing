@@ -465,9 +465,9 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
           ? (dstRotated.col > srcRotated.col)
           : (dstRotated.row > srcRotated.row)
 
-        // 正向 - 使用原始坐标查询带宽
-        const fwdKey = `${srcOrigCol},${srcOrigRow}-${dstOrigCol},${dstOrigRow}`
-        const fwdBw = dieBandwidth[fwdKey] || 0
+        // 正向 - 使用原始坐标查询带宽（包含die_id以区分不同Die的相同位置链路）
+        const fwdKey = `${dieId}-${srcOrigCol},${srcOrigRow}-${dstOrigCol},${dstOrigRow}`
+        const fwdBw = dieBandwidth[`${srcOrigCol},${srcOrigRow}-${dstOrigCol},${dstOrigRow}`] || 0
         edges.push({
           data: {
             id: `die-${dieId}-edge-${idx}-fwd`,
@@ -484,9 +484,9 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
           classes: 'internal-edge'
         })
 
-        // 反向 - 使用原始坐标查询带宽
-        const bwdKey = `${dstOrigCol},${dstOrigRow}-${srcOrigCol},${srcOrigRow}`
-        const bwdBw = dieBandwidth[bwdKey] || 0
+        // 反向 - 使用原始坐标查询带宽（包含die_id以区分不同Die的相同位置链路）
+        const bwdKey = `${dieId}-${dstOrigCol},${dstOrigRow}-${srcOrigCol},${srcOrigRow}`
+        const bwdBw = dieBandwidth[`${dstOrigCol},${dstOrigRow}-${srcOrigCol},${srcOrigRow}`] || 0
         edges.push({
           data: {
             id: `die-${dieId}-edge-${idx}-bwd`,
@@ -887,8 +887,10 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
     cy.on('tap', 'edge.d2d-edge', (evt) => {
       const linkKey = evt.target.data('linkKey')
       if (linkKey && onLinkClick) {
-        const composition = linkComposition?.[linkKey] || []
-        onLinkClick(linkKey, composition)
+        // 去除 "d2d-" 前缀用于查询 linkComposition
+        const queryKey = linkKey.replace(/^d2d-/, '')
+        const composition = linkComposition?.[queryKey] || []
+        onLinkClick(linkKey, composition)  // 传递完整linkKey用于显示
       }
     })
 

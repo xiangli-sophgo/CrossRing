@@ -455,7 +455,12 @@ class TrafficScheduler:
 
         with open(abs_path, "r") as f:
             for line in f:
-                parts = line.strip().split(",")
+                line = line.strip()
+                # 跳过空行和注释行（元数据行）
+                if not line or line.startswith("#"):
+                    continue
+
+                parts = line.split(",")
                 if len(parts) < 7:
                     continue
 

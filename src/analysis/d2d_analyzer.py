@@ -1153,6 +1153,7 @@ class D2DAnalyzer:
         save_path: str = None,
         show_fig: bool = False,
         return_fig: bool = False,
+        static_bandwidth: Dict = None,
     ):
         """
         绘制D2D流图（交互式版本，生成HTML文件）
@@ -1166,6 +1167,7 @@ class D2DAnalyzer:
             save_path: 保存路径（会自动转换为.html后缀）
             show_fig: 是否在浏览器中显示图像
             return_fig: 是否返回Figure对象（用于集成报告）
+            static_bandwidth: 静态带宽数据
 
         Returns:
             str or Figure: 如果return_fig=True返回Figure对象，否则返回HTML文件路径
@@ -1179,6 +1181,7 @@ class D2DAnalyzer:
             save_path=save_path,
             show_fig=show_fig,
             return_fig=return_fig,
+            static_bandwidth=static_bandwidth,
         )
 
     def draw_ip_bandwidth_heatmap(self, dies=None, config=None, mode="total", node_size=4000, save_path=None):
