@@ -31,7 +31,7 @@ def main():
     # 配置数据流
     # traffic_file_path = str(Path(__file__).parent.parent / "test_data")
     traffic_file_path = str(Path(__file__).parent.parent / "traffic")
-    # traffic_file_path = str(Path(__file__).parent.parent / "traffic" / "2261_traffic")
+    traffic_file_path = str(Path(__file__).parent.parent / "traffic" / "2261")
     traffic_chains = [
         [
             # "d2d_data_simple_example.txt",
@@ -39,23 +39,22 @@ def main():
             # "d2d_16_share_D2D_W_1104.txt"
             # "d2d_64_share_D2D_R_1104.txt",
             # "d2d_64_share_D2D_W_1104.txt",
-            # "d2d_16_share_W_1104.txt"
+            "2261_16share_d2d_W.txt"
             # "d2d_16_share_R_1104.txt"
             # "data_sim_16_share_W_1110.txt"
             # "2261_c2c_16_share_R.txt"
             # "2261_c2c_64share_d2d_R.txt"
             # "2261_16share_R.txt"
-            "test_d2d.txt"
+            # "test_d2d.txt"
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
-    # model.setup_debug(trace_packets=[2], update_interval=0.1)
-    # model.setup_visualization(enable=1, update_interval=0.5, start_cycle=200)
+    model.setup_debug(trace_packets=[2], update_interval=0.1)
+    # model.setup_visualization(enable=1, update_interval=0.5, start_cycle=600)
 
     model.setup_result_analysis(
         # 图片生成控制
         flow_graph_interactive=1,  # 生成HTML交互式流量图
-        ip_bandwidth_heatmap=0,
         plot_rn_bw_fig=0,
         fifo_utilization_heatmap=1,
         show_result_analysis=1,  # 在浏览器中显示图像
@@ -69,7 +68,7 @@ def main():
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_time=600,
+        max_time=5800,
         print_interval=200,
         verbose=1,
     )

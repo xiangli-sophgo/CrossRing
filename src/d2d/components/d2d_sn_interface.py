@@ -132,10 +132,15 @@ class D2D_SN_Interface(IPInterface):
 
         response = Flit(source=self.ip_pos, destination=dest_pos, path=path)
         response.packet_id = req_flit.packet_id
+        response.flit_type = "rsp"
         response.rsp_type = rsp_type
         response.req_type = getattr(req_flit, "req_type", "write")
         response.source_type = self.ip_type
         response.destination_type = getattr(req_flit, "source_type", "gdma_0")
+
+        # 设置departure_cycle，与普通IP的create_rsp保持一致
+        cycle = getattr(self, "current_cycle", 0)
+        response.departure_cycle = cycle + self.config.NETWORK_FREQUENCY + self.sn_processing_latency
 
         return response
 
@@ -283,6 +288,9 @@ class D2D_SN_Interface(IPInterface):
         # 重置网络状态属性以确保能被正确inject
         new_flit.is_injected = False
         new_flit.current_position = self.ip_pos
+
+        # 设置departure_cycle，响应可以立即发送
+        new_flit.departure_cycle = self.current_cycle
 
         # 根据响应类型选择网络
         if hasattr(new_flit, "rsp_type") and new_flit.rsp_type == "read_data":

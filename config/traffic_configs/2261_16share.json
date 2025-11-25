@@ -1,0 +1,202 @@
+{
+  "777e1302-5510-4d92-b58b-3bb46cf452cf": {
+    "source_ip": [
+      "节点0-gdma_0",
+      "节点1-gdma_0",
+      "节点2-gdma_0",
+      "节点3-gdma_0",
+      "节点3-gdma_1",
+      "节点4-gdma_0",
+      "节点5-gdma_0",
+      "节点6-gdma_0",
+      "节点7-gdma_0",
+      "节点8-gdma_0",
+      "节点9-gdma_0",
+      "节点10-gdma_0",
+      "节点11-gdma_0",
+      "节点12-gdma_0",
+      "节点13-gdma_0",
+      "节点14-gdma_0",
+      "节点15-gdma_0",
+      "节点15-gdma_1",
+      "节点19-gdma_0",
+      "节点19-gdma_1"
+    ],
+    "target_ip": [
+      "节点3-ddr_0",
+      "节点3-ddr_1",
+      "节点7-ddr_0",
+      "节点7-ddr_1",
+      "节点11-ddr_0",
+      "节点11-ddr_1",
+      "节点15-ddr_0",
+      "节点15-ddr_1"
+    ],
+    "speed_gbps": 46.08,
+    "burst_length": 4,
+    "request_type": "R",
+    "end_time_ns": 6000,
+    "id": "777e1302-5510-4d92-b58b-3bb46cf452cf",
+    "topology": "5x4",
+    "mode": "d2d",
+    "created_at": "2025-11-25T16:36:12.945222",
+    "source_die": null,
+    "target_die": null,
+    "die_pairs": [
+      [
+        0,
+        0
+      ]
+    ]
+  },
+  "5c0e9806-a156-41b8-a8d4-166fba2f6350": {
+    "source_ip": [
+      "节点0-gdma_0",
+      "节点1-gdma_0",
+      "节点2-gdma_0",
+      "节点3-gdma_0",
+      "节点3-gdma_1",
+      "节点4-gdma_0",
+      "节点5-gdma_0",
+      "节点6-gdma_0",
+      "节点7-gdma_0",
+      "节点8-gdma_0",
+      "节点9-gdma_0",
+      "节点10-gdma_0",
+      "节点11-gdma_0",
+      "节点12-gdma_0",
+      "节点13-gdma_0",
+      "节点14-gdma_0",
+      "节点15-gdma_0",
+      "节点15-gdma_1",
+      "节点19-gdma_0",
+      "节点19-gdma_1"
+    ],
+    "target_ip": [
+      "节点3-ddr_0",
+      "节点3-ddr_1",
+      "节点7-ddr_0",
+      "节点7-ddr_1",
+      "节点11-ddr_0",
+      "节点11-ddr_1",
+      "节点15-ddr_0",
+      "节点15-ddr_1"
+    ],
+    "speed_gbps": 46.08,
+    "burst_length": 4,
+    "request_type": "R",
+    "end_time_ns": 6000,
+    "id": "5c0e9806-a156-41b8-a8d4-166fba2f6350",
+    "topology": "5x4",
+    "mode": "d2d",
+    "created_at": "2025-11-25T16:36:12.946652",
+    "source_die": null,
+    "target_die": null,
+    "die_pairs": [
+      [
+        2,
+        2
+      ]
+    ]
+  },
+  "0911edd6-bb30-43a8-bf89-86add88103e6": {
+    "source_ip": [
+      "节点0-gdma_0",
+      "节点1-gdma_0",
+      "节点2-gdma_0",
+      "节点3-gdma_0",
+      "节点3-gdma_1",
+      "节点4-gdma_0",
+      "节点5-gdma_0",
+      "节点6-gdma_0",
+      "节点7-gdma_0",
+      "节点8-gdma_0",
+      "节点9-gdma_0",
+      "节点10-gdma_0",
+      "节点11-gdma_0",
+      "节点12-gdma_0",
+      "节点13-gdma_0",
+      "节点14-gdma_0",
+      "节点15-gdma_0",
+      "节点15-gdma_1",
+      "节点19-gdma_0",
+      "节点19-gdma_1"
+    ],
+    "target_ip": [
+      "节点3-ddr_0",
+      "节点3-ddr_1",
+      "节点7-ddr_0",
+      "节点7-ddr_1",
+      "节点11-ddr_0",
+      "节点11-ddr_1",
+      "节点15-ddr_0",
+      "节点15-ddr_1"
+    ],
+    "speed_gbps": 46.08,
+    "burst_length": 4,
+    "request_type": "R",
+    "end_time_ns": 6000,
+    "id": "0911edd6-bb30-43a8-bf89-86add88103e6",
+    "topology": "5x4",
+    "mode": "d2d",
+    "created_at": "2025-11-25T16:36:12.948219",
+    "source_die": null,
+    "target_die": null,
+    "die_pairs": [
+      [
+        3,
+        3
+      ]
+    ]
+  },
+  "e4c29642-f851-4618-ba85-4598c6be4f21": {
+    "source_ip": [
+      "节点0-gdma_0",
+      "节点1-gdma_0",
+      "节点2-gdma_0",
+      "节点3-gdma_0",
+      "节点3-gdma_1",
+      "节点4-gdma_0",
+      "节点5-gdma_0",
+      "节点6-gdma_0",
+      "节点7-gdma_0",
+      "节点8-gdma_0",
+      "节点9-gdma_0",
+      "节点10-gdma_0",
+      "节点11-gdma_0",
+      "节点12-gdma_0",
+      "节点13-gdma_0",
+      "节点14-gdma_0",
+      "节点15-gdma_0",
+      "节点15-gdma_1",
+      "节点19-gdma_0",
+      "节点19-gdma_1"
+    ],
+    "target_ip": [
+      "节点3-ddr_0",
+      "节点3-ddr_1",
+      "节点7-ddr_0",
+      "节点7-ddr_1",
+      "节点11-ddr_0",
+      "节点11-ddr_1",
+      "节点15-ddr_0",
+      "节点15-ddr_1"
+    ],
+    "speed_gbps": 46.08,
+    "burst_length": 4,
+    "request_type": "R",
+    "end_time_ns": 6000,
+    "id": "e4c29642-f851-4618-ba85-4598c6be4f21",
+    "topology": "5x4",
+    "mode": "d2d",
+    "created_at": "2025-11-25T16:36:12.949379",
+    "source_die": null,
+    "target_die": null,
+    "die_pairs": [
+      [
+        1,
+        1
+      ]
+    ]
+  }
+}
