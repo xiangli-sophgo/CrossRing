@@ -13,8 +13,8 @@ def main():
     """运行CrossRing仿真 - 使用新的简化配置接口"""
 
     # ==================== 流量配置 ====================
-    # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
-    traffic_file_path = r"../test_data"
+    traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
+    # traffic_file_path = r"../test_data"
     # traffic_file_path = r"../traffic"
     traffic_config = [
         [
@@ -85,7 +85,7 @@ def main():
 
     # ==================== 保存结果到数据库 ====================
     # sim.save_to_database()  # 使用默认实验名：日常仿真_YYYY-MM-DD
-    # sim.save_to_database(experiment_name="自定义实验名", description="实验描述")
+    sim.save_to_database(experiment_name="日常仿真", description="KCIN 日常仿真")
 
 
 if __name__ == "__main__":

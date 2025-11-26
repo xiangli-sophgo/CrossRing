@@ -12,7 +12,7 @@ from typing import Optional, Union
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker, Session
 
-from .models import Base, Experiment, KcinResult, DcinResult
+from .models import Base, Experiment, KcinResult, DcinResult, ResultFile
 
 
 # 默认数据库路径
@@ -570,3 +570,173 @@ class DatabaseManager:
         with cls._lock:
             if cls._instance is not None:
                 cls._instance = None
+
+    # ==================== 结果文件存储操作 ====================
+
+    def store_result_file(
+        self,
+        result_id: int,
+        result_type: str,
+        file_path: str,
+        file_content: bytes = None,
+    ) -> int:
+        """
+        存储结果文件到数据库
+
+        Args:
+            result_id: 结果ID
+            result_type: 结果类型 ("kcin" 或 "dcin")
+            file_path: 文件路径
+            file_content: 文件内容（如果为None则从file_path读取）
+
+        Returns:
+            存储的文件ID
+        """
+        import os
+        import mimetypes
+
+        # 如果没有提供内容，从文件读取
+        if file_content is None:
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"文件不存在: {file_path}")
+            with open(file_path, 'rb') as f:
+                file_content = f.read()
+
+        file_name = os.path.basename(file_path)
+        mime_type, _ = mimetypes.guess_type(file_path)
+        file_size = len(file_content)
+
+        with self.get_session() as session:
+            result_file = ResultFile(
+                result_id=result_id,
+                result_type=result_type,
+                file_name=file_name,
+                file_path=file_path,
+                mime_type=mime_type,
+                file_size=file_size,
+                file_content=file_content,
+            )
+            session.add(result_file)
+            session.flush()
+            return result_file.id
+
+    def store_result_files_batch(
+        self,
+        result_id: int,
+        result_type: str,
+        file_paths: list,
+    ) -> list:
+        """
+        批量存储结果文件
+
+        Args:
+            result_id: 结果ID
+            result_type: 结果类型
+            file_paths: 文件路径列表
+
+        Returns:
+            存储的文件ID列表
+        """
+        import os
+        import mimetypes
+
+        file_ids = []
+        with self.get_session() as session:
+            for file_path in file_paths:
+                if not os.path.exists(file_path):
+                    continue
+
+                try:
+                    with open(file_path, 'rb') as f:
+                        file_content = f.read()
+
+                    file_name = os.path.basename(file_path)
+                    mime_type, _ = mimetypes.guess_type(file_path)
+                    file_size = len(file_content)
+
+                    result_file = ResultFile(
+                        result_id=result_id,
+                        result_type=result_type,
+                        file_name=file_name,
+                        file_path=file_path,
+                        mime_type=mime_type,
+                        file_size=file_size,
+                        file_content=file_content,
+                    )
+                    session.add(result_file)
+                    session.flush()
+                    file_ids.append(result_file.id)
+                except Exception:
+                    continue
+
+        return file_ids
+
+    def get_result_file(self, file_id: int) -> Optional[dict]:
+        """
+        获取结果文件
+
+        Args:
+            file_id: 文件ID
+
+        Returns:
+            文件信息字典（包含内容）
+        """
+        with self.get_session() as session:
+            result_file = session.query(ResultFile).filter(ResultFile.id == file_id).first()
+            if result_file:
+                return {
+                    "id": result_file.id,
+                    "result_id": result_file.result_id,
+                    "result_type": result_file.result_type,
+                    "file_name": result_file.file_name,
+                    "file_path": result_file.file_path,
+                    "mime_type": result_file.mime_type,
+                    "file_size": result_file.file_size,
+                    "file_content": result_file.file_content,
+                }
+            return None
+
+    def get_result_files_list(self, result_id: int, result_type: str) -> list:
+        """
+        获取结果的所有文件列表（不包含内容）
+
+        Args:
+            result_id: 结果ID
+            result_type: 结果类型
+
+        Returns:
+            文件信息列表
+        """
+        with self.get_session() as session:
+            files = session.query(ResultFile).filter(
+                ResultFile.result_id == result_id,
+                ResultFile.result_type == result_type,
+            ).all()
+            return [
+                {
+                    "id": f.id,
+                    "file_name": f.file_name,
+                    "file_path": f.file_path,
+                    "mime_type": f.mime_type,
+                    "file_size": f.file_size,
+                }
+                for f in files
+            ]
+
+    def delete_result_files(self, result_id: int, result_type: str) -> int:
+        """
+        删除结果的所有文件
+
+        Args:
+            result_id: 结果ID
+            result_type: 结果类型
+
+        Returns:
+            删除的文件数量
+        """
+        with self.get_session() as session:
+            count = session.query(ResultFile).filter(
+                ResultFile.result_id == result_id,
+                ResultFile.result_type == result_type,
+            ).delete()
+            return count

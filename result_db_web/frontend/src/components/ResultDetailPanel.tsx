@@ -26,11 +26,12 @@ import { getResultHtmlUrl, openLocalFile } from '../api';
 interface Props {
   result: SimulationResult;
   experimentId: number;
+  hideConfigParams?: boolean;
 }
 
 const { Text } = Typography;
 
-export default function ResultDetailPanel({ result, experimentId }: Props) {
+export default function ResultDetailPanel({ result, experimentId, hideConfigParams = false }: Props) {
   const [openingFile, setOpeningFile] = useState<string | null>(null);
 
   // 分类参数
@@ -62,7 +63,7 @@ export default function ResultDetailPanel({ result, experimentId }: Props) {
   };
 
   const collapseItems = [
-    {
+    ...(!hideConfigParams ? [{
       key: 'config',
       label: `配置参数 (${Object.keys(configParams).length})`,
       children: (
@@ -74,7 +75,7 @@ export default function ResultDetailPanel({ result, experimentId }: Props) {
           ))}
         </Descriptions>
       ),
-    },
+    }] : []),
     {
       key: 'stats',
       label: `结果统计 (${Object.keys(resultStats).length})`,
@@ -144,7 +145,7 @@ export default function ResultDetailPanel({ result, experimentId }: Props) {
 
   return (
     <Collapse
-      defaultActiveKey={['config']}
+      defaultActiveKey={[]}
       items={collapseItems}
     />
   );

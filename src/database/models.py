@@ -16,6 +16,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     JSON,
+    LargeBinary,
 )
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -134,4 +135,24 @@ class DcinResult(Base):
     __table_args__ = (
         Index("idx_dcin_results_experiment", "experiment_id"),
         Index("idx_dcin_results_performance", "performance"),
+    )
+
+
+class ResultFile(Base):
+    """结果文件存储表 - 存储文件内容到数据库"""
+
+    __tablename__ = "result_files"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    result_id = Column(Integer, nullable=False)  # 对应的结果ID
+    result_type = Column(String(20), nullable=False)  # "kcin" 或 "dcin"
+    file_name = Column(String(255), nullable=False)  # 文件名
+    file_path = Column(String(512))  # 原始文件路径（用于参考）
+    mime_type = Column(String(100))  # MIME类型
+    file_size = Column(Integer)  # 文件大小（字节）
+    file_content = Column(LargeBinary)  # 文件二进制内容
+    created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        Index("idx_result_files_result", "result_id", "result_type"),
     )

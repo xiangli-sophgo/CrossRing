@@ -62,6 +62,7 @@ export default function ExperimentDetail() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [paramKeys, setParamKeys] = useState<string[]>([]);
   const [trafficStats, setTrafficStats] = useState<TrafficStat[]>([]);
+  const [activeTab, setActiveTab] = useState('results');
 
   const experimentId = parseInt(id || '0', 10);
 
@@ -169,7 +170,9 @@ export default function ExperimentDetail() {
                     : '-'}
                 </Descriptions.Item>
                 <Descriptions.Item label="数据流文件">
-                  {currentExperiment.traffic_files?.join(', ') || '-'}
+                  {trafficStats.length > 0
+                    ? trafficStats.map(s => s.traffic_name).join(', ')
+                    : '-'}
                 </Descriptions.Item>
                 <Descriptions.Item label="描述" span={2}>
                   {currentExperiment.description || '-'}
@@ -235,18 +238,7 @@ export default function ExperimentDetail() {
       children: (
         <Row gutter={16}>
           <Col span={24}>
-            <Card
-              title={`结果列表 (共 ${resultsData?.total || 0} 条)`}
-              extra={
-                <Button
-                  icon={<ReloadOutlined />}
-                  onClick={loadResults}
-                  loading={resultsLoading}
-                >
-                  刷新
-                </Button>
-              }
-            >
+            <Card title={`结果列表 (共 ${resultsData?.total || 0} 条)`}>
               <ResultTable
                 data={resultsData}
                 loading={resultsLoading}
@@ -287,7 +279,7 @@ export default function ExperimentDetail() {
           </Button>
         </div>
 
-        <Tabs items={tabItems} />
+        <Tabs items={tabItems} activeKey={activeTab} onChange={setActiveTab} />
       </Card>
     </div>
   );
