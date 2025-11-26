@@ -184,4 +184,46 @@ export const getParameterHeatmap = async (
   return response.data;
 };
 
+// ==================== 导出 ====================
+
+export interface ExportInfo {
+  experiments_count: number;
+  results_count: number;
+  database_size: number;
+  is_selective: boolean;
+}
+
+export const getExportInfo = async (
+  experimentIds?: number[]
+): Promise<ExportInfo> => {
+  const params: Record<string, string> = {};
+  if (experimentIds && experimentIds.length > 0) {
+    params.experiment_ids = experimentIds.join(',');
+  }
+  const response = await api.get('/export/info', { params });
+  return response.data;
+};
+
+export const downloadPackage = (
+  experimentIds?: number[],
+  includeFrontend: boolean = true,
+  includeBackend: boolean = true
+): string => {
+  const params = new URLSearchParams();
+  if (experimentIds && experimentIds.length > 0) {
+    params.append('experiment_ids', experimentIds.join(','));
+  }
+  params.append('include_frontend', String(includeFrontend));
+  params.append('include_backend', String(includeBackend));
+  return `/api/export/download?${params.toString()}`;
+};
+
+export const buildExecutablePackage = (experimentIds?: number[]): string => {
+  const params = new URLSearchParams();
+  if (experimentIds && experimentIds.length > 0) {
+    params.append('experiment_ids', experimentIds.join(','));
+  }
+  return `/api/export/build?${params.toString()}`;
+};
+
 export default api;

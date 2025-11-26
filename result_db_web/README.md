@@ -98,7 +98,7 @@ result_db_web/
 
 ## 数据库
 
-使用SQLite存储，位置: `../Result/Database/optimization.db`
+使用SQLite存储，位置: `../Result/Database/results.db`
 
 ## 与优化脚本集成
 

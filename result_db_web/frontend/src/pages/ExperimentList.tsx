@@ -26,11 +26,13 @@ import {
   ReloadOutlined,
   DeleteOutlined,
   BarChartOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useExperimentStore } from '../stores/experimentStore';
 import { getExperiments, importFromCSV, deleteExperiment } from '../api';
 import type { Experiment, ExperimentType } from '../types';
+import ExportModal from '../components/ExportModal';
 
 const { Title } = Typography;
 
@@ -55,6 +57,7 @@ export default function ExperimentList() {
   const navigate = useNavigate();
   const { experiments, setExperiments, loading, setLoading } = useExperimentStore();
   const [importModalVisible, setImportModalVisible] = useState(false);
+  const [exportModalVisible, setExportModalVisible] = useState(false);
   const [importForm] = Form.useForm();
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [typeFilter, setTypeFilter] = useState<ExperimentType | 'all'>('all');
@@ -228,6 +231,12 @@ export default function ExperimentList() {
             >
               导入CSV
             </Button>
+            <Button
+              icon={<DownloadOutlined />}
+              onClick={() => setExportModalVisible(true)}
+            >
+              导出打包
+            </Button>
             <Button icon={<ReloadOutlined />} onClick={loadExperiments}>
               刷新
             </Button>
@@ -301,6 +310,13 @@ export default function ExperimentList() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* 导出打包弹窗 */}
+      <ExportModal
+        open={exportModalVisible}
+        onClose={() => setExportModalVisible(false)}
+        experiments={experiments}
+      />
     </div>
   );
 }
