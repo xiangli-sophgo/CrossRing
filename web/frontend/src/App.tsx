@@ -1,14 +1,14 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { Layout, Typography, Card, Space, message, Select, Table, Tag, Button } from 'antd'
+import { useState, useEffect, useRef } from 'react'
+import { Layout, Typography, Card, Space, message, Select, Table, Tag, Button, InputNumber } from 'antd'
 import { AppstoreOutlined, SaveOutlined } from '@ant-design/icons'
 import TopologyGraph from './components/topology/TopologyGraph'
 import MultiDieTopologyGraph from './components/topology/MultiDieTopologyGraph'
 import NodeInfoPanel from './components/topology/NodeInfoPanel'
 import IPMountPanel from './components/traffic/IPMountPanel'
 import TrafficConfigPanel from './components/traffic/TrafficConfigPanel'
-import { getAvailableTopologies, getTopology, getNodeInfo } from './api/topology'
+import { generateTopology, getNodeInfoLocal } from './utils/topology'
 import { getMounts } from './api/ipMount'
-import type { TopologyData, TopologyInfo } from './types/topology'
+import type { TopologyData } from './types/topology'
 import type { IPMount } from './types/ipMount'
 import type { BandwidthComputeResponse, D2DLayoutInfo, FlowInfo } from './types/staticBandwidth'
 
@@ -27,8 +27,9 @@ interface NodeInfo {
 }
 
 function App() {
-  const [topologies, setTopologies] = useState<TopologyInfo[]>([])
-  const [selectedTopo, setSelectedTopo] = useState<string>('5x4')
+  const [rows, setRows] = useState<number>(5)
+  const [cols, setCols] = useState<number>(4)
+  const selectedTopo = `${rows}x${cols}`
   const [topoData, setTopoData] = useState<TopologyData | null>(null)
   const [topoLoading, setTopoLoading] = useState(false)
   const [nodeInfo, setNodeInfo] = useState<NodeInfo | null>(null)
@@ -47,30 +48,12 @@ function App() {
   const topoGraphRef = useRef<{ saveLayout: () => void }>(null)
   const multiDieTopoGraphRef = useRef<{ saveLayout: () => void }>(null)
 
-  // 加载可用拓扑类型
-  const loadTopologies = async () => {
-    try {
-      const data = await getAvailableTopologies()
-      setTopologies(data.topologies)
-    } catch (error) {
-      message.error('加载拓扑类型失败')
-      console.error(error)
-    }
-  }
-
   // 加载指定拓扑数据
-  const loadTopology = async (topoType: string) => {
+  const loadTopology = (topoType: string) => {
     setTopoLoading(true)
-    try {
-      const data = await getTopology(topoType)
-      setTopoData(data)
-      message.success(`已加载 ${topoType} 拓扑`)
-    } catch (error) {
-      message.error('加载拓扑数据失败')
-      console.error(error)
-    } finally {
-      setTopoLoading(false)
-    }
+    const data = generateTopology(topoType)
+    setTopoData(data)
+    setTopoLoading(false)
   }
 
   // 加载IP挂载
@@ -85,22 +68,9 @@ function App() {
   }
 
   // 处理节点点击
-  const handleNodeClick = async (nodeId: number, dieId?: number) => {
-    setNodeInfoLoading(true)
-    try {
-      const info = await getNodeInfo(selectedTopo, nodeId)
-      // D2D模式下添加die_id
-      if (dieId !== undefined) {
-        info.die_id = dieId
-      }
-      setNodeInfo(info)
-      console.log('节点信息:', info)
-    } catch (error) {
-      message.error('获取节点信息失败')
-      console.error('获取节点信息失败:', error)
-    } finally {
-      setNodeInfoLoading(false)
-    }
+  const handleNodeClick = (nodeId: number, dieId?: number) => {
+    const info = getNodeInfoLocal(selectedTopo, nodeId, dieId)
+    setNodeInfo(info)
   }
 
   // 处理带宽计算完成
@@ -141,18 +111,13 @@ function App() {
     }
   }
 
-  // 初始化
+  // 当行列变化时自动加载拓扑和IP挂载
   useEffect(() => {
-    loadTopologies()
-  }, [])
-
-  // 自动加载默认拓扑和IP挂载
-  useEffect(() => {
-    if (selectedTopo) {
+    if (rows > 0 && cols > 0) {
       loadTopology(selectedTopo)
       loadMounts()
     }
-  }, [selectedTopo])
+  }, [rows, cols])
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -177,18 +142,22 @@ function App() {
           </Button>
         </Space>
         <Space>
-          <Text style={{ color: '#8c8c8c' }}>选择拓扑:</Text>
-          <Select
-            value={selectedTopo}
-            onChange={setSelectedTopo}
-            style={{ width: 120 }}
-          >
-            {topologies.map(t => (
-              <Option key={t.type} value={t.type}>
-                {t.type}
-              </Option>
-            ))}
-          </Select>
+          <Text style={{ color: '#8c8c8c' }}>行:</Text>
+          <InputNumber
+            min={1}
+            max={20}
+            value={rows}
+            onChange={(val) => val && setRows(val)}
+            style={{ width: 70 }}
+          />
+          <Text style={{ color: '#8c8c8c' }}>列:</Text>
+          <InputNumber
+            min={1}
+            max={20}
+            value={cols}
+            onChange={(val) => val && setCols(val)}
+            style={{ width: 70 }}
+          />
         </Space>
       </Header>
 

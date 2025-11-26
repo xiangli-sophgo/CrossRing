@@ -13,7 +13,7 @@ export interface TopologyEdge {
   source: number
   target: number
   direction: 'horizontal' | 'vertical'
-  type: 'row_ring' | 'col_ring'
+  type: 'row_link' | 'col_link'
 }
 
 export interface TopologyData {
@@ -24,8 +24,8 @@ export interface TopologyData {
   nodes: TopologyNode[]
   edges: TopologyEdge[]
   metadata: {
-    row_rings: number
-    col_rings: number
+    row_links: number
+    col_links: number
     total_links: number
   }
 }

@@ -19,7 +19,7 @@ sys.path.insert(0, str(CROSSRING_ROOT))
 ensure_dirs()
 
 # 导入API路由
-from app.api import topology, ip_mount, traffic_config, traffic_generate, static_bandwidth
+from app.api import ip_mount, traffic_config, traffic_generate, static_bandwidth
 
 app = FastAPI(
     title="CrossRing Web API",
@@ -81,7 +81,6 @@ async def hello_world():
 
 
 # 注册路由
-app.include_router(topology.router)
 app.include_router(ip_mount.router)
 app.include_router(traffic_config.router)
 app.include_router(traffic_generate.router)
