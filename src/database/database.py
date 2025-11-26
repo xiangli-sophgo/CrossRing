@@ -215,6 +215,13 @@ class DatabaseManager:
 
     def _result_to_dict(self, result) -> dict:
         """将结果对象转为字典（在session内调用）"""
+        import json
+
+        # 解析 result_files JSON 字符串
+        result_files = result.result_files
+        if isinstance(result_files, str):
+            result_files = json.loads(result_files)
+
         return {
             "id": result.id,
             "experiment_id": result.experiment_id,
@@ -222,6 +229,8 @@ class DatabaseManager:
             "performance": result.performance,
             "config_params": result.config_params,
             "result_details": result.result_details,
+            "result_html": result.result_html,
+            "result_files": result_files,
             "error": result.error,
         }
 
@@ -239,6 +248,8 @@ class DatabaseManager:
         config_params: dict,
         performance: float,
         result_details: Optional[dict] = None,
+        result_html: Optional[str] = None,
+        result_files: Optional[list] = None,
         error: Optional[str] = None,
     ) -> int:
         """
@@ -249,11 +260,15 @@ class DatabaseManager:
             config_params: 配置参数字典
             performance: 主要性能指标
             result_details: 详细结果数据
+            result_html: HTML报告内容
+            result_files: 结果文件路径列表
             error: 错误信息
 
         Returns:
             创建的结果ID
         """
+        import json
+
         experiment_type = self._get_experiment_type(experiment_id)
         ResultModel = self._get_result_model(experiment_type)
 
@@ -263,6 +278,8 @@ class DatabaseManager:
                 config_params=config_params,
                 performance=performance,
                 result_details=result_details,
+                result_html=result_html,
+                result_files=json.dumps(result_files) if result_files else None,
                 error=error,
             )
             session.add(result)

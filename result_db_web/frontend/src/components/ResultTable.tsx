@@ -7,6 +7,7 @@ import { DownloadOutlined } from '@ant-design/icons';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import type { SorterResult } from 'antd/es/table/interface';
 import type { ResultsPageResponse, SimulationResult } from '../types';
+import ResultDetailPanel from './ResultDetailPanel';
 
 interface Props {
   data: ResultsPageResponse | null;
@@ -14,6 +15,7 @@ interface Props {
   page: number;
   pageSize: number;
   paramKeys: string[];
+  experimentId: number;
   onPageChange: (page: number, pageSize: number) => void;
   onSortChange: (field: string, order: 'asc' | 'desc') => void;
 }
@@ -24,6 +26,7 @@ export default function ResultTable({
   page,
   pageSize,
   paramKeys,
+  experimentId,
   onPageChange,
   onSortChange,
 }: Props) {
@@ -95,6 +98,11 @@ export default function ResultTable({
     message.success('导出成功');
   };
 
+  // 展开行渲染
+  const expandedRowRender = (record: SimulationResult) => (
+    <ResultDetailPanel result={record} experimentId={experimentId} />
+  );
+
   return (
     <div>
       <div style={{ marginBottom: 16, textAlign: 'right' }}>
@@ -109,6 +117,10 @@ export default function ResultTable({
         loading={loading}
         scroll={{ x: 'max-content', y: 500 }}
         size="small"
+        expandable={{
+          expandedRowRender,
+          rowExpandable: () => true,
+        }}
         pagination={{
           current: page,
           pageSize: pageSize,

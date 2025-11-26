@@ -87,6 +87,10 @@ class KcinResult(Base):
     # 详细结果 - JSON格式
     result_details = Column(JSON)  # 带宽、延迟等统计数据
 
+    # 结果文件
+    result_html = Column(Text)  # HTML报告内容
+    result_files = Column(Text)  # 结果文件路径列表 (JSON数组)
+
     # 错误信息
     error = Column(Text)
 
@@ -116,6 +120,10 @@ class DcinResult(Base):
 
     # 详细结果 - JSON格式
     result_details = Column(JSON)  # 带宽、延迟等统计数据
+
+    # 结果文件
+    result_html = Column(Text)  # HTML报告内容
+    result_files = Column(Text)  # 结果文件路径列表 (JSON数组)
 
     # 错误信息
     error = Column(Text)

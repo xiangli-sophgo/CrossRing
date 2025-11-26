@@ -153,6 +153,8 @@ class ResultManager:
         config_params: Dict[str, Any],
         performance: float,
         result_details: Optional[Dict[str, Any]] = None,
+        result_html: Optional[str] = None,
+        result_files: Optional[List[str]] = None,
         error: Optional[str] = None,
     ) -> int:
         """
@@ -163,6 +165,8 @@ class ResultManager:
             config_params: 配置参数字典
             performance: 主要性能指标
             result_details: 详细结果数据
+            result_html: HTML报告内容
+            result_files: 结果文件路径列表
             error: 错误信息
 
         Returns:
@@ -174,6 +178,8 @@ class ResultManager:
                 config_params=config_params,
                 performance=performance,
                 result_details=result_details,
+                result_html=result_html,
+                result_files=result_files,
                 error=error,
             )
 
@@ -355,6 +361,7 @@ class ResultManager:
         PERFORMANCE_FIELDS = [
             "performance",
             "optimization_performance",
+            "平均带宽_DDR_混合",
             "带宽_DDR_混合",
             "mixed_avg_weighted_bw",
             "avg_ddr_bw",

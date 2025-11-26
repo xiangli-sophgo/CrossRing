@@ -747,12 +747,33 @@ class StatsMixin:
         # 提取性能指标（带宽）
         performance = results.get("平均带宽_DDR_混合", 0)
 
+        # 读取HTML报告内容
+        result_html = None
+        if self.result_save_path:
+            html_path = f"{self.result_save_path}result_analysis.html"
+            if os.path.exists(html_path):
+                with open(html_path, "r", encoding="utf-8") as f:
+                    result_html = f.read()
+
+        # 收集结果文件路径
+        result_files = []
+        if self.result_save_path:
+            import glob
+            # 收集所有CSV文件
+            csv_files = glob.glob(f"{self.result_save_path}*.csv")
+            result_files.extend(csv_files)
+            # 收集JSON文件（如tracker_data.json）
+            json_files = glob.glob(f"{self.result_save_path}*.json")
+            result_files.extend(json_files)
+
         # 保存结果
         db.add_result(
             experiment_id=experiment_id,
             config_params=results,
             performance=performance,
             result_details=results,
+            result_html=result_html,
+            result_files=result_files if result_files else None,
         )
 
         if self.verbose:

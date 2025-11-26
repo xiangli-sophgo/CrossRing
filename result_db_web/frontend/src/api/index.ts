@@ -60,7 +60,7 @@ export const deleteExperiment = async (id: number): Promise<void> => {
 export const importFromCSV = async (
   file: File,
   experimentName: string,
-  experimentType: ExperimentType = 'noc',
+  experimentType: ExperimentType = 'kcin',
   description?: string,
   topoType?: string
 ): Promise<{ experiment_id: number; imported_count: number; errors: string[] }> => {
@@ -119,6 +119,21 @@ export const getParamKeys = async (
   experimentId: number
 ): Promise<{ param_keys: string[]; count: number }> => {
   const response = await api.get(`/experiments/${experimentId}/param-keys`);
+  return response.data;
+};
+
+export interface TrafficStat {
+  traffic_name: string;
+  count: number;
+  avg_performance: number;
+  max_performance: number;
+  min_performance: number;
+}
+
+export const getTrafficStats = async (
+  experimentId: number
+): Promise<{ experiment_id: number; total_results: number; traffic_stats: TrafficStat[] }> => {
+  const response = await api.get(`/experiments/${experimentId}/traffic-stats`);
   return response.data;
 };
 
@@ -224,6 +239,17 @@ export const buildExecutablePackage = (experimentIds?: number[]): string => {
     params.append('experiment_ids', experimentIds.join(','));
   }
   return `/api/export/build?${params.toString()}`;
+};
+
+// ==================== 结果文件操作 ====================
+
+export const getResultHtmlUrl = (resultId: number, experimentId: number): string => {
+  return `/api/results/${resultId}/html?experiment_id=${experimentId}`;
+};
+
+export const openLocalFile = async (path: string): Promise<{ success: boolean; message: string }> => {
+  const response = await api.post('/open-file', { path });
+  return response.data;
 };
 
 export default api;

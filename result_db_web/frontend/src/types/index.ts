@@ -34,6 +34,8 @@ export interface SimulationResult {
   performance: number;
   config_params: Record<string, number | string>;
   result_details: Record<string, unknown>;
+  result_html?: string;
+  result_files?: string[];
   error?: string;
 }
 

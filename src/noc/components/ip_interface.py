@@ -635,6 +635,8 @@ class IPInterface:
 
         req = next((req for req in self.rn_tracker[rsp.req_type] if req.packet_id == rsp.packet_id), None)
 
+        if not req:
+           return 
         req.sync_latency_record(rsp)
 
         if rsp.req_type == "read":

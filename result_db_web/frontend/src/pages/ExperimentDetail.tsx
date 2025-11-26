@@ -16,13 +16,13 @@ import {
   Typography,
   Row,
   Col,
-  Statistic,
 } from 'antd';
 import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useExperimentStore } from '../stores/experimentStore';
-import { getExperiment, getStatistics, getResults, getParamKeys } from '../api';
+import { getExperiment, getStatistics, getResults, getParamKeys, getTrafficStats, type TrafficStat } from '../api';
 import ResultTable from '../components/ResultTable';
 import type { ResultsPageResponse, ExperimentType } from '../types';
+import { Table } from 'antd';
 
 const experimentTypeColors: Record<ExperimentType, string> = {
   kcin: 'blue',
@@ -49,7 +49,6 @@ export default function ExperimentDetail() {
   const {
     currentExperiment,
     setCurrentExperiment,
-    currentStatistics,
     setCurrentStatistics,
     filters,
   } = useExperimentStore();
@@ -62,6 +61,7 @@ export default function ExperimentDetail() {
   const [sortBy, setSortBy] = useState('performance');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [paramKeys, setParamKeys] = useState<string[]>([]);
+  const [trafficStats, setTrafficStats] = useState<TrafficStat[]>([]);
 
   const experimentId = parseInt(id || '0', 10);
 
@@ -70,14 +70,16 @@ export default function ExperimentDetail() {
     if (!experimentId) return;
     setLoading(true);
     try {
-      const [exp, stats, keysData] = await Promise.all([
+      const [exp, stats, keysData, trafficData] = await Promise.all([
         getExperiment(experimentId),
         getStatistics(experimentId),
         getParamKeys(experimentId),
+        getTrafficStats(experimentId),
       ]);
       setCurrentExperiment(exp);
       setCurrentStatistics(stats);
       setParamKeys(keysData.param_keys);
+      setTrafficStats(trafficData.traffic_stats);
     } catch (error) {
       message.error('加载实验详情失败');
     } finally {
@@ -175,41 +177,52 @@ export default function ExperimentDetail() {
               </Descriptions>
             </Card>
           </Col>
-          <Col span={6}>
-            <Card>
-              <Statistic
-                title="结果数"
-                value={currentExperiment.completed_combinations || 0}
-                suffix="个"
-              />
-            </Card>
-          </Col>
-          <Col span={6}>
-            <Card>
-              <Statistic
-                title="最佳性能"
-                value={currentExperiment.best_performance || 0}
-                precision={2}
-                suffix="GB/s"
-              />
-            </Card>
-          </Col>
-          <Col span={6}>
-            <Card>
-              <Statistic
-                title="平均性能"
-                value={currentStatistics?.performance_distribution?.mean || 0}
-                precision={2}
-                suffix="GB/s"
-              />
-            </Card>
-          </Col>
-          <Col span={6}>
-            <Card>
-              <Statistic
-                title="性能范围"
-                value={`${(currentStatistics?.performance_distribution?.min || 0).toFixed(1)} - ${(currentStatistics?.performance_distribution?.max || 0).toFixed(1)}`}
-                suffix="GB/s"
+          <Col span={24}>
+            <Card title="数据流统计">
+              <Table
+                dataSource={trafficStats}
+                rowKey="traffic_name"
+                pagination={false}
+                size="small"
+                columns={[
+                  {
+                    title: '数据流文件',
+                    dataIndex: 'traffic_name',
+                    key: 'traffic_name',
+                    align: 'center' as const,
+                  },
+                  {
+                    title: '结果数',
+                    dataIndex: 'count',
+                    key: 'count',
+                    width: 200,
+                    align: 'center' as const,
+                  },
+                  {
+                    title: '平均性能 (GB/s)',
+                    dataIndex: 'avg_performance',
+                    key: 'avg_performance',
+                    width: 250,
+                    align: 'center' as const,
+                    render: (val: number) => val.toFixed(2),
+                  },
+                  {
+                    title: '最大性能 (GB/s)',
+                    dataIndex: 'max_performance',
+                    key: 'max_performance',
+                    width: 250,
+                    align: 'center' as const,
+                    render: (val: number) => val.toFixed(2),
+                  },
+                  {
+                    title: '最小性能 (GB/s)',
+                    dataIndex: 'min_performance',
+                    key: 'min_performance',
+                    width: 250,
+                    align: 'center' as const,
+                    render: (val: number) => val.toFixed(2),
+                  },
+                ]}
               />
             </Card>
           </Col>
@@ -240,6 +253,7 @@ export default function ExperimentDetail() {
                 page={page}
                 pageSize={pageSize}
                 paramKeys={paramKeys}
+                experimentId={experimentId}
                 onPageChange={(p, ps) => {
                   setPage(p);
                   setPageSize(ps);
