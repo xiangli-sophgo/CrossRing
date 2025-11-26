@@ -1,7 +1,7 @@
 """
 仿真结果数据库 - SQLAlchemy ORM模型定义
 
-支持 NoC 和 D2D 两种仿真类型，使用 JSON 存储配置参数
+支持 KCIN 和 DCIN 两种仿真类型，使用 JSON 存储配置参数
 """
 
 from datetime import datetime
@@ -29,7 +29,7 @@ class Experiment(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False, unique=True)  # 用户输入的实验名称
-    experiment_type = Column(String(20), default="noc")  # "noc" 或 "d2d"
+    experiment_type = Column(String(20), default="kcin")  # "kcin" 或 "dcin"
     created_at = Column(DateTime, default=datetime.now)
     description = Column(Text)  # 实验描述/调试信息
 
@@ -52,14 +52,14 @@ class Experiment(Base):
     git_commit = Column(String(50))  # Git commit hash (可选)
     notes = Column(Text)  # 额外备注
 
-    # 关系 - NoC 结果
-    noc_results = relationship(
-        "NocResult", back_populates="experiment", cascade="all, delete-orphan"
+    # 关系 - KCIN 结果
+    kcin_results = relationship(
+        "KcinResult", back_populates="experiment", cascade="all, delete-orphan"
     )
 
-    # 关系 - D2D 结果
-    d2d_results = relationship(
-        "D2DResult", back_populates="experiment", cascade="all, delete-orphan"
+    # 关系 - DCIN 结果
+    dcin_results = relationship(
+        "DcinResult", back_populates="experiment", cascade="all, delete-orphan"
     )
 
     __table_args__ = (
@@ -69,10 +69,10 @@ class Experiment(Base):
     )
 
 
-class NocResult(Base):
-    """NoC 仿真结果表"""
+class KcinResult(Base):
+    """KCIN 仿真结果表"""
 
-    __tablename__ = "noc_results"
+    __tablename__ = "kcin_results"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     experiment_id = Column(Integer, ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False)
@@ -91,24 +91,24 @@ class NocResult(Base):
     error = Column(Text)
 
     # 关系
-    experiment = relationship("Experiment", back_populates="noc_results")
+    experiment = relationship("Experiment", back_populates="kcin_results")
 
     __table_args__ = (
-        Index("idx_noc_results_experiment", "experiment_id"),
-        Index("idx_noc_results_performance", "performance"),
+        Index("idx_kcin_results_experiment", "experiment_id"),
+        Index("idx_kcin_results_performance", "performance"),
     )
 
 
-class D2DResult(Base):
-    """D2D 仿真结果表"""
+class DcinResult(Base):
+    """DCIN 仿真结果表"""
 
-    __tablename__ = "d2d_results"
+    __tablename__ = "dcin_results"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     experiment_id = Column(Integer, ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(DateTime, default=datetime.now)
 
-    # 配置参数 - JSON格式（D2D延迟/Tracker/资源等所有配置）
+    # 配置参数 - JSON格式（DCIN延迟/Tracker/资源等所有配置）
     config_params = Column(JSON)
 
     # 核心结果指标
@@ -121,13 +121,9 @@ class D2DResult(Base):
     error = Column(Text)
 
     # 关系
-    experiment = relationship("Experiment", back_populates="d2d_results")
+    experiment = relationship("Experiment", back_populates="dcin_results")
 
     __table_args__ = (
-        Index("idx_d2d_results_experiment", "experiment_id"),
-        Index("idx_d2d_results_performance", "performance"),
+        Index("idx_dcin_results_experiment", "experiment_id"),
+        Index("idx_dcin_results_performance", "performance"),
     )
-
-
-# 为了向后兼容，保留旧的别名
-OptimizationResult = NocResult

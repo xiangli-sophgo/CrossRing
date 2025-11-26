@@ -153,7 +153,7 @@ export default function ExportModal({ open, onClose, experiments }: ExportModalP
               >
                 <Space>
                   <Text>{exp.name}</Text>
-                  <Tag color={exp.experiment_type === 'noc' ? 'blue' : 'green'}>
+                  <Tag color={exp.experiment_type === 'kcin' ? 'blue' : 'green'}>
                     {exp.experiment_type.toUpperCase()}
                   </Tag>
                   {exp.topo_type && <Tag>{exp.topo_type}</Tag>}

@@ -21,18 +21,17 @@ import {
 import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useExperimentStore } from '../stores/experimentStore';
 import { getExperiment, getStatistics, getResults, getParamKeys } from '../api';
-import PerformanceChart from '../components/PerformanceChart';
 import ResultTable from '../components/ResultTable';
 import type { ResultsPageResponse, ExperimentType } from '../types';
 
 const experimentTypeColors: Record<ExperimentType, string> = {
-  noc: 'blue',
-  d2d: 'green',
+  kcin: 'blue',
+  dcin: 'green',
 };
 
 const experimentTypeText: Record<ExperimentType, string> = {
-  noc: 'NoC',
-  d2d: 'D2D',
+  kcin: 'KCIN',
+  dcin: 'DCIN',
 };
 
 const { Title } = Typography;
@@ -167,11 +166,8 @@ export default function ExperimentDetail() {
                     ? new Date(currentExperiment.created_at).toLocaleString('zh-CN')
                     : '-'}
                 </Descriptions.Item>
-                <Descriptions.Item label="Traffic文件">
+                <Descriptions.Item label="数据流文件">
                   {currentExperiment.traffic_files?.join(', ') || '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label="仿真时间">
-                  {currentExperiment.simulation_time || '-'}
                 </Descriptions.Item>
                 <Descriptions.Item label="描述" span={2}>
                   {currentExperiment.description || '-'}
@@ -182,8 +178,8 @@ export default function ExperimentDetail() {
           <Col span={6}>
             <Card>
               <Statistic
-                title="总组合数"
-                value={currentStatistics?.result_count || 0}
+                title="结果数"
+                value={currentExperiment.completed_combinations || 0}
                 suffix="个"
               />
             </Card>
@@ -214,14 +210,6 @@ export default function ExperimentDetail() {
                 title="性能范围"
                 value={`${(currentStatistics?.performance_distribution?.min || 0).toFixed(1)} - ${(currentStatistics?.performance_distribution?.max || 0).toFixed(1)}`}
                 suffix="GB/s"
-              />
-            </Card>
-          </Col>
-          <Col span={24}>
-            <Card title="性能分布">
-              <PerformanceChart
-                experimentId={experimentId}
-                distribution={currentStatistics?.performance_distribution}
               />
             </Card>
           </Col>

@@ -3,7 +3,7 @@
  */
 
 // 实验类型
-export type ExperimentType = 'noc' | 'd2d';
+export type ExperimentType = 'kcin' | 'dcin';
 
 export interface Experiment {
   id: number;

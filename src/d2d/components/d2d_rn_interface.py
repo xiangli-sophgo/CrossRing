@@ -445,8 +445,9 @@ class D2D_RN_Interface(IPInterface):
 
             # 获取tracker中的请求（已被替换为local_write_req）
             req = next((r for r in self.rn_tracker["write"] if r.packet_id == packet_id), None)
+            in_cache = packet_id in self.cross_die_write_data_cache
 
-            if req and packet_id in self.cross_die_write_data_cache:
+            if req and in_cache:
                 # 根据跨Die写数据重新创建Die内写数据（参考create_write_packet）
                 cross_die_data_flits = self.cross_die_write_data_cache[packet_id]
                 local_data_flits = []
@@ -521,6 +522,7 @@ class D2D_RN_Interface(IPInterface):
 
         # 设置基本属性
         write_complete_rsp.packet_id = packet_id
+        write_complete_rsp.flit_type = "rsp"  # 必须设置为rsp以正确分配order_id
         write_complete_rsp.rsp_type = "write_complete"
         write_complete_rsp.req_type = "write"  # 设置req_type为write，让D2D_SN能正确识别
         write_complete_rsp.source_type = tracker_req.d2d_target_type  # 使用目标类型（DDR）作为响应源

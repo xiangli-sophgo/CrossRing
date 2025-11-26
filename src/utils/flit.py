@@ -151,26 +151,28 @@ class Flit:
     _global_order_id_allocator = {}  # {(src, dest): {"REQ": next_id, "RSP": next_id, "DATA": next_id}}
 
     @classmethod
-    def get_next_order_id(cls, src_node, src_type, dest_node, dest_type, packet_category, granularity):
+    def get_next_order_id(cls, src_node, src_type, dest_node, dest_type, packet_category, granularity, die_id=None):
         """
         获取下一个顺序ID
 
         Args:
-            src_node: 源节点ID
+            src_node: 源节点ID（flit当前Die内的source）
             src_type: 源IP类型（如"gdma_0"）
-            dest_node: 目标节点ID
+            dest_node: 目标节点ID（flit当前Die内的destination）
             dest_type: 目标IP类型（如"ddr_1"）
             packet_category: 包类型（"REQ"/"RSP"/"DATA"）
             granularity: 保序粒度（0=IP层级, 1=节点层级）
+            die_id: Die ID，用于区分不同Die的保序（可选，None表示单Die模式）
 
         Returns:
             int: 分配的顺序ID
         """
-        # 根据粒度构造key
+        # 根据粒度构造key - 每个Die独立保序，使用flit的实际source/destination
+        # die_id加入key确保不同Die之间保序独立
         if granularity == 0:  # IP层级
-            key = (src_node, src_type, dest_node, dest_type)
+            key = (die_id, src_node, src_type, dest_node, dest_type)
         else:  # 节点层级（granularity == 1）
-            key = (src_node, dest_node)
+            key = (die_id, src_node, dest_node)
 
         if key not in cls._global_order_id_allocator:
             cls._global_order_id_allocator[key] = {"REQ": 1, "RSP": 1, "DATA": 1, "FLIT": 1}

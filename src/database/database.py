@@ -1,7 +1,7 @@
 """
 仿真结果数据库 - 数据库连接和CRUD操作
 
-支持 NoC 和 D2D 两种仿真类型
+支持 KCIN 和 DCIN 两种仿真类型
 """
 
 import threading
@@ -12,7 +12,7 @@ from typing import Optional, Union
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker, Session
 
-from .models import Base, Experiment, NocResult, D2DResult
+from .models import Base, Experiment, KcinResult, DcinResult
 
 
 # 默认数据库路径
@@ -107,7 +107,7 @@ class DatabaseManager:
         创建新实验
 
         Args:
-            **kwargs: Experiment模型的字段，必须包含 experiment_type ("noc" 或 "d2d")
+            **kwargs: Experiment模型的字段，必须包含 experiment_type ("kcin" 或 "dcin")
 
         Returns:
             创建的实验ID
@@ -121,6 +121,17 @@ class DatabaseManager:
 
     def _experiment_to_dict(self, exp: Experiment) -> dict:
         """将实验对象转为字典（在session内调用）"""
+        import json
+
+        # 解析 JSON 字符串字段
+        traffic_files = exp.traffic_files
+        if isinstance(traffic_files, str):
+            traffic_files = json.loads(traffic_files)
+
+        traffic_weights = exp.traffic_weights
+        if isinstance(traffic_weights, str):
+            traffic_weights = json.loads(traffic_weights)
+
         return {
             "id": exp.id,
             "name": exp.name,
@@ -129,8 +140,8 @@ class DatabaseManager:
             "description": exp.description,
             "config_path": exp.config_path,
             "topo_type": exp.topo_type,
-            "traffic_files": exp.traffic_files,
-            "traffic_weights": exp.traffic_weights,
+            "traffic_files": traffic_files,
+            "traffic_weights": traffic_weights,
             "simulation_time": exp.simulation_time,
             "n_repeats": exp.n_repeats,
             "n_jobs": exp.n_jobs,
@@ -168,7 +179,7 @@ class DatabaseManager:
 
         Args:
             status: 筛选状态
-            experiment_type: 筛选类型 ("noc" 或 "d2d")
+            experiment_type: 筛选类型 ("kcin" 或 "dcin")
         """
         with self.get_session() as session:
             query = session.query(Experiment)
@@ -198,9 +209,9 @@ class DatabaseManager:
 
     def _get_result_model(self, experiment_type: str):
         """根据实验类型获取对应的结果模型"""
-        if experiment_type == "d2d":
-            return D2DResult
-        return NocResult
+        if experiment_type == "dcin":
+            return DcinResult
+        return KcinResult
 
     def _result_to_dict(self, result) -> dict:
         """将结果对象转为字典（在session内调用）"""
@@ -229,7 +240,7 @@ class DatabaseManager:
         performance: float,
         result_details: Optional[dict] = None,
         error: Optional[str] = None,
-    ) -> Union[NocResult, D2DResult]:
+    ) -> int:
         """
         添加仿真结果
 
@@ -241,7 +252,7 @@ class DatabaseManager:
             error: 错误信息
 
         Returns:
-            创建的结果对象
+            创建的结果ID
         """
         experiment_type = self._get_experiment_type(experiment_id)
         ResultModel = self._get_result_model(experiment_type)
@@ -256,22 +267,19 @@ class DatabaseManager:
             )
             session.add(result)
             session.flush()
-            result_id = result.id
+            return result.id
 
-        with self.get_session() as session:
-            return session.query(ResultModel).filter(ResultModel.id == result_id).first()
-
-    def add_noc_result(
+    def add_kcin_result(
         self,
         experiment_id: int,
         config_params: dict,
         performance: float,
         result_details: Optional[dict] = None,
         error: Optional[str] = None,
-    ) -> NocResult:
-        """添加 NoC 仿真结果"""
+    ) -> KcinResult:
+        """添加 KCIN 仿真结果"""
         with self.get_session() as session:
-            result = NocResult(
+            result = KcinResult(
                 experiment_id=experiment_id,
                 config_params=config_params,
                 performance=performance,
@@ -283,19 +291,19 @@ class DatabaseManager:
             result_id = result.id
 
         with self.get_session() as session:
-            return session.query(NocResult).filter(NocResult.id == result_id).first()
+            return session.query(KcinResult).filter(KcinResult.id == result_id).first()
 
-    def add_d2d_result(
+    def add_dcin_result(
         self,
         experiment_id: int,
         config_params: dict,
         performance: float,
         result_details: Optional[dict] = None,
         error: Optional[str] = None,
-    ) -> D2DResult:
-        """添加 D2D 仿真结果"""
+    ) -> DcinResult:
+        """添加 DCIN 仿真结果"""
         with self.get_session() as session:
-            result = D2DResult(
+            result = DcinResult(
                 experiment_id=experiment_id,
                 config_params=config_params,
                 performance=performance,
@@ -307,7 +315,7 @@ class DatabaseManager:
             result_id = result.id
 
         with self.get_session() as session:
-            return session.query(D2DResult).filter(D2DResult.id == result_id).first()
+            return session.query(DcinResult).filter(DcinResult.id == result_id).first()
 
     def add_results_batch(
         self,
@@ -386,7 +394,7 @@ class DatabaseManager:
 
             return [self._result_to_dict(r) for r in results], total
 
-    def get_noc_results(
+    def get_kcin_results(
         self,
         experiment_id: int,
         page: int = 1,
@@ -394,13 +402,13 @@ class DatabaseManager:
         sort_by: str = "performance",
         order: str = "desc",
     ) -> tuple:
-        """分页获取 NoC 结果"""
+        """分页获取 KCIN 结果"""
         with self.get_session() as session:
-            query = session.query(NocResult).filter(
-                NocResult.experiment_id == experiment_id
+            query = session.query(KcinResult).filter(
+                KcinResult.experiment_id == experiment_id
             )
             total = query.count()
-            sort_column = getattr(NocResult, sort_by, NocResult.performance)
+            sort_column = getattr(KcinResult, sort_by, KcinResult.performance)
             if order == "desc":
                 query = query.order_by(sort_column.desc())
             else:
@@ -409,7 +417,7 @@ class DatabaseManager:
             results = query.offset(offset).limit(page_size).all()
             return results, total
 
-    def get_d2d_results(
+    def get_dcin_results(
         self,
         experiment_id: int,
         page: int = 1,
@@ -417,13 +425,13 @@ class DatabaseManager:
         sort_by: str = "performance",
         order: str = "desc",
     ) -> tuple:
-        """分页获取 D2D 结果"""
+        """分页获取 DCIN 结果"""
         with self.get_session() as session:
-            query = session.query(D2DResult).filter(
-                D2DResult.experiment_id == experiment_id
+            query = session.query(DcinResult).filter(
+                DcinResult.experiment_id == experiment_id
             )
             total = query.count()
-            sort_column = getattr(D2DResult, sort_by, D2DResult.performance)
+            sort_column = getattr(DcinResult, sort_by, DcinResult.performance)
             if order == "desc":
                 query = query.order_by(sort_column.desc())
             else:

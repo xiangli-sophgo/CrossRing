@@ -14,8 +14,8 @@ def main():
 
     # 创建配置和模型
     config = D2DConfig(
-        # d2d_config_file="../config/topologies/d2d_2die_config.yaml",
-        d2d_config_file="../config/topologies/d2d_4die_config.yaml",
+        # d2d_config_file="../config/topologies/dcin_2die_config.yaml",
+        d2d_config_file="../config/topologies/dcin_4die_config.yaml",
     )
 
     # 创建模型
@@ -30,7 +30,7 @@ def main():
     # 配置各种选项
     # 配置数据流
     # traffic_file_path = str(Path(__file__).parent.parent / "test_data")
-    traffic_file_path = str(Path(__file__).parent.parent / "traffic")
+    # traffic_file_path = str(Path(__file__).parent.parent / "traffic")
     traffic_file_path = str(Path(__file__).parent.parent / "traffic" / "2261")
     traffic_chains = [
         [
@@ -39,7 +39,7 @@ def main():
             # "d2d_16_share_D2D_W_1104.txt"
             # "d2d_64_share_D2D_R_1104.txt",
             # "d2d_64_share_D2D_W_1104.txt",
-            "2261_16share_d2d_W.txt"
+            "2261_64share_d2d_W.txt"
             # "d2d_16_share_R_1104.txt"
             # "data_sim_16_share_W_1110.txt"
             # "2261_c2c_16_share_R.txt"
@@ -49,8 +49,8 @@ def main():
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
-    model.setup_debug(trace_packets=[2], update_interval=0.1)
-    # model.setup_visualization(enable=1, update_interval=0.5, start_cycle=600)
+    # model.setup_debug(trace_packets=[8, 10], update_interval=0.01)
+    # model.setup_visualization(enable=1, update_interval=0.2, start_cycle=600)
 
     model.setup_result_analysis(
         # 图片生成控制

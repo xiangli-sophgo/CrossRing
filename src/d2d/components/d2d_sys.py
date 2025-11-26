@@ -148,6 +148,8 @@ class D2D_Sys:
         """
         # 根据flit类型选择AXI通道
         channel_type = self._determine_axi_channel(flit, "sn")
+        # print(f"[D2D_Sys Debug] enqueue_sn: packet_id={getattr(flit, 'packet_id', 'None')}, "
+        #       f"target_die_id={target_die_id}, channel_type={channel_type}, cycle={self.current_cycle}")
 
         self.sn_pending_queue.append({"flit": flit, "target_die_id": target_die_id, "channel_type": channel_type, "enqueue_cycle": self.current_cycle})
 

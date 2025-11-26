@@ -94,7 +94,7 @@ export default function ExperimentList() {
       const result = await importFromCSV(
         uploadFile,
         values.name,
-        values.experiment_type || 'noc',
+        values.experiment_type || 'kcin',
         values.description,
         values.topo_type
       );
@@ -130,8 +130,12 @@ export default function ExperimentList() {
       title: '实验名称',
       dataIndex: 'name',
       key: 'name',
+      width: 250,
+      ellipsis: true,
       render: (text, record) => (
-        <a onClick={() => navigate(`/experiments/${record.id}`)}>{text}</a>
+        <Tooltip title={text}>
+          <a onClick={() => navigate(`/experiments/${record.id}`)}>{text}</a>
+        </Tooltip>
       ),
     },
     {
@@ -220,8 +224,8 @@ export default function ExperimentList() {
               buttonStyle="solid"
             >
               <Radio.Button value="all">全部</Radio.Button>
-              <Radio.Button value="noc">NoC</Radio.Button>
-              <Radio.Button value="d2d">D2D</Radio.Button>
+              <Radio.Button value="kcin">KCIN</Radio.Button>
+              <Radio.Button value="dcin">DCIN</Radio.Button>
             </Radio.Group>
           </Space>
           <Space>
@@ -280,12 +284,12 @@ export default function ExperimentList() {
           <Form.Item
             name="experiment_type"
             label="实验类型"
-            initialValue="noc"
+            initialValue="kcin"
             rules={[{ required: true, message: '请选择实验类型' }]}
           >
             <Select>
-              <Select.Option value="noc">NoC</Select.Option>
-              <Select.Option value="d2d">D2D</Select.Option>
+              <Select.Option value="kcin">KCIN</Select.Option>
+              <Select.Option value="dcin">DCIN</Select.Option>
             </Select>
           </Form.Item>
           <Form.Item name="description" label="描述">

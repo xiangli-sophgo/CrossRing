@@ -347,12 +347,20 @@ class D2D_SN_Interface(IPInterface):
         # 检查ejected的flit
         if ejected_flits:
             for flit in ejected_flits:
+                # # 调试：打印所有ejected flit的d2d属性
+                # print(f"[D2D_SN Debug] eject_step Die{self.die_id}: packet_id={getattr(flit, 'packet_id', 'None')}, "
+                #       f"flit_type={getattr(flit, 'flit_type', 'None')}, req_type={getattr(flit, 'req_type', 'None')}, "
+                #       f"d2d_origin_die={getattr(flit, 'd2d_origin_die', 'None')}, d2d_target_die={getattr(flit, 'd2d_target_die', 'None')}, "
+                #       f"need_cross_die={getattr(flit, 'd2d_target_die', None) != self.die_id}")
+
+                # 关键修复：只有当目标Die不是当前Die时才需要跨Die转发
+                # 之前的逻辑只检查 d2d_target_die != d2d_origin_die，没有检查当前Die
                 if (
                     hasattr(flit, "d2d_target_die")
                     and hasattr(flit, "d2d_origin_die")
                     and flit.d2d_target_die is not None
                     and flit.d2d_origin_die is not None
-                    and flit.d2d_target_die != flit.d2d_origin_die
+                    and flit.d2d_target_die != self.die_id  # 修复：检查目标Die是否是当前Die
                 ):
                     # 记录跨Die请求/数据经过的D2D_SN节点
                     if not hasattr(flit, "d2d_sn_node") or flit.d2d_sn_node is None:
@@ -397,6 +405,7 @@ class D2D_SN_Interface(IPInterface):
         每个Die独立处理，不继承前一个Die的retry状态
         """
         packet_id = flit.packet_id
+        # print(f"[D2D_SN Debug] handle_local_cross_die_write_request: packet_id={packet_id}, req_attr={getattr(flit, 'req_attr', 'new')}")
 
         # 遵循基类逻辑：根据req_attr区分新请求和retry请求
         if getattr(flit, "req_attr", "new") == "new":
@@ -736,6 +745,7 @@ class D2D_SN_Interface(IPInterface):
         处理跨Die写数据 - 接收数据并通过AW+W通道转发
         """
         packet_id = flit.packet_id
+        # print(f"[D2D_SN Debug] handle_cross_die_write_data: packet_id={packet_id}, flit_id={getattr(flit, 'flit_id', -1)}")
 
         # 将数据存储到缓冲区
         if packet_id not in self.sn_wdb:
@@ -746,6 +756,7 @@ class D2D_SN_Interface(IPInterface):
         existing_flit_ids = [getattr(f, "flit_id", -1) for f in self.sn_wdb[packet_id]]
 
         if flit_id in existing_flit_ids:
+            # print(f"[D2D_SN Debug] handle_cross_die_write_data: 跳过重复flit_id={flit_id}")
             return  # 跳过重复处理
 
         self.sn_wdb[packet_id].append(flit)
@@ -756,13 +767,16 @@ class D2D_SN_Interface(IPInterface):
         # 检查是否收集完所有写数据
         collected_flits = self.sn_wdb[packet_id]
         expected_length = flit.burst_length
+        # print(f"[D2D_SN Debug] handle_cross_die_write_data: collected={len(collected_flits)}/{expected_length}")
 
         if len(collected_flits) >= expected_length:
             # 所有写数据已收集完成，找到对应的写请求
             write_req = next((req for req in self.sn_tracker if req.packet_id == packet_id), None)
+            # print(f"[D2D_SN Debug] handle_cross_die_write_data: 数据收集完成, write_req={write_req is not None}")
 
             if write_req:
                 # 通过AW通道发送写请求，W通道发送写数据
+                # print(f"[D2D_SN Debug] handle_cross_die_write_data: 调用forward_write_request_and_data_cross_die")
                 self.forward_write_request_and_data_cross_die(write_req, collected_flits)
 
     def forward_write_request_and_data_cross_die(self, write_req: Flit, data_flits: list):
@@ -770,8 +784,11 @@ class D2D_SN_Interface(IPInterface):
         通过AW和W通道将写请求和写数据转发到目标Die的D2D_RN
         """
         target_die_id = getattr(write_req, "d2d_target_die", None)
+        # print(f"[D2D_SN Debug] forward_write_request_and_data_cross_die: packet_id={write_req.packet_id}, "
+        #       f"target_die_id={target_die_id}, d2d_sys={self.d2d_sys is not None}")
 
         if target_die_id is None or not self.d2d_sys:
+            # print(f"[D2D_SN Debug] forward_write_request_and_data_cross_die: 跳过 - target_die_id={target_die_id}, d2d_sys={self.d2d_sys}")
             return
 
         from src.utils.flit import create_d2d_flit_copy

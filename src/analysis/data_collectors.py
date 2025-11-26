@@ -405,9 +405,7 @@ class RequestCollector:
         completed_requests = request_tracker.get_completed_requests()
 
         for packet_id, lifecycle in completed_requests.items():
-            # 只收集D2D请求
-            if not lifecycle.is_cross_die:
-                continue
+            # 收集所有请求（包括本地请求和跨Die请求）
 
             # 收集时间戳
             timestamps = lifecycle.timestamps

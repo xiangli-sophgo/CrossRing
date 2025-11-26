@@ -20,7 +20,7 @@ db_manager = ResultManager()
 class ExperimentCreate(BaseModel):
     """创建实验请求"""
     name: str
-    experiment_type: str = "noc"  # "noc" 或 "d2d"
+    experiment_type: str = "kcin"  # "kcin" 或 "dcin"
     description: Optional[str] = None
     topo_type: Optional[str] = None
 
@@ -71,7 +71,7 @@ async def list_experiments(
     获取实验列表
 
     - status: 筛选状态
-    - experiment_type: 筛选类型 ("noc" 或 "d2d")
+    - experiment_type: 筛选类型 ("kcin" 或 "dcin")
     """
     experiments = db_manager.list_experiments(status, experiment_type)
     return experiments
@@ -133,7 +133,7 @@ async def delete_experiment(experiment_id: int):
 async def import_from_csv(
     file: UploadFile = File(...),
     experiment_name: str = Form(...),
-    experiment_type: str = Form("noc"),
+    experiment_type: str = Form("kcin"),
     description: Optional[str] = Form(None),
     topo_type: Optional[str] = Form(None),
 ):
@@ -142,7 +142,7 @@ async def import_from_csv(
 
     - file: CSV文件
     - experiment_name: 实验名称
-    - experiment_type: 实验类型 ("noc" 或 "d2d")
+    - experiment_type: 实验类型 ("kcin" 或 "dcin")
     - description: 实验描述
     - topo_type: 拓扑类型
     """

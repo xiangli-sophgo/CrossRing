@@ -1516,6 +1516,7 @@ class NetworkLinkVisualizer:
                     "ring_bridge": copy.deepcopy(net.ring_bridge),
                     "cross_point": copy.deepcopy(net.cross_point),
                     "links_tag": copy.deepcopy(net.links_tag),
+                    "IQ_arbiter_input_fifo": copy.deepcopy(getattr(net, "IQ_arbiter_input_fifo", {})),
                 }
                 self.histories[i].append((cycle, snap, meta))
 
@@ -1582,6 +1583,7 @@ class NetworkLinkVisualizer:
                 ring_bridge=meta["ring_bridge"],
                 cross_point=meta["cross_point"],
                 links_tag=meta["links_tag"],
+                IQ_arbiter_input_fifo=meta.get("IQ_arbiter_input_fifo", {}),
                 config=self.networks[self.selected_network_index].config,
             )
             self.piece_vis.draw_piece_for_node(self._selected_node, fake_net)

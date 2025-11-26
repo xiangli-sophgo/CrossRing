@@ -19,6 +19,14 @@ from src.utils.flit import (
 import logging
 import inspect
 
+# Response优先级顺序（列表顺序即优先级，靠前优先级高）
+RSP_PRIORITY_ORDER = [
+    "datasend",
+    "negative",
+    "write_complete",
+    "positive",
+]
+
 
 # IPInterface的Ring支持扩展
 class RingIPInterface:
@@ -88,8 +96,8 @@ class IPInterface:
         h2l_l_depth = config.IP_H2L_L_FIFO_DEPTH
 
         # 处理延迟配置
-        self.sn_processing_latency = getattr(config, 'SN_PROCESSING_LATENCY', 0)
-        self.rn_processing_latency = getattr(config, 'RN_PROCESSING_LATENCY', 0)
+        self.sn_processing_latency = getattr(config, "SN_PROCESSING_LATENCY", 0)
+        self.rn_processing_latency = getattr(config, "RN_PROCESSING_LATENCY", 0)
 
         self.networks = {
             "req": {
@@ -126,6 +134,9 @@ class IPInterface:
                 "h2l_fifo_l": deque(maxlen=h2l_l_depth),
             },
         }
+
+        # Response优先级队列（用于rsp网络，按优先级分别存储）
+        self.rsp_inject_queues = {rsp_type: deque() for rsp_type in RSP_PRIORITY_ORDER}
 
         # 根据IP类型设置双向带宽限制令牌桶
         if ip_type.startswith("ddr"):
@@ -262,14 +273,10 @@ class IPInterface:
             "sn_share": {"allocations": [], "releases": []},
             "sn_wdb": {"allocations": [], "releases": []},
             "read_retry": {"allocations": [], "releases": []},
-            "write_retry": {"allocations": [], "releases": []}
+            "write_retry": {"allocations": [], "releases": []},
         }
 
-        self.tracker_total_allocated = {
-            "rn_read": 0, "rn_write": 0, "rn_rdb": 0, "rn_wdb": 0,
-            "sn_ro": 0, "sn_share": 0, "sn_wdb": 0,
-            "read_retry": 0, "write_retry": 0
-        }
+        self.tracker_total_allocated = {"rn_read": 0, "rn_write": 0, "rn_rdb": 0, "rn_wdb": 0, "sn_ro": 0, "sn_share": 0, "sn_wdb": 0, "read_retry": 0, "write_retry": 0}
 
         self.tracker_block_events = []
 
@@ -282,15 +289,25 @@ class IPInterface:
             "sn_share": self.sn_tracker_count["share"]["count"],
             "sn_wdb": self.sn_wdb_count["count"],
             "read_retry": None,
-            "write_retry": None
+            "write_retry": None,
         }
 
     def enqueue(self, flit: Flit, network_type: str, retry=False):
         """IP 核把flit丢进对应网络的 inject_fifo"""
-        if retry:
-            self.networks[network_type]["inject_fifo"].appendleft(flit)
+        if network_type == "rsp":
+            # Response按优先级分流到对应队列
+            rsp_type = getattr(flit, "rsp_type", "positive")
+            if rsp_type not in self.rsp_inject_queues:
+                rsp_type = "positive"  # 未知类型默认最低优先级
+            if retry:
+                self.rsp_inject_queues[rsp_type].appendleft(flit)
+            else:
+                self.rsp_inject_queues[rsp_type].append(flit)
         else:
-            self.networks[network_type]["inject_fifo"].append(flit)
+            if retry:
+                self.networks[network_type]["inject_fifo"].appendleft(flit)
+            else:
+                self.networks[network_type]["inject_fifo"].append(flit)
         flit.flit_position = "IP_inject"
 
         # 检查是否为新请求并记录统计
@@ -315,7 +332,7 @@ class IPInterface:
         self.networks[network_type]["send_flits"][flit.packet_id].append(flit)
 
         # 添加flit到RequestTracker
-        if hasattr(self, 'request_tracker') and self.request_tracker:
+        if hasattr(self, "request_tracker") and self.request_tracker:
             if network_type == "req":
                 self.request_tracker.add_request_flit(flit.packet_id, flit)
             elif network_type == "rsp":
@@ -329,7 +346,34 @@ class IPInterface:
         """1GHz: inject_fifo → l2h_fifo_pre（分网络处理）"""
         net_info = self.networks[network_type]
 
-        if not net_info["inject_fifo"] or len(net_info["l2h_fifo"]) >= net_info["l2h_fifo"].maxlen or net_info["l2h_fifo_pre"] is not None:
+        # 检查l2h_fifo是否有空间
+        if len(net_info["l2h_fifo"]) >= net_info["l2h_fifo"].maxlen or net_info["l2h_fifo_pre"] is not None:
+            return
+
+        # rsp网络使用优先级队列，其他网络使用inject_fifo
+        if network_type == "rsp":
+            # 响应网络：按优先级顺序检查各队列
+            flit = None
+            current_cycle = getattr(self, "current_cycle", 0)
+            for rsp_type in RSP_PRIORITY_ORDER:
+                queue = self.rsp_inject_queues[rsp_type]
+                if queue:
+                    candidate = queue[0]
+                    if hasattr(candidate, "departure_cycle") and candidate.departure_cycle > current_cycle:
+                        continue  # 还没到发送时间，检查下一优先级
+                    flit = queue.popleft()
+                    break
+
+            if flit is None:
+                return  # 所有队列都空或都未到发送时间
+
+            flit.flit_position = "L2H"
+            flit.start_inject = True
+            net_info["l2h_fifo_pre"] = flit
+            return
+
+        # req和data网络检查inject_fifo
+        if not net_info["inject_fifo"]:
             return
 
         flit = net_info["inject_fifo"][0]
@@ -338,15 +382,6 @@ class IPInterface:
         if network_type == "req":
             if flit.req_attr == "new" and not self._check_and_reserve_resources(flit):
                 return  # 资源不足，保持在inject_fifo中
-            flit.flit_position = "L2H"
-            flit.start_inject = True
-            net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
-
-        elif network_type == "rsp":
-            # 响应网络：检查departure_cycle
-            current_cycle = getattr(self, "current_cycle", 0)
-            if hasattr(flit, "departure_cycle") and flit.departure_cycle > current_cycle:
-                return  # 还没到发送时间
             flit.flit_position = "L2H"
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
@@ -388,25 +423,25 @@ class IPInterface:
         if network_type == "req" and flit.req_attr == "new":
             flit.cmd_entry_noc_from_cake0_cycle = self.current_cycle
             # 更新RequestTracker
-            if hasattr(self, 'request_tracker') and self.request_tracker:
-                self.request_tracker.update_timestamp(flit.packet_id, 'cmd_entry_noc_from_cake0_cycle', self.current_cycle)
+            if hasattr(self, "request_tracker") and self.request_tracker:
+                self.request_tracker.update_timestamp(flit.packet_id, "cmd_entry_noc_from_cake0_cycle", self.current_cycle)
         elif network_type == "rsp":
             flit.cmd_entry_noc_from_cake1_cycle = self.current_cycle
             # 更新RequestTracker
-            if hasattr(self, 'request_tracker') and self.request_tracker:
-                self.request_tracker.update_timestamp(flit.packet_id, 'cmd_entry_noc_from_cake1_cycle', self.current_cycle)
+            if hasattr(self, "request_tracker") and self.request_tracker:
+                self.request_tracker.update_timestamp(flit.packet_id, "cmd_entry_noc_from_cake1_cycle", self.current_cycle)
         elif network_type == "data":
             # 只为第一个data flit设置entry时间戳
             if flit.req_type == "read" and flit.flit_id == 0:
                 flit.data_entry_noc_from_cake1_cycle = self.current_cycle
                 # 更新RequestTracker
-                if hasattr(self, 'request_tracker') and self.request_tracker:
-                    self.request_tracker.update_timestamp(flit.packet_id, 'data_entry_noc_from_cake1_cycle', self.current_cycle)
+                if hasattr(self, "request_tracker") and self.request_tracker:
+                    self.request_tracker.update_timestamp(flit.packet_id, "data_entry_noc_from_cake1_cycle", self.current_cycle)
             elif flit.req_type == "write" and flit.flit_id == 0:
                 flit.data_entry_noc_from_cake0_cycle = self.current_cycle
                 # 更新RequestTracker
-                if hasattr(self, 'request_tracker') and self.request_tracker:
-                    self.request_tracker.update_timestamp(flit.packet_id, 'data_entry_noc_from_cake0_cycle', self.current_cycle)
+                if hasattr(self, "request_tracker") and self.request_tracker:
+                    self.request_tracker.update_timestamp(flit.packet_id, "data_entry_noc_from_cake0_cycle", self.current_cycle)
 
     def _check_and_reserve_resources(self, req):
         """检查并预占新请求所需的资源"""
@@ -436,8 +471,8 @@ class IPInterface:
                 req.cmd_entry_cake0_cycle = self.current_cycle  # 这里记录cycle
 
                 # 更新RequestTracker的timestamp
-                if hasattr(self, 'request_tracker') and self.request_tracker:
-                    self.request_tracker.update_timestamp(req.packet_id, 'cmd_entry_cake0_cycle', self.current_cycle)
+                if hasattr(self, "request_tracker") and self.request_tracker:
+                    self.request_tracker.update_timestamp(req.packet_id, "cmd_entry_cake0_cycle", self.current_cycle)
 
                 self.rn_tracker["read"].append(req)
                 self.rn_tracker_pointer["read"] += 1
@@ -464,8 +499,8 @@ class IPInterface:
                 req.cmd_entry_cake0_cycle = self.current_cycle  # 这里记录cycle
 
                 # 更新RequestTracker的timestamp
-                if hasattr(self, 'request_tracker') and self.request_tracker:
-                    self.request_tracker.update_timestamp(req.packet_id, 'cmd_entry_cake0_cycle', self.current_cycle)
+                if hasattr(self, "request_tracker") and self.request_tracker:
+                    self.request_tracker.update_timestamp(req.packet_id, "cmd_entry_cake0_cycle", self.current_cycle)
 
                 self.rn_tracker["write"].append(req)
                 self.rn_tracker_pointer["write"] += 1
@@ -541,9 +576,9 @@ class IPInterface:
         req.cmd_received_by_cake1_cycle = self.current_cycle
 
         # 添加到RequestTracker
-        if hasattr(self, 'request_tracker') and self.request_tracker:
+        if hasattr(self, "request_tracker") and self.request_tracker:
             self.request_tracker.add_request_flit(req.packet_id, req)
-            self.request_tracker.update_timestamp(req.packet_id, 'cmd_received_by_cake1_cycle', self.current_cycle)
+            self.request_tracker.update_timestamp(req.packet_id, "cmd_received_by_cake1_cycle", self.current_cycle)
 
         if req.req_type == "read":
             if req.req_attr == "new":
@@ -590,9 +625,9 @@ class IPInterface:
         rsp.cmd_received_by_cake0_cycle = self.current_cycle
 
         # 添加到RequestTracker
-        if hasattr(self, 'request_tracker') and self.request_tracker:
+        if hasattr(self, "request_tracker") and self.request_tracker:
             self.request_tracker.add_response_flit(rsp.packet_id, rsp)
-            self.request_tracker.update_timestamp(rsp.packet_id, 'cmd_received_by_cake0_cycle', self.current_cycle)
+            self.request_tracker.update_timestamp(rsp.packet_id, "cmd_received_by_cake0_cycle", self.current_cycle)
         if rsp.req_type == "read" and rsp.rsp_type == "negative":
             self.read_retry_num_stat += 1
         elif rsp.req_type == "write" and rsp.rsp_type == "negative":
@@ -687,9 +722,9 @@ class IPInterface:
                     req.data_received_complete_cycle = self.current_cycle  # 写完成即数据接收完成
 
                     # 标记写请求完成
-                    if hasattr(self, 'request_tracker') and self.request_tracker:
-                        self.request_tracker.update_timestamp(rsp.packet_id, 'write_complete_received_cycle', self.current_cycle)
-                        self.request_tracker.update_timestamp(rsp.packet_id, 'data_received_complete_cycle', self.current_cycle)
+                    if hasattr(self, "request_tracker") and self.request_tracker:
+                        self.request_tracker.update_timestamp(rsp.packet_id, "write_complete_received_cycle", self.current_cycle)
+                        self.request_tracker.update_timestamp(rsp.packet_id, "data_received_complete_cycle", self.current_cycle)
                         self.request_tracker.mark_request_completed(rsp.packet_id, self.current_cycle)
 
                     # 同时更新arrive_flits中对应packet的所有flit的时间戳
@@ -846,7 +881,7 @@ class IPInterface:
             self.rn_rdb[flit.packet_id].append(flit)
 
             # 添加到RequestTracker
-            if hasattr(self, 'request_tracker') and self.request_tracker:
+            if hasattr(self, "request_tracker") and self.request_tracker:
                 self.request_tracker.add_data_flit(flit.packet_id, flit)
 
             # 如果是跨Die数据且完成了整个burst，更新请求完成计数
@@ -861,7 +896,7 @@ class IPInterface:
             # 检查是否收集完整个burst
             if len(self.rn_rdb[flit.packet_id]) == flit.burst_length:
                 # 标记读请求完成
-                if hasattr(self, 'request_tracker') and self.request_tracker:
+                if hasattr(self, "request_tracker") and self.request_tracker:
                     self.request_tracker.mark_request_completed(flit.packet_id, self.current_cycle)
 
                 req = next((req for req in self.rn_tracker["read"] if req.packet_id == flit.packet_id), None)
@@ -890,9 +925,8 @@ class IPInterface:
                         f.transaction_latency = complete_cycle - f.cmd_entry_cake0_cycle
 
                     # 同步更新tracker中的data_flits时间戳并重新收集
-                    if hasattr(self, 'request_tracker') and self.request_tracker:
-                        lifecycle = self.request_tracker.active_requests.get(flit.packet_id) or \
-                                  self.request_tracker.completed_requests.get(flit.packet_id)
+                    if hasattr(self, "request_tracker") and self.request_tracker:
+                        lifecycle = self.request_tracker.active_requests.get(flit.packet_id) or self.request_tracker.completed_requests.get(flit.packet_id)
                         if lifecycle:
                             for f in lifecycle.data_flits:
                                 f.data_received_complete_cycle = complete_cycle
@@ -970,9 +1004,9 @@ class IPInterface:
                         f.transaction_latency = complete_cycle + self.config.SN_TRACKER_RELEASE_LATENCY - f.cmd_entry_cake0_cycle
 
                     # 更新RequestTracker的timestamp
-                    if hasattr(self, 'request_tracker') and self.request_tracker:
-                        self.request_tracker.update_timestamp(flit.packet_id, 'data_received_complete_cycle', complete_cycle)
-                        self.request_tracker.update_timestamp(flit.packet_id, 'data_entry_noc_from_cake0_cycle', first_flit.data_entry_noc_from_cake0_cycle)
+                    if hasattr(self, "request_tracker") and self.request_tracker:
+                        self.request_tracker.update_timestamp(flit.packet_id, "data_received_complete_cycle", complete_cycle)
+                        self.request_tracker.update_timestamp(flit.packet_id, "data_entry_noc_from_cake0_cycle", first_flit.data_entry_noc_from_cake0_cycle)
 
                         # 对于NoC内部写请求，数据到达SN端即完成（不需要write_complete响应）
                         # 但是对于跨Die写请求，需要等待write_complete响应（在RN端处理）
@@ -1230,12 +1264,7 @@ class IPInterface:
 
     def get_tracker_usage_data(self):
         """获取tracker使用数据"""
-        return {
-            "events": self.tracker_events,
-            "total_allocated": self.tracker_total_allocated,
-            "block_events": self.tracker_block_events,
-            "total_config": self.tracker_total_config
-        }
+        return {"events": self.tracker_events, "total_allocated": self.tracker_total_allocated, "block_events": self.tracker_block_events, "total_config": self.tracker_total_config}
 
 
 def create_ring_ip_interface(ip_type, ip_pos, config, req_network, rsp_network, data_network, node, routes):

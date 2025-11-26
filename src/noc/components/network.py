@@ -9,14 +9,7 @@ import numpy as np
 from collections import deque, defaultdict
 from typing import Optional, Dict, List, Any, Tuple
 from config.config import CrossRingConfig
-from src.utils.flit import (
-    Flit,
-    TokenBucket,
-    get_original_source_node,
-    get_original_destination_node,
-    get_original_source_type,
-    get_original_destination_type,
-)
+from src.utils.flit import Flit, TokenBucket
 import logging
 import inspect
 
@@ -704,6 +697,10 @@ class Network:
 
         Args:
             target_eject_node: 目标下环节点的position（映射后的位置），可能是中间节点
+
+        设计说明：
+            每个Die的保序是独立的，只关心Die内部的传输对。
+            key使用flit.source和flit.destination，而不是跨Die的原始源/目标。
         """
         # 先判断是否需要保序
         if not self._need_in_order_check(flit):
@@ -721,31 +718,32 @@ class Network:
         if flit.src_dest_order_id == -1:
             return True
 
-        # 获取原始的src（物理节点ID）
-        src = get_original_source_node(flit)
+        # 使用flit当前Die内的实际source/destination构建key
+        src = flit.source
+        dest = flit.destination
+        die_id = getattr(self.config, "DIE_ID", None)
 
-        # 使用最终目的地（而不是中间下环节点）作为key的dest
-        # 使用辅助函数统一获取原始节点ID
-        dest = get_original_destination_node(flit)
-
-        # 根据保序粒度构造key
+        # 根据保序粒度构造key（包含die_id确保不同Die独立保序）
         if self.config.ORDERING_GRANULARITY == 0:  # IP层级
-            # 获取IP类型信息
-            src_type = get_original_source_type(flit)
-            dest_type = get_original_destination_type(flit)
-            key = (src, src_type, dest, dest_type, direction)
+            src_type = flit.source_type
+            dest_type = flit.destination_type
+            key = (die_id, src, src_type, dest, dest_type, direction)
         else:  # 节点层级（granularity == 1）
-            key = (src, dest, direction)
+            key = (die_id, src, dest, direction)
 
         # 检查是否是期望的下一个顺序ID
-        # 每个network只记录自己的order_id，不需要区分packet_category
         expected_order_id = self.order_tracking_table[key] + 1
 
         can_eject = flit.src_dest_order_id == expected_order_id
+
         return can_eject
 
     def _need_in_order_check(self, flit: Flit):
-        """判断该flit是否需要保序检查"""
+        """判断该flit是否需要保序检查
+
+        设计说明：
+            使用flit的实际source/destination进行判断，与保序key构建保持一致。
+        """
         if self.config.ORDERING_PRESERVATION_MODE == 0:
             return False
 
@@ -755,9 +753,9 @@ class Network:
             if packet_category not in self.config.IN_ORDER_PACKET_CATEGORIES:
                 return False
 
-        # 获取真实的src和dest
-        src = get_original_source_node(flit)
-        dest = get_original_destination_node(flit)
+        # 使用flit的实际source/destination
+        src = flit.source
+        dest = flit.destination
 
         # 如果未配置特定对或配置为空，则全部保序
         if not hasattr(self.config, "IN_ORDER_EJECTION_PAIRS") or len(self.config.IN_ORDER_EJECTION_PAIRS) == 0:
@@ -783,6 +781,10 @@ class Network:
 
         Args:
             node: 目标节点的position（映射后的位置），可能是中间节点
+
+        设计说明：
+            每个Die的保序是独立的，只关心Die内部的传输对。
+            key使用flit.source和flit.destination，而不是跨Die的原始源/目标。
         """
         # 先判断是否需要保序
         if not self._need_in_order_check(flit):
@@ -797,17 +799,14 @@ class Network:
         if not hasattr(flit, "src_dest_order_id"):
             return True
 
-        # 获取原始的src（物理节点ID）
-        src = get_original_source_node(flit)
+        # 使用flit当前Die内的实际source/destination构建key
+        src = flit.source
+        dest = flit.destination
 
-        # 使用最终目的地（而不是中间下环节点）
-        dest = get_original_destination_node(flit)
-
-        # 使用 (src物理ID, final_dest物理ID, direction) 作为键
+        # 使用 (src, dest, direction) 作为键（节点层级）
         key = (src, dest, direction)
 
         # 检查是否是期望的下一个顺序ID
-        # 每个network只记录自己的order_id，不需要区分packet_category
         expected_order_id = self.order_tracking_table[key] + 1
         return flit.src_dest_order_id == expected_order_id
 
@@ -816,6 +815,10 @@ class Network:
 
         Args:
             target_node: 目标节点的position（映射后的位置），可能是中间节点
+
+        设计说明：
+            每个Die的保序是独立的，只关心Die内部的传输对。
+            key使用flit.source和flit.destination，而不是跨Die的原始源/目标。
         """
         # 先判断是否需要保序
         if not self._need_in_order_check(flit):
@@ -828,23 +831,20 @@ class Network:
         if flit.src_dest_order_id == -1:
             return
 
-        # 获取原始的src（物理节点ID）
-        src = get_original_source_node(flit)
+        # 使用flit当前Die内的实际source/destination构建key
+        src = flit.source
+        dest = flit.destination
+        die_id = getattr(self.config, "DIE_ID", None)
 
-        # 使用最终目的地（而不是中间下环节点）
-        dest = get_original_destination_node(flit)
-
-        # 根据保序粒度构造key（与_can_eject_in_order保持一致）
+        # 根据保序粒度构造key（与_can_eject_in_order保持一致，包含die_id）
         if self.config.ORDERING_GRANULARITY == 0:  # IP层级
-            # 获取IP类型信息
-            src_type = get_original_source_type(flit)
-            dest_type = get_original_destination_type(flit)
-            key = (src, src_type, dest, dest_type, direction)
+            src_type = flit.source_type
+            dest_type = flit.destination_type
+            key = (die_id, src, src_type, dest, dest_type, direction)
         else:  # 节点层级（granularity == 1）
-            key = (src, dest, direction)
+            key = (die_id, src, dest, direction)
 
         # 更新保序跟踪表
-        # 每个network只记录自己的order_id，不需要区分packet_category
         self.order_tracking_table[key] = flit.src_dest_order_id
 
     def _init_direction_control(self):
@@ -858,7 +858,12 @@ class Network:
         }
 
     def determine_allowed_eject_directions(self, flit: Flit):
-        """确定flit允许的下环方向"""
+        """确定flit允许的下环方向
+
+        设计说明：
+            使用flit.source来决定允许的下环方向。
+            对于跨Die场景，flit.source已经是本Die内的入口节点（如D2D_RN）。
+        """
         mode = self.config.ORDERING_PRESERVATION_MODE
 
         # Mode 0: 不保序，所有方向都允许
@@ -871,9 +876,8 @@ class Network:
 
         # Mode 2: 双侧下环，根据方向配置决定
         if mode == 2:
-            # 获取原始源节点编号（物理节点ID，未经node_map映射）
-            src_node = get_original_source_node(flit)
-            # self.error_log(flit, 1, 3)
+            # 使用flit的实际source节点（本Die内的源节点）
+            src_node = flit.source
 
             # 检查各方向是否允许
             allowed_dirs = []

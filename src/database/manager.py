@@ -2,7 +2,7 @@
 仿真结果数据库 - 业务逻辑层
 
 提供高级业务操作：CSV导入、统计分析、敏感性分析等
-支持 NoC 和 D2D 两种仿真类型
+支持 KCIN 和 DCIN 两种仿真类型
 """
 
 import csv
@@ -32,7 +32,7 @@ class ResultManager:
     def create_experiment(
         self,
         name: str,
-        experiment_type: str = "noc",
+        experiment_type: str = "kcin",
         config_path: Optional[str] = None,
         topo_type: Optional[str] = None,
         traffic_files: Optional[List[str]] = None,
@@ -49,7 +49,7 @@ class ResultManager:
 
         Args:
             name: 实验名称（必须唯一）
-            experiment_type: 实验类型 ("noc" 或 "d2d")
+            experiment_type: 实验类型 ("kcin" 或 "dcin")
             config_path: 配置文件路径
             topo_type: 拓扑类型
             traffic_files: traffic文件列表
@@ -64,8 +64,8 @@ class ResultManager:
         Returns:
             实验ID
         """
-        if experiment_type not in ("noc", "d2d"):
-            raise ValueError(f"无效的实验类型: {experiment_type}，必须是 'noc' 或 'd2d'")
+        if experiment_type not in ("kcin", "dcin"):
+            raise ValueError(f"无效的实验类型: {experiment_type}，必须是 'kcin' 或 'dcin'")
 
         # 检查名称是否已存在
         existing = self.db.get_experiment_by_name(name)
@@ -107,7 +107,7 @@ class ResultManager:
 
         Args:
             status: 筛选状态
-            experiment_type: 筛选类型 ("noc" 或 "d2d")
+            experiment_type: 筛选类型 ("kcin" 或 "dcin")
         """
         return self.db.get_all_experiments(status, experiment_type)
 
@@ -169,7 +169,7 @@ class ResultManager:
             结果ID
         """
         with self._write_lock:
-            result = self.db.add_result(
+            result_id = self.db.add_result(
                 experiment_id=experiment_id,
                 config_params=config_params,
                 performance=performance,
@@ -180,14 +180,15 @@ class ResultManager:
             # 更新实验统计
             self._update_experiment_stats(experiment_id, performance)
 
-            return result.id
+            return result_id
 
     def _update_experiment_stats(self, experiment_id: int, performance: float):
         """更新实验统计信息"""
         exp = self.db.get_experiment(experiment_id)
         if exp:
-            completed = (exp.completed_combinations or 0) + 1
-            best = exp.best_performance
+            # 使用实时查询获取准确的结果数
+            completed = self.db.get_result_count(experiment_id)
+            best = exp.get("best_performance")
             if best is None or performance > best:
                 best = performance
             self.db.update_experiment(
@@ -265,7 +266,7 @@ class ResultManager:
         self,
         csv_path: str,
         experiment_name: str,
-        experiment_type: str = "noc",
+        experiment_type: str = "kcin",
         description: Optional[str] = None,
         topo_type: Optional[str] = None,
         batch_size: int = 1000,
@@ -276,7 +277,7 @@ class ResultManager:
         Args:
             csv_path: CSV文件路径
             experiment_name: 实验名称
-            experiment_type: 实验类型 ("noc" 或 "d2d")
+            experiment_type: 实验类型 ("kcin" 或 "dcin")
             description: 实验描述
             topo_type: 拓扑类型
             batch_size: 批量写入大小
@@ -324,12 +325,13 @@ class ResultManager:
                     self._import_batch(experiment_id, batch)
                     imported_count += len(batch)
 
-            # 更新实验状态和统计
+            # 更新实验状态和统计 - 使用实际结果数
+            actual_count = self.db.get_result_count(experiment_id)
             self.db.update_experiment(
                 experiment_id,
                 status="completed",
-                total_combinations=imported_count,
-                completed_combinations=imported_count,
+                total_combinations=actual_count,
+                completed_combinations=actual_count,
             )
 
             # 更新最佳性能
@@ -492,7 +494,7 @@ class ResultManager:
 
         # 检查是否为同类型实验
         if len(experiment_types) > 1:
-            raise ValueError("只能对比同类型的实验（都是 NoC 或都是 D2D）")
+            raise ValueError("只能对比同类型的实验（都是 KCIN 或都是 DCIN）")
 
         return {
             "experiments": experiments,

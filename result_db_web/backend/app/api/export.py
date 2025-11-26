@@ -82,15 +82,15 @@ def create_selective_database(experiment_ids: List[int], output_path: Path) -> N
     if ids_to_delete:
         placeholders = ",".join("?" * len(ids_to_delete))
 
-        # 删除 noc_results
+        # 删除 kcin_results
         cursor.execute(
-            f"DELETE FROM noc_results WHERE experiment_id IN ({placeholders})",
+            f"DELETE FROM kcin_results WHERE experiment_id IN ({placeholders})",
             ids_to_delete
         )
 
-        # 删除 d2d_results
+        # 删除 dcin_results
         cursor.execute(
-            f"DELETE FROM d2d_results WHERE experiment_id IN ({placeholders})",
+            f"DELETE FROM dcin_results WHERE experiment_id IN ({placeholders})",
             ids_to_delete
         )
 
