@@ -693,6 +693,225 @@ class CrossPoint:
             return "TU"
 
     # ------------------------------------------------------------------
+    # 拥塞感知流控 - 智能综合策略 (v3.0)
+    # ------------------------------------------------------------------
+
+    def _get_entry_usage(self, node_pos: int, direction: str) -> float:
+        """
+        获取指定节点和方向的Entry使用率
+
+        Args:
+            node_pos: 节点位置
+            direction: 方向 ("TL"/"TR"/"TU"/"TD")
+
+        Returns:
+            float: Entry使用率 (0.0 ~ 1.0)
+        """
+        total_used = 0
+        total_capacity = 0
+
+        if direction in ["TL", "TR"]:
+            if node_pos in self.RB_UE_Counters[direction]:
+                levels = self.RB_UE_Counters[direction][node_pos]
+                capacity = self.RB_CAPACITY[direction][node_pos]
+                for level in ["T0", "T1", "T2"]:
+                    total_used += levels[level]
+                    total_capacity += capacity[level]
+        else:
+            if node_pos in self.EQ_UE_Counters[direction]:
+                levels = self.EQ_UE_Counters[direction][node_pos]
+                capacity = self.EQ_CAPACITY[direction][node_pos]
+                for level in ["T0", "T1", "T2"]:
+                    total_used += levels[level]
+                    total_capacity += capacity[level]
+
+        return total_used / total_capacity if total_capacity > 0 else 0.0
+
+    def _predict_eject_direction(self, flit) -> str:
+        """
+        预测flit在目标节点的下环方向
+
+        基于flit路径分析，判断最后一跳是横向还是纵向移动，
+        从而确定下环方向。
+
+        Args:
+            flit: Flit对象
+
+        Returns:
+            str: 预测的下环方向 ("TL"/"TR"/"TU"/"TD") 或 None
+        """
+        path = flit.path
+        dest = flit.destination
+
+        if not path or dest not in path:
+            return None
+
+        dest_idx = path.index(dest)
+        if dest_idx == 0:
+            return None  # 已经在目标
+
+        prev_node = path[dest_idx - 1]
+
+        # 判断最后一跳是横向还是纵向
+        if abs(dest - prev_node) == self.config.NUM_COL:
+            # 纵向移动到达，从纵向环下环 (TU或TD)
+            return "TU" if prev_node > dest else "TD"
+        else:
+            # 横向移动到达，从横向环下环 (TL或TR)
+            return "TL" if prev_node > dest else "TR"
+
+    def _calculate_target_entry_congestion(self, flit) -> float:
+        """
+        计算flit目标节点的下环Entry拥塞度
+
+        核心逻辑：
+        1. 获取flit的最终目标节点
+        2. 预测下环方向
+        3. 检查目标节点该方向的Entry使用率
+
+        Args:
+            flit: Flit对象
+
+        Returns:
+            float: 目标Entry拥塞度 (0.0 ~ 1.0)
+        """
+        target_node = flit.destination
+
+        # 预测下环方向
+        eject_direction = self._predict_eject_direction(flit)
+        if not eject_direction:
+            return 0.0  # 无法预测时不限流
+
+        return self._get_entry_usage(target_node, eject_direction)
+
+    def _calculate_path_link_congestion(self, flit) -> float:
+        """
+        计算flit剩余路径上的Link拥塞度
+
+        遍历flit从当前位置到目标的所有Link，
+        返回最大占用率（木桶效应）。
+
+        Args:
+            flit: Flit对象
+
+        Returns:
+            float: 路径Link拥塞度 (0.0 ~ 1.0)
+        """
+        if self.network is None:
+            return 0.0
+
+        path = flit.path
+        source = flit.source
+
+        # 找到当前位置
+        current_idx = 0
+        if source in path:
+            current_idx = path.index(source)
+
+        remaining_path = path[current_idx:]
+        if len(remaining_path) <= 1:
+            return 0.0
+
+        # 计算路径上所有Link的占用率
+        congestion_values = []
+        for i in range(len(remaining_path) - 1):
+            link = (remaining_path[i], remaining_path[i + 1])
+            if link in self.network.links:
+                slots = self.network.links[link]
+                occupied = sum(1 for s in slots if s is not None)
+                congestion_values.append(occupied / len(slots))
+
+        return max(congestion_values) if congestion_values else 0.0
+
+    def _calculate_comprehensive_congestion(self, flit) -> float:
+        """
+        综合评估上环的代价
+
+        考虑因素：
+        1. 目标节点Entry使用率 - 决定是否会绕环
+        2. 路径上Link占用率 - 反映中间节点压力
+
+        Args:
+            flit: Flit对象
+
+        Returns:
+            float: 综合拥塞度 (0.0 ~ 1.0)
+        """
+        # 1. 目标Entry拥塞度
+        target_congestion = self._calculate_target_entry_congestion(flit)
+
+        # 2. 路径Link拥塞度
+        path_congestion = self._calculate_path_link_congestion(flit)
+
+        # 综合评估：取最大值（木桶效应）
+        return max(target_congestion, path_congestion)
+
+    def _calculate_target_direction_entry_congestion(self, flit, direction: str) -> float:
+        """
+        计算目标节点在指定方向的T2 Entry使用率
+
+        专门用于IQ_OUT上横向环时的流控：
+        - TL方向的flit检查目标节点TL方向的T2 Entry
+        - TR方向的flit检查目标节点TR方向的T2 Entry
+
+        只检查T2是因为T2是最基本的Entry等级，T2满了才是真正的拥塞。
+
+        Args:
+            flit: Flit对象
+            direction: 上环方向 ("TL"/"TR")
+
+        Returns:
+            float: T2 Entry使用率 (0.0 ~ 1.0)
+        """
+        target_node = flit.destination
+
+        # 只检查RB的T2 Entry（TL/TR方向）
+        if direction not in ["TL", "TR"]:
+            return 0.0
+
+        if target_node not in self.RB_UE_Counters[direction]:
+            return 0.0
+
+        # 只看T2等级的使用率
+        t2_used = self.RB_UE_Counters[direction][target_node]["T2"]
+        t2_capacity = self.RB_CAPACITY[direction][target_node]["T2"]
+
+        return t2_used / t2_capacity if t2_capacity > 0 else 0.0
+
+    def _should_throttle_adaptive(self, congestion: float, cycle: int) -> bool:
+        """
+        自适应限流策略
+
+        策略逻辑：
+        - congestion >= 0.95: 100%限流（必须等待）
+        - 0.7 <= congestion < 0.95: 渐进式限流
+        - congestion < 0.7: 不限流
+
+        Args:
+            congestion: 拥塞度 (0.0 ~ 1.0)
+            cycle: 当前周期
+
+        Returns:
+            bool: True表示需要限流（本周期不上环）
+        """
+        # 完全拥塞：必须等待
+        if congestion >= 0.95:
+            return True
+
+        # 高拥塞：渐进式限流
+        if congestion >= 0.7:
+            # 将拥塞度映射到限流周期
+            # 0.7 -> period=4 (25%限流), 0.95 -> period=1 (100%限流)
+            throttle_intensity = (congestion - 0.7) / 0.25  # 0.0 ~ 1.0
+            if throttle_intensity >= 1.0:
+                return True
+            period = max(1, int(4 - 3 * throttle_intensity))  # 4 -> 1
+            return cycle % period != 0
+
+        # 低拥塞：不限流
+        return False
+
+    # ------------------------------------------------------------------
     # 上环逻辑 - 统一的注入管理
     # ------------------------------------------------------------------
 
@@ -756,7 +975,18 @@ class CrossPoint:
         else:
             # Link未占用
             if not slot.itag_reserved:
-                # 没有预约，直接注入
+                # 没有预约，检查是否需要拥塞限流
+                # 智能流控：只在IQ_OUT上横向环时进行流控（RB_OUT不需要）
+                # ITag flit必须上环，普通flit进行拥塞检查
+                has_itag = flit.itag_h if is_horizontal else flit.itag_v
+                if not has_itag and self.config.CONGESTION_CONTROL_ENABLED and is_horizontal:
+                    # 只对横向环（IQ_OUT）进行流控
+                    # 检查目标节点对应方向(TL/TR)的T2 Entry使用率
+                    congestion = self._calculate_target_direction_entry_congestion(flit, direction)
+                    if self._should_throttle_adaptive(congestion, cycle):
+                        # 被限流，本周期不上环
+                        return False
+                # ITag flit或未被限流的flit可以上环
                 return True
             elif slot.check_itag_match(current_pos, direction):
                 # 有预约且是自己的预约，使用预约
