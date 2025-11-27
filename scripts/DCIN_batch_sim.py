@@ -234,7 +234,7 @@ def main():
 
     # ========== 仿真参数 ==========
     sim_config = {
-        "max_time": 5800,  # 最大仿真时间 (ns)
+        "max_time": 1000,  # 最大仿真时间 (ns)
         "print_interval": 2000,  # 打印间隔 (ns)
         "verbose": 0,  # 详细程度 (0=静默, 1=正常)
         "export_d2d_csv": True,  # 是否导出D2D请求CSV
@@ -254,3 +254,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+ 

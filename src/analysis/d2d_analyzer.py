@@ -461,13 +461,15 @@ class D2DAnalyzer:
         self._calculate_bandwidth_from_die_internal_requests(dies, all_die_requests)
 
     def _calculate_bandwidth_from_d2d_requests(self, dies: Dict):
-        """基于D2D请求计算各Die的IP带宽"""
+        """基于跨Die请求计算各Die的IP带宽（只处理跨Die请求，Die内请求由_calculate_bandwidth_from_die_internal_requests处理）"""
         from collections import defaultdict
 
+        # 过滤出跨Die请求
+        cross_die_requests = [r for r in self.d2d_requests if r.source_die != r.target_die]
 
         # 第一步：按(die_id, source_node, source_type)分组source请求
         source_groups = defaultdict(list)
-        for request in self.d2d_requests:
+        for request in cross_die_requests:
             if request.source_die in dies:
                 source_type_normalized = self.normalize_ip_type(request.source_type, default_fallback="other")
                 key = (request.source_die, request.source_node, source_type_normalized)
@@ -475,7 +477,7 @@ class D2DAnalyzer:
 
         # 第二步：按(die_id, target_node, target_type)分组target请求
         target_groups = defaultdict(list)
-        for request in self.d2d_requests:
+        for request in cross_die_requests:
             if request.target_die in dies:
                 target_type_normalized = self.normalize_ip_type(request.target_type, default_fallback="other")
                 key = (request.target_die, request.target_node, target_type_normalized)

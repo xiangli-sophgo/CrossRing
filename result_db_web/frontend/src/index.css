@@ -28,6 +28,8 @@
   background: #fafafa;
   font-weight: 500;
   color: #666;
+  vertical-align: middle;
+  text-align: center;
 }
 
 /* 单元格样式 */

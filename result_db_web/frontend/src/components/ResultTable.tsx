@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Button, message, Space, Tree, Popover, Pagination, Divider, Checkbox, Popconfirm, Input } from 'antd';
-import { DownloadOutlined, SettingOutlined, DeleteOutlined, SearchOutlined, HolderOutlined } from '@ant-design/icons';
+import { DownloadOutlined, SettingOutlined, DeleteOutlined, SearchOutlined, HolderOutlined, EditOutlined, SwapOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import { HotTable, HotTableClass } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
@@ -150,6 +150,12 @@ export default function ResultTable({
 
   // 详情面板是否展开
   const [detailExpanded, setDetailExpanded] = useState(true);
+
+  // 编辑模式
+  const [editMode, setEditMode] = useState(false);
+
+  // 转置模式
+  const [transposed, setTransposed] = useState(false);
 
   // Handsontable ref
   const hotTableRef = useRef<HotTableClass>(null);
@@ -400,22 +406,40 @@ export default function ResultTable({
   // 根据用户自定义顺序排列可见列
   const orderedVisibleColumns = useMemo(() => {
     if (columnOrder.length === 0) {
-      return visibleColumns;
+      // 默认按首字母排序
+      return [...visibleColumns].sort((a, b) => a.localeCompare(b, 'zh-CN'));
     }
-    // 按照columnOrder中的顺序排列，新增的列放在最后
-    const ordered: string[] = [];
-    for (const col of columnOrder) {
-      if (visibleColumns.includes(col)) {
-        ordered.push(col);
+
+    // 获取手动排序的列（保持顺序）和新列（按首字母排序）
+    const manualCols = columnOrder.filter((col) => visibleColumns.includes(col));
+    const newCols = visibleColumns
+      .filter((col) => !columnOrder.includes(col))
+      .sort((a, b) => a.localeCompare(b, 'zh-CN'));
+
+    if (newCols.length === 0) {
+      return manualCols;
+    }
+
+    // 将新列按首字母插入到手动列中的正确位置
+    const result: string[] = [];
+    let newIdx = 0;
+
+    for (const manualCol of manualCols) {
+      // 在手动列之前，插入首字母排在它前面的新列
+      while (newIdx < newCols.length && newCols[newIdx].localeCompare(manualCol, 'zh-CN') < 0) {
+        result.push(newCols[newIdx]);
+        newIdx++;
       }
+      result.push(manualCol);
     }
-    // 添加不在columnOrder中的新列
-    for (const col of visibleColumns) {
-      if (!ordered.includes(col)) {
-        ordered.push(col);
-      }
+
+    // 添加剩余的新列（首字母在所有手动列之后）
+    while (newIdx < newCols.length) {
+      result.push(newCols[newIdx]);
+      newIdx++;
     }
-    return ordered;
+
+    return result;
   }, [visibleColumns, columnOrder]);
 
   // 生成列配置（固定列在前）
@@ -435,8 +459,8 @@ export default function ResultTable({
     return allColumns.map((col) => col.replace(/_/g, ' '));
   }, [allColumns]);
 
-  // 表格数据
-  const tableData = useMemo(() => {
+  // 表格数据（原始）
+  const tableDataRaw = useMemo(() => {
     if (!data?.results) return [];
     return data.results.map((row) => {
       return allColumns.map((col) => {
@@ -453,6 +477,26 @@ export default function ResultTable({
       });
     });
   }, [data?.results, allColumns]);
+
+  // 转置后的数据和列头
+  const { tableData, displayColHeaders } = useMemo(() => {
+    if (!transposed) {
+      return { tableData: tableDataRaw, displayColHeaders: colHeaders };
+    }
+    // 转置：行变列，列变行
+    // 转置后第一列是原来的列名，后续列是原来的每一行数据
+    const transposedData: (string | number)[][] = [];
+    for (let colIdx = 0; colIdx < allColumns.length; colIdx++) {
+      const row: (string | number)[] = [colHeaders[colIdx]]; // 第一个元素是列名
+      for (let rowIdx = 0; rowIdx < tableDataRaw.length; rowIdx++) {
+        row.push(tableDataRaw[rowIdx][colIdx]);
+      }
+      transposedData.push(row);
+    }
+    // 转置后的列头：第一列是"参数名"，后续是行号
+    const newHeaders = ['参数名', ...tableDataRaw.map((_, idx) => `结果${idx + 1}`)];
+    return { tableData: transposedData, displayColHeaders: newHeaders };
+  }, [transposed, tableDataRaw, colHeaders, allColumns]);
 
   // 数据变化时强制重新渲染 Handsontable
   useEffect(() => {
@@ -502,6 +546,19 @@ export default function ResultTable({
       const field = allColumns[column];
       onSortChange(field, sortOrder);
     }
+  };
+
+  // 列移动处理
+  const handleAfterColumnMove = (movedColumns: number[], finalIndex: number) => {
+    // 根据移动后的列顺序更新 columnOrder
+    const newOrder = [...allColumns];
+    // 获取被移动的列名
+    const movedColNames = movedColumns.map((idx) => allColumns[idx]);
+    // 从原位置移除
+    const remaining = newOrder.filter((_, idx) => !movedColumns.includes(idx));
+    // 插入到新位置
+    remaining.splice(finalIndex, 0, ...movedColNames);
+    setColumnOrder(remaining);
   };
 
   // 双击行选择（用于显示详情）
@@ -687,12 +744,28 @@ export default function ResultTable({
             </Button>
           </Popover>
           <span style={{ color: '#888', fontSize: 12 }}>
-            提示：双击行查看详情，点击空白隐藏
+            提示：双击行查看详情，拖拽行号/列头可排序（支持多选）
           </span>
         </Space>
-        <Button icon={<DownloadOutlined />} onClick={handleExport} disabled={!data?.results.length}>
-          导出当前页
-        </Button>
+        <Space>
+          <Button
+            icon={<SwapOutlined />}
+            type={transposed ? 'primary' : 'default'}
+            onClick={() => setTransposed(!transposed)}
+          >
+            {transposed ? '还原' : '转置'}
+          </Button>
+          <Button
+            icon={<EditOutlined />}
+            type={editMode ? 'primary' : 'default'}
+            onClick={() => setEditMode(!editMode)}
+          >
+            {editMode ? '退出编辑' : '编辑模式'}
+          </Button>
+          <Button icon={<DownloadOutlined />} onClick={handleExport} disabled={!data?.results.length}>
+            导出当前页
+          </Button>
+        </Space>
       </div>
 
       <div className="result-table-container">
@@ -704,26 +777,74 @@ export default function ResultTable({
           <HotTable
             ref={hotTableRef}
             data={tableData}
-            colHeaders={colHeaders}
-            colWidths={colWidths}
+            colHeaders={displayColHeaders}
+            colWidths={transposed ? undefined : colWidths}
             rowHeaders={true}
             width="100%"
             height="auto"
-            fixedColumnsStart={fixedColumnCount}
+            fixedColumnsStart={transposed ? 1 : fixedColumnCount}
             fixedRowsTop={0}
             manualColumnResize={true}
-            columnSorting={true}
+            manualColumnMove={!transposed}
+            manualRowMove={!transposed}
+            columnSorting={transposed ? false : { headerAction: false, indicator: true }}
+            contextMenu={transposed ? false : {
+              items: {
+                copy: { name: '复制' },
+                cut: { name: '剪切' },
+                sp1: { name: '---------' },
+                row_above: { name: '上方插入行' },
+                row_below: { name: '下方插入行' },
+                col_left: { name: '左侧插入列' },
+                col_right: { name: '右侧插入列' },
+                sp2: { name: '---------' },
+                remove_row: { name: '删除行' },
+                remove_col: { name: '删除列' },
+                sp3: { name: '---------' },
+                alignment: { name: '对齐方式' },
+              }
+            }}
             licenseKey="non-commercial-and-evaluation"
             stretchH="all"
             selectionMode="multiple"
             outsideClickDeselects={false}
-            afterColumnSort={handleAfterColumnSort}
+            afterColumnSort={transposed ? undefined : handleAfterColumnSort}
+            afterColumnMove={transposed ? undefined : handleAfterColumnMove}
             afterOnCellMouseDown={(event, coords) => {
               // 双击事件通过afterOnCellMouseDown的detail判断
-              if (event.detail === 2 && coords.row >= 0) {
-                handleRowDoubleClick(coords.row);
+              if (event.detail === 2) {
+                if (coords.row === -1 && coords.col >= 0 && !transposed) {
+                  // 双击列头触发排序切换：升序 -> 降序 -> 取消
+                  const hot = hotTableRef.current?.hotInstance;
+                  if (hot) {
+                    const columnSortingPlugin = hot.getPlugin('columnSorting');
+                    const currentSort = columnSortingPlugin.getSortConfig();
+                    const currentColSort = currentSort.find((s: { column: number }) => s.column === coords.col);
+
+                    let newOrder: 'asc' | 'desc' | undefined;
+                    if (!currentColSort) {
+                      newOrder = 'asc';
+                    } else if (currentColSort.sortOrder === 'asc') {
+                      newOrder = 'desc';
+                    } else {
+                      newOrder = undefined; // 取消排序
+                    }
+
+                    if (newOrder) {
+                      columnSortingPlugin.sort({ column: coords.col, sortOrder: newOrder });
+                      onSortChange(allColumns[coords.col], newOrder);
+                    } else {
+                      columnSortingPlugin.clearSort();
+                      onSortChange('id', 'asc'); // 恢复默认按id排序
+                    }
+                  }
+                } else if (coords.row >= 0 && !editMode && !transposed) {
+                  // 双击数据行显示详情
+                  handleRowDoubleClick(coords.row);
+                }
               }
             }}
+            readOnly={!editMode}
             cells={() => ({
               className: 'htCenter htMiddle',
             })}

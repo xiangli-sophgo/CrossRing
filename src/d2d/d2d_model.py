@@ -761,15 +761,8 @@ class D2D_Model:
         if not self.d2d_traffic_scheduler.is_all_completed():
             return False
 
-        # 检查是否有任何请求被发出
-        total_requests_sent = sum(self.d2d_requests_sent.values())
-        if total_requests_sent == 0:
-            return False  # 没有请求被发出，继续等待
-
-        # 使用基于读数据接收和写响应完成的判断逻辑
-        burst_length = 4  # 默认burst长度
-
-        # 初始化统计变量（如果还没有初始化）
+        # 检查是否有任何请求被发出（包括Die内和跨Die请求）
+        # 确保统计变量已初始化
         if not hasattr(self, "_local_read_requests"):
             self._local_read_requests = {i: 0 for i in range(self.num_dies)}
         if not hasattr(self, "_local_write_requests"):
@@ -778,6 +771,20 @@ class D2D_Model:
             self._cross_die_read_requests = {i: 0 for i in range(self.num_dies)}
         if not hasattr(self, "_cross_die_write_requests"):
             self._cross_die_write_requests = {i: 0 for i in range(self.num_dies)}
+
+        total_requests_sent = (
+            sum(self._local_read_requests.values()) +
+            sum(self._local_write_requests.values()) +
+            sum(self._cross_die_read_requests.values()) +
+            sum(self._cross_die_write_requests.values())
+        )
+        if total_requests_sent == 0:
+            return False  # 没有请求被发出，继续等待
+
+        # 使用基于读数据接收和写响应完成的判断逻辑
+        burst_length = 4  # 默认burst长度
+
+        # 初始化接收统计变量（如果还没有初始化）
         if not hasattr(self, "_actual_read_flits_received"):
             self._actual_read_flits_received = {i: 0 for i in range(self.num_dies)}
         if not hasattr(self, "_write_complete_received"):
@@ -905,12 +912,15 @@ class D2D_Model:
         # 在RequestTracker中开始追踪请求
         if hasattr(self, "request_tracker") and self.request_tracker:
             is_cross_die = src_die != dst_die
+            # 对于跨Die请求，使用d2d_target_type（真正的目标IP类型，如ddr_0）
+            # 而不是destination_type（中间路由节点d2d_sn_0）
+            actual_dest_type = req.d2d_target_type if is_cross_die else req.destination_type
             self.request_tracker.start_request(
                 packet_id=req.packet_id,
                 source=source_physical,
                 destination=dst_node,
-                source_type=src_ip,
-                dest_type=dst_ip,
+                source_type=req.source_type,
+                dest_type=actual_dest_type,
                 op_type=req.req_type,
                 burst_size=burst_length,
                 cycle=self.current_cycle,
@@ -1644,7 +1654,13 @@ class D2D_Model:
         Returns:
             dict: 包含仿真结果和统计数据的字典
         """
+        # 获取数据流名称
+        file_name = ""
+        if self.d2d_traffic_scheduler:
+            file_name = self.d2d_traffic_scheduler.get_save_filename()
+
         results = {
+            "数据流名称": file_name,
             "模型类型": "D2D",
             "Die数量": self.num_dies,
             "仿真周期": self.current_cycle,

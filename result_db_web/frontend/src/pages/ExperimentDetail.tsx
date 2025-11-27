@@ -58,8 +58,8 @@ export default function ExperimentDetail() {
   const [resultsLoading, setResultsLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
-  const [sortBy, setSortBy] = useState('performance');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [sortBy, setSortBy] = useState('id');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [paramKeys, setParamKeys] = useState<string[]>([]);
   const [trafficStats, setTrafficStats] = useState<TrafficStat[]>([]);
   const [activeTab, setActiveTab] = useState('results');
