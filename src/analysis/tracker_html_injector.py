@@ -519,3 +519,256 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
         f.write(html_content)
 
     return html_path
+
+
+def inject_tracker_functionality_to_content(html_content: str, tracker_json: str) -> str:
+    """
+    向HTML内容注入tracker交互功能（不写文件）
+
+    Args:
+        html_content: HTML内容字符串
+        tracker_json: tracker数据JSON字符串
+
+    Returns:
+        修改后的HTML内容字符串
+    """
+    # 解析tracker数据
+    tracker_data = json.loads(tracker_json) if isinstance(tracker_json, str) else tracker_json
+
+    # 检查是否已经注入过
+    if "tracker-panel" in html_content:
+        return html_content
+
+    # 生成tracker面板HTML（动态创建，竖向优先布局）
+    tracker_panel_html = """
+    <div class="tracker-section" id="tracker-panel">
+        <button class="close-btn" onclick="closeTrackerPanel()">关闭全部</button>
+        <h2 id="tracker-title">Tracker使用情况</h2>
+        <div class="tracker-grid" id="tracker-container">
+            <!-- tracker-item将由JavaScript动态创建 -->
+        </div>
+    </div>
+    """
+
+    # 生成CSS样式（与原函数相同的样式）
+    tracker_css = """
+    <style>
+        .tracker-section {
+            position: fixed;
+            right: 10px;
+            top: 10px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+            max-width: 90vw;
+            max-height: 90vh;
+            overflow-y: auto;
+            display: none;
+        }
+        .tracker-section.active {
+            display: block;
+        }
+        .tracker-section.narrow {
+            max-width: 650px;
+        }
+        .tracker-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(600px, 1fr));
+            gap: 15px;
+        }
+        .tracker-item {
+            position: relative;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+        }
+        .tracker-item .close-single {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: #ff4444;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            padding: 2px 8px;
+            font-size: 12px;
+        }
+        .close-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #ff4444;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+    </style>
+    """
+
+    # 生成JavaScript（与原函数相同，但内嵌tracker数据）
+    tracker_data_str = json.dumps(tracker_data, ensure_ascii=False)
+    tracker_js = f"""
+    <script>
+        // Tracker数据
+        const trackerData = {tracker_data_str};
+
+        // Tracker队列（最多显示6个）
+        const MAX_TRACKERS = 6;
+        let trackerQueue = [];
+
+        // 关闭整个面板
+        function closeTrackerPanel() {{
+            trackerQueue = [];
+            const panel = document.getElementById('tracker-panel');
+            const container = document.getElementById('tracker-container');
+            if (panel) panel.classList.remove('active');
+            if (container) container.innerHTML = '';
+        }}
+
+        // 关闭单个tracker
+        function closeTracker(key) {{
+            trackerQueue = trackerQueue.filter(item => item.key !== key);
+            updateAllTrackerCharts();
+        }}
+
+        // 显示tracker数据
+        function showTrackerData(dieId, ipType, ipPos) {{
+            console.log(`[Tracker] showTrackerData调用: Die${{dieId}} ${{ipType}}@${{ipPos}}`);
+
+            const dieData = trackerData[dieId.toString()];
+            if (!dieData) return;
+
+            const ipTypeData = dieData[ipType];
+            if (!ipTypeData) return;
+
+            const ipData = ipTypeData[ipPos.toString()];
+            if (!ipData) return;
+
+            const ipKey = `${{dieId}}_${{ipType}}_${{ipPos}}`;
+            const existingIndex = trackerQueue.findIndex(item => item.key === ipKey);
+            if (existingIndex !== -1) return;
+
+            if (trackerQueue.length >= MAX_TRACKERS) {{
+                trackerQueue.shift();
+            }}
+
+            trackerQueue.push({{ key: ipKey, dieId, ipType, ipPos, ipData }});
+
+            const panel = document.getElementById('tracker-panel');
+            if (panel) panel.classList.add('active');
+
+            updateAllTrackerCharts();
+        }}
+
+        function updateAllTrackerCharts() {{
+            const container = document.getElementById('tracker-container');
+            const panel = document.getElementById('tracker-panel');
+
+            if (trackerQueue.length === 0) {{
+                panel.classList.remove('active');
+                return;
+            }}
+
+            panel.classList.add('active');
+
+            if (trackerQueue.length <= 2) {{
+                panel.classList.add('narrow');
+            }} else {{
+                panel.classList.remove('narrow');
+            }}
+
+            container.innerHTML = '';
+
+            trackerQueue.forEach((item, index) => {{
+                const divId = `tracker-chart-${{index}}`;
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'tracker-item';
+                itemDiv.innerHTML = `
+                    <button class="close-single" onclick="closeTracker('${{item.key}}')">×</button>
+                    <div id="${{divId}}" style="width:100%;height:400px;"></div>
+                `;
+                container.appendChild(itemDiv);
+
+                setTimeout(() => {{
+                    renderTrackerChart(item.dieId, item.ipType, item.ipPos, item.ipData, divId);
+                }}, 50);
+            }});
+        }}
+
+        function renderTrackerChart(dieId, ipType, ipPos, ipData, targetDivId) {{
+            const trackerNames = {{'ro': 'RO', 'share': 'Share', 'wdb': 'WDB', 'rdb': 'RDB', 'read': 'Read', 'write': 'Write'}};
+            const networkFrequency = 2.0;
+            const traces = [];
+
+            for (const [trackerType, events] of Object.entries(ipData)) {{
+                if (!events || events.length === 0) continue;
+
+                const times = [];
+                const usageCounts = [];
+                let currentUsage = 0;
+                let cumulativeCount = 0;
+                const cumulativeAllocations = [];
+
+                for (const event of events) {{
+                    const [cycle, delta] = event;
+                    currentUsage += delta;
+                    if (delta > 0) cumulativeCount += delta;
+                    times.push(cycle / networkFrequency);
+                    usageCounts.push(currentUsage);
+                    cumulativeAllocations.push(cumulativeCount);
+                }}
+
+                traces.push({{
+                    x: times,
+                    y: usageCounts,
+                    mode: 'lines',
+                    name: trackerNames[trackerType] || trackerType,
+                    line: {{ width: 2.5, shape: 'hv' }},
+                    customdata: cumulativeAllocations,
+                    hovertemplate: '时间: %{{x:.1f}} ns<br>当前使用: %{{y}}<br>累计使用: %{{customdata}}<extra></extra>'
+                }});
+            }}
+
+            if (traces.length === 0) return;
+
+            let maxUsageCount = 0;
+            traces.forEach(trace => {{
+                maxUsageCount = Math.max(maxUsageCount, ...trace.y);
+            }});
+
+            const titleText = `${{ipType}}@${{ipPos}}@DIE${{dieId}}`;
+            const layout = {{
+                title: titleText,
+                xaxis: {{ title: '时间 (ns)' }},
+                yaxis: {{
+                    title: '使用个数',
+                    range: [0, Math.max(Math.ceil(maxUsageCount * 1.1), 1)]
+                }},
+                height: 400,
+                width: 580,
+                margin: {{ l: 60, r: 20, t: 60, b: 50 }},
+                hovermode: 'closest',
+                legend: {{ orientation: 'h', y: 1.05, xanchor: 'center', x: 0.5 }}
+            }};
+
+            try {{
+                Plotly.newPlot(targetDivId, traces, layout, {{displayModeBar: false}});
+            }} catch (error) {{
+                console.error('[Tracker] 渲染失败:', error);
+            }}
+        }}
+    </script>
+    """
+
+    # 注入CSS（在</head>之前）
+    html_content = html_content.replace("</head>", tracker_css + "</head>")
+
+    # 注入面板HTML和JS（在</body>之前）
+    html_content = html_content.replace("</body>", tracker_panel_html + tracker_js + "</body>")
+
+    return html_content

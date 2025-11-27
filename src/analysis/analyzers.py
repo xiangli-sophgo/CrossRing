@@ -744,29 +744,50 @@ class SingleDieAnalyzer:
         # 保存到缓存
         self._ip_bandwidth_data_cached = self.ip_bandwidth_data
 
-    def generate_unified_report(self, results: Dict, output_path: str) -> None:
+    def generate_unified_report(self, results: Dict, output_path: str = None, return_content: bool = False):
         """
         生成统一的带宽分析报告 (委托给ReportGenerator和CSVExporter)
 
         Args:
             results: analyze_all_bandwidth()的返回结果
-            output_path: 输出目录路径
+            output_path: 输出目录路径（如果return_content=True则忽略）
+            return_content: 如果为True，返回文件内容字典而不是写文件
+
+        Returns:
+            如果return_content=True: Dict[str, str] {filename: content}
+            否则: None
         """
-        # 生成文本报告
+        file_contents = {} if return_content else None
+
+        # 生成文本报告（已禁用，不生成txt）
         self.report_generator.generate_unified_report(results=results, output_path=output_path, num_ip=self.actual_num_ip if hasattr(self, "actual_num_ip") else 1)
 
         # 生成详细请求CSV
-        self.exporter.generate_detailed_request_csv(requests=self.requests, output_path=output_path)
+        if return_content:
+            request_csvs = self.exporter.generate_detailed_request_csv(requests=self.requests, return_content=True)
+            if request_csvs:
+                file_contents.update(request_csvs)
+        else:
+            self.exporter.generate_detailed_request_csv(requests=self.requests, output_path=output_path)
 
         # 生成端口CSV
-        self.exporter.generate_ports_csv(rn_ports=results.get("rn_ports"), sn_ports=results.get("sn_ports"), output_path=output_path, config=self.config)
+        if return_content:
+            ports_csv = self.exporter.generate_ports_csv(rn_ports=results.get("rn_ports"), sn_ports=results.get("sn_ports"), config=self.config, return_content=True)
+            if ports_csv:
+                file_contents["ports_bandwidth.csv"] = ports_csv
+        else:
+            self.exporter.generate_ports_csv(rn_ports=results.get("rn_ports"), sn_ports=results.get("sn_ports"), output_path=output_path, config=self.config)
 
         # 导出链路统计数据到CSV
         if hasattr(self.sim_model, "data_network") and self.sim_model.data_network:
-            import os
-
-            link_stats_csv = os.path.join(output_path, "link_statistics.csv")
-            self.exporter.export_link_statistics_csv(self.sim_model.data_network, link_stats_csv)
+            if return_content:
+                link_csv = self.exporter.export_link_statistics_csv(self.sim_model.data_network, return_content=True)
+                if link_csv:
+                    file_contents["link_statistics.csv"] = link_csv
+            else:
+                import os
+                link_stats_csv = os.path.join(output_path, "link_statistics.csv")
+                self.exporter.export_link_statistics_csv(self.sim_model.data_network, link_stats_csv)
 
         # 生成HTML格式的结果摘要，添加到集成报告中
         if self.sim_model and hasattr(self.sim_model, "result_processor"):
@@ -784,8 +805,8 @@ class SingleDieAnalyzer:
                 self.sim_model.result_processor.charts_to_merge = []
             self.sim_model.result_processor.charts_to_merge.append(("结果分析", None, report_html))
 
-        # 打印文件生成提示
-        if self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
+        # 打印文件生成提示（仅在写文件模式下）
+        if not return_content and self.sim_model and hasattr(self.sim_model, "verbose") and self.sim_model.verbose:
             import os
 
             print()
@@ -797,6 +818,8 @@ class SingleDieAnalyzer:
             saved_figures = results.get("saved_figures", [])
             for fig_name, fig_path in saved_figures:
                 print(f"{fig_name}已保存: {fig_path}")
+
+        return file_contents
 
     def generate_fifo_usage_csv(self, sim_model):
         """

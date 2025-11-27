@@ -27,6 +27,7 @@ class ExperimentCreate(BaseModel):
 
 class ExperimentUpdate(BaseModel):
     """更新实验请求"""
+    name: Optional[str] = None
     description: Optional[str] = None
     notes: Optional[str] = None
 
@@ -111,6 +112,7 @@ async def update_experiment(experiment_id: int, request: ExperimentUpdate):
 
     db_manager.update_experiment(
         experiment_id,
+        name=request.name,
         description=request.description,
         notes=request.notes,
     )

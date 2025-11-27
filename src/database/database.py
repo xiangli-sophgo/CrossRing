@@ -547,7 +547,7 @@ class DatabaseManager:
 
     def get_param_keys(self, experiment_id: int) -> list:
         """
-        获取实验结果中的所有配置参数键名
+        获取实验结果中的所有配置参数键名（所有结果的并集）
 
         用于前端动态生成表格列
         """
@@ -555,14 +555,17 @@ class DatabaseManager:
         ResultModel = self._get_result_model(experiment_type)
 
         with self.get_session() as session:
-            result = (
-                session.query(ResultModel)
+            results = (
+                session.query(ResultModel.config_params)
                 .filter(ResultModel.experiment_id == experiment_id)
-                .first()
+                .all()
             )
-            if result and result.config_params:
-                return list(result.config_params.keys())
-            return []
+            # 收集所有结果的参数键的并集
+            all_keys = set()
+            for (config_params,) in results:
+                if config_params:
+                    all_keys.update(config_params.keys())
+            return sorted(list(all_keys))
 
     @classmethod
     def reset_instance(cls):
@@ -659,6 +662,53 @@ class DatabaseManager:
                         result_type=result_type,
                         file_name=file_name,
                         file_path=file_path,
+                        mime_type=mime_type,
+                        file_size=file_size,
+                        file_content=file_content,
+                    )
+                    session.add(result_file)
+                    session.flush()
+                    file_ids.append(result_file.id)
+                except Exception:
+                    continue
+
+        return file_ids
+
+    def store_result_files_from_contents(
+        self,
+        result_id: int,
+        result_type: str,
+        file_contents: dict,
+    ) -> list:
+        """
+        从内存中的文件内容直接存储到数据库（不写本地文件）
+
+        Args:
+            result_id: 结果ID
+            result_type: 结果类型
+            file_contents: 文件内容字典 {filename: bytes_content}
+
+        Returns:
+            存储的文件ID列表
+        """
+        import mimetypes
+
+        file_ids = []
+        with self.get_session() as session:
+            for file_name, file_content in file_contents.items():
+                try:
+                    # 确保内容是bytes类型
+                    if isinstance(file_content, str):
+                        file_content = file_content.encode('utf-8')
+
+                    mime_type, _ = mimetypes.guess_type(file_name)
+                    file_size = len(file_content)
+
+                    result_file = ResultFile(
+                        result_id=result_id,
+                        result_type=result_type,
+                        file_name=file_name,
+                        file_path=f"db://{file_name}",  # 使用虚拟路径标识数据库存储
                         mime_type=mime_type,
                         file_size=file_size,
                         file_content=file_content,

@@ -18,7 +18,7 @@ from src.traffic_process.traffic_gene.generation_engine import (
     split_d2d_traffic_by_source as split_dcin_traffic_by_source
 )
 
-from app.api.ip_mount import _load_mounts
+from app.api.ip_mount import get_mounts_from_memory
 from app.api.traffic_config import _load_configs
 
 router = APIRouter(prefix="/api/traffic/generate", tags=["流量生成"])
@@ -237,8 +237,8 @@ async def generate_traffic(request: TrafficGenerateRequest):
     """
     start_time = datetime.now()
 
-    # 加载IP挂载
-    ip_mounts = _load_mounts(request.topology)
+    # 加载IP挂载（优先从内存读取）
+    ip_mounts = get_mounts_from_memory(request.topology)
     if not ip_mounts:
         raise HTTPException(
             status_code=400,

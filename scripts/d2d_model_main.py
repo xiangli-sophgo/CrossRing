@@ -57,7 +57,7 @@ def main():
         flow_graph_interactive=1,  # 生成HTML交互式流量图
         plot_rn_bw_fig=0,
         fifo_utilization_heatmap=1,
-        show_result_analysis=1,  # 在浏览器中显示图像
+        show_result_analysis=0,  # 在浏览器中显示图像
         # CSV文件导出控制
         export_d2d_requests_csv=1,
         export_ip_bandwidth_csv=1,
@@ -72,6 +72,7 @@ def main():
         print_interval=200,
         verbose=1,
     )
+    model.save_to_database(experiment_name="DCIN 仿真")
 
 
 if __name__ == "__main__":

@@ -1135,15 +1135,19 @@ class D2D_Model:
         # 处理D2D综合结果分析
         self.process_d2d_comprehensive_results(combined_flow_path=combined_flow_path)
 
-    def process_d2d_comprehensive_results(self, combined_flow_path=None):
+    def process_d2d_comprehensive_results(self, combined_flow_path=None, save_to_db_only=False):
         """
         处理D2D综合结果分析，复用现有的结果处理方法
 
         Args:
             combined_flow_path: generate_combined_flow_graph保存的文件路径（如果有）
+            save_to_db_only: 如果True，不写本地文件，只收集文件内容
         """
+        if save_to_db_only:
+            self._result_file_contents = {}
+
         # D2D专用结果处理，并收集保存的文件路径
-        saved_files = self._process_d2d_specific_results()
+        saved_files = self._process_d2d_specific_results(save_to_db_only=save_to_db_only)
 
         # 3. 添加组合流量图路径（如果有）
         if combined_flow_path:
@@ -1158,8 +1162,12 @@ class D2D_Model:
                 else:
                     print(f"{file_info['type']}已保存: {file_info['path']}")
 
-    def _process_d2d_specific_results(self):
-        """处理D2D专有的结果分析（跨Die请求记录和带宽统计）"""
+    def _process_d2d_specific_results(self, save_to_db_only=False):
+        """处理D2D专有的结果分析（跨Die请求记录和带宽统计）
+
+        Args:
+            save_to_db_only: 如果True，不写本地文件，只收集文件内容
+        """
         saved_files = []
 
         try:
@@ -1189,42 +1197,55 @@ class D2D_Model:
             traffic_name = self.d2d_traffic_scheduler.get_save_filename()
             d2d_result_path = os.path.join(result_save_path, f"{self.num_dies}die", traffic_name)
 
-            # 步骤1: 生成带宽分析报告（txt文件）
-            report_file = d2d_processor.generate_d2d_bandwidth_report(d2d_result_path, self.dies)
-            if report_file:
-                saved_files.append({"type": "D2D带宽报告", "path": report_file})
+            # 步骤1: 生成带宽分析报告（txt文件）- 仅在非db_only模式下生成
+            if not save_to_db_only:
+                report_file = d2d_processor.generate_d2d_bandwidth_report(d2d_result_path, self.dies)
+                if report_file:
+                    saved_files.append({"type": "D2D带宽报告", "path": report_file})
 
             # 步骤1.5: 生成D2D统计摘要HTML（用于集成报告）
             d2d_summary_html = d2d_processor.generate_d2d_summary_report_html(dies=self.dies)
 
             # 步骤2: 保存数据文件（根据配置）
             if self._result_analysis_config.get("export_d2d_requests_csv"):
-                read_requests = [req for req in d2d_processor.d2d_requests if req.req_type == "read"]
-                write_requests = [req for req in d2d_processor.d2d_requests if req.req_type == "write"]
+                if save_to_db_only:
+                    # 收集CSV内容而不写文件
+                    csv_contents = d2d_processor.save_d2d_requests_csv(return_content=True)
+                    if csv_contents:
+                        self._result_file_contents.update(csv_contents)
+                else:
+                    read_requests = [req for req in d2d_processor.d2d_requests if req.req_type == "read"]
+                    write_requests = [req for req in d2d_processor.d2d_requests if req.req_type == "write"]
 
-                if read_requests:
-                    read_csv_path = os.path.join(d2d_result_path, "d2d_read_requests.csv")
-                    saved_files.append({"type": "读请求", "path": read_csv_path, "count": len(read_requests)})
+                    if read_requests:
+                        read_csv_path = os.path.join(d2d_result_path, "d2d_read_requests.csv")
+                        saved_files.append({"type": "读请求", "path": read_csv_path, "count": len(read_requests)})
 
-                if write_requests:
-                    write_csv_path = os.path.join(d2d_result_path, "d2d_write_requests.csv")
-                    saved_files.append({"type": "写请求", "path": write_csv_path, "count": len(write_requests)})
+                    if write_requests:
+                        write_csv_path = os.path.join(d2d_result_path, "d2d_write_requests.csv")
+                        saved_files.append({"type": "写请求", "path": write_csv_path, "count": len(write_requests)})
 
-                d2d_processor.save_d2d_requests_csv(d2d_result_path)
+                    d2d_processor.save_d2d_requests_csv(d2d_result_path)
 
             if self._result_analysis_config.get("export_ip_bandwidth_csv"):
-                csv_path = os.path.join(d2d_result_path, "ip_bandwidth.csv")
-                d2d_processor.save_ip_bandwidth_to_csv(d2d_result_path)
+                if save_to_db_only:
+                    # 收集CSV内容而不写文件
+                    ip_bw_csv = d2d_processor.save_ip_bandwidth_to_csv(return_content=True)
+                    if ip_bw_csv:
+                        self._result_file_contents["ip_bandwidth.csv"] = ip_bw_csv
+                else:
+                    csv_path = os.path.join(d2d_result_path, "ip_bandwidth.csv")
+                    d2d_processor.save_ip_bandwidth_to_csv(d2d_result_path)
 
-                # 计算保存的记录数
-                if hasattr(d2d_processor, "die_ip_bandwidth_data") and d2d_processor.die_ip_bandwidth_data:
-                    total_records = 0
-                    for die_data in d2d_processor.die_ip_bandwidth_data.values():
-                        all_ip_instances = set()
-                        for mode_data in die_data.values():
-                            all_ip_instances.update(mode_data.keys())
-                        total_records += len(all_ip_instances)
-                    saved_files.append({"type": "IP带宽", "path": csv_path, "count": total_records})
+                    # 计算保存的记录数
+                    if hasattr(d2d_processor, "die_ip_bandwidth_data") and d2d_processor.die_ip_bandwidth_data:
+                        total_records = 0
+                        for die_data in d2d_processor.die_ip_bandwidth_data.values():
+                            all_ip_instances = set()
+                            for mode_data in die_data.values():
+                                all_ip_instances.update(mode_data.keys())
+                            total_records += len(all_ip_instances)
+                        saved_files.append({"type": "IP带宽", "path": csv_path, "count": total_records})
 
             # 步骤3: 生成流量图（如果启用）
             if self._result_analysis_config.get("flow_graph"):
@@ -1302,9 +1323,15 @@ class D2D_Model:
             # 步骤5: 生成FIFO使用率CSV文件（汇总所有Die的数据）
             should_export_fifo_csv = self._result_analysis_config.get("export_fifo_usage_csv", True)
             if should_export_fifo_csv:
-                fifo_csv_path = os.path.join(d2d_result_path, "fifo_usage_statistics.csv")
-                self._generate_d2d_fifo_usage_csv(fifo_csv_path)
-                saved_files.append({"type": "FIFO使用率统计", "path": fifo_csv_path})
+                if save_to_db_only:
+                    # 收集CSV内容而不写文件
+                    fifo_csv = self._generate_d2d_fifo_usage_csv(return_content=True)
+                    if fifo_csv:
+                        self._result_file_contents["fifo_usage_statistics.csv"] = fifo_csv
+                else:
+                    fifo_csv_path = os.path.join(d2d_result_path, "fifo_usage_statistics.csv")
+                    self._generate_d2d_fifo_usage_csv(fifo_csv_path)
+                    saved_files.append({"type": "FIFO使用率统计", "path": fifo_csv_path})
 
             # 步骤6: 生成FIFO使用率热力图（如果启用）- 只集成到HTML报告，不单独保存
             should_plot_fifo = self._result_analysis_config.get("fifo_utilization_heatmap") or getattr(self, "fifo_utilization_heatmap", False)
@@ -1406,22 +1433,58 @@ class D2D_Model:
                         if tracker_collector._has_tracker_data(tracker_usage_data):
                             tracker_collector.tracker_data[die_id_from_model][ip_type][ip_pos] = tracker_usage_data
 
-            tracker_json_path = tracker_collector.save_to_json(d2d_result_path, "tracker_data.json")
+            if save_to_db_only:
+                # 收集JSON内容而不写文件
+                tracker_json = tracker_collector.save_to_json(return_content=True)
+                if tracker_json:
+                    self._result_file_contents["tracker_data.json"] = tracker_json
+                tracker_json_path = None
+            else:
+                tracker_json_path = tracker_collector.save_to_json(d2d_result_path, "tracker_data.json")
 
             # 步骤8: 生成D2D集成可视化报告（合并所有图表）
             if ordered_charts:
                 from src.analysis.integrated_visualizer import create_integrated_report
 
-                integrated_save_path = os.path.join(d2d_result_path, "result_analysis.html")
-                integrated_path = create_integrated_report(charts_config=ordered_charts, save_path=integrated_save_path, show_result_analysis=self._result_analysis_config.get("show_fig", False))
+                if save_to_db_only:
+                    # 生成HTML内容而不写文件
+                    html_content = create_integrated_report(
+                        charts_config=ordered_charts,
+                        return_content=True
+                    )
 
-                # 步骤8.5: 注入tracker功能到HTML
-                if integrated_path and tracker_json_path:
-                    from src.analysis.tracker_html_injector import inject_tracker_functionality
+                    # 注入tracker功能到HTML内容
+                    if html_content and "tracker_data.json" in self._result_file_contents:
+                        try:
+                            from src.analysis.tracker_html_injector import inject_tracker_functionality_to_content
+                            tracker_json = self._result_file_contents["tracker_data.json"]
+                            html_content = inject_tracker_functionality_to_content(html_content, tracker_json)
+                        except Exception:
+                            pass
 
-                    inject_tracker_functionality(integrated_path, tracker_json_path)
-                if integrated_path:
-                    saved_files.append({"type": "集成可视化报告", "path": integrated_path})
+                    if html_content:
+                        self._result_html_content = html_content
+                        self._result_file_contents["result_analysis.html"] = html_content
+                else:
+                    integrated_save_path = os.path.join(d2d_result_path, "result_analysis.html")
+                    integrated_path = create_integrated_report(charts_config=ordered_charts, save_path=integrated_save_path, show_result_analysis=self._result_analysis_config.get("show_fig", False))
+
+                    # 步骤8.5: 注入tracker功能到HTML
+                    if integrated_path and tracker_json_path:
+                        from src.analysis.tracker_html_injector import inject_tracker_functionality
+
+                        inject_tracker_functionality(integrated_path, tracker_json_path)
+                    if integrated_path:
+                        saved_files.append({"type": "集成可视化报告", "path": integrated_path})
+
+            # 缓存D2DAnalyzer统计数据供get_results()使用
+            # 注意：latency_stats和circuit_stats在generate_d2d_summary_report_html中被计算并存储
+            self._d2d_analyzer_cache = {
+                "d2d_requests": d2d_processor.d2d_requests,
+                "latency_stats": getattr(d2d_processor, "latency_stats", None) or {},
+                "circuit_stats": getattr(d2d_processor, "circuit_stats", None) or {},
+                "die_ip_bandwidth_data": getattr(d2d_processor, "die_ip_bandwidth_data", None) or {},
+            }
 
         except Exception as e:
             import traceback
@@ -1432,9 +1495,19 @@ class D2D_Model:
 
         return saved_files
 
-    def _generate_d2d_fifo_usage_csv(self, output_path: str):
-        """生成D2D系统的FIFO使用率CSV文件（包含所有Die的数据和Die ID列）"""
+    def _generate_d2d_fifo_usage_csv(self, output_path: str = None, return_content: bool = False):
+        """生成D2D系统的FIFO使用率CSV文件（包含所有Die的数据和Die ID列）
+
+        Args:
+            output_path: 输出文件路径（return_content=True时可为None）
+            return_content: 如果True，返回CSV内容字符串，不写文件
+
+        Returns:
+            如果return_content=True: str CSV内容
+            否则: None
+        """
         import csv
+        import io
         from src.analysis.data_collectors import CircuitStatsCollector
 
         # 准备CSV数据
@@ -1474,6 +1547,13 @@ class D2D_Model:
                             }
                             rows.append(row)
 
+        if return_content:
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=headers)
+            writer.writeheader()
+            writer.writerows(rows)
+            return output.getvalue()
+
         # 写入CSV文件（使用UTF-8 with BOM编码，防止Excel打开乱码）
         with open(output_path, "w", newline="", encoding="utf-8-sig") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=headers)
@@ -1482,6 +1562,292 @@ class D2D_Model:
 
         # if self.kwargs.get("verbose", 1):
         #     print(f"FIFO使用率统计CSV已保存: {output_path}")
+
+    def save_to_database(self, experiment_name=None, experiment_type="dcin", description=None, save_local_files=False):
+        """保存D2D仿真结果到数据库
+
+        Args:
+            experiment_name: 实验名称，默认为"D2D日常仿真_YYYY-MM-DD"
+            experiment_type: 实验类型，默认为"dcin"
+            description: 实验描述
+            save_local_files: 如果为True，同时保存本地文件（默认False）
+
+        Returns:
+            experiment_id: 实验ID
+        """
+        from datetime import datetime
+        from src.database import ResultManager
+
+        db = ResultManager()
+
+        # 实验名称：默认为 D2D日常仿真_YYYY-MM-DD
+        if experiment_name is None:
+            today = datetime.now().strftime("%Y-%m-%d")
+            experiment_name = f"D2D日常仿真_{today}"
+
+        # 获取或创建实验
+        exp = db.get_experiment_by_name(experiment_name)
+        if exp:
+            experiment_id = exp["id"]
+        else:
+            # 获取traffic文件列表
+            traffic_files = []
+            if self.d2d_traffic_scheduler:
+                traffic_files = [self.d2d_traffic_scheduler.get_save_filename()]
+
+            # 获取配置路径
+            config_path = getattr(self.config, "config_path", None)
+
+            experiment_id = db.create_experiment(
+                name=experiment_name,
+                experiment_type=experiment_type,
+                topo_type=f"{self.num_dies}die",
+                config_path=config_path,
+                traffic_files=traffic_files,
+                description=description or "D2D仿真结果汇总",
+            )
+            db.update_experiment_status(experiment_id, "completed")
+
+        # 处理综合结果（不写本地文件，直接收集内容）
+        self.process_d2d_comprehensive_results(save_to_db_only=not save_local_files)
+
+        # 获取仿真结果
+        results = self.get_results()
+
+        # 提取性能指标
+        performance = results.get("总带宽", 0)
+
+        # 获取HTML报告内容
+        result_html = getattr(self, "_result_html_content", None)
+
+        # 获取收集到的文件内容
+        result_file_contents = getattr(self, "_result_file_contents", {})
+
+        # 保存结果
+        db.add_result(
+            experiment_id=experiment_id,
+            config_params=results,
+            performance=performance,
+            result_details=results,
+            result_html=result_html,
+            result_file_contents=result_file_contents if result_file_contents else None,
+        )
+
+        if self.kwargs.get("verbose", 1):
+            print(f"\n结果已保存到数据库，实验: {experiment_name}, ID: {experiment_id}")
+
+        return experiment_id
+
+    def get_results(self):
+        """收集D2D仿真结果统计
+
+        Returns:
+            dict: 包含仿真结果和统计数据的字典
+        """
+        results = {
+            "模型类型": "D2D",
+            "Die数量": self.num_dies,
+            "仿真周期": self.current_cycle,
+            "跨Die请求数": self.total_cross_die_requests,
+            "跨Die响应数": self.total_cross_die_responses,
+        }
+
+        # 收集D2D专有统计
+        d2d_stats = self._collect_d2d_statistics()
+        results["跨Die请求统计"] = d2d_stats["cross_die_requests"]
+        results["跨Die响应统计"] = d2d_stats["cross_die_responses"]
+
+        # 收集每个Die的统计
+        total_read_req = 0
+        total_write_req = 0
+        total_read_flit = 0
+        total_write_flit = 0
+
+        for die_id, die_model in self.dies.items():
+            die_results = die_model.get_results()
+            # 添加Die前缀避免键冲突
+            for key, value in die_results.items():
+                # 只添加数值类型的结果，跳过嵌套字典
+                if isinstance(value, (int, float, str)):
+                    results[f"Die{die_id}_{key}"] = value
+
+            # 累计统计
+            total_read_req += getattr(die_model, "read_req", 0)
+            total_write_req += getattr(die_model, "write_req", 0)
+            total_read_flit += getattr(die_model, "read_flit", 0)
+            total_write_flit += getattr(die_model, "write_flit", 0)
+
+        # 汇总统计
+        results["总读请求数"] = total_read_req
+        results["总写请求数"] = total_write_req
+        results["总读flit数"] = total_read_flit
+        results["总写flit数"] = total_write_flit
+
+        # 计算总带宽（如果有缓存的处理器）
+        if hasattr(self, "_cached_d2d_processor") and self._cached_d2d_processor:
+            d2d_processor = self._cached_d2d_processor
+            if hasattr(d2d_processor, "die_ip_bandwidth_data") and d2d_processor.die_ip_bandwidth_data:
+                total_bw = 0.0
+                for die_id, die_data in d2d_processor.die_ip_bandwidth_data.items():
+                    total_data = die_data.get("total", {})
+                    for ip_instance, bw_matrix in total_data.items():
+                        if bw_matrix is not None:
+                            total_bw += bw_matrix.sum()
+                results["总带宽"] = total_bw
+
+        # 从缓存的D2DAnalyzer数据中提取整体汇总指标（HTML报告中的统计数据）
+        if hasattr(self, "_d2d_analyzer_cache") and self._d2d_analyzer_cache:
+            cache = self._d2d_analyzer_cache
+
+            # 1. D2D请求统计（跨Die请求）
+            d2d_requests = cache.get("d2d_requests", [])
+            if d2d_requests:
+                results["D2D读请求数"] = len([r for r in d2d_requests if r.req_type == "read"])
+                results["D2D写请求数"] = len([r for r in d2d_requests if r.req_type == "write"])
+                results["D2D总请求数"] = len(d2d_requests)
+
+            # 2. 延迟统计
+            latency_stats = cache.get("latency_stats", {})
+            # 延迟类型映射：cmd->命令, data->数据, trans->事务
+            latency_type_map = {"cmd": "命令", "data": "数据", "trans": "事务"}
+            for latency_type in ["cmd", "data", "trans"]:
+                for req_type in ["read", "write", "mixed"]:
+                    stats = latency_stats.get(latency_type, {}).get(req_type, {})
+                    if stats.get("count", 0) > 0:
+                        cn_type = latency_type_map[latency_type]
+                        # 混合操作省略，读写保留
+                        if req_type == "mixed":
+                            prefix = f"{cn_type}延迟"
+                        else:
+                            cn_req = "读" if req_type == "read" else "写"
+                            prefix = f"{cn_type}延迟_{cn_req}"
+                        results[f"{prefix}_平均"] = stats["sum"] / stats["count"]
+                        results[f"{prefix}_最大"] = stats["max"]
+                        if "p95" in stats:
+                            results[f"{prefix}_p95"] = stats["p95"]
+                        if "p99" in stats:
+                            results[f"{prefix}_p99"] = stats["p99"]
+
+            # 3. 绕环统计
+            circuit_stats = cache.get("circuit_stats", {})
+            summary = circuit_stats.get("summary", {})
+            circling = summary.get("circling_ratio", {})
+            # 方向映射：horizontal->横向, vertical->纵向, overall->省略
+            for direction in ["horizontal", "vertical", "overall"]:
+                dir_data = circling.get(direction, {})
+                if "circling_ratio" in dir_data:
+                    if direction == "horizontal":
+                        results["绕环_横向_比例"] = dir_data["circling_ratio"]
+                    elif direction == "vertical":
+                        results["绕环_纵向_比例"] = dir_data["circling_ratio"]
+                    else:  # overall
+                        results["绕环_比例"] = dir_data["circling_ratio"]
+
+            # 4. Tag统计
+            results["ITag_横向"] = summary.get("ITag_h_num", 0)
+            results["ITag_纵向"] = summary.get("ITag_v_num", 0)
+            results["RB_ETag_T1"] = summary.get("RB_ETag_T1_num", 0)
+            results["RB_ETag_T0"] = summary.get("RB_ETag_T0_num", 0)
+            results["EQ_ETag_T1"] = summary.get("EQ_ETag_T1_num", 0)
+            results["EQ_ETag_T0"] = summary.get("EQ_ETag_T0_num", 0)
+            results["读重试数"] = summary.get("read_retry_num", 0)
+            results["写重试数"] = summary.get("write_retry_num", 0)
+
+            # 5. IP带宽统计（整体平均）
+            die_ip_bw = cache.get("die_ip_bandwidth_data", {})
+            self._add_aggregated_ip_bandwidth(results, die_ip_bw)
+
+        # 添加D2D配置参数
+        d2d_config_whitelist = [
+            # D2D基本配置
+            "NUM_DIES",
+            "D2D_ENABLED",
+            "D2D_MULTI_HOP_ENABLED",
+            "D2D_ROUTING_ALGORITHM",
+            # D2D延迟配置
+            "D2D_AR_LATENCY",
+            "D2D_R_LATENCY",
+            "D2D_AW_LATENCY",
+            "D2D_W_LATENCY",
+            "D2D_B_LATENCY",
+            # D2D带宽配置
+            "D2D_RN_BW_LIMIT",
+            "D2D_SN_BW_LIMIT",
+            "D2D_AXI_BANDWIDTH",
+            # D2D_RN资源配置
+            "D2D_RN_RDB_SIZE",
+            "D2D_RN_WDB_SIZE",
+            "D2D_RN_R_TRACKER_OSTD",
+            "D2D_RN_W_TRACKER_OSTD",
+            # D2D_SN资源配置
+            "D2D_SN_RDB_SIZE",
+            "D2D_SN_WDB_SIZE",
+            "D2D_SN_R_TRACKER_OSTD",
+            "D2D_SN_W_TRACKER_OSTD",
+        ]
+
+        for key in d2d_config_whitelist:
+            if hasattr(self.config, key):
+                value = getattr(self.config, key)
+                # 跳过auto和复杂对象
+                if isinstance(value, (int, float, str, bool)):
+                    results[key] = value
+
+        return results
+
+    def _add_aggregated_ip_bandwidth(self, results, die_ip_bandwidth_data):
+        """计算所有Die的IP带宽整体平均（加权平均），添加到results字典
+
+        Args:
+            results: 结果字典
+            die_ip_bandwidth_data: D2DAnalyzer计算的每个Die的IP带宽数据
+                每个IP实例的带宽存储为numpy矩阵，矩阵中非零位置为该节点的加权带宽
+        """
+        from collections import defaultdict
+
+        ip_type_groups = defaultdict(lambda: {"read": [], "write": [], "total": []})
+
+        # 特殊IP类型，不需要拆分（d2d_rn, d2d_sn等）
+        special_ip_types = {"d2d_rn", "d2d_sn"}
+
+        for die_id, die_data in die_ip_bandwidth_data.items():
+            for bw_type in ["read", "write", "total"]:
+                matrix = die_data.get(bw_type, {})
+                for ip_instance, bw_value in matrix.items():
+                    # bw_value是numpy数组（矩阵），每个非零位置代表一个IP实例的加权带宽
+                    # 提取非零值作为各实例的带宽
+                    if hasattr(bw_value, "flatten"):
+                        non_zero_values = bw_value[bw_value > 0.001]
+                        if len(non_zero_values) > 0:
+                            # 从ip_instance提取ip_type
+                            if ip_instance in special_ip_types:
+                                ip_type = ip_instance
+                            else:
+                                ip_type = ip_instance.rsplit("_", 1)[0] if "_" in ip_instance else ip_instance
+                            # 将每个非零值作为单独的带宽样本
+                            ip_type_groups[ip_type][bw_type].extend(non_zero_values.tolist())
+                    elif bw_value > 0.001:
+                        # 标量值
+                        if ip_instance in special_ip_types:
+                            ip_type = ip_instance
+                        else:
+                            ip_type = ip_instance.rsplit("_", 1)[0] if "_" in ip_instance else ip_instance
+                        ip_type_groups[ip_type][bw_type].append(bw_value)
+
+        # 带宽类型映射：read->读, write->写, total->省略
+        bw_type_map = {"read": "读", "write": "写", "total": None}
+        for ip_type, bw_data in ip_type_groups.items():
+            ip_upper = ip_type.upper()  # gdma -> GDMA, d2d_rn -> D2D_RN
+            for bw_type in ["read", "write", "total"]:
+                values = bw_data[bw_type]
+                if values:
+                    # 计算平均带宽（所有实例的加权带宽的平均值）
+                    avg_bw = sum(values) / len(values)
+                    cn_bw_type = bw_type_map[bw_type]
+                    if cn_bw_type:  # read/write
+                        results[f"{ip_upper}_{cn_bw_type}_带宽"] = avg_bw
+                    else:  # total (混合省略)
+                        results[f"{ip_upper}_带宽"] = avg_bw
 
     def _collect_d2d_statistics(self):
         """收集D2D专有统计信息"""

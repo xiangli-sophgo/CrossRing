@@ -216,7 +216,8 @@ class D2DAnalyzer:
         self.d2d_stats = self.calculate_d2d_bandwidth()
 
         # 计算延迟统计（包括跨Die和Die内部请求）
-        latency_stats = self._calculate_d2d_latency_stats()
+        self.latency_stats = self._calculate_d2d_latency_stats()
+        latency_stats = self.latency_stats
 
         # 检查是否有任何请求（跨Die或Die内部）
         total_all_requests = len(self.d2d_requests)
@@ -875,13 +876,15 @@ class D2DAnalyzer:
         """
         from .exporters import ReportGenerator
 
-        # 收集延迟统计
-        latency_stats = self._calculate_d2d_latency_stats()
+        # 收集延迟统计（并存储为实例属性）
+        self.latency_stats = self._calculate_d2d_latency_stats()
+        latency_stats = self.latency_stats
 
-        # 收集绕环统计
-        circuit_stats_data = None
+        # 收集绕环统计（并存储为实例属性）
+        self.circuit_stats = None
         if dies:
-            circuit_stats_data = self._collect_d2d_circuit_stats(dies)
+            self.circuit_stats = self._collect_d2d_circuit_stats(dies)
+        circuit_stats_data = self.circuit_stats
 
         # 调用ReportGenerator生成HTML
         report_generator = ReportGenerator()
@@ -1091,23 +1094,33 @@ class D2DAnalyzer:
 
         return lines
 
-    def save_d2d_requests_csv(self, output_path: str):
+    def save_d2d_requests_csv(self, output_path: str = None, return_content: bool = False):
         """
         保存D2D请求到CSV文件（委托给CSVExporter）
 
         Args:
-            output_path: 输出目录路径
-        """
-        self.exporter.save_d2d_requests_csv(d2d_requests=self.d2d_requests, output_path=output_path)
+            output_path: 输出目录路径（return_content=True时可为None）
+            return_content: 如果True，返回{filename: content}字典，不写文件
 
-    def save_ip_bandwidth_to_csv(self, output_path: str, die_ip_bandwidth_data: Dict = None, config=None):
+        Returns:
+            如果return_content=True: Dict[str, str] 文件名到内容的映射
+            否则: None
+        """
+        return self.exporter.save_d2d_requests_csv(d2d_requests=self.d2d_requests, output_path=output_path, return_content=return_content)
+
+    def save_ip_bandwidth_to_csv(self, output_path: str = None, die_ip_bandwidth_data: Dict = None, config=None, return_content: bool = False):
         """
         保存IP带宽数据到CSV（委托给CSVExporter）
 
         Args:
-            output_path: 输出目录路径
+            output_path: 输出目录路径（return_content=True时可为None）
             die_ip_bandwidth_data: Die IP带宽数据（可选，如果不提供则使用self.die_ip_bandwidth_data）
             config: 配置对象（可选，如果不提供则使用self.config）
+            return_content: 如果True，返回CSV内容字符串，不写文件
+
+        Returns:
+            如果return_content=True: str CSV内容
+            否则: None
         """
         # 如果没有提供数据，尝试从实例属性获取
         if die_ip_bandwidth_data is None:
@@ -1118,9 +1131,9 @@ class D2DAnalyzer:
 
         # 如果还是没有数据，直接返回
         if not die_ip_bandwidth_data:
-            return
+            return "" if return_content else None
 
-        self.exporter.save_ip_bandwidth_to_csv(die_ip_bandwidth_data=die_ip_bandwidth_data, output_path=output_path, config=config)
+        return self.exporter.save_ip_bandwidth_to_csv(die_ip_bandwidth_data=die_ip_bandwidth_data, output_path=output_path, config=config, return_content=return_content)
 
     def draw_d2d_flow_graph(self, die_networks: Dict = None, dies: Dict = None, config=None, die_ip_bandwidth_data: Dict = None, mode: str = "total", save_path: str = None):
         """

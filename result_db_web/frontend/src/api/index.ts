@@ -47,7 +47,7 @@ export const createExperiment = async (data: {
 
 export const updateExperiment = async (
   id: number,
-  data: { description?: string; notes?: string }
+  data: { name?: string; description?: string; notes?: string }
 ): Promise<Experiment> => {
   const response = await api.put(`/experiments/${id}`, data);
   return response.data;

@@ -27,10 +27,11 @@ import {
   DeleteOutlined,
   BarChartOutlined,
   DownloadOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useExperimentStore } from '../stores/experimentStore';
-import { getExperiments, importFromCSV, deleteExperiment } from '../api';
+import { getExperiments, importFromCSV, deleteExperiment, updateExperiment } from '../api';
 import type { Experiment, ExperimentType } from '../types';
 import ExportModal from '../components/ExportModal';
 
@@ -61,6 +62,9 @@ export default function ExperimentList() {
   const [importForm] = Form.useForm();
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [typeFilter, setTypeFilter] = useState<ExperimentType | 'all'>('all');
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingField, setEditingField] = useState<'name' | 'description' | null>(null);
+  const [editingValue, setEditingValue] = useState<string>('');
 
   // 加载实验列表
   const loadExperiments = async () => {
@@ -124,19 +128,73 @@ export default function ExperimentList() {
     }
   };
 
+  // 处理字段编辑
+  const handleStartEdit = (record: Experiment, field: 'name' | 'description') => {
+    setEditingId(record.id);
+    setEditingField(field);
+    setEditingValue(field === 'name' ? record.name : (record.description || ''));
+  };
+
+  const handleSaveEdit = async () => {
+    if (editingId === null || editingField === null) return;
+    try {
+      await updateExperiment(editingId, { [editingField]: editingValue });
+      message.success(editingField === 'name' ? '名称修改成功' : '描述修改成功');
+      handleCancelEdit();
+      loadExperiments();
+    } catch (error) {
+      message.error(editingField === 'name' ? '名称修改失败' : '描述修改失败');
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditingField(null);
+    setEditingValue('');
+  };
+
   // 表格列定义
   const columns: ColumnsType<Experiment> = [
     {
       title: '实验名称',
       dataIndex: 'name',
       key: 'name',
-      width: 250,
+      width: 350,
       ellipsis: true,
-      render: (text, record) => (
-        <Tooltip title={text}>
-          <a onClick={() => navigate(`/experiments/${record.id}`)}>{text}</a>
-        </Tooltip>
-      ),
+      render: (text, record) => {
+        if (editingId === record.id && editingField === 'name') {
+          return (
+            <Space>
+              <Input
+                size="small"
+                value={editingValue}
+                onChange={(e) => setEditingValue(e.target.value)}
+                onPressEnter={handleSaveEdit}
+                onKeyDown={(e) => e.key === 'Escape' && handleCancelEdit()}
+                autoFocus
+                style={{ width: 150 }}
+              />
+              <Button size="small" type="primary" onClick={handleSaveEdit}>
+                保存
+              </Button>
+              <Button size="small" onClick={handleCancelEdit}>
+                取消
+              </Button>
+            </Space>
+          );
+        }
+        return (
+          <Space>
+            <span>{text}</span>
+            <Tooltip title="编辑名称">
+              <EditOutlined
+                style={{ color: '#1890ff', cursor: 'pointer' }}
+                onClick={() => handleStartEdit(record, 'name')}
+              />
+            </Tooltip>
+          </Space>
+        );
+      },
     },
     {
       title: '结果数',
@@ -177,11 +235,42 @@ export default function ExperimentList() {
       dataIndex: 'description',
       key: 'description',
       ellipsis: true,
-      render: (text) => (
-        <Tooltip title={text}>
-          <span>{text || '-'}</span>
-        </Tooltip>
-      ),
+      render: (text, record) => {
+        if (editingId === record.id && editingField === 'description') {
+          return (
+            <Space>
+              <Input
+                size="small"
+                value={editingValue}
+                onChange={(e) => setEditingValue(e.target.value)}
+                onPressEnter={handleSaveEdit}
+                onKeyDown={(e) => e.key === 'Escape' && handleCancelEdit()}
+                autoFocus
+                style={{ width: 200 }}
+              />
+              <Button size="small" type="primary" onClick={handleSaveEdit}>
+                保存
+              </Button>
+              <Button size="small" onClick={handleCancelEdit}>
+                取消
+              </Button>
+            </Space>
+          );
+        }
+        return (
+          <Space>
+            <Tooltip title={text}>
+              <span>{text || '-'}</span>
+            </Tooltip>
+            <Tooltip title="编辑描述">
+              <EditOutlined
+                style={{ color: '#1890ff', cursor: 'pointer' }}
+                onClick={() => handleStartEdit(record, 'description')}
+              />
+            </Tooltip>
+          </Space>
+        );
+      },
     },
     {
       title: '操作',

@@ -959,15 +959,19 @@ class CircuitStatsCollector:
             "avg_throughput": flit_count / total_cycles if total_cycles > 0 else 0,
         }
 
-    def generate_fifo_usage_csv(self, model, output_path: str = None):
-        """生成FIFO使用率CSV文件（仅统计data通道）"""
-        if output_path is None:
-            # 使用模型的结果保存路径或当前目录
-            if hasattr(model, "result_save_path") and model.result_save_path:
-                output_dir = os.path.dirname(model.result_save_path)
-                output_path = os.path.join(output_dir, "fifo_usage_statistics.csv")
-            else:
-                output_path = "fifo_usage_statistics.csv"
+    def generate_fifo_usage_csv(self, model, output_path: str = None, return_content: bool = False):
+        """生成FIFO使用率CSV文件（仅统计data通道）
+
+        Args:
+            model: 仿真模型对象
+            output_path: 输出文件路径（如果return_content=True则忽略）
+            return_content: 如果为True，返回CSV内容字符串而不是写文件
+
+        Returns:
+            如果return_content=True: CSV内容字符串
+            否则: 输出文件路径
+        """
+        import io
 
         # 获取FIFO使用率统计
         fifo_stats = self.process_fifo_usage_statistics(model)
@@ -1012,7 +1016,22 @@ class CircuitStatsCollector:
                         }
                         rows.append(row)
 
-        # 写入CSV文件（使用UTF-8 with BOM编码，防止Excel打开乱码）
+        # 如果要求返回内容，使用StringIO
+        if return_content:
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=headers)
+            writer.writeheader()
+            writer.writerows(rows)
+            return output.getvalue()
+
+        # 否则写入文件
+        if output_path is None:
+            if hasattr(model, "result_save_path") and model.result_save_path:
+                output_dir = os.path.dirname(model.result_save_path)
+                output_path = os.path.join(output_dir, "fifo_usage_statistics.csv")
+            else:
+                output_path = "fifo_usage_statistics.csv"
+
         with open(output_path, "w", newline="", encoding="utf-8-sig") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=headers)
             writer.writeheader()
@@ -1097,22 +1116,29 @@ class TrackerDataCollector:
 
         return False
 
-    def save_to_json(self, output_dir: str, filename: str = "tracker_data.json"):
+    def save_to_json(self, output_dir: str = None, filename: str = "tracker_data.json", return_content: bool = False):
         """
-        将tracker数据保存为JSON文件
+        将tracker数据保存为JSON文件或返回JSON字符串
 
         Args:
-            output_dir: 输出目录
+            output_dir: 输出目录（如果return_content=True则忽略）
             filename: 文件名
+            return_content: 如果为True，返回JSON字符串而不是写文件
 
         Returns:
-            保存的文件路径
+            如果return_content=True: JSON字符串
+            否则: 保存的文件路径
         """
-        os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, filename)
-
         # 转换数据格式为可序列化的格式
         serializable_data = self._convert_to_serializable(self.tracker_data)
+
+        # 如果要求返回内容
+        if return_content:
+            return json.dumps(serializable_data, indent=2, ensure_ascii=False)
+
+        # 否则写入文件
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, filename)
 
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(serializable_data, f, indent=2, ensure_ascii=False)

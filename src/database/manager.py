@@ -114,6 +114,7 @@ class ResultManager:
     def update_experiment(
         self,
         experiment_id: int,
+        name: Optional[str] = None,
         description: Optional[str] = None,
         status: Optional[str] = None,
         completed_combinations: Optional[int] = None,
@@ -122,6 +123,8 @@ class ResultManager:
     ) -> bool:
         """更新实验信息"""
         kwargs = {}
+        if name is not None:
+            kwargs["name"] = name
         if description is not None:
             kwargs["description"] = description
         if status is not None:
@@ -155,6 +158,7 @@ class ResultManager:
         result_details: Optional[Dict[str, Any]] = None,
         result_html: Optional[str] = None,
         result_files: Optional[List[str]] = None,
+        result_file_contents: Optional[Dict[str, bytes]] = None,
         error: Optional[str] = None,
     ) -> int:
         """
@@ -166,7 +170,8 @@ class ResultManager:
             performance: 主要性能指标
             result_details: 详细结果数据
             result_html: HTML报告内容
-            result_files: 结果文件路径列表
+            result_files: 结果文件路径列表（向后兼容，从文件读取内容）
+            result_file_contents: 文件内容字典 {filename: bytes_content}，直接存储到数据库
             error: 错误信息
 
         Returns:
@@ -187,8 +192,11 @@ class ResultManager:
                 error=error,
             )
 
-            # 自动将结果文件内容存储到数据库
-            if result_files:
+            # 优先使用直接传入的文件内容
+            if result_file_contents:
+                self.db.store_result_files_from_contents(result_id, experiment_type, result_file_contents)
+            # 向后兼容：如果传入了文件路径列表，从文件读取内容
+            elif result_files:
                 self.db.store_result_files_batch(result_id, experiment_type, result_files)
 
             # 更新实验统计

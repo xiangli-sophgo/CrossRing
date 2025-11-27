@@ -11,7 +11,7 @@ from src.traffic_process.traffic_gene.static_bandwidth_analyzer import (
     compute_d2d_link_bandwidth as compute_dcin_link_bandwidth,
 )
 
-from app.api.ip_mount import _load_mounts
+from app.api.ip_mount import get_mounts_from_memory
 from app.api.traffic_config import _load_configs
 
 # DCIN配置文件目录
@@ -149,8 +149,8 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
             detail=f"不支持的路由类型: {request.routing_type}. 必须是 'XY' 或 'YX'"
         )
 
-    # 加载IP挂载
-    ip_mounts = _load_mounts(request.topology)
+    # 加载IP挂载（优先从内存读取）
+    ip_mounts = get_mounts_from_memory(request.topology)
     if not ip_mounts:
         raise HTTPException(
             status_code=400,

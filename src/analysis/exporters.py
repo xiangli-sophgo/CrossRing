@@ -8,6 +8,7 @@
 """
 
 import os
+import io
 import csv
 import json
 import psutil
@@ -29,13 +30,18 @@ class CSVExporter:
         """
         self.verbose = verbose
 
-    def generate_detailed_request_csv(self, requests: List[RequestInfo], output_path: str) -> None:
+    def generate_detailed_request_csv(self, requests: List[RequestInfo], output_path: str = None, return_content: bool = False):
         """
         生成详细的请求CSV文件（分离读写）
 
         Args:
             requests: RequestInfo列表
-            output_path: 输出目录路径
+            output_path: 输出目录路径（如果return_content=True则忽略）
+            return_content: 如果为True，返回内容字典而不是写文件
+
+        Returns:
+            如果return_content=True: Dict[str, str] {filename: content}
+            否则: None
         """
         # 分离读写请求
         read_requests = [req for req in requests if req.req_type == "read"]
@@ -69,17 +75,54 @@ class CSVExporter:
             "data_eject_attempts_v_list",
         ]
 
-        # 生成读写CSV文件
-        read_csv_file = None
-        write_csv_file = None
+        if return_content:
+            result = {}
+            if read_requests:
+                result["read_requests.csv"] = self._generate_request_csv_content(read_requests, csv_header)
+            if write_requests:
+                result["write_requests.csv"] = self._generate_request_csv_content(write_requests, csv_header)
+            return result
 
+        # 写文件模式
         if read_requests:
-            read_csv_file = self._write_request_csv_file(read_requests, output_path, "read", csv_header)
-
+            self._write_request_csv_file(read_requests, output_path, "read", csv_header)
         if write_requests:
-            write_csv_file = self._write_request_csv_file(write_requests, output_path, "write", csv_header)
+            self._write_request_csv_file(write_requests, output_path, "write", csv_header)
 
-        # 打印统计信息已移除
+    def _generate_request_csv_content(self, requests: List[RequestInfo], csv_header: List[str]) -> str:
+        """生成请求CSV内容字符串"""
+        import io
+        output = io.StringIO()
+        output.write(",".join(csv_header) + "\n")
+        for req in requests:
+            row = [
+                req.packet_id,
+                req.start_time,
+                req.end_time,
+                req.source_node,
+                req.source_type,
+                req.dest_node,
+                req.dest_type,
+                req.burst_length,
+                req.cmd_latency,
+                req.data_latency,
+                req.transaction_latency,
+                req.src_dest_order_id,
+                req.packet_category,
+                req.cmd_entry_cake0_cycle,
+                req.cmd_entry_noc_from_cake0_cycle,
+                req.cmd_entry_noc_from_cake1_cycle,
+                req.cmd_received_by_cake0_cycle,
+                req.cmd_received_by_cake1_cycle,
+                req.data_entry_noc_from_cake0_cycle,
+                req.data_entry_noc_from_cake1_cycle,
+                req.data_received_complete_cycle,
+                req.rsp_entry_network_cycle,
+                ",".join(map(str, req.data_eject_attempts_h_list)),
+                ",".join(map(str, req.data_eject_attempts_v_list)),
+            ]
+            output.write(",".join(map(str, row)) + "\n")
+        return output.getvalue()
 
     def _write_request_csv_file(self, requests: List[RequestInfo], output_path: str, req_type: str, csv_header: List[str]) -> str:
         """
@@ -127,17 +170,24 @@ class CSVExporter:
                 f.write(",".join(map(str, row)) + "\n")
         return csv_file
 
-    def generate_ports_csv(self, rn_ports: Dict[str, PortBandwidthMetrics], output_path: str, sn_ports: Dict[str, PortBandwidthMetrics] = None, config: Any = None, topo_type: str = None) -> None:
+    def generate_ports_csv(self, rn_ports: Dict[str, PortBandwidthMetrics], output_path: str = None, sn_ports: Dict[str, PortBandwidthMetrics] = None, config: Any = None, topo_type: str = None, return_content: bool = False):
         """
         生成端口带宽CSV文件
 
         Args:
             rn_ports: RN端口带宽指标字典 {port_id: PortBandwidthMetrics}
-            output_path: 输出目录路径
+            output_path: 输出目录路径（如果return_content=True则忽略）
             sn_ports: SN端口带宽指标字典（可选）
             config: 配置对象（可选，用于坐标计算）
             topo_type: 拓扑类型（可选）
+            return_content: 如果为True，返回CSV内容而不是写文件
+
+        Returns:
+            如果return_content=True: str (CSV内容)
+            否则: None
         """
+        import io
+
         # 合并RN和SN端口数据
         all_ports = {**rn_ports}
         if sn_ports:
@@ -145,10 +195,7 @@ class CSVExporter:
 
         # 若无任何端口数据则跳过
         if not all_ports:
-            return
-
-        # 确保输出目录存在
-        os.makedirs(output_path, exist_ok=True)
+            return "" if return_content else None
 
         # CSV文件头
         csv_header = [
@@ -180,10 +227,17 @@ class CSVExporter:
             "mixed_network_end_time_ns",
         ]
 
-        csv_file = os.path.join(output_path, "ports_bandwidth.csv")
-        with open(csv_file, "w", encoding="utf-8-sig", newline="") as f:
+        # 选择输出目标
+        if return_content:
+            output = io.StringIO()
+        else:
+            os.makedirs(output_path, exist_ok=True)
+            csv_file = os.path.join(output_path, "ports_bandwidth.csv")
+            output = open(csv_file, "w", encoding="utf-8-sig", newline="")
+
+        try:
             # 写入头部
-            f.write(",".join(csv_header) + "\n")
+            output.write(",".join(csv_header) + "\n")
 
             # 排序：先按端口类型字符串，再按节点编号大小
             sorted_ports = sorted(all_ports.items(), key=lambda x: (x[0].split("_")[0], int(x[0].rsplit("_", 1)[1])))
@@ -229,10 +283,16 @@ class CSVExporter:
                     metrics.mixed_metrics.network_start_time,
                     metrics.mixed_metrics.network_end_time,
                 ]
-                f.write(",".join(map(str, row_data)) + "\n")
+                output.write(",".join(map(str, row_data)) + "\n")
 
             # 添加端口带宽平均值统计
-            self._write_port_bandwidth_averages(f, all_ports)
+            self._write_port_bandwidth_averages(output, all_ports)
+
+            if return_content:
+                return output.getvalue()
+        finally:
+            if not return_content:
+                output.close()
 
     def _write_port_bandwidth_averages(self, f, all_ports: Dict[str, PortBandwidthMetrics]):
         """
@@ -295,23 +355,28 @@ class CSVExporter:
             ]
             f.write(",".join(avg_row) + "\n")
 
-    def export_link_statistics_csv(self, network, csv_path: str) -> None:
+    def export_link_statistics_csv(self, network, csv_path: str = None, return_content: bool = False):
         """
         导出链路统计数据到CSV
 
         Args:
             network: Network对象（包含links_flow_stat）
-            csv_path: CSV文件路径
+            csv_path: CSV文件路径（如果return_content=True则忽略）
+            return_content: 如果为True，返回CSV内容而不是写文件
+
+        Returns:
+            如果return_content=True: str (CSV内容)
+            否则: None
         """
+        import io
+
         if not hasattr(network, "get_links_utilization_stats") or not callable(network.get_links_utilization_stats):
-            print(f"警告: 网络 {network.name} 不支持链路统计导出")
-            return
+            return "" if return_content else None
 
         try:
             utilization_stats = network.get_links_utilization_stats()
             if not utilization_stats:
-                print("警告: 没有链路统计数据可导出")
-                return
+                return "" if return_content else None
 
             # 准备CSV数据
             csv_data = []
@@ -363,7 +428,7 @@ class CSVExporter:
                 }
                 csv_data.append(row)
 
-            # 写入CSV文件
+            # 写入CSV
             if csv_data:
                 fieldnames = [
                     "source_node",
@@ -395,26 +460,36 @@ class CSVExporter:
                     "eject_attempts_v_>2",
                 ]
 
-                with open(csv_path, "w", newline="", encoding="utf-8-sig") as csvfile:
-                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                if return_content:
+                    output = io.StringIO()
+                    writer = csv.DictWriter(output, fieldnames=fieldnames)
                     writer.writeheader()
                     writer.writerows(csv_data)
-            else:
-                print("警告: 没有有效的链路统计数据")
+                    return output.getvalue()
+                else:
+                    with open(csv_path, "w", newline="", encoding="utf-8-sig") as csvfile:
+                        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                        writer.writeheader()
+                        writer.writerows(csv_data)
+
+            return "" if return_content else None
 
         except Exception as e:
-            print(f"导出链路统计数据时发生错误: {e}")
+            return "" if return_content else None
 
-    def save_d2d_requests_csv(self, d2d_requests: List[D2DRequestInfo], output_path: str) -> None:
+    def save_d2d_requests_csv(self, d2d_requests: List[D2DRequestInfo], output_path: str = None, return_content: bool = False):
         """
         保存D2D请求到CSV文件
 
         Args:
             d2d_requests: D2DRequestInfo列表
-            output_path: 输出目录路径
-        """
-        os.makedirs(output_path, exist_ok=True)
+            output_path: 输出目录路径（return_content=True时可为None）
+            return_content: 如果True，返回{filename: content}字典，不写文件
 
+        Returns:
+            如果return_content=True: Dict[str, str] 文件名到内容的映射
+            否则: None
+        """
         # 分别保存读请求和写请求
         read_requests = [req for req in d2d_requests if req.req_type == "read"]
         write_requests = [req for req in d2d_requests if req.req_type == "write"]
@@ -439,7 +514,17 @@ class CSVExporter:
             "d2d_rn_node",
         ]
 
-        # 只有存在请求时才保存对应的CSV文件
+        if return_content:
+            result = {}
+            if read_requests:
+                result["d2d_read_requests.csv"] = self._generate_d2d_requests_csv_content(read_requests, csv_header)
+            if write_requests:
+                result["d2d_write_requests.csv"] = self._generate_d2d_requests_csv_content(write_requests, csv_header)
+            return result
+
+        # 原有的文件写入逻辑
+        os.makedirs(output_path, exist_ok=True)
+
         if read_requests:
             read_csv_path = os.path.join(output_path, "d2d_read_requests.csv")
             self._save_d2d_requests_to_csv(read_requests, read_csv_path, csv_header)
@@ -447,6 +532,35 @@ class CSVExporter:
         if write_requests:
             write_csv_path = os.path.join(output_path, "d2d_write_requests.csv")
             self._save_d2d_requests_to_csv(write_requests, write_csv_path, csv_header)
+
+    def _generate_d2d_requests_csv_content(self, requests: List[D2DRequestInfo], header: List[str]) -> str:
+        """生成D2D请求CSV内容字符串"""
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(header)
+
+        for req in requests:
+            writer.writerow(
+                [
+                    req.packet_id,
+                    req.source_die,
+                    req.target_die,
+                    req.source_node,
+                    req.target_node,
+                    req.source_type,
+                    req.target_type,
+                    req.burst_length,
+                    req.start_time_ns,
+                    req.end_time_ns,
+                    req.cmd_latency_ns,
+                    req.data_latency_ns,
+                    req.transaction_latency_ns,
+                    req.data_bytes,
+                    req.d2d_sn_node if req.d2d_sn_node is not None else "",
+                    req.d2d_rn_node if req.d2d_rn_node is not None else "",
+                ]
+            )
+        return output.getvalue()
 
     def _save_d2d_requests_to_csv(self, requests: List[D2DRequestInfo], file_path: str, header: List[str]):
         """保存D2D请求列表到CSV文件"""
@@ -479,130 +593,139 @@ class CSVExporter:
         except (IOError, OSError) as e:
             raise
 
-    def save_ip_bandwidth_to_csv(self, die_ip_bandwidth_data: Dict, config, output_path: str) -> None:
+    def save_ip_bandwidth_to_csv(self, die_ip_bandwidth_data: Dict, config, output_path: str = None, return_content: bool = False):
         """
         保存所有Die的IP带宽数据到单个CSV文件
 
         Args:
             die_ip_bandwidth_data: IP带宽数据字典
             config: 配置对象
-            output_path: 输出目录路径
-        """
-        os.makedirs(output_path, exist_ok=True)
+            output_path: 输出目录路径（return_content=True时可为None）
+            return_content: 如果True，返回CSV内容字符串，不写文件
 
+        Returns:
+            如果return_content=True: str CSV内容
+            否则: None
+        """
         # 检查数据是否存在
         if not die_ip_bandwidth_data:
-            print("警告: 没有die_ip_bandwidth_data数据，跳过IP带宽CSV导出")
-            return
+            if not return_content:
+                print("警告: 没有die_ip_bandwidth_data数据，跳过IP带宽CSV导出")
+            return "" if return_content else None
 
+        # 收集CSV数据
+        csv_rows = self._generate_ip_bandwidth_csv_rows(die_ip_bandwidth_data)
+
+        if return_content:
+            output = io.StringIO()
+            writer = csv.writer(output)
+            # 写入表头和数据
+            for row in csv_rows:
+                writer.writerow(row)
+            return output.getvalue()
+
+        # 原有的文件写入逻辑
+        os.makedirs(output_path, exist_ok=True)
         csv_path = os.path.join(output_path, "ip_bandwidth.csv")
 
         try:
             with open(csv_path, "w", newline="", encoding="utf-8-sig") as csvfile:
                 writer = csv.writer(csvfile)
-
-                # 写入CSV头：简洁明了的格式
-                writer.writerow(
-                    [
-                        "ip_instance",  # IP实例名 (如gdma_0, ddr_1)
-                        "die_id",  # Die ID
-                        "node_id",  # 节点ID
-                        "ip_type",  # IP类型 (如gdma, ddr)
-                        "read_bandwidth_gbps",  # 读带宽
-                        "write_bandwidth_gbps",  # 写带宽
-                        "total_bandwidth_gbps",  # 总带宽
-                    ]
-                )
-
-                # 收集所有数据行
-                all_rows = []
-
-                for die_id, die_data in die_ip_bandwidth_data.items():
-                    # 获取三种模式的数据
-                    read_data = die_data.get("read", {})
-                    write_data = die_data.get("write", {})
-                    total_data = die_data.get("total", {})
-
-                    # 收集所有IP实例
-                    all_ip_instances = set(read_data.keys()) | set(write_data.keys()) | set(total_data.keys())
-
-                    for ip_instance in all_ip_instances:
-                        # 提取IP基本类型
-                        if ip_instance.lower().startswith("d2d"):
-                            parts = ip_instance.lower().split("_")
-                            ip_type = "_".join(parts[:2]) if len(parts) >= 2 else parts[0]
-                        else:
-                            ip_type = ip_instance.split("_")[0]
-
-                        # 获取矩阵
-                        read_matrix = read_data.get(ip_instance)
-                        write_matrix = write_data.get(ip_instance)
-                        total_matrix = total_data.get(ip_instance)
-
-                        # 确定矩阵形状
-                        if read_matrix is not None:
-                            rows, cols = read_matrix.shape
-                        elif write_matrix is not None:
-                            rows, cols = write_matrix.shape
-                        elif total_matrix is not None:
-                            rows, cols = total_matrix.shape
-                        else:
-                            continue
-
-                        # 遍历矩阵中的所有位置
-                        for matrix_row in range(rows):
-                            for matrix_col in range(cols):
-                                # 获取三种带宽值
-                                read_bw = read_matrix[matrix_row, matrix_col] if read_matrix is not None else 0.0
-                                write_bw = write_matrix[matrix_row, matrix_col] if write_matrix is not None else 0.0
-                                total_bw = total_matrix[matrix_row, matrix_col] if total_matrix is not None else 0.0
-
-                                # 只保存有带宽的数据（任一模式大于阈值）
-                                if read_bw > 0.001 or write_bw > 0.001 or total_bw > 0.001:
-                                    # 计算节点ID（从矩阵索引计算）
-                                    node_id = matrix_row * cols + matrix_col
-
-                                    all_rows.append([ip_instance, die_id, node_id, ip_type, f"{read_bw:.6f}", f"{write_bw:.6f}", f"{total_bw:.6f}"])
-
-                # 排序：先按die_id，再按node_id，最后按ip_instance
-                all_rows.sort(key=lambda x: (int(x[1]), int(x[2]), x[0]))
-
-                # 写入所有数据行
-                for row in all_rows:
+                for row in csv_rows:
                     writer.writerow(row)
-
-                # 计算并添加平均带宽统计
-                ip_type_groups = defaultdict(lambda: {"read": [], "write": [], "total": []})
-
-                # 按IP类型分组（去掉实例编号）
-                for row in all_rows:
-                    ip_type = row[3]  # IP类型列
-                    read_bw = float(row[4])  # 读带宽
-                    write_bw = float(row[5])  # 写带宽
-                    total_bw = float(row[6])  # 总带宽
-
-                    ip_type_groups[ip_type]["read"].append(read_bw)
-                    ip_type_groups[ip_type]["write"].append(write_bw)
-                    ip_type_groups[ip_type]["total"].append(total_bw)
-
-                # 添加空行分隔
-                writer.writerow([])
-                writer.writerow(["# 平均带宽统计（按IP类型）"])
-                writer.writerow(["ip_type", "avg_read_bandwidth_gbps", "avg_write_bandwidth_gbps", "avg_total_bandwidth_gbps", "instance_count"])
-
-                # 计算并写入平均值
-                for ip_type in sorted(ip_type_groups.keys()):
-                    group = ip_type_groups[ip_type]
-                    count = len(group["read"])
-
-                    avg_read = sum(group["read"]) / count if count > 0 else 0.0
-                    avg_write = sum(group["write"]) / count if count > 0 else 0.0
-                    avg_total = sum(group["total"]) / count if count > 0 else 0.0
-
-                    writer.writerow([ip_type, f"{avg_read:.6f}", f"{avg_write:.6f}", f"{avg_total:.6f}", count])
-
         except (IOError, OSError) as e:
             print(f"警告: 保存IP带宽CSV失败 ({csv_path}): {e}")
+
+    def _generate_ip_bandwidth_csv_rows(self, die_ip_bandwidth_data: Dict) -> List[List]:
+        """生成IP带宽CSV行数据"""
+        csv_rows = []
+
+        # CSV表头
+        csv_rows.append(
+            [
+                "ip_instance",
+                "die_id",
+                "node_id",
+                "ip_type",
+                "read_bandwidth_gbps",
+                "write_bandwidth_gbps",
+                "total_bandwidth_gbps",
+            ]
+        )
+
+        # 收集所有数据行
+        all_rows = []
+
+        for die_id, die_data in die_ip_bandwidth_data.items():
+            read_data = die_data.get("read", {})
+            write_data = die_data.get("write", {})
+            total_data = die_data.get("total", {})
+
+            all_ip_instances = set(read_data.keys()) | set(write_data.keys()) | set(total_data.keys())
+
+            for ip_instance in all_ip_instances:
+                if ip_instance.lower().startswith("d2d"):
+                    parts = ip_instance.lower().split("_")
+                    ip_type = "_".join(parts[:2]) if len(parts) >= 2 else parts[0]
+                else:
+                    ip_type = ip_instance.split("_")[0]
+
+                read_matrix = read_data.get(ip_instance)
+                write_matrix = write_data.get(ip_instance)
+                total_matrix = total_data.get(ip_instance)
+
+                if read_matrix is not None:
+                    rows, cols = read_matrix.shape
+                elif write_matrix is not None:
+                    rows, cols = write_matrix.shape
+                elif total_matrix is not None:
+                    rows, cols = total_matrix.shape
+                else:
+                    continue
+
+                for matrix_row in range(rows):
+                    for matrix_col in range(cols):
+                        read_bw = read_matrix[matrix_row, matrix_col] if read_matrix is not None else 0.0
+                        write_bw = write_matrix[matrix_row, matrix_col] if write_matrix is not None else 0.0
+                        total_bw = total_matrix[matrix_row, matrix_col] if total_matrix is not None else 0.0
+
+                        if read_bw > 0.001 or write_bw > 0.001 or total_bw > 0.001:
+                            node_id = matrix_row * cols + matrix_col
+                            all_rows.append([ip_instance, die_id, node_id, ip_type, f"{read_bw:.6f}", f"{write_bw:.6f}", f"{total_bw:.6f}"])
+
+        all_rows.sort(key=lambda x: (int(x[1]), int(x[2]), x[0]))
+
+        for row in all_rows:
+            csv_rows.append(row)
+
+        # 添加平均带宽统计
+        ip_type_groups = defaultdict(lambda: {"read": [], "write": [], "total": []})
+
+        for row in all_rows:
+            ip_type = row[3]
+            read_bw = float(row[4])
+            write_bw = float(row[5])
+            total_bw = float(row[6])
+
+            ip_type_groups[ip_type]["read"].append(read_bw)
+            ip_type_groups[ip_type]["write"].append(write_bw)
+            ip_type_groups[ip_type]["total"].append(total_bw)
+
+        csv_rows.append([])
+        csv_rows.append(["# 平均带宽统计（按IP类型）"])
+        csv_rows.append(["ip_type", "avg_read_bandwidth_gbps", "avg_write_bandwidth_gbps", "avg_total_bandwidth_gbps", "instance_count"])
+
+        for ip_type in sorted(ip_type_groups.keys()):
+            group = ip_type_groups[ip_type]
+            count = len(group["read"])
+
+            avg_read = sum(group["read"]) / count if count > 0 else 0.0
+            avg_write = sum(group["write"]) / count if count > 0 else 0.0
+            avg_total = sum(group["total"]) / count if count > 0 else 0.0
+
+            csv_rows.append([ip_type, f"{avg_read:.6f}", f"{avg_write:.6f}", f"{avg_total:.6f}", count])
+
+        return csv_rows
 
     def save_d2d_axi_channel_statistics(self, output_path: str, d2d_bandwidth: Dict, dies: Dict = None, config: Any = None) -> None:
         """

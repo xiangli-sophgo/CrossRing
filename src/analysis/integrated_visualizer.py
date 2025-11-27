@@ -25,22 +25,27 @@ class IntegratedVisualizer:
         """
         self.charts.append((title, fig, custom_js))
 
-    def generate_html(self, save_path: str, show_fig: bool = False) -> str:
+    def generate_html(self, save_path: str = None, show_fig: bool = False, return_content: bool = False):
         """
         生成集成的HTML文件
 
         Args:
-            save_path: HTML文件保存路径
+            save_path: HTML文件保存路径（如果return_content=True则忽略）
             show_fig: 是否在浏览器中打开
+            return_content: 如果为True，返回HTML内容字符串而不是写文件
 
         Returns:
-            str: 保存路径
+            如果return_content=True: str (HTML内容)
+            否则: str (保存路径)
         """
         if not self.charts:
             raise ValueError("没有添加任何图表，无法生成HTML")
 
         # 生成HTML内容
         html_content = self._build_html()
+
+        if return_content:
+            return html_content
 
         # 保存文件
         with open(save_path, "w", encoding="utf-8") as f:
@@ -303,17 +308,19 @@ class IntegratedVisualizer:
         return "\n".join(indented_lines)
 
 
-def create_integrated_report(charts_config: List[Tuple[str, go.Figure, Optional[str]]], save_path: str, show_result_analysis: bool = False) -> str:
+def create_integrated_report(charts_config: List[Tuple[str, go.Figure, Optional[str]]], save_path: str = None, show_result_analysis: bool = False, return_content: bool = False):
     """
     便捷函数：创建集成报告
 
     Args:
         charts_config: 图表配置列表 [(title, fig, custom_js), ...]
-        save_path: 保存路径
-        show_fig: 是否显示
+        save_path: 保存路径（如果return_content=True则忽略）
+        show_result_analysis: 是否显示结果分析
+        return_content: 如果为True，返回HTML内容而不是写文件
 
     Returns:
-        str: 保存路径
+        如果return_content=True: str (HTML内容)
+        否则: str (保存路径)
     """
     visualizer = IntegratedVisualizer()
 
@@ -321,6 +328,6 @@ def create_integrated_report(charts_config: List[Tuple[str, go.Figure, Optional[
         visualizer.add_chart(title, fig, custom_js)
 
     if not visualizer.charts:
-        return None
+        return "" if return_content else None
 
-    return visualizer.generate_html(save_path, show_result_analysis)
+    return visualizer.generate_html(save_path, show_result_analysis, return_content=return_content)

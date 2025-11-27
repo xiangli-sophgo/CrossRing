@@ -18,11 +18,10 @@ import {
   FileTextOutlined,
   EyeOutlined,
   DownloadOutlined,
-  FolderOpenOutlined,
 } from '@ant-design/icons';
 import type { SimulationResult, ExperimentType } from '../types';
 import { classifyParams, formatParamValue } from '../utils/paramClassifier';
-import { getResultHtmlUrl, getResultFiles, getFileDownloadUrl, openFileDirectory, type ResultFileInfo } from '../api';
+import { getResultHtmlUrl, getResultFiles, getFileDownloadUrl, type ResultFileInfo } from '../api';
 
 interface Props {
   result: SimulationResult;
@@ -63,15 +62,6 @@ export default function ResultDetailPanel({ result, experimentId, experimentType
     window.open(url, '_blank');
   };
 
-  // 打开文件所在目录
-  const handleOpenDirectory = async (filePath: string) => {
-    try {
-      await openFileDirectory(filePath);
-    } catch {
-      // 忽略错误
-    }
-  };
-
   // 下载文件
   const handleDownloadFile = (fileId: number, fileName: string) => {
     const url = getFileDownloadUrl(fileId);
@@ -105,7 +95,7 @@ export default function ResultDetailPanel({ result, experimentId, experimentType
         <Descriptions column={3} size="small" bordered>
           {Object.entries(configParams).map(([key, value]) => (
             <Descriptions.Item key={key} label={key}>
-              {formatParamValue(value)}
+              {formatParamValue(value, key)}
             </Descriptions.Item>
           ))}
         </Descriptions>
@@ -118,7 +108,7 @@ export default function ResultDetailPanel({ result, experimentId, experimentType
         <Descriptions column={3} size="small" bordered>
           {Object.entries(resultStats).map(([key, value]) => (
             <Descriptions.Item key={key} label={key}>
-              {formatParamValue(value)}
+              {formatParamValue(value, key)}
             </Descriptions.Item>
           ))}
         </Descriptions>
@@ -161,14 +151,6 @@ export default function ResultDetailPanel({ result, experimentId, experimentType
                 <List.Item
                   actions={[
                     <Button
-                      key="open-dir"
-                      type="link"
-                      icon={<FolderOpenOutlined />}
-                      onClick={() => handleOpenDirectory(file.file_path)}
-                    >
-                      打开目录
-                    </Button>,
-                    <Button
                       key="download"
                       type="link"
                       icon={<DownloadOutlined />}
@@ -182,10 +164,7 @@ export default function ResultDetailPanel({ result, experimentId, experimentType
                     avatar={<FileTextOutlined />}
                     title={file.file_name}
                     description={
-                      <Space direction="vertical" size={0}>
-                        <Text type="secondary" ellipsis style={{ maxWidth: 400 }}>{file.file_path}</Text>
-                        <Text type="secondary">{formatFileSize(file.file_size)}</Text>
-                      </Space>
+                      <Text type="secondary">{formatFileSize(file.file_size)}</Text>
                     }
                   />
                 </List.Item>

@@ -85,7 +85,7 @@ def main():
 
     # ==================== 保存结果到数据库 ====================
     # sim.save_to_database()  # 使用默认实验名：日常仿真_YYYY-MM-DD
-    sim.save_to_database(experiment_name="日常仿真", description="KCIN 日常仿真")
+    sim.save_to_database(experiment_name="KCIN 仿真")
 
 
 if __name__ == "__main__":

@@ -48,6 +48,22 @@ def _load_mounts(topology: str) -> Dict[int, List[IPMount]]:
     return {}
 
 
+def get_mounts_from_memory(topology: str) -> Dict[int, List[IPMount]]:
+    """
+    从内存获取IP挂载配置
+
+    优先从内存读取，如果内存中没有则从文件加载
+    """
+    if topology in ip_mounts and ip_mounts[topology]:
+        return ip_mounts[topology]
+
+    # 内存中没有，从文件加载
+    loaded = _load_mounts(topology)
+    if loaded:
+        ip_mounts[topology] = loaded
+    return loaded
+
+
 def _save_mounts(topology: str, mounts: Dict[int, List[IPMount]]):
     """保存IP挂载配置到文件"""
     config_path = _get_mount_config_path(topology)

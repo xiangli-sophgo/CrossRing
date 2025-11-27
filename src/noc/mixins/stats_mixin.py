@@ -225,21 +225,44 @@ class StatsMixin:
         if has_active_flit and self.update_interval > 0:
             time.sleep(self.update_interval)
 
-    def process_comprehensive_results(self):
-        """处理综合统计结果"""
-        if not self.result_save_path:
-            return
+    def process_comprehensive_results(self, save_to_db_only: bool = False):
+        """处理综合统计结果
 
+        Args:
+            save_to_db_only: 如果为True，不写本地文件，只收集数据内容到self._result_file_contents
+        """
         self.result_processor.collect_requests_data(self, self.cycle)
         results = self.result_processor.analyze_all_bandwidth()
-        self.result_processor.generate_unified_report(results, self.result_save_path)
 
-        # 收集tracker使用数据（但暂不注入，等HTML生成后再注入）
+        # 收集文件内容或写本地文件
+        if save_to_db_only:
+            # 直接收集数据内容，不写本地文件
+            self._result_file_contents = {}
+
+            # 收集CSV内容
+            csv_contents = self.result_processor.generate_unified_report(results, return_content=True)
+            if csv_contents:
+                self._result_file_contents.update(csv_contents)
+        else:
+            # 写本地文件（原有行为）
+            if self.result_save_path:
+                self.result_processor.generate_unified_report(results, self.result_save_path)
+
+        # 收集tracker使用数据
         from src.analysis.data_collectors import TrackerDataCollector
 
         self._tracker_collector = TrackerDataCollector()
-        tracker_data = self._tracker_collector.collect_tracker_data(self)
-        self._tracker_json_path = self._tracker_collector.save_to_json(self.result_save_path, "tracker_data.json")
+        self._tracker_collector.collect_tracker_data(self)
+
+        if save_to_db_only:
+            # 直接获取JSON内容
+            tracker_json = self._tracker_collector.save_to_json(return_content=True)
+            if tracker_json:
+                self._result_file_contents["tracker_data.json"] = tracker_json
+        else:
+            # 写本地文件
+            if self.result_save_path:
+                self._tracker_json_path = self._tracker_collector.save_to_json(self.result_save_path, "tracker_data.json")
 
         self.Total_sum_BW_stat = results["Total_sum_BW"]
 
@@ -256,9 +279,16 @@ class StatsMixin:
         latency_stats = self.result_processor._calculate_latency_stats()
 
         # FIFO使用率统计
-        fifo_csv_path = self.result_processor.generate_fifo_usage_csv(self)
-        if fifo_csv_path and self.verbose:
-            print(f"FIFO使用率统计CSV: {fifo_csv_path}")
+        if save_to_db_only:
+            from src.analysis.data_collectors import CircuitStatsCollector
+            fifo_collector = CircuitStatsCollector()
+            fifo_csv = fifo_collector.generate_fifo_usage_csv(self, return_content=True)
+            if fifo_csv:
+                self._result_file_contents["fifo_usage_statistics.csv"] = fifo_csv
+        else:
+            fifo_csv_path = self.result_processor.generate_fifo_usage_csv(self)
+            if fifo_csv_path and self.verbose:
+                print(f"FIFO使用率统计CSV: {fifo_csv_path}")
         # CMD 延迟
         self.cmd_read_avg_latency_stat = (latency_stats["cmd"]["read"]["sum"] / latency_stats["cmd"]["read"]["count"]) if latency_stats["cmd"]["read"]["count"] else 0.0
         self.cmd_read_max_latency_stat = latency_stats["cmd"]["read"]["max"]
@@ -344,10 +374,14 @@ class StatsMixin:
                     print(f"警告: FIFO使用率热力图生成失败: {e}")
 
         # 生成集成HTML（所有图表收集完毕后）
-        self._generate_integrated_visualization()
+        self._generate_integrated_visualization(save_to_db_only=save_to_db_only)
 
-    def _generate_integrated_visualization(self):
-        """生成集成的可视化HTML报告"""
+    def _generate_integrated_visualization(self, save_to_db_only: bool = False):
+        """生成集成的可视化HTML报告
+
+        Args:
+            save_to_db_only: 如果为True，不写本地文件，只收集HTML内容
+        """
         if not hasattr(self.result_processor, "charts_to_merge"):
             return
 
@@ -393,27 +427,51 @@ class StatsMixin:
         try:
             from src.analysis.integrated_visualizer import create_integrated_report
 
-            # 确定保存路径
-            if self.result_save_path:
-                save_path = f"{self.result_save_path}result_analysis.html"
+            if save_to_db_only:
+                # 不写文件，直接获取HTML内容
+                html_content = create_integrated_report(
+                    charts_config=ordered_charts,
+                    save_path=None,
+                    show_result_analysis=self.show_result_analysis,
+                    return_content=True
+                )
+
+                if html_content:
+                    # 注入tracker功能到HTML内容
+                    if hasattr(self, "_result_file_contents") and "tracker_data.json" in self._result_file_contents:
+                        try:
+                            from src.analysis.tracker_html_injector import inject_tracker_functionality_to_content
+                            tracker_json = self._result_file_contents["tracker_data.json"]
+                            html_content = inject_tracker_functionality_to_content(html_content, tracker_json)
+                        except Exception:
+                            pass
+
+                    # 保存HTML内容
+                    self._result_html_content = html_content
+                    if hasattr(self, "_result_file_contents"):
+                        self._result_file_contents["result_analysis.html"] = html_content
             else:
-                return
+                # 写本地文件（原有行为）
+                if self.result_save_path:
+                    save_path = f"{self.result_save_path}result_analysis.html"
+                else:
+                    return
 
-            # 生成集成HTML
-            integrated_path = create_integrated_report(charts_config=ordered_charts, save_path=save_path, show_result_analysis=self.show_result_analysis)
+                # 生成集成HTML
+                integrated_path = create_integrated_report(charts_config=ordered_charts, save_path=save_path, show_result_analysis=self.show_result_analysis)
 
-            if integrated_path and self.verbose:
-                print(f"结果分析报告: {integrated_path}")
+                if integrated_path and self.verbose:
+                    print(f"结果分析报告: {integrated_path}")
 
-            # HTML生成完成后，注入tracker交互功能
-            if integrated_path and hasattr(self, "_tracker_json_path") and os.path.exists(self._tracker_json_path):
-                try:
-                    from src.analysis.tracker_html_injector import inject_tracker_functionality
+                # HTML生成完成后，注入tracker交互功能
+                if integrated_path and hasattr(self, "_tracker_json_path") and os.path.exists(self._tracker_json_path):
+                    try:
+                        from src.analysis.tracker_html_injector import inject_tracker_functionality
 
-                    inject_tracker_functionality(integrated_path, self._tracker_json_path)
-                except Exception as e:
-                    if self.verbose:
-                        print(f"警告: Tracker交互功能注入失败: {e}")
+                        inject_tracker_functionality(integrated_path, self._tracker_json_path)
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"警告: Tracker交互功能注入失败: {e}")
 
         except Exception as e:
             if self.verbose:
@@ -440,8 +498,8 @@ class StatsMixin:
             "model_type": "模型类型",
             "topo_type": "拓扑类型",
             "file_name": "数据流名称",
-            "send_read_flits_num": "发送读flit数",
-            "send_write_flits_num": "发送写flit数",
+            "send_read_flits_num": "总读flit数",
+            "send_write_flits_num": "总写flit数",
             "R_finish_time": "读完成时间",
             "W_finish_time": "写完成时间",
             "Total_finish_time": "总完成时间",
@@ -452,57 +510,57 @@ class StatsMixin:
             "cmd_read_max_latency": "命令延迟_读_最大",
             "cmd_write_avg_latency": "命令延迟_写_平均",
             "cmd_write_max_latency": "命令延迟_写_最大",
-            "cmd_mixed_avg_latency": "命令延迟_混合_平均",
-            "cmd_mixed_max_latency": "命令延迟_混合_最大",
+            "cmd_mixed_avg_latency": "命令延迟_平均",
+            "cmd_mixed_max_latency": "命令延迟_最大",
             # Data延迟
             "data_read_avg_latency": "数据延迟_读_平均",
             "data_read_max_latency": "数据延迟_读_最大",
             "data_write_avg_latency": "数据延迟_写_平均",
             "data_write_max_latency": "数据延迟_写_最大",
-            "data_mixed_avg_latency": "数据延迟_混合_平均",
-            "data_mixed_max_latency": "数据延迟_混合_最大",
+            "data_mixed_avg_latency": "数据延迟_平均",
+            "data_mixed_max_latency": "数据延迟_最大",
             # Transaction延迟
             "trans_read_avg_latency": "事务延迟_读_平均",
             "trans_read_max_latency": "事务延迟_读_最大",
             "trans_write_avg_latency": "事务延迟_写_平均",
             "trans_write_max_latency": "事务延迟_写_最大",
-            "trans_mixed_avg_latency": "事务延迟_混合_平均",
-            "trans_mixed_max_latency": "事务延迟_混合_最大",
+            "trans_mixed_avg_latency": "事务延迟_平均",
+            "trans_mixed_max_latency": "事务延迟_最大",
             # Circling统计
-            "req_cir_h_num": "请求横向环次数",
-            "req_cir_v_num": "请求纵向环次数",
-            "rsp_cir_h_num": "响应横向环次数",
-            "rsp_cir_v_num": "响应纵向环次数",
-            "data_cir_h_num": "数据横向环次数",
-            "data_cir_v_num": "数据纵向环次数",
+            "req_cir_h_num": "请求_横向_环次数",
+            "req_cir_v_num": "请求_纵向_环次数",
+            "rsp_cir_h_num": "响应_横向_环次数",
+            "rsp_cir_v_num": "响应_纵向_环次数",
+            "data_cir_h_num": "数据_横向_环次数",
+            "data_cir_v_num": "数据_纵向_环次数",
             # Wait Cycle统计
-            "req_wait_cycle_h_num": "请求横向等待周期",
-            "req_wait_cycle_v_num": "请求纵向等待周期",
-            "rsp_wait_cycle_h_num": "响应横向等待周期",
-            "rsp_wait_cycle_v_num": "响应纵向等待周期",
-            "data_wait_cycle_h_num": "数据横向等待周期",
-            "data_wait_cycle_v_num": "数据纵向等待周期",
+            "req_wait_cycle_h_num": "请求_横向_等待周期",
+            "req_wait_cycle_v_num": "请求_纵向_等待周期",
+            "rsp_wait_cycle_h_num": "响应_横向_等待周期",
+            "rsp_wait_cycle_v_num": "响应_纵向_等待周期",
+            "data_wait_cycle_h_num": "数据_横向_等待周期",
+            "data_wait_cycle_v_num": "数据_纵向_等待周期",
             # Retry统计
-            "read_retry_num": "读重试次数",
-            "write_retry_num": "写重试次数",
+            "read_retry_num": "读重试数",
+            "write_retry_num": "写重试数",
             # ETag统计
-            "EQ_ETag_T1_num": "EQ ETag_T1数量",
-            "EQ_ETag_T0_num": "EQ ETag_T0数量",
-            "RB_ETag_T1_num": "RB ETag_T1数量",
-            "RB_ETag_T0_num": "RB ETag_T0数量",
+            "EQ_ETag_T1_num": "EQ_ETag_T1",
+            "EQ_ETag_T0_num": "EQ_ETag_T0",
+            "RB_ETag_T1_num": "RB_ETag_T1",
+            "RB_ETag_T0_num": "RB_ETag_T0",
             # ITag统计
-            "ITag_h_num": "ITag横向数量",
-            "ITag_v_num": "ITag纵向数量",
+            "ITag_h_num": "ITag_横向",
+            "ITag_v_num": "ITag_纵向",
             # 带宽统计
-            "Total_sum_BW": "总和带宽",
+            "Total_sum_BW": "总带宽",
             "read_unweighted_bw": "带宽_读_非加权",
             "read_weighted_bw": "带宽_读_加权",
             "write_unweighted_bw": "带宽_写_非加权",
             "write_weighted_bw": "带宽_写_加权",
-            "mixed_unweighted_bw": "带宽_混合_非加权",
-            "mixed_weighted_bw": "带宽_混合_加权",
-            "mixed_avg_unweighted_bw": "带宽_混合_平均非加权",
-            "mixed_avg_weighted_bw": "带宽_混合_平均加权",
+            "mixed_unweighted_bw": "带宽_非加权",
+            "mixed_weighted_bw": "带宽_加权",
+            "mixed_avg_unweighted_bw": "带宽_平均非加权",
+            "mixed_avg_weighted_bw": "带宽_平均加权",
             "total_unweighted_bw": "带宽_总_非加权",
             "total_weighted_bw": "带宽_总_加权",
         }
@@ -606,23 +664,23 @@ class StatsMixin:
                     results["port_averages"] = port_avg  # Keep original dict for compatibility
 
                     # Expand port_averages dictionary into individual fields with Chinese names
-                    # Pattern: avg_{port}_{op}_bw -> 平均带宽_{端口}_{操作}
+                    # Pattern: avg_{port}_{op}_bw -> {端口}_{操作}_带宽
                     port_name_map = {
-                        "avg_gdma_read_bw": "平均带宽_GDMA_读",
-                        "avg_gdma_write_bw": "平均带宽_GDMA_写",
-                        "avg_gdma_bw": "平均带宽_GDMA_混合",
-                        "avg_sdma_read_bw": "平均带宽_SDMA_读",
-                        "avg_sdma_write_bw": "平均带宽_SDMA_写",
-                        "avg_sdma_bw": "平均带宽_SDMA_混合",
-                        "avg_cdma_read_bw": "平均带宽_CDMA_读",
-                        "avg_cdma_write_bw": "平均带宽_CDMA_写",
-                        "avg_cdma_bw": "平均带宽_CDMA_混合",
-                        "avg_ddr_read_bw": "平均带宽_DDR_读",
-                        "avg_ddr_write_bw": "平均带宽_DDR_写",
-                        "avg_ddr_bw": "平均带宽_DDR_混合",
-                        "avg_l2m_read_bw": "平均带宽_L2M_读",
-                        "avg_l2m_write_bw": "平均带宽_L2M_写",
-                        "avg_l2m_bw": "平均带宽_L2M_混合",
+                        "avg_gdma_read_bw": "GDMA_读_带宽",
+                        "avg_gdma_write_bw": "GDMA_写_带宽",
+                        "avg_gdma_bw": "GDMA_带宽",
+                        "avg_sdma_read_bw": "SDMA_读_带宽",
+                        "avg_sdma_write_bw": "SDMA_写_带宽",
+                        "avg_sdma_bw": "SDMA_带宽",
+                        "avg_cdma_read_bw": "CDMA_读_带宽",
+                        "avg_cdma_write_bw": "CDMA_写_带宽",
+                        "avg_cdma_bw": "CDMA_带宽",
+                        "avg_ddr_read_bw": "DDR_读_带宽",
+                        "avg_ddr_write_bw": "DDR_写_带宽",
+                        "avg_ddr_bw": "DDR_带宽",
+                        "avg_l2m_read_bw": "L2M_读_带宽",
+                        "avg_l2m_write_bw": "L2M_写_带宽",
+                        "avg_l2m_bw": "L2M_带宽",
                     }
                     for key, value in port_avg.items():
                         chinese_key = port_name_map.get(key, key)
@@ -649,9 +707,9 @@ class StatsMixin:
                         results["绕环_纵向_比例"] = circling_stats["vertical"]["circling_ratio"]
 
                     if "overall" in circling_stats:
-                        results["绕环_整体_总flit数"] = circling_stats["overall"]["total_data_flits"]
-                        results["绕环_整体_绕环flit数"] = circling_stats["overall"]["circling_flits"]
-                        results["绕环_整体_比例"] = circling_stats["overall"]["circling_ratio"]
+                        results["绕环_总flit数"] = circling_stats["overall"]["total_data_flits"]
+                        results["绕环_绕环flit数"] = circling_stats["overall"]["circling_flits"]
+                        results["绕环_比例"] = circling_stats["overall"]["circling_ratio"]
 
                 # Include ordering blocked stats (both original dict and expanded fields)
                 if "ordering_blocked_stats" in bandwidth_analysis:
@@ -670,9 +728,9 @@ class StatsMixin:
                         results["保序阻止_纵向_比例"] = ordering_stats["vertical"]["ordering_blocked_ratio"]
 
                     if "overall" in ordering_stats:
-                        results["保序阻止_整体_总flit数"] = ordering_stats["overall"]["total_data_flits"]
-                        results["保序阻止_整体_被阻止flit数"] = ordering_stats["overall"]["ordering_blocked_flits"]
-                        results["保序阻止_整体_比例"] = ordering_stats["overall"]["ordering_blocked_ratio"]
+                        results["保序阻止_总flit数"] = ordering_stats["overall"]["total_data_flits"]
+                        results["保序阻止_被阻止flit数"] = ordering_stats["overall"]["ordering_blocked_flits"]
+                        results["保序阻止_比例"] = ordering_stats["overall"]["ordering_blocked_ratio"]
 
         except Exception as e:
             if hasattr(self, "verbose") and self.verbose:
@@ -696,13 +754,14 @@ class StatsMixin:
 
         return stats
 
-    def save_to_database(self, experiment_name=None, experiment_type="kcin", description=None):
-        """保存仿真结果到数据库
+    def save_to_database(self, experiment_name=None, experiment_type="kcin", description=None, save_local_files=False):
+        """保存仿真结果到数据库（不生成本地文件）
 
         Args:
             experiment_name: 实验名称，默认为"日常仿真_YYYY-MM-DD"
             experiment_type: 实验类型，默认为"kcin"
             description: 实验描述，默认为"日常仿真结果汇总"
+            save_local_files: 如果为True，同时保存本地文件（默认False）
 
         Returns:
             experiment_id: 实验ID
@@ -741,30 +800,20 @@ class StatsMixin:
             )
             db.update_experiment_status(experiment_id, "completed")
 
+        # 处理综合结果（不写本地文件，直接收集内容）
+        self.process_comprehensive_results(save_to_db_only=not save_local_files)
+
         # 获取仿真结果
         results = self.get_results()
 
         # 提取性能指标（带宽）
-        performance = results.get("平均带宽_DDR_混合", 0)
+        performance = results.get("DDR_带宽", 0)
 
-        # 读取HTML报告内容
-        result_html = None
-        if self.result_save_path:
-            html_path = f"{self.result_save_path}result_analysis.html"
-            if os.path.exists(html_path):
-                with open(html_path, "r", encoding="utf-8") as f:
-                    result_html = f.read()
+        # 获取HTML报告内容
+        result_html = getattr(self, "_result_html_content", None)
 
-        # 收集结果文件路径
-        result_files = []
-        if self.result_save_path:
-            import glob
-            # 收集所有CSV文件
-            csv_files = glob.glob(f"{self.result_save_path}*.csv")
-            result_files.extend(csv_files)
-            # 收集JSON文件（如tracker_data.json）
-            json_files = glob.glob(f"{self.result_save_path}*.json")
-            result_files.extend(json_files)
+        # 获取收集到的文件内容
+        result_file_contents = getattr(self, "_result_file_contents", {})
 
         # 保存结果
         db.add_result(
@@ -773,7 +822,7 @@ class StatsMixin:
             performance=performance,
             result_details=results,
             result_html=result_html,
-            result_files=result_files if result_files else None,
+            result_file_contents=result_file_contents if result_file_contents else None,
         )
 
         if self.verbose:

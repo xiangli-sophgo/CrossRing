@@ -10,62 +10,141 @@ export interface ParamCategory {
   patterns: RegExp[];
 }
 
-// 列分类配置
+// 重要统计的模式（KCIN和DCIN通用）
+const IMPORTANT_PATTERNS = [
+  /^模型类型$/, /^拓扑类型$/, /^数据流名称$/, /^Die数量$/, /^仿真周期$/,
+  // 带宽：{IP}_带宽 或 {IP}_{操作}_带宽（包括D2D_RN, D2D_SN）
+  /^[A-Z0-9_]+_带宽$/, /^[A-Z0-9_]+_(读|写)_带宽$/, /^总带宽$/,
+  // 请求数
+  /^总读请求数$/, /^总写请求数$/, /^总请求数$/,
+  /^跨Die/, /^读重试数$/, /^写重试数$/,
+  // 绕环比例（整体省略方向）
+  /^绕环_(横向|纵向)_比例$/, /^绕环_比例$/,
+  // Tag统计
+  /^ITag_(横向|纵向)$/, /^RB_ETag_T[01]$/, /^EQ_ETag_T[01]$/,
+  // 延迟统计（使用中文：命令延迟、数据延迟、事务延迟）
+  /^命令延迟/, /^数据延迟/, /^事务延迟/,
+  // 注意：TOPO_TYPE, FLIT_SIZE, BURST, NETWORK_FREQUENCY 归类为配置参数
+];
+
+// 结果统计的模式
+const RESULT_PATTERNS = [
+  /延迟/, /完成时间/, /^绕环/, /^保序阻止/, /环次数/, /等待周期/,
+  /重试次数/, /ETag.*num/i, /ITag.*num/i, /flit数/,
+  /_带宽_read$/, /_带宽_write$/, /_带宽_total$/,
+  /^D2D.*请求数$/,  // D2D读请求数, D2D写请求数, D2D总请求数
+];
+
+/**
+ * 对Die内部列进行二级分类
+ * @param columnName 完整的列名（包含Die{n}_前缀）
+ * @returns 分类：important | result | config
+ */
+export function classifyDieColumn(columnName: string): 'important' | 'result' | 'config' {
+  // 去掉Die{n}_前缀后判断
+  const nameWithoutPrefix = columnName.replace(/^Die\d+_/, '');
+
+  if (IMPORTANT_PATTERNS.some(p => p.test(nameWithoutPrefix))) {
+    return 'important';
+  }
+  if (RESULT_PATTERNS.some(p => p.test(nameWithoutPrefix))) {
+    return 'result';
+  }
+  return 'config';
+}
+
+// Die层级分类结果的类型定义
+export interface DieHierarchy {
+  important: string[];
+  result: string[];
+  config: string[];
+}
+
+export interface HierarchicalClassification {
+  important: string[];
+  result: string[];
+  config: string[];
+  [key: `die${number}`]: DieHierarchy;
+}
+
+/**
+ * 带层级结构的参数键分类
+ * @param paramKeys 所有参数键列表
+ * @returns 层级分类结果
+ */
+export function classifyParamKeysWithHierarchy(paramKeys: string[]): HierarchicalClassification {
+  const result: HierarchicalClassification = {
+    important: [],
+    result: [],
+    config: [],
+  };
+
+  // 动态初始化Die分组（支持0-9）
+  for (let i = 0; i <= 9; i++) {
+    result[`die${i}`] = {
+      important: [],
+      result: [],
+      config: [],
+    };
+  }
+
+  for (const key of paramKeys) {
+    // 检查是否是Die列
+    const dieMatch = key.match(/^Die(\d+)_/);
+    if (dieMatch) {
+      const dieNum = parseInt(dieMatch[1], 10);
+      const subCategory = classifyDieColumn(key);
+      if (result[`die${dieNum}`]) {
+        result[`die${dieNum}`][subCategory].push(key);
+      }
+    } else if (IMPORTANT_PATTERNS.some(p => p.test(key))) {
+      result.important.push(key);
+    } else if (RESULT_PATTERNS.some(p => p.test(key))) {
+      result.result.push(key);
+    } else {
+      result.config.push(key);
+    }
+  }
+
+  return result;
+}
+
+// 列分类配置（简化为：重要统计、Die分组、结果统计、配置参数）
 export const PARAM_CATEGORIES: ParamCategory[] = [
   {
-    key: 'basic',
-    label: '基础信息',
-    patterns: [/^模型类型$/, /^拓扑类型$/, /^数据流名称$/, /^TOPO_TYPE$/, /^FLIT_SIZE$/, /^BURST$/, /^NETWORK_FREQUENCY$/],
+    key: 'important',
+    label: '重要统计',
+    patterns: IMPORTANT_PATTERNS,
   },
   {
-    key: 'fifo',
-    label: 'FIFO配置',
-    patterns: [/FIFO_DEPTH/],
+    key: 'die0',
+    label: 'Die0统计',
+    patterns: [/^Die0_/],
   },
   {
-    key: 'etag',
-    label: 'ETag配置',
-    patterns: [/^TL_Etag/, /^TR_Etag/, /^TU_Etag/, /^TD_Etag/, /ETag_BOTHSIDE/],
+    key: 'die1',
+    label: 'Die1统计',
+    patterns: [/^Die1_/],
   },
   {
-    key: 'itag',
-    label: 'ITag配置',
-    patterns: [/^ITag_/],
+    key: 'die2',
+    label: 'Die2统计',
+    patterns: [/^Die2_/],
   },
   {
-    key: 'latency_config',
-    label: '延迟配置',
-    patterns: [/LATENCY/],
+    key: 'die3',
+    label: 'Die3统计',
+    patterns: [/^Die3_/],
   },
   {
-    key: 'resource',
-    label: '资源配置',
-    patterns: [/^RN_/, /^SN_/, /^UNIFIED_/, /_SIZE$/, /TRACKER/, /SLICE_PER_LINK/],
+    key: 'result',
+    label: '结果统计',
+    patterns: RESULT_PATTERNS,
   },
   {
-    key: 'bw_limit',
-    label: '带宽限制',
-    patterns: [/_BW_LIMIT$/, /_RW_GAP$/],
-  },
-  {
-    key: 'bw_result',
-    label: '带宽结果',
-    patterns: [/^带宽/, /^平均带宽/, /^总和带宽/],
-  },
-  {
-    key: 'latency_result',
-    label: '延迟结果',
-    patterns: [/延迟/],
-  },
-  {
-    key: 'circling',
-    label: '绕环统计',
-    patterns: [/^绕环/, /环次数/, /^保序阻止/],
-  },
-  {
-    key: 'other',
-    label: '其他统计',
-    patterns: [/完成时间/, /重试次数/, /flit数/, /等待周期/, /ETag.*num/i, /ITag.*num/i],
+    key: 'config',
+    label: '配置参数',
+    patterns: [/.*/], // 匹配所有剩余参数
   },
 ];
 
@@ -248,12 +327,18 @@ export function classifyParams(params: Record<string, unknown>): {
 
 /**
  * 格式化参数值
+ * @param value 参数值
+ * @param key 参数键名（可选，用于判断是否为比例类数据）
  */
-export function formatParamValue(value: unknown): string {
+export function formatParamValue(value: unknown, key?: string): string {
   if (value === null || value === undefined) {
     return '-';
   }
   if (typeof value === 'number') {
+    // 检查是否为比例类数据（包含"比例"或"ratio"的键名，且值在0-1之间）
+    if (key && (key.includes('比例') || key.toLowerCase().includes('ratio')) && value >= 0 && value <= 1) {
+      return `${(value * 100).toFixed(2)}%`;
+    }
     // 检查是否为浮点数
     if (!Number.isInteger(value)) {
       return value.toFixed(4);
