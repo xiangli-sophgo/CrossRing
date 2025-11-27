@@ -740,3 +740,44 @@ class DatabaseManager:
                 ResultFile.result_type == result_type,
             ).delete()
             return count
+
+    def delete_result(self, result_id: int, experiment_type: str, experiment_id: int = None) -> bool:
+        """
+        删除单个结果
+
+        Args:
+            result_id: 结果ID
+            experiment_type: 实验类型 ("kcin" 或 "dcin")
+            experiment_id: 实验ID（用于更新统计）
+
+        Returns:
+            是否删除成功
+        """
+        ResultModel = self._get_result_model(experiment_type)
+        with self.get_session() as session:
+            # 获取结果的experiment_id（如果没有传入）
+            if experiment_id is None:
+                result = session.query(ResultModel).filter(ResultModel.id == result_id).first()
+                if result:
+                    experiment_id = result.experiment_id
+
+            # 先删除关联的文件
+            session.query(ResultFile).filter(
+                ResultFile.result_id == result_id,
+                ResultFile.result_type == experiment_type,
+            ).delete()
+            # 删除结果
+            count = session.query(ResultModel).filter(
+                ResultModel.id == result_id
+            ).delete()
+
+            # 更新实验统计
+            if experiment_id and count > 0:
+                new_count = session.query(ResultModel).filter(
+                    ResultModel.experiment_id == experiment_id
+                ).count()
+                session.query(Experiment).filter(
+                    Experiment.id == experiment_id
+                ).update({"completed_combinations": new_count})
+
+            return count > 0

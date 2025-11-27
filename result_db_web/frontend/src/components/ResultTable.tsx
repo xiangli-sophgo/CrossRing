@@ -2,16 +2,17 @@
  * 结果表格组件 - 使用Handsontable实现Excel-like功能
  */
 
-import { useState, useEffect, useMemo } from 'react';
-import { Button, message, Space, Tree, Popover, Pagination, Divider, Checkbox } from 'antd';
-import { DownloadOutlined, SettingOutlined } from '@ant-design/icons';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Button, message, Space, Tree, Popover, Pagination, Divider, Checkbox, Popconfirm } from 'antd';
+import { DownloadOutlined, SettingOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
-import { HotTable } from '@handsontable/react';
+import { HotTable, HotTableClass } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
-import type { ResultsPageResponse } from '../types';
+import type { ResultsPageResponse, ExperimentType } from '../types';
 import ResultDetailPanel from './ResultDetailPanel';
 import { classifyParamKeys, PARAM_CATEGORIES } from '../utils/paramClassifier';
+import { deleteResult } from '../api';
 
 // 注册所有Handsontable模块
 registerAllModules();
@@ -27,8 +28,10 @@ interface Props {
   pageSize: number;
   paramKeys: string[];
   experimentId: number;
+  experimentType?: ExperimentType;
   onPageChange: (page: number, pageSize: number) => void;
   onSortChange: (field: string, order: 'asc' | 'desc') => void;
+  onDataChange?: () => void;
 }
 
 export default function ResultTable({
@@ -38,8 +41,10 @@ export default function ResultTable({
   pageSize,
   paramKeys,
   experimentId,
+  experimentType = 'kcin',
   onPageChange,
   onSortChange,
+  onDataChange,
 }: Props) {
   // 可见列状态
   const [visibleColumns, setVisibleColumns] = useState<string[]>([]);
@@ -65,6 +70,9 @@ export default function ResultTable({
 
   // 详情面板是否展开
   const [detailExpanded, setDetailExpanded] = useState(true);
+
+  // Handsontable ref
+  const hotTableRef = useRef<HotTableClass>(null);
 
   // 分类数据
   const classifiedParams = useMemo(() => classifyParamKeys(paramKeys), [paramKeys]);
@@ -195,6 +203,16 @@ export default function ResultTable({
     });
   }, [data?.results, allColumns]);
 
+  // 数据变化时强制重新渲染 Handsontable
+  useEffect(() => {
+    if (hotTableRef.current?.hotInstance) {
+      // 延迟执行以确保数据已更新
+      setTimeout(() => {
+        hotTableRef.current?.hotInstance?.render();
+      }, 0);
+    }
+  }, [tableData, page, pageSize]);
+
   // 计算字符串显示宽度
   const calcStringWidth = (str: string) => {
     let width = 0;
@@ -250,6 +268,23 @@ export default function ResultTable({
     }
     return null;
   }, [selectedRowIndex, data?.results]);
+
+  // 删除结果
+  const [deleting, setDeleting] = useState(false);
+  const handleDeleteResult = async () => {
+    if (!selectedResult) return;
+    setDeleting(true);
+    try {
+      await deleteResult(selectedResult.id, experimentId);
+      message.success('结果已删除');
+      setSelectedRowIndex(null);
+      onDataChange?.();
+    } catch {
+      message.error('删除失败');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   // 导出 CSV
   const handleExport = () => {
@@ -330,7 +365,7 @@ export default function ResultTable({
             </Button>
           </Popover>
           <span style={{ color: '#888', fontSize: 12 }}>
-            提示：拖拽选择单元格，Ctrl+C 复制，双击行查看详情
+            提示：点击行查看详情
           </span>
         </Space>
         <Button icon={<DownloadOutlined />} onClick={handleExport} disabled={!data?.results.length}>
@@ -345,6 +380,7 @@ export default function ResultTable({
           <div style={{ textAlign: 'center', padding: 50, background: '#fafafa', color: '#999' }}>暂无数据</div>
         ) : (
           <HotTable
+            ref={hotTableRef}
             data={tableData}
             colHeaders={colHeaders}
             colWidths={colWidths}
@@ -398,18 +434,41 @@ export default function ResultTable({
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              cursor: 'pointer',
             }}
-            onClick={() => setDetailExpanded(!detailExpanded)}
           >
-            <strong>实验详情 (第 {selectedRowIndex! + 1} 行, 性能: {selectedResult.performance?.toFixed(2)} GB/s)</strong>
-            <Button size="small" type="text">
-              {detailExpanded ? '收起' : '展开'}
-            </Button>
+            <strong
+              style={{ cursor: 'pointer', flex: 1 }}
+              onClick={() => setDetailExpanded(!detailExpanded)}
+            >
+              实验详情 (第 {selectedRowIndex! + 1} 行, 性能: {selectedResult.performance?.toFixed(2)} GB/s)
+            </strong>
+            <Space>
+              <Popconfirm
+                title="确认删除"
+                description="确定要删除这条结果吗？此操作不可恢复。"
+                onConfirm={handleDeleteResult}
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+              >
+                <Button
+                  size="small"
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  loading={deleting}
+                >
+                  删除
+                </Button>
+              </Popconfirm>
+              <Button size="small" type="text" onClick={() => setDetailExpanded(!detailExpanded)}>
+                {detailExpanded ? '收起' : '展开'}
+              </Button>
+            </Space>
           </div>
           {detailExpanded && (
             <div style={{ padding: 16 }}>
-              <ResultDetailPanel result={selectedResult} experimentId={experimentId} />
+              <ResultDetailPanel result={selectedResult} experimentId={experimentId} experimentType={experimentType} />
             </div>
           )}
         </div>

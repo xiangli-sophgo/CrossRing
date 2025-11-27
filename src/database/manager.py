@@ -173,6 +173,10 @@ class ResultManager:
             结果ID
         """
         with self._write_lock:
+            # 获取实验类型
+            exp = self.db.get_experiment(experiment_id)
+            experiment_type = exp["experiment_type"] if exp else "kcin"
+
             result_id = self.db.add_result(
                 experiment_id=experiment_id,
                 config_params=config_params,
@@ -182,6 +186,10 @@ class ResultManager:
                 result_files=result_files,
                 error=error,
             )
+
+            # 自动将结果文件内容存储到数据库
+            if result_files:
+                self.db.store_result_files_batch(result_id, experiment_type, result_files)
 
             # 更新实验统计
             self._update_experiment_stats(experiment_id, performance)

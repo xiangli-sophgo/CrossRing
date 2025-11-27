@@ -252,4 +252,45 @@ export const openLocalFile = async (path: string): Promise<{ success: boolean; m
   return response.data;
 };
 
+export const openFileDirectory = async (path: string): Promise<{ success: boolean; message: string }> => {
+  const response = await api.post('/open-directory', { path });
+  return response.data;
+};
+
+export interface ResultFileInfo {
+  id: number;
+  file_name: string;
+  file_path: string;
+  mime_type: string;
+  file_size: number;
+}
+
+export const getResultFiles = async (
+  resultId: number,
+  resultType: string
+): Promise<ResultFileInfo[]> => {
+  const response = await api.get(`/results/${resultId}/files`, {
+    params: { result_type: resultType },
+  });
+  return response.data;
+};
+
+export const getFileDownloadUrl = (fileId: number): string => {
+  return `/api/files/${fileId}`;
+};
+
+export const getFileViewUrl = (fileId: number): string => {
+  return `/api/files/${fileId}/view`;
+};
+
+export const deleteResult = async (
+  resultId: number,
+  experimentId: number
+): Promise<{ success: boolean; message: string }> => {
+  const response = await api.delete(`/results/${resultId}`, {
+    params: { experiment_id: experimentId },
+  });
+  return response.data;
+};
+
 export default api;

@@ -357,23 +357,74 @@ async def open_local_file(request: OpenFileRequest):
         raise HTTPException(status_code=500, detail=f"打开文件失败: {str(e)}")
 
 
+@router.post("/open-directory")
+async def open_file_directory(request: OpenFileRequest):
+    """
+    打开文件所在目录（在文件管理器中显示）
+
+    - path: 文件路径
+    """
+    file_path = request.path
+    dir_path = os.path.dirname(file_path)
+
+    if not os.path.exists(dir_path):
+        raise HTTPException(status_code=404, detail=f"目录不存在: {dir_path}")
+
+    try:
+        if sys.platform == "win32":
+            # Windows: 使用explorer打开并选中文件
+            if os.path.exists(file_path):
+                subprocess.run(["explorer", "/select,", file_path], check=False)
+            else:
+                os.startfile(dir_path)
+        elif sys.platform == "darwin":
+            # macOS: 使用open -R显示文件
+            if os.path.exists(file_path):
+                subprocess.run(["open", "-R", file_path], check=True)
+            else:
+                subprocess.run(["open", dir_path], check=True)
+        else:
+            # Linux: 打开目录
+            subprocess.run(["xdg-open", dir_path], check=True)
+
+        return {"success": True, "message": f"已打开目录: {dir_path}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"打开目录失败: {str(e)}")
+
+
 # ==================== 结果文件存储API ====================
 
 @router.get("/results/{result_id}/files")
-async def get_result_files_list(result_id: int, experiment_id: int):
+async def get_result_files_list(result_id: int, result_type: str = Query("kcin")):
     """
     获取结果的所有存储文件列表
 
     - result_id: 结果ID
-    - experiment_id: 实验ID（用于确定结果类型）
+    - result_type: 结果类型（kcin 或 dcin）
+    """
+    files = db_manager.db.get_result_files_list(result_id, result_type)
+    return files
+
+
+@router.delete("/results/{result_id}")
+async def delete_result(result_id: int, experiment_id: int):
+    """
+    删除单个结果
+
+    - result_id: 结果ID
+    - experiment_id: 实验ID
     """
     experiment = db_manager.get_experiment(experiment_id)
     if not experiment:
         raise HTTPException(status_code=404, detail="实验不存在")
 
-    result_type = experiment.get("experiment_type", "kcin")
-    files = db_manager.db.get_result_files_list(result_id, result_type)
-    return {"result_id": result_id, "files": files}
+    experiment_type = experiment.get("experiment_type", "kcin")
+    success = db_manager.db.delete_result(result_id, experiment_type, experiment_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="结果不存在")
+
+    return {"success": True, "message": "结果已删除"}
 
 
 @router.get("/files/{file_id}")

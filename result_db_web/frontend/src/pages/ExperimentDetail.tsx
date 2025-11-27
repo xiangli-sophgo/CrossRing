@@ -246,6 +246,7 @@ export default function ExperimentDetail() {
                 pageSize={pageSize}
                 paramKeys={paramKeys}
                 experimentId={experimentId}
+                experimentType={currentExperiment?.experiment_type}
                 onPageChange={(p, ps) => {
                   setPage(p);
                   setPageSize(ps);
@@ -254,6 +255,7 @@ export default function ExperimentDetail() {
                   setSortBy(field);
                   setSortOrder(order);
                 }}
+                onDataChange={loadResults}
               />
             </Card>
           </Col>
