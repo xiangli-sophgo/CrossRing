@@ -234,7 +234,7 @@ def main():
 
     # ========== 仿真参数 ==========
     sim_config = {
-        "max_time": 1000,  # 最大仿真时间 (ns)
+        "max_time": 5800,  # 最大仿真时间 (ns)
         "print_interval": 2000,  # 打印间隔 (ns)
         "verbose": 0,  # 详细程度 (0=静默, 1=正常)
         "export_d2d_csv": True,  # 是否导出D2D请求CSV
@@ -243,7 +243,7 @@ def main():
 
     # ========== 数据库配置 ==========
     save_to_db = 1  # 是否保存到数据库
-    experiment_name = "2261_1127"  # 数据库中的实验名称，None 时自动生成
+    experiment_name = "2261_1128_1400"  # 数据库中的实验名称，None 时自动生成
 
     # ========== CSV 配置 ==========
     save_csv = True  # 是否生成 CSV 文件
@@ -254,4 +254,3 @@ def main():
 
 if __name__ == "__main__":
     main()
- 

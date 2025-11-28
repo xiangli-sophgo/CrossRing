@@ -34,9 +34,16 @@ import { CSS } from '@dnd-kit/utilities';
 // 注册所有Handsontable模块
 registerAllModules();
 
-const STORAGE_KEY = 'result_table_visible_columns_v4';
-const FIXED_COLUMNS_KEY = 'result_table_fixed_columns_v4';
-const COLUMN_ORDER_KEY = 'result_table_column_order_v1';
+// 按实验类型分别保存列设置
+const getStorageKey = (experimentType: ExperimentType) =>
+  `result_table_visible_columns_${experimentType}`;
+const getFixedColumnsKey = (experimentType: ExperimentType) =>
+  `result_table_fixed_columns_${experimentType}`;
+const getColumnOrderKey = (experimentType: ExperimentType) =>
+  `result_table_column_order_${experimentType}`;
+// 按实验ID保存行顺序
+const getRowOrderKey = (experimentId: number) =>
+  `result_table_row_order_${experimentId}`;
 
 // 可拖拽的列项组件
 interface SortableColumnItemProps {
@@ -113,37 +120,10 @@ export default function ResultTable({
   const [visibleColumns, setVisibleColumns] = useState<string[]>([]);
 
   // 列顺序（用户自定义排序）
-  const [columnOrder, setColumnOrder] = useState<string[]>(() => {
-    const saved = localStorage.getItem(COLUMN_ORDER_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed;
-        }
-      } catch {
-        // ignore
-      }
-    }
-    return [];
-  });
+  const [columnOrder, setColumnOrder] = useState<string[]>([]);
 
   // 固定列（具体列名）
-  const [fixedColumns, setFixedColumns] = useState<string[]>(() => {
-    const saved = localStorage.getItem(FIXED_COLUMNS_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          // 过滤掉已删除的performance列
-          return parsed.filter((col: string) => col !== 'performance');
-        }
-      } catch {
-        // ignore
-      }
-    }
-    return [];
-  });
+  const [fixedColumns, setFixedColumns] = useState<string[]>([]);
 
   // 选中的行索引（用于显示详情）
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
@@ -156,6 +136,9 @@ export default function ResultTable({
 
   // 转置模式
   const [transposed, setTransposed] = useState(false);
+
+  // 行顺序（数据记录的拖拽顺序，存储 result.id）
+  const [rowOrder, setRowOrder] = useState<number[]>([]);
 
   // Handsontable ref
   const hotTableRef = useRef<HotTableClass>(null);
@@ -259,12 +242,12 @@ export default function ResultTable({
     return nodes;
   }, [classifiedParams]);
 
-  // 初始化可见列
+  // 初始化可见列（按实验类型）
   useEffect(() => {
     if (paramKeys.length === 0) return;
     // 默认显示重要统计
     const defaultColumns = classifiedParams.important || [];
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(getStorageKey(experimentType));
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -280,26 +263,59 @@ export default function ResultTable({
       }
     }
     setVisibleColumns(defaultColumns);
-  }, [paramKeys, classifiedParams]);
+  }, [paramKeys, classifiedParams, experimentType]);
 
-  // 保存可见列
+  // 初始化列顺序和固定列（按实验类型）
+  useEffect(() => {
+    // 加载列顺序
+    const savedOrder = localStorage.getItem(getColumnOrderKey(experimentType));
+    if (savedOrder) {
+      try {
+        const parsed = JSON.parse(savedOrder);
+        if (Array.isArray(parsed)) {
+          setColumnOrder(parsed);
+        }
+      } catch {
+        setColumnOrder([]);
+      }
+    } else {
+      setColumnOrder([]);
+    }
+
+    // 加载固定列
+    const savedFixed = localStorage.getItem(getFixedColumnsKey(experimentType));
+    if (savedFixed) {
+      try {
+        const parsed = JSON.parse(savedFixed);
+        if (Array.isArray(parsed)) {
+          setFixedColumns(parsed.filter((col: string) => col !== 'performance'));
+        }
+      } catch {
+        setFixedColumns([]);
+      }
+    } else {
+      setFixedColumns([]);
+    }
+  }, [experimentType]);
+
+  // 保存可见列（按实验类型）
   useEffect(() => {
     if (visibleColumns.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(visibleColumns));
+      localStorage.setItem(getStorageKey(experimentType), JSON.stringify(visibleColumns));
     }
-  }, [visibleColumns]);
+  }, [visibleColumns, experimentType]);
 
-  // 保存固定列
+  // 保存固定列（按实验类型）
   useEffect(() => {
-    localStorage.setItem(FIXED_COLUMNS_KEY, JSON.stringify(fixedColumns));
-  }, [fixedColumns]);
+    localStorage.setItem(getFixedColumnsKey(experimentType), JSON.stringify(fixedColumns));
+  }, [fixedColumns, experimentType]);
 
-  // 保存列顺序
+  // 保存列顺序（按实验类型）
   useEffect(() => {
     if (columnOrder.length > 0) {
-      localStorage.setItem(COLUMN_ORDER_KEY, JSON.stringify(columnOrder));
+      localStorage.setItem(getColumnOrderKey(experimentType), JSON.stringify(columnOrder));
     }
-  }, [columnOrder]);
+  }, [columnOrder, experimentType]);
 
   // 切换固定列
   const toggleFixedColumn = (col: string) => {
@@ -410,36 +426,12 @@ export default function ResultTable({
       return [...visibleColumns].sort((a, b) => a.localeCompare(b, 'zh-CN'));
     }
 
-    // 获取手动排序的列（保持顺序）和新列（按首字母排序）
+    // 获取手动排序的列（保持顺序）
     const manualCols = columnOrder.filter((col) => visibleColumns.includes(col));
-    const newCols = visibleColumns
-      .filter((col) => !columnOrder.includes(col))
-      .sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    // 新列直接添加到末尾（不再按首字母自动插入）
+    const newCols = visibleColumns.filter((col) => !columnOrder.includes(col));
 
-    if (newCols.length === 0) {
-      return manualCols;
-    }
-
-    // 将新列按首字母插入到手动列中的正确位置
-    const result: string[] = [];
-    let newIdx = 0;
-
-    for (const manualCol of manualCols) {
-      // 在手动列之前，插入首字母排在它前面的新列
-      while (newIdx < newCols.length && newCols[newIdx].localeCompare(manualCol, 'zh-CN') < 0) {
-        result.push(newCols[newIdx]);
-        newIdx++;
-      }
-      result.push(manualCol);
-    }
-
-    // 添加剩余的新列（首字母在所有手动列之后）
-    while (newIdx < newCols.length) {
-      result.push(newCols[newIdx]);
-      newIdx++;
-    }
-
-    return result;
+    return [...manualCols, ...newCols];
   }, [visibleColumns, columnOrder]);
 
   // 生成列配置（固定列在前）
@@ -459,10 +451,57 @@ export default function ResultTable({
     return allColumns.map((col) => col.replace(/_/g, ' '));
   }, [allColumns]);
 
+  // 当数据变化时加载或初始化行顺序
+  useEffect(() => {
+    if (!data?.results || data.results.length === 0) {
+      setRowOrder([]);
+      return;
+    }
+    // 尝试从 localStorage 加载保存的顺序
+    const saved = localStorage.getItem(getRowOrderKey(experimentId));
+    if (saved) {
+      try {
+        const savedOrder: number[] = JSON.parse(saved);
+        // 过滤出当前数据中存在的 id
+        const currentIds = new Set(data.results.map((r) => r.id));
+        const validOrder = savedOrder.filter((id) => currentIds.has(id));
+        // 添加新数据的 id（不在保存顺序中的）
+        const newIds = data.results.filter((r) => !savedOrder.includes(r.id)).map((r) => r.id);
+        setRowOrder([...validOrder, ...newIds]);
+        return;
+      } catch {
+        // ignore
+      }
+    }
+    // 默认按原始顺序
+    setRowOrder(data.results.map((r) => r.id));
+  }, [data?.results, experimentId]);
+
+  // 保存行顺序
+  useEffect(() => {
+    if (rowOrder.length > 0) {
+      localStorage.setItem(getRowOrderKey(experimentId), JSON.stringify(rowOrder));
+    }
+  }, [rowOrder, experimentId]);
+
+  // 根据行顺序排列的数据
+  const sortedResults = useMemo(() => {
+    if (!data?.results || data.results.length === 0) return [];
+    if (rowOrder.length === 0) return data.results;
+    // 创建 id -> result 的映射
+    const resultMap = new Map(data.results.map((r) => [r.id, r]));
+    // 按 rowOrder 排序，过滤掉不存在的
+    const sorted = rowOrder.filter((id) => resultMap.has(id)).map((id) => resultMap.get(id)!);
+    // 如果有数据不在 rowOrder 中，添加到末尾
+    const orderedIds = new Set(rowOrder);
+    const remaining = data.results.filter((r) => !orderedIds.has(r.id));
+    return [...sorted, ...remaining];
+  }, [data?.results, rowOrder]);
+
   // 表格数据（原始）
   const tableDataRaw = useMemo(() => {
-    if (!data?.results) return [];
-    return data.results.map((row) => {
+    if (!sortedResults.length) return [];
+    return sortedResults.map((row) => {
       return allColumns.map((col) => {
         const value = row.config_params?.[col];
         if (value === undefined || value === null) return '-';
@@ -476,7 +515,7 @@ export default function ResultTable({
         return value;
       });
     });
-  }, [data?.results, allColumns]);
+  }, [sortedResults, allColumns]);
 
   // 转置后的数据和列头
   const { tableData, displayColHeaders } = useMemo(() => {
@@ -561,9 +600,25 @@ export default function ResultTable({
     setColumnOrder(remaining);
   };
 
+  // 行移动处理（非转置模式下）
+  const handleBeforeRowMove = (movedRows: number[], finalIndex: number) => {
+    if (transposed) return true;
+    // 获取当前显示顺序的 id 列表
+    const currentIds = sortedResults.map((r) => r.id);
+    // 获取被移动的行的 id
+    const movedIds = movedRows.map((idx) => currentIds[idx]);
+    // 从原位置移除
+    const remaining = currentIds.filter((_, idx) => !movedRows.includes(idx));
+    // 插入到新位置
+    remaining.splice(finalIndex, 0, ...movedIds);
+    setRowOrder(remaining);
+    // 返回 false 阻止 Handsontable 内部移动，由 React 状态控制
+    return false;
+  };
+
   // 双击行选择（用于显示详情）
   const handleRowDoubleClick = (row: number) => {
-    if (row >= 0 && data?.results[row]) {
+    if (row >= 0 && sortedResults[row]) {
       setSelectedRowIndex(row);
       setDetailExpanded(true);
     }
@@ -601,11 +656,11 @@ export default function ResultTable({
 
   // 获取选中的结果
   const selectedResult = useMemo(() => {
-    if (selectedRowIndex !== null && data?.results[selectedRowIndex]) {
-      return data.results[selectedRowIndex];
+    if (selectedRowIndex !== null && sortedResults[selectedRowIndex]) {
+      return sortedResults[selectedRowIndex];
     }
     return null;
-  }, [selectedRowIndex, data?.results]);
+  }, [selectedRowIndex, sortedResults]);
 
   // 删除结果
   const [deleting, setDeleting] = useState(false);
@@ -775,6 +830,7 @@ export default function ResultTable({
           <div style={{ textAlign: 'center', padding: 50, background: '#fafafa', color: '#999' }}>暂无数据</div>
         ) : (
           <HotTable
+            key={`hot-table-${transposed ? 'transposed' : 'normal'}`}
             ref={hotTableRef}
             data={tableData}
             colHeaders={displayColHeaders}
@@ -783,7 +839,7 @@ export default function ResultTable({
             width="100%"
             height="auto"
             fixedColumnsStart={transposed ? 1 : fixedColumnCount}
-            fixedRowsTop={0}
+            fixedRowsTop={transposed ? Math.min(fixedColumnCount, tableData.length) : 0}
             manualColumnResize={true}
             manualColumnMove={!transposed}
             manualRowMove={!transposed}
@@ -810,6 +866,7 @@ export default function ResultTable({
             outsideClickDeselects={false}
             afterColumnSort={transposed ? undefined : handleAfterColumnSort}
             afterColumnMove={transposed ? undefined : handleAfterColumnMove}
+            beforeRowMove={transposed ? undefined : handleBeforeRowMove}
             afterOnCellMouseDown={(event, coords) => {
               // 双击事件通过afterOnCellMouseDown的detail判断
               if (event.detail === 2) {
