@@ -365,6 +365,30 @@ class DataflowMixin:
                 for out_dir in output_dirs:
                     # 检查是否可以从这个slot转发到这个输出方向
                     can_forward = self._check_rb_forward_conditions(network, flit, pos, next_pos, out_dir, direction_conditions[out_dir])
+
+                    # 反方向流控检查（仅纵向TU/TD）
+                    if self.config.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED and flit and out_dir in ["TU", "TD"]:
+                        dest = flit.destination
+                        # 获取正常方向
+                        if dest < pos:
+                            normal_direction = "TU"
+                        elif dest > pos:
+                            normal_direction = "TD"
+                        else:
+                            normal_direction = None  # 目的地就是当前节点，走EQ
+
+                        # 如果当前检查的方向是反方向
+                        if normal_direction and out_dir != normal_direction:
+                            reverse_direction = out_dir
+                            normal_depth = len(network.ring_bridge[normal_direction][pos])
+                            reverse_depth = len(network.ring_bridge[reverse_direction][pos])
+
+                            # 只有当反方向队列深度 < 正常方向队列深度 × 阈值时，才允许转发到反方向
+                            if normal_depth > 0 and reverse_depth < normal_depth * self.config.REVERSE_DIRECTION_THRESHOLD:
+                                can_forward = True  # 允许转发到反方向
+                            else:
+                                can_forward = False  # 不满足条件，不能转发到反方向
+
                     row.append(can_forward)
                 request_matrix.append(row)
 
@@ -538,7 +562,30 @@ class DataflowMixin:
         # 缓存flit供后续使用
         flit_cache[(ip_type, direction)] = flit
 
-        # 检查方向条件
+        # 反方向流控检查（仅横向TL/TR）
+        if self.config.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED and direction in ["TL", "TR"]:
+            # 获取正常方向（根据path计算）
+            normal_direction = None
+            if len(flit.path) > 1:
+                diff = flit.path[1] - flit.path[0]
+                if diff == 1:
+                    normal_direction = "TR"
+                elif diff == -1:
+                    normal_direction = "TL"
+
+            # 如果当前检查的方向是反方向，进行流控判断
+            if normal_direction and direction != normal_direction:
+                reverse_direction = direction
+                normal_depth = len(network.inject_queues[normal_direction][node_id])
+                reverse_depth = len(network.inject_queues[reverse_direction][node_id])
+
+                # 只有当反方向队列深度 < 正常方向队列深度 × 阈值时，才允许放入反方向
+                if normal_depth > 0 and reverse_depth < normal_depth * self.config.REVERSE_DIRECTION_THRESHOLD:
+                    return True  # 允许放入反方向
+                else:
+                    return False  # 不满足条件，不能放入反方向
+
+        # 检查方向条件（正常逻辑）
         if not self.IQ_direction_conditions[direction](flit):
             return False
 

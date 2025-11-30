@@ -96,10 +96,9 @@ class CrossRingConfig:
         self.IP_H2L_H_FIFO_DEPTH = args.IP_H2L_H_FIFO_DEPTH
         self.IP_H2L_L_FIFO_DEPTH = args.IP_H2L_L_FIFO_DEPTH
 
-        # 拥塞感知流控配置
-        self.CONGESTION_CONTROL_ENABLED = args.CONGESTION_CONTROL_ENABLED
-        self.CONGESTION_MODERATE_THRESHOLD = args.CONGESTION_MODERATE_THRESHOLD
-        self.CONGESTION_SEVERE_THRESHOLD = args.CONGESTION_SEVERE_THRESHOLD
+        # 反方向流控配置
+        self.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED = args.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED
+        self.REVERSE_DIRECTION_THRESHOLD = args.REVERSE_DIRECTION_THRESHOLD
 
         # CHANNEL_SPEC现在为可选配置,主要用于向后兼容和可视化
         # 实际的IP接口将从traffic文件动态推断
@@ -584,10 +583,9 @@ class CrossRingConfig:
         parser.add_argument("--TU_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TU_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TU (up) direction")
         parser.add_argument("--TD_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TD_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TD (down) direction")
 
-        # 拥塞感知流控配置
-        parser.add_argument("--CONGESTION_CONTROL_ENABLED", type=bool, default=default_config.get("CONGESTION_CONTROL_ENABLED", False), help="Enable congestion-aware flow control")
-        parser.add_argument("--CONGESTION_MODERATE_THRESHOLD", type=float, default=default_config.get("CONGESTION_MODERATE_THRESHOLD", 0.5), help="Moderate congestion threshold (50% throttling)")
-        parser.add_argument("--CONGESTION_SEVERE_THRESHOLD", type=float, default=default_config.get("CONGESTION_SEVERE_THRESHOLD", 0.75), help="Severe congestion threshold (75% throttling)")
+        # 反方向流控配置
+        parser.add_argument("--REVERSE_DIRECTION_FLOW_CONTROL_ENABLED", type=bool, default=default_config.get("REVERSE_DIRECTION_FLOW_CONTROL_ENABLED", False), help="Enable reverse direction flow control")
+        parser.add_argument("--REVERSE_DIRECTION_THRESHOLD", type=float, default=default_config.get("REVERSE_DIRECTION_THRESHOLD", 0.5), help="Threshold ratio for reverse direction (e.g., 0.5 means reverse queue depth must be < 50% of normal direction)")
 
         # 添加仲裁器配置支持
         parser.add_argument("--arbitration", type=dict, default=default_config.get("arbitration", {}), help="Arbitration configuration for different queue types")

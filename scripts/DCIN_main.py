@@ -70,7 +70,7 @@ def main():
     model.run_simulation(
         max_time=1000,
         print_interval=200,
-        verbose=1,
+        verbose=1
     )
     # model.save_to_database(experiment_name="DCIN 仿真")
 

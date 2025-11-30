@@ -13,12 +13,12 @@ def main():
     """运行CrossRing仿真 - 使用新的简化配置接口"""
 
     # ==================== 流量配置 ====================
-    # traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
+    traffic_file_path = r"../traffic/DeepSeek_0616/step6_ch_map/"
     # traffic_file_path = r"../test_data"
-    traffic_file_path = r"../traffic"
+    # traffic_file_path = r"../traffic"
     traffic_config = [
         [
-            # "LLama2_AllReduce.txt"
+            "LLama2_AllReduce.txt"
             # "data_sim_16_share_R_1104.txt"
             # "data_sim_16_share_W_1104.txt"
             # "data_sim_16_share_d2d_W_1104.txt"
@@ -26,7 +26,7 @@ def main():
             # "data_sim_64_share_d2d_R_1104.txt"
             # "data_sim_64_share_d2d_W_1104.txt"
             # "data_burst4_W_1111.txt"
-            "test.txt"
+            # "test.txt"
             # "traffic_20251119_152813.txt"
         ],
     ]
@@ -77,14 +77,14 @@ def main():
         result_save_path=f"../Result/CrossRing/{model_type}/",
         show_result_analysis=0,
     )
-    # sim.setup_debug(print_trace=1, show_trace_id=[4150], update_interval=0.1)
+    # sim.setup_debug(print_trace=1, show_trace_id=[1], update_interval=0.1)
     # sim.setup_visualization(plot_link_state=1, plot_start_cycle=500, show_node_id=1)
     # np.random.seed(801)
 
     sim.run_simulation(max_time=5000, print_interval=200)
 
     # ==================== 保存结果到数据库 ====================
-    sim.save_to_database(experiment_name="KCIN 仿真")
+    # sim.save_to_database(experiment_name="KCIN 仿真")
 
 
 if __name__ == "__main__":
