@@ -55,9 +55,6 @@ class D2D_Sys:
         # AXI通道状态管理（类似network.send_flits）
         self.axi_channels = self._init_axi_channels(config)
 
-        # 保留原有的数据传输令牌桶（用于统一的数据流控制）
-        d2d_data_bw_limit = getattr(config, "D2D_DATA_BW_LIMIT", 64)
-        self.data_token_bucket = TokenBucket(rate=d2d_data_bw_limit / config.NETWORK_FREQUENCY / config.FLIT_SIZE, bucket_size=d2d_data_bw_limit)
 
         # 目标Die的接口（由D2DModel设置）
         self.target_die_interfaces = {}  # {die_id: {'rn': rn_interface, 'sn': sn_interface}}
@@ -65,7 +62,6 @@ class D2D_Sys:
         # 统计信息
         self.rn_transmit_count = 0
         self.sn_transmit_count = 0
-        self.data_throttled_count = 0
         self.total_transmit_count = 0
 
         # AXI通道统计
@@ -169,7 +165,6 @@ class D2D_Sys:
                 self.axi_channel_active_cycles[channel_type] += 1
 
         # 更新所有令牌桶
-        self.data_token_bucket.refill(current_cycle)
         for channel in self.axi_channels.values():
             channel["bandwidth_limiter"].refill(current_cycle)
 
@@ -219,7 +214,7 @@ class D2D_Sys:
                         self.sn_transmit_count += 1
 
                     self.total_transmit_count += 1
-                # 注入失败（该通道token不足），继续处理其他通道
+
 
     def _find_first_channel_item(self, queue, channel_type: str):
         """
@@ -499,10 +494,8 @@ class D2D_Sys:
             "rn_transmit_count": self.rn_transmit_count,
             "sn_transmit_count": self.sn_transmit_count,
             "total_transmit_count": self.total_transmit_count,
-            "data_throttled_count": self.data_throttled_count,
             "rn_queue_length": len(self.rn_pending_queue),
             "sn_queue_length": len(self.sn_pending_queue),
-            "data_tokens_available": self.data_token_bucket.tokens,
             "arbiter_type": getattr(self.arbiter, "__class__", type(self.arbiter)).__name__,
             "axi_channel_stats": self.axi_channel_stats.copy(),
             "axi_in_transit": axi_in_transit,

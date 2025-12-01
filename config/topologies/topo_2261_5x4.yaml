@@ -1,4 +1,4 @@
-# 5x4 拓扑配置 (40节点, SG2262)
+# 5x4 拓扑配置 (40节点, SG2261)
 TOPO_TYPE: "5x4"  # 格式 AxB，自动计算拓扑参数
 
 
@@ -21,12 +21,12 @@ SN_DDR_RDB_SIZE: 256  # SN DDR读数据缓冲区
 SN_DDR_WDB_SIZE: 256  # SN DDR写数据缓冲区
 
 # 次要配置：跟踪器数量（自动计算：databuffer_size / BURST）
-RN_R_TRACKER_OSTD: auto    # = RN_RDB_SIZE / BURST 
-RN_W_TRACKER_OSTD: auto    # = RN_WDB_SIZE / BURST 
-SN_DDR_R_TRACKER_OSTD: auto # = SN_DDR_RDB_SIZE / BURST 
-SN_DDR_W_TRACKER_OSTD: auto # = SN_DDR_WDB_SIZE / BURST 
-SN_L2M_R_TRACKER_OSTD: auto # = SN_L2M_RDB_SIZE / BURST 
-SN_L2M_W_TRACKER_OSTD: auto # = SN_L2M_WDB_SIZE / BURST 
+RN_R_TRACKER_OSTD: auto    # = RN_RDB_SIZE / BURST
+RN_W_TRACKER_OSTD: auto    # = RN_WDB_SIZE / BURST
+SN_DDR_R_TRACKER_OSTD: auto # = SN_DDR_RDB_SIZE / BURST
+SN_DDR_W_TRACKER_OSTD: auto # = SN_DDR_WDB_SIZE / BURST
+SN_L2M_R_TRACKER_OSTD: auto # = SN_L2M_RDB_SIZE / BURST
+SN_L2M_W_TRACKER_OSTD: auto # = SN_L2M_WDB_SIZE / BURST
 
 # 资源模式配置
 UNIFIED_RW_TRACKER: false   # true=读写共享资源池，false=读写分离
@@ -122,10 +122,10 @@ IN_ORDER_PACKET_CATEGORIES:
 
 
 # 双侧下环方向配置 - 5x4拓扑 (20节点: 0-19, 布局: 行0: 0-3, 行1: 4-7, 行2: 8-11, 行3: 12-15, 行4: 16-19)
-TL_ALLOWED_SOURCE_NODES: [2, 3, 6, 7, 10, 11, 14, 15, 18, 19]  
-TR_ALLOWED_SOURCE_NODES: [0, 1, 4, 5, 8, 9, 12, 13, 16, 17]    
-TU_ALLOWED_SOURCE_NODES: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]      
-TD_ALLOWED_SOURCE_NODES: [0, 1, 2, 3, 4, 5, 6, 7] 
+TL_ALLOWED_SOURCE_NODES: [2, 3, 6, 7, 10, 11, 14, 15, 18, 19]
+TR_ALLOWED_SOURCE_NODES: [0, 1, 4, 5, 8, 9, 12, 13, 16, 17]
+TU_ALLOWED_SOURCE_NODES: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+TD_ALLOWED_SOURCE_NODES: [0, 1, 2, 3, 4, 5, 6, 7]
 
 # 反方向流控配置
 # 当正常方向上环困难且反方向相对空闲时，允许flit从反方向上环

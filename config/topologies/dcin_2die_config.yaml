@@ -11,8 +11,8 @@ DIE_POSITIONS:
 
 # 每个Die的拓扑配置
 DIE_TOPOLOGIES:
-  0: "5x4"  # Die0使用5x4拓扑
-  1: "5x4"  # Die1使用5x4拓扑
+  0: "2261_5x4"  # Die0使用2261_5x4拓扑
+  1: "2261_5x4"  # Die1使用2261_5x4拓扑
 
 DIE_ROTATIONS:
   0: 0    # Die0不旋转

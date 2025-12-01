@@ -227,7 +227,7 @@ def main():
     traffic_path = "../traffic/2DIE/"
 
     # ========== 结果保存配置 ==========
-    results_folder_name = "2DIE_1201"
+    results_folder_name = "2DIE_1201_40"
 
     # ========== 并行配置 ==========
     max_workers = 2
@@ -243,7 +243,7 @@ def main():
 
     # ========== 数据库配置 ==========
     save_to_db = 1  # 是否保存到数据库
-    experiment_name = "2DIE_1201"  # 数据库中的实验名称，None 时自动生成
+    experiment_name = results_folder_name  # 数据库中的实验名称，None 时自动生成
 
     # ========== CSV 配置 ==========
     save_csv = True  # 是否生成 CSV 文件

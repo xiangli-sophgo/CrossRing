@@ -134,7 +134,7 @@ class D2D_Model:
 
         # 加载traffic元数据并计算静态带宽（如果有）
         meta_data = self._load_traffic_metadata(traffic_file_path, traffic_chains)
-        if meta_data and self.kwargs.get("verbose", 0):
+        if meta_data:
             self._compute_static_bandwidth(meta_data)
 
         # 分析全局traffic，为每个Die提取IP需求
