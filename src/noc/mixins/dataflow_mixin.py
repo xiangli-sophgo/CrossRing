@@ -86,6 +86,9 @@ class DataflowMixin:
                 flit.flit_position = f"IQ_{direction}"
                 queue[node_id].append(flit)
                 network.increment_fifo_flit_count("IQ", direction, node_id)
+                # 统计横向反方向上环
+                if direction in ["TR", "TL"] and getattr(flit, "reverse_inject_h", 0) == 1:
+                    network.increment_fifo_reverse_inject_count("IQ", direction, node_id)
                 queue_pre[node_id] = None
 
         # RB_IN_PRE → RB_IN
@@ -109,6 +112,9 @@ class DataflowMixin:
                 flit.flit_position = f"RB_{fifo_pos}"
                 queue[node_id].append(flit)
                 network.increment_fifo_flit_count("RB", fifo_pos, node_id)
+                # 统计纵向反方向上环
+                if fifo_pos in ["TU", "TD"] and getattr(flit, "reverse_inject_v", 0) == 1:
+                    network.increment_fifo_reverse_inject_count("RB", fifo_pos, node_id)
                 queue_pre[node_id] = None
 
         # EQ_IN_PRE → EQ_IN
@@ -263,6 +269,18 @@ class DataflowMixin:
                 if not flit:
                     continue
 
+                # 标记反方向上环（横向）
+                if self.config.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED and direction in ["TL", "TR"]:
+                    normal_direction = None
+                    if len(flit.path) > 1:
+                        diff = flit.path[1] - flit.path[0]
+                        if diff == 1:
+                            normal_direction = "TR"
+                        elif diff == -1:
+                            normal_direction = "TL"
+                    if normal_direction and direction != normal_direction:
+                        flit.reverse_inject_h = 1
+
                 # 执行注入
                 if flit_type == "req":
                     counts = None
@@ -366,7 +384,7 @@ class DataflowMixin:
                     # 检查是否可以从这个slot转发到这个输出方向
                     can_forward = self._check_rb_forward_conditions(network, flit, pos, next_pos, out_dir, direction_conditions[out_dir])
 
-                    # 反方向流控检查（仅纵向TU/TD）
+                    # 反方向流控检查（纵向TU/TD）
                     if self.config.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED and flit and out_dir in ["TU", "TD"]:
                         dest = flit.destination
                         # 获取正常方向
@@ -382,12 +400,13 @@ class DataflowMixin:
                             reverse_direction = out_dir
                             normal_depth = len(network.ring_bridge[normal_direction][pos])
                             reverse_depth = len(network.ring_bridge[reverse_direction][pos])
+                            capacity = self.config.RB_OUT_FIFO_DEPTH
 
-                            # 只有当反方向队列深度 < 正常方向队列深度 × 阈值时，才允许转发到反方向
-                            if normal_depth > 0 and reverse_depth < normal_depth * self.config.REVERSE_DIRECTION_THRESHOLD:
-                                can_forward = True  # 允许转发到反方向
+                            # 只有当正常方向比反方向拥塞程度超过容量×阈值时，才允许走反方向
+                            if (normal_depth - reverse_depth) > capacity * self.config.REVERSE_DIRECTION_THRESHOLD:
+                                can_forward = True  # 正常方向比反方向拥塞很多，允许走反方向
                             else:
-                                can_forward = False  # 不满足条件，不能转发到反方向
+                                can_forward = False  # 差距不够大，不走反方向
 
                     row.append(can_forward)
                 request_matrix.append(row)
@@ -405,6 +424,18 @@ class DataflowMixin:
                 flit = station_flits[slot_idx]
 
                 if flit:
+                    # 标记反方向上环（纵向）
+                    if self.config.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED and out_dir in ["TU", "TD"]:
+                        dest = flit.destination
+                        if dest < pos:
+                            normal_direction = "TU"
+                        elif dest > pos:
+                            normal_direction = "TD"
+                        else:
+                            normal_direction = None
+                        if normal_direction and out_dir != normal_direction:
+                            flit.reverse_inject_v = 1
+
                     # 新架构: ring_bridge_pre键直接使用节点号
                     network.ring_bridge_pre[out_dir][pos] = flit
                     station_flits[slot_idx] = None  # 标记为已使用
@@ -562,9 +593,8 @@ class DataflowMixin:
         # 缓存flit供后续使用
         flit_cache[(ip_type, direction)] = flit
 
-        # 反方向流控检查（仅横向TL/TR）
+        # 反方向流控检查（横向TL/TR）
         if self.config.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED and direction in ["TL", "TR"]:
-            # 获取正常方向（根据path计算）
             normal_direction = None
             if len(flit.path) > 1:
                 diff = flit.path[1] - flit.path[0]
@@ -578,12 +608,13 @@ class DataflowMixin:
                 reverse_direction = direction
                 normal_depth = len(network.inject_queues[normal_direction][node_id])
                 reverse_depth = len(network.inject_queues[reverse_direction][node_id])
+                capacity = self.config.IQ_OUT_FIFO_DEPTH_HORIZONTAL
 
-                # 只有当反方向队列深度 < 正常方向队列深度 × 阈值时，才允许放入反方向
-                if normal_depth > 0 and reverse_depth < normal_depth * self.config.REVERSE_DIRECTION_THRESHOLD:
-                    return True  # 允许放入反方向
+                # 只有当正常方向比反方向拥塞程度超过容量×阈值时，才允许走反方向
+                if (normal_depth - reverse_depth) > capacity * self.config.REVERSE_DIRECTION_THRESHOLD:
+                    return True  # 正常方向比反方向拥塞很多，允许走反方向
                 else:
-                    return False  # 不满足条件，不能放入反方向
+                    return False  # 差距不够大，不走反方向
 
         # 检查方向条件（正常逻辑）
         if not self.IQ_direction_conditions[direction](flit):

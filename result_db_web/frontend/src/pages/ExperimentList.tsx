@@ -28,6 +28,7 @@ import {
   BarChartOutlined,
   DownloadOutlined,
   EditOutlined,
+  SwapOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useExperimentStore } from '../stores/experimentStore';
@@ -56,7 +57,15 @@ const statusText: Record<string, string> = {
 
 export default function ExperimentList() {
   const navigate = useNavigate();
-  const { experiments, setExperiments, loading, setLoading } = useExperimentStore();
+  const {
+    experiments,
+    setExperiments,
+    loading,
+    setLoading,
+    selectedExperimentIds,
+    toggleExperimentSelection,
+    clearSelection,
+  } = useExperimentStore();
   const [importModalVisible, setImportModalVisible] = useState(false);
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [importForm] = Form.useForm();
@@ -318,6 +327,22 @@ export default function ExperimentList() {
             </Radio.Group>
           </Space>
           <Space>
+            {selectedExperimentIds.length > 0 && (
+              <>
+                <span style={{ color: '#1890ff' }}>
+                  已选择 {selectedExperimentIds.length} 个实验
+                </span>
+                <Button
+                  type="primary"
+                  icon={<SwapOutlined />}
+                  onClick={() => navigate('/compare')}
+                  disabled={selectedExperimentIds.length < 2}
+                >
+                  对比
+                </Button>
+                <Button onClick={clearSelection}>取消选择</Button>
+              </>
+            )}
             <Button
               icon={<UploadOutlined />}
               onClick={() => setImportModalVisible(true)}
@@ -341,6 +366,14 @@ export default function ExperimentList() {
           dataSource={experiments}
           rowKey="id"
           loading={loading}
+          rowSelection={{
+            selectedRowKeys: selectedExperimentIds,
+            onChange: (selectedRowKeys) => {
+              // 清除现有选择，设置新选择
+              clearSelection();
+              (selectedRowKeys as number[]).forEach((id) => toggleExperimentSelection(id));
+            },
+          }}
           pagination={{
             showSizeChanger: true,
             showQuickJumper: true,

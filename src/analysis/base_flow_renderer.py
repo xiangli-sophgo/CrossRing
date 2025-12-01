@@ -413,6 +413,12 @@ class BaseFlowRenderer:
                             f"下环尝试次数大于2占比: {attempts_gt2:.1f}%<br>"
                             f"空闲率: {empty_ratio:.1f}%"
                         )
+                        # 反方向上环统计（仅当功能开启且有数据时显示）
+                        if config and getattr(config, "REVERSE_DIRECTION_FLOW_CONTROL_ENABLED", False):
+                            reverse_inject_total = stats.get("reverse_inject_total", 0)
+                            reverse_inject_ratio = stats.get("reverse_inject_ratio", 0) * 100
+                            if reverse_inject_total > 0:
+                                hover_text += f"<br>反方向上环: {reverse_inject_total} ({reverse_inject_ratio:.1f}%)"
                     else:
                         hover_text = f"<b>链路: {i} → {j}</b><br>值: {label}"
 

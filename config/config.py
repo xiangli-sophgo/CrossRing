@@ -567,7 +567,7 @@ class CrossRingConfig:
             "--ORDERING_PRESERVATION_MODE",
             type=int,
             default=default_config["ORDERING_PRESERVATION_MODE"],
-            help="Ordering preservation mode: 0=disabled, 1=single-side(TL/TU), 2=dual-side(direction-config)",
+            help="Ordering preservation mode: 0=disabled, 1=single-side(TL/TU), 2=dual-side(whitelist), 3=dynamic(src-dest based)",
         )
         parser.add_argument("--ORDERING_GRANULARITY", type=int, default=default_config.get("ORDERING_GRANULARITY", 1), help="Ordering granularity: 0=IP-level, 1=Node-level")
         parser.add_argument(
@@ -585,7 +585,7 @@ class CrossRingConfig:
 
         # 反方向流控配置
         parser.add_argument("--REVERSE_DIRECTION_FLOW_CONTROL_ENABLED", type=bool, default=default_config.get("REVERSE_DIRECTION_FLOW_CONTROL_ENABLED", False), help="Enable reverse direction flow control")
-        parser.add_argument("--REVERSE_DIRECTION_THRESHOLD", type=float, default=default_config.get("REVERSE_DIRECTION_THRESHOLD", 0.5), help="Threshold ratio for reverse direction (e.g., 0.5 means reverse queue depth must be < 50% of normal direction)")
+        parser.add_argument("--REVERSE_DIRECTION_THRESHOLD", type=float, default=default_config.get("REVERSE_DIRECTION_THRESHOLD", 0.5), help="Threshold ratio for reverse direction (e.g., 0.5 means allow reverse when (normal_depth - reverse_depth) > 50% of capacity)")
 
         # 添加仲裁器配置支持
         parser.add_argument("--arbitration", type=dict, default=default_config.get("arbitration", {}), help="Arbitration configuration for different queue types")

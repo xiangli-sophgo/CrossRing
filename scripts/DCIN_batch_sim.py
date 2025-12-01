@@ -224,10 +224,10 @@ def main():
     d2d_config_path = "../config/topologies/dcin_4die_config.yaml"
 
     # ========== 流量配置 ==========
-    traffic_path = "../traffic/2261/"
+    traffic_path = "../traffic/2DIE/"
 
     # ========== 结果保存配置 ==========
-    results_folder_name = "2261_1125"
+    results_folder_name = "2DIE_1201"
 
     # ========== 并行配置 ==========
     max_workers = 2
@@ -243,7 +243,7 @@ def main():
 
     # ========== 数据库配置 ==========
     save_to_db = 1  # 是否保存到数据库
-    experiment_name = "2261_1128_1400"  # 数据库中的实验名称，None 时自动生成
+    experiment_name = "2DIE_1201"  # 数据库中的实验名称，None 时自动生成
 
     # ========== CSV 配置 ==========
     save_csv = True  # 是否生成 CSV 文件

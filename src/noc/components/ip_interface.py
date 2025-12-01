@@ -89,6 +89,10 @@ class IPInterface:
         self.req_cir_h_num, self.req_cir_v_num = 0, 0
         self.rsp_cir_h_num, self.rsp_cir_v_num = 0, 0
         self.data_cir_h_num, self.data_cir_v_num = 0, 0
+        # 反方向上环统计
+        self.req_reverse_h_num, self.req_reverse_v_num = 0, 0
+        self.rsp_reverse_h_num, self.rsp_reverse_v_num = 0, 0
+        self.data_reverse_h_num, self.data_reverse_v_num = 0, 0
 
         # 验证FIFO深度配置
         l2h_depth = config.IP_L2H_FIFO_DEPTH
@@ -573,6 +577,8 @@ class IPInterface:
         self.req_wait_cycles_v += req.wait_cycle_v
         self.req_cir_h_num += req.eject_attempts_h
         self.req_cir_v_num += req.eject_attempts_v
+        self.req_reverse_h_num += req.reverse_inject_h
+        self.req_reverse_v_num += req.reverse_inject_v
         req.cmd_received_by_cake1_cycle = self.current_cycle
 
         # 添加到RequestTracker
@@ -622,6 +628,8 @@ class IPInterface:
         self.rsp_wait_cycles_v += rsp.wait_cycle_v
         self.rsp_cir_h_num += rsp.eject_attempts_h
         self.rsp_cir_v_num += rsp.eject_attempts_v
+        self.rsp_reverse_h_num += rsp.reverse_inject_h
+        self.rsp_reverse_v_num += rsp.reverse_inject_v
         rsp.cmd_received_by_cake0_cycle = self.current_cycle
 
         # 添加到RequestTracker
@@ -636,7 +644,7 @@ class IPInterface:
         req = next((req for req in self.rn_tracker[rsp.req_type] if req.packet_id == rsp.packet_id), None)
 
         if not req:
-           return 
+            return
         req.sync_latency_record(rsp)
 
         if rsp.req_type == "read":
@@ -855,6 +863,8 @@ class IPInterface:
         self.data_wait_cycles_v += flit.wait_cycle_v
         self.data_cir_h_num += flit.eject_attempts_h
         self.data_cir_v_num += flit.eject_attempts_v
+        self.data_reverse_h_num += flit.reverse_inject_h
+        self.data_reverse_v_num += flit.reverse_inject_v
         if flit.req_type == "read":
             # 检查是否为跨Die返回的数据，更新D2D统计
             die_id = getattr(self.config, "DIE_ID", None)

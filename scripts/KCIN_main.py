@@ -75,7 +75,7 @@ def main():
         flow_graph_interactive=1,  # 生成交互式流量图
         fifo_utilization_heatmap=1,
         result_save_path=f"../Result/CrossRing/{model_type}/",
-        show_result_analysis=0,
+        show_result_analysis=1,
     )
     # sim.setup_debug(print_trace=1, show_trace_id=[1], update_interval=0.1)
     # sim.setup_visualization(plot_link_state=1, plot_start_cycle=500, show_node_id=1)

@@ -87,9 +87,7 @@ class CrossPoint:
 
         # 初始化统计字典
         if node_pos not in self.network.fifo_etag_entry_count[fifo_category][direction]:
-            self.network.fifo_etag_entry_count[fifo_category][direction][node_pos] = {
-                "T0": 0, "T1": 0, "T2": 0
-            }
+            self.network.fifo_etag_entry_count[fifo_category][direction][node_pos] = {"T0": 0, "T1": 0, "T2": 0}
 
         # 累加ETag等级计数
         self.network.fifo_etag_entry_count[fifo_category][direction][node_pos][etag] += 1
@@ -270,8 +268,8 @@ class CrossPoint:
             if direction in ["TL", "TU"]:
                 return "T0"
             elif direction in ["TR", "TD"]:
-                # TR/TD只有在双侧下环保序时才能升级到T0
-                return "T0" if (self.config.ORDERING_PRESERVATION_MODE == 2 and ETag_BOTHSIDE_UPGRADE) else None
+                # TR/TD只有在双侧下环保序(Mode 2/3)时才能升级到T0
+                return "T0" if (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and ETag_BOTHSIDE_UPGRADE) else None
 
         return None
 
@@ -320,12 +318,12 @@ class CrossPoint:
             bool: 是否有可用的entry
         """
         # 检查各级entry可用性
-        # T0 Entry检查：TL/TU总是可以；TR/TD只有在双侧下环保序时
+        # T0 Entry检查：TL/TU总是可以；TR/TD只有在双侧下环保序(Mode 2/3)时
         ETag_BOTHSIDE_UPGRADE = getattr(self.network, "ETag_BOTHSIDE_UPGRADE", getattr(self.config, "ETag_BOTHSIDE_UPGRADE", False))
         if direction in ["TL", "TU"]:
             can_use_T0 = self._entry_available(direction, key, "T0")
         elif direction in ["TR", "TD"]:
-            can_use_T0 = self._entry_available(direction, key, "T0") if (self.config.ORDERING_PRESERVATION_MODE == 2 and ETag_BOTHSIDE_UPGRADE) else False
+            can_use_T0 = self._entry_available(direction, key, "T0") if (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and ETag_BOTHSIDE_UPGRADE) else False
         else:
             can_use_T0 = False
 

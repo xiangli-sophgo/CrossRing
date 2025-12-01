@@ -99,6 +99,8 @@ class RequestCollector:
             data_eject_attempts_v_list = [f.eject_attempts_v for f in lifecycle.data_flits]
             data_ordering_blocked_h_list = [f.ordering_blocked_eject_h for f in lifecycle.data_flits]
             data_ordering_blocked_v_list = [f.ordering_blocked_eject_v for f in lifecycle.data_flits]
+            data_reverse_inject_h_list = [f.reverse_inject_h for f in lifecycle.data_flits]
+            data_reverse_inject_v_list = [f.reverse_inject_v for f in lifecycle.data_flits]
 
             # 保序信息（从第一个flit获取）
             first_flit = lifecycle.data_flits[0] if lifecycle.data_flits else None
@@ -141,6 +143,9 @@ class RequestCollector:
                 # 数据flit因保序被阻止的下环次数列表
                 data_ordering_blocked_h_list=data_ordering_blocked_h_list,
                 data_ordering_blocked_v_list=data_ordering_blocked_v_list,
+                # 数据flit反方向上环标记列表
+                data_reverse_inject_h_list=data_reverse_inject_h_list,
+                data_reverse_inject_v_list=data_reverse_inject_v_list,
             )
 
             self.requests.append(request_info)
@@ -806,6 +811,64 @@ class CircuitStatsCollector:
                 "total_data_flits": total_data_flits_h + total_data_flits_v,
                 "ordering_blocked_flits": ordering_blocked_flits_h + ordering_blocked_flits_v,
                 "ordering_blocked_ratio": (ordering_blocked_flits_h + ordering_blocked_flits_v) / (total_data_flits_h + total_data_flits_v) if (total_data_flits_h + total_data_flits_v) > 0 else 0.0,
+            },
+        }
+
+        return results
+
+    def calculate_reverse_inject_stats(self, requests: List[RequestInfo]) -> Dict:
+        """
+        计算反方向上环统计
+
+        Args:
+            requests: RequestInfo列表
+
+        Returns:
+            反方向上环统计字典
+        """
+        # 初始化计数器
+        total_data_flits_h = 0
+        total_data_flits_v = 0
+        reverse_inject_flits_h = 0  # 水平方向反方向上环的flit数
+        reverse_inject_flits_v = 0  # 垂直方向反方向上环的flit数
+
+        # 遍历所有请求，收集数据flit的反方向上环标记
+        for req in requests:
+            # 处理水平方向
+            if hasattr(req, "data_reverse_inject_h_list") and req.data_reverse_inject_h_list:
+                for reverse_flag in req.data_reverse_inject_h_list:
+                    total_data_flits_h += 1
+                    if reverse_flag > 0:
+                        reverse_inject_flits_h += 1
+
+            # 处理垂直方向
+            if hasattr(req, "data_reverse_inject_v_list") and req.data_reverse_inject_v_list:
+                for reverse_flag in req.data_reverse_inject_v_list:
+                    total_data_flits_v += 1
+                    if reverse_flag > 0:
+                        reverse_inject_flits_v += 1
+
+        # 计算比例
+        reverse_inject_ratio_h = reverse_inject_flits_h / total_data_flits_h if total_data_flits_h > 0 else 0.0
+        reverse_inject_ratio_v = reverse_inject_flits_v / total_data_flits_v if total_data_flits_v > 0 else 0.0
+
+        # 准备结果字典
+        results = {
+            "horizontal": {
+                "total_data_flits": total_data_flits_h,
+                "reverse_inject_flits": reverse_inject_flits_h,
+                "reverse_inject_ratio": reverse_inject_ratio_h,
+            },
+            "vertical": {
+                "total_data_flits": total_data_flits_v,
+                "reverse_inject_flits": reverse_inject_flits_v,
+                "reverse_inject_ratio": reverse_inject_ratio_v,
+            },
+            # 整体统计
+            "overall": {
+                "total_data_flits": total_data_flits_h + total_data_flits_v,
+                "reverse_inject_flits": reverse_inject_flits_h + reverse_inject_flits_v,
+                "reverse_inject_ratio": (reverse_inject_flits_h + reverse_inject_flits_v) / (total_data_flits_h + total_data_flits_v) if (total_data_flits_h + total_data_flits_v) > 0 else 0.0,
             },
         }
 

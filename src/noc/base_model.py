@@ -423,10 +423,10 @@ class BaseModel(StatsMixin, DataflowMixin):
         if self.plot_link_state:
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
 
-        # 智能设置各network的双侧升级：全局配置 OR (双侧下环 AND 在保序列表中)
-        self.req_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE == 2 and "REQ" in self.config.IN_ORDER_PACKET_CATEGORIES)
-        self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE == 2 and "RSP" in self.config.IN_ORDER_PACKET_CATEGORIES)
-        self.data_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE == 2 and "DATA" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        # 智能设置各network的双侧升级：全局配置 OR (双侧下环/动态方向 AND 在保序列表中)
+        self.req_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "REQ" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "RSP" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        self.data_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "DATA" in self.config.IN_ORDER_PACKET_CATEGORIES)
 
         # Initialize arbiters based on configuration
         arbitration_config = getattr(self.config, "arbitration", {})
@@ -516,6 +516,10 @@ class BaseModel(StatsMixin, DataflowMixin):
         self.req_cir_h_num_stat, self.req_cir_v_num_stat = 0, 0
         self.rsp_cir_h_num_stat, self.rsp_cir_v_num_stat = 0, 0
         self.data_cir_h_num_stat, self.data_cir_v_num_stat = 0, 0
+        # 反方向上环统计
+        self.req_reverse_h_num_stat, self.req_reverse_v_num_stat = 0, 0
+        self.rsp_reverse_h_num_stat, self.rsp_reverse_v_num_stat = 0, 0
+        self.data_reverse_h_num_stat, self.data_reverse_v_num_stat = 0, 0
         self.req_wait_cycle_h_num_stat, self.req_wait_cycle_v_num_stat = 0, 0
         self.rsp_wait_cycle_h_num_stat, self.rsp_wait_cycle_v_num_stat = 0, 0
         self.data_wait_cycle_h_num_stat, self.data_wait_cycle_v_num_stat = 0, 0

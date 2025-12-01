@@ -111,8 +111,8 @@ L2M_BW_LIMIT: 128
 CROSSRING_VERSION: "V1"
 IN_ORDER_EJECTION_PAIRS: []
 ENABLE_CROSSPOINT_CONFLICT_CHECK: 0
-ORDERING_PRESERVATION_MODE: 0  # 0=不保序, 1=单侧下环(TL/TU), 2=双侧下环(白名单)
-ORDERING_ETAG_UPGRADE_MODE: 0
+ORDERING_PRESERVATION_MODE: 0  # 0=不保序, 1=单侧下环(TL/TU), 2=双侧下环(白名单), 3=动态方向(基于src-dest)
+ORDERING_ETAG_UPGRADE_MODE: 0  # 0=仅资源失败升级ETag, 1=保序失败也升级ETag
 ORDERING_GRANULARITY: 0  # 0=IP层级, 1=节点层级
 # 需要保序的包类型 (REQ/RSP/DATA)
 IN_ORDER_PACKET_CATEGORIES:
@@ -128,8 +128,15 @@ TU_ALLOWED_SOURCE_NODES: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 TD_ALLOWED_SOURCE_NODES: [0, 1, 2, 3, 4, 5, 6, 7] 
 
 # 反方向流控配置
+# 当正常方向上环困难且反方向相对空闲时，允许flit从反方向上环
+# REVERSE_DIRECTION_FLOW_CONTROL_ENABLED: 启用开关 (0=禁用, 1=启用)
+# REVERSE_DIRECTION_THRESHOLD: 阈值比例 (0.0-1.0)
+#   判断公式: (正常方向深度 - 反方向深度) > 容量 × 阈值
+#   0.25 = 差值超过25%容量时走反方向（激进）
+#   0.5 = 差值超过50%容量时走反方向（推荐）
+#   0.75 = 差值超过75%容量时走反方向（保守）
 REVERSE_DIRECTION_FLOW_CONTROL_ENABLED: 0
-REVERSE_DIRECTION_THRESHOLD: 0.5
+REVERSE_DIRECTION_THRESHOLD: 0.75
 
 # IP 频率变换 FIFO 深度 (使用默认值)
 IP_L2H_FIFO_DEPTH: 3
@@ -144,7 +151,7 @@ arbitration:
   # 全局默认仲裁器类型
   default:
     type: "round_robin"
-#       type: "islip"
+      # type: "islip"
 #       algorithm: "lqf"  # Longest Queue First
-#       iterations: 2
+      # iterations: 1
 #       weight_strategy: "queue_length"

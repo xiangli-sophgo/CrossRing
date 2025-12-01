@@ -6,8 +6,8 @@ Contains the basic data unit (Flit) and rate limiting mechanism (TokenBucket).
 from __future__ import annotations
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from .network import Network  # 仅用于 IDE 类型提示
+# if TYPE_CHECKING:
+#     from .network import Network  # 仅用于 IDE 类型提示
 
 import numpy as np
 from collections import deque
@@ -71,6 +71,8 @@ class Flit:
         "eject_attempts_h",
         "ordering_blocked_eject_h",  # 因保序被阻止的横向下环次数
         "ordering_blocked_eject_v",  # 因保序被阻止的纵向下环次数
+        "reverse_inject_h",  # 横向反方向上环标记 (0=正常, 1=反方向)
+        "reverse_inject_v",  # 纵向反方向上环标记 (0=正常, 1=反方向)
         "wait_cycle_h",
         "wait_cycle_v",
         "path_index",
@@ -214,6 +216,8 @@ class Flit:
         self.eject_attempts_h = 0
         self.ordering_blocked_eject_h = 0
         self.ordering_blocked_eject_v = 0
+        self.reverse_inject_h = 0
+        self.reverse_inject_v = 0
         self.wait_cycle_h = 0
         self.wait_cycle_v = 0
         self.path_index = 0
@@ -316,7 +320,7 @@ class Flit:
         else:
             raise ValueError(self.flit_type)
 
-    def inject(self, network: "Network"):  # 使用字符串类型标注
+    def inject(self, network):  # 使用字符串类型标注
         if self.path_index == 0 and not self.is_injected:
             if len(self.path) > 1:  # Ensure there is a next position
                 next_position = self.path[self.path_index + 1]
@@ -370,6 +374,8 @@ class Flit:
         self.eject_attempts_v = 0
         self.ordering_blocked_eject_h = 0
         self.ordering_blocked_eject_v = 0
+        self.reverse_inject_h = 0
+        self.reverse_inject_v = 0
         self.ETag_priority = "T2"
         self.T0_slot_id = None
         self.path_index = 0
@@ -579,6 +585,7 @@ def create_d2d_flit_copy(src_flit: Flit, source: int = 0, destination: int = 0, 
 # 原始节点信息获取辅助函数
 # 用于统一获取flit的原始源/目标节点信息，替代已废弃的_original属性
 # ============================================================================
+
 
 def get_original_source_node(flit: Flit) -> int:
     """

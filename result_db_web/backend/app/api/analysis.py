@@ -42,6 +42,14 @@ class CompareResponse(BaseModel):
     best_configs: List[Dict[str, Any]]
 
 
+class TrafficCompareResponse(BaseModel):
+    """按数据流对比响应"""
+    traffic_files: List[str]
+    experiments: List[Dict[str, Any]]
+    param_keys: List[str]
+    data: List[Dict[str, Any]]
+
+
 # ==================== API端点 ====================
 
 @router.get("/experiments/{experiment_id}/sensitivity/{parameter}", response_model=SensitivityResponse)
@@ -172,3 +180,29 @@ async def get_parameter_heatmap(
         "y_values": sorted(y_values, key=lambda x: x if isinstance(x, (int, float)) else 0),
         "data": data,
     }
+
+
+@router.post("/compare/traffic", response_model=TrafficCompareResponse)
+async def compare_experiments_by_traffic(request: CompareRequest):
+    """
+    按数据流对比多个实验的性能（支持多指标）
+
+    返回每个数据流在各实验中的平均/最大/最小性能值
+    """
+    if len(request.experiment_ids) < 2:
+        raise HTTPException(status_code=400, detail="至少需要2个实验进行对比")
+
+    if len(request.experiment_ids) > 10:
+        raise HTTPException(status_code=400, detail="最多支持10个实验对比")
+
+    # 验证所有实验是否存在
+    for exp_id in request.experiment_ids:
+        experiment = db_manager.get_experiment(exp_id)
+        if not experiment:
+            raise HTTPException(status_code=404, detail=f"实验不存在: ID={exp_id}")
+
+    try:
+        result = db_manager.compare_by_traffic(request.experiment_ids)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

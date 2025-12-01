@@ -10,6 +10,7 @@ import type {
   Statistics,
   SensitivityResponse,
   FilterCondition,
+  TrafficCompareData,
 } from '../types';
 
 const api = axios.create({
@@ -179,6 +180,13 @@ export const compareExperiments = async (
   best_configs: Record<string, unknown>[];
 }> => {
   const response = await api.post('/compare', { experiment_ids: experimentIds });
+  return response.data;
+};
+
+export const compareByTraffic = async (
+  experimentIds: number[]
+): Promise<TrafficCompareData> => {
+  const response = await api.post('/compare/traffic', { experiment_ids: experimentIds });
   return response.data;
 };
 

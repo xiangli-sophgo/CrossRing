@@ -305,18 +305,18 @@ class D2D_SN_Interface(IPInterface):
     def inject_step(self, cycle):
         """
         重写inject_step方法
-        在inject阶段处理跨Die接收，inject_to_l2h_pre以1GHz频率运行
+        在inject阶段处理跨Die接收，inject_to_l2h_pre以2GHz频率运行
         """
         self.current_cycle = cycle
-        cycle_mod = cycle % self.config.NETWORK_FREQUENCY
+        # cycle_mod = cycle % self.config.NETWORK_FREQUENCY  # 2GHz统一频率，不再需要
 
         # 首先处理跨Die接收队列
         self.process_cross_die_receives()
 
-        # 1GHz inject操作（每个网络周期执行一次）
-        if cycle_mod == 0:
-            for net_type in ["req", "rsp", "data"]:
-                self.inject_to_l2h_pre(net_type)
+        # 2GHz inject操作（每个周期执行）
+        # if cycle_mod == 0:  # 2GHz统一频率，不再需要判断
+        for net_type in ["req", "rsp", "data"]:
+            self.inject_to_l2h_pre(net_type)
 
         # 2GHz操作：l2h_pre到IQ_channel_buffer
         for net_type in ["req", "rsp", "data"]:
@@ -325,24 +325,24 @@ class D2D_SN_Interface(IPInterface):
     def eject_step(self, cycle):
         """
         重写eject_step方法，在eject阶段处理写请求的资源检查和跨Die转发
-        D2D_SN的h2l_l FIFO运行在1GHz频率
+        D2D_SN的h2l_l FIFO运行在2GHz频率
         """
         self.current_cycle = cycle
-        cycle_mod = cycle % self.config.NETWORK_FREQUENCY
+        # cycle_mod = cycle % self.config.NETWORK_FREQUENCY  # 2GHz统一频率，不再需要
 
         ejected_flits = []
 
-        # 2GHz 操作(每半个网络周期执行一次)
+        # 2GHz 操作
         for net_type in ["req", "rsp", "data"]:
             self.EQ_channel_buffer_to_h2l_pre(net_type)
             self.h2l_h_to_h2l_l_pre(net_type)
 
-        # 1GHz 操作（每个网络周期执行一次）
-        if cycle_mod == 0:
-            for net_type in ["req", "rsp", "data"]:
-                flit = self.h2l_l_to_eject_fifo(net_type)
-                if flit:
-                    ejected_flits.append(flit)
+        # 2GHz 操作（每个周期执行）
+        # if cycle_mod == 0:  # 2GHz统一频率，不再需要判断
+        for net_type in ["req", "rsp", "data"]:
+            flit = self.h2l_l_to_eject_fifo(net_type)
+            if flit:
+                ejected_flits.append(flit)
 
         # 检查ejected的flit
         if ejected_flits:

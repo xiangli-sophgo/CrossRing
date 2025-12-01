@@ -264,6 +264,8 @@ class DualChannelIPInterface(IPInterface):
         self.data_wait_cycles_v += flit.wait_cycle_v
         self.data_cir_h_num += flit.eject_attempts_h
         self.data_cir_v_num += flit.eject_attempts_v
+        self.data_reverse_h_num += flit.reverse_inject_h
+        self.data_reverse_v_num += flit.reverse_inject_v
 
         if flit.req_type == "read":
             # 读数据到达RN端，需要收集到data buffer中

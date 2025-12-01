@@ -74,6 +74,9 @@ class RequestInfo:
     # 数据flit因保序被阻止的下环次数列表
     data_ordering_blocked_h_list: List[int] = None
     data_ordering_blocked_v_list: List[int] = None
+    # 数据flit反方向上环标记列表
+    data_reverse_inject_h_list: List[int] = None
+    data_reverse_inject_v_list: List[int] = None
 
     def __post_init__(self):
         # 初始化列表，避免None值
@@ -85,6 +88,10 @@ class RequestInfo:
             self.data_ordering_blocked_h_list = []
         if self.data_ordering_blocked_v_list is None:
             self.data_ordering_blocked_v_list = []
+        if self.data_reverse_inject_h_list is None:
+            self.data_reverse_inject_h_list = []
+        if self.data_reverse_inject_v_list is None:
+            self.data_reverse_inject_v_list = []
 
 
 @dataclass
@@ -414,6 +421,10 @@ class SingleDieAnalyzer:
         ordering_blocked_stats = self.circuit_collector.calculate_ordering_blocked_stats(self.requests)
         results["ordering_blocked_stats"] = ordering_blocked_stats
 
+        # 计算反方向上环统计
+        reverse_inject_stats = self.circuit_collector.calculate_reverse_inject_stats(self.requests)
+        results["reverse_inject_stats"] = reverse_inject_stats
+
         # 计算延迟统计
         latency_stats = self.latency_collector.calculate_latency_stats(self.requests)
         results["latency_stats"] = latency_stats
@@ -507,10 +518,8 @@ class SingleDieAnalyzer:
 
         # 将收集的图表保存到result_processor中，供base_model后续合并
         if self.sim_model and hasattr(self.sim_model, "result_processor"):
-            if not hasattr(self.sim_model.result_processor, "charts_to_merge"):
-                self.sim_model.result_processor.charts_to_merge = []
-            # 将当前收集的图表合并到result_processor
-            self.sim_model.result_processor.charts_to_merge.extend(charts_to_merge)
+            # 清空之前的图表，避免多次调用时重复追加
+            self.sim_model.result_processor.charts_to_merge = charts_to_merge
 
         # 保存图片路径到results中,供后续打印使用
         results["saved_figures"] = saved_figures

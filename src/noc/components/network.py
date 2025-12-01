@@ -191,6 +191,12 @@ class Network:
             "EQ": {"TU": {}, "TD": {}, "CH_buffer": {}},
         }
 
+        # 反方向上环flit计数统计
+        self.fifo_reverse_inject_count = {
+            "IQ": {"TR": {}, "TL": {}},  # IQ_OUT 横向反方向上环
+            "RB": {"TU": {}, "TD": {}},  # RB_OUT 纵向反方向上环
+        }
+
         # ITag累计次数统计（每周期累加FIFO中带ITag的flit数）
         self.fifo_itag_cumulative_count = {
             "IQ": {"TR": {}, "TL": {}},  # IQ_OUT (横向注入)
@@ -297,6 +303,8 @@ class Network:
                         "total_cycles": 0,
                         "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
                         "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
+                        "reverse_inject_h": 0,  # 横向反方向上环flit数
+                        "reverse_inject_v": 0,  # 纵向反方向上环flit数
                     }
                     self.links_tag[(i, j)] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(slice_count)]
                     self.global_slot_id_counter += slice_count
@@ -316,6 +324,8 @@ class Network:
                     "total_cycles": 0,
                     "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
                     "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
+                    "reverse_inject_h": 0,
+                    "reverse_inject_v": 0,
                 }
                 self.links_tag[key] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(2)]
                 self.global_slot_id_counter += 2
@@ -330,6 +340,8 @@ class Network:
                     "total_cycles": 0,
                     "eject_attempts_h": {"0": 0, "1": 0, "2": 0, ">2": 0},
                     "eject_attempts_v": {"0": 0, "1": 0, "2": 0, ">2": 0},
+                    "reverse_inject_h": 0,
+                    "reverse_inject_v": 0,
                 }
                 self.links_tag[key] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(2)]
                 self.global_slot_id_counter += 2
@@ -861,8 +873,10 @@ class Network:
         """确定flit允许的下环方向
 
         设计说明：
-            使用flit.source来决定允许的下环方向。
-            对于跨Die场景，flit.source已经是本Die内的入口节点（如D2D_RN）。
+            Mode 0: 不保序，所有方向都允许
+            Mode 1: 单侧下环，固定只允许TL和TU方向
+            Mode 2: 双侧下环，基于源节点白名单配置
+            Mode 3: 动态方向，基于(src, dest)相对位置计算
         """
         mode = self.config.ORDERING_PRESERVATION_MODE
 
@@ -888,8 +902,47 @@ class Network:
 
             return allowed_dirs if allowed_dirs else None
 
+        # Mode 3: 动态方向，基于(src, dest)相对位置计算
+        if mode == 3:
+            return self._calculate_dynamic_eject_directions(flit)
+
         # 未知模式，默认不保序
         return None
+
+    def _calculate_dynamic_eject_directions(self, flit: Flit):
+        """基于(src, dest)相对位置计算允许的下环方向
+
+        横向：dest在src左边 → TL，dest在src右边 → TR
+        纵向：dest在src上方 → TU，dest在src下方 → TD
+        同行/同列时不分配该维度的方向（由EQ直接处理）
+        """
+        src_node = flit.source
+        dest_node = flit.destination
+
+        num_cols = self.config.NUM_COL
+
+        src_row = src_node // num_cols
+        src_col = src_node % num_cols
+        dest_row = dest_node // num_cols
+        dest_col = dest_node % num_cols
+
+        allowed_dirs = []
+
+        # 横向方向判断
+        if dest_col < src_col:
+            allowed_dirs.append("TL")  # 目标在左边，允许向左下环
+        elif dest_col > src_col:
+            allowed_dirs.append("TR")  # 目标在右边，允许向右下环
+        # 同列时不需要横向下环，EQ直接处理
+
+        # 纵向方向判断
+        if dest_row < src_row:
+            allowed_dirs.append("TU")  # 目标在上方，允许向上下环
+        elif dest_row > src_row:
+            allowed_dirs.append("TD")  # 目标在下方，允许向下下环
+        # 同行时不需要纵向下环，EQ直接处理
+
+        return allowed_dirs if allowed_dirs else None
 
     def execute_moves(self, flit: Flit, cycle):
         # 情况1：is_arrive=True（已在IP模块）
@@ -1340,6 +1393,9 @@ class Network:
                 self.links_flow_stat[link]["eject_attempts_h"]["2"] += 1
             else:
                 self.links_flow_stat[link]["eject_attempts_h"][">2"] += 1
+            # 统计横向反方向上环
+            if hasattr(flit, "reverse_inject_h") and flit.reverse_inject_h > 0:
+                self.links_flow_stat[link]["reverse_inject_h"] += 1
         elif is_vertical:
             # 纵向链路，统计纵向下环尝试次数
             attempts = flit.eject_attempts_v
@@ -1351,6 +1407,9 @@ class Network:
                 self.links_flow_stat[link]["eject_attempts_v"]["2"] += 1
             else:
                 self.links_flow_stat[link]["eject_attempts_v"][">2"] += 1
+            # 统计纵向反方向上环
+            if hasattr(flit, "reverse_inject_v") and flit.reverse_inject_v > 0:
+                self.links_flow_stat[link]["reverse_inject_v"] += 1
 
     def collect_cycle_end_link_statistics(self, cycle):
         """
@@ -1487,6 +1546,22 @@ class Network:
                 self.fifo_flit_count[category][fifo_type][pos] = 0
             self.fifo_flit_count[category][fifo_type][pos] += 1
 
+    def increment_fifo_reverse_inject_count(self, category: str, fifo_type: str, pos: int):
+        """更新FIFO的反方向上环flit计数
+
+        Args:
+            category: FIFO类别 ("IQ"/"RB")
+            fifo_type: FIFO类型 ("TR"/"TL"/"TU"/"TD")
+            pos: 节点位置
+        """
+        if category not in self.fifo_reverse_inject_count:
+            return
+        if fifo_type not in self.fifo_reverse_inject_count[category]:
+            return
+        if pos not in self.fifo_reverse_inject_count[category][fifo_type]:
+            self.fifo_reverse_inject_count[category][fifo_type][pos] = 0
+        self.fifo_reverse_inject_count[category][fifo_type][pos] += 1
+
     def get_links_utilization_stats(self):
         """
         获取链路利用率统计信息
@@ -1519,6 +1594,11 @@ class Network:
                     ">2": (eject_attempts_h[">2"] + eject_attempts_v[">2"]) / total_cycles,
                 }
 
+                # 获取反方向上环统计
+                reverse_inject_h = link_stats.get("reverse_inject_h", 0)
+                reverse_inject_v = link_stats.get("reverse_inject_v", 0)
+                total_reverse_inject = reverse_inject_h + reverse_inject_v
+
                 stats[link] = {
                     # 主要比例（基于total_cycles）
                     "utilization": total_flit / total_cycles,
@@ -1536,6 +1616,11 @@ class Network:
                     "total_flit": total_flit,
                     "eject_attempts_h": eject_attempts_h,
                     "eject_attempts_v": eject_attempts_v,
+                    # 反方向上环统计
+                    "reverse_inject_h": reverse_inject_h,
+                    "reverse_inject_v": reverse_inject_v,
+                    "reverse_inject_total": total_reverse_inject,
+                    "reverse_inject_ratio": total_reverse_inject / total_flit if total_flit > 0 else 0.0,
                 }
 
         return stats

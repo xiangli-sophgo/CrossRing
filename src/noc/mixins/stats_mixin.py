@@ -88,6 +88,13 @@ class StatsMixin:
             self.rsp_cir_v_num_stat += ip_interface.rsp_cir_v_num
             self.data_cir_h_num_stat += ip_interface.data_cir_h_num
             self.data_cir_v_num_stat += ip_interface.data_cir_v_num
+            # 反方向上环统计汇总
+            self.req_reverse_h_num_stat += ip_interface.req_reverse_h_num
+            self.req_reverse_v_num_stat += ip_interface.req_reverse_v_num
+            self.rsp_reverse_h_num_stat += ip_interface.rsp_reverse_h_num
+            self.rsp_reverse_v_num_stat += ip_interface.rsp_reverse_v_num
+            self.data_reverse_h_num_stat += ip_interface.data_reverse_h_num
+            self.data_reverse_v_num_stat += ip_interface.data_reverse_v_num
             self.req_wait_cycle_h_num_stat += ip_interface.req_wait_cycles_h
             self.req_wait_cycle_v_num_stat += ip_interface.req_wait_cycles_v
             self.rsp_wait_cycle_h_num_stat += ip_interface.rsp_wait_cycles_h
@@ -731,6 +738,26 @@ class StatsMixin:
                         results["保序阻止_总flit数"] = ordering_stats["overall"]["total_data_flits"]
                         results["保序阻止_被阻止flit数"] = ordering_stats["overall"]["ordering_blocked_flits"]
                         results["保序阻止_比例"] = ordering_stats["overall"]["ordering_blocked_ratio"]
+
+                # 反方向上环统计
+                if "reverse_inject_stats" in bandwidth_analysis:
+                    reverse_stats = bandwidth_analysis["reverse_inject_stats"]
+                    results["reverse_inject_stats"] = reverse_stats
+
+                    if "horizontal" in reverse_stats:
+                        results["反方向_横向_总flit数"] = reverse_stats["horizontal"]["total_data_flits"]
+                        results["反方向_横向_反方向flit数"] = reverse_stats["horizontal"]["reverse_inject_flits"]
+                        results["反方向_横向_比例"] = reverse_stats["horizontal"]["reverse_inject_ratio"]
+
+                    if "vertical" in reverse_stats:
+                        results["反方向_纵向_总flit数"] = reverse_stats["vertical"]["total_data_flits"]
+                        results["反方向_纵向_反方向flit数"] = reverse_stats["vertical"]["reverse_inject_flits"]
+                        results["反方向_纵向_比例"] = reverse_stats["vertical"]["reverse_inject_ratio"]
+
+                    if "overall" in reverse_stats:
+                        results["反方向_总flit数"] = reverse_stats["overall"]["total_data_flits"]
+                        results["反方向_反方向flit数"] = reverse_stats["overall"]["reverse_inject_flits"]
+                        results["反方向_比例"] = reverse_stats["overall"]["reverse_inject_ratio"]
 
         except Exception as e:
             if hasattr(self, "verbose") and self.verbose:

@@ -524,3 +524,92 @@ class ResultManager:
             "best_configs": best_configs,
         }
 
+    def compare_by_traffic(self, experiment_ids: List[int]) -> Dict[str, Any]:
+        """
+        按数据流对比多个实验的完整参数数据
+
+        Args:
+            experiment_ids: 实验ID列表
+
+        Returns:
+            {
+                traffic_files: ["flow1.json", ...],
+                experiments: [{id, name}, ...],
+                param_keys: ["带宽ddr_mixed", "平均延迟", ...],  # 所有实验的参数并集
+                data: [
+                    {
+                        traffic_file: "flow1.json",
+                        exp_1_带宽ddr_mixed: 10.5,
+                        exp_1_平均延迟: 100,
+                        exp_2_带宽ddr_mixed: 11.2,
+                        ...
+                    },
+                    ...
+                ]
+            }
+        """
+        experiments = []
+        experiment_types = set()
+        all_param_keys = set()
+
+        # 收集所有实验的数据流结果
+        all_traffic_data = {}  # {exp_id: {traffic_name: {param: value, ...}}}
+
+        for exp_id in experiment_ids:
+            exp = self.db.get_experiment(exp_id)
+            if not exp:
+                continue
+
+            experiment_types.add(exp["experiment_type"])
+            experiments.append({"id": exp_id, "name": exp["name"]})
+
+            # 获取该实验的所有结果
+            results, _ = self.db.get_results(exp_id, page=1, page_size=100000)
+
+            # 按数据流名称分组，取每个数据流的第一条结果（或可以取平均）
+            traffic_results = {}
+            for result in results:
+                config_params = result.get("config_params", {})
+                # 尝试获取数据流名称字段
+                traffic_name = config_params.get("数据流名称") or config_params.get("file_name") or "未知"
+
+                # 收集所有参数键
+                all_param_keys.update(config_params.keys())
+
+                # 每个数据流只保留第一条结果（通常每个数据流只有一条）
+                if traffic_name not in traffic_results:
+                    traffic_results[traffic_name] = config_params
+
+            all_traffic_data[exp_id] = traffic_results
+
+        # 检查是否为同类型实验
+        if len(experiment_types) > 1:
+            raise ValueError("只能对比同类型的实验（都是 KCIN 或都是 DCIN）")
+
+        # 收集所有数据流名称
+        all_traffic_files = set()
+        for traffic_results in all_traffic_data.values():
+            all_traffic_files.update(traffic_results.keys())
+        traffic_files = sorted(all_traffic_files)
+
+        # 移除数据流名称字段本身
+        param_keys = sorted([k for k in all_param_keys if k not in ("数据流名称", "file_name")])
+
+        # 构建对比数据矩阵
+        data = []
+        for traffic_file in traffic_files:
+            row = {"traffic_file": traffic_file}
+            for exp in experiments:
+                exp_id = exp["id"]
+                params = all_traffic_data.get(exp_id, {}).get(traffic_file, {})
+                for key in param_keys:
+                    row[f"exp_{exp_id}_{key}"] = params.get(key)
+            data.append(row)
+
+        return {
+            "traffic_files": traffic_files,
+            "experiments": experiments,
+            "param_keys": param_keys,
+            "data": data,
+        }
+

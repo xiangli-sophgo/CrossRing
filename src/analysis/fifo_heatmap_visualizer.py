@@ -75,6 +75,16 @@ class FIFOUtilizationCollector:
                             if flit_count > 0 and total_cycles > 0:
                                 itag_rate = itag_cumulative / (total_cycles * flit_count) * 100
 
+                # 反方向上环统计 (只统计TR/TL横向注入)
+                reverse_inject_count = 0
+                reverse_inject_rate = 0.0
+                if direction in ["TR", "TL"]:
+                    if hasattr(network, "fifo_reverse_inject_count"):
+                        if direction in network.fifo_reverse_inject_count.get("IQ", {}):
+                            reverse_inject_count = network.fifo_reverse_inject_count["IQ"][direction].get(node_pos, 0)
+                            if flit_count > 0:
+                                reverse_inject_rate = reverse_inject_count / flit_count * 100
+
                 die_data["IQ"][node_pos][direction] = {
                     "avg": avg_util,
                     "peak": peak_util,
@@ -90,6 +100,8 @@ class FIFOUtilizationCollector:
                     "etag_t0_rate": 0.0,
                     "etag_t1_rate": 0.0,
                     "etag_t2_rate": 0.0,
+                    "reverse_inject_count": reverse_inject_count,
+                    "reverse_inject_rate": reverse_inject_rate,
                 }
 
         # 收集IQ通道缓冲数据 (IQ_channel_buffer)
@@ -164,6 +176,16 @@ class FIFOUtilizationCollector:
                                 etag_t1_rate = etag_t1_cumulative / total_etag * 100
                                 etag_t2_rate = etag_t2_cumulative / total_etag * 100
 
+                # 反方向上环统计 (只统计TU/TD纵向转向)
+                reverse_inject_count = 0
+                reverse_inject_rate = 0.0
+                if direction in ["TU", "TD"]:
+                    if hasattr(network, "fifo_reverse_inject_count"):
+                        if direction in network.fifo_reverse_inject_count.get("RB", {}):
+                            reverse_inject_count = network.fifo_reverse_inject_count["RB"][direction].get(node_pos, 0)
+                            if flit_count > 0:
+                                reverse_inject_rate = reverse_inject_count / flit_count * 100
+
                 die_data["RB"][node_pos][direction] = {
                     "avg": avg_util,
                     "peak": peak_util,
@@ -179,6 +201,8 @@ class FIFOUtilizationCollector:
                     "etag_t0_rate": etag_t0_rate,
                     "etag_t1_rate": etag_t1_rate,
                     "etag_t2_rate": etag_t2_rate,
+                    "reverse_inject_count": reverse_inject_count,
+                    "reverse_inject_rate": reverse_inject_rate,
                 }
 
         # 收集EQ下环队列数据 (eject_queues)
@@ -873,6 +897,12 @@ class FIFOHeatmapVisualizer:
                                 tag_info.append(f"ETag T0: {etag_t0} ({etag_t0_rate:.2f}%)")
                                 tag_info.append(f"ETag T1: {etag_t1} ({etag_t1_rate:.2f}%)")
                                 tag_info.append(f"ETag T2: {etag_t2} ({etag_t2_rate:.2f}%)")
+
+                            # 反方向上环统计（只有功能开启且有数据时显示）
+                            reverse_inject_count = fifo_info.get("reverse_inject_count", 0)
+                            reverse_inject_rate = fifo_info.get("reverse_inject_rate", 0.0)
+                            if getattr(self.config, "REVERSE_DIRECTION_FLOW_CONTROL_ENABLED", False) and reverse_inject_count > 0:
+                                tag_info.append(f"反方向上环: {reverse_inject_count} ({reverse_inject_rate:.2f}%)")
 
                             # 组装hover文本
                             hover_text = (

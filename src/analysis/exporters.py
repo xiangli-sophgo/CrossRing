@@ -1129,14 +1129,24 @@ class ReportGenerator:
                 f"<tr><td>绕环比例</td><td class='num-cell'>横向: {h_ratio:.2f}%</td><td class='num-cell'>纵向: {v_ratio:.2f}%</td><td class='num-cell'>总体: {overall_ratio:.2f}%</td></tr>"
             )
 
-            # 保序导致的绕环比例
+            # 保序导致的绕环比例（仅当有数据时显示）
             ordering_blocked_stats = results.get("ordering_blocked_stats", {})
-            if ordering_blocked_stats:
+            if ordering_blocked_stats and ordering_blocked_stats.get("overall", {}).get("ordering_blocked_flits", 0) > 0:
                 h_ord_ratio = ordering_blocked_stats.get("horizontal", {}).get("ordering_blocked_ratio", 0.0) * 100
                 v_ord_ratio = ordering_blocked_stats.get("vertical", {}).get("ordering_blocked_ratio", 0.0) * 100
                 overall_ord_ratio = ordering_blocked_stats.get("overall", {}).get("ordering_blocked_ratio", 0.0) * 100
                 html_parts.append(
                     f"<tr><td>保序导致绕环比例</td><td class='num-cell'>横向: {h_ord_ratio:.2f}%</td><td class='num-cell'>纵向: {v_ord_ratio:.2f}%</td><td class='num-cell'>总体: {overall_ord_ratio:.2f}%</td></tr>"
+                )
+
+            # 反方向上环比例（仅当有数据时显示）
+            reverse_inject_stats = results.get("reverse_inject_stats", {})
+            if reverse_inject_stats and reverse_inject_stats.get("overall", {}).get("reverse_inject_flits", 0) > 0:
+                h_rev_ratio = reverse_inject_stats.get("horizontal", {}).get("reverse_inject_ratio", 0.0) * 100
+                v_rev_ratio = reverse_inject_stats.get("vertical", {}).get("reverse_inject_ratio", 0.0) * 100
+                overall_rev_ratio = reverse_inject_stats.get("overall", {}).get("reverse_inject_ratio", 0.0) * 100
+                html_parts.append(
+                    f"<tr><td>反方向上环比例</td><td class='num-cell'>横向: {h_rev_ratio:.2f}%</td><td class='num-cell'>纵向: {v_rev_ratio:.2f}%</td><td class='num-cell'>总体: {overall_rev_ratio:.2f}%</td></tr>"
                 )
 
             html_parts.append("</tbody>")
@@ -1384,6 +1394,23 @@ class ReportGenerator:
                 html_parts.append('<table class="report-table">')
                 html_parts.append("<tbody>")
                 html_parts.append(f'<tr><td>绕环比例</td><td class="num-cell">横向: {h_ratio:.2f}%</td><td class="num-cell">纵向: {v_ratio:.2f}%</td><td class="num-cell">总体: {overall_ratio:.2f}%</td></tr>')
+
+                # 保序导致的绕环比例（仅当有数据时显示）
+                ordering_blocked_ratio = summary.get("ordering_blocked_ratio", {})
+                if ordering_blocked_ratio and ordering_blocked_ratio.get("overall", {}).get("ordering_blocked_flits", 0) > 0:
+                    h_ord_ratio = ordering_blocked_ratio.get("horizontal", {}).get("ordering_blocked_ratio", 0.0) * 100
+                    v_ord_ratio = ordering_blocked_ratio.get("vertical", {}).get("ordering_blocked_ratio", 0.0) * 100
+                    overall_ord_ratio = ordering_blocked_ratio.get("overall", {}).get("ordering_blocked_ratio", 0.0) * 100
+                    html_parts.append(f'<tr><td>保序导致绕环比例</td><td class="num-cell">横向: {h_ord_ratio:.2f}%</td><td class="num-cell">纵向: {v_ord_ratio:.2f}%</td><td class="num-cell">总体: {overall_ord_ratio:.2f}%</td></tr>')
+
+                # 反方向上环比例（仅当有数据时显示）
+                reverse_inject_ratio = summary.get("reverse_inject_ratio", {})
+                if reverse_inject_ratio and reverse_inject_ratio.get("overall", {}).get("reverse_inject_flits", 0) > 0:
+                    h_rev_ratio = reverse_inject_ratio.get("horizontal", {}).get("reverse_inject_ratio", 0.0) * 100
+                    v_rev_ratio = reverse_inject_ratio.get("vertical", {}).get("reverse_inject_ratio", 0.0) * 100
+                    overall_rev_ratio = reverse_inject_ratio.get("overall", {}).get("reverse_inject_ratio", 0.0) * 100
+                    html_parts.append(f'<tr><td>反方向上环比例</td><td class="num-cell">横向: {h_rev_ratio:.2f}%</td><td class="num-cell">纵向: {v_rev_ratio:.2f}%</td><td class="num-cell">总体: {overall_rev_ratio:.2f}%</td></tr>')
+
                 html_parts.append("</tbody>")
                 html_parts.append("</table>")
 

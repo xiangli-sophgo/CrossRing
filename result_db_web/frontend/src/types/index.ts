@@ -85,3 +85,11 @@ export interface FilterCondition {
   [paramName: string]: [number, number];
 }
 
+// 按数据流对比响应类型
+export interface TrafficCompareData {
+  traffic_files: string[];
+  experiments: Array<{ id: number; name: string }>;
+  param_keys: string[];
+  data: Array<Record<string, string | number | null>>;
+}
+
