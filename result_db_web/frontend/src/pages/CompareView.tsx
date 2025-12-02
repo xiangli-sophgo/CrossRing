@@ -362,12 +362,12 @@ export default function CompareView() {
     setRowSortState({ rowIndex, order: newOrder });
   };
 
-  // 构建嵌套列头（使用排序后的实验顺序）
+  // 构建嵌套列头（使用排序后的实验顺序）- 只保留实验名称行
   const nestedHeaders = useMemo(() => {
     if (!compareData || visibleColumns.length === 0) return [];
 
-    // 第一层：实验名称标题 + 各实验名称（跨越多列）
-    const firstRow: (string | { label: string; colspan: number })[] = ['实验名称'];
+    // 只保留实验名称行（跨越多列）
+    const firstRow: (string | { label: string; colspan: number })[] = [''];
     sortedExperiments.forEach((exp) => {
       firstRow.push({
         label: exp.name,
@@ -375,15 +375,7 @@ export default function CompareView() {
       });
     });
 
-    // 第二层：数据流标题 + 各实验的参数列
-    const secondRow: string[] = ['数据流'];
-    sortedExperiments.forEach(() => {
-      visibleColumns.forEach((col) => {
-        secondRow.push(col.replace(/_/g, ' '));
-      });
-    });
-
-    return [firstRow, secondRow];
+    return [firstRow];
   }, [compareData, visibleColumns, sortedExperiments]);
 
   // 格式化单元格值
@@ -399,11 +391,20 @@ export default function CompareView() {
     return value as string;
   };
 
-  // 构建表格数据（使用排序后的实验顺序）
+  // 构建表格数据（使用排序后的实验顺序）- 第一行为参数列名（可选中）
   const tableData = useMemo(() => {
     if (!compareData || visibleColumns.length === 0) return [];
 
-    return compareData.data.map((row) => {
+    // 第一行：参数列名（作为数据行，可选中复制）
+    const headerRow: (string | number | null)[] = ['数据流'];
+    sortedExperiments.forEach(() => {
+      visibleColumns.forEach((col) => {
+        headerRow.push(col.replace(/_/g, ' '));
+      });
+    });
+
+    // 数据行
+    const dataRows = compareData.data.map((row) => {
       const rowData: (string | number | null)[] = [row.traffic_file as string];
 
       sortedExperiments.forEach((exp) => {
@@ -416,6 +417,8 @@ export default function CompareView() {
 
       return rowData;
     });
+
+    return [headerRow, ...dataRows];
   }, [compareData, visibleColumns, sortedExperiments]);
 
   // 列宽配置（使用排序后的实验顺序）
@@ -651,8 +654,20 @@ export default function CompareView() {
               width="100%"
               height="auto"
               fixedColumnsStart={1}
+              fixedRowsTop={1}
               manualColumnResize={true}
               columnSorting={{ headerAction: false, indicator: true }}
+              copyPaste={{
+                copyColumnHeaders: true,
+                copyColumnHeadersOnly: true,
+              }}
+              contextMenu={{
+                items: {
+                  copy: { name: '复制' },
+                  copy_with_column_headers: { name: '复制（含表头）' },
+                  copy_column_headers_only: { name: '仅复制表头' },
+                }
+              }}
               licenseKey="non-commercial-and-evaluation"
               stretchH="all"
               readOnly={true}

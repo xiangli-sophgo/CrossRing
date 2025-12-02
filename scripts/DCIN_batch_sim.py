@@ -227,7 +227,7 @@ def main():
     traffic_path = "../traffic/2DIE/"
 
     # ========== 结果保存配置 ==========
-    results_folder_name = "2DIE_1201_40"
+    results_folder_name = "2DIE_1202"
 
     # ========== 并行配置 ==========
     max_workers = 2

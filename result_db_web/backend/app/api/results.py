@@ -427,6 +427,38 @@ async def delete_result(result_id: int, experiment_id: int):
     return {"success": True, "message": "结果已删除"}
 
 
+class BatchDeleteRequest(BaseModel):
+    """批量删除请求"""
+    result_ids: List[int]
+
+
+@router.post("/experiments/{experiment_id}/results/batch-delete")
+async def delete_results_batch(experiment_id: int, request: BatchDeleteRequest):
+    """
+    批量删除结果
+
+    - experiment_id: 实验ID
+    - result_ids: 要删除的结果ID列表
+    """
+    experiment = db_manager.get_experiment(experiment_id)
+    if not experiment:
+        raise HTTPException(status_code=404, detail="实验不存在")
+
+    if not request.result_ids:
+        raise HTTPException(status_code=400, detail="结果ID列表不能为空")
+
+    experiment_type = experiment.get("experiment_type", "kcin")
+    deleted_count = db_manager.db.delete_results_batch(
+        request.result_ids, experiment_type, experiment_id
+    )
+
+    return {
+        "success": True,
+        "message": f"已删除 {deleted_count} 条结果",
+        "deleted_count": deleted_count,
+    }
+
+
 @router.get("/files/{file_id}")
 async def download_result_file(file_id: int):
     """

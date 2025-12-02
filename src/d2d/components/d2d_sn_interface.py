@@ -600,12 +600,19 @@ class D2D_SN_Interface(IPInterface):
             # 设置发送时间
             flit.departure_cycle = self.current_cycle
 
+            # 设置is_last_flit标记，用于tracker释放判断
+            if i == len(data_flits) - 1:
+                flit.is_last_flit = True
+
             # 通过数据网络发送
             self.enqueue(flit, "data")
 
         # print(f"[D2D_SN] 批量转发packet {packet_id}的{len(data_flits)}个数据flits到Die{getattr(first_flit, 'd2d_origin_die', '?')}")
 
-        # 发送完成后释放D2D_SN的tracker
+        # tracker释放移至inject_to_l2h_pre，在最后一个data flit进入l2h时释放
+
+    def _release_sn_read_tracker(self, packet_id: int):
+        """重写父类方法，使用D2D_SN专用的释放逻辑"""
         self.release_sn_tracker_for_cross_die_data(packet_id)
 
     def release_sn_tracker_for_cross_die_data(self, packet_id: int):
@@ -655,10 +662,11 @@ class D2D_SN_Interface(IPInterface):
                 new_req.sn_tracker_type = "ro"
                 self.sn_tracker.append(new_req)
 
-                # 直接处理请求（不发送positive，直接转发）
-                self._handle_cross_die_transfer(new_req)
+                # 发送positive响应触发RN retry
+                positive_rsp = self._create_response_flit(new_req, "positive")
+                self.enqueue(positive_rsp, "rsp")
 
-                # print(f"[D2D_SN] 处理等待队列中的读请求 packet_id={new_req.packet_id}")
+                # print(f"[D2D_SN] 发送positive响应触发读请求retry packet_id={new_req.packet_id}")
 
         elif req_type == "write":
             # 写请求需要share tracker和WDB

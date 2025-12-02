@@ -45,6 +45,8 @@ function App() {
   const [selectedLinkKey, setSelectedLinkKey] = useState<string>('')
   const [selectedLinkFlows, setSelectedLinkFlows] = useState<FlowInfo[]>([])
   const [dcinLinkBandwidth, setDcinLinkBandwidth] = useState<Record<string, number>>({})
+  const [activeIPsByDie, setActiveIPsByDie] = useState<Map<number, Set<string>>>(new Map())
+  const [showOnlyActiveIPs, setShowOnlyActiveIPs] = useState(false)
   const topoGraphRef = useRef<{ saveLayout: () => void }>(null)
   const multiDieTopoGraphRef = useRef<{ saveLayout: () => void }>(null)
 
@@ -73,6 +75,25 @@ function App() {
     setNodeInfo(info)
   }
 
+  // 从link_composition中按Die提取使用的IP
+  const extractActiveIPsByDie = (composition: Record<string, FlowInfo[]>): Map<number, Set<string>> => {
+    const result = new Map<number, Set<string>>()
+    Object.values(composition).forEach(flows => {
+      flows.forEach(flow => {
+        // 源IP
+        const srcDie = flow.src_die ?? 0
+        if (!result.has(srcDie)) result.set(srcDie, new Set())
+        result.get(srcDie)!.add(`${flow.src_node}-${flow.src_ip}`)
+
+        // 目标IP
+        const dstDie = flow.dst_die ?? 0
+        if (!result.has(dstDie)) result.set(dstDie, new Set())
+        result.get(dstDie)!.add(`${flow.dst_node}-${flow.dst_ip}`)
+      })
+    })
+    return result
+  }
+
   // 处理带宽计算完成
   const handleBandwidthComputed = (data: BandwidthComputeResponse) => {
     setLinkBandwidth(data.link_bandwidth)
@@ -80,6 +101,16 @@ function App() {
     setBandwidthMode(data.mode)
     setSelectedLinkKey('')
     setSelectedLinkFlows([])
+
+    // 按Die提取使用中的IP并默认开启过滤
+    const composition = data.link_composition || {}
+    const ipsByDie = extractActiveIPsByDie(composition)
+    setActiveIPsByDie(ipsByDie)
+    // 检查是否有任何活跃IP
+    let hasActiveIPs = false
+    ipsByDie.forEach(ips => { if (ips.size > 0) hasActiveIPs = true })
+    setShowOnlyActiveIPs(hasActiveIPs)
+
     // DCIN模式时重置选中的Die为0，并设置布局
     if (data.mode === 'dcin') {
       setSelectedDie(0)
@@ -179,6 +210,9 @@ function App() {
                   dcinLayout={dcinLayout}
                   onNodeClick={handleNodeClick}
                   onLinkClick={handleLinkClick}
+                  activeIPsByDie={activeIPsByDie}
+                  showOnlyActiveIPs={showOnlyActiveIPs}
+                  onShowOnlyActiveIPsChange={setShowOnlyActiveIPs}
                 />
               ) : (
                 <TopologyGraph
@@ -193,6 +227,9 @@ function App() {
                   selectedDie={selectedDie}
                   onDieChange={setSelectedDie}
                   onLinkClick={handleLinkClick}
+                  activeIPs={activeIPsByDie.get(0)}
+                  showOnlyActiveIPs={showOnlyActiveIPs}
+                  onShowOnlyActiveIPsChange={setShowOnlyActiveIPs}
                 />
               )}
 

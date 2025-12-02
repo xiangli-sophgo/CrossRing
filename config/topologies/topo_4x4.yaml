@@ -97,6 +97,8 @@ IN_ORDER_PACKET_CATEGORIES:
   - "REQ"    # 只有REQ类型需要保序
   # - "RSP"
   # - "DATA"
+REVERSE_DIRECTION_FLOW_CONTROL_ENABLED: 1
+REVERSE_DIRECTION_THRESHOLD: 0.75
 
 # 方向控制配置 - 4x4拓扑 (16节点: 0-15, 布局: 行0: 0-3, 行1: 4-7, 行2: 8-11, 行3: 12-15)
 TL_ALLOWED_SOURCE_NODES: [2, 3, 6, 7, 10, 11, 14, 15]  # 向左：右半部(列2,3)

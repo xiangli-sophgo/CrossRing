@@ -16,6 +16,7 @@ import {
   Typography,
   Row,
   Col,
+  Tooltip,
 } from 'antd';
 import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useExperimentStore } from '../stores/experimentStore';
@@ -86,6 +87,12 @@ export default function ExperimentDetail() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // 刷新所有数据（实验详情 + 结果数据）
+  const refreshAll = async () => {
+    await Promise.all([loadExperiment(), loadResults()]);
+    message.success('刷新成功');
   };
 
   // 加载结果数据
@@ -269,16 +276,20 @@ export default function ExperimentDetail() {
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
           <Space>
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
-              返回
-            </Button>
+            <Tooltip title="返回实验列表">
+              <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
+                返回
+              </Button>
+            </Tooltip>
             <Title level={4} style={{ margin: 0 }}>
               {currentExperiment.name}
             </Title>
           </Space>
-          <Button icon={<ReloadOutlined />} onClick={loadExperiment}>
-            刷新
-          </Button>
+          <Tooltip title="刷新实验详情和结果数据">
+            <Button icon={<ReloadOutlined />} onClick={refreshAll}>
+              刷新
+            </Button>
+          </Tooltip>
         </div>
 
         <Tabs items={tabItems} activeKey={activeTab} onChange={setActiveTab} />

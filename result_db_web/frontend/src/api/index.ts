@@ -58,6 +58,15 @@ export const deleteExperiment = async (id: number): Promise<void> => {
   await api.delete(`/experiments/${id}`);
 };
 
+export const deleteExperimentsBatch = async (
+  experimentIds: number[]
+): Promise<{ success: boolean; message: string; deleted_count: number }> => {
+  const response = await api.post('/experiments/batch-delete', {
+    experiment_ids: experimentIds,
+  });
+  return response.data;
+};
+
 export const importFromCSV = async (
   file: File,
   experimentName: string,
@@ -297,6 +306,16 @@ export const deleteResult = async (
 ): Promise<{ success: boolean; message: string }> => {
   const response = await api.delete(`/results/${resultId}`, {
     params: { experiment_id: experimentId },
+  });
+  return response.data;
+};
+
+export const deleteResultsBatch = async (
+  experimentId: number,
+  resultIds: number[]
+): Promise<{ success: boolean; message: string; deleted_count: number }> => {
+  const response = await api.post(`/experiments/${experimentId}/results/batch-delete`, {
+    result_ids: resultIds,
   });
   return response.data;
 };

@@ -123,3 +123,12 @@
 .result-table-centered .ant-table-tbody > tr > td {
   text-align: center !important;
 }
+
+/* 选中行样式（用于批量删除） */
+.result-hot-table .handsontable td.selected-row {
+  background-color: #fff7e6 !important;
+}
+
+.result-hot-table .handsontable tbody tr:hover td.selected-row {
+  background-color: #ffe7ba !important;
+}

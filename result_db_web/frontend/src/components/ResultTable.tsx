@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Button, message, Space, Tree, Popover, Pagination, Divider, Checkbox, Popconfirm, Input } from 'antd';
+import { Button, message, Space, Tree, Popover, Pagination, Checkbox, Popconfirm, Input, Tooltip } from 'antd';
 import { DownloadOutlined, SettingOutlined, DeleteOutlined, SearchOutlined, HolderOutlined, EditOutlined, SwapOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import { HotTable, HotTableClass } from '@handsontable/react';
@@ -12,7 +12,7 @@ import 'handsontable/dist/handsontable.full.min.css';
 import type { ResultsPageResponse, ExperimentType } from '../types';
 import ResultDetailPanel from './ResultDetailPanel';
 import { classifyParamKeysWithHierarchy } from '../utils/paramClassifier';
-import { deleteResult } from '../api';
+import { deleteResult, deleteResultsBatch } from '../api';
 import {
   DndContext,
   closestCenter,
@@ -127,6 +127,12 @@ export default function ResultTable({
 
   // 选中的行索引（用于显示详情）
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+
+  // 批量选中的行索引集合
+  const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
+
+  // 选择模式
+  const [selectMode, setSelectMode] = useState(false);
 
   // 详情面板是否展开
   const [detailExpanded, setDetailExpanded] = useState(true);
@@ -451,6 +457,11 @@ export default function ResultTable({
     return allColumns.map((col) => col.replace(/_/g, ' '));
   }, [allColumns]);
 
+  // 当数据/页面变化时清除选中状态
+  useEffect(() => {
+    setSelectedRowIndices(new Set());
+  }, [page, pageSize, data?.results]);
+
   // 当数据变化时加载或初始化行顺序
   useEffect(() => {
     if (!data?.results || data.results.length === 0) {
@@ -679,6 +690,47 @@ export default function ResultTable({
     }
   };
 
+  // 批量删除结果
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const handleBatchDelete = async () => {
+    if (selectedRowIndices.size === 0) return;
+    setBatchDeleting(true);
+    try {
+      const resultIds = Array.from(selectedRowIndices).map((idx) => sortedResults[idx].id);
+      const result = await deleteResultsBatch(experimentId, resultIds);
+      message.success(result.message);
+      setSelectedRowIndices(new Set());
+      setSelectedRowIndex(null);
+      onDataChange?.();
+    } catch {
+      message.error('批量删除失败');
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
+  // 切换行选中状态
+  const toggleRowSelection = (rowIndex: number) => {
+    setSelectedRowIndices((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(rowIndex)) {
+        newSet.delete(rowIndex);
+      } else {
+        newSet.add(rowIndex);
+      }
+      return newSet;
+    });
+  };
+
+  // 全选/取消全选当前页
+  const toggleSelectAll = () => {
+    if (selectedRowIndices.size === sortedResults.length) {
+      setSelectedRowIndices(new Set());
+    } else {
+      setSelectedRowIndices(new Set(sortedResults.map((_, idx) => idx)));
+    }
+  };
+
   // 导出 CSV
   const handleExport = () => {
     if (!data || !data.results.length) {
@@ -799,27 +851,81 @@ export default function ResultTable({
             </Button>
           </Popover>
           <span style={{ color: '#888', fontSize: 12 }}>
-            提示：双击行查看详情，拖拽行号/列头可排序（支持多选）
+            {selectMode ? '选择模式：单击行选中，再次点击取消' : '双击行查看详情'}
           </span>
         </Space>
         <Space>
-          <Button
-            icon={<SwapOutlined />}
-            type={transposed ? 'primary' : 'default'}
-            onClick={() => setTransposed(!transposed)}
-          >
-            {transposed ? '还原' : '转置'}
-          </Button>
-          <Button
-            icon={<EditOutlined />}
-            type={editMode ? 'primary' : 'default'}
-            onClick={() => setEditMode(!editMode)}
-          >
-            {editMode ? '退出编辑' : '编辑模式'}
-          </Button>
-          <Button icon={<DownloadOutlined />} onClick={handleExport} disabled={!data?.results.length}>
-            导出当前页
-          </Button>
+          <Tooltip title="行列转置，方便对比不同结果的同一参数">
+            <Button
+              icon={<SwapOutlined />}
+              type={transposed ? 'primary' : 'default'}
+              onClick={() => setTransposed(!transposed)}
+            >
+              {transposed ? '还原' : '转置'}
+            </Button>
+          </Tooltip>
+          <Tooltip title="进入编辑模式后可以修改单元格内容">
+            <Button
+              icon={<EditOutlined />}
+              type={editMode ? 'primary' : 'default'}
+              onClick={() => setEditMode(!editMode)}
+            >
+              {editMode ? '退出编辑' : '编辑模式'}
+            </Button>
+          </Tooltip>
+          <Tooltip title="进入选择模式后单击行可选中，用于批量删除">
+            <Button
+              icon={<DeleteOutlined />}
+              type={selectMode ? 'primary' : 'default'}
+              danger={selectMode}
+              onClick={() => {
+                setSelectMode(!selectMode);
+                if (selectMode) {
+                  setSelectedRowIndices(new Set());
+                }
+              }}
+            >
+              {selectMode ? '退出选择' : '选择模式'}
+            </Button>
+          </Tooltip>
+          {selectMode && (
+            <>
+              <Tooltip title="选中/取消选中当前页所有行">
+                <Checkbox
+                  checked={selectedRowIndices.size === sortedResults.length && sortedResults.length > 0}
+                  indeterminate={selectedRowIndices.size > 0 && selectedRowIndices.size < sortedResults.length}
+                  onChange={toggleSelectAll}
+                >
+                  全选
+                </Checkbox>
+              </Tooltip>
+              <Popconfirm
+                title="批量删除"
+                description={`确定要删除选中的 ${selectedRowIndices.size} 条结果吗？此操作不可恢复。`}
+                onConfirm={handleBatchDelete}
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                disabled={selectedRowIndices.size === 0}
+              >
+                <Tooltip title="删除所有选中的结果">
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    loading={batchDeleting}
+                    disabled={selectedRowIndices.size === 0}
+                  >
+                    删除 ({selectedRowIndices.size})
+                  </Button>
+                </Tooltip>
+              </Popconfirm>
+            </>
+          )}
+          <Tooltip title="将当前页数据导出为CSV文件">
+            <Button icon={<DownloadOutlined />} onClick={handleExport} disabled={!data?.results.length}>
+              导出当前页
+            </Button>
+          </Tooltip>
         </Space>
       </div>
 
@@ -860,6 +966,10 @@ export default function ResultTable({
                 alignment: { name: '对齐方式' },
               }
             }}
+copyPaste={{
+              copyColumnHeaders: true,
+              copyColumnHeadersOnly: true,
+            }}
             licenseKey="non-commercial-and-evaluation"
             stretchH="all"
             selectionMode="multiple"
@@ -868,6 +978,11 @@ export default function ResultTable({
             afterColumnMove={transposed ? undefined : handleAfterColumnMove}
             beforeRowMove={transposed ? undefined : handleBeforeRowMove}
             afterOnCellMouseDown={(event, coords) => {
+              // 选择模式下单击行选中/取消选中
+              if (selectMode && coords.row >= 0 && !transposed) {
+                toggleRowSelection(coords.row);
+                return;
+              }
               // 双击事件通过afterOnCellMouseDown的detail判断
               if (event.detail === 2) {
                 if (coords.row === -1 && coords.col >= 0 && !transposed) {
@@ -902,8 +1017,8 @@ export default function ResultTable({
               }
             }}
             readOnly={!editMode}
-            cells={() => ({
-              className: 'htCenter htMiddle',
+            cells={(row) => ({
+              className: `htCenter htMiddle${selectedRowIndices.has(row) ? ' selected-row' : ''}`,
             })}
             className="result-hot-table"
           />

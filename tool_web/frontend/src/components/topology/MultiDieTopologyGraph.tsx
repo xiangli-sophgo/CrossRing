@@ -1,7 +1,7 @@
 import { useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 import Cytoscape from 'cytoscape'
-import { Card, Space, Tag, Button, Row, Col, message } from 'antd'
+import { Card, Space, Tag, Button, Row, Col, message, Switch } from 'antd'
 import { ZoomInOutlined, ZoomOutOutlined, AimOutlined, SaveOutlined } from '@ant-design/icons'
 import type { TopologyData } from '../../types/topology'
 import type { IPMount } from '../../types/ipMount'
@@ -21,6 +21,9 @@ interface MultiDieTopologyGraphProps {
   onNodeClick?: (nodeId: number, dieId?: number) => void
   onLinkClick?: (linkKey: string, composition: any[]) => void
   onWidthChange?: (width: number) => void
+  activeIPsByDie?: Map<number, Set<string>>
+  showOnlyActiveIPs?: boolean
+  onShowOnlyActiveIPsChange?: (val: boolean) => void
 }
 
 // 节点间距
@@ -72,7 +75,8 @@ const getRotatedDieSize = (
 }
 
 const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTopologyGraphProps>(({
-  data, mounts, loading, linkBandwidth, dcinLinkBandwidth, linkComposition, dcinLayout, onNodeClick, onLinkClick, onWidthChange
+  data, mounts, loading, linkBandwidth, dcinLinkBandwidth, linkComposition, dcinLayout, onNodeClick, onLinkClick, onWidthChange,
+  activeIPsByDie, showOnlyActiveIPs = false, onShowOnlyActiveIPsChange
 }, ref) => {
   const cyRef = useRef<Cytoscape.Core | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -100,17 +104,44 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
     return () => resizeObserver.disconnect()
   }, [onWidthChange])
 
-  // 创建节点ID到挂载信息的映射
-  const mountMap = useMemo(() => {
-    const map = new Map<number, IPMount[]>()
-    mounts.forEach(mount => {
-      if (!map.has(mount.node_id)) {
-        map.set(mount.node_id, [])
+  // 按Die创建过滤后的mountMap: {dieId: {nodeId: [mounts]}}
+  const mountMapByDie = useMemo(() => {
+    const result = new Map<number, Map<number, IPMount[]>>()
+    const numDies = dcinLayout?.num_dies || 1
+
+    for (let dieId = 0; dieId < numDies; dieId++) {
+      const dieActiveIPs = activeIPsByDie?.get(dieId)
+      const dieMap = new Map<number, IPMount[]>()
+
+      // 如果开启过滤模式
+      if (showOnlyActiveIPs && activeIPsByDie && activeIPsByDie.size > 0) {
+        // 该Die没有活跃IP时，不显示任何IP（返回空map）
+        if (!dieActiveIPs || dieActiveIPs.size === 0) {
+          result.set(dieId, dieMap)
+          continue
+        }
+        // 该Die有活跃IP，只显示活跃的
+        mounts.forEach(mount => {
+          if (dieActiveIPs.has(`${mount.node_id}-${mount.ip_type}`)) {
+            if (!dieMap.has(mount.node_id)) {
+              dieMap.set(mount.node_id, [])
+            }
+            dieMap.get(mount.node_id)!.push(mount)
+          }
+        })
+      } else {
+        // 不过滤，显示所有IP
+        mounts.forEach(mount => {
+          if (!dieMap.has(mount.node_id)) {
+            dieMap.set(mount.node_id, [])
+          }
+          dieMap.get(mount.node_id)!.push(mount)
+        })
       }
-      map.get(mount.node_id)!.push(mount)
-    })
-    return map
-  }, [mounts])
+      result.set(dieId, dieMap)
+    }
+    return result
+  }, [mounts, activeIPsByDie, showOnlyActiveIPs, dcinLayout])
 
   // IP类型到颜色
   const getIPTypeColor = (ipType: string): { bg: string; border: string } => {
@@ -329,9 +360,10 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
       })
 
       // 绘制节点
+      const dieMountMap = mountMapByDie.get(dieIdNum) || new Map()
       data.nodes.forEach(node => {
         const rotatedPos = calculateRotatedPosition(node.id, cols, rows, rotation)
-        const nodeMounts = mountMap.get(node.id)
+        const nodeMounts = dieMountMap.get(node.id)
         const hasMounts = nodeMounts && nodeMounts.length > 0
 
         const x = rotatedPos.col * NODE_SPACING + offset.x + NODE_SPACING / 2
@@ -353,8 +385,8 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
         // IP块
         if (nodeMounts && nodeMounts.length > 0) {
           // 按IP类型分组
-          const ipByType: Record<string, typeof nodeMounts> = {}
-          nodeMounts.forEach(mount => {
+          const ipByType: Record<string, IPMount[]> = {}
+          nodeMounts.forEach((mount: IPMount) => {
             const baseType = mount.ip_type.split('_')[0].toLowerCase()
             if (!ipByType[baseType]) ipByType[baseType] = []
             ipByType[baseType].push(mount)
@@ -404,7 +436,7 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
             const totalWidth = numCols * spacing
             const startX = -totalWidth / 2 + spacing / 2
 
-            rowMounts.forEach((mount, colIdx) => {
+            rowMounts.forEach((mount: IPMount, colIdx: number) => {
               const colors = getIPTypeColor(mount.ip_type)
               const parts = mount.ip_type.split('_')
               const typeAbbr = parts[0].charAt(0).toUpperCase()
@@ -592,7 +624,7 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
     })
 
     return [...nodes, ...edges]
-  }, [data, dcinLayout, linkBandwidth, dcinLinkBandwidth, mountMap])
+  }, [data, dcinLayout, linkBandwidth, dcinLinkBandwidth, mountMapByDie])
 
   const stylesheet: any[] = [
     // Die标签样式
@@ -950,6 +982,16 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
         </Col>
         <Col span={12} style={{ textAlign: 'right' }}>
           <Space>
+            {activeIPsByDie && activeIPsByDie.size > 0 && (
+              <Space>
+                <span>仅活跃IP:</span>
+                <Switch
+                  size="small"
+                  checked={showOnlyActiveIPs}
+                  onChange={(checked) => onShowOnlyActiveIPsChange?.(checked)}
+                />
+              </Space>
+            )}
             <Button size="small" icon={<ZoomInOutlined />} onClick={handleZoomIn}>放大</Button>
             <Button size="small" icon={<ZoomOutOutlined />} onClick={handleZoomOut}>缩小</Button>
             <Button size="small" icon={<AimOutlined />} onClick={handleFit}>适应</Button>
@@ -971,7 +1013,7 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
         }}
       >
         <CytoscapeComponent
-          key={`cy-${JSON.stringify(dcinLayout)}-${mounts.length}-${JSON.stringify(mounts.map(m => m.node_id + m.ip_type))}`}
+          key={`cy-${JSON.stringify(dcinLayout)}-${showOnlyActiveIPs}-${JSON.stringify(Array.from(activeIPsByDie?.entries() || []))}`}
           elements={elements}
           style={{ width: '100%', height: '100%' }}
           stylesheet={stylesheet}
@@ -1001,15 +1043,19 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
               'other': { bg: '#eb2f96', border: '#c41d7f', label: '其他' }
             }
 
-            // 统计已挂载的IP类型
+            // 统计已挂载的IP类型（从所有Die的mountMap中提取）
             const mountedTypes = new Set<string>()
-            mounts.forEach(mount => {
-              const type = mount.ip_type.split('_')[0].toLowerCase()
-              if (ipTypeColors[type]) {
-                mountedTypes.add(type)
-              } else {
-                mountedTypes.add('other')
-              }
+            mountMapByDie.forEach(dieMountMap => {
+              dieMountMap.forEach(nodeMounts => {
+                nodeMounts.forEach(mount => {
+                  const type = mount.ip_type.split('_')[0].toLowerCase()
+                  if (ipTypeColors[type]) {
+                    mountedTypes.add(type)
+                  } else {
+                    mountedTypes.add('other')
+                  }
+                })
+              })
             })
 
             // 生成图例项

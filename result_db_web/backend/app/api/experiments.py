@@ -131,6 +131,25 @@ async def delete_experiment(experiment_id: int):
     return {"message": "实验已删除", "id": experiment_id}
 
 
+class BatchDeleteExperimentsRequest(BaseModel):
+    """批量删除实验请求"""
+    experiment_ids: List[int]
+
+
+@router.post("/experiments/batch-delete")
+async def delete_experiments_batch(request: BatchDeleteExperimentsRequest):
+    """批量删除实验"""
+    if not request.experiment_ids:
+        raise HTTPException(status_code=400, detail="实验ID列表不能为空")
+
+    deleted_count = db_manager.db.delete_experiments_batch(request.experiment_ids)
+    return {
+        "success": True,
+        "message": f"已删除 {deleted_count} 个实验",
+        "deleted_count": deleted_count,
+    }
+
+
 @router.post("/experiments/import", response_model=ImportResponse)
 async def import_from_csv(
     file: UploadFile = File(...),

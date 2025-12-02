@@ -205,6 +205,16 @@ class DatabaseManager:
                 return True
             return False
 
+    def delete_experiments_batch(self, experiment_ids: list) -> int:
+        """批量删除实验（级联删除所有结果）"""
+        if not experiment_ids:
+            return 0
+        with self.get_session() as session:
+            count = session.query(Experiment).filter(
+                Experiment.id.in_(experiment_ids)
+            ).delete(synchronize_session=False)
+            return count
+
     # ==================== 结果相关操作 ====================
 
     def _get_result_model(self, experiment_type: str):
@@ -831,3 +841,42 @@ class DatabaseManager:
                 ).update({"completed_combinations": new_count})
 
             return count > 0
+
+    def delete_results_batch(self, result_ids: list, experiment_type: str, experiment_id: int) -> int:
+        """
+        批量删除结果
+
+        Args:
+            result_ids: 结果ID列表
+            experiment_type: 实验类型 ("kcin" 或 "dcin")
+            experiment_id: 实验ID
+
+        Returns:
+            删除的结果数量
+        """
+        if not result_ids:
+            return 0
+
+        ResultModel = self._get_result_model(experiment_type)
+        with self.get_session() as session:
+            # 先删除关联的文件
+            session.query(ResultFile).filter(
+                ResultFile.result_id.in_(result_ids),
+                ResultFile.result_type == experiment_type,
+            ).delete(synchronize_session=False)
+
+            # 批量删除结果
+            count = session.query(ResultModel).filter(
+                ResultModel.id.in_(result_ids)
+            ).delete(synchronize_session=False)
+
+            # 更新实验统计
+            if count > 0:
+                new_count = session.query(ResultModel).filter(
+                    ResultModel.experiment_id == experiment_id
+                ).count()
+                session.query(Experiment).filter(
+                    Experiment.id == experiment_id
+                ).update({"completed_combinations": new_count})
+
+            return count

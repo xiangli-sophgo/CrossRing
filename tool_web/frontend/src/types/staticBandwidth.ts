@@ -30,6 +30,8 @@ export interface FlowInfo {
   dst_ip: string
   bandwidth: number
   req_type: string
+  src_die?: number
+  dst_die?: number
 }
 
 export interface BandwidthComputeResponse {

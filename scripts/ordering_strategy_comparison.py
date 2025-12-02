@@ -341,7 +341,7 @@ def main():
     parser.add_argument("--results_base_name", default="ordering_comparison_ETag_upgrade_1113", help="结果文件基础名称")
     parser.add_argument("--max_workers", type=int, default=16, help="最大并行worker数量")
     parser.add_argument("--save_to_db", type=int, default=1, help="是否保存到数据库 (0/1)")
-    parser.add_argument("--experiment_name", default="reverse_inject_0.75", help="数据库中的实验名称")
+    parser.add_argument("--experiment_name", default="标准对照组", help="数据库中的实验名称")
     parser.add_argument("--save_csv", type=int, default=0, help="是否生成CSV文件 (0/1)")
 
     args = parser.parse_args()

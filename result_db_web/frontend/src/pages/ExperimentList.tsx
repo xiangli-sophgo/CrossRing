@@ -32,7 +32,7 @@ import {
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useExperimentStore } from '../stores/experimentStore';
-import { getExperiments, importFromCSV, deleteExperiment, updateExperiment } from '../api';
+import { getExperiments, importFromCSV, deleteExperiment, updateExperiment, deleteExperimentsBatch } from '../api';
 import type { Experiment, ExperimentType } from '../types';
 import ExportModal from '../components/ExportModal';
 
@@ -134,6 +134,23 @@ export default function ExperimentList() {
       loadExperiments();
     } catch (error) {
       message.error('删除失败');
+    }
+  };
+
+  // 批量删除
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const handleBatchDelete = async () => {
+    if (selectedExperimentIds.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      const result = await deleteExperimentsBatch(selectedExperimentIds);
+      message.success(result.message);
+      clearSelection();
+      loadExperiments();
+    } catch (error) {
+      message.error('批量删除失败');
+    } finally {
+      setBatchDeleting(false);
     }
   };
 
@@ -321,9 +338,15 @@ export default function ExperimentList() {
               optionType="button"
               buttonStyle="solid"
             >
-              <Radio.Button value="all">全部</Radio.Button>
-              <Radio.Button value="kcin">KCIN</Radio.Button>
-              <Radio.Button value="dcin">DCIN</Radio.Button>
+              <Tooltip title="显示所有类型的实验">
+                <Radio.Button value="all">全部</Radio.Button>
+              </Tooltip>
+              <Tooltip title="仅显示KCIN类型实验">
+                <Radio.Button value="kcin">KCIN</Radio.Button>
+              </Tooltip>
+              <Tooltip title="仅显示DCIN类型实验">
+                <Radio.Button value="dcin">DCIN</Radio.Button>
+              </Tooltip>
             </Radio.Group>
           </Space>
           <Space>
@@ -332,32 +355,60 @@ export default function ExperimentList() {
                 <span style={{ color: '#1890ff' }}>
                   已选择 {selectedExperimentIds.length} 个实验
                 </span>
-                <Button
-                  type="primary"
-                  icon={<SwapOutlined />}
-                  onClick={() => navigate('/compare')}
-                  disabled={selectedExperimentIds.length < 2}
+                <Tooltip title="对比选中的实验结果">
+                  <Button
+                    type="primary"
+                    icon={<SwapOutlined />}
+                    onClick={() => navigate('/compare')}
+                    disabled={selectedExperimentIds.length < 2}
+                  >
+                    对比
+                  </Button>
+                </Tooltip>
+                <Popconfirm
+                  title="批量删除"
+                  description={`确定要删除选中的 ${selectedExperimentIds.length} 个实验吗？此操作不可恢复。`}
+                  onConfirm={handleBatchDelete}
+                  okText="删除"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
                 >
-                  对比
-                </Button>
-                <Button onClick={clearSelection}>取消选择</Button>
+                  <Tooltip title="删除选中的实验及其所有结果">
+                    <Button
+                      danger
+                      icon={<DeleteOutlined />}
+                      loading={batchDeleting}
+                    >
+                      删除选中
+                    </Button>
+                  </Tooltip>
+                </Popconfirm>
+                <Tooltip title="清除所有选择">
+                  <Button onClick={clearSelection}>取消选择</Button>
+                </Tooltip>
               </>
             )}
-            <Button
-              icon={<UploadOutlined />}
-              onClick={() => setImportModalVisible(true)}
-            >
-              导入CSV
-            </Button>
-            <Button
-              icon={<DownloadOutlined />}
-              onClick={() => setExportModalVisible(true)}
-            >
-              导出打包
-            </Button>
-            <Button icon={<ReloadOutlined />} onClick={loadExperiments}>
-              刷新
-            </Button>
+            <Tooltip title="从CSV文件导入实验数据">
+              <Button
+                icon={<UploadOutlined />}
+                onClick={() => setImportModalVisible(true)}
+              >
+                导入CSV
+              </Button>
+            </Tooltip>
+            <Tooltip title="将数据库和前端打包导出，可独立部署查看">
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={() => setExportModalVisible(true)}
+              >
+                导出打包
+              </Button>
+            </Tooltip>
+            <Tooltip title="刷新实验列表">
+              <Button icon={<ReloadOutlined />} onClick={loadExperiments}>
+                刷新
+              </Button>
+            </Tooltip>
           </Space>
         </div>
 
@@ -375,6 +426,8 @@ export default function ExperimentList() {
             },
           }}
           pagination={{
+            defaultPageSize: 50,
+            pageSizeOptions: [10, 20, 50, 100],
             showSizeChanger: true,
             showQuickJumper: true,
             showTotal: (total) => `共 ${total} 个实验`,

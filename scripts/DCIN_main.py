@@ -30,8 +30,8 @@ def main():
     # 配置各种选项
     # 配置数据流
     # traffic_file_path = str(Path(__file__).parent.parent / "test_data")
-    traffic_file_path = str(Path(__file__).parent.parent / "traffic")
-    # traffic_file_path = str(Path(__file__).parent.parent / "traffic" / "2DIE")
+    # traffic_file_path = str(Path(__file__).parent.parent / "traffic")
+    traffic_file_path = str(Path(__file__).parent.parent / "traffic" / "2DIE")
     # traffic_file_path = str(Path(__file__).parent.parent / "traffic" / "2261")
     traffic_chains = [
         [
@@ -46,8 +46,8 @@ def main():
             # "2261_c2c_16share_R.txt"
             # "2261_c2c_64share_d2d_R.txt"
             # "2261_16share_R.txt"
-            # "DIE0_2_16share_d2d_R.txt"
-            "test_d2d.txt"
+            "DIE0_2_16share_d2d_R.txt"
+            # "test_d2d.txt"
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
@@ -70,11 +70,11 @@ def main():
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_time=1200,
+        max_time=5800,
         print_interval=200,
         verbose=1,
     )
-    # model.save_to_database(experiment_name="DCIN 仿真")
+    model.save_to_database(experiment_name="DCIN 仿真")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo, forwardRef, useImperativeHandle } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 import Cytoscape from 'cytoscape'
-import { Card, Space, Tag, Button, Row, Col, Select, message } from 'antd'
+import { Card, Space, Tag, Button, Row, Col, Select, message, Switch } from 'antd'
 import { ZoomInOutlined, ZoomOutOutlined, AimOutlined, SaveOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { TopologyData } from '../../types/topology'
 import type { IPMount } from '../../types/ipMount'
@@ -22,11 +22,15 @@ interface TopologyGraphProps {
   onDieChange?: (dieId: number) => void
   onLinkClick?: (linkKey: string, composition: FlowInfo[]) => void
   onWidthChange?: (width: number) => void
+  activeIPs?: Set<string>
+  showOnlyActiveIPs?: boolean
+  onShowOnlyActiveIPsChange?: (val: boolean) => void
 }
 
 const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>(({
   data, mounts, loading, onNodeClick, linkBandwidth, linkComposition,
-  bandwidthMode = 'kcin', selectedDie = 0, onDieChange, onLinkClick, onWidthChange
+  bandwidthMode = 'kcin', selectedDie = 0, onDieChange, onLinkClick, onWidthChange,
+  activeIPs, showOnlyActiveIPs = false, onShowOnlyActiveIPsChange
 }, ref) => {
   const [selectedNode, setSelectedNode] = useState<number | null>(null)
   const cyRef = useRef<Cytoscape.Core | null>(null)
@@ -146,13 +150,21 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
     return 4
   }
 
+  // 根据showOnlyActiveIPs过滤mounts
+  const filteredMounts = useMemo(() => {
+    if (showOnlyActiveIPs && activeIPs && activeIPs.size > 0) {
+      return mounts.filter(m => activeIPs.has(`${m.node_id}-${m.ip_type}`))
+    }
+    return mounts
+  }, [mounts, activeIPs, showOnlyActiveIPs])
+
   // 使用 useMemo 同步计算 elements，确保 mounts 变化时立即更新
   const elements = useMemo(() => {
     if (!data) return []
 
     // 创建节点ID到挂载信息列表的映射（一个节点可以有多个IP）
     const mountMap = new Map<number, IPMount[]>()
-    mounts.forEach(mount => {
+    filteredMounts.forEach(mount => {
       if (!mountMap.has(mount.node_id)) {
         mountMap.set(mount.node_id, [])
       }
@@ -346,7 +358,7 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
     })
 
     return [...nodes, ...edges]
-  }, [data, mounts, linkBandwidth, bandwidthMode, selectedDie])
+  }, [data, filteredMounts, linkBandwidth, bandwidthMode, selectedDie])
 
   const stylesheet: any[] = [
     // 背景节点样式 - 固定大小的正方形容器(统一浅灰色)
@@ -671,6 +683,16 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
                 </Select>
               </Space>
             )}
+            {activeIPs && activeIPs.size > 0 && (
+              <Space>
+                <span>仅活跃IP:</span>
+                <Switch
+                  size="small"
+                  checked={showOnlyActiveIPs}
+                  onChange={(checked) => onShowOnlyActiveIPsChange?.(checked)}
+                />
+              </Space>
+            )}
             <Button size="small" icon={<ReloadOutlined />} onClick={handleRefresh}>刷新显示</Button>
             <Button size="small" icon={<ZoomInOutlined />} onClick={handleZoomIn}>放大</Button>
             <Button size="small" icon={<ZoomOutOutlined />} onClick={handleZoomOut}>缩小</Button>
@@ -693,7 +715,7 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
           }}
         >
           <CytoscapeComponent
-            key={`topo-cy-${mounts.length}-${mounts.map(m => `${m.node_id}-${m.ip_type}`).join(',')}`}
+            key={`topo-cy-${filteredMounts.length}-${filteredMounts.map(m => `${m.node_id}-${m.ip_type}`).join(',')}`}
             elements={elements}
             style={{ width: '100%', height: '100%' }}
             stylesheet={stylesheet}
@@ -728,9 +750,9 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
               'other': { bg: '#eb2f96', border: '#c41d7f', label: '其他' }
             }
 
-            // 统计已挂载的IP类型
+            // 统计已挂载的IP类型（使用过滤后的mounts）
             const mountedTypes = new Set<string>()
-            mounts.forEach(mount => {
+            filteredMounts.forEach(mount => {
               const type = mount.ip_type.split('_')[0].toLowerCase()
               if (ipTypeColors[type]) {
                 mountedTypes.add(type)

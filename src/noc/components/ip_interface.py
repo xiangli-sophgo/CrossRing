@@ -404,6 +404,10 @@ class IPInterface:
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = flit
 
+            # 读数据最后一个flit进入l2h时释放SN tracker
+            if flit.req_type == "read" and getattr(flit, "is_last_flit", False):
+                self._release_sn_read_tracker(flit.packet_id)
+
     def l2h_to_IQ_channel_buffer(self, network_type):
         """2GHz: l2h_fifo → network.IQ_channel_buffer"""
         net_info = self.networks[network_type]
@@ -594,14 +598,14 @@ class IPInterface:
                     self.sn_tracker_count["ro"]["count"] -= 1
                     self._record_tracker_allocation("sn_ro")
                     self.create_read_packet(req)
-                    self.release_completed_sn_tracker(req)
+                    # tracker释放移至inject_to_l2h_pre，在最后一个data flit进入l2h时释放
                 else:
                     self.create_rsp(req, "negative")
                     self._record_tracker_block("sn_ro")
                     self.sn_req_wait[req.req_type].append(req)
             else:
                 self.create_read_packet(req)
-                self.release_completed_sn_tracker(req)
+                # tracker释放移至inject_to_l2h_pre，在最后一个data flit进入l2h时释放
 
         elif req.req_type == "write":
             if req.req_attr == "new":
@@ -850,11 +854,11 @@ class IPInterface:
                 self.sn_tracker_count[new_req.sn_tracker_type]["count"] -= 1
                 self._record_tracker_allocation("sn_ro")
 
-                # 记录retry释放（读请求成功处理）
+                # 记录retry释放（读请求成功处理，发送positive前记录）
                 self._record_tracker_release("read_retry")
 
-                # 直接生成并发送读数据包
-                self.create_read_packet(new_req)
+                # 发送 positive 响应，让RN重新发送请求
+                self.create_rsp(new_req, "positive")
 
     def _handle_received_data(self, flit: Flit):
         """处理接收到的数据"""
@@ -1273,6 +1277,37 @@ class IPInterface:
         """记录tracker阻塞事件"""
         cycle = getattr(self, "current_cycle", 0)
         self.tracker_block_events.append({"cycle": cycle, "tracker_type": tracker_type})
+
+    def _release_sn_read_tracker(self, packet_id: int):
+        """读数据最后一个flit进入l2h时释放SN tracker"""
+        tracker = next((req for req in self.sn_tracker if req.packet_id == packet_id), None)
+        if tracker:
+            self.sn_tracker.remove(tracker)
+            self.sn_tracker_count[tracker.sn_tracker_type]["count"] += 1
+            self._record_tracker_release(f"sn_{tracker.sn_tracker_type}")
+            # 处理等待队列
+            self._process_sn_read_wait_queue(tracker.sn_tracker_type)
+
+    def _process_sn_read_wait_queue(self, tracker_type: str):
+        """处理SN读请求等待队列"""
+        wait_list = self.sn_req_wait["read"]
+        if not wait_list:
+            return
+
+        if self.sn_tracker_count[tracker_type]["count"] > 0:
+            new_req = wait_list.pop(0)
+            new_req.sn_tracker_type = tracker_type
+
+            # 分配tracker
+            self.sn_tracker.append(new_req)
+            self.sn_tracker_count[new_req.sn_tracker_type]["count"] -= 1
+            self._record_tracker_allocation("sn_ro")
+
+            # 记录retry释放（发送positive前记录）
+            self._record_tracker_release("read_retry")
+
+            # 发送 positive 响应，让RN重新发送请求
+            self.create_rsp(new_req, "positive")
 
     def get_tracker_usage_data(self):
         """获取tracker使用数据"""
