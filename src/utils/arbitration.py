@@ -621,10 +621,18 @@ class MaxWeightMatchingArbiter:
     def _islip_matching(self, request_matrix: List[List[bool]],
                        weight_matrix: List[List[float]],
                        queue_id: str) -> List[Tuple[int, int]]:
-        """iSLIP算法实现"""
+        """
+        iSLIP算法实现（支持权重策略）
+
+        当 weight_strategy 为 "uniform" 时，使用标准 iSLIP 轮询选择。
+        当 weight_strategy 为其他值时，在候选中选择权重最大的。
+        """
         num_inputs = len(request_matrix)
         num_outputs = len(request_matrix[0])
         matches = []
+
+        # 判断是否使用权重（非uniform策略时使用权重）
+        use_weights = self.weight_strategy != "uniform"
 
         # 获取轮询指针
         input_ptrs = self.input_pointers[queue_id][:]
@@ -647,7 +655,7 @@ class MaxWeightMatchingArbiter:
                     if request_matrix[i][j] and j not in matched_outputs:
                         requests[i].append(j)
 
-            # 第二阶段：授权阶段（输出端轮询选择）
+            # 第二阶段：授权阶段（输出端选择输入）
             for j in range(num_outputs):
                 if j in matched_outputs:
                     continue
@@ -656,19 +664,23 @@ class MaxWeightMatchingArbiter:
                 if not requesting_inputs:
                     continue
 
-                # 从输出端指针位置开始轮询，选择第一个匹配的输入（标准iSLIP）
                 selected_input = None
 
-                for k in range(num_inputs):
-                    i = (output_ptrs[j] + k) % num_inputs
-                    if i in requesting_inputs:
-                        selected_input = i
-                        break  # 标准iSLIP：选择轮询顺序的第一个，不比较权重
+                if use_weights:
+                    # 加权iSLIP：在所有候选中选择权重最大的
+                    selected_input = max(requesting_inputs, key=lambda i: weight_matrix[i][j])
+                else:
+                    # 标准iSLIP：从输出端指针位置开始轮询，选择第一个匹配的输入
+                    for k in range(num_inputs):
+                        i = (output_ptrs[j] + k) % num_inputs
+                        if i in requesting_inputs:
+                            selected_input = i
+                            break
 
                 if selected_input is not None:
                     grants[j] = selected_input
 
-            # 第三阶段：接受阶段（输入端轮询选择）
+            # 第三阶段：接受阶段（输入端选择输出）
             for i in range(num_inputs):
                 if i in matched_inputs:
                     continue
@@ -677,14 +689,18 @@ class MaxWeightMatchingArbiter:
                 if not granting_outputs:
                     continue
 
-                # 从输入端指针位置开始轮询，选择第一个匹配的输出（标准iSLIP）
                 selected_output = None
 
-                for k in range(num_outputs):
-                    j = (input_ptrs[i] + k) % num_outputs
-                    if j in granting_outputs:
-                        selected_output = j
-                        break  # 标准iSLIP：选择轮询顺序的第一个，不比较权重
+                if use_weights:
+                    # 加权iSLIP：在所有授权输出中选择权重最大的
+                    selected_output = max(granting_outputs, key=lambda j: weight_matrix[i][j])
+                else:
+                    # 标准iSLIP：从输入端指针位置开始轮询，选择第一个匹配的输出
+                    for k in range(num_outputs):
+                        j = (input_ptrs[i] + k) % num_outputs
+                        if j in granting_outputs:
+                            selected_output = j
+                            break
 
                 if selected_output is not None:
                     matches.append((i, selected_output))

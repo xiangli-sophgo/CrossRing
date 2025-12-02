@@ -241,24 +241,52 @@ class DataflowMixin:
             ip_types_list = sorted(list(all_ip_types))
             directions_list = list(self.IQ_directions)
 
-            # 2. 构建请求矩阵 (ip_types × directions)
+            # 2. 构建请求矩阵和权重矩阵 (ip_types × directions)
             request_matrix = []
+            weight_matrix = []
             ip_type_to_flit = {}  # 缓存每个ip_type的flit
 
+            # 获取仲裁器的权重策略
+            weight_strategy = getattr(self.iq_arbiter, "weight_strategy", "uniform")
+
             for ip_type in ip_types_list:
-                row = []
+                req_row = []
+                weight_row = []
                 for direction in directions_list:
                     # 检查是否可以注入到这个方向
                     can_inject = self._check_iq_injection_conditions(network, node_id, ip_type, direction, flit_type, ip_type_to_flit)
-                    row.append(can_inject)
-                request_matrix.append(row)
+                    req_row.append(can_inject)
+
+                    # 计算权重
+                    if can_inject and weight_strategy != "uniform":
+                        flit = ip_type_to_flit.get((ip_type, direction))
+                        if flit:
+                            is_horizontal = direction in ["TL", "TR"]
+                            wait_time = flit.wait_cycle_h if is_horizontal else flit.wait_cycle_v
+                            queue_length = len(network.IQ_arbiter_input_fifo[ip_type][node_id])
+
+                            if weight_strategy == "wait_time":
+                                weight_row.append(float(wait_time))
+                            elif weight_strategy == "queue_length":
+                                weight_row.append(float(queue_length))
+                            elif weight_strategy == "hybrid":
+                                weight_row.append(queue_length * 0.7 + wait_time * 0.3)
+                            else:
+                                weight_row.append(1.0)
+                        else:
+                            weight_row.append(0.0)
+                    else:
+                        weight_row.append(1.0 if can_inject else 0.0)
+
+                request_matrix.append(req_row)
+                weight_matrix.append(weight_row)
 
             # 3. 执行匹配
             if not any(any(row) for row in request_matrix):
                 continue  # 没有有效请求
 
             queue_id = f"IQ_pos{node_id}_{flit_type}"
-            matches = self.iq_arbiter.match(request_matrix, queue_id=queue_id)
+            matches = self.iq_arbiter.match(request_matrix, weight_matrix=weight_matrix, queue_id=queue_id)
 
             # 4. 根据匹配结果处理注入
             for ip_idx, dir_idx in matches:
@@ -370,16 +398,21 @@ class DataflowMixin:
             if not any(station_flits):
                 continue
 
-            # 2. 构建请求矩阵 (input_slots × output_directions)
+            # 2. 构建请求矩阵和权重矩阵 (input_slots × output_directions)
             # input_slots: 0=TL, 1=TR, 2=TU, 3=TD
             # output_directions: 0=EQ, 1=TU, 2=TD
             slot_names = ["TL", "TR", "TU", "TD"]
             output_dirs = ["EQ", "TU", "TD"]
             direction_conditions = {"EQ": lambda d, n: d == n, "TU": lambda d, n: d < n, "TD": lambda d, n: d > n}
 
+            # 获取仲裁器的权重策略
+            weight_strategy = getattr(self.rb_arbiter, "weight_strategy", "uniform")
+
             request_matrix = []
+            weight_matrix = []
             for slot_idx, flit in enumerate(station_flits):
-                row = []
+                req_row = []
+                weight_row = []
                 for out_dir in output_dirs:
                     # 检查是否可以从这个slot转发到这个输出方向
                     can_forward = self._check_rb_forward_conditions(network, flit, pos, next_pos, out_dir, direction_conditions[out_dir])
@@ -408,15 +441,35 @@ class DataflowMixin:
                             else:
                                 can_forward = False  # 差距不够大，不走反方向
 
-                    row.append(can_forward)
-                request_matrix.append(row)
+                    req_row.append(can_forward)
+
+                    # 计算权重
+                    if can_forward and weight_strategy != "uniform" and flit:
+                        # RB的输入slot方向: TL/TR是横向，TU/TD是纵向
+                        slot_name = slot_names[slot_idx]
+                        is_horizontal = slot_name in ["TL", "TR"]
+                        wait_time = flit.wait_cycle_h if is_horizontal else flit.wait_cycle_v
+
+                        if weight_strategy == "wait_time":
+                            weight_row.append(float(wait_time))
+                        elif weight_strategy == "queue_length":
+                            weight_row.append(1.0)  # 每个slot只有一个flit
+                        elif weight_strategy == "hybrid":
+                            weight_row.append(float(wait_time))  # hybrid时也使用等待时间
+                        else:
+                            weight_row.append(1.0)
+                    else:
+                        weight_row.append(1.0 if can_forward else 0.0)
+
+                request_matrix.append(req_row)
+                weight_matrix.append(weight_row)
 
             # 3. 执行匹配
             if not any(any(row) for row in request_matrix):
                 continue
 
             queue_id = f"RB_pos{pos}_{next_pos}"
-            matches = self.rb_arbiter.match(request_matrix, queue_id=queue_id)
+            matches = self.rb_arbiter.match(request_matrix, weight_matrix=weight_matrix, queue_id=queue_id)
 
             # 4. 根据匹配结果处理转发
             for slot_idx, out_dir_idx in matches:
@@ -950,25 +1003,52 @@ class DataflowMixin:
         if not ip_types_list:
             return
 
-        # 2. 构建请求矩阵 (input_ports × ip_types)
+        # 2. 构建请求矩阵和权重矩阵 (input_ports × ip_types)
         # input_ports: 0=TU, 1=TD, 2=IQ, 3=RB
         port_names = ["TU", "TD", "IQ", "RB"]
+
+        # 获取仲裁器的权重策略
+        weight_strategy = getattr(self.eq_arbiter, "weight_strategy", "uniform")
+
         request_matrix = []
+        weight_matrix = []
 
         for port_idx, flit in enumerate(eject_flits):
-            row = []
+            req_row = []
+            weight_row = []
             for ip_type in ip_types_list:
                 # 检查是否可以从这个端口弹出到这个IP类型
                 can_eject = self._check_eq_eject_conditions(network, flit, node_id, port_idx, ip_type)
-                row.append(can_eject)
-            request_matrix.append(row)
+                req_row.append(can_eject)
+
+                # 计算权重
+                if can_eject and weight_strategy != "uniform" and flit:
+                    # EQ的输入端口方向: TU/TD是纵向，IQ/RB来源混合
+                    port_name = port_names[port_idx]
+                    is_horizontal = port_name in ["IQ", "RB"]  # IQ/RB端口视为横向
+                    wait_time = flit.wait_cycle_h if is_horizontal else flit.wait_cycle_v
+                    queue_length = len(network.EQ_arbiter_input_fifo[port_name][node_id])
+
+                    if weight_strategy == "wait_time":
+                        weight_row.append(float(wait_time))
+                    elif weight_strategy == "queue_length":
+                        weight_row.append(float(queue_length))
+                    elif weight_strategy == "hybrid":
+                        weight_row.append(queue_length * 0.7 + wait_time * 0.3)
+                    else:
+                        weight_row.append(1.0)
+                else:
+                    weight_row.append(1.0 if can_eject else 0.0)
+
+            request_matrix.append(req_row)
+            weight_matrix.append(weight_row)
 
         # 3. 执行匹配
         if not any(any(row) for row in request_matrix):
             return
 
         queue_id = f"EQ_pos{node_id}"
-        matches = self.eq_arbiter.match(request_matrix, queue_id=queue_id)
+        matches = self.eq_arbiter.match(request_matrix, weight_matrix=weight_matrix, queue_id=queue_id)
 
         # 4. 根据匹配结果处理弹出
         for port_idx, ip_type_idx in matches:

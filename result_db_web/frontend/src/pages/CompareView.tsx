@@ -633,7 +633,7 @@ export default function CompareView() {
         </div>
 
         <div style={{ marginBottom: 8, color: '#888', fontSize: 12 }}>
-          提示：双击列头按该列排序行，双击行头按该行数值排序实验列
+          提示：拖拽行头可调整数据流顺序，双击列头按该列排序行，双击行头按该行数值排序实验列
           {rowSortState && (
             <span style={{ marginLeft: 8, color: '#1890ff' }}>
               (当前按第 {rowSortState.rowIndex + 1} 行 {rowSortState.order === 'desc' ? '降序' : '升序'} 排列实验)
@@ -656,6 +656,7 @@ export default function CompareView() {
               fixedColumnsStart={1}
               fixedRowsTop={1}
               manualColumnResize={true}
+              manualRowMove={true}
               columnSorting={{ headerAction: false, indicator: true }}
               copyPaste={{
                 copyColumnHeaders: true,

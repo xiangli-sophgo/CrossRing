@@ -354,7 +354,7 @@ def main():
     parser.add_argument("--config", default="../config/topologies/topo_5x4.yaml", help="仿真配置文件路径")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="仿真模型类型")
     parser.add_argument("--results_base_name", default="arbitration_comparison", help="结果文件基础名称")
-    parser.add_argument("--max_workers", type=int, default=8, help="最大并行worker数量")
+    parser.add_argument("--max_workers", type=int, default=12, help="最大并行worker数量")
     parser.add_argument("--save_to_db", type=int, default=1, help="是否保存到数据库 (0/1)")
     parser.add_argument("--experiment_name", default="arbitration_comparison", help="数据库中的实验名称前缀")
     parser.add_argument("--save_csv", type=int, default=0, help="是否生成CSV文件 (0/1)")
