@@ -27,7 +27,7 @@ logging.getLogger("matplotlib.font_manager").setLevel(logging.WARNING)
 # 定义配置组合
 STRATEGY_CONFIGS = [
     # Mode 0: 无保序 - 1种配置
-    {"mode": 0, "granularity": 0, "channels": [], "name": "M0_NoOrder", "desc": "无保序（基准对照）"},
+    # {"mode": 0, "granularity": 0, "channels": [], "name": "M0_NoOrder", "desc": "无保序（基准对照）"},
     # Mode 1: 单侧下环 (TL/TU固定) - 4种组合
     # {"mode": 1, "granularity": 0, "channels": ["REQ"], "name": "M1_IP_REQ", "desc": "单侧下环+IP层级+仅REQ保序"},
     # {"mode": 1, "granularity": 0, "channels": ["REQ", "RSP", "DATA"], "name": "M1_IP_ALL", "desc": "单侧下环+IP层级+全通道保序"},
@@ -39,7 +39,7 @@ STRATEGY_CONFIGS = [
     # {"mode": 2, "granularity": 1, "channels": ["REQ"], "name": "M2_Node_REQ", "desc": "双侧下环+节点层级+仅REQ保序"},
     # {"mode": 2, "granularity": 1, "channels": ["REQ", "RSP", "DATA"], "name": "M2_Node_ALL", "desc": "双侧下环+节点层级+全通道保序"},
     # Mode 3: 动态方向 (基于src-dest相对位置) - 2种组合
-    # {"mode": 3, "granularity": 0, "channels": ["REQ", "RSP", "DATA"], "name": "M3_IP_ALL", "desc": "动态方向+IP层级+全通道保序"},
+    {"mode": 3, "granularity": 0, "channels": ["REQ", "RSP", "DATA"], "name": "M3_IP_ALL", "desc": "动态方向+IP层级+全通道保序"},
     # {"mode": 3, "granularity": 1, "channels": ["REQ", "RSP", "DATA"], "name": "M3_Node_ALL", "desc": "动态方向+节点层级+全通道保序"},
 ]
 

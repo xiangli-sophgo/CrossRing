@@ -161,7 +161,7 @@ function App() {
       }}>
         <Space>
           <Title level={3} style={{ color: 'white', margin: 0 }}>
-            <AppstoreOutlined /> KCIN Web 工具
+            <AppstoreOutlined /> 交互式拓扑建模工具
           </Title>
           <Button
             type="primary"
