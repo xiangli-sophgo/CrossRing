@@ -388,12 +388,18 @@ class Network:
         self.EQ_CAPACITY = {"TU": {}, "TD": {}}
 
         # 容量计算辅助函数
+        t1_enabled = config.ETAG_T1_ENABLED
+
         def _cap_tl(lvl):
             if lvl == "T2":
                 return config.TL_Etag_T2_UE_MAX
             if lvl == "T1":
+                if not t1_enabled:
+                    return 0
                 return config.TL_Etag_T1_UE_MAX - config.TL_Etag_T2_UE_MAX
             if lvl == "T0":
+                if not t1_enabled:
+                    return config.RB_IN_FIFO_DEPTH - config.TL_Etag_T2_UE_MAX
                 return config.RB_IN_FIFO_DEPTH - config.TL_Etag_T1_UE_MAX
 
         def _cap_tr(lvl):
@@ -404,6 +410,8 @@ class Network:
             if lvl == "T2":
                 return config.TR_Etag_T2_UE_MAX
             if lvl == "T1":
+                if not t1_enabled:
+                    return 0
                 return config.RB_IN_FIFO_DEPTH - config.TR_Etag_T2_UE_MAX
             return 0
 
@@ -411,8 +419,12 @@ class Network:
             if lvl == "T2":
                 return config.TU_Etag_T2_UE_MAX
             if lvl == "T1":
+                if not t1_enabled:
+                    return 0
                 return config.TU_Etag_T1_UE_MAX - config.TU_Etag_T2_UE_MAX
             if lvl == "T0":
+                if not t1_enabled:
+                    return config.EQ_IN_FIFO_DEPTH - config.TU_Etag_T2_UE_MAX
                 return config.EQ_IN_FIFO_DEPTH - config.TU_Etag_T1_UE_MAX
 
         def _cap_td(lvl):
@@ -423,6 +435,8 @@ class Network:
             if lvl == "T2":
                 return config.TD_Etag_T2_UE_MAX
             if lvl == "T1":
+                if not t1_enabled:
+                    return 0
                 return config.EQ_IN_FIFO_DEPTH - config.TD_Etag_T2_UE_MAX
             return 0
 

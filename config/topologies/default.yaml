@@ -79,6 +79,7 @@ TU_Etag_T2_UE_MAX: 5
 TU_Etag_T1_UE_MAX: 7
 TD_Etag_T2_UE_MAX: 6
 ETag_BOTHSIDE_UPGRADE: 1
+ETAG_T1_ENABLED: true  # true=三级(T2→T1→T0), false=两级(T2→T0)
 ORDERING_ETAG_UPGRADE_MODE: 0
 
 # DMA 读写间隔

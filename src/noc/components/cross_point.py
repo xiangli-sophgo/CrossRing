@@ -239,9 +239,12 @@ class CrossPoint:
         """
         判断下环失败后的ETag升级目标
 
-        升级规则：
+        升级规则（ETAG_T1_ENABLED=true）：
         - T2->T1: 根据ETAG_BOTHSIDE_UPGRADE配置
         - T1->T0: 只有TL/TU能升级
+
+        升级规则（ETAG_T1_ENABLED=false）：
+        - T2->T0: 直接跳过T1
 
         Args:
             flit: 当前flit
@@ -255,13 +258,21 @@ class CrossPoint:
 
         # 优先从network读取配置，否则使用全局config
         ETag_BOTHSIDE_UPGRADE = getattr(self.network, "ETag_BOTHSIDE_UPGRADE", getattr(self.config, "ETag_BOTHSIDE_UPGRADE", False))
+        t1_enabled = self.config.ETAG_T1_ENABLED
 
         if flit.ETag_priority == "T2":
-            # T2 -> T1 升级
-            if direction in ["TL", "TU"]:
-                return "T1"
-            elif direction in ["TR", "TD"]:
-                return "T1" if ETag_BOTHSIDE_UPGRADE else None
+            if not t1_enabled:
+                # T1禁用时：T2直接升级到T0
+                if direction in ["TL", "TU"]:
+                    return "T0"
+                elif direction in ["TR", "TD"]:
+                    return "T0" if (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and ETag_BOTHSIDE_UPGRADE) else None
+            else:
+                # T2 -> T1 升级
+                if direction in ["TL", "TU"]:
+                    return "T1"
+                elif direction in ["TR", "TD"]:
+                    return "T1" if ETag_BOTHSIDE_UPGRADE else None
 
         elif flit.ETag_priority == "T1":
             # T1 -> T0 升级
@@ -306,7 +317,7 @@ class CrossPoint:
 
         根据flit的ETag等级判断能否使用对应的entry：
         - T0: 需要T0专用/T1/T2中至少有一个可用（T0需赢得轮询仲裁）
-        - T1: 需要T1/T2中至少有一个可用
+        - T1: 需要T1/T2中至少有一个可用（T1禁用时跳过T1）
         - T2: 只能使用T2
 
         Args:
@@ -320,6 +331,8 @@ class CrossPoint:
         # 检查各级entry可用性
         # T0 Entry检查：TL/TU总是可以；TR/TD只有在双侧下环保序(Mode 2/3)时
         ETag_BOTHSIDE_UPGRADE = getattr(self.network, "ETag_BOTHSIDE_UPGRADE", getattr(self.config, "ETag_BOTHSIDE_UPGRADE", False))
+        t1_enabled = self.config.ETAG_T1_ENABLED
+
         if direction in ["TL", "TU"]:
             can_use_T0 = self._entry_available(direction, key, "T0")
         elif direction in ["TR", "TD"]:
@@ -327,7 +340,7 @@ class CrossPoint:
         else:
             can_use_T0 = False
 
-        can_use_T1 = self._entry_available(direction, key, "T1")
+        can_use_T1 = self._entry_available(direction, key, "T1") if t1_enabled else False
         can_use_T2 = self._entry_available(direction, key, "T2")
 
         if flit.ETag_priority == "T0":
@@ -346,9 +359,13 @@ class CrossPoint:
         """
         根据ETag优先级占用最佳可用Entry
 
-        优先级策略：
+        优先级策略（ETAG_T1_ENABLED=true）：
         - T0: T0专用 → T1 → T2
         - T1: T1 → T2
+        - T2: T2
+
+        优先级策略（ETAG_T1_ENABLED=false）：
+        - T0: T0专用 → T2
         - T2: T2
 
         Args:
@@ -361,15 +378,17 @@ class CrossPoint:
         Returns:
             bool: 是否成功占用Entry
         """
+        t1_enabled = self.config.ETAG_T1_ENABLED
+
         # 检查各级entry可用性
         can_use_T0 = self._entry_available(direction, key, "T0") if direction in ["TL", "TU"] else False
-        can_use_T1 = self._entry_available(direction, key, "T1")
+        can_use_T1 = self._entry_available(direction, key, "T1") if t1_enabled else False
         can_use_T2 = self._entry_available(direction, key, "T2")
 
         entry_to_use = None
 
         if flit.ETag_priority == "T0":
-            # T0优先级：尝试T0专用 → T1 → T2
+            # T0优先级：尝试T0专用 → T1(若启用) → T2
             if self._is_T0_slot_winner(flit) and can_use_T0:
                 entry_to_use = "T0"
             elif can_use_T1:

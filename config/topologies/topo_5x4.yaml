@@ -57,12 +57,20 @@ EQ_IN_FIFO_DEPTH: 16
 # EQ_IN_FIFO_DEPTH: 2
 
 # ETag 配置
-TL_Etag_T2_UE_MAX: 8
+
+TL_Etag_T2_UE_MAX: 15
 TL_Etag_T1_UE_MAX: 15
-TR_Etag_T2_UE_MAX: 12
-TU_Etag_T2_UE_MAX: 8
+TR_Etag_T2_UE_MAX: 15
+TU_Etag_T2_UE_MAX: 15
 TU_Etag_T1_UE_MAX: 15
-TD_Etag_T2_UE_MAX: 12
+TD_Etag_T2_UE_MAX: 15
+
+# TL_Etag_T2_UE_MAX: 8
+# TL_Etag_T1_UE_MAX: 15
+# TR_Etag_T2_UE_MAX: 12
+# TU_Etag_T2_UE_MAX: 8
+# TU_Etag_T1_UE_MAX: 15
+# TD_Etag_T2_UE_MAX: 12
 
 # TL_Etag_T2_UE_MAX: 4
 # TL_Etag_T1_UE_MAX: 7
@@ -86,6 +94,7 @@ ITag_MAX_Num_V: 1
 
 # 其他配置
 ETag_BOTHSIDE_UPGRADE: 0
+ETAG_T1_ENABLED: 0  # true=三级(T2→T1→T0), false=两级(T2→T0)
 GDMA_RW_GAP: .inf  # numpy.inf
 SDMA_RW_GAP: .inf  # numpy.inf
 
@@ -119,6 +128,8 @@ IN_ORDER_PACKET_CATEGORIES:
   - "REQ"    # 只有REQ类型需要保序
   - "RSP"
   - "DATA"
+
+
 
 
 # 双侧下环方向配置 - 5x4拓扑 (20节点: 0-19, 布局: 行0: 0-3, 行1: 4-7, 行2: 8-11, 行3: 12-15, 行4: 16-19)
