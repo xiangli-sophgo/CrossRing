@@ -1,0 +1,16 @@
+# FastAPI 和 Web 框架
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+pydantic-settings==2.5.2
+python-multipart==0.0.20
+
+# 异步支持
+aiofiles==24.1.0
+websockets>=13.0
+
+# 数据库
+sqlalchemy>=2.0.0
+
+# 打包
+pyinstaller>=6.0.0
