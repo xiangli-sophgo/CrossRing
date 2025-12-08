@@ -20,6 +20,10 @@ import {
   Popconfirm,
   Select,
   Radio,
+  Row,
+  Col,
+  Statistic,
+  Empty,
 } from 'antd';
 import {
   UploadOutlined,
@@ -29,30 +33,62 @@ import {
   DownloadOutlined,
   EditOutlined,
   SwapOutlined,
+  ExperimentOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  DatabaseOutlined,
+  SyncOutlined,
+  CloseCircleOutlined,
 } from '@ant-design/icons';
+import { primaryColor, successColor, warningColor, errorColor } from '@/theme/colors';
 import type { ColumnsType } from 'antd/es/table';
 import { useExperimentStore } from '../../stores/experimentStore';
 import { getExperiments, importFromCSV, deleteExperiment, updateExperiment, deleteExperimentsBatch } from './api';
 import type { Experiment, ExperimentType } from './types';
 import ExportModal from './components/ExportModal';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
-const statusColors: Record<string, string> = {
-  running: 'processing',
-  completed: 'success',
-  failed: 'error',
-  interrupted: 'warning',
-  importing: 'processing',
+const statusConfig: Record<string, { color: string; text: string; icon: React.ReactNode }> = {
+  running: { color: 'processing', text: '运行中', icon: <SyncOutlined spin /> },
+  completed: { color: 'success', text: '已完成', icon: <CheckCircleOutlined /> },
+  failed: { color: 'error', text: '失败', icon: <CloseCircleOutlined /> },
+  interrupted: { color: 'warning', text: '已中断', icon: <ClockCircleOutlined /> },
+  importing: { color: 'processing', text: '导入中', icon: <SyncOutlined spin /> },
 };
 
-const statusText: Record<string, string> = {
-  running: '运行中',
-  completed: '已完成',
-  failed: '失败',
-  interrupted: '已中断',
-  importing: '导入中',
-};
+// 统计卡片组件
+interface StatCardProps {
+  title: string;
+  value: number;
+  icon: React.ReactNode;
+  color: string;
+  bgColor: string;
+}
+
+const StatCard: React.FC<StatCardProps> = ({ title, value, icon, color, bgColor }) => (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+    <div
+      style={{
+        width: 44,
+        height: 44,
+        borderRadius: 10,
+        backgroundColor: bgColor,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: color,
+        fontSize: 20,
+      }}
+    >
+      {icon}
+    </div>
+    <div>
+      <Text type="secondary" style={{ fontSize: 12 }}>{title}</Text>
+      <div style={{ fontSize: 20, fontWeight: 600, color }}>{value}</div>
+    </div>
+  </div>
+);
 
 
 export default function ExperimentList() {
@@ -240,21 +276,24 @@ export default function ExperimentList() {
     {
       title: '状态',
       key: 'status',
-      width: 150,
-      render: (_, record) => (
-        <div>
-          <Tag color={statusColors[record.status || ''] || 'default'}>
-            {statusText[record.status || ''] || record.status}
-          </Tag>
-          {record.status === 'failed' && record.notes && (
-            <Tooltip title={record.notes}>
-              <span style={{ color: '#ff4d4f', fontSize: 12, marginLeft: 4 }}>
-                (查看错误)
-              </span>
-            </Tooltip>
-          )}
-        </div>
-      ),
+      width: 120,
+      render: (_, record) => {
+        const config = statusConfig[record.status || ''] || { color: 'default', text: record.status, icon: null };
+        return (
+          <div>
+            <Tag color={config.color} icon={config.icon}>
+              {config.text}
+            </Tag>
+            {record.status === 'failed' && record.notes && (
+              <Tooltip title={record.notes}>
+                <span style={{ color: errorColor, fontSize: 12, marginLeft: 4, cursor: 'pointer' }}>
+                  详情
+                </span>
+              </Tooltip>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: '描述',
@@ -324,89 +363,145 @@ export default function ExperimentList() {
     },
   ];
 
+  // 计算统计数据
+  const stats = {
+    total: experiments.length,
+    completed: experiments.filter(e => e.status === 'completed').length,
+    running: experiments.filter(e => e.status === 'running' || e.status === 'importing').length,
+    totalResults: experiments.reduce((sum, e) => sum + (e.completed_combinations || 0), 0),
+  };
+
   return (
     <div>
-      <Card>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+      {/* 统计卡片 */}
+      <Card style={{ marginBottom: 24 }}>
+        <Row gutter={[24, 16]}>
+          <Col xs={12} sm={6}>
+            <StatCard
+              title="总实验数"
+              value={stats.total}
+              icon={<ExperimentOutlined />}
+              color={primaryColor}
+              bgColor="#e6f4ff"
+            />
+          </Col>
+          <Col xs={12} sm={6}>
+            <StatCard
+              title="已完成"
+              value={stats.completed}
+              icon={<CheckCircleOutlined />}
+              color={successColor}
+              bgColor="#f6ffed"
+            />
+          </Col>
+          <Col xs={12} sm={6}>
+            <StatCard
+              title="运行中"
+              value={stats.running}
+              icon={<SyncOutlined />}
+              color={warningColor}
+              bgColor="#fffbe6"
+            />
+          </Col>
+          <Col xs={12} sm={6}>
+            <StatCard
+              title="结果总数"
+              value={stats.totalResults}
+              icon={<DatabaseOutlined />}
+              color="#722ed1"
+              bgColor="#f9f0ff"
+            />
+          </Col>
+        </Row>
+      </Card>
+
+      {/* 主表格卡片 */}
+      <Card
+        title={
           <Space>
-            <Title level={4} style={{ margin: 0 }}>
-              仿真结果数据库
-            </Title>
+            <ExperimentOutlined style={{ color: primaryColor }} />
+            <span>实验列表</span>
+          </Space>
+        }
+        extra={
+          <Space>
             <Radio.Group
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
               optionType="button"
-              buttonStyle="solid"
+              size="small"
             >
-              <Tooltip title="显示所有类型的实验">
-                <Radio.Button value="all">全部</Radio.Button>
-              </Tooltip>
-              <Tooltip title="仅显示KCIN类型实验">
-                <Radio.Button value="kcin">KCIN</Radio.Button>
-              </Tooltip>
-              <Tooltip title="仅显示DCIN类型实验">
-                <Radio.Button value="dcin">DCIN</Radio.Button>
-              </Tooltip>
+              <Radio.Button value="all">全部</Radio.Button>
+              <Radio.Button value="kcin">KCIN</Radio.Button>
+              <Radio.Button value="dcin">DCIN</Radio.Button>
             </Radio.Group>
+            <Tooltip title="刷新">
+              <Button icon={<ReloadOutlined />} onClick={loadExperiments} size="small" />
+            </Tooltip>
           </Space>
+        }
+      >
+        {/* 工具栏 */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
           <Space>
-            {selectedExperimentIds.length > 0 && (
+            {selectedExperimentIds.length > 0 ? (
               <>
-                <span style={{ color: '#1890ff' }}>
+                <Tag color="blue" style={{ fontSize: 13, padding: '4px 8px' }}>
                   已选择 {selectedExperimentIds.length} 个实验
-                </span>
+                </Tag>
                 <Tooltip title="对比选中的实验结果">
                   <Button
                     type="primary"
                     icon={<SwapOutlined />}
                     onClick={() => navigate('/compare')}
                     disabled={selectedExperimentIds.length < 2}
+                    size="small"
                   >
                     对比
                   </Button>
                 </Tooltip>
                 <Popconfirm
                   title="批量删除"
-                  description={`确定要删除选中的 ${selectedExperimentIds.length} 个实验吗？此操作不可恢复。`}
+                  description={`确定要删除选中的 ${selectedExperimentIds.length} 个实验吗？`}
                   onConfirm={handleBatchDelete}
                   okText="删除"
                   cancelText="取消"
                   okButtonProps={{ danger: true }}
                 >
-                  <Tooltip title="删除选中的实验及其所有结果">
-                    <Button
-                      danger
-                      icon={<DeleteOutlined />}
-                      loading={batchDeleting}
-                    >
-                      删除选中
-                    </Button>
-                  </Tooltip>
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    loading={batchDeleting}
+                    size="small"
+                  >
+                    删除选中
+                  </Button>
                 </Popconfirm>
-                <Tooltip title="清除所有选择">
-                  <Button onClick={clearSelection}>取消选择</Button>
-                </Tooltip>
+                <Button onClick={clearSelection} size="small">
+                  取消选择
+                </Button>
               </>
+            ) : (
+              <Text type="secondary">选择实验可进行批量操作</Text>
             )}
+          </Space>
+          <Space>
             <Tooltip title="从CSV文件导入实验数据">
               <Button
                 icon={<UploadOutlined />}
                 onClick={() => setImportModalVisible(true)}
+                size="small"
               >
                 导入CSV
               </Button>
             </Tooltip>
-            <Tooltip title="将数据库和前端打包导出，可独立部署查看">
+            <Tooltip title="将数据库和前端打包导出">
               <Button
                 icon={<DownloadOutlined />}
                 onClick={() => setExportModalVisible(true)}
+                size="small"
               >
                 导出打包
-              </Button>
-            </Tooltip>
-            <Tooltip title="刷新实验列表">
-              <Button icon={<ReloadOutlined />} onClick={loadExperiments}>
-                刷新
               </Button>
             </Tooltip>
           </Space>
@@ -426,11 +521,23 @@ export default function ExperimentList() {
             },
           }}
           pagination={{
-            defaultPageSize: 50,
+            defaultPageSize: 20,
             pageSizeOptions: [10, 20, 50, 100],
             showSizeChanger: true,
             showQuickJumper: true,
-            showTotal: (total) => `共 ${total} 个实验`,
+            showTotal: (total) => <Text type="secondary">共 {total} 个实验</Text>,
+          }}
+          locale={{
+            emptyText: (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="暂无实验数据"
+              >
+                <Button type="primary" icon={<UploadOutlined />} onClick={() => setImportModalVisible(true)}>
+                  导入第一个实验
+                </Button>
+              </Empty>
+            ),
           }}
         />
       </Card>

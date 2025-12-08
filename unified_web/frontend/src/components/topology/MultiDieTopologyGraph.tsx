@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from 'react'
+import { useEffect, useRef, useMemo, forwardRef, useImperativeHandle, useCallback } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 import Cytoscape from 'cytoscape'
 import { Card, Space, Tag, Button, Row, Col, message, Switch } from 'antd'
@@ -7,6 +7,7 @@ import type { TopologyData } from '../../types/topology'
 import type { IPMount } from '../../types/ipMount'
 import type { DCINLayoutInfo } from '../../types/staticBandwidth'
 import { useLayoutStore } from '../../store/layoutStore'
+import { getIPTypeColor as getThemeIPTypeColor } from '@/theme/colors'
 
 interface MultiDieTopologyGraphProps {
   data: TopologyData | null
@@ -85,10 +86,24 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
   const { multiDieWidth, multiDieHeight, setMultiDieSize } = useLayoutStore()
 
   // 监听容器大小变化，自动调整画布并适应
+  // 使用防抖避免拖拽过程中频繁触发fit
+  const lastSizeRef = useRef<{ width: number; height: number } | null>(null)
   useEffect(() => {
     if (!containerRef.current) return
-    const resizeObserver = new ResizeObserver(() => {
+    const resizeObserver = new ResizeObserver((entries) => {
       if (cyRef.current) {
+        const entry = entries[0]
+        const newWidth = entry.contentRect.width
+        const newHeight = entry.contentRect.height
+
+        // 只有尺寸真正变化时才调整
+        if (lastSizeRef.current &&
+            Math.abs(lastSizeRef.current.width - newWidth) < 1 &&
+            Math.abs(lastSizeRef.current.height - newHeight) < 1) {
+          return
+        }
+        lastSizeRef.current = { width: newWidth, height: newHeight }
+
         cyRef.current.resize()
         setTimeout(() => {
           cyRef.current?.fit(undefined, 10)
@@ -143,29 +158,10 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
     return result
   }, [mounts, activeIPsByDie, showOnlyActiveIPs, dcinLayout])
 
-  // IP类型到颜色
+  // IP类型到颜色（使用主题系统）
   const getIPTypeColor = (ipType: string): { bg: string; border: string } => {
-    const type = ipType.split('_')[0].toLowerCase()
-    switch (type) {
-      case 'gdma':
-      case 'sdma':
-        return { bg: '#5B8FF9', border: '#3A6FD9' }
-      case 'cdma':
-        return { bg: '#5AD8A6', border: '#3AB886' }
-      case 'npu':
-        return { bg: '#722ed1', border: '#531dab' }
-      case 'ddr':
-      case 'l2m':
-        return { bg: '#E8684A', border: '#C8482A' }
-      case 'pcie':
-        return { bg: '#fa8c16', border: '#d46b08' }
-      case 'eth':
-        return { bg: '#52c41a', border: '#389e0d' }
-      case 'dcin':
-        return { bg: '#13c2c2', border: '#08979c' }
-      default:
-        return { bg: '#eb2f96', border: '#c41d7f' }
-    }
+    const themeColor = getThemeIPTypeColor(ipType)
+    return { bg: themeColor.bg, border: themeColor.border }
   }
 
   // 根据带宽获取颜色（0-256映射到浅红-深红）
@@ -883,12 +879,33 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
           return 0
         }
       }
+    },
+    // 选中节点样式 - 使用温和的高亮
+    {
+      selector: 'node.mounted-node:selected, node.unmounted:selected',
+      style: {
+        'border-width': 3,
+        'border-color': '#1890ff',
+      }
     }
   ]
 
-  const handleCyInit = (cy: Cytoscape.Core) => {
+  // 记录当前拓扑类型，用于检测变化
+  const currentTopoRef = useRef<string | null>(null)
+
+  const handleCyInit = useCallback((cy: Cytoscape.Core) => {
+    // 检测拓扑是否变化
+    const topoChanged = data && currentTopoRef.current !== data.type
+    if (topoChanged) {
+      currentTopoRef.current = data.type
+      cyRef.current = null  // 重置cy引用，强制重新初始化
+    }
+
+    // 如果已经初始化过同一个cy实例，跳过
+    if (cyRef.current === cy) return
     cyRef.current = cy
 
+    // 新的cy实例，自动居中显示
     setTimeout(() => {
       cy.fit(undefined, 20)
       cy.center()
@@ -905,8 +922,12 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
 
     // IP块点击事件
     cy.on('tap', '.ip-block', (evt) => {
-      const parentNodeId = evt.target.data('parentNodeId')
-      const dieId = evt.target.data('dieId')
+      const ipNode = evt.target
+      const parentNodeId = ipNode.data('parentNodeId')
+      const dieId = ipNode.data('dieId')
+      // 选中对应的背景节点以显示高亮
+      cy.$(':selected').unselect()
+      cy.$(`#die-${dieId}-node-${parentNodeId}`).select()
       if (parentNodeId !== undefined && onNodeClick) {
         onNodeClick(parentNodeId, dieId)
       }
@@ -938,7 +959,7 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
         onLinkClick('', [])
       }
     })
-  }
+  }, [data, onNodeClick, onLinkClick, linkComposition])
 
   const handleZoomIn = () => cyRef.current?.zoom(cyRef.current.zoom() * 1.2)
   const handleZoomOut = () => cyRef.current?.zoom(cyRef.current.zoom() / 1.2)
@@ -971,7 +992,7 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
   }
 
   return (
-    <Card style={{ width: 'fit-content' }}>
+    <Card>
       <Row style={{ marginBottom: 16 }} align="middle">
         <Col span={12}>
           <Space>
@@ -1003,8 +1024,10 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
         style={{
           width: multiDieWidth,
           height: multiDieHeight,
-          minWidth: '30vw',
-          maxWidth: '60vw',
+          minWidth: 500,
+          minHeight: 500,
+          maxWidth: 1200,
+          maxHeight: 1200,
           border: '1px solid #d9d9d9',
           borderRadius: 4,
           background: '#fafafa',
@@ -1013,7 +1036,7 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
         }}
       >
         <CytoscapeComponent
-          key={`cy-${JSON.stringify(dcinLayout)}-${showOnlyActiveIPs}-${JSON.stringify(Array.from(activeIPsByDie?.entries() || []))}`}
+          key={`cy-${data?.type}-${JSON.stringify(dcinLayout)}-${showOnlyActiveIPs}-${JSON.stringify(Array.from(activeIPsByDie?.entries() || []))}`}
           elements={elements}
           style={{ width: '100%', height: '100%' }}
           stylesheet={stylesheet}
@@ -1030,17 +1053,17 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
       <Card title="图例" size="small" style={{ marginTop: 16 }}>
         <Row gutter={[16, 8]} justify="center">
           {(() => {
-            const ipTypeColors: Record<string, { bg: string; border: string; label: string }> = {
-              'gdma': { bg: '#5B8FF9', border: '#3A6FD9', label: 'GDMA' },
-              'sdma': { bg: '#5B8FF9', border: '#3A6FD9', label: 'SDMA' },
-              'cdma': { bg: '#5AD8A6', border: '#3AB886', label: 'CDMA' },
-              'npu': { bg: '#722ed1', border: '#531dab', label: 'NPU' },
-              'ddr': { bg: '#E8684A', border: '#C8482A', label: 'DDR' },
-              'l2m': { bg: '#E8684A', border: '#C8482A', label: 'L2M' },
-              'pcie': { bg: '#fa8c16', border: '#d46b08', label: 'PCIe' },
-              'eth': { bg: '#52c41a', border: '#389e0d', label: 'ETH' },
-              'dcin': { bg: '#13c2c2', border: '#08979c', label: 'DCIN' },
-              'other': { bg: '#eb2f96', border: '#c41d7f', label: '其他' }
+            const typeLabels: Record<string, string> = {
+              'gdma': 'GDMA',
+              'sdma': 'SDMA',
+              'cdma': 'CDMA',
+              'npu': 'NPU',
+              'ddr': 'DDR',
+              'l2m': 'L2M',
+              'pcie': 'PCIe',
+              'eth': 'ETH',
+              'dcin': 'DCIN',
+              'default': '其他'
             }
 
             // 统计已挂载的IP类型（从所有Die的mountMap中提取）
@@ -1049,10 +1072,10 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
               dieMountMap.forEach(nodeMounts => {
                 nodeMounts.forEach(mount => {
                   const type = mount.ip_type.split('_')[0].toLowerCase()
-                  if (ipTypeColors[type]) {
+                  if (typeLabels[type]) {
                     mountedTypes.add(type)
                   } else {
-                    mountedTypes.add('other')
+                    mountedTypes.add('default')
                   }
                 })
               })
@@ -1060,18 +1083,19 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
 
             // 生成图例项
             return Array.from(mountedTypes).map(type => {
-              const config = ipTypeColors[type]
+              const colors = getThemeIPTypeColor(type)
+              const label = typeLabels[type] || '其他'
               return (
                 <Col span={4} key={type}>
                   <Space>
                     <div style={{
                       width: 24,
                       height: 24,
-                      backgroundColor: config.bg,
-                      border: `2px solid ${config.border}`,
-                      borderRadius: 4
+                      backgroundColor: colors.bg,
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: 0
                     }}></div>
-                    <span>{config.label}</span>
+                    <span>{label}</span>
                   </Space>
                 </Col>
               )

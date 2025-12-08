@@ -43,7 +43,7 @@
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `REVERSE_DIRECTION_FLOW_CONTROL_ENABLED` | 是否启用反方向流控 | 0 (关闭) |
+| `REVERSE_DIRECTION_ENABLED` | 是否启用反方向流控 | 0 (关闭) |
 | `REVERSE_DIRECTION_THRESHOLD` | 正常方向比反方向拥塞程度超过容量的多少比例时才走反方向 | 0.5 |
 
 **示例**（容量=8，阈值=0.5）：

@@ -49,11 +49,13 @@ class SimulationEngine:
         config_path: str,
         topology: str = "5x4",
         verbose: int = 1,
+        config_overrides: Optional[Dict[str, Any]] = None,
     ):
         self.mode = mode
         self.config_path = config_path
         self.topology = topology
         self.verbose = verbose
+        self.config_overrides = config_overrides or {}
         self.model = None
         self.config = None
         self._cancelled = False
@@ -64,6 +66,12 @@ class SimulationEngine:
         from src.noc import REQ_RSP_model
 
         self.config = CrossRingConfig(self.config_path)
+
+        # 应用配置覆盖
+        for key, value in self.config_overrides.items():
+            if hasattr(self.config, key):
+                setattr(self.config, key, value)
+
         topo_type = self.config.TOPO_TYPE if self.config.TOPO_TYPE else self.topology
 
         self.model = REQ_RSP_model(
@@ -79,6 +87,11 @@ class SimulationEngine:
         from src.d2d.d2d_model import D2D_Model
 
         self.config = D2DConfig(d2d_config_file=self.config_path)
+
+        # 应用配置覆盖
+        for key, value in self.config_overrides.items():
+            if hasattr(self.config, key):
+                setattr(self.config, key, value)
 
         self.model = D2D_Model(
             config=self.config,

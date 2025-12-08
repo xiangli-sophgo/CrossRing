@@ -33,6 +33,7 @@ class SimulationTask:
     experiment_name: Optional[str]
     save_to_db: bool
     result_granularity: str  # per_file or per_batch
+    config_overrides: Optional[Dict[str, Any]] = None  # 配置覆盖项
 
     status: TaskStatus = TaskStatus.PENDING
     progress: int = 0  # 0-100
@@ -82,6 +83,7 @@ class TaskManager:
         experiment_name: Optional[str] = None,
         save_to_db: bool = True,
         result_granularity: str = "per_file",
+        config_overrides: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         创建新的仿真任务
@@ -102,6 +104,7 @@ class TaskManager:
             experiment_name=experiment_name,
             save_to_db=save_to_db,
             result_granularity=result_granularity,
+            config_overrides=config_overrides,
         )
 
         self._tasks[task_id] = task
@@ -200,6 +203,7 @@ class TaskManager:
                     config_path=task.config_path,
                     topology=task.topology,
                     verbose=0,
+                    config_overrides=task.config_overrides,
                 )
 
                 engine.setup(

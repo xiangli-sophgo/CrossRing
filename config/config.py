@@ -98,7 +98,7 @@ class CrossRingConfig:
         self.IP_H2L_L_FIFO_DEPTH = args.IP_H2L_L_FIFO_DEPTH
 
         # 反方向流控配置
-        self.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED = args.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED
+        self.REVERSE_DIRECTION_ENABLED = args.REVERSE_DIRECTION_ENABLED
         self.REVERSE_DIRECTION_THRESHOLD = args.REVERSE_DIRECTION_THRESHOLD
 
         # CHANNEL_SPEC现在为可选配置,主要用于向后兼容和可视化
@@ -586,7 +586,7 @@ class CrossRingConfig:
         parser.add_argument("--TD_ALLOWED_SOURCE_NODES", type=list, default=default_config.get("TD_ALLOWED_SOURCE_NODES", []), help="Source nodes allowed to eject from TD (down) direction")
 
         # 反方向流控配置
-        parser.add_argument("--REVERSE_DIRECTION_FLOW_CONTROL_ENABLED", type=bool, default=default_config.get("REVERSE_DIRECTION_FLOW_CONTROL_ENABLED", False), help="Enable reverse direction flow control")
+        parser.add_argument("--REVERSE_DIRECTION_ENABLED", type=bool, default=default_config.get("REVERSE_DIRECTION_ENABLED", False), help="Enable reverse direction flow control")
         parser.add_argument("--REVERSE_DIRECTION_THRESHOLD", type=float, default=default_config.get("REVERSE_DIRECTION_THRESHOLD", 0.5), help="Threshold ratio for reverse direction (e.g., 0.5 means allow reverse when (normal_depth - reverse_depth) > 50% of capacity)")
 
         # 添加仲裁器配置支持

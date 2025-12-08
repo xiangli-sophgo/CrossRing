@@ -901,7 +901,7 @@ class FIFOHeatmapVisualizer:
                             # 反方向上环统计（只有功能开启且有数据时显示）
                             reverse_inject_count = fifo_info.get("reverse_inject_count", 0)
                             reverse_inject_rate = fifo_info.get("reverse_inject_rate", 0.0)
-                            if getattr(self.config, "REVERSE_DIRECTION_FLOW_CONTROL_ENABLED", False) and reverse_inject_count > 0:
+                            if getattr(self.config, "REVERSE_DIRECTION_ENABLED", False) and reverse_inject_count > 0:
                                 tag_info.append(f"反方向上环: {reverse_inject_count} ({reverse_inject_rate:.2f}%)")
 
                             # 组装hover文本

@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState, useMemo, forwardRef, useImperativeHandle } from 'react'
+import { useEffect, useRef, useState, useMemo, forwardRef, useImperativeHandle, useCallback } from 'react'
 import CytoscapeComponent from 'react-cytoscapejs'
 import Cytoscape from 'cytoscape'
 import { Card, Space, Tag, Button, Row, Col, Select, message, Switch } from 'antd'
-import { ZoomInOutlined, ZoomOutOutlined, AimOutlined, SaveOutlined, ReloadOutlined } from '@ant-design/icons'
+import { ZoomInOutlined, ZoomOutOutlined, AimOutlined, SaveOutlined } from '@ant-design/icons'
 import type { TopologyData } from '../../types/topology'
 import type { IPMount } from '../../types/ipMount'
 import type { FlowInfo } from '../../types/staticBandwidth'
 import { useLayoutStore } from '../../store/layoutStore'
+import { getIPTypeColor as getThemeIPTypeColor } from '@/theme/colors'
 
 interface TopologyGraphProps {
   data: TopologyData | null
@@ -40,10 +41,24 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
   const { singleDieWidth, singleDieHeight, setSingleDieSize } = useLayoutStore()
 
   // 监听容器大小变化，自动调整画布并适应
+  // 使用防抖避免拖拽过程中频繁触发fit
+  const lastSizeRef = useRef<{ width: number; height: number } | null>(null)
   useEffect(() => {
     if (!containerRef.current) return
-    const resizeObserver = new ResizeObserver(() => {
+    const resizeObserver = new ResizeObserver((entries) => {
       if (cyRef.current) {
+        const entry = entries[0]
+        const newWidth = entry.contentRect.width
+        const newHeight = entry.contentRect.height
+
+        // 只有尺寸真正变化时才调整
+        if (lastSizeRef.current &&
+            Math.abs(lastSizeRef.current.width - newWidth) < 1 &&
+            Math.abs(lastSizeRef.current.height - newHeight) < 1) {
+          return
+        }
+        lastSizeRef.current = { width: newWidth, height: newHeight }
+
         cyRef.current.resize()
         setTimeout(() => {
           cyRef.current?.fit(undefined, 10)
@@ -59,29 +74,10 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
     return () => resizeObserver.disconnect()
   }, [onWidthChange])
 
-  // IP类型到颜色的映射
+  // IP类型到颜色的映射（使用主题系统）
   const getIPTypeColor = (ipType: string): { bg: string; border: string } => {
-    const type = ipType.split('_')[0].toLowerCase()
-    switch (type) {
-      case 'gdma':
-        return { bg: '#5B8FF9', border: '#3A6FD9' }  // 蓝色
-      case 'sdma':
-        return { bg: '#5B8FF9', border: '#3A6FD9' }  // 蓝色
-      case 'cdma':
-        return { bg: '#5AD8A6', border: '#3AB886' }  // 绿色
-      case 'npu':
-        return { bg: '#722ed1', border: '#531dab' }  // 紫色
-      case 'ddr':
-        return { bg: '#E8684A', border: '#C8482A' }  // 红色
-      case 'l2m':
-        return { bg: '#E8684A', border: '#C8482A' }  // 红色
-      case 'pcie':
-        return { bg: '#fa8c16', border: '#d46b08' }  // 橙色
-      case 'eth':
-        return { bg: '#52c41a', border: '#389e0d' }  // 绿色
-      default:
-        return { bg: '#eb2f96', border: '#c41d7f' }  // 粉红色
-    }
+    const themeColor = getThemeIPTypeColor(ipType)
+    return { bg: themeColor.bg, border: themeColor.border }
   }
 
   // 获取节点的主要CSS类（基于第一个IP）
@@ -182,7 +178,7 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
       nodes.push({
         data: {
           id: `node-${node.id}`,
-          label: `${node.id}`,  // 始终显示节点ID
+          label: hasMounts ? '' : `${node.id}`,  // 有IP挂载时由单独的node-label层显示
           nodeId: node.id,
           row: node.row,
           col: node.col,
@@ -379,7 +375,7 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
         'font-weight': 'bold',
         'text-outline-width': 2,
         'text-outline-color': '#ffffff',
-        'z-index': 20,  // 文字层级最高
+        'z-index': 1,
       }
     },
     // IP块样式 - 独立节点（动态大小）
@@ -402,7 +398,7 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
         },
         'font-weight': 'bold',
         'text-outline-width': 0,
-        'z-index': 10,
+        'z-index': 15,
         'events': 'yes',
       }
     },
@@ -427,16 +423,12 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
         'events': 'no',  // 不响应事件
       }
     },
-    // 选中节点（仅背景节点）
+    // 选中节点（仅背景节点）- 使用温和的高亮样式
     {
       selector: 'node.mounted-node:selected, node.unmounted:selected',
       style: {
-        'background-color': '#ff4d4f',
-        'border-width': 4,
-        'border-color': '#ff7875',
-        'text-outline-color': '#ff4d4f',
-        'width': 80,
-        'height': 80,
+        'border-width': 3,
+        'border-color': '#1890ff',
       }
     },
     // 高亮节点（点击后）
@@ -539,10 +531,22 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
     },
   ]
 
-  const handleCyInit = (cy: Cytoscape.Core) => {
+  // 记录当前拓扑类型，用于检测变化
+  const currentTopoRef = useRef<string | null>(null)
+
+  const handleCyInit = useCallback((cy: Cytoscape.Core) => {
+    // 检测拓扑是否变化
+    const topoChanged = data && currentTopoRef.current !== data.type
+    if (topoChanged) {
+      currentTopoRef.current = data.type
+      cyRef.current = null  // 重置cy引用，强制重新初始化
+    }
+
+    // 如果已经初始化过同一个cy实例，跳过
+    if (cyRef.current === cy) return
     cyRef.current = cy
 
-    // 初始化后自动居中显示
+    // 新的cy实例，自动居中显示
     setTimeout(() => {
       cy.fit(undefined, 50)
       cy.center()
@@ -566,6 +570,10 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
       const parentNodeId = ipNode.data('parentNodeId')
 
       setSelectedNode(parentNodeId)
+
+      // 选中对应的背景节点以显示高亮
+      cy.$(':selected').unselect()
+      cy.$(`#node-${parentNodeId}`).select()
 
       if (onNodeClick) {
         onNodeClick(parentNodeId)
@@ -594,7 +602,7 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
         }
       }
     })
-  }
+  }, [data, onNodeClick, onLinkClick, linkComposition])
 
   const handleZoomIn = () => {
     if (cyRef.current) {
@@ -624,19 +632,6 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
     }
   }
 
-  const handleRefresh = () => {
-    if (cyRef.current) {
-      // 强制重新运行布局
-      cyRef.current.layout({ name: 'preset' }).run()
-
-      setTimeout(() => {
-        cyRef.current?.fit(undefined, 50)
-        cyRef.current?.center()
-        message.success('已刷新显示')
-      }, 50)
-    }
-  }
-
   // 暴露saveLayout方法给父组件
   useImperativeHandle(ref, () => ({
     saveLayout: handleSaveLayout
@@ -655,7 +650,6 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
   return (
     <>
       <Card
-        style={{ width: 'fit-content' }}
         title={
           <Space>
             <span>拓扑: {data.type}</span>
@@ -693,7 +687,6 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
                 />
               </Space>
             )}
-            <Button size="small" icon={<ReloadOutlined />} onClick={handleRefresh}>刷新显示</Button>
             <Button size="small" icon={<ZoomInOutlined />} onClick={handleZoomIn}>放大</Button>
             <Button size="small" icon={<ZoomOutOutlined />} onClick={handleZoomOut}>缩小</Button>
             <Button size="small" icon={<AimOutlined />} onClick={handleFit}>适应</Button>
@@ -705,8 +698,10 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
           style={{
             width: singleDieWidth,
             height: singleDieHeight,
-            minWidth: '30vw',
-            maxWidth: '60vw',
+            minWidth: 700,
+            minHeight: 500,
+            maxWidth: 1200,
+            maxHeight: 1200,
             border: '1px solid #d9d9d9',
             borderRadius: 4,
             background: '#fafafa',
@@ -715,7 +710,7 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
           }}
         >
           <CytoscapeComponent
-            key={`topo-cy-${filteredMounts.length}-${filteredMounts.map(m => `${m.node_id}-${m.ip_type}`).join(',')}`}
+            key={`topo-cy-${data.type}-${filteredMounts.length}-${filteredMounts.map(m => `${m.node_id}-${m.ip_type}`).join(',')}`}
             elements={elements}
             style={{ width: '100%', height: '100%' }}
             stylesheet={stylesheet}
@@ -738,43 +733,44 @@ const TopologyGraph = forwardRef<{ saveLayout: () => void }, TopologyGraphProps>
         <Row gutter={[16, 8]} justify="center">
           {/* 动态显示已挂载的IP类型 */}
           {(() => {
-            const ipTypeColors: Record<string, { bg: string; border: string; label: string }> = {
-              'gdma': { bg: '#5B8FF9', border: '#3A6FD9', label: 'GDMA' },
-              'sdma': { bg: '#5B8FF9', border: '#3A6FD9', label: 'SDMA' },
-              'cdma': { bg: '#5AD8A6', border: '#3AB886', label: 'CDMA' },
-              'npu': { bg: '#722ed1', border: '#531dab', label: 'NPU' },
-              'ddr': { bg: '#E8684A', border: '#C8482A', label: 'DDR' },
-              'l2m': { bg: '#E8684A', border: '#C8482A', label: 'L2M' },
-              'pcie': { bg: '#fa8c16', border: '#d46b08', label: 'PCIe' },
-              'eth': { bg: '#52c41a', border: '#389e0d', label: 'ETH' },
-              'other': { bg: '#eb2f96', border: '#c41d7f', label: '其他' }
+            const typeLabels: Record<string, string> = {
+              'gdma': 'GDMA',
+              'sdma': 'SDMA',
+              'cdma': 'CDMA',
+              'npu': 'NPU',
+              'ddr': 'DDR',
+              'l2m': 'L2M',
+              'pcie': 'PCIe',
+              'eth': 'ETH',
+              'default': '其他'
             }
 
             // 统计已挂载的IP类型（使用过滤后的mounts）
             const mountedTypes = new Set<string>()
             filteredMounts.forEach(mount => {
               const type = mount.ip_type.split('_')[0].toLowerCase()
-              if (ipTypeColors[type]) {
+              if (typeLabels[type]) {
                 mountedTypes.add(type)
               } else {
-                mountedTypes.add('other')
+                mountedTypes.add('default')
               }
             })
 
             // 生成图例项
             return Array.from(mountedTypes).map(type => {
-              const config = ipTypeColors[type]
+              const colors = getThemeIPTypeColor(type)
+              const label = typeLabels[type] || '其他'
               return (
                 <Col span={4} key={type}>
                   <Space>
                     <div style={{
-                      width: 30,
-                      height: 30,
-                      backgroundColor: config.bg,
-                      border: `2px solid ${config.border}`,
-                      borderRadius: 4
+                      width: 24,
+                      height: 24,
+                      backgroundColor: colors.bg,
+                      border: `1px solid ${colors.border}`,
+                      borderRadius: 0
                     }}></div>
-                    <span>{config.label}</span>
+                    <span>{label}</span>
                   </Space>
                 </Col>
               )

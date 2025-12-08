@@ -298,7 +298,7 @@ class DataflowMixin:
                     continue
 
                 # 标记反方向上环（横向）
-                if self.config.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED and direction in ["TL", "TR"]:
+                if self.config.REVERSE_DIRECTION_ENABLED and direction in ["TL", "TR"]:
                     normal_direction = None
                     if len(flit.path) > 1:
                         diff = flit.path[1] - flit.path[0]
@@ -418,7 +418,7 @@ class DataflowMixin:
                     can_forward = self._check_rb_forward_conditions(network, flit, pos, next_pos, out_dir, direction_conditions[out_dir])
 
                     # 反方向流控检查（纵向TU/TD）
-                    if self.config.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED and flit and out_dir in ["TU", "TD"]:
+                    if self.config.REVERSE_DIRECTION_ENABLED and flit and out_dir in ["TU", "TD"]:
                         dest = flit.destination
                         # 获取正常方向
                         if dest < pos:
@@ -478,7 +478,7 @@ class DataflowMixin:
 
                 if flit:
                     # 标记反方向上环（纵向）
-                    if self.config.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED and out_dir in ["TU", "TD"]:
+                    if self.config.REVERSE_DIRECTION_ENABLED and out_dir in ["TU", "TD"]:
                         dest = flit.destination
                         if dest < pos:
                             normal_direction = "TU"
@@ -647,7 +647,7 @@ class DataflowMixin:
         flit_cache[(ip_type, direction)] = flit
 
         # 反方向流控检查（横向TL/TR）
-        if self.config.REVERSE_DIRECTION_FLOW_CONTROL_ENABLED and direction in ["TL", "TR"]:
+        if self.config.REVERSE_DIRECTION_ENABLED and direction in ["TL", "TR"]:
             normal_direction = None
             if len(flit.path) > 1:
                 diff = flit.path[1] - flit.path[0]

@@ -43,7 +43,7 @@ else:
     # 开发模式
     RESULT_DIR = BASE_DIR.parent / "Result"
     DATABASE_DIR = RESULT_DIR / "Database"
-    DATABASE_PATH = DATABASE_DIR / "results.db"
+    DATABASE_PATH = DATABASE_DIR / "simulation.db"
 
 # ==================== 前端静态文件目录 ====================
 FRONTEND_DIST_DIR = BASE_DIR / "unified_web" / "frontend" / "dist"

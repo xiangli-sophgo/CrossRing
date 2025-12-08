@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from src.database import ResultManager
+from app.config import BASE_DIR, DATABASE_PATH, DATABASE_DIR
 
 router = APIRouter()
 
@@ -22,12 +23,9 @@ router = APIRouter()
 db_manager = ResultManager()
 
 # 项目路径
-BACKEND_DIR = Path(__file__).parent.parent.parent
-RESULT_DB_WEB_DIR = BACKEND_DIR.parent
-PROJECT_ROOT = RESULT_DB_WEB_DIR.parent
-RESULT_DIR = PROJECT_ROOT.parent / "Result"
-DATABASE_DIR = RESULT_DIR / "Database"
-DATABASE_PATH = DATABASE_DIR / "results.db"
+UNIFIED_WEB_DIR = BASE_DIR / "unified_web"
+FRONTEND_DIR = UNIFIED_WEB_DIR / "frontend"
+BACKEND_DIR = UNIFIED_WEB_DIR / "backend"
 
 
 class ExportRequest(BaseModel):
@@ -47,28 +45,60 @@ class ExportInfo(BaseModel):
 
 
 def get_experiments_stats(experiment_ids: Optional[List[int]] = None) -> tuple:
-    """获取实验统计信息"""
-    experiments = db_manager.list_experiments()
+    """获取实验统计信息，返回 (实验数, 结果数, 估算大小)"""
+    import sqlite3
+
+    all_experiments = db_manager.list_experiments()
 
     if experiment_ids:
-        experiments = [e for e in experiments if e["id"] in experiment_ids]
+        experiments = [e for e in all_experiments if e["id"] in experiment_ids]
+    else:
+        experiments = all_experiments
 
     total_results = 0
     for exp in experiments:
         results = db_manager.get_results(exp["id"])
         total_results += results["total"]
 
-    return len(experiments), total_results
+    # 计算估算大小：只计算 result_analysis.html 文件
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+
+    if experiment_ids:
+        # 选择性导出
+        placeholders = ",".join("?" * len(experiment_ids))
+        cursor.execute(f"""
+            SELECT COALESCE(SUM(LENGTH(file_content)), 0) FROM result_files
+            WHERE file_name = 'result_analysis.html'
+            AND result_id IN (
+                SELECT id FROM kcin_results WHERE experiment_id IN ({placeholders})
+                UNION
+                SELECT id FROM dcin_results WHERE experiment_id IN ({placeholders})
+            )
+        """, experiment_ids + experiment_ids)
+    else:
+        # 全量导出
+        cursor.execute("""
+            SELECT COALESCE(SUM(LENGTH(file_content)), 0) FROM result_files
+            WHERE file_name = 'result_analysis.html'
+        """)
+
+    html_size = cursor.fetchone()[0]
+    conn.close()
+
+    # 估算大小 = HTML文件大小 + 结构化数据估算(约1MB基础 + 每条结果约1KB)
+    estimated_size = html_size + 1024 * 1024 + total_results * 1024
+
+    return len(experiments), total_results, estimated_size
 
 
-def create_selective_database(experiment_ids: List[int], output_path: Path) -> None:
-    """创建只包含特定实验的数据库副本"""
+def create_selective_database(experiment_ids: Optional[List[int]], output_path: Path) -> None:
+    """创建只包含特定实验的数据库副本，只保留 result_analysis.html 文件"""
     import sqlite3
 
     # 复制原数据库
     shutil.copy2(DATABASE_PATH, output_path)
 
-    # 删除不需要的实验
     conn = sqlite3.connect(output_path)
     cursor = conn.cursor()
 
@@ -77,7 +107,10 @@ def create_selective_database(experiment_ids: List[int], output_path: Path) -> N
     all_ids = [row[0] for row in cursor.fetchall()]
 
     # 删除不需要的实验数据
-    ids_to_delete = [id for id in all_ids if id not in experiment_ids]
+    if experiment_ids:
+        ids_to_delete = [id for id in all_ids if id not in experiment_ids]
+    else:
+        ids_to_delete = []
 
     if ids_to_delete:
         placeholders = ",".join("?" * len(ids_to_delete))
@@ -94,11 +127,26 @@ def create_selective_database(experiment_ids: List[int], output_path: Path) -> N
             ids_to_delete
         )
 
+        # 删除 result_files (关联的结果文件)
+        cursor.execute(
+            f"""DELETE FROM result_files WHERE result_id IN (
+                SELECT id FROM kcin_results WHERE experiment_id IN ({placeholders})
+                UNION
+                SELECT id FROM dcin_results WHERE experiment_id IN ({placeholders})
+            )""",
+            ids_to_delete + ids_to_delete
+        )
+
         # 删除 experiments
         cursor.execute(
             f"DELETE FROM experiments WHERE id IN ({placeholders})",
             ids_to_delete
         )
+
+    # 只保留 result_analysis.html 文件，删除其他文件
+    cursor.execute(
+        "DELETE FROM result_files WHERE file_name != 'result_analysis.html'"
+    )
 
     conn.commit()
 
@@ -121,12 +169,12 @@ async def get_export_info(
     if experiment_ids:
         ids = [int(id.strip()) for id in experiment_ids.split(",")]
 
-    exp_count, result_count = get_experiments_stats(ids)
+    exp_count, result_count, estimated_size = get_experiments_stats(ids)
 
     return {
         "experiments_count": exp_count,
         "results_count": result_count,
-        "database_size": DATABASE_PATH.stat().st_size if DATABASE_PATH.exists() else 0,
+        "database_size": estimated_size,
         "is_selective": ids is not None,
     }
 
@@ -174,20 +222,19 @@ async def download_package(
 
             # 打包后端代码
             if include_backend:
-                backend_dir = RESULT_DB_WEB_DIR / "backend"
-                for root, dirs, files in os.walk(backend_dir):
+                for root, dirs, files in os.walk(BACKEND_DIR):
                     # 跳过 __pycache__
                     dirs[:] = [d for d in dirs if d != "__pycache__"]
 
                     for file in files:
                         if file.endswith((".py", ".txt", ".md")):
                             file_path = Path(root) / file
-                            arcname = "backend" / file_path.relative_to(backend_dir)
+                            arcname = "backend" / file_path.relative_to(BACKEND_DIR)
                             zipf.write(file_path, arcname)
 
             # 打包前端代码（使用构建后的dist）
             if include_frontend:
-                frontend_dist = RESULT_DB_WEB_DIR / "frontend" / "dist"
+                frontend_dist = FRONTEND_DIR / "dist"
                 if frontend_dist.exists():
                     for root, dirs, files in os.walk(frontend_dist):
                         for file in files:
@@ -196,7 +243,7 @@ async def download_package(
                             zipf.write(file_path, arcname)
 
                 # 同时包含源代码
-                frontend_src = RESULT_DB_WEB_DIR / "frontend" / "src"
+                frontend_src = FRONTEND_DIR / "src"
                 if frontend_src.exists():
                     for root, dirs, files in os.walk(frontend_src):
                         dirs[:] = [d for d in dirs if d != "node_modules"]
@@ -207,7 +254,7 @@ async def download_package(
 
                 # 包含配置文件
                 for config_file in ["package.json", "vite.config.ts", "tsconfig.json", "index.html"]:
-                    config_path = RESULT_DB_WEB_DIR / "frontend" / config_file
+                    config_path = FRONTEND_DIR / config_file
                     if config_path.exists():
                         zipf.write(config_path, f"frontend/{config_file}")
 
@@ -277,13 +324,12 @@ async def build_executable_package(
         app_dir.mkdir(parents=True, exist_ok=True)
 
         # 1. 构建前端
-        frontend_dir = RESULT_DB_WEB_DIR / "frontend"
-        frontend_dist = frontend_dir / "dist"
+        frontend_dist = FRONTEND_DIR / "dist"
 
         # 运行 pnpm build
         result = subprocess.run(
             ["pnpm", "build"],
-            cwd=frontend_dir,
+            cwd=FRONTEND_DIR,
             shell=True,
             capture_output=True,
             text=True,
@@ -298,7 +344,6 @@ async def build_executable_package(
             shutil.copytree(frontend_dist, app_dir / "frontend" / "dist")
 
         # 2. 使用 PyInstaller 打包后端
-        backend_dir = RESULT_DB_WEB_DIR / "backend"
         pyinstaller_dist = temp_dir / "pyinstaller_dist"
 
         # 创建入口脚本
@@ -357,8 +402,8 @@ if __name__ == "__main__":
             f"--workpath={temp_dir / 'build'}",
             f"--specpath={temp_dir}",
             # 添加路径
-            f"--paths={backend_dir}",
-            f"--paths={PROJECT_ROOT}",
+            f"--paths={BACKEND_DIR}",
+            f"--paths={BASE_DIR}",
             # 添加隐式导入
             "--hidden-import=uvicorn.logging",
             "--hidden-import=uvicorn.loops",
@@ -382,8 +427,8 @@ if __name__ == "__main__":
             "--hidden-import=src.database.database",
             "--hidden-import=src.database.models",
             # 收集数据文件
-            f"--add-data={PROJECT_ROOT / 'src'};src",
-            f"--add-data={backend_dir / 'app'};app",
+            f"--add-data={BASE_DIR / 'src'};src",
+            f"--add-data={BACKEND_DIR / 'app'};app",
             str(entry_script),
         ]
 

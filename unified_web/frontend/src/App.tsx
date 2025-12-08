@@ -1,14 +1,17 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { Layout, Menu, Typography } from 'antd'
+import { Layout, Menu, Typography, Button, Tooltip } from 'antd'
 import {
   DashboardOutlined,
   ThunderboltOutlined,
   ExperimentOutlined,
-  BarChartOutlined,
   SettingOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  GithubOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { primaryColor } from './theme/colors'
 
 // 页面组件
 import Dashboard from './pages/Dashboard'
@@ -18,14 +21,14 @@ import ExperimentList from './pages/Experiments/ExperimentList'
 import ExperimentDetail from './pages/Experiments/ExperimentDetail'
 
 const { Header, Sider, Content } = Layout
-const { Title } = Typography
+const { Title, Text } = Typography
 
 // 侧边栏菜单项
 const menuItems = [
   {
     key: '/',
     icon: <DashboardOutlined />,
-    label: '仪表盘',
+    label: '概览',
   },
   {
     key: '/traffic',
@@ -40,7 +43,7 @@ const menuItems = [
   {
     key: '/experiments',
     icon: <ExperimentOutlined />,
-    label: '实验管理',
+    label: '结果管理',
   },
 ]
 
@@ -48,6 +51,7 @@ const menuItems = [
 const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navigate = useNavigate()
   const location = useLocation()
+  const [collapsed, setCollapsed] = useState(false)
 
   // 获取当前选中的菜单项
   const getSelectedKey = () => {
@@ -59,15 +63,40 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     return '/'
   }
 
+  // 获取页面标题
+  const getPageTitle = () => {
+    const path = location.pathname
+    if (path === '/') return '概览'
+    if (path.startsWith('/traffic')) return '流量配置'
+    if (path.startsWith('/simulation')) return '仿真执行'
+    if (path.startsWith('/experiments')) {
+      if (path.includes('/experiments/')) return '实验详情'
+      return '结果管理'
+    }
+    return '仿真一体化平台'
+  }
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Sider
-        width={200}
+        collapsible
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+        trigger={null}
+        width={220}
+        collapsedWidth={80}
         style={{
           background: '#fff',
           borderRight: '1px solid #f0f0f0',
+          position: 'fixed',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          zIndex: 100,
+          overflow: 'auto',
         }}
       >
+        {/* Logo区域 */}
         <div
           style={{
             height: 64,
@@ -75,21 +104,74 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             alignItems: 'center',
             justifyContent: 'center',
             borderBottom: '1px solid #f0f0f0',
+            padding: collapsed ? '0 8px' : '0 16px',
           }}
         >
-          <Title level={4} style={{ margin: 0, color: '#1890ff' }}>
-            CrossRing
-          </Title>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {!collapsed && (
+              <Title level={5} style={{ margin: 0, color: primaryColor, whiteSpace: 'nowrap' }}>
+                仿真一体化平台
+              </Title>
+            )}
+            {collapsed && (
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  background: `linear-gradient(135deg, ${primaryColor} 0%, #4096ff 100%)`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#fff',
+                  fontWeight: 700,
+                  fontSize: 14,
+                }}
+              >
+                仿
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* 菜单 */}
         <Menu
           mode="inline"
           selectedKeys={[getSelectedKey()]}
-          style={{ height: 'calc(100% - 64px)', borderRight: 0 }}
+          style={{
+            height: 'calc(100% - 128px)',
+            borderRight: 0,
+            padding: '8px 0',
+          }}
           items={menuItems}
           onClick={({ key }) => navigate(key)}
         />
+
+        {/* 底部信息 */}
+        <div
+          style={{
+            height: 64,
+            borderTop: '1px solid #f0f0f0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: collapsed ? '0 8px' : '0 16px',
+          }}
+        >
+          {!collapsed ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              版本 1.0.0
+            </Text>
+          ) : (
+            <Tooltip title="版本 1.0.0">
+              <Text type="secondary" style={{ fontSize: 12 }}>v1</Text>
+            </Tooltip>
+          )}
+        </div>
       </Sider>
-      <Layout>
+
+      <Layout style={{ marginLeft: collapsed ? 80 : 220, transition: 'margin-left 0.2s' }}>
+        {/* 顶部栏 */}
         <Header
           style={{
             background: '#fff',
@@ -97,20 +179,43 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             borderBottom: '1px solid #f0f0f0',
             display: 'flex',
             alignItems: 'center',
+            justifyContent: 'space-between',
+            position: 'sticky',
+            top: 0,
+            zIndex: 99,
           }}
         >
-          <Title level={4} style={{ margin: 0 }}>
-            一体化仿真平台
-          </Title>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <Button
+              type="text"
+              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={() => setCollapsed(!collapsed)}
+              style={{ fontSize: 16, width: 40, height: 40 }}
+            />
+            <Title level={4} style={{ margin: 0 }}>
+              {getPageTitle()}
+            </Title>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Tooltip title="查看源码">
+              <Button
+                type="text"
+                icon={<GithubOutlined />}
+                onClick={() => window.open('https://github.com/xiangli-sophgo/CrossRing', '_blank')}
+              />
+            </Tooltip>
+          </div>
         </Header>
+
+        {/* 内容区 */}
         <Content
           style={{
-            margin: '24px',
-            padding: '24px',
+            margin: 24,
+            padding: 24,
             background: '#fff',
-            borderRadius: '8px',
-            minHeight: 280,
-            overflow: 'auto',
+            borderRadius: 12,
+            minHeight: 'calc(100vh - 64px - 48px)',
+            boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02)',
           }}
         >
           {children}

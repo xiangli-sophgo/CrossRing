@@ -414,7 +414,7 @@ class BaseFlowRenderer:
                             f"空闲率: {empty_ratio:.1f}%"
                         )
                         # 反方向上环统计（仅当功能开启且有数据时显示）
-                        if config and getattr(config, "REVERSE_DIRECTION_FLOW_CONTROL_ENABLED", False):
+                        if config and getattr(config, "REVERSE_DIRECTION_ENABLED", False):
                             reverse_inject_total = stats.get("reverse_inject_total", 0)
                             reverse_inject_ratio = stats.get("reverse_inject_ratio", 0) * 100
                             if reverse_inject_total > 0:

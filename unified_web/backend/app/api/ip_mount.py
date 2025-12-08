@@ -140,8 +140,9 @@ async def batch_mount_ip(request: BatchMountRequest):
     """
     批量挂载IP
 
-    支持范围语法: "0-3" 或 "1,3,5"
-    自动为每个节点分配递增的IP编号
+    支持范围语法: "0-3" 或 "1,3,5" 或 "0-9,0-9" (每个节点挂载多个)
+    自动为每个节点分配递增的IP编号，编号从该节点已有的同类型IP数量开始
+    例如: 节点0已有gdma_0，再挂载gdma会变成gdma_1
     """
     node_ids = request.get_node_ids()
 
@@ -152,11 +153,34 @@ async def batch_mount_ip(request: BatchMountRequest):
     mounts = ip_mounts[request.topology]
     mounted = []
 
-    # 批量挂载，自动分配IP编号（允许一个节点挂载多个IP）
-    for idx, node_id in enumerate(node_ids):
+    # 统计每个节点要挂载的IP数量
+    from collections import Counter
+    node_counts = Counter(node_ids)
+
+    # 记录每个节点当前已分配的编号（基于已有的同类型IP）
+    node_next_idx: Dict[int, int] = {}
+
+    for node_id in node_ids:
         try:
             position = _get_node_position(request.topology, node_id)
-            ip_type = f"{request.ip_type_prefix}_{idx}"
+
+            # 获取该节点当前同类型IP的最大编号
+            if node_id not in node_next_idx:
+                existing_idx = -1
+                if node_id in mounts:
+                    for m in mounts[node_id]:
+                        if m.ip_type.startswith(f"{request.ip_type_prefix}_"):
+                            try:
+                                idx = int(m.ip_type.split('_')[-1])
+                                existing_idx = max(existing_idx, idx)
+                            except ValueError:
+                                pass
+                node_next_idx[node_id] = existing_idx + 1
+
+            # 分配IP编号
+            ip_idx = node_next_idx[node_id]
+            ip_type = f"{request.ip_type_prefix}_{ip_idx}"
+            node_next_idx[node_id] = ip_idx + 1
 
             # 检查该节点是否已挂载相同的IP类型
             if node_id in mounts:

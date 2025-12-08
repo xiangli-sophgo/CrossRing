@@ -11,6 +11,7 @@ export interface SimulationRequest {
   mode: 'kcin' | 'dcin'
   topology: string
   config_path?: string
+  config_overrides?: Record<string, any>
   traffic_source: 'file' | 'generate'
   traffic_files: string[]
   traffic_path?: string
@@ -107,5 +108,17 @@ export const getConfigs = async (): Promise<{ kcin: ConfigOption[]; dcin: Config
 // 获取流量文件列表
 export const getTrafficFiles = async (path: string = ''): Promise<TrafficFilesResponse> => {
   const response = await api.get(`/traffic-files?path=${encodeURIComponent(path)}`)
+  return response.data
+}
+
+// 获取配置文件内容
+export const getConfigContent = async (configPath: string): Promise<Record<string, any>> => {
+  const response = await api.get(`/config/${configPath}`)
+  return response.data
+}
+
+// 保存配置文件
+export const saveConfigContent = async (configPath: string, content: Record<string, any>): Promise<{ success: boolean; message: string }> => {
+  const response = await api.post(`/config/${configPath}`, content)
   return response.data
 }

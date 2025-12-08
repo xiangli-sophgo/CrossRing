@@ -1,7 +1,6 @@
 {
-  "c4c060fc-947b-4fb7-9dba-f7668a167380": {
+  "98797d83-5fd7-43ba-b4b4-c17da967af0b": {
     "source_ip": [
-      "节点0-gdma_0",
       "节点1-gdma_0",
       "节点2-gdma_0",
       "节点3-gdma_0",
@@ -20,7 +19,8 @@
       "节点15-gdma_0",
       "节点15-gdma_1",
       "节点19-gdma_0",
-      "节点19-gdma_1"
+      "节点19-gdma_1",
+      "节点0-gdma_0"
     ],
     "target_ip": [
       "节点3-ddr_0",
@@ -36,10 +36,10 @@
     "burst_length": 4,
     "request_type": "R",
     "end_time_ns": 6000,
-    "id": "c4c060fc-947b-4fb7-9dba-f7668a167380",
+    "id": "98797d83-5fd7-43ba-b4b4-c17da967af0b",
     "topology": "5x4",
     "mode": "kcin",
-    "created_at": "2025-12-02T15:45:45.293061",
+    "created_at": "2025-12-08T15:20:36.158691",
     "source_die": null,
     "target_die": null,
     "die_pairs": null
