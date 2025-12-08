@@ -23,6 +23,9 @@ class SimulationRequest(BaseModel):
     topology: str = Field(default="5x4", description="拓扑类型")
     config_path: Optional[str] = Field(None, description="配置文件路径(相对于config/topologies/)")
     config_overrides: Optional[Dict[str, Any]] = Field(None, description="配置覆盖项")
+    # DCIN模式下的DIE拓扑配置
+    die_config_path: Optional[str] = Field(None, description="DIE拓扑配置文件路径(DCIN模式下使用)")
+    die_config_overrides: Optional[Dict[str, Any]] = Field(None, description="DIE拓扑配置覆盖项")
     traffic_source: Literal["file", "generate"] = Field(default="file", description="流量来源")
     traffic_files: List[str] = Field(default=[], description="流量文件列表")
     traffic_path: Optional[str] = Field(None, description="流量文件目录(相对于traffic/)")
@@ -90,6 +93,13 @@ async def run_simulation(request: SimulationRequest):
     if not Path(config_path).exists():
         raise HTTPException(status_code=400, detail=f"配置文件不存在: {config_path}")
 
+    # DCIN模式下解析DIE拓扑配置文件路径
+    die_config_path = None
+    if request.mode == "dcin" and request.die_config_path:
+        die_config_path = str(TOPOLOGIES_DIR / request.die_config_path)
+        if not Path(die_config_path).exists():
+            raise HTTPException(status_code=400, detail=f"DIE拓扑配置文件不存在: {die_config_path}")
+
     # 解析流量文件路径
     if request.traffic_path:
         traffic_file_path = str(TRAFFIC_OUTPUT_DIR / request.traffic_path)
@@ -112,6 +122,8 @@ async def run_simulation(request: SimulationRequest):
         save_to_db=request.save_to_db,
         result_granularity=request.result_granularity,
         config_overrides=request.config_overrides,
+        die_config_path=die_config_path,
+        die_config_overrides=request.die_config_overrides,
     )
 
     # 异步执行任务
@@ -198,7 +210,7 @@ async def get_history(limit: int = 20):
 @router.get("/configs")
 async def list_configs():
     """
-    列出可用的配置文件
+    列出可用的配置文件（按名称排序）
     """
     kcin_configs = []
     dcin_configs = []
@@ -210,6 +222,10 @@ async def list_configs():
                 kcin_configs.append(ConfigOption(name=name.replace("topo_", ""), path=f.name))
             elif name.startswith("dcin_"):
                 dcin_configs.append(ConfigOption(name=name, path=f.name))
+
+    # 按名称排序
+    kcin_configs.sort(key=lambda c: c.name)
+    dcin_configs.sort(key=lambda c: c.name)
 
     return {
         "kcin": [c.dict() for c in kcin_configs],
@@ -252,75 +268,117 @@ async def get_config_content(config_path: str):
 def _format_config_with_comments(content: dict) -> str:
     """
     将配置内容格式化为带注释和分类的YAML字符串
-    按照前端页面分类: Basic Parameters, Buffer Size, KCIN Config, Feature Config
+    自动检测DCIN/KCIN配置类型，使用对应的分类格式
     """
     lines = []
 
-    # 配置分类定义 (按前端页面分类)
-    categories = {
-        "Basic Parameters": {
-            "keys": ["TOPO_TYPE", "FLIT_SIZE", "BURST", "NETWORK_FREQUENCY"],
-            "comments": {
-                "TOPO_TYPE": "格式 AxB，自动计算拓扑参数",
-            }
-        },
-        "Buffer Size": {
-            "keys": ["RN_RDB_SIZE", "RN_WDB_SIZE", "SN_DDR_RDB_SIZE", "SN_DDR_WDB_SIZE", "SN_L2M_RDB_SIZE", "SN_L2M_WDB_SIZE", "UNIFIED_RW_TRACKER"],
-            "comments": {
-                "RN_RDB_SIZE": "RN读数据缓冲区",
-                "RN_WDB_SIZE": "RN写数据缓冲区",
-                "SN_DDR_RDB_SIZE": "SN DDR读数据缓冲区",
-                "SN_DDR_WDB_SIZE": "SN DDR写数据缓冲区",
-                "SN_L2M_RDB_SIZE": "SN L2M读数据缓冲区",
-                "SN_L2M_WDB_SIZE": "SN L2M写数据缓冲区",
-                "UNIFIED_RW_TRACKER": "true=读写共享资源池，false=读写分离",
-            }
-        },
-        "KCIN Config": {
-            "keys": [
-                # Slice Per Link
-                "SLICE_PER_LINK_HORIZONTAL", "SLICE_PER_LINK_VERTICAL",
-                # FIFO Depth
-                "IQ_CH_FIFO_DEPTH", "EQ_CH_FIFO_DEPTH", "IQ_OUT_FIFO_DEPTH_HORIZONTAL", "IQ_OUT_FIFO_DEPTH_VERTICAL",
-                "IQ_OUT_FIFO_DEPTH_EQ", "RB_OUT_FIFO_DEPTH", "RB_IN_FIFO_DEPTH", "EQ_IN_FIFO_DEPTH",
-                "IP_L2H_FIFO_DEPTH", "IP_H2L_H_FIFO_DEPTH", "IP_H2L_L_FIFO_DEPTH",
-                # ETag
-                "TL_Etag_T2_UE_MAX", "TL_Etag_T1_UE_MAX", "TR_Etag_T2_UE_MAX",
-                "TU_Etag_T2_UE_MAX", "TU_Etag_T1_UE_MAX", "TD_Etag_T2_UE_MAX",
-                "ETag_BOTHSIDE_UPGRADE", "ETAG_T1_ENABLED",
-                # ITag
-                "ITag_TRIGGER_Th_H", "ITag_TRIGGER_Th_V", "ITag_MAX_Num_H", "ITag_MAX_Num_V",
-                # Latency
-                "DDR_R_LATENCY", "DDR_R_LATENCY_VAR", "DDR_W_LATENCY", "L2M_R_LATENCY", "L2M_W_LATENCY",
-                "SN_TRACKER_RELEASE_LATENCY", "SN_PROCESSING_LATENCY", "RN_PROCESSING_LATENCY",
-                # Bandwidth Limit
-                "GDMA_BW_LIMIT", "SDMA_BW_LIMIT", "CDMA_BW_LIMIT", "DDR_BW_LIMIT", "L2M_BW_LIMIT",
-            ],
-            "comments": {
-                "ETAG_T1_ENABLED": "true=三级(T2→T1→T0), false=两级(T2→T0)",
-                "SN_PROCESSING_LATENCY": "SN端处理延迟 (ns)",
-                "RN_PROCESSING_LATENCY": "RN端处理延迟 (ns)",
-            }
-        },
-        "Feature Config": {
-            "keys": [
-                "CROSSRING_VERSION",
-                "RB_ONLY_TAG_NUM_HORIZONTAL", "RB_ONLY_TAG_NUM_VERTICAL",
-                "ORDERING_PRESERVATION_MODE", "ORDERING_ETAG_UPGRADE_MODE", "ORDERING_GRANULARITY",
-                "TL_ALLOWED_SOURCE_NODES", "TR_ALLOWED_SOURCE_NODES", "TU_ALLOWED_SOURCE_NODES", "TD_ALLOWED_SOURCE_NODES",
-                "REVERSE_DIRECTION_ENABLED", "REVERSE_DIRECTION_THRESHOLD",
-            ],
-            "comments": {
-                "RB_ONLY_TAG_NUM_HORIZONTAL": "仅V2生效",
-                "RB_ONLY_TAG_NUM_VERTICAL": "仅V2生效",
-                "ORDERING_PRESERVATION_MODE": "0=不保序, 1=单侧下环(TL/TU), 2=双侧下环(白名单), 3=动态方向",
-                "ORDERING_ETAG_UPGRADE_MODE": "0=仅资源失败升级ETag, 1=保序失败也升级ETag",
-                "ORDERING_GRANULARITY": "0=IP层级, 1=节点层级",
-                "REVERSE_DIRECTION_ENABLED": "启用反方向流控 (0=禁用, 1=启用)",
-                "REVERSE_DIRECTION_THRESHOLD": "阈值比例 (0.25=激进, 0.5=推荐, 0.75=保守)",
-            }
-        },
-    }
+    # 检测是否为DCIN配置（通过NUM_DIES判断）
+    is_dcin = content.get("NUM_DIES", 1) > 1
+
+    if is_dcin:
+        # DCIN配置分类
+        categories = {
+            "DCIN Basic": {
+                "keys": ["NUM_DIES"],
+                "comments": {
+                    "NUM_DIES": "Die数量",
+                }
+            },
+            "DCIN Latency (ns)": {
+                "keys": ["D2D_AR_LATENCY", "D2D_R_LATENCY", "D2D_AW_LATENCY", "D2D_W_LATENCY", "D2D_B_LATENCY"],
+                "comments": {
+                    "D2D_AR_LATENCY": "地址读通道延迟",
+                    "D2D_R_LATENCY": "读数据通道延迟",
+                    "D2D_AW_LATENCY": "地址写通道延迟",
+                    "D2D_W_LATENCY": "写数据通道延迟",
+                    "D2D_B_LATENCY": "写响应通道延迟",
+                }
+            },
+            "DCIN Bandwidth Limit (GB/s)": {
+                "keys": ["D2D_RN_BW_LIMIT", "D2D_SN_BW_LIMIT", "D2D_AXI_BANDWIDTH"],
+                "comments": {
+                    "D2D_RN_BW_LIMIT": "D2D RN带宽限制",
+                    "D2D_SN_BW_LIMIT": "D2D SN带宽限制",
+                    "D2D_AXI_BANDWIDTH": "AXI通道统一带宽限制",
+                }
+            },
+            "DCIN Buffer Size": {
+                "keys": ["D2D_RN_RDB_SIZE", "D2D_RN_WDB_SIZE", "D2D_SN_RDB_SIZE", "D2D_SN_WDB_SIZE",
+                         "D2D_RN_R_TRACKER_OSTD", "D2D_RN_W_TRACKER_OSTD", "D2D_SN_R_TRACKER_OSTD", "D2D_SN_W_TRACKER_OSTD"],
+                "comments": {
+                    "D2D_RN_RDB_SIZE": "D2D RN读databuffer大小",
+                    "D2D_RN_WDB_SIZE": "D2D RN写databuffer大小",
+                    "D2D_SN_RDB_SIZE": "D2D SN读databuffer大小",
+                    "D2D_SN_WDB_SIZE": "D2D SN写databuffer大小",
+                }
+            },
+        }
+    else:
+        # KCIN配置分类
+        categories = {
+            "Basic Parameters": {
+                "keys": ["TOPO_TYPE", "FLIT_SIZE", "BURST", "NETWORK_FREQUENCY"],
+                "comments": {
+                    "TOPO_TYPE": "格式 AxB，自动计算拓扑参数",
+                }
+            },
+            "Buffer Size": {
+                "keys": ["RN_RDB_SIZE", "RN_WDB_SIZE", "SN_DDR_RDB_SIZE", "SN_DDR_WDB_SIZE", "SN_L2M_RDB_SIZE", "SN_L2M_WDB_SIZE", "UNIFIED_RW_TRACKER"],
+                "comments": {
+                    "RN_RDB_SIZE": "RN读数据缓冲区",
+                    "RN_WDB_SIZE": "RN写数据缓冲区",
+                    "SN_DDR_RDB_SIZE": "SN DDR读数据缓冲区",
+                    "SN_DDR_WDB_SIZE": "SN DDR写数据缓冲区",
+                    "SN_L2M_RDB_SIZE": "SN L2M读数据缓冲区",
+                    "SN_L2M_WDB_SIZE": "SN L2M写数据缓冲区",
+                    "UNIFIED_RW_TRACKER": "true=读写共享资源池，false=读写分离",
+                }
+            },
+            "KCIN Config": {
+                "keys": [
+                    # Slice Per Link
+                    "SLICE_PER_LINK_HORIZONTAL", "SLICE_PER_LINK_VERTICAL",
+                    # FIFO Depth
+                    "IQ_CH_FIFO_DEPTH", "EQ_CH_FIFO_DEPTH", "IQ_OUT_FIFO_DEPTH_HORIZONTAL", "IQ_OUT_FIFO_DEPTH_VERTICAL",
+                    "IQ_OUT_FIFO_DEPTH_EQ", "RB_OUT_FIFO_DEPTH", "RB_IN_FIFO_DEPTH", "EQ_IN_FIFO_DEPTH",
+                    "IP_L2H_FIFO_DEPTH", "IP_H2L_H_FIFO_DEPTH", "IP_H2L_L_FIFO_DEPTH",
+                    # ETag
+                    "TL_Etag_T2_UE_MAX", "TL_Etag_T1_UE_MAX", "TR_Etag_T2_UE_MAX",
+                    "TU_Etag_T2_UE_MAX", "TU_Etag_T1_UE_MAX", "TD_Etag_T2_UE_MAX",
+                    "ETag_BOTHSIDE_UPGRADE", "ETAG_T1_ENABLED",
+                    # ITag
+                    "ITag_TRIGGER_Th_H", "ITag_TRIGGER_Th_V", "ITag_MAX_Num_H", "ITag_MAX_Num_V",
+                    # Latency
+                    "DDR_R_LATENCY", "DDR_R_LATENCY_VAR", "DDR_W_LATENCY", "L2M_R_LATENCY", "L2M_W_LATENCY",
+                    "SN_TRACKER_RELEASE_LATENCY", "SN_PROCESSING_LATENCY", "RN_PROCESSING_LATENCY",
+                    # Bandwidth Limit
+                    "GDMA_BW_LIMIT", "SDMA_BW_LIMIT", "CDMA_BW_LIMIT", "DDR_BW_LIMIT", "L2M_BW_LIMIT",
+                ],
+                "comments": {
+                    "ETAG_T1_ENABLED": "true=三级(T2→T1→T0), false=两级(T2→T0)",
+                    "SN_PROCESSING_LATENCY": "SN端处理延迟 (ns)",
+                    "RN_PROCESSING_LATENCY": "RN端处理延迟 (ns)",
+                }
+            },
+            "Feature Config": {
+                "keys": [
+                    "CROSSRING_VERSION",
+                    "RB_ONLY_TAG_NUM_HORIZONTAL", "RB_ONLY_TAG_NUM_VERTICAL",
+                    "ORDERING_PRESERVATION_MODE", "ORDERING_ETAG_UPGRADE_MODE", "ORDERING_GRANULARITY",
+                    "TL_ALLOWED_SOURCE_NODES", "TR_ALLOWED_SOURCE_NODES", "TU_ALLOWED_SOURCE_NODES", "TD_ALLOWED_SOURCE_NODES",
+                    "REVERSE_DIRECTION_ENABLED", "REVERSE_DIRECTION_THRESHOLD",
+                ],
+                "comments": {
+                    "RB_ONLY_TAG_NUM_HORIZONTAL": "仅V2生效",
+                    "RB_ONLY_TAG_NUM_VERTICAL": "仅V2生效",
+                    "ORDERING_PRESERVATION_MODE": "0=不保序, 1=单侧下环(TL/TU), 2=双侧下环(白名单), 3=动态方向",
+                    "ORDERING_ETAG_UPGRADE_MODE": "0=仅资源失败升级ETag, 1=保序失败也升级ETag",
+                    "ORDERING_GRANULARITY": "0=IP层级, 1=节点层级",
+                    "REVERSE_DIRECTION_ENABLED": "启用反方向流控 (0=禁用, 1=启用)",
+                    "REVERSE_DIRECTION_THRESHOLD": "阈值比例 (0.25=激进, 0.5=推荐, 0.75=保守)",
+                }
+            },
+        }
 
     # 记录已处理的key
     processed_keys = set()
@@ -364,6 +422,22 @@ def _format_config_with_comments(content: dict) -> str:
                         lines.append(f"{key}: {formatted_value}")
                     processed_keys.add(key)
 
+    # 处理DCIN特殊配置
+    if is_dcin:
+        # DIE_TOPOLOGIES 不保存，由运行时根据选择的KCIN配置自动确定
+        if "DIE_TOPOLOGIES" in content:
+            processed_keys.add("DIE_TOPOLOGIES")
+
+        if "D2D_CONNECTIONS" in content:
+            lines.append("\n# D2D连接配置")
+            lines.append("# 格式: [源Die, 源节点, 目标Die, 目标节点]")
+            lines.append("D2D_CONNECTIONS:")
+            # 按 [源Die, 源节点, 目标Die, 目标节点] 排序
+            sorted_connections = sorted(content["D2D_CONNECTIONS"], key=lambda x: (x[0], x[1], x[2], x[3]))
+            for conn in sorted_connections:
+                lines.append(f"  - {conn}")
+            processed_keys.add("D2D_CONNECTIONS")
+
     # 处理特殊的嵌套配置
     if "CHANNEL_SPEC" in content:
         lines.append("\n# 通道规格")
@@ -383,24 +457,45 @@ def _format_config_with_comments(content: dict) -> str:
         lines.append(f"IN_ORDER_EJECTION_PAIRS: {format_value(content['IN_ORDER_EJECTION_PAIRS'])}")
         processed_keys.add("IN_ORDER_EJECTION_PAIRS")
 
+    # 仲裁器配置（DCIN模式不保存）
     if "arbitration" in content:
-        lines.append("\n# 仲裁器配置")
-        lines.append("arbitration:")
-        arb = content["arbitration"]
-        if "default" in arb:
-            lines.append("  default:")
-            arb_type = arb["default"].get("type", "round_robin")
-            lines.append(f"    type: {format_value(arb_type)}")
-            # 只有 islip 类型需要额外参数
-            if arb_type == "islip":
-                if "iterations" in arb["default"]:
-                    lines.append(f"    iterations: {arb['default']['iterations']}")
-                if "weight_strategy" in arb["default"]:
-                    lines.append(f"    weight_strategy: {format_value(arb['default']['weight_strategy'])}")
+        if not is_dcin:
+            arb = content["arbitration"]
+            if arb and "default" in arb:
+                lines.append("\n# 仲裁器配置")
+                lines.append("arbitration:")
+                lines.append("  default:")
+                arb_type = arb["default"].get("type", "round_robin")
+                lines.append(f"    type: {format_value(arb_type)}")
+                # 只有 islip 类型需要额外参数
+                if arb_type == "islip":
+                    if "iterations" in arb["default"]:
+                        lines.append(f"    iterations: {arb['default']['iterations']}")
+                    if "weight_strategy" in arb["default"]:
+                        lines.append(f"    weight_strategy: {format_value(arb['default']['weight_strategy'])}")
         processed_keys.add("arbitration")
+
+    # DCIN配置需要过滤的参数（这些应该在KCIN配置中定义，或者自动生成）
+    dcin_exclude_keys = {
+        "D2D_ENABLED",  # 已废弃
+        "DIE_POSITIONS",  # 自动生成
+        "DIE_ROTATIONS",  # 自动生成
+        "DIE_TOPOLOGIES",  # 由运行时根据选择的KCIN配置自动确定
+        "NETWORK_FREQUENCY",  # 从KCIN获取
+        "FLIT_SIZE",  # 从KCIN获取
+        "BURST",  # 从KCIN获取
+        "SLICE_PER_LINK_HORIZONTAL",  # 从KCIN获取
+        "SLICE_PER_LINK_VERTICAL",  # 从KCIN获取
+        "arbitration",  # DCIN不需要
+    }
 
     # 处理未分类的配置
     remaining = {k: v for k, v in content.items() if k not in processed_keys}
+
+    # DCIN模式下过滤掉不需要保存的参数
+    if is_dcin:
+        remaining = {k: v for k, v in remaining.items() if k not in dcin_exclude_keys}
+
     if remaining:
         lines.append("\n# 其他配置")
         for key, value in remaining.items():
@@ -416,20 +511,37 @@ def _format_config_with_comments(content: dict) -> str:
     return '\n'.join(lines) + '\n'
 
 
+class SaveConfigRequest(BaseModel):
+    """保存配置请求"""
+    content: Dict[str, Any]
+    save_as: Optional[str] = Field(None, description="另存为的新文件名（不含路径和扩展名）")
+
+
 @router.post("/config/{config_path:path}")
-async def save_config_content(config_path: str, content: dict):
+async def save_config_content(config_path: str, request: SaveConfigRequest):
     """
     保存配置文件内容（带分类和注释）
+    支持另存为新文件
     """
-    config_file = TOPOLOGIES_DIR / config_path
-    if not config_file.exists():
-        raise HTTPException(status_code=404, detail=f"配置文件不存在: {config_path}")
+    # 确定保存路径
+    if request.save_as:
+        # 另存为新文件
+        new_filename = f"{request.save_as}.yaml"
+        config_file = TOPOLOGIES_DIR / new_filename
+        # 检查文件是否已存在
+        if config_file.exists():
+            raise HTTPException(status_code=400, detail=f"文件已存在: {new_filename}")
+    else:
+        # 覆盖原文件
+        config_file = TOPOLOGIES_DIR / config_path
+        if not config_file.exists():
+            raise HTTPException(status_code=404, detail=f"配置文件不存在: {config_path}")
 
     try:
-        formatted_content = _format_config_with_comments(content)
+        formatted_content = _format_config_with_comments(request.content)
         with open(config_file, 'w', encoding='utf-8') as f:
             f.write(formatted_content)
-        return {"success": True, "message": f"配置文件已保存: {config_path}"}
+        return {"success": True, "message": f"配置文件已保存: {config_file.name}", "filename": config_file.name}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"保存配置文件失败: {str(e)}")
 
@@ -462,6 +574,97 @@ async def list_traffic_files(path: str = ""):
         "files": files,
         "directories": sorted(directories),
     }
+
+
+def _build_traffic_tree(base_path: Path, relative_path: str = "") -> List[Dict]:
+    """
+    递归构建流量文件树结构
+    返回格式: [{ key, title, isLeaf, children?, path?, size? }]
+    """
+    tree = []
+
+    if not base_path.exists():
+        return tree
+
+    # 先收集目录和文件
+    dirs = []
+    files = []
+
+    for item in base_path.iterdir():
+        if item.is_dir():
+            dirs.append(item)
+        elif item.suffix == ".txt":
+            files.append(item)
+
+    # 排序：目录在前，文件在后
+    dirs.sort(key=lambda x: x.name)
+    files.sort(key=lambda x: x.name)
+
+    # 处理目录
+    for dir_item in dirs:
+        dir_relative_path = f"{relative_path}/{dir_item.name}" if relative_path else dir_item.name
+        children = _build_traffic_tree(dir_item, dir_relative_path)
+        tree.append({
+            "key": dir_relative_path,
+            "title": dir_item.name,
+            "isLeaf": False,
+            "children": children,
+        })
+
+    # 处理文件
+    for file_item in files:
+        file_relative_path = f"{relative_path}/{file_item.name}" if relative_path else file_item.name
+        tree.append({
+            "key": file_relative_path,
+            "title": file_item.name,
+            "isLeaf": True,
+            "path": file_relative_path,
+            "size": file_item.stat().st_size,
+        })
+
+    return tree
+
+
+@router.get("/traffic-files-tree")
+async def get_traffic_files_tree():
+    """
+    获取流量文件的完整树形结构
+    """
+    tree = _build_traffic_tree(TRAFFIC_OUTPUT_DIR)
+    return {"tree": tree}
+
+
+@router.get("/traffic-file-content/{file_path:path}")
+async def get_traffic_file_content(file_path: str, max_lines: int = 100):
+    """
+    读取流量文件内容（限制行数避免过大）
+    """
+    full_path = TRAFFIC_OUTPUT_DIR / file_path
+
+    if not full_path.exists():
+        raise HTTPException(status_code=404, detail=f"文件不存在: {file_path}")
+
+    if not full_path.suffix == ".txt":
+        raise HTTPException(status_code=400, detail="只能读取txt文件")
+
+    try:
+        lines = []
+        total_lines = 0
+        with open(full_path, 'r', encoding='utf-8') as f:
+            for i, line in enumerate(f):
+                total_lines += 1
+                if i < max_lines:
+                    lines.append(line.rstrip('\n'))
+
+        return {
+            "content": lines,
+            "total_lines": total_lines,
+            "truncated": total_lines > max_lines,
+            "file_name": full_path.name,
+            "file_size": full_path.stat().st_size,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取文件失败: {str(e)}")
 
 
 # ==================== WebSocket 实时进度 ====================

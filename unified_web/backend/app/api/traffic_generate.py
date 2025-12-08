@@ -208,7 +208,8 @@ def _load_dcin_config_for_topology(topology: str) -> Optional[Dict]:
     if config_file.exists():
         with open(config_file, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
-            if config.get('D2D_ENABLED', False):
+            # 通过NUM_DIES判断是否为D2D配置
+            if config.get('NUM_DIES', 1) > 1:
                 return {
                     "num_dies": config.get('NUM_DIES', 2),
                     "dcin_connections": config.get('D2D_CONNECTIONS', [])
@@ -219,7 +220,8 @@ def _load_dcin_config_for_topology(topology: str) -> Optional[Dict]:
     if default_config.exists():
         with open(default_config, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
-            if config.get('D2D_ENABLED', False):
+            # 通过NUM_DIES判断是否为D2D配置
+            if config.get('NUM_DIES', 1) > 1:
                 return {
                     "num_dies": config.get('NUM_DIES', 2),
                     "dcin_connections": config.get('D2D_CONNECTIONS', [])

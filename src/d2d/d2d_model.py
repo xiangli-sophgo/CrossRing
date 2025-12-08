@@ -1777,9 +1777,6 @@ class D2D_Model:
         d2d_config_whitelist = [
             # D2D基本配置
             "NUM_DIES",
-            "D2D_ENABLED",
-            "D2D_MULTI_HOP_ENABLED",
-            "D2D_ROUTING_ALGORITHM",
             # D2D延迟配置
             "D2D_AR_LATENCY",
             "D2D_R_LATENCY",

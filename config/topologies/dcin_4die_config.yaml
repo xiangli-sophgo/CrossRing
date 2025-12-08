@@ -1,92 +1,41 @@
-# D2D (Die-to-Die) 4-Die 配置文件
 
-# D2D 特定配置
-D2D_ENABLED: true
-NUM_DIES: 4
+# DCIN Basic
+NUM_DIES: 4  # Die数量
 
-# 基本网络参数
-FLIT_SIZE: 128
-SLICE_PER_LINK_HORIZONTAL: 8
-SLICE_PER_LINK_VERTICAL: 8
-BURST: 4
-NETWORK_FREQUENCY: 2
+# DCIN Latency (ns)
+D2D_AR_LATENCY: 20  # 地址读通道延迟
+D2D_R_LATENCY: 20  # 读数据通道延迟
+D2D_AW_LATENCY: 20  # 地址写通道延迟
+D2D_W_LATENCY: 20  # 写数据通道延迟
+D2D_B_LATENCY: 20  # 写响应通道延迟
 
-# Die的XY坐标布局（左下角为原点）
-# 布局: Die2 - Die3
-#      |     |
-#      Die1 - Die0
-DIE_POSITIONS:
-  0: [1, 0]  # Die0在右下角
-  1: [0, 0]  # Die1在左下角
-  2: [0, 1]  # Die2在左上角
-  3: [1, 1]  # Die3在右上角
+# DCIN Bandwidth Limit (GB/s)
+D2D_RN_BW_LIMIT: 192  # D2D RN带宽限制
+D2D_SN_BW_LIMIT: 192  # D2D SN带宽限制
+D2D_AXI_BANDWIDTH: 192  # AXI通道统一带宽限制
 
-# 每个Die的拓扑配置（所有Die使用相同拓扑）
-DIE_TOPOLOGIES:
-  0: "2261_5x4"  # Die0使用5x4拓扑
-  1: "2261_5x4"  # Die1使用5x4拓扑（通过旋转适配布局）
-  2: "2261_5x4"  # Die2使用5x4拓扑
-  3: "2261_5x4"  # Die3使用5x4拓扑（通过旋转适配布局）
+# DCIN Buffer Size
+D2D_RN_RDB_SIZE: 256  # D2D RN读databuffer大小
+D2D_RN_WDB_SIZE: 256  # D2D RN写databuffer大小
+D2D_SN_RDB_SIZE: 256  # D2D SN读databuffer大小
+D2D_SN_WDB_SIZE: 256  # D2D SN写databuffer大小
+D2D_RN_R_TRACKER_OSTD: auto
+D2D_RN_W_TRACKER_OSTD: auto
+D2D_SN_R_TRACKER_OSTD: auto
+D2D_SN_W_TRACKER_OSTD: auto
 
-# 每个Die的旋转角度（度）
-DIE_ROTATIONS:
-  0: 0    # Die0不旋转（右下角）
-  1: 90   # Die1顺时针旋转90度（左下角）
-  2: 180  # Die2顺时针旋转180度（左上角）
-  3: 270  # Die3顺时针旋转270度（右上角）
-
-# D2D互联配置（单向配置，系统自动生成双向连接）
-# 格式: [源Die, 源物理节点, 目标Die, 目标物理节点]
+# D2D连接配置
+# 格式: [源Die, 源节点, 目标Die, 目标节点]
 D2D_CONNECTIONS:
-  # 水平连接（底部）
-  - [0, 12, 1, 1]    # Die0左侧 <-> Die1右侧
-  - [0, 16, 1, 2]
-
-  # 水平连接（顶部）
-  - [2, 16, 3, 2]    # Die2右侧 <-> Die3左侧
-  - [2, 12, 3, 1]
-
-  # 垂直连接（左侧）
-  - [1, 12, 2, 1]   # Die1顶部 <-> Die2底部
-  - [1, 16, 2, 2]
-
-  # 垂直连接（右侧）
-  - [0, 1, 3, 12]   # Die0顶部 <-> Die3底部
+  - [0, 1, 3, 12]
   - [0, 2, 3, 16]
-
-  # 对角连接（可选）
-  - [0, 4, 2, 8]   # Die0 <-> Die2 对角
-  - [0, 8, 2, 4]   # Die0 <-> Die2 对角
-  
-  - [1, 4, 3, 8]   # Die1 <-> Die3 对角
-  - [1, 8, 3, 4]   # Die1 <-> Die3 对角
-
-
-# 多跳路由配置
-D2D_MULTI_HOP_ENABLED: true
-D2D_ROUTING_ALGORITHM: "shortest_path"  # shortest_path, load_balance
-
-# D2D 延迟配置 (ns) - 会在配置加载时转换为cycles
-D2D_AR_LATENCY: 20  # 地址读通道延迟 (ns)
-D2D_R_LATENCY: 20   # 读数据通道延迟 (ns)
-D2D_AW_LATENCY: 20  # 地址写通道延迟 (ns)
-D2D_W_LATENCY: 20   # 写数据通道延迟 (ns)
-D2D_B_LATENCY: 20   # 写响应通道延迟 (ns)
-
-# D2D 带宽控制
-D2D_RN_BW_LIMIT: 192    # D2D RN 带宽限制 (GB/s)
-D2D_SN_BW_LIMIT: 192    # D2D SN 带宽限制 (GB/s)
-D2D_AXI_BANDWIDTH: 192  # AXI通道统一带宽限制 (GB/s)，所有通道使用此值但有独立令牌桶
-
-# D2D 资源管理配置
-# D2D_RN 配置
-D2D_RN_RDB_SIZE: 256        # D2D RN 读databuffer大小
-D2D_RN_WDB_SIZE: 256        # D2D RN 写databuffer大小
-D2D_RN_R_TRACKER_OSTD: auto # = D2D_RN_RDB_SIZE / BURST
-D2D_RN_W_TRACKER_OSTD: auto # = D2D_RN_WDB_SIZE / BURST
-
-# D2D_SN 配置
-D2D_SN_RDB_SIZE: 256        # D2D SN 读databuffer大小
-D2D_SN_WDB_SIZE: 256        # D2D SN 写databuffer大小
-D2D_SN_R_TRACKER_OSTD: auto # = D2D_SN_RDB_SIZE / BURST
-D2D_SN_W_TRACKER_OSTD: auto # = D2D_SN_WDB_SIZE / BURST
+  - [0, 4, 2, 8]
+  - [0, 8, 2, 4]
+  - [0, 12, 1, 1]
+  - [0, 16, 1, 2]
+  - [1, 4, 3, 8]
+  - [1, 8, 3, 4]
+  - [1, 12, 2, 1]
+  - [1, 16, 2, 2]
+  - [2, 12, 3, 1]
+  - [2, 16, 3, 2]

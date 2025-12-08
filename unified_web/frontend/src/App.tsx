@@ -9,6 +9,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   GithubOutlined,
+  LineChartOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { primaryColor } from './theme/colors'
@@ -19,6 +20,7 @@ import TrafficConfig from './pages/Traffic'
 import Simulation from './pages/Simulation'
 import ExperimentList from './pages/Experiments/ExperimentList'
 import ExperimentDetail from './pages/Experiments/ExperimentDetail'
+import Analysis from './pages/Analysis'
 
 const { Header, Sider, Content } = Layout
 const { Title, Text } = Typography
@@ -45,6 +47,11 @@ const menuItems = [
     icon: <ExperimentOutlined />,
     label: '结果管理',
   },
+  {
+    key: '/analysis',
+    icon: <LineChartOutlined />,
+    label: '结果分析',
+  },
 ]
 
 // 主布局组件
@@ -60,6 +67,7 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     if (path.startsWith('/traffic')) return '/traffic'
     if (path.startsWith('/simulation')) return '/simulation'
     if (path.startsWith('/experiments')) return '/experiments'
+    if (path.startsWith('/analysis')) return '/analysis'
     return '/'
   }
 
@@ -73,6 +81,7 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       if (path.includes('/experiments/')) return '实验详情'
       return '结果管理'
     }
+    if (path.startsWith('/analysis')) return '结果分析'
     return '仿真一体化平台'
   }
 
@@ -236,6 +245,7 @@ const App: React.FC = () => {
           <Route path="/simulation" element={<Simulation />} />
           <Route path="/experiments" element={<ExperimentList />} />
           <Route path="/experiments/:id" element={<ExperimentDetail />} />
+          <Route path="/analysis" element={<Analysis />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </MainLayout>

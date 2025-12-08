@@ -34,6 +34,9 @@ class SimulationTask:
     save_to_db: bool
     result_granularity: str  # per_file or per_batch
     config_overrides: Optional[Dict[str, Any]] = None  # 配置覆盖项
+    # DCIN模式下的DIE拓扑配置
+    die_config_path: Optional[str] = None
+    die_config_overrides: Optional[Dict[str, Any]] = None
 
     status: TaskStatus = TaskStatus.PENDING
     progress: int = 0  # 0-100
@@ -84,6 +87,8 @@ class TaskManager:
         save_to_db: bool = True,
         result_granularity: str = "per_file",
         config_overrides: Optional[Dict[str, Any]] = None,
+        die_config_path: Optional[str] = None,
+        die_config_overrides: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         创建新的仿真任务
@@ -105,6 +110,8 @@ class TaskManager:
             save_to_db=save_to_db,
             result_granularity=result_granularity,
             config_overrides=config_overrides,
+            die_config_path=die_config_path,
+            die_config_overrides=die_config_overrides,
         )
 
         self._tasks[task_id] = task
@@ -204,6 +211,8 @@ class TaskManager:
                     topology=task.topology,
                     verbose=0,
                     config_overrides=task.config_overrides,
+                    die_config_path=task.die_config_path,
+                    die_config_overrides=task.die_config_overrides,
                 )
 
                 engine.setup(

@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Collapse,
   Descriptions,
@@ -13,11 +14,13 @@ import {
   Typography,
   Empty,
   Spin,
+  Tooltip,
 } from 'antd';
 import {
   FileTextOutlined,
   EyeOutlined,
   DownloadOutlined,
+  ExportOutlined,
 } from '@ant-design/icons';
 import type { SimulationResult, ExperimentType } from '../types';
 import { classifyParams, formatParamValue } from '../utils/paramClassifier';
@@ -33,6 +36,7 @@ interface Props {
 const { Text } = Typography;
 
 export default function ResultDetailPanel({ result, experimentId, experimentType = 'kcin', hideConfigParams = false }: Props) {
+  const navigate = useNavigate();
   const [dbFiles, setDbFiles] = useState<ResultFileInfo[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
 
@@ -56,8 +60,14 @@ export default function ResultDetailPanel({ result, experimentId, experimentType
     loadDbFiles();
   }, [result.id, experimentType]);
 
-  // 打开HTML报告
+  // 在结果分析页面打开HTML报告
   const handleViewHtml = () => {
+    const label = `结果 ${result.id}`;
+    navigate(`/analysis?resultId=${result.id}&experimentId=${experimentId}&label=${encodeURIComponent(label)}`);
+  };
+
+  // 在新窗口打开HTML报告
+  const handleOpenInNewWindow = () => {
     const url = getResultHtmlUrl(result.id, experimentId);
     window.open(url, '_blank');
   };
@@ -129,6 +139,14 @@ export default function ResultDetailPanel({ result, experimentId, experimentType
               >
                 查看HTML报告
               </Button>
+              <Tooltip title="在新窗口打开">
+                <Button
+                  icon={<ExportOutlined />}
+                  onClick={handleOpenInNewWindow}
+                >
+                  新窗口
+                </Button>
+              </Tooltip>
               {getHtmlPath() && (
                 <Text type="secondary" style={{ marginLeft: 8 }}>
                   {getHtmlPath()}

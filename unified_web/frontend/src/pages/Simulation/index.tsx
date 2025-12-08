@@ -29,6 +29,8 @@ import {
   List,
   Collapse,
   Tooltip,
+  Modal,
+  Tree,
 } from 'antd'
 import {
   PlayCircleOutlined,
@@ -47,6 +49,8 @@ import {
   HistoryOutlined,
   RocketOutlined,
   SaveOutlined,
+  MinusSquareOutlined,
+  EyeOutlined,
 } from '@ant-design/icons'
 import { primaryColor, successColor, warningColor, errorColor } from '@/theme/colors'
 import {
@@ -55,14 +59,16 @@ import {
   cancelTask,
   getTaskHistory,
   getConfigs,
-  getTrafficFiles,
+  getTrafficFilesTree,
+  getTrafficFileContent,
   getConfigContent,
   saveConfigContent,
   type SimulationRequest,
   type TaskStatus,
   type TaskHistoryItem,
   type ConfigOption,
-  type TrafficFileInfo,
+  type TrafficTreeNode,
+  type TrafficFileContentResponse,
 } from '@/api/simulation'
 
 const { Title, Text } = Typography
@@ -145,6 +151,22 @@ const CONFIG_TOOLTIPS: Record<string, string> = {
   ARBITRATION_TYPE: 'Arbitration algorithm type for queue selection',
   ARBITRATION_ITERATIONS: 'Number of iterations for iSLIP algorithm',
   ARBITRATION_WEIGHT_STRATEGY: 'Weight calculation strategy: queue_length, fixed, priority',
+  // D2D Config (DCIN模式)
+  NUM_DIES: 'Number of dies in the system',
+  D2D_ENABLED: 'Enable D2D (Die-to-Die) communication',
+  D2D_AR_LATENCY: 'D2D address read channel latency (ns)',
+  D2D_R_LATENCY: 'D2D read data channel latency (ns)',
+  D2D_AW_LATENCY: 'D2D address write channel latency (ns)',
+  D2D_W_LATENCY: 'D2D write data channel latency (ns)',
+  D2D_B_LATENCY: 'D2D write response channel latency (ns)',
+  D2D_RN_BW_LIMIT: 'D2D RN bandwidth limit (GB/s)',
+  D2D_SN_BW_LIMIT: 'D2D SN bandwidth limit (GB/s)',
+  D2D_AXI_BANDWIDTH: 'D2D AXI channel bandwidth limit (GB/s)',
+  D2D_RN_RDB_SIZE: 'D2D RN read data buffer size',
+  D2D_RN_WDB_SIZE: 'D2D RN write data buffer size',
+  D2D_SN_RDB_SIZE: 'D2D SN read data buffer size',
+  D2D_SN_WDB_SIZE: 'D2D SN write data buffer size',
+  D2D_CONNECTIONS: 'D2D connections: [src_die, src_node, dst_die, dst_node]',
 }
 
 // 带Tooltip的配置项标签
@@ -179,11 +201,10 @@ const Simulation: React.FC = () => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
   const [configs, setConfigs] = useState<{ kcin: ConfigOption[]; dcin: ConfigOption[] }>({ kcin: [], dcin: [] })
-  const [trafficFiles, setTrafficFiles] = useState<TrafficFileInfo[]>([])
-  const [directories, setDirectories] = useState<string[]>([])
-  const [currentPath, setCurrentPath] = useState('')
+  const [trafficTree, setTrafficTree] = useState<TrafficTreeNode[]>([])
   const [selectedFiles, setSelectedFiles] = useState<string[]>([])
   const [loadingFiles, setLoadingFiles] = useState(false)
+  const [expandedKeys, setExpandedKeys] = useState<string[]>([])
 
   // 当前任务状态
   const [currentTask, setCurrentTask] = useState<TaskStatus | null>(null)
@@ -194,6 +215,18 @@ const Simulation: React.FC = () => {
   // 配置编辑状态
   const [configValues, setConfigValues] = useState<Record<string, any>>({})
   const [loadingConfig, setLoadingConfig] = useState(false)
+  // DCIN模式下的DIE拓扑配置
+  const [dieConfigValues, setDieConfigValues] = useState<Record<string, any>>({})
+  const [loadingDieConfig, setLoadingDieConfig] = useState(false)
+  // 另存为对话框状态
+  const [saveAsModalVisible, setSaveAsModalVisible] = useState(false)
+  const [saveAsType, setSaveAsType] = useState<'main' | 'die'>('main')  // 保存的是主配置还是DIE配置
+  const [saveAsName, setSaveAsName] = useState('')
+
+  // 流量文件预览状态
+  const [previewModalVisible, setPreviewModalVisible] = useState(false)
+  const [previewContent, setPreviewContent] = useState<TrafficFileContentResponse | null>(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
 
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -201,7 +234,7 @@ const Simulation: React.FC = () => {
   useEffect(() => {
     loadConfigs()
     loadHistory()
-    loadTrafficFiles('')
+    loadTrafficFilesTree()
     return () => {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current)
@@ -213,6 +246,12 @@ const Simulation: React.FC = () => {
     try {
       const data = await getConfigs()
       setConfigs(data)
+      // 加载默认KCIN配置 (topo_5x4.yaml)
+      const defaultConfig = data.kcin.find((c: ConfigOption) => c.path.includes('topo_5x4'))
+      if (defaultConfig) {
+        form.setFieldsValue({ config_path: defaultConfig.path })
+        loadConfigContent(defaultConfig.path)
+      }
     } catch (error) {
       console.error('加载配置失败:', error)
     }
@@ -230,13 +269,11 @@ const Simulation: React.FC = () => {
     }
   }
 
-  const loadTrafficFiles = async (path: string) => {
+  const loadTrafficFilesTree = async () => {
     setLoadingFiles(true)
     try {
-      const data = await getTrafficFiles(path)
-      setTrafficFiles(data.files)
-      setDirectories(data.directories)
-      setCurrentPath(data.current_path)
+      const data = await getTrafficFilesTree()
+      setTrafficTree(data.tree)
     } catch (error) {
       console.error('加载流量文件失败:', error)
     } finally {
@@ -263,29 +300,61 @@ const Simulation: React.FC = () => {
     }
   }
 
+  // 加载DIE拓扑配置文件内容（DCIN模式下使用）
+  const loadDieConfigContent = async (configPath: string) => {
+    if (!configPath) {
+      setDieConfigValues({})
+      return
+    }
+    setLoadingDieConfig(true)
+    try {
+      const content = await getConfigContent(configPath)
+      setDieConfigValues(content)
+    } catch (error) {
+      console.error('加载DIE配置内容失败:', error)
+      message.error('加载DIE配置内容失败')
+      setDieConfigValues({})
+    } finally {
+      setLoadingDieConfig(false)
+    }
+  }
+
   // 更新单个配置值
   const updateConfigValue = (key: string, value: any) => {
     setConfigValues(prev => ({ ...prev, [key]: value }))
   }
 
-  const navigateToDir = (dir: string) => {
-    const newPath = currentPath ? `${currentPath}/${dir}` : dir
-    loadTrafficFiles(newPath)
-    setSelectedFiles([])
+  // 更新DIE配置值
+  const updateDieConfigValue = (key: string, value: any) => {
+    setDieConfigValues(prev => ({ ...prev, [key]: value }))
   }
 
-  const navigateBack = () => {
-    const parts = currentPath.split('/')
-    parts.pop()
-    const newPath = parts.join('/')
-    loadTrafficFiles(newPath)
-    setSelectedFiles([])
+  // 预览流量文件内容
+  const handlePreviewFile = async (filePath: string) => {
+    setLoadingPreview(true)
+    setPreviewModalVisible(true)
+    try {
+      const data = await getTrafficFileContent(filePath, 200)
+      setPreviewContent(data)
+    } catch (error) {
+      console.error('加载文件内容失败:', error)
+      message.error('加载文件内容失败')
+      setPreviewModalVisible(false)
+    } finally {
+      setLoadingPreview(false)
+    }
   }
 
   // 提交仿真任务
   const handleSubmit = async (values: any) => {
     if (selectedFiles.length === 0) {
       message.warning('请选择流量文件')
+      return
+    }
+
+    // DCIN模式下检查是否选择了KCIN配置
+    if (values.mode === 'dcin' && !values.die_config_path) {
+      message.warning('请选择KCIN配置文件')
       return
     }
 
@@ -297,6 +366,8 @@ const Simulation: React.FC = () => {
         topology: topology,
         config_path: values.config_path,
         config_overrides: Object.keys(configValues).length > 0 ? configValues : undefined,
+        die_config_path: values.mode === 'dcin' ? values.die_config_path : undefined,
+        die_config_overrides: values.mode === 'dcin' && Object.keys(dieConfigValues).length > 0 ? dieConfigValues : undefined,
         traffic_source: 'file',
         traffic_files: selectedFiles,
         traffic_path: currentPath,
@@ -427,9 +498,9 @@ const Simulation: React.FC = () => {
         />
       </Card>
 
-      <Row gutter={24}>
+      <Row gutter={24} align="stretch">
         {/* 左侧：配置表单 */}
-        <Col xs={24} lg={12}>
+        <Col xs={24} lg={12} style={{ display: 'flex', flexDirection: 'column' }}>
           <Card
             title={
               <Space>
@@ -437,7 +508,7 @@ const Simulation: React.FC = () => {
                 <span>仿真配置</span>
               </Space>
             }
-            style={{ marginBottom: 24 }}
+            style={{ marginBottom: 24, flex: 1 }}
           >
           <Form
             form={form}
@@ -455,7 +526,31 @@ const Simulation: React.FC = () => {
             <Row gutter={24}>
               <Col span={12}>
                 <Form.Item name="mode" label="仿真模式" rules={[{ required: true }]}>
-                  <Radio.Group>
+                  <Radio.Group onChange={(e) => {
+                    const newMode = e.target.value
+                    // 切换模式时加载默认配置
+                    if (newMode === 'kcin') {
+                      // KCIN默认: topo_5x4.yaml
+                      const defaultConfig = configs.kcin.find(c => c.path.includes('topo_5x4'))
+                      if (defaultConfig) {
+                        form.setFieldsValue({ config_path: defaultConfig.path, rows: 5, cols: 4, die_config_path: undefined })
+                        loadConfigContent(defaultConfig.path)
+                        setDieConfigValues({})
+                      }
+                    } else {
+                      // DCIN默认: dcin_4die_config.yaml + topo_5x4.yaml
+                      const defaultDcinConfig = configs.dcin.find(c => c.path.includes('4die'))
+                      const defaultKcinConfig = configs.kcin.find(c => c.path.includes('topo_5x4'))
+                      if (defaultDcinConfig) {
+                        form.setFieldsValue({ config_path: defaultDcinConfig.path, rows: 5, cols: 4 })
+                        loadConfigContent(defaultDcinConfig.path)
+                      }
+                      if (defaultKcinConfig) {
+                        form.setFieldsValue({ die_config_path: defaultKcinConfig.path })
+                        loadDieConfigContent(defaultKcinConfig.path)
+                      }
+                    }
+                  }}>
                     <Radio.Button value="kcin">KCIN</Radio.Button>
                     <Radio.Button value="dcin">DCIN</Radio.Button>
                   </Radio.Group>
@@ -498,8 +593,12 @@ const Simulation: React.FC = () => {
               </Col>
             </Row>
 
-            <Form.Item name="config_path" label="配置文件" rules={[{ required: true, message: '请选择配置文件' }]}>
-              <Select placeholder="请选择配置文件" onChange={loadConfigContent}>
+            <Form.Item
+              name="config_path"
+              label={mode === 'dcin' ? 'DCIN配置文件' : 'KCIN配置文件'}
+              rules={[{ required: true, message: mode === 'dcin' ? '请选择DCIN配置文件' : '请选择KCIN配置文件' }]}
+            >
+              <Select placeholder={mode === 'dcin' ? '请选择DCIN配置文件' : '请选择KCIN配置文件'} onChange={loadConfigContent}>
                 {(mode === 'kcin' ? configs.kcin : configs.dcin).map((c) => (
                   <Option key={c.path} value={c.path}>
                     {c.name}
@@ -508,9 +607,235 @@ const Simulation: React.FC = () => {
               </Select>
             </Form.Item>
 
-            {/* 配置编辑面板 */}
+            {/* 配置编辑面板 - 紧跟在配置选择器下面 */}
             {Object.keys(configValues).length > 0 && (
               <Spin spinning={loadingConfig}>
+                {mode === 'dcin' ? (
+                  /* DCIN模式: 显示D2D配置参数 */
+                  <Collapse
+                    size="small"
+                    style={{ marginBottom: 16 }}
+                    items={[
+                      {
+                        key: 'dcin_basic',
+                        label: 'Basic Parameters',
+                        children: (
+                          <Row gutter={[16, 8]}>
+                            {configValues.NUM_DIES !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="NUM_DIES" /></div>
+                                <InputNumber value={configValues.NUM_DIES} onChange={(v) => updateConfigValue('NUM_DIES', v)} min={2} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+                        ),
+                      },
+                      {
+                        key: 'dcin_latency',
+                        label: 'Latency (ns)',
+                        children: (
+                          <Row gutter={[16, 8]}>
+                            {configValues.D2D_AR_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="D2D_AR_LATENCY" /></div>
+                                <InputNumber value={configValues.D2D_AR_LATENCY} onChange={(v) => updateConfigValue('D2D_AR_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.D2D_R_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="D2D_R_LATENCY" /></div>
+                                <InputNumber value={configValues.D2D_R_LATENCY} onChange={(v) => updateConfigValue('D2D_R_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.D2D_AW_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="D2D_AW_LATENCY" /></div>
+                                <InputNumber value={configValues.D2D_AW_LATENCY} onChange={(v) => updateConfigValue('D2D_AW_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.D2D_W_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="D2D_W_LATENCY" /></div>
+                                <InputNumber value={configValues.D2D_W_LATENCY} onChange={(v) => updateConfigValue('D2D_W_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.D2D_B_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="D2D_B_LATENCY" /></div>
+                                <InputNumber value={configValues.D2D_B_LATENCY} onChange={(v) => updateConfigValue('D2D_B_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+                        ),
+                      },
+                      {
+                        key: 'dcin_bandwidth',
+                        label: 'Bandwidth Limit (GB/s)',
+                        children: (
+                          <Row gutter={[16, 8]}>
+                            {configValues.D2D_RN_BW_LIMIT !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="D2D_RN_BW_LIMIT" /></div>
+                                <InputNumber value={configValues.D2D_RN_BW_LIMIT} onChange={(v) => updateConfigValue('D2D_RN_BW_LIMIT', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.D2D_SN_BW_LIMIT !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="D2D_SN_BW_LIMIT" /></div>
+                                <InputNumber value={configValues.D2D_SN_BW_LIMIT} onChange={(v) => updateConfigValue('D2D_SN_BW_LIMIT', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.D2D_AXI_BANDWIDTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="D2D_AXI_BANDWIDTH" /></div>
+                                <InputNumber value={configValues.D2D_AXI_BANDWIDTH} onChange={(v) => updateConfigValue('D2D_AXI_BANDWIDTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+                        ),
+                      },
+                      {
+                        key: 'dcin_buffer',
+                        label: 'Buffer Size',
+                        children: (
+                          <Row gutter={[16, 8]}>
+                            {configValues.D2D_RN_RDB_SIZE !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="D2D_RN_RDB_SIZE" /></div>
+                                <InputNumber value={configValues.D2D_RN_RDB_SIZE} onChange={(v) => updateConfigValue('D2D_RN_RDB_SIZE', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.D2D_RN_WDB_SIZE !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="D2D_RN_WDB_SIZE" /></div>
+                                <InputNumber value={configValues.D2D_RN_WDB_SIZE} onChange={(v) => updateConfigValue('D2D_RN_WDB_SIZE', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.D2D_SN_RDB_SIZE !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="D2D_SN_RDB_SIZE" /></div>
+                                <InputNumber value={configValues.D2D_SN_RDB_SIZE} onChange={(v) => updateConfigValue('D2D_SN_RDB_SIZE', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.D2D_SN_WDB_SIZE !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="D2D_SN_WDB_SIZE" /></div>
+                                <InputNumber value={configValues.D2D_SN_WDB_SIZE} onChange={(v) => updateConfigValue('D2D_SN_WDB_SIZE', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+                        ),
+                      },
+                      {
+                        key: 'dcin_connections',
+                        label: 'D2D Connections',
+                        children: (
+                          <div>
+                            {configValues.D2D_CONNECTIONS !== undefined && Array.isArray(configValues.D2D_CONNECTIONS) && (
+                              <>
+                                <div style={{ marginBottom: 8 }}>
+                                  <Text type="secondary">每行格式: [源Die, 源节点, 目标Die, 目标节点]</Text>
+                                </div>
+                                {(() => {
+                                  // 创建带原始索引的排序数组
+                                  const sortedConns = configValues.D2D_CONNECTIONS
+                                    .map((conn: number[], originalIdx: number) => ({ conn, originalIdx }))
+                                    .sort((a: any, b: any) => {
+                                      for (let i = 0; i < 4; i++) {
+                                        if (a.conn[i] !== b.conn[i]) return a.conn[i] - b.conn[i]
+                                      }
+                                      return 0
+                                    })
+                                  return sortedConns.map(({ conn, originalIdx }: { conn: number[], originalIdx: number }, displayIdx: number) => (
+                                    <Row key={displayIdx} gutter={8} style={{ marginBottom: 8 }} align="middle">
+                                      <Col span={5}>
+                                        <InputNumber
+                                          value={conn[0]}
+                                          onChange={(v) => {
+                                            const newConns = [...configValues.D2D_CONNECTIONS]
+                                            newConns[originalIdx] = [v ?? 0, conn[1], conn[2], conn[3]]
+                                            updateConfigValue('D2D_CONNECTIONS', newConns)
+                                          }}
+                                          min={0}
+                                          placeholder="源Die"
+                                          style={{ width: '100%' }}
+                                        />
+                                      </Col>
+                                      <Col span={5}>
+                                        <InputNumber
+                                          value={conn[1]}
+                                          onChange={(v) => {
+                                            const newConns = [...configValues.D2D_CONNECTIONS]
+                                            newConns[originalIdx] = [conn[0], v ?? 0, conn[2], conn[3]]
+                                            updateConfigValue('D2D_CONNECTIONS', newConns)
+                                          }}
+                                          min={0}
+                                          placeholder="源节点"
+                                          style={{ width: '100%' }}
+                                        />
+                                      </Col>
+                                      <Col span={5}>
+                                        <InputNumber
+                                          value={conn[2]}
+                                          onChange={(v) => {
+                                            const newConns = [...configValues.D2D_CONNECTIONS]
+                                            newConns[originalIdx] = [conn[0], conn[1], v ?? 0, conn[3]]
+                                            updateConfigValue('D2D_CONNECTIONS', newConns)
+                                          }}
+                                          min={0}
+                                          placeholder="目标Die"
+                                          style={{ width: '100%' }}
+                                        />
+                                      </Col>
+                                      <Col span={5}>
+                                        <InputNumber
+                                          value={conn[3]}
+                                          onChange={(v) => {
+                                            const newConns = [...configValues.D2D_CONNECTIONS]
+                                            newConns[originalIdx] = [conn[0], conn[1], conn[2], v ?? 0]
+                                            updateConfigValue('D2D_CONNECTIONS', newConns)
+                                          }}
+                                          min={0}
+                                          placeholder="目标节点"
+                                          style={{ width: '100%' }}
+                                        />
+                                      </Col>
+                                      <Col span={4}>
+                                        <Button
+                                          type="text"
+                                          danger
+                                          size="small"
+                                          onClick={() => {
+                                            const newConns = configValues.D2D_CONNECTIONS.filter((_: any, i: number) => i !== originalIdx)
+                                            updateConfigValue('D2D_CONNECTIONS', newConns)
+                                          }}
+                                        >
+                                          删除
+                                        </Button>
+                                      </Col>
+                                    </Row>
+                                  ))
+                                })()}
+                                <Button
+                                  type="dashed"
+                                  size="small"
+                                  onClick={() => {
+                                    const newConns = [...configValues.D2D_CONNECTIONS, [0, 0, 0, 0]]
+                                    updateConfigValue('D2D_CONNECTIONS', newConns)
+                                  }}
+                                  style={{ width: '100%', marginTop: 8 }}
+                                >
+                                  + 添加连接
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        ),
+                      },
+                    ]}
+                  />
+                ) : (
+                /* KCIN模式: 显示完整的KCIN配置参数 */
                 <Collapse
                   size="small"
                   style={{ marginBottom: 16 }}
@@ -1024,25 +1349,326 @@ const Simulation: React.FC = () => {
                     },
                   ]}
                 />
+                )}
                 <div style={{ marginTop: 12, textAlign: 'right' }}>
-                  <Button
-                    icon={<SaveOutlined />}
-                    onClick={async () => {
-                      const configPath = form.getFieldValue('config_path')
-                      if (!configPath) {
-                        message.warning('请先选择配置文件')
-                        return
-                      }
-                      try {
-                        await saveConfigContent(configPath, configValues)
-                        message.success('配置保存成功')
-                      } catch (e: any) {
-                        message.error(`保存失败: ${e.message || '未知错误'}`)
-                      }
-                    }}
-                  >
-                    保存配置
-                  </Button>
+                  <Space>
+                    <Button
+                      icon={<SaveOutlined />}
+                      onClick={async () => {
+                        const configPath = form.getFieldValue('config_path')
+                        if (!configPath) {
+                          message.warning(mode === 'dcin' ? '请先选择DCIN配置文件' : '请先选择KCIN配置文件')
+                          return
+                        }
+                        try {
+                          await saveConfigContent(configPath, configValues)
+                          message.success(mode === 'dcin' ? 'DCIN配置保存成功' : 'KCIN配置保存成功')
+                        } catch (e: any) {
+                          message.error(`保存失败: ${e.response?.data?.detail || e.message || '未知错误'}`)
+                        }
+                      }}
+                    >
+                      {mode === 'dcin' ? '保存DCIN配置' : '保存KCIN配置'}
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setSaveAsType('main')
+                        setSaveAsName('')
+                        setSaveAsModalVisible(true)
+                      }}
+                    >
+                      另存为
+                    </Button>
+                  </Space>
+                </div>
+              </Spin>
+            )}
+
+            {/* DCIN模式下显示KCIN配置选择器 */}
+            {mode === 'dcin' && (
+              <Form.Item
+                name="die_config_path"
+                label="KCIN配置文件"
+                rules={[{ required: true, message: '请选择KCIN配置文件' }]}
+                tooltip="每个DIE使用的拓扑配置"
+              >
+                <Select placeholder="请选择KCIN配置文件" onChange={loadDieConfigContent}>
+                  {configs.kcin.map((c) => (
+                    <Option key={c.path} value={c.path}>
+                      {c.name}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            )}
+
+            {/* DCIN模式下的KCIN配置编辑面板 */}
+            {mode === 'dcin' && Object.keys(dieConfigValues).length > 0 && (
+              <Spin spinning={loadingDieConfig}>
+                <Collapse
+                  size="small"
+                  style={{ marginBottom: 16 }}
+                  items={[
+                    {
+                      key: 'die_basic',
+                      label: 'Basic Parameters',
+                      children: (
+                        <Row gutter={[16, 8]}>
+                          {dieConfigValues.FLIT_SIZE !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="FLIT_SIZE" /></div>
+                              <InputNumber value={dieConfigValues.FLIT_SIZE} onChange={(v) => updateDieConfigValue('FLIT_SIZE', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.BURST !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="BURST" /></div>
+                              <InputNumber value={dieConfigValues.BURST} onChange={(v) => updateDieConfigValue('BURST', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.NETWORK_FREQUENCY !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="NETWORK_FREQUENCY" /></div>
+                              <InputNumber value={dieConfigValues.NETWORK_FREQUENCY} onChange={(v) => updateDieConfigValue('NETWORK_FREQUENCY', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.SLICE_PER_LINK_HORIZONTAL !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SLICE_PER_LINK_HORIZONTAL" /></div>
+                              <InputNumber value={dieConfigValues.SLICE_PER_LINK_HORIZONTAL} onChange={(v) => updateDieConfigValue('SLICE_PER_LINK_HORIZONTAL', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.SLICE_PER_LINK_VERTICAL !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SLICE_PER_LINK_VERTICAL" /></div>
+                              <InputNumber value={dieConfigValues.SLICE_PER_LINK_VERTICAL} onChange={(v) => updateDieConfigValue('SLICE_PER_LINK_VERTICAL', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                        </Row>
+                      ),
+                    },
+                    {
+                      key: 'die_buffer',
+                      label: 'Buffer Size',
+                      children: (
+                        <Row gutter={[16, 8]}>
+                          {dieConfigValues.RN_RDB_SIZE !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="RN_RDB_SIZE" /></div>
+                              <InputNumber value={dieConfigValues.RN_RDB_SIZE} onChange={(v) => updateDieConfigValue('RN_RDB_SIZE', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.RN_WDB_SIZE !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="RN_WDB_SIZE" /></div>
+                              <InputNumber value={dieConfigValues.RN_WDB_SIZE} onChange={(v) => updateDieConfigValue('RN_WDB_SIZE', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.SN_DDR_RDB_SIZE !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SN_DDR_RDB_SIZE" /></div>
+                              <InputNumber value={dieConfigValues.SN_DDR_RDB_SIZE} onChange={(v) => updateDieConfigValue('SN_DDR_RDB_SIZE', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.SN_DDR_WDB_SIZE !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SN_DDR_WDB_SIZE" /></div>
+                              <InputNumber value={dieConfigValues.SN_DDR_WDB_SIZE} onChange={(v) => updateDieConfigValue('SN_DDR_WDB_SIZE', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.SN_L2M_RDB_SIZE !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SN_L2M_RDB_SIZE" /></div>
+                              <InputNumber value={dieConfigValues.SN_L2M_RDB_SIZE} onChange={(v) => updateDieConfigValue('SN_L2M_RDB_SIZE', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.SN_L2M_WDB_SIZE !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SN_L2M_WDB_SIZE" /></div>
+                              <InputNumber value={dieConfigValues.SN_L2M_WDB_SIZE} onChange={(v) => updateDieConfigValue('SN_L2M_WDB_SIZE', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                        </Row>
+                      ),
+                    },
+                    {
+                      key: 'die_latency',
+                      label: 'Latency',
+                      children: (
+                        <Row gutter={[16, 8]}>
+                          {dieConfigValues.DDR_R_LATENCY !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_R_LATENCY" /></div>
+                              <InputNumber value={dieConfigValues.DDR_R_LATENCY} onChange={(v) => updateDieConfigValue('DDR_R_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.DDR_W_LATENCY !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_W_LATENCY" /></div>
+                              <InputNumber value={dieConfigValues.DDR_W_LATENCY} onChange={(v) => updateDieConfigValue('DDR_W_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.L2M_R_LATENCY !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_R_LATENCY" /></div>
+                              <InputNumber value={dieConfigValues.L2M_R_LATENCY} onChange={(v) => updateDieConfigValue('L2M_R_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.L2M_W_LATENCY !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_W_LATENCY" /></div>
+                              <InputNumber value={dieConfigValues.L2M_W_LATENCY} onChange={(v) => updateDieConfigValue('L2M_W_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.SN_TRACKER_RELEASE_LATENCY !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SN_TRACKER_RELEASE_LATENCY" /></div>
+                              <InputNumber value={dieConfigValues.SN_TRACKER_RELEASE_LATENCY} onChange={(v) => updateDieConfigValue('SN_TRACKER_RELEASE_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                        </Row>
+                      ),
+                    },
+                    {
+                      key: 'die_fifo',
+                      label: 'FIFO Depth',
+                      children: (
+                        <Row gutter={[16, 8]}>
+                          {dieConfigValues.IQ_CH_FIFO_DEPTH !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_CH_FIFO_DEPTH" /></div>
+                              <InputNumber value={dieConfigValues.IQ_CH_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('IQ_CH_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.EQ_CH_FIFO_DEPTH !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="EQ_CH_FIFO_DEPTH" /></div>
+                              <InputNumber value={dieConfigValues.EQ_CH_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('EQ_CH_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.RB_OUT_FIFO_DEPTH !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="RB_OUT_FIFO_DEPTH" /></div>
+                              <InputNumber value={dieConfigValues.RB_OUT_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('RB_OUT_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.RB_IN_FIFO_DEPTH !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="RB_IN_FIFO_DEPTH" /></div>
+                              <InputNumber value={dieConfigValues.RB_IN_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('RB_IN_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.EQ_IN_FIFO_DEPTH !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="EQ_IN_FIFO_DEPTH" /></div>
+                              <InputNumber value={dieConfigValues.EQ_IN_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('EQ_IN_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                        </Row>
+                      ),
+                    },
+                    {
+                      key: 'die_etag',
+                      label: 'ETag Config',
+                      children: (
+                        <Row gutter={[16, 8]}>
+                          {dieConfigValues.TL_Etag_T2_UE_MAX !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TL_Etag_T2_UE_MAX" /></div>
+                              <InputNumber value={dieConfigValues.TL_Etag_T2_UE_MAX} onChange={(v) => updateDieConfigValue('TL_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.TR_Etag_T2_UE_MAX !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TR_Etag_T2_UE_MAX" /></div>
+                              <InputNumber value={dieConfigValues.TR_Etag_T2_UE_MAX} onChange={(v) => updateDieConfigValue('TR_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.TU_Etag_T2_UE_MAX !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TU_Etag_T2_UE_MAX" /></div>
+                              <InputNumber value={dieConfigValues.TU_Etag_T2_UE_MAX} onChange={(v) => updateDieConfigValue('TU_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.TD_Etag_T2_UE_MAX !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TD_Etag_T2_UE_MAX" /></div>
+                              <InputNumber value={dieConfigValues.TD_Etag_T2_UE_MAX} onChange={(v) => updateDieConfigValue('TD_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.ETAG_T1_ENABLED !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="ETAG_T1_ENABLED" /></div>
+                              <Switch checked={!!dieConfigValues.ETAG_T1_ENABLED} onChange={(v) => updateDieConfigValue('ETAG_T1_ENABLED', v ? 1 : 0)} />
+                            </Col>
+                          )}
+                        </Row>
+                      ),
+                    },
+                    {
+                      key: 'die_bandwidth',
+                      label: 'Bandwidth Limit (GB/s)',
+                      children: (
+                        <Row gutter={[16, 8]}>
+                          {dieConfigValues.GDMA_BW_LIMIT !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="GDMA_BW_LIMIT" /></div>
+                              <InputNumber value={dieConfigValues.GDMA_BW_LIMIT} onChange={(v) => updateDieConfigValue('GDMA_BW_LIMIT', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.DDR_BW_LIMIT !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_BW_LIMIT" /></div>
+                              <InputNumber value={dieConfigValues.DDR_BW_LIMIT} onChange={(v) => updateDieConfigValue('DDR_BW_LIMIT', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.CDMA_BW_LIMIT !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="CDMA_BW_LIMIT" /></div>
+                              <InputNumber value={dieConfigValues.CDMA_BW_LIMIT} onChange={(v) => updateDieConfigValue('CDMA_BW_LIMIT', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                          {dieConfigValues.L2M_BW_LIMIT !== undefined && (
+                            <Col span={8}>
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_BW_LIMIT" /></div>
+                              <InputNumber value={dieConfigValues.L2M_BW_LIMIT} onChange={(v) => updateDieConfigValue('L2M_BW_LIMIT', v)} min={1} style={{ width: '100%' }} />
+                            </Col>
+                          )}
+                        </Row>
+                      ),
+                    },
+                  ]}
+                />
+                <div style={{ marginTop: 12, textAlign: 'right' }}>
+                  <Space>
+                    <Button
+                      icon={<SaveOutlined />}
+                      onClick={async () => {
+                        const dieConfigPath = form.getFieldValue('die_config_path')
+                        if (!dieConfigPath) {
+                          message.warning('请先选择KCIN配置文件')
+                          return
+                        }
+                        try {
+                          await saveConfigContent(dieConfigPath, dieConfigValues)
+                          message.success('KCIN配置保存成功')
+                        } catch (e: any) {
+                          message.error(`保存失败: ${e.response?.data?.detail || e.message || '未知错误'}`)
+                        }
+                      }}
+                    >
+                      保存KCIN配置
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setSaveAsType('die')
+                        setSaveAsName('')
+                        setSaveAsModalVisible(true)
+                      }}
+                    >
+                      另存为
+                    </Button>
+                  </Space>
                 </div>
               </Spin>
             )}
@@ -1167,7 +1793,7 @@ const Simulation: React.FC = () => {
         </Col>
 
         {/* 右侧：文件选择 */}
-        <Col xs={24} lg={12}>
+        <Col xs={24} lg={12} style={{ display: 'flex', flexDirection: 'column' }}>
           <Card
             title={
               <Space>
@@ -1177,70 +1803,80 @@ const Simulation: React.FC = () => {
               </Space>
             }
             extra={
-              <Button icon={<ReloadOutlined />} onClick={() => loadTrafficFiles(currentPath)} size="small">
-                刷新
-              </Button>
+              <Space>
+                <Tooltip title="全部折叠">
+                  <Button icon={<MinusSquareOutlined />} onClick={() => setExpandedKeys([])} size="small" />
+                </Tooltip>
+                <Button icon={<ReloadOutlined />} onClick={() => loadTrafficFilesTree()} size="small">
+                  刷新
+                </Button>
+              </Space>
             }
-            style={{ marginBottom: 24 }}
+            style={{ marginBottom: 24, flex: 1 }}
+            bodyStyle={{ maxHeight: 600, overflow: 'auto' }}
           >
-            <Breadcrumb style={{ marginBottom: 12 }}>
-              <Breadcrumb.Item>
-                <a onClick={() => loadTrafficFiles('')}>traffic</a>
-              </Breadcrumb.Item>
-              {currentPath.split('/').filter(Boolean).map((part, index, arr) => (
-                <Breadcrumb.Item key={index}>
-                  <a onClick={() => loadTrafficFiles(arr.slice(0, index + 1).join('/'))}>
-                    {part}
-                  </a>
-                </Breadcrumb.Item>
-              ))}
-            </Breadcrumb>
-
             <Spin spinning={loadingFiles}>
-              {/* 目录列表 */}
-              {directories.length > 0 && (
-                <div style={{ marginBottom: 12 }}>
-                  <Space wrap>
-                    {currentPath && (
-                      <Button size="small" onClick={navigateBack}>
-                        ..
-                      </Button>
-                    )}
-                    {directories.map((dir) => (
-                      <Button
-                        key={dir}
-                        size="small"
-                        icon={<FolderOpenOutlined />}
-                        onClick={() => navigateToDir(dir)}
-                      >
-                        {dir}
-                      </Button>
-                    ))}
-                  </Space>
-                </div>
+              {trafficTree.length > 0 ? (
+                <Tree
+                  checkable
+                  showIcon
+                  defaultExpandAll={false}
+                  expandedKeys={expandedKeys}
+                  onExpand={(keys) => setExpandedKeys(keys as string[])}
+                  checkedKeys={selectedFiles}
+                  onCheck={(checked) => {
+                    // 只选择文件（isLeaf=true），不选择目录
+                    const checkedKeys = Array.isArray(checked) ? checked : checked.checked
+                    const fileKeys = (checkedKeys as string[]).filter(key => {
+                      const findNode = (nodes: TrafficTreeNode[], targetKey: string): TrafficTreeNode | null => {
+                        for (const node of nodes) {
+                          if (node.key === targetKey) return node
+                          if (node.children) {
+                            const found = findNode(node.children, targetKey)
+                            if (found) return found
+                          }
+                        }
+                        return null
+                      }
+                      const node = findNode(trafficTree, key)
+                      return node?.isLeaf === true
+                    })
+                    setSelectedFiles(fileKeys)
+                  }}
+                  treeData={trafficTree}
+                  titleRender={(node: TrafficTreeNode) => (
+                    <span
+                      onDoubleClick={() => {
+                        if (node.isLeaf && node.path) {
+                          handlePreviewFile(node.path)
+                        }
+                      }}
+                      style={{ cursor: node.isLeaf ? 'pointer' : 'default' }}
+                    >
+                      {node.title}
+                      {node.isLeaf && node.size !== undefined && (
+                        <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                          ({(node.size / 1024).toFixed(1)} KB)
+                        </Text>
+                      )}
+                      {node.isLeaf && (
+                        <Tooltip title="预览">
+                          <EyeOutlined
+                            style={{ marginLeft: 8, color: primaryColor, fontSize: 12 }}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (node.path) handlePreviewFile(node.path)
+                            }}
+                          />
+                        </Tooltip>
+                      )}
+                    </span>
+                  )}
+                  icon={(props: any) => props.data?.isLeaf ? <FileTextOutlined /> : <FolderOpenOutlined />}
+                />
+              ) : (
+                <Empty description="无流量文件" image={Empty.PRESENTED_IMAGE_SIMPLE} />
               )}
-
-              {/* 文件列表 */}
-              <Table
-                dataSource={trafficFiles}
-                rowKey="name"
-                size="small"
-                pagination={{ pageSize: 5 }}
-                rowSelection={{
-                  selectedRowKeys: selectedFiles,
-                  onChange: (keys) => setSelectedFiles(keys as string[]),
-                }}
-                columns={[
-                  { title: '文件名', dataIndex: 'name', ellipsis: true },
-                  {
-                    title: '大小',
-                    dataIndex: 'size',
-                    width: 80,
-                    render: (size: number) => `${(size / 1024).toFixed(1)} KB`,
-                  },
-                ]}
-                locale={{ emptyText: <Empty description="无流量文件" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-              />
             </Spin>
           </Card>
         </Col>
@@ -1312,6 +1948,109 @@ const Simulation: React.FC = () => {
           locale={{ emptyText: <Empty description="暂无历史任务" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
         />
       </Card>
+
+      {/* 另存为模态框 */}
+      <Modal
+        title={saveAsType === 'main' ? (mode === 'dcin' ? '另存DCIN配置' : '另存KCIN配置') : '另存KCIN配置'}
+        open={saveAsModalVisible}
+        onCancel={() => setSaveAsModalVisible(false)}
+        onOk={async () => {
+          if (!saveAsName.trim()) {
+            message.warning('请输入文件名')
+            return
+          }
+          // 验证文件名格式
+          if (!/^[a-zA-Z0-9_-]+$/.test(saveAsName)) {
+            message.warning('文件名只能包含字母、数字、下划线和连字符')
+            return
+          }
+          try {
+            const configPath = saveAsType === 'main'
+              ? form.getFieldValue('config_path')
+              : form.getFieldValue('die_config_path')
+            const content = saveAsType === 'main' ? configValues : dieConfigValues
+            const result = await saveConfigContent(configPath || 'default.yaml', content, saveAsName)
+            message.success(`配置已另存为: ${result.filename}`)
+            setSaveAsModalVisible(false)
+            // 重新加载配置列表
+            loadConfigs()
+          } catch (e: any) {
+            message.error(`保存失败: ${e.response?.data?.detail || e.message || '未知错误'}`)
+          }
+        }}
+        okText="保存"
+        cancelText="取消"
+      >
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 8 }}>新文件名 (不含扩展名)</div>
+          <Input
+            placeholder={mode === 'dcin' && saveAsType === 'main' ? 'dcin_my_config' : 'topo_my_config'}
+            value={saveAsName}
+            onChange={(e) => setSaveAsName(e.target.value)}
+            addonAfter=".yaml"
+          />
+          <div style={{ marginTop: 8, color: '#888', fontSize: 12 }}>
+            提示: 文件名只能包含字母、数字、下划线和连字符
+          </div>
+        </div>
+      </Modal>
+
+      {/* 流量文件预览模态框 */}
+      <Modal
+        title={
+          <Space>
+            <FileTextOutlined />
+            <span>流量文件预览</span>
+            {previewContent && (
+              <Tag color="blue">{previewContent.file_name}</Tag>
+            )}
+          </Space>
+        }
+        open={previewModalVisible}
+        onCancel={() => {
+          setPreviewModalVisible(false)
+          setPreviewContent(null)
+        }}
+        footer={null}
+        width={800}
+      >
+        <Spin spinning={loadingPreview}>
+          {previewContent && (
+            <>
+              <div style={{ marginBottom: 12 }}>
+                <Space>
+                  <Text type="secondary">文件大小: {(previewContent.file_size / 1024).toFixed(1)} KB</Text>
+                  <Text type="secondary">总行数: {previewContent.total_lines}</Text>
+                  {previewContent.truncated && (
+                    <Tag color="warning">仅显示前 200 行</Tag>
+                  )}
+                </Space>
+              </div>
+              <div
+                style={{
+                  backgroundColor: '#f5f5f5',
+                  padding: 12,
+                  borderRadius: 4,
+                  maxHeight: 500,
+                  overflow: 'auto',
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                }}
+              >
+                {previewContent.content.map((line, index) => (
+                  <div key={index} style={{ display: 'flex' }}>
+                    <span style={{ color: '#999', width: 50, textAlign: 'right', marginRight: 12, userSelect: 'none' }}>
+                      {index + 1}
+                    </span>
+                    <span style={{ whiteSpace: 'pre' }}>{line || ' '}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </Spin>
+      </Modal>
     </div>
   )
 }

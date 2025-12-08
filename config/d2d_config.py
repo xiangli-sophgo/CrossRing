@@ -20,11 +20,12 @@ class D2DConfig:
     4. 验证D2D配置的合理性
     """
 
-    def __init__(self, d2d_config_file: str) -> None:
+    def __init__(self, d2d_config_file: str, die_config_file: Optional[str] = None) -> None:
         """初始化D2D配置
 
         Args:
             d2d_config_file: D2D专用配置文件路径
+            die_config_file: DIE拓扑配置文件路径（可选，用于覆盖DIE_TOPOLOGIES中指定的配置）
 
         Raises:
             ValueError: 如果未指定d2d_config_file
@@ -35,6 +36,10 @@ class D2DConfig:
             self._load_d2d_config_file(d2d_config_file)
         else:
             raise ValueError("必须指定d2d_config_file")
+
+        # 如果指定了单独的DIE拓扑配置文件，更新DIE_TOPOLOGIES
+        if die_config_file:
+            self._apply_die_config_file(die_config_file)
 
         self._generate_d2d_pairs()
         self._update_channel_spec_for_d2d()
@@ -97,10 +102,16 @@ class D2DConfig:
             ValueError: 如枟缺少必需的配置项
         """
 
-        if not hasattr(self, "DIE_POSITIONS"):
-            raise ValueError("新格式配置缺少DIE_POSITIONS")
         if not hasattr(self, "D2D_CONNECTIONS"):
             raise ValueError("新格式配置缺少D2D_CONNECTIONS")
+
+        # 自动生成DIE_POSITIONS（如果缺失）
+        if not hasattr(self, "DIE_POSITIONS") or not self.DIE_POSITIONS:
+            self.DIE_POSITIONS = self._generate_default_die_positions()
+
+        # 自动生成DIE_ROTATIONS（如果缺失）
+        if not hasattr(self, "DIE_ROTATIONS") or not self.DIE_ROTATIONS:
+            self.DIE_ROTATIONS = self._generate_default_die_rotations()
 
         self.die_layout_positions = getattr(self, "DIE_POSITIONS", {})
         die_topologies = getattr(self, "DIE_TOPOLOGIES", {})
@@ -112,6 +123,76 @@ class D2DConfig:
         self.D2D_PAIRS = pairs
         self._setup_die_positions_from_pairs(pairs)
         self._calculate_die_layout_type()
+
+    def _generate_default_die_positions(self) -> Dict[int, List[int]]:
+        """根据NUM_DIES自动生成默认的Die布局位置
+
+        布局规则：
+        - 2 Dies: 水平排列 [0,0], [1,0]
+        - 4 Dies: 2x2网格，右下角为Die0，逆时针排列
+          Die2 - Die3
+          |     |
+          Die1 - Die0
+        - 其他: 尽量接近正方形的网格
+
+        Returns:
+            Die位置字典，key为die_id，value为[x, y]坐标
+        """
+        num_dies = getattr(self, "NUM_DIES", 2)
+        positions = {}
+
+        if num_dies == 2:
+            positions = {0: [1, 0], 1: [0, 0]}
+        elif num_dies == 4:
+            # 2x2布局，Die0在右下角，逆时针排列
+            positions = {
+                0: [1, 0],  # 右下
+                1: [0, 0],  # 左下
+                2: [0, 1],  # 左上
+                3: [1, 1],  # 右上
+            }
+        else:
+            # 通用网格布局
+            import math
+            cols = math.ceil(math.sqrt(num_dies))
+            for i in range(num_dies):
+                x = i % cols
+                y = i // cols
+                positions[i] = [x, y]
+
+        return positions
+
+    def _generate_default_die_rotations(self) -> Dict[int, int]:
+        """根据NUM_DIES和DIE_POSITIONS自动生成默认的Die旋转角度
+
+        旋转规则（针对4 Die 2x2布局）：
+        - Die0 (右下): 0度
+        - Die1 (左下): 90度
+        - Die2 (左上): 180度
+        - Die3 (右上): 270度
+
+        Returns:
+            Die旋转角度字典，key为die_id，value为旋转角度（度）
+        """
+        num_dies = getattr(self, "NUM_DIES", 2)
+        rotations = {}
+
+        if num_dies == 2:
+            rotations = {0: 0, 1: 90}
+        elif num_dies == 4:
+            # 2x2布局的标准旋转
+            rotations = {
+                0: 0,    # 右下不旋转
+                1: 90,   # 左下顺时针90度
+                2: 180,  # 左上顺时针180度
+                3: 270,  # 右上顺时针270度
+            }
+        else:
+            # 默认不旋转
+            for i in range(num_dies):
+                rotations[i] = 0
+
+        return rotations
 
     def _generate_pairs_from_connections(self, connections: List[List[int]]) -> List[Tuple[int, int, int, int]]:
         """从D2D_CONNECTIONS生成配对关系
@@ -377,6 +458,58 @@ class D2DConfig:
             raise FileNotFoundError(f"D2D配置文件不存在: {d2d_config_file}")
         except (json.JSONDecodeError, yaml.YAMLError) as e:
             raise ValueError(f"D2D配置文件格式错误: {e}")
+
+    def _apply_die_config_file(self, die_config_file: str) -> None:
+        """应用单独的DIE拓扑配置文件
+
+        将指定的DIE拓扑配置文件应用到所有DIE，更新DIE_TOPOLOGIES中的配置引用。
+        同时加载该配置文件中的参数作为die_config属性。
+
+        Args:
+            die_config_file: DIE拓扑配置文件路径
+
+        Raises:
+            FileNotFoundError: 如果配置文件不存在
+            ValueError: 如果配置文件格式错误
+        """
+        try:
+            with open(die_config_file, "r", encoding="utf-8") as f:
+                if str(die_config_file).endswith((".yaml", ".yml")):
+                    die_config = yaml.safe_load(f)
+                else:
+                    die_config = json.load(f)
+
+            # 从文件名提取拓扑名称（如 topo_5x4.yaml -> 5x4）
+            import os
+            filename = os.path.basename(die_config_file)
+            if filename.startswith("topo_"):
+                topo_name = filename.replace("topo_", "").replace(".yaml", "").replace(".yml", "")
+            else:
+                topo_name = filename.replace(".yaml", "").replace(".yml", "")
+
+            # 更新所有DIE使用相同的拓扑配置
+            num_dies = getattr(self, "NUM_DIES", 2)
+            for die_id in range(num_dies):
+                self.DIE_TOPOLOGIES[die_id] = topo_name
+
+            # 保存DIE配置内容供后续使用
+            from config.config import CrossRingConfig
+            self.die_config = CrossRingConfig(die_config_file)
+
+            # 从KCIN配置中获取关键参数（如果DCIN配置中没有设置）
+            if not self.NETWORK_FREQUENCY and hasattr(self.die_config, 'NETWORK_FREQUENCY'):
+                self.NETWORK_FREQUENCY = self.die_config.NETWORK_FREQUENCY
+            if not self.FLIT_SIZE and hasattr(self.die_config, 'FLIT_SIZE'):
+                self.FLIT_SIZE = self.die_config.FLIT_SIZE
+            if not self.BURST and hasattr(self.die_config, 'BURST'):
+                self.BURST = self.die_config.BURST
+
+            logging.info(f"已应用DIE拓扑配置: {die_config_file} (拓扑: {topo_name})")
+
+        except FileNotFoundError:
+            raise FileNotFoundError(f"DIE拓扑配置文件不存在: {die_config_file}")
+        except (json.JSONDecodeError, yaml.YAMLError) as e:
+            raise ValueError(f"DIE拓扑配置文件格式错误: {e}")
 
     def _validate_d2d_config(self, die_config: Dict[int, Dict[str, Any]]) -> bool:
         """验证D2D配置的正确性

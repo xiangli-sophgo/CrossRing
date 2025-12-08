@@ -1,74 +1,38 @@
-# D2D (Die-to-Die) 配置文件
 
-# D2D 特定配置
-D2D_ENABLED: true
-NUM_DIES: 2
+# DCIN Basic
+NUM_DIES: 2  # Die数量
 
-# Die的XY坐标布局（左下角为原点）
-DIE_POSITIONS:
-  0: [0, 0]  # Die0在左下角
-  1: [0, 1]  # Die1在上方
+# DCIN Latency (ns)
+D2D_AR_LATENCY: 20  # 地址读通道延迟
+D2D_R_LATENCY: 20  # 读数据通道延迟
+D2D_AW_LATENCY: 20  # 地址写通道延迟
+D2D_W_LATENCY: 20  # 写数据通道延迟
+D2D_B_LATENCY: 20  # 写响应通道延迟
 
-# 每个Die的拓扑配置
+# DCIN Bandwidth Limit (GB/s)
+D2D_RN_BW_LIMIT: 192  # D2D RN带宽限制
+D2D_SN_BW_LIMIT: 192  # D2D SN带宽限制
+D2D_AXI_BANDWIDTH: 192  # AXI通道统一带宽限制
+
+# DCIN Buffer Size
+D2D_RN_RDB_SIZE: 512  # D2D RN读databuffer大小
+D2D_RN_WDB_SIZE: 512  # D2D RN写databuffer大小
+D2D_SN_RDB_SIZE: 512  # D2D SN读databuffer大小
+D2D_SN_WDB_SIZE: 512  # D2D SN写databuffer大小
+D2D_RN_R_TRACKER_OSTD: auto
+D2D_RN_W_TRACKER_OSTD: auto
+D2D_SN_R_TRACKER_OSTD: auto
+D2D_SN_W_TRACKER_OSTD: auto
+
+# Die拓扑配置
 DIE_TOPOLOGIES:
-  0: "2261_5x4"  # Die0使用2261_5x4拓扑
-  1: "2261_5x4"  # Die1使用2261_5x4拓扑
+  0: "2261_5x4"
+  1: "2261_5x4"
 
-DIE_ROTATIONS:
-  0: 0    # Die0不旋转
-  1: 180   # Die1顺时针旋转180度
-
-# D2D互联配置（单向配置，系统自动生成双向连接）
-# 格式: [源Die, 源物理节点, 目标Die, 目标物理节点]
-# 物理节点ID使用数据流中的实际编号，通过node_map转换到网络位置
+# D2D连接配置
+# 格式: [源Die, 源节点, 目标Die, 目标节点]
 D2D_CONNECTIONS:
-  # Die0顶部 <-> Die1底部
-  - [0, 0, 1, 3]   # Die0节点0 <-> Die1节点16
-  - [0, 1, 1, 2]   # Die0节点1 <-> Die1节点17
-  - [0, 2, 1, 1]   # Die0节点2 <-> Die1节点18
-  - [0, 3, 1, 0]   # Die0节点3 <-> Die1节点19
-
-
-
-# 网络基础参数
-NETWORK_FREQUENCY: 2
-FLIT_SIZE: 128
-BURST: 4
-
-# D2D 延迟配置 (ns) - 会在配置加载时转换为cycles
-D2D_AR_LATENCY: 20   # 地址读通道延迟 (ns)
-D2D_R_LATENCY: 20    # 读数据通道延迟 (ns)
-D2D_AW_LATENCY: 20   # 地址写通道延迟 (ns)
-D2D_W_LATENCY: 20    # 写数据通道延迟 (ns)
-D2D_B_LATENCY: 20    # 写响应通道延迟 (ns)
-
-# D2D 带宽控制
-D2D_AXI_BANDWIDTH: 192  # AXI通道统一带宽限制 (GB/s)，所有通道使用此值但有独立令牌桶
-D2D_RN_BW_LIMIT: 192    # D2D RN 带宽限制 (GB/s)
-D2D_SN_BW_LIMIT: 192    # D2D SN 带宽限制 (GB/s)
-
-# D2D 资源管理配置
-# D2D_RN 配置 (类似GDMA)
-D2D_RN_RDB_SIZE: 512        # D2D RN 读databuffer大小
-D2D_RN_WDB_SIZE: 512        # D2D RN 写databuffer大小
-D2D_RN_R_TRACKER_OSTD: auto # = D2D_RN_RDB_SIZE / BURST
-D2D_RN_W_TRACKER_OSTD: auto # = D2D_RN_WDB_SIZE / BURST
-
-# D2D_SN 配置 (类似DDR)
-D2D_SN_RDB_SIZE: 512        # D2D SN 读databuffer大小
-D2D_SN_WDB_SIZE: 512        # D2D SN 写databuffer大小
-D2D_SN_R_TRACKER_OSTD: auto # = D2D_SN_RDB_SIZE / BURST
-D2D_SN_W_TRACKER_OSTD: auto # = D2D_SN_WDB_SIZE / BURST
-
-# ========== D2D 仲裁器配置 ==========
-# D2D系统特定的仲裁器配置
-arbitration:
-  # D2D仲裁器配置（Die-to-Die仲裁）
-  # 用于RN和SN接口间的仲裁，可配置为加权仲裁
-  d2d:
-    type: "round_robin"    # 默认标准轮询
-    # 可选配置示例：
-    # type: "weighted"     # 加权轮询
-    # weights: [2, 1]      # RN权重2，SN权重1
-
-
+  - [0, 0, 1, 3]
+  - [0, 1, 1, 2]
+  - [0, 2, 1, 1]
+  - [0, 3, 1, 0]

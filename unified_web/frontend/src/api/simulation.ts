@@ -12,6 +12,9 @@ export interface SimulationRequest {
   topology: string
   config_path?: string
   config_overrides?: Record<string, any>
+  // DCIN模式下的DIE拓扑配置
+  die_config_path?: string
+  die_config_overrides?: Record<string, any>
   traffic_source: 'file' | 'generate'
   traffic_files: string[]
   traffic_path?: string
@@ -55,6 +58,20 @@ export interface TrafficFilesResponse {
   current_path: string
   files: TrafficFileInfo[]
   directories: string[]
+}
+
+// 树形结构节点
+export interface TrafficTreeNode {
+  key: string
+  title: string
+  isLeaf: boolean
+  children?: TrafficTreeNode[]
+  path?: string
+  size?: number
+}
+
+export interface TrafficFilesTreeResponse {
+  tree: TrafficTreeNode[]
 }
 
 export interface TaskHistoryItem {
@@ -111,6 +128,27 @@ export const getTrafficFiles = async (path: string = ''): Promise<TrafficFilesRe
   return response.data
 }
 
+// 获取流量文件树形结构
+export const getTrafficFilesTree = async (): Promise<TrafficFilesTreeResponse> => {
+  const response = await api.get('/traffic-files-tree')
+  return response.data
+}
+
+// 流量文件内容响应
+export interface TrafficFileContentResponse {
+  content: string[]
+  total_lines: number
+  truncated: boolean
+  file_name: string
+  file_size: number
+}
+
+// 获取流量文件内容
+export const getTrafficFileContent = async (filePath: string, maxLines: number = 100): Promise<TrafficFileContentResponse> => {
+  const response = await api.get(`/traffic-file-content/${filePath}?max_lines=${maxLines}`)
+  return response.data
+}
+
 // 获取配置文件内容
 export const getConfigContent = async (configPath: string): Promise<Record<string, any>> => {
   const response = await api.get(`/config/${configPath}`)
@@ -118,7 +156,11 @@ export const getConfigContent = async (configPath: string): Promise<Record<strin
 }
 
 // 保存配置文件
-export const saveConfigContent = async (configPath: string, content: Record<string, any>): Promise<{ success: boolean; message: string }> => {
-  const response = await api.post(`/config/${configPath}`, content)
+export const saveConfigContent = async (
+  configPath: string,
+  content: Record<string, any>,
+  saveAs?: string
+): Promise<{ success: boolean; message: string; filename?: string }> => {
+  const response = await api.post(`/config/${configPath}`, { content, save_as: saveAs })
   return response.data
 }

@@ -50,12 +50,17 @@ class SimulationEngine:
         topology: str = "5x4",
         verbose: int = 1,
         config_overrides: Optional[Dict[str, Any]] = None,
+        die_config_path: Optional[str] = None,
+        die_config_overrides: Optional[Dict[str, Any]] = None,
     ):
         self.mode = mode
         self.config_path = config_path
         self.topology = topology
         self.verbose = verbose
         self.config_overrides = config_overrides or {}
+        # DCIN模式下的DIE拓扑配置
+        self.die_config_path = die_config_path
+        self.die_config_overrides = die_config_overrides or {}
         self.model = None
         self.config = None
         self._cancelled = False
@@ -86,12 +91,22 @@ class SimulationEngine:
         from config.d2d_config import D2DConfig
         from src.d2d.d2d_model import D2D_Model
 
-        self.config = D2DConfig(d2d_config_file=self.config_path)
+        # 初始化D2D配置，支持单独指定DIE拓扑配置
+        self.config = D2DConfig(
+            d2d_config_file=self.config_path,
+            die_config_file=self.die_config_path,
+        )
 
-        # 应用配置覆盖
+        # 应用DCIN配置覆盖
         for key, value in self.config_overrides.items():
             if hasattr(self.config, key):
                 setattr(self.config, key, value)
+
+        # 应用DIE拓扑配置覆盖
+        if self.die_config_overrides and hasattr(self.config, 'die_config'):
+            for key, value in self.die_config_overrides.items():
+                if hasattr(self.config.die_config, key):
+                    setattr(self.config.die_config, key, value)
 
         self.model = D2D_Model(
             config=self.config,
