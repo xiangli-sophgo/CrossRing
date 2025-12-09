@@ -107,8 +107,7 @@ class Tier6ReportGenerator:
         # 生成图表 HTML
         charts_html = ""
         for i, (chart_title, fig) in enumerate(figures):
-            chart_id = f"chart_{i}"
-            fig_html = fig.to_html(full_html=False, include_plotlyjs=False, div_id=chart_id)
+            fig_html = fig.to_html(full_html=False, include_plotlyjs=False)
             charts_html += f"""
             <div class="chart-container">
                 <h3>{chart_title}</h3>

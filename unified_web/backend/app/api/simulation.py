@@ -230,6 +230,38 @@ async def delete_task(task_id: str):
     return {"success": True, "message": "任务已删除"}
 
 
+@router.get("/running")
+async def get_running_tasks():
+    """
+    获取正在运行的任务列表（用于页面刷新后恢复状态）
+    """
+    all_tasks = task_manager.get_all_tasks()
+    running_tasks = [
+        t for t in all_tasks
+        if t.status in (TaskStatus.PENDING, TaskStatus.RUNNING)
+    ]
+
+    return {
+        "tasks": [
+            {
+                "task_id": t.task_id,
+                "mode": t.mode,
+                "topology": t.topology,
+                "status": t.status.value,
+                "progress": t.progress,
+                "message": t.message,
+                "current_file": t.current_file,
+                "created_at": t.created_at.isoformat(),
+                "started_at": t.started_at.isoformat() if t.started_at else None,
+                "traffic_files": t.traffic_files,
+                "experiment_name": t.experiment_name,
+                "sim_details": t.sim_details,
+            }
+            for t in running_tasks
+        ]
+    }
+
+
 @router.get("/history")
 async def get_history(limit: int = 20):
     """

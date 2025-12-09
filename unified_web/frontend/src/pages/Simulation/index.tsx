@@ -61,6 +61,7 @@ import {
   cancelTask,
   deleteTask,
   getTaskHistory,
+  getRunningTasks,
   getConfigs,
   getTrafficFilesTree,
   getTrafficFileContent,
@@ -239,6 +240,31 @@ const Simulation: React.FC = () => {
 
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
+  // 恢复运行中的任务
+  const restoreRunningTask = async () => {
+    try {
+      const data = await getRunningTasks()
+      if (data.tasks.length > 0) {
+        // 取最新的运行中任务
+        const latestTask = data.tasks[0]
+        // 获取完整的任务状态并开始轮询
+        const fullStatus = await getTaskStatus(latestTask.task_id)
+        setCurrentTask(fullStatus)
+        // 恢复开始时间（使用任务的started_at或created_at）
+        if (latestTask.started_at) {
+          setStartTime(new Date(latestTask.started_at).getTime())
+        } else {
+          setStartTime(new Date(latestTask.created_at).getTime())
+        }
+        // 开始轮询
+        startPolling(latestTask.task_id)
+        message.info('已恢复运行中的任务')
+      }
+    } catch (error) {
+      console.error('恢复运行中任务失败:', error)
+    }
+  }
+
   // 加载配置和历史
   useEffect(() => {
     loadConfigs()
@@ -246,6 +272,8 @@ const Simulation: React.FC = () => {
     loadExistingExperiments()
     // 初始加载时使用默认模式(kcin)过滤流量文件
     loadTrafficFilesTree('kcin')
+    // 检查并恢复运行中的任务
+    restoreRunningTask()
     return () => {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current)
@@ -2124,8 +2152,9 @@ const Simulation: React.FC = () => {
               </div>
             )}
 
-            {/* 仿真详细指标 */}
-            {currentTask.sim_details && currentTask.status === 'running' && (
+            {/* 仿真详细指标 - 仅在非并行模式下显示 */}
+            {currentTask.sim_details && currentTask.status === 'running' &&
+             !currentTask.sim_details.current_file?.includes('并行执行中') && (
               <Row gutter={[16, 16]}>
                 <Col span={6}>
                   <Statistic

@@ -125,6 +125,28 @@ export const deleteTask = async (taskId: string): Promise<{ success: boolean; me
   return response.data
 }
 
+// 运行中的任务信息
+export interface RunningTaskItem {
+  task_id: string
+  mode: string
+  topology: string
+  status: string
+  progress: number
+  message: string
+  current_file: string
+  created_at: string
+  started_at: string | null
+  traffic_files: string[]
+  experiment_name: string | null
+  sim_details: SimDetails | null
+}
+
+// 获取运行中的任务列表
+export const getRunningTasks = async (): Promise<{ tasks: RunningTaskItem[] }> => {
+  const response = await apiClient.get('/api/simulation/running')
+  return response.data
+}
+
 // 获取历史任务
 export const getTaskHistory = async (limit: number = 20): Promise<{ tasks: TaskHistoryItem[] }> => {
   const response = await apiClient.get(`/api/simulation/history?limit=${limit}`)

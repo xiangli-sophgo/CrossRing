@@ -1,15 +1,22 @@
 [
   {
-    "task_id": "4b69ab29",
+    "task_id": "4a8e8832",
     "mode": "dcin",
     "topology": "5x4",
     "config_path": "/Users/lixiang/Documents/工作/code/CrossRing/config/topologies/dcin_4die_config.yaml",
     "traffic_file_path": "/Users/lixiang/Documents/工作/code/CrossRing/traffic",
     "traffic_files": [
-      "2DIE_0_3_16_share_d2d_c2c_W.txt"
+      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_R.txt",
+      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_W.txt",
+      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_R.txt",
+      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_W.txt",
+      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_R.txt",
+      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_W.txt",
+      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_R.txt",
+      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_W.txt"
     ],
     "max_time": 6000,
-    "experiment_name": "2DIE",
+    "experiment_name": "2DIE_4GDMA_40",
     "experiment_description": null,
     "save_to_db": true,
     "max_workers": null,
@@ -112,7 +119,7 @@
         "3": "2261_5x4"
       }
     },
-    "die_config_path": "/Users/lixiang/Documents/工作/code/CrossRing/config/topologies/topo_2261_5x4.yaml",
+    "die_config_path": "/Users/lixiang/Documents/工作/code/CrossRing/config/topologies/topo_5x4.yaml",
     "die_config_overrides": {
       "TOPO_TYPE": "5x4",
       "FLIT_SIZE": 128,
@@ -138,311 +145,19 @@
       "IP_L2H_FIFO_DEPTH": 3,
       "IP_H2L_H_FIFO_DEPTH": 2,
       "IP_H2L_L_FIFO_DEPTH": 2,
-      "TL_Etag_T2_UE_MAX": 8,
+      "TL_Etag_T2_UE_MAX": 15,
       "TL_Etag_T1_UE_MAX": 15,
-      "TR_Etag_T2_UE_MAX": 12,
-      "TU_Etag_T2_UE_MAX": 8,
+      "TR_Etag_T2_UE_MAX": 15,
+      "TU_Etag_T2_UE_MAX": 15,
       "TU_Etag_T1_UE_MAX": 15,
-      "TD_Etag_T2_UE_MAX": 12,
+      "TD_Etag_T2_UE_MAX": 15,
       "ETag_BOTHSIDE_UPGRADE": 0,
-      "ETAG_T1_ENABLED": true,
+      "ETAG_T1_ENABLED": 0,
       "ITag_TRIGGER_Th_H": 80,
       "ITag_TRIGGER_Th_V": 80,
       "ITag_MAX_Num_H": 1,
       "ITag_MAX_Num_V": 1,
-      "DDR_R_LATENCY": 150,
-      "DDR_R_LATENCY_VAR": 0,
-      "DDR_W_LATENCY": 0,
-      "L2M_R_LATENCY": 12,
-      "L2M_W_LATENCY": 16,
-      "SN_TRACKER_RELEASE_LATENCY": 40,
-      "SN_PROCESSING_LATENCY": 2,
-      "RN_PROCESSING_LATENCY": 0,
-      "GDMA_BW_LIMIT": 128,
-      "SDMA_BW_LIMIT": 128,
-      "CDMA_BW_LIMIT": 128,
-      "DDR_BW_LIMIT": 128,
-      "L2M_BW_LIMIT": 128,
-      "CROSSRING_VERSION": "V1",
-      "RB_ONLY_TAG_NUM_HORIZONTAL": 2,
-      "RB_ONLY_TAG_NUM_VERTICAL": 3,
-      "ORDERING_PRESERVATION_MODE": 0,
-      "ORDERING_ETAG_UPGRADE_MODE": 0,
-      "ORDERING_GRANULARITY": 0,
-      "TL_ALLOWED_SOURCE_NODES": [
-        2,
-        3,
-        6,
-        7,
-        10,
-        11,
-        14,
-        15,
-        18,
-        19
-      ],
-      "TR_ALLOWED_SOURCE_NODES": [
-        0,
-        1,
-        4,
-        5,
-        8,
-        9,
-        12,
-        13,
-        16,
-        17
-      ],
-      "TU_ALLOWED_SOURCE_NODES": [
-        8,
-        9,
-        10,
-        11,
-        12,
-        13,
-        14,
-        15,
-        16,
-        17,
-        18,
-        19
-      ],
-      "TD_ALLOWED_SOURCE_NODES": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7
-      ],
-      "REVERSE_DIRECTION_ENABLED": 0,
-      "REVERSE_DIRECTION_THRESHOLD": 0.75,
-      "CHANNEL_SPEC": {
-        "gdma": 2,
-        "sdma": 0,
-        "cdma": 2,
-        "ddr": 2,
-        "l2m": 0
-      },
-      "IN_ORDER_PACKET_CATEGORIES": [
-        "REQ",
-        "RSP",
-        "DATA"
-      ],
-      "IN_ORDER_EJECTION_PAIRS": [],
-      "arbitration": {
-        "default": {
-          "type": "round_robin"
-        }
-      },
-      "RN_R_TRACKER_OSTD": "auto",
-      "RN_W_TRACKER_OSTD": "auto",
-      "SN_DDR_R_TRACKER_OSTD": "auto",
-      "SN_DDR_W_TRACKER_OSTD": "auto",
-      "SN_L2M_R_TRACKER_OSTD": "auto",
-      "SN_L2M_W_TRACKER_OSTD": "auto",
-      "GDMA_RW_GAP": "inf",
-      "SDMA_RW_GAP": "inf",
-      "ENABLE_CROSSPOINT_CONFLICT_CHECK": 0
-    },
-    "status": "completed",
-    "progress": 100,
-    "current_file": "",
-    "message": "仿真完成",
-    "error": null,
-    "results": {
-      "total_files": 1,
-      "completed_files": 0,
-      "failed_files": 1,
-      "experiment_id": null,
-      "file_results": [
-        {
-          "file": "2DIE_0_3_16_share_d2d_c2c_W.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n                 ^^^^^^^^^^\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
-        }
-      ]
-    },
-    "sim_details": {
-      "file_index": 1,
-      "total_files": 1,
-      "current_file": "已完成: 2DIE_0_3_16_share_d2d_c2c_W.txt",
-      "sim_progress": 100,
-      "current_time": 6000,
-      "max_time": 6000,
-      "req_count": 0,
-      "total_req": 0,
-      "recv_flits": 0,
-      "total_flits": 0,
-      "trans_flits": 0
-    },
-    "created_at": "2025-12-09T20:38:15.836449",
-    "started_at": "2025-12-09T20:38:15.836552",
-    "completed_at": "2025-12-09T20:38:17.192566",
-    "_current_engine": null
-  },
-  {
-    "task_id": "a36137b1",
-    "mode": "dcin",
-    "topology": "5x4",
-    "config_path": "/Users/lixiang/Documents/工作/code/CrossRing/config/topologies/dcin_4die_config.yaml",
-    "traffic_file_path": "/Users/lixiang/Documents/工作/code/CrossRing/traffic",
-    "traffic_files": [
-      "2DIE_0_2_16_share_d2d_R.txt",
-      "2DIE_0_2_16_share_d2d_W.txt",
-      "2DIE_0_2_16_share_d2d_c2c_R.txt",
-      "2DIE_0_2_16_share_d2d_c2c_W.txt",
-      "2DIE_0_3_16_share_d2d_R.txt",
-      "2DIE_0_3_16_share_d2d_W.txt",
-      "2DIE_0_3_16_share_d2d_c2c_R.txt",
-      "2DIE_0_3_16_share_d2d_c2c_W.txt"
-    ],
-    "max_time": 6000,
-    "experiment_name": "2DIE",
-    "experiment_description": null,
-    "save_to_db": true,
-    "max_workers": null,
-    "config_overrides": {
-      "NUM_DIES": 4,
-      "D2D_AR_LATENCY": 20,
-      "D2D_R_LATENCY": 20,
-      "D2D_AW_LATENCY": 20,
-      "D2D_W_LATENCY": 20,
-      "D2D_B_LATENCY": 20,
-      "D2D_RN_BW_LIMIT": 192,
-      "D2D_SN_BW_LIMIT": 192,
-      "D2D_AXI_BANDWIDTH": 192,
-      "D2D_RN_RDB_SIZE": 256,
-      "D2D_RN_WDB_SIZE": 256,
-      "D2D_SN_RDB_SIZE": 256,
-      "D2D_SN_WDB_SIZE": 256,
-      "D2D_RN_R_TRACKER_OSTD": "auto",
-      "D2D_RN_W_TRACKER_OSTD": "auto",
-      "D2D_SN_R_TRACKER_OSTD": "auto",
-      "D2D_SN_W_TRACKER_OSTD": "auto",
-      "D2D_CONNECTIONS": [
-        [
-          0,
-          1,
-          3,
-          12
-        ],
-        [
-          0,
-          2,
-          3,
-          16
-        ],
-        [
-          0,
-          4,
-          2,
-          8
-        ],
-        [
-          0,
-          8,
-          2,
-          4
-        ],
-        [
-          0,
-          12,
-          1,
-          1
-        ],
-        [
-          0,
-          16,
-          1,
-          2
-        ],
-        [
-          1,
-          4,
-          3,
-          8
-        ],
-        [
-          1,
-          8,
-          3,
-          4
-        ],
-        [
-          1,
-          12,
-          2,
-          1
-        ],
-        [
-          1,
-          16,
-          2,
-          2
-        ],
-        [
-          2,
-          12,
-          3,
-          1
-        ],
-        [
-          2,
-          16,
-          3,
-          2
-        ]
-      ],
-      "DIE_TOPOLOGIES": {
-        "0": "2261_5x4",
-        "1": "2261_5x4",
-        "2": "2261_5x4",
-        "3": "2261_5x4"
-      }
-    },
-    "die_config_path": "/Users/lixiang/Documents/工作/code/CrossRing/config/topologies/topo_2261_5x4.yaml",
-    "die_config_overrides": {
-      "TOPO_TYPE": "5x4",
-      "FLIT_SIZE": 128,
-      "BURST": 4,
-      "NETWORK_FREQUENCY": 2,
-      "RN_RDB_SIZE": 256,
-      "RN_WDB_SIZE": 256,
-      "SN_DDR_RDB_SIZE": 256,
-      "SN_DDR_WDB_SIZE": 256,
-      "SN_L2M_RDB_SIZE": 256,
-      "SN_L2M_WDB_SIZE": 256,
-      "UNIFIED_RW_TRACKER": false,
-      "SLICE_PER_LINK_HORIZONTAL": 9,
-      "SLICE_PER_LINK_VERTICAL": 9,
-      "IQ_CH_FIFO_DEPTH": 4,
-      "EQ_CH_FIFO_DEPTH": 4,
-      "IQ_OUT_FIFO_DEPTH_HORIZONTAL": 8,
-      "IQ_OUT_FIFO_DEPTH_VERTICAL": 8,
-      "IQ_OUT_FIFO_DEPTH_EQ": 8,
-      "RB_OUT_FIFO_DEPTH": 8,
-      "RB_IN_FIFO_DEPTH": 16,
-      "EQ_IN_FIFO_DEPTH": 16,
-      "IP_L2H_FIFO_DEPTH": 3,
-      "IP_H2L_H_FIFO_DEPTH": 2,
-      "IP_H2L_L_FIFO_DEPTH": 2,
-      "TL_Etag_T2_UE_MAX": 8,
-      "TL_Etag_T1_UE_MAX": 15,
-      "TR_Etag_T2_UE_MAX": 12,
-      "TU_Etag_T2_UE_MAX": 8,
-      "TU_Etag_T1_UE_MAX": 15,
-      "TD_Etag_T2_UE_MAX": 12,
-      "ETag_BOTHSIDE_UPGRADE": 0,
-      "ETAG_T1_ENABLED": true,
-      "ITag_TRIGGER_Th_H": 80,
-      "ITag_TRIGGER_Th_V": 80,
-      "ITag_MAX_Num_H": 1,
-      "ITag_MAX_Num_V": 1,
-      "DDR_R_LATENCY": 150,
+      "DDR_R_LATENCY": 40,
       "DDR_R_LATENCY_VAR": 0,
       "DDR_W_LATENCY": 0,
       "L2M_R_LATENCY": 12,
@@ -546,64 +261,64 @@
     "error": null,
     "results": {
       "total_files": 8,
-      "completed_files": 0,
-      "failed_files": 8,
-      "experiment_id": null,
+      "completed_files": 8,
+      "failed_files": 0,
+      "experiment_id": 2,
       "file_results": [
         {
-          "file": "2DIE_0_3_16_share_d2d_R.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_R.txt",
+          "status": "completed",
+          "duration": 170.5593180656433,
+          "error": null
         },
         {
-          "file": "2DIE_0_3_16_share_d2d_c2c_R.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_R.txt",
+          "status": "completed",
+          "duration": 172.33071184158325,
+          "error": null
         },
         {
-          "file": "2DIE_0_3_16_share_d2d_c2c_W.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_W.txt",
+          "status": "completed",
+          "duration": 181.10557579994202,
+          "error": null
         },
         {
-          "file": "2DIE_0_2_16_share_d2d_R.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_W.txt",
+          "status": "completed",
+          "duration": 181.1438488960266,
+          "error": null
         },
         {
-          "file": "2DIE_0_3_16_share_d2d_W.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_R.txt",
+          "status": "completed",
+          "duration": 194.1905448436737,
+          "error": null
         },
         {
-          "file": "2DIE_0_2_16_share_d2d_c2c_R.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_R.txt",
+          "status": "completed",
+          "duration": 193.55666613578796,
+          "error": null
         },
         {
-          "file": "2DIE_0_2_16_share_d2d_c2c_W.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_W.txt",
+          "status": "completed",
+          "duration": 202.82312989234924,
+          "error": null
         },
         {
-          "file": "2DIE_0_2_16_share_d2d_W.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_W.txt",
+          "status": "completed",
+          "duration": 209.99207305908203,
+          "error": null
         }
       ]
     },
     "sim_details": {
       "file_index": 8,
       "total_files": 8,
-      "current_file": "已完成: 2DIE_0_2_16_share_d2d_W.txt",
+      "current_file": "已完成: 2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_W.txt",
       "sim_progress": 100,
       "current_time": 6000,
       "max_time": 6000,
@@ -613,26 +328,26 @@
       "total_flits": 0,
       "trans_flits": 0
     },
-    "created_at": "2025-12-09T20:36:45.962607",
-    "started_at": "2025-12-09T20:36:45.962754",
-    "completed_at": "2025-12-09T20:36:48.039872",
+    "created_at": "2025-12-09T21:55:10.238776",
+    "started_at": "2025-12-09T21:55:10.238933",
+    "completed_at": "2025-12-09T21:58:55.789164",
     "_current_engine": null
   },
   {
-    "task_id": "30446d9e",
+    "task_id": "345513bc",
     "mode": "dcin",
     "topology": "5x4",
     "config_path": "/Users/lixiang/Documents/工作/code/CrossRing/config/topologies/dcin_4die_config.yaml",
     "traffic_file_path": "/Users/lixiang/Documents/工作/code/CrossRing/traffic",
     "traffic_files": [
-      "2DIE_0_2_16_share_d2d_R.txt",
-      "2DIE_0_2_16_share_d2d_W.txt",
-      "2DIE_0_2_16_share_d2d_c2c_R.txt",
-      "2DIE_0_2_16_share_d2d_c2c_W.txt",
-      "2DIE_0_3_16_share_d2d_R.txt",
-      "2DIE_0_3_16_share_d2d_W.txt",
-      "2DIE_0_3_16_share_d2d_c2c_R.txt",
-      "2DIE_0_3_16_share_d2d_c2c_W.txt"
+      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_R.txt",
+      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_W.txt",
+      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_R.txt",
+      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_W.txt",
+      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_R.txt",
+      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_W.txt",
+      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_R.txt",
+      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_W.txt"
     ],
     "max_time": 6000,
     "experiment_name": "2DIE_4GDMA",
@@ -880,64 +595,64 @@
     "error": null,
     "results": {
       "total_files": 8,
-      "completed_files": 0,
-      "failed_files": 8,
-      "experiment_id": null,
+      "completed_files": 8,
+      "failed_files": 0,
+      "experiment_id": 1,
       "file_results": [
         {
-          "file": "2DIE_0_2_16_share_d2d_W.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_R.txt",
+          "status": "completed",
+          "duration": 178.6107451915741,
+          "error": null
         },
         {
-          "file": "2DIE_0_2_16_share_d2d_c2c_R.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_R.txt",
+          "status": "completed",
+          "duration": 179.72595477104187,
+          "error": null
         },
         {
-          "file": "2DIE_0_3_16_share_d2d_c2c_W.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_W.txt",
+          "status": "completed",
+          "duration": 191.14063501358032,
+          "error": null
         },
         {
-          "file": "2DIE_0_2_16_share_d2d_c2c_W.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_W.txt",
+          "status": "completed",
+          "duration": 190.4157829284668,
+          "error": null
         },
         {
-          "file": "2DIE_0_2_16_share_d2d_R.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_R.txt",
+          "status": "completed",
+          "duration": 204.07459688186646,
+          "error": null
         },
         {
-          "file": "2DIE_0_3_16_share_d2d_W.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_R.txt",
+          "status": "completed",
+          "duration": 205.82362818717957,
+          "error": null
         },
         {
-          "file": "2DIE_0_3_16_share_d2d_R.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_W.txt",
+          "status": "completed",
+          "duration": 214.5354130268097,
+          "error": null
         },
         {
-          "file": "2DIE_0_3_16_share_d2d_c2c_R.txt",
-          "status": "failed",
-          "duration": 0,
-          "error": "Die 0未指定topology配置，每个Die必须指定拓扑类型\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 93, in _run_single_simulation\n    engine.setup(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 196, in setup\n    self._init_dcin_model()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/simulation_engine.py\", line 168, in _init_dcin_model\n    self.model = D2D_Model(\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 99, in __init__\n    self._create_die_instances()\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 349, in _create_die_instances\n    die_config = self._create_die_config(die_id)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/src/d2d/d2d_model.py\", line 423, in _create_die_config\n    raise ValueError(f\"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型\")\nValueError: Die 0未指定topology配置，每个Die必须指定拓扑类型\n"
+          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_W.txt",
+          "status": "completed",
+          "duration": 219.89027309417725,
+          "error": null
         }
       ]
     },
     "sim_details": {
       "file_index": 8,
       "total_files": 8,
-      "current_file": "已完成: 2DIE_0_3_16_share_d2d_c2c_R.txt",
+      "current_file": "已完成: 2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_W.txt",
       "sim_progress": 100,
       "current_time": 6000,
       "max_time": 6000,
@@ -947,288 +662,9 @@
       "total_flits": 0,
       "trans_flits": 0
     },
-    "created_at": "2025-12-09T20:36:02.768991",
-    "started_at": "2025-12-09T20:36:02.769166",
-    "completed_at": "2025-12-09T20:36:04.856610",
-    "_current_engine": null
-  },
-  {
-    "task_id": "cc7344f8",
-    "mode": "dcin",
-    "topology": "5x4",
-    "config_path": "/Users/lixiang/Documents/工作/code/CrossRing/config/topologies/dcin_4die_config.yaml",
-    "traffic_file_path": "/Users/lixiang/Documents/工作/code/CrossRing/traffic",
-    "traffic_files": [
-      "2DIE_0_2_16_share_d2d_R.txt",
-      "2DIE_0_2_16_share_d2d_W.txt",
-      "2DIE_0_2_16_share_d2d_c2c_R.txt",
-      "2DIE_0_2_16_share_d2d_c2c_W.txt",
-      "2DIE_0_3_16_share_d2d_R.txt",
-      "2DIE_0_3_16_share_d2d_W.txt",
-      "2DIE_0_3_16_share_d2d_c2c_R.txt",
-      "2DIE_0_3_16_share_d2d_c2c_W.txt"
-    ],
-    "max_time": 6000,
-    "experiment_name": "2DIE_4GDMA",
-    "experiment_description": null,
-    "save_to_db": true,
-    "max_workers": null,
-    "config_overrides": {
-      "NUM_DIES": 4,
-      "D2D_AR_LATENCY": 20,
-      "D2D_R_LATENCY": 20,
-      "D2D_AW_LATENCY": 20,
-      "D2D_W_LATENCY": 20,
-      "D2D_B_LATENCY": 20,
-      "D2D_RN_BW_LIMIT": 192,
-      "D2D_SN_BW_LIMIT": 192,
-      "D2D_AXI_BANDWIDTH": 192,
-      "D2D_RN_RDB_SIZE": 256,
-      "D2D_RN_WDB_SIZE": 256,
-      "D2D_SN_RDB_SIZE": 256,
-      "D2D_SN_WDB_SIZE": 256,
-      "D2D_RN_R_TRACKER_OSTD": "auto",
-      "D2D_RN_W_TRACKER_OSTD": "auto",
-      "D2D_SN_R_TRACKER_OSTD": "auto",
-      "D2D_SN_W_TRACKER_OSTD": "auto",
-      "D2D_CONNECTIONS": [
-        [
-          0,
-          1,
-          3,
-          12
-        ],
-        [
-          0,
-          2,
-          3,
-          16
-        ],
-        [
-          0,
-          4,
-          2,
-          8
-        ],
-        [
-          0,
-          8,
-          2,
-          4
-        ],
-        [
-          0,
-          12,
-          1,
-          1
-        ],
-        [
-          0,
-          16,
-          1,
-          2
-        ],
-        [
-          1,
-          4,
-          3,
-          8
-        ],
-        [
-          1,
-          8,
-          3,
-          4
-        ],
-        [
-          1,
-          12,
-          2,
-          1
-        ],
-        [
-          1,
-          16,
-          2,
-          2
-        ],
-        [
-          2,
-          12,
-          3,
-          1
-        ],
-        [
-          2,
-          16,
-          3,
-          2
-        ]
-      ],
-      "DIE_TOPOLOGIES": {
-        "0": "2261_5x4",
-        "1": "2261_5x4",
-        "2": "2261_5x4",
-        "3": "2261_5x4"
-      }
-    },
-    "die_config_path": "/Users/lixiang/Documents/工作/code/CrossRing/config/topologies/topo_2261_5x4.yaml",
-    "die_config_overrides": {
-      "TOPO_TYPE": "5x4",
-      "FLIT_SIZE": 128,
-      "BURST": 4,
-      "NETWORK_FREQUENCY": 2,
-      "RN_RDB_SIZE": 256,
-      "RN_WDB_SIZE": 256,
-      "SN_DDR_RDB_SIZE": 256,
-      "SN_DDR_WDB_SIZE": 256,
-      "SN_L2M_RDB_SIZE": 256,
-      "SN_L2M_WDB_SIZE": 256,
-      "UNIFIED_RW_TRACKER": false,
-      "SLICE_PER_LINK_HORIZONTAL": 9,
-      "SLICE_PER_LINK_VERTICAL": 9,
-      "IQ_CH_FIFO_DEPTH": 4,
-      "EQ_CH_FIFO_DEPTH": 4,
-      "IQ_OUT_FIFO_DEPTH_HORIZONTAL": 8,
-      "IQ_OUT_FIFO_DEPTH_VERTICAL": 8,
-      "IQ_OUT_FIFO_DEPTH_EQ": 8,
-      "RB_OUT_FIFO_DEPTH": 8,
-      "RB_IN_FIFO_DEPTH": 16,
-      "EQ_IN_FIFO_DEPTH": 16,
-      "IP_L2H_FIFO_DEPTH": 3,
-      "IP_H2L_H_FIFO_DEPTH": 2,
-      "IP_H2L_L_FIFO_DEPTH": 2,
-      "TL_Etag_T2_UE_MAX": 8,
-      "TL_Etag_T1_UE_MAX": 15,
-      "TR_Etag_T2_UE_MAX": 12,
-      "TU_Etag_T2_UE_MAX": 8,
-      "TU_Etag_T1_UE_MAX": 15,
-      "TD_Etag_T2_UE_MAX": 12,
-      "ETag_BOTHSIDE_UPGRADE": 0,
-      "ETAG_T1_ENABLED": true,
-      "ITag_TRIGGER_Th_H": 80,
-      "ITag_TRIGGER_Th_V": 80,
-      "ITag_MAX_Num_H": 1,
-      "ITag_MAX_Num_V": 1,
-      "DDR_R_LATENCY": 150,
-      "DDR_R_LATENCY_VAR": 0,
-      "DDR_W_LATENCY": 0,
-      "L2M_R_LATENCY": 12,
-      "L2M_W_LATENCY": 16,
-      "SN_TRACKER_RELEASE_LATENCY": 40,
-      "SN_PROCESSING_LATENCY": 2,
-      "RN_PROCESSING_LATENCY": 0,
-      "GDMA_BW_LIMIT": 128,
-      "SDMA_BW_LIMIT": 128,
-      "CDMA_BW_LIMIT": 128,
-      "DDR_BW_LIMIT": 128,
-      "L2M_BW_LIMIT": 128,
-      "CROSSRING_VERSION": "V1",
-      "RB_ONLY_TAG_NUM_HORIZONTAL": 2,
-      "RB_ONLY_TAG_NUM_VERTICAL": 3,
-      "ORDERING_PRESERVATION_MODE": 0,
-      "ORDERING_ETAG_UPGRADE_MODE": 0,
-      "ORDERING_GRANULARITY": 0,
-      "TL_ALLOWED_SOURCE_NODES": [
-        2,
-        3,
-        6,
-        7,
-        10,
-        11,
-        14,
-        15,
-        18,
-        19
-      ],
-      "TR_ALLOWED_SOURCE_NODES": [
-        0,
-        1,
-        4,
-        5,
-        8,
-        9,
-        12,
-        13,
-        16,
-        17
-      ],
-      "TU_ALLOWED_SOURCE_NODES": [
-        8,
-        9,
-        10,
-        11,
-        12,
-        13,
-        14,
-        15,
-        16,
-        17,
-        18,
-        19
-      ],
-      "TD_ALLOWED_SOURCE_NODES": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7
-      ],
-      "REVERSE_DIRECTION_ENABLED": 0,
-      "REVERSE_DIRECTION_THRESHOLD": 0.75,
-      "CHANNEL_SPEC": {
-        "gdma": 2,
-        "sdma": 0,
-        "cdma": 2,
-        "ddr": 2,
-        "l2m": 0
-      },
-      "IN_ORDER_PACKET_CATEGORIES": [
-        "REQ",
-        "RSP",
-        "DATA"
-      ],
-      "IN_ORDER_EJECTION_PAIRS": [],
-      "arbitration": {
-        "default": {
-          "type": "round_robin"
-        }
-      },
-      "RN_R_TRACKER_OSTD": "auto",
-      "RN_W_TRACKER_OSTD": "auto",
-      "SN_DDR_R_TRACKER_OSTD": "auto",
-      "SN_DDR_W_TRACKER_OSTD": "auto",
-      "SN_L2M_R_TRACKER_OSTD": "auto",
-      "SN_L2M_W_TRACKER_OSTD": "auto",
-      "GDMA_RW_GAP": "inf",
-      "SDMA_RW_GAP": "inf",
-      "ENABLE_CROSSPOINT_CONFLICT_CHECK": 0
-    },
-    "status": "failed",
-    "progress": 0,
-    "current_file": "",
-    "message": "仿真失败",
-    "error": "[Errno 32] Broken pipe\nTraceback (most recent call last):\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 399, in run_task\n    results_list = await loop.run_in_executor(None, run_parallel)\n  File \"/Users/lixiang/miniforge3/lib/python3.9/concurrent/futures/thread.py\", line 58, in run\n    result = self.fn(*self.args, **self.kwargs)\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 330, in run_parallel\n    future_to_file = {\n  File \"/Users/lixiang/Documents/工作/code/CrossRing/unified_web/backend/app/core/task_manager.py\", line 331, in <dictcomp>\n    executor.submit(_run_single_simulation, params): params['traffic_file']\n  File \"/Users/lixiang/miniforge3/lib/python3.9/concurrent/futures/process.py\", line 697, in submit\n    self._adjust_process_count()\n  File \"/Users/lixiang/miniforge3/lib/python3.9/concurrent/futures/process.py\", line 675, in _adjust_process_count\n    p.start()\n  File \"/Users/lixiang/miniforge3/lib/python3.9/multiprocessing/process.py\", line 121, in start\n    self._popen = self._Popen(self)\n  File \"/Users/lixiang/miniforge3/lib/python3.9/multiprocessing/context.py\", line 284, in _Popen\n    return Popen(process_obj)\n  File \"/Users/lixiang/miniforge3/lib/python3.9/multiprocessing/popen_spawn_posix.py\", line 32, in __init__\n    super().__init__(process_obj)\n  File \"/Users/lixiang/miniforge3/lib/python3.9/multiprocessing/popen_fork.py\", line 16, in __init__\n    util._flush_std_streams()\n  File \"/Users/lixiang/miniforge3/lib/python3.9/multiprocessing/util.py\", line 435, in _flush_std_streams\n    sys.stdout.flush()\nBrokenPipeError: [Errno 32] Broken pipe\n",
-    "results": {},
-    "sim_details": {
-      "file_index": 0,
-      "total_files": 8,
-      "current_file": "并行执行中 (8 进程)",
-      "sim_progress": 0,
-      "current_time": 0,
-      "max_time": 6000,
-      "req_count": 0,
-      "total_req": 0,
-      "recv_flits": 0,
-      "total_flits": 0,
-      "trans_flits": 0
-    },
-    "created_at": "2025-12-09T20:29:56.742475",
-    "started_at": "2025-12-09T20:29:56.742630",
-    "completed_at": "2025-12-09T20:29:56.749589",
+    "created_at": "2025-12-09T21:46:42.377330",
+    "started_at": "2025-12-09T21:46:42.377469",
+    "completed_at": "2025-12-09T21:50:38.393611",
     "_current_engine": null
   }
 ]

@@ -149,11 +149,6 @@ class LatencyBreakdownChart:
             totals={"marker": {"color": "#1890ff"}},
         ))
 
-        # 使用自定义颜色
-        fig.update_traces(
-            marker_color=colors,
-        )
-
         fig.update_layout(
             title="Tier6+ 延迟瀑布图",
             xaxis_title="层级",

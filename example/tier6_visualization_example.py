@@ -13,6 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.tier6 import Tier6Analyzer, TrafficFlow
 from src.tier6.visualization import (
     HierarchyGraphRenderer,
+    Hierarchy3DRenderer,
+    LevelConfig,
     LatencyBreakdownChart,
     BandwidthBottleneckChart,
     ScalingAnalysisChart,
@@ -55,6 +57,39 @@ def example_hierarchy_visualization():
     fig_network = renderer.render(hierarchy_data, style="network")
     fig_network.write_html("output/hierarchy_network.html")
     print("  生成: output/hierarchy_network.html")
+
+
+def example_3d_topology():
+    """3D交互式层级拓扑图示例"""
+    print("\n" + "=" * 60)
+    print("示例: 3D交互式层级拓扑图")
+    print("=" * 60)
+
+    # 创建3D渲染器
+    renderer = Hierarchy3DRenderer()
+
+    # 配置各层级
+    level_configs = [
+        LevelConfig(level="die", count=8, topology="mesh"),
+        LevelConfig(level="chip", count=4, topology="mesh"),
+        LevelConfig(level="board", count=2, topology="mesh"),
+        LevelConfig(level="server", count=2, topology="mesh"),
+        LevelConfig(level="pod", count=1, topology="mesh"),
+    ]
+
+    # 渲染3D拓扑图
+    fig = renderer.render(
+        level_configs,
+        show_inter_level_connections=True,
+        layout_type="circular"
+    )
+    fig.write_html("output/hierarchy_3d.html")
+    print("  生成: output/hierarchy_3d.html")
+
+    # 使用默认配置渲染
+    fig_default = renderer.render_default()
+    fig_default.write_html("output/hierarchy_3d_default.html")
+    print("  生成: output/hierarchy_3d_default.html")
 
 
 def example_latency_visualization():
@@ -269,7 +304,10 @@ if __name__ == "__main__":
     # 创建输出目录
     os.makedirs("output", exist_ok=True)
 
-    # 运行所有示例
+    # 运行3D拓扑图示例（新增）
+    example_3d_topology()
+
+    # 运行其他示例
     example_hierarchy_visualization()
     example_latency_visualization()
     example_bandwidth_visualization()
