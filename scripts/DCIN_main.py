@@ -52,7 +52,7 @@ def main():
         ]
     ]
     model.setup_traffic_scheduler(traffic_file_path=traffic_file_path, traffic_chains=traffic_chains)
-    # model.setup_debug(trace_packets=[3], update_interval=0.01)
+    # model.setup_debug(trace_packets=[515], update_interval=0.01)
     # model.setup_visualization(enable=1, update_interval=0.2, start_cycle=500)
 
     model.setup_result_analysis(
@@ -60,7 +60,7 @@ def main():
         flow_graph_interactive=1,  # 生成HTML交互式流量图
         plot_rn_bw_fig=0,
         fifo_utilization_heatmap=1,
-        show_result_analysis=0,  # 在浏览器中显示图像
+        show_result_analysis=1,  # 在浏览器中显示图像
         # CSV文件导出控制
         export_d2d_requests_csv=1,
         export_ip_bandwidth_csv=1,

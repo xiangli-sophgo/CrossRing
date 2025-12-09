@@ -387,9 +387,10 @@ class D2D_SN_Interface(IPInterface):
                         self.handle_local_cross_die_write_request(flit)
                     elif hasattr(flit, "req_type") and flit.req_type == "read":
                         # 跨Die读请求：使用修改后的SN处理机制
-                        # print(f"[D2D_SN] 处理跨Die读请求 packet_id={flit.packet_id}")
-                        # 标记为新请求，使用D2D专用的处理方法
-                        flit.req_attr = "new"
+                        # 保持原有的req_attr，不强制重置
+                        # 只有真正的新请求（没有req_attr属性或为None）才设置为"new"
+                        if not hasattr(flit, "req_attr") or flit.req_attr is None:
+                            flit.req_attr = "new"
                         self._handle_cross_die_read_request(flit)
                     else:
                         # 其他类型：直接跨Die转发
@@ -409,6 +410,10 @@ class D2D_SN_Interface(IPInterface):
 
         # 遵循基类逻辑：根据req_attr区分新请求和retry请求
         if getattr(flit, "req_attr", "new") == "new":
+            # 防重复检查：如果已在等待队列中，忽略重复请求
+            if any(r.packet_id == packet_id for r in self.sn_req_wait["write"]):
+                return
+
             # 新请求：检查资源
             has_tracker = self.sn_tracker_count["share"]["count"] > 0
             has_databuffer = self.sn_wdb_count["count"] >= flit.burst_length
@@ -441,6 +446,10 @@ class D2D_SN_Interface(IPInterface):
         packet_id = flit.packet_id
 
         if flit.req_attr == "new":
+            # 防重复检查：如果已在等待队列中，忽略重复请求
+            if any(r.packet_id == packet_id for r in self.sn_req_wait["read"]):
+                return
+
             # 使用基类的SN tracker分配逻辑
             if self.sn_tracker_count["ro"]["count"] > 0:
                 flit.sn_tracker_type = "ro"
@@ -461,7 +470,7 @@ class D2D_SN_Interface(IPInterface):
                 self.sn_req_wait[flit.req_type].append(flit)
         else:
             # 重试请求：直接转发
-            print(f"[D2D_SN] 转发重试的跨Die读请求 packet_id={packet_id}")
+            # print(f"[D2D_SN] 转发重试的跨Die读请求 packet_id={packet_id}")
             self._handle_cross_die_transfer(flit)
 
     def handle_local_cross_die_read_request(self, flit: Flit):

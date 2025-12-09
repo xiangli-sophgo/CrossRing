@@ -405,7 +405,8 @@ class D2D_Model:
 
         # 获取Die的拓扑类型
         die_topologies = getattr(self.config, "DIE_TOPOLOGIES", {})
-        topology_str = die_topologies.get(die_id)
+        # 尝试整数键和字符串键（配置可能使用字符串键）
+        topology_str = die_topologies.get(die_id) or die_topologies.get(str(die_id))
 
         if topology_str:
             # 根据拓扑类型加载对应的配置文件

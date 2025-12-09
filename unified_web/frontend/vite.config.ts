@@ -14,11 +14,11 @@ export default defineConfig({
     port: 3002,  // 使用新端口，避免与现有项目冲突
     proxy: {
       '/api': {
-        target: 'http://localhost:8002',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:8002',
+        target: 'ws://localhost:8000',
         ws: true,
       },
     },
