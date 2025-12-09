@@ -1,6 +1,6 @@
 [
   {
-    "task_id": "0a543351",
+    "task_id": "dcdce8ea",
     "mode": "dcin",
     "topology": "5x4",
     "config_path": "C:\\Users\\xiang\\Documents\\code\\CrossRing\\config\\topologies\\dcin_4die_config.yaml",
@@ -17,7 +17,7 @@
     ],
     "max_time": 6000,
     "experiment_name": "2DIE_4GDMA",
-    "experiment_description": "2DIE情况，4GDMA",
+    "experiment_description": null,
     "save_to_db": true,
     "max_workers": null,
     "config_overrides": {
@@ -262,49 +262,49 @@
         {
           "file": "2DIE_0_3_16_share_d2d_R.txt",
           "status": "completed",
-          "duration": 192.15428185462952,
+          "duration": 173.5851287841797,
           "error": null
         },
         {
           "file": "2DIE_0_2_16_share_d2d_R.txt",
           "status": "completed",
-          "duration": 198.7554750442505,
+          "duration": 180.37868475914001,
           "error": null
         },
         {
           "file": "2DIE_0_3_16_share_d2d_c2c_R.txt",
           "status": "completed",
-          "duration": 217.51255011558533,
+          "duration": 208.20970463752747,
           "error": null
         },
         {
           "file": "2DIE_0_2_16_share_d2d_c2c_R.txt",
           "status": "completed",
-          "duration": 234.15829038619995,
+          "duration": 222.071031332016,
           "error": null
         },
         {
           "file": "2DIE_0_3_16_share_d2d_W.txt",
           "status": "completed",
-          "duration": 245.46739149093628,
+          "duration": 227.5784947872162,
           "error": null
         },
         {
           "file": "2DIE_0_2_16_share_d2d_W.txt",
           "status": "completed",
-          "duration": 247.42830324172974,
+          "duration": 236.5672323703766,
           "error": null
         },
         {
           "file": "2DIE_0_3_16_share_d2d_c2c_W.txt",
           "status": "completed",
-          "duration": 274.528692483902,
+          "duration": 258.430016040802,
           "error": null
         },
         {
           "file": "2DIE_0_2_16_share_d2d_c2c_W.txt",
           "status": "completed",
-          "duration": 281.1543278694153,
+          "duration": 267.65232372283936,
           "error": null
         }
       ]
@@ -322,337 +322,9 @@
       "total_flits": 0,
       "trans_flits": 0
     },
-    "created_at": "2025-12-09T17:46:42.222471",
-    "started_at": "2025-12-09T17:46:42.222578",
-    "completed_at": "2025-12-09T17:51:43.322207",
-    "_current_engine": null
-  },
-  {
-    "task_id": "4018d34c",
-    "mode": "dcin",
-    "topology": "5x4",
-    "config_path": "C:\\Users\\xiang\\Documents\\code\\CrossRing\\config\\topologies\\dcin_4die_config.yaml",
-    "traffic_file_path": "C:\\Users\\xiang\\Documents\\code\\CrossRing\\traffic",
-    "traffic_files": [
-      "2DIE/DIE0_2_16share_d2d_R.txt",
-      "2DIE/DIE0_2_16share_d2d_W.txt",
-      "2DIE/DIE0_2_c2c_16share_d2d_R.txt",
-      "2DIE/DIE0_2_c2c_16share_d2d_W.txt",
-      "2DIE/DIE0_3_16share_d2d_R.txt",
-      "2DIE/DIE0_3_16share_d2d_W.txt",
-      "2DIE/DIE0_3_c2c_16share_d2d_R.txt",
-      "2DIE/DIE0_3_c2c_16share_d2d_W.txt"
-    ],
-    "max_time": 6000,
-    "experiment_name": "2DIE_128ostd",
-    "experiment_description": "2DIE情况，ostd放大一倍",
-    "save_to_db": true,
-    "max_workers": null,
-    "config_overrides": {
-      "NUM_DIES": 4,
-      "D2D_AR_LATENCY": 20,
-      "D2D_R_LATENCY": 20,
-      "D2D_AW_LATENCY": 20,
-      "D2D_W_LATENCY": 20,
-      "D2D_B_LATENCY": 20,
-      "D2D_RN_BW_LIMIT": 192,
-      "D2D_SN_BW_LIMIT": 192,
-      "D2D_AXI_BANDWIDTH": 192,
-      "D2D_RN_RDB_SIZE": 512,
-      "D2D_RN_WDB_SIZE": 512,
-      "D2D_SN_RDB_SIZE": 512,
-      "D2D_SN_WDB_SIZE": 512,
-      "D2D_RN_R_TRACKER_OSTD": "auto",
-      "D2D_RN_W_TRACKER_OSTD": "auto",
-      "D2D_SN_R_TRACKER_OSTD": "auto",
-      "D2D_SN_W_TRACKER_OSTD": "auto",
-      "D2D_CONNECTIONS": [
-        [
-          0,
-          1,
-          3,
-          12
-        ],
-        [
-          0,
-          2,
-          3,
-          16
-        ],
-        [
-          0,
-          4,
-          2,
-          8
-        ],
-        [
-          0,
-          8,
-          2,
-          4
-        ],
-        [
-          0,
-          12,
-          1,
-          1
-        ],
-        [
-          0,
-          16,
-          1,
-          2
-        ],
-        [
-          1,
-          4,
-          3,
-          8
-        ],
-        [
-          1,
-          8,
-          3,
-          4
-        ],
-        [
-          1,
-          12,
-          2,
-          1
-        ],
-        [
-          1,
-          16,
-          2,
-          2
-        ],
-        [
-          2,
-          12,
-          3,
-          1
-        ],
-        [
-          2,
-          16,
-          3,
-          2
-        ]
-      ]
-    },
-    "die_config_path": "C:\\Users\\xiang\\Documents\\code\\CrossRing\\config\\topologies\\topo_2261_5x4.yaml",
-    "die_config_overrides": {
-      "TOPO_TYPE": "5x4",
-      "FLIT_SIZE": 128,
-      "BURST": 4,
-      "NETWORK_FREQUENCY": 2,
-      "RN_RDB_SIZE": 512,
-      "RN_WDB_SIZE": 512,
-      "SN_DDR_RDB_SIZE": 512,
-      "SN_DDR_WDB_SIZE": 512,
-      "SN_L2M_RDB_SIZE": 512,
-      "SN_L2M_WDB_SIZE": 512,
-      "UNIFIED_RW_TRACKER": false,
-      "SLICE_PER_LINK_HORIZONTAL": 9,
-      "SLICE_PER_LINK_VERTICAL": 9,
-      "IQ_CH_FIFO_DEPTH": 4,
-      "EQ_CH_FIFO_DEPTH": 4,
-      "IQ_OUT_FIFO_DEPTH_HORIZONTAL": 8,
-      "IQ_OUT_FIFO_DEPTH_VERTICAL": 8,
-      "IQ_OUT_FIFO_DEPTH_EQ": 8,
-      "RB_OUT_FIFO_DEPTH": 8,
-      "RB_IN_FIFO_DEPTH": 16,
-      "EQ_IN_FIFO_DEPTH": 16,
-      "IP_L2H_FIFO_DEPTH": 3,
-      "IP_H2L_H_FIFO_DEPTH": 2,
-      "IP_H2L_L_FIFO_DEPTH": 2,
-      "TL_Etag_T2_UE_MAX": 8,
-      "TL_Etag_T1_UE_MAX": 15,
-      "TR_Etag_T2_UE_MAX": 12,
-      "TU_Etag_T2_UE_MAX": 8,
-      "TU_Etag_T1_UE_MAX": 15,
-      "TD_Etag_T2_UE_MAX": 12,
-      "ETag_BOTHSIDE_UPGRADE": 0,
-      "ETAG_T1_ENABLED": true,
-      "ITag_TRIGGER_Th_H": 80,
-      "ITag_TRIGGER_Th_V": 80,
-      "ITag_MAX_Num_H": 1,
-      "ITag_MAX_Num_V": 1,
-      "DDR_R_LATENCY": 150,
-      "DDR_R_LATENCY_VAR": 0,
-      "DDR_W_LATENCY": 0,
-      "L2M_R_LATENCY": 12,
-      "L2M_W_LATENCY": 16,
-      "SN_TRACKER_RELEASE_LATENCY": 40,
-      "SN_PROCESSING_LATENCY": 2,
-      "RN_PROCESSING_LATENCY": 0,
-      "GDMA_BW_LIMIT": 128,
-      "SDMA_BW_LIMIT": 128,
-      "CDMA_BW_LIMIT": 128,
-      "DDR_BW_LIMIT": 128,
-      "L2M_BW_LIMIT": 128,
-      "CROSSRING_VERSION": "V1",
-      "RB_ONLY_TAG_NUM_HORIZONTAL": 2,
-      "RB_ONLY_TAG_NUM_VERTICAL": 3,
-      "ORDERING_PRESERVATION_MODE": 0,
-      "ORDERING_ETAG_UPGRADE_MODE": 0,
-      "ORDERING_GRANULARITY": 0,
-      "TL_ALLOWED_SOURCE_NODES": [
-        2,
-        3,
-        6,
-        7,
-        10,
-        11,
-        14,
-        15,
-        18,
-        19
-      ],
-      "TR_ALLOWED_SOURCE_NODES": [
-        0,
-        1,
-        4,
-        5,
-        8,
-        9,
-        12,
-        13,
-        16,
-        17
-      ],
-      "TU_ALLOWED_SOURCE_NODES": [
-        8,
-        9,
-        10,
-        11,
-        12,
-        13,
-        14,
-        15,
-        16,
-        17,
-        18,
-        19
-      ],
-      "TD_ALLOWED_SOURCE_NODES": [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7
-      ],
-      "REVERSE_DIRECTION_ENABLED": 0,
-      "REVERSE_DIRECTION_THRESHOLD": 0.75,
-      "CHANNEL_SPEC": {
-        "gdma": 2,
-        "sdma": 0,
-        "cdma": 2,
-        "ddr": 2,
-        "l2m": 0
-      },
-      "IN_ORDER_PACKET_CATEGORIES": [
-        "REQ",
-        "RSP",
-        "DATA"
-      ],
-      "IN_ORDER_EJECTION_PAIRS": [],
-      "arbitration": {
-        "default": {
-          "type": "round_robin"
-        }
-      },
-      "RN_R_TRACKER_OSTD": "auto",
-      "RN_W_TRACKER_OSTD": "auto",
-      "SN_DDR_R_TRACKER_OSTD": "auto",
-      "SN_DDR_W_TRACKER_OSTD": "auto",
-      "SN_L2M_R_TRACKER_OSTD": "auto",
-      "SN_L2M_W_TRACKER_OSTD": "auto",
-      "GDMA_RW_GAP": "inf",
-      "SDMA_RW_GAP": "inf",
-      "ENABLE_CROSSPOINT_CONFLICT_CHECK": 0
-    },
-    "status": "completed",
-    "progress": 100,
-    "current_file": "",
-    "message": "仿真完成",
-    "error": null,
-    "results": {
-      "total_files": 8,
-      "completed_files": 8,
-      "failed_files": 0,
-      "experiment_id": 26,
-      "file_results": [
-        {
-          "file": "2DIE/DIE0_2_16share_d2d_R.txt",
-          "status": "completed",
-          "duration": 188.32776761054993,
-          "error": null
-        },
-        {
-          "file": "2DIE/DIE0_2_16share_d2d_W.txt",
-          "status": "completed",
-          "duration": 191.06451058387756,
-          "error": null
-        },
-        {
-          "file": "2DIE/DIE0_3_16share_d2d_R.txt",
-          "status": "completed",
-          "duration": 192.81071615219116,
-          "error": null
-        },
-        {
-          "file": "2DIE/DIE0_3_16share_d2d_W.txt",
-          "status": "completed",
-          "duration": 195.2141411304474,
-          "error": null
-        },
-        {
-          "file": "2DIE/DIE0_3_c2c_16share_d2d_W.txt",
-          "status": "completed",
-          "duration": 215.7008078098297,
-          "error": null
-        },
-        {
-          "file": "2DIE/DIE0_3_c2c_16share_d2d_R.txt",
-          "status": "completed",
-          "duration": 216.6029407978058,
-          "error": null
-        },
-        {
-          "file": "2DIE/DIE0_2_c2c_16share_d2d_R.txt",
-          "status": "completed",
-          "duration": 215.42348051071167,
-          "error": null
-        },
-        {
-          "file": "2DIE/DIE0_2_c2c_16share_d2d_W.txt",
-          "status": "completed",
-          "duration": 217.6774287223816,
-          "error": null
-        }
-      ]
-    },
-    "sim_details": {
-      "file_index": 8,
-      "total_files": 8,
-      "current_file": "已完成: 2DIE/DIE0_2_c2c_16share_d2d_W.txt",
-      "sim_progress": 100,
-      "current_time": 6000,
-      "max_time": 6000,
-      "req_count": 0,
-      "total_req": 0,
-      "recv_flits": 0,
-      "total_flits": 0,
-      "trans_flits": 0
-    },
-    "created_at": "2025-12-09T16:59:06.804539",
-    "started_at": "2025-12-09T16:59:06.805092",
-    "completed_at": "2025-12-09T17:03:03.170626",
+    "created_at": "2025-12-09T17:54:02.962137",
+    "started_at": "2025-12-09T17:54:02.962271",
+    "completed_at": "2025-12-09T17:58:50.465115",
     "_current_engine": null
   }
 ]

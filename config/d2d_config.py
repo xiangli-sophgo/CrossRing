@@ -40,6 +40,19 @@ class D2DConfig:
         # 如果指定了单独的DIE拓扑配置文件，更新DIE_TOPOLOGIES
         if die_config_file:
             self._apply_die_config_file(die_config_file)
+        else:
+            # 从DIE_TOPOLOGIES自动加载第一个Die的拓扑配置来获取共享参数
+            if self.DIE_TOPOLOGIES:
+                first_topo = list(self.DIE_TOPOLOGIES.values())[0]
+                topo_file = os.path.join(os.path.dirname(__file__), "topologies", f"topo_{first_topo}.yaml")
+                from config.config import CrossRingConfig
+                self.die_config = CrossRingConfig(topo_file)
+                if not self.NETWORK_FREQUENCY:
+                    self.NETWORK_FREQUENCY = self.die_config.NETWORK_FREQUENCY
+                if not self.FLIT_SIZE:
+                    self.FLIT_SIZE = self.die_config.FLIT_SIZE
+                if not self.BURST:
+                    self.BURST = self.die_config.BURST
 
         self._generate_d2d_pairs()
         self._update_channel_spec_for_d2d()

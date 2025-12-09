@@ -894,6 +894,8 @@ class IPInterface:
                     d2d_model.record_read_data_received(flit.packet_id, die_id, burst_length, is_cross_die=False)
 
             # 读数据到达RN端，需要收集到data buffer中
+            if flit.packet_id not in self.rn_rdb:
+                self.rn_rdb[flit.packet_id] = []
             self.rn_rdb[flit.packet_id].append(flit)
 
             # 添加到RequestTracker
@@ -910,7 +912,9 @@ class IPInterface:
                             if d2d_model:
                                 d2d_model.d2d_requests_completed[die_id] += 1
             # 检查是否收集完整个burst
-            if len(self.rn_rdb[flit.packet_id]) == flit.burst_length:
+            collected = len(self.rn_rdb[flit.packet_id])
+            expected = flit.burst_length
+            if collected == expected:
                 # 标记读请求完成
                 if hasattr(self, "request_tracker") and self.request_tracker:
                     self.request_tracker.mark_request_completed(flit.packet_id, self.current_cycle)
