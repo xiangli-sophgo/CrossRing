@@ -7,9 +7,10 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Tabs, Empty, Button, Space, Tooltip } from 'antd';
 import {
-  CloseOutlined,
   ExpandOutlined,
   ReloadOutlined,
+  ZoomInOutlined,
+  ZoomOutOutlined,
 } from '@ant-design/icons';
 import { getResultHtmlUrl } from '../Experiments/api';
 
@@ -38,13 +39,24 @@ const saveTabs = (tabs: TabItem[]) => {
   localStorage.setItem('analysis_tabs', JSON.stringify(tabs));
 };
 
+// 加载上次活动的标签页
+const loadActiveKey = (): string => {
+  return localStorage.getItem('analysis_active_key') || '';
+};
+
+// 保存当前活动标签页
+const saveActiveKey = (key: string) => {
+  localStorage.setItem('analysis_active_key', key);
+};
+
 export default function Analysis() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
   const [tabs, setTabs] = useState<TabItem[]>(loadTabs);
-  const [activeKey, setActiveKey] = useState<string>('');
+  const [activeKey, setActiveKey] = useState<string>(loadActiveKey);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [zoom, setZoom] = useState(0.8); // 默认80%缩放
 
   // 从 URL 参数获取要打开的结果
   useEffect(() => {
@@ -70,18 +82,24 @@ export default function Analysis() {
         saveTabs(newTabs);
       }
 
+      // 设置为当前活动标签页
       setActiveKey(key);
+      saveActiveKey(key);
       // 清除 URL 参数
       setSearchParams({});
+    } else if (!activeKey && tabs.length > 0) {
+      // 没有URL参数时，如果activeKey为空，使用最后一个标签页
+      const lastKey = tabs[tabs.length - 1].key;
+      setActiveKey(lastKey);
+      saveActiveKey(lastKey);
     }
-  }, [searchParams]);
+  }, [searchParams, tabs.length]);
 
-  // 初始化时设置激活的标签页
-  useEffect(() => {
-    if (!activeKey && tabs.length > 0) {
-      setActiveKey(tabs[0].key);
-    }
-  }, [tabs]);
+  // 切换标签页时保存activeKey
+  const handleTabChange = (key: string) => {
+    setActiveKey(key);
+    saveActiveKey(key);
+  };
 
   // 关闭标签页
   const handleTabClose = (targetKey: string) => {
@@ -91,7 +109,12 @@ export default function Analysis() {
 
     // 如果关闭的是当前激活的标签页，切换到其他标签
     if (activeKey === targetKey && newTabs.length > 0) {
-      setActiveKey(newTabs[newTabs.length - 1].key);
+      const newKey = newTabs[newTabs.length - 1].key;
+      setActiveKey(newKey);
+      saveActiveKey(newKey);
+    } else if (newTabs.length === 0) {
+      setActiveKey('');
+      saveActiveKey('');
     }
   };
 
@@ -128,15 +151,17 @@ export default function Analysis() {
       </span>
     ),
     children: (
-      <div style={{ height: 'calc(100vh - 220px)', position: 'relative' }}>
+      <div style={{ height: 'calc(100vh - 160px)', position: 'relative', overflow: 'auto' }}>
         <iframe
           key={`${tab.key}-${refreshKey}`}
           src={getResultHtmlUrl(tab.resultId, tab.experimentId)}
           style={{
-            width: '100%',
-            height: '100%',
+            width: `${100 / zoom}%`,
+            height: `${100 / zoom}%`,
             border: 'none',
             borderRadius: 4,
+            transform: `scale(${zoom})`,
+            transformOrigin: 'top left',
           }}
           title={tab.label}
         />
@@ -173,35 +198,47 @@ export default function Analysis() {
 
   return (
     <div>
-      {/* 工具栏 */}
-      <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end' }}>
-        <Space>
-          <Tooltip title="刷新当前报告">
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={handleRefresh}
-              disabled={!currentTab}
-            />
-          </Tooltip>
-          <Tooltip title="在新窗口打开">
-            <Button
-              icon={<ExpandOutlined />}
-              onClick={() => currentTab && handleOpenInNewWindow(currentTab)}
-              disabled={!currentTab}
-            />
-          </Tooltip>
-        </Space>
-      </div>
-
-      {/* 标签页 */}
       <Tabs
         type="editable-card"
         hideAdd
         activeKey={activeKey}
-        onChange={setActiveKey}
+        onChange={handleTabChange}
         onEdit={handleTabEdit}
         items={tabItems}
         tabBarStyle={{ marginBottom: 0 }}
+        tabBarExtraContent={
+          <Space>
+            <Tooltip title="缩小">
+              <Button
+                icon={<ZoomOutOutlined />}
+                onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}
+                disabled={zoom <= 0.5}
+              />
+            </Tooltip>
+            <span style={{ minWidth: 45, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
+            <Tooltip title="放大">
+              <Button
+                icon={<ZoomInOutlined />}
+                onClick={() => setZoom(z => Math.min(1, z + 0.1))}
+                disabled={zoom >= 1}
+              />
+            </Tooltip>
+            <Tooltip title="刷新当前报告">
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={handleRefresh}
+                disabled={!currentTab}
+              />
+            </Tooltip>
+            <Tooltip title="在新窗口打开">
+              <Button
+                icon={<ExpandOutlined />}
+                onClick={() => currentTab && handleOpenInNewWindow(currentTab)}
+                disabled={!currentTab}
+              />
+            </Tooltip>
+          </Space>
+        }
       />
     </div>
   );

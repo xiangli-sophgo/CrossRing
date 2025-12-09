@@ -64,6 +64,8 @@ class SimulationEngine:
         self.model = None
         self.config = None
         self._cancelled = False
+        self._progress_callback = None
+        self._last_progress_data = None
 
     def _init_kcin_model(self):
         """初始化KCIN模型"""
@@ -77,6 +79,9 @@ class SimulationEngine:
             if hasattr(self.config, key):
                 setattr(self.config, key, value)
 
+        # 处理配置中的特殊值（auto、.inf等）
+        self._resolve_config_types()
+
         topo_type = self.config.TOPO_TYPE if self.config.TOPO_TYPE else self.topology
 
         self.model = REQ_RSP_model(
@@ -85,6 +90,58 @@ class SimulationEngine:
             topo_type=topo_type,
             verbose=self.verbose,
         )
+
+    def _resolve_config_types(self):
+        """处理配置中需要特殊类型转换的值"""
+        import math
+
+        burst = getattr(self.config, 'BURST', 4)
+
+        # 处理 "auto" tracker 值
+        auto_tracker_configs = [
+            ('RN_R_TRACKER_OSTD', 'RN_RDB_SIZE'),
+            ('RN_W_TRACKER_OSTD', 'RN_WDB_SIZE'),
+            ('SN_DDR_R_TRACKER_OSTD', 'SN_DDR_RDB_SIZE'),
+            ('SN_DDR_W_TRACKER_OSTD', 'SN_DDR_WDB_SIZE'),
+            ('SN_L2M_R_TRACKER_OSTD', 'SN_L2M_RDB_SIZE'),
+            ('SN_L2M_W_TRACKER_OSTD', 'SN_L2M_WDB_SIZE'),
+        ]
+
+        for tracker_attr, db_size_attr in auto_tracker_configs:
+            val = getattr(self.config, tracker_attr, None)
+            if isinstance(val, str):
+                db_size = getattr(self.config, db_size_attr, burst * 4)
+                setattr(self.config, tracker_attr, db_size // burst)
+
+        # 处理 ".inf" 等特殊数值
+        inf_configs = ['GDMA_RW_GAP', 'SDMA_RW_GAP', 'CDMA_RW_GAP']
+        for attr in inf_configs:
+            val = getattr(self.config, attr, None)
+            if isinstance(val, str):
+                if val.lower() in ('.inf', 'inf', 'infinity'):
+                    setattr(self.config, attr, math.inf)
+                else:
+                    try:
+                        setattr(self.config, attr, int(float(val)))
+                    except ValueError:
+                        setattr(self.config, attr, math.inf)
+
+        # 确保其他数值配置是正确类型
+        int_configs = [
+            'FLIT_SIZE', 'BURST', 'NETWORK_FREQUENCY',
+            'RN_RDB_SIZE', 'RN_WDB_SIZE',
+            'SN_DDR_RDB_SIZE', 'SN_DDR_WDB_SIZE',
+            'SN_L2M_RDB_SIZE', 'SN_L2M_WDB_SIZE',
+            'IQ_CH_FIFO_DEPTH', 'EQ_CH_FIFO_DEPTH',
+            'DDR_R_LATENCY', 'DDR_W_LATENCY', 'L2M_R_LATENCY', 'L2M_W_LATENCY',
+        ]
+        for attr in int_configs:
+            val = getattr(self.config, attr, None)
+            if isinstance(val, str):
+                try:
+                    setattr(self.config, attr, int(float(val)))
+                except (ValueError, TypeError):
+                    pass
 
     def _init_dcin_model(self):
         """初始化DCIN模型"""
@@ -119,6 +176,7 @@ class SimulationEngine:
         traffic_file_path: str,
         traffic_files: List[str],
         result_save_path: Optional[str] = None,
+        show_result_analysis: bool = False,
     ):
         """
         设置仿真参数
@@ -127,7 +185,10 @@ class SimulationEngine:
             traffic_file_path: 流量文件目录
             traffic_files: 流量文件列表
             result_save_path: 结果保存路径
+            show_result_analysis: 是否在浏览器中打开结果分析报告
         """
+        self._show_result_analysis = show_result_analysis
+
         # 初始化模型
         if self.mode == SimulationMode.KCIN:
             self._init_kcin_model()
@@ -141,42 +202,59 @@ class SimulationEngine:
             traffic_chains=traffic_chains,
         )
 
-        # 设置结果分析
-        if result_save_path:
-            if self.mode == SimulationMode.KCIN:
-                self.model.setup_result_analysis(
-                    plot_RN_BW_fig=0,
-                    flow_graph_interactive=1,
-                    fifo_utilization_heatmap=1,
-                    result_save_path=result_save_path,
-                    show_result_analysis=0,
-                )
-            else:
-                self.model.setup_result_analysis(
-                    flow_graph_interactive=1,
-                    plot_rn_bw_fig=0,
-                    fifo_utilization_heatmap=1,
-                    show_result_analysis=0,
-                    export_d2d_requests_csv=1,
-                    export_ip_bandwidth_csv=1,
-                )
+        # 设置结果分析（始终调用以初始化result_processor）
+        if self.mode == SimulationMode.KCIN:
+            self.model.setup_result_analysis(
+                plot_RN_BW_fig=0,
+                flow_graph_interactive=1,
+                fifo_utilization_heatmap=1,
+                result_save_path=result_save_path or "",
+                show_result_analysis=show_result_analysis,
+            )
+        else:
+            self.model.setup_result_analysis(
+                flow_graph_interactive=1,
+                plot_rn_bw_fig=0,
+                fifo_utilization_heatmap=1,
+                show_result_analysis=show_result_analysis,
+                export_d2d_requests_csv=1,
+                export_ip_bandwidth_csv=1,
+            )
+
+    def set_progress_callback(self, callback: Callable[[Dict[str, Any]], None]):
+        """设置进度回调函数"""
+        self._progress_callback = callback
+
+    def _on_progress(self, data: Dict[str, Any]):
+        """内部进度处理"""
+        self._last_progress_data = data
+        if self._progress_callback:
+            self._progress_callback(data)
 
     def run_sync(
         self,
         max_time: int = 6000,
-        print_interval: int = 200,
+        print_interval: int = None,
     ) -> SimulationResult:
         """
         同步执行仿真
 
         Args:
             max_time: 最大仿真时间
-            print_interval: 打印间隔
+            print_interval: 打印间隔，默认为max_time/10（每10%打印一次）
 
         Returns:
             SimulationResult
         """
         start_time = time.time()
+
+        # 计算print_interval：默认每10%打印一次
+        if print_interval is None:
+            print_interval = max(100, max_time // 10)
+
+        # 设置模型的进度回调
+        if self.model:
+            self.model.progress_callback = self._on_progress
 
         try:
             # 执行仿真
@@ -200,6 +278,8 @@ class SimulationEngine:
         except Exception as e:
             duration = time.time() - start_time
             error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            print(f"仿真过程中出现错误: {str(e)}")
+            print(f"详细堆栈:\n{traceback.format_exc()}")
 
             return SimulationResult(
                 status=SimulationStatus.FAILED,
@@ -211,7 +291,7 @@ class SimulationEngine:
     async def run_async(
         self,
         max_time: int = 6000,
-        print_interval: int = 200,
+        print_interval: int = None,
         progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> SimulationResult:
         """
@@ -219,7 +299,7 @@ class SimulationEngine:
 
         Args:
             max_time: 最大仿真时间
-            print_interval: 打印间隔
+            print_interval: 打印间隔，默认为max_time/10
             progress_callback: 进度回调函数 (current_time, max_time)
 
         Returns:
@@ -260,11 +340,14 @@ class SimulationEngine:
     def cancel(self):
         """取消仿真"""
         self._cancelled = True
-        # 注意: 当前模型实现不支持中断，这里只是标记
+        # 设置模型的取消标志
+        if self.model and hasattr(self.model, '_cancelled'):
+            self.model._cancelled = True
 
     def save_to_database(
         self,
         experiment_name: str,
+        description: Optional[str] = None,
         config_params: Optional[Dict[str, Any]] = None,
     ) -> Optional[int]:
         """
@@ -272,6 +355,7 @@ class SimulationEngine:
 
         Args:
             experiment_name: 实验名称
+            description: 实验描述
             config_params: 额外的配置参数
 
         Returns:
@@ -279,7 +363,7 @@ class SimulationEngine:
         """
         try:
             if hasattr(self.model, 'save_to_database'):
-                return self.model.save_to_database(experiment_name=experiment_name)
+                return self.model.save_to_database(experiment_name=experiment_name, description=description)
         except Exception as e:
             print(f"保存到数据库失败: {e}")
 

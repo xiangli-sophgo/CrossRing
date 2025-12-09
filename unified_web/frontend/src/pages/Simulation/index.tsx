@@ -2,6 +2,7 @@
  * 仿真执行页面
  */
 import React, { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Typography,
   Card,
@@ -31,6 +32,7 @@ import {
   Tooltip,
   Modal,
   Tree,
+  AutoComplete,
 } from 'antd'
 import {
   PlayCircleOutlined,
@@ -57,6 +59,7 @@ import {
   runSimulation,
   getTaskStatus,
   cancelTask,
+  deleteTask,
   getTaskHistory,
   getConfigs,
   getTrafficFilesTree,
@@ -70,6 +73,8 @@ import {
   type TrafficTreeNode,
   type TrafficFileContentResponse,
 } from '@/api/simulation'
+import { getExperiments } from '@/api/experiments'
+import type { Experiment } from '@/types'
 
 const { Title, Text } = Typography
 const { Option } = Select
@@ -198,6 +203,7 @@ const getStepStatus = (stepIndex: number, currentStep: number, taskStatus?: stri
 }
 
 const Simulation: React.FC = () => {
+  const navigate = useNavigate()
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
   const [configs, setConfigs] = useState<{ kcin: ConfigOption[]; dcin: ConfigOption[] }>({ kcin: [], dcin: [] })
@@ -228,19 +234,34 @@ const Simulation: React.FC = () => {
   const [previewContent, setPreviewContent] = useState<TrafficFileContentResponse | null>(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
 
+  // 已有实验列表（用于实验名称自动完成）
+  const [existingExperiments, setExistingExperiments] = useState<Experiment[]>([])
+
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // 加载配置和历史
   useEffect(() => {
     loadConfigs()
     loadHistory()
-    loadTrafficFilesTree()
+    loadExistingExperiments()
+    // 初始加载时使用默认模式(kcin)过滤流量文件
+    loadTrafficFilesTree('kcin')
     return () => {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current)
       }
     }
   }, [])
+
+  // 加载已有实验列表
+  const loadExistingExperiments = async () => {
+    try {
+      const experiments = await getExperiments()
+      setExistingExperiments(experiments)
+    } catch (error) {
+      console.error('加载实验列表失败:', error)
+    }
+  }
 
   const loadConfigs = async () => {
     try {
@@ -249,7 +270,10 @@ const Simulation: React.FC = () => {
       // 加载默认KCIN配置 (topo_5x4.yaml)
       const defaultConfig = data.kcin.find((c: ConfigOption) => c.path.includes('topo_5x4'))
       if (defaultConfig) {
-        form.setFieldsValue({ config_path: defaultConfig.path })
+        // 延迟设置表单值，确保Select组件已渲染
+        setTimeout(() => {
+          form.setFieldsValue({ config_path: defaultConfig.path })
+        }, 0)
         loadConfigContent(defaultConfig.path)
       }
     } catch (error) {
@@ -269,10 +293,10 @@ const Simulation: React.FC = () => {
     }
   }
 
-  const loadTrafficFilesTree = async () => {
+  const loadTrafficFilesTree = async (filterMode?: 'kcin' | 'dcin') => {
     setLoadingFiles(true)
     try {
-      const data = await getTrafficFilesTree()
+      const data = await getTrafficFilesTree(filterMode)
       setTrafficTree(data.tree)
     } catch (error) {
       console.error('加载流量文件失败:', error)
@@ -370,13 +394,12 @@ const Simulation: React.FC = () => {
         die_config_overrides: values.mode === 'dcin' && Object.keys(dieConfigValues).length > 0 ? dieConfigValues : undefined,
         traffic_source: 'file',
         traffic_files: selectedFiles,
-        traffic_path: currentPath,
         max_time: values.max_time,
         save_to_db: values.save_to_db,
         experiment_name: values.experiment_name,
-        result_granularity: values.result_granularity,
+        experiment_description: values.experiment_description,
+        max_workers: values.max_workers,
       }
-
       const response = await runSimulation(request)
       message.success(`仿真任务已创建: ${response.task_id}`)
       setStartTime(Date.now())
@@ -418,7 +441,7 @@ const Simulation: React.FC = () => {
     }
 
     poll()
-    pollIntervalRef.current = setInterval(poll, 2000)
+    pollIntervalRef.current = setInterval(poll, 1000)
   }
 
   // 取消任务
@@ -464,40 +487,6 @@ const Simulation: React.FC = () => {
 
   return (
     <div>
-      {/* 流程步骤指示器 */}
-      <Card style={{ marginBottom: 24 }}>
-        <Steps
-          current={currentStep}
-          items={[
-            {
-              title: '配置参数',
-              description: '设置仿真模式和拓扑',
-              icon: <SettingOutlined />,
-              status: getStepStatus(0, currentStep, currentTask?.status),
-            },
-            {
-              title: '选择文件',
-              description: `已选${selectedFiles.length}个文件`,
-              icon: <FileTextOutlined />,
-              status: getStepStatus(1, currentStep, currentTask?.status),
-            },
-            {
-              title: '执行仿真',
-              description: currentTask?.status === 'running' ? `${currentTask.progress}%` : '运行仿真任务',
-              icon: currentTask?.status === 'running' ? <LoadingOutlined /> : <ThunderboltOutlined />,
-              status: getStepStatus(2, currentStep, currentTask?.status),
-            },
-            {
-              title: '查看结果',
-              description: currentTask?.status === 'completed' ? '仿真完成' :
-                          currentTask?.status === 'failed' ? '仿真失败' : '等待完成',
-              icon: <TrophyOutlined />,
-              status: getStepStatus(3, currentStep, currentTask?.status),
-            },
-          ]}
-        />
-      </Card>
-
       <Row gutter={24} align="stretch">
         {/* 左侧：配置表单 */}
         <Col xs={24} lg={12} style={{ display: 'flex', flexDirection: 'column' }}>
@@ -519,7 +508,6 @@ const Simulation: React.FC = () => {
               cols: 4,
               max_time: 6000,
               save_to_db: true,
-              result_granularity: 'per_file',
             }}
             onFinish={handleSubmit}
           >
@@ -527,7 +515,7 @@ const Simulation: React.FC = () => {
               <Col span={12}>
                 <Form.Item name="mode" label="仿真模式" rules={[{ required: true }]}>
                   <Radio.Group onChange={(e) => {
-                    const newMode = e.target.value
+                    const newMode = e.target.value as 'kcin' | 'dcin'
                     // 切换模式时加载默认配置
                     if (newMode === 'kcin') {
                       // KCIN默认: topo_5x4.yaml
@@ -550,6 +538,9 @@ const Simulation: React.FC = () => {
                         loadDieConfigContent(defaultKcinConfig.path)
                       }
                     }
+                    // 切换模式时重新加载流量文件树并清空选择
+                    setSelectedFiles([])
+                    loadTrafficFilesTree(newMode)
                   }}>
                     <Radio.Button value="kcin">KCIN</Radio.Button>
                     <Radio.Button value="dcin">DCIN</Radio.Button>
@@ -598,7 +589,10 @@ const Simulation: React.FC = () => {
               label={mode === 'dcin' ? 'DCIN配置文件' : 'KCIN配置文件'}
               rules={[{ required: true, message: mode === 'dcin' ? '请选择DCIN配置文件' : '请选择KCIN配置文件' }]}
             >
-              <Select placeholder={mode === 'dcin' ? '请选择DCIN配置文件' : '请选择KCIN配置文件'} onChange={loadConfigContent}>
+              <Select
+                placeholder={mode === 'dcin' ? '请选择DCIN配置文件' : '请选择KCIN配置文件'}
+                onChange={loadConfigContent}
+              >
                 {(mode === 'kcin' ? configs.kcin : configs.dcin).map((c) => (
                   <Option key={c.path} value={c.path}>
                     {c.name}
@@ -920,242 +914,265 @@ const Simulation: React.FC = () => {
                       key: 'kcin',
                       label: 'KCIN Config',
                       children: (
-                        <Row gutter={[16, 8]}>
+                        <div>
                           {/* Slice Per Link */}
-                          {configValues.SLICE_PER_LINK_HORIZONTAL !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SLICE_PER_LINK_HORIZONTAL" /></div>
-                              <InputNumber value={configValues.SLICE_PER_LINK_HORIZONTAL} onChange={(v) => updateConfigValue('SLICE_PER_LINK_HORIZONTAL', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.SLICE_PER_LINK_VERTICAL !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SLICE_PER_LINK_VERTICAL" /></div>
-                              <InputNumber value={configValues.SLICE_PER_LINK_VERTICAL} onChange={(v) => updateConfigValue('SLICE_PER_LINK_VERTICAL', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Slice Per Link</Text>
+                          <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+                            {configValues.SLICE_PER_LINK_HORIZONTAL !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="SLICE_PER_LINK_HORIZONTAL" /></div>
+                                <InputNumber value={configValues.SLICE_PER_LINK_HORIZONTAL} onChange={(v) => updateConfigValue('SLICE_PER_LINK_HORIZONTAL', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.SLICE_PER_LINK_VERTICAL !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="SLICE_PER_LINK_VERTICAL" /></div>
+                                <InputNumber value={configValues.SLICE_PER_LINK_VERTICAL} onChange={(v) => updateConfigValue('SLICE_PER_LINK_VERTICAL', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+
                           {/* FIFO Depth */}
-                          {configValues.IQ_CH_FIFO_DEPTH !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_CH_FIFO_DEPTH" /></div>
-                              <InputNumber value={configValues.IQ_CH_FIFO_DEPTH} onChange={(v) => updateConfigValue('IQ_CH_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.EQ_CH_FIFO_DEPTH !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="EQ_CH_FIFO_DEPTH" /></div>
-                              <InputNumber value={configValues.EQ_CH_FIFO_DEPTH} onChange={(v) => updateConfigValue('EQ_CH_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.IQ_OUT_FIFO_DEPTH_HORIZONTAL !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_OUT_FIFO_DEPTH_HORIZONTAL" /></div>
-                              <InputNumber value={configValues.IQ_OUT_FIFO_DEPTH_HORIZONTAL} onChange={(v) => updateConfigValue('IQ_OUT_FIFO_DEPTH_HORIZONTAL', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.IQ_OUT_FIFO_DEPTH_VERTICAL !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_OUT_FIFO_DEPTH_VERTICAL" /></div>
-                              <InputNumber value={configValues.IQ_OUT_FIFO_DEPTH_VERTICAL} onChange={(v) => updateConfigValue('IQ_OUT_FIFO_DEPTH_VERTICAL', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.IQ_OUT_FIFO_DEPTH_EQ !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_OUT_FIFO_DEPTH_EQ" /></div>
-                              <InputNumber value={configValues.IQ_OUT_FIFO_DEPTH_EQ} onChange={(v) => updateConfigValue('IQ_OUT_FIFO_DEPTH_EQ', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.RB_OUT_FIFO_DEPTH !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="RB_OUT_FIFO_DEPTH" /></div>
-                              <InputNumber value={configValues.RB_OUT_FIFO_DEPTH} onChange={(v) => updateConfigValue('RB_OUT_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.RB_IN_FIFO_DEPTH !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="RB_IN_FIFO_DEPTH" /></div>
-                              <InputNumber value={configValues.RB_IN_FIFO_DEPTH} onChange={(v) => updateConfigValue('RB_IN_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.EQ_IN_FIFO_DEPTH !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="EQ_IN_FIFO_DEPTH" /></div>
-                              <InputNumber value={configValues.EQ_IN_FIFO_DEPTH} onChange={(v) => updateConfigValue('EQ_IN_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.IP_L2H_FIFO_DEPTH !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="IP_L2H_FIFO_DEPTH" /></div>
-                              <InputNumber value={configValues.IP_L2H_FIFO_DEPTH} onChange={(v) => updateConfigValue('IP_L2H_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.IP_H2L_H_FIFO_DEPTH !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="IP_H2L_H_FIFO_DEPTH" /></div>
-                              <InputNumber value={configValues.IP_H2L_H_FIFO_DEPTH} onChange={(v) => updateConfigValue('IP_H2L_H_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.IP_H2L_L_FIFO_DEPTH !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="IP_H2L_L_FIFO_DEPTH" /></div>
-                              <InputNumber value={configValues.IP_H2L_L_FIFO_DEPTH} onChange={(v) => updateConfigValue('IP_H2L_L_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {/* ETag Config */}
-                          {configValues.TL_Etag_T2_UE_MAX !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TL_Etag_T2_UE_MAX" /></div>
-                              <InputNumber value={configValues.TL_Etag_T2_UE_MAX} onChange={(v) => updateConfigValue('TL_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.TL_Etag_T1_UE_MAX !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TL_Etag_T1_UE_MAX" /></div>
-                              <InputNumber value={configValues.TL_Etag_T1_UE_MAX} onChange={(v) => updateConfigValue('TL_Etag_T1_UE_MAX', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.TR_Etag_T2_UE_MAX !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TR_Etag_T2_UE_MAX" /></div>
-                              <InputNumber value={configValues.TR_Etag_T2_UE_MAX} onChange={(v) => updateConfigValue('TR_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.TU_Etag_T2_UE_MAX !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TU_Etag_T2_UE_MAX" /></div>
-                              <InputNumber value={configValues.TU_Etag_T2_UE_MAX} onChange={(v) => updateConfigValue('TU_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.TU_Etag_T1_UE_MAX !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TU_Etag_T1_UE_MAX" /></div>
-                              <InputNumber value={configValues.TU_Etag_T1_UE_MAX} onChange={(v) => updateConfigValue('TU_Etag_T1_UE_MAX', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.TD_Etag_T2_UE_MAX !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TD_Etag_T2_UE_MAX" /></div>
-                              <InputNumber value={configValues.TD_Etag_T2_UE_MAX} onChange={(v) => updateConfigValue('TD_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.ETAG_T1_ENABLED !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="ETAG_T1_ENABLED" /></div>
-                              <Switch checked={!!configValues.ETAG_T1_ENABLED} onChange={(v) => updateConfigValue('ETAG_T1_ENABLED', v ? 1 : 0)} />
-                            </Col>
-                          )}
-                          {configValues.ETag_BOTHSIDE_UPGRADE !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="ETag_BOTHSIDE_UPGRADE" /></div>
-                              <Switch checked={!!configValues.ETag_BOTHSIDE_UPGRADE} onChange={(v) => updateConfigValue('ETag_BOTHSIDE_UPGRADE', v ? 1 : 0)} />
-                            </Col>
-                          )}
-                          {/* ITag Config */}
-                          {configValues.ITag_TRIGGER_Th_H !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="ITag_TRIGGER_Th_H" /></div>
-                              <InputNumber value={configValues.ITag_TRIGGER_Th_H} onChange={(v) => updateConfigValue('ITag_TRIGGER_Th_H', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.ITag_TRIGGER_Th_V !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="ITag_TRIGGER_Th_V" /></div>
-                              <InputNumber value={configValues.ITag_TRIGGER_Th_V} onChange={(v) => updateConfigValue('ITag_TRIGGER_Th_V', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.ITag_MAX_Num_H !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="ITag_MAX_Num_H" /></div>
-                              <InputNumber value={configValues.ITag_MAX_Num_H} onChange={(v) => updateConfigValue('ITag_MAX_Num_H', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.ITag_MAX_Num_V !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="ITag_MAX_Num_V" /></div>
-                              <InputNumber value={configValues.ITag_MAX_Num_V} onChange={(v) => updateConfigValue('ITag_MAX_Num_V', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>FIFO Depth</Text>
+                          <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+                            {configValues.IQ_CH_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_CH_FIFO_DEPTH" /></div>
+                                <InputNumber value={configValues.IQ_CH_FIFO_DEPTH} onChange={(v) => updateConfigValue('IQ_CH_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.EQ_CH_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="EQ_CH_FIFO_DEPTH" /></div>
+                                <InputNumber value={configValues.EQ_CH_FIFO_DEPTH} onChange={(v) => updateConfigValue('EQ_CH_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.IQ_OUT_FIFO_DEPTH_HORIZONTAL !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_OUT_FIFO_DEPTH_HORIZONTAL" /></div>
+                                <InputNumber value={configValues.IQ_OUT_FIFO_DEPTH_HORIZONTAL} onChange={(v) => updateConfigValue('IQ_OUT_FIFO_DEPTH_HORIZONTAL', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.IQ_OUT_FIFO_DEPTH_VERTICAL !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_OUT_FIFO_DEPTH_VERTICAL" /></div>
+                                <InputNumber value={configValues.IQ_OUT_FIFO_DEPTH_VERTICAL} onChange={(v) => updateConfigValue('IQ_OUT_FIFO_DEPTH_VERTICAL', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.IQ_OUT_FIFO_DEPTH_EQ !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_OUT_FIFO_DEPTH_EQ" /></div>
+                                <InputNumber value={configValues.IQ_OUT_FIFO_DEPTH_EQ} onChange={(v) => updateConfigValue('IQ_OUT_FIFO_DEPTH_EQ', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.RB_OUT_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="RB_OUT_FIFO_DEPTH" /></div>
+                                <InputNumber value={configValues.RB_OUT_FIFO_DEPTH} onChange={(v) => updateConfigValue('RB_OUT_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.RB_IN_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="RB_IN_FIFO_DEPTH" /></div>
+                                <InputNumber value={configValues.RB_IN_FIFO_DEPTH} onChange={(v) => updateConfigValue('RB_IN_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.EQ_IN_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="EQ_IN_FIFO_DEPTH" /></div>
+                                <InputNumber value={configValues.EQ_IN_FIFO_DEPTH} onChange={(v) => updateConfigValue('EQ_IN_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.IP_L2H_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IP_L2H_FIFO_DEPTH" /></div>
+                                <InputNumber value={configValues.IP_L2H_FIFO_DEPTH} onChange={(v) => updateConfigValue('IP_L2H_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.IP_H2L_H_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IP_H2L_H_FIFO_DEPTH" /></div>
+                                <InputNumber value={configValues.IP_H2L_H_FIFO_DEPTH} onChange={(v) => updateConfigValue('IP_H2L_H_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.IP_H2L_L_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IP_H2L_L_FIFO_DEPTH" /></div>
+                                <InputNumber value={configValues.IP_H2L_L_FIFO_DEPTH} onChange={(v) => updateConfigValue('IP_H2L_L_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+
                           {/* Latency */}
-                          {configValues.DDR_R_LATENCY !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_R_LATENCY" /></div>
-                              <InputNumber value={configValues.DDR_R_LATENCY} onChange={(v) => updateConfigValue('DDR_R_LATENCY', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.DDR_R_LATENCY_VAR !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_R_LATENCY_VAR" /></div>
-                              <InputNumber value={configValues.DDR_R_LATENCY_VAR} onChange={(v) => updateConfigValue('DDR_R_LATENCY_VAR', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.DDR_W_LATENCY !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_W_LATENCY" /></div>
-                              <InputNumber value={configValues.DDR_W_LATENCY} onChange={(v) => updateConfigValue('DDR_W_LATENCY', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.L2M_R_LATENCY !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_R_LATENCY" /></div>
-                              <InputNumber value={configValues.L2M_R_LATENCY} onChange={(v) => updateConfigValue('L2M_R_LATENCY', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.L2M_W_LATENCY !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_W_LATENCY" /></div>
-                              <InputNumber value={configValues.L2M_W_LATENCY} onChange={(v) => updateConfigValue('L2M_W_LATENCY', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.SN_TRACKER_RELEASE_LATENCY !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SN_TRACKER_RELEASE_LATENCY" /></div>
-                              <InputNumber value={configValues.SN_TRACKER_RELEASE_LATENCY} onChange={(v) => updateConfigValue('SN_TRACKER_RELEASE_LATENCY', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.SN_PROCESSING_LATENCY !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SN_PROCESSING_LATENCY" /></div>
-                              <InputNumber value={configValues.SN_PROCESSING_LATENCY} onChange={(v) => updateConfigValue('SN_PROCESSING_LATENCY', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.RN_PROCESSING_LATENCY !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="RN_PROCESSING_LATENCY" /></div>
-                              <InputNumber value={configValues.RN_PROCESSING_LATENCY} onChange={(v) => updateConfigValue('RN_PROCESSING_LATENCY', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Latency</Text>
+                          <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+                            {configValues.DDR_R_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_R_LATENCY" /></div>
+                                <InputNumber value={configValues.DDR_R_LATENCY} onChange={(v) => updateConfigValue('DDR_R_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.DDR_R_LATENCY_VAR !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_R_LATENCY_VAR" /></div>
+                                <InputNumber value={configValues.DDR_R_LATENCY_VAR} onChange={(v) => updateConfigValue('DDR_R_LATENCY_VAR', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.DDR_W_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_W_LATENCY" /></div>
+                                <InputNumber value={configValues.DDR_W_LATENCY} onChange={(v) => updateConfigValue('DDR_W_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.L2M_R_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_R_LATENCY" /></div>
+                                <InputNumber value={configValues.L2M_R_LATENCY} onChange={(v) => updateConfigValue('L2M_R_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.L2M_W_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_W_LATENCY" /></div>
+                                <InputNumber value={configValues.L2M_W_LATENCY} onChange={(v) => updateConfigValue('L2M_W_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.SN_TRACKER_RELEASE_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="SN_TRACKER_RELEASE_LATENCY" /></div>
+                                <InputNumber value={configValues.SN_TRACKER_RELEASE_LATENCY} onChange={(v) => updateConfigValue('SN_TRACKER_RELEASE_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.SN_PROCESSING_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="SN_PROCESSING_LATENCY" /></div>
+                                <InputNumber value={configValues.SN_PROCESSING_LATENCY} onChange={(v) => updateConfigValue('SN_PROCESSING_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.RN_PROCESSING_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="RN_PROCESSING_LATENCY" /></div>
+                                <InputNumber value={configValues.RN_PROCESSING_LATENCY} onChange={(v) => updateConfigValue('RN_PROCESSING_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+
                           {/* Bandwidth Limit */}
-                          {configValues.GDMA_BW_LIMIT !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="GDMA_BW_LIMIT" /></div>
-                              <InputNumber value={configValues.GDMA_BW_LIMIT} onChange={(v) => updateConfigValue('GDMA_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.SDMA_BW_LIMIT !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SDMA_BW_LIMIT" /></div>
-                              <InputNumber value={configValues.SDMA_BW_LIMIT} onChange={(v) => updateConfigValue('SDMA_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.CDMA_BW_LIMIT !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="CDMA_BW_LIMIT" /></div>
-                              <InputNumber value={configValues.CDMA_BW_LIMIT} onChange={(v) => updateConfigValue('CDMA_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.DDR_BW_LIMIT !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_BW_LIMIT" /></div>
-                              <InputNumber value={configValues.DDR_BW_LIMIT} onChange={(v) => updateConfigValue('DDR_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {configValues.L2M_BW_LIMIT !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_BW_LIMIT" /></div>
-                              <InputNumber value={configValues.L2M_BW_LIMIT} onChange={(v) => updateConfigValue('L2M_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                        </Row>
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Bandwidth Limit (GB/s)</Text>
+                          <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+                            {configValues.GDMA_BW_LIMIT !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="GDMA_BW_LIMIT" /></div>
+                                <InputNumber value={configValues.GDMA_BW_LIMIT} onChange={(v) => updateConfigValue('GDMA_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.SDMA_BW_LIMIT !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="SDMA_BW_LIMIT" /></div>
+                                <InputNumber value={configValues.SDMA_BW_LIMIT} onChange={(v) => updateConfigValue('SDMA_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.CDMA_BW_LIMIT !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="CDMA_BW_LIMIT" /></div>
+                                <InputNumber value={configValues.CDMA_BW_LIMIT} onChange={(v) => updateConfigValue('CDMA_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.DDR_BW_LIMIT !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_BW_LIMIT" /></div>
+                                <InputNumber value={configValues.DDR_BW_LIMIT} onChange={(v) => updateConfigValue('DDR_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.L2M_BW_LIMIT !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_BW_LIMIT" /></div>
+                                <InputNumber value={configValues.L2M_BW_LIMIT} onChange={(v) => updateConfigValue('L2M_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+
+                          {/* ETag Config */}
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>ETag Config</Text>
+                          <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+                            {configValues.TL_Etag_T2_UE_MAX !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="TL_Etag_T2_UE_MAX" /></div>
+                                <InputNumber value={configValues.TL_Etag_T2_UE_MAX} onChange={(v) => updateConfigValue('TL_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.TL_Etag_T1_UE_MAX !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="TL_Etag_T1_UE_MAX" /></div>
+                                <InputNumber value={configValues.TL_Etag_T1_UE_MAX} onChange={(v) => updateConfigValue('TL_Etag_T1_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.TR_Etag_T2_UE_MAX !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="TR_Etag_T2_UE_MAX" /></div>
+                                <InputNumber value={configValues.TR_Etag_T2_UE_MAX} onChange={(v) => updateConfigValue('TR_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.TU_Etag_T2_UE_MAX !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="TU_Etag_T2_UE_MAX" /></div>
+                                <InputNumber value={configValues.TU_Etag_T2_UE_MAX} onChange={(v) => updateConfigValue('TU_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.TU_Etag_T1_UE_MAX !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="TU_Etag_T1_UE_MAX" /></div>
+                                <InputNumber value={configValues.TU_Etag_T1_UE_MAX} onChange={(v) => updateConfigValue('TU_Etag_T1_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.TD_Etag_T2_UE_MAX !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="TD_Etag_T2_UE_MAX" /></div>
+                                <InputNumber value={configValues.TD_Etag_T2_UE_MAX} onChange={(v) => updateConfigValue('TD_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.ETAG_T1_ENABLED !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="ETAG_T1_ENABLED" /></div>
+                                <Switch checked={!!configValues.ETAG_T1_ENABLED} onChange={(v) => updateConfigValue('ETAG_T1_ENABLED', v ? 1 : 0)} />
+                              </Col>
+                            )}
+                            {configValues.ETag_BOTHSIDE_UPGRADE !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="ETag_BOTHSIDE_UPGRADE" /></div>
+                                <Switch checked={!!configValues.ETag_BOTHSIDE_UPGRADE} onChange={(v) => updateConfigValue('ETag_BOTHSIDE_UPGRADE', v ? 1 : 0)} />
+                              </Col>
+                            )}
+                          </Row>
+
+                          {/* ITag Config */}
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>ITag Config</Text>
+                          <Row gutter={[16, 8]}>
+                            {configValues.ITag_TRIGGER_Th_H !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="ITag_TRIGGER_Th_H" /></div>
+                                <InputNumber value={configValues.ITag_TRIGGER_Th_H} onChange={(v) => updateConfigValue('ITag_TRIGGER_Th_H', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.ITag_TRIGGER_Th_V !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="ITag_TRIGGER_Th_V" /></div>
+                                <InputNumber value={configValues.ITag_TRIGGER_Th_V} onChange={(v) => updateConfigValue('ITag_TRIGGER_Th_V', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.ITag_MAX_Num_H !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="ITag_MAX_Num_H" /></div>
+                                <InputNumber value={configValues.ITag_MAX_Num_H} onChange={(v) => updateConfigValue('ITag_MAX_Num_H', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {configValues.ITag_MAX_Num_V !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="ITag_MAX_Num_V" /></div>
+                                <InputNumber value={configValues.ITag_MAX_Num_V} onChange={(v) => updateConfigValue('ITag_MAX_Num_V', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+                        </div>
                       ),
                     },
                     {
@@ -1432,18 +1449,6 @@ const Simulation: React.FC = () => {
                               <InputNumber value={dieConfigValues.NETWORK_FREQUENCY} onChange={(v) => updateDieConfigValue('NETWORK_FREQUENCY', v)} min={1} style={{ width: '100%' }} />
                             </Col>
                           )}
-                          {dieConfigValues.SLICE_PER_LINK_HORIZONTAL !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SLICE_PER_LINK_HORIZONTAL" /></div>
-                              <InputNumber value={dieConfigValues.SLICE_PER_LINK_HORIZONTAL} onChange={(v) => updateDieConfigValue('SLICE_PER_LINK_HORIZONTAL', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {dieConfigValues.SLICE_PER_LINK_VERTICAL !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SLICE_PER_LINK_VERTICAL" /></div>
-                              <InputNumber value={dieConfigValues.SLICE_PER_LINK_VERTICAL} onChange={(v) => updateDieConfigValue('SLICE_PER_LINK_VERTICAL', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
                         </Row>
                       ),
                     },
@@ -1488,153 +1493,465 @@ const Simulation: React.FC = () => {
                               <InputNumber value={dieConfigValues.SN_L2M_WDB_SIZE} onChange={(v) => updateDieConfigValue('SN_L2M_WDB_SIZE', v)} min={1} style={{ width: '100%' }} />
                             </Col>
                           )}
-                        </Row>
-                      ),
-                    },
-                    {
-                      key: 'die_latency',
-                      label: 'Latency',
-                      children: (
-                        <Row gutter={[16, 8]}>
-                          {dieConfigValues.DDR_R_LATENCY !== undefined && (
+                          {dieConfigValues.UNIFIED_RW_TRACKER !== undefined && (
                             <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_R_LATENCY" /></div>
-                              <InputNumber value={dieConfigValues.DDR_R_LATENCY} onChange={(v) => updateDieConfigValue('DDR_R_LATENCY', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {dieConfigValues.DDR_W_LATENCY !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_W_LATENCY" /></div>
-                              <InputNumber value={dieConfigValues.DDR_W_LATENCY} onChange={(v) => updateDieConfigValue('DDR_W_LATENCY', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {dieConfigValues.L2M_R_LATENCY !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_R_LATENCY" /></div>
-                              <InputNumber value={dieConfigValues.L2M_R_LATENCY} onChange={(v) => updateDieConfigValue('L2M_R_LATENCY', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {dieConfigValues.L2M_W_LATENCY !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_W_LATENCY" /></div>
-                              <InputNumber value={dieConfigValues.L2M_W_LATENCY} onChange={(v) => updateDieConfigValue('L2M_W_LATENCY', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {dieConfigValues.SN_TRACKER_RELEASE_LATENCY !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="SN_TRACKER_RELEASE_LATENCY" /></div>
-                              <InputNumber value={dieConfigValues.SN_TRACKER_RELEASE_LATENCY} onChange={(v) => updateDieConfigValue('SN_TRACKER_RELEASE_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              <div style={{ marginBottom: 4 }}><ConfigLabel name="UNIFIED_RW_TRACKER" /></div>
+                              <Switch checked={dieConfigValues.UNIFIED_RW_TRACKER} onChange={(v) => updateDieConfigValue('UNIFIED_RW_TRACKER', v)} />
                             </Col>
                           )}
                         </Row>
                       ),
                     },
                     {
-                      key: 'die_fifo',
-                      label: 'FIFO Depth',
+                      key: 'die_kcin',
+                      label: 'KCIN Config',
                       children: (
-                        <Row gutter={[16, 8]}>
-                          {dieConfigValues.IQ_CH_FIFO_DEPTH !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_CH_FIFO_DEPTH" /></div>
-                              <InputNumber value={dieConfigValues.IQ_CH_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('IQ_CH_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {dieConfigValues.EQ_CH_FIFO_DEPTH !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="EQ_CH_FIFO_DEPTH" /></div>
-                              <InputNumber value={dieConfigValues.EQ_CH_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('EQ_CH_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {dieConfigValues.RB_OUT_FIFO_DEPTH !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="RB_OUT_FIFO_DEPTH" /></div>
-                              <InputNumber value={dieConfigValues.RB_OUT_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('RB_OUT_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {dieConfigValues.RB_IN_FIFO_DEPTH !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="RB_IN_FIFO_DEPTH" /></div>
-                              <InputNumber value={dieConfigValues.RB_IN_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('RB_IN_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                          {dieConfigValues.EQ_IN_FIFO_DEPTH !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="EQ_IN_FIFO_DEPTH" /></div>
-                              <InputNumber value={dieConfigValues.EQ_IN_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('EQ_IN_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
-                          )}
-                        </Row>
+                        <div>
+                          {/* Slice Per Link */}
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Slice Per Link</Text>
+                          <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+                            {dieConfigValues.SLICE_PER_LINK_HORIZONTAL !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="SLICE_PER_LINK_HORIZONTAL" /></div>
+                                <InputNumber value={dieConfigValues.SLICE_PER_LINK_HORIZONTAL} onChange={(v) => updateDieConfigValue('SLICE_PER_LINK_HORIZONTAL', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.SLICE_PER_LINK_VERTICAL !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="SLICE_PER_LINK_VERTICAL" /></div>
+                                <InputNumber value={dieConfigValues.SLICE_PER_LINK_VERTICAL} onChange={(v) => updateDieConfigValue('SLICE_PER_LINK_VERTICAL', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+
+                          {/* FIFO Depth */}
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>FIFO Depth</Text>
+                          <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+                            {dieConfigValues.IQ_CH_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_CH_FIFO_DEPTH" /></div>
+                                <InputNumber value={dieConfigValues.IQ_CH_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('IQ_CH_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.EQ_CH_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="EQ_CH_FIFO_DEPTH" /></div>
+                                <InputNumber value={dieConfigValues.EQ_CH_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('EQ_CH_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.IQ_OUT_FIFO_DEPTH_HORIZONTAL !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_OUT_FIFO_DEPTH_HORIZONTAL" /></div>
+                                <InputNumber value={dieConfigValues.IQ_OUT_FIFO_DEPTH_HORIZONTAL} onChange={(v) => updateDieConfigValue('IQ_OUT_FIFO_DEPTH_HORIZONTAL', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.IQ_OUT_FIFO_DEPTH_VERTICAL !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_OUT_FIFO_DEPTH_VERTICAL" /></div>
+                                <InputNumber value={dieConfigValues.IQ_OUT_FIFO_DEPTH_VERTICAL} onChange={(v) => updateDieConfigValue('IQ_OUT_FIFO_DEPTH_VERTICAL', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.IQ_OUT_FIFO_DEPTH_EQ !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IQ_OUT_FIFO_DEPTH_EQ" /></div>
+                                <InputNumber value={dieConfigValues.IQ_OUT_FIFO_DEPTH_EQ} onChange={(v) => updateDieConfigValue('IQ_OUT_FIFO_DEPTH_EQ', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.RB_OUT_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="RB_OUT_FIFO_DEPTH" /></div>
+                                <InputNumber value={dieConfigValues.RB_OUT_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('RB_OUT_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.RB_IN_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="RB_IN_FIFO_DEPTH" /></div>
+                                <InputNumber value={dieConfigValues.RB_IN_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('RB_IN_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.EQ_IN_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="EQ_IN_FIFO_DEPTH" /></div>
+                                <InputNumber value={dieConfigValues.EQ_IN_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('EQ_IN_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.IP_L2H_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IP_L2H_FIFO_DEPTH" /></div>
+                                <InputNumber value={dieConfigValues.IP_L2H_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('IP_L2H_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.IP_H2L_H_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IP_H2L_H_FIFO_DEPTH" /></div>
+                                <InputNumber value={dieConfigValues.IP_H2L_H_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('IP_H2L_H_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.IP_H2L_L_FIFO_DEPTH !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="IP_H2L_L_FIFO_DEPTH" /></div>
+                                <InputNumber value={dieConfigValues.IP_H2L_L_FIFO_DEPTH} onChange={(v) => updateDieConfigValue('IP_H2L_L_FIFO_DEPTH', v)} min={1} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+
+                          {/* Latency */}
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Latency</Text>
+                          <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+                            {dieConfigValues.DDR_R_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_R_LATENCY" /></div>
+                                <InputNumber value={dieConfigValues.DDR_R_LATENCY} onChange={(v) => updateDieConfigValue('DDR_R_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.DDR_R_LATENCY_VAR !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_R_LATENCY_VAR" /></div>
+                                <InputNumber value={dieConfigValues.DDR_R_LATENCY_VAR} onChange={(v) => updateDieConfigValue('DDR_R_LATENCY_VAR', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.DDR_W_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_W_LATENCY" /></div>
+                                <InputNumber value={dieConfigValues.DDR_W_LATENCY} onChange={(v) => updateDieConfigValue('DDR_W_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.L2M_R_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_R_LATENCY" /></div>
+                                <InputNumber value={dieConfigValues.L2M_R_LATENCY} onChange={(v) => updateDieConfigValue('L2M_R_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.L2M_W_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_W_LATENCY" /></div>
+                                <InputNumber value={dieConfigValues.L2M_W_LATENCY} onChange={(v) => updateDieConfigValue('L2M_W_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.SN_TRACKER_RELEASE_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="SN_TRACKER_RELEASE_LATENCY" /></div>
+                                <InputNumber value={dieConfigValues.SN_TRACKER_RELEASE_LATENCY} onChange={(v) => updateDieConfigValue('SN_TRACKER_RELEASE_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.SN_PROCESSING_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="SN_PROCESSING_LATENCY" /></div>
+                                <InputNumber value={dieConfigValues.SN_PROCESSING_LATENCY} onChange={(v) => updateDieConfigValue('SN_PROCESSING_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.RN_PROCESSING_LATENCY !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="RN_PROCESSING_LATENCY" /></div>
+                                <InputNumber value={dieConfigValues.RN_PROCESSING_LATENCY} onChange={(v) => updateDieConfigValue('RN_PROCESSING_LATENCY', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+
+                          {/* Bandwidth Limit */}
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Bandwidth Limit (GB/s)</Text>
+                          <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+                            {dieConfigValues.GDMA_BW_LIMIT !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="GDMA_BW_LIMIT" /></div>
+                                <InputNumber value={dieConfigValues.GDMA_BW_LIMIT} onChange={(v) => updateDieConfigValue('GDMA_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.SDMA_BW_LIMIT !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="SDMA_BW_LIMIT" /></div>
+                                <InputNumber value={dieConfigValues.SDMA_BW_LIMIT} onChange={(v) => updateDieConfigValue('SDMA_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.CDMA_BW_LIMIT !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="CDMA_BW_LIMIT" /></div>
+                                <InputNumber value={dieConfigValues.CDMA_BW_LIMIT} onChange={(v) => updateDieConfigValue('CDMA_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.DDR_BW_LIMIT !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_BW_LIMIT" /></div>
+                                <InputNumber value={dieConfigValues.DDR_BW_LIMIT} onChange={(v) => updateDieConfigValue('DDR_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.L2M_BW_LIMIT !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_BW_LIMIT" /></div>
+                                <InputNumber value={dieConfigValues.L2M_BW_LIMIT} onChange={(v) => updateDieConfigValue('L2M_BW_LIMIT', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+
+                          {/* ETag Config */}
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>ETag Config</Text>
+                          <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+                            {dieConfigValues.TL_Etag_T2_UE_MAX !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="TL_Etag_T2_UE_MAX" /></div>
+                                <InputNumber value={dieConfigValues.TL_Etag_T2_UE_MAX} onChange={(v) => updateDieConfigValue('TL_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.TL_Etag_T1_UE_MAX !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="TL_Etag_T1_UE_MAX" /></div>
+                                <InputNumber value={dieConfigValues.TL_Etag_T1_UE_MAX} onChange={(v) => updateDieConfigValue('TL_Etag_T1_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.TR_Etag_T2_UE_MAX !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="TR_Etag_T2_UE_MAX" /></div>
+                                <InputNumber value={dieConfigValues.TR_Etag_T2_UE_MAX} onChange={(v) => updateDieConfigValue('TR_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.TU_Etag_T2_UE_MAX !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="TU_Etag_T2_UE_MAX" /></div>
+                                <InputNumber value={dieConfigValues.TU_Etag_T2_UE_MAX} onChange={(v) => updateDieConfigValue('TU_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.TU_Etag_T1_UE_MAX !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="TU_Etag_T1_UE_MAX" /></div>
+                                <InputNumber value={dieConfigValues.TU_Etag_T1_UE_MAX} onChange={(v) => updateDieConfigValue('TU_Etag_T1_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.TD_Etag_T2_UE_MAX !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="TD_Etag_T2_UE_MAX" /></div>
+                                <InputNumber value={dieConfigValues.TD_Etag_T2_UE_MAX} onChange={(v) => updateDieConfigValue('TD_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.ETAG_T1_ENABLED !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="ETAG_T1_ENABLED" /></div>
+                                <Switch checked={!!dieConfigValues.ETAG_T1_ENABLED} onChange={(v) => updateDieConfigValue('ETAG_T1_ENABLED', v ? 1 : 0)} />
+                              </Col>
+                            )}
+                            {dieConfigValues.ETag_BOTHSIDE_UPGRADE !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="ETag_BOTHSIDE_UPGRADE" /></div>
+                                <Switch checked={!!dieConfigValues.ETag_BOTHSIDE_UPGRADE} onChange={(v) => updateDieConfigValue('ETag_BOTHSIDE_UPGRADE', v ? 1 : 0)} />
+                              </Col>
+                            )}
+                          </Row>
+
+                          {/* ITag Config */}
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>ITag Config</Text>
+                          <Row gutter={[16, 8]}>
+                            {dieConfigValues.ITag_TRIGGER_Th_H !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="ITag_TRIGGER_Th_H" /></div>
+                                <InputNumber value={dieConfigValues.ITag_TRIGGER_Th_H} onChange={(v) => updateDieConfigValue('ITag_TRIGGER_Th_H', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.ITag_TRIGGER_Th_V !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="ITag_TRIGGER_Th_V" /></div>
+                                <InputNumber value={dieConfigValues.ITag_TRIGGER_Th_V} onChange={(v) => updateDieConfigValue('ITag_TRIGGER_Th_V', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.ITag_MAX_Num_H !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="ITag_MAX_Num_H" /></div>
+                                <InputNumber value={dieConfigValues.ITag_MAX_Num_H} onChange={(v) => updateDieConfigValue('ITag_MAX_Num_H', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                            {dieConfigValues.ITag_MAX_Num_V !== undefined && (
+                              <Col span={8}>
+                                <div style={{ marginBottom: 4 }}><ConfigLabel name="ITag_MAX_Num_V" /></div>
+                                <InputNumber value={dieConfigValues.ITag_MAX_Num_V} onChange={(v) => updateDieConfigValue('ITag_MAX_Num_V', v)} min={0} style={{ width: '100%' }} />
+                              </Col>
+                            )}
+                          </Row>
+                        </div>
                       ),
                     },
                     {
-                      key: 'die_etag',
-                      label: 'ETag Config',
+                      key: 'die_features',
+                      label: 'Feature Config',
                       children: (
-                        <Row gutter={[16, 8]}>
-                          {dieConfigValues.TL_Etag_T2_UE_MAX !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TL_Etag_T2_UE_MAX" /></div>
-                              <InputNumber value={dieConfigValues.TL_Etag_T2_UE_MAX} onChange={(v) => updateDieConfigValue('TL_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
+                        <div>
+                          {/* Version */}
+                          {dieConfigValues.CROSSRING_VERSION !== undefined && (
+                            <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                              <Col span={10}><ConfigLabel name="CROSSRING_VERSION" /></Col>
+                              <Col span={14}>
+                                <Select value={dieConfigValues.CROSSRING_VERSION} onChange={(v) => updateDieConfigValue('CROSSRING_VERSION', v)} style={{ width: 120 }}>
+                                  <Option value="V1">V1</Option>
+                                  <Option value="V2">V2</Option>
+                                </Select>
+                              </Col>
+                            </Row>
                           )}
-                          {dieConfigValues.TR_Etag_T2_UE_MAX !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TR_Etag_T2_UE_MAX" /></div>
-                              <InputNumber value={dieConfigValues.TR_Etag_T2_UE_MAX} onChange={(v) => updateDieConfigValue('TR_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
+                          {/* Tag - V2 only */}
+                          {dieConfigValues.CROSSRING_VERSION === 'V2' && dieConfigValues.RB_ONLY_TAG_NUM_HORIZONTAL !== undefined && (
+                            <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                              <Col span={10}><ConfigLabel name="RB_ONLY_TAG_NUM_HORIZONTAL" /></Col>
+                              <Col span={14}>
+                                <InputNumber value={dieConfigValues.RB_ONLY_TAG_NUM_HORIZONTAL} onChange={(v) => updateDieConfigValue('RB_ONLY_TAG_NUM_HORIZONTAL', v)} min={0} style={{ width: 120 }} />
+                              </Col>
+                            </Row>
                           )}
-                          {dieConfigValues.TU_Etag_T2_UE_MAX !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TU_Etag_T2_UE_MAX" /></div>
-                              <InputNumber value={dieConfigValues.TU_Etag_T2_UE_MAX} onChange={(v) => updateDieConfigValue('TU_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
+                          {dieConfigValues.CROSSRING_VERSION === 'V2' && dieConfigValues.RB_ONLY_TAG_NUM_VERTICAL !== undefined && (
+                            <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                              <Col span={10}><ConfigLabel name="RB_ONLY_TAG_NUM_VERTICAL" /></Col>
+                              <Col span={14}>
+                                <InputNumber value={dieConfigValues.RB_ONLY_TAG_NUM_VERTICAL} onChange={(v) => updateDieConfigValue('RB_ONLY_TAG_NUM_VERTICAL', v)} min={0} style={{ width: 120 }} />
+                              </Col>
+                            </Row>
                           )}
-                          {dieConfigValues.TD_Etag_T2_UE_MAX !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="TD_Etag_T2_UE_MAX" /></div>
-                              <InputNumber value={dieConfigValues.TD_Etag_T2_UE_MAX} onChange={(v) => updateDieConfigValue('TD_Etag_T2_UE_MAX', v)} min={0} style={{ width: '100%' }} />
-                            </Col>
+                          {/* Ordering */}
+                          {dieConfigValues.ORDERING_PRESERVATION_MODE !== undefined && (
+                            <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                              <Col span={10}><ConfigLabel name="ORDERING_PRESERVATION_MODE" /></Col>
+                              <Col span={14}>
+                                <Select value={dieConfigValues.ORDERING_PRESERVATION_MODE} onChange={(v) => updateDieConfigValue('ORDERING_PRESERVATION_MODE', v)} style={{ width: 160 }}>
+                                  <Option value={0}>0 - Disabled</Option>
+                                  <Option value={1}>1 - Single Side</Option>
+                                  <Option value={2}>2 - Both Sides</Option>
+                                  <Option value={3}>3 - Dynamic</Option>
+                                </Select>
+                              </Col>
+                            </Row>
                           )}
-                          {dieConfigValues.ETAG_T1_ENABLED !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="ETAG_T1_ENABLED" /></div>
-                              <Switch checked={!!dieConfigValues.ETAG_T1_ENABLED} onChange={(v) => updateDieConfigValue('ETAG_T1_ENABLED', v ? 1 : 0)} />
-                            </Col>
+                          {dieConfigValues.ORDERING_ETAG_UPGRADE_MODE !== undefined && (
+                            <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                              <Col span={10}><ConfigLabel name="ORDERING_ETAG_UPGRADE_MODE" /></Col>
+                              <Col span={14}>
+                                <Select value={dieConfigValues.ORDERING_ETAG_UPGRADE_MODE} onChange={(v) => updateDieConfigValue('ORDERING_ETAG_UPGRADE_MODE', v)} style={{ width: 160 }}>
+                                  <Option value={0}>0 - Resource Only</Option>
+                                  <Option value={1}>1 - Include Ordering</Option>
+                                </Select>
+                              </Col>
+                            </Row>
                           )}
-                        </Row>
-                      ),
-                    },
-                    {
-                      key: 'die_bandwidth',
-                      label: 'Bandwidth Limit (GB/s)',
-                      children: (
-                        <Row gutter={[16, 8]}>
-                          {dieConfigValues.GDMA_BW_LIMIT !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="GDMA_BW_LIMIT" /></div>
-                              <InputNumber value={dieConfigValues.GDMA_BW_LIMIT} onChange={(v) => updateDieConfigValue('GDMA_BW_LIMIT', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
+                          {dieConfigValues.ORDERING_GRANULARITY !== undefined && (
+                            <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                              <Col span={10}><ConfigLabel name="ORDERING_GRANULARITY" /></Col>
+                              <Col span={14}>
+                                <Select value={dieConfigValues.ORDERING_GRANULARITY} onChange={(v) => updateDieConfigValue('ORDERING_GRANULARITY', v)} style={{ width: 160 }}>
+                                  <Option value={0}>0 - IP Level</Option>
+                                  <Option value={1}>1 - Node Level</Option>
+                                </Select>
+                              </Col>
+                            </Row>
                           )}
-                          {dieConfigValues.DDR_BW_LIMIT !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="DDR_BW_LIMIT" /></div>
-                              <InputNumber value={dieConfigValues.DDR_BW_LIMIT} onChange={(v) => updateDieConfigValue('DDR_BW_LIMIT', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
+                          {/* Allowed Source Nodes - 双侧下环方向配置 (仅 ORDERING_PRESERVATION_MODE === 2 时显示) */}
+                          {dieConfigValues.ORDERING_PRESERVATION_MODE === 2 && (
+                            <>
+                              {dieConfigValues.TL_ALLOWED_SOURCE_NODES !== undefined && (
+                                <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                                  <Col span={10}><ConfigLabel name="TL_ALLOWED_SOURCE_NODES" /></Col>
+                                  <Col span={14}>
+                                    <Input value={Array.isArray(dieConfigValues.TL_ALLOWED_SOURCE_NODES) ? dieConfigValues.TL_ALLOWED_SOURCE_NODES.join(', ') : dieConfigValues.TL_ALLOWED_SOURCE_NODES} onChange={(e) => updateDieConfigValue('TL_ALLOWED_SOURCE_NODES', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))} placeholder="e.g. 2,3,6,7" style={{ width: '100%' }} />
+                                  </Col>
+                                </Row>
+                              )}
+                              {dieConfigValues.TR_ALLOWED_SOURCE_NODES !== undefined && (
+                                <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                                  <Col span={10}><ConfigLabel name="TR_ALLOWED_SOURCE_NODES" /></Col>
+                                  <Col span={14}>
+                                    <Input value={Array.isArray(dieConfigValues.TR_ALLOWED_SOURCE_NODES) ? dieConfigValues.TR_ALLOWED_SOURCE_NODES.join(', ') : dieConfigValues.TR_ALLOWED_SOURCE_NODES} onChange={(e) => updateDieConfigValue('TR_ALLOWED_SOURCE_NODES', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))} placeholder="e.g. 0,1,4,5" style={{ width: '100%' }} />
+                                  </Col>
+                                </Row>
+                              )}
+                              {dieConfigValues.TU_ALLOWED_SOURCE_NODES !== undefined && (
+                                <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                                  <Col span={10}><ConfigLabel name="TU_ALLOWED_SOURCE_NODES" /></Col>
+                                  <Col span={14}>
+                                    <Input value={Array.isArray(dieConfigValues.TU_ALLOWED_SOURCE_NODES) ? dieConfigValues.TU_ALLOWED_SOURCE_NODES.join(', ') : dieConfigValues.TU_ALLOWED_SOURCE_NODES} onChange={(e) => updateDieConfigValue('TU_ALLOWED_SOURCE_NODES', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))} placeholder="e.g. 8,9,10,11" style={{ width: '100%' }} />
+                                  </Col>
+                                </Row>
+                              )}
+                              {dieConfigValues.TD_ALLOWED_SOURCE_NODES !== undefined && (
+                                <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                                  <Col span={10}><ConfigLabel name="TD_ALLOWED_SOURCE_NODES" /></Col>
+                                  <Col span={14}>
+                                    <Input value={Array.isArray(dieConfigValues.TD_ALLOWED_SOURCE_NODES) ? dieConfigValues.TD_ALLOWED_SOURCE_NODES.join(', ') : dieConfigValues.TD_ALLOWED_SOURCE_NODES} onChange={(e) => updateDieConfigValue('TD_ALLOWED_SOURCE_NODES', e.target.value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)))} placeholder="e.g. 0,1,2,3" style={{ width: '100%' }} />
+                                  </Col>
+                                </Row>
+                              )}
+                            </>
                           )}
-                          {dieConfigValues.CDMA_BW_LIMIT !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="CDMA_BW_LIMIT" /></div>
-                              <InputNumber value={dieConfigValues.CDMA_BW_LIMIT} onChange={(v) => updateDieConfigValue('CDMA_BW_LIMIT', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
+                          {/* Reverse Direction */}
+                          {dieConfigValues.REVERSE_DIRECTION_ENABLED !== undefined && (
+                            <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                              <Col span={10}><ConfigLabel name="REVERSE_DIRECTION_ENABLED" /></Col>
+                              <Col span={14}>
+                                <Switch checked={!!dieConfigValues.REVERSE_DIRECTION_ENABLED} onChange={(v) => updateDieConfigValue('REVERSE_DIRECTION_ENABLED', v ? 1 : 0)} />
+                              </Col>
+                            </Row>
                           )}
-                          {dieConfigValues.L2M_BW_LIMIT !== undefined && (
-                            <Col span={8}>
-                              <div style={{ marginBottom: 4 }}><ConfigLabel name="L2M_BW_LIMIT" /></div>
-                              <InputNumber value={dieConfigValues.L2M_BW_LIMIT} onChange={(v) => updateDieConfigValue('L2M_BW_LIMIT', v)} min={1} style={{ width: '100%' }} />
-                            </Col>
+                          {dieConfigValues.REVERSE_DIRECTION_THRESHOLD !== undefined && (
+                            <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                              <Col span={10}><ConfigLabel name="REVERSE_DIRECTION_THRESHOLD" /></Col>
+                              <Col span={14}>
+                                <InputNumber value={dieConfigValues.REVERSE_DIRECTION_THRESHOLD} onChange={(v) => updateDieConfigValue('REVERSE_DIRECTION_THRESHOLD', v)} min={0} max={1} step={0.05} style={{ width: 120 }} />
+                              </Col>
+                            </Row>
                           )}
-                        </Row>
+                          {/* Arbitration */}
+                          {dieConfigValues.arbitration?.default?.type !== undefined && (
+                            <>
+                              <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                                <Col span={10}><ConfigLabel name="ARBITRATION_TYPE" /></Col>
+                                <Col span={14}>
+                                  <Select
+                                    value={dieConfigValues.arbitration.default.type}
+                                    onChange={(v) => {
+                                      const newDefault: any = { type: v }
+                                      if (v === 'islip') {
+                                        newDefault.iterations = dieConfigValues.arbitration.default.iterations || 1
+                                        newDefault.weight_strategy = dieConfigValues.arbitration.default.weight_strategy || 'queue_length'
+                                      }
+                                      updateDieConfigValue('arbitration', { ...dieConfigValues.arbitration, default: newDefault })
+                                    }}
+                                    style={{ width: 160 }}
+                                  >
+                                    <Option value="round_robin">Round Robin</Option>
+                                    <Option value="islip">iSLIP</Option>
+                                    <Option value="weighted">Weighted</Option>
+                                    <Option value="priority">Priority</Option>
+                                    <Option value="dynamic">Dynamic</Option>
+                                    <Option value="random">Random</Option>
+                                  </Select>
+                                </Col>
+                              </Row>
+                              {/* iSLIP 专用参数 */}
+                              {dieConfigValues.arbitration.default.type === 'islip' && (
+                                <>
+                                  <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                                    <Col span={10}><ConfigLabel name="ARBITRATION_ITERATIONS" /></Col>
+                                    <Col span={14}>
+                                      <InputNumber
+                                        value={dieConfigValues.arbitration.default.iterations || 1}
+                                        onChange={(v) => updateDieConfigValue('arbitration', { ...dieConfigValues.arbitration, default: { ...dieConfigValues.arbitration.default, iterations: v } })}
+                                        min={1}
+                                        max={10}
+                                        style={{ width: 120 }}
+                                      />
+                                    </Col>
+                                  </Row>
+                                  <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                                    <Col span={10}><ConfigLabel name="ARBITRATION_WEIGHT_STRATEGY" /></Col>
+                                    <Col span={14}>
+                                      <Select
+                                        value={dieConfigValues.arbitration.default.weight_strategy || 'queue_length'}
+                                        onChange={(v) => updateDieConfigValue('arbitration', { ...dieConfigValues.arbitration, default: { ...dieConfigValues.arbitration.default, weight_strategy: v } })}
+                                        style={{ width: 160 }}
+                                      >
+                                        <Option value="queue_length">Queue Length</Option>
+                                        <Option value="fixed">Fixed</Option>
+                                        <Option value="priority">Priority</Option>
+                                      </Select>
+                                    </Col>
+                                  </Row>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </div>
                       ),
                     },
                   ]}
@@ -1678,19 +1995,49 @@ const Simulation: React.FC = () => {
             </Form.Item>
 
             <Form.Item name="experiment_name" label="实验名称">
-              <Input placeholder="可选，用于数据库记录" />
+              <AutoComplete
+                placeholder="选择已有实验或输入新名称"
+                options={existingExperiments
+                  .filter(exp => exp.experiment_type === mode)
+                  .map(exp => ({
+                    value: exp.name,
+                    label: (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>{exp.name}</span>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          {exp.completed_combinations || 0}条结果
+                        </Text>
+                      </div>
+                    ),
+                  }))}
+                filterOption={(inputValue, option) =>
+                  option?.value?.toLowerCase().includes(inputValue.toLowerCase()) ?? false
+                }
+                onChange={(value) => {
+                  // 如果填写了实验名称，自动勾选保存到数据库
+                  if (value && !form.getFieldValue('save_to_db')) {
+                    form.setFieldValue('save_to_db', true)
+                  }
+                }}
+              />
+            </Form.Item>
+            <Form.Item name="experiment_description" label="实验描述">
+              <Input.TextArea placeholder="可选，描述本次实验的目的或配置说明" rows={2} />
             </Form.Item>
 
             <Form.Item name="save_to_db" label="保存到数据库" valuePropName="checked">
               <Switch />
             </Form.Item>
 
-            <Form.Item name="result_granularity" label="结果粒度">
-              <Radio.Group>
-                <Radio value="per_file">每文件一条</Radio>
-                <Radio value="per_batch">每批次一条</Radio>
-              </Radio.Group>
-            </Form.Item>
+            {selectedFiles.length > 1 && (
+              <Form.Item
+                name="max_workers"
+                label="并行进程数"
+                tooltip="留空则使用CPU核心数"
+              >
+                <InputNumber min={1} max={32} placeholder="默认: CPU核心数" style={{ width: '100%' }} />
+              </Form.Item>
+            )}
 
             <Form.Item style={{ marginBottom: 0, marginTop: 8 }}>
               <Space size="middle">
@@ -1732,6 +2079,7 @@ const Simulation: React.FC = () => {
             }
             style={{ marginBottom: 24 }}
           >
+            {/* 顶部指标：任务进度、文件进度、运行时间 */}
             <Row gutter={[24, 16]}>
               <Col span={8}>
                 <Statistic
@@ -1743,9 +2091,9 @@ const Simulation: React.FC = () => {
               </Col>
               <Col span={8}>
                 <Statistic
-                  title="已处理文件"
-                  value={currentTask.current_file ? Math.ceil((currentTask.progress / 100) * selectedFiles.length) : 0}
-                  suffix={`/ ${selectedFiles.length}`}
+                  title="文件进度"
+                  value={currentTask.sim_details?.file_index || 0}
+                  suffix={`/ ${currentTask.sim_details?.total_files || selectedFiles.length}`}
                   valueStyle={{ color: primaryColor }}
                 />
               </Col>
@@ -1760,6 +2108,7 @@ const Simulation: React.FC = () => {
 
             <Divider style={{ margin: '16px 0' }} />
 
+            {/* 总进度条 */}
             <Progress
               percent={currentTask.progress}
               status={currentTask.status === 'failed' ? 'exception' : currentTask.status === 'completed' ? 'success' : 'active'}
@@ -1767,23 +2116,59 @@ const Simulation: React.FC = () => {
               style={{ marginBottom: 12 }}
             />
 
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+            {/* 当前文件信息 */}
+            {currentTask.sim_details?.current_file && (
+              <div style={{ marginBottom: 12 }}>
+                <Text type="secondary">当前文件: </Text>
+                <Text strong>{currentTask.sim_details.current_file}</Text>
+              </div>
+            )}
+
+            {/* 仿真详细指标 */}
+            {currentTask.sim_details && currentTask.status === 'running' && (
+              <Row gutter={[16, 16]}>
+                <Col span={6}>
+                  <Statistic
+                    title="仿真时间"
+                    value={currentTask.sim_details.current_time}
+                    suffix={`/ ${currentTask.sim_details.max_time} ns`}
+                    valueStyle={{ fontSize: 16 }}
+                  />
+                </Col>
+                <Col span={6}>
+                  <Statistic
+                    title="请求数"
+                    value={currentTask.sim_details.req_count}
+                    suffix={`/ ${currentTask.sim_details.total_req}`}
+                    valueStyle={{ fontSize: 16 }}
+                  />
+                </Col>
+                <Col span={6}>
+                  <Statistic
+                    title="接收数据"
+                    value={currentTask.sim_details.recv_flits}
+                    suffix={`/ ${currentTask.sim_details.total_flits} flits`}
+                    valueStyle={{ fontSize: 16 }}
+                  />
+                </Col>
+                <Col span={6}>
+                  <Statistic
+                    title="传输中"
+                    value={currentTask.sim_details.trans_flits}
+                    suffix="flits"
+                    valueStyle={{ fontSize: 16 }}
+                  />
+                </Col>
+              </Row>
+            )}
+
+            <Divider style={{ margin: '16px 0' }} />
+
+            <Space direction="vertical" style={{ width: '100%' }} size={4}>
               <div>
                 <Text type="secondary">任务ID: </Text>
                 <Text code copyable={{ text: currentTask.task_id }}>{currentTask.task_id}</Text>
               </div>
-              {currentTask.current_file && (
-                <div>
-                  <Text type="secondary">当前文件: </Text>
-                  <Text>{currentTask.current_file}</Text>
-                </div>
-              )}
-              {currentTask.message && (
-                <div>
-                  <Text type="secondary">状态信息: </Text>
-                  <Text>{currentTask.message}</Text>
-                </div>
-              )}
               {currentTask.error && (
                 <Alert type="error" message={currentTask.error} showIcon style={{ marginTop: 8 }} />
               )}
@@ -1807,7 +2192,7 @@ const Simulation: React.FC = () => {
                 <Tooltip title="全部折叠">
                   <Button icon={<MinusSquareOutlined />} onClick={() => setExpandedKeys([])} size="small" />
                 </Tooltip>
-                <Button icon={<ReloadOutlined />} onClick={() => loadTrafficFilesTree()} size="small">
+                <Button icon={<ReloadOutlined />} onClick={() => loadTrafficFilesTree(mode as 'kcin' | 'dcin')} size="small">
                   刷新
                 </Button>
               </Space>
@@ -1903,36 +2288,35 @@ const Simulation: React.FC = () => {
           pagination={{ pageSize: 5, showSizeChanger: false }}
           columns={[
             {
-              title: '任务ID',
-              dataIndex: 'task_id',
-              width: 120,
-              render: (id: string) => <Text code style={{ fontSize: 12 }}>{id}</Text>
-            },
-            {
-              title: '模式',
-              dataIndex: 'mode',
-              width: 100,
-              render: (mode: string) => (
-                <Tag color={mode === 'kcin' ? 'blue' : 'purple'}>{mode.toUpperCase()}</Tag>
+              title: '实验名称',
+              dataIndex: 'experiment_name',
+              width: 200,
+              render: (name: string, record: TaskHistoryItem) => (
+                <Space direction="vertical" size={0}>
+                  <Text strong>{name || '未命名实验'}</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    <Tag color={record.mode === 'kcin' ? 'blue' : 'purple'} style={{ marginRight: 4 }}>
+                      {record.mode.toUpperCase()}
+                    </Tag>
+                    {record.topology}
+                  </Text>
+                </Space>
               ),
             },
             {
-              title: '拓扑',
-              dataIndex: 'topology',
+              title: '结果数',
               width: 80,
-              render: (topo: string) => <Tag>{topo}</Tag>
+              render: (_: any, record: TaskHistoryItem) => {
+                const completed = record.results?.completed_files || 0
+                const total = record.results?.total_files || record.traffic_files?.length || 0
+                return <Text>{completed}/{total}</Text>
+              },
             },
             {
               title: '状态',
               dataIndex: 'status',
-              width: 110,
+              width: 100,
               render: getStatusTag
-            },
-            {
-              title: '消息',
-              dataIndex: 'message',
-              ellipsis: true,
-              render: (msg: string) => <Text type="secondary">{msg || '-'}</Text>
             },
             {
               title: '创建时间',
@@ -1942,6 +2326,39 @@ const Simulation: React.FC = () => {
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   {new Date(time).toLocaleString()}
                 </Text>
+              ),
+            },
+            {
+              title: '操作',
+              width: 150,
+              render: (_: any, record: TaskHistoryItem) => (
+                <Space>
+                  {record.status === 'completed' && record.results?.experiment_id && (
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={() => navigate(`/experiments/${record.results?.experiment_id}`)}
+                    >
+                      查看结果
+                    </Button>
+                  )}
+                  <Button
+                    type="link"
+                    size="small"
+                    danger
+                    onClick={async () => {
+                      try {
+                        await deleteTask(record.task_id)
+                        message.success('任务已删除')
+                        loadHistory()
+                      } catch (error: any) {
+                        message.error(error.response?.data?.detail || '删除失败')
+                      }
+                    }}
+                  >
+                    删除
+                  </Button>
+                </Space>
               ),
             },
           ]}

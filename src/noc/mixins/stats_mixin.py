@@ -828,7 +828,9 @@ class StatsMixin:
             db.update_experiment_status(experiment_id, "completed")
 
         # 处理综合结果（不写本地文件，直接收集内容）
-        self.process_comprehensive_results(save_to_db_only=not save_local_files)
+        # 只有当result_processor存在时才处理
+        if hasattr(self, 'result_processor') and self.result_processor is not None:
+            self.process_comprehensive_results(save_to_db_only=not save_local_files)
 
         # 获取仿真结果
         results = self.get_results()

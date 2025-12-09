@@ -1,5 +1,5 @@
 """
-CrossRing 一体化仿真平台 - FastAPI应用入口
+仿真一体化平台 - FastAPI应用入口
 合并 tool_web 和 result_db_web 的功能
 """
 
@@ -30,13 +30,15 @@ ensure_dirs()
 # 导入API路由
 # 来自 tool_web 的路由
 from app.api import ip_mount, traffic_config, traffic_generate, static_bandwidth
+
 # 来自 result_db_web 的路由
 from app.api import experiments, results, analysis, export
+
 # 新增的仿真路由
 from app.api import simulation
 
 app = FastAPI(
-    title="CrossRing 一体化仿真平台",
+    title="仿真一体化平台",
     description="集成流量配置、仿真执行、结果管理的统一平台",
     version="1.0.0",
     docs_url="/api/docs",
@@ -60,7 +62,7 @@ async def root():
         return FileResponse(FRONTEND_DIST_DIR / "index.html")
     return {
         "status": "ok",
-        "message": "CrossRing 一体化仿真平台 API",
+        "message": "仿真一体化平台 API",
         "version": "1.0.0",
         "docs": "/api/docs",
         "modules": {
@@ -69,17 +71,14 @@ async def root():
             "experiments": "实验管理",
             "results": "结果查询",
             "analysis": "数据分析",
-        }
+        },
     }
 
 
 @app.get("/api/health")
 async def health_check():
     """健康检查端点"""
-    return {
-        "status": "healthy",
-        "service": "crossring-unified-platform"
-    }
+    return {"status": "healthy", "service": "crossring-unified-platform"}
 
 
 # ==================== 注册路由 ====================
@@ -127,10 +126,11 @@ if FRONTEND_DIST_DIR.exists():
 
 # ==================== 启动事件 ====================
 
+
 @app.on_event("startup")
 async def startup_event():
     print("=" * 60)
-    print("🚀 CrossRing 一体化仿真平台已启动")
+    print("🚀 仿真一体化平台已启动")
     print(f"📁 项目根目录: {CROSSRING_ROOT}")
     print(f"📖 API文档: http://localhost:{API_PORT}/api/docs")
     print("=" * 60)
@@ -154,7 +154,7 @@ if __name__ == "__main__":
             port = start_port + i
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.bind(('127.0.0.1', port))
+                    s.bind(("127.0.0.1", port))
                     return port
             except OSError:
                 continue
@@ -163,19 +163,15 @@ if __name__ == "__main__":
     port = find_free_port(API_PORT)
 
     # 打包模式下自动打开浏览器
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
+
         def open_browser():
             import time
+
             time.sleep(1.5)
             webbrowser.open(f"http://localhost:{port}")
 
         threading.Thread(target=open_browser, daemon=True).start()
 
     print(f"服务启动在端口: {port}")
-    uvicorn.run(
-        app if getattr(sys, 'frozen', False) else "app.main:app",
-        host="0.0.0.0",
-        port=port,
-        reload=not getattr(sys, 'frozen', False),
-        log_level="info"
-    )
+    uvicorn.run(app if getattr(sys, "frozen", False) else "app.main:app", host="0.0.0.0", port=port, reload=not getattr(sys, "frozen", False), log_level="info")

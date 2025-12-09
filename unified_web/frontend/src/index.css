@@ -202,3 +202,12 @@ a:hover {
 .handsontable .ht_master {
   z-index: 1;
 }
+
+/* Handsontable 批量选中行样式 */
+.handsontable td.selected-row {
+  background-color: #e6f4ff !important;
+}
+
+.handsontable tr:hover td.selected-row {
+  background-color: #bae0ff !important;
+}

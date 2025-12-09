@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 > nul
-title CrossRing 一体化仿真平台
+title 仿真一体化平台
 
 echo ========================================
-echo   CrossRing 一体化仿真平台
+echo   仿真一体化平台
 echo ========================================
 
 set SCRIPT_DIR=%~dp0

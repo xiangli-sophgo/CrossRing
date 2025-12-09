@@ -1,5 +1,5 @@
 """
-CrossRing 一体化仿真平台 - 统一配置
+仿真一体化平台 - 统一配置
 合并 tool_web 和 result_db_web 的配置
 """
 
@@ -14,7 +14,7 @@ def get_base_dir() -> Path:
     - 开发模式: CrossRing 项目根目录
     - 打包模式: exe 所在目录
     """
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         # PyInstaller 打包后
         return Path(sys.executable).parent
     else:
@@ -35,7 +35,7 @@ TOPOLOGIES_DIR = CONFIG_DIR / "topologies"
 TRAFFIC_OUTPUT_DIR = BASE_DIR / "traffic"
 
 # ==================== 数据库配置 (来自 result_db_web) ====================
-if getattr(sys, 'frozen', False):
+if getattr(sys, "frozen", False):
     # 打包模式: 数据库在 exe 同级 data 目录
     DATABASE_DIR = BASE_DIR / "data"
     DATABASE_PATH = DATABASE_DIR / "results.db"

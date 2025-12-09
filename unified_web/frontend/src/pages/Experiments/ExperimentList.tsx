@@ -429,6 +429,7 @@ export default function ExperimentList() {
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
               optionType="button"
+              buttonStyle="solid"
               size="small"
             >
               <Radio.Button value="all">全部</Radio.Button>

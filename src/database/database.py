@@ -161,10 +161,18 @@ class DatabaseManager:
                 return self._experiment_to_dict(exp)
             return None
 
-    def get_experiment_by_name(self, name: str) -> Optional[dict]:
-        """根据名称获取实验"""
+    def get_experiment_by_name(self, name: str, experiment_type: Optional[str] = None) -> Optional[dict]:
+        """根据名称获取实验
+
+        Args:
+            name: 实验名称
+            experiment_type: 实验类型，如果指定则同时按类型筛选
+        """
         with self.get_session() as session:
-            exp = session.query(Experiment).filter(Experiment.name == name).first()
+            query = session.query(Experiment).filter(Experiment.name == name)
+            if experiment_type:
+                query = query.filter(Experiment.experiment_type == experiment_type)
+            exp = query.first()
             if exp:
                 return self._experiment_to_dict(exp)
             return None

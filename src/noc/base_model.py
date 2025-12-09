@@ -85,6 +85,9 @@ class BaseModel(StatsMixin, DataflowMixin):
         network_freq = getattr(config, "NETWORK_FREQUENCY", 2.0)
         self.request_tracker = RequestTracker(network_frequency=network_freq)
 
+        # 取消标志（用于外部中断仿真）
+        self._cancelled = False
+
     def setup_traffic_scheduler(self, traffic_file_path: str, traffic_chains: list) -> None:
         """
         配置流量调度器并提取IP需求
@@ -759,6 +762,12 @@ class BaseModel(StatsMixin, DataflowMixin):
 
         try:
             while True:
+                # 检查取消标志
+                if self._cancelled:
+                    if self.verbose:
+                        print("\n仿真被取消，正在保存结果...")
+                    break
+
                 self.cycle += 1
                 self.cycle_mod = self.cycle % self.config.NETWORK_FREQUENCY
 
@@ -811,9 +820,31 @@ class BaseModel(StatsMixin, DataflowMixin):
             print(f"Data statistic: Read: {self.read_req, self.read_flit}, " f"Write: {self.write_req, self.write_flit}, " f"Total: {self.read_req + self.write_req, self.read_flit + self.write_flit}")
 
     def log_summary(self):
+        current_time = self.cycle // self.config.NETWORK_FREQUENCY
+        total_req = getattr(self, 'read_req', 0) + getattr(self, 'write_req', 0)
+        total_flits = getattr(self, 'read_flit', 0) + getattr(self, 'write_flit', 0)
+        summary_data = {
+            "current_time": current_time,
+            "max_time": self.end_time,
+            "progress": min(100, int(current_time / self.end_time * 100)) if self.end_time > 0 else 0,
+            "req_count": self.req_count,
+            "total_req": total_req,
+            "in_req": self.req_num,
+            "rsp": self.rsp_num,
+            "read_flits": self.send_read_flits_num_stat,
+            "write_flits": self.send_write_flits_num_stat,
+            "trans_flits": self.trans_flits_num,
+            "recv_flits": self.data_network.recv_flits_num,
+            "total_flits": total_flits,
+        }
+
+        # 调用进度回调（如果设置了）
+        if hasattr(self, 'progress_callback') and self.progress_callback:
+            self.progress_callback(summary_data)
+
         if self.verbose:
             print(
-                f"T: {self.cycle // self.config.NETWORK_FREQUENCY}, Req_cnt: {self.req_count} In_Req: {self.req_num}, Rsp: {self.rsp_num},"
+                f"T: {current_time}, Req_cnt: {self.req_count} In_Req: {self.req_num}, Rsp: {self.rsp_num},"
                 f" R_fn: {self.send_read_flits_num_stat}, W_fn: {self.send_write_flits_num_stat}, "
                 f"Trans_fn: {self.trans_flits_num}, Recv_fn: {self.data_network.recv_flits_num}"
             )

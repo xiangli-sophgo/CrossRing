@@ -67,10 +67,10 @@ class ResultManager:
         if experiment_type not in ("kcin", "dcin"):
             raise ValueError(f"无效的实验类型: {experiment_type}，必须是 'kcin' 或 'dcin'")
 
-        # 检查名称是否已存在
-        existing = self.db.get_experiment_by_name(name)
+        # 检查同类型下名称是否已存在（同名不同类型可以共存）
+        existing = self.db.get_experiment_by_name(name, experiment_type)
         if existing:
-            raise ValueError(f"实验名称 '{name}' 已存在")
+            raise ValueError(f"{experiment_type.upper()} 实验名称 '{name}' 已存在")
 
         experiment_id = self.db.create_experiment(
             name=name,
@@ -93,9 +93,14 @@ class ResultManager:
         """获取实验详情"""
         return self.db.get_experiment(experiment_id)
 
-    def get_experiment_by_name(self, name: str) -> Optional[Dict[str, Any]]:
-        """根据名称获取实验"""
-        return self.db.get_experiment_by_name(name)
+    def get_experiment_by_name(self, name: str, experiment_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """根据名称获取实验
+
+        Args:
+            name: 实验名称
+            experiment_type: 实验类型，如果指定则同时按类型筛选
+        """
+        return self.db.get_experiment_by_name(name, experiment_type)
 
     def list_experiments(
         self,

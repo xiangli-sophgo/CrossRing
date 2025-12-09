@@ -1,11 +1,11 @@
 #!/bin/bash
-# CrossRing 一体化仿真平台 - 启动脚本 (Linux/macOS)
+# 仿真一体化平台 - 启动脚本 (Linux/macOS)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "========================================"
-echo "  CrossRing 一体化仿真平台"
+echo "  仿真一体化平台"
 echo "========================================"
 
 # 检查Python

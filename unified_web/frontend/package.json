@@ -2,7 +2,7 @@
   "name": "crossring-unified-web",
   "version": "1.0.0",
   "type": "module",
-  "description": "CrossRing 一体化仿真平台 - 前端界面",
+  "description": "仿真一体化平台 - 前端界面",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

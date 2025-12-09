@@ -528,7 +528,7 @@ class FIFOHeatmapVisualizer:
         # 创建子图布局: 1行2列 (50% + 50%)
         subplot_titles = None if hide_subplot_titles else ("FIFO使用率热力图", "CrossRing架构图")
         fig = make_subplots(
-            rows=1, cols=2, column_widths=[0.5, 0.5], subplot_titles=subplot_titles, specs=[[{"type": "scatter"}, {"type": "scatter"}]], horizontal_spacing=0.08
+            rows=1, cols=2, column_widths=[0.5, 0.5], subplot_titles=subplot_titles, specs=[[{"type": "scatter"}, {"type": "scatter"}]], horizontal_spacing=0.02
         )
 
         # 计算画布范围（用于坐标轴设置）
@@ -952,14 +952,14 @@ class FIFOHeatmapVisualizer:
                     cmin = 0
                     cmax = global_max_flit_count
                     colorbar_title = "累计Flit数"
-                    colorbar_config = dict(title=colorbar_title, thickness=18, x=-0.15, tickformat="d")  # 整数格式，不显示小数点
+                    colorbar_config = dict(title=colorbar_title, thickness=18, x=-0.02, tickformat="d")  # 整数格式，不显示小数点
                 else:
                     # 使用率模式：0-100%
                     colorscale = "RdYlGn_r"
                     cmin = 0
                     cmax = 100
                     colorbar_title = "使用率 (%)"
-                    colorbar_config = dict(title=colorbar_title, thickness=18, tickmode="array", x=-0.15)
+                    colorbar_config = dict(title=colorbar_title, thickness=18, tickmode="array", x=-0.02)
 
                 # 创建单个Scatter trace（包含所有Die的所有节点）
                 trace = go.Scatter(

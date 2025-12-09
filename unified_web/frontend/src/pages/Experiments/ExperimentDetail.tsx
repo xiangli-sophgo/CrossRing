@@ -253,6 +253,7 @@ export default function ExperimentDetail() {
                 pageSize={pageSize}
                 paramKeys={paramKeys}
                 experimentId={experimentId}
+                experimentName={currentExperiment?.name}
                 experimentType={currentExperiment?.experiment_type}
                 onPageChange={(p, ps) => {
                   setPage(p);

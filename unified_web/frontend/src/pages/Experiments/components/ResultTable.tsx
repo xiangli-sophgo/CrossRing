@@ -98,6 +98,7 @@ interface Props {
   pageSize: number;
   paramKeys: string[];
   experimentId: number;
+  experimentName?: string;
   experimentType?: ExperimentType;
   onPageChange: (page: number, pageSize: number) => void;
   onSortChange: (field: string, order: 'asc' | 'desc') => void;
@@ -111,6 +112,7 @@ export default function ResultTable({
   pageSize,
   paramKeys,
   experimentId,
+  experimentName,
   experimentType = 'kcin',
   onPageChange,
   onSortChange,
@@ -1086,7 +1088,7 @@ copyPaste={{
           </div>
           {detailExpanded && (
             <div style={{ padding: 16 }}>
-              <ResultDetailPanel result={selectedResult} experimentId={experimentId} experimentType={experimentType} />
+              <ResultDetailPanel result={selectedResult} experimentId={experimentId} experimentName={experimentName} experimentType={experimentType} />
             </div>
           )}
         </div>

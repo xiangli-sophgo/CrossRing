@@ -597,4 +597,4 @@ class CrossRingConfig:
             "--CHANNEL_SPEC", type=dict, default=default_config.get("CHANNEL_SPEC", {"gdma": 2, "sdma": 2, "cdma": 2, "ddr": 2, "l2m": 2}), help="Channel specification for different IP types"
         )
 
-        return parser.parse_args()
+        return parser.parse_args([])

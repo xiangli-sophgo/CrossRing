@@ -92,6 +92,12 @@ export const theme: ThemeConfig = {
     Breadcrumb: {
       separatorMargin: 8,
     },
+    // 单选按钮
+    Radio: {
+      buttonSolidCheckedBg: primaryColor,
+      buttonSolidCheckedColor: '#fff',
+      buttonSolidCheckedHoverBg: '#4096ff',
+    },
   },
 }
 

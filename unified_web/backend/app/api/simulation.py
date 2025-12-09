@@ -32,10 +32,8 @@ class SimulationRequest(BaseModel):
     max_time: int = Field(default=6000, description="最大仿真时间(ns)")
     save_to_db: bool = Field(default=True, description="是否保存到数据库")
     experiment_name: Optional[str] = Field(None, description="实验名称")
-    result_granularity: Literal["per_file", "per_batch"] = Field(
-        default="per_file",
-        description="结果粒度: per_file(每文件一条) 或 per_batch(每批次一条)"
-    )
+    experiment_description: Optional[str] = Field(None, description="实验描述")
+    max_workers: Optional[int] = Field(None, description="并行进程数，默认为CPU核心数")
 
 
 class TaskResponse(BaseModel):
@@ -43,6 +41,21 @@ class TaskResponse(BaseModel):
     task_id: str
     status: str
     message: str
+
+
+class SimDetailsResponse(BaseModel):
+    """仿真进度详细数据"""
+    file_index: int
+    total_files: int
+    current_file: str
+    sim_progress: int
+    current_time: int
+    max_time: int
+    req_count: int
+    total_req: int
+    recv_flits: int
+    total_flits: int
+    trans_flits: int  # 网络在途flit数
 
 
 class TaskStatusResponse(BaseModel):
@@ -54,6 +67,7 @@ class TaskStatusResponse(BaseModel):
     message: str
     error: Optional[str]
     results: Optional[dict]
+    sim_details: Optional[SimDetailsResponse]
     created_at: str
     started_at: Optional[str]
     completed_at: Optional[str]
@@ -119,8 +133,9 @@ async def run_simulation(request: SimulationRequest):
         traffic_files=request.traffic_files,
         max_time=request.max_time,
         experiment_name=request.experiment_name,
+        experiment_description=request.experiment_description,
         save_to_db=request.save_to_db,
-        result_granularity=request.result_granularity,
+        max_workers=request.max_workers,
         config_overrides=request.config_overrides,
         die_config_path=die_config_path,
         die_config_overrides=request.die_config_overrides,
@@ -145,6 +160,11 @@ async def get_task_status(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
+    # 构建sim_details响应
+    sim_details = None
+    if task.sim_details:
+        sim_details = SimDetailsResponse(**task.sim_details)
+
     return TaskStatusResponse(
         task_id=task.task_id,
         status=task.status.value,
@@ -153,6 +173,7 @@ async def get_task_status(task_id: str):
         message=task.message,
         error=task.error,
         results=task.results if task.results else None,
+        sim_details=sim_details,
         created_at=task.created_at.isoformat(),
         started_at=task.started_at.isoformat() if task.started_at else None,
         completed_at=task.completed_at.isoformat() if task.completed_at else None,
@@ -201,16 +222,41 @@ async def get_history(limit: int = 20):
                 "created_at": t.created_at.isoformat(),
                 "completed_at": t.completed_at.isoformat() if t.completed_at else None,
                 "traffic_files": t.traffic_files,
+                "experiment_name": t.experiment_name,
+                "results": t.results,
             }
             for t in tasks
         ]
     }
 
 
+@router.delete("/history")
+async def clear_history():
+    """
+    清空历史任务
+    """
+    task_manager.clear_history()
+    return {"success": True, "message": "历史任务已清空"}
+
+
+def _parse_topo_name(name: str) -> tuple:
+    """
+    解析拓扑名称为数字元组，用于排序
+    例如: "5x4" -> (5, 4), "10x8" -> (10, 8)
+    """
+    try:
+        parts = name.lower().split('x')
+        if len(parts) == 2:
+            return (int(parts[0]), int(parts[1]))
+    except (ValueError, IndexError):
+        pass
+    return (float('inf'), float('inf'))  # 无法解析的排最后
+
+
 @router.get("/configs")
 async def list_configs():
     """
-    列出可用的配置文件（按名称排序）
+    列出可用的配置文件（按拓扑大小排序）
     """
     kcin_configs = []
     dcin_configs = []
@@ -223,8 +269,9 @@ async def list_configs():
             elif name.startswith("dcin_"):
                 dcin_configs.append(ConfigOption(name=name, path=f.name))
 
-    # 按名称排序
-    kcin_configs.sort(key=lambda c: c.name)
+    # KCIN按拓扑大小排序（先行数后列数）
+    kcin_configs.sort(key=lambda c: _parse_topo_name(c.name))
+    # DCIN按名称排序
     dcin_configs.sort(key=lambda c: c.name)
 
     return {
@@ -576,10 +623,42 @@ async def list_traffic_files(path: str = ""):
     }
 
 
-def _build_traffic_tree(base_path: Path, relative_path: str = "") -> List[Dict]:
+def _detect_traffic_format(file_path: Path) -> str:
+    """
+    检测流量文件格式
+    - KCIN: 7字段 (时间,源节点,源IP,目标节点,目标IP,操作,burst)
+    - DCIN: 9字段 (时间,源Die,源节点,源IP,目标Die,目标节点,目标IP,操作,burst)
+    返回: "kcin", "dcin", 或 "unknown"
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                # 跳过空行和注释行
+                if not line or line.startswith('#'):
+                    continue
+                # 解析第一行有效数据
+                parts = line.split(',')
+                field_count = len(parts)
+                if field_count == 7:
+                    return "kcin"
+                elif field_count == 9:
+                    return "dcin"
+                else:
+                    return "unknown"
+        return "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _build_traffic_tree(base_path: Path, relative_path: str = "", mode: Optional[str] = None) -> List[Dict]:
     """
     递归构建流量文件树结构
-    返回格式: [{ key, title, isLeaf, children?, path?, size? }]
+    返回格式: [{ key, title, isLeaf, children?, path?, size?, format? }]
+
+    :param base_path: 基础路径
+    :param relative_path: 相对路径
+    :param mode: 过滤模式 ("kcin" 或 "dcin")，None表示不过滤
     """
     tree = []
 
@@ -603,16 +682,22 @@ def _build_traffic_tree(base_path: Path, relative_path: str = "") -> List[Dict]:
     # 处理目录
     for dir_item in dirs:
         dir_relative_path = f"{relative_path}/{dir_item.name}" if relative_path else dir_item.name
-        children = _build_traffic_tree(dir_item, dir_relative_path)
-        tree.append({
-            "key": dir_relative_path,
-            "title": dir_item.name,
-            "isLeaf": False,
-            "children": children,
-        })
+        children = _build_traffic_tree(dir_item, dir_relative_path, mode)
+        # 只有当子节点非空时才添加目录
+        if children:
+            tree.append({
+                "key": dir_relative_path,
+                "title": dir_item.name,
+                "isLeaf": False,
+                "children": children,
+            })
 
     # 处理文件
     for file_item in files:
+        file_format = _detect_traffic_format(file_item)
+        # 根据mode过滤文件
+        if mode and file_format != mode:
+            continue
         file_relative_path = f"{relative_path}/{file_item.name}" if relative_path else file_item.name
         tree.append({
             "key": file_relative_path,
@@ -620,17 +705,20 @@ def _build_traffic_tree(base_path: Path, relative_path: str = "") -> List[Dict]:
             "isLeaf": True,
             "path": file_relative_path,
             "size": file_item.stat().st_size,
+            "format": file_format,
         })
 
     return tree
 
 
 @router.get("/traffic-files-tree")
-async def get_traffic_files_tree():
+async def get_traffic_files_tree(mode: Optional[str] = None):
     """
     获取流量文件的完整树形结构
+
+    :param mode: 过滤模式 ("kcin" 或 "dcin")，不传则返回所有文件
     """
-    tree = _build_traffic_tree(TRAFFIC_OUTPUT_DIR)
+    tree = _build_traffic_tree(TRAFFIC_OUTPUT_DIR, mode=mode)
     return {"tree": tree}
 
 

@@ -21,13 +21,28 @@ export interface SimulationRequest {
   max_time: number
   save_to_db: boolean
   experiment_name?: string
-  result_granularity: 'per_file' | 'per_batch'
+  experiment_description?: string
+  max_workers?: number  // 并行进程数
 }
 
 export interface TaskResponse {
   task_id: string
   status: string
   message: string
+}
+
+export interface SimDetails {
+  file_index: number
+  total_files: number
+  current_file: string
+  sim_progress: number
+  current_time: number
+  max_time: number
+  req_count: number
+  total_req: number
+  recv_flits: number
+  total_flits: number
+  trans_flits: number  // 网络在途flit数
 }
 
 export interface TaskStatus {
@@ -38,6 +53,7 @@ export interface TaskStatus {
   message: string
   error: string | null
   results: Record<string, any> | null
+  sim_details: SimDetails | null
   created_at: string
   started_at: string | null
   completed_at: string | null
@@ -68,6 +84,7 @@ export interface TrafficTreeNode {
   children?: TrafficTreeNode[]
   path?: string
   size?: number
+  format?: 'kcin' | 'dcin' | 'unknown'
 }
 
 export interface TrafficFilesTreeResponse {
@@ -84,6 +101,8 @@ export interface TaskHistoryItem {
   created_at: string
   completed_at: string | null
   traffic_files: string[]
+  experiment_name: string | null
+  results: Record<string, any> | null
 }
 
 // 启动仿真
@@ -116,6 +135,12 @@ export const getTaskHistory = async (limit: number = 20): Promise<{ tasks: TaskH
   return response.data
 }
 
+// 清空历史任务
+export const clearTaskHistory = async (): Promise<{ success: boolean; message: string }> => {
+  const response = await api.delete('/history')
+  return response.data
+}
+
 // 获取可用配置
 export const getConfigs = async (): Promise<{ kcin: ConfigOption[]; dcin: ConfigOption[] }> => {
   const response = await api.get('/configs')
@@ -129,8 +154,9 @@ export const getTrafficFiles = async (path: string = ''): Promise<TrafficFilesRe
 }
 
 // 获取流量文件树形结构
-export const getTrafficFilesTree = async (): Promise<TrafficFilesTreeResponse> => {
-  const response = await api.get('/traffic-files-tree')
+export const getTrafficFilesTree = async (mode?: 'kcin' | 'dcin'): Promise<TrafficFilesTreeResponse> => {
+  const params = mode ? `?mode=${mode}` : ''
+  const response = await api.get(`/traffic-files-tree${params}`)
   return response.data
 }
 

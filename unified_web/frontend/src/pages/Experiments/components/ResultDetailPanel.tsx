@@ -29,13 +29,14 @@ import { getResultHtmlUrl, getResultFiles, getFileDownloadUrl, type ResultFileIn
 interface Props {
   result: SimulationResult;
   experimentId: number;
+  experimentName?: string;
   experimentType?: ExperimentType;
   hideConfigParams?: boolean;
 }
 
 const { Text } = Typography;
 
-export default function ResultDetailPanel({ result, experimentId, experimentType = 'kcin', hideConfigParams = false }: Props) {
+export default function ResultDetailPanel({ result, experimentId, experimentName, experimentType = 'kcin', hideConfigParams = false }: Props) {
   const navigate = useNavigate();
   const [dbFiles, setDbFiles] = useState<ResultFileInfo[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -62,7 +63,19 @@ export default function ResultDetailPanel({ result, experimentId, experimentType
 
   // 在结果分析页面打开HTML报告
   const handleViewHtml = () => {
-    const label = `结果 ${result.id}`;
+    // 从config_params中获取数据流名称（支持多种字段名）
+    const trafficName = result.config_params?.['数据流名称']
+      || result.config_params?.file_name
+      || result.config_params?.TRAFFIC_FILE
+      || result.config_params?.traffic_file
+      || '';
+    // 如果是路径，提取文件名（去除路径和扩展名）
+    const displayName = String(trafficName).includes('/') || String(trafficName).includes('\\')
+      ? String(trafficName).split('/').pop()?.split('\\').pop()?.replace(/\.[^/.]+$/, '') || ''
+      : String(trafficName);
+    // 构建标签：实验名称 - 数据流名称
+    const parts = [experimentName, displayName].filter(Boolean);
+    const label = parts.length > 0 ? parts.join(' - ') : `结果 ${result.id}`;
     navigate(`/analysis?resultId=${result.id}&experimentId=${experimentId}&label=${encodeURIComponent(label)}`);
   };
 
