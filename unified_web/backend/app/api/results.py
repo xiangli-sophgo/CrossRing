@@ -13,6 +13,9 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from src.database import ResultManager
+from app.core.logger import get_logger
+
+logger = get_logger("results")
 
 
 def embed_images_in_html(html_content: str, base_path: str = None) -> str:
@@ -341,6 +344,13 @@ async def open_local_file(request: OpenFileRequest):
     """
     file_path = request.path
 
+    # 安全检查：只允许打开特定扩展名的文件
+    allowed_extensions = {'.html', '.csv', '.txt', '.json', '.yaml', '.yml', '.png', '.jpg', '.svg'}
+    _, ext = os.path.splitext(file_path)
+    if ext.lower() not in allowed_extensions:
+        logger.warning(f"尝试打开不允许的文件类型: {file_path}")
+        raise HTTPException(status_code=400, detail="不允许打开该类型的文件")
+
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail=f"文件不存在: {file_path}")
 
@@ -352,9 +362,17 @@ async def open_local_file(request: OpenFileRequest):
         else:
             subprocess.run(["xdg-open", file_path], check=True)
 
+        logger.info(f"打开文件: {file_path}")
         return {"success": True, "message": f"已打开文件: {file_path}"}
+    except FileNotFoundError:
+        logger.error(f"找不到系统程序打开文件: {file_path}")
+        raise HTTPException(status_code=500, detail="无法找到打开文件的程序")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"打开文件进程错误: {file_path} - {e}")
+        raise HTTPException(status_code=500, detail="打开文件失败")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"打开文件失败: {str(e)}")
+        logger.error(f"打开文件失败: {file_path} - {e}")
+        raise HTTPException(status_code=500, detail="打开文件时发生内部错误")
 
 
 @router.post("/open-directory")
@@ -387,9 +405,14 @@ async def open_file_directory(request: OpenFileRequest):
             # Linux: 打开目录
             subprocess.run(["xdg-open", dir_path], check=True)
 
+        logger.info(f"打开目录: {dir_path}")
         return {"success": True, "message": f"已打开目录: {dir_path}"}
+    except subprocess.CalledProcessError as e:
+        logger.error(f"打开目录进程错误: {dir_path} - {e}")
+        raise HTTPException(status_code=500, detail="打开目录失败")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"打开目录失败: {str(e)}")
+        logger.error(f"打开目录失败: {dir_path} - {e}")
+        raise HTTPException(status_code=500, detail="打开目录时发生内部错误")
 
 
 # ==================== 结果文件存储API ====================

@@ -86,9 +86,7 @@ def _load_dcin_config(config_filename: Optional[str] = None) -> Optional[Dict]:
         config_file = DCIN_CONFIG_DIR / config_filename
         if config_file.exists():
             with open(config_file, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-                if config.get('D2D_ENABLED', False):
-                    return config
+                return yaml.safe_load(f)
         return None
 
     # 未指定时，尝试加载默认配置文件
@@ -100,9 +98,7 @@ def _load_dcin_config(config_filename: Optional[str] = None) -> Optional[Dict]:
     for config_file in config_files:
         if config_file.exists():
             with open(config_file, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-                if config.get('D2D_ENABLED', False):
-                    return config
+                return yaml.safe_load(f)
 
     return None
 
@@ -115,12 +111,11 @@ def _list_dcin_configs() -> List[Dict]:
             try:
                 with open(config_file, 'r', encoding='utf-8') as f:
                     config = yaml.safe_load(f)
-                    if config.get('D2D_ENABLED', False):
-                        configs.append({
-                            "filename": config_file.name,
-                            "num_dies": config.get('NUM_DIES', 2),
-                            "connections": len(config.get('D2D_CONNECTIONS', []))
-                        })
+                    configs.append({
+                        "filename": config_file.name,
+                        "num_dies": config.get('NUM_DIES', 2),
+                        "connections": len(config.get('D2D_CONNECTIONS', []))
+                    })
             except Exception:
                 pass
     return configs
@@ -328,6 +323,26 @@ async def compute_static_bandwidth(request: BandwidthComputeRequest):
             # 构建DCIN布局信息
             die_positions = dcin_config.get('DIE_POSITIONS', {})
             die_rotations = dcin_config.get('DIE_ROTATIONS', {})
+
+            # 如果缺少DIE_POSITIONS，生成默认布局
+            if not die_positions:
+                if num_dies == 2:
+                    # 2个Die: 水平排列
+                    die_positions = {0: [0, 0], 1: [1, 0]}
+                elif num_dies == 4:
+                    # 4个Die: 2x2网格 (Die1左上, Die0右上, Die2左下, Die3右下)
+                    die_positions = {0: [1, 0], 1: [0, 0], 2: [0, 1], 3: [1, 1]}
+                else:
+                    # 其他情况: 水平排列
+                    die_positions = {i: [i, 0] for i in range(num_dies)}
+
+            # 如果缺少DIE_ROTATIONS，生成默认旋转
+            if not die_rotations:
+                if num_dies == 4:
+                    # 4个Die: Die0=0°, Die1=90°, Die2=180°, Die3=270°
+                    die_rotations = {0: 0, 1: 90, 2: 180, 3: 270}
+                else:
+                    die_rotations = {i: 0 for i in range(num_dies)}
             dcin_layout = DCINLayoutInfo(
                 die_positions={str(k): v for k, v in die_positions.items()},
                 die_rotations={str(k): v for k, v in die_rotations.items()},

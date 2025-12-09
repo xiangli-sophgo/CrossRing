@@ -7,13 +7,19 @@ import asyncio
 import uuid
 import json
 import multiprocessing
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Any, List
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import threading
+import logging
+
+logger = logging.getLogger("unified_web.task_manager")
+
+# 单个任务超时时间（秒）
+TASK_TIMEOUT = 3600  # 1小时
 
 
 class TaskStatus(str, Enum):
@@ -319,29 +325,59 @@ class TaskManager:
 
             def run_parallel():
                 completed_results = []
+                timed_out_files = []
                 with ProcessPoolExecutor(max_workers=max_workers) as executor:
                     future_to_file = {
                         executor.submit(_run_single_simulation, params): params['traffic_file']
                         for params in sim_params_list
                     }
 
-                    for future in as_completed(future_to_file):
+                    for future in as_completed(future_to_file, timeout=TASK_TIMEOUT):
                         if task.status == TaskStatus.CANCELLED:
                             # 取消所有pending的任务
                             for f in future_to_file:
                                 f.cancel()
+                            logger.info(f"任务 {task.task_id} 被取消")
                             break
 
-                        result = future.result()
-                        completed_results.append(result)
+                        try:
+                            # 单个future的超时检查
+                            result = future.result(timeout=60)  # 60秒等待结果
+                            completed_results.append(result)
+                        except FuturesTimeoutError:
+                            # 单个任务超时
+                            file_name = future_to_file.get(future, 'unknown')
+                            timed_out_files.append(file_name)
+                            logger.warning(f"仿真任务超时: {file_name}")
+                            completed_results.append({
+                                'traffic_file': file_name,
+                                'status': 'failed',
+                                'duration': 0,
+                                'error': '任务执行超时',
+                                'experiment_id': None,
+                                'success': False,
+                            })
+                        except Exception as e:
+                            # 其他异常
+                            file_name = future_to_file.get(future, 'unknown')
+                            logger.error(f"仿真任务异常: {file_name} - {e}")
+                            completed_results.append({
+                                'traffic_file': file_name,
+                                'status': 'failed',
+                                'duration': 0,
+                                'error': str(e),
+                                'experiment_id': None,
+                                'success': False,
+                            })
 
                         # 更新进度
                         completed_count = len(completed_results)
                         task.progress = int((completed_count / total_files) * 100)
+                        last_result = completed_results[-1] if completed_results else {}
                         task.sim_details = {
                             "file_index": completed_count,
                             "total_files": total_files,
-                            "current_file": f"已完成: {result['traffic_file']}",
+                            "current_file": f"已完成: {last_result.get('traffic_file', '')}",
                             "sim_progress": 100,
                             "current_time": task.max_time,
                             "max_time": task.max_time,
@@ -353,9 +389,9 @@ class TaskManager:
                         }
 
                         # 保存最后一个experiment_id
-                        if result.get('experiment_id'):
+                        if last_result.get('experiment_id'):
                             nonlocal experiment_id
-                            experiment_id = result['experiment_id']
+                            experiment_id = last_result['experiment_id']
 
                 return completed_results
 
@@ -398,11 +434,19 @@ class TaskManager:
                     results=combined_results,
                 )
 
+        except FuturesTimeoutError:
+            # 整体超时
+            logger.error(f"仿真任务整体超时 [{task_id}]")
+            self.update_task_status(
+                task_id,
+                TaskStatus.FAILED,
+                message="仿真任务整体超时",
+                error=f"任务执行超过 {TASK_TIMEOUT} 秒",
+            )
         except Exception as e:
             import traceback
             error_msg = f"{str(e)}\n{traceback.format_exc()}"
-            print(f"仿真任务失败 [{task_id}]:")
-            print(error_msg)
+            logger.error(f"仿真任务失败 [{task_id}]: {error_msg}")
             self.update_task_status(
                 task_id,
                 TaskStatus.FAILED,

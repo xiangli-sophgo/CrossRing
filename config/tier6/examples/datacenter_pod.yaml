@@ -1,0 +1,36 @@
+# 数据中心 Pod 级配置示例
+# 模拟一个典型的数据中心机柜组
+
+# Die 层级 - 高性能 AI 芯片
+die:
+  num_nodes: 36           # 6x6 网格
+  num_cols: 6
+  noc_link_bw_gbps: 256.0 # 256 GB/s NoC
+  hop_latency_ns: 0.4
+  ddr_read_latency_ns: 80 # HBM 延迟
+  l2m_read_latency_ns: 15
+
+# Chip 层级 - 多 Die 封装
+chip:
+  num_dies: 4             # 4 Die Chiplet
+  d2d_latency_ns: 15.0    # UCIe 低延迟
+  d2d_bandwidth_gbps: 256.0
+
+# Board 层级 - 加速卡
+board:
+  num_chips: 4            # 4 芯片/板
+  c2c_latency_ns: 80.0    # NVLink/UCIe
+  c2c_bandwidth_gbps: 128.0
+
+# Server 层级 - GPU 服务器
+server:
+  num_boards: 8           # 8 卡服务器
+  b2b_latency_ns: 300.0   # NVSwitch
+  b2b_bandwidth_gbps: 64.0
+
+# Pod 层级 - 机柜组
+pod:
+  num_servers: 32         # 32 服务器/Pod
+  s2s_latency_ns: 1500.0  # InfiniBand
+  s2s_bandwidth_gbps: 200.0  # 200Gb HDR
+  topology: full_mesh

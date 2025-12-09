@@ -11,8 +11,34 @@ from pydantic import BaseModel, Field
 
 from app.config import BASE_DIR, TRAFFIC_OUTPUT_DIR, TOPOLOGIES_DIR
 from app.core.task_manager import task_manager, TaskStatus
+from app.core.logger import get_logger
 
 router = APIRouter(prefix="/simulation")
+logger = get_logger("simulation")
+
+
+# ==================== 安全辅助函数 ====================
+
+def _validate_path(base_dir: Path, user_path: str) -> Path:
+    """
+    验证用户路径在允许的目录范围内，防止路径遍历攻击
+
+    Args:
+        base_dir: 基础目录
+        user_path: 用户提供的相对路径
+
+    Returns:
+        验证后的完整路径
+
+    Raises:
+        HTTPException: 路径无效或超出允许范围
+    """
+    try:
+        full_path = (base_dir / user_path).resolve()
+        full_path.relative_to(base_dir.resolve())
+        return full_path
+    except (ValueError, OSError):
+        raise HTTPException(status_code=400, detail="无效的文件路径")
 
 
 # ==================== 请求/响应模型 ====================
@@ -300,7 +326,7 @@ async def get_config_content(config_path: str):
     """
     读取配置文件内容
     """
-    config_file = TOPOLOGIES_DIR / config_path
+    config_file = _validate_path(TOPOLOGIES_DIR, config_path)
     if not config_file.exists():
         raise HTTPException(status_code=404, detail=f"配置文件不存在: {config_path}")
 
@@ -308,8 +334,15 @@ async def get_config_content(config_path: str):
         with open(config_file, 'r', encoding='utf-8') as f:
             content = yaml.safe_load(f)
         return _sanitize_for_json(content)
+    except yaml.YAMLError as e:
+        logger.error(f"YAML解析错误: {config_path} - {e}")
+        raise HTTPException(status_code=400, detail="配置文件格式错误")
+    except PermissionError:
+        logger.error(f"权限不足: {config_path}")
+        raise HTTPException(status_code=403, detail="无权访问该文件")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"读取配置文件失败: {str(e)}")
+        logger.error(f"读取配置文件失败: {config_path} - {e}")
+        raise HTTPException(status_code=500, detail="读取配置文件时发生内部错误")
 
 
 def _format_config_with_comments(content: dict) -> str:
@@ -572,15 +605,18 @@ async def save_config_content(config_path: str, request: SaveConfigRequest):
     """
     # 确定保存路径
     if request.save_as:
-        # 另存为新文件
+        # 另存为新文件 - 验证文件名安全性
+        import re
+        if not re.match(r'^[a-zA-Z0-9_\-]+$', request.save_as):
+            raise HTTPException(status_code=400, detail="文件名只能包含字母、数字、下划线和连字符")
         new_filename = f"{request.save_as}.yaml"
-        config_file = TOPOLOGIES_DIR / new_filename
+        config_file = _validate_path(TOPOLOGIES_DIR, new_filename)
         # 检查文件是否已存在
         if config_file.exists():
             raise HTTPException(status_code=400, detail=f"文件已存在: {new_filename}")
     else:
         # 覆盖原文件
-        config_file = TOPOLOGIES_DIR / config_path
+        config_file = _validate_path(TOPOLOGIES_DIR, config_path)
         if not config_file.exists():
             raise HTTPException(status_code=404, detail=f"配置文件不存在: {config_path}")
 
@@ -588,9 +624,17 @@ async def save_config_content(config_path: str, request: SaveConfigRequest):
         formatted_content = _format_config_with_comments(request.content)
         with open(config_file, 'w', encoding='utf-8') as f:
             f.write(formatted_content)
+        logger.info(f"配置文件已保存: {config_file.name}")
         return {"success": True, "message": f"配置文件已保存: {config_file.name}", "filename": config_file.name}
+    except PermissionError:
+        logger.error(f"保存配置文件权限不足: {config_file}")
+        raise HTTPException(status_code=403, detail="无权写入该文件")
+    except OSError as e:
+        logger.error(f"保存配置文件IO错误: {config_file} - {e}")
+        raise HTTPException(status_code=500, detail="文件写入失败")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"保存配置文件失败: {str(e)}")
+        logger.error(f"保存配置文件失败: {config_file} - {e}")
+        raise HTTPException(status_code=500, detail="保存配置文件时发生内部错误")
 
 
 @router.get("/traffic-files")
@@ -727,7 +771,7 @@ async def get_traffic_file_content(file_path: str, max_lines: int = 100):
     """
     读取流量文件内容（限制行数避免过大）
     """
-    full_path = TRAFFIC_OUTPUT_DIR / file_path
+    full_path = _validate_path(TRAFFIC_OUTPUT_DIR, file_path)
 
     if not full_path.exists():
         raise HTTPException(status_code=404, detail=f"文件不存在: {file_path}")
@@ -751,8 +795,15 @@ async def get_traffic_file_content(file_path: str, max_lines: int = 100):
             "file_name": full_path.name,
             "file_size": full_path.stat().st_size,
         }
+    except UnicodeDecodeError:
+        logger.error(f"文件编码错误: {file_path}")
+        raise HTTPException(status_code=400, detail="文件编码不是UTF-8")
+    except PermissionError:
+        logger.error(f"读取文件权限不足: {file_path}")
+        raise HTTPException(status_code=403, detail="无权访问该文件")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"读取文件失败: {str(e)}")
+        logger.error(f"读取流量文件失败: {file_path} - {e}")
+        raise HTTPException(status_code=500, detail="读取文件时发生内部错误")
 
 
 # ==================== WebSocket 实时进度 ====================

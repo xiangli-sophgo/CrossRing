@@ -560,9 +560,9 @@ const MultiDieTopologyGraph = forwardRef<{ saveLayout: () => void }, MultiDieTop
       const dstY = dstRotated.row * NODE_SPACING + dstOffset.y
 
       // 根据Die网格位置判断方向（统一使用getConnType）
-      const srcDiePos = die_positions[srcDieStr]
-      const dstDiePos = die_positions[dstDieStr]
-      const dcinDirection = getConnType(srcDiePos, dstDiePos)
+      const srcDiePos = die_positions[srcDieStr] || [0, 0]
+      const dstDiePos = die_positions[dstDieStr] || [0, 0]
+      const dcinDirection = getConnType(srcDiePos as [number, number], dstDiePos as [number, number])
 
       // 确定偏移符号：水平方向时向右的在下，垂直方向时向下的在左，对角线使用水平方向判断
       const isForwardPositive = dcinDirection === 'horizontal'

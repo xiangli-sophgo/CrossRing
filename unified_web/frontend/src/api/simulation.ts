@@ -1,11 +1,7 @@
 /**
  * 仿真执行 API 客户端
  */
-import axios from 'axios'
-
-const api = axios.create({
-  baseURL: '/api/simulation',
-})
+import apiClient from './client'
 
 export interface SimulationRequest {
   mode: 'kcin' | 'dcin'
@@ -107,56 +103,56 @@ export interface TaskHistoryItem {
 
 // 启动仿真
 export const runSimulation = async (request: SimulationRequest): Promise<TaskResponse> => {
-  const response = await api.post('/run', request)
+  const response = await apiClient.post('/api/simulation/run', request)
   return response.data
 }
 
 // 获取任务状态
 export const getTaskStatus = async (taskId: string): Promise<TaskStatus> => {
-  const response = await api.get(`/status/${taskId}`)
+  const response = await apiClient.get(`/api/simulation/status/${taskId}`)
   return response.data
 }
 
 // 取消任务
 export const cancelTask = async (taskId: string): Promise<{ success: boolean; message: string }> => {
-  const response = await api.post(`/cancel/${taskId}`)
+  const response = await apiClient.post(`/api/simulation/cancel/${taskId}`)
   return response.data
 }
 
 // 删除任务
 export const deleteTask = async (taskId: string): Promise<{ success: boolean; message: string }> => {
-  const response = await api.delete(`/${taskId}`)
+  const response = await apiClient.delete(`/api/simulation/${taskId}`)
   return response.data
 }
 
 // 获取历史任务
 export const getTaskHistory = async (limit: number = 20): Promise<{ tasks: TaskHistoryItem[] }> => {
-  const response = await api.get(`/history?limit=${limit}`)
+  const response = await apiClient.get(`/api/simulation/history?limit=${limit}`)
   return response.data
 }
 
 // 清空历史任务
 export const clearTaskHistory = async (): Promise<{ success: boolean; message: string }> => {
-  const response = await api.delete('/history')
+  const response = await apiClient.delete('/api/simulation/history')
   return response.data
 }
 
 // 获取可用配置
 export const getConfigs = async (): Promise<{ kcin: ConfigOption[]; dcin: ConfigOption[] }> => {
-  const response = await api.get('/configs')
+  const response = await apiClient.get('/api/simulation/configs')
   return response.data
 }
 
 // 获取流量文件列表
 export const getTrafficFiles = async (path: string = ''): Promise<TrafficFilesResponse> => {
-  const response = await api.get(`/traffic-files?path=${encodeURIComponent(path)}`)
+  const response = await apiClient.get(`/api/simulation/traffic-files?path=${encodeURIComponent(path)}`)
   return response.data
 }
 
 // 获取流量文件树形结构
 export const getTrafficFilesTree = async (mode?: 'kcin' | 'dcin'): Promise<TrafficFilesTreeResponse> => {
   const params = mode ? `?mode=${mode}` : ''
-  const response = await api.get(`/traffic-files-tree${params}`)
+  const response = await apiClient.get(`/api/simulation/traffic-files-tree${params}`)
   return response.data
 }
 
@@ -171,13 +167,13 @@ export interface TrafficFileContentResponse {
 
 // 获取流量文件内容
 export const getTrafficFileContent = async (filePath: string, maxLines: number = 100): Promise<TrafficFileContentResponse> => {
-  const response = await api.get(`/traffic-file-content/${filePath}?max_lines=${maxLines}`)
+  const response = await apiClient.get(`/api/simulation/traffic-file-content/${filePath}?max_lines=${maxLines}`)
   return response.data
 }
 
 // 获取配置文件内容
 export const getConfigContent = async (configPath: string): Promise<Record<string, any>> => {
-  const response = await api.get(`/config/${configPath}`)
+  const response = await apiClient.get(`/api/simulation/config/${configPath}`)
   return response.data
 }
 
@@ -187,6 +183,6 @@ export const saveConfigContent = async (
   content: Record<string, any>,
   saveAs?: string
 ): Promise<{ success: boolean; message: string; filename?: string }> => {
-  const response = await api.post(`/config/${configPath}`, { content, save_as: saveAs })
+  const response = await apiClient.post(`/api/simulation/config/${configPath}`, { content, save_as: saveAs })
   return response.data
 }

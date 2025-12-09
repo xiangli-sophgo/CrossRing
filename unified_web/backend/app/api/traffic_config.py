@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict, List
 import json
+import re
 from pathlib import Path
 from app.config import TRAFFIC_CONFIGS_DIR
 import uuid
@@ -25,6 +26,52 @@ traffic_configs: Dict[str, Dict[str, Dict[str, TrafficConfig]]] = {}
 # 配置文件路径
 CONFIG_DIR = TRAFFIC_CONFIGS_DIR
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _validate_filename(filename: str) -> str:
+    """
+    验证并清理文件名，防止路径遍历攻击
+
+    Args:
+        filename: 用户提供的文件名
+
+    Returns:
+        清理后的安全文件名
+
+    Raises:
+        HTTPException: 文件名无效
+    """
+    # 移除路径分隔符
+    clean_name = filename.replace("/", "").replace("\\", "").replace("..", "")
+    # 只允许安全字符
+    if not re.match(r'^[a-zA-Z0-9_\-\.]+$', clean_name):
+        raise HTTPException(status_code=400, detail="文件名只能包含字母、数字、下划线、连字符和点号")
+    # 确保有 .json 后缀
+    if not clean_name.endswith(".json"):
+        clean_name += ".json"
+    return clean_name
+
+
+def _validate_path(base_dir: Path, user_path: str) -> Path:
+    """
+    验证用户路径在允许的目录范围内
+
+    Args:
+        base_dir: 基础目录
+        user_path: 用户提供的相对路径
+
+    Returns:
+        验证后的完整路径
+
+    Raises:
+        HTTPException: 路径无效或超出允许范围
+    """
+    try:
+        full_path = (base_dir / user_path).resolve()
+        full_path.relative_to(base_dir.resolve())
+        return full_path
+    except (ValueError, OSError):
+        raise HTTPException(status_code=400, detail="无效的文件路径")
 
 
 def _get_config_path(topology: str, mode: str) -> Path:
@@ -337,12 +384,9 @@ async def load_configs_from_file(topology: str, mode: str, request: dict):
     if not filename:
         raise HTTPException(status_code=400, detail="文件名不能为空")
 
-    # 确保文件名安全
-    filename = filename.replace("/", "_").replace("\\", "_")
-    if not filename.endswith(".json"):
-        filename += ".json"
-
-    file_path = CONFIG_DIR / filename
+    # 验证文件名安全性
+    filename = _validate_filename(filename)
+    file_path = _validate_path(CONFIG_DIR, filename)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"文件 {filename} 不存在")
 
@@ -385,15 +429,13 @@ async def save_configs_to_file(topology: str, mode: str, request: dict):
     if not filename:
         raise HTTPException(status_code=400, detail="文件名不能为空")
 
-    # 确保文件名安全
-    filename = filename.replace("/", "_").replace("\\", "_")
-    if not filename.endswith(".json"):
-        filename += ".json"
+    # 验证文件名安全性
+    filename = _validate_filename(filename)
 
     _ensure_topology_mode(topology, mode)
 
     # 保存到指定文件名
-    config_path = CONFIG_DIR / filename
+    config_path = _validate_path(CONFIG_DIR, filename)
     configs = traffic_configs[topology][mode]
     data = {k: v.model_dump(mode='json') for k, v in configs.items()}
 

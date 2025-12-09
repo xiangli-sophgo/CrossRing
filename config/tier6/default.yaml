@@ -1,0 +1,35 @@
+# Tier6+ 多层级网络建模默认配置
+
+# Die 层级 - NoC 内部
+die:
+  num_nodes: 20           # 节点数 (5x4)
+  num_cols: 4             # 列数
+  noc_link_bw_gbps: 128.0 # NoC 链路带宽 (GB/s)
+  hop_latency_ns: 0.5     # 单跳延迟 (ns)
+  ddr_read_latency_ns: 50 # DDR 读延迟 (ns)
+  l2m_read_latency_ns: 20 # L2M 读延迟 (ns)
+
+# Chip 层级 - D2D (Die-to-Die)
+chip:
+  num_dies: 2
+  d2d_latency_ns: 20.0       # D2D 传播延迟 (ns)
+  d2d_bandwidth_gbps: 192.0  # D2D 带宽 (GB/s)
+
+# Board 层级 - C2C (Chip-to-Chip)
+board:
+  num_chips: 2
+  c2c_latency_ns: 100.0      # C2C 传播延迟 (ns) - UCIe/PCIe
+  c2c_bandwidth_gbps: 64.0   # C2C 带宽 (GB/s)
+
+# Server 层级 - B2B (Board-to-Board)
+server:
+  num_boards: 2
+  b2b_latency_ns: 500.0      # B2B 传播延迟 (ns) - 背板/线缆
+  b2b_bandwidth_gbps: 32.0   # B2B 带宽 (GB/s)
+
+# Pod 层级 - S2S (Server-to-Server)
+pod:
+  num_servers: 4
+  s2s_latency_ns: 2000.0     # S2S 传播延迟 (ns) = 2μs
+  s2s_bandwidth_gbps: 100.0  # S2S 带宽 (GB/s) - 100GbE
+  topology: full_mesh        # 拓扑类型: full_mesh, ring

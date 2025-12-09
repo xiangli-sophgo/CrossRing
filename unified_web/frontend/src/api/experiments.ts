@@ -2,7 +2,7 @@
  * API 客户端
  */
 
-import axios from 'axios';
+import apiClient from './client';
 import type {
   Experiment,
   ExperimentType,
@@ -13,11 +13,6 @@ import type {
   TrafficCompareData,
 } from '../types';
 
-const api = axios.create({
-  baseURL: '/api',
-  timeout: 30000,
-});
-
 // ==================== 实验管理 ====================
 
 export const getExperiments = async (
@@ -27,12 +22,12 @@ export const getExperiments = async (
   const params: Record<string, string> = {};
   if (status) params.status = status;
   if (experimentType) params.experiment_type = experimentType;
-  const response = await api.get('/experiments', { params });
+  const response = await apiClient.get('/api/experiments', { params });
   return response.data;
 };
 
 export const getExperiment = async (id: number): Promise<Experiment> => {
-  const response = await api.get(`/experiments/${id}`);
+  const response = await apiClient.get(`/api/experiments/${id}`);
   return response.data;
 };
 
@@ -42,7 +37,7 @@ export const createExperiment = async (data: {
   description?: string;
   topo_type?: string;
 }): Promise<Experiment> => {
-  const response = await api.post('/experiments', data);
+  const response = await apiClient.post('/api/experiments', data);
   return response.data;
 };
 
@@ -50,18 +45,18 @@ export const updateExperiment = async (
   id: number,
   data: { name?: string; description?: string; notes?: string }
 ): Promise<Experiment> => {
-  const response = await api.put(`/experiments/${id}`, data);
+  const response = await apiClient.put(`/api/experiments/${id}`, data);
   return response.data;
 };
 
 export const deleteExperiment = async (id: number): Promise<void> => {
-  await api.delete(`/experiments/${id}`);
+  await apiClient.delete(`/api/experiments/${id}`);
 };
 
 export const deleteExperimentsBatch = async (
   experimentIds: number[]
 ): Promise<{ success: boolean; message: string; deleted_count: number }> => {
-  const response = await api.post('/experiments/batch-delete', {
+  const response = await apiClient.post('/api/experiments/batch-delete', {
     experiment_ids: experimentIds,
   });
   return response.data;
@@ -81,7 +76,7 @@ export const importFromCSV = async (
   if (description) formData.append('description', description);
   if (topoType) formData.append('topo_type', topoType);
 
-  const response = await api.post('/experiments/import', formData, {
+  const response = await apiClient.post('/api/experiments/import', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return response.data;
@@ -106,7 +101,7 @@ export const getResults = async (
   if (filters) {
     params.filters = JSON.stringify(filters);
   }
-  const response = await api.get(`/experiments/${experimentId}/results`, { params });
+  const response = await apiClient.get(`/api/experiments/${experimentId}/results`, { params });
   return response.data;
 };
 
@@ -114,21 +109,21 @@ export const getBestResults = async (
   experimentId: number,
   limit: number = 10
 ): Promise<{ results: Record<string, unknown>[]; count: number }> => {
-  const response = await api.get(`/experiments/${experimentId}/best`, {
+  const response = await apiClient.get(`/api/experiments/${experimentId}/best`, {
     params: { limit },
   });
   return response.data;
 };
 
 export const getStatistics = async (experimentId: number): Promise<Statistics> => {
-  const response = await api.get(`/experiments/${experimentId}/stats`);
+  const response = await apiClient.get(`/api/experiments/${experimentId}/stats`);
   return response.data;
 };
 
 export const getParamKeys = async (
   experimentId: number
 ): Promise<{ param_keys: string[]; count: number }> => {
-  const response = await api.get(`/experiments/${experimentId}/param-keys`);
+  const response = await apiClient.get(`/api/experiments/${experimentId}/param-keys`);
   return response.data;
 };
 
@@ -143,7 +138,7 @@ export interface TrafficStat {
 export const getTrafficStats = async (
   experimentId: number
 ): Promise<{ experiment_id: number; total_results: number; traffic_stats: TrafficStat[] }> => {
-  const response = await api.get(`/experiments/${experimentId}/traffic-stats`);
+  const response = await apiClient.get(`/api/experiments/${experimentId}/traffic-stats`);
   return response.data;
 };
 
@@ -157,7 +152,7 @@ export const getDistribution = async (
   count: number;
   histogram: [number, number, number][];
 }> => {
-  const response = await api.get(`/experiments/${experimentId}/distribution`, {
+  const response = await apiClient.get(`/api/experiments/${experimentId}/distribution`, {
     params: { bins },
   });
   return response.data;
@@ -169,8 +164,8 @@ export const getParameterSensitivity = async (
   experimentId: number,
   parameter: string
 ): Promise<SensitivityResponse> => {
-  const response = await api.get(
-    `/experiments/${experimentId}/sensitivity/${parameter}`
+  const response = await apiClient.get(
+    `/api/experiments/${experimentId}/sensitivity/${parameter}`
   );
   return response.data;
 };
@@ -178,7 +173,7 @@ export const getParameterSensitivity = async (
 export const getAllSensitivity = async (
   experimentId: number
 ): Promise<{ experiment_id: number; parameters: Record<string, SensitivityResponse> }> => {
-  const response = await api.get(`/experiments/${experimentId}/sensitivity`);
+  const response = await apiClient.get(`/api/experiments/${experimentId}/sensitivity`);
   return response.data;
 };
 
@@ -188,14 +183,14 @@ export const compareExperiments = async (
   experiments: Experiment[];
   best_configs: Record<string, unknown>[];
 }> => {
-  const response = await api.post('/compare', { experiment_ids: experimentIds });
+  const response = await apiClient.post('/api/compare', { experiment_ids: experimentIds });
   return response.data;
 };
 
 export const compareByTraffic = async (
   experimentIds: number[]
 ): Promise<TrafficCompareData> => {
-  const response = await api.post('/compare/traffic', { experiment_ids: experimentIds });
+  const response = await apiClient.post('/api/compare/traffic', { experiment_ids: experimentIds });
   return response.data;
 };
 
@@ -210,7 +205,7 @@ export const getParameterHeatmap = async (
   y_values: number[];
   data: { [key: string]: number | string }[];
 }> => {
-  const response = await api.get(`/experiments/${experimentId}/heatmap`, {
+  const response = await apiClient.get(`/api/experiments/${experimentId}/heatmap`, {
     params: { param_x: paramX, param_y: paramY },
   });
   return response.data;
@@ -232,7 +227,7 @@ export const getExportInfo = async (
   if (experimentIds && experimentIds.length > 0) {
     params.experiment_ids = experimentIds.join(',');
   }
-  const response = await api.get('/export/info', { params });
+  const response = await apiClient.get('/api/export/info', { params });
   return response.data;
 };
 
@@ -265,12 +260,12 @@ export const getResultHtmlUrl = (resultId: number, experimentId: number): string
 };
 
 export const openLocalFile = async (path: string): Promise<{ success: boolean; message: string }> => {
-  const response = await api.post('/open-file', { path });
+  const response = await apiClient.post('/api/open-file', { path });
   return response.data;
 };
 
 export const openFileDirectory = async (path: string): Promise<{ success: boolean; message: string }> => {
-  const response = await api.post('/open-directory', { path });
+  const response = await apiClient.post('/api/open-directory', { path });
   return response.data;
 };
 
@@ -286,7 +281,7 @@ export const getResultFiles = async (
   resultId: number,
   resultType: string
 ): Promise<ResultFileInfo[]> => {
-  const response = await api.get(`/results/${resultId}/files`, {
+  const response = await apiClient.get(`/api/results/${resultId}/files`, {
     params: { result_type: resultType },
   });
   return response.data;
@@ -304,7 +299,7 @@ export const deleteResult = async (
   resultId: number,
   experimentId: number
 ): Promise<{ success: boolean; message: string }> => {
-  const response = await api.delete(`/results/${resultId}`, {
+  const response = await apiClient.delete(`/api/results/${resultId}`, {
     params: { experiment_id: experimentId },
   });
   return response.data;
@@ -314,10 +309,10 @@ export const deleteResultsBatch = async (
   experimentId: number,
   resultIds: number[]
 ): Promise<{ success: boolean; message: string; deleted_count: number }> => {
-  const response = await api.post(`/experiments/${experimentId}/results/batch-delete`, {
+  const response = await apiClient.post(`/api/experiments/${experimentId}/results/batch-delete`, {
     result_ids: resultIds,
   });
   return response.data;
 };
 
-export default api;
+export default apiClient;

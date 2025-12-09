@@ -3,8 +3,8 @@
  */
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Button, message, Space, Tree, Popover, Pagination, Checkbox, Popconfirm, Input, Tooltip } from 'antd';
-import { DownloadOutlined, SettingOutlined, DeleteOutlined, SearchOutlined, HolderOutlined, EditOutlined, SwapOutlined } from '@ant-design/icons';
+import { Button, message, Space, Tree, Popover, Pagination, Checkbox, Popconfirm, Input, Tooltip, Modal, Select, Divider } from 'antd';
+import { DownloadOutlined, SettingOutlined, DeleteOutlined, SearchOutlined, HolderOutlined, EditOutlined, SwapOutlined, SaveOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import { HotTable, HotTableClass } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
@@ -13,6 +13,7 @@ import type { ResultsPageResponse, ExperimentType } from '../types';
 import ResultDetailPanel from './ResultDetailPanel';
 import { classifyParamKeysWithHierarchy } from '../utils/paramClassifier';
 import { deleteResult, deleteResultsBatch } from '../api';
+import apiClient from '../../../api/client';
 import {
   DndContext,
   closestCenter,
@@ -44,6 +45,16 @@ const getColumnOrderKey = (experimentType: ExperimentType) =>
 // 按实验ID保存行顺序
 const getRowOrderKey = (experimentId: number) =>
   `result_table_row_order_${experimentId}`;
+
+// 列配置方案类型
+interface ColumnPreset {
+  name: string;
+  experimentType: ExperimentType;
+  visibleColumns: string[];
+  columnOrder: string[];
+  fixedColumns: string[];
+  createdAt: string;
+}
 
 // 可拖拽的列项组件
 interface SortableColumnItemProps {
@@ -753,7 +764,107 @@ export default function ResultTable({
   };
 
   // 列设置标签页状态
-  const [columnSettingTab, setColumnSettingTab] = useState<'select' | 'order'>('select');
+  const [columnSettingTab, setColumnSettingTab] = useState<'select' | 'order' | 'preset'>('select');
+
+  // 配置方案相关状态
+  const [presets, setPresets] = useState<ColumnPreset[]>([]);
+  const [savePresetModalVisible, setSavePresetModalVisible] = useState(false);
+  const [newPresetName, setNewPresetName] = useState('');
+  const [presetsLoading, setPresetsLoading] = useState(false);
+
+  // 从后端加载配置方案
+  const loadPresetsFromServer = async () => {
+    try {
+      const response = await apiClient.get('/api/column-presets/');
+      if (response.data?.presets) {
+        setPresets(response.data.presets);
+      }
+    } catch (error) {
+      console.error('加载配置方案失败:', error);
+    }
+  };
+
+  // 初始加载配置方案
+  useEffect(() => {
+    loadPresetsFromServer();
+  }, []);
+
+  // 保存配置方案到后端
+  const savePresetsToServer = async (newPresets: ColumnPreset[]) => {
+    try {
+      await apiClient.post('/api/column-presets/', {
+        version: 1,
+        presets: newPresets,
+      });
+      setPresets(newPresets);
+    } catch (error) {
+      console.error('保存配置方案失败:', error);
+      message.error('保存配置方案失败');
+    }
+  };
+
+  // 保存当前配置为新方案
+  const handleSavePreset = async () => {
+    if (!newPresetName.trim()) {
+      message.warning('请输入配置名称');
+      return;
+    }
+    const preset: ColumnPreset = {
+      name: newPresetName.trim(),
+      experimentType,
+      visibleColumns: [...visibleColumns],
+      columnOrder: [...columnOrder],
+      fixedColumns: [...fixedColumns],
+      createdAt: new Date().toISOString(),
+    };
+
+    setPresetsLoading(true);
+    try {
+      const response = await apiClient.post('/api/column-presets/add', preset);
+      message.success(response.data.message);
+      await loadPresetsFromServer();
+      setSavePresetModalVisible(false);
+      setNewPresetName('');
+    } catch (error) {
+      message.error('保存配置方案失败');
+    } finally {
+      setPresetsLoading(false);
+    }
+  };
+
+  // 加载配置方案
+  const handleLoadPreset = (preset: ColumnPreset) => {
+    // 过滤出当前 paramKeys 中存在的列
+    const validVisible = preset.visibleColumns.filter(col => paramKeys.includes(col));
+    const validOrder = preset.columnOrder.filter(col => paramKeys.includes(col));
+    const validFixed = preset.fixedColumns.filter(col => paramKeys.includes(col));
+
+    if (validVisible.length === 0) {
+      message.warning('该配置方案中的列在当前数据中不存在');
+      return;
+    }
+
+    setVisibleColumns(validVisible);
+    setColumnOrder(validOrder);
+    setFixedColumns(validFixed);
+    message.success(`已加载配置方案「${preset.name}」`);
+  };
+
+  // 删除配置方案
+  const handleDeletePreset = async (presetName: string) => {
+    try {
+      const response = await apiClient.delete(`/api/column-presets/${experimentType}/${encodeURIComponent(presetName)}`);
+      message.success(response.data.message);
+      await loadPresetsFromServer();
+    } catch (error) {
+      message.error('删除配置方案失败');
+    }
+  };
+
+  // 当前实验类型的配置方案
+  const currentPresets = useMemo(() => {
+    return presets.filter(p => p.experimentType === experimentType);
+  }, [presets, experimentType]);
 
   // 列选择器
   const columnSelector = (
@@ -773,6 +884,13 @@ export default function ResultTable({
           onClick={() => setColumnSettingTab('order')}
         >
           排序列 ({orderedVisibleColumns.length})
+        </Button>
+        <Button
+          type={columnSettingTab === 'preset' ? 'primary' : 'default'}
+          size="small"
+          onClick={() => setColumnSettingTab('preset')}
+        >
+          配置方案 ({currentPresets.length})
         </Button>
       </div>
 
@@ -805,7 +923,7 @@ export default function ResultTable({
             onCheck={(checked) => handleColumnCheck(checked as React.Key[])}
           />
         </>
-      ) : (
+      ) : columnSettingTab === 'order' ? (
         <>
           <div style={{ marginBottom: 8, color: '#666', fontSize: 12 }}>
             拖拽调整列顺序，勾选复选框固定列到左侧
@@ -831,6 +949,80 @@ export default function ResultTable({
               </div>
             </SortableContext>
           </DndContext>
+        </>
+      ) : (
+        <>
+          <div style={{ marginBottom: 12 }}>
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              size="small"
+              onClick={() => setSavePresetModalVisible(true)}
+              block
+              loading={presetsLoading}
+            >
+              保存当前配置为方案
+            </Button>
+          </div>
+          <Divider style={{ margin: '12px 0' }}>已保存的方案 ({experimentType.toUpperCase()})</Divider>
+          {currentPresets.length === 0 ? (
+            <div style={{ color: '#999', textAlign: 'center', padding: '20px 0' }}>
+              暂无保存的配置方案
+            </div>
+          ) : (
+            <div style={{ maxHeight: 300, overflow: 'auto' }}>
+              {currentPresets.map((preset) => (
+                <div
+                  key={preset.name}
+                  style={{
+                    padding: '8px 12px',
+                    marginBottom: 8,
+                    background: '#fafafa',
+                    border: '1px solid #d9d9d9',
+                    borderRadius: 4,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <div style={{ fontWeight: 500, marginBottom: 2 }}>{preset.name}</div>
+                    <div style={{ fontSize: 11, color: '#888' }}>
+                      {preset.visibleColumns.length} 列
+                      {preset.fixedColumns.length > 0 && ` · ${preset.fixedColumns.length} 固定`}
+                      {' · '}
+                      {new Date(preset.createdAt).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <Space size="small">
+                    <Tooltip title="加载此配置">
+                      <Button
+                        type="link"
+                        size="small"
+                        icon={<FolderOpenOutlined />}
+                        onClick={() => handleLoadPreset(preset)}
+                      />
+                    </Tooltip>
+                    <Popconfirm
+                      title="确定删除此配置方案？"
+                      onConfirm={() => handleDeletePreset(preset.name)}
+                      okText="删除"
+                      cancelText="取消"
+                    >
+                      <Tooltip title="删除">
+                        <Button
+                          type="link"
+                          size="small"
+                          danger
+                          icon={<DeleteOutlined />}
+                        />
+                      </Tooltip>
+                    </Popconfirm>
+                  </Space>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -1093,6 +1285,40 @@ copyPaste={{
           )}
         </div>
       )}
+
+      {/* 保存配置方案弹窗 */}
+      <Modal
+        title="保存列配置方案"
+        open={savePresetModalVisible}
+        onOk={handleSavePreset}
+        onCancel={() => {
+          setSavePresetModalVisible(false);
+          setNewPresetName('');
+        }}
+        okText="保存"
+        cancelText="取消"
+      >
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 8 }}>配置名称：</div>
+          <Input
+            placeholder="请输入配置方案名称"
+            value={newPresetName}
+            onChange={(e) => setNewPresetName(e.target.value)}
+            onPressEnter={handleSavePreset}
+          />
+        </div>
+        <div style={{ color: '#666', fontSize: 12 }}>
+          <div>当前配置：</div>
+          <div>• 显示列：{visibleColumns.length} 列</div>
+          <div>• 固定列：{fixedColumns.length} 列</div>
+          <div>• 实验类型：{experimentType.toUpperCase()}</div>
+        </div>
+        {currentPresets.some(p => p.name === newPresetName.trim()) && (
+          <div style={{ color: '#faad14', fontSize: 12, marginTop: 8 }}>
+            ⚠ 已存在同名配置，保存将覆盖原有配置
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

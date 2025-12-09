@@ -5,10 +5,28 @@
 
 import sys
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+# 请求体大小限制 (10MB)
+MAX_REQUEST_SIZE = 10 * 1024 * 1024
+
+
+class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    """请求体大小限制中间件"""
+
+    async def dispatch(self, request: Request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length:
+            if int(content_length) > MAX_REQUEST_SIZE:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": f"请求体过大，最大允许 {MAX_REQUEST_SIZE // 1024 // 1024}MB"}
+                )
+        return await call_next(request)
 
 # 导入配置
 from app.config import (
@@ -37,6 +55,9 @@ from app.api import experiments, results, analysis, export
 # 新增的仿真路由
 from app.api import simulation
 
+# 列配置方案
+from app.api import column_presets
+
 app = FastAPI(
     title="仿真一体化平台",
     description="集成流量配置、仿真执行、结果管理的统一平台",
@@ -45,10 +66,13 @@ app = FastAPI(
     redoc_url="/api/redoc",
 )
 
-# CORS配置 - 允许前端访问
+# 请求体大小限制中间件
+app.add_middleware(RequestSizeLimitMiddleware)
+
+# CORS配置 - 使用白名单限制来源
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 简化配置，允许所有来源
+    allow_origins=CORS_ORIGINS,  # 使用配置的白名单
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -97,6 +121,9 @@ app.include_router(experiments.router, prefix=API_PREFIX, tags=["实验管理"])
 app.include_router(results.router, prefix=API_PREFIX, tags=["结果查询"])
 app.include_router(analysis.router, prefix=API_PREFIX, tags=["数据分析"])
 app.include_router(export.router, prefix=API_PREFIX, tags=["导出"])
+
+# 列配置方案
+app.include_router(column_presets.router, tags=["列配置"])
 
 
 # ==================== 前端静态文件服务 ====================
