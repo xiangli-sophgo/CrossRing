@@ -8,7 +8,6 @@ import {
   ClusterOutlined,
   DatabaseOutlined,
   CreditCardOutlined,
-  ApartmentOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
 import Icon from '@ant-design/icons'
@@ -28,7 +27,6 @@ const BoardSvg = () => (
   </svg>
 )
 const BoardIcon = () => <Icon component={BoardSvg} />
-import { TopologyGraph } from './TopologyGraph'
 import {
   HierarchicalTopology,
   PodConfig,
@@ -1059,7 +1057,6 @@ export const Scene3D: React.FC<Scene3DProps> = ({
   onBreadcrumbClick,
   canGoBack,
 }) => {
-  const [showTopologyGraph, setShowTopologyGraph] = useState(false)
   const [cameraKey, setCameraKey] = useState(0)
 
   // 重置视图（相机位置）
@@ -1161,39 +1158,7 @@ export const Scene3D: React.FC<Scene3DProps> = ({
             onClick={handleResetView}
           />
         </Tooltip>
-        <Tooltip title="查看抽象拓扑图">
-          <Button
-            type="primary"
-            icon={<ApartmentOutlined />}
-            onClick={() => setShowTopologyGraph(true)}
-          >
-            拓扑图
-          </Button>
-        </Tooltip>
       </div>
-
-      {/* 抽象拓扑图弹窗 */}
-      <TopologyGraph
-        visible={showTopologyGraph}
-        onClose={() => setShowTopologyGraph(false)}
-        topology={topology}
-        currentLevel={viewState.path.length === 0 ? 'datacenter' : viewState.level}
-        currentPod={currentPod}
-        currentRack={currentRack}
-        currentBoard={currentBoard}
-        onNodeDoubleClick={(nodeId, nodeType) => {
-          if (nodeType === 'pod') {
-            onNavigateToPod(nodeId)
-          } else if (nodeType === 'rack') {
-            const podId = currentPod?.id
-            if (podId) {
-              onNavigateToRack(podId, nodeId)
-            }
-          } else if (nodeType === 'board') {
-            onNavigate(nodeId)
-          }
-        }}
-      />
 
       {/* 操作提示 */}
       <div style={{

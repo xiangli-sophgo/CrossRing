@@ -74,12 +74,16 @@ export interface SwitchLayerConfig {
   inter_connect: boolean;   // 同层Switch是否互联
 }
 
+// 直连拓扑类型
+export type DirectTopologyType = 'none' | 'full_mesh' | 'hw_full_mesh' | 'ring' | 'torus_2d' | 'torus_3d';
+
 // 层级Switch配置（支持多层Switch，如Leaf-Spine）
 export interface HierarchyLevelSwitchConfig {
   enabled: boolean;                     // 是否启用该层级的Switch
   layers: SwitchLayerConfig[];          // Switch层列表（从下到上）
   downlink_redundancy: number;          // 下层设备连接几个Switch（冗余度）
   connect_to_upper_level: boolean;      // 是否连接到上层的Switch
+  direct_topology?: DirectTopologyType; // 无Switch时的直连拓扑类型
 }
 
 // 全局Switch配置

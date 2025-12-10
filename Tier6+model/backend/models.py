@@ -80,6 +80,8 @@ class HierarchyLevelSwitchConfig(BaseModel):
     layers: List[SwitchLayerConfig] = []  # Switch层列表（从下到上，如[leaf, spine]）
     downlink_redundancy: int = 1  # 下层设备连接几个Switch（冗余度）
     connect_to_upper_level: bool = True  # 是否连接到上层的Switch
+    # 无Switch时的直连拓扑类型
+    direct_topology: Literal['none', 'full_mesh', 'hw_full_mesh', 'ring', 'torus_2d', 'torus_3d'] = 'none'
 
 
 class GlobalSwitchConfig(BaseModel):
@@ -149,7 +151,7 @@ class BoardConfigByType(BaseModel):
 class TopologyGenerateRequest(BaseModel):
     """拓扑生成请求"""
     pod_count: int = Field(default=1, ge=1, le=10)
-    racks_per_pod: int = Field(default=4, ge=1, le=20)
+    racks_per_pod: int = Field(default=4, ge=1, le=64)
     board_counts: Optional[BoardCountConfig] = None  # 旧格式，保持兼容
     board_configs: Optional[BoardConfigByType] = None  # 新格式：按U高度配置Chip
     chip_types: List[ChipType] = ['npu', 'cpu']
@@ -168,7 +170,7 @@ class SavedConfig(BaseModel):
     name: str = Field(..., description="配置名称")
     description: Optional[str] = Field(default=None, description="配置描述")
     pod_count: int = Field(default=1, ge=1, le=10)
-    racks_per_pod: int = Field(default=4, ge=1, le=20)
+    racks_per_pod: int = Field(default=4, ge=1, le=64)
     board_configs: BoardConfigByType
     created_at: Optional[str] = None
     updated_at: Optional[str] = None

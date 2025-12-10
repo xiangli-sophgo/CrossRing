@@ -80,6 +80,7 @@ interface ConfigPanelProps {
     switch_config?: GlobalSwitchConfig
   }) => void
   loading: boolean
+  currentLevel?: 'datacenter' | 'pod' | 'rack' | 'board'
 }
 
 // localStorage缓存key
@@ -168,6 +169,16 @@ const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
     onChange({ ...config, layers: newLayers })
   }
 
+  // 直连拓扑类型选项
+  const directTopologyOptions = [
+    { value: 'none', label: '无连接' },
+    { value: 'full_mesh', label: '全连接 (Full Mesh)' },
+    { value: 'hw_full_mesh', label: 'HW FullMesh (行列全连接)' },
+    { value: 'ring', label: '环形 (Ring)' },
+    { value: 'torus_2d', label: '2D Torus' },
+    { value: 'torus_3d', label: '3D Torus' },
+  ]
+
   return (
     <div>
       {/* 启用开关 */}
@@ -179,6 +190,20 @@ const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
           onChange={(checked) => onChange({ ...config, enabled: checked })}
         />
       </div>
+
+      {/* 不启用Switch时显示直连拓扑选项 */}
+      {!config.enabled && (
+        <div style={configRowStyle}>
+          <Text>直连拓扑</Text>
+          <Select
+            size="small"
+            value={config.direct_topology || 'none'}
+            onChange={(v) => onChange({ ...config, direct_topology: v })}
+            style={{ width: 150 }}
+            options={directTopologyOptions}
+          />
+        </div>
+      )}
 
       {config.enabled && (
         <>
@@ -211,30 +236,18 @@ const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
           <Text type="secondary" style={{ fontSize: 11 }}>Switch层配置 (从下到上)</Text>
           {config.layers.map((layer, index) => (
             <div key={index} style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
-                <Input
-                  size="small"
-                  placeholder="层名称"
-                  value={layer.layer_name}
-                  onChange={(e) => updateLayer(index, 'layer_name', e.target.value)}
-                  style={{ width: 60 }}
-                />
-                <Select
-                  size="small"
-                  value={layer.switch_type_id}
-                  onChange={(v) => updateLayer(index, 'switch_type_id', v)}
-                  style={{ width: 130 }}
-                  options={switchTypes.map(t => ({ value: t.id, label: `${t.name} (${t.port_count}口)` }))}
-                />
-                <InputNumber
-                  size="small"
-                  min={1}
-                  max={16}
-                  value={layer.count}
-                  onChange={(v) => updateLayer(index, 'count', v || 1)}
-                  style={{ width: 50 }}
-                  placeholder="数量"
-                />
+              {/* 第一行：层名称和删除按钮 */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Text style={{ fontSize: 11, color: '#666' }}>层名称</Text>
+                  <Input
+                    size="small"
+                    placeholder="如 leaf, spine"
+                    value={layer.layer_name}
+                    onChange={(e) => updateLayer(index, 'layer_name', e.target.value)}
+                    style={{ width: 80 }}
+                  />
+                </div>
                 <Button
                   type="text"
                   danger
@@ -243,6 +256,27 @@ const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
                   onClick={() => removeLayer(index)}
                 />
               </div>
+              {/* 第二行：Switch类型和数量 */}
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                <Select
+                  size="small"
+                  value={layer.switch_type_id}
+                  onChange={(v) => updateLayer(index, 'switch_type_id', v)}
+                  style={{ flex: 1 }}
+                  options={switchTypes.map(t => ({ value: t.id, label: `${t.name} (${t.port_count}口)` }))}
+                />
+                <Text style={{ fontSize: 11, color: '#666' }}>×</Text>
+                <InputNumber
+                  size="small"
+                  min={1}
+                  max={16}
+                  value={layer.count}
+                  onChange={(v) => updateLayer(index, 'count', v || 1)}
+                  style={{ width: 60 }}
+                />
+                <Text style={{ fontSize: 11, color: '#666' }}>台</Text>
+              </div>
+              {/* 第三行：同层互联选项 */}
               <Checkbox
                 checked={layer.inter_connect}
                 onChange={(e) => updateLayer(index, 'inter_connect', e.target.checked)}
@@ -270,6 +304,7 @@ const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
 export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   topology,
   onGenerate,
+  currentLevel = 'datacenter',
 }) => {
   // 从缓存加载初始配置
   const cachedConfig = loadCachedConfig()
@@ -296,6 +331,14 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   const [loadModalOpen, setLoadModalOpen] = useState(false)
   const [configName, setConfigName] = useState('')
   const [configDesc, setConfigDesc] = useState('')
+
+  // 层连接设置的当前Tab
+  const [switchTabKey, setSwitchTabKey] = useState<string>(currentLevel === 'board' ? 'rack' : currentLevel)
+
+  // 当右边层级变化时，同步左边的Tab
+  useEffect(() => {
+    setSwitchTabKey(currentLevel === 'board' ? 'rack' : currentLevel)
+  }, [currentLevel])
 
   // 加载配置列表
   const loadConfigList = async () => {
@@ -423,210 +466,279 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
     marginBottom: 8,
   }
 
+  // 层级配置内容
+  const layerConfigContent = (
+    <Tabs
+      size="small"
+      type="card"
+      activeKey={switchTabKey}
+      onChange={setSwitchTabKey}
+      items={[
+        {
+          key: 'datacenter',
+          label: '数据中心层',
+          children: (
+            <div>
+              {/* Pod数量配置 */}
+              <div style={{ marginBottom: 16, padding: 12, background: '#f0f5ff', borderRadius: 6 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}><ClusterOutlined /> 节点配置</Text>
+                <div style={configRowStyle}>
+                  <Text>Pod 数量</Text>
+                  <InputNumber
+                    min={1}
+                    max={10}
+                    value={podCount}
+                    onChange={(v) => setPodCount(v || 1)}
+                    size="small"
+                    style={{ width: 80 }}
+                  />
+                </div>
+              </div>
+              {/* Pod间连接配置 */}
+              <div style={{ padding: 12, background: '#f5f5f5', borderRadius: 6 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}><ApiOutlined /> 连接配置</Text>
+                <SwitchLevelConfig
+                  levelKey="datacenter_level"
+                  config={switchConfig.datacenter_level}
+                  switchTypes={switchConfig.switch_types}
+                  onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, datacenter_level: newConfig }))}
+                  configRowStyle={configRowStyle}
+                />
+              </div>
+            </div>
+          ),
+        },
+        {
+          key: 'pod',
+          label: 'Pod层',
+          children: (
+            <div>
+              {/* Rack数量配置 */}
+              <div style={{ marginBottom: 16, padding: 12, background: '#f0fff4', borderRadius: 6 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}><DatabaseOutlined /> 节点配置</Text>
+                <div style={configRowStyle}>
+                  <Text>每Pod机柜数</Text>
+                  <InputNumber
+                    min={1}
+                    max={64}
+                    value={racksPerPod}
+                    onChange={(v) => setRacksPerPod(v || 1)}
+                    size="small"
+                    style={{ width: 80 }}
+                  />
+                </div>
+              </div>
+              {/* Rack间连接配置 */}
+              <div style={{ padding: 12, background: '#f5f5f5', borderRadius: 6 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}><ApiOutlined /> 连接配置</Text>
+                <SwitchLevelConfig
+                  levelKey="pod_level"
+                  config={switchConfig.pod_level}
+                  switchTypes={switchConfig.switch_types}
+                  onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, pod_level: newConfig }))}
+                  configRowStyle={configRowStyle}
+                />
+              </div>
+            </div>
+          ),
+        },
+        {
+          key: 'rack',
+          label: 'Rack层',
+          children: (
+            <div>
+              {/* Board配置 */}
+              <div style={{ marginBottom: 16, padding: 12, background: '#fff7e6', borderRadius: 6 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}><BoardIcon /> 节点配置 (已用 {totalUsedU}/42U)</Text>
+
+                {/* 1U 板卡配置 */}
+                <div style={{ marginBottom: 8, padding: 8, background: 'rgba(255,255,255,0.7)', borderRadius: 4 }}>
+                  <div style={configRowStyle}>
+                    <Text style={{ color: '#4a5568' }}>1U 板卡</Text>
+                    <InputNumber
+                      min={0}
+                      max={42}
+                      value={boardConfigs.u1.count}
+                      onChange={(v) => updateBoardCount('u1', v)}
+                      size="small"
+                      style={{ width: 60 }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                    {(Object.keys(CHIP_TYPE_COLORS) as ChipType[]).map(type => (
+                      <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: 2, background: CHIP_TYPE_COLORS[type] }} />
+                        <Text style={{ fontSize: 11 }}>{CHIP_TYPE_NAMES[type]}</Text>
+                        <InputNumber
+                          min={0}
+                          max={32}
+                          value={boardConfigs.u1.chips[type]}
+                          onChange={(v) => updateBoardChip('u1', type, v)}
+                          size="small"
+                          style={{ width: 50 }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 2U 板卡配置 */}
+                <div style={{ marginBottom: 8, padding: 8, background: 'rgba(230,240,255,0.7)', borderRadius: 4 }}>
+                  <div style={configRowStyle}>
+                    <Text style={{ color: '#2c5282' }}>2U 板卡</Text>
+                    <InputNumber
+                      min={0}
+                      max={21}
+                      value={boardConfigs.u2.count}
+                      onChange={(v) => updateBoardCount('u2', v)}
+                      size="small"
+                      style={{ width: 60 }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                    {(Object.keys(CHIP_TYPE_COLORS) as ChipType[]).map(type => (
+                      <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: 2, background: CHIP_TYPE_COLORS[type] }} />
+                        <Text style={{ fontSize: 11 }}>{CHIP_TYPE_NAMES[type]}</Text>
+                        <InputNumber
+                          min={0}
+                          max={32}
+                          value={boardConfigs.u2.chips[type]}
+                          onChange={(v) => updateBoardChip('u2', type, v)}
+                          size="small"
+                          style={{ width: 50 }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 4U 板卡配置 */}
+                <div style={{ padding: 8, background: 'rgba(243,232,255,0.7)', borderRadius: 4 }}>
+                  <div style={configRowStyle}>
+                    <Text style={{ color: '#553c9a' }}>4U 板卡</Text>
+                    <InputNumber
+                      min={0}
+                      max={10}
+                      value={boardConfigs.u4.count}
+                      onChange={(v) => updateBoardCount('u4', v)}
+                      size="small"
+                      style={{ width: 60 }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+                    {(Object.keys(CHIP_TYPE_COLORS) as ChipType[]).map(type => (
+                      <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: 2, background: CHIP_TYPE_COLORS[type] }} />
+                        <Text style={{ fontSize: 11 }}>{CHIP_TYPE_NAMES[type]}</Text>
+                        <InputNumber
+                          min={0}
+                          max={32}
+                          value={boardConfigs.u4.chips[type]}
+                          onChange={(v) => updateBoardChip('u4', type, v)}
+                          size="small"
+                          style={{ width: 50 }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {totalUsedU > 42 && (
+                  <Text type="danger" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>
+                    超出机柜容量！
+                  </Text>
+                )}
+              </div>
+
+              {/* Board间连接配置 */}
+              <div style={{ padding: 12, background: '#f5f5f5', borderRadius: 6 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}><ApiOutlined /> 连接配置</Text>
+                <SwitchLevelConfig
+                  levelKey="rack_level"
+                  config={switchConfig.rack_level}
+                  switchTypes={switchConfig.switch_types}
+                  onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, rack_level: newConfig }))}
+                  configRowStyle={configRowStyle}
+                />
+              </div>
+            </div>
+          ),
+        },
+        {
+          key: 'types',
+          label: 'Switch配置',
+          children: (
+            <div>
+              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
+                定义可用的Switch型号
+              </Text>
+              {switchConfig.switch_types.map((swType, index) => (
+                <div key={swType.id} style={{ marginBottom: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <Input
+                      size="small"
+                      placeholder="名称"
+                      value={swType.name}
+                      onChange={(e) => {
+                        const newTypes = [...switchConfig.switch_types]
+                        newTypes[index] = { ...newTypes[index], name: e.target.value }
+                        setSwitchConfig(prev => ({ ...prev, switch_types: newTypes }))
+                      }}
+                      style={{ flex: 1 }}
+                    />
+                    <InputNumber
+                      size="small"
+                      min={8}
+                      max={1024}
+                      value={swType.port_count}
+                      onChange={(v) => {
+                        const newTypes = [...switchConfig.switch_types]
+                        newTypes[index] = { ...newTypes[index], port_count: v || 48 }
+                        setSwitchConfig(prev => ({ ...prev, switch_types: newTypes }))
+                      }}
+                      style={{ width: 100 }}
+                      suffix="端口"
+                    />
+                    <Button
+                      type="text"
+                      danger
+                      size="small"
+                      icon={<MinusCircleOutlined />}
+                      disabled={switchConfig.switch_types.length <= 1}
+                      onClick={() => {
+                        const newTypes = switchConfig.switch_types.filter((_, i) => i !== index)
+                        setSwitchConfig(prev => ({ ...prev, switch_types: newTypes }))
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+              <Button
+                type="dashed"
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  const newId = `switch_${Date.now()}`
+                  const newTypes = [...switchConfig.switch_types, { id: newId, name: '新Switch', port_count: 48 }]
+                  setSwitchConfig(prev => ({ ...prev, switch_types: newTypes }))
+                }}
+                style={{ width: '100%' }}
+              >
+                添加Switch类型
+              </Button>
+            </div>
+          ),
+        },
+      ]}
+    />
+  )
+
   const collapseItems = [
     {
-      key: 'pod',
-      label: <Text strong><ClusterOutlined /> Pod 配置</Text>,
-      children: (
-        <div>
-          <div style={configRowStyle}>
-            <Text>Pod 数量</Text>
-            <InputNumber
-              min={1}
-              max={10}
-              value={podCount}
-              onChange={(v) => setPodCount(v || 1)}
-              size="small"
-              style={{ width: 80 }}
-            />
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'rack',
-      label: <Text strong><DatabaseOutlined /> Rack 配置</Text>,
-      children: (
-        <div>
-          <div style={configRowStyle}>
-            <Text>每Pod机柜数</Text>
-            <InputNumber
-              min={1}
-              max={20}
-              value={racksPerPod}
-              onChange={(v) => setRacksPerPod(v || 1)}
-              size="small"
-              style={{ width: 80 }}
-            />
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'board',
-      label: <Text strong><BoardIcon /> Board 配置</Text>,
-      children: (
-        <div>
-          <Text type="secondary" style={{ fontSize: 12, marginBottom: 12, display: 'block' }}>
-            每机柜板卡配置 (已用 {totalUsedU}/42U)
-          </Text>
-
-          {/* 1U 板卡配置 */}
-          <div style={{ marginBottom: 12, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
-            <div style={configRowStyle}>
-              <Text strong style={{ color: '#4a5568' }}>1U 板卡</Text>
-              <InputNumber
-                min={0}
-                max={42}
-                value={boardConfigs.u1.count}
-                onChange={(v) => updateBoardCount('u1', v)}
-                size="small"
-                style={{ width: 60 }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
-              {(Object.keys(CHIP_TYPE_COLORS) as ChipType[]).map(type => (
-                <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: 2, background: CHIP_TYPE_COLORS[type] }} />
-                  <Text style={{ fontSize: 11 }}>{CHIP_TYPE_NAMES[type]}</Text>
-                  <InputNumber
-                    min={0}
-                    max={32}
-                    value={boardConfigs.u1.chips[type]}
-                    onChange={(v) => updateBoardChip('u1', type, v)}
-                    size="small"
-                    style={{ width: 50 }}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* 2U 板卡配置 */}
-          <div style={{ marginBottom: 12, padding: 8, background: '#e6f0ff', borderRadius: 4 }}>
-            <div style={configRowStyle}>
-              <Text strong style={{ color: '#2c5282' }}>2U 板卡</Text>
-              <InputNumber
-                min={0}
-                max={21}
-                value={boardConfigs.u2.count}
-                onChange={(v) => updateBoardCount('u2', v)}
-                size="small"
-                style={{ width: 60 }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
-              {(Object.keys(CHIP_TYPE_COLORS) as ChipType[]).map(type => (
-                <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: 2, background: CHIP_TYPE_COLORS[type] }} />
-                  <Text style={{ fontSize: 11 }}>{CHIP_TYPE_NAMES[type]}</Text>
-                  <InputNumber
-                    min={0}
-                    max={32}
-                    value={boardConfigs.u2.chips[type]}
-                    onChange={(v) => updateBoardChip('u2', type, v)}
-                    size="small"
-                    style={{ width: 50 }}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* 4U 板卡配置 */}
-          <div style={{ marginBottom: 8, padding: 8, background: '#f3e8ff', borderRadius: 4 }}>
-            <div style={configRowStyle}>
-              <Text strong style={{ color: '#553c9a' }}>4U 板卡</Text>
-              <InputNumber
-                min={0}
-                max={10}
-                value={boardConfigs.u4.count}
-                onChange={(v) => updateBoardCount('u4', v)}
-                size="small"
-                style={{ width: 60 }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
-              {(Object.keys(CHIP_TYPE_COLORS) as ChipType[]).map(type => (
-                <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: 2, background: CHIP_TYPE_COLORS[type] }} />
-                  <Text style={{ fontSize: 11 }}>{CHIP_TYPE_NAMES[type]}</Text>
-                  <InputNumber
-                    min={0}
-                    max={32}
-                    value={boardConfigs.u4.chips[type]}
-                    onChange={(v) => updateBoardChip('u4', type, v)}
-                    size="small"
-                    style={{ width: 50 }}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {totalUsedU > 42 && (
-            <Text type="danger" style={{ fontSize: 12 }}>
-              超出机柜容量！
-            </Text>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: 'switch',
-      label: <Text strong><ApiOutlined /> Switch 配置</Text>,
-      children: (
-        <div>
-          <Text type="secondary" style={{ fontSize: 12, marginBottom: 12, display: 'block' }}>
-            配置各层级间的Switch连接（Board-Chip层不使用Switch）
-          </Text>
-
-          <Tabs
-            size="small"
-            items={[
-              {
-                key: 'rack',
-                label: 'Rack层(Board间)',
-                children: (
-                  <SwitchLevelConfig
-                    levelKey="rack_level"
-                    config={switchConfig.rack_level}
-                    switchTypes={switchConfig.switch_types}
-                    onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, rack_level: newConfig }))}
-                    configRowStyle={configRowStyle}
-                  />
-                ),
-              },
-              {
-                key: 'pod',
-                label: 'Pod层(Rack间)',
-                children: (
-                  <SwitchLevelConfig
-                    levelKey="pod_level"
-                    config={switchConfig.pod_level}
-                    switchTypes={switchConfig.switch_types}
-                    onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, pod_level: newConfig }))}
-                    configRowStyle={configRowStyle}
-                  />
-                ),
-              },
-              {
-                key: 'datacenter',
-                label: '数据中心层(Pod间)',
-                children: (
-                  <SwitchLevelConfig
-                    levelKey="datacenter_level"
-                    config={switchConfig.datacenter_level}
-                    switchTypes={switchConfig.switch_types}
-                    onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, datacenter_level: newConfig }))}
-                    configRowStyle={configRowStyle}
-                  />
-                ),
-              },
-            ]}
-          />
-        </div>
-      ),
+      key: 'layers',
+      label: <Text strong><ApiOutlined /> 层级配置</Text>,
+      children: layerConfigContent,
     },
   ]
 
@@ -685,7 +797,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
       {/* 分层级配置 */}
       <Collapse
         items={collapseItems}
-        defaultActiveKey={['pod', 'rack', 'board', 'switch']}
+        defaultActiveKey={['layers']}
         size="small"
         style={{ marginBottom: 16 }}
       />

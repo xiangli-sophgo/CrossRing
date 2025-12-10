@@ -140,7 +140,8 @@ class HierarchicalTopologyGenerator:
 
                 # 生成Board间连接（仅在没有Rack层Switch时使用直连）
                 if switch_config is None or not switch_config.get('rack_level', {}).get('enabled'):
-                    board_connections = self._generate_board_connections(boards)
+                    rack_level_topo = switch_config.get('rack_level', {}).get('direct_topology', 'full_mesh') if switch_config else 'full_mesh'
+                    board_connections = self._generate_board_connections(boards, rack_level_topo)
                     connections.extend(board_connections)
 
             pods.append(PodConfig(
@@ -152,15 +153,19 @@ class HierarchicalTopologyGenerator:
 
             # 生成Rack间连接（仅在没有Pod层Switch时使用直连）
             if switch_config is None or not switch_config.get('pod_level', {}).get('enabled'):
+                pod_level_topo = switch_config.get('pod_level', {}).get('direct_topology', 'full_mesh') if switch_config else 'full_mesh'
                 rack_connections = self._generate_rack_connections(
-                    [r.id for r in racks]
+                    [r.id for r in racks],
+                    pod_level_topo
                 )
                 connections.extend(rack_connections)
 
         # 生成Pod间连接（仅在没有Switch配置时使用直连）
         if pod_count > 1 and (switch_config is None or not switch_config.get('datacenter_level', {}).get('enabled')):
+            dc_level_topo = switch_config.get('datacenter_level', {}).get('direct_topology', 'full_mesh') if switch_config else 'full_mesh'
             pod_connections = self._generate_pod_connections(
-                [p.id for p in pods]
+                [p.id for p in pods],
+                dc_level_topo
             )
             connections.extend(pod_connections)
 
@@ -341,56 +346,151 @@ class HierarchicalTopologyGenerator:
 
     def _generate_board_connections(
         self,
-        boards: List[BoardConfig]
+        boards: List[BoardConfig],
+        topology_type: str = 'full_mesh'
     ) -> List[ConnectionConfig]:
-        """生成Board间的连接 (通过背板)"""
-        connections = []
-
-        # 相邻Board连接
-        for i in range(len(boards) - 1):
-            connections.append(ConnectionConfig(
-                source=boards[i].id,
-                target=boards[i + 1].id,
-                type='intra',
-                bandwidth=100.0,  # 100Gbps背板
-            ))
-
-        return connections
+        """生成Board间的连接"""
+        board_ids = [b.id for b in boards]
+        return self._generate_direct_connections(board_ids, topology_type, 'intra', 100.0)
 
     def _generate_rack_connections(
         self,
-        rack_ids: List[str]
+        rack_ids: List[str],
+        topology_type: str = 'full_mesh'
     ) -> List[ConnectionConfig]:
-        """生成Rack间的连接 (通过ToR Switch)"""
-        connections = []
-
-        # 全连接拓扑
-        for i in range(len(rack_ids)):
-            for j in range(i + 1, len(rack_ids)):
-                connections.append(ConnectionConfig(
-                    source=rack_ids[i],
-                    target=rack_ids[j],
-                    type='intra',
-                    bandwidth=400.0,  # 400Gbps
-                ))
-
-        return connections
+        """生成Rack间的连接"""
+        return self._generate_direct_connections(rack_ids, topology_type, 'intra', 400.0)
 
     def _generate_pod_connections(
         self,
-        pod_ids: List[str]
+        pod_ids: List[str],
+        topology_type: str = 'full_mesh'
     ) -> List[ConnectionConfig]:
         """生成Pod间的连接"""
-        connections = []
+        return self._generate_direct_connections(pod_ids, topology_type, 'inter', 1600.0)
 
-        for i in range(len(pod_ids)):
-            for j in range(i + 1, len(pod_ids)):
+    def _generate_direct_connections(
+        self,
+        node_ids: List[str],
+        topology_type: str,
+        conn_type: str,
+        bandwidth: float
+    ) -> List[ConnectionConfig]:
+        """根据拓扑类型生成直连"""
+        connections = []
+        n = len(node_ids)
+
+        if n < 2 or topology_type == 'none':
+            return connections
+
+        if topology_type == 'full_mesh':
+            # 全连接：每个节点连接所有其他节点
+            for i in range(n):
+                for j in range(i + 1, n):
+                    connections.append(ConnectionConfig(
+                        source=node_ids[i],
+                        target=node_ids[j],
+                        type=conn_type,
+                        bandwidth=bandwidth,
+                    ))
+
+        elif topology_type == 'ring':
+            # 环形：每个节点连接相邻节点
+            for i in range(n):
+                j = (i + 1) % n
                 connections.append(ConnectionConfig(
-                    source=pod_ids[i],
-                    target=pod_ids[j],
-                    type='inter',
-                    bandwidth=1600.0,  # 1.6Tbps
+                    source=node_ids[i],
+                    target=node_ids[j],
+                    type=conn_type,
+                    bandwidth=bandwidth,
                 ))
+
+        elif topology_type == 'torus_2d':
+            # 2D Torus：二维环面，计算行列
+            cols = int(math.ceil(math.sqrt(n)))
+            rows = (n + cols - 1) // cols
+            for i in range(n):
+                row, col = i // cols, i % cols
+                # 右邻居（环绕）
+                right = row * cols + (col + 1) % cols
+                if right < n and right != i:
+                    connections.append(ConnectionConfig(
+                        source=node_ids[i],
+                        target=node_ids[right],
+                        type=conn_type,
+                        bandwidth=bandwidth,
+                    ))
+                # 下邻居（环绕）
+                down = ((row + 1) % rows) * cols + col
+                if down < n and down != i:
+                    connections.append(ConnectionConfig(
+                        source=node_ids[i],
+                        target=node_ids[down],
+                        type=conn_type,
+                        bandwidth=bandwidth,
+                    ))
+
+        elif topology_type == 'torus_3d':
+            # 3D Torus：三维环面
+            dim = max(1, int(round(n ** (1/3))))
+            for i in range(n):
+                x = i % dim
+                y = (i // dim) % dim
+                z = i // (dim * dim)
+                # X方向邻居
+                nx = y * dim + ((x + 1) % dim) + z * dim * dim
+                if nx < n and nx != i:
+                    connections.append(ConnectionConfig(
+                        source=node_ids[i],
+                        target=node_ids[nx],
+                        type=conn_type,
+                        bandwidth=bandwidth,
+                    ))
+                # Y方向邻居
+                ny = ((y + 1) % dim) * dim + x + z * dim * dim
+                if ny < n and ny != i:
+                    connections.append(ConnectionConfig(
+                        source=node_ids[i],
+                        target=node_ids[ny],
+                        type=conn_type,
+                        bandwidth=bandwidth,
+                    ))
+                # Z方向邻居
+                nz = y * dim + x + ((z + 1) % dim) * dim * dim
+                if nz < n and nz != i:
+                    connections.append(ConnectionConfig(
+                        source=node_ids[i],
+                        target=node_ids[nz],
+                        type=conn_type,
+                        bandwidth=bandwidth,
+                    ))
+
+        elif topology_type == 'hw_full_mesh':
+            # HW FullMesh：行列全连接（同行全连接 + 同列全连接）
+            cols = int(math.ceil(math.sqrt(n)))
+            rows = (n + cols - 1) // cols
+            # 同行全连接
+            for row in range(rows):
+                row_nodes = [i for i in range(row * cols, min((row + 1) * cols, n))]
+                for i in range(len(row_nodes)):
+                    for j in range(i + 1, len(row_nodes)):
+                        connections.append(ConnectionConfig(
+                            source=node_ids[row_nodes[i]],
+                            target=node_ids[row_nodes[j]],
+                            type=conn_type,
+                            bandwidth=bandwidth,
+                        ))
+            # 同列全连接
+            for col in range(cols):
+                col_nodes = [row * cols + col for row in range(rows) if row * cols + col < n]
+                for i in range(len(col_nodes)):
+                    for j in range(i + 1, len(col_nodes)):
+                        connections.append(ConnectionConfig(
+                            source=node_ids[col_nodes[i]],
+                            target=node_ids[col_nodes[j]],
+                            type=conn_type,
+                            bandwidth=bandwidth,
+                        ))
 
         return connections
 
