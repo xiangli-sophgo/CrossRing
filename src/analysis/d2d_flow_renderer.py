@@ -389,6 +389,93 @@ class D2DFlowRenderer(BaseFlowRenderer):
 
                     traceback.print_exc()
 
+        # 添加D2D节点的点击处理scatter点（D2D_RN和D2D_SN没有画出IP方块，需要单独添加点击区域）
+        # 只在有实际带宽数据的D2D节点上添加点击区域
+        d2d_pairs = getattr(config, 'D2D_PAIRS', [])
+        if d2d_pairs and die_node_positions:
+            d2d_click_x = []
+            d2d_click_y = []
+            d2d_click_text = []
+            d2d_click_customdata = []
+
+            # 计算square_size（与draw_single_die_flow保持一致）
+            square_size = np.sqrt(node_size) / 50
+
+            # 收集有带宽数据的D2D节点（去重）
+            d2d_nodes_with_data = set()
+            if die_ip_bandwidth_data:
+                for die_id, die_data in die_ip_bandwidth_data.items():
+                    if mode in die_data:
+                        mode_data = die_data[mode]
+                        # 检查d2d_rn和d2d_sn的带宽数据
+                        for ip_type in ['d2d_rn', 'd2d_sn', 'D2D_RN', 'D2D_SN']:
+                            if ip_type in mode_data:
+                                data_matrix = mode_data[ip_type]
+                                num_cols = data_matrix.shape[1]
+                                # 找出有带宽的节点位置
+                                for row in range(data_matrix.shape[0]):
+                                    for col in range(num_cols):
+                                        if data_matrix[row, col] > 0.001:
+                                            node_pos = row * num_cols + col
+                                            d2d_nodes_with_data.add((die_id, ip_type.lower(), node_pos))
+
+            for die0_id, node0, die1_id, node1 in d2d_pairs:
+                # Die0的D2D节点
+                if die0_id in die_node_positions and node0 in die_node_positions[die0_id]:
+                    x, y = die_node_positions[die0_id][node0]
+                    # D2D_RN - 只在有数据时添加
+                    if (die0_id, 'd2d_rn', node0) in d2d_nodes_with_data:
+                        d2d_click_x.append(x - square_size * 0.35)
+                        d2d_click_y.append(y + square_size * 0.15)
+                        d2d_click_text.append(f"d2d_rn_0 @ Pos {node0}")
+                        d2d_click_customdata.append([die0_id, 'd2d_rn_0', node0])
+                    # D2D_SN - 只在有数据时添加
+                    if (die0_id, 'd2d_sn', node0) in d2d_nodes_with_data:
+                        d2d_click_x.append(x - square_size * 0.35)
+                        d2d_click_y.append(y - square_size * 0.15)
+                        d2d_click_text.append(f"d2d_sn_0 @ Pos {node0}")
+                        d2d_click_customdata.append([die0_id, 'd2d_sn_0', node0])
+
+                # Die1的D2D节点
+                if die1_id in die_node_positions and node1 in die_node_positions[die1_id]:
+                    x, y = die_node_positions[die1_id][node1]
+                    # D2D_RN - 只在有数据时添加
+                    if (die1_id, 'd2d_rn', node1) in d2d_nodes_with_data:
+                        d2d_click_x.append(x - square_size * 0.35)
+                        d2d_click_y.append(y + square_size * 0.15)
+                        d2d_click_text.append(f"d2d_rn_0 @ Pos {node1}")
+                        d2d_click_customdata.append([die1_id, 'd2d_rn_0', node1])
+                    # D2D_SN - 只在有数据时添加
+                    if (die1_id, 'd2d_sn', node1) in d2d_nodes_with_data:
+                        d2d_click_x.append(x - square_size * 0.35)
+                        d2d_click_y.append(y - square_size * 0.15)
+                        d2d_click_text.append(f"d2d_sn_0 @ Pos {node1}")
+                        d2d_click_customdata.append([die1_id, 'd2d_sn_0', node1])
+
+            if d2d_click_x:
+                fig.add_trace(
+                    go.Scatter(
+                        x=d2d_click_x,
+                        y=d2d_click_y,
+                        mode="markers",
+                        marker=dict(
+                            size=square_size * 12,
+                            opacity=0,  # 完全透明，仅用于点击检测
+                            color="rgba(0,0,0,0)",
+                        ),
+                        text=d2d_click_text,
+                        customdata=d2d_click_customdata,
+                        hoverinfo="text",
+                        hoverlabel=dict(
+                            bgcolor="white",
+                            bordercolor="#333333",
+                            font=dict(color="#333333"),
+                        ),
+                        showlegend=False,
+                        name="D2D Click Handler",
+                    )
+                )
+
         # 添加IP类型Legend
         if used_ip_types:
             self._add_ip_legend_plotly(fig, used_ip_types)

@@ -1,126 +1,26 @@
 [
   {
-    "task_id": "4a8e8832",
+    "task_id": "a7a333a9",
     "mode": "dcin",
     "topology": "5x4",
-    "config_path": "/Users/lixiang/Documents/工作/code/CrossRing/config/topologies/dcin_4die_config.yaml",
-    "traffic_file_path": "/Users/lixiang/Documents/工作/code/CrossRing/traffic",
+    "config_path": "C:\\Users\\xiang\\Documents\\code\\CrossRing\\config\\topologies\\dcin_4die_config.yaml",
+    "traffic_file_path": "C:\\Users\\xiang\\Documents\\code\\CrossRing\\traffic",
     "traffic_files": [
-      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_R.txt",
-      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_W.txt",
-      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_R.txt",
-      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_W.txt",
-      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_R.txt",
-      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_W.txt",
-      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_R.txt",
-      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_W.txt"
+      "2DIE_0_2_16_share_d2d_R.txt",
+      "2DIE_0_2_16_share_d2d_W.txt",
+      "2DIE_0_2_16_share_d2d_c2c_R.txt",
+      "2DIE_0_2_16_share_d2d_c2c_W.txt",
+      "2DIE_0_3_16_share_d2d_R.txt",
+      "2DIE_0_3_16_share_d2d_W.txt",
+      "2DIE_0_3_16_share_d2d_c2c_R.txt",
+      "2DIE_0_3_16_share_d2d_c2c_W.txt"
     ],
     "max_time": 6000,
-    "experiment_name": "2DIE_4GDMA_40",
-    "experiment_description": null,
+    "experiment_name": "2DIE_4GDMA",
+    "experiment_description": "2261，2DIE，4GDMA情况",
     "save_to_db": true,
     "max_workers": null,
     "config_overrides": {
-      "NUM_DIES": 4,
-      "D2D_AR_LATENCY": 20,
-      "D2D_R_LATENCY": 20,
-      "D2D_AW_LATENCY": 20,
-      "D2D_W_LATENCY": 20,
-      "D2D_B_LATENCY": 20,
-      "D2D_RN_BW_LIMIT": 192,
-      "D2D_SN_BW_LIMIT": 192,
-      "D2D_AXI_BANDWIDTH": 192,
-      "D2D_RN_RDB_SIZE": 256,
-      "D2D_RN_WDB_SIZE": 256,
-      "D2D_SN_RDB_SIZE": 256,
-      "D2D_SN_WDB_SIZE": 256,
-      "D2D_RN_R_TRACKER_OSTD": "auto",
-      "D2D_RN_W_TRACKER_OSTD": "auto",
-      "D2D_SN_R_TRACKER_OSTD": "auto",
-      "D2D_SN_W_TRACKER_OSTD": "auto",
-      "D2D_CONNECTIONS": [
-        [
-          0,
-          1,
-          3,
-          12
-        ],
-        [
-          0,
-          2,
-          3,
-          16
-        ],
-        [
-          0,
-          4,
-          2,
-          8
-        ],
-        [
-          0,
-          8,
-          2,
-          4
-        ],
-        [
-          0,
-          12,
-          1,
-          1
-        ],
-        [
-          0,
-          16,
-          1,
-          2
-        ],
-        [
-          1,
-          4,
-          3,
-          8
-        ],
-        [
-          1,
-          8,
-          3,
-          4
-        ],
-        [
-          1,
-          12,
-          2,
-          1
-        ],
-        [
-          1,
-          16,
-          2,
-          2
-        ],
-        [
-          2,
-          12,
-          3,
-          1
-        ],
-        [
-          2,
-          16,
-          3,
-          2
-        ]
-      ],
-      "DIE_TOPOLOGIES": {
-        "0": "2261_5x4",
-        "1": "2261_5x4",
-        "2": "2261_5x4",
-        "3": "2261_5x4"
-      }
-    },
-    "die_config_path": "/Users/lixiang/Documents/工作/code/CrossRing/config/topologies/topo_5x4.yaml",
-    "die_config_overrides": {
       "TOPO_TYPE": "5x4",
       "FLIT_SIZE": 128,
       "BURST": 4,
@@ -254,206 +154,7 @@
       "SDMA_RW_GAP": "inf",
       "ENABLE_CROSSPOINT_CONFLICT_CHECK": 0
     },
-    "status": "completed",
-    "progress": 100,
-    "current_file": "",
-    "message": "仿真完成",
-    "error": null,
-    "results": {
-      "total_files": 8,
-      "completed_files": 8,
-      "failed_files": 0,
-      "experiment_id": 2,
-      "file_results": [
-        {
-          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_R.txt",
-          "status": "completed",
-          "duration": 170.5593180656433,
-          "error": null
-        },
-        {
-          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_R.txt",
-          "status": "completed",
-          "duration": 172.33071184158325,
-          "error": null
-        },
-        {
-          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_W.txt",
-          "status": "completed",
-          "duration": 181.10557579994202,
-          "error": null
-        },
-        {
-          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_W.txt",
-          "status": "completed",
-          "duration": 181.1438488960266,
-          "error": null
-        },
-        {
-          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_R.txt",
-          "status": "completed",
-          "duration": 194.1905448436737,
-          "error": null
-        },
-        {
-          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_R.txt",
-          "status": "completed",
-          "duration": 193.55666613578796,
-          "error": null
-        },
-        {
-          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_W.txt",
-          "status": "completed",
-          "duration": 202.82312989234924,
-          "error": null
-        },
-        {
-          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_W.txt",
-          "status": "completed",
-          "duration": 209.99207305908203,
-          "error": null
-        }
-      ]
-    },
-    "sim_details": {
-      "file_index": 8,
-      "total_files": 8,
-      "current_file": "已完成: 2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_W.txt",
-      "sim_progress": 100,
-      "current_time": 6000,
-      "max_time": 6000,
-      "req_count": 0,
-      "total_req": 0,
-      "recv_flits": 0,
-      "total_flits": 0,
-      "trans_flits": 0
-    },
-    "created_at": "2025-12-09T21:55:10.238776",
-    "started_at": "2025-12-09T21:55:10.238933",
-    "completed_at": "2025-12-09T21:58:55.789164",
-    "_current_engine": null
-  },
-  {
-    "task_id": "345513bc",
-    "mode": "dcin",
-    "topology": "5x4",
-    "config_path": "/Users/lixiang/Documents/工作/code/CrossRing/config/topologies/dcin_4die_config.yaml",
-    "traffic_file_path": "/Users/lixiang/Documents/工作/code/CrossRing/traffic",
-    "traffic_files": [
-      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_R.txt",
-      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_W.txt",
-      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_R.txt",
-      "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_W.txt",
-      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_R.txt",
-      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_W.txt",
-      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_R.txt",
-      "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_W.txt"
-    ],
-    "max_time": 6000,
-    "experiment_name": "2DIE_4GDMA",
-    "experiment_description": null,
-    "save_to_db": true,
-    "max_workers": null,
-    "config_overrides": {
-      "NUM_DIES": 4,
-      "D2D_AR_LATENCY": 20,
-      "D2D_R_LATENCY": 20,
-      "D2D_AW_LATENCY": 20,
-      "D2D_W_LATENCY": 20,
-      "D2D_B_LATENCY": 20,
-      "D2D_RN_BW_LIMIT": 192,
-      "D2D_SN_BW_LIMIT": 192,
-      "D2D_AXI_BANDWIDTH": 192,
-      "D2D_RN_RDB_SIZE": 256,
-      "D2D_RN_WDB_SIZE": 256,
-      "D2D_SN_RDB_SIZE": 256,
-      "D2D_SN_WDB_SIZE": 256,
-      "D2D_RN_R_TRACKER_OSTD": "auto",
-      "D2D_RN_W_TRACKER_OSTD": "auto",
-      "D2D_SN_R_TRACKER_OSTD": "auto",
-      "D2D_SN_W_TRACKER_OSTD": "auto",
-      "D2D_CONNECTIONS": [
-        [
-          0,
-          1,
-          3,
-          12
-        ],
-        [
-          0,
-          2,
-          3,
-          16
-        ],
-        [
-          0,
-          4,
-          2,
-          8
-        ],
-        [
-          0,
-          8,
-          2,
-          4
-        ],
-        [
-          0,
-          12,
-          1,
-          1
-        ],
-        [
-          0,
-          16,
-          1,
-          2
-        ],
-        [
-          1,
-          4,
-          3,
-          8
-        ],
-        [
-          1,
-          8,
-          3,
-          4
-        ],
-        [
-          1,
-          12,
-          2,
-          1
-        ],
-        [
-          1,
-          16,
-          2,
-          2
-        ],
-        [
-          2,
-          12,
-          3,
-          1
-        ],
-        [
-          2,
-          16,
-          3,
-          2
-        ]
-      ],
-      "DIE_TOPOLOGIES": {
-        "0": "2261_5x4",
-        "1": "2261_5x4",
-        "2": "2261_5x4",
-        "3": "2261_5x4"
-      }
-    },
-    "die_config_path": "/Users/lixiang/Documents/工作/code/CrossRing/config/topologies/topo_2261_5x4.yaml",
+    "die_config_path": "C:\\Users\\xiang\\Documents\\code\\CrossRing\\config\\topologies\\topo_2261_5x4.yaml",
     "die_config_overrides": {
       "TOPO_TYPE": "5x4",
       "FLIT_SIZE": 128,
@@ -597,54 +298,54 @@
       "total_files": 8,
       "completed_files": 8,
       "failed_files": 0,
-      "experiment_id": 1,
+      "experiment_id": 27,
       "file_results": [
         {
-          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_R.txt",
+          "file": "2DIE_0_3_16_share_d2d_R.txt",
           "status": "completed",
-          "duration": 178.6107451915741,
+          "duration": 177.78327298164368,
           "error": null
         },
         {
-          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_R.txt",
+          "file": "2DIE_0_2_16_share_d2d_R.txt",
           "status": "completed",
-          "duration": 179.72595477104187,
+          "duration": 179.4592216014862,
           "error": null
         },
         {
-          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_W.txt",
+          "file": "2DIE_0_3_16_share_d2d_W.txt",
           "status": "completed",
-          "duration": 191.14063501358032,
+          "duration": 192.28046679496765,
           "error": null
         },
         {
-          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_W.txt",
+          "file": "2DIE_0_2_16_share_d2d_W.txt",
           "status": "completed",
-          "duration": 190.4157829284668,
+          "duration": 192.93535590171814,
           "error": null
         },
         {
-          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_R.txt",
+          "file": "2DIE_0_2_16_share_d2d_c2c_R.txt",
           "status": "completed",
-          "duration": 204.07459688186646,
+          "duration": 198.61818647384644,
           "error": null
         },
         {
-          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_R.txt",
+          "file": "2DIE_0_3_16_share_d2d_c2c_R.txt",
           "status": "completed",
-          "duration": 205.82362818717957,
+          "duration": 201.6908802986145,
           "error": null
         },
         {
-          "file": "2DIE_4GDMA/2DIE_0_2_16_share_d2d_c2c_W.txt",
+          "file": "2DIE_0_2_16_share_d2d_c2c_W.txt",
           "status": "completed",
-          "duration": 214.5354130268097,
+          "duration": 214.65895581245422,
           "error": null
         },
         {
-          "file": "2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_W.txt",
+          "file": "2DIE_0_3_16_share_d2d_c2c_W.txt",
           "status": "completed",
-          "duration": 219.89027309417725,
+          "duration": 219.36007142066956,
           "error": null
         }
       ]
@@ -652,7 +353,7 @@
     "sim_details": {
       "file_index": 8,
       "total_files": 8,
-      "current_file": "已完成: 2DIE_4GDMA/2DIE_0_3_16_share_d2d_c2c_W.txt",
+      "current_file": "已完成: 2DIE_0_3_16_share_d2d_c2c_W.txt",
       "sim_progress": 100,
       "current_time": 6000,
       "max_time": 6000,
@@ -662,9 +363,9 @@
       "total_flits": 0,
       "trans_flits": 0
     },
-    "created_at": "2025-12-09T21:46:42.377330",
-    "started_at": "2025-12-09T21:46:42.377469",
-    "completed_at": "2025-12-09T21:50:38.393611",
+    "created_at": "2025-12-10T10:47:12.123499",
+    "started_at": "2025-12-10T10:47:12.123654",
+    "completed_at": "2025-12-10T10:51:06.119204",
     "_current_engine": null
   }
 ]

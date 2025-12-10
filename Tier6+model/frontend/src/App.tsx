@@ -1,59 +1,75 @@
-import React, { useState, useCallback } from 'react'
-import { Layout, Typography } from 'antd'
-import { ConfigPanel } from './components/ConfigPanel'
+import React, { useState, useCallback, useEffect } from 'react'
+import { Layout, Typography, Spin, message } from 'antd'
 import { Scene3D } from './components/Scene3D'
-import { LevelConfig, TopologyData } from './types'
-import { generateTopology } from './api/topology'
+import { ConfigPanel } from './components/ConfigPanel'
+import { HierarchicalTopology } from './types'
+import { getTopology, generateTopology } from './api/topology'
+import { useViewNavigation } from './hooks/useViewNavigation'
 
 const { Header, Sider, Content } = Layout
 const { Title } = Typography
 
-// 默认配置
-const defaultLevels: LevelConfig[] = [
-  { level: 'die', count: 4, topology: 'mesh', visible: true },
-  { level: 'chip', count: 2, topology: 'mesh', visible: true },
-  { level: 'board', count: 2, topology: 'mesh', visible: true },
-  { level: 'server', count: 2, topology: 'mesh', visible: true },
-  { level: 'pod', count: 1, topology: 'mesh', visible: true },
-]
+// localStorage缓存key（与ConfigPanel保持一致）
+const CONFIG_CACHE_KEY = 'tier6_topology_config_cache'
 
 const App: React.FC = () => {
-  const [levels, setLevels] = useState<LevelConfig[]>(defaultLevels)
-  const [showInterLevel, setShowInterLevel] = useState(true)
-  const [topologyData, setTopologyData] = useState<TopologyData | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [topology, setTopology] = useState<HierarchicalTopology | null>(null)
+  const [loading, setLoading] = useState(true)  // 初始加载状态
 
-  // 加载拓扑数据
+  // 视图导航状态
+  const navigation = useViewNavigation(topology)
+
+  // 加载拓扑数据（优先使用缓存配置生成）
   const loadTopology = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await generateTopology(levels, showInterLevel)
-      setTopologyData(data)
+      // 检查是否有缓存配置
+      const cachedStr = localStorage.getItem(CONFIG_CACHE_KEY)
+      if (cachedStr) {
+        const cached = JSON.parse(cachedStr)
+        // 使用缓存配置生成拓扑
+        const data = await generateTopology({
+          pod_count: cached.podCount,
+          racks_per_pod: cached.racksPerPod,
+          board_configs: cached.boardConfigs,
+        })
+        setTopology(data)
+      } else {
+        // 没有缓存，使用默认配置
+        const data = await getTopology()
+        setTopology(data)
+      }
     } catch (error) {
       console.error('加载拓扑失败:', error)
+      message.error('加载拓扑数据失败')
     } finally {
       setLoading(false)
     }
-  }, [levels, showInterLevel])
+  }, [])
+
+  // 重新生成拓扑
+  const handleGenerate = useCallback(async (config: {
+    pod_count: number
+    racks_per_pod: number
+    board_configs: {
+      u1: { count: number; chips: { npu: number; cpu: number } }
+      u2: { count: number; chips: { npu: number; cpu: number } }
+      u4: { count: number; chips: { npu: number; cpu: number } }
+    }
+  }) => {
+    try {
+      const data = await generateTopology(config)
+      setTopology(data)
+    } catch (error) {
+      console.error('生成拓扑失败:', error)
+      message.error('生成拓扑失败')
+    }
+  }, [])
 
   // 初始加载
-  React.useEffect(() => {
+  useEffect(() => {
     loadTopology()
   }, [loadTopology])
-
-  // 配置变更处理
-  const handleConfigChange = (newLevels: LevelConfig[]) => {
-    setLevels(newLevels)
-  }
-
-  const handleInterLevelChange = (show: boolean) => {
-    setShowInterLevel(show)
-  }
-
-  const handleReset = () => {
-    setLevels(defaultLevels)
-    setShowInterLevel(true)
-  }
 
   return (
     <Layout style={{ height: '100vh' }}>
@@ -64,7 +80,7 @@ const App: React.FC = () => {
         alignItems: 'center',
       }}>
         <Title level={4} style={{ color: '#fff', margin: 0 }}>
-          Tier6+ 3D 拓扑配置器
+          Tier6+互联拓扑
         </Title>
       </Header>
 
@@ -78,19 +94,40 @@ const App: React.FC = () => {
           }}
         >
           <ConfigPanel
-            levels={levels}
-            showInterLevel={showInterLevel}
-            onConfigChange={handleConfigChange}
-            onInterLevelChange={handleInterLevelChange}
-            onReset={handleReset}
+            topology={topology}
+            onGenerate={handleGenerate}
+            loading={loading}
           />
         </Sider>
 
         <Content style={{ position: 'relative' }}>
-          <Scene3D
-            topologyData={topologyData}
-            loading={loading}
-          />
+          {loading && !topology ? (
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              height: '100%',
+            }}>
+              <Spin size="large" tip="加载中..." />
+            </div>
+          ) : (
+            <>
+              <Scene3D
+                topology={topology}
+                viewState={navigation.viewState}
+                breadcrumbs={navigation.breadcrumbs}
+                currentPod={navigation.currentPod}
+                currentRack={navigation.currentRack}
+                currentBoard={navigation.currentBoard}
+                onNavigate={navigation.navigateTo}
+                onNavigateToPod={navigation.navigateToPod}
+                onNavigateToRack={navigation.navigateToRack}
+                onNavigateBack={navigation.navigateBack}
+                onBreadcrumbClick={navigation.navigateToBreadcrumb}
+                canGoBack={navigation.canGoBack}
+              />
+            </>
+          )}
         </Content>
       </Layout>
     </Layout>

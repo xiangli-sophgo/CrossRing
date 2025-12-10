@@ -207,7 +207,9 @@ class BaseFlowRenderer:
                 )
             )
 
-    def _draw_link_arrows(self, fig, pos, edge_labels, edge_colors, links, config, square_size, rotation, fontsize, utilization_stats=None, is_d2d_scenario=False, show_labels=True, static_bandwidth=None):
+    def _draw_link_arrows(
+        self, fig, pos, edge_labels, edge_colors, links, config, square_size, rotation, fontsize, utilization_stats=None, is_d2d_scenario=False, show_labels=True, static_bandwidth=None
+    ):
         """绘制链路箭头（批量优化版本，增强hover信息）
 
         Returns:
@@ -495,7 +497,19 @@ class BaseFlowRenderer:
 
         # 绘制链路箭头（带文本标签）- 收集返回的annotations
         arrow_anns = self._draw_link_arrows(
-            fig, pos, edge_labels, edge_colors, links, config, square_size, rotation=rotation, fontsize=fontsize, utilization_stats=utilization_stats, is_d2d_scenario=is_d2d_scenario, show_labels=True, static_bandwidth=static_bandwidth
+            fig,
+            pos,
+            edge_labels,
+            edge_colors,
+            links,
+            config,
+            square_size,
+            rotation=rotation,
+            fontsize=fontsize,
+            utilization_stats=utilization_stats,
+            is_d2d_scenario=is_d2d_scenario,
+            show_labels=True,
+            static_bandwidth=static_bandwidth,
         )
         channel_annotations.extend(arrow_anns)
 

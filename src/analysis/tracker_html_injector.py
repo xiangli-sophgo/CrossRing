@@ -403,6 +403,16 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
                 'write_retry': 'SN写Retry'
             }};
 
+            // Tracker颜色映射：读=蓝色，写=橙色，retry用紫色和红色区分
+            const trackerColors = {{
+                'rn_read': '#1f77b4',      // 蓝色
+                'rn_write': '#ff7f0e',     // 橙色
+                'sn_ro': '#1f77b4',        // 蓝色
+                'sn_share': '#ff7f0e',     // 橙色
+                'read_retry': '#9467bd',   // 紫色
+                'write_retry': '#d62728'   // 红色
+            }};
+
             // 为每种tracker类型创建曲线
             for (const [trackerType, eventData] of Object.entries(trackerEvents)) {{
                 // 跳过DB类型（rn_rdb, rn_wdb, sn_wdb）
@@ -452,7 +462,7 @@ def inject_tracker_functionality(html_path: str, tracker_data_path: str) -> str:
                     y: usageCounts,
                     mode: 'lines',
                     name: trackerNames[trackerType] || trackerType,
-                    line: {{ width: 2.5, shape: 'hv' }},  // 阶梯线
+                    line: {{ width: 2.5, shape: 'hv', color: trackerColors[trackerType] || '#888888' }},  // 阶梯线，固定颜色
                     customdata: cumulativeAllocations,  // 传递累计分配数据
                     hovertemplate: '时间: %{{x:.1f}} ns' +
                         '<br>当前使用: %{{y}}' +
@@ -913,6 +923,16 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
                 'write_retry': 'SN写Retry'
             }};
 
+            // Tracker颜色映射：读=蓝色，写=橙色，retry用紫色和红色区分
+            const trackerColors = {{
+                'rn_read': '#1f77b4',      // 蓝色
+                'rn_write': '#ff7f0e',     // 橙色
+                'sn_ro': '#1f77b4',        // 蓝色
+                'sn_share': '#ff7f0e',     // 橙色
+                'read_retry': '#9467bd',   // 紫色
+                'write_retry': '#d62728'   // 红色
+            }};
+
             // 为每种tracker类型创建曲线
             for (const [trackerType, eventData] of Object.entries(trackerEvents)) {{
                 // 跳过DB类型（rn_rdb, rn_wdb, sn_wdb）
@@ -962,7 +982,7 @@ def inject_tracker_functionality_to_content(html_content: str, tracker_json: str
                     y: usageCounts,
                     mode: 'lines',
                     name: trackerNames[trackerType] || trackerType,
-                    line: {{ width: 2.5, shape: 'hv' }},  // 阶梯线
+                    line: {{ width: 2.5, shape: 'hv', color: trackerColors[trackerType] || '#888888' }},  // 阶梯线，固定颜色
                     customdata: cumulativeAllocations,  // 传递累计分配数据
                     hovertemplate: '时间: %{{x:.1f}} ns' +
                         '<br>当前使用: %{{y}}' +

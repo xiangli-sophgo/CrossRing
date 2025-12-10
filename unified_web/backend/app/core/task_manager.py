@@ -267,17 +267,23 @@ class TaskManager:
             self._subscribers[task_id].remove(queue)
 
     async def run_task(self, task_id: str):
-        """执行仿真任务（并行执行多个文件）"""
+        """执行仿真任务（单文件串行执行带进度，多文件并行执行）"""
         task = self._tasks.get(task_id)
         if not task:
             return
-
-        self.update_task_status(task_id, TaskStatus.RUNNING, message="正在初始化并行仿真...")
 
         try:
             total_files = len(task.traffic_files)
             results_list = []
             experiment_id = None
+
+            # 单文件时使用串行执行，显示详细进度
+            if total_files == 1:
+                await self._run_single_file_task(task_id, task)
+                return
+
+            # 多文件时使用并行执行
+            self.update_task_status(task_id, TaskStatus.RUNNING, message="正在初始化并行仿真...")
 
             # 准备所有仿真参数
             sim_params_list = []
@@ -452,6 +458,110 @@ class TaskManager:
             import traceback
             error_msg = f"{str(e)}\n{traceback.format_exc()}"
             logger.error(f"仿真任务失败 [{task_id}]: {error_msg}")
+            self.update_task_status(
+                task_id,
+                TaskStatus.FAILED,
+                message="仿真失败",
+                error=error_msg,
+            )
+
+    async def _run_single_file_task(self, task_id: str, task: SimulationTask):
+        """执行单文件仿真任务（串行执行，显示详细进度）"""
+        from .simulation_engine import SimulationEngine, SimulationMode
+
+        traffic_file = task.traffic_files[0]
+        self.update_task_status(task_id, TaskStatus.RUNNING, message=f"正在仿真: {traffic_file}")
+
+        # 初始化sim_details
+        task.sim_details = {
+            "file_index": 0,
+            "total_files": 1,
+            "current_file": traffic_file,
+            "sim_progress": 0,
+            "current_time": 0,
+            "max_time": task.max_time,
+            "req_count": 0,
+            "total_req": 0,
+            "recv_flits": 0,
+            "total_flits": 0,
+            "trans_flits": 0,
+        }
+
+        try:
+            engine = SimulationEngine(
+                mode=SimulationMode(task.mode),
+                config_path=task.config_path,
+                topology=task.topology,
+                verbose=0,
+                config_overrides=task.config_overrides,
+                die_config_path=task.die_config_path,
+                die_config_overrides=task.die_config_overrides,
+            )
+
+            # 设置进度回调
+            def on_progress(data: dict):
+                if task.status == TaskStatus.CANCELLED:
+                    return
+                task.sim_details.update(data)
+                # 计算总体进度
+                if data.get("max_time", 0) > 0:
+                    task.progress = int((data.get("current_time", 0) / data["max_time"]) * 100)
+
+            engine.set_progress_callback(on_progress)
+            task._current_engine = engine
+
+            engine.setup(
+                traffic_file_path=task.traffic_file_path,
+                traffic_files=[traffic_file],
+                show_result_analysis=not task.save_to_db,
+            )
+
+            result = await engine.run_async(max_time=task.max_time)
+            result.results['traffic_file'] = traffic_file
+
+            # 保存到数据库
+            experiment_id = None
+            if task.save_to_db:
+                exp_name = task.experiment_name or '仿真实验'
+                experiment_id = engine.save_to_database(
+                    experiment_name=exp_name,
+                    description=task.experiment_description
+                )
+
+            # 检查是否被取消
+            if task.status == TaskStatus.CANCELLED:
+                self.update_task_status(
+                    task_id,
+                    TaskStatus.CANCELLED,
+                    message="任务已取消",
+                )
+                return
+
+            combined_results = {
+                'total_files': 1,
+                'completed_files': 1 if result.status.value == 'completed' else 0,
+                'failed_files': 0 if result.status.value == 'completed' else 1,
+                'experiment_id': experiment_id,
+                'file_results': [{
+                    'file': traffic_file,
+                    'status': result.status.value,
+                    'duration': result.duration_seconds,
+                    'error': result.error,
+                }],
+            }
+
+            self.update_task_status(
+                task_id,
+                TaskStatus.COMPLETED,
+                progress=100,
+                message="仿真完成",
+                results=combined_results,
+            )
+
+        except Exception as e:
+            import traceback
+            error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            logger.error(f"单文件仿真任务失败 [{task_id}]: {error_msg}")
             self.update_task_status(
                 task_id,
                 TaskStatus.FAILED,

@@ -71,7 +71,7 @@ def main():
     # 运行仿真
     print("开始仿真")
     model.run_simulation(
-        max_time=1000,
+        max_time=2000,
         print_interval=200,
         verbose=1,
     )

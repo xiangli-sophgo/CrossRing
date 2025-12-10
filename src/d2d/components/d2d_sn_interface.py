@@ -425,12 +425,19 @@ class D2D_SN_Interface(IPInterface):
                 self.sn_tracker_count["share"]["count"] -= 1
                 self.sn_wdb[flit.packet_id] = []
                 self.sn_wdb_count["count"] -= flit.burst_length
+                # 记录tracker分配事件
+                self._record_tracker_allocation("sn_share")
+                self._record_tracker_allocation("sn_wdb")
 
                 # 发送datasend响应
                 data_send_rsp = self._create_response_flit(flit, "datasend")
                 self.enqueue(data_send_rsp, "rsp")
             else:
                 # 资源不足：发送negative并加入等待队列（与基类一致）
+                if not has_tracker:
+                    self._record_tracker_block("sn_share")
+                if not has_databuffer:
+                    self._record_tracker_block("sn_wdb")
                 self.create_rsp(flit, "negative")
                 self.sn_req_wait["write"].append(flit)
         else:
@@ -455,6 +462,8 @@ class D2D_SN_Interface(IPInterface):
                 flit.sn_tracker_type = "ro"
                 self.sn_tracker.append(flit)
                 self.sn_tracker_count["ro"]["count"] -= 1
+                # 记录tracker分配事件
+                self._record_tracker_allocation("sn_ro")
 
                 # print(f"[D2D_SN] 分配RO tracker并转发跨Die读请求 packet_id={packet_id}, "
                 #       f"剩余tracker={self.node.sn_tracker_count[self.ip_type]['ro'][self.ip_pos]}")
@@ -466,6 +475,7 @@ class D2D_SN_Interface(IPInterface):
             else:
                 # 资源不足，返回negative响应
                 # print(f"[D2D_SN] RO tracker不足，读请求 packet_id={packet_id} 返回negative响应")
+                self._record_tracker_block("sn_ro")
                 self.create_rsp(flit, "negative")
                 self.sn_req_wait[flit.req_type].append(flit)
         else:
@@ -639,11 +649,17 @@ class D2D_SN_Interface(IPInterface):
             # 释放tracker资源
             self.sn_tracker.remove(tracker)
             self.sn_tracker_count[tracker_type]["count"] += 1
+            # 记录tracker释放事件
+            if tracker_type == "ro":
+                self._record_tracker_release("sn_ro")
+            else:
+                self._record_tracker_release("sn_share")
 
             # 对于读请求，通常不需要释放RDB（读缓冲由RN管理）
             # 对于写请求，需要释放WDB
             if hasattr(tracker, "req_type") and tracker.req_type == "write":
                 self.sn_wdb_count["count"] += tracker.burst_length
+                self._record_tracker_release("sn_wdb")
 
             # print(f"[D2D_SN] 释放packet {packet_id}的{tracker_type} tracker资源")
 
@@ -670,6 +686,10 @@ class D2D_SN_Interface(IPInterface):
                 self.sn_tracker_count["ro"]["count"] -= 1
                 new_req.sn_tracker_type = "ro"
                 self.sn_tracker.append(new_req)
+                # 记录tracker分配事件
+                self._record_tracker_allocation("sn_ro")
+                # 记录retry释放（读请求成功处理，发送positive前记录）
+                self._record_tracker_release("read_retry")
 
                 # 发送positive响应触发RN retry
                 positive_rsp = self._create_response_flit(new_req, "positive")
@@ -688,6 +708,11 @@ class D2D_SN_Interface(IPInterface):
                 self.sn_tracker.append(new_req)
                 self.sn_tracker_count["share"]["count"] -= 1
                 self.sn_wdb_count["count"] -= new_req.burst_length
+                # 记录tracker分配事件
+                self._record_tracker_allocation("sn_share")
+                self._record_tracker_allocation("sn_wdb")
+                # 记录retry释放（写请求成功处理，发送positive前记录）
+                self._record_tracker_release("write_retry")
 
                 # 发送positive响应触发GDMA retry
                 positive_rsp = self._create_response_flit(new_req, "positive")
@@ -858,6 +883,9 @@ class D2D_SN_Interface(IPInterface):
             self.sn_tracker.remove(write_req)
             self.sn_tracker_count["share"]["count"] += 1
             self.sn_wdb_count["count"] += write_req.burst_length
+            # 记录tracker释放事件
+            self._record_tracker_release("sn_share")
+            self._record_tracker_release("sn_wdb")
 
             # 清理写数据缓冲
             if packet_id in self.sn_wdb:

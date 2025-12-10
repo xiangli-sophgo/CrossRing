@@ -188,6 +188,9 @@ class D2D_RN_Interface(IPInterface):
             # 消耗资源
             self.rn_tracker_count["write"]["count"] -= 1
             self.rn_wdb_count["count"] -= flit.burst_length
+            # 记录tracker分配事件
+            self._record_tracker_allocation("rn_write")
+            self._record_tracker_allocation("rn_wdb")
 
             # 创建flit副本保存写请求（因为AXI flit会被回收）
             from src.utils.flit import create_d2d_flit_copy
@@ -203,6 +206,10 @@ class D2D_RN_Interface(IPInterface):
             self.rn_tracker_pointer["write"] += 1
         else:
             # 资源不足：这违反了AXI协议！应该在D2D_SN预留资源
+            if not has_tracker:
+                self._record_tracker_block("rn_write")
+            if not has_databuffer:
+                self._record_tracker_block("rn_wdb")
             logging.warning(f"[D2D_RN] packet_id={packet_id} 资源不足被丢弃! tracker={self.rn_tracker_count['write']['count']}, wdb={self.rn_wdb_count['count']}")
 
     def handle_cross_die_write_data(self, flit: Flit):
@@ -346,8 +353,11 @@ class D2D_RN_Interface(IPInterface):
         # 记录D2D_RN的tracker信息（用于后续数据返回时释放）
         if req_type == "read":
             self.rn_tracker["read"].append(new_flit)
+            self.rn_tracker_count["read"]["count"] -= 1
             # 设置burst_length确保释放时正确计算databuffer
             new_flit.burst_length = burst_length
+            # 记录tracker分配事件
+            self._record_tracker_allocation("rn_read")
 
         # 根据请求类型选择网络，使用enqueue方法而不是直接append
         if hasattr(new_flit, "req_type"):
@@ -545,6 +555,9 @@ class D2D_RN_Interface(IPInterface):
         self.cross_die_write_data_cache.pop(packet_id, None)
         self.rn_tracker_count["write"]["count"] += 1
         self.rn_wdb_count["count"] += tracker_req.burst_length
+        # 记录tracker释放事件
+        self._record_tracker_release("rn_write")
+        self._record_tracker_release("rn_wdb")
 
         # 从tracker list中移除并更新pointer（通过packet_id查找，因为tracker可能已被替换为local_write_req）
         tracker_list = self.rn_tracker["write"]
@@ -741,6 +754,9 @@ class D2D_RN_Interface(IPInterface):
             self.rn_tracker_count["read"]["count"] += 1
             self.rn_tracker_pointer["read"] -= 1
             self.rn_rdb_count["count"] += tracker_req.burst_length
+            # 记录tracker释放事件
+            self._record_tracker_release("rn_read")
+            self._record_tracker_release("rn_rdb")
 
         self.cross_die_data_responses_sent = getattr(self, "cross_die_data_responses_sent", 0) + len(cross_die_data_flits)
 
