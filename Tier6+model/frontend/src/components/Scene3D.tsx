@@ -1,52 +1,128 @@
-import React, { useMemo, useRef, useState, useCallback } from 'react'
+import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react'
 import { Canvas, useFrame, ThreeEvent, useThree } from '@react-three/fiber'
-import { OrbitControls, PerspectiveCamera, Text, Line, Html } from '@react-three/drei'
+import { OrbitControls, PerspectiveCamera, Text, Html } from '@react-three/drei'
 import { Breadcrumb, Button, Tooltip } from 'antd'
-import {
-  ArrowLeftOutlined,
-  CloudServerOutlined,
-  ClusterOutlined,
-  DatabaseOutlined,
-  CreditCardOutlined,
-  ReloadOutlined,
-} from '@ant-design/icons'
-import Icon from '@ant-design/icons'
-
-// 自定义芯片图标 - UXWing专业图标
-const ChipSvg = () => (
-  <svg viewBox="0 0 122.88 122.88" width="1em" height="1em" fill="currentColor">
-    <path d="M28.7,122.88h11.03v-13.4H28.7V122.88L28.7,122.88z M22.67,19.51h74.76c2.56,0,4.66,2.09,4.66,4.66v75.01 c0,2.56-2.1,4.66-4.66,4.66l-74.76,0c-2.56,0-4.66-2.1-4.66-4.66V24.16C18.01,21.6,20.1,19.51,22.67,19.51L22.67,19.51L22.67,19.51 z M42.35,41.29h35.38c1.55,0,2.81,1.27,2.81,2.81v35.12c0,1.55-1.27,2.81-2.81,2.81H42.35c-1.55,0-2.81-1.27-2.81-2.81V44.1 C39.54,42.56,40.8,41.29,42.35,41.29L42.35,41.29z M122.88,65.62v9.16h-13.4v-9.16H122.88L122.88,65.62z M122.88,48.1v9.16l-13.4,0 V48.1L122.88,48.1L122.88,48.1L122.88,48.1z M122.88,83.15v11.03h-13.4V83.15H122.88L122.88,83.15z M122.88,28.7v11.03h-13.4V28.7 H122.88L122.88,28.7z M0,65.62v9.16h13.4v-9.16H0L0,65.62z M0,48.1v9.16l13.4,0V48.1L0,48.1L0,48.1z M0,83.15v11.03h13.4V83.15H0 L0,83.15z M0,28.7v11.03h13.4V28.7H0L0,28.7z M65.62,0h9.16v13.4h-9.16V0L65.62,0L65.62,0z M48.1,0h9.16v13.4H48.1V0L48.1,0L48.1,0 z M83.15,0h11.03v13.4H83.15V0L83.15,0L83.15,0z M28.7,0h11.03v13.4H28.7V0L28.7,0L28.7,0z M65.62,122.88h9.16v-13.4h-9.16V122.88 L65.62,122.88z M48.1,122.88h9.16v-13.4H48.1V122.88L48.1,122.88z M83.15,122.88h11.03v-13.4H83.15V122.88L83.15,122.88z"/>
-  </svg>
-)
-const ChipIcon = () => <Icon component={ChipSvg} />
-
-// 自定义PCB板卡图标 - UXWing主板图标
-const BoardSvg = () => (
-  <svg viewBox="0 0 122.88 117.61" width="1em" height="1em" fill="currentColor">
-    <path d="M71.39,103.48h3.64v-6.8h-3.64V103.48L71.39,103.48L71.39,103.48z M6.03,0h110.81c1.65,0,3.16,0.68,4.25,1.77 c1.1,1.1,1.78,2.61,1.78,4.26v105.54c0,1.66-0.68,3.17-1.77,4.27c-1.09,1.09-2.6,1.77-4.26,1.77H6.03c-1.66,0-3.17-0.68-4.26-1.77 S0,113.23,0,111.57V6.03c0-1.65,0.68-3.16,1.78-4.26C2.88,0.68,4.38,0,6.03,0L6.03,0z M115.35,7.53H7.53v46.73h10.68v-4.04 c-0.1-0.04-0.19-0.1-0.27-0.15c-0.16-0.1-0.31-0.22-0.44-0.34l-0.01-0.02c-0.23-0.22-0.41-0.5-0.54-0.8 c-0.12-0.3-0.19-0.63-0.19-0.97c0-0.35,0.07-0.67,0.19-0.97l0,0c0.13-0.31,0.32-0.59,0.55-0.84c0.23-0.23,0.51-0.42,0.82-0.55 c0.31-0.12,0.63-0.19,0.97-0.19c0.35,0,0.67,0.07,0.97,0.19c0.31,0.13,0.59,0.32,0.83,0.55c0.23,0.24,0.42,0.51,0.55,0.82 l0.01,0.02c0.12,0.29,0.19,0.62,0.19,0.95c0,0.34-0.07,0.67-0.19,0.97c-0.13,0.31-0.32,0.59-0.55,0.82l-0.02,0.02 c-0.12,0.11-0.24,0.22-0.38,0.31c-0.08,0.05-0.15,0.1-0.23,0.13v5.21c0,0.31-0.13,0.6-0.33,0.8c-0.21,0.2-0.49,0.33-0.8,0.33H7.53 v3.4h16.61l0,0c0.04-0.09,0.09-0.17,0.14-0.25l0.01-0.01c0.1-0.15,0.21-0.28,0.33-0.4c0.24-0.23,0.51-0.42,0.83-0.55l0.02-0.01 c0.3-0.12,0.62-0.19,0.95-0.19c0.34,0,0.67,0.07,0.97,0.19c0.31,0.13,0.6,0.32,0.82,0.55c0.23,0.23,0.42,0.51,0.55,0.82 c0.12,0.31,0.19,0.63,0.19,0.97c0,0.35-0.07,0.67-0.19,0.97c-0.13,0.31-0.32,0.59-0.55,0.82c-0.24,0.23-0.51,0.42-0.82,0.55 l-0.02,0.01c-0.3,0.12-0.62,0.19-0.95,0.19c-0.35,0-0.67-0.07-0.97-0.19c-0.31-0.13-0.59-0.32-0.83-0.55 c-0.12-0.12-0.24-0.26-0.33-0.42c-0.05-0.08-0.1-0.17-0.14-0.25H7.53v3.92h18.76l0,0c0.31,0,0.59,0.13,0.8,0.33 c0.21,0.2,0.33,0.48,0.33,0.8v8.39c0.1,0.04,0.21,0.1,0.31,0.16c0.17,0.11,0.34,0.23,0.48,0.38c0.23,0.24,0.42,0.51,0.55,0.82 l0.01,0.02c0.12,0.3,0.18,0.62,0.18,0.95c0,0.34-0.07,0.67-0.19,0.97c-0.13,0.31-0.32,0.59-0.55,0.84 c-0.23,0.23-0.51,0.42-0.82,0.55c-0.31,0.12-0.63,0.19-0.97,0.19c-0.34,0-0.67-0.07-0.97-0.19c-0.31-0.13-0.59-0.32-0.82-0.55 c-0.23-0.23-0.42-0.51-0.55-0.82c-0.12-0.3-0.19-0.63-0.19-0.97c0-0.35,0.07-0.67,0.19-0.97c0.13-0.31,0.32-0.6,0.55-0.83 c0.11-0.11,0.22-0.2,0.35-0.29c0.06-0.04,0.13-0.08,0.19-0.12v-7.38H7.53v3.2h9.89l0,0c0.31,0,0.59,0.13,0.79,0.33 c0.21,0.21,0.33,0.49,0.33,0.8v4.49c0.08,0.04,0.16,0.08,0.24,0.13c0.15,0.1,0.29,0.21,0.41,0.33l0.02,0.02 c0.22,0.23,0.4,0.51,0.53,0.81c0.12,0.3,0.19,0.63,0.19,0.97c0,0.35-0.07,0.67-0.19,0.97l-0.01,0.02 c-0.13,0.31-0.31,0.58-0.54,0.81l-0.02,0.01c-0.23,0.23-0.51,0.41-0.81,0.54C18.07,81.93,17.74,82,17.4,82 c-0.34,0-0.67-0.07-0.97-0.19c-0.31-0.13-0.6-0.32-0.82-0.55l-0.02-0.02c-0.22-0.23-0.4-0.51-0.53-0.81 c-0.12-0.31-0.19-0.63-0.19-0.97c0-0.34,0.07-0.66,0.19-0.96c0.13-0.31,0.32-0.6,0.55-0.82l0,0c0.13-0.14,0.27-0.25,0.43-0.35 c0.08-0.06,0.17-0.1,0.26-0.15v-3.34H7.53v36.24h107.82V7.53L115.35,7.53z"/>
-  </svg>
-)
-const BoardIcon = () => <Icon component={BoardSvg} />
+import { ReloadOutlined } from '@ant-design/icons'
 import {
   HierarchicalTopology,
   PodConfig,
   RackConfig,
   BoardConfig,
   ChipConfig,
-  ConnectionConfig,
   ViewState,
   BreadcrumbItem,
-  ViewLevel,
-  ChipType,
   RACK_DIMENSIONS,
   BOARD_DIMENSIONS,
   CHIP_DIMENSIONS,
-  CHIP_TYPE_COLORS,
   CHIP_TYPE_NAMES,
   CAMERA_PRESETS,
-  CAMERA_DISTANCE,
 } from '../types'
 import * as THREE from 'three'
+
+// ============================================
+// 动画工具函数
+// ============================================
+
+// 缓动函数：先加速后减速
+function easeInOutCubic(t: number): number {
+  return t < 0.5
+    ? 4 * t * t * t
+    : 1 - Math.pow(-2 * t + 2, 3) / 2
+}
+
+// 线性插值
+function lerp(start: number, end: number, t: number): number {
+  return start + (end - start) * t
+}
+
+// ============================================
+// 相机动画控制器
+// ============================================
+
+interface CameraAnimationTarget {
+  position: THREE.Vector3
+  lookAt: THREE.Vector3
+}
+
+const CameraController: React.FC<{
+  target: CameraAnimationTarget
+  duration?: number
+  onAnimationComplete?: () => void
+  enabled?: boolean
+}> = ({ target, duration = 1.0, onAnimationComplete, enabled = true }) => {
+  const { camera } = useThree()
+  const controlsRef = useRef<any>(null)
+
+  // 动画状态
+  const isAnimating = useRef(false)
+  const startPosition = useRef(new THREE.Vector3())
+  const startTarget = useRef(new THREE.Vector3())
+  const progress = useRef(0)
+  const lastTarget = useRef<CameraAnimationTarget | null>(null)
+  const pendingCallback = useRef<(() => void) | null>(null)
+
+  // 目标变化时启动动画
+  useEffect(() => {
+    // 检查目标是否真的变化了
+    if (lastTarget.current &&
+        lastTarget.current.position.equals(target.position) &&
+        lastTarget.current.lookAt.equals(target.lookAt)) {
+      return
+    }
+
+    // 记录起始位置
+    startPosition.current.copy(camera.position)
+    if (controlsRef.current) {
+      startTarget.current.copy(controlsRef.current.target)
+    } else {
+      startTarget.current.set(0, 0, 0)
+    }
+
+    progress.current = 0
+    isAnimating.current = true
+    lastTarget.current = {
+      position: target.position.clone(),
+      lookAt: target.lookAt.clone()
+    }
+    pendingCallback.current = onAnimationComplete || null
+  }, [target.position.x, target.position.y, target.position.z,
+      target.lookAt.x, target.lookAt.y, target.lookAt.z, camera, onAnimationComplete])
+
+  // 每帧更新
+  useFrame((_, delta) => {
+    if (!isAnimating.current) return
+
+    progress.current += delta / duration
+    const t = easeInOutCubic(Math.min(progress.current, 1))
+
+    // 插值相机位置
+    camera.position.lerpVectors(startPosition.current, target.position, t)
+
+    // 插值观察目标
+    if (controlsRef.current) {
+      controlsRef.current.target.lerpVectors(startTarget.current, target.lookAt, t)
+      controlsRef.current.update()
+    }
+
+    if (progress.current >= 1) {
+      isAnimating.current = false
+      if (pendingCallback.current) {
+        pendingCallback.current()
+        pendingCallback.current = null
+      }
+    }
+  })
+
+  return (
+    <OrbitControls
+      ref={controlsRef}
+      enabled={enabled && !isAnimating.current}
+      enablePan={true}
+      enableZoom={true}
+      enableRotate={true}
+    />
+  )
+}
 
 // ============================================
 // Props 接口定义
@@ -103,8 +179,8 @@ const ChipModel: React.FC<{
   const z = (row - (rows - 1) / 2) * spacing
   const y = baseY + dimensions[1] / 2
 
-  // 芯片类型对应的标签文字
-  const chipLabel = chip.type === 'npu' ? 'NPU' : 'CPU'
+  // 芯片标签文字 - 优先使用配置的label，否则使用类型名称
+  const chipLabel = chip.label || (chip.type === 'npu' ? 'NPU' : 'CPU')
   // 深色金属外壳颜色
   const shellColor = '#1a1a1a'
   const shellColorHover = '#2a2a2a'
@@ -233,30 +309,33 @@ const BOARD_U_COLORS: Record<number, { main: string; mainHover: string; front: s
 const BoardModel: React.FC<{
   board: BoardConfig
   showChips?: boolean
-  compact?: boolean  // 紧凑模式（在Rack外部视图使用）
   interactive?: boolean  // 是否可以交互（高亮和点击）
+  opacity?: number  // 透明度
   onDoubleClick?: () => void
-}> = ({ board, showChips = false, compact = false, interactive = true, onDoubleClick }) => {
-  const [hovered, setHovered] = useState(false)
-  const canHover = interactive && !compact  // 只有可交互且非紧凑模式才能高亮
+}> = ({ board, showChips = false, interactive = true, opacity = 1.0, onDoubleClick }) => {
+  const groupRef = useRef<THREE.Group>(null)
+  const hoveredRef = useRef(false)
+  const [, forceRender] = useState(0)
+  const canHover = interactive  // 可交互时才能高亮
 
   // 根据U高度获取颜色方案
   const uHeight = board.u_height
   const colorScheme = BOARD_U_COLORS[uHeight] || BOARD_U_COLORS[2]
 
-  // 根据U高度计算实际3D尺寸
+  // 根据U高度计算实际3D尺寸 - 始终使用完整尺寸
   const { uHeight: uSize } = RACK_DIMENSIONS
-  const width = compact ? BOARD_DIMENSIONS.width * 0.85 : BOARD_DIMENSIONS.width
-  const height = uHeight * uSize * (compact ? 0.85 : 0.9)  // 留一点间隙
-  const depth = compact ? BOARD_DIMENSIONS.depth * 0.8 : BOARD_DIMENSIONS.depth
+  const width = BOARD_DIMENSIONS.width
+  const height = uHeight * uSize * 0.9  // 留一点间隙
+  const depth = BOARD_DIMENSIONS.depth
 
-  // 颜色 - 只有canHover为true时才应用高亮效果
-  const isHighlighted = canHover && hovered
-  const mainColor = isHighlighted ? colorScheme.mainHover : colorScheme.main
-  const frontColor = colorScheme.front
+  // 高亮效果 - 使用ref实现即时响应
+  const isHighlighted = canHover && hoveredRef.current
 
-  // 边框厚度
-  const wallThickness = 0.01
+  // 高亮时整体提亮，使用accent颜色作为发光色，与板卡风格统一
+  const highlightColor = isHighlighted ? colorScheme.accent : colorScheme.main
+  const frontHighlightColor = isHighlighted ? colorScheme.accent : colorScheme.front
+  const glowIntensity = isHighlighted ? 0.3 : 0
+  const scale = isHighlighted ? 1.01 : 1.0
 
   return (
     <group>
@@ -363,216 +442,98 @@ const BoardModel: React.FC<{
         // 不显示芯片时：封闭的服务器盒子
         <>
           {/* 服务器主体 - 金属外壳 */}
-          <mesh
-            onDoubleClick={canHover ? onDoubleClick : undefined}
-            onPointerOver={canHover ? (e) => {
-              e.stopPropagation()
-              setHovered(true)
-            } : undefined}
-            onPointerOut={canHover ? (e) => {
-              e.stopPropagation()
-              setHovered(false)
-            } : undefined}
-            castShadow
-            receiveShadow
-          >
-            <boxGeometry args={[width, height, depth]} />
-            <meshStandardMaterial
-              color={mainColor}
-              emissive={isHighlighted ? '#38b2ac' : '#000000'}
-              emissiveIntensity={isHighlighted ? 0.4 : 0}
-              metalness={compact ? 0.5 : 0.7}
-              roughness={compact ? 0.4 : 0.3}
-            />
-          </mesh>
+          <group ref={groupRef} scale={scale}>
+            <mesh
+              onDoubleClick={canHover ? onDoubleClick : undefined}
+              onPointerOver={canHover ? (e) => {
+                e.stopPropagation()
+                hoveredRef.current = true
+                forceRender(n => n + 1)
+              } : undefined}
+              onPointerOut={canHover ? (e) => {
+                e.stopPropagation()
+                hoveredRef.current = false
+                forceRender(n => n + 1)
+              } : undefined}
+              castShadow={opacity > 0.5}
+              receiveShadow={opacity > 0.5}
+            >
+              <boxGeometry args={[width, height, depth]} />
+              <meshStandardMaterial
+                color={highlightColor}
+                emissive={colorScheme.accent}
+                emissiveIntensity={glowIntensity}
+                metalness={0.7}
+                roughness={0.3}
+                transparent={opacity < 1}
+                opacity={opacity}
+              />
+            </mesh>
 
-          {/* 前面板 - 带有指示灯效果 */}
-          <mesh position={[0, 0, depth / 2 + 0.001]}>
-            <boxGeometry args={[width - 0.02, height - 0.005, 0.002]} />
-            <meshStandardMaterial
-              color={frontColor}
-              metalness={0.5}
-              roughness={0.5}
-            />
-          </mesh>
+            {/* 前面板 - 带有指示灯效果 */}
+            <mesh position={[0, 0, depth / 2 + 0.001]}>
+              <boxGeometry args={[width - 0.02, height - 0.005, 0.002]} />
+              <meshStandardMaterial
+                color={frontHighlightColor}
+                emissive={colorScheme.accent}
+                emissiveIntensity={glowIntensity}
+                metalness={0.5}
+                roughness={0.5}
+                transparent={opacity < 1}
+                opacity={opacity}
+              />
+            </mesh>
 
-          {/* U高度标识条 - 左侧彩色条纹 */}
-          <mesh position={[-width / 2 + 0.008, 0, depth / 2 + 0.002]}>
-            <boxGeometry args={[0.012, height - 0.01, 0.001]} />
-            <meshBasicMaterial color={colorScheme.accent} />
-          </mesh>
+            {/* U高度标识条 - 左侧彩色条纹，高亮时更亮 */}
+            <mesh position={[-width / 2 + 0.008, 0, depth / 2 + 0.002]}>
+              <boxGeometry args={[isHighlighted ? 0.016 : 0.012, height - 0.01, 0.001]} />
+              <meshBasicMaterial
+                color={isHighlighted ? '#ffffff' : colorScheme.accent}
+                transparent={opacity < 1}
+                opacity={opacity}
+              />
+            </mesh>
 
-          {/* LED指示灯 */}
-          <mesh position={[-width / 2 + 0.03, height / 2 - 0.015, depth / 2 + 0.003]}>
-            <circleGeometry args={[compact ? 0.004 : 0.006, 16]} />
-            <meshBasicMaterial color="#52c41a" />
-          </mesh>
-          <mesh position={[-width / 2 + 0.045, height / 2 - 0.015, depth / 2 + 0.003]}>
-            <circleGeometry args={[compact ? 0.004 : 0.006, 16]} />
-            <meshBasicMaterial color={colorScheme.accent} />
-          </mesh>
+            {/* LED指示灯 - 高亮时更亮 */}
+            <mesh position={[-width / 2 + 0.03, height / 2 - 0.015, depth / 2 + 0.003]}>
+              <circleGeometry args={[isHighlighted ? 0.008 : 0.006, 16]} />
+              <meshBasicMaterial
+                color={isHighlighted ? '#7fff7f' : '#52c41a'}
+                transparent={opacity < 1}
+                opacity={opacity}
+              />
+            </mesh>
+            <mesh position={[-width / 2 + 0.045, height / 2 - 0.015, depth / 2 + 0.003]}>
+              <circleGeometry args={[isHighlighted ? 0.008 : 0.006, 16]} />
+              <meshBasicMaterial
+                color={isHighlighted ? '#ffffff' : colorScheme.accent}
+                transparent={opacity < 1}
+                opacity={opacity}
+              />
+            </mesh>
 
-          {/* 板卡标签 - 调整位置确保不被遮挡 */}
-          <Text
-            position={[0, 0, depth / 2 + 0.015]}
-            fontSize={compact ? 0.02 : 0.035}
-            color="#ffffff"
-            anchorX="center"
-            anchorY="middle"
-            outlineWidth={0.003}
-            outlineColor="#000000"
-            renderOrder={1}
-            material-depthTest={false}
-          >
-            {board.label}
-          </Text>
+            {/* 板卡标签 - 调整位置确保不被遮挡 */}
+            <Text
+              position={[0, 0, depth / 2 + 0.015]}
+              fontSize={0.035}
+              color="#ffffff"
+              anchorX="center"
+              anchorY="middle"
+              outlineWidth={0.003}
+              outlineColor="#000000"
+              renderOrder={1}
+              material-depthTest={false}
+              fillOpacity={opacity}
+            >
+              {board.label}
+            </Text>
+          </group>
         </>
       )}
     </group>
   )
 }
 
-// Rack模型 - 拟物化42U机柜
-const RackModel: React.FC<{
-  rack: RackConfig
-  showBoards?: boolean
-  highlighted?: boolean  // 外部控制高亮（用于Pod高亮时联动）
-  interactive?: boolean  // 是否允许Rack本身高亮
-  simplified?: boolean   // 简化模式（远距离时减少细节提升性能）
-  onClick?: () => void
-  onDoubleClick?: () => void
-  onBoardClick?: (boardId: string) => void
-  onHoverChange?: (hovered: boolean) => void  // 悬停状态变化回调
-}> = ({ rack, showBoards = false, highlighted = false, interactive = true, simplified = false, onClick, onDoubleClick, onBoardClick, onHoverChange }) => {
-  const [hovered, setHovered] = useState(false)
-
-  const { width, depth, uHeight, totalU } = RACK_DIMENSIONS
-  const height = totalU * uHeight
-
-  // 机柜框架粗细和颜色 - 只有interactive时才响应悬停
-  const isHighlighted = (interactive && hovered) || highlighted
-  const frameThickness = 0.02
-  const frameColor = isHighlighted ? '#38b2ac' : '#333333'
-  const topBottomColor = isHighlighted ? '#38b2ac' : '#1a1a1a'
-
-  // 计算每个Board在机柜中的位置
-  const getBoardPosition = (board: BoardConfig): [number, number, number] => {
-    const y = (board.u_position - 1) * uHeight + (board.u_height * uHeight) / 2 - height / 2
-    return [0, y, 0]
-  }
-
-  const handlePointerOver = () => {
-    setHovered(true)
-    onHoverChange?.(true)
-  }
-
-  const handlePointerOut = () => {
-    setHovered(false)
-    onHoverChange?.(false)
-  }
-
-  return (
-    <group
-      onClick={interactive ? onClick : undefined}
-      onDoubleClick={onDoubleClick}
-      onPointerOver={handlePointerOver}
-      onPointerOut={handlePointerOut}
-    >
-      {/* 机柜底座 */}
-      <mesh position={[0, -height / 2 - 0.02, 0]} receiveShadow>
-        <boxGeometry args={[width + 0.04, 0.04, depth + 0.04]} />
-        <meshStandardMaterial color={topBottomColor} metalness={0.3} roughness={0.7} />
-      </mesh>
-
-      {/* 机柜顶部 */}
-      <mesh position={[0, height / 2 + 0.02, 0]} castShadow>
-        <boxGeometry args={[width + 0.04, 0.04, depth + 0.04]} />
-        <meshStandardMaterial color={topBottomColor} metalness={0.3} roughness={0.7} />
-      </mesh>
-
-      {/* 四个垂直立柱 */}
-      {[
-        [-width / 2, 0, -depth / 2],
-        [width / 2, 0, -depth / 2],
-        [-width / 2, 0, depth / 2],
-        [width / 2, 0, depth / 2],
-      ].map((pos, i) => (
-        <mesh key={`pillar-${i}`} position={pos as [number, number, number]} castShadow>
-          <boxGeometry args={[frameThickness, height, frameThickness]} />
-          <meshStandardMaterial color={frameColor} metalness={0.3} roughness={0.7} />
-        </mesh>
-      ))}
-
-      {/* U位刻度线 (每5U一条) - 仅在非简化模式下渲染 */}
-      {!simplified && Array.from({ length: Math.floor(totalU / 5) + 1 }, (_, i) => i * 5).map(u => {
-        const y = u * uHeight - height / 2
-        return (
-          <group key={`u-mark-${u}`}>
-            <mesh position={[-width / 2 - 0.01, y, -depth / 2]}>
-              <boxGeometry args={[0.01, 0.002, 0.02]} />
-              <meshBasicMaterial color="#888888" />
-            </mesh>
-            <Text
-              position={[-width / 2 - 0.03, y, -depth / 2]}
-              fontSize={0.02}
-              color="#888888"
-              anchorX="right"
-              anchorY="middle"
-            >
-              {u}U
-            </Text>
-          </group>
-        )
-      })}
-
-      {/* 后面板 */}
-      <mesh position={[0, 0, -depth / 2 + 0.005]} receiveShadow>
-        <boxGeometry args={[width - frameThickness * 2, height, 0.01]} />
-        <meshStandardMaterial
-          color="#2a2a2a"
-          metalness={0.3}
-          roughness={0.7}
-        />
-      </mesh>
-
-      {/* 前面板 - 半透明玻璃效果，根据是否显示Board详情调整透明度 */}
-      <mesh position={[0, 0, depth / 2 - 0.005]}>
-        <boxGeometry args={[width - frameThickness * 2, height, 0.008]} />
-        <meshStandardMaterial
-          color="#4a4a4a"
-          transparent
-          opacity={showBoards ? 0.05 : 0.1}
-          metalness={0.9}
-          roughness={0.1}
-        />
-      </mesh>
-
-      {/* 机柜标签 - 文字 */}
-      <Text
-        position={[0, height / 2 + 0.12, 0.01]}
-        fontSize={0.2}
-        color="#ffffff"
-        anchorX="center"
-        anchorY="middle"
-        fontWeight="bold"
-      >
-        {rack.label}
-      </Text>
-
-      {/* 始终显示内部Boards */}
-      {rack.boards.map(board => (
-        <group key={board.id} position={getBoardPosition(board)}>
-          <BoardModel
-            board={board}
-            compact={!showBoards}
-            interactive={showBoards}
-            onDoubleClick={() => onBoardClick?.(board.id)}
-          />
-        </group>
-      ))}
-    </group>
-  )
-}
 
 // Pod标签组件 - 支持悬停高亮
 const PodLabel: React.FC<{
@@ -606,7 +567,7 @@ const PodLabel: React.FC<{
       <mesh>
         <planeGeometry args={[1.2, 0.4]} />
         <meshBasicMaterial
-          color={hovered ? '#38b2ac' : '#1890ff'}
+          color={hovered ? '#7a9fd4' : '#1890ff'}
           transparent
           opacity={hovered ? 1 : 0.9}
         />
@@ -626,74 +587,104 @@ const PodLabel: React.FC<{
   )
 }
 
+// ConnectionLine 组件预留，暂未使用
+
+
 // ============================================
-// 连接线组件
+// 统一场景组件 - 一次性渲染所有层级内容
 // ============================================
 
-const ConnectionLine: React.FC<{
-  connection: ConnectionConfig
-  getNodePosition: (nodeId: string) => THREE.Vector3 | null
-  elevate?: number  // 连线提升高度
-}> = ({ connection, getNodePosition, elevate = 0 }) => {
-  const sourcePos = getNodePosition(connection.source)
-  const targetPos = getNodePosition(connection.target)
-
-  // 必须有有效的位置
-  if (!sourcePos || !targetPos) return null
-  if (isNaN(sourcePos.x) || isNaN(targetPos.x)) return null
-
-  const isInter = connection.type === 'inter'
-  const color = isInter ? '#faad14' : '#52c41a'
-
-  // 提升连线到顶部
-  const elevatedSource = new THREE.Vector3(sourcePos.x, sourcePos.y + elevate, sourcePos.z)
-  const elevatedTarget = new THREE.Vector3(targetPos.x, targetPos.y + elevate, targetPos.z)
-
-  return (
-    <Line
-      points={[elevatedSource, elevatedTarget]}
-      color={color}
-      lineWidth={isInter ? 3 : 2}
-      dashed={isInter}
-      dashSize={0.1}
-      gapSize={0.05}
-    />
-  )
+interface NodePositions {
+  pods: Map<string, THREE.Vector3>      // Pod中心位置
+  racks: Map<string, THREE.Vector3>     // Rack位置
+  boards: Map<string, THREE.Vector3>    // Board世界坐标
 }
 
-// ============================================
-// 视图容器组件
-// ============================================
+// 透明度动画控制器组件 - 使用useFrame实现平滑过渡
+const OpacityAnimator: React.FC<{
+  targetOpacities: Map<string, number>
+  currentOpacities: React.MutableRefObject<Map<string, number>>
+  fadeInDuration?: number   // 淡入时长
+  fadeOutDuration?: number  // 淡出时长
+}> = ({ targetOpacities, currentOpacities, fadeInDuration = 0.8, fadeOutDuration = 0.3 }) => {
+  useFrame((_, delta) => {
+    targetOpacities.forEach((target, id) => {
+      const current = currentOpacities.current.get(id) ?? target
+      if (Math.abs(current - target) > 0.001) {
+        // 淡出（目标为0）时速度快，淡入时速度慢
+        const duration = target < current ? fadeOutDuration : fadeInDuration
+        const speed = 1 / duration
+        const newValue = lerp(current, target, Math.min(delta * speed * 2.5, 1))
+        currentOpacities.current.set(id, newValue)
+      } else {
+        currentOpacities.current.set(id, target)
+      }
+    })
+  })
+  return null
+}
 
-// Pod视图 - 显示所有Rack
-const PodView: React.FC<{
-  pods: PodConfig[]
-  onPodClick: (podId: string) => void
-  onRackDoubleClick: (podId: string, rackId: string) => void
-  isDatacenterView?: boolean  // true: 整个Pod高亮; false: 单个Rack高亮
-}> = ({ pods, onPodClick, onRackDoubleClick, isDatacenterView = true }) => {
+// 触发React重渲染的组件 - 当透明度变化时触发更新
+const OpacityUpdateTrigger: React.FC<{
+  targetOpacities: Map<string, number>
+  currentOpacities: React.MutableRefObject<Map<string, number>>
+  onUpdate: () => void
+}> = ({ targetOpacities, currentOpacities, onUpdate }) => {
+  const lastUpdateRef = useRef(0)
+
+  useFrame(() => {
+    // 检查是否有任何透明度还在动画中
+    let hasAnimation = false
+    targetOpacities.forEach((target, id) => {
+      const current = currentOpacities.current.get(id) ?? target
+      if (Math.abs(current - target) > 0.001) {
+        hasAnimation = true
+      }
+    })
+
+    // 如果有动画，每隔一定时间触发一次重渲染
+    if (hasAnimation) {
+      const now = Date.now()
+      if (now - lastUpdateRef.current > 16) { // 约60fps
+        lastUpdateRef.current = now
+        onUpdate()
+      }
+    }
+  })
+  return null
+}
+
+const UnifiedScene: React.FC<{
+  topology: HierarchicalTopology
+  focusPath: string[]  // 当前聚焦路径 ['pod_0', 'rack_1', 'board_2']
+  onNavigateToPod: (podId: string) => void
+  onNavigateToRack: (podId: string, rackId: string) => void
+  onNavigateToBoard: (boardId: string) => void
+}> = ({ topology, focusPath, onNavigateToPod, onNavigateToRack, onNavigateToBoard }) => {
   const [hoveredPodId, setHoveredPodId] = useState<string | null>(null)
   const [hoveredRackId, setHoveredRackId] = useState<string | null>(null)
+
+  // 透明度动画状态 - 存储当前渲染的透明度值
+  const currentOpacities = useRef<Map<string, number>>(new Map())
+  // 用于触发重新渲染的状态
+  const [, forceUpdate] = useState(0)
+
   const rackSpacingX = 1.5
   const rackSpacingZ = 2
+  const { uHeight, totalU, width: rackWidth, depth: rackDepth } = RACK_DIMENSIONS
+  const rackHeight = totalU * uHeight
 
-  // 计算Pod的尺寸和间距（根据Rack数量动态调整）
+  // 计算Pod布局参数
   const { podSpacingX, podSpacingZ, podCols } = useMemo(() => {
-    // 获取第一个Pod的Rack布局来估算Pod尺寸
-    const firstPod = pods[0]
+    const firstPod = topology.pods[0]
     if (!firstPod) return { podSpacingX: 6, podSpacingZ: 4, podCols: 2 }
 
-    // 计算Pod内Rack的列数和行数
     const rackCols = firstPod.grid_size[1]
     const rackRows = firstPod.grid_size[0]
-
-    // Pod宽度 = Rack列数 * Rack间距X + 额外间隙
     const podWidth = rackCols * rackSpacingX + 2
-    // Pod深度 = Rack行数 * Rack间距Z + 额外间隙（缩小前后距离）
     const podDepth = rackRows * rackSpacingZ + 1
 
-    // 根据Pod数量选择列数
-    const totalPods = pods.length
+    const totalPods = topology.pods.length
     let cols: number
     if (totalPods <= 2) cols = totalPods
     else if (totalPods <= 4) cols = 2
@@ -702,24 +693,26 @@ const PodView: React.FC<{
     else cols = 4
 
     return { podSpacingX: podWidth, podSpacingZ: podDepth, podCols: cols }
-  }, [pods])
+  }, [topology.pods])
 
-  // 计算Pod的网格布局
-  const getPodGridPosition = (podIndex: number) => {
-    const row = Math.floor(podIndex / podCols)
-    const col = podIndex % podCols
-    return { row, col }
-  }
+  // 计算所有节点的世界坐标
+  const nodePositions = useMemo((): NodePositions => {
+    const pods = new Map<string, THREE.Vector3>()
+    const racks = new Map<string, THREE.Vector3>()
+    const boards = new Map<string, THREE.Vector3>()
 
-  // 计算Rack位置（居中）
-  const rackPositions = useMemo(() => {
-    const positions = new Map<string, THREE.Vector3>()
+    // 计算Pod网格位置
+    const getPodGridPosition = (podIndex: number) => {
+      const row = Math.floor(podIndex / podCols)
+      const col = podIndex % podCols
+      return { row, col }
+    }
 
-    // 首先计算所有Rack的原始位置，找出边界
+    // 首先计算所有Rack位置以找出中心
     let minX = Infinity, maxX = -Infinity
     let minZ = Infinity, maxZ = -Infinity
 
-    pods.forEach((pod, podIndex) => {
+    topology.pods.forEach((pod, podIndex) => {
       const { row, col } = getPodGridPosition(podIndex)
       const podOffsetX = col * podSpacingX
       const podOffsetZ = row * podSpacingZ
@@ -733,222 +726,123 @@ const PodView: React.FC<{
       })
     })
 
-    // 计算中心偏移
     const centerX = (minX + maxX) / 2
     const centerZ = (minZ + maxZ) / 2
 
-    // 设置居中后的位置
-    pods.forEach((pod, podIndex) => {
+    // 设置所有节点位置
+    topology.pods.forEach((pod, podIndex) => {
       const { row, col } = getPodGridPosition(podIndex)
       const podOffsetX = col * podSpacingX
       const podOffsetZ = row * podSpacingZ
-      pod.racks.forEach(rack => {
-        const x = podOffsetX + rack.position[1] * rackSpacingX - centerX
-        const z = podOffsetZ + rack.position[0] * rackSpacingZ - centerZ
-        positions.set(rack.id, new THREE.Vector3(x, 0, z))
-      })
-    })
 
-    return positions
-  }, [pods])
+      let podSumX = 0, podSumZ = 0, podCount = 0
 
-  // 计算每个Pod的中心位置
-  const podCenters = useMemo(() => {
-    const centers = new Map<string, THREE.Vector3>()
-    pods.forEach((pod, podIndex) => {
-      let sumX = 0, sumZ = 0, count = 0
       pod.racks.forEach(rack => {
-        const pos = rackPositions.get(rack.id)
-        if (pos) {
-          sumX += pos.x
-          sumZ += pos.z
-          count++
-        }
+        const rackX = podOffsetX + rack.position[1] * rackSpacingX - centerX
+        const rackZ = podOffsetZ + rack.position[0] * rackSpacingZ - centerZ
+        racks.set(rack.id, new THREE.Vector3(rackX, 0, rackZ))
+
+        podSumX += rackX
+        podSumZ += rackZ
+        podCount++
+
+        // 计算Board位置
+        rack.boards.forEach(board => {
+          const boardY = (board.u_position - 1) * uHeight + (board.u_height * uHeight) / 2 - rackHeight / 2
+          boards.set(board.id, new THREE.Vector3(rackX, boardY, rackZ))
+        })
       })
-      if (count > 0) {
-        centers.set(pod.id, new THREE.Vector3(sumX / count, 0, sumZ / count))
+
+      // Pod中心
+      if (podCount > 0) {
+        pods.set(pod.id, new THREE.Vector3(podSumX / podCount, 0, podSumZ / podCount))
       }
     })
-    return centers
-  }, [pods, rackPositions])
+
+    return { pods, racks, boards }
+  }, [topology, podSpacingX, podSpacingZ, podCols, uHeight, rackHeight])
+
+
+  // 获取节点目标透明度 - 非聚焦内容完全隐藏
+  const getTargetOpacity = useCallback((nodeId: string, nodeType: 'pod' | 'rack' | 'board'): number => {
+    if (focusPath.length === 0) return 1.0 // 顶层全显示
+
+    if (nodeType === 'rack') {
+      if (focusPath.length === 1) {
+        // 聚焦Pod，只显示该Pod下的Rack，其他Pod的Rack完全隐藏
+        const pod = topology.pods.find(p => p.id === focusPath[0])
+        const isInPod = pod?.racks.some(r => r.id === nodeId)
+        return isInPod ? 1.0 : 0
+      }
+      if (focusPath.length === 2) {
+        // 聚焦Rack，只显示聚焦的Rack
+        return focusPath[1] === nodeId ? 1.0 : 0
+      }
+      if (focusPath.length >= 3) {
+        // 聚焦Board，所有Rack都完全隐藏（只显示Board）
+        return 0
+      }
+    }
+    if (nodeType === 'board') {
+      if (focusPath.length === 1) {
+        // 聚焦Pod，只显示该Pod下的Board，其他Pod的Board隐藏
+        const pod = topology.pods.find(p => p.id === focusPath[0])
+        const isInPod = pod?.racks.some(r => r.boards.some(b => b.id === nodeId))
+        return isInPod ? 1.0 : 0
+      }
+      if (focusPath.length === 2) {
+        // 聚焦Rack，只显示该Rack下的Board
+        const pod = topology.pods.find(p => p.id === focusPath[0])
+        const rack = pod?.racks.find(r => r.id === focusPath[1])
+        const isInRack = rack?.boards.some(b => b.id === nodeId)
+        return isInRack ? 1.0 : 0
+      }
+      if (focusPath.length >= 3) {
+        // 聚焦Board，只显示聚焦的Board
+        return focusPath[2] === nodeId ? 1.0 : 0
+      }
+    }
+    return 1.0
+  }, [focusPath, topology])
+
+  // 计算所有节点的目标透明度
+  const targetOpacities = useMemo(() => {
+    const opacities = new Map<string, number>()
+    topology.pods.forEach(pod => {
+      pod.racks.forEach(rack => {
+        opacities.set(rack.id, getTargetOpacity(rack.id, 'rack'))
+        rack.boards.forEach(board => {
+          opacities.set(board.id, getTargetOpacity(board.id, 'board'))
+        })
+      })
+    })
+    return opacities
+  }, [topology, getTargetOpacity])
+
+  // 获取当前动画透明度（如果没有则使用目标值）
+  const getAnimatedOpacity = useCallback((nodeId: string): number => {
+    return currentOpacities.current.get(nodeId) ?? targetOpacities.get(nodeId) ?? 1.0
+  }, [targetOpacities])
+
+  // 当前聚焦层级
+  const focusLevel = focusPath.length
 
   return (
     <group>
-      {/* 渲染所有Pod中的Rack */}
-      {pods.map(pod => {
-        const podCenter = podCenters.get(pod.id)
-        const isPodHighlighted = hoveredPodId === pod.id
-        return (
-          <group key={pod.id}>
-            {/* Pod标签 - 双击进入 */}
-            {podCenter && (
-              <PodLabel
-                pod={pod}
-                position={[podCenter.x, RACK_DIMENSIONS.totalU * RACK_DIMENSIONS.uHeight / 2 + 0.5, podCenter.z]}
-                onDoubleClick={() => onPodClick(pod.id)}
-                onHoverChange={(hovered) => setHoveredPodId(hovered ? pod.id : null)}
-              />
-            )}
-            {pod.racks.map(rack => {
-              const pos = rackPositions.get(rack.id)
-              if (!pos) return null
-              // 数据中心视图：整个Pod高亮; Pod视图：单个Rack高亮
-              const isRackHighlighted = isDatacenterView
-                ? isPodHighlighted
-                : hoveredRackId === rack.id
-              return (
-                <group key={rack.id} position={[pos.x, pos.y, pos.z]}>
-                  <RackModel
-                    rack={rack}
-                    highlighted={isRackHighlighted}
-                    interactive={!isDatacenterView}
-                    simplified={true}
-                    onDoubleClick={() => onRackDoubleClick(pod.id, rack.id)}
-                    onHoverChange={(hovered) => {
-                      if (isDatacenterView) {
-                        setHoveredPodId(hovered ? pod.id : null)
-                      } else {
-                        setHoveredRackId(hovered ? rack.id : null)
-                      }
-                    }}
-                  />
-                </group>
-              )
-            })}
-          </group>
-        )
-      })}
-
-      {/* 地面 */}
-      <mesh
-        position={[0, -RACK_DIMENSIONS.totalU * RACK_DIMENSIONS.uHeight / 2 - 0.06, 0]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        receiveShadow
-      >
-        <planeGeometry args={[30, 30]} />
-        <meshStandardMaterial color="#e8e8e8" />
-      </mesh>
-      {/* 地面网格线 */}
-      <gridHelper
-        args={[30, 30, '#bbb', '#ddd']}
-        position={[0, -RACK_DIMENSIONS.totalU * RACK_DIMENSIONS.uHeight / 2 - 0.05, 0]}
+      {/* 透明度动画控制器 - 每帧更新透明度并触发重渲染 */}
+      <OpacityAnimator
+        targetOpacities={targetOpacities}
+        currentOpacities={currentOpacities}
+        fadeInDuration={1.2}
+        fadeOutDuration={0.2}
       />
-    </group>
-  )
-}
-
-// Rack视图 - 显示单个Rack内部的Boards
-const RackView: React.FC<{
-  rack: RackConfig
-  onBoardClick: (boardId: string) => void
-}> = ({ rack, onBoardClick }) => {
-  const { uHeight, totalU } = RACK_DIMENSIONS
-  const height = totalU * uHeight
-
-  return (
-    <group>
-      {/* 渲染Rack框架 - 只允许Board高亮，Rack不高亮 */}
-      <RackModel
-        rack={rack}
-        showBoards={true}
-        interactive={false}
-        onBoardClick={onBoardClick}
+      {/* 每帧检查是否需要重渲染 */}
+      <OpacityUpdateTrigger
+        targetOpacities={targetOpacities}
+        currentOpacities={currentOpacities}
+        onUpdate={() => forceUpdate(n => n + 1)}
       />
 
-      {/* 地面 */}
-      <mesh
-        position={[0, -height / 2 - 0.06, 0]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        receiveShadow
-      >
-        <planeGeometry args={[5, 5]} />
-        <meshStandardMaterial color="#e8e8e8" />
-      </mesh>
-      <gridHelper
-        args={[5, 10, '#bbb', '#ddd']}
-        position={[0, -height / 2 - 0.05, 0]}
-      />
-    </group>
-  )
-}
-
-// Board视图 - 显示单个Board上的Chips
-const BoardView: React.FC<{
-  board: BoardConfig
-}> = ({ board }) => {
-  return (
-    <group>
-      {/* Board基板 - 最底层，不需要交互 */}
-      <BoardModel board={board} showChips={true} interactive={false} />
-    </group>
-  )
-}
-
-// ============================================
-// 场景内容组件
-// ============================================
-
-const SceneContent: React.FC<{
-  topology: HierarchicalTopology
-  viewState: ViewState
-  currentPod: PodConfig | null
-  currentRack: RackConfig | null
-  currentBoard: BoardConfig | null
-  onNavigate: (nodeId: string) => void
-  onNavigateToPod: (podId: string) => void
-  onNavigateToRack: (podId: string, rackId: string) => void
-}> = ({ topology, viewState, currentPod, currentRack, currentBoard, onNavigate, onNavigateToPod, onNavigateToRack }) => {
-  // 根据当前视图层级渲染不同内容
-  const renderView = () => {
-    // 顶层视图：显示所有Pods（数据中心视图，整个Pod高亮）
-    // 在顶层，双击Rack只进入对应的Pod（不直接跳到Rack内部）
-    if (viewState.path.length === 0) {
-      return (
-        <PodView
-          pods={topology.pods}
-          onPodClick={onNavigateToPod}
-          onRackDoubleClick={(podId) => onNavigateToPod(podId)}
-          isDatacenterView={true}
-        />
-      )
-    }
-
-    // Pod内部视图：只显示该Pod的Racks（Pod视图，单个Rack高亮）
-    if (viewState.path.length === 1 && currentPod) {
-      return (
-        <PodView
-          pods={[currentPod]}
-          onPodClick={() => {}}
-          onRackDoubleClick={onNavigateToRack}
-          isDatacenterView={false}
-        />
-      )
-    }
-
-    // Rack内部视图：显示Boards (path.length === 2)
-    if (viewState.path.length === 2 && currentRack) {
-      return (
-        <RackView
-          rack={currentRack}
-          onBoardClick={onNavigate}
-        />
-      )
-    }
-
-    // Board视图：显示Chips (path.length >= 3)
-    if (viewState.path.length >= 3 && currentBoard) {
-      return (
-        <BoardView
-          board={currentBoard}
-        />
-      )
-    }
-
-    return null
-  }
-
-  return (
-    <>
       {/* 灯光设置 */}
       <ambientLight intensity={0.4} />
       <directionalLight
@@ -961,11 +855,210 @@ const SceneContent: React.FC<{
       <directionalLight position={[-5, 10, -5]} intensity={0.3} />
       <pointLight position={[0, 5, 0]} intensity={0.5} />
 
-      {/* 渲染当前视图 */}
-      {renderView()}
-    </>
+      {/* 渲染所有Pod */}
+      {topology.pods.map(pod => {
+        const podCenter = nodePositions.pods.get(pod.id)
+        if (!podCenter) return null
+
+        const isPodHighlighted = hoveredPodId === pod.id
+
+        return (
+          <group key={pod.id}>
+            {/* Pod标签 - 只在顶层或聚焦该Pod时显示 */}
+            {(focusLevel === 0 || (focusLevel === 1 && focusPath[0] === pod.id)) && (
+              <PodLabel
+                pod={pod}
+                position={[podCenter.x, rackHeight / 2 + 0.5, podCenter.z]}
+                onDoubleClick={() => onNavigateToPod(pod.id)}
+                onHoverChange={(hovered) => setHoveredPodId(hovered ? pod.id : null)}
+              />
+            )}
+
+            {/* 渲染该Pod下的所有Rack */}
+            {pod.racks.map(rack => {
+              const rackPos = nodePositions.racks.get(rack.id)
+              if (!rackPos) return null
+
+              const rackOpacity = getAnimatedOpacity(rack.id)
+              const isRackHighlighted = focusLevel === 0 ? isPodHighlighted : hoveredRackId === rack.id
+
+              // 是否显示Board详情（聚焦到Rack级别或更深）
+              const showBoardDetails = focusLevel >= 2 && focusPath[1] === rack.id
+
+              // 透明度太低时不渲染（但要给动画留一点余地）
+              if (rackOpacity < 0.01) return null
+
+              return (
+                <group key={rack.id} position={[rackPos.x, rackPos.y, rackPos.z]}>
+                  {/* 机柜框架 */}
+                  <group>
+                    {/* 机柜底座 */}
+                    <mesh position={[0, -rackHeight / 2 - 0.02, 0]} receiveShadow>
+                      <boxGeometry args={[rackWidth + 0.04, 0.04, rackDepth + 0.04]} />
+                      <meshStandardMaterial
+                        color={isRackHighlighted ? '#7a9fd4' : '#1a1a1a'}
+                        transparent
+                        opacity={rackOpacity}
+                        metalness={0.3}
+                        roughness={0.7}
+                      />
+                    </mesh>
+
+                    {/* 机柜顶部 */}
+                    <mesh position={[0, rackHeight / 2 + 0.02, 0]} castShadow={rackOpacity > 0.5}>
+                      <boxGeometry args={[rackWidth + 0.04, 0.04, rackDepth + 0.04]} />
+                      <meshStandardMaterial
+                        color={isRackHighlighted ? '#7a9fd4' : '#1a1a1a'}
+                        transparent
+                        opacity={rackOpacity}
+                        metalness={0.3}
+                        roughness={0.7}
+                      />
+                    </mesh>
+
+                    {/* 四个垂直立柱 */}
+                    {[
+                      [-rackWidth / 2, 0, -rackDepth / 2],
+                      [rackWidth / 2, 0, -rackDepth / 2],
+                      [-rackWidth / 2, 0, rackDepth / 2],
+                      [rackWidth / 2, 0, rackDepth / 2],
+                    ].map((pos, i) => (
+                      <mesh key={`pillar-${i}`} position={pos as [number, number, number]} castShadow={rackOpacity > 0.5}>
+                        <boxGeometry args={[0.02, rackHeight, 0.02]} />
+                        <meshStandardMaterial
+                          color={isRackHighlighted ? '#7a9fd4' : '#333333'}
+                          transparent
+                          opacity={rackOpacity}
+                          metalness={0.3}
+                          roughness={0.7}
+                        />
+                      </mesh>
+                    ))}
+
+                    {/* 后面板 */}
+                    <mesh position={[0, 0, -rackDepth / 2 + 0.005]} receiveShadow>
+                      <boxGeometry args={[rackWidth - 0.04, rackHeight, 0.01]} />
+                      <meshStandardMaterial
+                        color="#2a2a2a"
+                        transparent
+                        opacity={rackOpacity * 0.8}
+                        metalness={0.3}
+                        roughness={0.7}
+                      />
+                    </mesh>
+
+                    {/* 前面板 - 半透明 */}
+                    <mesh position={[0, 0, rackDepth / 2 - 0.005]}>
+                      <boxGeometry args={[rackWidth - 0.04, rackHeight, 0.008]} />
+                      <meshStandardMaterial
+                        color="#4a4a4a"
+                        transparent
+                        opacity={showBoardDetails ? 0.02 : 0.08 * rackOpacity}
+                        metalness={0.9}
+                        roughness={0.1}
+                      />
+                    </mesh>
+
+                    {/* 机柜标签 */}
+                    {rackOpacity > 0.3 && (
+                      <Text
+                        position={[0, rackHeight / 2 + 0.12, 0.01]}
+                        fontSize={0.2}
+                        color="#ffffff"
+                        anchorX="center"
+                        anchorY="middle"
+                        fontWeight="bold"
+                        fillOpacity={rackOpacity}
+                      >
+                        {rack.label}
+                      </Text>
+                    )}
+
+                    {/* 交互层 - 用于双击进入 */}
+                    <mesh
+                      visible={false}
+                      onDoubleClick={() => {
+                        if (focusLevel === 0) {
+                          onNavigateToPod(pod.id)
+                        } else if (focusLevel === 1 && focusPath[0] === pod.id) {
+                          onNavigateToRack(pod.id, rack.id)
+                        }
+                      }}
+                      onPointerOver={() => {
+                        if (focusLevel === 0) setHoveredPodId(pod.id)
+                        else if (focusLevel === 1) setHoveredRackId(rack.id)
+                      }}
+                      onPointerOut={() => {
+                        setHoveredPodId(null)
+                        setHoveredRackId(null)
+                      }}
+                    >
+                      <boxGeometry args={[rackWidth, rackHeight, rackDepth]} />
+                      <meshBasicMaterial transparent opacity={0} />
+                    </mesh>
+                  </group>
+
+                </group>
+              )
+            })}
+          </group>
+        )
+      })}
+
+      {/* 独立渲染所有Board - 不受Rack透明度影响 */}
+      {topology.pods.map(pod => (
+        <group key={`boards-${pod.id}`}>
+          {pod.racks.map(rack => {
+            const rackPos = nodePositions.racks.get(rack.id)
+            if (!rackPos) return null
+
+            // 是否显示Board详情（聚焦到Rack级别或更深）
+            const showBoardDetails = focusLevel >= 2 && focusPath[1] === rack.id
+
+            return rack.boards.map(board => {
+              const boardY = (board.u_position - 1) * uHeight + (board.u_height * uHeight) / 2 - rackHeight / 2
+              const boardOpacity = getAnimatedOpacity(board.id)
+
+              // 是否显示芯片（聚焦到Board级别）
+              const showChips = focusLevel >= 3 && focusPath[2] === board.id
+
+              // 透明度太低时不渲染（但要给动画留一点余地）
+              if (boardOpacity < 0.01) return null
+
+              return (
+                <group key={board.id} position={[rackPos.x, rackPos.y + boardY, rackPos.z]}>
+                  <BoardModel
+                    board={board}
+                    showChips={showChips}
+                    interactive={showBoardDetails}
+                    opacity={boardOpacity}
+                    onDoubleClick={() => onNavigateToBoard(board.id)}
+                  />
+                </group>
+              )
+            })
+          })}
+        </group>
+      ))}
+
+      {/* 地面 */}
+      <mesh
+        position={[0, -rackHeight / 2 - 0.06, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        receiveShadow
+      >
+        <planeGeometry args={[50, 50]} />
+        <meshStandardMaterial color="#e8e8e8" />
+      </mesh>
+      {/* 地面网格线 */}
+      <gridHelper
+        args={[50, 50, '#bbb', '#ddd']}
+        position={[0, -rackHeight / 2 - 0.05, 0]}
+      />
+    </group>
   )
 }
+
 
 // ============================================
 // 导航覆盖层组件
@@ -1029,81 +1122,212 @@ export const Scene3D: React.FC<Scene3DProps> = ({
   onBreadcrumbClick,
   canGoBack,
 }) => {
-  const [cameraKey, setCameraKey] = useState(0)
+  // 用于强制重置相机位置的 key
+  const [resetKey, setResetKey] = useState(0)
 
   // 重置视图（相机位置）
   const handleResetView = useCallback(() => {
-    setCameraKey(k => k + 1)
+    setResetKey(k => k + 1)
   }, [])
 
-  // 获取当前视图的相机设置
-  const cameraDistance = CAMERA_DISTANCE[viewState.level]
+  // 计算所有节点的世界坐标（与 UnifiedScene 保持一致）
+  const nodePositions = useMemo(() => {
+    if (!topology) return { pods: new Map(), racks: new Map(), boards: new Map() }
 
-  // 根据Pod数量和Rack数量动态计算相机位置
-  const cameraPreset = useMemo(() => {
-    const basePreset = CAMERA_PRESETS[viewState.level]
-    if (viewState.level !== 'pod' || !topology) return basePreset
+    const rackSpacingX = 1.5
+    const rackSpacingZ = 2
+    const { uHeight, totalU } = RACK_DIMENSIONS
+    const rackHeight = totalU * uHeight
 
-    // 计算场景大小
-    const podCount = topology.pods.length
-    const racksPerPod = topology.pods[0]?.racks.length || 4
+    const pods = new Map<string, THREE.Vector3>()
+    const racks = new Map<string, THREE.Vector3>()
+    const boards = new Map<string, THREE.Vector3>()
 
-    // 根据Pod数量和Rack数量计算缩放因子
-    const scaleFactor = Math.max(1, Math.sqrt(podCount * racksPerPod / 4))
+    // 计算Pod布局参数
+    const firstPod = topology.pods[0]
+    let podSpacingX = 6, podSpacingZ = 4, podCols = 2
+    if (firstPod) {
+      const rackCols = firstPod.grid_size[1]
+      const rackRows = firstPod.grid_size[0]
+      podSpacingX = rackCols * rackSpacingX + 2
+      podSpacingZ = rackRows * rackSpacingZ + 1
 
-    return [
-      basePreset[0] * scaleFactor,
-      basePreset[1] * scaleFactor,
-      basePreset[2] * scaleFactor,
-    ] as [number, number, number]
-  }, [viewState.level, topology])
-
-  // 动态调整最大缩放距离
-  const dynamicCameraDistance = useMemo(() => {
-    if (viewState.level !== 'pod' || !topology) return cameraDistance
-
-    const podCount = topology.pods.length
-    const racksPerPod = topology.pods[0]?.racks.length || 4
-    const scaleFactor = Math.max(1, Math.sqrt(podCount * racksPerPod / 4))
-
-    return {
-      min: cameraDistance.min,
-      max: cameraDistance.max * scaleFactor * 1.5,
+      const totalPods = topology.pods.length
+      if (totalPods <= 2) podCols = totalPods
+      else if (totalPods <= 4) podCols = 2
+      else if (totalPods <= 6) podCols = 3
+      else if (totalPods <= 9) podCols = 3
+      else podCols = 4
     }
-  }, [viewState.level, topology, cameraDistance])
+
+    const getPodGridPosition = (podIndex: number) => {
+      const row = Math.floor(podIndex / podCols)
+      const col = podIndex % podCols
+      return { row, col }
+    }
+
+    // 首先计算所有Rack位置以找出中心
+    let minX = Infinity, maxX = -Infinity
+    let minZ = Infinity, maxZ = -Infinity
+
+    topology.pods.forEach((pod, podIndex) => {
+      const { row, col } = getPodGridPosition(podIndex)
+      const podOffsetX = col * podSpacingX
+      const podOffsetZ = row * podSpacingZ
+      pod.racks.forEach(rack => {
+        const x = podOffsetX + rack.position[1] * rackSpacingX
+        const z = podOffsetZ + rack.position[0] * rackSpacingZ
+        minX = Math.min(minX, x)
+        maxX = Math.max(maxX, x)
+        minZ = Math.min(minZ, z)
+        maxZ = Math.max(maxZ, z)
+      })
+    })
+
+    const centerX = (minX + maxX) / 2
+    const centerZ = (minZ + maxZ) / 2
+
+    // 设置所有节点位置
+    topology.pods.forEach((pod, podIndex) => {
+      const { row, col } = getPodGridPosition(podIndex)
+      const podOffsetX = col * podSpacingX
+      const podOffsetZ = row * podSpacingZ
+
+      let podSumX = 0, podSumZ = 0, podCount = 0
+
+      pod.racks.forEach(rack => {
+        const rackX = podOffsetX + rack.position[1] * rackSpacingX - centerX
+        const rackZ = podOffsetZ + rack.position[0] * rackSpacingZ - centerZ
+        racks.set(rack.id, new THREE.Vector3(rackX, 0, rackZ))
+
+        podSumX += rackX
+        podSumZ += rackZ
+        podCount++
+
+        // 计算Board位置
+        rack.boards.forEach(board => {
+          const boardY = (board.u_position - 1) * uHeight + (board.u_height * uHeight) / 2 - rackHeight / 2
+          boards.set(board.id, new THREE.Vector3(rackX, boardY, rackZ))
+        })
+      })
+
+      // Pod中心
+      if (podCount > 0) {
+        pods.set(pod.id, new THREE.Vector3(podSumX / podCount, 0, podSumZ / podCount))
+      }
+    })
+
+    return { pods, racks, boards }
+  }, [topology])
+
+  // 根据当前视图状态计算相机目标位置和观察点
+  const cameraTarget = useMemo((): CameraAnimationTarget => {
+    // 根据视图层级和路径计算相机位置
+    if (viewState.path.length === 0) {
+      // 数据中心顶层视图
+      const basePreset = CAMERA_PRESETS['pod']
+      const lookAt = new THREE.Vector3(0, 0, 0)
+      if (topology) {
+        const podCount = topology.pods.length
+        const racksPerPod = topology.pods[0]?.racks.length || 4
+        const scaleFactor = Math.max(1, Math.sqrt(podCount * racksPerPod / 4))
+        return {
+          position: new THREE.Vector3(
+            basePreset[0] * scaleFactor,
+            basePreset[1] * scaleFactor,
+            basePreset[2] * scaleFactor
+          ),
+          lookAt
+        }
+      }
+      return {
+        position: new THREE.Vector3(basePreset[0], basePreset[1], basePreset[2]),
+        lookAt
+      }
+    }
+
+    if (viewState.path.length === 1 && currentPod) {
+      // Pod内部视图 - 相机飞向该Pod中心位置
+      const podCenter = nodePositions.pods.get(currentPod.id)
+      if (podCenter) {
+        const racksCount = currentPod.racks.length
+        const distance = 3 + racksCount * 0.5  // 根据Rack数量调整距离
+        return {
+          position: new THREE.Vector3(
+            podCenter.x + distance,
+            distance * 0.8,
+            podCenter.z + distance
+          ),
+          lookAt: podCenter.clone()
+        }
+      }
+    }
+
+    if (viewState.path.length === 2 && currentRack) {
+      // Rack内部视图 - 相机飞向该Rack前方
+      const rackPos = nodePositions.racks.get(currentRack.id)
+      if (rackPos) {
+        return {
+          position: new THREE.Vector3(
+            rackPos.x + 0.8,
+            rackPos.y + 0.5,
+            rackPos.z + 2.5
+          ),
+          lookAt: new THREE.Vector3(rackPos.x, rackPos.y, rackPos.z)
+        }
+      }
+    }
+
+    if (viewState.path.length >= 3 && currentBoard) {
+      // Board视图 - 相机飞向该Board上方，调整合适的观察距离
+      const boardPos = nodePositions.boards.get(currentBoard.id)
+      if (boardPos) {
+        return {
+          position: new THREE.Vector3(
+            boardPos.x + 0.5,
+            boardPos.y + 1.0,
+            boardPos.z + 0.8
+          ),
+          lookAt: new THREE.Vector3(boardPos.x, boardPos.y, boardPos.z)
+        }
+      }
+    }
+
+    // 默认
+    const basePreset = CAMERA_PRESETS[viewState.level]
+    return {
+      position: new THREE.Vector3(basePreset[0], basePreset[1], basePreset[2]),
+      lookAt: new THREE.Vector3(0, 0, 0)
+    }
+  }, [viewState.path, viewState.level, topology, currentPod, currentRack, currentBoard, nodePositions, resetKey])
+
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       {/* 3D Canvas */}
       <Canvas shadows>
         <PerspectiveCamera
-          key={`camera-${cameraKey}`}
           makeDefault
-          position={cameraPreset}
+          position={[5, 4, 5]}
           fov={50}
         />
-        <OrbitControls
-          key={`controls-${cameraKey}`}
-          enablePan={true}
-          enableZoom={true}
-          enableRotate={true}
-          minDistance={dynamicCameraDistance.min}
-          maxDistance={dynamicCameraDistance.max}
-          target={[0, 0, 0]}
+
+        {/* 使用 CameraController 实现平滑动画 - 由它控制相机位置 */}
+        <CameraController
+          target={cameraTarget}
+          duration={1.5}
         />
 
         <color attach="background" args={['#f0f2f5']} />
 
+        {/* 使用统一场景渲染所有层级，通过相机移动和透明度控制实现层级切换 */}
         {topology && (
-          <SceneContent
+          <UnifiedScene
             topology={topology}
-            viewState={viewState}
-            currentPod={currentPod}
-            currentRack={currentRack}
-            currentBoard={currentBoard}
-            onNavigate={onNavigate}
+            focusPath={viewState.path}
             onNavigateToPod={onNavigateToPod}
             onNavigateToRack={onNavigateToRack}
+            onNavigateToBoard={onNavigate}
           />
         )}
       </Canvas>
