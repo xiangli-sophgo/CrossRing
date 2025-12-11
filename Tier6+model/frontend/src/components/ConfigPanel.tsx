@@ -25,35 +25,72 @@ import {
   SaveOutlined,
   FolderOpenOutlined,
   DeleteOutlined,
-  ApiOutlined,
   PlusOutlined,
   MinusCircleOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons'
 import Icon from '@ant-design/icons'
 
-// 自定义芯片图标 - UXWing专业图标
+// 自定义芯片图标 - 带引脚的芯片，中心白色
 const ChipSvg = () => (
-  <svg viewBox="0 0 122.88 122.88" width="1em" height="1em" fill="currentColor">
-    <path d="M28.7,122.88h11.03v-13.4H28.7V122.88L28.7,122.88z M22.67,19.51h74.76c2.56,0,4.66,2.09,4.66,4.66v75.01 c0,2.56-2.1,4.66-4.66,4.66l-74.76,0c-2.56,0-4.66-2.1-4.66-4.66V24.16C18.01,21.6,20.1,19.51,22.67,19.51L22.67,19.51L22.67,19.51 z M42.35,41.29h35.38c1.55,0,2.81,1.27,2.81,2.81v35.12c0,1.55-1.27,2.81-2.81,2.81H42.35c-1.55,0-2.81-1.27-2.81-2.81V44.1 C39.54,42.56,40.8,41.29,42.35,41.29L42.35,41.29z M122.88,65.62v9.16h-13.4v-9.16H122.88L122.88,65.62z M122.88,48.1v9.16l-13.4,0 V48.1L122.88,48.1L122.88,48.1L122.88,48.1z M122.88,83.15v11.03h-13.4V83.15H122.88L122.88,83.15z M122.88,28.7v11.03h-13.4V28.7 H122.88L122.88,28.7z M0,65.62v9.16h13.4v-9.16H0L0,65.62z M0,48.1v9.16l13.4,0V48.1L0,48.1L0,48.1z M0,83.15v11.03h13.4V83.15H0 L0,83.15z M0,28.7v11.03h13.4V28.7H0L0,28.7z M65.62,0h9.16v13.4h-9.16V0L65.62,0L65.62,0z M48.1,0h9.16v13.4H48.1V0L48.1,0L48.1,0 z M83.15,0h11.03v13.4H83.15V0L83.15,0L83.15,0z M28.7,0h11.03v13.4H28.7V0L28.7,0L28.7,0z M65.62,122.88h9.16v-13.4h-9.16V122.88 L65.62,122.88z M48.1,122.88h9.16v-13.4H48.1V122.88L48.1,122.88z M83.15,122.88h11.03v-13.4H83.15V122.88L83.15,122.88z"/>
+  <svg viewBox="0 0 100 100" width="1em" height="1em" fill="currentColor">
+    {/* 芯片主体 */}
+    <rect x="20" y="20" width="60" height="60" rx="4" fill="currentColor"/>
+    {/* 中心白色区域 */}
+    <rect x="30" y="30" width="40" height="40" rx="2" fill="white"/>
+    {/* 上方引脚 */}
+    <rect x="28" y="8" width="8" height="12" fill="currentColor"/>
+    <rect x="46" y="8" width="8" height="12" fill="currentColor"/>
+    <rect x="64" y="8" width="8" height="12" fill="currentColor"/>
+    {/* 下方引脚 */}
+    <rect x="28" y="80" width="8" height="12" fill="currentColor"/>
+    <rect x="46" y="80" width="8" height="12" fill="currentColor"/>
+    <rect x="64" y="80" width="8" height="12" fill="currentColor"/>
+    {/* 左侧引脚 */}
+    <rect x="8" y="28" width="12" height="8" fill="currentColor"/>
+    <rect x="8" y="46" width="12" height="8" fill="currentColor"/>
+    <rect x="8" y="64" width="12" height="8" fill="currentColor"/>
+    {/* 右侧引脚 */}
+    <rect x="80" y="28" width="12" height="8" fill="currentColor"/>
+    <rect x="80" y="46" width="12" height="8" fill="currentColor"/>
+    <rect x="80" y="64" width="12" height="8" fill="currentColor"/>
   </svg>
 )
 const ChipIcon = () => <Icon component={ChipSvg} />
 
-// 自定义PCB板卡图标 - UXWing主板图标
+// 自定义PCB板卡图标 - 带芯片和电路线（线框风格）
 const BoardSvg = () => (
-  <svg viewBox="0 0 122.88 117.61" width="1em" height="1em" fill="currentColor">
-    <path d="M71.39,103.48h3.64v-6.8h-3.64V103.48L71.39,103.48L71.39,103.48z M6.03,0h110.81c1.65,0,3.16,0.68,4.25,1.77 c1.1,1.1,1.78,2.61,1.78,4.26v105.54c0,1.66-0.68,3.17-1.77,4.27c-1.09,1.09-2.6,1.77-4.26,1.77H6.03c-1.66,0-3.17-0.68-4.26-1.77 S0,113.23,0,111.57V6.03c0-1.65,0.68-3.16,1.78-4.26C2.88,0.68,4.38,0,6.03,0L6.03,0z M115.35,7.53H7.53v46.73h10.68v-4.04 c-0.1-0.04-0.19-0.1-0.27-0.15c-0.16-0.1-0.31-0.22-0.44-0.34l-0.01-0.02c-0.23-0.22-0.41-0.5-0.54-0.8 c-0.12-0.3-0.19-0.63-0.19-0.97c0-0.35,0.07-0.67,0.19-0.97l0,0c0.13-0.31,0.32-0.59,0.55-0.84c0.23-0.23,0.51-0.42,0.82-0.55 c0.31-0.12,0.63-0.19,0.97-0.19c0.35,0,0.67,0.07,0.97,0.19c0.31,0.13,0.59,0.32,0.83,0.55c0.23,0.24,0.42,0.51,0.55,0.82 l0.01,0.02c0.12,0.29,0.19,0.62,0.19,0.95c0,0.34-0.07,0.67-0.19,0.97c-0.13,0.31-0.32,0.59-0.55,0.82l-0.02,0.02 c-0.12,0.11-0.24,0.22-0.38,0.31c-0.08,0.05-0.15,0.1-0.23,0.13v5.21c0,0.31-0.13,0.6-0.33,0.8c-0.21,0.2-0.49,0.33-0.8,0.33H7.53 v3.4h16.61l0,0c0.04-0.09,0.09-0.17,0.14-0.25l0.01-0.01c0.1-0.15,0.21-0.28,0.33-0.4c0.24-0.23,0.51-0.42,0.83-0.55l0.02-0.01 c0.3-0.12,0.62-0.19,0.95-0.19c0.34,0,0.67,0.07,0.97,0.19c0.31,0.13,0.6,0.32,0.82,0.55c0.23,0.23,0.42,0.51,0.55,0.82 c0.12,0.31,0.19,0.63,0.19,0.97c0,0.35-0.07,0.67-0.19,0.97c-0.13,0.31-0.32,0.59-0.55,0.82c-0.24,0.23-0.51,0.42-0.82,0.55 l-0.02,0.01c-0.3,0.12-0.62,0.19-0.95,0.19c-0.35,0-0.67-0.07-0.97-0.19c-0.31-0.13-0.59-0.32-0.83-0.55 c-0.12-0.12-0.24-0.26-0.33-0.42c-0.05-0.08-0.1-0.17-0.14-0.25H7.53v3.92h18.76l0,0c0.31,0,0.59,0.13,0.8,0.33 c0.21,0.2,0.33,0.48,0.33,0.8v8.39c0.1,0.04,0.21,0.1,0.31,0.16c0.17,0.11,0.34,0.23,0.48,0.38c0.23,0.24,0.42,0.51,0.55,0.82 l0.01,0.02c0.12,0.3,0.18,0.62,0.18,0.95c0,0.34-0.07,0.67-0.19,0.97c-0.13,0.31-0.32,0.59-0.55,0.84 c-0.23,0.23-0.51,0.42-0.82,0.55c-0.31,0.12-0.63,0.19-0.97,0.19c-0.34,0-0.67-0.07-0.97-0.19c-0.31-0.13-0.59-0.32-0.82-0.55 c-0.23-0.23-0.42-0.51-0.55-0.82c-0.12-0.3-0.19-0.63-0.19-0.97c0-0.35,0.07-0.67,0.19-0.97c0.13-0.31,0.32-0.6,0.55-0.83 c0.11-0.11,0.22-0.2,0.35-0.29c0.06-0.04,0.13-0.08,0.19-0.12v-7.38H7.53v3.2h9.89l0,0c0.31,0,0.59,0.13,0.79,0.33 c0.21,0.21,0.33,0.49,0.33,0.8v4.49c0.08,0.04,0.16,0.08,0.24,0.13c0.15,0.1,0.29,0.21,0.41,0.33l0.02,0.02 c0.22,0.23,0.4,0.51,0.53,0.81c0.12,0.3,0.19,0.63,0.19,0.97c0,0.35-0.07,0.67-0.19,0.97l-0.01,0.02 c-0.13,0.31-0.31,0.58-0.54,0.81l-0.02,0.01c-0.23,0.23-0.51,0.41-0.81,0.54C18.07,81.93,17.74,82,17.4,82 c-0.34,0-0.67-0.07-0.97-0.19c-0.31-0.13-0.6-0.32-0.82-0.55l-0.02-0.02c-0.22-0.23-0.4-0.51-0.53-0.81 c-0.12-0.31-0.19-0.63-0.19-0.97c0-0.34,0.07-0.66,0.19-0.96c0.13-0.31,0.32-0.6,0.55-0.82l0,0c0.13-0.14,0.27-0.25,0.43-0.35 c0.08-0.06,0.17-0.1,0.26-0.15v-3.34H7.53v36.24h107.82V7.53L115.35,7.53z"/>
+  <svg viewBox="0 0 100 80" width="1em" height="1em" fill="currentColor">
+    {/* PCB主体边框 */}
+    <rect x="5" y="5" width="90" height="70" rx="3" fill="none" stroke="currentColor" strokeWidth="3"/>
+    {/* 芯片1 - 左上 */}
+    <rect x="12" y="12" width="18" height="18" rx="2" fill="currentColor"/>
+    {/* 芯片2 - 右上 */}
+    <rect x="70" y="12" width="18" height="18" rx="2" fill="currentColor"/>
+    {/* 芯片3 - 中下 */}
+    <rect x="38" y="45" width="24" height="20" rx="2" fill="currentColor"/>
+    {/* 电路线 */}
+    <path d="M30 21 L70 21" stroke="currentColor" strokeWidth="2" fill="none"/>
+    <path d="M12 40 L38 40 L38 50" stroke="currentColor" strokeWidth="2" fill="none"/>
+    <path d="M62 55 L88 55 L88 30" stroke="currentColor" strokeWidth="2" fill="none"/>
+    <path d="M21 30 L21 45 L38 45" stroke="currentColor" strokeWidth="2" fill="none"/>
+    <path d="M79 30 L79 40 L62 40 L62 45" stroke="currentColor" strokeWidth="2" fill="none"/>
+    {/* 连接点 */}
+    <circle cx="10" cy="40" r="3" fill="currentColor"/>
+    <circle cx="90" cy="40" r="3" fill="currentColor"/>
+    <circle cx="50" cy="10" r="3" fill="currentColor"/>
+    <circle cx="50" cy="70" r="3" fill="currentColor"/>
   </svg>
 )
 const BoardIcon = () => <Icon component={BoardSvg} />
 import {
   HierarchicalTopology, CHIP_TYPE_COLORS, CHIP_TYPE_NAMES, ChipType,
   GlobalSwitchConfig, SwitchTypeConfig, SwitchLayerConfig, HierarchyLevelSwitchConfig,
-  SWITCH_LAYER_COLORS
+  ManualConnectionConfig, ConnectionMode, SwitchConnectionMode
 } from '../types'
 import { listConfigs, saveConfig, deleteConfig, SavedConfig } from '../api/topology'
 
-const { Text, Title } = Typography
+const { Text } = Typography
 
 interface ChipCounts {
   npu: number
@@ -71,16 +108,47 @@ interface BoardConfigs {
   u4: BoardTypeConfig
 }
 
+// 新的灵活板卡配置
+interface FlexBoardChipConfig {
+  name: string      // Chip名称，如 "NPU", "CPU", "GPU"
+  count: number     // 数量
+}
+
+interface FlexBoardConfig {
+  id: string            // 唯一ID
+  name: string          // 板卡名称
+  u_height: number      // U高度 (1-10)
+  count: number         // 板卡数量
+  chips: FlexBoardChipConfig[]  // Chip配置列表
+}
+
+interface RackConfig {
+  total_u: number              // Rack总U数，默认42
+  boards: FlexBoardConfig[]    // 板卡配置列表
+}
+
 interface ConfigPanelProps {
   topology: HierarchicalTopology | null
   onGenerate: (config: {
     pod_count: number
     racks_per_pod: number
     board_configs: BoardConfigs
+    rack_config?: RackConfig
     switch_config?: GlobalSwitchConfig
+    manual_connections?: ManualConnectionConfig
   }) => void
   loading: boolean
   currentLevel?: 'datacenter' | 'pod' | 'rack' | 'board'
+  // 编辑连接相关
+  manualConnectionConfig?: ManualConnectionConfig
+  onManualConnectionConfigChange?: (config: ManualConnectionConfig) => void
+  connectionMode?: ConnectionMode
+  onConnectionModeChange?: (mode: ConnectionMode) => void
+  selectedNodes?: Set<string>
+  onSelectedNodesChange?: (nodes: Set<string>) => void
+  onDeleteManualConnection?: (connectionId: string) => void
+  currentViewConnections?: { source: string; target: string; type?: string; bandwidth?: number }[]  // 当前视图的连接
+  onDeleteConnection?: (source: string, target: string) => void  // 删除连接
 }
 
 // localStorage缓存key
@@ -91,6 +159,14 @@ const DEFAULT_BOARD_CONFIGS: BoardConfigs = {
   u1: { count: 0, chips: { npu: 2, cpu: 0 } },
   u2: { count: 8, chips: { npu: 8, cpu: 0 } },
   u4: { count: 0, chips: { npu: 16, cpu: 2 } },
+}
+
+// 默认Rack配置
+const DEFAULT_RACK_CONFIG: RackConfig = {
+  total_u: 42,
+  boards: [
+    { id: 'board_1', name: '计算板卡', u_height: 2, count: 8, chips: [{ name: 'NPU', count: 8 }] },
+  ],
 }
 
 // 默认Switch配置
@@ -104,6 +180,7 @@ const DEFAULT_SWITCH_CONFIG: GlobalSwitchConfig = {
   datacenter_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true },
   pod_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true },
   rack_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true },
+  board_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true },
 }
 
 // 从localStorage加载缓存配置
@@ -124,6 +201,8 @@ const saveCachedConfig = (config: {
   podCount: number
   racksPerPod: number
   boardConfigs: BoardConfigs
+  rackConfig?: RackConfig
+  switchConfig?: GlobalSwitchConfig
 }) => {
   try {
     localStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify(config))
@@ -173,7 +252,7 @@ const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
   const directTopologyOptions = [
     { value: 'none', label: '无连接' },
     { value: 'full_mesh', label: '全连接 (Full Mesh)' },
-    { value: 'hw_full_mesh', label: 'HW FullMesh (行列全连接)' },
+    { value: 'full_mesh_2d', label: '2D FullMesh (行列全连接)' },
     { value: 'ring', label: '环形 (Ring)' },
     { value: 'torus_2d', label: '2D Torus' },
     { value: 'torus_3d', label: '3D Torus' },
@@ -207,28 +286,35 @@ const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
 
       {config.enabled && (
         <>
-          {/* 冗余度配置 */}
+          {/* 连接模式 */}
           <div style={configRowStyle}>
-            <Text>冗余连接数</Text>
-            <InputNumber
-              min={1}
-              max={4}
+            <Text>连接模式</Text>
+            <Select
               size="small"
-              value={config.downlink_redundancy}
-              onChange={(v) => onChange({ ...config, downlink_redundancy: v || 1 })}
-              style={{ width: 60 }}
+              value={config.connection_mode || 'full_mesh'}
+              onChange={(v: SwitchConnectionMode) => onChange({ ...config, connection_mode: v })}
+              style={{ width: 120 }}
+              options={[
+                { value: 'full_mesh', label: '全连接' },
+                { value: 'custom', label: '自定义' },
+              ]}
             />
           </div>
 
-          {/* 连接到上层 */}
-          <div style={configRowStyle}>
-            <Text>连接到上层Switch</Text>
-            <Switch
-              size="small"
-              checked={config.connect_to_upper_level}
-              onChange={(checked) => onChange({ ...config, connect_to_upper_level: checked })}
-            />
-          </div>
+          {/* 自定义模式：节点连接Switch数 */}
+          {config.connection_mode === 'custom' && (
+            <div style={configRowStyle}>
+              <Text>节点连接Switch数</Text>
+              <InputNumber
+                min={1}
+                max={config.layers[0]?.count || 1}
+                size="small"
+                value={Math.min(config.downlink_redundancy || 1, config.layers[0]?.count || 1)}
+                onChange={(v) => onChange({ ...config, downlink_redundancy: v || 1 })}
+                style={{ width: 60 }}
+              />
+            </div>
+          )}
 
           <Divider style={{ margin: '8px 0' }} />
 
@@ -297,6 +383,188 @@ const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
           </Button>
         </>
       )}
+
+    </div>
+  )
+}
+
+// 连接编辑子组件
+interface ConnectionEditPanelProps {
+  manualConnectionConfig?: ManualConnectionConfig
+  onManualConnectionConfigChange?: (config: ManualConnectionConfig) => void
+  connectionMode?: ConnectionMode
+  onConnectionModeChange?: (mode: ConnectionMode) => void
+  selectedNodes?: Set<string>
+  onSelectedNodesChange?: (nodes: Set<string>) => void
+  onDeleteManualConnection?: (id: string) => void
+  currentViewConnections?: Array<{ source: string; target: string; type?: string; bandwidth?: number }>
+  onDeleteConnection?: (source: string, target: string) => void
+  configRowStyle: React.CSSProperties
+}
+
+const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
+  manualConnectionConfig,
+  onManualConnectionConfigChange,
+  connectionMode = 'view',
+  onConnectionModeChange,
+  selectedNodes = new Set<string>(),
+  onSelectedNodesChange,
+  onDeleteManualConnection,
+  currentViewConnections = [],
+  onDeleteConnection,
+  configRowStyle,
+}) => {
+  return (
+    <div style={{ padding: 12, background: '#fafafa', borderRadius: 6 }}>
+      <Text strong style={{ display: 'block', marginBottom: 8 }}>连接编辑</Text>
+
+      {/* 启用开关 */}
+      <div style={configRowStyle}>
+        <Text>编辑模式</Text>
+        <Switch
+          size="small"
+          checked={manualConnectionConfig?.enabled ?? false}
+          onChange={(checked) => {
+            onManualConnectionConfigChange?.({
+              ...(manualConnectionConfig || { enabled: false, mode: 'append', connections: [] }),
+              enabled: checked,
+            })
+          }}
+        />
+      </div>
+
+      {manualConnectionConfig?.enabled && (
+        <>
+          {/* 模式切换按钮 */}
+          <Space style={{ marginBottom: 12, marginTop: 8 }}>
+            <Button
+              type={connectionMode === 'select' ? 'primary' : 'default'}
+              size="small"
+              onClick={() => onConnectionModeChange?.('select')}
+            >
+              多选模式
+            </Button>
+            <Button
+              type={connectionMode === 'connect' ? 'primary' : 'default'}
+              size="small"
+              onClick={() => onConnectionModeChange?.('connect')}
+            >
+              连线模式
+            </Button>
+            {connectionMode !== 'view' && (
+              <Button
+                size="small"
+                onClick={() => {
+                  onConnectionModeChange?.('view')
+                  onSelectedNodesChange?.(new Set())
+                }}
+              >
+                退出
+              </Button>
+            )}
+          </Space>
+
+          {connectionMode !== 'view' && (
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
+              {connectionMode === 'select'
+                ? 'Ctrl+点击选择多个源节点'
+                : selectedNodes && selectedNodes.size > 0
+                  ? `已选${selectedNodes.size}个源节点，点击目标节点批量连接`
+                  : '点击源节点，再点击目标节点添加连接'}
+            </Text>
+          )}
+
+          {selectedNodes && selectedNodes.size > 0 && (
+            <div style={{ marginBottom: 12, padding: 8, background: '#e6f7ff', borderRadius: 4 }}>
+              <Text style={{ fontSize: 12 }}>
+                已选中 {selectedNodes.size} 个节点
+              </Text>
+            </div>
+          )}
+
+          {/* 手动添加的连接列表 */}
+          <Collapse
+            size="small"
+            style={{ marginTop: 8 }}
+            items={[{
+              key: 'manual',
+              label: `手动连接 (${manualConnectionConfig?.connections?.length || 0})`,
+              children: (
+                <div style={{ maxHeight: 120, overflow: 'auto' }}>
+                  {manualConnectionConfig?.connections?.map((conn) => (
+                    <div
+                      key={conn.id}
+                      style={{
+                        padding: 6,
+                        background: '#f6ffed',
+                        marginBottom: 4,
+                        borderRadius: 4,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        border: '1px solid #b7eb8f',
+                      }}
+                    >
+                      <div>
+                        <Text code style={{ fontSize: 12 }}>{conn.source}</Text>
+                        <Text style={{ margin: '0 4px' }}>↔</Text>
+                        <Text code style={{ fontSize: 12 }}>{conn.target}</Text>
+                      </div>
+                      <Button
+                        type="text"
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        onClick={() => onDeleteManualConnection?.(conn.id)}
+                      />
+                    </div>
+                  ))}
+                  {(!manualConnectionConfig?.connections || manualConnectionConfig.connections.length === 0) && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>暂无</Text>
+                  )}
+                </div>
+              ),
+            }, {
+              key: 'current',
+              label: `当前连接 (${currentViewConnections.length})`,
+              children: (
+                <div style={{ maxHeight: 120, overflow: 'auto' }}>
+                  {currentViewConnections.map((conn, idx) => (
+                    <div
+                      key={`auto-${idx}`}
+                      style={{
+                        padding: 6,
+                        background: '#f5f5f5',
+                        marginBottom: 4,
+                        borderRadius: 4,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <Text code style={{ fontSize: 12 }}>{conn.source}</Text>
+                        <Text style={{ margin: '0 4px' }}>↔</Text>
+                        <Text code style={{ fontSize: 12 }}>{conn.target}</Text>
+                      </div>
+                      <Button
+                        type="text"
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        onClick={() => onDeleteConnection?.(conn.source, conn.target)}
+                      />
+                    </div>
+                  ))}
+                  {currentViewConnections.length === 0 && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>暂无</Text>
+                  )}
+                </div>
+              ),
+            }]}
+          />
+        </>
+      )}
     </div>
   )
 }
@@ -305,6 +573,16 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   topology,
   onGenerate,
   currentLevel = 'datacenter',
+  // 手动连线相关
+  manualConnectionConfig,
+  onManualConnectionConfigChange,
+  connectionMode = 'view',
+  onConnectionModeChange,
+  selectedNodes = new Set<string>(),
+  onSelectedNodesChange,
+  onDeleteManualConnection,
+  currentViewConnections = [],
+  onDeleteConnection,
 }) => {
   // 从缓存加载初始配置
   const cachedConfig = loadCachedConfig()
@@ -315,15 +593,26 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   // Rack层级配置
   const [racksPerPod, setRacksPerPod] = useState(cachedConfig?.racksPerPod ?? 4)
 
-  // Board配置（按U高度分类，每种类型有独立的chip配置）
+  // Board配置（按U高度分类，每种类型有独立的chip配置）- 旧格式，保持兼容
   const [boardConfigs, setBoardConfigs] = useState<BoardConfigs>(
     cachedConfig?.boardConfigs ?? DEFAULT_BOARD_CONFIGS
   )
 
-  // Switch配置
-  const [switchConfig, setSwitchConfig] = useState<GlobalSwitchConfig>(
-    cachedConfig?.switchConfig ?? DEFAULT_SWITCH_CONFIG
+  // 新的灵活Rack配置
+  const [rackConfig, setRackConfig] = useState<RackConfig>(
+    cachedConfig?.rackConfig ?? DEFAULT_RACK_CONFIG
   )
+
+  // Rack配置编辑模式
+  const [rackEditMode, setRackEditMode] = useState(false)
+
+  // Switch配置（合并默认值以兼容旧缓存）
+  const [switchConfig, setSwitchConfig] = useState<GlobalSwitchConfig>(() => {
+    if (cachedConfig?.switchConfig) {
+      return { ...DEFAULT_SWITCH_CONFIG, ...cachedConfig.switchConfig }
+    }
+    return DEFAULT_SWITCH_CONFIG
+  })
 
   // 保存/加载配置状态
   const [savedConfigs, setSavedConfigs] = useState<SavedConfig[]>([])
@@ -331,14 +620,6 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   const [loadModalOpen, setLoadModalOpen] = useState(false)
   const [configName, setConfigName] = useState('')
   const [configDesc, setConfigDesc] = useState('')
-
-  // 层连接设置的当前Tab
-  const [switchTabKey, setSwitchTabKey] = useState<string>(currentLevel === 'board' ? 'rack' : currentLevel)
-
-  // 当右边层级变化时，同步左边的Tab
-  useEffect(() => {
-    setSwitchTabKey(currentLevel === 'board' ? 'rack' : currentLevel)
-  }, [currentLevel])
 
   // 加载配置列表
   const loadConfigList = async () => {
@@ -356,8 +637,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
 
   // 配置变化时自动保存到localStorage
   useEffect(() => {
-    saveCachedConfig({ podCount, racksPerPod, boardConfigs, switchConfig })
-  }, [podCount, racksPerPod, boardConfigs, switchConfig])
+    saveCachedConfig({ podCount, racksPerPod, boardConfigs, rackConfig, switchConfig })
+  }, [podCount, racksPerPod, boardConfigs, rackConfig, switchConfig])
 
   // 配置变化时自动生成拓扑（防抖500ms）
   const isFirstRender = useRef(true)
@@ -373,12 +654,13 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
         pod_count: podCount,
         racks_per_pod: racksPerPod,
         board_configs: boardConfigs,
+        rack_config: rackConfig,
         switch_config: switchConfig,
       })
     }, 500)
 
     return () => clearTimeout(timer)
-  }, [podCount, racksPerPod, boardConfigs, switchConfig, onGenerate])
+  }, [podCount, racksPerPod, boardConfigs, rackConfig, switchConfig, onGenerate])
 
   // 保存当前配置
   const handleSaveConfig = async () => {
@@ -466,13 +748,74 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
     marginBottom: 8,
   }
 
-  // 层级配置内容
+  // 层级配置Tab key
+  const [layerTabKey, setLayerTabKey] = useState<string>(currentLevel === 'datacenter' ? 'datacenter' : currentLevel)
+
+  // 当右边层级变化时，同步层级配置Tab
+  useEffect(() => {
+    setLayerTabKey(currentLevel === 'datacenter' ? 'datacenter' : currentLevel)
+  }, [currentLevel])
+
+  // 汇总信息
+  const summaryText = topology
+    ? `${stats.pods}Pod ${stats.racks}Rack ${stats.boards}Board ${stats.chips}Chip`
+    : '未生成'
+
+  // 拓扑配置内容（统计信息）
+  const topologyConfigContent = (
+    <Row gutter={[8, 8]}>
+      <Col span={12}>
+        <Statistic
+          title="Pods"
+          value={stats.pods}
+          prefix={<ClusterOutlined />}
+          valueStyle={{ fontSize: 16 }}
+        />
+      </Col>
+      <Col span={12}>
+        <Statistic
+          title="Racks"
+          value={stats.racks}
+          prefix={<DatabaseOutlined />}
+          valueStyle={{ fontSize: 16 }}
+        />
+      </Col>
+      <Col span={12}>
+        <Statistic
+          title="Boards"
+          value={stats.boards}
+          prefix={<BoardIcon />}
+          valueStyle={{ fontSize: 16 }}
+        />
+      </Col>
+      <Col span={12}>
+        <Statistic
+          title="Chips"
+          value={stats.chips}
+          prefix={<ChipIcon />}
+          valueStyle={{ fontSize: 16 }}
+        />
+      </Col>
+      {stats.switches > 0 && (
+        <Col span={24}>
+          <Statistic
+            title="Switches"
+            value={stats.switches}
+            prefix={<ApartmentOutlined />}
+            valueStyle={{ fontSize: 16 }}
+          />
+        </Col>
+      )}
+    </Row>
+  )
+
+  // 层级配置内容（节点配置 + Switch连接配置）
   const layerConfigContent = (
     <Tabs
       size="small"
       type="card"
-      activeKey={switchTabKey}
-      onChange={setSwitchTabKey}
+      activeKey={layerTabKey}
+      onChange={setLayerTabKey}
       items={[
         {
           key: 'datacenter',
@@ -480,8 +823,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           children: (
             <div>
               {/* Pod数量配置 */}
-              <div style={{ marginBottom: 16, padding: 12, background: '#f0f5ff', borderRadius: 6 }}>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}><ClusterOutlined /> 节点配置</Text>
+              <div style={{ marginBottom: 12, padding: 12, background: '#fafafa', borderRadius: 6 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}>节点配置</Text>
                 <div style={configRowStyle}>
                   <Text>Pod 数量</Text>
                   <InputNumber
@@ -495,8 +838,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 </div>
               </div>
               {/* Pod间连接配置 */}
-              <div style={{ padding: 12, background: '#f5f5f5', borderRadius: 6 }}>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}><ApiOutlined /> 连接配置</Text>
+              <div style={{ padding: 12, background: '#fafafa', borderRadius: 6 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}>连接配置</Text>
                 <SwitchLevelConfig
                   levelKey="datacenter_level"
                   config={switchConfig.datacenter_level}
@@ -505,6 +848,23 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                   configRowStyle={configRowStyle}
                 />
               </div>
+              {/* 连接编辑（当前层级时显示） */}
+              {currentLevel === 'datacenter' && (
+                <div style={{ marginTop: 12 }}>
+                  <ConnectionEditPanel
+                    manualConnectionConfig={manualConnectionConfig}
+                    onManualConnectionConfigChange={onManualConnectionConfigChange}
+                    connectionMode={connectionMode}
+                    onConnectionModeChange={onConnectionModeChange}
+                    selectedNodes={selectedNodes}
+                    onSelectedNodesChange={onSelectedNodesChange}
+                    onDeleteManualConnection={onDeleteManualConnection}
+                    currentViewConnections={currentViewConnections}
+                    onDeleteConnection={onDeleteConnection}
+                    configRowStyle={configRowStyle}
+                  />
+                </div>
+              )}
             </div>
           ),
         },
@@ -514,8 +874,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           children: (
             <div>
               {/* Rack数量配置 */}
-              <div style={{ marginBottom: 16, padding: 12, background: '#f0fff4', borderRadius: 6 }}>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}><DatabaseOutlined /> 节点配置</Text>
+              <div style={{ marginBottom: 12, padding: 12, background: '#fafafa', borderRadius: 6 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}>节点配置</Text>
                 <div style={configRowStyle}>
                   <Text>每Pod机柜数</Text>
                   <InputNumber
@@ -529,8 +889,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 </div>
               </div>
               {/* Rack间连接配置 */}
-              <div style={{ padding: 12, background: '#f5f5f5', borderRadius: 6 }}>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}><ApiOutlined /> 连接配置</Text>
+              <div style={{ padding: 12, background: '#fafafa', borderRadius: 6 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}>连接配置</Text>
                 <SwitchLevelConfig
                   levelKey="pod_level"
                   config={switchConfig.pod_level}
@@ -539,6 +899,23 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                   configRowStyle={configRowStyle}
                 />
               </div>
+              {/* 连接编辑（当前层级时显示） */}
+              {currentLevel === 'pod' && (
+                <div style={{ marginTop: 12 }}>
+                  <ConnectionEditPanel
+                    manualConnectionConfig={manualConnectionConfig}
+                    onManualConnectionConfigChange={onManualConnectionConfigChange}
+                    connectionMode={connectionMode}
+                    onConnectionModeChange={onConnectionModeChange}
+                    selectedNodes={selectedNodes}
+                    onSelectedNodesChange={onSelectedNodesChange}
+                    onDeleteManualConnection={onDeleteManualConnection}
+                    currentViewConnections={currentViewConnections}
+                    onDeleteConnection={onDeleteConnection}
+                    configRowStyle={configRowStyle}
+                  />
+                </div>
+              )}
             </div>
           ),
         },
@@ -548,112 +925,221 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           children: (
             <div>
               {/* Board配置 */}
-              <div style={{ marginBottom: 16, padding: 12, background: '#fff7e6', borderRadius: 6 }}>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}><BoardIcon /> 节点配置 (已用 {totalUsedU}/42U)</Text>
-
-                {/* 1U 板卡配置 */}
-                <div style={{ marginBottom: 8, padding: 8, background: 'rgba(255,255,255,0.7)', borderRadius: 4 }}>
-                  <div style={configRowStyle}>
-                    <Text style={{ color: '#4a5568' }}>1U 板卡</Text>
-                    <InputNumber
-                      min={0}
-                      max={42}
-                      value={boardConfigs.u1.count}
-                      onChange={(v) => updateBoardCount('u1', v)}
+              <div style={{ marginBottom: 12, padding: 12, background: '#fafafa', borderRadius: 6 }}>
+                {/* 标题和编辑开关 */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <Text strong>节点配置</Text>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>编辑</Text>
+                    <Switch
                       size="small"
-                      style={{ width: 60 }}
+                      checked={rackEditMode}
+                      onChange={setRackEditMode}
                     />
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                    {(Object.keys(CHIP_TYPE_COLORS) as ChipType[]).map(type => (
-                      <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: 2, background: CHIP_TYPE_COLORS[type] }} />
-                        <Text style={{ fontSize: 11 }}>{CHIP_TYPE_NAMES[type]}</Text>
-                        <InputNumber
-                          min={0}
-                          max={32}
-                          value={boardConfigs.u1.chips[type]}
-                          onChange={(v) => updateBoardChip('u1', type, v)}
-                          size="small"
-                          style={{ width: 50 }}
-                        />
-                      </div>
-                    ))}
                   </div>
                 </div>
 
-                {/* 2U 板卡配置 */}
-                <div style={{ marginBottom: 8, padding: 8, background: 'rgba(230,240,255,0.7)', borderRadius: 4 }}>
+                {/* 汇总信息 */}
+                {(() => {
+                  const usedU = rackConfig.boards.reduce((sum, b) => sum + b.u_height * (b.count || 1), 0)
+                  const totalBoards = rackConfig.boards.reduce((sum, b) => sum + (b.count || 1), 0)
+                  const totalChips = rackConfig.boards.reduce((sum, b) => sum + (b.count || 1) * b.chips.reduce((s, c) => s + c.count, 0), 0)
+                  const isOverflow = usedU > rackConfig.total_u
+                  return (
+                    <div style={{ marginBottom: 8, fontSize: 12, color: '#666' }}>
+                      <span>容量: <Text strong>{rackConfig.total_u}U</Text></span>
+                      <span style={{ margin: '0 8px', color: '#d9d9d9' }}>|</span>
+                      <span>已用: <Text strong type={isOverflow ? 'danger' : undefined}>{usedU}U</Text></span>
+                      <span style={{ margin: '0 8px', color: '#d9d9d9' }}>|</span>
+                      <span>板卡: <Text strong>{totalBoards}</Text></span>
+                      <span style={{ margin: '0 8px', color: '#d9d9d9' }}>|</span>
+                      <span>芯片: <Text strong>{totalChips}</Text></span>
+                    </div>
+                  )
+                })()}
+
+                {/* 编辑模式：Rack容量 */}
+                {rackEditMode && (
                   <div style={configRowStyle}>
-                    <Text style={{ color: '#2c5282' }}>2U 板卡</Text>
+                    <Text>Rack容量</Text>
                     <InputNumber
-                      min={0}
-                      max={21}
-                      value={boardConfigs.u2.count}
-                      onChange={(v) => updateBoardCount('u2', v)}
+                      min={10}
+                      max={60}
+                      value={rackConfig.total_u}
+                      onChange={(v) => setRackConfig(prev => ({ ...prev, total_u: v || 42 }))}
                       size="small"
-                      style={{ width: 60 }}
+                      style={{ width: 70 }}
+                      addonAfter="U"
                     />
                   </div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                    {(Object.keys(CHIP_TYPE_COLORS) as ChipType[]).map(type => (
-                      <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: 2, background: CHIP_TYPE_COLORS[type] }} />
-                        <Text style={{ fontSize: 11 }}>{CHIP_TYPE_NAMES[type]}</Text>
-                        <InputNumber
-                          min={0}
-                          max={32}
-                          value={boardConfigs.u2.chips[type]}
-                          onChange={(v) => updateBoardChip('u2', type, v)}
-                          size="small"
-                          style={{ width: 50 }}
-                        />
-                      </div>
-                    ))}
-                  </div>
+                )}
+
+                {/* 板卡列表 */}
+                <div style={{ marginTop: 8 }}>
+                  {rackConfig.boards.map((board, boardIndex) => (
+                    <div key={board.id} style={{ marginBottom: 6, padding: '6px 10px', background: '#fff', borderRadius: 4, border: '1px solid #e8e8e8' }}>
+                      {rackEditMode ? (
+                        /* 编辑模式 */
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>名称:</Text>
+                              <Input
+                                size="small"
+                                value={board.name}
+                                onChange={(e) => {
+                                  const newBoards = [...rackConfig.boards]
+                                  newBoards[boardIndex] = { ...newBoards[boardIndex], name: e.target.value }
+                                  setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                }}
+                                style={{ width: 120 }}
+                              />
+                              <Text style={{ fontSize: 12, marginLeft: 8, whiteSpace: 'nowrap' }}>高度:</Text>
+                              <InputNumber
+                                size="small"
+                                min={1}
+                                max={10}
+                                value={board.u_height}
+                                onChange={(v) => {
+                                  const newBoards = [...rackConfig.boards]
+                                  newBoards[boardIndex] = { ...newBoards[boardIndex], u_height: v || 1 }
+                                  setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                }}
+                                style={{ width: 70 }}
+                                addonAfter="U"
+                              />
+                              <Text style={{ fontSize: 12, marginLeft: 8, whiteSpace: 'nowrap' }}>数量:</Text>
+                              <InputNumber
+                                size="small"
+                                min={0}
+                                max={42}
+                                value={board.count || 1}
+                                onChange={(v) => {
+                                  const newBoards = [...rackConfig.boards]
+                                  newBoards[boardIndex] = { ...newBoards[boardIndex], count: v || 0 }
+                                  setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                }}
+                                style={{ width: 60 }}
+                              />
+                            </div>
+                            <Button
+                              type="text"
+                              danger
+                              size="small"
+                              icon={<MinusCircleOutlined />}
+                              onClick={() => {
+                                const newBoards = rackConfig.boards.filter((_, i) => i !== boardIndex)
+                                setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                              }}
+                              disabled={rackConfig.boards.length <= 1}
+                            />
+                          </div>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                              <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>芯片配置:</Text>
+                              <Button
+                                type="dashed"
+                                size="small"
+                                icon={<PlusOutlined />}
+                                onClick={() => {
+                                  const newBoards = [...rackConfig.boards]
+                                  const newChips = [...newBoards[boardIndex].chips, { name: 'CPU', count: 2 }]
+                                  newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                  setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                }}
+                              >
+                                添加
+                              </Button>
+                            </div>
+                            {board.chips.map((chip, chipIndex) => (
+                              <div key={chipIndex} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, paddingLeft: 16 }}>
+                                <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>类型:</Text>
+                                <Input
+                                  size="small"
+                                  value={chip.name}
+                                  onChange={(e) => {
+                                    const newBoards = [...rackConfig.boards]
+                                    const newChips = [...newBoards[boardIndex].chips]
+                                    newChips[chipIndex] = { ...newChips[chipIndex], name: e.target.value }
+                                    newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                    setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                  }}
+                                  style={{ width: 70 }}
+                                />
+                                <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>数量:</Text>
+                                <InputNumber
+                                  size="small"
+                                  min={1}
+                                  max={64}
+                                  value={chip.count}
+                                  onChange={(v) => {
+                                    const newBoards = [...rackConfig.boards]
+                                    const newChips = [...newBoards[boardIndex].chips]
+                                    newChips[chipIndex] = { ...newChips[chipIndex], count: v || 1 }
+                                    newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                    setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                  }}
+                                  style={{ width: 60 }}
+                                />
+                                <Button
+                                  type="text"
+                                  danger
+                                  size="small"
+                                  icon={<MinusCircleOutlined />}
+                                  onClick={() => {
+                                    const newBoards = [...rackConfig.boards]
+                                    const newChips = newBoards[boardIndex].chips.filter((_, i) => i !== chipIndex)
+                                    newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                    setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                  }}
+                                  disabled={board.chips.length <= 1}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      ) : (
+                        /* 展示模式 */
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 13 }}>{board.name} ×{board.count || 1}</Text>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <Text type="secondary" style={{ fontSize: 12 }}>{board.u_height}U</Text>
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              {board.chips.map(c => `${c.name}×${c.count}`).join(' ')}
+                            </Text>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
 
-                {/* 4U 板卡配置 */}
-                <div style={{ padding: 8, background: 'rgba(243,232,255,0.7)', borderRadius: 4 }}>
-                  <div style={configRowStyle}>
-                    <Text style={{ color: '#553c9a' }}>4U 板卡</Text>
-                    <InputNumber
-                      min={0}
-                      max={10}
-                      value={boardConfigs.u4.count}
-                      onChange={(v) => updateBoardCount('u4', v)}
-                      size="small"
-                      style={{ width: 60 }}
-                    />
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-                    {(Object.keys(CHIP_TYPE_COLORS) as ChipType[]).map(type => (
-                      <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: 2, background: CHIP_TYPE_COLORS[type] }} />
-                        <Text style={{ fontSize: 11 }}>{CHIP_TYPE_NAMES[type]}</Text>
-                        <InputNumber
-                          min={0}
-                          max={32}
-                          value={boardConfigs.u4.chips[type]}
-                          onChange={(v) => updateBoardChip('u4', type, v)}
-                          size="small"
-                          style={{ width: 50 }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {totalUsedU > 42 && (
-                  <Text type="danger" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>
-                    超出机柜容量！
-                  </Text>
+                {/* 编辑模式：添加板卡按钮 */}
+                {rackEditMode && (
+                  <Button
+                    type="dashed"
+                    size="small"
+                    icon={<PlusOutlined />}
+                    onClick={() => {
+                      const newBoard: FlexBoardConfig = {
+                        id: `board_${Date.now()}`,
+                        name: '新板卡',
+                        u_height: 2,
+                        count: 1,
+                        chips: [{ name: 'NPU', count: 8 }],
+                      }
+                      setRackConfig(prev => ({ ...prev, boards: [...prev.boards, newBoard] }))
+                    }}
+                    style={{ width: '100%', marginTop: 4 }}
+                  >
+                    添加板卡类型
+                  </Button>
                 )}
               </div>
 
               {/* Board间连接配置 */}
-              <div style={{ padding: 12, background: '#f5f5f5', borderRadius: 6 }}>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}><ApiOutlined /> 连接配置</Text>
+              <div style={{ padding: 12, background: '#fafafa', borderRadius: 6 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}>连接配置</Text>
                 <SwitchLevelConfig
                   levelKey="rack_level"
                   config={switchConfig.rack_level}
@@ -662,71 +1148,67 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                   configRowStyle={configRowStyle}
                 />
               </div>
+              {/* 连接编辑（当前层级时显示） */}
+              {currentLevel === 'rack' && (
+                <div style={{ marginTop: 12 }}>
+                  <ConnectionEditPanel
+                    manualConnectionConfig={manualConnectionConfig}
+                    onManualConnectionConfigChange={onManualConnectionConfigChange}
+                    connectionMode={connectionMode}
+                    onConnectionModeChange={onConnectionModeChange}
+                    selectedNodes={selectedNodes}
+                    onSelectedNodesChange={onSelectedNodesChange}
+                    onDeleteManualConnection={onDeleteManualConnection}
+                    currentViewConnections={currentViewConnections}
+                    onDeleteConnection={onDeleteConnection}
+                    configRowStyle={configRowStyle}
+                  />
+                </div>
+              )}
             </div>
           ),
         },
         {
-          key: 'types',
-          label: 'Switch配置',
+          key: 'board',
+          label: 'Board层',
           children: (
             <div>
-              <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
-                定义可用的Switch型号
-              </Text>
-              {switchConfig.switch_types.map((swType, index) => (
-                <div key={swType.id} style={{ marginBottom: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <Input
-                      size="small"
-                      placeholder="名称"
-                      value={swType.name}
-                      onChange={(e) => {
-                        const newTypes = [...switchConfig.switch_types]
-                        newTypes[index] = { ...newTypes[index], name: e.target.value }
-                        setSwitchConfig(prev => ({ ...prev, switch_types: newTypes }))
-                      }}
-                      style={{ flex: 1 }}
-                    />
-                    <InputNumber
-                      size="small"
-                      min={8}
-                      max={1024}
-                      value={swType.port_count}
-                      onChange={(v) => {
-                        const newTypes = [...switchConfig.switch_types]
-                        newTypes[index] = { ...newTypes[index], port_count: v || 48 }
-                        setSwitchConfig(prev => ({ ...prev, switch_types: newTypes }))
-                      }}
-                      style={{ width: 100 }}
-                      suffix="端口"
-                    />
-                    <Button
-                      type="text"
-                      danger
-                      size="small"
-                      icon={<MinusCircleOutlined />}
-                      disabled={switchConfig.switch_types.length <= 1}
-                      onClick={() => {
-                        const newTypes = switchConfig.switch_types.filter((_, i) => i !== index)
-                        setSwitchConfig(prev => ({ ...prev, switch_types: newTypes }))
-                      }}
-                    />
-                  </div>
+              {/* Chip配置说明 */}
+              <div style={{ marginBottom: 12, padding: 12, background: '#fafafa', borderRadius: 6 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}>节点配置</Text>
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  Chip配置在Rack层的板卡配置中设置
+                </Text>
+              </div>
+
+              {/* Chip间连接配置 */}
+              <div style={{ padding: 12, background: '#fafafa', borderRadius: 6 }}>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}>连接配置</Text>
+                <SwitchLevelConfig
+                  levelKey="board_level"
+                  config={switchConfig.board_level}
+                  switchTypes={switchConfig.switch_types}
+                  onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, board_level: newConfig }))}
+                  configRowStyle={configRowStyle}
+                />
+              </div>
+              {/* 连接编辑（当前层级时显示） */}
+              {currentLevel === 'board' && (
+                <div style={{ marginTop: 12 }}>
+                  <ConnectionEditPanel
+                    manualConnectionConfig={manualConnectionConfig}
+                    onManualConnectionConfigChange={onManualConnectionConfigChange}
+                    connectionMode={connectionMode}
+                    onConnectionModeChange={onConnectionModeChange}
+                    selectedNodes={selectedNodes}
+                    onSelectedNodesChange={onSelectedNodesChange}
+                    onDeleteManualConnection={onDeleteManualConnection}
+                    currentViewConnections={currentViewConnections}
+                    onDeleteConnection={onDeleteConnection}
+                    configRowStyle={configRowStyle}
+                  />
                 </div>
-              ))}
-              <Button
-                type="dashed"
-                size="small"
-                icon={<PlusOutlined />}
-                onClick={() => {
-                  const newId = `switch_${Date.now()}`
-                  const newTypes = [...switchConfig.switch_types, { id: newId, name: '新Switch', port_count: 48 }]
-                  setSwitchConfig(prev => ({ ...prev, switch_types: newTypes }))
-                }}
-                style={{ width: '100%' }}
-              >
-                添加Switch类型
-              </Button>
+              )}
             </div>
           ),
         },
@@ -734,100 +1216,127 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
     />
   )
 
+  // Switch配置内容（只有Switch类型定义）
+  const switchConfigContent = (
+    <div>
+      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
+        定义可用的Switch型号，在各层级的连接配置中使用
+      </Text>
+      {switchConfig.switch_types.map((swType, index) => (
+        <div key={swType.id} style={{ marginBottom: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <Input
+              size="small"
+              placeholder="名称"
+              value={swType.name}
+              onChange={(e) => {
+                const newTypes = [...switchConfig.switch_types]
+                newTypes[index] = { ...newTypes[index], name: e.target.value }
+                setSwitchConfig(prev => ({ ...prev, switch_types: newTypes }))
+              }}
+              style={{ flex: 1 }}
+            />
+            <InputNumber
+              size="small"
+              min={8}
+              max={1024}
+              value={swType.port_count}
+              onChange={(v) => {
+                const newTypes = [...switchConfig.switch_types]
+                newTypes[index] = { ...newTypes[index], port_count: v || 48 }
+                setSwitchConfig(prev => ({ ...prev, switch_types: newTypes }))
+              }}
+              style={{ width: 100 }}
+              suffix="端口"
+            />
+            <Button
+              type="text"
+              danger
+              size="small"
+              icon={<MinusCircleOutlined />}
+              disabled={switchConfig.switch_types.length <= 1}
+              onClick={() => {
+                const newTypes = switchConfig.switch_types.filter((_, i) => i !== index)
+                setSwitchConfig(prev => ({ ...prev, switch_types: newTypes }))
+              }}
+            />
+          </div>
+        </div>
+      ))}
+      <Button
+        type="dashed"
+        size="small"
+        icon={<PlusOutlined />}
+        onClick={() => {
+          const newId = `switch_${Date.now()}`
+          const newTypes = [...switchConfig.switch_types, { id: newId, name: '新Switch', port_count: 48 }]
+          setSwitchConfig(prev => ({ ...prev, switch_types: newTypes }))
+        }}
+        style={{ width: '100%' }}
+      >
+        添加Switch类型
+      </Button>
+    </div>
+  )
+
   const collapseItems = [
     {
+      key: 'topology',
+      label: (
+        <span>
+          <Text strong>拓扑汇总</Text>
+          <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+            | {summaryText}
+          </Text>
+        </span>
+      ),
+      children: topologyConfigContent,
+    },
+    {
       key: 'layers',
-      label: <Text strong><ApiOutlined /> 层级配置</Text>,
+      label: <Text strong>层级配置</Text>,
       children: layerConfigContent,
+    },
+    {
+      key: 'switch',
+      label: <Text strong>Switch配置</Text>,
+      children: switchConfigContent,
     },
   ]
 
   return (
     <div>
-      <Title level={5} style={{ marginBottom: 16 }}>拓扑配置</Title>
-
-      {/* 统计信息 */}
-      <Card size="small" style={{ marginBottom: 16 }}>
-        <Row gutter={[8, 8]}>
-          <Col span={12}>
-            <Statistic
-              title="Pods"
-              value={stats.pods}
-              prefix={<ClusterOutlined />}
-              valueStyle={{ fontSize: 16 }}
-            />
-          </Col>
-          <Col span={12}>
-            <Statistic
-              title="Racks"
-              value={stats.racks}
-              prefix={<DatabaseOutlined />}
-              valueStyle={{ fontSize: 16 }}
-            />
-          </Col>
-          <Col span={12}>
-            <Statistic
-              title="Boards"
-              value={stats.boards}
-              prefix={<BoardIcon />}
-              valueStyle={{ fontSize: 16 }}
-            />
-          </Col>
-          <Col span={12}>
-            <Statistic
-              title="Chips"
-              value={stats.chips}
-              prefix={<ChipIcon />}
-              valueStyle={{ fontSize: 16 }}
-            />
-          </Col>
-          {stats.switches > 0 && (
-            <Col span={24}>
-              <Statistic
-                title="Switches"
-                value={stats.switches}
-                prefix={<ApiOutlined />}
-                valueStyle={{ fontSize: 16 }}
-              />
-            </Col>
-          )}
-        </Row>
-      </Card>
-
-      {/* 分层级配置 */}
+      {/* 折叠面板 */}
       <Collapse
         items={collapseItems}
         defaultActiveKey={['layers']}
         size="small"
-        style={{ marginBottom: 16 }}
       />
 
-      {/* 操作按钮 */}
-      <Space style={{ width: '100%' }} direction="vertical">
-        <Row gutter={8}>
-          <Col span={12}>
-            <Button
-              block
-              icon={<SaveOutlined />}
-              onClick={() => setSaveModalOpen(true)}
-            >
-              保存配置
-            </Button>
-          </Col>
-          <Col span={12}>
-            <Button
-              block
-              icon={<FolderOpenOutlined />}
-              onClick={() => {
-                loadConfigList()
-                setLoadModalOpen(true)
-              }}
-            >
-              加载配置
-            </Button>
-          </Col>
-        </Row>
-      </Space>
+      {/* 保存/加载配置按钮 */}
+      <Row gutter={8} style={{ marginTop: 16 }}>
+        <Col span={12}>
+          <Button
+            block
+            icon={<SaveOutlined />}
+            onClick={() => setSaveModalOpen(true)}
+          >
+            保存配置
+          </Button>
+        </Col>
+        <Col span={12}>
+          <Button
+            block
+            icon={<FolderOpenOutlined />}
+            onClick={() => {
+              loadConfigList()
+              setLoadModalOpen(true)
+            }}
+          >
+            加载配置
+          </Button>
+        </Col>
+      </Row>
 
       {/* 保存配置模态框 */}
       <Modal

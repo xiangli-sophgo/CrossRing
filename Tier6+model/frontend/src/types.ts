@@ -50,10 +50,39 @@ export interface PodConfig {
 export interface ConnectionConfig {
   source: string;
   target: string;
-  type: 'intra' | 'inter' | 'switch';
+  type: 'intra' | 'inter' | 'switch' | 'manual';
   bandwidth?: number;
   connection_role?: 'uplink' | 'downlink' | 'inter';  // Switch连接角色
+  is_manual?: boolean;  // 是否为手动添加的连接
 }
+
+// ============================================
+// 手动连接配置接口
+// ============================================
+
+// 层级类型
+export type HierarchyLevel = 'datacenter' | 'pod' | 'rack' | 'board';
+
+// 手动连接
+export interface ManualConnection {
+  id: string;
+  source: string;
+  target: string;
+  hierarchy_level: HierarchyLevel;
+  bandwidth?: number;
+  description?: string;
+  created_at?: string;
+}
+
+// 手动连接配置
+export interface ManualConnectionConfig {
+  enabled: boolean;
+  mode: 'append' | 'replace';
+  connections: ManualConnection[];
+}
+
+// 连接模式
+export type ConnectionMode = 'view' | 'select' | 'connect';
 
 // ============================================
 // Switch配置接口
@@ -75,15 +104,26 @@ export interface SwitchLayerConfig {
 }
 
 // 直连拓扑类型
-export type DirectTopologyType = 'none' | 'full_mesh' | 'hw_full_mesh' | 'ring' | 'torus_2d' | 'torus_3d';
+export type DirectTopologyType = 'none' | 'full_mesh' | 'full_mesh_2d' | 'ring' | 'torus_2d' | 'torus_3d';
+
+// Switch与下层节点的连接模式
+export type SwitchConnectionMode = 'full_mesh' | 'custom';
+
+// 自定义Switch连接
+export interface SwitchCustomConnection {
+  device_id: string;        // 设备ID
+  switch_indices: number[]; // 连接到的Switch索引列表
+}
 
 // 层级Switch配置（支持多层Switch，如Leaf-Spine）
 export interface HierarchyLevelSwitchConfig {
   enabled: boolean;                     // 是否启用该层级的Switch
   layers: SwitchLayerConfig[];          // Switch层列表（从下到上）
-  downlink_redundancy: number;          // 下层设备连接几个Switch（冗余度）
+  downlink_redundancy: number;          // 每节点连接数（自定义模式使用）
   connect_to_upper_level: boolean;      // 是否连接到上层的Switch
   direct_topology?: DirectTopologyType; // 无Switch时的直连拓扑类型
+  connection_mode?: SwitchConnectionMode;           // Switch与下层节点的连接模式
+  custom_connections?: SwitchCustomConnection[];    // 自定义连接配置
 }
 
 // 全局Switch配置
@@ -92,6 +132,7 @@ export interface GlobalSwitchConfig {
   datacenter_level: HierarchyLevelSwitchConfig;        // Pod间Switch
   pod_level: HierarchyLevelSwitchConfig;               // Rack间Switch
   rack_level: HierarchyLevelSwitchConfig;              // Board间Switch
+  board_level: HierarchyLevelSwitchConfig;             // Chip间Switch
 }
 
 // Switch实例
@@ -113,6 +154,7 @@ export interface HierarchicalTopology {
   connections: ConnectionConfig[];
   switches: SwitchInstance[];                           // Switch实例列表
   switch_config?: GlobalSwitchConfig;                   // Switch配置
+  manual_connections?: ManualConnectionConfig;          // 手动连接配置
 }
 
 // ============================================

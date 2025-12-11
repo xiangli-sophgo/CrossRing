@@ -13,7 +13,7 @@ import json
 import os
 from datetime import datetime
 
-from models import HierarchicalTopology, PodConfig, RackConfig, BoardConfig, ConnectionConfig, TopologyGenerateRequest, SavedConfig
+from models import HierarchicalTopology, PodConfig, RackConfig, BoardConfig, ConnectionConfig, TopologyGenerateRequest, SavedConfig, ManualConnectionConfig, ManualConnection
 from topology import HierarchicalTopologyGenerator
 
 # 配置文件存储路径
@@ -81,9 +81,18 @@ async def generate_topology(request: TopologyGenerateRequest):
             },
         }
 
+    # 灵活Rack配置
+    rack_config = None
+    if request.rack_config:
+        rack_config = request.rack_config.model_dump()
+
     switch_config = None
     if request.switch_config:
         switch_config = request.switch_config.model_dump()
+
+    manual_connections = None
+    if request.manual_connections:
+        manual_connections = request.manual_connections.model_dump()
 
     result = generator.generate(
         pod_count=request.pod_count,
@@ -92,7 +101,9 @@ async def generate_topology(request: TopologyGenerateRequest):
         chip_types=request.chip_types,
         chip_counts=chip_counts,
         board_configs=board_configs,
+        rack_config=rack_config,
         switch_config=switch_config,
+        manual_connections=manual_connections,
     )
 
     return result
@@ -171,6 +182,74 @@ async def get_rack_dimensions():
 async def health_check():
     """健康检查"""
     return {"status": "ok", "version": "2.0.0"}
+
+
+# ============================================
+# 手动连接接口
+# ============================================
+
+# 手动连接配置文件路径
+MANUAL_CONNECTIONS_FILE = os.path.join(CONFIG_DIR, "_manual_connections.json")
+
+
+@app.get("/api/manual-connections", response_model=ManualConnectionConfig)
+async def get_manual_connections():
+    """获取手动连接配置"""
+    if not os.path.exists(MANUAL_CONNECTIONS_FILE):
+        return ManualConnectionConfig()
+    with open(MANUAL_CONNECTIONS_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return ManualConnectionConfig(**data)
+
+
+@app.post("/api/manual-connections", response_model=ManualConnectionConfig)
+async def save_manual_connections(config: ManualConnectionConfig):
+    """保存手动连接配置"""
+    with open(MANUAL_CONNECTIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(config.model_dump(), f, ensure_ascii=False, indent=2)
+    print(f"手动连接配置已保存: {len(config.connections)} 条连接")
+    return config
+
+
+@app.post("/api/manual-connections/add", response_model=ManualConnectionConfig)
+async def add_manual_connection(connection: ManualConnection):
+    """添加单个手动连接"""
+    config = await get_manual_connections()
+    # 检查是否已存在相同连接
+    for existing in config.connections:
+        if existing.source == connection.source and existing.target == connection.target:
+            raise HTTPException(status_code=400, detail="该连接已存在")
+    # 添加创建时间
+    if not connection.created_at:
+        connection.created_at = datetime.now().isoformat()
+    config.connections.append(connection)
+    return await save_manual_connections(config)
+
+
+@app.delete("/api/manual-connections/{connection_id}")
+async def delete_manual_connection(connection_id: str):
+    """删除单个手动连接"""
+    config = await get_manual_connections()
+    original_count = len(config.connections)
+    config.connections = [c for c in config.connections if c.id != connection_id]
+    if len(config.connections) == original_count:
+        raise HTTPException(status_code=404, detail=f"连接 '{connection_id}' 不存在")
+    await save_manual_connections(config)
+    return {"message": f"连接 '{connection_id}' 已删除"}
+
+
+@app.delete("/api/manual-connections")
+async def clear_manual_connections(hierarchy_level: Optional[str] = None):
+    """清空手动连接（可按层级清空）"""
+    config = await get_manual_connections()
+    if hierarchy_level:
+        config.connections = [c for c in config.connections if c.hierarchy_level != hierarchy_level]
+        message = f"已清空 {hierarchy_level} 层级的手动连接"
+    else:
+        config.connections = []
+        message = "已清空所有手动连接"
+    await save_manual_connections(config)
+    return {"message": message}
 
 
 # ============================================

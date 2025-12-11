@@ -1,10 +1,10 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react'
-import { Layout, Typography, Spin, message, Segmented, Card, Descriptions, Tag } from 'antd'
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { Layout, Typography, Spin, message, Segmented, Card, Descriptions, Tag, Collapse } from 'antd'
 import { AppstoreOutlined, NodeIndexOutlined } from '@ant-design/icons'
 import { Scene3D } from './components/Scene3D'
 import { ConfigPanel } from './components/ConfigPanel'
 import { TopologyGraph, NodeDetail } from './components/TopologyGraph'
-import { HierarchicalTopology } from './types'
+import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel } from './types'
 import { getTopology, generateTopology } from './api/topology'
 import { useViewNavigation } from './hooks/useViewNavigation'
 
@@ -44,6 +44,16 @@ const App: React.FC = () => {
   // 选中的节点详情
   const [selectedNode, setSelectedNode] = useState<NodeDetail | null>(null)
 
+  // 手动连接状态
+  const [manualConnectionConfig, setManualConnectionConfig] = useState<ManualConnectionConfig>({
+    enabled: false,
+    mode: 'append',
+    connections: [],
+  })
+  const [connectionMode, setConnectionMode] = useState<ConnectionMode>('view')
+  const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set())
+  const [sourceNode, setSourceNode] = useState<string | null>(null)
+
   // 加载拓扑数据（优先使用缓存配置生成）
   const loadTopology = useCallback(async () => {
     setLoading(true)
@@ -81,6 +91,18 @@ const App: React.FC = () => {
       u2: { count: number; chips: { npu: number; cpu: number } }
       u4: { count: number; chips: { npu: number; cpu: number } }
     }
+    rack_config?: {
+      total_u: number
+      boards: Array<{
+        id: string
+        name: string
+        u_height: number
+        count: number
+        chips: Array<{ name: string; count: number }>
+      }>
+    }
+    switch_config?: any
+    manual_connections?: ManualConnectionConfig
   }) => {
     try {
       const data = await generateTopology(config)
@@ -95,6 +117,108 @@ const App: React.FC = () => {
   useEffect(() => {
     loadTopology()
   }, [loadTopology])
+
+  // 手动连接处理函数
+  const handleManualConnectionConfigChange = useCallback((config: ManualConnectionConfig) => {
+    setManualConnectionConfig(config)
+    // 禁用时重置编辑状态
+    if (!config.enabled) {
+      setConnectionMode('view')
+      setSelectedNodes(new Set())
+      setSourceNode(null)
+    }
+  }, [])
+
+  const handleConnectionModeChange = useCallback((mode: ConnectionMode) => {
+    setConnectionMode(mode)
+    if (mode === 'view') {
+      setSelectedNodes(new Set())
+      setSourceNode(null)
+    } else if (mode === 'select') {
+      setSourceNode(null)
+    }
+  }, [])
+
+  const handleSelectedNodesChange = useCallback((nodes: Set<string>) => {
+    setSelectedNodes(nodes)
+  }, [])
+
+  const handleSourceNodeChange = useCallback((nodeId: string | null) => {
+    setSourceNode(nodeId)
+  }, [])
+
+  const handleManualConnect = useCallback((sourceId: string, targetId: string, level: HierarchyLevel) => {
+    // 检查是否已存在手动连接（双向检查）
+    const existsManual = manualConnectionConfig.connections.some(c =>
+      (c.source === sourceId && c.target === targetId) ||
+      (c.source === targetId && c.target === sourceId)
+    )
+    if (existsManual) {
+      message.warning(`手动连接已存在: ${sourceId} ↔ ${targetId}`)
+      return
+    }
+
+    // 检查是否已存在自动连接（双向检查）
+    const existsAuto = topology?.connections?.some(c =>
+      (c.source === sourceId && c.target === targetId) ||
+      (c.source === targetId && c.target === sourceId)
+    )
+    if (existsAuto) {
+      message.warning(`自动连接已存在: ${sourceId} ↔ ${targetId}`)
+      return
+    }
+
+    const newConnection: ManualConnection = {
+      id: `manual_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      source: sourceId,
+      target: targetId,
+      hierarchy_level: level,
+      created_at: new Date().toISOString(),
+    }
+    setManualConnectionConfig(prev => ({
+      ...prev,
+      connections: [...prev.connections, newConnection],
+    }))
+    message.success(`已添加连接: ${sourceId} ↔ ${targetId}`)
+  }, [manualConnectionConfig.connections, topology?.connections])
+
+  const handleDeleteManualConnection = useCallback((connectionId: string) => {
+    setManualConnectionConfig(prev => ({
+      ...prev,
+      connections: prev.connections.filter(c => c.id !== connectionId),
+    }))
+    message.success('已删除连接')
+  }, [])
+
+  // 删除任意连接（自动或手动）
+  const handleDeleteConnection = useCallback((source: string, target: string) => {
+    // 先检查是否是手动连接
+    const manualConn = manualConnectionConfig.connections.find(c =>
+      (c.source === source && c.target === target) ||
+      (c.source === target && c.target === source)
+    )
+    if (manualConn) {
+      // 删除手动连接
+      setManualConnectionConfig(prev => ({
+        ...prev,
+        connections: prev.connections.filter(c => c.id !== manualConn.id),
+      }))
+      message.success('已删除手动连接')
+    } else {
+      // 自动连接：直接从topology.connections中删除
+      setTopology(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          connections: prev.connections.filter(c =>
+            !((c.source === source && c.target === target) ||
+              (c.source === target && c.target === source))
+          ),
+        }
+      })
+      message.success('已删除连接')
+    }
+  }, [manualConnectionConfig.connections])
 
   // 拖拽处理
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -136,6 +260,60 @@ const App: React.FC = () => {
     return 'datacenter'
   }
 
+  // 计算当前视图的连接
+  const currentViewConnections = useMemo(() => {
+    if (!topology) return []
+    const currentLevel = getCurrentLevel()
+
+    if (currentLevel === 'datacenter') {
+      // Datacenter层：Pod间连接
+      const podIds = new Set(topology.pods.map(p => p.id))
+      const dcSwitchIds = new Set(
+        (topology.switches || [])
+          .filter(s => s.hierarchy_level === 'datacenter')
+          .map(s => s.id)
+      )
+      return topology.connections.filter(c => {
+        const sourceInDc = podIds.has(c.source) || dcSwitchIds.has(c.source)
+        const targetInDc = podIds.has(c.target) || dcSwitchIds.has(c.target)
+        return sourceInDc && targetInDc
+      })
+    } else if (currentLevel === 'pod' && navigation.currentPod) {
+      // Pod层：Rack间连接
+      const rackIds = new Set(navigation.currentPod.racks.map(r => r.id))
+      const podSwitchIds = new Set(
+        (topology.switches || [])
+          .filter(s => s.hierarchy_level === 'pod' && s.parent_id === navigation.currentPod!.id)
+          .map(s => s.id)
+      )
+      return topology.connections.filter(c => {
+        const sourceInPod = rackIds.has(c.source) || podSwitchIds.has(c.source)
+        const targetInPod = rackIds.has(c.target) || podSwitchIds.has(c.target)
+        return sourceInPod && targetInPod
+      })
+    } else if (currentLevel === 'rack' && navigation.currentRack) {
+      // Rack层：Board间连接
+      const boardIds = new Set(navigation.currentRack.boards.map(b => b.id))
+      const rackSwitchIds = new Set(
+        (topology.switches || [])
+          .filter(s => s.hierarchy_level === 'rack' && s.parent_id === navigation.currentRack!.id)
+          .map(s => s.id)
+      )
+      return topology.connections.filter(c => {
+        const sourceInRack = boardIds.has(c.source) || rackSwitchIds.has(c.source)
+        const targetInRack = boardIds.has(c.target) || rackSwitchIds.has(c.target)
+        return sourceInRack && targetInRack
+      })
+    } else if (currentLevel === 'board' && navigation.currentBoard) {
+      // Board层：Chip间连接
+      const chipIds = new Set(navigation.currentBoard.chips.map(c => c.id))
+      return topology.connections.filter(c =>
+        chipIds.has(c.source) && chipIds.has(c.target)
+      )
+    }
+    return []
+  }, [topology, navigation.currentPod, navigation.currentRack, navigation.currentBoard])
+
   return (
     <Layout style={{ height: '100vh' }}>
       <Header style={{
@@ -152,8 +330,8 @@ const App: React.FC = () => {
           value={viewMode}
           onChange={(v) => setViewMode(v as '3d' | 'topology')}
           options={[
-            { value: '3d', icon: <AppstoreOutlined />, label: '3D视图' },
-            { value: 'topology', icon: <NodeIndexOutlined />, label: '拓扑图' },
+            { value: '3d', label: '3D视图' },
+            { value: 'topology', label: '拓扑图' },
           ]}
           style={{ background: 'rgba(255,255,255,0.2)' }}
         />
@@ -174,6 +352,15 @@ const App: React.FC = () => {
             onGenerate={handleGenerate}
             loading={loading}
             currentLevel={getCurrentLevel()}
+            manualConnectionConfig={manualConnectionConfig}
+            onManualConnectionConfigChange={handleManualConnectionConfigChange}
+            connectionMode={connectionMode}
+            onConnectionModeChange={handleConnectionModeChange}
+            selectedNodes={selectedNodes}
+            onSelectedNodesChange={handleSelectedNodesChange}
+            onDeleteManualConnection={handleDeleteManualConnection}
+            currentViewConnections={currentViewConnections}
+            onDeleteConnection={handleDeleteConnection}
           />
 
           {/* 节点详情卡片 */}
@@ -181,7 +368,7 @@ const App: React.FC = () => {
             <Card
               title={`节点详情: ${selectedNode.label}`}
               size="small"
-              style={{ margin: '8px 16px 16px 16px' }}
+              style={{ marginTop: 16, background: '#f8f9fa', border: '1px solid #e9ecef' }}
               extra={<a onClick={() => setSelectedNode(null)}>关闭</a>}
             >
               <Descriptions column={1} size="small">
@@ -199,17 +386,24 @@ const App: React.FC = () => {
                 <Descriptions.Item label="连接数">{selectedNode.connections.length}</Descriptions.Item>
               </Descriptions>
               {selectedNode.connections.length > 0 && (
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>连接列表:</div>
-                  <div style={{ maxHeight: 150, overflow: 'auto' }}>
-                    {selectedNode.connections.map((conn, idx) => (
-                      <div key={idx} style={{ fontSize: 12, padding: '2px 0', borderBottom: '1px solid #f0f0f0' }}>
-                        {conn.label}
-                        {conn.bandwidth && <span style={{ color: '#999', marginLeft: 8 }}>{conn.bandwidth}Gbps</span>}
+                <Collapse
+                  size="small"
+                  style={{ marginTop: 8 }}
+                  items={[{
+                    key: 'connections',
+                    label: `连接列表 (${selectedNode.connections.length})`,
+                    children: (
+                      <div style={{ maxHeight: 150, overflow: 'auto' }}>
+                        {selectedNode.connections.map((conn, idx) => (
+                          <div key={idx} style={{ fontSize: 12, padding: '2px 0', borderBottom: '1px solid #f0f0f0' }}>
+                            {conn.label}
+                            {conn.bandwidth && <span style={{ color: '#999', marginLeft: 8 }}>{conn.bandwidth}Gbps</span>}
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    ),
+                  }]}
+                />
               )}
             </Card>
           )}
@@ -290,6 +484,15 @@ const App: React.FC = () => {
               breadcrumbs={navigation.breadcrumbs}
               canGoBack={navigation.canGoBack}
               embedded={true}
+              connectionMode={connectionMode}
+              selectedNodes={selectedNodes}
+              onSelectedNodesChange={handleSelectedNodesChange}
+              sourceNode={sourceNode}
+              onSourceNodeChange={handleSourceNodeChange}
+              onManualConnect={handleManualConnect}
+              manualConnections={manualConnectionConfig.connections}
+              onDeleteManualConnection={handleDeleteManualConnection}
+              onDeleteConnection={handleDeleteConnection}
             />
           )}
         </Content>

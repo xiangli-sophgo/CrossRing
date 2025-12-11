@@ -10,7 +10,8 @@ from models import (
     HierarchicalTopology, PodConfig, RackConfig,
     BoardConfig, ChipConfig, ConnectionConfig, ChipType,
     GlobalSwitchConfig, SwitchInstance, SwitchLayerConfig,
-    HierarchyLevelSwitchConfig, SwitchTypeConfig
+    HierarchyLevelSwitchConfig, SwitchTypeConfig,
+    ManualConnectionConfig
 )
 
 
@@ -37,31 +38,37 @@ class HierarchicalTopologyGenerator:
         chip_types: List[ChipType] = None,
         chip_counts: dict = None,  # 旧格式：每种芯片的数量 {'npu': 8, 'cpu': 0}
         board_configs: dict = None,  # 新格式：按U高度分类的完整配置
-        switch_config: dict = None  # Switch配置
+        rack_config: dict = None,  # 最新格式：灵活Rack配置
+        switch_config: dict = None,  # Switch配置
+        manual_connections: dict = None  # 手动连接配置
     ) -> HierarchicalTopology:
         """根据配置生成拓扑"""
         if chip_types is None:
             chip_types = ['npu', 'cpu']
 
-        # 处理新旧格式兼容
-        if board_configs is not None:
-            # 新格式：从board_configs中提取信息
-            board_config_map = {
-                4: board_configs.get('u4', {'count': 0, 'chips': {'npu': 16, 'cpu': 2}}),
-                2: board_configs.get('u2', {'count': 8, 'chips': {'npu': 8, 'cpu': 0}}),
-                1: board_configs.get('u1', {'count': 0, 'chips': {'npu': 2, 'cpu': 0}}),
-            }
-        else:
-            # 旧格式：使用board_counts和chip_counts
-            if chip_counts is None:
-                chip_counts = {'npu': 8, 'cpu': 0}
-            if board_counts is None:
-                board_counts = {'u1': 0, 'u2': 8, 'u4': 0}
-            board_config_map = {
-                4: {'count': board_counts.get('u4', 0), 'chips': chip_counts},
-                2: {'count': board_counts.get('u2', 8), 'chips': chip_counts},
-                1: {'count': board_counts.get('u1', 0), 'chips': chip_counts},
-            }
+        # 判断使用哪种配置模式
+        use_flex_rack_config = rack_config is not None and rack_config.get('boards')
+
+        # 处理新旧格式兼容（仅在不使用flex模式时）
+        if not use_flex_rack_config:
+            if board_configs is not None:
+                # 新格式：从board_configs中提取信息
+                board_config_map = {
+                    4: board_configs.get('u4', {'count': 0, 'chips': {'npu': 16, 'cpu': 2}}),
+                    2: board_configs.get('u2', {'count': 8, 'chips': {'npu': 8, 'cpu': 0}}),
+                    1: board_configs.get('u1', {'count': 0, 'chips': {'npu': 2, 'cpu': 0}}),
+                }
+            else:
+                # 旧格式：使用board_counts和chip_counts
+                if chip_counts is None:
+                    chip_counts = {'npu': 8, 'cpu': 0}
+                if board_counts is None:
+                    board_counts = {'u1': 0, 'u2': 8, 'u4': 0}
+                board_config_map = {
+                    4: {'count': board_counts.get('u4', 0), 'chips': chip_counts},
+                    2: {'count': board_counts.get('u2', 8), 'chips': chip_counts},
+                    1: {'count': board_counts.get('u1', 0), 'chips': chip_counts},
+                }
 
         pods = []
         connections = []
@@ -92,49 +99,92 @@ class HierarchicalTopologyGenerator:
                 rack_full_id = f"{pod_id}/{rack_id}"
                 boards = []
 
-                # 按U高度生成板卡，从底部(U1)开始堆叠
-                current_u = 1
-                board_idx = 0
+                # 获取Rack总U数
+                rack_total_u = rack_config.get('total_u', 42) if rack_config else 42
 
-                # 按顺序生成各种U高度的板卡: 4U -> 2U -> 1U (大的在下面)
-                for u_height in [4, 2, 1]:
-                    config = board_config_map[u_height]
-                    count = config.get('count', 0)
-                    board_chip_counts = config.get('chips', {'npu': 8, 'cpu': 0})
+                if use_flex_rack_config:
+                    # ===== 灵活Rack配置模式 =====
+                    current_u = 1
+                    board_idx = 0
+                    for flex_board in rack_config['boards']:
+                        u_height = flex_board.get('u_height', 2)
+                        board_name = flex_board.get('name', f'Board')
+                        board_count = flex_board.get('count', 1)
+                        flex_chips = flex_board.get('chips', [])
 
-                    for _ in range(count):
-                        if current_u + u_height - 1 > 42:
-                            break  # 超出机柜容量
+                        # 根据count生成多个相同配置的板卡
+                        for _ in range(board_count):
+                            if current_u + u_height - 1 > rack_total_u:
+                                break  # 超出机柜容量
 
-                        board_id = f"board_{board_idx}"
-                        board_full_id = f"{rack_full_id}/{board_id}"
+                            board_full_id = f"{rack_full_id}/board_{board_idx}"
 
-                        # 生成Board上的Chip（使用该U高度对应的chip配置）
-                        chips = self._generate_board_chips(
-                            board_full_id,
-                            board_chip_counts
-                        )
+                            # 使用灵活配置生成Chip
+                            chips = self._generate_board_chips_flex(board_full_id, flex_chips)
 
-                        boards.append(BoardConfig(
-                            id=board_full_id,
-                            u_position=current_u,
-                            u_height=u_height,
-                            label=f"Board-{board_idx} ({u_height}U)",
-                            chips=chips,
-                        ))
+                            boards.append(BoardConfig(
+                                id=board_full_id,
+                                u_position=current_u,
+                                u_height=u_height,
+                                label=f"{board_name}-{board_idx}",
+                                chips=chips,
+                            ))
 
-                        # 生成Chip间连接
-                        chip_connections = self._generate_chip_connections(chips)
-                        connections.extend(chip_connections)
+                            # 生成Chip间连接（根据board_level配置）
+                            if switch_config is None or not switch_config.get('board_level', {}).get('enabled'):
+                                board_level_topo = switch_config.get('board_level', {}).get('direct_topology', 'none') if switch_config else 'none'
+                                chip_connections = self._generate_chip_connections(chips, board_level_topo)
+                                connections.extend(chip_connections)
 
-                        current_u += u_height
-                        board_idx += 1
+                            current_u += u_height
+                            board_idx += 1
+                else:
+                    # ===== 传统配置模式 =====
+                    # 按U高度生成板卡，从底部(U1)开始堆叠
+                    current_u = 1
+                    board_idx = 0
+
+                    # 按顺序生成各种U高度的板卡: 4U -> 2U -> 1U (大的在下面)
+                    for u_height in [4, 2, 1]:
+                        config = board_config_map[u_height]
+                        count = config.get('count', 0)
+                        board_chip_counts = config.get('chips', {'npu': 8, 'cpu': 0})
+
+                        for _ in range(count):
+                            if current_u + u_height - 1 > rack_total_u:
+                                break  # 超出机柜容量
+
+                            board_id = f"board_{board_idx}"
+                            board_full_id = f"{rack_full_id}/{board_id}"
+
+                            # 生成Board上的Chip（使用该U高度对应的chip配置）
+                            chips = self._generate_board_chips(
+                                board_full_id,
+                                board_chip_counts
+                            )
+
+                            boards.append(BoardConfig(
+                                id=board_full_id,
+                                u_position=current_u,
+                                u_height=u_height,
+                                label=f"Board-{board_idx}",
+                                chips=chips,
+                            ))
+
+                            # 生成Chip间连接（根据board_level配置）
+                            if switch_config is None or not switch_config.get('board_level', {}).get('enabled'):
+                                board_level_topo = switch_config.get('board_level', {}).get('direct_topology', 'none') if switch_config else 'none'
+                                chip_connections = self._generate_chip_connections(chips, board_level_topo)
+                                connections.extend(chip_connections)
+
+                            current_u += u_height
+                            board_idx += 1
 
                 racks.append(RackConfig(
                     id=rack_full_id,
                     position=(rack_idx // grid_cols, rack_idx % grid_cols),
                     label=f"Rack-{rack_idx}",
-                    total_u=42,
+                    total_u=rack_total_u,
                     boards=boards,
                 ))
 
@@ -197,7 +247,10 @@ class HierarchicalTopologyGenerator:
                             devices=board_ids,
                             redundancy=rack_level_config.get('downlink_redundancy', 1),
                             parent_id=rack.id,
-                            hierarchy_level='rack'
+                            hierarchy_level='rack',
+                            connection_mode=rack_level_config.get('connection_mode', 'round_robin'),
+                            group_config=rack_level_config.get('group_config'),
+                            custom_connections=rack_level_config.get('custom_connections')
                         )
                         switches.extend(rack_switches)
                         connections.extend(rack_switch_conns)
@@ -232,7 +285,10 @@ class HierarchicalTopologyGenerator:
                             devices=device_ids,
                             redundancy=pod_level_config.get('downlink_redundancy', 1),
                             parent_id=pod.id,
-                            hierarchy_level='pod'
+                            hierarchy_level='pod',
+                            connection_mode=pod_level_config.get('connection_mode', 'round_robin'),
+                            group_config=pod_level_config.get('group_config'),
+                            custom_connections=pod_level_config.get('custom_connections')
                         )
                         switches.extend(pod_switches)
                         connections.extend(pod_switch_conns)
@@ -260,19 +316,90 @@ class HierarchicalTopologyGenerator:
                         devices=device_ids,
                         redundancy=dc_level_config.get('downlink_redundancy', 1),
                         parent_id='',
-                        hierarchy_level='datacenter'
+                        hierarchy_level='datacenter',
+                        connection_mode=dc_level_config.get('connection_mode', 'round_robin'),
+                        group_config=dc_level_config.get('group_config'),
+                        custom_connections=dc_level_config.get('custom_connections')
                     )
                     switches.extend(dc_switches)
                     connections.extend(dc_switch_conns)
+
+        # 处理手动连接
+        manual_config = None
+        if manual_connections and manual_connections.get('enabled'):
+            manual_config = manual_connections
+            mode = manual_connections.get('mode', 'append')
+            manual_conn_list = manual_connections.get('connections', [])
+
+            if mode == 'replace':
+                # 替换模式：按层级移除自动生成的连接
+                levels_with_manual = set(c.get('hierarchy_level') for c in manual_conn_list)
+                connections = [c for c in connections if not self._is_connection_in_level(c, levels_with_manual, pods)]
+
+            # 添加手动连接
+            for mc in manual_conn_list:
+                connections.append(ConnectionConfig(
+                    source=mc['source'],
+                    target=mc['target'],
+                    type='manual',
+                    bandwidth=mc.get('bandwidth'),
+                    is_manual=True
+                ))
 
         topology = HierarchicalTopology(
             pods=pods,
             connections=connections,
             switches=switches,
-            switch_config=switch_config
+            switch_config=switch_config,
+            manual_connections=manual_config
         )
         self._cached_topology = topology
         return topology
+
+    def _is_connection_in_level(
+        self,
+        connection: ConnectionConfig,
+        levels: set,
+        pods: List[PodConfig]
+    ) -> bool:
+        """判断连接是否属于指定层级"""
+        source = connection.source
+        target = connection.target
+
+        # 根据节点ID格式判断层级
+        # datacenter层：pod_X 之间的连接
+        # pod层：pod_X/rack_Y 之间的连接
+        # rack层：pod_X/rack_Y/board_Z 之间的连接
+        # board层：chip 之间的连接
+
+        source_parts = source.split('/')
+        target_parts = target.split('/')
+
+        # 判断层级
+        if 'datacenter' in levels:
+            # Pod间连接
+            if len(source_parts) == 1 and source.startswith('pod_') and \
+               len(target_parts) == 1 and target.startswith('pod_'):
+                return True
+
+        if 'pod' in levels:
+            # Rack间连接（同一Pod内）
+            if len(source_parts) == 2 and 'rack_' in source and \
+               len(target_parts) == 2 and 'rack_' in target:
+                return True
+
+        if 'rack' in levels:
+            # Board间连接（同一Rack内）
+            if len(source_parts) == 3 and 'board_' in source and \
+               len(target_parts) == 3 and 'board_' in target:
+                return True
+
+        if 'board' in levels:
+            # Chip间连接
+            if 'chip_' in source and 'chip_' in target:
+                return True
+
+        return False
 
     def _generate_board_chips(
         self,
@@ -321,9 +448,57 @@ class HierarchicalTopologyGenerator:
 
         return chips
 
+    def _generate_board_chips_flex(
+        self,
+        board_id: str,
+        flex_chips: List[dict]
+    ) -> List[ChipConfig]:
+        """使用灵活配置生成板卡上的芯片"""
+        chips = []
+
+        # 计算总芯片数
+        total_chips = sum(fc.get('count', 1) for fc in flex_chips)
+        if total_chips == 0:
+            return chips
+
+        # 智能计算网格大小：尽量接近正方形
+        cols = int(math.ceil(math.sqrt(total_chips)))
+
+        # 收集所有芯片
+        chip_list = []
+        for fc in flex_chips:
+            chip_name = fc.get('name', 'CHIP')
+            chip_count = fc.get('count', 1)
+            # 将名称转换为小写作为类型（兼容现有逻辑）
+            chip_type = chip_name.lower()
+            # 只支持 npu 和 cpu 类型，其他类型默认为 npu
+            if chip_type not in ['npu', 'cpu']:
+                chip_type = 'npu'
+
+            for i in range(chip_count):
+                chip_list.append({
+                    'type': chip_type,
+                    'label': f"{chip_name}-{i}",
+                })
+
+        # 存储原始行列位置（整数），前端负责居中计算
+        for idx, chip_info in enumerate(chip_list):
+            row = idx // cols
+            col = idx % cols
+
+            chips.append(ChipConfig(
+                id=f"{board_id}/chip_{idx}",
+                type=chip_info['type'],
+                position=(row, col),
+                label=chip_info['label'],
+            ))
+
+        return chips
+
     def _generate_chip_connections(
         self,
-        chips: List[ChipConfig]
+        chips: List[ChipConfig],
+        topology_type: str = 'none'
     ) -> List[ConnectionConfig]:
         """生成芯片间的连接"""
         connections = []
@@ -332,7 +507,7 @@ class HierarchicalTopologyGenerator:
         npus = [c for c in chips if c.type == 'npu']
         cpus = [c for c in chips if c.type == 'cpu']
 
-        # NPU <-> CPU 连接
+        # NPU <-> CPU 连接（始终存在）
         for npu in npus:
             for cpu in cpus:
                 connections.append(ConnectionConfig(
@@ -341,6 +516,12 @@ class HierarchicalTopologyGenerator:
                     type='intra',
                     bandwidth=64.0,  # PCIe连接
                 ))
+
+        # 根据拓扑类型生成NPU间连接
+        if topology_type != 'none' and len(npus) > 1:
+            npu_ids = [c.id for c in npus]
+            npu_connections = self._generate_direct_connections(npu_ids, topology_type, 'intra', 400.0)
+            connections.extend(npu_connections)
 
         return connections
 
@@ -465,8 +646,8 @@ class HierarchicalTopologyGenerator:
                         bandwidth=bandwidth,
                     ))
 
-        elif topology_type == 'hw_full_mesh':
-            # HW FullMesh：行列全连接（同行全连接 + 同列全连接）
+        elif topology_type == 'full_mesh_2d':
+            # 2D FullMesh：行列全连接（同行全连接 + 同列全连接）
             cols = int(math.ceil(math.sqrt(n)))
             rows = (n + cols - 1) // cols
             # 同行全连接
@@ -564,7 +745,10 @@ class HierarchicalTopologyGenerator:
         devices: List[str],
         redundancy: int,
         parent_id: str,
-        hierarchy_level: str
+        hierarchy_level: str,
+        connection_mode: str = 'round_robin',
+        group_config: dict = None,
+        custom_connections: List[dict] = None
     ) -> Tuple[List[SwitchInstance], List[ConnectionConfig]]:
         """
         通用Switch连接生成算法
@@ -576,6 +760,9 @@ class HierarchicalTopologyGenerator:
             redundancy: 冗余度（每个设备连接几个Switch）
             parent_id: 父节点ID前缀
             hierarchy_level: 层级名称 ('datacenter', 'pod', 'rack')
+            connection_mode: 连接模式 ('round_robin', 'full_mesh', 'group', 'custom')
+            group_config: 分组配置（connection_mode为'group'时使用）
+            custom_connections: 自定义连接列表（connection_mode为'custom'时使用）
 
         Returns:
             (switches, connections) 元组
@@ -615,21 +802,55 @@ class HierarchicalTopologyGenerator:
                 switches.append(switch)
                 layer_switches[layer_name].append(switch)
 
-        # 2. 设备连接到最底层Switch（轮询+冗余）
+        # 2. 设备连接到最底层Switch（根据连接模式）
         bottom_layer = switch_layers[0]['layer_name']
         bottom_switches = layer_switches[bottom_layer]
 
-        for dev_idx, device_id in enumerate(devices):
-            for r in range(min(redundancy, len(bottom_switches))):
-                switch_idx = (dev_idx + r) % len(bottom_switches)
-                switch = bottom_switches[switch_idx]
-                connections.append(ConnectionConfig(
-                    source=device_id,
-                    target=switch.id,
-                    type='switch',
-                    connection_role='downlink'
-                ))
-                switch.downlink_ports_used += 1
+        if connection_mode == 'custom':
+            # 自定义连接：每个设备连接到指定数量的Switch（轮询分配）
+            conn_count = min(redundancy, len(bottom_switches))
+            if custom_connections:
+                # 使用用户指定的连接关系
+                for custom_conn in custom_connections:
+                    device_id = custom_conn.get('device_id')
+                    switch_indices = custom_conn.get('switch_indices', [])
+
+                    if device_id in devices:
+                        for switch_idx in switch_indices:
+                            if switch_idx < len(bottom_switches):
+                                switch = bottom_switches[switch_idx]
+                                connections.append(ConnectionConfig(
+                                    source=device_id,
+                                    target=switch.id,
+                                    type='switch',
+                                    connection_role='downlink'
+                                ))
+                                switch.downlink_ports_used += 1
+            else:
+                # 没有自定义配置时，按每节点连接数轮询分配
+                for dev_idx, device_id in enumerate(devices):
+                    for r in range(conn_count):
+                        switch_idx = (dev_idx + r) % len(bottom_switches)
+                        switch = bottom_switches[switch_idx]
+                        connections.append(ConnectionConfig(
+                            source=device_id,
+                            target=switch.id,
+                            type='switch',
+                            connection_role='downlink'
+                        ))
+                        switch.downlink_ports_used += 1
+
+        else:  # full_mesh (默认)
+            # 全连接：每个设备连接到所有底层Switch
+            for device_id in devices:
+                for switch in bottom_switches:
+                    connections.append(ConnectionConfig(
+                        source=device_id,
+                        target=switch.id,
+                        type='switch',
+                        connection_role='downlink'
+                    ))
+                    switch.downlink_ports_used += 1
 
         # 3. 相邻层Switch全连接（如leaf -> spine）
         for i in range(len(switch_layers) - 1):

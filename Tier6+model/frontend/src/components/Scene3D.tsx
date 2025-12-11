@@ -976,65 +976,37 @@ const NavigationOverlay: React.FC<{
   onBreadcrumbClick: (index: number) => void
   onBack: () => void
   canGoBack: boolean
-}> = ({ breadcrumbs, onBreadcrumbClick, onBack, canGoBack }) => {
+}> = ({ breadcrumbs, onBreadcrumbClick }) => {
   return (
     <div style={{
       position: 'absolute',
       top: 16,
       left: 16,
       zIndex: 100,
-      display: 'flex',
-      alignItems: 'center',
-      gap: 12,
+      background: 'rgba(255, 255, 255, 0.95)',
+      padding: '8px 16px',
+      borderRadius: 8,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
     }}>
-      {/* 返回按钮 */}
-      {canGoBack && (
-        <Tooltip title="返回上级">
-          <Button
-            type="primary"
-            icon={<ArrowLeftOutlined />}
-            onClick={onBack}
-          />
-        </Tooltip>
-      )}
-
-      {/* 面包屑导航 */}
-      <div style={{
-        background: 'rgba(255, 255, 255, 0.95)',
-        padding: '8px 16px',
-        borderRadius: 8,
-        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-      }}>
-        <Breadcrumb
-          items={breadcrumbs.map((item, index) => {
-            // 根据层级选择图标
-            const getIcon = () => {
-              if (index === 0) return <CloudServerOutlined />  // 数据中心
-              switch (item.level) {
-                case 'pod': return <ClusterOutlined />         // Pod - 集群图标
-                case 'rack': return <DatabaseOutlined />       // Rack - 机柜图标
-                case 'board': return <BoardIcon />             // Board - 板卡图标
-                case 'chip': return <ChipIcon />               // Chip - 芯片图标
-                default: return null
-              }
-            }
-            return {
-              title: (
-                <a
-                  onClick={(e) => {
-                    e.preventDefault()
-                    onBreadcrumbClick(index)
-                  }}
-                  style={{ cursor: 'pointer' }}
-                >
-                  {getIcon()}
-                  {' '}{item.label}
-                </a>
-              ),
-            }
-          })}
-        />
-      </div>
+      <Breadcrumb
+        items={breadcrumbs.map((item, index) => ({
+          title: (
+            <a
+              onClick={(e) => {
+                e.preventDefault()
+                onBreadcrumbClick(index)
+              }}
+              style={{
+                cursor: index < breadcrumbs.length - 1 ? 'pointer' : 'default',
+                color: index < breadcrumbs.length - 1 ? '#1890ff' : 'rgba(0, 0, 0, 0.88)',
+                fontWeight: index === breadcrumbs.length - 1 ? 500 : 400,
+              }}
+            >
+              {item.label}
+            </a>
+          ),
+        }))}
+      />
     </div>
   )
 }

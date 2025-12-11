@@ -6,6 +6,8 @@ import {
   BoardConfig,
   ConnectionConfig,
   GlobalSwitchConfig,
+  ManualConnectionConfig,
+  ManualConnection,
 } from '../types'
 
 const api = axios.create({
@@ -26,6 +28,16 @@ export async function generateTopology(config: {
     u1: { count: number; chips: { npu: number; cpu: number } }
     u2: { count: number; chips: { npu: number; cpu: number } }
     u4: { count: number; chips: { npu: number; cpu: number } }
+  }
+  rack_config?: {
+    total_u: number
+    boards: Array<{
+      id: string
+      name: string
+      u_height: number
+      count: number
+      chips: Array<{ name: string; count: number }>
+    }>
   }
   switch_config?: GlobalSwitchConfig
 }): Promise<HierarchicalTopology> {
@@ -122,4 +134,38 @@ export async function saveConfig(config: SavedConfig): Promise<SavedConfig> {
 // 删除配置
 export async function deleteConfig(name: string): Promise<void> {
   await api.delete(`/configs/${encodeURIComponent(name)}`)
+}
+
+// ============================================
+// 手动连接 API
+// ============================================
+
+// 获取手动连接配置
+export async function getManualConnections(): Promise<ManualConnectionConfig> {
+  const response = await api.get('/manual-connections')
+  return response.data
+}
+
+// 保存手动连接配置
+export async function saveManualConnections(config: ManualConnectionConfig): Promise<ManualConnectionConfig> {
+  const response = await api.post('/manual-connections', config)
+  return response.data
+}
+
+// 添加单个手动连接
+export async function addManualConnection(connection: ManualConnection): Promise<ManualConnectionConfig> {
+  const response = await api.post('/manual-connections/add', connection)
+  return response.data
+}
+
+// 删除单个手动连接
+export async function deleteManualConnection(connectionId: string): Promise<void> {
+  await api.delete(`/manual-connections/${encodeURIComponent(connectionId)}`)
+}
+
+// 清空手动连接（可按层级清空）
+export async function clearManualConnections(hierarchyLevel?: string): Promise<void> {
+  const params: Record<string, string> = {}
+  if (hierarchyLevel) params.hierarchy_level = hierarchyLevel
+  await api.delete('/manual-connections', { params })
 }
