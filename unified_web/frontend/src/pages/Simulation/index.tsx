@@ -80,6 +80,47 @@ import type { Experiment } from '@/types'
 const { Title, Text } = Typography
 const { Option } = Select
 
+// 参数遍历配置类型
+interface SweepParam {
+  key: string           // 参数名
+  start: number         // 起始值
+  end: number           // 结束值
+  step: number          // 步长
+  values: number[]      // 计算得到的值列表
+}
+
+// 计算参数值列表
+function calculateSweepValues(start: number, end: number, step: number): number[] {
+  if (step <= 0 || start > end) return [start]
+  const values: number[] = []
+  for (let v = start; v <= end + step * 0.001; v += step) {  // 加小量避免浮点精度问题
+    values.push(Math.round(v * 1000) / 1000)
+  }
+  return values
+}
+
+// 生成笛卡尔积组合
+function generateCombinations(sweepParams: SweepParam[]): Record<string, number>[] {
+  if (sweepParams.length === 0) return []
+  const combinations: Record<string, number>[] = []
+
+  function generate(index: number, current: Record<string, number>) {
+    if (index >= sweepParams.length) {
+      combinations.push({ ...current })
+      return
+    }
+    const param = sweepParams[index]
+    for (const value of param.values) {
+      generate(index + 1, { ...current, [param.key]: value })
+    }
+  }
+  generate(0, {})
+  return combinations
+}
+
+// sleep辅助函数
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
 // 配置参数描述映射
 const CONFIG_TOOLTIPS: Record<string, string> = {
   // Basic Parameters
@@ -238,7 +279,18 @@ const Simulation: React.FC = () => {
   // 已有实验列表（用于实验名称自动完成）
   const [existingExperiments, setExistingExperiments] = useState<Experiment[]>([])
 
+  // 参数遍历状态
+  const [sweepEnabled, setSweepEnabled] = useState(false)
+  const [sweepParams, setSweepParams] = useState<SweepParam[]>([])
+  const [sweepTaskIds, setSweepTaskIds] = useState<string[]>([])
+  const [sweepProgress, setSweepProgress] = useState({ total: 0, completed: 0, running: 0, failed: 0 })
+  const [sweepRunning, setSweepRunning] = useState(false)
+  const [savedSweepConfigs, setSavedSweepConfigs] = useState<{ name: string; params: SweepParam[] }[]>([])
+  const [sweepConfigName, setSweepConfigName] = useState('')
+  const [sweepRestoring, setSweepRestoring] = useState(false)
+
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const sweepPollRef = useRef<NodeJS.Timeout | null>(null)
 
   // 恢复运行中的任务
   const restoreRunningTask = async () => {
@@ -277,6 +329,9 @@ const Simulation: React.FC = () => {
     return () => {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current)
+      }
+      if (sweepPollRef.current) {
+        clearInterval(sweepPollRef.current)
       }
     }
   }, [])
@@ -488,6 +543,271 @@ const Simulation: React.FC = () => {
     }
   }
 
+  // 添加遍历参数
+  const addSweepParam = (key: string) => {
+    const currentValue = configValues[key] || 0
+    const newParam: SweepParam = {
+      key,
+      start: currentValue,
+      end: currentValue,
+      step: 1,
+      values: [currentValue]
+    }
+    setSweepParams([...sweepParams, newParam])
+  }
+
+  // 更新遍历参数
+  const updateSweepParam = (index: number, field: 'start' | 'end' | 'step', value: number | null) => {
+    const newParams = [...sweepParams]
+    const param = newParams[index]
+    if (value !== null) {
+      param[field] = value
+      param.values = calculateSweepValues(param.start, param.end, param.step)
+    }
+    setSweepParams(newParams)
+  }
+
+  // 删除遍历参数
+  const removeSweepParam = (index: number) => {
+    setSweepParams(sweepParams.filter((_, i) => i !== index))
+  }
+
+  // 保存遍历配置到localStorage
+  const saveSweepConfig = (name: string) => {
+    if (!name.trim()) {
+      message.warning('请输入配置名称')
+      return
+    }
+    if (sweepParams.length === 0) {
+      message.warning('没有可保存的遍历参数')
+      return
+    }
+    const configs = [...savedSweepConfigs]
+    const existingIndex = configs.findIndex(c => c.name === name)
+    if (existingIndex >= 0) {
+      configs[existingIndex] = { name, params: sweepParams }
+    } else {
+      configs.push({ name, params: sweepParams })
+    }
+    setSavedSweepConfigs(configs)
+    localStorage.setItem('sweepConfigs', JSON.stringify(configs))
+    setSweepConfigName('')
+    message.success(`遍历配置 "${name}" 已保存`)
+  }
+
+  // 加载遍历配置
+  const loadSweepConfig = (name: string) => {
+    const config = savedSweepConfigs.find(c => c.name === name)
+    if (config) {
+      setSweepParams(config.params)
+      message.success(`已加载配置 "${name}"`)
+    }
+  }
+
+  // 删除遍历配置
+  const deleteSweepConfig = (name: string) => {
+    const configs = savedSweepConfigs.filter(c => c.name !== name)
+    setSavedSweepConfigs(configs)
+    localStorage.setItem('sweepConfigs', JSON.stringify(configs))
+    message.success(`配置 "${name}" 已删除`)
+  }
+
+  // 初始化时加载保存的配置
+  useEffect(() => {
+    const saved = localStorage.getItem('sweepConfigs')
+    if (saved) {
+      try {
+        setSavedSweepConfigs(JSON.parse(saved))
+      } catch {
+        // ignore
+      }
+    }
+  }, [])
+
+  // 计算总组合数
+  const totalCombinations = sweepParams.length > 0
+    ? sweepParams.reduce((acc, param) => acc * param.values.length, 1)
+    : 0
+
+  // 获取可遍历的参数列表（数值类型）
+  const availableParams = Object.keys(configValues).filter(key => {
+    const value = configValues[key]
+    return typeof value === 'number' && !sweepParams.find(p => p.key === key)
+  })
+
+  // 批量任务状态轮询
+  const startSweepPolling = (taskIds: string[]) => {
+    if (sweepPollRef.current) {
+      clearInterval(sweepPollRef.current)
+    }
+
+    const poll = async () => {
+      let completed = 0
+      let running = 0
+      let failed = 0
+
+      for (const taskId of taskIds) {
+        try {
+          const status = await getTaskStatus(taskId)
+          if (status.status === 'completed') completed++
+          else if (['running', 'pending'].includes(status.status)) running++
+          else failed++
+        } catch {
+          failed++
+        }
+      }
+
+      setSweepProgress({ total: taskIds.length, completed, running, failed })
+
+      if (completed + failed >= taskIds.length) {
+        if (sweepPollRef.current) {
+          clearInterval(sweepPollRef.current)
+          sweepPollRef.current = null
+        }
+        setSweepRunning(false)
+        sessionStorage.removeItem('sweepTaskIds')
+        message.success(`参数遍历完成: ${completed} 成功, ${failed} 失败`)
+        loadHistory()
+      }
+    }
+
+    poll()
+    sweepPollRef.current = setInterval(poll, 3000)
+  }
+
+  // 恢复参数遍历任务（放在startSweepPolling之后确保函数可用）
+  useEffect(() => {
+    const restoreSweepTasks = async () => {
+      const savedTaskIds = sessionStorage.getItem('sweepTaskIds')
+      if (!savedTaskIds) return
+
+      try {
+        const taskIds: string[] = JSON.parse(savedTaskIds)
+        if (taskIds.length === 0) return
+
+        setSweepRestoring(true)
+        setSweepTaskIds(taskIds)
+
+        // 检查任务状态
+        let completed = 0
+        let running = 0
+        let failed = 0
+
+        for (const taskId of taskIds) {
+          try {
+            const status = await getTaskStatus(taskId)
+            if (status.status === 'completed') completed++
+            else if (['running', 'pending'].includes(status.status)) running++
+            else failed++
+          } catch {
+            failed++
+          }
+        }
+
+        setSweepProgress({ total: taskIds.length, completed, running, failed })
+
+        // 如果还有任务在运行，继续轮询
+        if (running > 0) {
+          setSweepRunning(true)
+          startSweepPolling(taskIds)
+          message.info('已恢复参数遍历任务')
+        } else {
+          // 所有任务已完成
+          sessionStorage.removeItem('sweepTaskIds')
+        }
+
+        setSweepRestoring(false)
+      } catch (error) {
+        console.error('恢复参数遍历任务失败:', error)
+        sessionStorage.removeItem('sweepTaskIds')
+        setSweepRestoring(false)
+      }
+    }
+
+    restoreSweepTasks()
+  }, [])
+
+  // 批量执行参数遍历
+  const handleSweepSubmit = async (values: any) => {
+    if (selectedFiles.length === 0) {
+      message.warning('请选择流量文件')
+      return
+    }
+
+    const combinations = generateCombinations(sweepParams)
+    if (combinations.length === 0) {
+      message.warning('请配置遍历参数')
+      return
+    }
+
+    // 超过100组时确认
+    if (combinations.length > 100) {
+      Modal.confirm({
+        title: '组合数量较多',
+        content: `将生成 ${combinations.length} 组参数组合，确定继续？`,
+        onOk: () => executeSweep(values, combinations)
+      })
+      return
+    }
+
+    await executeSweep(values, combinations)
+  }
+
+  const executeSweep = async (values: any, combinations: Record<string, number>[]) => {
+    setSweepRunning(true)
+    setSweepTaskIds([])
+    setSweepProgress({ total: combinations.length, completed: 0, running: 0, failed: 0 })
+
+    const topology = `${values.rows}x${values.cols}`
+    const batchId = Date.now().toString()  // 批次ID，用于标识同一次参数遍历的所有任务
+    const experimentName = values.experiment_name || `参数遍历_${new Date().toLocaleString()}`
+    const taskIds: string[] = []
+
+    for (let i = 0; i < combinations.length; i++) {
+      const combo = combinations[i]
+      const mergedOverrides = { ...configValues, ...combo }
+
+      const request: SimulationRequest = {
+        mode: values.mode,
+        topology,
+        config_path: values.config_path,
+        config_overrides: mergedOverrides,
+        die_config_path: values.mode === 'dcin' ? values.die_config_path : undefined,
+        die_config_overrides: values.mode === 'dcin' && Object.keys(dieConfigValues).length > 0 ? dieConfigValues : undefined,
+        traffic_source: 'file',
+        traffic_files: selectedFiles,
+        max_time: values.max_time,
+        save_to_db: values.save_to_db,
+        experiment_name: experimentName,
+        experiment_description: `[batch:${batchId}] 参数组合 ${i + 1}/${combinations.length}: ${JSON.stringify(combo)}`,
+        max_workers: values.max_workers,
+      }
+
+      try {
+        const response = await runSimulation(request)
+        taskIds.push(response.task_id)
+        setSweepTaskIds([...taskIds])
+        // 保存到sessionStorage以便页面刷新后恢复
+        sessionStorage.setItem('sweepTaskIds', JSON.stringify(taskIds))
+      } catch (error: any) {
+        message.error(`任务 ${i + 1} 创建失败: ${error.response?.data?.detail || error.message}`)
+      }
+
+      // 每5个任务暂停500ms
+      if ((i + 1) % 5 === 0) {
+        await sleep(500)
+      }
+    }
+
+    if (taskIds.length > 0) {
+      message.success(`已创建 ${taskIds.length} 个仿真任务`)
+      startSweepPolling(taskIds)
+    } else {
+      setSweepRunning(false)
+      sessionStorage.removeItem('sweepTaskIds')
+    }
+  }
+
   const getStatusTag = (status: string) => {
     const statusMap: Record<string, { color: string; text: string; icon: React.ReactNode }> = {
       pending: { color: 'default', text: '等待中', icon: <ClockCircleOutlined /> },
@@ -512,6 +832,71 @@ const Simulation: React.FC = () => {
     const secs = elapsed % 60
     return `${mins}分${secs}秒`
   }
+
+  // 按批次分组历史任务
+  interface GroupedTask {
+    key: string
+    experiment_name: string
+    mode: string
+    topology: string
+    created_at: string
+    status: string
+    tasks: TaskHistoryItem[]
+    completed_count: number
+    failed_count: number
+    total_count: number
+    experiment_id?: number
+  }
+
+  const groupedTaskHistory: GroupedTask[] = React.useMemo(() => {
+    const groups: Record<string, GroupedTask> = {}
+
+    taskHistory.forEach(task => {
+      // 用 experiment_name + topology + mode + 创建时间(精确到分钟) 作为分组key
+      // 这样同一批参数遍历的任务会被归到一组
+      const createTime = new Date(task.created_at)
+      const timeKey = `${createTime.getFullYear()}-${createTime.getMonth()}-${createTime.getDate()}-${createTime.getHours()}-${createTime.getMinutes()}`
+      const groupKey = `${task.experiment_name || '未命名'}_${task.mode}_${task.topology}_${timeKey}`
+
+      if (!groups[groupKey]) {
+        groups[groupKey] = {
+          key: groupKey,
+          experiment_name: task.experiment_name || '未命名实验',
+          mode: task.mode,
+          topology: task.topology,
+          created_at: task.created_at,
+          status: 'completed',
+          tasks: [],
+          completed_count: 0,
+          failed_count: 0,
+          total_count: 0,
+          experiment_id: task.results?.experiment_id,
+        }
+      }
+
+      groups[groupKey].tasks.push(task)
+      groups[groupKey].total_count++
+
+      if (task.status === 'completed') {
+        groups[groupKey].completed_count++
+      } else if (task.status === 'failed') {
+        groups[groupKey].failed_count++
+        groups[groupKey].status = 'failed'
+      } else if (['running', 'pending'].includes(task.status)) {
+        groups[groupKey].status = 'running'
+      }
+
+      // 更新experiment_id（取第一个有效的）
+      if (!groups[groupKey].experiment_id && task.results?.experiment_id) {
+        groups[groupKey].experiment_id = task.results.experiment_id
+      }
+    })
+
+    // 转换为数组并按创建时间排序
+    return Object.values(groups).sort((a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )
+  }, [taskHistory])
 
   return (
     <div>
@@ -2018,6 +2403,211 @@ const Simulation: React.FC = () => {
               </Spin>
             )}
 
+            {/* 参数遍历配置 */}
+            <Divider style={{ margin: '16px 0' }} />
+            <Form.Item style={{ marginBottom: 16 }}>
+              <Space>
+                <Switch
+                  checked={sweepEnabled}
+                  onChange={(checked) => {
+                    setSweepEnabled(checked)
+                    if (!checked) {
+                      setSweepParams([])
+                    }
+                  }}
+                />
+                <Text>启用参数遍历</Text>
+                {sweepEnabled && totalCombinations > 0 && (
+                  <Tag color="blue">{totalCombinations} 组参数组合</Tag>
+                )}
+              </Space>
+            </Form.Item>
+
+            {sweepEnabled && (
+              <Collapse
+                size="small"
+                style={{ marginBottom: 16 }}
+                defaultActiveKey={['sweep']}
+                items={[{
+                  key: 'sweep',
+                  label: (
+                    <Space>
+                      <ThunderboltOutlined />
+                      <span>参数遍历配置</span>
+                      {sweepParams.length > 0 && (
+                        <Text type="secondary">
+                          {sweepParams.map(p => `${p.key}[${p.values.length}]`).join(' × ')}
+                        </Text>
+                      )}
+                    </Space>
+                  ),
+                  children: (
+                    <div>
+                      {/* 表头说明 */}
+                      {sweepParams.length > 0 && (
+                        <Row gutter={16} style={{ marginBottom: 8 }}>
+                          <Col span={6}><Text type="secondary" style={{ fontSize: 12 }}>参数名</Text></Col>
+                          <Col span={5}><Text type="secondary" style={{ fontSize: 12 }}>起始值</Text></Col>
+                          <Col span={5}><Text type="secondary" style={{ fontSize: 12 }}>结束值</Text></Col>
+                          <Col span={4}><Text type="secondary" style={{ fontSize: 12 }}>步长</Text></Col>
+                          <Col span={2}><Text type="secondary" style={{ fontSize: 12 }}>数量</Text></Col>
+                          <Col span={2}></Col>
+                        </Row>
+                      )}
+
+                      {/* 已添加的遍历参数 */}
+                      {sweepParams.map((param, idx) => (
+                        <Row key={param.key} gutter={16} style={{ marginBottom: 12 }} align="middle">
+                          <Col span={6}>
+                            <Tooltip title={CONFIG_TOOLTIPS[param.key] || param.key}>
+                              <Text style={{ cursor: 'help', fontSize: 13 }}>{param.key}</Text>
+                            </Tooltip>
+                          </Col>
+                          <Col span={5}>
+                            <InputNumber
+                              value={param.start}
+                              onChange={(v) => updateSweepParam(idx, 'start', v)}
+                              placeholder="起始值"
+                              style={{ width: '100%' }}
+                            />
+                          </Col>
+                          <Col span={5}>
+                            <InputNumber
+                              value={param.end}
+                              onChange={(v) => updateSweepParam(idx, 'end', v)}
+                              placeholder="结束值"
+                              style={{ width: '100%' }}
+                            />
+                          </Col>
+                          <Col span={4}>
+                            <InputNumber
+                              value={param.step}
+                              onChange={(v) => updateSweepParam(idx, 'step', v)}
+                              placeholder="步长"
+                              min={0.001}
+                              style={{ width: '100%' }}
+                            />
+                          </Col>
+                          <Col span={2}>
+                            <Tag color="green">{param.values.length}个</Tag>
+                          </Col>
+                          <Col span={2}>
+                            <Button
+                              type="text"
+                              danger
+                              icon={<MinusSquareOutlined />}
+                              onClick={() => removeSweepParam(idx)}
+                            />
+                          </Col>
+                        </Row>
+                      ))}
+
+                      {/* 添加参数下拉框 */}
+                      <Select
+                        placeholder="+ 添加遍历参数"
+                        style={{ width: 350, marginTop: 8 }}
+                        onChange={(key) => {
+                          addSweepParam(key)
+                        }}
+                        value={undefined}
+                        showSearch
+                        optionFilterProp="children"
+                      >
+                        {availableParams.map(key => (
+                          <Option key={key} value={key}>
+                            {key} (当前: {configValues[key]})
+                          </Option>
+                        ))}
+                      </Select>
+
+                      {/* 预览信息 */}
+                      {totalCombinations > 0 && (
+                        <Alert
+                          type="info"
+                          style={{ marginTop: 16 }}
+                          message={
+                            <Space direction="vertical" size={0}>
+                              <Text>预计生成 <strong>{totalCombinations}</strong> 组参数组合</Text>
+                              <Text type="secondary" style={{ fontSize: 12 }}>
+                                每组执行 {selectedFiles.length} 个流量文件，共 {totalCombinations * selectedFiles.length} 个仿真任务
+                              </Text>
+                            </Space>
+                          }
+                        />
+                      )}
+
+                      {/* 保存/加载配置 */}
+                      <Divider style={{ margin: '16px 0 12px' }} />
+                      <Row gutter={8} align="middle">
+                        <Col flex="auto">
+                          <Space.Compact style={{ width: '100%' }}>
+                            <Input
+                              placeholder="输入配置名称"
+                              value={sweepConfigName}
+                              onChange={(e) => setSweepConfigName(e.target.value)}
+                              onPressEnter={() => saveSweepConfig(sweepConfigName)}
+                              style={{ width: 200 }}
+                            />
+                            <Button
+                              icon={<SaveOutlined />}
+                              onClick={() => saveSweepConfig(sweepConfigName)}
+                              disabled={sweepParams.length === 0}
+                            >
+                              保存
+                            </Button>
+                          </Space.Compact>
+                        </Col>
+                        <Col>
+                          <Select
+                            placeholder="加载已保存配置"
+                            style={{ width: 200 }}
+                            value={undefined}
+                            onChange={loadSweepConfig}
+                            dropdownRender={(menu) => (
+                              <>
+                                {menu}
+                                {savedSweepConfigs.length === 0 && (
+                                  <div style={{ padding: 8, textAlign: 'center' }}>
+                                    <Text type="secondary">暂无保存的配置</Text>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          >
+                            {savedSweepConfigs.map(config => (
+                              <Option key={config.name} value={config.name}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span>{config.name} ({config.params.length}个参数)</span>
+                                  <Button
+                                    type="text"
+                                    size="small"
+                                    danger
+                                    icon={<MinusSquareOutlined />}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      deleteSweepConfig(config.name)
+                                    }}
+                                  />
+                                </div>
+                              </Option>
+                            ))}
+                          </Select>
+                        </Col>
+                      </Row>
+
+                      {sweepParams.length === 0 && (
+                        <Empty
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                          description="请从上方下拉框选择要遍历的参数"
+                          style={{ marginTop: 16 }}
+                        />
+                      )}
+                    </div>
+                  )
+                }]}
+              />
+            )}
+
             <Form.Item name="max_time" label="最大仿真时间 (ns)" rules={[{ required: true }]}>
               <InputNumber min={1000} max={100000} step={1000} style={{ width: '100%' }} />
             </Form.Item>
@@ -2069,22 +2659,43 @@ const Simulation: React.FC = () => {
 
             <Form.Item style={{ marginBottom: 0, marginTop: 8 }}>
               <Space size="middle">
-                <Button
-                  type="primary"
-                  htmlType="submit"
-                  icon={<RocketOutlined />}
-                  loading={loading}
-                  disabled={currentTask?.status === 'running'}
-                  size="large"
-                  style={{
-                    height: 44,
-                    paddingLeft: 24,
-                    paddingRight: 24,
-                    background: currentTask?.status === 'running' ? undefined : `linear-gradient(135deg, ${primaryColor} 0%, #4096ff 100%)`,
-                  }}
-                >
-                  开始仿真
-                </Button>
+                {sweepEnabled ? (
+                  <Button
+                    type="primary"
+                    icon={<ThunderboltOutlined />}
+                    loading={sweepRunning}
+                    disabled={currentTask?.status === 'running' || sweepRunning || totalCombinations === 0}
+                    size="large"
+                    style={{
+                      height: 44,
+                      paddingLeft: 24,
+                      paddingRight: 24,
+                      background: (currentTask?.status === 'running' || sweepRunning) ? undefined : `linear-gradient(135deg, ${warningColor} 0%, #faad14 100%)`,
+                    }}
+                    onClick={() => {
+                      form.validateFields().then(handleSweepSubmit)
+                    }}
+                  >
+                    开始参数扫描 ({totalCombinations}组)
+                  </Button>
+                ) : (
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    icon={<RocketOutlined />}
+                    loading={loading}
+                    disabled={currentTask?.status === 'running'}
+                    size="large"
+                    style={{
+                      height: 44,
+                      paddingLeft: 24,
+                      paddingRight: 24,
+                      background: currentTask?.status === 'running' ? undefined : `linear-gradient(135deg, ${primaryColor} 0%, #4096ff 100%)`,
+                    }}
+                  >
+                    开始仿真
+                  </Button>
+                )}
                 {currentTask?.status === 'running' && (
                   <Button icon={<StopOutlined />} onClick={handleCancel} danger size="large" style={{ height: 44 }}>
                     取消任务
@@ -2094,6 +2705,71 @@ const Simulation: React.FC = () => {
             </Form.Item>
           </Form>
         </Card>
+
+        {/* 参数遍历进度卡片 */}
+        {(sweepTaskIds.length > 0 || sweepRestoring) && (
+          <Card
+            title={
+              <Space>
+                <ThunderboltOutlined style={{ color: sweepRunning || sweepRestoring ? warningColor : successColor }} />
+                <span>参数遍历进度</span>
+                {sweepRestoring ? (
+                  <Tag color="processing" icon={<SyncOutlined spin />}>恢复中</Tag>
+                ) : sweepRunning ? (
+                  <Tag color="processing" icon={<SyncOutlined spin />}>执行中</Tag>
+                ) : (
+                  <Tag color="success" icon={<CheckCircleOutlined />}>已完成</Tag>
+                )}
+              </Space>
+            }
+            style={{ marginBottom: 24 }}
+            loading={sweepRestoring}
+          >
+            <Row gutter={[24, 16]}>
+              <Col span={6}>
+                <Statistic title="总任务数" value={sweepProgress.total} />
+              </Col>
+              <Col span={6}>
+                <Statistic
+                  title="已完成"
+                  value={sweepProgress.completed}
+                  valueStyle={{ color: successColor }}
+                />
+              </Col>
+              <Col span={6}>
+                <Statistic
+                  title="运行中"
+                  value={sweepProgress.running}
+                  valueStyle={{ color: warningColor }}
+                />
+              </Col>
+              <Col span={6}>
+                <Statistic
+                  title="失败"
+                  value={sweepProgress.failed}
+                  valueStyle={{ color: sweepProgress.failed > 0 ? errorColor : undefined }}
+                />
+              </Col>
+            </Row>
+
+            <Progress
+              percent={sweepProgress.total > 0 ? Math.round((sweepProgress.completed + sweepProgress.failed) / sweepProgress.total * 100) : 0}
+              status={sweepRunning ? 'active' : sweepProgress.failed > 0 ? 'exception' : 'success'}
+              strokeColor={sweepRunning ? { from: warningColor, to: '#faad14' } : undefined}
+              style={{ marginTop: 16 }}
+            />
+
+            {!sweepRunning && sweepProgress.completed > 0 && (
+              <Button
+                type="link"
+                onClick={() => navigate('/experiments')}
+                style={{ marginTop: 8, padding: 0 }}
+              >
+                查看实验结果 →
+              </Button>
+            )}
+          </Card>
+        )}
 
         {/* 当前任务状态卡片 */}
         {currentTask && (
@@ -2311,8 +2987,8 @@ const Simulation: React.FC = () => {
         }
       >
         <Table
-          dataSource={taskHistory}
-          rowKey="task_id"
+          dataSource={groupedTaskHistory}
+          rowKey="key"
           loading={loadingHistory}
           pagination={{ pageSize: 5, showSizeChanger: false }}
           columns={[
@@ -2320,7 +2996,7 @@ const Simulation: React.FC = () => {
               title: '实验名称',
               dataIndex: 'experiment_name',
               width: 200,
-              render: (name: string, record: TaskHistoryItem) => (
+              render: (name: string, record: GroupedTask) => (
                 <Space direction="vertical" size={0}>
                   <Text strong>{name || '未命名实验'}</Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>
@@ -2328,18 +3004,28 @@ const Simulation: React.FC = () => {
                       {record.mode.toUpperCase()}
                     </Tag>
                     {record.topology}
+                    {record.total_count > 1 && (
+                      <Tag color="cyan" style={{ marginLeft: 4 }}>
+                        参数遍历
+                      </Tag>
+                    )}
                   </Text>
                 </Space>
               ),
             },
             {
-              title: '结果数',
-              width: 80,
-              render: (_: any, record: TaskHistoryItem) => {
-                const completed = record.results?.completed_files || 0
-                const total = record.results?.total_files || record.traffic_files?.length || 0
-                return <Text>{completed}/{total}</Text>
-              },
+              title: '任务数',
+              width: 100,
+              render: (_: any, record: GroupedTask) => (
+                <Text>
+                  {record.completed_count}/{record.total_count}
+                  {record.failed_count > 0 && (
+                    <Text type="danger" style={{ marginLeft: 4 }}>
+                      ({record.failed_count}失败)
+                    </Text>
+                  )}
+                </Text>
+              ),
             },
             {
               title: '状态',
@@ -2360,13 +3046,13 @@ const Simulation: React.FC = () => {
             {
               title: '操作',
               width: 150,
-              render: (_: any, record: TaskHistoryItem) => (
+              render: (_: any, record: GroupedTask) => (
                 <Space>
-                  {record.status === 'completed' && record.results?.experiment_id && (
+                  {record.status === 'completed' && record.experiment_id && (
                     <Button
                       type="link"
                       size="small"
-                      onClick={() => navigate(`/experiments/${record.results?.experiment_id}`)}
+                      onClick={() => navigate(`/experiments/${record.experiment_id}`)}
                     >
                       查看结果
                     </Button>
@@ -2377,8 +3063,11 @@ const Simulation: React.FC = () => {
                     danger
                     onClick={async () => {
                       try {
-                        await deleteTask(record.task_id)
-                        message.success('任务已删除')
+                        // 删除分组中的所有任务
+                        for (const task of record.tasks) {
+                          await deleteTask(task.task_id)
+                        }
+                        message.success(`已删除 ${record.tasks.length} 个任务`)
                         loadHistory()
                       } catch (error: any) {
                         message.error(error.response?.data?.detail || '删除失败')
