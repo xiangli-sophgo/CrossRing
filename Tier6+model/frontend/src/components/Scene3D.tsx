@@ -1250,6 +1250,22 @@ export const Scene3D: React.FC<Scene3DProps> = ({
       // Pod内部视图 - 相机飞向该Pod中心位置
       const podCenter = nodePositions.pods.get(currentPod.id)
       if (podCenter) {
+        // 单Pod特殊处理：保持与数据中心层相同的视角
+        if (topology.pods.length === 1) {
+          const basePreset = CAMERA_PRESETS['pod']
+          const racksPerPod = topology.pods[0]?.racks.length || 4
+          const scaleFactor = Math.max(1, Math.sqrt(racksPerPod / 4))
+          return {
+            position: new THREE.Vector3(
+              basePreset[0] * scaleFactor,
+              basePreset[1] * scaleFactor,
+              basePreset[2] * scaleFactor
+            ),
+            lookAt: podCenter.clone()
+          }
+        }
+
+        // 多Pod情况：原有逻辑
         const racksCount = currentPod.racks.length
         const distance = 3 + racksCount * 0.5  // 根据Rack数量调整距离
         return {

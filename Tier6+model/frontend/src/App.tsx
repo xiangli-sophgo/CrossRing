@@ -1,10 +1,9 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { Layout, Typography, Spin, message, Segmented, Card, Descriptions, Tag, Collapse } from 'antd'
-import { AppstoreOutlined, NodeIndexOutlined } from '@ant-design/icons'
 import { Scene3D } from './components/Scene3D'
 import { ConfigPanel } from './components/ConfigPanel'
 import { TopologyGraph, NodeDetail } from './components/TopologyGraph'
-import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel } from './types'
+import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType } from './types'
 import { getTopology, generateTopology } from './api/topology'
 import { useViewNavigation } from './hooks/useViewNavigation'
 
@@ -44,15 +43,26 @@ const App: React.FC = () => {
   // 选中的节点详情
   const [selectedNode, setSelectedNode] = useState<NodeDetail | null>(null)
 
-  // 手动连接状态
-  const [manualConnectionConfig, setManualConnectionConfig] = useState<ManualConnectionConfig>({
-    enabled: false,
-    mode: 'append',
-    connections: [],
+  // 手动连接状态 (从缓存加载)
+  const [manualConnectionConfig, setManualConnectionConfig] = useState<ManualConnectionConfig>(() => {
+    try {
+      const cachedStr = localStorage.getItem(CONFIG_CACHE_KEY)
+      if (cachedStr) {
+        const cached = JSON.parse(cachedStr)
+        if (cached.manualConnectionConfig) {
+          return cached.manualConnectionConfig
+        }
+      }
+    } catch (error) {
+      console.error('加载缓存手动连接配置失败:', error)
+    }
+    return { enabled: false, mode: 'append', connections: [] }
   })
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('view')
-  const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set())
-  const [sourceNode, setSourceNode] = useState<string | null>(null)
+  const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set())  // 源节点集合
+  const [targetNodes, setTargetNodes] = useState<Set<string>>(new Set())  // 目标节点集合
+  const [sourceNode, setSourceNode] = useState<string | null>(null)  // 保留兼容
+  const [layoutType, setLayoutType] = useState<LayoutType>('auto')  // 布局类型
 
   // 加载拓扑数据（优先使用缓存配置生成）
   const loadTopology = useCallback(async () => {
@@ -67,6 +77,8 @@ const App: React.FC = () => {
           pod_count: cached.podCount,
           racks_per_pod: cached.racksPerPod,
           board_configs: cached.boardConfigs,
+          switch_config: cached.switchConfig,
+          manual_connections: cached.manualConnectionConfig,
         })
         setTopology(data)
       } else {
@@ -125,6 +137,7 @@ const App: React.FC = () => {
     if (!config.enabled) {
       setConnectionMode('view')
       setSelectedNodes(new Set())
+      setTargetNodes(new Set())
       setSourceNode(null)
     }
   }, [])
@@ -133,14 +146,20 @@ const App: React.FC = () => {
     setConnectionMode(mode)
     if (mode === 'view') {
       setSelectedNodes(new Set())
+      setTargetNodes(new Set())
       setSourceNode(null)
-    } else if (mode === 'select') {
+    } else if (mode === 'select_source') {
+      setTargetNodes(new Set())
       setSourceNode(null)
     }
   }, [])
 
   const handleSelectedNodesChange = useCallback((nodes: Set<string>) => {
     setSelectedNodes(nodes)
+  }, [])
+
+  const handleTargetNodesChange = useCallback((nodes: Set<string>) => {
+    setTargetNodes(nodes)
   }, [])
 
   const handleSourceNodeChange = useCallback((nodeId: string | null) => {
@@ -181,6 +200,63 @@ const App: React.FC = () => {
     }))
     message.success(`已添加连接: ${sourceId} ↔ ${targetId}`)
   }, [manualConnectionConfig.connections, topology?.connections])
+
+  // 批量连接：源节点集合 × 目标节点集合
+  const handleBatchConnect = useCallback((level: HierarchyLevel) => {
+    if (selectedNodes.size === 0 || targetNodes.size === 0) {
+      message.warning('请先选择源节点和目标节点')
+      return
+    }
+
+    let addedCount = 0
+    const newConnections: ManualConnection[] = []
+
+    selectedNodes.forEach(sourceId => {
+      targetNodes.forEach(targetId => {
+        if (sourceId === targetId) return
+
+        // 检查是否已存在
+        const existsManual = manualConnectionConfig.connections.some(c =>
+          (c.source === sourceId && c.target === targetId) ||
+          (c.source === targetId && c.target === sourceId)
+        )
+        const existsAuto = topology?.connections?.some(c =>
+          (c.source === sourceId && c.target === targetId) ||
+          (c.source === targetId && c.target === sourceId)
+        )
+        const existsNew = newConnections.some(c =>
+          (c.source === sourceId && c.target === targetId) ||
+          (c.source === targetId && c.target === sourceId)
+        )
+
+        if (!existsManual && !existsAuto && !existsNew) {
+          newConnections.push({
+            id: `manual_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${addedCount}`,
+            source: sourceId,
+            target: targetId,
+            hierarchy_level: level,
+            created_at: new Date().toISOString(),
+          })
+          addedCount++
+        }
+      })
+    })
+
+    if (newConnections.length > 0) {
+      setManualConnectionConfig(prev => ({
+        ...prev,
+        connections: [...prev.connections, ...newConnections],
+      }))
+      message.success(`已添加 ${newConnections.length} 条连接`)
+    } else {
+      message.warning('所有连接已存在')
+    }
+
+    // 清空选中
+    setSelectedNodes(new Set())
+    setTargetNodes(new Set())
+    setConnectionMode('select_source')
+  }, [selectedNodes, targetNodes, manualConnectionConfig.connections, topology?.connections])
 
   const handleDeleteManualConnection = useCallback((connectionId: string) => {
     setManualConnectionConfig(prev => ({
@@ -358,9 +434,15 @@ const App: React.FC = () => {
             onConnectionModeChange={handleConnectionModeChange}
             selectedNodes={selectedNodes}
             onSelectedNodesChange={handleSelectedNodesChange}
+            targetNodes={targetNodes}
+            onTargetNodesChange={handleTargetNodesChange}
+            onBatchConnect={handleBatchConnect}
             onDeleteManualConnection={handleDeleteManualConnection}
             currentViewConnections={currentViewConnections}
             onDeleteConnection={handleDeleteConnection}
+            layoutType={layoutType}
+            onLayoutTypeChange={setLayoutType}
+            viewMode={viewMode}
           />
 
           {/* 节点详情卡片 */}
@@ -487,12 +569,16 @@ const App: React.FC = () => {
               connectionMode={connectionMode}
               selectedNodes={selectedNodes}
               onSelectedNodesChange={handleSelectedNodesChange}
+              targetNodes={targetNodes}
+              onTargetNodesChange={handleTargetNodesChange}
               sourceNode={sourceNode}
               onSourceNodeChange={handleSourceNodeChange}
               onManualConnect={handleManualConnect}
               manualConnections={manualConnectionConfig.connections}
               onDeleteManualConnection={handleDeleteManualConnection}
               onDeleteConnection={handleDeleteConnection}
+              layoutType={layoutType}
+              onLayoutTypeChange={setLayoutType}
             />
           )}
         </Content>

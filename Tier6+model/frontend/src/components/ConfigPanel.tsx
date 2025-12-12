@@ -86,7 +86,7 @@ const BoardIcon = () => <Icon component={BoardSvg} />
 import {
   HierarchicalTopology, CHIP_TYPE_COLORS, CHIP_TYPE_NAMES, ChipType,
   GlobalSwitchConfig, SwitchTypeConfig, SwitchLayerConfig, HierarchyLevelSwitchConfig,
-  ManualConnectionConfig, ConnectionMode, SwitchConnectionMode
+  ManualConnectionConfig, ConnectionMode, SwitchConnectionMode, HierarchyLevel, LayoutType
 } from '../types'
 import { listConfigs, saveConfig, deleteConfig, SavedConfig } from '../api/topology'
 
@@ -146,9 +146,16 @@ interface ConfigPanelProps {
   onConnectionModeChange?: (mode: ConnectionMode) => void
   selectedNodes?: Set<string>
   onSelectedNodesChange?: (nodes: Set<string>) => void
+  targetNodes?: Set<string>
+  onTargetNodesChange?: (nodes: Set<string>) => void
+  onBatchConnect?: (level: HierarchyLevel) => void
   onDeleteManualConnection?: (connectionId: string) => void
-  currentViewConnections?: { source: string; target: string; type?: string; bandwidth?: number }[]  // 当前视图的连接
+  currentViewConnections?: { source: string; target: string; type?: string; bandwidth?: number; latency?: number }[]  // 当前视图的连接
   onDeleteConnection?: (source: string, target: string) => void  // 删除连接
+  // 布局相关
+  layoutType?: LayoutType
+  onLayoutTypeChange?: (type: LayoutType) => void
+  viewMode?: '3d' | 'topology'
 }
 
 // localStorage缓存key
@@ -203,6 +210,7 @@ const saveCachedConfig = (config: {
   boardConfigs: BoardConfigs
   rackConfig?: RackConfig
   switchConfig?: GlobalSwitchConfig
+  manualConnectionConfig?: ManualConnectionConfig
 }) => {
   try {
     localStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify(config))
@@ -396,10 +404,14 @@ interface ConnectionEditPanelProps {
   onConnectionModeChange?: (mode: ConnectionMode) => void
   selectedNodes?: Set<string>
   onSelectedNodesChange?: (nodes: Set<string>) => void
+  targetNodes?: Set<string>
+  onTargetNodesChange?: (nodes: Set<string>) => void
+  onBatchConnect?: (level: HierarchyLevel) => void
   onDeleteManualConnection?: (id: string) => void
-  currentViewConnections?: Array<{ source: string; target: string; type?: string; bandwidth?: number }>
+  currentViewConnections?: Array<{ source: string; target: string; type?: string; bandwidth?: number; latency?: number }>
   onDeleteConnection?: (source: string, target: string) => void
   configRowStyle: React.CSSProperties
+  currentLevel?: string
 }
 
 const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
@@ -409,162 +421,241 @@ const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
   onConnectionModeChange,
   selectedNodes = new Set<string>(),
   onSelectedNodesChange,
+  targetNodes = new Set<string>(),
+  onTargetNodesChange,
+  onBatchConnect,
   onDeleteManualConnection,
   currentViewConnections = [],
   onDeleteConnection,
   configRowStyle,
+  currentLevel = 'datacenter',
 }) => {
+  // 获取当前层级
+  const getCurrentHierarchyLevel = (): HierarchyLevel => {
+    switch (currentLevel) {
+      case 'datacenter': return 'datacenter'
+      case 'pod': return 'pod'
+      case 'rack': return 'rack'
+      case 'board': return 'board'
+      default: return 'datacenter'
+    }
+  }
   return (
     <div style={{ padding: 12, background: '#fafafa', borderRadius: 6 }}>
       <Text strong style={{ display: 'block', marginBottom: 8 }}>连接编辑</Text>
 
-      {/* 启用开关 */}
-      <div style={configRowStyle}>
-        <Text>编辑模式</Text>
-        <Switch
-          size="small"
-          checked={manualConnectionConfig?.enabled ?? false}
-          onChange={(checked) => {
-            onManualConnectionConfigChange?.({
-              ...(manualConnectionConfig || { enabled: false, mode: 'append', connections: [] }),
-              enabled: checked,
-            })
-          }}
-        />
+      {/* 编辑模式按钮 */}
+      <div style={{ marginBottom: 12 }}>
+        {connectionMode === 'view' ? (
+          <Button
+            type="default"
+            onClick={() => onConnectionModeChange?.('select_source')}
+          >
+            编辑连接
+          </Button>
+        ) : (
+          <Space>
+            <Button
+              type={connectionMode === 'select_source' ? 'primary' : 'default'}
+              onClick={() => onConnectionModeChange?.('select_source')}
+            >
+              选源节点
+            </Button>
+            <Button
+              type={connectionMode === 'select_target' ? 'primary' : 'default'}
+              onClick={() => onConnectionModeChange?.('select_target')}
+              disabled={selectedNodes.size === 0}
+            >
+              选目标节点
+            </Button>
+            <Button onClick={() => onConnectionModeChange?.('view')}>
+              退出
+            </Button>
+          </Space>
+        )}
       </div>
 
-      {manualConnectionConfig?.enabled && (
-        <>
-          {/* 模式切换按钮 */}
-          <Space style={{ marginBottom: 12, marginTop: 8 }}>
-            <Button
-              type={connectionMode === 'select' ? 'primary' : 'default'}
-              size="small"
-              onClick={() => onConnectionModeChange?.('select')}
-            >
-              多选模式
-            </Button>
-            <Button
-              type={connectionMode === 'connect' ? 'primary' : 'default'}
-              size="small"
-              onClick={() => onConnectionModeChange?.('connect')}
-            >
-              连线模式
-            </Button>
-            {connectionMode !== 'view' && (
-              <Button
-                size="small"
-                onClick={() => {
-                  onConnectionModeChange?.('view')
-                  onSelectedNodesChange?.(new Set())
-                }}
-              >
-                退出
-              </Button>
-            )}
-          </Space>
+      {connectionMode !== 'view' && (
+        <div style={{
+          padding: 10,
+          background: '#f0f5ff',
+          borderRadius: 6,
+          marginBottom: 12,
+          border: '1px solid #adc6ff'
+        }}>
+          <Text style={{ fontSize: 13, display: 'block', marginBottom: 6 }}>
+            <strong>操作说明：</strong>
+          </Text>
+          <Text style={{ fontSize: 13, display: 'block', color: connectionMode === 'select_source' ? '#1890ff' : '#444' }}>
+            1. 点击图中节点选为源节点（绿色框）
+          </Text>
+          <Text style={{ fontSize: 13, display: 'block', color: connectionMode === 'select_target' ? '#1890ff' : '#444' }}>
+            2. 切换到"选目标节点"，点击选择目标（蓝色框）
+          </Text>
+          <Text style={{ fontSize: 13, display: 'block', color: '#444' }}>
+            3. 点击下方"确认连接"按钮完成
+          </Text>
+        </div>
+      )}
 
-          {connectionMode !== 'view' && (
-            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 8 }}>
-              {connectionMode === 'select'
-                ? 'Ctrl+点击选择多个源节点'
-                : selectedNodes && selectedNodes.size > 0
-                  ? `已选${selectedNodes.size}个源节点，点击目标节点批量连接`
-                  : '点击源节点，再点击目标节点添加连接'}
+      {/* 选中状态显示 */}
+      {(selectedNodes.size > 0 || targetNodes.size > 0) && (
+        <div style={{ marginBottom: 12, padding: 10, background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Text style={{ fontSize: 14 }}>
+              <strong>源节点: {selectedNodes.size} 个</strong>
+              {selectedNodes.size > 0 && (
+                <span style={{ fontSize: 12, color: '#666', marginLeft: 8 }}>
+                  ({Array.from(selectedNodes).slice(0, 3).join(', ')}{selectedNodes.size > 3 ? '...' : ''})
+                </span>
+              )}
             </Text>
-          )}
+            {selectedNodes.size > 0 && (
+              <Button size="small" type="link" onClick={() => onSelectedNodesChange?.(new Set())}>清空</Button>
+            )}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={{ fontSize: 14 }}>
+              <strong>目标节点: {targetNodes.size} 个</strong>
+              {targetNodes.size > 0 && (
+                <span style={{ fontSize: 12, color: '#666', marginLeft: 8 }}>
+                  ({Array.from(targetNodes).slice(0, 3).join(', ')}{targetNodes.size > 3 ? '...' : ''})
+                </span>
+              )}
+            </Text>
+            {targetNodes.size > 0 && (
+              <Button size="small" type="link" onClick={() => onTargetNodesChange?.(new Set())}>清空</Button>
+            )}
+          </div>
+          {selectedNodes.size > 0 && targetNodes.size > 0 && (() => {
+            // 计算实际会创建的连接数（排除已存在的连接）
+            let newCount = 0
+            let existCount = 0
+            selectedNodes.forEach(sourceId => {
+              targetNodes.forEach(targetId => {
+                if (sourceId === targetId) return
+                // 检查是否已存在于当前视图连接中
+                const existsInView = currentViewConnections.some(c =>
+                  (c.source === sourceId && c.target === targetId) ||
+                  (c.source === targetId && c.target === sourceId)
+                )
+                // 检查是否已存在于手动连接中
+                const existsManual = manualConnectionConfig?.connections?.some(c =>
+                  (c.source === sourceId && c.target === targetId) ||
+                  (c.source === targetId && c.target === sourceId)
+                )
+                if (existsInView || existsManual) {
+                  existCount++
+                } else {
+                  newCount++
+                }
+              })
+            })
+            return (
+              <Button
+                type="primary"
+                style={{ marginTop: 12, width: '100%' }}
+                onClick={() => onBatchConnect?.(getCurrentHierarchyLevel())}
+                disabled={newCount === 0}
+              >
+                确认连接（{newCount} 条新连接{existCount > 0 ? `，${existCount} 条已存在` : ''}）
+              </Button>
+            )
+          })()}
+        </div>
+      )}
 
-          {selectedNodes && selectedNodes.size > 0 && (
-            <div style={{ marginBottom: 12, padding: 8, background: '#e6f7ff', borderRadius: 4 }}>
-              <Text style={{ fontSize: 12 }}>
-                已选中 {selectedNodes.size} 个节点
-              </Text>
-            </div>
-          )}
-
-          {/* 手动添加的连接列表 */}
-          <Collapse
-            size="small"
-            style={{ marginTop: 8 }}
-            items={[{
-              key: 'manual',
-              label: `手动连接 (${manualConnectionConfig?.connections?.length || 0})`,
-              children: (
-                <div style={{ maxHeight: 120, overflow: 'auto' }}>
-                  {manualConnectionConfig?.connections?.map((conn) => (
-                    <div
+      {/* 手动添加的连接列表 */}
+      <Collapse
+        size="small"
+        style={{ marginTop: 8 }}
+        items={[{
+          key: 'manual',
+          label: <span style={{ fontSize: 14 }}>手动连接 ({manualConnectionConfig?.connections?.length || 0})</span>,
+          children: (
+            <div style={{ maxHeight: 180, overflow: 'auto' }}>
+              {manualConnectionConfig?.connections?.map((conn) => (
+                <div
                       key={conn.id}
                       style={{
-                        padding: 6,
+                        padding: 8,
                         background: '#f6ffed',
-                        marginBottom: 4,
+                        marginBottom: 6,
                         borderRadius: 4,
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
                         border: '1px solid #b7eb8f',
                       }}
                     >
-                      <div>
-                        <Text code style={{ fontSize: 12 }}>{conn.source}</Text>
-                        <Text style={{ margin: '0 4px' }}>↔</Text>
-                        <Text code style={{ fontSize: 12 }}>{conn.target}</Text>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <Text code style={{ fontSize: 14 }}>{conn.source}</Text>
+                          <Text style={{ margin: '0 6px', fontSize: 14 }}>↔</Text>
+                          <Text code style={{ fontSize: 14 }}>{conn.target}</Text>
+                        </div>
+                        <Button
+                          type="text"
+                          danger
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          onClick={() => onDeleteManualConnection?.(conn.id)}
+                        />
                       </div>
-                      <Button
-                        type="text"
-                        danger
-                        size="small"
-                        icon={<DeleteOutlined />}
-                        onClick={() => onDeleteManualConnection?.(conn.id)}
-                      />
+                      {(conn.bandwidth || conn.latency) && (
+                        <div style={{ marginTop: 6, fontSize: 13, color: '#666' }}>
+                          {conn.bandwidth && <span style={{ marginRight: 12 }}>带宽: {conn.bandwidth}Gbps</span>}
+                          {conn.latency && <span>延迟: {conn.latency}ns</span>}
+                        </div>
+                      )}
                     </div>
                   ))}
                   {(!manualConnectionConfig?.connections || manualConnectionConfig.connections.length === 0) && (
-                    <Text type="secondary" style={{ fontSize: 11 }}>暂无</Text>
+                    <Text type="secondary" style={{ fontSize: 13 }}>暂无手动连接</Text>
                   )}
                 </div>
               ),
             }, {
               key: 'current',
-              label: `当前连接 (${currentViewConnections.length})`,
+              label: <span style={{ fontSize: 14 }}>当前连接 ({currentViewConnections.length})</span>,
               children: (
-                <div style={{ maxHeight: 120, overflow: 'auto' }}>
+                <div style={{ maxHeight: 180, overflow: 'auto' }}>
                   {currentViewConnections.map((conn, idx) => (
                     <div
                       key={`auto-${idx}`}
                       style={{
-                        padding: 6,
+                        padding: 8,
                         background: '#f5f5f5',
-                        marginBottom: 4,
+                        marginBottom: 6,
                         borderRadius: 4,
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
                       }}
                     >
-                      <div style={{ flex: 1 }}>
-                        <Text code style={{ fontSize: 12 }}>{conn.source}</Text>
-                        <Text style={{ margin: '0 4px' }}>↔</Text>
-                        <Text code style={{ fontSize: 12 }}>{conn.target}</Text>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ flex: 1 }}>
+                          <Text code style={{ fontSize: 14 }}>{conn.source}</Text>
+                          <Text style={{ margin: '0 6px', fontSize: 14 }}>↔</Text>
+                          <Text code style={{ fontSize: 14 }}>{conn.target}</Text>
+                        </div>
+                        <Button
+                          type="text"
+                          danger
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          onClick={() => onDeleteConnection?.(conn.source, conn.target)}
+                        />
                       </div>
-                      <Button
-                        type="text"
-                        danger
-                        size="small"
-                        icon={<DeleteOutlined />}
-                        onClick={() => onDeleteConnection?.(conn.source, conn.target)}
-                      />
+                      {(conn.bandwidth || conn.latency) && (
+                        <div style={{ marginTop: 6, fontSize: 13, color: '#666' }}>
+                          {conn.bandwidth && <span style={{ marginRight: 12 }}>带宽: {conn.bandwidth}Gbps</span>}
+                          {conn.latency && <span>延迟: {conn.latency}ns</span>}
+                        </div>
+                      )}
                     </div>
                   ))}
                   {currentViewConnections.length === 0 && (
-                    <Text type="secondary" style={{ fontSize: 11 }}>暂无</Text>
+                    <Text type="secondary" style={{ fontSize: 13 }}>暂无连接</Text>
                   )}
                 </div>
               ),
             }]}
           />
-        </>
-      )}
     </div>
   )
 }
@@ -580,9 +671,15 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onConnectionModeChange,
   selectedNodes = new Set<string>(),
   onSelectedNodesChange,
+  targetNodes = new Set<string>(),
+  onTargetNodesChange,
+  onBatchConnect,
   onDeleteManualConnection,
   currentViewConnections = [],
   onDeleteConnection,
+  layoutType = 'auto',
+  onLayoutTypeChange,
+  viewMode = 'topology',
 }) => {
   // 从缓存加载初始配置
   const cachedConfig = loadCachedConfig()
@@ -637,8 +734,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
 
   // 配置变化时自动保存到localStorage
   useEffect(() => {
-    saveCachedConfig({ podCount, racksPerPod, boardConfigs, rackConfig, switchConfig })
-  }, [podCount, racksPerPod, boardConfigs, rackConfig, switchConfig])
+    saveCachedConfig({ podCount, racksPerPod, boardConfigs, rackConfig, switchConfig, manualConnectionConfig })
+  }, [podCount, racksPerPod, boardConfigs, rackConfig, switchConfig, manualConnectionConfig])
 
   // 配置变化时自动生成拓扑（防抖500ms）
   const isFirstRender = useRef(true)
@@ -656,11 +753,12 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
         board_configs: boardConfigs,
         rack_config: rackConfig,
         switch_config: switchConfig,
+        manual_connections: manualConnectionConfig,
       })
     }, 500)
 
     return () => clearTimeout(timer)
-  }, [podCount, racksPerPod, boardConfigs, rackConfig, switchConfig, onGenerate])
+  }, [podCount, racksPerPod, boardConfigs, rackConfig, switchConfig, manualConnectionConfig, onGenerate])
 
   // 保存当前配置
   const handleSaveConfig = async () => {
@@ -809,6 +907,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
     </Row>
   )
 
+
   // 层级配置内容（节点配置 + Switch连接配置）
   const layerConfigContent = (
     <Tabs
@@ -858,10 +957,14 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                     onConnectionModeChange={onConnectionModeChange}
                     selectedNodes={selectedNodes}
                     onSelectedNodesChange={onSelectedNodesChange}
+                    targetNodes={targetNodes}
+                    onTargetNodesChange={onTargetNodesChange}
+                    onBatchConnect={onBatchConnect}
                     onDeleteManualConnection={onDeleteManualConnection}
                     currentViewConnections={currentViewConnections}
                     onDeleteConnection={onDeleteConnection}
                     configRowStyle={configRowStyle}
+                    currentLevel={currentLevel}
                   />
                 </div>
               )}
@@ -909,10 +1012,14 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                     onConnectionModeChange={onConnectionModeChange}
                     selectedNodes={selectedNodes}
                     onSelectedNodesChange={onSelectedNodesChange}
+                    targetNodes={targetNodes}
+                    onTargetNodesChange={onTargetNodesChange}
+                    onBatchConnect={onBatchConnect}
                     onDeleteManualConnection={onDeleteManualConnection}
                     currentViewConnections={currentViewConnections}
                     onDeleteConnection={onDeleteConnection}
                     configRowStyle={configRowStyle}
+                    currentLevel={currentLevel}
                   />
                 </div>
               )}
@@ -1158,10 +1265,14 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                     onConnectionModeChange={onConnectionModeChange}
                     selectedNodes={selectedNodes}
                     onSelectedNodesChange={onSelectedNodesChange}
+                    targetNodes={targetNodes}
+                    onTargetNodesChange={onTargetNodesChange}
+                    onBatchConnect={onBatchConnect}
                     onDeleteManualConnection={onDeleteManualConnection}
                     currentViewConnections={currentViewConnections}
                     onDeleteConnection={onDeleteConnection}
                     configRowStyle={configRowStyle}
+                    currentLevel={currentLevel}
                   />
                 </div>
               )}
@@ -1202,10 +1313,14 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                     onConnectionModeChange={onConnectionModeChange}
                     selectedNodes={selectedNodes}
                     onSelectedNodesChange={onSelectedNodesChange}
+                    targetNodes={targetNodes}
+                    onTargetNodesChange={onTargetNodesChange}
+                    onBatchConnect={onBatchConnect}
                     onDeleteManualConnection={onDeleteManualConnection}
                     currentViewConnections={currentViewConnections}
                     onDeleteConnection={onDeleteConnection}
                     configRowStyle={configRowStyle}
+                    currentLevel={currentLevel}
                   />
                 </div>
               )}

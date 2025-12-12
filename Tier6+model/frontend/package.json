@@ -2,7 +2,7 @@
   "name": "tier6-topology-viewer",
   "version": "1.0.0",
   "type": "module",
-  "description": "Tier6+ 3D拓扑配置器",
+  "description": "Tier6+互联建模",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

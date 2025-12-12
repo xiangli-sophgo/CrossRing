@@ -52,6 +52,7 @@ export interface ConnectionConfig {
   target: string;
   type: 'intra' | 'inter' | 'switch' | 'manual';
   bandwidth?: number;
+  latency?: number;  // 延迟 (ns)
   connection_role?: 'uplink' | 'downlink' | 'inter';  // Switch连接角色
   is_manual?: boolean;  // 是否为手动添加的连接
 }
@@ -70,6 +71,7 @@ export interface ManualConnection {
   target: string;
   hierarchy_level: HierarchyLevel;
   bandwidth?: number;
+  latency?: number;  // 延迟 (ns)
   description?: string;
   created_at?: string;
 }
@@ -81,8 +83,11 @@ export interface ManualConnectionConfig {
   connections: ManualConnection[];
 }
 
-// 连接模式
-export type ConnectionMode = 'view' | 'select' | 'connect';
+// 连接模式: view=查看, select_source=选择源节点, select_target=选择目标节点
+export type ConnectionMode = 'view' | 'select' | 'connect' | 'select_source' | 'select_target';
+
+// 布局类型（基础布局，不包含手动模式）
+export type LayoutType = 'auto' | 'circle' | 'grid';
 
 // ============================================
 // Switch配置接口

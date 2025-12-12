@@ -1,6 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react'
-import { Modal, Button, Space, Typography, Breadcrumb } from 'antd'
-import { ZoomInOutlined, ZoomOutOutlined, HomeOutlined } from '@ant-design/icons'
+import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react'
+import { Modal, Button, Space, Typography, Breadcrumb, Segmented, Tooltip, Checkbox } from 'antd'
+import { ZoomInOutlined, ZoomOutOutlined, ReloadOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons'
 import {
   HierarchicalTopology,
   PodConfig,
@@ -11,6 +11,7 @@ import {
   ManualConnection,
   ConnectionMode,
   HierarchyLevel,
+  LayoutType,
 } from '../types'
 
 const { Text } = Typography
@@ -34,7 +35,7 @@ export interface NodeDetail {
   label: string
   type: string
   subType?: string
-  connections: { id: string; label: string; bandwidth?: number }[]
+  connections: { id: string; label: string; bandwidth?: number; latency?: number }[]
   portInfo?: { uplink: number; downlink: number; inter: number }
 }
 
@@ -55,14 +56,18 @@ interface TopologyGraphProps {
   embedded?: boolean  // 嵌入模式（非弹窗）
   // 编辑连接相关
   connectionMode?: ConnectionMode
-  selectedNodes?: Set<string>
+  selectedNodes?: Set<string>  // 源节点集合
   onSelectedNodesChange?: (nodes: Set<string>) => void
-  sourceNode?: string | null
+  targetNodes?: Set<string>  // 目标节点集合
+  onTargetNodesChange?: (nodes: Set<string>) => void
+  sourceNode?: string | null  // 保留兼容
   onSourceNodeChange?: (nodeId: string | null) => void
   onManualConnect?: (sourceId: string, targetId: string, level: HierarchyLevel) => void
   manualConnections?: ManualConnection[]
   onDeleteManualConnection?: (connectionId: string) => void
   onDeleteConnection?: (source: string, target: string) => void  // 删除任意连接（包括自动生成的）
+  layoutType?: LayoutType  // 布局类型
+  onLayoutTypeChange?: (type: LayoutType) => void  // 布局类型变更回调
 }
 
 interface Node {
@@ -89,6 +94,7 @@ interface Edge {
   source: string
   target: string
   bandwidth?: number
+  latency?: number  // 延迟 (ns)
 }
 
 // 布局算法：圆形布局
@@ -318,18 +324,99 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   connectionMode = 'view',
   selectedNodes = new Set<string>(),
   onSelectedNodesChange,
+  targetNodes = new Set<string>(),
+  onTargetNodesChange,
   sourceNode = null,
   onSourceNodeChange,
   onManualConnect,
   manualConnections = [],
   onDeleteManualConnection,
   onDeleteConnection,
+  layoutType = 'auto',
+  onLayoutTypeChange,
 }) => {
   void _onNavigateBack
   void _canGoBack
   const svgRef = useRef<SVGSVGElement>(null)
   const [zoom, setZoom] = useState(1)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; content: string } | null>(null)
+
+  // 手动调整模式开关（内部状态）
+  const [isManualMode, setIsManualMode] = useState(false)
+
+  // 手动布局缓存key（按层级、路径和布局类型区分）
+  const getManualPositionsCacheKey = (layout: LayoutType) => {
+    const pathKey = currentLevel === 'datacenter' ? 'dc' :
+      currentLevel === 'pod' ? `pod_${currentPod?.id}` :
+      currentLevel === 'rack' ? `rack_${currentRack?.id}` :
+      `board_${currentBoard?.id}`
+    return `tier6_manual_positions_${pathKey}_${layout}`
+  }
+
+  // 手动布局：按布局类型分开存储位置（从localStorage加载）
+  const [manualPositionsByLayout, setManualPositionsByLayout] = useState<Record<LayoutType, Record<string, { x: number; y: number }>>>(() => {
+    const result: Record<LayoutType, Record<string, { x: number; y: number }>> = {
+      auto: {},
+      circle: {},
+      grid: {},
+    }
+    try {
+      const pathKey = currentLevel === 'datacenter' ? 'dc' : currentLevel
+      for (const layout of ['auto', 'circle', 'grid'] as LayoutType[]) {
+        const cached = localStorage.getItem(`tier6_manual_positions_${pathKey}_${layout}`)
+        if (cached) result[layout] = JSON.parse(cached)
+      }
+    } catch (e) { /* ignore */ }
+    return result
+  })
+
+  // 当前布局的手动位置（便捷访问）
+  const manualPositions = manualPositionsByLayout[layoutType] || {}
+
+  // 拖动状态
+  const [draggingNode, setDraggingNode] = useState<string | null>(null)
+  const [dragStart, setDragStart] = useState<{ x: number; y: number; nodeX: number; nodeY: number } | null>(null)
+
+  // 撤销/重做历史
+  const [history, setHistory] = useState<Record<string, { x: number; y: number }>[]>([])
+  const [historyIndex, setHistoryIndex] = useState(-1)
+  const maxHistoryLength = 50
+
+  // 辅助线状态（支持水平、垂直和圆形）
+  const [alignmentLines, setAlignmentLines] = useState<{ type: 'h' | 'v' | 'circle'; pos: number; center?: { x: number; y: number } }[]>([])
+
+  // 层级/路径变化时，加载对应的手动位置
+  useEffect(() => {
+    const result: Record<LayoutType, Record<string, { x: number; y: number }>> = {
+      auto: {},
+      circle: {},
+      grid: {},
+    }
+    try {
+      for (const layout of ['auto', 'circle', 'grid'] as LayoutType[]) {
+        const key = getManualPositionsCacheKey(layout)
+        const cached = localStorage.getItem(key)
+        if (cached) result[layout] = JSON.parse(cached)
+      }
+    } catch (e) { /* ignore */ }
+    setManualPositionsByLayout(result)
+    // 重置历史和手动模式
+    setHistory([])
+    setHistoryIndex(-1)
+    setIsManualMode(false)
+  }, [currentLevel, currentPod?.id, currentRack?.id, currentBoard?.id])
+
+  // 手动位置变化时自动保存（只保存当前布局）
+  useEffect(() => {
+    const positions = manualPositionsByLayout[layoutType]
+    if (positions && Object.keys(positions).length > 0) {
+      try {
+        const key = getManualPositionsCacheKey(layoutType)
+        localStorage.setItem(key, JSON.stringify(positions))
+      } catch (e) { /* ignore */ }
+    }
+  }, [manualPositionsByLayout, layoutType])
+
 
   // 获取当前层级对应的 HierarchyLevel
   const getCurrentHierarchyLevel = (): HierarchyLevel => {
@@ -404,6 +491,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
           source: c.source,
           target: c.target,
           bandwidth: c.bandwidth,
+          latency: c.latency,
         }))
 
     } else if (currentLevel === 'pod' && currentPod) {
@@ -459,6 +547,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
           source: c.source,
           target: c.target,
           bandwidth: c.bandwidth,
+          latency: c.latency,
         }))
 
     } else if (currentLevel === 'rack' && currentRack) {
@@ -515,6 +604,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
           source: c.source,
           target: c.target,
           bandwidth: c.bandwidth,
+          latency: c.latency,
         }))
 
     } else if (currentLevel === 'board' && currentBoard) {
@@ -537,6 +627,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
           source: c.source,
           target: c.target,
           bandwidth: c.bandwidth,
+          latency: c.latency,
         }))
     }
 
@@ -563,20 +654,81 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
     // 应用布局
     const hasSwitches = nodeList.some(n => n.isSwitch)
+
     if (hasSwitches) {
       // 有Switch时强制使用分层布局，确保Switch在上方
       nodeList = hierarchicalLayout(nodeList, width, height)
-    } else {
-      // 无Switch时根据直连拓扑类型选择布局
+    } else if (layoutType === 'auto') {
+      // 自动布局：根据直连拓扑类型选择布局
       nodeList = getLayoutForTopology(directTopology, nodeList, width, height)
+    } else if (layoutType === 'circle') {
+      // 强制环形布局
+      const deviceNodes = nodeList.filter(n => !n.isSwitch)
+      const radius = Math.min(width, height) * 0.35
+      nodeList = circleLayout(deviceNodes, width / 2, height / 2, radius)
+    } else if (layoutType === 'grid') {
+      // 强制网格布局
+      const deviceNodes = nodeList.filter(n => !n.isSwitch)
+      nodeList = torusLayout(deviceNodes, width, height)
     }
 
     return { nodes: nodeList, edges: edgeList, title: graphTitle, directTopology }
-  }, [topology, currentLevel, currentPod, currentRack, currentBoard])
+  }, [topology, currentLevel, currentPod, currentRack, currentBoard, layoutType])
+
+  // 切换到手动模式时，如果没有保存的位置，使用当前布局位置作为初始值
+  useEffect(() => {
+    if (isManualMode && Object.keys(manualPositions).length === 0 && nodes.length > 0) {
+      // 没有保存的位置，使用当前布局的位置
+      const currentPositions: Record<string, { x: number; y: number }> = {}
+      nodes.forEach(node => {
+        currentPositions[node.id] = { x: node.x, y: node.y }
+      })
+      setManualPositionsByLayout(prev => ({
+        ...prev,
+        [layoutType]: currentPositions
+      }))
+    }
+  }, [isManualMode, nodes.length, layoutType])
+
+  // 更新当前布局的手动位置
+  const setManualPositions = useCallback((updater: Record<string, { x: number; y: number }> | ((prev: Record<string, { x: number; y: number }>) => Record<string, { x: number; y: number }>)) => {
+    setManualPositionsByLayout(prev => ({
+      ...prev,
+      [layoutType]: typeof updater === 'function' ? updater(prev[layoutType] || {}) : updater
+    }))
+  }, [layoutType])
+
+  // 当节点列表变化时（数量或ID变化），重置手动位置
+  const prevNodeIdsRef = useRef<string>('')
+  useEffect(() => {
+    const currentNodeIds = nodes.map(n => n.id).sort().join(',')
+    if (prevNodeIdsRef.current && prevNodeIdsRef.current !== currentNodeIds) {
+      // 节点列表发生变化，重置当前布局的手动位置
+      setManualPositionsByLayout(prev => ({
+        ...prev,
+        [layoutType]: {}
+      }))
+      setHistory([])
+      setHistoryIndex(-1)
+    }
+    prevNodeIdsRef.current = currentNodeIds
+  }, [nodes, layoutType])
+
+  // 应用手动位置调整后的节点列表
+  const displayNodes = useMemo(() => {
+    if (!isManualMode) return nodes
+    return nodes.map(node => {
+      const manualPos = manualPositions[node.id]
+      if (manualPos) {
+        return { ...node, x: manualPos.x, y: manualPos.y }
+      }
+      return node
+    })
+  }, [nodes, manualPositions, isManualMode])
 
   // 根据节点数量计算缩放系数
   const nodeScale = useMemo(() => {
-    const deviceNodes = nodes.filter(n => !n.isSwitch)
+    const deviceNodes = displayNodes.filter(n => !n.isSwitch)
     const count = deviceNodes.length
     if (count <= 4) return 1
     if (count <= 8) return 0.85
@@ -584,19 +736,194 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
     if (count <= 32) return 0.55
     if (count <= 64) return 0.45
     return 0.35
-  }, [nodes])
+  }, [displayNodes])
 
   // 创建节点位置映射
   const nodePositions = useMemo(() => {
     const map = new Map<string, { x: number; y: number }>()
-    nodes.forEach(node => {
+    displayNodes.forEach(node => {
       map.set(node.id, { x: node.x, y: node.y })
     })
     return map
-  }, [nodes])
+  }, [displayNodes])
 
   const handleZoomIn = () => setZoom(z => Math.min(z + 0.2, 2))
   const handleZoomOut = () => setZoom(z => Math.max(z - 0.2, 0.5))
+
+  // 对齐吸附阈值
+  const SNAP_THRESHOLD = 10
+
+  // 圆形布局的参数（与 circleLayout 函数一致）
+  const CIRCLE_CENTER = { x: 400, y: 300 }
+  const CIRCLE_RADIUS = Math.min(800, 600) * 0.35  // 210
+
+  // 检测对齐并返回吸附后的位置
+  const checkAlignment = (x: number, y: number, excludeNodeId: string) => {
+    const lines: { type: 'h' | 'v' | 'circle'; pos: number; center?: { x: number; y: number } }[] = []
+    let snappedX = x
+    let snappedY = y
+
+    // 环形布局：优先检测圆形轨迹吸附
+    if (layoutType === 'circle') {
+      const dx = x - CIRCLE_CENTER.x
+      const dy = y - CIRCLE_CENTER.y
+      const distance = Math.sqrt(dx * dx + dy * dy)
+
+      // 检测是否接近圆形轨迹
+      if (Math.abs(distance - CIRCLE_RADIUS) < SNAP_THRESHOLD * 2) {
+        // 吸附到圆上：保持角度，调整距离到半径
+        const angle = Math.atan2(dy, dx)
+        snappedX = CIRCLE_CENTER.x + CIRCLE_RADIUS * Math.cos(angle)
+        snappedY = CIRCLE_CENTER.y + CIRCLE_RADIUS * Math.sin(angle)
+        lines.push({ type: 'circle', pos: CIRCLE_RADIUS, center: CIRCLE_CENTER })
+      }
+    }
+
+    // 获取其他节点的位置
+    const otherNodes = displayNodes.filter(n => n.id !== excludeNodeId)
+
+    for (const node of otherNodes) {
+      // 水平对齐检测
+      if (Math.abs(node.y - y) < SNAP_THRESHOLD) {
+        snappedY = node.y
+        lines.push({ type: 'h', pos: node.y })
+      }
+      // 垂直对齐检测
+      if (Math.abs(node.x - x) < SNAP_THRESHOLD) {
+        snappedX = node.x
+        lines.push({ type: 'v', pos: node.x })
+      }
+    }
+
+    return { snappedX, snappedY, lines }
+  }
+
+  // 保存历史记录
+  const saveToHistory = useCallback((positions: Record<string, { x: number; y: number }>) => {
+    setHistory(prev => {
+      // 删除当前位置之后的历史（重做时）
+      const newHistory = prev.slice(0, historyIndex + 1)
+      newHistory.push({ ...positions })
+      // 限制历史长度
+      if (newHistory.length > maxHistoryLength) {
+        newHistory.shift()
+        return newHistory
+      }
+      return newHistory
+    })
+    setHistoryIndex(prev => Math.min(prev + 1, maxHistoryLength - 1))
+  }, [historyIndex])
+
+  // 撤销
+  const handleUndo = useCallback(() => {
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1
+      setHistoryIndex(newIndex)
+      setManualPositions(history[newIndex] || {})
+    } else if (historyIndex === 0) {
+      setHistoryIndex(-1)
+      setManualPositions({})
+    }
+  }, [history, historyIndex])
+
+  // 重做
+  const handleRedo = useCallback(() => {
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1
+      setHistoryIndex(newIndex)
+      setManualPositions(history[newIndex])
+    }
+  }, [history, historyIndex])
+
+  // 键盘快捷键：Ctrl+Z 撤销，Ctrl+Y 重做
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isManualMode) return
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z' && !e.shiftKey) {
+          e.preventDefault()
+          handleUndo()
+        } else if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) {
+          e.preventDefault()
+          handleRedo()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isManualMode, handleUndo, handleRedo])
+
+  // 计算屏幕坐标到SVG坐标的转换比例
+  const getScreenToSvgScale = useCallback(() => {
+    if (!svgRef.current) return { scaleX: 1, scaleY: 1 }
+    const rect = svgRef.current.getBoundingClientRect()
+    // viewBox 尺寸（考虑 zoom）
+    const viewBoxWidth = 800 / zoom
+    const viewBoxHeight = 600 / zoom
+    // 屏幕像素到 SVG 坐标的比例
+    const scaleX = viewBoxWidth / rect.width
+    const scaleY = viewBoxHeight / rect.height
+    return { scaleX, scaleY }
+  }, [zoom])
+
+  // 手动布局拖动处理
+  const handleDragStart = (nodeId: string, e: React.MouseEvent) => {
+    if (!isManualMode || !e.shiftKey) return
+    e.preventDefault()
+    e.stopPropagation()
+    const node = displayNodes.find(n => n.id === nodeId)
+    if (!node) return
+    setDraggingNode(nodeId)
+    setDragStart({ x: e.clientX, y: e.clientY, nodeX: node.x, nodeY: node.y })
+  }
+
+  const handleDragMove = (e: React.MouseEvent) => {
+    if (!draggingNode || !dragStart) return
+    e.preventDefault()
+
+    // 使用正确的坐标转换
+    const { scaleX, scaleY } = getScreenToSvgScale()
+    const dx = (e.clientX - dragStart.x) * scaleX
+    const dy = (e.clientY - dragStart.y) * scaleY
+    const rawX = dragStart.nodeX + dx
+    const rawY = dragStart.nodeY + dy
+
+    // 检测对齐
+    const { snappedX, snappedY, lines } = checkAlignment(rawX, rawY, draggingNode)
+    setAlignmentLines(lines)
+
+    setManualPositions(prev => ({
+      ...prev,
+      [draggingNode]: {
+        x: snappedX,
+        y: snappedY,
+      }
+    }))
+  }
+
+  const handleDragEnd = () => {
+    if (draggingNode) {
+      // 保存到历史记录
+      saveToHistory(manualPositions)
+    }
+    setDraggingNode(null)
+    setDragStart(null)
+    setAlignmentLines([])
+  }
+
+  // 重置当前布局的手动位置
+  const handleResetManualPositions = useCallback(() => {
+    setManualPositionsByLayout(prev => ({
+      ...prev,
+      [layoutType]: {}
+    }))
+    setHistory([])
+    setHistoryIndex(-1)
+    try {
+      const key = getManualPositionsCacheKey(layoutType)
+      localStorage.removeItem(key)
+    } catch (e) { /* ignore */ }
+  }, [layoutType, currentLevel, currentPod?.id, currentRack?.id, currentBoard?.id])
 
   // 工具栏组件
   const toolbar = (
@@ -692,12 +1019,101 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
           />
         </div>
       )}
+
+      {/* 右上角布局选择器悬浮框 */}
+      {embedded && (
+        <div style={{
+          position: 'absolute',
+          top: 16,
+          right: 16,
+          zIndex: 100,
+          background: 'rgba(255, 255, 255, 0.95)',
+          padding: '8px 12px',
+          borderRadius: 8,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Segmented
+              size="small"
+              value={layoutType}
+              onChange={(value) => {
+                onLayoutTypeChange?.(value as LayoutType)
+                // 切换布局时重置历史
+                setHistory([])
+                setHistoryIndex(-1)
+              }}
+              options={[
+                { label: '自动', value: 'auto' },
+                { label: '环形', value: 'circle' },
+                { label: '网格', value: 'grid' },
+              ]}
+            />
+            <div style={{ borderLeft: '1px solid #e8e8e8', height: 20 }} />
+            <Checkbox
+              checked={isManualMode}
+              onChange={(e) => setIsManualMode(e.target.checked)}
+            >
+              <span style={{ fontSize: 12 }}>手动调整</span>
+            </Checkbox>
+            {isManualMode && (
+              <>
+                <Tooltip title="撤销 (Ctrl+Z)">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<UndoOutlined />}
+                    onClick={handleUndo}
+                    disabled={historyIndex < 0}
+                  />
+                </Tooltip>
+                <Tooltip title="重做 (Ctrl+Y)">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<RedoOutlined />}
+                    onClick={handleRedo}
+                    disabled={historyIndex >= history.length - 1}
+                  />
+                </Tooltip>
+                {Object.keys(manualPositions).length > 0 && (
+                  <Tooltip title="重置布局">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      onClick={handleResetManualPositions}
+                    />
+                  </Tooltip>
+                )}
+              </>
+            )}
+          </div>
+          {isManualMode && (
+            <div style={{
+              marginTop: 8,
+              padding: '6px 10px',
+              background: 'linear-gradient(135deg, #e6f7ff 0%, #f0f5ff 100%)',
+              borderRadius: 6,
+              border: '1px solid #91d5ff',
+              fontSize: 12,
+              color: '#1890ff',
+              fontWeight: 500,
+            }}>
+              💡 Shift+拖动 · 自动吸附对齐 · 自动保存
+            </div>
+          )}
+        </div>
+      )}
+
         <svg
           ref={svgRef}
           width="100%"
           height="100%"
           viewBox={`${400 - 400/zoom} ${300 - 300/zoom} ${800 / zoom} ${600 / zoom}`}
           style={{ display: 'block' }}
+          onMouseMove={handleDragMove}
+          onMouseUp={handleDragEnd}
+          onMouseLeave={handleDragEnd}
         >
           {/* 定义箭头标记 */}
           <defs>
@@ -724,183 +1140,243 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             </marker>
           </defs>
 
+          {/* 手动布局时的辅助对齐线 */}
+          {isManualMode && alignmentLines.map((line, idx) => {
+            if (line.type === 'h') {
+              return (
+                <line
+                  key={`align-h-${idx}`}
+                  x1={0}
+                  y1={line.pos}
+                  x2={800}
+                  y2={line.pos}
+                  stroke="#1890ff"
+                  strokeWidth={1}
+                  strokeDasharray="4 4"
+                  opacity={0.8}
+                />
+              )
+            } else if (line.type === 'v') {
+              return (
+                <line
+                  key={`align-v-${idx}`}
+                  x1={line.pos}
+                  y1={0}
+                  x2={line.pos}
+                  y2={600}
+                  stroke="#1890ff"
+                  strokeWidth={1}
+                  strokeDasharray="4 4"
+                  opacity={0.8}
+                />
+              )
+            } else if (line.type === 'circle' && line.center) {
+              return (
+                <circle
+                  key={`align-circle-${idx}`}
+                  cx={line.center.x}
+                  cy={line.center.y}
+                  r={line.pos}
+                  fill="none"
+                  stroke="#52c41a"
+                  strokeWidth={2}
+                  strokeDasharray="8 4"
+                  opacity={0.6}
+                />
+              )
+            }
+            return null
+          })}
+
           {/* 2D Torus：渲染环绕连接的半椭圆弧 */}
           {directTopology === 'torus_2d' && (() => {
-            const deviceNodes = nodes.filter(n => !n.isSwitch)
+            const deviceNodes = displayNodes.filter(n => !n.isSwitch)
             const { cols, rows } = getTorusGridSize(deviceNodes.length)
             if (cols < 2 && rows < 2) return null
 
+            // 获取节点的实际显示位置（优先使用手动位置）
+            const getPos = (node: { id: string; x: number; y: number }) => {
+              if (isManualMode && manualPositions[node.id]) {
+                return manualPositions[node.id]
+              }
+              return { x: node.x, y: node.y }
+            }
+
             // 找出每行和每列的首尾节点位置
-            const rowArcs: { y: number; leftX: number; rightX: number; row: number }[] = []
-            const colArcs: { x: number; topY: number; bottomY: number; col: number }[] = []
+            const rowArcs: { leftX: number; leftY: number; rightX: number; rightY: number; row: number }[] = []
+            const colArcs: { topX: number; topY: number; bottomX: number; bottomY: number; col: number }[] = []
 
             for (let r = 0; r < rows; r++) {
-              const nodesInRow = deviceNodes.filter(n => n.gridRow === r).sort((a, b) => a.x - b.x)
+              const nodesInRow = deviceNodes.filter(n => n.gridRow === r).sort((a, b) => (a.gridCol || 0) - (b.gridCol || 0))
               if (nodesInRow.length >= 2) {
+                const first = nodesInRow[0]
+                const last = nodesInRow[nodesInRow.length - 1]
+                const firstPos = getPos(first)
+                const lastPos = getPos(last)
                 rowArcs.push({
-                  y: nodesInRow[0].y,
-                  leftX: nodesInRow[0].x,
-                  rightX: nodesInRow[nodesInRow.length - 1].x,
+                  leftX: firstPos.x,
+                  leftY: firstPos.y,
+                  rightX: lastPos.x,
+                  rightY: lastPos.y,
                   row: r
                 })
               }
             }
 
             for (let c = 0; c < cols; c++) {
-              const nodesInCol = deviceNodes.filter(n => n.gridCol === c).sort((a, b) => a.y - b.y)
+              const nodesInCol = deviceNodes.filter(n => n.gridCol === c).sort((a, b) => (a.gridRow || 0) - (b.gridRow || 0))
               if (nodesInCol.length >= 2) {
+                const first = nodesInCol[0]
+                const last = nodesInCol[nodesInCol.length - 1]
+                const firstPos = getPos(first)
+                const lastPos = getPos(last)
                 colArcs.push({
-                  x: nodesInCol[0].x,
-                  topY: nodesInCol[0].y,
-                  bottomY: nodesInCol[nodesInCol.length - 1].y,
+                  topX: firstPos.x,
+                  topY: firstPos.y,
+                  bottomX: lastPos.x,
+                  bottomY: lastPos.y,
                   col: c
                 })
               }
             }
 
+            // 通用弧线渲染函数：根据两点位置动态计算控制点
+            const renderArc = (
+              x1: number, y1: number, x2: number, y2: number,
+              key: string, bulgeOffset: number
+            ) => {
+              const midX = (x1 + x2) / 2
+              const midY = (y1 + y2) / 2
+              const dx = x2 - x1
+              const dy = y2 - y1
+              const dist = Math.sqrt(dx * dx + dy * dy)
+              // 弯曲量与距离成比例
+              const bulge = dist * 0.25 + bulgeOffset * 8
+              // 垂直于连线方向的单位向量（选择一个固定方向避免翻转）
+              const perpX = -dy / dist
+              const perpY = dx / dist
+              // 控制点在连线中点的垂直方向上
+              const ctrlX = midX + perpX * bulge
+              const ctrlY = midY + perpY * bulge
+              return (
+                <path
+                  key={key}
+                  d={`M ${x1} ${y1} Q ${ctrlX} ${ctrlY}, ${x2} ${y2}`}
+                  fill="none"
+                  stroke="#999"
+                  strokeWidth={1.5}
+                  strokeOpacity={0.6}
+                />
+              )
+            }
+
             return (
               <g>
-                {/* 行环绕弧 - 曲度根据宽度比例调整 */}
-                {rowArcs.map((arc, i) => {
-                  const width = arc.rightX - arc.leftX
-                  // 曲度与宽度成比例，基础值 + 行号偏移避免重叠
-                  const bulge = width * 0.06 + i * 6
-                  const bottomY = arc.y + bulge
-                  // 控制点向中间靠拢
-                  const ctrl1X = arc.leftX + width * 0.15
-                  const ctrl2X = arc.rightX - width * 0.15
-                  return (
-                    <path
-                      key={`row-arc-${i}`}
-                      d={`M ${arc.leftX} ${arc.y} C ${ctrl1X} ${bottomY}, ${ctrl2X} ${bottomY}, ${arc.rightX} ${arc.y}`}
-                      fill="none"
-                      stroke="#999"
-                      strokeWidth={1.5}
-                      strokeOpacity={0.6}
-                    />
-                  )
-                })}
-                {/* 列环绕弧 - 曲度根据高度比例调整 */}
-                {colArcs.map((arc, i) => {
-                  const height = arc.bottomY - arc.topY
-                  // 曲度与高度成比例
-                  const bulge = height * 0.10 + i * 6
-                  const leftX = arc.x - bulge
-                  // 控制点向中间靠拢
-                  const ctrl1Y = arc.topY + height * 0.15
-                  const ctrl2Y = arc.bottomY - height * 0.15
-                  return (
-                    <path
-                      key={`col-arc-${i}`}
-                      d={`M ${arc.x} ${arc.topY} C ${leftX} ${ctrl1Y}, ${leftX} ${ctrl2Y}, ${arc.x} ${arc.bottomY}`}
-                      fill="none"
-                      stroke="#999"
-                      strokeWidth={1.5}
-                      strokeOpacity={0.6}
-                    />
-                  )
-                })}
+                {/* 行环绕弧 */}
+                {rowArcs.map((arc, i) => renderArc(
+                  arc.leftX, arc.leftY, arc.rightX, arc.rightY,
+                  `row-arc-${i}`, i
+                ))}
+                {/* 列环绕弧 */}
+                {colArcs.map((arc, i) => renderArc(
+                  arc.topX, arc.topY, arc.bottomX, arc.bottomY,
+                  `col-arc-${i}`, i
+                ))}
               </g>
             )
           })()}
 
           {/* 3D Torus：X/Y/Z三个方向的环绕弧线（只有>=3个节点才画环绕弧） */}
           {directTopology === 'torus_3d' && (() => {
-            const deviceNodes = nodes.filter(n => !n.isSwitch)
+            const deviceNodes = displayNodes.filter(n => !n.isSwitch)
             const { dim, layers } = getTorus3DSize(deviceNodes.length)
             if (dim < 2) return null
 
+            // 获取节点的实际显示位置（优先使用手动位置）
+            const getPos = (node: { id: string; x: number; y: number }) => {
+              if (isManualMode && manualPositions[node.id]) {
+                return manualPositions[node.id]
+              }
+              return { x: node.x, y: node.y }
+            }
+
+            // 通用弧线渲染函数
+            const renderArc3D = (
+              x1: number, y1: number, x2: number, y2: number,
+              key: string, bulgeOffset: number
+            ) => {
+              const midX = (x1 + x2) / 2
+              const midY = (y1 + y2) / 2
+              const dx = x2 - x1
+              const dy = y2 - y1
+              const dist = Math.sqrt(dx * dx + dy * dy)
+              if (dist < 1) return null
+              const bulge = dist * 0.25 + bulgeOffset * 5
+              const perpX = -dy / dist
+              const perpY = dx / dist
+              const ctrlX = midX + perpX * bulge
+              const ctrlY = midY + perpY * bulge
+              return (
+                <path
+                  key={key}
+                  d={`M ${x1} ${y1} Q ${ctrlX} ${ctrlY}, ${x2} ${y2}`}
+                  fill="none"
+                  stroke="#999"
+                  strokeWidth={1.5}
+                  strokeOpacity={0.5}
+                />
+              )
+            }
+
             const arcs: JSX.Element[] = []
 
-            // X方向环绕弧（连接同层同行的首尾节点col=0和col=dim-1）
-            // 只有行内节点数>=3才画环绕弧
+            // X方向环绕弧
             for (let z = 0; z < layers; z++) {
               for (let r = 0; r < dim; r++) {
                 const rowNodes = deviceNodes
                   .filter(n => n.gridZ === z && n.gridRow === r)
                   .sort((a, b) => a.gridCol! - b.gridCol!)
                 if (rowNodes.length >= 3) {
-                  const first = rowNodes[0]  // col=0
-                  const last = rowNodes[rowNodes.length - 1]  // col=dim-1
-                  // 在下方画U型弧连接首尾（两端弯曲，中间平缓）
-                  const bulge = 30 + z * 10 + r * 8
-                  const bottomY = Math.max(first.y, last.y) + bulge
-                  // 控制点向中间靠拢，让中间更平
-                  const width = Math.abs(last.x - first.x)
-                  const ctrl1X = first.x + width * 0.15
-                  const ctrl2X = last.x - width * 0.15
-                  arcs.push(
-                    <path
-                      key={`x-arc-z${z}-r${r}`}
-                      d={`M ${first.x} ${first.y} C ${ctrl1X} ${bottomY}, ${ctrl2X} ${bottomY}, ${last.x} ${last.y}`}
-                      fill="none"
-                      stroke="#999"
-                      strokeWidth={1.5}
-                      strokeOpacity={0.5}
-                    />
-                  )
+                  const first = rowNodes[0]
+                  const last = rowNodes[rowNodes.length - 1]
+                  const firstPos = getPos(first)
+                  const lastPos = getPos(last)
+                  const arc = renderArc3D(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `x-arc-z${z}-r${r}`, z + r)
+                  if (arc) arcs.push(arc)
                 }
               }
             }
 
-            // Y方向环绕弧（连接同层同列的首尾节点row=0和row=dim-1）
-            // 只有列内节点数>=3才画环绕弧
+            // Y方向环绕弧
             for (let z = 0; z < layers; z++) {
               for (let c = 0; c < dim; c++) {
                 const colNodes = deviceNodes
                   .filter(n => n.gridZ === z && n.gridCol === c)
                   .sort((a, b) => a.gridRow! - b.gridRow!)
                 if (colNodes.length >= 3) {
-                  const first = colNodes[0]  // row=0
-                  const last = colNodes[colNodes.length - 1]  // row=dim-1
-                  // 在左侧画U型弧连接首尾
-                  const bulge = 30 + z * 10 + c * 8
-                  const leftX = Math.min(first.x, last.x) - bulge
-                  // 控制点向中间靠拢，让中间更平
-                  const height = Math.abs(last.y - first.y)
-                  const ctrl1Y = first.y + height * 0.15
-                  const ctrl2Y = last.y - height * 0.15
-                  arcs.push(
-                    <path
-                      key={`y-arc-z${z}-c${c}`}
-                      d={`M ${first.x} ${first.y} C ${leftX} ${ctrl1Y}, ${leftX} ${ctrl2Y}, ${last.x} ${last.y}`}
-                      fill="none"
-                      stroke="#999"
-                      strokeWidth={1.5}
-                      strokeOpacity={0.5}
-                    />
-                  )
+                  const first = colNodes[0]
+                  const last = colNodes[colNodes.length - 1]
+                  const firstPos = getPos(first)
+                  const lastPos = getPos(last)
+                  const arc = renderArc3D(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `y-arc-z${z}-c${c}`, z + c)
+                  if (arc) arcs.push(arc)
                 }
               }
             }
 
-            // Z方向环绕弧（连接同行同列的首尾节点z=0和z=layers-1）
-            // 只有深度>=3才画环绕弧
+            // Z方向环绕弧
             for (let r = 0; r < dim; r++) {
               for (let c = 0; c < dim; c++) {
                 const depthNodes = deviceNodes
                   .filter(n => n.gridRow === r && n.gridCol === c)
                   .sort((a, b) => a.gridZ! - b.gridZ!)
                 if (depthNodes.length >= 3) {
-                  const first = depthNodes[0]  // z=0
-                  const last = depthNodes[depthNodes.length - 1]  // z=layers-1
-                  // 在下方画U型弧连接首尾，Z方向曲度较小
-                  const bulge = 5 + r * 6 + c * 5
-                  const bottomY = Math.max(first.y, last.y) + bulge
-                  // 控制点向中间靠拢，让中间更平
-                  const width = Math.abs(last.x - first.x)
-                  const ctrl1X = first.x + width * 0.2
-                  const ctrl2X = last.x - width * 0.2
-                  arcs.push(
-                    <path
-                      key={`z-arc-r${r}-c${c}`}
-                      d={`M ${first.x} ${first.y} C ${ctrl1X} ${bottomY}, ${ctrl2X} ${bottomY}, ${last.x} ${last.y}`}
-                      fill="none"
-                      stroke="#999"
-                      strokeWidth={1.5}
-                      strokeOpacity={0.5}
-                    />
-                  )
+                  const first = depthNodes[0]
+                  const last = depthNodes[depthNodes.length - 1]
+                  const firstPos = getPos(first)
+                  const lastPos = getPos(last)
+                  const arc = renderArc3D(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `z-arc-r${r}-c${c}`, r + c)
+                  if (arc) arcs.push(arc)
                 }
               }
             }
@@ -914,15 +1390,13 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             const targetPos = nodePositions.get(edge.target)
             if (!sourcePos || !targetPos) return null
 
-            // 计算连接线的起点和终点（考虑节点半径和缩放系数）
-            const dx = targetPos.x - sourcePos.x
-            const dy = targetPos.y - sourcePos.y
-            const dist = Math.sqrt(dx * dx + dy * dy)
-            const nodeRadius = 25 * nodeScale  // 缩放后的节点半径
-
             const sourceNode = nodes.find(n => n.id === edge.source)
             const targetNode = nodes.find(n => n.id === edge.target)
-            const tooltipContent = `${sourceNode?.label || edge.source} ↔ ${targetNode?.label || edge.target}${edge.bandwidth ? ` (${edge.bandwidth}Gbps)` : ''}`
+
+            const bandwidthStr = edge.bandwidth ? `${edge.bandwidth}Gbps` : ''
+            const latencyStr = edge.latency ? `${edge.latency}ns` : ''
+            const propsStr = [bandwidthStr, latencyStr].filter(Boolean).join(', ')
+            const tooltipContent = `${sourceNode?.label || edge.source} ↔ ${targetNode?.label || edge.target}${propsStr ? ` (${propsStr})` : ''}`
 
             // 判断是否是 Torus 环绕连接
             const sourceGridRow = sourceNode?.gridRow
@@ -984,72 +1458,44 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
               if ((sameRow && colDiff > 1) || (sameCol && rowDiff > 1)) {
                 const midX = (sourcePos.x + targetPos.x) / 2
                 const midY = (sourcePos.y + targetPos.y) / 2
+                const dx = targetPos.x - sourcePos.x
+                const dy = targetPos.y - sourcePos.y
+                const dist = Math.sqrt(dx * dx + dy * dy)
 
-                // 同行连接：曲线向下凸出
-                if (sameRow) {
-                  const width = Math.abs(targetPos.x - sourcePos.x)
-                  const bulge = width * 0.15 + (sourceGridRow || 0) * 8
-                  const bottomY = midY + bulge
-                  const ctrl1X = sourcePos.x + width * 0.2
-                  const ctrl2X = targetPos.x - width * 0.2
-                  const startX = Math.min(sourcePos.x, targetPos.x)
-                  const endX = Math.max(sourcePos.x, targetPos.x)
+                // 使用垂直于连线方向的控制点，确保曲线正确连接两端
+                const bulge = dist * 0.25 + (sourceGridRow || 0) * 5
+                const perpX = -dy / dist
+                const perpY = dx / dist
+                const ctrlX = midX + perpX * bulge
+                const ctrlY = midY + perpY * bulge
 
-                  return (
-                    <path
-                      key={`edge-${i}`}
-                      d={`M ${startX} ${sourcePos.y} C ${ctrl1X} ${bottomY}, ${ctrl2X} ${bottomY}, ${endX} ${sourcePos.y}`}
-                      fill="none"
-                      stroke="#b0b0b0"
-                      strokeWidth={1.5}
-                      strokeOpacity={0.6}
-                    />
-                  )
-                }
-
-                // 同列连接：曲线向左凸出
-                if (sameCol) {
-                  const height = Math.abs(targetPos.y - sourcePos.y)
-                  const bulge = height * 0.15 + (sourceGridCol || 0) * 8
-                  const leftX = midX - bulge
-                  const ctrl1Y = sourcePos.y + height * 0.2
-                  const ctrl2Y = targetPos.y - height * 0.2
-                  const startY = Math.min(sourcePos.y, targetPos.y)
-                  const endY = Math.max(sourcePos.y, targetPos.y)
-
-                  return (
-                    <path
-                      key={`edge-${i}`}
-                      d={`M ${sourcePos.x} ${startY} C ${leftX} ${ctrl1Y}, ${leftX} ${ctrl2Y}, ${sourcePos.x} ${endY}`}
-                      fill="none"
-                      stroke="#b0b0b0"
-                      strokeWidth={1.5}
-                      strokeOpacity={0.6}
-                    />
-                  )
-                }
+                return (
+                  <path
+                    key={`edge-${i}`}
+                    d={`M ${sourcePos.x} ${sourcePos.y} Q ${ctrlX} ${ctrlY}, ${targetPos.x} ${targetPos.y}`}
+                    fill="none"
+                    stroke="#b0b0b0"
+                    strokeWidth={1.5}
+                    strokeOpacity={0.6}
+                  />
+                )
               }
             }
 
-            // 普通直线连接
-            const offsetX = dist > 0 ? (dx / dist) * nodeRadius : 0
-            const offsetY = dist > 0 ? (dy / dist) * nodeRadius : 0
-            const midX = (sourcePos.x + targetPos.x) / 2
-            const midY = (sourcePos.y + targetPos.y) / 2
-
+            // 普通直线连接 - 使用中心点，节点会遮盖线的端点
             return (
               <g key={`edge-${i}`}>
                 <line
-                  x1={sourcePos.x + offsetX}
-                  y1={sourcePos.y + offsetY}
-                  x2={targetPos.x - offsetX}
-                  y2={targetPos.y - offsetY}
+                  x1={sourcePos.x}
+                  y1={sourcePos.y}
+                  x2={targetPos.x}
+                  y2={targetPos.y}
                   stroke="#b0b0b0"
                   strokeWidth={4}
                   strokeOpacity={0}
                   style={{ cursor: 'pointer' }}
                   onMouseEnter={(e) => {
-                    if (connectionMode !== 'view') return
+                    if (connectionMode !== 'view' || isManualMode) return
                     const rect = svgRef.current?.getBoundingClientRect()
                     if (rect) {
                       setTooltip({
@@ -1059,13 +1505,13 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                       })
                     }
                   }}
-                  onMouseLeave={() => connectionMode === 'view' && setTooltip(null)}
+                  onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
                 />
                 <line
-                  x1={sourcePos.x + offsetX}
-                  y1={sourcePos.y + offsetY}
-                  x2={targetPos.x - offsetX}
-                  y2={targetPos.y - offsetY}
+                  x1={sourcePos.x}
+                  y1={sourcePos.y}
+                  x2={targetPos.x}
+                  y2={targetPos.y}
                   stroke="#b0b0b0"
                   strokeWidth={1.5}
                   strokeOpacity={0.6}
@@ -1083,24 +1529,14 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
               const targetPos = nodePositions.get(conn.target)
               if (!sourcePos || !targetPos) return null
 
-              const dx = targetPos.x - sourcePos.x
-              const dy = targetPos.y - sourcePos.y
-              const dist = Math.sqrt(dx * dx + dy * dy)
-              const nodeRadius = 25 * nodeScale
-              const offsetX = dist > 0 ? (dx / dist) * nodeRadius : 0
-              const offsetY = dist > 0 ? (dy / dist) * nodeRadius : 0
-
-              const midX = (sourcePos.x + targetPos.x) / 2
-              const midY = (sourcePos.y + targetPos.y) / 2
-
               return (
                 <g key={`manual-${conn.id}`}>
                   {/* 手动连接线 - 编辑模式绿色虚线，普通模式与自动连接一致 */}
                   <line
-                    x1={sourcePos.x + offsetX}
-                    y1={sourcePos.y + offsetY}
-                    x2={targetPos.x - offsetX}
-                    y2={targetPos.y - offsetY}
+                    x1={sourcePos.x}
+                    y1={sourcePos.y}
+                    x2={targetPos.x}
+                    y2={targetPos.y}
                     stroke={connectionMode !== 'view' ? '#52c41a' : '#b0b0b0'}
                     strokeWidth={connectionMode !== 'view' ? 2.5 : 1.5}
                     strokeOpacity={connectionMode !== 'view' ? 1 : 0.6}
@@ -1111,7 +1547,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             })}
 
           {/* 渲染节点 */}
-          {nodes.map((node) => {
+          {displayNodes.map((node) => {
             const isSwitch = node.isSwitch
             const portInfoText = node.portInfo
               ? `上行:${node.portInfo.uplink} 下行:${node.portInfo.downlink} 互联:${node.portInfo.inter}`
@@ -1120,7 +1556,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             const nodeConnections = edges.filter(e => e.source === node.id || e.target === node.id)
             const connectedNodes = nodeConnections.map(e => {
               const otherId = e.source === node.id ? e.target : e.source
-              const otherNode = nodes.find(n => n.id === otherId)
+              const otherNode = displayNodes.find(n => n.id === otherId)
               return otherNode?.label || otherId
             })
             const connectionInfo = nodeConnections.length > 0
@@ -1129,57 +1565,68 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             const nodeTooltip = isSwitch
               ? `${node.label} (${node.subType?.toUpperCase() || 'SWITCH'})\n${portInfoText}\n${connectionInfo}`
               : `${node.label} (${node.type.toUpperCase()})\n${connectionInfo}`
-            const isSelected = selectedNodes.has(node.id)
-            const isSource = sourceNode === node.id
+            const isSourceSelected = selectedNodes.has(node.id)
+            const isTargetSelected = targetNodes.has(node.id)
+            const isDragging = draggingNode === node.id
             return (
               <g
                 key={node.id}
                 transform={`translate(${node.x}, ${node.y}) scale(${nodeScale})`}
-                style={{ cursor: connectionMode !== 'view' ? 'crosshair' : 'pointer' }}
+                style={{
+                  cursor: isManualMode ? 'move' : connectionMode !== 'view' ? 'crosshair' : 'pointer',
+                  opacity: isDragging ? 0.7 : 1,
+                }}
+                onMouseDown={(e) => handleDragStart(node.id, e)}
                 onClick={(e) => {
-                  // 根据连线模式处理点击
-                  if (connectionMode === 'select') {
-                    // 多选模式：Ctrl+点击切换选中
+                  // 选择源节点模式
+                  if (connectionMode === 'select_source' || connectionMode === 'select' || connectionMode === 'connect') {
+                    const currentSet = new Set(selectedNodes)
                     if (e.ctrlKey || e.metaKey) {
-                      const newSet = new Set(selectedNodes)
-                      if (newSet.has(node.id)) {
-                        newSet.delete(node.id)
+                      // Ctrl+点击：切换选中状态
+                      if (currentSet.has(node.id)) {
+                        currentSet.delete(node.id)
                       } else {
-                        newSet.add(node.id)
+                        currentSet.add(node.id)
                       }
-                      onSelectedNodesChange?.(newSet)
                     } else {
-                      // 普通点击：清除并选中当前
-                      onSelectedNodesChange?.(new Set([node.id]))
-                    }
-                  } else if (connectionMode === 'connect') {
-                    // 连线模式
-                    if (selectedNodes.size > 0) {
-                      // 有预选节点：批量连接到目标节点
-                      if (!selectedNodes.has(node.id)) {
-                        selectedNodes.forEach(srcId => {
-                          onManualConnect?.(srcId, node.id, getCurrentHierarchyLevel())
-                        })
-                        onSelectedNodesChange?.(new Set())  // 清空选中
+                      // 普通点击：切换单个选中
+                      if (currentSet.has(node.id)) {
+                        currentSet.delete(node.id)
+                      } else {
+                        currentSet.add(node.id)
                       }
-                    } else if (sourceNode === null) {
-                      // 无预选：设置源节点
-                      onSourceNodeChange?.(node.id)
-                    } else if (sourceNode !== node.id) {
-                      // 创建单条连接
-                      onManualConnect?.(sourceNode, node.id, getCurrentHierarchyLevel())
-                      onSourceNodeChange?.(null)
                     }
+                    onSelectedNodesChange?.(currentSet)
+                  } else if (connectionMode === 'select_target') {
+                    // 选择目标节点模式
+                    const currentSet = new Set(targetNodes)
+                    if (e.ctrlKey || e.metaKey) {
+                      // Ctrl+点击：切换选中状态
+                      if (currentSet.has(node.id)) {
+                        currentSet.delete(node.id)
+                      } else {
+                        currentSet.add(node.id)
+                      }
+                    } else {
+                      // 普通点击：切换单个选中
+                      if (currentSet.has(node.id)) {
+                        currentSet.delete(node.id)
+                      } else {
+                        currentSet.add(node.id)
+                      }
+                    }
+                    onTargetNodesChange?.(currentSet)
                   } else {
                     // 普通查看模式
                     if (onNodeClick) {
                       const connections = nodeConnections.map(e => {
                         const otherId = e.source === node.id ? e.target : e.source
-                        const otherNode = nodes.find(n => n.id === otherId)
+                        const otherNode = displayNodes.find(n => n.id === otherId)
                         return {
                           id: otherId,
                           label: otherNode?.label || otherId,
-                          bandwidth: e.bandwidth
+                          bandwidth: e.bandwidth,
+                          latency: e.latency
                         }
                       })
                       onNodeClick({
@@ -1199,7 +1646,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                   }
                 }}
                 onMouseEnter={(e) => {
-                  if (connectionMode !== 'view') return  // 连线模式不显示悬停提示
+                  if (connectionMode !== 'view' || isManualMode) return  // 连线模式或手动布局不显示悬停提示
                   const rect = svgRef.current?.getBoundingClientRect()
                   if (rect) {
                     setTooltip({
@@ -1209,10 +1656,24 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                     })
                   }
                 }}
-                onMouseLeave={() => connectionMode === 'view' && setTooltip(null)}
+                onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
               >
-                {/* 选中状态边框 */}
-                {isSelected && (
+                {/* 源节点选中状态边框（绿色） */}
+                {isSourceSelected && (
+                  <rect
+                    x={-38}
+                    y={-30}
+                    width={76}
+                    height={60}
+                    fill="none"
+                    stroke="#52c41a"
+                    strokeWidth={3}
+                    strokeDasharray="6,3"
+                    rx={8}
+                  />
+                )}
+                {/* 目标节点选中状态边框（蓝色） */}
+                {isTargetSelected && (
                   <rect
                     x={-38}
                     y={-30}
@@ -1223,16 +1684,6 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                     strokeWidth={3}
                     strokeDasharray="6,3"
                     rx={8}
-                  />
-                )}
-                {/* 源节点高亮圈 */}
-                {isSource && (
-                  <circle
-                    r={40}
-                    fill="none"
-                    stroke="#52c41a"
-                    strokeWidth={4}
-                    strokeDasharray="8,4"
                   />
                 )}
                 {/* 根据节点类型渲染不同形状 */}

@@ -343,6 +343,7 @@ class HierarchicalTopologyGenerator:
                     target=mc['target'],
                     type='manual',
                     bandwidth=mc.get('bandwidth'),
+                    latency=mc.get('latency'),
                     is_manual=True
                 ))
 
@@ -515,12 +516,13 @@ class HierarchicalTopologyGenerator:
                     target=cpu.id,
                     type='intra',
                     bandwidth=64.0,  # PCIe连接
+                    latency=50.0,  # PCIe延迟 (ns)
                 ))
 
         # 根据拓扑类型生成NPU间连接
         if topology_type != 'none' and len(npus) > 1:
             npu_ids = [c.id for c in npus]
-            npu_connections = self._generate_direct_connections(npu_ids, topology_type, 'intra', 400.0)
+            npu_connections = self._generate_direct_connections(npu_ids, topology_type, 'intra', 400.0, latency=50.0)
             connections.extend(npu_connections)
 
         return connections
@@ -532,7 +534,7 @@ class HierarchicalTopologyGenerator:
     ) -> List[ConnectionConfig]:
         """生成Board间的连接"""
         board_ids = [b.id for b in boards]
-        return self._generate_direct_connections(board_ids, topology_type, 'intra', 100.0)
+        return self._generate_direct_connections(board_ids, topology_type, 'intra', 100.0, latency=100.0)
 
     def _generate_rack_connections(
         self,
@@ -540,7 +542,7 @@ class HierarchicalTopologyGenerator:
         topology_type: str = 'full_mesh'
     ) -> List[ConnectionConfig]:
         """生成Rack间的连接"""
-        return self._generate_direct_connections(rack_ids, topology_type, 'intra', 400.0)
+        return self._generate_direct_connections(rack_ids, topology_type, 'intra', 400.0, latency=200.0)
 
     def _generate_pod_connections(
         self,
@@ -548,14 +550,15 @@ class HierarchicalTopologyGenerator:
         topology_type: str = 'full_mesh'
     ) -> List[ConnectionConfig]:
         """生成Pod间的连接"""
-        return self._generate_direct_connections(pod_ids, topology_type, 'inter', 1600.0)
+        return self._generate_direct_connections(pod_ids, topology_type, 'inter', 1600.0, latency=500.0)
 
     def _generate_direct_connections(
         self,
         node_ids: List[str],
         topology_type: str,
         conn_type: str,
-        bandwidth: float
+        bandwidth: float,
+        latency: float = 100.0
     ) -> List[ConnectionConfig]:
         """根据拓扑类型生成直连"""
         connections = []
@@ -573,6 +576,7 @@ class HierarchicalTopologyGenerator:
                         target=node_ids[j],
                         type=conn_type,
                         bandwidth=bandwidth,
+                        latency=latency,
                     ))
 
         elif topology_type == 'ring':
@@ -584,6 +588,7 @@ class HierarchicalTopologyGenerator:
                     target=node_ids[j],
                     type=conn_type,
                     bandwidth=bandwidth,
+                    latency=latency,
                 ))
 
         elif topology_type == 'torus_2d':
@@ -600,6 +605,7 @@ class HierarchicalTopologyGenerator:
                         target=node_ids[right],
                         type=conn_type,
                         bandwidth=bandwidth,
+                        latency=latency,
                     ))
                 # 下邻居（环绕）
                 down = ((row + 1) % rows) * cols + col
@@ -609,6 +615,7 @@ class HierarchicalTopologyGenerator:
                         target=node_ids[down],
                         type=conn_type,
                         bandwidth=bandwidth,
+                        latency=latency,
                     ))
 
         elif topology_type == 'torus_3d':
@@ -626,6 +633,7 @@ class HierarchicalTopologyGenerator:
                         target=node_ids[nx],
                         type=conn_type,
                         bandwidth=bandwidth,
+                        latency=latency,
                     ))
                 # Y方向邻居
                 ny = ((y + 1) % dim) * dim + x + z * dim * dim
@@ -635,6 +643,7 @@ class HierarchicalTopologyGenerator:
                         target=node_ids[ny],
                         type=conn_type,
                         bandwidth=bandwidth,
+                        latency=latency,
                     ))
                 # Z方向邻居
                 nz = y * dim + x + ((z + 1) % dim) * dim * dim
@@ -644,6 +653,7 @@ class HierarchicalTopologyGenerator:
                         target=node_ids[nz],
                         type=conn_type,
                         bandwidth=bandwidth,
+                        latency=latency,
                     ))
 
         elif topology_type == 'full_mesh_2d':
@@ -660,6 +670,7 @@ class HierarchicalTopologyGenerator:
                             target=node_ids[row_nodes[j]],
                             type=conn_type,
                             bandwidth=bandwidth,
+                            latency=latency,
                         ))
             # 同列全连接
             for col in range(cols):
@@ -671,6 +682,7 @@ class HierarchicalTopologyGenerator:
                             target=node_ids[col_nodes[j]],
                             type=conn_type,
                             bandwidth=bandwidth,
+                            latency=latency,
                         ))
 
         return connections
@@ -823,7 +835,8 @@ class HierarchicalTopologyGenerator:
                                     source=device_id,
                                     target=switch.id,
                                     type='switch',
-                                    connection_role='downlink'
+                                    connection_role='downlink',
+                                    latency=100.0,  # Switch连接延迟 (ns)
                                 ))
                                 switch.downlink_ports_used += 1
             else:
@@ -836,7 +849,8 @@ class HierarchicalTopologyGenerator:
                             source=device_id,
                             target=switch.id,
                             type='switch',
-                            connection_role='downlink'
+                            connection_role='downlink',
+                            latency=100.0,  # Switch连接延迟 (ns)
                         ))
                         switch.downlink_ports_used += 1
 
@@ -848,7 +862,8 @@ class HierarchicalTopologyGenerator:
                         source=device_id,
                         target=switch.id,
                         type='switch',
-                        connection_role='downlink'
+                        connection_role='downlink',
+                        latency=100.0,  # Switch连接延迟 (ns)
                     ))
                     switch.downlink_ports_used += 1
 
@@ -863,7 +878,8 @@ class HierarchicalTopologyGenerator:
                         source=lower_sw.id,
                         target=upper_sw.id,
                         type='switch',
-                        connection_role='uplink'
+                        connection_role='uplink',
+                        latency=100.0,  # Switch层间连接延迟 (ns)
                     ))
                     lower_sw.uplink_ports_used += 1
                     upper_sw.downlink_ports_used += 1
@@ -879,7 +895,8 @@ class HierarchicalTopologyGenerator:
                             source=sw_list[i].id,
                             target=sw_list[j].id,
                             type='switch',
-                            connection_role='inter'
+                            connection_role='inter',
+                            latency=100.0,  # Switch同层互联延迟 (ns)
                         ))
                         sw_list[i].inter_ports_used += 1
                         sw_list[j].inter_ports_used += 1

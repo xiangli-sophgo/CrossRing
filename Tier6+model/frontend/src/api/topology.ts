@@ -40,6 +40,7 @@ export async function generateTopology(config: {
     }>
   }
   switch_config?: GlobalSwitchConfig
+  manual_connections?: ManualConnectionConfig
 }): Promise<HierarchicalTopology> {
   const response = await api.post('/topology/generate', config)
   return response.data

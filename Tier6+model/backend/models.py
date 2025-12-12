@@ -53,6 +53,7 @@ class ConnectionConfig(BaseModel):
     target: str
     type: Literal['intra', 'inter', 'switch', 'manual']  # 层内/层间/Switch/手动连接
     bandwidth: Optional[float] = None  # 带宽 (Gbps)
+    latency: Optional[float] = None  # 延迟 (ns)
     connection_role: Optional[Literal['uplink', 'downlink', 'inter']] = None  # Switch连接角色
     is_manual: bool = False  # 是否为手动添加的连接
 
@@ -72,6 +73,7 @@ class ManualConnection(BaseModel):
     target: str
     hierarchy_level: HierarchyLevel
     bandwidth: Optional[float] = None
+    latency: Optional[float] = None  # 延迟 (ns)
     description: Optional[str] = None
     created_at: Optional[str] = None
 
