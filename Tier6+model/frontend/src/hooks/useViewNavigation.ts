@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useRef } from 'react'
 import {
   ViewState,
   ViewLevel,
@@ -59,7 +59,13 @@ export interface ViewNavigationReturn {
   navigateToRack: (podId: string, rackId: string) => void
   navigateBack: () => void
   navigateToBreadcrumb: (index: number) => void
+  navigateToTop: () => void
   canGoBack: boolean
+  // 历史导航
+  navigateHistoryBack: () => void
+  navigateHistoryForward: () => void
+  canGoHistoryBack: boolean
+  canGoHistoryForward: boolean
   currentPod: PodConfig | null
   currentRack: RackConfig | null
   currentBoard: BoardConfig | null
@@ -73,6 +79,29 @@ export function useViewNavigation(
     path: [],
     selectedNode: undefined,
   })
+
+  // 历史记录: 存储路径数组的历史
+  const historyRef = useRef<string[][]>([[]])  // 初始为空路径
+  const historyIndexRef = useRef(0)
+  const isNavigatingHistoryRef = useRef(false)  // 是否正在进行历史导航
+
+  // 添加到历史记录（仅在非历史导航时）
+  const addToHistory = useCallback((path: string[]) => {
+    if (isNavigatingHistoryRef.current) {
+      isNavigatingHistoryRef.current = false
+      return
+    }
+    // 如果不在历史末尾，清除后面的历史
+    if (historyIndexRef.current < historyRef.current.length - 1) {
+      historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1)
+    }
+    // 避免重复添加相同路径
+    const lastPath = historyRef.current[historyRef.current.length - 1]
+    if (JSON.stringify(lastPath) !== JSON.stringify(path)) {
+      historyRef.current.push([...path])
+      historyIndexRef.current = historyRef.current.length - 1
+    }
+  }, [])
 
   // 生成面包屑
   const breadcrumbs = useMemo(() => {
@@ -114,17 +143,20 @@ export function useViewNavigation(
 
   // 导航到Pod内部
   const navigateToPod = useCallback((podId: string) => {
+    const newPath = [podId]
+    addToHistory(newPath)
     setViewState({
       level: 'pod',
-      path: [podId],
+      path: newPath,
       selectedNode: undefined,
     })
-  }, [])
+  }, [addToHistory])
 
   // 导航到子层级（通用）
   const navigateTo = useCallback((nodeId: string) => {
     setViewState(prev => {
       const newPath = [...prev.path, nodeId]
+      addToHistory(newPath)
       const newLevel = getLevelFromDepth(newPath.length)
       return {
         level: newLevel,
@@ -132,22 +164,25 @@ export function useViewNavigation(
         selectedNode: undefined,
       }
     })
-  }, [])
+  }, [addToHistory])
 
   // 直接导航到Rack (从Pod视图)
   const navigateToRack = useCallback((podId: string, rackId: string) => {
+    const newPath = [podId, rackId]
+    addToHistory(newPath)
     setViewState({
       level: 'rack',
-      path: [podId, rackId],
+      path: newPath,
       selectedNode: undefined,
     })
-  }, [])
+  }, [addToHistory])
 
   // 返回上一级
   const navigateBack = useCallback(() => {
     setViewState(prev => {
       if (prev.path.length === 0) return prev
       const newPath = prev.path.slice(0, -1)
+      addToHistory(newPath)
       const newLevel = getLevelFromDepth(newPath.length)
       return {
         level: newLevel,
@@ -155,15 +190,17 @@ export function useViewNavigation(
         selectedNode: undefined,
       }
     })
-  }, [])
+  }, [addToHistory])
 
   // 通过面包屑导航
   const navigateToBreadcrumb = useCallback((index: number) => {
     setViewState(prev => {
       if (index === 0) {
+        addToHistory([])
         return { level: 'pod', path: [], selectedNode: undefined }
       }
       const newPath = prev.path.slice(0, index)
+      addToHistory(newPath)
       const newLevel = getLevelFromDepth(newPath.length)
       return {
         level: newLevel,
@@ -171,6 +208,42 @@ export function useViewNavigation(
         selectedNode: undefined,
       }
     })
+  }, [addToHistory])
+
+  // 导航到顶层（数据中心视图）
+  const navigateToTop = useCallback(() => {
+    addToHistory([])
+    setViewState({ level: 'pod', path: [], selectedNode: undefined })
+  }, [addToHistory])
+
+  // 历史后退（左方向键）
+  const navigateHistoryBack = useCallback(() => {
+    if (historyIndexRef.current > 0) {
+      historyIndexRef.current--
+      const targetPath = historyRef.current[historyIndexRef.current]
+      isNavigatingHistoryRef.current = true
+      const newLevel = getLevelFromDepth(targetPath.length)
+      setViewState({
+        level: newLevel,
+        path: [...targetPath],
+        selectedNode: undefined,
+      })
+    }
+  }, [])
+
+  // 历史前进（右方向键）
+  const navigateHistoryForward = useCallback(() => {
+    if (historyIndexRef.current < historyRef.current.length - 1) {
+      historyIndexRef.current++
+      const targetPath = historyRef.current[historyIndexRef.current]
+      isNavigatingHistoryRef.current = true
+      const newLevel = getLevelFromDepth(targetPath.length)
+      setViewState({
+        level: newLevel,
+        path: [...targetPath],
+        selectedNode: undefined,
+      })
+    }
   }, [])
 
   // 获取当前Pod
@@ -194,6 +267,10 @@ export function useViewNavigation(
 
   const canGoBack = viewState.path.length > 0
 
+  // 历史导航状态 - 每次渲染时基于当前ref值计算
+  const canGoHistoryBack = historyIndexRef.current > 0
+  const canGoHistoryForward = historyIndexRef.current < historyRef.current.length - 1
+
   return {
     viewState,
     breadcrumbs,
@@ -202,7 +279,12 @@ export function useViewNavigation(
     navigateToRack,
     navigateBack,
     navigateToBreadcrumb,
+    navigateToTop,
     canGoBack,
+    navigateHistoryBack,
+    navigateHistoryForward,
+    canGoHistoryBack,
+    canGoHistoryForward,
     currentPod,
     currentRack,
     currentBoard,

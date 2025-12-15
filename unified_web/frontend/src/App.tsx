@@ -8,11 +8,18 @@ import {
   SettingOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  GithubOutlined,
   LineChartOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { primaryColor } from './theme/colors'
+import {
+  primaryColor,
+  bgLayout,
+  bgSider,
+  bgContainer,
+  borderColor,
+  textColor,
+  textColorSecondary,
+} from './theme/colors'
 
 // 页面组件
 import Dashboard from './pages/Dashboard'
@@ -82,11 +89,11 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       return '结果管理'
     }
     if (path.startsWith('/analysis')) return '结果分析'
-    return '仿真一体化平台'
+    return '仿真平台'
   }
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout style={{ minHeight: '100vh', background: bgLayout }}>
       <Sider
         collapsible
         collapsed={collapsed}
@@ -95,8 +102,8 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         width={220}
         collapsedWidth={80}
         style={{
-          background: '#fff',
-          borderRight: '1px solid #f0f0f0',
+          background: bgSider,
+          borderRight: `1px solid ${borderColor}`,
           position: 'fixed',
           left: 0,
           top: 0,
@@ -112,32 +119,64 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            borderBottom: '1px solid #f0f0f0',
+            borderBottom: `1px solid ${borderColor}`,
             padding: collapsed ? '0 8px' : '0 16px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* Logo图标 */}
+            <div
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 10,
+                background: `linear-gradient(135deg, ${primaryColor} 0%, #818cf8 100%)`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 2px 8px rgba(79, 110, 247, 0.3)',
+                flexShrink: 0,
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M12 2L2 7L12 12L22 7L12 2Z"
+                  stroke="#fff"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M2 17L12 22L22 17"
+                  stroke="#fff"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M2 12L12 17L22 12"
+                  stroke="#fff"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
             {!collapsed && (
-              <Title level={5} style={{ margin: 0, color: primaryColor, whiteSpace: 'nowrap' }}>
-                仿真一体化平台
-              </Title>
-            )}
-            {collapsed && (
-              <div
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 8,
-                  background: `linear-gradient(135deg, ${primaryColor} 0%, #4096ff 100%)`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#fff',
-                  fontWeight: 700,
-                  fontSize: 14,
-                }}
-              >
-                仿
+              <div style={{ overflow: 'hidden' }}>
+                <Title
+                  level={5}
+                  style={{
+                    margin: 0,
+                    color: textColor,
+                    whiteSpace: 'nowrap',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    letterSpacing: '-0.3px',
+                  }}
+                >
+                  Simulation Platform
+                </Title>
               </div>
             )}
           </div>
@@ -150,7 +189,8 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           style={{
             height: 'calc(100% - 128px)',
             borderRight: 0,
-            padding: '8px 0',
+            padding: '12px 8px',
+            background: 'transparent',
           }}
           items={menuItems}
           onClick={({ key }) => navigate(key)}
@@ -160,7 +200,7 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         <div
           style={{
             height: 64,
-            borderTop: '1px solid #f0f0f0',
+            borderTop: `1px solid ${borderColor}`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -168,30 +208,50 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           }}
         >
           {!collapsed ? (
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              版本 1.0.0
-            </Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: '#10b981',
+                  boxShadow: '0 0 6px rgba(16, 185, 129, 0.5)',
+                }}
+              />
+              <Text style={{ fontSize: 12, color: textColorSecondary }}>
+                v1.0.0
+              </Text>
+            </div>
           ) : (
             <Tooltip title="版本 1.0.0">
-              <Text type="secondary" style={{ fontSize: 12 }}>v1</Text>
+              <div
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: '#10b981',
+                  boxShadow: '0 0 6px rgba(16, 185, 129, 0.5)',
+                }}
+              />
             </Tooltip>
           )}
         </div>
       </Sider>
 
-      <Layout style={{ marginLeft: collapsed ? 80 : 220, transition: 'margin-left 0.2s' }}>
+      <Layout style={{ marginLeft: collapsed ? 80 : 220, transition: 'margin-left 0.2s', background: 'transparent' }}>
         {/* 顶部栏 */}
         <Header
           style={{
-            background: '#fff',
+            background: bgSider,
             padding: '0 24px',
-            borderBottom: '1px solid #f0f0f0',
+            borderBottom: `1px solid ${borderColor}`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             position: 'sticky',
             top: 0,
             zIndex: 99,
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -199,32 +259,21 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               type="text"
               icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
               onClick={() => setCollapsed(!collapsed)}
-              style={{ fontSize: 16, width: 40, height: 40 }}
+              style={{ fontSize: 16, width: 40, height: 40, color: textColorSecondary }}
             />
-            <Title level={4} style={{ margin: 0 }}>
+            <Title level={4} style={{ margin: 0, color: textColor, fontWeight: 600 }}>
               {getPageTitle()}
             </Title>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Tooltip title="查看源码">
-              <Button
-                type="text"
-                icon={<GithubOutlined />}
-                onClick={() => window.open('https://github.com/xiangli-sophgo/CrossRing', '_blank')}
-              />
-            </Tooltip>
           </div>
         </Header>
 
         {/* 内容区 */}
         <Content
           style={{
-            margin: 24,
+            margin: 0,
             padding: 24,
-            background: '#fff',
-            borderRadius: 12,
-            minHeight: 'calc(100vh - 64px - 48px)',
-            boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02)',
+            background: bgContainer,
+            minHeight: 'calc(100vh - 64px)',
           }}
         >
           {children}

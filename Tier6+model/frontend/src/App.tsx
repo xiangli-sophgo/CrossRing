@@ -130,6 +130,46 @@ const App: React.FC = () => {
     loadTopology()
   }, [loadTopology])
 
+  // 全局键盘快捷键处理（在3D和拓扑视图都生效）
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 如果正在输入框中则忽略
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return
+      }
+
+      // Esc / Backspace - 返回上一级
+      if (e.key === 'Escape' || e.key === 'Backspace') {
+        e.preventDefault()
+        if (navigation.canGoBack) {
+          navigation.navigateBack()
+        }
+        return
+      }
+
+      // 左方向键 - 历史后退
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        if (navigation.canGoHistoryBack) {
+          navigation.navigateHistoryBack()
+        }
+        return
+      }
+
+      // 右方向键 - 历史前进
+      if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        if (navigation.canGoHistoryForward) {
+          navigation.navigateHistoryForward()
+        }
+        return
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [navigation])
+
   // 手动连接处理函数
   const handleManualConnectionConfigChange = useCallback((config: ManualConnectionConfig) => {
     setManualConnectionConfig(config)
@@ -336,6 +376,38 @@ const App: React.FC = () => {
     return 'datacenter'
   }
 
+  // 处理3D视图节点选择，转换为NodeDetail格式
+  const handleScene3DNodeSelect = useCallback((
+    nodeType: 'pod' | 'rack' | 'board' | 'chip' | 'switch',
+    nodeId: string,
+    label: string,
+    info: Record<string, string | number>,
+    subType?: string
+  ) => {
+    // 查找与该节点相关的连接
+    const connections: { label: string; bandwidth?: number }[] = []
+    if (topology?.connections) {
+      topology.connections.forEach(conn => {
+        if (conn.source === nodeId) {
+          connections.push({ label: `→ ${conn.target}`, bandwidth: conn.bandwidth })
+        } else if (conn.target === nodeId) {
+          connections.push({ label: `← ${conn.source}`, bandwidth: conn.bandwidth })
+        }
+      })
+    }
+
+    // 转换为NodeDetail格式
+    const nodeDetail: NodeDetail = {
+      id: nodeId,
+      label,
+      type: nodeType,
+      subType,
+      connections,
+    }
+
+    setSelectedNode(nodeDetail)
+  }, [topology])
+
   // 计算当前视图的连接
   const currentViewConnections = useMemo(() => {
     if (!topology) return []
@@ -393,15 +465,34 @@ const App: React.FC = () => {
   return (
     <Layout style={{ height: '100vh' }}>
       <Header style={{
-        background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
+        background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
+        borderBottom: 'none',
         padding: '0 24px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
+        height: 56,
+        boxShadow: '0 2px 16px rgba(28, 25, 23, 0.12)',
+        position: 'relative',
+        zIndex: 100,
       }}>
-        <Title level={4} style={{ color: '#fff', margin: 0 }}>
-          Tier6+互联拓扑
-        </Title>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{
+            width: 32,
+            height: 32,
+            borderRadius: 8,
+            background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 2px 8px rgba(79, 70, 229, 0.4)',
+          }}>
+            <span style={{ color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>T6</span>
+          </div>
+          <Title level={4} style={{ color: '#f8fafc', margin: 0, fontSize: 16, fontWeight: 600 }}>
+            Tier6+ Topology
+          </Title>
+        </div>
         <Segmented
           value={viewMode}
           onChange={(v) => setViewMode(v as '3d' | 'topology')}
@@ -409,7 +500,6 @@ const App: React.FC = () => {
             { value: '3d', label: '3D视图' },
             { value: 'topology', label: '拓扑图' },
           ]}
-          style={{ background: 'rgba(255,255,255,0.2)' }}
         />
       </Header>
 
@@ -417,10 +507,12 @@ const App: React.FC = () => {
         <Sider
           width={siderWidth}
           style={{
-            background: '#fff',
+            background: '#f8fafc',
             padding: 16,
             overflow: 'auto',
             position: 'relative',
+            borderRight: '1px solid #e2e8f0',
+            boxShadow: '2px 0 12px rgba(15, 23, 42, 0.04)',
           }}
         >
           <ConfigPanel
@@ -450,7 +542,7 @@ const App: React.FC = () => {
             <Card
               title={`节点详情: ${selectedNode.label}`}
               size="small"
-              style={{ marginTop: 16, background: '#f8f9fa', border: '1px solid #e9ecef' }}
+              style={{ marginTop: 16 }}
               extra={<a onClick={() => setSelectedNode(null)}>关闭</a>}
             >
               <Descriptions column={1} size="small">
@@ -497,16 +589,16 @@ const App: React.FC = () => {
               position: 'absolute',
               top: 0,
               right: 0,
-              width: 6,
+              width: 4,
               height: '100%',
               cursor: 'col-resize',
-              background: isDragging ? '#1890ff' : 'transparent',
-              transition: 'background 0.2s',
+              background: isDragging ? '#4f46e5' : 'transparent',
+              transition: 'background 0.15s',
               zIndex: 10,
             }}
             onMouseEnter={(e) => {
               if (!isDragging) {
-                (e.target as HTMLElement).style.background = '#e0e0e0'
+                (e.target as HTMLElement).style.background = '#e2e8f0'
               }
             }}
             onMouseLeave={(e) => {
@@ -517,7 +609,7 @@ const App: React.FC = () => {
           />
         </Sider>
 
-        <Content style={{ position: 'relative' }}>
+        <Content style={{ position: 'relative', background: '#ffffff' }}>
           {loading && !topology ? (
             <div style={{
               display: 'flex',
@@ -541,6 +633,7 @@ const App: React.FC = () => {
               onNavigateBack={navigation.navigateBack}
               onBreadcrumbClick={navigation.navigateToBreadcrumb}
               canGoBack={navigation.canGoBack}
+              onNodeSelect={handleScene3DNodeSelect}
             />
           ) : (
             <TopologyGraph

@@ -18,6 +18,7 @@ import {
   Checkbox,
   Tabs,
   Divider,
+  Radio,
 } from 'antd'
 import {
   ClusterOutlined,
@@ -127,6 +128,12 @@ interface RackConfig {
   boards: FlexBoardConfig[]    // 板卡配置列表
 }
 
+// Switch 3D显示配置
+export interface SwitchDisplayConfig {
+  position: 'top' | 'middle' | 'bottom'
+  uHeight: number
+}
+
 interface ConfigPanelProps {
   topology: HierarchicalTopology | null
   onGenerate: (config: {
@@ -156,6 +163,9 @@ interface ConfigPanelProps {
   layoutType?: LayoutType
   onLayoutTypeChange?: (type: LayoutType) => void
   viewMode?: '3d' | 'topology'
+  // Switch 3D显示配置
+  switchDisplayConfig?: SwitchDisplayConfig
+  onSwitchDisplayConfigChange?: (config: SwitchDisplayConfig) => void
 }
 
 // localStorage缓存key
@@ -184,10 +194,10 @@ const DEFAULT_SWITCH_CONFIG: GlobalSwitchConfig = {
     { id: 'spine_128', name: '128端口Spine交换机', port_count: 128 },
     { id: 'core_512', name: '512端口核心交换机', port_count: 512 },
   ],
-  datacenter_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true },
-  pod_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true },
-  rack_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true },
-  board_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true },
+  datacenter_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, keep_direct_topology: false },
+  pod_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, keep_direct_topology: false },
+  rack_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, switch_position: 'top', switch_u_height: 1, keep_direct_topology: false },
+  board_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, keep_direct_topology: false },
 }
 
 // 从localStorage加载缓存配置
@@ -226,6 +236,7 @@ interface SwitchLevelConfigProps {
   switchTypes: SwitchTypeConfig[]
   onChange: (config: HierarchyLevelSwitchConfig) => void
   configRowStyle: React.CSSProperties
+  viewMode?: '3d' | 'topology'
 }
 
 const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
@@ -234,6 +245,7 @@ const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
   switchTypes,
   onChange,
   configRowStyle,
+  viewMode,
 }) => {
   const updateLayer = (index: number, field: keyof SwitchLayerConfig, value: any) => {
     const newLayers = [...config.layers]
@@ -294,9 +306,33 @@ const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
 
       {config.enabled && (
         <>
+          {/* 保留节点直连 */}
+          <div style={configRowStyle}>
+            <Text>保留节点直连</Text>
+            <Switch
+              size="small"
+              checked={config.keep_direct_topology || false}
+              onChange={(checked) => onChange({ ...config, keep_direct_topology: checked })}
+            />
+          </div>
+
+          {/* 保留直连时选择拓扑类型 */}
+          {config.keep_direct_topology && (
+            <div style={configRowStyle}>
+              <Text>直连拓扑</Text>
+              <Select
+                size="small"
+                value={config.direct_topology || 'full_mesh'}
+                onChange={(v) => onChange({ ...config, direct_topology: v })}
+                style={{ width: 150 }}
+                options={directTopologyOptions}
+              />
+            </div>
+          )}
+
           {/* 连接模式 */}
           <div style={configRowStyle}>
-            <Text>连接模式</Text>
+            <Text>Switch连接模式</Text>
             <Select
               size="small"
               value={config.connection_mode || 'full_mesh'}
@@ -322,6 +358,36 @@ const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
                 style={{ width: 60 }}
               />
             </div>
+          )}
+
+          {/* Switch 3D显示配置（仅rack层级且3D视图时显示） */}
+          {levelKey === 'rack_level' && viewMode === '3d' && (
+            <>
+              <div style={configRowStyle}>
+                <Text>Switch位置</Text>
+                <Radio.Group
+                  size="small"
+                  value={config.switch_position || 'top'}
+                  onChange={(e) => onChange({ ...config, switch_position: e.target.value })}
+                >
+                  <Radio.Button value="top">顶部</Radio.Button>
+                  <Radio.Button value="middle">中间</Radio.Button>
+                  <Radio.Button value="bottom">底部</Radio.Button>
+                </Radio.Group>
+              </div>
+              <div style={configRowStyle}>
+                <Text>Switch高度</Text>
+                <Radio.Group
+                  size="small"
+                  value={config.switch_u_height || 1}
+                  onChange={(e) => onChange({ ...config, switch_u_height: e.target.value })}
+                >
+                  <Radio.Button value={1}>1U</Radio.Button>
+                  <Radio.Button value={2}>2U</Radio.Button>
+                  <Radio.Button value={4}>4U</Radio.Button>
+                </Radio.Group>
+              </div>
+            </>
           )}
 
           <Divider style={{ margin: '8px 0' }} />
@@ -441,8 +507,13 @@ const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
     }
   }
   return (
-    <div style={{ padding: 12, background: '#fafafa', borderRadius: 6 }}>
-      <Text strong style={{ display: 'block', marginBottom: 8 }}>连接编辑</Text>
+    <div style={{
+      padding: 14,
+      background: '#f5f5f5',
+      borderRadius: 10,
+      border: '1px solid rgba(0, 0, 0, 0.06)',
+    }}>
+      <Text strong style={{ display: 'block', marginBottom: 10, color: '#171717' }}>连接编辑</Text>
 
       {/* 编辑模式按钮 */}
       <div style={{ marginBottom: 12 }}>
@@ -477,22 +548,22 @@ const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
 
       {connectionMode !== 'view' && (
         <div style={{
-          padding: 10,
-          background: '#f0f5ff',
-          borderRadius: 6,
+          padding: 12,
+          background: 'rgba(37, 99, 235, 0.04)',
+          borderRadius: 8,
           marginBottom: 12,
-          border: '1px solid #adc6ff'
+          border: '1px solid rgba(37, 99, 235, 0.1)',
         }}>
-          <Text style={{ fontSize: 13, display: 'block', marginBottom: 6 }}>
+          <Text style={{ fontSize: 12, display: 'block', marginBottom: 6, color: '#525252' }}>
             <strong>操作说明：</strong>
           </Text>
-          <Text style={{ fontSize: 13, display: 'block', color: connectionMode === 'select_source' ? '#1890ff' : '#444' }}>
+          <Text style={{ fontSize: 12, display: 'block', color: connectionMode === 'select_source' ? '#2563eb' : '#525252' }}>
             1. 点击图中节点选为源节点（绿色框）
           </Text>
-          <Text style={{ fontSize: 13, display: 'block', color: connectionMode === 'select_target' ? '#1890ff' : '#444' }}>
+          <Text style={{ fontSize: 12, display: 'block', color: connectionMode === 'select_target' ? '#2563eb' : '#525252' }}>
             2. 切换到"选目标节点"，点击选择目标（蓝色框）
           </Text>
-          <Text style={{ fontSize: 13, display: 'block', color: '#444' }}>
+          <Text style={{ fontSize: 12, display: 'block', color: '#525252' }}>
             3. 点击下方"确认连接"按钮完成
           </Text>
         </div>
@@ -500,7 +571,13 @@ const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
 
       {/* 选中状态显示 */}
       {(selectedNodes.size > 0 || targetNodes.size > 0) && (
-        <div style={{ marginBottom: 12, padding: 10, background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f' }}>
+        <div style={{
+          marginBottom: 12,
+          padding: 12,
+          background: 'rgba(5, 150, 105, 0.04)',
+          borderRadius: 8,
+          border: '1px solid rgba(5, 150, 105, 0.1)',
+        }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
             <Text style={{ fontSize: 14 }}>
               <strong>源节点: {selectedNodes.size} 个</strong>
@@ -578,11 +655,11 @@ const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
                 <div
                       key={conn.id}
                       style={{
-                        padding: 8,
-                        background: '#f6ffed',
-                        marginBottom: 6,
-                        borderRadius: 4,
-                        border: '1px solid #b7eb8f',
+                        padding: 10,
+                        background: 'rgba(5, 150, 105, 0.04)',
+                        marginBottom: 8,
+                        borderRadius: 8,
+                        border: '1px solid rgba(5, 150, 105, 0.1)',
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -621,10 +698,11 @@ const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
                     <div
                       key={`auto-${idx}`}
                       style={{
-                        padding: 8,
-                        background: '#f5f5f5',
-                        marginBottom: 6,
-                        borderRadius: 4,
+                        padding: 10,
+                        background: '#fff',
+                        marginBottom: 8,
+                        borderRadius: 8,
+                        border: '1px solid rgba(0, 0, 0, 0.06)',
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -703,10 +781,37 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   // Rack配置编辑模式
   const [rackEditMode, setRackEditMode] = useState(false)
 
-  // Switch配置（合并默认值以兼容旧缓存）
+  // Switch配置（深度合并默认值以兼容旧缓存）
   const [switchConfig, setSwitchConfig] = useState<GlobalSwitchConfig>(() => {
     if (cachedConfig?.switchConfig) {
-      return { ...DEFAULT_SWITCH_CONFIG, ...cachedConfig.switchConfig }
+      // 深度合并各层级配置，确保新字段有默认值
+      const merged = { ...DEFAULT_SWITCH_CONFIG }
+      if (cachedConfig.switchConfig.switch_types) {
+        merged.switch_types = cachedConfig.switchConfig.switch_types
+      }
+      // 合并各层级配置，过滤掉无效字段
+      const mergeLevel = (defaultLevel: any, cachedLevel: any) => {
+        if (!cachedLevel) return defaultLevel
+        return {
+          enabled: cachedLevel.enabled ?? defaultLevel.enabled,
+          layers: cachedLevel.layers ?? defaultLevel.layers,
+          downlink_redundancy: cachedLevel.downlink_redundancy ?? defaultLevel.downlink_redundancy,
+          connect_to_upper_level: cachedLevel.connect_to_upper_level ?? defaultLevel.connect_to_upper_level,
+          direct_topology: cachedLevel.direct_topology ?? defaultLevel.direct_topology,
+          keep_direct_topology: cachedLevel.keep_direct_topology ?? defaultLevel.keep_direct_topology,
+          connection_mode: cachedLevel.connection_mode ?? defaultLevel.connection_mode,
+          group_config: cachedLevel.group_config ?? defaultLevel.group_config,
+          custom_connections: cachedLevel.custom_connections ?? defaultLevel.custom_connections,
+          // 只保留正确的字段名
+          switch_position: cachedLevel.switch_position ?? defaultLevel.switch_position,
+          switch_u_height: cachedLevel.switch_u_height ?? defaultLevel.switch_u_height,
+        }
+      }
+      merged.datacenter_level = mergeLevel(DEFAULT_SWITCH_CONFIG.datacenter_level, cachedConfig.switchConfig.datacenter_level)
+      merged.pod_level = mergeLevel(DEFAULT_SWITCH_CONFIG.pod_level, cachedConfig.switchConfig.pod_level)
+      merged.rack_level = mergeLevel(DEFAULT_SWITCH_CONFIG.rack_level, cachedConfig.switchConfig.rack_level)
+      merged.board_level = mergeLevel(DEFAULT_SWITCH_CONFIG.board_level, cachedConfig.switchConfig.board_level)
+      return merged
     }
     return DEFAULT_SWITCH_CONFIG
   })
@@ -922,8 +1027,14 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           children: (
             <div>
               {/* Pod数量配置 */}
-              <div style={{ marginBottom: 12, padding: 12, background: '#fafafa', borderRadius: 6 }}>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}>节点配置</Text>
+              <div style={{
+                marginBottom: 12,
+                padding: 14,
+                background: '#f5f5f5',
+                borderRadius: 10,
+                border: '1px solid rgba(0, 0, 0, 0.06)',
+              }}>
+                <Text strong style={{ display: 'block', marginBottom: 10, color: '#171717' }}>节点配置</Text>
                 <div style={configRowStyle}>
                   <Text>Pod 数量</Text>
                   <InputNumber
@@ -937,8 +1048,13 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 </div>
               </div>
               {/* Pod间连接配置 */}
-              <div style={{ padding: 12, background: '#fafafa', borderRadius: 6 }}>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}>连接配置</Text>
+              <div style={{
+                padding: 14,
+                background: '#f5f5f5',
+                borderRadius: 10,
+                border: '1px solid rgba(0, 0, 0, 0.06)',
+              }}>
+                <Text strong style={{ display: 'block', marginBottom: 10, color: '#171717' }}>连接配置</Text>
                 <SwitchLevelConfig
                   levelKey="datacenter_level"
                   config={switchConfig.datacenter_level}
@@ -977,8 +1093,14 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           children: (
             <div>
               {/* Rack数量配置 */}
-              <div style={{ marginBottom: 12, padding: 12, background: '#fafafa', borderRadius: 6 }}>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}>节点配置</Text>
+              <div style={{
+                marginBottom: 12,
+                padding: 14,
+                background: '#f5f5f5',
+                borderRadius: 10,
+                border: '1px solid rgba(0, 0, 0, 0.06)',
+              }}>
+                <Text strong style={{ display: 'block', marginBottom: 10, color: '#171717' }}>节点配置</Text>
                 <div style={configRowStyle}>
                   <Text>每Pod机柜数</Text>
                   <InputNumber
@@ -992,8 +1114,13 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 </div>
               </div>
               {/* Rack间连接配置 */}
-              <div style={{ padding: 12, background: '#fafafa', borderRadius: 6 }}>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}>连接配置</Text>
+              <div style={{
+                padding: 14,
+                background: '#f5f5f5',
+                borderRadius: 10,
+                border: '1px solid rgba(0, 0, 0, 0.06)',
+              }}>
+                <Text strong style={{ display: 'block', marginBottom: 10, color: '#171717' }}>连接配置</Text>
                 <SwitchLevelConfig
                   levelKey="pod_level"
                   config={switchConfig.pod_level}
@@ -1032,7 +1159,13 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           children: (
             <div>
               {/* Board配置 */}
-              <div style={{ marginBottom: 12, padding: 12, background: '#fafafa', borderRadius: 6 }}>
+              <div style={{
+                marginBottom: 12,
+                padding: 14,
+                background: 'linear-gradient(135deg, rgba(248, 250, 252, 0.8) 0%, rgba(241, 245, 249, 0.8) 100%)',
+                borderRadius: 12,
+                border: '1px solid rgba(0, 0, 0, 0.04)',
+              }}>
                 {/* 标题和编辑开关 */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <Text strong>节点配置</Text>
@@ -1141,69 +1274,6 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                               disabled={rackConfig.boards.length <= 1}
                             />
                           </div>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                              <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>芯片配置:</Text>
-                              <Button
-                                type="dashed"
-                                size="small"
-                                icon={<PlusOutlined />}
-                                onClick={() => {
-                                  const newBoards = [...rackConfig.boards]
-                                  const newChips = [...newBoards[boardIndex].chips, { name: 'CPU', count: 2 }]
-                                  newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
-                                  setRackConfig(prev => ({ ...prev, boards: newBoards }))
-                                }}
-                              >
-                                添加
-                              </Button>
-                            </div>
-                            {board.chips.map((chip, chipIndex) => (
-                              <div key={chipIndex} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, paddingLeft: 16 }}>
-                                <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>类型:</Text>
-                                <Input
-                                  size="small"
-                                  value={chip.name}
-                                  onChange={(e) => {
-                                    const newBoards = [...rackConfig.boards]
-                                    const newChips = [...newBoards[boardIndex].chips]
-                                    newChips[chipIndex] = { ...newChips[chipIndex], name: e.target.value }
-                                    newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
-                                    setRackConfig(prev => ({ ...prev, boards: newBoards }))
-                                  }}
-                                  style={{ width: 70 }}
-                                />
-                                <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>数量:</Text>
-                                <InputNumber
-                                  size="small"
-                                  min={1}
-                                  max={64}
-                                  value={chip.count}
-                                  onChange={(v) => {
-                                    const newBoards = [...rackConfig.boards]
-                                    const newChips = [...newBoards[boardIndex].chips]
-                                    newChips[chipIndex] = { ...newChips[chipIndex], count: v || 1 }
-                                    newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
-                                    setRackConfig(prev => ({ ...prev, boards: newBoards }))
-                                  }}
-                                  style={{ width: 60 }}
-                                />
-                                <Button
-                                  type="text"
-                                  danger
-                                  size="small"
-                                  icon={<MinusCircleOutlined />}
-                                  onClick={() => {
-                                    const newBoards = [...rackConfig.boards]
-                                    const newChips = newBoards[boardIndex].chips.filter((_, i) => i !== chipIndex)
-                                    newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
-                                    setRackConfig(prev => ({ ...prev, boards: newBoards }))
-                                  }}
-                                  disabled={board.chips.length <= 1}
-                                />
-                              </div>
-                            ))}
-                          </div>
                         </>
                       ) : (
                         /* 展示模式 */
@@ -1245,14 +1315,20 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
               </div>
 
               {/* Board间连接配置 */}
-              <div style={{ padding: 12, background: '#fafafa', borderRadius: 6 }}>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}>连接配置</Text>
+              <div style={{
+                padding: 14,
+                background: '#f5f5f5',
+                borderRadius: 10,
+                border: '1px solid rgba(0, 0, 0, 0.06)',
+              }}>
+                <Text strong style={{ display: 'block', marginBottom: 10, color: '#171717' }}>连接配置</Text>
                 <SwitchLevelConfig
                   levelKey="rack_level"
                   config={switchConfig.rack_level}
                   switchTypes={switchConfig.switch_types}
                   onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, rack_level: newConfig }))}
                   configRowStyle={configRowStyle}
+                  viewMode={viewMode}
                 />
               </div>
               {/* 连接编辑（当前层级时显示） */}
@@ -1284,17 +1360,93 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           label: 'Board层',
           children: (
             <div>
-              {/* Chip配置说明 */}
-              <div style={{ marginBottom: 12, padding: 12, background: '#fafafa', borderRadius: 6 }}>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}>节点配置</Text>
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  Chip配置在Rack层的板卡配置中设置
+              {/* 芯片配置 */}
+              <div style={{
+                marginBottom: 12,
+                padding: 14,
+                background: '#f5f5f5',
+                borderRadius: 10,
+                border: '1px solid rgba(0, 0, 0, 0.06)',
+              }}>
+                <Text strong style={{ display: 'block', marginBottom: 10, color: '#171717' }}>芯片配置</Text>
+                <Text type="secondary" style={{ fontSize: 11, marginBottom: 10, display: 'block' }}>
+                  为每种板卡类型配置芯片
                 </Text>
+                {rackConfig.boards.map((board, boardIndex) => (
+                  <div key={board.id} style={{ marginBottom: 10, padding: '8px 10px', background: '#fff', borderRadius: 6, border: '1px solid #e8e8e8' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <Text strong style={{ fontSize: 12 }}>{board.name}</Text>
+                      <Button
+                        type="dashed"
+                        size="small"
+                        icon={<PlusOutlined />}
+                        onClick={() => {
+                          const newBoards = [...rackConfig.boards]
+                          const newChips = [...newBoards[boardIndex].chips, { name: 'CPU', count: 2 }]
+                          newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                          setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                        }}
+                      >
+                        添加芯片
+                      </Button>
+                    </div>
+                    {board.chips.map((chip, chipIndex) => (
+                      <div key={chipIndex} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>类型:</Text>
+                        <Input
+                          size="small"
+                          value={chip.name}
+                          onChange={(e) => {
+                            const newBoards = [...rackConfig.boards]
+                            const newChips = [...newBoards[boardIndex].chips]
+                            newChips[chipIndex] = { ...newChips[chipIndex], name: e.target.value }
+                            newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                            setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                          }}
+                          style={{ width: 80 }}
+                        />
+                        <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>数量:</Text>
+                        <InputNumber
+                          size="small"
+                          min={1}
+                          max={64}
+                          value={chip.count}
+                          onChange={(v) => {
+                            const newBoards = [...rackConfig.boards]
+                            const newChips = [...newBoards[boardIndex].chips]
+                            newChips[chipIndex] = { ...newChips[chipIndex], count: v || 1 }
+                            newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                            setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                          }}
+                          style={{ width: 60 }}
+                        />
+                        <Button
+                          type="text"
+                          danger
+                          size="small"
+                          icon={<MinusCircleOutlined />}
+                          onClick={() => {
+                            const newBoards = [...rackConfig.boards]
+                            const newChips = newBoards[boardIndex].chips.filter((_, i) => i !== chipIndex)
+                            newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                            setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                          }}
+                          disabled={board.chips.length <= 1}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ))}
               </div>
 
               {/* Chip间连接配置 */}
-              <div style={{ padding: 12, background: '#fafafa', borderRadius: 6 }}>
-                <Text strong style={{ display: 'block', marginBottom: 8 }}>连接配置</Text>
+              <div style={{
+                padding: 14,
+                background: '#f5f5f5',
+                borderRadius: 10,
+                border: '1px solid rgba(0, 0, 0, 0.06)',
+              }}>
+                <Text strong style={{ display: 'block', marginBottom: 10, color: '#171717' }}>连接配置</Text>
                 <SwitchLevelConfig
                   levelKey="board_level"
                   config={switchConfig.board_level}

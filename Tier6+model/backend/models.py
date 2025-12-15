@@ -102,6 +102,9 @@ class SwitchLayerConfig(BaseModel):
     switch_type_id: str  # 使用的Switch类型ID
     count: int  # 该层Switch数量
     inter_connect: bool = False  # 同层Switch是否互联
+    # Rack层级Switch的物理位置配置
+    u_start_position: Optional[int] = None  # 起始U位 (1-42)
+    u_height: Optional[int] = 1  # 每台Switch占用U数
 
 
 class SwitchConnectionMode(str, Enum):
@@ -126,6 +129,10 @@ class SwitchCustomConnection(BaseModel):
     switch_indices: List[int]  # 连接到的Switch索引列表
 
 
+# Switch位置类型
+SwitchPosition = Literal['top', 'middle', 'bottom']
+
+
 class HierarchyLevelSwitchConfig(BaseModel):
     """某一层级的Switch配置（支持多层Switch，如Leaf-Spine）"""
     enabled: bool = False  # 是否启用该层级的Switch
@@ -134,12 +141,17 @@ class HierarchyLevelSwitchConfig(BaseModel):
     connect_to_upper_level: bool = True  # 是否连接到上层的Switch
     # 无Switch时的直连拓扑类型
     direct_topology: Literal['none', 'full_mesh', 'full_mesh_2d', 'ring', 'torus_2d', 'torus_3d'] = 'none'
+    # 启用Switch时是否同时保留节点之间的直连
+    keep_direct_topology: bool = False
     # Switch与下层节点的连接模式
     connection_mode: SwitchConnectionMode = SwitchConnectionMode.ROUND_ROBIN
     # 分组连接配置（connection_mode为GROUP时使用）
     group_config: Optional[SwitchGroupConfig] = None
     # 自定义连接配置（connection_mode为CUSTOM时使用）
     custom_connections: Optional[List[SwitchCustomConnection]] = None
+    # Rack层级Switch的位置配置
+    switch_position: Optional[SwitchPosition] = 'top'  # Switch位置: top/middle/bottom
+    switch_u_height: Optional[int] = 1  # Switch U高度 (1-4U)
 
 
 class GlobalSwitchConfig(BaseModel):
@@ -167,6 +179,8 @@ class SwitchInstance(BaseModel):
     uplink_ports_used: int = 0  # 上行端口使用数
     downlink_ports_used: int = 0  # 下行端口使用数
     inter_ports_used: int = 0  # 同层互联端口使用数
+    u_height: Optional[int] = None  # 占用U数（用于3D显示）
+    u_position: Optional[int] = None  # U位置（用于3D显示，与Board统一计算）
 
 
 class HierarchicalTopology(BaseModel):

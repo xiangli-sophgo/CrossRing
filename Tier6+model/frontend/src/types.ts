@@ -106,6 +106,9 @@ export interface SwitchLayerConfig {
   switch_type_id: string;   // 使用的Switch类型ID
   count: number;            // 该层Switch数量
   inter_connect: boolean;   // 同层Switch是否互联
+  // Rack层级Switch的物理位置配置
+  u_start_position?: number;  // 起始U位 (1-42)，多台Switch从此位置向上排列
+  u_height?: number;          // 每台Switch占用U数，默认1
 }
 
 // 直连拓扑类型
@@ -120,6 +123,9 @@ export interface SwitchCustomConnection {
   switch_indices: number[]; // 连接到的Switch索引列表
 }
 
+// Switch位置类型
+export type SwitchPosition = 'top' | 'middle' | 'bottom';
+
 // 层级Switch配置（支持多层Switch，如Leaf-Spine）
 export interface HierarchyLevelSwitchConfig {
   enabled: boolean;                     // 是否启用该层级的Switch
@@ -127,8 +133,12 @@ export interface HierarchyLevelSwitchConfig {
   downlink_redundancy: number;          // 每节点连接数（自定义模式使用）
   connect_to_upper_level: boolean;      // 是否连接到上层的Switch
   direct_topology?: DirectTopologyType; // 无Switch时的直连拓扑类型
+  keep_direct_topology?: boolean;       // 启用Switch时是否同时保留节点直连
   connection_mode?: SwitchConnectionMode;           // Switch与下层节点的连接模式
   custom_connections?: SwitchCustomConnection[];    // 自定义连接配置
+  // Rack层级Switch的3D显示配置
+  switch_position?: SwitchPosition;     // Switch位置: top/middle/bottom
+  switch_u_height?: number;             // Switch U高度 (1-4U)
 }
 
 // 全局Switch配置
@@ -146,11 +156,13 @@ export interface SwitchInstance {
   type_id: string;                                      // Switch类型ID
   layer: string;                                        // 所在层，如 "leaf", "spine"
   hierarchy_level: 'datacenter' | 'pod' | 'rack';       // 所属层级
-  parent_id?: string;                                   // 父节点ID
+  parent_id?: string;                                   // 父节点ID (rack层级时为rack_id)
   label: string;                                        // 显示标签
   uplink_ports_used: number;                            // 上行端口使用数
   downlink_ports_used: number;                          // 下行端口使用数
   inter_ports_used: number;                             // 同层互联端口使用数
+  u_height?: number;                                    // 占用U数（用于3D显示）
+  u_position?: number;                                  // U位置（用于3D显示，与Board统一计算）
 }
 
 // 完整拓扑数据
@@ -207,8 +219,8 @@ export const LEVEL_COLORS: Record<ViewLevel, string> = {
 
 // Chip类型颜色
 export const CHIP_TYPE_COLORS: Record<ChipType, string> = {
-  npu: '#eb2f96',      // 粉色
-  cpu: '#1890ff',      // 蓝色
+  npu: '#d97706',      // 琥珀色
+  cpu: '#4f46e5',      // 靛蓝色
 };
 
 // Switch层级颜色
@@ -265,4 +277,47 @@ export const CAMERA_DISTANCE: Record<ViewLevel, { min: number; max: number }> = 
   rack: { min: 0.5, max: 8 },
   board: { min: 0.3, max: 3 },
   chip: { min: 0.1, max: 1 },
+};
+
+// ============================================
+// LOD (Level of Detail) 配置
+// ============================================
+
+// LOD 级别
+export type LODLevel = 'high' | 'medium' | 'low';
+
+// LOD 距离阈值（单位：3D世界单位）
+export const LOD_THRESHOLDS = {
+  high: 2,      // 距离 < 2: 高细节（完整引脚、电路纹理、文字）
+  medium: 5,    // 距离 2-5: 中细节（简化引脚）
+  low: Infinity // 距离 > 5: 低细节（仅 Box）
+};
+
+// 引脚渲染配置
+export const PIN_CONFIG = {
+  pinsPerSide: 6,           // 每边引脚数
+  pinWidth: 0.006,          // 引脚宽度
+  pinDepth: 0.004,          // 引脚深度
+  pinHeightRatio: 0.3,      // 引脚高度相对于芯片厚度的比例
+  pinColor: '#a0a0a0',      // 引脚颜色
+  pinMetalness: 0.4,
+  pinRoughness: 0.6,
+};
+
+// 电路纹理配置
+export const CIRCUIT_TRACE_CONFIG = {
+  horizontalCount: 3,       // 水平纹理数量
+  verticalCount: 3,         // 垂直纹理数量
+  traceHeight: 0.001,       // 纹理高度
+  traceWidth: 0.002,        // 纹理宽度
+  traceColor: '#333',       // 纹理颜色
+};
+
+// ============================================
+// 键盘快捷键配置
+// ============================================
+
+export const KEYBOARD_SHORTCUTS = {
+  back: ['Escape', 'Backspace'],      // 返回上一级
+  resetView: ['KeyR'],                 // 重置相机视角
 };

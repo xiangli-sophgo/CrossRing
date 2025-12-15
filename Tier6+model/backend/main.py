@@ -332,4 +332,4 @@ async def delete_config(name: str):
 if __name__ == "__main__":
     # 推荐使用 start.py 启动，会自动清理端口
     # 直接运行 main.py 需要手动确保端口未被占用
-    uvicorn.run(app, host="0.0.0.0", port=8001, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=8002, reload=False)

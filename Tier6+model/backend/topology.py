@@ -102,9 +102,29 @@ class HierarchicalTopologyGenerator:
                 # 获取Rack总U数
                 rack_total_u = rack_config.get('total_u', 42) if rack_config else 42
 
+                # 计算Switch预留空间（汇总显示，只占用配置的高度）
+                switch_reserved_u = 0
+                switch_position = 'top'  # 默认在顶部
+                switch_u_height = 1
+                if switch_config:
+                    rack_level_cfg = switch_config.get('rack_level', {})
+                    if rack_level_cfg.get('enabled'):
+                        switch_position = rack_level_cfg.get('switch_position', 'top')
+                        switch_u_height = rack_level_cfg.get('switch_u_height', 1)
+                        # 汇总显示，只预留配置的高度
+                        switch_reserved_u = switch_u_height
+
+                # 根据Switch位置确定Board的起始U位置
+                if switch_position == 'bottom':
+                    # Switch在底部，Board从Switch上方开始
+                    board_start_u = switch_reserved_u + 1
+                else:
+                    # Switch在顶部或中间，Board从U1开始（middle模式后续会重新调整）
+                    board_start_u = 1
+
                 if use_flex_rack_config:
                     # ===== 灵活Rack配置模式 =====
-                    current_u = 1
+                    current_u = board_start_u
                     board_idx = 0
                     for flex_board in rack_config['boards']:
                         u_height = flex_board.get('u_height', 2)
@@ -131,8 +151,12 @@ class HierarchicalTopologyGenerator:
                             ))
 
                             # 生成Chip间连接（根据board_level配置）
-                            if switch_config is None or not switch_config.get('board_level', {}).get('enabled'):
-                                board_level_topo = switch_config.get('board_level', {}).get('direct_topology', 'none') if switch_config else 'none'
+                            board_level_cfg = switch_config.get('board_level', {}) if switch_config else {}
+                            board_level_enabled = board_level_cfg.get('enabled', False)
+                            board_level_topo = board_level_cfg.get('direct_topology', 'none')
+                            keep_direct = board_level_cfg.get('keep_direct_topology', False)
+                            # 未启用Switch时生成直连，或启用Switch但keep_direct_topology为True时也生成直连
+                            if not board_level_enabled or keep_direct:
                                 chip_connections = self._generate_chip_connections(chips, board_level_topo)
                                 connections.extend(chip_connections)
 
@@ -140,8 +164,8 @@ class HierarchicalTopologyGenerator:
                             board_idx += 1
                 else:
                     # ===== 传统配置模式 =====
-                    # 按U高度生成板卡，从底部(U1)开始堆叠
-                    current_u = 1
+                    # 按U高度生成板卡，从board_start_u开始堆叠
+                    current_u = board_start_u
                     board_idx = 0
 
                     # 按顺序生成各种U高度的板卡: 4U -> 2U -> 1U (大的在下面)
@@ -172,13 +196,32 @@ class HierarchicalTopologyGenerator:
                             ))
 
                             # 生成Chip间连接（根据board_level配置）
-                            if switch_config is None or not switch_config.get('board_level', {}).get('enabled'):
-                                board_level_topo = switch_config.get('board_level', {}).get('direct_topology', 'none') if switch_config else 'none'
+                            board_level_cfg = switch_config.get('board_level', {}) if switch_config else {}
+                            board_level_enabled = board_level_cfg.get('enabled', False)
+                            board_level_topo = board_level_cfg.get('direct_topology', 'none')
+                            keep_direct = board_level_cfg.get('keep_direct_topology', False)
+                            # 未启用Switch时生成直连，或启用Switch但keep_direct_topology为True时也生成直连
+                            if not board_level_enabled or keep_direct:
                                 chip_connections = self._generate_chip_connections(chips, board_level_topo)
                                 connections.extend(chip_connections)
 
                             current_u += u_height
                             board_idx += 1
+
+                # middle模式：在Board中间插入Switch空间，调整后半部分Board的u_position
+                if switch_position == 'middle' and switch_reserved_u > 0 and len(boards) > 0:
+                    # 计算中间位置
+                    half_count = len(boards) // 2
+                    if half_count > 0:
+                        # 找到中间分界点：前half_count个Board的最高位置
+                        sorted_boards = sorted(boards, key=lambda b: b.u_position)
+                        split_board = sorted_boards[half_count - 1]
+                        split_u = split_board.u_position + split_board.u_height  # 分界U位置
+
+                        # 后半部分Board的u_position向上移动switch_reserved_u
+                        for board in boards:
+                            if board.u_position >= split_u:
+                                board.u_position += switch_reserved_u
 
                 racks.append(RackConfig(
                     id=rack_full_id,
@@ -188,9 +231,13 @@ class HierarchicalTopologyGenerator:
                     boards=boards,
                 ))
 
-                # 生成Board间连接（仅在没有Rack层Switch时使用直连）
-                if switch_config is None or not switch_config.get('rack_level', {}).get('enabled'):
-                    rack_level_topo = switch_config.get('rack_level', {}).get('direct_topology', 'full_mesh') if switch_config else 'full_mesh'
+                # 生成Board间连接
+                rack_level_cfg = switch_config.get('rack_level', {}) if switch_config else {}
+                rack_level_enabled = rack_level_cfg.get('enabled', False)
+                rack_level_topo = rack_level_cfg.get('direct_topology', 'full_mesh')
+                keep_direct = rack_level_cfg.get('keep_direct_topology', False)
+                # 未启用Switch时生成直连，或启用Switch但keep_direct_topology为True时也生成直连
+                if not rack_level_enabled or keep_direct:
                     board_connections = self._generate_board_connections(boards, rack_level_topo)
                     connections.extend(board_connections)
 
@@ -201,23 +248,32 @@ class HierarchicalTopologyGenerator:
                 racks=racks,
             ))
 
-            # 生成Rack间连接（仅在没有Pod层Switch时使用直连）
-            if switch_config is None or not switch_config.get('pod_level', {}).get('enabled'):
-                pod_level_topo = switch_config.get('pod_level', {}).get('direct_topology', 'full_mesh') if switch_config else 'full_mesh'
+            # 生成Rack间连接
+            pod_level_cfg = switch_config.get('pod_level', {}) if switch_config else {}
+            pod_level_enabled = pod_level_cfg.get('enabled', False)
+            pod_level_topo = pod_level_cfg.get('direct_topology', 'full_mesh')
+            keep_direct = pod_level_cfg.get('keep_direct_topology', False)
+            # 未启用Switch时生成直连，或启用Switch但keep_direct_topology为True时也生成直连
+            if not pod_level_enabled or keep_direct:
                 rack_connections = self._generate_rack_connections(
                     [r.id for r in racks],
                     pod_level_topo
                 )
                 connections.extend(rack_connections)
 
-        # 生成Pod间连接（仅在没有Switch配置时使用直连）
-        if pod_count > 1 and (switch_config is None or not switch_config.get('datacenter_level', {}).get('enabled')):
-            dc_level_topo = switch_config.get('datacenter_level', {}).get('direct_topology', 'full_mesh') if switch_config else 'full_mesh'
-            pod_connections = self._generate_pod_connections(
-                [p.id for p in pods],
-                dc_level_topo
-            )
-            connections.extend(pod_connections)
+        # 生成Pod间连接
+        if pod_count > 1:
+            dc_level_cfg = switch_config.get('datacenter_level', {}) if switch_config else {}
+            dc_level_enabled = dc_level_cfg.get('enabled', False)
+            dc_level_topo = dc_level_cfg.get('direct_topology', 'full_mesh')
+            keep_direct = dc_level_cfg.get('keep_direct_topology', False)
+            # 未启用Switch时生成直连，或启用Switch但keep_direct_topology为True时也生成直连
+            if not dc_level_enabled or keep_direct:
+                pod_connections = self._generate_pod_connections(
+                    [p.id for p in pods],
+                    dc_level_topo
+                )
+                connections.extend(pod_connections)
 
         # ============================================
         # Switch生成
@@ -231,12 +287,52 @@ class HierarchicalTopologyGenerator:
                 for t in switch_config.get('switch_types', [])
             ]
 
+            # 0. Board层Switch（Chip间）
+            board_level_config = switch_config.get('board_level', {})
+            if board_level_config.get('enabled') and board_level_config.get('layers'):
+                for pod in pods:
+                    for rack in pod.racks:
+                        for board in rack.boards:
+                            chip_ids = [c.id for c in board.chips]
+                            if chip_ids:
+                                board_switches, board_switch_conns = self._generate_switch_connections(
+                                    switch_layers=[
+                                        {'layer_name': l['layer_name'], 'switch_type_id': l['switch_type_id'],
+                                         'count': l['count'], 'inter_connect': l.get('inter_connect', False)}
+                                        for l in board_level_config['layers']
+                                    ],
+                                    switch_types=switch_types_list,
+                                    devices=chip_ids,
+                                    redundancy=board_level_config.get('downlink_redundancy', 1),
+                                    parent_id=board.id,
+                                    hierarchy_level='board',
+                                    connection_mode=board_level_config.get('connection_mode', 'full_mesh'),
+                                    group_config=board_level_config.get('group_config'),
+                                    custom_connections=board_level_config.get('custom_connections')
+                                )
+                                switches.extend(board_switches)
+                                connections.extend(board_switch_conns)
+
             # 1. Rack层Switch（Board间）
             rack_level_config = switch_config.get('rack_level', {})
             if rack_level_config.get('enabled') and rack_level_config.get('layers'):
+                switch_position = rack_level_config.get('switch_position', 'top')
+                switch_u_height = rack_level_config.get('switch_u_height', 1)
+
                 for pod in pods:
                     for rack in pod.racks:
-                        board_ids = [b.id for b in rack.boards]
+                        # 确定下层设备：Board还是Board层顶层Switch
+                        if board_level_config.get('enabled') and board_level_config.get('connect_to_upper_level', True):
+                            # 连接到Board层顶层Switch
+                            top_board_switches = self._get_top_layer_switches(switches, 'board')
+                            device_ids = [s.id for s in top_board_switches if s.parent_id and s.parent_id.startswith(rack.id)]
+                        else:
+                            # 直接连接到Board
+                            device_ids = [b.id for b in rack.boards]
+
+                        if not device_ids:
+                            continue
+
                         rack_switches, rack_switch_conns = self._generate_switch_connections(
                             switch_layers=[
                                 {'layer_name': l['layer_name'], 'switch_type_id': l['switch_type_id'],
@@ -244,7 +340,7 @@ class HierarchicalTopologyGenerator:
                                 for l in rack_level_config['layers']
                             ],
                             switch_types=switch_types_list,
-                            devices=board_ids,
+                            devices=device_ids,
                             redundancy=rack_level_config.get('downlink_redundancy', 1),
                             parent_id=rack.id,
                             hierarchy_level='rack',
@@ -252,6 +348,33 @@ class HierarchicalTopologyGenerator:
                             group_config=rack_level_config.get('group_config'),
                             custom_connections=rack_level_config.get('custom_connections')
                         )
+
+                        # 为rack层Switch分配u_position（所有Switch共用同一位置，汇总显示）
+                        if switch_position == 'bottom':
+                            # 底部：从U1开始
+                            switch_u = 1
+                        elif switch_position == 'middle':
+                            # 中间：放在Board分界位置（前半部分Board之后）
+                            if rack.boards:
+                                half_count = len(rack.boards) // 2
+                                if half_count > 0:
+                                    sorted_boards = sorted(rack.boards, key=lambda b: b.u_position)
+                                    split_board = sorted_boards[half_count - 1]
+                                    switch_u = split_board.u_position + split_board.u_height
+                                else:
+                                    switch_u = 1
+                            else:
+                                switch_u = 1
+                        else:
+                            # 顶部：从最高Board之后开始
+                            max_board_u = max((b.u_position + b.u_height - 1 for b in rack.boards), default=0)
+                            switch_u = max_board_u + 1
+
+                        # 所有Switch共用同一个u_position
+                        for sw in rack_switches:
+                            sw.u_position = switch_u
+                            sw.u_height = switch_u_height
+
                         switches.extend(rack_switches)
                         connections.extend(rack_switch_conns)
 
@@ -625,9 +748,9 @@ class HierarchicalTopologyGenerator:
                 x = i % dim
                 y = (i // dim) % dim
                 z = i // (dim * dim)
-                # X方向邻居
+                # X方向邻居（只在i < nx时生成，避免重复）
                 nx = y * dim + ((x + 1) % dim) + z * dim * dim
-                if nx < n and nx != i:
+                if nx < n and nx != i and i < nx:
                     connections.append(ConnectionConfig(
                         source=node_ids[i],
                         target=node_ids[nx],
@@ -635,9 +758,9 @@ class HierarchicalTopologyGenerator:
                         bandwidth=bandwidth,
                         latency=latency,
                     ))
-                # Y方向邻居
+                # Y方向邻居（只在i < ny时生成，避免重复）
                 ny = ((y + 1) % dim) * dim + x + z * dim * dim
-                if ny < n and ny != i:
+                if ny < n and ny != i and i < ny:
                     connections.append(ConnectionConfig(
                         source=node_ids[i],
                         target=node_ids[ny],
@@ -645,9 +768,9 @@ class HierarchicalTopologyGenerator:
                         bandwidth=bandwidth,
                         latency=latency,
                     ))
-                # Z方向邻居
+                # Z方向邻居（只在i < nz时生成，避免重复）
                 nz = y * dim + x + ((z + 1) % dim) * dim * dim
-                if nz < n and nz != i:
+                if nz < n and nz != i and i < nz:
                     connections.append(ConnectionConfig(
                         source=node_ids[i],
                         target=node_ids[nz],
@@ -790,6 +913,7 @@ class HierarchicalTopologyGenerator:
 
         # 1. 创建Switch实例
         layer_switches: Dict[str, List[SwitchInstance]] = {}
+
         for layer_idx, layer_config in enumerate(switch_layers):
             layer_name = layer_config['layer_name']
             switch_type = type_map.get(layer_config['switch_type_id'])
@@ -800,6 +924,7 @@ class HierarchicalTopologyGenerator:
 
             for i in range(layer_config['count']):
                 switch_id = f"{parent_id}/{layer_name}_{i}" if parent_id else f"{layer_name}_{i}"
+
                 switch = SwitchInstance(
                     id=switch_id,
                     type_id=layer_config['switch_type_id'],
@@ -809,7 +934,8 @@ class HierarchicalTopologyGenerator:
                     label=f"{switch_type['name']}-{i}",
                     uplink_ports_used=0,
                     downlink_ports_used=0,
-                    inter_ports_used=0
+                    inter_ports_used=0,
+                    u_height=1 if hierarchy_level == 'rack' else None
                 )
                 switches.append(switch)
                 layer_switches[layer_name].append(switch)

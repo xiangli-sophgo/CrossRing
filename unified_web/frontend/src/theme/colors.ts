@@ -1,78 +1,97 @@
 /**
- * 统一颜色系统
+ * 统一颜色系统 - 高级浅色主题 (Soft Blue-Gray)
+ * 设计灵感：清晨薄雾、精致科技、北欧简约
  */
 
-// 主色调
-export const primaryColor = '#1677ff'
-export const primaryColorHover = '#4096ff'
-export const primaryColorActive = '#0958d9'
-export const primaryBg = '#e6f4ff'
+// ========== 核心品牌色 ==========
+export const primaryColor = '#4f6ef7'        // 优雅蓝紫
+export const primaryColorHover = '#6b85f9'
+export const primaryColorActive = '#3d5bd9'
+export const primaryBg = '#eef2ff'
 
-// 状态颜色
-export const successColor = '#52c41a'
-export const warningColor = '#faad14'
-export const errorColor = '#ff4d4f'
-export const infoColor = '#1677ff'
+// 强调色 - 青绿色点缀
+export const accentColor = '#10b981'
+export const accentColorHover = '#34d399'
 
-// 中性色
-export const textColor = 'rgba(0, 0, 0, 0.88)'
-export const textColorSecondary = 'rgba(0, 0, 0, 0.65)'
-export const textColorTertiary = 'rgba(0, 0, 0, 0.45)'
-export const textColorQuaternary = 'rgba(0, 0, 0, 0.25)'
+// ========== 状态颜色 ==========
+export const successColor = '#10b981'  // 翡翠绿
+export const warningColor = '#f59e0b'  // 琥珀色
+export const errorColor = '#ef4444'    // 珊瑚红
+export const infoColor = '#4f6ef7'
 
-// 边框和分割线
-export const borderColor = '#d9d9d9'
-export const borderColorSplit = '#f0f0f0'
+// ========== 背景色层级 ==========
+// 主背景 - 淡蓝灰，带一点温暖
+export const bgLayout = '#f4f7fb'
+// 侧边栏 - 稍深的蓝灰
+export const bgSider = '#eaeff6'
+// 卡片/容器 - 纯净白
+export const bgContainer = '#ffffff'
+// 悬浮层 - 纯白
+export const bgElevated = '#ffffff'
+// 悬停背景
+export const bgHover = '#f0f4fa'
 
-// 背景色
-export const bgColorBase = '#ffffff'
-export const bgColorLayout = '#f5f5f5'
-export const bgColorContainer = '#ffffff'
-export const bgColorElevated = '#ffffff'
+// ========== 文字色 ==========
+export const textColor = '#1e293b'              // 深蓝灰
+export const textColorSecondary = '#64748b'     // 中灰蓝
+export const textColorTertiary = '#94a3b8'      // 浅灰蓝
+export const textColorQuaternary = '#cbd5e1'
 
-// IP类型颜色 (用于拓扑图节点)
+// ========== 边框 ==========
+export const borderColor = '#e2e8f0'
+export const borderColorLight = '#f1f5f9'
+export const borderColorDark = '#cbd5e1'
+
+// ========== 兼容旧代码 ==========
+export const borderColorSplit = borderColor
+export const bgColorBase = bgContainer
+export const bgColorLayout = bgLayout
+export const bgColorContainer = bgContainer
+export const bgColorElevated = bgElevated
+
+// ========== IP类型颜色 (拓扑图节点) ==========
 export const ipTypeColors: Record<string, { bg: string; border: string; text: string }> = {
-  gdma: { bg: '#e6f7ff', border: '#1890ff', text: '#096dd9' },
-  sdma: { bg: '#e6f7ff', border: '#1890ff', text: '#096dd9' },
-  cdma: { bg: '#f6ffed', border: '#52c41a', text: '#389e0d' },
-  npu: { bg: '#f9f0ff', border: '#722ed1', text: '#531dab' },
-  ddr: { bg: '#fff1f0', border: '#ff4d4f', text: '#cf1322' },
-  l2m: { bg: '#fff1f0', border: '#ff4d4f', text: '#cf1322' },
-  pcie: { bg: '#fff7e6', border: '#fa8c16', text: '#d46b08' },
-  eth: { bg: '#f6ffed', border: '#52c41a', text: '#389e0d' },
-  dcin: { bg: '#e6fffb', border: '#13c2c2', text: '#08979c' },
-  default: { bg: '#fafafa', border: '#d9d9d9', text: '#595959' },
+  gdma: { bg: '#eef2ff', border: '#6366f1', text: '#4338ca' },
+  sdma: { bg: '#eef2ff', border: '#6366f1', text: '#4338ca' },
+  cdma: { bg: '#ecfdf5', border: '#10b981', text: '#047857' },
+  npu: { bg: '#faf5ff', border: '#a855f7', text: '#7c3aed' },
+  ddr: { bg: '#fef2f2', border: '#ef4444', text: '#dc2626' },
+  l2m: { bg: '#fef2f2', border: '#ef4444', text: '#dc2626' },
+  pcie: { bg: '#fffbeb', border: '#f59e0b', text: '#d97706' },
+  eth: { bg: '#ecfdf5', border: '#10b981', text: '#047857' },
+  dcin: { bg: '#ecfeff', border: '#06b6d4', text: '#0891b2' },
+  default: { bg: '#f8fafc', border: '#94a3b8', text: '#64748b' },
 }
 
-// 状态标签颜色映射
+// ========== 状态标签颜色映射 ==========
 export const statusColors: Record<string, { color: string; bg: string }> = {
-  pending: { color: '#8c8c8c', bg: '#fafafa' },
-  running: { color: '#1677ff', bg: '#e6f4ff' },
-  completed: { color: '#52c41a', bg: '#f6ffed' },
-  failed: { color: '#ff4d4f', bg: '#fff2f0' },
-  cancelled: { color: '#faad14', bg: '#fffbe6' },
-  interrupted: { color: '#fa8c16', bg: '#fff7e6' },
+  pending: { color: '#64748b', bg: '#f1f5f9' },
+  running: { color: '#4f6ef7', bg: '#eef2ff' },
+  completed: { color: '#10b981', bg: '#ecfdf5' },
+  failed: { color: '#ef4444', bg: '#fef2f2' },
+  cancelled: { color: '#f59e0b', bg: '#fffbeb' },
+  interrupted: { color: '#f97316', bg: '#fff7ed' },
 }
 
-// 实验类型颜色
+// ========== 实验类型颜色 ==========
 export const experimentTypeColors: Record<string, string> = {
-  kcin: '#1677ff',
-  dcin: '#722ed1',
+  kcin: '#4f6ef7',
+  dcin: '#a855f7',
 }
 
-// 图表颜色序列
+// ========== 图表颜色序列 ==========
 export const chartColors = [
-  '#1677ff',
-  '#52c41a',
-  '#722ed1',
-  '#fa8c16',
-  '#eb2f96',
-  '#13c2c2',
-  '#faad14',
-  '#2f54eb',
+  '#4f6ef7',  // 主蓝紫
+  '#10b981',  // 翡翠绿
+  '#a855f7',  // 紫色
+  '#f59e0b',  // 琥珀
+  '#ec4899',  // 粉红
+  '#06b6d4',  // 青色
+  '#f97316',  // 橙色
+  '#8b5cf6',  // 紫罗兰
 ]
 
-// 获取IP类型颜色（带默认值）
+// ========== 工具函数 ==========
 export const getIPTypeColor = (ipType: string) => {
   const type = ipType.toLowerCase().replace(/_\d+$/, '')
   return ipTypeColors[type] || ipTypeColors.default

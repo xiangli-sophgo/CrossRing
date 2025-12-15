@@ -178,7 +178,7 @@ function torus3DLayout(nodes: Node[], width: number, height: number, _padding: n
   const centerY = height / 2
   const spacingX = 140  // X方向间距
   const spacingY = 120  // Y方向间距（垂直）
-  const spacingZ = 80   // Z方向间距（深度，斜向）
+  const spacingZ = 90   // Z方向间距（深度，斜向）
 
   return nodes.map((node, i) => {
     const z = Math.floor(i / nodesPerLayer)
@@ -188,8 +188,8 @@ function torus3DLayout(nodes: Node[], width: number, height: number, _padding: n
 
     // 等轴测投影：
     // X轴向右，Y轴向下，Z轴向右上方（模拟深度）
-    const x = centerX + (col - (dim - 1) / 2) * spacingX + (z - (dim - 1) / 2) * spacingZ * 0.5
-    const y = centerY + (row - (dim - 1) / 2) * spacingY - (z - (dim - 1) / 2) * spacingZ * 0.4
+    const x = centerX + (col - (dim - 1) / 2) * spacingX + (z - (dim - 1) / 2) * spacingZ * 0.6
+    const y = centerY + (row - (dim - 1) / 2) * spacingY - (z - (dim - 1) / 2) * spacingZ * 0.5
 
     return {
       ...node,
@@ -240,7 +240,7 @@ function getLayoutForTopology(
   }
 }
 
-// 布局算法：分层布局（用于显示Switch层级）
+// 布局算法：分层布局（用于显示Switch层级，设备节点排成一排）
 function hierarchicalLayout(nodes: Node[], width: number, height: number): Node[] {
   // 按类型分组
   const switchNodes = nodes.filter(n => n.isSwitch)
@@ -305,6 +305,92 @@ function hierarchicalLayout(nodes: Node[], width: number, height: number): Node[
   return result
 }
 
+// 布局算法：混合布局（设备节点按拓扑排列，Switch节点在上方中央）
+// 用于同时有Switch和节点直连的场景
+function hybridLayout(
+  nodes: Node[],
+  width: number,
+  height: number,
+  directTopology: string
+): Node[] {
+  const switchNodes = nodes.filter(n => n.isSwitch)
+  const deviceNodes = nodes.filter(n => !n.isSwitch)
+
+  // 如果没有Switch，使用普通拓扑布局
+  if (switchNodes.length === 0) {
+    return getLayoutForTopology(directTopology, deviceNodes, width, height)
+  }
+
+  // Switch层数决定Switch区域高度
+  const switchLayers: Record<string, Node[]> = {}
+  switchNodes.forEach(n => {
+    const layer = n.subType || 'default'
+    if (!switchLayers[layer]) switchLayers[layer] = []
+    switchLayers[layer].push(n)
+  })
+  const switchLayerCount = Object.keys(switchLayers).length
+
+  // 动态计算区域划分：Switch区域更紧凑
+  const switchLayerHeight = 50  // 每层Switch的高度
+  const switchAreaHeight = switchLayerCount * switchLayerHeight
+  const switchAreaTop = 60  // Switch起始位置（留出顶部空间）
+  const gapBetween = 40  // Switch和设备之间的间隙
+
+  // 设备节点区域
+  const deviceAreaTop = switchAreaTop + switchAreaHeight + gapBetween
+  const deviceAreaHeight = height - deviceAreaTop - 30  // 底部留30px
+
+  const result: Node[] = []
+
+  // 1. 设备节点按拓扑类型布局（在下方区域）
+  const centerX = width / 2
+  const centerY = deviceAreaTop + deviceAreaHeight / 2
+  const radius = Math.min(width * 0.4, deviceAreaHeight * 0.45)
+
+  let layoutedDevices: Node[]
+  switch (directTopology) {
+    case 'ring':
+      layoutedDevices = ringLayout(deviceNodes, centerX, centerY, radius)
+      break
+    case 'torus_2d':
+      layoutedDevices = torusLayout(deviceNodes, width, deviceAreaHeight, 80)
+      layoutedDevices = layoutedDevices.map(n => ({ ...n, y: n.y + deviceAreaTop }))
+      break
+    case 'torus_3d':
+      layoutedDevices = torus3DLayout(deviceNodes, width, deviceAreaHeight, 60)
+      layoutedDevices = layoutedDevices.map(n => ({ ...n, y: n.y + deviceAreaTop - 30 }))
+      break
+    case 'full_mesh_2d':
+      layoutedDevices = torusLayout(deviceNodes, width, deviceAreaHeight, 80)
+      layoutedDevices = layoutedDevices.map(n => ({ ...n, y: n.y + deviceAreaTop }))
+      break
+    case 'full_mesh':
+    default:
+      layoutedDevices = circleLayout(deviceNodes, centerX, centerY, radius)
+      break
+  }
+  result.push(...layoutedDevices)
+
+  // 2. Switch节点按层级排列（在上方区域）
+  const layerOrder = ['leaf', 'spine', 'core']
+  const sortedLayers = Object.keys(switchLayers).sort((a, b) => {
+    const aIdx = layerOrder.indexOf(a)
+    const bIdx = layerOrder.indexOf(b)
+    return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx)
+  })
+
+  sortedLayers.forEach((layer, layerIdx) => {
+    const layerNodes = switchLayers[layer]
+    const y = switchAreaTop + layerIdx * switchLayerHeight
+    const spacing = width / (layerNodes.length + 1)
+    layerNodes.forEach((node, i) => {
+      result.push({ ...node, x: spacing * (i + 1), y })
+    })
+  })
+
+  return result
+}
+
 export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   visible,
   onClose,
@@ -340,6 +426,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   const svgRef = useRef<SVGSVGElement>(null)
   const [zoom, setZoom] = useState(1)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; content: string } | null>(null)
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
 
   // 手动调整模式开关（内部状态）
   const [isManualMode, setIsManualMode] = useState(false)
@@ -472,27 +559,42 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             },
           })
         })
+
       }
 
-      // Pod间连接和Switch连接
+      // Pod间连接和DC层Switch连接
+      const podIds = new Set(topology.pods.map(p => p.id))
+      const dcSwitchIds = new Set(
+        (topology.switches || []).filter(s => s.hierarchy_level === 'datacenter').map(s => s.id)
+      )
+      // 构建Pod层Switch到Pod的映射（用于转换跨层连接）
+      const podSwitchToPod: Record<string, string> = {}
+      ;(topology.switches || [])
+        .filter(s => s.hierarchy_level === 'pod')
+        .forEach(s => { podSwitchToPod[s.id] = s.parent_id })
+
       edgeList = topology.connections
         .filter(c => {
-          // Pod间直连
-          if (c.source.startsWith('pod_') && !c.source.includes('/')) return true
-          // Switch连接（数据中心层）
-          if (c.type === 'switch') {
-            const isSourceDc = c.source.startsWith('leaf_') || c.source.startsWith('spine_') || c.source.startsWith('core_')
-            const isTargetDc = c.target.startsWith('leaf_') || c.target.startsWith('spine_') || c.target.startsWith('core_')
-            return isSourceDc || isTargetDc || c.source.startsWith('pod_') || c.target.startsWith('pod_')
-          }
+          const sourceValid = podIds.has(c.source) || dcSwitchIds.has(c.source)
+          const targetValid = podIds.has(c.target) || dcSwitchIds.has(c.target)
+          if (sourceValid && targetValid) return true
+          // 跨层连接（DC Switch到Pod Switch）
+          if (dcSwitchIds.has(c.source) && podSwitchToPod[c.target]) return true
+          if (dcSwitchIds.has(c.target) && podSwitchToPod[c.source]) return true
           return false
         })
-        .map(c => ({
-          source: c.source,
-          target: c.target,
-          bandwidth: c.bandwidth,
-          latency: c.latency,
-        }))
+        .map(c => {
+          let source = c.source
+          let target = c.target
+          if (podSwitchToPod[c.source]) source = podSwitchToPod[c.source]
+          if (podSwitchToPod[c.target]) target = podSwitchToPod[c.target]
+          return {
+            source,
+            target,
+            bandwidth: c.bandwidth,
+            latency: c.latency,
+          }
+        })
 
     } else if (currentLevel === 'pod' && currentPod) {
       // Pod层：显示所有Rack和Pod层Switch
@@ -528,27 +630,46 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             },
           })
         })
+
       }
 
-      // Rack间连接和Switch连接
+      // Rack间连接和Pod层Switch连接
       const rackIds = new Set(currentPod.racks.map(r => r.id))
       const podSwitchIds = new Set(
         (topology.switches || [])
           .filter(s => s.hierarchy_level === 'pod' && s.parent_id === currentPod.id)
           .map(s => s.id)
       )
+      // 构建Rack层Switch到Rack的映射（用于转换跨层连接）
+      const rackSwitchToRack: Record<string, string> = {}
+      ;(topology.switches || [])
+        .filter(s => s.hierarchy_level === 'rack' && rackIds.has(s.parent_id))
+        .forEach(s => { rackSwitchToRack[s.id] = s.parent_id })
+
       edgeList = topology.connections
         .filter(c => {
+          // 直接连接（Rack或Pod Switch之间）
           const sourceInPod = rackIds.has(c.source) || podSwitchIds.has(c.source)
           const targetInPod = rackIds.has(c.target) || podSwitchIds.has(c.target)
-          return sourceInPod && targetInPod
+          if (sourceInPod && targetInPod) return true
+          // 跨层连接（Pod Switch到Rack Switch）- 需要转换
+          if (podSwitchIds.has(c.source) && rackSwitchToRack[c.target]) return true
+          if (podSwitchIds.has(c.target) && rackSwitchToRack[c.source]) return true
+          return false
         })
-        .map(c => ({
-          source: c.source,
-          target: c.target,
-          bandwidth: c.bandwidth,
-          latency: c.latency,
-        }))
+        .map(c => {
+          // 转换跨层连接：将Rack Switch替换为对应的Rack
+          let source = c.source
+          let target = c.target
+          if (rackSwitchToRack[c.source]) source = rackSwitchToRack[c.source]
+          if (rackSwitchToRack[c.target]) target = rackSwitchToRack[c.target]
+          return {
+            source,
+            target,
+            bandwidth: c.bandwidth,
+            latency: c.latency,
+          }
+        })
 
     } else if (currentLevel === 'rack' && currentRack) {
       // Rack层：显示所有Board和Rack层Switch
@@ -608,7 +729,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
         }))
 
     } else if (currentLevel === 'board' && currentBoard) {
-      // Board层：显示所有Chip
+      // Board层：显示所有Chip和Board层Switch
       graphTitle = `${currentBoard.label} - Chip拓扑`
       nodeList = currentBoard.chips.map((chip) => ({
         id: chip.id,
@@ -619,10 +740,43 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
         color: CHIP_TYPE_COLORS[chip.type] || '#666',
       }))
 
-      // Chip间连接
+      // 添加Board层Switch
+      if (topology.switches) {
+        const boardSwitches = topology.switches.filter(s =>
+          s.hierarchy_level === 'board' && s.parent_id === currentBoard.id
+        )
+        boardSwitches.forEach(sw => {
+          nodeList.push({
+            id: sw.id,
+            label: sw.label,
+            type: 'switch',
+            subType: sw.layer,
+            isSwitch: true,
+            x: 0,
+            y: 0,
+            color: SWITCH_LAYER_COLORS[sw.layer] || '#666',
+            portInfo: {
+              uplink: sw.uplink_ports_used,
+              downlink: sw.downlink_ports_used,
+              inter: sw.inter_ports_used,
+            },
+          })
+        })
+      }
+
+      // Chip间连接和Switch连接
       const chipIds = new Set(currentBoard.chips.map(c => c.id))
+      const boardSwitchIds = new Set(
+        (topology.switches || [])
+          .filter(s => s.hierarchy_level === 'board' && s.parent_id === currentBoard.id)
+          .map(s => s.id)
+      )
       edgeList = topology.connections
-        .filter(c => chipIds.has(c.source) && chipIds.has(c.target))
+        .filter(c => {
+          const sourceInBoard = chipIds.has(c.source) || boardSwitchIds.has(c.source)
+          const targetInBoard = chipIds.has(c.target) || boardSwitchIds.has(c.target)
+          return sourceInBoard && targetInBoard
+        })
         .map(c => ({
           source: c.source,
           target: c.target,
@@ -631,32 +785,37 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
         }))
     }
 
-    // 获取当前层级的直连拓扑类型
+    // 获取当前层级的直连拓扑类型和是否保留直连
     let directTopology = 'full_mesh'
+    let keepDirectTopology = false
     if (topology.switch_config) {
       if (currentLevel === 'datacenter') {
         const dcConfig = topology.switch_config.datacenter_level
-        if (!dcConfig?.enabled) {
-          directTopology = dcConfig?.direct_topology || 'full_mesh'
-        }
+        directTopology = dcConfig?.direct_topology || 'full_mesh'
+        keepDirectTopology = dcConfig?.enabled && dcConfig?.keep_direct_topology || false
       } else if (currentLevel === 'pod') {
         const podConfig = topology.switch_config.pod_level
-        if (!podConfig?.enabled) {
-          directTopology = podConfig?.direct_topology || 'full_mesh'
-        }
+        directTopology = podConfig?.direct_topology || 'full_mesh'
+        keepDirectTopology = podConfig?.enabled && podConfig?.keep_direct_topology || false
       } else if (currentLevel === 'rack') {
         const rackConfig = topology.switch_config.rack_level
-        if (!rackConfig?.enabled) {
-          directTopology = rackConfig?.direct_topology || 'full_mesh'
-        }
+        directTopology = rackConfig?.direct_topology || 'full_mesh'
+        keepDirectTopology = rackConfig?.enabled && rackConfig?.keep_direct_topology || false
+      } else if (currentLevel === 'board') {
+        const boardConfig = topology.switch_config.board_level
+        directTopology = boardConfig?.direct_topology || 'full_mesh'
+        keepDirectTopology = boardConfig?.enabled && boardConfig?.keep_direct_topology || false
       }
     }
 
     // 应用布局
     const hasSwitches = nodeList.some(n => n.isSwitch)
 
-    if (hasSwitches) {
-      // 有Switch时强制使用分层布局，确保Switch在上方
+    if (hasSwitches && keepDirectTopology && directTopology !== 'none') {
+      // 有Switch且保留直连：使用混合布局（设备按拓扑排列，Switch在上方）
+      nodeList = hybridLayout(nodeList, width, height, directTopology)
+    } else if (hasSwitches) {
+      // 只有Switch（无直连）：使用分层布局
       nodeList = hierarchicalLayout(nodeList, width, height)
     } else if (layoutType === 'auto') {
       // 自动布局：根据直连拓扑类型选择布局
@@ -992,10 +1151,11 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
           top: 16,
           left: 16,
           zIndex: 100,
-          background: 'rgba(255, 255, 255, 0.95)',
-          padding: '8px 16px',
-          borderRadius: 8,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          background: '#fff',
+          padding: '10px 16px',
+          borderRadius: 10,
+          border: '1px solid rgba(0, 0, 0, 0.08)',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.06)',
         }}>
           <Breadcrumb
             items={breadcrumbs.map((item, index) => ({
@@ -1008,7 +1168,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                   }}
                   style={{
                     cursor: index < breadcrumbs.length - 1 ? 'pointer' : 'default',
-                    color: index < breadcrumbs.length - 1 ? '#1890ff' : 'rgba(0, 0, 0, 0.88)',
+                    color: index < breadcrumbs.length - 1 ? '#2563eb' : '#171717',
                     fontWeight: index === breadcrumbs.length - 1 ? 500 : 400,
                   }}
                 >
@@ -1027,14 +1187,16 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
           top: 16,
           right: 16,
           zIndex: 100,
-          background: 'rgba(255, 255, 255, 0.95)',
-          padding: '8px 12px',
-          borderRadius: 8,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          background: '#fff',
+          padding: '10px 14px',
+          borderRadius: 10,
+          border: '1px solid rgba(0, 0, 0, 0.08)',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.06)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <Segmented
               size="small"
+              className="topology-layout-segmented"
               value={layoutType}
               onChange={(value) => {
                 onLayoutTypeChange?.(value as LayoutType)
@@ -1048,7 +1210,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                 { label: '网格', value: 'grid' },
               ]}
             />
-            <div style={{ borderLeft: '1px solid #e8e8e8', height: 20 }} />
+            <div style={{ borderLeft: '1px solid rgba(0, 0, 0, 0.08)', height: 20 }} />
             <Checkbox
               checked={isManualMode}
               onChange={(e) => setIsManualMode(e.target.checked)}
@@ -1090,16 +1252,16 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
           </div>
           {isManualMode && (
             <div style={{
-              marginTop: 8,
-              padding: '6px 10px',
-              background: 'linear-gradient(135deg, #e6f7ff 0%, #f0f5ff 100%)',
-              borderRadius: 6,
-              border: '1px solid #91d5ff',
+              marginTop: 10,
+              padding: '8px 12px',
+              background: 'rgba(37, 99, 235, 0.06)',
+              borderRadius: 8,
+              border: '1px solid rgba(37, 99, 235, 0.12)',
               fontSize: 12,
-              color: '#1890ff',
+              color: '#2563eb',
               fontWeight: 500,
             }}>
-              💡 Shift+拖动 · 自动吸附对齐 · 自动保存
+              Shift+拖动 · 自动吸附对齐 · 自动保存
             </div>
           )}
         </div>
@@ -1208,7 +1370,8 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
             for (let r = 0; r < rows; r++) {
               const nodesInRow = deviceNodes.filter(n => n.gridRow === r).sort((a, b) => (a.gridCol || 0) - (b.gridCol || 0))
-              if (nodesInRow.length >= 2) {
+              // 只有3个以上节点时才画环绕弧（2个节点时首尾相邻，已有直线连接）
+              if (nodesInRow.length >= 3) {
                 const first = nodesInRow[0]
                 const last = nodesInRow[nodesInRow.length - 1]
                 const firstPos = getPos(first)
@@ -1225,7 +1388,8 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
             for (let c = 0; c < cols; c++) {
               const nodesInCol = deviceNodes.filter(n => n.gridCol === c).sort((a, b) => (a.gridRow || 0) - (b.gridRow || 0))
-              if (nodesInCol.length >= 2) {
+              // 只有3个以上节点时才画环绕弧（2个节点时首尾相邻，已有直线连接）
+              if (nodesInCol.length >= 3) {
                 const first = nodesInCol[0]
                 const last = nodesInCol[nodesInCol.length - 1]
                 const firstPos = getPos(first)
@@ -1469,15 +1633,39 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                 const ctrlX = midX + perpX * bulge
                 const ctrlY = midY + perpY * bulge
 
+                const pathD = `M ${sourcePos.x} ${sourcePos.y} Q ${ctrlX} ${ctrlY}, ${targetPos.x} ${targetPos.y}`
                 return (
-                  <path
-                    key={`edge-${i}`}
-                    d={`M ${sourcePos.x} ${sourcePos.y} Q ${ctrlX} ${ctrlY}, ${targetPos.x} ${targetPos.y}`}
-                    fill="none"
-                    stroke="#b0b0b0"
-                    strokeWidth={1.5}
-                    strokeOpacity={0.6}
-                  />
+                  <g key={`edge-${i}`}>
+                    {/* 透明触发层 */}
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke="transparent"
+                      strokeWidth={16}
+                      style={{ cursor: 'pointer' }}
+                      onMouseEnter={(e) => {
+                        if (connectionMode !== 'view' || isManualMode) return
+                        const rect = svgRef.current?.getBoundingClientRect()
+                        if (rect) {
+                          setTooltip({
+                            x: e.clientX - rect.left,
+                            y: e.clientY - rect.top + 20,
+                            content: tooltipContent,
+                          })
+                        }
+                      }}
+                      onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
+                    />
+                    {/* 可见曲线 */}
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke="#b0b0b0"
+                      strokeWidth={1.5}
+                      strokeOpacity={0.6}
+                      style={{ pointerEvents: 'none' }}
+                    />
+                  </g>
                 )
               }
             }
@@ -1485,14 +1673,14 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             // 普通直线连接 - 使用中心点，节点会遮盖线的端点
             return (
               <g key={`edge-${i}`}>
+                {/* 透明触发层 - 增大点击区域 */}
                 <line
                   x1={sourcePos.x}
                   y1={sourcePos.y}
                   x2={targetPos.x}
                   y2={targetPos.y}
-                  stroke="#b0b0b0"
-                  strokeWidth={4}
-                  strokeOpacity={0}
+                  stroke="transparent"
+                  strokeWidth={16}
                   style={{ cursor: 'pointer' }}
                   onMouseEnter={(e) => {
                     if (connectionMode !== 'view' || isManualMode) return
@@ -1500,13 +1688,14 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                     if (rect) {
                       setTooltip({
                         x: e.clientX - rect.left,
-                        y: e.clientY - rect.top - 30,
+                        y: e.clientY - rect.top + 20,
                         content: tooltipContent,
                       })
                     }
                   }}
                   onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
                 />
+                {/* 可见线条 */}
                 <line
                   x1={sourcePos.x}
                   y1={sourcePos.y}
@@ -1529,9 +1718,35 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
               const targetPos = nodePositions.get(conn.target)
               if (!sourcePos || !targetPos) return null
 
+              const sourceNode = nodes.find(n => n.id === conn.source)
+              const targetNode = nodes.find(n => n.id === conn.target)
+              const manualTooltip = `${sourceNode?.label || conn.source} ↔ ${targetNode?.label || conn.target} (手动)`
+
               return (
                 <g key={`manual-${conn.id}`}>
-                  {/* 手动连接线 - 编辑模式绿色虚线，普通模式与自动连接一致 */}
+                  {/* 透明触发层 */}
+                  <line
+                    x1={sourcePos.x}
+                    y1={sourcePos.y}
+                    x2={targetPos.x}
+                    y2={targetPos.y}
+                    stroke="transparent"
+                    strokeWidth={16}
+                    style={{ cursor: 'pointer' }}
+                    onMouseEnter={(e) => {
+                      if (connectionMode !== 'view' || isManualMode) return
+                      const rect = svgRef.current?.getBoundingClientRect()
+                      if (rect) {
+                        setTooltip({
+                          x: e.clientX - rect.left,
+                          y: e.clientY - rect.top + 20,
+                          content: manualTooltip,
+                        })
+                      }
+                    }}
+                    onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
+                  />
+                  {/* 可见线条 - 编辑模式绿色虚线，普通模式与自动连接一致 */}
                   <line
                     x1={sourcePos.x}
                     y1={sourcePos.y}
@@ -1541,6 +1756,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                     strokeWidth={connectionMode !== 'view' ? 2.5 : 1.5}
                     strokeOpacity={connectionMode !== 'view' ? 1 : 0.6}
                     strokeDasharray={connectionMode !== 'view' ? '8,4' : undefined}
+                    style={{ pointerEvents: 'none' }}
                   />
                 </g>
               )
@@ -1549,25 +1765,16 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
           {/* 渲染节点 */}
           {displayNodes.map((node) => {
             const isSwitch = node.isSwitch
-            const portInfoText = node.portInfo
-              ? `上行:${node.portInfo.uplink} 下行:${node.portInfo.downlink} 互联:${node.portInfo.inter}`
-              : ''
-            // 计算连接信息
+            // 计算连接数
             const nodeConnections = edges.filter(e => e.source === node.id || e.target === node.id)
-            const connectedNodes = nodeConnections.map(e => {
-              const otherId = e.source === node.id ? e.target : e.source
-              const otherNode = displayNodes.find(n => n.id === otherId)
-              return otherNode?.label || otherId
-            })
-            const connectionInfo = nodeConnections.length > 0
-              ? `连接数: ${nodeConnections.length}\n连接到: ${connectedNodes.slice(0, 5).join(', ')}${connectedNodes.length > 5 ? '...' : ''}`
-              : '无连接'
+            // 简化的tooltip内容
             const nodeTooltip = isSwitch
-              ? `${node.label} (${node.subType?.toUpperCase() || 'SWITCH'})\n${portInfoText}\n${connectionInfo}`
-              : `${node.label} (${node.type.toUpperCase()})\n${connectionInfo}`
+              ? `${node.label} · ${node.subType?.toUpperCase() || 'SWITCH'} · ${nodeConnections.length}连接`
+              : `${node.label} · ${node.type.toUpperCase()} · ${nodeConnections.length}连接`
             const isSourceSelected = selectedNodes.has(node.id)
             const isTargetSelected = targetNodes.has(node.id)
             const isDragging = draggingNode === node.id
+            const isHovered = hoveredNodeId === node.id && connectionMode === 'view' && !isManualMode && !isDragging
             return (
               <g
                 key={node.id}
@@ -1575,6 +1782,8 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                 style={{
                   cursor: isManualMode ? 'move' : connectionMode !== 'view' ? 'crosshair' : 'pointer',
                   opacity: isDragging ? 0.7 : 1,
+                  filter: isHovered ? 'drop-shadow(0 0 8px rgba(37, 99, 235, 0.5)) drop-shadow(0 0 16px rgba(37, 99, 235, 0.25))' : 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
+                  transition: 'filter 0.15s ease, opacity 0.15s ease',
                 }}
                 onMouseDown={(e) => handleDragStart(node.id, e)}
                 onClick={(e) => {
@@ -1646,17 +1855,21 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                   }
                 }}
                 onMouseEnter={(e) => {
+                  setHoveredNodeId(node.id)
                   if (connectionMode !== 'view' || isManualMode) return  // 连线模式或手动布局不显示悬停提示
                   const rect = svgRef.current?.getBoundingClientRect()
                   if (rect) {
                     setTooltip({
                       x: e.clientX - rect.left,
-                      y: e.clientY - rect.top - 35,
+                      y: e.clientY - rect.top + 25,  // 显示在节点下方
                       content: nodeTooltip,
                     })
                   }
                 }}
-                onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
+                onMouseLeave={() => {
+                  setHoveredNodeId(null)
+                  if (connectionMode === 'view' && !isManualMode) setTooltip(null)
+                }}
               >
                 {/* 源节点选中状态边框（绿色） */}
                 {isSourceSelected && (
@@ -1689,7 +1902,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                 {/* 根据节点类型渲染不同形状 */}
                 {isSwitch ? (
                   /* Switch: 网络交换机形状 - 扁平矩形带端口和指示灯 */
-                  <g style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))' }}>
+                  <g>
                     {/* 主体外壳 */}
                     <rect x={-36} y={-14} width={72} height={28} rx={3} fill={node.color} stroke="#fff" strokeWidth={2} />
                     {/* 前面板凹槽 */}
@@ -1713,7 +1926,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                   </g>
                 ) : node.type === 'pod' ? (
                   /* Pod: 数据中心/机房形状 - 带屋顶的建筑 */
-                  <g style={{ cursor: 'pointer', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))' }}>
+                  <g>
                     {/* 主体建筑 */}
                     <rect x={-28} y={-12} width={56} height={32} rx={3} fill={node.color} stroke="#fff" strokeWidth={2} />
                     {/* 屋顶 */}
@@ -1727,7 +1940,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                   </g>
                 ) : node.type === 'rack' ? (
                   /* Rack: 机柜形状 - 竖长矩形带分隔线 */
-                  <g style={{ cursor: 'pointer', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))' }}>
+                  <g>
                     <rect x={-18} y={-28} width={36} height={56} rx={3} fill={node.color} stroke="#fff" strokeWidth={2} />
                     {/* 机柜层分隔 */}
                     <line x1={-14} y1={-16} x2={14} y2={-16} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
@@ -1742,7 +1955,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                   </g>
                 ) : node.type === 'board' ? (
                   /* Board: 电路板形状 - 横向矩形带电路纹理 */
-                  <g style={{ cursor: 'pointer', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))' }}>
+                  <g>
                     <rect x={-32} y={-18} width={64} height={36} rx={2} fill={node.color} stroke="#fff" strokeWidth={2} />
                     {/* 电路纹理 */}
                     <path d="M-24,-10 L-24,-2 L-16,-2 L-16,6 L-8,6" stroke="rgba(255,255,255,0.25)" strokeWidth={1.5} fill="none" />
@@ -1755,7 +1968,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                   </g>
                 ) : (node.type === 'npu' || node.type === 'cpu') ? (
                   /* Chip: 芯片形状 - 方形带引脚 */
-                  <g style={{ cursor: 'default', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))' }}>
+                  <g>
                     {/* 芯片主体 */}
                     <rect x={-20} y={-20} width={40} height={40} rx={2} fill={node.color} stroke="#fff" strokeWidth={2} />
                     {/* 引脚 - 上 */}
@@ -1788,7 +2001,6 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                     fill={node.color}
                     stroke="#fff"
                     strokeWidth={2}
-                    style={{ cursor: currentLevel !== 'board' ? 'pointer' : 'default', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))' }}
                   />
                 )}
                 {/* 节点标签 */}
@@ -1810,12 +2022,15 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
         {/* 图例 */}
         <div style={{
           position: 'absolute',
-          bottom: 10,
-          left: 10,
-          background: 'rgba(255,255,255,0.9)',
-          padding: '8px 12px',
-          borderRadius: 4,
+          bottom: 16,
+          left: 16,
+          background: '#fff',
+          padding: '8px 14px',
+          borderRadius: 8,
+          border: '1px solid rgba(0, 0, 0, 0.08)',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
           fontSize: 12,
+          fontFamily: "'JetBrains Mono', monospace",
         }}>
           <Text type="secondary">
             节点: {nodes.length} | 连接: {edges.length}
@@ -1829,16 +2044,16 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             left: tooltip.x,
             top: tooltip.y,
             transform: 'translateX(-50%)',
-            background: 'rgba(0, 0, 0, 0.85)',
+            background: '#171717',
             color: '#fff',
-            padding: '8px 12px',
-            borderRadius: 4,
-            fontSize: 12,
-            whiteSpace: 'pre-line',
+            padding: '6px 10px',
+            borderRadius: 6,
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+            fontSize: 11,
+            fontFamily: "'JetBrains Mono', monospace",
+            whiteSpace: 'nowrap',
             pointerEvents: 'none',
             zIndex: 1000,
-            maxWidth: 300,
-            textAlign: 'left',
           }}>
             {tooltip.content}
           </div>

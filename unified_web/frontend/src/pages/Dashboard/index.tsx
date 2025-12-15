@@ -181,7 +181,7 @@ const Dashboard: React.FC = () => {
       {/* 欢迎区域 */}
       <div style={{ marginBottom: 24 }}>
         <Title level={3} style={{ marginBottom: 4 }}>
-          欢迎使用仿真一体化平台
+          欢迎使用仿真平台
         </Title>
       </div>
 
@@ -286,7 +286,7 @@ const Dashboard: React.FC = () => {
               title="结果分析"
               description="性能数据分析"
               color="#fa8c16"
-              onClick={() => navigate('/experiments')}
+              onClick={() => navigate('/analysis')}
             />
           </Col>
         </Row>
