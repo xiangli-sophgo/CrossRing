@@ -162,10 +162,10 @@ class GlobalSwitchConfig(BaseModel):
         SwitchTypeConfig(id="spine_128", name="128端口Spine交换机", port_count=128),
         SwitchTypeConfig(id="core_512", name="512端口核心交换机", port_count=512),
     ]
-    datacenter_level: HierarchyLevelSwitchConfig = HierarchyLevelSwitchConfig()  # Pod间
-    pod_level: HierarchyLevelSwitchConfig = HierarchyLevelSwitchConfig()  # Rack间
-    rack_level: HierarchyLevelSwitchConfig = HierarchyLevelSwitchConfig()  # Board间
-    board_level: HierarchyLevelSwitchConfig = HierarchyLevelSwitchConfig()  # Chip间
+    inter_pod: HierarchyLevelSwitchConfig = HierarchyLevelSwitchConfig()  # Pod间交换机
+    inter_rack: HierarchyLevelSwitchConfig = HierarchyLevelSwitchConfig()  # Rack间交换机
+    inter_board: HierarchyLevelSwitchConfig = HierarchyLevelSwitchConfig()  # Board间交换机
+    inter_chip: HierarchyLevelSwitchConfig = HierarchyLevelSwitchConfig()  # Chip间交换机
 
 
 class SwitchInstance(BaseModel):
@@ -173,7 +173,7 @@ class SwitchInstance(BaseModel):
     id: str  # 唯一标识，如 "dc_spine_0", "pod_0/leaf_1"
     type_id: str  # Switch类型ID
     layer: str  # 所在层，如 "leaf", "spine"
-    hierarchy_level: Literal['datacenter', 'pod', 'rack']  # 所属层级
+    hierarchy_level: Literal['inter_pod', 'inter_rack', 'inter_board', 'inter_chip']  # Switch层级
     parent_id: Optional[str] = None  # 父节点ID（如pod_0）
     label: str  # 显示标签
     uplink_ports_used: int = 0  # 上行端口使用数

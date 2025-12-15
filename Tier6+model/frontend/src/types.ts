@@ -144,10 +144,10 @@ export interface HierarchyLevelSwitchConfig {
 // 全局Switch配置
 export interface GlobalSwitchConfig {
   switch_types: SwitchTypeConfig[];                    // 预定义的Switch类型
-  datacenter_level: HierarchyLevelSwitchConfig;        // Pod间Switch
-  pod_level: HierarchyLevelSwitchConfig;               // Rack间Switch
-  rack_level: HierarchyLevelSwitchConfig;              // Board间Switch
-  board_level: HierarchyLevelSwitchConfig;             // Chip间Switch
+  inter_pod: HierarchyLevelSwitchConfig;               // Pod间交换机
+  inter_rack: HierarchyLevelSwitchConfig;              // Rack间交换机
+  inter_board: HierarchyLevelSwitchConfig;             // Board间交换机
+  inter_chip: HierarchyLevelSwitchConfig;              // Chip间交换机
 }
 
 // Switch实例
@@ -155,7 +155,7 @@ export interface SwitchInstance {
   id: string;                                           // 唯一标识
   type_id: string;                                      // Switch类型ID
   layer: string;                                        // 所在层，如 "leaf", "spine"
-  hierarchy_level: 'datacenter' | 'pod' | 'rack';       // 所属层级
+  hierarchy_level: 'inter_pod' | 'inter_rack' | 'inter_board' | 'inter_chip';  // Switch层级
   parent_id?: string;                                   // 父节点ID (rack层级时为rack_id)
   label: string;                                        // 显示标签
   uplink_ports_used: number;                            // 上行端口使用数

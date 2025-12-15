@@ -194,10 +194,10 @@ const DEFAULT_SWITCH_CONFIG: GlobalSwitchConfig = {
     { id: 'spine_128', name: '128端口Spine交换机', port_count: 128 },
     { id: 'core_512', name: '512端口核心交换机', port_count: 512 },
   ],
-  datacenter_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, keep_direct_topology: false },
-  pod_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, keep_direct_topology: false },
-  rack_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, switch_position: 'top', switch_u_height: 1, keep_direct_topology: false },
-  board_level: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, keep_direct_topology: false },
+  inter_pod: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, keep_direct_topology: false },
+  inter_rack: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, keep_direct_topology: false },
+  inter_board: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, switch_position: 'top', switch_u_height: 1, keep_direct_topology: false },
+  inter_chip: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, keep_direct_topology: false },
 }
 
 // 从localStorage加载缓存配置
@@ -361,7 +361,7 @@ const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
           )}
 
           {/* Switch 3D显示配置（仅rack层级且3D视图时显示） */}
-          {levelKey === 'rack_level' && viewMode === '3d' && (
+          {levelKey === 'inter_board' && viewMode === '3d' && (
             <>
               <div style={configRowStyle}>
                 <Text>Switch位置</Text>
@@ -807,10 +807,10 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           switch_u_height: cachedLevel.switch_u_height ?? defaultLevel.switch_u_height,
         }
       }
-      merged.datacenter_level = mergeLevel(DEFAULT_SWITCH_CONFIG.datacenter_level, cachedConfig.switchConfig.datacenter_level)
-      merged.pod_level = mergeLevel(DEFAULT_SWITCH_CONFIG.pod_level, cachedConfig.switchConfig.pod_level)
-      merged.rack_level = mergeLevel(DEFAULT_SWITCH_CONFIG.rack_level, cachedConfig.switchConfig.rack_level)
-      merged.board_level = mergeLevel(DEFAULT_SWITCH_CONFIG.board_level, cachedConfig.switchConfig.board_level)
+      merged.inter_pod = mergeLevel(DEFAULT_SWITCH_CONFIG.inter_pod, cachedConfig.switchConfig.inter_pod)
+      merged.inter_rack = mergeLevel(DEFAULT_SWITCH_CONFIG.inter_rack, cachedConfig.switchConfig.inter_rack)
+      merged.inter_board = mergeLevel(DEFAULT_SWITCH_CONFIG.inter_board, cachedConfig.switchConfig.inter_board)
+      merged.inter_chip = mergeLevel(DEFAULT_SWITCH_CONFIG.inter_chip, cachedConfig.switchConfig.inter_chip)
       return merged
     }
     return DEFAULT_SWITCH_CONFIG
@@ -1056,10 +1056,10 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
               }}>
                 <Text strong style={{ display: 'block', marginBottom: 10, color: '#171717' }}>连接配置</Text>
                 <SwitchLevelConfig
-                  levelKey="datacenter_level"
-                  config={switchConfig.datacenter_level}
+                  levelKey="inter_pod"
+                  config={switchConfig.inter_pod}
                   switchTypes={switchConfig.switch_types}
-                  onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, datacenter_level: newConfig }))}
+                  onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, inter_pod: newConfig }))}
                   configRowStyle={configRowStyle}
                 />
               </div>
@@ -1122,10 +1122,10 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
               }}>
                 <Text strong style={{ display: 'block', marginBottom: 10, color: '#171717' }}>连接配置</Text>
                 <SwitchLevelConfig
-                  levelKey="pod_level"
-                  config={switchConfig.pod_level}
+                  levelKey="inter_rack"
+                  config={switchConfig.inter_rack}
                   switchTypes={switchConfig.switch_types}
-                  onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, pod_level: newConfig }))}
+                  onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, inter_rack: newConfig }))}
                   configRowStyle={configRowStyle}
                 />
               </div>
@@ -1323,10 +1323,10 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
               }}>
                 <Text strong style={{ display: 'block', marginBottom: 10, color: '#171717' }}>连接配置</Text>
                 <SwitchLevelConfig
-                  levelKey="rack_level"
-                  config={switchConfig.rack_level}
+                  levelKey="inter_board"
+                  config={switchConfig.inter_board}
                   switchTypes={switchConfig.switch_types}
-                  onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, rack_level: newConfig }))}
+                  onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, inter_board: newConfig }))}
                   configRowStyle={configRowStyle}
                   viewMode={viewMode}
                 />
@@ -1448,10 +1448,10 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
               }}>
                 <Text strong style={{ display: 'block', marginBottom: 10, color: '#171717' }}>连接配置</Text>
                 <SwitchLevelConfig
-                  levelKey="board_level"
-                  config={switchConfig.board_level}
+                  levelKey="inter_chip"
+                  config={switchConfig.inter_chip}
                   switchTypes={switchConfig.switch_types}
-                  onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, board_level: newConfig }))}
+                  onChange={(newConfig) => setSwitchConfig(prev => ({ ...prev, inter_chip: newConfig }))}
                   configRowStyle={configRowStyle}
                 />
               </div>

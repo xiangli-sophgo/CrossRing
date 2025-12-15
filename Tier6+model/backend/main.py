@@ -67,18 +67,9 @@ async def generate_topology(request: TopologyGenerateRequest):
     board_configs = None
     if request.board_configs:
         board_configs = {
-            'u1': {
-                'count': request.board_configs.u1.count,
-                'chips': request.board_configs.u1.chips.model_dump()
-            },
-            'u2': {
-                'count': request.board_configs.u2.count,
-                'chips': request.board_configs.u2.chips.model_dump()
-            },
-            'u4': {
-                'count': request.board_configs.u4.count,
-                'chips': request.board_configs.u4.chips.model_dump()
-            },
+            "u1": {"count": request.board_configs.u1.count, "chips": request.board_configs.u1.chips.model_dump()},
+            "u2": {"count": request.board_configs.u2.count, "chips": request.board_configs.u2.chips.model_dump()},
+            "u4": {"count": request.board_configs.u4.count, "chips": request.board_configs.u4.chips.model_dump()},
         }
 
     # 灵活Rack配置
@@ -332,4 +323,4 @@ async def delete_config(name: str):
 if __name__ == "__main__":
     # 推荐使用 start.py 启动，会自动清理端口
     # 直接运行 main.py 需要手动确保端口未被占用
-    uvicorn.run(app, host="0.0.0.0", port=8002, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=8003, reload=False)

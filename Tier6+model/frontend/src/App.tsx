@@ -418,7 +418,7 @@ const App: React.FC = () => {
       const podIds = new Set(topology.pods.map(p => p.id))
       const dcSwitchIds = new Set(
         (topology.switches || [])
-          .filter(s => s.hierarchy_level === 'datacenter')
+          .filter(s => s.hierarchy_level === 'inter_pod')
           .map(s => s.id)
       )
       return topology.connections.filter(c => {
@@ -431,7 +431,7 @@ const App: React.FC = () => {
       const rackIds = new Set(navigation.currentPod.racks.map(r => r.id))
       const podSwitchIds = new Set(
         (topology.switches || [])
-          .filter(s => s.hierarchy_level === 'pod' && s.parent_id === navigation.currentPod!.id)
+          .filter(s => s.hierarchy_level === 'inter_rack' && s.parent_id === navigation.currentPod!.id)
           .map(s => s.id)
       )
       return topology.connections.filter(c => {
@@ -444,7 +444,7 @@ const App: React.FC = () => {
       const boardIds = new Set(navigation.currentRack.boards.map(b => b.id))
       const rackSwitchIds = new Set(
         (topology.switches || [])
-          .filter(s => s.hierarchy_level === 'rack' && s.parent_id === navigation.currentRack!.id)
+          .filter(s => s.hierarchy_level === 'inter_board' && s.parent_id === navigation.currentRack!.id)
           .map(s => s.id)
       )
       return topology.connections.filter(c => {

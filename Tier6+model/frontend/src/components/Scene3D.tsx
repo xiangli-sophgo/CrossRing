@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react'
 import { Canvas, useFrame, ThreeEvent, useThree } from '@react-three/fiber'
 import { OrbitControls, PerspectiveCamera, Text, Html } from '@react-three/drei'
+import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import { Breadcrumb, Button, Tooltip } from 'antd'
 import { ReloadOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import {
@@ -23,6 +24,17 @@ import {
   KEYBOARD_SHORTCUTS,
 } from '../types'
 import * as THREE from 'three'
+
+// ============================================
+// 模块级别的状态缓存（组件卸载后保留）
+// ============================================
+let lastCameraState: {
+  position: THREE.Vector3
+  lookAt: THREE.Vector3
+} | null = null
+
+// 透明度状态缓存
+let lastOpacityState: Map<string, number> | null = null
 
 // ============================================
 // 动画工具函数
@@ -257,7 +269,8 @@ const CameraController: React.FC<{
   onAnimationComplete?: () => void
   enabled?: boolean
   resetTrigger?: number  // 变化时强制重置，即使目标位置相同
-}> = ({ target, baseDuration = 1.0, onAnimationComplete, enabled = true, resetTrigger = 0 }) => {
+  visible?: boolean  // 是否可见，隐藏时直接跳转不执行动画
+}> = ({ target, baseDuration = 1.0, onAnimationComplete, enabled = true, resetTrigger = 0, visible = true }) => {
   const { camera } = useThree()
   const controlsRef = useRef<any>(null)
 
@@ -271,12 +284,90 @@ const CameraController: React.FC<{
   const lastResetTrigger = useRef(resetTrigger)
   const pendingCallback = useRef<(() => void) | null>(null)
   const isFirstRender = useRef(true)  // 首次渲染标记
+  const needsInitialTarget = useRef(false)  // 首次渲染时 OrbitControls 未挂载，需要延迟设置 target
+
+  // 记录上一次的 visible 状态
+  const lastVisible = useRef(visible)
+
+  // 组件卸载时保存相机状态到模块级变量
+  useEffect(() => {
+    return () => {
+      if (controlsRef.current) {
+        lastCameraState = {
+          position: camera.position.clone(),
+          lookAt: controlsRef.current.target.clone()
+        }
+      } else {
+        lastCameraState = {
+          position: camera.position.clone(),
+          lookAt: new THREE.Vector3(0, 0, 0)
+        }
+      }
+    }
+  }, [camera])
 
   // 目标变化或 resetTrigger 变化时启动动画
   useEffect(() => {
-    // 首次渲染时直接设置位置，不执行动画
+    // 检查是否刚从隐藏变为可见
+    const justBecameVisible = visible && !lastVisible.current
+    lastVisible.current = visible
+
+    // 首次渲染时，检查是否有上次保存的相机状态
     if (isFirstRender.current) {
       isFirstRender.current = false
+
+      // 如果有上次保存的相机状态，从该位置动画到目标位置
+      if (lastCameraState) {
+        // 设置相机到上次保存的位置
+        camera.position.copy(lastCameraState.position)
+        startPosition.current.copy(lastCameraState.position)
+        startTarget.current.copy(lastCameraState.lookAt)
+
+        // 启动动画到目标位置
+        actualDuration.current = baseDuration
+        progress.current = 0
+        isAnimating.current = true
+        lastTarget.current = {
+          position: target.position.clone(),
+          lookAt: target.lookAt.clone()
+        }
+        pendingCallback.current = onAnimationComplete || null
+        needsInitialTarget.current = true  // 需要在下一帧设置 OrbitControls target
+        return
+      }
+
+      // 没有上次保存的状态，直接设置到目标位置
+      camera.position.copy(target.position)
+      if (controlsRef.current) {
+        controlsRef.current.target.copy(target.lookAt)
+        controlsRef.current.update()
+      } else {
+        needsInitialTarget.current = true
+      }
+      lastTarget.current = {
+        position: target.position.clone(),
+        lookAt: target.lookAt.clone()
+      }
+      return
+    }
+
+    // 不可见时直接设置位置，不执行动画
+    if (!visible) {
+      camera.position.copy(target.position)
+      if (controlsRef.current) {
+        controlsRef.current.target.copy(target.lookAt)
+        controlsRef.current.update()
+      }
+      lastTarget.current = {
+        position: target.position.clone(),
+        lookAt: target.lookAt.clone()
+      }
+      isAnimating.current = false
+      return
+    }
+
+    // 刚变为可见时，直接设置位置，不执行动画
+    if (justBecameVisible) {
       camera.position.copy(target.position)
       if (controlsRef.current) {
         controlsRef.current.target.copy(target.lookAt)
@@ -319,10 +410,23 @@ const CameraController: React.FC<{
     }
     pendingCallback.current = onAnimationComplete || null
   }, [target.position.x, target.position.y, target.position.z,
-      target.lookAt.x, target.lookAt.y, target.lookAt.z, camera, onAnimationComplete, resetTrigger, baseDuration])
+      target.lookAt.x, target.lookAt.y, target.lookAt.z, camera, onAnimationComplete, resetTrigger, baseDuration, visible])
 
   // 每帧更新
   useFrame((_, delta) => {
+    // 处理首次渲染时 OrbitControls 未挂载的延迟初始化
+    if (needsInitialTarget.current && controlsRef.current) {
+      // 如果正在动画中，设置为起始观察点（会在下面被动画更新）
+      // 如果没有动画，设置为目标观察点
+      if (isAnimating.current) {
+        controlsRef.current.target.copy(startTarget.current)
+      } else if (lastTarget.current) {
+        controlsRef.current.target.copy(lastTarget.current.lookAt)
+      }
+      controlsRef.current.update()
+      needsInitialTarget.current = false
+    }
+
     if (!isAnimating.current) return
 
     progress.current += delta / actualDuration.current
@@ -384,6 +488,7 @@ interface Scene3DProps {
   onNavigateBack: () => void
   onBreadcrumbClick: (index: number) => void
   canGoBack: boolean
+  visible?: boolean  // 是否可见，隐藏时相机直接跳转不执行动画
   // 历史导航
   onNavigateHistoryBack?: () => void
   onNavigateHistoryForward?: () => void
@@ -773,21 +878,23 @@ const BoardModel: React.FC<{
               />
             </mesh>
 
-            {/* 板卡标签 - 调整位置确保不被遮挡 */}
-            <Text
-              position={[0, 0, depth / 2 + 0.015]}
-              fontSize={0.035}
-              color="#ffffff"
-              anchorX="center"
-              anchorY="middle"
-              outlineWidth={0.003}
-              outlineColor="#000000"
-              renderOrder={1}
-              material-depthTest={false}
-              fillOpacity={opacity}
-            >
-              {board.label}
-            </Text>
+            {/* 板卡标签 - 只在可交互时显示（聚焦到Rack层级或更深） */}
+            {interactive && (
+              <Text
+                position={[0, 0, depth / 2 + 0.015]}
+                fontSize={0.035}
+                color="#ffffff"
+                anchorX="center"
+                anchorY="middle"
+                outlineWidth={0.003}
+                outlineColor="#000000"
+                renderOrder={1}
+                material-depthTest={false}
+                fillOpacity={opacity}
+              >
+                {board.label}
+              </Text>
+            )}
           </group>
         </>
       )}
@@ -1035,10 +1142,16 @@ const OpacityAnimator: React.FC<{
   currentOpacities: React.MutableRefObject<Map<string, number>>
   fadeInDuration?: number   // 淡入时长
   fadeOutDuration?: number  // 淡出时长
-}> = ({ targetOpacities, currentOpacities, fadeInDuration = 0.8, fadeOutDuration = 0.3 }) => {
+  skipAnimation?: boolean   // 跳过动画，直接设置目标值
+}> = ({ targetOpacities, currentOpacities, fadeInDuration = 0.8, fadeOutDuration = 0.3, skipAnimation = false }) => {
   useFrame((_, delta) => {
     targetOpacities.forEach((target, id) => {
       const current = currentOpacities.current.get(id) ?? target
+      // 跳过动画时直接设置目标值
+      if (skipAnimation) {
+        currentOpacities.current.set(id, target)
+        return
+      }
       if (Math.abs(current - target) > 0.001) {
         // 淡出（目标为0）时速度快，淡入时速度慢
         const duration = target < current ? fadeOutDuration : fadeInDuration
@@ -1090,14 +1203,25 @@ const UnifiedScene: React.FC<{
   onNavigateToRack: (podId: string, rackId: string) => void
   onNavigateToBoard: (boardId: string) => void
   onNodeClick?: (nodeType: 'pod' | 'rack' | 'board' | 'chip' | 'switch', nodeId: string, label: string, info: Record<string, string | number>, subType?: string) => void
-}> = ({ topology, focusPath, onNavigateToPod, onNavigateToRack, onNavigateToBoard, onNodeClick }) => {
+  visible?: boolean  // 是否可见，隐藏时跳过动画
+}> = ({ topology, focusPath, onNavigateToPod, onNavigateToRack, onNavigateToBoard, onNodeClick, visible = true }) => {
   const [hoveredPodId, setHoveredPodId] = useState<string | null>(null)
   const [hoveredRackId, setHoveredRackId] = useState<string | null>(null)
 
   // 透明度动画状态 - 存储当前渲染的透明度值
-  const currentOpacities = useRef<Map<string, number>>(new Map())
+  // 初始化时从上次保存的状态恢复
+  const currentOpacities = useRef<Map<string, number>>(
+    lastOpacityState ? new Map(lastOpacityState) : new Map()
+  )
   // 用于触发重新渲染的状态
   const [, forceUpdate] = useState(0)
+
+  // 组件卸载时保存透明度状态
+  useEffect(() => {
+    return () => {
+      lastOpacityState = new Map(currentOpacities.current)
+    }
+  }, [])
 
   const rackSpacingX = 1.5
   const rackSpacingZ = 2
@@ -1265,6 +1389,7 @@ const UnifiedScene: React.FC<{
         currentOpacities={currentOpacities}
         fadeInDuration={1.2}
         fadeOutDuration={0.2}
+        skipAnimation={!visible}
       />
       {/* 每帧检查是否需要重渲染 */}
       <OpacityUpdateTrigger
@@ -1310,27 +1435,36 @@ const UnifiedScene: React.FC<{
               if (!rackPos) return null
 
               const rackOpacity = getAnimatedOpacity(rack.id)
-              const isRackHighlighted = focusLevel === 0 ? isPodHighlighted : hoveredRackId === rack.id
+              // 只在顶层和Pod层级时才高亮Rack，在Rack层级及更深时不高亮
+              const isRackHighlighted = focusLevel === 0 ? isPodHighlighted : (focusLevel === 1 && hoveredRackId === rack.id)
 
-              // 是否显示Board详情（聚焦到Rack级别或更深）
-              const showBoardDetails = focusLevel >= 2 && focusPath[1] === rack.id
+              // 高亮效果参数 - 使用低饱和度高级灰蓝色调
+              const rackFrameColor = isRackHighlighted ? '#2d3748' : '#1a1a1a'
+              const rackPillarColor = isRackHighlighted ? '#3d4758' : '#333333'
+              const rackGlowColor = '#4a6080'  // 深灰蓝色
+              // emissiveIntensity > 1 配合 toneMapped={false} 触发 Bloom 效果
+              const rackGlowIntensity = isRackHighlighted ? 1.8 : 0
+              const rackScale = isRackHighlighted ? 1.01 : 1.0
 
               // 透明度太低时不渲染（但要给动画留一点余地）
               if (rackOpacity < 0.01) return null
 
               return (
-                <group key={rack.id} position={[rackPos.x, rackPos.y, rackPos.z]}>
+                <group key={rack.id} position={[rackPos.x, rackPos.y, rackPos.z]} scale={rackScale}>
                   {/* 机柜框架 */}
                   <group>
                     {/* 机柜底座 */}
                     <mesh position={[0, -rackHeight / 2 - 0.02, 0]} receiveShadow>
                       <boxGeometry args={[rackWidth + 0.04, 0.04, rackDepth + 0.04]} />
                       <meshStandardMaterial
-                        color={isRackHighlighted ? '#7a9fd4' : '#1a1a1a'}
+                        color={rackFrameColor}
+                        emissive={rackGlowColor}
+                        emissiveIntensity={rackGlowIntensity}
+                        toneMapped={false}
                         transparent
                         opacity={rackOpacity}
-                        metalness={0.3}
-                        roughness={0.7}
+                        metalness={0.6}
+                        roughness={0.3}
                       />
                     </mesh>
 
@@ -1338,11 +1472,14 @@ const UnifiedScene: React.FC<{
                     <mesh position={[0, rackHeight / 2 + 0.02, 0]} castShadow={rackOpacity > 0.5}>
                       <boxGeometry args={[rackWidth + 0.04, 0.04, rackDepth + 0.04]} />
                       <meshStandardMaterial
-                        color={isRackHighlighted ? '#7a9fd4' : '#1a1a1a'}
+                        color={rackFrameColor}
+                        emissive={rackGlowColor}
+                        emissiveIntensity={rackGlowIntensity}
+                        toneMapped={false}
                         transparent
                         opacity={rackOpacity}
-                        metalness={0.3}
-                        roughness={0.7}
+                        metalness={0.6}
+                        roughness={0.3}
                       />
                     </mesh>
 
@@ -1356,11 +1493,14 @@ const UnifiedScene: React.FC<{
                       <mesh key={`pillar-${i}`} position={pos as [number, number, number]} castShadow={rackOpacity > 0.5}>
                         <boxGeometry args={[0.02, rackHeight, 0.02]} />
                         <meshStandardMaterial
-                          color={isRackHighlighted ? '#7a9fd4' : '#333333'}
+                          color={rackPillarColor}
+                          emissive={rackGlowColor}
+                          emissiveIntensity={rackGlowIntensity}
+                          toneMapped={false}
                           transparent
                           opacity={rackOpacity}
-                          metalness={0.3}
-                          roughness={0.7}
+                          metalness={0.5}
+                          roughness={0.4}
                         />
                       </mesh>
                     ))}
@@ -1371,23 +1511,54 @@ const UnifiedScene: React.FC<{
                       <meshStandardMaterial
                         color="#2a2a2a"
                         transparent
-                        opacity={rackOpacity * 0.8}
+                        opacity={rackOpacity * 0.7}
                         metalness={0.3}
                         roughness={0.7}
                       />
                     </mesh>
 
-                    {/* 前面板 - 半透明 */}
-                    <mesh position={[0, 0, rackDepth / 2 - 0.005]}>
-                      <boxGeometry args={[rackWidth - 0.04, rackHeight, 0.008]} />
+                    {/* 左侧面板 */}
+                    <mesh position={[-rackWidth / 2 + 0.005, 0, 0]}>
+                      <boxGeometry args={[0.01, rackHeight, rackDepth - 0.04]} />
                       <meshStandardMaterial
-                        color="#4a4a4a"
+                        color="#2a2a2a"
                         transparent
-                        opacity={showBoardDetails ? 0.02 : 0.08 * rackOpacity}
-                        metalness={0.9}
-                        roughness={0.1}
+                        opacity={rackOpacity * 0.5}
+                        metalness={0.3}
+                        roughness={0.7}
                       />
                     </mesh>
+
+                    {/* 右侧面板 */}
+                    <mesh position={[rackWidth / 2 - 0.005, 0, 0]}>
+                      <boxGeometry args={[0.01, rackHeight, rackDepth - 0.04]} />
+                      <meshStandardMaterial
+                        color="#2a2a2a"
+                        transparent
+                        opacity={rackOpacity * 0.5}
+                        metalness={0.3}
+                        roughness={0.7}
+                      />
+                    </mesh>
+
+                    {/* 底部支脚 - 四个角落 */}
+                    {[
+                      [-rackWidth / 2 + 0.03, -rackHeight / 2 - 0.04, -rackDepth / 2 + 0.03],
+                      [rackWidth / 2 - 0.03, -rackHeight / 2 - 0.04, -rackDepth / 2 + 0.03],
+                      [-rackWidth / 2 + 0.03, -rackHeight / 2 - 0.04, rackDepth / 2 - 0.03],
+                      [rackWidth / 2 - 0.03, -rackHeight / 2 - 0.04, rackDepth / 2 - 0.03],
+                    ].map((pos, i) => (
+                      <mesh key={`foot-${i}`} position={pos as [number, number, number]}>
+                        <cylinderGeometry args={[0.02, 0.025, 0.04, 8]} />
+                        <meshStandardMaterial
+                          color="#333333"
+                          transparent
+                          opacity={rackOpacity}
+                          metalness={0.5}
+                          roughness={0.5}
+                        />
+                      </mesh>
+                    ))}
 
                     {/* 机柜标签 */}
                     {rackOpacity > 0.3 && (
@@ -1399,6 +1570,9 @@ const UnifiedScene: React.FC<{
                         anchorY="middle"
                         fontWeight="bold"
                         fillOpacity={rackOpacity}
+                        outlineWidth={0.01}
+                        outlineColor="#000000"
+                        material-depthTest={false}
                       >
                         {rack.label}
                       </Text>
@@ -1466,7 +1640,7 @@ const UnifiedScene: React.FC<{
               if (boardOpacity < 0.01) return null
 
               return (
-                <group key={board.id} position={[rackPos.x, rackPos.y + boardY, rackPos.z]}>
+                <group key={`${board.id}-${board.label}`} position={[rackPos.x, rackPos.y + boardY, rackPos.z]}>
                   <BoardModel
                     board={board}
                     showChips={showChips}
@@ -1491,7 +1665,7 @@ const UnifiedScene: React.FC<{
       ))}
 
       {/* 渲染Rack层级的Switch - 在Pod和Rack层级显示，Board层级隐藏 */}
-      {topology.switch_config?.rack_level?.enabled && topology.pods.map(pod => (
+      {topology.switch_config?.inter_board?.enabled && topology.pods.map(pod => (
         <group key={`switches-${pod.id}`}>
           {pod.racks.map(rack => {
             const rackPos = nodePositions.racks.get(rack.id)
@@ -1514,7 +1688,7 @@ const UnifiedScene: React.FC<{
 
             // 获取该Rack下的所有Switch（使用后端计算的u_position）
             const rackSwitches = topology.switches?.filter(
-              sw => sw.hierarchy_level === 'rack' && sw.parent_id === rack.id
+              sw => sw.hierarchy_level === 'inter_board' && sw.parent_id === rack.id
             ) || []
 
             if (rackSwitches.length === 0) return null
@@ -1530,7 +1704,7 @@ const UnifiedScene: React.FC<{
               id: `${rack.id}/switch_summary`,
               type_id: 'summary',
               layer: 'leaf',
-              hierarchy_level: 'rack',
+              hierarchy_level: 'inter_board',
               parent_id: rack.id,
               label: `Switch ×${rackSwitches.length}`,
               uplink_ports_used: 0,
@@ -1644,6 +1818,7 @@ export const Scene3D: React.FC<Scene3DProps> = ({
   onNavigateBack,
   onBreadcrumbClick,
   canGoBack,
+  visible = true,
   onNodeSelect,
 }) => {
   // 用于强制重置相机位置的 key
@@ -1894,6 +2069,7 @@ export const Scene3D: React.FC<Scene3DProps> = ({
           target={cameraTarget}
           baseDuration={1.2}
           resetTrigger={resetKey}
+          visible={visible}
         />
 
         <color attach="background" args={['#f0f2f5']} />
@@ -1907,8 +2083,19 @@ export const Scene3D: React.FC<Scene3DProps> = ({
             onNavigateToRack={onNavigateToRack}
             onNavigateToBoard={onNavigate}
             onNodeClick={onNodeSelect}
+            visible={visible}
           />
         )}
+
+        {/* Bloom 后处理效果 - 实现高级发光 */}
+        <EffectComposer>
+          <Bloom
+            luminanceThreshold={0.9}
+            luminanceSmoothing={0.4}
+            intensity={0.8}
+            mipmapBlur
+          />
+        </EffectComposer>
       </Canvas>
 
       {/* 导航覆盖层 */}

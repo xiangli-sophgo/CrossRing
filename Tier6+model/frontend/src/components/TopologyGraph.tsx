@@ -95,6 +95,7 @@ interface Edge {
   target: string
   bandwidth?: number
   latency?: number  // 延迟 (ns)
+  isSwitch?: boolean  // 是否为Switch连接
 }
 
 // 布局算法：圆形布局
@@ -541,7 +542,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
       // 添加数据中心层Switch
       if (topology.switches) {
-        const dcSwitches = topology.switches.filter(s => s.hierarchy_level === 'datacenter')
+        const dcSwitches = topology.switches.filter(s => s.hierarchy_level === 'inter_pod')
         dcSwitches.forEach(sw => {
           nodeList.push({
             id: sw.id,
@@ -565,12 +566,12 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       // Pod间连接和DC层Switch连接
       const podIds = new Set(topology.pods.map(p => p.id))
       const dcSwitchIds = new Set(
-        (topology.switches || []).filter(s => s.hierarchy_level === 'datacenter').map(s => s.id)
+        (topology.switches || []).filter(s => s.hierarchy_level === 'inter_pod').map(s => s.id)
       )
       // 构建Pod层Switch到Pod的映射（用于转换跨层连接）
       const podSwitchToPod: Record<string, string> = {}
       ;(topology.switches || [])
-        .filter(s => s.hierarchy_level === 'pod')
+        .filter(s => s.hierarchy_level === 'inter_rack')
         .forEach(s => { podSwitchToPod[s.id] = s.parent_id })
 
       edgeList = topology.connections
@@ -593,6 +594,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             target,
             bandwidth: c.bandwidth,
             latency: c.latency,
+            isSwitch: c.type === 'switch',
           }
         })
 
@@ -611,7 +613,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       // 添加Pod层Switch
       if (topology.switches) {
         const podSwitches = topology.switches.filter(s =>
-          s.hierarchy_level === 'pod' && s.parent_id === currentPod.id
+          s.hierarchy_level === 'inter_rack' && s.parent_id === currentPod.id
         )
         podSwitches.forEach(sw => {
           nodeList.push({
@@ -637,13 +639,13 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       const rackIds = new Set(currentPod.racks.map(r => r.id))
       const podSwitchIds = new Set(
         (topology.switches || [])
-          .filter(s => s.hierarchy_level === 'pod' && s.parent_id === currentPod.id)
+          .filter(s => s.hierarchy_level === 'inter_rack' && s.parent_id === currentPod.id)
           .map(s => s.id)
       )
       // 构建Rack层Switch到Rack的映射（用于转换跨层连接）
       const rackSwitchToRack: Record<string, string> = {}
       ;(topology.switches || [])
-        .filter(s => s.hierarchy_level === 'rack' && rackIds.has(s.parent_id))
+        .filter(s => s.hierarchy_level === 'inter_board' && rackIds.has(s.parent_id))
         .forEach(s => { rackSwitchToRack[s.id] = s.parent_id })
 
       edgeList = topology.connections
@@ -668,6 +670,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             target,
             bandwidth: c.bandwidth,
             latency: c.latency,
+            isSwitch: c.type === 'switch',
           }
         })
 
@@ -687,7 +690,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       // 添加Rack层Switch
       if (topology.switches) {
         const rackSwitches = topology.switches.filter(s =>
-          s.hierarchy_level === 'rack' && s.parent_id === currentRack.id
+          s.hierarchy_level === 'inter_board' && s.parent_id === currentRack.id
         )
         rackSwitches.forEach(sw => {
           nodeList.push({
@@ -712,21 +715,39 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       const boardIds = new Set(currentRack.boards.map(b => b.id))
       const rackSwitchIds = new Set(
         (topology.switches || [])
-          .filter(s => s.hierarchy_level === 'rack' && s.parent_id === currentRack.id)
+          .filter(s => s.hierarchy_level === 'inter_board' && s.parent_id === currentRack.id)
           .map(s => s.id)
       )
+      // 构建Board层Switch到Board的映射（用于转换跨层连接）
+      const boardSwitchToBoard: Record<string, string> = {}
+      ;(topology.switches || [])
+        .filter(s => s.hierarchy_level === 'inter_chip' && s.parent_id?.startsWith(currentRack.id))
+        .forEach(s => { boardSwitchToBoard[s.id] = s.parent_id! })
+
       edgeList = topology.connections
         .filter(c => {
           const sourceInRack = boardIds.has(c.source) || rackSwitchIds.has(c.source)
           const targetInRack = boardIds.has(c.target) || rackSwitchIds.has(c.target)
-          return sourceInRack && targetInRack
+          if (sourceInRack && targetInRack) return true
+          // 跨层连接（Rack Switch到Board Switch）- 需要转换
+          if (rackSwitchIds.has(c.source) && boardSwitchToBoard[c.target]) return true
+          if (rackSwitchIds.has(c.target) && boardSwitchToBoard[c.source]) return true
+          return false
         })
-        .map(c => ({
-          source: c.source,
-          target: c.target,
-          bandwidth: c.bandwidth,
-          latency: c.latency,
-        }))
+        .map(c => {
+          // 转换跨层连接：将Board Switch替换为对应的Board
+          let source = c.source
+          let target = c.target
+          if (boardSwitchToBoard[c.source]) source = boardSwitchToBoard[c.source]
+          if (boardSwitchToBoard[c.target]) target = boardSwitchToBoard[c.target]
+          return {
+            source,
+            target,
+            bandwidth: c.bandwidth,
+            latency: c.latency,
+            isSwitch: c.type === 'switch',
+          }
+        })
 
     } else if (currentLevel === 'board' && currentBoard) {
       // Board层：显示所有Chip和Board层Switch
@@ -743,7 +764,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       // 添加Board层Switch
       if (topology.switches) {
         const boardSwitches = topology.switches.filter(s =>
-          s.hierarchy_level === 'board' && s.parent_id === currentBoard.id
+          s.hierarchy_level === 'inter_chip' && s.parent_id === currentBoard.id
         )
         boardSwitches.forEach(sw => {
           nodeList.push({
@@ -768,7 +789,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       const chipIds = new Set(currentBoard.chips.map(c => c.id))
       const boardSwitchIds = new Set(
         (topology.switches || [])
-          .filter(s => s.hierarchy_level === 'board' && s.parent_id === currentBoard.id)
+          .filter(s => s.hierarchy_level === 'inter_chip' && s.parent_id === currentBoard.id)
           .map(s => s.id)
       )
       edgeList = topology.connections
@@ -781,6 +802,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
           source: c.source,
           target: c.target,
           bandwidth: c.bandwidth,
+          isSwitch: c.type === 'switch',
           latency: c.latency,
         }))
     }
@@ -790,19 +812,19 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
     let keepDirectTopology = false
     if (topology.switch_config) {
       if (currentLevel === 'datacenter') {
-        const dcConfig = topology.switch_config.datacenter_level
+        const dcConfig = topology.switch_config.inter_pod
         directTopology = dcConfig?.direct_topology || 'full_mesh'
         keepDirectTopology = dcConfig?.enabled && dcConfig?.keep_direct_topology || false
       } else if (currentLevel === 'pod') {
-        const podConfig = topology.switch_config.pod_level
+        const podConfig = topology.switch_config.inter_rack
         directTopology = podConfig?.direct_topology || 'full_mesh'
         keepDirectTopology = podConfig?.enabled && podConfig?.keep_direct_topology || false
       } else if (currentLevel === 'rack') {
-        const rackConfig = topology.switch_config.rack_level
+        const rackConfig = topology.switch_config.inter_board
         directTopology = rackConfig?.direct_topology || 'full_mesh'
         keepDirectTopology = rackConfig?.enabled && rackConfig?.keep_direct_topology || false
       } else if (currentLevel === 'board') {
-        const boardConfig = topology.switch_config.board_level
+        const boardConfig = topology.switch_config.inter_chip
         directTopology = boardConfig?.direct_topology || 'full_mesh'
         keepDirectTopology = boardConfig?.enabled && boardConfig?.keep_direct_topology || false
       }
@@ -811,24 +833,36 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
     // 应用布局
     const hasSwitches = nodeList.some(n => n.isSwitch)
 
-    if (hasSwitches && keepDirectTopology && directTopology !== 'none') {
-      // 有Switch且保留直连：使用混合布局（设备按拓扑排列，Switch在上方）
-      nodeList = hybridLayout(nodeList, width, height, directTopology)
-    } else if (hasSwitches) {
-      // 只有Switch（无直连）：使用分层布局
-      nodeList = hierarchicalLayout(nodeList, width, height)
-    } else if (layoutType === 'auto') {
-      // 自动布局：根据直连拓扑类型选择布局
-      nodeList = getLayoutForTopology(directTopology, nodeList, width, height)
-    } else if (layoutType === 'circle') {
+    // 用户明确选择布局类型时优先使用
+    if (layoutType === 'circle') {
       // 强制环形布局
-      const deviceNodes = nodeList.filter(n => !n.isSwitch)
-      const radius = Math.min(width, height) * 0.35
-      nodeList = circleLayout(deviceNodes, width / 2, height / 2, radius)
+      if (hasSwitches) {
+        // 有Switch时使用混合布局，但设备节点强制环形
+        nodeList = hybridLayout(nodeList, width, height, 'ring')
+      } else {
+        const radius = Math.min(width, height) * 0.35
+        nodeList = circleLayout(nodeList, width / 2, height / 2, radius)
+      }
     } else if (layoutType === 'grid') {
       // 强制网格布局
-      const deviceNodes = nodeList.filter(n => !n.isSwitch)
-      nodeList = torusLayout(deviceNodes, width, height)
+      if (hasSwitches) {
+        // 有Switch时使用混合布局，但设备节点强制网格
+        nodeList = hybridLayout(nodeList, width, height, 'full_mesh_2d')
+      } else {
+        nodeList = torusLayout(nodeList, width, height)
+      }
+    } else {
+      // auto模式：根据是否有Switch和拓扑类型自动选择
+      if (hasSwitches && keepDirectTopology && directTopology !== 'none') {
+        // 有Switch且保留直连：使用混合布局（设备按拓扑排列，Switch在上方）
+        nodeList = hybridLayout(nodeList, width, height, directTopology)
+      } else if (hasSwitches) {
+        // 只有Switch（无直连）：使用分层布局
+        nodeList = hierarchicalLayout(nodeList, width, height)
+      } else {
+        // 自动布局：根据直连拓扑类型选择布局
+        nodeList = getLayoutForTopology(directTopology, nodeList, width, height)
+      }
     }
 
     return { nodes: nodeList, edges: edgeList, title: graphTitle, directTopology }
@@ -1656,13 +1690,13 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                       }}
                       onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
                     />
-                    {/* 可见曲线 */}
+                    {/* 可见曲线 - Switch连接用蓝色，节点直连用灰色 */}
                     <path
                       d={pathD}
                       fill="none"
-                      stroke="#b0b0b0"
-                      strokeWidth={1.5}
-                      strokeOpacity={0.6}
+                      stroke={edge.isSwitch ? '#1890ff' : '#b0b0b0'}
+                      strokeWidth={edge.isSwitch ? 2 : 1.5}
+                      strokeOpacity={0.7}
                       style={{ pointerEvents: 'none' }}
                     />
                   </g>
@@ -1695,15 +1729,15 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                   }}
                   onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
                 />
-                {/* 可见线条 */}
+                {/* 可见线条 - Switch连接用蓝色，节点直连用灰色 */}
                 <line
                   x1={sourcePos.x}
                   y1={sourcePos.y}
                   x2={targetPos.x}
                   y2={targetPos.y}
-                  stroke="#b0b0b0"
-                  strokeWidth={1.5}
-                  strokeOpacity={0.6}
+                  stroke={edge.isSwitch ? '#1890ff' : '#b0b0b0'}
+                  strokeWidth={edge.isSwitch ? 2 : 1.5}
+                  strokeOpacity={0.7}
                   style={{ pointerEvents: 'none' }}
                 />
               </g>
