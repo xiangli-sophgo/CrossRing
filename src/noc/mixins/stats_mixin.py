@@ -603,6 +603,8 @@ class StatsMixin:
             "L2M_R_LATENCY_original",
             "L2M_W_LATENCY_original",
             "SN_TRACKER_RELEASE_LATENCY_original",
+            "SN_PROCESSING_LATENCY_original",
+            "RN_PROCESSING_LATENCY_original",
             # FIFO depths
             "IQ_CH_FIFO_DEPTH",
             "EQ_CH_FIFO_DEPTH",
@@ -627,7 +629,17 @@ class StatsMixin:
             "ITag_MAX_NUM_V",
             # Feature switches
             "ENABLE_CROSSPOINT_CONFLICT_CHECK",
+            "ETAG_T1_ENABLED",
             "ORDERING_PRESERVATION_MODE",
+            "ORDERING_ETAG_UPGRADE_MODE",
+            "ORDERING_GRANULARITY",
+            "REVERSE_DIRECTION_ENABLED",
+            "REVERSE_DIRECTION_THRESHOLD",
+            # Allowed source nodes (dual-side ejection)
+            "TL_ALLOWED_SOURCE_NODES",
+            "TR_ALLOWED_SOURCE_NODES",
+            "TU_ALLOWED_SOURCE_NODES",
+            "TD_ALLOWED_SOURCE_NODES",
             # Bandwidth limits
             "GDMA_BW_LIMIT",
             "SDMA_BW_LIMIT",
@@ -792,25 +804,23 @@ class StatsMixin:
 
         db = ResultManager()
 
-        # 实验名称：默认为 日常仿真_YYYY-MM-DD
+        # 获取 traffic 文件列表
+        traffic_files = []
+        if hasattr(self, "traffic_scheduler") and hasattr(self.traffic_scheduler, "traffic_config"):
+            for chain in self.traffic_scheduler.traffic_config:
+                traffic_files.extend(chain)
+
+        # 获取配置路径
+        config_path = getattr(self.config, "config_path", None)
+
+        # 实验名称处理：
+        # - 用户指定了名称：查找已有实验并追加，或创建新实验
+        # - 用户未指定名称：创建带时间戳的新实验
+
         if experiment_name is None:
-            today = datetime.now().strftime("%Y-%m-%d")
-            experiment_name = f"日常仿真_{today}"
-
-        # 获取或创建实验
-        exp = db.get_experiment_by_name(experiment_name)
-        if exp:
-            experiment_id = exp["id"]
-        else:
-            # 获取 traffic 文件列表
-            traffic_files = []
-            if hasattr(self, "traffic_scheduler") and hasattr(self.traffic_scheduler, "traffic_config"):
-                for chain in self.traffic_scheduler.traffic_config:
-                    traffic_files.extend(chain)
-
-            # 获取配置路径
-            config_path = getattr(self.config, "config_path", None)
-
+            # 未指定名称，创建带时间戳的新实验
+            now = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            experiment_name = f"日常仿真_{now}"
             experiment_id = db.create_experiment(
                 name=experiment_name,
                 experiment_type=experiment_type,
@@ -819,7 +829,21 @@ class StatsMixin:
                 traffic_files=traffic_files,
                 description=description or "日常仿真结果汇总",
             )
-            db.update_experiment_status(experiment_id, "completed")
+        else:
+            # 用户指定了名称，查找已有实验
+            exp = db.get_experiment_by_name(experiment_name)
+            if exp:
+                experiment_id = exp["id"]
+            else:
+                experiment_id = db.create_experiment(
+                    name=experiment_name,
+                    experiment_type=experiment_type,
+                    topo_type=self.topo_type_stat,
+                    config_path=config_path,
+                    traffic_files=traffic_files,
+                    description=description or "日常仿真结果汇总",
+                )
+        db.update_experiment_status(experiment_id, "completed")
 
         # 处理综合结果（不写本地文件，直接收集内容）
         # 只有当result_processor存在时才处理
@@ -839,7 +863,7 @@ class StatsMixin:
         result_file_contents = getattr(self, "_result_file_contents", {})
 
         # 保存结果
-        db.add_result(
+        result_id = db.add_result(
             experiment_id=experiment_id,
             config_params=results,
             performance=performance,

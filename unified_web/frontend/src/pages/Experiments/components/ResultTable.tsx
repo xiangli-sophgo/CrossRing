@@ -844,9 +844,23 @@ export default function ResultTable({
       return;
     }
 
+    // 先销毁 Handsontable 实例，避免状态不一致导致的渲染错误
+    if (hotTableRef.current?.hotInstance) {
+      hotTableRef.current.hotInstance.deselectCell();
+    }
+
+    // 批量更新状态
     setVisibleColumns(validVisible);
     setColumnOrder(validOrder);
     setFixedColumns(validFixed);
+
+    // 延迟刷新表格
+    setTimeout(() => {
+      if (hotTableRef.current?.hotInstance) {
+        hotTableRef.current.hotInstance.render();
+      }
+    }, 0);
+
     message.success(`已加载配置方案「${preset.name}」`);
   };
 

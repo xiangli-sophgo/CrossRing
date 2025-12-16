@@ -53,6 +53,7 @@ export interface TaskStatus {
   created_at: string
   started_at: string | null
   completed_at: string | null
+  experiment_name?: string
 }
 
 export interface ConfigOption {

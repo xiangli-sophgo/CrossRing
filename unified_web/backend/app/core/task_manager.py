@@ -21,6 +21,9 @@ logger = logging.getLogger("unified_web.task_manager")
 # 单个任务超时时间（秒）
 TASK_TIMEOUT = 3600  # 1小时
 
+# 全局最大并行 worker 数
+MAX_GLOBAL_WORKERS = 4
+
 
 class TaskStatus(str, Enum):
     """任务状态"""
@@ -155,6 +158,9 @@ class TaskManager:
         self._tasks: Dict[str, SimulationTask] = {}
         self._running_tasks: Dict[str, asyncio.Task] = {}
         self._subscribers: Dict[str, List[asyncio.Queue]] = {}
+        # 全局 worker 数管理
+        self._active_workers: Dict[str, int] = {}  # task_id -> worker_count
+        self._workers_lock = threading.Lock()
         # 从文件加载历史任务
         self._load_history()
 
@@ -210,6 +216,31 @@ class TaskManager:
         """获取所有任务"""
         return list(self._tasks.values())
 
+    def get_available_workers(self) -> int:
+        """获取当前可用的 worker 数"""
+        with self._workers_lock:
+            used = sum(self._active_workers.values())
+            return max(0, MAX_GLOBAL_WORKERS - used)
+
+    def allocate_workers(self, task_id: str, requested: int) -> int:
+        """
+        为任务分配 worker 数
+        Returns: 实际分配的 worker 数（至少为1）
+        """
+        with self._workers_lock:
+            available = MAX_GLOBAL_WORKERS - sum(self._active_workers.values())
+            allocated = max(1, min(requested, available))
+            self._active_workers[task_id] = allocated
+            logger.info(f"任务 {task_id} 分配 {allocated} 个 worker（请求 {requested}，可用 {available}）")
+            return allocated
+
+    def release_workers(self, task_id: str):
+        """释放任务占用的 worker"""
+        with self._workers_lock:
+            if task_id in self._active_workers:
+                released = self._active_workers.pop(task_id)
+                logger.info(f"任务 {task_id} 释放 {released} 个 worker")
+
     def update_task_status(
         self,
         task_id: str,
@@ -241,6 +272,8 @@ class TaskManager:
             task.started_at = datetime.now()
         if status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
             task.completed_at = datetime.now()
+            # 释放 worker
+            self.release_workers(task_id)
             # 任务完成时保存历史
             self._save_history()
 
@@ -305,11 +338,13 @@ class TaskManager:
                 }
                 sim_params_list.append(sim_params)
 
-            # 确定并行进程数
+            # 确定并行进程数（考虑全局限制）
             if task.max_workers:
-                max_workers = min(task.max_workers, total_files)
+                requested_workers = min(task.max_workers, total_files)
             else:
-                max_workers = min(multiprocessing.cpu_count(), total_files)
+                requested_workers = min(multiprocessing.cpu_count(), total_files)
+            # 分配 worker（考虑其他正在运行的任务）
+            max_workers = self.allocate_workers(task_id, requested_workers)
 
             # 更新状态
             task.sim_details = {
@@ -639,6 +674,8 @@ class TaskManager:
             data = []
             for task in tasks_to_save:
                 task_dict = asdict(task)
+                # 移除不可序列化的字段
+                task_dict.pop('_current_engine', None)
                 # 转换枚举为字符串
                 task_dict['status'] = task.status.value
                 # 转换时间为ISO字符串

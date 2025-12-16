@@ -97,6 +97,7 @@ class TaskStatusResponse(BaseModel):
     created_at: str
     started_at: Optional[str]
     completed_at: Optional[str]
+    experiment_name: Optional[str] = None
 
 
 class ConfigOption(BaseModel):
@@ -203,6 +204,7 @@ async def get_task_status(task_id: str):
         created_at=task.created_at.isoformat(),
         started_at=task.started_at.isoformat() if task.started_at else None,
         completed_at=task.completed_at.isoformat() if task.completed_at else None,
+        experiment_name=task.experiment_name,
     )
 
 

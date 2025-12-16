@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { Layout, Typography, Spin, message, Segmented, Card, Descriptions, Tag, Collapse } from 'antd'
 import { Scene3D } from './components/Scene3D'
 import { ConfigPanel } from './components/ConfigPanel'
-import { TopologyGraph, NodeDetail } from './components/TopologyGraph'
+import { TopologyGraph, NodeDetail, LinkDetail } from './components/TopologyGraph'
 import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType } from './types'
 import { getTopology, generateTopology } from './api/topology'
 import { useViewNavigation } from './hooks/useViewNavigation'
@@ -42,6 +42,9 @@ const App: React.FC = () => {
 
   // 选中的节点详情
   const [selectedNode, setSelectedNode] = useState<NodeDetail | null>(null)
+
+  // 选中的连接详情
+  const [selectedLink, setSelectedLink] = useState<LinkDetail | null>(null)
 
   // 手动连接状态 (从缓存加载)
   const [manualConnectionConfig, setManualConnectionConfig] = useState<ManualConnectionConfig>(() => {
@@ -585,6 +588,38 @@ const App: React.FC = () => {
             </Card>
           )}
 
+          {/* 连接详情卡片 */}
+          {selectedLink && (
+            <Card
+              title="连接详情"
+              size="small"
+              style={{ marginTop: 16 }}
+              extra={<a onClick={() => setSelectedLink(null)}>关闭</a>}
+            >
+              <Descriptions column={1} size="small">
+                <Descriptions.Item label="源节点">
+                  <Tag color="green">{selectedLink.sourceLabel}</Tag>
+                  <span style={{ color: '#999', marginLeft: 4, fontSize: 12 }}>({selectedLink.sourceType.toUpperCase()})</span>
+                </Descriptions.Item>
+                <Descriptions.Item label="目标节点">
+                  <Tag color="blue">{selectedLink.targetLabel}</Tag>
+                  <span style={{ color: '#999', marginLeft: 4, fontSize: 12 }}>({selectedLink.targetType.toUpperCase()})</span>
+                </Descriptions.Item>
+                {selectedLink.bandwidth && (
+                  <Descriptions.Item label="带宽">{selectedLink.bandwidth} Gbps</Descriptions.Item>
+                )}
+                {selectedLink.latency && (
+                  <Descriptions.Item label="延迟">{selectedLink.latency} ns</Descriptions.Item>
+                )}
+                <Descriptions.Item label="类型">
+                  <Tag color={selectedLink.isManual ? 'orange' : 'default'}>
+                    {selectedLink.isManual ? '手动连接' : '自动连接'}
+                  </Tag>
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+          )}
+
           {/* 拖拽手柄 */}
           <div
             onMouseDown={handleMouseDown}
@@ -656,7 +691,16 @@ const App: React.FC = () => {
                   navigation.navigateTo(nodeId)
                 }
               }}
-              onNodeClick={setSelectedNode}
+              onNodeClick={(node) => {
+                setSelectedNode(node)
+                if (node) setSelectedLink(null)  // 点击节点时清除选中的连接
+              }}
+              onLinkClick={(link) => {
+                setSelectedLink(link)
+                if (link) setSelectedNode(null)  // 点击连接时清除选中的节点
+              }}
+              selectedNodeId={selectedNode?.id || null}
+              selectedLinkId={selectedLink?.id || null}
               onNavigateBack={navigation.navigateBack}
               onBreadcrumbClick={navigation.navigateToBreadcrumb}
               breadcrumbs={navigation.breadcrumbs}

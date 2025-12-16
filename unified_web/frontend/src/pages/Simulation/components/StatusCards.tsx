@@ -23,6 +23,7 @@ const { Text } = Typography
 interface TaskStatusCardProps {
   currentTask: TaskStatus
   startTime: number | null
+  onCancel?: () => void
 }
 
 // 获取状态标签
@@ -41,17 +42,29 @@ const getStatusTag = (status: string) => {
 export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
   currentTask,
   startTime,
+  onCancel,
 }) => {
+  const taskName = currentTask.experiment_name || currentTask.task_id.slice(0, 8)
   return (
     <Card
       title={
         <Space>
           <ThunderboltOutlined style={{ color: currentTask.status === 'running' ? warningColor : successColor }} />
-          <span>任务状态</span>
+          <span>{taskName}</span>
           {getStatusTag(currentTask.status)}
         </Space>
       }
-      style={{ marginBottom: 24 }}
+      extra={onCancel && (
+        <Button
+          icon={<StopOutlined />}
+          danger
+          size="small"
+          onClick={onCancel}
+        >
+          取消
+        </Button>
+      )}
+      style={{ marginBottom: 16 }}
     >
       <Row gutter={[24, 16]}>
         <Col span={8}>

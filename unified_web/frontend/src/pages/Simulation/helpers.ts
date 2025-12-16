@@ -12,6 +12,7 @@ export interface SweepParam {
   end: number           // 结束值
   step: number          // 步长
   values: number[]      // 计算得到的值列表
+  bindGroupId?: string  // 绑定组ID（相同ID的参数同步遍历）
 }
 
 // 参数遍历进度
@@ -44,6 +45,18 @@ export interface SavedSweepConfig {
 }
 
 // ============== 常量定义 ==============
+
+// 绑定组背景颜色
+export const BIND_GROUP_COLORS: Record<string, string> = {
+  'A': '#e6f7ff',  // 浅蓝
+  'B': '#f6ffed',  // 浅绿
+  'C': '#fff7e6',  // 浅橙
+  'D': '#f9f0ff',  // 浅紫
+  'E': '#fff1f0',  // 浅红
+  'F': '#e6fffb',  // 浅青
+  'G': '#fcffe6',  // 浅黄绿
+  'H': '#fff0f6',  // 浅粉
+}
 
 // 配置参数描述映射
 export const CONFIG_TOOLTIPS: Record<string, string> = {
@@ -246,4 +259,116 @@ export function groupTaskHistory(taskHistory: TaskHistoryItem[]): GroupedTask[] 
   return Object.values(groups).sort((a, b) =>
     new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   )
+}
+
+// ============== 参数绑定相关函数 ==============
+
+// 获取下一个可用的绑定组ID
+export function getNextBindGroupId(existingGroups: string[]): string {
+  const allIds = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+  for (const id of allIds) {
+    if (!existingGroups.includes(id)) return id
+  }
+  return `G${existingGroups.length + 1}`
+}
+
+// 验证绑定配置
+export function validateBindings(sweepParams: SweepParam[]): string[] {
+  const errors: string[] = []
+  const bindGroups: Map<string, SweepParam[]> = new Map()
+
+  for (const param of sweepParams) {
+    if (param.bindGroupId) {
+      const group = bindGroups.get(param.bindGroupId) || []
+      group.push(param)
+      bindGroups.set(param.bindGroupId, group)
+    }
+  }
+
+  for (const [groupId, params] of bindGroups) {
+    if (params.length < 2) {
+      errors.push(`绑定组 ${groupId} 至少需要2个参数`)
+      continue
+    }
+    const counts = params.map(p => p.values.length)
+    if (!counts.every(c => c === counts[0])) {
+      const details = params.map(p => `${p.key}(${p.values.length})`).join(', ')
+      errors.push(`绑定组 ${groupId} 参数值数量不一致: ${details}`)
+    }
+  }
+  return errors
+}
+
+// 计算带绑定的总组合数
+export function calculateTotalCombinationsWithBinding(sweepParams: SweepParam[]): number {
+  if (sweepParams.length === 0) return 0
+  const counted = new Set<string>()
+  let total = 1
+
+  for (const param of sweepParams) {
+    if (param.bindGroupId) {
+      if (!counted.has(param.bindGroupId)) {
+        counted.add(param.bindGroupId)
+        total *= param.values.length
+      }
+    } else {
+      total *= param.values.length
+    }
+  }
+  return total
+}
+
+// 生成带绑定的参数组合
+export function generateCombinationsWithBinding(sweepParams: SweepParam[]): Record<string, number>[] {
+  if (sweepParams.length === 0) return []
+
+  // 分组：绑定组 vs 独立参数
+  const bindGroups: Map<string, SweepParam[]> = new Map()
+  const independentParams: SweepParam[] = []
+
+  for (const param of sweepParams) {
+    if (param.bindGroupId) {
+      const group = bindGroups.get(param.bindGroupId) || []
+      group.push(param)
+      bindGroups.set(param.bindGroupId, group)
+    } else {
+      independentParams.push(param)
+    }
+  }
+
+  // 构建所有"单元"的值列表
+  const allUnits: Record<string, number>[][] = []
+
+  // 绑定组：zip成单元
+  for (const params of bindGroups.values()) {
+    const unitValues: Record<string, number>[] = []
+    const len = params[0].values.length
+    for (let i = 0; i < len; i++) {
+      const combo: Record<string, number> = {}
+      for (const p of params) {
+        combo[p.key] = p.values[i]
+      }
+      unitValues.push(combo)
+    }
+    allUnits.push(unitValues)
+  }
+
+  // 独立参数：每个参数是一个单元
+  for (const param of independentParams) {
+    allUnits.push(param.values.map(v => ({ [param.key]: v })))
+  }
+
+  // 对所有单元做笛卡尔积
+  const combinations: Record<string, number>[] = []
+  function cartesian(idx: number, current: Record<string, number>) {
+    if (idx >= allUnits.length) {
+      combinations.push({ ...current })
+      return
+    }
+    for (const val of allUnits[idx]) {
+      cartesian(idx + 1, { ...current, ...val })
+    }
+  }
+  cartesian(0, {})
+  return combinations
 }

@@ -7,7 +7,7 @@ import {
   Collapse, Alert, Empty, Space, Divider, Tooltip
 } from 'antd'
 import { ThunderboltOutlined, MinusSquareOutlined, SaveOutlined } from '@ant-design/icons'
-import { CONFIG_TOOLTIPS } from '../helpers'
+import { CONFIG_TOOLTIPS, BIND_GROUP_COLORS, getNextBindGroupId } from '../helpers'
 import type { SweepParam, SavedSweepConfig } from '../helpers'
 
 const { Text } = Typography
@@ -21,9 +21,12 @@ interface SweepConfigPanelProps {
   availableParams: string[]
   savedSweepConfigs: SavedSweepConfig[]
   sweepConfigName: string
+  existingBindGroups: string[]        // 当前存在的绑定组
+  bindingErrors: string[]             // 绑定验证错误
   onAddSweepParam: (key: string) => void
   onUpdateSweepParam: (index: number, field: 'start' | 'end' | 'step', value: number | null) => void
   onRemoveSweepParam: (index: number) => void
+  onUpdateBindGroup: (index: number, groupId: string | undefined) => void
   onSaveSweepConfig: (name: string) => void
   onLoadSweepConfig: (name: string) => void
   onDeleteSweepConfig: (name: string) => void
@@ -37,9 +40,12 @@ export const SweepConfigPanel: React.FC<SweepConfigPanelProps> = ({
   availableParams,
   savedSweepConfigs,
   sweepConfigName,
+  existingBindGroups,
+  bindingErrors,
   onAddSweepParam,
   onUpdateSweepParam,
   onRemoveSweepParam,
+  onUpdateBindGroup,
   onSaveSweepConfig,
   onLoadSweepConfig,
   onDeleteSweepConfig,
@@ -50,12 +56,11 @@ export const SweepConfigPanel: React.FC<SweepConfigPanelProps> = ({
     <Collapse
       size="small"
       style={{ marginBottom: 16 }}
-      defaultActiveKey={['sweep']}
+      defaultActiveKey={[]}
       items={[{
         key: 'sweep',
         label: (
           <Space>
-            <ThunderboltOutlined />
             <span>参数遍历配置</span>
             {sweepParams.length > 0 && (
               <Text type="secondary">
@@ -69,24 +74,35 @@ export const SweepConfigPanel: React.FC<SweepConfigPanelProps> = ({
             {/* 表头说明 */}
             {sweepParams.length > 0 && (
               <Row gutter={16} style={{ marginBottom: 8 }}>
-                <Col span={6}><Text type="secondary" style={{ fontSize: 12 }}>参数名</Text></Col>
-                <Col span={5}><Text type="secondary" style={{ fontSize: 12 }}>起始值</Text></Col>
-                <Col span={5}><Text type="secondary" style={{ fontSize: 12 }}>结束值</Text></Col>
-                <Col span={4}><Text type="secondary" style={{ fontSize: 12 }}>步长</Text></Col>
+                <Col span={5}><Text type="secondary" style={{ fontSize: 12 }}>参数名</Text></Col>
+                <Col span={4}><Text type="secondary" style={{ fontSize: 12 }}>起始值</Text></Col>
+                <Col span={4}><Text type="secondary" style={{ fontSize: 12 }}>结束值</Text></Col>
+                <Col span={3}><Text type="secondary" style={{ fontSize: 12 }}>步长</Text></Col>
                 <Col span={2}><Text type="secondary" style={{ fontSize: 12 }}>数量</Text></Col>
+                <Col span={4}><Text type="secondary" style={{ fontSize: 12 }}>绑定组</Text></Col>
                 <Col span={2}></Col>
               </Row>
             )}
 
             {/* 已添加的遍历参数 */}
             {sweepParams.map((param, idx) => (
-              <Row key={param.key} gutter={16} style={{ marginBottom: 12 }} align="middle">
-                <Col span={6}>
+              <Row
+                key={param.key}
+                gutter={16}
+                style={{
+                  marginBottom: 12,
+                  padding: '4px 8px',
+                  borderRadius: 4,
+                  backgroundColor: param.bindGroupId ? BIND_GROUP_COLORS[param.bindGroupId] || '#f5f5f5' : undefined,
+                }}
+                align="middle"
+              >
+                <Col span={5}>
                   <Tooltip title={CONFIG_TOOLTIPS[param.key] || param.key}>
                     <Text style={{ cursor: 'help', fontSize: 13 }}>{param.key}</Text>
                   </Tooltip>
                 </Col>
-                <Col span={5}>
+                <Col span={4}>
                   <InputNumber
                     value={param.start}
                     onChange={(v) => onUpdateSweepParam(idx, 'start', v)}
@@ -94,7 +110,7 @@ export const SweepConfigPanel: React.FC<SweepConfigPanelProps> = ({
                     style={{ width: '100%' }}
                   />
                 </Col>
-                <Col span={5}>
+                <Col span={4}>
                   <InputNumber
                     value={param.end}
                     onChange={(v) => onUpdateSweepParam(idx, 'end', v)}
@@ -102,7 +118,7 @@ export const SweepConfigPanel: React.FC<SweepConfigPanelProps> = ({
                     style={{ width: '100%' }}
                   />
                 </Col>
-                <Col span={4}>
+                <Col span={3}>
                   <InputNumber
                     value={param.step}
                     onChange={(v) => onUpdateSweepParam(idx, 'step', v)}
@@ -113,6 +129,25 @@ export const SweepConfigPanel: React.FC<SweepConfigPanelProps> = ({
                 </Col>
                 <Col span={2}>
                   <Tag color="green">{param.values.length}个</Tag>
+                </Col>
+                <Col span={4}>
+                  <Select
+                    value={param.bindGroupId || ''}
+                    onChange={(v) => onUpdateBindGroup(idx, v || undefined)}
+                    style={{ width: '100%' }}
+                    size="small"
+                  >
+                    <Option value="">无绑定</Option>
+                    {existingBindGroups.map(g => (
+                      <Option key={g} value={g}>
+                        <span style={{ display: 'inline-block', width: 12, height: 12, backgroundColor: BIND_GROUP_COLORS[g], marginRight: 6, borderRadius: 2 }} />
+                        组{g}
+                      </Option>
+                    ))}
+                    <Option value={getNextBindGroupId(existingBindGroups)}>
+                      + 新建组{getNextBindGroupId(existingBindGroups)}
+                    </Option>
+                  </Select>
                 </Col>
                 <Col span={2}>
                   <Button
@@ -129,22 +164,33 @@ export const SweepConfigPanel: React.FC<SweepConfigPanelProps> = ({
             <Select
               placeholder="+ 添加遍历参数"
               style={{ width: 350, marginTop: 8 }}
-              onChange={(key) => {
+              onSelect={(key: string) => {
                 onAddSweepParam(key)
               }}
-              value={undefined}
               showSearch
-              optionFilterProp="children"
-            >
-              {availableParams.map(key => (
-                <Option key={key} value={key}>
-                  {key} (当前: {configValues[key]})
-                </Option>
-              ))}
-            </Select>
+              optionFilterProp="label"
+              options={availableParams.map(key => ({
+                value: key,
+                label: `${key} (当前: ${configValues[key]})`,
+              }))}
+            />
+
+            {/* 绑定验证错误提示 */}
+            {bindingErrors.length > 0 && (
+              <Alert
+                type="error"
+                style={{ marginTop: 16 }}
+                message="绑定配置错误"
+                description={
+                  <ul style={{ margin: 0, paddingLeft: 20 }}>
+                    {bindingErrors.map((err, i) => <li key={i}>{err}</li>)}
+                  </ul>
+                }
+              />
+            )}
 
             {/* 预览信息 */}
-            {totalCombinations > 0 && (
+            {totalCombinations > 0 && bindingErrors.length === 0 && (
               <Alert
                 type="info"
                 style={{ marginTop: 16 }}

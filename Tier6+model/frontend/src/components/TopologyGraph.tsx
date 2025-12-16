@@ -39,6 +39,20 @@ export interface NodeDetail {
   portInfo?: { uplink: number; downlink: number; inter: number }
 }
 
+// 连接详细信息
+export interface LinkDetail {
+  id: string  // source-target 格式
+  sourceId: string
+  sourceLabel: string
+  sourceType: string
+  targetId: string
+  targetLabel: string
+  targetType: string
+  bandwidth?: number
+  latency?: number
+  isManual?: boolean
+}
+
 interface TopologyGraphProps {
   visible: boolean
   onClose: () => void
@@ -49,6 +63,9 @@ interface TopologyGraphProps {
   currentBoard?: BoardConfig | null
   onNodeDoubleClick?: (nodeId: string, nodeType: string) => void
   onNodeClick?: (nodeDetail: NodeDetail | null) => void
+  onLinkClick?: (linkDetail: LinkDetail | null) => void
+  selectedNodeId?: string | null  // 当前选中的节点ID
+  selectedLinkId?: string | null  // 当前选中的连接ID
   onNavigateBack?: () => void
   onBreadcrumbClick?: (index: number) => void
   breadcrumbs?: BreadcrumbItem[]
@@ -402,6 +419,9 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   currentBoard,
   onNodeDoubleClick,
   onNodeClick,
+  onLinkClick,
+  selectedNodeId = null,
+  selectedLinkId = null,
   onNavigateBack: _onNavigateBack,
   onBreadcrumbClick,
   breadcrumbs = [],
@@ -1316,6 +1336,20 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
           onMouseUp={handleDragEnd}
           onMouseLeave={handleDragEnd}
         >
+          {/* 背景层 - 用于点击空白区域清除选中状态 */}
+          <rect
+            x={400 - 400/zoom}
+            y={300 - 300/zoom}
+            width={800 / zoom}
+            height={600 / zoom}
+            fill="transparent"
+            onClick={() => {
+              if (connectionMode === 'view' && !isManualMode) {
+                onNodeClick?.(null)
+                onLinkClick?.(null)
+              }
+            }}
+          />
           {/* 定义箭头标记 */}
           <defs>
             <marker
@@ -1596,10 +1630,34 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             const sourceNode = nodes.find(n => n.id === edge.source)
             const targetNode = nodes.find(n => n.id === edge.target)
 
+            // 生成唯一的连接ID
+            const edgeId = `${edge.source}-${edge.target}`
+            const isLinkSelected = selectedLinkId === edgeId || selectedLinkId === `${edge.target}-${edge.source}`
+
             const bandwidthStr = edge.bandwidth ? `${edge.bandwidth}Gbps` : ''
             const latencyStr = edge.latency ? `${edge.latency}ns` : ''
             const propsStr = [bandwidthStr, latencyStr].filter(Boolean).join(', ')
             const tooltipContent = `${sourceNode?.label || edge.source} ↔ ${targetNode?.label || edge.target}${propsStr ? ` (${propsStr})` : ''}`
+
+            // 点击 link 的处理函数
+            const handleLinkClick = (e: React.MouseEvent) => {
+              e.stopPropagation()
+              if (connectionMode !== 'view' || isManualMode) return
+              if (onLinkClick) {
+                onLinkClick({
+                  id: edgeId,
+                  sourceId: edge.source,
+                  sourceLabel: sourceNode?.label || edge.source,
+                  sourceType: sourceNode?.type || 'unknown',
+                  targetId: edge.target,
+                  targetLabel: targetNode?.label || edge.target,
+                  targetType: targetNode?.type || 'unknown',
+                  bandwidth: edge.bandwidth,
+                  latency: edge.latency,
+                  isManual: false
+                })
+              }
+            }
 
             // 判断是否是 Torus 环绕连接
             const sourceGridRow = sourceNode?.gridRow
@@ -1682,6 +1740,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                       stroke="transparent"
                       strokeWidth={16}
                       style={{ cursor: 'pointer' }}
+                      onClick={handleLinkClick}
                       onMouseEnter={(e) => {
                         if (connectionMode !== 'view' || isManualMode) return
                         const rect = svgRef.current?.getBoundingClientRect()
@@ -1695,14 +1754,14 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                       }}
                       onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
                     />
-                    {/* 可见曲线 - Switch连接用蓝色，节点直连用灰色 */}
+                    {/* 可见曲线 - Switch连接用蓝色，节点直连用灰色，选中时绿色高亮 */}
                     <path
                       d={pathD}
                       fill="none"
-                      stroke={edge.isSwitch ? '#1890ff' : '#b0b0b0'}
-                      strokeWidth={edge.isSwitch ? 2 : 1.5}
-                      strokeOpacity={0.7}
-                      style={{ pointerEvents: 'none' }}
+                      stroke={isLinkSelected ? '#52c41a' : (edge.isSwitch ? '#1890ff' : '#b0b0b0')}
+                      strokeWidth={isLinkSelected ? 3 : (edge.isSwitch ? 2 : 1.5)}
+                      strokeOpacity={isLinkSelected ? 1 : 0.7}
+                      style={{ pointerEvents: 'none', filter: isLinkSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
                     />
                   </g>
                 )
@@ -1721,6 +1780,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                   stroke="transparent"
                   strokeWidth={16}
                   style={{ cursor: 'pointer' }}
+                  onClick={handleLinkClick}
                   onMouseEnter={(e) => {
                     if (connectionMode !== 'view' || isManualMode) return
                     const rect = svgRef.current?.getBoundingClientRect()
@@ -1734,16 +1794,16 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                   }}
                   onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
                 />
-                {/* 可见线条 - Switch连接用蓝色，节点直连用灰色 */}
+                {/* 可见线条 - Switch连接用蓝色，节点直连用灰色，选中时绿色高亮 */}
                 <line
                   x1={sourcePos.x}
                   y1={sourcePos.y}
                   x2={targetPos.x}
                   y2={targetPos.y}
-                  stroke={edge.isSwitch ? '#1890ff' : '#b0b0b0'}
-                  strokeWidth={edge.isSwitch ? 2 : 1.5}
-                  strokeOpacity={0.7}
-                  style={{ pointerEvents: 'none' }}
+                  stroke={isLinkSelected ? '#52c41a' : (edge.isSwitch ? '#1890ff' : '#b0b0b0')}
+                  strokeWidth={isLinkSelected ? 3 : (edge.isSwitch ? 2 : 1.5)}
+                  strokeOpacity={isLinkSelected ? 1 : 0.7}
+                  style={{ pointerEvents: 'none', filter: isLinkSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
                 />
               </g>
             )
@@ -1761,6 +1821,28 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
               const targetNode = nodes.find(n => n.id === conn.target)
               const manualTooltip = `${sourceNode?.label || conn.source} ↔ ${targetNode?.label || conn.target} (手动)`
 
+              // 手动连接的ID和选中状态
+              const manualEdgeId = `${conn.source}-${conn.target}`
+              const isManualLinkSelected = selectedLinkId === manualEdgeId || selectedLinkId === `${conn.target}-${conn.source}`
+
+              // 手动连接的点击处理
+              const handleManualLinkClick = (e: React.MouseEvent) => {
+                e.stopPropagation()
+                if (connectionMode !== 'view' || isManualMode) return
+                if (onLinkClick) {
+                  onLinkClick({
+                    id: manualEdgeId,
+                    sourceId: conn.source,
+                    sourceLabel: sourceNode?.label || conn.source,
+                    sourceType: sourceNode?.type || 'unknown',
+                    targetId: conn.target,
+                    targetLabel: targetNode?.label || conn.target,
+                    targetType: targetNode?.type || 'unknown',
+                    isManual: true
+                  })
+                }
+              }
+
               return (
                 <g key={`manual-${conn.id}`}>
                   {/* 透明触发层 */}
@@ -1772,6 +1854,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                     stroke="transparent"
                     strokeWidth={16}
                     style={{ cursor: 'pointer' }}
+                    onClick={handleManualLinkClick}
                     onMouseEnter={(e) => {
                       if (connectionMode !== 'view' || isManualMode) return
                       const rect = svgRef.current?.getBoundingClientRect()
@@ -1785,17 +1868,17 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                     }}
                     onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
                   />
-                  {/* 可见线条 - 编辑模式绿色虚线，普通模式与自动连接一致 */}
+                  {/* 可见线条 - 编辑模式绿色虚线，普通模式与自动连接一致，选中时绿色高亮 */}
                   <line
                     x1={sourcePos.x}
                     y1={sourcePos.y}
                     x2={targetPos.x}
                     y2={targetPos.y}
-                    stroke={connectionMode !== 'view' ? '#52c41a' : '#b0b0b0'}
-                    strokeWidth={connectionMode !== 'view' ? 2.5 : 1.5}
-                    strokeOpacity={connectionMode !== 'view' ? 1 : 0.6}
+                    stroke={isManualLinkSelected ? '#52c41a' : (connectionMode !== 'view' ? '#52c41a' : '#b0b0b0')}
+                    strokeWidth={isManualLinkSelected ? 3 : (connectionMode !== 'view' ? 2.5 : 1.5)}
+                    strokeOpacity={isManualLinkSelected ? 1 : (connectionMode !== 'view' ? 1 : 0.6)}
                     strokeDasharray={connectionMode !== 'view' ? '8,4' : undefined}
-                    style={{ pointerEvents: 'none' }}
+                    style={{ pointerEvents: 'none', filter: isManualLinkSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
                   />
                 </g>
               )
@@ -1813,7 +1896,16 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             const isSourceSelected = selectedNodes.has(node.id)
             const isTargetSelected = targetNodes.has(node.id)
             const isDragging = draggingNode === node.id
+            // 判断节点是否被点击选中
+            const isNodeSelected = selectedNodeId === node.id
+            // 判断节点是否是选中 link 的两端
+            const isLinkEndpoint = selectedLinkId && (
+              selectedLinkId.startsWith(node.id + '-') ||
+              selectedLinkId.endsWith('-' + node.id)
+            )
             const isHovered = hoveredNodeId === node.id && connectionMode === 'view' && !isManualMode && !isDragging
+            // 节点高亮：点击选中、hover 或者是选中 link 的端点
+            const shouldHighlight = isNodeSelected || isHovered || isLinkEndpoint
             return (
               <g
                 key={node.id}
@@ -1821,7 +1913,9 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                 style={{
                   cursor: isManualMode ? 'move' : connectionMode !== 'view' ? 'crosshair' : 'pointer',
                   opacity: isDragging ? 0.7 : 1,
-                  filter: isHovered ? 'drop-shadow(0 0 8px rgba(37, 99, 235, 0.5)) drop-shadow(0 0 16px rgba(37, 99, 235, 0.25))' : 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
+                  filter: shouldHighlight
+                    ? 'drop-shadow(0 0 8px rgba(37, 99, 235, 0.6)) drop-shadow(0 0 16px rgba(37, 99, 235, 0.3))'
+                    : 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
                   transition: 'filter 0.15s ease, opacity 0.15s ease',
                 }}
                 onMouseDown={(e) => handleDragStart(node.id, e)}

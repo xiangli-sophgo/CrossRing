@@ -1,7 +1,7 @@
 /**
  * 仿真执行页面
  */
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Typography,
@@ -25,7 +25,6 @@ import {
 } from 'antd'
 import {
   PlayCircleOutlined,
-  StopOutlined,
   ReloadOutlined,
   SettingOutlined,
   FileTextOutlined,
@@ -67,8 +66,15 @@ import {
 } from './components'
 
 // 导入类型和工具函数
-import type { SweepParam, SweepProgress, SavedSweepConfig } from './helpers'
-import { calculateSweepValues, generateCombinations, sleep, groupTaskHistory } from './helpers'
+import type { SweepParam, SweepProgress, SavedSweepConfig, GroupedTask } from './helpers'
+import {
+  calculateSweepValues,
+  generateCombinationsWithBinding,
+  validateBindings,
+  calculateTotalCombinationsWithBinding,
+  sleep,
+  groupTaskHistory,
+} from './helpers'
 
 const { Text } = Typography
 const { Option } = Select
@@ -83,11 +89,10 @@ const Simulation: React.FC = () => {
   const [loadingFiles, setLoadingFiles] = useState(false)
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
 
-  // 当前任务状态
-  const [currentTask, setCurrentTask] = useState<TaskStatus | null>(null)
+  // 运行中的任务列表（支持多任务）
+  const [runningTasks, setRunningTasks] = useState<Map<string, { task: TaskStatus; startTime: number }>>(new Map())
   const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
-  const [startTime, setStartTime] = useState<number | null>(null)
 
   // 配置编辑状态
   const [configValues, setConfigValues] = useState<Record<string, any>>({})
@@ -117,7 +122,7 @@ const Simulation: React.FC = () => {
   const [sweepConfigName, setSweepConfigName] = useState('')
   const [sweepRestoring, setSweepRestoring] = useState(false)
 
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollIntervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
   const sweepPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // 恢复运行中的任务
@@ -125,16 +130,17 @@ const Simulation: React.FC = () => {
     try {
       const data = await getRunningTasks()
       if (data.tasks.length > 0) {
-        const latestTask = data.tasks[0]
-        const fullStatus = await getTaskStatus(latestTask.task_id)
-        setCurrentTask(fullStatus)
-        if (latestTask.started_at) {
-          setStartTime(new Date(latestTask.started_at).getTime())
-        } else {
-          setStartTime(new Date(latestTask.created_at).getTime())
+        const newRunningTasks = new Map<string, { task: TaskStatus; startTime: number }>()
+        for (const taskItem of data.tasks) {
+          const fullStatus = await getTaskStatus(taskItem.task_id)
+          const startTime = taskItem.started_at
+            ? new Date(taskItem.started_at).getTime()
+            : new Date(taskItem.created_at).getTime()
+          newRunningTasks.set(taskItem.task_id, { task: fullStatus, startTime })
+          startPolling(taskItem.task_id)
         }
-        startPolling(latestTask.task_id)
-        message.info('已恢复运行中的任务')
+        setRunningTasks(newRunningTasks)
+        message.info(`已恢复 ${data.tasks.length} 个运行中的任务`)
       }
     } catch (error) {
       console.error('恢复运行中任务失败:', error)
@@ -149,7 +155,9 @@ const Simulation: React.FC = () => {
     loadTrafficFilesTree('kcin')
     restoreRunningTask()
     return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+      // 清除所有任务轮询
+      pollIntervalsRef.current.forEach(interval => clearInterval(interval))
+      pollIntervalsRef.current.clear()
       if (sweepPollRef.current) clearInterval(sweepPollRef.current)
     }
   }, [])
@@ -293,7 +301,26 @@ const Simulation: React.FC = () => {
       }
       const response = await runSimulation(request)
       message.success(`仿真任务已创建: ${response.task_id}`)
-      setStartTime(Date.now())
+      // 添加到运行任务列表
+      const initialStatus: TaskStatus = {
+        task_id: response.task_id,
+        status: 'pending',
+        progress: 0,
+        current_file: '',
+        message: '任务已创建',
+        error: null,
+        results: null,
+        sim_details: null,
+        created_at: new Date().toISOString(),
+        started_at: null,
+        completed_at: null,
+        experiment_name: values.experiment_name,
+      }
+      setRunningTasks(prev => {
+        const newMap = new Map(prev)
+        newMap.set(response.task_id, { task: initialStatus, startTime: Date.now() })
+        return newMap
+      })
       startPolling(response.task_id)
     } catch (error: any) {
       message.error(error.response?.data?.detail || '启动仿真失败')
@@ -303,17 +330,45 @@ const Simulation: React.FC = () => {
   }
 
   const startPolling = (taskId: string) => {
-    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+    // 如果已经在轮询这个任务，不重复创建
+    if (pollIntervalsRef.current.has(taskId)) return
+
+    let messageShown = false  // 防止重复显示消息
 
     const poll = async () => {
       try {
         const status = await getTaskStatus(taskId)
-        setCurrentTask(status)
+        setRunningTasks(prev => {
+          const newMap = new Map(prev)
+          const existing = newMap.get(taskId)
+          if (existing) {
+            newMap.set(taskId, { ...existing, task: status })
+          }
+          return newMap
+        })
+
         if (['completed', 'failed', 'cancelled'].includes(status.status)) {
-          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+          // 停止该任务的轮询
+          const interval = pollIntervalsRef.current.get(taskId)
+          if (interval) {
+            clearInterval(interval)
+            pollIntervalsRef.current.delete(taskId)
+          }
+          // 从运行任务列表中移除（延迟3秒让用户看到最终状态）
+          setTimeout(() => {
+            setRunningTasks(prev => {
+              const newMap = new Map(prev)
+              newMap.delete(taskId)
+              return newMap
+            })
+          }, 3000)
           loadHistory()
-          if (status.status === 'completed') message.success('仿真完成')
-          else if (status.status === 'failed') message.error('仿真失败')
+          if (!messageShown) {
+            messageShown = true
+            const expName = status.experiment_name || taskId.slice(0, 8)
+            if (status.status === 'completed') message.success(`任务完成: ${expName}`)
+            else if (status.status === 'failed') message.error(`任务失败: ${expName}`)
+          }
         }
       } catch (error) {
         console.error('获取任务状态失败:', error)
@@ -321,16 +376,26 @@ const Simulation: React.FC = () => {
     }
 
     poll()
-    pollIntervalRef.current = setInterval(poll, 1000)
+    const interval = setInterval(poll, 1000)
+    pollIntervalsRef.current.set(taskId, interval)
   }
 
-  const handleCancel = async () => {
-    if (!currentTask) return
+  const handleCancel = async (taskId: string) => {
     try {
-      await cancelTask(currentTask.task_id)
+      await cancelTask(taskId)
       message.info('任务已取消')
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
-      setCurrentTask(null)
+      // 停止轮询
+      const interval = pollIntervalsRef.current.get(taskId)
+      if (interval) {
+        clearInterval(interval)
+        pollIntervalsRef.current.delete(taskId)
+      }
+      // 从列表移除
+      setRunningTasks(prev => {
+        const newMap = new Map(prev)
+        newMap.delete(taskId)
+        return newMap
+      })
       loadHistory()
     } catch (error) {
       message.error('取消任务失败')
@@ -362,6 +427,12 @@ const Simulation: React.FC = () => {
 
   const removeSweepParam = (index: number) => {
     setSweepParams(sweepParams.filter((_, i) => i !== index))
+  }
+
+  const updateBindGroup = (index: number, groupId: string | undefined) => {
+    const newParams = [...sweepParams]
+    newParams[index] = { ...newParams[index], bindGroupId: groupId }
+    setSweepParams(newParams)
   }
 
   const saveSweepConfig = (name: string) => {
@@ -413,8 +484,19 @@ const Simulation: React.FC = () => {
     }
   }, [])
 
+  // 计算存在的绑定组
+  const existingBindGroups = useMemo(() => {
+    const groups = new Set<string>()
+    sweepParams.forEach(p => { if (p.bindGroupId) groups.add(p.bindGroupId) })
+    return Array.from(groups).sort()
+  }, [sweepParams])
+
+  // 验证绑定配置
+  const bindingErrors = useMemo(() => validateBindings(sweepParams), [sweepParams])
+
+  // 计算总组合数（支持绑定）
   const totalCombinations = sweepParams.length > 0
-    ? sweepParams.reduce((acc, param) => acc * param.values.length, 1)
+    ? calculateTotalCombinationsWithBinding(sweepParams)
     : 0
 
   const availableParams = Object.keys(configValues).filter(key => {
@@ -515,7 +597,13 @@ const Simulation: React.FC = () => {
       return
     }
 
-    const combinations = generateCombinations(sweepParams)
+    // 验证绑定配置
+    if (bindingErrors.length > 0) {
+      message.error('绑定配置有误: ' + bindingErrors.join('; '))
+      return
+    }
+
+    const combinations = generateCombinationsWithBinding(sweepParams)
     if (combinations.length === 0) {
       message.warning('请配置遍历参数')
       return
@@ -623,6 +711,7 @@ const Simulation: React.FC = () => {
                 rows: 5,
                 cols: 4,
                 max_time: 6000,
+                max_workers: 8,
                 save_to_db: true,
               }}
               onFinish={handleSubmit}
@@ -729,6 +818,24 @@ const Simulation: React.FC = () => {
                     <Button
                       size="small"
                       icon={<SaveOutlined />}
+                      onClick={async () => {
+                        const configPath = form.getFieldValue('config_path')
+                        if (!configPath) {
+                          message.warning('请先选择配置文件')
+                          return
+                        }
+                        try {
+                          await saveConfigContent(configPath, configValues)
+                          message.success('配置已保存')
+                        } catch (e: any) {
+                          message.error(`保存失败: ${e.response?.data?.detail || e.message || '未知错误'}`)
+                        }
+                      }}
+                    >
+                      保存
+                    </Button>
+                    <Button
+                      size="small"
                       onClick={() => {
                         setSaveAsType('main')
                         setSaveAsName('')
@@ -773,6 +880,24 @@ const Simulation: React.FC = () => {
                         <Button
                           size="small"
                           icon={<SaveOutlined />}
+                          onClick={async () => {
+                            const configPath = form.getFieldValue('die_config_path')
+                            if (!configPath) {
+                              message.warning('请先选择配置文件')
+                              return
+                            }
+                            try {
+                              await saveConfigContent(configPath, dieConfigValues)
+                              message.success('配置已保存')
+                            } catch (e: any) {
+                              message.error(`保存失败: ${e.response?.data?.detail || e.message || '未知错误'}`)
+                            }
+                          }}
+                        >
+                          保存
+                        </Button>
+                        <Button
+                          size="small"
                           onClick={() => {
                             setSaveAsType('die')
                             setSaveAsName('')
@@ -803,9 +928,12 @@ const Simulation: React.FC = () => {
                 totalCombinations={totalCombinations}
                 savedSweepConfigs={savedSweepConfigs}
                 sweepConfigName={sweepConfigName}
+                existingBindGroups={existingBindGroups}
+                bindingErrors={bindingErrors}
                 onAddSweepParam={addSweepParam}
                 onUpdateSweepParam={updateSweepParam}
                 onRemoveSweepParam={removeSweepParam}
+                onUpdateBindGroup={updateBindGroup}
                 onSaveSweepConfig={saveSweepConfig}
                 onLoadSweepConfig={loadSweepConfig}
                 onDeleteSweepConfig={deleteSweepConfig}
@@ -828,7 +956,7 @@ const Simulation: React.FC = () => {
                       </Col>
                       <Col span={8}>
                         <Form.Item name="max_workers" label="并行数">
-                          <InputNumber min={1} max={16} placeholder="留空使用默认" style={{ width: '100%' }} />
+                          <InputNumber min={1} max={8} style={{ width: '100%' }} />
                         </Form.Item>
                       </Col>
                       <Col span={8}>
@@ -876,7 +1004,7 @@ const Simulation: React.FC = () => {
                       icon={<RocketOutlined />}
                       onClick={() => handleSweepSubmit(form.getFieldsValue())}
                       loading={sweepRunning}
-                      disabled={currentTask?.status === 'running' || sweepParams.length === 0}
+                      disabled={sweepParams.length === 0 || bindingErrors.length > 0}
                       size="large"
                       style={{ height: 44 }}
                     >
@@ -888,16 +1016,10 @@ const Simulation: React.FC = () => {
                       htmlType="submit"
                       icon={<PlayCircleOutlined />}
                       loading={loading}
-                      disabled={currentTask?.status === 'running'}
                       size="large"
                       style={{ height: 44 }}
                     >
                       开始仿真
-                    </Button>
-                  )}
-                  {currentTask?.status === 'running' && (
-                    <Button icon={<StopOutlined />} onClick={handleCancel} danger size="large" style={{ height: 44 }}>
-                      取消任务
                     </Button>
                   )}
                 </Space>
@@ -915,13 +1037,15 @@ const Simulation: React.FC = () => {
             />
           )}
 
-          {/* 当前任务状态卡片 */}
-          {currentTask && (
+          {/* 运行中的任务卡片列表 */}
+          {Array.from(runningTasks.entries()).map(([taskId, { task, startTime }]) => (
             <TaskStatusCard
-              currentTask={currentTask}
+              key={taskId}
+              currentTask={task}
               startTime={startTime}
+              onCancel={task.status === 'running' ? () => handleCancel(taskId) : undefined}
             />
-          )}
+          ))}
         </Col>
 
         {/* 右侧：文件选择 */}
@@ -984,7 +1108,7 @@ const Simulation: React.FC = () => {
             placeholder={mode === 'dcin' && saveAsType === 'main' ? 'dcin_my_config' : 'topo_my_config'}
             value={saveAsName}
             onChange={(e) => setSaveAsName(e.target.value)}
-            addonAfter=".yaml"
+            suffix=".yaml"
           />
           <div style={{ marginTop: 8, color: '#888', fontSize: 12 }}>
             提示: 文件名只能包含字母、数字、下划线和连字符
