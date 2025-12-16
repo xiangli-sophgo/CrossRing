@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react'
 import { Canvas, useFrame, ThreeEvent, useThree } from '@react-three/fiber'
 import { OrbitControls, PerspectiveCamera, Text, Html } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
+import { useSpring, animated } from '@react-spring/three'
 import { Breadcrumb, Button, Tooltip } from 'antd'
 import { ReloadOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import {
@@ -33,8 +34,69 @@ let lastCameraState: {
   lookAt: THREE.Vector3
 } | null = null
 
-// 透明度状态缓存
-let lastOpacityState: Map<string, number> | null = null
+// ============================================
+// 共享材质和几何体缓存（内存优化）
+// ============================================
+const sharedMaterials = {
+  // PCB 材质
+  pcbBase: new THREE.MeshStandardMaterial({ color: '#1a4d2e', metalness: 0.1, roughness: 0.9 }),
+  pcbMiddle: new THREE.MeshStandardMaterial({ color: '#0f3d1f', metalness: 0.15, roughness: 0.85 }),
+  pcbTop: new THREE.MeshStandardMaterial({ color: '#0a2f18', metalness: 0.1, roughness: 0.7 }),
+  // 铜走线
+  copperTrace: new THREE.MeshStandardMaterial({ color: '#c9a227', metalness: 0.6, roughness: 0.4 }),
+  // 过孔
+  via: new THREE.MeshStandardMaterial({ color: '#b8860b', metalness: 0.7, roughness: 0.3 }),
+  // 金手指
+  goldFinger: new THREE.MeshStandardMaterial({ color: '#b8923a', metalness: 0.3, roughness: 0.7 }),
+  // 安装孔
+  mountHole: new THREE.MeshStandardMaterial({ color: '#8a7040', metalness: 0.2, roughness: 0.8 }),
+  // 芯片
+  chipShell: new THREE.MeshStandardMaterial({ color: '#1a1a1a', metalness: 0.3, roughness: 0.8 }),
+  chipShellHover: new THREE.MeshStandardMaterial({ color: '#2a2a2a', metalness: 0.3, roughness: 0.8 }),
+  chipTop: new THREE.MeshStandardMaterial({ color: '#0d0d0d', metalness: 0.2, roughness: 0.9 }),
+  // 引脚
+  pin: new THREE.MeshStandardMaterial({ color: PIN_CONFIG.pinColor, metalness: PIN_CONFIG.pinMetalness, roughness: PIN_CONFIG.pinRoughness }),
+  // 电路纹理
+  circuitTrace: new THREE.MeshStandardMaterial({ color: CIRCUIT_TRACE_CONFIG.traceColor, metalness: 0.2, roughness: 0.8 }),
+}
+
+const sharedGeometries = {
+  // 过孔几何体
+  via: new THREE.CylinderGeometry(0.003, 0.003, 0.001, 6),
+  // 安装孔几何体
+  mountHole: new THREE.CircleGeometry(0.01, 16),
+  // LED圆形
+  ledSmall: new THREE.CircleGeometry(0.006, 16),
+  ledMedium: new THREE.CircleGeometry(0.008, 16),
+  ledLarge: new THREE.CircleGeometry(0.006, 12),
+  // Switch端口
+  portOuter: new THREE.BoxGeometry(0.022, 0.018, 0.001),
+  portInner: new THREE.BoxGeometry(0.018, 0.014, 0.001),
+  portLed: new THREE.CircleGeometry(0.003, 8),
+  // 机柜支脚
+  rackFoot: new THREE.CylinderGeometry(0.02, 0.025, 0.04, 8),
+  // 地面
+  groundPlane: new THREE.PlaneGeometry(50, 50),
+}
+
+// 共享的基础材质（不带动态参数）
+const sharedBasicMaterials = {
+  // LED颜色
+  ledGreen: new THREE.MeshBasicMaterial({ color: '#52c41a' }),
+  ledGreenBright: new THREE.MeshBasicMaterial({ color: '#7fff7f' }),
+  ledOrange: new THREE.MeshBasicMaterial({ color: '#ffa500' }),
+  ledYellow: new THREE.MeshBasicMaterial({ color: '#ffff7f' }),
+  // Switch端口
+  portFrame: new THREE.MeshBasicMaterial({ color: '#1a1a1a' }),
+  portInner: new THREE.MeshBasicMaterial({ color: '#0a0a0a' }),
+  portLedActive: new THREE.MeshBasicMaterial({ color: '#00ff88' }),
+  portLedInactive: new THREE.MeshBasicMaterial({ color: '#333' }),
+  // 机柜
+  rackBackPanel: new THREE.MeshStandardMaterial({ color: '#2a2a2a', metalness: 0.3, roughness: 0.7 }),
+  rackFoot: new THREE.MeshStandardMaterial({ color: '#333333', metalness: 0.5, roughness: 0.5 }),
+  // 地面
+  ground: new THREE.MeshStandardMaterial({ color: '#e8e8e8' }),
+}
 
 // ============================================
 // 动画工具函数
@@ -47,9 +109,84 @@ function easeInOutCubic(t: number): number {
     : 1 - Math.pow(-2 * t + 2, 3) / 2
 }
 
-// 线性插值
-function lerp(start: number, end: number, t: number): number {
-  return start + (end - start) * t
+// 向量近似相等比较（容差）
+function vectorNearlyEquals(a: THREE.Vector3, b: THREE.Vector3, tolerance: number = 0.01): boolean {
+  return Math.abs(a.x - b.x) < tolerance && Math.abs(a.y - b.y) < tolerance && Math.abs(a.z - b.z) < tolerance
+}
+
+// ============================================
+// 带动画的透明材质组件 (react-spring)
+// ============================================
+
+const AnimatedMeshStandardMaterial = animated.meshStandardMaterial
+
+interface FadingMaterialProps {
+  targetOpacity: number
+  color: string
+  metalness?: number
+  roughness?: number
+  emissive?: string
+  emissiveIntensity?: number
+  toneMapped?: boolean
+  side?: THREE.Side
+}
+
+const FadingMaterial: React.FC<FadingMaterialProps> = ({
+  targetOpacity,
+  color,
+  metalness = 0.5,
+  roughness = 0.5,
+  emissive,
+  emissiveIntensity = 0,
+  toneMapped = true,
+  side = THREE.FrontSide,
+}) => {
+  const { opacity } = useSpring({
+    from: { opacity: 0 },  // 从透明开始，确保淡入效果
+    to: { opacity: targetOpacity },
+    config: { tension: 120, friction: 20 }
+  })
+
+  return (
+    <AnimatedMeshStandardMaterial
+      transparent
+      opacity={opacity}
+      color={color}
+      metalness={metalness}
+      roughness={roughness}
+      emissive={emissive}
+      emissiveIntensity={emissiveIntensity}
+      toneMapped={toneMapped}
+      side={side}
+    />
+  )
+}
+
+// 带动画的 meshBasicMaterial
+const AnimatedMeshBasicMaterial = animated.meshBasicMaterial
+
+interface FadingBasicMaterialProps {
+  targetOpacity: number
+  color: string
+}
+
+const FadingBasicMaterial: React.FC<FadingBasicMaterialProps> = ({
+  targetOpacity,
+  color,
+}) => {
+  const { opacity } = useSpring({
+    from: { opacity: 0 },  // 从透明开始，确保淡入效果
+    to: { opacity: targetOpacity },
+    config: { tension: 120, friction: 20 }
+  })
+
+  return (
+    <AnimatedMeshBasicMaterial
+      transparent
+      opacity={opacity}
+      color={color}
+    />
+  )
 }
 
 // ============================================
@@ -145,13 +282,8 @@ const InstancedPins: React.FC<{
   ] as [number, number, number] : [0.006, 0.006, 0.004] as [number, number, number]
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, actualTotalPins]} castShadow>
+    <instancedMesh ref={meshRef} args={[undefined, undefined, actualTotalPins]} castShadow material={sharedMaterials.pin}>
       <boxGeometry args={pinDimensions} />
-      <meshStandardMaterial
-        color={PIN_CONFIG.pinColor}
-        metalness={PIN_CONFIG.pinMetalness}
-        roughness={PIN_CONFIG.pinRoughness}
-      />
     </instancedMesh>
   )
 }
@@ -241,14 +373,12 @@ const InstancedCircuitTraces: React.FC<{
   return (
     <>
       {/* 水平纹理 */}
-      <instancedMesh ref={hMeshRef} args={[undefined, undefined, totalHTraces]}>
+      <instancedMesh ref={hMeshRef} args={[undefined, undefined, totalHTraces]} material={sharedMaterials.circuitTrace}>
         <boxGeometry args={[hTraceWidth, CIRCUIT_TRACE_CONFIG.traceHeight, CIRCUIT_TRACE_CONFIG.traceWidth]} />
-        <meshStandardMaterial color={CIRCUIT_TRACE_CONFIG.traceColor} metalness={0.2} roughness={0.8} />
       </instancedMesh>
       {/* 垂直纹理 */}
-      <instancedMesh ref={vMeshRef} args={[undefined, undefined, totalVTraces]}>
+      <instancedMesh ref={vMeshRef} args={[undefined, undefined, totalVTraces]} material={sharedMaterials.circuitTrace}>
         <boxGeometry args={[CIRCUIT_TRACE_CONFIG.traceWidth, CIRCUIT_TRACE_CONFIG.traceHeight, vTraceDepth]} />
-        <meshStandardMaterial color={CIRCUIT_TRACE_CONFIG.traceColor} metalness={0.2} roughness={0.8} />
       </instancedMesh>
     </>
   )
@@ -289,26 +419,34 @@ const CameraController: React.FC<{
   // 记录上一次的 visible 状态
   const lastVisible = useRef(visible)
 
+  // 持续追踪 OrbitControls 的 target（因为卸载时 ref 可能已失效）
+  // 初始化为目标 lookAt，确保即使 useFrame 没来得及更新也有正确的值
+  const lastKnownTarget = useRef(target.lookAt.clone())
+
+  useFrame(() => {
+    // 每帧更新已知的 target 位置
+    if (controlsRef.current) {
+      lastKnownTarget.current.copy(controlsRef.current.target)
+    }
+  })
+
+  // 当 target.lookAt 变化时，同步更新 lastKnownTarget（作为后备）
+  useEffect(() => {
+    lastKnownTarget.current.copy(target.lookAt)
+  }, [target.lookAt.x, target.lookAt.y, target.lookAt.z])
+
   // 组件卸载时保存相机状态到模块级变量
   useEffect(() => {
     return () => {
-      if (controlsRef.current) {
-        lastCameraState = {
-          position: camera.position.clone(),
-          lookAt: controlsRef.current.target.clone()
-        }
-      } else {
-        lastCameraState = {
-          position: camera.position.clone(),
-          lookAt: new THREE.Vector3(0, 0, 0)
-        }
+      lastCameraState = {
+        position: camera.position.clone(),
+        lookAt: lastKnownTarget.current.clone()
       }
     }
   }, [camera])
 
   // 目标变化或 resetTrigger 变化时启动动画
   useEffect(() => {
-    // 检查是否刚从隐藏变为可见
     const justBecameVisible = visible && !lastVisible.current
     lastVisible.current = visible
 
@@ -316,27 +454,35 @@ const CameraController: React.FC<{
     if (isFirstRender.current) {
       isFirstRender.current = false
 
-      // 如果有上次保存的相机状态，从该位置动画到目标位置
       if (lastCameraState) {
-        // 设置相机到上次保存的位置
-        camera.position.copy(lastCameraState.position)
-        startPosition.current.copy(lastCameraState.position)
-        startTarget.current.copy(lastCameraState.lookAt)
+        const positionNearlyEqual = vectorNearlyEquals(lastCameraState.position, target.position)
 
-        // 启动动画到目标位置
+        // 同一层级的视图切换，直接设置到目标位置
+        if (positionNearlyEqual) {
+          camera.position.copy(target.position)
+          if (controlsRef.current) {
+            controlsRef.current.target.copy(target.lookAt)
+            controlsRef.current.update()
+          } else {
+            needsInitialTarget.current = true
+          }
+          lastTarget.current = { position: target.position.clone(), lookAt: target.lookAt.clone() }
+          return
+        }
+
+        // 层级切换，从当前位置和观察目标启动动画（避免跳动）
+        startPosition.current.copy(camera.position)
+        startTarget.current.copy(lastKnownTarget.current)  // 使用当前实际的观察目标
         actualDuration.current = baseDuration
         progress.current = 0
         isAnimating.current = true
-        lastTarget.current = {
-          position: target.position.clone(),
-          lookAt: target.lookAt.clone()
-        }
+        lastTarget.current = { position: target.position.clone(), lookAt: target.lookAt.clone() }
         pendingCallback.current = onAnimationComplete || null
-        needsInitialTarget.current = true  // 需要在下一帧设置 OrbitControls target
+        // 不设置 needsInitialTarget，避免跳动
         return
       }
 
-      // 没有上次保存的状态，直接设置到目标位置
+      // 无上次状态，直接设置到目标位置
       camera.position.copy(target.position)
       if (controlsRef.current) {
         controlsRef.current.target.copy(target.lookAt)
@@ -344,39 +490,30 @@ const CameraController: React.FC<{
       } else {
         needsInitialTarget.current = true
       }
-      lastTarget.current = {
-        position: target.position.clone(),
-        lookAt: target.lookAt.clone()
-      }
+      lastTarget.current = { position: target.position.clone(), lookAt: target.lookAt.clone() }
       return
     }
 
-    // 不可见时直接设置位置，不执行动画
+    // 不可见时直接设置位置
     if (!visible) {
       camera.position.copy(target.position)
       if (controlsRef.current) {
         controlsRef.current.target.copy(target.lookAt)
         controlsRef.current.update()
       }
-      lastTarget.current = {
-        position: target.position.clone(),
-        lookAt: target.lookAt.clone()
-      }
+      lastTarget.current = { position: target.position.clone(), lookAt: target.lookAt.clone() }
       isAnimating.current = false
       return
     }
 
-    // 刚变为可见时，直接设置位置，不执行动画
+    // 刚变为可见时，直接设置位置
     if (justBecameVisible) {
       camera.position.copy(target.position)
       if (controlsRef.current) {
         controlsRef.current.target.copy(target.lookAt)
         controlsRef.current.update()
       }
-      lastTarget.current = {
-        position: target.position.clone(),
-        lookAt: target.lookAt.clone()
-      }
+      lastTarget.current = { position: target.position.clone(), lookAt: target.lookAt.clone() }
       return
     }
 
@@ -384,30 +521,24 @@ const CameraController: React.FC<{
     const isForceReset = resetTrigger !== lastResetTrigger.current
     lastResetTrigger.current = resetTrigger
 
-    // 检查目标是否真的变化了（非强制重置时）
+    // 目标未变化时跳过
     if (!isForceReset && lastTarget.current &&
         lastTarget.current.position.equals(target.position) &&
         lastTarget.current.lookAt.equals(target.lookAt)) {
       return
     }
 
-    // 记录起始位置（从当前相机实际位置开始）
+    // 启动动画
     startPosition.current.copy(camera.position)
     if (controlsRef.current) {
       startTarget.current.copy(controlsRef.current.target)
     } else {
       startTarget.current.set(0, 0, 0)
     }
-
-    // 使用固定动画时长
     actualDuration.current = baseDuration
-
     progress.current = 0
     isAnimating.current = true
-    lastTarget.current = {
-      position: target.position.clone(),
-      lookAt: target.lookAt.clone()
-    }
+    lastTarget.current = { position: target.position.clone(), lookAt: target.lookAt.clone() }
     pendingCallback.current = onAnimationComplete || null
   }, [target.position.x, target.position.y, target.position.z,
       target.lookAt.x, target.lookAt.y, target.lookAt.z, camera, onAnimationComplete, resetTrigger, baseDuration, visible])
@@ -416,12 +547,12 @@ const CameraController: React.FC<{
   useFrame((_, delta) => {
     // 处理首次渲染时 OrbitControls 未挂载的延迟初始化
     if (needsInitialTarget.current && controlsRef.current) {
-      // 如果正在动画中，设置为起始观察点（会在下面被动画更新）
-      // 如果没有动画，设置为目标观察点
       if (isAnimating.current) {
         controlsRef.current.target.copy(startTarget.current)
       } else if (lastTarget.current) {
         controlsRef.current.target.copy(lastTarget.current.lookAt)
+      } else {
+        controlsRef.current.target.copy(target.lookAt)
       }
       controlsRef.current.update()
       needsInitialTarget.current = false
@@ -453,6 +584,7 @@ const CameraController: React.FC<{
   return (
     <OrbitControls
       ref={controlsRef}
+      // 不设置 target prop，由动画完全控制，避免 props 变化时的跳动
       enabled={enabled && !isAnimating.current}
       enablePan={true}
       enableZoom={true}
@@ -633,16 +765,51 @@ const BoardModel: React.FC<{
   board: BoardConfig
   showChips?: boolean
   interactive?: boolean  // 是否可以交互（高亮和点击）
-  opacity?: number  // 透明度
+  targetOpacity?: number  // 目标透明度（会动画过渡）
   lodLevel?: LODLevel  // LOD 级别
   onDoubleClick?: () => void
   onClick?: () => void  // 单击显示详情
   onChipClick?: (chip: ChipConfig) => void  // 芯片点击
-}> = ({ board, showChips = false, interactive = true, opacity = 1.0, lodLevel = 'high', onDoubleClick, onClick, onChipClick }) => {
+}> = ({ board, showChips = false, interactive = true, targetOpacity = 1.0, lodLevel = 'high', onDoubleClick, onClick, onChipClick }) => {
   const groupRef = useRef<THREE.Group>(null)
   const hoveredRef = useRef(false)
   const [, forceRender] = useState(0)
   const canHover = interactive  // 可交互时才能高亮
+
+  // 跟踪是否应该渲染（动画完成后才隐藏）
+  const [shouldRender, setShouldRender] = useState(targetOpacity > 0.01)
+
+  useEffect(() => {
+    if (targetOpacity > 0.01) {
+      setShouldRender(true)
+    }
+  }, [targetOpacity])
+
+  // 计算所有芯片的位置数据（供 InstancedMesh 使用）- 必须在 early return 之前
+  const chipPinData = useMemo((): ChipPinData[] => {
+    if (!showChips) return []
+    return board.chips.map(chip => {
+      const { x, y, z, dimensions } = getChipPosition(chip, board.chips.length, 0.004)
+      return {
+        position: new THREE.Vector3(x, y, z),
+        dimensions
+      }
+    })
+  }, [board.chips, showChips])
+
+  // 使用 spring 监听动画完成
+  useSpring({
+    opacity: targetOpacity,
+    config: { tension: 120, friction: 20 },
+    onRest: () => {
+      if (targetOpacity < 0.01) {
+        setShouldRender(false)
+      }
+    }
+  })
+
+  // 动画完成后才真正隐藏
+  if (!shouldRender) return null
 
   // 根据U高度获取颜色方案
   const uHeight = board.u_height
@@ -663,18 +830,6 @@ const BoardModel: React.FC<{
   const glowIntensity = isHighlighted ? 0.3 : 0
   const scale = isHighlighted ? 1.01 : 1.0
 
-  // 计算所有芯片的位置数据（供 InstancedMesh 使用）
-  const chipPinData = useMemo((): ChipPinData[] => {
-    if (!showChips) return []
-    return board.chips.map(chip => {
-      const { x, y, z, dimensions } = getChipPosition(chip, board.chips.length, 0.004)
-      return {
-        position: new THREE.Vector3(x, y, z),
-        dimensions
-      }
-    })
-  }, [board.chips, showChips])
-
   return (
     <group>
       {showChips ? (
@@ -682,19 +837,16 @@ const BoardModel: React.FC<{
         <>
           {/* PCB基板 - 多层结构 */}
           {/* 底层 - FR4基材 */}
-          <mesh position={[0, -0.002, 0]} castShadow receiveShadow>
+          <mesh position={[0, -0.002, 0]} castShadow receiveShadow material={sharedMaterials.pcbBase}>
             <boxGeometry args={[width, 0.004, depth]} />
-            <meshStandardMaterial color="#1a4d2e" metalness={0.1} roughness={0.9} />
           </mesh>
           {/* 中间层 - 主PCB */}
-          <mesh position={[0, 0.001, 0]} castShadow receiveShadow>
+          <mesh position={[0, 0.001, 0]} castShadow receiveShadow material={sharedMaterials.pcbMiddle}>
             <boxGeometry args={[width - 0.002, 0.004, depth - 0.002]} />
-            <meshStandardMaterial color="#0f3d1f" metalness={0.15} roughness={0.85} />
           </mesh>
           {/* 顶层 - 阻焊层(绿油) */}
-          <mesh position={[0, 0.0035, 0]}>
+          <mesh position={[0, 0.0035, 0]} material={sharedMaterials.pcbTop}>
             <boxGeometry args={[width - 0.004, 0.001, depth - 0.004]} />
-            <meshStandardMaterial color="#0a2f18" metalness={0.1} roughness={0.7} />
           </mesh>
 
           {/* 铜走线 - 仅在高细节模式下显示 */}
@@ -705,9 +857,8 @@ const BoardModel: React.FC<{
                 const zPos = -depth / 2 + 0.05 + i * (depth / 7)
                 const lineWidth = i % 2 === 0 ? 0.004 : 0.002
                 return (
-                  <mesh key={`trace-h-${i}`} position={[0, 0.0042, zPos]}>
+                  <mesh key={`trace-h-${i}`} position={[0, 0.0042, zPos]} material={sharedMaterials.copperTrace}>
                     <boxGeometry args={[width - 0.06, 0.0008, lineWidth]} />
-                    <meshStandardMaterial color="#c9a227" metalness={0.6} roughness={0.4} />
                   </mesh>
                 )
               })}
@@ -716,9 +867,8 @@ const BoardModel: React.FC<{
                 const xPos = -width / 2 + 0.06 + i * (width / 6)
                 const lineWidth = i % 2 === 0 ? 0.003 : 0.0015
                 return (
-                  <mesh key={`trace-v-${i}`} position={[xPos, 0.0042, 0]}>
+                  <mesh key={`trace-v-${i}`} position={[xPos, 0.0042, 0]} material={sharedMaterials.copperTrace}>
                     <boxGeometry args={[lineWidth, 0.0008, depth - 0.06]} />
-                    <meshStandardMaterial color="#c9a227" metalness={0.6} roughness={0.4} />
                   </mesh>
                 )
               })}
@@ -730,27 +880,20 @@ const BoardModel: React.FC<{
             const viaX = (Math.sin(i * 2.5) * 0.35) * width / 2
             const viaZ = (Math.cos(i * 3.1) * 0.35) * depth / 2
             return (
-              <mesh key={`via-${i}`} position={[viaX, 0.0043, viaZ]} rotation={[-Math.PI / 2, 0, 0]}>
-                <cylinderGeometry args={[0.003, 0.003, 0.001, 6]} />
-                <meshStandardMaterial color="#b8860b" metalness={0.7} roughness={0.3} />
-              </mesh>
+              <mesh key={`via-${i}`} position={[viaX, 0.0043, viaZ]} rotation={[-Math.PI / 2, 0, 0]} geometry={sharedGeometries.via} material={sharedMaterials.via} />
             )
           })}
 
           {/* 边缘金手指接口 - 中等及以上细节 */}
           {lodLevel !== 'low' && (
-            <mesh position={[0, 0, -depth / 2 + 0.012]}>
+            <mesh position={[0, 0, -depth / 2 + 0.012]} material={sharedMaterials.goldFinger}>
               <boxGeometry args={[width * 0.6, 0.005, 0.018]} />
-              <meshStandardMaterial color="#b8923a" metalness={0.3} roughness={0.7} />
             </mesh>
           )}
 
           {/* 安装孔 - 仅在高细节模式下显示 */}
           {lodLevel === 'high' && [[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([dx, dz], i) => (
-            <mesh key={`mount-${i}`} position={[dx * (width / 2 - 0.025), 0.0042, dz * (depth / 2 - 0.025)]} rotation={[-Math.PI / 2, 0, 0]}>
-              <circleGeometry args={[0.01, 16]} />
-              <meshStandardMaterial color="#8a7040" metalness={0.2} roughness={0.8} />
-            </mesh>
+            <mesh key={`mount-${i}`} position={[dx * (width / 2 - 0.025), 0.0042, dz * (depth / 2 - 0.025)]} rotation={[-Math.PI / 2, 0, 0]} geometry={sharedGeometries.mountHole} material={sharedMaterials.mountHole} />
           ))}
 
           {/* 使用 InstancedMesh 批量渲染引脚 */}
@@ -821,65 +964,60 @@ const BoardModel: React.FC<{
                 hoveredRef.current = false
                 forceRender(n => n + 1)
               } : undefined}
-              castShadow={opacity > 0.5}
-              receiveShadow={opacity > 0.5}
+              castShadow={targetOpacity > 0.5}
+              receiveShadow={targetOpacity > 0.5}
             >
               <boxGeometry args={[width, height, depth]} />
-              <meshStandardMaterial
+              <FadingMaterial
+                targetOpacity={targetOpacity}
                 color={highlightColor}
                 emissive={colorScheme.accent}
                 emissiveIntensity={glowIntensity}
                 metalness={0.7}
                 roughness={0.3}
-                transparent={opacity < 1}
-                opacity={opacity}
               />
             </mesh>
 
             {/* 前面板 - 带有指示灯效果 */}
             <mesh position={[0, 0, depth / 2 + 0.001]}>
               <boxGeometry args={[width - 0.02, height - 0.005, 0.002]} />
-              <meshStandardMaterial
+              <FadingMaterial
+                targetOpacity={targetOpacity}
                 color={frontHighlightColor}
                 emissive={colorScheme.accent}
                 emissiveIntensity={glowIntensity}
                 metalness={0.5}
                 roughness={0.5}
-                transparent={opacity < 1}
-                opacity={opacity}
               />
             </mesh>
 
             {/* U高度标识条 - 左侧彩色条纹，高亮时更亮 */}
             <mesh position={[-width / 2 + 0.008, 0, depth / 2 + 0.002]}>
               <boxGeometry args={[isHighlighted ? 0.016 : 0.012, height - 0.01, 0.001]} />
-              <meshBasicMaterial
+              <FadingBasicMaterial
+                targetOpacity={targetOpacity}
                 color={isHighlighted ? '#ffffff' : colorScheme.accent}
-                transparent={opacity < 1}
-                opacity={opacity}
               />
             </mesh>
 
             {/* LED指示灯 - 高亮时更亮 */}
             <mesh position={[-width / 2 + 0.03, height / 2 - 0.015, depth / 2 + 0.003]}>
               <circleGeometry args={[isHighlighted ? 0.008 : 0.006, 16]} />
-              <meshBasicMaterial
+              <FadingBasicMaterial
+                targetOpacity={targetOpacity}
                 color={isHighlighted ? '#7fff7f' : '#52c41a'}
-                transparent={opacity < 1}
-                opacity={opacity}
               />
             </mesh>
             <mesh position={[-width / 2 + 0.045, height / 2 - 0.015, depth / 2 + 0.003]}>
               <circleGeometry args={[isHighlighted ? 0.008 : 0.006, 16]} />
-              <meshBasicMaterial
+              <FadingBasicMaterial
+                targetOpacity={targetOpacity}
                 color={isHighlighted ? '#ffffff' : colorScheme.accent}
-                transparent={opacity < 1}
-                opacity={opacity}
               />
             </mesh>
 
-            {/* 板卡标签 - 只在可交互时显示（聚焦到Rack层级或更深） */}
-            {interactive && (
+            {/* 板卡标签 - 只在可交互时显示（聚焦到Rack层级或更深），透明度低时隐藏 */}
+            {interactive && targetOpacity > 0.3 && (
               <Text
                 position={[0, 0, depth / 2 + 0.015]}
                 fontSize={0.035}
@@ -890,7 +1028,6 @@ const BoardModel: React.FC<{
                 outlineColor="#000000"
                 renderOrder={1}
                 material-depthTest={false}
-                fillOpacity={opacity}
               >
                 {board.label}
               </Text>
@@ -905,10 +1042,33 @@ const BoardModel: React.FC<{
 // Switch模型 - 网络交换机，与服务器尺寸一致
 const SwitchModel: React.FC<{
   switchData: SwitchInstance
-  opacity?: number
+  targetOpacity?: number  // 目标透明度（会动画过渡）
   onClick?: () => void
-}> = ({ switchData, opacity = 1.0, onClick }) => {
+}> = ({ switchData, targetOpacity = 1.0, onClick }) => {
   const [hovered, setHovered] = useState(false)
+
+  // 跟踪是否应该渲染（动画完成后才隐藏）
+  const [shouldRender, setShouldRender] = useState(targetOpacity > 0.01)
+
+  useEffect(() => {
+    if (targetOpacity > 0.01) {
+      setShouldRender(true)
+    }
+  }, [targetOpacity])
+
+  // 使用 spring 监听动画完成
+  useSpring({
+    opacity: targetOpacity,
+    config: { tension: 120, friction: 20 },
+    onRest: () => {
+      if (targetOpacity < 0.01) {
+        setShouldRender(false)
+      }
+    }
+  })
+
+  // 动画完成后才真正隐藏
+  if (!shouldRender) return null
 
   // 根据U高度计算实际3D尺寸 - 与BoardModel保持一致
   const { uHeight: uSize } = RACK_DIMENSIONS
@@ -948,42 +1108,39 @@ const SwitchModel: React.FC<{
           e.stopPropagation()
           setHovered(false)
         }}
-        castShadow={opacity > 0.5}
-        receiveShadow={opacity > 0.5}
+        castShadow={targetOpacity > 0.5}
+        receiveShadow={targetOpacity > 0.5}
       >
         <boxGeometry args={[width, height, depth]} />
-        <meshStandardMaterial
+        <FadingMaterial
+          targetOpacity={targetOpacity}
           color={isHighlighted ? shellColorHover : shellColor}
           emissive={accentColor}
           emissiveIntensity={glowIntensity}
           metalness={0.8}
           roughness={0.2}
-          transparent={opacity < 1}
-          opacity={opacity}
         />
       </mesh>
 
       {/* 前面板 - 更深的颜色 */}
       <mesh position={[0, 0, depth / 2 + 0.001]}>
         <boxGeometry args={[width - 0.02, height - 0.005, 0.002]} />
-        <meshStandardMaterial
+        <FadingMaterial
+          targetOpacity={targetOpacity}
           color={frontPanelColor}
           emissive={accentColor}
           emissiveIntensity={glowIntensity * 0.3}
           metalness={0.6}
           roughness={0.4}
-          transparent={opacity < 1}
-          opacity={opacity}
         />
       </mesh>
 
       {/* 左侧青蓝色标识条 - Switch特有标识，更宽更亮 */}
       <mesh position={[-width / 2 + 0.01, 0, depth / 2 + 0.002]}>
         <boxGeometry args={[isHighlighted ? 0.02 : 0.016, height - 0.008, 0.001]} />
-        <meshBasicMaterial
+        <FadingBasicMaterial
+          targetOpacity={targetOpacity}
           color={isHighlighted ? '#ffffff' : accentColor}
-          transparent={opacity < 1}
-          opacity={opacity}
         />
       </mesh>
 
@@ -998,22 +1155,18 @@ const SwitchModel: React.FC<{
               return (
                 <group key={`port-${rowIdx}-${portIdx}`}>
                   {/* 端口外框 */}
-                  <mesh position={[portX, rowY, depth / 2 + 0.002]}>
-                    <boxGeometry args={[0.022, 0.018, 0.001]} />
-                    <meshBasicMaterial color="#1a1a1a" transparent={opacity < 1} opacity={opacity} />
+                  <mesh position={[portX, rowY, depth / 2 + 0.002]} geometry={sharedGeometries.portOuter}>
+                    <FadingBasicMaterial targetOpacity={targetOpacity} color="#1a1a1a" />
                   </mesh>
                   {/* 端口内部 */}
-                  <mesh position={[portX, rowY, depth / 2 + 0.0025]}>
-                    <boxGeometry args={[0.018, 0.014, 0.001]} />
-                    <meshBasicMaterial color="#0a0a0a" transparent={opacity < 1} opacity={opacity} />
+                  <mesh position={[portX, rowY, depth / 2 + 0.0025]} geometry={sharedGeometries.portInner}>
+                    <FadingBasicMaterial targetOpacity={targetOpacity} color="#0a0a0a" />
                   </mesh>
                   {/* 端口LED - 在端口上方 */}
-                  <mesh position={[portX, rowY + 0.012, depth / 2 + 0.003]}>
-                    <circleGeometry args={[0.003, 8]} />
-                    <meshBasicMaterial
+                  <mesh position={[portX, rowY + 0.012, depth / 2 + 0.003]} geometry={sharedGeometries.portLed}>
+                    <FadingBasicMaterial
+                      targetOpacity={targetOpacity}
                       color={isActive ? (isHighlighted ? '#7fff7f' : '#00ff88') : '#333'}
-                      transparent={opacity < 1}
-                      opacity={opacity}
                     />
                   </mesh>
                 </group>
@@ -1026,30 +1179,24 @@ const SwitchModel: React.FC<{
       {/* 右侧状态LED区域 */}
       <group>
         {/* 电源LED */}
-        <mesh position={[width / 2 - 0.025, height / 2 - 0.015, depth / 2 + 0.003]}>
-          <circleGeometry args={[0.006, 12]} />
-          <meshBasicMaterial
+        <mesh position={[width / 2 - 0.025, height / 2 - 0.015, depth / 2 + 0.003]} geometry={sharedGeometries.ledLarge}>
+          <FadingBasicMaterial
+            targetOpacity={targetOpacity}
             color={isHighlighted ? '#7fff7f' : '#00ff88'}
-            transparent={opacity < 1}
-            opacity={opacity}
           />
         </mesh>
         {/* 状态LED */}
-        <mesh position={[width / 2 - 0.04, height / 2 - 0.015, depth / 2 + 0.003]}>
-          <circleGeometry args={[0.006, 12]} />
-          <meshBasicMaterial
+        <mesh position={[width / 2 - 0.04, height / 2 - 0.015, depth / 2 + 0.003]} geometry={sharedGeometries.ledLarge}>
+          <FadingBasicMaterial
+            targetOpacity={targetOpacity}
             color={isHighlighted ? '#ffffff' : accentColor}
-            transparent={opacity < 1}
-            opacity={opacity}
           />
         </mesh>
         {/* 活动LED */}
-        <mesh position={[width / 2 - 0.055, height / 2 - 0.015, depth / 2 + 0.003]}>
-          <circleGeometry args={[0.006, 12]} />
-          <meshBasicMaterial
+        <mesh position={[width / 2 - 0.055, height / 2 - 0.015, depth / 2 + 0.003]} geometry={sharedGeometries.ledLarge}>
+          <FadingBasicMaterial
+            targetOpacity={targetOpacity}
             color={isHighlighted ? '#ffff7f' : '#ffa500'}
-            transparent={opacity < 1}
-            opacity={opacity}
           />
         </mesh>
       </group>
@@ -1060,7 +1207,7 @@ const SwitchModel: React.FC<{
           {Array.from({ length: 6 }).map((_, i) => (
             <mesh key={`vent-${i}`} position={[width / 2 - 0.08 - i * 0.012, 0, 0]}>
               <boxGeometry args={[0.008, 0.004, 0.001]} />
-              <meshBasicMaterial color="#0a0a0a" transparent={opacity < 1} opacity={opacity} />
+              <FadingBasicMaterial targetOpacity={targetOpacity} color="#0a0a0a" />
             </mesh>
           ))}
         </group>
@@ -1127,6 +1274,225 @@ const PodLabel: React.FC<{
 
 
 // ============================================
+// 带动画的 Rack 渲染组件
+// ============================================
+
+interface AnimatedRackProps {
+  rack: RackConfig
+  position: [number, number, number]
+  targetOpacity: number
+  isHighlighted: boolean
+  rackWidth: number
+  rackHeight: number
+  rackDepth: number
+  focusLevel: number
+  podId: string
+  onNavigateToPod: (podId: string) => void
+  onNavigateToRack: (podId: string, rackId: string) => void
+  onNodeClick?: (nodeType: 'rack', nodeId: string, label: string, info: Record<string, string | number>) => void
+  onHoverChange: (hovered: boolean) => void
+}
+
+const AnimatedRack: React.FC<AnimatedRackProps> = ({
+  rack,
+  position,
+  targetOpacity,
+  isHighlighted,
+  rackWidth,
+  rackHeight,
+  rackDepth,
+  focusLevel,
+  podId,
+  onNavigateToPod,
+  onNavigateToRack,
+  onNodeClick,
+  onHoverChange,
+}) => {
+  // 跟踪是否应该渲染（动画完成后才隐藏）
+  const [shouldRender, setShouldRender] = useState(targetOpacity > 0.01)
+
+  // 当目标透明度变化时更新渲染状态
+  useEffect(() => {
+    if (targetOpacity > 0.01) {
+      setShouldRender(true)
+    }
+  }, [targetOpacity])
+
+  // 使用 spring 监听动画完成
+  useSpring({
+    opacity: targetOpacity,
+    config: { tension: 120, friction: 20 },
+    onRest: () => {
+      if (targetOpacity < 0.01) {
+        setShouldRender(false)
+      }
+    }
+  })
+
+  // 高亮效果参数 - 使用低饱和度高级灰蓝色调
+  const rackFrameColor = isHighlighted ? '#2d3748' : '#1a1a1a'
+  const rackPillarColor = isHighlighted ? '#3d4758' : '#333333'
+  const rackGlowColor = '#4a6080'  // 深灰蓝色
+  // emissiveIntensity > 1 配合 toneMapped={false} 触发 Bloom 效果
+  const rackGlowIntensity = isHighlighted ? 1.8 : 0
+  const rackScale = isHighlighted ? 1.01 : 1.0
+
+  // 动画完成后才真正隐藏
+  if (!shouldRender) return null
+
+  return (
+    <group position={position} scale={rackScale}>
+      {/* 机柜框架 */}
+      <group>
+        {/* 机柜底座 */}
+        <mesh position={[0, -rackHeight / 2 - 0.02, 0]} receiveShadow>
+          <boxGeometry args={[rackWidth + 0.04, 0.04, rackDepth + 0.04]} />
+          <FadingMaterial
+            targetOpacity={targetOpacity}
+            color={rackFrameColor}
+            emissive={rackGlowColor}
+            emissiveIntensity={rackGlowIntensity}
+            toneMapped={false}
+            metalness={0.6}
+            roughness={0.3}
+          />
+        </mesh>
+
+        {/* 机柜顶部 */}
+        <mesh position={[0, rackHeight / 2 + 0.02, 0]} castShadow={targetOpacity > 0.5}>
+          <boxGeometry args={[rackWidth + 0.04, 0.04, rackDepth + 0.04]} />
+          <FadingMaterial
+            targetOpacity={targetOpacity}
+            color={rackFrameColor}
+            emissive={rackGlowColor}
+            emissiveIntensity={rackGlowIntensity}
+            toneMapped={false}
+            metalness={0.6}
+            roughness={0.3}
+          />
+        </mesh>
+
+        {/* 四个垂直立柱 */}
+        {[
+          [-rackWidth / 2, 0, -rackDepth / 2],
+          [rackWidth / 2, 0, -rackDepth / 2],
+          [-rackWidth / 2, 0, rackDepth / 2],
+          [rackWidth / 2, 0, rackDepth / 2],
+        ].map((pos, i) => (
+          <mesh key={`pillar-${i}`} position={pos as [number, number, number]} castShadow={targetOpacity > 0.5}>
+            <boxGeometry args={[0.02, rackHeight, 0.02]} />
+            <FadingMaterial
+              targetOpacity={targetOpacity}
+              color={rackPillarColor}
+              emissive={rackGlowColor}
+              emissiveIntensity={rackGlowIntensity}
+              toneMapped={false}
+              metalness={0.5}
+              roughness={0.4}
+            />
+          </mesh>
+        ))}
+
+        {/* 后面板 */}
+        <mesh position={[0, 0, -rackDepth / 2 + 0.005]} receiveShadow>
+          <boxGeometry args={[rackWidth - 0.04, rackHeight, 0.01]} />
+          <FadingMaterial
+            targetOpacity={targetOpacity * 0.7}
+            color="#2a2a2a"
+            metalness={0.3}
+            roughness={0.7}
+          />
+        </mesh>
+
+        {/* 左侧面板 */}
+        <mesh position={[-rackWidth / 2 + 0.005, 0, 0]}>
+          <boxGeometry args={[0.01, rackHeight, rackDepth - 0.04]} />
+          <FadingMaterial
+            targetOpacity={targetOpacity * 0.5}
+            color="#2a2a2a"
+            metalness={0.3}
+            roughness={0.7}
+          />
+        </mesh>
+
+        {/* 右侧面板 */}
+        <mesh position={[rackWidth / 2 - 0.005, 0, 0]}>
+          <boxGeometry args={[0.01, rackHeight, rackDepth - 0.04]} />
+          <FadingMaterial
+            targetOpacity={targetOpacity * 0.5}
+            color="#2a2a2a"
+            metalness={0.3}
+            roughness={0.7}
+          />
+        </mesh>
+
+        {/* 底部支脚 - 四个角落 */}
+        {[
+          [-rackWidth / 2 + 0.03, -rackHeight / 2 - 0.04, -rackDepth / 2 + 0.03],
+          [rackWidth / 2 - 0.03, -rackHeight / 2 - 0.04, -rackDepth / 2 + 0.03],
+          [-rackWidth / 2 + 0.03, -rackHeight / 2 - 0.04, rackDepth / 2 - 0.03],
+          [rackWidth / 2 - 0.03, -rackHeight / 2 - 0.04, rackDepth / 2 - 0.03],
+        ].map((pos, i) => (
+          <mesh key={`foot-${i}`} position={pos as [number, number, number]} geometry={sharedGeometries.rackFoot}>
+            <FadingMaterial
+              targetOpacity={targetOpacity}
+              color="#333333"
+              metalness={0.5}
+              roughness={0.5}
+            />
+          </mesh>
+        ))}
+
+        {/* 机柜标签 - 透明度低时隐藏 */}
+        {targetOpacity > 0.3 && (
+          <Text
+            position={[0, rackHeight / 2 + 0.12, 0.01]}
+            fontSize={0.2}
+            color="#ffffff"
+            anchorX="center"
+            anchorY="middle"
+            fontWeight="bold"
+            outlineWidth={0.01}
+            outlineColor="#000000"
+            material-depthTest={false}
+          >
+            {rack.label}
+          </Text>
+        )}
+
+        {/* 交互层 - 用于点击和双击，只在顶层和Pod层级有效 */}
+        {focusLevel <= 1 && (
+          <mesh
+            visible={false}
+            onClick={(e) => {
+              e.stopPropagation()
+              onNodeClick?.('rack', rack.id, rack.label, {
+                '位置': `(${rack.position[0]}, ${rack.position[1]})`,
+                '总U数': rack.total_u,
+                '板卡数': rack.boards.length
+              })
+            }}
+            onDoubleClick={() => {
+              if (focusLevel === 0) {
+                onNavigateToPod(podId)
+              } else if (focusLevel === 1) {
+                onNavigateToRack(podId, rack.id)
+              }
+            }}
+            onPointerOver={() => onHoverChange(true)}
+            onPointerOut={() => onHoverChange(false)}
+          >
+            <boxGeometry args={[rackWidth, rackHeight, rackDepth]} />
+            <meshBasicMaterial transparent opacity={0} />
+          </mesh>
+        )}
+      </group>
+    </group>
+  )
+}
+
+
+// ============================================
 // 统一场景组件 - 一次性渲染所有层级内容
 // ============================================
 
@@ -1134,66 +1500,6 @@ interface NodePositions {
   pods: Map<string, THREE.Vector3>      // Pod中心位置
   racks: Map<string, THREE.Vector3>     // Rack位置
   boards: Map<string, THREE.Vector3>    // Board世界坐标
-}
-
-// 透明度动画控制器组件 - 使用useFrame实现平滑过渡
-const OpacityAnimator: React.FC<{
-  targetOpacities: Map<string, number>
-  currentOpacities: React.MutableRefObject<Map<string, number>>
-  fadeInDuration?: number   // 淡入时长
-  fadeOutDuration?: number  // 淡出时长
-  skipAnimation?: boolean   // 跳过动画，直接设置目标值
-}> = ({ targetOpacities, currentOpacities, fadeInDuration = 0.8, fadeOutDuration = 0.3, skipAnimation = false }) => {
-  useFrame((_, delta) => {
-    targetOpacities.forEach((target, id) => {
-      const current = currentOpacities.current.get(id) ?? target
-      // 跳过动画时直接设置目标值
-      if (skipAnimation) {
-        currentOpacities.current.set(id, target)
-        return
-      }
-      if (Math.abs(current - target) > 0.001) {
-        // 淡出（目标为0）时速度快，淡入时速度慢
-        const duration = target < current ? fadeOutDuration : fadeInDuration
-        const speed = 1 / duration
-        const newValue = lerp(current, target, Math.min(delta * speed * 2.5, 1))
-        currentOpacities.current.set(id, newValue)
-      } else {
-        currentOpacities.current.set(id, target)
-      }
-    })
-  })
-  return null
-}
-
-// 触发React重渲染的组件 - 当透明度变化时触发更新
-const OpacityUpdateTrigger: React.FC<{
-  targetOpacities: Map<string, number>
-  currentOpacities: React.MutableRefObject<Map<string, number>>
-  onUpdate: () => void
-}> = ({ targetOpacities, currentOpacities, onUpdate }) => {
-  const lastUpdateRef = useRef(0)
-
-  useFrame(() => {
-    // 检查是否有任何透明度还在动画中
-    let hasAnimation = false
-    targetOpacities.forEach((target, id) => {
-      const current = currentOpacities.current.get(id) ?? target
-      if (Math.abs(current - target) > 0.001) {
-        hasAnimation = true
-      }
-    })
-
-    // 如果有动画，每隔一定时间触发一次重渲染
-    if (hasAnimation) {
-      const now = Date.now()
-      if (now - lastUpdateRef.current > 16) { // 约60fps
-        lastUpdateRef.current = now
-        onUpdate()
-      }
-    }
-  })
-  return null
 }
 
 const UnifiedScene: React.FC<{
@@ -1204,24 +1510,9 @@ const UnifiedScene: React.FC<{
   onNavigateToBoard: (boardId: string) => void
   onNodeClick?: (nodeType: 'pod' | 'rack' | 'board' | 'chip' | 'switch', nodeId: string, label: string, info: Record<string, string | number>, subType?: string) => void
   visible?: boolean  // 是否可见，隐藏时跳过动画
-}> = ({ topology, focusPath, onNavigateToPod, onNavigateToRack, onNavigateToBoard, onNodeClick, visible = true }) => {
+}> = ({ topology, focusPath, onNavigateToPod, onNavigateToRack, onNavigateToBoard, onNodeClick }) => {
   const [hoveredPodId, setHoveredPodId] = useState<string | null>(null)
   const [hoveredRackId, setHoveredRackId] = useState<string | null>(null)
-
-  // 透明度动画状态 - 存储当前渲染的透明度值
-  // 初始化时从上次保存的状态恢复
-  const currentOpacities = useRef<Map<string, number>>(
-    lastOpacityState ? new Map(lastOpacityState) : new Map()
-  )
-  // 用于触发重新渲染的状态
-  const [, forceUpdate] = useState(0)
-
-  // 组件卸载时保存透明度状态
-  useEffect(() => {
-    return () => {
-      lastOpacityState = new Map(currentOpacities.current)
-    }
-  }, [])
 
   const rackSpacingX = 1.5
   const rackSpacingZ = 2
@@ -1318,7 +1609,7 @@ const UnifiedScene: React.FC<{
 
 
   // 获取节点目标透明度 - 非聚焦内容完全隐藏
-  const getTargetOpacity = useCallback((nodeId: string, nodeType: 'pod' | 'rack' | 'board'): number => {
+  const getTargetOpacity = useCallback((nodeId: string, nodeType: 'pod' | 'rack' | 'board' | 'switch'): number => {
     if (focusPath.length === 0) return 1.0 // 顶层全显示
 
     if (nodeType === 'rack') {
@@ -1356,6 +1647,21 @@ const UnifiedScene: React.FC<{
         return focusPath[2] === nodeId ? 1.0 : 0
       }
     }
+    if (nodeType === 'switch') {
+      // Switch的nodeId格式为 `${rack.id}/switch`
+      const rackId = nodeId.replace('/switch', '')
+      if (focusPath.length === 1) {
+        // 聚焦Pod，显示该Pod下所有Rack的Switch
+        const pod = topology.pods.find(p => p.id === focusPath[0])
+        return pod?.racks.some(r => r.id === rackId) ? 1.0 : 0
+      }
+      if (focusPath.length === 2) {
+        // 聚焦Rack，只显示该Rack的Switch
+        return focusPath[1] === rackId ? 1.0 : 0
+      }
+      // Board层级及更深，隐藏所有Switch
+      return 0
+    }
     return 1.0
   }, [focusPath, topology])
 
@@ -1368,36 +1674,19 @@ const UnifiedScene: React.FC<{
         rack.boards.forEach(board => {
           opacities.set(board.id, getTargetOpacity(board.id, 'board'))
         })
+        // 添加switch的opacity
+        const switchId = `${rack.id}/switch`
+        opacities.set(switchId, getTargetOpacity(switchId, 'switch'))
       })
     })
     return opacities
   }, [topology, getTargetOpacity])
-
-  // 获取当前动画透明度（如果没有则使用目标值）
-  const getAnimatedOpacity = useCallback((nodeId: string): number => {
-    return currentOpacities.current.get(nodeId) ?? targetOpacities.get(nodeId) ?? 1.0
-  }, [targetOpacities])
 
   // 当前聚焦层级
   const focusLevel = focusPath.length
 
   return (
     <group>
-      {/* 透明度动画控制器 - 每帧更新透明度并触发重渲染 */}
-      <OpacityAnimator
-        targetOpacities={targetOpacities}
-        currentOpacities={currentOpacities}
-        fadeInDuration={1.2}
-        fadeOutDuration={0.2}
-        skipAnimation={!visible}
-      />
-      {/* 每帧检查是否需要重渲染 */}
-      <OpacityUpdateTrigger
-        targetOpacities={targetOpacities}
-        currentOpacities={currentOpacities}
-        onUpdate={() => forceUpdate(n => n + 1)}
-      />
-
       {/* 灯光设置 */}
       <ambientLight intensity={0.4} />
       <directionalLight
@@ -1429,190 +1718,35 @@ const UnifiedScene: React.FC<{
               />
             )}
 
-            {/* 渲染该Pod下的所有Rack */}
+            {/* 渲染该Pod下的所有Rack - 使用动画组件 */}
             {pod.racks.map(rack => {
               const rackPos = nodePositions.racks.get(rack.id)
               if (!rackPos) return null
 
-              const rackOpacity = getAnimatedOpacity(rack.id)
+              const rackTargetOpacity = targetOpacities.get(rack.id) ?? 1.0
               // 只在顶层和Pod层级时才高亮Rack，在Rack层级及更深时不高亮
               const isRackHighlighted = focusLevel === 0 ? isPodHighlighted : (focusLevel === 1 && hoveredRackId === rack.id)
 
-              // 高亮效果参数 - 使用低饱和度高级灰蓝色调
-              const rackFrameColor = isRackHighlighted ? '#2d3748' : '#1a1a1a'
-              const rackPillarColor = isRackHighlighted ? '#3d4758' : '#333333'
-              const rackGlowColor = '#4a6080'  // 深灰蓝色
-              // emissiveIntensity > 1 配合 toneMapped={false} 触发 Bloom 效果
-              const rackGlowIntensity = isRackHighlighted ? 1.8 : 0
-              const rackScale = isRackHighlighted ? 1.01 : 1.0
-
-              // 透明度太低时不渲染（但要给动画留一点余地）
-              if (rackOpacity < 0.01) return null
-
               return (
-                <group key={rack.id} position={[rackPos.x, rackPos.y, rackPos.z]} scale={rackScale}>
-                  {/* 机柜框架 */}
-                  <group>
-                    {/* 机柜底座 */}
-                    <mesh position={[0, -rackHeight / 2 - 0.02, 0]} receiveShadow>
-                      <boxGeometry args={[rackWidth + 0.04, 0.04, rackDepth + 0.04]} />
-                      <meshStandardMaterial
-                        color={rackFrameColor}
-                        emissive={rackGlowColor}
-                        emissiveIntensity={rackGlowIntensity}
-                        toneMapped={false}
-                        transparent
-                        opacity={rackOpacity}
-                        metalness={0.6}
-                        roughness={0.3}
-                      />
-                    </mesh>
-
-                    {/* 机柜顶部 */}
-                    <mesh position={[0, rackHeight / 2 + 0.02, 0]} castShadow={rackOpacity > 0.5}>
-                      <boxGeometry args={[rackWidth + 0.04, 0.04, rackDepth + 0.04]} />
-                      <meshStandardMaterial
-                        color={rackFrameColor}
-                        emissive={rackGlowColor}
-                        emissiveIntensity={rackGlowIntensity}
-                        toneMapped={false}
-                        transparent
-                        opacity={rackOpacity}
-                        metalness={0.6}
-                        roughness={0.3}
-                      />
-                    </mesh>
-
-                    {/* 四个垂直立柱 */}
-                    {[
-                      [-rackWidth / 2, 0, -rackDepth / 2],
-                      [rackWidth / 2, 0, -rackDepth / 2],
-                      [-rackWidth / 2, 0, rackDepth / 2],
-                      [rackWidth / 2, 0, rackDepth / 2],
-                    ].map((pos, i) => (
-                      <mesh key={`pillar-${i}`} position={pos as [number, number, number]} castShadow={rackOpacity > 0.5}>
-                        <boxGeometry args={[0.02, rackHeight, 0.02]} />
-                        <meshStandardMaterial
-                          color={rackPillarColor}
-                          emissive={rackGlowColor}
-                          emissiveIntensity={rackGlowIntensity}
-                          toneMapped={false}
-                          transparent
-                          opacity={rackOpacity}
-                          metalness={0.5}
-                          roughness={0.4}
-                        />
-                      </mesh>
-                    ))}
-
-                    {/* 后面板 */}
-                    <mesh position={[0, 0, -rackDepth / 2 + 0.005]} receiveShadow>
-                      <boxGeometry args={[rackWidth - 0.04, rackHeight, 0.01]} />
-                      <meshStandardMaterial
-                        color="#2a2a2a"
-                        transparent
-                        opacity={rackOpacity * 0.7}
-                        metalness={0.3}
-                        roughness={0.7}
-                      />
-                    </mesh>
-
-                    {/* 左侧面板 */}
-                    <mesh position={[-rackWidth / 2 + 0.005, 0, 0]}>
-                      <boxGeometry args={[0.01, rackHeight, rackDepth - 0.04]} />
-                      <meshStandardMaterial
-                        color="#2a2a2a"
-                        transparent
-                        opacity={rackOpacity * 0.5}
-                        metalness={0.3}
-                        roughness={0.7}
-                      />
-                    </mesh>
-
-                    {/* 右侧面板 */}
-                    <mesh position={[rackWidth / 2 - 0.005, 0, 0]}>
-                      <boxGeometry args={[0.01, rackHeight, rackDepth - 0.04]} />
-                      <meshStandardMaterial
-                        color="#2a2a2a"
-                        transparent
-                        opacity={rackOpacity * 0.5}
-                        metalness={0.3}
-                        roughness={0.7}
-                      />
-                    </mesh>
-
-                    {/* 底部支脚 - 四个角落 */}
-                    {[
-                      [-rackWidth / 2 + 0.03, -rackHeight / 2 - 0.04, -rackDepth / 2 + 0.03],
-                      [rackWidth / 2 - 0.03, -rackHeight / 2 - 0.04, -rackDepth / 2 + 0.03],
-                      [-rackWidth / 2 + 0.03, -rackHeight / 2 - 0.04, rackDepth / 2 - 0.03],
-                      [rackWidth / 2 - 0.03, -rackHeight / 2 - 0.04, rackDepth / 2 - 0.03],
-                    ].map((pos, i) => (
-                      <mesh key={`foot-${i}`} position={pos as [number, number, number]}>
-                        <cylinderGeometry args={[0.02, 0.025, 0.04, 8]} />
-                        <meshStandardMaterial
-                          color="#333333"
-                          transparent
-                          opacity={rackOpacity}
-                          metalness={0.5}
-                          roughness={0.5}
-                        />
-                      </mesh>
-                    ))}
-
-                    {/* 机柜标签 */}
-                    {rackOpacity > 0.3 && (
-                      <Text
-                        position={[0, rackHeight / 2 + 0.12, 0.01]}
-                        fontSize={0.2}
-                        color="#ffffff"
-                        anchorX="center"
-                        anchorY="middle"
-                        fontWeight="bold"
-                        fillOpacity={rackOpacity}
-                        outlineWidth={0.01}
-                        outlineColor="#000000"
-                        material-depthTest={false}
-                      >
-                        {rack.label}
-                      </Text>
-                    )}
-
-                    {/* 交互层 - 用于点击和双击，只在顶层和Pod层级有效 */}
-                    {focusLevel <= 1 && (
-                      <mesh
-                        visible={false}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onNodeClick?.('rack', rack.id, rack.label, {
-                            '位置': `(${rack.position[0]}, ${rack.position[1]})`,
-                            '总U数': rack.total_u,
-                            '板卡数': rack.boards.length
-                          })
-                        }}
-                        onDoubleClick={() => {
-                          if (focusLevel === 0) {
-                            onNavigateToPod(pod.id)
-                          } else if (focusLevel === 1 && focusPath[0] === pod.id) {
-                            onNavigateToRack(pod.id, rack.id)
-                          }
-                        }}
-                        onPointerOver={() => {
-                          if (focusLevel === 0) setHoveredPodId(pod.id)
-                          else if (focusLevel === 1) setHoveredRackId(rack.id)
-                        }}
-                        onPointerOut={() => {
-                          setHoveredPodId(null)
-                          setHoveredRackId(null)
-                        }}
-                      >
-                        <boxGeometry args={[rackWidth, rackHeight, rackDepth]} />
-                        <meshBasicMaterial transparent opacity={0} />
-                      </mesh>
-                    )}
-                  </group>
-
-                </group>
+                <AnimatedRack
+                  key={rack.id}
+                  rack={rack}
+                  position={[rackPos.x, rackPos.y, rackPos.z]}
+                  targetOpacity={rackTargetOpacity}
+                  isHighlighted={isRackHighlighted}
+                  rackWidth={rackWidth}
+                  rackHeight={rackHeight}
+                  rackDepth={rackDepth}
+                  focusLevel={focusLevel}
+                  podId={pod.id}
+                  onNavigateToPod={onNavigateToPod}
+                  onNavigateToRack={onNavigateToRack}
+                  onNodeClick={onNodeClick}
+                  onHoverChange={(hovered) => {
+                    if (focusLevel === 0) setHoveredPodId(hovered ? pod.id : null)
+                    else if (focusLevel === 1) setHoveredRackId(hovered ? rack.id : null)
+                  }}
+                />
               )
             })}
           </group>
@@ -1631,21 +1765,19 @@ const UnifiedScene: React.FC<{
 
             return rack.boards.map(board => {
               const boardY = (board.u_position - 1) * uHeight + (board.u_height * uHeight) / 2 - rackHeight / 2
-              const boardOpacity = getAnimatedOpacity(board.id)
+              const boardOpacity = targetOpacities.get(board.id) ?? 1.0
 
               // 是否显示芯片（聚焦到Board级别）
               const showChips = focusLevel >= 3 && focusPath[2] === board.id
 
-              // 透明度太低时不渲染（但要给动画留一点余地）
-              if (boardOpacity < 0.01) return null
-
+              // BoardModel 内部处理动画完成后的隐藏
               return (
                 <group key={`${board.id}-${board.label}`} position={[rackPos.x, rackPos.y + boardY, rackPos.z]}>
                   <BoardModel
                     board={board}
                     showChips={showChips}
                     interactive={showBoardDetails}
-                    opacity={boardOpacity}
+                    targetOpacity={boardOpacity}
                     onDoubleClick={() => onNavigateToBoard(board.id)}
                     onClick={() => onNodeClick?.('board', board.id, board.label, {
                       'U位置': board.u_position,
@@ -1671,20 +1803,10 @@ const UnifiedScene: React.FC<{
             const rackPos = nodePositions.racks.get(rack.id)
             if (!rackPos) return null
 
-            // 计算Switch透明度：
-            // - 顶层(focusLevel=0): 所有Rack的Switch都显示
-            // - Pod层级(focusLevel=1): 只显示该Pod下的Rack的Switch
-            // - Rack层级(focusLevel=2): 只显示聚焦Rack的Switch
-            // - Board层级(focusLevel>=3): 隐藏所有Switch
-            let switchOpacity = 0
-            if (focusLevel === 0) {
-              switchOpacity = 1.0
-            } else if (focusLevel === 1 && focusPath[0] === pod.id) {
-              switchOpacity = 1.0
-            } else if (focusLevel === 2 && focusPath[1] === rack.id) {
-              switchOpacity = 1.0
-            }
-            if (switchOpacity === 0) return null
+            // 使用统一的targetOpacities获取Switch透明度（支持动画）
+            const switchId = `${rack.id}/switch`
+            const switchTargetOpacity = targetOpacities.get(switchId) ?? 0
+            // 注意：不在这里检查透明度，让SwitchModel内部处理动画完成后的隐藏
 
             // 获取该Rack下的所有Switch（使用后端计算的u_position）
             const rackSwitches = topology.switches?.filter(
@@ -1729,7 +1851,7 @@ const UnifiedScene: React.FC<{
               <group key={`${rack.id}/switch`} position={[rackPos.x, rackPos.y + switchY, rackPos.z]}>
                 <SwitchModel
                   switchData={summarySwitch}
-                  opacity={switchOpacity}
+                  targetOpacity={switchTargetOpacity}
                   onClick={() => onNodeClick?.('switch', rackSwitches[0].id, `${rack.label} Switch ×${rackSwitches.length}`, switchInfoObj)}
                 />
               </group>
@@ -1743,10 +1865,9 @@ const UnifiedScene: React.FC<{
         position={[0, -rackHeight / 2 - 0.06, 0]}
         rotation={[-Math.PI / 2, 0, 0]}
         receiveShadow
-      >
-        <planeGeometry args={[50, 50]} />
-        <meshStandardMaterial color="#e8e8e8" />
-      </mesh>
+        geometry={sharedGeometries.groundPlane}
+        material={sharedBasicMaterials.ground}
+      />
       {/* 地面网格线 */}
       <gridHelper
         args={[50, 50, '#bbb', '#ddd']}
@@ -1953,7 +2074,6 @@ export const Scene3D: React.FC<Scene3DProps> = ({
 
   // 根据当前视图状态计算相机目标位置和观察点
   const cameraTarget = useMemo((): CameraAnimationTarget => {
-    // 根据视图层级和路径计算相机位置
     if (viewState.path.length === 0) {
       // 数据中心顶层视图
       const basePreset = CAMERA_PRESETS['pod']
@@ -1963,78 +2083,49 @@ export const Scene3D: React.FC<Scene3DProps> = ({
         const racksPerPod = topology.pods[0]?.racks.length || 4
         const scaleFactor = Math.max(1, Math.sqrt(podCount * racksPerPod / 4))
         return {
-          position: new THREE.Vector3(
-            basePreset[0] * scaleFactor,
-            basePreset[1] * scaleFactor,
-            basePreset[2] * scaleFactor
-          ),
+          position: new THREE.Vector3(basePreset[0] * scaleFactor, basePreset[1] * scaleFactor, basePreset[2] * scaleFactor),
           lookAt
         }
       }
-      return {
-        position: new THREE.Vector3(basePreset[0], basePreset[1], basePreset[2]),
-        lookAt
-      }
+      return { position: new THREE.Vector3(basePreset[0], basePreset[1], basePreset[2]), lookAt }
     }
 
     if (viewState.path.length === 1 && currentPod && topology) {
-      // Pod内部视图 - 相机飞向该Pod中心位置
       const podCenter = nodePositions.pods.get(currentPod.id)
       if (podCenter) {
-        // 单Pod特殊处理：保持与数据中心层相同的视角
         if (topology.pods.length === 1) {
           const basePreset = CAMERA_PRESETS['pod']
           const racksPerPod = topology.pods[0]?.racks.length || 4
           const scaleFactor = Math.max(1, Math.sqrt(racksPerPod / 4))
           return {
-            position: new THREE.Vector3(
-              basePreset[0] * scaleFactor,
-              basePreset[1] * scaleFactor,
-              basePreset[2] * scaleFactor
-            ),
+            position: new THREE.Vector3(basePreset[0] * scaleFactor, basePreset[1] * scaleFactor, basePreset[2] * scaleFactor),
             lookAt: podCenter.clone()
           }
         }
-
-        // 多Pod情况：原有逻辑
         const racksCount = currentPod.racks.length
-        const distance = 3 + racksCount * 0.5  // 根据Rack数量调整距离
+        const distance = 3 + racksCount * 0.5
         return {
-          position: new THREE.Vector3(
-            podCenter.x + distance,
-            distance * 0.8,
-            podCenter.z + distance
-          ),
+          position: new THREE.Vector3(podCenter.x + distance, distance * 0.8, podCenter.z + distance),
           lookAt: podCenter.clone()
         }
       }
     }
 
     if (viewState.path.length === 2 && currentRack) {
-      // Rack内部视图 - 相机飞向该Rack前方
       const rackPos = nodePositions.racks.get(currentRack.id)
       if (rackPos) {
         return {
-          position: new THREE.Vector3(
-            rackPos.x + 0.8,
-            rackPos.y + 0.5,
-            rackPos.z + 2.5
-          ),
+          position: new THREE.Vector3(rackPos.x + 0.8, rackPos.y + 0.5, rackPos.z + 2.5),
           lookAt: new THREE.Vector3(rackPos.x, rackPos.y, rackPos.z)
         }
       }
     }
 
     if (viewState.path.length >= 3 && currentBoard) {
-      // Board视图 - 相机飞向该Board上方，调整合适的观察距离
       const boardPos = nodePositions.boards.get(currentBoard.id)
       if (boardPos) {
         return {
-          position: new THREE.Vector3(
-            boardPos.x + 0.5,
-            boardPos.y + 1.0,
-            boardPos.z + 0.8
-          ),
+          position: new THREE.Vector3(boardPos.x + 0.5, boardPos.y + 1.0, boardPos.z + 0.8),
           lookAt: new THREE.Vector3(boardPos.x, boardPos.y, boardPos.z)
         }
       }
@@ -2042,10 +2133,7 @@ export const Scene3D: React.FC<Scene3DProps> = ({
 
     // 默认
     const basePreset = CAMERA_PRESETS[viewState.level]
-    return {
-      position: new THREE.Vector3(basePreset[0], basePreset[1], basePreset[2]),
-      lookAt: new THREE.Vector3(0, 0, 0)
-    }
+    return { position: new THREE.Vector3(basePreset[0], basePreset[1], basePreset[2]), lookAt: new THREE.Vector3(0, 0, 0) }
   }, [viewState.path, viewState.level, topology, currentPod, currentRack, currentBoard, nodePositions, resetKey])
 
   // 记录初始相机位置（只在首次计算cameraTarget时设置）
