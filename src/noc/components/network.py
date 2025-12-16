@@ -220,8 +220,13 @@ class Network:
         self.global_slot_id_counter = 0
 
         # ETag setup (这些数据结构由Network管理，CrossPoint共享引用)
-        # T0 Slot ID轮询队列：每个方向独立的FIFO（改为存储slot_id而非(node, flit)）
-        self.T0_Etag_Order_FIFO = {"TL": deque(), "TR": deque(), "TU": deque(), "TD": deque()}
+        # T0轮询机制：环slot列表、T0_table和仲裁指针
+        self.horizontal_ring_slots = {}  # {node_id: [slot_id, ...]} 横向环的slot列表
+        self.vertical_ring_slots = {}    # {node_id: [slot_id, ...]} 纵向环的slot列表
+        self.T0_table_h = {}  # {node_id: set(slot_id, ...)} 横向环T0 flit记录表
+        self.T0_table_v = {}  # {node_id: set(slot_id, ...)} 纵向环T0 flit记录表
+        self.T0_arb_pointer_h = {}  # {node_id: index} 横向环仲裁指针
+        self.T0_arb_pointer_v = {}  # {node_id: index} 纵向环仲裁指针
         self.RB_UE_Counters = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}  # 所有CrossPoint共享
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}  # 所有CrossPoint共享
         self.ETag_BOTHSIDE_UPGRADE = False
@@ -470,6 +475,9 @@ class Network:
 
             self.crosspoints[ip_pos] = {"horizontal": cp_h, "vertical": cp_v}
 
+        # 构建环slot列表和初始化T0仲裁数据结构
+        self._build_ring_slots()
+
     def initialize_buffers(self):
         """
         延迟初始化channel buffer - 在IP接口创建后调用
@@ -602,6 +610,107 @@ class Network:
         # 横向环移动（TR/TL）已由CrossPoint处理，此路径不应到达
         # 保留兼容性，返回False
         return False
+
+    # ------------------------------------------------------------------
+    # T0轮询机制：环slot列表构建
+    # ------------------------------------------------------------------
+
+    def _build_ring_slots(self):
+        """构建每个节点所在环的slot列表，并初始化T0仲裁数据结构"""
+        num_col = self.config.NUM_COL
+        num_row = self.config.NUM_ROW
+
+        # 横向环
+        for row in range(num_row):
+            row_nodes = [row * num_col + col for col in range(num_col)]
+            slot_ids = self._collect_horizontal_ring_slots(row_nodes)
+            for node in row_nodes:
+                self.horizontal_ring_slots[node] = slot_ids
+                self.T0_table_h[node] = set()
+                self.T0_arb_pointer_h[node] = 0
+
+        # 纵向环
+        for col in range(num_col):
+            col_nodes = [row * num_col + col for row in range(num_row)]
+            slot_ids = self._collect_vertical_ring_slots(col_nodes)
+            for node in col_nodes:
+                self.vertical_ring_slots[node] = slot_ids
+                self.T0_table_v[node] = set()
+                self.T0_arb_pointer_v[node] = 0
+
+    def _collect_horizontal_ring_slots(self, row_nodes):
+        """
+        收集横向环的slot_id列表（按流动顺序）
+
+        横向环结构（以节点0,1,2,3为例）：
+        TL方向: 3 -> 2 -> 1 -> 0 -> (0,0,"h")自环 -> 回到0
+        TR方向: 0 -> 1 -> 2 -> 3 -> (3,3,"h")自环 -> 回到3
+
+        链路顺序: (3,2) -> (2,1) -> (1,0) -> (0,0,"h") -> (0,1) -> (1,2) -> (2,3) -> (3,3,"h")
+        """
+        slot_ids = []
+        left_node, right_node = row_nodes[0], row_nodes[-1]
+
+        # TL方向: 右->左
+        for i in range(len(row_nodes) - 1, 0, -1):
+            link = (row_nodes[i], row_nodes[i - 1])
+            if link in self.links_tag:
+                slot_ids.extend(slot.slot_id for slot in self.links_tag[link])
+
+        # 左边界自环
+        link = (left_node, left_node, "h")
+        if link in self.links_tag:
+            slot_ids.extend(slot.slot_id for slot in self.links_tag[link])
+
+        # TR方向: 左->右
+        for i in range(len(row_nodes) - 1):
+            link = (row_nodes[i], row_nodes[i + 1])
+            if link in self.links_tag:
+                slot_ids.extend(slot.slot_id for slot in self.links_tag[link])
+
+        # 右边界自环
+        link = (right_node, right_node, "h")
+        if link in self.links_tag:
+            slot_ids.extend(slot.slot_id for slot in self.links_tag[link])
+
+        return slot_ids
+
+    def _collect_vertical_ring_slots(self, col_nodes):
+        """
+        收集纵向环的slot_id列表（按流动顺序）
+
+        纵向环结构（以节点0,4,8,12为例）：
+        TU方向: 12 -> 8 -> 4 -> 0 -> (0,0,"v")自环 -> 回到0
+        TD方向: 0 -> 4 -> 8 -> 12 -> (12,12,"v")自环 -> 回到12
+
+        链路顺序: (12,8) -> (8,4) -> (4,0) -> (0,0,"v") -> (0,4) -> (4,8) -> (8,12) -> (12,12,"v")
+        """
+        slot_ids = []
+        top_node, bottom_node = col_nodes[0], col_nodes[-1]
+
+        # TU方向: 下->上
+        for i in range(len(col_nodes) - 1, 0, -1):
+            link = (col_nodes[i], col_nodes[i - 1])
+            if link in self.links_tag:
+                slot_ids.extend(slot.slot_id for slot in self.links_tag[link])
+
+        # 上边界自环
+        link = (top_node, top_node, "v")
+        if link in self.links_tag:
+            slot_ids.extend(slot.slot_id for slot in self.links_tag[link])
+
+        # TD方向: 上->下
+        for i in range(len(col_nodes) - 1):
+            link = (col_nodes[i], col_nodes[i + 1])
+            if link in self.links_tag:
+                slot_ids.extend(slot.slot_id for slot in self.links_tag[link])
+
+        # 下边界自环
+        link = (bottom_node, bottom_node, "v")
+        if link in self.links_tag:
+            slot_ids.extend(slot.slot_id for slot in self.links_tag[link])
+
+        return slot_ids
 
     def update_excess_ITag(self):
         """在主循环中调用，处理多余ITag释放"""
@@ -1245,8 +1354,8 @@ class Network:
                     upgrade_to = crosspoint._determine_etag_upgrade(flit, eject_direction)
                     if upgrade_to:
                         flit.ETag_priority = upgrade_to
-                        if upgrade_to == "T0":
-                            crosspoint._register_T0_slot(flit, eject_direction)
+                        if upgrade_to == "T0" and eject_direction in ["TL", "TU"]:
+                            crosspoint.T0_table_record(flit, eject_direction)
 
                 state = self._analyze_flit_state(flit, current, next_node)
                 self._continue_looping(flit, link, state["next_pos"])
@@ -1271,8 +1380,8 @@ class Network:
             upgrade_to = crosspoint._determine_etag_upgrade(flit, eject_direction)
             if upgrade_to:
                 flit.ETag_priority = upgrade_to
-                if upgrade_to == "T0":
-                    crosspoint._register_T0_slot(flit, eject_direction)
+                if upgrade_to == "T0" and eject_direction in ["TL", "TU"]:
+                    crosspoint.T0_table_record(flit, eject_direction)
 
             # 继续绕环
             if should_continue_loop:

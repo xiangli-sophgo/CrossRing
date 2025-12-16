@@ -1,15 +1,15 @@
 /**
- * 统一颜色系统 - 高级浅色主题 (Soft Blue-Gray)
- * 设计灵感：清晨薄雾、精致科技、北欧简约
+ * 统一颜色系统 - Linear风格浅色主题
+ * 设计灵感：Linear App - 极简冷灰调，高对比度
  */
 
 // ========== 核心品牌色 ==========
-export const primaryColor = '#4f6ef7'        // 优雅蓝紫
-export const primaryColorHover = '#6b85f9'
-export const primaryColorActive = '#3d5bd9'
-export const primaryBg = '#eef2ff'
+export const primaryColor = '#2563EB'        // 冷蓝色
+export const primaryColorHover = '#1D4ED8'
+export const primaryColorActive = '#1E40AF'
+export const primaryBg = 'rgba(37, 99, 235, 0.08)'
 
-// 强调色 - 青绿色点缀
+// 强调色
 export const accentColor = '#10b981'
 export const accentColorHover = '#34d399'
 
@@ -17,30 +17,30 @@ export const accentColorHover = '#34d399'
 export const successColor = '#10b981'  // 翡翠绿
 export const warningColor = '#f59e0b'  // 琥珀色
 export const errorColor = '#ef4444'    // 珊瑚红
-export const infoColor = '#4f6ef7'
+export const infoColor = '#2563EB'
 
 // ========== 背景色层级 ==========
-// 主背景 - 淡蓝灰，带一点温暖
-export const bgLayout = '#f4f7fb'
-// 侧边栏 - 稍深的蓝灰
-export const bgSider = '#eaeff6'
-// 卡片/容器 - 纯净白
-export const bgContainer = '#ffffff'
+// 主背景 - Linear风格冷灰
+export const bgLayout = '#F7F7F7'
+// 侧边栏
+export const bgSider = '#EFEFEF'
+// 卡片/容器 - 纯白
+export const bgContainer = '#FFFFFF'
 // 悬浮层 - 纯白
-export const bgElevated = '#ffffff'
+export const bgElevated = '#FFFFFF'
 // 悬停背景
-export const bgHover = '#f0f4fa'
+export const bgHover = 'rgba(0, 0, 0, 0.03)'
 
 // ========== 文字色 ==========
-export const textColor = '#1e293b'              // 深蓝灰
-export const textColorSecondary = '#64748b'     // 中灰蓝
-export const textColorTertiary = '#94a3b8'      // 浅灰蓝
-export const textColorQuaternary = '#cbd5e1'
+export const textColor = '#1A1A1A'              // 深色
+export const textColorSecondary = '#666666'     // 中灰
+export const textColorTertiary = '#999999'      // 浅灰
+export const textColorQuaternary = '#CCCCCC'
 
 // ========== 边框 ==========
-export const borderColor = '#e2e8f0'
-export const borderColorLight = '#f1f5f9'
-export const borderColorDark = '#cbd5e1'
+export const borderColor = '#E5E5E5'
+export const borderColorLight = '#EFEFEF'
+export const borderColorDark = '#D4D4D4'
 
 // ========== 兼容旧代码 ==========
 export const borderColorSplit = borderColor
@@ -65,23 +65,23 @@ export const ipTypeColors: Record<string, { bg: string; border: string; text: st
 
 // ========== 状态标签颜色映射 ==========
 export const statusColors: Record<string, { color: string; bg: string }> = {
-  pending: { color: '#64748b', bg: '#f1f5f9' },
-  running: { color: '#4f6ef7', bg: '#eef2ff' },
-  completed: { color: '#10b981', bg: '#ecfdf5' },
-  failed: { color: '#ef4444', bg: '#fef2f2' },
-  cancelled: { color: '#f59e0b', bg: '#fffbeb' },
-  interrupted: { color: '#f97316', bg: '#fff7ed' },
+  pending: { color: '#666666', bg: '#EFEFEF' },
+  running: { color: '#2563EB', bg: 'rgba(37, 99, 235, 0.08)' },
+  completed: { color: '#10b981', bg: 'rgba(16, 185, 129, 0.08)' },
+  failed: { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.08)' },
+  cancelled: { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.08)' },
+  interrupted: { color: '#f97316', bg: 'rgba(249, 115, 22, 0.08)' },
 }
 
 // ========== 实验类型颜色 ==========
 export const experimentTypeColors: Record<string, string> = {
-  kcin: '#4f6ef7',
+  kcin: '#2563EB',
   dcin: '#a855f7',
 }
 
 // ========== 图表颜色序列 ==========
 export const chartColors = [
-  '#4f6ef7',  // 主蓝紫
+  '#2563EB',  // 冷蓝色
   '#10b981',  // 翡翠绿
   '#a855f7',  // 紫色
   '#f59e0b',  // 琥珀

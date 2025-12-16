@@ -213,31 +213,17 @@ class NetworkLinkVisualizer:
                 patch_dict=self.eq_patches,
                 text_dict=self.eq_texts,
             )
-            # Dynamic Ring Bridge configuration based on CrossRing version
-            if hasattr(self.config, "CROSSRING_VERSION") and self.config.CROSSRING_VERSION == "V1":
-                # V1.3 configuration - unified FIFOs
-                rb_config = dict(
-                    title="Ring Bridge",
-                    lanes=["TL", "TR", "TU", "TD", "EQ"],
-                    depths=[self.RB_in_depth] * 2 + [self.RB_out_depth] * 3,
-                    orientations=["vertical", "vertical", "horizontal", "horizontal", "vertical"],
-                    h_pos=["bottom", "bottom", "top", "top", "top"],
-                    v_pos=["left", "left", "right", "right", "left"],
-                    patch_dict=self.rb_patches,
-                    text_dict=self.rb_texts,
-                )
-            else:
-                # V2 configuration - separate input/output FIFOs (default)
-                rb_config = dict(
-                    title="Ring Bridge",
-                    lanes=["TL_in", "TR_in", "TU_in", "TD_in", "TL_out", "TR_out", "TU_out", "TD_out", "EQ_out"],
-                    depths=[self.RB_in_depth] * 4 + [self.RB_out_depth] * 5,
-                    orientations=["vertical", "vertical", "vertical", "vertical", "horizontal", "horizontal", "horizontal", "horizontal", "vertical"],
-                    h_pos=["bottom", "bottom", "bottom", "bottom", "top", "top", "top", "top", "top"],
-                    v_pos=["left", "left", "left", "left", "right", "right", "right", "right", "left"],
-                    patch_dict=self.rb_patches,
-                    text_dict=self.rb_texts,
-                )
+            # Ring Bridge configuration
+            rb_config = dict(
+                title="Ring Bridge",
+                lanes=["TL", "TR", "TU", "TD", "EQ"],
+                depths=[self.RB_in_depth] * 2 + [self.RB_out_depth] * 3,
+                orientations=["vertical", "vertical", "horizontal", "horizontal", "vertical"],
+                h_pos=["bottom", "bottom", "top", "top", "top"],
+                v_pos=["left", "left", "right", "right", "left"],
+                patch_dict=self.rb_patches,
+                text_dict=self.rb_texts,
+            )
 
             cross_point_horizontal_config = dict(
                 title="CP",

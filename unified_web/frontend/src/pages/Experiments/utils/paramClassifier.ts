@@ -15,6 +15,8 @@ const IMPORTANT_PATTERNS = [
   /^模型类型$/, /^拓扑类型$/, /^数据流名称$/, /^Die数量$/, /^仿真周期$/,
   // 带宽：{IP}_带宽 或 {IP}_{操作}_带宽（包括D2D_RN, D2D_SN）
   /^[A-Z0-9_]+_带宽$/, /^[A-Z0-9_]+_(读|写)_带宽$/, /^总带宽$/,
+  // 带宽汇总统计
+  /^带宽_加权$/, /^带宽_平均加权$/,
   // 请求数
   /^总读请求数$/, /^总写请求数$/, /^总请求数$/,
   /^跨Die/, /^读重试数$/, /^写重试数$/,
@@ -27,13 +29,38 @@ const IMPORTANT_PATTERNS = [
   // 注意：TOPO_TYPE, FLIT_SIZE, BURST, NETWORK_FREQUENCY 归类为配置参数
 ];
 
-// 结果统计的模式
+// 结果统计的模式（用于列分类的优先匹配）
 const RESULT_PATTERNS = [
   /[Pp]9\d/, // P95, P99, p95, p99 等百分位数据优先匹配到结果统计
   /延迟/, /完成时间/, /^绕环/, /^保序阻止/, /环次数/, /等待周期/,
-  /重试次数/, /ETag.*num/i, /ITag.*num/i, /flit数/,
+  /重试/, /ETag.*num/i, /ITag.*num/i, /flit数/,
   /_带宽_read$/, /_带宽_write$/, /_带宽_total$/,
   /^D2D.*请求数$/,  // D2D读请求数, D2D写请求数, D2D总请求数
+  /带宽/, /请求数/,
+];
+
+// 配置参数的模式（用于列分类，精确匹配config_whitelist中的参数）
+const CONFIG_PATTERNS_FOR_COLUMN = [
+  /^TOPO_TYPE$/,
+  /^FLIT_SIZE$/,
+  /^BURST$/,
+  /^NETWORK_FREQUENCY$/,
+  /^SLICE_PER_LINK_/,
+  /^RN_RDB_SIZE$/, /^RN_WDB_SIZE$/,
+  /^SN_DDR_RDB_SIZE$/, /^SN_DDR_WDB_SIZE$/,
+  /^SN_L2M_RDB_SIZE$/, /^SN_L2M_WDB_SIZE$/,
+  /^UNIFIED_RW_TRACKER$/,
+  /LATENCY_original$/,
+  /FIFO_DEPTH$/,
+  /Etag_T\d_UE_MAX$/,
+  /^ETag_BOTHSIDE_UPGRADE$/,
+  /^ETAG_T1_ENABLED$/,
+  /^ITag_TRIGGER_Th_/,
+  /^ITag_MAX_NUM_/,
+  /^ENABLE_CROSSPOINT_CONFLICT_CHECK$/,
+  /^ORDERING_/,
+  /BW_LIMIT$/,
+  /^IN_ORDER_/,
 ];
 
 /**
@@ -48,10 +75,11 @@ export function classifyDieColumn(columnName: string): 'important' | 'result' | 
   if (IMPORTANT_PATTERNS.some(p => p.test(nameWithoutPrefix))) {
     return 'important';
   }
-  if (RESULT_PATTERNS.some(p => p.test(nameWithoutPrefix))) {
-    return 'result';
+  if (CONFIG_PATTERNS_FOR_COLUMN.some(p => p.test(nameWithoutPrefix))) {
+    return 'config';
   }
-  return 'config';
+  // 不是配置参数的默认归类为结果统计
+  return 'result';
 }
 
 // Die层级分类结果的类型定义
@@ -100,17 +128,18 @@ export function classifyParamKeysWithHierarchy(paramKeys: string[]): Hierarchica
       }
     } else if (IMPORTANT_PATTERNS.some(p => p.test(key))) {
       result.important.push(key);
-    } else if (RESULT_PATTERNS.some(p => p.test(key))) {
-      result.result.push(key);
-    } else {
+    } else if (CONFIG_PATTERNS_FOR_COLUMN.some(p => p.test(key))) {
       result.config.push(key);
+    } else {
+      // 不是配置参数的默认归类为结果统计
+      result.result.push(key);
     }
   }
 
   return result;
 }
 
-// 列分类配置（简化为：重要统计、Die分组、结果统计、配置参数）
+// 列分类配置（简化为：重要统计、Die分组、配置参数、结果统计）
 export const PARAM_CATEGORIES: ParamCategory[] = [
   {
     key: 'important',
@@ -138,14 +167,14 @@ export const PARAM_CATEGORIES: ParamCategory[] = [
     patterns: [/^Die3_/],
   },
   {
-    key: 'result',
-    label: '结果统计',
-    patterns: RESULT_PATTERNS,
-  },
-  {
     key: 'config',
     label: '配置参数',
-    patterns: [/.*/], // 匹配所有剩余参数
+    patterns: CONFIG_PATTERNS_FOR_COLUMN,
+  },
+  {
+    key: 'result',
+    label: '结果统计',
+    patterns: [/.*/], // 匹配所有剩余参数（不是配置参数的都是结果统计）
   },
 ];
 
@@ -239,48 +268,57 @@ export function getVisibleParamKeys(paramKeys: string[], selectedCategories: str
   return visibleKeys;
 }
 
-// 配置参数关键词模式
+// 配置参数关键词模式（仅匹配 config_whitelist 中定义的参数）
 const CONFIG_PARAM_PATTERNS = [
   /^TOPO_TYPE$/,
   /^FLIT_SIZE$/,
   /^BURST$/,
-  /FREQUENCY/,
-  /FIFO_DEPTH/,
-  /LATENCY/,
-  /_SIZE$/,
-  /Etag/i,
-  /ITag/i,
-  /BW_LIMIT$/,
-  /^ENABLE_/,
+  /^NETWORK_FREQUENCY$/,
+  /^SLICE_PER_LINK_/,
+  // Resource configuration
+  /^RN_RDB_SIZE$/, /^RN_WDB_SIZE$/,
+  /^SN_DDR_RDB_SIZE$/, /^SN_DDR_WDB_SIZE$/,
+  /^SN_L2M_RDB_SIZE$/, /^SN_L2M_WDB_SIZE$/,
+  /^UNIFIED_RW_TRACKER$/,
+  // Latency configuration
+  /LATENCY_original$/,
+  // FIFO depths
+  /FIFO_DEPTH$/,
+  // ETag configuration (配置参数以_MAX结尾)
+  /Etag_T\d_UE_MAX$/,
+  /^ETag_BOTHSIDE_UPGRADE$/,
+  /^ETAG_T1_ENABLED$/,
+  // ITag configuration
+  /^ITag_TRIGGER_Th_/,
+  /^ITag_MAX_NUM_/,
+  // Feature switches
+  /^ENABLE_CROSSPOINT_CONFLICT_CHECK$/,
   /^ORDERING_/,
-  /CROSSRING_VERSION/,
-  /SLICE_PER_LINK/,
-  /_RW_GAP$/,
-  /IN_ORDER_/,
-  /TAG_NUM/,
-  /^RN_/,
-  /^SN_/,
-  /^UNIFIED_/,
+  // Bandwidth limits
+  /BW_LIMIT$/,
+  // Other configurations
+  /^IN_ORDER_/,
 ];
 
 // 结果统计关键词模式
 const RESULT_STAT_PATTERNS = [
-  /^带宽/,
-  /^平均带宽/,
-  /^总和带宽/,
+  /带宽/,
   /延迟/,
   /完成时间/,
   /^绕环/,
   /^保序阻止/,
   /环次数/,
   /等待周期/,
-  /重试次数/,
+  /重试/,
   /ETag.*num/i,
   /ITag.*num/i,
   /flit数/,
   /^模型类型$/,
   /^拓扑类型$/,
   /^数据流名称$/,
+  /^仿真周期$/,
+  /请求数/,
+  /^跨Die/,
 ];
 
 /**
@@ -313,13 +351,11 @@ export function classifyParams(params: Record<string, unknown>): {
       continue;
     }
 
-    if (isResultStat(key)) {
-      resultStats[key] = value;
-    } else if (isConfigParam(key)) {
+    if (isConfigParam(key)) {
       configParams[key] = value;
     } else {
-      // 默认归类为配置参数
-      configParams[key] = value;
+      // 不是配置参数的都归类为结果统计
+      resultStats[key] = value;
     }
   }
 

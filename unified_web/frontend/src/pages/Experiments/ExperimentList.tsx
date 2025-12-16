@@ -247,11 +247,21 @@ export default function ExperimentList() {
         }
         return (
           <Space>
-            <span>{text}</span>
+            <Tooltip title="点击查看详情">
+              <span
+                style={{ color: primaryColor, cursor: 'pointer' }}
+                onClick={() => navigate(`/experiments/${record.id}`)}
+              >
+                {text}
+              </span>
+            </Tooltip>
             <Tooltip title="编辑名称">
               <EditOutlined
                 style={{ color: '#1890ff', cursor: 'pointer' }}
-                onClick={() => handleStartEdit(record, 'name')}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleStartEdit(record, 'name');
+                }}
               />
             </Tooltip>
           </Space>

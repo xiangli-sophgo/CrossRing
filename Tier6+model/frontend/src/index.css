@@ -1,74 +1,74 @@
 /* ============================================
-   Editorial Light Theme - Refined Elegance
+   Linear Style Light Theme
    Tier6+ Topology Modeler
    ============================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
-  /* 背景层次 - 冷灰色调 */
-  --bg-base: #f8fafc;
-  --bg-elevated: #ffffff;
-  --bg-surface: #f1f5f9;
-  --bg-inset: #e2e8f0;
+  /* 背景层次 - Linear风格冷灰 */
+  --bg-base: #F7F7F7;
+  --bg-elevated: #FFFFFF;
+  --bg-surface: #EFEFEF;
+  --bg-inset: #E8E8E8;
   --bg-hover: rgba(0, 0, 0, 0.03);
 
-  /* 侧边栏 - 浅石板色 */
-  --sider-bg: #f8fafc;
-  --sider-border: #e2e8f0;
+  /* 侧边栏 */
+  --sider-bg: #EFEFEF;
+  --sider-border: #E5E5E5;
 
-  /* 顶部栏 - 深石板色 */
-  --header-bg: linear-gradient(135deg, #1e293b 0%, #334155 100%);
-  --header-text: #f8fafc;
-  --header-text-muted: #94a3b8;
-  --header-border: rgba(255, 255, 255, 0.08);
+  /* 顶部栏 - 浅色主题 */
+  --header-bg: #FFFFFF;
+  --header-text: #1A1A1A;
+  --header-text-muted: #999999;
+  --header-border: #E5E5E5;
 
-  /* 边框 - 冷灰调 */
+  /* 边框 */
   --border-subtle: rgba(0, 0, 0, 0.05);
-  --border-default: #e2e8f0;
-  --border-strong: #cbd5e1;
-  --border-focus: #4f46e5;
+  --border-default: #E5E5E5;
+  --border-strong: #D4D4D4;
+  --border-focus: #5E6AD2;
 
-  /* 主色 - 靛蓝 */
-  --primary: #4f46e5;
-  --primary-hover: #4338ca;
-  --primary-subtle: rgba(79, 70, 229, 0.08);
-  --primary-light: rgba(79, 70, 229, 0.12);
+  /* 主色 - Linear蓝紫 */
+  --primary: #5E6AD2;
+  --primary-hover: #4E5BBF;
+  --primary-subtle: rgba(94, 106, 210, 0.08);
+  --primary-light: rgba(94, 106, 210, 0.12);
 
-  /* 成功色 - 祖母绿 */
-  --success: #059669;
-  --success-subtle: rgba(5, 150, 105, 0.08);
+  /* 成功色 */
+  --success: #10b981;
+  --success-subtle: rgba(16, 185, 129, 0.08);
 
-  /* 警告色 - 琥珀 */
-  --warning: #d97706;
-  --warning-subtle: rgba(217, 119, 6, 0.08);
+  /* 警告色 */
+  --warning: #f59e0b;
+  --warning-subtle: rgba(245, 158, 11, 0.08);
 
   /* 错误色 */
-  --error: #dc2626;
-  --error-subtle: rgba(220, 38, 38, 0.08);
+  --error: #ef4444;
+  --error-subtle: rgba(239, 68, 68, 0.08);
 
-  /* 文字 - 冷灰色调 */
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
-  --text-disabled: #cbd5e1;
+  /* 文字 - Linear风格 */
+  --text-primary: #1A1A1A;
+  --text-secondary: #666666;
+  --text-muted: #999999;
+  --text-disabled: #CCCCCC;
 
-  /* 阴影 - 冷灰调 */
-  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
-  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.03);
-  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.05), 0 2px 4px -1px rgba(15, 23, 42, 0.03);
-  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -2px rgba(15, 23, 42, 0.04);
-  --shadow-focus: 0 0 0 3px rgba(79, 70, 229, 0.15);
+  /* 阴影 - 更柔和 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-focus: 0 0 0 3px rgba(94, 106, 210, 0.15);
 
   /* 侧边栏阴影 */
-  --sider-shadow: 2px 0 12px rgba(15, 23, 42, 0.04);
+  --sider-shadow: 1px 0 3px rgba(0, 0, 0, 0.04);
 
   /* 顶部栏阴影 */
-  --header-shadow: 0 2px 16px rgba(15, 23, 42, 0.12);
+  --header-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 
-  /* 字体 */
+  /* 字体 - 使用Inter (Linear使用) */
   --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
-  --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 * {
@@ -422,9 +422,9 @@ body {
   font-size: 13px !important;
 }
 
-/* Segmented - 顶部栏专用深色版本 */
+/* Segmented - 浅色主题 */
 .ant-segmented {
-  background: rgba(255, 255, 255, 0.1) !important;
+  background: var(--bg-surface) !important;
   border-radius: 8px !important;
   padding: 3px !important;
 }
@@ -434,16 +434,16 @@ body {
   font-weight: 500 !important;
   border-radius: 6px !important;
   transition: all 0.15s ease !important;
-  color: rgba(255, 255, 255, 0.7) !important;
+  color: var(--text-secondary) !important;
 }
 
 .ant-segmented-item:hover:not(.ant-segmented-item-selected) {
-  color: rgba(255, 255, 255, 0.9) !important;
+  color: var(--text-primary) !important;
 }
 
 .ant-segmented-item-selected {
-  background: rgba(255, 255, 255, 0.95) !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15) !important;
+  background: var(--bg-elevated) !important;
+  box-shadow: var(--shadow-sm) !important;
   color: var(--text-primary) !important;
 }
 

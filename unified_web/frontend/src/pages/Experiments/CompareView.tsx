@@ -26,10 +26,10 @@ import type { DataNode } from 'antd/es/tree';
 import { HotTable, HotTableClass } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
-import { useExperimentStore } from '../stores/experimentStore';
-import { compareByTraffic, getExperiments } from '../api';
-import type { TrafficCompareData, Experiment } from '../types';
-import { classifyParamKeysWithHierarchy } from '../utils/paramClassifier';
+import { useExperimentStore } from '../../stores/experimentStore';
+import { compareByTraffic, getExperiments } from './api';
+import type { TrafficCompareData, Experiment } from './types';
+import { classifyParamKeysWithHierarchy } from './utils/paramClassifier';
 
 // 注册所有Handsontable模块
 registerAllModules();
@@ -67,7 +67,7 @@ export default function CompareView() {
   const loadCompareData = async () => {
     if (selectedExperimentIds.length < 2) {
       message.warning('请至少选择2个实验进行对比');
-      navigate('/');
+      navigate('/experiments');
       return;
     }
 
@@ -574,7 +574,7 @@ export default function CompareView() {
     return (
       <Card>
         <Empty description="请选择至少2个实验进行对比">
-          <Button type="primary" onClick={() => navigate('/')}>
+          <Button type="primary" onClick={() => navigate('/experiments')}>
             返回列表
           </Button>
         </Empty>
@@ -591,7 +591,7 @@ export default function CompareView() {
               icon={<ArrowLeftOutlined />}
               onClick={() => {
                 clearSelection();
-                navigate('/');
+                navigate('/experiments');
               }}
             >
               返回

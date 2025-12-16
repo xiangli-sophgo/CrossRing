@@ -43,14 +43,6 @@ class CrossRingConfig:
         self.ITag_TRIGGER_Th_V = args.ITag_TRIGGER_Th_V
         self.ITag_MAX_NUM_H = args.ITag_MAX_Num_H
         self.ITag_MAX_NUM_V = args.ITag_MAX_Num_V
-        # RB only tag 数量配置（仅在 network_v2 中生效）
-        self.RB_ONLY_TAG_NUM_HORIZONTAL = args.RB_ONLY_TAG_NUM_HORIZONTAL
-        self.RB_ONLY_TAG_NUM_VERTICAL = args.RB_ONLY_TAG_NUM_VERTICAL
-        # 验证标签数量参数在有效范围内
-        if self.RB_ONLY_TAG_NUM_HORIZONTAL < 0:
-            raise ValueError(f"RB_ONLY_TAG_NUM_HORIZONTAL must be non-negative, got {self.RB_ONLY_TAG_NUM_HORIZONTAL}")
-        if self.RB_ONLY_TAG_NUM_VERTICAL < 0:
-            raise ValueError(f"RB_ONLY_TAG_NUM_VERTICAL must be non-negative, got {self.RB_ONLY_TAG_NUM_VERTICAL}")
         # self.reservation_num = args.reservation_num
         self.BURST = args.BURST
         self.NETWORK_FREQUENCY = args.NETWORK_FREQUENCY
@@ -80,10 +72,7 @@ class CrossRingConfig:
         self.ETag_BOTHSIDE_UPGRADE = args.ETag_BOTHSIDE_UPGRADE
         self.ETAG_T1_ENABLED = args.ETAG_T1_ENABLED
         self.ORDERING_ETAG_UPGRADE_MODE = args.ORDERING_ETAG_UPGRADE_MODE
-        self.GDMA_RW_GAP = args.GDMA_RW_GAP
-        self.SDMA_RW_GAP = args.SDMA_RW_GAP
         self.ENABLE_CROSSPOINT_CONFLICT_CHECK = args.ENABLE_CROSSPOINT_CONFLICT_CHECK
-        self.CROSSRING_VERSION = args.CROSSRING_VERSION
         self.ORDERING_PRESERVATION_MODE = args.ORDERING_PRESERVATION_MODE
         self.ORDERING_GRANULARITY = args.ORDERING_GRANULARITY
         self.IN_ORDER_EJECTION_PAIRS = args.IN_ORDER_EJECTION_PAIRS
@@ -507,15 +496,6 @@ class CrossRingConfig:
         parser.add_argument("--ITag_TRIGGER_Th_V", type=int, default=default_config["ITag_TRIGGER_Th_V"], help="Vertical ring I-Tag trigger threshold")
         parser.add_argument("--ITag_MAX_Num_H", type=int, default=default_config["ITag_MAX_Num_H"], help="Maximum number of I-Tag reservations for horizontal ring XY nodes")
         parser.add_argument("--ITag_MAX_Num_V", type=int, default=default_config["ITag_MAX_Num_V"], help="Maximum number of I-Tag reservations for vertical ring XY nodes")
-        parser.add_argument(
-            "--RB_ONLY_TAG_NUM_HORIZONTAL",
-            type=int,
-            default=default_config["RB_ONLY_TAG_NUM_HORIZONTAL"],
-            help="Number of RB only tags per horizontal ring (only effective in base_model_v2/network_v2)",
-        )
-        parser.add_argument(
-            "--RB_ONLY_TAG_NUM_VERTICAL", type=int, default=default_config["RB_ONLY_TAG_NUM_VERTICAL"], help="Number of RB only tags per vertical ring (only effective in base_model_v2/network_v2)"
-        )
         # 带宽限制参数（统一TX和RX）
         parser.add_argument("--GDMA_BW_LIMIT", type=int, default=default_config["GDMA_BW_LIMIT"], help="GDMA Bandwidth limit.")
         parser.add_argument("--SDMA_BW_LIMIT", type=int, default=default_config["SDMA_BW_LIMIT"], help="SDMA Bandwidth limit.")
@@ -561,10 +541,7 @@ class CrossRingConfig:
         parser.add_argument("--IP_L2H_FIFO_DEPTH", type=int, default=default_config["IP_L2H_FIFO_DEPTH"], help="IP frequency change l2h fifo depth")
         parser.add_argument("--IP_H2L_H_FIFO_DEPTH", type=int, default=default_config["IP_H2L_H_FIFO_DEPTH"], help="IP frequency change h2l high frequency fifo depth")
         parser.add_argument("--IP_H2L_L_FIFO_DEPTH", type=int, default=default_config["IP_H2L_L_FIFO_DEPTH"], help="IP frequency change h2l low frequency fifo depth")
-        parser.add_argument("--GDMA_RW_GAP", type=int, default=default_config["GDMA_RW_GAP"], help="GDMA read and write cmd num gap")
-        parser.add_argument("--SDMA_RW_GAP", type=int, default=default_config["SDMA_RW_GAP"], help="SDMA read and write cmd num gap")
         parser.add_argument("--ENABLE_CROSSPOINT_CONFLICT_CHECK", type=bool, default=default_config["ENABLE_CROSSPOINT_CONFLICT_CHECK"], help="Enable crosspoint conflict checking for inject queue")
-        parser.add_argument("--CROSSRING_VERSION", type=str, default=default_config["CROSSRING_VERSION"], help="CrossRing version (V1 or V2)")
         parser.add_argument(
             "--ORDERING_PRESERVATION_MODE",
             type=int,

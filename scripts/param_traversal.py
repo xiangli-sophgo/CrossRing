@@ -210,8 +210,6 @@ def run_single_simulation_optimized(sim_params):
                     sim.config.DDR_R_LATENCY_original = 40
                     sim.config.L2M_R_LATENCY_original = 12
                     sim.config.L2M_W_LATENCY_original = 16
-                    sim.config.GDMA_RW_GAP = np.inf
-                    sim.config.SDMA_RW_GAP = np.inf
                     sim.config.CHANNEL_SPEC = {"gdma": 2, "sdma": 2, "ddr": 2, "l2m": 2}
 
                 # 设置参数
@@ -615,8 +613,6 @@ class ParamTraversalRunner:
             sim.config.DDR_R_LATENCY_original = 40
             sim.config.L2M_R_LATENCY_original = 12
             sim.config.L2M_W_LATENCY_original = 16
-            sim.config.GDMA_RW_GAP = np.inf
-            sim.config.SDMA_RW_GAP = np.inf
             sim.config.CHANNEL_SPEC = {"gdma": 2, "sdma": 2, "ddr": 2, "l2m": 2}
 
     def run_simulation(self, params: Dict) -> float:

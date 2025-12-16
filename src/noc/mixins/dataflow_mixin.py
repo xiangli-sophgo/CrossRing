@@ -673,17 +673,6 @@ class DataflowMixin:
         if not self.IQ_direction_conditions[direction](flit):
             return False
 
-        # 网络特定前置检查
-        if network_type == "req":
-            if not ip_type.startswith("d2d_rn"):
-                max_gap = self.config.GDMA_RW_GAP if ip_type.startswith("gdma") else self.config.SDMA_RW_GAP
-                counts = self.dma_rw_counts[ip_type][node_id]
-                rd, wr = counts["read"], counts["write"]
-                if flit.req_type == "read" and abs(rd + 1 - wr) >= max_gap:
-                    return False
-                if flit.req_type == "write" and abs(wr + 1 - rd) >= max_gap:
-                    return False
-
         return True
 
     def move_pre_to_queues_all(self):

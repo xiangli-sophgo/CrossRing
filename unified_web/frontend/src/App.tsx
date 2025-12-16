@@ -16,6 +16,7 @@ import {
   bgLayout,
   bgSider,
   bgContainer,
+  bgElevated,
   borderColor,
   textColor,
   textColorSecondary,
@@ -27,6 +28,7 @@ import TrafficConfig from './pages/Traffic'
 import Simulation from './pages/Simulation'
 import ExperimentList from './pages/Experiments/ExperimentList'
 import ExperimentDetail from './pages/Experiments/ExperimentDetail'
+import CompareView from './pages/Experiments/CompareView'
 import Analysis from './pages/Analysis'
 
 const { Header, Sider, Content } = Layout
@@ -73,7 +75,7 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     if (path === '/') return '/'
     if (path.startsWith('/traffic')) return '/traffic'
     if (path.startsWith('/simulation')) return '/simulation'
-    if (path.startsWith('/experiments')) return '/experiments'
+    if (path.startsWith('/experiments') || path.startsWith('/compare')) return '/experiments'
     if (path.startsWith('/analysis')) return '/analysis'
     return '/'
   }
@@ -84,6 +86,7 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     if (path === '/') return '概览'
     if (path.startsWith('/traffic')) return '流量配置'
     if (path.startsWith('/simulation')) return '仿真执行'
+    if (path.startsWith('/compare')) return '实验对比'
     if (path.startsWith('/experiments')) {
       if (path.includes('/experiments/')) return '实验详情'
       return '结果管理'
@@ -130,11 +133,11 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 width: 34,
                 height: 34,
                 borderRadius: 10,
-                background: `linear-gradient(135deg, ${primaryColor} 0%, #818cf8 100%)`,
+                background: `linear-gradient(135deg, ${primaryColor} 0%, #7C3AED 100%)`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 2px 8px rgba(79, 110, 247, 0.3)',
+                boxShadow: '0 2px 6px rgba(94, 106, 210, 0.3)',
                 flexShrink: 0,
               }}
             >
@@ -219,11 +222,11 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 }}
               />
               <Text style={{ fontSize: 12, color: textColorSecondary }}>
-                v1.0.0
+                v{__APP_VERSION__}
               </Text>
             </div>
           ) : (
-            <Tooltip title="版本 1.0.0">
+            <Tooltip title={`版本 ${__APP_VERSION__}`}>
               <div
                 style={{
                   width: 6,
@@ -242,7 +245,7 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         {/* 顶部栏 */}
         <Header
           style={{
-            background: bgSider,
+            background: bgElevated,
             padding: '0 24px',
             borderBottom: `1px solid ${borderColor}`,
             display: 'flex',
@@ -251,7 +254,7 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             position: 'sticky',
             top: 0,
             zIndex: 99,
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
+            boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -294,6 +297,7 @@ const App: React.FC = () => {
           <Route path="/simulation" element={<Simulation />} />
           <Route path="/experiments" element={<ExperimentList />} />
           <Route path="/experiments/:id" element={<ExperimentDetail />} />
+          <Route path="/compare" element={<CompareView />} />
           <Route path="/analysis" element={<Analysis />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -103,16 +103,12 @@ export const CONFIG_TOOLTIPS: Record<string, string> = {
   DDR_BW_LIMIT: 'DDR bandwidth limit in GB/s',
   L2M_BW_LIMIT: 'L2M bandwidth limit in GB/s',
   // Feature Switches
-  CROSSRING_VERSION: 'CrossRing architecture version (V1 or V2)',
   ENABLE_CROSSPOINT_CONFLICT_CHECK: 'Enable crosspoint conflict checking',
   ORDERING_PRESERVATION_MODE: '0=Disabled, 1=Single side (TL/TU), 2=Both sides (whitelist), 3=Dynamic (src-dest based)',
   ORDERING_ETAG_UPGRADE_MODE: '0=Upgrade ETag only on resource failure, 1=Also upgrade on ordering failure',
   ORDERING_GRANULARITY: '0=IP level ordering, 1=Node level ordering',
   REVERSE_DIRECTION_ENABLED: 'Enable reverse direction flow control when normal direction is congested',
   REVERSE_DIRECTION_THRESHOLD: 'Threshold ratio (0.0-1.0) for triggering reverse direction flow',
-  // Tag Config
-  RB_ONLY_TAG_NUM_HORIZONTAL: 'Ring buffer only tag number for horizontal direction',
-  RB_ONLY_TAG_NUM_VERTICAL: 'Ring buffer only tag number for vertical direction',
   // Allowed Source Nodes (双侧下环方向配置)
   TL_ALLOWED_SOURCE_NODES: 'Node IDs allowed to eject to TL (left) direction',
   TR_ALLOWED_SOURCE_NODES: 'Node IDs allowed to eject to TR (right) direction',

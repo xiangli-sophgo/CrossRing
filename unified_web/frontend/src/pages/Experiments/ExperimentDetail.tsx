@@ -64,21 +64,25 @@ export default function ExperimentDetail() {
   const [paramKeys, setParamKeys] = useState<string[]>([]);
   const [trafficStats, setTrafficStats] = useState<TrafficStat[]>([]);
   const [activeTab, setActiveTab] = useState('results');
+  const [resultsLoaded, setResultsLoaded] = useState(false);
 
   const experimentId = parseInt(id || '0', 10);
 
-  // 加载实验详情
+  // 加载实验详情（轻量级：只加载基本信息和参数键）
   const loadExperiment = async () => {
     if (!experimentId) return;
     setLoading(true);
     try {
-      const [exp, stats, keysData, trafficData] = await Promise.all([
-        getExperiment(experimentId),
+      // 先加载基本信息，尽快显示页面
+      const exp = await getExperiment(experimentId);
+      setCurrentExperiment(exp);
+
+      // 并行加载其他信息
+      const [stats, keysData, trafficData] = await Promise.all([
         getStatistics(experimentId),
         getParamKeys(experimentId),
         getTrafficStats(experimentId),
       ]);
-      setCurrentExperiment(exp);
       setCurrentStatistics(stats);
       setParamKeys(keysData.param_keys);
       setTrafficStats(trafficData.traffic_stats);
@@ -109,6 +113,7 @@ export default function ExperimentDetail() {
         Object.keys(filters).length > 0 ? filters : undefined
       );
       setResultsData(data);
+      setResultsLoaded(true);
     } catch (error) {
       message.error('加载结果数据失败');
     } finally {
@@ -118,11 +123,17 @@ export default function ExperimentDetail() {
 
   useEffect(() => {
     loadExperiment();
+    // 重置结果加载状态
+    setResultsLoaded(false);
+    setResultsData(null);
   }, [experimentId]);
 
+  // 延迟加载结果数据：只在切换到results tab时或参数变化时加载
   useEffect(() => {
-    loadResults();
-  }, [experimentId, page, pageSize, sortBy, sortOrder, filters]);
+    if (activeTab === 'results') {
+      loadResults();
+    }
+  }, [experimentId, page, pageSize, sortBy, sortOrder, filters, activeTab]);
 
   if (loading) {
     return (
@@ -138,7 +149,7 @@ export default function ExperimentDetail() {
         <div style={{ textAlign: 'center', padding: 50 }}>
           <Typography.Text type="secondary">实验不存在</Typography.Text>
           <br />
-          <Button type="link" onClick={() => navigate('/')}>
+          <Button type="link" onClick={() => navigate('/experiments')}>
             返回列表
           </Button>
         </div>
@@ -278,7 +289,7 @@ export default function ExperimentDetail() {
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
           <Space>
             <Tooltip title="返回实验列表">
-              <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
+              <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/experiments')}>
                 返回
               </Button>
             </Tooltip>

@@ -113,18 +113,6 @@ class SimulationEngine:
                 db_size = getattr(self.config, db_size_attr, burst * 4)
                 setattr(self.config, tracker_attr, db_size // burst)
 
-        # 处理 ".inf" 等特殊数值
-        inf_configs = ['GDMA_RW_GAP', 'SDMA_RW_GAP', 'CDMA_RW_GAP']
-        for attr in inf_configs:
-            val = getattr(self.config, attr, None)
-            if isinstance(val, str):
-                if val.lower() in ('.inf', 'inf', 'infinity'):
-                    setattr(self.config, attr, math.inf)
-                else:
-                    try:
-                        setattr(self.config, attr, int(float(val)))
-                    except ValueError:
-                        setattr(self.config, attr, math.inf)
 
         # 确保其他数值配置是正确类型
         int_configs = [

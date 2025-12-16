@@ -628,7 +628,6 @@ class StatsMixin:
             # Feature switches
             "ENABLE_CROSSPOINT_CONFLICT_CHECK",
             "ORDERING_PRESERVATION_MODE",
-            "CROSSRING_VERSION",
             # Bandwidth limits
             "GDMA_BW_LIMIT",
             "SDMA_BW_LIMIT",
@@ -636,13 +635,8 @@ class StatsMixin:
             "DDR_BW_LIMIT",
             "L2M_BW_LIMIT",
             # Other configurations
-            "GDMA_RW_GAP",
-            "SDMA_RW_GAP",
             "IN_ORDER_EJECTION_PAIRS",
             "IN_ORDER_PACKET_CATEGORIES",
-            # Tag configuration
-            "RB_ONLY_TAG_NUM_HORIZONTAL",
-            "RB_ONLY_TAG_NUM_VERTICAL",
             # IP frequency transformation FIFO depths
             "IP_L2H_FIFO_DEPTH",
             "IP_H2L_H_FIFO_DEPTH",

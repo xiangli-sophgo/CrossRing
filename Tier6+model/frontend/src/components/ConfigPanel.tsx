@@ -85,7 +85,7 @@ const BoardSvg = () => (
 )
 const BoardIcon = () => <Icon component={BoardSvg} />
 import {
-  HierarchicalTopology, CHIP_TYPE_COLORS, CHIP_TYPE_NAMES, ChipType,
+  HierarchicalTopology,
   GlobalSwitchConfig, SwitchTypeConfig, SwitchLayerConfig, HierarchyLevelSwitchConfig,
   ManualConnectionConfig, ConnectionMode, SwitchConnectionMode, HierarchyLevel, LayoutType
 } from '../types'
@@ -482,7 +482,7 @@ interface ConnectionEditPanelProps {
 
 const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
   manualConnectionConfig,
-  onManualConnectionConfigChange,
+  onManualConnectionConfigChange: _onManualConnectionConfigChange,
   connectionMode = 'view',
   onConnectionModeChange,
   selectedNodes = new Set<string>(),
@@ -493,9 +493,11 @@ const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
   onDeleteManualConnection,
   currentViewConnections = [],
   onDeleteConnection,
-  configRowStyle,
+  configRowStyle: _configRowStyle,
   currentLevel = 'datacenter',
 }) => {
+  void _onManualConnectionConfigChange
+  void _configRowStyle
   // 获取当前层级
   const getCurrentHierarchyLevel = (): HierarchyLevel => {
     switch (currentLevel) {
@@ -755,10 +757,12 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onDeleteManualConnection,
   currentViewConnections = [],
   onDeleteConnection,
-  layoutType = 'auto',
-  onLayoutTypeChange,
+  layoutType: _layoutType = 'auto',
+  onLayoutTypeChange: _onLayoutTypeChange,
   viewMode = 'topology',
 }) => {
+  void _layoutType
+  void _onLayoutTypeChange
   // 从缓存加载初始配置
   const cachedConfig = loadCachedConfig()
 
@@ -911,9 +915,6 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
     }
   }
 
-  // 计算总占用U数
-  const totalUsedU = boardConfigs.u1.count * 1 + boardConfigs.u2.count * 2 + boardConfigs.u4.count * 4
-
   // 计算统计数据
   const stats = {
     pods: topology?.pods.length || 0,
@@ -924,23 +925,6 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
       sum + p.racks.reduce((s, r) =>
         s + r.boards.reduce((b, board) => b + board.chips.length, 0), 0), 0) || 0,
     switches: topology?.switches?.length || 0,
-  }
-
-  const updateBoardCount = (uSize: keyof BoardConfigs, value: number | null) => {
-    setBoardConfigs(prev => ({
-      ...prev,
-      [uSize]: { ...prev[uSize], count: value || 0 }
-    }))
-  }
-
-  const updateBoardChip = (uSize: keyof BoardConfigs, chipType: keyof ChipCounts, value: number | null) => {
-    setBoardConfigs(prev => ({
-      ...prev,
-      [uSize]: {
-        ...prev[uSize],
-        chips: { ...prev[uSize].chips, [chipType]: value || 0 }
-      }
-    }))
   }
 
   // 配置项样式
@@ -1209,7 +1193,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                       onChange={(v) => setRackConfig(prev => ({ ...prev, total_u: v || 42 }))}
                       size="small"
                       style={{ width: 70 }}
-                      addonAfter="U"
+                      suffix="U"
                     />
                   </div>
                 )}
@@ -1246,7 +1230,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                                   setRackConfig(prev => ({ ...prev, boards: newBoards }))
                                 }}
                                 style={{ width: 70 }}
-                                addonAfter="U"
+                                suffix="U"
                               />
                               <Text style={{ fontSize: 12, marginLeft: 8, whiteSpace: 'nowrap' }}>数量:</Text>
                               <InputNumber

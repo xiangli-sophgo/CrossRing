@@ -196,8 +196,6 @@ def run_single_simulation(traffic_file, topo_type, model_type, config_path, resu
     config.SLICE_PER_LINK_HORIZONTAL = 8
     config.SLICE_PER_LINK_VERTICAL = 8
 
-    config.GDMA_RW_GAP = np.inf
-    config.SDMA_RW_GAP = np.inf
     config.CHANNEL_SPEC = {
         "gdma": 3,
         "sdma": 2,

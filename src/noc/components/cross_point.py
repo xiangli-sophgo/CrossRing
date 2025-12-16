@@ -41,7 +41,6 @@ class CrossPoint:
             self.EQ_UE_Counters = network_ref.EQ_UE_Counters
             self.RB_CAPACITY = network_ref.RB_CAPACITY
             self.EQ_CAPACITY = network_ref.EQ_CAPACITY
-            self.T0_Etag_Order_FIFO = network_ref.T0_Etag_Order_FIFO  # 字典结构，包含4个方向的FIFO
             # I-Tag: 预约管理 (共享Network的数据结构)
             self.remain_tag = network_ref.remain_tag
             self.tagged_counter = network_ref.tagged_counter
@@ -53,7 +52,6 @@ class CrossPoint:
             self.EQ_UE_Counters = {"TU": {}, "TD": {}}
             self.RB_CAPACITY = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
             self.EQ_CAPACITY = {"TU": {}, "TD": {}}
-            self.T0_Etag_Order_FIFO = {"TL": None, "TR": None, "TU": None, "TD": None}
             self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
             self.tagged_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
             self.itag_req_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
@@ -132,104 +130,111 @@ class CrossPoint:
     # E-Tag: T0轮询机制
     # ------------------------------------------------------------------
 
-    def _register_T0_slot(self, flit: Flit, direction: str) -> int:
+    def _is_T0_slot_winner(self, flit: Flit, direction: str) -> bool:
         """
-        为Flit注册T0 Slot到轮询队列
+        检查flit是否是T0仲裁的winner
 
-        当Flit从T1升级到T0时调用此方法
-
-        Args:
-            flit: 要注册的Flit对象
-            direction: 下环方向 ("TL"/"TR"/"TU"/"TD")
-
-        Returns:
-            int: 分配的slot_id
-        """
-        # 检查方向有效性
-        if direction not in ["TL", "TR", "TU", "TD"]:
-            raise ValueError(f"未知方向: {direction}")
-
-        # 获取该方向的FIFO队列
-        fifo = self.T0_Etag_Order_FIFO[direction]
-
-        if fifo is None:
-            raise RuntimeError(f"T0_Etag_Order_FIFO[{direction}]未初始化")
-
-        # 获取当前Slot的slot_id
-        slot = self.network.links_tag[flit.current_link][flit.current_seat_index]
-        slot_id = slot.slot_id
-
-        # 注册到对应的轮询队列
-        fifo.append(slot_id)
-
-        # 记录在flit上（改为记录方向而非类型）
-        flit.T0_slot_id = slot_id
-        flit.T0_fifo_direction = direction
-
-        return slot_id
-
-    def _unregister_T0_slot(self, flit: Flit):
-        """
-        从轮询队列中注销T0 Slot
-
-        当Flit成功下环或被移除时调用
-
-        Args:
-            flit: 要注销的Flit对象
-        """
-        if not hasattr(flit, "T0_slot_id") or flit.T0_slot_id is None:
-            return
-
-        # 根据flit记录的方向获取对应的FIFO
-        if not hasattr(flit, "T0_fifo_direction") or flit.T0_fifo_direction is None:
-            return
-
-        direction = flit.T0_fifo_direction
-        if direction not in ["TL", "TR", "TU", "TD"]:
-            return
-
-        fifo = self.T0_Etag_Order_FIFO[direction]
-
-        if fifo is None:
-            return
-
-        # 从对应队列中移除
-        try:
-            fifo.remove(flit.T0_slot_id)
-        except ValueError:
-            pass
-
-        # 清除flit上的标记
-        flit.T0_slot_id = None
-        flit.T0_fifo_direction = None
-
-    def _is_T0_slot_winner(self, flit: Flit) -> bool:
-        """
-        检查Flit是否赢得T0轮询仲裁
+        从当前指针位置开始，在T0_table中找到第一个slot作为winner
 
         Args:
             flit: 要检查的Flit对象
+            direction: 下环方向 ("TL"/"TU")
 
         Returns:
             bool: 是否赢得仲裁
         """
-        if not hasattr(flit, "T0_slot_id") or flit.T0_slot_id is None:
+        if self.network is None:
             return False
 
-        # 根据flit记录的方向获取对应的FIFO
-        if not hasattr(flit, "T0_fifo_direction") or flit.T0_fifo_direction is None:
+        # 只有TL/TU方向使用T0轮询
+        if direction not in ["TL", "TU"]:
             return False
 
-        direction = flit.T0_fifo_direction
-        if direction not in ["TL", "TR", "TU", "TD"]:
+        # 获取flit当前slot_id
+        slot = self.network.links_tag[flit.current_link][flit.current_seat_index]
+        flit_slot_id = slot.slot_id
+
+        # 获取对应的ring_slots、T0_table和指针
+        if direction == "TL":
+            ring_slots = self.network.horizontal_ring_slots[self.node_id]
+            T0_table = self.network.T0_table_h[self.node_id]
+            pointer = self.network.T0_arb_pointer_h[self.node_id]
+        else:  # TU
+            ring_slots = self.network.vertical_ring_slots[self.node_id]
+            T0_table = self.network.T0_table_v[self.node_id]
+            pointer = self.network.T0_arb_pointer_v[self.node_id]
+
+        # 如果T0_table为空，没有winner
+        if not T0_table:
             return False
 
-        fifo = self.T0_Etag_Order_FIFO[direction]
+        # 从指针位置开始，找到第一个在T0_table中的slot
+        n = len(ring_slots)
+        for i in range(n):
+            idx = (pointer + i) % n
+            candidate_slot_id = ring_slots[idx]
+            if candidate_slot_id in T0_table:
+                # 找到了winner
+                return flit_slot_id == candidate_slot_id
 
-        if fifo is None or not fifo:
-            return False
+        return False
 
-        return fifo[0] == flit.T0_slot_id
+    def T0_table_record(self, flit: Flit, direction: str):
+        """
+        将slot加入T0_table（flit升级到T0时调用）
+
+        Args:
+            flit: 升级到T0的flit
+            direction: 下环方向 ("TL"/"TU")
+        """
+        if self.network is None:
+            return
+
+        slot = self.network.links_tag[flit.current_link][flit.current_seat_index]
+        slot_id = slot.slot_id
+
+        if direction == "TL":
+            self.network.T0_table_h[self.node_id].add(slot_id)
+        elif direction == "TU":
+            self.network.T0_table_v[self.node_id].add(slot_id)
+
+    def T0_remove_from_table(self, flit: Flit, direction: str):
+        """
+        将slot从T0_table移除（T0 flit下环时调用）
+
+        Args:
+            flit: 下环的T0 flit
+            direction: 下环方向 ("TL"/"TU")
+        """
+        if self.network is None:
+            return
+
+        slot = self.network.links_tag[flit.current_link][flit.current_seat_index]
+        slot_id = slot.slot_id
+
+        if direction == "TL":
+            self.network.T0_table_h[self.node_id].discard(slot_id)
+        elif direction == "TU":
+            self.network.T0_table_v[self.node_id].discard(slot_id)
+
+    def _advance_T0_arb_pointer(self, direction: str):
+        """
+        推进仲裁指针到下一个位置（T0 flit成功使用T0 Entry下环后调用）
+
+        Args:
+            direction: 下环方向 ("TL"/"TU")
+        """
+        if self.network is None:
+            return
+
+        if direction == "TL":
+            ring_slots = self.network.horizontal_ring_slots[self.node_id]
+            pointer = self.network.T0_arb_pointer_h[self.node_id]
+            self.network.T0_arb_pointer_h[self.node_id] = (pointer + 1) % len(ring_slots)
+        elif direction == "TU":
+            ring_slots = self.network.vertical_ring_slots[self.node_id]
+            pointer = self.network.T0_arb_pointer_v[self.node_id]
+            self.network.T0_arb_pointer_v[self.node_id] = (pointer + 1) % len(ring_slots)
 
     # ------------------------------------------------------------------
     # E-Tag: 升级机制
@@ -345,7 +350,7 @@ class CrossPoint:
 
         if flit.ETag_priority == "T0":
             # T0优先级：需要T0专用/T1/T2中至少有一个可用，且T0需要赢得轮询仲裁
-            return (self._is_T0_slot_winner(flit) and can_use_T0) or can_use_T1 or can_use_T2
+            return (self._is_T0_slot_winner(flit, direction) and can_use_T0) or can_use_T1 or can_use_T2
         elif flit.ETag_priority == "T1":
             # T1优先级：需要T1/T2中至少有一个可用
             return can_use_T1 or can_use_T2
@@ -389,7 +394,7 @@ class CrossPoint:
 
         if flit.ETag_priority == "T0":
             # T0优先级：尝试T0专用 → T1(若启用) → T2
-            if self._is_T0_slot_winner(flit) and can_use_T0:
+            if self._is_T0_slot_winner(flit, direction) and can_use_T0:
                 entry_to_use = "T0"
             elif can_use_T1:
                 entry_to_use = "T1"
@@ -424,9 +429,13 @@ class CrossPoint:
             key: entry的键（ring_bridge用节点号，eject_queues用节点号）
             entry_level: 占用的entry等级 ("T0"/"T1"/"T2")
         """
-        # 1. 取消T0注册（如果需要）
-        if flit.ETag_priority == "T0":
-            self._unregister_T0_slot(flit)
+        # 1. T0相关处理（必须在清空link位置之前，因为需要访问slot_id）
+        if flit.ETag_priority == "T0" and direction in ["TL", "TU"]:
+            # 无论使用什么Entry，都从T0_table移除
+            self.T0_remove_from_table(flit, direction)
+            # 只有使用T0 Entry时才推进指针
+            if entry_level == "T0":
+                self._advance_T0_arb_pointer(direction)
 
         # 2. 清空当前link位置
         link[flit.current_seat_index] = None

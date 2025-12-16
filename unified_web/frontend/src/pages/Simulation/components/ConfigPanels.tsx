@@ -103,12 +103,6 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                   <InputNumber value={configValues.SN_L2M_WDB_SIZE} onChange={(v) => updateConfigValue('SN_L2M_WDB_SIZE', v)} min={1} style={{ width: '100%' }} />
                 </Col>
               )}
-              {configValues.UNIFIED_RW_TRACKER !== undefined && (
-                <Col span={8}>
-                  <div style={{ marginBottom: 4 }}><ConfigLabel name="UNIFIED_RW_TRACKER" /></div>
-                  <Switch checked={configValues.UNIFIED_RW_TRACKER} onChange={(v) => updateConfigValue('UNIFIED_RW_TRACKER', v)} />
-                </Col>
-              )}
             </Row>
           ),
         },
@@ -183,18 +177,6 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                     </Col>
                   )
                 )}
-                {configValues.ETAG_T1_ENABLED !== undefined && (
-                  <Col span={8}>
-                    <div style={{ marginBottom: 4 }}><ConfigLabel name="ETAG_T1_ENABLED" /></div>
-                    <Switch checked={!!configValues.ETAG_T1_ENABLED} onChange={(v) => updateConfigValue('ETAG_T1_ENABLED', v ? 1 : 0)} />
-                  </Col>
-                )}
-                {configValues.ETag_BOTHSIDE_UPGRADE !== undefined && (
-                  <Col span={8}>
-                    <div style={{ marginBottom: 4 }}><ConfigLabel name="ETag_BOTHSIDE_UPGRADE" /></div>
-                    <Switch checked={!!configValues.ETag_BOTHSIDE_UPGRADE} onChange={(v) => updateConfigValue('ETag_BOTHSIDE_UPGRADE', v ? 1 : 0)} />
-                  </Col>
-                )}
               </Row>
 
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>ITag Config</Text>
@@ -216,30 +198,27 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
           label: 'Feature Config',
           children: (
             <div>
-              {configValues.CROSSRING_VERSION !== undefined && (
+              {configValues.UNIFIED_RW_TRACKER !== undefined && (
                 <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
-                  <Col span={10}><ConfigLabel name="CROSSRING_VERSION" /></Col>
+                  <Col span={10}><ConfigLabel name="UNIFIED_RW_TRACKER" /></Col>
                   <Col span={14}>
-                    <Select value={configValues.CROSSRING_VERSION} onChange={(v) => updateConfigValue('CROSSRING_VERSION', v)} style={{ width: 120 }}>
-                      <Option value="V1">V1</Option>
-                      <Option value="V2">V2</Option>
-                    </Select>
+                    <Switch checked={configValues.UNIFIED_RW_TRACKER} onChange={(v) => updateConfigValue('UNIFIED_RW_TRACKER', v)} />
                   </Col>
                 </Row>
               )}
-              {configValues.CROSSRING_VERSION === 'V2' && configValues.RB_ONLY_TAG_NUM_HORIZONTAL !== undefined && (
+              {configValues.ETAG_T1_ENABLED !== undefined && (
                 <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
-                  <Col span={10}><ConfigLabel name="RB_ONLY_TAG_NUM_HORIZONTAL" /></Col>
+                  <Col span={10}><ConfigLabel name="ETAG_T1_ENABLED" /></Col>
                   <Col span={14}>
-                    <InputNumber value={configValues.RB_ONLY_TAG_NUM_HORIZONTAL} onChange={(v) => updateConfigValue('RB_ONLY_TAG_NUM_HORIZONTAL', v)} min={0} style={{ width: 120 }} />
+                    <Switch checked={!!configValues.ETAG_T1_ENABLED} onChange={(v) => updateConfigValue('ETAG_T1_ENABLED', v ? 1 : 0)} />
                   </Col>
                 </Row>
               )}
-              {configValues.CROSSRING_VERSION === 'V2' && configValues.RB_ONLY_TAG_NUM_VERTICAL !== undefined && (
+              {configValues.ETag_BOTHSIDE_UPGRADE !== undefined && (
                 <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
-                  <Col span={10}><ConfigLabel name="RB_ONLY_TAG_NUM_VERTICAL" /></Col>
+                  <Col span={10}><ConfigLabel name="ETag_BOTHSIDE_UPGRADE" /></Col>
                   <Col span={14}>
-                    <InputNumber value={configValues.RB_ONLY_TAG_NUM_VERTICAL} onChange={(v) => updateConfigValue('RB_ONLY_TAG_NUM_VERTICAL', v)} min={0} style={{ width: 120 }} />
+                    <Switch checked={!!configValues.ETag_BOTHSIDE_UPGRADE} onChange={(v) => updateConfigValue('ETag_BOTHSIDE_UPGRADE', v ? 1 : 0)} />
                   </Col>
                 </Row>
               )}

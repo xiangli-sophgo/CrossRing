@@ -465,14 +465,14 @@ const App: React.FC = () => {
   return (
     <Layout style={{ height: '100vh' }}>
       <Header style={{
-        background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
-        borderBottom: 'none',
+        background: '#FFFFFF',
+        borderBottom: '1px solid #E5E5E5',
         padding: '0 24px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         height: 56,
-        boxShadow: '0 2px 16px rgba(28, 25, 23, 0.12)',
+        boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
         position: 'relative',
         zIndex: 100,
       }}>
@@ -481,38 +481,41 @@ const App: React.FC = () => {
             width: 32,
             height: 32,
             borderRadius: 8,
-            background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+            background: 'linear-gradient(135deg, #5E6AD2 0%, #7C3AED 100%)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 2px 8px rgba(79, 70, 229, 0.4)',
+            boxShadow: '0 2px 6px rgba(94, 106, 210, 0.3)',
           }}>
             <span style={{ color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>T6</span>
           </div>
-          <Title level={4} style={{ color: '#f8fafc', margin: 0, fontSize: 16, fontWeight: 600 }}>
+          <Title level={4} style={{ color: '#1A1A1A', margin: 0, fontSize: 16, fontWeight: 600 }}>
             Tier6+ Topology
           </Title>
         </div>
-        <Segmented
-          value={viewMode}
-          onChange={(v) => setViewMode(v as '3d' | 'topology')}
-          options={[
-            { value: '3d', label: '3D视图' },
-            { value: 'topology', label: '拓扑图' },
-          ]}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <Segmented
+            value={viewMode}
+            onChange={(v) => setViewMode(v as '3d' | 'topology')}
+            options={[
+              { value: '3d', label: '3D视图' },
+              { value: 'topology', label: '拓扑图' },
+            ]}
+          />
+          <span style={{ color: '#999999', fontSize: 12 }}>v{__APP_VERSION__}</span>
+        </div>
       </Header>
 
       <Layout>
         <Sider
           width={siderWidth}
           style={{
-            background: '#f8fafc',
+            background: '#EFEFEF',
             padding: 16,
             overflow: 'auto',
             position: 'relative',
-            borderRight: '1px solid #e2e8f0',
-            boxShadow: '2px 0 12px rgba(15, 23, 42, 0.04)',
+            borderRight: '1px solid #E5E5E5',
+            boxShadow: '1px 0 3px rgba(0, 0, 0, 0.04)',
           }}
         >
           <ConfigPanel

@@ -413,17 +413,22 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   onSelectedNodesChange,
   targetNodes = new Set<string>(),
   onTargetNodesChange,
-  sourceNode = null,
-  onSourceNodeChange,
-  onManualConnect,
+  sourceNode: _sourceNode = null,
+  onSourceNodeChange: _onSourceNodeChange,
+  onManualConnect: _onManualConnect,
   manualConnections = [],
-  onDeleteManualConnection,
-  onDeleteConnection,
+  onDeleteManualConnection: _onDeleteManualConnection,
+  onDeleteConnection: _onDeleteConnection,
   layoutType = 'auto',
   onLayoutTypeChange,
 }) => {
   void _onNavigateBack
   void _canGoBack
+  void _sourceNode
+  void _onSourceNodeChange
+  void _onManualConnect
+  void _onDeleteManualConnection
+  void _onDeleteConnection
   const svgRef = useRef<SVGSVGElement>(null)
   const [zoom, setZoom] = useState(1)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; content: string } | null>(null)
@@ -571,7 +576,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       // 构建Pod层Switch到Pod的映射（用于转换跨层连接）
       const podSwitchToPod: Record<string, string> = {}
       ;(topology.switches || [])
-        .filter(s => s.hierarchy_level === 'inter_rack')
+        .filter((s): s is typeof s & { parent_id: string } => s.hierarchy_level === 'inter_rack' && !!s.parent_id)
         .forEach(s => { podSwitchToPod[s.id] = s.parent_id })
 
       edgeList = topology.connections
@@ -645,7 +650,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       // 构建Rack层Switch到Rack的映射（用于转换跨层连接）
       const rackSwitchToRack: Record<string, string> = {}
       ;(topology.switches || [])
-        .filter(s => s.hierarchy_level === 'inter_board' && rackIds.has(s.parent_id))
+        .filter((s): s is typeof s & { parent_id: string } => s.hierarchy_level === 'inter_board' && !!s.parent_id && rackIds.has(s.parent_id))
         .forEach(s => { rackSwitchToRack[s.id] = s.parent_id })
 
       edgeList = topology.connections
@@ -2112,7 +2117,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       onCancel={onClose}
       footer={null}
       width={900}
-      bodyStyle={{ padding: 0 }}
+      styles={{ body: { padding: 0 } }}
     >
       {graphContent}
     </Modal>

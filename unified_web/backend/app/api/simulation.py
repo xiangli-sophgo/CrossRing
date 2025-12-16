@@ -435,7 +435,10 @@ def _format_config_with_comments(content: dict) -> str:
                 }
             },
             "Buffer Size": {
-                "keys": ["RN_RDB_SIZE", "RN_WDB_SIZE", "SN_DDR_RDB_SIZE", "SN_DDR_WDB_SIZE", "SN_L2M_RDB_SIZE", "SN_L2M_WDB_SIZE", "UNIFIED_RW_TRACKER"],
+                "keys": [
+                    "RN_RDB_SIZE", "RN_WDB_SIZE", "SN_DDR_RDB_SIZE", "SN_DDR_WDB_SIZE", "SN_L2M_RDB_SIZE", "SN_L2M_WDB_SIZE",
+                    "RN_R_TRACKER_OSTD", "RN_W_TRACKER_OSTD", "SN_DDR_R_TRACKER_OSTD", "SN_DDR_W_TRACKER_OSTD", "SN_L2M_R_TRACKER_OSTD", "SN_L2M_W_TRACKER_OSTD",
+                ],
                 "comments": {
                     "RN_RDB_SIZE": "RN读数据缓冲区",
                     "RN_WDB_SIZE": "RN写数据缓冲区",
@@ -443,7 +446,6 @@ def _format_config_with_comments(content: dict) -> str:
                     "SN_DDR_WDB_SIZE": "SN DDR写数据缓冲区",
                     "SN_L2M_RDB_SIZE": "SN L2M读数据缓冲区",
                     "SN_L2M_WDB_SIZE": "SN L2M写数据缓冲区",
-                    "UNIFIED_RW_TRACKER": "true=读写共享资源池，false=读写分离",
                 }
             },
             "KCIN Config": {
@@ -457,7 +459,6 @@ def _format_config_with_comments(content: dict) -> str:
                     # ETag
                     "TL_Etag_T2_UE_MAX", "TL_Etag_T1_UE_MAX", "TR_Etag_T2_UE_MAX",
                     "TU_Etag_T2_UE_MAX", "TU_Etag_T1_UE_MAX", "TD_Etag_T2_UE_MAX",
-                    "ETag_BOTHSIDE_UPGRADE", "ETAG_T1_ENABLED",
                     # ITag
                     "ITag_TRIGGER_Th_H", "ITag_TRIGGER_Th_V", "ITag_MAX_Num_H", "ITag_MAX_Num_V",
                     # Latency
@@ -467,22 +468,21 @@ def _format_config_with_comments(content: dict) -> str:
                     "GDMA_BW_LIMIT", "SDMA_BW_LIMIT", "CDMA_BW_LIMIT", "DDR_BW_LIMIT", "L2M_BW_LIMIT",
                 ],
                 "comments": {
-                    "ETAG_T1_ENABLED": "true=三级(T2→T1→T0), false=两级(T2→T0)",
                     "SN_PROCESSING_LATENCY": "SN端处理延迟 (ns)",
                     "RN_PROCESSING_LATENCY": "RN端处理延迟 (ns)",
                 }
             },
             "Feature Config": {
                 "keys": [
-                    "CROSSRING_VERSION",
-                    "RB_ONLY_TAG_NUM_HORIZONTAL", "RB_ONLY_TAG_NUM_VERTICAL",
+                    "UNIFIED_RW_TRACKER", "ETAG_T1_ENABLED", "ETag_BOTHSIDE_UPGRADE",
                     "ORDERING_PRESERVATION_MODE", "ORDERING_ETAG_UPGRADE_MODE", "ORDERING_GRANULARITY",
                     "TL_ALLOWED_SOURCE_NODES", "TR_ALLOWED_SOURCE_NODES", "TU_ALLOWED_SOURCE_NODES", "TD_ALLOWED_SOURCE_NODES",
                     "REVERSE_DIRECTION_ENABLED", "REVERSE_DIRECTION_THRESHOLD",
+                    "ENABLE_CROSSPOINT_CONFLICT_CHECK",
                 ],
                 "comments": {
-                    "RB_ONLY_TAG_NUM_HORIZONTAL": "仅V2生效",
-                    "RB_ONLY_TAG_NUM_VERTICAL": "仅V2生效",
+                    "UNIFIED_RW_TRACKER": "true=读写共享资源池，false=读写分离",
+                    "ETAG_T1_ENABLED": "true=三级(T2→T1→T0), false=两级(T2→T0)",
                     "ORDERING_PRESERVATION_MODE": "0=不保序, 1=单侧下环(TL/TU), 2=双侧下环(白名单), 3=动态方向",
                     "ORDERING_ETAG_UPGRADE_MODE": "0=仅资源失败升级ETag, 1=保序失败也升级ETag",
                     "ORDERING_GRANULARITY": "0=IP层级, 1=节点层级",
