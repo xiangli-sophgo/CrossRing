@@ -6,7 +6,7 @@ import {
   Row, Col, InputNumber, Button, Select, Input, Tag, Typography,
   Collapse, Alert, Empty, Space, Divider, Tooltip
 } from 'antd'
-import { ThunderboltOutlined, MinusSquareOutlined, SaveOutlined } from '@ant-design/icons'
+import { MinusSquareOutlined, SaveOutlined } from '@ant-design/icons'
 import { CONFIG_TOOLTIPS, BIND_GROUP_COLORS, getNextBindGroupId } from '../helpers'
 import type { SweepParam, SavedSweepConfig } from '../helpers'
 
@@ -59,16 +59,7 @@ export const SweepConfigPanel: React.FC<SweepConfigPanelProps> = ({
       defaultActiveKey={[]}
       items={[{
         key: 'sweep',
-        label: (
-          <Space>
-            <span>参数遍历配置</span>
-            {sweepParams.length > 0 && (
-              <Text type="secondary">
-                {sweepParams.map(p => `${p.key}[${p.values.length}]`).join(' × ')}
-              </Text>
-            )}
-          </Space>
-        ),
+        label: '参数遍历配置',
         children: (
           <div>
             {/* 表头说明 */}

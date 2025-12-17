@@ -2,9 +2,9 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { Layout, Typography, Spin, message, Segmented, Card, Descriptions, Tag, Collapse } from 'antd'
 import { Scene3D } from './components/Scene3D'
 import { ConfigPanel } from './components/ConfigPanel'
-import { TopologyGraph, NodeDetail, LinkDetail } from './components/TopologyGraph'
-import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType } from './types'
-import { getTopology, generateTopology } from './api/topology'
+import { TopologyGraph, NodeDetail, LinkDetail, LevelPairSelector } from './components/TopologyGraph'
+import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType, MultiLevelViewOptions, AdjacentLevelPair } from './types'
+import { getTopology, generateTopology, getLevelConnectionDefaults } from './api/topology'
 import { useViewNavigation } from './hooks/useViewNavigation'
 
 const { Header, Sider, Content } = Layout
@@ -46,6 +46,14 @@ const App: React.FC = () => {
   // 选中的连接详情
   const [selectedLink, setSelectedLink] = useState<LinkDetail | null>(null)
 
+  // 各层级连接的默认参数（从后端加载，初始为空）
+  const [_levelConnectionDefaults, _setLevelConnectionDefaults] = useState<{
+    datacenter: { bandwidth: number; latency: number }
+    pod: { bandwidth: number; latency: number }
+    rack: { bandwidth: number; latency: number }
+    board: { bandwidth: number; latency: number }
+  } | null>(null)
+
   // 手动连接状态 (从缓存加载)
   const [manualConnectionConfig, setManualConnectionConfig] = useState<ManualConnectionConfig>(() => {
     try {
@@ -61,11 +69,44 @@ const App: React.FC = () => {
     }
     return { enabled: false, mode: 'append', connections: [] }
   })
+
+  // 从后端加载默认配置，并设置到 manualConnectionConfig
+  useEffect(() => {
+    getLevelConnectionDefaults().then((defaults) => {
+      _setLevelConnectionDefaults(defaults)
+      // 设置 manualConnectionConfig 的 level_defaults（保留用户自定义的值）
+      setManualConnectionConfig((prev) => ({
+        ...prev,
+        level_defaults: {
+          ...defaults,
+          ...prev.level_defaults,
+        },
+      }))
+    }).catch((error) => {
+      console.error('获取层级连接默认配置失败:', error)
+    })
+  }, [])
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('view')
   const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set())  // 源节点集合
   const [targetNodes, setTargetNodes] = useState<Set<string>>(new Set())  // 目标节点集合
   const [sourceNode, setSourceNode] = useState<string | null>(null)  // 保留兼容
   const [layoutType, setLayoutType] = useState<LayoutType>('auto')  // 布局类型
+
+  // 多层级视图选项
+  const [multiLevelOptions, setMultiLevelOptions] = useState<MultiLevelViewOptions>({
+    enabled: false,
+    levelPair: 'pod_rack',
+    expandedContainers: new Set(),
+  })
+
+  // 切换多层级视图
+  const handleMultiLevelChange = useCallback((levelPair: AdjacentLevelPair | null) => {
+    setMultiLevelOptions(prev => ({
+      ...prev,
+      enabled: levelPair !== null,
+      levelPair: levelPair || prev.levelPair,
+    }))
+  }, [])
 
   // 加载拓扑数据（优先使用缓存配置生成）
   const loadTopology = useCallback(async () => {
@@ -273,6 +314,7 @@ const App: React.FC = () => {
         )
 
         if (!existsManual && !existsAuto && !existsNew) {
+          // 新建连接不设置带宽/延迟，使用层级默认值
           newConnections.push({
             id: `manual_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${addedCount}`,
             source: sourceId,
@@ -339,6 +381,39 @@ const App: React.FC = () => {
     }
   }, [manualConnectionConfig.connections])
 
+  // 更新连接参数（带宽/延迟）
+  const handleUpdateConnectionParams = useCallback((source: string, target: string, bandwidth?: number, latency?: number) => {
+    // 先检查是否是手动连接
+    const manualConn = manualConnectionConfig.connections.find(c =>
+      (c.source === source && c.target === target) ||
+      (c.source === target && c.target === source)
+    )
+    if (manualConn) {
+      // 更新手动连接参数
+      setManualConnectionConfig(prev => ({
+        ...prev,
+        connections: prev.connections.map(c =>
+          c.id === manualConn.id ? { ...c, bandwidth, latency } : c
+        ),
+      }))
+    } else {
+      // 更新自动连接参数
+      setTopology(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          connections: prev.connections.map(c => {
+            if ((c.source === source && c.target === target) ||
+                (c.source === target && c.target === source)) {
+              return { ...c, bandwidth, latency }
+            }
+            return c
+          }),
+        }
+      })
+    }
+  }, [manualConnectionConfig.connections])
+
   // 拖拽处理
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     setIsDragging(true)
@@ -384,17 +459,17 @@ const App: React.FC = () => {
     nodeType: 'pod' | 'rack' | 'board' | 'chip' | 'switch',
     nodeId: string,
     label: string,
-    info: Record<string, string | number>,
+    _info: Record<string, string | number>,
     subType?: string
   ) => {
     // 查找与该节点相关的连接
-    const connections: { label: string; bandwidth?: number }[] = []
+    const connections: { id: string; label: string; bandwidth?: number }[] = []
     if (topology?.connections) {
       topology.connections.forEach(conn => {
         if (conn.source === nodeId) {
-          connections.push({ label: `→ ${conn.target}`, bandwidth: conn.bandwidth })
+          connections.push({ id: conn.target, label: `→ ${conn.target}`, bandwidth: conn.bandwidth })
         } else if (conn.target === nodeId) {
-          connections.push({ label: `← ${conn.source}`, bandwidth: conn.bandwidth })
+          connections.push({ id: conn.source, label: `← ${conn.source}`, bandwidth: conn.bandwidth })
         }
       })
     }
@@ -505,6 +580,16 @@ const App: React.FC = () => {
               { value: 'topology', label: '拓扑图' },
             ]}
           />
+          {viewMode === 'topology' && (
+            <LevelPairSelector
+              value={multiLevelOptions.enabled ? multiLevelOptions.levelPair : null}
+              onChange={handleMultiLevelChange}
+              currentLevel={getCurrentLevel()}
+              hasCurrentPod={!!navigation.currentPod}
+              hasCurrentRack={!!navigation.currentRack}
+              hasCurrentBoard={!!navigation.currentBoard}
+            />
+          )}
           <span style={{ color: '#999999', fontSize: 12 }}>v{__APP_VERSION__}</span>
         </div>
       </Header>
@@ -538,6 +623,7 @@ const App: React.FC = () => {
             onDeleteManualConnection={handleDeleteManualConnection}
             currentViewConnections={currentViewConnections}
             onDeleteConnection={handleDeleteConnection}
+            onUpdateConnectionParams={handleUpdateConnectionParams}
             layoutType={layoutType}
             onLayoutTypeChange={setLayoutType}
             viewMode={viewMode}
@@ -719,6 +805,8 @@ const App: React.FC = () => {
               onDeleteConnection={handleDeleteConnection}
               layoutType={layoutType}
               onLayoutTypeChange={setLayoutType}
+              multiLevelOptions={multiLevelOptions}
+              onMultiLevelOptionsChange={setMultiLevelOptions}
             />
           )}
         </Content>

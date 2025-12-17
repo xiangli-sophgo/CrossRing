@@ -135,6 +135,7 @@ export interface ConfigPanelProps {
   onDeleteManualConnection?: (connectionId: string) => void
   currentViewConnections?: { source: string; target: string; type?: string; bandwidth?: number; latency?: number }[]  // 当前视图的连接
   onDeleteConnection?: (source: string, target: string) => void  // 删除连接
+  onUpdateConnectionParams?: (source: string, target: string, bandwidth?: number, latency?: number) => void  // 更新连接参数
   // 布局相关
   layoutType?: LayoutType
   onLayoutTypeChange?: (type: LayoutType) => void

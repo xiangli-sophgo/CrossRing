@@ -67,6 +67,8 @@ class SimulationTask:
 
     # 运行时属性（不序列化）
     _current_engine: Any = field(default=None, repr=False)
+    _executor: Any = field(default=None, repr=False)  # ProcessPoolExecutor 引用
+    _futures: List[Any] = field(default_factory=list, repr=False)  # Future 列表
 
 
 def _run_single_simulation(sim_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -367,77 +369,87 @@ class TaskManager:
             def run_parallel():
                 completed_results = []
                 timed_out_files = []
+                executor = None
                 try:
-                    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                        future_to_file = {
-                            executor.submit(_run_single_simulation, params): params['traffic_file']
-                            for params in sim_params_list
+                    executor = ProcessPoolExecutor(max_workers=max_workers)
+                    task._executor = executor  # 保存引用以便取消
+
+                    future_to_file = {
+                        executor.submit(_run_single_simulation, params): params['traffic_file']
+                        for params in sim_params_list
+                    }
+                    task._futures = list(future_to_file.keys())  # 保存 futures 引用
+
+                    for future in as_completed(future_to_file, timeout=TASK_TIMEOUT):
+                        if task.status == TaskStatus.CANCELLED:
+                            # 取消所有pending的任务
+                            for f in future_to_file:
+                                f.cancel()
+                            logger.info(f"任务 {task.task_id} 被取消")
+                            break
+
+                        try:
+                            # 单个future的超时检查
+                            result = future.result(timeout=60)  # 60秒等待结果
+                            completed_results.append(result)
+                        except FuturesTimeoutError:
+                            # 单个任务超时
+                            file_name = future_to_file.get(future, 'unknown')
+                            timed_out_files.append(file_name)
+                            logger.warning(f"仿真任务超时: {file_name}")
+                            completed_results.append({
+                                'traffic_file': file_name,
+                                'status': 'failed',
+                                'duration': 0,
+                                'error': '任务执行超时',
+                                'experiment_id': None,
+                                'success': False,
+                            })
+                        except Exception as e:
+                            # 其他异常
+                            file_name = future_to_file.get(future, 'unknown')
+                            logger.error(f"仿真任务异常: {file_name} - {e}")
+                            completed_results.append({
+                                'traffic_file': file_name,
+                                'status': 'failed',
+                                'duration': 0,
+                                'error': str(e),
+                                'experiment_id': None,
+                                'success': False,
+                            })
+
+                        # 更新进度
+                        completed_count = len(completed_results)
+                        task.progress = int((completed_count / total_files) * 100)
+                        last_result = completed_results[-1] if completed_results else {}
+                        task.sim_details = {
+                            "file_index": completed_count,
+                            "total_files": total_files,
+                            "current_file": f"已完成: {last_result.get('traffic_file', '')}",
+                            "sim_progress": 100,
+                            "current_time": task.max_time,
+                            "max_time": task.max_time,
+                            "req_count": 0,
+                            "total_req": 0,
+                            "recv_flits": 0,
+                            "total_flits": 0,
+                            "trans_flits": 0,
                         }
 
-                        for future in as_completed(future_to_file, timeout=TASK_TIMEOUT):
-                            if task.status == TaskStatus.CANCELLED:
-                                # 取消所有pending的任务
-                                for f in future_to_file:
-                                    f.cancel()
-                                logger.info(f"任务 {task.task_id} 被取消")
-                                break
-
-                            try:
-                                # 单个future的超时检查
-                                result = future.result(timeout=60)  # 60秒等待结果
-                                completed_results.append(result)
-                            except FuturesTimeoutError:
-                                # 单个任务超时
-                                file_name = future_to_file.get(future, 'unknown')
-                                timed_out_files.append(file_name)
-                                logger.warning(f"仿真任务超时: {file_name}")
-                                completed_results.append({
-                                    'traffic_file': file_name,
-                                    'status': 'failed',
-                                    'duration': 0,
-                                    'error': '任务执行超时',
-                                    'experiment_id': None,
-                                    'success': False,
-                                })
-                            except Exception as e:
-                                # 其他异常
-                                file_name = future_to_file.get(future, 'unknown')
-                                logger.error(f"仿真任务异常: {file_name} - {e}")
-                                completed_results.append({
-                                    'traffic_file': file_name,
-                                    'status': 'failed',
-                                    'duration': 0,
-                                    'error': str(e),
-                                    'experiment_id': None,
-                                    'success': False,
-                                })
-
-                            # 更新进度
-                            completed_count = len(completed_results)
-                            task.progress = int((completed_count / total_files) * 100)
-                            last_result = completed_results[-1] if completed_results else {}
-                            task.sim_details = {
-                                "file_index": completed_count,
-                                "total_files": total_files,
-                                "current_file": f"已完成: {last_result.get('traffic_file', '')}",
-                                "sim_progress": 100,
-                                "current_time": task.max_time,
-                                "max_time": task.max_time,
-                                "req_count": 0,
-                                "total_req": 0,
-                                "recv_flits": 0,
-                                "total_flits": 0,
-                                "trans_flits": 0,
-                            }
-
-                            # 保存最后一个experiment_id
-                            if last_result.get('experiment_id'):
-                                nonlocal experiment_id
-                                experiment_id = last_result['experiment_id']
+                        # 保存最后一个experiment_id
+                        if last_result.get('experiment_id'):
+                            nonlocal experiment_id
+                            experiment_id = last_result['experiment_id']
                 except BrokenPipeError:
                     logger.warning(f"任务 {task.task_id} 进程池管道断开，可能是父进程被终止")
                 except BrokenExecutor:
                     logger.warning(f"任务 {task.task_id} 进程池执行器已损坏")
+                finally:
+                    # 清理 executor
+                    if executor:
+                        executor.shutdown(wait=False)
+                    task._executor = None
+                    task._futures = []
 
                 return completed_results
 
@@ -541,6 +553,13 @@ class TaskManager:
                 # 计算总体进度
                 if data.get("max_time", 0) > 0:
                     task.progress = int((data.get("current_time", 0) / data["max_time"]) * 100)
+                # 通知 WebSocket 订阅者（线程安全方式）
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._notify_subscribers(task_id, task))
+                except RuntimeError:
+                    # 没有运行中的事件循环，跳过通知（进度数据已更新到 task 对象）
+                    pass
 
             engine.set_progress_callback(on_progress)
             task._current_engine = engine
@@ -605,15 +624,45 @@ class TaskManager:
             )
 
     def cancel_task(self, task_id: str) -> bool:
-        """取消任务"""
+        """
+        取消任务 - 真正终止运行中的仿真进程
+
+        对于单文件任务：调用引擎的 cancel() 方法，仿真循环会检测到取消标志并退出
+        对于多文件任务：关闭 ProcessPoolExecutor 并取消所有 futures
+        """
         task = self._tasks.get(task_id)
         if not task:
             return False
 
-        if task.status == TaskStatus.RUNNING:
-            # 标记任务状态为取消
-            # 并行模式下，run_parallel 会检测到这个状态并停止提交新任务
-            task.status = TaskStatus.CANCELLED
+        if task.status != TaskStatus.RUNNING:
+            return False
+
+        # 标记任务状态为取消
+        task.status = TaskStatus.CANCELLED
+        logger.info(f"正在取消任务 {task_id}")
+
+        # 单文件任务：调用引擎的取消方法
+        if task._current_engine:
+            try:
+                task._current_engine.cancel()
+                logger.info(f"任务 {task_id} 的仿真引擎已标记取消")
+            except Exception as e:
+                logger.error(f"取消仿真引擎失败: {e}")
+
+        # 多文件任务：关闭进程池
+        if task._executor:
+            try:
+                # 取消所有未完成的 futures
+                for future in task._futures:
+                    future.cancel()
+                # 强制关闭进程池（不等待）
+                task._executor.shutdown(wait=False, cancel_futures=True)
+                logger.info(f"任务 {task_id} 的进程池已关闭")
+            except Exception as e:
+                logger.error(f"关闭进程池失败: {e}")
+
+        # 释放 worker
+        self.release_workers(task_id)
 
         return True
 

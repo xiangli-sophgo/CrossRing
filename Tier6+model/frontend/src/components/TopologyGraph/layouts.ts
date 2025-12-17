@@ -1,5 +1,158 @@
 import { Node } from './shared'
 
+// ============================================
+// 等轴测投影工具函数
+// ============================================
+
+// 等轴测投影参数
+const ISO_ANGLE = Math.PI / 6  // 30度
+const ISO_SCALE_X = Math.cos(ISO_ANGLE)  // X轴缩放 ≈ 0.866
+const ISO_SCALE_Y = Math.sin(ISO_ANGLE)  // Y轴偏移 ≈ 0.5
+
+// 等轴测坐标转换：将3D坐标(x, y, z)投影到2D
+export function isoProject(x: number, y: number, z: number): { px: number; py: number } {
+  const px = (x - z) * ISO_SCALE_X
+  const py = (x + z) * ISO_SCALE_Y - y
+  return { px, py }
+}
+
+// 容器边界
+export interface ContainerBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+// 堆叠布局选项
+export interface StackedLayoutOptions {
+  layerGap: number           // 层间垂直距离
+  containerPadding: number   // 容器内边距
+  innerNodeScale: number     // 内部节点缩放比例
+  upperNodeSize: number      // 上层节点大小
+  lowerNodeSize: number      // 下层节点大小
+}
+
+// 堆叠布局结果
+export interface StackedLayoutResult {
+  upperNodes: Node[]
+  lowerNodes: Node[]
+  containerBounds: Map<string, ContainerBounds>
+}
+
+// 默认堆叠布局选项
+const DEFAULT_STACKED_OPTIONS: StackedLayoutOptions = {
+  layerGap: 120,
+  containerPadding: 30,
+  innerNodeScale: 0.6,
+  upperNodeSize: 60,
+  lowerNodeSize: 25,
+}
+
+// 多层堆叠布局 - Z轴垂直堆叠效果
+// 每个上层节点展开为一个容器，内部显示下层节点的拓扑
+// 多个容器在Z轴方向垂直堆叠，形成卡片堆叠效果，支持悬停抬起交互
+export function isometricStackedLayout(
+  upperNodes: Node[],
+  lowerNodesMap: Map<string, Node[]>,
+  width: number,
+  height: number,
+  options: Partial<StackedLayoutOptions> = {}
+): StackedLayoutResult {
+  const opts = { ...DEFAULT_STACKED_OPTIONS, ...options }
+  const { containerPadding, innerNodeScale } = opts
+
+  // 如果没有上层节点，返回空结果
+  if (upperNodes.length === 0) {
+    return { upperNodes: [], lowerNodes: [], containerBounds: new Map() }
+  }
+
+  const containerBounds = new Map<string, ContainerBounds>()
+  const layoutedLower: Node[] = []
+  const layoutedUpper: Node[] = []
+
+  // 计算上层节点数量来确定布局（在Z方向堆叠）
+  const upperCount = upperNodes.length
+
+  // 每个容器的基础大小
+  const containerWidth = Math.min(width * 0.85, 600)
+  const containerHeight = 200  // 固定高度
+
+  // 书本堆叠参数
+  const bookThickness = 30   // 每本书的"厚度"（层间露出的高度）
+  const depth3D = 20         // 3D深度（顶面和侧面的高度）
+
+  // 计算整体堆叠的高度
+  const totalStackHeight = containerHeight + (upperCount - 1) * bookThickness + depth3D
+
+  // 计算起始位置，使整体居中
+  // zLayer=0 在最上面（Y最小），zLayer越大越在下面（Y越大）
+  const baseX = width / 2
+  const baseY = (height - totalStackHeight) / 2 + depth3D + containerHeight / 2
+
+  // 计算每个容器（展开的上层节点）及其内部的下层节点
+  upperNodes.forEach((upperNode, idx) => {
+    // 书本堆叠：idx=0 的 zLayer=0 在最上面
+    const zIndex = idx
+
+    // 容器中心位置 - zLayer=0在最上面（Y最小），zLayer越大越在下面（Y越大）
+    const containerCenterX = baseX
+    const containerCenterY = baseY + zIndex * bookThickness
+
+    // 容器边界（作为展开的上层节点）
+    const bounds: ContainerBounds = {
+      x: containerCenterX - containerWidth / 2,
+      y: containerCenterY - containerHeight / 2,
+      width: containerWidth,
+      height: containerHeight,
+    }
+    containerBounds.set(upperNode.id, bounds)
+
+    // 上层节点作为容器
+    layoutedUpper.push({
+      ...upperNode,
+      x: containerCenterX,
+      y: containerCenterY,
+      isContainer: true,
+      zLayer: zIndex,
+      containerBounds: bounds,
+    })
+
+    // 获取下层子节点
+    const children = lowerNodesMap.get(upperNode.id) || []
+    const childCount = children.length
+
+    if (childCount === 0) return
+
+    // 布局下层子节点（在容器内使用网格布局）
+    const childCols = Math.ceil(Math.sqrt(childCount))
+    const childRows = Math.ceil(childCount / childCols)
+    const innerWidth = (containerWidth - containerPadding * 2) * innerNodeScale
+    const innerHeight = (containerHeight - containerPadding * 2) * innerNodeScale
+    const childSpacingX = childCols > 1 ? innerWidth / (childCols - 1) : 0
+    const childSpacingY = childRows > 1 ? innerHeight / (childRows - 1) : 0
+
+    children.forEach((child, i) => {
+      const childCol = i % childCols
+      const childRow = Math.floor(i / childCols)
+
+      // 子节点在容器内的相对位置
+      const relX = childCols === 1 ? 0 : (childCol - (childCols - 1) / 2) * childSpacingX
+      const relY = childRows === 1 ? 0 : (childRow - (childRows - 1) / 2) * childSpacingY
+
+      layoutedLower.push({
+        ...child,
+        x: containerCenterX + relX,
+        y: containerCenterY + relY,
+        parentId: upperNode.id,
+        zLayer: zIndex,  // 与父容器相同的zLayer
+      })
+    })
+  })
+
+  return { upperNodes: layoutedUpper, lowerNodes: layoutedLower, containerBounds }
+}
+
 // 布局算法：圆形布局
 export function circleLayout(nodes: Node[], centerX: number, centerY: number, radius: number): Node[] {
   const count = nodes.length

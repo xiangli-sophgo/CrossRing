@@ -16,10 +16,12 @@ import {
   DeleteOutlined,
   PlusOutlined,
   MinusCircleOutlined,
+  UndoOutlined,
 } from '@ant-design/icons'
 import {
   HierarchyLevelSwitchConfig, SwitchTypeConfig, SwitchLayerConfig,
-  ManualConnectionConfig, ConnectionMode, SwitchConnectionMode, HierarchyLevel
+  ManualConnectionConfig, ConnectionMode, SwitchConnectionMode, HierarchyLevel,
+  LevelConnectionDefaults
 } from '../../types'
 
 const { Text } = Typography
@@ -277,13 +279,14 @@ interface ConnectionEditPanelProps {
   onDeleteManualConnection?: (id: string) => void
   currentViewConnections?: Array<{ source: string; target: string; type?: string; bandwidth?: number; latency?: number }>
   onDeleteConnection?: (source: string, target: string) => void
+  onUpdateConnectionParams?: (source: string, target: string, bandwidth?: number, latency?: number) => void
   configRowStyle: React.CSSProperties
   currentLevel?: string
 }
 
 export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
   manualConnectionConfig,
-  onManualConnectionConfigChange: _onManualConnectionConfigChange,
+  onManualConnectionConfigChange,
   connectionMode = 'view',
   onConnectionModeChange,
   selectedNodes = new Set<string>(),
@@ -294,10 +297,10 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
   onDeleteManualConnection,
   currentViewConnections = [],
   onDeleteConnection,
+  onUpdateConnectionParams,
   configRowStyle: _configRowStyle,
   currentLevel = 'datacenter',
 }) => {
-  void _onManualConnectionConfigChange
   void _configRowStyle
   // 获取当前层级
   const getCurrentHierarchyLevel = (): HierarchyLevel => {
@@ -309,6 +312,38 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
       default: return 'datacenter'
     }
   }
+  // 获取当前层级的默认参数
+  const levelKey = currentLevel as 'datacenter' | 'pod' | 'rack' | 'board'
+  const currentDefaults = manualConnectionConfig?.level_defaults?.[levelKey] || {}
+
+  // 更新层级默认参数
+  const updateLevelDefaults = (defaults: LevelConnectionDefaults) => {
+    if (!onManualConnectionConfigChange) return
+    const newConfig: ManualConnectionConfig = {
+      ...(manualConnectionConfig || { enabled: true, mode: 'append', connections: [] }),
+      level_defaults: {
+        ...(manualConnectionConfig?.level_defaults || {}),
+        [levelKey]: defaults,
+      },
+    }
+    onManualConnectionConfigChange(newConfig)
+  }
+
+  // 更新手动连接的参数
+  const updateManualConnectionParams = (connId: string, bandwidth?: number, latency?: number) => {
+    if (!onManualConnectionConfigChange || !manualConnectionConfig) return
+    const newConnections = manualConnectionConfig.connections.map(conn => {
+      if (conn.id === connId) {
+        return { ...conn, bandwidth, latency }
+      }
+      return conn
+    })
+    onManualConnectionConfigChange({
+      ...manualConnectionConfig,
+      connections: newConnections,
+    })
+  }
+
   return (
     <div style={{
       padding: 14,
@@ -317,6 +352,46 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
       border: '1px solid rgba(0, 0, 0, 0.06)',
     }}>
       <Text strong style={{ display: 'block', marginBottom: 10, color: '#171717' }}>连接编辑</Text>
+
+      {/* 层级默认带宽/延迟配置 */}
+      <div style={{
+        marginBottom: 12,
+        padding: 10,
+        background: '#fff',
+        borderRadius: 6,
+        border: '1px solid #e8e8e8',
+      }}>
+        <div style={{ marginBottom: 8 }}>
+          <Text style={{ fontSize: 12, color: '#333', fontWeight: 500 }}>层级默认参数</Text>
+          <Text style={{ fontSize: 11, color: '#999', marginLeft: 8 }}>新建连接时自动应用</Text>
+        </div>
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Text style={{ fontSize: 12 }}>带宽:</Text>
+            <InputNumber
+              size="small"
+              min={0}
+              value={currentDefaults.bandwidth}
+              onChange={(v) => updateLevelDefaults({ ...currentDefaults, bandwidth: v || undefined })}
+              style={{ width: 80 }}
+              placeholder="未设置"
+            />
+            <Text style={{ fontSize: 11, color: '#999' }}>Gbps</Text>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Text style={{ fontSize: 12 }}>延迟:</Text>
+            <InputNumber
+              size="small"
+              min={0}
+              value={currentDefaults.latency}
+              onChange={(v) => updateLevelDefaults({ ...currentDefaults, latency: v || undefined })}
+              style={{ width: 80 }}
+              placeholder="未设置"
+            />
+            <Text style={{ fontSize: 11, color: '#999' }}>ns</Text>
+          </div>
+        </div>
+      </div>
 
       {/* 编辑模式按钮 */}
       <div style={{ marginBottom: 12 }}>
@@ -446,31 +521,56 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
       )}
 
       {/* 手动添加的连接列表 */}
-      <Collapse
-        size="small"
-        style={{ marginTop: 8 }}
-        items={[{
-          key: 'manual',
-          label: <span style={{ fontSize: 14 }}>手动连接 ({manualConnectionConfig?.connections?.length || 0})</span>,
-          children: (
-            <div style={{ maxHeight: 180, overflow: 'auto' }}>
-              {manualConnectionConfig?.connections?.map((conn) => (
-                <div
-                      key={conn.id}
-                      style={{
-                        padding: 10,
-                        background: 'rgba(5, 150, 105, 0.04)',
-                        marginBottom: 8,
-                        borderRadius: 8,
-                        border: '1px solid rgba(5, 150, 105, 0.1)',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <Text code style={{ fontSize: 14 }}>{conn.source}</Text>
-                          <Text style={{ margin: '0 6px', fontSize: 14 }}>↔</Text>
-                          <Text code style={{ fontSize: 14 }}>{conn.target}</Text>
-                        </div>
+      {(() => {
+        // 过滤当前层级的手动连接
+        const currentLevelConnections = manualConnectionConfig?.connections?.filter(
+          conn => conn.hierarchy_level === currentLevel
+        ) || []
+        return (
+          <Collapse
+            size="small"
+            style={{ marginTop: 8 }}
+            items={[{
+              key: 'manual',
+              label: <span style={{ fontSize: 14 }}>手动连接 ({currentLevelConnections.length})</span>,
+              children: (
+                <div style={{ maxHeight: 240, overflow: 'auto' }}>
+                  {currentLevelConnections.map((conn) => {
+                    // 判断是否使用默认值（值为空）
+                    const useDefaultBandwidth = conn.bandwidth === undefined || conn.bandwidth === null
+                    const useDefaultLatency = conn.latency === undefined || conn.latency === null
+                    const hasCustom = !useDefaultBandwidth || !useDefaultLatency
+                    // 显示值：空值时显示默认值
+                    const displayBandwidth = useDefaultBandwidth ? currentDefaults.bandwidth : conn.bandwidth
+                    const displayLatency = useDefaultLatency ? currentDefaults.latency : conn.latency
+                    return (
+                  <div
+                    key={conn.id}
+                    style={{
+                      padding: 10,
+                      background: 'rgba(5, 150, 105, 0.04)',
+                      marginBottom: 8,
+                      borderRadius: 8,
+                      border: '1px solid rgba(5, 150, 105, 0.1)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <Text code style={{ fontSize: 14 }}>{conn.source}</Text>
+                        <Text style={{ margin: '0 6px', fontSize: 14 }}>↔</Text>
+                        <Text code style={{ fontSize: 14 }}>{conn.target}</Text>
+                      </div>
+                      <Space size={4}>
+                        {hasCustom && (
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<UndoOutlined />}
+                            title="重置为默认"
+                            onClick={() => updateManualConnectionParams(conn.id, undefined, undefined)}
+                            style={{ color: '#999' }}
+                          />
+                        )}
                         <Button
                           type="text"
                           danger
@@ -478,42 +578,81 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
                           icon={<DeleteOutlined />}
                           onClick={() => onDeleteManualConnection?.(conn.id)}
                         />
-                      </div>
-                      {(conn.bandwidth || conn.latency) && (
-                        <div style={{ marginTop: 6, fontSize: 13, color: '#666' }}>
-                          {conn.bandwidth && <span style={{ marginRight: 12 }}>带宽: {conn.bandwidth}Gbps</span>}
-                          {conn.latency && <span>延迟: {conn.latency}ns</span>}
-                        </div>
-                      )}
+                      </Space>
                     </div>
-                  ))}
-                  {(!manualConnectionConfig?.connections || manualConnectionConfig.connections.length === 0) && (
+                    <div style={{ marginTop: 8, display: 'flex', gap: 12, alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Text style={{ fontSize: 11, color: useDefaultBandwidth ? '#999' : '#333' }}>带宽:</Text>
+                        <InputNumber
+                          size="small"
+                          min={0}
+                          value={displayBandwidth}
+                          onChange={(v) => updateManualConnectionParams(conn.id, v ?? undefined, conn.latency)}
+                          style={{ width: 80, color: useDefaultBandwidth ? '#999' : undefined }}
+                          placeholder="Gbps"
+                        />
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Text style={{ fontSize: 11, color: useDefaultLatency ? '#999' : '#333' }}>延迟:</Text>
+                        <InputNumber
+                          size="small"
+                          min={0}
+                          value={displayLatency}
+                          onChange={(v) => updateManualConnectionParams(conn.id, conn.bandwidth, v ?? undefined)}
+                          style={{ width: 80, color: useDefaultLatency ? '#999' : undefined }}
+                          placeholder="ns"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )
+                  })}
+                  {currentLevelConnections.length === 0 && (
                     <Text type="secondary" style={{ fontSize: 13 }}>暂无手动连接</Text>
                   )}
                 </div>
               ),
             }, {
-              key: 'current',
-              label: <span style={{ fontSize: 14 }}>当前连接 ({currentViewConnections.length})</span>,
-              children: (
-                <div style={{ maxHeight: 180, overflow: 'auto' }}>
-                  {currentViewConnections.map((conn, idx) => (
-                    <div
-                      key={`auto-${idx}`}
-                      style={{
-                        padding: 10,
-                        background: '#fff',
-                        marginBottom: 8,
-                        borderRadius: 8,
-                        border: '1px solid rgba(0, 0, 0, 0.06)',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ flex: 1 }}>
-                          <Text code style={{ fontSize: 14 }}>{conn.source}</Text>
-                          <Text style={{ margin: '0 6px', fontSize: 14 }}>↔</Text>
-                          <Text code style={{ fontSize: 14 }}>{conn.target}</Text>
-                        </div>
+          key: 'current',
+          label: <span style={{ fontSize: 14 }}>当前连接 ({currentViewConnections.length})</span>,
+          children: (
+            <div style={{ maxHeight: 240, overflow: 'auto' }}>
+              {currentViewConnections.map((conn, idx) => {
+                // 判断是否使用默认值（值为空）
+                const useDefaultBandwidth = conn.bandwidth === undefined || conn.bandwidth === null
+                const useDefaultLatency = conn.latency === undefined || conn.latency === null
+                const hasCustom = !useDefaultBandwidth || !useDefaultLatency
+                // 显示值：空值时显示默认值
+                const displayBandwidth = useDefaultBandwidth ? currentDefaults.bandwidth : conn.bandwidth
+                const displayLatency = useDefaultLatency ? currentDefaults.latency : conn.latency
+                return (
+                  <div
+                    key={`auto-${idx}`}
+                    style={{
+                      padding: 10,
+                      background: '#fff',
+                      marginBottom: 8,
+                      borderRadius: 8,
+                      border: '1px solid rgba(0, 0, 0, 0.06)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ flex: 1 }}>
+                        <Text code style={{ fontSize: 14 }}>{conn.source}</Text>
+                        <Text style={{ margin: '0 6px', fontSize: 14 }}>↔</Text>
+                        <Text code style={{ fontSize: 14 }}>{conn.target}</Text>
+                      </div>
+                      <Space size={4}>
+                        {hasCustom && (
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<UndoOutlined />}
+                            title="重置为默认"
+                            onClick={() => onUpdateConnectionParams?.(conn.source, conn.target, undefined, undefined)}
+                            style={{ color: '#999' }}
+                          />
+                        )}
                         <Button
                           type="text"
                           danger
@@ -521,22 +660,44 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
                           icon={<DeleteOutlined />}
                           onClick={() => onDeleteConnection?.(conn.source, conn.target)}
                         />
-                      </div>
-                      {(conn.bandwidth || conn.latency) && (
-                        <div style={{ marginTop: 6, fontSize: 13, color: '#666' }}>
-                          {conn.bandwidth && <span style={{ marginRight: 12 }}>带宽: {conn.bandwidth}Gbps</span>}
-                          {conn.latency && <span>延迟: {conn.latency}ns</span>}
-                        </div>
-                      )}
+                      </Space>
                     </div>
-                  ))}
-                  {currentViewConnections.length === 0 && (
-                    <Text type="secondary" style={{ fontSize: 13 }}>暂无连接</Text>
-                  )}
-                </div>
-              ),
-            }]}
-          />
+                    <div style={{ marginTop: 8, display: 'flex', gap: 12, alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Text style={{ fontSize: 11, color: useDefaultBandwidth ? '#999' : '#333' }}>带宽:</Text>
+                        <InputNumber
+                          size="small"
+                          min={0}
+                          value={displayBandwidth}
+                          onChange={(v) => onUpdateConnectionParams?.(conn.source, conn.target, v ?? undefined, conn.latency)}
+                          style={{ width: 80, color: useDefaultBandwidth ? '#999' : undefined }}
+                          placeholder="Gbps"
+                        />
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Text style={{ fontSize: 11, color: useDefaultLatency ? '#999' : '#333' }}>延迟:</Text>
+                        <InputNumber
+                          size="small"
+                          min={0}
+                          value={displayLatency}
+                          onChange={(v) => onUpdateConnectionParams?.(conn.source, conn.target, conn.bandwidth, v ?? undefined)}
+                          style={{ width: 80, color: useDefaultLatency ? '#999' : undefined }}
+                          placeholder="ns"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+              {currentViewConnections.length === 0 && (
+                <Text type="secondary" style={{ fontSize: 13 }}>暂无连接</Text>
+              )}
+            </div>
+          ),
+        }]}
+      />
+        )
+      })()}
     </div>
   )
 }

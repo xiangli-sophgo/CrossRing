@@ -7,6 +7,7 @@ import {
   ConnectionMode,
   HierarchyLevel,
   LayoutType,
+  MultiLevelViewOptions,
 } from '../../types'
 
 // 根据板卡U高度区分颜色
@@ -78,6 +79,9 @@ export interface TopologyGraphProps {
   onDeleteConnection?: (source: string, target: string) => void  // 删除任意连接（包括自动生成的）
   layoutType?: LayoutType  // 布局类型
   onLayoutTypeChange?: (type: LayoutType) => void  // 布局类型变更回调
+  // 多层级视图相关
+  multiLevelOptions?: MultiLevelViewOptions
+  onMultiLevelOptionsChange?: (options: MultiLevelViewOptions) => void
 }
 
 export interface Node {
@@ -99,6 +103,17 @@ export interface Node {
   gridCol?: number
   gridZ?: number  // 3D Torus的Z层
   uHeight?: number  // Board的U高度
+  // 多层级视图属性
+  parentId?: string              // 父节点ID（下层节点使用）
+  hierarchyLevel?: HierarchyLevel // 所属层级
+  isContainer?: boolean          // 是否为容器节点
+  zLayer?: number                // Z层 (0=下层, 1=上层)
+  containerBounds?: {            // 容器边界
+    x: number
+    y: number
+    width: number
+    height: number
+  }
 }
 
 export interface Edge {
@@ -107,4 +122,6 @@ export interface Edge {
   bandwidth?: number
   latency?: number  // 延迟 (ns)
   isSwitch?: boolean  // 是否为Switch连接
+  // 多层级视图属性
+  connectionType?: 'intra_upper' | 'intra_lower' | 'inter_level'  // 连接类型
 }

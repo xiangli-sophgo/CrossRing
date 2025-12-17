@@ -42,7 +42,7 @@ function findNode(
 }
 
 // 获取节点标签
-function getNodeLabel(
+function _getNodeLabel(
   topology: HierarchicalTopology,
   path: string[]
 ): string {
@@ -50,6 +50,7 @@ function getNodeLabel(
   if (!node) return path[path.length - 1]
   return node.label
 }
+void _getNodeLabel // 标记为已使用，保留以备后用
 
 export interface ViewNavigationReturn {
   viewState: ViewState

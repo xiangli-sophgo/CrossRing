@@ -2,7 +2,7 @@
  * 历史任务表格组件
  */
 import React from 'react'
-import { Card, Table, Space, Button, Tag, Typography, Empty } from 'antd'
+import { Card, Table, Space, Button, Tag, Typography, Empty, Alert } from 'antd'
 import {
   HistoryOutlined,
   ReloadOutlined,
@@ -13,16 +13,16 @@ import {
   StopOutlined,
 } from '@ant-design/icons'
 import { primaryColor } from '@/theme/colors'
-import type { GroupedTask } from '../types'
+import type { GroupedTaskItem } from '@/api/simulation'
 
 const { Text } = Typography
 
 interface TaskHistoryTableProps {
-  groupedTaskHistory: GroupedTask[]
+  groupedTaskHistory: GroupedTaskItem[]
   loading: boolean
   onRefresh: () => void
   onViewResult: (experimentId: number) => void
-  onDelete: (tasks: GroupedTask) => Promise<void>
+  onDelete: (tasks: GroupedTaskItem) => Promise<void>
 }
 
 // 获取状态标签
@@ -64,12 +64,29 @@ export const TaskHistoryTable: React.FC<TaskHistoryTableProps> = ({
         rowKey="key"
         loading={loading}
         pagination={{ pageSize: 5, showSizeChanger: false }}
+        expandable={{
+          expandedRowRender: (record) => (
+            <div style={{ padding: '8px 0' }}>
+              {record.errors.map((error, index) => (
+                <Alert
+                  key={index}
+                  type="error"
+                  message={`错误 ${index + 1}`}
+                  description={<pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 12 }}>{error}</pre>}
+                  showIcon
+                  style={{ marginBottom: index < record.errors.length - 1 ? 8 : 0 }}
+                />
+              ))}
+            </div>
+          ),
+          rowExpandable: (record) => record.errors.length > 0,
+        }}
         columns={[
           {
             title: '实验名称',
             dataIndex: 'experiment_name',
             width: 200,
-            render: (name: string, record: GroupedTask) => (
+            render: (name: string, record: GroupedTaskItem) => (
               <Space direction="vertical" size={0}>
                 <Text strong>{name || '未命名实验'}</Text>
                 <Text type="secondary" style={{ fontSize: 12 }}>
@@ -77,7 +94,7 @@ export const TaskHistoryTable: React.FC<TaskHistoryTableProps> = ({
                     {record.mode.toUpperCase()}
                   </Tag>
                   {record.topology}
-                  {record.total_count > 1 && (
+                  {record.is_sweep && (
                     <Tag color="cyan" style={{ marginLeft: 4 }}>
                       参数遍历
                     </Tag>
@@ -89,7 +106,7 @@ export const TaskHistoryTable: React.FC<TaskHistoryTableProps> = ({
           {
             title: '任务数',
             width: 100,
-            render: (_: any, record: GroupedTask) => (
+            render: (_: any, record: GroupedTaskItem) => (
               <Text>
                 {record.completed_count}/{record.total_count}
                 {record.failed_count > 0 && (
@@ -119,7 +136,7 @@ export const TaskHistoryTable: React.FC<TaskHistoryTableProps> = ({
           {
             title: '操作',
             width: 150,
-            render: (_: any, record: GroupedTask) => (
+            render: (_: any, record: GroupedTaskItem) => (
               <Space>
                 {record.status === 'completed' && record.experiment_id && (
                   <Button

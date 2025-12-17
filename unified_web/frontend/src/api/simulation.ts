@@ -95,10 +95,12 @@ export interface TaskHistoryItem {
   status: string
   progress: number
   message: string
+  error: string | null
   created_at: string
   completed_at: string | null
   traffic_files: string[]
   experiment_name: string | null
+  experiment_description: string | null
   results: Record<string, any> | null
 }
 
@@ -110,7 +112,27 @@ export const runSimulation = async (request: SimulationRequest): Promise<TaskRes
 
 // 获取任务状态
 export const getTaskStatus = async (taskId: string): Promise<TaskStatus> => {
-  const response = await apiClient.get(`/api/simulation/status/${taskId}`)
+  const response = await apiClient.get(`/api/simulation/status/${taskId}`, {
+    timeout: 10000,  // 轮询请求使用较短超时
+  })
+  return response.data
+}
+
+// 批量任务状态
+export interface BatchTaskStatusItem {
+  status: string
+  progress: number
+  current_file: string
+  message: string
+}
+
+export interface BatchTaskStatusResponse {
+  tasks: Record<string, BatchTaskStatusItem>
+}
+
+// 批量获取任务状态
+export const getBatchTaskStatus = async (taskIds: string[]): Promise<BatchTaskStatusResponse> => {
+  const response = await apiClient.post('/api/simulation/status/batch', { task_ids: taskIds })
   return response.data
 }
 
@@ -151,6 +173,29 @@ export const getRunningTasks = async (): Promise<{ tasks: RunningTaskItem[] }> =
 // 获取历史任务
 export const getTaskHistory = async (limit: number = 20): Promise<{ tasks: TaskHistoryItem[] }> => {
   const response = await apiClient.get(`/api/simulation/history?limit=${limit}`)
+  return response.data
+}
+
+// 分组后的历史任务
+export interface GroupedTaskItem {
+  key: string
+  experiment_name: string
+  mode: string
+  topology: string
+  created_at: string
+  status: string
+  completed_count: number
+  failed_count: number
+  total_count: number
+  experiment_id: number | null
+  errors: string[]
+  is_sweep: boolean
+  task_ids: string[]
+}
+
+// 获取分组后的历史任务
+export const getGroupedHistory = async (limit: number = 50): Promise<{ groups: GroupedTaskItem[] }> => {
+  const response = await apiClient.get(`/api/simulation/history/grouped?limit=${limit}`)
   return response.data
 }
 

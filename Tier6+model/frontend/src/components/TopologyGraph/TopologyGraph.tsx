@@ -15,17 +15,103 @@ import {
 } from './shared'
 import {
   circleLayout,
-  ringLayout,
   torusLayout,
   getTorusGridSize,
-  torus3DLayout,
   getTorus3DSize,
   getLayoutForTopology,
   hierarchicalLayout,
   hybridLayout,
+  isometricStackedLayout,
 } from './layouts'
+import { LEVEL_PAIR_NAMES } from '../../types'
 
 const { Text } = Typography
+
+// 渲染节点形状的辅助函数
+function renderNodeShape(node: Node): React.ReactNode {
+  const isSwitch = node.isSwitch
+  if (isSwitch) {
+    return (
+      <g>
+        <rect x={-36} y={-14} width={72} height={28} rx={3} fill={node.color} stroke="#fff" strokeWidth={2} />
+        <rect x={-32} y={-10} width={64} height={16} rx={2} fill="rgba(0,0,0,0.15)" />
+        <rect x={-28} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
+        <rect x={-20} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
+        <rect x={-12} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
+        <rect x={-4} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
+        <rect x={6} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
+        <rect x={14} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
+        <rect x={22} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
+        <circle cx={-28} cy={8} r={2} fill="#4ade80" />
+        <circle cx={-22} cy={8} r={2} fill="#4ade80" />
+        <circle cx={-16} cy={8} r={2} fill="#4ade80" />
+        <circle cx={-10} cy={8} r={2} fill="#fbbf24" />
+        <rect x={10} y={4} width={18} height={6} rx={1} fill="rgba(255,255,255,0.2)" />
+      </g>
+    )
+  }
+  if (node.type === 'pod') {
+    return (
+      <g>
+        <rect x={-28} y={-12} width={56} height={32} rx={3} fill={node.color} stroke="#fff" strokeWidth={2} />
+        <polygon points="-32,-12 0,-24 32,-12" fill={node.color} stroke="#fff" strokeWidth={2} />
+        <rect x={-20} y={-4} width={8} height={8} rx={1} fill="rgba(255,255,255,0.3)" />
+        <rect x={-6} y={-4} width={8} height={8} rx={1} fill="rgba(255,255,255,0.3)" />
+        <rect x={8} y={-4} width={8} height={8} rx={1} fill="rgba(255,255,255,0.3)" />
+        <rect x={-5} y={8} width={10} height={12} rx={1} fill="rgba(255,255,255,0.4)" />
+      </g>
+    )
+  }
+  if (node.type === 'rack') {
+    return (
+      <g>
+        <rect x={-18} y={-28} width={36} height={56} rx={3} fill={node.color} stroke="#fff" strokeWidth={2} />
+        <line x1={-14} y1={-16} x2={14} y2={-16} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+        <line x1={-14} y1={-4} x2={14} y2={-4} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+        <line x1={-14} y1={8} x2={14} y2={8} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+        <line x1={-14} y1={20} x2={14} y2={20} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+        <circle cx={10} cy={-22} r={2} fill="#4ade80" />
+        <circle cx={10} cy={-10} r={2} fill="#4ade80" />
+        <circle cx={10} cy={2} r={2} fill="#4ade80" />
+        <circle cx={10} cy={14} r={2} fill="#fbbf24" />
+      </g>
+    )
+  }
+  if (node.type === 'board') {
+    return (
+      <g>
+        <rect x={-32} y={-18} width={64} height={36} rx={2} fill={node.color} stroke="#fff" strokeWidth={2} />
+        <path d="M-24,-10 L-24,-2 L-16,-2 L-16,6 L-8,6" stroke="rgba(255,255,255,0.25)" strokeWidth={1.5} fill="none" />
+        <path d="M8,-10 L8,0 L16,0 L16,8 L24,8" stroke="rgba(255,255,255,0.25)" strokeWidth={1.5} fill="none" />
+        <rect x={-8} y={-8} width={16} height={16} rx={1} fill="rgba(0,0,0,0.2)" stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+        <circle cx={-26} cy={0} r={3} fill="rgba(255,255,255,0.4)" />
+        <circle cx={26} cy={0} r={3} fill="rgba(255,255,255,0.4)" />
+      </g>
+    )
+  }
+  if (node.type === 'npu' || node.type === 'cpu') {
+    return (
+      <g>
+        <rect x={-20} y={-20} width={40} height={40} rx={2} fill={node.color} stroke="#fff" strokeWidth={2} />
+        <rect x={-12} y={-26} width={4} height={6} fill={node.color} />
+        <rect x={-2} y={-26} width={4} height={6} fill={node.color} />
+        <rect x={8} y={-26} width={4} height={6} fill={node.color} />
+        <rect x={-12} y={20} width={4} height={6} fill={node.color} />
+        <rect x={-2} y={20} width={4} height={6} fill={node.color} />
+        <rect x={8} y={20} width={4} height={6} fill={node.color} />
+        <rect x={-26} y={-12} width={6} height={4} fill={node.color} />
+        <rect x={-26} y={-2} width={6} height={4} fill={node.color} />
+        <rect x={-26} y={8} width={6} height={4} fill={node.color} />
+        <rect x={20} y={-12} width={6} height={4} fill={node.color} />
+        <rect x={20} y={-2} width={6} height={4} fill={node.color} />
+        <rect x={20} y={8} width={6} height={4} fill={node.color} />
+        <rect x={-10} y={-10} width={20} height={20} rx={1} fill="rgba(255,255,255,0.15)" />
+      </g>
+    )
+  }
+  // 默认: 圆角矩形
+  return <rect x={-25} y={-18} width={50} height={36} rx={6} fill={node.color} stroke="#fff" strokeWidth={2} />
+}
 
 export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   visible,
@@ -59,6 +145,9 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   onDeleteConnection: _onDeleteConnection,
   layoutType = 'auto',
   onLayoutTypeChange,
+  // 多层级视图相关
+  multiLevelOptions,
+  onMultiLevelOptionsChange,
 }) => {
   void _onNavigateBack
   void _canGoBack
@@ -67,10 +156,14 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   void _onManualConnect
   void _onDeleteManualConnection
   void _onDeleteConnection
+  void onMultiLevelOptionsChange
   const svgRef = useRef<SVGSVGElement>(null)
   const [zoom, setZoom] = useState(1)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; content: string } | null>(null)
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
+
+  // 多层级模式：悬停的层级索引（用于抬起上方层级）
+  const [hoveredLayerIndex, setHoveredLayerIndex] = useState<number | null>(null)
 
   // 手动调整模式开关（内部状态）
   const [isManualMode, setIsManualMode] = useState(false)
@@ -164,12 +257,172 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   const { nodes, edges, title, directTopology } = useMemo(() => {
     if (!topology) return { nodes: [], edges: [], title: '', directTopology: 'full_mesh' }
 
+    const width = 800
+    const height = 600
+
+    // ==========================================
+    // 多层级模式：生成堆叠视图数据
+    // ==========================================
+    if (multiLevelOptions?.enabled && multiLevelOptions.levelPair) {
+      const levelPair = multiLevelOptions.levelPair
+
+      let upperNodes: Node[] = []
+      let lowerNodesMap = new Map<string, Node[]>()
+      let allEdges: Edge[] = []
+      let graphTitle = LEVEL_PAIR_NAMES[levelPair] + ' 拓扑'
+
+      // 根据层级组合提取节点
+      if (levelPair === 'datacenter_pod') {
+        // Datacenter + Pod: 显示所有 Pod，以及每个 Pod 内的 Rack
+        upperNodes = topology.pods.map(pod => ({
+          id: pod.id,
+          label: pod.label,
+          type: 'pod',
+          x: 0, y: 0,
+          color: '#1890ff',
+          hierarchyLevel: 'datacenter' as HierarchyLevel,
+        }))
+        topology.pods.forEach(pod => {
+          const racks = pod.racks.map(rack => ({
+            id: rack.id,
+            label: rack.label,
+            type: 'rack',
+            x: 0, y: 0,
+            color: '#52c41a',
+            hierarchyLevel: 'pod' as HierarchyLevel,
+          }))
+          lowerNodesMap.set(pod.id, racks)
+        })
+        // 提取连接
+        const allNodeIds = new Set([
+          ...topology.pods.map(p => p.id),
+          ...topology.pods.flatMap(p => p.racks.map(r => r.id))
+        ])
+        allEdges = topology.connections
+          .filter(c => allNodeIds.has(c.source) && allNodeIds.has(c.target))
+          .map(c => {
+            const sourceIsPod = topology.pods.some(p => p.id === c.source)
+            const targetIsPod = topology.pods.some(p => p.id === c.target)
+            let connectionType: 'intra_upper' | 'intra_lower' | 'inter_level' = 'inter_level'
+            if (sourceIsPod && targetIsPod) connectionType = 'intra_upper'
+            else if (!sourceIsPod && !targetIsPod) connectionType = 'intra_lower'
+            return { source: c.source, target: c.target, bandwidth: c.bandwidth, latency: c.latency, connectionType }
+          })
+      } else if (levelPair === 'pod_rack' && currentPod) {
+        // Pod + Rack: 显示当前 Pod 的所有 Rack，以及每个 Rack 内的 Board
+        upperNodes = currentPod.racks.map(rack => ({
+          id: rack.id,
+          label: rack.label,
+          type: 'rack',
+          x: 0, y: 0,
+          color: '#52c41a',
+          hierarchyLevel: 'pod' as HierarchyLevel,
+        }))
+        currentPod.racks.forEach(rack => {
+          const boards = rack.boards.map(board => ({
+            id: board.id,
+            label: board.label,
+            type: 'board',
+            x: 0, y: 0,
+            color: BOARD_U_COLORS[board.u_height] || '#666',
+            uHeight: board.u_height,
+            hierarchyLevel: 'rack' as HierarchyLevel,
+          }))
+          lowerNodesMap.set(rack.id, boards)
+        })
+        graphTitle = `${currentPod.label} - ${LEVEL_PAIR_NAMES[levelPair]}`
+        // 提取连接
+        const allNodeIds = new Set([
+          ...currentPod.racks.map(r => r.id),
+          ...currentPod.racks.flatMap(r => r.boards.map(b => b.id))
+        ])
+        allEdges = topology.connections
+          .filter(c => allNodeIds.has(c.source) && allNodeIds.has(c.target))
+          .map(c => {
+            const sourceIsRack = currentPod.racks.some(r => r.id === c.source)
+            const targetIsRack = currentPod.racks.some(r => r.id === c.target)
+            let connectionType: 'intra_upper' | 'intra_lower' | 'inter_level' = 'inter_level'
+            if (sourceIsRack && targetIsRack) connectionType = 'intra_upper'
+            else if (!sourceIsRack && !targetIsRack) connectionType = 'intra_lower'
+            return { source: c.source, target: c.target, bandwidth: c.bandwidth, latency: c.latency, connectionType }
+          })
+      } else if (levelPair === 'rack_board' && currentRack) {
+        // Rack + Board: 显示当前 Rack 的所有 Board，以及每个 Board 内的 Chip
+        upperNodes = currentRack.boards.map(board => ({
+          id: board.id,
+          label: board.label,
+          type: 'board',
+          x: 0, y: 0,
+          color: BOARD_U_COLORS[board.u_height] || '#666',
+          uHeight: board.u_height,
+          hierarchyLevel: 'rack' as HierarchyLevel,
+        }))
+        currentRack.boards.forEach(board => {
+          const chips = board.chips.map(chip => ({
+            id: chip.id,
+            label: chip.label || chip.type.toUpperCase(),
+            type: chip.type,
+            x: 0, y: 0,
+            color: CHIP_TYPE_COLORS[chip.type] || '#666',
+            hierarchyLevel: 'board' as HierarchyLevel,
+          }))
+          lowerNodesMap.set(board.id, chips)
+        })
+        graphTitle = `${currentRack.label} - ${LEVEL_PAIR_NAMES[levelPair]}`
+        // 提取连接
+        const allNodeIds = new Set([
+          ...currentRack.boards.map(b => b.id),
+          ...currentRack.boards.flatMap(b => b.chips.map(c => c.id))
+        ])
+        allEdges = topology.connections
+          .filter(c => allNodeIds.has(c.source) && allNodeIds.has(c.target))
+          .map(c => {
+            const sourceIsBoard = currentRack.boards.some(b => b.id === c.source)
+            const targetIsBoard = currentRack.boards.some(b => b.id === c.target)
+            let connectionType: 'intra_upper' | 'intra_lower' | 'inter_level' = 'inter_level'
+            if (sourceIsBoard && targetIsBoard) connectionType = 'intra_upper'
+            else if (!sourceIsBoard && !targetIsBoard) connectionType = 'intra_lower'
+            return { source: c.source, target: c.target, bandwidth: c.bandwidth, latency: c.latency, connectionType }
+          })
+      } else if (levelPair === 'board_chip' && currentBoard) {
+        // Board + Chip: 显示当前 Board 的所有 Chip（单层级，无子节点）
+        upperNodes = currentBoard.chips.map(chip => ({
+          id: chip.id,
+          label: chip.label || chip.type.toUpperCase(),
+          type: chip.type,
+          x: 0, y: 0,
+          color: CHIP_TYPE_COLORS[chip.type] || '#666',
+          hierarchyLevel: 'board' as HierarchyLevel,
+        }))
+        graphTitle = `${currentBoard.label} - Chip 拓扑`
+        // Chip 层没有子层级，只显示 Chip 间连接
+        const chipIds = new Set(currentBoard.chips.map(c => c.id))
+        allEdges = topology.connections
+          .filter(c => chipIds.has(c.source) && chipIds.has(c.target))
+          .map(c => ({ source: c.source, target: c.target, bandwidth: c.bandwidth, latency: c.latency, connectionType: 'intra_upper' as const }))
+      }
+
+      // 应用堆叠布局
+      if (upperNodes.length > 0) {
+        const layoutResult = isometricStackedLayout(upperNodes, lowerNodesMap, width, height)
+        const allNodes = [...layoutResult.upperNodes, ...layoutResult.lowerNodes]
+        return {
+          nodes: allNodes,
+          edges: allEdges,
+          title: graphTitle,
+          directTopology: 'full_mesh',
+        }
+      }
+
+      return { nodes: [], edges: [], title: graphTitle, directTopology: 'full_mesh' }
+    }
+
+    // ==========================================
+    // 单层级模式：原有逻辑
+    // ==========================================
     let nodeList: Node[] = []
     let edgeList: Edge[] = []
     let graphTitle = ''
-
-    const width = 800
-    const height = 600
 
     if (currentLevel === 'datacenter') {
       // 数据中心层：显示所有Pod和数据中心层Switch
@@ -509,7 +762,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
     }
 
     return { nodes: nodeList, edges: edgeList, title: graphTitle, directTopology }
-  }, [topology, currentLevel, currentPod, currentRack, currentBoard, layoutType])
+  }, [topology, currentLevel, currentPod, currentRack, currentBoard, layoutType, multiLevelOptions])
 
   // 切换到手动模式时，如果没有保存的位置，使用当前布局位置作为初始值
   useEffect(() => {
@@ -1041,6 +1294,159 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             return null
           })}
 
+          {/* 多层级模式：按层级分组渲染（容器+边+节点），实现正确遮挡 */}
+          {multiLevelOptions?.enabled && (() => {
+            const containers = displayNodes
+              .filter(n => n.isContainer && n.containerBounds)
+              .sort((a, b) => (b.zLayer ?? 0) - (a.zLayer ?? 0))  // 远处先渲染
+
+            // 悬停时上面的层向上移动的距离
+            const liftDistance = 150
+
+            // 按层级分组渲染（zLayer大的在下面，先渲染；zLayer小的在上面，后渲染覆盖）
+            return containers.map(containerNode => {
+              const bounds = containerNode.containerBounds!
+              const zLayer = containerNode.zLayer ?? 0
+
+              // 计算悬停时的偏移和透明度
+              // zLayer=0在最上面，悬停某层时，上面的层（zLayer更小）向上移动
+              let yOffset = 0
+              let layerOpacity = 1
+              if (hoveredLayerIndex !== null && zLayer < hoveredLayerIndex) {
+                yOffset = -liftDistance  // 向上移动
+                layerOpacity = 0.3  // 上面的层变透明
+              }
+
+              const x = bounds.x
+              const w = bounds.width
+              const h = bounds.height
+              const y = bounds.y
+              const isHoveredLayer = hoveredLayerIndex === zLayer
+
+              // 获取该层的子节点
+              const layerNodes = displayNodes.filter(n => !n.isContainer && n.zLayer === zLayer)
+              // 获取该层的边（两端都在该层）
+              const layerEdges = edges.filter(e => {
+                const sourceNode = displayNodes.find(n => n.id === e.source)
+                const targetNode = displayNodes.find(n => n.id === e.target)
+                return sourceNode?.zLayer === zLayer && targetNode?.zLayer === zLayer
+              })
+
+              // 3D书本效果参数 - 统一斜切变换
+              const skewAngle = -15  // 负值使上边向右斜切
+              // 容器中心点，用于以中心为原点进行斜切
+              const centerX = x + w / 2
+              const centerY = y + h / 2
+
+              return (
+                <g
+                  key={`layer-${zLayer}-${containerNode.id}`}
+                  style={{
+                    transition: 'transform 0.3s ease-out, opacity 0.3s ease-out',
+                    transform: `translateY(${yOffset}px)`,
+                    opacity: layerOpacity,
+                  }}
+                  onMouseEnter={() => setHoveredLayerIndex(zLayer)}
+                  onMouseLeave={() => setHoveredLayerIndex(null)}
+                >
+                  {/* 整个层级应用统一的斜切变换，以容器中心为原点 */}
+                  <g transform={`translate(${centerX}, ${centerY}) skewX(${skewAngle}) translate(${-centerX}, ${-centerY})`}>
+                    {/* 矩形容器 */}
+                    <rect
+                      x={x}
+                      y={y}
+                      width={w}
+                      height={h}
+                      fill="#f8f9fa"
+                      stroke={isHoveredLayer ? containerNode.color : '#d0d0d0'}
+                      strokeWidth={isHoveredLayer ? 2.5 : 1.5}
+                      style={{
+                        filter: `drop-shadow(0 ${isHoveredLayer ? 8 : 3}px ${isHoveredLayer ? 16 : 6}px rgba(0,0,0,${isHoveredLayer ? 0.2 : 0.1}))`,
+                      }}
+                    />
+
+                    {/* 容器标签 - 左下角 */}
+                    <text
+                      x={x + 12}
+                      y={y + h - 10}
+                      fill={containerNode.color}
+                      fontSize={12}
+                      fontWeight={600}
+                    >
+                      {containerNode.label}
+                    </text>
+                    {/* 该层的边 */}
+                    {layerEdges.map((edge, i) => {
+                      const sourceNode = displayNodes.find(n => n.id === edge.source)
+                      const targetNode = displayNodes.find(n => n.id === edge.target)
+                      if (!sourceNode || !targetNode) return null
+                      return (
+                        <line
+                          key={`layer-edge-${i}`}
+                          x1={sourceNode.x}
+                          y1={sourceNode.y}
+                          x2={targetNode.x}
+                          y2={targetNode.y}
+                          stroke="#52c41a"
+                          strokeWidth={1.5}
+                          strokeOpacity={0.6}
+                        />
+                      )
+                    })}
+
+                  {/* 3. 该层的节点 - 使用公共函数渲染形状 */}
+                  {layerNodes.map(node => {
+                    const multiLevelScale = 0.5  // 多层级模式下节点缩小
+                    return (
+                      <g
+                        key={`layer-node-${node.id}`}
+                        transform={`translate(${node.x}, ${node.y}) scale(${multiLevelScale})`}
+                        style={{ cursor: 'pointer', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' }}
+                        onClick={() => {
+                          if (onNodeClick) {
+                            const nodeConnections = edges
+                              .filter(e => e.source === node.id || e.target === node.id)
+                              .map(e => {
+                                const otherId = e.source === node.id ? e.target : e.source
+                                const otherNode = displayNodes.find(n => n.id === otherId)
+                                return { id: otherId, label: otherNode?.label || otherId, bandwidth: e.bandwidth, latency: e.latency }
+                              })
+                            onNodeClick({
+                              id: node.id,
+                              label: node.label,
+                              type: node.type,
+                              subType: node.subType,
+                              connections: nodeConnections,
+                            })
+                          }
+                        }}
+                        onDoubleClick={() => {
+                          if (onNodeDoubleClick && !node.isSwitch) {
+                            onNodeDoubleClick(node.id, node.type)
+                          }
+                        }}
+                      >
+                        {renderNodeShape(node)}
+                        <text
+                          y={4}
+                          textAnchor="middle"
+                          fontSize={14}
+                          fill="#fff"
+                          fontWeight={600}
+                          style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}
+                        >
+                          {/* 标签太长则只显示编号 */}
+                          {node.label.length > 6 ? node.label.match(/\d+/)?.[0] || node.label.slice(-2) : node.label}
+                        </text>
+                      </g>
+                    )
+                  })}
+                  </g>
+                </g>
+              )
+            })
+          })()}
+
           {/* 2D Torus：渲染环绕连接的半椭圆弧 */}
           {directTopology === 'torus_2d' && (() => {
             const deviceNodes = displayNodes.filter(n => !n.isSwitch)
@@ -1239,14 +1645,17 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             return <g>{arcs}</g>
           })()}
 
-          {/* 渲染连接线 */}
-          {edges.map((edge, i) => {
+          {/* 渲染连接线（非多层级模式） */}
+          {!multiLevelOptions?.enabled && edges.map((edge, i) => {
             const sourcePos = nodePositions.get(edge.source)
             const targetPos = nodePositions.get(edge.target)
             if (!sourcePos || !targetPos) return null
 
             const sourceNode = nodes.find(n => n.id === edge.source)
             const targetNode = nodes.find(n => n.id === edge.target)
+
+            const adjustedSourcePos = { x: sourcePos.x, y: sourcePos.y }
+            const adjustedTargetPos = { x: targetPos.x, y: targetPos.y }
 
             // 生成唯一的连接ID
             const edgeId = `${edge.source}-${edge.target}`
@@ -1386,15 +1795,39 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
               }
             }
 
+            // 多层级连接样式计算
+            const getMultiLevelEdgeStyle = () => {
+              if (!edge.connectionType) {
+                // 非多层级模式，使用原有逻辑
+                return {
+                  stroke: isLinkSelected ? '#52c41a' : (edge.isSwitch ? '#1890ff' : '#b0b0b0'),
+                  strokeWidth: isLinkSelected ? 3 : (edge.isSwitch ? 2 : 1.5),
+                  strokeDasharray: undefined as string | undefined,
+                }
+              }
+              // 多层级模式
+              switch (edge.connectionType) {
+                case 'intra_upper':
+                  return { stroke: isLinkSelected ? '#52c41a' : '#1890ff', strokeWidth: isLinkSelected ? 3 : 2, strokeDasharray: undefined }
+                case 'intra_lower':
+                  return { stroke: isLinkSelected ? '#52c41a' : '#52c41a', strokeWidth: isLinkSelected ? 3 : 1.5, strokeDasharray: undefined }
+                case 'inter_level':
+                  return { stroke: isLinkSelected ? '#52c41a' : '#faad14', strokeWidth: isLinkSelected ? 3 : 1.5, strokeDasharray: '6,3' }
+                default:
+                  return { stroke: '#b0b0b0', strokeWidth: 1.5, strokeDasharray: undefined }
+              }
+            }
+            const edgeStyle = getMultiLevelEdgeStyle()
+
             // 普通直线连接 - 使用中心点，节点会遮盖线的端点
             return (
-              <g key={`edge-${i}`}>
+              <g key={`edge-${i}`} style={{ transition: 'transform 0.3s ease-out' }}>
                 {/* 透明触发层 - 增大点击区域 */}
                 <line
-                  x1={sourcePos.x}
-                  y1={sourcePos.y}
-                  x2={targetPos.x}
-                  y2={targetPos.y}
+                  x1={adjustedSourcePos.x}
+                  y1={adjustedSourcePos.y}
+                  x2={adjustedTargetPos.x}
+                  y2={adjustedTargetPos.y}
                   stroke="transparent"
                   strokeWidth={16}
                   style={{ cursor: 'pointer' }}
@@ -1412,14 +1845,15 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                   }}
                   onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
                 />
-                {/* 可见线条 - Switch连接用蓝色，节点直连用灰色，选中时绿色高亮 */}
+                {/* 可见线条 */}
                 <line
-                  x1={sourcePos.x}
-                  y1={sourcePos.y}
-                  x2={targetPos.x}
-                  y2={targetPos.y}
-                  stroke={isLinkSelected ? '#52c41a' : (edge.isSwitch ? '#1890ff' : '#b0b0b0')}
-                  strokeWidth={isLinkSelected ? 3 : (edge.isSwitch ? 2 : 1.5)}
+                  x1={adjustedSourcePos.x}
+                  y1={adjustedSourcePos.y}
+                  x2={adjustedTargetPos.x}
+                  y2={adjustedTargetPos.y}
+                  stroke={edgeStyle.stroke}
+                  strokeWidth={edgeStyle.strokeWidth}
+                  strokeDasharray={edgeStyle.strokeDasharray}
                   strokeOpacity={isLinkSelected ? 1 : 0.7}
                   style={{ pointerEvents: 'none', filter: isLinkSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
                 />
@@ -1502,8 +1936,12 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
               )
             })}
 
-          {/* 渲染节点 */}
-          {displayNodes.map((node) => {
+          {/* 渲染节点（非多层级模式） */}
+          {!multiLevelOptions?.enabled && displayNodes.map((node) => {
+            // 容器节点不渲染
+            if (node.isContainer) {
+              return null
+            }
             const isSwitch = node.isSwitch
             // 计算连接数
             const nodeConnections = edges.filter(e => e.source === node.id || e.target === node.id)
@@ -1524,6 +1962,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             const isHovered = hoveredNodeId === node.id && connectionMode === 'view' && !isManualMode && !isDragging
             // 节点高亮：点击选中、hover 或者是选中 link 的端点
             const shouldHighlight = isNodeSelected || isHovered || isLinkEndpoint
+
             return (
               <g
                 key={node.id}

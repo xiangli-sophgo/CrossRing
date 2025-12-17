@@ -313,7 +313,7 @@ export default function ExperimentList() {
       render: (text, record) => {
         if (editingId === record.id && editingField === 'description') {
           return (
-            <Space>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Input
                 size="small"
                 value={editingValue}
@@ -321,7 +321,7 @@ export default function ExperimentList() {
                 onPressEnter={handleSaveEdit}
                 onKeyDown={(e) => e.key === 'Escape' && handleCancelEdit()}
                 autoFocus
-                style={{ width: 200 }}
+                style={{ flex: 1, minWidth: 150 }}
               />
               <Button size="small" type="primary" onClick={handleSaveEdit}>
                 保存
@@ -329,21 +329,23 @@ export default function ExperimentList() {
               <Button size="small" onClick={handleCancelEdit}>
                 取消
               </Button>
-            </Space>
+            </div>
           );
         }
         return (
-          <Space>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Tooltip title={text}>
-              <span>{text || '-'}</span>
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {text || '-'}
+              </span>
             </Tooltip>
             <Tooltip title="编辑描述">
               <EditOutlined
-                style={{ color: '#1890ff', cursor: 'pointer' }}
+                style={{ color: '#1890ff', cursor: 'pointer', flexShrink: 0 }}
                 onClick={() => handleStartEdit(record, 'description')}
               />
             </Tooltip>
-          </Space>
+          </div>
         );
       },
     },
@@ -383,48 +385,7 @@ export default function ExperimentList() {
 
   return (
     <div>
-      {/* 统计卡片 */}
-      <Card style={{ marginBottom: 24 }}>
-        <Row gutter={[24, 16]}>
-          <Col xs={12} sm={6}>
-            <StatCard
-              title="总实验数"
-              value={stats.total}
-              icon={<ExperimentOutlined />}
-              color={primaryColor}
-              bgColor="#e6f4ff"
-            />
-          </Col>
-          <Col xs={12} sm={6}>
-            <StatCard
-              title="已完成"
-              value={stats.completed}
-              icon={<CheckCircleOutlined />}
-              color={successColor}
-              bgColor="#f6ffed"
-            />
-          </Col>
-          <Col xs={12} sm={6}>
-            <StatCard
-              title="运行中"
-              value={stats.running}
-              icon={<SyncOutlined />}
-              color={warningColor}
-              bgColor="#fffbe6"
-            />
-          </Col>
-          <Col xs={12} sm={6}>
-            <StatCard
-              title="结果总数"
-              value={stats.totalResults}
-              icon={<DatabaseOutlined />}
-              color="#722ed1"
-              bgColor="#f9f0ff"
-            />
-          </Col>
-        </Row>
-      </Card>
-
+      
       {/* 主表格卡片 */}
       <Card
         title={

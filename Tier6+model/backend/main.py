@@ -14,7 +14,7 @@ import os
 from datetime import datetime
 
 from models import HierarchicalTopology, PodConfig, RackConfig, BoardConfig, ConnectionConfig, TopologyGenerateRequest, SavedConfig, ManualConnectionConfig, ManualConnection
-from topology import HierarchicalTopologyGenerator
+from topology import HierarchicalTopologyGenerator, LEVEL_CONNECTION_DEFAULTS
 
 # 配置文件存储路径
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), "saved_configs")
@@ -167,6 +167,12 @@ async def get_rack_dimensions():
         "total_u": 42,
         "full_height": 42 * 0.0445,
     }
+
+
+@app.get("/api/config/level-connection-defaults")
+async def get_level_connection_defaults():
+    """获取各层级连接的默认带宽和延迟配置"""
+    return LEVEL_CONNECTION_DEFAULTS
 
 
 @app.get("/health")

@@ -37,22 +37,24 @@ import {
   getTaskStatus,
   cancelTask,
   deleteTask,
-  getTaskHistory,
+  getGroupedHistory,
   getRunningTasks,
   getConfigs,
   getTrafficFilesTree,
   getTrafficFileContent,
   getConfigContent,
   saveConfigContent,
+  getBatchTaskStatus,
   type SimulationRequest,
   type TaskStatus,
-  type TaskHistoryItem,
   type ConfigOption,
   type TrafficTreeNode,
   type TrafficFileContentResponse,
+  type GroupedTaskItem,
 } from '@/api/simulation'
 import { getExperiments } from '@/api/experiments'
 import type { Experiment } from '@/types'
+import { useSimulationStore } from '@/stores/simulationStore'
 
 // 导入拆分的组件
 import {
@@ -66,14 +68,13 @@ import {
 } from './components'
 
 // 导入类型和工具函数
-import type { SweepParam, SweepProgress, SavedSweepConfig, GroupedTask } from './helpers'
+import type { SweepParam, SweepProgress, SavedSweepConfig } from './helpers'
 import {
   calculateSweepValues,
   generateCombinationsWithBinding,
   validateBindings,
   calculateTotalCombinationsWithBinding,
   sleep,
-  groupTaskHistory,
 } from './helpers'
 
 const { Text } = Typography
@@ -83,15 +84,23 @@ const Simulation: React.FC = () => {
   const navigate = useNavigate()
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
-  const [configs, setConfigs] = useState<{ kcin: ConfigOption[]; dcin: ConfigOption[] }>({ kcin: [], dcin: [] })
-  const [trafficTree, setTrafficTree] = useState<TrafficTreeNode[]>([])
+  // 使用全局store缓存配置和流量文件
+  const {
+    configs,
+    configsLoaded,
+    setConfigs,
+    trafficTree,
+    trafficTreeMode,
+    trafficTreeLoaded,
+    setTrafficTree,
+  } = useSimulationStore()
   const [selectedFiles, setSelectedFiles] = useState<string[]>([])
   const [loadingFiles, setLoadingFiles] = useState(false)
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
 
   // 运行中的任务列表（支持多任务）
   const [runningTasks, setRunningTasks] = useState<Map<string, { task: TaskStatus; startTime: number }>>(new Map())
-  const [taskHistory, setTaskHistory] = useState<TaskHistoryItem[]>([])
+  const [groupedTaskHistory, setGroupedTaskHistory] = useState<GroupedTaskItem[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
 
   // 配置编辑状态
@@ -116,7 +125,7 @@ const Simulation: React.FC = () => {
   // 参数遍历状态
   const [sweepParams, setSweepParams] = useState<SweepParam[]>([])
   const [sweepTaskIds, setSweepTaskIds] = useState<string[]>([])
-  const [sweepProgress, setSweepProgress] = useState<SweepProgress>({ total: 0, completed: 0, running: 0, failed: 0 })
+  const [sweepProgress, setSweepProgress] = useState<SweepProgress>({ total: 0, completed: 0, running: 0, pending: 0, failed: 0 })
   const [sweepRunning, setSweepRunning] = useState(false)
   const [savedSweepConfigs, setSavedSweepConfigs] = useState<SavedSweepConfig[]>([])
   const [sweepConfigName, setSweepConfigName] = useState('')
@@ -124,6 +133,8 @@ const Simulation: React.FC = () => {
 
   const pollIntervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
   const sweepPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const wsConnectionsRef = useRef<Map<string, WebSocket>>(new Map())
+  const runningTasksRef = useRef<Map<string, { task: TaskStatus; startTime: number }>>(new Map())
 
   // 恢复运行中的任务
   const restoreRunningTask = async () => {
@@ -131,34 +142,83 @@ const Simulation: React.FC = () => {
       const data = await getRunningTasks()
       if (data.tasks.length > 0) {
         const newRunningTasks = new Map<string, { task: TaskStatus; startTime: number }>()
-        for (const taskItem of data.tasks) {
-          const fullStatus = await getTaskStatus(taskItem.task_id)
-          const startTime = taskItem.started_at
-            ? new Date(taskItem.started_at).getTime()
-            : new Date(taskItem.created_at).getTime()
-          newRunningTasks.set(taskItem.task_id, { task: fullStatus, startTime })
-          startPolling(taskItem.task_id)
+        // 并行查询所有任务状态
+        const statusPromises = data.tasks.map(async (taskItem) => {
+          try {
+            const fullStatus = await getTaskStatus(taskItem.task_id)
+            return { taskItem, fullStatus, success: true }
+          } catch {
+            return { taskItem, fullStatus: null, success: false }
+          }
+        })
+        const results = await Promise.all(statusPromises)
+        for (const { taskItem, fullStatus, success } of results) {
+          // 只恢复 running 状态的任务，pending 状态的任务不显示卡片
+          if (success && fullStatus && fullStatus.status === 'running') {
+            const startTime = taskItem.started_at
+              ? new Date(taskItem.started_at).getTime()
+              : new Date(taskItem.created_at).getTime()
+            newRunningTasks.set(taskItem.task_id, { task: fullStatus, startTime })
+            connectTaskWebSocket(taskItem.task_id)
+          }
         }
         setRunningTasks(newRunningTasks)
-        message.info(`已恢复 ${data.tasks.length} 个运行中的任务`)
+        if (newRunningTasks.size > 0) {
+          message.info(`已恢复 ${newRunningTasks.size} 个运行中的任务`)
+        }
       }
     } catch (error) {
       console.error('恢复运行中任务失败:', error)
     }
   }
 
+  // 同步 runningTasks 到 ref，以便在 WebSocket 回调中访问最新值
+  useEffect(() => {
+    runningTasksRef.current = runningTasks
+  }, [runningTasks])
+
   // 加载配置和历史
   useEffect(() => {
-    loadConfigs()
-    loadHistory()
-    loadExistingExperiments()
-    loadTrafficFilesTree('kcin')
-    restoreRunningTask()
+    const initPage = async () => {
+      // 并行执行所有初始化操作，每个操作独立处理错误
+      const tasks: Promise<void>[] = []
+
+      // 加载配置（只在未加载时）
+      if (!configsLoaded) {
+        tasks.push(loadConfigs())
+      } else {
+        // 已有缓存，直接设置默认配置
+        const defaultConfig = configs.kcin.find((c: ConfigOption) => c.path.includes('topo_5x4'))
+        if (defaultConfig && !form.getFieldValue('config_path')) {
+          form.setFieldsValue({ config_path: defaultConfig.path })
+          tasks.push(loadConfigContent(defaultConfig.path))
+        }
+      }
+
+      // 加载流量文件（只在未加载或模式不匹配时）
+      if (!trafficTreeLoaded || trafficTreeMode !== 'kcin') {
+        tasks.push(loadTrafficFilesTree('kcin'))
+      }
+
+      // 加载历史和实验列表
+      tasks.push(loadHistory())
+      tasks.push(loadExistingExperiments())
+      tasks.push(restoreRunningTask())
+
+      // 等待所有任务完成（每个任务已独立处理错误）
+      await Promise.allSettled(tasks)
+    }
+
+    initPage()
+
     return () => {
       // 清除所有任务轮询
       pollIntervalsRef.current.forEach(interval => clearInterval(interval))
       pollIntervalsRef.current.clear()
       if (sweepPollRef.current) clearInterval(sweepPollRef.current)
+      // 关闭所有 WebSocket 连接
+      wsConnectionsRef.current.forEach(ws => ws.close())
+      wsConnectionsRef.current.clear()
     }
   }, [])
 
@@ -191,8 +251,8 @@ const Simulation: React.FC = () => {
   const loadHistory = async () => {
     setLoadingHistory(true)
     try {
-      const data = await getTaskHistory(10)
-      setTaskHistory(data.tasks)
+      const data = await getGroupedHistory(50)
+      setGroupedTaskHistory(data.groups)
     } catch (error) {
       console.error('加载历史失败:', error)
     } finally {
@@ -200,11 +260,15 @@ const Simulation: React.FC = () => {
     }
   }
 
-  const loadTrafficFilesTree = async (filterMode?: 'kcin' | 'dcin') => {
+  const loadTrafficFilesTree = async (filterMode?: 'kcin' | 'dcin', forceRefresh?: boolean) => {
+    // 如果缓存有效且不强制刷新，直接返回
+    if (!forceRefresh && trafficTreeLoaded && trafficTreeMode === filterMode) {
+      return
+    }
     setLoadingFiles(true)
     try {
       const data = await getTrafficFilesTree(filterMode)
-      setTrafficTree(data.tree)
+      setTrafficTree(data.tree, filterMode || 'kcin')
     } catch (error) {
       console.error('加载流量文件失败:', error)
     } finally {
@@ -321,7 +385,7 @@ const Simulation: React.FC = () => {
         newMap.set(response.task_id, { task: initialStatus, startTime: Date.now() })
         return newMap
       })
-      startPolling(response.task_id)
+      connectTaskWebSocket(response.task_id)
     } catch (error: any) {
       message.error(error.response?.data?.detail || '启动仿真失败')
     } finally {
@@ -329,15 +393,110 @@ const Simulation: React.FC = () => {
     }
   }
 
+  // WebSocket 连接管理
+  const connectTaskWebSocket = (taskId: string) => {
+    // 如果已经有连接，不重复创建
+    if (wsConnectionsRef.current.has(taskId)) return
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(`${protocol}//${window.location.host}/api/simulation/ws/${taskId}`)
+    let messageShown = false
+
+    ws.onopen = () => {
+      console.log(`WebSocket connected for task ${taskId}`)
+    }
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+
+        // 忽略心跳消息
+        if (data.type === 'heartbeat') return
+
+        // 更新任务状态
+        setRunningTasks(prev => {
+          const newMap = new Map(prev)
+          const existing = newMap.get(taskId)
+          if (existing) {
+            newMap.set(taskId, {
+              ...existing,
+              task: {
+                ...existing.task,
+                status: data.status,
+                progress: data.progress,
+                current_file: data.current_file,
+                message: data.message,
+                sim_details: data.sim_details,
+              }
+            })
+          }
+          return newMap
+        })
+
+        // 任务完成时关闭连接
+        if (['completed', 'failed', 'cancelled'].includes(data.status)) {
+          ws.close()
+          wsConnectionsRef.current.delete(taskId)
+
+          // 延迟移除任务卡片
+          setTimeout(() => {
+            setRunningTasks(prev => {
+              const newMap = new Map(prev)
+              newMap.delete(taskId)
+              return newMap
+            })
+          }, 3000)
+
+          loadHistory()
+
+          if (!messageShown) {
+            messageShown = true
+            const expName = data.experiment_name || taskId.slice(0, 8)
+            if (data.status === 'completed') message.success(`任务完成: ${expName}`)
+            else if (data.status === 'failed') message.error(`任务失败: ${expName}`)
+          }
+        }
+      } catch (e) {
+        console.error('Failed to parse WebSocket message:', e)
+      }
+    }
+
+    ws.onerror = (error) => {
+      console.error(`WebSocket error for task ${taskId}:`, error)
+      // 发生错误时关闭连接，不再回退到轮询（避免轮询超时问题）
+      ws.close()
+      wsConnectionsRef.current.delete(taskId)
+    }
+
+    ws.onclose = (event) => {
+      wsConnectionsRef.current.delete(taskId)
+      // 非正常关闭时尝试重连（2秒后）
+      if (event.code !== 1000) {
+        setTimeout(() => {
+          // 重连前检查任务是否仍在运行
+          const taskEntry = runningTasksRef.current.get(taskId)
+          if (taskEntry && !['completed', 'failed', 'cancelled'].includes(taskEntry.task.status)) {
+            console.log(`WebSocket reconnecting for task ${taskId}...`)
+            connectTaskWebSocket(taskId)
+          }
+        }, 2000)
+      }
+    }
+
+    wsConnectionsRef.current.set(taskId, ws)
+  }
+
   const startPolling = (taskId: string) => {
     // 如果已经在轮询这个任务，不重复创建
     if (pollIntervalsRef.current.has(taskId)) return
 
     let messageShown = false  // 防止重复显示消息
+    let errorCount = 0  // 连续错误计数
 
     const poll = async () => {
       try {
         const status = await getTaskStatus(taskId)
+        errorCount = 0  // 重置错误计数
         setRunningTasks(prev => {
           const newMap = new Map(prev)
           const existing = newMap.get(taskId)
@@ -370,8 +529,39 @@ const Simulation: React.FC = () => {
             else if (status.status === 'failed') message.error(`任务失败: ${expName}`)
           }
         }
-      } catch (error) {
-        console.error('获取任务状态失败:', error)
+      } catch (error: any) {
+        // 404 表示任务已不存在，立即停止轮询
+        if (error.response?.status === 404) {
+          const interval = pollIntervalsRef.current.get(taskId)
+          if (interval) {
+            clearInterval(interval)
+            pollIntervalsRef.current.delete(taskId)
+          }
+          setRunningTasks(prev => {
+            const newMap = new Map(prev)
+            newMap.delete(taskId)
+            return newMap
+          })
+          loadHistory()
+          return
+        }
+
+        errorCount++
+        console.error(`获取任务状态失败 (${errorCount}/3):`, error)
+        // 连续3次失败后停止轮询该任务
+        if (errorCount >= 3) {
+          const interval = pollIntervalsRef.current.get(taskId)
+          if (interval) {
+            clearInterval(interval)
+            pollIntervalsRef.current.delete(taskId)
+          }
+          setRunningTasks(prev => {
+            const newMap = new Map(prev)
+            newMap.delete(taskId)
+            return newMap
+          })
+          message.warning(`任务 ${taskId.slice(0, 8)} 状态获取失败，已停止轮询`)
+        }
       }
     }
 
@@ -389,6 +579,12 @@ const Simulation: React.FC = () => {
       if (interval) {
         clearInterval(interval)
         pollIntervalsRef.current.delete(taskId)
+      }
+      // 关闭 WebSocket 连接
+      const ws = wsConnectionsRef.current.get(taskId)
+      if (ws) {
+        ws.close()
+        wsConnectionsRef.current.delete(taskId)
       }
       // 从列表移除
       setRunningTasks(prev => {
@@ -504,42 +700,59 @@ const Simulation: React.FC = () => {
     return typeof value === 'number' && !sweepParams.find(p => p.key === key)
   })
 
-  // 批量任务状态轮询
+  // 批量任务状态轮询（混合策略：批量查询 + WebSocket）
   const startSweepPolling = (taskIds: string[]) => {
     if (sweepPollRef.current) clearInterval(sweepPollRef.current)
 
     const poll = async () => {
-      let completed = 0
-      let running = 0
-      let failed = 0
+      try {
+        // 使用批量查询接口，一次请求获取所有任务状态
+        const { tasks } = await getBatchTaskStatus(taskIds)
 
-      for (const taskId of taskIds) {
-        try {
-          const status = await getTaskStatus(taskId)
-          if (status.status === 'completed') completed++
-          else if (['running', 'pending'].includes(status.status)) running++
+        let completed = 0
+        let running = 0
+        let pending = 0
+        let failed = 0
+
+        for (const taskId of taskIds) {
+          const taskStatus = tasks[taskId]
+          if (!taskStatus) {
+            failed++
+            continue
+          }
+
+          const status = taskStatus.status
+          if (status === 'completed') completed++
+          else if (status === 'running') {
+            running++
+            // 对 running 状态的任务建立 WebSocket 连接获取详细进度
+            if (!wsConnectionsRef.current.has(taskId)) {
+              connectTaskWebSocket(taskId)
+            }
+          }
+          else if (status === 'pending') pending++
           else failed++
-        } catch {
-          failed++
         }
-      }
 
-      setSweepProgress({ total: taskIds.length, completed, running, failed })
+        setSweepProgress({ total: taskIds.length, completed, running, pending, failed })
 
-      if (completed + failed >= taskIds.length) {
-        if (sweepPollRef.current) {
-          clearInterval(sweepPollRef.current)
-          sweepPollRef.current = null
+        if (completed + failed >= taskIds.length) {
+          if (sweepPollRef.current) {
+            clearInterval(sweepPollRef.current)
+            sweepPollRef.current = null
+          }
+          setSweepRunning(false)
+          sessionStorage.removeItem('sweepTaskIds')
+          message.success(`参数遍历完成: ${completed} 成功, ${failed} 失败`)
+          loadHistory()
         }
-        setSweepRunning(false)
-        sessionStorage.removeItem('sweepTaskIds')
-        message.success(`参数遍历完成: ${completed} 成功, ${failed} 失败`)
-        loadHistory()
+      } catch (error) {
+        console.error('批量查询任务状态失败:', error)
       }
     }
 
     poll()
-    sweepPollRef.current = setInterval(poll, 3000)
+    sweepPollRef.current = setInterval(poll, 5000)  // 5秒轮询一次
   }
 
   // 恢复参数遍历任务
@@ -555,24 +768,30 @@ const Simulation: React.FC = () => {
         setSweepRestoring(true)
         setSweepTaskIds(taskIds)
 
+        // 使用批量查询接口
+        const { tasks } = await getBatchTaskStatus(taskIds)
+
         let completed = 0
         let running = 0
+        let pending = 0
         let failed = 0
 
         for (const taskId of taskIds) {
-          try {
-            const status = await getTaskStatus(taskId)
-            if (status.status === 'completed') completed++
-            else if (['running', 'pending'].includes(status.status)) running++
-            else failed++
-          } catch {
+          const taskStatus = tasks[taskId]
+          if (!taskStatus) {
             failed++
+            continue
           }
+          const status = taskStatus.status
+          if (status === 'completed') completed++
+          else if (status === 'running') running++
+          else if (status === 'pending') pending++
+          else failed++
         }
 
-        setSweepProgress({ total: taskIds.length, completed, running, failed })
+        setSweepProgress({ total: taskIds.length, completed, running, pending, failed })
 
-        if (running > 0) {
+        if (running > 0 || pending > 0) {
           setSweepRunning(true)
           startSweepPolling(taskIds)
           message.info('已恢复参数遍历任务')
@@ -613,7 +832,10 @@ const Simulation: React.FC = () => {
       Modal.confirm({
         title: '组合数量较多',
         content: `将生成 ${combinations.length} 组参数组合，确定继续？`,
-        onOk: () => executeSweep(values, combinations)
+        onOk: () => {
+          // 不返回 Promise，让 Modal 立即关闭
+          executeSweep(values, combinations)
+        }
       })
       return
     }
@@ -624,7 +846,7 @@ const Simulation: React.FC = () => {
   const executeSweep = async (values: any, combinations: Record<string, number>[]) => {
     setSweepRunning(true)
     setSweepTaskIds([])
-    setSweepProgress({ total: combinations.length, completed: 0, running: 0, failed: 0 })
+    setSweepProgress({ total: combinations.length, completed: 0, running: 0, pending: 0, failed: 0 })
 
     const topology = `${values.rows}x${values.cols}`
     const batchId = Date.now().toString()
@@ -674,12 +896,12 @@ const Simulation: React.FC = () => {
     }
   }
 
-  const handleDeleteGroupedTask = async (record: GroupedTask) => {
+  const handleDeleteGroupedTask = async (record: GroupedTaskItem) => {
     try {
-      for (const task of record.tasks) {
-        await deleteTask(task.task_id)
+      for (const taskId of record.task_ids) {
+        await deleteTask(taskId)
       }
-      message.success(`已删除 ${record.tasks.length} 个任务`)
+      message.success(`已删除 ${record.task_ids.length} 个任务`)
       loadHistory()
     } catch (error: any) {
       message.error(error.response?.data?.detail || '删除失败')
@@ -687,7 +909,6 @@ const Simulation: React.FC = () => {
   }
 
   const mode = Form.useWatch('mode', form) || 'kcin'
-  const groupedTaskHistory = groupTaskHistory(taskHistory)
 
   return (
     <div>
@@ -1057,7 +1278,7 @@ const Simulation: React.FC = () => {
             loading={loadingFiles}
             onSelect={setSelectedFiles}
             onExpandedKeysChange={setExpandedKeys}
-            onRefresh={() => loadTrafficFilesTree(mode as 'kcin' | 'dcin')}
+            onRefresh={() => loadTrafficFilesTree(mode as 'kcin' | 'dcin', true)}
             onPreviewFile={handlePreviewFile}
           />
         </Col>

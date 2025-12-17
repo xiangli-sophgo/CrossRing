@@ -20,6 +20,7 @@ export interface SweepProgress {
   total: number
   completed: number
   running: number
+  pending: number
   failed: number
 }
 
@@ -36,6 +37,8 @@ export interface GroupedTask {
   failed_count: number
   total_count: number
   experiment_id?: number
+  errors: string[]  // 收集组内失败任务的错误信息
+  is_sweep: boolean  // 是否为参数遍历
 }
 
 // 保存的遍历配置
@@ -214,14 +217,30 @@ export const getElapsedTime = (startTime: number | null): string => {
   return `${mins}分${secs}秒`
 }
 
+// 从描述中提取 batch ID
+function extractBatchId(description: string | null): string | null {
+  if (!description) return null
+  const match = description.match(/\[batch:(\d+)\]/)
+  return match ? match[1] : null
+}
+
 // 按批次分组历史任务
 export function groupTaskHistory(taskHistory: TaskHistoryItem[]): GroupedTask[] {
   const groups: Record<string, GroupedTask> = {}
 
   taskHistory.forEach(task => {
-    const createTime = new Date(task.created_at)
-    const timeKey = `${createTime.getFullYear()}-${createTime.getMonth()}-${createTime.getDate()}-${createTime.getHours()}-${createTime.getMinutes()}`
-    const groupKey = `${task.experiment_name || '未命名'}_${task.mode}_${task.topology}_${timeKey}`
+    // 检查是否为参数遍历（通过 description 中的 batch ID 判断）
+    const batchId = extractBatchId(task.experiment_description)
+    const isSweep = batchId !== null
+
+    let groupKey: string
+    if (isSweep) {
+      // 参数遍历：用 batch ID 分组
+      groupKey = `sweep_${batchId}_${task.experiment_name || '未命名'}`
+    } else {
+      // 普通任务：每个任务单独一组
+      groupKey = `single_${task.task_id}`
+    }
 
     if (!groups[groupKey]) {
       groups[groupKey] = {
@@ -236,6 +255,8 @@ export function groupTaskHistory(taskHistory: TaskHistoryItem[]): GroupedTask[] 
         failed_count: 0,
         total_count: 0,
         experiment_id: task.results?.experiment_id,
+        errors: [],
+        is_sweep: isSweep,
       }
     }
 
@@ -247,6 +268,10 @@ export function groupTaskHistory(taskHistory: TaskHistoryItem[]): GroupedTask[] 
     } else if (task.status === 'failed') {
       groups[groupKey].failed_count++
       groups[groupKey].status = 'failed'
+      // 收集错误信息
+      if (task.error) {
+        groups[groupKey].errors.push(task.error)
+      }
     } else if (['running', 'pending'].includes(task.status)) {
       groups[groupKey].status = 'running'
     }

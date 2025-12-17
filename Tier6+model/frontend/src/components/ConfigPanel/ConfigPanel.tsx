@@ -62,6 +62,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onDeleteManualConnection,
   currentViewConnections = [],
   onDeleteConnection,
+  onUpdateConnectionParams,
   layoutType: _layoutType = 'auto',
   onLayoutTypeChange: _onLayoutTypeChange,
   viewMode = 'topology',
@@ -368,6 +369,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                     onDeleteManualConnection={onDeleteManualConnection}
                     currentViewConnections={currentViewConnections}
                     onDeleteConnection={onDeleteConnection}
+                    onUpdateConnectionParams={onUpdateConnectionParams}
                     configRowStyle={configRowStyle}
                     currentLevel={currentLevel}
                   />
@@ -434,6 +436,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                     onDeleteManualConnection={onDeleteManualConnection}
                     currentViewConnections={currentViewConnections}
                     onDeleteConnection={onDeleteConnection}
+                    onUpdateConnectionParams={onUpdateConnectionParams}
                     configRowStyle={configRowStyle}
                     currentLevel={currentLevel}
                   />
@@ -636,6 +639,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                     onDeleteManualConnection={onDeleteManualConnection}
                     currentViewConnections={currentViewConnections}
                     onDeleteConnection={onDeleteConnection}
+                    onUpdateConnectionParams={onUpdateConnectionParams}
                     configRowStyle={configRowStyle}
                     currentLevel={currentLevel}
                   />
@@ -760,6 +764,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                     onDeleteManualConnection={onDeleteManualConnection}
                     currentViewConnections={currentViewConnections}
                     onDeleteConnection={onDeleteConnection}
+                    onUpdateConnectionParams={onUpdateConnectionParams}
                     configRowStyle={configRowStyle}
                     currentLevel={currentLevel}
                   />

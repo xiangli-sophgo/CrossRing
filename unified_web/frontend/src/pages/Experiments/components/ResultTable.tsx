@@ -536,6 +536,13 @@ export default function ResultTable({
           }
           return Number.isInteger(value) ? value : value.toFixed(2);
         }
+        // 数据流名称只显示最后的文件名
+        if (col === '数据流名称' || col === 'file_name' || col === 'TRAFFIC_FILE' || col === 'traffic_file') {
+          const strValue = String(value);
+          if (strValue.includes('/') || strValue.includes('\\')) {
+            return strValue.split('/').pop()?.split('\\').pop() || strValue;
+          }
+        }
         return value;
       });
     });
@@ -975,7 +982,7 @@ export default function ResultTable({
               block
               loading={presetsLoading}
             >
-              保存当前配置为方案
+              保存当前配置方案
             </Button>
           </div>
           <Divider style={{ margin: '12px 0' }}>已保存的方案 ({experimentType.toUpperCase()})</Divider>

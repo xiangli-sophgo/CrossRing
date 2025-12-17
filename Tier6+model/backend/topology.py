@@ -15,6 +15,15 @@ from models import (
 )
 
 
+# 各层级连接的默认参数配置
+LEVEL_CONNECTION_DEFAULTS = {
+    "datacenter": {"bandwidth": 400.0, "latency": 300.0},   # Pod间: 400Gbps, 300ns
+    "pod": {"bandwidth": 100.0, "latency": 200.0},          # Rack间: 100Gbps, 200ns
+    "rack": {"bandwidth": 100.0, "latency": 100.0},         # Board间: 100Gbps, 100ns
+    "board": {"bandwidth": 400.0, "latency": 50.0},         # Chip间: 400Gbps, 50ns
+}
+
+
 class HierarchicalTopologyGenerator:
     """层级拓扑生成器"""
 
@@ -645,7 +654,11 @@ class HierarchicalTopologyGenerator:
         # 根据拓扑类型生成NPU间连接
         if topology_type != 'none' and len(npus) > 1:
             npu_ids = [c.id for c in npus]
-            npu_connections = self._generate_direct_connections(npu_ids, topology_type, 'intra', 400.0, latency=50.0)
+            board_defaults = LEVEL_CONNECTION_DEFAULTS["board"]
+            npu_connections = self._generate_direct_connections(
+                npu_ids, topology_type, 'intra',
+                board_defaults["bandwidth"], latency=board_defaults["latency"]
+            )
             connections.extend(npu_connections)
 
         return connections
@@ -657,7 +670,11 @@ class HierarchicalTopologyGenerator:
     ) -> List[ConnectionConfig]:
         """生成Board间的连接"""
         board_ids = [b.id for b in boards]
-        return self._generate_direct_connections(board_ids, topology_type, 'intra', 100.0, latency=100.0)
+        rack_defaults = LEVEL_CONNECTION_DEFAULTS["rack"]
+        return self._generate_direct_connections(
+            board_ids, topology_type, 'intra',
+            rack_defaults["bandwidth"], latency=rack_defaults["latency"]
+        )
 
     def _generate_rack_connections(
         self,
@@ -665,7 +682,11 @@ class HierarchicalTopologyGenerator:
         topology_type: str = 'full_mesh'
     ) -> List[ConnectionConfig]:
         """生成Rack间的连接"""
-        return self._generate_direct_connections(rack_ids, topology_type, 'intra', 400.0, latency=200.0)
+        pod_defaults = LEVEL_CONNECTION_DEFAULTS["pod"]
+        return self._generate_direct_connections(
+            rack_ids, topology_type, 'intra',
+            pod_defaults["bandwidth"], latency=pod_defaults["latency"]
+        )
 
     def _generate_pod_connections(
         self,
@@ -673,7 +694,11 @@ class HierarchicalTopologyGenerator:
         topology_type: str = 'full_mesh'
     ) -> List[ConnectionConfig]:
         """生成Pod间的连接"""
-        return self._generate_direct_connections(pod_ids, topology_type, 'inter', 1600.0, latency=500.0)
+        dc_defaults = LEVEL_CONNECTION_DEFAULTS["datacenter"]
+        return self._generate_direct_connections(
+            pod_ids, topology_type, 'inter',
+            dc_defaults["bandwidth"], latency=dc_defaults["latency"]
+        )
 
     def _generate_direct_connections(
         self,

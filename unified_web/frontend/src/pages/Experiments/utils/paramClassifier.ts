@@ -385,5 +385,12 @@ export function formatParamValue(value: unknown, key?: string): string {
   if (typeof value === 'boolean') {
     return value ? '是' : '否';
   }
+  // 数据流名称只显示最后的文件名
+  if (key && (key === '数据流名称' || key === 'file_name' || key === 'TRAFFIC_FILE' || key === 'traffic_file')) {
+    const strValue = String(value);
+    if (strValue.includes('/') || strValue.includes('\\')) {
+      return strValue.split('/').pop()?.split('\\').pop() || strValue;
+    }
+  }
   return String(value);
 }

@@ -6,6 +6,7 @@ import asyncio
 import yaml
 from pathlib import Path
 from typing import List, Optional, Literal, Dict, Any
+import re
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
@@ -208,6 +209,29 @@ async def get_task_status(task_id: str):
     )
 
 
+class BatchStatusRequest(BaseModel):
+    """批量状态查询请求"""
+    task_ids: List[str]
+
+
+@router.post("/status/batch")
+async def get_batch_task_status(request: BatchStatusRequest):
+    """
+    批量获取任务状态（用于参数遍历场景）
+    """
+    results = {}
+    for task_id in request.task_ids:
+        task = task_manager.get_task(task_id)
+        if task:
+            results[task_id] = {
+                "status": task.status.value,
+                "progress": task.progress,
+                "current_file": task.current_file,
+                "message": task.message,
+            }
+    return {"tasks": results}
+
+
 @router.post("/cancel/{task_id}")
 async def cancel_task(task_id: str):
     """
@@ -279,15 +303,109 @@ async def get_history(limit: int = 20):
                 "status": t.status.value,
                 "progress": t.progress,
                 "message": t.message,
+                "error": t.error,
                 "created_at": t.created_at.isoformat(),
                 "completed_at": t.completed_at.isoformat() if t.completed_at else None,
                 "traffic_files": t.traffic_files,
                 "experiment_name": t.experiment_name,
+                "experiment_description": t.experiment_description,
                 "results": t.results,
             }
             for t in tasks
         ]
     }
+
+
+@router.get("/history/grouped")
+async def get_history_grouped(limit: int = 50):
+    """
+    获取按实验分组的历史任务
+    """
+    # 获取足够多的任务用于分组
+    tasks = task_manager.get_history(limit * 10)
+
+    def extract_batch_id(description: str | None) -> str | None:
+        if not description:
+            return None
+        match = re.search(r'\[batch:(\d+)\]', description)
+        return match.group(1) if match else None
+
+    groups: Dict[str, Dict[str, Any]] = {}
+
+    for t in tasks:
+        batch_id = extract_batch_id(t.experiment_description)
+        is_sweep = batch_id is not None
+
+        if is_sweep:
+            group_key = f"sweep_{batch_id}_{t.experiment_name or '未命名'}"
+        else:
+            group_key = f"single_{t.task_id}"
+
+        if group_key not in groups:
+            groups[group_key] = {
+                "key": group_key,
+                "experiment_name": t.experiment_name or "未命名实验",
+                "mode": t.mode,
+                "topology": t.topology,
+                "created_at": t.created_at.isoformat(),
+                "status": "completed",
+                "completed_count": 0,
+                "failed_count": 0,
+                "total_count": 0,
+                "experiment_id": t.results.get("experiment_id") if t.results else None,
+                "errors": [],
+                "is_sweep": is_sweep,
+                "task_ids": [],
+            }
+
+        groups[group_key]["task_ids"].append(t.task_id)
+
+        # 计算文件数（而非任务数）
+        task_file_count = len(t.traffic_files) if t.traffic_files else 1
+        groups[group_key]["total_count"] += task_file_count
+
+        # 状态优先级: running > cancelled > failed > completed
+        # 根据任务结果计算完成/失败的文件数
+        if t.status.value == "completed":
+            if t.results and "completed_files" in t.results:
+                groups[group_key]["completed_count"] += t.results["completed_files"]
+                groups[group_key]["failed_count"] += t.results.get("failed_files", 0)
+            else:
+                groups[group_key]["completed_count"] += task_file_count
+        elif t.status.value == "failed":
+            groups[group_key]["failed_count"] += task_file_count
+            if groups[group_key]["status"] not in ("running", "cancelled"):
+                groups[group_key]["status"] = "failed"
+            if t.error:
+                groups[group_key]["errors"].append(t.error)
+        elif t.status.value == "cancelled":
+            # 取消时，使用 sim_details 中的进度
+            if t.sim_details and "file_index" in t.sim_details:
+                groups[group_key]["completed_count"] += t.sim_details["file_index"]
+                groups[group_key]["failed_count"] += task_file_count - t.sim_details["file_index"]
+            else:
+                groups[group_key]["failed_count"] += task_file_count
+            if groups[group_key]["status"] != "running":
+                groups[group_key]["status"] = "cancelled"
+            if t.error:
+                groups[group_key]["errors"].append(t.error)
+        elif t.status.value in ("running", "pending"):
+            # 运行中：使用 sim_details 中的进度
+            if t.sim_details and "file_index" in t.sim_details:
+                groups[group_key]["completed_count"] += t.sim_details["file_index"]
+            groups[group_key]["status"] = "running"
+
+        if not groups[group_key]["experiment_id"] and t.results:
+            groups[group_key]["experiment_id"] = t.results.get("experiment_id")
+
+    # 按创建时间排序，取前 limit 个
+    sorted_groups = sorted(
+        groups.values(),
+        key=lambda x: x["created_at"],
+        reverse=True
+    )[:limit]
+
+    return {"groups": sorted_groups}
 
 
 @router.delete("/history")
@@ -866,6 +984,8 @@ async def websocket_progress(websocket: WebSocket, task_id: str):
             "progress": task.progress,
             "current_file": task.current_file,
             "message": task.message,
+            "sim_details": task.sim_details,
+            "experiment_name": task.experiment_name,
         })
 
         # 持续推送更新
@@ -879,6 +999,8 @@ async def websocket_progress(websocket: WebSocket, task_id: str):
                     "current_file": updated_task.current_file,
                     "message": updated_task.message,
                     "error": updated_task.error,
+                    "sim_details": updated_task.sim_details,
+                    "experiment_name": updated_task.experiment_name,
                 })
 
                 # 任务完成后退出

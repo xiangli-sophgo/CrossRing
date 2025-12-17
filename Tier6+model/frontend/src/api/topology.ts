@@ -96,6 +96,17 @@ export async function getRackDimensions(): Promise<{
   return response.data
 }
 
+// 获取各层级连接的默认带宽和延迟配置
+export async function getLevelConnectionDefaults(): Promise<{
+  datacenter: { bandwidth: number; latency: number }
+  pod: { bandwidth: number; latency: number }
+  rack: { bandwidth: number; latency: number }
+  board: { bandwidth: number; latency: number }
+}> {
+  const response = await api.get('/config/level-connection-defaults')
+  return response.data
+}
+
 // ============================================
 // 配置保存/加载 API
 // ============================================

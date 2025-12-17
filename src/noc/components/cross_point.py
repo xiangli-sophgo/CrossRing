@@ -267,10 +267,10 @@ class CrossPoint:
 
         if flit.ETag_priority == "T2":
             if not t1_enabled:
-                # T1禁用时：T2升级到T0需要下环尝试次数>2
-                if direction == "TL" and flit.eject_attempts_h > 2:
+                # T1禁用时：T2直接升级到T0
+                if direction == "TL":
                     return "T0"
-                elif direction == "TU" and flit.eject_attempts_v > 2:
+                elif direction == "TU":
                     return "T0"
                 elif direction in ["TR", "TD"]:
                     # TR/TD需要额外满足双侧下环保序条件

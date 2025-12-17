@@ -76,11 +76,24 @@ export interface ManualConnection {
   created_at?: string;
 }
 
+// 层级默认连接参数
+export interface LevelConnectionDefaults {
+  bandwidth?: number;  // 默认带宽 (Gbps)
+  latency?: number;    // 默认延迟 (ns)
+}
+
 // 手动连接配置
 export interface ManualConnectionConfig {
   enabled: boolean;
   mode: 'append' | 'replace';
   connections: ManualConnection[];
+  // 各层级默认连接参数
+  level_defaults?: {
+    datacenter?: LevelConnectionDefaults;
+    pod?: LevelConnectionDefaults;
+    rack?: LevelConnectionDefaults;
+    board?: LevelConnectionDefaults;
+  };
 }
 
 // 连接模式: view=查看, select_source=选择源节点, select_target=选择目标节点
@@ -320,4 +333,26 @@ export const CIRCUIT_TRACE_CONFIG = {
 export const KEYBOARD_SHORTCUTS = {
   back: ['Escape', 'Backspace'],      // 返回上一级
   resetView: ['KeyR'],                 // 重置相机视角
+};
+
+// ============================================
+// 多层级视图配置
+// ============================================
+
+// 相邻层级组合
+export type AdjacentLevelPair = 'datacenter_pod' | 'pod_rack' | 'rack_board' | 'board_chip';
+
+// 多层级视图选项
+export interface MultiLevelViewOptions {
+  enabled: boolean;
+  levelPair: AdjacentLevelPair;
+  expandedContainers: Set<string>;  // 展开的容器节点ID
+}
+
+// 层级组合显示名称
+export const LEVEL_PAIR_NAMES: Record<AdjacentLevelPair, string> = {
+  datacenter_pod: 'Datacenter + Pod',
+  pod_rack: 'Pod + Rack',
+  rack_board: 'Rack + Board',
+  board_chip: 'Board + Chip',
 };
