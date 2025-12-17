@@ -493,7 +493,7 @@ const App: React.FC = () => {
             <span style={{ color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>T6</span>
           </div>
           <Title level={4} style={{ color: '#1A1A1A', margin: 0, fontSize: 16, fontWeight: 600 }}>
-            Tier6+ Topology
+            Tier6+ 互联建模
           </Title>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
