@@ -143,6 +143,8 @@ export interface ConfigPanelProps {
   // Switch 3D显示配置
   switchDisplayConfig?: SwitchDisplayConfig
   onSwitchDisplayConfigChange?: (config: SwitchDisplayConfig) => void
+  // 外部控制聚焦的层级（点击容器时切换）
+  focusedLevel?: 'datacenter' | 'pod' | 'rack' | 'board' | null
 }
 
 // ============================================

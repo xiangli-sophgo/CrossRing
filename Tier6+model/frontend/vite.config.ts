@@ -16,11 +16,30 @@ export default defineConfig({
   },
   server: {
     port: 3100,
+    host: '127.0.0.1', // 避免 Mac 上 localhost IPv6 解析延迟
     proxy: {
       '/api': {
-        target: 'http://localhost:8003',
+        target: 'http://127.0.0.1:8004', // 使用 127.0.0.1 替代 localhost
         changeOrigin: true,
       },
     },
+    watch: {
+      // Mac 上使用 polling 模式可能更稳定，但通常不需要
+      // usePolling: true,
+      // 忽略不需要监听的目录
+      ignored: ['**/node_modules/**', '**/.git/**'],
+    },
+  },
+  // 优化依赖预构建
+  optimizeDeps: {
+    include: [
+      'three',
+      '@react-three/fiber',
+      '@react-three/drei',
+      '@react-spring/three',
+      'react',
+      'react-dom',
+      'antd',
+    ],
   },
 })

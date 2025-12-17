@@ -114,6 +114,14 @@ export interface Node {
     width: number
     height: number
   }
+  // 多层级模式：容器内的单层级完整布局数据（用于展开动画）
+  singleLevelData?: {
+    nodes: Node[]
+    edges: Edge[]
+    viewBox: { width: number; height: number }
+    scale: number  // 从单层级视图到容器内视图的缩放比例
+    directTopology?: string  // 布局类型，用于判断是否需要曲线连接
+  }
 }
 
 export interface Edge {

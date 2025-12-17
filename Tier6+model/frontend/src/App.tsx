@@ -2,8 +2,8 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { Layout, Typography, Spin, message, Segmented, Card, Descriptions, Tag, Collapse } from 'antd'
 import { Scene3D } from './components/Scene3D'
 import { ConfigPanel } from './components/ConfigPanel'
-import { TopologyGraph, NodeDetail, LinkDetail, LevelPairSelector } from './components/TopologyGraph'
-import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType, MultiLevelViewOptions, AdjacentLevelPair } from './types'
+import { TopologyGraph, NodeDetail, LinkDetail } from './components/TopologyGraph'
+import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType, MultiLevelViewOptions } from './types'
 import { getTopology, generateTopology, getLevelConnectionDefaults } from './api/topology'
 import { useViewNavigation } from './hooks/useViewNavigation'
 
@@ -45,6 +45,9 @@ const App: React.FC = () => {
 
   // 选中的连接详情
   const [selectedLink, setSelectedLink] = useState<LinkDetail | null>(null)
+
+  // 聚焦的层级配置（点击容器时切换）
+  const [focusedLevel, setFocusedLevel] = useState<'datacenter' | 'pod' | 'rack' | 'board' | null>(null)
 
   // 各层级连接的默认参数（从后端加载，初始为空）
   const [_levelConnectionDefaults, _setLevelConnectionDefaults] = useState<{
@@ -98,15 +101,6 @@ const App: React.FC = () => {
     levelPair: 'pod_rack',
     expandedContainers: new Set(),
   })
-
-  // 切换多层级视图
-  const handleMultiLevelChange = useCallback((levelPair: AdjacentLevelPair | null) => {
-    setMultiLevelOptions(prev => ({
-      ...prev,
-      enabled: levelPair !== null,
-      levelPair: levelPair || prev.levelPair,
-    }))
-  }, [])
 
   // 加载拓扑数据（优先使用缓存配置生成）
   const loadTopology = useCallback(async () => {
@@ -580,16 +574,6 @@ const App: React.FC = () => {
               { value: 'topology', label: '拓扑图' },
             ]}
           />
-          {viewMode === 'topology' && (
-            <LevelPairSelector
-              value={multiLevelOptions.enabled ? multiLevelOptions.levelPair : null}
-              onChange={handleMultiLevelChange}
-              currentLevel={getCurrentLevel()}
-              hasCurrentPod={!!navigation.currentPod}
-              hasCurrentRack={!!navigation.currentRack}
-              hasCurrentBoard={!!navigation.currentBoard}
-            />
-          )}
           <span style={{ color: '#999999', fontSize: 12 }}>v{__APP_VERSION__}</span>
         </div>
       </Header>
@@ -627,6 +611,7 @@ const App: React.FC = () => {
             layoutType={layoutType}
             onLayoutTypeChange={setLayoutType}
             viewMode={viewMode}
+            focusedLevel={focusedLevel}
           />
 
           {/* 节点详情卡片 */}
@@ -769,6 +754,11 @@ const App: React.FC = () => {
               currentRack={navigation.currentRack}
               currentBoard={navigation.currentBoard}
               onNodeDoubleClick={(nodeId, nodeType) => {
+                // 双击进入时切换到单层级视图，保留当前布局设置
+                if (multiLevelOptions.enabled) {
+                  setMultiLevelOptions(prev => ({ ...prev, enabled: false }))
+                  // 不重置 layoutType，保留用户选择的布局
+                }
                 if (nodeType === 'pod') {
                   navigation.navigateToPod(nodeId)
                 } else if (nodeType === 'rack' && navigation.currentPod) {
@@ -779,7 +769,18 @@ const App: React.FC = () => {
               }}
               onNodeClick={(node) => {
                 setSelectedNode(node)
-                if (node) setSelectedLink(null)  // 点击节点时清除选中的连接
+                if (node) {
+                  setSelectedLink(null)  // 点击节点时清除选中的连接
+                  // 如果点击的是容器（subType 是层级类型），切换左侧层级配置
+                  const levelTypes = ['datacenter', 'pod', 'rack', 'board']
+                  if (node.subType && levelTypes.includes(node.subType)) {
+                    setFocusedLevel(node.subType as 'datacenter' | 'pod' | 'rack' | 'board')
+                  } else {
+                    setFocusedLevel(null)
+                  }
+                } else {
+                  setFocusedLevel(null)
+                }
               }}
               onLinkClick={(link) => {
                 setSelectedLink(link)
@@ -787,8 +788,20 @@ const App: React.FC = () => {
               }}
               selectedNodeId={selectedNode?.id || null}
               selectedLinkId={selectedLink?.id || null}
-              onNavigateBack={navigation.navigateBack}
-              onBreadcrumbClick={navigation.navigateToBreadcrumb}
+              onNavigateBack={() => {
+                // 导航返回时切换到单层级视图
+                if (multiLevelOptions.enabled) {
+                  setMultiLevelOptions(prev => ({ ...prev, enabled: false }))
+                }
+                navigation.navigateBack()
+              }}
+              onBreadcrumbClick={(index) => {
+                // 面包屑导航时切换到单层级视图
+                if (multiLevelOptions.enabled) {
+                  setMultiLevelOptions(prev => ({ ...prev, enabled: false }))
+                }
+                navigation.navigateToBreadcrumb(index)
+              }}
               breadcrumbs={navigation.breadcrumbs}
               canGoBack={navigation.canGoBack}
               embedded={true}

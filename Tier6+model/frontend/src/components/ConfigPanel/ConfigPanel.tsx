@@ -66,6 +66,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   layoutType: _layoutType = 'auto',
   onLayoutTypeChange: _onLayoutTypeChange,
   viewMode = 'topology',
+  focusedLevel,
 }) => {
   void _layoutType
   void _onLayoutTypeChange
@@ -249,6 +250,13 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
     setLayerTabKey(currentLevel === 'datacenter' ? 'datacenter' : currentLevel)
   }, [currentLevel])
 
+  // 外部指定聚焦层级时切换Tab（点击容器时）
+  useEffect(() => {
+    if (focusedLevel) {
+      setLayerTabKey(focusedLevel)
+    }
+  }, [focusedLevel])
+
   // 汇总信息
   const summaryText = topology
     ? `${stats.pods}Pod ${stats.racks}Rack ${stats.boards}Board ${stats.chips}Chip`
@@ -353,8 +361,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                   configRowStyle={configRowStyle}
                 />
               </div>
-              {/* 连接编辑（当前层级时显示） */}
-              {currentLevel === 'datacenter' && (
+              {/* 连接编辑（当前层级或聚焦层级时显示） */}
+              {(currentLevel === 'datacenter' || focusedLevel === 'datacenter') && (
                 <div style={{ marginTop: 12 }}>
                   <ConnectionEditPanel
                     manualConnectionConfig={manualConnectionConfig}
@@ -420,8 +428,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                   configRowStyle={configRowStyle}
                 />
               </div>
-              {/* 连接编辑（当前层级时显示） */}
-              {currentLevel === 'pod' && (
+              {/* 连接编辑（当前层级或聚焦层级时显示） */}
+              {(currentLevel === 'pod' || focusedLevel === 'pod') && (
                 <div style={{ marginTop: 12 }}>
                   <ConnectionEditPanel
                     manualConnectionConfig={manualConnectionConfig}
@@ -623,8 +631,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                   viewMode={viewMode}
                 />
               </div>
-              {/* 连接编辑（当前层级时显示） */}
-              {currentLevel === 'rack' && (
+              {/* 连接编辑（当前层级或聚焦层级时显示） */}
+              {(currentLevel === 'rack' || focusedLevel === 'rack') && (
                 <div style={{ marginTop: 12 }}>
                   <ConnectionEditPanel
                     manualConnectionConfig={manualConnectionConfig}
@@ -748,8 +756,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                   configRowStyle={configRowStyle}
                 />
               </div>
-              {/* 连接编辑（当前层级时显示） */}
-              {currentLevel === 'board' && (
+              {/* 连接编辑（当前层级或聚焦层级时显示） */}
+              {(currentLevel === 'board' || focusedLevel === 'board') && (
                 <div style={{ marginTop: 12 }}>
                   <ConnectionEditPanel
                     manualConnectionConfig={manualConnectionConfig}

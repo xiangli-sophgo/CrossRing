@@ -46,12 +46,24 @@ function getAvailableOptions(
     })
   }
 
-  if (currentLevel === 'board' || (currentLevel === 'rack' && hasCurrentBoard)) {
+  // board 层级（chip 视图）是最底层，多层级视图显示上一级的 rack_board
+  // 因为 chip 没有下一层，所以 board_chip 组合只在 rack 层级时可用
+  if (currentLevel === 'rack' && hasCurrentBoard) {
     options.push({
       label: LEVEL_PAIR_NAMES.board_chip,
       value: 'board_chip',
-      disabled: currentLevel === 'rack' && !hasCurrentBoard,
     })
+  }
+
+  // 当在 board 层级（chip 视图）时，多层级显示 rack_board（向上一级）
+  if (currentLevel === 'board' && hasCurrentRack) {
+    // 如果还没有 rack_board 选项，添加它
+    if (!options.some(o => o.value === 'rack_board')) {
+      options.push({
+        label: LEVEL_PAIR_NAMES.rack_board,
+        value: 'rack_board',
+      })
+    }
   }
 
   return options
