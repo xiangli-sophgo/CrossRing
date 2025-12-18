@@ -1,6 +1,4 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react'
-// TODO: 动画功能待实现，暂时注释
-// import { useSpring, animated, to } from '@react-spring/web'
 import { Modal, Button, Space, Typography, Breadcrumb, Segmented, Tooltip, Checkbox } from 'antd'
 import { ZoomInOutlined, ZoomOutOutlined, ReloadOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons'
 import {
@@ -8,7 +6,9 @@ import {
   SWITCH_LAYER_COLORS,
   HierarchyLevel,
   LayoutType,
+  LinkTraffic,
 } from '../../types'
+import { getHeatmapColor } from '../../utils/trafficAnalysis'
 import {
   BOARD_U_COLORS,
   TopologyGraphProps,
@@ -118,33 +118,22 @@ function renderNodeShape(node: Node): React.ReactNode {
 // 动画化的手动连接组件（必须在组件外部定义，避免每次渲染重新创建）
 interface AnimatedManualConnectionProps {
   conn: { id: string; source: string; target: string }
-  sourcePos: { x: number; y: number } | null
-  targetPos: { x: number; y: number } | null
+  sourcePos: { x: number; y: number; zLayer: number } | null
+  targetPos: { x: number; y: number; zLayer: number } | null
   isSelected: boolean
   isCrossContainer: boolean
   indexDiff: number
   onClick: (e: React.MouseEvent) => void
+  layoutType?: string
+  containers?: Array<{
+    zLayer: number
+    bounds: { x: number; y: number; width: number; height: number }
+  }>
 }
 
 /**
- * 跨容器手动连接组件
- *
- * TODO: 需要实现平滑动画效果
- * 功能需求：
- * 1. 当容器悬停/选中时，上层容器向上移动（yOffset），连接线的端点需要平滑跟随移动
- * 2. 当切换容器内部视图（布局变化）时，连接线端点位置需要平滑过渡到新位置
- * 3. 跨容器连接（indexDiff > 1）使用曲线，同容器连接使用直线
- * 4. 选中时高亮显示（绿色 + glow 效果）
- *
- * 当前问题：
- * - useSpring 在组件外部定义时，props 变化不会触发动画（spring 直接跳到目标值）
- * - 可能是因为 React 的 reconciliation 机制，或者 react-spring 的使用方式不对
- *
- * 可能的解决方案：
- * 1. 使用 useSpring 的 api.start() 手动触发动画
- * 2. 使用 useSprings 处理多个连接
- * 3. 使用 framer-motion 替代 react-spring
- * 4. 使用 CSS transition（但 SVG path 的 d 属性不支持）
+ * 跨容器手动连接组件（带 CSS transition 动画）
+ * 跨容器时，中间容器区域显示为虚线
  */
 const ManualConnectionLine: React.FC<AnimatedManualConnectionProps> = ({
   sourcePos,
@@ -153,14 +142,116 @@ const ManualConnectionLine: React.FC<AnimatedManualConnectionProps> = ({
   isCrossContainer,
   indexDiff,
   onClick,
+  containers,
 }) => {
   if (!sourcePos || !targetPos) return null
 
   const strokeColor = isSelected ? '#52c41a' : (isCrossContainer ? '#722ed1' : '#b0b0b0')
   const strokeWidth = isSelected ? 3 : 2
+  const transitionStyle = { transition: 'all 0.3s ease-out' }
+
+  // 计算分段（跨容器时，中间容器显示虚线）
+  const getSegments = () => {
+    if (!isCrossContainer || !containers || containers.length === 0) {
+      return [{ from: sourcePos, to: targetPos, isDashed: false }]
+    }
+
+    const minZ = Math.min(sourcePos.zLayer, targetPos.zLayer)
+    const maxZ = Math.max(sourcePos.zLayer, targetPos.zLayer)
+
+    // 找出经过的容器，按 zLayer 排序
+    const passedContainers = containers
+      .filter(c => c.zLayer >= minZ && c.zLayer <= maxZ)
+      .sort((a, b) => a.zLayer - b.zLayer)
+
+    if (passedContainers.length <= 2) {
+      // 没有中间容器，直接返回一段
+      return [{ from: sourcePos, to: targetPos, isDashed: false }]
+    }
+
+    const segments: Array<{ from: { x: number; y: number }; to: { x: number; y: number }; isDashed: boolean }> = []
+
+    // 线性插值：根据 y 坐标计算 x 坐标
+    const getX = (y: number) => {
+      if (Math.abs(targetPos.y - sourcePos.y) < 0.001) return sourcePos.x
+      const t = (y - sourcePos.y) / (targetPos.y - sourcePos.y)
+      return sourcePos.x + t * (targetPos.x - sourcePos.x)
+    }
+
+    // 确保 y 从小到大排序
+    const startY = Math.min(sourcePos.y, targetPos.y)
+    const endY = Math.max(sourcePos.y, targetPos.y)
+    const isSourceAbove = sourcePos.y < targetPos.y
+
+    // 收集所有容器边界的 y 坐标
+    const boundaryYs: Array<{ y: number; zLayer: number; isTop: boolean }> = []
+    for (const c of passedContainers) {
+      boundaryYs.push({ y: c.bounds.y, zLayer: c.zLayer, isTop: true })
+      boundaryYs.push({ y: c.bounds.y + c.bounds.height, zLayer: c.zLayer, isTop: false })
+    }
+    boundaryYs.sort((a, b) => a.y - b.y)
+
+    // 根据 y 坐标分段
+    let currentY = startY
+    let lastPoint: { x: number; y: number } = isSourceAbove
+      ? { x: sourcePos.x, y: sourcePos.y }
+      : { x: targetPos.x, y: targetPos.y }
+
+    for (const boundary of boundaryYs) {
+      if (boundary.y <= startY || boundary.y >= endY) continue
+
+      const x = getX(boundary.y)
+      const nextPoint = { x, y: boundary.y }
+
+      // 判断当前线段所在的容器
+      const midY = (currentY + boundary.y) / 2
+      let segmentContainer: { zLayer: number } | null = null
+      for (const c of passedContainers) {
+        if (midY >= c.bounds.y && midY <= c.bounds.y + c.bounds.height) {
+          segmentContainer = c
+          break
+        }
+      }
+
+      const isMiddle = segmentContainer &&
+        segmentContainer.zLayer !== sourcePos.zLayer &&
+        segmentContainer.zLayer !== targetPos.zLayer
+
+      segments.push({
+        from: { x: lastPoint.x, y: lastPoint.y },
+        to: nextPoint,
+        isDashed: !!isMiddle,
+      })
+
+      lastPoint = nextPoint
+      currentY = boundary.y
+    }
+
+    // 最后一段
+    const finalPoint = isSourceAbove ? targetPos : sourcePos
+    const midY = (currentY + (isSourceAbove ? targetPos.y : sourcePos.y)) / 2
+    let segmentContainer: { zLayer: number } | null = null
+    for (const c of passedContainers) {
+      if (midY >= c.bounds.y && midY <= c.bounds.y + c.bounds.height) {
+        segmentContainer = c
+        break
+      }
+    }
+    const isMiddle = segmentContainer &&
+      segmentContainer.zLayer !== sourcePos.zLayer &&
+      segmentContainer.zLayer !== targetPos.zLayer
+
+    segments.push({
+      from: { x: lastPoint.x, y: lastPoint.y },
+      to: { x: finalPoint.x, y: finalPoint.y },
+      isDashed: !!isMiddle,
+    })
+
+    return segments
+  }
 
   if (isCrossContainer) {
-    // 曲线连接
+    // 曲线连接 - 计算分段
     const midX = (sourcePos.x + targetPos.x) / 2
     const midY = (sourcePos.y + targetPos.y) / 2
     const dx = targetPos.x - sourcePos.x
@@ -171,16 +262,49 @@ const ManualConnectionLine: React.FC<AnimatedManualConnectionProps> = ({
     const perpY = dx / dist
     const ctrlX = midX + perpX * bulge
     const ctrlY = midY + perpY * bulge
-    const pathD = `M ${sourcePos.x} ${sourcePos.y} Q ${ctrlX} ${ctrlY}, ${targetPos.x} ${targetPos.y}`
 
+    // 贝塞尔曲线分段绘制
+    const segments = getSegments()
+    const hasMiddleSegments = segments.some(s => s.isDashed)
+
+    if (!hasMiddleSegments) {
+      // 没有中间段，整条曲线
+      const pathD = `M ${sourcePos.x} ${sourcePos.y} Q ${ctrlX} ${ctrlY}, ${targetPos.x} ${targetPos.y}`
+      return (
+        <g style={transitionStyle}>
+          <path d={pathD} fill="none" stroke="transparent" strokeWidth={16}
+            style={{ cursor: 'pointer' }} onClick={onClick} />
+          <path d={pathD} fill="none" stroke={strokeColor} strokeWidth={strokeWidth}
+            strokeOpacity={isSelected ? 1 : 0.8}
+            style={{ pointerEvents: 'none', filter: isSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
+          />
+        </g>
+      )
+    }
+
+    // 有中间段，分段绘制曲线
+    // 简化处理：用分段的直线近似（因为贝塞尔曲线分段复杂）
     return (
-      <g>
-        <path d={pathD} fill="none" stroke="transparent" strokeWidth={16}
-          style={{ cursor: 'pointer' }} onClick={onClick} />
-        <path d={pathD} fill="none" stroke={strokeColor} strokeWidth={strokeWidth}
-          strokeOpacity={isSelected ? 1 : 0.8}
-          style={{ pointerEvents: 'none', filter: isSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
+      <g style={transitionStyle}>
+        {/* 透明点击区域 */}
+        <path
+          d={`M ${sourcePos.x} ${sourcePos.y} Q ${ctrlX} ${ctrlY}, ${targetPos.x} ${targetPos.y}`}
+          fill="none" stroke="transparent" strokeWidth={16}
+          style={{ cursor: 'pointer' }} onClick={onClick}
         />
+        {/* 分段绘制 */}
+        {segments.map((seg, i) => (
+          <line
+            key={i}
+            x1={seg.from.x} y1={seg.from.y}
+            x2={seg.to.x} y2={seg.to.y}
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            strokeOpacity={isSelected ? 1 : 0.8}
+            strokeDasharray={seg.isDashed ? "8 4" : undefined}
+            style={{ pointerEvents: 'none', filter: isSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
+          />
+        ))}
       </g>
     )
   } else {
@@ -191,14 +315,14 @@ const ManualConnectionLine: React.FC<AnimatedManualConnectionProps> = ({
           x1={sourcePos.x} y1={sourcePos.y}
           x2={targetPos.x} y2={targetPos.y}
           stroke="transparent" strokeWidth={16}
-          style={{ cursor: 'pointer' }} onClick={onClick}
+          style={{ cursor: 'pointer', ...transitionStyle }} onClick={onClick}
         />
         <line
           x1={sourcePos.x} y1={sourcePos.y}
           x2={targetPos.x} y2={targetPos.y}
           stroke={strokeColor} strokeWidth={strokeWidth}
           strokeOpacity={isSelected ? 1 : 0.6}
-          style={{ pointerEvents: 'none', filter: isSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
+          style={{ pointerEvents: 'none', filter: isSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none', ...transitionStyle }}
         />
       </g>
     )
@@ -240,6 +364,8 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   // 多层级视图相关
   multiLevelOptions,
   onMultiLevelOptionsChange,
+  // 流量分析热力图
+  trafficAnalysisResult,
 }) => {
   void _onNavigateBack
   void _canGoBack
@@ -317,6 +443,31 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       return () => cancelAnimationFrame(frameId)
     }
   }, [collapsingContainer, collapseAnimationStarted])
+
+  // 流量分析热力图：创建链路流量查找表
+  const linkTrafficMap = useMemo(() => {
+    const map = new Map<string, LinkTraffic>()
+    if (trafficAnalysisResult?.link_traffic) {
+      for (const lt of trafficAnalysisResult.link_traffic) {
+        // 使用双向key，因为边可能source/target顺序不同
+        map.set(`${lt.source}-${lt.target}`, lt)
+        map.set(`${lt.target}-${lt.source}`, lt)
+      }
+    }
+    return map
+  }, [trafficAnalysisResult])
+
+  // 获取边的热力图样式
+  const getTrafficHeatmapStyle = useCallback((source: string, target: string) => {
+    const lt = linkTrafficMap.get(`${source}-${target}`)
+    if (!lt) return null
+    return {
+      stroke: getHeatmapColor(lt.bandwidth_utilization),
+      strokeWidth: 2 + lt.bandwidth_utilization * 4,  // 2-6px
+      trafficMb: lt.traffic_mb,
+      utilization: lt.bandwidth_utilization,
+    }
+  }, [linkTrafficMap])
 
   // 手动调整模式开关（内部状态）
   const [isManualMode, setIsManualMode] = useState(false)
@@ -1720,6 +1871,12 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                 return 0
               }
 
+              // 准备容器边界信息（用于分段绘制）
+              const containerBoundsInfo = containers.map(c => ({
+                zLayer: c.zLayer ?? 0,
+                bounds: c.containerBounds!,
+              }))
+
               return currentManualConnections.map((conn) => {
                 const sourcePos = getNodePosition(conn.source, activeLayerIdx)
                 const targetPos = getNodePosition(conn.target, activeLayerIdx)
@@ -1727,7 +1884,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                 const sourceParentIdx = getParentIdx(conn.source)
                 const targetParentIdx = getParentIdx(conn.target)
                 const indexDiff = Math.abs(sourceParentIdx - targetParentIdx)
-                const isCrossContainer = indexDiff > 1
+                const isCrossContainer = indexDiff >= 1  // 只要不在同一容器就是跨容器
 
                 const manualEdgeId = `${conn.source}-${conn.target}`
                 const isLinkSelected = selectedLinkId === manualEdgeId || selectedLinkId === `${conn.target}-${conn.source}`
@@ -1761,6 +1918,8 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                     isCrossContainer={isCrossContainer}
                     indexDiff={indexDiff}
                     onClick={handleManualClick}
+                    layoutType={layoutType}
+                    containers={containerBoundsInfo}
                   />
                 )
               })
@@ -2157,12 +2316,16 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                             const reverseEdgeId = `${edge.target}-${edge.source}`
                             const isEdgeSelected = selectedLinkId === edgeId || selectedLinkId === reverseEdgeId
 
-                            // 边颜色：与单层级视图保持一致
+                            // 边颜色：与单层级视图保持一致，优先使用热力图颜色
                             let edgeColor = '#b0b0b0'  // 默认灰色
                             let strokeWidth = 1.5
+                            const slTrafficStyle = getTrafficHeatmapStyle(edge.source, edge.target)
                             if (isEdgeSelected) {
                               edgeColor = '#52c41a'  // 选中：绿色
                               strokeWidth = 3
+                            } else if (slTrafficStyle) {
+                              edgeColor = slTrafficStyle.stroke  // 热力图颜色
+                              strokeWidth = slTrafficStyle.strokeWidth
                             } else if (edge.isSwitch) {
                               edgeColor = '#1890ff'  // Switch 连接：蓝色
                               strokeWidth = 2
@@ -2171,7 +2334,8 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                             // tooltip 内容
                             const bandwidthStr = edge.bandwidth ? `${edge.bandwidth}Gbps` : ''
                             const latencyStr = edge.latency ? `${edge.latency}ns` : ''
-                            const propsStr = [bandwidthStr, latencyStr].filter(Boolean).join(', ')
+                            const slTrafficStr = slTrafficStyle ? `流量: ${slTrafficStyle.trafficMb.toFixed(1)}MB, 利用率: ${(slTrafficStyle.utilization * 100).toFixed(0)}%` : ''
+                            const propsStr = [bandwidthStr, latencyStr, slTrafficStr].filter(Boolean).join(', ')
                             const edgeTooltip = `${sourceNode.label} ↔ ${targetNode.label}${propsStr ? ` (${propsStr})` : ''}`
 
                             // 点击处理
@@ -2696,7 +2860,9 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
             const bandwidthStr = edge.bandwidth ? `${edge.bandwidth}Gbps` : ''
             const latencyStr = edge.latency ? `${edge.latency}ns` : ''
-            const propsStr = [bandwidthStr, latencyStr].filter(Boolean).join(', ')
+            const trafficStyle = getTrafficHeatmapStyle(edge.source, edge.target)
+            const trafficStr = trafficStyle ? `流量: ${trafficStyle.trafficMb.toFixed(1)}MB, 利用率: ${(trafficStyle.utilization * 100).toFixed(0)}%` : ''
+            const propsStr = [bandwidthStr, latencyStr, trafficStr].filter(Boolean).join(', ')
             const tooltipContent = `${sourceNode?.label || edge.source} ↔ ${targetNode?.label || edge.target}${propsStr ? ` (${propsStr})` : ''}`
 
             // 点击 link 的处理函数
@@ -2830,6 +2996,15 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
             // 多层级连接样式计算
             const getMultiLevelEdgeStyle = () => {
+              // 热力图模式优先：如果有流量分析结果，使用热力图颜色
+              const trafficStyle = getTrafficHeatmapStyle(edge.source, edge.target)
+              if (trafficStyle && !isLinkSelected) {
+                return {
+                  stroke: trafficStyle.stroke,
+                  strokeWidth: trafficStyle.strokeWidth,
+                  strokeDasharray: undefined as string | undefined,
+                }
+              }
               if (!edge.connectionType) {
                 // 非多层级模式，使用原有逻辑
                 return {

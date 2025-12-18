@@ -1206,7 +1206,8 @@ copyPaste={{
                   if (hot) {
                     const columnSortingPlugin = hot.getPlugin('columnSorting');
                     const currentSort = columnSortingPlugin.getSortConfig();
-                    const currentColSort = currentSort.find((s: { column: number }) => s.column === coords.col);
+                    const sortArray = Array.isArray(currentSort) ? currentSort : (currentSort ? [currentSort] : []);
+                    const currentColSort = sortArray.find((s: { column: number }) => s.column === coords.col);
 
                     let newOrder: 'asc' | 'desc' | undefined;
                     if (!currentColSort) {

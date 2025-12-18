@@ -75,12 +75,12 @@ export function isometricStackedLayout(
   const upperCount = upperNodes.length
 
   // 每个容器的基础大小
-  const containerWidth = Math.min(width * 0.85, 500)
-  const containerHeight = 300  // 增大高度以容纳更多内容
+  const containerWidth = Math.min(width * 0.85, 400)
+  const containerHeight = 250  // 增大高度以容纳更多内容
 
   // 书本堆叠参数
-  const bookThickness = 30   // 每本书的"厚度"（层间露出的高度）
-  const depth3D = 20         // 3D深度（顶面和侧面的高度）
+  const bookThickness = 40   // 每本书的"厚度"（层间露出的高度）
+  const depth3D = 0         // 3D深度（顶面和侧面的高度）
 
   // 计算整体堆叠的高度
   const totalStackHeight = containerHeight + (upperCount - 1) * bookThickness + depth3D

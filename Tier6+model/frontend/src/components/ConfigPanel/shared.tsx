@@ -6,6 +6,8 @@ import {
   HierarchyLevel,
   LayoutType,
   HierarchicalTopology,
+  TrafficConfigItem,
+  TrafficAnalysisResult,
 } from '../../types'
 
 // ============================================
@@ -145,6 +147,12 @@ export interface ConfigPanelProps {
   onSwitchDisplayConfigChange?: (config: SwitchDisplayConfig) => void
   // 外部控制聚焦的层级（点击容器时切换）
   focusedLevel?: 'datacenter' | 'pod' | 'rack' | 'board' | null
+  // LLM流量分析相关 (多配置)
+  trafficConfigs?: TrafficConfigItem[]
+  onTrafficConfigsChange?: (configs: TrafficConfigItem[]) => void
+  trafficAnalysisResult?: TrafficAnalysisResult | null
+  onTrafficAnalysisResultChange?: (result: TrafficAnalysisResult | null) => void
+  onNavigateToChips?: () => void  // 跳转到芯片视图
 }
 
 // ============================================

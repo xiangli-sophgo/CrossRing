@@ -61,6 +61,7 @@ class SimulationRequest(BaseModel):
     experiment_name: Optional[str] = Field(None, description="实验名称")
     experiment_description: Optional[str] = Field(None, description="实验描述")
     max_workers: Optional[int] = Field(None, description="并行进程数，默认为CPU核心数")
+    sweep_combinations: Optional[List[Dict[str, Any]]] = Field(None, description="参数遍历组合列表")
 
 
 class TaskResponse(BaseModel):
@@ -167,6 +168,7 @@ async def run_simulation(request: SimulationRequest):
         config_overrides=request.config_overrides,
         die_config_path=die_config_path,
         die_config_overrides=request.die_config_overrides,
+        sweep_combinations=request.sweep_combinations,
     )
 
     # 异步执行任务
@@ -360,20 +362,29 @@ async def get_history_grouped(limit: int = 50):
 
         groups[group_key]["task_ids"].append(t.task_id)
 
-        # 计算文件数（而非任务数）
-        task_file_count = len(t.traffic_files) if t.traffic_files else 1
-        groups[group_key]["total_count"] += task_file_count
+        # 计算执行单元数（文件数 × 参数组合数）
+        # 优先从 results["total_files"] 获取（已包含笛卡尔积计算）
+        if t.results and "total_files" in t.results:
+            task_unit_count = t.results["total_files"]
+        elif t.sim_details and "total_files" in t.sim_details:
+            task_unit_count = t.sim_details["total_files"]
+        else:
+            # 回退计算：文件数 × 组合数
+            file_count = len(t.traffic_files) if t.traffic_files else 1
+            combo_count = len(t.sweep_combinations) if t.sweep_combinations else 1
+            task_unit_count = file_count * combo_count
+        groups[group_key]["total_count"] += task_unit_count
 
         # 状态优先级: running > cancelled > failed > completed
-        # 根据任务结果计算完成/失败的文件数
+        # 根据任务结果计算完成/失败的执行单元数
         if t.status.value == "completed":
             if t.results and "completed_files" in t.results:
                 groups[group_key]["completed_count"] += t.results["completed_files"]
                 groups[group_key]["failed_count"] += t.results.get("failed_files", 0)
             else:
-                groups[group_key]["completed_count"] += task_file_count
+                groups[group_key]["completed_count"] += task_unit_count
         elif t.status.value == "failed":
-            groups[group_key]["failed_count"] += task_file_count
+            groups[group_key]["failed_count"] += task_unit_count
             if groups[group_key]["status"] not in ("running", "cancelled"):
                 groups[group_key]["status"] = "failed"
             if t.error:
@@ -382,9 +393,9 @@ async def get_history_grouped(limit: int = 50):
             # 取消时，使用 sim_details 中的进度
             if t.sim_details and "file_index" in t.sim_details:
                 groups[group_key]["completed_count"] += t.sim_details["file_index"]
-                groups[group_key]["failed_count"] += task_file_count - t.sim_details["file_index"]
+                groups[group_key]["failed_count"] += task_unit_count - t.sim_details["file_index"]
             else:
-                groups[group_key]["failed_count"] += task_file_count
+                groups[group_key]["failed_count"] += task_unit_count
             if groups[group_key]["status"] != "running":
                 groups[group_key]["status"] = "cancelled"
             if t.error:
@@ -959,6 +970,50 @@ async def get_traffic_file_content(file_path: str, max_lines: int = 100):
 
 
 # ==================== WebSocket 实时进度 ====================
+
+@router.websocket("/ws/global")
+async def websocket_global_progress(websocket: WebSocket):
+    """
+    全局 WebSocket - 推送所有任务状态变化
+    只推送任务级别更新（不包含 sim_details 的高频更新）
+    注意：此路由必须在 /ws/{task_id} 之前定义，否则 "global" 会被当作 task_id
+    """
+    await websocket.accept()
+
+    queue = task_manager.subscribe_global()
+
+    try:
+        # 发送当前所有运行中任务的状态
+        running_tasks = [t for t in task_manager.get_all_tasks()
+                         if t.status in (TaskStatus.PENDING, TaskStatus.RUNNING)]
+        for task in running_tasks:
+            await websocket.send_json({
+                'type': 'task_update',
+                'task_id': task.task_id,
+                'status': task.status.value,
+                'progress': task.progress,
+                'message': task.message,
+                'experiment_name': task.experiment_name,
+                'current_file': task.current_file,
+            })
+
+        # 持续推送更新
+        while True:
+            try:
+                update = await asyncio.wait_for(queue.get(), timeout=30.0)
+                await websocket.send_json({
+                    'type': 'task_update',
+                    **update
+                })
+            except asyncio.TimeoutError:
+                # 发送心跳
+                await websocket.send_json({'type': 'heartbeat'})
+
+    except WebSocketDisconnect:
+        pass
+    finally:
+        task_manager.unsubscribe_global(queue)
+
 
 @router.websocket("/ws/{task_id}")
 async def websocket_progress(websocket: WebSocket, task_id: str):

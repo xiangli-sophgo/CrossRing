@@ -356,3 +356,169 @@ export const LEVEL_PAIR_NAMES: Record<AdjacentLevelPair, string> = {
   rack_board: 'Rack + Board',
   board_chip: 'Board + Chip',
 };
+
+// ============================================
+// LLM 并行策略与流量分析
+// ============================================
+
+// 并行策略类型
+export type ParallelismType = 'DP' | 'TP' | 'PP' | 'EP' | 'SP';
+
+// 集合通信类型
+export type CollectiveType = 'AllReduce' | 'AllGather' | 'ReduceScatter' | 'AllToAll' | 'P2P';
+
+// Chip 范围类型
+export type ChipScopeType = 'all' | 'pod' | 'rack' | 'board' | 'chip';
+
+// 单个流量配置项
+export interface TrafficConfigItem {
+  id: string;                    // 唯一ID (uuid)
+  name: string;                  // 配置名称，如 "DP通信"
+  parallelism: ParallelismType;  // 并行类型: DP/TP/PP/EP/SP
+  collective: CollectiveType;    // 集合操作: AllReduce/AllGather/...
+  size: number;                  // 并行度 (2-64)
+  message_size_mb: number;       // 消息大小 (MB)
+  // Chip 范围选择（每个配置独立的范围）
+  chip_scope: ChipScopeType;
+  scope_pod_ids?: string[];
+  scope_rack_ids?: string[];
+  scope_board_ids?: string[];
+  scope_chip_ids?: string[];
+}
+
+// 并行策略配置 (保留用于兼容)
+export interface ParallelismConfig {
+  enabled: boolean;
+  dp_size: number;          // 数据并行度
+  tp_size: number;          // 张量并行度
+  pp_size: number;          // 流水线并行度
+  ep_size: number;          // 专家并行度 (MoE)
+  sp_size: number;          // 序列并行度
+  message_size_mb: number;  // 消息大小 (MB)
+  // 每种并行策略的操作类型
+  dp_collective: CollectiveType;
+  tp_collective: CollectiveType;
+  pp_collective: CollectiveType;
+  ep_collective: CollectiveType;
+  sp_collective: CollectiveType;
+  // Chip 范围选择
+  chip_scope: ChipScopeType;  // 范围类型
+  scope_pod_ids?: string[];   // 选择的 Pod ID 列表
+  scope_rack_ids?: string[];  // 选择的 Rack ID 列表 (格式: "pod_id/rack_id")
+  scope_board_ids?: string[]; // 选择的 Board ID 列表 (格式: "pod_id/rack_id/board_id")
+  scope_chip_ids?: string[];  // 选择的 Chip ID 列表
+}
+
+// 通信组定义
+export interface CommunicationGroup {
+  id: string;
+  type: ParallelismType;
+  collective: CollectiveType;
+  members: string[];        // chip IDs
+  data_volume_mb: number;   // 通信数据量 (MB)
+}
+
+// 链路流量数据
+export interface LinkTraffic {
+  source: string;
+  target: string;
+  traffic_mb: number;       // 总流量 (MB)
+  bandwidth_utilization: number; // 带宽利用率 (0-1)
+  contributions: {          // 各并行策略贡献
+    dp?: number;
+    tp?: number;
+    pp?: number;
+    ep?: number;
+  };
+}
+
+// 节点负载数据
+export interface NodeLoad {
+  id: string;
+  send_mb: number;          // 发送流量
+  recv_mb: number;          // 接收流量
+  total_mb: number;         // 总流量
+}
+
+// 流量分析结果
+export interface TrafficAnalysisResult {
+  configs: TrafficConfigItem[];   // 输入的配置列表
+  groups: CommunicationGroup[];
+  link_traffic: LinkTraffic[];
+  node_loads: NodeLoad[];
+  summary: {
+    total_traffic_mb: number;
+    max_link_traffic_mb: number;
+    avg_bandwidth_utilization: number;
+    bottleneck_links: string[];
+    // 各配置的流量贡献
+    config_contributions: Array<{
+      config_id: string;
+      config_name: string;
+      traffic_mb: number;
+      percentage: number;
+    }>;
+  };
+}
+
+// 默认流量配置项模板
+export const DEFAULT_TRAFFIC_CONFIG_ITEM: Omit<TrafficConfigItem, 'id'> = {
+  name: '新配置',
+  parallelism: 'DP',
+  collective: 'AllReduce',
+  size: 2,
+  message_size_mb: 100,
+  chip_scope: 'all',
+  scope_pod_ids: [],
+  scope_rack_ids: [],
+  scope_board_ids: [],
+  scope_chip_ids: [],
+};
+
+// 默认并行配置 (保留用于兼容)
+export const DEFAULT_PARALLELISM_CONFIG: ParallelismConfig = {
+  enabled: false,
+  dp_size: 1,
+  tp_size: 1,
+  pp_size: 1,
+  ep_size: 1,
+  sp_size: 1,
+  message_size_mb: 100,
+  dp_collective: 'AllReduce',
+  tp_collective: 'AllReduce',
+  pp_collective: 'P2P',
+  ep_collective: 'AllToAll',
+  sp_collective: 'AllGather',
+  chip_scope: 'all',
+  scope_pod_ids: [],
+  scope_rack_ids: [],
+  scope_board_ids: [],
+  scope_chip_ids: [],
+};
+
+// 并行策略通信模式映射
+export const PARALLELISM_COLLECTIVES: Record<ParallelismType, CollectiveType> = {
+  DP: 'AllReduce',
+  TP: 'AllReduce',
+  PP: 'P2P',
+  EP: 'AllToAll',
+  SP: 'AllGather',
+};
+
+// 并行策略显示名称
+export const PARALLELISM_NAMES: Record<ParallelismType, string> = {
+  DP: '数据并行 (DP)',
+  TP: '张量并行 (TP)',
+  PP: '流水线并行 (PP)',
+  EP: '专家并行 (EP)',
+  SP: '序列并行 (SP)',
+};
+
+// 并行策略颜色
+export const PARALLELISM_COLORS: Record<ParallelismType, string> = {
+  DP: '#1890ff',  // 蓝色
+  TP: '#52c41a',  // 绿色
+  PP: '#fa8c16',  // 橙色
+  EP: '#722ed1',  // 紫色
+  SP: '#eb2f96',  // 粉色
+};

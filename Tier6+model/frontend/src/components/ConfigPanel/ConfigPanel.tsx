@@ -41,7 +41,8 @@ import {
   loadCachedConfig,
   saveCachedConfig,
 } from './shared'
-import { SwitchLevelConfig, ConnectionEditPanel } from './components'
+import { SwitchLevelConfig, ConnectionEditPanel, TrafficAnalysisPanel } from './components'
+import { runMultiConfigAnalysis, collectAllChips } from '../../utils/trafficAnalysis'
 
 const { Text } = Typography
 
@@ -67,6 +68,12 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onLayoutTypeChange: _onLayoutTypeChange,
   viewMode = 'topology',
   focusedLevel,
+  // LLM流量分析相关 (多配置)
+  trafficConfigs,
+  onTrafficConfigsChange,
+  trafficAnalysisResult,
+  onTrafficAnalysisResultChange,
+  onNavigateToChips,
 }) => {
   void _layoutType
   void _onLayoutTypeChange
@@ -848,6 +855,30 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
     </div>
   )
 
+  // 计算拓扑中的总 chip 数量
+  const totalChips = topology ? collectAllChips(topology).length : 0
+
+  // 运行流量分析 (多配置)
+  const handleRunTrafficAnalysis = () => {
+    if (!topology || !trafficConfigs || trafficConfigs.length === 0) return
+    const result = runMultiConfigAnalysis(topology, trafficConfigs)
+    onTrafficAnalysisResultChange?.(result)
+  }
+
+  // 流量分析面板内容 (多配置)
+  const trafficAnalysisContent = (
+    <TrafficAnalysisPanel
+      configs={trafficConfigs || []}
+      onConfigsChange={(configs) => onTrafficConfigsChange?.(configs)}
+      onRunAnalysis={handleRunTrafficAnalysis}
+      analysisResult={trafficAnalysisResult || null}
+      totalChips={totalChips}
+      configRowStyle={configRowStyle}
+      onNavigateToChips={onNavigateToChips}
+      topology={topology}
+    />
+  )
+
   const collapseItems = [
     {
       key: 'topology',
@@ -870,6 +901,11 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
       key: 'switch',
       label: <Text strong>Switch配置</Text>,
       children: switchConfigContent,
+    },
+    {
+      key: 'traffic',
+      label: <Text strong>LLM流量分析</Text>,
+      children: trafficAnalysisContent,
     },
   ]
 

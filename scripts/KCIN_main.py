@@ -42,7 +42,7 @@ def main():
         "3x3": r"../config/topologies/topo_3x3.yaml",
         "4x4": r"../config/topologies/topo_4x4.yaml",
         "5x2": r"../config/topologies/topo_5x2.yaml",
-        "5x4": r"../config/topologies/topo_5x4.yaml",
+        "5x4": r"../config/topologies/topo_5x4_48_test.yaml",
         "6x5": r"../config/topologies/topo_6x5.yaml",
         "8x8": r"../config/topologies/topo_8x8.yaml",
     }
@@ -85,7 +85,7 @@ def main():
     sim.run_simulation(max_time=5000, print_interval=200)
 
     # ==================== 保存结果到数据库 ====================
-    # sim.save_to_database(experiment_name="KCIN 仿真")
+    sim.save_to_database(experiment_name="KCIN 仿真")
 
 
 if __name__ == "__main__":

@@ -23,13 +23,20 @@ export default defineConfig({
   server: {
     port: 3002,  // 使用新端口，避免与现有项目冲突
     proxy: {
+      // WebSocket 代理必须放在 /api 之前，否则会被 /api 匹配
+      '/api/simulation/ws': {
+        target: 'http://localhost:8000',
+        ws: true,
+        changeOrigin: true,
+      },
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:8000',
+        target: 'http://localhost:8000',
         ws: true,
+        changeOrigin: true,
       },
     },
   },

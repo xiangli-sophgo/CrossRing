@@ -3,6 +3,6 @@
  */
 export { ConfigLabel, KCINConfigPanel, DCINConfigPanel } from './ConfigPanels'
 export { SweepConfigPanel } from './SweepConfigPanel'
-export { TaskStatusCard, SweepProgressCard } from './StatusCards'
+export { TaskStatusCard } from './StatusCards'
 export { TaskHistoryTable } from './TaskHistoryTable'
 export { TrafficFileTree } from './TrafficFileTree'

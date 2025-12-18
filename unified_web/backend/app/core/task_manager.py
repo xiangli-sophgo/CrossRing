@@ -52,6 +52,8 @@ class SimulationTask:
     # DCIN模式下的DIE拓扑配置
     die_config_path: Optional[str] = None
     die_config_overrides: Optional[Dict[str, Any]] = None
+    # 参数遍历组合列表
+    sweep_combinations: Optional[List[Dict[str, Any]]] = None
 
     status: TaskStatus = TaskStatus.PENDING
     progress: int = 0  # 0-100
@@ -77,6 +79,8 @@ def _run_single_simulation(sim_params: Dict[str, Any]) -> Dict[str, Any]:
 
     Args:
         sim_params: 仿真参数字典
+            - combination_overrides: 参数遍历时的配置覆盖项，会与 config_overrides 合并
+            - combination_index: 参数组合索引（用于日志和结果标识）
 
     Returns:
         结果字典
@@ -84,13 +88,19 @@ def _run_single_simulation(sim_params: Dict[str, Any]) -> Dict[str, Any]:
     from .simulation_engine import SimulationEngine, SimulationMode
 
     traffic_file = sim_params['traffic_file']
+    combination_index = sim_params.get('combination_index')
     try:
+        # 合并配置覆盖项: base config_overrides + combination_overrides
+        config_overrides = sim_params.get('config_overrides') or {}
+        combination_overrides = sim_params.get('combination_overrides') or {}
+        merged_overrides = {**config_overrides, **combination_overrides}
+
         engine = SimulationEngine(
             mode=SimulationMode(sim_params['mode']),
             config_path=sim_params['config_path'],
             topology=sim_params['topology'],
             verbose=0,
-            config_overrides=sim_params.get('config_overrides'),
+            config_overrides=merged_overrides if merged_overrides else None,
             die_config_path=sim_params.get('die_config_path'),
             die_config_overrides=sim_params.get('die_config_overrides'),
         )
@@ -115,6 +125,7 @@ def _run_single_simulation(sim_params: Dict[str, Any]) -> Dict[str, Any]:
 
         return {
             'traffic_file': traffic_file,
+            'combination_index': combination_index,
             'status': result.status.value,
             'duration': result.duration_seconds,
             'error': result.error,
@@ -126,6 +137,7 @@ def _run_single_simulation(sim_params: Dict[str, Any]) -> Dict[str, Any]:
         import traceback
         return {
             'traffic_file': traffic_file,
+            'combination_index': combination_index,
             'status': 'failed',
             'duration': 0,
             'error': f"{str(e)}\n{traceback.format_exc()}",
@@ -160,11 +172,20 @@ class TaskManager:
         self._tasks: Dict[str, SimulationTask] = {}
         self._running_tasks: Dict[str, asyncio.Task] = {}
         self._subscribers: Dict[str, List[asyncio.Queue]] = {}
+        # 全局订阅者（接收所有任务状态变化）
+        self._global_subscribers: List[asyncio.Queue] = []
+        # 主事件循环引用（用于跨线程通知）
+        self._main_loop: Optional[asyncio.AbstractEventLoop] = None
         # 全局 worker 数管理
         self._active_workers: Dict[str, int] = {}  # task_id -> worker_count
         self._workers_lock = threading.Lock()
         # 从文件加载历史任务
         self._load_history()
+
+    def set_event_loop(self, loop: asyncio.AbstractEventLoop):
+        """设置主事件循环引用（在 FastAPI 启动时调用）"""
+        self._main_loop = loop
+        logger.info("TaskManager 事件循环已设置")
 
     def create_task(
         self,
@@ -181,6 +202,7 @@ class TaskManager:
         config_overrides: Optional[Dict[str, Any]] = None,
         die_config_path: Optional[str] = None,
         die_config_overrides: Optional[Dict[str, Any]] = None,
+        sweep_combinations: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """
         创建新的仿真任务
@@ -205,6 +227,7 @@ class TaskManager:
             config_overrides=config_overrides,
             die_config_path=die_config_path,
             die_config_overrides=die_config_overrides,
+            sweep_combinations=sweep_combinations,
         )
 
         self._tasks[task_id] = task
@@ -279,14 +302,56 @@ class TaskManager:
             # 任务完成时保存历史
             self._save_history()
 
-        # 通知订阅者
-        asyncio.create_task(self._notify_subscribers(task_id, task))
+        # 通知订阅者（线程安全方式）
+        self._notify_subscribers_sync(task_id, task, level='task_level')
 
-    async def _notify_subscribers(self, task_id: str, task: SimulationTask):
-        """通知任务状态变更"""
+    def _notify_subscribers_sync(self, task_id: str, task: SimulationTask, level: str = 'task_level'):
+        """
+        线程安全的同步通知方法
+        从普通线程中调用，自动调度到事件循环
+        """
+        try:
+            # 尝试获取当前运行的事件循环（在异步上下文中）
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._notify_subscribers(task_id, task, level))
+        except RuntimeError:
+            # 没有运行中的事件循环（在子线程中），使用保存的主事件循环
+            if self._main_loop and self._main_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self._notify_subscribers(task_id, task, level),
+                    self._main_loop
+                )
+            else:
+                logger.warning(f"无法通知订阅者（任务 {task_id}）: 主事件循环未设置或未运行")
+
+    async def _notify_subscribers(self, task_id: str, task: SimulationTask, level: str = 'task_level'):
+        """
+        通知任务状态变更
+
+        Args:
+            task_id: 任务ID
+            task: 任务对象
+            level: 通知级别
+                - 'task_level': 任务状态变化，通知全局订阅者和单任务订阅者
+                - 'sim_level': 仿真详情更新，只通知单任务订阅者
+        """
+        # 通知单任务订阅者（所有级别）
         if task_id in self._subscribers:
             for queue in self._subscribers[task_id]:
                 await queue.put(task)
+
+        # 只有任务级别更新才通知全局订阅者
+        if level == 'task_level' and self._global_subscribers:
+            global_update = {
+                'task_id': task.task_id,
+                'status': task.status.value,
+                'progress': task.progress,
+                'message': task.message,
+                'experiment_name': task.experiment_name,
+                'current_file': task.current_file,
+            }
+            for queue in self._global_subscribers:
+                await queue.put(global_update)
 
     def subscribe(self, task_id: str) -> asyncio.Queue:
         """订阅任务状态更新"""
@@ -296,42 +361,72 @@ class TaskManager:
         self._subscribers[task_id].append(queue)
         return queue
 
+    def subscribe_global(self) -> asyncio.Queue:
+        """订阅所有任务状态更新（全局）"""
+        queue = asyncio.Queue()
+        self._global_subscribers.append(queue)
+        return queue
+
+    def unsubscribe_global(self, queue: asyncio.Queue):
+        """取消全局订阅"""
+        if queue in self._global_subscribers:
+            self._global_subscribers.remove(queue)
+
     def unsubscribe(self, task_id: str, queue: asyncio.Queue):
         """取消订阅"""
         if task_id in self._subscribers:
             self._subscribers[task_id].remove(queue)
 
     async def run_task(self, task_id: str):
-        """执行仿真任务（单文件串行执行带进度，多文件并行执行）"""
+        """
+        执行仿真任务（单执行单元串行执行带进度，多执行单元并行执行）
+
+        执行单元 = 文件 × 参数组合 的笛卡尔积
+        - 无 sweep_combinations: 每个文件是一个执行单元
+        - 有 sweep_combinations: 文件数 × 组合数 = 总执行单元数
+        """
         task = self._tasks.get(task_id)
         if not task:
             return
 
         try:
-            total_files = len(task.traffic_files)
+            # 构建执行单元列表 (文件 × 参数组合 笛卡尔积)
+            combinations = task.sweep_combinations or [{}]  # 无组合时用空字典
+            execution_units = []
+            for traffic_file in task.traffic_files:
+                for combo_idx, combo in enumerate(combinations):
+                    execution_units.append({
+                        'traffic_file': traffic_file,
+                        'combination': combo,
+                        'combination_index': combo_idx if task.sweep_combinations else None,
+                    })
+
+            total_units = len(execution_units)
             results_list = []
             experiment_id = None
 
-            # 单文件时使用串行执行，显示详细进度
-            if total_files == 1:
-                await self._run_single_file_task(task_id, task)
+            # 单执行单元时使用串行执行，显示详细进度
+            if total_units == 1:
+                await self._run_single_file_task(task_id, task, execution_units[0])
                 return
 
-            # 多文件时使用并行执行
+            # 多执行单元时使用并行执行
             self.update_task_status(task_id, TaskStatus.RUNNING, message="正在初始化并行仿真...")
 
             # 准备所有仿真参数
             sim_params_list = []
-            for traffic_file in task.traffic_files:
+            for unit in execution_units:
                 sim_params = {
                     'mode': task.mode,
                     'config_path': task.config_path,
                     'topology': task.topology,
                     'config_overrides': task.config_overrides,
+                    'combination_overrides': unit['combination'],
+                    'combination_index': unit['combination_index'],
                     'die_config_path': task.die_config_path,
                     'die_config_overrides': task.die_config_overrides,
                     'traffic_file_path': task.traffic_file_path,
-                    'traffic_file': traffic_file,
+                    'traffic_file': unit['traffic_file'],
                     'max_time': task.max_time,
                     'save_to_db': task.save_to_db,
                     'experiment_name': task.experiment_name,
@@ -342,16 +437,16 @@ class TaskManager:
 
             # 确定并行进程数（考虑全局限制）
             if task.max_workers:
-                requested_workers = min(task.max_workers, total_files)
+                requested_workers = min(task.max_workers, total_units)
             else:
-                requested_workers = min(multiprocessing.cpu_count(), total_files)
+                requested_workers = min(multiprocessing.cpu_count(), total_units)
             # 分配 worker（考虑其他正在运行的任务）
             max_workers = self.allocate_workers(task_id, requested_workers)
 
             # 更新状态
             task.sim_details = {
                 "file_index": 0,
-                "total_files": total_files,
+                "total_files": total_units,
                 "current_file": f"并行执行中 ({max_workers} 进程)",
                 "sim_progress": 0,
                 "current_time": 0,
@@ -420,12 +515,16 @@ class TaskManager:
 
                         # 更新进度
                         completed_count = len(completed_results)
-                        task.progress = int((completed_count / total_files) * 100)
+                        task.progress = int((completed_count / total_units) * 100)
                         last_result = completed_results[-1] if completed_results else {}
+                        # 构建当前文件显示（包含组合索引）
+                        current_display = last_result.get('traffic_file', '')
+                        if last_result.get('combination_index') is not None:
+                            current_display = f"{current_display} [组合{last_result['combination_index']}]"
                         task.sim_details = {
                             "file_index": completed_count,
-                            "total_files": total_files,
-                            "current_file": f"已完成: {last_result.get('traffic_file', '')}",
+                            "total_files": total_units,
+                            "current_file": f"已完成: {current_display}",
                             "sim_progress": 100,
                             "current_time": task.max_time,
                             "max_time": task.max_time,
@@ -435,6 +534,9 @@ class TaskManager:
                             "total_flits": 0,
                             "trans_flits": 0,
                         }
+
+                        # 通知订阅者（包括全局订阅者）
+                        self._notify_subscribers_sync(task_id, task, level='task_level')
 
                         # 保存最后一个experiment_id
                         if last_result.get('experiment_id'):
@@ -458,13 +560,14 @@ class TaskManager:
 
             # 合并结果
             combined_results = {
-                'total_files': total_files,
+                'total_files': total_units,
                 'completed_files': len([r for r in results_list if r['status'] == 'completed']),
                 'failed_files': len([r for r in results_list if r['status'] == 'failed']),
                 'experiment_id': experiment_id,
                 'file_results': [
                     {
                         'file': r['traffic_file'],
+                        'combination_index': r.get('combination_index'),
                         'status': r['status'],
                         'duration': r['duration'],
                         'error': r['error'],
@@ -475,12 +578,12 @@ class TaskManager:
 
             # 检查是否被取消
             if task.status == TaskStatus.CANCELLED:
-                completed_files = len(results_list)
+                completed_count = len(results_list)
                 combined_results['cancelled'] = True
                 self.update_task_status(
                     task_id,
                     TaskStatus.CANCELLED,
-                    message=f"任务已取消，已完成 {completed_files}/{total_files} 个文件",
+                    message=f"任务已取消，已完成 {completed_count}/{total_units} 个执行单元",
                     results=combined_results,
                 )
             else:
@@ -512,18 +615,33 @@ class TaskManager:
                 error=error_msg,
             )
 
-    async def _run_single_file_task(self, task_id: str, task: SimulationTask):
-        """执行单文件仿真任务（串行执行，显示详细进度）"""
+    async def _run_single_file_task(self, task_id: str, task: SimulationTask, execution_unit: Dict[str, Any]):
+        """
+        执行单执行单元仿真任务（串行执行，显示详细进度）
+
+        Args:
+            task_id: 任务ID
+            task: 任务对象
+            execution_unit: 执行单元，包含 traffic_file, combination, combination_index
+        """
         from .simulation_engine import SimulationEngine, SimulationMode
 
-        traffic_file = task.traffic_files[0]
-        self.update_task_status(task_id, TaskStatus.RUNNING, message=f"正在仿真: {traffic_file}")
+        traffic_file = execution_unit['traffic_file']
+        combination = execution_unit.get('combination', {})
+        combination_index = execution_unit.get('combination_index')
+
+        # 构建显示名称
+        display_name = traffic_file
+        if combination_index is not None:
+            display_name = f"{traffic_file} [组合{combination_index}]"
+
+        self.update_task_status(task_id, TaskStatus.RUNNING, message=f"正在仿真: {display_name}")
 
         # 初始化sim_details
         task.sim_details = {
             "file_index": 0,
             "total_files": 1,
-            "current_file": traffic_file,
+            "current_file": display_name,
             "sim_progress": 0,
             "current_time": 0,
             "max_time": task.max_time,
@@ -535,12 +653,16 @@ class TaskManager:
         }
 
         try:
+            # 合并配置覆盖项: base config_overrides + combination
+            config_overrides = task.config_overrides or {}
+            merged_overrides = {**config_overrides, **combination}
+
             engine = SimulationEngine(
                 mode=SimulationMode(task.mode),
                 config_path=task.config_path,
                 topology=task.topology,
                 verbose=0,
-                config_overrides=task.config_overrides,
+                config_overrides=merged_overrides if merged_overrides else None,
                 die_config_path=task.die_config_path,
                 die_config_overrides=task.die_config_overrides,
             )
@@ -554,9 +676,10 @@ class TaskManager:
                 if data.get("max_time", 0) > 0:
                     task.progress = int((data.get("current_time", 0) / data["max_time"]) * 100)
                 # 通知 WebSocket 订阅者（线程安全方式）
+                # 使用 sim_level 级别，只通知单任务订阅者（不通知全局订阅者）
                 try:
                     loop = asyncio.get_running_loop()
-                    loop.create_task(self._notify_subscribers(task_id, task))
+                    loop.create_task(self._notify_subscribers(task_id, task, level='sim_level'))
                 except RuntimeError:
                     # 没有运行中的事件循环，跳过通知（进度数据已更新到 task 对象）
                     pass

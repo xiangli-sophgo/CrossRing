@@ -3,7 +3,7 @@ import { Layout, Typography, Spin, message, Segmented, Card, Descriptions, Tag, 
 import { Scene3D } from './components/Scene3D'
 import { ConfigPanel } from './components/ConfigPanel'
 import { TopologyGraph, NodeDetail, LinkDetail } from './components/TopologyGraph'
-import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType, MultiLevelViewOptions } from './types'
+import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType, MultiLevelViewOptions, TrafficConfigItem, TrafficAnalysisResult } from './types'
 import { getTopology, generateTopology, getLevelConnectionDefaults } from './api/topology'
 import { useViewNavigation } from './hooks/useViewNavigation'
 
@@ -101,6 +101,10 @@ const App: React.FC = () => {
     levelPair: 'pod_rack',
     expandedContainers: new Set(),
   })
+
+  // LLM流量分析状态 (多配置)
+  const [trafficConfigs, setTrafficConfigs] = useState<TrafficConfigItem[]>([])
+  const [trafficAnalysisResult, setTrafficAnalysisResult] = useState<TrafficAnalysisResult | null>(null)
 
   // 加载拓扑数据（优先使用缓存配置生成）
   const loadTopology = useCallback(async () => {
@@ -448,6 +452,22 @@ const App: React.FC = () => {
     return 'datacenter'
   }
 
+  // 跳转到芯片视图（用于流量分析）
+  const handleNavigateToChips = useCallback(() => {
+    if (!topology || topology.pods.length === 0) return
+    const firstPod = topology.pods[0]
+    if (firstPod.racks.length === 0) return
+    const firstRack = firstPod.racks[0]
+    if (firstRack.boards.length === 0) return
+    const firstBoard = firstRack.boards[0]
+    // 直接导航到 Board 视图（显示 Chip）
+    navigation.navigateToBoard(firstPod.id, firstRack.id, firstBoard.id)
+    // 切换到拓扑视图
+    setViewMode('topology')
+    // 关闭多层级视图以便看到热力图
+    setMultiLevelOptions(prev => ({ ...prev, enabled: false }))
+  }, [topology, navigation])
+
   // 处理3D视图节点选择，转换为NodeDetail格式
   const handleScene3DNodeSelect = useCallback((
     nodeType: 'pod' | 'rack' | 'board' | 'chip' | 'switch',
@@ -612,6 +632,11 @@ const App: React.FC = () => {
             onLayoutTypeChange={setLayoutType}
             viewMode={viewMode}
             focusedLevel={focusedLevel}
+            trafficConfigs={trafficConfigs}
+            onTrafficConfigsChange={setTrafficConfigs}
+            trafficAnalysisResult={trafficAnalysisResult}
+            onTrafficAnalysisResultChange={setTrafficAnalysisResult}
+            onNavigateToChips={handleNavigateToChips}
           />
 
           {/* 节点详情卡片 */}
@@ -820,6 +845,7 @@ const App: React.FC = () => {
               onLayoutTypeChange={setLayoutType}
               multiLevelOptions={multiLevelOptions}
               onMultiLevelOptionsChange={setMultiLevelOptions}
+              trafficAnalysisResult={trafficAnalysisResult}
             />
           )}
         </Content>

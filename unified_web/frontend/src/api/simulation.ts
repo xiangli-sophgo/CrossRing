@@ -19,6 +19,7 @@ export interface SimulationRequest {
   experiment_name?: string
   experiment_description?: string
   max_workers?: number  // 并行进程数
+  sweep_combinations?: Record<string, number>[]  // 参数遍历组合列表
 }
 
 export interface TaskResponse {

@@ -8,6 +8,7 @@ import {
   HierarchyLevel,
   LayoutType,
   MultiLevelViewOptions,
+  TrafficAnalysisResult,
 } from '../../types'
 
 // 根据板卡U高度区分颜色
@@ -82,6 +83,8 @@ export interface TopologyGraphProps {
   // 多层级视图相关
   multiLevelOptions?: MultiLevelViewOptions
   onMultiLevelOptionsChange?: (options: MultiLevelViewOptions) => void
+  // 流量分析热力图
+  trafficAnalysisResult?: TrafficAnalysisResult | null
 }
 
 export interface Node {

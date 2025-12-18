@@ -1,5 +1,5 @@
 /**
- * 状态卡片组件集合 - TaskStatusCard, SweepProgressCard
+ * 状态卡片组件集合 - TaskStatusCard
  */
 import React, { useState, useEffect } from 'react'
 import { Card, Row, Col, Statistic, Progress, Space, Typography, Divider, Alert, Tag, Button } from 'antd'
@@ -13,7 +13,6 @@ import {
 } from '@ant-design/icons'
 import { primaryColor, successColor, warningColor, errorColor } from '@/theme/colors'
 import type { TaskStatus } from '@/api/simulation'
-import type { SweepProgress } from '../helpers'
 import { getElapsedTime } from '../helpers'
 
 const { Text } = Typography
@@ -173,91 +172,6 @@ export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
           <Alert type="error" message={currentTask.error} showIcon style={{ marginTop: 8 }} />
         )}
       </Space>
-    </Card>
-  )
-}
-
-// ============== SweepProgressCard ==============
-
-interface SweepProgressCardProps {
-  sweepProgress: SweepProgress
-  sweepRunning: boolean
-  sweepRestoring: boolean
-  onViewResults: () => void
-}
-
-export const SweepProgressCard: React.FC<SweepProgressCardProps> = ({
-  sweepProgress,
-  sweepRunning,
-  sweepRestoring,
-  onViewResults,
-}) => {
-  return (
-    <Card
-      title={
-        <Space>
-          <span>参数遍历进度</span>
-          {sweepRestoring ? (
-            <Tag color="processing" icon={<SyncOutlined spin />}>恢复中</Tag>
-          ) : sweepRunning ? (
-            <Tag color="processing" icon={<SyncOutlined spin />}>执行中</Tag>
-          ) : (
-            <Tag color="success" icon={<CheckCircleOutlined />}>已完成</Tag>
-          )}
-        </Space>
-      }
-      style={{ marginBottom: 24 }}
-      loading={sweepRestoring}
-    >
-      <Row gutter={[16, 16]}>
-        <Col span={5}>
-          <Statistic title="总任务数" value={sweepProgress.total} />
-        </Col>
-        <Col span={5}>
-          <Statistic
-            title="已完成"
-            value={sweepProgress.completed}
-            valueStyle={{ color: successColor }}
-          />
-        </Col>
-        <Col span={5}>
-          <Statistic
-            title="运行中"
-            value={sweepProgress.running}
-            valueStyle={{ color: warningColor }}
-          />
-        </Col>
-        <Col span={5}>
-          <Statistic
-            title="等待中"
-            value={sweepProgress.pending}
-          />
-        </Col>
-        <Col span={4}>
-          <Statistic
-            title="失败"
-            value={sweepProgress.failed}
-            valueStyle={{ color: sweepProgress.failed > 0 ? errorColor : undefined }}
-          />
-        </Col>
-      </Row>
-
-      <Progress
-        percent={sweepProgress.total > 0 ? Math.round((sweepProgress.completed + sweepProgress.failed) / sweepProgress.total * 100) : 0}
-        status={sweepRunning ? 'active' : sweepProgress.failed > 0 ? 'exception' : 'success'}
-        strokeColor={sweepRunning ? { from: warningColor, to: '#faad14' } : undefined}
-        style={{ marginTop: 16 }}
-      />
-
-      {!sweepRunning && sweepProgress.completed > 0 && (
-        <Button
-          type="link"
-          onClick={onViewResults}
-          style={{ marginTop: 8, padding: 0 }}
-        >
-          查看实验结果 →
-        </Button>
-      )}
     </Card>
   )
 }

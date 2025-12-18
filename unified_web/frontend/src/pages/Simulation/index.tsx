@@ -1,7 +1,7 @@
 /**
  * 仿真执行页面
  */
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Typography,
@@ -44,7 +44,6 @@ import {
   getTrafficFileContent,
   getConfigContent,
   saveConfigContent,
-  getBatchTaskStatus,
   type SimulationRequest,
   type TaskStatus,
   type ConfigOption,
@@ -62,13 +61,12 @@ import {
   DCINConfigPanel,
   SweepConfigPanel,
   TaskStatusCard,
-  SweepProgressCard,
   TaskHistoryTable,
   TrafficFileTree,
 } from './components'
 
 // 导入类型和工具函数
-import type { SweepParam, SweepProgress, SavedSweepConfig } from './helpers'
+import type { SweepParam, SavedSweepConfig } from './helpers'
 import {
   calculateSweepValues,
   generateCombinationsWithBinding,
@@ -76,6 +74,7 @@ import {
   calculateTotalCombinationsWithBinding,
   sleep,
 } from './helpers'
+import { useGlobalTaskWebSocket, type GlobalTaskUpdate } from '@/hooks/useGlobalTaskWebSocket'
 
 const { Text } = Typography
 const { Option } = Select
@@ -122,50 +121,44 @@ const Simulation: React.FC = () => {
   // 已有实验列表（用于实验名称自动完成）
   const [existingExperiments, setExistingExperiments] = useState<Experiment[]>([])
 
-  // 参数遍历状态
+  // 参数遍历配置（用于UI配置，生成combinations后作为请求参数传递）
   const [sweepParams, setSweepParams] = useState<SweepParam[]>([])
-  const [sweepTaskIds, setSweepTaskIds] = useState<string[]>([])
-  const [sweepProgress, setSweepProgress] = useState<SweepProgress>({ total: 0, completed: 0, running: 0, pending: 0, failed: 0 })
-  const [sweepRunning, setSweepRunning] = useState(false)
   const [savedSweepConfigs, setSavedSweepConfigs] = useState<SavedSweepConfig[]>([])
   const [sweepConfigName, setSweepConfigName] = useState('')
-  const [sweepRestoring, setSweepRestoring] = useState(false)
 
   const pollIntervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
-  const sweepPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const wsConnectionsRef = useRef<Map<string, WebSocket>>(new Map())
   const runningTasksRef = useRef<Map<string, { task: TaskStatus; startTime: number }>>(new Map())
+  const loadHistoryDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 恢复运行中的任务
   const restoreRunningTask = async () => {
     try {
       const data = await getRunningTasks()
-      if (data.tasks.length > 0) {
-        const newRunningTasks = new Map<string, { task: TaskStatus; startTime: number }>()
-        // 并行查询所有任务状态
-        const statusPromises = data.tasks.map(async (taskItem) => {
-          try {
-            const fullStatus = await getTaskStatus(taskItem.task_id)
-            return { taskItem, fullStatus, success: true }
-          } catch {
-            return { taskItem, fullStatus: null, success: false }
-          }
-        })
-        const results = await Promise.all(statusPromises)
-        for (const { taskItem, fullStatus, success } of results) {
-          // 只恢复 running 状态的任务，pending 状态的任务不显示卡片
-          if (success && fullStatus && fullStatus.status === 'running') {
-            const startTime = taskItem.started_at
-              ? new Date(taskItem.started_at).getTime()
-              : new Date(taskItem.created_at).getTime()
-            newRunningTasks.set(taskItem.task_id, { task: fullStatus, startTime })
-            connectTaskWebSocket(taskItem.task_id)
-          }
+      if (data.tasks.length === 0) return
+
+      const newRunningTasks = new Map<string, { task: TaskStatus; startTime: number }>()
+      const statusPromises = data.tasks.map(async (taskItem) => {
+        try {
+          const fullStatus = await getTaskStatus(taskItem.task_id)
+          return { taskItem, fullStatus, success: true }
+        } catch {
+          return { taskItem, fullStatus: null, success: false }
         }
-        setRunningTasks(newRunningTasks)
-        if (newRunningTasks.size > 0) {
-          message.info(`已恢复 ${newRunningTasks.size} 个运行中的任务`)
+      })
+      const results = await Promise.all(statusPromises)
+      for (const { taskItem, fullStatus, success } of results) {
+        if (success && fullStatus && (fullStatus.status === 'running' || fullStatus.status === 'pending')) {
+          const startTime = taskItem.started_at
+            ? new Date(taskItem.started_at).getTime()
+            : new Date(taskItem.created_at).getTime()
+          newRunningTasks.set(taskItem.task_id, { task: fullStatus, startTime })
+          connectTaskWebSocket(taskItem.task_id)
         }
+      }
+      setRunningTasks(newRunningTasks)
+      if (newRunningTasks.size > 0) {
+        message.info(`已恢复 ${newRunningTasks.size} 个运行中的任务`)
       }
     } catch (error) {
       console.error('恢复运行中任务失败:', error)
@@ -176,6 +169,44 @@ const Simulation: React.FC = () => {
   useEffect(() => {
     runningTasksRef.current = runningTasks
   }, [runningTasks])
+
+  // 全局 WebSocket 处理：接收所有任务状态变化
+  const handleGlobalTaskUpdate = useCallback((update: GlobalTaskUpdate) => {
+    // 更新运行中任务卡片（如果存在）
+    if (runningTasksRef.current.has(update.task_id)) {
+      setRunningTasks(prev => {
+        const newMap = new Map(prev)
+        const existing = newMap.get(update.task_id)
+        if (existing) {
+          newMap.set(update.task_id, {
+            ...existing,
+            task: {
+              ...existing.task,
+              status: update.status as TaskStatus['status'],
+              progress: update.progress,
+              message: update.message,
+              current_file: update.current_file || existing.task.current_file,
+            }
+          })
+        }
+        return newMap
+      })
+    }
+
+    // 刷新历史列表：任务状态变化时都刷新（包括进度更新）
+    // 使用防抖避免过于频繁的刷新（500ms 内只刷新一次）
+    if (loadHistoryDebounceRef.current) {
+      clearTimeout(loadHistoryDebounceRef.current)
+    }
+    loadHistoryDebounceRef.current = setTimeout(() => {
+      loadHistory()
+    }, 500)
+  }, [])
+
+  // 使用全局 WebSocket 订阅
+  useGlobalTaskWebSocket({
+    onTaskUpdate: handleGlobalTaskUpdate,
+  })
 
   // 加载配置和历史
   useEffect(() => {
@@ -215,7 +246,6 @@ const Simulation: React.FC = () => {
       // 清除所有任务轮询
       pollIntervalsRef.current.forEach(interval => clearInterval(interval))
       pollIntervalsRef.current.clear()
-      if (sweepPollRef.current) clearInterval(sweepPollRef.current)
       // 关闭所有 WebSocket 连接
       wsConnectionsRef.current.forEach(ws => ws.close())
       wsConnectionsRef.current.clear()
@@ -399,7 +429,9 @@ const Simulation: React.FC = () => {
     if (wsConnectionsRef.current.has(taskId)) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/simulation/ws/${taskId}`)
+    // 开发环境直接连接后端，生产环境使用相对路径
+    const host = import.meta.env.DEV ? 'localhost:8000' : window.location.host
+    const ws = new WebSocket(`${protocol}//${host}/api/simulation/ws/${taskId}`)
     let messageShown = false
 
     ws.onopen = () => {
@@ -435,7 +467,7 @@ const Simulation: React.FC = () => {
 
         // 任务完成时关闭连接
         if (['completed', 'failed', 'cancelled'].includes(data.status)) {
-          ws.close()
+          ws.close(1000, 'Task completed')  // 传递正常关闭码，防止重连
           wsConnectionsRef.current.delete(taskId)
 
           // 延迟移除任务卡片
@@ -700,116 +732,6 @@ const Simulation: React.FC = () => {
     return typeof value === 'number' && !sweepParams.find(p => p.key === key)
   })
 
-  // 批量任务状态轮询（混合策略：批量查询 + WebSocket）
-  const startSweepPolling = (taskIds: string[]) => {
-    if (sweepPollRef.current) clearInterval(sweepPollRef.current)
-
-    const poll = async () => {
-      try {
-        // 使用批量查询接口，一次请求获取所有任务状态
-        const { tasks } = await getBatchTaskStatus(taskIds)
-
-        let completed = 0
-        let running = 0
-        let pending = 0
-        let failed = 0
-
-        for (const taskId of taskIds) {
-          const taskStatus = tasks[taskId]
-          if (!taskStatus) {
-            failed++
-            continue
-          }
-
-          const status = taskStatus.status
-          if (status === 'completed') completed++
-          else if (status === 'running') {
-            running++
-            // 对 running 状态的任务建立 WebSocket 连接获取详细进度
-            if (!wsConnectionsRef.current.has(taskId)) {
-              connectTaskWebSocket(taskId)
-            }
-          }
-          else if (status === 'pending') pending++
-          else failed++
-        }
-
-        setSweepProgress({ total: taskIds.length, completed, running, pending, failed })
-
-        if (completed + failed >= taskIds.length) {
-          if (sweepPollRef.current) {
-            clearInterval(sweepPollRef.current)
-            sweepPollRef.current = null
-          }
-          setSweepRunning(false)
-          sessionStorage.removeItem('sweepTaskIds')
-          message.success(`参数遍历完成: ${completed} 成功, ${failed} 失败`)
-          loadHistory()
-        }
-      } catch (error) {
-        console.error('批量查询任务状态失败:', error)
-      }
-    }
-
-    poll()
-    sweepPollRef.current = setInterval(poll, 5000)  // 5秒轮询一次
-  }
-
-  // 恢复参数遍历任务
-  useEffect(() => {
-    const restoreSweepTasks = async () => {
-      const savedTaskIds = sessionStorage.getItem('sweepTaskIds')
-      if (!savedTaskIds) return
-
-      try {
-        const taskIds: string[] = JSON.parse(savedTaskIds)
-        if (taskIds.length === 0) return
-
-        setSweepRestoring(true)
-        setSweepTaskIds(taskIds)
-
-        // 使用批量查询接口
-        const { tasks } = await getBatchTaskStatus(taskIds)
-
-        let completed = 0
-        let running = 0
-        let pending = 0
-        let failed = 0
-
-        for (const taskId of taskIds) {
-          const taskStatus = tasks[taskId]
-          if (!taskStatus) {
-            failed++
-            continue
-          }
-          const status = taskStatus.status
-          if (status === 'completed') completed++
-          else if (status === 'running') running++
-          else if (status === 'pending') pending++
-          else failed++
-        }
-
-        setSweepProgress({ total: taskIds.length, completed, running, pending, failed })
-
-        if (running > 0 || pending > 0) {
-          setSweepRunning(true)
-          startSweepPolling(taskIds)
-          message.info('已恢复参数遍历任务')
-        } else {
-          sessionStorage.removeItem('sweepTaskIds')
-        }
-
-        setSweepRestoring(false)
-      } catch (error) {
-        console.error('恢复参数遍历任务失败:', error)
-        sessionStorage.removeItem('sweepTaskIds')
-        setSweepRestoring(false)
-      }
-    }
-
-    restoreSweepTasks()
-  }, [])
-
   const handleSweepSubmit = async (values: any) => {
     if (selectedFiles.length === 0) {
       message.warning('请选择流量文件')
@@ -844,55 +766,59 @@ const Simulation: React.FC = () => {
   }
 
   const executeSweep = async (values: any, combinations: Record<string, number>[]) => {
-    setSweepRunning(true)
-    setSweepTaskIds([])
-    setSweepProgress({ total: combinations.length, completed: 0, running: 0, pending: 0, failed: 0 })
-
+    // 创建单个任务，包含所有参数组合（和并行执行逻辑统一）
     const topology = `${values.rows}x${values.cols}`
-    const batchId = Date.now().toString()
+    const totalUnits = selectedFiles.length * combinations.length
     const experimentName = values.experiment_name || `参数遍历_${new Date().toLocaleString()}`
-    const taskIds: string[] = []
 
-    for (let i = 0; i < combinations.length; i++) {
-      const combo = combinations[i]
-      const mergedOverrides = { ...configValues, ...combo }
-
-      const request: SimulationRequest = {
-        mode: values.mode,
-        topology,
-        config_path: values.config_path,
-        config_overrides: mergedOverrides,
-        die_config_path: values.mode === 'dcin' ? values.die_config_path : undefined,
-        die_config_overrides: values.mode === 'dcin' && Object.keys(dieConfigValues).length > 0 ? dieConfigValues : undefined,
-        traffic_source: 'file',
-        traffic_files: selectedFiles,
-        max_time: values.max_time,
-        save_to_db: values.save_to_db,
-        experiment_name: experimentName,
-        experiment_description: `[batch:${batchId}] 参数组合 ${i + 1}/${combinations.length}: ${JSON.stringify(combo)}`,
-        max_workers: values.max_workers,
-      }
-
-      try {
-        const response = await runSimulation(request)
-        taskIds.push(response.task_id)
-        setSweepTaskIds([...taskIds])
-        sessionStorage.setItem('sweepTaskIds', JSON.stringify(taskIds))
-      } catch (error: any) {
-        message.error(`任务 ${i + 1} 创建失败: ${error.response?.data?.detail || error.message}`)
-      }
-
-      if ((i + 1) % 5 === 0) {
-        await sleep(500)
-      }
+    const request: SimulationRequest = {
+      mode: values.mode,
+      topology,
+      config_path: values.config_path,
+      config_overrides: configValues,
+      die_config_path: values.mode === 'dcin' ? values.die_config_path : undefined,
+      die_config_overrides: values.mode === 'dcin' && Object.keys(dieConfigValues).length > 0 ? dieConfigValues : undefined,
+      traffic_source: 'file',
+      traffic_files: selectedFiles,
+      max_time: values.max_time,
+      save_to_db: values.save_to_db,
+      experiment_name: experimentName,
+      experiment_description: `参数遍历: ${combinations.length} 个组合 × ${selectedFiles.length} 个文件 = ${totalUnits} 个执行单元`,
+      max_workers: values.max_workers,
+      sweep_combinations: combinations,
     }
 
-    if (taskIds.length > 0) {
-      message.success(`已创建 ${taskIds.length} 个仿真任务`)
-      startSweepPolling(taskIds)
-    } else {
-      setSweepRunning(false)
-      sessionStorage.removeItem('sweepTaskIds')
+    try {
+      const response = await runSimulation(request)
+
+      // 创建初始状态（和 handleSubmit 相同）
+      const initialStatus: TaskStatus = {
+        task_id: response.task_id,
+        status: 'pending',
+        progress: 0,
+        current_file: '',
+        message: response.message,
+        error: null,
+        results: null,
+        sim_details: null,
+        created_at: new Date().toISOString(),
+        started_at: null,
+        completed_at: null,
+        experiment_name: experimentName,
+      }
+
+      // 添加到 runningTasks
+      setRunningTasks(prev => {
+        const newMap = new Map(prev)
+        newMap.set(response.task_id, { task: initialStatus, startTime: Date.now() })
+        return newMap
+      })
+
+      // 建立 WebSocket 连接
+      connectTaskWebSocket(response.task_id)
+      message.success(`参数遍历任务已创建: ${totalUnits} 个执行单元`)
+    } catch (error: any) {
+      message.error(`任务创建失败: ${error.response?.data?.detail || error.message}`)
     }
   }
 
@@ -1169,37 +1095,25 @@ const Simulation: React.FC = () => {
                   key: 'sim_settings',
                   label: '仿真设置',
                   children: (
-                    <Row gutter={[16, 8]}>
-                      <Col span={8}>
-                        <Form.Item name="max_time" label="最大仿真时间 (ns)">
-                          <InputNumber min={100} max={100000} style={{ width: '100%' }} />
-                        </Form.Item>
-                      </Col>
-                      <Col span={8}>
-                        <Form.Item name="max_workers" label="并行数">
-                          <InputNumber min={1} max={8} style={{ width: '100%' }} />
-                        </Form.Item>
-                      </Col>
-                      <Col span={8}>
-                        <Form.Item name="save_to_db" label="保存到数据库" valuePropName="checked">
-                          <Switch />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-                  ),
-                }]}
-              />
-
-              {/* 实验信息 */}
-              <Collapse
-                size="small"
-                style={{ marginBottom: 16 }}
-                items={[{
-                  key: 'experiment_info',
-                  label: '实验信息',
-                  children: (
                     <>
-                      <Form.Item name="experiment_name" label="实验名称">
+                      <Row gutter={[16, 8]}>
+                        <Col span={8}>
+                          <Form.Item name="max_time" label="最大仿真时间 (ns)">
+                            <InputNumber min={100} max={100000} style={{ width: '100%' }} />
+                          </Form.Item>
+                        </Col>
+                        <Col span={8}>
+                          <Form.Item name="max_workers" label="并行数">
+                            <InputNumber min={1} max={8} style={{ width: '100%' }} />
+                          </Form.Item>
+                        </Col>
+                        <Col span={8}>
+                          <Form.Item name="save_to_db" label="保存到数据库" valuePropName="checked">
+                            <Switch />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                      <Form.Item name="experiment_name" label="实验名称" style={{ marginBottom: 8 }}>
                         <AutoComplete
                           placeholder="输入或选择已有实验名称"
                           options={existingExperiments.map(e => ({ value: e.name }))}
@@ -1208,7 +1122,7 @@ const Simulation: React.FC = () => {
                           }
                         />
                       </Form.Item>
-                      <Form.Item name="experiment_description" label="实验描述">
+                      <Form.Item name="experiment_description" label="实验描述" style={{ marginBottom: 0 }}>
                         <Input.TextArea rows={2} placeholder="可选的实验描述" />
                       </Form.Item>
                     </>
@@ -1224,12 +1138,12 @@ const Simulation: React.FC = () => {
                       type="primary"
                       icon={<RocketOutlined />}
                       onClick={() => handleSweepSubmit(form.getFieldsValue())}
-                      loading={sweepRunning}
+                      loading={loading}
                       disabled={sweepParams.length === 0 || bindingErrors.length > 0}
                       size="large"
                       style={{ height: 44 }}
                     >
-                      {sweepRunning ? '批量执行中...' : `批量执行 (${totalCombinations}组)`}
+                      {loading ? '批量执行中...' : `批量执行 (${totalCombinations}组)`}
                     </Button>
                   ) : (
                     <Button
@@ -1247,16 +1161,6 @@ const Simulation: React.FC = () => {
               </Form.Item>
             </Form>
           </Card>
-
-          {/* 参数遍历进度卡片 */}
-          {(sweepTaskIds.length > 0 || sweepRestoring) && (
-            <SweepProgressCard
-              sweepProgress={sweepProgress}
-              sweepRunning={sweepRunning}
-              sweepRestoring={sweepRestoring}
-              onViewResults={() => navigate('/experiments')}
-            />
-          )}
 
           {/* 运行中的任务卡片列表 */}
           {Array.from(runningTasks.entries()).map(([taskId, { task, startTime }]) => (

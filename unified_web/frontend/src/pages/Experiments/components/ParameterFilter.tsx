@@ -3,7 +3,7 @@
  */
 
 import { Slider, Button, Space, Typography } from 'antd';
-import { useExperimentStore } from '../stores/experimentStore';
+import { useExperimentStore } from '@/stores/experimentStore';
 
 const { Text } = Typography;
 

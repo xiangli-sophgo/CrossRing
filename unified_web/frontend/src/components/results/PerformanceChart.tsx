@@ -5,8 +5,8 @@
 import { useEffect, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { Spin, Empty } from 'antd';
-import { getDistribution } from '../api';
-import type { PerformanceDistribution } from '../types';
+import { getDistribution } from '@/api/experiments';
+import type { PerformanceDistribution } from '@/types';
 
 interface Props {
   experimentId: number;

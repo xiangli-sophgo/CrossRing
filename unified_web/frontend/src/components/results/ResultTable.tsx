@@ -9,10 +9,10 @@ import type { DataNode } from 'antd/es/tree';
 import { HotTable, HotTableClass } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
-import type { ResultsPageResponse, ExperimentType } from '../types';
+import type { ResultsPageResponse, ExperimentType } from '@/types';
 import ResultDetailPanel from './ResultDetailPanel';
-import { classifyParamKeysWithHierarchy } from '../utils/paramClassifier';
-import { deleteResult, deleteResultsBatch } from '../api';
+import { classifyParamKeysWithHierarchy } from '@/utils/paramClassifier';
+import { deleteResult, deleteResultsBatch } from '@/api/experiments';
 import {
   DndContext,
   closestCenter,
@@ -991,7 +991,8 @@ copyPaste={{
                   if (hot) {
                     const columnSortingPlugin = hot.getPlugin('columnSorting');
                     const currentSort = columnSortingPlugin.getSortConfig();
-                    const currentColSort = currentSort.find((s: { column: number }) => s.column === coords.col);
+                    const sortArray = Array.isArray(currentSort) ? currentSort : (currentSort ? [currentSort] : []);
+                    const currentColSort = sortArray.find((s: { column: number }) => s.column === coords.col);
 
                     let newOrder: 'asc' | 'desc' | undefined;
                     if (!currentColSort) {

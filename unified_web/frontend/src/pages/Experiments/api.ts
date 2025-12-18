@@ -11,7 +11,7 @@ import type {
   SensitivityResponse,
   FilterCondition,
   TrafficCompareData,
-} from '../types';
+} from '@/types';
 
 const api = axios.create({
   baseURL: '/api',

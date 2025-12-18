@@ -19,9 +19,9 @@ import {
   EyeOutlined,
   DownloadOutlined,
 } from '@ant-design/icons';
-import type { SimulationResult, ExperimentType } from '../types';
-import { classifyParams, formatParamValue } from '../utils/paramClassifier';
-import { getResultHtmlUrl, getResultFiles, getFileDownloadUrl, type ResultFileInfo } from '../api';
+import type { SimulationResult, ExperimentType } from '@/types';
+import { classifyParams, formatParamValue } from '@/utils/paramClassifier';
+import { getResultHtmlUrl, getResultFiles, getFileDownloadUrl, type ResultFileInfo } from '@/api/experiments';
 
 interface Props {
   result: SimulationResult;

@@ -58,6 +58,7 @@ export interface ViewNavigationReturn {
   navigateTo: (nodeId: string) => void
   navigateToPod: (podId: string) => void
   navigateToRack: (podId: string, rackId: string) => void
+  navigateToBoard: (podId: string, rackId: string, boardId: string) => void
   navigateBack: () => void
   navigateToBreadcrumb: (index: number) => void
   navigateToTop: () => void
@@ -178,6 +179,17 @@ export function useViewNavigation(
     })
   }, [addToHistory])
 
+  // 直接导航到Board (从任意视图)
+  const navigateToBoard = useCallback((podId: string, rackId: string, boardId: string) => {
+    const newPath = [podId, rackId, boardId]
+    addToHistory(newPath)
+    setViewState({
+      level: 'board',
+      path: newPath,
+      selectedNode: undefined,
+    })
+  }, [addToHistory])
+
   // 返回上一级
   const navigateBack = useCallback(() => {
     setViewState(prev => {
@@ -278,6 +290,7 @@ export function useViewNavigation(
     navigateTo,
     navigateToPod,
     navigateToRack,
+    navigateToBoard,
     navigateBack,
     navigateToBreadcrumb,
     navigateToTop,

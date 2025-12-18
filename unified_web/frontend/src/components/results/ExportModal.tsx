@@ -5,8 +5,8 @@
 import { useState, useEffect } from 'react';
 import { Modal, Checkbox, Button, Space, Spin, message, Typography, Divider, Tag, Progress } from 'antd';
 import { DownloadOutlined, RocketOutlined } from '@ant-design/icons';
-import type { Experiment } from '../types';
-import { getExportInfo, buildExecutablePackage, type ExportInfo } from '../api';
+import type { Experiment } from '@/types';
+import { getExportInfo, buildExecutablePackage, type ExportInfo } from '@/api/experiments';
 
 const { Text } = Typography;
 

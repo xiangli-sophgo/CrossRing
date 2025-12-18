@@ -156,6 +156,13 @@ if FRONTEND_DIST_DIR.exists():
 
 @app.on_event("startup")
 async def startup_event():
+    import asyncio
+    from app.core.task_manager import TaskManager
+
+    # 设置 TaskManager 的事件循环引用（用于跨线程通知）
+    task_manager = TaskManager()
+    task_manager.set_event_loop(asyncio.get_running_loop())
+
     print("=" * 60)
     print("🚀 仿真一体化平台已启动")
     print(f"📁 项目根目录: {CROSSRING_ROOT}")
