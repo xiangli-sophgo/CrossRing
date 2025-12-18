@@ -119,8 +119,8 @@ export default function ResultDetailPanel({ result, experimentId, experimentType
       label: '结果文件',
       children: (
         <Space direction="vertical" style={{ width: '100%' }}>
-          {/* HTML报告 */}
-          {result.result_html ? (
+          {/* HTML报告 - 支持轻量模式（has_result_html）和完整模式（result_html） */}
+          {(result.result_html || result.has_result_html) ? (
             <Space>
               <Button
                 type="primary"

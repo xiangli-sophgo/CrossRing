@@ -22,6 +22,7 @@ import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useExperimentStore } from '../../stores/experimentStore';
 import { getExperiment, getStatistics, getResults, getParamKeys, getTrafficStats, type TrafficStat } from './api';
 import ResultTable from './components/ResultTable';
+import ParameterAnalysisView from './components/ParameterAnalysisView';
 import type { ResultsPageResponse, ExperimentType } from './types';
 import { Table } from 'antd';
 
@@ -279,6 +280,16 @@ export default function ExperimentDetail() {
             </Card>
           </Col>
         </Row>
+      ),
+    },
+    {
+      key: 'analysis',
+      label: '分析',
+      children: (
+        <ParameterAnalysisView
+          experimentId={experimentId}
+          paramKeys={paramKeys}
+        />
       ),
     },
   ];

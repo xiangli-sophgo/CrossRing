@@ -36,6 +36,7 @@ export interface SimulationResult {
   result_details: Record<string, unknown>;
   result_html?: string;
   result_files?: string[];
+  has_result_html?: boolean;  // 轻量模式下使用此标志判断是否有 HTML 报告
   error?: string;
 }
 

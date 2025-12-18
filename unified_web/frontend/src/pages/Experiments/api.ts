@@ -67,26 +67,6 @@ export const deleteExperimentsBatch = async (
   return response.data;
 };
 
-export const importFromCSV = async (
-  file: File,
-  experimentName: string,
-  experimentType: ExperimentType = 'kcin',
-  description?: string,
-  topoType?: string
-): Promise<{ experiment_id: number; imported_count: number; errors: string[] }> => {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('experiment_name', experimentName);
-  formData.append('experiment_type', experimentType);
-  if (description) formData.append('description', description);
-  if (topoType) formData.append('topo_type', topoType);
-
-  const response = await api.post('/experiments/import', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
-  return response.data;
-};
-
 // ==================== 结果查询 ====================
 
 export const getResults = async (
@@ -167,18 +147,23 @@ export const getDistribution = async (
 
 export const getParameterSensitivity = async (
   experimentId: number,
-  parameter: string
+  parameter: string,
+  metric?: string
 ): Promise<SensitivityResponse> => {
   const response = await api.get(
-    `/experiments/${experimentId}/sensitivity/${parameter}`
+    `/experiments/${experimentId}/sensitivity/${parameter}`,
+    { params: metric ? { metric } : undefined }
   );
   return response.data;
 };
 
 export const getAllSensitivity = async (
-  experimentId: number
-): Promise<{ experiment_id: number; parameters: Record<string, SensitivityResponse> }> => {
-  const response = await api.get(`/experiments/${experimentId}/sensitivity`);
+  experimentId: number,
+  metric?: string
+): Promise<{ experiment_id: number; metric: string; parameters: Record<string, SensitivityResponse> }> => {
+  const response = await api.get(`/experiments/${experimentId}/sensitivity`, {
+    params: metric ? { metric } : undefined,
+  });
   return response.data;
 };
 
@@ -202,16 +187,18 @@ export const compareByTraffic = async (
 export const getParameterHeatmap = async (
   experimentId: number,
   paramX: string,
-  paramY: string
+  paramY: string,
+  metric?: string
 ): Promise<{
   param_x: string;
   param_y: string;
+  metric: string;
   x_values: number[];
   y_values: number[];
   data: { [key: string]: number | string }[];
 }> => {
   const response = await api.get(`/experiments/${experimentId}/heatmap`, {
-    params: { param_x: paramX, param_y: paramY },
+    params: { param_x: paramX, param_y: paramY, ...(metric && { metric }) },
   });
   return response.data;
 };
@@ -256,6 +243,98 @@ export const buildExecutablePackage = (experimentIds?: number[]): string => {
     params.append('experiment_ids', experimentIds.join(','));
   }
   return `/api/export/build?${params.toString()}`;
+};
+
+// ==================== 实验导出/导入 ====================
+
+/** 导出实验信息预估 */
+export interface ExperimentExportInfo {
+  experiments_count: number;
+  results_count: number;
+  estimated_size: number;
+}
+
+/** 获取导出预估信息 */
+export const getExperimentExportInfo = async (
+  experimentIds: number[]
+): Promise<ExperimentExportInfo> => {
+  const response = await api.get('/export/experiment/info', {
+    params: { experiment_ids: experimentIds.join(',') },
+  });
+  return response.data;
+};
+
+/** 导出实验为ZIP包 */
+export const exportExperiment = (experimentIds: number[]): string => {
+  const params = new URLSearchParams();
+  params.append('experiment_ids', experimentIds.join(','));
+  return `/api/export/experiment?${params.toString()}`;
+};
+
+/** 导入包中的实验信息 */
+export interface ImportExperimentInfo {
+  id: number;
+  name: string;
+  experiment_type: string;
+  results_count: number;
+  conflict: boolean;
+  existing_id?: number;
+}
+
+/** 检查导入包的响应 */
+export interface CheckImportResult {
+  valid: boolean;
+  error?: string;
+  package_info?: {
+    version: string;
+    export_time: string;
+    source_platform: string;
+  };
+  experiments?: ImportExperimentInfo[];
+  temp_file_id?: string;
+}
+
+/** 检查导入包 */
+export const checkImportPackage = async (file: File): Promise<CheckImportResult> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await api.post('/import/experiment/check', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000, // 上传可能需要更长时间
+  });
+  return response.data;
+};
+
+/** 导入配置项 */
+export interface ImportConfigItem {
+  original_id: number;
+  action: 'rename' | 'overwrite' | 'skip';
+  new_name?: string;
+}
+
+/** 导入结果 */
+export interface ImportResult {
+  success: boolean;
+  imported: Array<{
+    original_id: number;
+    new_id: number;
+    name: string;
+    results_count: number;
+  }>;
+  skipped: number[];
+  errors: Array<{ original_id: number; error: string }>;
+}
+
+/** 执行导入 */
+export const executeImport = async (
+  tempFileId: string,
+  importConfig: ImportConfigItem[]
+): Promise<ImportResult> => {
+  const response = await api.post('/import/experiment/execute', {
+    temp_file_id: tempFileId,
+    import_config: importConfig,
+  });
+  return response.data;
 };
 
 // ==================== 结果文件操作 ====================

@@ -10,19 +10,12 @@ import {
   Button,
   Space,
   Tag,
-  Modal,
-  Form,
   Input,
-  Upload,
   message,
   Typography,
   Tooltip,
   Popconfirm,
-  Select,
   Radio,
-  Row,
-  Col,
-  Statistic,
   Empty,
 } from 'antd';
 import {
@@ -36,16 +29,16 @@ import {
   ExperimentOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
-  DatabaseOutlined,
   SyncOutlined,
   CloseCircleOutlined,
 } from '@ant-design/icons';
 import { primaryColor, successColor, warningColor, errorColor } from '@/theme/colors';
 import type { ColumnsType } from 'antd/es/table';
 import { useExperimentStore } from '../../stores/experimentStore';
-import { getExperiments, importFromCSV, deleteExperiment, updateExperiment, deleteExperimentsBatch } from './api';
+import { getExperiments, deleteExperiment, updateExperiment, deleteExperimentsBatch, exportExperiment } from './api';
 import type { Experiment, ExperimentType } from './types';
-import ExportModal from './components/ExportModal';
+import ImportModal from './components/ImportModal';
+import ExportExperimentModal from './components/ExportExperimentModal';
 
 const { Title, Text } = Typography;
 
@@ -102,10 +95,8 @@ export default function ExperimentList() {
     toggleExperimentSelection,
     clearSelection,
   } = useExperimentStore();
-  const [importModalVisible, setImportModalVisible] = useState(false);
-  const [exportModalVisible, setExportModalVisible] = useState(false);
-  const [importForm] = Form.useForm();
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [importExpModalVisible, setImportExpModalVisible] = useState(false);
+  const [exportExpModalVisible, setExportExpModalVisible] = useState(false);
   const [typeFilter, setTypeFilter] = useState<ExperimentType | 'all'>('all');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingField, setEditingField] = useState<'name' | 'description' | null>(null);
@@ -130,37 +121,6 @@ export default function ExperimentList() {
   useEffect(() => {
     loadExperiments();
   }, [typeFilter]);
-
-  // 处理CSV导入
-  const handleImport = async () => {
-    try {
-      const values = await importForm.validateFields();
-      if (!uploadFile) {
-        message.error('请选择CSV文件');
-        return;
-      }
-
-      const result = await importFromCSV(
-        uploadFile,
-        values.name,
-        values.experiment_type || 'kcin',
-        values.description,
-        values.topo_type
-      );
-
-      message.success(`导入成功！共导入 ${result.imported_count} 条记录`);
-      if (result.errors.length > 0) {
-        message.warning(`有 ${result.errors.length} 条记录导入失败`);
-      }
-
-      setImportModalVisible(false);
-      importForm.resetFields();
-      setUploadFile(null);
-      loadExperiments();
-    } catch (error) {
-      message.error('导入失败');
-    }
-  };
 
   // 处理删除
   const handleDelete = async (id: number) => {
@@ -213,6 +173,12 @@ export default function ExperimentList() {
     setEditingId(null);
     setEditingField(null);
     setEditingValue('');
+  };
+
+  // 导出单个实验
+  const handleExportSingle = (id: number) => {
+    const url = exportExperiment([id]);
+    window.open(url, '_blank');
   };
 
   // 表格列定义
@@ -352,7 +318,7 @@ export default function ExperimentList() {
     {
       title: '操作',
       key: 'action',
-      width: 100,
+      width: 130,
       render: (_, record) => (
         <Space>
           <Tooltip title="查看详情">
@@ -361,6 +327,14 @@ export default function ExperimentList() {
               size="small"
               icon={<BarChartOutlined />}
               onClick={() => navigate(`/experiments/${record.id}`)}
+            />
+          </Tooltip>
+          <Tooltip title="导出实验">
+            <Button
+              type="link"
+              size="small"
+              icon={<DownloadOutlined />}
+              onClick={() => handleExportSingle(record.id)}
             />
           </Tooltip>
           <Popconfirm
@@ -458,22 +432,23 @@ export default function ExperimentList() {
             )}
           </Space>
           <Space>
-            <Tooltip title="从CSV文件导入实验数据">
-              <Button
-                icon={<UploadOutlined />}
-                onClick={() => setImportModalVisible(true)}
-                size="small"
-              >
-                导入CSV
-              </Button>
-            </Tooltip>
-            <Tooltip title="将数据库和前端打包导出">
+            <Tooltip title="导出实验到其他平台">
               <Button
                 icon={<DownloadOutlined />}
-                onClick={() => setExportModalVisible(true)}
+                onClick={() => setExportExpModalVisible(true)}
                 size="small"
               >
-                导出打包
+                导出实验
+              </Button>
+            </Tooltip>
+            <Tooltip title="从其他平台导入实验包">
+              <Button
+                type="primary"
+                icon={<UploadOutlined />}
+                onClick={() => setImportExpModalVisible(true)}
+                size="small"
+              >
+                导入实验
               </Button>
             </Tooltip>
           </Space>
@@ -505,7 +480,7 @@ export default function ExperimentList() {
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
                 description="暂无实验数据"
               >
-                <Button type="primary" icon={<UploadOutlined />} onClick={() => setImportModalVisible(true)}>
+                <Button type="primary" icon={<UploadOutlined />} onClick={() => setImportExpModalVisible(true)}>
                   导入第一个实验
                 </Button>
               </Empty>
@@ -514,66 +489,20 @@ export default function ExperimentList() {
         />
       </Card>
 
-      {/* CSV导入弹窗 */}
-      <Modal
-        title="从CSV导入实验数据"
-        open={importModalVisible}
-        onOk={handleImport}
-        onCancel={() => {
-          setImportModalVisible(false);
-          importForm.resetFields();
-          setUploadFile(null);
-        }}
-        okText="导入"
-        cancelText="取消"
-      >
-        <Form form={importForm} layout="vertical">
-          <Form.Item
-            name="name"
-            label="实验名称"
-            rules={[{ required: true, message: '请输入实验名称' }]}
-          >
-            <Input placeholder="输入唯一的实验名称" />
-          </Form.Item>
-          <Form.Item
-            name="experiment_type"
-            label="实验类型"
-            initialValue="kcin"
-            rules={[{ required: true, message: '请选择实验类型' }]}
-          >
-            <Select>
-              <Select.Option value="kcin">KCIN</Select.Option>
-              <Select.Option value="dcin">DCIN</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item name="description" label="描述">
-            <Input.TextArea rows={2} placeholder="可选的实验描述" />
-          </Form.Item>
-          <Form.Item name="topo_type" label="拓扑类型">
-            <Input placeholder="如 5x4" />
-          </Form.Item>
-          <Form.Item label="CSV文件" required>
-            <Upload
-              beforeUpload={(file) => {
-                setUploadFile(file);
-                return false;
-              }}
-              onRemove={() => setUploadFile(null)}
-              maxCount={1}
-              accept=".csv"
-            >
-              <Button icon={<UploadOutlined />}>选择文件</Button>
-            </Upload>
-            {uploadFile && <span style={{ marginLeft: 8 }}>{uploadFile.name}</span>}
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* 导出打包弹窗 */}
-      <ExportModal
-        open={exportModalVisible}
-        onClose={() => setExportModalVisible(false)}
+      {/* 导出实验弹窗 */}
+      <ExportExperimentModal
+        open={exportExpModalVisible}
+        onClose={() => setExportExpModalVisible(false)}
         experiments={experiments}
+      />
+
+      {/* 导入实验弹窗 */}
+      <ImportModal
+        open={importExpModalVisible}
+        onClose={() => setImportExpModalVisible(false)}
+        onSuccess={() => {
+          loadExperiments();
+        }}
       />
     </div>
   );

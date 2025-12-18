@@ -56,6 +56,7 @@ class TrafficCompareResponse(BaseModel):
 async def get_parameter_sensitivity(
     experiment_id: int,
     parameter: str,
+    metric: str = Query(None, description="性能指标名（默认使用performance，可指定config_params中的字段）"),
 ):
     """
     获取单个参数的敏感性分析
@@ -76,21 +77,24 @@ async def get_parameter_sensitivity(
         )
 
     try:
-        result = db_manager.get_parameter_sensitivity(experiment_id, parameter)
+        result = db_manager.get_parameter_sensitivity(experiment_id, parameter, metric)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/experiments/{experiment_id}/sensitivity")
-async def get_all_sensitivity(experiment_id: int):
+async def get_all_sensitivity(
+    experiment_id: int,
+    metric: str = Query(None, description="性能指标名（默认使用performance）"),
+):
     """获取所有参数的敏感性分析"""
     experiment = db_manager.get_experiment(experiment_id)
     if not experiment:
         raise HTTPException(status_code=404, detail="实验不存在")
 
-    result = db_manager.get_all_parameter_sensitivity(experiment_id)
-    return {"experiment_id": experiment_id, "parameters": result}
+    result = db_manager.get_all_parameter_sensitivity(experiment_id, metric)
+    return {"experiment_id": experiment_id, "metric": metric or "performance", "parameters": result}
 
 
 @router.post("/compare", response_model=CompareResponse)
@@ -125,6 +129,7 @@ async def get_parameter_heatmap(
     experiment_id: int,
     param_x: str = Query(..., description="X轴参数"),
     param_y: str = Query(..., description="Y轴参数"),
+    metric: str = Query(None, description="性能指标名（默认使用performance，可指定config_params中的字段）"),
 ):
     """
     获取两个参数的性能热图数据
@@ -144,38 +149,49 @@ async def get_parameter_heatmap(
     if param_x == param_y:
         raise HTTPException(status_code=400, detail="X轴和Y轴参数不能相同")
 
-    # 获取热图数据（从 JSON config_params 中提取）
-    results, total = db_manager.db.get_results(experiment_id, page=1, page_size=100000)
+    # 轻量级查询，只获取 config_params 和 performance 字段
+    results = db_manager.db.get_results_for_analysis(experiment_id)
 
     # 按参数组合分组统计
     groups = {}
     for result in results:
-        if result.config_params:
-            x_val = result.config_params.get(param_x)
-            y_val = result.config_params.get(param_y)
-            if x_val is not None and y_val is not None:
+        config_params = result.get("config_params") or {}
+        x_val = config_params.get(param_x)
+        y_val = config_params.get(param_y)
+        if x_val is not None and y_val is not None:
+            # 获取性能值
+            if metric:
+                perf_val = config_params.get(metric)
+                if perf_val is None or not isinstance(perf_val, (int, float)):
+                    continue
+            else:
+                perf_val = result.get("performance")
+
+            if perf_val is not None:
                 key = (x_val, y_val)
                 if key not in groups:
-                    groups[key] = {"performances": [], "count": 0}
-                groups[key]["performances"].append(result.performance)
-                groups[key]["count"] += 1
+                    groups[key] = []
+                groups[key].append(perf_val)
 
     data = []
     x_values = set()
     y_values = set()
-    for (x_val, y_val), stats in groups.items():
+    for (x_val, y_val), perfs in groups.items():
         x_values.add(x_val)
         y_values.add(y_val)
         data.append({
             param_x: x_val,
             param_y: y_val,
-            "mean_performance": sum(stats["performances"]) / len(stats["performances"]),
-            "count": stats["count"],
+            "mean_performance": sum(perfs) / len(perfs),
+            "min_performance": min(perfs),
+            "max_performance": max(perfs),
+            "count": len(perfs),
         })
 
     return {
         "param_x": param_x,
         "param_y": param_y,
+        "metric": metric or "performance",
         "x_values": sorted(x_values, key=lambda x: x if isinstance(x, (int, float)) else 0),
         "y_values": sorted(y_values, key=lambda x: x if isinstance(x, (int, float)) else 0),
         "data": data,

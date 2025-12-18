@@ -231,11 +231,30 @@ class DatabaseManager:
             return DcinResult
         return KcinResult
 
-    def _result_to_dict(self, result) -> dict:
-        """将结果对象转为字典（在session内调用）"""
+    def _result_to_dict(self, result, lightweight: bool = False) -> dict:
+        """将结果对象转为字典（在session内调用）
+
+        Args:
+            result: 结果对象
+            lightweight: 是否轻量模式（不加载 result_html 和 result_files）
+        """
         import json
 
-        # 解析 result_files JSON 字符串
+        if lightweight:
+            # 轻量模式：不加载大字段，用于列表展示
+            # 添加 has_result_html 标志，让前端知道是否有 HTML 报告
+            return {
+                "id": result.id,
+                "experiment_id": result.experiment_id,
+                "created_at": result.created_at.isoformat() if result.created_at else None,
+                "performance": result.performance,
+                "config_params": result.config_params,
+                "result_details": result.result_details,
+                "error": result.error,
+                "has_result_html": bool(result.result_html),
+            }
+
+        # 完整模式：包含所有字段
         result_files = result.result_files
         if isinstance(result_files, str):
             result_files = json.loads(result_files)
@@ -391,6 +410,7 @@ class DatabaseManager:
         page_size: int = 100,
         sort_by: str = "performance",
         order: str = "desc",
+        lightweight: bool = True,
     ) -> tuple:
         """
         分页获取结果
@@ -401,6 +421,7 @@ class DatabaseManager:
             page_size: 每页数量
             sort_by: 排序字段
             order: 排序方向 (asc/desc)
+            lightweight: 是否轻量模式（不加载 result_html 和 result_files）
 
         Returns:
             (结果字典列表, 总数)
@@ -409,25 +430,64 @@ class DatabaseManager:
         ResultModel = self._get_result_model(experiment_type)
 
         with self.get_session() as session:
-            query = session.query(ResultModel).filter(
-                ResultModel.experiment_id == experiment_id
-            )
-
             # 获取总数
-            total = query.count()
+            total = session.query(func.count(ResultModel.id)).filter(
+                ResultModel.experiment_id == experiment_id
+            ).scalar()
 
-            # 排序
+            # 排序字段
             sort_column = getattr(ResultModel, sort_by, ResultModel.performance)
-            if order == "desc":
-                query = query.order_by(sort_column.desc())
+
+            if lightweight:
+                # 轻量模式：只查询需要的字段，不加载 result_html 和 result_files 内容
+                # 使用 func.length 检查 result_html 是否存在
+                query = session.query(
+                    ResultModel.id,
+                    ResultModel.experiment_id,
+                    ResultModel.created_at,
+                    ResultModel.performance,
+                    ResultModel.config_params,
+                    ResultModel.result_details,
+                    ResultModel.error,
+                    func.length(ResultModel.result_html).label("html_length"),
+                ).filter(ResultModel.experiment_id == experiment_id)
+
+                if order == "desc":
+                    query = query.order_by(sort_column.desc())
+                else:
+                    query = query.order_by(sort_column.asc())
+
+                offset = (page - 1) * page_size
+                results = query.offset(offset).limit(page_size).all()
+
+                return [
+                    {
+                        "id": r.id,
+                        "experiment_id": r.experiment_id,
+                        "created_at": r.created_at.isoformat() if r.created_at else None,
+                        "performance": r.performance,
+                        "config_params": r.config_params,
+                        "result_details": r.result_details,
+                        "error": r.error,
+                        "has_result_html": bool(r.html_length and r.html_length > 0),
+                    }
+                    for r in results
+                ], total
             else:
-                query = query.order_by(sort_column.asc())
+                # 完整模式：加载完整对象
+                query = session.query(ResultModel).filter(
+                    ResultModel.experiment_id == experiment_id
+                )
 
-            # 分页
-            offset = (page - 1) * page_size
-            results = query.offset(offset).limit(page_size).all()
+                if order == "desc":
+                    query = query.order_by(sort_column.desc())
+                else:
+                    query = query.order_by(sort_column.asc())
 
-            return [self._result_to_dict(r) for r in results], total
+                offset = (page - 1) * page_size
+                results = query.offset(offset).limit(page_size).all()
+
+                return [self._result_to_dict(r, lightweight=False) for r in results], total
 
     def get_kcin_results(
         self,
@@ -584,6 +644,28 @@ class DatabaseManager:
                 if config_params:
                     all_keys.update(config_params.keys())
             return sorted(list(all_keys))
+
+    def get_results_for_analysis(self, experiment_id: int) -> list:
+        """
+        轻量级查询，只返回分析需要的字段
+        不加载 result_html 等大字段，用于热力图/敏感性分析等
+        """
+        experiment_type = self._get_experiment_type(experiment_id)
+        ResultModel = self._get_result_model(experiment_type)
+
+        with self.get_session() as session:
+            results = session.query(
+                ResultModel.id,
+                ResultModel.config_params,
+                ResultModel.performance
+            ).filter(
+                ResultModel.experiment_id == experiment_id
+            ).all()
+
+            return [
+                {"id": r.id, "config_params": r.config_params, "performance": r.performance}
+                for r in results
+            ]
 
     @classmethod
     def reset_instance(cls):

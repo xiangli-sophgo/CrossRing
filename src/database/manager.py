@@ -431,7 +431,7 @@ class ResultManager:
     # ==================== 敏感性分析 ====================
 
     def get_parameter_sensitivity(
-        self, experiment_id: int, parameter: str
+        self, experiment_id: int, parameter: str, metric: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         获取单个参数的敏感性分析
@@ -439,48 +439,68 @@ class ResultManager:
         Args:
             experiment_id: 实验ID
             parameter: 参数名
+            metric: 性能指标名（默认使用 performance 字段，也可以指定 config_params 中的字段）
 
         Returns:
             {
                 parameter: str,
+                metric: str,
                 data: [{value: any, mean_performance: float, count: int}, ...]
             }
         """
-        # 获取所有结果
-        results, total = self.db.get_results(experiment_id, page=1, page_size=100000)
+        # 轻量级查询，只获取 config_params 和 performance
+        results = self.db.get_results_for_analysis(experiment_id)
 
         # 按参数值分组统计
         groups = {}
         for result in results:
-            config_params = result.get("config_params")
-            if config_params and parameter in config_params:
+            config_params = result.get("config_params") or {}
+            if parameter in config_params:
                 value = config_params[parameter]
-                if value not in groups:
-                    groups[value] = {"performances": [], "count": 0}
-                groups[value]["performances"].append(result["performance"])
-                groups[value]["count"] += 1
+                # 获取性能值：默认使用 performance，否则从 config_params 中获取
+                if metric is None:
+                    perf_value = result.get("performance")
+                else:
+                    perf_value = config_params.get(metric)
+
+                if perf_value is not None and isinstance(perf_value, (int, float)):
+                    if value not in groups:
+                        groups[value] = {"performances": [], "count": 0}
+                    groups[value]["performances"].append(perf_value)
+                    groups[value]["count"] += 1
 
         # 计算统计值
         data = []
         for value, stats in sorted(groups.items(), key=lambda x: x[0] if isinstance(x[0], (int, float)) else 0):
             performances = stats["performances"]
-            data.append({
-                "value": value,
-                "mean_performance": sum(performances) / len(performances),
-                "min_performance": min(performances),
-                "max_performance": max(performances),
-                "count": stats["count"],
-            })
+            if performances:
+                data.append({
+                    "value": value,
+                    "mean_performance": sum(performances) / len(performances),
+                    "min_performance": min(performances),
+                    "max_performance": max(performances),
+                    "count": stats["count"],
+                })
 
-        return {"parameter": parameter, "data": data}
+        return {"parameter": parameter, "metric": metric or "performance", "data": data}
 
-    def get_all_parameter_sensitivity(self, experiment_id: int) -> Dict[str, Any]:
-        """获取所有参数的敏感性分析"""
+    def get_all_parameter_sensitivity(
+        self, experiment_id: int, metric: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """获取所有参数的敏感性分析
+
+        Args:
+            experiment_id: 实验ID
+            metric: 性能指标名（默认使用 performance 字段）
+        """
         param_keys = self.db.get_param_keys(experiment_id)
         result = {}
         for param in param_keys:
+            # 跳过与 metric 相同的参数
+            if metric and param == metric:
+                continue
             try:
-                sensitivity = self.get_parameter_sensitivity(experiment_id, param)
+                sensitivity = self.get_parameter_sensitivity(experiment_id, param, metric)
                 if sensitivity["data"]:
                     result[param] = sensitivity
             except Exception:

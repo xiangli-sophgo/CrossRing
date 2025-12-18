@@ -2,9 +2,8 @@
 实验管理API
 """
 
-import os
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from src.database import ResultManager
@@ -52,13 +51,6 @@ class ExperimentResponse(BaseModel):
     best_performance: Optional[float]
     git_commit: Optional[str]
     notes: Optional[str]
-
-
-class ImportResponse(BaseModel):
-    """CSV导入响应"""
-    experiment_id: int
-    imported_count: int
-    errors: List[str]
 
 
 # ==================== API端点 ====================
@@ -148,46 +140,3 @@ async def delete_experiments_batch(request: BatchDeleteExperimentsRequest):
         "message": f"已删除 {deleted_count} 个实验",
         "deleted_count": deleted_count,
     }
-
-
-@router.post("/experiments/import", response_model=ImportResponse)
-async def import_from_csv(
-    file: UploadFile = File(...),
-    experiment_name: str = Form(...),
-    experiment_type: str = Form("kcin"),
-    description: Optional[str] = Form(None),
-    topo_type: Optional[str] = Form(None),
-):
-    """
-    从CSV文件导入实验数据
-
-    - file: CSV文件
-    - experiment_name: 实验名称
-    - experiment_type: 实验类型 ("kcin" 或 "dcin")
-    - description: 实验描述
-    - topo_type: 拓扑类型
-    """
-    # 保存上传的文件
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp_file:
-        content = await file.read()
-        tmp_file.write(content)
-        tmp_path = tmp_file.name
-
-    try:
-        result = db_manager.import_from_csv(
-            csv_path=tmp_path,
-            experiment_name=experiment_name,
-            experiment_type=experiment_type,
-            description=description,
-            topo_type=topo_type,
-        )
-        return result
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        # 清理临时文件
-        os.unlink(tmp_path)
