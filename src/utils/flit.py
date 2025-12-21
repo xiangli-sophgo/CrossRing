@@ -145,6 +145,8 @@ class Flit:
         # D2D NoC端口时间戳
         "d2d_noc_inject_cycle",  # D2D节点注入NoC的时间
         "d2d_noc_eject_cycle",  # D2D节点从NoC弹出的时间
+        # 位置时间戳字典（自动记录）
+        "position_timestamps",  # {position: cycle}
     ]
 
     last_id = 0
@@ -200,6 +202,7 @@ class Flit:
         self.burst_length = -1
         self.path = path
         self.flit_position = ""
+        self.position_timestamps = {}  # {position: cycle} 位置时间戳自动记录
         self.is_finish = False
         Flit.last_id += 1
         self.packet_id = None
@@ -291,6 +294,16 @@ class Flit:
         self.data_channel_id = 0  # 默认数据通道0
         self.d2d_noc_inject_cycle = np.inf  # D2D NoC注入时间
         self.d2d_noc_eject_cycle = np.inf  # D2D NoC弹出时间
+
+    def set_position(self, position: str, cycle: int):
+        """设置位置并记录时间戳
+
+        Args:
+            position: 位置名称 (如 "IP_inject", "L2H", "IQ_CH", "Link", "RB", "EQ", "IP_eject")
+            cycle: 当前时间周期
+        """
+        self.flit_position = position
+        self.position_timestamps[position] = cycle
 
     def sync_latency_record(self, flit):
         if flit.req_type == "read":
@@ -412,6 +425,8 @@ class Flit:
         self.transaction_latency = np.inf
         self.cmd_latency = np.inf
         self.data_latency = np.inf
+        # Reset position timestamps
+        self.position_timestamps = {}
 
     @classmethod
     def create_flit(cls, source, destination, path):

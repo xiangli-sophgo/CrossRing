@@ -232,28 +232,18 @@ class StatsMixin:
         if has_active_flit and self.update_interval > 0:
             time.sleep(self.update_interval)
 
-    def process_comprehensive_results(self, save_to_db_only: bool = False):
-        """处理综合统计结果
-
-        Args:
-            save_to_db_only: 如果为True，不写本地文件，只收集数据内容到self._result_file_contents
-        """
+    def process_comprehensive_results(self):
+        """处理综合统计结果，所有结果收集到内存（不写本地文件）"""
         self.result_processor.collect_requests_data(self, self.cycle)
         results = self.result_processor.analyze_all_bandwidth()
 
-        # 收集文件内容或写本地文件
-        if save_to_db_only:
-            # 直接收集数据内容，不写本地文件
-            self._result_file_contents = {}
+        # 初始化文件内容收集器
+        self._result_file_contents = {}
 
-            # 收集CSV内容
-            csv_contents = self.result_processor.generate_unified_report(results, return_content=True)
-            if csv_contents:
-                self._result_file_contents.update(csv_contents)
-        else:
-            # 写本地文件（原有行为）
-            if self.result_save_path:
-                self.result_processor.generate_unified_report(results, self.result_save_path)
+        # 收集CSV内容
+        csv_contents = self.result_processor.generate_unified_report(results, return_content=True)
+        if csv_contents:
+            self._result_file_contents.update(csv_contents)
 
         # 收集tracker使用数据
         from src.analysis.data_collectors import TrackerDataCollector
@@ -261,15 +251,9 @@ class StatsMixin:
         self._tracker_collector = TrackerDataCollector()
         self._tracker_collector.collect_tracker_data(self)
 
-        if save_to_db_only:
-            # 直接获取JSON内容
-            tracker_json = self._tracker_collector.save_to_json(return_content=True)
-            if tracker_json:
-                self._result_file_contents["tracker_data.json"] = tracker_json
-        else:
-            # 写本地文件
-            if self.result_save_path:
-                self._tracker_json_path = self._tracker_collector.save_to_json(self.result_save_path, "tracker_data.json")
+        tracker_json = self._tracker_collector.save_to_json(return_content=True)
+        if tracker_json:
+            self._result_file_contents["tracker_data.json"] = tracker_json
 
         self.Total_sum_BW_stat = results["Total_sum_BW"]
 
@@ -286,16 +270,25 @@ class StatsMixin:
         latency_stats = self.result_processor._calculate_latency_stats()
 
         # FIFO使用率统计
-        if save_to_db_only:
-            from src.analysis.data_collectors import CircuitStatsCollector
-            fifo_collector = CircuitStatsCollector()
-            fifo_csv = fifo_collector.generate_fifo_usage_csv(self, return_content=True)
-            if fifo_csv:
-                self._result_file_contents["fifo_usage_statistics.csv"] = fifo_csv
-        else:
-            fifo_csv_path = self.result_processor.generate_fifo_usage_csv(self)
-            if fifo_csv_path and self.verbose:
-                print(f"FIFO使用率统计CSV: {fifo_csv_path}")
+        from src.analysis.data_collectors import CircuitStatsCollector
+        fifo_collector = CircuitStatsCollector()
+        fifo_csv = fifo_collector.generate_fifo_usage_csv(self, return_content=True)
+        if fifo_csv:
+            self._result_file_contents["fifo_usage_statistics.csv"] = fifo_csv
+
+        # 波形数据导出到Parquet（内存）
+        if hasattr(self, 'request_tracker'):
+            try:
+                from src.analysis.exporters import ParquetExporter
+                parquet_exporter = ParquetExporter(
+                    network_frequency=self.config.NETWORK_FREQUENCY if hasattr(self.config, 'NETWORK_FREQUENCY') else 2.0
+                )
+                parquet_contents = parquet_exporter.export_waveform_data_to_bytes(self)
+                if parquet_contents:
+                    self._result_file_contents.update(parquet_contents)
+            except Exception as e:
+                if self.verbose:
+                    print(f"Parquet导出错误: {e}")
         # CMD 延迟
         self.cmd_read_avg_latency_stat = (latency_stats["cmd"]["read"]["sum"] / latency_stats["cmd"]["read"]["count"]) if latency_stats["cmd"]["read"]["count"] else 0.0
         self.cmd_read_max_latency_stat = latency_stats["cmd"]["read"]["max"]
@@ -380,8 +373,8 @@ class StatsMixin:
                 if self.verbose:
                     print(f"警告: FIFO使用率热力图生成失败: {e}")
 
-        # 生成集成HTML（所有图表收集完毕后）
-        self._generate_integrated_visualization(save_to_db_only=save_to_db_only)
+        # 生成集成HTML（所有图表收集完毕后，始终收集到内存）
+        self._generate_integrated_visualization(save_to_db_only=True)
 
     def _generate_integrated_visualization(self, save_to_db_only: bool = False):
         """生成集成的可视化HTML报告
@@ -787,14 +780,13 @@ class StatsMixin:
 
         return stats
 
-    def save_to_database(self, experiment_name=None, experiment_type="kcin", description=None, save_local_files=False):
-        """保存仿真结果到数据库（不生成本地文件）
+    def save_to_database(self, experiment_name=None, experiment_type="kcin", description=None):
+        """保存仿真结果到数据库（所有文件内容存入数据库，不生成本地文件）
 
         Args:
             experiment_name: 实验名称，默认为"日常仿真_YYYY-MM-DD"
             experiment_type: 实验类型，默认为"kcin"
             description: 实验描述，默认为"日常仿真结果汇总"
-            save_local_files: 如果为True，同时保存本地文件（默认False）
 
         Returns:
             experiment_id: 实验ID
@@ -848,10 +840,11 @@ class StatsMixin:
                 )
         db.update_experiment_status(experiment_id, "completed")
 
-        # 处理综合结果（不写本地文件，直接收集内容）
-        # 只有当result_processor存在时才处理
-        if hasattr(self, 'result_processor') and self.result_processor is not None:
-            self.process_comprehensive_results(save_to_db_only=not save_local_files)
+        # 处理综合结果
+        # 如果仿真运行时已经处理过（_result_file_contents已存在），跳过重复处理
+        already_processed = hasattr(self, '_result_file_contents') and self._result_file_contents
+        if not already_processed and hasattr(self, 'result_processor') and self.result_processor is not None:
+            self.process_comprehensive_results()
 
         # 获取仿真结果
         results = self.get_results()
@@ -862,7 +855,7 @@ class StatsMixin:
         # 获取HTML报告内容
         result_html = getattr(self, "_result_html_content", None)
 
-        # 获取收集到的文件内容
+        # 获取收集到的文件内容（所有结果文件都在这里，包括Parquet）
         result_file_contents = getattr(self, "_result_file_contents", {})
 
         # 保存结果

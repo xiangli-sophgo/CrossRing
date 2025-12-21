@@ -1642,3 +1642,252 @@ class JSONExporter:
         json_path = os.path.join(output_path, "analysis_config.json")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=2, ensure_ascii=False)
+
+
+class ParquetExporter:
+    """Parquet格式导出器 - 用于波形数据存储"""
+
+    def __init__(self, network_frequency: float = 2.0):
+        """
+        初始化Parquet导出器
+
+        Args:
+            network_frequency: 网络频率 (GHz)，用于将cycle转换为ns
+        """
+        self.network_frequency = network_frequency
+
+    def export_waveform_data(self, sim_model, output_path: str) -> list:
+        """
+        导出请求和flit数据到Parquet文件
+
+        Args:
+            sim_model: 仿真模型对象
+            output_path: 输出目录路径
+
+        Returns:
+            生成的文件路径列表
+        """
+        try:
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+        except ImportError:
+            raise ImportError("pyarrow未安装，请运行: pip install pyarrow")
+
+        os.makedirs(output_path, exist_ok=True)
+
+        request_tracker = sim_model.request_tracker
+        completed_requests = request_tracker.get_completed_requests()
+
+        # 确保所有请求的时间戳被收集
+        for packet_id in completed_requests:
+            request_tracker.collect_timestamps_from_flits(packet_id)
+
+        generated_files = []
+
+        # 构建requests表数据
+        requests_data = self._build_requests_data(completed_requests)
+        if requests_data["packet_id"]:
+            requests_path = os.path.join(output_path, "requests.parquet")
+            requests_table = pa.Table.from_pydict(requests_data)
+            pq.write_table(requests_table, requests_path)
+            generated_files.append(requests_path)
+
+        # 构建flits表数据
+        flits_data = self._build_flits_data(completed_requests)
+        if flits_data["packet_id"]:
+            flits_path = os.path.join(output_path, "flits.parquet")
+            flits_table = pa.Table.from_pydict(flits_data)
+            pq.write_table(flits_table, flits_path)
+            generated_files.append(flits_path)
+
+        return generated_files
+
+    def export_waveform_data_to_bytes(self, sim_model) -> Dict[str, bytes]:
+        """
+        导出请求和flit数据到内存（bytes格式）
+
+        Args:
+            sim_model: 仿真模型对象
+
+        Returns:
+            {"requests.parquet": bytes, "flits.parquet": bytes}
+        """
+        import io
+
+        try:
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+        except ImportError:
+            raise ImportError("pyarrow未安装，请运行: pip install pyarrow")
+
+        request_tracker = sim_model.request_tracker
+        completed_requests = request_tracker.get_completed_requests()
+
+        # 确保所有请求的时间戳被收集
+        for packet_id in completed_requests:
+            request_tracker.collect_timestamps_from_flits(packet_id)
+
+        result = {}
+
+        # 构建requests表数据
+        requests_data = self._build_requests_data(completed_requests)
+        if requests_data["packet_id"]:
+            requests_table = pa.Table.from_pydict(requests_data)
+            requests_buffer = io.BytesIO()
+            pq.write_table(requests_table, requests_buffer)
+            result["requests.parquet"] = requests_buffer.getvalue()
+
+        # 构建flits表数据
+        flits_data = self._build_flits_data(completed_requests)
+        if flits_data["packet_id"]:
+            flits_table = pa.Table.from_pydict(flits_data)
+            flits_buffer = io.BytesIO()
+            pq.write_table(flits_table, flits_buffer)
+            result["flits.parquet"] = flits_buffer.getvalue()
+
+        return result
+
+    def _build_requests_data(self, completed_requests) -> Dict:
+        """构建请求级别数据"""
+        data = {
+            "packet_id": [],
+            "req_type": [],
+            "source_node": [],
+            "source_type": [],
+            "dest_node": [],
+            "dest_type": [],
+            "burst_length": [],
+            "start_time_ns": [],
+            "end_time_ns": [],
+            "cmd_latency_ns": [],
+            "data_latency_ns": [],
+            "trans_latency_ns": [],
+        }
+
+        for packet_id, lifecycle in completed_requests.items():
+            timestamps = lifecycle.timestamps
+
+            # 从flit的position_timestamps获取开始时间（L2H位置）
+            start_cycle = float('inf')
+            for flit in lifecycle.request_flits:
+                pos_ts = getattr(flit, 'position_timestamps', {})
+                if 'L2H' in pos_ts:
+                    start_cycle = min(start_cycle, pos_ts['L2H'])
+            if start_cycle >= float('inf'):
+                start_cycle = timestamps.get('cmd_entry_cake0_cycle', float('inf'))
+
+            # 从flit的position_timestamps获取结束时间（IP_eject位置）
+            end_cycle = float('inf')
+            for flit in lifecycle.data_flits + lifecycle.response_flits:
+                pos_ts = getattr(flit, 'position_timestamps', {})
+                if 'IP_eject' in pos_ts:
+                    end_cycle = max(end_cycle, pos_ts['IP_eject']) if end_cycle < float('inf') else pos_ts['IP_eject']
+            if end_cycle >= float('inf'):
+                end_cycle = timestamps.get('data_received_complete_cycle', float('inf'))
+
+            if start_cycle >= float('inf') or end_cycle >= float('inf'):
+                continue
+
+            data["packet_id"].append(packet_id)
+            data["req_type"].append(lifecycle.op_type)
+            data["source_node"].append(lifecycle.source)
+            data["source_type"].append(lifecycle.source_type or "")
+            data["dest_node"].append(lifecycle.destination)
+            data["dest_type"].append(lifecycle.dest_type or "")
+            data["burst_length"].append(lifecycle.burst_size)
+            data["start_time_ns"].append(start_cycle / self.network_frequency)
+            data["end_time_ns"].append(end_cycle / self.network_frequency)
+
+            # 计算延迟
+            cmd_entry = timestamps.get('cmd_entry_noc_from_cake0_cycle', float('inf'))
+            cmd_received = timestamps.get('cmd_received_by_cake0_cycle', float('inf'))
+            data_entry = timestamps.get('data_entry_noc_from_cake0_cycle', float('inf'))
+            data_received = timestamps.get('data_received_complete_cycle', float('inf'))
+
+            cmd_latency = (cmd_received - cmd_entry) / self.network_frequency if cmd_entry < float('inf') and cmd_received < float('inf') else -1
+            data_latency = (data_received - data_entry) / self.network_frequency if data_entry < float('inf') and data_received < float('inf') else -1
+            trans_latency = (end_cycle - start_cycle) / self.network_frequency
+
+            data["cmd_latency_ns"].append(cmd_latency)
+            data["data_latency_ns"].append(data_latency)
+            data["trans_latency_ns"].append(trans_latency)
+
+        return data
+
+    def _build_flits_data(self, completed_requests) -> Dict:
+        """构建flit级别数据（每个flit一行）"""
+        data = {
+            "packet_id": [],
+            "flit_id": [],
+            "flit_type": [],
+            # 时间戳（ns）
+            "ip_inject_ns": [],
+            "iq_out_ns": [],
+            "h_ring_ns": [],
+            "rb_ns": [],
+            "v_ring_ns": [],
+            "eq_ns": [],
+            "ip_eject_ns": [],
+            # 统计
+            "eject_attempts_h": [],
+            "eject_attempts_v": [],
+        }
+
+        for packet_id, lifecycle in completed_requests.items():
+            # 处理请求flit
+            for flit in lifecycle.request_flits:
+                self._add_flit_to_data(data, packet_id, flit, "req", 0)
+
+            # 处理数据flit
+            for idx, flit in enumerate(lifecycle.data_flits):
+                flit_id = getattr(flit, 'flit_id', idx + 1)
+                self._add_flit_to_data(data, packet_id, flit, "data", flit_id)
+
+            # 处理响应flit
+            for flit in lifecycle.response_flits:
+                self._add_flit_to_data(data, packet_id, flit, "rsp", -1)
+
+        return data
+
+    def _add_flit_to_data(self, data: Dict, packet_id: int, flit, flit_type: str, flit_id: int):
+        """将单个flit的数据添加到数据字典"""
+        data["packet_id"].append(packet_id)
+        data["flit_id"].append(flit_id)
+        data["flit_type"].append(flit_type)
+
+        # 从position_timestamps读取时间戳
+        data["ip_inject_ns"].append(self._get_position_timestamp_ns(flit, ["L2H"]))
+        data["iq_out_ns"].append(self._get_position_timestamp_ns(flit, ["IQ_TL", "IQ_TR", "IQ_TU", "IQ_TD"]))
+        data["h_ring_ns"].append(self._get_position_timestamp_ns(flit, ["Link"]))
+        data["rb_ns"].append(self._get_position_timestamp_ns(flit, ["RB_TL", "RB_TR"]))
+        data["v_ring_ns"].append(self._get_position_timestamp_ns(flit, ["Link"]))  # 与h_ring共用Link
+        data["eq_ns"].append(self._get_position_timestamp_ns(flit, ["EQ_TU", "EQ_TD", "EQ_CH"]))
+        data["ip_eject_ns"].append(self._get_position_timestamp_ns(flit, ["IP_eject"]))
+
+        # 统计
+        data["eject_attempts_h"].append(getattr(flit, 'eject_attempts_h', 0))
+        data["eject_attempts_v"].append(getattr(flit, 'eject_attempts_v', 0))
+
+    def _get_timestamp_ns(self, flit, attr_name: str) -> float:
+        """获取时间戳并转换为ns，无效值返回-1"""
+        if hasattr(flit, attr_name):
+            value = getattr(flit, attr_name)
+            if value is not None and value < float('inf'):
+                return value / self.network_frequency
+        return -1.0
+
+    def _get_position_timestamp_ns(self, flit, position_keys: list) -> float:
+        """从position_timestamps字典获取时间戳，按优先级尝试多个key
+
+        Args:
+            flit: flit对象
+            position_keys: 位置key列表，按优先级排序
+
+        Returns:
+            float: 时间戳(ns)，无效值返回-1
+        """
+        timestamps = getattr(flit, 'position_timestamps', {})
+        for key in position_keys:
+            if key in timestamps:
+                return timestamps[key] / self.network_frequency
+        return -1.0

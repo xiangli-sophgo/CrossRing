@@ -114,9 +114,9 @@ def _run_single_simulation(sim_params: Dict[str, Any]) -> Dict[str, Any]:
         result = engine.run_sync(max_time=sim_params['max_time'])
         result.results['traffic_file'] = traffic_file
 
-        # 保存到数据库（每个文件独立保存）
+        # 保存到数据库（仅在成功时保存）
         experiment_id = None
-        if sim_params.get('save_to_db'):
+        if sim_params.get('save_to_db') and result.status.value == 'completed':
             exp_name = sim_params.get('experiment_name') or '仿真实验'
             experiment_id = engine.save_to_database(
                 experiment_name=exp_name,
@@ -697,9 +697,9 @@ class TaskManager:
             result = await engine.run_async(max_time=task.max_time)
             result.results['traffic_file'] = traffic_file
 
-            # 保存到数据库
+            # 保存到数据库（仅在成功时保存）
             experiment_id = None
-            if task.save_to_db:
+            if task.save_to_db and result.status.value == 'completed':
                 exp_name = task.experiment_name or '仿真实验'
                 experiment_id = engine.save_to_database(
                     experiment_name=exp_name,

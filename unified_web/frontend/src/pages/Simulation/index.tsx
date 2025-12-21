@@ -250,7 +250,7 @@ const Simulation: React.FC = () => {
         tasks.push(loadConfigs())
       } else if (Object.keys(configValues).length === 0) {
         // 配置列表已有缓存，但没有配置值，加载默认配置
-        const defaultConfig = configs.kcin.find((c: ConfigOption) => c.path.includes('topo_5x4'))
+        const defaultConfig = configs.kcin.find((c: ConfigOption) => c.name === '5x4')
         if (defaultConfig && !form.getFieldValue('config_path')) {
           form.setFieldsValue({ config_path: defaultConfig.path })
           tasks.push(loadConfigContent(defaultConfig.path))
@@ -299,7 +299,7 @@ const Simulation: React.FC = () => {
     try {
       const data = await getConfigs()
       setConfigs(data)
-      const defaultConfig = data.kcin.find((c: ConfigOption) => c.path.includes('topo_5x4'))
+      const defaultConfig = data.kcin.find((c: ConfigOption) => c.name === '5x4')
       if (defaultConfig) {
         setTimeout(() => {
           form.setFieldsValue({ config_path: defaultConfig.path })
@@ -959,7 +959,7 @@ const Simulation: React.FC = () => {
                     <Radio.Group onChange={(e) => {
                       const newMode = e.target.value as 'kcin' | 'dcin'
                       if (newMode === 'kcin') {
-                        const defaultConfig = configs.kcin.find(c => c.path.includes('topo_5x4'))
+                        const defaultConfig = configs.kcin.find(c => c.name === '5x4')
                         if (defaultConfig) {
                           form.setFieldsValue({ config_path: defaultConfig.path, rows: 5, cols: 4, die_config_path: undefined })
                           loadConfigContent(defaultConfig.path)
@@ -967,7 +967,7 @@ const Simulation: React.FC = () => {
                         }
                       } else {
                         const defaultDcinConfig = configs.dcin.find(c => c.path.includes('4die'))
-                        const defaultKcinConfig = configs.kcin.find(c => c.path.includes('topo_5x4'))
+                        const defaultKcinConfig = configs.kcin.find(c => c.name === '5x4')
                         if (defaultDcinConfig) {
                           form.setFieldsValue({ config_path: defaultDcinConfig.path, rows: 5, cols: 4 })
                           loadConfigContent(defaultDcinConfig.path)

@@ -148,24 +148,27 @@ class RequestTracker:
 
     def add_request_flit(self, packet_id: int, flit: Any):
         """添加请求flit"""
-        if packet_id in self.active_requests:
-            self.active_requests[packet_id].request_flits.append(flit)
-        elif packet_id in self.completed_requests:
-            self.completed_requests[packet_id].request_flits.append(flit)
+        lifecycle = self.active_requests.get(packet_id) or self.completed_requests.get(packet_id)
+        if lifecycle:
+            print(f"[DEBUG] add_request_flit: packet_id={packet_id}, flit_id={getattr(flit, 'id', '?')}, "
+                  f"已有{len(lifecycle.request_flits)}个, position_timestamps={getattr(flit, 'position_timestamps', {})}")
+            lifecycle.request_flits.append(flit)
 
     def add_response_flit(self, packet_id: int, flit: Any):
         """添加响应flit"""
-        if packet_id in self.active_requests:
-            self.active_requests[packet_id].response_flits.append(flit)
-        elif packet_id in self.completed_requests:
-            self.completed_requests[packet_id].response_flits.append(flit)
+        lifecycle = self.active_requests.get(packet_id) or self.completed_requests.get(packet_id)
+        if lifecycle:
+            print(f"[DEBUG] add_response_flit: packet_id={packet_id}, flit_id={getattr(flit, 'id', '?')}, "
+                  f"已有{len(lifecycle.response_flits)}个, position_timestamps={getattr(flit, 'position_timestamps', {})}")
+            lifecycle.response_flits.append(flit)
 
     def add_data_flit(self, packet_id: int, flit: Any):
         """添加数据flit"""
-        if packet_id in self.active_requests:
-            self.active_requests[packet_id].data_flits.append(flit)
-        elif packet_id in self.completed_requests:
-            self.completed_requests[packet_id].data_flits.append(flit)
+        lifecycle = self.active_requests.get(packet_id) or self.completed_requests.get(packet_id)
+        if lifecycle:
+            print(f"[DEBUG] add_data_flit: packet_id={packet_id}, flit_id={getattr(flit, 'flit_id', '?')}, "
+                  f"已有{len(lifecycle.data_flits)}个, position_timestamps={getattr(flit, 'position_timestamps', {})}")
+            lifecycle.data_flits.append(flit)
 
     # ===== 时间戳管理（关键创新）=====
 

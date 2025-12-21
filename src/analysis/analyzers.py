@@ -216,7 +216,7 @@ class SingleDieAnalyzer:
 
         # from .flow_graph_renderer import FlowGraphRenderer  # 已弃用
         from .single_die_flow_renderer import SingleDieFlowRenderer
-        from .exporters import CSVExporter, ReportGenerator
+        from .exporters import CSVExporter, ReportGenerator, ParquetExporter
         from .latency_distribution_plotter import LatencyDistributionPlotter
 
         self.config = config
@@ -257,6 +257,7 @@ class SingleDieAnalyzer:
         self.flow_visualizer = SingleDieFlowRenderer()  # 用于静态PNG流图
         self.interactive_flow_visualizer = SingleDieFlowRenderer()
         self.exporter = CSVExporter(verbose=self.verbose)
+        self.parquet_exporter = ParquetExporter(network_frequency=config.NETWORK_FREQUENCY if config else 2.0)
         self.report_generator = ReportGenerator()
 
     def collect_ip_statistics(self):
@@ -480,9 +481,13 @@ class SingleDieAnalyzer:
                 flow_save_path = None
 
             if self.sim_model.topo_type_stat.startswith("Ring"):
-                self.flow_visualizer.draw_ring_flow_graph(network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, save_path=flow_save_path)
+                self.flow_visualizer.draw_ring_flow_graph(
+                    network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, save_path=flow_save_path
+                )
             else:
-                self.flow_visualizer.draw_flow_graph(network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, mode="total", save_path=flow_save_path)
+                self.flow_visualizer.draw_flow_graph(
+                    network=self.sim_model.data_network, ip_bandwidth_data=self.ip_bandwidth_data, config=self.config, mode="total", save_path=flow_save_path
+                )
 
             if flow_save_path:
                 saved_figures.append(("流图", flow_save_path))
@@ -498,7 +503,7 @@ class SingleDieAnalyzer:
             if not self.sim_model.topo_type_stat.startswith("Ring"):
                 # 获取静态带宽数据（如果有）
                 static_bandwidth = None
-                if hasattr(self.sim_model, 'static_link_bandwidth') and self.sim_model.static_link_bandwidth:
+                if hasattr(self.sim_model, "static_link_bandwidth") and self.sim_model.static_link_bandwidth:
                     static_bandwidth = self.sim_model.static_link_bandwidth
 
                 flow_fig = self.interactive_flow_visualizer.draw_flow_graph(
@@ -607,7 +612,9 @@ class SingleDieAnalyzer:
 
     def _empty_metrics(self) -> BandwidthMetrics:
         """返回空的BandwidthMetrics"""
-        return BandwidthMetrics(unweighted_bandwidth=0.0, weighted_bandwidth=0.0, working_intervals=[], total_working_time=0, network_start_time=0, network_end_time=0, total_bytes=0, total_requests=0)
+        return BandwidthMetrics(
+            unweighted_bandwidth=0.0, weighted_bandwidth=0.0, working_intervals=[], total_working_time=0, network_start_time=0, network_end_time=0, total_bytes=0, total_requests=0
+        )
 
     def _calculate_port_bandwidth_averages(self, all_ports: Dict[str, PortBandwidthMetrics]) -> Dict[str, float]:
         """计算每种端口类型的平均带宽"""
@@ -771,14 +778,6 @@ class SingleDieAnalyzer:
         # 生成文本报告（已禁用，不生成txt）
         self.report_generator.generate_unified_report(results=results, output_path=output_path, num_ip=self.actual_num_ip if hasattr(self, "actual_num_ip") else 1)
 
-        # 生成详细请求CSV
-        if return_content:
-            request_csvs = self.exporter.generate_detailed_request_csv(requests=self.requests, return_content=True)
-            if request_csvs:
-                file_contents.update(request_csvs)
-        else:
-            self.exporter.generate_detailed_request_csv(requests=self.requests, output_path=output_path)
-
         # 生成端口CSV
         if return_content:
             ports_csv = self.exporter.generate_ports_csv(rn_ports=results.get("rn_ports"), sn_ports=results.get("sn_ports"), config=self.config, return_content=True)
@@ -795,8 +794,22 @@ class SingleDieAnalyzer:
                     file_contents["link_statistics.csv"] = link_csv
             else:
                 import os
+
                 link_stats_csv = os.path.join(output_path, "link_statistics.csv")
                 self.exporter.export_link_statistics_csv(self.sim_model.data_network, link_stats_csv)
+
+        # 导出波形数据到Parquet格式（用于波形可视化）
+        if not return_content and self.sim_model and output_path:
+            try:
+                parquet_files = self.parquet_exporter.export_waveform_data(self.sim_model, output_path)
+                # 将文件路径保存到模型，供save_to_database使用
+                if parquet_files:
+                    if not hasattr(self.sim_model, '_result_files'):
+                        self.sim_model._result_files = []
+                    self.sim_model._result_files.extend(parquet_files)
+            except Exception as e:
+                if self.verbose:
+                    print(f"[警告] 导出波形数据失败: {e}")
 
         # 生成HTML格式的结果摘要，添加到集成报告中
         if self.sim_model and hasattr(self.sim_model, "result_processor"):

@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Collapse,
   Descriptions,
@@ -18,21 +19,24 @@ import {
   FileTextOutlined,
   EyeOutlined,
   DownloadOutlined,
+  LineChartOutlined,
 } from '@ant-design/icons';
 import type { SimulationResult, ExperimentType } from '@/types';
 import { classifyParams, formatParamValue } from '@/utils/paramClassifier';
-import { getResultHtmlUrl, getResultFiles, getFileDownloadUrl, type ResultFileInfo } from '@/api/experiments';
+import { getResultFiles, getFileDownloadUrl, type ResultFileInfo } from '@/api/experiments';
 
 interface Props {
   result: SimulationResult;
   experimentId: number;
+  experimentName?: string;
   experimentType?: ExperimentType;
   hideConfigParams?: boolean;
 }
 
 const { Text } = Typography;
 
-export default function ResultDetailPanel({ result, experimentId, experimentType = 'kcin', hideConfigParams = false }: Props) {
+export default function ResultDetailPanel({ result, experimentId, experimentName, experimentType = 'kcin', hideConfigParams = false }: Props) {
+  const navigate = useNavigate();
   const [dbFiles, setDbFiles] = useState<ResultFileInfo[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
 
@@ -56,10 +60,33 @@ export default function ResultDetailPanel({ result, experimentId, experimentType
     loadDbFiles();
   }, [result.id, experimentType]);
 
-  // 打开HTML报告
+  // 获取结果标签名称
+  const getResultLabel = () => {
+    // 从config_params中获取数据流名称（支持多种字段名）
+    const trafficName = result.config_params?.['数据流名称']
+      || result.config_params?.file_name
+      || result.config_params?.TRAFFIC_FILE
+      || result.config_params?.traffic_file
+      || '';
+    // 如果是路径，提取文件名（去除路径和扩展名）
+    const displayName = String(trafficName).includes('/') || String(trafficName).includes('\\')
+      ? String(trafficName).split('/').pop()?.split('\\').pop()?.replace(/\.[^/.]+$/, '') || ''
+      : String(trafficName);
+    // 构建标签：实验名称 - 数据流名称
+    const parts = [experimentName, displayName].filter(Boolean);
+    return parts.length > 0 ? parts.join(' - ') : `结果 ${result.id}`;
+  };
+
+  // 在结果分析页面打开HTML报告
   const handleViewHtml = () => {
-    const url = getResultHtmlUrl(result.id, experimentId);
-    window.open(url, '_blank');
+    const label = getResultLabel();
+    navigate(`/analysis?resultId=${result.id}&experimentId=${experimentId}&label=${encodeURIComponent(label)}&type=html`);
+  };
+
+  // 在结果分析页面打开波形
+  const handleViewWaveform = () => {
+    const label = getResultLabel();
+    navigate(`/analysis?resultId=${result.id}&experimentId=${experimentId}&label=${encodeURIComponent(label)}&type=waveform`);
   };
 
   // 下载文件
@@ -76,15 +103,6 @@ export default function ResultDetailPanel({ result, experimentId, experimentType
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
-  // 从result_files中提取HTML路径
-  const getHtmlPath = () => {
-    if (result.result_files && result.result_files.length > 0) {
-      const htmlFile = result.result_files.find(f => f.endsWith('.html'));
-      if (htmlFile) return htmlFile;
-    }
-    return null;
   };
 
   const collapseItems = [
@@ -120,8 +138,8 @@ export default function ResultDetailPanel({ result, experimentId, experimentType
       children: (
         <Space direction="vertical" style={{ width: '100%' }}>
           {/* HTML报告 - 支持轻量模式（has_result_html）和完整模式（result_html） */}
-          {(result.result_html || result.has_result_html) ? (
-            <Space>
+          <Space>
+            {(result.result_html || result.has_result_html) ? (
               <Button
                 type="primary"
                 icon={<EyeOutlined />}
@@ -129,15 +147,17 @@ export default function ResultDetailPanel({ result, experimentId, experimentType
               >
                 查看HTML报告
               </Button>
-              {getHtmlPath() && (
-                <Text type="secondary" style={{ marginLeft: 8 }}>
-                  {getHtmlPath()}
-                </Text>
-              )}
-            </Space>
-          ) : (
-            <Text type="secondary">无HTML报告</Text>
-          )}
+            ) : (
+              <Text type="secondary">无HTML报告</Text>
+            )}
+            <Button
+              type="primary"
+              icon={<LineChartOutlined />}
+              onClick={handleViewWaveform}
+            >
+              查看波形
+            </Button>
+          </Space>
 
           {/* 数据库文件列表 */}
           {loadingFiles ? (

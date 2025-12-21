@@ -572,3 +572,58 @@ body {
   color: var(--text-primary) !important;
   box-shadow: var(--shadow-sm) !important;
 }
+
+/* 力导向模拟状态指示器动画 */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.2);
+  }
+}
+
+/* 多层级视图物理动画增强 */
+/* 弹簧过冲效果 */
+@keyframes spring-bounce {
+  0% { transform: scale(1); }
+  25% { transform: scale(1.05); }
+  50% { transform: scale(0.98); }
+  75% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+
+/* 容器悬停时的发光效果 */
+.topology-container-hover {
+  filter: drop-shadow(0 4px 12px rgba(94, 106, 210, 0.15));
+}
+
+/* 连接线悬停时的脉冲效果 */
+@keyframes connection-pulse {
+  0%, 100% {
+    stroke-opacity: 1;
+    stroke-width: 2;
+  }
+  50% {
+    stroke-opacity: 0.7;
+    stroke-width: 3;
+  }
+}
+
+/* 节点拖拽时的缩放效果 */
+.node-dragging {
+  transform: scale(1.1);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.2));
+  cursor: grabbing !important;
+}
+
+/* 力导向模式节点悬停效果 */
+.force-node-hover {
+  cursor: grab;
+}
+
+.force-node-hover:active {
+  cursor: grabbing;
+}

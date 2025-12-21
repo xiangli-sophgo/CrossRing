@@ -1093,7 +1093,8 @@ class CircuitStatsCollector:
                 output_dir = os.path.dirname(model.result_save_path)
                 output_path = os.path.join(output_dir, "fifo_usage_statistics.csv")
             else:
-                output_path = "fifo_usage_statistics.csv"
+                # 没有有效的输出路径，跳过文件生成
+                return None
 
         with open(output_path, "w", newline="", encoding="utf-8-sig") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=headers)

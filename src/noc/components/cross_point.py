@@ -452,7 +452,7 @@ class CrossPoint:
             flit.is_delay = False
             flit.current_link = None
             flit.current_seat_index = -1
-            flit.flit_position = f"RB_{direction}"
+            flit.set_position(f"RB_{direction}", self.network.cycle)
 
             # 添加到ring_bridge_pre缓冲位（带检查）
             if self.network:
@@ -467,7 +467,7 @@ class CrossPoint:
             flit.is_arrive = False  # 还未到IP模块，保持False
             flit.current_link = None
             flit.current_seat_index = 0
-            flit.flit_position = f"EQ_{direction}"
+            flit.set_position(f"EQ_{direction}", self.network.cycle)
 
             # 添加到eject_queues_in_pre缓冲位（带检查）
             if self.network:
@@ -876,7 +876,7 @@ class CrossPoint:
         self.network.links[link][0] = flit
         flit.current_link = link
         flit.current_seat_index = 0
-        flit.flit_position = "Link"
+        flit.set_position("Link", cycle)
 
         # 2. 处理I-Tag释放
         if slot.itag_reserved and slot.check_itag_match(current_pos, direction):

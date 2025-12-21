@@ -1,6 +1,6 @@
 /**
- * 结果分析页面 - 显示HTML报告
- * 支持多标签页查看不同结果的报告
+ * 结果分析页面 - 显示HTML报告和波形
+ * 支持多标签页查看不同结果的报告和波形
  */
 
 import { useState, useEffect } from 'react';
@@ -11,14 +11,20 @@ import {
   ReloadOutlined,
   ZoomInOutlined,
   ZoomOutOutlined,
+  FileTextOutlined,
+  LineChartOutlined,
 } from '@ant-design/icons';
 import { getResultHtmlUrl } from '../Experiments/api';
+import { WaveformViewer } from '@/components/waveform';
+
+type ContentType = 'html' | 'waveform';
 
 interface TabItem {
   key: string;
   label: string;
   resultId: number;
   experimentId: number;
+  type: ContentType;  // 内容类型
 }
 
 // 从 localStorage 加载标签页
@@ -26,7 +32,16 @@ const loadTabs = (): TabItem[] => {
   const saved = localStorage.getItem('analysis_tabs');
   if (saved) {
     try {
-      return JSON.parse(saved);
+      const tabs = JSON.parse(saved);
+      // 迁移旧格式：为没有type字段的标签页添加默认值
+      return tabs.map((tab: TabItem) => ({
+        ...tab,
+        type: tab.type || 'html',
+        // 更新旧的key格式
+        key: tab.key.includes('-html') || tab.key.includes('-waveform')
+          ? tab.key
+          : `${tab.key}-html`,
+      }));
     } catch {
       return [];
     }
@@ -63,9 +78,11 @@ export default function Analysis() {
     const resultId = searchParams.get('resultId');
     const experimentId = searchParams.get('experimentId');
     const label = searchParams.get('label') || `结果 ${resultId}`;
+    const type = (searchParams.get('type') || 'html') as ContentType;
 
     if (resultId && experimentId) {
-      const key = `${experimentId}-${resultId}`;
+      // key 包含类型，同一结果可以同时打开 html 和 waveform
+      const key = `${experimentId}-${resultId}-${type}`;
 
       // 检查是否已存在该标签页
       const existingTab = tabs.find(t => t.key === key);
@@ -73,9 +90,10 @@ export default function Analysis() {
         // 添加新标签页
         const newTab: TabItem = {
           key,
-          label,
+          label: type === 'waveform' ? `${label} [波形]` : label,
           resultId: parseInt(resultId),
           experimentId: parseInt(experimentId),
+          type,
         };
         const newTabs = [...tabs, newTab];
         setTabs(newTabs);
@@ -142,15 +160,21 @@ export default function Analysis() {
   // 获取当前激活的标签页
   const currentTab = tabs.find(t => t.key === activeKey);
 
-  // 生成标签页项
-  const tabItems = tabs.map(tab => ({
-    key: tab.key,
-    label: (
-      <span style={{ userSelect: 'none' }}>
-        {tab.label}
-      </span>
-    ),
-    children: (
+  // 渲染标签页内容
+  const renderTabContent = (tab: TabItem) => {
+    if (tab.type === 'waveform') {
+      return (
+        <div style={{ height: 'calc(100vh - 160px)', overflow: 'auto', padding: 16 }}>
+          <WaveformViewer
+            key={`${tab.key}-${refreshKey}`}
+            experimentId={tab.experimentId}
+            resultId={tab.resultId}
+          />
+        </div>
+      );
+    }
+    // HTML 报告
+    return (
       <div style={{ height: 'calc(100vh - 160px)', position: 'relative', overflow: 'auto' }}>
         <iframe
           key={`${tab.key}-${refreshKey}`}
@@ -166,7 +190,19 @@ export default function Analysis() {
           title={tab.label}
         />
       </div>
+    );
+  };
+
+  // 生成标签页项
+  const tabItems = tabs.map(tab => ({
+    key: tab.key,
+    label: (
+      <Space size={4} style={{ userSelect: 'none' }}>
+        {tab.type === 'waveform' ? <LineChartOutlined /> : <FileTextOutlined />}
+        <span>{tab.label}</span>
+      </Space>
     ),
+    children: renderTabContent(tab),
   }));
 
   if (tabs.length === 0) {
@@ -208,35 +244,43 @@ export default function Analysis() {
         tabBarStyle={{ marginBottom: 0 }}
         tabBarExtraContent={
           <Space>
-            <Tooltip title="缩小">
-              <Button
-                icon={<ZoomOutOutlined />}
-                onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}
-                disabled={zoom <= 0.5}
-              />
-            </Tooltip>
-            <span style={{ minWidth: 45, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
-            <Tooltip title="放大">
-              <Button
-                icon={<ZoomInOutlined />}
-                onClick={() => setZoom(z => Math.min(1, z + 0.1))}
-                disabled={zoom >= 1}
-              />
-            </Tooltip>
-            <Tooltip title="刷新当前报告">
+            {/* 缩放控件只对HTML报告显示 */}
+            {currentTab?.type !== 'waveform' && (
+              <>
+                <Tooltip title="缩小">
+                  <Button
+                    icon={<ZoomOutOutlined />}
+                    onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}
+                    disabled={zoom <= 0.5}
+                  />
+                </Tooltip>
+                <span style={{ minWidth: 45, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
+                <Tooltip title="放大">
+                  <Button
+                    icon={<ZoomInOutlined />}
+                    onClick={() => setZoom(z => Math.min(1, z + 0.1))}
+                    disabled={zoom >= 1}
+                  />
+                </Tooltip>
+              </>
+            )}
+            <Tooltip title="刷新">
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleRefresh}
                 disabled={!currentTab}
               />
             </Tooltip>
-            <Tooltip title="在新窗口打开">
-              <Button
-                icon={<ExpandOutlined />}
-                onClick={() => currentTab && handleOpenInNewWindow(currentTab)}
-                disabled={!currentTab}
-              />
-            </Tooltip>
+            {/* 新窗口打开只对HTML报告有效 */}
+            {currentTab?.type !== 'waveform' && (
+              <Tooltip title="在新窗口打开">
+                <Button
+                  icon={<ExpandOutlined />}
+                  onClick={() => currentTab && handleOpenInNewWindow(currentTab)}
+                  disabled={!currentTab}
+                />
+              </Tooltip>
+            )}
           </Space>
         }
       />

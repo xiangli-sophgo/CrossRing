@@ -15,8 +15,8 @@ from sqlalchemy.orm import sessionmaker, Session
 from .models import Base, Experiment, KcinResult, DcinResult, ResultFile, AnalysisChart
 
 
-# 默认数据库路径
-DEFAULT_DB_DIR = Path(__file__).parent.parent.parent.parent / "Result" / "Database"
+# 默认数据库路径（保存到项目内 Result/database 目录）
+DEFAULT_DB_DIR = Path(__file__).parent.parent.parent / "Result" / "database"
 DEFAULT_DB_PATH = DEFAULT_DB_DIR / "simulation.db"
 
 
@@ -287,6 +287,7 @@ class DatabaseManager:
         result_details: Optional[dict] = None,
         result_html: Optional[str] = None,
         result_files: Optional[list] = None,
+        result_file_contents: Optional[dict] = None,
         error: Optional[str] = None,
     ) -> int:
         """
@@ -299,6 +300,7 @@ class DatabaseManager:
             result_details: 详细结果数据
             result_html: HTML报告内容
             result_files: 结果文件路径列表
+            result_file_contents: 文件内容字典 {filename: bytes_content}
             error: 错误信息
 
         Returns:
@@ -321,7 +323,13 @@ class DatabaseManager:
             )
             session.add(result)
             session.flush()
-            return result.id
+            result_id = result.id
+
+        # 如果有文件内容，存储到result_files表
+        if result_file_contents:
+            self.store_result_files_from_contents(result_id, experiment_type, result_file_contents)
+
+        return result_id
 
     def add_kcin_result(
         self,
@@ -872,6 +880,37 @@ class DatabaseManager:
                 }
                 for f in files
             ]
+
+    def get_result_file_by_name(self, result_id: int, result_type: str, file_name: str):
+        """
+        根据文件名获取结果文件（包含内容）
+
+        Args:
+            result_id: 结果ID
+            result_type: 结果类型
+            file_name: 文件名
+
+        Returns:
+            包含file_content的对象；如果不存在返回None
+        """
+        with self.get_session() as session:
+            result_file = session.query(ResultFile).filter(
+                ResultFile.result_id == result_id,
+                ResultFile.result_type == result_type,
+                ResultFile.file_name == file_name,
+            ).first()
+            if result_file:
+                # 在session关闭前访问file_content，创建一个简单对象返回
+                class FileData:
+                    pass
+                data = FileData()
+                data.id = result_file.id
+                data.file_name = result_file.file_name
+                data.file_content = result_file.file_content
+                data.file_size = result_file.file_size
+                data.mime_type = result_file.mime_type
+                return data
+            return None
 
     def delete_result_files(self, result_id: int, result_type: str) -> int:
         """

@@ -312,7 +312,7 @@ class IPInterface:
                 self.networks[network_type]["inject_fifo"].appendleft(flit)
             else:
                 self.networks[network_type]["inject_fifo"].append(flit)
-        flit.flit_position = "IP_inject"
+        flit.set_position("IP_inject", self.current_cycle)
 
         # 检查是否为新请求并记录统计
         # 新请求必须满足：1) 请求网络 2) 本IP首次见到此packet_id 3) 非重试 4) 当前IP是原始发起IP
@@ -335,14 +335,9 @@ class IPInterface:
             return True
         self.networks[network_type]["send_flits"][flit.packet_id].append(flit)
 
-        # 添加flit到RequestTracker
-        if hasattr(self, "request_tracker") and self.request_tracker:
-            if network_type == "req":
-                self.request_tracker.add_request_flit(flit.packet_id, flit)
-            elif network_type == "rsp":
-                self.request_tracker.add_response_flit(flit.packet_id, flit)
-            elif network_type == "data":
-                self.request_tracker.add_data_flit(flit.packet_id, flit)
+        # 注：flit添加到RequestTracker的操作移至接收端（避免重复添加）
+        # request_flit在process_req_from_network时添加
+        # data_flit在process_data_from_network时添加
 
         return True
 
@@ -371,7 +366,7 @@ class IPInterface:
             if flit is None:
                 return  # 所有队列都空或都未到发送时间
 
-            flit.flit_position = "L2H"
+            flit.set_position("L2H", self.current_cycle)
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = flit
             return
@@ -386,7 +381,7 @@ class IPInterface:
         if network_type == "req":
             if flit.req_attr == "new" and not self._check_and_reserve_resources(flit):
                 return  # 资源不足，保持在inject_fifo中
-            flit.flit_position = "L2H"
+            flit.set_position("L2H", self.current_cycle)
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
 
@@ -400,7 +395,7 @@ class IPInterface:
                 if not self.tx_token_bucket.consume():
                     return
             flit: Flit = net_info["inject_fifo"].popleft()
-            flit.flit_position = "L2H"
+            flit.set_position("L2H", current_cycle)
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = flit
 
@@ -424,7 +419,7 @@ class IPInterface:
 
         # 从 l2h_fifo 弹出一个 flit，先放到 *pre* 槽
         flit: Flit = net_info["l2h_fifo"].popleft()
-        flit.flit_position = "IQ_CH"
+        flit.set_position("IQ_CH", self.current_cycle)
         network.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = flit
 
         # 更新cycle统计
@@ -543,7 +538,7 @@ class IPInterface:
 
             flit = eq_buf.popleft()
             flit.is_arrive = True
-            flit.flit_position = "H2L_H"
+            flit.set_position("H2L_H", self.current_cycle)
             net_info["h2l_fifo_h_pre"] = flit
             # arrive_flits添加移动到IP_eject阶段，确保只记录真正完成的flit
 
@@ -566,7 +561,7 @@ class IPInterface:
 
         # 从H级FIFO传输到L级预缓冲（不设置延迟，直接传输）
         flit = net_info["h2l_fifo_h"].popleft()
-        flit.flit_position = "H2L_L"
+        flit.set_position("H2L_L", self.current_cycle)
         net_info["h2l_fifo_l_pre"] = flit
 
     def _handle_received_request(self, req: Flit):
@@ -988,6 +983,10 @@ class IPInterface:
 
             self.sn_wdb[flit.packet_id].append(flit)
 
+            # 添加到RequestTracker（写请求的data flit）
+            if hasattr(self, "request_tracker") and self.request_tracker:
+                self.request_tracker.add_data_flit(flit.packet_id, flit)
+
             # 检查是否收集完整个burst
             if len(self.sn_wdb[flit.packet_id]) == flit.burst_length:
 
@@ -1057,7 +1056,7 @@ class IPInterface:
 
         # 出队flit
         flit = net_info["h2l_fifo_l"].popleft()
-        flit.flit_position = "IP_eject"
+        flit.set_position("IP_eject", current_cycle)
         flit.is_finish = True
 
         # 在IP_eject阶段添加到arrive_flits，确保只记录真正完成的flit

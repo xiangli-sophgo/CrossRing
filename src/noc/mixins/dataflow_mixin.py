@@ -53,7 +53,7 @@ class DataflowMixin:
             queue = network.IQ_channel_buffer[ip_type]
             if queue_pre[node_id] and len(queue[node_id]) < self.config.IQ_CH_FIFO_DEPTH:
                 flit = queue_pre[node_id]
-                flit.flit_position = "IQ_CH"
+                flit.set_position("IQ_CH", self.cycle)
                 queue[node_id].append(flit)
                 network.increment_fifo_flit_count("IQ", "CH_buffer", node_id, ip_type)
                 queue_pre[node_id] = None
@@ -83,7 +83,7 @@ class DataflowMixin:
             if queue_pre[node_id] and len(queue[node_id]) < fifo_depth:
                 flit = queue_pre[node_id]
                 flit.departure_inject_cycle = self.cycle
-                flit.flit_position = f"IQ_{direction}"
+                flit.set_position(f"IQ_{direction}", self.cycle)
                 queue[node_id].append(flit)
                 network.increment_fifo_flit_count("IQ", direction, node_id)
                 # 统计横向反方向上环
@@ -97,7 +97,7 @@ class DataflowMixin:
             queue = network.ring_bridge[direction]
             if queue_pre[node_id] and len(queue[node_id]) < self.config.RB_IN_FIFO_DEPTH:
                 flit = queue_pre[node_id]
-                flit.flit_position = f"RB_{direction}"
+                flit.set_position(f"RB_{direction}", self.cycle)
                 queue[node_id].append(flit)
                 network.increment_fifo_flit_count("RB", direction, node_id)
                 queue_pre[node_id] = None
@@ -109,7 +109,7 @@ class DataflowMixin:
             if queue_pre[node_id] and len(queue[node_id]) < self.config.RB_OUT_FIFO_DEPTH:
                 flit = queue_pre[node_id]
                 flit.is_arrive = fifo_pos == "EQ"
-                flit.flit_position = f"RB_{fifo_pos}"
+                flit.set_position(f"RB_{fifo_pos}", self.cycle)
                 queue[node_id].append(flit)
                 network.increment_fifo_flit_count("RB", fifo_pos, node_id)
                 # 统计纵向反方向上环
@@ -124,7 +124,7 @@ class DataflowMixin:
             if queue_pre[node_id] and len(queue[node_id]) < self.config.EQ_IN_FIFO_DEPTH:
                 flit = queue_pre[node_id]
                 flit.is_arrive = fifo_pos == "EQ"
-                flit.flit_position = f"EQ_{fifo_pos}"
+                flit.set_position(f"EQ_{fifo_pos}", self.cycle)
                 queue[node_id].append(flit)
                 network.increment_fifo_flit_count("EQ", fifo_pos, node_id)
                 queue_pre[node_id] = None
@@ -144,7 +144,7 @@ class DataflowMixin:
             queue = network.EQ_channel_buffer[ip_type]
             if queue_pre[node_id] and len(queue[node_id]) < self.config.EQ_CH_FIFO_DEPTH:
                 flit = queue_pre[node_id]
-                flit.flit_position = "EQ_CH"
+                flit.set_position("EQ_CH", self.cycle)
                 queue[node_id].append(flit)
                 network.increment_fifo_flit_count("EQ", "CH_buffer", node_id, ip_type)
                 queue_pre[node_id] = None

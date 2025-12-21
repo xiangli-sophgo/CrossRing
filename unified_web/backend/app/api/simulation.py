@@ -326,7 +326,7 @@ async def get_history_grouped(limit: int = 50):
     # 获取足够多的任务用于分组
     tasks = task_manager.get_history(limit * 10)
 
-    def extract_batch_id(description: str | None) -> str | None:
+    def extract_batch_id(description: Optional[str]) -> Optional[str]:
         if not description:
             return None
         match = re.search(r'\[batch:(\d+)\]', description)
@@ -380,7 +380,15 @@ async def get_history_grouped(limit: int = 50):
         if t.status.value == "completed":
             if t.results and "completed_files" in t.results:
                 groups[group_key]["completed_count"] += t.results["completed_files"]
-                groups[group_key]["failed_count"] += t.results.get("failed_files", 0)
+                failed_count = t.results.get("failed_files", 0)
+                groups[group_key]["failed_count"] += failed_count
+                # 如果有失败的文件，从file_results中收集错误信息
+                if failed_count > 0 and t.results.get("file_results"):
+                    for fr in t.results["file_results"]:
+                        if fr.get("status") == "failed" and fr.get("error"):
+                            groups[group_key]["errors"].append(
+                                f"[{fr.get('file', 'unknown')}] {fr['error']}"
+                            )
             else:
                 groups[group_key]["completed_count"] += task_unit_count
         elif t.status.value == "failed":
@@ -400,6 +408,13 @@ async def get_history_grouped(limit: int = 50):
                 groups[group_key]["status"] = "cancelled"
             if t.error:
                 groups[group_key]["errors"].append(t.error)
+            # 也从file_results中收集错误
+            if t.results and t.results.get("file_results"):
+                for fr in t.results["file_results"]:
+                    if fr.get("status") == "failed" and fr.get("error"):
+                        groups[group_key]["errors"].append(
+                            f"[{fr.get('file', 'unknown')}] {fr['error']}"
+                        )
         elif t.status.value in ("running", "pending"):
             # 运行中：使用 sim_details 中的进度
             if t.sim_details and "file_index" in t.sim_details:
@@ -432,7 +447,10 @@ def _parse_kcin_name(name: str) -> tuple:
     """
     解析拓扑名称为数字元组，用于排序
     例如: "5x4" -> (5, 4), "10x8" -> (10, 8)
+    "default" 排在最前面
     """
+    if name.lower() == "default":
+        return (0, 0)  # default排在最前面
     try:
         parts = name.lower().split('x')
         if len(parts) == 2:

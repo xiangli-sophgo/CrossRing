@@ -24,6 +24,9 @@ import {
   hierarchicalLayout,
   hybridLayout,
   isometricStackedLayout,
+  forceDirectedLayout,
+  ForceLayoutManager,
+  ForceNode,
 } from './layouts'
 import { LEVEL_PAIR_NAMES } from '../../types'
 
@@ -380,6 +383,12 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   const [tooltip, setTooltip] = useState<{ x: number; y: number; content: string } | null>(null)
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
 
+  // 力导向布局动态模拟
+  const forceManagerRef = useRef<ForceLayoutManager | null>(null)
+  const [forceNodes, setForceNodes] = useState<ForceNode[]>([])
+  const [isForceSimulating, setIsForceSimulating] = useState(false)
+  const isForceMode = layoutType === 'force' && !multiLevelOptions?.enabled
+
   // 多层级模式：悬停的层级索引（用于抬起上方层级）
   const [hoveredLayerIndex, setHoveredLayerIndex] = useState<number | null>(null)
 
@@ -487,10 +496,11 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       auto: {},
       circle: {},
       grid: {},
+      force: {},
     }
     try {
       const pathKey = currentLevel === 'datacenter' ? 'dc' : currentLevel
-      for (const layout of ['auto', 'circle', 'grid'] as LayoutType[]) {
+      for (const layout of ['auto', 'circle', 'grid', 'force'] as LayoutType[]) {
         const cached = localStorage.getItem(`tier6_manual_positions_${pathKey}_${layout}`)
         if (cached) result[layout] = JSON.parse(cached)
       }
@@ -519,9 +529,10 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       auto: {},
       circle: {},
       grid: {},
+      force: {},
     }
     try {
-      for (const layout of ['auto', 'circle', 'grid'] as LayoutType[]) {
+      for (const layout of ['auto', 'circle', 'grid', 'force'] as LayoutType[]) {
         const key = getManualPositionsCacheKey(layout)
         const cached = localStorage.getItem(key)
         if (cached) result[layout] = JSON.parse(cached)
@@ -774,6 +785,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
           // 检查子节点是否有 Switch（多层级模式下通常没有 Switch，但保留逻辑以备扩展）
           const hasSwitches = children.some(n => n.isSwitch)
+          const childIds = new Set(children.map(c => c.id))
 
           // 使用与单层级相同的布局逻辑
           let layoutedChildren: Node[]
@@ -790,6 +802,16 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             } else {
               layoutedChildren = torusLayout(children, singleLevelWidth, singleLevelHeight)
             }
+          } else if (layoutType === 'force') {
+            // 力导向布局：提取容器内的边用于计算
+            const childEdges = allEdges.filter(e =>
+              childIds.has(e.source) && childIds.has(e.target)
+            )
+            layoutedChildren = forceDirectedLayout(children, childEdges, singleLevelWidth, singleLevelHeight, {
+              chargeStrength: hasSwitches ? -400 : -300,
+              linkDistance: hasSwitches ? 120 : 100,
+              collisionRadius: hasSwitches ? 45 : 35,
+            })
           } else {
             // auto 模式：与单层级相同的自动选择逻辑
             if (hasSwitches && keepDirectTopology && directTopology !== 'none') {
@@ -802,7 +824,6 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
           }
 
           // 提取容器内的边（intra_lower 类型）
-          const childIds = new Set(children.map(c => c.id))
           const containerEdges = allEdges.filter(e =>
             childIds.has(e.source) && childIds.has(e.target) &&
             e.connectionType === 'intra_lower'
@@ -1168,6 +1189,13 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       } else {
         nodeList = torusLayout(nodeList, width, height)
       }
+    } else if (layoutType === 'force') {
+      // 力导向布局：使用物理模拟计算节点位置
+      nodeList = forceDirectedLayout(nodeList, edgeList, width, height, {
+        chargeStrength: hasSwitches ? -400 : -300,  // Switch场景需要更大斥力
+        linkDistance: hasSwitches ? 120 : 100,
+        collisionRadius: hasSwitches ? 45 : 35,
+      })
     } else {
       // auto模式：根据是否有Switch和拓扑类型自动选择
       if (hasSwitches && keepDirectTopology && directTopology !== 'none') {
@@ -1184,6 +1212,58 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
     return { nodes: nodeList, edges: edgeList, title: graphTitle, directTopology }
   }, [topology, currentLevel, currentPod, currentRack, currentBoard, layoutType, multiLevelOptions])
+
+  // 力导向动态模拟管理
+  useEffect(() => {
+    if (!isForceMode) {
+      // 非力导向模式，停止并清理模拟
+      if (forceManagerRef.current) {
+        forceManagerRef.current.destroy()
+        forceManagerRef.current = null
+      }
+      setForceNodes([])
+      setIsForceSimulating(false)
+      return
+    }
+
+    // 初始化力导向模拟
+    if (!forceManagerRef.current) {
+      forceManagerRef.current = new ForceLayoutManager({
+        width: 800,
+        height: 600,
+        chargeStrength: -300,
+        linkDistance: 100,
+        collisionRadius: 35,
+      })
+    }
+
+    const manager = forceManagerRef.current
+
+    // 初始化节点和边
+    const initialNodes = manager.initialize(nodes, edges, {
+      width: 800,
+      height: 600,
+    })
+
+    // 设置 tick 回调
+    manager.setOnTick((updatedNodes) => {
+      setForceNodes([...updatedNodes])
+    })
+
+    manager.setOnEnd(() => {
+      setIsForceSimulating(false)
+    })
+
+    setForceNodes(initialNodes)
+    setIsForceSimulating(true)
+
+    // 开始模拟
+    manager.start(1.0)
+
+    return () => {
+      manager.stop()
+    }
+  }, [isForceMode, nodes.length, edges.length])
 
   // 切换到手动模式时，如果没有保存的位置，使用当前布局位置作为初始值
   useEffect(() => {
@@ -1226,15 +1306,23 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
   // 应用手动位置调整后的节点列表
   const displayNodes = useMemo(() => {
-    if (!isManualMode) return nodes
-    return nodes.map(node => {
-      const manualPos = manualPositions[node.id]
-      if (manualPos) {
-        return { ...node, x: manualPos.x, y: manualPos.y }
-      }
-      return node
-    })
-  }, [nodes, manualPositions, isManualMode])
+    // 力导向模式：使用动态模拟的位置
+    if (isForceMode && forceNodes.length > 0) {
+      return forceNodes as Node[]
+    }
+    // 手动模式：应用手动调整的位置
+    if (isManualMode) {
+      return nodes.map(node => {
+        const manualPos = manualPositions[node.id]
+        if (manualPos) {
+          return { ...node, x: manualPos.x, y: manualPos.y }
+        }
+        return node
+      })
+    }
+    // 其他模式：使用静态计算的位置
+    return nodes
+  }, [nodes, manualPositions, isManualMode, isForceMode, forceNodes])
 
   // 根据节点数量计算缩放系数
   const nodeScale = useMemo(() => {
@@ -1376,8 +1464,21 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
     return { scaleX, scaleY }
   }, [zoom])
 
-  // 手动布局拖动处理
+  // 拖动处理（支持手动模式和力导向模式）
   const handleDragStart = (nodeId: string, e: React.MouseEvent) => {
+    // 力导向模式：直接拖拽（无需 Shift 键）
+    if (isForceMode) {
+      e.preventDefault()
+      e.stopPropagation()
+      const node = displayNodes.find(n => n.id === nodeId)
+      if (!node) return
+      setDraggingNode(nodeId)
+      setDragStart({ x: e.clientX, y: e.clientY, nodeX: node.x, nodeY: node.y })
+      // 固定节点位置
+      forceManagerRef.current?.fixNode(nodeId, node.x, node.y)
+      return
+    }
+    // 手动模式：需要 Shift 键
     if (!isManualMode || !e.shiftKey) return
     e.preventDefault()
     e.stopPropagation()
@@ -1398,7 +1499,13 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
     const rawX = dragStart.nodeX + dx
     const rawY = dragStart.nodeY + dy
 
-    // 检测对齐
+    // 力导向模式：通过物理模拟更新位置
+    if (isForceMode) {
+      forceManagerRef.current?.dragNode(draggingNode, rawX, rawY)
+      return
+    }
+
+    // 手动模式：检测对齐并更新位置
     const { snappedX, snappedY, lines } = checkAlignment(rawX, rawY, draggingNode)
     setAlignmentLines(lines)
 
@@ -1413,8 +1520,13 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
   const handleDragEnd = () => {
     if (draggingNode) {
-      // 保存到历史记录
-      saveToHistory(manualPositions)
+      // 力导向模式：释放节点，让物理模拟继续
+      if (isForceMode) {
+        forceManagerRef.current?.releaseNode(draggingNode)
+      } else {
+        // 手动模式：保存到历史记录
+        saveToHistory(manualPositions)
+      }
     }
     setDraggingNode(null)
     setDragStart(null)
@@ -1599,13 +1711,35 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                 { label: '自动', value: 'auto' },
                 { label: '环形', value: 'circle' },
                 { label: '网格', value: 'grid' },
+                { label: '力导向', value: 'force' },
               ]}
             />
+            {/* 力导向模式指示器 */}
+            {isForceMode && (
+              <Tooltip title={isForceSimulating ? '物理模拟进行中，可直接拖拽节点' : '物理模拟已稳定'}>
+                <span style={{
+                  fontSize: 11,
+                  color: isForceSimulating ? '#52c41a' : '#8c8c8c',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}>
+                  <span style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    backgroundColor: isForceSimulating ? '#52c41a' : '#d9d9d9',
+                    animation: isForceSimulating ? 'pulse 1s infinite' : 'none',
+                  }} />
+                  {isForceSimulating ? '模拟中' : '已稳定'}
+                </span>
+              </Tooltip>
+            )}
             <div style={{ borderLeft: '1px solid rgba(0, 0, 0, 0.08)', height: 20 }} />
             <Checkbox
               checked={isManualMode}
               onChange={(e) => setIsManualMode(e.target.checked)}
-              disabled={multiLevelOptions?.enabled}
+              disabled={multiLevelOptions?.enabled || isForceMode}
             >
               <span style={{ fontSize: 12 }}>手动调整</span>
             </Checkbox>
@@ -2026,12 +2160,14 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                 <g
                   key={`layer-${zLayer}-${containerNode.id}`}
                   style={{
+                    // 使用弹簧曲线实现更自然的物理效果
+                    // cubic-bezier(0.34, 1.56, 0.64, 1) 模拟过冲弹簧效果
                     transition: isAnimating
-                      ? 'transform 0.5s ease-in-out, opacity 0.4s ease-out'
-                      : 'transform 0.3s ease-out, opacity 0.3s ease-out',
+                      ? 'transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.4s ease-out'
+                      : 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease-out',
                     transform: (isExpanding || (isCollapsing && !collapseAnimationStarted))
                       ? `translate(${expandTranslateX}px, ${expandTranslateY}px) scale(${expandScale})`
-                      : `translateY(${yOffset}px)`,
+                      : `translateY(${yOffset}px) scale(${yOffset !== 0 ? 0.98 : 1})`,  // 悬浮时微微缩小
                     opacity: layerOpacity,
                     transformOrigin: `${centerX}px ${centerY}px`,
                   }}
@@ -2048,9 +2184,10 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                   {/* 容器：使用 rect + skewX transform 实现平行四边形，这样 skew 角度可以动画化 */}
                   <g
                     style={{
+                      // 弹簧曲线使倾斜动画更有物理感
                       transition: isAnimating
-                        ? 'transform 0.5s ease-in-out'
-                        : 'transform 0.3s ease-out',
+                        ? 'transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
+                        : 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
                       transform: `skewX(${currentSkewAngle}deg)`,
                       transformOrigin: `${centerX}px ${centerY}px`,
                     }}
@@ -3279,14 +3416,19 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             return (
               <g
                 key={node.id}
-                transform={`translate(${node.x}, ${node.y}) scale(${nodeScale})`}
+                transform={`translate(${node.x}, ${node.y}) scale(${nodeScale * (isDragging ? 1.08 : 1)})`}
+                className={isForceMode ? 'force-node-hover' : ''}
                 style={{
-                  cursor: isManualMode ? 'move' : connectionMode !== 'view' ? 'crosshair' : 'pointer',
-                  opacity: isDragging ? 0.7 : 1,
-                  filter: shouldHighlight
-                    ? 'drop-shadow(0 0 8px rgba(37, 99, 235, 0.6)) drop-shadow(0 0 16px rgba(37, 99, 235, 0.3))'
-                    : 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
-                  transition: 'filter 0.15s ease, opacity 0.15s ease',
+                  cursor: isForceMode ? (isDragging ? 'grabbing' : 'grab') : isManualMode ? 'move' : connectionMode !== 'view' ? 'crosshair' : 'pointer',
+                  opacity: isDragging ? 0.85 : 1,
+                  filter: isDragging
+                    ? 'drop-shadow(0 8px 16px rgba(0,0,0,0.25))'
+                    : shouldHighlight
+                      ? 'drop-shadow(0 0 8px rgba(37, 99, 235, 0.6)) drop-shadow(0 0 16px rgba(37, 99, 235, 0.3))'
+                      : 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
+                  transition: isDragging
+                    ? 'none'  // 拖拽时禁用过渡以实现即时响应
+                    : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.15s ease, opacity 0.15s ease',
                 }}
                 onMouseDown={(e) => handleDragStart(node.id, e)}
                 onClick={(e) => {

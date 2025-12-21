@@ -5,6 +5,7 @@ Result/
 backup_code
 
 tasks.json
+unified_web/backend/data/
 
 CrossRing.egg-info/
 

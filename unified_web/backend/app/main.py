@@ -50,7 +50,7 @@ ensure_dirs()
 from app.api import ip_mount, traffic_config, traffic_generate, static_bandwidth
 
 # 来自 result_db_web 的路由
-from app.api import experiments, results, analysis, export
+from app.api import experiments, results, analysis, export, waveform
 
 # 新增的仿真路由
 from app.api import simulation
@@ -121,6 +121,7 @@ app.include_router(experiments.router, prefix=API_PREFIX, tags=["实验管理"])
 app.include_router(results.router, prefix=API_PREFIX, tags=["结果查询"])
 app.include_router(analysis.router, prefix=API_PREFIX, tags=["数据分析"])
 app.include_router(export.router, prefix=API_PREFIX, tags=["导出"])
+app.include_router(waveform.router, prefix=API_PREFIX, tags=["波形数据"])
 
 # 列配置方案
 app.include_router(column_presets.router, tags=["列配置"])

@@ -1,4 +1,366 @@
-import { Node } from './shared'
+import { Node, Edge } from './shared'
+import * as d3Force from 'd3-force'
+
+// ============================================
+// 力导向布局类型定义
+// ============================================
+
+export interface ForceLayoutOptions {
+  // 力的强度参数
+  chargeStrength: number      // 节点间斥力强度 (负值表示排斥，默认 -300)
+  linkDistance: number        // 连接线的理想距离 (默认 100)
+  linkStrength: number        // 连接线的刚度 (0-1，默认 0.5)
+  collisionRadius: number     // 碰撞检测半径 (默认 35)
+  centerStrength: number      // 向中心的吸引力 (默认 0.05)
+
+  // 模拟参数
+  alphaDecay: number          // 衰减率，越小运行越久 (默认 0.02)
+  velocityDecay: number       // 速度衰减，越大越快停止 (默认 0.4)
+  alphaMin: number            // 最小alpha值，低于此值停止 (默认 0.001)
+
+  // 视图参数
+  width: number
+  height: number
+}
+
+export const DEFAULT_FORCE_OPTIONS: ForceLayoutOptions = {
+  chargeStrength: -300,
+  linkDistance: 100,
+  linkStrength: 0.5,
+  collisionRadius: 35,
+  centerStrength: 0.05,
+  alphaDecay: 0.02,
+  velocityDecay: 0.4,
+  alphaMin: 0.001,
+  width: 800,
+  height: 600,
+}
+
+// D3 力导向节点类型（扩展 Node）
+export interface ForceNode extends Node {
+  vx?: number  // x方向速度
+  vy?: number  // y方向速度
+  fx?: number | null  // 固定x位置（拖拽时使用）
+  fy?: number | null  // 固定y位置（拖拽时使用）
+  index?: number
+}
+
+// D3 力导向连接类型
+export interface ForceLink {
+  source: string | ForceNode
+  target: string | ForceNode
+  bandwidth?: number
+  latency?: number
+}
+
+// 力导向模拟结果
+export interface ForceSimulationResult {
+  nodes: ForceNode[]
+  simulation: d3Force.Simulation<ForceNode, ForceLink>
+}
+
+// ============================================
+// 力导向布局管理器
+// ============================================
+
+export class ForceLayoutManager {
+  private simulation: d3Force.Simulation<ForceNode, ForceLink> | null = null
+  private nodes: ForceNode[] = []
+  private links: ForceLink[] = []
+  private options: ForceLayoutOptions
+  private onTick: ((nodes: ForceNode[]) => void) | null = null
+  private onEnd: (() => void) | null = null
+
+  constructor(options: Partial<ForceLayoutOptions> = {}) {
+    this.options = { ...DEFAULT_FORCE_OPTIONS, ...options }
+  }
+
+  // 初始化或更新模拟
+  initialize(
+    nodes: Node[],
+    edges: Edge[],
+    options?: Partial<ForceLayoutOptions>
+  ): ForceNode[] {
+    if (options) {
+      this.options = { ...this.options, ...options }
+    }
+
+    const { width, height, chargeStrength, linkDistance, linkStrength, collisionRadius, centerStrength, alphaDecay, velocityDecay, alphaMin } = this.options
+
+    // 转换节点，保留现有位置或初始化为中心附近随机位置
+    this.nodes = nodes.map((node, i) => ({
+      ...node,
+      x: node.x || width / 2 + (Math.random() - 0.5) * 100,
+      y: node.y || height / 2 + (Math.random() - 0.5) * 100,
+      vx: 0,
+      vy: 0,
+      index: i,
+    }))
+
+    // 转换边
+    this.links = edges.map(edge => ({
+      source: edge.source,
+      target: edge.target,
+      bandwidth: edge.bandwidth,
+      latency: edge.latency,
+    }))
+
+    // 停止之前的模拟
+    if (this.simulation) {
+      this.simulation.stop()
+    }
+
+    // 创建新的力模拟
+    this.simulation = d3Force.forceSimulation<ForceNode, ForceLink>(this.nodes)
+      // 节点间斥力（电荷力）
+      .force('charge', d3Force.forceManyBody<ForceNode>()
+        .strength(chargeStrength)
+        .distanceMax(300)  // 限制斥力的最大距离
+      )
+      // 连接线弹簧力
+      .force('link', d3Force.forceLink<ForceNode, ForceLink>(this.links)
+        .id(d => d.id)
+        .distance(linkDistance)
+        .strength(linkStrength)
+      )
+      // 中心吸引力
+      .force('center', d3Force.forceCenter<ForceNode>(width / 2, height / 2)
+        .strength(centerStrength)
+      )
+      // 碰撞检测
+      .force('collision', d3Force.forceCollide<ForceNode>()
+        .radius(collisionRadius)
+        .strength(0.8)
+      )
+      // 边界约束力（防止节点飞出视图）
+      .force('bounds', this.createBoundsForce(width, height, 50))
+      // 模拟参数
+      .alphaDecay(alphaDecay)
+      .velocityDecay(velocityDecay)
+      .alphaMin(alphaMin)
+
+    // 绑定事件
+    this.simulation.on('tick', () => {
+      if (this.onTick) {
+        this.onTick(this.nodes)
+      }
+    })
+
+    this.simulation.on('end', () => {
+      if (this.onEnd) {
+        this.onEnd()
+      }
+    })
+
+    return this.nodes
+  }
+
+  // 创建边界约束力
+  private createBoundsForce(width: number, height: number, padding: number) {
+    return () => {
+      for (const node of this.nodes) {
+        // X边界
+        if (node.x! < padding) {
+          node.vx! += (padding - node.x!) * 0.1
+        } else if (node.x! > width - padding) {
+          node.vx! += (width - padding - node.x!) * 0.1
+        }
+        // Y边界
+        if (node.y! < padding) {
+          node.vy! += (padding - node.y!) * 0.1
+        } else if (node.y! > height - padding) {
+          node.vy! += (height - padding - node.y!) * 0.1
+        }
+      }
+    }
+  }
+
+  // 设置tick回调
+  setOnTick(callback: (nodes: ForceNode[]) => void) {
+    this.onTick = callback
+  }
+
+  // 设置结束回调
+  setOnEnd(callback: () => void) {
+    this.onEnd = callback
+  }
+
+  // 开始/恢复模拟
+  start(alpha: number = 0.3) {
+    if (this.simulation) {
+      this.simulation.alpha(alpha).restart()
+    }
+  }
+
+  // 停止模拟
+  stop() {
+    if (this.simulation) {
+      this.simulation.stop()
+    }
+  }
+
+  // 暂停但不重置
+  pause() {
+    if (this.simulation) {
+      this.simulation.stop()
+    }
+  }
+
+  // 固定节点位置（拖拽开始）
+  fixNode(nodeId: string, x: number, y: number) {
+    const node = this.nodes.find(n => n.id === nodeId)
+    if (node) {
+      node.fx = x
+      node.fy = y
+    }
+  }
+
+  // 更新固定位置（拖拽中）
+  dragNode(nodeId: string, x: number, y: number) {
+    const node = this.nodes.find(n => n.id === nodeId)
+    if (node) {
+      node.fx = x
+      node.fy = y
+    }
+    // 稍微加热模拟以响应拖拽
+    if (this.simulation) {
+      this.simulation.alpha(0.1).restart()
+    }
+  }
+
+  // 释放节点（拖拽结束）
+  releaseNode(nodeId: string) {
+    const node = this.nodes.find(n => n.id === nodeId)
+    if (node) {
+      node.fx = null
+      node.fy = null
+    }
+    // 释放后加热让节点自然运动
+    if (this.simulation) {
+      this.simulation.alpha(0.2).restart()
+    }
+  }
+
+  // 加热模拟（重新激活）
+  reheat(alpha: number = 0.3) {
+    if (this.simulation) {
+      this.simulation.alpha(alpha).restart()
+    }
+  }
+
+  // 获取当前节点位置
+  getNodes(): ForceNode[] {
+    return this.nodes
+  }
+
+  // 获取模拟实例
+  getSimulation(): d3Force.Simulation<ForceNode, ForceLink> | null {
+    return this.simulation
+  }
+
+  // 更新选项
+  updateOptions(options: Partial<ForceLayoutOptions>) {
+    this.options = { ...this.options, ...options }
+
+    if (!this.simulation) return
+
+    const { chargeStrength, linkDistance, linkStrength, collisionRadius, centerStrength, width, height } = this.options
+
+    // 更新各个力
+    const chargeForce = this.simulation.force('charge') as d3Force.ForceManyBody<ForceNode>
+    if (chargeForce) {
+      chargeForce.strength(chargeStrength)
+    }
+
+    const linkForce = this.simulation.force('link') as d3Force.ForceLink<ForceNode, ForceLink>
+    if (linkForce) {
+      linkForce.distance(linkDistance).strength(linkStrength)
+    }
+
+    const centerForce = this.simulation.force('center') as d3Force.ForceCenter<ForceNode>
+    if (centerForce) {
+      centerForce.x(width / 2).y(height / 2).strength(centerStrength)
+    }
+
+    const collisionForce = this.simulation.force('collision') as d3Force.ForceCollide<ForceNode>
+    if (collisionForce) {
+      collisionForce.radius(collisionRadius)
+    }
+
+    // 更新边界力
+    this.simulation.force('bounds', this.createBoundsForce(width, height, 50))
+
+    // 重新加热
+    this.reheat(0.3)
+  }
+
+  // 销毁模拟
+  destroy() {
+    if (this.simulation) {
+      this.simulation.stop()
+      this.simulation = null
+    }
+    this.nodes = []
+    this.links = []
+    this.onTick = null
+    this.onEnd = null
+  }
+}
+
+// ============================================
+// 简单的力导向布局函数（一次性计算）
+// ============================================
+
+export function forceDirectedLayout(
+  nodes: Node[],
+  edges: Edge[],
+  width: number,
+  height: number,
+  options: Partial<ForceLayoutOptions> = {}
+): Node[] {
+  const opts: ForceLayoutOptions = { ...DEFAULT_FORCE_OPTIONS, ...options, width, height }
+
+  // 转换节点
+  const forceNodes: ForceNode[] = nodes.map((node, i) => ({
+    ...node,
+    x: node.x || width / 2 + (Math.random() - 0.5) * 200,
+    y: node.y || height / 2 + (Math.random() - 0.5) * 200,
+    vx: 0,
+    vy: 0,
+    index: i,
+  }))
+
+  // 转换边
+  const forceLinks: ForceLink[] = edges.map(edge => ({
+    source: edge.source,
+    target: edge.target,
+  }))
+
+  // 创建模拟
+  const simulation = d3Force.forceSimulation<ForceNode, ForceLink>(forceNodes)
+    .force('charge', d3Force.forceManyBody<ForceNode>().strength(opts.chargeStrength))
+    .force('link', d3Force.forceLink<ForceNode, ForceLink>(forceLinks)
+      .id(d => d.id)
+      .distance(opts.linkDistance)
+      .strength(opts.linkStrength)
+    )
+    .force('center', d3Force.forceCenter<ForceNode>(width / 2, height / 2))
+    .force('collision', d3Force.forceCollide<ForceNode>().radius(opts.collisionRadius))
+    .stop()
+
+  // 运行模拟直到稳定（同步计算）
+  const iterations = 300
+  for (let i = 0; i < iterations; i++) {
+    simulation.tick()
+  }
+
+  // 返回计算后的节点位置
+  return forceNodes.map(n => ({
+    ...n,
+    x: Math.max(50, Math.min(width - 50, n.x!)),
+    y: Math.max(50, Math.min(height - 50, n.y!)),
+  }))
+}
 
 // ============================================
 // 等轴测投影工具函数

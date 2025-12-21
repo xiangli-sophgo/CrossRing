@@ -100,7 +100,7 @@ export interface ManualConnectionConfig {
 export type ConnectionMode = 'view' | 'select' | 'connect' | 'select_source' | 'select_target';
 
 // 布局类型（基础布局，不包含手动模式）
-export type LayoutType = 'auto' | 'circle' | 'grid';
+export type LayoutType = 'auto' | 'circle' | 'grid' | 'force';
 
 // ============================================
 // Switch配置接口
