@@ -57,7 +57,7 @@ def test_config_methods():
     """测试配置类的新方法"""
     print("\n=== 测试2: Config类新方法 ===")
 
-    config_path = os.path.join(project_root, "config", "topologies", "topo_4x5.yaml")
+    config_path = os.path.join(project_root, "config", "topologies", "kcin_4x5.yaml")
     config = CrossRingConfig(config_path)
 
     print(f"✓ 加载配置: {config_path}")
@@ -82,14 +82,14 @@ def test_integration():
     try:
         from src.noc.REQ_RSP import REQ_RSP_model
 
-        config_path = os.path.join(project_root, "config", "topologies", "topo_4x5.yaml")
+        config_path = os.path.join(project_root, "config", "topologies", "kcin_4x5.yaml")
         config = CrossRingConfig(config_path)
 
         print(f"✓ 创建模型实例...")
         sim = REQ_RSP_model(
             model_type="REQ_RSP",
             config=config,
-            topo_type="4x5",
+            kcin_type="4x5",
             verbose=0,
         )
 

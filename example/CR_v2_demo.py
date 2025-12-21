@@ -21,8 +21,8 @@ from src.noc.base_model_v2 import BaseModel
 def run_CR_v2_demo():
     # 创建配置 - 使用5x2拓扑的YAML配置
     print("\n初始化配置...")
-    topo_type = "5x2"
-    config_path = os.path.join(project_root, "config", "topologies", f"topo_{topo_type}.yaml")
+    kcin_type = "5x2"
+    config_path = os.path.join(project_root, "config", "topologies", f"kcin_{kcin_type}.yaml")
     config = CrossRingConfig(config_path)
 
     # 创建仿真实例（使用v2版本）
@@ -32,7 +32,7 @@ def run_CR_v2_demo():
     sim = BaseModel(
         model_type="REQ_RSP",
         config=config,
-        topo_type="5x2",
+        kcin_type="5x2",
     )
 
     # 配置流量调度器

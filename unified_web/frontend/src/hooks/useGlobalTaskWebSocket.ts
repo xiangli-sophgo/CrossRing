@@ -8,6 +8,7 @@ export interface GlobalTaskUpdate {
   message: string
   experiment_name?: string
   current_file?: string
+  error?: string | null
 }
 
 interface UseGlobalTaskWebSocketOptions {

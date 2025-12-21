@@ -20,25 +20,25 @@ class CrossRingBatchRunner:
     def __init__(self):
         self.results = []
         self.traffic_base_path = r"../../traffic/nxn_MLP_MoE"
-        self.config_path = r"../../config/topologies/topo_5x4.yaml"
-        self.result_save_path = f"../../Result/CrossRing_different_topo_{datetime.now().strftime('%Y%m%d_%H%M%S')}/"
-        self.csv_output_path = f"../../Result/CrossRing_different_topo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        self.config_path = r"../../config/topologies/kcin_5x4.yaml"
+        self.result_save_path = f"../../Result/CrossRing_different_kcin_{datetime.now().strftime('%Y%m%d_%H%M%S')}/"
+        self.csv_output_path = f"../../Result/CrossRing_different_kcin_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
         # 确保输出目录存在
         os.makedirs(self.result_save_path, exist_ok=True)
         os.makedirs(os.path.dirname(self.csv_output_path), exist_ok=True)
 
-    def is_matching_topology(self, filename, topo_name):
+    def is_matching_topology(self, filename, kcin_name):
         """检查文件名是否与指定拓扑匹配"""
         filename_lower = filename.lower()
-        topo_lower = topo_name.lower()
+        kcin_lower = kcin_name.lower()
 
         # 直接包含拓扑名称 (如: traffic_3x3_case1.txt)
-        if topo_lower in filename_lower:
+        if kcin_lower in filename_lower:
             return True
 
         # 提取拓扑的行列数
-        rows, cols = map(int, topo_name.split("x"))
+        rows, cols = map(int, kcin_name.split("x"))
 
         # 检查各种可能的格式
         patterns = [
@@ -58,7 +58,7 @@ class CrossRingBatchRunner:
 
         return False
 
-    def find_traffic_files(self, topo_name):
+    def find_traffic_files(self, kcin_name):
         """查找指定拓扑的traffic文件"""
         if not os.path.exists(self.traffic_base_path):
             print(f"Warning: Traffic path not found: {self.traffic_base_path}")
@@ -68,25 +68,25 @@ class CrossRingBatchRunner:
         try:
             for file in os.listdir(self.traffic_base_path):
                 if file.endswith(".txt"):
-                    if self.is_matching_topology(file, topo_name):
+                    if self.is_matching_topology(file, kcin_name):
                         traffic_files.append(file)
         except Exception as e:
             print(f"Error reading traffic directory: {e}")
             return []
 
         if traffic_files:
-            print(f"Found {len(traffic_files)} traffic files for {topo_name}: {traffic_files}")
+            print(f"Found {len(traffic_files)} traffic files for {kcin_name}: {traffic_files}")
 
         return traffic_files
 
-    def run_single_simulation(self, topo_name, traffic_file, model_type="REQ_RSP"):
+    def run_single_simulation(self, kcin_name, traffic_file, model_type="REQ_RSP"):
         """运行单个仿真"""
         # try:
-        print(f"Running simulation: {topo_name} with {traffic_file}")
+        print(f"Running simulation: {kcin_name} with {traffic_file}")
 
         config = CrossRingConfig(self.config_path)
-        config.TOPO_TYPE = topo_name
-        rows, cols = map(int, topo_name.split("x"))
+        config.TOPO_TYPE = kcin_name
+        rows, cols = map(int, kcin_name.split("x"))
         # cols *= 2
         # 解析行列并计算核心数量
         num_cores = rows * cols
@@ -133,7 +133,7 @@ class CrossRingBatchRunner:
         sim: BaseModel = eval(f"{model_type}_model")(
             model_type=model_type,
             config=config,
-            topo_type=topo_name,
+            kcin_type=kcin_name,
             traffic_file_path=self.traffic_base_path,
             traffic_config=traffic_file,
             result_save_path=self.result_save_path,
@@ -162,7 +162,7 @@ class CrossRingBatchRunner:
         metrics = sim.get_results()
         result.update(metrics)
 
-        print(f"Completed: {topo_name} with {traffic_file}")
+        print(f"Completed: {kcin_name} with {traffic_file}")
         del sim
         return result
 
@@ -170,8 +170,8 @@ class CrossRingBatchRunner:
         #     import traceback
 
         #     error_msg = f"{str(e)}\nTraceback:\n{traceback.format_exc()}"
-        #     print(f"Error running {topo_name} with {traffic_file}: {error_msg}")
-        #     return {"topology": topo_name, "traffic_file": traffic_file, "model_type": model_type, "status": f"error: {str(e)}"}  # CSV中只保存简短错误信息
+        #     print(f"Error running {kcin_name} with {traffic_file}: {error_msg}")
+        #     return {"topology": kcin_name, "traffic_file": traffic_file, "model_type": model_type, "status": f"error: {str(e)}"}  # CSV中只保存简短错误信息
 
     def run_batch(self, model_types=["REQ_RSP"], max_topology_size=None, max_workers=None):
         """运行批量仿真"""
@@ -196,13 +196,13 @@ class CrossRingBatchRunner:
                 m = pattern.search(file)
                 if not m:
                     continue
-                topo_name = f"{m.group(1)}x{m.group(2)}"
+                kcin_name = f"{m.group(1)}x{m.group(2)}"
                 # 可选：仅保留在 max_topology_size 范围内的拓扑
                 if max_topology_size:
                     r, c = int(m.group(1)), int(m.group(2))
                     if r > max_topology_size or c > max_topology_size:
                         continue
-                all_traffic_files.setdefault(topo_name, []).append(file)
+                all_traffic_files.setdefault(kcin_name, []).append(file)
         except Exception:
             print("Error scanning traffic files, full traceback:")
             traceback.print_exc()
@@ -219,9 +219,9 @@ class CrossRingBatchRunner:
 
             # 准备并行执行任务
             tasks = []
-            for topo_name in sorted(all_traffic_files.keys()):
-                for traffic_file in all_traffic_files[topo_name]:
-                    tasks.append((topo_name, traffic_file, model_type))
+            for kcin_name in sorted(all_traffic_files.keys()):
+                for traffic_file in all_traffic_files[kcin_name]:
+                    tasks.append((kcin_name, traffic_file, model_type))
 
             total_runs += len(tasks)
             # 使用多进程并行执行
@@ -265,9 +265,9 @@ class CrossRingBatchRunner:
 
         # 按拓扑统计
         print("\nResults by Topology:")
-        topo_summary = df.groupby("topology").agg({"status": lambda x: (x == "completed").sum(), "simulation_time": "mean", "total_cycles": "mean"}).round(2)
-        topo_summary.columns = ["Completed_Runs", "Avg_SimTime(s)", "Avg_Cycles"]
-        print(topo_summary)
+        kcin_summary = df.groupby("topology").agg({"status": lambda x: (x == "completed").sum(), "simulation_time": "mean", "total_cycles": "mean"}).round(2)
+        kcin_summary.columns = ["Completed_Runs", "Avg_SimTime(s)", "Avg_Cycles"]
+        print(kcin_summary)
 
         # 按模型类型统计
         print("\nResults by Model Type:")

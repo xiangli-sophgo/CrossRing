@@ -1243,7 +1243,7 @@ def _print_statistics(results, calculator=None, verbose=True, print_latency_stat
         print(f"事务延迟 - 平均: {np.mean(all_trans_latencies):.1f} ns, " f"最小: {np.min(all_trans_latencies):.1f} ns, " f"最大: {np.max(all_trans_latencies):.1f} ns")
 
 
-def _plot_bandwidth_curve(results, base_name, topo_type, save_path, calculator=None):
+def _plot_bandwidth_curve(results, base_name, kcin_type, save_path, calculator=None):
     """绘制带宽曲线（基于工作区间）"""
     try:
         # 设置中文字体
@@ -1304,13 +1304,13 @@ def _plot_bandwidth_curve(results, base_name, topo_type, save_path, calculator=N
 
         plt.xlabel("时间 (μs)")
         plt.ylabel("带宽 (GB/s)")
-        plt.title(f"事件驱动理论带宽 - {base_name} ({topo_type})")
+        plt.title(f"事件驱动理论带宽 - {base_name} ({kcin_type})")
         plt.legend()
         plt.grid(True)
 
         # 保存图片或显示
         if save_path:
-            output_fig = os.path.join(save_path, f"{base_name}_{topo_type}_event_driven_bw.png")
+            output_fig = os.path.join(save_path, f"{base_name}_{kcin_type}_event_driven_bw.png")
             plt.savefig(output_fig, bbox_inches="tight", dpi=300)
             plt.close()
             print(f"事件驱动带宽曲线图已保存: {output_fig}")
@@ -1365,16 +1365,16 @@ def main():
     results_fig_save_path = None
 
     # ==================== 拓扑配置 ====================
-    topo_config_map = {
-        "3x3": r"../../config/topologies/topo_3x3.yaml",
-        "4x4": r"../../config/topologies/topo_4x4.yaml",
-        "5x2": r"../../config/topologies/topo_5x2.yaml",
-        "5x4": r"../../config/topologies/topo_5x4.yaml",
-        "6x5": r"../../config/topologies/topo_6x5.yaml",
-        "8x8": r"../../config/topologies/topo_8x8.yaml",
+    kcin_config_map = {
+        "3x3": r"../../config/topologies/kcin_3x3.yaml",
+        "4x4": r"../../config/topologies/kcin_4x4.yaml",
+        "5x2": r"../../config/topologies/kcin_5x2.yaml",
+        "5x4": r"../../config/topologies/kcin_5x4.yaml",
+        "6x5": r"../../config/topologies/kcin_6x5.yaml",
+        "8x8": r"../../config/topologies/kcin_8x8.yaml",
     }
 
-    topo_type = "5x4"  # SG2262
+    kcin_type = "5x4"  # SG2262
 
     # ==================== 仿真参数 ====================
     verbose = 1  # 详细输出
@@ -1384,7 +1384,7 @@ def main():
     debug_mode = 0  # 调试模式
 
     # ==================== 执行仿真 ====================
-    config_path = topo_config_map.get(topo_type, r"../config/default.yaml")
+    config_path = kcin_config_map.get(kcin_type, r"../config/default.yaml")
 
     # 确保输出路径存在
     os.makedirs(result_save_path, exist_ok=True)
@@ -1397,7 +1397,7 @@ def main():
             if verbose:
                 print(f"\n{'='*60}")
                 print(f"处理流量文件: {traffic_file}")
-                print(f"拓扑类型: {topo_type}")
+                print(f"拓扑类型: {kcin_type}")
                 print(f"配置文件: {config_path}")
                 print(f"仿真模式: 事件驱动")
                 print(f"{'='*60}")
@@ -1422,7 +1422,7 @@ def main():
 
                 # 生成输出文件名
                 base_name = os.path.splitext(traffic_file)[0]
-                output_csv = os.path.join(result_save_path, f"{base_name}_{topo_type}_event_driven.csv")
+                output_csv = os.path.join(result_save_path, f"{base_name}_{kcin_type}_event_driven.csv")
 
                 # 保存CSV结果
                 if save_csv_results:
@@ -1433,7 +1433,7 @@ def main():
 
                 # 绘制带宽曲线（如果启用）
                 if plot_bandwidth_curve:
-                    _plot_bandwidth_curve(results, base_name, topo_type, results_fig_save_path, calculator)
+                    _plot_bandwidth_curve(results, base_name, kcin_type, results_fig_save_path, calculator)
 
             except Exception as e:
                 print(f"错误: 处理文件 {traffic_file} 时发生异常: {e}")

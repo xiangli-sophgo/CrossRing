@@ -354,7 +354,7 @@ class D2D_Model:
             die_model = BaseModel(
                 model_type=self.kwargs.get("model_type", "REQ_RSP"),
                 config=die_config,
-                topo_type=self.kwargs.get("topo_type", "5x4"),
+                kcin_type=self.kwargs.get("kcin_type", "5x4"),
                 verbose=die_verbose,
             )
 
@@ -410,15 +410,15 @@ class D2D_Model:
 
         if topology_str:
             # 根据拓扑类型加载对应的配置文件
-            topo_config_path = f"../../config/topologies/topo_{topology_str}.yaml"
-            # print(f"为Die {die_id}加载拓扑配置: {topology_str} (文件: {topo_config_path})")
+            kcin_config_path = f"../../config/topologies/kcin_{topology_str}.yaml"
+            # print(f"为Die {die_id}加载拓扑配置: {topology_str} (文件: {kcin_config_path})")
 
             try:
                 from config.config import CrossRingConfig
 
-                die_config = CrossRingConfig(default_config=topo_config_path)
+                die_config = CrossRingConfig(default_config=kcin_config_path)
             except Exception as e:
-                raise RuntimeError(f"加载Die {die_id}拓扑配置失败 ({topo_config_path}): {e}")
+                raise RuntimeError(f"加载Die {die_id}拓扑配置失败 ({kcin_config_path}): {e}")
         else:
             # 没有指定拓扑是配置错误
             raise ValueError(f"Die {die_id}未指定topology配置，每个Die必须指定拓扑类型")
@@ -1095,9 +1095,9 @@ class D2D_Model:
                     if not hasattr(die_processor, "sim_model"):
                         die_processor.sim_model = die_model
 
-                    # 确保die_model有topo_type_stat属性
-                    if not hasattr(die_model, "topo_type_stat"):
-                        die_model.topo_type_stat = self.kwargs.get("topo_type", "5x4")
+                    # 确保die_model有kcin_type_stat属性
+                    if not hasattr(die_model, "kcin_type_stat"):
+                        die_model.kcin_type_stat = self.kwargs.get("kcin_type", "5x4")
 
                     # 使用D2D处理器计算的该Die特定的IP带宽数据
                     if hasattr(d2d_processor, "die_ip_bandwidth_data") and die_id in d2d_processor.die_ip_bandwidth_data:
@@ -1193,7 +1193,7 @@ class D2D_Model:
                 d2d_processor.finish_cycle = self.current_cycle
 
                 # 直接设置所需属性，避免创建临时sim_model
-                d2d_processor.topo_type_stat = "5x4"  # D2D系统使用5x4拓扑
+                d2d_processor.kcin_type_stat = "5x4"  # D2D系统使用5x4拓扑
                 d2d_processor.results_fig_save_path = self.kwargs.get("results_fig_save_path", "../Result/")
                 d2d_processor.file_name = "d2d_system"
                 d2d_processor.verbose = self.kwargs.get("verbose", 1)
@@ -1270,9 +1270,9 @@ class D2D_Model:
                         if not hasattr(die_processor, "sim_model"):
                             die_processor.sim_model = die_model
 
-                        # 确保die_model有topo_type_stat属性
-                        if not hasattr(die_model, "topo_type_stat"):
-                            die_model.topo_type_stat = self.kwargs.get("topo_type", "5x4")
+                        # 确保die_model有kcin_type_stat属性
+                        if not hasattr(die_model, "kcin_type_stat"):
+                            die_model.kcin_type_stat = self.kwargs.get("kcin_type", "5x4")
 
                         # 使用D2D处理器计算的该Die特定的IP带宽数据
                         if hasattr(d2d_processor, "die_ip_bandwidth_data") and die_id in d2d_processor.die_ip_bandwidth_data:
@@ -1300,8 +1300,8 @@ class D2D_Model:
                         if not hasattr(die_processor, "sim_model"):
                             die_processor.sim_model = die_model
 
-                        if not hasattr(die_model, "topo_type_stat"):
-                            die_model.topo_type_stat = self.kwargs.get("topo_type", "5x4")
+                        if not hasattr(die_model, "kcin_type_stat"):
+                            die_model.kcin_type_stat = self.kwargs.get("kcin_type", "5x4")
 
                         if hasattr(d2d_processor, "die_ip_bandwidth_data") and die_id in d2d_processor.die_ip_bandwidth_data:
                             die_processor.ip_bandwidth_data = d2d_processor.die_ip_bandwidth_data[die_id]
@@ -1600,6 +1600,9 @@ class D2D_Model:
         exp = db.get_experiment_by_name(experiment_name)
         if exp:
             experiment_id = exp["id"]
+            # 如果传入了新描述，更新实验描述
+            if description:
+                db.update_experiment(experiment_id, description=description)
         else:
             # 获取traffic文件列表
             traffic_files = []
@@ -1612,7 +1615,7 @@ class D2D_Model:
             experiment_id = db.create_experiment(
                 name=experiment_name,
                 experiment_type=experiment_type,
-                topo_type=f"{self.num_dies}die",
+                kcin_type=f"{self.num_dies}die",
                 config_path=config_path,
                 traffic_files=traffic_files,
                 description=description or "D2D仿真结果汇总",
@@ -2680,8 +2683,8 @@ class D2D_Model:
             # D2D模式 - 计算各Die的链路带宽和跨Die带宽
             from src.traffic_process.traffic_gene.static_bandwidth_analyzer import compute_d2d_link_bandwidth
 
-            # 从仿真配置获取topo_type
-            topo_type = self.dies[0].config.TOPO_TYPE
+            # 从仿真配置获取kcin_type
+            kcin_type = self.dies[0].config.TOPO_TYPE
 
             # 从配置获取D2D连接，构建d2d_pairs
             d2d_pairs = []
@@ -2692,7 +2695,7 @@ class D2D_Model:
                     d2d_pairs.append((dst_die, dst_node, src_die, src_node))
 
             # 计算D2D静态带宽
-            die_link_bandwidth, d2d_link_bandwidth, link_composition = compute_d2d_link_bandwidth(topo_type=topo_type, configs=configs, d2d_pairs=d2d_pairs, routing_type="XY", num_dies=self.num_dies)
+            die_link_bandwidth, d2d_link_bandwidth, link_composition = compute_d2d_link_bandwidth(kcin_type=kcin_type, configs=configs, d2d_pairs=d2d_pairs, routing_type="XY", num_dies=self.num_dies)
 
             # 保存D2D带宽数据：{die_id: {link_key: bw}, ...} 和跨Die链路
             self.static_link_bandwidth = die_link_bandwidth

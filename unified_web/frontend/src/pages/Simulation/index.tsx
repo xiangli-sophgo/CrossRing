@@ -92,8 +92,19 @@ const Simulation: React.FC = () => {
     trafficTreeMode,
     trafficTreeLoaded,
     setTrafficTree,
+    configValues,
+    setConfigValues,
+    dieConfigValues,
+    setDieConfigValues,
+    originalConfigValues,
+    setOriginalConfigValues,
+    originalDieConfigValues,
+    setOriginalDieConfigValues,
+    selectedFiles,
+    setSelectedFiles,
+    formValues,
+    setFormValues,
   } = useSimulationStore()
-  const [selectedFiles, setSelectedFiles] = useState<string[]>([])
   const [loadingFiles, setLoadingFiles] = useState(false)
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
 
@@ -102,11 +113,9 @@ const Simulation: React.FC = () => {
   const [groupedTaskHistory, setGroupedTaskHistory] = useState<GroupedTaskItem[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
 
-  // 配置编辑状态
-  const [configValues, setConfigValues] = useState<Record<string, any>>({})
+  // 配置编辑加载状态
   const [loadingConfig, setLoadingConfig] = useState(false)
-  // DCIN模式下的DIE拓扑配置
-  const [dieConfigValues, setDieConfigValues] = useState<Record<string, any>>({})
+  // DCIN模式下的DIE拓扑配置加载状态
   const [loadingDieConfig, setLoadingDieConfig] = useState(false)
   // 另存为对话框状态
   const [saveAsModalVisible, setSaveAsModalVisible] = useState(false)
@@ -120,6 +129,8 @@ const Simulation: React.FC = () => {
 
   // 已有实验列表（用于实验名称自动完成）
   const [existingExperiments, setExistingExperiments] = useState<Experiment[]>([])
+  // 选中已有实验时的描述（用于追加模式）
+  const [selectedExperimentDesc, setSelectedExperimentDesc] = useState<string | null>(null)
 
   // 参数遍历配置（用于UI配置，生成combinations后作为请求参数传递）
   const [sweepParams, setSweepParams] = useState<SweepParam[]>([])
@@ -130,6 +141,20 @@ const Simulation: React.FC = () => {
   const wsConnectionsRef = useRef<Map<string, WebSocket>>(new Map())
   const runningTasksRef = useRef<Map<string, { task: TaskStatus; startTime: number }>>(new Map())
   const loadHistoryDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 同步表单值到 store
+  const syncFormToStore = useCallback(() => {
+    const values = form.getFieldsValue()
+    setFormValues({
+      mode: values.mode,
+      rows: values.rows,
+      cols: values.cols,
+      config_path: values.config_path,
+      die_config_path: values.die_config_path,
+      max_cycles: values.max_cycles,
+      timeout_ns: values.timeout_ns,
+    })
+  }, [form, setFormValues])
 
   // 恢复运行中的任务
   const restoreRunningTask = async () => {
@@ -186,6 +211,7 @@ const Simulation: React.FC = () => {
               progress: update.progress,
               message: update.message,
               current_file: update.current_file || existing.task.current_file,
+              error: update.error ?? existing.task.error,
             }
           })
         }
@@ -211,24 +237,31 @@ const Simulation: React.FC = () => {
   // 加载配置和历史
   useEffect(() => {
     const initPage = async () => {
+      // 从 store 恢复表单值
+      if (formValues.mode || formValues.config_path) {
+        form.setFieldsValue(formValues)
+      }
+
       // 并行执行所有初始化操作，每个操作独立处理错误
       const tasks: Promise<void>[] = []
 
-      // 加载配置（只在未加载时）
+      // 加载配置列表（只在未加载时）
       if (!configsLoaded) {
         tasks.push(loadConfigs())
-      } else {
-        // 已有缓存，直接设置默认配置
+      } else if (Object.keys(configValues).length === 0) {
+        // 配置列表已有缓存，但没有配置值，加载默认配置
         const defaultConfig = configs.kcin.find((c: ConfigOption) => c.path.includes('topo_5x4'))
         if (defaultConfig && !form.getFieldValue('config_path')) {
           form.setFieldsValue({ config_path: defaultConfig.path })
           tasks.push(loadConfigContent(defaultConfig.path))
         }
       }
+      // 如果 store 中已有 configValues，不重新加载
 
       // 加载流量文件（只在未加载或模式不匹配时）
-      if (!trafficTreeLoaded || trafficTreeMode !== 'kcin') {
-        tasks.push(loadTrafficFilesTree('kcin'))
+      const currentMode = formValues.mode || 'kcin'
+      if (!trafficTreeLoaded || trafficTreeMode !== currentMode) {
+        tasks.push(loadTrafficFilesTree(currentMode))
       }
 
       // 加载历史和实验列表
@@ -309,16 +342,19 @@ const Simulation: React.FC = () => {
   const loadConfigContent = async (configPath: string) => {
     if (!configPath) {
       setConfigValues({})
+      setOriginalConfigValues({})
       return
     }
     setLoadingConfig(true)
     try {
       const content = await getConfigContent(configPath)
       setConfigValues(content)
+      setOriginalConfigValues(content)  // 同时保存原始配置
     } catch (error) {
       console.error('加载配置内容失败:', error)
       message.error('加载配置内容失败')
       setConfigValues({})
+      setOriginalConfigValues({})
     } finally {
       setLoadingConfig(false)
     }
@@ -327,28 +363,26 @@ const Simulation: React.FC = () => {
   const loadDieConfigContent = async (configPath: string) => {
     if (!configPath) {
       setDieConfigValues({})
+      setOriginalDieConfigValues({})
       return
     }
     setLoadingDieConfig(true)
     try {
       const content = await getConfigContent(configPath)
       setDieConfigValues(content)
+      setOriginalDieConfigValues(content)  // 同时保存原始配置
     } catch (error) {
       console.error('加载DIE配置内容失败:', error)
       message.error('加载DIE配置内容失败')
       setDieConfigValues({})
+      setOriginalDieConfigValues({})
     } finally {
       setLoadingDieConfig(false)
     }
   }
 
-  const updateConfigValue = (key: string, value: any) => {
-    setConfigValues(prev => ({ ...prev, [key]: value }))
-  }
-
-  const updateDieConfigValue = (key: string, value: any) => {
-    setDieConfigValues(prev => ({ ...prev, [key]: value }))
-  }
+  const updateConfigValue = useSimulationStore((state) => state.updateConfigValue)
+  const updateDieConfigValue = useSimulationStore((state) => state.updateDieConfigValue)
 
   const handlePreviewFile = async (filePath: string) => {
     setLoadingPreview(true)
@@ -378,6 +412,16 @@ const Simulation: React.FC = () => {
     setLoading(true)
     try {
       const topology = `${values.rows}x${values.cols}`
+      // 生成实验描述：优先使用用户输入，否则自动生成；如果是已有实验则追加
+      const autoDesc = generateDefaultDescription()
+      let finalDescription: string
+      if (values.experiment_description) {
+        finalDescription = values.experiment_description
+      } else if (selectedExperimentDesc) {
+        finalDescription = `${selectedExperimentDesc}\n${autoDesc}`
+      } else {
+        finalDescription = autoDesc
+      }
       const request: SimulationRequest = {
         mode: values.mode,
         topology: topology,
@@ -390,7 +434,7 @@ const Simulation: React.FC = () => {
         max_time: values.max_time,
         save_to_db: values.save_to_db,
         experiment_name: values.experiment_name,
-        experiment_description: values.experiment_description,
+        experiment_description: finalDescription,
         max_workers: values.max_workers,
       }
       const response = await runSimulation(request)
@@ -458,6 +502,7 @@ const Simulation: React.FC = () => {
                 progress: data.progress,
                 current_file: data.current_file,
                 message: data.message,
+                error: data.error,
                 sim_details: data.sim_details,
               }
             })
@@ -470,14 +515,16 @@ const Simulation: React.FC = () => {
           ws.close(1000, 'Task completed')  // 传递正常关闭码，防止重连
           wsConnectionsRef.current.delete(taskId)
 
-          // 延迟移除任务卡片
-          setTimeout(() => {
-            setRunningTasks(prev => {
-              const newMap = new Map(prev)
-              newMap.delete(taskId)
-              return newMap
-            })
-          }, 3000)
+          // 延迟移除任务卡片（失败任务需手动关闭，不自动消失）
+          if (data.status !== 'failed') {
+            setTimeout(() => {
+              setRunningTasks(prev => {
+                const newMap = new Map(prev)
+                newMap.delete(taskId)
+                return newMap
+              })
+            }, 3000)
+          }
 
           loadHistory()
 
@@ -485,7 +532,7 @@ const Simulation: React.FC = () => {
             messageShown = true
             const expName = data.experiment_name || taskId.slice(0, 8)
             if (data.status === 'completed') message.success(`任务完成: ${expName}`)
-            else if (data.status === 'failed') message.error(`任务失败: ${expName}`)
+            else if (data.status === 'failed') message.error(`任务失败: ${expName}，详情请查看任务卡片`)
           }
         }
       } catch (e) {
@@ -545,20 +592,22 @@ const Simulation: React.FC = () => {
             clearInterval(interval)
             pollIntervalsRef.current.delete(taskId)
           }
-          // 从运行任务列表中移除（延迟3秒让用户看到最终状态）
-          setTimeout(() => {
-            setRunningTasks(prev => {
-              const newMap = new Map(prev)
-              newMap.delete(taskId)
-              return newMap
-            })
-          }, 3000)
+          // 从运行任务列表中移除（失败任务需手动关闭，不自动消失）
+          if (status.status !== 'failed') {
+            setTimeout(() => {
+              setRunningTasks(prev => {
+                const newMap = new Map(prev)
+                newMap.delete(taskId)
+                return newMap
+              })
+            }, 3000)
+          }
           loadHistory()
           if (!messageShown) {
             messageShown = true
             const expName = status.experiment_name || taskId.slice(0, 8)
             if (status.status === 'completed') message.success(`任务完成: ${expName}`)
-            else if (status.status === 'failed') message.error(`任务失败: ${expName}`)
+            else if (status.status === 'failed') message.error(`任务失败: ${expName}，详情请查看任务卡片`)
           }
         }
       } catch (error: any) {
@@ -662,6 +711,35 @@ const Simulation: React.FC = () => {
     newParams[index] = { ...newParams[index], bindGroupId: groupId }
     setSweepParams(newParams)
   }
+
+  // 生成默认实验描述
+  const generateDefaultDescription = useCallback(() => {
+    const now = new Date()
+    const timestamp = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+
+    // 找出修改的参数
+    const changedParams = Object.entries(configValues)
+      .filter(([k, v]) => originalConfigValues[k] !== v)
+      .map(([k, v]) => `${k}=${v}`)
+
+    // 如果是参数遍历，显示遍历范围
+    let paramStr: string
+    if (sweepParams.length > 0) {
+      paramStr = sweepParams.map(p => `${p.key}[${p.start}→${p.end}]`).join(', ')
+    } else if (changedParams.length > 0) {
+      paramStr = changedParams.join(', ')
+    } else {
+      paramStr = '默认配置'
+    }
+
+    // 简化流量文件显示
+    const fileNames = selectedFiles.map(f => f.split('/').pop() || f)
+    const filesStr = fileNames.length <= 3
+      ? fileNames.join(', ')
+      : `${fileNames.slice(0, 2).join(', ')} 等${fileNames.length}个`
+
+    return `[${timestamp}] ${paramStr} | ${filesStr}`
+  }, [configValues, originalConfigValues, sweepParams, selectedFiles])
 
   const saveSweepConfig = (name: string) => {
     if (!name.trim()) {
@@ -771,6 +849,17 @@ const Simulation: React.FC = () => {
     const totalUnits = selectedFiles.length * combinations.length
     const experimentName = values.experiment_name || `参数遍历_${new Date().toLocaleString()}`
 
+    // 生成实验描述：优先使用用户输入，否则自动生成；如果是已有实验则追加
+    const autoDesc = generateDefaultDescription()
+    let finalDescription: string
+    if (values.experiment_description) {
+      finalDescription = values.experiment_description
+    } else if (selectedExperimentDesc) {
+      finalDescription = `${selectedExperimentDesc}\n${autoDesc}`
+    } else {
+      finalDescription = autoDesc
+    }
+
     const request: SimulationRequest = {
       mode: values.mode,
       topology,
@@ -783,7 +872,7 @@ const Simulation: React.FC = () => {
       max_time: values.max_time,
       save_to_db: values.save_to_db,
       experiment_name: experimentName,
-      experiment_description: `参数遍历: ${combinations.length} 个组合 × ${selectedFiles.length} 个文件 = ${totalUnits} 个执行单元`,
+      experiment_description: finalDescription,
       max_workers: values.max_workers,
       sweep_combinations: combinations,
     }
@@ -853,6 +942,7 @@ const Simulation: React.FC = () => {
             <Form
               form={form}
               layout="vertical"
+              onValuesChange={syncFormToStore}
               initialValues={{
                 mode: 'kcin',
                 rows: 5,
@@ -1120,6 +1210,16 @@ const Simulation: React.FC = () => {
                           filterOption={(inputValue, option) =>
                             option?.value.toLowerCase().includes(inputValue.toLowerCase()) || false
                           }
+                          onSelect={(value: string) => {
+                            // 选择已有实验时，获取其描述用于追加
+                            const exp = existingExperiments.find(e => e.name === value)
+                            setSelectedExperimentDesc(exp?.description || null)
+                          }}
+                          onChange={(value: string) => {
+                            // 用户手动输入时，检查是否匹配已有实验
+                            const exp = existingExperiments.find(e => e.name === value)
+                            setSelectedExperimentDesc(exp?.description || null)
+                          }}
                         />
                       </Form.Item>
                       <Form.Item name="experiment_description" label="实验描述" style={{ marginBottom: 0 }}>
@@ -1169,6 +1269,13 @@ const Simulation: React.FC = () => {
               currentTask={task}
               startTime={startTime}
               onCancel={task.status === 'running' ? () => handleCancel(taskId) : undefined}
+              onClose={task.status === 'failed' ? () => {
+                setRunningTasks(prev => {
+                  const newMap = new Map(prev)
+                  newMap.delete(taskId)
+                  return newMap
+                })
+              } : undefined}
             />
           ))}
         </Col>

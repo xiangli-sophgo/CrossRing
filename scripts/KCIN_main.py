@@ -27,6 +27,7 @@ def main():
             # "data_sim_64_share_d2d_W_1104.txt"
             # "data_burst4_W_1111.txt"
             # "test.txt"
+            # "simple_case_W.txt"
             # "simple_case_R.txt"
             # "traffic_20251119_152813.txt"
         ],
@@ -38,34 +39,34 @@ def main():
     # model_type = "Packet_Base"
 
     # ==================== 拓扑配置 ====================
-    topo_config_map = {
-        "3x3": r"../config/topologies/topo_3x3.yaml",
-        "4x4": r"../config/topologies/topo_4x4.yaml",
-        "5x2": r"../config/topologies/topo_5x2.yaml",
-        "5x4": r"../config/topologies/topo_5x4_48_test.yaml",
-        "6x5": r"../config/topologies/topo_6x5.yaml",
-        "8x8": r"../config/topologies/topo_8x8.yaml",
+    kcin_config_map = {
+        "3x3": r"../config/topologies/kcin_3x3.yaml",
+        "4x4": r"../config/topologies/kcin_4x4.yaml",
+        "5x2": r"../config/topologies/kcin_5x2.yaml",
+        "5x4": r"../config/topologies/kcin_5x4_48_test.yaml",
+        "6x5": r"../config/topologies/kcin_6x5.yaml",
+        "8x8": r"../config/topologies/kcin_8x8.yaml",
     }
 
-    topo_type = "5x4"  # SG2262
-    # topo_type = "4x4"
-    # topo_type = "5x2"
-    # topo_type = "3x3"
-    # topo_type = "6x5"  # SG2260
-    # topo_type = "8x8"  # SG2260E
+    kcin_type = "5x4"  # SG2262
+    # kcin_type = "4x4"
+    # kcin_type = "5x2"
+    # kcin_type = "3x3"
+    # kcin_type = "6x5"  # SG2260
+    # kcin_type = "8x8"  # SG2260E
 
     # ==================== 创建配置和模型 ====================
-    config_path = topo_config_map.get(topo_type, r"../config/default.yaml")
+    config_path = kcin_config_map.get(kcin_type, r"../config/default.yaml")
     config = CrossRingConfig(config_path)
 
     # 从配置文件获取拓扑类型，如果没有则使用默认值
-    topo_type = config.TOPO_TYPE if config.TOPO_TYPE else topo_type
+    kcin_type = config.TOPO_TYPE if config.TOPO_TYPE else kcin_type
 
     # 创建模型实例
     sim: BaseModel = eval(f"{model_type}_model")(
         model_type=model_type,
         config=config,
-        topo_type=topo_type,
+        topo_type=kcin_type,
         verbose=1,
     )
 

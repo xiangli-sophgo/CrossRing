@@ -275,39 +275,60 @@ export default function ExperimentList() {
       title: '描述',
       dataIndex: 'description',
       key: 'description',
-      ellipsis: true,
+      width: 300,
       render: (text, record) => {
         if (editingId === record.id && editingField === 'description') {
           return (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Input
+              <Input.TextArea
                 size="small"
                 value={editingValue}
                 onChange={(e) => setEditingValue(e.target.value)}
-                onPressEnter={handleSaveEdit}
-                onKeyDown={(e) => e.key === 'Escape' && handleCancelEdit()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') handleCancelEdit();
+                  if (e.key === 'Enter' && e.ctrlKey) handleSaveEdit();
+                }}
                 autoFocus
-                style={{ flex: 1, minWidth: 150 }}
+                autoSize={{ minRows: 2, maxRows: 6 }}
+                style={{ flex: 1, minWidth: 200 }}
               />
-              <Button size="small" type="primary" onClick={handleSaveEdit}>
-                保存
-              </Button>
-              <Button size="small" onClick={handleCancelEdit}>
-                取消
-              </Button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <Button size="small" type="primary" onClick={handleSaveEdit}>
+                  保存
+                </Button>
+                <Button size="small" onClick={handleCancelEdit}>
+                  取消
+                </Button>
+              </div>
             </div>
           );
         }
+        // 处理多行描述的折叠显示
+        const lines = (text || '').split('\n').filter((line: string) => line.trim());
+        const hasMultipleLines = lines.length > 2;
+        const displayText = hasMultipleLines ? lines.slice(0, 2).join('\n') + '...' : text;
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Tooltip title={text}>
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {text || '-'}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+            <Tooltip
+              title={text ? <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxWidth: 400 }}>{text}</pre> : undefined}
+              overlayStyle={{ maxWidth: 450 }}
+            >
+              <span style={{
+                flex: 1,
+                overflow: 'hidden',
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                whiteSpace: 'pre-wrap',
+                fontSize: 12,
+                lineHeight: '1.5',
+              }}>
+                {displayText || '-'}
               </span>
             </Tooltip>
             <Tooltip title="编辑描述">
               <EditOutlined
-                style={{ color: '#1890ff', cursor: 'pointer', flexShrink: 0 }}
+                style={{ color: '#1890ff', cursor: 'pointer', flexShrink: 0, marginTop: 2 }}
                 onClick={() => handleStartEdit(record, 'description')}
               />
             </Tooltip>

@@ -60,7 +60,7 @@ L2M_BW_LIMIT: 128
 # Feature Config
 UNIFIED_RW_TRACKER: false  # true=读写共享资源池，false=读写分离
 ETAG_T1_ENABLED: 0  # true=三级(T2→T1→T0), false=两级(T2→T0)
-ETag_BOTHSIDE_UPGRADE: 0
+ETAG_BOTHSIDE_UPGRADE: 0
 ORDERING_PRESERVATION_MODE: 0  # 0=不保序, 1=单侧下环(TL/TU), 2=双侧下环(白名单), 3=动态方向
 ORDERING_ETAG_UPGRADE_MODE: 0  # 0=仅资源失败升级ETag, 1=保序失败也升级ETag
 ORDERING_GRANULARITY: 0  # 0=IP层级, 1=节点层级

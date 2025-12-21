@@ -1,21 +1,21 @@
-# 4x5 拓扑配置 (40节点, SG2262)
-TOPO_TYPE: "4x5"
+# 8x8 拓扑配置 (128节点, SG2260E)
+TOPO_TYPE: "8x8"  # 格式 AxB，自动计算拓扑参数
 
 # 基本参数
 FLIT_SIZE: 128
-SLICE_PER_LINK_HORIZONTAL: 8
-SLICE_PER_LINK_VERTICAL: 8
+SLICE_PER_LINK_HORIZONTAL: 6
+SLICE_PER_LINK_VERTICAL: 6
 BURST: 4
 NETWORK_FREQUENCY: 2
 
 # ========== 资源配置 ==========
 # 主配置：数据缓冲区大小
 RN_RDB_SIZE: 256      # RN读数据缓冲区
-RN_WDB_SIZE: 256      # RN写数据缓冲区
-SN_DDR_RDB_SIZE: 256  # SN DDR读数据缓冲区
-SN_DDR_WDB_SIZE: 256  # SN DDR写数据缓冲区
-SN_L2M_RDB_SIZE: 256  # SN L2M读数据缓冲区
-SN_L2M_WDB_SIZE: 256  # SN L2M写数据缓冲区
+RN_WDB_SIZE: 128      # RN写数据缓冲区
+SN_DDR_RDB_SIZE: 384  # SN DDR读数据缓冲区
+SN_DDR_WDB_SIZE: 192  # SN DDR写数据缓冲区
+SN_L2M_RDB_SIZE: 384  # SN L2M读数据缓冲区
+SN_L2M_WDB_SIZE: 192  # SN L2M写数据缓冲区
 
 # 次要配置：跟踪器数量（自动计算：databuffer_size / BURST）
 RN_R_TRACKER_OSTD: auto    # = RN_RDB_SIZE / BURST 
@@ -29,9 +29,8 @@ SN_L2M_W_TRACKER_OSTD: auto # = SN_L2M_WDB_SIZE / BURST
 UNIFIED_RW_TRACKER: false   # true=读写共享资源池，false=读写分离
 
 # 延迟配置 (原始值)
-DDR_R_LATENCY: 40
-DDR_R_LATENCY_VAR: 0
-DDR_W_LATENCY: 0
+DDR_R_LATENCY: 100
+DDR_W_LATENCY: 40
 L2M_R_LATENCY: 12
 L2M_W_LATENCY: 16
 SN_TRACKER_RELEASE_LATENCY: 40
@@ -39,22 +38,22 @@ SN_PROCESSING_LATENCY: 2  # SN端处理延迟 (ns)
 RN_PROCESSING_LATENCY: 2  # RN端处理延迟 (ns)
 
 # FIFO 深度配置
-IQ_CH_FIFO_DEPTH: 4
-EQ_CH_FIFO_DEPTH: 4
+IQ_CH_FIFO_DEPTH: 10
+EQ_CH_FIFO_DEPTH: 10
 IQ_OUT_FIFO_DEPTH_HORIZONTAL: 8
 IQ_OUT_FIFO_DEPTH_VERTICAL: 8
 IQ_OUT_FIFO_DEPTH_EQ: 8
 RB_OUT_FIFO_DEPTH: 8
-RB_IN_FIFO_DEPTH: 16
-EQ_IN_FIFO_DEPTH: 16
 
 # ETag 配置
 TL_Etag_T2_UE_MAX: 8
 TL_Etag_T1_UE_MAX: 15
 TR_Etag_T2_UE_MAX: 12
+RB_IN_FIFO_DEPTH: 16
 TU_Etag_T2_UE_MAX: 8
 TU_Etag_T1_UE_MAX: 15
 TD_Etag_T2_UE_MAX: 12
+EQ_IN_FIFO_DEPTH: 16
 
 # ITag 配置
 ITag_TRIGGER_Th_H: 80
@@ -63,23 +62,19 @@ ITag_MAX_Num_H: 1
 ITag_MAX_Num_V: 1
 
 # 其他配置
-ETag_BOTHSIDE_UPGRADE: 0
+ETAG_BOTHSIDE_UPGRADE: 0
 ETAG_T1_ENABLED: true
 ORDERING_ETAG_UPGRADE_MODE: 0
 GDMA_RW_GAP: .inf  # numpy.inf
 SDMA_RW_GAP: .inf  # numpy.inf
 
-# 功能开关
-ENABLE_CROSSPOINT_CONFLICT_CHECK: 0
-ENABLE_IN_ORDER_EJECTION: 0
-
-# 通道规格 - 已废弃,现在从traffic文件自动推断
-# CHANNEL_SPEC配置已移除,IP接口将根据traffic文件中实际使用的IP类型动态创建
-
-# 带宽限制 (GB/s) - 注释掉表示无限制
-# GDMA_BW_LIMIT: 16
-# CDMA_BW_LIMIT: 16
-# DDR_BW_LIMIT: 128
+# 通道规格
+CHANNEL_SPEC:
+  gdma: 2
+  sdma: 0
+  cdma: 0
+  ddr: 2
+  l2m: 0
 
 # 默认带宽配置
 GDMA_BW_LIMIT: 128
@@ -89,19 +84,11 @@ DDR_BW_LIMIT: 128
 L2M_BW_LIMIT: 128
 
 # 其他功能开关
-CROSSRING_VERSION: "V1"
+ENABLE_CROSSPOINT_CONFLICT_CHECK: 0
 ORDERING_PRESERVATION_MODE: 0  # 0=不保序, 1=单侧下环(TL/TU), 2=双侧下环(方向配置)
 ORDERING_GRANULARITY: 1  # 0=IP层级, 1=节点层级
+CROSSRING_VERSION: "V1"
 IN_ORDER_EJECTION_PAIRS: []
-# 需要保序的包类型 (REQ/RSP/DATA)
-IN_ORDER_PACKET_CATEGORIES:
-  - "REQ"    # 只有REQ类型需要保序
-
-# 方向控制配置 - 4x5拓扑 (20节点: 0-19, 布局: 行0: 0-4, 行1: 5-9, 行2: 10-14, 行3: 15-19)
-TL_ALLOWED_SOURCE_NODES: [3, 4, 8, 9, 13, 14, 18, 19]        # 向左：右半部(列3,4)
-TR_ALLOWED_SOURCE_NODES: [0, 1, 2, 5, 6, 7, 10, 11, 12, 15, 16, 17]  # 向右：左半部(列0-2)
-TU_ALLOWED_SOURCE_NODES: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]    # 向上：下半部(行2,3)
-TD_ALLOWED_SOURCE_NODES: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]      # 向下：上半部(行0,1)
 
 # IP 频率变换 FIFO 深度 (使用默认值)
 IP_L2H_FIFO_DEPTH: 3
@@ -111,3 +98,7 @@ IP_H2L_L_FIFO_DEPTH: 2
 # 标签配置 (仅在 base_model_v2/network_v2 中生效，base_model/d2d_model 中无效)
 RB_ONLY_TAG_NUM_HORIZONTAL: 2
 RB_ONLY_TAG_NUM_VERTICAL: 3
+
+# 注意：NUM_DDR, NUM_L2M, NUM_GDMA, NUM_SDMA, NUM_RN, NUM_SN 等参数
+# 现在从实际流量数据中动态获取，不再需要在配置中指定
+# NUM_CDMA: 3  # CDMA数量仍可配置

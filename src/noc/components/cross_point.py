@@ -262,7 +262,7 @@ class CrossPoint:
             return None
 
         # 优先从network读取配置，否则使用全局config
-        ETag_BOTHSIDE_UPGRADE = getattr(self.network, "ETag_BOTHSIDE_UPGRADE", getattr(self.config, "ETag_BOTHSIDE_UPGRADE", False))
+        ETAG_BOTHSIDE_UPGRADE = getattr(self.network, "ETAG_BOTHSIDE_UPGRADE", getattr(self.config, "ETAG_BOTHSIDE_UPGRADE", False))
         t1_enabled = self.config.ETAG_T1_ENABLED
 
         if flit.ETag_priority == "T2":
@@ -275,7 +275,7 @@ class CrossPoint:
                 elif direction in ["TR", "TD"]:
                     # TR/TD需要额外满足双侧下环保序条件
                     eject_count = flit.eject_attempts_h if direction == "TR" else flit.eject_attempts_v
-                    if eject_count > 1 and self.config.ORDERING_PRESERVATION_MODE in [2, 3] and ETag_BOTHSIDE_UPGRADE:
+                    if eject_count > 1 and self.config.ORDERING_PRESERVATION_MODE in [2, 3] and ETAG_BOTHSIDE_UPGRADE:
                         return "T0"
                 return None
             else:
@@ -283,7 +283,7 @@ class CrossPoint:
                 if direction in ["TL", "TU"]:
                     return "T1"
                 elif direction in ["TR", "TD"]:
-                    return "T1" if ETag_BOTHSIDE_UPGRADE else None
+                    return "T1" if ETAG_BOTHSIDE_UPGRADE else None
 
         elif flit.ETag_priority == "T1":
             # T1 -> T0 升级
@@ -291,7 +291,7 @@ class CrossPoint:
                 return "T0"
             elif direction in ["TR", "TD"]:
                 # TR/TD只有在双侧下环保序(Mode 2/3)时才能升级到T0
-                return "T0" if (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and ETag_BOTHSIDE_UPGRADE) else None
+                return "T0" if (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and ETAG_BOTHSIDE_UPGRADE) else None
 
         return None
 
@@ -341,13 +341,13 @@ class CrossPoint:
         """
         # 检查各级entry可用性
         # T0 Entry检查：TL/TU总是可以；TR/TD只有在双侧下环保序(Mode 2/3)时
-        ETag_BOTHSIDE_UPGRADE = getattr(self.network, "ETag_BOTHSIDE_UPGRADE", getattr(self.config, "ETag_BOTHSIDE_UPGRADE", False))
+        ETAG_BOTHSIDE_UPGRADE = getattr(self.network, "ETAG_BOTHSIDE_UPGRADE", getattr(self.config, "ETAG_BOTHSIDE_UPGRADE", False))
         t1_enabled = self.config.ETAG_T1_ENABLED
 
         if direction in ["TL", "TU"]:
             can_use_T0 = self._entry_available(direction, key, "T0")
         elif direction in ["TR", "TD"]:
-            can_use_T0 = self._entry_available(direction, key, "T0") if (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and ETag_BOTHSIDE_UPGRADE) else False
+            can_use_T0 = self._entry_available(direction, key, "T0") if (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and ETAG_BOTHSIDE_UPGRADE) else False
         else:
             can_use_T0 = False
 
@@ -768,6 +768,7 @@ class CrossPoint:
         检查flit是否可以上环到指定link（统一的I-Tag检查逻辑）
 
         检查流程：
+        0. 检查CrossPoint冲突（根据ENABLE_CROSSPOINT_CONFLICT_CHECK配置）
         1. 检查link是否被占用
         2. 如果占用：
            - 检查是否已有I-Tag预约
@@ -790,6 +791,19 @@ class CrossPoint:
             return False
 
         current_pos = link[0]
+
+        # CrossPoint冲突检查
+        dim = "horizontal" if direction in ["TL", "TR"] else "vertical"
+        conflict_status = self.network.crosspoint_conflict[dim][current_pos][direction]
+        if self.config.ENABLE_CROSSPOINT_CONFLICT_CHECK == 1:
+            # 严格模式：当前或前一周期有冲突都不能上环
+            if conflict_status[0] or conflict_status[1]:
+                return False
+        else:
+            # 默认模式：当前周期有冲突不能上环
+            if conflict_status[0]:
+                return False
+
         link_occupied = self.network.links[link][0] is not None
         slot = self.network.links_tag[link][0]
 

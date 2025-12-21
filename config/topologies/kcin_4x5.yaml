@@ -1,5 +1,5 @@
-# 4x4 拓扑配置 (32节点)
-TOPO_TYPE: "4x4"
+# 4x5 拓扑配置 (40节点, SG2262)
+TOPO_TYPE: "4x5"
 
 # 基本参数
 FLIT_SIZE: 128
@@ -41,10 +41,10 @@ RN_PROCESSING_LATENCY: 2  # RN端处理延迟 (ns)
 # FIFO 深度配置
 IQ_CH_FIFO_DEPTH: 4
 EQ_CH_FIFO_DEPTH: 4
-IQ_OUT_FIFO_DEPTH_HORIZONTAL: 4
-IQ_OUT_FIFO_DEPTH_VERTICAL: 4
-IQ_OUT_FIFO_DEPTH_EQ: 4
-RB_OUT_FIFO_DEPTH: 4
+IQ_OUT_FIFO_DEPTH_HORIZONTAL: 8
+IQ_OUT_FIFO_DEPTH_VERTICAL: 8
+IQ_OUT_FIFO_DEPTH_EQ: 8
+RB_OUT_FIFO_DEPTH: 8
 RB_IN_FIFO_DEPTH: 16
 EQ_IN_FIFO_DEPTH: 16
 
@@ -63,7 +63,7 @@ ITag_MAX_Num_H: 1
 ITag_MAX_Num_V: 1
 
 # 其他配置
-ETag_BOTHSIDE_UPGRADE: 0
+ETAG_BOTHSIDE_UPGRADE: 0
 ETAG_T1_ENABLED: true
 ORDERING_ETAG_UPGRADE_MODE: 0
 GDMA_RW_GAP: .inf  # numpy.inf
@@ -73,15 +73,15 @@ SDMA_RW_GAP: .inf  # numpy.inf
 ENABLE_CROSSPOINT_CONFLICT_CHECK: 0
 ENABLE_IN_ORDER_EJECTION: 0
 
-# 通道规格
-CHANNEL_SPEC:
-  gdma: 2
-  sdma: 2
-  cdma: 1
-  ddr: 2
-  l2m: 2
+# 通道规格 - 已废弃,现在从traffic文件自动推断
+# CHANNEL_SPEC配置已移除,IP接口将根据traffic文件中实际使用的IP类型动态创建
 
 # 带宽限制 (GB/s) - 注释掉表示无限制
+# GDMA_BW_LIMIT: 16
+# CDMA_BW_LIMIT: 16
+# DDR_BW_LIMIT: 128
+
+# 默认带宽配置
 GDMA_BW_LIMIT: 128
 SDMA_BW_LIMIT: 128
 CDMA_BW_LIMIT: 128
@@ -96,16 +96,12 @@ IN_ORDER_EJECTION_PAIRS: []
 # 需要保序的包类型 (REQ/RSP/DATA)
 IN_ORDER_PACKET_CATEGORIES:
   - "REQ"    # 只有REQ类型需要保序
-  # - "RSP"
-  # - "DATA"
-REVERSE_DIRECTION_ENABLED: 1
-REVERSE_DIRECTION_THRESHOLD: 0.75
 
-# 方向控制配置 - 4x4拓扑 (16节点: 0-15, 布局: 行0: 0-3, 行1: 4-7, 行2: 8-11, 行3: 12-15)
-TL_ALLOWED_SOURCE_NODES: [2, 3, 6, 7, 10, 11, 14, 15]  # 向左：右半部(列2,3)
-TR_ALLOWED_SOURCE_NODES: [0, 1, 4, 5, 8, 9, 12, 13]    # 向右：左半部(列0,1)
-TU_ALLOWED_SOURCE_NODES: [8, 9, 10, 11, 12, 13, 14, 15]  # 向上：下半部(行2,3)
-TD_ALLOWED_SOURCE_NODES: [0, 1, 2, 3, 4, 5, 6, 7]      # 向下：上半部(行0,1)
+# 方向控制配置 - 4x5拓扑 (20节点: 0-19, 布局: 行0: 0-4, 行1: 5-9, 行2: 10-14, 行3: 15-19)
+TL_ALLOWED_SOURCE_NODES: [3, 4, 8, 9, 13, 14, 18, 19]        # 向左：右半部(列3,4)
+TR_ALLOWED_SOURCE_NODES: [0, 1, 2, 5, 6, 7, 10, 11, 12, 15, 16, 17]  # 向右：左半部(列0-2)
+TU_ALLOWED_SOURCE_NODES: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]    # 向上：下半部(行2,3)
+TD_ALLOWED_SOURCE_NODES: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]      # 向下：上半部(行0,1)
 
 # IP 频率变换 FIFO 深度 (使用默认值)
 IP_L2H_FIFO_DEPTH: 3

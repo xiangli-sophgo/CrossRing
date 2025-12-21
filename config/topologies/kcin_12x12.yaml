@@ -1,21 +1,21 @@
-# 6x5 拓扑配置 (60节点, SG2260)
-TOPO_TYPE: "6x5"  # 格式 AxB，自动计算拓扑参数
+# 12x12 拓扑配置 (288节点)
+TOPO_TYPE: "12x12"  # 格式 AxB，自动计算拓扑参数
 
 # 基本参数
 FLIT_SIZE: 128
-SLICE_PER_LINK_HORIZONTAL: 8
-SLICE_PER_LINK_VERTICAL: 8
-BURST: 2
+SLICE_PER_LINK_HORIZONTAL: 6
+SLICE_PER_LINK_VERTICAL: 6
+BURST: 4
 NETWORK_FREQUENCY: 2
 
 # ========== 资源配置 ==========
 # 主配置：数据缓冲区大小
-RN_RDB_SIZE: 128      # RN读数据缓冲区
-RN_WDB_SIZE: 128      # RN写数据缓冲区
-SN_DDR_RDB_SIZE: 128  # SN DDR读数据缓冲区
-SN_DDR_WDB_SIZE: 128  # SN DDR写数据缓冲区
-SN_L2M_RDB_SIZE: 128  # SN L2M读数据缓冲区
-SN_L2M_WDB_SIZE: 128  # SN L2M写数据缓冲区
+RN_RDB_SIZE: 256      # RN读数据缓冲区
+RN_WDB_SIZE: 256      # RN写数据缓冲区
+SN_DDR_RDB_SIZE: 384  # SN DDR读数据缓冲区
+SN_DDR_WDB_SIZE: 384  # SN DDR写数据缓冲区
+SN_L2M_RDB_SIZE: 384  # SN L2M读数据缓冲区
+SN_L2M_WDB_SIZE: 192  # SN L2M写数据缓冲区
 
 # 次要配置：跟踪器数量（自动计算：databuffer_size / BURST）
 RN_R_TRACKER_OSTD: auto    # = RN_RDB_SIZE / BURST 
@@ -29,9 +29,8 @@ SN_L2M_W_TRACKER_OSTD: auto # = SN_L2M_WDB_SIZE / BURST
 UNIFIED_RW_TRACKER: false   # true=读写共享资源池，false=读写分离
 
 # 延迟配置 (原始值)
-DDR_R_LATENCY: 40
-DDR_R_LATENCY_VAR: 0
-DDR_W_LATENCY: 0
+DDR_R_LATENCY: 100
+DDR_W_LATENCY: 40
 L2M_R_LATENCY: 12
 L2M_W_LATENCY: 16
 SN_TRACKER_RELEASE_LATENCY: 40
@@ -45,9 +44,6 @@ IQ_OUT_FIFO_DEPTH_HORIZONTAL: 8
 IQ_OUT_FIFO_DEPTH_VERTICAL: 8
 IQ_OUT_FIFO_DEPTH_EQ: 8
 RB_OUT_FIFO_DEPTH: 8
-
-# 带宽限制
-CDMA_BW_LIMIT: 8
 
 # ETag 配置
 TL_Etag_T2_UE_MAX: 8
@@ -66,7 +62,7 @@ ITag_MAX_Num_H: 1
 ITag_MAX_Num_V: 1
 
 # 其他配置
-ETag_BOTHSIDE_UPGRADE: 0
+ETAG_BOTHSIDE_UPGRADE: 0
 ETAG_T1_ENABLED: true
 ORDERING_ETAG_UPGRADE_MODE: 0
 GDMA_RW_GAP: .inf  # numpy.inf
@@ -75,14 +71,15 @@ SDMA_RW_GAP: .inf  # numpy.inf
 # 通道规格
 CHANNEL_SPEC:
   gdma: 2
-  sdma: 2
-  cdma: 1
+  sdma: 0
+  cdma: 0
   ddr: 2
-  l2m: 2
+  l2m: 0
 
 # 默认带宽配置
 GDMA_BW_LIMIT: 128
 SDMA_BW_LIMIT: 128
+CDMA_BW_LIMIT: 128
 DDR_BW_LIMIT: 128
 L2M_BW_LIMIT: 128
 
@@ -92,11 +89,14 @@ ORDERING_PRESERVATION_MODE: 0  # 0=不保序, 1=单侧下环(TL/TU), 2=双侧下
 ORDERING_GRANULARITY: 1  # 0=IP层级, 1=节点层级
 CROSSRING_VERSION: "V1"
 IN_ORDER_EJECTION_PAIRS: []
+# 需要保序的包类型 (REQ/RSP/DATA)
+IN_ORDER_PACKET_CATEGORIES:
+  - "REQ"    # 只有REQ类型需要保序
 
 # IP 频率变换 FIFO 深度 (使用默认值)
 IP_L2H_FIFO_DEPTH: 3
-IP_H2L_H_FIFO_DEPTH: 2
-IP_H2L_L_FIFO_DEPTH: 2
+IP_H2L_H_FIFO_DEPTH: 4
+IP_H2L_L_FIFO_DEPTH: 4
 
 # 标签配置 (仅在 base_model_v2/network_v2 中生效，base_model/d2d_model 中无效)
 RB_ONLY_TAG_NUM_HORIZONTAL: 2

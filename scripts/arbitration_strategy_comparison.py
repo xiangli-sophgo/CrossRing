@@ -53,25 +53,25 @@ def run_single_simulation(sim_params):
         print(f"[{strategy['name']}] 开始仿真: {file_name} (进程 {os.getpid()})")
 
         # 拓扑类型到配置文件的映射
-        topo_config_map = {
-            "3x3": r"../config/topologies/topo_3x3.yaml",
-            "4x4": r"../config/topologies/topo_4x4.yaml",
-            "5x2": r"../config/topologies/topo_5x2.yaml",
-            "5x4": r"../config/topologies/topo_5x4.yaml",
-            "6x5": r"../config/topologies/topo_6x5.yaml",
-            "8x8": r"../config/topologies/topo_8x8.yaml",
+        kcin_config_map = {
+            "3x3": r"../config/topologies/kcin_3x3.yaml",
+            "4x4": r"../config/topologies/kcin_4x4.yaml",
+            "5x2": r"../config/topologies/kcin_5x2.yaml",
+            "5x4": r"../config/topologies/kcin_5x4.yaml",
+            "6x5": r"../config/topologies/kcin_6x5.yaml",
+            "8x8": r"../config/topologies/kcin_8x8.yaml",
         }
 
         # 默认拓扑类型
-        topo_type = "5x4"
+        kcin_type = "5x4"
 
         # 根据拓扑类型选择配置文件
-        actual_config_path = topo_config_map.get(topo_type, config_path)
+        actual_config_path = kcin_config_map.get(kcin_type, config_path)
         config = CrossRingConfig(actual_config_path)
         config.CROSSRING_VERSION = "V1"
 
         # 从配置文件获取拓扑类型
-        topo_type = config.TOPO_TYPE if config.TOPO_TYPE else topo_type
+        kcin_type = config.TOPO_TYPE if config.TOPO_TYPE else kcin_type
 
         # ==================== 关键: 动态修改仲裁策略配置 ====================
         config.arbitration = {
@@ -86,7 +86,7 @@ def run_single_simulation(sim_params):
         sim: BaseModel = eval(f"{model_type}_model")(
             model_type=model_type,
             config=config,
-            topo_type=topo_type,
+            kcin_type=kcin_type,
             verbose=0,
         )
 
@@ -351,7 +351,7 @@ def run_comparison_simulation(config_path, traffic_path, model_type, results_bas
 def main():
     parser = argparse.ArgumentParser(description="仲裁策略对比仿真")
     parser.add_argument("--traffic_path", default="../traffic/DeepSeek_0616/step6_ch_map/", help="流量数据路径")
-    parser.add_argument("--config", default="../config/topologies/topo_5x4.yaml", help="仿真配置文件路径")
+    parser.add_argument("--config", default="../config/topologies/kcin_5x4.yaml", help="仿真配置文件路径")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="仿真模型类型")
     parser.add_argument("--results_base_name", default="arbitration_comparison", help="结果文件基础名称")
     parser.add_argument("--max_workers", type=int, default=8, help="最大并行worker数量")

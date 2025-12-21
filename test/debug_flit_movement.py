@@ -12,13 +12,13 @@ from src.noc.REQ_RSP import REQ_RSP_model
 from config.config import CrossRingConfig
 import numpy as np
 
-config_path = os.path.join(project_root, "config", "topologies", "topo_4x5.yaml")
+config_path = os.path.join(project_root, "config", "topologies", "kcin_4x5.yaml")
 config = CrossRingConfig(config_path)
 
 sim = REQ_RSP_model(
     model_type="REQ_RSP",
     config=config,
-    topo_type="4x5",
+    kcin_type="4x5",
     verbose=0,
 )
 

@@ -214,11 +214,11 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                   </Col>
                 </Row>
               )}
-              {configValues.ETag_BOTHSIDE_UPGRADE !== undefined && (
+              {configValues.ETAG_BOTHSIDE_UPGRADE !== undefined && (
                 <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
-                  <Col span={10}><ConfigLabel name="ETag_BOTHSIDE_UPGRADE" /></Col>
+                  <Col span={10}><ConfigLabel name="ETAG_BOTHSIDE_UPGRADE" /></Col>
                   <Col span={14}>
-                    <Switch checked={!!configValues.ETag_BOTHSIDE_UPGRADE} onChange={(v) => updateConfigValue('ETag_BOTHSIDE_UPGRADE', v ? 1 : 0)} />
+                    <Switch checked={!!configValues.ETAG_BOTHSIDE_UPGRADE} onChange={(v) => updateConfigValue('ETAG_BOTHSIDE_UPGRADE', v ? 1 : 0)} />
                   </Col>
                 </Row>
               )}
@@ -289,6 +289,17 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                   <Col span={10}><ConfigLabel name="REVERSE_DIRECTION_THRESHOLD" /></Col>
                   <Col span={14}>
                     <InputNumber value={configValues.REVERSE_DIRECTION_THRESHOLD} onChange={(v) => updateConfigValue('REVERSE_DIRECTION_THRESHOLD', v)} min={0} max={1} step={0.05} style={{ width: 120 }} />
+                  </Col>
+                </Row>
+              )}
+              {configValues.ENABLE_CROSSPOINT_CONFLICT_CHECK !== undefined && (
+                <Row gutter={[16, 8]} align="middle" style={{ marginBottom: 8 }}>
+                  <Col span={10}><ConfigLabel name="ENABLE_CROSSPOINT_CONFLICT_CHECK" /></Col>
+                  <Col span={14}>
+                    <Select value={configValues.ENABLE_CROSSPOINT_CONFLICT_CHECK} onChange={(v) => updateConfigValue('ENABLE_CROSSPOINT_CONFLICT_CHECK', v)} style={{ width: 200 }}>
+                      <Option value={0}>0 - Current Cycle</Option>
+                      <Option value={1}>1 - Current + Previous</Option>
+                    </Select>
                   </Col>
                 </Row>
               )}

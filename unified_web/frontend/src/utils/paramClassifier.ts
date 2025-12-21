@@ -53,7 +53,7 @@ const CONFIG_PATTERNS_FOR_COLUMN = [
   /LATENCY_original$/,
   /FIFO_DEPTH$/,
   /Etag_T\d_UE_MAX$/,
-  /^ETag_BOTHSIDE_UPGRADE$/,
+  /^ETAG_BOTHSIDE_UPGRADE$/,
   /^ETAG_T1_ENABLED$/,
   /^ITag_TRIGGER_Th_/,
   /^ITag_MAX_NUM_/,
@@ -286,7 +286,7 @@ const CONFIG_PARAM_PATTERNS = [
   /FIFO_DEPTH$/,
   // ETag configuration (配置参数以_MAX结尾)
   /Etag_T\d_UE_MAX$/,
-  /^ETag_BOTHSIDE_UPGRADE$/,
+  /^ETAG_BOTHSIDE_UPGRADE$/,
   /^ETAG_T1_ENABLED$/,
   // ITag configuration
   /^ITag_TRIGGER_Th_/,

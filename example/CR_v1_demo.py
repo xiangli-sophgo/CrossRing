@@ -11,14 +11,14 @@ def main():
     model_type = "REQ_RSP"
 
     # Define the path to the configuration file - use topology-specific YAML config
-    topo_type = "5x4"
-    config = CrossRingConfig(f"../config/topologies/topo_{topo_type}.yaml")
+    kcin_type = "5x4"
+    config = CrossRingConfig(f"../config/topologies/kcin_{kcin_type}.yaml")
 
     # Initialize the simulation model
     sim: BaseModel = eval(f"{model_type}_model")(
         model_type=model_type,
         config=config,
-        topo_type=topo_type,
+        kcin_type=kcin_type,
         verbose=1,
     )
 

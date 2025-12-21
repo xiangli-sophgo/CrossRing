@@ -284,11 +284,12 @@ async def get_result_html(result_id: int, experiment_id: int):
     if not experiment:
         raise HTTPException(status_code=404, detail="实验不存在")
 
-    # 获取结果
+    # 获取结果（需要完整数据，包括 result_html）
     results_data = db_manager.get_results(
         experiment_id=experiment_id,
         page=1,
         page_size=100000,
+        lightweight=False,
     )
 
     # 查找指定result_id的结果

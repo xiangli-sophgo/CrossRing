@@ -167,6 +167,31 @@ export const getAllSensitivity = async (
   return response.data;
 };
 
+export interface ParameterInfluence {
+  name: string;
+  influence: number;
+  between_variance: number;
+  mean_range: number;
+  value_count: number;
+}
+
+export interface InfluenceResponse {
+  experiment_id: number;
+  metric: string;
+  total_variance: number;
+  parameters: ParameterInfluence[];
+}
+
+export const getParameterInfluence = async (
+  experimentId: number,
+  metric?: string
+): Promise<InfluenceResponse> => {
+  const response = await api.get(`/experiments/${experimentId}/influence`, {
+    params: metric ? { metric } : undefined,
+  });
+  return response.data;
+};
+
 export const compareExperiments = async (
   experimentIds: number[]
 ): Promise<{
@@ -396,6 +421,61 @@ export const deleteResultsBatch = async (
   const response = await api.post(`/experiments/${experimentId}/results/batch-delete`, {
     result_ids: resultIds,
   });
+  return response.data;
+};
+
+// ==================== 分析图表配置 ====================
+
+export interface ChartConfig {
+  id: number;
+  name: string;
+  chart_type: 'line' | 'heatmap' | 'sensitivity';
+  config: {
+    params?: string[];
+    metric?: string;
+    [key: string]: unknown;
+  };
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const getAnalysisCharts = async (experimentId: number): Promise<ChartConfig[]> => {
+  const response = await api.get(`/experiments/${experimentId}/charts`);
+  return response.data;
+};
+
+export const addAnalysisChart = async (
+  experimentId: number,
+  data: {
+    name: string;
+    chart_type: 'line' | 'heatmap' | 'sensitivity';
+    config: Record<string, unknown>;
+    sort_order?: number;
+  }
+): Promise<ChartConfig> => {
+  const response = await api.post(`/experiments/${experimentId}/charts`, data);
+  return response.data;
+};
+
+export const updateAnalysisChart = async (
+  experimentId: number,
+  chartId: number,
+  data: {
+    name?: string;
+    config?: Record<string, unknown>;
+    sort_order?: number;
+  }
+): Promise<ChartConfig> => {
+  const response = await api.put(`/experiments/${experimentId}/charts/${chartId}`, data);
+  return response.data;
+};
+
+export const deleteAnalysisChart = async (
+  experimentId: number,
+  chartId: number
+): Promise<{ success: boolean }> => {
+  const response = await api.delete(`/experiments/${experimentId}/charts/${chartId}`);
   return response.data;
 };
 

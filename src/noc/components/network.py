@@ -229,7 +229,7 @@ class Network:
         self.T0_arb_pointer_v = {}  # {node_id: index} 纵向环仲裁指针
         self.RB_UE_Counters = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}  # 所有CrossPoint共享
         self.EQ_UE_Counters = {"TU": {}, "TD": {}}  # 所有CrossPoint共享
-        self.ETag_BOTHSIDE_UPGRADE = False
+        self.ETAG_BOTHSIDE_UPGRADE = False
 
         # 延迟释放Entry机制：存储待释放的Entry信息 {node_id: [(level, release_cycle), ...]}
         self.RB_pending_entry_release = {"TL": defaultdict(list), "TR": defaultdict(list)}

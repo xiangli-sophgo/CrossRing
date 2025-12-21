@@ -44,9 +44,9 @@ class D2DConfig:
             # 从DIE_TOPOLOGIES自动加载第一个Die的拓扑配置来获取共享参数
             if self.DIE_TOPOLOGIES:
                 first_topo = list(self.DIE_TOPOLOGIES.values())[0]
-                topo_file = os.path.join(os.path.dirname(__file__), "topologies", f"topo_{first_topo}.yaml")
+                kcin_file = os.path.join(os.path.dirname(__file__), "topologies", f"kcin_{first_topo}.yaml")
                 from config.config import CrossRingConfig
-                self.die_config = CrossRingConfig(topo_file)
+                self.die_config = CrossRingConfig(kcin_file)
                 if not self.NETWORK_FREQUENCY:
                     self.NETWORK_FREQUENCY = self.die_config.NETWORK_FREQUENCY
                 if not self.FLIT_SIZE:
@@ -492,18 +492,18 @@ class D2DConfig:
                 else:
                     die_config = json.load(f)
 
-            # 从文件名提取拓扑名称（如 topo_5x4.yaml -> 5x4）
+            # 从文件名提取拓扑名称（如 kcin_5x4.yaml -> 5x4）
             import os
             filename = os.path.basename(die_config_file)
-            if filename.startswith("topo_"):
-                topo_name = filename.replace("topo_", "").replace(".yaml", "").replace(".yml", "")
+            if filename.startswith("kcin_"):
+                kcin_name = filename.replace("kcin_", "").replace(".yaml", "").replace(".yml", "")
             else:
-                topo_name = filename.replace(".yaml", "").replace(".yml", "")
+                kcin_name = filename.replace(".yaml", "").replace(".yml", "")
 
             # 更新所有DIE使用相同的拓扑配置
             num_dies = getattr(self, "NUM_DIES", 2)
             for die_id in range(num_dies):
-                self.DIE_TOPOLOGIES[die_id] = topo_name
+                self.DIE_TOPOLOGIES[die_id] = kcin_name
 
             # 保存DIE配置内容供后续使用
             from config.config import CrossRingConfig
@@ -517,7 +517,7 @@ class D2DConfig:
             if not self.BURST and hasattr(self.die_config, 'BURST'):
                 self.BURST = self.die_config.BURST
 
-            logging.info(f"已应用DIE拓扑配置: {die_config_file} (拓扑: {topo_name})")
+            logging.info(f"已应用DIE拓扑配置: {die_config_file} (拓扑: {kcin_name})")
 
         except FileNotFoundError:
             raise FileNotFoundError(f"DIE拓扑配置文件不存在: {die_config_file}")

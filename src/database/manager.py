@@ -7,11 +7,44 @@
 
 import csv
 import json
+import re
 import threading
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from .database import DatabaseManager
+
+# 配置参数的正则模式（仅用于影响度分析）
+CONFIG_PARAM_PATTERNS = [
+    re.compile(r"^TOPO_TYPE$"),
+    re.compile(r"^FLIT_SIZE$"),
+    re.compile(r"^BURST$"),
+    re.compile(r"^NETWORK_FREQUENCY$"),
+    re.compile(r"^SLICE_PER_LINK_"),
+    re.compile(r"^RN_RDB_SIZE$"),
+    re.compile(r"^RN_WDB_SIZE$"),
+    re.compile(r"^SN_DDR_RDB_SIZE$"),
+    re.compile(r"^SN_DDR_WDB_SIZE$"),
+    re.compile(r"^SN_L2M_RDB_SIZE$"),
+    re.compile(r"^SN_L2M_WDB_SIZE$"),
+    re.compile(r"^UNIFIED_RW_TRACKER$"),
+    re.compile(r"LATENCY_original$"),
+    re.compile(r"FIFO_DEPTH$"),
+    re.compile(r"Etag_T\d_UE_MAX$"),
+    re.compile(r"^ETAG_BOTHSIDE_UPGRADE$"),
+    re.compile(r"^ETAG_T1_ENABLED$"),
+    re.compile(r"^ITag_TRIGGER_Th_"),
+    re.compile(r"^ITag_MAX_NUM_"),
+    re.compile(r"^ENABLE_CROSSPOINT_CONFLICT_CHECK$"),
+    re.compile(r"^ORDERING_"),
+    re.compile(r"BW_LIMIT$"),
+    re.compile(r"^IN_ORDER_"),
+]
+
+
+def is_config_param(param_name: str) -> bool:
+    """判断参数是否为配置参数"""
+    return any(pattern.search(param_name) for pattern in CONFIG_PARAM_PATTERNS)
 
 
 class ResultManager:
@@ -231,6 +264,7 @@ class ResultManager:
         page_size: int = 100,
         sort_by: str = "performance",
         order: str = "desc",
+        lightweight: bool = True,
     ) -> Dict[str, Any]:
         """
         分页获取结果
@@ -241,12 +275,13 @@ class ResultManager:
             page_size: 每页数量
             sort_by: 排序字段
             order: 排序方向
+            lightweight: 是否轻量模式（不加载 result_html 和 result_files）
 
         Returns:
             {results: [...], total: int, page: int, page_size: int}
         """
         results, total = self.db.get_results(
-            experiment_id, page, page_size, sort_by, order
+            experiment_id, page, page_size, sort_by, order, lightweight=lightweight
         )
         return {
             "results": results,
@@ -506,6 +541,134 @@ class ResultManager:
             except Exception:
                 pass
         return result
+
+    def get_parameter_influence(
+        self, experiment_id: int, metric: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        计算各参数对性能的影响度（基于方差贡献）
+
+        使用简化的方差分解方法：
+        影响度 = Var(各取值的平均性能) / Var(所有性能)
+
+        这种方法通过取平均值来抵消其他参数变化带来的噪声，
+        更准确地反映单个参数对性能的独立贡献。
+
+        Args:
+            experiment_id: 实验ID
+            metric: 性能指标名（默认使用 performance 字段）
+
+        Returns:
+            {
+                metric: str,
+                total_variance: float,
+                parameters: [
+                    {
+                        name: str,
+                        influence: float,  # 影响度 (0-1)
+                        between_variance: float,  # 组间方差
+                        mean_range: float,  # 各取值平均性能的范围
+                        value_count: int,  # 取值数量
+                    },
+                    ...
+                ]
+            }
+        """
+        # 获取所有结果
+        results = self.db.get_results_for_analysis(experiment_id)
+        if not results:
+            return {"metric": metric or "performance", "total_variance": 0, "parameters": []}
+
+        # 收集所有性能值
+        all_performances = []
+        for result in results:
+            config_params = result.get("config_params") or {}
+            if metric is None:
+                perf_value = result.get("performance")
+            else:
+                perf_value = config_params.get(metric)
+            if perf_value is not None and isinstance(perf_value, (int, float)):
+                all_performances.append(perf_value)
+
+        if len(all_performances) < 2:
+            return {"metric": metric or "performance", "total_variance": 0, "parameters": []}
+
+        # 计算总方差
+        mean_all = sum(all_performances) / len(all_performances)
+        total_variance = sum((p - mean_all) ** 2 for p in all_performances) / len(all_performances)
+
+        if total_variance == 0:
+            return {"metric": metric or "performance", "total_variance": 0, "parameters": []}
+
+        # 获取所有参数，只保留配置参数
+        param_keys = self.db.get_param_keys(experiment_id)
+        config_params_keys = [p for p in param_keys if is_config_param(p)]
+        parameter_influences = []
+
+        for param in config_params_keys:
+            # 跳过与 metric 相同的参数
+            if metric and param == metric:
+                continue
+
+            # 按参数值分组，计算每组的平均性能
+            groups = {}
+            for result in results:
+                config_params = result.get("config_params") or {}
+                if param not in config_params:
+                    continue
+                value = config_params[param]
+                # 转换为可哈希类型
+                try:
+                    if isinstance(value, list):
+                        value = tuple(value)
+                    elif isinstance(value, dict):
+                        # 字典转为排序后的元组
+                        value = tuple(sorted(value.items()))
+                    # 测试是否可哈希
+                    hash(value)
+                except TypeError:
+                    # 跳过不可哈希的值
+                    continue
+                if metric is None:
+                    perf_value = result.get("performance")
+                else:
+                    perf_value = config_params.get(metric)
+                if perf_value is not None and isinstance(perf_value, (int, float)):
+                    if value not in groups:
+                        groups[value] = []
+                    groups[value].append(perf_value)
+
+            if len(groups) < 2:
+                continue
+
+            # 计算每个取值的平均性能
+            group_means = []
+            for value, perfs in groups.items():
+                group_means.append(sum(perfs) / len(perfs))
+
+            # 计算组间方差（各取值平均性能的方差）
+            mean_of_means = sum(group_means) / len(group_means)
+            between_variance = sum((m - mean_of_means) ** 2 for m in group_means) / len(group_means)
+
+            # 影响度 = 组间方差 / 总方差
+            influence = between_variance / total_variance
+
+            parameter_influences.append({
+                "name": param,
+                "influence": round(influence, 4),
+                "between_variance": round(between_variance, 4),
+                "mean_range": round(max(group_means) - min(group_means), 4),
+                "value_count": len(groups),
+            })
+
+        # 按影响度排序
+        parameter_influences.sort(key=lambda x: x["influence"], reverse=True)
+
+        return {
+            "metric": metric or "performance",
+            "total_variance": round(total_variance, 4),
+            "parameters": parameter_influences,
+        }
 
     # ==================== 实验对比 ====================
 

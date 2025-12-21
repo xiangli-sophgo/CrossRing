@@ -338,7 +338,7 @@ CrossRing的保序机制采用**配置驱动的方向控制策略**，通过配�
 #### 6.2.1 Mode 0: 不保序配置示例
 
 ```yaml
-# config/topologies/topo_5x4.yaml
+# config/topologies/kcin_5x4.yaml
 
 # 禁用保序功能
 ORDERING_PRESERVATION_MODE: 0  # 不保序
@@ -355,7 +355,7 @@ IN_ORDER_EJECTION_PAIRS: []
 #### 6.2.2 Mode 1: 单侧下环配置示例
 
 ```yaml
-# config/topologies/topo_5x4.yaml
+# config/topologies/kcin_5x4.yaml
 
 # 启用单侧下环
 ORDERING_PRESERVATION_MODE: 1  # 单侧下环(TL/TU)
@@ -374,7 +374,7 @@ IN_ORDER_EJECTION_PAIRS: []
 #### 6.2.3 Mode 2: 双侧下环配置示例（5×4拓扑）
 
 ```yaml
-# config/topologies/topo_5x4.yaml
+# config/topologies/kcin_5x4.yaml
 
 # 启用双侧下环
 ORDERING_PRESERVATION_MODE: 2  # 双侧下环(方向配置)

@@ -1484,7 +1484,7 @@ from src.core.d2d_model import D2D_Model
 
 # 加载高级配置
 config = D2DConfig(
-    die_config_file="config/topologies/topo_5x4.yaml",
+    die_config_file="config/topologies/kcin_5x4.yaml",
     d2d_config_file="config/topologies/d2d_advanced_config.yaml"
 )
 

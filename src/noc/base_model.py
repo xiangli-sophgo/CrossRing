@@ -427,9 +427,9 @@ class BaseModel(StatsMixin, DataflowMixin):
             self.link_state_vis = NetworkLinkVisualizer(self.data_network)
 
         # 智能设置各network的双侧升级：全局配置 OR (双侧下环/动态方向 AND 在保序列表中)
-        self.req_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "REQ" in self.config.IN_ORDER_PACKET_CATEGORIES)
-        self.rsp_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "RSP" in self.config.IN_ORDER_PACKET_CATEGORIES)
-        self.data_network.ETag_BOTHSIDE_UPGRADE = self.config.ETag_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "DATA" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        self.req_network.ETAG_BOTHSIDE_UPGRADE = self.config.ETAG_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "REQ" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        self.rsp_network.ETAG_BOTHSIDE_UPGRADE = self.config.ETAG_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "RSP" in self.config.IN_ORDER_PACKET_CATEGORIES)
+        self.data_network.ETAG_BOTHSIDE_UPGRADE = self.config.ETAG_BOTHSIDE_UPGRADE or (self.config.ORDERING_PRESERVATION_MODE in [2, 3] and "DATA" in self.config.IN_ORDER_PACKET_CATEGORIES)
 
         # Initialize arbiters based on configuration
         arbitration_config = getattr(self.config, "arbitration", {})

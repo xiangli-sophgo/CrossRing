@@ -621,7 +621,7 @@ class StatsMixin:
             "TU_Etag_T1_UE_MAX",
             "TU_Etag_T2_UE_MAX",
             "TD_Etag_T2_UE_MAX",
-            "ETag_BOTHSIDE_UPGRADE",
+            "ETAG_BOTHSIDE_UPGRADE",
             # ITag configuration
             "ITag_TRIGGER_Th_H",
             "ITag_TRIGGER_Th_V",
@@ -834,6 +834,9 @@ class StatsMixin:
             exp = db.get_experiment_by_name(experiment_name)
             if exp:
                 experiment_id = exp["id"]
+                # 如果传入了新描述，更新实验描述
+                if description:
+                    db.update_experiment(experiment_id, description=description)
             else:
                 experiment_id = db.create_experiment(
                     name=experiment_name,

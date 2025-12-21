@@ -113,12 +113,12 @@ def parse_range(range_str: str) -> List[Union[int, float]]:
             raise ValueError(f"无效的范围格式: {range_str}")
 
 
-def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base_config_path: str, topo_type, traffic_path: str, result_save_path: str) -> Dict[str, Any]:
+def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base_config_path: str, kcin_type, traffic_path: str, result_save_path: str) -> Dict[str, Any]:
     """运行单次仿真"""
     sim = None
     try:
         # 使用YAML配置文件加载配置
-        config_file = f"../config/topologies/topo_{topo_type}.yaml"
+        config_file = f"../config/topologies/kcin_{kcin_type}.yaml"
         config = CrossRingConfig(config_file)
 
         # 更新参数
@@ -157,7 +157,7 @@ def run_single_simulation(config_params: Dict[str, Any], traffic_file: str, base
         sim = BaseModel(
             model_type="REQ_RSP",
             config=config,
-            topo_type=config.TOPO_TYPE,
+            kcin_type=config.TOPO_TYPE,
             traffic_file_path=traffic_path,
             traffic_config=traffic_file,
             result_save_path=result_save_path,
@@ -189,7 +189,7 @@ def run_parameter_combination(
     traffic_files: List[str],
     traffic_weights: List[float],
     base_config_path: str,
-    topo_type,
+    kcin_type,
     traffic_path: str,
     result_save_path: str,
 ) -> Dict[str, Any]:
@@ -203,7 +203,7 @@ def run_parameter_combination(
         traffic_name = traffic_file[:-4]
 
         # 单次仿真
-        sim_results = run_single_simulation(params_dict, traffic_file, base_config_path, topo_type, traffic_path, result_save_path)
+        sim_results = run_single_simulation(params_dict, traffic_file, base_config_path, kcin_type, traffic_path, result_save_path)
 
         if isinstance(sim_results, dict) and sim_results:
             bw = sim_results.get("mixed_avg_weighted_bw", 0)
@@ -249,8 +249,8 @@ def run_parameter_combination(
 
 def run_single_combination(args):
     """用于并行执行的包装函数"""
-    params_dict, traffic_files, traffic_weights, config_path, topo_type, traffic_path, output_dir = args
-    return run_parameter_combination(params_dict, traffic_files, traffic_weights, config_path, topo_type, traffic_path, output_dir)
+    params_dict, traffic_files, traffic_weights, config_path, kcin_type, traffic_path, output_dir = args
+    return run_parameter_combination(params_dict, traffic_files, traffic_weights, config_path, kcin_type, traffic_path, output_dir)
 
 
 def save_plot(save_dir: str, filename: str) -> str:
@@ -527,7 +527,7 @@ def main():
     ]
 
     # 文件路径配置
-    config_path = "../config/topologies/topo_5x4.yaml"
+    config_path = "../config/topologies/kcin_5x4.yaml"
     # traffic_path = "../traffic/traffic0730"
     traffic_path = "../traffic/0617"
     # 仿真配置
@@ -538,10 +538,10 @@ def main():
         # "W_5x4_CR_v1.0.2.txt",
         "LLama2_AllReduce.txt",
     ]
-    # topo_type = "4x4"
-    # topo_type = "8x8"
-    # topo_type = "12x12"
-    topo_type = "5x4"
+    # kcin_type = "4x4"
+    # kcin_type = "8x8"
+    # kcin_type = "12x12"
+    kcin_type = "5x4"
     traffic_weights = [1]
     max_workers = 4  # 并行运行的最大进程数，根据CPU核心数调整
 
@@ -588,7 +588,7 @@ def main():
         "ranges": {name: range_vals for name, range_vals in zip(param_names, param_ranges)},
         "traffic_files": traffic_files,
         "traffic_weights": traffic_weights,
-        "topo_type": topo_type,
+        "kcin_type": kcin_type,
         "max_workers": max_workers,
         "config_path": config_path,
         "traffic_path": traffic_path,
@@ -615,7 +615,7 @@ def main():
     task_args = []
     for combination in all_combinations:
         params_dict = {name: value for name, value in zip(param_names, combination)}
-        task_args.append((params_dict, traffic_files, traffic_weights, config_path, topo_type, traffic_path, output_dir))
+        task_args.append((params_dict, traffic_files, traffic_weights, config_path, kcin_type, traffic_path, output_dir))
 
     # 并行运行所有组合
     completed_count = 0

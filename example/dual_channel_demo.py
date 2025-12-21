@@ -17,10 +17,10 @@ def main():
     model_type = "DualChannel_REQ_RSP"
 
     # 创建双通道配置 - 可以基于拓扑专用配置或自定义双通道配置
-    topo_type = "5x4"
+    kcin_type = "5x4"
 
     # 拓扑配置：
-    config = DualChannelConfig(f"../config/topologies/topo_{topo_type}.yaml")
+    config = DualChannelConfig(f"../config/topologies/kcin_{kcin_type}.yaml")
 
     # 配置双通道设置
     config.DATA_DUAL_CHANNEL_ENABLED = True
@@ -35,7 +35,7 @@ def main():
     sim = DualChannelBaseModel(
         model_type=model_type,
         config=config,
-        topo_type=topo_type,
+        kcin_type=kcin_type,
     )
 
     # 配置流量调度器

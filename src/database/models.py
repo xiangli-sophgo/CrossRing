@@ -156,3 +156,28 @@ class ResultFile(Base):
     __table_args__ = (
         Index("idx_result_files_result", "result_id", "result_type"),
     )
+
+
+class AnalysisChart(Base):
+    """分析图表配置表 - 保存用户配置的分析图表"""
+
+    __tablename__ = "analysis_charts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    experiment_id = Column(Integer, ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # 图表基本信息
+    name = Column(String(255), nullable=False)  # 图表名称
+    chart_type = Column(String(50), nullable=False)  # 图表类型: line/heatmap/sensitivity
+
+    # 图表配置 - JSON格式
+    config = Column(JSON, nullable=False)  # 存储图表配置（参数、指标等）
+
+    # 排序
+    sort_order = Column(Integer, default=0)  # 显示顺序
+
+    __table_args__ = (
+        Index("idx_analysis_charts_experiment", "experiment_id"),
+    )

@@ -21,7 +21,7 @@ def test_with_mock_data():
     print("=" * 60)
 
     # 加载配置
-    config_path = "../config/topologies/topo_5x4.yaml"
+    config_path = "../config/topologies/kcin_5x4.yaml"
     if not os.path.exists(config_path):
         config_path = "../config/config.json"
 
@@ -100,7 +100,7 @@ def test_collector_directly():
     print("=" * 60)
 
     # 使用配置文件
-    config_path = "../config/topologies/topo_5x4.yaml"
+    config_path = "../config/topologies/kcin_5x4.yaml"
     if not os.path.exists(config_path):
         config_path = "../config/config.json"
 

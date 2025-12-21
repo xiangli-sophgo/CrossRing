@@ -1,21 +1,21 @@
-# 8x8 拓扑配置 (128节点, SG2260E)
-TOPO_TYPE: "8x8"  # 格式 AxB，自动计算拓扑参数
+# 6x5 拓扑配置 (60节点, SG2260)
+TOPO_TYPE: "6x5"  # 格式 AxB，自动计算拓扑参数
 
 # 基本参数
 FLIT_SIZE: 128
-SLICE_PER_LINK_HORIZONTAL: 6
-SLICE_PER_LINK_VERTICAL: 6
-BURST: 4
+SLICE_PER_LINK_HORIZONTAL: 8
+SLICE_PER_LINK_VERTICAL: 8
+BURST: 2
 NETWORK_FREQUENCY: 2
 
 # ========== 资源配置 ==========
 # 主配置：数据缓冲区大小
-RN_RDB_SIZE: 256      # RN读数据缓冲区
+RN_RDB_SIZE: 128      # RN读数据缓冲区
 RN_WDB_SIZE: 128      # RN写数据缓冲区
-SN_DDR_RDB_SIZE: 384  # SN DDR读数据缓冲区
-SN_DDR_WDB_SIZE: 192  # SN DDR写数据缓冲区
-SN_L2M_RDB_SIZE: 384  # SN L2M读数据缓冲区
-SN_L2M_WDB_SIZE: 192  # SN L2M写数据缓冲区
+SN_DDR_RDB_SIZE: 128  # SN DDR读数据缓冲区
+SN_DDR_WDB_SIZE: 128  # SN DDR写数据缓冲区
+SN_L2M_RDB_SIZE: 128  # SN L2M读数据缓冲区
+SN_L2M_WDB_SIZE: 128  # SN L2M写数据缓冲区
 
 # 次要配置：跟踪器数量（自动计算：databuffer_size / BURST）
 RN_R_TRACKER_OSTD: auto    # = RN_RDB_SIZE / BURST 
@@ -29,8 +29,9 @@ SN_L2M_W_TRACKER_OSTD: auto # = SN_L2M_WDB_SIZE / BURST
 UNIFIED_RW_TRACKER: false   # true=读写共享资源池，false=读写分离
 
 # 延迟配置 (原始值)
-DDR_R_LATENCY: 100
-DDR_W_LATENCY: 40
+DDR_R_LATENCY: 40
+DDR_R_LATENCY_VAR: 0
+DDR_W_LATENCY: 0
 L2M_R_LATENCY: 12
 L2M_W_LATENCY: 16
 SN_TRACKER_RELEASE_LATENCY: 40
@@ -44,6 +45,9 @@ IQ_OUT_FIFO_DEPTH_HORIZONTAL: 8
 IQ_OUT_FIFO_DEPTH_VERTICAL: 8
 IQ_OUT_FIFO_DEPTH_EQ: 8
 RB_OUT_FIFO_DEPTH: 8
+
+# 带宽限制
+CDMA_BW_LIMIT: 8
 
 # ETag 配置
 TL_Etag_T2_UE_MAX: 8
@@ -62,7 +66,7 @@ ITag_MAX_Num_H: 1
 ITag_MAX_Num_V: 1
 
 # 其他配置
-ETag_BOTHSIDE_UPGRADE: 0
+ETAG_BOTHSIDE_UPGRADE: 0
 ETAG_T1_ENABLED: true
 ORDERING_ETAG_UPGRADE_MODE: 0
 GDMA_RW_GAP: .inf  # numpy.inf
@@ -71,15 +75,14 @@ SDMA_RW_GAP: .inf  # numpy.inf
 # 通道规格
 CHANNEL_SPEC:
   gdma: 2
-  sdma: 0
-  cdma: 0
+  sdma: 2
+  cdma: 1
   ddr: 2
-  l2m: 0
+  l2m: 2
 
 # 默认带宽配置
 GDMA_BW_LIMIT: 128
 SDMA_BW_LIMIT: 128
-CDMA_BW_LIMIT: 128
 DDR_BW_LIMIT: 128
 L2M_BW_LIMIT: 128
 

@@ -62,11 +62,11 @@ def _run_single_bw_point(args):
         # 加载配置
         config = CrossRingConfig(config_path)
 
-        # 获取topo_type
-        topo_type = config.TOPO_TYPE
+        # 获取kcin_type
+        kcin_type = config.TOPO_TYPE
 
         # 创建模型
-        sim = REQ_RSP_model(model_type=model_type, config=config, topo_type=topo_type, verbose=0)
+        sim = REQ_RSP_model(model_type=model_type, config=config, kcin_type=kcin_type, verbose=0)
 
         # 设置traffic调度器
         sim.setup_traffic_scheduler(traffic_file_path=traffic_dir, traffic_chains=[[traffic_file]])
@@ -236,11 +236,11 @@ class LatencyBandwidthSweeper:
         # 应用带宽限制
         self._apply_bw_limit(config, bw_limit)
 
-        # 获取topo_type
-        topo_type = config.TOPO_TYPE
+        # 获取kcin_type
+        kcin_type = config.TOPO_TYPE
 
         # 创建模型
-        sim = REQ_RSP_model(model_type=self.model_type, config=config, topo_type=topo_type, verbose=self.verbose)
+        sim = REQ_RSP_model(model_type=self.model_type, config=config, kcin_type=kcin_type, verbose=self.verbose)
 
         # 设置traffic调度器
         sim.setup_traffic_scheduler(traffic_file_path=self.traffic_dir, traffic_chains=[[self.traffic_file]])
@@ -565,7 +565,7 @@ def main():
     # ==================== 配置区域 ====================
 
     # 基础配置
-    CONFIG_PATH = "../config/topologies/topo_5x4.yaml"
+    CONFIG_PATH = "../config/topologies/kcin_5x4.yaml"
     TRAFFIC_DIR = r"../traffic/DeepSeek_0616/step6_ch_map/"
     TRAFFIC_FILE = "LLama2_AllReduce.txt"
     SAVE_DIR = "../Result/LatencyBandwidthSweep"

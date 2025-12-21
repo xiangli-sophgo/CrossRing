@@ -349,6 +349,7 @@ class TaskManager:
                 'message': task.message,
                 'experiment_name': task.experiment_name,
                 'current_file': task.current_file,
+                'error': task.error,
             }
             for queue in self._global_subscribers:
                 await queue.put(global_update)

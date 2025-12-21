@@ -159,19 +159,19 @@ def run_single_simulation_optimized(sim_params):
     优化的独立仿真函数，参考traffic_sim_main.py的设计
 
     Args:
-        sim_params: (combination, config_path, topo_type, traffic_files, traffic_weights, traffic_path)
+        sim_params: (combination, config_path, kcin_type, traffic_files, traffic_weights, traffic_path)
 
     Returns:
         {"combination": combination, "performance": total_weighted_bw}
     """
-    combination, config_path, topo_type, traffic_files, traffic_weights, traffic_path = sim_params
+    combination, config_path, kcin_type, traffic_files, traffic_weights, traffic_path = sim_params
 
     try:
         print(f"Starting simulation for combination on process {os.getpid()}")
 
         # 创建仿真实例
         cfg = CrossRingConfig(config_path)
-        cfg.TOPO_TYPE = topo_type
+        cfg.TOPO_TYPE = kcin_type
 
         total_weighted_bw = 0
 
@@ -182,7 +182,7 @@ def run_single_simulation_optimized(sim_params):
                 sim = REQ_RSP_model(
                     model_type="REQ_RSP",
                     config=cfg,
-                    topo_type=topo_type,
+                    kcin_type=kcin_type,
                     traffic_file_path=traffic_path,
                     traffic_config=traffic_file,
                     result_save_path="../Result/temp",
@@ -190,7 +190,7 @@ def run_single_simulation_optimized(sim_params):
                 )
 
                 # 设置平台参数（5x4拓扑）
-                if topo_type == "5x4":
+                if kcin_type == "5x4":
                     sim.config.BURST = 4
                     sim.config.NUM_IP = 32
                     sim.config.NUM_DDR = 32
@@ -335,9 +335,9 @@ def save_optimization_results_to_csv(result_data, output_csv, db_manager=None, e
 class ParamTraversalRunner:
     """FIFO和ETag参数全遍历执行器"""
 
-    def __init__(self, config_path: str, topo_type: str, traffic_files: List[str], traffic_weights: List[float], traffic_path: str = "../traffic/0617/", experiment_name: str = None, save_csv: bool = True):
+    def __init__(self, config_path: str, kcin_type: str, traffic_files: List[str], traffic_weights: List[float], traffic_path: str = "../traffic/0617/", experiment_name: str = None, save_csv: bool = True):
         self.config_path = config_path
-        self.topo_type = topo_type
+        self.kcin_type = kcin_type
         self.traffic_files = traffic_files
         self.traffic_weights = traffic_weights
         self.traffic_path = traffic_path
@@ -393,13 +393,13 @@ class ParamTraversalRunner:
                     name=experiment_name,
                     experiment_type="noc",
                     config_path=config_path,
-                    topo_type=topo_type,
+                    kcin_type=kcin_type,
                     traffic_files=traffic_files,
                     traffic_weights=traffic_weights,
                     simulation_time=SIMULATION_TIME,
                     n_repeats=N_REPEATS,
                     n_jobs=N_JOBS,
-                    description=f"FIFO和ETag参数全遍历 - {topo_type}拓扑",
+                    description=f"FIFO和ETag参数全遍历 - {kcin_type}拓扑",
                 )
                 print(f"已创建实验记录: {experiment_name} (ID: {self.experiment_id})")
             except Exception as e:
@@ -592,7 +592,7 @@ class ParamTraversalRunner:
 
     def _set_platform_config(self, sim):
         """设置平台相关配置"""
-        if self.topo_type == "5x4":
+        if self.kcin_type == "5x4":
             # 5x4拓扑的固定参数
             sim.config.BURST = 4
             sim.config.NUM_IP = 32
@@ -646,12 +646,12 @@ class ParamTraversalRunner:
                 try:
                     # 创建仿真实例
                     cfg = CrossRingConfig(self.config_path)
-                    cfg.TOPO_TYPE = self.topo_type
+                    cfg.TOPO_TYPE = self.kcin_type
 
                     sim = REQ_RSP_model(
                         model_type="REQ_RSP",
                         config=cfg,
-                        topo_type=self.topo_type,
+                        kcin_type=self.kcin_type,
                         traffic_file_path=self.traffic_path,
                         traffic_config=traffic_file,
                         result_save_path=self.result_dir,
@@ -994,7 +994,7 @@ class ParamTraversalRunner:
                     # 准备仿真参数列表
                     sim_params_list = []
                     for combination in batch:
-                        sim_params = (combination, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path)
+                        sim_params = (combination, self.config_path, self.kcin_type, self.traffic_files, self.traffic_weights, self.traffic_path)
                         sim_params_list.append(sim_params)
 
                     start_time = time.time()
@@ -1027,7 +1027,7 @@ class ParamTraversalRunner:
                     print(f"  批次并行处理失败: {e}")
                     print(f"  使用串行处理批次{batch_count}")
                     for combination in tqdm(batch, desc=f"批次{batch_count}串行"):
-                        sim_params = (combination, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path)
+                        sim_params = (combination, self.config_path, self.kcin_type, self.traffic_files, self.traffic_weights, self.traffic_path)
                         try:
                             result = run_single_simulation_optimized(sim_params)
                             save_optimization_results_to_csv(result, self.csv_output_path, self.db_manager, self.experiment_id, self.save_csv)
@@ -1037,7 +1037,7 @@ class ParamTraversalRunner:
             else:
                 # 串行处理小批次
                 for combination in tqdm(batch, desc=f"批次{batch_count}仿真"):
-                    sim_params = (combination, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path)
+                    sim_params = (combination, self.config_path, self.kcin_type, self.traffic_files, self.traffic_weights, self.traffic_path)
                     try:
                         result = run_single_simulation_optimized(sim_params)
                         save_optimization_results_to_csv(result, self.csv_output_path, self.db_manager, self.experiment_id, self.save_csv)
@@ -1085,7 +1085,7 @@ class ParamTraversalRunner:
         # 准备仿真参数列表
         sim_params_list = []
         for combination in valid_combinations:
-            sim_params = (combination, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path)
+            sim_params = (combination, self.config_path, self.kcin_type, self.traffic_files, self.traffic_weights, self.traffic_path)
             sim_params_list.append(sim_params)
 
         # 使用ProcessPoolExecutor进行并行处理
@@ -1149,7 +1149,7 @@ class ParamTraversalRunner:
             # 准备仿真参数列表
             sim_params_list = []
             for combination in valid_combinations:
-                sim_params = (combination, self.config_path, self.topo_type, self.traffic_files, self.traffic_weights, self.traffic_path)
+                sim_params = (combination, self.config_path, self.kcin_type, self.traffic_files, self.traffic_weights, self.traffic_path)
                 sim_params_list.append(sim_params)
 
             for i, sim_params in enumerate(tqdm(sim_params_list, desc="仿真进度")):
@@ -1423,8 +1423,8 @@ def main():
     print(f"实验名称: {experiment_name}")
 
     # 配置
-    config_path = "../config/topologies/topo_5x4.yaml"
-    topo_type = "5x4"
+    config_path = "../config/topologies/kcin_5x4.yaml"
+    kcin_type = "5x4"
     traffic_files = ["LLama2_AllReduce.txt"]
     traffic_weights = [1.0]
     traffic_path = "../traffic/0617/"  # 使用绝对路径
@@ -1433,7 +1433,7 @@ def main():
     # 创建遍历执行器
     runner = ParamTraversalRunner(
         config_path=config_path,
-        topo_type=topo_type,
+        kcin_type=kcin_type,
         traffic_files=traffic_files,
         traffic_weights=traffic_weights,
         traffic_path=traffic_path,
@@ -1442,7 +1442,7 @@ def main():
     )
 
     print(f"配置信息:")
-    print(f"  拓扑: {topo_type}")
+    print(f"  拓扑: {kcin_type}")
     print(f"  Traffic: {traffic_files}")
     print(f"  结果目录: {runner.result_dir}")
     print(f"  参数总数: {len(ALL_PARAMS)} (FIFO: {len(FIFO_PARAMS)}, ETag: {len(ETAG_PARAMS)})")

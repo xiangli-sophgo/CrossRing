@@ -106,7 +106,7 @@ export const CONFIG_TOOLTIPS: Record<string, string> = {
   TU_Etag_T1_UE_MAX: 'Max T1 upgrade entries for TU direction',
   TD_Etag_T2_UE_MAX: 'Max T2 upgrade entries for TD direction',
   ETAG_T1_ENABLED: 'Enable 3-level ETag mode (T2→T1→T0), otherwise 2-level (T2→T0)',
-  ETag_BOTHSIDE_UPGRADE: 'Enable ETag upgrade on both sides',
+  ETAG_BOTHSIDE_UPGRADE: 'Enable ETag upgrade on both sides',
   // ITag Config
   ITag_TRIGGER_Th_H: 'ITag trigger threshold for horizontal direction',
   ITag_TRIGGER_Th_V: 'ITag trigger threshold for vertical direction',

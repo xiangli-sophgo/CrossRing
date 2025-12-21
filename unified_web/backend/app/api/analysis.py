@@ -97,6 +97,27 @@ async def get_all_sensitivity(
     return {"experiment_id": experiment_id, "metric": metric or "performance", "parameters": result}
 
 
+@router.get("/experiments/{experiment_id}/influence")
+async def get_parameter_influence(
+    experiment_id: int,
+    metric: str = Query(None, description="性能指标名（默认使用performance）"),
+):
+    """
+    获取各参数对性能的影响度（基于方差贡献）
+
+    使用方差分解方法计算每个参数对性能变化的贡献比例：
+    影响度 = Var(各取值的平均性能) / Var(所有性能)
+
+    返回按影响度从高到低排序的参数列表
+    """
+    experiment = db_manager.get_experiment(experiment_id)
+    if not experiment:
+        raise HTTPException(status_code=404, detail="实验不存在")
+
+    result = db_manager.get_parameter_influence(experiment_id, metric)
+    return {"experiment_id": experiment_id, **result}
+
+
 @router.post("/compare", response_model=CompareResponse)
 async def compare_experiments(request: CompareRequest):
     """
@@ -222,3 +243,99 @@ async def compare_experiments_by_traffic(request: CompareRequest):
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ==================== 分析图表配置 API ====================
+
+class ChartConfigRequest(BaseModel):
+    """图表配置请求"""
+    name: str
+    chart_type: str  # line / heatmap / sensitivity
+    config: Dict[str, Any]  # 图表配置（参数、指标等）
+    sort_order: int = 0
+
+
+class ChartConfigUpdateRequest(BaseModel):
+    """图表配置更新请求"""
+    name: str = None
+    config: Dict[str, Any] = None
+    sort_order: int = None
+
+
+class ChartConfigResponse(BaseModel):
+    """图表配置响应"""
+    id: int
+    name: str
+    chart_type: str
+    config: Dict[str, Any]
+    sort_order: int
+    created_at: str = None
+    updated_at: str = None
+
+
+@router.get("/experiments/{experiment_id}/charts", response_model=List[ChartConfigResponse])
+async def get_analysis_charts(experiment_id: int):
+    """获取实验的所有保存的分析图表配置"""
+    experiment = db_manager.get_experiment(experiment_id)
+    if not experiment:
+        raise HTTPException(status_code=404, detail="实验不存在")
+
+    charts = db_manager.db.get_analysis_charts(experiment_id)
+    return charts
+
+
+@router.post("/experiments/{experiment_id}/charts", response_model=ChartConfigResponse)
+async def add_analysis_chart(experiment_id: int, request: ChartConfigRequest):
+    """添加分析图表配置"""
+    experiment = db_manager.get_experiment(experiment_id)
+    if not experiment:
+        raise HTTPException(status_code=404, detail="实验不存在")
+
+    if request.chart_type not in ["line", "heatmap", "sensitivity"]:
+        raise HTTPException(status_code=400, detail="无效的图表类型，必须是 line/heatmap/sensitivity")
+
+    chart_id = db_manager.db.add_analysis_chart(
+        experiment_id=experiment_id,
+        name=request.name,
+        chart_type=request.chart_type,
+        config=request.config,
+        sort_order=request.sort_order,
+    )
+
+    charts = db_manager.db.get_analysis_charts(experiment_id)
+    return next(c for c in charts if c["id"] == chart_id)
+
+
+@router.put("/experiments/{experiment_id}/charts/{chart_id}", response_model=ChartConfigResponse)
+async def update_analysis_chart(experiment_id: int, chart_id: int, request: ChartConfigUpdateRequest):
+    """更新分析图表配置"""
+    experiment = db_manager.get_experiment(experiment_id)
+    if not experiment:
+        raise HTTPException(status_code=404, detail="实验不存在")
+
+    success = db_manager.db.update_analysis_chart(
+        chart_id=chart_id,
+        name=request.name,
+        config=request.config,
+        sort_order=request.sort_order,
+    )
+
+    if not success:
+        raise HTTPException(status_code=404, detail="图表配置不存在")
+
+    charts = db_manager.db.get_analysis_charts(experiment_id)
+    return next(c for c in charts if c["id"] == chart_id)
+
+
+@router.delete("/experiments/{experiment_id}/charts/{chart_id}")
+async def delete_analysis_chart(experiment_id: int, chart_id: int):
+    """删除分析图表配置"""
+    experiment = db_manager.get_experiment(experiment_id)
+    if not experiment:
+        raise HTTPException(status_code=404, detail="实验不存在")
+
+    success = db_manager.db.delete_analysis_chart(chart_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="图表配置不存在")
+
+    return {"success": True}

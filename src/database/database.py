@@ -12,7 +12,7 @@ from typing import Optional, Union
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker, Session
 
-from .models import Base, Experiment, KcinResult, DcinResult, ResultFile
+from .models import Base, Experiment, KcinResult, DcinResult, ResultFile, AnalysisChart
 
 
 # 默认数据库路径
@@ -970,3 +970,116 @@ class DatabaseManager:
                 ).update({"completed_combinations": new_count})
 
             return count
+
+    # ==================== 分析图表配置管理 ====================
+
+    def get_analysis_charts(self, experiment_id: int) -> list:
+        """
+        获取实验的所有分析图表配置
+
+        Args:
+            experiment_id: 实验ID
+
+        Returns:
+            图表配置列表
+        """
+        with self.get_session() as session:
+            charts = session.query(AnalysisChart).filter(
+                AnalysisChart.experiment_id == experiment_id
+            ).order_by(AnalysisChart.sort_order, AnalysisChart.id).all()
+            return [
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    "chart_type": c.chart_type,
+                    "config": c.config,
+                    "sort_order": c.sort_order,
+                    "created_at": c.created_at.isoformat() if c.created_at else None,
+                    "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+                }
+                for c in charts
+            ]
+
+    def add_analysis_chart(
+        self,
+        experiment_id: int,
+        name: str,
+        chart_type: str,
+        config: dict,
+        sort_order: int = 0,
+    ) -> int:
+        """
+        添加分析图表配置
+
+        Args:
+            experiment_id: 实验ID
+            name: 图表名称
+            chart_type: 图表类型
+            config: 图表配置
+            sort_order: 排序顺序
+
+        Returns:
+            图表ID
+        """
+        with self.get_session() as session:
+            chart = AnalysisChart(
+                experiment_id=experiment_id,
+                name=name,
+                chart_type=chart_type,
+                config=config,
+                sort_order=sort_order,
+            )
+            session.add(chart)
+            session.flush()
+            return chart.id
+
+    def update_analysis_chart(
+        self,
+        chart_id: int,
+        name: str = None,
+        config: dict = None,
+        sort_order: int = None,
+    ) -> bool:
+        """
+        更新分析图表配置
+
+        Args:
+            chart_id: 图表ID
+            name: 新名称
+            config: 新配置
+            sort_order: 新排序
+
+        Returns:
+            是否更新成功
+        """
+        with self.get_session() as session:
+            chart = session.query(AnalysisChart).filter(
+                AnalysisChart.id == chart_id
+            ).first()
+            if not chart:
+                return False
+
+            if name is not None:
+                chart.name = name
+            if config is not None:
+                chart.config = config
+            if sort_order is not None:
+                chart.sort_order = sort_order
+
+            return True
+
+    def delete_analysis_chart(self, chart_id: int) -> bool:
+        """
+        删除分析图表配置
+
+        Args:
+            chart_id: 图表ID
+
+        Returns:
+            是否删除成功
+        """
+        with self.get_session() as session:
+            count = session.query(AnalysisChart).filter(
+                AnalysisChart.id == chart_id
+            ).delete()
+            return count > 0

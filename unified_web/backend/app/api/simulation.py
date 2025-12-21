@@ -128,7 +128,7 @@ async def run_simulation(request: SimulationRequest):
     else:
         # 根据模式和拓扑选择默认配置
         if request.mode == "kcin":
-            config_path = str(TOPOLOGIES_DIR / f"topo_{request.topology}.yaml")
+            config_path = str(TOPOLOGIES_DIR / f"kcin_{request.topology}.yaml")
         else:
             config_path = str(TOPOLOGIES_DIR / f"dcin_{request.topology}_config.yaml")
 
@@ -428,7 +428,7 @@ async def clear_history():
     return {"success": True, "message": "历史任务已清空"}
 
 
-def _parse_topo_name(name: str) -> tuple:
+def _parse_kcin_name(name: str) -> tuple:
     """
     解析拓扑名称为数字元组，用于排序
     例如: "5x4" -> (5, 4), "10x8" -> (10, 8)
@@ -453,13 +453,13 @@ async def list_configs():
     if TOPOLOGIES_DIR.exists():
         for f in TOPOLOGIES_DIR.glob("*.yaml"):
             name = f.stem
-            if name.startswith("topo_"):
-                kcin_configs.append(ConfigOption(name=name.replace("topo_", ""), path=f.name))
+            if name.startswith("kcin_"):
+                kcin_configs.append(ConfigOption(name=name.replace("kcin_", ""), path=f.name))
             elif name.startswith("dcin_"):
                 dcin_configs.append(ConfigOption(name=name, path=f.name))
 
     # KCIN按拓扑大小排序（先行数后列数）
-    kcin_configs.sort(key=lambda c: _parse_topo_name(c.name))
+    kcin_configs.sort(key=lambda c: _parse_kcin_name(c.name))
     # DCIN按名称排序
     dcin_configs.sort(key=lambda c: c.name)
 
@@ -487,16 +487,28 @@ def _sanitize_for_json(obj):
 @router.get("/config/{config_path:path}")
 async def get_config_content(config_path: str):
     """
-    读取配置文件内容
+    读取配置文件内容，与默认配置合并确保所有参数都有值
     """
     config_file = _validate_path(TOPOLOGIES_DIR, config_path)
     if not config_file.exists():
         raise HTTPException(status_code=404, detail=f"配置文件不存在: {config_path}")
 
     try:
+        # 先加载默认配置
+        default_file = TOPOLOGIES_DIR / "default.yaml"
+        default_content = {}
+        if default_file.exists():
+            with open(default_file, 'r', encoding='utf-8') as f:
+                default_content = yaml.safe_load(f) or {}
+
+        # 加载用户选择的配置
         with open(config_file, 'r', encoding='utf-8') as f:
-            content = yaml.safe_load(f)
-        return _sanitize_for_json(content)
+            user_content = yaml.safe_load(f) or {}
+
+        # 合并配置：用户配置覆盖默认配置
+        merged_content = {**default_content, **user_content}
+
+        return _sanitize_for_json(merged_content)
     except yaml.YAMLError as e:
         logger.error(f"YAML解析错误: {config_path} - {e}")
         raise HTTPException(status_code=400, detail="配置文件格式错误")
@@ -605,7 +617,7 @@ def _format_config_with_comments(content: dict) -> str:
             },
             "Feature Config": {
                 "keys": [
-                    "UNIFIED_RW_TRACKER", "ETAG_T1_ENABLED", "ETag_BOTHSIDE_UPGRADE",
+                    "UNIFIED_RW_TRACKER", "ETAG_T1_ENABLED", "ETAG_BOTHSIDE_UPGRADE",
                     "ORDERING_PRESERVATION_MODE", "ORDERING_ETAG_UPGRADE_MODE", "ORDERING_GRANULARITY",
                     "TL_ALLOWED_SOURCE_NODES", "TR_ALLOWED_SOURCE_NODES", "TU_ALLOWED_SOURCE_NODES", "TD_ALLOWED_SOURCE_NODES",
                     "REVERSE_DIRECTION_ENABLED", "REVERSE_DIRECTION_THRESHOLD",
@@ -619,6 +631,7 @@ def _format_config_with_comments(content: dict) -> str:
                     "ORDERING_GRANULARITY": "0=IP层级, 1=节点层级",
                     "REVERSE_DIRECTION_ENABLED": "启用反方向流控 (0=禁用, 1=启用)",
                     "REVERSE_DIRECTION_THRESHOLD": "阈值比例 (0.25=激进, 0.5=推荐, 0.75=保守)",
+                    "ENABLE_CROSSPOINT_CONFLICT_CHECK": "CrossPoint冲突检查 (0=检查当前周期, 1=检查当前+前一周期)",
                 }
             },
         }

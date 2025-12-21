@@ -53,7 +53,7 @@ def run_single_simulation(sim_params):
         config.CROSSRING_VERSION = "V1"
 
         # 从配置文件获取拓扑类型
-        topo_type = config.TOPO_TYPE
+        kcin_type = config.TOPO_TYPE
 
         # 获取模型类
         model_class = MODEL_CLASS_MAP.get(model_type)
@@ -64,7 +64,7 @@ def run_single_simulation(sim_params):
         sim: BaseModel = model_class(
             model_type=model_type,
             config=config,
-            topo_type=topo_type,
+            kcin_type=kcin_type,
             verbose=0,
         )
 
@@ -224,7 +224,7 @@ def main():
     parser.add_argument("--traffic_output", default=r"../traffic/DeepSeek_0616", help="Output directory for processed data")
     # parser.add_argument("--traffic_output", default=r"../traffic/sim_d2d_traffic", help="Output directory for processed data")
     parser.add_argument("--outstanding", type=int, default=2048, help="Outstanding number (must be power of 2)")
-    parser.add_argument("--config", default="../config/topologies/topo_5x4.yaml", help="Simulation config file path")
+    parser.add_argument("--config", default="../config/topologies/kcin_5x4.yaml", help="Simulation config file path")
     parser.add_argument("--model", default="REQ_RSP", choices=["Feature", "REQ_RSP", "Packet_Base"], help="Simulation model type")
     parser.add_argument("--results_file_name", default="M2_IP_All", help="Base name for results files")
     parser.add_argument("--mode", default=1, choices=[0, 1, 2], help="Execution mode: 0 for data processing only, 1 for simulation only, 2 for both")

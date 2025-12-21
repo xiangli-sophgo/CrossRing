@@ -10,6 +10,7 @@ import {
   ClockCircleOutlined,
   SyncOutlined,
   StopOutlined,
+  CloseOutlined,
 } from '@ant-design/icons'
 import { primaryColor, successColor, warningColor, errorColor } from '@/theme/colors'
 import type { TaskStatus } from '@/api/simulation'
@@ -23,6 +24,7 @@ interface TaskStatusCardProps {
   currentTask: TaskStatus
   startTime: number | null
   onCancel?: () => void
+  onClose?: () => void
 }
 
 // 获取状态标签
@@ -42,6 +44,7 @@ export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
   currentTask,
   startTime,
   onCancel,
+  onClose,
 }) => {
   const [elapsedTime, setElapsedTime] = useState(getElapsedTime(startTime))
 
@@ -69,16 +72,29 @@ export const TaskStatusCard: React.FC<TaskStatusCardProps> = ({
           {getStatusTag(currentTask.status)}
         </Space>
       }
-      extra={onCancel && (
-        <Button
-          icon={<StopOutlined />}
-          danger
-          size="small"
-          onClick={onCancel}
-        >
-          取消
-        </Button>
-      )}
+      extra={
+        <Space>
+          {onCancel && (
+            <Button
+              icon={<StopOutlined />}
+              danger
+              size="small"
+              onClick={onCancel}
+            >
+              取消
+            </Button>
+          )}
+          {onClose && (
+            <Button
+              icon={<CloseOutlined />}
+              size="small"
+              onClick={onClose}
+            >
+              关闭
+            </Button>
+          )}
+        </Space>
+      }
       style={{ marginBottom: 16 }}
     >
       <Row gutter={[24, 16]}>

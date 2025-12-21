@@ -141,23 +141,23 @@ def save_results_to_csv(results, csv_output_path):
         traceback.print_exc()
 
 
-def run_single_simulation(traffic_file, topo_type, model_type, config_path, result_save_path):
+def run_single_simulation(traffic_file, kcin_type, model_type, config_path, result_save_path):
     """运行单个仿真"""
     print(f"开始仿真: {traffic_file}")
 
     config = CrossRingConfig(config_path)
     config.CROSSRING_VERSION = "V1"
-    config.TOPO_TYPE = topo_type
+    config.TOPO_TYPE = kcin_type
 
     # 根据拓扑类型配置参数
-    if topo_type == "4x4":
+    if kcin_type == "4x4":
         config.NUM_COL = 4
         config.NUM_NODE = 32
         config.NUM_ROW = 8
         config.BURST = 4
         config.NUM_IP = 16
 
-    elif topo_type == "4x2":
+    elif kcin_type == "4x2":
         config.NUM_COL = 2
         config.NUM_NODE = 16
         config.NUM_ROW = 8
@@ -192,7 +192,7 @@ def run_single_simulation(traffic_file, topo_type, model_type, config_path, resu
 
     config.ITag_TRIGGER_Th_H = config.ITag_TRIGGER_Th_V = 80
     config.ITag_MAX_NUM_H = config.ITag_MAX_NUM_V = 1
-    config.ETag_BOTHSIDE_UPGRADE = 0
+    config.ETAG_BOTHSIDE_UPGRADE = 0
     config.SLICE_PER_LINK_HORIZONTAL = 8
     config.SLICE_PER_LINK_VERTICAL = 8
 
@@ -213,7 +213,7 @@ def run_single_simulation(traffic_file, topo_type, model_type, config_path, resu
     sim: BaseModel = eval(f"{model_type}_model")(
         model_type=model_type,
         config=config,
-        topo_type=topo_type,
+        kcin_type=kcin_type,
     )
 
     # 配置流量调度器
@@ -258,7 +258,7 @@ def run_single_simulation(traffic_file, topo_type, model_type, config_path, resu
     return {
         "file": traffic_file,
         "time": end_time - start_time,
-        "config": {"topo": topo_type, "c2c_type": "w" if "wc2c" in traffic_file else "wo", "spare_core": "w" if "wSPC" in traffic_file else "wo", "req_type": "R" if "_R.txt" in traffic_file else "W"},
+        "config": {"topo": kcin_type, "c2c_type": "w" if "wc2c" in traffic_file else "wo", "spare_core": "w" if "wSPC" in traffic_file else "wo", "req_type": "R" if "_R.txt" in traffic_file else "W"},
         "bandwidth": bandwidth_data,
     }
 
@@ -270,7 +270,7 @@ def batch_simulate_all():
     # 参数设置
     model_type = "REQ_RSP"
     # 使用5x4拓扑的YAML配置文件
-    config_path = r"../config/topologies/topo_5x4.yaml"
+    config_path = r"../config/topologies/kcin_5x4.yaml"
     result_save_path = f"../Result/2262_0801_Sim/{model_type}/"
     traffic_base_path = "../test_data/"
 
@@ -302,7 +302,7 @@ def batch_simulate_all():
 
         try:
             # 运行仿真
-            result = run_single_simulation(traffic_file=traffic_file, topo_type=topo, model_type=model_type, config_path=config_path, result_save_path=specific_result_path)
+            result = run_single_simulation(traffic_file=traffic_file, kcin_type=topo, model_type=model_type, config_path=config_path, result_save_path=specific_result_path)
             results.append(result)
 
         except Exception as e:
