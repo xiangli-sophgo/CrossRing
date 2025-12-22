@@ -219,19 +219,53 @@ def _load_parquet_from_db(result_id: int, result_type: str) -> Tuple[pd.DataFram
     Raises:
         HTTPException: 如果文件不存在
     """
+    import json
+
     db = DatabaseManager()
 
-    # 获取requests.parquet
-    requests_file = db.get_result_file_by_name(result_id, result_type, "requests.parquet")
-    if not requests_file or not requests_file.file_content:
-        raise HTTPException(status_code=404, detail="未找到requests.parquet文件")
+    # 优先尝试加载新格式 waveform.parquet
+    waveform_file = db.get_result_file_by_name(result_id, result_type, "waveform.parquet")
+    if waveform_file and waveform_file.file_content:
+        waveform_df = pd.read_parquet(io.BytesIO(waveform_file.file_content))
 
-    # 获取flits.parquet
+        # 构造 requests_df（排除 flits 列）
+        requests_cols = [c for c in waveform_df.columns if c != "flits"]
+        requests_df = waveform_df[requests_cols].copy()
+
+        # 展开 flits 列构造 flits_df
+        flits_rows = []
+        for _, row in waveform_df.iterrows():
+            packet_id = row["packet_id"]
+            flits_json = row.get("flits", "[]")
+            try:
+                flits_list = json.loads(flits_json) if isinstance(flits_json, str) else flits_json
+                for flit_info in flits_list:
+                    flits_rows.append({
+                        "packet_id": packet_id,
+                        "flit_id": flit_info.get("flit_id", 0),
+                        "flit_type": flit_info.get("flit_type", ""),
+                        "position_timestamps": json.dumps(flit_info.get("position_timestamps", {})),
+                        "rsp_type": flit_info.get("rsp_type", ""),
+                        "req_attr": flit_info.get("req_attr", ""),
+                    })
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        flits_df = pd.DataFrame(flits_rows) if flits_rows else pd.DataFrame(
+            columns=["packet_id", "flit_id", "flit_type", "position_timestamps", "rsp_type", "req_attr"]
+        )
+
+        return requests_df, flits_df
+
+    # 向后兼容：尝试加载旧格式的两个文件
+    requests_file = db.get_result_file_by_name(result_id, result_type, "requests.parquet")
     flits_file = db.get_result_file_by_name(result_id, result_type, "flits.parquet")
+
+    if not requests_file or not requests_file.file_content:
+        raise HTTPException(status_code=404, detail="未找到waveform.parquet或requests.parquet文件")
     if not flits_file or not flits_file.file_content:
         raise HTTPException(status_code=404, detail="未找到flits.parquet文件")
 
-    # 从内存读取parquet
     requests_df = pd.read_parquet(io.BytesIO(requests_file.file_content))
     flits_df = pd.read_parquet(io.BytesIO(flits_file.file_content))
 

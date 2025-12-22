@@ -72,3 +72,19 @@ export const FIFO_COLORS: Record<string, string> = {
   EQ_TD: '#fadb14',
   EQ_CH: '#13c2c2',
 };
+
+// 获取 FIFO 颜色（支持 IP 通道如 IQ_CH_G0）
+export const getFIFOColor = (fifoType: string): string => {
+  // 直接匹配
+  if (FIFO_COLORS[fifoType]) {
+    return FIFO_COLORS[fifoType];
+  }
+  // IP 通道：IQ_CH_G0 -> IQ_CH
+  if (fifoType.startsWith('IQ_CH_')) {
+    return FIFO_COLORS['IQ_CH'] || '#8c8c8c';
+  }
+  if (fifoType.startsWith('EQ_CH_')) {
+    return FIFO_COLORS['EQ_CH'] || '#13c2c2';
+  }
+  return '#999';
+};

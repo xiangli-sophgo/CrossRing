@@ -4,8 +4,10 @@
 
 import { useState, useEffect } from 'react';
 import { Checkbox, Space, Button, Divider } from 'antd';
-import type { CheckboxValueType } from 'antd/es/checkbox/Group';
+import type { CheckboxProps } from 'antd';
 import { getAvailableFIFOs } from '@/api/fifoWaveform';
+
+type CheckboxValueType = NonNullable<CheckboxProps['value']>;
 
 interface Props {
   experimentId: number;

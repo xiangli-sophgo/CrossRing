@@ -43,11 +43,18 @@ class DatabaseManager:
             db_path: 数据库文件路径，默认为 ../Result/Database/simulation.db
         """
         if self._initialized:
+            # 检查数据库文件是否仍然存在，如果被删除则需要重新初始化
+            if not Path(self.db_path).exists():
+                self._reinitialize(db_path)
             return
 
         if db_path is None:
             db_path = str(DEFAULT_DB_PATH)
 
+        self._do_init(db_path)
+
+    def _do_init(self, db_path: str):
+        """执行实际的初始化逻辑"""
         # 确保目录存在
         db_dir = Path(db_path).parent
         db_dir.mkdir(parents=True, exist_ok=True)
@@ -68,9 +75,25 @@ class DatabaseManager:
 
         self._initialized = True
 
+    def _reinitialize(self, db_path: Optional[str] = None):
+        """重新初始化数据库连接（当数据库文件被删除后调用）"""
+        if db_path is None:
+            db_path = self.db_path if hasattr(self, 'db_path') else str(DEFAULT_DB_PATH)
+
+        # 关闭旧的连接
+        if hasattr(self, 'engine') and self.engine:
+            self.engine.dispose()
+
+        self._do_init(db_path)
+
     def create_tables(self):
         """创建所有表结构"""
         Base.metadata.create_all(self.engine)
+
+    def _ensure_db_exists(self):
+        """确保数据库文件存在，如果被删除则重新初始化"""
+        if not Path(self.db_path).exists():
+            self._reinitialize()
 
     @contextmanager
     def get_session(self):
@@ -81,6 +104,7 @@ class DatabaseManager:
             with db_manager.get_session() as session:
                 session.query(...)
         """
+        self._ensure_db_exists()
         session = self.SessionLocal()
         try:
             yield session
@@ -98,6 +122,7 @@ class DatabaseManager:
         Returns:
             Session: 数据库会话
         """
+        self._ensure_db_exists()
         return self.SessionLocal()
 
     # ==================== 实验相关操作 ====================

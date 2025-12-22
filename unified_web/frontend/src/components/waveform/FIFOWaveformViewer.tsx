@@ -129,23 +129,27 @@ export default function FIFOWaveformViewer({ experimentId, resultId, nodeId: pro
           />
         ) : null}
 
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: 50 }}>
-            <Spin tip="加载FIFO波形数据..." />
-          </div>
-        ) : !waveformData || waveformData.signals.length === 0 ? (
-          <Empty
-            description={
-              selectedFifos.length === 0
-                ? '请选择要查看的FIFO'
-                : '所选FIFO无数据'
-            }
-          />
+        {!waveformData || waveformData.signals.length === 0 ? (
+          loading ? (
+            <div style={{ textAlign: 'center', padding: 50 }}>
+              <Spin tip="加载FIFO波形数据..." />
+            </div>
+          ) : (
+            <Empty
+              description={
+                selectedFifos.length === 0
+                  ? '请选择要查看的FIFO'
+                  : '所选FIFO无数据'
+              }
+            />
+          )
         ) : (
-          <FIFOWaveformChart
-            signals={waveformData.signals}
-            timeRange={waveformData.time_range}
-          />
+          <Spin spinning={loading} tip="更新中...">
+            <FIFOWaveformChart
+              signals={waveformData.signals}
+              timeRange={waveformData.time_range}
+            />
+          </Spin>
         )}
       </Card>
     </div>

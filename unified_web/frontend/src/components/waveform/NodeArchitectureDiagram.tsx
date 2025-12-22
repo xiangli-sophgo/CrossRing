@@ -9,6 +9,7 @@ import React, { useMemo } from 'react';
 interface NodeArchitectureDiagramProps {
   selectedNode: number | null;
   selectedFifos: string[];
+  selectedChannel: string;  // 当前选中的通道类型
   onFifoSelect: (fifo: string) => void;
   availableFifos?: string[];
   activeIPs?: string[];  // 当前节点实际挂载的IP类型列表
@@ -27,6 +28,7 @@ interface FIFORectProps {
   textAngle?: number;
 }
 
+
 const FIFORect: React.FC<FIFORectProps> = ({
   x,
   y,
@@ -39,6 +41,12 @@ const FIFORect: React.FC<FIFORectProps> = ({
   onClick,
   textAngle = 0,
 }) => {
+  const bgColor = isAvailable
+    ? isSelected
+      ? '#3b82f6'
+      : '#e5e7eb'
+    : '#d1d5db';
+
   return (
     <g
       onClick={() => isAvailable && onClick(fifoId)}
@@ -49,10 +57,10 @@ const FIFORect: React.FC<FIFORectProps> = ({
         y={y}
         width={width}
         height={height}
-        fill={isAvailable ? (isSelected ? '#3b82f6' : '#e5e7eb') : '#d1d5db'}
+        fill={bgColor}
         stroke={isSelected ? '#1d4ed8' : '#9ca3af'}
-        strokeWidth={isSelected ? 3 : 1}
-        rx={4}
+        strokeWidth={isSelected ? 2 : 1}
+        rx={0}
       />
       <text
         x={x + width / 2}
@@ -69,6 +77,7 @@ const FIFORect: React.FC<FIFORectProps> = ({
     </g>
   );
 };
+
 
 const ModuleBox: React.FC<{
   x: number;
@@ -89,7 +98,7 @@ const ModuleBox: React.FC<{
         fillOpacity={0.2}
         stroke="#000"
         strokeWidth={2}
-        rx={8}
+        rx={0}
       />
       <text
         x={x + width / 2}
@@ -108,6 +117,7 @@ const ModuleBox: React.FC<{
 const NodeArchitectureDiagram: React.FC<NodeArchitectureDiagramProps> = ({
   selectedNode,
   selectedFifos,
+  selectedChannel,
   onFifoSelect,
   availableFifos,
   activeIPs,
@@ -127,14 +137,16 @@ const NodeArchitectureDiagram: React.FC<NodeArchitectureDiagramProps> = ({
   }, [activeIPs]);
 
   // 检查FIFO是否可用
-  const isAvailable = (fifoId: string) => {
+  const isFifoAvailable = (fifoId: string) => {
     if (!availableFifos) return true;
     return availableFifos.includes(fifoId);
   };
 
-  // 检查FIFO是否被选中
-  const isSelected = (fifoId: string) => {
-    return selectedFifos.includes(fifoId);
+  // 检查FIFO在当前节点和通道下是否被选中
+  // selectedFifos 格式: "nodeId.fifoId.channel"
+  const isFifoSelected = (fifoId: string) => {
+    if (selectedNode === null) return false;
+    return selectedFifos.includes(`${selectedNode}.${fifoId}.${selectedChannel}`);
   };
 
   if (selectedNode === null) {
@@ -175,40 +187,20 @@ const NodeArchitectureDiagram: React.FC<NodeArchitectureDiagramProps> = ({
         <FIFORect
           key={`EQ_CH_${ch}`}
           x={275}
-          y={45 + i * 20}
+          y={45 + i * 25}
           width={40}
-          height={16}
+          height={20}
           label={ch}
           fifoId={`EQ_CH_${ch}`}
-          isSelected={isSelected(`EQ_CH_${ch}`)}
-          isAvailable={isAvailable(`EQ_CH_${ch}`)}
+          isSelected={isFifoSelected(`EQ_CH_${ch}`)}
+          isAvailable={isFifoAvailable(`EQ_CH_${ch}`)}
           onClick={onFifoSelect}
         />
       ))}
 
       {/* EQ TU/TD（右侧纵向） */}
-      <FIFORect
-        x={415}
-        y={45}
-        width={50}
-        height={35}
-        label="TU"
-        fifoId="EQ_TU"
-        isSelected={isSelected('EQ_TU')}
-        isAvailable={isAvailable('EQ_TU')}
-        onClick={onFifoSelect}
-      />
-      <FIFORect
-        x={415}
-        y={85}
-        width={50}
-        height={35}
-        label="TD"
-        fifoId="EQ_TD"
-        isSelected={isSelected('EQ_TD')}
-        isAvailable={isAvailable('EQ_TD')}
-        onClick={onFifoSelect}
-      />
+      <FIFORect x={415} y={45} width={50} height={35} label="TU" fifoId="EQ_TU" isSelected={isFifoSelected('EQ_TU')} isAvailable={isFifoAvailable('EQ_TU')} onClick={onFifoSelect} />
+      <FIFORect x={415} y={95} width={50} height={35} label="TD" fifoId="EQ_TD" isSelected={isFifoSelected('EQ_TD')} isAvailable={isFifoAvailable('EQ_TD')} onClick={onFifoSelect} />
 
       {/* Ring Bridge 模块（右下） */}
       <ModuleBox
@@ -221,65 +213,15 @@ const NodeArchitectureDiagram: React.FC<NodeArchitectureDiagramProps> = ({
       />
 
       {/* RB EQ（左上角） */}
-      <FIFORect
-        x={275}
-        y={235}
-        width={50}
-        height={35}
-        label="EQ"
-        fifoId="RB_EQ"
-        isSelected={isSelected('RB_EQ')}
-        isAvailable={isAvailable('RB_EQ')}
-        onClick={onFifoSelect}
-      />
+      <FIFORect x={275} y={235} width={50} height={35} label="EQ" fifoId="RB_EQ" isSelected={isFifoSelected('RB_EQ')} isAvailable={isFifoAvailable('RB_EQ')} onClick={onFifoSelect} />
 
       {/* RB TL/TR（底部水平排列） */}
-      <FIFORect
-        x={275}
-        y={335}
-        width={35}
-        height={50}
-        label="TL"
-        fifoId="RB_TL"
-        isSelected={isSelected('RB_TL')}
-        isAvailable={isAvailable('RB_TL')}
-        onClick={onFifoSelect}
-      />
-      <FIFORect
-        x={320}
-        y={335}
-        width={35}
-        height={50}
-        label="TR"
-        fifoId="RB_TR"
-        isSelected={isSelected('RB_TR')}
-        isAvailable={isAvailable('RB_TR')}
-        onClick={onFifoSelect}
-      />
+      <FIFORect x={275} y={335} width={35} height={50} label="TL" fifoId="RB_TL" isSelected={isFifoSelected('RB_TL')} isAvailable={isFifoAvailable('RB_TL')} onClick={onFifoSelect} />
+      <FIFORect x={320} y={335} width={35} height={50} label="TR" fifoId="RB_TR" isSelected={isFifoSelected('RB_TR')} isAvailable={isFifoAvailable('RB_TR')} onClick={onFifoSelect} />
 
       {/* RB TU/TD（右侧纵向） */}
-      <FIFORect
-        x={415}
-        y={235}
-        width={50}
-        height={35}
-        label="TU"
-        fifoId="RB_TU"
-        isSelected={isSelected('RB_TU')}
-        isAvailable={isAvailable('RB_TU')}
-        onClick={onFifoSelect}
-      />
-      <FIFORect
-        x={415}
-        y={275}
-        width={50}
-        height={35}
-        label="TD"
-        fifoId="RB_TD"
-        isSelected={isSelected('RB_TD')}
-        isAvailable={isAvailable('RB_TD')}
-        onClick={onFifoSelect}
-      />
+      <FIFORect x={415} y={235} width={50} height={35} label="TU" fifoId="RB_TU" isSelected={isFifoSelected('RB_TU')} isAvailable={isFifoAvailable('RB_TU')} onClick={onFifoSelect} />
+      <FIFORect x={415} y={285} width={50} height={35} label="TD" fifoId="RB_TD" isSelected={isFifoSelected('RB_TD')} isAvailable={isFifoAvailable('RB_TD')} onClick={onFifoSelect} />
 
       {/* Inject Queue 模块（左侧） */}
       <ModuleBox
@@ -295,79 +237,29 @@ const NodeArchitectureDiagram: React.FC<NodeArchitectureDiagramProps> = ({
       {channels.map((ch, i) => (
         <FIFORect
           key={`IQ_CH_${ch}`}
-          x={15 + i * 24}
+          x={15 + i * 28}
           y={235}
-          width={20}
+          width={24}
           height={40}
           label={ch}
           fifoId={`IQ_CH_${ch}`}
-          isSelected={isSelected(`IQ_CH_${ch}`)}
-          isAvailable={isAvailable(`IQ_CH_${ch}`)}
+          isSelected={isFifoSelected(`IQ_CH_${ch}`)}
+          isAvailable={isFifoAvailable(`IQ_CH_${ch}`)}
           onClick={onFifoSelect}
           textAngle={90}
         />
       ))}
 
       {/* IQ EQ（右侧上） */}
-      <FIFORect
-        x={175}
-        y={235}
-        width={50}
-        height={35}
-        label="EQ"
-        fifoId="IQ_EQ"
-        isSelected={isSelected('IQ_EQ')}
-        isAvailable={isAvailable('IQ_EQ')}
-        onClick={onFifoSelect}
-      />
+      <FIFORect x={175} y={235} width={50} height={35} label="EQ" fifoId="IQ_EQ" isSelected={isFifoSelected('IQ_EQ')} isAvailable={isFifoAvailable('IQ_EQ')} onClick={onFifoSelect} />
 
       {/* IQ TU/TD（右侧） */}
-      <FIFORect
-        x={175}
-        y={285}
-        width={50}
-        height={35}
-        label="TU"
-        fifoId="IQ_TU"
-        isSelected={isSelected('IQ_TU')}
-        isAvailable={isAvailable('IQ_TU')}
-        onClick={onFifoSelect}
-      />
-      <FIFORect
-        x={175}
-        y={325}
-        width={50}
-        height={35}
-        label="TD"
-        fifoId="IQ_TD"
-        isSelected={isSelected('IQ_TD')}
-        isAvailable={isAvailable('IQ_TD')}
-        onClick={onFifoSelect}
-      />
+      <FIFORect x={175} y={285} width={50} height={35} label="TU" fifoId="IQ_TU" isSelected={isFifoSelected('IQ_TU')} isAvailable={isFifoAvailable('IQ_TU')} onClick={onFifoSelect} />
+      <FIFORect x={175} y={335} width={50} height={35} label="TD" fifoId="IQ_TD" isSelected={isFifoSelected('IQ_TD')} isAvailable={isFifoAvailable('IQ_TD')} onClick={onFifoSelect} />
 
       {/* IQ TL/TR（底部） */}
-      <FIFORect
-        x={15}
-        y={335}
-        width={35}
-        height={50}
-        label="TL"
-        fifoId="IQ_TL"
-        isSelected={isSelected('IQ_TL')}
-        isAvailable={isAvailable('IQ_TL')}
-        onClick={onFifoSelect}
-      />
-      <FIFORect
-        x={60}
-        y={335}
-        width={35}
-        height={50}
-        label="TR"
-        fifoId="IQ_TR"
-        isSelected={isSelected('IQ_TR')}
-        isAvailable={isAvailable('IQ_TR')}
-        onClick={onFifoSelect}
-      />
+      <FIFORect x={15} y={335} width={35} height={50} label="TL" fifoId="IQ_TL" isSelected={isFifoSelected('IQ_TL')} isAvailable={isFifoAvailable('IQ_TL')} onClick={onFifoSelect} />
+      <FIFORect x={60} y={335} width={35} height={50} label="TR" fifoId="IQ_TR" isSelected={isFifoSelected('IQ_TR')} isAvailable={isFifoAvailable('IQ_TR')} onClick={onFifoSelect} />
     </svg>
   );
 };

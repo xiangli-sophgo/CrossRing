@@ -1658,7 +1658,7 @@ class ParquetExporter:
 
     def export_waveform_data(self, sim_model, output_path: str) -> list:
         """
-        导出请求和flit数据到Parquet文件
+        导出波形数据到Parquet文件
 
         Args:
             sim_model: 仿真模型对象
@@ -1684,33 +1684,25 @@ class ParquetExporter:
 
         generated_files = []
 
-        # 构建requests表数据
-        requests_data = self._build_requests_data(completed_requests)
-        if requests_data["packet_id"]:
-            requests_path = os.path.join(output_path, "requests.parquet")
-            requests_table = pa.Table.from_pydict(requests_data)
-            pq.write_table(requests_table, requests_path)
-            generated_files.append(requests_path)
-
-        # 构建flits表数据
-        flits_data = self._build_flits_data(completed_requests)
-        if flits_data["packet_id"]:
-            flits_path = os.path.join(output_path, "flits.parquet")
-            flits_table = pa.Table.from_pydict(flits_data)
-            pq.write_table(flits_table, flits_path)
-            generated_files.append(flits_path)
+        # 构建合并的波形数据
+        waveform_data = self._build_waveform_data(completed_requests)
+        if waveform_data["packet_id"]:
+            waveform_path = os.path.join(output_path, "waveform.parquet")
+            waveform_table = pa.Table.from_pydict(waveform_data)
+            pq.write_table(waveform_table, waveform_path)
+            generated_files.append(waveform_path)
 
         return generated_files
 
     def export_waveform_data_to_bytes(self, sim_model) -> Dict[str, bytes]:
         """
-        导出请求和flit数据到内存（bytes格式）
+        导出波形数据到内存（bytes格式）
 
         Args:
             sim_model: 仿真模型对象
 
         Returns:
-            {"requests.parquet": bytes, "flits.parquet": bytes}
+            {"waveform.parquet": bytes} - 合并的请求和flit数据
         """
         import io
 
@@ -1729,27 +1721,22 @@ class ParquetExporter:
 
         result = {}
 
-        # 构建requests表数据
-        requests_data = self._build_requests_data(completed_requests)
-        if requests_data["packet_id"]:
-            requests_table = pa.Table.from_pydict(requests_data)
-            requests_buffer = io.BytesIO()
-            pq.write_table(requests_table, requests_buffer)
-            result["requests.parquet"] = requests_buffer.getvalue()
-
-        # 构建flits表数据
-        flits_data = self._build_flits_data(completed_requests)
-        if flits_data["packet_id"]:
-            flits_table = pa.Table.from_pydict(flits_data)
-            flits_buffer = io.BytesIO()
-            pq.write_table(flits_table, flits_buffer)
-            result["flits.parquet"] = flits_buffer.getvalue()
+        # 构建合并的数据（请求级别 + flit时间戳）
+        waveform_data = self._build_waveform_data(completed_requests)
+        if waveform_data["packet_id"]:
+            waveform_table = pa.Table.from_pydict(waveform_data)
+            waveform_buffer = io.BytesIO()
+            pq.write_table(waveform_table, waveform_buffer)
+            result["waveform.parquet"] = waveform_buffer.getvalue()
 
         return result
 
-    def _build_requests_data(self, completed_requests) -> Dict:
-        """构建请求级别数据"""
+    def _build_waveform_data(self, completed_requests) -> Dict:
+        """构建合并的波形数据（请求级别 + flit时间戳）"""
+        import json
+
         data = {
+            # 请求级别信息
             "packet_id": [],
             "req_type": [],
             "source_node": [],
@@ -1762,12 +1749,14 @@ class ParquetExporter:
             "cmd_latency_ns": [],
             "data_latency_ns": [],
             "trans_latency_ns": [],
+            # flit时间戳（JSON数组，每个元素包含flit_id, flit_type, position_timestamps）
+            "flits": [],
         }
 
         for packet_id, lifecycle in completed_requests.items():
             timestamps = lifecycle.timestamps
 
-            # 从flit的position_timestamps获取开始时间（L2H位置）
+            # 计算开始时间（从flit的L2H位置）
             start_cycle = float('inf')
             for flit in lifecycle.request_flits:
                 pos_ts = getattr(flit, 'position_timestamps', {})
@@ -1776,7 +1765,7 @@ class ParquetExporter:
             if start_cycle >= float('inf'):
                 start_cycle = timestamps.get('cmd_entry_cake0_cycle', float('inf'))
 
-            # 从flit的position_timestamps获取结束时间（IP_eject位置）
+            # 计算结束时间（从flit的IP_eject位置）
             end_cycle = float('inf')
             for flit in lifecycle.data_flits + lifecycle.response_flits:
                 pos_ts = getattr(flit, 'position_timestamps', {})
@@ -1788,6 +1777,7 @@ class ParquetExporter:
             if start_cycle >= float('inf') or end_cycle >= float('inf'):
                 continue
 
+            # 请求级别数据
             data["packet_id"].append(packet_id)
             data["req_type"].append(lifecycle.op_type)
             data["source_node"].append(lifecycle.source)
@@ -1812,105 +1802,50 @@ class ParquetExporter:
             data["data_latency_ns"].append(data_latency)
             data["trans_latency_ns"].append(trans_latency)
 
-        return data
+            # 收集所有flit的时间戳
+            flits_info = []
 
-    def _build_flits_data(self, completed_requests) -> Dict:
-        """构建flit级别数据（每个flit一行）"""
-        data = {
-            "packet_id": [],
-            "flit_id": [],
-            "flit_type": [],
-            # 完整的 position_timestamps 字典（JSON 字符串）
-            "position_timestamps": [],
-            # 响应类型和重试信息
-            "rsp_type": [],
-            "req_attr": [],
-            # 统计
-            "eject_attempts_h": [],
-            "eject_attempts_v": [],
-        }
-
-        for packet_id, lifecycle in completed_requests.items():
-            # 处理请求flit
+            # 请求flit
             for flit in lifecycle.request_flits:
-                # 如果有备份的时间戳（第一次失败），先导出第一次失败的记录
+                flit_info = self._extract_flit_info(flit, "req", 0)
+                flits_info.append(flit_info)
+                # 如果有备份时间戳（第一次失败的请求）
                 if hasattr(flit, 'position_timestamps_backup') and flit.position_timestamps_backup:
-                    self._add_flit_to_data(data, packet_id, flit, "req", 0, use_backup=True)
-                # 导出当前的时间戳（重试成功或正常请求）
-                self._add_flit_to_data(data, packet_id, flit, "req", 0, use_backup=False)
+                    backup_info = self._extract_flit_info(flit, "req_retry", 0, use_backup=True)
+                    flits_info.append(backup_info)
 
-            # 处理数据flit
+            # 数据flit
             for idx, flit in enumerate(lifecycle.data_flits):
                 flit_id = getattr(flit, 'flit_id', idx + 1)
-                self._add_flit_to_data(data, packet_id, flit, "data", flit_id)
+                flit_info = self._extract_flit_info(flit, "data", flit_id)
+                flits_info.append(flit_info)
 
-            # 处理响应flit
+            # 响应flit
             for flit in lifecycle.response_flits:
-                self._add_flit_to_data(data, packet_id, flit, "rsp", -1)
+                flit_info = self._extract_flit_info(flit, "rsp", -1)
+                flits_info.append(flit_info)
+
+            data["flits"].append(json.dumps(flits_info))
 
         return data
 
-    def _add_flit_to_data(self, data: Dict, packet_id: int, flit, flit_type: str, flit_id: int, use_backup: bool = False):
-        """将单个flit的数据添加到数据字典
-
-        Args:
-            use_backup: 如果为True，使用position_timestamps_backup而不是position_timestamps
-        """
-        import json
-
-        data["packet_id"].append(packet_id)
-        data["flit_id"].append(flit_id)
-        data["flit_type"].append(flit_type)
-
-        # 导出完整的 position_timestamps
+    def _extract_flit_info(self, flit, flit_type: str, flit_id: int, use_backup: bool = False) -> Dict:
+        """提取单个flit的信息"""
         if use_backup and hasattr(flit, 'position_timestamps_backup') and flit.position_timestamps_backup:
             timestamps = flit.position_timestamps_backup
-            # 第一次失败的请求，req_attr标记为"new"
-            req_attr_value = "new"
         else:
             timestamps = getattr(flit, 'position_timestamps', {})
-            # 当前请求（可能是重试或正常请求），使用实际的req_attr
-            req_attr_value = getattr(flit, 'req_attr', None) or ""
 
-        # 转换为 {position: time_ns} 格式
+        # 转换为 ns
         timestamps_ns = {
             pos: cycle / self.network_frequency
             for pos, cycle in timestamps.items()
         }
-        # 序列化为 JSON 字符串
-        data["position_timestamps"].append(json.dumps(timestamps_ns))
 
-        # 响应类型和重试信息
-        actual_rsp_type = getattr(flit, 'rsp_type', None)
-        actual_req_attr = getattr(flit, 'req_attr', None)
-        print(f"[EXPORT DEBUG] packet_id={packet_id}, flit_type={flit_type}, rsp_type={actual_rsp_type}, req_attr={actual_req_attr}, use_backup={use_backup}")
-        data["rsp_type"].append(actual_rsp_type or "")
-        data["req_attr"].append(req_attr_value)
-
-        # 统计
-        data["eject_attempts_h"].append(getattr(flit, 'eject_attempts_h', 0))
-        data["eject_attempts_v"].append(getattr(flit, 'eject_attempts_v', 0))
-
-    def _get_timestamp_ns(self, flit, attr_name: str) -> float:
-        """获取时间戳并转换为ns，无效值返回-1"""
-        if hasattr(flit, attr_name):
-            value = getattr(flit, attr_name)
-            if value is not None and value < float('inf'):
-                return value / self.network_frequency
-        return -1.0
-
-    def _get_position_timestamp_ns(self, flit, position_keys: list) -> float:
-        """从position_timestamps字典获取时间戳，按优先级尝试多个key
-
-        Args:
-            flit: flit对象
-            position_keys: 位置key列表，按优先级排序
-
-        Returns:
-            float: 时间戳(ns)，无效值返回-1
-        """
-        timestamps = getattr(flit, 'position_timestamps', {})
-        for key in position_keys:
-            if key in timestamps:
-                return timestamps[key] / self.network_frequency
-        return -1.0
+        return {
+            "flit_id": flit_id,
+            "flit_type": flit_type,
+            "position_timestamps": timestamps_ns,
+            "rsp_type": getattr(flit, 'rsp_type', None) or "",
+            "req_attr": getattr(flit, 'req_attr', None) or "",
+        }
