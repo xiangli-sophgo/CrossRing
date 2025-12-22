@@ -261,7 +261,7 @@ class D2D_Sys:
 
         # 响应flit
         if hasattr(flit, "rsp_type"):
-            if flit.rsp_type in ["datasend", "read_data"]:
+            if flit.rsp_type in ["DBID", "read_data"]:
                 return "R"  # 读数据通道
             elif flit.rsp_type in ["write_ack", "write_response"]:
                 return "B"  # 写响应通道

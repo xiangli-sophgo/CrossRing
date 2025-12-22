@@ -73,6 +73,9 @@ export default function Analysis() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [zoom, setZoom] = useState(0.8); // 默认80%缩放
 
+  // 从 URL 参数获取来源页面
+  const fromPath = searchParams.get('from') || '/experiments';
+
   // 从 URL 参数获取要打开的结果
   useEffect(() => {
     const resultId = searchParams.get('resultId');
@@ -103,8 +106,12 @@ export default function Analysis() {
       // 设置为当前活动标签页
       setActiveKey(key);
       saveActiveKey(key);
-      // 清除 URL 参数
-      setSearchParams({});
+      // 清除 URL 参数，但保留 from 参数
+      const newParams: Record<string, string> = {};
+      if (fromPath) {
+        newParams.from = fromPath;
+      }
+      setSearchParams(newParams);
     } else if (!activeKey && tabs.length > 0) {
       // 没有URL参数时，如果activeKey为空，使用最后一个标签页
       const lastKey = tabs[tabs.length - 1].key;
@@ -224,8 +231,8 @@ export default function Analysis() {
             </span>
           }
         >
-          <Button type="primary" onClick={() => navigate('/experiments')}>
-            前往结果管理
+          <Button type="primary" onClick={() => navigate(fromPath)}>
+            返回结果管理
           </Button>
         </Empty>
       </div>

@@ -95,6 +95,22 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     return '仿真平台'
   }
 
+  // 处理菜单点击
+  const handleMenuClick = ({ key }: { key: string }) => {
+    // 如果点击"结果管理"且当前在分析页面，尝试返回来源页面
+    if (key === '/experiments' && location.pathname === '/analysis') {
+      const searchParams = new URLSearchParams(location.search)
+      const fromPath = searchParams.get('from')
+      if (fromPath && fromPath.startsWith('/experiments/')) {
+        // 如果来源是实验详情页，返回详情页
+        navigate(fromPath)
+        return
+      }
+    }
+    // 其他情况正常导航
+    navigate(key)
+  }
+
   return (
     <Layout style={{ minHeight: '100vh', background: bgLayout }}>
       <Sider
@@ -196,7 +212,7 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
             background: 'transparent',
           }}
           items={menuItems}
-          onClick={({ key }) => navigate(key)}
+          onClick={handleMenuClick}
         />
 
         {/* 底部信息 */}

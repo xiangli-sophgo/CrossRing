@@ -73,17 +73,21 @@ export default function WaveformChart({ signals, timeRange, stages, height }: Pr
         left: 120,
         right: 30,
         top: HEADER_HEIGHT,
-        bottom: 60,
+        bottom: 80,
       },
       xAxis: {
         type: 'value',
         name: '时间 (ns)',
         nameLocation: 'middle',
-        nameGap: 25,
+        nameGap: 35,
         min: timeRange.start_ns,
         max: timeRange.end_ns,
+        minInterval: 0.5,  // 2GHz频率，最小间隔0.5ns
         axisLabel: {
-          formatter: (value: number) => value.toFixed(1),
+          formatter: (value: number) => {
+            // 0.5ns精度显示
+            return Number.isInteger(value * 2) ? value.toFixed(1) : value.toFixed(2);
+          },
         },
       },
       yAxis: {
@@ -104,6 +108,15 @@ export default function WaveformChart({ signals, timeRange, stages, height }: Pr
           type: 'inside',
           xAxisIndex: 0,
           filterMode: 'none',
+          zoomOnMouseWheel: 'ctrl',
+          moveOnMouseWheel: 'shift',
+          zoomOnMouseMove: false,
+          moveOnMouseMove: false,
+          preventDefaultMouseMove: false,
+          startValue: timeRange.start_ns,
+          endValue: timeRange.end_ns - timeRange.start_ns > 500
+            ? timeRange.start_ns + 500
+            : timeRange.end_ns,
         },
         {
           type: 'slider',
@@ -111,6 +124,10 @@ export default function WaveformChart({ signals, timeRange, stages, height }: Pr
           height: 20,
           bottom: 10,
           filterMode: 'none',
+          startValue: timeRange.start_ns,
+          endValue: timeRange.end_ns - timeRange.start_ns > 500
+            ? timeRange.start_ns + 500
+            : timeRange.end_ns,
         },
       ],
       series: [

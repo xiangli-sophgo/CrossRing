@@ -80,13 +80,15 @@ export default function ResultDetailPanel({ result, experimentId, experimentName
   // 在结果分析页面打开HTML报告
   const handleViewHtml = () => {
     const label = getResultLabel();
-    navigate(`/analysis?resultId=${result.id}&experimentId=${experimentId}&label=${encodeURIComponent(label)}&type=html`);
+    const from = window.location.pathname; // 记录来源页面
+    navigate(`/analysis?resultId=${result.id}&experimentId=${experimentId}&label=${encodeURIComponent(label)}&type=html&from=${encodeURIComponent(from)}`);
   };
 
   // 在结果分析页面打开波形
   const handleViewWaveform = () => {
     const label = getResultLabel();
-    navigate(`/analysis?resultId=${result.id}&experimentId=${experimentId}&label=${encodeURIComponent(label)}&type=waveform`);
+    const from = window.location.pathname; // 记录来源页面
+    navigate(`/analysis?resultId=${result.id}&experimentId=${experimentId}&label=${encodeURIComponent(label)}&type=waveform&from=${encodeURIComponent(from)}`);
   };
 
   // 下载文件

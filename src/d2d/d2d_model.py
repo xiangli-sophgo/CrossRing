@@ -2216,10 +2216,10 @@ class D2D_Model:
             if hasattr(flit, "rsp_type") and flit.rsp_type and (net_type == "RSP" or net_type in ["AXI_R", "AXI_B"]):
                 # 响应类型映射到清晰的缩写
                 rsp_type_map = {
-                    "positive": "pos",  # positive response
-                    "negative": "neg",  # negative response
-                    "datasend": "dat",  # datasend is positive response
-                    "write_complete": "ack",  # write acknowledgment
+                    "Pcredit": "Pcr",  # positive credit response
+                    "Retry": "Rty",  # retry (negative) response
+                    "DBID": "DBI",  # data buffer ID response
+                    "Comp": "Cmp",  # write complete acknowledgment
                     "write_ack": "ack",  # write acknowledgment
                     "write_response": "ack",  # write response
                 }

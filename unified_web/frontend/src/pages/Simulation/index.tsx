@@ -717,6 +717,29 @@ const Simulation: React.FC = () => {
     const now = new Date()
     const timestamp = `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
 
+    // 获取配置文件名
+    const configPath = form.getFieldValue('config_path') || ''
+    const dieConfigPath = form.getFieldValue('die_config_path') || ''
+    const mode = form.getFieldValue('mode') || 'kcin'
+
+    // 提取配置文件名（去除路径和扩展名）
+    const getConfigName = (path: string) => {
+      if (!path) return ''
+      const filename = path.split('/').pop() || path
+      return filename.replace(/\.(yaml|json)$/, '')
+    }
+
+    const mainConfigName = getConfigName(configPath)
+    const dieConfigName = getConfigName(dieConfigPath)
+
+    // 构建配置文件信息
+    let configInfo = ''
+    if (mode === 'dcin') {
+      configInfo = `配置: ${mainConfigName} (Die配置: ${dieConfigName})`
+    } else {
+      configInfo = `配置: ${mainConfigName}`
+    }
+
     // 找出修改的参数
     const changedParams = Object.entries(configValues)
       .filter(([k, v]) => originalConfigValues[k] !== v)
@@ -725,9 +748,9 @@ const Simulation: React.FC = () => {
     // 如果是参数遍历，显示遍历范围
     let paramStr: string
     if (sweepParams.length > 0) {
-      paramStr = sweepParams.map(p => `${p.key}[${p.start}→${p.end}]`).join(', ')
+      paramStr = `参数遍历: ${sweepParams.map(p => `${p.key}[${p.start}→${p.end}]`).join(', ')}`
     } else if (changedParams.length > 0) {
-      paramStr = changedParams.join(', ')
+      paramStr = `修改: ${changedParams.join(', ')}`
     } else {
       paramStr = '默认配置'
     }
@@ -738,8 +761,8 @@ const Simulation: React.FC = () => {
       ? fileNames.join(', ')
       : `${fileNames.slice(0, 2).join(', ')} 等${fileNames.length}个`
 
-    return `[${timestamp}] ${paramStr} | ${filesStr}`
-  }, [configValues, originalConfigValues, sweepParams, selectedFiles])
+    return `[${timestamp}] ${configInfo} - ${paramStr} | ${filesStr}`
+  }, [configValues, originalConfigValues, sweepParams, selectedFiles, form])
 
   const saveSweepConfig = (name: string) => {
     if (!name.trim()) {

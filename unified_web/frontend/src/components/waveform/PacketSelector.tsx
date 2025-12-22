@@ -2,8 +2,8 @@
  * 请求选择器组件
  */
 
-import { useState, useEffect } from 'react';
-import { Table, Tag, Space, Radio, InputNumber, Button } from 'antd';
+import { useState, useEffect, useMemo } from 'react';
+import { Table, Tag, Space, Select, Input, Button, message } from 'antd';
 import type { ColumnsType, TableRowSelection } from 'antd/es/table/interface';
 import { getPacketList, type PacketInfo } from '@/api/waveform';
 
@@ -27,22 +27,29 @@ export default function PacketSelector({
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const [reqTypeFilter, setReqTypeFilter] = useState<'all' | 'read' | 'write'>('all');
-  const [quickSelectCount, setQuickSelectCount] = useState(10);
+  const [packetIdInput, setPacketIdInput] = useState('');
+
+  // 多选过滤器
+  const [reqTypeFilter, setReqTypeFilter] = useState<string[]>([]);
+  const [sourceIpFilter, setSourceIpFilter] = useState<string[]>([]);
+  const [destIpFilter, setDestIpFilter] = useState<string[]>([]);
+
+  // 排序
+  const [sortField, setSortField] = useState<string>('start_time_ns');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
     loadPackets();
-  }, [experimentId, resultId, page, pageSize, reqTypeFilter]);
+  }, [experimentId, resultId, page, pageSize]);
 
   const loadPackets = async () => {
     setLoading(true);
     try {
       const result = await getPacketList(experimentId, resultId, {
         page,
-        pageSize,
-        reqType: reqTypeFilter === 'all' ? undefined : reqTypeFilter,
-        sortBy: 'start_time_ns',
-        order: 'asc',
+        pageSize: 1000, // 加载更多数据用于前端过滤
+        sortBy: sortField,
+        order: sortOrder,
       });
       setPackets(result.packets);
       setTotal(result.total);
@@ -53,46 +60,114 @@ export default function PacketSelector({
     }
   };
 
+  // 获取所有唯一的源IP和目标IP选项（节点.IP格式）
+  const { sourceIpOptions, destIpOptions } = useMemo(() => {
+    const sourceSet = new Set<string>();
+    const destSet = new Set<string>();
+    packets.forEach(p => {
+      sourceSet.add(`${p.source_node}.${p.source_type}`);
+      destSet.add(`${p.dest_node}.${p.dest_type}`);
+    });
+    return {
+      sourceIpOptions: Array.from(sourceSet).sort(),
+      destIpOptions: Array.from(destSet).sort(),
+    };
+  }, [packets]);
+
+  // 前端过滤数据
+  const filteredPackets = useMemo(() => {
+    let filtered = packets;
+
+    // 类型过滤
+    if (reqTypeFilter.length > 0) {
+      filtered = filtered.filter(p => reqTypeFilter.includes(p.req_type));
+    }
+
+    // 源IP过滤（匹配"节点.IP"格式）
+    if (sourceIpFilter.length > 0) {
+      filtered = filtered.filter(p =>
+        sourceIpFilter.includes(`${p.source_node}.${p.source_type}`)
+      );
+    }
+
+    // 目标IP过滤（匹配"节点.IP"格式）
+    if (destIpFilter.length > 0) {
+      filtered = filtered.filter(p =>
+        destIpFilter.includes(`${p.dest_node}.${p.dest_type}`)
+      );
+    }
+
+    return filtered;
+  }, [packets, reqTypeFilter, sourceIpFilter, destIpFilter]);
+
   const columns: ColumnsType<PacketInfo> = [
     {
       title: 'ID',
       dataIndex: 'packet_id',
       key: 'packet_id',
       width: 80,
+      align: 'center',
+      sorter: (a, b) => a.packet_id - b.packet_id,
     },
     {
       title: '类型',
       dataIndex: 'req_type',
       key: 'req_type',
       width: 80,
+      align: 'center',
       render: (type: string) => (
         <Tag color={type === 'read' ? 'blue' : 'green'}>
           {type === 'read' ? '读' : '写'}
         </Tag>
       ),
+      sorter: (a, b) => a.req_type.localeCompare(b.req_type),
     },
     {
-      title: '源节点',
+      title: '源IP',
       key: 'source',
-      width: 120,
+      width: 150,
+      align: 'center',
       render: (_: unknown, record: PacketInfo) => (
-        <span>{record.source_node} ({record.source_type})</span>
+        <span>{record.source_node}.{record.source_type}</span>
       ),
+      sorter: (a, b) => a.source_node - b.source_node || a.source_type.localeCompare(b.source_type),
     },
     {
-      title: '目标节点',
+      title: '目标IP',
       key: 'dest',
-      width: 120,
+      width: 150,
+      align: 'center',
       render: (_: unknown, record: PacketInfo) => (
-        <span>{record.dest_node} ({record.dest_type})</span>
+        <span>{record.dest_node}.{record.dest_type}</span>
       ),
+      sorter: (a, b) => a.dest_node - b.dest_node || a.dest_type.localeCompare(b.dest_type),
     },
     {
-      title: '延迟 (ns)',
-      dataIndex: 'latency_ns',
-      key: 'latency_ns',
-      width: 100,
-      render: (val: number) => val.toFixed(2),
+      title: '命令延迟 (ns)',
+      dataIndex: 'cmd_latency_ns',
+      key: 'cmd_latency_ns',
+      width: 110,
+      align: 'center',
+      render: (val?: number | null) => val != null ? (Number.isInteger(val * 2) ? val.toFixed(1) : val.toFixed(2)) : '-',
+      sorter: (a, b) => (a.cmd_latency_ns || 0) - (b.cmd_latency_ns || 0),
+    },
+    {
+      title: '数据延迟 (ns)',
+      dataIndex: 'data_latency_ns',
+      key: 'data_latency_ns',
+      width: 110,
+      align: 'center',
+      render: (val?: number | null) => val != null ? (Number.isInteger(val * 2) ? val.toFixed(1) : val.toFixed(2)) : '-',
+      sorter: (a, b) => (a.data_latency_ns || 0) - (b.data_latency_ns || 0),
+    },
+    {
+      title: '事务延迟 (ns)',
+      dataIndex: 'transaction_latency_ns',
+      key: 'transaction_latency_ns',
+      width: 110,
+      align: 'center',
+      render: (val?: number | null) => val != null ? (Number.isInteger(val * 2) ? val.toFixed(1) : val.toFixed(2)) : '-',
+      sorter: (a, b) => (a.transaction_latency_ns || 0) - (b.transaction_latency_ns || 0),
     },
   ];
 
@@ -112,42 +187,61 @@ export default function PacketSelector({
     }),
   };
 
-  const handleQuickSelect = () => {
-    // 快速选择前N个请求
-    const ids = packets.slice(0, quickSelectCount).map(p => p.packet_id);
-    onSelectionChange(ids);
+  const handleApplyPacketIds = () => {
+    if (!packetIdInput.trim()) {
+      message.warning('请输入请求ID');
+      return;
+    }
+
+    try {
+      const ids = packetIdInput
+        .split(',')
+        .map(s => s.trim())
+        .filter(s => s !== '')
+        .map(s => {
+          const num = parseInt(s, 10);
+          if (isNaN(num)) {
+            throw new Error(`无效的ID: ${s}`);
+          }
+          return num;
+        });
+
+      if (ids.length === 0) {
+        message.warning('请输入有效的请求ID');
+        return;
+      }
+
+      if (ids.length > maxPackets) {
+        message.warning(`最多只能选择 ${maxPackets} 个请求`);
+        return;
+      }
+
+      onSelectionChange(ids);
+      message.success(`已选择 ${ids.length} 个请求`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '输入格式错误');
+    }
   };
 
   const handleClearSelection = () => {
     onSelectionChange([]);
+    setPacketIdInput('');
   };
 
   return (
     <div>
       <Space style={{ marginBottom: 12 }} wrap>
-        <span>类型过滤:</span>
-        <Radio.Group
-          value={reqTypeFilter}
-          onChange={(e) => setReqTypeFilter(e.target.value)}
+        <span>指定请求ID:</span>
+        <Input
+          placeholder="输入请求ID，多个用逗号分隔，如: 1,5,10"
+          value={packetIdInput}
+          onChange={(e) => setPacketIdInput(e.target.value)}
+          onPressEnter={handleApplyPacketIds}
           size="small"
-        >
-          <Radio.Button value="all">全部</Radio.Button>
-          <Radio.Button value="read">读</Radio.Button>
-          <Radio.Button value="write">写</Radio.Button>
-        </Radio.Group>
-
-        <span style={{ marginLeft: 16 }}>快速选择前</span>
-        <InputNumber
-          value={quickSelectCount}
-          onChange={(val) => setQuickSelectCount(val || 10)}
-          min={1}
-          max={maxPackets}
-          size="small"
-          style={{ width: 60 }}
+          style={{ width: 300 }}
         />
-        <span>个</span>
-        <Button size="small" onClick={handleQuickSelect}>
-          选择
+        <Button size="small" type="primary" onClick={handleApplyPacketIds}>
+          应用
         </Button>
         <Button size="small" onClick={handleClearSelection}>
           清空
@@ -158,25 +252,57 @@ export default function PacketSelector({
         </span>
       </Space>
 
+      <Space style={{ marginBottom: 12,marginLeft: 50}} wrap>
+        <span>类型:</span>
+        <Select
+          mode="multiple"
+          placeholder="全部"
+          value={reqTypeFilter}
+          onChange={setReqTypeFilter}
+          size="small"
+          style={{ minWidth: 150 }}
+          options={[
+            { label: '读', value: 'read' },
+            { label: '写', value: 'write' },
+          ]}
+        />
+
+        <span style={{ marginLeft: 24 }}>源IP:</span>
+        <Select
+          mode="multiple"
+          placeholder="全部"
+          value={sourceIpFilter}
+          onChange={setSourceIpFilter}
+          size="small"
+          style={{ minWidth: 200 }}
+          options={sourceIpOptions.map(ip => ({ label: ip, value: ip }))}
+        />
+
+        <span style={{ marginLeft: 24 }}>目标IP:</span>
+        <Select
+          mode="multiple"
+          placeholder="全部"
+          value={destIpFilter}
+          onChange={setDestIpFilter}
+          size="small"
+          style={{ minWidth: 200 }}
+          options={destIpOptions.map(ip => ({ label: ip, value: ip }))}
+        />
+      </Space>
+
       <Table
         rowKey="packet_id"
         columns={columns}
-        dataSource={packets}
+        dataSource={filteredPackets}
         loading={loading}
         rowSelection={rowSelection}
         size="small"
-        scroll={{ y: 300 }}
+        scroll={{ y: 300, x: 'max-content' }}
         pagination={{
-          current: page,
-          pageSize,
-          total,
+          pageSize: 50,
           showSizeChanger: true,
-          pageSizeOptions: ['20', '50', '100'],
+          pageSizeOptions: ['20', '50', '100', '200'],
           showTotal: (t) => `共 ${t} 条`,
-          onChange: (p, ps) => {
-            setPage(p);
-            setPageSize(ps);
-          },
         }}
       />
     </div>

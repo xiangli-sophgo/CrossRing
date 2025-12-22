@@ -29,8 +29,8 @@ class D2D_RN_Interface(IPInterface):
 
         self.target_die_interfaces = {}  # 将由D2D_Model设置 {die_id: d2d_sn_interface}
 
-        # 防止重复发送write_complete响应的记录 {packet_id: True}
-        self.sent_write_complete_responses = set()
+        # 防止重复发送Comp响应的记录 {packet_id: True}
+        self.sent_Comp_responses = set()
 
         # 添加D2D_RN的带宽限制（在父类初始化后）
         if not self.tx_token_bucket and not self.rx_token_bucket:
@@ -105,7 +105,7 @@ class D2D_RN_Interface(IPInterface):
                 return "AW"
 
         if hasattr(flit, "rsp_type"):
-            if flit.rsp_type in ["datasend", "read_data"]:
+            if flit.rsp_type in ["DBID", "read_data"]:
                 return "R"
             elif flit.rsp_type in ["write_ack", "write_response"]:
                 return "B"
@@ -201,7 +201,7 @@ class D2D_RN_Interface(IPInterface):
             self.cross_die_write_requests[packet_id] = write_req_copy
             self.cross_die_write_data_cache[packet_id] = []
 
-            # 添加到tracker list和更新pointer（修复：确保datasend响应处理器能找到请求）
+            # 添加到tracker list和更新pointer（修复：确保DBID响应处理器能找到请求）
             self.rn_tracker["write"].append(write_req_copy)
             self.rn_tracker_pointer["write"] += 1
         else:
@@ -428,7 +428,7 @@ class D2D_RN_Interface(IPInterface):
         if hasattr(flit, "rsp_type"):
             if flit.rsp_type == "read_data":
                 delay = self.d2d_r_latency
-            elif flit.rsp_type in ["write_complete", "negative"]:
+            elif flit.rsp_type in ["Comp", "Retry"]:
                 delay = self.d2d_b_latency
             else:
                 delay = self.d2d_r_latency
@@ -449,9 +449,9 @@ class D2D_RN_Interface(IPInterface):
         """
         packet_id = rsp.packet_id
 
-        # 检查是否为跨Die写请求的datasend响应
-        if hasattr(rsp, "rsp_type") and rsp.rsp_type == "datasend" and packet_id in self.cross_die_write_requests:
-            # 这是跨Die写请求的datasend响应，需要发送跨Die写数据到DDR
+        # 检查是否为跨Die写请求的DBID响应
+        if hasattr(rsp, "rsp_type") and rsp.rsp_type == "DBID" and packet_id in self.cross_die_write_requests:
+            # 这是跨Die写请求的DBID响应，需要发送跨Die写数据到DDR
 
             # 获取tracker中的请求（已被替换为local_write_req）
             req = next((r for r in self.rn_tracker["write"] if r.packet_id == packet_id), None)
@@ -500,19 +500,19 @@ class D2D_RN_Interface(IPInterface):
                 # 清理wdb（不需要放到wdb，直接发送）
                 self.rn_wdb.pop(packet_id, None)
 
-            # 防重复：检查是否已经发送过write_complete响应
-            if packet_id not in self.sent_write_complete_responses:
-                # 发送写数据完成后，立即发送write_complete响应到AXI_B通道
-                # tracker会在send_cross_die_write_complete中释放
-                self.send_cross_die_write_complete(packet_id)
+            # 防重复：检查是否已经发送过Comp响应
+            if packet_id not in self.sent_Comp_responses:
+                # 发送写数据完成后，立即发送Comp响应到AXI_B通道
+                # tracker会在send_cross_die_Comp中释放
+                self.send_cross_die_Comp(packet_id)
                 # 标记已发送
-                self.sent_write_complete_responses.add(packet_id)
+                self.sent_Comp_responses.add(packet_id)
             return
 
         # 其他响应类型，调用父类处理
         super()._handle_received_response(rsp)
 
-    def send_cross_die_write_complete(self, packet_id: int):
+    def send_cross_die_Comp(self, packet_id: int):
         """
         发送跨Die写完成响应到AXI_B通道
         """
@@ -524,31 +524,31 @@ class D2D_RN_Interface(IPInterface):
         if not tracker_req:
             return
 
-        # 创建write_complete响应
+        # 创建Comp响应
         from src.utils.flit import _flit_pool
         from src.utils.flit import copy_flit_attributes
 
-        write_complete_rsp = _flit_pool.get_flit(source=self.ip_pos, destination=0, path=[self.ip_pos])
+        Comp_rsp = _flit_pool.get_flit(source=self.ip_pos, destination=0, path=[self.ip_pos])
 
         # 设置基本属性
-        write_complete_rsp.packet_id = packet_id
-        write_complete_rsp.flit_type = "rsp"  # 必须设置为rsp以正确分配order_id
-        write_complete_rsp.rsp_type = "write_complete"
-        write_complete_rsp.req_type = "write"  # 设置req_type为write，让D2D_SN能正确识别
-        write_complete_rsp.source_type = tracker_req.d2d_target_type  # 使用目标类型（DDR）作为响应源
-        write_complete_rsp.destination_type = tracker_req.d2d_origin_type
+        Comp_rsp.packet_id = packet_id
+        Comp_rsp.flit_type = "rsp"  # 必须设置为rsp以正确分配order_id
+        Comp_rsp.rsp_type = "Comp"
+        Comp_rsp.req_type = "write"  # 设置req_type为write，让D2D_SN能正确识别
+        Comp_rsp.source_type = tracker_req.d2d_target_type  # 使用目标类型（DDR）作为响应源
+        Comp_rsp.destination_type = tracker_req.d2d_origin_type
 
         # 复制D2D属性（从tracker_req复制，包含完整的D2D属性包括d2d_rn_node）
         copy_flit_attributes(
             tracker_req,
-            write_complete_rsp,
+            Comp_rsp,
             D2D_ORIGIN_TARGET_ATTRS,
         )
 
         # 通过AXI_B通道发送回源Die，明确指定B通道
         source_die_id = tracker_req.d2d_origin_die
         if self.d2d_sys and source_die_id is not None:
-            self.d2d_sys.enqueue_rn(write_complete_rsp, source_die_id, self.d2d_b_latency, channel="B")
+            self.d2d_sys.enqueue_rn(Comp_rsp, source_die_id, self.d2d_b_latency, channel="B")
 
         # 发送后立即释放D2D_RN的tracker和WDB资源（符合设计文档3.3节要求）
         self.cross_die_write_requests.pop(packet_id)

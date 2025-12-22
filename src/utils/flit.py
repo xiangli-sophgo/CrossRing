@@ -147,6 +147,7 @@ class Flit:
         "d2d_noc_eject_cycle",  # D2D节点从NoC弹出的时间
         # 位置时间戳字典（自动记录）
         "position_timestamps",  # {position: cycle}
+        "position_timestamps_backup",  # retry请求的第一次失败时间戳备份
     ]
 
     last_id = 0
@@ -203,6 +204,7 @@ class Flit:
         self.path = path
         self.flit_position = ""
         self.position_timestamps = {}  # {position: cycle} 位置时间戳自动记录
+        self.position_timestamps_backup = None  # retry请求的第一次失败时间戳备份
         self.is_finish = False
         Flit.last_id += 1
         self.packet_id = None
@@ -427,6 +429,7 @@ class Flit:
         self.data_latency = np.inf
         # Reset position timestamps
         self.position_timestamps = {}
+        self.position_timestamps_backup = None
 
     @classmethod
     def create_flit(cls, source, destination, path):

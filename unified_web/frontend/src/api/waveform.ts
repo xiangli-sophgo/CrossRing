@@ -3,6 +3,7 @@
  */
 
 import apiClient from './client';
+import type { TopologyData } from '@/types/topology';
 
 // ==================== 类型定义 ====================
 
@@ -39,6 +40,9 @@ export interface PacketInfo {
   start_time_ns: number;
   end_time_ns: number;
   latency_ns: number;
+  cmd_latency_ns?: number;
+  data_latency_ns?: number;
+  transaction_latency_ns?: number;
 }
 
 export interface PacketListResponse {
@@ -152,24 +156,24 @@ export const checkWaveformData = async (
  * 阶段颜色映射
  */
 export const STAGE_COLORS: Record<string, string> = {
-  l2h: '#91d5ff',      // 浅蓝 - IP注入
-  iq_out: '#1890ff',   // 蓝 - IQ_OUT
-  h_ring: '#52c41a',   // 绿 - 横向环
-  rb: '#faad14',       // 黄 - Ring_Bridge
-  v_ring: '#ff7a45',   // 橙 - 纵向环
-  eq: '#f5222d',       // 红 - EQ
+  IP_inject: '#91d5ff',   // 浅蓝 - IP注入
+  IQ: '#1890ff',          // 蓝 - Inject Queue
+  Link: '#52c41a',        // 绿 - 链路传输
+  RB: '#faad14',          // 黄 - Ring Bridge
+  EQ: '#f5222d',          // 红 - Eject Queue
+  IP_eject: '#ff7a45',    // 橙 - IP弹出
 };
 
 /**
  * 阶段中文名映射
  */
 export const STAGE_NAMES: Record<string, string> = {
-  l2h: 'L2H缓冲',
-  iq_out: 'IQ_OUT',
-  h_ring: '横向环',
-  rb: 'Ring_Bridge',
-  v_ring: '纵向环',
-  eq: 'EQ',
+  IP_inject: 'IP注入',
+  IQ: 'Inject Queue',
+  Link: '链路传输',
+  RB: 'Ring Bridge',
+  EQ: 'Eject Queue',
+  IP_eject: 'IP弹出',
 };
 
 /**
@@ -179,4 +183,42 @@ export const FLIT_TYPE_COLORS: Record<string, string> = {
   req: '#722ed1',     // 紫色 - 请求
   data: '#13c2c2',    // 青色 - 数据
   rsp: '#eb2f96',     // 粉色 - 响应
+};
+
+// ==================== 拓扑数据 ====================
+
+// 重新导出类型供外部使用
+export type { TopologyData, TopologyNode, TopologyEdge } from '@/types/topology';
+
+/**
+ * 获取拓扑数据
+ */
+export const getTopologyData = async (
+  experimentId: number,
+  resultId: number
+): Promise<TopologyData> => {
+  const response = await apiClient.get(
+    `/api/experiments/${experimentId}/results/${resultId}/topology`
+  );
+  return response.data;
+};
+
+// ==================== 活跃IP数据 ====================
+
+export interface ActiveIPsResponse {
+  active_ips: Record<number, string[]>;  // {node_id: [ip_type1, ip_type2, ...]}
+}
+
+/**
+ * 获取实验中活跃的IP列表
+ * 从requests.parquet中提取所有涉及的节点和IP类型
+ */
+export const getActiveIPs = async (
+  experimentId: number,
+  resultId: number
+): Promise<ActiveIPsResponse> => {
+  const response = await apiClient.get(
+    `/api/experiments/${experimentId}/results/${resultId}/active-ips`
+  );
+  return response.data;
 };

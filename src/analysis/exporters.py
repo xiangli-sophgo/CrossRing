@@ -1820,14 +1820,11 @@ class ParquetExporter:
             "packet_id": [],
             "flit_id": [],
             "flit_type": [],
-            # 时间戳（ns）
-            "ip_inject_ns": [],
-            "iq_out_ns": [],
-            "h_ring_ns": [],
-            "rb_ns": [],
-            "v_ring_ns": [],
-            "eq_ns": [],
-            "ip_eject_ns": [],
+            # 完整的 position_timestamps 字典（JSON 字符串）
+            "position_timestamps": [],
+            # 响应类型和重试信息
+            "rsp_type": [],
+            "req_attr": [],
             # 统计
             "eject_attempts_h": [],
             "eject_attempts_v": [],
@@ -1836,7 +1833,11 @@ class ParquetExporter:
         for packet_id, lifecycle in completed_requests.items():
             # 处理请求flit
             for flit in lifecycle.request_flits:
-                self._add_flit_to_data(data, packet_id, flit, "req", 0)
+                # 如果有备份的时间戳（第一次失败），先导出第一次失败的记录
+                if hasattr(flit, 'position_timestamps_backup') and flit.position_timestamps_backup:
+                    self._add_flit_to_data(data, packet_id, flit, "req", 0, use_backup=True)
+                # 导出当前的时间戳（重试成功或正常请求）
+                self._add_flit_to_data(data, packet_id, flit, "req", 0, use_backup=False)
 
             # 处理数据flit
             for idx, flit in enumerate(lifecycle.data_flits):
@@ -1849,20 +1850,42 @@ class ParquetExporter:
 
         return data
 
-    def _add_flit_to_data(self, data: Dict, packet_id: int, flit, flit_type: str, flit_id: int):
-        """将单个flit的数据添加到数据字典"""
+    def _add_flit_to_data(self, data: Dict, packet_id: int, flit, flit_type: str, flit_id: int, use_backup: bool = False):
+        """将单个flit的数据添加到数据字典
+
+        Args:
+            use_backup: 如果为True，使用position_timestamps_backup而不是position_timestamps
+        """
+        import json
+
         data["packet_id"].append(packet_id)
         data["flit_id"].append(flit_id)
         data["flit_type"].append(flit_type)
 
-        # 从position_timestamps读取时间戳
-        data["ip_inject_ns"].append(self._get_position_timestamp_ns(flit, ["L2H"]))
-        data["iq_out_ns"].append(self._get_position_timestamp_ns(flit, ["IQ_TL", "IQ_TR", "IQ_TU", "IQ_TD"]))
-        data["h_ring_ns"].append(self._get_position_timestamp_ns(flit, ["Link"]))
-        data["rb_ns"].append(self._get_position_timestamp_ns(flit, ["RB_TL", "RB_TR"]))
-        data["v_ring_ns"].append(self._get_position_timestamp_ns(flit, ["Link"]))  # 与h_ring共用Link
-        data["eq_ns"].append(self._get_position_timestamp_ns(flit, ["EQ_TU", "EQ_TD", "EQ_CH"]))
-        data["ip_eject_ns"].append(self._get_position_timestamp_ns(flit, ["IP_eject"]))
+        # 导出完整的 position_timestamps
+        if use_backup and hasattr(flit, 'position_timestamps_backup') and flit.position_timestamps_backup:
+            timestamps = flit.position_timestamps_backup
+            # 第一次失败的请求，req_attr标记为"new"
+            req_attr_value = "new"
+        else:
+            timestamps = getattr(flit, 'position_timestamps', {})
+            # 当前请求（可能是重试或正常请求），使用实际的req_attr
+            req_attr_value = getattr(flit, 'req_attr', None) or ""
+
+        # 转换为 {position: time_ns} 格式
+        timestamps_ns = {
+            pos: cycle / self.network_frequency
+            for pos, cycle in timestamps.items()
+        }
+        # 序列化为 JSON 字符串
+        data["position_timestamps"].append(json.dumps(timestamps_ns))
+
+        # 响应类型和重试信息
+        actual_rsp_type = getattr(flit, 'rsp_type', None)
+        actual_req_attr = getattr(flit, 'req_attr', None)
+        print(f"[EXPORT DEBUG] packet_id={packet_id}, flit_type={flit_type}, rsp_type={actual_rsp_type}, req_attr={actual_req_attr}, use_backup={use_backup}")
+        data["rsp_type"].append(actual_rsp_type or "")
+        data["req_attr"].append(req_attr_value)
 
         # 统计
         data["eject_attempts_h"].append(getattr(flit, 'eject_attempts_h', 0))

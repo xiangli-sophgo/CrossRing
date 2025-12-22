@@ -472,7 +472,7 @@ class RequestCollector:
             # 改进数据验证
             # 对于特殊响应（write_complete, datasend, negative等），不需要检查burst_length
             rsp_type = getattr(first_flit, "rsp_type", None)
-            is_special_response = rsp_type in ["write_complete", "datasend", "negative", "positive"]
+            is_special_response = rsp_type in ["Comp", "DBID", "Retry", "Pcredit"]
 
             if not is_special_response:
                 if not hasattr(first_flit, "burst_length") or len(flits) != first_flit.burst_length:

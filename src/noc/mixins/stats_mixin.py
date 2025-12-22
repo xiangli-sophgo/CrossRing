@@ -179,10 +179,10 @@ class StatsMixin:
         # 检查是否有活跃的flit（非等待状态的flit）
         has_active_flit = any(not self._should_skip_waiting_flit(flit) for flit in flits)
 
-        # 对于单 flit 的 negative rsp，到达后不打印也不更新状态
+        # 对于单 flit 的 Retry rsp，到达后不打印也不更新状态
         if net_type == "rsp":
             last_flit = flits[-1]
-            if last_flit.rsp_type == "negative" and len(flits) == 1 and last_flit.is_finish:
+            if last_flit.rsp_type == "Retry" and len(flits) == 1 and last_flit.is_finish:
                 return
 
         # 只有当有活跃flit时才打印
@@ -219,9 +219,9 @@ class StatsMixin:
         all_at_ip_eject = all(f.flit_position == "IP_eject" for f in flits)
 
         if net_type == "rsp":
-            # 只有最后一个 datasend 到达 IP_eject 时才算完成
+            # 只有最后一个 DBID 到达 IP_eject 时才算完成
             last_flit = flits[-1]
-            if last_flit.rsp_type == "datasend" and last_flit.flit_position == "IP_eject":
+            if last_flit.rsp_type == "DBID" and last_flit.flit_position == "IP_eject":
                 self._done_flags[packet_done_key] = True
         else:
             # 其他网络类型，所有 flit 都到达 IP_eject 才算完成

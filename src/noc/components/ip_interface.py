@@ -21,10 +21,10 @@ import inspect
 
 # Response优先级顺序（列表顺序即优先级，靠前优先级高）
 RSP_PRIORITY_ORDER = [
-    "datasend",
-    "negative",
-    "write_complete",
-    "positive",
+    "DBID",
+    "Retry",
+    "Comp",
+    "Pcredit",
 ]
 
 
@@ -300,9 +300,9 @@ class IPInterface:
         """IP 核把flit丢进对应网络的 inject_fifo"""
         if network_type == "rsp":
             # Response按优先级分流到对应队列
-            rsp_type = getattr(flit, "rsp_type", "positive")
+            rsp_type = getattr(flit, "rsp_type", "Pcredit")
             if rsp_type not in self.rsp_inject_queues:
-                rsp_type = "positive"  # 未知类型默认最低优先级
+                rsp_type = "Pcredit"  # 未知类型默认最低优先级
             if retry:
                 self.rsp_inject_queues[rsp_type].appendleft(flit)
             else:
@@ -508,7 +508,7 @@ class IPInterface:
                 self.rn_tracker["write"].append(req)
                 self.rn_tracker_pointer["write"] += 1
 
-                # 写数据包将在收到 datasend 响应时创建
+                # 写数据包将在收到 DBID 响应时创建
 
             return True
 
@@ -595,7 +595,7 @@ class IPInterface:
                     self.create_read_packet(req)
                     # tracker释放移至inject_to_l2h_pre，在最后一个data flit进入l2h时释放
                 else:
-                    self.create_rsp(req, "negative")
+                    self.create_rsp(req, "Retry")
                     self._record_tracker_block("sn_ro")
                     self.sn_req_wait[req.req_type].append(req)
             else:
@@ -612,13 +612,13 @@ class IPInterface:
                     self.sn_wdb_count["count"] -= req.burst_length
                     self._record_tracker_allocation("sn_share")
                     self._record_tracker_allocation("sn_wdb")
-                    self.create_rsp(req, "datasend")
+                    self.create_rsp(req, "DBID")
                 else:
-                    self.create_rsp(req, "negative")
+                    self.create_rsp(req, "Retry")
                     self._record_tracker_block("sn_share")
                     self.sn_req_wait[req.req_type].append(req)
             else:
-                self.create_rsp(req, "datasend")
+                self.create_rsp(req, "DBID")
 
     def _handle_received_response(self, rsp: Flit):
         """处理接收到的响应（RN端）"""
@@ -635,9 +635,9 @@ class IPInterface:
         if hasattr(self, "request_tracker") and self.request_tracker:
             self.request_tracker.add_response_flit(rsp.packet_id, rsp)
             self.request_tracker.update_timestamp(rsp.packet_id, "cmd_received_by_cake0_cycle", self.current_cycle)
-        if rsp.req_type == "read" and rsp.rsp_type == "negative":
+        if rsp.req_type == "read" and rsp.rsp_type == "Retry":
             self.read_retry_num_stat += 1
-        elif rsp.req_type == "write" and rsp.rsp_type == "negative":
+        elif rsp.req_type == "write" and rsp.rsp_type == "Retry":
             self.write_retry_num_stat += 1
 
         req = next((req for req in self.rn_tracker[rsp.req_type] if req.packet_id == rsp.packet_id), None)
@@ -647,7 +647,7 @@ class IPInterface:
         req.sync_latency_record(rsp)
 
         if rsp.req_type == "read":
-            if rsp.rsp_type == "negative":
+            if rsp.rsp_type == "Retry":
                 # 读请求retry逻辑
                 if req.req_attr == "old":
                     # 该请求已经被重新注入网络，不需要再次修改。直接返回
@@ -656,10 +656,12 @@ class IPInterface:
                 req.is_injected = False
                 req.path_index = 0
                 req.req_attr = "old"
-                # 保留rn_rdb和databuffer资源，等待positive后重试
+                # 备份第一次失败的时间戳
+                req.position_timestamps_backup = req.position_timestamps.copy()
+                # 保留rn_rdb和databuffer资源，等待Pcredit后重试
                 # databuffer已在第一次分配，retry时不需要重复分配和释放
 
-            elif rsp.rsp_type == "positive":
+            elif rsp.rsp_type == "Pcredit":
                 # 处理读重试：资源已在第一次分配，直接重新发送请求
                 req.req_state = "valid"
                 req.req_attr = "old"
@@ -668,11 +670,13 @@ class IPInterface:
                 req.is_arrive = False
                 # 重置order_id，让网络层重新分配
                 req.src_dest_order_id = -1
+                # 清空位置时间戳，避免重试时覆盖第一次失败的时间戳
+                req.position_timestamps = {}
                 # 放入请求网络的inject_fifo
                 self.enqueue(req, "req", retry=True)
 
         elif rsp.req_type == "write":
-            if rsp.rsp_type == "negative":
+            if rsp.rsp_type == "Retry":
                 # 写请求retry逻辑
                 if req.req_attr == "old":
                     # 该请求已经被重新注入网络，不需要再次修改。直接返回
@@ -681,8 +685,10 @@ class IPInterface:
                 req.req_attr = "old"
                 req.is_injected = False
                 req.path_index = 0
+                # 备份第一次失败的时间戳
+                req.position_timestamps_backup = req.position_timestamps.copy()
 
-            elif rsp.rsp_type == "positive":
+            elif rsp.rsp_type == "Pcredit":
                 # 处理写重试
                 req.req_state = "valid"
                 req.is_injected = False
@@ -691,10 +697,12 @@ class IPInterface:
                 req.is_arrive = False
                 # 重置order_id，让网络层重新分配
                 req.src_dest_order_id = -1
+                # 清空位置时间戳，避免重试时覆盖第一次失败的时间戳
+                req.position_timestamps = {}
                 # 放入请求网络的inject_fifo
                 self.enqueue(req, "req", retry=True)
 
-            elif rsp.rsp_type == "datasend":
+            elif rsp.rsp_type == "DBID":
                 # 收到写数据发送响应，现在创建并发送写数据包
                 req: Flit = next((r for r in self.rn_tracker["write"] if r.packet_id == rsp.packet_id), None)
                 if req:
@@ -722,30 +730,30 @@ class IPInterface:
                 # 同时清理写缓冲
                 self.rn_wdb.pop(rsp.packet_id, None)
 
-            elif rsp.rsp_type == "write_complete":
+            elif rsp.rsp_type == "Comp":
                 # 收到写完成响应，查找对应的写请求（包括本地和跨Die写请求）
                 req: Flit = next((r for r in self.rn_tracker["write"] if r.packet_id == rsp.packet_id), None)
                 if req:
                     # 记录写完成响应接收时间（所有写请求都需要记录）
-                    req.write_complete_received_cycle = self.current_cycle
+                    req.Comp_received_cycle = self.current_cycle
                     req.data_received_complete_cycle = self.current_cycle  # 写完成即数据接收完成
 
                     # 标记写请求完成
                     if hasattr(self, "request_tracker") and self.request_tracker:
-                        self.request_tracker.update_timestamp(rsp.packet_id, "write_complete_received_cycle", self.current_cycle)
+                        self.request_tracker.update_timestamp(rsp.packet_id, "Comp_received_cycle", self.current_cycle)
                         self.request_tracker.update_timestamp(rsp.packet_id, "data_received_complete_cycle", self.current_cycle)
                         self.request_tracker.mark_request_completed(rsp.packet_id, self.current_cycle)
 
                     # 同时更新arrive_flits中对应packet的所有flit的时间戳
                     if req.packet_id in self.req_network.arrive_flits:
                         for flit in self.req_network.arrive_flits[req.packet_id]:
-                            flit.write_complete_received_cycle = self.current_cycle
+                            flit.Comp_received_cycle = self.current_cycle
                             flit.data_received_complete_cycle = self.current_cycle
 
                     # 同时更新数据网络中对应packet的所有flit的时间戳（用于结果统计）
                     if req.packet_id in self.data_network.arrive_flits:
                         for flit in self.data_network.arrive_flits[req.packet_id]:
-                            flit.write_complete_received_cycle = self.current_cycle
+                            flit.Comp_received_cycle = self.current_cycle
                             flit.data_received_complete_cycle = self.current_cycle
 
                 # 对于跨Die写请求，需要特殊处理tracker释放
@@ -770,15 +778,15 @@ class IPInterface:
                     self._record_tracker_release("rn_wdb")
                     self.rn_tracker_pointer["write"] -= 1
 
-                    # 更新D2D请求完成计数（只在源IP收到write_complete时记录，不在D2D_SN记录）
+                    # 更新D2D请求完成计数（只在源IP收到Comp时记录，不在D2D_SN记录）
                     if hasattr(req, "d2d_origin_die") and hasattr(req, "d2d_target_die") and hasattr(req, "d2d_origin_type") and req.d2d_origin_type == self.ip_type:
                         die_id = getattr(self.config, "DIE_ID", None)
                         if die_id is not None and req.d2d_origin_die == die_id:
                             d2d_model = getattr(self.req_network, "d2d_model", None)
                             if d2d_model:
                                 d2d_model.d2d_requests_completed[die_id] += 1
-                                # 记录write_complete响应的接收（只在真正的源IP记录）
-                                d2d_model.record_write_complete(req.packet_id, die_id)
+                                # 记录Comp响应的接收（只在真正的源IP记录）
+                                d2d_model.record_Comp(req.packet_id, die_id)
 
     def _is_cross_die_write_request(self, req: Flit) -> bool:
         """检查是否为跨Die写请求"""
@@ -832,11 +840,11 @@ class IPInterface:
                 self._record_tracker_allocation("sn_share")
                 self._record_tracker_allocation("sn_wdb")
 
-                # 记录retry释放（写请求成功处理，发送positive前记录）
+                # 记录retry释放（写请求成功处理，发送Pcredit前记录）
                 self._record_tracker_release("write_retry")
 
-                # 发送 positive 响应
-                self.create_rsp(new_req, "positive")
+                # 发送 Pcredit 响应
+                self.create_rsp(new_req, "Pcredit")
 
         elif req.req_type == "read":
             # 读：只要有空 tracker 即可
@@ -849,11 +857,11 @@ class IPInterface:
                 self.sn_tracker_count[new_req.sn_tracker_type]["count"] -= 1
                 self._record_tracker_allocation("sn_ro")
 
-                # 记录retry释放（读请求成功处理，发送positive前记录）
+                # 记录retry释放（读请求成功处理，发送Pcredit前记录）
                 self._record_tracker_release("read_retry")
 
-                # 发送 positive 响应，让RN重新发送请求
-                self.create_rsp(new_req, "positive")
+                # 发送 Pcredit 响应，让RN重新发送请求
+                self.create_rsp(new_req, "Pcredit")
 
     def _handle_received_data(self, flit: Flit):
         """处理接收到的数据"""
@@ -1027,8 +1035,8 @@ class IPInterface:
                         self.request_tracker.update_timestamp(flit.packet_id, "data_received_complete_cycle", complete_cycle)
                         self.request_tracker.update_timestamp(flit.packet_id, "data_entry_noc_from_cake0_cycle", first_flit.data_entry_noc_from_cake0_cycle)
 
-                        # 对于NoC内部写请求，数据到达SN端即完成（不需要write_complete响应）
-                        # 但是对于跨Die写请求，需要等待write_complete响应（在RN端处理）
+                        # 对于NoC内部写请求，数据到达SN端即完成（不需要Comp响应）
+                        # 但是对于跨Die写请求，需要等待Comp响应（在RN端处理）
                         if not is_cross_die_write:
                             self.request_tracker.mark_request_completed(flit.packet_id, complete_cycle)
 
@@ -1248,8 +1256,8 @@ class IPInterface:
         rsp.sync_latency_record(req)
         rsp.sn_rsp_generate_cycle = cycle
 
-        # 记录negative响应（retry分配）
-        if rsp_type == "negative":
+        # 记录Retry响应（retry分配）
+        if rsp_type == "Retry":
             retry_type = "read_retry" if req.req_type == "read" else "write_retry"
             self._record_tracker_allocation(retry_type)
 
@@ -1306,11 +1314,11 @@ class IPInterface:
             self.sn_tracker_count[new_req.sn_tracker_type]["count"] -= 1
             self._record_tracker_allocation("sn_ro")
 
-            # 记录retry释放（发送positive前记录）
+            # 记录retry释放（发送Pcredit前记录）
             self._record_tracker_release("read_retry")
 
-            # 发送 positive 响应，让RN重新发送请求
-            self.create_rsp(new_req, "positive")
+            # 发送 Pcredit 响应，让RN重新发送请求
+            self.create_rsp(new_req, "Pcredit")
 
     def get_tracker_usage_data(self):
         """获取tracker使用数据"""

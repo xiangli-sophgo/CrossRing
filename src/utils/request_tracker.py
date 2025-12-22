@@ -18,23 +18,25 @@ import numpy as np
 
 class RequestState(Enum):
     """请求状态枚举"""
-    CREATED = "created"          # 请求创建
-    INJECTED = "injected"        # 已注入网络
-    IN_NETWORK = "in_network"    # 在网络中传输
-    ARRIVED = "arrived"          # 已到达目标
-    COMPLETED = "completed"      # 请求完成
+
+    CREATED = "created"  # 请求创建
+    INJECTED = "injected"  # 已注入网络
+    IN_NETWORK = "in_network"  # 在网络中传输
+    ARRIVED = "arrived"  # 已到达目标
+    COMPLETED = "completed"  # 请求完成
 
 
 @dataclass
 class RequestLifecycle:
     """请求生命周期记录"""
+
     # 基本信息
     packet_id: int
     source: int
     destination: int
     source_type: str
     dest_type: str
-    op_type: str                # 'read' or 'write'
+    op_type: str  # 'read' or 'write'
     burst_size: int
 
     # 时间戳（cycle）
@@ -72,15 +74,13 @@ class RequestTracker:
         Args:
             network_frequency: 网络频率 (GHz)，用于cycle到ns的转换
         """
-        self.active_requests: Dict[int, RequestLifecycle] = {}      # 活跃请求
+        self.active_requests: Dict[int, RequestLifecycle] = {}  # 活跃请求
         self.completed_requests: Dict[int, RequestLifecycle] = {}  # 已完成请求
         self.network_frequency = network_frequency
 
     # ===== 请求生命周期管理 =====
 
-    def start_request(self, packet_id: int, source: int, destination: int,
-                     source_type: str, dest_type: str, op_type: str,
-                     burst_size: int, cycle: int, **kwargs):
+    def start_request(self, packet_id: int, source: int, destination: int, source_type: str, dest_type: str, op_type: str, burst_size: int, cycle: int, **kwargs):
         """
         开始追踪请求
 
@@ -96,9 +96,9 @@ class RequestTracker:
             **kwargs: 可选参数（is_cross_die, origin_die, target_die等）
         """
         # 获取die信息，如果未指定则默认为0（单Die场景）
-        origin_die = kwargs.get('origin_die', 0)
-        target_die = kwargs.get('target_die', 0)
-        is_cross_die = kwargs.get('is_cross_die', False) or (origin_die != target_die)
+        origin_die = kwargs.get("origin_die", 0)
+        target_die = kwargs.get("target_die", 0)
+        is_cross_die = kwargs.get("is_cross_die", False) or (origin_die != target_die)
 
         lifecycle = RequestLifecycle(
             packet_id=packet_id,
@@ -111,7 +111,7 @@ class RequestTracker:
             created_cycle=cycle,
             is_cross_die=is_cross_die,
             origin_die=origin_die,
-            target_die=target_die
+            target_die=target_die,
         )
         self.active_requests[packet_id] = lifecycle
 
@@ -147,27 +147,33 @@ class RequestTracker:
     # ===== Flit追踪 =====
 
     def add_request_flit(self, packet_id: int, flit: Any):
-        """添加请求flit"""
+        """添加请求flit（避免重复添加同一个flit对象）"""
         lifecycle = self.active_requests.get(packet_id) or self.completed_requests.get(packet_id)
         if lifecycle:
-            print(f"[DEBUG] add_request_flit: packet_id={packet_id}, flit_id={getattr(flit, 'id', '?')}, "
-                  f"已有{len(lifecycle.request_flits)}个, position_timestamps={getattr(flit, 'position_timestamps', {})}")
+            # 检查是否已经存在该flit（通过id判断）
+            flit_id = getattr(flit, 'id', None)
+            existing_ids = [getattr(f, 'id', None) for f in lifecycle.request_flits]
+            if flit_id in existing_ids:
+                # 已存在，不重复添加
+                return
             lifecycle.request_flits.append(flit)
 
     def add_response_flit(self, packet_id: int, flit: Any):
         """添加响应flit"""
         lifecycle = self.active_requests.get(packet_id) or self.completed_requests.get(packet_id)
         if lifecycle:
-            print(f"[DEBUG] add_response_flit: packet_id={packet_id}, flit_id={getattr(flit, 'id', '?')}, "
-                  f"已有{len(lifecycle.response_flits)}个, position_timestamps={getattr(flit, 'position_timestamps', {})}")
+            # print(
+            #     f"[DEBUG] add_response_flit: packet_id={packet_id}, flit_id={getattr(flit, 'id', '?')}, "
+            #     f"已有{len(lifecycle.response_flits)}个, position_timestamps={getattr(flit, 'position_timestamps', {})}"
+            # )
             lifecycle.response_flits.append(flit)
 
     def add_data_flit(self, packet_id: int, flit: Any):
         """添加数据flit"""
         lifecycle = self.active_requests.get(packet_id) or self.completed_requests.get(packet_id)
         if lifecycle:
-            print(f"[DEBUG] add_data_flit: packet_id={packet_id}, flit_id={getattr(flit, 'flit_id', '?')}, "
-                  f"已有{len(lifecycle.data_flits)}个, position_timestamps={getattr(flit, 'position_timestamps', {})}")
+            # print(f"[DEBUG] add_data_flit: packet_id={packet_id}, flit_id={getattr(flit, 'flit_id', '?')}, "
+            #   f"已有{len(lifecycle.data_flits)}个, position_timestamps={getattr(flit, 'position_timestamps', {})}")
             lifecycle.data_flits.append(flit)
 
     # ===== 时间戳管理（关键创新）=====
@@ -206,16 +212,16 @@ class RequestTracker:
 
         # 定义需要收集的时间戳字段
         timestamp_fields = [
-            'cmd_entry_cake0_cycle',
-            'cmd_entry_noc_from_cake0_cycle',
-            'cmd_entry_noc_from_cake1_cycle',
-            'cmd_received_by_cake0_cycle',
-            'cmd_received_by_cake1_cycle',
-            'data_entry_noc_from_cake0_cycle',
-            'data_entry_noc_from_cake1_cycle',
-            'data_received_complete_cycle',
-            'write_complete_received_cycle',
-            'rsp_entry_network_cycle',
+            "cmd_entry_cake0_cycle",
+            "cmd_entry_noc_from_cake0_cycle",
+            "cmd_entry_noc_from_cake1_cycle",
+            "cmd_received_by_cake0_cycle",
+            "cmd_received_by_cake1_cycle",
+            "data_entry_noc_from_cake0_cycle",
+            "data_entry_noc_from_cake1_cycle",
+            "data_received_complete_cycle",
+            "write_complete_received_cycle",
+            "rsp_entry_network_cycle",
         ]
 
         for field in timestamp_fields:
@@ -223,13 +229,13 @@ class RequestTracker:
             for f in all_flits:
                 if hasattr(f, field):
                     val = getattr(f, field)
-                    if val is not None and val < float('inf'):
+                    if val is not None and val < float("inf"):
                         values.append(val)
 
             if values:
                 # 对于complete/received字段，使用最大值（最后完成的）
                 # 对于entry字段，使用最小值（最早发生的）
-                if 'complete' in field or 'received' in field:
+                if "complete" in field or "received" in field:
                     timestamps[field] = max(values)
                 else:
                     timestamps[field] = min(values)
@@ -305,11 +311,13 @@ class RequestTracker:
         write_completed = sum(1 for lc in self.completed_requests.values() if lc.op_type == "write")
         cross_die_completed = sum(1 for lc in self.completed_requests.values() if lc.is_cross_die)
 
-        stats.update({
-            "read_completed": read_completed,
-            "write_completed": write_completed,
-            "cross_die_completed": cross_die_completed,
-        })
+        stats.update(
+            {
+                "read_completed": read_completed,
+                "write_completed": write_completed,
+                "cross_die_completed": cross_die_completed,
+            }
+        )
 
         return stats
 
@@ -330,11 +338,13 @@ class RequestTracker:
         if self.active_requests:
             print(f"\n未完成的请求 ({len(self.active_requests)}个):")
             for packet_id, lifecycle in list(self.active_requests.items())[:10]:  # 最多显示10个
-                print(f"  Packet {packet_id}: "
-                      f"{lifecycle.source}→{lifecycle.destination}, "
-                      f"类型={lifecycle.op_type}, "
-                      f"状态={lifecycle.current_state.value}, "
-                      f"flit数={len(lifecycle.request_flits + lifecycle.response_flits + lifecycle.data_flits)}")
+                print(
+                    f"  Packet {packet_id}: "
+                    f"{lifecycle.source}→{lifecycle.destination}, "
+                    f"类型={lifecycle.op_type}, "
+                    f"状态={lifecycle.current_state.value}, "
+                    f"flit数={len(lifecycle.request_flits + lifecycle.response_flits + lifecycle.data_flits)}"
+                )
 
             if len(self.active_requests) > 10:
                 print(f"  ... 还有{len(self.active_requests) - 10}个未完成请求")
@@ -344,10 +354,7 @@ class RequestTracker:
             print(f"\n已完成请求示例 (前5个):")
             for packet_id, lifecycle in list(self.completed_requests.items())[:5]:
                 latency = lifecycle.completed_cycle - lifecycle.created_cycle
-                print(f"  Packet {packet_id}: "
-                      f"{lifecycle.source}→{lifecycle.destination}, "
-                      f"延迟={latency}周期, "
-                      f"类型={lifecycle.op_type}")
+                print(f"  Packet {packet_id}: " f"{lifecycle.source}→{lifecycle.destination}, " f"延迟={latency}周期, " f"类型={lifecycle.op_type}")
 
     def reset(self) -> None:
         """重置跟踪器"""

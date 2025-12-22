@@ -36,7 +36,7 @@ class D2D_SN_Interface(IPInterface):
         self.target_die_interfaces = {}  # 将由D2D_Model设置 {die_id: d2d_rn_interface}
 
         # 防止重复处理AXI_B响应的记录 {(packet_id, cycle): True}
-        self.processed_write_complete_responses = {}
+        self.processed_Comp_responses = {}
 
         # 防止重复处理写请求 {packet_id: True}
         self.processed_write_requests = set()
@@ -109,7 +109,7 @@ class D2D_SN_Interface(IPInterface):
                 return "AW"
 
         if hasattr(flit, "rsp_type"):
-            if flit.rsp_type in ["datasend", "read_data"]:
+            if flit.rsp_type in ["DBID", "read_data"]:
                 return "R"
             elif flit.rsp_type in ["write_ack", "write_response"]:
                 return "B"
@@ -167,10 +167,10 @@ class D2D_SN_Interface(IPInterface):
         处理接收到的跨Die flit (AXI flit)
         根据flit类型进行相应处理，处理完后回收AXI flit
         """
-        # 优先检查是否为AXI_B的write_complete响应
+        # 优先检查是否为AXI_B的Comp响应
         if hasattr(flit, "flit_position") and flit.flit_position and "AXI_B" in str(flit.flit_position):
             # AXI_B通道的写完成响应
-            self.handle_cross_die_write_complete_response(flit)
+            self.handle_cross_die_Comp_response(flit)
             # 回收AXI flit（forward方法会创建新NoC flit）
             from src.utils.flit import _flit_pool
 
@@ -277,8 +277,8 @@ class D2D_SN_Interface(IPInterface):
 
         new_flit.path_index = 0
 
-        # 为write_complete响应设置正确的属性
-        if hasattr(new_flit, "rsp_type") and new_flit.rsp_type == "write_complete":
+        # 为Comp响应设置正确的属性
+        if hasattr(new_flit, "rsp_type") and new_flit.rsp_type == "Comp":
             new_flit.req_type = "write"  # 写完成响应需要标记为write类型
             # 设置正确的source_type为D2D_SN自己（响应从D2D_SN发出）
             new_flit.source_type = self.ip_type  # d2d_sn_0
@@ -429,21 +429,21 @@ class D2D_SN_Interface(IPInterface):
                 self._record_tracker_allocation("sn_share")
                 self._record_tracker_allocation("sn_wdb")
 
-                # 发送datasend响应
-                data_send_rsp = self._create_response_flit(flit, "datasend")
+                # 发送DBID响应
+                data_send_rsp = self._create_response_flit(flit, "DBID")
                 self.enqueue(data_send_rsp, "rsp")
             else:
-                # 资源不足：发送negative并加入等待队列（与基类一致）
+                # 资源不足：发送Retry并加入等待队列（与基类一致）
                 if not has_tracker:
                     self._record_tracker_block("sn_share")
                 if not has_databuffer:
                     self._record_tracker_block("sn_wdb")
-                self.create_rsp(flit, "negative")
+                self.create_rsp(flit, "Retry")
                 self.sn_req_wait["write"].append(flit)
         else:
-            # retry请求（req_attr="old"）：直接发送datasend（与基类一致）
+            # retry请求（req_attr="old"）：直接发送DBID（与基类一致）
             # flit已在等待队列处理时加入tracker，这里不需要再次分配资源
-            data_send_rsp = self._create_response_flit(flit, "datasend")
+            data_send_rsp = self._create_response_flit(flit, "DBID")
             self.enqueue(data_send_rsp, "rsp")
 
     def _handle_cross_die_read_request(self, flit: Flit):
@@ -473,10 +473,10 @@ class D2D_SN_Interface(IPInterface):
 
                 # 注意：不在这里释放tracker！tracker会在数据返回时释放
             else:
-                # 资源不足，返回negative响应
-                # print(f"[D2D_SN] RO tracker不足，读请求 packet_id={packet_id} 返回negative响应")
+                # 资源不足，返回Retry响应
+                # print(f"[D2D_SN] RO tracker不足，读请求 packet_id={packet_id} 返回Retry响应")
                 self._record_tracker_block("sn_ro")
-                self.create_rsp(flit, "negative")
+                self.create_rsp(flit, "Retry")
                 self.sn_req_wait[flit.req_type].append(flit)
         else:
             # 重试请求：直接转发
@@ -688,14 +688,14 @@ class D2D_SN_Interface(IPInterface):
                 self.sn_tracker.append(new_req)
                 # 记录tracker分配事件
                 self._record_tracker_allocation("sn_ro")
-                # 记录retry释放（读请求成功处理，发送positive前记录）
+                # 记录retry释放（读请求成功处理，发送Pcredit前记录）
                 self._record_tracker_release("read_retry")
 
-                # 发送positive响应触发RN retry
-                positive_rsp = self._create_response_flit(new_req, "positive")
-                self.enqueue(positive_rsp, "rsp")
+                # 发送Pcredit响应触发RN retry
+                Pcredit_rsp = self._create_response_flit(new_req, "Pcredit")
+                self.enqueue(Pcredit_rsp, "rsp")
 
-                # print(f"[D2D_SN] 发送positive响应触发读请求retry packet_id={new_req.packet_id}")
+                # print(f"[D2D_SN] 发送Pcredit响应触发读请求retry packet_id={new_req.packet_id}")
 
         elif req_type == "write":
             # 写请求需要share tracker和WDB
@@ -711,14 +711,14 @@ class D2D_SN_Interface(IPInterface):
                 # 记录tracker分配事件
                 self._record_tracker_allocation("sn_share")
                 self._record_tracker_allocation("sn_wdb")
-                # 记录retry释放（写请求成功处理，发送positive前记录）
+                # 记录retry释放（写请求成功处理，发送Pcredit前记录）
                 self._record_tracker_release("write_retry")
 
-                # 发送positive响应触发GDMA retry
-                positive_rsp = self._create_response_flit(new_req, "positive")
-                self.enqueue(positive_rsp, "rsp")
+                # 发送Pcredit响应触发GDMA retry
+                Pcredit_rsp = self._create_response_flit(new_req, "Pcredit")
+                self.enqueue(Pcredit_rsp, "rsp")
 
-                # print(f"[D2D_SN] 发送positive响应触发写请求retry packet_id={new_req.packet_id}")
+                # print(f"[D2D_SN] 发送Pcredit响应触发写请求retry packet_id={new_req.packet_id}")
 
     def forward_cross_die_data_to_requester(self, flit: Flit):
         """
@@ -857,7 +857,7 @@ class D2D_SN_Interface(IPInterface):
             # 通过W通道发送写数据
             self.d2d_sys.enqueue_sn(axi_data_flit, target_die_id, 0)
 
-    def handle_cross_die_write_complete_response(self, flit: Flit):
+    def handle_cross_die_Comp_response(self, flit: Flit):
         """
         处理从B通道返回的写完成响应
         释放D2D_SN的tracker并转发响应给原始RN
@@ -872,12 +872,12 @@ class D2D_SN_Interface(IPInterface):
             if hasattr(self, 'request_tracker') and self.request_tracker:
                 self.request_tracker.update_timestamp(
                     packet_id,
-                    'write_complete_received_cycle',
+                    'Comp_received_cycle',
                     self.current_cycle
                 )
                 # 从所有flit收集时间戳
                 self.request_tracker.collect_timestamps_from_flits(packet_id)
-                # 注意：不在D2D_SN标记完成，由原始请求者(GDMA)在接收到write_complete时标记
+                # 注意：不在D2D_SN标记完成，由原始请求者(GDMA)在接收到Comp时标记
 
             # 释放D2D_SN的tracker和资源
             self.sn_tracker.remove(write_req)
@@ -915,22 +915,22 @@ class D2D_SN_Interface(IPInterface):
         flit_position = getattr(rsp, "flit_position", "None")
 
         # 只处理从AXI_B通道来的跨Die写完成响应（D2D_SN自己的业务）
-        if rsp_type == "write_complete" and flit_position == "AXI_B":
+        if rsp_type == "Comp" and flit_position == "AXI_B":
             # 防重复处理
             response_key = (packet_id, self.current_cycle)
-            if response_key in self.processed_write_complete_responses:
+            if response_key in self.processed_Comp_responses:
                 return
 
             # AXI_B通道的原始写完成响应，需要释放D2D_SN的tracker
-            self.processed_write_complete_responses[response_key] = True
-            self.handle_cross_die_write_complete_response(rsp)
+            self.processed_Comp_responses[response_key] = True
+            self.handle_cross_die_Comp_response(rsp)
             return
 
         # 检查req_type有效性
         if req_type in [None, "None"]:
             return
 
-        # 其他所有响应（包括已转发的write_complete），调用父类处理
+        # 其他所有响应（包括已转发的Comp），调用父类处理
         super()._handle_received_response(rsp)
 
     def get_statistics(self) -> dict:
@@ -941,7 +941,7 @@ class D2D_SN_Interface(IPInterface):
             "cross_die_responses_sent": self.cross_die_responses_sent,
             "cross_die_data_forwarded": getattr(self, "cross_die_data_forwarded", 0),
             "processed_write_requests_count": len(self.processed_write_requests),
-            "processed_write_complete_responses_count": len(self.processed_write_complete_responses),
+            "processed_Comp_responses_count": len(self.processed_Comp_responses),
             "cross_die_receive_queue_size": sum(len(q) for q in self.cross_die_receive_queues.values()),
         }
         return stats
