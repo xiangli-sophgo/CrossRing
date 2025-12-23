@@ -808,3 +808,155 @@ export function hybridLayout(
 
   return result
 }
+
+// ==========================================
+// useForceLayout Hook
+// ==========================================
+
+import { useRef, useCallback, useEffect, useState } from 'react'
+
+export interface UseForceLayoutOptions extends Partial<ForceLayoutOptions> {
+  enabled: boolean
+  onNodePositionsChange?: (nodes: ForceNode[]) => void
+}
+
+export interface UseForceLayoutResult {
+  isSimulating: boolean
+  nodes: ForceNode[]
+  initialize: (nodes: Node[], edges: Edge[]) => void
+  start: () => void
+  stop: () => void
+  reheat: () => void
+  onDragStart: (nodeId: string, x: number, y: number) => void
+  onDrag: (nodeId: string, x: number, y: number) => void
+  onDragEnd: (nodeId: string) => void
+  updateOptions: (options: Partial<ForceLayoutOptions>) => void
+}
+
+export function useForceLayout(options: UseForceLayoutOptions): UseForceLayoutResult {
+  const { enabled, onNodePositionsChange, ...forceOptions } = options
+
+  const managerRef = useRef<ForceLayoutManager | null>(null)
+  const [isSimulating, setIsSimulating] = useState(false)
+  const [nodes, setNodes] = useState<ForceNode[]>([])
+
+  const getManager = useCallback(() => {
+    if (!managerRef.current) {
+      managerRef.current = new ForceLayoutManager({
+        ...DEFAULT_FORCE_OPTIONS,
+        ...forceOptions,
+      })
+    }
+    return managerRef.current
+  }, [])
+
+  const initialize = useCallback((inputNodes: Node[], edges: Edge[]) => {
+    if (!enabled) return
+
+    const manager = getManager()
+    const opts: Partial<ForceLayoutOptions> = { ...forceOptions }
+    const initialNodes = manager.initialize(inputNodes, edges, opts)
+
+    manager.setOnTick((updatedNodes) => {
+      setNodes([...updatedNodes])
+      if (onNodePositionsChange) {
+        onNodePositionsChange(updatedNodes)
+      }
+    })
+
+    manager.setOnEnd(() => {
+      setIsSimulating(false)
+    })
+
+    setNodes(initialNodes)
+    setIsSimulating(true)
+    manager.start(1.0)
+  }, [enabled, getManager, onNodePositionsChange, forceOptions])
+
+  const start = useCallback(() => {
+    if (!enabled) return
+    const manager = managerRef.current
+    if (manager) {
+      setIsSimulating(true)
+      manager.start()
+    }
+  }, [enabled])
+
+  const stop = useCallback(() => {
+    const manager = managerRef.current
+    if (manager) {
+      manager.stop()
+      setIsSimulating(false)
+    }
+  }, [])
+
+  const reheat = useCallback(() => {
+    if (!enabled) return
+    const manager = managerRef.current
+    if (manager) {
+      setIsSimulating(true)
+      manager.reheat()
+    }
+  }, [enabled])
+
+  const onDragStart = useCallback((nodeId: string, x: number, y: number) => {
+    if (!enabled) return
+    const manager = managerRef.current
+    if (manager) {
+      manager.fixNode(nodeId, x, y)
+      setIsSimulating(true)
+    }
+  }, [enabled])
+
+  const onDrag = useCallback((nodeId: string, x: number, y: number) => {
+    if (!enabled) return
+    const manager = managerRef.current
+    if (manager) {
+      manager.dragNode(nodeId, x, y)
+    }
+  }, [enabled])
+
+  const onDragEnd = useCallback((nodeId: string) => {
+    if (!enabled) return
+    const manager = managerRef.current
+    if (manager) {
+      manager.releaseNode(nodeId)
+    }
+  }, [enabled])
+
+  const updateOptions = useCallback((newOptions: Partial<ForceLayoutOptions>) => {
+    const manager = managerRef.current
+    if (manager) {
+      manager.updateOptions(newOptions)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!enabled && managerRef.current) {
+      managerRef.current.stop()
+      setIsSimulating(false)
+    }
+  }, [enabled])
+
+  useEffect(() => {
+    return () => {
+      if (managerRef.current) {
+        managerRef.current.destroy()
+        managerRef.current = null
+      }
+    }
+  }, [])
+
+  return {
+    isSimulating,
+    nodes,
+    initialize,
+    start,
+    stop,
+    reheat,
+    onDragStart,
+    onDrag,
+    onDragEnd,
+    updateOptions,
+  }
+}

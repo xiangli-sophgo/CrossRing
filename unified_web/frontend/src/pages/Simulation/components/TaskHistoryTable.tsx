@@ -2,7 +2,7 @@
  * 历史任务表格组件
  */
 import React from 'react'
-import { Card, Table, Space, Button, Tag, Typography, Empty, Alert } from 'antd'
+import { Card, Table, Space, Button, Tag, Typography, Empty, Alert, Popconfirm } from 'antd'
 import {
   HistoryOutlined,
   ReloadOutlined,
@@ -11,6 +11,7 @@ import {
   ClockCircleOutlined,
   SyncOutlined,
   StopOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons'
 import { primaryColor } from '@/theme/colors'
 import type { GroupedTaskItem } from '@/api/simulation'
@@ -23,6 +24,7 @@ interface TaskHistoryTableProps {
   onRefresh: () => void
   onViewResult: (experimentId: number) => void
   onDelete: (tasks: GroupedTaskItem) => Promise<void>
+  onClearAll?: () => Promise<void>
 }
 
 // 获取状态标签
@@ -44,6 +46,7 @@ export const TaskHistoryTable: React.FC<TaskHistoryTableProps> = ({
   onRefresh,
   onViewResult,
   onDelete,
+  onClearAll,
 }) => {
   return (
     <Card
@@ -54,9 +57,28 @@ export const TaskHistoryTable: React.FC<TaskHistoryTableProps> = ({
         </Space>
       }
       extra={
-        <Button icon={<ReloadOutlined />} onClick={onRefresh} size="small">
-          刷新
-        </Button>
+        <Space>
+          {onClearAll && groupedTaskHistory.length > 0 && (
+            <Popconfirm
+              title="确认清除"
+              description="确定要清除所有历史任务记录吗？"
+              onConfirm={onClearAll}
+              okText="确定"
+              cancelText="取消"
+            >
+              <Button
+                icon={<DeleteOutlined />}
+                size="small"
+                danger
+              >
+                全部清除
+              </Button>
+            </Popconfirm>
+          )}
+          <Button icon={<ReloadOutlined />} onClick={onRefresh} size="small">
+            刷新
+          </Button>
+        </Space>
       }
     >
       <Table

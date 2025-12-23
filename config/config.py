@@ -31,6 +31,7 @@ class CrossRingConfig:
         self.FAIL_CORE_POS = []
         self.SLICE_PER_LINK_HORIZONTAL = args.SLICE_PER_LINK_HORIZONTAL
         self.SLICE_PER_LINK_VERTICAL = args.SLICE_PER_LINK_VERTICAL
+        self.SLICE_PER_LINK_SELF = args.SLICE_PER_LINK_SELF
         self.RB_IN_FIFO_DEPTH = args.RB_IN_FIFO_DEPTH
         self.RB_OUT_FIFO_DEPTH = args.RB_OUT_FIFO_DEPTH
         self.IQ_OUT_FIFO_DEPTH_HORIZONTAL = args.IQ_OUT_FIFO_DEPTH_HORIZONTAL
@@ -483,6 +484,7 @@ class CrossRingConfig:
         parser.add_argument("--FLIT_SIZE", type=int, default=default_config["FLIT_SIZE"], help="Flit size")
         parser.add_argument("--SLICE_PER_LINK_HORIZONTAL", type=int, default=default_config["SLICE_PER_LINK_HORIZONTAL"], help="Slice num per horizontal link, (num -2) equals to RTL slice num")
         parser.add_argument("--SLICE_PER_LINK_VERTICAL", type=int, default=default_config["SLICE_PER_LINK_VERTICAL"], help="Slice num per vertical link, (num -2) equals to RTL slice num")
+        parser.add_argument("--SLICE_PER_LINK_SELF", type=int, default=default_config.get("SLICE_PER_LINK_SELF", 2), help="Slice num per self-loop link")
         parser.add_argument("--RB_IN_FIFO_DEPTH", type=int, default=default_config["RB_IN_FIFO_DEPTH"], help="Depth of IN FIFOs in Ring Bridge")
         parser.add_argument("--RB_OUT_FIFO_DEPTH", type=int, default=default_config["RB_OUT_FIFO_DEPTH"], help="Depth of OUT FIFOs in Ring Bridge")
 

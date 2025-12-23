@@ -11,6 +11,9 @@ import {
   TrafficAnalysisResult,
 } from '../../types'
 
+// 重新导出供子组件使用的类型
+export type { HierarchyLevel, LayoutType, MultiLevelViewOptions }
+
 // 根据板卡U高度区分颜色
 export const BOARD_U_COLORS: Record<number, string> = {
   1: '#13c2c2',  // 1U - 青色
@@ -135,4 +138,13 @@ export interface Edge {
   isSwitch?: boolean  // 是否为Switch连接
   // 多层级视图属性
   connectionType?: 'intra_upper' | 'intra_lower' | 'inter_level'  // 连接类型
+  // 单层级视图：跨层级连接属性
+  isExternal?: boolean  // 是否连接到当前层级之外
+  externalDirection?: 'upper' | 'lower'  // 外部连接方向（上层/下层）
+  externalNodeId?: string  // 外部节点ID
+  externalNodeLabel?: string  // 外部节点标签
+  // 间接连接属性（通过上层Switch）
+  isIndirect?: boolean  // 是否为间接连接
+  viaNodeId?: string  // 中转节点ID
+  viaNodeLabel?: string  // 中转节点标签
 }

@@ -2,7 +2,7 @@
  * 波形查看器主组件 - 统一的波形查看界面
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -61,23 +61,70 @@ interface Props {
   resultId: number;
 }
 
+// localStorage key 生成
+const getStorageKey = (experimentId: number, resultId: number) =>
+  `waveform-state-${experimentId}-${resultId}`;
+
+// 状态持久化接口
+interface PersistedState {
+  activeTab: 'packet' | 'fifo';
+  selectedPacketIds: number[];
+  selectedNode: number | null;
+  selectedChannel: string;
+  selectedFifos: string[];
+  fifoClickedPacketId: number | null;
+  expandedRspSignals: string[];  // 已展开的 rsp 信号（如 ["IQ_TR.rsp"]）
+  expandedReqSignals: string[];  // 已展开的 req 信号（如 ["IQ_TR.req"]）
+  expandedDataSignals: string[]; // 已展开的 data 信号（如 ["IQ_TR.data"]）
+}
+
+// 从 localStorage 加载状态
+const loadPersistedState = (experimentId: number, resultId: number): Partial<PersistedState> => {
+  try {
+    const key = getStorageKey(experimentId, resultId);
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (e) {
+    console.error('加载波形状态失败', e);
+  }
+  return {};
+};
+
+// 保存状态到 localStorage
+const savePersistedState = (experimentId: number, resultId: number, state: PersistedState) => {
+  try {
+    const key = getStorageKey(experimentId, resultId);
+    localStorage.setItem(key, JSON.stringify(state));
+  } catch (e) {
+    console.error('保存波形状态失败', e);
+  }
+};
+
 export default function WaveformViewer({ experimentId, resultId }: Props) {
+  // 加载持久化状态
+  const initialState = useMemo(() => loadPersistedState(experimentId, resultId), [experimentId, resultId]);
+
   const [loading, setLoading] = useState(true);
   const [checkResult, setCheckResult] = useState<WaveformCheckResponse | null>(null);
-  const [activeTab, setActiveTab] = useState<'packet' | 'fifo'>('packet');
+  const [activeTab, setActiveTab] = useState<'packet' | 'fifo'>(initialState.activeTab || 'packet');
 
   // 请求波形相关状态
   const [waveformData, setWaveformData] = useState<WaveformResponse | null>(null);
-  const [selectedPacketIds, setSelectedPacketIds] = useState<number[]>([]);
+  const [selectedPacketIds, setSelectedPacketIds] = useState<number[]>(initialState.selectedPacketIds || []);
   const [loadingWaveform, setLoadingWaveform] = useState(false);
 
   // FIFO波形相关状态
-  const [selectedNode, setSelectedNode] = useState<number | null>(null);
-  const [selectedChannel, setSelectedChannel] = useState<string>('data');  // 当前选中的通道类型（单选）
-  const [selectedFifos, setSelectedFifos] = useState<string[]>([]);  // 格式: "fifo.flit_type" 如 "IQ_TD.req"
+  const [selectedNode, setSelectedNode] = useState<number | null>(initialState.selectedNode ?? null);
+  const [selectedChannel, setSelectedChannel] = useState<string>(initialState.selectedChannel || 'data');
+  const [selectedFifos, setSelectedFifos] = useState<string[]>(initialState.selectedFifos || []);
   const [fifoWaveformData, setFifoWaveformData] = useState<FIFOWaveformResponse | null>(null);
   const [loadingFifoWaveform, setLoadingFifoWaveform] = useState(false);
   const [fifoError, setFifoError] = useState<string | null>(null);
+  const [expandedRspSignals, setExpandedRspSignals] = useState<string[]>(initialState.expandedRspSignals || []);
+  const [expandedReqSignals, setExpandedReqSignals] = useState<string[]>(initialState.expandedReqSignals || []);
+  const [expandedDataSignals, setExpandedDataSignals] = useState<string[]>(initialState.expandedDataSignals || []);
 
   // 拓扑数据
   const [topoData, setTopoData] = useState<TopologyData | null>(null);
@@ -269,16 +316,28 @@ export default function WaveformViewer({ experimentId, resultId }: Props) {
           resultId,
           nodeId,
           Array.from(info.fifos),
-          Array.from(info.flitTypes)
+          Array.from(info.flitTypes),
+          {
+            expandRspSignals: expandedRspSignals,
+            expandReqSignals: expandedReqSignals,
+            expandDataSignals: expandedDataSignals
+          }
         );
         // 过滤只保留用户选择的 fifo.flit_type 组合
         const filteredSignals = data.signals.filter(signal => {
-          // signal.name 格式: "Node_X.FIFO.flit_type"
+          // signal.name 格式: "Node_X.FIFO.flit_type" 或 "Node_X.FIFO.flit_type.sub_type"
           const parts = signal.name.split('.');
           if (parts.length >= 3) {
             const fifoType = parts[1];
             const flitType = parts[2];
-            return info.fullIds.includes(`${fifoType}.${flitType}`);
+            // 基本匹配
+            if (info.fullIds.includes(`${fifoType}.${flitType}`)) {
+              return true;
+            }
+            // 展开的子类型（如 rsp.CompData, req.new, data.0）也需要通过
+            if (parts.length >= 4) {
+              return info.fullIds.includes(`${fifoType}.${flitType}`);
+            }
           }
           return false;
         });
@@ -308,16 +367,96 @@ export default function WaveformViewer({ experimentId, resultId }: Props) {
     } finally {
       setLoadingFifoWaveform(false);
     }
-  }, [experimentId, resultId, selectedFifos, getSelectedFifoInfoByNode]);
+  }, [experimentId, resultId, selectedFifos, getSelectedFifoInfoByNode, expandedRspSignals, expandedReqSignals, expandedDataSignals]);
 
-  // 当选择的FIFO改变时自动加载
+  // 当选择的FIFO或展开状态改变时自动加载
   useEffect(() => {
     if (selectedFifos.length > 0) {
       loadFifoWaveform();
     } else {
       setFifoWaveformData(null);
     }
-  }, [selectedFifos, loadFifoWaveform]);
+  }, [selectedFifos, loadFifoWaveform, expandedRspSignals, expandedReqSignals, expandedDataSignals]);
+
+  // FIFO 波形中点击的 packet（用于在下方显示请求波形）
+  const [fifoClickedPacketId, setFifoClickedPacketId] = useState<number | null>(initialState.fifoClickedPacketId ?? null);
+  const [fifoClickedWaveform, setFifoClickedWaveform] = useState<WaveformResponse | null>(null);
+  const [loadingFifoClickedWaveform, setLoadingFifoClickedWaveform] = useState(false);
+
+  // 保存状态到 localStorage
+  useEffect(() => {
+    savePersistedState(experimentId, resultId, {
+      activeTab,
+      selectedPacketIds,
+      selectedNode,
+      selectedChannel,
+      selectedFifos,
+      fifoClickedPacketId,
+      expandedRspSignals,
+      expandedReqSignals,
+      expandedDataSignals,
+    });
+  }, [experimentId, resultId, activeTab, selectedPacketIds, selectedNode, selectedChannel, selectedFifos, fifoClickedPacketId, expandedRspSignals, expandedReqSignals, expandedDataSignals]);
+
+  // 处理 flit 点击 - 在下方显示请求波形
+  const handleFlitClick = useCallback((packetId: number) => {
+    setFifoClickedPacketId(packetId);
+  }, []);
+
+  // 处理展开/折叠信号（支持 rsp, req, data）
+  const handleToggleExpand = useCallback((signalKey: string) => {
+    // signalKey 格式: "IQ_TR.rsp", "IQ_TR.req", "IQ_TR.data"
+    if (signalKey.endsWith('.rsp')) {
+      setExpandedRspSignals(prev => {
+        if (prev.includes(signalKey)) {
+          return prev.filter(s => s !== signalKey);
+        } else {
+          return [...prev, signalKey];
+        }
+      });
+    } else if (signalKey.endsWith('.req')) {
+      setExpandedReqSignals(prev => {
+        if (prev.includes(signalKey)) {
+          return prev.filter(s => s !== signalKey);
+        } else {
+          return [...prev, signalKey];
+        }
+      });
+    } else if (signalKey.endsWith('.data')) {
+      setExpandedDataSignals(prev => {
+        if (prev.includes(signalKey)) {
+          return prev.filter(s => s !== signalKey);
+        } else {
+          return [...prev, signalKey];
+        }
+      });
+    }
+  }, []);
+
+  // 加载点击的 packet 的波形数据
+  useEffect(() => {
+    if (fifoClickedPacketId === null) {
+      setFifoClickedWaveform(null);
+      return;
+    }
+
+    const loadClickedWaveform = async () => {
+      setLoadingFifoClickedWaveform(true);
+      try {
+        const data = await getWaveformData(experimentId, resultId, {
+          packetIds: [fifoClickedPacketId],
+        });
+        setFifoClickedWaveform(data);
+      } catch (error) {
+        console.error('加载请求波形失败', error);
+        setFifoClickedWaveform(null);
+      } finally {
+        setLoadingFifoClickedWaveform(false);
+      }
+    };
+
+    loadClickedWaveform();
+  }, [experimentId, resultId, fifoClickedPacketId]);
 
   if (loading) {
     return (
@@ -551,14 +690,56 @@ export default function WaveformViewer({ experimentId, resultId }: Props) {
                 />
               )
             ) : (
-              <Spin spinning={loadingFifoWaveform} tip="更新中...">
-                <FIFOWaveformChart
-                  signals={fifoWaveformData.signals}
-                  timeRange={fifoWaveformData.time_range}
-                />
-              </Spin>
+              <div style={{ minHeight: 400 }}>
+                <Spin spinning={loadingFifoWaveform} tip="更新中...">
+                  <FIFOWaveformChart
+                    signals={fifoWaveformData.signals}
+                    timeRange={fifoWaveformData.time_range}
+                    onFlitClick={handleFlitClick}
+                    expandedRspSignals={expandedRspSignals}
+                    expandedReqSignals={expandedReqSignals}
+                    expandedDataSignals={expandedDataSignals}
+                    onToggleExpand={handleToggleExpand}
+                  />
+                </Spin>
+              </div>
             )}
           </Card>
+
+          {/* 点击 flit 后显示的请求波形 */}
+          {fifoClickedPacketId !== null && (
+            <Card
+              title={
+                <Space>
+                  <LineChartOutlined />
+                  <span>请求 #{fifoClickedPacketId} 波形</span>
+                </Space>
+              }
+              extra={
+                <Button
+                  size="small"
+                  onClick={() => setFifoClickedPacketId(null)}
+                >
+                  关闭
+                </Button>
+              }
+              style={{ marginTop: 16 }}
+            >
+              {loadingFifoClickedWaveform ? (
+                <div style={{ textAlign: 'center', padding: 30 }}>
+                  <Spin tip="加载请求波形..." />
+                </div>
+              ) : !fifoClickedWaveform || fifoClickedWaveform.signals.length === 0 ? (
+                <Empty description="该请求无波形数据" />
+              ) : (
+                <WaveformChart
+                  signals={fifoClickedWaveform.signals}
+                  timeRange={fifoClickedWaveform.time_range}
+                  stages={fifoClickedWaveform.stages}
+                />
+              )}
+            </Card>
+          )}
         </div>
       ),
     },

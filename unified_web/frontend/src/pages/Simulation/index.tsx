@@ -44,6 +44,7 @@ import {
   getTrafficFileContent,
   getConfigContent,
   saveConfigContent,
+  clearTaskHistory,
   type SimulationRequest,
   type TaskStatus,
   type ConfigOption,
@@ -946,6 +947,16 @@ const Simulation: React.FC = () => {
     }
   }
 
+  const handleClearAllHistory = async () => {
+    try {
+      await clearTaskHistory()
+      message.success('已清除所有历史任务')
+      loadHistory()
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '清除失败')
+    }
+  }
+
   const mode = Form.useWatch('mode', form) || 'kcin'
 
   return (
@@ -1325,6 +1336,7 @@ const Simulation: React.FC = () => {
         onRefresh={loadHistory}
         onViewResult={(experimentId) => navigate(`/experiments/${experimentId}`)}
         onDelete={handleDeleteGroupedTask}
+        onClearAll={handleClearAllHistory}
       />
 
       {/* 另存为模态框 */}

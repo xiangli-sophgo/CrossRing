@@ -236,14 +236,29 @@ def _load_parquet_from_db(result_id: int, result_type: str) -> Tuple[pd.DataFram
         flits_rows = []
         for _, row in waveform_df.iterrows():
             packet_id = row["packet_id"]
+            # 请求级别的 source/dest（用于向后兼容）
+            req_source = row.get("source_node")
+            req_dest = row.get("dest_node")
+            req_source_type = row.get("source_type", "")
+            req_dest_type = row.get("dest_type", "")
+
             flits_json = row.get("flits", "[]")
             try:
                 flits_list = json.loads(flits_json) if isinstance(flits_json, str) else flits_json
                 for flit_info in flits_list:
+                    # 优先使用 flit 级别的 source/dest（新格式）
+                    # 如果没有则使用请求级别的（旧格式兼容）
+                    flit_source = flit_info.get("source_node", req_source)
+                    flit_dest = flit_info.get("dest_node", req_dest)
+
                     flits_rows.append({
                         "packet_id": packet_id,
                         "flit_id": flit_info.get("flit_id", 0),
                         "flit_type": flit_info.get("flit_type", ""),
+                        "source_node": flit_source,
+                        "dest_node": flit_dest,
+                        "source_type": req_source_type,
+                        "dest_type": req_dest_type,
                         "position_timestamps": json.dumps(flit_info.get("position_timestamps", {})),
                         "rsp_type": flit_info.get("rsp_type", ""),
                         "req_attr": flit_info.get("req_attr", ""),
@@ -252,7 +267,8 @@ def _load_parquet_from_db(result_id: int, result_type: str) -> Tuple[pd.DataFram
                 pass
 
         flits_df = pd.DataFrame(flits_rows) if flits_rows else pd.DataFrame(
-            columns=["packet_id", "flit_id", "flit_type", "position_timestamps", "rsp_type", "req_attr"]
+            columns=["packet_id", "flit_id", "flit_type", "source_node", "dest_node",
+                     "source_type", "dest_type", "position_timestamps", "rsp_type", "req_attr"]
         )
 
         return requests_df, flits_df

@@ -322,7 +322,7 @@ class Network:
             # 检查是否需要水平自环（左右边缘）
             if col == 0 or col == config.NUM_COL - 1:
                 key = (node_id, node_id, "h")  # 水平自环
-                self.links[key] = [None] * 2
+                self.links[key] = [None] * config.SLICE_PER_LINK_SELF
                 self.links_flow_stat[key] = {
                     "ITag_count": 0,
                     "empty_count": 0,
@@ -332,13 +332,13 @@ class Network:
                     "reverse_inject_h": 0,
                     "reverse_inject_v": 0,
                 }
-                self.links_tag[key] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(2)]
-                self.global_slot_id_counter += 2
+                self.links_tag[key] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(config.SLICE_PER_LINK_SELF)]
+                self.global_slot_id_counter += config.SLICE_PER_LINK_SELF
 
             # 检查是否需要垂直自环（上下边缘）
             if row == 0 or row == config.NUM_ROW - 1:
                 key = (node_id, node_id, "v")  # 垂直自环
-                self.links[key] = [None] * 2
+                self.links[key] = [None] * config.SLICE_PER_LINK_SELF
                 self.links_flow_stat[key] = {
                     "ITag_count": 0,
                     "empty_count": 0,
@@ -348,8 +348,8 @@ class Network:
                     "reverse_inject_h": 0,
                     "reverse_inject_v": 0,
                 }
-                self.links_tag[key] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(2)]
-                self.global_slot_id_counter += 2
+                self.links_tag[key] = [LinkSlot(slot_id=self.global_slot_id_counter + idx) for idx in range(config.SLICE_PER_LINK_SELF)]
+                self.global_slot_id_counter += config.SLICE_PER_LINK_SELF
 
         for pos in range(config.NUM_NODE):
             # 新架构: Ring Bridge在同一节点，键直接使用节点号

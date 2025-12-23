@@ -2,15 +2,20 @@
  * FIFO波形图组件 - 显示flit在FIFO中的占用时段（阶梯波形）
  */
 
-import { useMemo, useRef, useState, useCallback, useEffect } from 'react';
+import { useMemo, useRef, useState, useCallback, useEffect, memo } from 'react';
 import ReactECharts from 'echarts-for-react';
 import type { FIFOSignal } from '@/api/fifoWaveform';
-import { getFIFOColor } from '@/api/fifoWaveform';
+import { getFIFOColor, getSignalColor } from '@/api/fifoWaveform';
 
 interface Props {
   signals: FIFOSignal[];
   timeRange: { start_ns: number; end_ns: number };
   height?: number;
+  onFlitClick?: (packetId: number) => void;
+  expandedRspSignals?: string[];  // 已展开的 rsp 信号（如 ["IQ_TR.rsp"]）
+  expandedReqSignals?: string[];  // 已展开的 req 信号（如 ["IQ_TR.req"]）
+  expandedDataSignals?: string[]; // 已展开的 data 信号（如 ["IQ_TR.data"]）
+  onToggleExpand?: (signalKey: string) => void;  // 切换展开状态
 }
 
 // 时间标记类型
@@ -101,12 +106,25 @@ function buildStepWaveform(
   return points;
 }
 
-export default function FIFOWaveformChart({ signals, timeRange, height }: Props) {
+// 从 flit_id 解析 packet_id
+const parsePacketId = (flitId: string): number | null => {
+  // flit_id 格式: "123.req.0" -> packet_id = 123
+  const parts = flitId.split('.');
+  if (parts.length >= 1) {
+    const pktId = parseInt(parts[0], 10);
+    return isNaN(pktId) ? null : pktId;
+  }
+  return null;
+};
+
+function FIFOWaveformChart({ signals, timeRange, height, onFlitClick, expandedRspSignals = [], expandedReqSignals = [], expandedDataSignals = [], onToggleExpand }: Props) {
   const chartHeight = height || FIXED_CHART_HEIGHT;
   const chartRef = useRef<ReactECharts>(null);
 
   // 时间标记状态
   const [markers, setMarkers] = useState<TimeMarkers>({ primary: null, secondary: null });
+  // 用于强制清除残留
+  const [chartKey, setChartKey] = useState(0);
 
   // 格式化时间显示
   const formatTime = (time: number) => {
@@ -120,38 +138,6 @@ export default function FIFOWaveformChart({ signals, timeRange, height }: Props)
     }
     return null;
   }, [markers]);
-
-  // 处理图表点击事件 - 使用zrender监听整个画布
-  const bindChartClick = useCallback(() => {
-    const chart = chartRef.current?.getEchartsInstance();
-    if (!chart) return;
-
-    const zr = chart.getZr();
-    // 移除旧的监听器
-    zr.off('click');
-    // 添加新的监听器
-    zr.on('click', (params: any) => {
-      const pointInPixel = [params.offsetX, params.offsetY];
-      // 检查是否在grid区域内
-      if (!chart.containPixel('grid', pointInPixel)) return;
-
-      const pointInGrid = chart.convertFromPixel('grid', pointInPixel);
-      if (!pointInGrid) return;
-
-      // 对齐到0.5ns粒度
-      const rawTime = pointInGrid[0];
-      const alignedTime = Math.round(rawTime * 2) / 2;
-
-      if (alignedTime < timeRange.start_ns || alignedTime > timeRange.end_ns) return;
-
-      // Shift+点击设置次标记，普通点击设置主标记
-      if (params.event.shiftKey) {
-        setMarkers(prev => ({ ...prev, secondary: alignedTime }));
-      } else {
-        setMarkers(prev => ({ ...prev, primary: alignedTime }));
-      }
-    });
-  }, [timeRange]);
 
   // 清除标记
   const clearMarkers = useCallback(() => {
@@ -176,8 +162,156 @@ export default function FIFOWaveformChart({ signals, timeRange, height }: Props)
   const dataRef = useRef<{
     waveformDataMap: Map<number, WaveformPoint[]>;
     signals: FIFOSignal[];
-  }>({ waveformDataMap: new Map(), signals: [] });
-  dataRef.current = { waveformDataMap, signals };
+    hoverSignalIndex: number;  // 当前悬停的信号索引
+    hoverTime: number;  // 当前悬停的时间
+  }>({ waveformDataMap: new Map(), signals: [], hoverSignalIndex: 0, hoverTime: 0 });
+  dataRef.current.waveformDataMap = waveformDataMap;
+  dataRef.current.signals = signals;
+
+  // 查找某时间点对应的flit列表
+  const findFlitsAtTime = useCallback((signalIndex: number, time: number): string[] => {
+    const points = waveformDataMap.get(signalIndex);
+    if (!points) return [];
+    // 找到time之前最近的点
+    for (let i = points.length - 1; i >= 0; i--) {
+      if (points[i].time <= time) {
+        return points[i].flits;
+      }
+    }
+    return [];
+  }, [waveformDataMap]);
+
+  // 使用 ref 存储 onToggleExpand 以便在事件处理中使用
+  const onToggleExpandRef = useRef(onToggleExpand);
+  onToggleExpandRef.current = onToggleExpand;
+
+  // 处理图表事件 - 使用zrender监听整个画布
+  const bindChartClick = useCallback(() => {
+    const chart = chartRef.current?.getEchartsInstance();
+    if (!chart) return;
+
+    const zr = chart.getZr();
+    // 移除旧的监听器
+    zr.off('click');
+    zr.off('mousemove');
+    chart.off('click');
+
+    // 添加 mousemove 监听器，追踪当前悬停的信号索引和时间，并手动触发 tooltip
+    zr.on('mousemove', (params: any) => {
+      const pointInPixel = [params.offsetX, params.offsetY];
+      if (!chart.containPixel('grid', pointInPixel)) {
+        // 鼠标离开 grid 区域时隐藏 tooltip
+        chart.dispatchAction({ type: 'hideTip' });
+        return;
+      }
+
+      const pointInGrid = chart.convertFromPixel('grid', pointInPixel);
+      if (!pointInGrid) return;
+
+      const rawTime = pointInGrid[0];
+      const signalIndex = Math.round(pointInGrid[1]);
+
+      // 保存悬停位置信息
+      if (signalIndex >= 0 && signalIndex < dataRef.current.signals.length) {
+        dataRef.current.hoverSignalIndex = signalIndex;
+      }
+      // 对齐到 0.5ns 粒度
+      dataRef.current.hoverTime = Math.round(rawTime * 2) / 2;
+
+      // 手动触发 tooltip 显示
+      chart.dispatchAction({
+        type: 'showTip',
+        x: params.offsetX,
+        y: params.offsetY,
+      });
+    });
+
+    // 添加 zrender click 监听器（用于 Y 轴标签和波形区域点击）
+    zr.on('click', (params: any) => {
+      const pointInPixel = [params.offsetX, params.offsetY];
+
+      // === Y 轴标签区域点击检测 ===
+      const leftMargin = 150;  // 与 grid.left 一致
+      if (params.offsetX < leftMargin && params.offsetX > 5) {
+        // 获取 grid 坐标信息（使用 any 绕过私有方法类型检查）
+        const model = (chart as any).getModel();
+        const gridComponent = model?.getComponent('grid', 0);
+        if (gridComponent && gridComponent.coordinateSystem) {
+          const gridRect = gridComponent.coordinateSystem.getRect();
+          const currentSignals = dataRef.current.signals;
+
+          if (currentSignals.length > 0) {
+            // 考虑 Y 轴 dataZoom 的影响
+            const yDataZoom = model.getComponent('dataZoom', 2);
+            const startPercent = yDataZoom?.get('start') ?? 0;
+            const endPercent = yDataZoom?.get('end') ?? 100;
+
+            const visibleStart = Math.floor(currentSignals.length * startPercent / 100);
+            const visibleEnd = Math.ceil(currentSignals.length * endPercent / 100);
+            const visibleCount = Math.max(1, visibleEnd - visibleStart);
+
+            const bandHeight = gridRect.height / visibleCount;
+            const relativeY = params.offsetY - gridRect.y;
+            const visibleIndex = Math.floor(relativeY / bandHeight);
+            const signalIndex = visibleStart + visibleIndex;
+
+            if (signalIndex >= 0 && signalIndex < currentSignals.length) {
+              const signal = currentSignals[signalIndex];
+              const parts = signal.name.split('.');
+
+              // 支持 req/rsp/data 类型的展开/折叠
+              // 3段格式（Node_X.FIFO.type）：可展开
+              // 4段格式（Node_X.FIFO.type.subType）：展开后的子类型，可折叠
+              if (parts.length >= 3) {
+                const fifoType = parts[1];
+                const flitType = parts[2];
+                if (flitType === 'rsp' || flitType === 'req' || flitType === 'data') {
+                  const signalKey = `${fifoType}.${flitType}`;
+                  onToggleExpandRef.current?.(signalKey);
+                  return;  // 阻止后续处理
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // === 波形区域点击 ===
+      // 检查是否在grid区域内
+      if (!chart.containPixel('grid', pointInPixel)) return;
+
+      const pointInGrid = chart.convertFromPixel('grid', pointInPixel);
+      if (!pointInGrid) return;
+
+      const rawTime = pointInGrid[0];
+      const signalIndex = Math.round(pointInGrid[1]);
+
+      // 边界检查
+      if (signalIndex < 0 || signalIndex >= dataRef.current.signals.length) return;
+      if (rawTime < timeRange.start_ns || rawTime > timeRange.end_ns) return;
+
+      // Ctrl+点击：跳转到请求波形
+      if (params.event.ctrlKey && onFlitClick) {
+        const flits = findFlitsAtTime(signalIndex, rawTime);
+        if (flits.length > 0) {
+          const packetIds = flits.map(parsePacketId).filter((id): id is number => id !== null);
+          const uniquePacketIds = [...new Set(packetIds)];
+          if (uniquePacketIds.length >= 1) {
+            onFlitClick(uniquePacketIds[0]);
+            return;
+          }
+        }
+      }
+
+      // 普通点击/Shift+点击：设置时间标记
+      const alignedTime = Math.round(rawTime * 2) / 2;
+      if (params.event.shiftKey) {
+        setMarkers(prev => ({ ...prev, secondary: alignedTime }));
+      } else {
+        setMarkers(prev => ({ ...prev, primary: alignedTime }));
+      }
+    });
+  }, [timeRange, onFlitClick, findFlitsAtTime]);
 
   // 按节点分组信号，返回分组信息
   const groupedSignalInfo = useMemo(() => {
@@ -247,7 +381,7 @@ export default function FIFOWaveformChart({ signals, timeRange, height }: Props)
           const currentY = level > 0 ? highY : baseY;
           const nextY = nextLevel > 0 ? highY : baseY;
 
-          const color = getFIFOColor(signal.fifo_type);
+          const color = getSignalColor(signal.name);
           const children: any[] = [];
 
           // 同一时间点的电平变化：只画垂直线
@@ -338,63 +472,80 @@ export default function FIFOWaveformChart({ signals, timeRange, height }: Props)
           }))
         : [],
       tooltip: {
+        show: true,
         trigger: 'axis',
+        triggerOn: 'mousemove',
         axisPointer: {
-          type: 'line',
-          axis: 'x',
-          snap: false,
+          type: 'none',
         },
-        formatter: (params: any, ticket: any, callback: any) => {
-          // 从 ref 获取最新数据
+        position: (point: number[]) => {
+          // tooltip 跟随鼠标位置，稍微偏移避免遮挡
+          return [point[0] + 10, point[1] + 10];
+        },
+        formatter: () => {
+          // 从 ref 获取最新数据（包括 mousemove 事件中计算的时间和信号索引）
           const currentData = dataRef.current;
           const currentSignals = currentData.signals;
           const currentWaveformDataMap = currentData.waveformDataMap;
+          const time = currentData.hoverTime;
+          const signalIndex = currentData.hoverSignalIndex;
 
           // 查找某时间点对应的flit列表
-          const findFlitsAtTime = (signalIndex: number, time: number): string[] => {
-            const points = currentWaveformDataMap.get(signalIndex);
+          const findFlitsAtTime = (idx: number, t: number): string[] => {
+            const points = currentWaveformDataMap.get(idx);
             if (!points) return [];
             // 找到time之前最近的点
             for (let i = points.length - 1; i >= 0; i--) {
-              if (points[i].time <= time) {
+              if (points[i].time <= t) {
                 return points[i].flits;
               }
             }
             return [];
           };
 
-          // 从 params 获取时间 - 检查多种格式
-          let time: number | undefined;
-          if (params && params.length > 0) {
-            // 尝试从第一个参数获取时间
-            const firstParam = params[0];
-            if (firstParam.axisValue !== undefined) {
-              time = firstParam.axisValue;
-            } else if (firstParam.value && Array.isArray(firstParam.value)) {
-              time = firstParam.value[0];
-            } else if (typeof firstParam.value === 'number') {
-              time = firstParam.value;
-            }
+          const signal = currentSignals[signalIndex];
+          if (!signal) {
+            return '';
           }
 
-          if (time === undefined) return '';
+          const flits = findFlitsAtTime(signalIndex, time);
+          const isOccupied = flits.length > 0;
+          const color = getSignalColor(signal.name);
+          const timeStr = time.toFixed(1);
 
-          // 2GHz频率，0.5ns精度
-          const timeStr = Number.isInteger(time * 2) ? time.toFixed(1) : time.toFixed(2);
-          let html = `<div><b>时间: ${timeStr} ns</b></div>`;
-          // 按信号遍历，避免重复
-          currentSignals.forEach((signal, signalIdx) => {
-            const flits = findFlitsAtTime(signalIdx, time!);
-            const isHigh = flits.length > 0;
-            const status = isHigh ? '占用' : '空闲';
-            const color = getFIFOColor(signal.fifo_type);
-            html += `<div style="color:${color}">${signal.name}: ${status}`;
-            if (isHigh) {
-              html += `<br/>&nbsp;&nbsp;Flits: ${flits.join(', ')}`;
-            }
-            html += `</div>`;
-          });
-          return html;
+          // 空闲状态：简化显示
+          if (!isOccupied) {
+            return `
+              <div style="padding: 8px 12px;">
+                <div style="font-weight: bold; margin-bottom: 6px;">时间: ${timeStr} ns</div>
+                <div style="color: ${color};">${signal.name}: 空闲</div>
+              </div>
+            `;
+          }
+
+          // 占用状态：详细显示
+          const flitList = flits.map(f => `<span style="color: #1890ff;">${f}</span>`).join(', ');
+          return `
+            <div style="padding: 8px 12px; min-width: 180px;">
+              <div style="font-weight: bold; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #eee;">
+                时间: ${timeStr} ns
+              </div>
+              <div style="color: ${color}; font-weight: 500; margin-bottom: 4px;">
+                ${signal.name}
+              </div>
+              <div style="display: flex; align-items: center; margin-bottom: 6px;">
+                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #52c41a; margin-right: 6px;"></span>
+                <span>占用中</span>
+              </div>
+              <div style="background: #f5f5f5; padding: 6px 8px; border-radius: 4px; font-size: 12px;">
+                <div style="color: #666; margin-bottom: 2px;">Flits:</div>
+                <div>${flitList}</div>
+              </div>
+              <div style="font-size: 11px; color: #999; margin-top: 6px;">
+                Ctrl+点击查看请求波形
+              </div>
+            </div>
+          `;
         },
       },
       grid: {
@@ -422,24 +573,42 @@ export default function FIFOWaveformChart({ signals, timeRange, height }: Props)
         type: 'category',
         data: signals.map(s => s.name),
         inverse: true,
+        triggerEvent: true,  // 启用 Y 轴点击事件
         axisLabel: {
           width: 140,
           overflow: 'truncate',
           ellipsis: '...',
+          triggerEvent: true,  // 启用点击事件
           formatter: (value: string) => {
             // 简化显示: "Node_3.IQ_TD.data" -> "IQ_TD.data"
             // 因为分组已经显示了节点号
             const parts = value.split('.');
             if (parts.length >= 3) {
-              return `${parts[1]}.${parts[2]}`;
+              const fifoType = parts[1];
+              const flitType = parts[2];
+
+              // 3段格式：可展开的基础类型
+              if (parts.length === 3) {
+                const signalKey = `${fifoType}.${flitType}`;
+                let isExpanded = false;
+                if (flitType === 'rsp') {
+                  isExpanded = expandedRspSignals.includes(signalKey);
+                } else if (flitType === 'req') {
+                  isExpanded = expandedReqSignals.includes(signalKey);
+                } else if (flitType === 'data') {
+                  isExpanded = expandedDataSignals.includes(signalKey);
+                }
+                const icon = isExpanded ? '▼' : '▶';
+                return `${icon} ${fifoType}.${flitType}`;
+              }
+
+              // 4段格式：展开后的子类型
+              if (parts.length >= 4) {
+                const subType = parts[3];
+                return `  ▲ ${fifoType}.${flitType}.${subType}`;  // 带折叠箭头
+              }
             }
             return value;
-          },
-          rich: {
-            group: {
-              fontWeight: 'bold',
-              color: '#1890ff',
-            },
           },
         },
         axisTick: {
@@ -510,69 +679,18 @@ export default function FIFOWaveformChart({ signals, timeRange, height }: Props)
         },
       ],
       series: [
-        // 辅助series：为每个category生成数据点，用于触发tooltip（0.5ns粒度，最多4000点/信号）
-        // 第一个series添加markLine用于显示时间标记
-        ...signals.map((_, signalIndex) => ({
-          type: 'scatter',
-          data: (() => {
-            const points: [number, number][] = [];
-            const range = timeRange.end_ns - timeRange.start_ns;
-            const step = Math.max(0.5, range / 4000);  // 0.5ns粒度，但最多4000点
-            for (let t = timeRange.start_ns; t <= timeRange.end_ns; t += step) {
-              points.push([t, signalIndex]);
-            }
-            return points;
-          })(),
-          symbol: 'none',
-          silent: false,
-          z: 1,
-          xAxisIndex: 0,
-          yAxisIndex: 0,
-          // 第一个series添加id用于单独更新markLine
-          ...(signalIndex === 0 ? {
-            id: 'marker-bindable-series',
-          } : {}),
-        })),
         ...groupBackgroundSeries,  // 分组背景色
         ...series,
       ],
     };
-  }, [signals, timeRange, waveformDataMap, groupedSignalInfo, chartHeight]);
+  }, [signals, timeRange, waveformDataMap, groupedSignalInfo, chartHeight, expandedRspSignals, expandedReqSignals, expandedDataSignals]);
 
-  // 单独更新 markLine，不触发整个 option 重建，避免 dataZoom 重置
-  useEffect(() => {
-    const chart = chartRef.current?.getEchartsInstance();
-    if (!chart) return;
-
-    const markLineData: any[] = [];
-    if (markers.primary !== null) {
-      markLineData.push({
-        xAxis: markers.primary,
-        lineStyle: { color: '#f97316', width: 2, type: 'solid' },
-        label: { formatter: `A: ${formatTime(markers.primary)} ns`, position: 'start', color: '#f97316' },
-      });
-    }
-    if (markers.secondary !== null) {
-      markLineData.push({
-        xAxis: markers.secondary,
-        lineStyle: { color: '#3b82f6', width: 2, type: 'solid' },
-        label: { formatter: `B: ${formatTime(markers.secondary)} ns`, position: 'start', color: '#3b82f6' },
-      });
-    }
-
-    // 只更新指定 id 的 series 的 markLine
-    chart.setOption({
-      series: [{
-        id: 'marker-bindable-series',
-        markLine: {
-          silent: true,
-          symbol: 'none',
-          data: markLineData,
-          animation: false,
-        },
-      }],
-    });
-  }, [markers]);
+  // 暂时禁用 markLine 更新，测试 tooltip 问题
+  // useEffect(() => {
+  //   const chart = chartRef.current?.getEchartsInstance();
+  //   if (!chart) return;
+  //   // ... markLine 更新代码
+  // }, [markers]);
 
   // 图表ready时绑定点击事件
   const onChartReady = useCallback(() => {
@@ -583,6 +701,22 @@ export default function FIFOWaveformChart({ signals, timeRange, height }: Props)
   useEffect(() => {
     bindChartClick();
   }, [bindChartClick]);
+
+  // 信号变化时强制清理图表，解决波形残留问题
+  const prevSignalsRef = useRef<string>('');
+  useEffect(() => {
+    const signalKey = signals.map(s => s.name).join(',');
+    if (prevSignalsRef.current && prevSignalsRef.current !== signalKey) {
+      const chart = chartRef.current?.getEchartsInstance();
+      if (chart) {
+        // 清空图表并重新设置
+        chart.clear();
+        setChartKey(k => k + 1);
+      }
+    }
+    prevSignalsRef.current = signalKey;
+  }, [signals]);
+
 
   return (
     <div>
@@ -630,14 +764,56 @@ export default function FIFOWaveformChart({ signals, timeRange, height }: Props)
       </div>
 
       <ReactECharts
+        key={chartKey}
         ref={chartRef}
         option={option}
         style={{ height: chartHeight }}
         opts={{ renderer: 'canvas' }}
         notMerge={false}
-        lazyUpdate={true}
+        lazyUpdate={false}
         onChartReady={onChartReady}
       />
     </div>
   );
 }
+
+// 自定义比较函数，只有当关键 props 变化时才重新渲染
+function propsAreEqual(prevProps: Props, nextProps: Props): boolean {
+  // 比较 signals 数组长度和引用
+  if (prevProps.signals !== nextProps.signals) {
+    if (prevProps.signals.length !== nextProps.signals.length) return false;
+    // 如果长度相同，检查第一个和最后一个元素的 name
+    if (prevProps.signals.length > 0) {
+      if (prevProps.signals[0].name !== nextProps.signals[0].name) return false;
+      const lastIdx = prevProps.signals.length - 1;
+      if (prevProps.signals[lastIdx].name !== nextProps.signals[lastIdx].name) return false;
+    }
+  }
+
+  // 比较 timeRange
+  if (prevProps.timeRange.start_ns !== nextProps.timeRange.start_ns) return false;
+  if (prevProps.timeRange.end_ns !== nextProps.timeRange.end_ns) return false;
+
+  // height 和 onFlitClick 不太可能变化，简单比较引用
+  if (prevProps.height !== nextProps.height) return false;
+
+  // 比较展开状态数组的辅助函数
+  const compareArrays = (prev: string[] | undefined, next: string[] | undefined): boolean => {
+    const prevArr = prev || [];
+    const nextArr = next || [];
+    if (prevArr.length !== nextArr.length) return false;
+    for (let i = 0; i < prevArr.length; i++) {
+      if (prevArr[i] !== nextArr[i]) return false;
+    }
+    return true;
+  };
+
+  // 比较所有展开状态
+  if (!compareArrays(prevProps.expandedRspSignals, nextProps.expandedRspSignals)) return false;
+  if (!compareArrays(prevProps.expandedReqSignals, nextProps.expandedReqSignals)) return false;
+  if (!compareArrays(prevProps.expandedDataSignals, nextProps.expandedDataSignals)) return false;
+
+  return true;
+}
+
+export default memo(FIFOWaveformChart, propsAreEqual);

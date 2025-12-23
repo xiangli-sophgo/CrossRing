@@ -168,12 +168,12 @@ export const STAGE_COLORS: Record<string, string> = {
  * 阶段中文名映射
  */
 export const STAGE_NAMES: Record<string, string> = {
-  IP_inject: 'IP注入',
-  IQ: 'Inject Queue',
-  Link: '链路传输',
-  RB: 'Ring Bridge',
-  EQ: 'Eject Queue',
-  IP_eject: 'IP弹出',
+  IP_inject: 'IP Inject',
+  IQ: 'IQ',
+  Link: 'Link',
+  RB: 'RB',
+  EQ: 'EQ',
+  IP_eject: 'IP Eject',
 };
 
 /**

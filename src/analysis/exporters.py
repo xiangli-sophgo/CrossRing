@@ -1805,32 +1805,62 @@ class ParquetExporter:
             # 收集所有flit的时间戳
             flits_info = []
 
-            # 请求flit
+            # 原始请求方向
+            req_source = lifecycle.source
+            req_dest = lifecycle.destination
+
+            # 判断是否是 read 类型操作（数据从 dest 返回到 source）
+            op_type = lifecycle.op_type or ""
+            is_read_op = op_type.lower().startswith("read") or op_type in [
+                "ReadOnce", "ReadNoSnp", "ReadClean", "ReadShared", "ReadUnique", "ReadNoSnpSep"
+            ]
+
+            # 请求flit：source → dest
             for flit in lifecycle.request_flits:
-                flit_info = self._extract_flit_info(flit, "req", 0)
+                flit_info = self._extract_flit_info(flit, "req", 0, req_source, req_dest)
                 flits_info.append(flit_info)
                 # 如果有备份时间戳（第一次失败的请求）
                 if hasattr(flit, 'position_timestamps_backup') and flit.position_timestamps_backup:
-                    backup_info = self._extract_flit_info(flit, "req_retry", 0, use_backup=True)
+                    backup_info = self._extract_flit_info(flit, "req_retry", 0, req_source, req_dest, use_backup=True)
                     flits_info.append(backup_info)
 
-            # 数据flit
+            # 数据flit：方向取决于操作类型
+            # Read操作：dest → source（数据返回）
+            # Write操作：source → dest（数据发送）
+            if is_read_op:
+                data_source, data_dest = req_dest, req_source
+            else:
+                data_source, data_dest = req_source, req_dest
+
             for idx, flit in enumerate(lifecycle.data_flits):
                 flit_id = getattr(flit, 'flit_id', idx + 1)
-                flit_info = self._extract_flit_info(flit, "data", flit_id)
+                flit_info = self._extract_flit_info(flit, "data", flit_id, data_source, data_dest)
                 flits_info.append(flit_info)
 
-            # 响应flit
+            # 响应flit：dest → source（反向）
             for flit in lifecycle.response_flits:
-                flit_info = self._extract_flit_info(flit, "rsp", -1)
+                flit_info = self._extract_flit_info(flit, "rsp", -1, req_dest, req_source)
                 flits_info.append(flit_info)
 
             data["flits"].append(json.dumps(flits_info))
 
         return data
 
-    def _extract_flit_info(self, flit, flit_type: str, flit_id: int, use_backup: bool = False) -> Dict:
-        """提取单个flit的信息"""
+    def _extract_flit_info(
+        self, flit, flit_type: str, flit_id: int,
+        source_node: int, dest_node: int,
+        use_backup: bool = False
+    ) -> Dict:
+        """提取单个flit的信息
+
+        Args:
+            flit: flit对象
+            flit_type: flit类型 (req, rsp, data)
+            flit_id: flit ID
+            source_node: 该flit的源节点（已根据flit类型调整方向）
+            dest_node: 该flit的目标节点（已根据flit类型调整方向）
+            use_backup: 是否使用备份时间戳
+        """
         if use_backup and hasattr(flit, 'position_timestamps_backup') and flit.position_timestamps_backup:
             timestamps = flit.position_timestamps_backup
         else:
@@ -1845,6 +1875,8 @@ class ParquetExporter:
         return {
             "flit_id": flit_id,
             "flit_type": flit_type,
+            "source_node": source_node,
+            "dest_node": dest_node,
             "position_timestamps": timestamps_ns,
             "rsp_type": getattr(flit, 'rsp_type', None) or "",
             "req_attr": getattr(flit, 'req_attr', None) or "",

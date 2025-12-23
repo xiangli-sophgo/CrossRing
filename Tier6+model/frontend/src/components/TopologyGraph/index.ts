@@ -1,3 +1,6 @@
+/**
+ * TopologyGraph 组件导出
+ */
 export { TopologyGraph } from './TopologyGraph'
-export { LevelPairSelector } from './LevelPairSelector'
-export type { NodeDetail, LinkDetail, BreadcrumbItem } from './shared'
+export type { TopologyGraphProps, Node, Edge, LinkDetail, MultiLevelViewOptions, NodeDetail } from './shared'
+export { LevelPairSelector } from './components'

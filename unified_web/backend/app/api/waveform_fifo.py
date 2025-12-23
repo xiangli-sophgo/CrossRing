@@ -211,7 +211,10 @@ def build_fifo_waveform_for_node(
     requests_df: pd.DataFrame,
     node_id: int,
     fifo_types: List[str],
-    flit_types_filter: List[str] = None
+    flit_types_filter: List[str] = None,
+    expand_rsp_fifo_types: List[str] = None,
+    expand_req_fifo_types: List[str] = None,
+    expand_data_fifo_types: List[str] = None
 ) -> Dict[str, List[Dict]]:
     """为指定节点构建 FIFO 波形数据（基于 position_timestamps）
 
@@ -221,22 +224,46 @@ def build_fifo_waveform_for_node(
         node_id: 节点ID
         fifo_types: 要查询的FIFO类型列表
         flit_types_filter: Flit类型过滤列表（如 ["req", "rsp", "data"]），None表示不过滤
+        expand_rsp_fifo_types: 需要展开rsp_type的FIFO类型列表（如 ["IQ_TR", "EQ_TD"]），None表示都不展开
+        expand_req_fifo_types: 需要展开req_attr的FIFO类型列表，展开为new/old
+        expand_data_fifo_types: 需要展开data_id的FIFO类型列表，展开为0/1/2/3...
 
     Returns:
-        按 fifo_type.flit_type 分组:
+        按 fifo_type.flit_type 分组（可选择进一步细分）:
         {
-            "IQ_TR.req": [{"enter_ns": 10.5, "leave_ns": 12.3, "flit_id": "123.req.0", "flit_type": "req"}, ...],
-            "IQ_TR.rsp": [...],
-            "EQ_TU.req": [...],
+            "IQ_TR.req": [...],
+            "IQ_TR.req.new": [...],  # req展开时按req_attr细分
+            "IQ_TR.req.old": [...],
+            "IQ_TR.rsp": [...],  # 未展开时合并所有rsp_type
+            "IQ_TR.rsp.CompData": [...],  # rsp展开时按rsp_type细分
+            "IQ_TR.data": [...],
+            "IQ_TR.data.0": [...],  # data展开时按data_id细分
+            "IQ_TR.data.1": [...],
             ...
         }
     """
-    # 合并 flits 和 requests 数据
-    merged = flits_df.merge(
-        requests_df[["packet_id", "source_node", "dest_node", "source_type", "dest_type"]],
-        on="packet_id",
-        how="left"
-    )
+    expand_rsp_fifo_types = expand_rsp_fifo_types or []
+    expand_req_fifo_types = expand_req_fifo_types or []
+    expand_data_fifo_types = expand_data_fifo_types or []
+
+    # 检查 flits_df 是否已包含 source_node/dest_node（新格式）
+    if "source_node" in flits_df.columns and "dest_node" in flits_df.columns:
+        # 新格式：flits_df 已包含 flit 级别的 source/dest
+        merged = flits_df.copy()
+        # 如果缺少 source_type/dest_type，从 requests_df 补充
+        if "source_type" not in merged.columns or "dest_type" not in merged.columns:
+            merged = merged.merge(
+                requests_df[["packet_id", "source_type", "dest_type"]],
+                on="packet_id",
+                how="left"
+            )
+    else:
+        # 旧格式：需要从 requests_df 获取 source/dest
+        merged = flits_df.merge(
+            requests_df[["packet_id", "source_node", "dest_node", "source_type", "dest_type"]],
+            on="packet_id",
+            how="left"
+        )
 
     # 确定要使用的 flit 类型列表
     if flit_types_filter:
@@ -255,12 +282,53 @@ def build_fifo_waveform_for_node(
         else:
             regular_fifos.append(fifo_type)
 
-    # 初始化结果：按 fifo_type.flit_type 分组
+    # 初始化结果：按 fifo_type.flit_type 分组（rsp 按 rsp_type 动态创建）
     waveform_data = {}
     for fifo_type in fifo_types:
         for flit_type in flit_types_to_use:
+            # rsp 类型不预创建，由实际数据动态创建（因为rsp_type种类不确定）
+            if flit_type != "rsp":
+                key = f"{fifo_type}.{flit_type}"
+                waveform_data[key] = []
+
+    # 辅助函数：生成 key 并添加事件
+    def add_event(fifo_type: str, flit_type: str, rsp_type: str, req_attr: str, data_id: int, enter_ns: float, leave_ns: float, flit_id_str: str):
+        """添加事件到 waveform_data，根据展开配置决定是否细分"""
+        if flit_type == "rsp":
+            # 检查该 fifo_type 是否需要展开 rsp_type
+            if fifo_type in expand_rsp_fifo_types and rsp_type:
+                key = f"{fifo_type}.rsp.{rsp_type}"
+            else:
+                key = f"{fifo_type}.rsp"
+        elif flit_type == "req":
+            # 检查该 fifo_type 是否需要展开 req_attr
+            # 只有 old/retry 类型需要展开显示，new 类型保持在主 req 行
+            if fifo_type in expand_req_fifo_types and req_attr and req_attr != "new":
+                key = f"{fifo_type}.req.Retry"  # old/retry 统一显示为 Retry
+            else:
+                key = f"{fifo_type}.req"
+        elif flit_type == "data":
+            # 检查该 fifo_type 是否需要展开 data_id
+            if fifo_type in expand_data_fifo_types:
+                key = f"{fifo_type}.data.{data_id}"
+            else:
+                key = f"{fifo_type}.data"
+        else:
             key = f"{fifo_type}.{flit_type}"
+
+        # 动态创建 key
+        if key not in waveform_data:
             waveform_data[key] = []
+
+        waveform_data[key].append({
+            "enter_ns": enter_ns,
+            "leave_ns": leave_ns,
+            "flit_id": flit_id_str,
+            "flit_type": flit_type,
+            "rsp_type": rsp_type if flit_type == "rsp" else "",
+            "req_attr": req_attr if flit_type == "req" else "",
+            "data_id": data_id if flit_type == "data" else -1
+        })
 
     # 遍历所有 flit
     for _, row in merged.iterrows():
@@ -271,6 +339,11 @@ def build_fifo_waveform_for_node(
         if flit_types_filter and flit_type not in flit_types_filter:
             continue
 
+        # 获取各类型特有属性
+        rsp_type = row.get("rsp_type", "") if flit_type == "rsp" else ""
+        req_attr = row.get("req_attr", "") if flit_type == "req" else ""
+        data_id = int(row.get("flit_id", 0)) if flit_type == "data" else -1
+
         # 从 position_timestamps 提取事件
         events = extract_fifo_events_from_timestamps(
             row.get("position_timestamps", "{}"),
@@ -280,6 +353,7 @@ def build_fifo_waveform_for_node(
 
         source_type = row.get("source_type", "")
         dest_type = row.get("dest_type", "")
+        flit_id_str = f"{row['packet_id']}.{flit_type}.{row.get('flit_id', 0)}"
 
         # 过滤：只保留目标节点的目标 FIFO 类型
         for fifo_type_name, event_node_id, enter_ns, leave_ns in events:
@@ -288,14 +362,7 @@ def build_fifo_waveform_for_node(
 
             # 1. 处理常规 FIFO 类型
             if fifo_type_name in regular_fifos:
-                key = f"{fifo_type_name}.{flit_type}"
-                if key in waveform_data:
-                    waveform_data[key].append({
-                        "enter_ns": enter_ns,
-                        "leave_ns": leave_ns,
-                        "flit_id": f"{row['packet_id']}.{flit_type}.{row.get('flit_id', 0)}",
-                        "flit_type": flit_type
-                    })
+                add_event(fifo_type_name, flit_type, rsp_type, req_attr, data_id, enter_ns, leave_ns, flit_id_str)
 
             # 2. 处理 IP 通道 FIFO
             # IQ_CH_G0 -> L2H 事件，过滤 source_type=gdma_0
@@ -304,25 +371,11 @@ def build_fifo_waveform_for_node(
                 if base_type == "IQ_CH" and fifo_type_name == "L2H":
                     # IQ 中的 IP 通道：显示 L2H，按 source_type 过滤
                     if source_type == ip_type:
-                        key = f"{fifo_key}.{flit_type}"
-                        if key in waveform_data:
-                            waveform_data[key].append({
-                                "enter_ns": enter_ns,
-                                "leave_ns": leave_ns,
-                                "flit_id": f"{row['packet_id']}.{flit_type}.{row.get('flit_id', 0)}",
-                                "flit_type": flit_type
-                            })
+                        add_event(fifo_key, flit_type, rsp_type, req_attr, data_id, enter_ns, leave_ns, flit_id_str)
                 elif base_type == "EQ_CH" and fifo_type_name == "H2L":
                     # EQ 中的 IP 通道：显示 H2L，按 dest_type 过滤
                     if dest_type == ip_type:
-                        key = f"{fifo_key}.{flit_type}"
-                        if key in waveform_data:
-                            waveform_data[key].append({
-                                "enter_ns": enter_ns,
-                                "leave_ns": leave_ns,
-                                "flit_id": f"{row['packet_id']}.{flit_type}.{row.get('flit_id', 0)}",
-                                "flit_type": flit_type
-                            })
+                        add_event(fifo_key, flit_type, rsp_type, req_attr, data_id, enter_ns, leave_ns, flit_id_str)
 
     # 按时间排序
     for key in waveform_data:
@@ -359,6 +412,9 @@ async def get_fifo_waveform(
     node_id: int = Query(..., description="节点ID"),
     fifo_types: str = Query(..., description="FIFO类型列表(逗号分隔)"),
     flit_types_filter: str = Query(None, description="Flit类型过滤(逗号分隔，如req,rsp,data)"),
+    expand_rsp_signals: str = Query(None, description="需要展开rsp_type的信号(逗号分隔，如IQ_TR.rsp,EQ_TD.rsp)"),
+    expand_req_signals: str = Query(None, description="需要展开req_attr的信号(逗号分隔，如IQ_TR.req)"),
+    expand_data_signals: str = Query(None, description="需要展开data_id的信号(逗号分隔，如IQ_TR.data)"),
     time_start: float = Query(None, description="起始时间(ns)"),
     time_end: float = Query(None, description="结束时间(ns)"),
 ) -> FIFOWaveformResponse:
@@ -384,9 +440,25 @@ async def get_fifo_waveform(
     if flit_types_filter:
         flit_types_list = [f.strip() for f in flit_types_filter.split(",")]
 
+    # 解析需要展开的信号列表
+    # 格式: "IQ_TR.rsp,EQ_TD.rsp" -> ["IQ_TR", "EQ_TD"]
+    def parse_expand_signals(signals_str: str, suffix: str) -> list:
+        result = []
+        if signals_str:
+            for sig in signals_str.split(","):
+                sig = sig.strip()
+                if sig.endswith(suffix):
+                    result.append(sig[:-len(suffix)])  # 去掉后缀
+        return result
+
+    expand_rsp_list = parse_expand_signals(expand_rsp_signals, ".rsp")
+    expand_req_list = parse_expand_signals(expand_req_signals, ".req")
+    expand_data_list = parse_expand_signals(expand_data_signals, ".data")
+
     # 重建 FIFO 波形
     waveform_data = build_fifo_waveform_for_node(
-        flits_df, requests_df, node_id, requested_fifos, flit_types_list
+        flits_df, requests_df, node_id, requested_fifos, flit_types_list,
+        expand_rsp_list, expand_req_list, expand_data_list
     )
 
     # 构建信号列表
@@ -413,6 +485,23 @@ async def get_fifo_waveform(
                 ))
                 all_times.extend([e["enter_ns"] for e in filtered_events])
                 all_times.extend([e["leave_ns"] for e in filtered_events])
+
+    # 对信号进行排序，确保展开的子类型紧跟在父类型后面
+    # 排序规则：FIFO类型 > flit类型(req/rsp/data) > 子类型
+    flit_type_order = {"req": 0, "rsp": 1, "data": 2}
+
+    def signal_sort_key(signal: FIFOSignal):
+        # name 格式: "Node_X.FIFO.flit_type" 或 "Node_X.FIFO.flit_type.sub_type"
+        parts = signal.name.split(".")
+        if len(parts) >= 3:
+            fifo_type = parts[1]
+            flit_type = parts[2]
+            sub_type = parts[3] if len(parts) >= 4 else ""
+            # 子类型排序：空字符串（父类型）在前，其他按字母顺序
+            return (fifo_type, flit_type_order.get(flit_type, 99), 0 if not sub_type else 1, sub_type)
+        return (signal.name, 99, 0, "")
+
+    signals.sort(key=signal_sort_key)
 
     # 计算时间范围（从0开始，结束时留5ns余量）
     padding_ns = 5.0

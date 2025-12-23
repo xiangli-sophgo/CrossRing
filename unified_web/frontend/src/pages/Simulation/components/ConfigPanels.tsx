@@ -125,6 +125,12 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
                     <InputNumber value={configValues.SLICE_PER_LINK_VERTICAL} onChange={(v) => updateConfigValue('SLICE_PER_LINK_VERTICAL', v)} min={1} style={{ width: '100%' }} />
                   </Col>
                 )}
+                {configValues.SLICE_PER_LINK_SELF !== undefined && (
+                  <Col span={8}>
+                    <div style={{ marginBottom: 4 }}><ConfigLabel name="SLICE_PER_LINK_SELF" /></div>
+                    <InputNumber value={configValues.SLICE_PER_LINK_SELF} onChange={(v) => updateConfigValue('SLICE_PER_LINK_SELF', v)} min={1} style={{ width: '100%' }} />
+                  </Col>
+                )}
               </Row>
 
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>FIFO Depth</Text>

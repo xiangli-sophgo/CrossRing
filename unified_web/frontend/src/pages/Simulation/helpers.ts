@@ -67,8 +67,9 @@ export const CONFIG_TOOLTIPS: Record<string, string> = {
   FLIT_SIZE: 'Size of a single flit in bits',
   BURST: 'Number of flits per burst transfer',
   NETWORK_FREQUENCY: 'Network operating frequency in GHz',
-  SLICE_PER_LINK_HORIZONTAL: 'Time slices per horizontal link',
-  SLICE_PER_LINK_VERTICAL: 'Time slices per vertical link',
+  SLICE_PER_LINK_HORIZONTAL: 'Slice number per horizontal link',
+  SLICE_PER_LINK_VERTICAL: 'Slice number per vertical link',
+  SLICE_PER_LINK_SELF: 'Slice number per self-loop link',
   // Buffer Size
   RN_RDB_SIZE: 'RN read data buffer size',
   RN_WDB_SIZE: 'RN write data buffer size',

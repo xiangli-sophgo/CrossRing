@@ -612,7 +612,7 @@ def _format_config_with_comments(content: dict) -> str:
             "KCIN Config": {
                 "keys": [
                     # Slice Per Link
-                    "SLICE_PER_LINK_HORIZONTAL", "SLICE_PER_LINK_VERTICAL",
+                    "SLICE_PER_LINK_HORIZONTAL", "SLICE_PER_LINK_VERTICAL", "SLICE_PER_LINK_SELF",
                     # FIFO Depth
                     "IQ_CH_FIFO_DEPTH", "EQ_CH_FIFO_DEPTH", "IQ_OUT_FIFO_DEPTH_HORIZONTAL", "IQ_OUT_FIFO_DEPTH_VERTICAL",
                     "IQ_OUT_FIFO_DEPTH_EQ", "RB_OUT_FIFO_DEPTH", "RB_IN_FIFO_DEPTH", "EQ_IN_FIFO_DEPTH",
@@ -760,6 +760,7 @@ def _format_config_with_comments(content: dict) -> str:
         "BURST",  # 从KCIN获取
         "SLICE_PER_LINK_HORIZONTAL",  # 从KCIN获取
         "SLICE_PER_LINK_VERTICAL",  # 从KCIN获取
+        "SLICE_PER_LINK_SELF",  # 从KCIN获取
         "arbitration",  # DCIN不需要
     }
 
