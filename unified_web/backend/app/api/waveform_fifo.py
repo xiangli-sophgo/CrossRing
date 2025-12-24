@@ -68,15 +68,15 @@ def extract_fifo_events_from_timestamps(
     events = []
 
     # 已知的 FIFO 位置模式
-    # IP: IP_inject, L2H, H2L_H, H2L_L, IP_eject
+    # IP: IP_TX, L2H, H2L_H, H2L_L, IP_RX
     # IQ: IQ_TR, IQ_TL, IQ_TU, IQ_TD, IQ_CH
     # RB: RB_TR, RB_TL, RB_TU, RB_TD, RB_EQ
     # EQ: EQ_TU, EQ_TD, EQ_CH
 
     # ===== IP 发送端口事件（在源节点）=====
-    # IP_TX: 从 IP_inject 到 L2H（或第一个 IQ）
-    if "IP_inject" in timestamps:
-        enter_ns = timestamps["IP_inject"]
+    # IP_TX: 从 IP_TX 到 L2H（或第一个 IQ）
+    if "IP_TX" in timestamps:
+        enter_ns = timestamps["IP_TX"]
         leave_ns = timestamps.get("L2H", -1)
         # 如果没有 L2H，尝试 IQ 位置
         if leave_ns < 0:
@@ -117,34 +117,43 @@ def extract_fifo_events_from_timestamps(
             if enter_ns >= 0 and leave_ns >= 0 and leave_ns > enter_ns:
                 events.append((iq_pos, source_node, enter_ns, leave_ns))
 
-    # ===== RB 事件（在中间节点，暂时简化处理）=====
-    rb_positions = ["RB_TR", "RB_TL", "RB_TU", "RB_TD", "RB_EQ"]
-    for rb_pos in rb_positions:
-        if rb_pos in timestamps:
-            enter_ns = timestamps[rb_pos]
-            leave_ns = -1
-            for next_pos in ["Link", "EQ_TU", "EQ_TD", "EQ_CH"]:
-                if next_pos in timestamps and timestamps[next_pos] > enter_ns:
-                    leave_ns = timestamps[next_pos]
-                    break
+    # ===== RB 事件（从位置名称中提取节点 ID）=====
+    # 新格式: RB_TR_N5 表示节点 5 的 RB_TR
+    import re
+    rb_pattern = re.compile(r'^(RB_(?:TR|TL|TU|TD|EQ))_N(\d+)$')
+    for pos_name, enter_ns in timestamps.items():
+        match = rb_pattern.match(pos_name)
+        if match:
+            rb_type = match.group(1)  # RB_TR, RB_TL 等
+            rb_node_id = int(match.group(2))  # 节点 ID
 
-            if enter_ns >= 0 and leave_ns >= 0:
-                # TODO: 推导中间节点ID（暂时跳过）
-                pass
+            leave_ns = -1
+            # RB 的下一跳：其他 RB、EQ 或 H2L
+            for next_pos, next_time in timestamps.items():
+                # 跳过同类型的 RB 位置
+                if next_pos.startswith("RB_"):
+                    continue
+                if next_pos in ["EQ_TU", "EQ_TD", "EQ_CH", "H2L_H", "H2L_L", "IP_RX", "Link"]:
+                    if next_time > enter_ns:
+                        if leave_ns < 0 or next_time < leave_ns:
+                            leave_ns = next_time
+
+            if enter_ns >= 0 and leave_ns >= 0 and leave_ns > enter_ns:
+                events.append((rb_type, rb_node_id, enter_ns, leave_ns))
 
     # ===== EQ 事件（在目标节点）=====
     eq_positions = ["EQ_TU", "EQ_TD", "EQ_CH"]
     for eq_pos in eq_positions:
         if eq_pos in timestamps:
             enter_ns = timestamps[eq_pos]
-            # 查找离开时间：H2L_H -> H2L_L -> IP_eject
+            # 查找离开时间：H2L_H -> H2L_L -> IP_RX
             leave_ns = -1
-            for next_pos in ["H2L_H", "H2L_L", "IP_eject"]:
+            for next_pos in ["H2L_H", "H2L_L", "IP_RX"]:
                 if next_pos in timestamps and timestamps[next_pos] > enter_ns:
                     leave_ns = timestamps[next_pos]
                     break
             if leave_ns < 0:
-                leave_ns = timestamps.get("IP_eject", -1)
+                leave_ns = timestamps.get("IP_RX", -1)
 
             if enter_ns >= 0 and leave_ns >= 0 and leave_ns > enter_ns:
                 events.append((eq_pos, dest_node, enter_ns, leave_ns))
@@ -153,13 +162,13 @@ def extract_fifo_events_from_timestamps(
     # H2L: 从 EQ 或 H2L_H 到 H2L_L（高层到低层的转换）
     if "H2L_H" in timestamps:
         enter_ns = timestamps["H2L_H"]
-        leave_ns = timestamps.get("H2L_L", timestamps.get("IP_eject", -1))
+        leave_ns = timestamps.get("H2L_L", timestamps.get("IP_RX", -1))
         if enter_ns >= 0 and leave_ns >= 0 and leave_ns > enter_ns:
             events.append(("H2L", dest_node, enter_ns, leave_ns))
 
-    # IP_RX: 从 H2L_L（或 EQ）到 IP_eject（接收端的最后阶段）
-    if "IP_eject" in timestamps:
-        leave_ns = timestamps["IP_eject"]
+    # IP_RX: 从 H2L_L（或 EQ）到 IP_RX（接收端的最后阶段）
+    if "IP_RX" in timestamps:
+        leave_ns = timestamps["IP_RX"]
         # 查找进入时间：优先 H2L_L，其次 H2L_H，再次 EQ
         enter_ns = -1
         for prev_pos in ["H2L_L", "H2L_H", "EQ_CH", "EQ_TU", "EQ_TD"]:
@@ -176,19 +185,19 @@ def _parse_ip_channel_fifo(fifo_type: str) -> Tuple[str, str, str]:
     """解析 IP 通道 FIFO 类型
 
     Args:
-        fifo_type: 如 "IQ_CH_G0", "EQ_CH_D1"
+        fifo_type: 如 "IQ_CH_G0", "EQ_CH_D1", "IP_TX_G0", "IP_RX_D1"
 
     Returns:
         (base_type, ip_type, channel_name)
-        如 ("IQ_CH", "gdma_0", "G0") 或 ("", "", "") 如果不是 IP 通道
+        如 ("IQ_CH", "gdma_0", "G0") 或 ("IP_TX", "gdma_0", "G0") 或 ("", "", "") 如果不是 IP 通道
     """
-    # 匹配 IQ_CH_X0 或 EQ_CH_X0 格式
     import re
-    match = re.match(r'^(IQ_CH|EQ_CH)_([A-Z])(\d+)$', fifo_type)
+    # 匹配 IQ_CH_X0, EQ_CH_X0, IP_TX_X0, IP_RX_X0 格式
+    match = re.match(r'^(IQ_CH|EQ_CH|IP_TX|IP_RX)_([A-Z])(\d+)$', fifo_type)
     if not match:
         return ("", "", "")
 
-    base_type = match.group(1)  # IQ_CH 或 EQ_CH
+    base_type = match.group(1)  # IQ_CH, EQ_CH, IP_TX 或 IP_RX
     type_char = match.group(2)  # G, D, C 等
     num = match.group(3)        # 0, 1 等
 
@@ -198,6 +207,10 @@ def _parse_ip_channel_fifo(fifo_type: str) -> Tuple[str, str, str]:
         'D': 'ddr',
         'C': 'cpu',
         'P': 'pcie',
+        'S': 'sdma',
+        'N': 'npu',
+        'E': 'eth',
+        'L': 'l2m',
     }
     ip_prefix = type_map.get(type_char, type_char.lower())
     ip_type = f"{ip_prefix}_{num}"
@@ -282,6 +295,9 @@ def build_fifo_waveform_for_node(
         else:
             regular_fifos.append(fifo_type)
 
+    print(f"[DEBUG] build_fifo_waveform_for_node: node_id={node_id}, fifo_types={fifo_types}")
+    print(f"[DEBUG] regular_fifos={regular_fifos}, ip_channel_map={ip_channel_map}")
+
     # 初始化结果：按 fifo_type.flit_type 分组（rsp 按 rsp_type 动态创建）
     waveform_data = {}
     for fifo_type in fifo_types:
@@ -353,7 +369,26 @@ def build_fifo_waveform_for_node(
 
         source_type = row.get("source_type", "")
         dest_type = row.get("dest_type", "")
-        flit_id_str = f"{row['packet_id']}.{flit_type}.{row.get('flit_id', 0)}"
+
+        # 生成 flit_id_str 用于显示
+        # req: "123" 或 "123(Retry)"
+        # rsp: "123(Comp)" 或 "123(CompData)"
+        # data: "123.1"
+        packet_id = row['packet_id']
+        if flit_type == "req":
+            if req_attr and req_attr != "new":
+                flit_id_str = f"{packet_id}(Retry)"
+            else:
+                flit_id_str = str(packet_id)
+        elif flit_type == "rsp":
+            if rsp_type:
+                flit_id_str = f"{packet_id}({rsp_type})"
+            else:
+                flit_id_str = str(packet_id)
+        elif flit_type == "data":
+            flit_id_str = f"{packet_id}.{data_id}"
+        else:
+            flit_id_str = str(packet_id)
 
         # 过滤：只保留目标节点的目标 FIFO 类型
         for fifo_type_name, event_node_id, enter_ns, leave_ns in events:
@@ -367,6 +402,8 @@ def build_fifo_waveform_for_node(
             # 2. 处理 IP 通道 FIFO
             # IQ_CH_G0 -> L2H 事件，过滤 source_type=gdma_0
             # EQ_CH_G0 -> H2L 事件，过滤 dest_type=gdma_0
+            # IP_TX_G0 -> IP_TX 事件，过滤 source_type=gdma_0
+            # IP_RX_G0 -> IP_RX 事件，过滤 dest_type=gdma_0
             for fifo_key, (base_type, ip_type, channel_name) in ip_channel_map.items():
                 if base_type == "IQ_CH" and fifo_type_name == "L2H":
                     # IQ 中的 IP 通道：显示 L2H，按 source_type 过滤
@@ -376,6 +413,18 @@ def build_fifo_waveform_for_node(
                     # EQ 中的 IP 通道：显示 H2L，按 dest_type 过滤
                     if dest_type == ip_type:
                         add_event(fifo_key, flit_type, rsp_type, req_attr, data_id, enter_ns, leave_ns, flit_id_str)
+                elif base_type == "IP_TX" and fifo_type_name == "IP_TX":
+                    # IP 发送端口：按 source_type 过滤
+                    print(f"[DEBUG] IP_TX match: fifo_key={fifo_key}, ip_type={ip_type}, source_type={source_type}, event_node_id={event_node_id}")
+                    if source_type == ip_type:
+                        add_event(fifo_key, flit_type, rsp_type, req_attr, data_id, enter_ns, leave_ns, flit_id_str)
+                        print(f"[DEBUG] IP_TX event added: {fifo_key}")
+                elif base_type == "IP_RX" and fifo_type_name == "IP_RX":
+                    # IP 接收端口：按 dest_type 过滤
+                    print(f"[DEBUG] IP_RX match: fifo_key={fifo_key}, ip_type={ip_type}, dest_type={dest_type}, event_node_id={event_node_id}")
+                    if dest_type == ip_type:
+                        add_event(fifo_key, flit_type, rsp_type, req_attr, data_id, enter_ns, leave_ns, flit_id_str)
+                        print(f"[DEBUG] IP_RX event added: {fifo_key}")
 
     # 按时间排序
     for key in waveform_data:
@@ -419,6 +468,7 @@ async def get_fifo_waveform(
     time_end: float = Query(None, description="结束时间(ns)"),
 ) -> FIFOWaveformResponse:
     """从 waveform.parquet 的 position_timestamps 重建指定节点的 FIFO 波形数据"""
+    print(f"[DEBUG] get_fifo_waveform called: node_id={node_id}, fifo_types={fifo_types}, flit_types_filter={flit_types_filter}")
     result_type = _get_result_type(experiment_id)
 
     # 使用 waveform.py 中的加载函数

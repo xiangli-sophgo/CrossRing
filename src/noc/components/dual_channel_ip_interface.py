@@ -71,7 +71,7 @@ class DualChannelIPInterface(IPInterface):
         else:
             net_info["inject_fifo"].append(flit)
 
-        flit.flit_position = "IP_inject"
+        flit.flit_position = "IP_TX"
 
         # 将flit添加到对应网络的send_flits进行追踪
         if flit.packet_id not in target_network.send_flits:
@@ -232,7 +232,7 @@ class DualChannelIPInterface(IPInterface):
                 channel_for_stats = flit.ejected_from_channel
 
             if channel_for_stats is not None:
-                flit.flit_position = f"IP_eject_ch{channel_for_stats}"
+                flit.flit_position = f"IP_RX_ch{channel_for_stats}"
                 # 更新对应网络的统计
                 target_network = self.data_network_ch0 if channel_for_stats == 0 else self.data_network_ch1
                 if flit.packet_id not in target_network.arrive_flits:
@@ -240,7 +240,7 @@ class DualChannelIPInterface(IPInterface):
                 target_network.arrive_flits[flit.packet_id].append(flit)
                 target_network.recv_flits_num += 1
             else:
-                flit.flit_position = "IP_eject"
+                flit.flit_position = "IP_RX"
                 # 默认添加到ch0统计
                 if flit.packet_id not in self.data_network_ch0.arrive_flits:
                     self.data_network_ch0.arrive_flits[flit.packet_id] = []

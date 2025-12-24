@@ -156,24 +156,28 @@ export const checkWaveformData = async (
  * 阶段颜色映射
  */
 export const STAGE_COLORS: Record<string, string> = {
-  IP_inject: '#91d5ff',   // 浅蓝 - IP注入
+  IP_TX: '#91d5ff',       // 浅蓝 - IP发送
+  L2H: '#91d5ff',         // 浅蓝 - Low to High（与IP_TX同色）
   IQ: '#1890ff',          // 蓝 - Inject Queue
   Link: '#52c41a',        // 绿 - 链路传输
   RB: '#faad14',          // 黄 - Ring Bridge
   EQ: '#f5222d',          // 红 - Eject Queue
-  IP_eject: '#ff7a45',    // 橙 - IP弹出
+  H2L: '#ff7a45',         // 橙 - High to Low（与IP_RX同色）
+  IP_RX: '#ff7a45',       // 橙 - IP接收
 };
 
 /**
  * 阶段中文名映射
  */
 export const STAGE_NAMES: Record<string, string> = {
-  IP_inject: 'IP Inject',
+  IP_TX: 'IP TX',
+  L2H: 'L2H',
   IQ: 'IQ',
   Link: 'Link',
   RB: 'RB',
   EQ: 'EQ',
-  IP_eject: 'IP Eject',
+  H2L: 'H2L',
+  IP_RX: 'IP RX',
 };
 
 /**

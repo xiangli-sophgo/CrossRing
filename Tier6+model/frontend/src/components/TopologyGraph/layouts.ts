@@ -1,4 +1,4 @@
-import { Node, Edge } from './shared'
+import { Node, Edge, SWITCH_PANEL_CONFIG, SWITCH_LAYER_ORDER, SwitchPanelLayoutResult } from './shared'
 import * as d3Force from 'd3-force'
 
 // ============================================
@@ -429,15 +429,33 @@ export function isometricStackedLayout(
     return { upperNodes: [], lowerNodes: [], containerBounds: new Map() }
   }
 
+  // 分离Switch节点和容器节点
+  const switchNodes = upperNodes.filter(n => n.isSwitch)
+  const containerNodes = upperNodes.filter(n => !n.isSwitch)
+
   const containerBounds = new Map<string, ContainerBounds>()
   const layoutedLower: Node[] = []
   const layoutedUpper: Node[] = []
 
-  // 计算上层节点数量来确定布局（在Z方向堆叠）
-  const upperCount = upperNodes.length
+  // 计算Switch面板布局（如果有Switch）
+  let switchPanelWidth = 0
+  if (switchNodes.length > 0) {
+    // 获取所有边（这里暂时传空数组，Switch内部连线在渲染时处理）
+    const switchPanelResult = computeSwitchPanelLayout(switchNodes, [], height)
+    switchPanelWidth = switchPanelResult.panelWidth
+    // 添加布局后的Switch节点
+    layoutedUpper.push(...switchPanelResult.switchNodes)
+  }
 
-  // 每个容器的基础大小
-  const containerWidth = Math.min(width * 0.85, 400)
+  // 计算容器节点数量来确定布局（在Z方向堆叠）
+  const containerCount = containerNodes.length
+  if (containerCount === 0) {
+    return { upperNodes: layoutedUpper, lowerNodes: layoutedLower, containerBounds }
+  }
+
+  // 每个容器的基础大小（考虑Switch面板宽度）
+  const availableWidth = width - switchPanelWidth
+  const containerWidth = Math.min(availableWidth * 0.85, 400)
   const containerHeight = 250  // 增大高度以容纳更多内容
 
   // 书本堆叠参数
@@ -445,15 +463,15 @@ export function isometricStackedLayout(
   const depth3D = 0         // 3D深度（顶面和侧面的高度）
 
   // 计算整体堆叠的高度
-  const totalStackHeight = containerHeight + (upperCount - 1) * bookThickness + depth3D
+  const totalStackHeight = containerHeight + (containerCount - 1) * bookThickness + depth3D
 
-  // 计算起始位置，使整体居中
+  // 计算起始位置，使整体居中（考虑Switch面板偏移）
   // zLayer=0 在最上面（Y最小），zLayer越大越在下面（Y越大）
-  const baseX = width / 2
+  const baseX = switchPanelWidth + availableWidth / 2
   const baseY = (height - totalStackHeight) / 2 + depth3D + containerHeight / 2
 
   // 计算每个容器（展开的上层节点）及其内部的下层节点
-  upperNodes.forEach((upperNode, idx) => {
+  containerNodes.forEach((upperNode, idx) => {
     // 书本堆叠：idx=0 的 zLayer=0 在最上面
     const zIndex = idx
 
@@ -958,5 +976,120 @@ export function useForceLayout(options: UseForceLayoutOptions): UseForceLayoutRe
     onDrag,
     onDragEnd,
     updateOptions,
+  }
+}
+
+// ============================================
+// Switch面板布局函数
+// ============================================
+
+/**
+ * 计算Switch面板布局
+ * Switch按层级（leaf/spine/core）分组，呈树形结构排列
+ * @param switchNodes Switch节点列表
+ * @param allEdges 所有边（用于提取Switch之间的连接）
+ * @param totalHeight 总高度（用于垂直居中）
+ * @returns Switch面板布局结果
+ */
+export function computeSwitchPanelLayout(
+  switchNodes: Node[],
+  allEdges: Edge[],
+  totalHeight: number
+): SwitchPanelLayoutResult {
+  if (switchNodes.length === 0) {
+    return {
+      panelWidth: 0,
+      switchNodes: [],
+      switchEdges: [],
+      deviceAreaOffset: 0,
+    }
+  }
+
+  const { minWidth, maxWidth, nodeWidth, nodeHeight, layerGap, nodeGap, padding, panelGap } = SWITCH_PANEL_CONFIG
+
+  // 按层分组
+  const switchLayers: Record<string, Node[]> = {}
+  switchNodes.forEach(node => {
+    const layer = node.subType || 'leaf'
+    if (!switchLayers[layer]) switchLayers[layer] = []
+    switchLayers[layer].push(node)
+  })
+
+  // 按层级顺序排序（leaf在下，spine在上，core在最上）
+  const sortedLayers = SWITCH_LAYER_ORDER.filter(l => switchLayers[l])
+  const layerCount = sortedLayers.length
+
+  if (layerCount === 0) {
+    return {
+      panelWidth: 0,
+      switchNodes: [],
+      switchEdges: [],
+      deviceAreaOffset: 0,
+    }
+  }
+
+  // 计算面板宽度（基于最大层的节点数）
+  const maxNodesInLayer = Math.max(...Object.values(switchLayers).map(arr => arr.length))
+  const panelWidth = Math.min(
+    maxWidth,
+    Math.max(
+      minWidth,
+      maxNodesInLayer * (nodeWidth + nodeGap) + padding * 2
+    )
+  )
+
+  // 计算总层高度
+  const totalLayerHeight = (layerCount - 1) * layerGap + nodeHeight
+  const startY = (totalHeight - totalLayerHeight) / 2
+
+  // 布局每层（leaf在下面，spine/core在上面 - 树形结构）
+  const layoutedNodes: Node[] = []
+  sortedLayers.forEach((layer, layerIdx) => {
+    const nodesInLayer = switchLayers[layer]
+    // layerIdx=0是leaf（最底层），layerIdx越大越靠上
+    const layerY = startY + (layerCount - 1 - layerIdx) * layerGap + nodeHeight / 2
+    const totalNodesWidth = nodesInLayer.length * nodeWidth + (nodesInLayer.length - 1) * nodeGap
+    const startX = (panelWidth - totalNodesWidth) / 2 + nodeWidth / 2
+
+    nodesInLayer.forEach((node, nodeIdx) => {
+      layoutedNodes.push({
+        ...node,
+        x: startX + nodeIdx * (nodeWidth + nodeGap),
+        y: layerY,
+        inSwitchPanel: true,
+        switchPanelPosition: {
+          x: startX + nodeIdx * (nodeWidth + nodeGap),
+          y: layerY,
+          layer,
+          layerIndex: nodeIdx,
+        },
+      })
+    })
+  })
+
+  // 提取Switch之间的边
+  const switchIds = new Set(switchNodes.map(n => n.id))
+  const switchEdges = allEdges.filter(e =>
+    switchIds.has(e.source) && switchIds.has(e.target)
+  )
+
+  return {
+    panelWidth,
+    switchNodes: layoutedNodes,
+    switchEdges,
+    deviceAreaOffset: panelWidth + panelGap,
+  }
+}
+
+/**
+ * 分离Switch节点和设备节点
+ */
+export function separateSwitchAndDeviceNodes(allNodes: Node[]): {
+  switchNodes: Node[]
+  deviceNodes: Node[]
+} {
+  return {
+    switchNodes: allNodes.filter(n => n.isSwitch),
+    deviceNodes: allNodes.filter(n => !n.isSwitch),
   }
 }

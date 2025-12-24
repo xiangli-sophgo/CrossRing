@@ -301,7 +301,7 @@ class Flit:
         """设置位置并记录时间戳
 
         Args:
-            position: 位置名称 (如 "IP_inject", "L2H", "IQ_CH", "Link", "RB", "EQ", "IP_eject")
+            position: 位置名称 (如 "IP_TX", "L2H", "IQ_CH", "Link", "RB", "EQ", "IP_RX")
             cycle: 当前时间周期
         """
         self.flit_position = position

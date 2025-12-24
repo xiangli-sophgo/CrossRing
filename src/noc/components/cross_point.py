@@ -452,7 +452,7 @@ class CrossPoint:
             flit.is_delay = False
             flit.current_link = None
             flit.current_seat_index = -1
-            flit.set_position(f"RB_{direction}", self.network.cycle)
+            flit.set_position(f"RB_{direction}_N{key}", self.network.cycle)
 
             # 添加到ring_bridge_pre缓冲位（带检查）
             if self.network:

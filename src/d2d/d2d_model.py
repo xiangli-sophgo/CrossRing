@@ -2166,14 +2166,14 @@ class D2D_Model:
     def _should_skip_d2d_flit(self, flit):
         """判断D2D flit是否在等待状态，不需要打印"""
         if hasattr(flit, "flit_position"):
-            # IP_inject 状态算等待状态
-            if flit.flit_position == "IP_inject":
+            # IP_TX 状态算等待状态
+            if flit.flit_position == "IP_TX":
                 return True
             # L2H状态且还未到departure时间 = 等待状态
             if flit.flit_position == "L2H" and hasattr(flit, "departure_cycle") and flit.departure_cycle > self.current_cycle:
                 return True
-            # IP_eject状态且位置没有变化，也算等待状态
-            if flit.flit_position == "IP_eject":
+            # IP_RX状态且位置没有变化，也算等待状态
+            if flit.flit_position == "IP_RX":
                 flit_key = f"{flit.packet_id}_{flit.flit_id}"
                 if flit_key in self._d2d_flit_stable_cycles:
                     if self.current_cycle - self._d2d_flit_stable_cycles[flit_key] > 2:
@@ -2317,22 +2317,22 @@ class D2D_Model:
                                 if flit.flit_type == "rsp" or flit.flit_type == "data":
                                     # 响应/数据：需要回到源Die
                                     current_die = self._get_flit_current_die(flit, die_id)
-                                    if current_die != flit.d2d_origin_die or not hasattr(flit, "flit_position") or flit.flit_position != "IP_eject":
+                                    if current_die != flit.d2d_origin_die or not hasattr(flit, "flit_position") or flit.flit_position != "IP_RX":
                                         all_completed = False
                                         break
                                 else:
                                     # 请求：需要到达目标Die的目标节点
-                                    if not hasattr(flit, "flit_position") or flit.flit_position != "IP_eject":
+                                    if not hasattr(flit, "flit_position") or flit.flit_position != "IP_RX":
                                         all_completed = False
                                         break
                             else:
                                 # 响应或数据flit
-                                if not hasattr(flit, "flit_position") or flit.flit_position != "IP_eject":
+                                if not hasattr(flit, "flit_position") or flit.flit_position != "IP_RX":
                                     all_completed = False
                                     break
                         else:
-                            # 本地请求，只需要检查是否到达IP_eject
-                            if not hasattr(flit, "flit_position") or flit.flit_position != "IP_eject":
+                            # 本地请求，只需要检查是否到达IP_RX
+                            if not hasattr(flit, "flit_position") or flit.flit_position != "IP_RX":
                                 all_completed = False
                                 break
                 if not all_completed:

@@ -312,7 +312,7 @@ class IPInterface:
                 self.networks[network_type]["inject_fifo"].appendleft(flit)
             else:
                 self.networks[network_type]["inject_fifo"].append(flit)
-        flit.set_position("IP_inject", self.current_cycle)
+        # IP_TX 时间戳移到 inject_to_l2h_pre() 中设置，确保反映真正的发送时间
 
         # 检查是否为新请求并记录统计
         # 新请求必须满足：1) 请求网络 2) 本IP首次见到此packet_id 3) 非重试 4) 当前IP是原始发起IP
@@ -366,6 +366,7 @@ class IPInterface:
             if flit is None:
                 return  # 所有队列都空或都未到发送时间
 
+            flit.set_position("IP_TX", self.current_cycle - self.config.NETWORK_FREQUENCY)
             flit.set_position("L2H", self.current_cycle)
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = flit
@@ -381,6 +382,7 @@ class IPInterface:
         if network_type == "req":
             if flit.req_attr == "new" and not self._check_and_reserve_resources(flit):
                 return  # 资源不足，保持在inject_fifo中
+            flit.set_position("IP_TX", self.current_cycle - self.config.NETWORK_FREQUENCY)
             flit.set_position("L2H", self.current_cycle)
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = net_info["inject_fifo"].popleft()
@@ -395,6 +397,7 @@ class IPInterface:
                 if not self.tx_token_bucket.consume():
                     return
             flit: Flit = net_info["inject_fifo"].popleft()
+            flit.set_position("IP_TX", current_cycle - self.config.NETWORK_FREQUENCY)
             flit.set_position("L2H", current_cycle)
             flit.start_inject = True
             net_info["l2h_fifo_pre"] = flit
@@ -1064,7 +1067,7 @@ class IPInterface:
 
         # 出队flit
         flit = net_info["h2l_fifo_l"].popleft()
-        flit.set_position("IP_eject", current_cycle)
+        flit.set_position("IP_RX", current_cycle)
         flit.is_finish = True
 
         # 在IP_eject阶段添加到arrive_flits，确保只记录真正完成的flit

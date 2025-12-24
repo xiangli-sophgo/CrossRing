@@ -246,10 +246,12 @@ def _load_parquet_from_db(result_id: int, result_type: str) -> Tuple[pd.DataFram
             try:
                 flits_list = json.loads(flits_json) if isinstance(flits_json, str) else flits_json
                 for flit_info in flits_list:
-                    # 优先使用 flit 级别的 source/dest（新格式）
+                    # 优先使用 flit 级别的 source/dest/type（新格式）
                     # 如果没有则使用请求级别的（旧格式兼容）
                     flit_source = flit_info.get("source_node", req_source)
                     flit_dest = flit_info.get("dest_node", req_dest)
+                    flit_source_type = flit_info.get("source_type", req_source_type)
+                    flit_dest_type = flit_info.get("dest_type", req_dest_type)
 
                     flits_rows.append({
                         "packet_id": packet_id,
@@ -257,8 +259,8 @@ def _load_parquet_from_db(result_id: int, result_type: str) -> Tuple[pd.DataFram
                         "flit_type": flit_info.get("flit_type", ""),
                         "source_node": flit_source,
                         "dest_node": flit_dest,
-                        "source_type": req_source_type,
-                        "dest_type": req_dest_type,
+                        "source_type": flit_source_type,
+                        "dest_type": flit_dest_type,
                         "position_timestamps": json.dumps(flit_info.get("position_timestamps", {})),
                         "rsp_type": flit_info.get("rsp_type", ""),
                         "req_attr": flit_info.get("req_attr", ""),
@@ -342,18 +344,22 @@ def _build_waveform_signal(packet_id: int, flit_row, flit_type: str, flit_id: Op
 
     # 位置到阶段的映射
     def get_stage(pos_name: str) -> str:
-        if pos_name == "L2H":
-            return "IP_inject"
+        if pos_name == "IP_TX":
+            return "IP_TX"
+        elif pos_name == "L2H":
+            return "L2H"
         elif pos_name.startswith("IQ"):
             return "IQ"
         elif pos_name == "Link":
             return "Link"
-        elif pos_name == "RB":
+        elif pos_name.startswith("RB"):
             return "RB"
         elif pos_name.startswith("EQ"):
             return "EQ"
         elif pos_name in ["H2L_H", "H2L_L"]:
-            return "IP_eject"
+            return "H2L"
+        elif pos_name == "IP_RX":
+            return "IP_RX"
         else:
             return "Unknown"
 
@@ -511,7 +517,7 @@ async def get_waveform_data(
         time_range = {"start_ns": 0, "end_ns": 0}
 
     # 位置列表（按flit传输顺序）
-    stages = ["IP_inject", "IQ", "Link", "RB", "EQ", "IP_eject"]
+    stages = ["IP_TX", "L2H", "IQ", "Link", "RB", "EQ", "H2L", "IP_RX"]
 
     return WaveformResponse(
         time_range=time_range,

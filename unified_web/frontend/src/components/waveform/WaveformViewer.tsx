@@ -133,13 +133,38 @@ export default function WaveformViewer({ experimentId, resultId }: Props) {
   // 活跃IP数据
   const [activeIPsData, setActiveIPsData] = useState<Record<number, string[]>>({});
 
-  // 检查波形数据可用性
-  useEffect(() => {
-    checkAvailability();
-  }, [experimentId, resultId]);
+  // FIFO 波形中点击的 packet（用于在下方显示请求波形）
+  const [fifoClickedPacketId, setFifoClickedPacketId] = useState<number | null>(initialState.fifoClickedPacketId ?? null);
+  const [fifoClickedWaveform, setFifoClickedWaveform] = useState<WaveformResponse | null>(null);
+  const [loadingFifoClickedWaveform, setLoadingFifoClickedWaveform] = useState(false);
 
-  // 加载拓扑数据
+  // 当 experimentId 或 resultId 变化时，重置所有状态并重新加载
   useEffect(() => {
+    // 重新加载持久化状态
+    const newState = loadPersistedState(experimentId, resultId);
+
+    // 重置所有状态
+    setActiveTab(newState.activeTab || 'packet');
+    setSelectedPacketIds(newState.selectedPacketIds || []);
+    setSelectedNode(newState.selectedNode ?? null);
+    setSelectedChannel(newState.selectedChannel || 'data');
+    setSelectedFifos(newState.selectedFifos || []);
+    setExpandedRspSignals(newState.expandedRspSignals || []);
+    setExpandedReqSignals(newState.expandedReqSignals || []);
+    setExpandedDataSignals(newState.expandedDataSignals || []);
+    setFifoClickedPacketId(newState.fifoClickedPacketId ?? null);
+
+    // 清空波形数据
+    setWaveformData(null);
+    setFifoWaveformData(null);
+    setFifoClickedWaveform(null);
+    setTopoData(null);
+    setActiveIPsData({});
+    setCheckResult(null);
+    setFifoError(null);
+
+    // 重新加载数据
+    checkAvailability();
     loadTopology();
   }, [experimentId, resultId]);
 
@@ -216,13 +241,17 @@ export default function WaveformViewer({ experimentId, resultId }: Props) {
   const handleFifoSelect = (fifoId: string) => {
     if (selectedNode === null) return;
     const fullId = `${selectedNode}.${fifoId}.${selectedChannel}`;
-    if (selectedFifos.includes(fullId)) {
-      // 取消选择
-      setSelectedFifos(selectedFifos.filter(f => f !== fullId));
-    } else {
-      // 添加选择
-      setSelectedFifos([...selectedFifos, fullId]);
-    }
+    console.log('[DEBUG] handleFifoSelect:', fullId);
+    // 使用函数式更新确保连续调用时状态正确
+    setSelectedFifos(prev => {
+      if (prev.includes(fullId)) {
+        // 取消选择
+        return prev.filter(f => f !== fullId);
+      } else {
+        // 添加选择
+        return [...prev, fullId];
+      }
+    });
   };
 
   // 删除单个波形选择
@@ -377,11 +406,6 @@ export default function WaveformViewer({ experimentId, resultId }: Props) {
       setFifoWaveformData(null);
     }
   }, [selectedFifos, loadFifoWaveform, expandedRspSignals, expandedReqSignals, expandedDataSignals]);
-
-  // FIFO 波形中点击的 packet（用于在下方显示请求波形）
-  const [fifoClickedPacketId, setFifoClickedPacketId] = useState<number | null>(initialState.fifoClickedPacketId ?? null);
-  const [fifoClickedWaveform, setFifoClickedWaveform] = useState<WaveformResponse | null>(null);
-  const [loadingFifoClickedWaveform, setLoadingFifoClickedWaveform] = useState(false);
 
   // 保存状态到 localStorage
   useEffect(() => {

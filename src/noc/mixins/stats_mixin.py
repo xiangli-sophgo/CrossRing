@@ -72,8 +72,8 @@ class StatsMixin:
 
     def update_traffic_completion_stats(self, flit):
         """在flit完成时更新TrafficScheduler的统计"""
-        # 只有当 flit 真正到达 IP_eject 状态时才更新统计
-        if hasattr(flit, "traffic_id") and flit.flit_position.startswith("IP_eject"):
+        # 只有当 flit 真正到达 IP_RX 状态时才更新统计
+        if hasattr(flit, "traffic_id") and flit.flit_position.startswith("IP_RX"):
             self.traffic_scheduler.update_traffic_stats(flit.traffic_id, "received_flit")
 
     def syn_IP_stat(self):
@@ -145,21 +145,21 @@ class StatsMixin:
     def _should_skip_waiting_flit(self, flit) -> bool:
         """判断flit是否在等待状态，不需要打印"""
         if hasattr(flit, "flit_position"):
-            # IP_inject 状态算等待状态
-            if flit.flit_position == "IP_inject":
+            # IP_TX 状态算等待状态
+            if flit.flit_position == "IP_TX":
                 return True
             # L2H状态且还未到departure时间 = 等待状态
             if flit.flit_position == "L2H" and hasattr(flit, "departure_cycle") and flit.departure_cycle > self.cycle:
                 return True
-            # IP_eject状态且位置没有变化，也算等待状态
-            if flit.flit_position == "IP_eject":
+            # IP_RX状态且位置没有变化，也算等待状态
+            if flit.flit_position == "IP_RX":
                 # 使用外部字典跟踪flit的稳定周期（避免修改Flit类的__slots__）
                 if not hasattr(self, "_flit_stable_cycles"):
                     self._flit_stable_cycles = {}
 
                 flit_key = f"{flit.packet_id}_{flit.flit_id}"
                 if flit_key in self._flit_stable_cycles:
-                    if self.cycle - self._flit_stable_cycles[flit_key] > 2:  # 在IP_eject超过2个周期就跳过
+                    if self.cycle - self._flit_stable_cycles[flit_key] > 2:  # 在IP_RX超过2个周期就跳过
                         return True
                 else:
                     self._flit_stable_cycles[flit_key] = self.cycle
@@ -215,17 +215,17 @@ class StatsMixin:
                 print(" | ".join(all_flits) + " |")
 
         # —— 更新完成标记 ——
-        # 检查所有 flit 是否都已到达 IP_eject 状态
-        all_at_ip_eject = all(f.flit_position == "IP_eject" for f in flits)
+        # 检查所有 flit 是否都已到达 IP_RX 状态
+        all_at_ip_rx = all(f.flit_position == "IP_RX" for f in flits)
 
         if net_type == "rsp":
-            # 只有最后一个 DBID 到达 IP_eject 时才算完成
+            # 只有最后一个 DBID 到达 IP_RX 时才算完成
             last_flit = flits[-1]
-            if last_flit.rsp_type == "DBID" and last_flit.flit_position == "IP_eject":
+            if last_flit.rsp_type == "DBID" and last_flit.flit_position == "IP_RX":
                 self._done_flags[packet_done_key] = True
         else:
-            # 其他网络类型，所有 flit 都到达 IP_eject 才算完成
-            if all_at_ip_eject:
+            # 其他网络类型，所有 flit 都到达 IP_RX 才算完成
+            if all_at_ip_rx:
                 self._done_flags[packet_done_key] = True
 
         # 只有在实际打印了信息时才执行sleep

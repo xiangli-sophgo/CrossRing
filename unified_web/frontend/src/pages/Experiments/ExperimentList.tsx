@@ -175,12 +175,6 @@ export default function ExperimentList() {
     setEditingValue('');
   };
 
-  // 导出单个实验
-  const handleExportSingle = (id: number) => {
-    const url = exportExperiment([id]);
-    window.open(url, '_blank');
-  };
-
   // 表格列定义
   const columns: ColumnsType<Experiment> = [
     {
@@ -189,6 +183,7 @@ export default function ExperimentList() {
       key: 'name',
       width: 350,
       ellipsis: true,
+      align: 'center',
       render: (text, record) => {
         if (editingId === record.id && editingField === 'name') {
           return (
@@ -238,6 +233,7 @@ export default function ExperimentList() {
       title: '结果数',
       key: 'count',
       width: 100,
+      align: 'center',
       render: (_, record) => (
         <span>{record.completed_combinations?.toLocaleString() || 0}</span>
       ),
@@ -247,12 +243,14 @@ export default function ExperimentList() {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 180,
+      align: 'center',
       render: (text) => (text ? new Date(text).toLocaleString('zh-CN') : '-'),
     },
     {
       title: '状态',
       key: 'status',
       width: 120,
+      align: 'center',
       render: (_, record) => {
         const config = statusConfig[record.status || ''] || { color: 'default', text: record.status, icon: null };
         return (
@@ -276,6 +274,7 @@ export default function ExperimentList() {
       dataIndex: 'description',
       key: 'description',
       width: 300,
+      align: 'center',
       render: (text, record) => {
         if (editingId === record.id && editingField === 'description') {
           return (
@@ -339,7 +338,8 @@ export default function ExperimentList() {
     {
       title: '操作',
       key: 'action',
-      width: 130,
+      width: 100,
+      align: 'center',
       render: (_, record) => (
         <Space>
           <Tooltip title="查看详情">
@@ -348,14 +348,6 @@ export default function ExperimentList() {
               size="small"
               icon={<BarChartOutlined />}
               onClick={() => navigate(`/experiments/${record.id}`)}
-            />
-          </Tooltip>
-          <Tooltip title="导出实验">
-            <Button
-              type="link"
-              size="small"
-              icon={<DownloadOutlined />}
-              onClick={() => handleExportSingle(record.id)}
             />
           </Tooltip>
           <Popconfirm

@@ -97,7 +97,7 @@ class DataflowMixin:
             queue = network.ring_bridge[direction]
             if queue_pre[node_id] and len(queue[node_id]) < self.config.RB_IN_FIFO_DEPTH:
                 flit = queue_pre[node_id]
-                flit.set_position(f"RB_{direction}", self.cycle)
+                flit.set_position(f"RB_{direction}_N{node_id}", self.cycle)
                 queue[node_id].append(flit)
                 network.increment_fifo_flit_count("RB", direction, node_id)
                 queue_pre[node_id] = None
@@ -109,7 +109,7 @@ class DataflowMixin:
             if queue_pre[node_id] and len(queue[node_id]) < self.config.RB_OUT_FIFO_DEPTH:
                 flit = queue_pre[node_id]
                 flit.is_arrive = fifo_pos == "EQ"
-                flit.set_position(f"RB_{fifo_pos}", self.cycle)
+                flit.set_position(f"RB_{fifo_pos}_N{node_id}", self.cycle)
                 queue[node_id].append(flit)
                 network.increment_fifo_flit_count("RB", fifo_pos, node_id)
                 # 统计纵向反方向上环

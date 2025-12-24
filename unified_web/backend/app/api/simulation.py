@@ -246,6 +246,15 @@ async def cancel_task(task_id: str):
     return {"success": True, "message": "任务已取消"}
 
 
+@router.delete("/history")
+async def clear_history():
+    """
+    清空历史任务
+    """
+    task_manager.clear_history()
+    return {"success": True, "message": "历史任务已清空"}
+
+
 @router.delete("/{task_id}")
 async def delete_task(task_id: str):
     """
@@ -432,15 +441,6 @@ async def get_history_grouped(limit: int = 50):
     )[:limit]
 
     return {"groups": sorted_groups}
-
-
-@router.delete("/history")
-async def clear_history():
-    """
-    清空历史任务
-    """
-    task_manager.clear_history()
-    return {"success": True, "message": "历史任务已清空"}
 
 
 def _parse_kcin_name(name: str) -> tuple:

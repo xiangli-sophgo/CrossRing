@@ -5,6 +5,7 @@
  */
 
 import React, { useMemo } from 'react';
+import { getIPTypeColor } from '@/theme/colors';
 
 interface NodeArchitectureDiagramProps {
   selectedNode: number | null;
@@ -172,6 +173,72 @@ const NodeArchitectureDiagram: React.FC<NodeArchitectureDiagramProps> = ({
       style={{ width: '100%', height: '100%' }}
       xmlns="http://www.w3.org/2000/svg"
     >
+      {/* IP 模块（左上） */}
+      <ModuleBox
+        x={0}
+        y={30}
+        width={240}
+        height={160}
+        title="IP"
+        color="#E6E6FA"
+      />
+
+      {/* IP 块显示（居中，正方形），点击显示 TX 和 RX 波形 */}
+      {activeIPs && (() => {
+        const ipCount = activeIPs.length;
+        const ipSize = 40;  // 正方形尺寸
+        const ipSpacing = 48;
+        const totalWidth = ipCount * ipSpacing - (ipSpacing - ipSize);
+        const startX = (240 - totalWidth) / 2;
+        const centerY = 30 + 160 / 2;
+
+        return activeIPs.map((ip, i) => {
+          const colors = getIPTypeColor(ip);
+          const parts = ip.split('_');
+          const typeChar = parts[0].charAt(0).toUpperCase();
+          const num = parts[1] || '0';
+          const shortLabel = `${typeChar}${num}`;
+          const txFifoId = `IP_TX_${shortLabel}`;
+          const rxFifoId = `IP_RX_${shortLabel}`;
+          const isSelected = isFifoSelected(txFifoId) || isFifoSelected(rxFifoId);
+
+          return (
+            <g
+              key={`IP_${ip}`}
+              style={{ cursor: 'pointer' }}
+              onClick={() => {
+                // 点击时同时选择 TX 和 RX
+                console.log('[DEBUG] IP clicked:', ip, 'txFifoId:', txFifoId, 'rxFifoId:', rxFifoId);
+                onFifoSelect(txFifoId);
+                onFifoSelect(rxFifoId);
+              }}
+            >
+              <rect
+                x={startX + i * ipSpacing}
+                y={centerY - ipSize / 2}
+                width={ipSize}
+                height={ipSize}
+                fill={isSelected ? colors.border : colors.bg}
+                stroke={colors.border}
+                strokeWidth={isSelected ? 3 : 2}
+                rx={0}
+              />
+              <text
+                x={startX + i * ipSpacing + ipSize / 2}
+                y={centerY}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={12}
+                fontWeight="bold"
+                fill={isSelected ? '#fff' : colors.text}
+              >
+                {shortLabel}
+              </text>
+            </g>
+          );
+        });
+      })()}
+
       {/* Eject Queue 模块（右上） */}
       <ModuleBox
         x={260}

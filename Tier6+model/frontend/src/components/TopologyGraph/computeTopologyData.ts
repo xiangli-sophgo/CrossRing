@@ -24,10 +24,10 @@ import {
   circleLayout,
   torusLayout,
   getLayoutForTopology,
-  hierarchicalLayout,
-  hybridLayout,
   isometricStackedLayout,
   forceDirectedLayout,
+  computeSwitchPanelLayout,
+  separateSwitchAndDeviceNodes,
 } from './layouts'
 
 // ==========================================
@@ -49,6 +49,7 @@ export interface TopologyDataResult {
   edges: Edge[]
   title: string
   directTopology: string
+  switchPanelWidth: number  // Switch面板宽度（0表示无Switch面板）
 }
 
 // ==========================================
@@ -66,7 +67,7 @@ export function computeTopologyData(params: ComputeTopologyParams): TopologyData
     manualConnections,
   } = params
 
-  if (!topology) return { nodes: [], edges: [], title: '', directTopology: 'full_mesh' }
+  if (!topology) return { nodes: [], edges: [], title: '', directTopology: 'full_mesh', switchPanelWidth: 0 }
 
   const width = 800
   const height = 600
@@ -124,6 +125,7 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
 
   // 根据层级组合提取节点
   if (levelPair === 'datacenter_pod') {
+    // 上层：Pod节点 + Datacenter级别的Switch（inter_pod）
     upperNodes = topology.pods.map(pod => ({
       id: pod.id,
       label: pod.label,
@@ -132,8 +134,12 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
       color: '#1890ff',
       hierarchyLevel: 'datacenter' as HierarchyLevel,
     }))
+    // 添加Datacenter级别的Switch到上层
+    upperNodes.push(...convertSwitchesToNodes(topology.switches, 'inter_pod'))
+
+    // 下层：每个Pod容器内的Rack + Pod级别的Switch（inter_rack）
     topology.pods.forEach(pod => {
-      const racks = pod.racks.map(rack => ({
+      const racks: Node[] = pod.racks.map(rack => ({
         id: rack.id,
         label: rack.label,
         type: 'rack',
@@ -141,23 +147,45 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
         color: '#52c41a',
         hierarchyLevel: 'pod' as HierarchyLevel,
       }))
-      lowerNodesMap.set(pod.id, racks)
+      // 添加Pod级别的Switch到容器内
+      const podSwitches = convertSwitchesToNodes(topology.switches, 'inter_rack', pod.id)
+      lowerNodesMap.set(pod.id, [...racks, ...podSwitches])
     })
+
+    // 收集所有节点ID（包括Switch）
+    const dcSwitchIds = getSwitchIds(topology.switches, 'inter_pod')
+    const podSwitchIds = new Set(
+      topology.pods.flatMap(p =>
+        Array.from(getSwitchIds(topology.switches, 'inter_rack', p.id))
+      )
+    )
     const allNodeIds = new Set([
       ...topology.pods.map(p => p.id),
-      ...topology.pods.flatMap(p => p.racks.map(r => r.id))
+      ...topology.pods.flatMap(p => p.racks.map(r => r.id)),
+      ...dcSwitchIds,
+      ...podSwitchIds,
     ])
     allEdges = topology.connections
       .filter(c => allNodeIds.has(c.source) && allNodeIds.has(c.target))
       .map(c => {
         const sourceIsPod = topology.pods.some(p => p.id === c.source)
         const targetIsPod = topology.pods.some(p => p.id === c.target)
+        const sourceIsDcSwitch = dcSwitchIds.has(c.source)
+        const targetIsDcSwitch = dcSwitchIds.has(c.target)
         let connectionType: 'intra_upper' | 'intra_lower' | 'inter_level' = 'inter_level'
-        if (sourceIsPod && targetIsPod) {
+        // 上层连接：Pod之间 或 Pod与DC级Switch之间 或 DC级Switch之间
+        if ((sourceIsPod || sourceIsDcSwitch) && (targetIsPod || targetIsDcSwitch)) {
           connectionType = 'intra_upper'
-        } else if (!sourceIsPod && !targetIsPod) {
-          const sourcePod = topology.pods.find(p => p.racks.some(r => r.id === c.source))
-          const targetPod = topology.pods.find(p => p.racks.some(r => r.id === c.target))
+        } else if (!sourceIsPod && !targetIsPod && !sourceIsDcSwitch && !targetIsDcSwitch) {
+          // 下层连接：同一Pod内的Rack/Switch之间
+          const sourcePod = topology.pods.find(p =>
+            p.racks.some(r => r.id === c.source) ||
+            getSwitchIds(topology.switches, 'inter_rack', p.id).has(c.source)
+          )
+          const targetPod = topology.pods.find(p =>
+            p.racks.some(r => r.id === c.target) ||
+            getSwitchIds(topology.switches, 'inter_rack', p.id).has(c.target)
+          )
           if (sourcePod && targetPod && sourcePod.id === targetPod.id) {
             connectionType = 'intra_lower'
           }
@@ -165,6 +193,7 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
         return { source: c.source, target: c.target, bandwidth: c.bandwidth, latency: c.latency, connectionType }
       })
   } else if (levelPair === 'pod_rack' && currentPod) {
+    // 上层：Rack节点 + Pod级别的Switch（inter_rack）
     upperNodes = currentPod.racks.map(rack => ({
       id: rack.id,
       label: rack.label,
@@ -173,8 +202,12 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
       color: '#52c41a',
       hierarchyLevel: 'pod' as HierarchyLevel,
     }))
+    // 添加Pod级别的Switch到上层
+    upperNodes.push(...convertSwitchesToNodes(topology.switches, 'inter_rack', currentPod.id))
+
+    // 下层：每个Rack容器内的Board + Rack级别的Switch（inter_board）
     currentPod.racks.forEach(rack => {
-      const boards = rack.boards.map(board => ({
+      const boards: Node[] = rack.boards.map(board => ({
         id: board.id,
         label: board.label,
         type: 'board',
@@ -183,24 +216,46 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
         uHeight: board.u_height,
         hierarchyLevel: 'rack' as HierarchyLevel,
       }))
-      lowerNodesMap.set(rack.id, boards)
+      // 添加Rack级别的Switch到容器内
+      const rackSwitches = convertSwitchesToNodes(topology.switches, 'inter_board', rack.id)
+      lowerNodesMap.set(rack.id, [...boards, ...rackSwitches])
     })
     graphTitle = `${currentPod.label} - ${LEVEL_PAIR_NAMES[levelPair]}`
+
+    // 收集所有节点ID（包括Switch）
+    const podSwitchIds = getSwitchIds(topology.switches, 'inter_rack', currentPod.id)
+    const rackSwitchIds = new Set(
+      currentPod.racks.flatMap(r =>
+        Array.from(getSwitchIds(topology.switches, 'inter_board', r.id))
+      )
+    )
     const allNodeIds = new Set([
       ...currentPod.racks.map(r => r.id),
-      ...currentPod.racks.flatMap(r => r.boards.map(b => b.id))
+      ...currentPod.racks.flatMap(r => r.boards.map(b => b.id)),
+      ...podSwitchIds,
+      ...rackSwitchIds,
     ])
     allEdges = topology.connections
       .filter(c => allNodeIds.has(c.source) && allNodeIds.has(c.target))
       .map(c => {
         const sourceIsRack = currentPod.racks.some(r => r.id === c.source)
         const targetIsRack = currentPod.racks.some(r => r.id === c.target)
+        const sourceIsPodSwitch = podSwitchIds.has(c.source)
+        const targetIsPodSwitch = podSwitchIds.has(c.target)
         let connectionType: 'intra_upper' | 'intra_lower' | 'inter_level' = 'inter_level'
-        if (sourceIsRack && targetIsRack) {
+        // 上层连接：Rack之间 或 Rack与Pod级Switch之间 或 Pod级Switch之间
+        if ((sourceIsRack || sourceIsPodSwitch) && (targetIsRack || targetIsPodSwitch)) {
           connectionType = 'intra_upper'
-        } else if (!sourceIsRack && !targetIsRack) {
-          const sourceRack = currentPod.racks.find(r => r.boards.some(b => b.id === c.source))
-          const targetRack = currentPod.racks.find(r => r.boards.some(b => b.id === c.target))
+        } else if (!sourceIsRack && !targetIsRack && !sourceIsPodSwitch && !targetIsPodSwitch) {
+          // 下层连接：同一Rack内的Board/Switch之间
+          const sourceRack = currentPod.racks.find(r =>
+            r.boards.some(b => b.id === c.source) ||
+            getSwitchIds(topology.switches, 'inter_board', r.id).has(c.source)
+          )
+          const targetRack = currentPod.racks.find(r =>
+            r.boards.some(b => b.id === c.target) ||
+            getSwitchIds(topology.switches, 'inter_board', r.id).has(c.target)
+          )
           if (sourceRack && targetRack && sourceRack.id === targetRack.id) {
             connectionType = 'intra_lower'
           }
@@ -208,6 +263,7 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
         return { source: c.source, target: c.target, bandwidth: c.bandwidth, latency: c.latency, connectionType }
       })
   } else if (levelPair === 'rack_board' && currentRack) {
+    // 上层：Board节点 + Rack级别的Switch（inter_board）
     upperNodes = currentRack.boards.map(board => ({
       id: board.id,
       label: board.label,
@@ -217,8 +273,12 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
       uHeight: board.u_height,
       hierarchyLevel: 'rack' as HierarchyLevel,
     }))
+    // 添加Rack级别的Switch到上层
+    upperNodes.push(...convertSwitchesToNodes(topology.switches, 'inter_board', currentRack.id))
+
+    // 下层：每个Board容器内的Chip + Board级别的Switch（inter_chip）
     currentRack.boards.forEach(board => {
-      const chips = board.chips.map(chip => ({
+      const chips: Node[] = board.chips.map(chip => ({
         id: chip.id,
         label: chip.label || chip.type.toUpperCase(),
         type: chip.type,
@@ -226,24 +286,46 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
         color: CHIP_TYPE_COLORS[chip.type] || '#666',
         hierarchyLevel: 'board' as HierarchyLevel,
       }))
-      lowerNodesMap.set(board.id, chips)
+      // 添加Board级别的Switch到容器内
+      const boardSwitches = convertSwitchesToNodes(topology.switches, 'inter_chip', board.id)
+      lowerNodesMap.set(board.id, [...chips, ...boardSwitches])
     })
     graphTitle = `${currentRack.label} - ${LEVEL_PAIR_NAMES[levelPair]}`
+
+    // 收集所有节点ID（包括Switch）
+    const rackSwitchIds = getSwitchIds(topology.switches, 'inter_board', currentRack.id)
+    const boardSwitchIds = new Set(
+      currentRack.boards.flatMap(b =>
+        Array.from(getSwitchIds(topology.switches, 'inter_chip', b.id))
+      )
+    )
     const allNodeIds = new Set([
       ...currentRack.boards.map(b => b.id),
-      ...currentRack.boards.flatMap(b => b.chips.map(c => c.id))
+      ...currentRack.boards.flatMap(b => b.chips.map(c => c.id)),
+      ...rackSwitchIds,
+      ...boardSwitchIds,
     ])
     allEdges = topology.connections
       .filter(c => allNodeIds.has(c.source) && allNodeIds.has(c.target))
       .map(c => {
         const sourceIsBoard = currentRack.boards.some(b => b.id === c.source)
         const targetIsBoard = currentRack.boards.some(b => b.id === c.target)
+        const sourceIsRackSwitch = rackSwitchIds.has(c.source)
+        const targetIsRackSwitch = rackSwitchIds.has(c.target)
         let connectionType: 'intra_upper' | 'intra_lower' | 'inter_level' = 'inter_level'
-        if (sourceIsBoard && targetIsBoard) {
+        // 上层连接：Board之间 或 Board与Rack级Switch之间 或 Rack级Switch之间
+        if ((sourceIsBoard || sourceIsRackSwitch) && (targetIsBoard || targetIsRackSwitch)) {
           connectionType = 'intra_upper'
-        } else if (!sourceIsBoard && !targetIsBoard) {
-          const sourceBoard = currentRack.boards.find(b => b.chips.some(ch => ch.id === c.source))
-          const targetBoard = currentRack.boards.find(b => b.chips.some(ch => ch.id === c.target))
+        } else if (!sourceIsBoard && !targetIsBoard && !sourceIsRackSwitch && !targetIsRackSwitch) {
+          // 下层连接：同一Board内的Chip/Switch之间
+          const sourceBoard = currentRack.boards.find(b =>
+            b.chips.some(ch => ch.id === c.source) ||
+            getSwitchIds(topology.switches, 'inter_chip', b.id).has(c.source)
+          )
+          const targetBoard = currentRack.boards.find(b =>
+            b.chips.some(ch => ch.id === c.target) ||
+            getSwitchIds(topology.switches, 'inter_chip', b.id).has(c.target)
+          )
           if (sourceBoard && targetBoard && sourceBoard.id === targetBoard.id) {
             connectionType = 'intra_lower'
           }
@@ -282,63 +364,82 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
       const singleLevelHeight = 600
 
       let directTopology = 'full_mesh'
-      let keepDirectTopology = false
       if (topology.switch_config) {
         if (containerNode.type === 'pod') {
-          const config = topology.switch_config.inter_rack
-          directTopology = config?.direct_topology || 'full_mesh'
-          keepDirectTopology = config?.enabled && config?.keep_direct_topology || false
+          directTopology = topology.switch_config.inter_rack?.direct_topology || 'full_mesh'
         } else if (containerNode.type === 'rack') {
-          const config = topology.switch_config.inter_board
-          directTopology = config?.direct_topology || 'full_mesh'
-          keepDirectTopology = config?.enabled && config?.keep_direct_topology || false
+          directTopology = topology.switch_config.inter_board?.direct_topology || 'full_mesh'
         } else if (containerNode.type === 'board') {
-          const config = topology.switch_config.inter_chip
-          directTopology = config?.direct_topology || 'full_mesh'
-          keepDirectTopology = config?.enabled && config?.keep_direct_topology || false
+          directTopology = topology.switch_config.inter_chip?.direct_topology || 'full_mesh'
         }
       }
 
-      const hasSwitches = children.some(n => n.isSwitch)
+      // 分离Switch节点和设备节点
+      const { switchNodes: containerSwitchNodes, deviceNodes: containerDeviceNodes } = separateSwitchAndDeviceNodes(children)
       const childIds = new Set(children.map(c => c.id))
-
-      let layoutedChildren: Node[]
-      if (layoutType === 'circle') {
-        if (hasSwitches) {
-          layoutedChildren = hybridLayout(children, singleLevelWidth, singleLevelHeight, 'ring')
-        } else {
-          const radius = Math.min(singleLevelWidth, singleLevelHeight) * 0.35
-          layoutedChildren = circleLayout(children, singleLevelWidth / 2, singleLevelHeight / 2, radius)
-        }
-      } else if (layoutType === 'grid') {
-        if (hasSwitches) {
-          layoutedChildren = hybridLayout(children, singleLevelWidth, singleLevelHeight, 'full_mesh_2d')
-        } else {
-          layoutedChildren = torusLayout(children, singleLevelWidth, singleLevelHeight)
-        }
-      } else if (layoutType === 'force') {
-        const childEdges = allEdges.filter(e =>
-          childIds.has(e.source) && childIds.has(e.target)
-        )
-        layoutedChildren = forceDirectedLayout(children, childEdges, singleLevelWidth, singleLevelHeight, {
-          chargeStrength: hasSwitches ? -400 : -300,
-          linkDistance: hasSwitches ? 120 : 100,
-          collisionRadius: hasSwitches ? 45 : 35,
-        })
-      } else {
-        if (hasSwitches && keepDirectTopology && directTopology !== 'none') {
-          layoutedChildren = hybridLayout(children, singleLevelWidth, singleLevelHeight, directTopology)
-        } else if (hasSwitches) {
-          layoutedChildren = hierarchicalLayout(children, singleLevelWidth, singleLevelHeight)
-        } else {
-          layoutedChildren = getLayoutForTopology(directTopology, children, singleLevelWidth, singleLevelHeight)
-        }
-      }
-
       const containerEdges = allEdges.filter(e =>
         childIds.has(e.source) && childIds.has(e.target) &&
         e.connectionType === 'intra_lower'
       )
+
+      let layoutedChildren: Node[]
+      let containerSwitchPanelWidth = 0
+
+      if (containerSwitchNodes.length > 0) {
+        // 有Switch：使用Switch面板布局
+        const switchPanelResult = computeSwitchPanelLayout(containerSwitchNodes, containerEdges, singleLevelHeight)
+        containerSwitchPanelWidth = switchPanelResult.panelWidth
+        const layoutedSwitchNodes = switchPanelResult.switchNodes
+
+        // 计算设备区域的实际宽度和偏移
+        const deviceAreaWidth = singleLevelWidth - switchPanelResult.deviceAreaOffset
+        const deviceAreaOffsetX = switchPanelResult.deviceAreaOffset
+
+        // 对设备节点应用布局
+        let layoutedDevices: Node[]
+        if (layoutType === 'circle') {
+          const radius = Math.min(deviceAreaWidth, singleLevelHeight) * 0.35
+          layoutedDevices = circleLayout(containerDeviceNodes, deviceAreaWidth / 2, singleLevelHeight / 2, radius)
+        } else if (layoutType === 'grid') {
+          layoutedDevices = torusLayout(containerDeviceNodes, deviceAreaWidth, singleLevelHeight)
+        } else if (layoutType === 'force') {
+          const deviceIds = new Set(containerDeviceNodes.map(n => n.id))
+          const deviceEdges = containerEdges.filter(e => deviceIds.has(e.source) && deviceIds.has(e.target))
+          layoutedDevices = forceDirectedLayout(containerDeviceNodes, deviceEdges, deviceAreaWidth, singleLevelHeight, {
+            chargeStrength: -300,
+            linkDistance: 100,
+            collisionRadius: 35,
+          })
+        } else {
+          // auto模式
+          layoutedDevices = getLayoutForTopology(directTopology, containerDeviceNodes, deviceAreaWidth, singleLevelHeight)
+        }
+
+        // 偏移设备节点位置
+        layoutedDevices = layoutedDevices.map(node => ({
+          ...node,
+          x: node.x + deviceAreaOffsetX,
+        }))
+
+        // 合并Switch和设备节点
+        layoutedChildren = [...layoutedSwitchNodes, ...layoutedDevices]
+      } else {
+        // 无Switch：使用原有布局逻辑
+        if (layoutType === 'circle') {
+          const radius = Math.min(singleLevelWidth, singleLevelHeight) * 0.35
+          layoutedChildren = circleLayout(containerDeviceNodes, singleLevelWidth / 2, singleLevelHeight / 2, radius)
+        } else if (layoutType === 'grid') {
+          layoutedChildren = torusLayout(containerDeviceNodes, singleLevelWidth, singleLevelHeight)
+        } else if (layoutType === 'force') {
+          layoutedChildren = forceDirectedLayout(containerDeviceNodes, containerEdges, singleLevelWidth, singleLevelHeight, {
+            chargeStrength: -300,
+            linkDistance: 100,
+            collisionRadius: 35,
+          })
+        } else {
+          layoutedChildren = getLayoutForTopology(directTopology, containerDeviceNodes, singleLevelWidth, singleLevelHeight)
+        }
+      }
 
       const containerPadding = 40
       const availableWidth = bounds.width - containerPadding * 2
@@ -353,6 +454,7 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
         viewBox: { width: singleLevelWidth, height: singleLevelHeight },
         scale,
         directTopology,
+        switchPanelWidth: containerSwitchPanelWidth,
       }
     })
 
@@ -362,10 +464,11 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
       edges: allEdges,
       title: graphTitle,
       directTopology: 'full_mesh',
+      switchPanelWidth: 0,  // 多层级模式下Switch面板在各容器内处理
     }
   }
 
-  return { nodes: [], edges: [], title: graphTitle, directTopology: 'full_mesh' }
+  return { nodes: [], edges: [], title: graphTitle, directTopology: 'full_mesh', switchPanelWidth: 0 }
 }
 
 // ==========================================
@@ -435,39 +538,75 @@ function computeSingleLevelData(params: SingleLevelParams): TopologyDataResult {
     }
   }
 
-  // 应用布局
-  const hasSwitches = nodeList.some(n => n.isSwitch)
+  // 分离Switch节点和设备节点
+  const { switchNodes, deviceNodes } = separateSwitchAndDeviceNodes(nodeList)
 
-  if (layoutType === 'circle') {
-    if (hasSwitches) {
-      nodeList = hybridLayout(nodeList, width, height, 'ring')
+  // 如果有Switch，计算Switch面板布局
+  let switchPanelWidth = 0
+  let layoutedSwitchNodes: Node[] = []
+
+  if (switchNodes.length > 0) {
+    const switchPanelResult = computeSwitchPanelLayout(switchNodes, edgeList, height)
+    switchPanelWidth = switchPanelResult.panelWidth
+    layoutedSwitchNodes = switchPanelResult.switchNodes
+    // switchEdges 在渲染时从 edges 中动态过滤，这里不需要存储
+
+    // 计算设备区域的实际宽度
+    const deviceAreaWidth = width - switchPanelResult.deviceAreaOffset
+    const deviceAreaOffsetX = switchPanelResult.deviceAreaOffset
+
+    // 对设备节点应用布局
+    let layoutedDevices: Node[]
+    if (layoutType === 'circle') {
+      const radius = Math.min(deviceAreaWidth, height) * 0.35
+      layoutedDevices = circleLayout(deviceNodes, deviceAreaWidth / 2, height / 2, radius)
+    } else if (layoutType === 'grid') {
+      layoutedDevices = torusLayout(deviceNodes, deviceAreaWidth, height)
+    } else if (layoutType === 'force') {
+      // 过滤出设备间的边
+      const deviceIds = new Set(deviceNodes.map(n => n.id))
+      const deviceEdges = edgeList.filter(e => deviceIds.has(e.source) && deviceIds.has(e.target))
+      layoutedDevices = forceDirectedLayout(deviceNodes, deviceEdges, deviceAreaWidth, height, {
+        chargeStrength: -300,
+        linkDistance: 100,
+        collisionRadius: 35,
+      })
     } else {
-      const radius = Math.min(width, height) * 0.35
-      nodeList = circleLayout(nodeList, width / 2, height / 2, radius)
+      // auto模式
+      if (keepDirectTopology && directTopology !== 'none') {
+        layoutedDevices = getLayoutForTopology(directTopology, deviceNodes, deviceAreaWidth, height)
+      } else {
+        layoutedDevices = getLayoutForTopology(directTopology, deviceNodes, deviceAreaWidth, height)
+      }
     }
-  } else if (layoutType === 'grid') {
-    if (hasSwitches) {
-      nodeList = hybridLayout(nodeList, width, height, 'full_mesh_2d')
-    } else {
-      nodeList = torusLayout(nodeList, width, height)
-    }
-  } else if (layoutType === 'force') {
-    nodeList = forceDirectedLayout(nodeList, edgeList, width, height, {
-      chargeStrength: hasSwitches ? -400 : -300,
-      linkDistance: hasSwitches ? 120 : 100,
-      collisionRadius: hasSwitches ? 45 : 35,
-    })
+
+    // 偏移设备节点位置（右移Switch面板宽度）
+    layoutedDevices = layoutedDevices.map(node => ({
+      ...node,
+      x: node.x + deviceAreaOffsetX,
+    }))
+
+    // 合并Switch和设备节点
+    nodeList = [...layoutedSwitchNodes, ...layoutedDevices]
   } else {
-    if (hasSwitches && keepDirectTopology && directTopology !== 'none') {
-      nodeList = hybridLayout(nodeList, width, height, directTopology)
-    } else if (hasSwitches) {
-      nodeList = hierarchicalLayout(nodeList, width, height)
+    // 无Switch时，使用原有逻辑
+    if (layoutType === 'circle') {
+      const radius = Math.min(width, height) * 0.35
+      nodeList = circleLayout(deviceNodes, width / 2, height / 2, radius)
+    } else if (layoutType === 'grid') {
+      nodeList = torusLayout(deviceNodes, width, height)
+    } else if (layoutType === 'force') {
+      nodeList = forceDirectedLayout(deviceNodes, edgeList, width, height, {
+        chargeStrength: -300,
+        linkDistance: 100,
+        collisionRadius: 35,
+      })
     } else {
-      nodeList = getLayoutForTopology(directTopology, nodeList, width, height)
+      nodeList = getLayoutForTopology(directTopology, deviceNodes, width, height)
     }
   }
 
-  return { nodes: nodeList, edges: edgeList, title: graphTitle, directTopology }
+  return { nodes: nodeList, edges: edgeList, title: graphTitle, directTopology, switchPanelWidth }
 }
 
 // ==========================================

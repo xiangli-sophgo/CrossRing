@@ -36,9 +36,8 @@ export const useGlobalTaskWebSocket = (options: UseGlobalTaskWebSocketOptions) =
     if (wsRef.current?.readyState === WebSocket.OPEN) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    // 开发环境直接连接后端，生产环境使用相对路径
-    const host = import.meta.env.DEV ? 'localhost:8000' : window.location.host
-    const ws = new WebSocket(`${protocol}//${host}/api/simulation/ws/global`)
+    // 使用当前host，让Vite代理转发到后端
+    const ws = new WebSocket(`${protocol}//${window.location.host}/api/simulation/ws/global`)
 
     ws.onopen = () => {
       console.log('Global WebSocket connected')

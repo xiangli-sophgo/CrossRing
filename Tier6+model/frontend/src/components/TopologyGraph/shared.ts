@@ -21,6 +21,29 @@ export const BOARD_U_COLORS: Record<number, string> = {
   4: '#eb2f96',  // 4U - 洋红色
 }
 
+// Switch面板布局配置
+export const SWITCH_PANEL_CONFIG = {
+  minWidth: 100,           // 最小面板宽度
+  maxWidth: 180,           // 最大面板宽度
+  nodeWidth: 60,           // Switch节点宽度
+  nodeHeight: 24,          // Switch节点高度
+  layerGap: 60,            // 层间垂直间距
+  nodeGap: 15,             // 同层节点间距
+  padding: 15,             // 面板内边距
+  panelGap: 20,            // 面板与主视图之间的间距
+}
+
+// Switch层级顺序（从下到上渲染）
+export const SWITCH_LAYER_ORDER = ['leaf', 'spine', 'core']
+
+// Switch面板布局结果
+export interface SwitchPanelLayoutResult {
+  panelWidth: number       // Switch面板宽度
+  switchNodes: Node[]      // 布局后的Switch节点
+  switchEdges: Edge[]      // Switch之间的连接
+  deviceAreaOffset: number // 设备区域的X偏移量
+}
+
 export interface BreadcrumbItem {
   level: string
   id: string
@@ -127,7 +150,17 @@ export interface Node {
     viewBox: { width: number; height: number }
     scale: number  // 从单层级视图到容器内视图的缩放比例
     directTopology?: string  // 布局类型，用于判断是否需要曲线连接
+    switchPanelWidth?: number  // Switch面板宽度
   }
+  // Switch面板位置（用于独立的Switch面板区域）
+  switchPanelPosition?: {
+    x: number
+    y: number
+    layer: string      // leaf / spine / core
+    layerIndex: number // 该层内的索引
+  }
+  // 标记是否在Switch面板中显示
+  inSwitchPanel?: boolean
 }
 
 export interface Edge {

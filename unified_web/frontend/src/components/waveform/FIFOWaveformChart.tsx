@@ -7,6 +7,9 @@ import ReactECharts from 'echarts-for-react';
 import type { FIFOSignal } from '@/api/fifoWaveform';
 import { getFIFOColor, getSignalColor } from '@/api/fifoWaveform';
 
+// 波形显示模式
+type WaveformViewMode = 'waveform' | 'transaction';
+
 interface Props {
   signals: FIFOSignal[];
   timeRange: { start_ns: number; end_ns: number };
@@ -121,6 +124,8 @@ function FIFOWaveformChart({ signals, timeRange, height, onFlitClick, expandedRs
   const chartHeight = height || FIXED_CHART_HEIGHT;
   const chartRef = useRef<ReactECharts>(null);
 
+  // 视图模式状态
+  const [viewMode, setViewMode] = useState<WaveformViewMode>('waveform');
   // 时间标记状态
   const [markers, setMarkers] = useState<TimeMarkers>({ primary: null, secondary: null });
   // 用于强制清除残留
@@ -342,13 +347,45 @@ function FIFOWaveformChart({ signals, timeRange, height, onFlitClick, expandedRs
     const series = signals.map((signal, signalIndex) => {
       const waveformPoints = waveformDataMap.get(signalIndex) || [];
 
-      // 转换为ECharts数据格式 [x, categoryIndex]
+      // 判断信号是否为展开后的子类型（4段格式：Node_X.FIFO.type.subType）
+      const signalParts = signal.name.split('.');
+      const isExpandedSubType = signalParts.length >= 4;
+
+      // 转换为ECharts数据格式 [x, categoryIndex, level, flitLabel]
       // 使用category索引，高低电平通过自定义renderItem控制
-      const data = waveformPoints.map(pt => [
-        pt.time,
-        signalIndex,
-        pt.level,  // 保存电平信息用于绘制
-      ]);
+      const data = waveformPoints.map(pt => {
+        // 生成 flit 标签
+        // 后端已生成格式: req="123" 或 "123(Retry)", rsp="123(Comp)", data="123.1"
+        let flitLabel = '';
+        if (pt.flits.length > 0) {
+          const firstFlit = pt.flits[0];
+
+          if (isExpandedSubType) {
+            // 展开状态：信号名已包含类型，简化显示
+            // 从 "123(Retry)" 或 "123(Comp)" 提取 packet_id
+            // 从 "123.1" 保持原样
+            const match = firstFlit.match(/^(\d+)/);
+            if (firstFlit.includes('.')) {
+              // data 类型: "123.1" -> 保持原样
+              flitLabel = firstFlit;
+            } else if (match) {
+              // req/rsp 类型: "123(Retry)" -> "123"
+              flitLabel = match[1];
+            } else {
+              flitLabel = firstFlit;
+            }
+          } else {
+            // 折叠状态：直接使用后端生成的标签
+            flitLabel = firstFlit;
+          }
+        }
+        return [
+          pt.time,
+          signalIndex,
+          pt.level,  // 保存电平信息用于绘制
+          flitLabel, // flit 标签用于 transaction 视图
+        ];
+      });
 
       return {
         name: signal.name,
@@ -361,8 +398,9 @@ function FIFOWaveformChart({ signals, timeRange, height, onFlitClick, expandedRs
           const startTime = api.value(0);
           const categoryIndex = api.value(1);
           const level = api.value(2);
-          const nextTime = data[nextDataIndex][0];
-          const nextLevel = data[nextDataIndex][2];
+          const flitLabel = api.value(3) as string;
+          const nextTime = data[nextDataIndex][0] as number;
+          const nextLevel = data[nextDataIndex][2] as number;
 
           // 获取坐标系边界用于裁剪
           const coordSys = params.coordSys;
@@ -401,12 +439,70 @@ function FIFOWaveformChart({ signals, timeRange, height, onFlitClick, expandedRs
           let x2 = Math.min(endCoord[0], clipRight);
           if (x1 >= x2) return null;
 
-          // 绘制水平线段
-          children.push({
-            type: 'line',
-            shape: { x1, y1: currentY, x2, y2: currentY },
-            style: { stroke: color, lineWidth: 2 },
-          });
+          // Transaction 视图：高电平绘制带标签的矩形块
+          if (viewMode === 'transaction' && level > 0 && flitLabel) {
+            const rectHeight = waveHeight - 2;  // 矩形高度略小于波形高度
+            const rectY = highY + 1;  // 稍微内缩
+            const rectWidth = x2 - x1;
+
+            // 绘制矩形背景
+            children.push({
+              type: 'rect',
+              shape: { x: x1, y: rectY, width: rectWidth, height: rectHeight },
+              style: {
+                fill: color,
+                opacity: 0.2,  // 半透明背景
+              },
+            });
+
+            // 绘制矩形边框（上下左右）
+            children.push({
+              type: 'rect',
+              shape: { x: x1, y: rectY, width: rectWidth, height: rectHeight },
+              style: {
+                fill: 'none',
+                stroke: color,
+                lineWidth: 1.5,
+              },
+            });
+
+            // 绘制文本标签（仅当矩形宽度足够时）
+            const minWidthForText = 30;  // 最小宽度才显示文本
+            if (rectWidth >= minWidthForText) {
+              // 计算可用字符数（估计每个字符约 7px 宽度）
+              const charWidth = 7;
+              const maxChars = Math.floor((rectWidth - 8) / charWidth);
+              let displayLabel = flitLabel;
+              if (displayLabel.length > maxChars && maxChars > 3) {
+                displayLabel = displayLabel.substring(0, maxChars - 2) + '..';
+              } else if (maxChars <= 3) {
+                displayLabel = '';  // 太窄不显示文本
+              }
+
+              if (displayLabel) {
+                children.push({
+                  type: 'text',
+                  x: x1 + rectWidth / 2,
+                  y: rectY + rectHeight / 2,
+                  style: {
+                    text: displayLabel,
+                    fill: color,
+                    font: '11px sans-serif',
+                    fontWeight: 'bold',
+                    textAlign: 'center',
+                    textVerticalAlign: 'middle',
+                  },
+                });
+              }
+            }
+          } else {
+            // 传统波形视图：绘制水平线
+            children.push({
+              type: 'line',
+              shape: { x1, y1: currentY, x2, y2: currentY },
+              style: { stroke: color, lineWidth: 2 },
+            });
+          }
 
           // 垂直跳变线（如果电平变化且终点在可见范围内）
           if (currentY !== nextY && endCoord[0] >= clipLeft && endCoord[0] <= clipRight) {
@@ -683,7 +779,7 @@ function FIFOWaveformChart({ signals, timeRange, height, onFlitClick, expandedRs
         ...series,
       ],
     };
-  }, [signals, timeRange, waveformDataMap, groupedSignalInfo, chartHeight, expandedRspSignals, expandedReqSignals, expandedDataSignals]);
+  }, [signals, timeRange, waveformDataMap, groupedSignalInfo, chartHeight, expandedRspSignals, expandedReqSignals, expandedDataSignals, viewMode]);
 
   // 暂时禁用 markLine 更新，测试 tooltip 问题
   // useEffect(() => {
@@ -720,7 +816,7 @@ function FIFOWaveformChart({ signals, timeRange, height, onFlitClick, expandedRs
 
   return (
     <div>
-      {/* 标记信息栏 */}
+      {/* 工具栏 */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -731,7 +827,44 @@ function FIFOWaveformChart({ signals, timeRange, height, onFlitClick, expandedRs
         borderRadius: 4,
         fontSize: 13,
       }}>
-        <span style={{ color: '#666' }}>时间标记：</span>
+        {/* 视图切换 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ color: '#666', marginRight: 4 }}>视图:</span>
+          <button
+            onClick={() => setViewMode('waveform')}
+            style={{
+              padding: '2px 8px',
+              border: viewMode === 'waveform' ? '1px solid #1890ff' : '1px solid #d9d9d9',
+              borderRadius: '4px 0 0 4px',
+              background: viewMode === 'waveform' ? '#e6f7ff' : '#fff',
+              color: viewMode === 'waveform' ? '#1890ff' : '#666',
+              cursor: 'pointer',
+              fontSize: 12,
+            }}
+          >
+            波形
+          </button>
+          <button
+            onClick={() => setViewMode('transaction')}
+            style={{
+              padding: '2px 8px',
+              border: viewMode === 'transaction' ? '1px solid #1890ff' : '1px solid #d9d9d9',
+              borderLeft: 'none',
+              borderRadius: '0 4px 4px 0',
+              background: viewMode === 'transaction' ? '#e6f7ff' : '#fff',
+              color: viewMode === 'transaction' ? '#1890ff' : '#666',
+              cursor: 'pointer',
+              fontSize: 12,
+            }}
+          >
+            Transaction
+          </button>
+        </div>
+
+        <div style={{ width: 1, height: 16, background: '#d9d9d9' }} />
+
+        {/* 时间标记 */}
+        <span style={{ color: '#666' }}>标记:</span>
         <span style={{ color: '#f97316' }}>
           A: {markers.primary !== null ? `${formatTime(markers.primary)} ns` : '--'}
         </span>

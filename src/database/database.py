@@ -142,6 +142,39 @@ class DatabaseManager:
             session.add(experiment)
             session.flush()
             exp_id = experiment.id
+
+            # 清理可能存在的孤儿记录（SQLite 会重用被删除的 ID）
+            # 先获取可能的孤儿结果ID
+            orphan_kcin_ids = [r.id for r in session.query(KcinResult).filter(
+                KcinResult.experiment_id == exp_id
+            ).all()]
+            orphan_dcin_ids = [r.id for r in session.query(DcinResult).filter(
+                DcinResult.experiment_id == exp_id
+            ).all()]
+
+            # 删除关联的 ResultFile
+            if orphan_kcin_ids:
+                session.query(ResultFile).filter(
+                    ResultFile.result_type == "kcin",
+                    ResultFile.result_id.in_(orphan_kcin_ids)
+                ).delete(synchronize_session=False)
+            if orphan_dcin_ids:
+                session.query(ResultFile).filter(
+                    ResultFile.result_type == "dcin",
+                    ResultFile.result_id.in_(orphan_dcin_ids)
+                ).delete(synchronize_session=False)
+
+            # 删除孤儿结果和分析图表
+            session.query(KcinResult).filter(
+                KcinResult.experiment_id == exp_id
+            ).delete(synchronize_session=False)
+            session.query(DcinResult).filter(
+                DcinResult.experiment_id == exp_id
+            ).delete(synchronize_session=False)
+            session.query(AnalysisChart).filter(
+                AnalysisChart.experiment_id == exp_id
+            ).delete(synchronize_session=False)
+
             return exp_id
 
     def _experiment_to_dict(self, exp: Experiment) -> dict:
@@ -230,19 +263,87 @@ class DatabaseManager:
             return result > 0
 
     def delete_experiment(self, experiment_id: int) -> bool:
-        """删除实验（级联删除所有结果）"""
+        """删除实验（级联删除所有结果和结果文件）"""
         with self.get_session() as session:
             experiment = session.query(Experiment).filter(Experiment.id == experiment_id).first()
             if experiment:
+                # 先获取所有结果ID，用于删除result_files
+                kcin_result_ids = [r.id for r in session.query(KcinResult).filter(
+                    KcinResult.experiment_id == experiment_id
+                ).all()]
+                dcin_result_ids = [r.id for r in session.query(DcinResult).filter(
+                    DcinResult.experiment_id == experiment_id
+                ).all()]
+
+                # 删除result_files表中的相关记录
+                if kcin_result_ids:
+                    session.query(ResultFile).filter(
+                        ResultFile.result_type == "kcin",
+                        ResultFile.result_id.in_(kcin_result_ids)
+                    ).delete(synchronize_session=False)
+                if dcin_result_ids:
+                    session.query(ResultFile).filter(
+                        ResultFile.result_type == "dcin",
+                        ResultFile.result_id.in_(dcin_result_ids)
+                    ).delete(synchronize_session=False)
+
+                # 删除AnalysisChart（SQLite可能不启用外键CASCADE）
+                session.query(AnalysisChart).filter(
+                    AnalysisChart.experiment_id == experiment_id
+                ).delete(synchronize_session=False)
+
+                # 手动删除kcin_results和dcin_results（SQLite默认不启用外键CASCADE）
+                session.query(KcinResult).filter(
+                    KcinResult.experiment_id == experiment_id
+                ).delete(synchronize_session=False)
+                session.query(DcinResult).filter(
+                    DcinResult.experiment_id == experiment_id
+                ).delete(synchronize_session=False)
+
+                # 删除实验
                 session.delete(experiment)
                 return True
             return False
 
     def delete_experiments_batch(self, experiment_ids: list) -> int:
-        """批量删除实验（级联删除所有结果）"""
+        """批量删除实验（级联删除所有结果和结果文件）"""
         if not experiment_ids:
             return 0
         with self.get_session() as session:
+            # 先获取所有结果ID
+            kcin_result_ids = [r.id for r in session.query(KcinResult).filter(
+                KcinResult.experiment_id.in_(experiment_ids)
+            ).all()]
+            dcin_result_ids = [r.id for r in session.query(DcinResult).filter(
+                DcinResult.experiment_id.in_(experiment_ids)
+            ).all()]
+
+            # 删除result_files表中的相关记录
+            if kcin_result_ids:
+                session.query(ResultFile).filter(
+                    ResultFile.result_type == "kcin",
+                    ResultFile.result_id.in_(kcin_result_ids)
+                ).delete(synchronize_session=False)
+            if dcin_result_ids:
+                session.query(ResultFile).filter(
+                    ResultFile.result_type == "dcin",
+                    ResultFile.result_id.in_(dcin_result_ids)
+                ).delete(synchronize_session=False)
+
+            # 删除AnalysisChart（SQLite可能不启用外键CASCADE）
+            session.query(AnalysisChart).filter(
+                AnalysisChart.experiment_id.in_(experiment_ids)
+            ).delete(synchronize_session=False)
+
+            # 手动删除kcin_results和dcin_results（SQLite默认不启用外键CASCADE）
+            session.query(KcinResult).filter(
+                KcinResult.experiment_id.in_(experiment_ids)
+            ).delete(synchronize_session=False)
+            session.query(DcinResult).filter(
+                DcinResult.experiment_id.in_(experiment_ids)
+            ).delete(synchronize_session=False)
+
+            # 删除实验
             count = session.query(Experiment).filter(
                 Experiment.id.in_(experiment_ids)
             ).delete(synchronize_session=False)

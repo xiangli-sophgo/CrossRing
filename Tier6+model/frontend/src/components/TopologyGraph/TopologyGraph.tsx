@@ -11,14 +11,14 @@ import {
   Node,
   LayoutType,
 } from './shared'
-import { renderNodeShape } from './utils'
+// renderNodeShape 已被统一的 renderNode 函数替代
 import { ManualConnectionLine, ControlPanel, renderExternalEdge, renderIndirectEdge, EdgeRendererProps } from './components'
 import { ForceLayoutManager, ForceNode, getTorusGridSize, getTorus3DSize } from './layouts'
 import { computeTopologyData } from './computeTopologyData'
 
 const { Text } = Typography
 
-// renderNodeShape 和 ManualConnectionLine 已提取到独立文件
+// ManualConnectionLine 已提取到独立文件，renderNode 统一渲染所有节点类型
 
 export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   visible,
@@ -166,6 +166,150 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
     }
   }, [linkTrafficMap])
 
+  // 节点尺寸配置（统一管理）
+  const NODE_SIZE_CONFIG: Record<string, { w: number; h: number; labelY: number; fontSize: number }> = {
+    switch: { w: 60, h: 24, labelY: -1, fontSize: 8 },
+    pod: { w: 56, h: 32, labelY: 2, fontSize: 9 },
+    rack: { w: 36, h: 56, labelY: 2, fontSize: 9 },
+    board: { w: 64, h: 36, labelY: 2, fontSize: 9 },
+    chip: { w: 40, h: 40, labelY: 2, fontSize: 8 },
+    npu: { w: 40, h: 40, labelY: 2, fontSize: 8 },
+    cpu: { w: 40, h: 40, labelY: 2, fontSize: 8 },
+    default: { w: 50, h: 36, labelY: 2, fontSize: 9 },
+  }
+
+  // 格式化标签（太长则截断）
+  const formatNodeLabel = (label: string) => {
+    if (label.length <= 6) return label
+    const match = label.match(/\d+/)
+    return match ? match[0] : label.slice(-4)
+  }
+
+  // 节点形状渲染函数（仅渲染形状和标签，不包含外层g）
+  const renderNodeShape = useCallback((node: Node, isSelected: boolean = false) => {
+    const nodeType = node.isSwitch ? 'switch' : node.type
+    const size = NODE_SIZE_CONFIG[nodeType] || NODE_SIZE_CONFIG.default
+    const halfW = size.w / 2
+    const halfH = size.h / 2
+
+    return (
+      <>
+        {/* 根据节点类型渲染不同形状 */}
+        {nodeType === 'switch' && (
+          <>
+            <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={3} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
+            {/* 端口 */}
+            <rect x={-24} y={-6} width={5} height={6} rx={1} fill="rgba(255,255,255,0.5)" />
+            <rect x={-17} y={-6} width={5} height={6} rx={1} fill="rgba(255,255,255,0.5)" />
+            <rect x={-10} y={-6} width={5} height={6} rx={1} fill="rgba(255,255,255,0.5)" />
+            <rect x={5} y={-6} width={5} height={6} rx={1} fill="rgba(255,255,255,0.5)" />
+            <rect x={12} y={-6} width={5} height={6} rx={1} fill="rgba(255,255,255,0.5)" />
+            <rect x={19} y={-6} width={5} height={6} rx={1} fill="rgba(255,255,255,0.5)" />
+            {/* 指示灯 */}
+            <circle cx={-22} cy={6} r={2} fill="#4ade80" />
+            <circle cx={-16} cy={6} r={2} fill="#4ade80" />
+          </>
+        )}
+
+        {nodeType === 'pod' && (
+          <>
+            <rect x={-halfW} y={-halfH + 6} width={size.w} height={size.h - 6} rx={3} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
+            <polygon points={`${-halfW},-${halfH - 6} 0,-${halfH} ${halfW},-${halfH - 6}`} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
+            {/* 装饰 */}
+            <rect x={-20} y={-4} width={8} height={8} rx={1} fill="rgba(255,255,255,0.3)" />
+            <rect x={-6} y={-4} width={8} height={8} rx={1} fill="rgba(255,255,255,0.3)" />
+            <rect x={8} y={-4} width={8} height={8} rx={1} fill="rgba(255,255,255,0.3)" />
+          </>
+        )}
+
+        {nodeType === 'rack' && (
+          <>
+            <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={3} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
+            {/* 层级线 */}
+            <line x1={-14} y1={-16} x2={14} y2={-16} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+            <line x1={-14} y1={-4} x2={14} y2={-4} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+            <line x1={-14} y1={8} x2={14} y2={8} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+            <line x1={-14} y1={20} x2={14} y2={20} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+            {/* 指示灯 */}
+            <circle cx={10} cy={-22} r={2} fill="#4ade80" />
+            <circle cx={10} cy={-10} r={2} fill="#4ade80" />
+          </>
+        )}
+
+        {nodeType === 'board' && (
+          <>
+            <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={2} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
+            {/* 电路线装饰 */}
+            <path d="M-24,-10 L-24,-2 L-16,-2 L-16,6 L-8,6" stroke="rgba(255,255,255,0.25)" strokeWidth={1.5} fill="none" />
+            <path d="M8,-10 L8,0 L16,0 L16,8 L24,8" stroke="rgba(255,255,255,0.25)" strokeWidth={1.5} fill="none" />
+            {/* 芯片 */}
+            <rect x={-8} y={-8} width={16} height={16} rx={1} fill="rgba(0,0,0,0.2)" stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+          </>
+        )}
+
+        {(nodeType === 'chip' || nodeType === 'npu' || nodeType === 'cpu') && (
+          <>
+            <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={2} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
+            {/* 引脚 */}
+            <rect x={-12} y={-halfH - 4} width={4} height={4} fill={node.color} />
+            <rect x={-2} y={-halfH - 4} width={4} height={4} fill={node.color} />
+            <rect x={8} y={-halfH - 4} width={4} height={4} fill={node.color} />
+            <rect x={-12} y={halfH} width={4} height={4} fill={node.color} />
+            <rect x={-2} y={halfH} width={4} height={4} fill={node.color} />
+            <rect x={8} y={halfH} width={4} height={4} fill={node.color} />
+            {/* 内核 */}
+            <rect x={-10} y={-10} width={20} height={20} rx={1} fill="rgba(255,255,255,0.15)" />
+          </>
+        )}
+
+        {/* 默认形状（未匹配的类型） */}
+        {!['switch', 'pod', 'rack', 'board', 'chip', 'npu', 'cpu'].includes(nodeType) && (
+          <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={6} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
+        )}
+
+        {/* 统一标签渲染 */}
+        <text y={size.labelY} textAnchor="middle" fill="#fff" fontSize={size.fontSize} fontWeight={600} style={{ pointerEvents: 'none' }}>
+          {formatNodeLabel(node.label)}
+        </text>
+      </>
+    )
+  }, [])
+
+  // 统一节点渲染函数（带完整g包装） - 适用于Switch面板、容器内节点等场景
+  const renderNode = useCallback((
+    node: Node,
+    options: {
+      keyPrefix: string
+      scale?: number
+      isSelected?: boolean
+      onClick?: () => void
+    }
+  ) => {
+    const { keyPrefix, scale = 1, isSelected = false, onClick } = options
+    const nodeType = node.isSwitch ? 'switch' : node.type
+    const size = NODE_SIZE_CONFIG[nodeType] || NODE_SIZE_CONFIG.default
+    const halfW = size.w / 2
+    const halfH = size.h / 2
+
+    return (
+      <g
+        key={`${keyPrefix}-${node.id}`}
+        transform={scale === 1 ? `translate(${node.x}, ${node.y})` : `translate(${node.x}, ${node.y}) scale(${scale})`}
+        style={{ cursor: 'pointer' }}
+        onClick={(e) => {
+          e.stopPropagation()
+          onClick?.()
+        }}
+      >
+        {/* 选中高亮 - 背景发光效果 */}
+        {isSelected && (
+          <rect x={-halfW - 2} y={-halfH - 2} width={size.w + 4} height={size.h + 4} rx={4} fill="#52c41a" opacity={0.3} />
+        )}
+        {renderNodeShape(node, isSelected)}
+      </g>
+    )
+  }, [renderNodeShape])
+
   // 手动调整模式开关（内部状态）
   const [isManualMode, setIsManualMode] = useState(false)
 
@@ -257,7 +401,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   }
 
   // 根据当前层级生成节点和边
-  const { nodes, edges, title, directTopology } = useMemo(() => {
+  const { nodes, edges, title, directTopology, switchPanelWidth } = useMemo(() => {
     return computeTopologyData({
       topology,
       currentLevel,
@@ -840,6 +984,95 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             </filter>
           </defs>
 
+          {/* Switch面板（单层级模式） */}
+          {!multiLevelOptions?.enabled && switchPanelWidth > 0 && (() => {
+            // 获取Switch面板中的节点
+            const switchPanelNodes = displayNodes.filter(n => n.inSwitchPanel)
+
+            if (switchPanelNodes.length === 0) return null
+
+            // 获取Switch之间的边
+            const switchIds = new Set(switchPanelNodes.map(n => n.id))
+            const switchInternalEdges = edges.filter(e =>
+              switchIds.has(e.source) && switchIds.has(e.target)
+            )
+
+            return (
+              <g className="switch-panel">
+                {/* 面板背景 */}
+                <rect
+                  x={0}
+                  y={0}
+                  width={switchPanelWidth}
+                  height={600}
+                  fill="#f8f9fa"
+                  stroke="#e9ecef"
+                  strokeWidth={1}
+                />
+                {/* 面板标题 */}
+                <text
+                  x={switchPanelWidth / 2}
+                  y={20}
+                  textAnchor="middle"
+                  fill="#666"
+                  fontSize={12}
+                  fontWeight={500}
+                >
+                  Switch
+                </text>
+
+                {/* Switch之间的连线（树形结构 - 阶梯式） */}
+                {switchInternalEdges.map((edge, idx) => {
+                  const sourceNode = switchPanelNodes.find(n => n.id === edge.source)
+                  const targetNode = switchPanelNodes.find(n => n.id === edge.target)
+                  if (!sourceNode || !targetNode) return null
+
+                  // 确保上层（spine）在上，下层（leaf）在下
+                  const upperNode = sourceNode.y < targetNode.y ? sourceNode : targetNode
+                  const lowerNode = sourceNode.y < targetNode.y ? targetNode : sourceNode
+
+                  // 阶梯式连线
+                  const midY = (upperNode.y + lowerNode.y) / 2
+                  const pathD = `M ${upperNode.x} ${upperNode.y + 12}
+                                 L ${upperNode.x} ${midY}
+                                 L ${lowerNode.x} ${midY}
+                                 L ${lowerNode.x} ${lowerNode.y - 12}`
+
+                  return (
+                    <path
+                      key={`switch-edge-${idx}`}
+                      d={pathD}
+                      fill="none"
+                      stroke="#1890ff"
+                      strokeWidth={2}
+                      strokeOpacity={0.6}
+                    />
+                  )
+                })}
+
+                {/* Switch节点 */}
+                {switchPanelNodes.map(node => renderNode(node, {
+                  keyPrefix: 'switch',
+                  isSelected: selectedNodeId === node.id,
+                  onClick: () => onNodeClick?.({
+                    id: node.id,
+                    label: node.label,
+                    type: 'switch',
+                    subType: node.subType,
+                    connections: edges.filter(e => e.source === node.id || e.target === node.id)
+                      .map(e => ({
+                        id: e.source === node.id ? e.target : e.source,
+                        label: displayNodes.find(n => n.id === (e.source === node.id ? e.target : e.source))?.label || '',
+                        bandwidth: e.bandwidth,
+                        latency: e.latency,
+                      })),
+                    portInfo: node.portInfo,
+                  })
+                }))}
+              </g>
+            )
+          })()}
+
           {/* 手动布局时的辅助对齐线 */}
           {isManualMode && alignmentLines.map((line, idx) => {
             if (line.type === 'h') {
@@ -1390,7 +1623,10 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
                     {/* 使用嵌套 SVG 渲染单层级内容（用于展开动画平滑过渡） */}
                     {containerNode.singleLevelData && (() => {
-                      const { nodes: slNodes, edges: slEdges, viewBox, directTopology: slDirectTopology } = containerNode.singleLevelData
+                      const { nodes: slNodes, edges: slEdges, viewBox, directTopology: slDirectTopology, switchPanelWidth } = containerNode.singleLevelData
+                      const slSwitchPanelWidth = switchPanelWidth ?? 0
+                      // 分离Switch节点
+                      const slSwitchNodes = slNodes.filter(n => n.isSwitch && n.inSwitchPanel)
                       // 让拓扑填充尽可能多的容器空间
                       const labelHeight = 10  // 留给标签的空间
                       const sidePadding = 10
@@ -1452,6 +1688,80 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                               onLinkClick?.(null)
                             }}
                           />
+
+                          {/* 容器内Switch面板（与单层级一致） */}
+                          {slSwitchPanelWidth > 0 && slSwitchNodes.length > 0 && (
+                            <g className="container-switch-panel">
+                              {/* Switch面板背景 */}
+                              <rect
+                                x={0}
+                                y={0}
+                                width={slSwitchPanelWidth}
+                                height={viewBox.height}
+                                fill="rgba(248, 249, 250, 0.9)"
+                                stroke="#e9ecef"
+                                strokeWidth={1}
+                                rx={2}
+                              />
+                              {/* Switch之间的连线（阶梯式，与单层级一致） */}
+                              {(() => {
+                                const switchIds = new Set(slSwitchNodes.map(n => n.id))
+                                const switchInternalEdges = slEdges.filter(e =>
+                                  switchIds.has(e.source) && switchIds.has(e.target)
+                                )
+                                return switchInternalEdges.map((edge, idx) => {
+                                  const sourceNode = slSwitchNodes.find(n => n.id === edge.source)
+                                  const targetNode = slSwitchNodes.find(n => n.id === edge.target)
+                                  if (!sourceNode || !targetNode) return null
+
+                                  const upperNode = sourceNode.y < targetNode.y ? sourceNode : targetNode
+                                  const lowerNode = sourceNode.y < targetNode.y ? targetNode : sourceNode
+
+                                  const midY = (upperNode.y + lowerNode.y) / 2
+                                  const pathD = `M ${upperNode.x} ${upperNode.y + 10}
+                                                 L ${upperNode.x} ${midY}
+                                                 L ${lowerNode.x} ${midY}
+                                                 L ${lowerNode.x} ${lowerNode.y - 10}`
+
+                                  return (
+                                    <path
+                                      key={`sl-sw-edge-${idx}`}
+                                      d={pathD}
+                                      fill="none"
+                                      stroke="#1890ff"
+                                      strokeWidth={1.5}
+                                      strokeOpacity={0.6}
+                                    />
+                                  )
+                                })
+                              })()}
+                              {/* Switch节点（缩小版） */}
+                              {slSwitchNodes.map(swNode => renderNode(swNode, {
+                                keyPrefix: 'sl-sw',
+                                scale: 0.85,
+                                isSelected: selectedNodeId === swNode.id,
+                                onClick: () => {
+                                  if (connectionMode === 'view' && onNodeClick) {
+                                    const swConnections = slEdges
+                                      .filter(edge => edge.source === swNode.id || edge.target === swNode.id)
+                                      .map(edge => {
+                                        const otherId = edge.source === swNode.id ? edge.target : edge.source
+                                        const otherNode = slNodes.find(n => n.id === otherId)
+                                        return { id: otherId, label: otherNode?.label || otherId, bandwidth: edge.bandwidth, latency: edge.latency }
+                                      })
+                                    onNodeClick({
+                                      id: swNode.id,
+                                      label: swNode.label,
+                                      type: swNode.type,
+                                      subType: swNode.subType,
+                                      connections: swConnections,
+                                    })
+                                  }
+                                }
+                              }))}
+                            </g>
+                          )}
+
                           {/* 渲染边 - 使用与单层级相同的颜色和交互逻辑 */}
                           {slEdges.map((edge, i) => {
                             const sourceNodeOrig = slNodes.find(n => n.id === edge.source)
@@ -1613,151 +1923,40 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                             )
                           })}
 
-                          {/* 渲染节点 - 使用与单层级相同的高亮和交互逻辑 */}
-                          {slNodes.map(node => {
-                            // 检测节点状态（连接模式）
-                            const isSourceSelected = selectedNodes.has(node.id)
-                            const isTargetSelected = targetNodes.has(node.id)
-                            // 检测节点状态（查看模式）
+                          {/* 渲染节点 - 使用统一的renderNode函数（过滤掉Switch节点，已单独渲染） */}
+                          {slNodes.filter(n => !n.isSwitch).map(node => {
                             const isNodeSelected = selectedNodeId === node.id
-                            const isNodeHovered = hoveredNodeId === node.id
-                            const isLinkEndpoint = selectedLinkId && (
-                              selectedLinkId.startsWith(node.id + '-') ||
-                              selectedLinkId.endsWith('-' + node.id)
-                            )
-                            const shouldHighlight = isNodeSelected || isNodeHovered || isLinkEndpoint || isSourceSelected || isTargetSelected
-                            const isDragging = draggingNode === node.id
-
-                            // 节点连接信息（用于 tooltip 和 onClick）
                             const nodeConnections = slEdges
                               .filter(e => e.source === node.id || e.target === node.id)
                               .map(e => {
-                                // 外部连接
-                                if (e.isExternal) {
-                                  return { id: e.externalNodeId || '', label: `↗ ${e.externalNodeLabel || '外部节点'}`, bandwidth: e.bandwidth, latency: e.latency }
-                                }
-                                // 间接连接
-                                if (e.isIndirect) {
-                                  const otherId = e.source === node.id ? e.target : e.source
-                                  const otherNode = slNodes.find(n => n.id === otherId)
-                                  return { id: otherId, label: `${otherNode?.label || otherId} (via ${e.viaNodeLabel})`, bandwidth: e.bandwidth, latency: e.latency }
-                                }
                                 const otherId = e.source === node.id ? e.target : e.source
                                 const otherNode = slNodes.find(n => n.id === otherId)
                                 return { id: otherId, label: otherNode?.label || otherId, bandwidth: e.bandwidth, latency: e.latency }
                               })
 
-                            // 根据模式决定高亮颜色
-                            let highlightFilter = 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))'
-                            if (isDragging) {
-                              highlightFilter = 'drop-shadow(0 8px 16px rgba(0,0,0,0.25))'  // 拖动时的阴影效果
-                            } else if (isSourceSelected) {
-                              highlightFilter = 'drop-shadow(0 0 8px rgba(24, 144, 255, 0.8)) drop-shadow(0 0 16px rgba(24, 144, 255, 0.4))'  // 蓝色：源节点
-                            } else if (isTargetSelected) {
-                              highlightFilter = 'drop-shadow(0 0 8px rgba(82, 196, 26, 0.8)) drop-shadow(0 0 16px rgba(82, 196, 26, 0.4))'  // 绿色：目标节点
-                            } else if (shouldHighlight) {
-                              highlightFilter = 'drop-shadow(0 0 8px rgba(37, 99, 235, 0.6)) drop-shadow(0 0 16px rgba(37, 99, 235, 0.3))'
+                            // 使用手动位置（如果存在）
+                            const nodeWithPos = {
+                              ...node,
+                              x: manualPositions[node.id]?.x ?? node.x,
+                              y: manualPositions[node.id]?.y ?? node.y,
                             }
 
-                            // 根据节点类型获取背景尺寸（用于遮挡边）
-                            const bgSize = node.type === 'board' ? { x: -32, y: -18, w: 64, h: 36 }
-                              : node.type === 'rack' ? { x: -18, y: -28, w: 36, h: 56 }
-                              : node.type === 'pod' ? { x: -32, y: -24, w: 64, h: 44 }
-                              : (node.type === 'npu' || node.type === 'cpu') ? { x: -26, y: -26, w: 52, h: 52 }
-                              : { x: -25, y: -18, w: 50, h: 36 }
-
-                            // 使用手动位置（如果存在）
-                            const nodeX = manualPositions[node.id]?.x ?? node.x
-                            const nodeY = manualPositions[node.id]?.y ?? node.y
-
-                            return (
-                              <g
-                                key={`sl-node-${node.id}`}
-                                transform={`translate(${nodeX}, ${nodeY}) scale(${slNodeScale * (isDragging ? 1.08 : 1)})`}
-                                style={{
-                                  cursor: isForceMode ? (isDragging ? 'grabbing' : 'grab') : connectionMode !== 'view' ? 'crosshair' : 'pointer',
-                                  opacity: isDragging ? 0.85 : 1,
-                                  filter: highlightFilter,
-                                  transition: isDragging ? 'none' : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.15s ease, opacity 0.15s ease',
-                                }}
-                                onMouseDown={(e) => handleDragStart(node.id, e)}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  // 连接模式：选择源节点
-                                  if (connectionMode === 'select_source' || connectionMode === 'select' || connectionMode === 'connect') {
-                                    const currentSet = new Set(selectedNodes)
-                                    if (currentSet.has(node.id)) {
-                                      currentSet.delete(node.id)
-                                    } else {
-                                      currentSet.add(node.id)
-                                    }
-                                    onSelectedNodesChange?.(currentSet)
-                                  } else if (connectionMode === 'select_target') {
-                                    // 连接模式：选择目标节点
-                                    const currentSet = new Set(targetNodes)
-                                    if (currentSet.has(node.id)) {
-                                      currentSet.delete(node.id)
-                                    } else {
-                                      currentSet.add(node.id)
-                                    }
-                                    onTargetNodesChange?.(currentSet)
-                                  } else {
-                                    // 查看模式
-                                    if (onNodeClick) {
-                                      onNodeClick({
-                                        id: node.id,
-                                        label: node.label,
-                                        type: node.type,
-                                        subType: node.subType,
-                                        connections: nodeConnections,
-                                      })
-                                    }
-                                  }
-                                }}
-                                onDoubleClick={(e) => {
-                                  e.stopPropagation()
-                                  if (connectionMode === 'view' && onNodeDoubleClick && !node.isSwitch) {
-                                    onNodeDoubleClick(node.id, node.type)
-                                  }
-                                }}
-                                onMouseEnter={(e) => {
-                                  setHoveredNodeId(node.id)
-                                  if (connectionMode !== 'view') return
-                                  setTooltip({
-                                    x: e.clientX - (svgRef.current?.getBoundingClientRect().left || 0),
-                                    y: e.clientY - (svgRef.current?.getBoundingClientRect().top || 0) + 15,
-                                    content: `${node.label} (${node.type}) - ${nodeConnections.length} 连接`,
+                            return renderNode(nodeWithPos, {
+                              keyPrefix: 'sl-node',
+                              scale: slNodeScale,
+                              isSelected: isNodeSelected,
+                              onClick: () => {
+                                if (connectionMode === 'view' && onNodeClick) {
+                                  onNodeClick({
+                                    id: node.id,
+                                    label: node.label,
+                                    type: node.type,
+                                    subType: node.subType,
+                                    connections: nodeConnections,
                                   })
-                                }}
-                                onMouseLeave={() => {
-                                  setHoveredNodeId(null)
-                                  if (connectionMode !== 'view') return
-                                  setTooltip(null)
-                                }}
-                              >
-                                {/* 遮挡层：确保节点在边上面 */}
-                                <rect
-                                  x={bgSize.x}
-                                  y={bgSize.y}
-                                  width={bgSize.w}
-                                  height={bgSize.h}
-                                  fill={node.color || '#6366f1'}
-                                  rx={node.type === 'board' || node.type === 'npu' || node.type === 'cpu' ? 2 : node.type === 'rack' || node.type === 'pod' ? 3 : 6}
-                                />
-                                {/* 节点形状 */}
-                                {renderNodeShape(node)}
-                                <text
-                                  y={4}
-                                  textAnchor="middle"
-                                  fontSize={14}
-                                  fill="#fff"
-                                  fontWeight={600}
-                                  style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)', pointerEvents: 'none' }}
-                                >
-                                  {node.label.length > 6 ? node.label.match(/\d+/)?.[0] || node.label.slice(-2) : node.label}
-                                </text>
-                              </g>
-                            )
+                                }
+                              }
+                            })
                           })}
                         </svg>
                       )
@@ -1785,28 +1984,19 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                           )
                         })}
 
-                        {/* 该层的节点 */}
-                        {layerNodes.map(node => {
-                          const multiLevelScale = 0.5
-                          return (
-                            <g
-                              key={`layer-node-${node.id}`}
-                              transform={`translate(${node.x}, ${node.y}) scale(${multiLevelScale})`}
-                              style={{ cursor: 'pointer', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' }}
-                            >
-                              {renderNodeShape(node)}
-                              <text
-                                y={4}
-                                textAnchor="middle"
-                                fontSize={14}
-                                fill="#fff"
-                                fontWeight={600}
-                              >
-                                {node.label.length > 6 ? node.label.match(/\d+/)?.[0] || node.label.slice(-2) : node.label}
-                              </text>
-                            </g>
-                          )
-                        })}
+                        {/* 该层的节点 - 使用统一的renderNode */}
+                        {layerNodes.map(node => renderNode(node, {
+                          keyPrefix: 'layer-node',
+                          scale: 0.5,
+                          isSelected: selectedNodeId === node.id,
+                          onClick: () => onNodeClick?.({
+                            id: node.id,
+                            label: node.label,
+                            type: node.type,
+                            subType: node.subType,
+                            connections: [],
+                          })
+                        }))}
                       </>
                     )}
                   </g>
@@ -1814,8 +2004,97 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
               )
             })
 
+            // 获取上层的Switch节点（已通过isometricStackedLayout布局）
+            const upperSwitchNodes = displayNodes.filter(n => n.isSwitch && n.inSwitchPanel && !n.parentId)
+            const upperSwitchPanelWidth = upperSwitchNodes.length > 0
+              ? Math.max(...upperSwitchNodes.map(n => n.x)) + 50
+              : 0
+
             return (
               <>
+                {/* 上层Switch面板（多层级模式） */}
+                {upperSwitchNodes.length > 0 && (
+                  <g className="multi-level-switch-panel">
+                    {/* Switch面板背景 */}
+                    <rect
+                      x={0}
+                      y={0}
+                      width={upperSwitchPanelWidth}
+                      height={600}
+                      fill="#f8f9fa"
+                      stroke="#e9ecef"
+                      strokeWidth={1}
+                    />
+                    <text
+                      x={upperSwitchPanelWidth / 2}
+                      y={20}
+                      textAnchor="middle"
+                      fontSize={12}
+                      fill="#666"
+                      fontWeight={600}
+                    >
+                      Switch
+                    </text>
+                    {/* Switch之间的连线（树形结构 - 阶梯式，与单层级一致） */}
+                    {(() => {
+                      // 基于实际edges过滤Switch之间的连线
+                      const switchIds = new Set(upperSwitchNodes.map(n => n.id))
+                      const switchInternalEdges = edges.filter(e =>
+                        switchIds.has(e.source) && switchIds.has(e.target)
+                      )
+                      return switchInternalEdges.map((edge, idx) => {
+                        const sourceNode = upperSwitchNodes.find(n => n.id === edge.source)
+                        const targetNode = upperSwitchNodes.find(n => n.id === edge.target)
+                        if (!sourceNode || !targetNode) return null
+
+                        // 确保上层（spine）在上，下层（leaf）在下
+                        const upperNode = sourceNode.y < targetNode.y ? sourceNode : targetNode
+                        const lowerNode = sourceNode.y < targetNode.y ? targetNode : sourceNode
+
+                        // 阶梯式连线
+                        const midY = (upperNode.y + lowerNode.y) / 2
+                        const pathD = `M ${upperNode.x} ${upperNode.y + 12}
+                                       L ${upperNode.x} ${midY}
+                                       L ${lowerNode.x} ${midY}
+                                       L ${lowerNode.x} ${lowerNode.y - 12}`
+
+                        return (
+                          <path
+                            key={`ml-sw-edge-${idx}`}
+                            d={pathD}
+                            fill="none"
+                            stroke="#1890ff"
+                            strokeWidth={2}
+                            strokeOpacity={0.6}
+                          />
+                        )
+                      })
+                    })()}
+                    {/* Switch节点 - 与单层级样式一致 */}
+                    {upperSwitchNodes.map(swNode => renderNode(swNode, {
+                      keyPrefix: 'ml-sw',
+                      isSelected: selectedNodeId === swNode.id,
+                      onClick: () => {
+                        if (connectionMode === 'view' && onNodeClick) {
+                          const swConnections = edges
+                            .filter(edge => edge.source === swNode.id || edge.target === swNode.id)
+                            .map(edge => {
+                              const otherId = edge.source === swNode.id ? edge.target : edge.source
+                              const otherNode = displayNodes.find(n => n.id === otherId)
+                              return { id: otherId, label: otherNode?.label || otherId, bandwidth: edge.bandwidth, latency: edge.latency }
+                            })
+                          onNodeClick({
+                            id: swNode.id,
+                            label: swNode.label,
+                            type: swNode.type,
+                            subType: swNode.subType,
+                            connections: swConnections,
+                          })
+                        }
+                      }
+                    }))}
+                  </g>
+                )}
                 {containersRendered}
                 {/* 跨容器手动连接在最上层 */}
                 {renderManualConnectionsOverlay()}
@@ -2634,121 +2913,8 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
                     rx={8}
                   />
                 )}
-                {/* 根据节点类型渲染不同形状 */}
-                {isSwitch ? (
-                  /* Switch: 网络交换机形状 - 扁平矩形带端口和指示灯 */
-                  <g>
-                    {/* 主体外壳 */}
-                    <rect x={-36} y={-14} width={72} height={28} rx={3} fill={node.color} stroke="#fff" strokeWidth={2} />
-                    {/* 前面板凹槽 */}
-                    <rect x={-32} y={-10} width={64} height={16} rx={2} fill="rgba(0,0,0,0.15)" />
-                    {/* 端口组 - 左侧 */}
-                    <rect x={-28} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
-                    <rect x={-20} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
-                    <rect x={-12} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
-                    <rect x={-4} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
-                    {/* 端口组 - 右侧 */}
-                    <rect x={6} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
-                    <rect x={14} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
-                    <rect x={22} y={-6} width={6} height={8} rx={1} fill="rgba(255,255,255,0.5)" />
-                    {/* 状态指示灯 */}
-                    <circle cx={-28} cy={8} r={2} fill="#4ade80" />
-                    <circle cx={-22} cy={8} r={2} fill="#4ade80" />
-                    <circle cx={-16} cy={8} r={2} fill="#4ade80" />
-                    <circle cx={-10} cy={8} r={2} fill="#fbbf24" />
-                    {/* 品牌标识区 */}
-                    <rect x={10} y={4} width={18} height={6} rx={1} fill="rgba(255,255,255,0.2)" />
-                  </g>
-                ) : node.type === 'pod' ? (
-                  /* Pod: 数据中心/机房形状 - 带屋顶的建筑 */
-                  <g>
-                    {/* 主体建筑 */}
-                    <rect x={-28} y={-12} width={56} height={32} rx={3} fill={node.color} stroke="#fff" strokeWidth={2} />
-                    {/* 屋顶 */}
-                    <polygon points="-32,-12 0,-24 32,-12" fill={node.color} stroke="#fff" strokeWidth={2} />
-                    {/* 窗户装饰 */}
-                    <rect x={-20} y={-4} width={8} height={8} rx={1} fill="rgba(255,255,255,0.3)" />
-                    <rect x={-6} y={-4} width={8} height={8} rx={1} fill="rgba(255,255,255,0.3)" />
-                    <rect x={8} y={-4} width={8} height={8} rx={1} fill="rgba(255,255,255,0.3)" />
-                    {/* 门 */}
-                    <rect x={-5} y={8} width={10} height={12} rx={1} fill="rgba(255,255,255,0.4)" />
-                  </g>
-                ) : node.type === 'rack' ? (
-                  /* Rack: 机柜形状 - 竖长矩形带分隔线 */
-                  <g>
-                    <rect x={-18} y={-28} width={36} height={56} rx={3} fill={node.color} stroke="#fff" strokeWidth={2} />
-                    {/* 机柜层分隔 */}
-                    <line x1={-14} y1={-16} x2={14} y2={-16} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
-                    <line x1={-14} y1={-4} x2={14} y2={-4} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
-                    <line x1={-14} y1={8} x2={14} y2={8} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
-                    <line x1={-14} y1={20} x2={14} y2={20} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
-                    {/* 指示灯 */}
-                    <circle cx={10} cy={-22} r={2} fill="#4ade80" />
-                    <circle cx={10} cy={-10} r={2} fill="#4ade80" />
-                    <circle cx={10} cy={2} r={2} fill="#4ade80" />
-                    <circle cx={10} cy={14} r={2} fill="#fbbf24" />
-                  </g>
-                ) : node.type === 'board' ? (
-                  /* Board: 电路板形状 - 横向矩形带电路纹理 */
-                  <g>
-                    <rect x={-32} y={-18} width={64} height={36} rx={2} fill={node.color} stroke="#fff" strokeWidth={2} />
-                    {/* 电路纹理 */}
-                    <path d="M-24,-10 L-24,-2 L-16,-2 L-16,6 L-8,6" stroke="rgba(255,255,255,0.25)" strokeWidth={1.5} fill="none" />
-                    <path d="M8,-10 L8,0 L16,0 L16,8 L24,8" stroke="rgba(255,255,255,0.25)" strokeWidth={1.5} fill="none" />
-                    {/* 芯片槽位 */}
-                    <rect x={-8} y={-8} width={16} height={16} rx={1} fill="rgba(0,0,0,0.2)" stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
-                    {/* 连接点 */}
-                    <circle cx={-26} cy={0} r={3} fill="rgba(255,255,255,0.4)" />
-                    <circle cx={26} cy={0} r={3} fill="rgba(255,255,255,0.4)" />
-                  </g>
-                ) : (node.type === 'npu' || node.type === 'cpu') ? (
-                  /* Chip: 芯片形状 - 方形带引脚 */
-                  <g>
-                    {/* 芯片主体 */}
-                    <rect x={-20} y={-20} width={40} height={40} rx={2} fill={node.color} stroke="#fff" strokeWidth={2} />
-                    {/* 引脚 - 上 */}
-                    <rect x={-12} y={-26} width={4} height={6} fill={node.color} />
-                    <rect x={-2} y={-26} width={4} height={6} fill={node.color} />
-                    <rect x={8} y={-26} width={4} height={6} fill={node.color} />
-                    {/* 引脚 - 下 */}
-                    <rect x={-12} y={20} width={4} height={6} fill={node.color} />
-                    <rect x={-2} y={20} width={4} height={6} fill={node.color} />
-                    <rect x={8} y={20} width={4} height={6} fill={node.color} />
-                    {/* 引脚 - 左 */}
-                    <rect x={-26} y={-12} width={6} height={4} fill={node.color} />
-                    <rect x={-26} y={-2} width={6} height={4} fill={node.color} />
-                    <rect x={-26} y={8} width={6} height={4} fill={node.color} />
-                    {/* 引脚 - 右 */}
-                    <rect x={20} y={-12} width={6} height={4} fill={node.color} />
-                    <rect x={20} y={-2} width={6} height={4} fill={node.color} />
-                    <rect x={20} y={8} width={6} height={4} fill={node.color} />
-                    {/* 芯片内核标识 */}
-                    <rect x={-10} y={-10} width={20} height={20} rx={1} fill="rgba(255,255,255,0.15)" />
-                  </g>
-                ) : (
-                  /* 默认: 圆角矩形 */
-                  <rect
-                    x={-25}
-                    y={-18}
-                    width={50}
-                    height={36}
-                    rx={6}
-                    fill={node.color}
-                    stroke="#fff"
-                    strokeWidth={2}
-                  />
-                )}
-                {/* 节点标签 */}
-                <text
-                  y={node.type === 'rack' ? 0 : (node.type === 'pod' ? 6 : 4)}
-                  fontSize={isSwitch ? 8 : (node.type === 'pod' || node.type === 'rack' ? 9 : 10)}
-                  fill="#fff"
-                  textAnchor="middle"
-                  fontWeight="bold"
-                  style={{ pointerEvents: 'none' }}
-                >
-                  {node.label.length > 8 ? node.label.substring(0, 8) + '..' : node.label}
-                </text>
+                {/* 使用统一的节点形状渲染函数 */}
+                {renderNodeShape(node, isNodeSelected)}
               </g>
             )
           })}

@@ -579,7 +579,7 @@ const App: React.FC = () => {
             justifyContent: 'center',
             boxShadow: '0 2px 6px rgba(94, 106, 210, 0.3)',
           }}>
-            <span style={{ color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>T6</span>
+            <span style={{ color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>T6+</span>
           </div>
           <Title level={4} style={{ color: '#1A1A1A', margin: 0, fontSize: 16, fontWeight: 600 }}>
             Tier6+ 互联建模
