@@ -21,33 +21,38 @@ db_manager = ResultManager()
 
 # ==================== Pydantic模型 ====================
 
+
 class WaveformEvent(BaseModel):
     """波形事件（一个阶段）"""
-    stage: str          # 阶段名: "l2h", "iq_out", "h_ring", "rb", "v_ring", "eq", "eject"
-    start_ns: float     # 开始时间(ns)
-    end_ns: float       # 结束时间(ns)
+
+    stage: str  # 阶段名: "l2h", "iq_out", "h_ring", "rb", "v_ring", "eq", "eject"
+    start_ns: float  # 开始时间(ns)
+    end_ns: float  # 结束时间(ns)
 
 
 class WaveformSignal(BaseModel):
     """波形信号（一个flit的传输轨迹）"""
-    name: str           # 信号名: "Pkt_123.REQ", "Pkt_123.D0", "Pkt_123.RSP"
-    packet_id: int      # 请求ID
-    flit_type: str      # "req" | "data" | "rsp"
+
+    name: str  # 信号名: "Pkt_123.REQ", "Pkt_123.D0", "Pkt_123.RSP"
+    packet_id: int  # 请求ID
+    flit_type: str  # "req" | "data" | "rsp"
     flit_id: Optional[int] = None  # flit序号（data flit用）
-    events: List[WaveformEvent]    # 各阶段事件
+    events: List[WaveformEvent]  # 各阶段事件
 
 
 class WaveformResponse(BaseModel):
     """波形数据响应"""
+
     time_range: Dict[str, float]  # {start_ns, end_ns}
     signals: List[WaveformSignal]
-    stages: List[str]   # 所有阶段名称列表
+    stages: List[str]  # 所有阶段名称列表
 
 
 class PacketInfo(BaseModel):
     """请求信息"""
+
     packet_id: int
-    req_type: str       # "read" | "write"
+    req_type: str  # "read" | "write"
     source_node: int
     source_type: str
     dest_node: int
@@ -62,6 +67,7 @@ class PacketInfo(BaseModel):
 
 class PacketListResponse(BaseModel):
     """请求列表响应"""
+
     packets: List[PacketInfo]
     total: int
     page: int
@@ -70,6 +76,7 @@ class PacketListResponse(BaseModel):
 
 class TopologyNode(BaseModel):
     """拓扑节点"""
+
     id: int
     row: int
     col: int
@@ -78,6 +85,7 @@ class TopologyNode(BaseModel):
 
 class TopologyEdge(BaseModel):
     """拓扑边"""
+
     source: int
     target: int
     direction: str  # 'horizontal' | 'vertical'
@@ -86,6 +94,7 @@ class TopologyEdge(BaseModel):
 
 class TopologyMetadata(BaseModel):
     """拓扑元数据"""
+
     row_links: int
     col_links: int
     total_links: int
@@ -93,6 +102,7 @@ class TopologyMetadata(BaseModel):
 
 class TopologyData(BaseModel):
     """拓扑数据"""
+
     type: str
     rows: int
     cols: int
@@ -103,6 +113,7 @@ class TopologyData(BaseModel):
 
 
 # ==================== 辅助函数 ====================
+
 
 def _parse_topology_type(topo_type: str) -> Tuple[int, int]:
     """解析拓扑类型字符串
@@ -119,7 +130,7 @@ def _parse_topology_type(topo_type: str) -> Tuple[int, int]:
     if not topo_type:
         raise ValueError("拓扑类型为空")
 
-    parts = topo_type.lower().split('x')
+    parts = topo_type.lower().split("x")
     if len(parts) != 2:
         raise ValueError(f"拓扑类型格式错误: {topo_type}，应为 AxB 格式")
 
@@ -152,12 +163,7 @@ def _generate_topology_data(topo_type: str) -> TopologyData:
     for i in range(total_nodes):
         row = i // cols
         col = i % cols
-        nodes.append(TopologyNode(
-            id=i,
-            row=row,
-            col=col,
-            label=str(i)
-        ))
+        nodes.append(TopologyNode(id=i, row=row, col=col, label=str(i)))
 
     # 生成边
     edges = []
@@ -170,40 +176,18 @@ def _generate_topology_data(topo_type: str) -> TopologyData:
 
         # 横向边（向右）
         if col < cols - 1:
-            edges.append(TopologyEdge(
-                source=i,
-                target=i + 1,
-                direction="horizontal",
-                type="row_link"
-            ))
+            edges.append(TopologyEdge(source=i, target=i + 1, direction="horizontal", type="row_link"))
             row_links += 1
 
         # 纵向边（向下）
         if row < rows - 1:
-            edges.append(TopologyEdge(
-                source=i,
-                target=i + cols,
-                direction="vertical",
-                type="col_link"
-            ))
+            edges.append(TopologyEdge(source=i, target=i + cols, direction="vertical", type="col_link"))
             col_links += 1
 
     # 计算元数据
-    metadata = TopologyMetadata(
-        row_links=row_links,
-        col_links=col_links,
-        total_links=row_links + col_links
-    )
+    metadata = TopologyMetadata(row_links=row_links, col_links=col_links, total_links=row_links + col_links)
 
-    return TopologyData(
-        type=topo_type,
-        rows=rows,
-        cols=cols,
-        total_nodes=total_nodes,
-        nodes=nodes,
-        edges=edges,
-        metadata=metadata
-    )
+    return TopologyData(type=topo_type, rows=rows, cols=cols, total_nodes=total_nodes, nodes=nodes, edges=edges, metadata=metadata)
 
 
 def _load_parquet_from_db(result_id: int, result_type: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -253,24 +237,27 @@ def _load_parquet_from_db(result_id: int, result_type: str) -> Tuple[pd.DataFram
                     flit_source_type = flit_info.get("source_type", req_source_type)
                     flit_dest_type = flit_info.get("dest_type", req_dest_type)
 
-                    flits_rows.append({
-                        "packet_id": packet_id,
-                        "flit_id": flit_info.get("flit_id", 0),
-                        "flit_type": flit_info.get("flit_type", ""),
-                        "source_node": flit_source,
-                        "dest_node": flit_dest,
-                        "source_type": flit_source_type,
-                        "dest_type": flit_dest_type,
-                        "position_timestamps": json.dumps(flit_info.get("position_timestamps", {})),
-                        "rsp_type": flit_info.get("rsp_type", ""),
-                        "req_attr": flit_info.get("req_attr", ""),
-                    })
+                    flits_rows.append(
+                        {
+                            "packet_id": packet_id,
+                            "flit_id": flit_info.get("flit_id", 0),
+                            "flit_type": flit_info.get("flit_type", ""),
+                            "source_node": flit_source,
+                            "dest_node": flit_dest,
+                            "source_type": flit_source_type,
+                            "dest_type": flit_dest_type,
+                            "position_timestamps": json.dumps(flit_info.get("position_timestamps", {})),
+                            "rsp_type": flit_info.get("rsp_type", ""),
+                            "req_attr": flit_info.get("req_attr", ""),
+                        }
+                    )
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        flits_df = pd.DataFrame(flits_rows) if flits_rows else pd.DataFrame(
-            columns=["packet_id", "flit_id", "flit_type", "source_node", "dest_node",
-                     "source_type", "dest_type", "position_timestamps", "rsp_type", "req_attr"]
+        flits_df = (
+            pd.DataFrame(flits_rows)
+            if flits_rows
+            else pd.DataFrame(columns=["packet_id", "flit_id", "flit_type", "source_node", "dest_node", "source_type", "dest_type", "position_timestamps", "rsp_type", "req_attr"])
         )
 
         return requests_df, flits_df
@@ -307,7 +294,7 @@ def _build_waveform_signal(packet_id: int, flit_row, flit_type: str, flit_id: Op
     req_attr = flit_row.get("req_attr", "") if "req_attr" in flit_row else ""
 
     # 调试日志
-    logger.info(f"[DEBUG] packet_id={packet_id}, flit_type={flit_type}, rsp_type='{rsp_type}', req_attr='{req_attr}'")
+    # logger.info(f"[DEBUG] packet_id={packet_id}, flit_type={flit_type}, rsp_type='{rsp_type}', req_attr='{req_attr}'")
 
     # 信号名
     if flit_type == "req":
@@ -334,13 +321,7 @@ def _build_waveform_signal(packet_id: int, flit_row, flit_type: str, flit_id: Op
 
     if not sorted_positions:
         # 没有时间戳数据
-        return WaveformSignal(
-            name=name,
-            packet_id=packet_id,
-            flit_type=flit_type,
-            flit_id=flit_id,
-            events=[]
-        )
+        return WaveformSignal(name=name, packet_id=packet_id, flit_type=flit_type, flit_id=flit_id, events=[])
 
     # 位置到阶段的映射
     def get_stage(pos_name: str) -> str:
@@ -381,35 +362,22 @@ def _build_waveform_signal(packet_id: int, flit_row, flit_type: str, flit_id: Op
         elif stage != current_stage:
             # 阶段切换，保存上一个阶段
             if stage_start is not None:
-                events.append(WaveformEvent(
-                    stage=current_stage,
-                    start_ns=float(stage_start),
-                    end_ns=float(pos_time)
-                ))
+                events.append(WaveformEvent(stage=current_stage, start_ns=float(stage_start), end_ns=float(pos_time)))
             current_stage = stage
             stage_start = pos_time
 
     # 添加最后一个阶段（使用最后一个时间戳作为结束）
     if current_stage is not None and stage_start is not None and sorted_positions:
         last_time = sorted_positions[-1][1]
-        events.append(WaveformEvent(
-            stage=current_stage,
-            start_ns=float(stage_start),
-            end_ns=float(last_time)
-        ))
+        events.append(WaveformEvent(stage=current_stage, start_ns=float(stage_start), end_ns=float(last_time)))
 
-    return WaveformSignal(
-        name=name,
-        packet_id=packet_id,
-        flit_type=flit_type,
-        flit_id=flit_id,
-        events=events
-    )
+    return WaveformSignal(name=name, packet_id=packet_id, flit_type=flit_type, flit_id=flit_id, events=events)
 
 
 def _get_flit_start_time(flit_row) -> float:
     """从 position_timestamps 中提取 flit 的开始时间（优先使用L2H时间戳）"""
     import json
+
     pos_timestamps = {}
     if "position_timestamps" in flit_row and flit_row["position_timestamps"]:
         try:
@@ -419,14 +387,15 @@ def _get_flit_start_time(flit_row) -> float:
 
     if pos_timestamps:
         # 优先使用L2H时间戳（进入网络的时间）
-        if 'L2H' in pos_timestamps:
-            return pos_timestamps['L2H']
+        if "L2H" in pos_timestamps:
+            return pos_timestamps["L2H"]
         # 否则使用最小时间戳
         return min(pos_timestamps.values())
-    return float('inf')
+    return float("inf")
 
 
 # ==================== API端点 ====================
+
 
 @router.get("/experiments/{experiment_id}/results/{result_id}/waveform")
 async def get_waveform_data(
@@ -486,9 +455,9 @@ async def get_waveform_data(
     filtered_flits = flits_df[flits_df["packet_id"].isin(final_packet_ids)].copy()
 
     # 计算每个 flit 的开始时间并排序
-    filtered_flits['_start_time'] = filtered_flits.apply(_get_flit_start_time, axis=1)
-    filtered_flits = filtered_flits.sort_values(['packet_id', '_start_time'])
-    filtered_flits = filtered_flits.drop(columns=['_start_time'])
+    filtered_flits["_start_time"] = filtered_flits.apply(_get_flit_start_time, axis=1)
+    filtered_flits = filtered_flits.sort_values(["packet_id", "_start_time"])
+    filtered_flits = filtered_flits.drop(columns=["_start_time"])
 
     # 构建波形信号
     signals = []
@@ -509,21 +478,14 @@ async def get_waveform_data(
             all_times.append(event.end_ns)
 
     if all_times:
-        time_range = {
-            "start_ns": min(all_times),
-            "end_ns": max(all_times)
-        }
+        time_range = {"start_ns": min(all_times), "end_ns": max(all_times)}
     else:
         time_range = {"start_ns": 0, "end_ns": 0}
 
     # 位置列表（按flit传输顺序）
     stages = ["IP_TX", "L2H", "IQ", "Link", "RB", "EQ", "H2L", "IP_RX"]
 
-    return WaveformResponse(
-        time_range=time_range,
-        signals=signals,
-        stages=stages
-    )
+    return WaveformResponse(time_range=time_range, signals=signals, stages=stages)
 
 
 @router.get("/experiments/{experiment_id}/results/{result_id}/packets")
@@ -593,27 +555,24 @@ async def list_packets(
         if trans_field in row and row[trans_field] is not None and row[trans_field] >= 0:
             transaction_latency = float(row[trans_field])
 
-        packets.append(PacketInfo(
-            packet_id=int(row["packet_id"]),
-            req_type=row["req_type"],
-            source_node=int(row["source_node"]),
-            source_type=row["source_type"],
-            dest_node=int(row["dest_node"]),
-            dest_type=row["dest_type"],
-            start_time_ns=start_time,
-            end_time_ns=end_time,
-            latency_ns=end_time - start_time,
-            cmd_latency_ns=cmd_latency,
-            data_latency_ns=data_latency,
-            transaction_latency_ns=transaction_latency,
-        ))
+        packets.append(
+            PacketInfo(
+                packet_id=int(row["packet_id"]),
+                req_type=row["req_type"],
+                source_node=int(row["source_node"]),
+                source_type=row["source_type"],
+                dest_node=int(row["dest_node"]),
+                dest_type=row["dest_type"],
+                start_time_ns=start_time,
+                end_time_ns=end_time,
+                latency_ns=end_time - start_time,
+                cmd_latency_ns=cmd_latency,
+                data_latency_ns=data_latency,
+                transaction_latency_ns=transaction_latency,
+            )
+        )
 
-    return PacketListResponse(
-        packets=packets,
-        total=total,
-        page=page,
-        page_size=page_size
-    )
+    return PacketListResponse(packets=packets, total=total, page=page, page_size=page_size)
 
 
 @router.get("/experiments/{experiment_id}/results/{result_id}/waveform/check")
@@ -645,11 +604,8 @@ async def check_waveform_data(
                 "total_flits": len(flits_df),
                 "read_packets": len(requests_df[requests_df["req_type"] == "read"]),
                 "write_packets": len(requests_df[requests_df["req_type"] == "write"]),
-                "time_range_ns": {
-                    "start": float(requests_df["start_time_ns"].min()),
-                    "end": float(requests_df["end_time_ns"].max())
-                }
-            }
+                "time_range_ns": {"start": float(requests_df["start_time_ns"].min()), "end": float(requests_df["end_time_ns"].max())},
+            },
         }
     except HTTPException as e:
         return {

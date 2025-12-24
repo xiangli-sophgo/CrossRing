@@ -8,11 +8,12 @@ import {
   HierarchyLevel,
   LayoutType,
   MultiLevelViewOptions,
-  TrafficAnalysisResult,
 } from '../../types'
+import { TopologyTrafficResult } from '../../utils/llmDeployment/types'
 
 // 重新导出供子组件使用的类型
-export type { HierarchyLevel, LayoutType, MultiLevelViewOptions }
+export type { HierarchyLevel, LayoutType, MultiLevelViewOptions, ManualConnection }
+export type { TopologyTrafficResult }
 
 // 根据板卡U高度区分颜色
 export const BOARD_U_COLORS: Record<number, string> = {
@@ -109,8 +110,8 @@ export interface TopologyGraphProps {
   // 多层级视图相关
   multiLevelOptions?: MultiLevelViewOptions
   onMultiLevelOptionsChange?: (options: MultiLevelViewOptions) => void
-  // 流量分析热力图
-  trafficAnalysisResult?: TrafficAnalysisResult | null
+  // 流量热力图
+  trafficResult?: TopologyTrafficResult | null
 }
 
 export interface Node {

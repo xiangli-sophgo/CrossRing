@@ -25,16 +25,16 @@ export default defineConfig({
     proxy: {
       // WebSocket 代理必须放在 /api 之前，否则会被 /api 匹配
       '/api/simulation/ws': {
-        target: 'http://localhost:8002',
+        target: 'http://localhost:8000',
         ws: true,
         changeOrigin: true,
       },
       '/api': {
-        target: 'http://localhost:8002',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'http://localhost:8002',
+        target: 'http://localhost:8000',
         ws: true,
         changeOrigin: true,
       },

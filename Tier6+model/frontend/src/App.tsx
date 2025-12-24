@@ -3,7 +3,8 @@ import { Layout, Typography, Spin, message, Segmented, Card, Descriptions, Tag, 
 import { Scene3D } from './components/Scene3D'
 import { ConfigPanel } from './components/ConfigPanel'
 import { TopologyGraph, NodeDetail, LinkDetail } from './components/TopologyGraph'
-import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType, MultiLevelViewOptions, TrafficConfigItem, TrafficAnalysisResult } from './types'
+import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType, MultiLevelViewOptions } from './types'
+import { TopologyTrafficResult } from './utils/llmDeployment/types'
 import { getTopology, generateTopology, getLevelConnectionDefaults } from './api/topology'
 import { useViewNavigation } from './hooks/useViewNavigation'
 
@@ -48,6 +49,9 @@ const App: React.FC = () => {
 
   // 聚焦的层级配置（点击容器时切换）
   const [focusedLevel, setFocusedLevel] = useState<'datacenter' | 'pod' | 'rack' | 'board' | null>(null)
+
+  // 流量热力图结果
+  const [trafficResult, setTrafficResult] = useState<TopologyTrafficResult | null>(null)
 
   // 各层级连接的默认参数（从后端加载，初始为空）
   const [_levelConnectionDefaults, _setLevelConnectionDefaults] = useState<{
@@ -101,10 +105,6 @@ const App: React.FC = () => {
     levelPair: 'pod_rack',
     expandedContainers: new Set(),
   })
-
-  // LLM流量分析状态 (多配置)
-  const [trafficConfigs, setTrafficConfigs] = useState<TrafficConfigItem[]>([])
-  const [trafficAnalysisResult, setTrafficAnalysisResult] = useState<TrafficAnalysisResult | null>(null)
 
   // 加载拓扑数据（优先使用缓存配置生成）
   const loadTopology = useCallback(async () => {
@@ -452,22 +452,6 @@ const App: React.FC = () => {
     return 'datacenter'
   }
 
-  // 跳转到芯片视图（用于流量分析）
-  const handleNavigateToChips = useCallback(() => {
-    if (!topology || topology.pods.length === 0) return
-    const firstPod = topology.pods[0]
-    if (firstPod.racks.length === 0) return
-    const firstRack = firstPod.racks[0]
-    if (firstRack.boards.length === 0) return
-    const firstBoard = firstRack.boards[0]
-    // 直接导航到 Board 视图（显示 Chip）
-    navigation.navigateToBoard(firstPod.id, firstRack.id, firstBoard.id)
-    // 切换到拓扑视图
-    setViewMode('topology')
-    // 关闭多层级视图以便看到热力图
-    setMultiLevelOptions(prev => ({ ...prev, enabled: false }))
-  }, [topology, navigation])
-
   // 处理3D视图节点选择，转换为NodeDetail格式
   const handleScene3DNodeSelect = useCallback((
     nodeType: 'pod' | 'rack' | 'board' | 'chip' | 'switch',
@@ -632,11 +616,7 @@ const App: React.FC = () => {
             onLayoutTypeChange={setLayoutType}
             viewMode={viewMode}
             focusedLevel={focusedLevel}
-            trafficConfigs={trafficConfigs}
-            onTrafficConfigsChange={setTrafficConfigs}
-            trafficAnalysisResult={trafficAnalysisResult}
-            onTrafficAnalysisResultChange={setTrafficAnalysisResult}
-            onNavigateToChips={handleNavigateToChips}
+            onTrafficResultChange={setTrafficResult}
           />
 
           {/* 节点详情卡片 */}
@@ -779,17 +759,40 @@ const App: React.FC = () => {
               currentRack={navigation.currentRack}
               currentBoard={navigation.currentBoard}
               onNodeDoubleClick={(nodeId, nodeType) => {
-                // 双击进入时切换到单层级视图，保留当前布局设置
+                // 双击进入时保持多层级视图，并根据新层级更新 levelPair
                 if (multiLevelOptions.enabled) {
-                  setMultiLevelOptions(prev => ({ ...prev, enabled: false }))
-                  // 不重置 layoutType，保留用户选择的布局
+                  // 根据进入的层级确定新的 levelPair
+                  let newLevelPair: 'datacenter_pod' | 'pod_rack' | 'rack_board' | 'board_chip' = multiLevelOptions.levelPair || 'datacenter_pod'
+                  if (nodeType === 'pod') {
+                    newLevelPair = 'datacenter_pod'  // Pod 层级显示 Pod+Rack
+                  } else if (nodeType === 'rack') {
+                    newLevelPair = 'pod_rack'  // Rack 层级显示 Rack+Board
+                  } else if (nodeType === 'board') {
+                    newLevelPair = 'rack_board'  // Board 层级显示 Board+Chip
+                  }
+                  setMultiLevelOptions(prev => ({ ...prev, levelPair: newLevelPair }))
                 }
+                // 解析节点 ID 来获取完整路径（格式：pod_0/rack_0/board_0）
+                const pathParts = nodeId.split('/')
                 if (nodeType === 'pod') {
                   navigation.navigateToPod(nodeId)
-                } else if (nodeType === 'rack' && navigation.currentPod) {
-                  navigation.navigateToRack(navigation.currentPod.id, nodeId)
+                } else if (nodeType === 'rack') {
+                  // Rack ID 格式：pod_0/rack_0，需要提取 podId
+                  if (pathParts.length >= 2) {
+                    const podId = pathParts[0]
+                    navigation.navigateToRack(podId, nodeId)
+                  } else if (navigation.currentPod) {
+                    navigation.navigateToRack(navigation.currentPod.id, nodeId)
+                  }
                 } else if (nodeType === 'board') {
-                  navigation.navigateTo(nodeId)
+                  // Board ID 格式：pod_0/rack_0/board_0，需要提取 podId 和 rackId
+                  if (pathParts.length >= 3) {
+                    const podId = pathParts[0]
+                    const rackId = `${pathParts[0]}/${pathParts[1]}`
+                    navigation.navigateToBoard(podId, rackId, nodeId)
+                  } else {
+                    navigation.navigateTo(nodeId)
+                  }
                 }
               }}
               onNodeClick={(node) => {
@@ -814,16 +817,41 @@ const App: React.FC = () => {
               selectedNodeId={selectedNode?.id || null}
               selectedLinkId={selectedLink?.id || null}
               onNavigateBack={() => {
-                // 导航返回时切换到单层级视图
+                // 导航返回时保持多层级视图，并根据新层级更新 levelPair
                 if (multiLevelOptions.enabled) {
-                  setMultiLevelOptions(prev => ({ ...prev, enabled: false }))
+                  // 返回后的层级 = 当前路径长度 - 1
+                  // path.length: 0=datacenter, 1=pod, 2=rack, 3=board
+                  const newPathLength = navigation.viewState.path.length - 1
+                  let newLevelPair: 'datacenter_pod' | 'pod_rack' | 'rack_board' | 'board_chip' = 'datacenter_pod'
+                  if (newPathLength <= 0) {
+                    newLevelPair = 'datacenter_pod'
+                  } else if (newPathLength === 1) {
+                    newLevelPair = 'datacenter_pod'  // Pod 层级显示 Pod+Rack
+                  } else if (newPathLength === 2) {
+                    newLevelPair = 'pod_rack'  // Rack 层级显示 Rack+Board
+                  } else if (newPathLength >= 3) {
+                    newLevelPair = 'rack_board'  // Board 层级显示 Board+Chip
+                  }
+                  setMultiLevelOptions(prev => ({ ...prev, levelPair: newLevelPair }))
                 }
                 navigation.navigateBack()
               }}
               onBreadcrumbClick={(index) => {
-                // 面包屑导航时切换到单层级视图
+                // 面包屑导航时保持多层级视图，并根据新层级更新 levelPair
                 if (multiLevelOptions.enabled) {
-                  setMultiLevelOptions(prev => ({ ...prev, enabled: false }))
+                  // 根据目标层级确定新的 levelPair
+                  // index: 0=datacenter, 1=pod, 2=rack, 3=board
+                  let newLevelPair: 'datacenter_pod' | 'pod_rack' | 'rack_board' | 'board_chip' = 'datacenter_pod'
+                  if (index === 0) {
+                    newLevelPair = 'datacenter_pod'
+                  } else if (index === 1) {
+                    newLevelPair = 'datacenter_pod'  // Pod 层级显示 Pod+Rack
+                  } else if (index === 2) {
+                    newLevelPair = 'pod_rack'  // Rack 层级显示 Rack+Board
+                  } else if (index === 3) {
+                    newLevelPair = 'rack_board'  // Board 层级显示 Board+Chip
+                  }
+                  setMultiLevelOptions(prev => ({ ...prev, levelPair: newLevelPair }))
                 }
                 navigation.navigateToBreadcrumb(index)
               }}
@@ -845,7 +873,7 @@ const App: React.FC = () => {
               onLayoutTypeChange={setLayoutType}
               multiLevelOptions={multiLevelOptions}
               onMultiLevelOptionsChange={setMultiLevelOptions}
-              trafficAnalysisResult={trafficAnalysisResult}
+              trafficResult={trafficResult}
             />
           )}
         </Content>

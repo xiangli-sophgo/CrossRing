@@ -17,8 +17,10 @@ router = APIRouter()
 
 # ==================== Pydantic模型 ====================
 
+
 class FIFOEvent(BaseModel):
     """FIFO事件"""
+
     enter_ns: float
     leave_ns: float
     flit_id: str
@@ -26,6 +28,7 @@ class FIFOEvent(BaseModel):
 
 class FIFOSignal(BaseModel):
     """FIFO信号"""
+
     name: str  # "Node_5.IQ_TR"
     node_id: int
     fifo_type: str
@@ -34,6 +37,7 @@ class FIFOSignal(BaseModel):
 
 class FIFOWaveformResponse(BaseModel):
     """FIFO波形响应"""
+
     time_range: Dict[str, float]
     signals: List[FIFOSignal]
     available_fifos: List[str]
@@ -41,11 +45,8 @@ class FIFOWaveformResponse(BaseModel):
 
 # ==================== 辅助函数 ====================
 
-def extract_fifo_events_from_timestamps(
-    position_timestamps_json: str,
-    source_node: int,
-    dest_node: int
-) -> List[Tuple[str, int, float, float]]:
+
+def extract_fifo_events_from_timestamps(position_timestamps_json: str, source_node: int, dest_node: int) -> List[Tuple[str, int, float, float]]:
     """从 position_timestamps JSON 提取 FIFO 事件
 
     Args:
@@ -120,7 +121,8 @@ def extract_fifo_events_from_timestamps(
     # ===== RB 事件（从位置名称中提取节点 ID）=====
     # 新格式: RB_TR_N5 表示节点 5 的 RB_TR
     import re
-    rb_pattern = re.compile(r'^(RB_(?:TR|TL|TU|TD|EQ))_N(\d+)$')
+
+    rb_pattern = re.compile(r"^(RB_(?:TR|TL|TU|TD|EQ))_N(\d+)$")
     for pos_name, enter_ns in timestamps.items():
         match = rb_pattern.match(pos_name)
         if match:
@@ -192,25 +194,26 @@ def _parse_ip_channel_fifo(fifo_type: str) -> Tuple[str, str, str]:
         如 ("IQ_CH", "gdma_0", "G0") 或 ("IP_TX", "gdma_0", "G0") 或 ("", "", "") 如果不是 IP 通道
     """
     import re
+
     # 匹配 IQ_CH_X0, EQ_CH_X0, IP_TX_X0, IP_RX_X0 格式
-    match = re.match(r'^(IQ_CH|EQ_CH|IP_TX|IP_RX)_([A-Z])(\d+)$', fifo_type)
+    match = re.match(r"^(IQ_CH|EQ_CH|IP_TX|IP_RX)_([A-Z])(\d+)$", fifo_type)
     if not match:
         return ("", "", "")
 
     base_type = match.group(1)  # IQ_CH, EQ_CH, IP_TX 或 IP_RX
     type_char = match.group(2)  # G, D, C 等
-    num = match.group(3)        # 0, 1 等
+    num = match.group(3)  # 0, 1 等
 
     # 映射类型字符到 IP 类型
     type_map = {
-        'G': 'gdma',
-        'D': 'ddr',
-        'C': 'cpu',
-        'P': 'pcie',
-        'S': 'sdma',
-        'N': 'npu',
-        'E': 'eth',
-        'L': 'l2m',
+        "G": "gdma",
+        "D": "ddr",
+        "C": "cpu",
+        "P": "pcie",
+        "S": "sdma",
+        "N": "npu",
+        "E": "eth",
+        "L": "l2m",
     }
     ip_prefix = type_map.get(type_char, type_char.lower())
     ip_type = f"{ip_prefix}_{num}"
@@ -227,7 +230,7 @@ def build_fifo_waveform_for_node(
     flit_types_filter: List[str] = None,
     expand_rsp_fifo_types: List[str] = None,
     expand_req_fifo_types: List[str] = None,
-    expand_data_fifo_types: List[str] = None
+    expand_data_fifo_types: List[str] = None,
 ) -> Dict[str, List[Dict]]:
     """为指定节点构建 FIFO 波形数据（基于 position_timestamps）
 
@@ -265,18 +268,10 @@ def build_fifo_waveform_for_node(
         merged = flits_df.copy()
         # 如果缺少 source_type/dest_type，从 requests_df 补充
         if "source_type" not in merged.columns or "dest_type" not in merged.columns:
-            merged = merged.merge(
-                requests_df[["packet_id", "source_type", "dest_type"]],
-                on="packet_id",
-                how="left"
-            )
+            merged = merged.merge(requests_df[["packet_id", "source_type", "dest_type"]], on="packet_id", how="left")
     else:
         # 旧格式：需要从 requests_df 获取 source/dest
-        merged = flits_df.merge(
-            requests_df[["packet_id", "source_node", "dest_node", "source_type", "dest_type"]],
-            on="packet_id",
-            how="left"
-        )
+        merged = flits_df.merge(requests_df[["packet_id", "source_node", "dest_node", "source_type", "dest_type"]], on="packet_id", how="left")
 
     # 确定要使用的 flit 类型列表
     if flit_types_filter:
@@ -295,8 +290,8 @@ def build_fifo_waveform_for_node(
         else:
             regular_fifos.append(fifo_type)
 
-    print(f"[DEBUG] build_fifo_waveform_for_node: node_id={node_id}, fifo_types={fifo_types}")
-    print(f"[DEBUG] regular_fifos={regular_fifos}, ip_channel_map={ip_channel_map}")
+    # print(f"[DEBUG] build_fifo_waveform_for_node: node_id={node_id}, fifo_types={fifo_types}")
+    # print(f"[DEBUG] regular_fifos={regular_fifos}, ip_channel_map={ip_channel_map}")
 
     # 初始化结果：按 fifo_type.flit_type 分组（rsp 按 rsp_type 动态创建）
     waveform_data = {}
@@ -336,15 +331,17 @@ def build_fifo_waveform_for_node(
         if key not in waveform_data:
             waveform_data[key] = []
 
-        waveform_data[key].append({
-            "enter_ns": enter_ns,
-            "leave_ns": leave_ns,
-            "flit_id": flit_id_str,
-            "flit_type": flit_type,
-            "rsp_type": rsp_type if flit_type == "rsp" else "",
-            "req_attr": req_attr if flit_type == "req" else "",
-            "data_id": data_id if flit_type == "data" else -1
-        })
+        waveform_data[key].append(
+            {
+                "enter_ns": enter_ns,
+                "leave_ns": leave_ns,
+                "flit_id": flit_id_str,
+                "flit_type": flit_type,
+                "rsp_type": rsp_type if flit_type == "rsp" else "",
+                "req_attr": req_attr if flit_type == "req" else "",
+                "data_id": data_id if flit_type == "data" else -1,
+            }
+        )
 
     # 遍历所有 flit
     for _, row in merged.iterrows():
@@ -361,11 +358,7 @@ def build_fifo_waveform_for_node(
         data_id = int(row.get("flit_id", 0)) if flit_type == "data" else -1
 
         # 从 position_timestamps 提取事件
-        events = extract_fifo_events_from_timestamps(
-            row.get("position_timestamps", "{}"),
-            row["source_node"],
-            row["dest_node"]
-        )
+        events = extract_fifo_events_from_timestamps(row.get("position_timestamps", "{}"), row["source_node"], row["dest_node"])
 
         source_type = row.get("source_type", "")
         dest_type = row.get("dest_type", "")
@@ -374,7 +367,7 @@ def build_fifo_waveform_for_node(
         # req: "123" 或 "123(Retry)"
         # rsp: "123(Comp)" 或 "123(CompData)"
         # data: "123.1"
-        packet_id = row['packet_id']
+        packet_id = row["packet_id"]
         if flit_type == "req":
             if req_attr and req_attr != "new":
                 flit_id_str = f"{packet_id}(Retry)"
@@ -415,16 +408,16 @@ def build_fifo_waveform_for_node(
                         add_event(fifo_key, flit_type, rsp_type, req_attr, data_id, enter_ns, leave_ns, flit_id_str)
                 elif base_type == "IP_TX" and fifo_type_name == "IP_TX":
                     # IP 发送端口：按 source_type 过滤
-                    print(f"[DEBUG] IP_TX match: fifo_key={fifo_key}, ip_type={ip_type}, source_type={source_type}, event_node_id={event_node_id}")
+                    # print(f"[DEBUG] IP_TX match: fifo_key={fifo_key}, ip_type={ip_type}, source_type={source_type}, event_node_id={event_node_id}")
                     if source_type == ip_type:
                         add_event(fifo_key, flit_type, rsp_type, req_attr, data_id, enter_ns, leave_ns, flit_id_str)
-                        print(f"[DEBUG] IP_TX event added: {fifo_key}")
+                        # print(f"[DEBUG] IP_TX event added: {fifo_key}")
                 elif base_type == "IP_RX" and fifo_type_name == "IP_RX":
                     # IP 接收端口：按 dest_type 过滤
-                    print(f"[DEBUG] IP_RX match: fifo_key={fifo_key}, ip_type={ip_type}, dest_type={dest_type}, event_node_id={event_node_id}")
+                    # print(f"[DEBUG] IP_RX match: fifo_key={fifo_key}, ip_type={ip_type}, dest_type={dest_type}, event_node_id={event_node_id}")
                     if dest_type == ip_type:
                         add_event(fifo_key, flit_type, rsp_type, req_attr, data_id, enter_ns, leave_ns, flit_id_str)
-                        print(f"[DEBUG] IP_RX event added: {fifo_key}")
+                        # print(f"[DEBUG] IP_RX event added: {fifo_key}")
 
     # 按时间排序
     for key in waveform_data:
@@ -447,6 +440,7 @@ def _ip_type_to_channel(ip_type: str) -> str:
 
 # ==================== API端点 ====================
 
+
 def _get_result_type(experiment_id: int) -> str:
     """获取实验的结果类型"""
     # 简化实现：根据ID范围判断，或从数据库查询
@@ -468,19 +462,17 @@ async def get_fifo_waveform(
     time_end: float = Query(None, description="结束时间(ns)"),
 ) -> FIFOWaveformResponse:
     """从 waveform.parquet 的 position_timestamps 重建指定节点的 FIFO 波形数据"""
-    print(f"[DEBUG] get_fifo_waveform called: node_id={node_id}, fifo_types={fifo_types}, flit_types_filter={flit_types_filter}")
+    # print(f"[DEBUG] get_fifo_waveform called: node_id={node_id}, fifo_types={fifo_types}, flit_types_filter={flit_types_filter}")
     result_type = _get_result_type(experiment_id)
 
     # 使用 waveform.py 中的加载函数
     from .waveform import _load_parquet_from_db
+
     requests_df, flits_df = _load_parquet_from_db(result_id, result_type)
 
     # 检查是否包含 position_timestamps 字段
     if "position_timestamps" not in flits_df.columns:
-        raise HTTPException(
-            status_code=400,
-            detail="flits.parquet 缺少 position_timestamps 字段，请重新运行仿真"
-        )
+        raise HTTPException(status_code=400, detail="flits.parquet 缺少 position_timestamps 字段，请重新运行仿真")
 
     # 解析请求的 FIFO 类型
     requested_fifos = [f.strip() for f in fifo_types.split(",")]
@@ -498,7 +490,7 @@ async def get_fifo_waveform(
             for sig in signals_str.split(","):
                 sig = sig.strip()
                 if sig.endswith(suffix):
-                    result.append(sig[:-len(suffix)])  # 去掉后缀
+                    result.append(sig[: -len(suffix)])  # 去掉后缀
         return result
 
     expand_rsp_list = parse_expand_signals(expand_rsp_signals, ".rsp")
@@ -506,10 +498,7 @@ async def get_fifo_waveform(
     expand_data_list = parse_expand_signals(expand_data_signals, ".data")
 
     # 重建 FIFO 波形
-    waveform_data = build_fifo_waveform_for_node(
-        flits_df, requests_df, node_id, requested_fifos, flit_types_list,
-        expand_rsp_list, expand_req_list, expand_data_list
-    )
+    waveform_data = build_fifo_waveform_for_node(flits_df, requests_df, node_id, requested_fifos, flit_types_list, expand_rsp_list, expand_req_list, expand_data_list)
 
     # 构建信号列表
     signals = []
@@ -527,12 +516,7 @@ async def get_fifo_waveform(
                 # key 格式: "IQ_TR.req" -> fifo_type="IQ_TR", flit_type="req"
                 parts = key.rsplit(".", 1)
                 base_fifo_type = parts[0] if len(parts) > 1 else key
-                signals.append(FIFOSignal(
-                    name=f"Node_{node_id}.{key}",
-                    node_id=node_id,
-                    fifo_type=base_fifo_type,  # 用于颜色映射
-                    events=filtered_events
-                ))
+                signals.append(FIFOSignal(name=f"Node_{node_id}.{key}", node_id=node_id, fifo_type=base_fifo_type, events=filtered_events))  # 用于颜色映射
                 all_times.extend([e["enter_ns"] for e in filtered_events])
                 all_times.extend([e["leave_ns"] for e in filtered_events])
 
@@ -555,19 +539,12 @@ async def get_fifo_waveform(
 
     # 计算时间范围（从0开始，结束时留5ns余量）
     padding_ns = 5.0
-    time_range = {
-        "start_ns": 0,
-        "end_ns": (max(all_times) + padding_ns) if all_times else 0
-    }
+    time_range = {"start_ns": 0, "end_ns": (max(all_times) + padding_ns) if all_times else 0}
 
     # 可用 FIFO 列表
     available_fifos = list(waveform_data.keys())
 
-    return FIFOWaveformResponse(
-        time_range=time_range,
-        signals=signals,
-        available_fifos=available_fifos
-    )
+    return FIFOWaveformResponse(time_range=time_range, signals=signals, available_fifos=available_fifos)
 
 
 @router.get("/experiments/{experiment_id}/results/{result_id}/fifo-waveform/available")
@@ -578,9 +555,5 @@ async def get_available_fifos(
 ) -> Dict[str, List[str]]:
     """获取指定节点可用的 FIFO 列表"""
     # 返回所有可能的 FIFO 类型
-    all_fifos = [
-        "IQ_TR", "IQ_TL", "IQ_TU", "IQ_TD", "IQ_EQ", "IQ_CH",
-        "RB_TR", "RB_TL", "RB_TU", "RB_TD", "RB_EQ",
-        "EQ_TU", "EQ_TD", "EQ_CH"
-    ]
+    all_fifos = ["IQ_TR", "IQ_TL", "IQ_TU", "IQ_TD", "IQ_EQ", "IQ_CH", "RB_TR", "RB_TL", "RB_TU", "RB_TD", "RB_EQ", "EQ_TU", "EQ_TD", "EQ_CH"]
     return {"fifos": all_fifos}

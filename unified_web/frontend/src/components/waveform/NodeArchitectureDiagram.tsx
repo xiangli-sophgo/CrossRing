@@ -208,7 +208,7 @@ const NodeArchitectureDiagram: React.FC<NodeArchitectureDiagramProps> = ({
               style={{ cursor: 'pointer' }}
               onClick={() => {
                 // 点击时同时选择 TX 和 RX
-                console.log('[DEBUG] IP clicked:', ip, 'txFifoId:', txFifoId, 'rxFifoId:', rxFifoId);
+                // console.log('[DEBUG] IP clicked:', ip, 'txFifoId:', txFifoId, 'rxFifoId:', rxFifoId);
                 onFifoSelect(txFifoId);
                 onFifoSelect(rxFifoId);
               }}

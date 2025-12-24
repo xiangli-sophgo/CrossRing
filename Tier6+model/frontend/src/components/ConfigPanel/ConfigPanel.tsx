@@ -41,8 +41,8 @@ import {
   loadCachedConfig,
   saveCachedConfig,
 } from './shared'
-import { SwitchLevelConfig, ConnectionEditPanel, TrafficAnalysisPanel } from './components'
-import { runMultiConfigAnalysis, collectAllChips } from '../../utils/trafficAnalysis'
+import { SwitchLevelConfig, ConnectionEditPanel } from './components'
+import { DeploymentAnalysisPanel } from './DeploymentAnalysisPanel'
 
 const { Text } = Typography
 
@@ -68,12 +68,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onLayoutTypeChange: _onLayoutTypeChange,
   viewMode = 'topology',
   focusedLevel,
-  // LLM流量分析相关 (多配置)
-  trafficConfigs,
-  onTrafficConfigsChange,
-  trafficAnalysisResult,
-  onTrafficAnalysisResultChange,
-  onNavigateToChips,
+  // 流量热力图
+  onTrafficResultChange,
 }) => {
   void _layoutType
   void _onLayoutTypeChange
@@ -855,31 +851,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
     </div>
   )
 
-  // 计算拓扑中的总 chip 数量
-  const totalChips = topology ? collectAllChips(topology).length : 0
-
-  // 运行流量分析 (多配置)
-  const handleRunTrafficAnalysis = () => {
-    if (!topology || !trafficConfigs || trafficConfigs.length === 0) return
-    const result = runMultiConfigAnalysis(topology, trafficConfigs)
-    onTrafficAnalysisResultChange?.(result)
-  }
-
-  // 流量分析面板内容 (多配置)
-  const trafficAnalysisContent = (
-    <TrafficAnalysisPanel
-      configs={trafficConfigs || []}
-      onConfigsChange={(configs) => onTrafficConfigsChange?.(configs)}
-      onRunAnalysis={handleRunTrafficAnalysis}
-      analysisResult={trafficAnalysisResult || null}
-      totalChips={totalChips}
-      configRowStyle={configRowStyle}
-      onNavigateToChips={onNavigateToChips}
-      topology={topology}
-    />
-  )
-
-  const collapseItems = [
+  // 拓扑设置的折叠项
+  const topologyCollapseItems = [
     {
       key: 'topology',
       label: (
@@ -902,46 +875,68 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
       label: <Text strong>Switch配置</Text>,
       children: switchConfigContent,
     },
-    {
-      key: 'traffic',
-      label: <Text strong>LLM流量分析</Text>,
-      children: trafficAnalysisContent,
-    },
   ]
+
+  // 顶层页面Tab状态
+  const [activePageTab, setActivePageTab] = useState<'topology' | 'deployment'>('topology')
 
   return (
     <div>
-      {/* 折叠面板 */}
-      <Collapse
-        items={collapseItems}
-        defaultActiveKey={['layers']}
+      {/* 顶层页面切换 Tabs */}
+      <Tabs
+        activeKey={activePageTab}
+        onChange={(key) => setActivePageTab(key as 'topology' | 'deployment')}
         size="small"
+        type="card"
+        style={{ marginBottom: 12 }}
+        items={[
+          {
+            key: 'topology',
+            label: '拓扑设置',
+            children: (
+              <>
+                <Collapse
+                  items={topologyCollapseItems}
+                  defaultActiveKey={['layers']}
+                  size="small"
+                />
+                {/* 保存/加载配置按钮 */}
+                <Row gutter={8} style={{ marginTop: 16 }}>
+                  <Col span={12}>
+                    <Button
+                      block
+                      icon={<SaveOutlined />}
+                      onClick={() => setSaveModalOpen(true)}
+                    >
+                      保存配置
+                    </Button>
+                  </Col>
+                  <Col span={12}>
+                    <Button
+                      block
+                      icon={<FolderOpenOutlined />}
+                      onClick={() => {
+                        loadConfigList()
+                        setLoadModalOpen(true)
+                      }}
+                    >
+                      加载配置
+                    </Button>
+                  </Col>
+                </Row>
+              </>
+            ),
+          },
+          {
+            key: 'deployment',
+            label: '部署分析',
+            children: <DeploymentAnalysisPanel
+              topology={topology}
+              onTrafficResultChange={onTrafficResultChange}
+            />,
+          },
+        ]}
       />
-
-      {/* 保存/加载配置按钮 */}
-      <Row gutter={8} style={{ marginTop: 16 }}>
-        <Col span={12}>
-          <Button
-            block
-            icon={<SaveOutlined />}
-            onClick={() => setSaveModalOpen(true)}
-          >
-            保存配置
-          </Button>
-        </Col>
-        <Col span={12}>
-          <Button
-            block
-            icon={<FolderOpenOutlined />}
-            onClick={() => {
-              loadConfigList()
-              setLoadModalOpen(true)
-            }}
-          >
-            加载配置
-          </Button>
-        </Col>
-      </Row>
 
       {/* 保存配置模态框 */}
       <Modal

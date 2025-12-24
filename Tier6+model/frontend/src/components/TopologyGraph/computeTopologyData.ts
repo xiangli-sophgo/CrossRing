@@ -280,8 +280,8 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
     currentRack.boards.forEach(board => {
       const chips: Node[] = board.chips.map(chip => ({
         id: chip.id,
-        label: chip.label || chip.type.toUpperCase(),
-        type: chip.type,
+        label: chip.label || chip.id,
+        type: 'chip',
         x: 0, y: 0,
         color: CHIP_TYPE_COLORS[chip.type] || '#666',
         hierarchyLevel: 'board' as HierarchyLevel,
@@ -335,8 +335,8 @@ function computeMultiLevelData(params: MultiLevelParams): TopologyDataResult {
   } else if (levelPair === 'board_chip' && currentBoard) {
     upperNodes = currentBoard.chips.map(chip => ({
       id: chip.id,
-      label: chip.label || chip.type.toUpperCase(),
-      type: chip.type,
+      label: chip.label || chip.id,
+      type: 'chip',
       x: 0, y: 0,
       color: CHIP_TYPE_COLORS[chip.type] || '#666',
       hierarchyLevel: 'board' as HierarchyLevel,
@@ -978,8 +978,8 @@ function computeBoardLevel(topology: HierarchicalTopology, currentBoard: BoardCo
   const graphTitle = `${currentBoard.label} - Chip拓扑`
   const nodeList: Node[] = currentBoard.chips.map((chip) => ({
     id: chip.id,
-    label: chip.label || chip.type.toUpperCase(),
-    type: chip.type,
+    label: chip.label || chip.id,
+    type: 'chip',
     x: 0,
     y: 0,
     color: CHIP_TYPE_COLORS[chip.type] || '#666',

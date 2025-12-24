@@ -3,18 +3,18 @@ import { Modal, Button, Space, Typography, Breadcrumb } from 'antd'
 import { ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons'
 import {
   HierarchyLevel,
-  LinkTraffic,
 } from '../../types'
-import { getHeatmapColor } from '../../utils/trafficAnalysis'
 import {
   TopologyGraphProps,
   Node,
   LayoutType,
 } from './shared'
 // renderNodeShape 已被统一的 renderNode 函数替代
-import { ManualConnectionLine, ControlPanel, renderExternalEdge, renderIndirectEdge, EdgeRendererProps } from './components'
+import { ControlPanel } from './components'
 import { ForceLayoutManager, ForceNode, getTorusGridSize, getTorus3DSize } from './layouts'
 import { computeTopologyData } from './computeTopologyData'
+import { MultiLevelView } from './MultiLevelView'
+import { SingleLevelView } from './SingleLevelView'
 
 const { Text } = Typography
 
@@ -55,8 +55,8 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
   // 多层级视图相关
   multiLevelOptions,
   onMultiLevelOptionsChange,
-  // 流量分析热力图
-  trafficAnalysisResult,
+  // 流量热力图
+  trafficResult,
 }) => {
   void _onNavigateBack
   void _canGoBack
@@ -85,6 +85,24 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
     id: string
     type: string
   } | null>(null)
+
+  // 包装双击事件，先触发展开动画，再执行实际导航
+  // TODO: 动画功能暂时禁用，直接导航
+  const handleNodeDoubleClickWithAnimation = useCallback((nodeId: string, nodeType: string) => {
+    // if (multiLevelOptions?.enabled && (nodeType === 'pod' || nodeType === 'rack' || nodeType === 'board')) {
+    //   // 触发展开动画（动画完成后由 onTransitionEnd 回调处理导航）
+    //   setExpandingContainer({ id: nodeId, type: nodeType })
+    // } else {
+    //   onNodeDoubleClick?.(nodeId, nodeType)
+    // }
+    onNodeDoubleClick?.(nodeId, nodeType)
+  }, [onNodeDoubleClick])
+
+  // 展开动画完成回调
+  const handleExpandAnimationEnd = useCallback((nodeId: string, nodeType: string) => {
+    setExpandingContainer(null)
+    onNodeDoubleClick?.(nodeId, nodeType)
+  }, [onNodeDoubleClick])
 
   // 容器收缩动画状态（从单层级切换到多层级时使用）
   const [collapsingContainer, setCollapsingContainer] = useState<{
@@ -141,54 +159,100 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
     }
   }, [collapsingContainer, collapseAnimationStarted])
 
-  // 流量分析热力图：创建链路流量查找表
+  // 构建链路流量查找表
   const linkTrafficMap = useMemo(() => {
-    const map = new Map<string, LinkTraffic>()
-    if (trafficAnalysisResult?.link_traffic) {
-      for (const lt of trafficAnalysisResult.link_traffic) {
-        // 使用双向key，因为边可能source/target顺序不同
-        map.set(`${lt.source}-${lt.target}`, lt)
-        map.set(`${lt.target}-${lt.source}`, lt)
+    const map = new Map<string, { trafficMb: number; utilizationPercent: number; groups: string[] }>()
+    if (trafficResult?.linkTraffic) {
+      for (const lt of trafficResult.linkTraffic) {
+        // 使用双向key
+        map.set(`${lt.source}->${lt.target}`, {
+          trafficMb: lt.trafficMb,
+          utilizationPercent: lt.utilizationPercent,
+          groups: lt.contributingGroups,
+        })
+        map.set(`${lt.target}->${lt.source}`, {
+          trafficMb: lt.trafficMb,
+          utilizationPercent: lt.utilizationPercent,
+          groups: lt.contributingGroups,
+        })
       }
     }
     return map
-  }, [trafficAnalysisResult])
+  }, [trafficResult])
+
+  // 计算最大流量（用于宽度归一化）
+  const maxTrafficMb = useMemo(() => {
+    if (!trafficResult?.linkTraffic || trafficResult.linkTraffic.length === 0) return 0
+    return Math.max(...trafficResult.linkTraffic.map(lt => lt.trafficMb))
+  }, [trafficResult])
 
   // 获取边的热力图样式
   const getTrafficHeatmapStyle = useCallback((source: string, target: string) => {
-    const lt = linkTrafficMap.get(`${source}-${target}`)
+    const lt = linkTrafficMap.get(`${source}->${target}`)
     if (!lt) return null
-    return {
-      stroke: getHeatmapColor(lt.bandwidth_utilization),
-      strokeWidth: 2 + lt.bandwidth_utilization * 4,  // 2-6px
-      trafficMb: lt.traffic_mb,
-      utilization: lt.bandwidth_utilization,
-    }
-  }, [linkTrafficMap])
 
-  // 节点尺寸配置（统一管理）
+    // 根据利用率计算颜色
+    const u = Math.min(Math.max(lt.utilizationPercent, 0), 100)
+    let color: string
+    if (u < 30) {
+      const t = u / 30
+      color = `rgb(${Math.round(100 * t)}, 200, ${Math.round(100 * (1 - t))})`
+    } else if (u < 60) {
+      const t = (u - 30) / 30
+      color = `rgb(${Math.round(100 + 155 * t)}, 200, 0)`
+    } else if (u < 80) {
+      const t = (u - 60) / 20
+      color = `rgb(255, ${Math.round(200 - 100 * t)}, 0)`
+    } else {
+      const t = (u - 80) / 20
+      color = `rgb(255, ${Math.round(100 - 100 * t)}, 0)`
+    }
+
+    // 根据流量计算宽度 (2-6px)
+    const width = maxTrafficMb > 0 ? 2 + (lt.trafficMb / maxTrafficMb) * 4 : 2
+
+    return {
+      stroke: color,
+      strokeWidth: width,
+      trafficMb: lt.trafficMb,
+      utilization: lt.utilizationPercent,
+    }
+  }, [linkTrafficMap, maxTrafficMb])
+
+  // 节点尺寸配置（统一管理）- 单层级视图
   const NODE_SIZE_CONFIG: Record<string, { w: number; h: number; labelY: number; fontSize: number }> = {
-    switch: { w: 60, h: 24, labelY: -1, fontSize: 8 },
-    pod: { w: 56, h: 32, labelY: 2, fontSize: 9 },
-    rack: { w: 36, h: 56, labelY: 2, fontSize: 9 },
-    board: { w: 64, h: 36, labelY: 2, fontSize: 9 },
-    chip: { w: 40, h: 40, labelY: 2, fontSize: 8 },
-    npu: { w: 40, h: 40, labelY: 2, fontSize: 8 },
-    cpu: { w: 40, h: 40, labelY: 2, fontSize: 8 },
-    default: { w: 50, h: 36, labelY: 2, fontSize: 9 },
+    switch: { w: 61, h: 24, labelY: 4, fontSize: 14 },
+    pod: { w: 56, h: 32, labelY: 9, fontSize: 15 },
+    rack: { w: 36, h: 56, labelY: 6, fontSize: 14 },
+    board: { w: 64, h: 36, labelY: 5, fontSize: 15 },
+    chip: { w: 40, h: 40, labelY: 5, fontSize: 14 },
+    default: { w: 50, h: 36, labelY: 0, fontSize: 11 },
   }
 
-  // 格式化标签（太长则截断）
+  // 多层级视图的节点尺寸配置（可单独调整）
+  const MULTI_LEVEL_NODE_SIZE_CONFIG: Record<string, { w: number; h: number; labelY: number; fontSize: number }> = {
+    switch: { w: 61, h: 24, labelY: 5, fontSize: 14 },
+    pod: { w: 56, h: 32, labelY: 9, fontSize: 16 },
+    rack: { w: 36, h: 56, labelY: 6, fontSize: 16 },
+    board: { w: 64, h: 36, labelY: 5, fontSize: 16 },
+    chip: { w: 40, h: 40, labelY: 5, fontSize: 16 },
+    default: { w: 50, h: 36, labelY: 0, fontSize: 11 },
+  }
+
+  // 格式化标签（名称第一个字符大写 + 编号）
   const formatNodeLabel = (label: string) => {
-    if (label.length <= 6) return label
     const match = label.match(/\d+/)
-    return match ? match[0] : label.slice(-4)
+    const num = match ? match[0] : ''
+    // 取名称的第一个字符大写作为前缀
+    const firstChar = label.charAt(0).toUpperCase()
+    return `${firstChar}${num}`
   }
 
   // 节点形状渲染函数（仅渲染形状和标签，不包含外层g）
-  const renderNodeShape = useCallback((node: Node, isSelected: boolean = false) => {
-    const nodeType = node.isSwitch ? 'switch' : node.type
-    const size = NODE_SIZE_CONFIG[nodeType] || NODE_SIZE_CONFIG.default
+  const renderNodeShape = useCallback((node: Node, useMultiLevelConfig: boolean = false) => {
+    const nodeType = node.isSwitch ? 'switch' : node.type.toLowerCase()
+    const config = useMultiLevelConfig ? MULTI_LEVEL_NODE_SIZE_CONFIG : NODE_SIZE_CONFIG
+    const size = config[nodeType] || config.default
     const halfW = size.w / 2
     const halfH = size.h / 2
 
@@ -197,7 +261,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
         {/* 根据节点类型渲染不同形状 */}
         {nodeType === 'switch' && (
           <>
-            <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={3} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
+            <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={3} fill={node.color} stroke="#fff" strokeWidth={1.5} />
             {/* 端口 */}
             <rect x={-24} y={-6} width={5} height={6} rx={1} fill="rgba(255,255,255,0.5)" />
             <rect x={-17} y={-6} width={5} height={6} rx={1} fill="rgba(255,255,255,0.5)" />
@@ -213,8 +277,8 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
         {nodeType === 'pod' && (
           <>
-            <rect x={-halfW} y={-halfH + 6} width={size.w} height={size.h - 6} rx={3} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
-            <polygon points={`${-halfW},-${halfH - 6} 0,-${halfH} ${halfW},-${halfH - 6}`} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
+            <rect x={-halfW} y={-halfH + 6} width={size.w} height={size.h - 6} rx={3} fill={node.color} stroke="#fff" strokeWidth={1.5} />
+            <polygon points={`${-halfW},-${halfH - 6} 0,-${halfH} ${halfW},-${halfH - 6}`} fill={node.color} stroke="#fff" strokeWidth={1.5} />
             {/* 装饰 */}
             <rect x={-20} y={-4} width={8} height={8} rx={1} fill="rgba(255,255,255,0.3)" />
             <rect x={-6} y={-4} width={8} height={8} rx={1} fill="rgba(255,255,255,0.3)" />
@@ -224,7 +288,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
         {nodeType === 'rack' && (
           <>
-            <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={3} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
+            <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={3} fill={node.color} stroke="#fff" strokeWidth={1.5} />
             {/* 层级线 */}
             <line x1={-14} y1={-16} x2={14} y2={-16} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
             <line x1={-14} y1={-4} x2={14} y2={-4} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
@@ -238,7 +302,7 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
 
         {nodeType === 'board' && (
           <>
-            <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={2} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
+            <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={2} fill={node.color} stroke="#fff" strokeWidth={1.5} />
             {/* 电路线装饰 */}
             <path d="M-24,-10 L-24,-2 L-16,-2 L-16,6 L-8,6" stroke="rgba(255,255,255,0.25)" strokeWidth={1.5} fill="none" />
             <path d="M8,-10 L8,0 L16,0 L16,8 L24,8" stroke="rgba(255,255,255,0.25)" strokeWidth={1.5} fill="none" />
@@ -247,9 +311,9 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
           </>
         )}
 
-        {(nodeType === 'chip' || nodeType === 'npu' || nodeType === 'cpu') && (
+        {nodeType === 'chip' && (
           <>
-            <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={2} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
+            <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={2} fill={node.color} stroke="#fff" strokeWidth={1.5} />
             {/* 引脚 */}
             <rect x={-12} y={-halfH - 4} width={4} height={4} fill={node.color} />
             <rect x={-2} y={-halfH - 4} width={4} height={4} fill={node.color} />
@@ -263,8 +327,8 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
         )}
 
         {/* 默认形状（未匹配的类型） */}
-        {!['switch', 'pod', 'rack', 'board', 'chip', 'npu', 'cpu'].includes(nodeType) && (
-          <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={6} fill={node.color} stroke={isSelected ? '#52c41a' : '#fff'} strokeWidth={isSelected ? 2 : 1.5} />
+        {!['switch', 'pod', 'rack', 'board', 'chip'].includes(nodeType) && (
+          <rect x={-halfW} y={-halfH} width={size.w} height={size.h} rx={6} fill={node.color} stroke="#fff" strokeWidth={1.5} />
         )}
 
         {/* 统一标签渲染 */}
@@ -283,29 +347,28 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
       scale?: number
       isSelected?: boolean
       onClick?: () => void
+      useMultiLevelConfig?: boolean
     }
   ) => {
-    const { keyPrefix, scale = 1, isSelected = false, onClick } = options
-    const nodeType = node.isSwitch ? 'switch' : node.type
-    const size = NODE_SIZE_CONFIG[nodeType] || NODE_SIZE_CONFIG.default
-    const halfW = size.w / 2
-    const halfH = size.h / 2
+    const { keyPrefix, scale = 1, isSelected = false, onClick, useMultiLevelConfig = false } = options
 
     return (
       <g
         key={`${keyPrefix}-${node.id}`}
         transform={scale === 1 ? `translate(${node.x}, ${node.y})` : `translate(${node.x}, ${node.y}) scale(${scale})`}
-        style={{ cursor: 'pointer' }}
+        style={{
+          cursor: 'pointer',
+          filter: isSelected
+            ? 'drop-shadow(0 0 8px rgba(37, 99, 235, 0.6)) drop-shadow(0 0 16px rgba(37, 99, 235, 0.3))'
+            : 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
+          transition: 'filter 0.15s ease',
+        }}
         onClick={(e) => {
           e.stopPropagation()
           onClick?.()
         }}
       >
-        {/* 选中高亮 - 背景发光效果 */}
-        {isSelected && (
-          <rect x={-halfW - 2} y={-halfH - 2} width={size.w + 4} height={size.h + 4} rx={4} fill="#52c41a" opacity={0.3} />
-        )}
-        {renderNodeShape(node, isSelected)}
+        {renderNodeShape(node, useMultiLevelConfig)}
       </g>
     )
   }, [renderNodeShape])
@@ -984,95 +1047,6 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             </filter>
           </defs>
 
-          {/* Switch面板（单层级模式） */}
-          {!multiLevelOptions?.enabled && switchPanelWidth > 0 && (() => {
-            // 获取Switch面板中的节点
-            const switchPanelNodes = displayNodes.filter(n => n.inSwitchPanel)
-
-            if (switchPanelNodes.length === 0) return null
-
-            // 获取Switch之间的边
-            const switchIds = new Set(switchPanelNodes.map(n => n.id))
-            const switchInternalEdges = edges.filter(e =>
-              switchIds.has(e.source) && switchIds.has(e.target)
-            )
-
-            return (
-              <g className="switch-panel">
-                {/* 面板背景 */}
-                <rect
-                  x={0}
-                  y={0}
-                  width={switchPanelWidth}
-                  height={600}
-                  fill="#f8f9fa"
-                  stroke="#e9ecef"
-                  strokeWidth={1}
-                />
-                {/* 面板标题 */}
-                <text
-                  x={switchPanelWidth / 2}
-                  y={20}
-                  textAnchor="middle"
-                  fill="#666"
-                  fontSize={12}
-                  fontWeight={500}
-                >
-                  Switch
-                </text>
-
-                {/* Switch之间的连线（树形结构 - 阶梯式） */}
-                {switchInternalEdges.map((edge, idx) => {
-                  const sourceNode = switchPanelNodes.find(n => n.id === edge.source)
-                  const targetNode = switchPanelNodes.find(n => n.id === edge.target)
-                  if (!sourceNode || !targetNode) return null
-
-                  // 确保上层（spine）在上，下层（leaf）在下
-                  const upperNode = sourceNode.y < targetNode.y ? sourceNode : targetNode
-                  const lowerNode = sourceNode.y < targetNode.y ? targetNode : sourceNode
-
-                  // 阶梯式连线
-                  const midY = (upperNode.y + lowerNode.y) / 2
-                  const pathD = `M ${upperNode.x} ${upperNode.y + 12}
-                                 L ${upperNode.x} ${midY}
-                                 L ${lowerNode.x} ${midY}
-                                 L ${lowerNode.x} ${lowerNode.y - 12}`
-
-                  return (
-                    <path
-                      key={`switch-edge-${idx}`}
-                      d={pathD}
-                      fill="none"
-                      stroke="#1890ff"
-                      strokeWidth={2}
-                      strokeOpacity={0.6}
-                    />
-                  )
-                })}
-
-                {/* Switch节点 */}
-                {switchPanelNodes.map(node => renderNode(node, {
-                  keyPrefix: 'switch',
-                  isSelected: selectedNodeId === node.id,
-                  onClick: () => onNodeClick?.({
-                    id: node.id,
-                    label: node.label,
-                    type: 'switch',
-                    subType: node.subType,
-                    connections: edges.filter(e => e.source === node.id || e.target === node.id)
-                      .map(e => ({
-                        id: e.source === node.id ? e.target : e.source,
-                        label: displayNodes.find(n => n.id === (e.source === node.id ? e.target : e.source))?.label || '',
-                        bandwidth: e.bandwidth,
-                        latency: e.latency,
-                      })),
-                    portInfo: node.portInfo,
-                  })
-                }))}
-              </g>
-            )
-          })()}
-
           {/* 手动布局时的辅助对齐线 */}
           {isManualMode && alignmentLines.map((line, idx) => {
             if (line.type === 'h') {
@@ -1121,986 +1095,36 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             return null
           })}
 
-          {/* 多层级模式：按层级分组渲染（容器+边+节点），实现正确遮挡 */}
-          {multiLevelOptions?.enabled && (() => {
-            const containers = displayNodes
-              .filter(n => n.isContainer && n.containerBounds)
-              .sort((a, b) => (b.zLayer ?? 0) - (a.zLayer ?? 0))  // 远处先渲染
-
-            // 悬停时上面的层向上移动的距离
-            const liftDistance = 150
-
-            // 查找选中容器的 zLayer（支持选中容器或容器内节点，用于保持选中时的移动效果）
-            let selectedLayerIndex: number | null = null
-            const selectedContainer = containers.find(c => c.id === selectedNodeId)
-            if (selectedContainer) {
-              selectedLayerIndex = selectedContainer.zLayer ?? null
-            } else if (selectedNodeId) {
-              // 如果选中的是容器内的节点，查找包含该节点的容器
-              for (const container of containers) {
-                if (container.singleLevelData?.nodes.some(n => n.id === selectedNodeId)) {
-                  selectedLayerIndex = container.zLayer ?? null
-                  break
-                }
-              }
-            }
-
-            // 获取所有inter_level边，并计算它们应该在哪个容器中渲染
-            const interLevelEdges = edges.filter(e => e.connectionType === 'inter_level')
-            const baseSkewAngle = -30
-            const skewTan = Math.tan(baseSkewAngle * Math.PI / 180)
-
-            // 查找节点所在的容器及其zLayer和索引
-            const getNodeContainerInfo = (nodeId: string) => {
-              for (const container of containers) {
-                if (container.singleLevelData?.nodes.some(n => n.id === nodeId)) {
-                  // 从容器ID中提取索引（例如 "pod_0/rack_2" -> 2）
-                  const idParts = container.id.split('/')
-                  const lastPart = idParts[idParts.length - 1]
-                  const indexMatch = lastPart.match(/_(\d+)$/)
-                  const containerIndex = indexMatch ? parseInt(indexMatch[1], 10) : 0
-                  return { container, zLayer: container.zLayer ?? 0, containerIndex }
-                }
-              }
-              return null
-            }
-
-            // 计算节点位置（考虑yOffset和skew变换）
-            const getNodePosition = (nodeId: string, activeLayerIdx: number | null) => {
-              for (const container of containers) {
-                if (container.singleLevelData) {
-                  const slNode = container.singleLevelData.nodes.find(n => n.id === nodeId)
-                  if (slNode && container.containerBounds) {
-                    const bounds = container.containerBounds
-                    const viewBox = container.singleLevelData.viewBox
-                    const zLayer = container.zLayer ?? 0
-
-                    let yOffset = 0
-                    if (activeLayerIdx !== null && zLayer < activeLayerIdx) {
-                      yOffset = -liftDistance
-                    }
-
-                    const labelHeight = 10
-                    const sidePadding = 10
-                    const topPadding = 10
-                    const svgWidth = bounds.width - sidePadding * 2
-                    const svgHeight = bounds.height - labelHeight - topPadding
-                    const svgX = bounds.x + sidePadding
-                    const svgY = bounds.y + topPadding
-
-                    const scaleX = svgWidth / viewBox.width
-                    const scaleY = svgHeight / viewBox.height
-                    const scale = Math.min(scaleX, scaleY)
-
-                    const offsetX = (svgWidth - viewBox.width * scale) / 2
-                    const offsetY = (svgHeight - viewBox.height * scale) / 2
-
-                    const baseX = svgX + offsetX + slNode.x * scale
-                    const baseY = svgY + offsetY + slNode.y * scale
-                    const centerY = bounds.y + bounds.height / 2
-                    const skewedX = baseX + (baseY - centerY) * skewTan
-
-                    return { x: skewedX, y: baseY + yOffset, zLayer }
-                  }
-                }
-              }
-              return null
-            }
-
-            // 计算视口中心和尺寸（用于展开动画）
-            // viewBox: ${400 - 400/zoom} ${300 - 300/zoom} ${800/zoom} ${600/zoom}
-            const viewportWidth = 800 / zoom
-            const viewportHeight = 600 / zoom
-            // viewBox 中心点始终是 (400, 300)
-            const viewportCenterX = 400
-            const viewportCenterY = 300
-
-            // 按层级分组渲染（zLayer大的在下面，先渲染；zLayer小的在上面，后渲染覆盖）
-            // 获取当前层级的手动连接（用于最后渲染）
-            const currentManualConnections = manualConnections.filter(mc => mc.hierarchy_level === getCurrentHierarchyLevel())
-
-            // 渲染跨容器手动连接（在所有容器之上）
-            const renderManualConnectionsOverlay = () => {
-              const activeLayerIdx = hoveredLayerIndex ?? selectedLayerIndex
-              const getParentIdx = (nodeId: string): number => {
-                const parts = nodeId.split('/')
-                if (parts.length >= 2) {
-                  const parentPart = parts[parts.length - 2]
-                  const match = parentPart.match(/_(\d+)$/)
-                  return match ? parseInt(match[1], 10) : 0
-                }
-                return 0
-              }
-
-              // 准备容器边界信息（用于分段绘制）
-              const containerBoundsInfo = containers.map(c => ({
-                zLayer: c.zLayer ?? 0,
-                bounds: c.containerBounds!,
-              }))
-
-              return currentManualConnections.map((conn) => {
-                const sourcePos = getNodePosition(conn.source, activeLayerIdx)
-                const targetPos = getNodePosition(conn.target, activeLayerIdx)
-
-                const sourceParentIdx = getParentIdx(conn.source)
-                const targetParentIdx = getParentIdx(conn.target)
-                const indexDiff = Math.abs(sourceParentIdx - targetParentIdx)
-                const isCrossContainer = indexDiff >= 1  // 只要不在同一容器就是跨容器
-
-                const manualEdgeId = `${conn.source}-${conn.target}`
-                const isLinkSelected = selectedLinkId === manualEdgeId || selectedLinkId === `${conn.target}-${conn.source}`
-
-                const handleManualClick = (e: React.MouseEvent) => {
-                  e.stopPropagation()
-                  if (connectionMode !== 'view') return
-                  const getDetailedLabel = (nodeId: string) => {
-                    const parts = nodeId.split('/')
-                    return parts.length >= 2 ? parts.slice(-2).join('/') : nodeId
-                  }
-                  onLinkClick?.({
-                    id: manualEdgeId,
-                    sourceId: conn.source,
-                    sourceLabel: getDetailedLabel(conn.source),
-                    sourceType: conn.source.split('/').pop()?.split('_')[0] || 'unknown',
-                    targetId: conn.target,
-                    targetLabel: getDetailedLabel(conn.target),
-                    targetType: conn.target.split('/').pop()?.split('_')[0] || 'unknown',
-                    isManual: true
-                  })
-                }
-
-                return (
-                  <ManualConnectionLine
-                    key={`manual-conn-${conn.id}`}
-                    conn={conn}
-                    sourcePos={sourcePos}
-                    targetPos={targetPos}
-                    isSelected={isLinkSelected}
-                    isCrossContainer={isCrossContainer}
-                    indexDiff={indexDiff}
-                    onClick={handleManualClick}
-                    layoutType={layoutType}
-                    containers={containerBoundsInfo}
-                  />
-                )
-              })
-            }
-
-            const containersRendered = containers.map(containerNode => {
-              const bounds = containerNode.containerBounds!
-              const zLayer = containerNode.zLayer ?? 0
-              const isExpanding = expandingContainer?.id === containerNode.id
-              const isOtherExpanding = expandingContainer !== null && !isExpanding
-              const isCollapsing = collapsingContainer?.id === containerNode.id
-              const isOtherCollapsing = collapsingContainer !== null && !isCollapsing
-
-              // 计算悬停或选中时的偏移和透明度
-              // zLayer=0在最上面，悬停/选中某层时，上面的层（zLayer更小）向上移动
-              // 优先使用悬停的层，如果没有悬停则使用选中的层
-              const activeLayerIndex = hoveredLayerIndex ?? selectedLayerIndex
-              let yOffset = 0
-              let layerOpacity = 1
-              if (activeLayerIndex !== null && zLayer < activeLayerIndex && !expandingContainer && !collapsingContainer) {
-                yOffset = -liftDistance  // 向上移动
-                layerOpacity = 0.3  // 上面的层变透明
-              }
-
-              // 展开动画时其他容器淡出
-              if (isOtherExpanding) {
-                layerOpacity = 0
-              }
-
-              // 收缩动画时其他容器从透明淡入
-              if (isOtherCollapsing) {
-                if (!collapseAnimationStarted) {
-                  layerOpacity = 0  // 初始状态：透明
-                } else {
-                  layerOpacity = 1  // 动画开始后：过渡到完全可见
-                }
-              }
-
-              const x = bounds.x
-              const w = bounds.width
-              const h = bounds.height
-              const y = bounds.y
-              const isHoveredLayer = hoveredLayerIndex === zLayer && !expandingContainer && !collapsingContainer
-
-              // 获取该层的子节点
-              const layerNodes = displayNodes.filter(n => !n.isContainer && n.zLayer === zLayer)
-              // 获取该层的边（两端都在该层）
-              const layerEdges = edges.filter(e => {
-                const sourceNode = displayNodes.find(n => n.id === e.source)
-                const targetNode = displayNodes.find(n => n.id === e.target)
-                return sourceNode?.zLayer === zLayer && targetNode?.zLayer === zLayer
-              })
-
-              // 容器中心点
-              const centerX = x + w / 2
-              const centerY = y + h / 2
-
-              // 3D书本效果参数
-              const baseSkewAngle = -30  // 基础斜切角度
-              // 展开时 skew 角度变为 0
-              // 收缩时：开始阶段为0，动画开始后变回baseSkewAngle
-              let currentSkewAngle = baseSkewAngle
-              if (isExpanding) {
-                currentSkewAngle = 0
-              } else if (isCollapsing && !collapseAnimationStarted) {
-                currentSkewAngle = 0  // 收缩开始前保持展开状态
-              }
-
-              // 计算展开/收缩动画的变换参数
-              const contentScale = containerNode.singleLevelData?.scale ?? 0.25
-              const padding = 40
-              const targetContentWidth = viewportWidth - padding * 2
-              const targetContentHeight = viewportHeight - padding * 2
-              const scaleToFitWidth = targetContentWidth / (800 * contentScale)
-              const scaleToFitHeight = targetContentHeight / (600 * contentScale)
-              const fullExpandScale = Math.min(scaleToFitWidth, scaleToFitHeight)
-              const fullExpandTranslateX = viewportCenterX - centerX
-              const fullExpandTranslateY = viewportCenterY - centerY
-
-              // 计算当前帧的变换
-              let expandScale = 1
-              let expandTranslateX = 0
-              let expandTranslateY = 0
-              if (isExpanding) {
-                expandScale = fullExpandScale
-                expandTranslateX = fullExpandTranslateX
-                expandTranslateY = fullExpandTranslateY
-              } else if (isCollapsing && !collapseAnimationStarted) {
-                // 收缩开始前：显示展开状态
-                expandScale = fullExpandScale
-                expandTranslateX = fullExpandTranslateX
-                expandTranslateY = fullExpandTranslateY
-              }
-              // 收缩动画开始后：expandScale=1, translate=0 (默认值)，容器会过渡到正常状态
-
-              // 是否正在进行展开或收缩动画
-              const isAnimating = expandingContainer !== null || collapsingContainer !== null
-
-              // 检测容器是否被选中
-              const isContainerSelected = selectedNodeId === containerNode.id
-              const isContainerHighlighted = isHoveredLayer || isContainerSelected
-
-              return (
-                <g
-                  key={`layer-${zLayer}-${containerNode.id}`}
-                  style={{
-                    // 使用弹簧曲线实现更自然的物理效果
-                    // cubic-bezier(0.34, 1.56, 0.64, 1) 模拟过冲弹簧效果
-                    transition: isAnimating
-                      ? 'transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.4s ease-out'
-                      : 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease-out',
-                    transform: (isExpanding || (isCollapsing && !collapseAnimationStarted))
-                      ? `translate(${expandTranslateX}px, ${expandTranslateY}px) scale(${expandScale})`
-                      : `translateY(${yOffset}px) scale(${yOffset !== 0 ? 0.98 : 1})`,  // 悬浮时微微缩小
-                    opacity: layerOpacity,
-                    transformOrigin: `${centerX}px ${centerY}px`,
-                  }}
-                  onMouseEnter={() => !isAnimating && setHoveredLayerIndex(zLayer)}
-                  onMouseLeave={() => !isAnimating && setHoveredLayerIndex(null)}
-                  onTransitionEnd={(e) => {
-                    // 展开动画完成后触发导航
-                    if (isExpanding && e.propertyName === 'transform' && onNodeDoubleClick) {
-                      onNodeDoubleClick(containerNode.id, containerNode.type)
-                      setExpandingContainer(null)
-                    }
-                  }}
-                >
-                  {/* 容器：使用 rect + skewX transform 实现平行四边形，这样 skew 角度可以动画化 */}
-                  <g
-                    style={{
-                      // 弹簧曲线使倾斜动画更有物理感
-                      transition: isAnimating
-                        ? 'transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
-                        : 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                      transform: `skewX(${currentSkewAngle}deg)`,
-                      transformOrigin: `${centerX}px ${centerY}px`,
-                    }}
-                  >
-                    <rect
-                      x={x}
-                      y={y}
-                      width={w}
-                      height={h}
-                      fill="#f8f9fa"
-                      stroke={isContainerHighlighted ? containerNode.color : '#d0d0d0'}
-                      strokeWidth={isContainerHighlighted ? 2.5 : 1.5}
-                      style={{
-                        cursor: isAnimating ? 'default' : 'pointer',
-                        filter: `drop-shadow(0 ${isContainerHighlighted ? 8 : 3}px ${isContainerHighlighted ? 16 : 6}px rgba(0,0,0,${isContainerHighlighted ? 0.2 : 0.1}))`,
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        if (isAnimating || connectionMode !== 'view') return
-                        // 单击容器：选中容器并通知父组件
-                        if (onNodeClick) {
-                          // 计算容器内的连接数
-                          const containerConnections = layerEdges.map(edge => {
-                            const targetNode = layerNodes.find(n => n.id === (edge.source === containerNode.id ? edge.target : edge.source))
-                            return {
-                              id: edge.source === containerNode.id ? edge.target : edge.source,
-                              label: targetNode?.label || '',
-                              bandwidth: edge.bandwidth,
-                              latency: edge.latency,
-                            }
-                          })
-                          // 容器的 type（pod/rack/board）就是它的层级
-                          onNodeClick({
-                            id: containerNode.id,
-                            label: containerNode.label,
-                            type: containerNode.type,
-                            subType: containerNode.type,  // 使用 type 作为层级标识
-                            connections: containerConnections,
-                          })
-                        }
-                      }}
-                      onDoubleClick={() => {
-                        if (!isAnimating) {
-                          // 开始展开动画
-                          setExpandingContainer({ id: containerNode.id, type: containerNode.type })
-                        }
-                      }}
-                    />
-                  </g>
-
-                  {/* 渲染与该容器相关的跨层级边（在容器背景之后、节点之前，确保边在节点下方） */}
-                  {(() => {
-                    const activeLayerIdx = hoveredLayerIndex ?? selectedLayerIndex
-
-                    // 找出应该在当前容器渲染的inter_level边
-                    const edgesToRender = interLevelEdges.filter(edge => {
-                      const sourceInfo = getNodeContainerInfo(edge.source)
-                      const targetInfo = getNodeContainerInfo(edge.target)
-                      if (!sourceInfo || !targetInfo) return false
-                      const maxZLayer = Math.max(sourceInfo.zLayer, targetInfo.zLayer)
-                      return maxZLayer === zLayer
-                    })
-
-                    if (edgesToRender.length === 0) return null
-
-                    return (
-                      <g>
-                        {edgesToRender.map((edge, i) => {
-                          const sourcePos = getNodePosition(edge.source, activeLayerIdx)
-                          const targetPos = getNodePosition(edge.target, activeLayerIdx)
-                          if (!sourcePos || !targetPos) return null
-
-                          const edgeId = `${edge.source}-${edge.target}`
-                          const isLinkSelected = selectedLinkId === edgeId || selectedLinkId === `${edge.target}-${edge.source}`
-                          const strokeWidth = isLinkSelected ? 3 : 2
-                          const zLayerDiff = Math.abs(sourcePos.zLayer - targetPos.zLayer)
-
-                          const handleClick = (e: React.MouseEvent) => {
-                            e.stopPropagation()
-                            if (connectionMode !== 'view') return
-                            // 从容器的 singleLevelData 中查找节点详细信息
-                            const findNodeInContainers = (nodeId: string) => {
-                              for (const c of containers) {
-                                const node = c.singleLevelData?.nodes.find(n => n.id === nodeId)
-                                if (node) return { node, container: c }
-                              }
-                              return null
-                            }
-                            const sourceResult = findNodeInContainers(edge.source)
-                            const targetResult = findNodeInContainers(edge.target)
-                            // 构建详细的标签：包含容器路径
-                            const sourceContainer = sourceResult?.container
-                            const targetContainer = targetResult?.container
-                            const sourceLabel = sourceResult?.node
-                              ? `${sourceContainer?.label || ''}/${sourceResult.node.label}`
-                              : edge.source
-                            const targetLabel = targetResult?.node
-                              ? `${targetContainer?.label || ''}/${targetResult.node.label}`
-                              : edge.target
-                            onLinkClick?.({
-                              id: edgeId,
-                              sourceId: edge.source,
-                              sourceLabel,
-                              sourceType: sourceResult?.node?.type || 'unknown',
-                              targetId: edge.target,
-                              targetLabel,
-                              targetType: targetResult?.node?.type || 'unknown',
-                              bandwidth: edge.bandwidth,
-                              latency: edge.latency,
-                              isManual: false
-                            })
-                          }
-
-                          // 3D效果：使用弧线模拟z轴方向的连接
-                          const midX = (sourcePos.x + targetPos.x) / 2
-                          const midY = (sourcePos.y + targetPos.y) / 2
-                          const dx = targetPos.x - sourcePos.x
-                          const dy = targetPos.y - sourcePos.y
-                          const dist = Math.sqrt(dx * dx + dy * dy)
-
-                          // 3D弯曲程度：向上弯曲模拟z轴方向
-                          // 弯曲方向固定向上（负Y方向），高度基于zLayer差和距离
-                          const baseBulge = Math.min(dist * 0.25, 80)  // 基础弯曲
-                          const zBulge = zLayerDiff * 20  // zLayer差异增加高度
-                          const totalBulge = baseBulge + zBulge
-
-                          // 控制点向上偏移（负Y方向）
-                          const ctrlX = midX
-                          const ctrlY = midY - totalBulge  // 向上弯曲
-
-                          // 3D路径
-                          const pathD = `M ${sourcePos.x} ${sourcePos.y} Q ${ctrlX} ${ctrlY}, ${targetPos.x} ${targetPos.y}`
-
-                          // 计算路径的1/4和3/4点，用于分段渲染（实线-虚线-实线）
-                          const t1 = 0.2, t2 = 0.8  // 虚线段的起止位置
-                          // 贝塞尔曲线上的点：B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
-                          const getPointOnCurve = (t: number) => ({
-                            x: (1-t)*(1-t)*sourcePos.x + 2*(1-t)*t*ctrlX + t*t*targetPos.x,
-                            y: (1-t)*(1-t)*sourcePos.y + 2*(1-t)*t*ctrlY + t*t*targetPos.y,
-                          })
-                          const p1 = getPointOnCurve(t1)
-                          const p2 = getPointOnCurve(t2)
-
-                          // 分段路径
-                          const pathSolid1 = `M ${sourcePos.x} ${sourcePos.y} Q ${sourcePos.x + (ctrlX-sourcePos.x)*t1*2} ${sourcePos.y + (ctrlY-sourcePos.y)*t1*2}, ${p1.x} ${p1.y}`
-                          const pathDashed = `M ${p1.x} ${p1.y} Q ${ctrlX} ${ctrlY}, ${p2.x} ${p2.y}`
-                          const pathSolid2 = `M ${p2.x} ${p2.y} Q ${targetPos.x + (ctrlX-targetPos.x)*(1-t2)*2} ${targetPos.y + (ctrlY-targetPos.y)*(1-t2)*2}, ${targetPos.x} ${targetPos.y}`
-
-                          // 3D阴影路径（稍微偏移）
-                          const shadowPathD = `M ${sourcePos.x + 2} ${sourcePos.y + 4} Q ${ctrlX + 2} ${ctrlY + 4}, ${targetPos.x + 2} ${targetPos.y + 4}`
-
-                          const baseColor = isLinkSelected ? '#52c41a' : '#faad14'
-
-                          return (
-                            <g key={`inter-level-edge-${containerNode.id}-${i}`} style={{ transition: 'all 0.3s ease-out' }}>
-                              {/* 3D阴影 */}
-                              <path d={shadowPathD} fill="none" stroke="#000" strokeWidth={strokeWidth + 1}
-                                strokeOpacity={0.15} style={{ pointerEvents: 'none' }} />
-                              {/* 透明触发层 */}
-                              <path d={pathD} fill="none" stroke="transparent" strokeWidth={14}
-                                style={{ cursor: 'pointer' }} onClick={handleClick} />
-                              {/* 实线段1（源端） */}
-                              <path d={pathSolid1} fill="none" stroke={baseColor} strokeWidth={strokeWidth}
-                                strokeOpacity={isLinkSelected ? 1 : 0.9}
-                                style={{ pointerEvents: 'none' }} />
-                              {/* 虚线段（中间，跨越边界） */}
-                              <path d={pathDashed} fill="none" stroke={baseColor} strokeWidth={strokeWidth - 0.5}
-                                strokeDasharray="6,4" strokeOpacity={isLinkSelected ? 0.8 : 0.5}
-                                style={{ pointerEvents: 'none' }} />
-                              {/* 实线段2（目标端） */}
-                              <path d={pathSolid2} fill="none" stroke={baseColor} strokeWidth={strokeWidth}
-                                strokeOpacity={isLinkSelected ? 1 : 0.9}
-                                style={{ pointerEvents: 'none' }} />
-                              {/* 发光效果（选中时） */}
-                              {isLinkSelected && (
-                                <path d={pathD} fill="none" stroke="#52c41a" strokeWidth={strokeWidth + 2}
-                                  strokeOpacity={0.3} style={{ pointerEvents: 'none', filter: 'blur(4px)' }} />
-                              )}
-                            </g>
-                          )
-                        })}
-                      </g>
-                    )
-                  })()}
-
-                  {/* 内部元素应用 skewX 变换（同样可动画化） */}
-                  <g
-                    style={{
-                      transition: isAnimating
-                        ? 'transform 0.5s ease-in-out'
-                        : 'transform 0.3s ease-out',
-                      transform: `skewX(${currentSkewAngle}deg)`,
-                      transformOrigin: `${centerX}px ${centerY}px`,
-                    }}
-                  >
-                    {/* 容器标签 - 左下角 */}
-                    <text
-                      x={x + 12}
-                      y={y + h - 10}
-                      fill={containerNode.color}
-                      fontSize={12}
-                      fontWeight={600}
-                    >
-                      {containerNode.label}
-                    </text>
-
-                    {/* 使用嵌套 SVG 渲染单层级内容（用于展开动画平滑过渡） */}
-                    {containerNode.singleLevelData && (() => {
-                      const { nodes: slNodes, edges: slEdges, viewBox, directTopology: slDirectTopology, switchPanelWidth } = containerNode.singleLevelData
-                      const slSwitchPanelWidth = switchPanelWidth ?? 0
-                      // 分离Switch节点
-                      const slSwitchNodes = slNodes.filter(n => n.isSwitch && n.inSwitchPanel)
-                      // 让拓扑填充尽可能多的容器空间
-                      const labelHeight = 10  // 留给标签的空间
-                      const sidePadding = 10
-                      const topPadding = 10
-                      // SVG 填充容器的大部分空间
-                      const svgWidth = w - sidePadding * 2
-                      const svgHeight = h - labelHeight - topPadding
-                      const svgX = x + sidePadding
-                      const svgY = y + topPadding
-
-                      // 计算节点缩放（与单层级视图一致）
-                      const deviceCount = slNodes.filter(n => !n.isSwitch).length
-                      const slNodeScale = deviceCount > 20 ? 0.8 : deviceCount > 10 ? 0.9 : 1.0
-
-                      return (
-                        <svg
-                          x={svgX}
-                          y={svgY}
-                          width={svgWidth}
-                          height={svgHeight}
-                          viewBox={`0 0 ${viewBox.width} ${viewBox.height}`}
-                          preserveAspectRatio="xMidYMid meet"
-                          overflow="hidden"
-                          onMouseMove={handleDragMove}
-                          onMouseUp={handleDragEnd}
-                          onMouseLeave={handleDragEnd}
-                        >
-                          {/* 透明背景 - 点击空白区域：查看模式选中容器，连接模式不做处理 */}
-                          <rect
-                            x={0}
-                            y={0}
-                            width={viewBox.width}
-                            height={viewBox.height}
-                            fill="transparent"
-                            style={{ cursor: connectionMode !== 'view' ? 'crosshair' : 'pointer' }}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              // 连接模式下点击空白区域不做处理
-                              if (connectionMode !== 'view') return
-                              // 查看模式：点击容器内空白区域选中容器
-                              if (onNodeClick) {
-                                const containerConnections = layerEdges.map(edge => {
-                                  const targetNode = layerNodes.find(n => n.id === (edge.source === containerNode.id ? edge.target : edge.source))
-                                  return {
-                                    id: edge.source === containerNode.id ? edge.target : edge.source,
-                                    label: targetNode?.label || '',
-                                    bandwidth: edge.bandwidth,
-                                    latency: edge.latency,
-                                  }
-                                })
-                                onNodeClick({
-                                  id: containerNode.id,
-                                  label: containerNode.label,
-                                  type: containerNode.type,
-                                  subType: containerNode.type,
-                                  connections: containerConnections,
-                                })
-                              }
-                              onLinkClick?.(null)
-                            }}
-                          />
-
-                          {/* 容器内Switch面板（与单层级一致） */}
-                          {slSwitchPanelWidth > 0 && slSwitchNodes.length > 0 && (
-                            <g className="container-switch-panel">
-                              {/* Switch面板背景 */}
-                              <rect
-                                x={0}
-                                y={0}
-                                width={slSwitchPanelWidth}
-                                height={viewBox.height}
-                                fill="rgba(248, 249, 250, 0.9)"
-                                stroke="#e9ecef"
-                                strokeWidth={1}
-                                rx={2}
-                              />
-                              {/* Switch之间的连线（阶梯式，与单层级一致） */}
-                              {(() => {
-                                const switchIds = new Set(slSwitchNodes.map(n => n.id))
-                                const switchInternalEdges = slEdges.filter(e =>
-                                  switchIds.has(e.source) && switchIds.has(e.target)
-                                )
-                                return switchInternalEdges.map((edge, idx) => {
-                                  const sourceNode = slSwitchNodes.find(n => n.id === edge.source)
-                                  const targetNode = slSwitchNodes.find(n => n.id === edge.target)
-                                  if (!sourceNode || !targetNode) return null
-
-                                  const upperNode = sourceNode.y < targetNode.y ? sourceNode : targetNode
-                                  const lowerNode = sourceNode.y < targetNode.y ? targetNode : sourceNode
-
-                                  const midY = (upperNode.y + lowerNode.y) / 2
-                                  const pathD = `M ${upperNode.x} ${upperNode.y + 10}
-                                                 L ${upperNode.x} ${midY}
-                                                 L ${lowerNode.x} ${midY}
-                                                 L ${lowerNode.x} ${lowerNode.y - 10}`
-
-                                  return (
-                                    <path
-                                      key={`sl-sw-edge-${idx}`}
-                                      d={pathD}
-                                      fill="none"
-                                      stroke="#1890ff"
-                                      strokeWidth={1.5}
-                                      strokeOpacity={0.6}
-                                    />
-                                  )
-                                })
-                              })()}
-                              {/* Switch节点（缩小版） */}
-                              {slSwitchNodes.map(swNode => renderNode(swNode, {
-                                keyPrefix: 'sl-sw',
-                                scale: 0.85,
-                                isSelected: selectedNodeId === swNode.id,
-                                onClick: () => {
-                                  if (connectionMode === 'view' && onNodeClick) {
-                                    const swConnections = slEdges
-                                      .filter(edge => edge.source === swNode.id || edge.target === swNode.id)
-                                      .map(edge => {
-                                        const otherId = edge.source === swNode.id ? edge.target : edge.source
-                                        const otherNode = slNodes.find(n => n.id === otherId)
-                                        return { id: otherId, label: otherNode?.label || otherId, bandwidth: edge.bandwidth, latency: edge.latency }
-                                      })
-                                    onNodeClick({
-                                      id: swNode.id,
-                                      label: swNode.label,
-                                      type: swNode.type,
-                                      subType: swNode.subType,
-                                      connections: swConnections,
-                                    })
-                                  }
-                                }
-                              }))}
-                            </g>
-                          )}
-
-                          {/* 渲染边 - 使用与单层级相同的颜色和交互逻辑 */}
-                          {slEdges.map((edge, i) => {
-                            const sourceNodeOrig = slNodes.find(n => n.id === edge.source)
-                            const targetNodeOrig = slNodes.find(n => n.id === edge.target)
-                            if (!sourceNodeOrig || !targetNodeOrig) return null
-                            // 使用手动位置（如果存在）
-                            const sourceNode = {
-                              ...sourceNodeOrig,
-                              x: manualPositions[sourceNodeOrig.id]?.x ?? sourceNodeOrig.x,
-                              y: manualPositions[sourceNodeOrig.id]?.y ?? sourceNodeOrig.y,
-                            }
-                            const targetNode = {
-                              ...targetNodeOrig,
-                              x: manualPositions[targetNodeOrig.id]?.x ?? targetNodeOrig.x,
-                              y: manualPositions[targetNodeOrig.id]?.y ?? targetNodeOrig.y,
-                            }
-
-                            // 检测边是否被选中
-                            const edgeId = `${edge.source}-${edge.target}`
-                            const reverseEdgeId = `${edge.target}-${edge.source}`
-                            const isEdgeSelected = selectedLinkId === edgeId || selectedLinkId === reverseEdgeId
-
-                            // 边颜色：与单层级视图保持一致，优先使用热力图颜色
-                            let edgeColor = '#b0b0b0'  // 默认灰色
-                            let strokeWidth = 1.5
-                            const slTrafficStyle = getTrafficHeatmapStyle(edge.source, edge.target)
-                            if (isEdgeSelected) {
-                              edgeColor = '#52c41a'  // 选中：绿色
-                              strokeWidth = 3
-                            } else if (slTrafficStyle) {
-                              edgeColor = slTrafficStyle.stroke  // 热力图颜色
-                              strokeWidth = slTrafficStyle.strokeWidth
-                            } else if (edge.isSwitch) {
-                              edgeColor = '#1890ff'  // Switch 连接：蓝色
-                              strokeWidth = 2
-                            }
-
-                            // tooltip 内容
-                            const bandwidthStr = edge.bandwidth ? `${edge.bandwidth}Gbps` : ''
-                            const latencyStr = edge.latency ? `${edge.latency}ns` : ''
-                            const slTrafficStr = slTrafficStyle ? `流量: ${slTrafficStyle.trafficMb.toFixed(1)}MB, 利用率: ${(slTrafficStyle.utilization * 100).toFixed(0)}%` : ''
-                            const propsStr = [bandwidthStr, latencyStr, slTrafficStr].filter(Boolean).join(', ')
-                            const edgeTooltip = `${sourceNode.label} ↔ ${targetNode.label}${propsStr ? ` (${propsStr})` : ''}`
-
-                            // 点击处理
-                            const handleEdgeClick = (e: React.MouseEvent) => {
-                              e.stopPropagation()
-                              if (connectionMode !== 'view') return
-                              if (onLinkClick) {
-                                onLinkClick({
-                                  id: edgeId,
-                                  sourceId: edge.source,
-                                  sourceLabel: sourceNode.label,
-                                  sourceType: sourceNode.type,
-                                  targetId: edge.target,
-                                  targetLabel: targetNode.label,
-                                  targetType: targetNode.type,
-                                  bandwidth: edge.bandwidth,
-                                  latency: edge.latency,
-                                  isManual: false,
-                                })
-                              }
-                            }
-                            const handleEdgeMouseEnter = (e: React.MouseEvent) => {
-                              if (connectionMode !== 'view') return
-                              setTooltip({
-                                x: e.clientX - (svgRef.current?.getBoundingClientRect().left || 0),
-                                y: e.clientY - (svgRef.current?.getBoundingClientRect().top || 0) + 15,
-                                content: edgeTooltip,
-                              })
-                            }
-                            const handleEdgeMouseLeave = () => connectionMode === 'view' && setTooltip(null)
-
-                            // 2D FullMesh：非相邻节点使用曲线连接
-                            if (slDirectTopology === 'full_mesh_2d') {
-                              const sourceGridRow = sourceNode.gridRow
-                              const sourceGridCol = sourceNode.gridCol
-                              const targetGridRow = targetNode.gridRow
-                              const targetGridCol = targetNode.gridCol
-                              const sameRow = sourceGridRow === targetGridRow
-                              const sameCol = sourceGridCol === targetGridCol
-                              const colDiff = Math.abs((sourceGridCol || 0) - (targetGridCol || 0))
-                              const rowDiff = Math.abs((sourceGridRow || 0) - (targetGridRow || 0))
-
-                              // 同行非相邻（列差>1）或同列非相邻（行差>1）使用曲线
-                              if ((sameRow && colDiff > 1) || (sameCol && rowDiff > 1)) {
-                                const midX = (sourceNode.x + targetNode.x) / 2
-                                const midY = (sourceNode.y + targetNode.y) / 2
-                                const dx = targetNode.x - sourceNode.x
-                                const dy = targetNode.y - sourceNode.y
-                                const dist = Math.sqrt(dx * dx + dy * dy)
-
-                                const bulge = dist * 0.25 + (sourceGridRow || 0) * 5
-                                const perpX = -dy / dist
-                                const perpY = dx / dist
-                                const ctrlX = midX + perpX * bulge
-                                const ctrlY = midY + perpY * bulge
-
-                                const pathD = `M ${sourceNode.x} ${sourceNode.y} Q ${ctrlX} ${ctrlY}, ${targetNode.x} ${targetNode.y}`
-                                return (
-                                  <g key={`sl-edge-${i}`}>
-                                    <path
-                                      d={pathD}
-                                      fill="none"
-                                      stroke="transparent"
-                                      strokeWidth={12}
-                                      style={{ cursor: 'pointer' }}
-                                      onClick={handleEdgeClick}
-                                      onMouseEnter={handleEdgeMouseEnter}
-                                      onMouseLeave={handleEdgeMouseLeave}
-                                    />
-                                    <path
-                                      d={pathD}
-                                      fill="none"
-                                      stroke={edgeColor}
-                                      strokeWidth={strokeWidth}
-                                      strokeOpacity={isEdgeSelected ? 1 : 0.7}
-                                      style={{
-                                        pointerEvents: 'none',
-                                        filter: isEdgeSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none',
-                                      }}
-                                    />
-                                  </g>
-                                )
-                              }
-                            }
-
-                            // 普通直线连接
-                            return (
-                              <g key={`sl-edge-${i}`}>
-                                {/* 透明触发层 - 增大点击区域 */}
-                                <line
-                                  x1={sourceNode.x}
-                                  y1={sourceNode.y}
-                                  x2={targetNode.x}
-                                  y2={targetNode.y}
-                                  stroke="transparent"
-                                  strokeWidth={12}
-                                  style={{ cursor: 'pointer' }}
-                                  onClick={handleEdgeClick}
-                                  onMouseEnter={handleEdgeMouseEnter}
-                                  onMouseLeave={handleEdgeMouseLeave}
-                                />
-                                {/* 可见线条 */}
-                                <line
-                                  x1={sourceNode.x}
-                                  y1={sourceNode.y}
-                                  x2={targetNode.x}
-                                  y2={targetNode.y}
-                                  stroke={edgeColor}
-                                  strokeWidth={strokeWidth}
-                                  strokeOpacity={isEdgeSelected ? 1 : 0.7}
-                                  style={{
-                                    pointerEvents: 'none',
-                                    filter: isEdgeSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none',
-                                  }}
-                                />
-                              </g>
-                            )
-                          })}
-
-                          {/* 渲染节点 - 使用统一的renderNode函数（过滤掉Switch节点，已单独渲染） */}
-                          {slNodes.filter(n => !n.isSwitch).map(node => {
-                            const isNodeSelected = selectedNodeId === node.id
-                            const nodeConnections = slEdges
-                              .filter(e => e.source === node.id || e.target === node.id)
-                              .map(e => {
-                                const otherId = e.source === node.id ? e.target : e.source
-                                const otherNode = slNodes.find(n => n.id === otherId)
-                                return { id: otherId, label: otherNode?.label || otherId, bandwidth: e.bandwidth, latency: e.latency }
-                              })
-
-                            // 使用手动位置（如果存在）
-                            const nodeWithPos = {
-                              ...node,
-                              x: manualPositions[node.id]?.x ?? node.x,
-                              y: manualPositions[node.id]?.y ?? node.y,
-                            }
-
-                            return renderNode(nodeWithPos, {
-                              keyPrefix: 'sl-node',
-                              scale: slNodeScale,
-                              isSelected: isNodeSelected,
-                              onClick: () => {
-                                if (connectionMode === 'view' && onNodeClick) {
-                                  onNodeClick({
-                                    id: node.id,
-                                    label: node.label,
-                                    type: node.type,
-                                    subType: node.subType,
-                                    connections: nodeConnections,
-                                  })
-                                }
-                              }
-                            })
-                          })}
-                        </svg>
-                      )
-                    })()}
-
-                    {/* 如果没有 singleLevelData，使用原来的渲染方式（兼容） */}
-                    {!containerNode.singleLevelData && (
-                      <>
-                        {/* 该层的边 */}
-                        {layerEdges.map((edge, i) => {
-                          const sourceNode = displayNodes.find(n => n.id === edge.source)
-                          const targetNode = displayNodes.find(n => n.id === edge.target)
-                          if (!sourceNode || !targetNode) return null
-                          return (
-                            <line
-                              key={`layer-edge-${i}`}
-                              x1={sourceNode.x}
-                              y1={sourceNode.y}
-                              x2={targetNode.x}
-                              y2={targetNode.y}
-                              stroke="#52c41a"
-                              strokeWidth={1.5}
-                              strokeOpacity={0.6}
-                            />
-                          )
-                        })}
-
-                        {/* 该层的节点 - 使用统一的renderNode */}
-                        {layerNodes.map(node => renderNode(node, {
-                          keyPrefix: 'layer-node',
-                          scale: 0.5,
-                          isSelected: selectedNodeId === node.id,
-                          onClick: () => onNodeClick?.({
-                            id: node.id,
-                            label: node.label,
-                            type: node.type,
-                            subType: node.subType,
-                            connections: [],
-                          })
-                        }))}
-                      </>
-                    )}
-                  </g>
-                </g>
-              )
-            })
-
-            // 获取上层的Switch节点（已通过isometricStackedLayout布局）
-            const upperSwitchNodes = displayNodes.filter(n => n.isSwitch && n.inSwitchPanel && !n.parentId)
-            const upperSwitchPanelWidth = upperSwitchNodes.length > 0
-              ? Math.max(...upperSwitchNodes.map(n => n.x)) + 50
-              : 0
-
-            return (
-              <>
-                {/* 上层Switch面板（多层级模式） */}
-                {upperSwitchNodes.length > 0 && (
-                  <g className="multi-level-switch-panel">
-                    {/* Switch面板背景 */}
-                    <rect
-                      x={0}
-                      y={0}
-                      width={upperSwitchPanelWidth}
-                      height={600}
-                      fill="#f8f9fa"
-                      stroke="#e9ecef"
-                      strokeWidth={1}
-                    />
-                    <text
-                      x={upperSwitchPanelWidth / 2}
-                      y={20}
-                      textAnchor="middle"
-                      fontSize={12}
-                      fill="#666"
-                      fontWeight={600}
-                    >
-                      Switch
-                    </text>
-                    {/* Switch之间的连线（树形结构 - 阶梯式，与单层级一致） */}
-                    {(() => {
-                      // 基于实际edges过滤Switch之间的连线
-                      const switchIds = new Set(upperSwitchNodes.map(n => n.id))
-                      const switchInternalEdges = edges.filter(e =>
-                        switchIds.has(e.source) && switchIds.has(e.target)
-                      )
-                      return switchInternalEdges.map((edge, idx) => {
-                        const sourceNode = upperSwitchNodes.find(n => n.id === edge.source)
-                        const targetNode = upperSwitchNodes.find(n => n.id === edge.target)
-                        if (!sourceNode || !targetNode) return null
-
-                        // 确保上层（spine）在上，下层（leaf）在下
-                        const upperNode = sourceNode.y < targetNode.y ? sourceNode : targetNode
-                        const lowerNode = sourceNode.y < targetNode.y ? targetNode : sourceNode
-
-                        // 阶梯式连线
-                        const midY = (upperNode.y + lowerNode.y) / 2
-                        const pathD = `M ${upperNode.x} ${upperNode.y + 12}
-                                       L ${upperNode.x} ${midY}
-                                       L ${lowerNode.x} ${midY}
-                                       L ${lowerNode.x} ${lowerNode.y - 12}`
-
-                        return (
-                          <path
-                            key={`ml-sw-edge-${idx}`}
-                            d={pathD}
-                            fill="none"
-                            stroke="#1890ff"
-                            strokeWidth={2}
-                            strokeOpacity={0.6}
-                          />
-                        )
-                      })
-                    })()}
-                    {/* Switch节点 - 与单层级样式一致 */}
-                    {upperSwitchNodes.map(swNode => renderNode(swNode, {
-                      keyPrefix: 'ml-sw',
-                      isSelected: selectedNodeId === swNode.id,
-                      onClick: () => {
-                        if (connectionMode === 'view' && onNodeClick) {
-                          const swConnections = edges
-                            .filter(edge => edge.source === swNode.id || edge.target === swNode.id)
-                            .map(edge => {
-                              const otherId = edge.source === swNode.id ? edge.target : edge.source
-                              const otherNode = displayNodes.find(n => n.id === otherId)
-                              return { id: otherId, label: otherNode?.label || otherId, bandwidth: edge.bandwidth, latency: edge.latency }
-                            })
-                          onNodeClick({
-                            id: swNode.id,
-                            label: swNode.label,
-                            type: swNode.type,
-                            subType: swNode.subType,
-                            connections: swConnections,
-                          })
-                        }
-                      }
-                    }))}
-                  </g>
-                )}
-                {containersRendered}
-                {/* 跨容器手动连接在最上层 */}
-                {renderManualConnectionsOverlay()}
-              </>
-            )
-          })()}
+          {/* 多层级模式：使用独立组件渲染 */}
+          {multiLevelOptions?.enabled && (
+              <MultiLevelView
+                displayNodes={displayNodes}
+                edges={edges}
+                manualConnections={manualConnections}
+                zoom={zoom}
+                selectedNodeId={selectedNodeId}
+                selectedLinkId={selectedLinkId}
+                hoveredLayerIndex={hoveredLayerIndex}
+                setHoveredLayerIndex={setHoveredLayerIndex}
+                expandingContainer={expandingContainer}
+                collapsingContainer={collapsingContainer}
+                collapseAnimationStarted={collapseAnimationStarted}
+                onExpandAnimationEnd={handleExpandAnimationEnd}
+                connectionMode={connectionMode}
+                onNodeClick={onNodeClick}
+                onLinkClick={onLinkClick}
+                onNodeDoubleClick={handleNodeDoubleClickWithAnimation}
+                layoutType={layoutType}
+                renderNode={renderNode}
+                getCurrentHierarchyLevel={getCurrentHierarchyLevel}
+                handleDragMove={handleDragMove}
+                handleDragEnd={handleDragEnd}
+                selectedNodes={selectedNodes}
+                targetNodes={targetNodes}
+                onSelectedNodesChange={onSelectedNodesChange}
+                onTargetNodesChange={onTargetNodesChange}
+              />
+          )}
 
           {/* 2D Torus：渲染环绕连接的半椭圆弧 */}
           {directTopology === 'torus_2d' && (() => {
@@ -2300,624 +1324,46 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             return <g>{arcs}</g>
           })()}
 
-          {/* 渲染连接线（非多层级模式） */}
-          {!multiLevelOptions?.enabled && (() => {
-            // 创建边渲染器的 props
-            const edgeProps: EdgeRendererProps = {
-              edges,
-              nodes,
-              nodePositions,
-              zoom,
-              selectedLinkId,
-              connectionMode,
-              isManualMode,
-              onLinkClick,
-              setTooltip,
-              svgRef,
-              getTrafficHeatmapStyle,
-              directTopology,
-            }
-            return edges.map((edge, i) => {
-            // 外部连接：使用提取的渲染函数
-            if (edge.isExternal) {
-              return renderExternalEdge(edge, i, edgeProps)
-            }
+          {/* 单层级模式：使用独立组件渲染 */}
+          {!multiLevelOptions?.enabled && (
+            <SingleLevelView
+              displayNodes={displayNodes}
+              nodes={nodes}
+              edges={edges}
+              manualConnections={manualConnections}
+              nodePositions={nodePositions}
+              zoom={zoom}
+              selectedNodeId={selectedNodeId}
+              selectedLinkId={selectedLinkId}
+              hoveredNodeId={hoveredNodeId}
+              setHoveredNodeId={setHoveredNodeId}
+              connectionMode={connectionMode}
+              isManualMode={isManualMode}
+              isForceMode={isForceMode}
+              directTopology={directTopology}
+              switchPanelWidth={switchPanelWidth}
+              onNodeClick={onNodeClick}
+              onNodeDoubleClick={handleNodeDoubleClickWithAnimation}
+              onLinkClick={onLinkClick}
+              setTooltip={setTooltip}
+              svgRef={svgRef}
+              draggingNode={draggingNode}
+              handleDragStart={handleDragStart}
+              layoutType={layoutType}
+              nodeScale={nodeScale}
+              renderNode={renderNode}
+              renderNodeShape={renderNodeShape}
+              getCurrentHierarchyLevel={getCurrentHierarchyLevel}
+              getTrafficHeatmapStyle={getTrafficHeatmapStyle}
+              selectedNodes={selectedNodes}
+              targetNodes={targetNodes}
+              onSelectedNodesChange={onSelectedNodesChange}
+              onTargetNodesChange={onTargetNodesChange}
+            />
+          )}
 
-            // 间接连接：使用提取的渲染函数
-            if (edge.isIndirect) {
-              return renderIndirectEdge(edge, i, edgeProps)
-            }
 
-            const sourcePos = nodePositions.get(edge.source)
-            const targetPos = nodePositions.get(edge.target)
-            if (!sourcePos || !targetPos) return null
 
-            const sourceNode = nodes.find(n => n.id === edge.source)
-            const targetNode = nodes.find(n => n.id === edge.target)
-
-            const adjustedSourcePos = { x: sourcePos.x, y: sourcePos.y }
-            const adjustedTargetPos = { x: targetPos.x, y: targetPos.y }
-
-            // 生成唯一的连接ID
-            const edgeId = `${edge.source}-${edge.target}`
-            const isLinkSelected = selectedLinkId === edgeId || selectedLinkId === `${edge.target}-${edge.source}`
-
-            const bandwidthStr = edge.bandwidth ? `${edge.bandwidth}Gbps` : ''
-            const latencyStr = edge.latency ? `${edge.latency}ns` : ''
-            const trafficStyle = getTrafficHeatmapStyle(edge.source, edge.target)
-            const trafficStr = trafficStyle ? `流量: ${trafficStyle.trafficMb.toFixed(1)}MB, 利用率: ${(trafficStyle.utilization * 100).toFixed(0)}%` : ''
-            const propsStr = [bandwidthStr, latencyStr, trafficStr].filter(Boolean).join(', ')
-            const tooltipContent = `${sourceNode?.label || edge.source} ↔ ${targetNode?.label || edge.target}${propsStr ? ` (${propsStr})` : ''}`
-
-            // 点击 link 的处理函数
-            const handleLinkClick = (e: React.MouseEvent) => {
-              e.stopPropagation()
-              if (connectionMode !== 'view' || isManualMode) return
-              if (onLinkClick) {
-                onLinkClick({
-                  id: edgeId,
-                  sourceId: edge.source,
-                  sourceLabel: sourceNode?.label || edge.source,
-                  sourceType: sourceNode?.type || 'unknown',
-                  targetId: edge.target,
-                  targetLabel: targetNode?.label || edge.target,
-                  targetType: targetNode?.type || 'unknown',
-                  bandwidth: edge.bandwidth,
-                  latency: edge.latency,
-                  isManual: false
-                })
-              }
-            }
-
-            // 判断是否是 Torus 环绕连接
-            const sourceGridRow = sourceNode?.gridRow
-            const sourceGridCol = sourceNode?.gridCol
-            const sourceGridZ = sourceNode?.gridZ
-            const targetGridRow = targetNode?.gridRow
-            const targetGridCol = targetNode?.gridCol
-            const targetGridZ = targetNode?.gridZ
-
-            // 检测环绕连接
-            const deviceNodes = nodes.filter(n => !n.isSwitch)
-
-            if (directTopology === 'torus_2d') {
-              const { cols, rows } = getTorusGridSize(deviceNodes.length)
-              const isHorizontalWrap = sourceGridRow === targetGridRow &&
-                Math.abs((sourceGridCol || 0) - (targetGridCol || 0)) === cols - 1
-              const isVerticalWrap = sourceGridCol === targetGridCol &&
-                Math.abs((sourceGridRow || 0) - (targetGridRow || 0)) === rows - 1
-              if (isHorizontalWrap || isVerticalWrap) {
-                return null  // 2D Torus 环绕连接由弧线表示
-              }
-            }
-
-            if (directTopology === 'torus_3d') {
-              void getTorus3DSize(deviceNodes.length)  // 保留方法调用但不使用返回值
-              const sameZ = sourceGridZ === targetGridZ
-              const sameRow = sourceGridRow === targetGridRow
-              const sameCol = sourceGridCol === targetGridCol
-
-              // 只有该方向节点数>=3时，环绕连接才由弧线表示，否则直接画线
-              // X方向环绕（同层同行，列差为dim-1，且该行节点数>=3）
-              const rowNodes = deviceNodes.filter(n => n.gridZ === sourceGridZ && n.gridRow === sourceGridRow)
-              const isXWrap = sameZ && sameRow && rowNodes.length >= 3 &&
-                Math.abs((sourceGridCol || 0) - (targetGridCol || 0)) === rowNodes.length - 1
-
-              // Y方向环绕（同层同列，行差为dim-1，且该列节点数>=3）
-              const colNodes = deviceNodes.filter(n => n.gridZ === sourceGridZ && n.gridCol === sourceGridCol)
-              const isYWrap = sameZ && sameCol && colNodes.length >= 3 &&
-                Math.abs((sourceGridRow || 0) - (targetGridRow || 0)) === colNodes.length - 1
-
-              // Z方向环绕（同行同列，Z差为layers-1，且该深度>=3）
-              const depthNodes = deviceNodes.filter(n => n.gridRow === sourceGridRow && n.gridCol === sourceGridCol)
-              const isZWrap = sameRow && sameCol && depthNodes.length >= 3 &&
-                Math.abs((sourceGridZ || 0) - (targetGridZ || 0)) === depthNodes.length - 1
-
-              if (isXWrap || isYWrap || isZWrap) {
-                return null  // 3D Torus 环绕连接由弧线表示
-              }
-            }
-
-            // 2D FullMesh：非相邻节点使用曲线连接
-            if (directTopology === 'full_mesh_2d') {
-              const sameRow = sourceGridRow === targetGridRow
-              const sameCol = sourceGridCol === targetGridCol
-              const colDiff = Math.abs((sourceGridCol || 0) - (targetGridCol || 0))
-              const rowDiff = Math.abs((sourceGridRow || 0) - (targetGridRow || 0))
-
-              // 同行非相邻（列差>1）或同列非相邻（行差>1）使用曲线
-              if ((sameRow && colDiff > 1) || (sameCol && rowDiff > 1)) {
-                const midX = (sourcePos.x + targetPos.x) / 2
-                const midY = (sourcePos.y + targetPos.y) / 2
-                const dx = targetPos.x - sourcePos.x
-                const dy = targetPos.y - sourcePos.y
-                const dist = Math.sqrt(dx * dx + dy * dy)
-
-                // 使用垂直于连线方向的控制点，确保曲线正确连接两端
-                const bulge = dist * 0.25 + (sourceGridRow || 0) * 5
-                const perpX = -dy / dist
-                const perpY = dx / dist
-                const ctrlX = midX + perpX * bulge
-                const ctrlY = midY + perpY * bulge
-
-                const pathD = `M ${sourcePos.x} ${sourcePos.y} Q ${ctrlX} ${ctrlY}, ${targetPos.x} ${targetPos.y}`
-                return (
-                  <g key={`edge-${i}`}>
-                    {/* 透明触发层 */}
-                    <path
-                      d={pathD}
-                      fill="none"
-                      stroke="transparent"
-                      strokeWidth={16}
-                      style={{ cursor: 'pointer' }}
-                      onClick={handleLinkClick}
-                      onMouseEnter={(e) => {
-                        if (connectionMode !== 'view' || isManualMode) return
-                        const rect = svgRef.current?.getBoundingClientRect()
-                        if (rect) {
-                          setTooltip({
-                            x: e.clientX - rect.left,
-                            y: e.clientY - rect.top + 20,
-                            content: tooltipContent,
-                          })
-                        }
-                      }}
-                      onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
-                    />
-                    {/* 可见曲线 - Switch连接用蓝色，节点直连用灰色，选中时绿色高亮 */}
-                    <path
-                      d={pathD}
-                      fill="none"
-                      stroke={isLinkSelected ? '#52c41a' : (edge.isSwitch ? '#1890ff' : '#b0b0b0')}
-                      strokeWidth={isLinkSelected ? 3 : (edge.isSwitch ? 2 : 1.5)}
-                      strokeOpacity={isLinkSelected ? 1 : 0.7}
-                      style={{ pointerEvents: 'none', filter: isLinkSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
-                    />
-                  </g>
-                )
-              }
-            }
-
-            // 多层级连接样式计算
-            const getMultiLevelEdgeStyle = () => {
-              // 热力图模式优先：如果有流量分析结果，使用热力图颜色
-              const trafficStyle = getTrafficHeatmapStyle(edge.source, edge.target)
-              if (trafficStyle && !isLinkSelected) {
-                return {
-                  stroke: trafficStyle.stroke,
-                  strokeWidth: trafficStyle.strokeWidth,
-                  strokeDasharray: undefined as string | undefined,
-                }
-              }
-              if (!edge.connectionType) {
-                // 非多层级模式，使用原有逻辑
-                return {
-                  stroke: isLinkSelected ? '#52c41a' : (edge.isSwitch ? '#1890ff' : '#b0b0b0'),
-                  strokeWidth: isLinkSelected ? 3 : (edge.isSwitch ? 2 : 1.5),
-                  strokeDasharray: undefined as string | undefined,
-                }
-              }
-              // 多层级模式
-              switch (edge.connectionType) {
-                case 'intra_upper':
-                  return { stroke: isLinkSelected ? '#52c41a' : '#1890ff', strokeWidth: isLinkSelected ? 3 : 2, strokeDasharray: undefined }
-                case 'intra_lower':
-                  return { stroke: isLinkSelected ? '#52c41a' : '#52c41a', strokeWidth: isLinkSelected ? 3 : 1.5, strokeDasharray: undefined }
-                case 'inter_level':
-                  return { stroke: isLinkSelected ? '#52c41a' : '#faad14', strokeWidth: isLinkSelected ? 3 : 1.5, strokeDasharray: '6,3' }
-                default:
-                  return { stroke: '#b0b0b0', strokeWidth: 1.5, strokeDasharray: undefined }
-              }
-            }
-            const edgeStyle = getMultiLevelEdgeStyle()
-
-            // 普通直线连接 - 使用中心点，节点会遮盖线的端点
-            return (
-              <g key={`edge-${i}`} style={{ transition: 'transform 0.3s ease-out' }}>
-                {/* 透明触发层 - 增大点击区域 */}
-                <line
-                  x1={adjustedSourcePos.x}
-                  y1={adjustedSourcePos.y}
-                  x2={adjustedTargetPos.x}
-                  y2={adjustedTargetPos.y}
-                  stroke="transparent"
-                  strokeWidth={16}
-                  style={{ cursor: 'pointer' }}
-                  onClick={handleLinkClick}
-                  onMouseEnter={(e) => {
-                    if (connectionMode !== 'view' || isManualMode) return
-                    const rect = svgRef.current?.getBoundingClientRect()
-                    if (rect) {
-                      setTooltip({
-                        x: e.clientX - rect.left,
-                        y: e.clientY - rect.top + 20,
-                        content: tooltipContent,
-                      })
-                    }
-                  }}
-                  onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
-                />
-                {/* 可见线条 */}
-                <line
-                  x1={adjustedSourcePos.x}
-                  y1={adjustedSourcePos.y}
-                  x2={adjustedTargetPos.x}
-                  y2={adjustedTargetPos.y}
-                  stroke={edgeStyle.stroke}
-                  strokeWidth={edgeStyle.strokeWidth}
-                  strokeDasharray={edgeStyle.strokeDasharray}
-                  strokeOpacity={isLinkSelected ? 1 : 0.7}
-                  style={{ pointerEvents: 'none', filter: isLinkSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
-                />
-              </g>
-            )
-          })
-          })()}
-
-          {/* 渲染手动连接线（非多层级模式） */}
-          {!multiLevelOptions?.enabled && manualConnections
-            .filter(mc => mc.hierarchy_level === getCurrentHierarchyLevel())
-            .map((conn) => {
-              const sourcePos = nodePositions.get(conn.source)
-              const targetPos = nodePositions.get(conn.target)
-              if (!sourcePos || !targetPos) return null
-
-              const sourceNode = nodes.find(n => n.id === conn.source)
-              const targetNode = nodes.find(n => n.id === conn.target)
-
-              // 多层级视图：计算 yOffset（容器悬停/选中时的位移）
-              let sourceYOffset = 0
-              let targetYOffset = 0
-              if (multiLevelOptions?.enabled) {
-                const liftDistance = 150
-                // 从节点ID提取父容器索引作为 zLayer
-                const getZLayer = (nodeId: string): number => {
-                  const parts = nodeId.split('/')
-                  if (parts.length >= 2) {
-                    const parentPart = parts[parts.length - 2]
-                    const match = parentPart.match(/_(\d+)$/)
-                    return match ? parseInt(match[1], 10) : 0
-                  }
-                  return 0
-                }
-                // 计算 selectedLayerIndex
-                let selectedLayerIdx: number | null = null
-                if (selectedNodeId) {
-                  const selectedContainer = displayNodes.find(n => n.isContainer && n.id === selectedNodeId)
-                  if (selectedContainer) {
-                    selectedLayerIdx = selectedContainer.zLayer ?? null
-                  } else {
-                    // 查找包含选中节点的容器
-                    for (const n of displayNodes) {
-                      if (n.isContainer && n.singleLevelData?.nodes.some(sn => sn.id === selectedNodeId)) {
-                        selectedLayerIdx = n.zLayer ?? null
-                        break
-                      }
-                    }
-                  }
-                }
-                const activeLayerIdx = hoveredLayerIndex ?? selectedLayerIdx
-                const sourceZLayer = getZLayer(conn.source)
-                const targetZLayer = getZLayer(conn.target)
-                if (activeLayerIdx !== null) {
-                  if (sourceZLayer < activeLayerIdx) sourceYOffset = -liftDistance
-                  if (targetZLayer < activeLayerIdx) targetYOffset = -liftDistance
-                }
-              }
-              // 应用 yOffset
-              const adjustedSourcePos = { x: sourcePos.x, y: sourcePos.y + sourceYOffset }
-              const adjustedTargetPos = { x: targetPos.x, y: targetPos.y + targetYOffset }
-              const manualTooltip = `${sourceNode?.label || conn.source} ↔ ${targetNode?.label || conn.target} (手动)`
-
-              // 手动连接的ID和选中状态
-              const manualEdgeId = `${conn.source}-${conn.target}`
-              const isManualLinkSelected = selectedLinkId === manualEdgeId || selectedLinkId === `${conn.target}-${conn.source}`
-
-              // 手动连接的点击处理
-              const handleManualLinkClick = (e: React.MouseEvent) => {
-                e.stopPropagation()
-                if (connectionMode !== 'view' || isManualMode) return
-                if (onLinkClick) {
-                  // 构建详细的节点标签（从节点ID路径中提取）
-                  // 例如 "pod_0/rack_0/board_4" -> "rack_0/board_4"
-                  const getDetailedLabel = (nodeId: string, fallbackLabel: string) => {
-                    const parts = nodeId.split('/')
-                    if (parts.length >= 2) {
-                      // 取最后两部分作为详细标签
-                      return parts.slice(-2).join('/')
-                    }
-                    return fallbackLabel
-                  }
-                  onLinkClick({
-                    id: manualEdgeId,
-                    sourceId: conn.source,
-                    sourceLabel: getDetailedLabel(conn.source, sourceNode?.label || conn.source),
-                    sourceType: sourceNode?.type || conn.source.split('/').pop()?.split('_')[0] || 'unknown',
-                    targetId: conn.target,
-                    targetLabel: getDetailedLabel(conn.target, targetNode?.label || conn.target),
-                    targetType: targetNode?.type || conn.target.split('/').pop()?.split('_')[0] || 'unknown',
-                    isManual: true
-                  })
-                }
-              }
-
-              // 判断是否跨容器连接（从节点ID路径中提取父容器索引）
-              const getParentIndex = (nodeId: string): number => {
-                const parts = nodeId.split('/')
-                if (parts.length >= 2) {
-                  const parentPart = parts[parts.length - 2]
-                  const match = parentPart.match(/_(\d+)$/)
-                  return match ? parseInt(match[1], 10) : 0
-                }
-                return 0
-              }
-              const sourceParentIdx = getParentIndex(conn.source)
-              const targetParentIdx = getParentIndex(conn.target)
-              const indexDiff = Math.abs(sourceParentIdx - targetParentIdx)
-              const isCrossContainer = indexDiff > 1
-
-              // 跨容器连接使用曲线
-              if (isCrossContainer) {
-                const midX = (adjustedSourcePos.x + adjustedTargetPos.x) / 2
-                const midY = (adjustedSourcePos.y + adjustedTargetPos.y) / 2
-                const dx = adjustedTargetPos.x - adjustedSourcePos.x
-                const dy = adjustedTargetPos.y - adjustedSourcePos.y
-                const dist = Math.sqrt(dx * dx + dy * dy)
-                const bulge = dist * 0.2 * indexDiff
-                const perpX = -dy / dist
-                const perpY = dx / dist
-                const ctrlX = midX + perpX * bulge
-                const ctrlY = midY + perpY * bulge
-                const pathD = `M ${adjustedSourcePos.x} ${adjustedSourcePos.y} Q ${ctrlX} ${ctrlY}, ${adjustedTargetPos.x} ${adjustedTargetPos.y}`
-                const strokeColor = isManualLinkSelected ? '#52c41a' : '#722ed1'  // 跨容器用紫色
-                const strokeWidth = isManualLinkSelected ? 3 : 2
-
-                return (
-                  <g key={`manual-${conn.id}`} style={{ transition: 'all 0.3s ease-out' }}>
-                    <path d={pathD} fill="none" stroke="transparent" strokeWidth={16}
-                      style={{ cursor: 'pointer' }} onClick={handleManualLinkClick}
-                      onMouseEnter={(e) => {
-                        if (connectionMode !== 'view' || isManualMode) return
-                        const rect = svgRef.current?.getBoundingClientRect()
-                        if (rect) {
-                          setTooltip({ x: e.clientX - rect.left, y: e.clientY - rect.top + 20, content: manualTooltip })
-                        }
-                      }}
-                      onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
-                    />
-                    <path d={pathD} fill="none" stroke={strokeColor} strokeWidth={strokeWidth}
-                      strokeOpacity={isManualLinkSelected ? 1 : 0.8}
-                      style={{ pointerEvents: 'none', filter: isManualLinkSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
-                    />
-                  </g>
-                )
-              }
-
-              return (
-                <g key={`manual-${conn.id}`} style={{ transition: 'all 0.3s ease-out' }}>
-                  {/* 透明触发层 */}
-                  <line
-                    x1={adjustedSourcePos.x}
-                    y1={adjustedSourcePos.y}
-                    x2={adjustedTargetPos.x}
-                    y2={adjustedTargetPos.y}
-                    stroke="transparent"
-                    strokeWidth={16}
-                    style={{ cursor: 'pointer' }}
-                    onClick={handleManualLinkClick}
-                    onMouseEnter={(e) => {
-                      if (connectionMode !== 'view' || isManualMode) return
-                      const rect = svgRef.current?.getBoundingClientRect()
-                      if (rect) {
-                        setTooltip({
-                          x: e.clientX - rect.left,
-                          y: e.clientY - rect.top + 20,
-                          content: manualTooltip,
-                        })
-                      }
-                    }}
-                    onMouseLeave={() => (connectionMode === 'view' && !isManualMode) && setTooltip(null)}
-                  />
-                  {/* 可见线条 - 编辑模式绿色虚线，普通模式与自动连接一致，选中时绿色高亮 */}
-                  <line
-                    x1={adjustedSourcePos.x}
-                    y1={adjustedSourcePos.y}
-                    x2={adjustedTargetPos.x}
-                    y2={adjustedTargetPos.y}
-                    stroke={isManualLinkSelected ? '#52c41a' : (connectionMode !== 'view' ? '#52c41a' : '#b0b0b0')}
-                    strokeWidth={isManualLinkSelected ? 3 : (connectionMode !== 'view' ? 2.5 : 1.5)}
-                    strokeOpacity={isManualLinkSelected ? 1 : (connectionMode !== 'view' ? 1 : 0.6)}
-                    strokeDasharray={connectionMode !== 'view' ? '8,4' : undefined}
-                    style={{ pointerEvents: 'none', filter: isManualLinkSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
-                  />
-                </g>
-              )
-            })}
-
-          {/* 渲染节点（非多层级模式） */}
-          {!multiLevelOptions?.enabled && displayNodes.map((node) => {
-            // 容器节点不渲染
-            if (node.isContainer) {
-              return null
-            }
-            const isSwitch = node.isSwitch
-            // 计算连接数
-            const nodeConnections = edges.filter(e => e.source === node.id || e.target === node.id)
-            // 简化的tooltip内容
-            const nodeTooltip = isSwitch
-              ? `${node.label} · ${node.subType?.toUpperCase() || 'SWITCH'} · ${nodeConnections.length}连接`
-              : `${node.label} · ${node.type.toUpperCase()} · ${nodeConnections.length}连接`
-            const isSourceSelected = selectedNodes.has(node.id)
-            const isTargetSelected = targetNodes.has(node.id)
-            const isDragging = draggingNode === node.id
-            // 判断节点是否被点击选中
-            const isNodeSelected = selectedNodeId === node.id
-            // 判断节点是否是选中 link 的两端
-            const isLinkEndpoint = selectedLinkId && (
-              selectedLinkId.startsWith(node.id + '-') ||
-              selectedLinkId.endsWith('-' + node.id)
-            )
-            const isHovered = hoveredNodeId === node.id && connectionMode === 'view' && !isManualMode && !isDragging
-            // 节点高亮：点击选中、hover 或者是选中 link 的端点
-            const shouldHighlight = isNodeSelected || isHovered || isLinkEndpoint
-
-            return (
-              <g
-                key={node.id}
-                transform={`translate(${node.x}, ${node.y}) scale(${nodeScale * (isDragging ? 1.08 : 1)})`}
-                className={isForceMode ? 'force-node-hover' : ''}
-                style={{
-                  cursor: isForceMode ? (isDragging ? 'grabbing' : 'grab') : isManualMode ? 'move' : connectionMode !== 'view' ? 'crosshair' : 'pointer',
-                  opacity: isDragging ? 0.85 : 1,
-                  filter: isDragging
-                    ? 'drop-shadow(0 8px 16px rgba(0,0,0,0.25))'
-                    : shouldHighlight
-                      ? 'drop-shadow(0 0 8px rgba(37, 99, 235, 0.6)) drop-shadow(0 0 16px rgba(37, 99, 235, 0.3))'
-                      : 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))',
-                  transition: isDragging
-                    ? 'none'  // 拖拽时禁用过渡以实现即时响应
-                    : 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.15s ease, opacity 0.15s ease',
-                }}
-                onMouseDown={(e) => handleDragStart(node.id, e)}
-                onClick={(e) => {
-                  // 选择源节点模式
-                  if (connectionMode === 'select_source' || connectionMode === 'select' || connectionMode === 'connect') {
-                    const currentSet = new Set(selectedNodes)
-                    if (e.ctrlKey || e.metaKey) {
-                      // Ctrl+点击：切换选中状态
-                      if (currentSet.has(node.id)) {
-                        currentSet.delete(node.id)
-                      } else {
-                        currentSet.add(node.id)
-                      }
-                    } else {
-                      // 普通点击：切换单个选中
-                      if (currentSet.has(node.id)) {
-                        currentSet.delete(node.id)
-                      } else {
-                        currentSet.add(node.id)
-                      }
-                    }
-                    onSelectedNodesChange?.(currentSet)
-                  } else if (connectionMode === 'select_target') {
-                    // 选择目标节点模式
-                    const currentSet = new Set(targetNodes)
-                    if (e.ctrlKey || e.metaKey) {
-                      // Ctrl+点击：切换选中状态
-                      if (currentSet.has(node.id)) {
-                        currentSet.delete(node.id)
-                      } else {
-                        currentSet.add(node.id)
-                      }
-                    } else {
-                      // 普通点击：切换单个选中
-                      if (currentSet.has(node.id)) {
-                        currentSet.delete(node.id)
-                      } else {
-                        currentSet.add(node.id)
-                      }
-                    }
-                    onTargetNodesChange?.(currentSet)
-                  } else {
-                    // 普通查看模式
-                    if (onNodeClick) {
-                      const connections = nodeConnections.map(e => {
-                        // 外部连接：使用 externalNodeId 和 externalNodeLabel
-                        if (e.isExternal) {
-                          return {
-                            id: e.externalNodeId || '',
-                            label: `↗ ${e.externalNodeLabel || '外部节点'}`,
-                            bandwidth: e.bandwidth,
-                            latency: e.latency
-                          }
-                        }
-                        // 间接连接：显示中转节点信息
-                        if (e.isIndirect) {
-                          const otherId = e.source === node.id ? e.target : e.source
-                          const otherNode = displayNodes.find(n => n.id === otherId)
-                          return {
-                            id: otherId,
-                            label: `${otherNode?.label || otherId} (via ${e.viaNodeLabel || '中转'})`,
-                            bandwidth: e.bandwidth,
-                            latency: e.latency
-                          }
-                        }
-                        // 普通连接
-                        const otherId = e.source === node.id ? e.target : e.source
-                        const otherNode = displayNodes.find(n => n.id === otherId)
-                        return {
-                          id: otherId,
-                          label: otherNode?.label || otherId,
-                          bandwidth: e.bandwidth,
-                          latency: e.latency
-                        }
-                      })
-                      onNodeClick({
-                        id: node.id,
-                        label: node.label,
-                        type: node.type,
-                        subType: node.subType,
-                        connections,
-                        portInfo: node.portInfo
-                      })
-                    }
-                  }
-                }}
-                onDoubleClick={() => {
-                  if (connectionMode === 'view' && onNodeDoubleClick && currentLevel !== 'board' && !isSwitch) {
-                    onNodeDoubleClick(node.id, node.type)
-                  }
-                }}
-                onMouseEnter={(e) => {
-                  setHoveredNodeId(node.id)
-                  if (connectionMode !== 'view' || isManualMode) return  // 连线模式或手动布局不显示悬停提示
-                  const rect = svgRef.current?.getBoundingClientRect()
-                  if (rect) {
-                    setTooltip({
-                      x: e.clientX - rect.left,
-                      y: e.clientY - rect.top + 25,  // 显示在节点下方
-                      content: nodeTooltip,
-                    })
-                  }
-                }}
-                onMouseLeave={() => {
-                  setHoveredNodeId(null)
-                  if (connectionMode === 'view' && !isManualMode) setTooltip(null)
-                }}
-              >
-                {/* 源节点选中状态边框（绿色） */}
-                {isSourceSelected && (
-                  <rect
-                    x={-38}
-                    y={-30}
-                    width={76}
-                    height={60}
-                    fill="none"
-                    stroke="#52c41a"
-                    strokeWidth={3}
-                    strokeDasharray="6,3"
-                    rx={8}
-                  />
-                )}
-                {/* 目标节点选中状态边框（蓝色） */}
-                {isTargetSelected && (
-                  <rect
-                    x={-38}
-                    y={-30}
-                    width={76}
-                    height={60}
-                    fill="none"
-                    stroke="#1890ff"
-                    strokeWidth={3}
-                    strokeDasharray="6,3"
-                    rx={8}
-                  />
-                )}
-                {/* 使用统一的节点形状渲染函数 */}
-                {renderNodeShape(node, isNodeSelected)}
-              </g>
-            )
-          })}
         </svg>
 
         {/* 图例 */}

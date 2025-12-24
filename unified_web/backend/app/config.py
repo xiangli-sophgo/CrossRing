@@ -50,7 +50,7 @@ FRONTEND_DIST_DIR = BASE_DIR / "unified_web" / "frontend" / "dist"
 
 # ==================== API配置 ====================
 API_PREFIX = "/api"
-API_PORT = 8002  # 使用新端口，避免与现有项目冲突
+API_PORT = 8000
 
 # ==================== CORS配置 ====================
 CORS_ORIGINS = [

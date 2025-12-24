@@ -241,7 +241,7 @@ export default function WaveformViewer({ experimentId, resultId }: Props) {
   const handleFifoSelect = (fifoId: string) => {
     if (selectedNode === null) return;
     const fullId = `${selectedNode}.${fifoId}.${selectedChannel}`;
-    console.log('[DEBUG] handleFifoSelect:', fullId);
+    // console.log('[DEBUG] handleFifoSelect:', fullId);
     // 使用函数式更新确保连续调用时状态正确
     setSelectedFifos(prev => {
       if (prev.includes(fullId)) {

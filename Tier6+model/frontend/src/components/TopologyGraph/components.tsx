@@ -34,155 +34,47 @@ export const ManualConnectionLine: React.FC<AnimatedManualConnectionProps> = ({
   targetPos,
   isSelected,
   isCrossContainer,
-  indexDiff,
   onClick,
-  containers,
 }) => {
   if (!sourcePos || !targetPos) return null
 
   const strokeColor = isSelected ? '#52c41a' : (isCrossContainer ? '#722ed1' : '#b0b0b0')
   const strokeWidth = isSelected ? 3 : 2
   const transitionStyle = { transition: 'all 0.3s ease-out' }
-
-  const getSegments = () => {
-    if (!isCrossContainer || !containers || containers.length === 0) {
-      return [{ from: sourcePos, to: targetPos, isDashed: false }]
-    }
-
-    const minZ = Math.min(sourcePos.zLayer, targetPos.zLayer)
-    const maxZ = Math.max(sourcePos.zLayer, targetPos.zLayer)
-
-    const passedContainers = containers
-      .filter(c => c.zLayer >= minZ && c.zLayer <= maxZ)
-      .sort((a, b) => a.zLayer - b.zLayer)
-
-    if (passedContainers.length <= 2) {
-      return [{ from: sourcePos, to: targetPos, isDashed: false }]
-    }
-
-    const segments: Array<{ from: { x: number; y: number }; to: { x: number; y: number }; isDashed: boolean }> = []
-
-    const getX = (y: number) => {
-      if (Math.abs(targetPos.y - sourcePos.y) < 0.001) return sourcePos.x
-      const t = (y - sourcePos.y) / (targetPos.y - sourcePos.y)
-      return sourcePos.x + t * (targetPos.x - sourcePos.x)
-    }
-
-    const startY = Math.min(sourcePos.y, targetPos.y)
-    const endY = Math.max(sourcePos.y, targetPos.y)
-    const isSourceAbove = sourcePos.y < targetPos.y
-
-    const boundaryYs: Array<{ y: number; zLayer: number; isTop: boolean }> = []
-    for (const c of passedContainers) {
-      boundaryYs.push({ y: c.bounds.y, zLayer: c.zLayer, isTop: true })
-      boundaryYs.push({ y: c.bounds.y + c.bounds.height, zLayer: c.zLayer, isTop: false })
-    }
-    boundaryYs.sort((a, b) => a.y - b.y)
-
-    let currentY = startY
-    let lastPoint: { x: number; y: number } = isSourceAbove
-      ? { x: sourcePos.x, y: sourcePos.y }
-      : { x: targetPos.x, y: targetPos.y }
-
-    for (const boundary of boundaryYs) {
-      if (boundary.y <= startY || boundary.y >= endY) continue
-
-      const x = getX(boundary.y)
-      const nextPoint = { x, y: boundary.y }
-
-      const midY = (currentY + boundary.y) / 2
-      let segmentContainer: { zLayer: number } | null = null
-      for (const c of passedContainers) {
-        if (midY >= c.bounds.y && midY <= c.bounds.y + c.bounds.height) {
-          segmentContainer = c
-          break
-        }
-      }
-
-      const isMiddle = segmentContainer &&
-        segmentContainer.zLayer !== sourcePos.zLayer &&
-        segmentContainer.zLayer !== targetPos.zLayer
-
-      segments.push({
-        from: { x: lastPoint.x, y: lastPoint.y },
-        to: nextPoint,
-        isDashed: !!isMiddle,
-      })
-
-      lastPoint = nextPoint
-      currentY = boundary.y
-    }
-
-    const finalPoint = isSourceAbove ? targetPos : sourcePos
-    const midY = (currentY + (isSourceAbove ? targetPos.y : sourcePos.y)) / 2
-    let segmentContainer: { zLayer: number } | null = null
-    for (const c of passedContainers) {
-      if (midY >= c.bounds.y && midY <= c.bounds.y + c.bounds.height) {
-        segmentContainer = c
-        break
-      }
-    }
-    const isMiddle = segmentContainer &&
-      segmentContainer.zLayer !== sourcePos.zLayer &&
-      segmentContainer.zLayer !== targetPos.zLayer
-
-    segments.push({
-      from: { x: lastPoint.x, y: lastPoint.y },
-      to: { x: finalPoint.x, y: finalPoint.y },
-      isDashed: !!isMiddle,
-    })
-
-    return segments
-  }
-
   if (isCrossContainer) {
-    const midX = (sourcePos.x + targetPos.x) / 2
-    const midY = (sourcePos.y + targetPos.y) / 2
-    const dx = targetPos.x - sourcePos.x
-    const dy = targetPos.y - sourcePos.y
-    const dist = Math.sqrt(dx * dx + dy * dy) || 1
-    const bulge = dist * 0.2 * indexDiff
-    const perpX = -dy / dist
-    const perpY = dx / dist
-    const ctrlX = midX + perpX * bulge
-    const ctrlY = midY + perpY * bulge
+    // 分段曲线：起始弯曲 → 直线 → 结束弯曲
+    const curveLength = 20  // 起始和结束的弯曲段长度
+    const curveOffset = 15  // 弯曲的水平偏移量（统一向右）
 
-    const segments = getSegments()
-    const hasMiddleSegments = segments.some(s => s.isDashed)
+    // 判断连线方向（从上到下还是从下到上）
+    const isDownward = targetPos.y > sourcePos.y
 
-    if (!hasMiddleSegments) {
-      const pathD = `M ${sourcePos.x} ${sourcePos.y} Q ${ctrlX} ${ctrlY}, ${targetPos.x} ${targetPos.y}`
-      return (
-        <g style={transitionStyle}>
-          <path d={pathD} fill="none" stroke="transparent" strokeWidth={16}
-            style={{ cursor: 'pointer' }} onClick={onClick} />
-          <path d={pathD} fill="none" stroke={strokeColor} strokeWidth={strokeWidth}
-            strokeOpacity={isSelected ? 1 : 0.8}
-            style={{ pointerEvents: 'none', filter: isSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
-          />
-        </g>
-      )
-    }
+    // 起始点的弯曲控制点和结束点
+    const startCtrlX = sourcePos.x + curveOffset
+    const startCtrlY = sourcePos.y
+    const startEndX = sourcePos.x + curveOffset
+    const startEndY = isDownward ? sourcePos.y + curveLength : sourcePos.y - curveLength
+
+    // 结束点的弯曲控制点和起始点
+    const endStartX = targetPos.x + curveOffset
+    const endStartY = isDownward ? targetPos.y - curveLength : targetPos.y + curveLength
+    const endCtrlX = targetPos.x + curveOffset
+    const endCtrlY = targetPos.y
+
+    // 使用三段路径：起始曲线 + 直线 + 结束曲线
+    const pathD = `M ${sourcePos.x} ${sourcePos.y}
+                   Q ${startCtrlX} ${startCtrlY}, ${startEndX} ${startEndY}
+                   L ${endStartX} ${endStartY}
+                   Q ${endCtrlX} ${endCtrlY}, ${targetPos.x} ${targetPos.y}`
 
     return (
       <g style={transitionStyle}>
-        <path
-          d={`M ${sourcePos.x} ${sourcePos.y} Q ${ctrlX} ${ctrlY}, ${targetPos.x} ${targetPos.y}`}
-          fill="none" stroke="transparent" strokeWidth={16}
-          style={{ cursor: 'pointer' }} onClick={onClick}
+        <path d={pathD} fill="none" stroke="transparent" strokeWidth={16}
+          style={{ cursor: 'pointer' }} onClick={onClick} />
+        <path d={pathD} fill="none" stroke={strokeColor} strokeWidth={strokeWidth}
+          strokeOpacity={isSelected ? 1 : 0.6}
+          style={{ pointerEvents: 'none', filter: isSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
         />
-        {segments.map((seg, i) => (
-          <line
-            key={i}
-            x1={seg.from.x} y1={seg.from.y}
-            x2={seg.to.x} y2={seg.to.y}
-            stroke={strokeColor}
-            strokeWidth={strokeWidth}
-            strokeOpacity={isSelected ? 1 : 0.8}
-            strokeDasharray={seg.isDashed ? "8 4" : undefined}
-            style={{ pointerEvents: 'none', filter: isSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
-          />
-        ))}
       </g>
     )
   } else {
@@ -269,15 +161,16 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           onChange={(value) => {
             if (onMultiLevelOptionsChange) {
               if (value === 'multi') {
+                // 多层级视图显示"上一层 + 这一层"
                 let levelPair: 'datacenter_pod' | 'pod_rack' | 'rack_board' | 'board_chip' = multiLevelOptions?.levelPair || 'datacenter_pod'
                 if (currentLevel === 'datacenter') {
-                  levelPair = 'datacenter_pod'
+                  levelPair = 'datacenter_pod'  // datacenter 没有上层，显示 Pod
                 } else if (currentLevel === 'pod') {
-                  levelPair = 'pod_rack'
+                  levelPair = 'datacenter_pod'  // 显示 Pod（上层容器）+ Rack（这一层内容）
                 } else if (currentLevel === 'rack') {
-                  levelPair = 'rack_board'
+                  levelPair = 'pod_rack'  // 显示 Rack（上层容器）+ Board（这一层内容）
                 } else if (currentLevel === 'board') {
-                  levelPair = 'rack_board'
+                  levelPair = 'rack_board'  // 显示 Board（上层容器）+ Chip（这一层内容）
                 }
                 onMultiLevelOptionsChange({
                   ...multiLevelOptions!,

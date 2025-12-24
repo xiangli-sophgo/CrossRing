@@ -1,4 +1,9 @@
-import axios from 'axios'
+/**
+ * 拓扑 API 模块
+ *
+ * 使用本地生成器和IndexedDB存储，无需后端服务
+ */
+
 import {
   HierarchicalTopology,
   PodConfig,
@@ -8,176 +13,224 @@ import {
   GlobalSwitchConfig,
   ManualConnectionConfig,
   ManualConnection,
-} from '../types'
+} from '../types';
 
-const api = axios.create({
-  baseURL: '/api',
-})
+import {
+  topologyGenerator,
+  TopologyGenerateRequest,
+} from '../utils/topologyGenerator';
 
-// 获取完整拓扑数据
+import {
+  listConfigs as storageListConfigs,
+  getConfig as storageGetConfig,
+  saveConfig as storageSaveConfig,
+  deleteConfig as storageDeleteConfig,
+  getManualConnections as storageGetManualConnections,
+  saveManualConnections as storageSaveManualConnections,
+  addManualConnection as storageAddManualConnection,
+  deleteManualConnection as storageDeleteManualConnection,
+  clearManualConnections as storageClearManualConnections,
+  getChipTypes as storageGetChipTypes,
+  getRackDimensions as storageGetRackDimensions,
+  getLevelConnectionDefaults as storageGetLevelConnectionDefaults,
+  SavedConfig,
+} from '../utils/storage';
+
+// ============================================
+// 拓扑生成 API
+// ============================================
+
+/**
+ * 获取完整拓扑数据
+ */
 export async function getTopology(): Promise<HierarchicalTopology> {
-  const response = await api.get('/topology')
-  return response.data
+  return topologyGenerator.getCachedTopology();
 }
 
-// 生成新的拓扑
+/**
+ * 生成新的拓扑
+ */
 export async function generateTopology(config: {
-  pod_count?: number
-  racks_per_pod?: number
+  pod_count?: number;
+  racks_per_pod?: number;
   board_configs?: {
-    u1: { count: number; chips: { npu: number; cpu: number } }
-    u2: { count: number; chips: { npu: number; cpu: number } }
-    u4: { count: number; chips: { npu: number; cpu: number } }
-  }
+    u1: { count: number; chips: { npu: number; cpu: number } };
+    u2: { count: number; chips: { npu: number; cpu: number } };
+    u4: { count: number; chips: { npu: number; cpu: number } };
+  };
   rack_config?: {
-    total_u: number
+    total_u: number;
     boards: Array<{
-      id: string
-      name: string
-      u_height: number
-      count: number
-      chips: Array<{ name: string; count: number }>
-    }>
-  }
-  switch_config?: GlobalSwitchConfig
-  manual_connections?: ManualConnectionConfig
+      id: string;
+      name: string;
+      u_height: number;
+      count: number;
+      chips: Array<{ name: string; count: number }>;
+    }>;
+  };
+  switch_config?: GlobalSwitchConfig;
+  manual_connections?: ManualConnectionConfig;
 }): Promise<HierarchicalTopology> {
-  const response = await api.post('/topology/generate', config)
-  return response.data
+  return topologyGenerator.generate(config as TopologyGenerateRequest);
 }
 
-// 获取指定Pod
+/**
+ * 获取指定Pod
+ */
 export async function getPod(podId: string): Promise<PodConfig> {
-  const response = await api.get(`/topology/pod/${podId}`)
-  return response.data
+  const pod = topologyGenerator.getPod(podId);
+  if (!pod) {
+    throw new Error(`Pod '${podId}' not found`);
+  }
+  return pod;
 }
 
-// 获取指定Rack
+/**
+ * 获取指定Rack
+ */
 export async function getRack(rackId: string): Promise<RackConfig> {
-  const response = await api.get(`/topology/rack/${rackId}`)
-  return response.data
+  const rack = topologyGenerator.getRack(rackId);
+  if (!rack) {
+    throw new Error(`Rack '${rackId}' not found`);
+  }
+  return rack;
 }
 
-// 获取指定Board
+/**
+ * 获取指定Board
+ */
 export async function getBoard(boardId: string): Promise<BoardConfig> {
-  const response = await api.get(`/topology/board/${boardId}`)
-  return response.data
+  const board = topologyGenerator.getBoard(boardId);
+  if (!board) {
+    throw new Error(`Board '${boardId}' not found`);
+  }
+  return board;
 }
 
-// 获取连接数据
+/**
+ * 获取连接数据
+ */
 export async function getConnections(
   level?: string,
   parentId?: string
 ): Promise<ConnectionConfig[]> {
-  const params: Record<string, string> = {}
-  if (level) params.level = level
-  if (parentId) params.parent_id = parentId
-  const response = await api.get('/topology/connections', { params })
-  return response.data
+  if (level) {
+    return topologyGenerator.getConnectionsForLevel(level, parentId);
+  }
+  return topologyGenerator.getCachedTopology().connections;
 }
 
-// 获取Chip类型配置
+// ============================================
+// 配置接口
+// ============================================
+
+/**
+ * 获取Chip类型配置
+ */
 export async function getChipTypes(): Promise<{
-  types: { id: string; name: string; color: string }[]
+  types: { id: string; name: string; color: string }[];
 }> {
-  const response = await api.get('/config/chip-types')
-  return response.data
+  return storageGetChipTypes();
 }
 
-// 获取Rack尺寸配置
+/**
+ * 获取Rack尺寸配置
+ */
 export async function getRackDimensions(): Promise<{
-  width: number
-  depth: number
-  u_height: number
-  total_u: number
-  full_height: number
+  width: number;
+  depth: number;
+  u_height: number;
+  total_u: number;
+  full_height: number;
 }> {
-  const response = await api.get('/config/rack-dimensions')
-  return response.data
+  return storageGetRackDimensions();
 }
 
-// 获取各层级连接的默认带宽和延迟配置
+/**
+ * 获取各层级连接的默认带宽和延迟配置
+ */
 export async function getLevelConnectionDefaults(): Promise<{
-  datacenter: { bandwidth: number; latency: number }
-  pod: { bandwidth: number; latency: number }
-  rack: { bandwidth: number; latency: number }
-  board: { bandwidth: number; latency: number }
+  datacenter: { bandwidth: number; latency: number };
+  pod: { bandwidth: number; latency: number };
+  rack: { bandwidth: number; latency: number };
+  board: { bandwidth: number; latency: number };
 }> {
-  const response = await api.get('/config/level-connection-defaults')
-  return response.data
+  return storageGetLevelConnectionDefaults();
 }
 
 // ============================================
 // 配置保存/加载 API
 // ============================================
 
-export interface SavedConfig {
-  name: string
-  description?: string
-  pod_count: number
-  racks_per_pod: number
-  board_configs: {
-    u1: { count: number; chips: { npu: number; cpu: number } }
-    u2: { count: number; chips: { npu: number; cpu: number } }
-    u4: { count: number; chips: { npu: number; cpu: number } }
-  }
-  created_at?: string
-  updated_at?: string
-}
+export type { SavedConfig } from '../utils/storage';
 
-// 获取所有保存的配置
+/**
+ * 获取所有保存的配置
+ */
 export async function listConfigs(): Promise<SavedConfig[]> {
-  const response = await api.get('/configs')
-  return response.data
+  return storageListConfigs();
 }
 
-// 获取指定配置
+/**
+ * 获取指定配置
+ */
 export async function getConfig(name: string): Promise<SavedConfig> {
-  const response = await api.get(`/configs/${encodeURIComponent(name)}`)
-  return response.data
+  const config = await storageGetConfig(name);
+  if (!config) {
+    throw new Error(`配置 '${name}' 不存在`);
+  }
+  return config;
 }
 
-// 保存配置
+/**
+ * 保存配置
+ */
 export async function saveConfig(config: SavedConfig): Promise<SavedConfig> {
-  const response = await api.post('/configs', config)
-  return response.data
+  return storageSaveConfig(config);
 }
 
-// 删除配置
+/**
+ * 删除配置
+ */
 export async function deleteConfig(name: string): Promise<void> {
-  await api.delete(`/configs/${encodeURIComponent(name)}`)
+  return storageDeleteConfig(name);
 }
 
 // ============================================
 // 手动连接 API
 // ============================================
 
-// 获取手动连接配置
+/**
+ * 获取手动连接配置
+ */
 export async function getManualConnections(): Promise<ManualConnectionConfig> {
-  const response = await api.get('/manual-connections')
-  return response.data
+  return storageGetManualConnections();
 }
 
-// 保存手动连接配置
+/**
+ * 保存手动连接配置
+ */
 export async function saveManualConnections(config: ManualConnectionConfig): Promise<ManualConnectionConfig> {
-  const response = await api.post('/manual-connections', config)
-  return response.data
+  return storageSaveManualConnections(config);
 }
 
-// 添加单个手动连接
+/**
+ * 添加单个手动连接
+ */
 export async function addManualConnection(connection: ManualConnection): Promise<ManualConnectionConfig> {
-  const response = await api.post('/manual-connections/add', connection)
-  return response.data
+  return storageAddManualConnection(connection);
 }
 
-// 删除单个手动连接
+/**
+ * 删除单个手动连接
+ */
 export async function deleteManualConnection(connectionId: string): Promise<void> {
-  await api.delete(`/manual-connections/${encodeURIComponent(connectionId)}`)
+  return storageDeleteManualConnection(connectionId);
 }
 
-// 清空手动连接（可按层级清空）
+/**
+ * 清空手动连接（可按层级清空）
+ */
 export async function clearManualConnections(hierarchyLevel?: string): Promise<void> {
-  const params: Record<string, string> = {}
-  if (hierarchyLevel) params.hierarchy_level = hierarchyLevel
-  await api.delete('/manual-connections', { params })
+  return storageClearManualConnections(hierarchyLevel);
 }
