@@ -75,6 +75,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   focusedLevel,
   // 流量热力图
   onTrafficResultChange,
+  // 部署分析结果
+  onAnalysisDataChange,
 }) => {
   void _layoutType
   void _onLayoutTypeChange
@@ -581,7 +583,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 {/* 板卡列表 */}
                 <div style={{ marginTop: 8 }}>
                   {rackConfig.boards.map((board, boardIndex) => (
-                    <div key={board.id} style={{ marginBottom: 6, padding: '6px 10px', background: '#fff', borderRadius: 4, border: '1px solid #e8e8e8' }}>
+                    <div key={board.id} style={{ marginBottom: 6, padding: '6px 10px', background: '#fff', borderRadius: 8, border: '1px solid rgba(0,0,0,0.06)' }}>
                       {rackEditMode ? (
                         /* 编辑模式 */
                         <>
@@ -1078,7 +1080,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
         定义可用的Switch型号，在各层级的连接配置中使用
       </Text>
       {switchConfig.switch_types.map((swType, index) => (
-        <div key={swType.id} style={{ marginBottom: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+        <div key={swType.id} style={{ marginBottom: 8, padding: 8, background: '#f5f5f5', borderRadius: 8 }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <Input
               size="small"
@@ -1095,15 +1097,16 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
               size="small"
               min={8}
               max={1024}
+              controls={false}
               value={swType.port_count}
               onChange={(v) => {
                 const newTypes = [...switchConfig.switch_types]
                 newTypes[index] = { ...newTypes[index], port_count: v || 48 }
                 setSwitchConfig(prev => ({ ...prev, switch_types: newTypes }))
               }}
-              style={{ width: 100 }}
-              suffix="端口"
+              style={{ width: 80 }}
             />
+            <Text style={{ fontSize: 12, color: '#666' }}>端口</Text>
             <Button
               type="text"
               danger
@@ -1183,7 +1186,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
       {/* 顶层页面切换 - 自定义样式 */}
       <div style={{
         display: 'flex',
@@ -1298,6 +1301,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
         <DeploymentAnalysisPanel
           topology={topology}
           onTrafficResultChange={onTrafficResultChange}
+          onAnalysisDataChange={onAnalysisDataChange}
           rackConfig={rackConfig}
           podCount={podCount}
           racksPerPod={racksPerPod}

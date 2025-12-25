@@ -10,8 +10,8 @@ import {
   LayoutType,
 } from './shared'
 // renderNodeShape 已被统一的 renderNode 函数替代
-import { ControlPanel } from './components'
-import { ForceLayoutManager, ForceNode, getTorusGridSize, getTorus3DSize } from './layouts'
+import { ControlPanel, TorusArcs } from './components'
+import { ForceLayoutManager, ForceNode } from './layouts'
 import { computeTopologyData } from './computeTopologyData'
 import { MultiLevelView } from './MultiLevelView'
 import { SingleLevelView } from './SingleLevelView'
@@ -1129,203 +1129,15 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
               />
           )}
 
-          {/* 2D Torus：渲染环绕连接的半椭圆弧 */}
-          {directTopology === 'torus_2d' && (() => {
-            const deviceNodes = displayNodes.filter(n => !n.isSwitch)
-            const { cols, rows } = getTorusGridSize(deviceNodes.length)
-            if (cols < 2 && rows < 2) return null
-
-            // 获取节点的实际显示位置（优先使用手动位置）
-            const getPos = (node: { id: string; x: number; y: number }) => {
-              if (isManualMode && manualPositions[node.id]) {
-                return manualPositions[node.id]
-              }
-              return { x: node.x, y: node.y }
-            }
-
-            // 找出每行和每列的首尾节点位置
-            const rowArcs: { leftX: number; leftY: number; rightX: number; rightY: number; row: number }[] = []
-            const colArcs: { topX: number; topY: number; bottomX: number; bottomY: number; col: number }[] = []
-
-            for (let r = 0; r < rows; r++) {
-              const nodesInRow = deviceNodes.filter(n => n.gridRow === r).sort((a, b) => (a.gridCol || 0) - (b.gridCol || 0))
-              // 只有3个以上节点时才画环绕弧（2个节点时首尾相邻，已有直线连接）
-              if (nodesInRow.length >= 3) {
-                const first = nodesInRow[0]
-                const last = nodesInRow[nodesInRow.length - 1]
-                const firstPos = getPos(first)
-                const lastPos = getPos(last)
-                rowArcs.push({
-                  leftX: firstPos.x,
-                  leftY: firstPos.y,
-                  rightX: lastPos.x,
-                  rightY: lastPos.y,
-                  row: r
-                })
-              }
-            }
-
-            for (let c = 0; c < cols; c++) {
-              const nodesInCol = deviceNodes.filter(n => n.gridCol === c).sort((a, b) => (a.gridRow || 0) - (b.gridRow || 0))
-              // 只有3个以上节点时才画环绕弧（2个节点时首尾相邻，已有直线连接）
-              if (nodesInCol.length >= 3) {
-                const first = nodesInCol[0]
-                const last = nodesInCol[nodesInCol.length - 1]
-                const firstPos = getPos(first)
-                const lastPos = getPos(last)
-                colArcs.push({
-                  topX: firstPos.x,
-                  topY: firstPos.y,
-                  bottomX: lastPos.x,
-                  bottomY: lastPos.y,
-                  col: c
-                })
-              }
-            }
-
-            // 通用弧线渲染函数：根据两点位置动态计算控制点
-            const renderArc = (
-              x1: number, y1: number, x2: number, y2: number,
-              key: string, bulgeOffset: number
-            ) => {
-              const midX = (x1 + x2) / 2
-              const midY = (y1 + y2) / 2
-              const dx = x2 - x1
-              const dy = y2 - y1
-              const dist = Math.sqrt(dx * dx + dy * dy)
-              // 弯曲量与距离成比例
-              const bulge = dist * 0.25 + bulgeOffset * 8
-              // 垂直于连线方向的单位向量（选择一个固定方向避免翻转）
-              const perpX = -dy / dist
-              const perpY = dx / dist
-              // 控制点在连线中点的垂直方向上
-              const ctrlX = midX + perpX * bulge
-              const ctrlY = midY + perpY * bulge
-              return (
-                <path
-                  key={key}
-                  d={`M ${x1} ${y1} Q ${ctrlX} ${ctrlY}, ${x2} ${y2}`}
-                  fill="none"
-                  stroke="#999"
-                  strokeWidth={1.5}
-                  strokeOpacity={0.6}
-                />
-              )
-            }
-
-            return (
-              <g>
-                {/* 行环绕弧 */}
-                {rowArcs.map((arc, i) => renderArc(
-                  arc.leftX, arc.leftY, arc.rightX, arc.rightY,
-                  `row-arc-${i}`, i
-                ))}
-                {/* 列环绕弧 */}
-                {colArcs.map((arc, i) => renderArc(
-                  arc.topX, arc.topY, arc.bottomX, arc.bottomY,
-                  `col-arc-${i}`, i
-                ))}
-              </g>
-            )
-          })()}
-
-          {/* 3D Torus：X/Y/Z三个方向的环绕弧线（只有>=3个节点才画环绕弧） */}
-          {directTopology === 'torus_3d' && (() => {
-            const deviceNodes = displayNodes.filter(n => !n.isSwitch)
-            const { dim, layers } = getTorus3DSize(deviceNodes.length)
-            if (dim < 2) return null
-
-            // 获取节点的实际显示位置（优先使用手动位置）
-            const getPos = (node: { id: string; x: number; y: number }) => {
-              if (isManualMode && manualPositions[node.id]) {
-                return manualPositions[node.id]
-              }
-              return { x: node.x, y: node.y }
-            }
-
-            // 通用弧线渲染函数
-            const renderArc3D = (
-              x1: number, y1: number, x2: number, y2: number,
-              key: string, bulgeOffset: number
-            ) => {
-              const midX = (x1 + x2) / 2
-              const midY = (y1 + y2) / 2
-              const dx = x2 - x1
-              const dy = y2 - y1
-              const dist = Math.sqrt(dx * dx + dy * dy)
-              if (dist < 1) return null
-              const bulge = dist * 0.25 + bulgeOffset * 5
-              const perpX = -dy / dist
-              const perpY = dx / dist
-              const ctrlX = midX + perpX * bulge
-              const ctrlY = midY + perpY * bulge
-              return (
-                <path
-                  key={key}
-                  d={`M ${x1} ${y1} Q ${ctrlX} ${ctrlY}, ${x2} ${y2}`}
-                  fill="none"
-                  stroke="#999"
-                  strokeWidth={1.5}
-                  strokeOpacity={0.5}
-                />
-              )
-            }
-
-            const arcs: JSX.Element[] = []
-
-            // X方向环绕弧
-            for (let z = 0; z < layers; z++) {
-              for (let r = 0; r < dim; r++) {
-                const rowNodes = deviceNodes
-                  .filter(n => n.gridZ === z && n.gridRow === r)
-                  .sort((a, b) => a.gridCol! - b.gridCol!)
-                if (rowNodes.length >= 3) {
-                  const first = rowNodes[0]
-                  const last = rowNodes[rowNodes.length - 1]
-                  const firstPos = getPos(first)
-                  const lastPos = getPos(last)
-                  const arc = renderArc3D(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `x-arc-z${z}-r${r}`, z + r)
-                  if (arc) arcs.push(arc)
-                }
-              }
-            }
-
-            // Y方向环绕弧
-            for (let z = 0; z < layers; z++) {
-              for (let c = 0; c < dim; c++) {
-                const colNodes = deviceNodes
-                  .filter(n => n.gridZ === z && n.gridCol === c)
-                  .sort((a, b) => a.gridRow! - b.gridRow!)
-                if (colNodes.length >= 3) {
-                  const first = colNodes[0]
-                  const last = colNodes[colNodes.length - 1]
-                  const firstPos = getPos(first)
-                  const lastPos = getPos(last)
-                  const arc = renderArc3D(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `y-arc-z${z}-c${c}`, z + c)
-                  if (arc) arcs.push(arc)
-                }
-              }
-            }
-
-            // Z方向环绕弧
-            for (let r = 0; r < dim; r++) {
-              for (let c = 0; c < dim; c++) {
-                const depthNodes = deviceNodes
-                  .filter(n => n.gridRow === r && n.gridCol === c)
-                  .sort((a, b) => a.gridZ! - b.gridZ!)
-                if (depthNodes.length >= 3) {
-                  const first = depthNodes[0]
-                  const last = depthNodes[depthNodes.length - 1]
-                  const firstPos = getPos(first)
-                  const lastPos = getPos(last)
-                  const arc = renderArc3D(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `z-arc-r${r}-c${c}`, r + c)
-                  if (arc) arcs.push(arc)
-                }
-              }
-            }
-
-            return <g>{arcs}</g>
-          })()}
+          {/* Torus/FullMesh2D 弧线连接 */}
+          {(directTopology === 'torus_2d' || directTopology === 'torus_3d' || directTopology === 'full_mesh_2d') && (
+            <TorusArcs
+              nodes={displayNodes.filter(n => !n.isSwitch)}
+              directTopology={directTopology}
+              opacity={0.6}
+              getNodePosition={isManualMode ? (node) => manualPositions[node.id] || { x: node.x, y: node.y } : undefined}
+            />
+          )}
 
           {/* 单层级模式：使用独立组件渲染 */}
           {!multiLevelOptions?.enabled && (

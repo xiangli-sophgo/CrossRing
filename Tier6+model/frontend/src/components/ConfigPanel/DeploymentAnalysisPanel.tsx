@@ -9,7 +9,6 @@ import {
   Typography,
   Button,
   InputNumber,
-  Collapse,
   Select,
   Radio,
   Progress,
@@ -23,10 +22,6 @@ import {
   InfoCircleOutlined,
   WarningOutlined,
   CheckCircleOutlined,
-  ThunderboltOutlined,
-  DatabaseOutlined,
-  ApiOutlined,
-  HeatMapOutlined,
 } from '@ant-design/icons'
 import {
   LLMModelConfig,
@@ -65,9 +60,9 @@ import {
   TopologyHardwareSummary,
 } from '../../utils/llmDeployment/topologyHardwareExtractor'
 import { RackConfig } from './shared'
+// Charts and ScoringRulesCard are now displayed in the right panel (App.tsx)
 
 const { Text } = Typography
-const { Panel } = Collapse
 
 // ============================================
 // 设计系统 - 样式常量
@@ -118,10 +113,6 @@ const sectionTitleStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 6,
-}
-
-const sectionStyle: React.CSSProperties = {
-  marginBottom: 12,
 }
 
 // ============================================
@@ -1903,9 +1894,12 @@ const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({ result, t
 // 主面板组件
 // ============================================
 
+import { DeploymentAnalysisData } from './shared'
+
 interface DeploymentAnalysisPanelProps {
   topology?: HierarchicalTopology | null
   onTrafficResultChange?: (result: TopologyTrafficResult | null) => void
+  onAnalysisDataChange?: (data: DeploymentAnalysisData | null) => void
   rackConfig?: RackConfig
   podCount?: number
   racksPerPod?: number
@@ -1914,6 +1908,7 @@ interface DeploymentAnalysisPanelProps {
 export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = ({
   topology,
   onTrafficResultChange,
+  onAnalysisDataChange,
   rackConfig,
   podCount = 1,
   racksPerPod = 1,
@@ -2031,6 +2026,42 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
+  // 映射到拓扑的回调
+  const handleMapToTopology = React.useCallback(() => {
+    if (!analysisResult || !topology || !onTrafficResultChange) return
+    try {
+      const strategy = analysisResult.plan.parallelism
+      const trafficResult = analyzeTopologyTraffic(
+        topology,
+        strategy,
+        analysisResult.communication
+      )
+      onTrafficResultChange(trafficResult)
+    } catch (error) {
+      console.error('流量映射失败:', error)
+      onTrafficResultChange(null)
+    }
+  }, [analysisResult, topology, onTrafficResultChange])
+
+  // 当分析状态变化时，通知父组件
+  React.useEffect(() => {
+    if (onAnalysisDataChange) {
+      onAnalysisDataChange({
+        result: analysisResult,
+        topKPlans,
+        hardware: hardwareConfig,
+        model: modelConfig,
+        loading,
+        errorMsg,
+        searchStats,
+        onSelectPlan: (plan) => setAnalysisResult(plan),
+        onMapToTopology: handleMapToTopology,
+        onClearTraffic: () => onTrafficResultChange?.(null),
+        canMapToTopology: !!(analysisResult && topology && onTrafficResultChange),
+      })
+    }
+  }, [analysisResult, topKPlans, hardwareConfig, modelConfig, loading, errorMsg, searchStats, onAnalysisDataChange, handleMapToTopology, topology, onTrafficResultChange])
+
   // 计算最大可用芯片数
   const maxChips = hardwareConfig.node.chips_per_node * hardwareConfig.cluster.num_nodes
 
@@ -2086,166 +2117,140 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
 
   return (
     <div style={{ padding: 0 }}>
-      {/* 模型配置 */}
-      <div style={sectionCardStyle}>
-        <div style={sectionTitleStyle}>模型配置</div>
-        <ModelConfigSelector value={modelConfig} onChange={setModelConfig} />
-      </div>
+      {/* 配置面板 */}
+      <>
+          {/* 模型配置 */}
+          <div style={sectionCardStyle}>
+            <div style={sectionTitleStyle}>模型配置</div>
+            <ModelConfigSelector value={modelConfig} onChange={setModelConfig} />
+          </div>
 
-      {/* 推理配置 */}
-      <div style={sectionCardStyle}>
-        <div style={sectionTitleStyle}>推理配置</div>
-        <InferenceConfigSelector value={inferenceConfig} onChange={setInferenceConfig} />
-      </div>
+          {/* 推理配置 */}
+          <div style={sectionCardStyle}>
+            <div style={sectionTitleStyle}>推理配置</div>
+            <InferenceConfigSelector value={inferenceConfig} onChange={setInferenceConfig} />
+          </div>
 
-      {/* 硬件配置 */}
-      <div style={sectionCardStyle}>
-        <div style={sectionTitleStyle}>硬件配置</div>
-        {/* 配置来源选择 */}
-        <div style={{ marginBottom: 12 }}>
-          <Radio.Group
-            size="small"
-            value={hardwareSource}
-            onChange={(e) => setHardwareSource(e.target.value)}
-            buttonStyle="solid"
-          >
-            <Radio.Button value="topology">使用拓扑配置</Radio.Button>
-            <Radio.Button value="manual">手动配置</Radio.Button>
-          </Radio.Group>
-        </div>
+          {/* 硬件配置 */}
+          <div style={sectionCardStyle}>
+            <div style={sectionTitleStyle}>硬件配置</div>
+            {/* 配置来源选择 */}
+            <div style={{ marginBottom: 12 }}>
+              <Radio.Group
+                size="small"
+                value={hardwareSource}
+                onChange={(e) => setHardwareSource(e.target.value)}
+                buttonStyle="solid"
+              >
+                <Radio.Button value="topology">使用拓扑配置</Radio.Button>
+                <Radio.Button value="manual">手动配置</Radio.Button>
+              </Radio.Group>
+            </div>
 
-        {hardwareSource === 'topology' ? (
-          <div>
-            {chipGroups.length === 0 ? (
-              <div style={{ padding: 12, background: colors.warningLight, borderRadius: 8, border: '1px solid #ffd591' }}>
-                <Text type="warning">
-                  <WarningOutlined style={{ marginRight: 6 }} />
-                  请先在「Board层级」中配置芯片类型
-                </Text>
+            {hardwareSource === 'topology' ? (
+              <div>
+                {chipGroups.length === 0 ? (
+                  <div style={{ padding: 12, background: colors.warningLight, borderRadius: 8, border: '1px solid #ffd591' }}>
+                    <Text type="warning">
+                      <WarningOutlined style={{ marginRight: 6 }} />
+                      请先在「Board层级」中配置芯片类型
+                    </Text>
+                  </div>
+                ) : (
+                  <>
+                    {chipGroups.length > 1 && (
+                      <div style={configRowStyle}>
+                        <Text>分析芯片类型</Text>
+                        <Select
+                          size="small"
+                          value={selectedChipType}
+                          onChange={setSelectedChipType}
+                          style={{ width: 140 }}
+                          options={chipGroups.map(g => ({
+                            value: g.presetId || g.chipType,
+                            label: `${g.chipType} (${g.totalCount * podCount * racksPerPod}个)`,
+                          }))}
+                        />
+                      </div>
+                    )}
+
+                    <div style={{ padding: 10, background: colors.successLight, borderRadius: 8, fontSize: 12, border: '1px solid #b7eb8f' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <Text><CheckCircleOutlined style={{ color: colors.success, marginRight: 4 }} />芯片: <b>{hardwareConfig.chip.chip_type}</b></Text>
+                        <Text>共 <b>{hardwareConfig.node.chips_per_node * hardwareConfig.cluster.num_nodes}</b> 个</Text>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', color: colors.textSecondary }}>
+                        <span>节点数: {hardwareConfig.cluster.num_nodes}</span>
+                        <span>每节点: {hardwareConfig.node.chips_per_node} 个</span>
+                        <span>算力: {hardwareConfig.chip.compute_tflops_fp16} TFLOPs</span>
+                        <span>显存: {hardwareConfig.chip.memory_gb}GB</span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             ) : (
-              <>
-                {chipGroups.length > 1 && (
-                  <div style={configRowStyle}>
-                    <Text>分析芯片类型</Text>
-                    <Select
-                      size="small"
-                      value={selectedChipType}
-                      onChange={setSelectedChipType}
-                      style={{ width: 140 }}
-                      options={chipGroups.map(g => ({
-                        value: g.presetId || g.chipType,
-                        label: `${g.chipType} (${g.totalCount * podCount * racksPerPod}个)`,
-                      }))}
-                    />
-                  </div>
-                )}
-
-                <div style={{ padding: 10, background: colors.successLight, borderRadius: 8, fontSize: 12, border: '1px solid #b7eb8f' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <Text><CheckCircleOutlined style={{ color: colors.success, marginRight: 4 }} />芯片: <b>{hardwareConfig.chip.chip_type}</b></Text>
-                    <Text>共 <b>{hardwareConfig.node.chips_per_node * hardwareConfig.cluster.num_nodes}</b> 个</Text>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', color: colors.textSecondary }}>
-                    <span>节点数: {hardwareConfig.cluster.num_nodes}</span>
-                    <span>每节点: {hardwareConfig.node.chips_per_node} 个</span>
-                    <span>算力: {hardwareConfig.chip.compute_tflops_fp16} TFLOPs</span>
-                    <span>显存: {hardwareConfig.chip.memory_gb}GB</span>
-                  </div>
-                </div>
-              </>
+              <HardwareConfigSelector value={hardwareConfig} onChange={setHardwareConfig} />
             )}
           </div>
-        ) : (
-          <HardwareConfigSelector value={hardwareConfig} onChange={setHardwareConfig} />
-        )}
-      </div>
 
-      {/* 并行策略 */}
-      <div style={sectionCardStyle}>
-        <div style={sectionTitleStyle}>并行策略</div>
-        <ParallelismConfigPanel
-          mode={parallelismMode}
-          onModeChange={setParallelismMode}
-          manualStrategy={manualStrategy}
-          onManualStrategyChange={setManualStrategy}
-          searchConstraints={searchConstraints}
-          onSearchConstraintsChange={setSearchConstraints}
-          maxChips={maxChips}
-          scoreWeights={scoreWeights}
-          onScoreWeightsChange={setScoreWeights}
-        />
-      </div>
-
-      {/* 运行按钮 */}
-      <Button
-        type="primary"
-        icon={parallelismMode === 'auto' ? <SearchOutlined /> : <PlayCircleOutlined />}
-        onClick={handleRunAnalysis}
-        loading={loading}
-        block
-        size="large"
-        style={{
-          marginBottom: 16,
-          height: 44,
-          borderRadius: 8,
-          background: colors.primary,
-          boxShadow: '0 2px 8px rgba(94, 106, 210, 0.3)',
-        }}
-      >
-        {parallelismMode === 'auto' ? '搜索最优方案' : '运行分析'}
-      </Button>
-
-      {/* 分析结果 */}
-      <div style={{
-        ...sectionCardStyle,
-        background: colors.background,
-        border: `1px solid ${colors.border}`,
-      }}>
-        <div style={sectionTitleStyle}>分析结果</div>
-        <AnalysisResultDisplay
-          result={analysisResult}
-          topKPlans={topKPlans}
-          loading={loading}
-          onSelectPlan={(plan) => setAnalysisResult(plan)}
-          searchStats={searchStats}
-          errorMsg={errorMsg}
-        />
-
-        {/* 映射到拓扑按钮 */}
-        {analysisResult && topology && onTrafficResultChange && (
-          <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-            <Button
-              icon={<HeatMapOutlined />}
-              onClick={() => {
-                try {
-                  const strategy = analysisResult.plan.parallelism
-                  const trafficResult = analyzeTopologyTraffic(
-                    topology,
-                    strategy,
-                    analysisResult.communication
-                  )
-                  onTrafficResultChange(trafficResult)
-                } catch (error) {
-                  console.error('流量映射失败:', error)
-                  onTrafficResultChange(null)
-                }
-              }}
-              style={{ flex: 1 }}
-            >
-              映射到拓扑热力图
-            </Button>
-            <Button
-              onClick={() => onTrafficResultChange(null)}
-              type="text"
-            >
-              清除
-            </Button>
+          {/* 并行策略 */}
+          <div style={sectionCardStyle}>
+            <div style={sectionTitleStyle}>并行策略</div>
+            <ParallelismConfigPanel
+              mode={parallelismMode}
+              onModeChange={setParallelismMode}
+              manualStrategy={manualStrategy}
+              onManualStrategyChange={setManualStrategy}
+              searchConstraints={searchConstraints}
+              onSearchConstraintsChange={setSearchConstraints}
+              maxChips={maxChips}
+              scoreWeights={scoreWeights}
+              onScoreWeightsChange={setScoreWeights}
+            />
           </div>
-        )}
-      </div>
+
+          {/* 运行按钮 */}
+          <Button
+            type="primary"
+            icon={parallelismMode === 'auto' ? <SearchOutlined /> : <PlayCircleOutlined />}
+            onClick={handleRunAnalysis}
+            loading={loading}
+            block
+            size="large"
+            style={{
+              marginBottom: 16,
+              height: 44,
+              borderRadius: 8,
+              background: colors.primary,
+              boxShadow: '0 2px 8px rgba(94, 106, 210, 0.3)',
+            }}
+          >
+            {parallelismMode === 'auto' ? '搜索最优方案' : '运行分析'}
+          </Button>
+
+          {/* 分析状态提示 */}
+          {(loading || errorMsg) && (
+            <div style={{
+              marginTop: 12,
+              padding: 12,
+              background: loading ? '#e6f7ff' : '#fff2f0',
+              borderRadius: 8,
+              border: `1px solid ${loading ? '#91d5ff' : '#ffccc7'}`,
+              textAlign: 'center',
+              fontSize: 13,
+            }}>
+              {loading ? (
+                <span><Spin size="small" style={{ marginRight: 8 }} />正在分析...</span>
+              ) : (
+                <span style={{ color: '#ff4d4f' }}><WarningOutlined style={{ marginRight: 6 }} />{errorMsg}</span>
+              )}
+            </div>
+          )}
+        </>
     </div>
   )
 }
 
+export { AnalysisResultDisplay }
 export default DeploymentAnalysisPanel

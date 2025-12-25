@@ -36,7 +36,7 @@ interface SwitchLevelConfigProps {
   switchTypes: SwitchTypeConfig[]
   onChange: (config: HierarchyLevelSwitchConfig) => void
   configRowStyle: React.CSSProperties
-  viewMode?: '3d' | 'topology'
+  viewMode?: '3d' | 'topology' | 'analysis'
 }
 
 export const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
@@ -208,7 +208,7 @@ export const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
           {/* Switch层列表 */}
           <Text type="secondary" style={{ fontSize: 11 }}>Switch层配置 (从下到上)</Text>
           {config.layers.map((layer, index) => (
-            <div key={index} style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+            <div key={index} style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 8 }}>
               {/* 第一行：层名称和删除按钮 */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -371,8 +371,8 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
         marginBottom: 12,
         padding: 10,
         background: '#fff',
-        borderRadius: 6,
-        border: '1px solid #e8e8e8',
+        borderRadius: 8,
+        border: '1px solid rgba(0,0,0,0.06)',
       }}>
         <div style={{ marginBottom: 8 }}>
           <Text style={{ fontSize: 12, color: '#333', fontWeight: 500 }}>层级默认参数</Text>
@@ -542,10 +542,16 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
         return (
           <Collapse
             size="small"
-            style={{ marginTop: 8 }}
+            bordered={false}
+            style={{
+              marginTop: 8,
+              background: 'transparent',
+            }}
+            className="connection-collapse"
             items={[{
               key: 'manual',
               label: <span style={{ fontSize: 14 }}>手动连接 ({currentLevelConnections.length})</span>,
+              style: { background: '#fff', borderRadius: 8, marginBottom: 8, border: '1px solid rgba(0,0,0,0.06)', overflow: 'hidden' },
               children: (
                 <div style={{ maxHeight: 240, overflow: 'auto' }}>
                   {currentLevelConnections.map((conn) => {
@@ -633,6 +639,7 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
             }, {
           key: 'current',
           label: <span style={{ fontSize: 14 }}>当前连接 ({currentViewConnections.length})</span>,
+          style: { background: '#fff', borderRadius: 8, border: '1px solid rgba(0,0,0,0.06)' },
           children: (
             <div style={{ maxHeight: 240, overflow: 'auto' }}>
               {currentViewConnections.map((conn, idx) => {

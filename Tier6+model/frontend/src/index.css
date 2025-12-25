@@ -627,3 +627,28 @@ body {
 .force-node-hover:active {
   cursor: grabbing;
 }
+
+/* 连接编辑面板的Collapse - 透明背景 */
+.connection-collapse.ant-collapse {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+.connection-collapse .ant-collapse-item {
+  border: none !important;
+}
+
+.connection-collapse .ant-collapse-header {
+  padding: 10px 12px !important;
+  border-radius: 8px !important;
+}
+
+.connection-collapse .ant-collapse-content {
+  border-top: none !important;
+}
+
+.connection-collapse .ant-collapse-content-box {
+  padding: 8px 0 0 0 !important;
+}

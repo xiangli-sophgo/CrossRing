@@ -5,6 +5,9 @@ import { ConfigPanel } from './components/ConfigPanel'
 import { TopologyGraph, NodeDetail, LinkDetail } from './components/TopologyGraph'
 import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType, MultiLevelViewOptions } from './types'
 import { TopologyTrafficResult } from './utils/llmDeployment/types'
+import { DeploymentAnalysisData } from './components/ConfigPanel/shared'
+import { ChartsPanel, ScoringRulesCard } from './components/ConfigPanel/charts'
+import { AnalysisResultDisplay } from './components/ConfigPanel/DeploymentAnalysisPanel'
 import { getTopology, generateTopology, getLevelConnectionDefaults } from './api/topology'
 import { useViewNavigation } from './hooks/useViewNavigation'
 
@@ -18,14 +21,14 @@ const SIDER_WIDTH_KEY = 'tier6_sider_width_cache'
 // 默认和限制值
 const DEFAULT_SIDER_WIDTH = 480
 const MIN_SIDER_WIDTH = 320
-const MAX_SIDER_WIDTH = 720
+const MAX_SIDER_WIDTH = 900
 
 const App: React.FC = () => {
   const [topology, setTopology] = useState<HierarchicalTopology | null>(null)
   const [loading, setLoading] = useState(true)  // 初始加载状态
 
   // 视图模式：3d 或 topology
-  const [viewMode, setViewMode] = useState<'3d' | 'topology'>('topology')
+  const [viewMode, setViewMode] = useState<'3d' | 'topology' | 'analysis'>('topology')
 
   // 侧边栏宽度（从localStorage加载）
   const [siderWidth, setSiderWidth] = useState(() => {
@@ -52,6 +55,19 @@ const App: React.FC = () => {
 
   // 流量热力图结果
   const [trafficResult, setTrafficResult] = useState<TopologyTrafficResult | null>(null)
+
+  // LLM 部署分析结果（用于右侧图表面板）
+  const [deploymentAnalysisData, setDeploymentAnalysisData] = useState<DeploymentAnalysisData | null>(null)
+
+  // 分析完成后自动切换到分析视图
+  const prevResultRef = useRef<typeof deploymentAnalysisData>(null)
+  useEffect(() => {
+    // 当从无结果变为有结果时，自动切换到分析视图
+    if (deploymentAnalysisData?.result && !prevResultRef.current?.result) {
+      setViewMode('analysis')
+    }
+    prevResultRef.current = deploymentAnalysisData
+  }, [deploymentAnalysisData])
 
   // 各层级连接的默认参数（从后端加载，初始为空）
   const [_levelConnectionDefaults, _setLevelConnectionDefaults] = useState<{
@@ -610,10 +626,11 @@ const App: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <Segmented
             value={viewMode}
-            onChange={(v) => setViewMode(v as '3d' | 'topology')}
+            onChange={(v) => setViewMode(v as '3d' | 'topology' | 'analysis')}
             options={[
               { value: '3d', label: '3D视图' },
               { value: 'topology', label: '拓扑图' },
+              ...(deploymentAnalysisData?.result ? [{ value: 'analysis', label: '部署分析' }] : []),
             ]}
           />
           <span style={{ color: '#999999', fontSize: 12 }}>v{__APP_VERSION__}</span>
@@ -629,10 +646,13 @@ const App: React.FC = () => {
             overflow: 'auto',
             position: 'relative',
             borderRight: '1px solid #E5E5E5',
-            boxShadow: '1px 0 3px rgba(0, 0, 0, 0.04)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
-          <ConfigPanel
+          <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+            <ConfigPanel
             topology={topology}
             onGenerate={handleGenerate}
             loading={loading}
@@ -655,9 +675,11 @@ const App: React.FC = () => {
             viewMode={viewMode}
             focusedLevel={focusedLevel}
             onTrafficResultChange={setTrafficResult}
-          />
+            onAnalysisDataChange={setDeploymentAnalysisData}
+            />
+          </div>
 
-          {/* 节点详情卡片 */}
+          {/* 节点详情卡片 - 固定在底部 */}
           {selectedNode && (
             <Card
               title={`节点详情: ${selectedNode.label}`}
@@ -761,7 +783,7 @@ const App: React.FC = () => {
           />
         </Sider>
 
-        <Content style={{ position: 'relative', background: '#ffffff' }}>
+        <Content style={{ position: 'relative', background: '#ffffff', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {loading && !topology ? (
             <div style={{
               display: 'flex',
@@ -770,6 +792,92 @@ const App: React.FC = () => {
               height: '100%',
             }}>
               <Spin size="large" tip="加载中..." />
+            </div>
+          ) : viewMode === 'analysis' ? (
+            /* 分析视图 */
+            <div style={{
+              flex: 1,
+              overflow: 'auto',
+              padding: 24,
+              background: '#fafafa',
+            }}>
+              <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+                <div style={{ fontSize: 20, fontWeight: 600, color: '#1a1a1a', marginBottom: 20 }}>
+                  LLM 部署分析结果
+                </div>
+
+                {/* 分析结果详情 */}
+                <div style={{
+                  background: '#fff',
+                  borderRadius: 12,
+                  padding: 20,
+                  marginBottom: 20,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                }}>
+                  <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>分析结果</div>
+                  {deploymentAnalysisData && (
+                    <AnalysisResultDisplay
+                      result={deploymentAnalysisData.result}
+                      topKPlans={deploymentAnalysisData.topKPlans}
+                      loading={deploymentAnalysisData.loading}
+                      onSelectPlan={deploymentAnalysisData.onSelectPlan}
+                      searchStats={deploymentAnalysisData.searchStats}
+                      errorMsg={deploymentAnalysisData.errorMsg}
+                    />
+                  )}
+
+                  {/* 映射到拓扑按钮 */}
+                  {deploymentAnalysisData?.canMapToTopology && (
+                    <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+                      <button
+                        onClick={deploymentAnalysisData.onMapToTopology}
+                        style={{
+                          flex: 1,
+                          padding: '10px 16px',
+                          background: '#5E6AD2',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: 8,
+                          cursor: 'pointer',
+                          fontSize: 14,
+                          fontWeight: 500,
+                        }}
+                      >
+                        映射到拓扑热力图
+                      </button>
+                      <button
+                        onClick={deploymentAnalysisData.onClearTraffic}
+                        style={{
+                          padding: '10px 16px',
+                          background: '#f5f5f5',
+                          color: '#666',
+                          border: '1px solid #d9d9d9',
+                          borderRadius: 8,
+                          cursor: 'pointer',
+                          fontSize: 14,
+                        }}
+                      >
+                        清除
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* 评分规则和图表 */}
+                {deploymentAnalysisData?.result && (
+                  <>
+                    <ScoringRulesCard />
+                    <div style={{ marginTop: 16 }}>
+                      <ChartsPanel
+                        result={deploymentAnalysisData.result}
+                        topKPlans={deploymentAnalysisData.topKPlans}
+                        hardware={deploymentAnalysisData.hardware}
+                        model={deploymentAnalysisData.model}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           ) : viewMode === '3d' ? (
             <Scene3D

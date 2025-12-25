@@ -7,6 +7,7 @@ import { Segmented, Tooltip, Checkbox, Button, Typography } from 'antd'
 import { UndoOutlined, RedoOutlined, ReloadOutlined } from '@ant-design/icons'
 import { LayoutType, AdjacentLevelPair, LEVEL_PAIR_NAMES } from '../../types'
 import { Node, Edge, LinkDetail, MultiLevelViewOptions, getNodeEdgePoint } from './shared'
+import { getTorusGridSize, getTorus3DSize } from './layouts'
 
 const { Text } = Typography
 
@@ -628,4 +629,193 @@ export const LevelPairSelector: React.FC<LevelPairSelectorProps> = ({
       />
     </div>
   )
+}
+
+// ==========================================
+// TorusArcs - Torus拓扑环绕弧线组件
+// ==========================================
+
+export interface TorusArcsProps {
+  nodes: Array<{ id: string; x: number; y: number; gridRow?: number; gridCol?: number; gridZ?: number }>
+  directTopology: string
+  opacity?: number
+  /** 获取节点位置的函数（用于支持手动拖拽位置） */
+  getNodePosition?: (node: { id: string; x: number; y: number }) => { x: number; y: number }
+}
+
+/**
+ * 渲染弧线的通用函数
+ */
+const renderArc = (
+  x1: number, y1: number, x2: number, y2: number,
+  key: string, offset: number, opacity: number
+): JSX.Element | null => {
+  const midX = (x1 + x2) / 2
+  const midY = (y1 + y2) / 2
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const dist = Math.sqrt(dx * dx + dy * dy)
+  if (dist < 1) return null
+  const bulge = dist * 0.25 + offset * 8
+  const perpX = -dy / dist
+  const perpY = dx / dist
+  const ctrlX = midX + perpX * bulge
+  const ctrlY = midY + perpY * bulge
+  return (
+    <path
+      key={key}
+      d={`M ${x1} ${y1} Q ${ctrlX} ${ctrlY}, ${x2} ${y2}`}
+      fill="none"
+      stroke="#999"
+      strokeWidth={1.5}
+      strokeOpacity={opacity}
+      style={{ transition: 'stroke-opacity 0.2s ease' }}
+    />
+  )
+}
+
+export const TorusArcs: React.FC<TorusArcsProps> = ({
+  nodes,
+  directTopology,
+  opacity = 0.6,
+  getNodePosition,
+}) => {
+  const getPos = (node: { id: string; x: number; y: number }) => {
+    if (getNodePosition) return getNodePosition(node)
+    return { x: node.x, y: node.y }
+  }
+
+  if (directTopology === 'torus_2d') {
+    const { cols, rows } = getTorusGridSize(nodes.length)
+    if (cols < 2 && rows < 2) return null
+
+    const rowArcs: { x1: number; y1: number; x2: number; y2: number }[] = []
+    const colArcs: { x1: number; y1: number; x2: number; y2: number }[] = []
+
+    // Torus: 只画首尾环绕弧
+    for (let r = 0; r < rows; r++) {
+      const nodesInRow = nodes.filter(n => n.gridRow === r).sort((a, b) => (a.gridCol || 0) - (b.gridCol || 0))
+      if (nodesInRow.length >= 3) {
+        const first = nodesInRow[0]
+        const last = nodesInRow[nodesInRow.length - 1]
+        const firstPos = getPos(first)
+        const lastPos = getPos(last)
+        rowArcs.push({ x1: firstPos.x, y1: firstPos.y, x2: lastPos.x, y2: lastPos.y })
+      }
+    }
+
+    for (let c = 0; c < cols; c++) {
+      const nodesInCol = nodes.filter(n => n.gridCol === c).sort((a, b) => (a.gridRow || 0) - (b.gridRow || 0))
+      if (nodesInCol.length >= 3) {
+        const first = nodesInCol[0]
+        const last = nodesInCol[nodesInCol.length - 1]
+        const firstPos = getPos(first)
+        const lastPos = getPos(last)
+        colArcs.push({ x1: firstPos.x, y1: firstPos.y, x2: lastPos.x, y2: lastPos.y })
+      }
+    }
+
+    return (
+      <g>
+        {rowArcs.map((arc, i) => renderArc(arc.x1, arc.y1, arc.x2, arc.y2, `row-arc-${i}`, i, opacity))}
+        {colArcs.map((arc, i) => renderArc(arc.x1, arc.y1, arc.x2, arc.y2, `col-arc-${i}`, i, opacity))}
+      </g>
+    )
+  }
+
+  if (directTopology === 'full_mesh_2d') {
+    const { cols, rows } = getTorusGridSize(nodes.length)
+    if (cols < 2 && rows < 2) return null
+
+    const arcs: JSX.Element[] = []
+
+    // 2D FullMesh: 行内全连接，非相邻节点用曲线
+    for (let r = 0; r < rows; r++) {
+      const nodesInRow = nodes.filter(n => n.gridRow === r).sort((a, b) => (a.gridCol || 0) - (b.gridCol || 0))
+      // 对于行内所有非相邻的节点对，画曲线
+      for (let i = 0; i < nodesInRow.length; i++) {
+        for (let j = i + 2; j < nodesInRow.length; j++) {
+          const n1 = nodesInRow[i]
+          const n2 = nodesInRow[j]
+          const pos1 = getPos(n1)
+          const pos2 = getPos(n2)
+          const arc = renderArc(pos1.x, pos1.y, pos2.x, pos2.y, `row-${r}-${i}-${j}`, j - i - 1, opacity * 0.8)
+          if (arc) arcs.push(arc)
+        }
+      }
+    }
+
+    // 列内全连接，非相邻节点用曲线
+    for (let c = 0; c < cols; c++) {
+      const nodesInCol = nodes.filter(n => n.gridCol === c).sort((a, b) => (a.gridRow || 0) - (b.gridRow || 0))
+      for (let i = 0; i < nodesInCol.length; i++) {
+        for (let j = i + 2; j < nodesInCol.length; j++) {
+          const n1 = nodesInCol[i]
+          const n2 = nodesInCol[j]
+          const pos1 = getPos(n1)
+          const pos2 = getPos(n2)
+          const arc = renderArc(pos1.x, pos1.y, pos2.x, pos2.y, `col-${c}-${i}-${j}`, j - i - 1, opacity * 0.8)
+          if (arc) arcs.push(arc)
+        }
+      }
+    }
+
+    return <g>{arcs}</g>
+  }
+
+  if (directTopology === 'torus_3d') {
+    const { dim, layers } = getTorus3DSize(nodes.length)
+    if (dim < 2) return null
+
+    const arcs: JSX.Element[] = []
+
+    // X方向环绕弧
+    for (let z = 0; z < layers; z++) {
+      for (let r = 0; r < dim; r++) {
+        const rowNodes = nodes.filter(n => n.gridZ === z && n.gridRow === r).sort((a, b) => (a.gridCol || 0) - (b.gridCol || 0))
+        if (rowNodes.length >= 3) {
+          const first = rowNodes[0]
+          const last = rowNodes[rowNodes.length - 1]
+          const firstPos = getPos(first)
+          const lastPos = getPos(last)
+          const arc = renderArc(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `x-arc-z${z}-r${r}`, z + r, opacity * 0.8)
+          if (arc) arcs.push(arc)
+        }
+      }
+    }
+
+    // Y方向环绕弧
+    for (let z = 0; z < layers; z++) {
+      for (let c = 0; c < dim; c++) {
+        const colNodes = nodes.filter(n => n.gridZ === z && n.gridCol === c).sort((a, b) => (a.gridRow || 0) - (b.gridRow || 0))
+        if (colNodes.length >= 3) {
+          const first = colNodes[0]
+          const last = colNodes[colNodes.length - 1]
+          const firstPos = getPos(first)
+          const lastPos = getPos(last)
+          const arc = renderArc(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `y-arc-z${z}-c${c}`, z + c, opacity * 0.8)
+          if (arc) arcs.push(arc)
+        }
+      }
+    }
+
+    // Z方向环绕弧
+    for (let r = 0; r < dim; r++) {
+      for (let c = 0; c < dim; c++) {
+        const layerNodes = nodes.filter(n => n.gridRow === r && n.gridCol === c).sort((a, b) => (a.gridZ || 0) - (b.gridZ || 0))
+        if (layerNodes.length >= 3) {
+          const first = layerNodes[0]
+          const last = layerNodes[layerNodes.length - 1]
+          const firstPos = getPos(first)
+          const lastPos = getPos(last)
+          const arc = renderArc(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `z-arc-r${r}-c${c}`, r + c, opacity * 0.8)
+          if (arc) arcs.push(arc)
+        }
+      }
+    }
+
+    return <g>{arcs}</g>
+  }
+
+  return null
 }

@@ -7,7 +7,23 @@ import {
   LayoutType,
   HierarchicalTopology,
 } from '../../types'
-import { TopologyTrafficResult } from '../../utils/llmDeployment/types'
+import { TopologyTrafficResult, PlanAnalysisResult, HardwareConfig, LLMModelConfig } from '../../utils/llmDeployment/types'
+
+// 部署分析数据（用于传递给右侧分析面板）
+export interface DeploymentAnalysisData {
+  result: PlanAnalysisResult | null
+  topKPlans: PlanAnalysisResult[]
+  hardware: HardwareConfig
+  model: LLMModelConfig
+  loading: boolean
+  errorMsg: string | null
+  searchStats: { evaluated: number; feasible: number; timeMs: number } | null
+  onSelectPlan: (plan: PlanAnalysisResult) => void
+  onMapToTopology?: () => void
+  onClearTraffic?: () => void
+  canMapToTopology?: boolean
+  onSwitchToAnalysis?: () => void
+}
 
 // ============================================
 // 自定义图标
@@ -145,7 +161,7 @@ export interface ConfigPanelProps {
   // 布局相关
   layoutType?: LayoutType
   onLayoutTypeChange?: (type: LayoutType) => void
-  viewMode?: '3d' | 'topology'
+  viewMode?: '3d' | 'topology' | 'analysis'
   // Switch 3D显示配置
   switchDisplayConfig?: SwitchDisplayConfig
   onSwitchDisplayConfigChange?: (config: SwitchDisplayConfig) => void
@@ -154,6 +170,8 @@ export interface ConfigPanelProps {
   // 流量热力图
   trafficResult?: TopologyTrafficResult | null
   onTrafficResultChange?: (result: TopologyTrafficResult | null) => void
+  // 部署分析结果（用于右侧图表）
+  onAnalysisDataChange?: (data: DeploymentAnalysisData | null) => void
 }
 
 // ============================================

@@ -275,7 +275,7 @@ export function searchOptimalPlan(
   inference: InferenceConfig,
   hardware: HardwareConfig,
   constraints: SearchConstraints = {},
-  target: OptimizationTarget = 'balanced',
+  _target: OptimizationTarget = 'balanced',
   topK: number = 10,
   weights?: ScoreWeights
 ): PlanSearchResult {
@@ -351,8 +351,6 @@ export function quickSearch(
   hardware: HardwareConfig,
   target: OptimizationTarget = 'balanced'
 ): PlanAnalysisResult {
-  const chipsPerNode = hardware.node.chips_per_node;
-
   // 启发式: 常见的有效配置
   const heuristicPlans: ParallelismStrategy[] = [];
 
@@ -426,8 +424,11 @@ export function quickSearch(
 // ============================================
 
 /**
- * 给定固定芯片数，搜索最优配置
+ * 给定最大芯片数，搜索最优配置
  * @param weights 自定义评分权重
+ *
+ * 注意：由于并行度参数（DP/TP/PP/EP）通常是 2 的幂次，
+ * 实际使用的芯片数可能小于 targetChips，但会尽量接近。
  */
 export function searchWithFixedChips(
   model: LLMModelConfig,
@@ -437,7 +438,7 @@ export function searchWithFixedChips(
   target: OptimizationTarget = 'balanced',
   weights?: ScoreWeights
 ): PlanSearchResult {
-  // 约束芯片数为精确值
+  // 约束最大芯片数
   const constraints: SearchConstraints = {
     max_chips: targetChips,
   };
@@ -445,21 +446,9 @@ export function searchWithFixedChips(
   // 搜索 (传入自定义权重)
   const result = searchOptimalPlan(model, inference, hardware, constraints, target, 10, weights);
 
-  // 过滤只保留精确芯片数的方案
-  const exactChipPlans = result.top_k_plans.filter(
-    p => p.plan.total_chips === targetChips
-  );
-
-  if (exactChipPlans.length === 0) {
-    throw new Error(`无法找到使用 ${targetChips} 芯片的可行方案`);
-  }
-
-  return {
-    ...result,
-    optimal_plan: exactChipPlans[0],
-    top_k_plans: exactChipPlans,
-    pareto_frontier: extractParetoFrontier(exactChipPlans),
-  };
+  // 返回所有不超过 targetChips 的可行方案（已按评分排序）
+  // 不再要求精确匹配芯片数，因为并行度参数组合可能无法精确达到目标值
+  return result;
 }
 
 // ============================================
