@@ -305,6 +305,26 @@ export interface PlanAnalysisResult {
 // 方案搜索
 // ============================================
 
+/** 评分权重配置 */
+export interface ScoreWeights {
+  /** 延迟权重 (0-1) */
+  latency: number;
+  /** 吞吐权重 (0-1) */
+  throughput: number;
+  /** 效率权重 (0-1) */
+  efficiency: number;
+  /** 均衡权重 (0-1) */
+  balance: number;
+}
+
+/** 默认评分权重 */
+export const DEFAULT_SCORE_WEIGHTS: ScoreWeights = {
+  latency: 0.3,
+  throughput: 0.35,
+  efficiency: 0.2,
+  balance: 0.15,
+};
+
 /** 搜索约束 */
 export interface SearchConstraints {
   /** 最大芯片数 */
@@ -321,6 +341,10 @@ export interface SearchConstraints {
   pp_divides_layers?: boolean;
   /** TP 应放在节点内 */
   tp_within_node?: boolean;
+  /** 优化目标 */
+  optimization_target?: OptimizationTarget;
+  /** 自定义评分权重 */
+  score_weights?: ScoreWeights;
 }
 
 /** 搜索统计 */

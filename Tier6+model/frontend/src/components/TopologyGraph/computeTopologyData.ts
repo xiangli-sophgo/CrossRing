@@ -1081,55 +1081,6 @@ function computeBoardLevel(topology: HierarchicalTopology, currentBoard: BoardCo
     }
   })
 
-  // 添加跨层级连接
-  const currentBoardNodeIds = new Set([...chipIds, ...boardSwitchIds])
-  currentBoardNodeIds.add(currentBoard.id)
-
-  allBoardConnections
-    .filter(c => {
-      const sourceIsCurrentBoard = c.source === currentBoard.id
-      const targetIsCurrentBoard = c.target === currentBoard.id
-      if (!sourceIsCurrentBoard && !targetIsCurrentBoard) return false
-      if (sourceIsCurrentBoard && targetIsCurrentBoard) return false
-      const externalNode = sourceIsCurrentBoard ? c.target : c.source
-      if (rackSwitchIds.has(externalNode) || boardSwitchIds.has(externalNode)) return false
-      return true
-    })
-    .forEach(c => {
-      const isSourceInternal = currentBoardNodeIds.has(c.source) || c.source === currentBoard.id
-      const externalNode = isSourceInternal ? c.target : c.source
-
-      let externalDirection: 'upper' | 'lower' = 'upper'
-      let externalLabel = externalNode
-
-      const externalParts = externalNode.split('/')
-      const internalParts = currentBoard.id.split('/')
-
-      if (externalParts.length > internalParts.length) {
-        externalDirection = 'lower'
-      }
-
-      if (externalParts.length >= 3) {
-        externalLabel = externalParts[externalParts.length - 1].replace('_', ' ').toUpperCase()
-        if (externalParts.length >= 2) {
-          const rackPart = externalParts[externalParts.length - 2]
-          externalLabel = `${rackPart.replace('_', ' ')}/${externalLabel}`
-        }
-      }
-
-      edgeList.push({
-        source: currentBoard.id,
-        target: currentBoard.id,
-        bandwidth: c.bandwidth,
-        latency: c.latency,
-        isSwitch: false,
-        isExternal: true,
-        externalDirection,
-        externalNodeId: externalNode,
-        externalNodeLabel: externalLabel,
-      })
-    })
-
   return { nodes: nodeList, edges: edgeList, title: graphTitle }
 }
 

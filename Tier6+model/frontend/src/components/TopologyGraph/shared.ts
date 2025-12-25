@@ -182,3 +182,105 @@ export interface Edge {
   viaNodeId?: string  // 中转节点ID
   viaNodeLabel?: string  // 中转节点标签
 }
+
+// ============================================
+// 节点尺寸配置（用于边缘点计算）
+// ============================================
+
+// 节点尺寸映射（半宽和半高）
+export const NODE_SIZE_MAP: Record<string, { hw: number; hh: number }> = {
+  switch: { hw: 30, hh: 12 },      // Switch节点
+  pod: { hw: 28, hh: 16 },         // Pod节点
+  rack: { hw: 18, hh: 28 },        // Rack节点
+  board: { hw: 32, hh: 18 },       // Board节点
+  chip: { hw: 20, hh: 20 },        // Chip节点
+  default: { hw: 25, hh: 18 },     // 默认尺寸
+}
+
+// 多层级视图中的节点尺寸（与MULTI_LEVEL_NODE_SIZE_CONFIG匹配）
+export const NODE_SIZE_MAP_MULTI: Record<string, { hw: number; hh: number }> = {
+  switch: { hw: 30.5, hh: 12 },  // 61x24 (与单层级相同)
+  pod: { hw: 28, hh: 16 },       // 56x32
+  rack: { hw: 18, hh: 28 },      // 36x56
+  board: { hw: 32, hh: 18 },     // 64x36
+  chip: { hw: 20, hh: 20 },      // 40x40
+  default: { hw: 25, hh: 18 },   // 50x36
+}
+
+/**
+ * 计算从节点中心到目标点方向的边缘点
+ * @param cx 节点中心X坐标
+ * @param cy 节点中心Y坐标
+ * @param tx 目标点X坐标
+ * @param ty 目标点Y坐标
+ * @param nodeType 节点类型（用于确定尺寸）
+ * @param isMultiLevel 是否为多层级视图（使用较大尺寸）
+ * @param scale 缩放比例（默认1）
+ * @returns 边缘点坐标 { x, y }
+ */
+export function getNodeEdgePoint(
+  cx: number,
+  cy: number,
+  tx: number,
+  ty: number,
+  nodeType: string,
+  isMultiLevel: boolean = false,
+  scale: number = 1
+): { x: number; y: number } {
+  const sizeMap = isMultiLevel ? NODE_SIZE_MAP_MULTI : NODE_SIZE_MAP
+  const type = nodeType.toLowerCase()
+  const size = sizeMap[type] || sizeMap.default
+  const hw = size.hw * scale  // 半宽
+  const hh = size.hh * scale  // 半高
+
+  // 计算方向向量
+  const dx = tx - cx
+  const dy = ty - cy
+
+  // 如果目标点就是中心点，返回中心点
+  if (dx === 0 && dy === 0) {
+    return { x: cx, y: cy }
+  }
+
+  // 计算射线与矩形边界的交点
+  // 使用参数化方法：找到射线 (cx + t*dx, cy + t*dy) 与矩形边界的交点
+  // 矩形边界：x = cx ± hw, y = cy ± hh
+
+  let t = Infinity
+
+  // 检查与左右边界的交点
+  if (dx !== 0) {
+    const tRight = hw / Math.abs(dx)
+    const tLeft = hw / Math.abs(dx)
+    const tX = dx > 0 ? tRight : tLeft
+    if (tX < t) {
+      const yAtT = cy + tX * dy
+      if (Math.abs(yAtT - cy) <= hh) {
+        t = tX
+      }
+    }
+  }
+
+  // 检查与上下边界的交点
+  if (dy !== 0) {
+    const tBottom = hh / Math.abs(dy)
+    const tTop = hh / Math.abs(dy)
+    const tY = dy > 0 ? tBottom : tTop
+    if (tY < t) {
+      const xAtT = cx + tY * dx
+      if (Math.abs(xAtT - cx) <= hw) {
+        t = tY
+      }
+    }
+  }
+
+  // 如果没有找到交点（不应该发生），返回中心点
+  if (t === Infinity) {
+    return { x: cx, y: cy }
+  }
+
+  return {
+    x: cx + t * dx,
+    y: cy + t * dy,
+  }
+}

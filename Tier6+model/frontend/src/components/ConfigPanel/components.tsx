@@ -86,7 +86,20 @@ export const SwitchLevelConfig: React.FC<SwitchLevelConfigProps> = ({
         <Switch
           size="small"
           checked={config.enabled}
-          onChange={(checked) => onChange({ ...config, enabled: checked })}
+          onChange={(checked) => {
+            if (checked && config.layers.length === 0) {
+              // 启用时如果没有层，自动添加一个默认Switch层
+              const defaultLayer: SwitchLayerConfig = {
+                layer_name: 'leaf',
+                switch_type_id: switchTypes[0]?.id || '',
+                count: 1,
+                inter_connect: false,
+              }
+              onChange({ ...config, enabled: checked, layers: [defaultLayer] })
+            } else {
+              onChange({ ...config, enabled: checked })
+            }
+          }}
         />
       </div>
 
@@ -554,13 +567,18 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
                       border: '1px solid rgba(5, 150, 105, 0.1)',
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <Text code style={{ fontSize: 14 }}>{conn.source}</Text>
-                        <Text style={{ margin: '0 6px', fontSize: 14 }}>↔</Text>
-                        <Text code style={{ fontSize: 14 }}>{conn.target}</Text>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 2 }}>
+                          <Text style={{ fontSize: 11, color: '#999', width: 20, flexShrink: 0 }}>源:</Text>
+                          <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>{conn.source}</Text>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 11, color: '#999', width: 20, flexShrink: 0 }}>→</Text>
+                          <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>{conn.target}</Text>
+                        </div>
                       </div>
-                      <Space size={4}>
+                      <Space size={4} style={{ flexShrink: 0, marginLeft: 8 }}>
                         {hasCustom && (
                           <Button
                             type="text"
@@ -636,13 +654,18 @@ export const ConnectionEditPanel: React.FC<ConnectionEditPanelProps> = ({
                       border: '1px solid rgba(0, 0, 0, 0.06)',
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ flex: 1 }}>
-                        <Text code style={{ fontSize: 14 }}>{conn.source}</Text>
-                        <Text style={{ margin: '0 6px', fontSize: 14 }}>↔</Text>
-                        <Text code style={{ fontSize: 14 }}>{conn.target}</Text>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 2 }}>
+                          <Text style={{ fontSize: 11, color: '#999', width: 20, flexShrink: 0 }}>源:</Text>
+                          <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>{conn.source}</Text>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 11, color: '#999', width: 20, flexShrink: 0 }}>→</Text>
+                          <Text code style={{ fontSize: 12, wordBreak: 'break-all' }}>{conn.target}</Text>
+                        </div>
                       </div>
-                      <Space size={4}>
+                      <Space size={4} style={{ flexShrink: 0, marginLeft: 8 }}>
                         {hasCustom && (
                           <Button
                             type="text"

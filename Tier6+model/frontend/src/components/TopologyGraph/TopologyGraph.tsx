@@ -994,7 +994,10 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
             height={600 / zoom}
             fill="transparent"
             onClick={() => {
-              if (connectionMode === 'view' && !isManualMode) {
+              // 在连接模式下，点击空白处重置悬停状态
+              if (connectionMode !== 'view') {
+                setHoveredLayerIndex(null)
+              } else if (!isManualMode) {
                 onNodeClick?.(null)
                 onLinkClick?.(null)
               }

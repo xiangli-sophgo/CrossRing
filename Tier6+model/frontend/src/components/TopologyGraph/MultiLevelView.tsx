@@ -1,5 +1,5 @@
 import React from 'react'
-import { Node, Edge, LayoutType, ManualConnection } from './shared'
+import { Node, Edge, LayoutType, ManualConnection, getNodeEdgePoint } from './shared'
 import { ManualConnectionLine } from './components'
 import { HierarchyLevel } from '../../types'
 
@@ -90,27 +90,22 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
 
   // 获取所有inter_level边（用于跨层级连线渲染）
   const interLevelEdges = edges.filter(e => e.connectionType === 'inter_level')
-  void interLevelEdges // 在简化版本中暂未使用
-  const baseSkewAngle = -30
+  const baseSkewAngle = -25
   const skewTan = Math.tan(baseSkewAngle * Math.PI / 180)
 
-  // 查找节点所在的容器及其zLayer和索引（用于跨层级连线）
-  const getNodeContainerInfo = (nodeId: string) => {
-    for (const container of containers) {
-      if (container.singleLevelData?.nodes.some(n => n.id === nodeId)) {
-        const idParts = container.id.split('/')
-        const lastPart = idParts[idParts.length - 1]
-        const indexMatch = lastPart.match(/_(\d+)$/)
-        const containerIndex = indexMatch ? parseInt(indexMatch[1], 10) : 0
-        return { container, zLayer: container.zLayer ?? 0, containerIndex }
-      }
-    }
-    return null
-  }
-  void getNodeContainerInfo // 在简化版本中暂未使用
+  // 上层Switch节点（容器外的Switch）- 需要在containersRendered之前定义
+  const upperSwitchNodes = displayNodes.filter(n => n.isSwitch && n.inSwitchPanel)
 
   // 计算节点位置（考虑yOffset和skew变换）
   const getNodePosition = (nodeId: string, activeLayerIdx: number | null) => {
+    // 首先检查是否是容器外的Switch节点
+    const upperSwitch = displayNodes.find(n => n.id === nodeId && n.isSwitch && n.inSwitchPanel)
+    if (upperSwitch) {
+      // 容器外Switch节点直接使用其坐标，不受skew变换影响
+      return { x: upperSwitch.x, y: upperSwitch.y, zLayer: -1 }
+    }
+
+    // 然后在容器内查找
     for (const container of containers) {
       if (container.singleLevelData) {
         const slNode = container.singleLevelData.nodes.find(n => n.id === nodeId)
@@ -239,6 +234,13 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
         })
       }
 
+      // 获取节点类型
+      const getNodeType = (nodeId: string): string => {
+        const parts = nodeId.split('/')
+        const lastPart = parts[parts.length - 1] || ''
+        return lastPart.split('_')[0] || 'default'
+      }
+
       return (
         <g key={`manual-conn-${conn.id}`} style={{ opacity: linkOpacity, transition: 'opacity 0.2s ease' }}>
           <ManualConnectionLine
@@ -251,6 +253,9 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
             onClick={handleManualClick}
             layoutType={layoutType}
             containers={containerBoundsInfo}
+            sourceType={getNodeType(conn.source)}
+            targetType={getNodeType(conn.target)}
+            isMultiLevel={true}
           />
         </g>
       )
@@ -502,7 +507,7 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
                 height={svgHeight}
                 viewBox={`0 0 ${viewBox.width} ${viewBox.height}`}
                 preserveAspectRatio="xMidYMid meet"
-                overflow="hidden"
+                overflow="visible"
                 style={{ pointerEvents: 'all' }}
                 onMouseMove={handleDragMove}
                 onMouseUp={handleDragEnd}
@@ -568,30 +573,126 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
                       })
                     })()}
                     {/* Switch节点 */}
-                    {slSwitchNodes.map(swNode => renderNode(swNode, {
-                      keyPrefix: 'sl-sw',
-                      scale: 1.8,
-                      isSelected: selectedNodeId === swNode.id,
-                      useMultiLevelConfig: true,
-                      onClick: () => {
-                        if (connectionMode === 'view' && onNodeClick) {
-                          const swConnections = slEdges
-                            .filter(edge => edge.source === swNode.id || edge.target === swNode.id)
-                            .map(edge => {
-                              const otherId = edge.source === swNode.id ? edge.target : edge.source
-                              const otherNode = slNodes.find(n => n.id === otherId)
-                              return { id: otherId, label: otherNode?.label || otherId, bandwidth: edge.bandwidth, latency: edge.latency }
-                            })
-                          onNodeClick({
-                            id: swNode.id,
-                            label: swNode.label,
-                            type: swNode.type,
-                            subType: swNode.subType,
-                            connections: swConnections,
-                          })
-                        }
-                      }
-                    }))}
+                    {slSwitchNodes.map(swNode => {
+                      const isSwSourceSelected = selectedNodes.has(swNode.id)
+                      const isSwTargetSelected = targetNodes.has(swNode.id)
+                      const isActiveLayer = !shouldDimContainer
+                      const canSelectSw = connectionMode === 'view' || isActiveLayer
+
+                      return (
+                        <g
+                          key={`sl-sw-wrapper-${swNode.id}`}
+                          style={{
+                            cursor: !canSelectSw ? 'default' : connectionMode !== 'view' ? 'crosshair' : 'pointer',
+                            pointerEvents: canSelectSw ? 'all' : 'none',
+                          }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation()
+                            e.preventDefault()
+                            if (!isActiveLayer) return
+                            if (connectionMode === 'select_source' || connectionMode === 'select' || connectionMode === 'connect') {
+                              const currentSet = new Set(selectedNodes)
+                              if (currentSet.has(swNode.id)) {
+                                currentSet.delete(swNode.id)
+                              } else {
+                                currentSet.add(swNode.id)
+                              }
+                              onSelectedNodesChange?.(currentSet)
+                            } else if (connectionMode === 'select_target') {
+                              const currentSet = new Set(targetNodes)
+                              if (currentSet.has(swNode.id)) {
+                                currentSet.delete(swNode.id)
+                              } else {
+                                currentSet.add(swNode.id)
+                              }
+                              onTargetNodesChange?.(currentSet)
+                            }
+                          }}
+                        >
+                          {/* 选中指示器（连接模式）*/}
+                          {(isSwSourceSelected || isSwTargetSelected) && (() => {
+                            const size = { w: 110, h: 44 }
+                            const padding = 6
+                            const isBoth = isSwSourceSelected && isSwTargetSelected
+
+                            if (isBoth) {
+                              return (
+                                <>
+                                  <rect
+                                    x={swNode.x - (size.w / 2 + padding + 4)}
+                                    y={swNode.y - (size.h / 2 + padding + 4)}
+                                    width={size.w + (padding + 4) * 2}
+                                    height={size.h + (padding + 4) * 2}
+                                    rx={8}
+                                    ry={8}
+                                    fill="none"
+                                    stroke="#10b981"
+                                    strokeWidth={2.5}
+                                    strokeDasharray="6 3"
+                                    style={{ filter: 'drop-shadow(0 0 8px #10b981) drop-shadow(0 0 16px rgba(16, 185, 129, 0.5))' }}
+                                  />
+                                  <rect
+                                    x={swNode.x - (size.w / 2 + padding)}
+                                    y={swNode.y - (size.h / 2 + padding)}
+                                    width={size.w + padding * 2}
+                                    height={size.h + padding * 2}
+                                    rx={6}
+                                    ry={6}
+                                    fill="none"
+                                    stroke="#2563eb"
+                                    strokeWidth={2.5}
+                                    strokeDasharray="6 3"
+                                    style={{ filter: 'drop-shadow(0 0 8px #2563eb) drop-shadow(0 0 16px rgba(37, 99, 235, 0.5))' }}
+                                  />
+                                </>
+                              )
+                            }
+
+                            const color = isSwSourceSelected ? '#2563eb' : '#10b981'
+                            const glowColor = isSwSourceSelected ? 'rgba(37, 99, 235, 0.5)' : 'rgba(16, 185, 129, 0.5)'
+                            return (
+                              <rect
+                                x={swNode.x - (size.w / 2 + padding)}
+                                y={swNode.y - (size.h / 2 + padding)}
+                                width={size.w + padding * 2}
+                                height={size.h + padding * 2}
+                                rx={6}
+                                ry={6}
+                                fill="none"
+                                stroke={color}
+                                strokeWidth={2.5}
+                                strokeDasharray="6 3"
+                                style={{ filter: `drop-shadow(0 0 8px ${color}) drop-shadow(0 0 16px ${glowColor})` }}
+                              />
+                            )
+                          })()}
+                          {renderNode(swNode, {
+                            keyPrefix: 'sl-sw',
+                            scale: 1.8,
+                            isSelected: selectedNodeId === swNode.id,
+                            useMultiLevelConfig: true,
+                            onClick: () => {
+                              if (connectionMode === 'view' && onNodeClick) {
+                                const swConnections = slEdges
+                                  .filter(edge => edge.source === swNode.id || edge.target === swNode.id)
+                                  .map(edge => {
+                                    const otherId = edge.source === swNode.id ? edge.target : edge.source
+                                    const otherNode = slNodes.find(n => n.id === otherId)
+                                    return { id: otherId, label: otherNode?.label || otherId, bandwidth: edge.bandwidth, latency: edge.latency }
+                                  })
+                                onNodeClick({
+                                  id: swNode.id,
+                                  label: swNode.label,
+                                  type: swNode.type,
+                                  subType: swNode.subType,
+                                  connections: swConnections,
+                                })
+                              }
+                            }
+                          })}
+                        </g>
+                      )
+                    })}
                   </g>
                 )}
 
@@ -609,13 +710,19 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
                   const targetConnected = connectedNodeIds.has(edge.target)
                   const edgeOpacity = shouldDimContainer && !sourceConnected && !targetConnected ? 0.15 : 0.6
 
+                  // 计算边缘点
+                  const sourceScale = sourceNode.isSwitch ? 1.8 : slNodeScale
+                  const targetScale = targetNode.isSwitch ? 1.8 : slNodeScale
+                  const sourceEdge = getNodeEdgePoint(sourceNode.x, sourceNode.y, targetNode.x, targetNode.y, sourceNode.type, false, sourceScale)
+                  const targetEdge = getNodeEdgePoint(targetNode.x, targetNode.y, sourceNode.x, sourceNode.y, targetNode.type, false, targetScale)
+
                   return (
                     <line
                       key={`sl-edge-${i}`}
-                      x1={sourceNode.x}
-                      y1={sourceNode.y}
-                      x2={targetNode.x}
-                      y2={targetNode.y}
+                      x1={sourceEdge.x}
+                      y1={sourceEdge.y}
+                      x2={targetEdge.x}
+                      y2={targetEdge.y}
                       stroke={isLinkSelected ? '#2563eb' : '#b0b0b0'}
                       strokeWidth={isLinkSelected ? 2 : 1}
                       strokeOpacity={edgeOpacity}
@@ -639,6 +746,7 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
                     />
                   )
                 })}
+
 
                 {/* 设备节点 */}
                 {slNodes.filter(n => !n.isSwitch && !n.inSwitchPanel).map(node => {
@@ -730,6 +838,48 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
                         }
                         const size = sizeMap[nodeType] || sizeMap.default
                         const padding = 6
+                        const isBoth = isSourceSelected && isTargetSelected
+
+                        if (isBoth) {
+                          // 同时是源节点和目标节点：显示双层边框（外层虚线）
+                          return (
+                            <>
+                              {/* 外层：目标节点绿色虚线 */}
+                              <rect
+                                x={-(size.w / 2 + padding + 4)}
+                                y={-(size.h / 2 + padding + 4)}
+                                width={size.w + (padding + 4) * 2}
+                                height={size.h + (padding + 4) * 2}
+                                rx={8}
+                                ry={8}
+                                fill="none"
+                                stroke="#10b981"
+                                strokeWidth={2.5}
+                                strokeDasharray="6 3"
+                                style={{
+                                  filter: 'drop-shadow(0 0 8px #10b981) drop-shadow(0 0 16px rgba(16, 185, 129, 0.5))',
+                                }}
+                              />
+                              {/* 内层：源节点蓝色虚线 */}
+                              <rect
+                                x={-(size.w / 2 + padding)}
+                                y={-(size.h / 2 + padding)}
+                                width={size.w + padding * 2}
+                                height={size.h + padding * 2}
+                                rx={6}
+                                ry={6}
+                                fill="none"
+                                stroke="#2563eb"
+                                strokeWidth={2.5}
+                                strokeDasharray="6 3"
+                                style={{
+                                  filter: 'drop-shadow(0 0 8px #2563eb) drop-shadow(0 0 16px rgba(37, 99, 235, 0.5))',
+                                }}
+                              />
+                            </>
+                          )
+                        }
+
                         const color = isSourceSelected ? '#2563eb' : '#10b981'
                         const glowColor = isSourceSelected ? 'rgba(37, 99, 235, 0.5)' : 'rgba(16, 185, 129, 0.5)'
                         return (
@@ -743,6 +893,7 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
                             fill="none"
                             stroke={color}
                             strokeWidth={2.5}
+                            strokeDasharray="6 3"
                             style={{
                               filter: `drop-shadow(0 0 8px ${color}) drop-shadow(0 0 16px ${glowColor})`,
                             }}
@@ -766,9 +917,6 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
       </g>
     )
   })
-
-  // 上层Switch节点（容器外的Switch）
-  const upperSwitchNodes = displayNodes.filter(n => n.isSwitch && n.inSwitchPanel)
 
   // 渲染上层Switch面板
   const renderUpperSwitchPanel = () => {
@@ -809,30 +957,122 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
           })
         })()}
         {/* Switch节点 */}
-        {upperSwitchNodes.map(swNode => renderNode(swNode, {
-          keyPrefix: 'upper-sw',
-          scale: 1,
-          isSelected: selectedNodeId === swNode.id,
-          useMultiLevelConfig: true,
-          onClick: () => {
-            if (connectionMode === 'view' && onNodeClick) {
-              const swConnections = edges
-                .filter(edge => edge.source === swNode.id || edge.target === swNode.id)
-                .map(edge => {
-                  const otherId = edge.source === swNode.id ? edge.target : edge.source
-                  const otherNode = displayNodes.find(n => n.id === otherId)
-                  return { id: otherId, label: otherNode?.label || otherId, bandwidth: edge.bandwidth, latency: edge.latency }
-                })
-              onNodeClick({
-                id: swNode.id,
-                label: swNode.label,
-                type: swNode.type,
-                subType: swNode.subType,
-                connections: swConnections,
-              })
-            }
-          }
-        }))}
+        {upperSwitchNodes.map(swNode => {
+          const isSourceSelected = selectedNodes.has(swNode.id)
+          const isTargetSelected = targetNodes.has(swNode.id)
+          return (
+            <g
+              key={`upper-sw-wrapper-${swNode.id}`}
+              style={{
+                cursor: connectionMode !== 'view' ? 'crosshair' : 'pointer',
+              }}
+              onMouseDown={(e) => {
+                e.stopPropagation()
+                e.preventDefault()
+                // 在连接模式下处理选择
+                if (connectionMode === 'select_source' || connectionMode === 'select' || connectionMode === 'connect') {
+                  const currentSet = new Set(selectedNodes)
+                  if (currentSet.has(swNode.id)) {
+                    currentSet.delete(swNode.id)
+                  } else {
+                    currentSet.add(swNode.id)
+                  }
+                  onSelectedNodesChange?.(currentSet)
+                } else if (connectionMode === 'select_target') {
+                  const currentSet = new Set(targetNodes)
+                  if (currentSet.has(swNode.id)) {
+                    currentSet.delete(swNode.id)
+                  } else {
+                    currentSet.add(swNode.id)
+                  }
+                  onTargetNodesChange?.(currentSet)
+                }
+              }}
+            >
+              {/* 选中指示器（连接模式）*/}
+              {(isSourceSelected || isTargetSelected) && (() => {
+                const size = { w: 80, h: 30 }
+                const padding = 6
+                const isBoth = isSourceSelected && isTargetSelected
+
+                if (isBoth) {
+                  return (
+                    <>
+                      <rect
+                        x={swNode.x - (size.w / 2 + padding + 4)}
+                        y={swNode.y - (size.h / 2 + padding + 4)}
+                        width={size.w + (padding + 4) * 2}
+                        height={size.h + (padding + 4) * 2}
+                        rx={8}
+                        ry={8}
+                        fill="none"
+                        stroke="#10b981"
+                        strokeWidth={2.5}
+                        strokeDasharray="6 3"
+                        style={{ filter: 'drop-shadow(0 0 8px #10b981) drop-shadow(0 0 16px rgba(16, 185, 129, 0.5))' }}
+                      />
+                      <rect
+                        x={swNode.x - (size.w / 2 + padding)}
+                        y={swNode.y - (size.h / 2 + padding)}
+                        width={size.w + padding * 2}
+                        height={size.h + padding * 2}
+                        rx={6}
+                        ry={6}
+                        fill="none"
+                        stroke="#2563eb"
+                        strokeWidth={2.5}
+                        strokeDasharray="6 3"
+                        style={{ filter: 'drop-shadow(0 0 8px #2563eb) drop-shadow(0 0 16px rgba(37, 99, 235, 0.5))' }}
+                      />
+                    </>
+                  )
+                }
+
+                const color = isSourceSelected ? '#2563eb' : '#10b981'
+                const glowColor = isSourceSelected ? 'rgba(37, 99, 235, 0.5)' : 'rgba(16, 185, 129, 0.5)'
+                return (
+                  <rect
+                    x={swNode.x - (size.w / 2 + padding)}
+                    y={swNode.y - (size.h / 2 + padding)}
+                    width={size.w + padding * 2}
+                    height={size.h + padding * 2}
+                    rx={6}
+                    ry={6}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={2.5}
+                    strokeDasharray="6 3"
+                    style={{ filter: `drop-shadow(0 0 8px ${color}) drop-shadow(0 0 16px ${glowColor})` }}
+                  />
+                )
+              })()}
+              {renderNode(swNode, {
+                keyPrefix: 'upper-sw',
+                scale: 1,
+                isSelected: selectedNodeId === swNode.id,
+                useMultiLevelConfig: true,
+                onClick: () => {
+                  if (connectionMode === 'view' && onNodeClick) {
+                    const swConnections = edges
+                      .filter(edge => edge.source === swNode.id || edge.target === swNode.id)
+                      .map(edge => {
+                        const otherId = edge.source === swNode.id ? edge.target : edge.source
+                        const otherNode = displayNodes.find(n => n.id === otherId)
+                        return { id: otherId, label: otherNode?.label || otherId, bandwidth: edge.bandwidth, latency: edge.latency }
+                      })
+                    onNodeClick({
+                      id: swNode.id,
+                      label: swNode.label,
+                      type: swNode.type,
+                      subType: swNode.subType,
+                      connections: swConnections,
+                    })
+                  }
+                }
+              })}
+            </g>
+          )
+        })}
       </g>
     )
   }
@@ -842,6 +1082,87 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
       {/* 上层Switch面板 */}
       {renderUpperSwitchPanel()}
       {containersRendered}
+      {/* 跨层级边（容器外Switch到容器内节点）*/}
+      {(() => {
+        const activeLayerIdx = hoveredLayerIndex ?? selectedLayerIndex
+        return interLevelEdges.map((edge, idx) => {
+          const sourcePos = getNodePosition(edge.source, activeLayerIdx)
+          const targetPos = getNodePosition(edge.target, activeLayerIdx)
+          if (!sourcePos || !targetPos) return null
+
+          const edgeId = `${edge.source}-${edge.target}`
+          const isLinkSelected = selectedLinkId === edgeId || selectedLinkId === `${edge.target}-${edge.source}`
+
+          // 直接使用中心坐标
+          const srcX = sourcePos.x
+          const srcY = sourcePos.y
+          const tgtX = targetPos.x
+          const tgtY = targetPos.y
+
+          // 计算曲线路径
+          const isDownward = tgtY > srcY
+          const verticalDistance = Math.abs(tgtY - srcY)
+          const horizontalDistance = tgtX - srcX
+
+          const spreadRatio = 0.8
+          const ctrl1Offset = horizontalDistance * spreadRatio
+          const ctrl1X = srcX + ctrl1Offset
+          const ctrl2X = tgtX
+
+          const ctrl1Y = isDownward
+            ? srcY + verticalDistance * 0.1
+            : srcY - verticalDistance * 0.1
+          const ctrl2Y = isDownward
+            ? srcY + verticalDistance * 0.90
+            : srcY - verticalDistance * 0.90
+
+          const pathD = `M ${srcX} ${srcY} C ${ctrl1X} ${ctrl1Y}, ${ctrl2X} ${ctrl2Y}, ${tgtX} ${tgtY}`
+
+          const getDetailedLabel = (nodeId: string) => {
+            const parts = nodeId.split('/')
+            return parts.length >= 2 ? parts.slice(-2).join('/') : nodeId
+          }
+
+          // 判断源/目标类型
+          const getNodeType = (nodeId: string): string => {
+            const upperSwitch = upperSwitchNodes.find(n => n.id === nodeId)
+            if (upperSwitch) return 'switch'
+            for (const container of containers) {
+              const slNode = container.singleLevelData?.nodes.find(n => n.id === nodeId)
+              if (slNode) return slNode.isSwitch ? 'switch' : slNode.type
+            }
+            return 'default'
+          }
+
+          return (
+            <path
+              key={`inter-level-${idx}`}
+              d={pathD}
+              fill="none"
+              stroke={isLinkSelected ? '#2563eb' : '#1890ff'}
+              strokeWidth={isLinkSelected ? 2.5 : 1.5}
+              strokeOpacity={0.7}
+              style={{ cursor: 'pointer' }}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (connectionMode !== 'view') return
+                onLinkClick?.({
+                  id: edgeId,
+                  sourceId: edge.source,
+                  sourceLabel: getDetailedLabel(edge.source),
+                  sourceType: getNodeType(edge.source),
+                  targetId: edge.target,
+                  targetLabel: getDetailedLabel(edge.target),
+                  targetType: getNodeType(edge.target),
+                  bandwidth: edge.bandwidth,
+                  latency: edge.latency,
+                  isManual: false
+                })
+              }}
+            />
+          )
+        })
+      })()}
       {/* 跨容器手动连接在最上层 */}
       {renderManualConnectionsOverlay()}
     </>

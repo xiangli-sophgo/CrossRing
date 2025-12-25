@@ -18,6 +18,8 @@ import {
   UtilizationAnalysis,
   OverallScore,
   OptimizationSuggestion,
+  ScoreWeights,
+  DEFAULT_SCORE_WEIGHTS,
 } from './types';
 import { analyzeMemory } from './modelCalculator';
 import { analyzeCommunication } from './commCalculator';
@@ -211,13 +213,15 @@ function calculateLoadBalanceScore(
 
 /**
  * 计算综合评分
+ * @param weights 自定义权重，不传则使用默认权重
  */
 export function calculateOverallScore(
   memory: MemoryAnalysis,
   latency: LatencyAnalysis,
   throughput: ThroughputAnalysis,
   utilization: UtilizationAnalysis,
-  parallelism: ParallelismStrategy
+  parallelism: ParallelismStrategy,
+  weights: ScoreWeights = DEFAULT_SCORE_WEIGHTS
 ): OverallScore {
   // 延迟评分 (TTFT < 100ms 得满分，> 1000ms 得 0 分)
   const ttft = latency.prefill_total_latency_ms;
@@ -236,13 +240,6 @@ export function calculateOverallScore(
   const balanceScore = utilization.load_balance_score * 100;
 
   // 综合评分 (加权平均)
-  const weights = {
-    latency: 0.3,
-    throughput: 0.35,
-    efficiency: 0.2,
-    balance: 0.15,
-  };
-
   const overallScore =
     latencyScore * weights.latency +
     throughputScore * weights.throughput +
@@ -341,13 +338,15 @@ export function generateSuggestions(
 
 /**
  * 分析单个部署方案
+ * @param weights 自定义评分权重
  */
 export function analyzePlan(
   model: LLMModelConfig,
   inference: InferenceConfig,
   parallelism: ParallelismStrategy,
   hardware: HardwareConfig,
-  planId?: string
+  planId?: string,
+  weights?: ScoreWeights
 ): PlanAnalysisResult {
   // 生成方案 ID
   const id = planId ?? `dp${parallelism.dp}_tp${parallelism.tp}_pp${parallelism.pp}_ep${parallelism.ep}_sp${parallelism.sp}`;
@@ -381,8 +380,8 @@ export function analyzePlan(
     memory, latency, throughputAnalysis
   );
 
-  // 评分
-  const score = calculateOverallScore(memory, latency, throughputAnalysis, utilization, parallelism);
+  // 评分 (使用自定义权重或默认权重)
+  const score = calculateOverallScore(memory, latency, throughputAnalysis, utilization, parallelism, weights);
 
   // 优化建议
   const suggestions = generateSuggestions(

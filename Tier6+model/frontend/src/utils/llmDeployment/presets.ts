@@ -435,13 +435,143 @@ export const CHIP_PRESETS: Record<string, ChipHardwareConfig> = {
 };
 
 /** 获取芯片列表 */
-export function getChipList(): Array<{ id: string; name: string; memory: string; compute: string }> {
-  return Object.entries(CHIP_PRESETS).map(([id, config]) => ({
+export function getChipList(): Array<{ id: string; name: string; memory: string; compute: string; isCustom?: boolean }> {
+  const builtIn = Object.entries(CHIP_PRESETS).map(([id, config]) => ({
     id,
     name: config.chip_type,
     memory: `${config.memory_gb}GB`,
     compute: `${config.compute_tflops_fp16} TFLOPs`,
+    isCustom: false,
   }));
+  const custom = Object.entries(getCustomChipPresets()).map(([id, config]) => ({
+    id,
+    name: config.chip_type,
+    memory: `${config.memory_gb}GB`,
+    compute: `${config.compute_tflops_fp16} TFLOPs`,
+    isCustom: true,
+  }));
+  return [...builtIn, ...custom];
+}
+
+// ============================================
+// 自定义芯片预设管理
+// ============================================
+
+const CUSTOM_CHIP_PRESETS_KEY = 'llm_custom_chip_presets';
+
+/** 获取自定义芯片预设 */
+export function getCustomChipPresets(): Record<string, ChipHardwareConfig> {
+  try {
+    const data = localStorage.getItem(CUSTOM_CHIP_PRESETS_KEY);
+    return data ? JSON.parse(data) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** 保存自定义芯片预设 */
+export function saveCustomChipPreset(id: string, config: ChipHardwareConfig): void {
+  const presets = getCustomChipPresets();
+  presets[id] = config;
+  localStorage.setItem(CUSTOM_CHIP_PRESETS_KEY, JSON.stringify(presets));
+}
+
+/** 删除自定义芯片预设 */
+export function deleteCustomChipPreset(id: string): void {
+  const presets = getCustomChipPresets();
+  delete presets[id];
+  localStorage.setItem(CUSTOM_CHIP_PRESETS_KEY, JSON.stringify(presets));
+}
+
+/** 获取芯片配置（包含内置和自定义） */
+export function getChipConfig(id: string): ChipHardwareConfig | null {
+  if (CHIP_PRESETS[id]) {
+    return CHIP_PRESETS[id];
+  }
+  const custom = getCustomChipPresets();
+  return custom[id] || null;
+}
+
+// ============================================
+// 芯片互联配置映射
+// ============================================
+
+/** 芯片互联配置 */
+export interface ChipInterconnectConfig {
+  /** 互联类型名称 (如 NVLink 4.0, PCIe 4.0) */
+  interconnect_type: string;
+  /** 节点内带宽 (GB/s) */
+  intra_node_bandwidth_gbps: number;
+  /** 节点内延迟 (us) */
+  intra_node_latency_us: number;
+  /** 推荐的芯片数量/节点 */
+  recommended_chips_per_node: number;
+}
+
+/** H100 SXM 互联配置 - NVLink 4.0 */
+export const H100_SXM_INTERCONNECT: ChipInterconnectConfig = {
+  interconnect_type: 'NVLink 4.0',
+  intra_node_bandwidth_gbps: 900,
+  intra_node_latency_us: 1,
+  recommended_chips_per_node: 8,
+};
+
+/** H100 PCIe 互联配置 - PCIe 5.0 */
+export const H100_PCIE_INTERCONNECT: ChipInterconnectConfig = {
+  interconnect_type: 'PCIe 5.0',
+  intra_node_bandwidth_gbps: 128,
+  intra_node_latency_us: 3,
+  recommended_chips_per_node: 8,
+};
+
+/** A100 SXM 互联配置 - NVLink 3.0 */
+export const A100_SXM_INTERCONNECT: ChipInterconnectConfig = {
+  interconnect_type: 'NVLink 3.0',
+  intra_node_bandwidth_gbps: 600,
+  intra_node_latency_us: 1,
+  recommended_chips_per_node: 8,
+};
+
+/** A100/A800 PCIe 互联配置 - PCIe 4.0 */
+export const PCIE_4_INTERCONNECT: ChipInterconnectConfig = {
+  interconnect_type: 'PCIe 4.0',
+  intra_node_bandwidth_gbps: 64,
+  intra_node_latency_us: 5,
+  recommended_chips_per_node: 8,
+};
+
+/** MI300X 互联配置 - Infinity Fabric 3.0 */
+export const MI300X_INTERCONNECT: ChipInterconnectConfig = {
+  interconnect_type: 'Infinity Fabric 3.0',
+  intra_node_bandwidth_gbps: 896,
+  intra_node_latency_us: 1,
+  recommended_chips_per_node: 8,
+};
+
+/** Ascend 910B 互联配置 - HCCS */
+export const ASCEND_910B_INTERCONNECT: ChipInterconnectConfig = {
+  interconnect_type: 'HCCS',
+  intra_node_bandwidth_gbps: 300,
+  intra_node_latency_us: 2,
+  recommended_chips_per_node: 8,
+};
+
+/** 芯片ID到互联配置的映射 */
+export const CHIP_INTERCONNECT_PRESETS: Record<string, ChipInterconnectConfig> = {
+  'h100-sxm': H100_SXM_INTERCONNECT,
+  'h100-pcie': H100_PCIE_INTERCONNECT,
+  'a100-sxm': A100_SXM_INTERCONNECT,
+  'a100-pcie': PCIE_4_INTERCONNECT,
+  'a800': A100_SXM_INTERCONNECT,  // A800 也支持 NVLink 3.0
+  'l40s': PCIE_4_INTERCONNECT,
+  'rtx-4090': PCIE_4_INTERCONNECT,
+  'mi300x': MI300X_INTERCONNECT,
+  'ascend-910b': ASCEND_910B_INTERCONNECT,
+};
+
+/** 获取芯片互联配置 */
+export function getChipInterconnectConfig(chipId: string): ChipInterconnectConfig | null {
+  return CHIP_INTERCONNECT_PRESETS[chipId] || null;
 }
 
 // ============================================

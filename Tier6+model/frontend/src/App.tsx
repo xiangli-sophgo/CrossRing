@@ -16,9 +16,9 @@ const CONFIG_CACHE_KEY = 'tier6_topology_config_cache'
 const SIDER_WIDTH_KEY = 'tier6_sider_width_cache'
 
 // 默认和限制值
-const DEFAULT_SIDER_WIDTH = 400
-const MIN_SIDER_WIDTH = 280
-const MAX_SIDER_WIDTH = 600
+const DEFAULT_SIDER_WIDTH = 480
+const MIN_SIDER_WIDTH = 320
+const MAX_SIDER_WIDTH = 720
 
 const App: React.FC = () => {
   const [topology, setTopology] = useState<HierarchicalTopology | null>(null)
@@ -171,6 +171,44 @@ const App: React.FC = () => {
   useEffect(() => {
     loadTopology()
   }, [loadTopology])
+
+  // 当层级默认参数变化时，应用到所有对应层级的连接
+  // 使用 setTimeout 确保在拓扑重新生成后再应用
+  useEffect(() => {
+    const levelDefaults = manualConnectionConfig.level_defaults
+    if (!levelDefaults) return
+
+    // 延迟执行，确保在拓扑重新生成后应用
+    const timer = setTimeout(() => {
+      setTopology(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          connections: prev.connections.map(conn => {
+            // 根据连接类型确定层级
+            let level: 'datacenter' | 'pod' | 'rack' | 'board' | undefined
+            if (conn.type === 'intra') {
+              level = 'board' // 节点内连接 = Board层（芯片间）
+            } else if (conn.type === 'inter') {
+              level = 'rack' // 节点间连接 = Rack层（Board间）
+            }
+
+            const defaults = level ? levelDefaults[level] : undefined
+            if (defaults) {
+              return {
+                ...conn,
+                bandwidth: defaults.bandwidth ?? conn.bandwidth,
+                latency: defaults.latency ?? conn.latency,
+              }
+            }
+            return conn
+          }),
+        }
+      })
+    }, 600) // 等待拓扑重新生成完成（ConfigPanel 中有 500ms 防抖）
+
+    return () => clearTimeout(timer)
+  }, [manualConnectionConfig.level_defaults])
 
   // 全局键盘快捷键处理（在3D和拓扑视图都生效）
   useEffect(() => {

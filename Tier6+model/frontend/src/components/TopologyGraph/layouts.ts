@@ -455,12 +455,12 @@ export function isometricStackedLayout(
 
   // 每个容器的基础大小（考虑Switch面板宽度）
   const availableWidth = width - switchPanelWidth
-  const containerWidth = Math.min(availableWidth * 0.85, 400)
-  const containerHeight = 250  // 增大高度以容纳更多内容
+  const containerWidth = Math.min(availableWidth * 0.85, 350)
+  const containerHeight = 220  // 增大高度以容纳更多内容
 
   // 书本堆叠参数
   const bookThickness = 40   // 每本书的"厚度"（层间露出的高度）
-  const depth3D = 0         // 3D深度（顶面和侧面的高度）
+  const depth3D = 80         // 3D深度（顶面和侧面的高度）
 
   // 计算整体堆叠的高度
   const totalStackHeight = containerHeight + (containerCount - 1) * bookThickness + depth3D

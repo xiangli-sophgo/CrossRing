@@ -15,6 +15,8 @@ import {
   Popconfirm,
   Switch,
   Tabs,
+  Select,
+  Tooltip,
 } from 'antd'
 import {
   ClusterOutlined,
@@ -28,6 +30,7 @@ import {
 } from '@ant-design/icons'
 import { GlobalSwitchConfig } from '../../types'
 import { listConfigs, saveConfig, deleteConfig, SavedConfig } from '../../api/topology'
+import { clearAllCache } from '../../utils/storage'
 import {
   ChipIcon,
   BoardIcon,
@@ -43,6 +46,8 @@ import {
 } from './shared'
 import { SwitchLevelConfig, ConnectionEditPanel } from './components'
 import { DeploymentAnalysisPanel } from './DeploymentAnalysisPanel'
+import { getChipList, getChipConfig, saveCustomChipPreset, deleteCustomChipPreset, getChipInterconnectConfig } from '../../utils/llmDeployment/presets'
+import { ChipHardwareConfig } from '../../utils/llmDeployment/types'
 
 const { Text } = Typography
 
@@ -244,6 +249,62 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
     alignItems: 'center',
     marginBottom: 8,
   }
+
+  // 根据芯片配置更新连接参数（层级默认参数和手动连接）
+  // 注意：不直接更新当前连接，因为拓扑重新生成时会使用层级默认参数
+  const updateConnectionDefaultsFromChips = React.useCallback((boards: typeof rackConfig.boards) => {
+    // 收集所有芯片的互联配置，找到数量最多的芯片类型
+    let maxCount = 0
+    let primaryInterconnect: ReturnType<typeof getChipInterconnectConfig> = null
+
+    for (const board of boards) {
+      const boardCount = board.count || 1
+      for (const chip of board.chips) {
+        const totalChips = chip.count * boardCount
+        if (chip.preset_id && totalChips > maxCount) {
+          const interconnect = getChipInterconnectConfig(chip.preset_id)
+          if (interconnect) {
+            maxCount = totalChips
+            primaryInterconnect = interconnect
+          }
+        }
+      }
+    }
+
+    if (!primaryInterconnect) return
+
+    const newBandwidth = primaryInterconnect.intra_node_bandwidth_gbps
+    const newLatency = primaryInterconnect.intra_node_latency_us * 1000 // us -> ns
+
+    // 更新层级默认参数和手动连接
+    if (onManualConnectionConfigChange) {
+      const existingConnections = manualConnectionConfig?.connections || []
+      // 更新 Board 层的手动连接参数
+      const updatedConnections = existingConnections.map(conn => {
+        if (conn.hierarchy_level === 'board') {
+          return { ...conn, bandwidth: newBandwidth, latency: newLatency }
+        }
+        return conn
+      })
+
+      const newConfig = {
+        ...(manualConnectionConfig || { enabled: true, mode: 'append' as const, connections: [] }),
+        connections: updatedConnections,
+        level_defaults: {
+          ...(manualConnectionConfig?.level_defaults || {}),
+          board: {
+            ...(manualConnectionConfig?.level_defaults?.board || {}),
+            bandwidth: newBandwidth,
+            latency: newLatency,
+          },
+        },
+      }
+      onManualConnectionConfigChange(newConfig)
+    }
+
+    // 提示用户
+    message.info(`已根据 ${primaryInterconnect.interconnect_type} 更新 Board 层连接参数: ${newBandwidth} Gbps, ${newLatency} ns`)
+  }, [manualConnectionConfig, onManualConnectionConfigChange])
 
   // 层级配置Tab key
   const [layerTabKey, setLayerTabKey] = useState<string>(currentLevel === 'datacenter' ? 'datacenter' : currentLevel)
@@ -603,10 +664,10 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                     onClick={() => {
                       const newBoard: FlexBoardConfig = {
                         id: `board_${Date.now()}`,
-                        name: '新板卡',
+                        name: 'Board',
                         u_height: 2,
                         count: 1,
-                        chips: [{ name: 'NPU', count: 8 }],
+                        chips: [{ name: 'Chip', count: 8 }],
                       }
                       setRackConfig(prev => ({ ...prev, boards: [...prev.boards, newBoard] }))
                     }}
@@ -686,7 +747,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                         icon={<PlusOutlined />}
                         onClick={() => {
                           const newBoards = [...rackConfig.boards]
-                          const newChips = [...newBoards[boardIndex].chips, { name: 'CPU', count: 2 }]
+                          const newChips = [...newBoards[boardIndex].chips, { name: 'H100-SXM', count: 8, preset_id: 'h100-sxm' }]
                           newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
                           setRackConfig(prev => ({ ...prev, boards: newBoards }))
                         }}
@@ -694,51 +755,273 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                         添加芯片
                       </Button>
                     </div>
-                    {board.chips.map((chip, chipIndex) => (
-                      <div key={chipIndex} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                        <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>类型:</Text>
-                        <Input
-                          size="small"
-                          value={chip.name}
-                          onChange={(e) => {
-                            const newBoards = [...rackConfig.boards]
-                            const newChips = [...newBoards[boardIndex].chips]
-                            newChips[chipIndex] = { ...newChips[chipIndex], name: e.target.value }
-                            newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
-                            setRackConfig(prev => ({ ...prev, boards: newBoards }))
-                          }}
-                          style={{ width: 80 }}
-                        />
-                        <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>数量:</Text>
-                        <InputNumber
-                          size="small"
-                          min={1}
-                          max={64}
-                          value={chip.count}
-                          onChange={(v) => {
-                            const newBoards = [...rackConfig.boards]
-                            const newChips = [...newBoards[boardIndex].chips]
-                            newChips[chipIndex] = { ...newChips[chipIndex], count: v || 1 }
-                            newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
-                            setRackConfig(prev => ({ ...prev, boards: newBoards }))
-                          }}
-                          style={{ width: 60 }}
-                        />
-                        <Button
-                          type="text"
-                          danger
-                          size="small"
-                          icon={<MinusCircleOutlined />}
-                          onClick={() => {
-                            const newBoards = [...rackConfig.boards]
-                            const newChips = newBoards[boardIndex].chips.filter((_, i) => i !== chipIndex)
-                            newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
-                            setRackConfig(prev => ({ ...prev, boards: newBoards }))
-                          }}
-                          disabled={board.chips.length <= 1}
-                        />
-                      </div>
-                    ))}
+                    {board.chips.map((chip, chipIndex) => {
+                      const chipPresetList = getChipList()
+                      const presetConfig = chip.preset_id ? getChipConfig(chip.preset_id) : null
+                      // 当前使用的参数值（预设值或自定义值）
+                      const currentTflops = chip.compute_tflops_fp16 ?? presetConfig?.compute_tflops_fp16 ?? 100
+                      const currentMemory = chip.memory_gb ?? presetConfig?.memory_gb ?? 32
+                      const currentBandwidth = chip.memory_bandwidth_gbps ?? presetConfig?.memory_bandwidth_gbps ?? 1000
+                      // 检查参数是否被修改过
+                      const isModified = presetConfig && (
+                        (chip.compute_tflops_fp16 !== undefined && chip.compute_tflops_fp16 !== presetConfig.compute_tflops_fp16) ||
+                        (chip.memory_gb !== undefined && chip.memory_gb !== presetConfig.memory_gb) ||
+                        (chip.memory_bandwidth_gbps !== undefined && chip.memory_bandwidth_gbps !== presetConfig.memory_bandwidth_gbps)
+                      )
+                      const isCustomPreset = chipPresetList.find(c => c.id === chip.preset_id)?.isCustom
+                      return (
+                        <div key={chipIndex} style={{ marginBottom: 8, padding: '8px 10px', background: '#fafafa', borderRadius: 6, border: isModified ? '1px solid #faad14' : '1px solid transparent' }}>
+                          {/* 类型选择 */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                            <Text style={{ fontSize: 12, width: 60, flexShrink: 0 }}>类型:</Text>
+                            <Select
+                              size="small"
+                              value={chip.preset_id || 'custom'}
+                              onChange={(value) => {
+                                const newBoards = [...rackConfig.boards]
+                                const newChips = [...newBoards[boardIndex].chips]
+                                if (value === 'custom') {
+                                  newChips[chipIndex] = {
+                                    ...newChips[chipIndex],
+                                    name: '自定义芯片',
+                                    preset_id: undefined,
+                                    compute_tflops_fp16: 100,
+                                    memory_gb: 32,
+                                    memory_bandwidth_gbps: 1000,
+                                  }
+                                } else {
+                                  const preset = getChipConfig(value)
+                                  if (preset) {
+                                    newChips[chipIndex] = {
+                                      ...newChips[chipIndex],
+                                      name: preset.chip_type,
+                                      preset_id: value,
+                                      compute_tflops_fp16: undefined,
+                                      memory_gb: undefined,
+                                      memory_bandwidth_gbps: undefined,
+                                    }
+                                  }
+                                }
+                                newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                // 根据新选择的芯片类型更新连接默认参数
+                                updateConnectionDefaultsFromChips(newBoards)
+                              }}
+                              style={{ flex: 1 }}
+                              options={[
+                                ...chipPresetList.map(c => ({
+                                  value: c.id,
+                                  label: c.isCustom ? `⭐ ${c.name}` : c.name,
+                                })),
+                                { value: 'custom', label: '➕ 自定义...' },
+                              ]}
+                            />
+                            <Button
+                              type="text"
+                              danger
+                              size="small"
+                              icon={<MinusCircleOutlined />}
+                              onClick={() => {
+                                const newBoards = [...rackConfig.boards]
+                                const newChips = newBoards[boardIndex].chips.filter((_, i) => i !== chipIndex)
+                                newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                              }}
+                              disabled={board.chips.length <= 1}
+                            />
+                          </div>
+                          {/* 数量 */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                            <Text style={{ fontSize: 12, width: 60, flexShrink: 0 }}>数量:</Text>
+                            <InputNumber
+                              size="small"
+                              min={1}
+                              max={64}
+                              value={chip.count}
+                              onChange={(v) => {
+                                const newBoards = [...rackConfig.boards]
+                                const newChips = [...newBoards[boardIndex].chips]
+                                newChips[chipIndex] = { ...newChips[chipIndex], count: v || 1 }
+                                newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                              }}
+                              style={{ flex: 1 }}
+                              addonAfter="个"
+                            />
+                          </div>
+                          {/* 第二行：芯片参数（可编辑） */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {!chip.preset_id && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <Text style={{ fontSize: 12, width: 60, flexShrink: 0 }}>名称:</Text>
+                                <Input
+                                  size="small"
+                                  placeholder="芯片名称"
+                                  value={chip.name}
+                                  onChange={(e) => {
+                                    const newBoards = [...rackConfig.boards]
+                                    const newChips = [...newBoards[boardIndex].chips]
+                                    newChips[chipIndex] = { ...newChips[chipIndex], name: e.target.value }
+                                    newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                    setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                  }}
+                                  style={{ flex: 1 }}
+                                />
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <Text style={{ fontSize: 12, width: 60, flexShrink: 0 }}>算力:</Text>
+                              <InputNumber
+                                size="small"
+                                min={1}
+                                value={currentTflops}
+                                onChange={(v) => {
+                                  const newBoards = [...rackConfig.boards]
+                                  const newChips = [...newBoards[boardIndex].chips]
+                                  newChips[chipIndex] = { ...newChips[chipIndex], compute_tflops_fp16: v || undefined }
+                                  newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                  setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                }}
+                                style={{ flex: 1 }}
+                                addonAfter="TFLOPs"
+                              />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <Text style={{ fontSize: 12, width: 60, flexShrink: 0 }}>显存:</Text>
+                              <InputNumber
+                                size="small"
+                                min={1}
+                                value={currentMemory}
+                                onChange={(v) => {
+                                  const newBoards = [...rackConfig.boards]
+                                  const newChips = [...newBoards[boardIndex].chips]
+                                  newChips[chipIndex] = { ...newChips[chipIndex], memory_gb: v || undefined }
+                                  newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                  setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                }}
+                                style={{ flex: 1 }}
+                                addonAfter="GB"
+                              />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <Text style={{ fontSize: 12, width: 60, flexShrink: 0 }}>带宽:</Text>
+                              <InputNumber
+                                size="small"
+                                min={1}
+                                value={currentBandwidth}
+                                onChange={(v) => {
+                                  const newBoards = [...rackConfig.boards]
+                                  const newChips = [...newBoards[boardIndex].chips]
+                                  newChips[chipIndex] = { ...newChips[chipIndex], memory_bandwidth_gbps: v || undefined }
+                                  newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                  setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                }}
+                                style={{ flex: 1 }}
+                                addonAfter="GB/s"
+                              />
+                            </div>
+                          </div>
+                          {/* 第三行：操作按钮 */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                            {isModified && (
+                              <Tooltip title="重置为预设值">
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  style={{ padding: 0, fontSize: 11 }}
+                                  onClick={() => {
+                                    const newBoards = [...rackConfig.boards]
+                                    const newChips = [...newBoards[boardIndex].chips]
+                                    newChips[chipIndex] = {
+                                      ...newChips[chipIndex],
+                                      compute_tflops_fp16: undefined,
+                                      memory_gb: undefined,
+                                      memory_bandwidth_gbps: undefined,
+                                    }
+                                    newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                    setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                  }}
+                                >
+                                  重置
+                                </Button>
+                              </Tooltip>
+                            )}
+                            {(isModified || !chip.preset_id) && (
+                              <Tooltip title="保存为新预设">
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  icon={<SaveOutlined />}
+                                  style={{ padding: 0, fontSize: 11 }}
+                                  onClick={() => {
+                                    const newName = prompt('输入预设名称:', chip.name || '自定义芯片')
+                                    if (newName) {
+                                      const presetId = `custom-${Date.now()}`
+                                      const config: ChipHardwareConfig = {
+                                        chip_type: newName,
+                                        compute_tflops_fp16: currentTflops,
+                                        memory_gb: currentMemory,
+                                        memory_bandwidth_gbps: currentBandwidth,
+                                      }
+                                      saveCustomChipPreset(presetId, config)
+                                      // 更新当前芯片使用新预设
+                                      const newBoards = [...rackConfig.boards]
+                                      const newChips = [...newBoards[boardIndex].chips]
+                                      newChips[chipIndex] = {
+                                        ...newChips[chipIndex],
+                                        name: newName,
+                                        preset_id: presetId,
+                                        compute_tflops_fp16: undefined,
+                                        memory_gb: undefined,
+                                        memory_bandwidth_gbps: undefined,
+                                      }
+                                      newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                      setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                      message.success(`已保存预设: ${newName}`)
+                                    }
+                                  }}
+                                >
+                                  保存预设
+                                </Button>
+                              </Tooltip>
+                            )}
+                            {isCustomPreset && chip.preset_id && (
+                              <Popconfirm
+                                title="确定删除此预设？"
+                                onConfirm={() => {
+                                  if (chip.preset_id) {
+                                    deleteCustomChipPreset(chip.preset_id)
+                                    // 将当前芯片改为自定义
+                                    const newBoards = [...rackConfig.boards]
+                                    const newChips = [...newBoards[boardIndex].chips]
+                                    newChips[chipIndex] = {
+                                      ...newChips[chipIndex],
+                                      preset_id: undefined,
+                                      compute_tflops_fp16: currentTflops,
+                                      memory_gb: currentMemory,
+                                      memory_bandwidth_gbps: currentBandwidth,
+                                    }
+                                    newBoards[boardIndex] = { ...newBoards[boardIndex], chips: newChips }
+                                    setRackConfig(prev => ({ ...prev, boards: newBoards }))
+                                    message.success('已删除预设')
+                                  }
+                                }}
+                              >
+                                <Button
+                                  type="link"
+                                  danger
+                                  size="small"
+                                  icon={<DeleteOutlined />}
+                                  style={{ padding: 0, fontSize: 11 }}
+                                >
+                                  删除预设
+                                </Button>
+                              </Popconfirm>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 ))}
               </div>
@@ -880,63 +1163,146 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   // 顶层页面Tab状态
   const [activePageTab, setActivePageTab] = useState<'topology' | 'deployment'>('topology')
 
+  // 自定义Tab样式
+  const tabButtonStyle = (isActive: boolean): React.CSSProperties => ({
+    flex: 1,
+    padding: '12px 16px',
+    border: 'none',
+    background: isActive ? '#fff' : 'transparent',
+    color: isActive ? '#5E6AD2' : '#666',
+    fontWeight: isActive ? 600 : 400,
+    fontSize: 14,
+    cursor: 'pointer',
+    borderRadius: isActive ? '8px' : '8px',
+    boxShadow: isActive ? '0 2px 8px rgba(94, 106, 210, 0.15)' : 'none',
+    transition: 'all 0.2s ease',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  })
+
   return (
-    <div>
-      {/* 顶层页面切换 Tabs */}
-      <Tabs
-        activeKey={activePageTab}
-        onChange={(key) => setActivePageTab(key as 'topology' | 'deployment')}
-        size="small"
-        type="card"
-        style={{ marginBottom: 12 }}
-        items={[
-          {
-            key: 'topology',
-            label: '拓扑设置',
-            children: (
-              <>
-                <Collapse
-                  items={topologyCollapseItems}
-                  defaultActiveKey={['layers']}
-                  size="small"
-                />
-                {/* 保存/加载配置按钮 */}
-                <Row gutter={8} style={{ marginTop: 16 }}>
-                  <Col span={12}>
-                    <Button
-                      block
-                      icon={<SaveOutlined />}
-                      onClick={() => setSaveModalOpen(true)}
-                    >
-                      保存配置
-                    </Button>
-                  </Col>
-                  <Col span={12}>
-                    <Button
-                      block
-                      icon={<FolderOpenOutlined />}
-                      onClick={() => {
-                        loadConfigList()
-                        setLoadModalOpen(true)
-                      }}
-                    >
-                      加载配置
-                    </Button>
-                  </Col>
-                </Row>
-              </>
-            ),
-          },
-          {
-            key: 'deployment',
-            label: '部署分析',
-            children: <DeploymentAnalysisPanel
-              topology={topology}
-              onTrafficResultChange={onTrafficResultChange}
-            />,
-          },
-        ]}
-      />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* 顶层页面切换 - 自定义样式 */}
+      <div style={{
+        display: 'flex',
+        gap: 8,
+        padding: 4,
+        background: '#E8E8E8',
+        borderRadius: 10,
+        marginBottom: 16,
+      }}>
+        <button
+          style={tabButtonStyle(activePageTab === 'topology')}
+          onClick={() => setActivePageTab('topology')}
+        >
+          拓扑设置
+        </button>
+        <button
+          style={tabButtonStyle(activePageTab === 'deployment')}
+          onClick={() => setActivePageTab('deployment')}
+        >
+          部署分析
+        </button>
+      </div>
+
+      {/* 内容区域 */}
+      {activePageTab === 'topology' ? (
+        <>
+          <Collapse
+            items={topologyCollapseItems}
+            defaultActiveKey={['layers']}
+            size="small"
+            style={{
+              background: 'transparent',
+              border: 'none',
+            }}
+            className="custom-collapse"
+          />
+          <style>{`
+            .custom-collapse.ant-collapse {
+              background: transparent !important;
+              border: none !important;
+            }
+            .custom-collapse .ant-collapse-item {
+              background: #fff !important;
+              border-radius: 10px !important;
+              margin-bottom: 12px !important;
+              border: 1px solid #E5E5E5 !important;
+              overflow: hidden;
+            }
+            .custom-collapse .ant-collapse-item:last-child {
+              border-radius: 10px !important;
+            }
+            .custom-collapse .ant-collapse-header {
+              padding: 12px 16px !important;
+              font-weight: 500;
+              background: #fff !important;
+            }
+            .custom-collapse .ant-collapse-content {
+              border-top: 1px solid #F0F0F0 !important;
+              background: #fff !important;
+            }
+            .custom-collapse .ant-collapse-content-box {
+              padding: 12px 16px !important;
+            }
+          `}</style>
+          {/* 保存/加载/清除配置按钮 */}
+          <Row gutter={8} style={{ marginTop: 16 }}>
+            <Col span={8}>
+              <Popconfirm
+                title="清除所有缓存"
+                description="确定要清除所有缓存数据吗？清除后页面将刷新。"
+                onConfirm={async () => {
+                  try {
+                    await clearAllCache()
+                    message.success('缓存已清除，即将刷新页面')
+                    setTimeout(() => window.location.reload(), 500)
+                  } catch (error) {
+                    message.error('清除缓存失败')
+                  }
+                }}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button block icon={<DeleteOutlined />} danger>
+                  清除缓存
+                </Button>
+              </Popconfirm>
+            </Col>
+            <Col span={8}>
+              <Button
+                block
+                icon={<SaveOutlined />}
+                onClick={() => setSaveModalOpen(true)}
+              >
+                保存配置
+              </Button>
+            </Col>
+            <Col span={8}>
+              <Button
+                block
+                icon={<FolderOpenOutlined />}
+                onClick={() => {
+                  loadConfigList()
+                  setLoadModalOpen(true)
+                }}
+              >
+                加载配置
+              </Button>
+            </Col>
+          </Row>
+        </>
+      ) : (
+        <DeploymentAnalysisPanel
+          topology={topology}
+          onTrafficResultChange={onTrafficResultChange}
+          rackConfig={rackConfig}
+          podCount={podCount}
+          racksPerPod={racksPerPod}
+        />
+      )}
 
       {/* 保存配置模态框 */}
       <Modal

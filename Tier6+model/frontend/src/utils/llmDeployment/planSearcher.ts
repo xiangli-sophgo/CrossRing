@@ -14,6 +14,7 @@ import {
   PlanSearchResult,
   SearchStats,
   OptimizationTarget,
+  ScoreWeights,
 } from './types';
 import { analyzePlan, quickAnalyze, checkFeasibility } from './planAnalyzer';
 
@@ -267,6 +268,7 @@ function applyConstraints(
 
 /**
  * 搜索最优部署方案
+ * @param weights 自定义评分权重，用于计算综合评分
  */
 export function searchOptimalPlan(
   model: LLMModelConfig,
@@ -274,7 +276,8 @@ export function searchOptimalPlan(
   hardware: HardwareConfig,
   constraints: SearchConstraints = {},
   target: OptimizationTarget = 'balanced',
-  topK: number = 10
+  topK: number = 10,
+  weights?: ScoreWeights
 ): PlanSearchResult {
   const startTime = performance.now();
 
@@ -298,17 +301,17 @@ export function searchOptimalPlan(
       continue;
     }
 
-    // 完整分析
+    // 完整分析 (传入自定义权重)
     evaluatedCount++;
-    const result = analyzePlan(model, inference, parallelism, hardware);
+    const result = analyzePlan(model, inference, parallelism, hardware, undefined, weights);
     results.push(result);
   }
 
   // 应用约束过滤
   const filteredResults = applyConstraints(results, constraints);
 
-  // 排序
-  const sortedResults = sortByTarget(filteredResults, target);
+  // 排序 - 现在统一按 overall_score 排序（权重已在评分时应用）
+  const sortedResults = sortByTarget(filteredResults, 'balanced');
 
   // 提取 Pareto 前沿
   const paretoFrontier = extractParetoFrontier(filteredResults);
@@ -424,21 +427,23 @@ export function quickSearch(
 
 /**
  * 给定固定芯片数，搜索最优配置
+ * @param weights 自定义评分权重
  */
 export function searchWithFixedChips(
   model: LLMModelConfig,
   inference: InferenceConfig,
   hardware: HardwareConfig,
   targetChips: number,
-  target: OptimizationTarget = 'balanced'
+  target: OptimizationTarget = 'balanced',
+  weights?: ScoreWeights
 ): PlanSearchResult {
   // 约束芯片数为精确值
   const constraints: SearchConstraints = {
     max_chips: targetChips,
   };
 
-  // 搜索
-  const result = searchOptimalPlan(model, inference, hardware, constraints, target);
+  // 搜索 (传入自定义权重)
+  const result = searchOptimalPlan(model, inference, hardware, constraints, target, 10, weights);
 
   // 过滤只保留精确芯片数的方案
   const exactChipPlans = result.top_k_plans.filter(

@@ -1,6 +1,6 @@
 import React from 'react'
-import { Node, Edge, LayoutType, ManualConnection } from './shared'
-import { ManualConnectionLine, renderExternalEdge, renderIndirectEdge, EdgeRendererProps } from './components'
+import { Node, Edge, LayoutType, ManualConnection, getNodeEdgePoint } from './shared'
+import { ManualConnectionLine, renderIndirectEdge, EdgeRendererProps } from './components'
 import { getTorusGridSize, getTorus3DSize } from './layouts'
 import { HierarchyLevel } from '../../types'
 
@@ -95,14 +95,15 @@ export const SingleLevelView: React.FC<SingleLevelViewProps> = ({
     svgRef,
     getTrafficHeatmapStyle,
     directTopology,
+    nodeScale,
   }
 
   // 渲染普通边
   const renderEdges = () => {
     return edges.map((edge, i) => {
-      // 外部连接
+      // 外部连接 - 单层级视图中不显示跨容器连接
       if (edge.isExternal) {
-        return renderExternalEdge(edge, i, edgeProps)
+        return null
       }
 
       // 间接连接
@@ -183,6 +184,12 @@ export const SingleLevelView: React.FC<SingleLevelViewProps> = ({
         }
       }
 
+      // 计算边缘点（检查isSwitch来确定正确的节点类型，使用nodeScale）
+      const sourceType = sourceNode?.isSwitch ? 'switch' : (sourceNode?.type || 'default')
+      const targetType = targetNode?.isSwitch ? 'switch' : (targetNode?.type || 'default')
+      const sourceEdge = getNodeEdgePoint(sourcePos.x, sourcePos.y, targetPos.x, targetPos.y, sourceType, false, nodeScale)
+      const targetEdge = getNodeEdgePoint(targetPos.x, targetPos.y, sourcePos.x, sourcePos.y, targetType, false, nodeScale)
+
       // 渲染普通直线边
       return (
         <g
@@ -203,20 +210,20 @@ export const SingleLevelView: React.FC<SingleLevelViewProps> = ({
         >
           {/* 透明触发层 */}
           <line
-            x1={sourcePos.x}
-            y1={sourcePos.y}
-            x2={targetPos.x}
-            y2={targetPos.y}
+            x1={sourceEdge.x}
+            y1={sourceEdge.y}
+            x2={targetEdge.x}
+            y2={targetEdge.y}
             stroke="transparent"
             strokeWidth={12}
             style={{ cursor: connectionMode === 'view' && !isManualMode ? 'pointer' : 'default' }}
           />
           {/* 可见线条 */}
           <line
-            x1={sourcePos.x}
-            y1={sourcePos.y}
-            x2={targetPos.x}
-            y2={targetPos.y}
+            x1={sourceEdge.x}
+            y1={sourceEdge.y}
+            x2={targetEdge.x}
+            y2={targetEdge.y}
             stroke={isLinkSelected ? '#2563eb' : (trafficStyle?.stroke || '#b0b0b0')}
             strokeWidth={isLinkSelected ? 3 : 1.5}
             strokeOpacity={isLinkSelected ? 1 : 0.6}
@@ -257,6 +264,10 @@ export const SingleLevelView: React.FC<SingleLevelViewProps> = ({
         })
       }
 
+      // 检查isSwitch来确定正确的节点类型
+      const sourceNodeType = sourceNode?.isSwitch ? 'switch' : (sourceNode?.type || 'default')
+      const targetNodeType = targetNode?.isSwitch ? 'switch' : (targetNode?.type || 'default')
+
       return (
         <ManualConnectionLine
           key={`manual-conn-${conn.id}`}
@@ -269,6 +280,10 @@ export const SingleLevelView: React.FC<SingleLevelViewProps> = ({
           onClick={handleManualClick}
           layoutType={layoutType}
           containers={[]}
+          sourceType={sourceNodeType}
+          targetType={targetNodeType}
+          isMultiLevel={false}
+          nodeScale={nodeScale}
         />
       )
     })
@@ -428,6 +443,48 @@ export const SingleLevelView: React.FC<SingleLevelViewProps> = ({
             }
             const size = sizeMap[nodeType] || sizeMap.default
             const padding = 6
+            const isBoth = isSourceSelected && isTargetSelected
+
+            if (isBoth) {
+              // 同时是源节点和目标节点：显示双层边框（外层虚线）
+              return (
+                <>
+                  {/* 外层：目标节点绿色虚线 */}
+                  <rect
+                    x={-(size.w / 2 + padding + 4)}
+                    y={-(size.h / 2 + padding + 4)}
+                    width={size.w + (padding + 4) * 2}
+                    height={size.h + (padding + 4) * 2}
+                    rx={8}
+                    ry={8}
+                    fill="none"
+                    stroke="#10b981"
+                    strokeWidth={2.5}
+                    strokeDasharray="6 3"
+                    style={{
+                      filter: 'drop-shadow(0 0 8px #10b981) drop-shadow(0 0 16px rgba(16, 185, 129, 0.5))',
+                    }}
+                  />
+                  {/* 内层：源节点蓝色虚线 */}
+                  <rect
+                    x={-(size.w / 2 + padding)}
+                    y={-(size.h / 2 + padding)}
+                    width={size.w + padding * 2}
+                    height={size.h + padding * 2}
+                    rx={6}
+                    ry={6}
+                    fill="none"
+                    stroke="#2563eb"
+                    strokeWidth={2.5}
+                    strokeDasharray="6 3"
+                    style={{
+                      filter: 'drop-shadow(0 0 8px #2563eb) drop-shadow(0 0 16px rgba(37, 99, 235, 0.5))',
+                    }}
+                  />
+                </>
+              )
+            }
+
             const color = isSourceSelected ? '#2563eb' : '#10b981'
             const glowColor = isSourceSelected ? 'rgba(37, 99, 235, 0.5)' : 'rgba(16, 185, 129, 0.5)'
             return (
@@ -441,6 +498,7 @@ export const SingleLevelView: React.FC<SingleLevelViewProps> = ({
                 fill="none"
                 stroke={color}
                 strokeWidth={2.5}
+                strokeDasharray="6 3"
                 style={{
                   filter: `drop-shadow(0 0 8px ${color}) drop-shadow(0 0 16px ${glowColor})`,
                 }}

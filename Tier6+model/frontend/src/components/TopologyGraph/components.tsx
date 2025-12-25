@@ -6,7 +6,7 @@ import React from 'react'
 import { Segmented, Tooltip, Checkbox, Button, Typography } from 'antd'
 import { UndoOutlined, RedoOutlined, ReloadOutlined } from '@ant-design/icons'
 import { LayoutType, AdjacentLevelPair, LEVEL_PAIR_NAMES } from '../../types'
-import { Node, Edge, LinkDetail, MultiLevelViewOptions } from './shared'
+import { Node, Edge, LinkDetail, MultiLevelViewOptions, getNodeEdgePoint } from './shared'
 
 const { Text } = Typography
 
@@ -27,50 +27,84 @@ export interface AnimatedManualConnectionProps {
     zLayer: number
     bounds: { x: number; y: number; width: number; height: number }
   }>
+  // 节点类型（用于边缘点计算）
+  sourceType?: string
+  targetType?: string
+  isMultiLevel?: boolean
+  nodeScale?: number
 }
 
 export const ManualConnectionLine: React.FC<AnimatedManualConnectionProps> = ({
+  conn,
   sourcePos,
   targetPos,
   isSelected,
   isCrossContainer,
   onClick,
+  sourceType = 'default',
+  targetType = 'default',
+  isMultiLevel = false,
+  nodeScale = 1,
 }) => {
   if (!sourcePos || !targetPos) return null
 
   const strokeColor = isSelected ? '#52c41a' : (isCrossContainer ? '#722ed1' : '#b0b0b0')
   const strokeWidth = isSelected ? 3 : 2
   const transitionStyle = { transition: 'all 0.3s ease-out' }
+
+  // 直接使用节点中心坐标
+  const sourceEdge = { x: sourcePos.x, y: sourcePos.y }
+  const targetEdge = { x: targetPos.x, y: targetPos.y }
+
+  // 提取节点编号（如 pod_0/rack_0/board_0/chip_0 -> 0）
+  const getNodeIndex = (nodeId: string): string => {
+    const parts = nodeId.split('/')
+    const lastPart = parts[parts.length - 1] || ''
+    const match = lastPart.match(/_(\d+)$/)
+    return match ? match[1] : ''
+  }
+
   if (isCrossContainer) {
-    // 分段曲线：起始弯曲 → 直线 → 结束弯曲
-    const curveLength = 20  // 起始和结束的弯曲段长度
-    const curveOffset = 15  // 弯曲的水平偏移量（统一向右）
+    // 汇聚树形：控制点偏移与水平距离成比例，使出发点曲率一致
+    const isDownward = targetEdge.y > sourceEdge.y
+    const verticalDistance = Math.abs(targetEdge.y - sourceEdge.y)
+    const horizontalDistance = targetEdge.x - sourceEdge.x
 
-    // 判断连线方向（从上到下还是从下到上）
-    const isDownward = targetPos.y > sourcePos.y
+    // 检查源节点和目标节点的编号是否相同
+    const sourceIndex = getNodeIndex(conn.source)
+    const targetIndex = getNodeIndex(conn.target)
+    const isSameIndex = sourceIndex !== '' && sourceIndex === targetIndex
 
-    // 起始点的弯曲控制点和结束点
-    const startCtrlX = sourcePos.x + curveOffset
-    const startCtrlY = sourcePos.y
-    const startEndX = sourcePos.x + curveOffset
-    const startEndY = isDownward ? sourcePos.y + curveLength : sourcePos.y - curveLength
+    // 控制点的水平偏移与水平距离成比例
+    // 比例系数决定了曲线的"展开"速度
+    const spreadRatio = 0.8
+    // 只有编号相同时才增加最小偏移量
+    const minOffset = isSameIndex ? 15 : 0
+    let ctrl1Offset = horizontalDistance * spreadRatio
+    // 如果偏移量太小且编号相同，使用最小偏移
+    if (isSameIndex && Math.abs(ctrl1Offset) < minOffset) {
+      ctrl1Offset = horizontalDistance >= 0 ? minOffset : -minOffset
+    }
+    const ctrl1X = sourceEdge.x + ctrl1Offset
+    const ctrl2X = isSameIndex ? sourceEdge.x : targetEdge.x
 
-    // 结束点的弯曲控制点和起始点
-    const endStartX = targetPos.x + curveOffset
-    const endStartY = isDownward ? targetPos.y - curveLength : targetPos.y + curveLength
-    const endCtrlX = targetPos.x + curveOffset
-    const endCtrlY = targetPos.y
+    // 控制点的垂直位置：第一个控制点更靠近起点，让曲线一开始就有角度
+    const ctrl1Y = isDownward
+      ? sourceEdge.y + verticalDistance * 0.1
+      : sourceEdge.y - verticalDistance * 0.1
+    const ctrl2Y = isDownward
+      ? sourceEdge.y + verticalDistance * 0.90
+      : sourceEdge.y - verticalDistance * 0.90
 
-    // 使用三段路径：起始曲线 + 直线 + 结束曲线
-    const pathD = `M ${sourcePos.x} ${sourcePos.y}
-                   Q ${startCtrlX} ${startCtrlY}, ${startEndX} ${startEndY}
-                   L ${endStartX} ${endStartY}
-                   Q ${endCtrlX} ${endCtrlY}, ${targetPos.x} ${targetPos.y}`
+    // 三次贝塞尔曲线
+    const pathD = `M ${sourceEdge.x} ${sourceEdge.y} C ${ctrl1X} ${ctrl1Y}, ${ctrl2X} ${ctrl2Y}, ${targetEdge.x} ${targetEdge.y}`
 
     return (
       <g style={transitionStyle}>
+        {/* 点击区域 */}
         <path d={pathD} fill="none" stroke="transparent" strokeWidth={16}
           style={{ cursor: 'pointer' }} onClick={onClick} />
+        {/* 可见线条 */}
         <path d={pathD} fill="none" stroke={strokeColor} strokeWidth={strokeWidth}
           strokeOpacity={isSelected ? 1 : 0.6}
           style={{ pointerEvents: 'none', filter: isSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none' }}
@@ -81,14 +115,14 @@ export const ManualConnectionLine: React.FC<AnimatedManualConnectionProps> = ({
     return (
       <g>
         <line
-          x1={sourcePos.x} y1={sourcePos.y}
-          x2={targetPos.x} y2={targetPos.y}
+          x1={sourceEdge.x} y1={sourceEdge.y}
+          x2={targetEdge.x} y2={targetEdge.y}
           stroke="transparent" strokeWidth={16}
           style={{ cursor: 'pointer', ...transitionStyle }} onClick={onClick}
         />
         <line
-          x1={sourcePos.x} y1={sourcePos.y}
-          x2={targetPos.x} y2={targetPos.y}
+          x1={sourceEdge.x} y1={sourceEdge.y}
+          x2={targetEdge.x} y2={targetEdge.y}
           stroke={strokeColor} strokeWidth={strokeWidth}
           strokeOpacity={isSelected ? 1 : 0.6}
           style={{ pointerEvents: 'none', filter: isSelected ? 'drop-shadow(0 0 4px #52c41a)' : 'none', ...transitionStyle }}
@@ -302,6 +336,7 @@ export interface EdgeRendererProps {
   svgRef: React.RefObject<SVGSVGElement>
   getTrafficHeatmapStyle: (source: string, target: string) => { stroke: string; strokeWidth: number; utilization: number; trafficMb: number } | null
   directTopology?: string
+  nodeScale?: number  // 节点缩放比例
 }
 
 export const renderExternalEdge = (
@@ -309,7 +344,7 @@ export const renderExternalEdge = (
   index: number,
   props: EdgeRendererProps
 ): React.ReactNode => {
-  const { nodes, nodePositions, zoom, selectedLinkId, connectionMode, onLinkClick } = props
+  const { nodes, nodePositions, zoom, selectedLinkId, connectionMode, onLinkClick, nodeScale = 1 } = props
 
   let sourcePos = nodePositions.get(edge.source)
   if (!sourcePos) {
@@ -330,8 +365,12 @@ export const renderExternalEdge = (
   const ctrlX = midX
   const ctrlY = midY + bulgeDir * bulge
 
-  const pathD = `M ${sourcePos.x} ${sourcePos.y} Q ${ctrlX} ${ctrlY}, ${anchorX} ${anchorY}`
-  const shadowPathD = `M ${sourcePos.x + 2} ${sourcePos.y + 3} Q ${ctrlX + 2} ${ctrlY + 3}, ${anchorX + 2} ${anchorY + 3}`
+  // 计算源节点边缘点（使用控制点方向和nodeScale）
+  const sourceType = sourceNode?.isSwitch ? 'switch' : (sourceNode?.type || 'default')
+  const sourceEdge = getNodeEdgePoint(sourcePos.x, sourcePos.y, ctrlX, ctrlY, sourceType, false, nodeScale)
+
+  const pathD = `M ${sourceEdge.x} ${sourceEdge.y} Q ${ctrlX} ${ctrlY}, ${anchorX} ${anchorY}`
+  const shadowPathD = `M ${sourceEdge.x + 2} ${sourceEdge.y + 3} Q ${ctrlX + 2} ${ctrlY + 3}, ${anchorX + 2} ${anchorY + 3}`
 
   const edgeId = `${edge.source}-external-${edge.externalNodeId}`
   const isLinkSelected = selectedLinkId === edgeId
@@ -393,7 +432,7 @@ export const renderIndirectEdge = (
   index: number,
   props: EdgeRendererProps
 ): React.ReactNode => {
-  const { nodes, nodePositions, selectedLinkId, connectionMode, onLinkClick } = props
+  const { nodes, nodePositions, selectedLinkId, connectionMode, onLinkClick, nodeScale = 1 } = props
 
   const sourcePos = nodePositions.get(edge.source)
   const targetPos = nodePositions.get(edge.target)
@@ -411,8 +450,14 @@ export const renderIndirectEdge = (
   const ctrlX = midX
   const ctrlY = midY - bulge
 
-  const pathD = `M ${sourcePos.x} ${sourcePos.y} Q ${ctrlX} ${ctrlY}, ${targetPos.x} ${targetPos.y}`
-  const shadowPathD = `M ${sourcePos.x + 2} ${sourcePos.y + 4} Q ${ctrlX + 2} ${ctrlY + 4}, ${targetPos.x + 2} ${targetPos.y + 4}`
+  // 计算边缘点（使用控制点方向和nodeScale）
+  const sourceType = sourceNode?.isSwitch ? 'switch' : (sourceNode?.type || 'default')
+  const targetType = targetNode?.isSwitch ? 'switch' : (targetNode?.type || 'default')
+  const sourceEdge = getNodeEdgePoint(sourcePos.x, sourcePos.y, ctrlX, ctrlY, sourceType, false, nodeScale)
+  const targetEdge = getNodeEdgePoint(targetPos.x, targetPos.y, ctrlX, ctrlY, targetType, false, nodeScale)
+
+  const pathD = `M ${sourceEdge.x} ${sourceEdge.y} Q ${ctrlX} ${ctrlY}, ${targetEdge.x} ${targetEdge.y}`
+  const shadowPathD = `M ${sourceEdge.x + 2} ${sourceEdge.y + 4} Q ${ctrlX + 2} ${ctrlY + 4}, ${targetEdge.x + 2} ${targetEdge.y + 4}`
 
   const edgeId = `${edge.source}-indirect-${edge.target}`
   const isLinkSelected = selectedLinkId === edgeId

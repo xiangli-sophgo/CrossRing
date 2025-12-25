@@ -88,8 +88,13 @@ export interface BoardConfigs {
 
 // 新的灵活板卡配置
 export interface FlexBoardChipConfig {
-  name: string      // Chip名称，如 "NPU", "CPU", "GPU"
-  count: number     // 数量
+  name: string                      // Chip名称/型号
+  count: number                     // 数量
+  preset_id?: string                // 预设ID (如 'h100-sxm')，为空表示自定义
+  // 自定义参数（preset_id为空时使用）
+  compute_tflops_fp16?: number      // FP16算力 (TFLOPs)
+  memory_gb?: number                // 显存容量 (GB)
+  memory_bandwidth_gbps?: number    // 显存带宽 (GB/s)
 }
 
 export interface FlexBoardConfig {
@@ -169,17 +174,14 @@ export const DEFAULT_BOARD_CONFIGS: BoardConfigs = {
 export const DEFAULT_RACK_CONFIG: RackConfig = {
   total_u: 42,
   boards: [
-    { id: 'board_1', name: '计算板卡', u_height: 2, count: 8, chips: [{ name: 'NPU', count: 8 }] },
+    { id: 'board_1', name: 'GPU Board', u_height: 2, count: 8, chips: [{ name: 'H100-SXM', count: 8, preset_id: 'h100-sxm' }] },
   ],
 }
 
 // 默认Switch配置
 export const DEFAULT_SWITCH_CONFIG: GlobalSwitchConfig = {
   switch_types: [
-    { id: 'leaf_48', name: '48端口Leaf交换机', port_count: 48 },
-    { id: 'leaf_72', name: '72端口Leaf交换机', port_count: 72 },
-    { id: 'spine_128', name: '128端口Spine交换机', port_count: 128 },
-    { id: 'core_512', name: '512端口核心交换机', port_count: 512 },
+    { id: 'switch_48', name: 'Switch', port_count: 48 },
   ],
   inter_pod: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, keep_direct_topology: false },
   inter_rack: { enabled: false, layers: [], downlink_redundancy: 1, connect_to_upper_level: true, keep_direct_topology: false },

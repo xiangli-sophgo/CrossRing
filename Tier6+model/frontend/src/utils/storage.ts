@@ -364,3 +364,36 @@ export function getLevelConnectionDefaults(): {
     board: { bandwidth: 400.0, latency: 50.0 },
   };
 }
+
+// ============================================
+// 缓存清理 API
+// ============================================
+
+/**
+ * 清除所有缓存数据（IndexedDB + localStorage）
+ */
+export async function clearAllCache(): Promise<void> {
+  // 1. 删除 IndexedDB 数据库
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(DB_NAME);
+
+    request.onsuccess = () => {
+      // 2. 清除 localStorage 中的相关缓存
+      const keysToRemove = [
+        'tier6_topology_config_cache',
+        'tier6_sider_width_cache',
+      ];
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+
+      resolve();
+    };
+
+    request.onerror = () => {
+      reject(new Error('清除缓存失败'));
+    };
+
+    request.onblocked = () => {
+      reject(new Error('数据库被占用，请关闭其他标签页后重试'));
+    };
+  });
+}
