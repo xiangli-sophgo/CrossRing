@@ -194,6 +194,7 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
 
       // 如果有选中的link，添加两端节点
       if (selectedLinkId) {
+        // 首先检查 manualConnections
         const selectedConn = currentManualConnections.find(conn => {
           const edgeId = `${conn.source}-${conn.target}`
           return selectedLinkId === edgeId || selectedLinkId === `${conn.target}-${conn.source}`
@@ -201,6 +202,31 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
         if (selectedConn) {
           connectedIds.add(selectedConn.source)
           connectedIds.add(selectedConn.target)
+        }
+
+        // 然后检查容器内的普通边
+        if (connectedIds.size === 0 && containerNode.singleLevelData) {
+          const slEdges = containerNode.singleLevelData.edges || []
+          const selectedEdge = slEdges.find((edge: Edge) => {
+            const edgeId = `${edge.source}-${edge.target}`
+            return selectedLinkId === edgeId || selectedLinkId === `${edge.target}-${edge.source}`
+          })
+          if (selectedEdge) {
+            connectedIds.add(selectedEdge.source)
+            connectedIds.add(selectedEdge.target)
+          }
+        }
+
+        // 也检查跨层级边（使用 inter: 前缀）
+        if (connectedIds.size === 0) {
+          const selectedInterEdge = interLevelEdges.find(edge => {
+            const edgeId = `inter:${edge.source}-${edge.target}`
+            return selectedLinkId === edgeId || selectedLinkId === `inter:${edge.target}-${edge.source}`
+          })
+          if (selectedInterEdge) {
+            connectedIds.add(selectedInterEdge.source)
+            connectedIds.add(selectedInterEdge.target)
+          }
         }
       }
 
@@ -387,7 +413,7 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
   // 第二层：容器内边（不包含节点）
   const containerEdgesLayer = containers.map(containerNode => {
     const state = getContainerState(containerNode)
-    const { bounds, zLayer, isAnimating, shouldDimContainer, connectedNodeIds,
+    const { bounds, zLayer: _zLayer, isAnimating, shouldDimContainer, connectedNodeIds,
             animX, animY, animW, animH, animSkewAngle, containerGroupOpacity } = state
 
     if (!containerNode.singleLevelData) return null
@@ -491,34 +517,48 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
               const sourceEdge = getNodeEdgePoint(sourceNode.x, sourceNode.y, targetNode.x, targetNode.y, sourceNode.type, false, sourceScale)
               const targetEdge = getNodeEdgePoint(targetNode.x, targetNode.y, sourceNode.x, sourceNode.y, targetNode.type, false, targetScale)
 
+              const handleEdgeClick = (e: React.MouseEvent) => {
+                e.stopPropagation()
+                if (connectionMode !== 'view') return
+                onLinkClick?.({
+                  id: edgeId,
+                  sourceId: edge.source,
+                  sourceLabel: sourceNode.label,
+                  sourceType: sourceNode.type,
+                  targetId: edge.target,
+                  targetLabel: targetNode.label,
+                  targetType: targetNode.type,
+                  bandwidth: edge.bandwidth,
+                  latency: edge.latency,
+                  isManual: false
+                })
+              }
+
               return (
-                <line
-                  key={`sl-edge-${i}`}
-                  x1={sourceEdge.x}
-                  y1={sourceEdge.y}
-                  x2={targetEdge.x}
-                  y2={targetEdge.y}
-                  stroke={isLinkSelected ? '#2563eb' : '#b0b0b0'}
-                  strokeWidth={isLinkSelected ? 2 : 1}
-                  strokeOpacity={edgeOpacity}
-                  style={{ cursor: 'pointer', transition: 'stroke-opacity 0.2s ease', pointerEvents: 'auto' }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    if (connectionMode !== 'view') return
-                    onLinkClick?.({
-                      id: edgeId,
-                      sourceId: edge.source,
-                      sourceLabel: sourceNode.label,
-                      sourceType: sourceNode.type,
-                      targetId: edge.target,
-                      targetLabel: targetNode.label,
-                      targetType: targetNode.type,
-                      bandwidth: edge.bandwidth,
-                      latency: edge.latency,
-                      isManual: false
-                    })
-                  }}
-                />
+                <g key={`sl-edge-${i}`}>
+                  {/* 透明点击层 */}
+                  <line
+                    x1={sourceEdge.x}
+                    y1={sourceEdge.y}
+                    x2={targetEdge.x}
+                    y2={targetEdge.y}
+                    stroke="transparent"
+                    strokeWidth={12}
+                    style={{ cursor: 'pointer', pointerEvents: 'auto' }}
+                    onClick={handleEdgeClick}
+                  />
+                  {/* 可见线条 */}
+                  <line
+                    x1={sourceEdge.x}
+                    y1={sourceEdge.y}
+                    x2={targetEdge.x}
+                    y2={targetEdge.y}
+                    stroke={isLinkSelected ? '#2563eb' : '#b0b0b0'}
+                    strokeWidth={isLinkSelected ? 2.5 : 1}
+                    strokeOpacity={isLinkSelected ? 1 : edgeOpacity}
+                    style={{ pointerEvents: 'none', transition: 'stroke-opacity 0.2s ease', filter: isLinkSelected ? 'drop-shadow(0 0 4px #2563eb)' : 'none' }}
+                  />
+                </g>
               )
             })}
 
@@ -539,7 +579,7 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
   // 第三层：容器内节点
   const containerNodesLayer = containers.map(containerNode => {
     const state = getContainerState(containerNode)
-    const { bounds, zLayer, isAnimating, shouldDimContainer, connectedNodeIds,
+    const { bounds, zLayer: _zLayer2, isAnimating, shouldDimContainer, connectedNodeIds,
             animX, animY, animW, animH, animSkewAngle, containerGroupOpacity } = state
 
     if (!containerNode.singleLevelData) return null
@@ -1060,8 +1100,10 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
       const targetPos = getNodePosition(edge.target, activeLayerIdx)
       if (!sourcePos || !targetPos) return null
 
-      const edgeId = `${edge.source}-${edge.target}`
-      const isLinkSelected = selectedLinkId === edgeId || selectedLinkId === `${edge.target}-${edge.source}`
+      // 跨层级边使用 inter: 前缀
+      const edgeId = `inter:${edge.source}-${edge.target}`
+      const reverseEdgeId = `inter:${edge.target}-${edge.source}`
+      const isLinkSelected = selectedLinkId === edgeId || selectedLinkId === reverseEdgeId
 
       // 计算层级差异，用于深度效果
       const zDiff = Math.abs((sourcePos.zLayer ?? 0) - (targetPos.zLayer ?? 0))
@@ -1158,10 +1200,10 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
 
     const activeLayerIdx = hoveredLayerIndex ?? selectedLayerIndex
 
-    // 检查是否是跨层级边
+    // 检查是否是跨层级边（使用 inter: 前缀）
     const interLevelEdge = interLevelEdges.find(edge => {
-      const edgeId = `${edge.source}-${edge.target}`
-      return selectedLinkId === edgeId || selectedLinkId === `${edge.target}-${edge.source}`
+      const edgeId = `inter:${edge.source}-${edge.target}`
+      return selectedLinkId === edgeId || selectedLinkId === `inter:${edge.target}-${edge.source}`
     })
 
     if (interLevelEdge) {
@@ -1221,11 +1263,9 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
     const container = containers.find(c => c.id === containerId)
     if (!container) return null
 
-    // 获取与这个容器相关的手动连接（两端都至少有一端在这个容器内）
+    // 获取与这个容器相关的手动连接（只渲染源节点在这个容器内的连接，避免重复渲染）
     const containerConnections = currentManualConnections.filter(conn => {
       const sourceInContainer = container.singleLevelData?.nodes.some(n => n.id === conn.source)
-      const targetInContainer = container.singleLevelData?.nodes.some(n => n.id === conn.target)
-      // 只渲染源节点在这个容器内的连接（避免重复渲染）
       return sourceInContainer
     })
 
@@ -1347,8 +1387,6 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
     if (connections.length === 0) return null
 
     const activeLayerIdx = hoveredLayerIndex ?? selectedLayerIndex
-    const container = containers.find(c => c.id === containerId)
-    const containerZLayer = container?.zLayer ?? 0
 
     const getParentIdx = (nodeId: string): number => {
       const parts = nodeId.split('/')
@@ -1426,7 +1464,6 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
   const containersInterleavedRender = containers.map((containerNode, idx) => {
     const zLayer = containerNode.zLayer ?? 0
     const isExpanding = expandingContainer?.id === containerNode.id
-    const isCollapsing = collapsingContainer?.id === containerNode.id
 
     // 获取与这个容器相关的手动连接
     const containerManualConnections = currentManualConnections.filter(conn => {

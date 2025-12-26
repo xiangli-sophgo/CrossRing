@@ -42,10 +42,10 @@ export const ManualConnectionLine: React.FC<AnimatedManualConnectionProps> = ({
   isSelected,
   isCrossContainer,
   onClick,
-  sourceType = 'default',
-  targetType = 'default',
-  isMultiLevel = false,
-  nodeScale = 1,
+  sourceType: _sourceType = 'default',
+  targetType: _targetType = 'default',
+  isMultiLevel: _isMultiLevel = false,
+  nodeScale: _nodeScale = 1,
 }) => {
   if (!sourcePos || !targetPos) return null
 

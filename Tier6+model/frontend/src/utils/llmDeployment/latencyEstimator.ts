@@ -11,7 +11,6 @@ import {
   HardwareConfig,
   LatencyAnalysis,
   BottleneckType,
-  getBytesPerElement,
 } from './types';
 import {
   calculatePrefillFlops,

@@ -282,19 +282,15 @@ export function analyzeCommunication(
 
   // TP 通信量
   const tpCommPrefill = calculateTPCommVolumePrefill(model, inference, parallelism.tp);
-  const tpCommDecode = calculateTPCommVolumeDecode(model, inference, parallelism.tp);
 
   // PP 通信量
   const ppCommPrefill = calculatePPCommVolumePrefill(model, inference, parallelism.pp, numMicroBatches);
-  const ppCommDecode = calculatePPCommVolumeDecode(model, inference, parallelism.pp);
 
   // EP 通信量
   const epCommPrefill = calculateEPCommVolumePrefill(model, inference, parallelism.ep);
-  const epCommDecode = calculateEPCommVolumeDecode(model, inference, parallelism.ep);
 
   // SP 通信量
   const spCommPrefill = calculateSPCommVolumePrefill(model, inference, parallelism.sp);
-  const spCommDecode = calculateSPCommVolumeDecode(model, inference, parallelism.sp);
 
   // 总通信量 (Prefill)
   const totalCommPrefill = tpCommPrefill + ppCommPrefill + epCommPrefill + spCommPrefill;

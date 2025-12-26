@@ -218,8 +218,7 @@ export const LEVEL_NAMES: Record<ViewLevel, string> = {
 
 // Chip类型显示名称
 export const CHIP_TYPE_NAMES: Record<ChipType, string> = {
-  npu: 'NPU',
-  cpu: 'CPU',
+  chip: 'Chip',
 };
 
 // 层级颜色
@@ -232,8 +231,7 @@ export const LEVEL_COLORS: Record<ViewLevel, string> = {
 
 // Chip类型颜色
 export const CHIP_TYPE_COLORS: Record<ChipType, string> = {
-  npu: '#d97706',      // 琥珀色
-  cpu: '#4f46e5',      // 靛蓝色
+  chip: '#d97706',     // 琥珀色
 };
 
 // Switch层级颜色
@@ -270,10 +268,9 @@ export const BOARD_DIMENSIONS = {
   height: 0.04,
 };
 
-// Chip尺寸 (根据类型不同) [width(x), height(y-厚度), depth(z)]
+// Chip尺寸 [width(x), height(y-厚度), depth(z)]
 export const CHIP_DIMENSIONS: Record<ChipType, [number, number, number]> = {
-  npu: [0.07, 0.02, 0.07],
-  cpu: [0.06, 0.02, 0.06],
+  chip: [0.07, 0.02, 0.07],
 };
 
 // 相机预设位置

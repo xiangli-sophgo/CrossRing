@@ -61,12 +61,12 @@ export const ChipModel: React.FC<{
   const { x, y, z, dimensions } = getChipPosition(chip, totalChips, baseY)
 
   // 芯片标签文字 - 优先使用配置的label，否则使用类型名称
-  const chipLabel = chip.label || (chip.type === 'npu' ? 'NPU' : 'CPU')
+  const chipLabel = chip.label || 'Chip'
   // 深色金属外壳颜色
   const shellColor = '#1a1a1a'
   const shellColorHover = '#2a2a2a'
-  // 顶部标识颜色 - 根据类型
-  const labelColor = chip.type === 'npu' ? '#4fc3f7' : '#81c784'
+  // 顶部标识颜色
+  const labelColor = '#4fc3f7'
 
   return (
     <group position={[x, y, z]}>

@@ -9,7 +9,6 @@ import {
   InferenceConfig,
   ParallelismStrategy,
   HardwareConfig,
-  DeploymentPlan,
   PlanAnalysisResult,
   MemoryAnalysis,
   CommunicationAnalysis,
@@ -146,9 +145,9 @@ export function analyzeThroughput(
  */
 export function analyzeUtilization(
   model: LLMModelConfig,
-  inference: InferenceConfig,
+  _inference: InferenceConfig,
   parallelism: ParallelismStrategy,
-  hardware: HardwareConfig,
+  _hardware: HardwareConfig,
   memory: MemoryAnalysis,
   latency: LatencyAnalysis,
   throughput: ThroughputAnalysis
@@ -216,11 +215,11 @@ function calculateLoadBalanceScore(
  * @param weights 自定义权重，不传则使用默认权重
  */
 export function calculateOverallScore(
-  memory: MemoryAnalysis,
+  _memory: MemoryAnalysis,
   latency: LatencyAnalysis,
   throughput: ThroughputAnalysis,
   utilization: UtilizationAnalysis,
-  parallelism: ParallelismStrategy,
+  _parallelism: ParallelismStrategy,
   weights: ScoreWeights = DEFAULT_SCORE_WEIGHTS
 ): OverallScore {
   // 延迟评分 (TTFT < 100ms 得满分，> 1000ms 得 0 分)
@@ -266,7 +265,7 @@ export function generateSuggestions(
   model: LLMModelConfig,
   inference: InferenceConfig,
   parallelism: ParallelismStrategy,
-  hardware: HardwareConfig,
+  _hardware: HardwareConfig,
   memory: MemoryAnalysis,
   latency: LatencyAnalysis,
   throughput: ThroughputAnalysis

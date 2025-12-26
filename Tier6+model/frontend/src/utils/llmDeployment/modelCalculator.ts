@@ -9,7 +9,6 @@ import {
   InferenceConfig,
   ParallelismStrategy,
   MemoryAnalysis,
-  DataType,
   getBytesPerElement,
 } from './types';
 
@@ -222,8 +221,8 @@ export function calculateActivationMemory(
  * 包括：CUDA context、临时缓冲区、碎片等
  */
 export function calculateOverheadMemory(
-  model: LLMModelConfig,
-  inference: InferenceConfig
+  _model: LLMModelConfig,
+  _inference: InferenceConfig
 ): number {
   // 固定开销：CUDA context 约 1GB
   const cudaContext = 1.0;

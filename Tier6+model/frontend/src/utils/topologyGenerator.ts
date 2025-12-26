@@ -504,7 +504,7 @@ export class HierarchicalTopologyGenerator {
   private isConnectionInLevel(
     connection: ConnectionConfig,
     levels: Set<string>,
-    pods: PodConfig[]
+    _pods: PodConfig[]
   ): boolean {
     const source = connection.source;
     const target = connection.target;
@@ -635,34 +635,18 @@ export class HierarchicalTopologyGenerator {
   ): ConnectionConfig[] {
     const connections: ConnectionConfig[] = [];
 
-    const npus = chips.filter(c => c.type === 'npu');
-    const cpus = chips.filter(c => c.type === 'cpu');
-
-    // NPU <-> CPU 连接（始终存在）
-    for (const npu of npus) {
-      for (const cpu of cpus) {
-        connections.push({
-          source: npu.id,
-          target: cpu.id,
-          type: 'intra',
-          bandwidth: 64.0,
-          latency: 50.0,
-        });
-      }
-    }
-
-    // 根据拓扑类型生成NPU间连接
-    if (topologyType !== 'none' && npus.length > 1) {
-      const npuIds = npus.map(c => c.id);
+    // 根据拓扑类型生成芯片间连接
+    if (topologyType !== 'none' && chips.length > 1) {
+      const chipIds = chips.map(c => c.id);
       const boardDefaults = LEVEL_CONNECTION_DEFAULTS.board;
-      const npuConnections = this.generateDirectConnections(
-        npuIds,
+      const chipConnections = this.generateDirectConnections(
+        chipIds,
         topologyType,
         'intra',
         boardDefaults.bandwidth,
         boardDefaults.latency
       );
-      connections.push(...npuConnections);
+      connections.push(...chipConnections);
     }
 
     return connections;
@@ -683,40 +667,6 @@ export class HierarchicalTopologyGenerator {
       'intra',
       rackDefaults.bandwidth,
       rackDefaults.latency
-    );
-  }
-
-  /**
-   * 生成Rack间的连接
-   */
-  private generateRackConnections(
-    rackIds: string[],
-    topologyType: DirectTopologyType = 'full_mesh'
-  ): ConnectionConfig[] {
-    const podDefaults = LEVEL_CONNECTION_DEFAULTS.pod;
-    return this.generateDirectConnections(
-      rackIds,
-      topologyType,
-      'intra',
-      podDefaults.bandwidth,
-      podDefaults.latency
-    );
-  }
-
-  /**
-   * 生成Pod间的连接
-   */
-  private generatePodConnections(
-    podIds: string[],
-    topologyType: DirectTopologyType = 'full_mesh'
-  ): ConnectionConfig[] {
-    const dcDefaults = LEVEL_CONNECTION_DEFAULTS.datacenter;
-    return this.generateDirectConnections(
-      podIds,
-      topologyType,
-      'inter',
-      dcDefaults.bandwidth,
-      dcDefaults.latency
     );
   }
 
