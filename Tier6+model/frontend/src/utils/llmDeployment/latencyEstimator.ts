@@ -10,7 +10,9 @@ import {
   ParallelismStrategy,
   HardwareConfig,
   LatencyAnalysis,
+  LatencyPercentiles,
   BottleneckType,
+  CostAnalysis,
 } from './types';
 import {
   calculatePrefillFlops,
@@ -30,21 +32,108 @@ import {
 } from './commCalculator';
 
 // ============================================
+// 常量定义
+// ============================================
+
+/** HBM 效率因子 (实际带宽 / 峰值带宽) */
+const HBM_EFFICIENCY = 0.85;
+
+// ============================================
+// 动态 MFU 估算
+// ============================================
+
+/**
+ * 基于 Roofline 模型估算可达 MFU
+ *
+ * Roofline 模型原理:
+ * - 算术强度 (AI) = FLOPs / Bytes
+ * - 峰点 (Ridge Point) = 峰值算力 / 峰值带宽
+ * - 实际算力利用率 = min(1, AI / Ridge Point)
+ *
+ * 参考:
+ * - NVIDIA: https://developer.nvidia.com/blog/achieving-optimal-performance-with-roofline-analysis/
+ */
+export function estimateAchievableMFU(
+  model: LLMModelConfig,
+  inference: InferenceConfig,
+  parallelism: ParallelismStrategy,
+  hardware: HardwareConfig,
+  phase: 'prefill' | 'decode',
+  contextLength?: number
+): number {
+  // 计算每 token 的 FLOPs
+  const avgContext = contextLength ?? (inference.input_seq_length + inference.output_seq_length / 2);
+  const flopsPerToken = phase === 'prefill'
+    ? calculatePrefillFlops(model, inference) / inference.input_seq_length
+    : calculateDecodeFlopsPerToken(model, inference, avgContext);
+
+  // 计算每 token 需要读取的数据量 (bytes)
+  // 模型权重 (每 token 都需要读取)
+  const modelMemoryGB = calculateModelMemory(model, parallelism);
+  const modelMemoryBytes = modelMemoryGB * 1e9;
+
+  // KV Cache (仅 decode 阶段)
+  let kvCacheBytes = 0;
+  if (phase === 'decode') {
+    const kvCacheGB = calculateKVCacheMemory(model, inference, parallelism);
+    const kvCacheRatio = avgContext / inference.max_seq_length;
+    kvCacheBytes = kvCacheGB * kvCacheRatio * 1e9;
+  }
+
+  const bytesPerToken = modelMemoryBytes + kvCacheBytes;
+
+  // 算术强度 (FLOPs / Bytes)
+  const arithmeticIntensity = flopsPerToken / bytesPerToken;
+
+  // Ridge Point = 峰值算力 (FLOPs/s) / 峰值带宽 (Bytes/s)
+  const peakFlops = hardware.chip.compute_tflops_fp16 * 1e12;
+  const peakBandwidth = hardware.chip.memory_bandwidth_gbps * 1e9 * HBM_EFFICIENCY;
+  const ridgePoint = peakFlops / peakBandwidth;
+
+  // 基于 Roofline 的理论 MFU
+  const theoreticalMFU = Math.min(1.0, arithmeticIntensity / ridgePoint);
+
+  // 实际 MFU 通常更低，考虑以下因素:
+  // - 并行效率损失 (TP/PP 通信开销)
+  // - 启动开销 (kernel launch)
+  // - 负载不均衡
+  const parallelismOverhead = 1 - (parallelism.tp - 1) * 0.02 - (parallelism.pp - 1) * 0.03;
+  const practicalFactor = 0.8; // 实际因素
+
+  // 最终 MFU
+  const achievableMFU = theoreticalMFU * parallelismOverhead * practicalFactor;
+
+  // 限制范围
+  // Prefill: 通常 30-50%
+  // Decode: 通常 15-30%
+  if (phase === 'prefill') {
+    return Math.max(0.2, Math.min(0.5, achievableMFU));
+  } else {
+    return Math.max(0.1, Math.min(0.35, achievableMFU));
+  }
+}
+
+// ============================================
 // 计算延迟估算
 // ============================================
 
 /**
  * 估算 Prefill 阶段计算延迟
  *
- * 计算延迟 = FLOPs / (峰值算力 × 利用率 × 并行数)
+ * 计算延迟 = max(计算时间, 访存时间)
+ * - 计算时间 = FLOPs / (峰值算力 × MFU × 并行数)
+ * - 访存时间 = 模型权重 / (HBM带宽 × 效率)
  */
 export function estimatePrefillComputeLatency(
   model: LLMModelConfig,
   inference: InferenceConfig,
   parallelism: ParallelismStrategy,
   hardware: HardwareConfig,
-  mfuEstimate: number = 0.5 // 模型算力利用率估计
+  mfuEstimate?: number // 可选，不传则使用动态估算
 ): number {
+  // 使用动态 MFU 估算（如果未指定）
+  const mfu = mfuEstimate ?? estimateAchievableMFU(model, inference, parallelism, hardware, 'prefill');
+
   const totalFlops = calculatePrefillFlops(model, inference);
 
   // 每芯片算力 (FLOPs/s)
@@ -60,13 +149,23 @@ export function estimatePrefillComputeLatency(
   const flopsPerChip = totalFlops / effectiveParallelism;
 
   // 计算时间 (秒)
-  const computeTimeS = flopsPerChip / (flopsPerSecond * mfuEstimate);
+  const computeTimeS = flopsPerChip / (flopsPerSecond * mfu);
+  const computeTimeMs = computeTimeS * 1000;
 
-  return computeTimeS * 1000; // ms
+  // 访存时间 (权重加载)
+  // Prefill 阶段需要读取模型权重
+  const modelMemoryGB = calculateModelMemory(model, parallelism);
+  const memoryTimeS = modelMemoryGB / (hardware.chip.memory_bandwidth_gbps * HBM_EFFICIENCY);
+  const memoryTimeMs = memoryTimeS * 1000;
+
+  // 取较大值 (Roofline 模型)
+  return Math.max(computeTimeMs, memoryTimeMs);
 }
 
 /**
  * 估算 Decode 阶段单 token 计算延迟
+ *
+ * Decode 阶段通常是 memory-bound，但仍需计算 compute time 作为参考
  */
 export function estimateDecodeComputeLatency(
   model: LLMModelConfig,
@@ -74,15 +173,18 @@ export function estimateDecodeComputeLatency(
   parallelism: ParallelismStrategy,
   hardware: HardwareConfig,
   contextLength: number,
-  mfuEstimate: number = 0.3 // Decode 阶段 MFU 通常较低
+  mfuEstimate?: number // 可选，不传则使用动态估算
 ): number {
+  // 使用动态 MFU 估算（如果未指定）
+  const mfu = mfuEstimate ?? estimateAchievableMFU(model, inference, parallelism, hardware, 'decode', contextLength);
+
   const tokenFlops = calculateDecodeFlopsPerToken(model, inference, contextLength);
 
   const chipTflops = hardware.chip.compute_tflops_fp16;
   const flopsPerSecond = chipTflops * 1e12;
   const effectiveParallelism = parallelism.tp * parallelism.pp;
   const flopsPerChip = tokenFlops / effectiveParallelism;
-  const computeTimeS = flopsPerChip / (flopsPerSecond * mfuEstimate);
+  const computeTimeS = flopsPerChip / (flopsPerSecond * mfu);
 
   return computeTimeS * 1000; // ms
 }
@@ -95,7 +197,7 @@ export function estimateDecodeComputeLatency(
  * 估算访存延迟 (Memory Bandwidth Bound)
  *
  * Decode 阶段通常是 memory-bound
- * 延迟 = 需读取的数据量 / 显存带宽
+ * 延迟 = 需读取的数据量 / (显存带宽 × HBM效率)
  */
 export function estimateMemoryLatency(
   model: LLMModelConfig,
@@ -113,11 +215,11 @@ export function estimateMemoryLatency(
   // = 模型权重 + 当前 context 的 KV Cache
   const dataToReadGB = modelMemoryGB + kvCacheGB * (inference.input_seq_length / inference.max_seq_length);
 
-  // 显存带宽
-  const bandwidthGBps = hardware.chip.memory_bandwidth_gbps;
+  // 显存带宽 (考虑 HBM 效率)
+  const effectiveBandwidthGBps = hardware.chip.memory_bandwidth_gbps * HBM_EFFICIENCY;
 
   // 访存时间
-  const memoryTimeS = dataToReadGB / bandwidthGBps;
+  const memoryTimeS = dataToReadGB / effectiveBandwidthGBps;
 
   return memoryTimeS * 1000; // ms
 }
@@ -141,8 +243,9 @@ export function estimateDecodeMemoryLatency(
   const currentKVCacheGB = kvCacheGB * kvCacheRatio;
 
   const dataToReadGB = modelMemoryGB + currentKVCacheGB;
-  const bandwidthGBps = hardware.chip.memory_bandwidth_gbps;
-  const memoryTimeS = dataToReadGB / bandwidthGBps;
+  // 考虑 HBM 效率
+  const effectiveBandwidthGBps = hardware.chip.memory_bandwidth_gbps * HBM_EFFICIENCY;
+  const memoryTimeS = dataToReadGB / effectiveBandwidthGBps;
 
   return memoryTimeS * 1000; // ms
 }
@@ -326,6 +429,66 @@ export function identifyBottleneck(
 }
 
 // ============================================
+// 分位数估算
+// ============================================
+
+/**
+ * 估算延迟分位数
+ *
+ * 业界基准 (MLPerf Inference v5.0):
+ * - TTFT P99 ≤ 450ms (Server scenario)
+ * - TPOT P99 ≤ 40ms (Server scenario)
+ *
+ * 分位数倍率基于实际测量数据的经验值:
+ * - P50 ≈ 基准延迟 × 1.0 (中位数接近理论值)
+ * - P90 ≈ 基准延迟 × 1.3 (网络/调度抖动)
+ * - P99 ≈ 基准延迟 × 1.8 (尾部延迟，含 GC/页面缺失等)
+ *
+ * 影响因素:
+ * - 网络通信: TP/PP 越高，通信抖动越大
+ * - 负载变化: 高负载时排队延迟增加
+ * - 批次变化: continuous batching 带来请求级差异
+ *
+ * 参考来源:
+ * - Meta LLaMa 3 Benchmark: https://ai.meta.com/blog/meta-llama-3/
+ * - Databricks MosaicML: https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices
+ */
+export function estimateLatencyPercentiles(
+  baseLatencyMs: number,
+  parallelism: ParallelismStrategy,
+  isDecodePhase: boolean = false
+): LatencyPercentiles {
+  // 基础倍率
+  let p90Multiplier = 1.3;
+  let p99Multiplier = 1.8;
+
+  // TP/PP 通信引入额外抖动
+  if (parallelism.tp > 1) {
+    const tpFactor = 1 + (parallelism.tp - 1) * 0.02; // 每增加 1 TP 增加 2%
+    p90Multiplier *= tpFactor;
+    p99Multiplier *= tpFactor;
+  }
+
+  if (parallelism.pp > 1) {
+    const ppFactor = 1 + (parallelism.pp - 1) * 0.03; // PP 同步更敏感
+    p90Multiplier *= ppFactor;
+    p99Multiplier *= ppFactor;
+  }
+
+  // Decode 阶段抖动更稳定 (批次更小，通信更少)
+  if (isDecodePhase) {
+    p90Multiplier *= 0.9;
+    p99Multiplier *= 0.85;
+  }
+
+  return {
+    p50: baseLatencyMs,
+    p90: baseLatencyMs * p90Multiplier,
+    p99: baseLatencyMs * p99Multiplier,
+  };
+}
+
+// ============================================
 // 综合延迟分析
 // ============================================
 
@@ -391,6 +554,10 @@ export function analyzeLatency(
     bottleneckDetails = `Decode 阶段: ${decodeBottleneck.details}`;
   }
 
+  // ===== 分位数估算 =====
+  const ttftPercentiles = estimateLatencyPercentiles(prefillTotal, parallelism, false);
+  const tpotPercentiles = estimateLatencyPercentiles(decodePerToken, parallelism, true);
+
   return {
     prefill_compute_latency_ms: prefillCompute,
     prefill_comm_latency_ms: prefillComm,
@@ -402,6 +569,8 @@ export function analyzeLatency(
     pipeline_bubble_ratio: bubbleRatio,
     bottleneck_type: bottleneckType,
     bottleneck_details: bottleneckDetails,
+    ttft_percentiles: ttftPercentiles,
+    tpot_percentiles: tpotPercentiles,
   };
 }
 
@@ -446,7 +615,9 @@ export function estimateRequestThroughput(
 }
 
 /**
- * 估算 MFU (Model FLOPs Utilization)
+ * 估算 Decode 阶段 MFU (Model FLOPs Utilization)
+ *
+ * 注意: Decode 阶段是 memory-bound，MFU 通常很低 (5-15%)
  */
 export function estimateMFU(
   model: LLMModelConfig,
@@ -474,6 +645,35 @@ export function estimateMFU(
 }
 
 /**
+ * 估算 Prefill 阶段 MFU (Model FLOPs Utilization)
+ *
+ * Prefill 阶段是 compute-bound，MFU 通常较高 (30-50%)
+ * 此函数用于与仿真结果对比 (仿真计算的是 Prefill MFU)
+ */
+export function estimatePrefillMFU(
+  model: LLMModelConfig,
+  inference: InferenceConfig,
+  parallelism: ParallelismStrategy,
+  hardware: HardwareConfig
+): number {
+  // Prefill 总 FLOPs
+  const prefillFlops = calculatePrefillFlops(model, inference);
+
+  // Prefill 时间
+  const prefillTimeMs = estimatePrefillComputeLatency(model, inference, parallelism, hardware);
+  const prefillTimeS = prefillTimeMs / 1000;
+
+  // 实际算力 (TFLOPs)
+  const achievedTflops = (prefillFlops / 1e12) / prefillTimeS;
+
+  // 单 DP 副本的峰值算力 (tp * pp 个芯片)
+  const chipsPerReplica = parallelism.tp * parallelism.pp;
+  const peakTflops = hardware.chip.compute_tflops_fp16 * chipsPerReplica;
+
+  return achievedTflops / peakTflops;
+}
+
+/**
  * 估算理论最大吞吐量
  */
 export function estimateTheoreticalMaxThroughput(
@@ -493,4 +693,177 @@ export function estimateTheoreticalMaxThroughput(
   );
 
   return theoreticalFlopsPerSecond / flopsPerToken;
+}
+
+/**
+ * 估算 MBU (Memory Bandwidth Utilization)
+ *
+ * MBU = Achieved_Bandwidth / Peak_Bandwidth
+ * 其中 Achieved_Bandwidth = (Model_Size + KV_Cache_Size) / TPOT
+ *
+ * 业界标准公式来源:
+ * - Databricks: https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices
+ * - NVIDIA: https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/
+ */
+export function estimateMBU(
+  model: LLMModelConfig,
+  inference: InferenceConfig,
+  parallelism: ParallelismStrategy,
+  hardware: HardwareConfig
+): number {
+  const latency = analyzeLatency(model, inference, parallelism, hardware);
+  const tpotSeconds = latency.decode_per_token_latency_ms / 1000;
+
+  if (tpotSeconds <= 0) return 0;
+
+  // Decode 每 token 需读取的数据量 (GB)
+  // = 模型权重 (每 token 都要读一遍) + 当前 context 的 KV Cache
+  const modelMemoryGB = calculateModelMemory(model, parallelism);
+
+  // KV Cache 按平均 context 长度计算
+  const avgContextLen = inference.input_seq_length + inference.output_seq_length / 2;
+  const kvCacheGB = calculateKVCacheMemory(model, inference, parallelism);
+  const kvCacheRatio = avgContextLen / inference.max_seq_length;
+  const currentKVCacheGB = kvCacheGB * kvCacheRatio;
+
+  // 实际带宽 (GB/s)
+  const dataReadPerTokenGB = modelMemoryGB + currentKVCacheGB;
+  const achievedBandwidthGBps = dataReadPerTokenGB / tpotSeconds;
+
+  // 峰值带宽 (考虑所有芯片并行读取)
+  // 注意: TP 并行时，每个芯片只读取自己的部分，所以总带宽是单芯片带宽
+  const peakBandwidthGBps = hardware.chip.memory_bandwidth_gbps;
+
+  // MBU
+  const mbu = achievedBandwidthGBps / peakBandwidthGBps;
+
+  // MBU 不应超过 1 (理论上)
+  return Math.min(mbu, 1.0);
+}
+
+// ============================================
+// 成本分析
+// ============================================
+
+/**
+ * 默认芯片成本表 ($/hour)
+ * 数据来源: 云服务商按需实例定价 (2025年)
+ * - AWS: https://aws.amazon.com/ec2/instance-types/
+ * - Azure: https://azure.microsoft.com/pricing/details/virtual-machines/
+ * - GCP: https://cloud.google.com/compute/all-pricing
+ */
+const DEFAULT_CHIP_COSTS: Record<string, number> = {
+  // NVIDIA
+  'H100': 4.5,       // ~$32-35/h per 8-GPU node
+  'H200': 6.0,       // 预估 (尚未普遍)
+  'A100-80GB': 3.0,  // ~$24/h per 8-GPU node
+  'A100-40GB': 2.5,
+  'L40S': 1.5,
+  'A10': 1.0,
+  // AMD
+  'MI300X': 4.0,     // 预估
+  'MI250X': 2.5,
+  // 国产
+  'Ascend-910B': 2.0, // 预估
+};
+
+/**
+ * 获取芯片成本
+ */
+function getChipCost(hardware: HardwareConfig): number {
+  // 优先使用配置的成本
+  if (hardware.chip.cost_per_hour !== undefined) {
+    return hardware.chip.cost_per_hour;
+  }
+
+  // 查找默认成本
+  const chipType = hardware.chip.chip_type;
+  for (const [name, cost] of Object.entries(DEFAULT_CHIP_COSTS)) {
+    if (chipType.toLowerCase().includes(name.toLowerCase())) {
+      return cost;
+    }
+  }
+
+  // 默认成本 (基于算力估算: ~$0.01 per TFLOP-hour)
+  return hardware.chip.compute_tflops_fp16 * 0.01;
+}
+
+/**
+ * 估算成本分析
+ *
+ * 业界成本计算标准:
+ * - $/M tokens = (Hardware_Cost_Per_Hour × 1e6) / (Tokens_Per_Second × 3600)
+ * - 输入/输出成本比例通常为 1:3 ~ 1:5 (因为 Prefill 计算密度高但快，Decode 慢)
+ *
+ * 参考:
+ * - OpenAI Pricing: https://openai.com/pricing
+ * - Anthropic Pricing: https://www.anthropic.com/pricing
+ * - Together AI: https://www.together.ai/pricing
+ */
+export function estimateCost(
+  model: LLMModelConfig,
+  inference: InferenceConfig,
+  parallelism: ParallelismStrategy,
+  hardware: HardwareConfig
+): CostAnalysis {
+  // 计算总芯片数
+  const totalChips = parallelism.dp * parallelism.tp * parallelism.pp * parallelism.ep;
+
+  // 每芯片成本
+  const chipCostPerHour = getChipCost(hardware);
+
+  // 总硬件成本
+  const totalCostPerHour = chipCostPerHour * totalChips;
+
+  // 获取吞吐量
+  const tokenThroughput = estimateTokenThroughput(model, inference, parallelism, hardware);
+
+  if (tokenThroughput <= 0) {
+    return {
+      hardware_cost_per_hour: chipCostPerHour,
+      total_hardware_cost_per_hour: totalCostPerHour,
+      cost_per_million_tokens: Infinity,
+      input_cost_per_million_tokens: Infinity,
+      output_cost_per_million_tokens: Infinity,
+      tokens_per_dollar: 0,
+    };
+  }
+
+  // 每百万 token 成本 (综合)
+  // $/M tokens = ($/hour × 1e6) / (tokens/s × 3600s/hour)
+  const tokensPerHour = tokenThroughput * 3600;
+  const costPerMillionTokens = (totalCostPerHour * 1e6) / tokensPerHour;
+
+  // 输入/输出成本分解
+  // 通常输出 token 比输入 token 成本高 3-4 倍
+  // 原因: Prefill (输入) 是 compute-bound 且批量处理
+  //       Decode (输出) 是 memory-bound 且逐 token 生成
+  const latency = analyzeLatency(model, inference, parallelism, hardware);
+  const prefillTime = latency.prefill_total_latency_ms;
+  const decodeTime = latency.decode_per_token_latency_ms * inference.output_seq_length;
+  const totalTime = prefillTime + decodeTime;
+
+  // 按时间比例分配成本
+  const inputRatio = prefillTime / totalTime;
+  const outputRatio = decodeTime / totalTime;
+
+  // 输入成本 ($/M input tokens)
+  const inputCostPerMillion = (totalCostPerHour * 1e6 * inputRatio) /
+                               (inference.batch_size * inference.input_seq_length * 3600 / (totalTime / 1000));
+
+  // 输出成本 ($/M output tokens)
+  const outputCostPerMillion = (totalCostPerHour * 1e6 * outputRatio) /
+                                (inference.batch_size * inference.output_seq_length * 3600 / (totalTime / 1000));
+
+  // Token/美元效率
+  const tokensPerDollar = tokensPerHour / totalCostPerHour;
+
+  return {
+    hardware_cost_per_hour: chipCostPerHour,
+    total_hardware_cost_per_hour: totalCostPerHour,
+    cost_per_million_tokens: costPerMillionTokens,
+    input_cost_per_million_tokens: inputCostPerMillion,
+    output_cost_per_million_tokens: outputCostPerMillion,
+    tokens_per_dollar: tokensPerDollar,
+  };
 }

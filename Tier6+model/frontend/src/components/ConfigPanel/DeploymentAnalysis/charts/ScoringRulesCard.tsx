@@ -12,7 +12,7 @@ import {
   CalculatorOutlined,
   InfoCircleOutlined,
 } from '@ant-design/icons'
-import { ScoreWeights, DEFAULT_SCORE_WEIGHTS } from '../../../utils/llmDeployment/types'
+import { ScoreWeights, DEFAULT_SCORE_WEIGHTS } from '../../../../utils/llmDeployment/types'
 
 const { Text } = Typography
 

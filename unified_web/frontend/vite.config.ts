@@ -43,5 +43,16 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-ui': ['antd', '@ant-design/icons'],
+          'vendor-chart': ['echarts', 'echarts-for-react'],
+          'vendor-graph': ['cytoscape', 'react-cytoscapejs'],
+          'vendor-table': ['handsontable', '@handsontable/react'],
+        },
+      },
+    },
   },
 })

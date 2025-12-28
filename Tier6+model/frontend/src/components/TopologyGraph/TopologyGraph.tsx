@@ -1136,6 +1136,10 @@ export const TopologyGraph: React.FC<TopologyGraphProps> = ({
               directTopology={directTopology}
               opacity={0.6}
               getNodePosition={isManualMode ? (node) => manualPositions[node.id] || { x: node.x, y: node.y } : undefined}
+              selectedLinkId={selectedLinkId}
+              onLinkClick={onLinkClick}
+              connectionMode={connectionMode}
+              isManualMode={isManualMode}
             />
           )}
 

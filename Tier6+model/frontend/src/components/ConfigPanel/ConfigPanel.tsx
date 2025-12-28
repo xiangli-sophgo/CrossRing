@@ -45,7 +45,7 @@ import {
   saveCachedConfig,
 } from './shared'
 import { SwitchLevelConfig, ConnectionEditPanel } from './components'
-import { DeploymentAnalysisPanel } from './DeploymentAnalysisPanel'
+import { DeploymentAnalysisPanel } from './DeploymentAnalysis'
 import { getChipList, getChipConfig, saveCustomChipPreset, deleteCustomChipPreset, getChipInterconnectConfig } from '../../utils/llmDeployment/presets'
 import { ChipHardwareConfig } from '../../utils/llmDeployment/types'
 

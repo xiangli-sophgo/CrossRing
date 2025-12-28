@@ -30,6 +30,18 @@ export default defineConfig({
       ignored: ['**/node_modules/**', '**/.git/**'],
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-three': ['three', '@react-three/fiber', '@react-three/drei', '@react-spring/three'],
+          'vendor-ui': ['antd', '@ant-design/icons'],
+          'vendor-chart': ['echarts', 'echarts-for-react'],
+        },
+      },
+    },
+  },
   // 优化依赖预构建
   optimizeDeps: {
     include: [

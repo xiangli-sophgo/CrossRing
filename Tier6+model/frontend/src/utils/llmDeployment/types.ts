@@ -14,6 +14,12 @@ export type DataType = 'fp32' | 'fp16' | 'bf16' | 'int8' | 'int4';
 /** 模型类型 */
 export type ModelType = 'dense' | 'moe';
 
+/** Attention 类型 */
+export type AttentionType = 'mha' | 'gqa' | 'mqa' | 'mla';
+
+/** Norm 类型 */
+export type NormType = 'layernorm' | 'rmsnorm';
+
 /** 推理阶段 */
 export type InferencePhase = 'prefill' | 'decode';
 
@@ -41,6 +47,20 @@ export interface MoEConfig {
   expert_intermediate_size?: number;
 }
 
+/** MLA (Multi-head Latent Attention) 配置 - DeepSeek V3/R1 专用 */
+export interface MLAConfig {
+  /** KV 压缩后的隐维度 (kv_lora_rank) */
+  kv_lora_rank: number;
+  /** Q 的 LoRA rank */
+  q_lora_rank: number;
+  /** 非 RoPE 头维度 (qk_nope_head_dim) */
+  qk_nope_head_dim: number;
+  /** RoPE 头维度 (qk_rope_head_dim) */
+  qk_rope_head_dim: number;
+  /** V 的头维度 */
+  v_head_dim: number;
+}
+
 /** LLM 模型配置 */
 export interface LLMModelConfig {
   /** 模型名称 */
@@ -65,6 +85,14 @@ export interface LLMModelConfig {
   max_seq_length: number;
   /** MoE 配置 (可选) */
   moe_config?: MoEConfig;
+  /** MLA 配置 (可选，DeepSeek V3/R1 专用) */
+  mla_config?: MLAConfig;
+  /** Attention 类型 (可选，默认根据 num_kv_heads 推断) */
+  attention_type?: AttentionType;
+  /** Norm 类型 (可选，默认 rmsnorm) */
+  norm_type?: NormType;
+  /** 是否共享 embedding 和 LM Head 权重 (可选，默认 true) */
+  tie_word_embeddings?: boolean;
 }
 
 // ============================================
@@ -101,6 +129,8 @@ export interface ChipHardwareConfig {
   memory_gb: number;
   /** 显存带宽 (GB/s) */
   memory_bandwidth_gbps: number;
+  /** 成本 ($/hour) - 云服务商按需实例价格 */
+  cost_per_hour?: number;
 }
 
 /** 节点配置 */
@@ -203,6 +233,16 @@ export interface CommunicationAnalysis {
   bottleneck_description?: string;
 }
 
+/** 延迟分位数统计 */
+export interface LatencyPercentiles {
+  /** P50 中位数 (ms) */
+  p50: number;
+  /** P90 (ms) */
+  p90: number;
+  /** P99 (ms) */
+  p99: number;
+}
+
 /** 延迟分析结果 */
 export interface LatencyAnalysis {
   /** Prefill 计算延迟 (ms) */
@@ -225,6 +265,10 @@ export interface LatencyAnalysis {
   bottleneck_type: BottleneckType;
   /** 瓶颈详情 */
   bottleneck_details: string;
+  /** TTFT 分位数分布 */
+  ttft_percentiles?: LatencyPercentiles;
+  /** TPOT 分位数分布 */
+  tpot_percentiles?: LatencyPercentiles;
 }
 
 /** 吞吐量分析结果 */
@@ -233,10 +277,28 @@ export interface ThroughputAnalysis {
   tokens_per_second: number;
   /** 请求吞吐量 (requests/s) */
   requests_per_second: number;
-  /** 有效算力利用率 MFU (0-1) */
+  /** 有效算力利用率 MFU (0-1) - Prefill 阶段关键指标 */
   model_flops_utilization: number;
+  /** 显存带宽利用率 MBU (0-1) - Decode 阶段关键指标 */
+  memory_bandwidth_utilization: number;
   /** 理论峰值吞吐量 (tokens/s) */
   theoretical_max_throughput: number;
+}
+
+/** 成本分析结果 */
+export interface CostAnalysis {
+  /** 硬件成本 ($/hour/chip) */
+  hardware_cost_per_hour: number;
+  /** 总硬件成本 ($/hour) */
+  total_hardware_cost_per_hour: number;
+  /** 成本每百万 token ($/M tokens) - 综合输入输出 */
+  cost_per_million_tokens: number;
+  /** 输入 token 成本 ($/M tokens) */
+  input_cost_per_million_tokens: number;
+  /** 输出 token 成本 ($/M tokens) */
+  output_cost_per_million_tokens: number;
+  /** Token/美元 效率 */
+  tokens_per_dollar: number;
 }
 
 /** 资源利用率分析 */
@@ -289,6 +351,8 @@ export interface PlanAnalysisResult {
   latency: LatencyAnalysis;
   /** 吞吐量分析 */
   throughput: ThroughputAnalysis;
+  /** 成本分析 */
+  cost?: CostAnalysis;
   /** 资源利用率 */
   utilization: UtilizationAnalysis;
   /** 综合评分 */
@@ -536,3 +600,11 @@ export interface TopologyTrafficResult {
   /** 平均链路利用率 */
   avgUtilization: number;
 }
+
+// ============================================
+// 模拟结果类型 (从 simulation 模块重导出)
+// ============================================
+
+// 注意: 完整的模拟类型定义在 ./simulation/types.ts
+// 这里只导出核心结果类型以便在 PlanAnalysisResult 中使用
+export type { SimulationResult, SimulationConfig, GanttChartData, SimulationStats } from './simulation/types';

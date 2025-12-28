@@ -641,6 +641,10 @@ export interface TorusArcsProps {
   opacity?: number
   /** 获取节点位置的函数（用于支持手动拖拽位置） */
   getNodePosition?: (node: { id: string; x: number; y: number }) => { x: number; y: number }
+  selectedLinkId?: string | null
+  onLinkClick?: (link: LinkDetail) => void
+  connectionMode?: string
+  isManualMode?: boolean
 }
 
 /**
@@ -648,7 +652,12 @@ export interface TorusArcsProps {
  */
 const renderArc = (
   x1: number, y1: number, x2: number, y2: number,
-  key: string, offset: number, opacity: number
+  key: string, offset: number, opacity: number,
+  sourceId: string, targetId: string,
+  selectedLinkId: string | null | undefined,
+  onLinkClick: ((link: LinkDetail) => void) | undefined,
+  connectionMode: string | undefined,
+  isManualMode: boolean | undefined
 ): JSX.Element | null => {
   const midX = (x1 + x2) / 2
   const midY = (y1 + y2) / 2
@@ -661,16 +670,44 @@ const renderArc = (
   const perpY = dx / dist
   const ctrlX = midX + perpX * bulge
   const ctrlY = midY + perpY * bulge
+  const pathD = `M ${x1} ${y1} Q ${ctrlX} ${ctrlY}, ${x2} ${y2}`
+
+  const edgeId = `${sourceId}-${targetId}`
+  const isSelected = selectedLinkId === edgeId || selectedLinkId === `${targetId}-${sourceId}`
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (connectionMode !== 'view' || isManualMode) return
+    onLinkClick?.({
+      id: edgeId,
+      sourceId,
+      sourceLabel: sourceId.split('/').pop() || sourceId,
+      sourceType: 'chip',
+      targetId,
+      targetLabel: targetId.split('/').pop() || targetId,
+      targetType: 'chip',
+      isManual: false
+    })
+  }
+
   return (
-    <path
-      key={key}
-      d={`M ${x1} ${y1} Q ${ctrlX} ${ctrlY}, ${x2} ${y2}`}
-      fill="none"
-      stroke="#999"
-      strokeWidth={1.5}
-      strokeOpacity={opacity}
-      style={{ transition: 'stroke-opacity 0.2s ease' }}
-    />
+    <g key={key} style={{ cursor: connectionMode === 'view' && !isManualMode ? 'pointer' : 'default' }}>
+      {/* 透明点击层 */}
+      <path d={pathD} fill="none" stroke="transparent" strokeWidth={16} onClick={handleClick} />
+      {/* 可见曲线 */}
+      <path
+        d={pathD}
+        fill="none"
+        stroke={isSelected ? '#2563eb' : '#999'}
+        strokeWidth={isSelected ? 2.5 : 1.5}
+        strokeOpacity={isSelected ? 1 : opacity}
+        style={{
+          pointerEvents: 'none',
+          transition: 'stroke-opacity 0.2s ease',
+          filter: isSelected ? 'drop-shadow(0 0 4px #2563eb)' : 'none'
+        }}
+      />
+    </g>
   )
 }
 
@@ -679,6 +716,10 @@ export const TorusArcs: React.FC<TorusArcsProps> = ({
   directTopology,
   opacity = 0.6,
   getNodePosition,
+  selectedLinkId,
+  onLinkClick,
+  connectionMode,
+  isManualMode,
 }) => {
   const getPos = (node: { id: string; x: number; y: number }) => {
     if (getNodePosition) return getNodePosition(node)
@@ -689,8 +730,8 @@ export const TorusArcs: React.FC<TorusArcsProps> = ({
     const { cols, rows } = getTorusGridSize(nodes.length)
     if (cols < 2 && rows < 2) return null
 
-    const rowArcs: { x1: number; y1: number; x2: number; y2: number }[] = []
-    const colArcs: { x1: number; y1: number; x2: number; y2: number }[] = []
+    const rowArcs: { x1: number; y1: number; x2: number; y2: number; firstId: string; lastId: string }[] = []
+    const colArcs: { x1: number; y1: number; x2: number; y2: number; firstId: string; lastId: string }[] = []
 
     // Torus: 只画首尾环绕弧
     for (let r = 0; r < rows; r++) {
@@ -700,7 +741,7 @@ export const TorusArcs: React.FC<TorusArcsProps> = ({
         const last = nodesInRow[nodesInRow.length - 1]
         const firstPos = getPos(first)
         const lastPos = getPos(last)
-        rowArcs.push({ x1: firstPos.x, y1: firstPos.y, x2: lastPos.x, y2: lastPos.y })
+        rowArcs.push({ x1: firstPos.x, y1: firstPos.y, x2: lastPos.x, y2: lastPos.y, firstId: first.id, lastId: last.id })
       }
     }
 
@@ -711,14 +752,14 @@ export const TorusArcs: React.FC<TorusArcsProps> = ({
         const last = nodesInCol[nodesInCol.length - 1]
         const firstPos = getPos(first)
         const lastPos = getPos(last)
-        colArcs.push({ x1: firstPos.x, y1: firstPos.y, x2: lastPos.x, y2: lastPos.y })
+        colArcs.push({ x1: firstPos.x, y1: firstPos.y, x2: lastPos.x, y2: lastPos.y, firstId: first.id, lastId: last.id })
       }
     }
 
     return (
       <g>
-        {rowArcs.map((arc, i) => renderArc(arc.x1, arc.y1, arc.x2, arc.y2, `row-arc-${i}`, i, opacity))}
-        {colArcs.map((arc, i) => renderArc(arc.x1, arc.y1, arc.x2, arc.y2, `col-arc-${i}`, i, opacity))}
+        {rowArcs.map((arc, i) => renderArc(arc.x1, arc.y1, arc.x2, arc.y2, `row-arc-${i}`, i, opacity, arc.firstId, arc.lastId, selectedLinkId, onLinkClick, connectionMode, isManualMode))}
+        {colArcs.map((arc, i) => renderArc(arc.x1, arc.y1, arc.x2, arc.y2, `col-arc-${i}`, i, opacity, arc.firstId, arc.lastId, selectedLinkId, onLinkClick, connectionMode, isManualMode))}
       </g>
     )
   }
@@ -739,7 +780,7 @@ export const TorusArcs: React.FC<TorusArcsProps> = ({
           const n2 = nodesInRow[j]
           const pos1 = getPos(n1)
           const pos2 = getPos(n2)
-          const arc = renderArc(pos1.x, pos1.y, pos2.x, pos2.y, `row-${r}-${i}-${j}`, j - i - 1, opacity * 0.8)
+          const arc = renderArc(pos1.x, pos1.y, pos2.x, pos2.y, `row-${r}-${i}-${j}`, j - i - 1, opacity * 0.8, n1.id, n2.id, selectedLinkId, onLinkClick, connectionMode, isManualMode)
           if (arc) arcs.push(arc)
         }
       }
@@ -754,7 +795,7 @@ export const TorusArcs: React.FC<TorusArcsProps> = ({
           const n2 = nodesInCol[j]
           const pos1 = getPos(n1)
           const pos2 = getPos(n2)
-          const arc = renderArc(pos1.x, pos1.y, pos2.x, pos2.y, `col-${c}-${i}-${j}`, j - i - 1, opacity * 0.8)
+          const arc = renderArc(pos1.x, pos1.y, pos2.x, pos2.y, `col-${c}-${i}-${j}`, j - i - 1, opacity * 0.8, n1.id, n2.id, selectedLinkId, onLinkClick, connectionMode, isManualMode)
           if (arc) arcs.push(arc)
         }
       }
@@ -778,7 +819,7 @@ export const TorusArcs: React.FC<TorusArcsProps> = ({
           const last = rowNodes[rowNodes.length - 1]
           const firstPos = getPos(first)
           const lastPos = getPos(last)
-          const arc = renderArc(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `x-arc-z${z}-r${r}`, z + r, opacity * 0.8)
+          const arc = renderArc(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `x-arc-z${z}-r${r}`, z + r, opacity * 0.8, first.id, last.id, selectedLinkId, onLinkClick, connectionMode, isManualMode)
           if (arc) arcs.push(arc)
         }
       }
@@ -793,7 +834,7 @@ export const TorusArcs: React.FC<TorusArcsProps> = ({
           const last = colNodes[colNodes.length - 1]
           const firstPos = getPos(first)
           const lastPos = getPos(last)
-          const arc = renderArc(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `y-arc-z${z}-c${c}`, z + c, opacity * 0.8)
+          const arc = renderArc(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `y-arc-z${z}-c${c}`, z + c, opacity * 0.8, first.id, last.id, selectedLinkId, onLinkClick, connectionMode, isManualMode)
           if (arc) arcs.push(arc)
         }
       }
@@ -808,7 +849,7 @@ export const TorusArcs: React.FC<TorusArcsProps> = ({
           const last = layerNodes[layerNodes.length - 1]
           const firstPos = getPos(first)
           const lastPos = getPos(last)
-          const arc = renderArc(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `z-arc-r${r}-c${c}`, r + c, opacity * 0.8)
+          const arc = renderArc(firstPos.x, firstPos.y, lastPos.x, lastPos.y, `z-arc-r${r}-c${c}`, r + c, opacity * 0.8, first.id, last.id, selectedLinkId, onLinkClick, connectionMode, isManualMode)
           if (arc) arcs.push(arc)
         }
       }

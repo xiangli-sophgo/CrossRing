@@ -9,7 +9,7 @@ import {
   PlanAnalysisResult,
   HardwareConfig,
   LLMModelConfig,
-} from '../../../utils/llmDeployment/types'
+} from '../../../../utils/llmDeployment/types'
 
 interface RooflineChartProps {
   result: PlanAnalysisResult
@@ -44,6 +44,22 @@ export const RooflineChart: React.FC<RooflineChartProps> = ({
       rooflineData.push([oi, actualPerf])
     }
 
+    // 生成带宽受限区域的填充数据（拐点左侧）
+    const memoryBoundAreaData: [number, number][] = []
+    for (let oi = minOI; oi <= ridgePoint; oi *= 1.3) {
+      memoryBoundAreaData.push([oi, oi * memoryBandwidthTBps])
+    }
+    memoryBoundAreaData.push([ridgePoint, peakTflops])
+
+    // 生成算力受限区域的填充数据（拐点右侧）
+    const computeBoundAreaData: [number, number][] = [
+      [ridgePoint, peakTflops],
+    ]
+    for (let oi = ridgePoint * 1.3; oi <= maxOI; oi *= 1.3) {
+      computeBoundAreaData.push([oi, peakTflops])
+    }
+    computeBoundAreaData.push([maxOI, peakTflops])
+
     // 计算当前方案的工作点
     const calculateWorkPoint = (r: PlanAnalysisResult) => {
       // 估算操作强度 (FLOP/Byte)
@@ -71,7 +87,7 @@ export const RooflineChart: React.FC<RooflineChartProps> = ({
         trigger: 'item',
         formatter: (params: unknown) => {
           const p = params as { seriesName: string; data: [number, number]; name?: string }
-          if (p.seriesName === 'Roofline') {
+          if (p.seriesName === 'Roofline' || p.seriesName === '带宽受限区' || p.seriesName === '算力受限区') {
             return `算术强度: ${p.data[0].toFixed(1)} FLOP/Byte<br/>性能上限: ${p.data[1].toFixed(1)} TFLOPS`
           }
           const point = workPoints.find((pt) => pt.planId === p.name)
@@ -80,7 +96,11 @@ export const RooflineChart: React.FC<RooflineChartProps> = ({
               <div style="font-weight: bold;">${point.planId}</div>
               <div>算术强度: ${point.oi.toFixed(1)} FLOP/Byte</div>
               <div>实际性能: ${point.perf.toFixed(2)} TFLOPS</div>
-              <div>瓶颈: ${point.bottleneck === 'memory' ? '带宽受限' : point.bottleneck === 'compute' ? '算力受限' : '通信受限'}</div>
+              <div style="margin-top: 4px; padding-top: 4px; border-top: 1px solid #e8e8e8;">
+                瓶颈: <span style="color: ${point.bottleneck === 'memory' ? '#1890ff' : point.bottleneck === 'compute' ? '#52c41a' : '#faad14'}; font-weight: 500;">
+                  ${point.bottleneck === 'memory' ? '带宽受限' : point.bottleneck === 'compute' ? '算力受限' : '通信受限'}
+                </span>
+              </div>
             `
           }
           return ''
@@ -88,16 +108,17 @@ export const RooflineChart: React.FC<RooflineChartProps> = ({
       },
       legend: {
         show: workPoints.length > 1,
-        bottom: 0,
+        bottom: 5,
         itemWidth: 10,
         itemHeight: 10,
+        itemGap: 12,
         textStyle: { fontSize: 10 },
       },
       grid: {
         left: 60,
         right: 30,
         top: 30,
-        bottom: workPoints.length > 1 ? 40 : 20,
+        bottom: workPoints.length > 1 ? 60 : 30,  // 为 legend 和 X 轴名称留出空间
       },
       xAxis: {
         type: 'log',
@@ -124,6 +145,32 @@ export const RooflineChart: React.FC<RooflineChartProps> = ({
         splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } },
       },
       series: [
+        // 带宽受限区域填充（蓝色）
+        {
+          name: '带宽受限区',
+          type: 'line',
+          data: memoryBoundAreaData,
+          smooth: false,
+          symbol: 'none',
+          lineStyle: { width: 0 },
+          areaStyle: {
+            color: 'rgba(24, 144, 255, 0.08)',
+          },
+          z: 1,
+        },
+        // 算力受限区域填充（绿色）
+        {
+          name: '算力受限区',
+          type: 'line',
+          data: computeBoundAreaData,
+          smooth: false,
+          symbol: 'none',
+          lineStyle: { width: 0 },
+          areaStyle: {
+            color: 'rgba(82, 196, 26, 0.08)',
+          },
+          z: 1,
+        },
         // Roofline 边界线
         {
           name: 'Roofline',
@@ -133,40 +180,32 @@ export const RooflineChart: React.FC<RooflineChartProps> = ({
           symbol: 'none',
           lineStyle: {
             color: '#ff4d4f',
-            width: 2,
+            width: 2.5,
           },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(255, 77, 79, 0.1)' },
-                { offset: 1, color: 'rgba(255, 77, 79, 0)' },
-              ],
-            },
-          },
+          z: 10,
         },
         // 工作点
         ...workPoints.map((point, index) => ({
           name: point.planId,
           type: 'scatter' as const,
           data: [[point.oi, point.perf]],
-          symbolSize: index === 0 ? 14 : 10,
+          symbolSize: index === 0 ? 16 : 12,
           itemStyle: {
             color: COLORS[index % COLORS.length],
             borderColor: '#fff',
             borderWidth: 2,
+            shadowBlur: index === 0 ? 8 : 0,
+            shadowColor: index === 0 ? 'rgba(94, 106, 210, 0.4)' : 'transparent',
           },
           label: {
             show: index === 0,
             position: 'top' as const,
             formatter: point.planId,
-            fontSize: 10,
-            color: '#666',
+            fontSize: 11,
+            fontWeight: 500,
+            color: '#333',
           },
+          z: 20,
         })),
         // 峰值性能线
         {
@@ -176,26 +215,60 @@ export const RooflineChart: React.FC<RooflineChartProps> = ({
           symbol: 'none',
           lineStyle: {
             color: '#52c41a',
-            width: 1,
+            width: 1.5,
             type: 'dashed',
           },
+          z: 5,
         },
         // 拐点标记
         {
           name: '拐点',
           type: 'scatter',
           data: [[ridgePoint, peakTflops]],
-          symbolSize: 8,
+          symbolSize: 10,
           itemStyle: {
             color: '#52c41a',
+            borderColor: '#fff',
+            borderWidth: 2,
           },
           label: {
             show: true,
             position: 'right',
             formatter: `拐点: ${ridgePoint.toFixed(1)}`,
-            fontSize: 9,
+            fontSize: 10,
+            fontWeight: 500,
             color: '#52c41a',
           },
+          z: 15,
+        },
+      ],
+      // 区域标签（使用 graphic）
+      graphic: [
+        // 带宽受限区标签
+        {
+          type: 'text',
+          left: '15%',
+          top: '20%',
+          style: {
+            text: '带宽受限区',
+            fontSize: 11,
+            fill: 'rgba(24, 144, 255, 0.6)',
+            fontWeight: 500,
+          },
+          z: 5,
+        },
+        // 算力受限区标签
+        {
+          type: 'text',
+          right: '15%',
+          top: '20%',
+          style: {
+            text: '算力受限区',
+            fontSize: 11,
+            fill: 'rgba(82, 196, 26, 0.6)',
+            fontWeight: 500,
+          },
+          z: 5,
         },
       ],
     }

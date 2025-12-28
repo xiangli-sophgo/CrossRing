@@ -7,7 +7,32 @@ import {
   LayoutType,
   HierarchicalTopology,
 } from '../../types'
-import { TopologyTrafficResult, PlanAnalysisResult, HardwareConfig, LLMModelConfig } from '../../utils/llmDeployment/types'
+import { TopologyTrafficResult, PlanAnalysisResult, HardwareConfig, LLMModelConfig, InferenceConfig, ParallelismStrategy } from '../../utils/llmDeployment/types'
+
+// 历史记录项
+export interface AnalysisHistoryItem {
+  id: string
+  timestamp: number
+  modelName: string
+  parallelism: ParallelismStrategy
+  score: number
+  ttft: number
+  tpot: number
+  throughput: number
+  mfu: number
+  mbu: number
+  cost: number | null
+  chips: number
+  result: PlanAnalysisResult
+  topKPlans?: PlanAnalysisResult[]
+  searchMode?: 'manual' | 'auto'
+  modelConfig: LLMModelConfig
+  inferenceConfig: InferenceConfig
+  hardwareConfig: HardwareConfig
+}
+
+// 视图模式：历史列表（第一层） 或 结果详情（第二层）
+export type AnalysisViewMode = 'history' | 'detail'
 
 // 部署分析数据（用于传递给右侧分析面板）
 export interface DeploymentAnalysisData {
@@ -15,6 +40,7 @@ export interface DeploymentAnalysisData {
   topKPlans: PlanAnalysisResult[]
   hardware: HardwareConfig
   model: LLMModelConfig
+  inference?: InferenceConfig
   loading: boolean
   errorMsg: string | null
   searchStats: { evaluated: number; feasible: number; timeMs: number } | null
@@ -23,6 +49,14 @@ export interface DeploymentAnalysisData {
   onClearTraffic?: () => void
   canMapToTopology?: boolean
   onSwitchToAnalysis?: () => void
+  // 视图模式：历史列表 或 详情
+  viewMode: AnalysisViewMode
+  onViewModeChange: (mode: AnalysisViewMode) => void
+  // 历史记录相关
+  history: AnalysisHistoryItem[]
+  onLoadFromHistory: (item: AnalysisHistoryItem) => void
+  onDeleteHistory: (id: string) => void
+  onClearHistory: () => void
 }
 
 // ============================================

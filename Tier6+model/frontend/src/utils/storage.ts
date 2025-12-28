@@ -350,6 +350,16 @@ export function getRackDimensions(): {
 
 /**
  * 获取各层级连接的默认带宽和延迟配置
+ *
+ * 单位说明:
+ * - bandwidth: GB/s (字节/秒，非 Gbps)
+ * - latency: us (微秒)
+ *
+ * 参考值来源 (presets.ts):
+ * - NVLink 4.0 (H100): 900 GB/s, 1 us
+ * - NVLink 3.0 (A100): 600 GB/s, 1 us
+ * - InfiniBand NDR: 50 GB/s (400 Gbps), 2 us
+ * - PCIe 4.0: 64 GB/s, 5 us
  */
 export function getLevelConnectionDefaults(): {
   datacenter: { bandwidth: number; latency: number };
@@ -358,10 +368,14 @@ export function getLevelConnectionDefaults(): {
   board: { bandwidth: number; latency: number };
 } {
   return {
-    datacenter: { bandwidth: 400.0, latency: 300.0 },
-    pod: { bandwidth: 100.0, latency: 200.0 },
-    rack: { bandwidth: 100.0, latency: 100.0 },
-    board: { bandwidth: 400.0, latency: 50.0 },
+    // Pod 间: 跨 Pod 通信，通常走数据中心网络
+    datacenter: { bandwidth: 50.0, latency: 50.0 },
+    // Rack 间: 同 Pod 内不同 Rack，通常走 InfiniBand
+    pod: { bandwidth: 50.0, latency: 5.0 },
+    // Board 间: 同 Rack 内不同节点/Board，走 InfiniBand
+    rack: { bandwidth: 50.0, latency: 2.0 },
+    // Chip 间: 同 Board 内芯片互联，走 NVLink
+    board: { bandwidth: 900.0, latency: 1.0 },
   };
 }
 

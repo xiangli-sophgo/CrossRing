@@ -568,6 +568,10 @@ export const MultiLevelView: React.FC<MultiLevelViewProps> = ({
                 nodes={slNodes.filter(n => !n.isSwitch)}
                 directTopology={directTopology}
                 opacity={shouldDimContainer ? 0.1 : 0.6}
+                selectedLinkId={selectedLinkId}
+                onLinkClick={onLinkClick}
+                connectionMode={connectionMode}
+                isManualMode={false}
               />
             )}
           </svg>

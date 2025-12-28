@@ -169,3 +169,25 @@ export {
   getHeatmapColor,
   getHeatmapWidth,
 } from './trafficMapper';
+
+// ============================================
+// 推理模拟器
+// ============================================
+export {
+  // 核心模拟器
+  InferenceSimulator,
+  runInferenceSimulation,
+  // 事件队列
+  EventQueue,
+  TaskDependencyGraph,
+  // 类型 (常用)
+  type SimulationConfig,
+  type SimulationResult,
+  type GanttChartData,
+  type GanttTask,
+  type SimEvent,
+  type CommTraceItem,
+  type SimulationStats,
+  // 默认配置
+  DEFAULT_SIMULATION_CONFIG,
+} from './simulation';

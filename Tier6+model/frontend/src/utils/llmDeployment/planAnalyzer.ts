@@ -27,8 +27,29 @@ import {
   estimateTokenThroughput,
   estimateRequestThroughput,
   estimateMFU,
+  estimateMBU,
   estimateTheoreticalMaxThroughput,
+  estimateCost,
 } from './latencyEstimator';
+
+// ============================================
+// 辅助函数
+// ============================================
+
+/**
+ * 生成简洁的方案 ID (只显示值 > 1 的并行度参数)
+ * 例如: tp8_pp2 而不是 dp1_tp8_pp2_ep1_sp1
+ */
+export function generatePlanId(parallelism: ParallelismStrategy): string {
+  const parts: string[] = [];
+  if (parallelism.dp > 1) parts.push(`dp${parallelism.dp}`);
+  if (parallelism.tp > 1) parts.push(`tp${parallelism.tp}`);
+  if (parallelism.pp > 1) parts.push(`pp${parallelism.pp}`);
+  if (parallelism.ep > 1) parts.push(`ep${parallelism.ep}`);
+  if (parallelism.sp > 1) parts.push(`sp${parallelism.sp}`);
+  // 如果全是 1，显示 single
+  return parts.length > 0 ? parts.join('_') : 'single';
+}
 
 // ============================================
 // 方案可行性检查
@@ -126,12 +147,14 @@ export function analyzeThroughput(
   const tokensPerSecond = estimateTokenThroughput(model, inference, parallelism, hardware);
   const requestsPerSecond = estimateRequestThroughput(model, inference, parallelism, hardware);
   const mfu = estimateMFU(model, inference, parallelism, hardware);
+  const mbu = estimateMBU(model, inference, parallelism, hardware);
   const theoreticalMax = estimateTheoreticalMaxThroughput(model, inference, parallelism, hardware);
 
   return {
     tokens_per_second: tokensPerSecond,
     requests_per_second: requestsPerSecond,
     model_flops_utilization: mfu,
+    memory_bandwidth_utilization: mbu,
     theoretical_max_throughput: theoreticalMax,
   };
 }
@@ -347,8 +370,8 @@ export function analyzePlan(
   planId?: string,
   weights?: ScoreWeights
 ): PlanAnalysisResult {
-  // 生成方案 ID
-  const id = planId ?? `dp${parallelism.dp}_tp${parallelism.tp}_pp${parallelism.pp}_ep${parallelism.ep}_sp${parallelism.sp}`;
+  // 生成方案 ID (只显示值 > 1 的并行度参数)
+  const id = planId ?? generatePlanId(parallelism);
 
   // 计算总芯片数
   const totalChips = parallelism.dp * parallelism.tp * parallelism.pp * parallelism.ep;
@@ -372,6 +395,9 @@ export function analyzePlan(
 
   // 吞吐分析
   const throughputAnalysis = analyzeThroughput(model, inference, parallelism, hardware);
+
+  // 成本分析
+  const costAnalysis = estimateCost(model, inference, parallelism, hardware);
 
   // 利用率分析
   const utilization = analyzeUtilization(
@@ -398,6 +424,7 @@ export function analyzePlan(
     communication,
     latency,
     throughput: throughputAnalysis,
+    cost: costAnalysis,
     utilization,
     score,
     suggestions,
@@ -451,6 +478,7 @@ function createInfeasibleResult(
     tokens_per_second: 0,
     requests_per_second: 0,
     model_flops_utilization: 0,
+    memory_bandwidth_utilization: 0,
     theoretical_max_throughput: 0,
   };
 

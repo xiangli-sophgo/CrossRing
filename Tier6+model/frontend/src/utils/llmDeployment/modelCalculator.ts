@@ -18,6 +18,11 @@ import {
 
 /**
  * 计算模型总参数量
+ *
+ * 参考模型参数量:
+ * - LLaMA-7B: 6.74B (tie_word_embeddings=true)
+ * - LLaMA-70B: 68.98B (tie_word_embeddings=true)
+ * - Qwen-7B: 7.72B (tie_word_embeddings=false)
  */
 export function calculateModelParams(model: LLMModelConfig): number {
   const H = model.hidden_size;
@@ -30,12 +35,13 @@ export function calculateModelParams(model: LLMModelConfig): number {
   // 每个头的维度
   const headDim = H / numHeads;
 
-  // Embedding 层: token embedding + position embedding (如果有)
-  // 通常只有 token embedding: V * H
+  // Embedding 层: token embedding
   const embeddingParams = V * H;
 
-  // 输出层 (LM Head): H * V (通常与embedding共享权重，但计算时分开)
-  const lmHeadParams = H * V;
+  // LM Head: 如果共享 embedding 权重则不额外计算
+  // 大多数现代模型 (LLaMA, Mistral, DeepSeek) 共享权重
+  const tieWordEmbeddings = model.tie_word_embeddings ?? true;
+  const lmHeadParams = tieWordEmbeddings ? 0 : H * V;
 
   // 每层 Transformer 参数:
   // Attention:
@@ -59,22 +65,81 @@ export function calculateModelParams(model: LLMModelConfig): number {
   if (model.model_type === 'moe' && model.moe_config) {
     const numExperts = model.moe_config.num_experts;
     const numSharedExperts = model.moe_config.num_shared_experts ?? 0;
-    ffnParams = 3 * H * I * (numExperts + numSharedExperts);
+    // 使用 expert_intermediate_size，如果未设置则使用 intermediate_size
+    const expertI = model.moe_config.expert_intermediate_size ?? I;
+    ffnParams = 3 * H * expertI * (numExperts + numSharedExperts);
 
     // Router: H * numExperts
     ffnParams += H * numExperts;
   }
 
-  // LayerNorm: 2 * H (gamma + beta) × 2 (attention前 + FFN前)
-  const layerNormParams = 4 * H;
+  // LayerNorm/RMSNorm: 每层 2 个 (attention前 + FFN前)
+  // LayerNorm: 2H (gamma + beta), RMSNorm: H (仅 gamma)
+  const normType = model.norm_type ?? 'rmsnorm'; // 现代模型默认 RMSNorm
+  const layerNormParams = normType === 'rmsnorm' ? 2 * H : 4 * H;
 
   // 每层总参数
   const paramsPerLayer = attentionParams + ffnParams + layerNormParams;
 
+  // Final LayerNorm (模型输出前的最后一个 RMSNorm/LayerNorm)
+  const finalLayerNormParams = normType === 'rmsnorm' ? H : 2 * H;
+
   // 总参数
-  const totalParams = embeddingParams + L * paramsPerLayer + lmHeadParams;
+  const totalParams = embeddingParams + L * paramsPerLayer + lmHeadParams + finalLayerNormParams;
 
   return totalParams;
+}
+
+/**
+ * 计算 MoE 模型的等效 expert_intermediate_size
+ *
+ * 用于将官方参数量反推为我们公式所需的 expert_intermediate_size，
+ * 以处理混合 Dense/MoE 架构的模型（如 LLaMA 4, Qwen3 MoE）
+ *
+ * @param model - 模型配置（不含 expert_intermediate_size 或设为临时值）
+ * @param targetParamsB - 官方参数量（单位: B，如 400 表示 400B）
+ * @returns 等效的 expert_intermediate_size 值
+ */
+export function calculateEquivalentExpertSize(
+  model: LLMModelConfig,
+  targetParamsB: number
+): number {
+  if (model.model_type !== 'moe' || !model.moe_config) {
+    throw new Error('此函数仅适用于 MoE 模型');
+  }
+
+  const H = model.hidden_size;
+  const L = model.num_layers;
+  const V = model.vocab_size;
+  const numHeads = model.num_attention_heads;
+  const numKVHeads = model.num_kv_heads;
+  const headDim = H / numHeads;
+  const E = model.moe_config.num_experts;
+  const S = model.moe_config.num_shared_experts ?? 0;
+
+  // 1. 计算非 FFN 部分参数
+  const embedding = V * H;
+  const tieWordEmbeddings = model.tie_word_embeddings ?? true;
+  const lmHead = tieWordEmbeddings ? 0 : H * V;
+  const attention = (H * H + 2 * H * headDim * numKVHeads + H * H) * L;
+  const normType = model.norm_type ?? 'rmsnorm';
+  const layerNorm = (normType === 'rmsnorm' ? 2 * H : 4 * H) * L;
+  const finalNorm = normType === 'rmsnorm' ? H : 2 * H;
+
+  const P_other = embedding + lmHead + attention + layerNorm + finalNorm;
+
+  // 2. FFN 预算
+  const P_target = targetParamsB * 1e9;
+  const P_ffn = P_target - P_other;
+  const P_ffn_per_layer = P_ffn / L;
+
+  // 3. 反推 expert_intermediate_size
+  // P_ffn_per_layer = 3 * H * expertI * (E + S) + H * E
+  // expertI = (P_ffn_per_layer - H * E) / (3 * H * (E + S))
+  const router = H * E;
+  const expertI = (P_ffn_per_layer - router) / (3 * H * (E + S));
+
+  return Math.round(expertI);
 }
 
 /**
@@ -98,10 +163,14 @@ export function calculateParamsPerLayer(model: LLMModelConfig): {
   if (model.model_type === 'moe' && model.moe_config) {
     const numExperts = model.moe_config.num_experts;
     const numSharedExperts = model.moe_config.num_shared_experts ?? 0;
-    ffn = 3 * H * I * (numExperts + numSharedExperts) + H * numExperts;
+    // 使用 expert_intermediate_size，如果未设置则使用 intermediate_size
+    const expertI = model.moe_config.expert_intermediate_size ?? I;
+    ffn = 3 * H * expertI * (numExperts + numSharedExperts) + H * numExperts;
   }
 
-  const layerNorm = 4 * H;
+  // LayerNorm/RMSNorm: 每层 2 个
+  const normType = model.norm_type ?? 'rmsnorm';
+  const layerNorm = normType === 'rmsnorm' ? 2 * H : 4 * H;
 
   return {
     attention,
@@ -306,8 +375,10 @@ export function calculateLayerFlopsPrefill(
   if (model.model_type === 'moe' && model.moe_config) {
     const expertsPerTok = model.moe_config.num_experts_per_tok;
     const numSharedExperts = model.moe_config.num_shared_experts ?? 0;
+    // 使用 expert_intermediate_size，如果未设置则使用 intermediate_size
+    const expertI = model.moe_config.expert_intermediate_size ?? I;
     // 每个 token 激活 expertsPerTok 个专家 + 共享专家
-    ffnFlops = (2 * batchSize * seqLen * H * I * 3 + batchSize * seqLen * I) *
+    ffnFlops = (2 * batchSize * seqLen * H * expertI * 3 + batchSize * seqLen * expertI) *
                (expertsPerTok + numSharedExperts);
     // Router FLOPs
     ffnFlops += 2 * batchSize * seqLen * H * model.moe_config.num_experts;
@@ -353,7 +424,9 @@ export function calculateLayerFlopsDecode(
   if (model.model_type === 'moe' && model.moe_config) {
     const expertsPerTok = model.moe_config.num_experts_per_tok;
     const numSharedExperts = model.moe_config.num_shared_experts ?? 0;
-    ffnFlops = (2 * batchSize * seqLen * H * I * 3 + batchSize * seqLen * I) *
+    // 使用 expert_intermediate_size，如果未设置则使用 intermediate_size
+    const expertI = model.moe_config.expert_intermediate_size ?? I;
+    ffnFlops = (2 * batchSize * seqLen * H * expertI * 3 + batchSize * seqLen * expertI) *
                (expertsPerTok + numSharedExperts);
     ffnFlops += 2 * batchSize * seqLen * H * model.moe_config.num_experts;
   }

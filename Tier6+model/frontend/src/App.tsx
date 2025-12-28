@@ -6,8 +6,8 @@ import { TopologyGraph, NodeDetail, LinkDetail } from './components/TopologyGrap
 import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType, MultiLevelViewOptions } from './types'
 import { TopologyTrafficResult } from './utils/llmDeployment/types'
 import { DeploymentAnalysisData } from './components/ConfigPanel/shared'
-import { ChartsPanel, ScoringRulesCard } from './components/ConfigPanel/charts'
-import { AnalysisResultDisplay } from './components/ConfigPanel/DeploymentAnalysisPanel'
+import { ChartsPanel, ScoringRulesCard } from './components/ConfigPanel/DeploymentAnalysis/charts'
+import { AnalysisResultDisplay } from './components/ConfigPanel/DeploymentAnalysis'
 import { getTopology, generateTopology, getLevelConnectionDefaults } from './api/topology'
 import { useViewNavigation } from './hooks/useViewNavigation'
 
@@ -630,7 +630,7 @@ const App: React.FC = () => {
             options={[
               { value: '3d', label: '3D视图' },
               { value: 'topology', label: '拓扑图' },
-              ...(deploymentAnalysisData?.result ? [{ value: 'analysis', label: '部署分析' }] : []),
+              ...(deploymentAnalysisData ? [{ value: 'analysis', label: '部署分析' }] : []),
             ]}
           />
           <span style={{ color: '#999999', fontSize: 12 }}>v{__APP_VERSION__}</span>
@@ -794,7 +794,7 @@ const App: React.FC = () => {
               <Spin size="large" tip="加载中..." />
             </div>
           ) : viewMode === 'analysis' ? (
-            /* 分析视图 */
+            /* 分析视图 - Dashboard 风格布局 */
             <div style={{
               flex: 1,
               overflow: 'auto',
@@ -802,20 +802,27 @@ const App: React.FC = () => {
               background: '#fafafa',
             }}>
               <div style={{ maxWidth: 1400, margin: '0 auto' }}>
-                <div style={{ fontSize: 20, fontWeight: 600, color: '#1a1a1a', marginBottom: 20 }}>
-                  LLM 部署分析结果
+                {/* 标题行 */}
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 20,
+                }}>
+                  <div style={{ fontSize: 20, fontWeight: 600, color: '#1a1a1a' }}>
+                    LLM 部署分析结果
+                  </div>
                 </div>
 
-                {/* 分析结果详情 */}
-                <div style={{
-                  background: '#fff',
-                  borderRadius: 12,
-                  padding: 20,
-                  marginBottom: 20,
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-                }}>
-                  <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>分析结果</div>
-                  {deploymentAnalysisData && (
+                {/* 分析结果/历史记录 - 始终显示 */}
+                {deploymentAnalysisData && (
+                  <div style={{
+                    background: '#fff',
+                    borderRadius: 12,
+                    padding: 20,
+                    marginBottom: 16,
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                  }}>
                     <AnalysisResultDisplay
                       result={deploymentAnalysisData.result}
                       topKPlans={deploymentAnalysisData.topKPlans}
@@ -823,57 +830,34 @@ const App: React.FC = () => {
                       onSelectPlan={deploymentAnalysisData.onSelectPlan}
                       searchStats={deploymentAnalysisData.searchStats}
                       errorMsg={deploymentAnalysisData.errorMsg}
+                      viewMode={deploymentAnalysisData.viewMode}
+                      onViewModeChange={deploymentAnalysisData.onViewModeChange}
+                      history={deploymentAnalysisData.history}
+                      onLoadFromHistory={deploymentAnalysisData.onLoadFromHistory}
+                      onDeleteHistory={deploymentAnalysisData.onDeleteHistory}
+                      onClearHistory={deploymentAnalysisData.onClearHistory}
+                      canMapToTopology={deploymentAnalysisData.canMapToTopology}
+                      onMapToTopology={deploymentAnalysisData.onMapToTopology}
+                      onClearTraffic={deploymentAnalysisData.onClearTraffic}
                     />
-                  )}
+                  </div>
+                )}
 
-                  {/* 映射到拓扑按钮 */}
-                  {deploymentAnalysisData?.canMapToTopology && (
-                    <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
-                      <button
-                        onClick={deploymentAnalysisData.onMapToTopology}
-                        style={{
-                          flex: 1,
-                          padding: '10px 16px',
-                          background: '#5E6AD2',
-                          color: '#fff',
-                          border: 'none',
-                          borderRadius: 8,
-                          cursor: 'pointer',
-                          fontSize: 14,
-                          fontWeight: 500,
-                        }}
-                      >
-                        映射到拓扑热力图
-                      </button>
-                      <button
-                        onClick={deploymentAnalysisData.onClearTraffic}
-                        style={{
-                          padding: '10px 16px',
-                          background: '#f5f5f5',
-                          color: '#666',
-                          border: '1px solid #d9d9d9',
-                          borderRadius: 8,
-                          cursor: 'pointer',
-                          fontSize: 14,
-                        }}
-                      >
-                        清除
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* 评分规则和图表 */}
-                {deploymentAnalysisData?.result && (
+                {/* 图表区域 - 仅在详情视图且有结果时显示 */}
+                {deploymentAnalysisData?.result && deploymentAnalysisData.viewMode === 'detail' && (
                   <>
-                    <ScoringRulesCard />
+                    <ChartsPanel
+                      result={deploymentAnalysisData.result}
+                      topKPlans={deploymentAnalysisData.topKPlans}
+                      hardware={deploymentAnalysisData.hardware}
+                      model={deploymentAnalysisData.model}
+                      inference={deploymentAnalysisData.inference}
+                      topology={topology}
+                    />
+
+                    {/* 评分规则（折叠） */}
                     <div style={{ marginTop: 16 }}>
-                      <ChartsPanel
-                        result={deploymentAnalysisData.result}
-                        topKPlans={deploymentAnalysisData.topKPlans}
-                        hardware={deploymentAnalysisData.hardware}
-                        model={deploymentAnalysisData.model}
-                      />
+                      <ScoringRulesCard />
                     </div>
                   </>
                 )}

@@ -6,6 +6,7 @@
 
 import {
   LLMModelConfig,
+  MLAConfig,
   ChipHardwareConfig,
   NodeConfig,
   ClusterConfig,
@@ -16,183 +17,32 @@ import {
 } from './types';
 
 // ============================================
-// 预设模型配置
+// 预设模型配置 (只保留 DeepSeek 和 Qwen 最新版本)
 // ============================================
 
-/** LLaMA-7B */
-export const LLAMA_7B: LLMModelConfig = {
-  model_name: 'LLaMA-7B',
-  model_type: 'dense',
-  hidden_size: 4096,
-  num_layers: 32,
-  num_attention_heads: 32,
-  num_kv_heads: 32,  // MHA
-  intermediate_size: 11008,
-  vocab_size: 32000,
-  dtype: 'fp16',
-  max_seq_length: 4096,
+/** DeepSeek-V3 MLA 配置 (官方参数) */
+const DEEPSEEK_V3_MLA: MLAConfig = {
+  kv_lora_rank: 512,       // KV 压缩后的隐维度
+  q_lora_rank: 1536,       // Q 的 LoRA rank
+  qk_nope_head_dim: 128,   // 非 RoPE 头维度
+  qk_rope_head_dim: 64,    // RoPE 头维度
+  v_head_dim: 128,         // V 的头维度
 };
 
-/** LLaMA-13B */
-export const LLAMA_13B: LLMModelConfig = {
-  model_name: 'LLaMA-13B',
-  model_type: 'dense',
-  hidden_size: 5120,
-  num_layers: 40,
-  num_attention_heads: 40,
-  num_kv_heads: 40,  // MHA
-  intermediate_size: 13824,
-  vocab_size: 32000,
-  dtype: 'fp16',
-  max_seq_length: 4096,
-};
-
-/** LLaMA-70B */
-export const LLAMA_70B: LLMModelConfig = {
-  model_name: 'LLaMA-70B',
-  model_type: 'dense',
-  hidden_size: 8192,
-  num_layers: 80,
-  num_attention_heads: 64,
-  num_kv_heads: 8,   // GQA
-  intermediate_size: 28672,
-  vocab_size: 32000,
-  dtype: 'fp16',
-  max_seq_length: 4096,
-};
-
-/** LLaMA-3-8B */
-export const LLAMA3_8B: LLMModelConfig = {
-  model_name: 'LLaMA-3-8B',
-  model_type: 'dense',
-  hidden_size: 4096,
-  num_layers: 32,
-  num_attention_heads: 32,
-  num_kv_heads: 8,   // GQA
-  intermediate_size: 14336,
-  vocab_size: 128256,
-  dtype: 'bf16',
-  max_seq_length: 8192,
-};
-
-/** LLaMA-3-70B */
-export const LLAMA3_70B: LLMModelConfig = {
-  model_name: 'LLaMA-3-70B',
-  model_type: 'dense',
-  hidden_size: 8192,
-  num_layers: 80,
-  num_attention_heads: 64,
-  num_kv_heads: 8,   // GQA
-  intermediate_size: 28672,
-  vocab_size: 128256,
-  dtype: 'bf16',
-  max_seq_length: 8192,
-};
-
-/** Mistral-7B */
-export const MISTRAL_7B: LLMModelConfig = {
-  model_name: 'Mistral-7B',
-  model_type: 'dense',
-  hidden_size: 4096,
-  num_layers: 32,
-  num_attention_heads: 32,
-  num_kv_heads: 8,   // GQA
-  intermediate_size: 14336,
-  vocab_size: 32000,
-  dtype: 'bf16',
-  max_seq_length: 32768,  // 滑动窗口
-};
-
-/** Mixtral-8x7B (MoE) */
-export const MIXTRAL_8X7B: LLMModelConfig = {
-  model_name: 'Mixtral-8x7B',
-  model_type: 'moe',
-  hidden_size: 4096,
-  num_layers: 32,
-  num_attention_heads: 32,
-  num_kv_heads: 8,   // GQA
-  intermediate_size: 14336,
-  vocab_size: 32000,
-  dtype: 'bf16',
-  max_seq_length: 32768,
-  moe_config: {
-    num_experts: 8,
-    num_experts_per_tok: 2,
-    expert_capacity_factor: 1.25,
-  },
-};
-
-/** Mixtral-8x22B (MoE) */
-export const MIXTRAL_8X22B: LLMModelConfig = {
-  model_name: 'Mixtral-8x22B',
-  model_type: 'moe',
-  hidden_size: 6144,
-  num_layers: 56,
-  num_attention_heads: 48,
-  num_kv_heads: 8,   // GQA
-  intermediate_size: 16384,
-  vocab_size: 32000,
-  dtype: 'bf16',
-  max_seq_length: 65536,
-  moe_config: {
-    num_experts: 8,
-    num_experts_per_tok: 2,
-    expert_capacity_factor: 1.25,
-  },
-};
-
-/** DeepSeek-V2-236B (MoE) */
-export const DEEPSEEK_V2_236B: LLMModelConfig = {
-  model_name: 'DeepSeek-V2-236B',
-  model_type: 'moe',
-  hidden_size: 5120,
-  num_layers: 60,
-  num_attention_heads: 128,  // MLA
-  num_kv_heads: 128,         // MLA
-  intermediate_size: 12288,
-  vocab_size: 102400,
-  dtype: 'bf16',
-  max_seq_length: 128000,
-  moe_config: {
-    num_experts: 160,
-    num_experts_per_tok: 6,
-    expert_capacity_factor: 1.0,
-    num_shared_experts: 2,
-  },
-};
-
-/** DeepSeek-V2-Lite-16B (MoE) */
-export const DEEPSEEK_V2_LITE: LLMModelConfig = {
-  model_name: 'DeepSeek-V2-Lite-16B',
-  model_type: 'moe',
-  hidden_size: 2048,
-  num_layers: 27,
-  num_attention_heads: 16,
-  num_kv_heads: 16,
-  intermediate_size: 10944,
-  vocab_size: 102400,
-  dtype: 'bf16',
-  max_seq_length: 32768,
-  moe_config: {
-    num_experts: 64,
-    num_experts_per_tok: 6,
-    expert_capacity_factor: 1.0,
-    num_shared_experts: 2,
-  },
-};
-
-/** DeepSeek-V3-671B (MoE) */
+/** DeepSeek-V3-671B (MoE + MLA) */
 export const DEEPSEEK_V3: LLMModelConfig = {
   model_name: 'DeepSeek-V3-671B',
   model_type: 'moe',
   hidden_size: 7168,
   num_layers: 61,
   num_attention_heads: 128,  // MLA
-  num_kv_heads: 128,
-  intermediate_size: 18432,  // Dense层FFN维度
+  num_kv_heads: 128,         // MLA (实际使用 kv_lora_rank=512 压缩)
+  intermediate_size: 18432,  // Dense层FFN维度 (前3层使用)
   vocab_size: 129280,
   dtype: 'bf16',
   max_seq_length: 131072,
+  norm_type: 'rmsnorm',
+  attention_type: 'mla',
   moe_config: {
     num_experts: 256,
     num_experts_per_tok: 8,
@@ -200,20 +50,23 @@ export const DEEPSEEK_V3: LLMModelConfig = {
     num_shared_experts: 1,
     expert_intermediate_size: 2048,  // 每个专家的FFN维度
   },
+  mla_config: DEEPSEEK_V3_MLA,
 };
 
-/** DeepSeek-R1-671B (MoE) */
+/** DeepSeek-R1-671B (MoE + MLA，与 V3 同架构) */
 export const DEEPSEEK_R1: LLMModelConfig = {
   model_name: 'DeepSeek-R1-671B',
   model_type: 'moe',
   hidden_size: 7168,
   num_layers: 61,
   num_attention_heads: 128,  // MLA
-  num_kv_heads: 128,
-  intermediate_size: 18432,  // Dense层FFN维度
+  num_kv_heads: 128,         // MLA (实际使用 kv_lora_rank=512 压缩)
+  intermediate_size: 18432,  // Dense层FFN维度 (前3层使用)
   vocab_size: 129280,
   dtype: 'bf16',
   max_seq_length: 131072,
+  norm_type: 'rmsnorm',
+  attention_type: 'mla',
   moe_config: {
     num_experts: 256,
     num_experts_per_tok: 8,
@@ -221,71 +74,95 @@ export const DEEPSEEK_R1: LLMModelConfig = {
     num_shared_experts: 1,
     expert_intermediate_size: 2048,  // 每个专家的FFN维度
   },
+  mla_config: DEEPSEEK_V3_MLA,  // 与 V3 相同的 MLA 配置
 };
 
-/** DeepSeek-R1-Distill-Qwen-32B */
-export const DEEPSEEK_R1_DISTILL_32B: LLMModelConfig = {
-  model_name: 'DeepSeek-R1-Distill-32B',
+// ============================================
+// Qwen 最新模型
+// ============================================
+
+/** Qwen2.5-72B (官方配置) */
+export const QWEN2_5_72B: LLMModelConfig = {
+  model_name: 'Qwen2.5-72B',
+  model_type: 'dense',
+  hidden_size: 8192,
+  num_layers: 80,
+  num_attention_heads: 64,
+  num_kv_heads: 8,   // GQA
+  intermediate_size: 29568,
+  vocab_size: 152064,
+  dtype: 'bf16',
+  max_seq_length: 131072,
+  norm_type: 'rmsnorm',
+  attention_type: 'gqa',
+};
+
+/** Qwen2.5-32B */
+export const QWEN2_5_32B: LLMModelConfig = {
+  model_name: 'Qwen2.5-32B',
   model_type: 'dense',
   hidden_size: 5120,
   num_layers: 64,
   num_attention_heads: 40,
-  num_kv_heads: 8,  // GQA
+  num_kv_heads: 8,   // GQA
   intermediate_size: 27648,
   vocab_size: 152064,
   dtype: 'bf16',
   max_seq_length: 131072,
+  norm_type: 'rmsnorm',
+  attention_type: 'gqa',
 };
 
-/** DeepSeek-R1-Distill-Llama-70B */
-export const DEEPSEEK_R1_DISTILL_70B: LLMModelConfig = {
-  model_name: 'DeepSeek-R1-Distill-70B',
+/** Qwen3-32B */
+export const QWEN3_32B: LLMModelConfig = {
+  model_name: 'Qwen3-32B',
   model_type: 'dense',
-  hidden_size: 8192,
-  num_layers: 80,
+  hidden_size: 5120,
+  num_layers: 64,
   num_attention_heads: 64,
-  num_kv_heads: 8,  // GQA
-  intermediate_size: 28672,
-  vocab_size: 128256,
-  dtype: 'bf16',
-  max_seq_length: 131072,
-};
-
-/** Qwen-72B */
-export const QWEN_72B: LLMModelConfig = {
-  model_name: 'Qwen-72B',
-  model_type: 'dense',
-  hidden_size: 8192,
-  num_layers: 80,
-  num_attention_heads: 64,
-  num_kv_heads: 64,  // MHA
-  intermediate_size: 24576,
+  num_kv_heads: 8,   // GQA
+  intermediate_size: 25600,  // 估算: ~5H
   vocab_size: 151936,
   dtype: 'bf16',
-  max_seq_length: 32768,
+  max_seq_length: 131072,
+  norm_type: 'rmsnorm',
+  attention_type: 'gqa',
 };
 
-/** GPT-4 (估计参数) */
-export const GPT4_175B: LLMModelConfig = {
-  model_name: 'GPT-4-175B (估计)',
-  model_type: 'dense',
-  hidden_size: 12288,
-  num_layers: 96,
-  num_attention_heads: 96,
-  num_kv_heads: 96,  // MHA
-  intermediate_size: 49152,
-  vocab_size: 100000,
+/** Qwen3-235B-A22B (MoE 旗舰)
+ * 注意: expert_intermediate_size 已调整为等效值以匹配官方 235B 参数量
+ */
+export const QWEN3_235B: LLMModelConfig = {
+  model_name: 'Qwen3-235B-A22B',
+  model_type: 'moe',
+  hidden_size: 8192,
+  num_layers: 94,
+  num_attention_heads: 64,
+  num_kv_heads: 8,   // GQA
+  intermediate_size: 29568,  // Dense FFN
+  vocab_size: 151936,
   dtype: 'bf16',
-  max_seq_length: 8192,
+  max_seq_length: 131072,
+  norm_type: 'rmsnorm',
+  attention_type: 'gqa',
+  moe_config: {
+    num_experts: 128,
+    num_experts_per_tok: 8,
+    expert_capacity_factor: 1.0,
+    expert_intermediate_size: 768,  // 等效值，匹配官方 235B
+  },
 };
 
-/** 所有预设模型 */
+/** 所有预设模型 (只保留 DeepSeek 和 Qwen 最新版本) */
 export const MODEL_PRESETS: Record<string, LLMModelConfig> = {
+  // DeepSeek 最新
   'deepseek-v3': DEEPSEEK_V3,
   'deepseek-r1': DEEPSEEK_R1,
-  'llama3-70b': LLAMA3_70B,
-  'qwen-72b': QWEN_72B,
-  'mixtral-8x22b': MIXTRAL_8X22B,
+  // Qwen 最新
+  'qwen3-235b': QWEN3_235B,
+  'qwen3-32b': QWEN3_32B,
+  'qwen2.5-72b': QWEN2_5_72B,
+  'qwen2.5-32b': QWEN2_5_32B,
 };
 
 /** 获取模型列表 */
@@ -785,21 +662,21 @@ export const BENCHMARK_SCENARIOS: BenchmarkScenario[] = [
 export const BENCHMARK_PRESETS: Record<string, BenchmarkPreset> = {
   'inference-standard': {
     name: '标准推理Benchmark',
-    models: ['llama-7b', 'llama-70b'],
+    models: ['qwen2.5-32b', 'qwen2.5-72b'],
     batch_sizes: [1, 8, 32],
     seq_lengths: [512, 2048],
     metrics: ['TTFT', 'TPOT', 'throughput', 'memory'],
   },
   'long-context': {
     name: '长上下文Benchmark',
-    models: ['llama-70b'],
+    models: ['deepseek-v3', 'qwen2.5-72b'],
     batch_sizes: [1, 4],
     seq_lengths: [8192, 16384, 32768],
     metrics: ['memory', 'TTFT', 'E2E'],
   },
   'moe-benchmark': {
     name: 'MoE模型Benchmark',
-    models: ['mixtral-8x7b', 'deepseek-v2-236b'],
+    models: ['deepseek-v3', 'qwen3-235b'],
     batch_sizes: [8, 32],
     seq_lengths: [2048],
     metrics: ['throughput', 'memory', 'communication'],
