@@ -1206,12 +1206,12 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           style={tabButtonStyle(activePageTab === 'deployment')}
           onClick={() => setActivePageTab('deployment')}
         >
-          部署分析
+          部署设置
         </button>
       </div>
 
-      {/* 内容区域 */}
-      {activePageTab === 'topology' ? (
+      {/* 内容区域 - 使用 display 控制显示，避免组件卸载导致状态丢失 */}
+      <div style={{ display: activePageTab === 'topology' ? 'block' : 'none' }}>
         <>
           <Collapse
             items={topologyCollapseItems}
@@ -1297,7 +1297,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
             </Col>
           </Row>
         </>
-      ) : (
+      </div>
+      <div style={{ display: activePageTab === 'deployment' ? 'block' : 'none' }}>
         <DeploymentAnalysisPanel
           topology={topology}
           onTrafficResultChange={onTrafficResultChange}
@@ -1306,7 +1307,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           podCount={podCount}
           racksPerPod={racksPerPod}
         />
-      )}
+      </div>
 
       {/* 保存配置模态框 */}
       <Modal

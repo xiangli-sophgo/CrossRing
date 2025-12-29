@@ -5,8 +5,8 @@ import { ConfigPanel } from './components/ConfigPanel'
 import { TopologyGraph, NodeDetail, LinkDetail } from './components/TopologyGraph'
 import { HierarchicalTopology, ManualConnectionConfig, ManualConnection, ConnectionMode, HierarchyLevel, LayoutType, MultiLevelViewOptions } from './types'
 import { TopologyTrafficResult } from './utils/llmDeployment/types'
-import { DeploymentAnalysisData } from './components/ConfigPanel/shared'
-import { ChartsPanel, ScoringRulesCard } from './components/ConfigPanel/DeploymentAnalysis/charts'
+import { DeploymentAnalysisData, AnalysisHistoryItem, AnalysisViewMode } from './components/ConfigPanel/shared'
+import { ChartsPanel } from './components/ConfigPanel/DeploymentAnalysis/charts'
 import { AnalysisResultDisplay } from './components/ConfigPanel/DeploymentAnalysis'
 import { getTopology, generateTopology, getLevelConnectionDefaults } from './api/topology'
 import { useViewNavigation } from './hooks/useViewNavigation'
@@ -59,12 +59,72 @@ const App: React.FC = () => {
   // LLM 部署分析结果（用于右侧图表面板）
   const [deploymentAnalysisData, setDeploymentAnalysisData] = useState<DeploymentAnalysisData | null>(null)
 
-  // 分析完成后自动切换到分析视图
+  // App 级别的分析视图模式和历史记录（独立于 DeploymentAnalysisPanel）
+  const [analysisViewMode, setAnalysisViewMode] = useState<AnalysisViewMode>('history')
+  const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistoryItem[]>(() => {
+    try {
+      const stored = localStorage.getItem('llm-deployment-analysis-history')
+      return stored ? JSON.parse(stored) : []
+    } catch { return [] }
+  })
+
+  // 加载历史记录项
+  const handleLoadFromHistory = useCallback((item: AnalysisHistoryItem) => {
+    // 更新 deploymentAnalysisData 以显示该记录
+    setDeploymentAnalysisData(prev => ({
+      result: item.result,
+      topKPlans: item.topKPlans || [item.result],
+      hardware: item.hardwareConfig,
+      model: item.modelConfig,
+      inference: item.inferenceConfig,
+      loading: false,
+      errorMsg: null,
+      searchStats: null,
+      // 保留原有回调或使用空函数
+      onSelectPlan: prev?.onSelectPlan || (() => {}),
+      onMapToTopology: prev?.onMapToTopology,
+      onClearTraffic: prev?.onClearTraffic,
+      canMapToTopology: false,
+      viewMode: 'detail' as const,
+      onViewModeChange: prev?.onViewModeChange || (() => {}),
+      history: prev?.history || [],
+      onLoadFromHistory: prev?.onLoadFromHistory || (() => {}),
+      onDeleteHistory: prev?.onDeleteHistory || (() => {}),
+      onClearHistory: prev?.onClearHistory || (() => {}),
+    }))
+    setAnalysisViewMode('detail')
+  }, [])
+
+  // 删除历史记录
+  const handleDeleteHistory = useCallback((id: string) => {
+    setAnalysisHistory(prev => {
+      const updated = prev.filter(h => h.id !== id)
+      localStorage.setItem('llm-deployment-analysis-history', JSON.stringify(updated))
+      return updated
+    })
+  }, [])
+
+  // 清空历史记录
+  const handleClearHistory = useCallback(() => {
+    localStorage.setItem('llm-deployment-analysis-history', '[]')
+    setAnalysisHistory([])
+  }, [])
+
+  // 同步 DeploymentAnalysisPanel 传递过来的数据
   const prevResultRef = useRef<typeof deploymentAnalysisData>(null)
   useEffect(() => {
     // 当从无结果变为有结果时，自动切换到分析视图
     if (deploymentAnalysisData?.result && !prevResultRef.current?.result) {
       setViewMode('analysis')
+      setAnalysisViewMode('detail')
+    }
+    // 同步历史记录（仅当面板存在时）
+    // 注意：viewMode 不在这里同步，因为它可能会被 modelConfig 变化意外重置
+    // viewMode 只应该在用户主动操作时更新（点击分析、加载历史等）
+    if (deploymentAnalysisData) {
+      if (deploymentAnalysisData.history) {
+        setAnalysisHistory(deploymentAnalysisData.history)
+      }
     }
     prevResultRef.current = deploymentAnalysisData
   }, [deploymentAnalysisData])
@@ -630,7 +690,7 @@ const App: React.FC = () => {
             options={[
               { value: '3d', label: '3D视图' },
               { value: 'topology', label: '拓扑图' },
-              ...(deploymentAnalysisData ? [{ value: 'analysis', label: '部署分析' }] : []),
+              { value: 'analysis', label: '部署分析' },
             ]}
           />
           <span style={{ color: '#999999', fontSize: 12 }}>v{__APP_VERSION__}</span>
@@ -814,52 +874,37 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 分析结果/历史记录 - 始终显示 */}
-                {deploymentAnalysisData && (
-                  <div style={{
-                    background: '#fff',
-                    borderRadius: 12,
-                    padding: 20,
-                    marginBottom: 16,
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-                  }}>
-                    <AnalysisResultDisplay
-                      result={deploymentAnalysisData.result}
-                      topKPlans={deploymentAnalysisData.topKPlans}
-                      loading={deploymentAnalysisData.loading}
-                      onSelectPlan={deploymentAnalysisData.onSelectPlan}
-                      searchStats={deploymentAnalysisData.searchStats}
-                      errorMsg={deploymentAnalysisData.errorMsg}
-                      viewMode={deploymentAnalysisData.viewMode}
-                      onViewModeChange={deploymentAnalysisData.onViewModeChange}
-                      history={deploymentAnalysisData.history}
-                      onLoadFromHistory={deploymentAnalysisData.onLoadFromHistory}
-                      onDeleteHistory={deploymentAnalysisData.onDeleteHistory}
-                      onClearHistory={deploymentAnalysisData.onClearHistory}
-                      canMapToTopology={deploymentAnalysisData.canMapToTopology}
-                      onMapToTopology={deploymentAnalysisData.onMapToTopology}
-                      onClearTraffic={deploymentAnalysisData.onClearTraffic}
-                    />
-                  </div>
-                )}
+                {/* 分析结果/历史记录 - 使用 App 级别的状态和回调确保始终可交互 */}
+                <AnalysisResultDisplay
+                  result={deploymentAnalysisData?.result ?? null}
+                  topKPlans={deploymentAnalysisData?.topKPlans ?? []}
+                  loading={deploymentAnalysisData?.loading ?? false}
+                  onSelectPlan={deploymentAnalysisData?.onSelectPlan}
+                  searchStats={deploymentAnalysisData?.searchStats ?? null}
+                  errorMsg={deploymentAnalysisData?.errorMsg ?? null}
+                  viewMode={analysisViewMode}
+                  onViewModeChange={setAnalysisViewMode}
+                  history={analysisHistory}
+                  onLoadFromHistory={handleLoadFromHistory}
+                  onDeleteHistory={handleDeleteHistory}
+                  onClearHistory={handleClearHistory}
+                  canMapToTopology={deploymentAnalysisData?.canMapToTopology}
+                  onMapToTopology={deploymentAnalysisData?.onMapToTopology}
+                  onClearTraffic={deploymentAnalysisData?.onClearTraffic}
+                  model={deploymentAnalysisData?.model}
+                  inference={deploymentAnalysisData?.inference}
+                />
 
                 {/* 图表区域 - 仅在详情视图且有结果时显示 */}
-                {deploymentAnalysisData?.result && deploymentAnalysisData.viewMode === 'detail' && (
-                  <>
-                    <ChartsPanel
-                      result={deploymentAnalysisData.result}
-                      topKPlans={deploymentAnalysisData.topKPlans}
-                      hardware={deploymentAnalysisData.hardware}
-                      model={deploymentAnalysisData.model}
-                      inference={deploymentAnalysisData.inference}
-                      topology={topology}
-                    />
-
-                    {/* 评分规则（折叠） */}
-                    <div style={{ marginTop: 16 }}>
-                      <ScoringRulesCard />
-                    </div>
-                  </>
+                {deploymentAnalysisData?.result && analysisViewMode === 'detail' && (
+                  <ChartsPanel
+                    result={deploymentAnalysisData.result}
+                    topKPlans={deploymentAnalysisData.topKPlans}
+                    hardware={deploymentAnalysisData.hardware}
+                    model={deploymentAnalysisData.model}
+                    inference={deploymentAnalysisData.inference}
+                    topology={topology}
+                  />
                 )}
               </div>
             </div>

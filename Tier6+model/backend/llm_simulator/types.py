@@ -47,6 +47,23 @@ class GanttTaskType(str, Enum):
     PP_COMM = "pp_comm"
     EP_COMM = "ep_comm"
 
+    # MLA细粒度 (DeepSeek特有)
+    RMSNORM_Q_LORA = "rmsnorm_q_lora"
+    RMSNORM_KV_LORA = "rmsnorm_kv_lora"
+    MM_Q_LORA_A = "mm_q_lora_a"
+    MM_Q_LORA_B = "mm_q_lora_b"
+    MM_KV_LORA_A = "mm_kv_lora_a"
+    ATTN_FC = "attn_fc"
+    BMM_QK = "bmm_qk"
+    BMM_SV = "bmm_sv"
+
+    # MoE (DeepSeek, Qwen-MoE, Mixtral等)
+    MOE_GATE = "moe_gate"
+    MOE_EXPERT = "moe_expert"
+    MOE_SHARED_EXPERT = "moe_shared_expert"
+    EP_DISPATCH = "ep_dispatch"
+    EP_COMBINE = "ep_combine"
+
     # 其他
     BUBBLE = "bubble"
     IDLE = "idle"

@@ -605,6 +605,393 @@ def calc_mla_output_latency(
     return max(compute_time, memory_time)
 
 
+# ============================================
+# MLA 细粒度操作延迟计算 - DeepSeek V3 数据流对标
+# ============================================
+
+def calc_rmsnorm_q_lora_latency(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    hardware: HardwareConfig,
+    num_tokens: int,
+) -> float:
+    """
+    计算 RMSNorm_q_lora 延迟 (Q LoRA 投影前的 RMSNorm)
+
+    作用于 hidden_size 维度，为 Q 投影做归一化
+    FLOPS = 3 * B * S * H (square + mean + normalize)
+    """
+    flops = 3 * inference.batch_size * num_tokens * model.hidden_size
+    tflops = flops / 1e12
+    compute_time = tflops / hardware.chip.compute_tflops_fp16 * 1000
+
+    bytes_per_elem = get_bytes_per_element(model.dtype)
+    data_bytes = inference.batch_size * num_tokens * model.hidden_size * bytes_per_elem * 2
+    data_gb = data_bytes / (1024 ** 3)
+    memory_time = calc_hbm_read_latency(data_gb, hardware)
+
+    return max(memory_time, compute_time)
+
+
+def calc_rmsnorm_kv_lora_latency(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    hardware: HardwareConfig,
+    num_tokens: int,
+) -> float:
+    """
+    计算 RMSNorm_kv_lora 延迟 (KV LoRA 投影前的 RMSNorm)
+
+    作用于 hidden_size 维度，为 KV 压缩做归一化
+    """
+    return calc_rmsnorm_q_lora_latency(model, inference, parallelism, hardware, num_tokens)
+
+
+def calc_mm_q_lora_a_latency(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    hardware: HardwareConfig,
+    num_tokens: int,
+) -> float:
+    """
+    计算 mm_q_lora_a 延迟 (Q LoRA 下投影)
+
+    矩阵乘法: hidden_size -> q_lora_rank (压缩)
+    FLOPS = 2 * B * S * H * q_lora_rank / TP
+    """
+    if model.mla_config is None:
+        return 0.0
+
+    mla = model.mla_config
+    bytes_per_elem = get_bytes_per_element(model.dtype)
+
+    flops = 2 * inference.batch_size * num_tokens * model.hidden_size * mla.q_lora_rank / parallelism.tp
+    tflops = flops / 1e12
+    compute_time = tflops / hardware.chip.compute_tflops_fp16 * 1000
+
+    weight_bytes = model.hidden_size * mla.q_lora_rank * bytes_per_elem / parallelism.tp
+    io_bytes = inference.batch_size * num_tokens * (model.hidden_size + mla.q_lora_rank) * bytes_per_elem
+    data_gb = (weight_bytes + io_bytes) / (1024 ** 3)
+    memory_time = calc_hbm_read_latency(data_gb, hardware)
+
+    return max(compute_time, memory_time)
+
+
+def calc_mm_q_lora_b_latency(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    hardware: HardwareConfig,
+    num_tokens: int,
+) -> float:
+    """
+    计算 mm_q_lora_b 延迟 (Q LoRA 上投影)
+
+    矩阵乘法: q_lora_rank -> num_heads * (qk_nope_dim + qk_rope_dim) (解压)
+    FLOPS = 2 * B * S * q_lora_rank * Q_total_dim / TP
+    """
+    if model.mla_config is None:
+        return 0.0
+
+    mla = model.mla_config
+    bytes_per_elem = get_bytes_per_element(model.dtype)
+
+    q_head_dim = mla.qk_nope_head_dim + mla.qk_rope_head_dim
+    q_total_dim = model.num_attention_heads * q_head_dim // parallelism.tp
+
+    flops = 2 * inference.batch_size * num_tokens * mla.q_lora_rank * q_total_dim
+    tflops = flops / 1e12
+    compute_time = tflops / hardware.chip.compute_tflops_fp16 * 1000
+
+    weight_bytes = mla.q_lora_rank * q_total_dim * bytes_per_elem
+    io_bytes = inference.batch_size * num_tokens * (mla.q_lora_rank + q_total_dim) * bytes_per_elem
+    data_gb = (weight_bytes + io_bytes) / (1024 ** 3)
+    memory_time = calc_hbm_read_latency(data_gb, hardware)
+
+    return max(compute_time, memory_time)
+
+
+def calc_mm_kv_lora_a_latency(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    hardware: HardwareConfig,
+    num_tokens: int,
+) -> float:
+    """
+    计算 mm_kv_lora_a 延迟 (KV LoRA 压缩)
+
+    矩阵乘法: hidden_size -> kv_lora_rank (压缩)
+    这是 MLA 的关键优化点，压缩后的 KV 直接缓存
+    FLOPS = 2 * B * S * H * kv_lora_rank / TP
+    """
+    return calc_mla_kv_compression_latency(model, inference, parallelism, hardware, num_tokens)
+
+
+def calc_bmm_qk_latency(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    hardware: HardwareConfig,
+    num_tokens: int,
+    context_length: int,
+) -> float:
+    """
+    计算 bmm Q@K^T 延迟 (批量矩阵乘)
+
+    FLOPS = 2 * B * heads * S * C * head_dim / TP
+    """
+    if model.mla_config is not None:
+        return calc_mla_attention_score_latency(
+            model, inference, parallelism, hardware, num_tokens, context_length
+        )
+    return calc_attention_score_latency(
+        model, inference, parallelism, hardware, num_tokens, context_length
+    )
+
+
+def calc_bmm_sv_latency(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    hardware: HardwareConfig,
+    num_tokens: int,
+    context_length: int,
+) -> float:
+    """
+    计算 bmm Score@V 延迟 (批量矩阵乘)
+
+    FLOPS = 2 * B * heads * S * C * v_head_dim / TP
+    """
+    bytes_per_elem = get_bytes_per_element(model.dtype)
+    num_heads_per_tp = model.num_attention_heads // parallelism.tp
+
+    if model.mla_config is not None:
+        v_head_dim = model.mla_config.v_head_dim
+    else:
+        v_head_dim = model.hidden_size // model.num_attention_heads
+
+    flops = 2 * inference.batch_size * num_heads_per_tp * num_tokens * context_length * v_head_dim
+    tflops = flops / 1e12
+    compute_time = tflops / hardware.chip.compute_tflops_fp16 * 1000
+
+    score_bytes = inference.batch_size * num_heads_per_tp * num_tokens * context_length * bytes_per_elem
+    v_bytes = inference.batch_size * num_heads_per_tp * context_length * v_head_dim * bytes_per_elem
+    output_bytes = inference.batch_size * num_heads_per_tp * num_tokens * v_head_dim * bytes_per_elem
+    data_gb = (score_bytes + v_bytes + output_bytes) / (1024 ** 3)
+    memory_time = calc_hbm_read_latency(data_gb, hardware)
+
+    return max(compute_time, memory_time)
+
+
+def calc_attn_fc_latency(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    hardware: HardwareConfig,
+    num_tokens: int,
+) -> float:
+    """
+    计算 attn_fc 延迟 (注意力输出投影 wo)
+
+    矩阵乘法: num_heads * v_head_dim -> hidden_size
+    FLOPS = 2 * B * S * (heads * v_dim) * H / TP
+    """
+    bytes_per_elem = get_bytes_per_element(model.dtype)
+
+    if model.mla_config is not None:
+        input_dim = model.num_attention_heads * model.mla_config.v_head_dim
+    else:
+        input_dim = model.hidden_size
+
+    flops = 2 * inference.batch_size * num_tokens * input_dim * model.hidden_size / parallelism.tp
+    tflops = flops / 1e12
+    compute_time = tflops / hardware.chip.compute_tflops_fp16 * 1000
+
+    weight_bytes = input_dim * model.hidden_size * bytes_per_elem / parallelism.tp
+    io_bytes = inference.batch_size * num_tokens * (input_dim + model.hidden_size) * bytes_per_elem
+    data_gb = (weight_bytes + io_bytes) / (1024 ** 3)
+    memory_time = calc_hbm_read_latency(data_gb, hardware)
+
+    return max(compute_time, memory_time)
+
+
+# ============================================
+# MoE (Mixture of Experts) 延迟计算
+# ============================================
+
+def calc_moe_gate_latency(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    hardware: HardwareConfig,
+    num_tokens: int,
+) -> float:
+    """
+    计算 MoE Gate (路由网络) 延迟
+
+    矩阵乘法: hidden_size -> num_experts + Sigmoid
+    FLOPS = 2 * B * S * H * num_experts + B * S * num_experts (sigmoid)
+    """
+    if model.moe_config is None:
+        return 0.0
+
+    moe = model.moe_config
+    bytes_per_elem = get_bytes_per_element(model.dtype)
+
+    # 路由计算: hidden -> num_experts
+    flops_mm = 2 * inference.batch_size * num_tokens * model.hidden_size * moe.num_experts
+    # Sigmoid 激活
+    flops_sigmoid = inference.batch_size * num_tokens * moe.num_experts
+    total_flops = flops_mm + flops_sigmoid
+    tflops = total_flops / 1e12
+    compute_time = tflops / hardware.chip.compute_tflops_fp16 * 1000
+
+    # 内存访问
+    weight_bytes = model.hidden_size * moe.num_experts * bytes_per_elem
+    io_bytes = inference.batch_size * num_tokens * (model.hidden_size + moe.num_experts) * bytes_per_elem
+    data_gb = (weight_bytes + io_bytes) / (1024 ** 3)
+    memory_time = calc_hbm_read_latency(data_gb, hardware)
+
+    return max(compute_time, memory_time)
+
+
+def calc_moe_expert_ffn_latency(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    hardware: HardwareConfig,
+    num_tokens: int,
+) -> float:
+    """
+    计算 MoE 路由专家 FFN 延迟 (单个专家)
+
+    每个专家处理 num_tokens * num_experts_per_tok / num_experts 个 token
+    FLOPS = 2 * tokens_per_expert * H * expert_intermediate * 3 (gate+up+down)
+    """
+    if model.moe_config is None:
+        return calc_ffn_gate_latency(model, inference, parallelism, hardware, num_tokens)
+
+    moe = model.moe_config
+    bytes_per_elem = get_bytes_per_element(model.dtype)
+
+    # 每个专家处理的 token 数 (考虑 EP 并行)
+    total_tokens = inference.batch_size * num_tokens
+    tokens_per_expert = total_tokens * moe.num_experts_per_tok / moe.num_experts
+    tokens_per_expert_per_ep = tokens_per_expert / parallelism.ep
+
+    # 专家 FFN 中间维度 (如果配置了使用配置值，否则使用模型默认)
+    expert_intermediate = moe.expert_intermediate_size if moe.expert_intermediate_size > 0 else model.intermediate_size
+
+    # Gate + Up + Down 三个矩阵乘法
+    flops_gate = 2 * tokens_per_expert_per_ep * model.hidden_size * expert_intermediate
+    flops_up = 2 * tokens_per_expert_per_ep * model.hidden_size * expert_intermediate
+    flops_down = 2 * tokens_per_expert_per_ep * expert_intermediate * model.hidden_size
+    total_flops = flops_gate + flops_up + flops_down
+    tflops = total_flops / 1e12
+    compute_time = tflops / hardware.chip.compute_tflops_fp16 * 1000
+
+    # 内存访问 (权重 + IO)
+    weight_bytes = 3 * model.hidden_size * expert_intermediate * bytes_per_elem
+    io_bytes = tokens_per_expert_per_ep * (model.hidden_size * 2 + expert_intermediate) * bytes_per_elem
+    data_gb = (weight_bytes + io_bytes) / (1024 ** 3)
+    memory_time = calc_hbm_read_latency(data_gb, hardware)
+
+    return max(compute_time, memory_time)
+
+
+def calc_moe_shared_expert_latency(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    hardware: HardwareConfig,
+    num_tokens: int,
+) -> float:
+    """
+    计算 MoE 共享专家 FFN 延迟
+
+    共享专家处理所有 token，使用标准 FFN 计算
+    DeepSeek V3: 1 个共享专家
+    """
+    if model.moe_config is None or model.moe_config.num_shared_experts == 0:
+        return 0.0
+
+    # 共享专家使用标准 FFN 结构
+    return calc_ffn_gate_latency(model, inference, parallelism, hardware, num_tokens) + \
+           calc_ffn_up_latency(model, inference, parallelism, hardware, num_tokens) + \
+           calc_ffn_down_latency(model, inference, parallelism, hardware, num_tokens)
+
+
+def calc_ep_dispatch_latency(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    hardware: HardwareConfig,
+    num_tokens: int,
+    ep_bandwidth_gbps: float,
+    ep_latency_us: float,
+) -> float:
+    """
+    计算 EP Dispatch (Token 分发) 延迟
+
+    All2All 通信: 每个芯片将 token 发送到对应专家所在的芯片
+    数据量 = B * S * H * bytes * num_experts_per_tok
+    """
+    if model.moe_config is None or parallelism.ep <= 1:
+        return 0.0
+
+    moe = model.moe_config
+    bytes_per_elem = get_bytes_per_element(model.dtype)
+
+    # 每个 token 发送到 num_experts_per_tok 个专家
+    data_bytes = inference.batch_size * num_tokens * model.hidden_size * bytes_per_elem * moe.num_experts_per_tok
+    data_gb = data_bytes / (1024 ** 3)
+
+    return calc_ep_alltoall_latency(data_gb, ep_bandwidth_gbps, ep_latency_us, parallelism.ep)
+
+
+def calc_ep_combine_latency(
+    model: LLMModelConfig,
+    inference: InferenceConfig,
+    parallelism: ParallelismStrategy,
+    hardware: HardwareConfig,
+    num_tokens: int,
+    ep_bandwidth_gbps: float,
+    ep_latency_us: float,
+) -> float:
+    """
+    计算 EP Combine (结果收集) 延迟
+
+    All2All 通信: 每个芯片收集专家计算结果
+    数据量与 Dispatch 相同
+    """
+    return calc_ep_dispatch_latency(
+        model, inference, parallelism, hardware, num_tokens,
+        ep_bandwidth_gbps, ep_latency_us
+    )
+
+
+def is_moe_layer(layer_index: int, model: LLMModelConfig) -> bool:
+    """
+    判断是否为 MoE 层
+
+    DeepSeek V3: layer 0-2 使用密集 FFN，layer 3+ 使用 MoE
+    其他 MoE 模型: 所有层都使用 MoE
+    """
+    if model.moe_config is None:
+        return False
+
+    # DeepSeek V3 特殊规则: 前3层是密集FFN
+    if model.model_name and "deepseek" in model.model_name.lower():
+        return layer_index >= 3
+
+    # 其他 MoE 模型: 所有层都是 MoE
+    return True
+
+
 def calc_ffn_gate_latency(
     model: LLMModelConfig,
     inference: InferenceConfig,

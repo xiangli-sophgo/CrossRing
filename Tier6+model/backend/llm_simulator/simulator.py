@@ -19,7 +19,7 @@ from .types import (
     SimulationResult, SimulationStats, PhaseTimeStats,
     GanttTaskType, InferencePhase,
     get_bytes_per_element,
-    MLAConfig,
+    MLAConfig, MoEConfig,
 )
 from .topology import TopologyParser
 from .latency import (
@@ -35,6 +35,13 @@ from .latency import (
     calc_mla_q_projection_latency, calc_mla_kv_compression_latency,
     calc_mla_attention_score_latency, calc_mla_output_latency,
     calc_mla_kv_cache_read_latency, calc_mla_kv_cache_write_latency,
+    # MLA 细粒度
+    calc_rmsnorm_q_lora_latency, calc_rmsnorm_kv_lora_latency,
+    calc_mm_q_lora_a_latency, calc_mm_q_lora_b_latency, calc_mm_kv_lora_a_latency,
+    calc_bmm_qk_latency, calc_bmm_sv_latency, calc_attn_fc_latency,
+    # MoE
+    calc_moe_gate_latency, calc_moe_expert_ffn_latency, calc_moe_shared_expert_latency,
+    calc_ep_dispatch_latency, calc_ep_combine_latency, is_moe_layer,
     # Kernel Fusion
     calc_fused_layernorm_qkv_latency, calc_fused_ffn_gate_up_latency,
     calc_single_layer_latency_fused, OVERLAP_COEFFICIENTS,
@@ -117,6 +124,16 @@ class LLMInferenceSimulator:
         else:
             self.pp_bandwidth = hardware.cluster.inter_node_bandwidth_gbps
             self.pp_latency = hardware.cluster.inter_node_latency_us
+
+        # 获取 EP 组的链路参数 (MoE Expert Parallelism)
+        if self.group_assignment.ep_groups and len(self.group_assignment.ep_groups[0]) > 1:
+            self.ep_bandwidth, self.ep_latency = self.topo_parser.get_link_params_for_group(
+                self.group_assignment.ep_groups[0], 'alltoall'
+            )
+        else:
+            # 默认使用节点内带宽 (EP 通常在节点内)
+            self.ep_bandwidth = hardware.node.intra_node_bandwidth_gbps
+            self.ep_latency = hardware.node.intra_node_latency_us
 
         # 甘特图构建器
         self.gantt_builder = GanttChartBuilder(parallelism)
@@ -520,37 +537,103 @@ class LLMInferenceSimulator:
             )
             current_time += ln2_latency
 
-            # FFN Gate
-            gate_latency = calc_ffn_gate_latency(
-                self.model, self.inference, self.parallelism, self.hardware, num_tokens
-            )
-            self.gantt_builder.add_compute_task(
-                GanttTaskType.FFN_GATE, current_time, gate_latency,
-                phase, chip_id, pp_stage, layer_index, token_index
-            )
-            current_time += gate_latency
+            # 判断是否为 MoE 层
+            is_moe = is_moe_layer(layer_index, self.model)
 
-            # FFN Up
-            up_latency = calc_ffn_up_latency(
-                self.model, self.inference, self.parallelism, self.hardware, num_tokens
-            )
-            self.gantt_builder.add_compute_task(
-                GanttTaskType.FFN_UP, current_time, up_latency,
-                phase, chip_id, pp_stage, layer_index, token_index
-            )
-            current_time += up_latency
+            if is_moe:
+                # ========== MoE 层 ==========
+                # MoE Gate (路由网络)
+                gate_latency = calc_moe_gate_latency(
+                    self.model, self.inference, self.parallelism, self.hardware, num_tokens
+                )
+                self.gantt_builder.add_compute_task(
+                    GanttTaskType.MOE_GATE, current_time, gate_latency,
+                    phase, chip_id, pp_stage, layer_index, token_index
+                )
+                current_time += gate_latency
 
-            # FFN Down
-            down_latency = calc_ffn_down_latency(
-                self.model, self.inference, self.parallelism, self.hardware, num_tokens
-            )
-            self.gantt_builder.add_compute_task(
-                GanttTaskType.FFN_DOWN, current_time, down_latency,
-                phase, chip_id, pp_stage, layer_index, token_index
-            )
-            current_time += down_latency
+                # EP Dispatch (Token 分发)
+                if self.parallelism.ep > 1:
+                    dispatch_latency = calc_ep_dispatch_latency(
+                        self.model, self.inference, self.parallelism, self.hardware,
+                        num_tokens, self.ep_bandwidth, self.ep_latency
+                    )
+                    self.gantt_builder.add_comm_task(
+                        GanttTaskType.EP_DISPATCH, current_time, dispatch_latency,
+                        phase, chip_id, pp_stage, layer_index, token_index
+                    )
+                    current_time += dispatch_latency
 
-            # TP AllReduce (FFN)
+                # MoE Expert FFN (路由专家)
+                expert_latency = calc_moe_expert_ffn_latency(
+                    self.model, self.inference, self.parallelism, self.hardware, num_tokens
+                )
+                self.gantt_builder.add_compute_task(
+                    GanttTaskType.MOE_EXPERT, current_time, expert_latency,
+                    phase, chip_id, pp_stage, layer_index, token_index
+                )
+                current_time += expert_latency
+
+                # MoE Shared Expert (共享专家, 并行计算)
+                if self.model.moe_config and self.model.moe_config.num_shared_experts > 0:
+                    shared_latency = calc_moe_shared_expert_latency(
+                        self.model, self.inference, self.parallelism, self.hardware, num_tokens
+                    )
+                    # 共享专家与路由专家并行，取较大值
+                    # 这里简化处理：假设共享专家在路由专家之后开始，但可以部分重叠
+                    overlap_ratio = 0.5  # 50% 重叠
+                    effective_shared_latency = shared_latency * (1 - overlap_ratio)
+                    self.gantt_builder.add_compute_task(
+                        GanttTaskType.MOE_SHARED_EXPERT, current_time, effective_shared_latency,
+                        phase, chip_id, pp_stage, layer_index, token_index
+                    )
+                    current_time += effective_shared_latency
+
+                # EP Combine (结果收集)
+                if self.parallelism.ep > 1:
+                    combine_latency = calc_ep_combine_latency(
+                        self.model, self.inference, self.parallelism, self.hardware,
+                        num_tokens, self.ep_bandwidth, self.ep_latency
+                    )
+                    self.gantt_builder.add_comm_task(
+                        GanttTaskType.EP_COMBINE, current_time, combine_latency,
+                        phase, chip_id, pp_stage, layer_index, token_index
+                    )
+                    current_time += combine_latency
+
+            else:
+                # ========== 普通 Dense FFN 层 ==========
+                # FFN Gate
+                gate_latency = calc_ffn_gate_latency(
+                    self.model, self.inference, self.parallelism, self.hardware, num_tokens
+                )
+                self.gantt_builder.add_compute_task(
+                    GanttTaskType.FFN_GATE, current_time, gate_latency,
+                    phase, chip_id, pp_stage, layer_index, token_index
+                )
+                current_time += gate_latency
+
+                # FFN Up
+                up_latency = calc_ffn_up_latency(
+                    self.model, self.inference, self.parallelism, self.hardware, num_tokens
+                )
+                self.gantt_builder.add_compute_task(
+                    GanttTaskType.FFN_UP, current_time, up_latency,
+                    phase, chip_id, pp_stage, layer_index, token_index
+                )
+                current_time += up_latency
+
+                # FFN Down
+                down_latency = calc_ffn_down_latency(
+                    self.model, self.inference, self.parallelism, self.hardware, num_tokens
+                )
+                self.gantt_builder.add_compute_task(
+                    GanttTaskType.FFN_DOWN, current_time, down_latency,
+                    phase, chip_id, pp_stage, layer_index, token_index
+                )
+                current_time += down_latency
+
+            # TP AllReduce (FFN/MoE 输出)
             if self.parallelism.tp > 1:
                 tp_comm_latency = self._calc_tp_allreduce_latency(num_tokens)
                 self.gantt_builder.add_comm_task(
@@ -795,6 +878,18 @@ def run_simulation(
             v_head_dim=mla_dict["v_head_dim"],
         )
 
+    # 解析 MoE 配置 (DeepSeek, Mixtral, Qwen-MoE)
+    moe_config = None
+    moe_dict = model_dict.get("moe_config")
+    if moe_dict:
+        moe_config = MoEConfig(
+            num_experts=moe_dict["num_experts"],
+            num_experts_per_tok=moe_dict["num_experts_per_tok"],
+            expert_capacity_factor=moe_dict.get("expert_capacity_factor", 1.0),
+            num_shared_experts=moe_dict.get("num_shared_experts", 0),
+            expert_intermediate_size=moe_dict.get("expert_intermediate_size", 0),
+        )
+
     # 解析配置
     model = LLMModelConfig(
         model_name=model_dict.get("model_name", "Unknown"),
@@ -809,6 +904,7 @@ def run_simulation(
         max_seq_length=model_dict.get("max_seq_length", 4096),
         attention_type=model_dict.get("attention_type", "gqa"),
         mla_config=mla_config,
+        moe_config=moe_config,
     )
 
     inference = InferenceConfig(

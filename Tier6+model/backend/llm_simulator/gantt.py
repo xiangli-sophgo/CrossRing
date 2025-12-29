@@ -43,6 +43,23 @@ TASK_COLORS = {
     GanttTaskType.PP_COMM: "#722ed1",
     GanttTaskType.EP_COMM: "#eb2f96",
 
+    # MLA细粒度 - 青色系 (DeepSeek特有)
+    GanttTaskType.RMSNORM_Q_LORA: "#13c2c2",
+    GanttTaskType.RMSNORM_KV_LORA: "#36cfc9",
+    GanttTaskType.MM_Q_LORA_A: "#5cdbd3",
+    GanttTaskType.MM_Q_LORA_B: "#87e8de",
+    GanttTaskType.MM_KV_LORA_A: "#b5f5ec",
+    GanttTaskType.ATTN_FC: "#08979c",
+    GanttTaskType.BMM_QK: "#006d75",
+    GanttTaskType.BMM_SV: "#00474f",
+
+    # MoE - 品红/紫色系
+    GanttTaskType.MOE_GATE: "#f759ab",
+    GanttTaskType.MOE_EXPERT: "#eb2f96",
+    GanttTaskType.MOE_SHARED_EXPERT: "#c41d7f",
+    GanttTaskType.EP_DISPATCH: "#9254de",
+    GanttTaskType.EP_COMBINE: "#722ed1",
+
     # 其他
     GanttTaskType.BUBBLE: "#ff4d4f",
     GanttTaskType.IDLE: "#d9d9d9",
@@ -77,6 +94,23 @@ TASK_LABELS = {
     GanttTaskType.TP_COMM: "TP 通信",
     GanttTaskType.PP_COMM: "PP 通信",
     GanttTaskType.EP_COMM: "EP 通信",
+
+    # MLA细粒度 (DeepSeek特有)
+    GanttTaskType.RMSNORM_Q_LORA: "RMSNorm Q",
+    GanttTaskType.RMSNORM_KV_LORA: "RMSNorm KV",
+    GanttTaskType.MM_Q_LORA_A: "Q LoRA↓",
+    GanttTaskType.MM_Q_LORA_B: "Q LoRA↑",
+    GanttTaskType.MM_KV_LORA_A: "KV Compress",
+    GanttTaskType.ATTN_FC: "Attn FC",
+    GanttTaskType.BMM_QK: "BMM QK",
+    GanttTaskType.BMM_SV: "BMM SV",
+
+    # MoE
+    GanttTaskType.MOE_GATE: "MoE Gate",
+    GanttTaskType.MOE_EXPERT: "Expert FFN",
+    GanttTaskType.MOE_SHARED_EXPERT: "Shared Expert",
+    GanttTaskType.EP_DISPATCH: "EP Dispatch",
+    GanttTaskType.EP_COMBINE: "EP Combine",
 
     GanttTaskType.BUBBLE: "气泡",
     GanttTaskType.IDLE: "空闲",
@@ -151,7 +185,8 @@ class GanttChartBuilder:
         self._task_counter += 1
 
         # 确定资源行
-        if task_type in (GanttTaskType.TP_COMM, GanttTaskType.PP_COMM, GanttTaskType.EP_COMM):
+        if task_type in (GanttTaskType.TP_COMM, GanttTaskType.PP_COMM, GanttTaskType.EP_COMM,
+                         GanttTaskType.EP_DISPATCH, GanttTaskType.EP_COMBINE):
             resource = f"stage{pp_stage}_network"
         else:
             resource = f"stage{pp_stage}_compute"

@@ -1,26 +1,26 @@
 /**
  * 甘特图组件 - 展示 LLM 推理时序
  *
- * 性能优化版：
- * - 使用事件委托代替单独事件处理
- * - 单一悬浮提示框，无 Tooltip 包装器
- * - 移除过渡动画
+ * 优化版：
+ * - 任务聚合：当任务过多时按时间窗口聚合显示
+ * - 缩放功能：支持滚轮缩放和拖拽平移
+ * - 自适应宽度：响应容器宽度变化
  */
 
-import React, { useMemo, useState, useCallback, useRef } from 'react'
-import { Empty, Typography } from 'antd'
-import type { GanttChartData, GanttTask, GanttTaskType } from '../../../../utils/llmDeployment/simulation/types'
+import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react'
+import { Empty, Typography, Button, Space, Tooltip } from 'antd'
+import { ZoomInOutlined, ZoomOutOutlined, ReloadOutlined } from '@ant-design/icons'
+import type { GanttChartData, GanttTask } from '../../../../utils/llmDeployment/simulation/types'
 
 const { Text } = Typography
 
 interface GanttChartProps {
   data: GanttChartData | null
-  height?: number
   showLegend?: boolean
 }
 
 /** 任务类型颜色映射 */
-const TASK_COLORS: Record<GanttTaskType, string> = {
+const TASK_COLORS: Record<string, string> = {
   // 计算任务 - 绿色系
   compute: '#52c41a',
   embedding: '#73d13d',
@@ -45,13 +45,28 @@ const TASK_COLORS: Record<GanttTaskType, string> = {
   tp_comm: '#1890ff',
   pp_comm: '#722ed1',
   ep_comm: '#eb2f96',
+  // MLA - 青色系
+  rmsnorm_q_lora: '#13c2c2',
+  rmsnorm_kv_lora: '#36cfc9',
+  mm_q_lora_a: '#5cdbd3',
+  mm_q_lora_b: '#87e8de',
+  mm_kv_lora_a: '#b5f5ec',
+  attn_fc: '#08979c',
+  bmm_qk: '#006d75',
+  bmm_sv: '#00474f',
+  // MoE - 品红色系
+  moe_gate: '#f759ab',
+  moe_expert: '#eb2f96',
+  moe_shared_expert: '#c41d7f',
+  ep_dispatch: '#9254de',
+  ep_combine: '#722ed1',
   // 其他
   bubble: '#ff4d4f',
   idle: '#d9d9d9',
 }
 
 /** 任务类型标签 */
-const TASK_LABELS: Record<GanttTaskType, string> = {
+const TASK_LABELS: Record<string, string> = {
   compute: '计算',
   embedding: 'Embed',
   layernorm: 'LN',
@@ -73,88 +88,271 @@ const TASK_LABELS: Record<GanttTaskType, string> = {
   tp_comm: 'TP',
   pp_comm: 'PP',
   ep_comm: 'EP',
+  moe_gate: 'MoE Gate',
+  moe_expert: 'Expert',
+  moe_shared_expert: 'Shared',
+  ep_dispatch: 'Dispatch',
+  ep_combine: 'Combine',
   bubble: '气泡',
   idle: '空闲',
 }
 
 /** 图例分组配置 */
 const LEGEND_GROUPS = [
-  {
-    name: '计算',
-    types: ['compute', 'attention_qkv', 'ffn_gate', 'lm_head'] as GanttTaskType[],
-  },
-  {
-    name: '数据搬运',
-    types: ['pcie_h2d', 'weight_load', 'kv_cache_read'] as GanttTaskType[],
-  },
-  {
-    name: '通信',
-    types: ['tp_comm', 'pp_comm', 'ep_comm'] as GanttTaskType[],
-  },
-  {
-    name: '其他',
-    types: ['bubble', 'idle'] as GanttTaskType[],
-  },
+  { name: '计算', types: ['compute', 'attention_qkv', 'ffn_gate', 'lm_head'] },
+  { name: '数据搬运', types: ['pcie_h2d', 'weight_load', 'kv_cache_read'] },
+  { name: '通信', types: ['tp_comm', 'pp_comm', 'ep_comm'] },
+  { name: 'MoE', types: ['moe_gate', 'moe_expert', 'ep_dispatch'] },
+  { name: '其他', types: ['bubble', 'idle'] },
 ]
 
 /** 图表边距 */
-const MARGIN = { top: 30, right: 20, bottom: 25, left: 100 }
+const MARGIN = { top: 25, right: 20, bottom: 25, left: 80 }
+
+/** 滚动条高度 */
+const SCROLLBAR_HEIGHT = 10
 
 /** 资源行高度 */
-const ROW_HEIGHT = 24
+const ROW_HEIGHT = 28
 
 /** 任务条高度 */
-const BAR_HEIGHT = 18
+const BAR_HEIGHT = 22
+
+/** 聚合后的任务段 */
+interface AggregatedSegment {
+  binIndex: number
+  resourceId: string
+  startTime: number
+  endTime: number
+  typeBreakdown: Map<string, number> // 各类型占比
+  taskCount: number
+  tasks: GanttTask[] // 原始任务引用
+}
 
 /** 悬浮提示框样式 */
 const tooltipStyle: React.CSSProperties = {
   position: 'fixed',
-  background: 'rgba(0, 0, 0, 0.85)',
+  background: 'rgba(0, 0, 0, 0.9)',
   color: '#fff',
-  padding: '8px 12px',
-  borderRadius: 6,
+  padding: '10px 14px',
+  borderRadius: 8,
   fontSize: 12,
-  lineHeight: 1.5,
+  lineHeight: 1.6,
   pointerEvents: 'none',
   zIndex: 1000,
-  maxWidth: 250,
-  boxShadow: '0 3px 6px -4px rgba(0,0,0,0.12), 0 6px 16px 0 rgba(0,0,0,0.08)',
+  maxWidth: 300,
+  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
 }
 
 export const GanttChart: React.FC<GanttChartProps> = ({
   data,
-  height = 300,
   showLegend = true,
 }) => {
-  const [tooltip, setTooltip] = useState<{ task: GanttTask; x: number; y: number } | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [containerWidth, setContainerWidth] = useState(0)
+  const [tooltip, setTooltip] = useState<{ segment: AggregatedSegment; x: number; y: number } | null>(null)
+
+  // 缩放和平移状态
+  const [zoom, setZoom] = useState(1)
+  const [panOffset, setPanOffset] = useState(0) // 时间轴偏移(ms)
+  const [isDragging, setIsDragging] = useState(false)
+  const [isScrollbarDragging, setIsScrollbarDragging] = useState(false)
+  const dragStartRef = useRef({ x: 0, offset: 0 })
+
   const svgRef = useRef<SVGSVGElement>(null)
 
-  // 计算图表尺寸
-  const chartWidth = 600
+  // 监听容器宽度变化
+  useEffect(() => {
+    if (!containerRef.current) return
+    // 初始化宽度
+    setContainerWidth(containerRef.current.clientWidth)
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width
+      if (width && width > 0) setContainerWidth(width)
+    })
+    observer.observe(containerRef.current)
+    return () => observer.disconnect()
+  }, [])
+
+  // 原生wheel事件监听（passive: false 才能阻止浏览器默认缩放）
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg || !data) return
+
+    const handleNativeWheel = (e: WheelEvent) => {
+      const totalDuration = data.timeRange.end - data.timeRange.start
+
+      // Ctrl + 滚轮：缩放
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        if (e.deltaY < 0) {
+          setZoom((z) => Math.min(z * 1.2, 50))
+        } else {
+          setZoom((z) => {
+            const newZoom = Math.max(z / 1.2, 1)
+            const newVisibleDuration = totalDuration / newZoom
+            setPanOffset((offset) => Math.max(0, Math.min(offset, totalDuration - newVisibleDuration)))
+            return newZoom
+          })
+        }
+        return
+      }
+
+      // Shift + 滚轮：水平平移
+      if (e.shiftKey) {
+        setZoom((currentZoom) => {
+          if (currentZoom > 1) {
+            e.preventDefault()
+            const visibleDuration = totalDuration / currentZoom
+            const panStep = visibleDuration * 0.1
+            const delta = e.deltaY > 0 ? panStep : -panStep
+            setPanOffset((offset) => Math.max(0, Math.min(offset + delta, totalDuration - visibleDuration)))
+          }
+          return currentZoom
+        })
+      }
+    }
+
+    svg.addEventListener('wheel', handleNativeWheel, { passive: false })
+    return () => svg.removeEventListener('wheel', handleNativeWheel)
+  }, [data])
+
+  // 计算图表尺寸 - 根据实际资源数量计算高度
+  const chartWidth = containerWidth
   const chartHeight = data
-    ? Math.max(height, MARGIN.top + MARGIN.bottom + data.resources.length * ROW_HEIGHT)
-    : height
+    ? MARGIN.top + MARGIN.bottom + data.resources.length * ROW_HEIGHT
+    : 100
+  const innerWidth = chartWidth - MARGIN.left - MARGIN.right
 
-  // 计算比例尺
-  const { xScale, yScale, timeRange } = useMemo(() => {
-    if (!data) return { xScale: () => 0, yScale: () => 0, timeRange: { start: 0, end: 1 } }
+  // 计算可见时间范围
+  const visibleTimeRange = useMemo(() => {
+    if (!data) return { start: 0, end: 1 }
+    const totalDuration = data.timeRange.end - data.timeRange.start
+    const visibleDuration = totalDuration / zoom
+    const start = data.timeRange.start + panOffset
+    // 限制边界
+    const clampedStart = Math.max(data.timeRange.start, Math.min(start, data.timeRange.end - visibleDuration))
+    const clampedEnd = clampedStart + visibleDuration
+    return { start: clampedStart, end: clampedEnd }
+  }, [data, zoom, panOffset])
 
-    const innerWidth = chartWidth - MARGIN.left - MARGIN.right
-    const { start, end } = data.timeRange
+  // X轴比例尺
+  const xScale = useCallback((time: number) => {
+    const { start, end } = visibleTimeRange
+    return MARGIN.left + ((time - start) / (end - start)) * innerWidth
+  }, [visibleTimeRange, innerWidth])
 
-    const xScale = (time: number) => {
-      return MARGIN.left + ((time - start) / (end - start)) * innerWidth
+  // Y轴比例尺
+  const yScale = useCallback((resourceIndex: number) => {
+    return MARGIN.top + resourceIndex * ROW_HEIGHT
+  }, [])
+
+  // 资源索引映射
+  const resourceIndexMap = useMemo(() => {
+    if (!data) return new Map<string, number>()
+    const map = new Map<string, number>()
+    data.resources.forEach((r, i) => map.set(r.id, i))
+    return map
+  }, [data])
+
+  // 聚合任务数据
+  const aggregatedData = useMemo(() => {
+    if (!data) return []
+
+    const { start, end } = visibleTimeRange
+    const duration = end - start
+
+    // 根据缩放级别决定bin数量
+    const numBins = Math.min(Math.max(50, Math.floor(innerWidth / 3)), 300)
+    const binWidth = duration / numBins
+
+    // 初始化bins: resourceId -> binIndex -> tasks
+    const bins = new Map<string, Map<number, GanttTask[]>>()
+    for (const resource of data.resources) {
+      bins.set(resource.id, new Map())
     }
 
-    const yScale = (resourceIndex: number) => {
-      return MARGIN.top + resourceIndex * ROW_HEIGHT
+    // 将任务分配到bins
+    for (const task of data.tasks) {
+      // 跳过不在可见范围内的任务
+      if (task.end < start || task.start > end) continue
+
+      // 确定资源行
+      const isNetworkTask = ['tp_comm', 'pp_comm', 'ep_comm', 'ep_dispatch', 'ep_combine'].includes(task.type)
+      const resourceId = `stage${task.ppStage}_${isNetworkTask ? 'network' : 'compute'}`
+
+      const resourceBins = bins.get(resourceId)
+      if (!resourceBins) continue
+
+      // 计算任务覆盖的bin范围
+      const taskStart = Math.max(task.start, start)
+      const taskEnd = Math.min(task.end, end)
+      const startBin = Math.floor((taskStart - start) / binWidth)
+      const endBin = Math.floor((taskEnd - start) / binWidth)
+
+      for (let bin = startBin; bin <= endBin && bin < numBins; bin++) {
+        if (bin < 0) continue
+        if (!resourceBins.has(bin)) resourceBins.set(bin, [])
+        resourceBins.get(bin)!.push(task)
+      }
     }
 
-    return { xScale, yScale, timeRange: data.timeRange }
-  }, [data, chartWidth])
+    // 生成聚合段
+    const segments: AggregatedSegment[] = []
+
+    for (const [resourceId, resourceBins] of bins) {
+      // 合并连续的非空bins
+      let currentSegment: AggregatedSegment | null = null
+
+      for (let bin = 0; bin < numBins; bin++) {
+        const binTasks = resourceBins.get(bin)
+
+        if (binTasks && binTasks.length > 0) {
+          if (!currentSegment) {
+            currentSegment = {
+              binIndex: bin,
+              resourceId,
+              startTime: start + bin * binWidth,
+              endTime: start + (bin + 1) * binWidth,
+              typeBreakdown: new Map(),
+              taskCount: 0,
+              tasks: [],
+            }
+          } else {
+            currentSegment.endTime = start + (bin + 1) * binWidth
+          }
+
+          // 统计类型分布
+          for (const task of binTasks) {
+            const type = task.type
+            const existing = currentSegment.typeBreakdown.get(type) || 0
+            currentSegment.typeBreakdown.set(type, existing + (task.end - task.start))
+            if (!currentSegment.tasks.includes(task)) {
+              currentSegment.tasks.push(task)
+              currentSegment.taskCount++
+            }
+          }
+        } else {
+          // bin为空，结束当前段
+          if (currentSegment) {
+            segments.push(currentSegment)
+            currentSegment = null
+          }
+        }
+      }
+
+      // 添加最后一个段
+      if (currentSegment) {
+        segments.push(currentSegment)
+      }
+    }
+
+    return segments
+  }, [data, visibleTimeRange, innerWidth])
 
   // 格式化时间
   const formatTime = (ms: number): string => {
+    if (ms < 0.001) return `${(ms * 1000000).toFixed(0)}ns`
     if (ms < 1) return `${(ms * 1000).toFixed(1)}µs`
     if (ms < 1000) return `${ms.toFixed(2)}ms`
     return `${(ms / 1000).toFixed(2)}s`
@@ -162,102 +360,208 @@ export const GanttChart: React.FC<GanttChartProps> = ({
 
   // 生成时间刻度
   const timeTicksData = useMemo(() => {
-    if (!data) return []
-
-    const { start, end } = data.timeRange
+    const { start, end } = visibleTimeRange
     const duration = end - start
-    const numTicks = 6
+    const numTicks = Math.min(8, Math.floor(innerWidth / 80))
 
     const ticks: number[] = []
     for (let i = 0; i <= numTicks; i++) {
       ticks.push(start + (duration / numTicks) * i)
     }
     return ticks
-  }, [data])
+  }, [visibleTimeRange, innerWidth])
 
-  // 按资源分组任务，并预计算坐标
-  const taskRenderData = useMemo(() => {
-    if (!data) return []
+  // 缩放处理
+  const handleZoomIn = useCallback(() => {
+    setZoom((z) => Math.min(z * 1.5, 50))
+  }, [])
 
-    const result: Array<{
-      task: GanttTask
-      x: number
-      y: number
-      width: number
-      color: string
-    }> = []
+  const handleZoomOut = useCallback(() => {
+    setZoom((z) => Math.max(z / 1.5, 1))
+    setPanOffset((offset) => {
+      if (!data) return offset
+      const totalDuration = data.timeRange.end - data.timeRange.start
+      const newVisibleDuration = totalDuration / Math.max(zoom / 1.5, 1)
+      return Math.min(offset, totalDuration - newVisibleDuration)
+    })
+  }, [data, zoom])
 
-    // 构建资源索引映射
-    const resourceIndexMap = new Map<string, number>()
-    data.resources.forEach((r, i) => resourceIndexMap.set(r.id, i))
+  const handleReset = useCallback(() => {
+    setZoom(1)
+    setPanOffset(0)
+  }, [])
 
-    for (const task of data.tasks) {
-      const isNetworkTask = task.type === 'tp_comm' || task.type === 'pp_comm' || task.type === 'ep_comm'
-      const resourceId = `stage${task.ppStage}_${isNetworkTask ? 'network' : 'compute'}`
-      let resourceIndex = resourceIndexMap.get(resourceId)
+  // 拖拽平移
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (zoom <= 1) return
+    setIsDragging(true)
+    dragStartRef.current = { x: e.clientX, offset: panOffset }
+  }, [zoom, panOffset])
 
-      if (resourceIndex === undefined) {
-        const fallbackId = `stage${task.ppStage}_compute`
-        resourceIndex = resourceIndexMap.get(fallbackId)
-      }
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isDragging || !data) return
+    const dx = e.clientX - dragStartRef.current.x
+    const totalDuration = data.timeRange.end - data.timeRange.start
+    const visibleDuration = totalDuration / zoom
+    const pxPerMs = innerWidth / visibleDuration
+    const newOffset = dragStartRef.current.offset - dx / pxPerMs
+    setPanOffset(Math.max(0, Math.min(newOffset, totalDuration - visibleDuration)))
+  }, [isDragging, data, zoom, innerWidth])
 
-      if (resourceIndex !== undefined) {
-        const x = xScale(task.start)
-        const width = Math.max(1, xScale(task.end) - xScale(task.start))
-        const y = yScale(resourceIndex) + (ROW_HEIGHT - BAR_HEIGHT) / 2
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false)
+    setIsScrollbarDragging(false)
+  }, [])
 
-        result.push({
-          task,
-          x,
-          y,
-          width,
-          color: task.color || TASK_COLORS[task.type],
-        })
-      }
-    }
+  // 滚动条拖拽
+  const handleScrollbarMouseDown = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    setIsScrollbarDragging(true)
+    dragStartRef.current = { x: e.clientX, offset: panOffset }
+  }, [panOffset])
 
-    return result
-  }, [data, xScale, yScale])
+  const handleScrollbarMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isScrollbarDragging || !data) return
+    const dx = e.clientX - dragStartRef.current.x
+    const totalDuration = data.timeRange.end - data.timeRange.start
+    const visibleDuration = totalDuration / zoom
+    const scrollbarWidth = innerWidth
+    const thumbWidth = scrollbarWidth / zoom
+    const maxThumbOffset = scrollbarWidth - thumbWidth
+    const pxPerMs = maxThumbOffset / (totalDuration - visibleDuration)
+    const newOffset = dragStartRef.current.offset + dx / pxPerMs
+    setPanOffset(Math.max(0, Math.min(newOffset, totalDuration - visibleDuration)))
+  }, [isScrollbarDragging, data, zoom, innerWidth])
 
-  // 任务ID到任务的映射（用于快速查找）
-  const taskMap = useMemo(() => {
-    if (!data) return new Map<string, GanttTask>()
-    const map = new Map<string, GanttTask>()
-    for (const task of data.tasks) {
-      map.set(task.id, task)
-    }
-    return map
-  }, [data])
+  // 点击滚动条轨道跳转
+  const handleScrollbarTrackClick = useCallback((e: React.MouseEvent<SVGRectElement>) => {
+    if (!data || zoom <= 1) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const clickX = e.clientX - rect.left
+    const totalDuration = data.timeRange.end - data.timeRange.start
+    const visibleDuration = totalDuration / zoom
+    const ratio = clickX / innerWidth
+    const targetOffset = ratio * totalDuration - visibleDuration / 2
+    setPanOffset(Math.max(0, Math.min(targetOffset, totalDuration - visibleDuration)))
+  }, [data, zoom, innerWidth])
 
-  // 事件委托处理鼠标移动
-  const handleMouseMove = useCallback((e: React.MouseEvent<SVGGElement>) => {
-    const target = e.target as SVGElement
-    if (target.tagName === 'rect' && target.dataset.taskId) {
-      const task = taskMap.get(target.dataset.taskId)
-      if (task) {
-        setTooltip({ task, x: e.clientX + 10, y: e.clientY + 10 })
-      }
-    }
-  }, [taskMap])
+  // Tooltip处理
+  const handleSegmentHover = useCallback((segment: AggregatedSegment, e: React.MouseEvent) => {
+    setTooltip({ segment, x: e.clientX + 10, y: e.clientY + 10 })
+  }, [])
 
-  const handleMouseLeave = useCallback(() => {
+  const handleSegmentLeave = useCallback(() => {
     setTooltip(null)
   }, [])
 
+  // 渲染聚合段
+  const renderSegment = useCallback((segment: AggregatedSegment) => {
+    const resourceIndex = resourceIndexMap.get(segment.resourceId)
+    if (resourceIndex === undefined) return null
+
+    const x = xScale(segment.startTime)
+    const endX = xScale(segment.endTime)
+    const width = Math.max(2, endX - x)
+    const y = yScale(resourceIndex) + (ROW_HEIGHT - BAR_HEIGHT) / 2
+
+    // 计算各类型占比并生成渐变
+    const totalDuration = Array.from(segment.typeBreakdown.values()).reduce((a, b) => a + b, 0)
+    const sortedTypes = Array.from(segment.typeBreakdown.entries())
+      .sort((a, b) => b[1] - a[1])
+
+    // 如果只有一种类型，直接用纯色
+    if (sortedTypes.length === 1) {
+      const [type] = sortedTypes[0]
+      return (
+        <rect
+          key={`${segment.resourceId}-${segment.binIndex}`}
+          x={x}
+          y={y}
+          width={width}
+          height={BAR_HEIGHT}
+          fill={TASK_COLORS[type] || '#999'}
+          rx={2}
+          style={{ cursor: 'pointer' }}
+          onMouseEnter={(e) => handleSegmentHover(segment, e)}
+          onMouseMove={(e) => handleSegmentHover(segment, e)}
+          onMouseLeave={handleSegmentLeave}
+        />
+      )
+    }
+
+    // 多种类型：使用主导颜色，透明度表示混合程度
+    const dominantType = sortedTypes[0][0]
+    const dominantRatio = sortedTypes[0][1] / totalDuration
+
+    return (
+      <rect
+        key={`${segment.resourceId}-${segment.binIndex}`}
+        x={x}
+        y={y}
+        width={width}
+        height={BAR_HEIGHT}
+        fill={TASK_COLORS[dominantType] || '#999'}
+        opacity={0.6 + dominantRatio * 0.4}
+        rx={2}
+        style={{ cursor: 'pointer' }}
+        onMouseEnter={(e) => handleSegmentHover(segment, e)}
+        onMouseMove={(e) => handleSegmentHover(segment, e)}
+        onMouseLeave={handleSegmentLeave}
+      />
+    )
+  }, [resourceIndexMap, xScale, yScale, handleSegmentHover, handleSegmentLeave])
+
   if (!data || data.tasks.length === 0) {
     return (
-      <Empty
-        description="运行模拟以生成甘特图"
-        style={{ marginTop: 20 }}
-        image={Empty.PRESENTED_IMAGE_SIMPLE}
-      />
+      <div ref={containerRef} style={{ width: '100%' }}>
+        <Empty
+          description="运行模拟以生成甘特图"
+          style={{ marginTop: 20 }}
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+        />
+      </div>
     )
   }
 
+  // 等待容器宽度初始化
+  if (containerWidth === 0) {
+    return <div ref={containerRef} style={{ width: '100%', height: 100 }} />
+  }
+
   return (
-    <div style={{ width: '100%', overflowX: 'auto' }}>
+    <div ref={containerRef} style={{ width: '100%' }}>
+      {/* 工具栏 */}
+      <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Text type="secondary" style={{ fontSize: 10 }}>
+          Ctrl+滚轮: 缩放 | Shift+滚轮: 平移 | 拖拽: 平移
+        </Text>
+        <Space size="small">
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {zoom.toFixed(1)}x
+          </Text>
+          <Tooltip title="放大 (Ctrl+滚轮↑)">
+            <Button size="small" icon={<ZoomInOutlined />} onClick={handleZoomIn} />
+          </Tooltip>
+          <Tooltip title="缩小 (Ctrl+滚轮↓)">
+            <Button size="small" icon={<ZoomOutOutlined />} onClick={handleZoomOut} disabled={zoom <= 1} />
+          </Tooltip>
+          <Tooltip title="重置视图">
+            <Button size="small" icon={<ReloadOutlined />} onClick={handleReset} disabled={zoom === 1} />
+          </Tooltip>
+        </Space>
+      </div>
+
       {/* SVG 图表 */}
-      <svg ref={svgRef} width={chartWidth} height={chartHeight}>
+      <svg
+        ref={svgRef}
+        width={chartWidth}
+        height={chartHeight + (zoom > 1 ? SCROLLBAR_HEIGHT + 6 : 0)}
+        onMouseDown={handleMouseDown}
+        onMouseMove={(e) => { handleMouseMove(e); handleScrollbarMouseMove(e) }}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        style={{ cursor: isDragging || isScrollbarDragging ? 'grabbing' : zoom > 1 ? 'grab' : 'default' }}
+      >
         {/* 背景网格 */}
         <g className="grid">
           {timeTicksData.map((tick, i) => (
@@ -268,13 +572,13 @@ export const GanttChart: React.FC<GanttChartProps> = ({
               x2={xScale(tick)}
               y2={chartHeight - MARGIN.bottom}
               stroke="#f0f0f0"
-              strokeDasharray="2,2"
+              strokeDasharray="3,3"
             />
           ))}
         </g>
 
         {/* Prefill/Decode 分界线 */}
-        {data.phaseTransition && (
+        {data.phaseTransition && data.phaseTransition >= visibleTimeRange.start && data.phaseTransition <= visibleTimeRange.end && (
           <g>
             <line
               x1={xScale(data.phaseTransition)}
@@ -282,21 +586,23 @@ export const GanttChart: React.FC<GanttChartProps> = ({
               x2={xScale(data.phaseTransition)}
               y2={chartHeight - MARGIN.bottom}
               stroke="#ff4d4f"
-              strokeWidth={1.5}
-              strokeDasharray="4,4"
+              strokeWidth={2}
+              strokeDasharray="6,4"
             />
             <text
-              x={xScale(data.phaseTransition) - 30}
-              y={MARGIN.top - 8}
-              fontSize={10}
+              x={xScale(data.phaseTransition) - 35}
+              y={MARGIN.top - 10}
+              fontSize={11}
+              fontWeight={500}
               fill="#ff4d4f"
             >
               Prefill
             </text>
             <text
-              x={xScale(data.phaseTransition) + 5}
-              y={MARGIN.top - 8}
-              fontSize={10}
+              x={xScale(data.phaseTransition) + 8}
+              y={MARGIN.top - 10}
+              fontSize={11}
+              fontWeight={500}
               fill="#1890ff"
             >
               Decode
@@ -309,45 +615,31 @@ export const GanttChart: React.FC<GanttChartProps> = ({
           {data.resources.map((resource, i) => (
             <g key={resource.id} transform={`translate(0, ${yScale(i)})`}>
               <text
-                x={MARGIN.left - 6}
+                x={MARGIN.left - 8}
                 y={ROW_HEIGHT / 2 + 4}
                 textAnchor="end"
-                fontSize={10}
-                fill="#666"
+                fontSize={11}
+                fill="#333"
+                fontWeight={500}
               >
                 {resource.name}
               </text>
               <rect
                 x={MARGIN.left}
                 y={(ROW_HEIGHT - BAR_HEIGHT) / 2}
-                width={chartWidth - MARGIN.left - MARGIN.right}
+                width={innerWidth}
                 height={BAR_HEIGHT}
                 fill={i % 2 === 0 ? '#fafafa' : '#fff'}
-                rx={2}
+                stroke="#f0f0f0"
+                rx={3}
               />
             </g>
           ))}
         </g>
 
-        {/* 任务条 - 使用事件委托 */}
-        <g
-          className="tasks"
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
-        >
-          {taskRenderData.map(({ task, x, y, width, color }) => (
-            <rect
-              key={task.id}
-              data-task-id={task.id}
-              x={x}
-              y={y}
-              width={width}
-              height={BAR_HEIGHT}
-              fill={color}
-              rx={1}
-              opacity={0.9}
-            />
-          ))}
+        {/* 聚合任务段 */}
+        <g className="tasks">
+          {aggregatedData.map(renderSegment)}
         </g>
 
         {/* 时间轴 */}
@@ -361,11 +653,11 @@ export const GanttChart: React.FC<GanttChartProps> = ({
           />
           {timeTicksData.map((tick, i) => (
             <g key={i} transform={`translate(${xScale(tick)}, 0)`}>
-              <line y1={0} y2={4} stroke="#999" />
+              <line y1={0} y2={5} stroke="#999" />
               <text
-                y={16}
+                y={18}
                 textAnchor="middle"
-                fontSize={9}
+                fontSize={10}
                 fill="#666"
               >
                 {formatTime(tick)}
@@ -373,61 +665,82 @@ export const GanttChart: React.FC<GanttChartProps> = ({
             </g>
           ))}
         </g>
+
+        {/* 滚动条 - 仅在缩放时显示 */}
+        {zoom > 1 && data && (
+          <g className="scrollbar" transform={`translate(0, ${chartHeight + 2})`}>
+            {/* 轨道 */}
+            <rect
+              x={MARGIN.left}
+              y={0}
+              width={innerWidth}
+              height={SCROLLBAR_HEIGHT}
+              fill="#f0f0f0"
+              rx={5}
+              style={{ cursor: 'pointer' }}
+              onClick={handleScrollbarTrackClick}
+            />
+            {/* 滑块 */}
+            <rect
+              x={MARGIN.left + (panOffset / (data.timeRange.end - data.timeRange.start)) * innerWidth}
+              y={1}
+              width={Math.max(30, innerWidth / zoom)}
+              height={SCROLLBAR_HEIGHT - 2}
+              fill={isScrollbarDragging ? '#1890ff' : '#999'}
+              rx={4}
+              style={{ cursor: 'grab' }}
+              onMouseDown={handleScrollbarMouseDown}
+            />
+          </g>
+        )}
       </svg>
 
       {/* 悬浮提示框 */}
       {tooltip && (
-        <div
-          style={{
-            ...tooltipStyle,
-            left: tooltip.x,
-            top: tooltip.y,
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>{tooltip.task.name}</div>
-          <div>开始: {formatTime(tooltip.task.start)}</div>
-          <div>结束: {formatTime(tooltip.task.end)}</div>
-          <div>耗时: {formatTime(tooltip.task.end - tooltip.task.start)}</div>
-          <div>阶段: {tooltip.task.phase === 'prefill' ? 'Prefill' : 'Decode'}</div>
-          {tooltip.task.layerIndex !== undefined && <div>层: {tooltip.task.layerIndex}</div>}
-          {tooltip.task.tokenIndex !== undefined && <div>Token: {tooltip.task.tokenIndex}</div>}
+        <div style={{ ...tooltipStyle, left: tooltip.x, top: tooltip.y }}>
+          <div style={{ fontWeight: 600, marginBottom: 6, borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: 4 }}>
+            时间段: {formatTime(tooltip.segment.startTime)} - {formatTime(tooltip.segment.endTime)}
+          </div>
+          <div style={{ marginBottom: 4 }}>任务数: {tooltip.segment.taskCount}</div>
+          <div style={{ marginBottom: 4 }}>类型分布:</div>
+          <div style={{ maxHeight: 150, overflowY: 'auto' }}>
+            {Array.from(tooltip.segment.typeBreakdown.entries())
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 8)
+              .map(([type, duration]) => {
+                const total = Array.from(tooltip.segment.typeBreakdown.values()).reduce((a, b) => a + b, 0)
+                const pct = ((duration / total) * 100).toFixed(1)
+                return (
+                  <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: TASK_COLORS[type] || '#999', flexShrink: 0 }} />
+                    <span style={{ flex: 1 }}>{TASK_LABELS[type] || type}</span>
+                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>{pct}%</span>
+                  </div>
+                )
+              })}
+          </div>
         </div>
       )}
 
-      {/* 图例和统计信息 - 合并在底部 */}
+      {/* 图例和统计信息 */}
       <div style={{
         marginTop: 8,
         padding: '8px 0',
         borderTop: '1px solid #f0f0f0',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        gap: 16,
+        overflow: 'hidden',
       }}>
         {/* 图例 */}
         {showLegend && (
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', flex: 1 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
             {LEGEND_GROUPS.map((group) => (
               <div key={group.name} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: 10, color: '#999', marginRight: 2 }}>{group.name}:</span>
+                <span style={{ fontSize: 10, color: '#999' }}>{group.name}:</span>
                 {group.types.map((type) => (
                   <span
                     key={type}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 3,
-                      fontSize: 10,
-                    }}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 10 }}
                   >
-                    <span
-                      style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: 2,
-                        backgroundColor: TASK_COLORS[type],
-                      }}
-                    />
+                    <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: TASK_COLORS[type], flexShrink: 0 }} />
                     <span style={{ color: '#666' }}>{TASK_LABELS[type]}</span>
                   </span>
                 ))}
@@ -437,23 +750,15 @@ export const GanttChart: React.FC<GanttChartProps> = ({
         )}
 
         {/* 统计信息 */}
-        <div style={{ display: 'flex', gap: 12, fontSize: 10, color: '#666', whiteSpace: 'nowrap' }}>
-          <Text type="secondary" style={{ fontSize: 10 }}>
-            总时长: {formatTime(timeRange.end - timeRange.start)}
-          </Text>
+        <div style={{ display: 'flex', gap: 12, fontSize: 10, color: '#666', flexWrap: 'wrap' }}>
+          <span>总时长: {formatTime(data.timeRange.end - data.timeRange.start)}</span>
           {data.phaseTransition && (
             <>
-              <Text type="secondary" style={{ fontSize: 10 }}>
-                Prefill: {formatTime(data.phaseTransition)}
-              </Text>
-              <Text type="secondary" style={{ fontSize: 10 }}>
-                Decode: {formatTime(timeRange.end - data.phaseTransition)}
-              </Text>
+              <span>Prefill: {formatTime(data.phaseTransition)}</span>
+              <span>Decode: {formatTime(data.timeRange.end - data.phaseTransition)}</span>
             </>
           )}
-          <Text type="secondary" style={{ fontSize: 10 }}>
-            任务数: {data.tasks.length}
-          </Text>
+          <span>任务数: {data.tasks.length.toLocaleString()}</span>
         </div>
       </div>
     </div>

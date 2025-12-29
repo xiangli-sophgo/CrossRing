@@ -4,7 +4,13 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Typography, Select, Empty, Button, Tooltip, message } from 'antd'
-import { ReloadOutlined, CloudServerOutlined, DesktopOutlined } from '@ant-design/icons'
+import {
+  ReloadOutlined,
+  CloudServerOutlined,
+  DesktopOutlined,
+  UpOutlined,
+  DownOutlined,
+} from '@ant-design/icons'
 import { ScoreRadarChart } from './ScoreRadarChart'
 import { MetricsBarChart } from './MetricsBarChart'
 import { MemoryPieChart } from './MemoryPieChart'
@@ -67,6 +73,28 @@ const chartTitleStyle: React.CSSProperties = {
   justifyContent: 'space-between',
 }
 
+// 章节标题样式（与 AnalysisResultDisplay 保持一致）
+const sectionTitleStyle: React.CSSProperties = {
+  fontSize: 15,
+  fontWeight: 600,
+  color: '#1a1a1a',
+  marginBottom: 12,
+  paddingBottom: 8,
+  borderBottom: '1px solid #f0f0f0',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+}
+
+// 章节容器样式（与 AnalysisResultDisplay 外层容器保持一致）
+const sectionContainerStyle: React.CSSProperties = {
+  background: '#fff',
+  borderRadius: 12,
+  padding: 20,
+  marginBottom: 16,
+  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+}
+
 export const ChartsPanel: React.FC<ChartsPanelProps> = ({
   result,
   topKPlans,
@@ -80,6 +108,15 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({
   const [isSimulating, setIsSimulating] = useState(false)
   const [useBackend, setUseBackend] = useState(true)  // 默认使用后端模拟
   const [backendAvailable, setBackendAvailable] = useState<boolean | null>(null)
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    charts: true,
+    simulation: true,
+    comparison: true,
+  })
+
+  const toggleSection = (section: string) => {
+    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }))
+  }
 
   // 记录上次运行的result id，避免重复运行
   const lastResultIdRef = useRef<string | null>(null)
@@ -116,6 +153,10 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({
           vocab_size: model.vocab_size,
           dtype: model.dtype,
           max_seq_length: model.max_seq_length,
+          attention_type: model.attention_type,
+          norm_type: model.norm_type,
+          moe_config: model.moe_config,
+          mla_config: model.mla_config,
         },
         inference: {
           batch_size: inference.batch_size,
@@ -246,164 +287,199 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({
   ]
 
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(2, 1fr)',
-        gap: 16,
-      }}
-    >
-      {/* 雷达图 - 左上 */}
-      <div style={chartCardStyle}>
-        <div style={chartTitleStyle}>
-          <Text strong>多维评分分析</Text>
-          {topKPlans.length > 1 && (
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              对比 Top-{Math.min(5, topKPlans.length)} 方案
-            </Text>
-          )}
+    <div>
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* 四、图表可视化 */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      <div style={sectionContainerStyle}>
+        <div
+          style={{ ...sectionTitleStyle, cursor: 'pointer' }}
+          onClick={() => toggleSection('charts')}
+        >
+          <span>图表可视化</span>
+          {expandedSections.charts ? <UpOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
         </div>
-        <ScoreRadarChart
-          result={result}
-          comparisonResults={topKPlans.slice(1, 5)}
-          height={240}
-        />
-      </div>
+        {expandedSections.charts && <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, 1fr)',
+            gap: 16,
+          }}
+        >
+          {/* 雷达图 - 左上 */}
+          <div style={chartCardStyle}>
+            <div style={chartTitleStyle}>
+              <Text strong>多维评分分析</Text>
+              {topKPlans.length > 1 && (
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  对比 Top-{Math.min(5, topKPlans.length)} 方案
+                </Text>
+              )}
+            </div>
+            <ScoreRadarChart
+              result={result}
+              comparisonResults={topKPlans.slice(1, 5)}
+              height={240}
+            />
+          </div>
 
-      {/* 柱状图 - 右上 */}
-      <div style={chartCardStyle}>
-        <div style={chartTitleStyle}>
-          <Text strong>多方案对比</Text>
-          <Select
-            size="small"
-            value={selectedMetric}
-            onChange={setSelectedMetric}
-            options={metricOptions}
-            style={{ width: 130 }}
-          />
-        </div>
-        <MetricsBarChart
-          plans={topKPlans}
-          metric={selectedMetric}
-          height={240}
-        />
-      </div>
-
-      {/* 显存图 - 左下 */}
-      <div style={chartCardStyle}>
-        <div style={chartTitleStyle}>
-          <Text strong>显存占用分解</Text>
-          <Text
-            type="secondary"
-            style={{
-              fontSize: 11,
-              color: result.memory.is_memory_sufficient ? '#52c41a' : '#faad14',
-            }}
-          >
-            {result.memory.is_memory_sufficient ? '✓ 显存充足' : '⚠ 显存不足'}
-          </Text>
-        </div>
-        <MemoryPieChart memory={result.memory} height={220} />
-      </div>
-
-      {/* Roofline 图 - 右下 */}
-      <div style={chartCardStyle}>
-        <div style={chartTitleStyle}>
-          <Text strong>Roofline 性能分析</Text>
-          <Text
-            type="secondary"
-            style={{
-              fontSize: 11,
-              color:
-                result.latency.bottleneck_type === 'memory'
-                  ? '#1890ff'
-                  : result.latency.bottleneck_type === 'compute'
-                  ? '#52c41a'
-                  : '#faad14',
-            }}
-          >
-            {result.latency.bottleneck_type === 'memory'
-              ? '带宽受限'
-              : result.latency.bottleneck_type === 'compute'
-              ? '算力受限'
-              : '通信受限'}
-          </Text>
-        </div>
-        <RooflineChart
-          result={result}
-          hardware={hardware}
-          model={model}
-          comparisonResults={topKPlans.slice(1, 4)}
-          height={220}
-        />
-      </div>
-
-      {/* 甘特图 - 底部跨列 */}
-      <div style={{ ...chartCardStyle, gridColumn: '1 / -1' }}>
-        <div style={chartTitleStyle}>
-          <Text strong>推理时序模拟</Text>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {isSimulating ? (
-              <Text type="secondary" style={{ fontSize: 11 }}>模拟中...</Text>
-            ) : simulationResult ? (
-              <Text type="secondary" style={{ fontSize: 11 }}>
-                TTFT: {simulationResult.stats.ttft.toFixed(2)}ms |
-                Avg TPOT: {simulationResult.stats.avgTpot.toFixed(2)}ms |
-                动态MFU: {(simulationResult.stats.dynamicMfu * 100).toFixed(1)}%
-              </Text>
-            ) : null}
-            <Tooltip title={useBackend ? '使用后端模拟 (精细模式)' : '使用前端模拟 (快速模式)'}>
-              <Button
-                type="text"
+          {/* 柱状图 - 右上 */}
+          <div style={chartCardStyle}>
+            <div style={chartTitleStyle}>
+              <Text strong>多方案对比</Text>
+              <Select
                 size="small"
-                icon={useBackend ? <CloudServerOutlined /> : <DesktopOutlined />}
-                onClick={() => {
-                  setUseBackend(!useBackend)
-                  lastResultIdRef.current = null  // 强制重新运行
+                value={selectedMetric}
+                onChange={setSelectedMetric}
+                options={metricOptions}
+                style={{ width: 130 }}
+              />
+            </div>
+            <MetricsBarChart
+              plans={topKPlans}
+              metric={selectedMetric}
+              height={240}
+            />
+          </div>
+
+          {/* 显存图 - 左下 */}
+          <div style={chartCardStyle}>
+            <div style={chartTitleStyle}>
+              <Text strong>显存占用分解</Text>
+              <Text
+                type="secondary"
+                style={{
+                  fontSize: 11,
+                  color: result.memory.is_memory_sufficient ? '#52c41a' : '#faad14',
                 }}
-                style={{ color: backendAvailable === false ? '#999' : undefined }}
-              />
-            </Tooltip>
-            <Tooltip title="重新运行模拟">
-              <Button
-                type="text"
-                size="small"
-                icon={<ReloadOutlined spin={isSimulating} />}
-                disabled={!inference || isSimulating}
-                onClick={runSimulation}
-              />
-            </Tooltip>
+              >
+                {result.memory.is_memory_sufficient ? '✓ 显存充足' : '⚠ 显存不足'}
+              </Text>
+            </div>
+            <MemoryPieChart memory={result.memory} height={220} />
           </div>
-        </div>
-        <GanttChart
-          data={simulationResult?.ganttChart ?? null}
-          height={200}
-          showLegend
-        />
+
+          {/* Roofline 图 - 右下 */}
+          <div style={chartCardStyle}>
+            <div style={chartTitleStyle}>
+              <Text strong>Roofline 性能分析</Text>
+              <Text
+                type="secondary"
+                style={{
+                  fontSize: 11,
+                  color:
+                    result.latency.bottleneck_type === 'memory'
+                      ? '#1890ff'
+                      : result.latency.bottleneck_type === 'compute'
+                      ? '#52c41a'
+                      : '#faad14',
+                }}
+              >
+                {result.latency.bottleneck_type === 'memory'
+                  ? '带宽受限'
+                  : result.latency.bottleneck_type === 'compute'
+                  ? '算力受限'
+                  : '通信受限'}
+              </Text>
+            </div>
+            <RooflineChart
+              result={result}
+              hardware={hardware}
+              model={model}
+              comparisonResults={topKPlans.slice(1, 4)}
+              height={220}
+            />
+          </div>
+        </div>}
       </div>
 
-      {/* 公式 vs 仿真对比 - 底部跨列 */}
-      {simulationResult && (
-        <div style={{ ...chartCardStyle, gridColumn: '1 / -1' }}>
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* 五、推理时序模拟 */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      <div style={sectionContainerStyle}>
+        <div
+          style={{ ...sectionTitleStyle, cursor: 'pointer' }}
+          onClick={() => toggleSection('simulation')}
+        >
+          <span>推理时序模拟</span>
+          {expandedSections.simulation ? <UpOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
+        </div>
+        {expandedSections.simulation && <div style={{ ...chartCardStyle, boxShadow: 'none', border: 'none' }}>
           <div style={chartTitleStyle}>
-            <Text strong>公式计算 vs 仿真结果</Text>
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              对比理论估算与事件驱动模拟
-            </Text>
+            <Text strong>Prefill + Decode 时序甘特图</Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {isSimulating ? (
+                <Text type="secondary" style={{ fontSize: 11 }}>模拟中...</Text>
+              ) : simulationResult ? (
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  TTFT: {simulationResult.stats.ttft.toFixed(2)}ms |
+                  Avg TPOT: {simulationResult.stats.avgTpot.toFixed(2)}ms |
+                  动态MFU: {(simulationResult.stats.dynamicMfu * 100).toFixed(1)}%
+                </Text>
+              ) : null}
+              <Tooltip title={useBackend ? '使用后端模拟 (精细模式)' : '使用前端模拟 (快速模式)'}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={useBackend ? <CloudServerOutlined /> : <DesktopOutlined />}
+                  onClick={() => {
+                    setUseBackend(!useBackend)
+                    lastResultIdRef.current = null  // 强制重新运行
+                  }}
+                  style={{ color: backendAvailable === false ? '#999' : undefined }}
+                />
+              </Tooltip>
+              <Tooltip title="重新运行模拟">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<ReloadOutlined spin={isSimulating} />}
+                  disabled={!inference || isSimulating}
+                  onClick={runSimulation}
+                />
+              </Tooltip>
+            </div>
           </div>
-          <ComparisonTable
-            comparison={compareFormulaAndSimulation(
-              result,
-              simulationResult.stats,
-              undefined,  // 使用默认权重
-              inference ? {
-                model,
-                inference,
-                parallelism: result.plan.parallelism,
-                hardware,
-              } : undefined
-            )}
+          <GanttChart
+            data={simulationResult?.ganttChart ?? null}
+            showLegend
           />
+        </div>}
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* 六、公式 vs 仿真结果 */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {simulationResult && (
+        <div style={sectionContainerStyle}>
+          <div
+            style={{ ...sectionTitleStyle, cursor: 'pointer' }}
+            onClick={() => toggleSection('comparison')}
+          >
+            <span>公式 vs 仿真结果</span>
+            {expandedSections.comparison ? <UpOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
+          </div>
+          {expandedSections.comparison && <div style={{ ...chartCardStyle, boxShadow: 'none', border: 'none' }}>
+            <div style={chartTitleStyle}>
+              <Text strong>理论估算与事件驱动模拟对比</Text>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                误差分析与评分
+              </Text>
+            </div>
+            <ComparisonTable
+              comparison={compareFormulaAndSimulation(
+                result,
+                simulationResult.stats,
+                undefined,  // 使用默认权重
+                inference ? {
+                  model,
+                  inference,
+                  parallelism: result.plan.parallelism,
+                  hardware,
+                } : undefined
+              )}
+            />
+          </div>}
         </div>
       )}
     </div>

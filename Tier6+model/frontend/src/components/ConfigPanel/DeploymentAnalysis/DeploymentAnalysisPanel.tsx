@@ -266,6 +266,10 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
   // 视图模式状态（历史列表 或 详情）
   const [viewMode, setViewMode] = useState<AnalysisViewMode>('history')
 
+  // 当前显示的分析结果对应的配置（区分于配置面板的当前选择）
+  const [displayModelConfig, setDisplayModelConfig] = useState<LLMModelConfig | null>(null)
+  const [displayInferenceConfig, setDisplayInferenceConfig] = useState<InferenceConfig | null>(null)
+
   // 加载历史记录
   useEffect(() => {
     setHistory(loadHistory())
@@ -297,6 +301,9 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
     setParallelismMode(item.searchMode === 'auto' ? 'auto' : 'manual')
     setAnalysisResult(item.result)
     setTopKPlans(item.topKPlans && item.topKPlans.length > 0 ? item.topKPlans : [item.result])
+    // 设置显示配置（分析时使用的配置，不随配置面板变化）
+    setDisplayModelConfig(item.modelConfig)
+    setDisplayInferenceConfig(item.inferenceConfig)
     setViewMode('detail')  // 切换到详情视图
     const plansCount = item.topKPlans?.length ?? 1
     message.success(`已加载历史记录${plansCount > 1 ? `（含 ${plansCount} 个候选方案）` : ''}`)
@@ -324,8 +331,9 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
         result: analysisResult,
         topKPlans,
         hardware: hardwareConfig,
-        model: modelConfig,
-        inference: inferenceConfig,
+        // 使用显示配置（分析时的配置），而不是配置面板当前选择
+        model: displayModelConfig || modelConfig,
+        inference: displayInferenceConfig || inferenceConfig,
         loading,
         errorMsg,
         searchStats,
@@ -343,7 +351,7 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
         onClearHistory: handleClearHistory,
       })
     }
-  }, [analysisResult, topKPlans, hardwareConfig, modelConfig, inferenceConfig, loading, errorMsg, searchStats, onAnalysisDataChange, handleMapToTopology, topology, onTrafficResultChange, viewMode, history, handleLoadFromHistory, handleDeleteHistory, handleClearHistory])
+  }, [analysisResult, topKPlans, hardwareConfig, displayModelConfig, displayInferenceConfig, modelConfig, inferenceConfig, loading, errorMsg, searchStats, onAnalysisDataChange, handleMapToTopology, topology, onTrafficResultChange, viewMode, history, handleLoadFromHistory, handleDeleteHistory, handleClearHistory])
 
   // 计算最大可用芯片数
   const maxChips = hardwareConfig.node.chips_per_node * hardwareConfig.cluster.num_nodes
@@ -390,6 +398,9 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
       }
       // 保存到历史记录并切换到详情视图
       if (result && result.is_feasible) {
+        // 设置显示配置（分析时使用的配置，不随配置面板变化）
+        setDisplayModelConfig(modelConfig)
+        setDisplayInferenceConfig(inferenceConfig)
         const currentTopKPlans = parallelismMode === 'auto' ? topKPlans : undefined
         const updatedHistory = addToHistory(
           result,
