@@ -362,6 +362,7 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({
               model={model}
               comparisonResults={topKPlans.slice(1, 4)}
               height={220}
+              simulationStats={simulationResult?.stats}
             />
           </div>
         </div>

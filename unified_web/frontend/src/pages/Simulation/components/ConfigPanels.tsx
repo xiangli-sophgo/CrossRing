@@ -111,6 +111,20 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
           label: 'KCIN Config',
           children: (
             <div>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>KCIN Version</Text>
+              <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
+                <Col span={8}>
+                  <Select
+                    value={configValues.KCIN_VERSION || 'v1'}
+                    onChange={(v) => updateConfigValue('KCIN_VERSION', v)}
+                    style={{ width: '100%' }}
+                  >
+                    <Option value="v1">v1 - IQ/RB/EQ</Option>
+                    <Option value="v2">v2 - RingStation</Option>
+                  </Select>
+                </Col>
+              </Row>
+
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Slice Per Link</Text>
               <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
                 {configValues.SLICE_PER_LINK_HORIZONTAL !== undefined && (
@@ -135,16 +149,27 @@ export const KCINConfigPanel: React.FC<KCINConfigPanelProps> = ({
 
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>FIFO Depth</Text>
               <Row gutter={[16, 8]} style={{ marginBottom: 16 }}>
-                {['IQ_CH_FIFO_DEPTH', 'EQ_CH_FIFO_DEPTH', 'IQ_OUT_FIFO_DEPTH_HORIZONTAL', 'IQ_OUT_FIFO_DEPTH_VERTICAL',
-                  'IQ_OUT_FIFO_DEPTH_EQ', 'RB_OUT_FIFO_DEPTH', 'RB_IN_FIFO_DEPTH', 'EQ_IN_FIFO_DEPTH',
-                  'IP_L2H_FIFO_DEPTH', 'IP_H2L_H_FIFO_DEPTH', 'IP_H2L_L_FIFO_DEPTH'].map(key =>
-                  configValues[key] !== undefined && (
+                {(configValues.KCIN_VERSION === 'v2'
+                  ? ['RS_IN_CH_BUFFER', 'RS_OUT_CH_BUFFER', 'RS_IN_FIFO_DEPTH', 'RS_OUT_FIFO_DEPTH',
+                     'IP_L2H_FIFO_DEPTH', 'IP_H2L_H_FIFO_DEPTH', 'IP_H2L_L_FIFO_DEPTH']
+                  : ['IQ_CH_FIFO_DEPTH', 'EQ_CH_FIFO_DEPTH', 'IQ_OUT_FIFO_DEPTH_HORIZONTAL', 'IQ_OUT_FIFO_DEPTH_VERTICAL',
+                     'IQ_OUT_FIFO_DEPTH_EQ', 'RB_OUT_FIFO_DEPTH', 'RB_IN_FIFO_DEPTH', 'EQ_IN_FIFO_DEPTH',
+                     'IP_L2H_FIFO_DEPTH', 'IP_H2L_H_FIFO_DEPTH', 'IP_H2L_L_FIFO_DEPTH']
+                ).map(key => {
+                  // v2 参数默认值
+                  const v2Defaults: Record<string, number> = {
+                    RS_IN_CH_BUFFER: 4, RS_OUT_CH_BUFFER: 4,
+                    RS_IN_FIFO_DEPTH: 4, RS_OUT_FIFO_DEPTH: 4,
+                  }
+                  const value = configValues[key] ?? v2Defaults[key]
+                  if (value === undefined) return null
+                  return (
                     <Col span={8} key={key}>
                       <div style={{ marginBottom: 4 }}><ConfigLabel name={key} /></div>
-                      <InputNumber value={configValues[key]} onChange={(v) => updateConfigValue(key, v)} min={1} style={{ width: '100%' }} />
+                      <InputNumber value={value} onChange={(v) => updateConfigValue(key, v)} min={1} style={{ width: '100%' }} />
                     </Col>
                   )
-                )}
+                })}
               </Row>
 
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>Latency</Text>

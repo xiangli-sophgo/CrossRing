@@ -15,6 +15,7 @@ import {
   CostAnalysis,
   BottleneckAnalysis,
   PhaseBottleneckAnalysis,
+  getBytesPerElement,
 } from './types';
 import {
   calculatePrefillFlops,
@@ -39,6 +40,21 @@ import {
 
 /** HBM 效率因子 (实际带宽 / 峰值带宽) */
 const HBM_EFFICIENCY = 0.85;
+
+/** 计算效率因子 - 不同操作的实际 GPU 利用率 */
+const COMPUTE_EFFICIENCY: Record<string, number> = {
+  matmul_large: 0.70,    // 大矩阵乘法 (Prefill QKV, Dense FFN)
+  matmul_small: 0.50,    // 小矩阵乘法 (Decode QKV)
+  attention: 0.60,       // Attention Score/Output
+  elementwise: 0.30,     // 逐元素操作 (LayerNorm, Softmax)
+  moe_sparse: 0.20,      // MoE 稀疏计算 (小batch、sparse routing、expert load imbalance)
+};
+
+/** 随机访问延迟惩罚因子 */
+const RANDOM_ACCESS_PENALTY = 1.5;
+
+/** GB 到 bytes 转换 (使用 1024^3 与后端保持一致) */
+const GB_TO_BYTES = 1024 * 1024 * 1024;
 
 // ============================================
 // 动态 MFU 估算
@@ -89,8 +105,8 @@ export function estimateAchievableMFU(
 
   // Ridge Point = 峰值算力 (FLOPs/s) / 峰值带宽 (Bytes/s)
   const peakFlops = hardware.chip.compute_tflops_fp16 * 1e12;
-  const peakBandwidth = hardware.chip.memory_bandwidth_gbps * 1e9 * HBM_EFFICIENCY;
-  const ridgePoint = peakFlops / peakBandwidth;
+  const peakBandwidthBytesPerS = hardware.chip.memory_bandwidth_gbps * GB_TO_BYTES * HBM_EFFICIENCY;
+  const ridgePoint = peakFlops / peakBandwidthBytesPerS;
 
   // 基于 Roofline 的理论 MFU
   const theoreticalMFU = Math.min(1.0, arithmeticIntensity / ridgePoint);
@@ -105,14 +121,414 @@ export function estimateAchievableMFU(
   // 最终 MFU
   const achievableMFU = theoreticalMFU * parallelismOverhead * practicalFactor;
 
-  // 限制范围
-  // Prefill: 通常 30-50%
-  // Decode: 通常 15-30%
+  // 放宽限制范围，避免过度约束
+  // Prefill: 通常 20-65%
+  // Decode: 通常 5-40%
   if (phase === 'prefill') {
-    return Math.max(0.2, Math.min(0.5, achievableMFU));
+    return Math.max(0.15, Math.min(0.65, achievableMFU));
   } else {
-    return Math.max(0.1, Math.min(0.35, achievableMFU));
+    return Math.max(0.05, Math.min(0.40, achievableMFU));
   }
+}
+
+// ============================================
+// 逐操作延迟估算 (Per-Operation Roofline)
+// ============================================
+
+/**
+ * 操作类型 - 用于确定计算效率
+ */
+type OpType = 'matmul_large' | 'matmul_small' | 'attention' | 'elementwise' | 'memory_only' | 'moe_sparse';
+
+/**
+ * 计算单个操作的延迟 (ms)
+ * 使用 Roofline 模型: max(compute_time, memory_time)
+ *
+ * @param flops - 浮点运算数
+ * @param memoryBytes - 内存访问字节数
+ * @param peakFlops - 峰值算力 (FLOPs)
+ * @param memoryBandwidthGBps - 内存带宽 (GB/s)
+ * @param opType - 操作类型，决定计算效率
+ * @param isRandomAccess - 是否随机访问（如 KV Cache 读取）
+ */
+function calcOpLatency(
+  flops: number,
+  memoryBytes: number,
+  peakFlops: number,
+  memoryBandwidthGBps: number,
+  opType: OpType = 'matmul_large',
+  isRandomAccess: boolean = false
+): { latencyMs: number; computeMs: number; memoryMs: number } {
+  // 计算效率
+  const computeEfficiency = opType === 'memory_only' ? 1.0 : COMPUTE_EFFICIENCY[opType];
+
+  // 计算时间 (考虑效率)
+  const effectiveFlops = peakFlops * computeEfficiency;
+  const computeTimeS = flops > 0 ? flops / effectiveFlops : 0;
+  const computeTimeMs = computeTimeS * 1000;
+
+  // 内存时间 (转换 bytes 到 GB，使用 1024^3)
+  const memoryGB = memoryBytes / GB_TO_BYTES;
+  const effectiveBandwidthGBps = memoryBandwidthGBps * HBM_EFFICIENCY;
+  let memoryTimeMs = (memoryGB / effectiveBandwidthGBps) * 1000;
+
+  // 随机访问惩罚
+  if (isRandomAccess) {
+    memoryTimeMs *= RANDOM_ACCESS_PENALTY;
+  }
+
+  return {
+    latencyMs: Math.max(computeTimeMs, memoryTimeMs),
+    computeMs: computeTimeMs,
+    memoryMs: memoryTimeMs,
+  };
+}
+
+/**
+ * 逐操作 Prefill 延迟估算 (Per-Operation Roofline)
+ *
+ * 原理: 对每个子操作应用 Roofline 模型，然后求和
+ * 单层包含: LayerNorm1 + QKV + Score + Softmax + Output + TP_AllReduce1
+ *         + LayerNorm2 + FFN_gate + FFN_up + FFN_down + TP_AllReduce2 + KV_Cache_Write
+ *
+ * Σ max(compute_i, memory_i) >> max(Σ compute, Σ memory)
+ */
+export function estimatePrefillLatencyPerLayer(
+  model: LLMModelConfig,
+  inference: InferenceConfig,
+  parallelism: ParallelismStrategy,
+  hardware: HardwareConfig
+): { totalMs: number; computeMs: number; memoryMs: number; commMs: number } {
+  const numLayers = model.num_layers;
+  const layersPerChip = Math.ceil(numLayers / parallelism.pp);
+
+  // 硬件参数 (带宽使用 GB/s，不再转换为 bytes/s)
+  const peakFlops = hardware.chip.compute_tflops_fp16 * 1e12;
+  const memoryBandwidthGBps = hardware.chip.memory_bandwidth_gbps;
+  const tpBandwidthGBps = hardware.node.intra_node_bandwidth_gbps;
+  const tpLatencyUs = hardware.node.intra_node_latency_us;
+
+  // 模型参数
+  const H = model.hidden_size;
+  const I = model.intermediate_size;
+  const numHeads = model.num_attention_heads;
+  const numKVHeads = model.num_kv_heads;
+  const headDim = H / numHeads;
+  const kvDim = headDim * numKVHeads;
+  const B = inference.batch_size;
+  const S = inference.input_seq_length;
+  const bytesPerElement = getBytesPerElement(model.dtype);
+
+  // TP 分片后的参数
+  const headsPerTP = Math.ceil(numHeads / parallelism.tp);
+  const kvHeadsPerTP = Math.ceil(numKVHeads / parallelism.tp);
+
+  let totalComputeMs = 0;
+  let totalMemoryMs = 0;
+  let totalCommMs = 0;
+  let totalLatencyMs = 0;
+
+  // 逐层计算
+  for (let layer = 0; layer < layersPerChip; layer++) {
+    // === 1. LayerNorm 1 (RMSNorm) ===
+    const ln1Flops = 3 * B * S * H;  // RMSNorm: square, mean, normalize
+    const ln1Memory = B * S * H * bytesPerElement * 2;  // 读+写
+    const ln1 = calcOpLatency(ln1Flops, ln1Memory, peakFlops, memoryBandwidthGBps, 'elementwise');
+
+    // === 2. QKV Projection (大矩阵乘法) ===
+    const qkvFlops = 2 * B * S * H * (H + 2 * kvDim) / parallelism.tp;
+    const qkvWeightBytes = H * (H + 2 * kvDim) * bytesPerElement / parallelism.tp;
+    const qkvIOBytes = B * S * (H + H + 2 * kvDim) * bytesPerElement / parallelism.tp;
+    const qkv = calcOpLatency(qkvFlops, qkvWeightBytes + qkvIOBytes, peakFlops, memoryBandwidthGBps, 'matmul_large');
+
+    // === 3. Attention Score (Q @ K^T) - Attention 操作 ===
+    const scoreFlops = 2 * B * headsPerTP * S * S * headDim;
+    const scoreQBytes = B * headsPerTP * S * headDim * bytesPerElement;
+    const scoreKBytes = B * kvHeadsPerTP * S * headDim * bytesPerElement;
+    const scoreOutBytes = B * headsPerTP * S * S * bytesPerElement;
+    const score = calcOpLatency(scoreFlops, scoreQBytes + scoreKBytes + scoreOutBytes, peakFlops, memoryBandwidthGBps, 'attention');
+
+    // === 4. Softmax (逐元素操作) ===
+    const softmaxFlops = 5 * B * headsPerTP * S * S;  // exp + sum + div + sub + max
+    const softmaxMemory = B * headsPerTP * S * S * bytesPerElement * 2;  // 读+写
+    const softmax = calcOpLatency(softmaxFlops, softmaxMemory, peakFlops, memoryBandwidthGBps, 'elementwise');
+
+    // === 5. Attention Output (Softmax @ V + Output Projection) ===
+    const svFlops = 2 * B * headsPerTP * S * S * headDim;
+    const outProjFlops = 2 * B * S * H * H / parallelism.tp;
+    const attnOutFlops = svFlops + outProjFlops;
+    const svMemory = B * headsPerTP * S * S * bytesPerElement + B * kvHeadsPerTP * S * headDim * bytesPerElement;
+    const outProjMemory = H * H * bytesPerElement / parallelism.tp + B * S * H * bytesPerElement;
+    const attnOut = calcOpLatency(attnOutFlops, svMemory + outProjMemory, peakFlops, memoryBandwidthGBps, 'attention');
+
+    // === 6. TP AllReduce 1 (Attention 后) ===
+    let tpComm1Ms = 0;
+    if (parallelism.tp > 1) {
+      const allReduceGB = 2 * B * S * H * bytesPerElement * (parallelism.tp - 1) / parallelism.tp / GB_TO_BYTES;
+      tpComm1Ms = (allReduceGB / tpBandwidthGBps) * 1000 + tpLatencyUs / 1000;
+    }
+
+    // === 7. LayerNorm 2 (RMSNorm) ===
+    const ln2 = calcOpLatency(ln1Flops, ln1Memory, peakFlops, memoryBandwidthGBps, 'elementwise');
+
+    // === 8-10. FFN Gate/Up/Down ===
+    // 判断是否为 MoE 层 (简化: model_type='moe' 时假设大部分层是 MoE)
+    const isMoELayer = model.model_type === 'moe' && model.moe_config;
+    let gate: { latencyMs: number; computeMs: number; memoryMs: number };
+    let up: { latencyMs: number; computeMs: number; memoryMs: number };
+    let down: { latencyMs: number; computeMs: number; memoryMs: number };
+    let epCommMs = 0;
+
+    if (isMoELayer && model.moe_config) {
+      // MoE FFN: 稀疏计算，按 EP 切分 (不按 TP!)
+      const moeConfig = model.moe_config;
+      const ffnI = moeConfig.expert_intermediate_size ?? I;
+      const numActiveExperts = moeConfig.num_experts_per_tok;
+
+      // MoE FLOPs: B * S * num_active_experts * 2 * H * expert_I
+      const moeGateFlops = 2 * B * S * H * ffnI * numActiveExperts;
+      // MoE 权重: 需要加载 num_active_experts 个专家的权重 (不除以 TP!)
+      const expertWeightBytes = 3 * H * ffnI * bytesPerElement;
+      const totalWeightBytes = expertWeightBytes * numActiveExperts;
+      const moeIOBytes = B * S * (H + ffnI) * bytesPerElement * numActiveExperts;
+
+      // 使用 moe_sparse 效率 (20%) - MoE 是稀疏计算
+      gate = calcOpLatency(moeGateFlops / 2, totalWeightBytes / 3 + moeIOBytes / 2, peakFlops, memoryBandwidthGBps, 'moe_sparse');
+      up = calcOpLatency(moeGateFlops / 2, totalWeightBytes / 3 + moeIOBytes / 2, peakFlops, memoryBandwidthGBps, 'moe_sparse');
+      const moeDownFlops = 2 * B * S * ffnI * H * numActiveExperts;
+      down = calcOpLatency(moeDownFlops, totalWeightBytes / 3 + B * S * (ffnI + H) * bytesPerElement * numActiveExperts, peakFlops, memoryBandwidthGBps, 'moe_sparse');
+
+      // EP All-to-All 通信开销 (dispatch + combine)
+      if (parallelism.ep > 1) {
+        const allToAllBytes = B * S * H * bytesPerElement * 2;  // dispatch + combine
+        epCommMs = (allToAllBytes / GB_TO_BYTES / tpBandwidthGBps) * 1000 * 2;  // 双向
+      }
+    } else {
+      // Dense FFN: 大矩阵乘法，按 TP 切分
+      const ffnI = I;
+      const gateFlops = 2 * B * S * H * ffnI / parallelism.tp;
+      const gateWeightBytes = H * ffnI * bytesPerElement / parallelism.tp;
+      const gateIOBytes = B * S * (H + ffnI) * bytesPerElement / parallelism.tp;
+      gate = calcOpLatency(gateFlops, gateWeightBytes + gateIOBytes, peakFlops, memoryBandwidthGBps, 'matmul_large');
+      up = calcOpLatency(gateFlops, gateWeightBytes + gateIOBytes, peakFlops, memoryBandwidthGBps, 'matmul_large');
+
+      const downFlops = 2 * B * S * ffnI * H / parallelism.tp;
+      const downWeightBytes = ffnI * H * bytesPerElement / parallelism.tp;
+      const downIOBytes = B * S * (ffnI + H) * bytesPerElement / parallelism.tp;
+      down = calcOpLatency(downFlops, downWeightBytes + downIOBytes, peakFlops, memoryBandwidthGBps, 'matmul_large');
+    }
+
+    // === 11. TP AllReduce 2 (FFN 后) ===
+    let tpComm2Ms = 0;
+    if (parallelism.tp > 1) {
+      const allReduceGB = 2 * B * S * H * bytesPerElement * (parallelism.tp - 1) / parallelism.tp / GB_TO_BYTES;
+      tpComm2Ms = (allReduceGB / tpBandwidthGBps) * 1000 + tpLatencyUs / 1000;
+    }
+
+    // === 12. KV Cache Write (Prefill 阶段写入所有 token 的 KV) ===
+    const kvWriteBytes = 2 * B * S * kvHeadsPerTP * headDim * bytesPerElement;
+    const kvWrite = calcOpLatency(0, kvWriteBytes, peakFlops, memoryBandwidthGBps, 'memory_only');
+
+    // 单层总延迟 = 所有操作延迟之和 (含 EP 通信)
+    const layerLatencyMs = ln1.latencyMs + qkv.latencyMs + score.latencyMs + softmax.latencyMs +
+                           attnOut.latencyMs + tpComm1Ms + ln2.latencyMs + gate.latencyMs +
+                           up.latencyMs + down.latencyMs + epCommMs + tpComm2Ms + kvWrite.latencyMs;
+
+    const layerComputeMs = ln1.computeMs + qkv.computeMs + score.computeMs + softmax.computeMs +
+                           attnOut.computeMs + ln2.computeMs + gate.computeMs + up.computeMs + down.computeMs;
+
+    const layerMemoryMs = ln1.memoryMs + qkv.memoryMs + score.memoryMs + softmax.memoryMs +
+                          attnOut.memoryMs + ln2.memoryMs + gate.memoryMs + up.memoryMs +
+                          down.memoryMs + kvWrite.memoryMs;
+
+    totalComputeMs += layerComputeMs;
+    totalMemoryMs += layerMemoryMs;
+    totalCommMs += tpComm1Ms + tpComm2Ms + epCommMs;
+    totalLatencyMs += layerLatencyMs;
+  }
+
+  return {
+    totalMs: totalLatencyMs,
+    computeMs: totalComputeMs,
+    memoryMs: totalMemoryMs,
+    commMs: totalCommMs,
+  };
+}
+
+/**
+ * 逐操作 Decode 延迟估算 (Per-Operation Roofline)
+ *
+ * Decode 阶段每 token 的延迟计算
+ * 与 Prefill 类似，但：
+ * - num_tokens = 1
+ * - 需要读取 KV Cache (context_length 个 token)
+ * - 不需要写入 KV Cache (只写 1 个 token，很小)
+ */
+export function estimateDecodeLatencyPerOperation(
+  model: LLMModelConfig,
+  inference: InferenceConfig,
+  parallelism: ParallelismStrategy,
+  hardware: HardwareConfig,
+  contextLength: number
+): { totalMs: number; computeMs: number; memoryMs: number; commMs: number } {
+  const numLayers = model.num_layers;
+  const layersPerChip = Math.ceil(numLayers / parallelism.pp);
+
+  // 硬件参数 (带宽使用 GB/s)
+  const peakFlops = hardware.chip.compute_tflops_fp16 * 1e12;
+  const memoryBandwidthGBps = hardware.chip.memory_bandwidth_gbps;
+  const tpBandwidthGBps = hardware.node.intra_node_bandwidth_gbps;
+  const tpLatencyUs = hardware.node.intra_node_latency_us;
+
+  // 模型参数
+  const H = model.hidden_size;
+  const I = model.intermediate_size;
+  const numHeads = model.num_attention_heads;
+  const numKVHeads = model.num_kv_heads;
+  const headDim = H / numHeads;
+  const kvDim = headDim * numKVHeads;
+  const B = inference.batch_size;
+  const S = 1;  // Decode: 每次只处理 1 个 token
+  const C = contextLength;  // 需要与 context 个 token 做 attention
+  const bytesPerElement = getBytesPerElement(model.dtype);
+
+  // TP 分片后的参数
+  const headsPerTP = Math.ceil(numHeads / parallelism.tp);
+  const kvHeadsPerTP = Math.ceil(numKVHeads / parallelism.tp);
+
+  let totalComputeMs = 0;
+  let totalMemoryMs = 0;
+  let totalCommMs = 0;
+  let totalLatencyMs = 0;
+
+  // 逐层计算
+  for (let layer = 0; layer < layersPerChip; layer++) {
+    // === 1. LayerNorm 1 (RMSNorm) - 逐元素操作 ===
+    const ln1Flops = 3 * B * S * H;
+    const ln1Memory = B * S * H * bytesPerElement * 2;
+    const ln1 = calcOpLatency(ln1Flops, ln1Memory, peakFlops, memoryBandwidthGBps, 'elementwise');
+
+    // === 2. QKV Projection - Decode 用小矩阵乘法 (batch=1, seq=1) ===
+    const qkvFlops = 2 * B * S * H * (H + 2 * kvDim) / parallelism.tp;
+    const qkvWeightBytes = H * (H + 2 * kvDim) * bytesPerElement / parallelism.tp;
+    const qkvIOBytes = B * S * (H + H + 2 * kvDim) * bytesPerElement / parallelism.tp;
+    const qkv = calcOpLatency(qkvFlops, qkvWeightBytes + qkvIOBytes, peakFlops, memoryBandwidthGBps, 'matmul_small');
+
+    // === 3. KV Cache Read (Decode 特有：读取历史 context 的 KV) - 随机访问 ===
+    const kvReadBytes = 2 * B * C * kvHeadsPerTP * headDim * bytesPerElement;
+    const kvRead = calcOpLatency(0, kvReadBytes, peakFlops, memoryBandwidthGBps, 'memory_only', true);
+
+    // === 4. Attention Score (Q @ K^T): 1 query vs C keys ===
+    const scoreFlops = 2 * B * headsPerTP * S * C * headDim;
+    const scoreQBytes = B * headsPerTP * S * headDim * bytesPerElement;
+    const scoreKBytes = B * kvHeadsPerTP * C * headDim * bytesPerElement;
+    const scoreOutBytes = B * headsPerTP * S * C * bytesPerElement;
+    const score = calcOpLatency(scoreFlops, scoreQBytes + scoreKBytes + scoreOutBytes, peakFlops, memoryBandwidthGBps, 'attention');
+
+    // === 5. Softmax - 逐元素操作 ===
+    const softmaxFlops = 5 * B * headsPerTP * S * C;
+    const softmaxMemory = B * headsPerTP * S * C * bytesPerElement * 2;
+    const softmax = calcOpLatency(softmaxFlops, softmaxMemory, peakFlops, memoryBandwidthGBps, 'elementwise');
+
+    // === 6. Attention Output (Softmax @ V + Output Projection) ===
+    const svFlops = 2 * B * headsPerTP * S * C * headDim;
+    const outProjFlops = 2 * B * S * H * H / parallelism.tp;
+    const attnOutFlops = svFlops + outProjFlops;
+    const svMemory = B * headsPerTP * S * C * bytesPerElement + B * kvHeadsPerTP * C * headDim * bytesPerElement;
+    const outProjMemory = H * H * bytesPerElement / parallelism.tp + B * S * H * bytesPerElement;
+    const attnOut = calcOpLatency(attnOutFlops, svMemory + outProjMemory, peakFlops, memoryBandwidthGBps, 'matmul_small');
+
+    // === 7. TP AllReduce 1 ===
+    let tpComm1Ms = 0;
+    if (parallelism.tp > 1) {
+      const allReduceGB = 2 * B * S * H * bytesPerElement * (parallelism.tp - 1) / parallelism.tp / GB_TO_BYTES;
+      tpComm1Ms = (allReduceGB / tpBandwidthGBps) * 1000 + tpLatencyUs / 1000;
+    }
+
+    // === 8. LayerNorm 2 - 逐元素操作 ===
+    const ln2 = calcOpLatency(ln1Flops, ln1Memory, peakFlops, memoryBandwidthGBps, 'elementwise');
+
+    // === 9-11. FFN (Gate, Up, Down) ===
+    // 判断是否为 MoE 层
+    const isMoELayer = model.model_type === 'moe' && model.moe_config;
+    let gate: { latencyMs: number; computeMs: number; memoryMs: number };
+    let up: { latencyMs: number; computeMs: number; memoryMs: number };
+    let down: { latencyMs: number; computeMs: number; memoryMs: number };
+    let epCommMs = 0;
+
+    if (isMoELayer && model.moe_config) {
+      // MoE FFN: 需要加载 num_experts_per_tok 个专家的权重 (不除以 TP!)
+      const moeConfig = model.moe_config;
+      const ffnI = moeConfig.expert_intermediate_size ?? I;
+      const numActiveExperts = moeConfig.num_experts_per_tok;
+
+      // Decode MoE: 仍然是 memory-bound，需要加载专家权重
+      const moeGateFlops = 2 * B * S * H * ffnI * numActiveExperts;
+      const expertWeightBytes = 3 * H * ffnI * bytesPerElement;
+      const totalWeightBytes = expertWeightBytes * numActiveExperts;
+      const moeIOBytes = B * S * (H + ffnI) * bytesPerElement * numActiveExperts;
+
+      // Decode 用 moe_sparse 效率
+      gate = calcOpLatency(moeGateFlops / 2, totalWeightBytes / 3 + moeIOBytes / 2, peakFlops, memoryBandwidthGBps, 'moe_sparse');
+      up = calcOpLatency(moeGateFlops / 2, totalWeightBytes / 3 + moeIOBytes / 2, peakFlops, memoryBandwidthGBps, 'moe_sparse');
+      const moeDownFlops = 2 * B * S * ffnI * H * numActiveExperts;
+      down = calcOpLatency(moeDownFlops, totalWeightBytes / 3 + B * S * (ffnI + H) * bytesPerElement * numActiveExperts, peakFlops, memoryBandwidthGBps, 'moe_sparse');
+
+      // EP All-to-All 通信
+      if (parallelism.ep > 1) {
+        const allToAllBytes = B * S * H * bytesPerElement * 2;
+        epCommMs = (allToAllBytes / GB_TO_BYTES / tpBandwidthGBps) * 1000 * 2;
+      }
+    } else {
+      // Dense FFN: 小矩阵乘法
+      const ffnI = I;
+      const gateFlops = 2 * B * S * H * ffnI / parallelism.tp;
+      const gateWeightBytes = H * ffnI * bytesPerElement / parallelism.tp;
+      const gateIOBytes = B * S * (H + ffnI) * bytesPerElement / parallelism.tp;
+      gate = calcOpLatency(gateFlops, gateWeightBytes + gateIOBytes, peakFlops, memoryBandwidthGBps, 'matmul_small');
+      up = calcOpLatency(gateFlops, gateWeightBytes + gateIOBytes, peakFlops, memoryBandwidthGBps, 'matmul_small');
+
+      const downFlops = 2 * B * S * ffnI * H / parallelism.tp;
+      const downWeightBytes = ffnI * H * bytesPerElement / parallelism.tp;
+      const downIOBytes = B * S * (ffnI + H) * bytesPerElement / parallelism.tp;
+      down = calcOpLatency(downFlops, downWeightBytes + downIOBytes, peakFlops, memoryBandwidthGBps, 'matmul_small');
+    }
+
+    // === 12. TP AllReduce 2 ===
+    let tpComm2Ms = 0;
+    if (parallelism.tp > 1) {
+      const allReduceGB = 2 * B * S * H * bytesPerElement * (parallelism.tp - 1) / parallelism.tp / GB_TO_BYTES;
+      tpComm2Ms = (allReduceGB / tpBandwidthGBps) * 1000 + tpLatencyUs / 1000;
+    }
+
+    // === 13. KV Cache Write (写入 1 个 token，很小) ===
+    const kvWriteBytes = 2 * B * S * kvHeadsPerTP * headDim * bytesPerElement;
+    const kvWrite = calcOpLatency(0, kvWriteBytes, peakFlops, memoryBandwidthGBps, 'memory_only');
+
+    // 单层总延迟 (含 EP 通信)
+    const layerLatencyMs = ln1.latencyMs + qkv.latencyMs + kvRead.latencyMs + score.latencyMs +
+                           softmax.latencyMs + attnOut.latencyMs + tpComm1Ms + ln2.latencyMs +
+                           gate.latencyMs + up.latencyMs + down.latencyMs + epCommMs + tpComm2Ms + kvWrite.latencyMs;
+
+    const layerComputeMs = ln1.computeMs + qkv.computeMs + score.computeMs + softmax.computeMs +
+                           attnOut.computeMs + ln2.computeMs + gate.computeMs + up.computeMs + down.computeMs;
+
+    const layerMemoryMs = ln1.memoryMs + qkv.memoryMs + kvRead.memoryMs + score.memoryMs +
+                          softmax.memoryMs + attnOut.memoryMs + ln2.memoryMs + gate.memoryMs +
+                          up.memoryMs + down.memoryMs + kvWrite.memoryMs;
+
+    totalComputeMs += layerComputeMs;
+    totalMemoryMs += layerMemoryMs;
+    totalCommMs += tpComm1Ms + tpComm2Ms + epCommMs;
+    totalLatencyMs += layerLatencyMs;
+  }
+
+  return {
+    totalMs: totalLatencyMs,
+    computeMs: totalComputeMs,
+    memoryMs: totalMemoryMs,
+    commMs: totalCommMs,
+  };
 }
 
 // ============================================
@@ -122,46 +538,22 @@ export function estimateAchievableMFU(
 /**
  * 估算 Prefill 阶段计算延迟
  *
- * 计算延迟 = max(计算时间, 访存时间)
- * - 计算时间 = FLOPs / (峰值算力 × MFU × 并行数)
- * - 访存时间 = 模型权重 / (HBM带宽 × 效率)
+ * 使用逐操作 Roofline 模型：对每个子操作应用 max(compute, memory)，然后求和
+ * 返回总延迟（计算 + 访存 + 通信）
  */
 export function estimatePrefillComputeLatency(
   model: LLMModelConfig,
   inference: InferenceConfig,
   parallelism: ParallelismStrategy,
   hardware: HardwareConfig,
-  mfuEstimate?: number // 可选，不传则使用动态估算
+  _mfuEstimate?: number // 保留参数兼容性，但逐操作计算不使用整体 MFU
 ): number {
-  // 使用动态 MFU 估算（如果未指定）
-  const mfu = mfuEstimate ?? estimateAchievableMFU(model, inference, parallelism, hardware, 'prefill');
+  // 使用逐操作计算方法
+  const perLayerResult = estimatePrefillLatencyPerLayer(model, inference, parallelism, hardware);
 
-  const totalFlops = calculatePrefillFlops(model, inference);
-
-  // 每芯片算力 (FLOPs/s)
-  const chipTflops = hardware.chip.compute_tflops_fp16;
-  const flopsPerSecond = chipTflops * 1e12;
-
-  // 并行带来的加速
-  // TP: 计算完美切分
-  // PP: 计算按 stage 切分，但有气泡
-  const effectiveParallelism = parallelism.tp * parallelism.pp;
-
-  // 每芯片需处理的 FLOPs
-  const flopsPerChip = totalFlops / effectiveParallelism;
-
-  // 计算时间 (秒)
-  const computeTimeS = flopsPerChip / (flopsPerSecond * mfu);
-  const computeTimeMs = computeTimeS * 1000;
-
-  // 访存时间 (权重加载)
-  // Prefill 阶段需要读取模型权重
-  const modelMemoryGB = calculateModelMemory(model, parallelism);
-  const memoryTimeS = modelMemoryGB / (hardware.chip.memory_bandwidth_gbps * HBM_EFFICIENCY);
-  const memoryTimeMs = memoryTimeS * 1000;
-
-  // 取较大值 (Roofline 模型)
-  return Math.max(computeTimeMs, memoryTimeMs);
+  // 返回总延迟 (逐操作 Roofline 的结果)
+  // 注意: 这个值用于 MFU 计算和 analyzeLatency 中的 prefillCompute
+  return perLayerResult.totalMs;
 }
 
 /**
@@ -393,8 +785,8 @@ export function calculatePPEfficiency(
  * Ridge Point = Peak Compute / Peak Memory BW
  */
 function calculateRidgePoint(hardware: HardwareConfig): number {
-  // 优先使用 peak_tflops，否则使用 compute_tflops_fp16
-  const peakTflops = hardware.chip.peak_tflops ?? hardware.chip.compute_tflops_fp16;
+  // 使用 compute_tflops_fp16 作为峰值算力
+  const peakTflops = hardware.chip.compute_tflops_fp16;
   const memBwGBps = hardware.chip.memory_bandwidth_gbps;
 
   // 防止除零和无效值
@@ -420,7 +812,7 @@ function calculatePrefillArithmeticIntensity(
   parallelism: ParallelismStrategy
 ): number {
   const dtypeBytes = model.dtype === 'fp32' ? 4 : 2;
-  const params = model.total_params || estimateModelParams(model);
+  const params = estimateModelParams(model);
 
   // FLOPs: 2 * Params * SeqLen * Batch / TP (TP切分后单卡计算量)
   const flops = (2 * params * inference.input_seq_length * inference.batch_size) / parallelism.tp;
@@ -446,7 +838,7 @@ function calculateDecodeArithmeticIntensity(
   contextLen: number
 ): number {
   const dtypeBytes = model.dtype === 'fp32' ? 4 : 2;
-  const params = model.total_params || estimateModelParams(model);
+  const params = estimateModelParams(model);
 
   // FLOPs per token: 2 * Params * Batch / TP
   const flopsPerToken = (2 * params * inference.batch_size) / parallelism.tp;
@@ -479,7 +871,7 @@ function analyzePhaseBottleneck(
   memoryLatency: number,
   commLatency: number,
   actualLatency: number,
-  hardware: HardwareConfig,
+  _hardware: HardwareConfig,
   utilization: number
 ): PhaseBottleneckAnalysis {
   // 判断瓶颈类型
@@ -760,32 +1152,38 @@ export function analyzeLatency(
 ): LatencyAnalysis {
   const numMicroBatches = inference.num_micro_batches ?? Math.max(parallelism.pp, 4);
 
-  // ===== Prefill 阶段 =====
-  const prefillCompute = estimatePrefillComputeLatency(model, inference, parallelism, hardware);
-  const prefillComm = estimatePrefillCommLatency(model, inference, parallelism, hardware);
+  // ===== Prefill 阶段 (使用逐层计算) =====
+  // 逐层 Roofline: Σ max(compute_i, memory_i) + Σ comm_i
+  const perLayerResult = estimatePrefillLatencyPerLayer(model, inference, parallelism, hardware);
+
+  // 为了向后兼容，仍然分别返回 compute 和 comm
+  const prefillCompute = Math.max(perLayerResult.computeMs, perLayerResult.memoryMs);
+  const prefillComm = perLayerResult.commMs;
 
   // 流水线气泡
   const bubbleRatio = calculatePPBubbleRatio(parallelism.pp, numMicroBatches);
 
-  // Prefill 总延迟 (考虑气泡)
-  // 计算和通信部分重叠，取 max；然后考虑气泡损失
-  const prefillIdeal = Math.max(prefillCompute, prefillComm);
+  // Prefill 总延迟 (使用逐层结果，已包含计算+访存+通信)
+  // 逐层计算: Σ [max(compute_i, memory_i) + comm_i]
+  const prefillIdeal = perLayerResult.totalMs;
   const prefillTotal = prefillIdeal / (1 - bubbleRatio);
 
-  // ===== Decode 阶段 =====
+  // ===== Decode 阶段 (使用逐操作计算) =====
   // 使用平均 context 长度
   const avgContextLen = inference.input_seq_length + inference.output_seq_length / 2;
 
-  const decodeCompute = estimateDecodeComputeLatency(
+  // 逐操作 Roofline 计算
+  const decodePerOpResult = estimateDecodeLatencyPerOperation(
     model, inference, parallelism, hardware, avgContextLen
   );
-  const decodeMemory = estimateDecodeMemoryLatency(
-    model, inference, parallelism, hardware, avgContextLen
-  );
-  const decodeComm = estimateDecodeCommLatency(model, inference, parallelism, hardware);
 
-  // Decode 是 memory-bound，取计算和访存的最大值，加上通信
-  const decodePerToken = Math.max(decodeCompute, decodeMemory) + decodeComm;
+  // 为了向后兼容，仍然分别返回 compute 和 memory
+  const decodeCompute = decodePerOpResult.computeMs;
+  const decodeMemory = decodePerOpResult.memoryMs;
+  const decodeComm = decodePerOpResult.commMs;
+
+  // Decode 每 token 延迟 (使用逐操作结果)
+  const decodePerToken = decodePerOpResult.totalMs;
 
   // ===== 端到端延迟 =====
   const e2eLatency = prefillTotal + decodePerToken * inference.output_seq_length;
@@ -953,11 +1351,17 @@ export function estimateTheoreticalMaxThroughput(
   return theoreticalFlopsPerSecond / flopsPerToken;
 }
 
+/** Kernel Launch 开销常量 */
+const KERNELS_PER_LAYER = 12;  // 每层约 12 个 kernel (LN, QKV, Attn, FFN 等)
+const KERNEL_LAUNCH_US = 15;   // 每个 kernel 约 15μs launch 时间
+
 /**
  * 估算 MBU (Memory Bandwidth Utilization)
  *
  * MBU = Achieved_Bandwidth / Peak_Bandwidth
  * 其中 Achieved_Bandwidth = (Model_Size + KV_Cache_Size) / TPOT
+ *
+ * 注意: TPOT 包含 kernel launch 开销，这会降低有效 MBU
  *
  * 业界标准公式来源:
  * - Databricks: https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices
@@ -970,29 +1374,69 @@ export function estimateMBU(
   hardware: HardwareConfig
 ): number {
   const latency = analyzeLatency(model, inference, parallelism, hardware);
-  const tpotSeconds = latency.decode_per_token_latency_ms / 1000;
+  const tpotComputeMs = latency.decode_per_token_latency_ms;
 
-  if (tpotSeconds <= 0) return 0;
+  if (tpotComputeMs <= 0) return 0;
 
-  // Decode 每 token 需读取的数据量 (GB)
-  // = 模型权重 (每 token 都要读一遍) + 当前 context 的 KV Cache
-  const modelMemoryGB = calculateModelMemory(model, parallelism);
+  // Kernel launch 开销 (显著影响 Decode 性能)
+  const layersPerChip = Math.ceil(model.num_layers / parallelism.pp);
+  const kernelOverheadMs = KERNELS_PER_LAYER * KERNEL_LAUNCH_US / 1000 * layersPerChip;
+  const tpotTotalMs = tpotComputeMs + kernelOverheadMs;
+  const tpotSeconds = tpotTotalMs / 1000;
 
-  // KV Cache 按平均 context 长度计算
+  // 计算 Decode 每 token 需读取的数据量 (正确处理 MoE)
+  const bytesPerElement = getBytesPerElement(model.dtype);
+  const H = model.hidden_size;
+
+  // 1. Attention 权重 (每层, 按 TP 切分)
+  let attnWeightPerLayer: number;
+  if (model.mla_config) {
+    // MLA Attention
+    attnWeightPerLayer = (
+      H * model.mla_config.q_lora_rank +  // Q LoRA down
+      model.mla_config.q_lora_rank * model.num_attention_heads *
+        (model.mla_config.qk_nope_head_dim + model.mla_config.qk_rope_head_dim) +  // Q LoRA up
+      H * model.mla_config.kv_lora_rank +  // KV compress
+      model.num_attention_heads * (model.mla_config.v_head_dim ?? (H / model.num_attention_heads)) * H  // Output proj
+    ) * bytesPerElement / parallelism.tp;
+  } else {
+    // 标准 MHA
+    attnWeightPerLayer = 4 * H * H * bytesPerElement / parallelism.tp;
+  }
+
+  // 2. FFN 权重 (需要区分 Dense 和 MoE)
+  let modelWeightBytes: number;
+  if (model.model_type === 'moe' && model.moe_config) {
+    // MoE 模型: 前几层是 Dense，其余是 MoE
+    const numDenseLayers = 3;  // DeepSeek-V3 前 3 层是 Dense
+    const numMoELayers = model.num_layers - numDenseLayers;
+
+    // Dense FFN (按 TP 切分)
+    const denseFFNWeightPerLayer = 3 * H * model.intermediate_size * bytesPerElement / parallelism.tp;
+    // MoE FFN (每 token 激活 k 个 experts, 不按 TP 切分!)
+    const moeFFNWeightPerLayer = 3 * H * (model.moe_config.expert_intermediate_size ?? model.intermediate_size) *
+      bytesPerElement * model.moe_config.num_experts_per_tok;
+
+    modelWeightBytes = (attnWeightPerLayer + denseFFNWeightPerLayer) * numDenseLayers +
+                       (attnWeightPerLayer + moeFFNWeightPerLayer) * numMoELayers;
+  } else {
+    // Dense 模型
+    const ffnWeightPerLayer = 3 * H * model.intermediate_size * bytesPerElement / parallelism.tp;
+    modelWeightBytes = (attnWeightPerLayer + ffnWeightPerLayer) * model.num_layers;
+  }
+
+  // 3. KV Cache (使用 MLA 压缩后的维度)
   const avgContextLen = inference.input_seq_length + inference.output_seq_length / 2;
-  const kvCacheGB = calculateKVCacheMemory(model, inference, parallelism);
-  const kvCacheRatio = avgContextLen / inference.max_seq_length;
-  const currentKVCacheGB = kvCacheGB * kvCacheRatio;
+  const kvDim = model.mla_config?.kv_lora_rank ??
+    (model.hidden_size / model.num_attention_heads * model.num_kv_heads);
+  const kvCacheBytes = 2 * inference.batch_size * avgContextLen * kvDim *
+    bytesPerElement / parallelism.tp * model.num_layers;
 
-  // 实际带宽 (GB/s)
-  const dataReadPerTokenGB = modelMemoryGB + currentKVCacheGB;
+  // 4. 计算 MBU
+  const dataReadPerTokenGB = (modelWeightBytes + kvCacheBytes) / GB_TO_BYTES;
   const achievedBandwidthGBps = dataReadPerTokenGB / tpotSeconds;
-
-  // 峰值带宽 (考虑所有芯片并行读取)
-  // 注意: TP 并行时，每个芯片只读取自己的部分，所以总带宽是单芯片带宽
   const peakBandwidthGBps = hardware.chip.memory_bandwidth_gbps;
 
-  // MBU
   const mbu = achievedBandwidthGBps / peakBandwidthGBps;
 
   // MBU 不应超过 1 (理论上)

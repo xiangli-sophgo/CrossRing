@@ -27,7 +27,7 @@ class _FlitProxy:
         return f"(pid={self.packet_id}, fid={self.flit_id}, ET={self.ETag_priority}, IT={itag})"
 
 
-from config.config import CrossRingConfig
+from src.kcin.base.config import KCINConfigBase
 
 # 引入节点局部 CrossRing piece 绘制函数（若存在）
 # from .CrossRing_Piece_Visualizer import CrossRingVisualizer
@@ -40,7 +40,7 @@ from matplotlib.patches import FancyArrowPatch
 
 class NetworkLinkVisualizer:
     class PieceVisualizer:
-        def __init__(self, config: CrossRingConfig, ax, highlight_callback=None, parent: "NetworkLinkVisualizer" = None):
+        def __init__(self, config: KCINConfigBase, ax, highlight_callback=None, parent: "NetworkLinkVisualizer" = None):
             """
             仅绘制单个节点的 Inject/Eject Queue 和 Ring Bridge FIFO。
             参数:

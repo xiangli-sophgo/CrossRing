@@ -69,10 +69,22 @@ class SimulationEngine:
 
     def _init_kcin_model(self):
         """初始化KCIN模型"""
-        from config.config import CrossRingConfig
-        from src.noc import REQ_RSP_model
+        import yaml
 
-        self.config = CrossRingConfig(self.config_path)
+        # 先读取配置文件确定版本
+        with open(self.config_path, "r", encoding="utf-8") as f:
+            raw_config = yaml.safe_load(f)
+        kcin_version = self.config_overrides.get('KCIN_VERSION', raw_config.get('KCIN_VERSION', 'v1'))
+
+        # 根据版本选择配置类和模型类
+        if kcin_version == 'v2':
+            from src.kcin.v2.config import V2Config
+            from src.kcin.v2 import REQ_RSP_model
+            self.config = V2Config(self.config_path)
+        else:
+            from src.kcin.v1.config import V1Config
+            from src.kcin.v1 import REQ_RSP_model
+            self.config = V1Config(self.config_path)
 
         # 应用配置覆盖
         for key, value in self.config_overrides.items():
@@ -120,9 +132,25 @@ class SimulationEngine:
             'RN_RDB_SIZE', 'RN_WDB_SIZE',
             'SN_DDR_RDB_SIZE', 'SN_DDR_WDB_SIZE',
             'SN_L2M_RDB_SIZE', 'SN_L2M_WDB_SIZE',
-            'IQ_CH_FIFO_DEPTH', 'EQ_CH_FIFO_DEPTH',
             'DDR_R_LATENCY', 'DDR_W_LATENCY', 'L2M_R_LATENCY', 'L2M_W_LATENCY',
         ]
+
+        # 根据 KCIN 版本添加对应的 FIFO 参数
+        kcin_version = getattr(self.config, 'KCIN_VERSION', 'v1')
+        if kcin_version == 'v2':
+            # v2 RingStation 架构参数
+            int_configs.extend([
+                'RS_IN_CH_BUFFER', 'RS_OUT_CH_BUFFER',
+                'RS_IN_FIFO_DEPTH', 'RS_OUT_FIFO_DEPTH',
+            ])
+        else:
+            # v1 IQ/RB/EQ 分离架构参数
+            int_configs.extend([
+                'IQ_CH_FIFO_DEPTH', 'EQ_CH_FIFO_DEPTH',
+                'RB_IN_FIFO_DEPTH', 'RB_OUT_FIFO_DEPTH',
+                'IQ_OUT_FIFO_DEPTH_HORIZONTAL', 'IQ_OUT_FIFO_DEPTH_VERTICAL',
+                'IQ_OUT_FIFO_DEPTH_EQ', 'EQ_IN_FIFO_DEPTH',
+            ])
         for attr in int_configs:
             val = getattr(self.config, attr, None)
             if isinstance(val, str):
@@ -133,12 +161,12 @@ class SimulationEngine:
 
     def _init_dcin_model(self):
         """初始化DCIN模型"""
-        from config.d2d_config import D2DConfig
-        from src.d2d.d2d_model import D2D_Model
+        from src.dcin.config import DCINConfig
+        from src.dcin.d2d_model import D2D_Model
 
         # 初始化D2D配置，支持单独指定DIE拓扑配置
-        self.config = D2DConfig(
-            d2d_config_file=self.config_path,
+        self.config = DCINConfig(
+            dcin_config_file=self.config_path,
             die_config_file=self.die_config_path,
         )
 
@@ -351,9 +379,15 @@ class SimulationEngine:
         """
         try:
             if hasattr(self.model, 'save_to_database'):
-                return self.model.save_to_database(experiment_name=experiment_name, description=description)
+                print(f"[SimulationEngine] 调用 model.save_to_database: {experiment_name}")
+                result = self.model.save_to_database(experiment_name=experiment_name, description=description)
+                print(f"[SimulationEngine] save_to_database 返回: {result}")
+                return result
+            else:
+                print(f"[SimulationEngine] model 没有 save_to_database 方法")
         except Exception as e:
             print(f"保存到数据库失败: {e}")
+            traceback.print_exc()
 
         return None
 

@@ -5,15 +5,15 @@ D2D (Die-to-Die) 仿真主脚本
 """
 
 from pathlib import Path
-from src.d2d.d2d_model import D2D_Model
-from config.d2d_config import D2DConfig
+from src.dcin.d2d_model import D2D_Model
+from src.dcin.config import DCINConfig
 
 
 def main():
     """运行D2D仿真 - 使用新的简化接口"""
 
     # 创建配置和模型
-    config = D2DConfig(
+    config = DCINConfig(
         # d2d_config_file="../config/topologies/dcin_2die_config.yaml",
         d2d_config_file="../config/topologies/dcin_4die_config.yaml",
     )

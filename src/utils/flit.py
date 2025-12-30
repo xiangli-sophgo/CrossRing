@@ -109,6 +109,7 @@ class Flit:
         "is_tagged",
         "ETag_priority",
         "used_entry_level",
+        "eject_direction",  # 下环方向（TL/TR/TU/TD），用于释放 entry
         "T0_slot_id",  # T0轮询机制的slot ID
         "T0_fifo_direction",  # T0 slot注册的FIFO方向（"TL"/"TR"/"TU"/"TD"）
         "cmd_entry_cake0_cycle",

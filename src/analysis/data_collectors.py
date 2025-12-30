@@ -897,24 +897,34 @@ class CircuitStatsCollector:
         for net_name, network in networks.items():
             results[net_name] = {}
 
-            # 获取FIFO容量配置
+            # 获取FIFO容量配置（兼容 v1/v2 参数名）
+            # v2: RS_IN_CH_BUFFER, RS_IN_FIFO_DEPTH, RS_OUT_CH_BUFFER, RS_OUT_FIFO_DEPTH
+            # v1: IQ_CH_FIFO_DEPTH, IQ_OUT_FIFO_DEPTH_*, RB_IN_FIFO_DEPTH, RB_OUT_FIFO_DEPTH, EQ_IN_FIFO_DEPTH, EQ_CH_FIFO_DEPTH
+            iq_ch = getattr(config, 'RS_IN_CH_BUFFER', getattr(config, 'IQ_CH_FIFO_DEPTH', 4))
+            iq_out_h = getattr(config, 'RS_OUT_FIFO_DEPTH', getattr(config, 'IQ_OUT_FIFO_DEPTH_HORIZONTAL', 4))
+            iq_out_v = getattr(config, 'RS_OUT_FIFO_DEPTH', getattr(config, 'IQ_OUT_FIFO_DEPTH_VERTICAL', 4))
+            iq_out_eq = getattr(config, 'RS_OUT_CH_BUFFER', getattr(config, 'IQ_OUT_FIFO_DEPTH_EQ', 4))
+            rb_in = getattr(config, 'RS_IN_FIFO_DEPTH', getattr(config, 'RB_IN_FIFO_DEPTH', 4))
+            rb_out = getattr(config, 'RS_OUT_FIFO_DEPTH', getattr(config, 'RB_OUT_FIFO_DEPTH', 4))
+            eq_in = getattr(config, 'RS_IN_FIFO_DEPTH', getattr(config, 'EQ_IN_FIFO_DEPTH', 4))
+            eq_ch = getattr(config, 'RS_OUT_CH_BUFFER', getattr(config, 'EQ_CH_FIFO_DEPTH', 4))
             capacities = {
                 "IQ": {
-                    "CH_buffer": config.IQ_CH_FIFO_DEPTH,
-                    "TR": config.IQ_OUT_FIFO_DEPTH_HORIZONTAL,
-                    "TL": config.IQ_OUT_FIFO_DEPTH_HORIZONTAL,
-                    "TU": config.IQ_OUT_FIFO_DEPTH_VERTICAL,
-                    "TD": config.IQ_OUT_FIFO_DEPTH_VERTICAL,
-                    "EQ": config.IQ_OUT_FIFO_DEPTH_EQ,
+                    "CH_buffer": iq_ch,
+                    "TR": iq_out_h,
+                    "TL": iq_out_h,
+                    "TU": iq_out_v,
+                    "TD": iq_out_v,
+                    "EQ": iq_out_eq,
                 },
                 "RB": {
-                    "TR": config.RB_IN_FIFO_DEPTH,
-                    "TL": config.RB_IN_FIFO_DEPTH,
-                    "TU": config.RB_OUT_FIFO_DEPTH,
-                    "TD": config.RB_OUT_FIFO_DEPTH,
-                    "EQ": config.RB_OUT_FIFO_DEPTH,
+                    "TR": rb_in,
+                    "TL": rb_in,
+                    "TU": rb_out,
+                    "TD": rb_out,
+                    "EQ": rb_out,
                 },
-                "EQ": {"TU": config.EQ_IN_FIFO_DEPTH, "TD": config.EQ_IN_FIFO_DEPTH, "CH_buffer": config.EQ_CH_FIFO_DEPTH},
+                "EQ": {"TU": eq_in, "TD": eq_in, "CH_buffer": eq_ch},
             }
 
             # 计算平均深度和使用率

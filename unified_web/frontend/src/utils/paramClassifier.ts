@@ -52,6 +52,8 @@ const CONFIG_PATTERNS_FOR_COLUMN = [
   /^UNIFIED_RW_TRACKER$/,
   /LATENCY_original$/,
   /FIFO_DEPTH$/,
+  /^RS_IN_CH_BUFFER$/, /^RS_OUT_CH_BUFFER$/,
+  /^RS_IN_FIFO_DEPTH$/, /^RS_OUT_FIFO_DEPTH$/,
   /Etag_T\d_UE_MAX$/,
   /^ETAG_BOTHSIDE_UPGRADE$/,
   /^ETAG_T1_ENABLED$/,
@@ -282,8 +284,10 @@ const CONFIG_PARAM_PATTERNS = [
   /^UNIFIED_RW_TRACKER$/,
   // Latency configuration
   /LATENCY_original$/,
-  // FIFO depths
+  // FIFO depths (v1 and v2)
   /FIFO_DEPTH$/,
+  /^RS_IN_CH_BUFFER$/, /^RS_OUT_CH_BUFFER$/,
+  /^RS_IN_FIFO_DEPTH$/, /^RS_OUT_FIFO_DEPTH$/,
   // ETag configuration (配置参数以_MAX结尾)
   /Etag_T\d_UE_MAX$/,
   /^ETAG_BOTHSIDE_UPGRADE$/,

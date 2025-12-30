@@ -18,7 +18,10 @@ import {
 import {
   calculateLayerFlopsPrefill,
   calculateLayerFlopsDecode,
+  calculateModelMemory,
+  calculateKVCacheMemory,
 } from '../modelCalculator'
+import { getBytesPerElement } from '../types'
 import { EventQueue } from './eventQueue'
 import {
   SimulationConfig,
@@ -714,8 +717,9 @@ export class InferenceSimulator {
     const actualFlopsPerSecond = totalFlops / (prefillTime / 1000)
     const dynamicMfu = actualFlopsPerSecond / theoreticalFlopsPerSecond
 
-    // MBU 估算
-    const dynamicMbu = 0.5
+    // MBU 计算 (基于实际 Decode 访存量和 TPOT)
+    // MBU = (Model_Weights + KV_Cache) / (TPOT * Peak_Bandwidth)
+    const dynamicMbu = this.calculateDecodeMBU(avgTpot)
 
     // PP 气泡比
     const maxPPBubbleRatio = this.parallelism.pp > 1
@@ -735,6 +739,71 @@ export class InferenceSimulator {
       maxPPBubbleRatio,
       totalEvents: this.events.length,
     }
+  }
+
+  /**
+   * 计算 Decode 阶段的 MBU (Memory Bandwidth Utilization)
+   *
+   * MBU = (Data_Read_Per_Token) / (TPOT * Peak_Bandwidth)
+   *
+   * 其中 Data_Read_Per_Token 包括:
+   * - 模型权重 (每 token 都需要加载)
+   * - KV Cache (按当前 context 比例)
+   */
+  private calculateDecodeMBU(avgTpotMs: number): number {
+    if (avgTpotMs <= 0) return 0
+
+    const GB_TO_BYTES = 1024 * 1024 * 1024
+    const bytesPerElement = getBytesPerElement(this.model.dtype)
+    const H = this.model.hidden_size
+
+    // 1. 计算模型权重 (需要正确处理 MoE)
+    let modelWeightBytes = 0
+
+    // Attention 权重 (每层, 按 TP 切分)
+    const attnWeightPerLayer = this.model.mla_config
+      ? (
+          H * this.model.mla_config.q_lora_rank +  // Q LoRA down
+          this.model.mla_config.q_lora_rank * this.model.num_attention_heads *
+            (this.model.mla_config.qk_nope_head_dim + this.model.mla_config.qk_rope_head_dim) +  // Q LoRA up
+          H * this.model.mla_config.kv_lora_rank +  // KV compress
+          this.model.num_attention_heads * (this.model.mla_config.v_head_dim ?? (H / this.model.num_attention_heads)) * H  // Output proj
+        ) * bytesPerElement / this.parallelism.tp
+      : (4 * H * H) * bytesPerElement / this.parallelism.tp  // 标准 QKV + O
+
+    // FFN 权重
+    if (this.model.model_type === 'moe' && this.model.moe_config) {
+      // MoE: 前几层是 Dense，其余是 MoE
+      const numDenseLayers = 3  // DeepSeek-V3 前 3 层是 Dense
+      const numMoELayers = this.model.num_layers - numDenseLayers
+
+      // Dense FFN (按 TP 切分)
+      const denseFFNWeightPerLayer = 3 * H * this.model.intermediate_size * bytesPerElement / this.parallelism.tp
+      // MoE FFN (8 experts, 不按 TP 切分!)
+      const moeFFNWeightPerLayer = 3 * H * (this.model.moe_config.expert_intermediate_size ?? this.model.intermediate_size) *
+        bytesPerElement * this.model.moe_config.num_experts_per_tok
+
+      modelWeightBytes = (attnWeightPerLayer + denseFFNWeightPerLayer) * numDenseLayers +
+                         (attnWeightPerLayer + moeFFNWeightPerLayer) * numMoELayers
+    } else {
+      // Dense 模型
+      const ffnWeightPerLayer = 3 * H * this.model.intermediate_size * bytesPerElement / this.parallelism.tp
+      modelWeightBytes = (attnWeightPerLayer + ffnWeightPerLayer) * this.model.num_layers
+    }
+
+    // 2. 计算 KV Cache (按平均 context 长度)
+    const avgContext = this.inference.input_seq_length + this.inference.output_seq_length / 2
+    const kvDim = this.model.mla_config?.kv_lora_rank ?? (this.model.hidden_size / this.model.num_attention_heads * this.model.num_kv_heads)
+    const kvCacheBytes = 2 * this.inference.batch_size * avgContext * kvDim * bytesPerElement / this.parallelism.tp * this.model.num_layers
+
+    // 3. 计算 MBU
+    const dataReadPerTokenGB = (modelWeightBytes + kvCacheBytes) / GB_TO_BYTES
+    const tpotSeconds = avgTpotMs / 1000
+    const achievedBandwidthGBps = dataReadPerTokenGB / tpotSeconds
+    const peakBandwidthGBps = this.hardware.chip.memory_bandwidth_gbps
+
+    const mbu = achievedBandwidthGBps / peakBandwidthGBps
+    return Math.min(mbu, 1.0)  // MBU 不应超过 1
   }
 
   /**

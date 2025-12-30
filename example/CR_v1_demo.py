@@ -1,5 +1,5 @@
-from src.noc import *
-from config.config import CrossRingConfig
+from src.kcin import *
+from src.kcin.config import KCINConfig
 import numpy as np
 
 
@@ -12,7 +12,7 @@ def main():
 
     # Define the path to the configuration file - use topology-specific YAML config
     kcin_type = "5x4"
-    config = CrossRingConfig(f"../config/topologies/kcin_{kcin_type}.yaml")
+    config = KCINConfig(f"../config/topologies/kcin_{kcin_type}.yaml")
 
     # Initialize the simulation model
     sim: BaseModel = eval(f"{model_type}_model")(

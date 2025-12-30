@@ -14,8 +14,8 @@ import time
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from config.config import CrossRingConfig
-from src.noc.base_model_v2 import BaseModel
+from src.kcin.config import KCINConfig
+from src.kcin.base_model_v2 import BaseModel
 
 
 def run_CR_v2_demo():
@@ -23,7 +23,7 @@ def run_CR_v2_demo():
     print("\n初始化配置...")
     kcin_type = "5x2"
     config_path = os.path.join(project_root, "config", "topologies", f"kcin_{kcin_type}.yaml")
-    config = CrossRingConfig(config_path)
+    config = KCINConfig(config_path)
 
     # 创建仿真实例（使用v2版本）
     result_dir = os.path.join(project_root, "Result", "CrossRing_v2")

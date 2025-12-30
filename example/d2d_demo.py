@@ -8,15 +8,15 @@ import sys
 from pathlib import Path
 
 sys.path.append("..")
-from src.d2d.d2d_model import D2D_Model
-from config.d2d_config import D2DConfig
+from src.dcin.d2d_model import D2D_Model
+from src.dcin.config import DCINConfig
 
 
 def main():
     """D2D仿真演示 - 使用新的简化接口"""
 
     # 创建配置和模型
-    config = D2DConfig(
+    config = DCINConfig(
         d2d_config_file="../config/topologies/d2d_config.yaml",
     )
 

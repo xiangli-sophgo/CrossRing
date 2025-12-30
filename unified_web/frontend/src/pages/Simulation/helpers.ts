@@ -63,6 +63,8 @@ export const BIND_GROUP_COLORS: Record<string, string> = {
 
 // 配置参数描述映射
 export const CONFIG_TOOLTIPS: Record<string, string> = {
+  // KCIN Version
+  KCIN_VERSION: 'KCIN architecture version: v1 (IQ/RB/EQ) or v2 (RingStation)',
   // Basic Parameters
   FLIT_SIZE: 'Size of a single flit in bits',
   BURST: 'Number of flits per burst transfer',
@@ -87,7 +89,7 @@ export const CONFIG_TOOLTIPS: Record<string, string> = {
   SN_TRACKER_RELEASE_LATENCY: 'SN tracker release latency in ns',
   SN_PROCESSING_LATENCY: 'SN processing latency in ns',
   RN_PROCESSING_LATENCY: 'RN processing latency in ns',
-  // FIFO Depth
+  // FIFO Depth (v1 IQ/RB/EQ architecture)
   IQ_CH_FIFO_DEPTH: 'Injection queue channel FIFO depth',
   EQ_CH_FIFO_DEPTH: 'Ejection queue channel FIFO depth',
   IQ_OUT_FIFO_DEPTH_HORIZONTAL: 'IQ output FIFO depth for horizontal direction',
@@ -96,6 +98,12 @@ export const CONFIG_TOOLTIPS: Record<string, string> = {
   RB_OUT_FIFO_DEPTH: 'Ring buffer output FIFO depth',
   RB_IN_FIFO_DEPTH: 'Ring buffer input FIFO depth',
   EQ_IN_FIFO_DEPTH: 'Ejection queue input FIFO depth',
+  // FIFO Depth (v2 RingStation architecture)
+  RS_IN_CH_BUFFER: 'RingStation input channel buffer depth',
+  RS_OUT_CH_BUFFER: 'RingStation output channel buffer depth',
+  RS_IN_FIFO_DEPTH: 'RingStation input ring direction FIFO depth',
+  RS_OUT_FIFO_DEPTH: 'RingStation output ring direction FIFO depth',
+  // IP interface FIFO
   IP_L2H_FIFO_DEPTH: 'IP low-to-high frequency FIFO depth',
   IP_H2L_H_FIFO_DEPTH: 'IP high-to-low frequency high side FIFO depth',
   IP_H2L_L_FIFO_DEPTH: 'IP high-to-low frequency low side FIFO depth',

@@ -292,7 +292,7 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
   canMapToTopology,
   onMapToTopology,
   onClearTraffic,
-  hardware,
+  hardware: _hardware,
   model,
   inference,
 }) => {

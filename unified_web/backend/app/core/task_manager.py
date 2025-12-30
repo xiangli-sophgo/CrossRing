@@ -116,12 +116,15 @@ def _run_single_simulation(sim_params: Dict[str, Any]) -> Dict[str, Any]:
 
         # 保存到数据库（仅在成功时保存）
         experiment_id = None
+        print(f"[TaskManager] save_to_db={sim_params.get('save_to_db')}, status={result.status.value}")
         if sim_params.get('save_to_db') and result.status.value == 'completed':
             exp_name = sim_params.get('experiment_name') or '仿真实验'
+            print(f"[TaskManager] 准备保存到数据库: {exp_name}")
             experiment_id = engine.save_to_database(
                 experiment_name=exp_name,
                 description=sim_params.get('experiment_description')
             )
+            print(f"[TaskManager] 保存结果: experiment_id={experiment_id}")
 
         return {
             'traffic_file': traffic_file,

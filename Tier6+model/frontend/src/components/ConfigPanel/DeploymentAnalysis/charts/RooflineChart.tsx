@@ -9,6 +9,7 @@ import {
   PlanAnalysisResult,
   HardwareConfig,
   LLMModelConfig,
+  SimulationStats,
 } from '../../../../utils/llmDeployment/types'
 
 interface RooflineChartProps {
@@ -17,6 +18,7 @@ interface RooflineChartProps {
   model: LLMModelConfig
   comparisonResults?: PlanAnalysisResult[]
   height?: number
+  simulationStats?: SimulationStats
 }
 
 const COLORS = ['#5E6AD2', '#52c41a', '#faad14', '#722ed1']
@@ -27,6 +29,7 @@ export const RooflineChart: React.FC<RooflineChartProps> = ({
   model: _model,
   comparisonResults = [],
   height = 280,
+  simulationStats,
 }) => {
   const option: EChartsOption = useMemo(() => {
     const peakTflops = hardware.chip.compute_tflops_fp16
@@ -61,8 +64,29 @@ export const RooflineChart: React.FC<RooflineChartProps> = ({
     computeBoundAreaData.push([maxOI, peakTflops])
 
     // 计算当前方案的工作点
-    const calculateWorkPoint = (r: PlanAnalysisResult) => {
-      // 优先使用 bottleneck_analysis 中的精确计算值
+    const calculateWorkPoint = (r: PlanAnalysisResult, isMainResult: boolean = false) => {
+      // 优先使用后端仿真的精确值（仅对主方案）
+      if (isMainResult && simulationStats && simulationStats.dynamicMfu > 0) {
+        const achievedTflops = simulationStats.dynamicMfu * peakTflops
+        // 根据 MBU 和 MFU 判断瓶颈类型
+        const isMemoryBound = simulationStats.dynamicMbu > simulationStats.dynamicMfu
+        const bottleneck = isMemoryBound ? 'memory' : 'compute'
+
+        // 反推算术强度：如果是 memory-bound，AI = perf / bandwidth
+        const operationalIntensity = isMemoryBound
+          ? Math.max(0.1, achievedTflops / memoryBandwidthTBps)
+          : ridgePoint * 1.2
+
+        return {
+          oi: operationalIntensity,
+          perf: achievedTflops,
+          planId: r.plan.plan_id,
+          bottleneck: bottleneck as 'memory' | 'compute' | 'communication' | 'balanced',
+          phase: 'decode' as const,
+        }
+      }
+
+      // 使用 bottleneck_analysis 中的计算值（对比方案或无仿真结果时）
       if (r.latency.bottleneck_analysis) {
         const ba = r.latency.bottleneck_analysis
         const dominantPhase = ba.dominant_phase === 'prefill' ? ba.prefill : ba.decode
@@ -95,7 +119,7 @@ export const RooflineChart: React.FC<RooflineChartProps> = ({
     const allResults = [result, ...comparisonResults.slice(0, 3)]
     const workPoints = allResults
       .filter((r) => r.is_feasible)
-      .map(calculateWorkPoint)
+      .map((r, index) => calculateWorkPoint(r, index === 0))
 
     return {
       tooltip: {
@@ -287,7 +311,7 @@ export const RooflineChart: React.FC<RooflineChartProps> = ({
         },
       ],
     }
-  }, [result, hardware, comparisonResults])
+  }, [result, hardware, comparisonResults, simulationStats])
 
   if (!result.is_feasible) {
     return (
