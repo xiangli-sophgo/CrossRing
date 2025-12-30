@@ -629,7 +629,7 @@ export const InferenceConfigSelector: React.FC<InferenceConfigSelectorProps> = (
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
         <div style={configRowStyle}>
-          <Tooltip title="Batch Size: 同时处理的请求数量，影响吞吐量和延迟">
+          <Tooltip title="同时处理的请求数量，影响吞吐量和延迟">
             <Text style={{ fontSize: 12, cursor: 'help' }}>Batch Size</Text>
           </Tooltip>
           <InputNumber
@@ -642,7 +642,7 @@ export const InferenceConfigSelector: React.FC<InferenceConfigSelectorProps> = (
           />
         </div>
         <div style={configRowStyle}>
-          <Tooltip title="Input Length: 输入提示词的token数量（如问题、上下文）">
+          <Tooltip title="输入提示词的 Token 数量（Prefill 阶段处理）">
             <Text style={{ fontSize: 12, cursor: 'help' }}>Input Length</Text>
           </Tooltip>
           <InputNumber
@@ -655,7 +655,7 @@ export const InferenceConfigSelector: React.FC<InferenceConfigSelectorProps> = (
           />
         </div>
         <div style={configRowStyle}>
-          <Tooltip title="Output Length: 生成输出的token数量（如回答、代码）">
+          <Tooltip title="生成输出的 Token 数量（Decode 阶段逐个生成）">
             <Text style={{ fontSize: 12, cursor: 'help' }}>Output Length</Text>
           </Tooltip>
           <InputNumber
@@ -668,7 +668,7 @@ export const InferenceConfigSelector: React.FC<InferenceConfigSelectorProps> = (
           />
         </div>
         <div style={configRowStyle}>
-          <Tooltip title="Max Sequence Length: KV Cache预分配的最大长度，通常≥输入+输出">
+          <Tooltip title="KV Cache 预分配的最大长度，通常 ≥ 输入长度 + 输出长度">
             <Text style={{ fontSize: 12, cursor: 'help' }}>Max Seq Length</Text>
           </Tooltip>
           <InputNumber

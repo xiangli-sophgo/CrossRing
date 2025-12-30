@@ -62,8 +62,22 @@ export const RooflineChart: React.FC<RooflineChartProps> = ({
 
     // 计算当前方案的工作点
     const calculateWorkPoint = (r: PlanAnalysisResult) => {
-      // 估算操作强度 (FLOP/Byte)
-      // 简化：使用 MFU * peak / bandwidth 作为近似
+      // 优先使用 bottleneck_analysis 中的精确计算值
+      if (r.latency.bottleneck_analysis) {
+        const ba = r.latency.bottleneck_analysis
+        const dominantPhase = ba.dominant_phase === 'prefill' ? ba.prefill : ba.decode
+        const achievedTflops = dominantPhase.utilization * peakTflops
+
+        return {
+          oi: dominantPhase.arithmetic_intensity,
+          perf: achievedTflops,
+          planId: r.plan.plan_id,
+          bottleneck: r.latency.bottleneck_type,
+          phase: ba.dominant_phase,
+        }
+      }
+
+      // 回退：简化估算
       const achievedTflops = r.throughput.model_flops_utilization * peakTflops
       const operationalIntensity = r.latency.bottleneck_type === 'memory'
         ? achievedTflops / memoryBandwidthTBps * 0.8
@@ -74,6 +88,7 @@ export const RooflineChart: React.FC<RooflineChartProps> = ({
         perf: achievedTflops,
         planId: r.plan.plan_id,
         bottleneck: r.latency.bottleneck_type,
+        phase: 'decode' as const,
       }
     }
 

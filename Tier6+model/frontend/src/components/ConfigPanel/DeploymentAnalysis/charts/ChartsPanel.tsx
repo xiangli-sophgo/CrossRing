@@ -8,8 +8,6 @@ import {
   ReloadOutlined,
   CloudServerOutlined,
   DesktopOutlined,
-  UpOutlined,
-  DownOutlined,
 } from '@ant-design/icons'
 import { ScoreRadarChart } from './ScoreRadarChart'
 import { MetricsBarChart } from './MetricsBarChart'
@@ -17,6 +15,7 @@ import { MemoryPieChart } from './MemoryPieChart'
 import { RooflineChart } from './RooflineChart'
 import { GanttChart } from './GanttChart'
 import { ComparisonTable } from './ComparisonTable'
+import { BaseCard } from '../../../common/BaseCard'
 import { compareFormulaAndSimulation } from '../../../../utils/llmDeployment/simulationScorer'
 import {
   PlanAnalysisResult,
@@ -73,27 +72,6 @@ const chartTitleStyle: React.CSSProperties = {
   justifyContent: 'space-between',
 }
 
-// 章节标题样式（与 AnalysisResultDisplay 保持一致）
-const sectionTitleStyle: React.CSSProperties = {
-  fontSize: 15,
-  fontWeight: 600,
-  color: '#1a1a1a',
-  marginBottom: 12,
-  paddingBottom: 8,
-  borderBottom: '1px solid #f0f0f0',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-}
-
-// 章节容器样式（与 AnalysisResultDisplay 外层容器保持一致）
-const sectionContainerStyle: React.CSSProperties = {
-  background: '#fff',
-  borderRadius: 12,
-  padding: 20,
-  marginBottom: 16,
-  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-}
 
 export const ChartsPanel: React.FC<ChartsPanelProps> = ({
   result,
@@ -113,10 +91,6 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({
     simulation: true,
     comparison: true,
   })
-
-  const toggleSection = (section: string) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }))
-  }
 
   // 记录上次运行的result id，避免重复运行
   const lastResultIdRef = useRef<string | null>(null)
@@ -291,15 +265,15 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({
       {/* ═══════════════════════════════════════════════════════════════ */}
       {/* 四、图表可视化 */}
       {/* ═══════════════════════════════════════════════════════════════ */}
-      <div style={sectionContainerStyle}>
-        <div
-          style={{ ...sectionTitleStyle, cursor: 'pointer' }}
-          onClick={() => toggleSection('charts')}
+      <div style={{ marginBottom: 16 }}>
+        <BaseCard
+          title="图表可视化"
+          accentColor="#eb2f96"
+          collapsible
+          expanded={expandedSections.charts}
+          onExpandChange={(expanded) => setExpandedSections(prev => ({ ...prev, charts: expanded }))}
         >
-          <span>图表可视化</span>
-          {expandedSections.charts ? <UpOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
-        </div>
-        {expandedSections.charts && <div
+          <div
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(2, 1fr)',
@@ -390,21 +364,22 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({
               height={220}
             />
           </div>
-        </div>}
+        </div>
+        </BaseCard>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════ */}
       {/* 五、推理时序模拟 */}
       {/* ═══════════════════════════════════════════════════════════════ */}
-      <div style={sectionContainerStyle}>
-        <div
-          style={{ ...sectionTitleStyle, cursor: 'pointer' }}
-          onClick={() => toggleSection('simulation')}
+      <div style={{ marginBottom: 16 }}>
+        <BaseCard
+          title="推理时序模拟"
+          accentColor="#faad14"
+          collapsible
+          expanded={expandedSections.simulation}
+          onExpandChange={(expanded) => setExpandedSections(prev => ({ ...prev, simulation: expanded }))}
         >
-          <span>推理时序模拟</span>
-          {expandedSections.simulation ? <UpOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
-        </div>
-        {expandedSections.simulation && <div style={{ ...chartCardStyle, boxShadow: 'none', border: 'none' }}>
+          <div style={{ ...chartCardStyle, boxShadow: 'none', border: 'none' }}>
           <div style={chartTitleStyle}>
             <Text strong>Prefill + Decode 时序甘特图</Text>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -444,22 +419,23 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({
             data={simulationResult?.ganttChart ?? null}
             showLegend
           />
-        </div>}
+        </div>
+        </BaseCard>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════ */}
       {/* 六、公式 vs 仿真结果 */}
       {/* ═══════════════════════════════════════════════════════════════ */}
       {simulationResult && (
-        <div style={sectionContainerStyle}>
-          <div
-            style={{ ...sectionTitleStyle, cursor: 'pointer' }}
-            onClick={() => toggleSection('comparison')}
+        <div style={{ marginBottom: 16 }}>
+          <BaseCard
+            title="公式 vs 仿真结果"
+            accentColor="#1890ff"
+            collapsible
+            expanded={expandedSections.comparison}
+            onExpandChange={(expanded) => setExpandedSections(prev => ({ ...prev, comparison: expanded }))}
           >
-            <span>公式 vs 仿真结果</span>
-            {expandedSections.comparison ? <UpOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
-          </div>
-          {expandedSections.comparison && <div style={{ ...chartCardStyle, boxShadow: 'none', border: 'none' }}>
+            <div style={{ ...chartCardStyle, boxShadow: 'none', border: 'none' }}>
             <div style={chartTitleStyle}>
               <Text strong>理论估算与事件驱动模拟对比</Text>
               <Text type="secondary" style={{ fontSize: 11 }}>
@@ -479,7 +455,8 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({
                 } : undefined
               )}
             />
-          </div>}
+          </div>
+          </BaseCard>
         </div>
       )}
     </div>

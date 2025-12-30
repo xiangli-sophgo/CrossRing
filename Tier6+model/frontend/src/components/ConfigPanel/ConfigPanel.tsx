@@ -8,7 +8,6 @@ import {
   Row,
   Col,
   InputNumber,
-  Collapse,
   Modal,
   Input,
   message,
@@ -46,6 +45,7 @@ import {
 } from './shared'
 import { SwitchLevelConfig, ConnectionEditPanel } from './components'
 import { DeploymentAnalysisPanel } from './DeploymentAnalysis'
+import { BaseCard } from '../common/BaseCard'
 import { getChipList, getChipConfig, saveCustomChipPreset, deleteCustomChipPreset, getChipInterconnectConfig } from '../../utils/llmDeployment/presets'
 import { ChipHardwareConfig } from '../../utils/llmDeployment/types'
 
@@ -1137,32 +1137,6 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
     </div>
   )
 
-  // 拓扑设置的折叠项
-  const topologyCollapseItems = [
-    {
-      key: 'topology',
-      label: (
-        <span>
-          <Text strong>拓扑汇总</Text>
-          <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-            | {summaryText}
-          </Text>
-        </span>
-      ),
-      children: topologyConfigContent,
-    },
-    {
-      key: 'layers',
-      label: <Text strong>层级配置</Text>,
-      children: layerConfigContent,
-    },
-    {
-      key: 'switch',
-      label: <Text strong>Switch配置</Text>,
-      children: switchConfigContent,
-    },
-  ]
-
   // 顶层页面Tab状态
   const [activePageTab, setActivePageTab] = useState<'topology' | 'deployment'>('topology')
 
@@ -1213,16 +1187,41 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
       {/* 内容区域 - 使用 display 控制显示，避免组件卸载导致状态丢失 */}
       <div style={{ display: activePageTab === 'topology' ? 'block' : 'none' }}>
         <>
-          <Collapse
-            items={topologyCollapseItems}
-            defaultActiveKey={['layers']}
-            size="small"
-            style={{
-              background: 'transparent',
-              border: 'none',
-            }}
-            className="custom-collapse"
-          />
+          {/* 拓扑汇总 */}
+          <div style={{ marginBottom: 12 }}>
+            <BaseCard
+              title={<>拓扑汇总 <span style={{ fontSize: 12, fontWeight: 400, color: '#9ca3af', marginLeft: 8 }}>{summaryText}</span></>}
+              accentColor="#5E6AD2"
+              collapsible
+              defaultExpanded={false}
+            >
+              {topologyConfigContent}
+            </BaseCard>
+          </div>
+
+          {/* 层级配置 */}
+          <div style={{ marginBottom: 12 }}>
+            <BaseCard
+              title="层级配置"
+              accentColor="#13c2c2"
+              collapsible
+              defaultExpanded
+            >
+              {layerConfigContent}
+            </BaseCard>
+          </div>
+
+          {/* Switch配置 */}
+          <div style={{ marginBottom: 12 }}>
+            <BaseCard
+              title="Switch配置"
+              accentColor="#52c41a"
+              collapsible
+              defaultExpanded={false}
+            >
+              {switchConfigContent}
+            </BaseCard>
+          </div>
           <style>{`
             .custom-collapse.ant-collapse {
               background: transparent !important;

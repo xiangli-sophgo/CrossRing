@@ -15,36 +15,18 @@ import { PlanAnalysisResult } from '../../../../utils/llmDeployment/types'
 
 const { Text } = Typography
 
-export type MetricType = 'ttft' | 'tpot' | 'throughput' | 'mfu' | 'mbu' | 'cost' | 'percentiles' | 'bottleneck' | 'e2e' | 'chips'
+export type MetricType = 'ttft' | 'tpot' | 'throughput' | 'mfu' | 'mbu' | 'cost' | 'percentiles' | 'bottleneck' | 'e2e' | 'chips' | 'memory'
 
 interface MetricDetailCardProps {
   metric: MetricType
   result: PlanAnalysisResult
 }
 
-// 通用卡片样式
-const cardStyle: React.CSSProperties = {
-  marginTop: 12,
-  marginBottom: 16,
-  padding: '20px',
-  background: '#fff',
-  borderRadius: 12,
-  border: '1px solid #e5e7eb',
-}
-
-// 标题样式
-const titleStyle: React.CSSProperties = {
-  fontSize: 16,
-  fontWeight: 600,
-  color: '#1f2937',
-  marginBottom: 4,
-}
-
-// 副标题样式
-const subtitleStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#6b7280',
-  marginBottom: 16,
+// 内嵌详情区域样式
+const detailWrapperStyle: React.CSSProperties = {
+  background: '#fafafa',
+  borderRadius: 8,
+  padding: 16,
 }
 
 // 小节标题样式
@@ -68,11 +50,12 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
   switch (metric) {
     case 'ttft':
       return (
-        <div style={cardStyle}>
-          <div style={titleStyle}>Time To First Token (TTFT)</div>
-          <div style={subtitleStyle}>首Token延迟 · Prefill阶段核心指标</div>
-
-          <div style={{ marginBottom: 20 }}>
+        <div style={detailWrapperStyle}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Time To First Token (TTFT)</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>首Token延迟 · Prefill阶段核心指标</span>
+          </div>
+          <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
               从请求发送到生成第一个输出Token的延迟时间。直接影响用户感知的响应速度，
@@ -82,8 +65,8 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
 
           <FormulaCard
             title="核心公式"
-            tex={String.raw`\text{TTFT} = \frac{\max(T_{\text{compute}}, T_{\text{comm}})}{1 - \beta}`}
-            description="TTFT由计算延迟和通信延迟中的较大值决定，并受流水线气泡影响"
+            tex={String.raw`\text{TTFT} = \frac{T_{\text{compute}} + T_{\text{comm}}}{1 - \beta}`}
+            description="Prefill阶段处理全部输入token，计算与TP通信串行；PP>1时受气泡比影响"
             result={latency.prefill_total_latency_ms.toFixed(2)}
             unit="ms"
             resultColor="#1890ff"
@@ -95,72 +78,47 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
               {
                 symbol: 'T_{\\text{compute}}',
                 name: '计算延迟',
-                description: 'Prefill阶段处理所有输入token的计算时间',
+                description: '$T_{compute} = \\frac{FLOPs}{Peak \\times MFU \\times TP}$，Prefill阶段是compute-bound',
               },
               {
                 symbol: 'T_{\\text{comm}}',
                 name: '通信延迟',
-                description: '张量并行/流水线并行的集合通信时间',
+                description: 'TP AllReduce通信：$T_{comm} = 2 \\times \\frac{B \\times S \\times H \\times dtype}{BW_{NVLink}}$',
               },
               {
                 symbol: '\\beta',
-                name: '气泡比',
-                description: 'PP并行导致的空闲时间占比，$\\beta = \\frac{PP-1}{MB+PP-1}$',
+                name: '气泡比 (Bubble Ratio)',
+                description: 'PP导致的空闲时间占比，$\\beta = \\frac{PP-1}{MB+PP-1}$（GPipe调度）',
               },
               {
-                symbol: '\\text{Params}',
-                name: '模型参数量',
-                description: '模型总参数数量',
-              },
-              {
-                symbol: '\\text{SeqLen}',
-                name: '输入序列长度',
-                description: '输入token的数量',
-              },
-              {
-                symbol: '\\text{Batch}',
-                name: '批次大小',
-                description: '同时处理的请求数量',
+                symbol: '\\text{FLOPs}',
+                name: 'Prefill计算量',
+                description: '$FLOPs \\approx 2 \\times Params \\times SeqLen \\times Batch$（忽略Attention的$O(S^2)$项）',
               },
               {
                 symbol: '\\text{Peak}',
                 name: '峰值算力',
-                description: '芯片理论峰值计算能力 (TFLOPs)',
+                description: '单芯片理论峰值，如H100 SXM = 989 TFLOPs (BF16)',
               },
               {
-                symbol: '\\text{Util}',
-                name: '利用率',
-                description: '硬件实际可达的计算效率（MFU）',
+                symbol: '\\text{MFU}',
+                name: '硬件利用率',
+                description: 'Model FLOPs Utilization，Prefill阶段通常可达40-60%',
               },
               {
                 symbol: '\\text{TP}',
                 name: '张量并行度',
-                description: '模型在单层内切分到多少个设备',
+                description: '单层内切分设备数，减少单卡计算量但增加AllReduce通信',
               },
               {
                 symbol: '\\text{PP}',
                 name: '流水线并行度',
-                description: '模型层按顺序切分到多少个阶段',
+                description: '层间切分阶段数，引入气泡开销',
               },
               {
                 symbol: '\\text{MB}',
                 name: 'Micro-batch数',
-                description: '流水线并行中的微批次数量',
-              },
-              {
-                symbol: '\\text{Data}',
-                name: '通信数据量',
-                description: '每次集合通信传输的数据量',
-              },
-              {
-                symbol: '\\text{BW}',
-                name: '通信带宽',
-                description: '芯片间互联带宽（NVLink/PCIe）',
-              },
-              {
-                symbol: 't_{\\text{startup}}',
-                name: '启动延迟',
-                description: '通信操作的固定开销',
+                description: '微批次数量，$MB \\geq 4 \\times PP$时气泡开销可忽略',
               },
             ]}
           />
@@ -199,11 +157,12 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
 
     case 'tpot':
       return (
-        <div style={cardStyle}>
-          <div style={titleStyle}>Time Per Output Token (TPOT)</div>
-          <div style={subtitleStyle}>单Token延迟 · Decode阶段核心指标</div>
-
-          <div style={{ marginBottom: 20 }}>
+        <div style={detailWrapperStyle}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Time Per Output Token (TPOT)</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>单Token延迟 · Decode阶段核心指标</span>
+          </div>
+          <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
               Decode阶段生成每个输出Token的平均延迟。决定了文本生成的"打字速度"，
@@ -226,62 +185,42 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
               {
                 symbol: 'T_{\\text{compute}}',
                 name: '计算延迟',
-                description: '单token前向传播的计算时间',
+                description: '$T_{compute} = \\frac{2 \\times Params}{Peak \\times TP}$，单token前向传播计算时间',
               },
               {
                 symbol: 'T_{\\text{memory}}',
                 name: '访存延迟',
-                description: '读取模型权重和KV Cache的时间',
+                description: '$T_{memory} = \\frac{Model + KV}{BW_{HBM}}$，每token需读取全部权重（memory-bound）',
               },
               {
                 symbol: 'T_{\\text{comm}}',
                 name: '通信延迟',
-                description: '张量并行的AllReduce通信时间',
-              },
-              {
-                symbol: '\\text{Params}',
-                name: '模型参数量',
-                description: '模型总参数数量',
+                description: 'TP AllReduce：$T_{comm} = \\frac{2 \\times B \\times H \\times dtype}{BW_{NVLink}}$',
               },
               {
                 symbol: '\\text{FLOPs/Token}',
                 name: '每Token计算量',
-                description: '$\\approx 2 \\times$ 模型参数量',
+                description: '$\\approx 2 \\times Params$，decode每次只处理1个token',
               },
               {
-                symbol: '\\text{Peak}',
-                name: '峰值算力',
-                description: '芯片理论峰值计算能力 (TFLOPs)',
+                symbol: '\\text{Model Size}',
+                name: '模型权重',
+                description: '$= \\frac{Params \\times dtype}{TP}$ GB，每token需完整读取一次',
               },
               {
-                symbol: '\\text{Util}',
-                name: '利用率',
-                description: '硬件实际可达的计算效率',
-              },
-              {
-                symbol: '\\text{Model}',
-                name: '模型大小',
-                description: '模型权重占用的显存 (GB)',
-              },
-              {
-                symbol: '\\text{KV}',
+                symbol: '\\text{KV Cache}',
                 name: 'KV缓存',
-                description: '存储历史token的Key和Value',
+                description: '$= 2 \\times L \\times H \\times S \\times B \\times dtype$，随序列长度增长',
               },
               {
-                symbol: '\\text{BW}',
+                symbol: '\\text{BW}_{\\text{HBM}}',
                 name: 'HBM带宽',
-                description: '显存带宽 (GB/s)',
+                description: '显存带宽，H100 = 3.35 TB/s，A100 = 2.0 TB/s',
               },
               {
-                symbol: 'H',
-                name: '隐藏维度',
-                description: '模型的隐藏层大小',
-              },
-              {
-                symbol: '\\text{BW}_{\\text{NVLink}}',
-                name: 'NVLink带宽',
-                description: '芯片间NVLink互联带宽',
+                symbol: '\\text{Batch}',
+                name: '批次大小',
+                description: '增大batch可提高算术强度，从memory-bound转向compute-bound',
               },
             ]}
           />
@@ -291,25 +230,25 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             steps={[
               {
                 label: 'FLOPs/Token',
-                formula: '\\text{FLOPs/Token} \\approx 2 \\times \\text{Params}',
+                formula: '\\text{FLOPs} \\approx 2 \\times \\text{Params}',
                 value: (2 * 70e9 / 1e9).toFixed(0),
                 unit: 'GFLOPs',
               },
               {
                 label: '计算延迟',
-                formula: 'T_{\\text{compute}} = \\frac{\\text{FLOPs/Token}}{\\text{Peak} \\times \\text{Util}}',
+                formula: 'T_{\\text{compute}} = \\frac{2 \\times Params}{Peak \\times TP}',
                 value: latency.decode_compute_latency_ms.toFixed(3),
                 unit: 'ms',
               },
               {
                 label: '访存延迟',
-                formula: 'T_{\\text{memory}} = \\frac{\\text{Model} + \\text{KV}}{\\text{BW}}',
+                formula: 'T_{\\text{memory}} = \\frac{Model + KV}{BW_{HBM}}',
                 value: (memory.model_memory_gb / 3.35).toFixed(2),
                 unit: 'ms',
               },
               {
                 label: '通信延迟',
-                formula: 'T_{\\text{comm}} = \\frac{2 \\times H}{\\text{BW}_{\\text{NVLink}}}',
+                formula: 'T_{\\text{comm}} = \\frac{2(TP-1)}{TP} \\times \\frac{B \\times H \\times dtype}{BW}',
                 value: latency.decode_comm_latency_ms.toFixed(3),
                 unit: 'ms',
               },
@@ -320,11 +259,12 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
 
     case 'throughput':
       return (
-        <div style={cardStyle}>
-          <div style={titleStyle}>Throughput (吞吐量)</div>
-          <div style={subtitleStyle}>系统处理能力 · 经济性核心指标</div>
-
-          <div style={{ marginBottom: 20 }}>
+        <div style={detailWrapperStyle}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#52c41a', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Throughput (吞吐量)</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>系统处理能力 · 经济性核心指标</span>
+          </div>
+          <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
               每秒生成的Token数量，衡量系统处理能力的核心指标。吞吐量越高，
@@ -404,11 +344,12 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
 
     case 'mfu':
       return (
-        <div style={cardStyle}>
-          <div style={titleStyle}>Model FLOPs Utilization (MFU)</div>
-          <div style={subtitleStyle}>算力利用率 · Prefill效率指标</div>
-
-          <div style={{ marginBottom: 20 }}>
+        <div style={detailWrapperStyle}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#52c41a', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Model FLOPs Utilization (MFU)</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>算力利用率 · Prefill效率指标</span>
+          </div>
+          <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
               实际用于模型计算的算力占硬件峰值算力的比例。MFU越高说明硬件利用越充分。
@@ -484,11 +425,12 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
     case 'mbu':
       const achievedBW = (memory.model_memory_gb + memory.kv_cache_memory_gb * 0.5) / (latency.decode_per_token_latency_ms / 1000)
       return (
-        <div style={cardStyle}>
-          <div style={titleStyle}>Memory Bandwidth Utilization (MBU)</div>
-          <div style={subtitleStyle}>带宽利用率 · Decode效率指标</div>
-
-          <div style={{ marginBottom: 20 }}>
+        <div style={detailWrapperStyle}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#52c41a', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Memory Bandwidth Utilization (MBU)</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>带宽利用率 · Decode效率指标</span>
+          </div>
+          <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
               实际显存带宽使用量占峰值带宽的比例。Decode阶段是memory-bound，
@@ -565,11 +507,12 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
       const costData = result.cost
       if (!costData) return null
       return (
-        <div style={cardStyle}>
-          <div style={titleStyle}>Cost Analysis (成本分析)</div>
-          <div style={subtitleStyle}>经济性指标 · 每百万Token成本</div>
-
-          <div style={{ marginBottom: 20 }}>
+        <div style={detailWrapperStyle}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#fa8c16', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Cost Analysis (成本分析)</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>经济性指标 · 每百万Token成本</span>
+          </div>
+          <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
               每百万Token的推理成本，是衡量部署经济性的核心指标。
@@ -673,17 +616,17 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             </div>
           </div>
 
-          <div style={{
-            marginTop: 12,
-            padding: '10px 14px',
-            background: '#f5f5f5',
-            borderRadius: 8,
-            fontSize: 13,
-            color: '#1f2937',
-            textAlign: 'center',
-          }}>
-            效率: <strong style={{ color: '#fa541c' }}>{costData.tokens_per_dollar.toExponential(2)}</strong> tokens/$
-          </div>
+            <div style={{
+              marginTop: 12,
+              padding: '10px 14px',
+              background: '#f5f5f5',
+              borderRadius: 8,
+              fontSize: 13,
+              color: '#1f2937',
+              textAlign: 'center',
+            }}>
+              效率: <strong style={{ color: '#fa541c' }}>{costData.tokens_per_dollar.toExponential(2)}</strong> tokens/$
+            </div>
         </div>
       )
 
@@ -691,11 +634,13 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
       const ttftP = latency.ttft_percentiles
       const tpotP = latency.tpot_percentiles
       return (
-        <div style={cardStyle}>
-          <div style={titleStyle}>Latency Percentiles (延迟分位数)</div>
-          <div style={subtitleStyle}>SLO关键指标 · P50/P90/P99</div>
+        <div style={detailWrapperStyle}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Latency Percentiles (延迟分位数)</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>SLO关键指标 · P50/P90/P99</span>
+          </div>
 
-          <div style={{ marginBottom: 20 }}>
+          <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
               延迟的统计分布。P99表示99%请求的延迟都低于此值，是SLO的关键指标。
@@ -790,17 +735,17 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             </div>
           </div>
 
-          <div style={{
-            marginTop: 16,
-            padding: '10px 14px',
-            background: '#f0f5ff',
-            borderRadius: 8,
-            fontSize: 12,
-            color: '#2f54eb',
-            textAlign: 'center',
-          }}>
-            📊 MLPerf SLO标准: TTFT P99 ≤ 450ms, TPOT P99 ≤ 40ms
-          </div>
+            <div style={{
+              marginTop: 16,
+              padding: '10px 14px',
+              background: '#f0f5ff',
+              borderRadius: 8,
+              fontSize: 12,
+              color: '#2f54eb',
+              textAlign: 'center',
+            }}>
+              📊 MLPerf SLO标准: TTFT P99 ≤ 450ms, TPOT P99 ≤ 40ms
+            </div>
         </div>
       )
 
@@ -834,38 +779,12 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
       const info = bottleneckInfo[latency.bottleneck_type] || { name: '未知', color: '#666', desc: '', solution: '' }
 
       return (
-        <div style={{ ...cardStyle, background: '#fffbe6', border: '1px solid #ffe58f' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-            <div style={{
-              width: 40,
-              height: 40,
-              borderRadius: 10,
-              background: info.color,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontWeight: 700,
-              fontSize: 16,
-            }}>
-              ⚠️
-            </div>
-            <div>
-              <div style={titleStyle}>性能瓶颈分析</div>
-              <div style={{
-                display: 'inline-block',
-                padding: '2px 8px',
-                background: info.color,
-                color: '#fff',
-                borderRadius: 4,
-                fontSize: 12,
-              }}>
-                {info.name}
-              </div>
-            </div>
+        <div style={{ ...detailWrapperStyle, background: '#fffbe6' }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: '#fa8c16', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>⚠️ 性能瓶颈分析</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>{info.name}</span>
           </div>
-
-          <div style={{ ...descStyle, background: '#fff' }}>
+          <div style={{ ...descStyle, background: '#fff', padding: 12, borderRadius: 8 }}>
             <div style={{ marginBottom: 8 }}>
               <strong style={{ color: '#ad6800' }}>瓶颈原因：</strong>
               {info.desc}
@@ -887,26 +806,27 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             <div style={{ fontSize: 14, color: info.color, fontWeight: 500 }}>{info.solution}</div>
           </div>
 
-          <CalculationSteps
-            title="延迟分解"
-            steps={[
-              { label: 'Prefill 计算', value: latency.prefill_compute_latency_ms.toFixed(2), unit: 'ms' },
-              { label: 'Prefill 通信', value: latency.prefill_comm_latency_ms.toFixed(2), unit: 'ms' },
-              { label: 'Decode 计算', value: latency.decode_compute_latency_ms.toFixed(3), unit: 'ms' },
-              { label: 'Decode 通信', value: latency.decode_comm_latency_ms.toFixed(3), unit: 'ms' },
-              { label: '流水线气泡比', value: (latency.pipeline_bubble_ratio * 100).toFixed(1), unit: '%' },
-            ]}
-          />
+            <CalculationSteps
+              title="延迟分解"
+              steps={[
+                { label: 'Prefill 计算', value: latency.prefill_compute_latency_ms.toFixed(2), unit: 'ms' },
+                { label: 'Prefill 通信', value: latency.prefill_comm_latency_ms.toFixed(2), unit: 'ms' },
+                { label: 'Decode 计算', value: latency.decode_compute_latency_ms.toFixed(3), unit: 'ms' },
+                { label: 'Decode 通信', value: latency.decode_comm_latency_ms.toFixed(3), unit: 'ms' },
+                { label: '流水线气泡比', value: (latency.pipeline_bubble_ratio * 100).toFixed(1), unit: '%' },
+              ]}
+            />
         </div>
       )
 
     case 'e2e':
       return (
-        <div style={cardStyle}>
-          <div style={titleStyle}>End-to-End Latency (端到端延迟)</div>
-          <div style={subtitleStyle}>完整请求耗时 · 用户感知延迟</div>
-
-          <div style={{ marginBottom: 20 }}>
+        <div style={detailWrapperStyle}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>End-to-End Latency (端到端延迟)</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>完整请求耗时 · 用户感知延迟</span>
+          </div>
+          <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
               从发送请求到接收完整响应的总时间。包括Prefill阶段（TTFT）和Decode阶段的全部时间。
@@ -983,11 +903,12 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
     case 'chips':
       const { dp, tp, pp, ep } = plan.parallelism
       return (
-        <div style={cardStyle}>
-          <div style={titleStyle}>Chip Configuration (芯片配置)</div>
-          <div style={subtitleStyle}>资源利用 · 并行策略分解</div>
-
-          <div style={{ marginBottom: 20 }}>
+        <div style={detailWrapperStyle}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: '#fa8c16', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Chip Configuration (芯片配置)</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>资源利用 · 并行策略分解</span>
+          </div>
+          <div style={{ marginBottom: 16 }}>
             <div style={sectionTitleStyle}>指标定义</div>
             <div style={descStyle}>
               总芯片数由并行策略决定：DP × TP × PP × EP = 总芯片数。
@@ -1030,23 +951,174 @@ export const MetricDetailCard: React.FC<MetricDetailCardProps> = ({ metric, resu
             ]}
           />
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginTop: 16 }}>
-            {[
-              { label: 'DP', value: dp, color: '#1890ff' },
-              { label: 'TP', value: tp, color: '#52c41a' },
-              { label: 'PP', value: pp, color: '#fa8c16' },
-              { label: 'EP', value: ep, color: '#722ed1' },
-            ].map((item) => (
-              <div key={item.label} style={{
-                padding: 12,
-                background: `${item.color}10`,
-                borderRadius: 8,
-                textAlign: 'center',
-              }}>
-                <div style={{ fontSize: 11, color: item.color }}>{item.label}</div>
-                <div style={{ fontSize: 24, fontWeight: 700, color: item.color }}>{item.value}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginTop: 16 }}>
+              {[
+                { label: 'DP', value: dp, color: '#1890ff' },
+                { label: 'TP', value: tp, color: '#52c41a' },
+                { label: 'PP', value: pp, color: '#fa8c16' },
+                { label: 'EP', value: ep, color: '#722ed1' },
+              ].map((item) => (
+                <div key={item.label} style={{
+                  padding: 12,
+                  background: `${item.color}10`,
+                  borderRadius: 8,
+                  textAlign: 'center',
+                }}>
+                  <div style={{ fontSize: 11, color: item.color }}>{item.label}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: item.color }}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+        </div>
+      )
+
+    case 'memory':
+      return (
+        <div style={detailWrapperStyle}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: '#fa8c16', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Memory Usage (显存占用)</span>
+            <span style={{ fontSize: 12, fontWeight: 400, color: '#8c8c8c' }}>资源约束 · 可行性关键指标</span>
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <div style={sectionTitleStyle}>指标定义</div>
+            <div style={descStyle}>
+              单芯片显存占用包括模型权重、KV Cache和激活值三部分。显存不足会导致OOM，是部署可行性的硬约束。
+              TP并行可以减少单卡模型显存，PP并行可以减少单卡激活显存。
+            </div>
+          </div>
+
+          <FormulaCard
+            title="核心公式"
+            tex={String.raw`M_{\text{total}} = M_{\text{model}} + M_{\text{KV}} + M_{\text{act}}`}
+            description="总显存 = 模型权重 + KV缓存 + 激活值"
+            result={memory.total_per_chip_gb.toFixed(2)}
+            unit="GB"
+            resultColor={memory.is_memory_sufficient ? '#13c2c2' : '#f5222d'}
+          />
+
+          <VariableList
+            title="显存组成说明"
+            variables={[
+              {
+                symbol: 'M_{\\text{model}}',
+                name: '模型权重',
+                description: '模型参数占用显存，$M = \\frac{\\text{Params} \\times \\text{bytes}}{\\text{TP}}$',
+              },
+              {
+                symbol: 'M_{\\text{KV}}',
+                name: 'KV缓存',
+                description: '存储历史token的Key/Value，随序列长度和batch线性增长',
+              },
+              {
+                symbol: 'M_{\\text{act}}',
+                name: '激活值',
+                description: '前向传播的中间结果，与batch×seq成正比',
+              },
+              {
+                symbol: '\\text{TP}',
+                name: '张量并行度',
+                description: '模型切分份数，TP越大单卡显存越小',
+              },
+              {
+                symbol: '\\text{PP}',
+                name: '流水线并行度',
+                description: '层切分份数，PP越大单卡层数越少',
+              },
+              {
+                symbol: '\\text{Params}',
+                name: '模型参数量',
+                description: '模型总参数数量',
+              },
+              {
+                symbol: '\\text{bytes}',
+                name: '参数字节数',
+                description: 'FP16=2, BF16=2, FP32=4',
+              },
+            ]}
+          />
+
+          <CalculationSteps
+            title="显存分解"
+            steps={[
+              {
+                label: '模型权重',
+                formula: 'M_{\\text{model}} = \\frac{\\text{Params} \\times \\text{bytes}}{\\text{TP} \\times \\text{PP}}',
+                value: memory.model_memory_gb.toFixed(2),
+                unit: 'GB',
+              },
+              {
+                label: 'KV缓存',
+                formula: 'M_{\\text{KV}} = 2 \\times L \\times H \\times S \\times B \\times \\text{bytes}',
+                value: memory.kv_cache_memory_gb.toFixed(2),
+                unit: 'GB',
+              },
+              {
+                label: '激活值',
+                formula: 'M_{\\text{act}} = \\text{batch} \\times \\text{seq} \\times H \\times \\text{factor}',
+                value: memory.activation_memory_gb.toFixed(2),
+                unit: 'GB',
+              },
+              {
+                label: '显存利用率',
+                formula: '\\text{Util} = \\frac{M_{\\text{total}}}{M_{\\text{chip}}} \\times 100\\%',
+                value: (memory.memory_utilization * 100).toFixed(1),
+                unit: '%',
+              },
+            ]}
+          />
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginTop: 16 }}>
+            <div style={{
+              padding: '14px 12px',
+              background: '#e6f7ff',
+              borderRadius: 10,
+              textAlign: 'center',
+            }}>
+              <div style={{ fontSize: 11, color: '#096dd9', marginBottom: 4 }}>模型权重</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#1890ff' }}>
+                {memory.model_memory_gb.toFixed(1)}
               </div>
-            ))}
+              <div style={{ fontSize: 10, color: '#096dd9' }}>GB</div>
+            </div>
+            <div style={{
+              padding: '14px 12px',
+              background: '#f6ffed',
+              borderRadius: 10,
+              textAlign: 'center',
+            }}>
+              <div style={{ fontSize: 11, color: '#389e0d', marginBottom: 4 }}>KV缓存</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#52c41a' }}>
+                {memory.kv_cache_memory_gb.toFixed(1)}
+              </div>
+              <div style={{ fontSize: 10, color: '#389e0d' }}>GB</div>
+            </div>
+            <div style={{
+              padding: '14px 12px',
+              background: '#fff7e6',
+              borderRadius: 10,
+              textAlign: 'center',
+            }}>
+              <div style={{ fontSize: 11, color: '#ad6800', marginBottom: 4 }}>激活值</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#fa8c16' }}>
+                {memory.activation_memory_gb.toFixed(1)}
+              </div>
+              <div style={{ fontSize: 10, color: '#ad6800' }}>GB</div>
+            </div>
+          </div>
+
+          <div style={{
+            marginTop: 12,
+            padding: '10px 14px',
+            background: memory.is_memory_sufficient ? '#f6ffed' : '#fff2f0',
+            borderRadius: 8,
+            fontSize: 13,
+            color: memory.is_memory_sufficient ? '#52c41a' : '#f5222d',
+            textAlign: 'center',
+            border: `1px solid ${memory.is_memory_sufficient ? '#b7eb8f' : '#ffa39e'}`,
+          }}>
+            {memory.is_memory_sufficient ? '✓ 显存充足' : '⚠ 显存不足'} ·
+            总占用 <strong>{memory.total_per_chip_gb.toFixed(1)} GB</strong> / 80 GB ·
+            利用率 <strong>{(memory.memory_utilization * 100).toFixed(1)}%</strong>
           </div>
         </div>
       )

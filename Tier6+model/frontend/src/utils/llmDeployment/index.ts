@@ -83,6 +83,7 @@ export {
   calculatePPEfficiency,
   // 综合分析
   analyzeLatency,
+  analyzeBottleneckRoofline,
   // 吞吐量
   estimateTokenThroughput,
   estimateRequestThroughput,

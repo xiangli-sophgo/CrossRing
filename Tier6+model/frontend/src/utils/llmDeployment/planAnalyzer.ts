@@ -24,6 +24,7 @@ import { analyzeMemory } from './modelCalculator';
 import { analyzeCommunication } from './commCalculator';
 import {
   analyzeLatency,
+  analyzeBottleneckRoofline,
   estimateTokenThroughput,
   estimateRequestThroughput,
   estimateMFU,
@@ -405,6 +406,26 @@ export function analyzePlan(
     memory, latency, throughputAnalysis
   );
 
+  // 瓶颈分析 (Roofline 模型)
+  const bottleneckAnalysis = analyzeBottleneckRoofline(
+    model, inference, parallelism, hardware,
+    latency.prefill_compute_latency_ms,
+    latency.prefill_comm_latency_ms,
+    latency.prefill_total_latency_ms,
+    latency.decode_compute_latency_ms,
+    latency.decode_memory_latency_ms,
+    latency.decode_comm_latency_ms,
+    latency.decode_per_token_latency_ms,
+    throughputAnalysis.model_flops_utilization,
+    throughputAnalysis.memory_bandwidth_utilization
+  );
+
+  // 将瓶颈分析结果附加到 latency
+  latency.bottleneck_analysis = bottleneckAnalysis;
+  // 更新瓶颈类型和详情
+  latency.bottleneck_type = bottleneckAnalysis.overall_bottleneck;
+  latency.bottleneck_details = bottleneckAnalysis.summary;
+
   // 评分 (使用自定义权重或默认权重)
   const score = calculateOverallScore(memory, latency, throughputAnalysis, utilization, parallelism, weights);
 
@@ -466,6 +487,7 @@ function createInfeasibleResult(
     prefill_comm_latency_ms: 0,
     prefill_total_latency_ms: Infinity,
     decode_compute_latency_ms: 0,
+    decode_memory_latency_ms: 0,
     decode_comm_latency_ms: 0,
     decode_per_token_latency_ms: Infinity,
     end_to_end_latency_ms: Infinity,

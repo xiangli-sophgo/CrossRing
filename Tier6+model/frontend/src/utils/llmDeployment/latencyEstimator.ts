@@ -13,6 +13,8 @@ import {
   LatencyPercentiles,
   BottleneckType,
   CostAnalysis,
+  BottleneckAnalysis,
+  PhaseBottleneckAnalysis,
 } from './types';
 import {
   calculatePrefillFlops,
@@ -383,11 +385,266 @@ export function calculatePPEfficiency(
 }
 
 // ============================================
-// 瓶颈识别
+// 瓶颈识别 (Roofline 模型)
 // ============================================
 
 /**
- * 识别主要瓶颈
+ * 计算硬件临界点 (Ridge Point)
+ * Ridge Point = Peak Compute / Peak Memory BW
+ */
+function calculateRidgePoint(hardware: HardwareConfig): number {
+  // 优先使用 peak_tflops，否则使用 compute_tflops_fp16
+  const peakTflops = hardware.chip.peak_tflops ?? hardware.chip.compute_tflops_fp16;
+  const memBwGBps = hardware.chip.memory_bandwidth_gbps;
+
+  // 防止除零和无效值
+  if (!peakTflops || !memBwGBps || memBwGBps <= 0) {
+    // 返回默认值：H100 的 ridge point 约为 312 ops/byte
+    return 312;
+  }
+
+  // Ridge Point = TFLOPs / (GB/s) = (TFLOPs * 1000) / (TB/s) = ops/byte
+  // 简化: peakTflops (TFLOPs) / (memBwGBps / 1000) (TB/s) = peakTflops * 1000 / memBwGBps
+  return (peakTflops * 1000) / memBwGBps;
+}
+
+/**
+ * 计算 Prefill 阶段算术强度
+ * AI = FLOPs / Bytes
+ * Prefill: FLOPs ≈ 2 * Params * SeqLen * Batch
+ * Bytes ≈ Params * dtype_bytes (模型权重读取一次)
+ */
+function calculatePrefillArithmeticIntensity(
+  model: LLMModelConfig,
+  inference: InferenceConfig,
+  parallelism: ParallelismStrategy
+): number {
+  const dtypeBytes = model.dtype === 'fp32' ? 4 : 2;
+  const params = model.total_params || estimateModelParams(model);
+
+  // FLOPs: 2 * Params * SeqLen * Batch / TP (TP切分后单卡计算量)
+  const flops = (2 * params * inference.input_seq_length * inference.batch_size) / parallelism.tp;
+
+  // Bytes: 模型权重 / TP + 激活值
+  // 激活值: batch * seq * hidden * dtype_bytes * 2 (输入输出)
+  const modelBytes = (params * dtypeBytes) / parallelism.tp;
+  const activationBytes = inference.batch_size * inference.input_seq_length * model.hidden_size * dtypeBytes * 2;
+  const totalBytes = modelBytes + activationBytes;
+
+  return flops / totalBytes;
+}
+
+/**
+ * 计算 Decode 阶段算术强度
+ * Decode: FLOPs ≈ 2 * Params (每token)
+ * Bytes ≈ Params * dtype + KV_cache_per_token
+ */
+function calculateDecodeArithmeticIntensity(
+  model: LLMModelConfig,
+  inference: InferenceConfig,
+  parallelism: ParallelismStrategy,
+  contextLen: number
+): number {
+  const dtypeBytes = model.dtype === 'fp32' ? 4 : 2;
+  const params = model.total_params || estimateModelParams(model);
+
+  // FLOPs per token: 2 * Params * Batch / TP
+  const flopsPerToken = (2 * params * inference.batch_size) / parallelism.tp;
+
+  // Bytes per token: 模型权重 + KV cache
+  const modelBytes = (params * dtypeBytes) / parallelism.tp;
+  // KV cache per token: 2 * num_layers * hidden_size * context_len * batch * dtype / TP
+  const kvBytesPerToken = (2 * model.num_layers * model.hidden_size * contextLen * inference.batch_size * dtypeBytes) / parallelism.tp;
+  const totalBytes = modelBytes + kvBytesPerToken;
+
+  return flopsPerToken / totalBytes;
+}
+
+/**
+ * 估算模型参数量
+ */
+function estimateModelParams(model: LLMModelConfig): number {
+  // 简化估算: 12 * num_layers * hidden_size^2
+  return 12 * model.num_layers * model.hidden_size * model.hidden_size;
+}
+
+/**
+ * 分析单阶段瓶颈 (Roofline 模型)
+ */
+function analyzePhaseBottleneck(
+  phase: 'prefill' | 'decode',
+  arithmeticIntensity: number,
+  ridgePoint: number,
+  computeLatency: number,
+  memoryLatency: number,
+  commLatency: number,
+  actualLatency: number,
+  hardware: HardwareConfig,
+  utilization: number
+): PhaseBottleneckAnalysis {
+  // 判断瓶颈类型
+  const aiRatio = arithmeticIntensity / ridgePoint;
+  let boundType: 'compute' | 'memory' | 'balanced';
+
+  if (aiRatio < 0.8) {
+    boundType = 'memory';
+  } else if (aiRatio > 1.2) {
+    boundType = 'compute';
+  } else {
+    boundType = 'balanced';
+  }
+
+  // 计算延迟占比
+  const totalLatencyComponents = computeLatency + memoryLatency + commLatency;
+  const computeRatio = totalLatencyComponents > 0 ? computeLatency / totalLatencyComponents : 0;
+  const memoryRatio = totalLatencyComponents > 0 ? memoryLatency / totalLatencyComponents : 0;
+  const commRatio = totalLatencyComponents > 0 ? commLatency / totalLatencyComponents : 0;
+
+  // 计算理论最优延迟
+  const theoreticalLatency = Math.max(computeLatency, memoryLatency);
+
+  // 效率损失原因
+  const efficiencyLoss: string[] = [];
+
+  if (commRatio > 0.2) {
+    efficiencyLoss.push(`通信开销 ${(commRatio * 100).toFixed(0)}%`);
+  }
+  if (utilization < 0.5) {
+    efficiencyLoss.push(`硬件利用率低 ${(utilization * 100).toFixed(0)}%`);
+  }
+  if (boundType === 'memory' && phase === 'prefill') {
+    efficiencyLoss.push('Prefill 意外进入 memory-bound (batch 过小?)');
+  }
+  if (boundType === 'compute' && phase === 'decode') {
+    efficiencyLoss.push('Decode 意外进入 compute-bound (batch 过大?)');
+  }
+
+  return {
+    phase,
+    arithmetic_intensity: arithmeticIntensity,
+    hardware_ridge_point: ridgePoint,
+    bound_type: boundType,
+    compute_ratio: computeRatio,
+    memory_ratio: memoryRatio,
+    comm_ratio: commRatio,
+    utilization,
+    theoretical_latency_ms: theoreticalLatency,
+    actual_latency_ms: actualLatency,
+    efficiency_loss: efficiencyLoss,
+  };
+}
+
+/**
+ * 完整瓶颈分析 (Roofline 模型)
+ */
+export function analyzeBottleneckRoofline(
+  model: LLMModelConfig,
+  inference: InferenceConfig,
+  parallelism: ParallelismStrategy,
+  hardware: HardwareConfig,
+  prefillCompute: number,
+  prefillComm: number,
+  prefillTotal: number,
+  decodeCompute: number,
+  decodeMemory: number,
+  decodeComm: number,
+  decodePerToken: number,
+  mfu: number,
+  mbu: number
+): BottleneckAnalysis {
+  const ridgePoint = calculateRidgePoint(hardware);
+  const avgContextLen = inference.input_seq_length + inference.output_seq_length / 2;
+
+  // Prefill 算术强度
+  const prefillAI = calculatePrefillArithmeticIntensity(model, inference, parallelism);
+
+  // Decode 算术强度
+  const decodeAI = calculateDecodeArithmeticIntensity(model, inference, parallelism, avgContextLen);
+
+  // 分析各阶段瓶颈
+  const prefillAnalysis = analyzePhaseBottleneck(
+    'prefill', prefillAI, ridgePoint,
+    prefillCompute, 0, prefillComm, prefillTotal,
+    hardware, mfu
+  );
+
+  const decodeAnalysis = analyzePhaseBottleneck(
+    'decode', decodeAI, ridgePoint,
+    decodeCompute, decodeMemory, decodeComm, decodePerToken,
+    hardware, mbu
+  );
+
+  // 判断主导阶段
+  const prefillTotalTime = prefillTotal;
+  const decodeTotalTime = decodePerToken * inference.output_seq_length;
+  const dominantPhase = prefillTotalTime > decodeTotalTime ? 'prefill' : 'decode';
+
+  // 综合瓶颈类型
+  const dominantAnalysis = dominantPhase === 'prefill' ? prefillAnalysis : decodeAnalysis;
+  let overallBottleneck: BottleneckType;
+
+  if (dominantAnalysis.comm_ratio > 0.4) {
+    overallBottleneck = 'communication';
+  } else if (dominantAnalysis.bound_type === 'memory') {
+    overallBottleneck = 'memory';
+  } else if (dominantAnalysis.bound_type === 'compute') {
+    overallBottleneck = 'compute';
+  } else {
+    overallBottleneck = 'balanced';
+  }
+
+  // 瓶颈严重程度 (1 - 利用率)
+  const severity = 1 - dominantAnalysis.utilization;
+
+  // 优化潜力分析
+  const dtypeBytes = model.dtype === 'fp32' ? 4 : 2;
+  const currentAI = dominantPhase === 'prefill' ? prefillAI : decodeAI;
+
+  // Batch scaling: 增大 batch 提升算术强度
+  const batchScalingPotential = decodeAI < ridgePoint ? Math.min(ridgePoint / decodeAI, 4) : 1;
+
+  // 量化: INT8 可减少一半内存访问
+  const quantizationPotential = dtypeBytes > 1 ? dtypeBytes / 1 : 1;
+
+  // 减少 TP: 减少通信开销
+  const reduceTPPotential = dominantAnalysis.comm_ratio > 0.1 ? 1 / (1 - dominantAnalysis.comm_ratio * 0.5) : 1;
+
+  // 生成摘要
+  const phaseLabel = dominantPhase === 'prefill' ? 'Prefill' : 'Decode';
+  const boundLabel = dominantAnalysis.bound_type === 'memory' ? '访存瓶颈' :
+                     dominantAnalysis.bound_type === 'compute' ? '算力瓶颈' : '均衡状态';
+  const summary = `${phaseLabel}阶段主导 (${(dominantPhase === 'prefill' ? prefillTotalTime : decodeTotalTime).toFixed(1)}ms)，` +
+                  `${boundLabel}，算术强度 ${currentAI.toFixed(1)} ops/byte (临界点 ${ridgePoint.toFixed(0)})，` +
+                  `利用率 ${(dominantAnalysis.utilization * 100).toFixed(0)}%`;
+
+  return {
+    prefill: prefillAnalysis,
+    decode: decodeAnalysis,
+    dominant_phase: dominantPhase,
+    overall_bottleneck: overallBottleneck,
+    severity,
+    optimization_potential: {
+      batch_scaling: {
+        current_ai: currentAI,
+        target_ai: ridgePoint,
+        potential_speedup: batchScalingPotential,
+      },
+      quantization: {
+        current_bytes: dtypeBytes,
+        target_bytes: 1,
+        potential_speedup: quantizationPotential,
+      },
+      reduce_tp: {
+        current_comm_ratio: dominantAnalysis.comm_ratio,
+        potential_speedup: reduceTPPotential,
+      },
+    },
+    summary,
+  };
+}
+
+/**
+ * 识别主要瓶颈 (兼容旧接口)
  */
 export function identifyBottleneck(
   computeLatency: number,
@@ -563,6 +820,7 @@ export function analyzeLatency(
     prefill_comm_latency_ms: prefillComm,
     prefill_total_latency_ms: prefillTotal,
     decode_compute_latency_ms: decodeCompute,
+    decode_memory_latency_ms: decodeMemory,
     decode_comm_latency_ms: decodeComm,
     decode_per_token_latency_ms: decodePerToken,
     end_to_end_latency_ms: e2eLatency,

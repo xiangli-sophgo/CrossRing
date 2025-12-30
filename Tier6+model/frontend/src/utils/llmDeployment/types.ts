@@ -24,7 +24,58 @@ export type NormType = 'layernorm' | 'rmsnorm';
 export type InferencePhase = 'prefill' | 'decode';
 
 /** 瓶颈类型 */
-export type BottleneckType = 'compute' | 'memory' | 'communication' | 'pipeline_bubble';
+export type BottleneckType = 'compute' | 'memory' | 'communication' | 'pipeline_bubble' | 'balanced';
+
+/** 单阶段瓶颈分析 */
+export interface PhaseBottleneckAnalysis {
+  /** 阶段名称 */
+  phase: 'prefill' | 'decode';
+  /** 算术强度 (ops/byte) */
+  arithmetic_intensity: number;
+  /** 硬件临界点 (ops/byte) */
+  hardware_ridge_point: number;
+  /** 瓶颈类型 */
+  bound_type: 'compute' | 'memory' | 'balanced';
+  /** 计算延迟占比 (0-1) */
+  compute_ratio: number;
+  /** 访存延迟占比 (0-1) */
+  memory_ratio: number;
+  /** 通信延迟占比 (0-1) */
+  comm_ratio: number;
+  /** 利用率 (MFU for prefill, MBU for decode) */
+  utilization: number;
+  /** 理论最优延迟 (ms) */
+  theoretical_latency_ms: number;
+  /** 实际延迟 (ms) */
+  actual_latency_ms: number;
+  /** 效率损失原因 */
+  efficiency_loss: string[];
+}
+
+/** 完整瓶颈分析结果 */
+export interface BottleneckAnalysis {
+  /** Prefill 阶段瓶颈分析 */
+  prefill: PhaseBottleneckAnalysis;
+  /** Decode 阶段瓶颈分析 */
+  decode: PhaseBottleneckAnalysis;
+  /** 主导阶段 */
+  dominant_phase: 'prefill' | 'decode';
+  /** 综合瓶颈类型 */
+  overall_bottleneck: BottleneckType;
+  /** 瓶颈严重程度 (0-1, 越高越严重) */
+  severity: number;
+  /** 优化潜力分析 */
+  optimization_potential: {
+    /** 增大batch的潜在提升 */
+    batch_scaling: { current_ai: number; target_ai: number; potential_speedup: number };
+    /** 量化的潜在提升 */
+    quantization: { current_bytes: number; target_bytes: number; potential_speedup: number };
+    /** 减少TP的潜在提升 (减少通信) */
+    reduce_tp: { current_comm_ratio: number; potential_speedup: number };
+  };
+  /** 瓶颈摘要 */
+  summary: string;
+}
 
 /** 优化目标 */
 export type OptimizationTarget = 'latency' | 'throughput' | 'efficiency' | 'balanced';
@@ -253,6 +304,8 @@ export interface LatencyAnalysis {
   prefill_total_latency_ms: number;
   /** Decode 单 token 计算延迟 (ms) */
   decode_compute_latency_ms: number;
+  /** Decode 单 token 访存延迟 (ms) */
+  decode_memory_latency_ms: number;
   /** Decode 单 token 通信延迟 (ms) */
   decode_comm_latency_ms: number;
   /** Decode 单 token 总延迟 (ms) = TPOT */
@@ -265,6 +318,8 @@ export interface LatencyAnalysis {
   bottleneck_type: BottleneckType;
   /** 瓶颈详情 */
   bottleneck_details: string;
+  /** 详细瓶颈分析 (Roofline模型) */
+  bottleneck_analysis?: BottleneckAnalysis;
   /** TTFT 分位数分布 */
   ttft_percentiles?: LatencyPercentiles;
   /** TPOT 分位数分布 */

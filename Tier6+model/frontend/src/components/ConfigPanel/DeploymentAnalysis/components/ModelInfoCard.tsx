@@ -106,15 +106,33 @@ const calculateParams = (model: LLMModelConfig) => {
   }
 }
 
+// 小节标题样式
+const SubSectionTitle: React.FC<{ title: string }> = ({ title }) => (
+  <div style={{
+    fontSize: 12,
+    fontWeight: 600,
+    color: COLORS.text,
+    marginBottom: 6,
+    marginTop: 10,
+    paddingTop: 8,
+    borderTop: '1px dashed #e8e8e8',
+  }}>
+    {title}
+  </div>
+)
+
 // 两列参数网格
-const ParamGrid: React.FC<{ items: { label: string; value: string | number }[] }> = ({ items }) => (
-  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', marginBottom: 8 }}>
-    {items.map((item, i) => (
-      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0' }}>
-        <span style={{ color: COLORS.textSecondary }}>{item.label}:</span>
-        <span style={{ fontWeight: 500, color: COLORS.text, fontFamily: 'ui-monospace, monospace' }}>{item.value}</span>
-      </div>
-    ))}
+const ParamGrid: React.FC<{ items: { label: string; value: string | number }[]; title?: string }> = ({ items, title }) => (
+  <div>
+    {title && <SubSectionTitle title={title} />}
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', marginBottom: 8 }}>
+      {items.map((item, i) => (
+        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '2px 0' }}>
+          <span style={{ color: COLORS.textSecondary }}>{item.label}:</span>
+          <span style={{ fontWeight: 500, color: COLORS.text, fontFamily: 'ui-monospace, monospace' }}>{item.value}</span>
+        </div>
+      ))}
+    </div>
   </div>
 )
 
@@ -122,7 +140,7 @@ const ParamGrid: React.FC<{ items: { label: string; value: string | number }[] }
 const DetailSection: React.FC<{ title: string; color: typeof COLORS.embedding; children: React.ReactNode }> = ({ title, color, children }) => (
   <div style={{ marginBottom: 12 }}>
     <div style={{
-      fontSize: 13,
+      fontSize: 14,
       fontWeight: 600,
       color: color.text,
       marginBottom: 6,
@@ -163,21 +181,23 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
   })
 
   // 操作步骤组件 - 更详细的说明
-  const StepList: React.FC<{ items: { name: string; desc: string; detail?: string }[] }> = ({ items }) => (
-    <div style={{ marginTop: 8, padding: 10, background: '#fafafa', borderRadius: 4, fontSize: 11 }}>
-      <div style={{ fontWeight: 600, color: COLORS.text, marginBottom: 8 }}>操作流程</div>
-      {items.map((item, i) => (
-        <div key={i} style={{ marginBottom: 6, paddingLeft: 4 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-            <span style={{ color: '#1677ff', fontWeight: 600, minWidth: 20 }}>{i + 1}.</span>
-            <div>
-              <b style={{ color: COLORS.text }}>{item.name}</b>
-              <span style={{ color: COLORS.textSecondary }}>：{item.desc}</span>
-              {item.detail && <div style={{ color: '#999', marginTop: 2, fontSize: 10 }}>{item.detail}</div>}
+  const StepList: React.FC<{ items: { name: string; desc: string; detail?: string }[]; title?: string }> = ({ items, title = '操作流程' }) => (
+    <div>
+      <SubSectionTitle title={title} />
+      <div style={{ fontSize: 12 }}>
+        {items.map((item, i) => (
+          <div key={i} style={{ marginBottom: 6, paddingLeft: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+              <span style={{ color: '#1677ff', fontWeight: 600, minWidth: 20 }}>{i + 1}.</span>
+              <div>
+                <b style={{ color: COLORS.text }}>{item.name}</b>
+                <span style={{ color: COLORS.textSecondary }}>：{item.desc}</span>
+                {item.detail && <div style={{ color: '#999', marginTop: 2, fontSize: 11 }}>{item.detail}</div>}
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   )
 
@@ -185,29 +205,35 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
   const detailContent: Record<string, React.ReactNode> = {
     embedding: (
       <DetailSection title="Embedding Layer" color={COLORS.embedding}>
-        <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>
           将离散的 Token ID 映射为连续的高维向量表示，是模型理解文本的第一步。
+          <div style={{ marginTop: 4, fontFamily: 'ui-monospace, monospace', color: COLORS.text }}>
+            维度变化：[B, S] → [B, S, H]
+          </div>
         </div>
-        <ParamGrid items={[
-          { label: '词表大小', value: formatNum(model.vocab_size) },
-          { label: '隐藏维度', value: formatNum(H) },
+        <ParamGrid title="关键参数" items={[
+          { label: '词表大小 V', value: formatNum(model.vocab_size) },
+          { label: '隐藏维度 H', value: formatNum(H) },
           { label: '位置编码', value: 'RoPE' },
           { label: '参数量', value: formatNum(params.embedding) },
         ]} />
         <StepList items={[
-          { name: 'Token Embedding', desc: '查表映射', detail: `输入 Token ID，从 ${formatNum(model.vocab_size)}×${formatNum(H)} 的嵌入矩阵中查找对应的 ${formatNum(H)} 维向量` },
+          { name: 'Token Embedding', desc: '查表映射', detail: '输入 Token ID (整数)，从 V×H 的嵌入矩阵中查找对应的 H 维向量' },
           { name: 'RoPE 位置编码', desc: '旋转位置编码', detail: '通过旋转变换将位置信息编码到向量中，使模型能够区分不同位置的 Token' },
         ]} />
       </DetailSection>
     ),
     attention: (
       <DetailSection title={`${isMLA ? 'MLA' : model.attention_type?.toUpperCase() || 'GQA'} Attention`} color={COLORS.attention}>
-        <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>
           {isMLA
-            ? 'Multi-head Latent Attention：DeepSeek 独创的注意力机制，通过低秩压缩大幅减少 KV Cache 显存占用。'
-            : '自注意力机制：让每个位置能够关注序列中所有其他位置，捕获长距离依赖关系。'}
+            ? 'Multi-head Latent Attention（多头潜在注意力）：DeepSeek 独创的注意力机制，通过低秩压缩技术将 KV Cache 压缩数倍，在保持模型性能的同时大幅降低推理时的显存占用。'
+            : `GQA（Grouped Query Attention，分组查询注意力）：将多个 Query 头共享同一组 Key-Value 头，在保持模型表达能力的同时减少 KV Cache 的显存占用和计算量。本模型使用 ${n_h} 个 Q 头共享 ${n_kv} 个 KV 头。`}
+          <div style={{ marginTop: 4, fontFamily: 'ui-monospace, monospace', color: COLORS.text }}>
+            维度变化：[B, S, H] → [B, S, H]（维度不变）
+          </div>
         </div>
-        <ParamGrid items={[
+        <ParamGrid title="关键参数" items={[
           { label: '注意力头', value: n_h },
           { label: 'KV 头', value: n_kv },
           { label: '头维度', value: d_h },
@@ -220,58 +246,64 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
         ]} />
         {isMLA ? (
           <StepList items={[
-            { name: 'RMSNorm', desc: '层归一化', detail: 'Root Mean Square Layer Normalization，对输入进行归一化，稳定训练过程' },
-            { name: 'Q LoRA 投影', desc: '低秩 Q 生成', detail: `先 Down 投影 (${formatNum(H)}→${model.mla_config?.q_lora_rank})，再 Up 投影生成 Q，减少计算量` },
-            { name: 'KV 压缩', desc: `${Math.round(H / (model.mla_config?.kv_lora_rank || 512))}× 压缩`, detail: `将 ${formatNum(H)} 维压缩到 ${model.mla_config?.kv_lora_rank} 维，大幅减少 KV Cache 显存` },
-            { name: 'Attention 计算', desc: 'Q @ K^T → Softmax → @ V', detail: '计算 Query 和 Key 的相似度，Softmax 归一化后加权 Value' },
-            { name: 'V 解压 + Output', desc: '恢复维度并投影', detail: `从 ${model.mla_config?.kv_lora_rank} 维解压回 ${formatNum(H)} 维，然后线性投影输出` },
-            { name: '+ Residual', desc: '残差连接', detail: '将输出与原始输入相加，帮助梯度流动，防止深层网络退化' },
+            { name: 'RMSNorm', desc: '输入归一化', detail: '对上一层的输出进行均方根归一化，消除不同样本间的数值差异，使训练更加稳定' },
+            { name: 'Q LoRA 投影', desc: '低秩查询生成', detail: '通过低秩分解技术生成 Query 向量，先压缩再扩展，在减少参数量的同时保持表达能力' },
+            { name: 'KV 压缩', desc: '键值缓存压缩', detail: '将 Key 和 Value 投影到低维空间存储，推理时可节省数倍显存，是 MLA 的核心创新' },
+            { name: '注意力计算', desc: '相似度加权', detail: '计算当前位置与所有历史位置的相关性得分，决定应该关注哪些上下文信息' },
+            { name: 'V 解压 + 输出投影', desc: '恢复并输出', detail: '将压缩的 Value 解压并与注意力权重加权求和，再通过线性变换生成最终输出' },
+            { name: '+ Residual', desc: '残差连接', detail: '将注意力输出与原始输入相加，让梯度能够直接回传，解决深层网络训练困难的问题' },
           ]} />
         ) : (
           <StepList items={[
-            { name: 'RMSNorm', desc: '层归一化', detail: '对输入进行归一化，稳定训练过程' },
-            { name: 'QKV 投影', desc: '生成 Q/K/V', detail: `通过三个线性变换生成 Query、Key、Value 向量` },
-            { name: 'Attention', desc: '注意力计算', detail: 'Q @ K^T / √d → Softmax → @ V，计算位置间的关联' },
-            { name: 'Output 投影', desc: '多头拼接输出', detail: '将多个注意力头的输出拼接后线性投影' },
-            { name: '+ Residual', desc: '残差连接', detail: '与输入相加，防止梯度消失' },
+            { name: 'RMSNorm', desc: '输入归一化', detail: '对上一层的输出进行均方根归一化，消除不同样本间的数值差异，使训练更加稳定' },
+            { name: 'QKV 投影', desc: '生成查询/键/值', detail: 'Query 用于表示"我要查找什么"，Key 用于表示"我有什么信息"，Value 是实际要传递的内容' },
+            { name: '注意力计算', desc: '相似度加权', detail: '计算 Query 和所有 Key 的相似度得分，通过 Softmax 归一化后作为权重，对 Value 进行加权求和' },
+            { name: '输出投影', desc: '多头融合输出', detail: '将多个注意力头捕获的不同模式信息拼接起来，通过线性变换融合成统一的表示' },
+            { name: '+ Residual', desc: '残差连接', detail: '将注意力输出与原始输入相加，让梯度能够直接回传，解决深层网络训练困难的问题' },
           ]} />
         )}
       </DetailSection>
     ),
     ffn: (
-      <DetailSection title="Feed-Forward Network" color={COLORS.ffn}>
-        <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>
-          前馈网络：对每个位置独立进行非线性变换，是 Transformer 中存储知识的主要组件。
+      <DetailSection title="FFN 前馈网络" color={COLORS.ffn}>
+        <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>
+          FFN（Feed-Forward Network，前馈神经网络）：对每个位置的表示独立进行非线性变换。本模型采用 SwiGLU 变体，相比传统 FFN 有更好的性能。研究表明 FFN 层是 Transformer 存储事实知识的主要位置。
+          <div style={{ marginTop: 4, fontFamily: 'ui-monospace, monospace', color: COLORS.text }}>
+            维度变化：[B, S, H] → [B, S, I] → [B, S, H]
+          </div>
         </div>
-        <ParamGrid items={[
-          { label: '隐藏维度', value: formatNum(H) },
-          { label: '中间维度', value: formatNum(I) },
+        <ParamGrid title="关键参数" items={[
+          { label: '隐藏维度 H', value: formatNum(H) },
+          { label: '中间维度 I', value: formatNum(I) },
           { label: '扩展倍数', value: `${(I / H).toFixed(1)}×` },
-          { label: '激活函数', value: 'SwiGLU' },
+          { label: 'FFN 类型', value: 'SwiGLU' },
           { label: '参数量/层', value: formatNum(params.ffn / model.num_layers) },
         ]} />
         <StepList items={[
-          { name: 'RMSNorm', desc: '层归一化', detail: '对 Attention 输出进行归一化' },
-          { name: 'Gate 投影', desc: `${formatNum(H)}→${formatNum(I)}`, detail: '门控分支，决定信息通过的比例' },
-          { name: 'Up 投影', desc: `${formatNum(H)}→${formatNum(I)}`, detail: '数值分支，承载实际的特征变换' },
-          { name: 'SiLU ⊙ 门控', desc: '门控激活', detail: 'SiLU(Gate) × Up，SiLU 是平滑的激活函数，门控机制增强表达能力' },
-          { name: 'Down 投影', desc: `${formatNum(I)}→${formatNum(H)}`, detail: '将扩展的维度降回原始维度' },
-          { name: '+ Residual', desc: '残差连接', detail: '与 FFN 输入相加，保持信息流通' },
+          { name: 'RMSNorm', desc: '输入归一化', detail: '对注意力层的输出进行归一化，确保数值稳定，为后续计算提供一致的输入分布' },
+          { name: 'Gate 投影', desc: 'H → I', detail: '将输入线性变换到中间维度 I，这个分支的输出将经过激活函数处理，用于控制信息流通' },
+          { name: 'Up 投影', desc: 'H → I', detail: '将输入线性变换到中间维度 I，这个分支承载实际的特征信息，将与门控信号相乘' },
+          { name: 'SiLU × Up', desc: '门控激活', detail: 'Gate 分支经过 SiLU 激活函数后与 Up 分支逐元素相乘，维度保持 I 不变' },
+          { name: 'Down 投影', desc: 'I → H', detail: '将中间维度 I 压缩回隐藏维度 H，完成"扩展-压缩"的信息处理流程' },
+          { name: '+ Residual', desc: '残差连接', detail: '将 FFN 输出与输入相加，确保原始信息不丢失，同时融入新学到的特征' },
         ]} />
       </DetailSection>
     ),
     moe: model.moe_config && (
-      <DetailSection title="Mixture of Experts (MoE)" color={COLORS.moe}>
-        <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>
-          稀疏专家混合：每个 Token 只激活部分专家，以较低计算量实现超大模型容量。
+      <DetailSection title="MoE 混合专家层" color={COLORS.moe}>
+        <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>
+          MoE（Mixture of Experts，混合专家）：用多个专家网络替代单一 FFN，每个 Token 只激活少量专家进行计算。这种稀疏激活机制使模型能够拥有巨大的参数量（存储更多知识），同时保持较低的计算成本。
+          <div style={{ marginTop: 4, fontFamily: 'ui-monospace, monospace', color: COLORS.text }}>
+            维度变化：[B, S, H] → [B, S, H]（维度不变）
+          </div>
         </div>
         {model.model_name?.toLowerCase().includes('deepseek') && (
-          <div style={{ background: '#fff0f6', border: '1px solid #ffadd2', borderRadius: 4, padding: '6px 8px', marginBottom: 8, fontSize: 11 }}>
+          <div style={{ background: '#fff0f6', border: '1px solid #ffadd2', borderRadius: 4, padding: '6px 8px', marginBottom: 8, fontSize: 12 }}>
             <b style={{ color: COLORS.moe.text }}>DeepSeek 层分布：</b>
             <span style={{ color: COLORS.textSecondary }}>Layer 0-2 使用 Dense FFN，Layer 3-{model.num_layers - 1} 使用 MoE</span>
           </div>
         )}
-        <ParamGrid items={[
+        <ParamGrid title="关键参数" items={[
           { label: '专家总数', value: model.moe_config.num_experts },
           { label: '激活专家', value: `Top-${model.moe_config.num_experts_per_tok}` },
           { label: '共享专家', value: model.moe_config.num_shared_experts || 0 },
@@ -279,47 +311,60 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
           { label: '参数量/层', value: formatNum(params.ffn / model.num_layers) },
         ]} />
         <StepList items={[
-          { name: 'RMSNorm', desc: '层归一化', detail: '对 Attention 输出进行归一化' },
-          { name: 'Router 路由', desc: '计算专家分数', detail: `将输入通过路由网络，计算对 ${model.moe_config.num_experts} 个专家的亲和度分数` },
-          { name: 'Top-K 选择', desc: `选择 ${model.moe_config.num_experts_per_tok} 个专家`, detail: '每个 Token 只选择分数最高的几个专家，实现稀疏计算' },
-          { name: 'AllToAll Dispatch', desc: '分布式 Token 分发', detail: '在多 GPU 环境下，将 Token 发送到对应专家所在的设备' },
-          { name: 'Expert FFN', desc: '专家计算', detail: `每个被选中的专家独立执行 SwiGLU FFN (${formatNum(H)}→${formatNum(model.moe_config.expert_intermediate_size || I)}→${formatNum(H)})` },
-          { name: 'Shared Expert', desc: '共享专家计算', detail: `${model.moe_config.num_shared_experts || 0} 个共享专家处理所有 Token，提供通用特征` },
-          { name: 'AllToAll Combine', desc: '收集专家输出', detail: '将各专家的计算结果收集回原始设备' },
-          { name: 'Sum + Residual', desc: '加权求和 + 残差', detail: '按路由分数加权求和专家输出，加上共享专家输出，再与输入残差连接' },
+          { name: 'RMSNorm', desc: '输入归一化', detail: '对注意力层的输出进行归一化，为路由决策和专家计算提供稳定的输入' },
+          { name: '路由计算', desc: '专家选择决策', detail: '路由网络根据输入内容计算每个专家的匹配分数，决定当前 Token 应该由哪些专家处理' },
+          { name: 'Top-K 选择', desc: '稀疏激活', detail: '只选择得分最高的 K 个专家参与计算，其他专家不激活，大幅减少计算量' },
+          { name: 'AllToAll 分发', desc: '跨设备传输', detail: '在分布式训练中，将 Token 发送到对应专家所在的 GPU，实现专家并行' },
+          { name: '路由专家计算', desc: '专家独立处理', detail: '每个专家是一个独立的 FFN 网络，专门处理路由给它的 Token，不同专家学习不同类型的知识' },
+          { name: '共享专家计算', desc: '通用特征提取', detail: '共享专家处理所有 Token，提取通用特征，与路由专家互补，提升模型整体表现' },
+          { name: 'AllToAll 收集', desc: '结果汇总', detail: '将分散在各 GPU 上的专家计算结果收集回来，准备进行汇总' },
+          { name: '加权求和 + 残差', desc: '融合输出', detail: '按路由分数对各专家输出加权求和，加上共享专家的贡献，最后与输入残差连接' },
         ]} />
       </DetailSection>
     ),
     output: (
-      <DetailSection title="LM Head (Output)" color={COLORS.output}>
-        <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>
-          语言模型头：将最终隐藏状态映射到词表空间，预测下一个 Token 的概率分布。
+      <DetailSection title="LM Head 语言模型头" color={COLORS.output}>
+        <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>
+          LM Head（Language Model Head，语言模型头）：将 Transformer 最后一层输出的隐藏状态转换为词表上的概率分布，用于预测下一个 Token。这是模型从"理解"到"生成"的关键转换步骤。
+          <div style={{ marginTop: 4, fontFamily: 'ui-monospace, monospace', color: COLORS.text }}>
+            维度变化：[B, S, H] → [B, S, V]
+          </div>
         </div>
-        <ParamGrid items={[
-          { label: '输入维度', value: formatNum(H) },
-          { label: '输出维度', value: formatNum(model.vocab_size) },
+        <ParamGrid title="关键参数" items={[
+          { label: '输入维度 H', value: formatNum(H) },
+          { label: '输出维度 V', value: formatNum(model.vocab_size) },
           { label: '权重共享', value: '是' },
           { label: '参数量', value: formatNum(params.output) },
         ]} />
         <StepList items={[
-          { name: 'Final RMSNorm', desc: '最终归一化', detail: '对最后一层 Transformer 的输出进行归一化，确保数值稳定' },
-          { name: '线性投影', desc: `${formatNum(H)}→${formatNum(model.vocab_size)}`, detail: '通过与 Embedding 矩阵共享的权重，将隐藏状态映射到词表空间' },
-          { name: 'Softmax', desc: '概率分布', detail: '将 logits 转换为概率分布，选择概率最高的 Token 作为输出' },
+          { name: 'Final RMSNorm', desc: '最终归一化', detail: '对 Transformer 最后一层的输出进行归一化，确保输入到分类器的数值稳定' },
+          { name: '线性投影', desc: 'H → V', detail: '将隐藏状态投影到词表维度 V，通常与输入 Embedding 共享权重以减少参数量并提升效果' },
+          { name: 'Softmax', desc: '概率分布生成', detail: '将投影得到的原始分数转换为概率分布，每个位置表示对应词的预测概率' },
         ]} />
       </DetailSection>
     ),
     // 整体流程概览（默认视图）
     overview: (
       <DetailSection title="模型架构概览" color={{ bg: '#e6f7ff', border: '#91d5ff', text: '#0050b3' }}>
-        <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 10, lineHeight: 1.6 }}>
+        <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 10, lineHeight: 1.6 }}>
           {model.model_name} 是一个 {model.num_layers} 层的大型语言模型，采用 {isMLA ? 'MLA (Multi-head Latent Attention)' : 'GQA (Grouped Query Attention)'} 注意力机制
           {isMoE && `和 MoE (Mixture of Experts) 稀疏架构`}。
         </div>
-        <ParamGrid items={[
+        <div style={{ background: '#f0f5ff', border: '1px solid #adc6ff', borderRadius: 4, padding: '6px 10px', marginBottom: 10, fontSize: 11 }}>
+          <div style={{ fontWeight: 600, color: '#1d39c4', marginBottom: 4 }}>符号说明</div>
+          <div style={{ color: COLORS.textSecondary, lineHeight: 1.6 }}>
+            <span style={{ marginRight: 12 }}><b>B</b>=批次大小</span>
+            <span style={{ marginRight: 12 }}><b>S</b>=序列长度</span>
+            <span style={{ marginRight: 12 }}><b>H</b>=隐藏维度({formatNum(H)})</span>
+            <span style={{ marginRight: 12 }}><b>V</b>=词表大小({formatNum(model.vocab_size)})</span>
+            <span><b>I</b>=中间维度({formatNum(I)})</span>
+          </div>
+        </div>
+        <ParamGrid title="关键参数" items={[
           { label: '总参数量', value: formatNum(params.total) },
-          { label: '隐藏维度', value: formatNum(H) },
-          { label: '层数', value: model.num_layers },
-          { label: '词表大小', value: formatNum(model.vocab_size) },
+          { label: '隐藏维度 H', value: formatNum(H) },
+          { label: '层数 L', value: model.num_layers },
+          { label: '词表大小 V', value: formatNum(model.vocab_size) },
           { label: '注意力头', value: n_h },
           { label: 'KV 头', value: n_kv },
           ...(isMoE && model.moe_config ? [
@@ -328,23 +373,20 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
           ] : []),
         ]} />
         <StepList items={[
-          { name: 'Embedding', desc: '词嵌入层', detail: `将 Token ID 映射为 ${formatNum(H)} 维向量，加入 RoPE 位置编码` },
-          { name: 'Transformer ×' + model.num_layers, desc: '核心计算层', detail: `每层包含 ${isMLA ? 'MLA' : 'Attention'} 和 ${isMoE ? 'MoE' : 'FFN'}，使用 Pre-LN 架构` },
-          { name: 'Final RMSNorm', desc: '输出归一化', detail: '对最后一层输出进行 RMSNorm 归一化' },
-          { name: 'LM Head', desc: '语言模型头', detail: `映射到 ${formatNum(model.vocab_size)} 词表空间，预测下一个 Token` },
+          { name: 'Embedding', desc: '[B,S] → [B,S,H]', detail: '将 Token ID 映射为 H 维向量，加入 RoPE 位置编码' },
+          { name: 'Transformer ×' + model.num_layers, desc: '[B,S,H] → [B,S,H]', detail: `每层包含 ${isMLA ? 'MLA' : 'Attention'} 和 ${isMoE ? 'MoE' : 'FFN'}，维度保持不变` },
+          { name: 'Final RMSNorm', desc: '归一化', detail: '对最后一层输出进行 RMSNorm 归一化' },
+          { name: 'LM Head', desc: '[B,S,H] → [B,S,V]', detail: '映射到词表空间，预测下一个 Token 的概率分布' },
         ]} />
-        <div style={{ marginTop: 12, padding: 8, background: '#f0f5ff', borderRadius: 4, fontSize: 11, color: '#1d39c4' }}>
-          💡 点击左侧架构图中的各个模块，查看详细参数和操作流程
-        </div>
       </DetailSection>
     ),
     // Transformer 层说明
     transformer: (
       <DetailSection title="Transformer Layer" color={{ bg: '#f0f0f0', border: '#d9d9d9', text: '#595959' }}>
-        <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 8, lineHeight: 1.5 }}>
           Transformer 层是模型的核心组件，由注意力机制和前馈网络组成，共 {model.num_layers} 层堆叠。
         </div>
-        <ParamGrid items={[
+        <ParamGrid title="关键参数" items={[
           { label: '层数', value: model.num_layers },
           { label: '隐藏维度', value: formatNum(H) },
           { label: '注意力类型', value: isMLA ? 'MLA' : (model.attention_type?.toUpperCase() || 'GQA') },
@@ -352,9 +394,9 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
         ]} />
         <StepList items={[
           { name: 'Pre-LN 架构', desc: '归一化在前', detail: '每个子层前先做 RMSNorm，比 Post-LN 更稳定' },
-          { name: 'Attention 子层', desc: '自注意力机制', detail: `${isMLA ? 'MLA' : 'GQA'} 注意力，捕获序列中的依赖关系` },
+          { name: '注意力子层', desc: '自注意力机制', detail: `${isMLA ? 'MLA' : 'GQA'} 注意力，捕获序列中的依赖关系` },
           { name: 'FFN 子层', desc: isMoE ? 'MoE 稀疏计算' : 'SwiGLU FFN', detail: isMoE ? '稀疏专家混合，大容量低计算' : '全连接前馈网络，存储知识' },
-          { name: 'Residual 连接', desc: '残差连接', detail: '每个子层都有残差连接，x + SubLayer(x)，帮助梯度流动' },
+          { name: '残差连接', desc: '信息直通', detail: '每个子层都有残差连接，将输入直接加到输出上，帮助梯度流动' },
         ]} />
       </DetailSection>
     ),
@@ -384,7 +426,7 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
           width="100%"
           height={svgHeight}
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          style={{ display: 'block' }}
+          style={{ display: 'block', fontFamily: '"Times New Roman", Times, serif' }}
           preserveAspectRatio="xMidYMid meet"
         >
           <defs>
@@ -401,9 +443,17 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
             style={{ cursor: selectedBlock !== 'overview' ? 'pointer' : 'default' }}
           />
 
+          {/* 符号说明 */}
+          <g transform="translate(12, 12)">
+            <text x={0} y={0} fontSize={10} fill={COLORS.textSecondary}>
+              <tspan x={0} dy={0}>B=批次 S=序列长度</tspan>
+              <tspan x={0} dy={12}>H=隐藏维度 V=词表</tspan>
+            </text>
+          </g>
+
           {/* Input */}
           <text x={centerX} y={24} textAnchor="middle" fontSize={15} fontWeight={500} fill={COLORS.text}>
-            Input [{inference?.batch_size || 'B'}, {inference ? formatNum(inference.input_seq_length) : 'S'}]
+            输入 Token IDs [B, S]
           </text>
 
           {/* Arrow - 线段 + 三角形 */}
@@ -413,11 +463,11 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
           {/* Embedding */}
           <g onClick={(e) => { e.stopPropagation(); setSelectedBlock('embedding') }} style={{ cursor: 'pointer' }}>
             <rect x={centerX - 130} y={54} width={260} height={54} rx={6} {...getBlockStyle('embedding', COLORS.embedding)} />
-            <text x={centerX} y={78} textAnchor="middle" fontSize={16} fontWeight={600} fill={COLORS.embedding.text}>
+            <text x={centerX} y={76} textAnchor="middle" fontSize={16} fontWeight={600} fill={COLORS.embedding.text}>
               Embedding
             </text>
-            <text x={centerX} y={98} textAnchor="middle" fontSize={13} fill={COLORS.textSecondary}>
-              {formatNum(model.vocab_size)} × {formatNum(H)}
+            <text x={centerX} y={94} textAnchor="middle" fontSize={11} fill={COLORS.textSecondary}>
+              [B, S] → [B, S, H]
             </text>
           </g>
 
@@ -474,20 +524,20 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
                 <line x1={135} y1={312} x2={135} y2={322} stroke={COLORS.wire} strokeWidth={1.5} />
                 <polygon points="135,330 131,320 139,320" fill={COLORS.wire} />
 
-                {/* Attention */}
+                {/* 注意力计算 */}
                 <g transform="translate(53, 330)">
                   <rect width={164} height={30} rx={4} fill="#fff" stroke={COLORS.attention.border} strokeWidth={1.5} />
-                  <text x={82} y={20} textAnchor="middle" fontSize={12} fill={COLORS.textSecondary}>Attention (QKᵀ)</text>
+                  <text x={82} y={20} textAnchor="middle" fontSize={12} fill={COLORS.textSecondary}>注意力计算</text>
                 </g>
 
                 {/* 垂直流动箭头 */}
                 <line x1={135} y1={360} x2={135} y2={372} stroke={COLORS.wire} strokeWidth={1.5} />
                 <polygon points="135,380 131,370 139,370" fill={COLORS.wire} />
 
-                {/* V 解压 + Output */}
+                {/* V 解压 + 输出投影 */}
                 <g transform="translate(53, 380)">
                   <rect width={164} height={30} rx={4} fill="#fff" stroke={COLORS.attention.border} strokeWidth={1.5} />
-                  <text x={82} y={20} textAnchor="middle" fontSize={12} fill={COLORS.attention.text}>V 解压 + Output</text>
+                  <text x={82} y={20} textAnchor="middle" fontSize={12} fill={COLORS.attention.text}>V 解压 + 输出投影</text>
                 </g>
 
                 {/* 垂直流动箭头 */}
@@ -502,29 +552,54 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
 
               </>
             ) : (
-              /* 标准 GQA/MHA */
+              /* 标准 GQA/MHA - 带数据流箭头 */
               <>
-                {/* Q K V */}
-                <g transform="translate(50, 235)">
+                {/* RMSNorm 到 QKV 的流动箭头 */}
+                <line x1={135} y1={220} x2={135} y2={226} stroke={COLORS.wire} strokeWidth={1.5} />
+                <polygon points="135,232 131,224 139,224" fill={COLORS.wire} />
+
+                {/* Q K V 投影 */}
+                <g transform="translate(53, 232)">
                   {['Q', 'K', 'V'].map((label, i) => (
                     <g key={label} transform={`translate(${i * 55}, 0)`}>
-                      <rect width={50} height={34} rx={4} fill="#fff" stroke={COLORS.attention.border} strokeWidth={1.5} />
-                      <text x={25} y={22} textAnchor="middle" fontSize={14} fontWeight={500} fill={COLORS.attention.text}>{label}</text>
+                      <rect width={50} height={30} rx={4} fill="#fff" stroke={COLORS.attention.border} strokeWidth={1.5} />
+                      <text x={25} y={20} textAnchor="middle" fontSize={13} fontWeight={500} fill={COLORS.attention.text}>{label}</text>
                     </g>
                   ))}
                 </g>
-                <g transform="translate(50, 279)">
-                  <rect width={160} height={34} rx={4} fill="#fff" stroke={COLORS.attention.border} strokeWidth={1.5} />
-                  <text x={80} y={22} textAnchor="middle" fontSize={13} fill={COLORS.textSecondary}>Dot-Product Attn</text>
+
+                {/* QKV 汇聚到 Attention 的箭头 */}
+                <line x1={78} y1={262} x2={78} y2={272} stroke={COLORS.wire} strokeWidth={1.5} />
+                <line x1={135} y1={262} x2={135} y2={272} stroke={COLORS.wire} strokeWidth={1.5} />
+                <line x1={192} y1={262} x2={192} y2={272} stroke={COLORS.wire} strokeWidth={1.5} />
+                <line x1={78} y1={272} x2={192} y2={272} stroke={COLORS.wire} strokeWidth={1.5} />
+                <line x1={135} y1={272} x2={135} y2={280} stroke={COLORS.wire} strokeWidth={1.5} />
+                <polygon points="135,286 131,278 139,278" fill={COLORS.wire} />
+
+                {/* Dot-Product Attention */}
+                <g transform="translate(53, 286)">
+                  <rect width={164} height={28} rx={4} fill="#fff" stroke={COLORS.attention.border} strokeWidth={1.5} />
+                  <text x={82} y={19} textAnchor="middle" fontSize={12} fill={COLORS.textSecondary}>Scaled Dot-Product</text>
                 </g>
-                <g transform="translate(55, 323)">
-                  <rect width={150} height={32} rx={4} fill="#fff" stroke={COLORS.attention.border} strokeWidth={1.5} />
-                  <text x={75} y={21} textAnchor="middle" fontSize={13} fill={COLORS.attention.text}>Output Proj</text>
+
+                {/* Attention 到 Output Proj 的箭头 */}
+                <line x1={135} y1={314} x2={135} y2={322} stroke={COLORS.wire} strokeWidth={1.5} />
+                <polygon points="135,328 131,320 139,320" fill={COLORS.wire} />
+
+                {/* Output Projection */}
+                <g transform="translate(53, 328)">
+                  <rect width={164} height={28} rx={4} fill="#fff" stroke={COLORS.attention.border} strokeWidth={1.5} />
+                  <text x={82} y={19} textAnchor="middle" fontSize={12} fill={COLORS.attention.text}>输出投影</text>
                 </g>
+
+                {/* Output Proj 到 Residual 的箭头 */}
+                <line x1={135} y1={356} x2={135} y2={364} stroke={COLORS.wire} strokeWidth={1.5} />
+                <polygon points="135,370 131,362 139,362" fill={COLORS.wire} />
+
                 {/* Residual Add */}
-                <g transform="translate(50, 365)">
-                  <rect width={160} height={24} rx={3} fill="#fafafa" stroke={COLORS.wire} strokeWidth={1} />
-                  <text x={80} y={16} textAnchor="middle" fontSize={11} fill={COLORS.textSecondary}>+ Residual</text>
+                <g transform="translate(53, 370)">
+                  <rect width={164} height={24} rx={3} fill="#fafafa" stroke={COLORS.wire} strokeWidth={1} />
+                  <text x={82} y={16} textAnchor="middle" fontSize={11} fill={COLORS.textSecondary}>+ Residual</text>
                 </g>
               </>
             )}
@@ -540,80 +615,95 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
               <rect x={260} y={168} width={200} height={300} rx={6} {...getBlockStyle('moe', COLORS.moe)} />
               {/* 标题 */}
               <text x={360} y={188} textAnchor="middle" fontSize={15} fontWeight={600} fill={COLORS.moe.text}>
-                MoE FFN
+                MoE
               </text>
               {/* Pre-LN: RMSNorm */}
               <rect x={278} y={198} width={164} height={22} rx={3} fill="#fafafa" stroke={COLORS.wire} strokeWidth={1} />
               <text x={360} y={213} textAnchor="middle" fontSize={11} fill={COLORS.textSecondary}>RMSNorm</text>
 
-              {/* Router */}
-              <g transform="translate(278, 228)">
-                <rect width={170} height={28} rx={4} fill="#fff" stroke={COLORS.moe.border} strokeWidth={1.5} />
-                <text x={85} y={19} textAnchor="middle" fontSize={12} fill={COLORS.moe.text}>
-                  Router → Top-{model.moe_config.num_experts_per_tok}
+              {/* RMSNorm 到 Router 的流动箭头 */}
+              <line x1={360} y1={220} x2={360} y2={226} stroke={COLORS.wire} strokeWidth={1.5} />
+              <polygon points="360,232 356,224 364,224" fill={COLORS.wire} />
+
+              {/* 路由 */}
+              <g transform="translate(278, 232)">
+                <rect width={164} height={28} rx={4} fill="#fff" stroke={COLORS.moe.border} strokeWidth={1.5} />
+                <text x={82} y={19} textAnchor="middle" fontSize={12} fill={COLORS.moe.text}>
+                  路由 → Top-{model.moe_config.num_experts_per_tok}
                 </text>
               </g>
 
-              {/* 垂直流动箭头 */}
-              <line x1={360} y1={256} x2={360} y2={262} stroke={COLORS.wire} strokeWidth={1.5} />
-              <polygon points="360,268 356,260 364,260" fill={COLORS.wire} />
+              {/* Router 到 AllToAll 的流动箭头 */}
+              <line x1={360} y1={260} x2={360} y2={266} stroke={COLORS.wire} strokeWidth={1.5} />
+              <polygon points="360,272 356,264 364,264" fill={COLORS.wire} />
 
-              {/* AllToAll Dispatch */}
-              <g transform="translate(278, 268)">
+              {/* AllToAll 分发 */}
+              <g transform="translate(278, 272)">
                 <rect width={164} height={24} rx={4} fill={COLORS.bg} stroke={COLORS.wire} strokeDasharray="4,2" strokeWidth={1.5} />
-                <text x={82} y={16} textAnchor="middle" fontSize={11} fill={COLORS.textSecondary}>AllToAll Dispatch</text>
+                <text x={82} y={16} textAnchor="middle" fontSize={11} fill={COLORS.textSecondary}>AllToAll 分发</text>
               </g>
 
-              {/* 垂直流动箭头 */}
-              <line x1={360} y1={292} x2={360} y2={298} stroke={COLORS.wire} strokeWidth={1.5} />
-              <polygon points="360,304 356,296 364,296" fill={COLORS.wire} />
+              {/* AllToAll 到 Experts 的流动箭头 */}
+              <line x1={360} y1={296} x2={360} y2={302} stroke={COLORS.wire} strokeWidth={1.5} />
+              <polygon points="360,308 356,300 364,300" fill={COLORS.wire} />
 
-              {/* Routed Experts + Shared Expert 并排 */}
-              <g transform="translate(278, 304)">
-                {/* Routed Experts */}
-                <rect width={108} height={70} rx={4} fill="#fff" stroke={COLORS.ffn.border} strokeWidth={1.5} />
-                <text x={54} y={15} textAnchor="middle" fontSize={11} fontWeight={600} fill={COLORS.ffn.text}>Routed ×{model.moe_config.num_experts_per_tok}</text>
-                <g transform="translate(6, 20)">
-                  {[0, 1, 2, 3].map((i) => (
-                    <rect key={i} x={(i % 2) * 48} y={Math.floor(i / 2) * 24} width={44} height={20} rx={3}
-                      fill={COLORS.ffn.bg} stroke={COLORS.ffn.border} />
-                  ))}
-                  <text x={22} y={14} textAnchor="middle" fontSize={10} fill={COLORS.ffn.text}>E₁</text>
-                  <text x={70} y={14} textAnchor="middle" fontSize={10} fill={COLORS.ffn.text}>E₂</text>
-                  <text x={22} y={38} textAnchor="middle" fontSize={10} fill={COLORS.textSecondary}>...</text>
-                  <text x={70} y={38} textAnchor="middle" fontSize={10} fill={COLORS.ffn.text}>E₈</text>
-                </g>
+              {/* 专家层 - 并行分支 */}
+              <g transform="translate(278, 308)">
+                {/* 分支箭头 - 从中间分出两路 */}
+                {(model.moe_config.num_shared_experts || 0) > 0 ? (
+                  <>
+                    <line x1={82} y1={0} x2={42} y2={12} stroke={COLORS.wire} strokeWidth={1.5} />
+                    <line x1={82} y1={0} x2={122} y2={12} stroke={COLORS.wire} strokeWidth={1.5} />
+                  </>
+                ) : null}
 
-                {/* Shared Expert */}
+                {/* 激活专家 */}
+                <rect x={0} y={(model.moe_config.num_shared_experts || 0) > 0 ? 14 : 0} width={(model.moe_config.num_shared_experts || 0) > 0 ? 80 : 164} height={44} rx={4} fill="#fff" stroke={COLORS.ffn.border} strokeWidth={1.5} />
+                <text x={(model.moe_config.num_shared_experts || 0) > 0 ? 40 : 82} y={(model.moe_config.num_shared_experts || 0) > 0 ? 32 : 18} textAnchor="middle" fontSize={11} fontWeight={600} fill={COLORS.ffn.text}>激活专家</text>
+                <text x={(model.moe_config.num_shared_experts || 0) > 0 ? 40 : 82} y={(model.moe_config.num_shared_experts || 0) > 0 ? 48 : 36} textAnchor="middle" fontSize={10} fill={COLORS.textSecondary}>Top-{model.moe_config.num_experts_per_tok} / {model.moe_config.num_experts}</text>
+
+                {/* 共享专家 */}
                 {(model.moe_config.num_shared_experts || 0) > 0 && (
-                  <g transform="translate(112, 0)">
-                    <rect width={52} height={70} rx={4} fill="#fff" stroke={COLORS.attention.border} strokeWidth={1.5} />
-                    <text x={26} y={15} textAnchor="middle" fontSize={10} fontWeight={600} fill={COLORS.attention.text}>Shared</text>
-                    <text x={26} y={30} textAnchor="middle" fontSize={10} fill={COLORS.attention.text}>×{model.moe_config.num_shared_experts}</text>
-                    <rect x={6} y={38} width={40} height={26} rx={3} fill={COLORS.attention.bg} stroke={COLORS.attention.border} />
-                    <text x={26} y={55} textAnchor="middle" fontSize={10} fill={COLORS.attention.text}>FFN</text>
-                  </g>
+                  <>
+                    <rect x={84} y={14} width={80} height={44} rx={4} fill="#fff" stroke={COLORS.attention.border} strokeWidth={1.5} />
+                    <text x={124} y={32} textAnchor="middle" fontSize={11} fontWeight={600} fill={COLORS.attention.text}>共享专家</text>
+                    <text x={124} y={48} textAnchor="middle" fontSize={10} fill={COLORS.textSecondary}>×{model.moe_config.num_shared_experts}</text>
+                  </>
+                )}
+
+                {/* 汇聚箭头 - 两路合并 */}
+                {(model.moe_config.num_shared_experts || 0) > 0 ? (
+                  <>
+                    <line x1={42} y1={58} x2={82} y2={68} stroke={COLORS.wire} strokeWidth={1.5} />
+                    <line x1={122} y1={58} x2={82} y2={68} stroke={COLORS.wire} strokeWidth={1.5} />
+                    <polygon points="82,74 78,66 86,66" fill={COLORS.wire} />
+                  </>
+                ) : (
+                  <>
+                    <line x1={82} y1={44} x2={82} y2={50} stroke={COLORS.wire} strokeWidth={1.5} />
+                    <polygon points="82,56 78,48 86,48" fill={COLORS.wire} />
+                  </>
                 )}
               </g>
 
-              {/* 垂直流动箭头 */}
-              <line x1={360} y1={374} x2={360} y2={380} stroke={COLORS.wire} strokeWidth={1.5} />
-              <polygon points="360,386 356,378 364,378" fill={COLORS.wire} />
+              {/* 专家输出到 AllToAll 的流动箭头 */}
+              <line x1={360} y1={(model.moe_config.num_shared_experts || 0) > 0 ? 382 : 364} x2={360} y2={(model.moe_config.num_shared_experts || 0) > 0 ? 388 : 370} stroke={COLORS.wire} strokeWidth={1.5} />
+              <polygon points={`360,${(model.moe_config.num_shared_experts || 0) > 0 ? 394 : 376} 356,${(model.moe_config.num_shared_experts || 0) > 0 ? 386 : 368} 364,${(model.moe_config.num_shared_experts || 0) > 0 ? 386 : 368}`} fill={COLORS.wire} />
 
-              {/* AllToAll Combine */}
-              <g transform="translate(278, 386)">
+              {/* AllToAll 收集 */}
+              <g transform={`translate(278, ${(model.moe_config.num_shared_experts || 0) > 0 ? 394 : 376})`}>
                 <rect width={164} height={24} rx={4} fill={COLORS.bg} stroke={COLORS.wire} strokeDasharray="4,2" strokeWidth={1.5} />
-                <text x={82} y={16} textAnchor="middle" fontSize={11} fill={COLORS.textSecondary}>AllToAll Combine</text>
+                <text x={82} y={16} textAnchor="middle" fontSize={11} fill={COLORS.textSecondary}>AllToAll 收集</text>
               </g>
 
-              {/* 垂直流动箭头 */}
-              <line x1={360} y1={410} x2={360} y2={416} stroke={COLORS.wire} strokeWidth={1.5} />
-              <polygon points="360,422 356,414 364,414" fill={COLORS.wire} />
+              {/* AllToAll 到 Sum 的流动箭头 */}
+              <line x1={360} y1={(model.moe_config.num_shared_experts || 0) > 0 ? 418 : 400} x2={360} y2={(model.moe_config.num_shared_experts || 0) > 0 ? 424 : 406} stroke={COLORS.wire} strokeWidth={1.5} />
+              <polygon points={`360,${(model.moe_config.num_shared_experts || 0) > 0 ? 430 : 412} 356,${(model.moe_config.num_shared_experts || 0) > 0 ? 422 : 404} 364,${(model.moe_config.num_shared_experts || 0) > 0 ? 422 : 404}`} fill={COLORS.wire} />
 
-              {/* Sum + Residual */}
-              <g transform="translate(278, 422)">
+              {/* 加权求和 + 残差 */}
+              <g transform={`translate(278, ${(model.moe_config.num_shared_experts || 0) > 0 ? 430 : 412})`}>
                 <rect width={164} height={24} rx={3} fill="#fafafa" stroke={COLORS.wire} strokeWidth={1} />
-                <text x={82} y={16} textAnchor="middle" fontSize={11} fill={COLORS.textSecondary}>Sum + Residual</text>
+                <text x={82} y={16} textAnchor="middle" fontSize={11} fill={COLORS.textSecondary}>求和 + 残差</text>
               </g>
             </g>
           ) : (
@@ -627,46 +717,57 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
               <rect x={278} y={198} width={164} height={22} rx={3} fill="#fafafa" stroke={COLORS.wire} strokeWidth={1} />
               <text x={360} y={213} textAnchor="middle" fontSize={11} fill={COLORS.textSecondary}>RMSNorm</text>
 
-              {/* 垂直流动箭头 */}
-              <line x1={360} y1={220} x2={360} y2={226} stroke={COLORS.wire} strokeWidth={1.5} />
-              <polygon points="360,232 356,224 364,224" fill={COLORS.wire} />
+              {/* RMSNorm 分叉到 Gate 和 Up */}
+              <line x1={360} y1={220} x2={360} y2={224} stroke={COLORS.wire} strokeWidth={1.5} />
+              <line x1={317} y1={224} x2={403} y2={224} stroke={COLORS.wire} strokeWidth={1.5} />
+              <line x1={317} y1={224} x2={317} y2={230} stroke={COLORS.wire} strokeWidth={1.5} />
+              <polygon points="317,236 313,228 321,228" fill={COLORS.wire} />
+              <line x1={403} y1={224} x2={403} y2={230} stroke={COLORS.wire} strokeWidth={1.5} />
+              <polygon points="403,236 399,228 407,228" fill={COLORS.wire} />
 
-              <g transform="translate(278, 232)">
-                <rect width={78} height={32} rx={4} fill="#fff" stroke={COLORS.ffn.border} strokeWidth={1.5} />
-                <text x={39} y={21} textAnchor="middle" fontSize={12} fill={COLORS.ffn.text}>Gate</text>
+              {/* Gate 投影 */}
+              <g transform="translate(278, 236)">
+                <rect width={78} height={30} rx={4} fill="#fff" stroke={COLORS.ffn.border} strokeWidth={1.5} />
+                <text x={39} y={20} textAnchor="middle" fontSize={12} fill={COLORS.ffn.text}>Gate</text>
               </g>
-              <g transform="translate(364, 232)">
-                <rect width={78} height={32} rx={4} fill="#fff" stroke={COLORS.ffn.border} strokeWidth={1.5} />
-                <text x={39} y={21} textAnchor="middle" fontSize={12} fill={COLORS.ffn.text}>Up</text>
-              </g>
-
-              {/* 垂直流动箭头 */}
-              <line x1={360} y1={264} x2={360} y2={270} stroke={COLORS.wire} strokeWidth={1.5} />
-              <polygon points="360,276 356,268 364,268" fill={COLORS.wire} />
-
-              <text x={360} y={290} textAnchor="middle" fontSize={13} fill={COLORS.textSecondary}>SiLU ⊙</text>
-
-              {/* 垂直流动箭头 */}
-              <line x1={360} y1={296} x2={360} y2={302} stroke={COLORS.wire} strokeWidth={1.5} />
-              <polygon points="360,308 356,300 364,300" fill={COLORS.wire} />
-
-              <g transform="translate(295, 308)">
-                <rect width={130} height={32} rx={4} fill="#fff" stroke={COLORS.ffn.border} strokeWidth={1.5} />
-                <text x={65} y={21} textAnchor="middle" fontSize={12} fill={COLORS.ffn.text}>Down</text>
+              {/* Up 投影 */}
+              <g transform="translate(364, 236)">
+                <rect width={78} height={30} rx={4} fill="#fff" stroke={COLORS.ffn.border} strokeWidth={1.5} />
+                <text x={39} y={20} textAnchor="middle" fontSize={12} fill={COLORS.ffn.text}>Up</text>
               </g>
 
-              {/* 垂直流动箭头 */}
-              <line x1={360} y1={340} x2={360} y2={346} stroke={COLORS.wire} strokeWidth={1.5} />
-              <polygon points="360,352 356,344 364,344" fill={COLORS.wire} />
+              {/* Gate 和 Up 汇聚到 SiLU */}
+              <line x1={317} y1={266} x2={317} y2={274} stroke={COLORS.wire} strokeWidth={1.5} />
+              <line x1={403} y1={266} x2={403} y2={274} stroke={COLORS.wire} strokeWidth={1.5} />
+              <line x1={317} y1={274} x2={403} y2={274} stroke={COLORS.wire} strokeWidth={1.5} />
+              <line x1={360} y1={274} x2={360} y2={280} stroke={COLORS.wire} strokeWidth={1.5} />
+              <polygon points="360,286 356,278 364,278" fill={COLORS.wire} />
+
+              {/* SiLU 激活 */}
+              <g transform="translate(295, 286)">
+                <rect width={130} height={26} rx={4} fill="#fff" stroke={COLORS.ffn.border} strokeWidth={1.5} />
+                <text x={65} y={18} textAnchor="middle" fontSize={12} fill={COLORS.textSecondary}>SiLU(Gate) ⊙ Up</text>
+              </g>
+
+              {/* SiLU 到 Down 的箭头 */}
+              <line x1={360} y1={312} x2={360} y2={320} stroke={COLORS.wire} strokeWidth={1.5} />
+              <polygon points="360,326 356,318 364,318" fill={COLORS.wire} />
+
+              {/* Down 投影 */}
+              <g transform="translate(295, 326)">
+                <rect width={130} height={28} rx={4} fill="#fff" stroke={COLORS.ffn.border} strokeWidth={1.5} />
+                <text x={65} y={19} textAnchor="middle" fontSize={12} fill={COLORS.ffn.text}>Down</text>
+              </g>
+
+              {/* Down 到 Residual 的箭头 */}
+              <line x1={360} y1={354} x2={360} y2={362} stroke={COLORS.wire} strokeWidth={1.5} />
+              <polygon points="360,368 356,360 364,360" fill={COLORS.wire} />
 
               {/* Residual Add */}
-              <g transform="translate(278, 352)">
+              <g transform="translate(278, 368)">
                 <rect width={164} height={24} rx={3} fill="#fafafa" stroke={COLORS.wire} strokeWidth={1} />
                 <text x={82} y={16} textAnchor="middle" fontSize={11} fill={COLORS.textSecondary}>+ Residual</text>
               </g>
-              <text x={360} y={392} textAnchor="middle" fontSize={12} fill={COLORS.textSecondary}>
-                {formatNum(H)} → {formatNum(I)} → {formatNum(H)}
-              </text>
             </g>
           )}
 
@@ -687,11 +788,11 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
           {/* Output */}
           <g onClick={(e) => { e.stopPropagation(); setSelectedBlock('output') }} style={{ cursor: 'pointer' }}>
             <rect x={centerX - 110} y={isMoE ? 556 : 496} width={220} height={54} rx={6} {...getBlockStyle('output', COLORS.output)} />
-            <text x={centerX} y={isMoE ? 582 : 520} textAnchor="middle" fontSize={15} fontWeight={600} fill={COLORS.output.text}>
+            <text x={centerX} y={isMoE ? 580 : 518} textAnchor="middle" fontSize={15} fontWeight={600} fill={COLORS.output.text}>
               LM Head
             </text>
-            <text x={centerX} y={isMoE ? 600 : 538} textAnchor="middle" fontSize={12} fill={COLORS.textSecondary}>
-              {formatNum(H)} → {formatNum(model.vocab_size)}
+            <text x={centerX} y={isMoE ? 598 : 536} textAnchor="middle" fontSize={11} fill={COLORS.textSecondary}>
+              [B, S, H] → [B, S, V]
             </text>
           </g>
         </svg>
@@ -700,30 +801,12 @@ export const ModelInfoCard: React.FC<ModelInfoCardProps> = ({ model, inference }
       {/* 右侧：详情面板 */}
       <div style={{ flex: '1 1 45%', minWidth: 0, padding: '0 8px' }}>
         {detailContent[selectedBlock] || detailContent.overview}
-
-        {/* 推理配置 */}
-        {inference && (
-          <div style={{
-            marginTop: 12,
-            padding: '8px 10px',
-            background: '#f6ffed',
-            borderRadius: 4,
-            border: '1px solid #b7eb8f',
-            fontSize: 11,
-            color: '#389e0d',
-          }}>
-            <span style={{ fontWeight: 600 }}>推理配置：</span>
-            <span style={{ marginLeft: 8 }}>Batch={inference.batch_size}</span>
-            <span style={{ marginLeft: 8 }}>Input={formatNum(inference.input_seq_length)}</span>
-            <span style={{ marginLeft: 8 }}>Output={formatNum(inference.output_seq_length)}</span>
-          </div>
-        )}
       </div>
     </div>
   )
 
   return (
-    <div>
+    <div style={{ fontFamily: '"Times New Roman", Times, serif, "Microsoft YaHei", "PingFang SC", sans-serif' }}>
       {headerContent}
       {cardContent}
     </div>

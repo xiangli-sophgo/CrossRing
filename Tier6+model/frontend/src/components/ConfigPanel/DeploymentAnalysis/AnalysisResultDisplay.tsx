@@ -9,7 +9,6 @@
 import React, { useState, useCallback } from 'react'
 import {
   Typography,
-  Progress,
   Spin,
   Tag,
   Tooltip,
@@ -32,12 +31,11 @@ import {
   DashboardOutlined,
   ClockCircleOutlined,
   AimOutlined,
-  DownOutlined,
-  UpOutlined,
 } from '@ant-design/icons'
 import { PlanAnalysisResult, HardwareConfig, LLMModelConfig, InferenceConfig, DEFAULT_SCORE_WEIGHTS } from '../../../utils/llmDeployment/types'
 import { AnalysisHistoryItem, AnalysisViewMode } from '../shared'
 import { colors } from './ConfigSelectors'
+import { BaseCard } from '../../common/BaseCard'
 import { MetricDetailCard } from './components/MetricDetailCard'
 import { ModelInfoCard } from './components/ModelInfoCard'
 import { ParallelismInfo, ParallelismCard, type ParallelismType } from './components/ParallelismInfo'
@@ -276,7 +274,7 @@ interface AnalysisResultDisplayProps {
   inference?: InferenceConfig
 }
 
-type MetricType = 'ttft' | 'tpot' | 'throughput' | 'mfu' | 'mbu' | 'cost' | 'percentiles' | 'bottleneck' | 'e2e' | 'chips' | null
+type MetricType = 'ttft' | 'tpot' | 'throughput' | 'mfu' | 'mbu' | 'cost' | 'percentiles' | 'bottleneck' | 'e2e' | 'chips' | 'memory' | null
 
 export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
   result,
@@ -294,6 +292,7 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
   canMapToTopology,
   onMapToTopology,
   onClearTraffic,
+  hardware,
   model,
   inference,
 }) => {
@@ -306,14 +305,9 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
     deployment: true,
     model: true,
     performance: true,
-    bottleneck: true,
     suggestions: true,
     candidates: true,
   })
-
-  const toggleSection = (section: string) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }))
-  }
 
   // 从历史记录加载（父组件会自动切换到详情视图）
   const handleLoadFromHistory = useCallback((item: AnalysisHistoryItem) => {
@@ -395,28 +389,6 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
 
   const { plan, memory, latency, throughput, score, suggestions, is_feasible, infeasibility_reason } = result
 
-  // 章节标题样式
-  const sectionTitleStyle: React.CSSProperties = {
-    fontSize: 15,
-    fontWeight: 600,
-    color: colors.text,
-    marginBottom: 12,
-    paddingBottom: 8,
-    borderBottom: `1px solid ${colors.borderLight}`,
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-  }
-
-  // 章节容器样式（与 ChartsPanel 保持一致）
-  const sectionStyle: React.CSSProperties = {
-    background: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 16,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-  }
-
   // 指标卡片样式
   const metricCardStyle = (isSelected: boolean): React.CSSProperties => ({
     padding: '12px 10px',
@@ -461,19 +433,14 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
       {/* ═══════════════════════════════════════════════════════════════ */}
       {/* 一、部署方案 */}
       {/* ═══════════════════════════════════════════════════════════════ */}
-      <div style={sectionStyle}>
-        <div
-          style={{ ...sectionTitleStyle, cursor: 'pointer' }}
-          onClick={() => toggleSection('deployment')}
+      <div style={{ marginBottom: 16 }}>
+        <BaseCard
+          title="部署方案"
+          accentColor="#5E6AD2"
+          collapsible
+          expanded={expandedSections.deployment}
+          onExpandChange={(expanded) => setExpandedSections(prev => ({ ...prev, deployment: expanded }))}
         >
-          部署方案
-          <span style={{ marginLeft: 'auto' }}>
-            {expandedSections.deployment ? <UpOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
-          </span>
-        </div>
-        {/* 部署方案内容 */}
-        {expandedSections.deployment && (
-        <>
           {/* 顶部：并行策略卡片 + 综合评分 */}
           <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
             {/* 并行策略卡片 */}
@@ -549,25 +516,30 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
           </div>
 
           {/* 芯片数和搜索统计 */}
-          <div style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 12 }}>
+          <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 8 }}>
             <span>总芯片数: <b style={{ color: colors.text }}>{plan.total_chips}</b></span>
             {searchStats && (
               <span style={{ marginLeft: 16 }}>
-                搜索空间: {searchStats.evaluated} 方案 · {searchStats.feasible} 可行 · {searchStats.timeMs.toFixed(0)}ms
+                搜索: {searchStats.evaluated} 方案 · {searchStats.feasible} 可行 · {searchStats.timeMs.toFixed(0)}ms
               </span>
             )}
             <span style={{ marginLeft: 16, color: '#bbb' }}>点击策略卡片查看详情</span>
           </div>
 
+          {/* 推理配置 */}
+          {inference && (
+            <div style={{ fontSize: 13, color: colors.textSecondary, marginBottom: 0 }}>
+              <span>推理配置: </span>
+              <span style={{ marginLeft: 16 }}>Batch Size <b style={{ color: colors.text }}>{inference.batch_size}</b></span>
+              <span style={{ marginLeft: 16 }}>Input Length <b style={{ color: colors.text }}>{inference.input_seq_length}</b></span>
+              <span style={{ marginLeft: 16 }}>Output Length <b style={{ color: colors.text }}>{inference.output_seq_length}</b></span>
+              <span style={{ marginLeft: 16 }}>Max Seq Length <b style={{ color: colors.text }}>{inference.max_seq_length}</b></span>
+            </div>
+          )}
+
           {/* 并行策略详细介绍 */}
           {selectedParallelism && (
-            <div style={{
-              marginBottom: 12,
-              padding: 16,
-              background: '#fafafa',
-              borderRadius: 8,
-              border: '1px solid #f0f0f0',
-            }}>
+            <div style={{ marginBottom: 12 }}>
               <ParallelismInfo type={selectedParallelism} />
             </div>
           )}
@@ -684,161 +656,129 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
               </div>
             </div>
           )}
-        </>
-        )}
+        </BaseCard>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════ */}
       {/* 二、模型架构 */}
       {/* ═══════════════════════════════════════════════════════════════ */}
       {model && (
-        <div style={sectionStyle}>
-          <div
-            style={{ ...sectionTitleStyle, cursor: 'pointer' }}
-            onClick={() => toggleSection('model')}
+        <div style={{ marginBottom: 16 }}>
+          <BaseCard
+            title="模型架构"
+            accentColor="#13c2c2"
+            collapsible
+            expanded={expandedSections.model}
+            onExpandChange={(expanded) => setExpandedSections(prev => ({ ...prev, model: expanded }))}
           >
-            模型架构
-            <span style={{ marginLeft: 'auto' }}>
-              {expandedSections.model ? <UpOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
-            </span>
-          </div>
-          {expandedSections.model && <ModelInfoCard model={model} inference={inference} />}
+            <ModelInfoCard model={model} inference={inference} />
+          </BaseCard>
         </div>
       )}
 
       {/* ═══════════════════════════════════════════════════════════════ */}
       {/* 三、性能分析 */}
       {/* ═══════════════════════════════════════════════════════════════ */}
-      <div style={sectionStyle}>
-        <div
-          style={{ ...sectionTitleStyle, cursor: 'pointer' }}
-          onClick={() => toggleSection('performance')}
+      <div style={{ marginBottom: 16 }}>
+        <BaseCard
+          title="性能分析"
+          accentColor="#52c41a"
+          collapsible
+          expanded={expandedSections.performance}
+          onExpandChange={(expanded) => setExpandedSections(prev => ({ ...prev, performance: expanded }))}
         >
-          性能分析
-          <span style={{ marginLeft: 'auto' }}>
-            {expandedSections.performance ? <UpOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
-          </span>
-        </div>
-
-        {expandedSections.performance && (
         <>
         {/* 延迟指标 */}
-        <Text style={{ fontSize: 11, color: colors.textSecondary, display: 'block', marginBottom: 6 }}>延迟</Text>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 6, marginBottom: 10 }}>
-          <div style={metricCardStyle(selectedMetric === 'ttft')} onClick={() => setSelectedMetric(selectedMetric === 'ttft' ? null : 'ttft')}>
-            <Text style={{ fontSize: 10, color: colors.textSecondary }}>TTFT</Text>
-            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text, marginTop: 2 }}>
-              {latency.prefill_total_latency_ms.toFixed(1)} <span style={{ fontSize: 9, fontWeight: 400, color: colors.textSecondary }}>ms</span>
+        <Text style={{ fontSize: 13, fontWeight: 500, color: colors.text, display: 'block', marginBottom: 8 }}>延迟</Text>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 12 }}>
+          <div style={{ ...metricCardStyle(selectedMetric === 'ttft'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'ttft' ? null : 'ttft')}>
+            <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'ttft' ? colors.primary : '#d9d9d9' }} />
+            <Text style={{ fontSize: 13, color: colors.textSecondary }}>TTFT</Text>
+            <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
+              {latency.prefill_total_latency_ms.toFixed(1)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>ms</span>
             </div>
           </div>
-          <div style={metricCardStyle(selectedMetric === 'tpot')} onClick={() => setSelectedMetric(selectedMetric === 'tpot' ? null : 'tpot')}>
-            <Text style={{ fontSize: 10, color: colors.textSecondary }}>TPOT</Text>
-            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text, marginTop: 2 }}>
-              {latency.decode_per_token_latency_ms.toFixed(2)} <span style={{ fontSize: 9, fontWeight: 400, color: colors.textSecondary }}>ms</span>
+          <div style={{ ...metricCardStyle(selectedMetric === 'tpot'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'tpot' ? null : 'tpot')}>
+            <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'tpot' ? colors.primary : '#d9d9d9' }} />
+            <Text style={{ fontSize: 13, color: colors.textSecondary }}>TPOT</Text>
+            <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
+              {latency.decode_per_token_latency_ms.toFixed(2)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>ms</span>
             </div>
           </div>
-          <div style={metricCardStyle(selectedMetric === 'e2e')} onClick={() => setSelectedMetric(selectedMetric === 'e2e' ? null : 'e2e')}>
-            <Text style={{ fontSize: 10, color: colors.textSecondary }}>E2E</Text>
-            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text, marginTop: 2 }}>
-              {(latency.end_to_end_latency_ms / 1000).toFixed(2)} <span style={{ fontSize: 9, fontWeight: 400, color: colors.textSecondary }}>s</span>
+          <div style={{ ...metricCardStyle(selectedMetric === 'e2e'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'e2e' ? null : 'e2e')}>
+            <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'e2e' ? colors.primary : '#d9d9d9' }} />
+            <Text style={{ fontSize: 13, color: colors.textSecondary }}>E2E</Text>
+            <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
+              {(latency.end_to_end_latency_ms / 1000).toFixed(2)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>s</span>
             </div>
           </div>
-          <div style={metricCardStyle(selectedMetric === 'percentiles')} onClick={() => setSelectedMetric(selectedMetric === 'percentiles' ? null : 'percentiles')}>
-            <Text style={{ fontSize: 10, color: colors.textSecondary }}>P99</Text>
-            <div style={{ fontSize: 15, fontWeight: 600, color: latency.ttft_percentiles && latency.ttft_percentiles.p99 > 450 ? colors.error : colors.text, marginTop: 2 }}>
-              {latency.ttft_percentiles ? latency.ttft_percentiles.p99.toFixed(0) : '-'} <span style={{ fontSize: 9, fontWeight: 400, color: colors.textSecondary }}>ms</span>
+          <div style={{ ...metricCardStyle(selectedMetric === 'percentiles'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'percentiles' ? null : 'percentiles')}>
+            <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'percentiles' ? colors.primary : '#d9d9d9' }} />
+            <Text style={{ fontSize: 13, color: colors.textSecondary }}>P99</Text>
+            <div style={{ fontSize: 18, fontWeight: 600, color: latency.ttft_percentiles && latency.ttft_percentiles.p99 > 450 ? colors.error : colors.text, marginTop: 4 }}>
+              {latency.ttft_percentiles ? latency.ttft_percentiles.p99.toFixed(0) : '-'} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>ms</span>
             </div>
           </div>
         </div>
 
         {/* 吞吐与效率 */}
-        <Text style={{ fontSize: 11, color: colors.textSecondary, display: 'block', marginBottom: 6 }}>吞吐与效率</Text>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 10 }}>
-          <div style={metricCardStyle(selectedMetric === 'throughput')} onClick={() => setSelectedMetric(selectedMetric === 'throughput' ? null : 'throughput')}>
-            <Text style={{ fontSize: 10, color: colors.textSecondary }}>吞吐量</Text>
-            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text, marginTop: 2 }}>
-              {throughput.tokens_per_second.toFixed(0)} <span style={{ fontSize: 9, fontWeight: 400, color: colors.textSecondary }}>tok/s</span>
+        <Text style={{ fontSize: 13, fontWeight: 500, color: colors.text, display: 'block', marginBottom: 8 }}>吞吐与效率</Text>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
+          <div style={{ ...metricCardStyle(selectedMetric === 'throughput'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'throughput' ? null : 'throughput')}>
+            <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'throughput' ? colors.primary : '#d9d9d9' }} />
+            <Text style={{ fontSize: 13, color: colors.textSecondary }}>吞吐量</Text>
+            <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
+              {throughput.tokens_per_second.toFixed(0)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>tok/s</span>
             </div>
           </div>
-          <div style={metricCardStyle(selectedMetric === 'mfu')} onClick={() => setSelectedMetric(selectedMetric === 'mfu' ? null : 'mfu')}>
-            <Text style={{ fontSize: 10, color: colors.textSecondary }}>MFU</Text>
-            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text, marginTop: 2 }}>
-              {(throughput.model_flops_utilization * 100).toFixed(1)} <span style={{ fontSize: 9, fontWeight: 400, color: colors.textSecondary }}>%</span>
+          <div style={{ ...metricCardStyle(selectedMetric === 'mfu'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'mfu' ? null : 'mfu')}>
+            <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'mfu' ? colors.primary : '#d9d9d9' }} />
+            <Text style={{ fontSize: 13, color: colors.textSecondary }}>MFU</Text>
+            <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
+              {(throughput.model_flops_utilization * 100).toFixed(1)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>%</span>
             </div>
           </div>
-          <div style={metricCardStyle(selectedMetric === 'mbu')} onClick={() => setSelectedMetric(selectedMetric === 'mbu' ? null : 'mbu')}>
-            <Text style={{ fontSize: 10, color: colors.textSecondary }}>MBU</Text>
-            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text, marginTop: 2 }}>
-              {(throughput.memory_bandwidth_utilization * 100).toFixed(1)} <span style={{ fontSize: 9, fontWeight: 400, color: colors.textSecondary }}>%</span>
+          <div style={{ ...metricCardStyle(selectedMetric === 'mbu'), textAlign: 'center', position: 'relative' }} onClick={() => setSelectedMetric(selectedMetric === 'mbu' ? null : 'mbu')}>
+            <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'mbu' ? colors.primary : '#d9d9d9' }} />
+            <Text style={{ fontSize: 13, color: colors.textSecondary }}>MBU</Text>
+            <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
+              {(throughput.memory_bandwidth_utilization * 100).toFixed(1)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>%</span>
             </div>
           </div>
         </div>
 
         {/* 资源利用 */}
-        <Text style={{ fontSize: 11, color: colors.textSecondary, display: 'block', marginBottom: 6 }}>资源利用</Text>
-        <div style={{
-          padding: 12,
-          background: '#fff',
-          borderRadius: 8,
-          marginBottom: 8,
-          border: `1px solid ${colors.border}`,
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <Text style={{ fontSize: 11, color: colors.textSecondary }}>显存</Text>
-            <Text style={{ fontSize: 13, fontWeight: 500, color: colors.text }}>
-              {memory.total_per_chip_gb.toFixed(1)} <span style={{ color: colors.textSecondary, fontWeight: 400 }}>/ 80 GB</span>
-            </Text>
+        <Text style={{ fontSize: 13, fontWeight: 500, color: colors.text, display: 'block', marginBottom: 8 }}>资源利用</Text>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+          {/* 显存占用 */}
+          <div
+            style={{ ...metricCardStyle(selectedMetric === 'memory'), textAlign: 'center', position: 'relative' }}
+            onClick={() => setSelectedMetric(selectedMetric === 'memory' ? null : 'memory')}
+          >
+            <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'memory' ? colors.primary : '#d9d9d9' }} />
+            <Text style={{ fontSize: 13, color: colors.textSecondary }}>显存占用</Text>
+            <div style={{ fontSize: 18, fontWeight: 600, color: memory.is_memory_sufficient ? colors.text : colors.error, marginTop: 4 }}>
+              {memory.total_per_chip_gb.toFixed(1)} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>/ 80G</span>
+            </div>
+            <div style={{ fontSize: 10, color: colors.textSecondary, marginTop: 4 }}>
+              模型{memory.model_memory_gb.toFixed(1)} · KV{memory.kv_cache_memory_gb.toFixed(1)} · 激活{memory.activation_memory_gb.toFixed(1)}
+            </div>
           </div>
-          <Progress
-            percent={memory.memory_utilization * 100}
-            status={memory.is_memory_sufficient ? 'normal' : 'exception'}
-            size="small"
-            strokeColor={memory.is_memory_sufficient ? colors.primary : colors.error}
-            trailColor={colors.borderLight}
-            format={(p) => <span style={{ fontSize: 11, color: colors.textSecondary }}>{p?.toFixed(0)}%</span>}
-          />
-          <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 10, color: colors.textSecondary }}>
-            <span>模型: {memory.model_memory_gb.toFixed(1)}G</span>
-            <span>KV Cache: {memory.kv_cache_memory_gb.toFixed(1)}G</span>
-            <span>激活: {memory.activation_memory_gb.toFixed(1)}G</span>
-          </div>
-        </div>
-        <div
-          style={metricCardStyle(selectedMetric === 'cost')}
-          onClick={() => setSelectedMetric(selectedMetric === 'cost' ? null : 'cost')}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ fontSize: 11, color: colors.textSecondary }}>推理成本</Text>
-            <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>
-              ${result.cost ? result.cost.cost_per_million_tokens.toFixed(3) : '-'} <span style={{ fontSize: 10, fontWeight: 400, color: colors.textSecondary }}>/M tokens</span>
+          {/* 推理成本 */}
+          <div
+            style={{ ...metricCardStyle(selectedMetric === 'cost'), textAlign: 'center', position: 'relative' }}
+            onClick={() => setSelectedMetric(selectedMetric === 'cost' ? null : 'cost')}
+          >
+            <InfoCircleOutlined style={{ position: 'absolute', top: 8, right: 8, fontSize: 10, color: selectedMetric === 'cost' ? colors.primary : '#d9d9d9' }} />
+            <Text style={{ fontSize: 13, color: colors.textSecondary }}>推理成本</Text>
+            <div style={{ fontSize: 18, fontWeight: 600, color: colors.text, marginTop: 4 }}>
+              ${result.cost ? result.cost.cost_per_million_tokens.toFixed(3) : '-'} <span style={{ fontSize: 12, fontWeight: 400, color: colors.textSecondary }}>/M</span>
             </div>
           </div>
         </div>
-        </>
-        )}
-      </div>
 
-      {/* 指标详情展示 */}
-      {selectedMetric && selectedMetric !== 'bottleneck' && (
-        <MetricDetailCard metric={selectedMetric} result={result} />
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════ */}
-      {/* 七、瓶颈与优化（四~六在 ChartsPanel 中渲染） */}
-      {/* ═══════════════════════════════════════════════════════════════ */}
-      <div style={sectionStyle}>
-        <div
-          style={{ ...sectionTitleStyle, cursor: 'pointer' }}
-          onClick={() => toggleSection('bottleneck')}
-        >
-          瓶颈分析
-          <span style={{ marginLeft: 'auto' }}>
-            {expandedSections.bottleneck ? <UpOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
-          </span>
-        </div>
-
-        {/* 瓶颈 */}
-        {expandedSections.bottleneck && (
+        {/* 瓶颈分析 */}
+        <Text style={{ fontSize: 13, fontWeight: 500, color: colors.text, display: 'block', marginBottom: 8 }}>瓶颈分析</Text>
         <div
           style={{
             padding: 12,
@@ -847,63 +787,126 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
             cursor: 'pointer',
             border: selectedMetric === 'bottleneck' ? `2px solid ${colors.warning}` : `1px solid ${colors.border}`,
             transition: 'all 0.2s ease',
+            marginBottom: 12,
           }}
           onClick={() => setSelectedMetric(selectedMetric === 'bottleneck' ? null : 'bottleneck')}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-            <Text strong style={{ fontSize: 13, color: colors.text }}>{latency.bottleneck_type}</Text>
+          {/* 瓶颈类型标签 */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Tag color={
+                latency.bottleneck_type === 'compute' ? 'orange' :
+                latency.bottleneck_type === 'memory' ? 'blue' :
+                latency.bottleneck_type === 'communication' ? 'purple' :
+                latency.bottleneck_type === 'balanced' ? 'green' : 'default'
+              } style={{ margin: 0 }}>
+                {latency.bottleneck_type === 'compute' ? '算力瓶颈' :
+                 latency.bottleneck_type === 'memory' ? '访存瓶颈' :
+                 latency.bottleneck_type === 'communication' ? '通信瓶颈' :
+                 latency.bottleneck_type === 'balanced' ? '均衡状态' : latency.bottleneck_type}
+              </Tag>
+              {latency.bottleneck_analysis && (
+                <Text style={{ fontSize: 12, color: colors.textSecondary }}>
+                  {latency.bottleneck_analysis.dominant_phase === 'prefill' ? 'Prefill阶段主导' : 'Decode阶段主导'}
+                </Text>
+              )}
+            </div>
             <InfoCircleOutlined style={{ fontSize: 12, color: selectedMetric === 'bottleneck' ? colors.warning : '#ccc' }} />
           </div>
-          <Text style={{ fontSize: 11, color: colors.textSecondary }}>{latency.bottleneck_details}</Text>
-        </div>
-        )}
-      </div>
 
-      {/* 瓶颈详情展示 */}
-      {selectedMetric === 'bottleneck' && (
-        <MetricDetailCard metric="bottleneck" result={result} />
-      )}
+          {/* 延迟组成条 */}
+          {latency.bottleneck_analysis && (
+            <>
+              <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: '#f0f0f0' }}>
+                {(() => {
+                  const analysis = latency.bottleneck_analysis.dominant_phase === 'prefill'
+                    ? latency.bottleneck_analysis.prefill
+                    : latency.bottleneck_analysis.decode;
+                  return (
+                    <>
+                      <div style={{ width: `${analysis.compute_ratio * 100}%`, background: '#faad14' }} />
+                      <div style={{ width: `${analysis.memory_ratio * 100}%`, background: '#1890ff' }} />
+                      <div style={{ width: `${analysis.comm_ratio * 100}%`, background: '#722ed1' }} />
+                    </>
+                  );
+                })()}
+              </div>
+              <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 11, color: colors.textSecondary }}>
+                {(() => {
+                  const analysis = latency.bottleneck_analysis.dominant_phase === 'prefill'
+                    ? latency.bottleneck_analysis.prefill
+                    : latency.bottleneck_analysis.decode;
+                  return (
+                    <>
+                      <span>
+                        <span style={{ display: 'inline-block', width: 8, height: 8, background: '#faad14', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />
+                        计算 {(analysis.compute_ratio * 100).toFixed(0)}%
+                      </span>
+                      <span>
+                        <span style={{ display: 'inline-block', width: 8, height: 8, background: '#1890ff', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />
+                        访存 {(analysis.memory_ratio * 100).toFixed(0)}%
+                      </span>
+                      <span>
+                        <span style={{ display: 'inline-block', width: 8, height: 8, background: '#722ed1', borderRadius: 2, marginRight: 4, verticalAlign: 'middle' }} />
+                        通信 {(analysis.comm_ratio * 100).toFixed(0)}%
+                      </span>
+                    </>
+                  );
+                })()}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* 指标详情展示 - 内嵌在性能分析中 */}
+        {selectedMetric && (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px dashed ${colors.borderLight}` }}>
+            <MetricDetailCard metric={selectedMetric} result={result} />
+          </div>
+        )}
+        </>
+        </BaseCard>
+      </div>
 
       {/* 优化建议 */}
       {suggestions.length > 0 && (
-        <div style={sectionStyle}>
-          <div
-            style={{ ...sectionTitleStyle, cursor: 'pointer' }}
-            onClick={() => toggleSection('suggestions')}
+        <div style={{ marginBottom: 16 }}>
+          <BaseCard
+            title="优化建议"
+            accentColor="#722ed1"
+            collapsible
+            expanded={expandedSections.suggestions}
+            onExpandChange={(expanded) => setExpandedSections(prev => ({ ...prev, suggestions: expanded }))}
           >
-            优化建议
-            <span style={{ marginLeft: 'auto' }}>
-              {expandedSections.suggestions ? <UpOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
-            </span>
-          </div>
-          {expandedSections.suggestions && suggestions.slice(0, 3).map((s, i) => (
-            <div key={i} style={{
-              padding: 10,
-              background: '#fff',
-              borderRadius: 8,
-              marginBottom: 8,
-              borderLeft: `3px solid ${s.priority <= 2 ? colors.error : s.priority <= 3 ? colors.warning : colors.primary}`,
-              border: `1px solid ${colors.border}`,
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <Text style={{ fontSize: 12, color: colors.text, flex: 1 }}>{s.description}</Text>
-                <Tag
-                  style={{
-                    fontSize: 9,
-                    padding: '0 6px',
-                    borderRadius: 4,
-                    border: 'none',
-                    background: s.priority <= 2 ? colors.errorLight : s.priority <= 3 ? colors.warningLight : colors.primaryLight,
-                    color: s.priority <= 2 ? colors.error : s.priority <= 3 ? colors.warning : colors.primary,
-                    marginLeft: 8,
-                  }}
-                >
-                  P{s.priority}
-                </Tag>
+            {suggestions.slice(0, 3).map((s, i) => (
+              <div key={i} style={{
+                padding: 10,
+                background: '#fff',
+                borderRadius: 8,
+                marginBottom: 8,
+                borderLeft: `3px solid ${s.priority <= 2 ? colors.error : s.priority <= 3 ? colors.warning : colors.primary}`,
+                border: `1px solid ${colors.border}`,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <Text style={{ fontSize: 12, color: colors.text, flex: 1 }}>{s.description}</Text>
+                  <Tag
+                    style={{
+                      fontSize: 9,
+                      padding: '0 6px',
+                      borderRadius: 4,
+                      border: 'none',
+                      background: s.priority <= 2 ? colors.errorLight : s.priority <= 3 ? colors.warningLight : colors.primaryLight,
+                      color: s.priority <= 2 ? colors.error : s.priority <= 3 ? colors.warning : colors.primary,
+                      marginLeft: 8,
+                    }}
+                  >
+                    P{s.priority}
+                  </Tag>
+                </div>
+                <Text style={{ fontSize: 10, color: colors.textSecondary, marginTop: 4, display: 'block' }}>预期: {s.expected_improvement}</Text>
               </div>
-              <Text style={{ fontSize: 10, color: colors.textSecondary, marginTop: 4, display: 'block' }}>预期: {s.expected_improvement}</Text>
-            </div>
-          ))}
+            ))}
+          </BaseCard>
         </div>
       )}
 
@@ -911,19 +914,16 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
       {/* 八、候选方案 */}
       {/* ═══════════════════════════════════════════════════════════════ */}
       {topKPlans.length > 1 && (
-        <div style={sectionStyle}>
-          <div
-            style={{ ...sectionTitleStyle, cursor: 'pointer' }}
-            onClick={() => toggleSection('candidates')}
+        <div style={{ marginBottom: 16 }}>
+          <BaseCard
+            title="候选方案"
+            subtitle={`${topKPlans.length}个`}
+            accentColor="#1890ff"
+            collapsible
+            expanded={expandedSections.candidates}
+            onExpandChange={(expanded) => setExpandedSections(prev => ({ ...prev, candidates: expanded }))}
           >
-            候选方案
-            <Tag color="default" style={{ marginLeft: 8, fontSize: 10 }}>{topKPlans.length}个</Tag>
-            <span style={{ marginLeft: 'auto' }}>
-              {expandedSections.candidates ? <UpOutlined style={{ fontSize: 12 }} /> : <DownOutlined style={{ fontSize: 12 }} />}
-            </span>
-          </div>
-          {expandedSections.candidates && (
-          <div style={{ maxHeight: 200, overflow: 'auto' }}>
+            <div style={{ maxHeight: 200, overflow: 'auto' }}>
             {topKPlans.map((p, i) => {
               const isSelected = p.plan.plan_id === result?.plan.plan_id
               return (
@@ -976,8 +976,8 @@ export const AnalysisResultDisplay: React.FC<AnalysisResultDisplayProps> = ({
                 </div>
               )
             })}
-          </div>
-          )}
+            </div>
+          </BaseCard>
         </div>
       )}
 

@@ -51,10 +51,9 @@ import {
   InferenceConfigSelector,
   HardwareConfigSelector,
   colors,
-  sectionCardStyle,
-  sectionTitleStyle,
   configRowStyle,
 } from './ConfigSelectors'
+import { BaseCard } from '../../common/BaseCard'
 import { ParallelismConfigPanel } from './ParallelismConfigPanel'
 import { AnalysisResultDisplay } from './AnalysisResultDisplay'
 
@@ -427,93 +426,97 @@ export const DeploymentAnalysisPanel: React.FC<DeploymentAnalysisPanelProps> = (
   return (
     <div style={{ padding: 0 }}>
       {/* 模型配置 */}
-      <div style={sectionCardStyle}>
-        <div style={sectionTitleStyle}>模型配置</div>
-        <ModelConfigSelector value={modelConfig} onChange={setModelConfig} />
+      <div style={{ marginBottom: 12 }}>
+        <BaseCard title="模型配置" accentColor="#5E6AD2" collapsible defaultExpanded>
+          <ModelConfigSelector value={modelConfig} onChange={setModelConfig} />
+        </BaseCard>
       </div>
 
       {/* 推理配置 */}
-      <div style={sectionCardStyle}>
-        <div style={sectionTitleStyle}>推理配置</div>
-        <InferenceConfigSelector value={inferenceConfig} onChange={setInferenceConfig} />
+      <div style={{ marginBottom: 12 }}>
+        <BaseCard title="推理配置" accentColor="#13c2c2" collapsible defaultExpanded>
+          <InferenceConfigSelector value={inferenceConfig} onChange={setInferenceConfig} />
+        </BaseCard>
       </div>
 
       {/* 硬件配置 */}
-      <div style={sectionCardStyle}>
-        <div style={sectionTitleStyle}>硬件配置</div>
-        <div style={{ marginBottom: 12 }}>
-          <Radio.Group
-            size="small"
-            value={hardwareSource}
-            onChange={(e) => setHardwareSource(e.target.value)}
-            buttonStyle="solid"
-          >
-            <Radio.Button value="topology">使用拓扑配置</Radio.Button>
-            <Radio.Button value="manual">手动配置</Radio.Button>
-          </Radio.Group>
-        </div>
-
-        {hardwareSource === 'topology' ? (
-          <div>
-            {chipGroups.length === 0 ? (
-              <div style={{ padding: 12, background: colors.warningLight, borderRadius: 8, border: '1px solid #ffd591' }}>
-                <Text type="warning">
-                  <WarningOutlined style={{ marginRight: 6 }} />
-                  请先在「Board层级」中配置芯片类型
-                </Text>
-              </div>
-            ) : (
-              <>
-                {chipGroups.length > 1 && (
-                  <div style={configRowStyle}>
-                    <Text>分析芯片类型</Text>
-                    <Select
-                      size="small"
-                      value={selectedChipType}
-                      onChange={setSelectedChipType}
-                      style={{ width: 140 }}
-                      options={chipGroups.map(g => ({
-                        value: g.presetId || g.chipType,
-                        label: `${g.chipType} (${g.totalCount * podCount * racksPerPod}个)`,
-                      }))}
-                    />
-                  </div>
-                )}
-
-                <div style={{ padding: 10, background: colors.successLight, borderRadius: 8, fontSize: 12, border: '1px solid #b7eb8f' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <Text><CheckCircleOutlined style={{ color: colors.success, marginRight: 4 }} />芯片: <b>{hardwareConfig.chip.chip_type}</b></Text>
-                    <Text>共 <b>{hardwareConfig.node.chips_per_node * hardwareConfig.cluster.num_nodes}</b> 个</Text>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', color: colors.textSecondary }}>
-                    <span>节点数: {hardwareConfig.cluster.num_nodes}</span>
-                    <span>每节点: {hardwareConfig.node.chips_per_node} 个</span>
-                    <span>算力: {hardwareConfig.chip.compute_tflops_fp16} TFLOPs</span>
-                    <span>显存: {hardwareConfig.chip.memory_gb}GB</span>
-                  </div>
-                </div>
-              </>
-            )}
+      <div style={{ marginBottom: 12 }}>
+        <BaseCard title="硬件配置" accentColor="#52c41a" collapsible defaultExpanded>
+          <div style={{ marginBottom: 12 }}>
+            <Radio.Group
+              size="small"
+              value={hardwareSource}
+              onChange={(e) => setHardwareSource(e.target.value)}
+              buttonStyle="solid"
+            >
+              <Radio.Button value="topology">使用拓扑配置</Radio.Button>
+              <Radio.Button value="manual">手动配置</Radio.Button>
+            </Radio.Group>
           </div>
-        ) : (
-          <HardwareConfigSelector value={hardwareConfig} onChange={setHardwareConfig} />
-        )}
+
+          {hardwareSource === 'topology' ? (
+            <div>
+              {chipGroups.length === 0 ? (
+                <div style={{ padding: 12, background: colors.warningLight, borderRadius: 8, border: '1px solid #ffd591' }}>
+                  <Text type="warning">
+                    <WarningOutlined style={{ marginRight: 6 }} />
+                    请先在「Board层级」中配置芯片类型
+                  </Text>
+                </div>
+              ) : (
+                <>
+                  {chipGroups.length > 1 && (
+                    <div style={configRowStyle}>
+                      <Text>分析芯片类型</Text>
+                      <Select
+                        size="small"
+                        value={selectedChipType}
+                        onChange={setSelectedChipType}
+                        style={{ width: 140 }}
+                        options={chipGroups.map(g => ({
+                          value: g.presetId || g.chipType,
+                          label: `${g.chipType} (${g.totalCount * podCount * racksPerPod}个)`,
+                        }))}
+                      />
+                    </div>
+                  )}
+
+                  <div style={{ padding: 10, background: colors.successLight, borderRadius: 8, fontSize: 12, border: '1px solid #b7eb8f' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <Text><CheckCircleOutlined style={{ color: colors.success, marginRight: 4 }} />芯片: <b>{hardwareConfig.chip.chip_type}</b></Text>
+                      <Text>共 <b>{hardwareConfig.node.chips_per_node * hardwareConfig.cluster.num_nodes}</b> 个</Text>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', color: colors.textSecondary }}>
+                      <span>节点数: {hardwareConfig.cluster.num_nodes}</span>
+                      <span>每节点: {hardwareConfig.node.chips_per_node} 个</span>
+                      <span>算力: {hardwareConfig.chip.compute_tflops_fp16} TFLOPs</span>
+                      <span>显存: {hardwareConfig.chip.memory_gb}GB</span>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <HardwareConfigSelector value={hardwareConfig} onChange={setHardwareConfig} />
+          )}
+        </BaseCard>
       </div>
 
       {/* 并行策略 */}
-      <div style={sectionCardStyle}>
-        <div style={sectionTitleStyle}>并行策略</div>
-        <ParallelismConfigPanel
-          mode={parallelismMode}
-          onModeChange={setParallelismMode}
-          manualStrategy={manualStrategy}
-          onManualStrategyChange={setManualStrategy}
-          searchConstraints={searchConstraints}
-          onSearchConstraintsChange={setSearchConstraints}
-          maxChips={maxChips}
-          scoreWeights={scoreWeights}
-          onScoreWeightsChange={setScoreWeights}
-        />
+      <div style={{ marginBottom: 12 }}>
+        <BaseCard title="并行策略" accentColor="#faad14" collapsible defaultExpanded>
+          <ParallelismConfigPanel
+            mode={parallelismMode}
+            onModeChange={setParallelismMode}
+            manualStrategy={manualStrategy}
+            onManualStrategyChange={setManualStrategy}
+            searchConstraints={searchConstraints}
+            onSearchConstraintsChange={setSearchConstraints}
+            maxChips={maxChips}
+            scoreWeights={scoreWeights}
+            onScoreWeightsChange={setScoreWeights}
+          />
+        </BaseCard>
       </div>
 
       {/* 运行按钮 */}

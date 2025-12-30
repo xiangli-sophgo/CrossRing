@@ -3,7 +3,7 @@
    Tier6+ 互联建模 Modeler
    ============================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
   /* 背景层次 - Linear风格冷灰 */
@@ -66,15 +66,33 @@
   /* 顶部栏阴影 */
   --header-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 
-  /* 字体 - 使用Inter (Linear使用) */
+  /* 字体 - 英文使用 Times New Roman */
   --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: 'Times New Roman', Times, serif, 'Microsoft YaHei', 'PingFang SC', -apple-system, sans-serif;
 }
 
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  font-family: inherit;
+}
+
+/* Ant Design 组件字体覆盖 */
+.ant-typography,
+.ant-btn,
+.ant-input,
+.ant-select,
+.ant-table,
+.ant-card,
+.ant-tag,
+.ant-tooltip,
+.ant-popover,
+.ant-modal,
+.ant-menu,
+.ant-dropdown,
+.ant-tabs {
+  font-family: var(--font-sans) !important;
 }
 
 body {

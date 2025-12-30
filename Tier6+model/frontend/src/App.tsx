@@ -891,6 +891,7 @@ const App: React.FC = () => {
                   canMapToTopology={deploymentAnalysisData?.canMapToTopology}
                   onMapToTopology={deploymentAnalysisData?.onMapToTopology}
                   onClearTraffic={deploymentAnalysisData?.onClearTraffic}
+                  hardware={deploymentAnalysisData?.hardware}
                   model={deploymentAnalysisData?.model}
                   inference={deploymentAnalysisData?.inference}
                 />
