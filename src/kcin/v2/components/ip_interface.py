@@ -54,8 +54,8 @@ class IPInterface:
     模拟一个 IP 的频率转化和 OSTD/Data-buffer 行为:
       - inject_fifo: 1GHz 入队
       - l2h_fifo: 1→2GHz 上转换 FIFO（深度可调）
-      - 和 network.IQ_channel_buffer 对接（2GHz）
-      - network.EQ_channel_buffer → h2l_fifo → eject_fifo → IP（1GHz）
+      - tx_channel_buffer_pre → RS.input_fifos[ch_buffer]（2GHz发送）
+      - RS.output_fifos[ch_buffer] → rx_channel_buffer → h2l_fifo → eject_fifo → IP（1GHz接收）
     """
 
     def __init__(
@@ -114,6 +114,9 @@ class IPInterface:
                 "l2h_fifo": deque(maxlen=l2h_depth),  # 1GHz → 2GHz 转换FIFO
                 "h2l_fifo_h": deque(maxlen=h2l_h_depth),  # 2GHz域 高频FIFO
                 "h2l_fifo_l": deque(maxlen=h2l_l_depth),  # 1GHz域 低频FIFO
+                # v2统一架构: IP视角的发送/接收缓冲
+                "tx_channel_buffer_pre": None,  # IP发送 → RS.input_fifos[ch_buffer]
+                "rx_channel_buffer": deque(maxlen=config.RS_OUT_CH_BUFFER),  # RS.output_fifos[ch_buffer] → IP接收
             },
             "rsp": {
                 "network": rsp_network,
@@ -125,6 +128,9 @@ class IPInterface:
                 "l2h_fifo": deque(maxlen=l2h_depth),
                 "h2l_fifo_h": deque(maxlen=h2l_h_depth),
                 "h2l_fifo_l": deque(maxlen=h2l_l_depth),
+                # v2统一架构: IP视角的发送/接收缓冲
+                "tx_channel_buffer_pre": None,
+                "rx_channel_buffer": deque(maxlen=config.RS_OUT_CH_BUFFER),
             },
             "data": {
                 "network": data_network,
@@ -136,6 +142,9 @@ class IPInterface:
                 "l2h_fifo": deque(maxlen=l2h_depth),
                 "h2l_fifo_h": deque(maxlen=h2l_h_depth),
                 "h2l_fifo_l": deque(maxlen=h2l_l_depth),
+                # v2统一架构: IP视角的发送/接收缓冲
+                "tx_channel_buffer_pre": None,
+                "rx_channel_buffer": deque(maxlen=config.RS_OUT_CH_BUFFER),
             },
         }
 
@@ -406,46 +415,38 @@ class IPInterface:
             if flit.req_type == "read" and getattr(flit, "is_last_flit", False):
                 self._release_sn_read_tracker(flit.packet_id)
 
-    def l2h_to_IQ_channel_buffer(self, network_type):
-        """2GHz: l2h_fifo → network.IQ_channel_buffer"""
+    def l2h_to_tx_channel_buffer(self, network_type):
+        """2GHz: l2h_fifo → tx_channel_buffer_pre (v2统一架构)"""
         net_info = self.networks[network_type]
-        network = net_info["network"]
 
         if not net_info["l2h_fifo"]:
             return
 
-        # 检查目标缓冲区是否已满（只能在 *pre* 缓冲区为空且正式 FIFO 未满时移动）
-        fifo = network.IQ_channel_buffer[self.ip_type][self.ip_pos]
-        fifo_pre = network.IQ_channel_buffer_pre[self.ip_type][self.ip_pos]
-        if len(fifo) >= getattr(self.config, "RS_IN_CH_BUFFER", 8) or fifo_pre is not None:
-            return  # 没空间，或 pre 槽已占用
+        # 检查 tx_channel_buffer_pre 是否为空
+        if net_info["tx_channel_buffer_pre"] is not None:
+            return  # pre 槽已占用
 
-        # 从 l2h_fifo 弹出一个 flit，先放到 *pre* 槽
+        # 从 l2h_fifo 弹出一个 flit，放到 tx_channel_buffer_pre
         flit: Flit = net_info["l2h_fifo"].popleft()
-        flit.set_position("RS_IN_CH", self.current_cycle)
-        network.IQ_channel_buffer_pre[self.ip_type][self.ip_pos] = flit
+        flit.set_position("IP_TX_CH", self.current_cycle)
+        net_info["tx_channel_buffer_pre"] = flit
 
         # 更新cycle统计
         if network_type == "req" and flit.req_attr == "new":
             flit.cmd_entry_noc_from_cake0_cycle = self.current_cycle
-            # 更新RequestTracker
             if hasattr(self, "request_tracker") and self.request_tracker:
                 self.request_tracker.update_timestamp(flit.packet_id, "cmd_entry_noc_from_cake0_cycle", self.current_cycle)
         elif network_type == "rsp":
             flit.cmd_entry_noc_from_cake1_cycle = self.current_cycle
-            # 更新RequestTracker
             if hasattr(self, "request_tracker") and self.request_tracker:
                 self.request_tracker.update_timestamp(flit.packet_id, "cmd_entry_noc_from_cake1_cycle", self.current_cycle)
         elif network_type == "data":
-            # 只为第一个data flit设置entry时间戳
             if flit.req_type == "read" and flit.flit_id == 0:
                 flit.data_entry_noc_from_cake1_cycle = self.current_cycle
-                # 更新RequestTracker
                 if hasattr(self, "request_tracker") and self.request_tracker:
                     self.request_tracker.update_timestamp(flit.packet_id, "data_entry_noc_from_cake1_cycle", self.current_cycle)
             elif flit.req_type == "write" and flit.flit_id == 0:
                 flit.data_entry_noc_from_cake0_cycle = self.current_cycle
-                # 更新RequestTracker
                 if hasattr(self, "request_tracker") and self.request_tracker:
                     self.request_tracker.update_timestamp(flit.packet_id, "data_entry_noc_from_cake0_cycle", self.current_cycle)
 
@@ -519,34 +520,25 @@ class IPInterface:
             logging.warning(f"Resource check failed for {req}: {e}")
             return False
 
-    def EQ_channel_buffer_to_h2l_pre(self, network_type):
-        """2GHz: network.EQ_channel_buffer → h2l_fifo_h_pre"""
+    def rx_channel_buffer_to_h2l_pre(self, network_type):
+        """2GHz: rx_channel_buffer → h2l_fifo_h_pre (v2统一架构)"""
         net_info = self.networks[network_type]
-        network = net_info["network"]
 
         if net_info["h2l_fifo_h_pre"] is not None:
             return  # 预缓冲已占用
 
-        try:
-            # 新架构：直接使用 ip_pos
-            pos_index = self.ip_pos
+        rx_buf = net_info["rx_channel_buffer"]
+        if not rx_buf:
+            return
 
-            eq_buf = network.EQ_channel_buffer[self.ip_type][pos_index]
-            if not eq_buf:
-                return
+        # 检查h2l_fifo_h是否有空间
+        if len(net_info["h2l_fifo_h"]) >= net_info["h2l_fifo_h"].maxlen:
+            return
 
-            # 检查h2l_fifo_h是否有空间
-            if len(net_info["h2l_fifo_h"]) >= net_info["h2l_fifo_h"].maxlen:
-                return
-
-            flit = eq_buf.popleft()
-            flit.is_arrive = True
-            flit.set_position("H2L_H", self.current_cycle)
-            net_info["h2l_fifo_h_pre"] = flit
-            # arrive_flits添加移动到IP_eject阶段，确保只记录真正完成的flit
-
-        except (KeyError, AttributeError) as e:
-            logging.warning(f"EQ to h2l_h transfer failed for {network_type}: {e}")
+        flit = rx_buf.popleft()
+        flit.is_arrive = True
+        flit.set_position("H2L_H", self.current_cycle)
+        net_info["h2l_fifo_h_pre"] = flit
 
     def h2l_h_to_h2l_l_pre(self, network_type):
         """网络频率: h2l_fifo_h → h2l_fifo_l_pre"""
@@ -963,7 +955,13 @@ class IPInterface:
                     self.rn_rdb.pop(flit.packet_id)
 
                 else:
+                    # 调试信息：打印详细上下文
+                    tracker_pids = [r.packet_id for r in self.rn_tracker["read"]]
                     print(f"Warning: No RN tracker found for packet_id {flit.packet_id}")
+                    print(f"  - 当前IP: {self.ip_type}@{self.ip_pos}")
+                    print(f"  - flit来源: {flit.source}({flit.source_type}) -> {flit.destination}({flit.destination_type})")
+                    print(f"  - rn_tracker中的packet_ids: {tracker_pids}")
+                    print(f"  - rn_rdb中的packet_ids: {list(self.rn_rdb.keys())}")
 
         elif flit.req_type == "write":
             # D2D写数据统计（包括跨Die和Die内）
@@ -1100,7 +1098,7 @@ class IPInterface:
 
         # 2GHz 操作（每半个网络周期执行一次）
         for net_type in ["req", "rsp", "data"]:
-            self.l2h_to_IQ_channel_buffer(net_type)
+            self.l2h_to_tx_channel_buffer(net_type)
 
     def move_pre_to_fifo(self):
         # pre → fifo 的移动（每个周期都执行）
@@ -1131,7 +1129,7 @@ class IPInterface:
 
         # 2GHz 操作（每半个网络周期执行一次）
         for net_type in ["req", "rsp", "data"]:
-            self.EQ_channel_buffer_to_h2l_pre(net_type)
+            self.rx_channel_buffer_to_h2l_pre(net_type)
             self.h2l_h_to_h2l_l_pre(net_type)
 
         # 1GHz 操作（每个网络周期执行一次）

@@ -120,11 +120,58 @@ class StatsMixin:
             if self.link_state_vis.should_stop:
                 return
 
+            # v2 架构：同步 IP 模块的 channel buffer 到 network 对象
+            self._sync_channel_buffers_for_visualization()
+
+            # 调试：打印 req_network 节点 0 的 RingStation FIFO 状态
+            rs = self.req_network.ring_stations.get(0)
+            if rs:
+                in_cnt = {k: len(v) for k, v in rs.input_fifos.items() if len(v) > 0}
+                out_cnt = {k: len(v) for k, v in rs.output_fifos.items() if len(v) > 0}
+                in_pre = {k: 1 for k, v in rs.input_fifos_pre.items() if v is not None}
+                out_pre = {k: 1 for k, v in rs.output_fifos_pre.items() if v is not None}
+                if in_cnt or out_cnt or in_pre or out_pre:
+                    print(f"[DEBUG] cycle={self.cycle}, req_net node0: in={in_cnt}, out={out_cnt}, in_pre={in_pre}, out_pre={out_pre}")
+
             try:
                 self.link_state_vis.update([self.req_network, self.rsp_network, self.data_network], self.cycle)
             except Exception as e:
                 # 窗口已关闭，设置停止标志
                 self.link_state_vis.should_stop = True
+
+    def _sync_channel_buffers_for_visualization(self):
+        """将 IP 模块的 channel buffer 数据同步到 network 对象，供可视化使用"""
+        from collections import defaultdict
+
+        for network in [self.req_network, self.rsp_network, self.data_network]:
+            # 初始化 channel buffer 结构（如果不存在）
+            if not hasattr(network, "IQ_channel_buffer"):
+                network.IQ_channel_buffer = defaultdict(dict)
+            if not hasattr(network, "EQ_channel_buffer"):
+                network.EQ_channel_buffer = defaultdict(dict)
+
+            # 确定网络类型
+            if network == self.req_network:
+                net_type = "req"
+            elif network == self.rsp_network:
+                net_type = "rsp"
+            else:
+                net_type = "data"
+
+            # 从 IP 模块同步数据
+            for (ip_type, node_id), ip_interface in self.ip_modules.items():
+                net_info = ip_interface.networks.get(net_type)
+                if net_info is None:
+                    continue
+
+                # IQ: IP发送方向 (tx_channel_buffer_pre)
+                # 使用列表包装单个 flit，以便可视化器可以迭代
+                tx_pre = net_info.get("tx_channel_buffer_pre")
+                network.IQ_channel_buffer[ip_type][node_id] = [tx_pre] if tx_pre is not None else []
+
+                # EQ: IP接收方向 (rx_channel_buffer)
+                rx_buf = net_info.get("rx_channel_buffer")
+                network.EQ_channel_buffer[ip_type][node_id] = list(rx_buf) if rx_buf else []
 
     def error_log(self, flit, target_id, flit_id):
         if flit and flit.packet_id == target_id and flit.flit_id == flit_id:

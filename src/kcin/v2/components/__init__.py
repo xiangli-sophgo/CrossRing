@@ -3,7 +3,6 @@
 from .network import Network, LinkSlot
 from .ip_interface import IPInterface, RingIPInterface
 from .cross_point import CrossPoint
-from .dual_channel_ip_interface import DualChannelIPInterface
 from .ring_station import RingStation
 
 __all__ = [
@@ -12,6 +11,5 @@ __all__ = [
     "IPInterface",
     "RingIPInterface",
     "CrossPoint",
-    "DualChannelIPInterface",
     "RingStation",
 ]

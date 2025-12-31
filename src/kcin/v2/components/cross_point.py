@@ -37,10 +37,9 @@ class CrossPoint:
 
         # E-Tag: Entry管理 (共享Network的数据结构)
         if network_ref:
-            self.RB_UE_Counters = network_ref.RB_UE_Counters
-            self.EQ_UE_Counters = network_ref.EQ_UE_Counters
-            self.RB_CAPACITY = network_ref.RB_CAPACITY
-            self.EQ_CAPACITY = network_ref.EQ_CAPACITY
+            # v2统一Entry管理
+            self.RS_UE_Counters = network_ref.RS_UE_Counters
+            self.RS_CAPACITY = network_ref.RS_CAPACITY
             # I-Tag: 预约管理 (共享Network的数据结构)
             self.remain_tag = network_ref.remain_tag
             self.tagged_counter = network_ref.tagged_counter
@@ -48,10 +47,8 @@ class CrossPoint:
             self.excess_ITag_to_remove = network_ref.excess_ITag_to_remove
         else:
             # 如果没有network_ref，创建空的（用于测试）
-            self.RB_UE_Counters = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
-            self.EQ_UE_Counters = {"TU": {}, "TD": {}}
-            self.RB_CAPACITY = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
-            self.EQ_CAPACITY = {"TU": {}, "TD": {}}
+            self.RS_UE_Counters = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
+            self.RS_CAPACITY = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
             self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
             self.tagged_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
             self.itag_req_counter = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
@@ -102,12 +99,9 @@ class CrossPoint:
         Returns:
             bool: 是否可用
         """
-        if dir_type in ("TL", "TR"):
-            cap = self.RB_CAPACITY[dir_type][key][level]
-            occ = self.RB_UE_Counters[dir_type][key][level]
-        else:
-            cap = self.EQ_CAPACITY[dir_type][key][level]
-            occ = self.EQ_UE_Counters[dir_type][key][level]
+        # v2统一Entry管理
+        cap = self.RS_CAPACITY[dir_type][key][level]
+        occ = self.RS_UE_Counters[dir_type][key][level]
         return occ < cap
 
     def _occupy_entry(self, dir_type: str, key: Any, level: str, flit: Flit):
@@ -120,10 +114,8 @@ class CrossPoint:
             level: entry等级 ("T0"/"T1"/"T2")
             flit: 要记录的flit对象
         """
-        if dir_type in ("TL", "TR"):
-            self.RB_UE_Counters[dir_type][key][level] += 1
-        else:
-            self.EQ_UE_Counters[dir_type][key][level] += 1
+        # v2统一Entry管理
+        self.RS_UE_Counters[dir_type][key][level] += 1
         flit.used_entry_level = level
 
     # ------------------------------------------------------------------
@@ -476,48 +468,34 @@ class CrossPoint:
         if self.network and hasattr(self.network, "_update_order_tracking_table"):
             self.network._update_order_tracking_table(flit, target_node, direction)
 
-    def _try_eject(self, flit: Flit, direction: str, target_node: int, link: list, ring_bridge: dict = None, eject_queues: dict = None) -> tuple:
+    def _try_eject(self, flit: Flit, direction: str, target_node: int, link: list) -> tuple:
         """
         尝试下环（适用于所有下环场景）
 
         检查顺序：
-        1. 队列容量
+        1. RingStation输入端口容量
         2. 对应等级的entry可用性
         3. 占用最佳Entry
 
         注意：保序检查（方向和order_id）由调用方在外层完成
+        v2统一架构：使用 rs_can_accept_input 检查 RingStation 容量
 
         Args:
             flit: 当前flit
             direction: 下环方向 (TL/TR/TU/TD)
             target_node: 目标下环节点
             link: 当前链路
-            ring_bridge: ring_bridge队列字典
-            eject_queues: eject_queues队列字典
 
         Returns:
             tuple: (是否成功: bool, 失败原因: str)
                 失败原因: "" (成功), "capacity" (容量), "entry" (Entry不足)
         """
-        # 1. 获取队列和容量限制
-        if direction in ["TL", "TR"]:
-            # 横向环下环到ring_bridge
-            if ring_bridge is None:
-                return False, "capacity"
-            current_node = flit.current_link[1]
-            key = current_node  # 新架构: ring_bridge键直接使用节点号
-            queue = ring_bridge[direction][key]
-            capacity = self.config.RS_IN_FIFO_DEPTH
-        else:  # TU, TD
-            # 纵向环下环到eject_queues
-            if eject_queues is None:
-                return False, "capacity"
-            key = flit.current_link[1]
-            queue = eject_queues[direction][key]
-            capacity = self.config.RS_IN_FIFO_DEPTH
+        # 1. 获取节点ID
+        current_node = flit.current_link[1]
+        key = current_node
 
-        # 2. 检查队列容量（第二优先级）
-        if len(queue) >= capacity:
+        # 2. 检查RingStation输入端口容量（v2统一架构）
+        if not self.network.rs_can_accept_input(key, direction):
             return False, "capacity"
 
         # 3. 检查是否有对应等级的entry可用（第三优先级）
@@ -698,10 +676,14 @@ class CrossPoint:
         # 自环：根据节点所在边缘判断流动方向
         if prev_node == curr_node:
             row = curr_node // self.config.NUM_COL
-            num_rows = self.config.NUM_NODE // self.config.NUM_COL
-            # 上边缘 -> 向下流动 -> TD
-            # 下边缘 -> 向上流动 -> TU
-            return "TD" if row == 0 else "TU"
+            num_rows = self.config.NUM_ROW
+            if row == 0:
+                return "TD"  # 上边缘 -> 向下流动
+            elif row == num_rows - 1:
+                return "TU"  # 下边缘 -> 向上流动
+            else:
+                # 中间行不应该有纵向自环
+                raise ValueError(f"节点 {curr_node} (row={row}) 不应该有纵向自环")
 
         # 非自环：比较行号判断移动方向
         prev_row = prev_node // self.config.NUM_COL
@@ -732,20 +714,13 @@ class CrossPoint:
         total_used = 0
         total_capacity = 0
 
-        if direction in ["TL", "TR"]:
-            if node_pos in self.RB_UE_Counters[direction]:
-                levels = self.RB_UE_Counters[direction][node_pos]
-                capacity = self.RB_CAPACITY[direction][node_pos]
-                for level in ["T0", "T1", "T2"]:
-                    total_used += levels[level]
-                    total_capacity += capacity[level]
-        else:
-            if node_pos in self.EQ_UE_Counters[direction]:
-                levels = self.EQ_UE_Counters[direction][node_pos]
-                capacity = self.EQ_CAPACITY[direction][node_pos]
-                for level in ["T0", "T1", "T2"]:
-                    total_used += levels[level]
-                    total_capacity += capacity[level]
+        # v2统一Entry管理
+        if node_pos in self.RS_UE_Counters[direction]:
+            levels = self.RS_UE_Counters[direction][node_pos]
+            capacity = self.RS_CAPACITY[direction][node_pos]
+            for level in ["T0", "T1", "T2"]:
+                total_used += levels[level]
+                total_capacity += capacity[level]
 
         return total_used / total_capacity if total_capacity > 0 else 0.0
 
@@ -912,7 +887,7 @@ class CrossPoint:
 
         Args:
             node_pos: 节点位置
-            queue: inject_queues（TL/TR）或ring_bridge（TU/TD）队列
+            queue: RingStation.output_fifos[direction] 队列
             direction: 注入方向 ("TL"/"TR"/"TU"/"TD")
             cycle: 当前周期
 

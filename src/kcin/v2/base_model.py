@@ -471,24 +471,7 @@ class BaseModel(StatsMixin, DataflowMixin):
         self._last_printed_cycle = -1
         self.flit_num, self.req_num, self.rsp_num = 0, 0, 0
         self.new_write_req = []
-        self.IQ_directions = ["TR", "TL", "TU", "TD", "EQ"]
-        # 新架构: 物理直接映射, 相邻节点差值简化
-        # TR: +1 (向右), TL: -1 (向左), TU: -NUM_COL (向上), TD: +NUM_COL (向下)
-        self.IQ_direction_conditions = {
-            "TR": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == 1,
-            "TL": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == -1,
-            "TU": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == -self.config.NUM_COL,
-            "TD": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == self.config.NUM_COL,
-            "EQ": lambda flit: len(flit.path) == 1,  # 源=目标,直接下环
-        }
-        # 如果只有1列，禁用横向注入，仅保留垂直和EQ方向
-        if self.config.NUM_COL <= 1:
-            self.IQ_directions = ["EQ", "TU", "TD"]
-            self.IQ_direction_conditions = {
-                "TU": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == -self.config.NUM_COL,
-                "TD": lambda flit: len(flit.path) > 1 and flit.path[1] - flit.path[0] == self.config.NUM_COL,
-                "EQ": lambda flit: len(flit.path) == 1,
-            }
+        # v2架构: IQ_directions和IQ_direction_conditions已移至RingStation仲裁
         self.read_ip_intervals = defaultdict(list)  # 存储每个IP的读请求时间区间
         self.write_ip_intervals = defaultdict(list)  # 存储每个IP的写请求时间区间
 

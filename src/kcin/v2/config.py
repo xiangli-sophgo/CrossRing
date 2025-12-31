@@ -24,10 +24,11 @@ class V2Config(KCINConfigBase):
         self.KCIN_VERSION = "v2"
 
         # ==================== RingStation 配置 ====================
-        self.RS_IN_CH_BUFFER = config.get("RS_IN_CH_BUFFER", 4)
-        self.RS_IN_FIFO_DEPTH = config.get("RS_IN_FIFO_DEPTH", 4)
-        self.RS_OUT_CH_BUFFER = config.get("RS_OUT_CH_BUFFER", 4)
-        self.RS_OUT_FIFO_DEPTH = config.get("RS_OUT_FIFO_DEPTH", 4)
+        # 支持两种命名方式：RS_IN_CH_BUFFER 或 RS_INPUT_CH_DEPTH
+        self.RS_IN_CH_BUFFER = config.get("RS_IN_CH_BUFFER", config.get("RS_INPUT_CH_DEPTH", 4))
+        self.RS_IN_FIFO_DEPTH = config.get("RS_IN_FIFO_DEPTH", config.get("RS_INPUT_RING_DEPTH", 4))
+        self.RS_OUT_CH_BUFFER = config.get("RS_OUT_CH_BUFFER", config.get("RS_OUTPUT_CH_DEPTH", 4))
+        self.RS_OUT_FIFO_DEPTH = config.get("RS_OUT_FIFO_DEPTH", config.get("RS_OUTPUT_RING_DEPTH", 4))
 
         # ==================== Slice 配置（v2 可能简化）====================
         self.SLICE_PER_LINK_HORIZONTAL = config.get("SLICE_PER_LINK_HORIZONTAL", 1)

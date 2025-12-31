@@ -11,7 +11,6 @@ from .components import (
     IPInterface,
     RingIPInterface,
     CrossPoint,
-    DualChannelIPInterface,
     RingStation,
 )
 
@@ -27,6 +26,5 @@ __all__ = [
     "IPInterface",
     "RingIPInterface",
     "CrossPoint",
-    "DualChannelIPInterface",
     "RingStation",
 ]

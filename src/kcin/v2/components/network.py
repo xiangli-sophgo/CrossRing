@@ -95,22 +95,8 @@ class Network:
         self.schedules = {"sdma": None}
         self.inject_num = 0
         self.eject_num = 0
-        self.inject_queues = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
-        self.inject_queues_pre = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
-        self.eject_queues = {"TU": {}, "TD": {}}
-        self.eject_queues_in_pre = {"TU": {}, "TD": {}}
-        # Channel buffers - 延迟到initialize_buffers()中创建
+        # v2架构: 使用RingStation替代旧的inject_queues/eject_queues/channel_buffer
         self.arrive_node_pre = {}
-        self.IQ_channel_buffer = {}
-        self.EQ_channel_buffer = {}
-        self.IQ_channel_buffer_pre = {}
-        self.EQ_channel_buffer_pre = {}
-        # IQ仲裁输入FIFO (深度2 + pre缓冲，按IP类型分类)
-        self.IQ_arbiter_input_fifo = {}
-        self.IQ_arbiter_input_fifo_pre = {}
-        # EQ仲裁输入FIFO (深度2 + pre缓冲，4个输入端口，每个端口一个FIFO)
-        self.EQ_arbiter_input_fifo = {"TU": {}, "TD": {}, "IQ": {}, "RB": {}}
-        self.EQ_arbiter_input_fifo_pre = {"TU": {}, "TD": {}, "IQ": {}, "RB": {}}
         self.links = {}
         self.cross_point = {"horizontal": defaultdict(lambda: defaultdict(list)), "vertical": defaultdict(lambda: defaultdict(list))}
         # Crosspoint conflict status: maintains pipeline queue [current_cycle, previous_cycle]
@@ -124,10 +110,6 @@ class Network:
 
         # 每个FIFO Entry的等待计数器
         self.fifo_counters = {"TL": {}, "TR": {}}
-        self.ring_bridge = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
-        self.ring_bridge_pre = {"TL": {}, "TR": {}, "TU": {}, "TD": {}, "EQ": {}}
-        self.round_robin = {"IQ": defaultdict(lambda: defaultdict(dict)), "RB": defaultdict(lambda: defaultdict(dict)), "EQ": defaultdict(lambda: defaultdict(dict))}
-        self.round_robin_counter = 0
 
         self.recv_flits_num = 0
         self.send_flits = defaultdict(list)
@@ -227,13 +209,12 @@ class Network:
         self.T0_table_v = {}  # {node_id: set(slot_id, ...)} 纵向环T0 flit记录表
         self.T0_arb_pointer_h = {}  # {node_id: index} 横向环仲裁指针
         self.T0_arb_pointer_v = {}  # {node_id: index} 纵向环仲裁指针
-        self.RB_UE_Counters = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}  # 所有CrossPoint共享
-        self.EQ_UE_Counters = {"TU": {}, "TD": {}}  # 所有CrossPoint共享
+        # v2统一Entry管理：RS_UE_Counters 替代 RB_UE_Counters 和 EQ_UE_Counters
+        self.RS_UE_Counters = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}  # 所有CrossPoint共享
         self.ETAG_BOTHSIDE_UPGRADE = False
 
         # 延迟释放Entry机制：存储待释放的Entry信息 {node_id: [(level, release_cycle), ...]}
-        self.RB_pending_entry_release = {"TL": defaultdict(list), "TR": defaultdict(list)}
-        self.EQ_pending_entry_release = {"TU": defaultdict(list), "TD": defaultdict(list)}
+        self.RS_pending_entry_release = {"TL": defaultdict(list), "TR": defaultdict(list), "TU": defaultdict(list), "TD": defaultdict(list)}
 
         # ITag setup (这些数据结构由Network管理，CrossPoint共享引用)
         self.remain_tag = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
@@ -252,35 +233,11 @@ class Network:
             self.cross_point["vertical"][node_pos]["TU"] = [None] * 2
             self.cross_point["vertical"][node_pos]["TD"] = [None] * 2
 
-            # Inject/Eject queues
-            self.inject_queues["TL"][node_pos] = deque(maxlen=config.RS_OUT_FIFO_DEPTH)
-            self.inject_queues["TR"][node_pos] = deque(maxlen=config.RS_OUT_FIFO_DEPTH)
-            self.inject_queues["TU"][node_pos] = deque(maxlen=config.RS_OUT_FIFO_DEPTH)
-            self.inject_queues["TD"][node_pos] = deque(maxlen=config.RS_OUT_FIFO_DEPTH)
-            self.inject_queues["EQ"][node_pos] = deque(maxlen=config.RS_OUT_CH_BUFFER)
-            self.inject_queues_pre["TL"][node_pos] = None
-            self.inject_queues_pre["TR"][node_pos] = None
-            self.inject_queues_pre["TU"][node_pos] = None
-            self.inject_queues_pre["TD"][node_pos] = None
-            self.inject_queues_pre["EQ"][node_pos] = None
+            # v2架构: inject_queues/eject_queues已合并到RingStation中
 
-            self.eject_queues["TU"][node_pos] = deque(maxlen=config.RS_IN_FIFO_DEPTH)
-            self.eject_queues["TD"][node_pos] = deque(maxlen=config.RS_IN_FIFO_DEPTH)
-            self.eject_queues_in_pre["TU"][node_pos] = None
-            self.eject_queues_in_pre["TD"][node_pos] = None
-
-            # EQ UE Counters
-            self.EQ_UE_Counters["TU"][node_pos] = {"T2": 0, "T1": 0, "T0": 0}
-            self.EQ_UE_Counters["TD"][node_pos] = {"T2": 0, "T1": 0, "T0": 0}
-
-            # Channel buffers - 延迟到initialize_buffers()中初始化
-
-            # EQ仲裁输入FIFO初始化（4个输入端口，每个端口一个FIFO）
-            for input_port in ["TU", "TD", "IQ", "RB"]:
-                self.EQ_arbiter_input_fifo[input_port][node_pos] = deque(maxlen=2)
-                self.EQ_arbiter_input_fifo_pre[input_port][node_pos] = None
-
-            # Round robin - 延迟到initialize_buffers()中初始化(依赖IQ_channel_buffer.keys())
+            # RS UE Counters (TU/TD)
+            self.RS_UE_Counters["TU"][node_pos] = {"T2": 0, "T1": 0, "T0": 0}
+            self.RS_UE_Counters["TD"][node_pos] = {"T2": 0, "T1": 0, "T0": 0}
 
             # Timing statistics
             self.inject_time[node_pos] = []
@@ -352,21 +309,11 @@ class Network:
                 self.global_slot_id_counter += config.SLICE_PER_LINK_SELF
 
         for pos in range(config.NUM_NODE):
-            # 新架构: Ring Bridge在同一节点，键直接使用节点号
-            self.ring_bridge["TL"][pos] = deque(maxlen=config.RS_IN_FIFO_DEPTH)
-            self.ring_bridge["TR"][pos] = deque(maxlen=config.RS_IN_FIFO_DEPTH)
-            self.ring_bridge["TU"][pos] = deque(maxlen=config.RS_OUT_FIFO_DEPTH)
-            self.ring_bridge["TD"][pos] = deque(maxlen=config.RS_OUT_FIFO_DEPTH)
-            self.ring_bridge["EQ"][pos] = deque(maxlen=config.RS_OUT_FIFO_DEPTH)
+            # v2架构: ring_bridge已合并到RingStation中
 
-            self.ring_bridge_pre["TL"][pos] = None
-            self.ring_bridge_pre["TR"][pos] = None
-            self.ring_bridge_pre["TU"][pos] = None
-            self.ring_bridge_pre["TD"][pos] = None
-            self.ring_bridge_pre["EQ"][pos] = None
-
-            self.RB_UE_Counters["TL"][pos] = {"T2": 0, "T1": 0, "T0": 0}
-            self.RB_UE_Counters["TR"][pos] = {"T2": 0, "T1": 0, "T0": 0}
+            # RS UE Counters (TL/TR)
+            self.RS_UE_Counters["TL"][pos] = {"T2": 0, "T1": 0, "T0": 0}
+            self.RS_UE_Counters["TR"][pos] = {"T2": 0, "T1": 0, "T0": 0}
 
         # 新架构: 所有节点都可以作为IP节点
         for ip_type in self.num_recv.keys():
@@ -377,10 +324,7 @@ class Network:
                 self.per_send_throughput[ip_type][source] = 0
                 self.per_recv_throughput[ip_type][destination] = 0
 
-        for ip_type in self.IQ_channel_buffer.keys():
-            for ip_index in range(config.NUM_NODE):
-                self.IQ_channel_buffer[ip_type][ip_index] = deque(maxlen=config.RS_IN_CH_BUFFER)
-                self.EQ_channel_buffer[ip_type][ip_index] = deque(maxlen=config.RS_OUT_CH_BUFFER)
+        # v2架构: IQ_channel_buffer/EQ_channel_buffer已合并到RingStation中
         for ip_type in self.last_select.keys():
             for ip_index in range(config.NUM_NODE):
                 self.last_select[ip_type][ip_index] = "write"
@@ -388,9 +332,8 @@ class Network:
             for ip_index in range(config.NUM_NODE):
                 self.throughput[ip_type][ip_index] = [0, 0, 10000000, 0]
 
-        # 初始化RB_CAPACITY和EQ_CAPACITY (所有CrossPoint共享)
-        self.RB_CAPACITY = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
-        self.EQ_CAPACITY = {"TU": {}, "TD": {}}
+        # 初始化RS_CAPACITY (所有CrossPoint共享)
+        self.RS_CAPACITY = {"TL": {}, "TR": {}, "TU": {}, "TD": {}}
 
         # 容量计算辅助函数
         t1_enabled = config.ETAG_T1_ENABLED
@@ -445,17 +388,15 @@ class Network:
                 return config.RS_IN_FIFO_DEPTH - config.TD_Etag_T2_UE_MAX
             return 0
 
-        # 为所有RB pair设置容量
-        for pair in self.RB_UE_Counters["TL"]:
-            self.RB_CAPACITY["TL"][pair] = {lvl: _cap_tl(lvl) for lvl in ("T0", "T1", "T2")}
-        for pair in self.RB_UE_Counters["TR"]:
-            self.RB_CAPACITY["TR"][pair] = {lvl: _cap_tr(lvl) for lvl in ("T0", "T1", "T2")}
-
-        # 为所有EQ位置设置容量
-        for pos in self.EQ_UE_Counters["TU"]:
-            self.EQ_CAPACITY["TU"][pos] = {lvl: _cap_tu(lvl) for lvl in ("T0", "T1", "T2")}
-        for pos in self.EQ_UE_Counters["TD"]:
-            self.EQ_CAPACITY["TD"][pos] = {lvl: _cap_td(lvl) for lvl in ("T0", "T1", "T2")}
+        # 为所有节点设置RS_CAPACITY
+        for pos in self.RS_UE_Counters["TL"]:
+            self.RS_CAPACITY["TL"][pos] = {lvl: _cap_tl(lvl) for lvl in ("T0", "T1", "T2")}
+        for pos in self.RS_UE_Counters["TR"]:
+            self.RS_CAPACITY["TR"][pos] = {lvl: _cap_tr(lvl) for lvl in ("T0", "T1", "T2")}
+        for pos in self.RS_UE_Counters["TU"]:
+            self.RS_CAPACITY["TU"][pos] = {lvl: _cap_tu(lvl) for lvl in ("T0", "T1", "T2")}
+        for pos in self.RS_UE_Counters["TD"]:
+            self.RS_CAPACITY["TD"][pos] = {lvl: _cap_td(lvl) for lvl in ("T0", "T1", "T2")}
 
         # 创建CrossPoint对象
         from .cross_point import CrossPoint
@@ -487,24 +428,15 @@ class Network:
 
     def initialize_buffers(self):
         """
-        延迟初始化channel buffer - 在IP接口创建后调用
+        延迟初始化 - 在IP接口创建后调用
 
-        根据config.CH_NAME_LIST动态创建所有与IP类型相关的buffer和统计结构
+        根据config.CH_NAME_LIST动态创建统计结构
+        v2架构: channel buffer已合并到RingStation中
         """
         from collections import defaultdict, deque
 
-        # 1. 直接根据CH_NAME_LIST创建channel buffer(不使用_make_channels)
+        # 1. 为每个IP类型创建统计结构(排除d2d)
         for ip_type in self.config.CH_NAME_LIST:
-            # 为每个IP类型创建buffer字典
-            self.IQ_channel_buffer[ip_type] = defaultdict(lambda: deque(maxlen=self.config.RS_IN_CH_BUFFER))
-            self.EQ_channel_buffer[ip_type] = defaultdict(lambda: deque(maxlen=self.config.RS_OUT_CH_BUFFER))
-            # pre buffer需要用普通dict,因为None是有效值
-            self.IQ_channel_buffer_pre[ip_type] = {}
-            self.EQ_channel_buffer_pre[ip_type] = {}
-            self.IQ_arbiter_input_fifo[ip_type] = defaultdict(lambda: deque(maxlen=2))
-            self.IQ_arbiter_input_fifo_pre[ip_type] = {}
-
-            # 为普通IP类型创建统计结构(排除d2d)
             if not ip_type.startswith("d2d"):
                 base_type = ip_type.split('_')[0]
                 if base_type not in ["d2d"]:
@@ -524,34 +456,10 @@ class Network:
                     if ip_type not in self.arrive_node_pre:
                         self.arrive_node_pre[ip_type] = defaultdict(lambda: deque(maxlen=self.config.RS_IN_CH_BUFFER))
 
-        # 2. 为每个节点初始化channel buffer的pre和仲裁FIFO
+        # 2. 为每个节点初始化arrive_node_pre
         for node_pos in range(self.config.NUM_NODE):
-            for key in self.config.CH_NAME_LIST:
-                # 初始化pre为None
-                self.IQ_channel_buffer_pre[key][node_pos] = None
-                self.EQ_channel_buffer_pre[key][node_pos] = None
-                # 初始化仲裁FIFO(已经通过defaultdict创建,这里确保显式初始化)
-                if node_pos not in self.IQ_arbiter_input_fifo[key]:
-                    self.IQ_arbiter_input_fifo[key][node_pos] = deque(maxlen=2)
-                self.IQ_arbiter_input_fifo_pre[key][node_pos] = None
-
-            # 初始化arrive_node_pre
             for key in self.arrive_node_pre:
                 self.arrive_node_pre[key][node_pos] = None
-
-            # 3. 初始化round_robin队列(依赖IQ_channel_buffer.keys())
-            for key in self.round_robin.keys():
-                if key == "IQ":
-                    for fifo_name in ["TR", "TL", "TU", "TD", "EQ"]:
-                        self.round_robin[key][fifo_name][node_pos] = deque()
-                        for ch_name in self.IQ_channel_buffer.keys():
-                            self.round_robin[key][fifo_name][node_pos].append(ch_name)
-                elif key == "EQ":
-                    for ch_name in self.IQ_channel_buffer.keys():
-                        self.round_robin[key][ch_name][node_pos] = deque([0, 1, 2, 3])
-                else:
-                    for fifo_name in ["TU", "TD", "EQ"]:
-                        self.round_robin[key][fifo_name][node_pos] = deque([0, 1, 2, 3])
 
     # ------------------------------------------------------------------
     # RingStation 处理方法 (v2 架构核心)
@@ -572,9 +480,25 @@ class Network:
         for node_id, rs in self.ring_stations.items():
             rs.move_pre_to_fifos(cycle)
 
+        # 调试：打印 move_pre_to_fifos 后的状态
+        rs0 = self.ring_stations.get(0)
+        if rs0:
+            in_cnt = {k: len(v) for k, v in rs0.input_fifos.items() if len(v) > 0}
+            out_cnt = {k: len(v) for k, v in rs0.output_fifos.items() if len(v) > 0}
+            if in_cnt or out_cnt:
+                print(f"[RS] cycle={cycle}, node0 after move_pre: in={in_cnt}, out={out_cnt}")
+
         # Phase 2: 所有 RS 执行周期处理（仲裁 + 转移）
         for node_id, rs in self.ring_stations.items():
             rs.process_cycle(cycle)
+
+        # 调试：打印 process_cycle 后的状态
+        if rs0:
+            in_cnt = {k: len(v) for k, v in rs0.input_fifos.items() if len(v) > 0}
+            out_cnt = {k: len(v) for k, v in rs0.output_fifos.items() if len(v) > 0}
+            out_pre = {k: 1 for k, v in rs0.output_fifos_pre.items() if v is not None}
+            if in_cnt or out_cnt or out_pre:
+                print(f"[RS] cycle={cycle}, node0 after process: in={in_cnt}, out={out_cnt}, out_pre={out_pre}")
 
     def rs_enqueue_from_local(self, node_id: int, flit) -> bool:
         """
@@ -727,20 +651,22 @@ class Network:
 
         用于EQ/TU/TD本地注入的FIFO深度检查
         TR/TL方向的注入已由CrossPoint管理，不再使用此方法
+        v2统一架构: 使用 RingStation.output_fifos 替代 inject_queues
         """
+        rs = self.ring_stations[current]
         if flit.source == flit.destination or len(flit.path) <= 1:
-            # 本地注入到EQ
-            return len(self.inject_queues["EQ"][current]) < self.config.RS_OUT_CH_BUFFER
+            # 本地注入到ch_buffer (原EQ)
+            return len(rs.output_fifos["ch_buffer"]) < self.config.RS_OUT_CH_BUFFER
 
         # 纵向环移动（上下方向） - 本地注入到TU/TD
         if abs(current - next_node) == self.config.NUM_COL:
             # 判断向上还是向下
             if next_node > current:
                 # 向下移动
-                return len(self.inject_queues["TD"][current]) < self.config.RS_OUT_FIFO_DEPTH
+                return len(rs.output_fifos["TD"]) < self.config.RS_OUT_FIFO_DEPTH
             else:
                 # 向上移动
-                return len(self.inject_queues["TU"][current]) < self.config.RS_OUT_FIFO_DEPTH
+                return len(rs.output_fifos["TU"]) < self.config.RS_OUT_FIFO_DEPTH
 
         # 横向环移动（TR/TL）已由CrossPoint处理，此路径不应到达
         # 保留兼容性，返回False
@@ -1496,8 +1422,8 @@ class Network:
                 self._continue_looping(flit, link, state["next_pos"])
                 return
 
-            # 尝试下环（只检查资源：队列容量和entry）
-            success, fail_reason = crosspoint._try_eject(flit, eject_direction, final_destination, link, ring_bridge=self.ring_bridge, eject_queues=self.eject_queues)
+            # 尝试下环（v2统一架构：使用RingStation）
+            success, fail_reason = crosspoint._try_eject(flit, eject_direction, final_destination, link)
 
             if success:
                 # 下环成功
@@ -1705,84 +1631,70 @@ class Network:
             self.links_flow_stat[link]["total_cycles"] += 1
 
     def update_fifo_stats_after_move(self, in_pos):
-        """在move操作后批量更新所有FIFO统计"""
+        """在move操作后批量更新所有FIFO统计
+
+        v2架构使用RingStation替代旧的inject_queues/ring_bridge/eject_queues
+        """
         ip_pos = in_pos  # 新架构: in_pos和ip_pos是同一节点
+        rs = self.ring_stations.get(in_pos)
+        if rs is None:
+            return
 
-        # IQ统计 - inject_queues
-        for direction in ["TR", "TL", "TU", "TD", "EQ"]:
-            if in_pos in self.inject_queues.get(direction, {}):
-                depth = len(self.inject_queues[direction][in_pos])
-                if in_pos not in self.fifo_depth_sum["IQ"][direction]:
-                    self.fifo_depth_sum["IQ"][direction][in_pos] = 0
-                    self.fifo_max_depth["IQ"][direction][in_pos] = 0
-                self.fifo_depth_sum["IQ"][direction][in_pos] += depth
-                self.fifo_max_depth["IQ"][direction][in_pos] = max(self.fifo_max_depth["IQ"][direction][in_pos], depth)
+        # IQ统计 - RS.output_fifos (输出到环)
+        for direction in ["TR", "TL", "TU", "TD"]:
+            depth = len(rs.output_fifos[direction])
+            if in_pos not in self.fifo_depth_sum["IQ"][direction]:
+                self.fifo_depth_sum["IQ"][direction][in_pos] = 0
+                self.fifo_max_depth["IQ"][direction][in_pos] = 0
+            self.fifo_depth_sum["IQ"][direction][in_pos] += depth
+            self.fifo_max_depth["IQ"][direction][in_pos] = max(self.fifo_max_depth["IQ"][direction][in_pos], depth)
 
-        # IQ CH_buffer统计
-        for ip_type in self.IQ_channel_buffer:
-            if in_pos in self.IQ_channel_buffer[ip_type]:
-                depth = len(self.IQ_channel_buffer[ip_type][in_pos])
-                if in_pos not in self.fifo_depth_sum["IQ"]["CH_buffer"]:
-                    self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos] = {}
-                    self.fifo_max_depth["IQ"]["CH_buffer"][in_pos] = {}
-                if ip_type not in self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos]:
-                    self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos][ip_type] = 0
-                    self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type] = 0
-                self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos][ip_type] += depth
-                self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type] = max(self.fifo_max_depth["IQ"]["CH_buffer"][in_pos][ip_type], depth)
+        # IQ CH_buffer统计 - RS.input_fifos[ch_buffer] (从IP接收)
+        depth = len(rs.input_fifos["ch_buffer"])
+        if in_pos not in self.fifo_depth_sum["IQ"]["CH_buffer"]:
+            self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos] = {}
+            self.fifo_max_depth["IQ"]["CH_buffer"][in_pos] = {}
+        # 统一使用节点ID作为key
+        if "all" not in self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos]:
+            self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos]["all"] = 0
+            self.fifo_max_depth["IQ"]["CH_buffer"][in_pos]["all"] = 0
+        self.fifo_depth_sum["IQ"]["CH_buffer"][in_pos]["all"] += depth
+        self.fifo_max_depth["IQ"]["CH_buffer"][in_pos]["all"] = max(self.fifo_max_depth["IQ"]["CH_buffer"][in_pos]["all"], depth)
 
-        # RB统计 - ring_bridge
-        # 新架构: ring_bridge键直接使用节点号
-        for direction in ["TR", "TL", "TU", "TD", "EQ"]:
-            if in_pos in self.ring_bridge.get(direction, {}):
-                depth = len(self.ring_bridge[direction][in_pos])
-                if in_pos not in self.fifo_depth_sum["RB"][direction]:
-                    self.fifo_depth_sum["RB"][direction][in_pos] = 0
-                    self.fifo_max_depth["RB"][direction][in_pos] = 0
-                self.fifo_depth_sum["RB"][direction][in_pos] += depth
-                self.fifo_max_depth["RB"][direction][in_pos] = max(self.fifo_max_depth["RB"][direction][in_pos], depth)
+        # RB统计 - RS.input_fifos (从环接收)
+        for direction in ["TR", "TL", "TU", "TD"]:
+            depth = len(rs.input_fifos[direction])
+            if in_pos not in self.fifo_depth_sum["RB"][direction]:
+                self.fifo_depth_sum["RB"][direction][in_pos] = 0
+                self.fifo_max_depth["RB"][direction][in_pos] = 0
+            self.fifo_depth_sum["RB"][direction][in_pos] += depth
+            self.fifo_max_depth["RB"][direction][in_pos] = max(self.fifo_max_depth["RB"][direction][in_pos], depth)
 
-        # EQ统计 - eject_queues
-        for direction in ["TU", "TD"]:
-            if ip_pos in self.eject_queues.get(direction, {}):
-                depth = len(self.eject_queues[direction][ip_pos])
-                if ip_pos not in self.fifo_depth_sum["EQ"][direction]:
-                    self.fifo_depth_sum["EQ"][direction][ip_pos] = 0
-                    self.fifo_max_depth["EQ"][direction][ip_pos] = 0
-                self.fifo_depth_sum["EQ"][direction][ip_pos] += depth
-                self.fifo_max_depth["EQ"][direction][ip_pos] = max(self.fifo_max_depth["EQ"][direction][ip_pos], depth)
-
-        # EQ CH_buffer统计
-        for ip_type in self.EQ_channel_buffer:
-            if ip_pos in self.EQ_channel_buffer[ip_type]:
-                depth = len(self.EQ_channel_buffer[ip_type][ip_pos])
-                if ip_pos not in self.fifo_depth_sum["EQ"]["CH_buffer"]:
-                    self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos] = {}
-                    self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos] = {}
-                if ip_type not in self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos]:
-                    self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos][ip_type] = 0
-                    self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type] = 0
-                self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos][ip_type] += depth
-                self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type] = max(self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos][ip_type], depth)
+        # EQ统计 - RS.output_fifos[ch_buffer] (输出到IP)
+        depth = len(rs.output_fifos["ch_buffer"])
+        if ip_pos not in self.fifo_depth_sum["EQ"]["CH_buffer"]:
+            self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos] = {}
+            self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos] = {}
+        if "all" not in self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos]:
+            self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos]["all"] = 0
+            self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos]["all"] = 0
+        self.fifo_depth_sum["EQ"]["CH_buffer"][ip_pos]["all"] += depth
+        self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos]["all"] = max(self.fifo_max_depth["EQ"]["CH_buffer"][ip_pos]["all"], depth)
 
         # === ITag累计统计 ===
         # IQ_OUT统计 (只统计TR/TL横向注入)
         for direction in ["TR", "TL"]:
-            if direction in self.inject_queues and in_pos in self.inject_queues[direction]:
-                itag_count = sum(1 for flit in self.inject_queues[direction][in_pos] if getattr(flit, "itag_h", False))
-
-                if in_pos not in self.fifo_itag_cumulative_count["IQ"][direction]:
-                    self.fifo_itag_cumulative_count["IQ"][direction][in_pos] = 0
-                self.fifo_itag_cumulative_count["IQ"][direction][in_pos] += itag_count
+            itag_count = sum(1 for flit in rs.output_fifos[direction] if getattr(flit, "itag_h", False))
+            if in_pos not in self.fifo_itag_cumulative_count["IQ"][direction]:
+                self.fifo_itag_cumulative_count["IQ"][direction][in_pos] = 0
+            self.fifo_itag_cumulative_count["IQ"][direction][in_pos] += itag_count
 
         # RB_OUT统计 (TU/TD纵向转向)
         for direction in ["TU", "TD"]:
-            if direction in self.ring_bridge and in_pos in self.ring_bridge[direction]:
-                itag_count = sum(1 for flit in self.ring_bridge[direction][in_pos] if getattr(flit, "itag_v", False))
-
-                if in_pos not in self.fifo_itag_cumulative_count["RB"][direction]:
-                    self.fifo_itag_cumulative_count["RB"][direction][in_pos] = 0
-                self.fifo_itag_cumulative_count["RB"][direction][in_pos] += itag_count
+            itag_count = sum(1 for flit in rs.output_fifos[direction] if getattr(flit, "itag_v", False))
+            if in_pos not in self.fifo_itag_cumulative_count["RB"][direction]:
+                self.fifo_itag_cumulative_count["RB"][direction][in_pos] = 0
+            self.fifo_itag_cumulative_count["RB"][direction][in_pos] += itag_count
 
     def increment_fifo_flit_count(self, category: str, fifo_type: str, pos: int, ip_type: str = None):
         """更新FIFO的flit计数

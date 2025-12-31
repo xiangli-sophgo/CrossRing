@@ -43,111 +43,59 @@ class DataflowMixin:
                     if req in ip_interface.sn_tracker:
                         ip_interface.release_completed_sn_tracker(req)
 
-    def _move_pre_to_queues(self, network: Network, node_id):
-        """Move all items from pre-injection queues to injection queues for a given network."""
-        # ===  注入队列 *_pre → *_FIFO ===
+    def _move_pre_to_queues(self, network: Network, node_id, network_type: str):
+        """v2统一架构: IP ↔ RingStation 数据流处理
 
-        # IQ_channel_buffer_pre → IQ_channel_buffer
-        for ip_type in network.IQ_channel_buffer_pre.keys():
-            queue_pre = network.IQ_channel_buffer_pre[ip_type]
-            queue = network.IQ_channel_buffer[ip_type]
-            if queue_pre[node_id] and len(queue[node_id]) < self.config.RS_IN_CH_BUFFER:
-                flit = queue_pre[node_id]
+        Args:
+            network: 网络实例
+            node_id: 节点ID
+            network_type: 网络类型 ("req" / "rsp" / "data")
+        """
+        rs = network.ring_stations[node_id]
+
+        # === IP发送 → RS接收 ===
+        # IP.tx_channel_buffer_pre → RS.input_fifos_pre[ch_buffer]
+        # (RingStation._move_pre_to_fifos 负责 input_fifos_pre → input_fifos)
+        for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
+            if ip_pos != node_id:
+                continue
+            net_info = ip_interface.networks.get(network_type)
+            if net_info is None:
+                continue
+
+            tx_pre = net_info.get("tx_channel_buffer_pre")
+            if tx_pre is not None and rs.can_accept_input("ch_buffer"):
+                flit = tx_pre
                 flit.set_position("RS_IN_CH", self.cycle)
-                queue[node_id].append(flit)
+                rs.input_fifos_pre["ch_buffer"] = flit
+                net_info["tx_channel_buffer_pre"] = None
                 network.increment_fifo_flit_count("IQ", "CH_buffer", node_id, ip_type)
-                queue_pre[node_id] = None
 
-        # IQ_arbiter_input_fifo_pre → IQ_arbiter_input_fifo
-        for ip_type in network.IQ_arbiter_input_fifo_pre.keys():
-            queue_pre = network.IQ_arbiter_input_fifo_pre[ip_type]
-            queue = network.IQ_arbiter_input_fifo[ip_type]
-            if queue_pre[node_id] and len(queue[node_id]) < 2:
-                flit = queue_pre[node_id]
-                queue[node_id].append(flit)
-                queue_pre[node_id] = None
+        # === RS输出 → IP接收 ===
+        # RS.output_fifos[ch_buffer] → IP.rx_channel_buffer
+        if rs.output_fifos["ch_buffer"]:
+            # 先查看队首flit的目标IP类型
+            flit = rs.output_fifos["ch_buffer"][0]
+            target_ip_type = flit.destination_type
 
-        # IQ_pre → IQ_OUT
-        for direction in self.IQ_directions:
-            queue_pre = network.inject_queues_pre[direction]
-            queue = network.inject_queues[direction]
+            for (ip_type, ip_pos), ip_interface in self.ip_modules.items():
+                if ip_pos != node_id or ip_type != target_ip_type:
+                    continue
+                net_info = ip_interface.networks.get(network_type)
+                if net_info is None:
+                    continue
 
-            # 根据方向选择对应的FIFO深度
-            if direction in ["TR", "TL"]:
-                fifo_depth = self.config.RS_OUT_FIFO_DEPTH
-            elif direction in ["TU", "TD"]:
-                fifo_depth = self.config.RS_OUT_FIFO_DEPTH
-            else:  # EQ
-                fifo_depth = self.config.RS_OUT_CH_BUFFER
+                rx_buf = net_info["rx_channel_buffer"]
+                if len(rx_buf) < rx_buf.maxlen:
+                    rs.output_fifos["ch_buffer"].popleft()
+                    flit.set_position("IP_RX_CH", self.cycle)
+                    rx_buf.append(flit)
+                    network.increment_fifo_flit_count("EQ", "CH_buffer", node_id, ip_type)
+                    break  # 每周期只移动一个
 
-            if queue_pre[node_id] and len(queue[node_id]) < fifo_depth:
-                flit = queue_pre[node_id]
-                flit.departure_inject_cycle = self.cycle
-                flit.set_position(f"RS_OUT_{direction}", self.cycle)
-                queue[node_id].append(flit)
-                network.increment_fifo_flit_count("IQ", direction, node_id)
-                # 统计横向反方向上环
-                if direction in ["TR", "TL"] and getattr(flit, "reverse_inject_h", 0) == 1:
-                    network.increment_fifo_reverse_inject_count("IQ", direction, node_id)
-                queue_pre[node_id] = None
-
-        # RB_IN_PRE → RB_IN
-        for direction in ["TL", "TR"]:
-            queue_pre = network.ring_bridge_pre[direction]
-            queue = network.ring_bridge[direction]
-            if queue_pre[node_id] and len(queue[node_id]) < self.config.RS_IN_FIFO_DEPTH:
-                flit = queue_pre[node_id]
-                flit.set_position(f"RS_IN_{direction}", self.cycle)
-                queue[node_id].append(flit)
-                network.increment_fifo_flit_count("RB", direction, node_id)
-                queue_pre[node_id] = None
-
-        # RB_OUT_PRE → RB_OUT
-        for fifo_pos in ("EQ", "TU", "TD"):
-            queue_pre = network.ring_bridge_pre[fifo_pos]
-            queue = network.ring_bridge[fifo_pos]
-            if queue_pre[node_id] and len(queue[node_id]) < self.config.RS_OUT_FIFO_DEPTH:
-                flit = queue_pre[node_id]
-                flit.is_arrive = fifo_pos == "EQ"
-                flit.set_position(f"RS_OUT_{fifo_pos}", self.cycle)
-                queue[node_id].append(flit)
-                network.increment_fifo_flit_count("RB", fifo_pos, node_id)
-                # 统计纵向反方向上环
-                if fifo_pos in ["TU", "TD"] and getattr(flit, "reverse_inject_v", 0) == 1:
-                    network.increment_fifo_reverse_inject_count("RB", fifo_pos, node_id)
-                queue_pre[node_id] = None
-
-        # EQ_IN_PRE → EQ_IN
-        for fifo_pos in ("TU", "TD"):
-            queue_pre = network.eject_queues_in_pre[fifo_pos]
-            queue = network.eject_queues[fifo_pos]
-            if queue_pre[node_id] and len(queue[node_id]) < self.config.RS_IN_FIFO_DEPTH:
-                flit = queue_pre[node_id]
-                flit.is_arrive = fifo_pos == "EQ"
-                flit.set_position(f"RS_IN_{fifo_pos}", self.cycle)
-                queue[node_id].append(flit)
-                network.increment_fifo_flit_count("EQ", fifo_pos, node_id)
-                queue_pre[node_id] = None
-
-        # EQ_arbiter_input_fifo_pre → EQ_arbiter_input_fifo
-        for port_name in ["TU", "TD", "IQ", "RB"]:
-            queue_pre = network.EQ_arbiter_input_fifo_pre[port_name]
-            queue = network.EQ_arbiter_input_fifo[port_name]
-            if queue_pre[node_id] and len(queue[node_id]) < 2:
-                flit = queue_pre[node_id]
-                queue[node_id].append(flit)
-                queue_pre[node_id] = None
-
-        # EQ_channel_buffer_pre → EQ_channel_buffer
-        for ip_type in network.EQ_channel_buffer_pre.keys():
-            queue_pre = network.EQ_channel_buffer_pre[ip_type]
-            queue = network.EQ_channel_buffer[ip_type]
-            if queue_pre[node_id] and len(queue[node_id]) < self.config.RS_OUT_CH_BUFFER:
-                flit = queue_pre[node_id]
-                flit.set_position("RS_OUT_CH", self.cycle)
-                queue[node_id].append(flit)
-                network.increment_fifo_flit_count("EQ", "CH_buffer", node_id, ip_type)
-                queue_pre[node_id] = None
+        # v2统一架构: RB_IN/RB_OUT/EQ_IN 由 RingStation 内部处理
+        # CrossPoint._complete_eject → rs_enqueue_from_ring → RS.input_fifos_pre
+        # RingStation._move_pre_to_fifos 负责 input_fifos_pre → input_fifos
 
         # 更新FIFO统计
         network.update_fifo_stats_after_move(node_id)
@@ -168,29 +116,6 @@ class DataflowMixin:
         """Process injection queues and move flits."""
         flits = self._network_cycle_process(network, flits, flit_type)
         return flits
-
-    def _try_inject_to_direction(self, req: Flit, ip_type, node_id, direction, counts):
-        """检查tracker空间并尝试注入到指定direction的pre缓冲"""
-        # 设置flit的允许下环方向（仅在第一次注入时设置）
-        if not hasattr(req, "allowed_eject_directions") or req.allowed_eject_directions is None:
-            req.allowed_eject_directions = self.req_network.determine_allowed_eject_directions(req)
-
-        # 直接注入到指定direction的pre缓冲
-        queue_pre = self.req_network.inject_queues_pre[direction]
-        queue_pre[node_id] = req
-
-        # 从仲裁输入FIFO移除
-        self.req_network.IQ_arbiter_input_fifo[ip_type][node_id].popleft()
-
-        # 更新计数和状态
-        if req.req_attr == "new":  # 只有新请求才更新计数器和tracker
-            if req.req_type == "read":
-                counts["read"] += 1
-
-            elif req.req_type == "write":
-                counts["write"] += 1
-
-        return True
 
     def _Link_process(self, network: Network, flits):
         """Link模块：Link传输处理
@@ -221,79 +146,6 @@ class DataflowMixin:
 
         return flits
 
-    def _check_iq_injection_conditions(self, network, node_id, ip_type, direction, network_type, flit_cache):
-        """
-        检查是否可以从ip_type注入到direction
-
-        Returns:
-            bool: 是否可以注入
-        """
-        # 检查round_robin队列中是否有这个ip_type
-        rr_queue = network.round_robin["IQ"][direction][node_id]
-        if ip_type not in rr_queue:
-            return False
-
-        # 检查pre槽是否占用
-        queue_pre = network.inject_queues_pre[direction]
-        if queue_pre[node_id]:
-            return False
-
-        # 检查FIFO是否满
-        queue = network.inject_queues[direction]
-        if direction in ["TR", "TL"]:
-            fifo_depth = self.config.RS_OUT_FIFO_DEPTH
-        elif direction in ["TU", "TD"]:
-            fifo_depth = self.config.RS_OUT_FIFO_DEPTH
-        else:  # EQ
-            fifo_depth = self.config.RS_OUT_CH_BUFFER
-
-        if len(queue[node_id]) >= fifo_depth:
-            return False
-
-        # 网络特定 ip_type 过滤
-        if network_type == "req" and not (ip_type.startswith("sdma") or ip_type.startswith("gdma") or ip_type.startswith("cdma") or ip_type.startswith("d2d_rn")):
-            return False
-        if network_type == "rsp" and not (ip_type.startswith("ddr") or ip_type.startswith("l2m") or ip_type.startswith("d2d_sn")):
-            return False
-
-        # 检查仲裁输入FIFO是否为空
-        if not network.IQ_arbiter_input_fifo[ip_type][node_id]:
-            return False
-
-        flit = network.IQ_arbiter_input_fifo[ip_type][node_id][0]
-
-        # 缓存flit供后续使用
-        flit_cache[(ip_type, direction)] = flit
-
-        # 反方向流控检查（横向TL/TR）
-        if self.config.REVERSE_DIRECTION_ENABLED and direction in ["TL", "TR"]:
-            normal_direction = None
-            if len(flit.path) > 1:
-                diff = flit.path[1] - flit.path[0]
-                if diff == 1:
-                    normal_direction = "TR"
-                elif diff == -1:
-                    normal_direction = "TL"
-
-            # 如果当前检查的方向是反方向，进行流控判断
-            if normal_direction and direction != normal_direction:
-                reverse_direction = direction
-                normal_depth = len(network.inject_queues[normal_direction][node_id])
-                reverse_depth = len(network.inject_queues[reverse_direction][node_id])
-                capacity = self.config.RS_OUT_FIFO_DEPTH
-
-                # 只有当正常方向比反方向拥塞程度超过容量×阈值时，才允许走反方向
-                if (normal_depth - reverse_depth) > capacity * self.config.REVERSE_DIRECTION_THRESHOLD:
-                    return True  # 正常方向比反方向拥塞很多，允许走反方向
-                else:
-                    return False  # 差距不够大，不走反方向
-
-        # 检查方向条件（正常逻辑）
-        if not self.IQ_direction_conditions[direction](flit):
-            return False
-
-        return True
-
     def move_pre_to_queues_all(self):
         #  所有 IPInterface 的 *_pre → FIFO
         # 直接遍历实际创建的IP接口(动态挂载模式)
@@ -302,9 +154,9 @@ class DataflowMixin:
 
         # 所有网络的 *_pre → FIFO
         for node_id in range(self.config.NUM_NODE):
-            self._move_pre_to_queues(self.req_network, node_id)
-            self._move_pre_to_queues(self.rsp_network, node_id)
-            self._move_pre_to_queues(self.data_network, node_id)
+            self._move_pre_to_queues(self.req_network, node_id, "req")
+            self._move_pre_to_queues(self.rsp_network, node_id, "rsp")
+            self._move_pre_to_queues(self.data_network, node_id, "data")
 
     def update_throughput_metrics(self, flits):
         """Update throughput metrics based on flit counts."""
@@ -463,117 +315,18 @@ class DataflowMixin:
         """处理延迟释放的Entry计数器
 
         在每个cycle末尾调用，检查并释放所有到期(cycle <= current_cycle)的Entry
+        v2统一Entry管理：使用 RS_pending_entry_release 和 RS_UE_Counters
         """
-        # 处理RB TL方向
-        for node_id, pending_list in network.RB_pending_entry_release["TL"].items():
-            to_remove = []
-            for idx, (level, release_cycle) in enumerate(pending_list):
-                if release_cycle <= self.cycle:
-                    network.RB_UE_Counters["TL"][node_id][level] -= 1
-                    to_remove.append(idx)
-            # 从后往前删除，避免索引变化
-            for idx in reversed(to_remove):
-                pending_list.pop(idx)
-
-        # 处理RB TR方向
-        for node_id, pending_list in network.RB_pending_entry_release["TR"].items():
-            to_remove = []
-            for idx, (level, release_cycle) in enumerate(pending_list):
-                if release_cycle <= self.cycle:
-                    network.RB_UE_Counters["TR"][node_id][level] -= 1
-                    to_remove.append(idx)
-            for idx in reversed(to_remove):
-                pending_list.pop(idx)
-
-        # 处理EQ TU方向
-        for node_id, pending_list in network.EQ_pending_entry_release["TU"].items():
-            to_remove = []
-            for idx, (level, release_cycle) in enumerate(pending_list):
-                if release_cycle <= self.cycle:
-                    network.EQ_UE_Counters["TU"][node_id][level] -= 1
-                    to_remove.append(idx)
-            for idx in reversed(to_remove):
-                pending_list.pop(idx)
-
-        # 处理EQ TD方向
-        for node_id, pending_list in network.EQ_pending_entry_release["TD"].items():
-            to_remove = []
-            for idx, (level, release_cycle) in enumerate(pending_list):
-                if release_cycle <= self.cycle:
-                    network.EQ_UE_Counters["TD"][node_id][level] -= 1
-                    to_remove.append(idx)
-            for idx in reversed(to_remove):
-                pending_list.pop(idx)
-
-    def process_inject_queues(self, network: Network, inject_queues, direction):
-        """统一的CrossPoint注入处理（支持TL/TR/TU/TD四个方向）
-
-        Args:
-            inject_queues: 对于TL/TR是network.inject_queues[direction]
-                          对于TU/TD是network.ring_bridge[direction]
-            direction: TL/TR/TU/TD
-        """
-        flit_num = 0
-        flits = []
-
-        # 判断是横向还是纵向
-        is_horizontal = direction in ["TL", "TR"]
-        cp_type = "horizontal" if is_horizontal else "vertical"
-        wait_attr = "wait_cycle_h" if is_horizontal else "wait_cycle_v"
-        itag_attr = "itag_h" if is_horizontal else "itag_v"
-        threshold = self.config.ITag_TRIGGER_Th_H if is_horizontal else self.config.ITag_TRIGGER_Th_V
-
-        for node_id, queue in inject_queues.items():
-            if not queue or not queue[0]:
-                continue
-
-            # 1. 检查是否需要生成Buffer_Reach_Th信号
-            flit = queue[0]
-            if getattr(flit, wait_attr) == threshold:
-                network.itag_req_counter[direction][node_id] += 1
-
-            # 2. 获取CrossPoint并调用统一的注入方法
-            crosspoint = network.crosspoints[node_id][cp_type]
-            injected_flit = crosspoint.process_inject(node_id, queue, direction, self.cycle)
-
-            if injected_flit:
-                # 3. 首次上环时分配order_id
-                # 设计说明：每个Die独立保序，使用flit的实际source/destination和die_id
-                if injected_flit.src_dest_order_id == -1:
-                    src_node = injected_flit.source
-                    dest_node = injected_flit.destination
-                    src_type = injected_flit.source_type
-                    dest_type = injected_flit.destination_type
-                    die_id = getattr(self.config, "DIE_ID", None)
-                    injected_flit.src_dest_order_id = Flit.get_next_order_id(src_node, src_type, dest_node, dest_type, injected_flit.flit_type.upper(), self.config.ORDERING_GRANULARITY, die_id)
-
-                # 4. 横向注入需要更新inject_num统计
-                if is_horizontal:
-                    network.inject_num += 1
-                    flit_num += 1
-
-                # 5. 纵向注入需要更新flit状态
-                if not is_horizontal:
-                    injected_flit.current_position = node_id
-                    injected_flit.path_index += 1
-
-                flits.append(injected_flit)
-
-                # 7. ITag释放处理（统一逻辑）
-                if getattr(injected_flit, wait_attr) >= threshold:
-                    network.itag_req_counter[direction][node_id] -= 1
-                    excess = network.tagged_counter[direction][node_id] - network.itag_req_counter[direction][node_id]
-                    if excess > 0:
-                        network.excess_ITag_to_remove[direction][node_id] += excess
-
-            # 8. ITag统计
-            if queue and queue[0] and getattr(queue[0], itag_attr, False):
-                if is_horizontal:
-                    self.ITag_h_num_stat += 1
-                else:
-                    self.ITag_v_num_stat += 1
-
-        return flit_num, flits
+        for direction in ["TL", "TR", "TU", "TD"]:
+            for node_id, pending_list in network.RS_pending_entry_release[direction].items():
+                to_remove = []
+                for idx, (level, release_cycle) in enumerate(pending_list):
+                    if release_cycle <= self.cycle:
+                        network.RS_UE_Counters[direction][node_id][level] -= 1
+                        to_remove.append(idx)
+                # 从后往前删除，避免索引变化
+                for idx in reversed(to_remove):
+                    pending_list.pop(idx)
 
     # ------------------------------------------------------------------
     # v2 RingStation 架构相关方法
@@ -676,74 +429,16 @@ class DataflowMixin:
 
         return flits
 
-    def _move_IQ_to_RS(self, network: Network):
-        """v2架构：将IQ_channel_buffer移动到RS的ch_buffer输入端口
-
-        Args:
-            network: 网络实例
-        """
-        for node_id in range(self.config.NUM_NODE):
-            # 检查RS是否可以接受输入
-            if not network.rs_can_accept_input(node_id, "ch_buffer"):
-                continue
-
-            # 遍历所有IP类型的channel buffer
-            for ip_type in network.IQ_channel_buffer.keys():
-                if not network.IQ_channel_buffer[ip_type][node_id]:
-                    continue
-
-                # peek flit
-                flit = network.IQ_channel_buffer[ip_type][node_id][0]
-
-                # 尝试发送到RS
-                if network.rs_enqueue_from_local(node_id, flit):
-                    # 成功后从IQ移除
-                    network.IQ_channel_buffer[ip_type][node_id].popleft()
-                    break  # 每个周期每个节点只能发送一个
-
-    def _move_RS_to_EQ(self, network: Network):
-        """v2架构：将RS的ch_buffer输出移动到EQ_channel_buffer
-
-        Args:
-            network: 网络实例
-        """
-        for node_id in range(self.config.NUM_NODE):
-            # 从RS取出准备弹出到本地的flit
-            flit = network.rs_dequeue_to_local(node_id)
-            if flit is None:
-                continue
-
-            # 确定目标IP类型
-            dest_type = flit.destination_type
-            if dest_type not in network.EQ_channel_buffer:
-                continue
-
-            # 检查EQ_channel_buffer是否有空间
-            if len(network.EQ_channel_buffer[dest_type][node_id]) < self.config.RS_OUT_CH_BUFFER:
-                flit.is_arrive = True
-                flit.set_position("RS_OUT_CH", self.cycle)
-                network.EQ_channel_buffer[dest_type][node_id].append(flit)
-                network.increment_fifo_flit_count("EQ", "CH_buffer", node_id, dest_type)
-
-                # 释放 Entry（延迟释放，下一周期生效）
-                if hasattr(flit, 'used_entry_level') and flit.used_entry_level in ("T0", "T1", "T2"):
-                    # 根据 flit 的下环方向释放对应的 entry
-                    eject_dir = getattr(flit, 'eject_direction', None)
-                    if eject_dir == "TU":
-                        network.EQ_pending_entry_release["TU"][node_id].append((flit.used_entry_level, self.cycle + 1))
-                    elif eject_dir == "TD":
-                        network.EQ_pending_entry_release["TD"][node_id].append((flit.used_entry_level, self.cycle + 1))
-
     def _network_cycle_process(self, network: Network, flits, flit_type: str):
         """v2架构：网络周期处理
 
         处理顺序：
-        1. IQ_channel_buffer → RS.ch_buffer（本地注入）
+        1. IP.tx_channel_buffer → RS.input_fifos[ch_buffer]（本地注入，由_move_pre_to_queues处理）
         2. RS处理（仲裁 + 内部路由）
         3. Link传输
         4. CP下环处理（Link → RS）
         5. CP上环处理（RS → Link）
-        6. RS.ch_buffer → EQ_channel_buffer（本地弹出）
+        6. RS.output_fifos[ch_buffer] → IP.rx_channel_buffer（本地弹出，由_move_pre_to_queues处理）
 
         Args:
             network: 网络实例
@@ -753,21 +448,16 @@ class DataflowMixin:
         Returns:
             list: 更新后的flits列表
         """
-        # 1. IQ_channel_buffer → RS.ch_buffer
-        self._move_IQ_to_RS(network)
-
-        # 2. RS处理
+        # 1. RS处理（内部仲裁和路由）
         network.process_ring_stations(self.cycle)
 
-        # 3. Link传输
+        # 2. Link传输
         flits = self._Link_process(network, flits)
 
-        # 4. CP下环处理已在Link传输中完成（通过_handle_flit）
+        # 3. CP下环处理已在Link传输中完成（通过_handle_flit）
 
-        # 5. CP上环处理（从RS输出）
+        # 4. CP上环处理（从RS输出）
         flits = self._CP_process(network, flits, flit_type)
 
-        # 6. RS.ch_buffer → EQ_channel_buffer
-        self._move_RS_to_EQ(network)
-
+        # IP↔RS 数据流在 _move_pre_to_queues 中统一处理
         return flits
